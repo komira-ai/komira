@@ -21,6 +21,7 @@ mojo_library(
         "//src/komira_scan_source:komira_scan_source",
     ],
     test_srcs = [
+        "tests/test_plan_wire_excel_error.mojo",
         "tests/test_plan_wire_golden_bytes.mojo",
         "tests/test_plan_wire_hostile_bytes.mojo",
         "tests/test_plan_wire_hostile_values.mojo",
@@ -32,6 +33,7 @@ mojo_library(
     # by that path: the test runs with the staged data as its current
     # directory.
     test_data = {
+        "tests/test_plan_wire_excel_error.mojo": glob(["tests/fixtures/golden/excel_error_literal*.hex"]),
         "tests/test_plan_wire_golden_bytes.mojo": glob(["tests/fixtures/golden/*.hex"]),
         "tests/test_plan_wire_hostile_values.mojo": glob(
             ["tests/fixtures/hostile/*.hex"],
@@ -66,6 +68,7 @@ _GOLDEN = [
     "asof_join",
     "correlated_subquery",
     "distinct",
+    "excel_error_literal",
     "filter_over_scan",
     "index_pinned",
     "join",
@@ -96,6 +99,8 @@ _HOSTILE = [
     "filter_colidx_negative",
     "filter_colidx_out_of_range",
     "filter_colref_unknown_name",
+    "filter_error_code_undeclared",
+    "filter_error_code_unspecified",
     "limit_negative_n",
     "partition_by_descending_short",
     "partition_topn_descending_short",
@@ -115,10 +120,17 @@ _HOSTILE = [
     "union_output_schema_diverges",
 ]
 
-# hostile/filter_binary_op_undeclared_enum carries an `op` that
-# `plan_vocabulary.proto` does not declare, so leg 5 refuses it: it is checked
-# by `plan_wire_hostile_undeclared_enum` below, which requires that refusal.
-_HOSTILE_CHECKED = [s for s in _HOSTILE if s != "filter_binary_op_undeclared_enum"]
+# Two hostile fixtures carry an enum value `plan_vocabulary.proto` does not
+# declare, so leg 5 refuses them: filter_binary_op_undeclared_enum (an `op`)
+# and filter_error_code_undeclared (an `ExcelErrorCode` of 12, one past
+# XL_ERR_CIRCULAR). Each is checked by the `proto_fixture_case` pair below,
+# which requires that refusal.
+_HOSTILE_UNDECLARED_ENUM = {
+    "filter_binary_op_undeclared_enum": "plan_wire_hostile_undeclared_enum",
+    "filter_error_code_undeclared": "plan_wire_hostile_undeclared_error_code",
+}
+
+_HOSTILE_CHECKED = [s for s in _HOSTILE if s not in _HOSTILE_UNDECLARED_ENUM]
 
 # The goldens: `.hex` is this package's encoder's output, which writes scalars
 # at their defaults that protoc omits, so no golden equals its canonical bytes
@@ -149,24 +161,25 @@ proto_fixture_check(
     proto_deps = _PLAN_PROTO,
 )
 
-# The undeclared enum value, held to the refusal it was written for. Two
-# cases on the same fixture: the first fails unless leg 5 refuses it; the
-# second fails unless the check reports exactly one failure (": 1 failure(s)"
+# Each undeclared enum value, held to the refusal it was written for. Two
+# cases per fixture: the first fails unless leg 5 refuses it; the `_only`
+# case fails unless the check reports exactly one failure (": 1 failure(s)"
 # does not match "11 failure(s)"). Together they require that leg 5 is the
-# only leg that fails, so legs 0 to 4 still hold this fixture's `.hex`,
+# only leg that fails, so legs 0 to 4 still hold the fixture's `.hex`,
 # `.txtpb` and `.canonical.hex` to each other.
 [
     proto_fixture_case(
         name = name,
-        canonical_producer = ["filter_binary_op_undeclared_enum"],
+        canonical_producer = [stem],
         dir = "tests/fixtures/hostile",
         expect = expect,
-        fixtures = {"filter_binary_op_undeclared_enum": _PLAN_ROOT},
+        fixtures = {stem: _PLAN_ROOT},
         proto_deps = _PLAN_PROTO,
     )
+    for stem, case in _HOSTILE_UNDECLARED_ENUM.items()
     for name, expect in [
-        ("plan_wire_hostile_undeclared_enum", "filter_binary_op_undeclared_enum: LEG 5: filter_binary_op_undeclared_enum.hex carries enum values the schema does not name"),
-        ("plan_wire_hostile_undeclared_enum_only", "proto_fixture: FAILED: 1 failure(s)"),
+        (case, "{}: LEG 5: {}.hex carries enum values the schema does not name".format(stem, stem)),
+        (case + "_only", "proto_fixture: FAILED: 1 failure(s)"),
     ]
 ]
 

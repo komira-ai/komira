@@ -52,12 +52,9 @@ from komira_plan_expr.excel_error_code import (
     XL_ERR_NONE,
     XL_ERR_DIV0,
     XL_ERR_NA,
-    XL_ERR_VALUE,
     STATUS_VALID,
     STATUS_NULL,
     STATUS_ERROR,
-    excel_error_text,
-    excel_error_code_from_literal,
     SparseErrorSidecar,
 )
 from komira_plan_expr.agg_expr import (
@@ -574,14 +571,8 @@ def test_scalar_error_expr_roundtrip() raises:
 
 
 def test_excel_error_code_space() raises:
-    """the shared error-code space renders + parses round-trip
-    (the scalar<->columnar boundary is a 1:1 code copy)."""
-    assert_equal(excel_error_text(XL_ERR_DIV0), "#DIV/0!")
-    assert_equal(excel_error_text(XL_ERR_NA), "#N/A")
-    assert_equal(excel_error_text(XL_ERR_VALUE), "#VALUE!")
-    # Literal -> code round-trip.
-    assert_equal(Int(excel_error_code_from_literal(String("#DIV/0!"))), Int(XL_ERR_DIV0))
-    assert_equal(Int(excel_error_code_from_literal(String("#N/A"))), Int(XL_ERR_NA))
+    """the status-lane constants. The code space's text and literal helpers
+    are held for all eleven codes by `test_excel_error_code.mojo`."""
     # Status lane constants are distinct (VALID / NULL / ERROR).
     assert_true(STATUS_VALID != STATUS_NULL)
     assert_true(STATUS_NULL != STATUS_ERROR)

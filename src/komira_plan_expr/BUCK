@@ -14,6 +14,7 @@ mojo_library(
         "tests/test_agg_expr_copy.mojo",
         "tests/test_agg_expr_named_ctors.mojo",
         "tests/test_date_to_days_closed_form.mojo",
+        "tests/test_excel_error_code.mojo",
         "tests/test_expr_copy.mojo",
         "tests/test_expr_render_is_plan_identity.mojo",
         "tests/test_sdk_expr.mojo",

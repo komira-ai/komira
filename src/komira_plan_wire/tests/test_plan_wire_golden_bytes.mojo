@@ -1308,6 +1308,9 @@ def test_the_fixtures_are_not_all_the_same_bytes() raises:
         String("correlated_subquery"),
         String("topic_live"),
         String("index_pinned"),
+        # Frozen by test_plan_wire_excel_error.mojo, named here so it too is
+        # held distinct from every other fixture.
+        String("excel_error_literal"),
     ]
     var seen = List[String]()
     for i in range(len(names)):

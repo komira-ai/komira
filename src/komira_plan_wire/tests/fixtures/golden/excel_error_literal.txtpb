@@ -1,0 +1,381 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 2
+plan {
+  output_schema {
+    fields {
+      name: "div0"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "na"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "value"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "ref"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "name"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "num"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "null"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "spill"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "calc"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "circular"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  project {
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_DIV0
+              }
+            }
+          }
+        }
+        name: "div0"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_NA
+              }
+            }
+          }
+        }
+        name: "na"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_VALUE
+              }
+            }
+          }
+        }
+        name: "value"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_REF
+              }
+            }
+          }
+        }
+        name: "ref"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_NAME
+              }
+            }
+          }
+        }
+        name: "name"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_NUM
+              }
+            }
+          }
+        }
+        name: "num"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_NULL
+              }
+            }
+          }
+        }
+        name: "null"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_SPILL
+              }
+            }
+          }
+        }
+        name: "spill"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_CALC
+              }
+            }
+          }
+        }
+        name: "calc"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_GT
+            left {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                kind: SCALAR_KIND_ERROR
+                time_unit: SCALAR_TIME_UNIT_MICRO
+                error_code: XL_ERR_CIRCULAR
+              }
+            }
+          }
+        }
+        name: "circular"
+      }
+    }
+    child {
+      output_schema {
+        fields {
+          name: "a"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      scan {
+        source {
+          binding {
+            kind_id: 1056219456
+            kind_name: "komira.orc"
+            name: "sheet"
+            params {
+              key: "path"
+              tag: PARAM_STR
+              s: "/data/sheet.orc"
+            }
+            schema {
+              fields {
+                name: "a"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "s"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            fingerprint: 3735928559
+            structural_id: 4277009102
+            pushdown_gate {
+              mode: GATE_SHAPED
+              allowed_binary_ops: 63
+              allow_and_recurse: true
+              allow_in_list: true
+              require_stat_friendly_col: true
+            }
+            snapshot_policy: SNAPSHOT_PINNED
+            snapshot_token: 1234567890
+            orientation: SOURCE_KIND_COLUMNAR
+            variant_tag: SOURCE_VARIANT_ORC
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "a"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "s"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+  }
+}

@@ -426,6 +426,32 @@ def _corpus() raises -> List[_Case]:
         ),
     ))
 
+    # ---- an Excel error literal whose code is outside the 11 ----------------
+    # `ExcelErrorCode` declares wire 1..11 (XL_ERR_NONE..XL_ERR_CIRCULAR). Both
+    # fixtures are a filter `name > <error literal>` whose ONLY defect is the
+    # literal's `error_code`; the exact refusal text is pinned by
+    # `test_an_error_literal_outside_the_eleven_codes_is_refused_by_name`.
+    c.append(_Case(
+        String("filter_error_code_unspecified"),
+        _REFUSED_UNTOKENED,
+        String(
+            "a SCALAR_KIND_ERROR literal with no `error_code`: proto3 omits"
+            " wire 0, so this is what a producer that never set the code sends."
+            " Read as engine code 0 it would be XL_ERR_NONE, an error value that"
+            " is not an error; `excel_error_code_from_wire` refuses wire 0"
+        ),
+    ))
+    c.append(_Case(
+        String("filter_error_code_undeclared"),
+        _REFUSED_UNTOKENED,
+        String(
+            "`error_code: 12`, one past XL_ERR_CIRCULAR: what a producer with a"
+            " newer code space (`#GETTING_DATA`, `#BLOCKED!`) sends. Taken"
+            " verbatim it becomes engine code 11, a DIFFERENT error to every"
+            " later reader; the membership check refuses it"
+        ),
+    ))
+
     # ---- observed ADMITTED, and written down for that reason ---------------
     c.append(_Case(
         String("schema_duplicate_column_names"),
@@ -625,8 +651,8 @@ def test_every_hostile_fixture_lands_where_the_ledger_says() raises:
     # A corpus that shrank to nothing would make every assertion above
     # vacuously true.
     assert_true(
-        len(corpus) >= 23,
-        "the ledger has shrunk below the 23 fixtures this corpus holds."
+        len(corpus) >= 26,
+        "the ledger has shrunk below the 26 fixtures this corpus holds."
         " A row is deleted only when its FIXTURE is, and a fixture is deleted"
         " only when the state it expresses has become unrepresentable.",
     )
@@ -690,6 +716,36 @@ def test_a_correct_plan_still_decodes() raises:
         " is refusing a plan that is correct, which is the failure mode a"
         " fail-closed gate has and a fail-open one does not.",
     )
+
+def _refusal_text(name: String) raises -> String:
+    """Decode one fixture and return the full refusal message; raises if the
+    fixture decodes."""
+    var bytes = _read_fixture(name)
+    try:
+        var _p = plan_from_bytes(bytes^)
+    except e:
+        return String(e)
+    raise Error(name + ": decoded without a refusal")
+
+
+def test_an_error_literal_outside_the_eleven_codes_is_refused_by_name() raises:
+    """★ THE EXACT TEXT, NOT ONLY "IT RAISED". The ledger records these two as
+    untokened refusals; this pins the message a producer gets, which names the
+    space and the wire value, so a refusal that moved to some other check (or a
+    decoder that read the code unchecked and failed later for another reason)
+    is red here."""
+    assert_equal(
+        _refusal_text(String("filter_error_code_unspecified")),
+        String(
+            "ExcelErrorCode: wire 0 is XL_ERR_WIRE_UNSPECIFIED — an absent"
+            " proto3 enum field is not a tag"
+        ),
+    )
+    assert_equal(
+        _refusal_text(String("filter_error_code_undeclared")),
+        String("ExcelErrorCode: wire value 12 is unknown to this reader"),
+    )
+
 
 # =============================================================================
 # `scan_params_from_bytes`: THE PARAMS-ONLY REQUEST

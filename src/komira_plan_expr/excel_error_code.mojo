@@ -105,7 +105,9 @@ def excel_error_text(code: UInt8) -> String:
 @always_inline
 def excel_error_code_from_literal(text: String) -> UInt8:
     """Map an error LITERAL as written in a formula (`#DIV/0!`, `#N/A`, ...) to
-    its code. Returns XL_ERR_NAME for an unrecognized `#...` token (Excel treats
+    its code. Every code with an Excel literal has an arm (nine: all but
+    XL_ERR_NONE and XL_ERR_CIRCULAR), so literal -> code -> text is the
+    identity. Returns XL_ERR_NAME for an unrecognized `#...` token (Excel treats
     an unknown `#name` as a name error)."""
     if text == String("#DIV/0!"):
         return XL_ERR_DIV0
@@ -121,6 +123,12 @@ def excel_error_code_from_literal(text: String) -> UInt8:
         return XL_ERR_NUM
     if text == String("#NULL!"):
         return XL_ERR_NULL
+    if text == String("#SPILL!"):
+        return XL_ERR_SPILL
+    if text == String("#CALC!"):
+        return XL_ERR_CALC
+    # XL_ERR_CIRCULAR has no literal: Excel reports a circular reference as a
+    # warning, not as an error value a formula can carry.
     return XL_ERR_NAME
 
 
