@@ -174,7 +174,7 @@ runs a whole plan yet ([Layers still to come](#layers-still-to-come)).
 | [`komira_secret_store`](../src/komira_secret_store/) | the secret-store seam: a one-method `SecretStore` trait (handle in, `SecretValue` out) and a scripted, network-free double, so a consumer can bind a store without depending on any implementation. |
 | [`komira_secret_registry`](../src/komira_secret_registry/) | the per-execution secret registry: a side table binding a query's secret-bearing plan nodes to opaque handles, and the connector reveal seam that resolves a handle only at the moment a connector needs the bytes. |
 | [`komira_secret_env`](../src/komira_secret_env/) | a `SecretStore` whose handle is the name of an environment variable (`[A-Za-z_][A-Za-z0-9_]*`, at most 128 bytes): it returns the variable's value as a zeroizing, redacted `SecretValue`. |
-| [`komira_authz_api`](../src/komira_authz_api/) | the neutral authorization interface, `AuthzPort` with the plain `AuthzAction` and `AuthzResource` values, and two store-free reference conformers. |
+| [`komira_authz_api`](../src/komira_authz_api/) | the neutral authorization interface, `AuthzPort` with the plain `AuthzAction` and `AuthzResource` (kind, opaque id, attributes) values, and two store-free reference conformers. |
 
 ### Runtime support and change data capture
 
@@ -360,6 +360,7 @@ anywhere else under `src/`.
 | [`komira_test_bucket`](../src/tests/helpers/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
 | [`komira_test_s3_adapter`](../src/tests/helpers/komira_test_s3_adapter/) | the real adapters behind those seams, for a test that runs on an embedded MinIO: `SpawnedProcessRunner` (starts the server through `spawn_detached` and setpriv so it dies with the test, Linux only; readiness from MinIO's health endpoint) and `MinioObjectStore` (an `S3Store`, path-style plaintext, the credential from the shared-credentials file), and `open_embedded_minio_test_bucket`, which opens a run's bucket from the test's flags with both. The only one of these libraries with an HTTP stack and a process supervisor. |
 | [`komira_test_fake_s3`](../src/tests/helpers/komira_test_fake_s3/) | a fake S3 in memory for hermetic welded tests, a komira_http_core `Connector` with faults a test sets ([Test infrastructure](#test-infrastructure)). |
+| [`komira_test_vocabulary`](../src/tests/helpers/komira_test_vocabulary/) | the source scan a generic package's welded test runs over its own sources: product vocabulary and dates before September 2026, each hit named by file and line. |
 
 ### Third-party code
 
