@@ -102,7 +102,14 @@ from kci_pkg_upload import PkgTransport
 from kci_release_set.member import file_sha256_hex
 
 from .channel_index import ChannelUrl, IndexPollLog, check_channel
-from .container import MANIFEST_NAME, install_manifest_text, join_path, payload_record_name, work_subdirs
+from .container import (
+    MANIFEST_NAME,
+    install_manifest_text,
+    join_path,
+    native_link_args,
+    payload_record_name,
+    work_subdirs,
+)
 from .env import (
     AUTH_FILE,
     AUTH_FILE_TEXT,
@@ -449,14 +456,17 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
     if not readme_ok:
         return _finish(row^, checks^)
 
-    # 4. each README program, from the installed package only
+    # 4. each README program, from the installed package only, linking the
+    # native package when the environment holds it
+    var link = native_link_args(env_dir, pins)
     for i in range(len(programs)):
         ref p = programs[i]
         var record = _record_of(p.file)
         var raw_out = join_path(out_dir, record + String(".stdout"))
         var raw_err = join_path(out_dir, record + String(".stderr"))
         var run = RunSpec(
-            pixi.copy(), run_program_argv(work, p.file), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
+            pixi.copy(), run_program_argv(work, p.file, link), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(),
+            raw_err.copy(),
         )
         run.set_env(env.copy())
         var started = True

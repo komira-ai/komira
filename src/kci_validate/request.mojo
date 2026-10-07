@@ -33,7 +33,12 @@
 # share/doc/<name>/README.md ("" when it records none) from its
 # metadata.json. A pin of the NATIVE package (kci_release_set `is_native`:
 # libkomira_native.so.1, no Mojo) is marked `is_native` and carries none of
-# the library's values: it has no payload to hash and no README to run.
+# the library's values: it has no payload to hash and no README to run. It
+# carries `link_names`: `<x>` of each `lib/lib<x>.so` its metadata.json
+# `lib_files` lists (the link name, `komira_native`), which a program run in
+# the environment links (`-Xlinker -l<x>`, container.mojo
+# `native_link_args`). A native package with no such row, or one whose `<x>`
+# is not lowercase letters, digits and `_`, RAISES.
 # `mojo_pin_of` is the compiler version every library of the set was built
 # with (they must agree); the native package records none and is not asked.
 # A name that is not a member, a member that is not a conda package, or a
@@ -198,6 +203,7 @@ struct InstallPin(Copyable, Movable):
     var label: String
     var has_doc_files: Bool
     var readme_sha256: String
+    var link_names: List[String]
 
     def __init__(out self, var name: String):
         self.name = name^
@@ -213,6 +219,7 @@ struct InstallPin(Copyable, Movable):
         self.label = String("")
         self.has_doc_files = False
         self.readme_sha256 = String("")
+        self.link_names = List[String]()
 
     def file_name(self) -> String:
         """`<name>-<version>-<build>.conda`: the file the channel serves."""
@@ -245,6 +252,34 @@ def _shell_safe(s: String) -> Bool:
         if seg.byte_length() == 0 or seg == String(".") or seg == String(".."):
             return False
     return True
+
+
+comptime _LINK_PREFIX: String = "lib/lib"
+comptime _LINK_SUFFIX: String = ".so"
+
+
+def _link_name(name: String, path: String) raises -> String:
+    """`<x>` when `path` is `lib/lib<x>.so` (a link name a linker's `-l<x>`
+    finds), "" for any other path. RAISES when `<x>` is empty or holds a byte
+    other than a lowercase letter, a digit or `_`: it is written into the
+    container's script and a program's link line."""
+    if not path.startswith(_LINK_PREFIX) or not path.endswith(_LINK_SUFFIX):
+        return String("")
+    var start = _LINK_PREFIX.byte_length()
+    var end = path.byte_length() - _LINK_SUFFIX.byte_length()
+    var x = String(path[byte=start:end]) if end > start else String("")
+    var b = x.as_bytes()
+    var ok = len(b) > 0
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not ((c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95):
+            ok = False
+    if not ok:
+        raise Error(
+            String("'") + name + String("' ships '") + path
+            + String("', whose link name is not lowercase letters, digits and `_`: kci will not write it into a link line")
+        )
+    return x^
 
 
 def install_pins(release: LoadedRelease, names: List[String]) raises -> List[InstallPin]:
@@ -280,6 +315,15 @@ def install_pins(release: LoadedRelease, names: List[String]) raises -> List[Ins
                             pin.readme_sha256 = mem.conda.doc_files[d].sha256_hex.copy()
                 elif mem.has_conda and mem.conda.name == name and mem.conda.is_native():
                     pin.is_native = True
+                    for f in range(len(mem.conda.lib_files)):
+                        var x = _link_name(name, mem.conda.lib_files[f].path)
+                        if x.byte_length() > 0:
+                            pin.link_names.append(x^)
+                    if len(pin.link_names) == 0:
+                        raise Error(
+                            String("native package '") + name
+                            + String("' ships no lib/lib<name>.so in its lib_files: a program cannot link it")
+                        )
             for word in [pin.version.copy(), pin.build.copy(), pin.subdir.copy()]:
                 if not _shell_safe(word):
                     raise Error(String("'") + name + String("' has a version, build or subdir '") + word + String("' kci will not write into a script"))

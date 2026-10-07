@@ -41,7 +41,12 @@
 #
 #   pixi install --manifest-path <w>/pixi.toml --auth-file <w>/auth.json
 #        --tls-root-certs webpki --no-progress
-#   pixi run --manifest-path <w>/pixi.toml --as-is mojo run <w>/readme_<import>.mojo
+#   pixi run --manifest-path <w>/pixi.toml --as-is mojo run [<link>] <w>/readme_<import>.mojo
+#
+# <link> is container.mojo's `native_link_args` over the environment
+# `<w>/.pixi/envs/default` when the pins hold the native package
+# (`-Xlinker -L<w>/.pixi/envs/default/lib -Xlinker -lkomira_native`), and
+# nothing otherwise. argv, no shell: the scratch path is never parsed.
 #
 # `--manifest-path` is explicit because pixi otherwise finds a workspace by
 # walking up from its working directory. `--as-is` is `--no-install
@@ -120,8 +125,9 @@ def install_env_argv(work_dir: String) -> List[String]:
     return a^
 
 
-def run_program_argv(work_dir: String, program_file: String) -> List[String]:
-    """`pixi run ... --as-is mojo run <w>/<program_file>` (file header)."""
+def run_program_argv(work_dir: String, program_file: String, link: List[String]) -> List[String]:
+    """`pixi run ... --as-is mojo run <link...> <w>/<program_file>` (file
+    header)."""
     var a = List[String]()
     a.append(String("run"))
     a.append(String("--manifest-path"))
@@ -129,6 +135,8 @@ def run_program_argv(work_dir: String, program_file: String) -> List[String]:
     a.append(String("--as-is"))
     a.append(String("mojo"))
     a.append(String("run"))
+    for i in range(len(link)):
+        a.append(link[i].copy())
     a.append(join_path(work_dir, program_file))
     return a^
 
