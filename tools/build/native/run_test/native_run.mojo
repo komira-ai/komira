@@ -2,7 +2,8 @@
 # s2n-tls and a komira C shim (komira_libc's, through the real komira_libc
 # package), each called through libkomira_native.so.1, with known answers.
 from komira_libc.posix_io import RawWriteFd
-from native_checks import check_aead, check_s2n, check_sha256, check_snappy, report
+from native_checks import check_aead, check_s2n, check_sha256, check_snappy
+from native_util import report
 
 
 def check_libc() raises -> Bool:

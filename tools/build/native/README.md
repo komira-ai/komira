@@ -101,9 +101,13 @@ analysis error: the dependency lacks `NativeArchiveInfo`) and refuses a
 version script from the code: the names the `callers`' sources pass to
 `external_call["..."]` (their `[src]`, tests excluded) that a `shared`
 archive defines. Every other symbol is local: aws-lc's and s2n-tls's
-internals, snappy's C++ and the C++ runtime. It fails when
+internals, snappy's C++ and the C++ runtime. A call site is code: names in
+docstrings (triple-quoted strings) and `#` comments are not read, and the
+quoted name may be on a later line than `external_call[`. It fails when
 
-- a symbol is defined by two archives (one owner per C symbol);
+- a symbol is defined by two archives (one owner per C symbol), whatever its
+  binding: a strong pair fails the link, and a weak or common pair would
+  link with the linker keeping one copy silently, so it is refused too;
 - a called name is defined only hidden (the library could not export it);
 - a called `komira_*` name is defined by no `shared` and no `per_library`
   archive, or by both;
@@ -112,6 +116,12 @@ internals, snappy's C++ and the C++ runtime. It fails when
 `callers` is a list in the BUCK file: a package that calls the library and
 is not listed fails its own link against the library once packages link it,
 so a missing one cannot ship.
+
+Names only welded tests call (`komira_objstore_test_*`, `komira_fs_test_*`,
+`komira_mac_*`, `komira_s2n_config_enable_quic`) are not exported. A test
+linking the static archive instead gets its own copy of the archive's
+statics, so a test hook it sets would not reach the library's copy: how the
+tests link is decided with the packages' move to the library.
 
 ### The link and the checks
 
@@ -123,19 +133,29 @@ every exported symbol is `komira_*` and the exports are exactly the
 generated list (and the version script's), no strong undefined symbol is
 `komira_*`, the SONAME is `libkomira_native.so.1`, NEEDED is only glibc's
 own libraries, and it was linked `-Bsymbolic` with no run path.
+[`native_callsite_check.sh`](native_callsite_check.sh), a second
+validation, does not trust the generator: it reads the call sites again
+with [`callsites`](callsites.c), a tokenizer of Mojo sharing nothing with
+the generator's line scan, and fails unless the exports are exactly the
+call-site names it finds that the archives define. A name the generator's
+scan missed, absent from both its list and its script, is a difference
+there.
 
 `:komira_native_run_test` ([`native_run.sh`](native_run.sh), programs in
 [`run_test/`](run_test)) lays the library out as a conda environment holds
 it, with `komira_libc` as `lib/mojo/komira_libc.mojoc`, and runs Mojo
 programs calling aws-lc (SHA-256, AES-256-GCM), snappy, s2n-tls (init, a
-TLS 1.3 config, a client connection) and komira_libc's shim through it:
+TLS 1.3 config, a client connection) and komira_libc's shim through it.
+IR1 and IR2 fail on a worker without the system `libcrypto.so.3` and
+`libssl.so.3`: a case that cannot load them proves nothing about them.
 
 | case | what |
 |---|---|
 | R1 | `mojo run` with `-Xlinker -L<prefix>/lib -Xlinker -lkomira_native` |
 | B1 | `mojo build --runpath='$ORIGIN/../lib'`, the program in `<prefix>/bin`, run with `LD_LIBRARY_PATH` unset; it must NEED `libkomira_native.so.1` |
-| IR1 | R1 after the system `libcrypto.so.3` and `libssl.so.3` are loaded `RTLD_GLOBAL`: the library exports none of their names, the global scope resolves them to the system's, and the system `SSL_CTX_new` still works (a worker without them runs our calls only, and says so) |
+| IR1 | as R1 (ours loaded at start through `-lkomira_native`), then the system `libcrypto.so.3` and `libssl.so.3` dlopened `RTLD_GLOBAL` and called: the library exports none of their names, the global scope resolves them to the system's, our calls still answer right, and the system `SSL_CTX_new` still works |
+| IR2 | the order a host process (a Python interpreter, say) gives: the system OpenSSL loaded `RTLD_GLOBAL` and called first, then ours dlopened by path `RTLD_GLOBAL` and called through the handle (the program links nothing of ours); the same checks |
 
 `:komira_native` is `:libkomira_native` with the run test as a check, so no
-build of it succeeds while either is red. The library is built for linux
+build of it succeeds while any of the three is red. The library is built for linux
 x86_64 only (an ELF version script; aws-lc's assembly).

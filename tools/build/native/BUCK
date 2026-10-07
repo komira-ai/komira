@@ -15,6 +15,15 @@ c_exe(
     visibility = ["PUBLIC"],
 )
 
+# callsites: the external_call names of Mojo sources, by tokenizing them
+# (callsites.c); the second reader of the call sites, for
+# native_callsite_check.sh.
+c_exe(
+    name = "callsites",
+    exec_compatible_with = LINUX_X86_64,
+    src = "callsites.c",
+)
+
 export_file(
     name = "prefix_header.sh",
     visibility = ["PUBLIC"],
@@ -41,6 +50,11 @@ export_file(
 )
 
 export_file(
+    name = "native_callsite_check.sh",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
     name = "native_run.sh",
     visibility = ["PUBLIC"],
 )
@@ -49,6 +63,7 @@ shell_lint(
     name = "shell_lint",
     srcs = [
         "archive_check.sh",
+        "native_callsite_check.sh",
         "native_check.sh",
         "native_exports.sh",
         "native_link.sh",
@@ -117,14 +132,18 @@ komira_native_run_test(
         "R1",
         "B1",
         "IR1",
+        "IR2",
     ],
     exec_compatible_with = LINUX_X86_64,
     lib = ":libkomira_native",
     mojoc = {"komira_libc": "//src/komira_libc:komira_libc"},
     srcs = [
         "run_test/native_checks.mojo",
+        "run_test/native_dlopen.mojo",
         "run_test/native_interpose.mojo",
+        "run_test/native_openssl.mojo",
         "run_test/native_run.mojo",
+        "run_test/native_util.mojo",
     ],
 )
 

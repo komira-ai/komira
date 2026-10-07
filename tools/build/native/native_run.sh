@@ -16,7 +16,12 @@
 #        <prefix>/bin, run there with LD_LIBRARY_PATH unset: the program NEEDs
 #        libkomira_native.so.1 (its SONAME), has that run path and no other,
 #        and finds the library through it alone
-#   IR1  `mojo run` of native_interpose.mojo: the system OpenSSL loaded first
+#   IR1  `mojo run` of native_interpose.mojo with `-lkomira_native`: ours is
+#        loaded at start, then the system libcrypto.so.3 and libssl.so.3 are
+#        dlopened RTLD_GLOBAL; fails when the worker has no system OpenSSL
+#   IR2  `mojo run` of native_dlopen.mojo, linking nothing of ours: the system
+#        OpenSSL is loaded first, then ours is dlopened by path (as a host
+#        process such as a Python interpreter would); fails likewise
 # The case passes when every command exits 0 and the program prints
 # `RESULT PASS`; otherwise it fails (exit 1) with its log on stderr. The log
 # is the action's output either way it passes.
@@ -134,6 +139,9 @@ case "$CASE" in
     IR1)
         # shellcheck disable=SC2086 # LINK is four words
         run_jit $LINK "$SRC/native_interpose.mojo"
+        ;;
+    IR2)
+        run_jit "$SRC/native_dlopen.mojo" "$P/lib/libkomira_native.so.1"
         ;;
     *)
         echo "unknown case $CASE"

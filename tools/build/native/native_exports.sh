@@ -10,13 +10,17 @@
 # (aws-lc's and s2n-tls's internals, snappy's C++, the C++ runtime) is local.
 # <version.map> exports them and makes every other symbol local.
 #
-# A call site is `external_call[` then, on that line or the next, the quoted
-# name; `#` comments are dropped first. A name only in a docstring counts too
-# (it can only add a name some code also calls, or one nothing defines).
+# A call site is `external_call[` then, on that line or a later one, the
+# quoted name. Triple-quoted strings (docstrings) are dropped, and so is a
+# `#` comment on every line, so a name written only in prose is no call site.
+# native_callsite_check.sh reads the call sites again with a tokenizer
+# (callsites.c) and holds the library's exports to its reading.
 #
 # Fails (exit 1, naming each offender) when
-#   - a GLOBAL symbol is defined by two --shared archives: one owner per C
-#     symbol, or the link would pick one silently or fail;
+#   - a symbol is defined (global, weak or common) by two --shared archives:
+#     one owner per C symbol. A strong pair fails the link; a weak or common
+#     pair would link, the linker keeping one of them silently, so it is
+#     refused too;
 #   - a called name is defined by a --shared archive only with hidden
 #     visibility: the library could not export it;
 #   - a called komira_* name is defined by no --shared and no --per-library
@@ -55,10 +59,40 @@ fail() { # file, what
 }
 
 # Every call site name in the .mojo files under a directory, one per line.
+# Per file: docstrings ("""...""" or '''...''', across lines) are dropped,
+# then each line's `#` comment, then a line ending in `external_call[` (with
+# nothing after it but space) is joined to the next line.
 calls_in() {
     find "$1" -name '*.mojo' -type f | sort | while IFS= read -r f; do
-        sed -e 's/#.*//' -e ':a' -e '/external_call\[[[:space:]]*$/{N;s/\n[[:space:]]*//;ba' -e '}' "$f"
-    done | { grep -o -E 'external_call\[[[:space:]]*"[A-Za-z0-9_]+"' || true; } | sed -E 's/.*"([A-Za-z0-9_]+)"/\1/' | sort -u
+        awk '
+            function strip(s,    out, i, q) {
+                out = ""
+                while (s != "") {
+                    if (doc != "") {
+                        i = index(s, doc)
+                        if (i == 0) return out
+                        s = substr(s, i + 3); doc = ""
+                        continue
+                    }
+                    i = match(s, /"""|\047\047\047/)
+                    if (i == 0) { out = out s; break }
+                    out = out substr(s, 1, i - 1); doc = substr(s, i, 3); s = substr(s, i + 3)
+                }
+                sub(/#.*/, "", out)
+                return out
+            }
+            {
+                line = pending strip($0)
+                if (line ~ /external_call\[[ \t]*$/) { pending = line; next }
+                pending = ""
+                while (match(line, /external_call\[[ \t]*"[A-Za-z0-9_]+"/)) {
+                    m = substr(line, RSTART, RLENGTH)
+                    sub(/^[^"]*"/, "", m); sub(/"$/, "", m)
+                    print m
+                    line = substr(line, RSTART + RLENGTH)
+                }
+            }' "$f"
+    done | sort -u
 }
 
 ns=0
@@ -80,7 +114,7 @@ while [ $# -gt 0 ]; do
             # Field 1 DEF|UND, 2 binding, 3 type, 4 visibility, 5 name.
             awk '$1 == "DEF" { print $5 }' "$d/symtab.txt" | sort -u > "$d/def.txt"
             awk '$1 == "DEF" && ($4 == "DEFAULT" || $4 == "PROTECTED") { print $5 }' "$d/symtab.txt" | sort -u > "$d/visible.txt"
-            awk '$1 == "DEF" && $2 == "GLOBAL" && $3 != "COMMON" { print $5 }' "$d/symtab.txt" | sort -u > "$d/strong.txt"
+            awk '$1 == "DEF" && $2 != "LOCAL" { print $5 }' "$d/symtab.txt" | sort -u > "$d/owned.txt"
             ;;
         --per-library)
             np=$((np + 1))
@@ -114,10 +148,10 @@ if [ "$np" -gt 0 ]; then
     cat "$T"/perlib/*/def.txt | sort -u > "$T/perlib_def.txt"
 fi
 
-# One owner per C symbol: a strong definition in two archives.
+# One owner per C symbol: a definition (strong, weak or common) in two archives.
 : > "$T/dup.txt"
 for d in "$T"/shared/*; do
-    sed "s|\$| $(cat "$d/label")|" "$d/strong.txt"
+    sed "s|\$| $(cat "$d/label")|" "$d/owned.txt"
 done | sort > "$T/owners.txt"
 awk '{ n[$1]++; o[$1] = o[$1] " " $2 } END { for (s in n) if (n[s] > 1) print s ":" o[s] }' "$T/owners.txt" | sort > "$T/dup.txt"
 fail "$T/dup.txt" "symbols defined by more than one archive (one owner per C symbol)"
