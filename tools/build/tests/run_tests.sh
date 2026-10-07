@@ -1255,6 +1255,9 @@ for want in \
     "import_list_first|$S:2: import komira_zlib, os$F" \
     "import_list_nospace|$S:2: import os,komira_zlib$F" \
     "import_list_first_nospace|$S:2: import komira_lz4,os$F" \
+    "import_list_middle|$S:2: import os, komira_zlib, sys$F" \
+    "import_list_as|$S:2: import os, komira_lz4 as l$F" \
+    "import_list_indented|$S:3: import os, komira_zlib$F" \
     "import_indented|$S:3: from komira_zlib import deflate$F" \
     "near_owner|$N:src/komira_compression2/plant.mojo:2: var h = OwnedDLHandle(\"libz.so.1\")$F" \
     "no_snappy_owner|codec_owner: no owner file holds the snappy declarations (\"snappy_uncompress\" or \"komira_snappy_uncompress\"), so the patterns match nothing" \

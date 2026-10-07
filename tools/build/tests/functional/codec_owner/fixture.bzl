@@ -9,9 +9,11 @@ plain one and an alias); the layers name the liblz4 and libz sonames. So every
 owner check is met, and none of their lines is a finding.
 
 near.mojo, outside the owners, names each form where it is not a site: in
-comment lines and a trailing comment, an import of komira_compression and of
-packages whose names only start like the layers' (`komira_zlib_extra`,
-`komira_lz4x`, alone and first in an `import a, b` list), a snappy name as an identifier, inside a longer string, after
+comment lines (indented or not) and a trailing comment, an import of
+komira_compression and of packages whose names only start like the layers'
+(`komira_zlib_extra`, `komira_lz4x`, alone, first in an `import a, b` list and,
+as `komira_zlibx`, in its middle) or end like them (`my_komira_lz4`), an
+import list inside a string, a snappy name as an identifier, inside a longer string, after
 another character in the string or with `-`, and a codec library name with
 no `.so` or `.dylib` after it or not at the start of the string.
 functional/codec_owner/BUCK exports the files, so negative/codec_owner plants

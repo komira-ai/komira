@@ -1023,8 +1023,10 @@ sonames, so those patterns cannot stop matching unnoticed; this test pins
 the rest. Its action is [`codec_owner.sh`](../lint/codec_owner.sh).
 [`functional/codec_owner:ok`](functional/codec_owner/BUCK) builds a planted
 tree ([`fixture.bzl`](functional/codec_owner/fixture.bzl)) whose owners hold
-every form, beside near misses outside them (comment lines, a trailing
-comment, packages whose names only start like the layers', a snappy name as
+every form, beside near misses outside them (comment lines, indented or not,
+a trailing comment, packages whose names only start or end like the layers'
+(`komira_zlibx` in the middle of an import list, `my_komira_lz4`), an import
+list inside a string, a snappy name as
 an identifier or inside a longer string, a codec library name with no soname
 suffix); `:ok_prefixed` builds the same tree with the snappy owner declaring
 `"komira_snappy_uncompress"`. Each target of
@@ -1034,7 +1036,8 @@ the `external_call[` line, on the next, prefixed, single- and triple-quoted;
 each soname as `.so`, one as `.dylib`, one single-quoted, one with a trailing
 comment; each import shape (`from x import`, `from x.m import`, a
 parenthesised import, `import x.m`, `import x as y`, `import a, x`,
-`import x, a`, `import a,x`, `import x,a`, an indented import); a directory whose name only starts with an owner's. Two
+`import x, a`, `import a,x`, `import x,a`, `import a, x, b`, `import a, x as y`, an indented
+`from x import` and an indented `import a, x`); a directory whose name only starts with an owner's. Two
 more drop an owner file (the snappy owner, the libz layer) and must fail
 naming the unmet check; an empty tree fails as checking nothing, and a target
 with no owners, or naming both or neither of `tree` and `files`, is refused
