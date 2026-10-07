@@ -4,8 +4,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 # Test-only: komira's TLS against real TLS peers, `bssl s_server` and
 # `bssl s_client`, aws-lc's tool built from the pinned archive
 # (//third_party/aws-lc:bssl). Each mojo_test below starts bssl as a child
-# process (komira_supervisor) on a loopback port and drives komira's side of
-# the connection itself; the tests get the binary through `args`
+# process (komira_supervisor) and drives komira's side of the connection
+# itself. komira listens and connects on 127.0.0.1 only; s_server listens on
+# the dual-stack wildcard ([::], aws-lc's choice), komira connects to
+# 127.0.0.1, so the tests need IPv6 with dual-stack sockets. The tests get
+# the binary through `args`
 # ($(exe_target)) and run under `./buck2 test`, not as part of this library's
 # build. The certificates are komira_http_core's test fixtures, staged at
 # their source paths.

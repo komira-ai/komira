@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_tls_interop_e2e/tls_io.mojo -- komira's side of a connection to a
-# peer process: loopback sockets and a TLS connection driven to a deadline
+# peer process: sockets on 127.0.0.1 and a TLS connection driven to a deadline
 # =============================================================================
 #
 # Everything here is non-blocking and single-threaded. Each loop retries a
@@ -8,11 +8,15 @@
 # peer's pipes never fill while komira waits on the socket), and gives up at
 # its deadline with an error naming the step and what the peer printed.
 #
-# Sockets are IPv4 loopback only. `listen_loopback` binds 127.0.0.1 on an
-# ephemeral port. `connect_loopback` is the port handshake with a server
-# peer: until the peer listens, a connection is refused, and it is retried on
-# a fresh socket after a tick; it fails at the deadline, or as soon as the
-# peer has exited.
+# komira's sockets are IPv4 on 127.0.0.1. `listen_loopback` binds 127.0.0.1
+# on an ephemeral port. `connect_loopback` connects to 127.0.0.1 and is the
+# port handshake with a server peer: until the peer listens, a connection is
+# refused, and it is retried on a fresh socket after a tick; it fails at the
+# deadline, or as soon as the peer has exited. A `bssl s_server` peer does
+# not listen on 127.0.0.1 alone: it binds the dual-stack wildcard `[::]`
+# (aws-lc's tool/transport_common.cc, Listener::Init), so it needs a kernel
+# with IPv6 and dual-stack sockets, and accepts komira's IPv4 connection as
+# an IPv4-mapped one.
 # =============================================================================
 
 from komira_async.reactor.socket_io import try_io_accept, try_io_connect
@@ -73,8 +77,11 @@ def local_port(s: Socket) raises -> UInt16:
 def free_loopback_port() raises -> UInt16:
     """A port the kernel just handed out on 127.0.0.1, released again, for a
     server peer that takes its port on the command line. Another process
-    could take it before the peer binds it; the peer then fails to bind and
-    exits, and `connect_loopback` reports that."""
+    could take it before the peer binds it. If the peer then fails to bind,
+    it exits and `connect_loopback` reports that; if the other process
+    listens on 127.0.0.1, `connect_loopback` succeeds to IT, and the test
+    fails later, at the handshake or on what the peer reports (it never
+    printed a connection). Either way the test fails loudly, never passes."""
     var s = listen_loopback()
     return local_port(s)
 
