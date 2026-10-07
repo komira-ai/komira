@@ -19,19 +19,24 @@
 #                                      size_t* out_pos, size_t out_size);
 #
 # Both return LZMA_OK (0), LZMA_BUF_ERROR (10) when the output space ran out,
-# or another code. Decoding a stream that has not ended, liblzma's
-# stream_buffer_decoder.c (xz 5.2 through 5.8) means to answer LZMA_DATA_ERROR
-# (9) when the input was all consumed and LZMA_BUF_ERROR otherwise, but it
-# restores `*in_pos` to its starting value before that test. So the test sees
-# the start, not the consumed position: a non-empty input cut short comes
-# back LZMA_BUF_ERROR, the same as a short destination, and LZMA_DATA_ERROR
-# only when the input is empty.
+# or another code. For a stream that has not ended, what
+# lzma_stream_buffer_decode returns depends on the liblzma version, and
+# liblzma.so.5 is the system's, not pinned:
+#   * before xz 5.8.4 (and before the same fix on the v5.2, v5.4 and v5.6
+#     branches), stream_buffer_decoder.c restores `*in_pos` to its start
+#     before it tests whether all input was consumed, so a non-empty input
+#     cut short comes back LZMA_BUF_ERROR, the same as a short destination;
+#   * from xz 5.8.4 on, the test reads the consumed position, so a truncated
+#     input comes back LZMA_DATA_ERROR (9).
+# An empty input is LZMA_DATA_ERROR in both. So across versions this module
+# cannot tell a short destination from a truncated stream: truncation is
+# either None or a raise with rc=9.
 #
 # Public entries (no pointer in a signature):
 #   * `xz_compress_into(dst, src, preset, check) -> Int`
 #   * `xz_decompress_into(dst, src, memlimit) -> Optional[Int]`: None on
-#     LZMA_BUF_ERROR (a short destination, or a truncated stream: a caller
-#     that grows and retries bounds its growth)
+#     LZMA_BUF_ERROR (a short destination, or, before xz 5.8.4, a truncated
+#     stream: a caller that grows and retries bounds its growth)
 #   * `XZ_PRESET_DEFAULT` (6), `XZ_CHECK_CRC64` (4), `XZ_DEFAULT_MEMLIMIT`
 #     (16 GiB)
 # =============================================================================
@@ -131,14 +136,18 @@ def xz_decompress_into[
 ) raises -> Optional[Int]:
     """Decode the .xz stream `src` into `dst`, with at most `memlimit` bytes
     of decoder memory; return the bytes written, or None on LZMA_BUF_ERROR.
-    None means the stream decodes to more than `len(dst)` or a non-empty
-    `src` ends before the stream does: liblzma does not tell the two apart
-    (see the header), so a caller that grows `dst` and retries on None must
-    bound its growth. liblzma writes no byte past `len(dst)`.
+    None means the stream decodes to more than `len(dst)`, or, with a
+    liblzma older than xz 5.8.4 (or a v5.2, v5.4 or v5.6 release without
+    the same fix), that a non-empty `src` ends before the stream does. From
+    xz 5.8.4 on, a truncated `src` raises with rc=9 instead (see the
+    header). A caller must treat truncation as either None or a raise, and
+    a caller that grows `dst` and retries on None must bound its growth.
+    liblzma writes no byte past `len(dst)`.
 
     Raises `lzma_stream_buffer_decode failed (rc=R, input_len=N,
     output_cap=C)` for any other failure: an empty `src` (rc=9,
-    LZMA_DATA_ERROR), a corrupt stream, a memory limit too low.
+    LZMA_DATA_ERROR), a truncated `src` on xz 5.8.4 and later (rc=9), a
+    corrupt stream, a memory limit too low.
     """
     var n = len(src)
     var cap = len(dst)

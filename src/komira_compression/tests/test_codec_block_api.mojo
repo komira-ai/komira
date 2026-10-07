@@ -389,11 +389,14 @@ def test_xz_corrupt_stream_names_rc() raises:
     )
 
 
-def test_xz_truncated_stream_is_buf_error_and_empty_is_data_error() raises:
-    # liblzma (xz 5.2 to 5.8) restores `*in_pos` before it tests whether all
-    # input was consumed, so a non-empty stream cut short comes back
-    # LZMA_BUF_ERROR (None, like a short destination), not LZMA_DATA_ERROR.
-    # Only an empty input is LZMA_DATA_ERROR (9), which raises.
+def test_xz_truncated_stream_is_none_or_data_error_and_empty_is_data_error() raises:
+    # What liblzma returns for a non-empty stream cut short depends on its
+    # version (liblzma.so.5 is the system's): before xz 5.8.4 (and the same
+    # fix on the v5.2, v5.4 and v5.6 branches) LZMA_BUF_ERROR, so None, the
+    # same as a short destination; from 5.8.4 on LZMA_DATA_ERROR (9), which
+    # raises. Either is accepted, but nothing else: no byte count, no other
+    # rc, no write past the destination. An empty input is LZMA_DATA_ERROR
+    # in every version.
     var data = _incompressible(4096)
     var packed = _xz_compress(data)
     var cuts = List[Int]()
@@ -403,10 +406,24 @@ def test_xz_truncated_stream_is_buf_error_and_empty_is_data_error() raises:
     for c in range(len(cuts)):
         var cut = cuts[c]
         var dst = _guarded(8192)
-        var got = xz_decompress_into(
-            Span(dst)[0:8192], Span(packed)[0:cut], XZ_DEFAULT_MEMLIMIT
+        var outcome = String("")
+        try:
+            var got = xz_decompress_into(
+                Span(dst)[0:8192], Span(packed)[0:cut], XZ_DEFAULT_MEMLIMIT
+            )
+            outcome = "returned " + (String(got.value()) if got else String("None"))
+        except e:
+            outcome = String(e)
+        var as_data_error = (
+            "lzma_stream_buffer_decode failed (rc=9, input_len=" + String(cut)
+            + ", output_cap=8192)"
         )
-        assert_false(got, "a truncated .xz is LZMA_BUF_ERROR (cut " + String(cut) + ")")
+        if outcome != as_data_error:
+            assert_equal(
+                outcome,
+                "returned None",
+                "a truncated .xz is None or rc=9 (cut " + String(cut) + ")",
+            )
         _assert_pad_untouched(dst, 8192, "xz truncated stream")
 
     var empty = List[UInt8]()

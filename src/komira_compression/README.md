@@ -23,7 +23,8 @@ this package's API in follow-up changes.
 - `bzip2_buffer`: `bzip2_compress_into`, `bzip2_decompress_into` (None when
   the destination is too small).
 - `xz_buffer`: `xz_compress_into`, `xz_decompress_into` (None on
-  `LZMA_BUF_ERROR`).
+  `LZMA_BUF_ERROR`; a truncated stream is None before xz 5.8.4 and a raise
+  with rc=9 from 5.8.4 on).
 - `zlib`: komira_zlib's deflate API, with `zlib_inflate_once` for a
   grow-and-retry caller.
 - `lz4`: komira_lz4's raw block and frame API, with
