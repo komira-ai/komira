@@ -1,0 +1,6 @@
+mojo_library(
+    name = "komira_fs_registry",
+    srcs = glob(["*.mojo"]),
+    deps = ["//src/komira_fs:komira_fs"],
+    visibility = ["PUBLIC"],
+)

@@ -1,0 +1,15 @@
+# The physical-plan packages of the registry lint (//:fs_registry_deps,
+# tools/build/lint/defs.bzl, fs_registry_deps): the packages under src/ that
+# must never depend on komira_fs_registry, directly or through another
+# package. One row per prefix or package, tab-separated:
+# <prefix|package> <name> <why it is physical-plan execution>. A package
+# whose name starts with a `prefix` row's name is in the set; a `package` row
+# names one more that no prefix covers, and must name a package of the tree
+# that no prefix covers, or the row fails the build. A new physical-plan
+# package that matches no prefix gets a `package` row here.
+prefix	komira_dispatch_	the engine dispatcher's packages: they lower and run a compiled plan
+prefix	komira_op_	the physical operators
+prefix	komira_sdk_exec	the SDK's execution paths, which run a compiled plan
+package	komira_morsel	the morsel layer: the source, operator and sink seams a pipeline is assembled from, and the pipeline-execution context
+package	komira_scan_resolver	the execution-time half of a scan kind: it plans the splits and opens a reader per split
+package	komira_exec_types	the result, error and context types that cross the operator, scheduler and caller boundary

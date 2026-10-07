@@ -76,6 +76,16 @@
 #       a bad count or an empty reason is a finding, in either ledger. The
 #       <name>s are what findings call the ledgers. File names hold no
 #       whitespace.
+#   kind "fs_registry_deps", tools <fs_registry_deps.awk>, args <ledger> <ledger name>
+#       No physical-plan package under src/ of <stage> (the tree) depends on
+#       komira_fs_registry, directly or through other packages, or imports
+#       it. <ledger>, rows `<prefix|package> <name> <reason>` tab-separated,
+#       `#` lines and blank lines comments, names the set: a package whose
+#       name starts with a prefix, or one a package row names (a package of
+#       the tree that no prefix covers). The dependencies are the labels the
+#       BUCK files name, read as text; fs_registry_deps.awk, the reader, says
+#       how. A bad row is a finding; checks nothing, so fails, when the set
+#       is empty.
 set -eu
 
 BB=$1 RESULT=$2 KIND=$3 STAGE=$4 PREFIX=$5
@@ -320,6 +330,16 @@ pointer_lint)
             for (f in ffi)
                 if (!(f in fsites)) print FN ":" ffi[f] ": " f " names no wildcard origin; delete the row"
         }' "$T/files" "$T/marked" "$ffi" "$holds" "$T/sites" | sort >> "$REPORT"
+    ;;
+fs_registry_deps)
+    AWK=$(abs "$1"); shift
+    [ "$1" = -- ] && shift
+    ledger=$(abs "$1") ledger_name=$2
+    (cd "$STAGE" && { [ -d src ] && find src \( -name BUCK -o -name '*.mojo' \) \( -type f -o -type l \) || true; } | sort) > "$T/files"
+    # A reader error fails the action: no verdict rather than a partial one.
+    (cd "$STAGE" && awk -v LN="$ledger_name" -v P="$STAGE/" -v CF="$T/checked" -f "$AWK" "$ledger" "$T/files") > "$T/fsr.txt"
+    sort "$T/fsr.txt" >> "$REPORT"
+    checked=$(cat "$T/checked")
     ;;
 *)
     echo "lint.sh: unknown kind $KIND" >&2

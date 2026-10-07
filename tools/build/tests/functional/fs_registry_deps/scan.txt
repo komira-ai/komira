@@ -1,0 +1,11 @@
+"""The scan operator, generic over the file system.
+
+Not from komira_fs_registry: the caller passes the concrete backend.
+"""
+# from komira_fs_registry import FsHandle
+from komira_fs import FileSystem
+from komira_fs_registry_types import Unrelated
+
+
+fn scan[F: FileSystem](fs: F, path: String) raises -> Int:
+    return fs.size(path)

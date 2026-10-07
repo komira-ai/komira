@@ -1,0 +1,6 @@
+# Named like the komira_op_ prefix, but not under it: a logical-plan package.
+mojo_library(
+    name = "komira_optimizer",
+    srcs = glob(["*.mojo"]),
+    deps = ["komira//src/komira_fs_registry:komira_fs_registry"],
+)

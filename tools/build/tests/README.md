@@ -993,6 +993,45 @@ Each test's coverage binary also runs under kcov through the release gate's runn
 ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
 [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
 
+## 46. Registry lint
+
+[`fs_registry_deps`](../lint/defs.bzl) refuses a physical-plan package (a
+dispatcher, an operator, a compiled scan, an SDK execution path) that depends
+on `komira_fs_registry`, directly or through other packages, or imports it.
+The registry's handle is the closed sum of every concrete file system; a
+physical plan that depends on it instantiates all of them, where a compiled
+plan should instantiate only the one file system it runs over. To fix a finding, make the
+package take a `FileSystem`-generic parameter (`fn scan[F: FileSystem](fs: F, ...)`)
+and let its caller, a logical-plan package that may use the registry, pass the
+concrete backend. The set is
+[`tests/fs_registry_physical.tsv`](../../../tests/fs_registry_physical.tsv):
+`prefix` rows (`komira_dispatch_`, `komira_op_`, `komira_sdk_exec`) and
+`package` rows for a physical-plan package no prefix covers; a new one gets a
+row there. The dependencies are the `//src/<package>` labels the BUCK files
+under `src/` name, in any cell spelling and any attribute, read as text outside
+`#` comments and `visibility` lists (so a dep a loaded `.bzl` constant adds is
+not seen; the import check catches the package that uses it). Its reader is
+[`fs_registry_deps.awk`](../lint/fs_registry_deps.awk), its action
+[`lint.sh`](../lint/lint.sh) (kind `fs_registry_deps`).
+[`functional/fs_registry_deps:ok`](functional/fs_registry_deps/BUCK) builds a
+planted tree ([`fixture.bzl`](functional/fs_registry_deps/fixture.bzl)) whose
+physical-plan packages name the registry only in comments, a visibility list,
+a docstring and a longer module name, and whose logical-plan packages depend on
+it, two of them named like a prefix without being under it (`komira_optimizer`,
+`komira_sdk`). Each target of
+[`negative/fs_registry_deps`](negative/fs_registry_deps/BUCK) plants one
+defect in the same tree (a dep in `deps`, one after a string holding `#`,
+another target of the registry's package, a path through two logical-plan
+packages, a package in the set by its ledger row, an import) or in the ledger
+(a malformed, unknown-kind, reasonless or repeated row, a row for no package,
+a row a prefix covers, a prefix covering the registry), or empties the set, and
+must fail naming it.
+
+```sh
+./buck2 build //:fs_registry_deps tests//functional/fs_registry_deps:ok
+./buck2 build tests//negative/fs_registry_deps:transitive   # must fail: through komira_sql -> komira_plan_ir
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`

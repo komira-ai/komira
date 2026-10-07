@@ -196,6 +196,29 @@ pointer_lint_rule = rule(
     },
 )
 
+def _fs_registry_deps_impl(ctx):
+    if (ctx.attrs.tree == None) == (not ctx.attrs.files):
+        fail("fs_registry_deps {}: name the files in exactly one of `tree` and `files`".format(ctx.label))
+    if ctx.attrs.tree != None:
+        staged = ctx.attrs.tree[DefaultInfo].default_outputs[0]
+    else:
+        staged = ctx.actions.copied_dir("tree", ctx.attrs.files)
+    package = "{}//{}".format(ctx.label.cell, ctx.label.package + "/" if ctx.label.package else "")
+    ledger = ctx.attrs.physical
+    name = str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path
+    return _lint(ctx, "fs_registry_deps", [ctx.attrs._reader], [ledger, name], staged)
+
+fs_registry_deps_rule = rule(
+    impl = _fs_registry_deps_impl,
+    doc = "No physical-plan package under src/ of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, depends on komira_fs_registry, directly or through other packages, or imports it: a physical-plan package takes a FileSystem-generic parameter and its caller passes the concrete backend, so a compiled plan instantiates one file system. `physical` is the set: `prefix` rows (a package whose name starts with one) and `package` rows (one more, which no prefix covers), each with its reason. The dependencies are the labels the BUCK files name, read as text; fs_registry_deps.awk, the reader, says how.",
+    attrs = _COMMON | {
+        "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "physical": attrs.source(),
+        "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
+        "_reader": attrs.source(default = "komira//tools/build/lint:fs_registry_deps.awk"),
+    },
+)
+
 def _lint_suite_impl(ctx):
     if not ctx.attrs.lints:
         fail("lint_suite {}: lints is empty".format(ctx.label))
@@ -284,6 +307,9 @@ def push_verdicts(**kwargs):
 def mojo_deps(**kwargs):
     mojo_deps_rule(**_linux(kwargs))
 
+def fs_registry_deps(**kwargs):
+    fs_registry_deps_rule(**_linux(kwargs))
+
 def pointer_lint(**kwargs):
     pointer_lint_rule(**_linux(kwargs))
 
@@ -301,6 +327,7 @@ def markdown_docs(**kwargs):
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (doc_tree.bzl), so no BUCK file names one.
 action_pins = declares_docs(action_pins)
+fs_registry_deps = declares_docs(fs_registry_deps)
 lint_suite = declares_docs(lint_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
 mojo_deps = declares_docs(mojo_deps)

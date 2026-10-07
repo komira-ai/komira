@@ -1,0 +1,16 @@
+# A physical-plan package with every spelling of the registry that is not a
+# dependency: this comment names //src/komira_fs_registry:komira_fs_registry,
+# so does the trailing comment of a dep, and the visibility list names its
+# package (visibility is who may depend on this package, not what it uses).
+mojo_library(
+    name = "komira_op_scan",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/komira_fs:komira_fs",  # not //src/komira_fs_registry:komira_fs_registry
+    ],
+    test_env = {"NOTE": "a # in a string is not a comment"},
+    visibility = [
+        "//src/komira_dispatch_run:",
+        "//src/komira_fs_registry:",
+    ],
+)

@@ -330,6 +330,18 @@
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
 #  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
+#  46. The registry lint (tools/build/lint/defs.bzl, fs_registry_deps):
+#      //:fs_registry_deps (every package under src/, against
+#      tests/fs_registry_physical.tsv) and tests//functional/fs_registry_deps:ok
+#      (a planted tree whose physical-plan packages name komira_fs_registry
+#      only in comments, a visibility list and a longer module name, and whose
+#      logical-plan packages, two named like a prefix, depend on it) build;
+#      each target of tests//negative/fs_registry_deps fails naming its one
+#      planted finding: a physical-plan package depending on the registry
+#      (in its deps, after a string holding `#`, through another target of
+#      its package, through two logical-plan packages, by a ledger row rather
+#      than a prefix) or importing it, or a ledger defect; an empty set fails
+#      as checking nothing, and a target naming no tree is refused at analysis.
 set -uo pipefail
 
 umbrella=1
@@ -1228,6 +1240,31 @@ expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`
 # 43
 # shellcheck source=tools/build/tests/coverage_run_tests.sh
 . "$ROOT/tools/build/tests/coverage_run_tests.sh"
+
+# 46
+expect_green fs_registry_deps //:fs_registry_deps tests//functional/fs_registry_deps:ok
+N=tests//negative/fs_registry_deps
+R="but a physical-plan package"
+F="must never depend on komira_fs_registry: take a FileSystem-generic parameter"
+for want in \
+    "direct|$N/src/komira_op_scan/BUCK:6: komira_op_scan depends on komira_fs_registry (//src/komira_fs_registry:komira_fs_registry), $R (prefix komira_op_) $F" \
+    "after_hash|$N/src/komira_op_scan/BUCK:1: komira_op_scan depends on komira_fs_registry (//src/komira_fs_registry:komira_fs_registry), $R (prefix komira_op_) $F" \
+    "any_target|$N/src/komira_dispatch_run/BUCK:9: komira_dispatch_run depends on komira_fs_registry (komira//src/komira_fs_registry:fs_handle_fixture), $R (prefix komira_dispatch_) $F" \
+    "transitive|$N/src/komira_dispatch_run/BUCK:7: komira_dispatch_run depends on komira_fs_registry through komira_sql -> komira_plan_ir ($N/src/komira_plan_ir/BUCK:7: //src/komira_fs_registry:komira_fs_registry), $R (prefix komira_dispatch_) $F" \
+    "listed|$N/src/komira_pipeline/BUCK:6: komira_pipeline depends on komira_fs_registry (@komira//src/komira_fs_registry:komira_fs_registry), $R (listed at tests//functional/fs_registry_deps:physical.tsv:5) $F" \
+    "import|$N/src/komira_op_scan/plant.mojo:2: komira_op_scan imports komira_fs_registry, $R (prefix komira_op_) $F" \
+    "malformed|$N/physical_malformed.tsv:6: a row has 3 tab-separated fields (kind, name, reason), not 2" \
+    "kind|$N/physical_kind.tsv:6: unknown kind \`module\` (kinds: prefix, package)" \
+    "reason|$N/physical_reason.tsv:6: empty reason: say why komira_plan_ir is physical-plan execution" \
+    "duplicate|$N/physical_duplicate.tsv:6: a second row for package komira_pipeline, first on line 5" \
+    "stale|$N/physical_stale.tsv:6: komira_gone is not a package of the tree (no src/komira_gone/BUCK); delete the row" \
+    "covered|$N/physical_covered.tsv:6: komira_op_scan is covered by prefix komira_op_ (line 3); delete the row" \
+    "registry|$N/physical_registry.tsv:6: prefix komira_fs_ covers komira_fs_registry itself, which the rule is about; narrow or delete the row" \
+    "empty|fs_registry_deps: checked nothing"; do
+    expect_red "fs_registry_deps_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red fs_registry_deps_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
+expect_red fs_registry_deps_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
 # 37
 pt_rc=0

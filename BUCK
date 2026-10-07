@@ -1,7 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "fs_registry_deps", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "retired_names", "shell_lint", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 
@@ -180,5 +180,20 @@ _TESTS_LINTS = [
     name = "pointer_lint",
     ffi = "tests/pointer_lint_ffi.tsv",
     holds = "tests/pointer_lint_holds.tsv",
+    tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# The file-system registry stays out of the physical plan
+# (tools/build/lint/defs.bzl, fs_registry_deps; tools/build/tests/README.md,
+# test 44): no physical-plan package under src/ depends on komira_fs_registry,
+# directly or through other packages, or imports it. Such a package takes a
+# FileSystem-generic parameter and its caller passes the concrete backend, so
+# a compiled plan instantiates one file system; logical-plan packages may use
+# the registry. tests/fs_registry_physical.tsv names the set: the prefixes
+# (komira_dispatch_, komira_op_, komira_sdk_exec) and the packages no prefix
+# covers. The tree is every file of the cell (`:doc_tree`).
+[fs_registry_deps(
+    name = "fs_registry_deps",
+    physical = "tests/fs_registry_physical.tsv",
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]

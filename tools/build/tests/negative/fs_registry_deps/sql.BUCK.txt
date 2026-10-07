@@ -1,0 +1,5 @@
+mojo_library(
+    name = "komira_sql",
+    srcs = glob(["*.mojo"]),
+    deps = ["//src/komira_plan_ir:komira_plan_ir"],
+)

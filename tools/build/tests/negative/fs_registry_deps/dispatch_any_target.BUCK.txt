@@ -1,0 +1,10 @@
+mojo_library(
+    name = "komira_dispatch_run",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/komira_fs:komira_fs",
+        "//src/komira_op_scan:komira_op_scan",
+    ],
+    test_srcs = ["tests/test_run.mojo"],
+    test_data = {"tests/test_run.mojo": {"h": "komira//src/komira_fs_registry:fs_handle_fixture"}},
+)

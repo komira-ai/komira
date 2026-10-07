@@ -1,0 +1,5 @@
+# The fixture set: the real ledger's prefixes and one listed package.
+prefix	komira_dispatch_	the dispatcher
+prefix	komira_op_	the operators
+prefix	komira_sdk_exec	the SDK's execution paths
+package	komira_pipeline	a physical package no prefix covers

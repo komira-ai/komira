@@ -1,0 +1,8 @@
+mojo_library(
+    name = "komira_dispatch_run",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/komira_fs:komira_fs",
+        "//src/komira_op_scan:komira_op_scan",
+    ],
+)

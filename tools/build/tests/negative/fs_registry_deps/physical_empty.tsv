@@ -1,0 +1,4 @@
+# The fixture set without its package row: a tree with no package under a prefix.
+prefix	komira_dispatch_	the dispatcher
+prefix	komira_op_	the operators
+prefix	komira_sdk_exec	the SDK's execution paths

@@ -1,0 +1,2 @@
+"""A file of komira_op_scan whose dep a loaded constant would add."""
+from komira_fs_registry import FsHandle

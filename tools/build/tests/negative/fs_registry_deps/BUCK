@@ -1,0 +1,81 @@
+load("@komira//tools/build/lint:defs.bzl", "fs_registry_deps")
+load("//functional/fs_registry_deps:fixture.bzl", "FS_REGISTRY_PHYSICAL", "FS_REGISTRY_TREE")
+
+# Test 46 (the registry lint), the half that must go red: one planted defect
+# per target, in the tree of functional/fs_registry_deps (whose `ok` builds).
+# run_tests.sh requires each to fail naming its finding.
+
+# A physical-plan package that reaches the registry: one file of the tree
+# replaced, or added.
+[
+    fs_registry_deps(
+        name = name,
+        files = FS_REGISTRY_TREE | plants,
+        physical = FS_REGISTRY_PHYSICAL,
+    )
+    for name, plants in [
+        # komira_op_scan (prefix komira_op_) names it in its deps.
+        ("direct", {"src/komira_op_scan/BUCK": "op_scan_direct.BUCK.txt"}),
+        # The same on one line, after a string holding `#`, which is not a
+        # comment.
+        ("after_hash", {"src/komira_op_scan/BUCK": "op_scan_after_hash.BUCK.txt"}),
+        # komira_dispatch_run names another target of the registry's package,
+        # cell-qualified, outside `deps`.
+        ("any_target", {"src/komira_dispatch_run/BUCK": "dispatch_any_target.BUCK.txt"}),
+        # komira_dispatch_run depends on komira_sql, which depends on
+        # komira_plan_ir, which depends on the registry (allowed for both).
+        ("transitive", {
+            "src/komira_dispatch_run/BUCK": "dispatch_transitive.BUCK.txt",
+            "src/komira_sql/BUCK": "sql.BUCK.txt",
+        }),
+        # komira_pipeline, in the set by its ledger row, not by a prefix.
+        ("listed", {"src/komira_pipeline/BUCK": "pipeline_listed.BUCK.txt"}),
+        # A file of komira_op_scan imports the registry; its BUCK names nothing.
+        ("import", {"src/komira_op_scan/plant.mojo": "plant_import.txt"}),
+    ]
+]
+
+# A defect in the ledger: the fixture's with one row added.
+[
+    fs_registry_deps(
+        name = name,
+        files = FS_REGISTRY_TREE,
+        physical = "physical_{}.tsv".format(name),
+    )
+    for name in [
+        # A row of two fields.
+        "malformed",
+        "kind",
+        # A reason of one space.
+        "reason",
+        "duplicate",
+        # A package row naming no package of the tree.
+        "stale",
+        # A package row a prefix covers.
+        "covered",
+        # A prefix covering the registry itself.
+        "registry",
+    ]
+]
+
+# No physical-plan package in the tree (and a ledger of prefixes only, so no
+# row is stale): the lint checks nothing, so it fails.
+fs_registry_deps(
+    name = "empty",
+    files = {"src/komira_fs/BUCK": "tests//functional/fs_registry_deps:fs.BUCK.txt"},
+    physical = "physical_empty.tsv",
+)
+
+# Neither `tree` nor `files`: refused at analysis.
+fs_registry_deps(
+    name = "no_tree",
+    physical = FS_REGISTRY_PHYSICAL,
+)
+
+# Both `tree` and `files`: refused at analysis.
+fs_registry_deps(
+    name = "both_tree_and_files",
+    files = FS_REGISTRY_TREE,
+    physical = FS_REGISTRY_PHYSICAL,
+    tree = ":doc_tree",
+)

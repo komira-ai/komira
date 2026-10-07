@@ -1,0 +1,9 @@
+# A logical-plan package: it may use the registry.
+mojo_library(
+    name = "komira_plan_ir",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/komira_fs:komira_fs",
+        "//src/komira_fs_registry:komira_fs_registry",
+    ],
+)

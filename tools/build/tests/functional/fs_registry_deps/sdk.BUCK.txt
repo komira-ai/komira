@@ -1,0 +1,7 @@
+# The SDK outside its execution paths (the komira_sdk_exec prefix): it may use
+# the registry.
+mojo_library(
+    name = "komira_sdk",
+    srcs = glob(["*.mojo"]),
+    deps = ["//src/komira_fs_registry:komira_fs_registry"],
+)
