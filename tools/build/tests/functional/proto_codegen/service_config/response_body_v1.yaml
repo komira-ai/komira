@@ -1,4 +1,5 @@
-# fixture_v1.yaml with a `response_body` on CancelOperation.
+# fixture_v1.yaml below its header comment, with one line added:
+# `response_body: done` on the CancelOperation rule.
 type: google.api.Service
 config_version: 3
 name: fixture.googleapis.com
@@ -6,7 +7,6 @@ title: Fixture API
 
 apis:
 - name: fixture.v1.Things
-- name: mixin.v1.Operations
 
 documentation:
   summary: |-
@@ -25,5 +25,7 @@ http:
     post: '/v9/{name=projects/*/operations/*}:cancel'
     body: spec
     response_body: done
+  - selector: mixin.v1.Operations.ListOperations
+    get: '/v9/{name=projects/*}/operations'
   - selector: mixin.v1.Operations.DeleteOperation
     delete: '/v9/{name=projects/*/operations/*}'

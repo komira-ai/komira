@@ -40,9 +40,10 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # is not a module name) and Run's own `status.proto`, beside
 # google/rpc/status.proto (an operation's error) in the one flat package.
 #
-# The clients start at run.googleapis.com, the `google.api.default_host`
-# of the pinned protos, Run Admin v2's one endpoint; a resource's region is
-# part of its name.
+# The clients start at run.googleapis.com, Run Admin v2's one endpoint; a
+# resource's region is part of its name. Run's four services declare it as
+# their `google.api.default_host`; the operations client starts at
+# run_v2.yaml's `name`, the same host (test_run_endpoint).
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the Cloud Run Admin v2 REST reference (no upstream test body is
