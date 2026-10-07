@@ -245,7 +245,9 @@ struct KciCommand(Copyable, Movable):
 
 
 def usage_error(why: String) -> Error:
-    return Error(String("kci: ") + why)
+    """A refused command line: `why` as is. The dispatcher records it and
+    prints it after its one `kci: ` (dispatch.mojo `_stop`)."""
+    return Error(why)
 
 
 # The flags of `run`, by the kind of step that takes them.

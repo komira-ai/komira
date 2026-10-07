@@ -1,9 +1,9 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load(":defs.bzl", "cov_debug_check", "cov_set_check")
+load(":defs.bzl", "cov_debug_check", "cov_plant", "cov_report_check", "cov_set_check")
 
-# Coverage builds (tools/build/mojo/README.md, "Coverage builds"; test 41 of
-# tools/build/tests/run_tests.sh).
+# Coverage builds and runs (tools/build/mojo/README.md, "Coverage builds";
+# tests 41 and 43 of tools/build/tests/run_tests.sh).
 
 # A library with two tests and no README, coverage by the switch: with
 # `-c komira.coverage=true` it has [coverage]; without it, none.
@@ -61,18 +61,132 @@ cov_debug_check(
     script = "check.sh",
 )
 
-# [coverage] and [coverage][bin] are every test's binary, no more and no
-# fewer (checked at analysis).
+# [coverage][bin] is every test's binary, [coverage][tests] every test's
+# report, and [coverage] both, no more and no fewer (checked at analysis).
+_BINS = [
+    ":covlib_forced[coverage][bin][test_describe]",
+    ":covlib_forced[coverage][bin][test_value]",
+]
+
+_REPORTS = [
+    ":covlib_forced[coverage][tests][test_describe]",
+    ":covlib_forced[coverage][tests][test_value]",
+]
+
 cov_set_check(
     name = "aggregates",
-    aggregates = [
-        ":covlib_forced[coverage]",
-        ":covlib_forced[coverage][bin]",
+    aggregates = [":covlib_forced[coverage][bin]"],
+    members = _BINS,
+)
+
+cov_set_check(
+    name = "aggregates_tests",
+    aggregates = [":covlib_forced[coverage][tests]"],
+    members = _REPORTS,
+)
+
+cov_set_check(
+    name = "aggregates_all",
+    aggregates = [":covlib_forced[coverage]"],
+    members = _BINS + _REPORTS,
+)
+
+# Test 43: each test's report from its kcov run is its golden file byte for
+# byte. In covlib/value.mojo, test_value covers clamp and test_describe
+# calls describe(0) only: the arm `if x > 0: return "positive"` (lines 12
+# and 13) is never taken, and line 14 carries `# cov: unreachable`, uncovered
+# in the report (an exemption is covcheck's business). Lines 5 and 6 of
+# clamp (`return hi`, `return x`) are absent, not uncovered: the -O0
+# binary's line table has rows for value.mojo's lines 1 to 4 and none, not
+# even a non-statement row (which kcov skips), for 5 or 6 (`readelf
+# --debug-dump=decodedline` of [coverage][bin][test_value]; debug_relocate
+# rewrites directory strings only). So the pinned Mojo emits no row there,
+# and an arm like `return hi`, never taken, is invisible to coverage. The library is
+# in the tests cell, outside src/, and its sources are in covlib/ below the
+# package, so the paths are tools/build/tests/functional/coverage/....
+cov_report_check(
+    name = "numbers",
+    goldens = [
+        "golden/test_describe.xml",
+        "golden/test_value.xml",
+        "golden/test_gen.xml",
     ],
-    members = [
-        ":covlib_forced[coverage][bin][test_describe]",
-        ":covlib_forced[coverage][bin][test_value]",
+    mode = "golden",
+    reports = _REPORTS + [":covgen[coverage][tests][test_gen]"],
+    script = "report.sh",
+)
+
+# Test 43: a library with a generated source. covgen/gen.mojo is made from
+# covgen/gen.mojo.in (cov_plant used as a generator); test_gen calls a
+# function of each. Its golden report has covgen/plain.mojo and the test, and
+# no gen.mojo: a generated source is not measured (cov_run.sh --gen).
+cov_plant(
+    name = "covgen_gen",
+    expr = "s/@FACTOR@/2/",
+    out = "covgen/gen.mojo",
+    src = "covgen/gen.mojo.in",
+)
+
+mojo_library(
+    name = "covgen",
+    srcs = [
+        "covgen/__init__.mojo",
+        "covgen/plain.mojo",
+        ":covgen_gen",
     ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_gen.mojo"],
+)
+
+# Test 43: a test of the gate's runtime contract (test_env, declared data
+# reached from the working directory, the runner's PATH, LD_LIBRARY_PATH,
+# HOME and TMPDIR, no LD_PRELOAD), green in the release gate and, with
+# [coverage][tests][test_env], in its kcov run: the run has the gate's
+# environment. One data file sits where the binary names a standard library
+# source, so the run is red unless --include-path keeps it out of the report.
+mojo_library(
+    name = "covenv",
+    srcs = ["covenv/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_data = {"tests/test_env.mojo": {
+        "functional/coverage/tests/data/covenv.txt": "tests/data/covenv.txt",
+        # Where the binary's line tables name a standard library source:
+        # kcov would measure it but for cov_run.sh's --include-path list,
+        # and its report would then hold a name no --map covers.
+        "oss/modular/mojo/stdlib/std/testing/testing.mojo": "tests/data/stdlib_decoy.txt",
+    }},
+    test_env = {"COVENV": "set by test_env"},
+    test_srcs = ["tests/test_env.mojo"],
+)
+
+# Test 43: covcheck's build gate reads those reports (census mode), over the
+# package's sources: its numbers are the reports' (value.mojo's lines, the
+# exempted line out of them) and the tests are set aside.
+cov_report_check(
+    name = "census",
+    covcheck = "komira//tools/build/coverage:covcheck_bin",
+    # value.mojo: 9 lines recorded besides the exempted one (1-4 by
+    # test_value; 9-13 by test_describe), 7 hit (12 and 13 not), line 14
+    # exempt; __init__.mojo has no executable line; the two tests set aside.
+    expect = [
+        '"conclusion":"neutral","mode":"census"',
+        '"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":7,"line_found":9,"line_bp":7777,',
+        '"exempt_lines":1,',
+        '"exemptions":[{"path":"tools/build/tests/functional/coverage/covlib/value.mojo","line":14,"reason":"a fixture line (test 43): the tests describe 0 only","status":"exempt"}]',
+        '"excluded_test_files":2,',
+    ],
+    files = {
+        "tools/build/tests/functional/coverage/covlib/__init__.mojo": "covlib/__init__.mojo",
+        "tools/build/tests/functional/coverage/covlib/value.mojo": "covlib/value.mojo",
+        "tools/build/tests/functional/coverage/tests/test_describe.mojo": "tests/test_describe.mojo",
+        "tools/build/tests/functional/coverage/tests/test_value.mojo": "tests/test_value.mojo",
+    },
+    mode = "census",
+    package = "tools/build/tests/functional/coverage",
+    reports = _REPORTS,
+    script = "report.sh",
 )
 
 # Reproducibility without --no-remote-cache: two libraries build the same
@@ -120,6 +234,9 @@ export_file(
 
 shell_lint(
     name = "shell_lint",
-    srcs = ["check.sh"],
+    srcs = [
+        "check.sh",
+        "report.sh",
+    ],
     visibility = ["komira//:tests_lints"],
 )

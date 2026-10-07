@@ -39,12 +39,29 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   truncations, single-byte corruptions, short and empty destinations and
 #   hostile size fields, sentinel-guarded on both sides of the destination.
 # - test_crc32c: published CRC-32C check values.
+# - test_parquet_file_pages_e2e: every page of Parquet files pyarrow wrote
+#   (tests/fixtures/parquet, staged at parquet/; gen_pyarrow_fixtures.py is
+#   their provenance and SHA256SUMS pins them): the footer walked by a
+#   compact-Thrift reader in the test, each page body decompressed through
+#   the dispatch (GZIP, SNAPPY, ZSTD, UNCOMPRESSED; DATA_PAGE and
+#   DATA_PAGE_V2) against its header's sizes, each page CRC-32 checked, and
+#   decoded values against the data the generator wrote.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below, hold no raw pointer in a public
 #   signature and rebuild no address from an integer. It is staged every
 #   source `srcs` compiles, subdirectories included, so a module the scan does
 #   not read fails it.
 _SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
+
+_PARQUET_FIXTURES = [
+    "lineitem_pyarrow_500.parquet",
+    "lineitem_pyarrow_500_uncompressed.parquet",
+    "pyarrow_gzip_plain.parquet",
+    "pyarrow_int96_ts.parquet",
+    "pyarrow_multi_dict_page.parquet",
+    "pyarrow_page_crc_zstd_v2.parquet",
+    "pyarrow_zero_row.parquet",
+]
 
 mojo_library(
     name = "komira_parquet_codec",
@@ -72,6 +89,10 @@ mojo_library(
             "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
             "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
         },
+        "tests/test_parquet_file_pages_e2e.mojo": {
+            "parquet/" + f: "tests/fixtures/parquet/" + f
+            for f in _PARQUET_FIXTURES
+        },
         "tests/test_no_env_reads.mojo": {
             "src/" + f: f
             for f in _SRCS
@@ -88,6 +109,7 @@ mojo_library(
         "tests/test_compression_zstd_lz4.mojo",
         "tests/test_crc32c.mojo",
         "tests/test_no_env_reads.mojo",
+        "tests/test_parquet_file_pages_e2e.mojo",
         "tests/test_snappy_corpus.mojo",
         "tests/test_snappy_exact_dst.mojo",
         "tests/test_snappy_fuzz.mojo",
