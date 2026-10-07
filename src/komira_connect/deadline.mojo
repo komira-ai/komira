@@ -18,6 +18,11 @@
 # Encapsulation: NO UnsafePointer in any public sig.
 # =============================================================================
 
+from komira_http_core.transport.grpc_timeout import (
+    GRPC_TIMEOUT_SET,
+    parse_grpc_timeout_value,
+)
+
 
 # =============================================================================
 # §1 — Sentinels
@@ -41,56 +46,16 @@ def parse_grpc_timeout(header_value: String) -> Int:
       TimeoutValue = 1*8DIGIT
       TimeoutUnit  = "H" / "M" / "S" / "m" / "u" / "n"
 
-    The value digits + final unit char are read in one pass. Returns
-    micros for any unit.
+    A nanosecond value is rounded up to whole micros. The parse is
+    `komira_http_core`'s `parse_grpc_timeout_value`; this wrapper folds its
+    three states into one Int, so malformed, absent and a legal zero all read
+    as 0 here. The h2 serve loop enforces grpc-timeout through the
+    three-state result (`grpc_deadline_at_arrival`), not through this.
     """
-    # The value is the peer's header and may hold any byte: read it through
-    # `as_bytes()`. (Indexing `header_value[byte=i]` asserts on a UTF-8
-    # continuation byte and aborts the process.) A non-ASCII byte is not a
-    # digit or a unit, so such a value is malformed: unset, like any other.
-    var bytes = header_value.as_bytes()
-    var n = len(bytes)
-    if n == 0:
+    var t = parse_grpc_timeout_value(header_value)
+    if t.state != GRPC_TIMEOUT_SET:
         return DEADLINE_UNSET_MICROS
-    # Last byte is the unit
-    var unit_byte = Int(bytes[n - 1])
-    var unit_multiplier_us: Int
-    if unit_byte == ord("H"):
-        unit_multiplier_us = 3_600_000_000  # 3600 sec → micros
-    elif unit_byte == ord("M"):
-        unit_multiplier_us = 60_000_000  # 60 sec → micros
-    elif unit_byte == ord("S"):
-        unit_multiplier_us = 1_000_000  # 1 sec → micros
-    elif unit_byte == ord("m"):
-        unit_multiplier_us = 1_000  # 1 ms → micros
-    elif unit_byte == ord("u"):
-        unit_multiplier_us = 1  # 1 micro
-    elif unit_byte == ord("n"):
-        # Nanoseconds — round up to next micro (truncates to 0 for <1000 ns)
-        # We compute below.
-        unit_multiplier_us = 0  # special-cased
-    else:
-        return DEADLINE_UNSET_MICROS
-
-    # Parse digits in [0..n-1]
-    var v = 0
-    var digit_count = 0
-    for i in range(n - 1):
-        var b = Int(bytes[i])
-        if b < ord("0") or b > ord("9"):
-            return DEADLINE_UNSET_MICROS
-        v = v * 10 + (b - ord("0"))
-        digit_count += 1
-        if digit_count > 8:
-            return DEADLINE_UNSET_MICROS
-    if digit_count == 0:
-        return DEADLINE_UNSET_MICROS
-
-    # Apply unit
-    if unit_byte == ord("n"):
-        # nanos → micros (ceil-divide so a 1ns timeout becomes 1us, not 0)
-        return (v + 999) // 1000
-    return v * unit_multiplier_us
+    return t.micros
 
 
 # =============================================================================

@@ -25,18 +25,35 @@
 #     var r      = compress_f64xW(keep, values)
 #     sink.append(r.compacted, Int(r.count))
 #
-# and ship the same source through both NEON (stdlib scalar one-at-a-time
-# loop — no native gather, behavior-identical to a scalar loop) and x86
-# AVX-512 (single `vgatherqpd` + masked-passthrough load).
+# and ship the same source to every target: x86 AVX-512 takes the
+# single-instruction branch below, every other target takes the scalar
+# fallback (one load per lane).
 #
 # Architecture dispatch:
 #   * x86 + simd_width_of[T]() == 8 (f64/i64/u64) → `llvm.x86.avx512.mask.gather.qpd.512`
 #                                                    or `...qpq.512`.
 #   * x86 + simd_width_of[T]() == 16 (u32)        → `llvm.x86.avx512.mask.gather.dpi.512`.
-#   * Otherwise (NEON, AVX2, scalar)              → stdlib `UnsafePointer.gather()`
-#                                                    which on NEON is W independent
-#                                                    `ldr` instructions and on AVX2
-#                                                    is the 4-lane native gather.
+#   * Otherwise (NEON, AVX2, scalar)              → `_scalar_gather`: a
+#                                                    comptime-unrolled load per
+#                                                    lane (W `ldr` on NEON, W
+#                                                    scalar loads on AVX2).
+#
+# Why the fallback is scalar, not the stdlib `UnsafePointer.gather()`: the
+# stdlib lowers it to `llvm.masked.gather` and passes the alignment as a
+# runtime `Int32` through `llvm_intrinsic`; LLVM needs that operand to be a
+# constant, and only the optimizer folds it. At -O0 (coverage builds) the
+# compile fails ("llvm.masked.gather alignment must be a constant, got
+# runtime value"). The same immarg limit is why
+# `byte_class/masked_memory.mojo` is scalar. Nothing is lost on the shipped
+# targets: for x86-64-v3 LLVM already scalarized `masked.gather` (the
+# release `test_simd_gather` binary disassembles to zero `vgather` /
+# `vpgather` with the stdlib call and with this fallback), and NEON has no
+# gather instruction.
+#
+# The AVX-512 branches are selected only when `simd_width_of` reports a
+# 512-bit register file, which no pinned target CPU does, so no build here
+# compiles them. They pass the `scale` immarg the same way (a runtime
+# `Int32`), so they would likely hit the same -O0 refusal; unverified.
 #
 # Encapsulation (`UnsafePointer` must NEVER cross a module boundary): public
 # API accepts a SAFE `Span[T, origin]` view instead of a raw
@@ -81,66 +98,33 @@ from std.sys.intrinsics import llvm_intrinsic
 
 
 # =============================================================================
-# Scalar / stdlib fallback — used on NEON, AVX2, and AVX-512 widths
-# that don't match the native intrinsic shape.
+# Scalar fallback — used on NEON, AVX2, and AVX-512 widths that don't match
+# the native intrinsic shape.
 # =============================================================================
 
 
 @always_inline
-def _stdlib_gather_u32[
-    W: SIMDLength, origin: Origin[mut=False], //,
+def _scalar_gather[
+    dtype: DType, W: SIMDLength, origin: Origin[mut=False], //,
 ](
-    base: Span[UInt32, origin],
+    base: Span[Scalar[dtype], origin],
     indices: SIMD[DType.uint32, W],
-) -> SIMD[DType.uint32, W]:
-    """Fallback: stdlib `UnsafePointer.gather()` on `Span.unsafe_ptr()`.
+) -> SIMD[dtype, W]:
+    """Fallback gather: `out[k] = base[indices[k]]`, one load per lane.
 
-    On NEON this emits W independent `ldr` instructions (no native NEON
-    gather). On AVX2 x86 this emits a 4-lane native gather (W=4) or two
-    4-lane gathers (W=8). On AVX-512 widths that don't match the native
-    register shape this falls back to the LLVM `masked.gather` lowering.
-
-    Byte-identical to a scalar reference loop on NEON.
+    Comptime-unrolled, so it compiles at every optimization level (see the
+    module header for why the stdlib `.gather()` does not at -O0). On NEON
+    this is W independent `ldr`; on AVX2 it is W scalar loads, which is
+    what LLVM produced from `masked.gather` on x86-64-v3 anyway.
     """
-    # SAFETY: `base.unsafe_ptr()` aliases the Span; pointer arithmetic
-    # stays inside this module per encapsulation rule.
+    # SAFETY: `base.unsafe_ptr()` aliases the Span and does not leave this
+    # function. Every `indices[k] < len(base)` is the caller's contract
+    # (module header, bounds-check policy); UInt32 -> Int is a widening.
     var p = base.unsafe_ptr()
-    # Stdlib `.gather()` takes signed integer indices; cast UInt32 -> Int64
-    # is the universal safe widening (Int32 overflow on 4G-element arrays).
-    return p.gather(indices.cast[DType.int64]())
-
-
-@always_inline
-def _stdlib_gather_u64[
-    W: SIMDLength, origin: Origin[mut=False], //,
-](
-    base: Span[UInt64, origin],
-    indices: SIMD[DType.uint32, W],
-) -> SIMD[DType.uint64, W]:
-    var p = base.unsafe_ptr()
-    return p.gather(indices.cast[DType.int64]())
-
-
-@always_inline
-def _stdlib_gather_i64[
-    W: SIMDLength, origin: Origin[mut=False], //,
-](
-    base: Span[Int64, origin],
-    indices: SIMD[DType.uint32, W],
-) -> SIMD[DType.int64, W]:
-    var p = base.unsafe_ptr()
-    return p.gather(indices.cast[DType.int64]())
-
-
-@always_inline
-def _stdlib_gather_f64[
-    W: SIMDLength, origin: Origin[mut=False], //,
-](
-    base: Span[Float64, origin],
-    indices: SIMD[DType.uint32, W],
-) -> SIMD[DType.float64, W]:
-    var p = base.unsafe_ptr()
-    return p.gather(indices.cast[DType.int64]())
+    var out = SIMD[dtype, W](0)
+    comptime for k in range(Int(W)):
+        out[k] = p[Int(indices[k])]
+    return out
 
 
 # =============================================================================
@@ -285,7 +269,7 @@ def _avx512_gather_qpd_x8[origin: Origin[mut=False]](
 # Mojo derives W from the caller's `simd_width_of[T]()` choice. The
 # AVX-512 intrinsic fires only when W matches the AVX-512 register
 # width (16 for u32, 8 for i64/u64/f64). All other widths fall through
-# to the stdlib gather, which is correct for any W.
+# to `_scalar_gather`, which is correct for any W.
 #
 # Encapsulation: public API is `Span[T, origin]` (safe view) — NO
 # `UnsafePointer` crosses the module boundary.
@@ -311,8 +295,7 @@ def gather_u32xW[
 
     x86 AVX-512 (W=16): single `vpgatherdd` instruction (~5 cycle thpt
     on Skylake-X).
-    NEON / AVX2 / scalar: stdlib `.gather()` on `Span.unsafe_ptr()`,
-    which lowers to W independent `ldr` on NEON.
+    NEON / AVX2 / scalar: `_scalar_gather`, one load per lane.
 
     Caller's contract: every `indices[k] < base.size()` (no bounds check).
     """
@@ -335,7 +318,7 @@ def gather_u32xW[
         )
         return rebind[SIMD[DType.uint32, W]](result)
     else:
-        return _stdlib_gather_u32(base, indices)
+        return _scalar_gather(base, indices)
 
 
 @always_inline
@@ -348,7 +331,7 @@ def gather_u64xW[
     """Index-driven gather for UInt64 lanes.
 
     x86 AVX-512 (W=8): single `vpgatherqq` instruction.
-    NEON / AVX2 / scalar: stdlib `.gather()`.
+    NEON / AVX2 / scalar: `_scalar_gather`, one load per lane.
 
     Caller's contract: every `indices[k] < base.size()` (no bounds check).
     """
@@ -369,7 +352,7 @@ def gather_u64xW[
         )
         return rebind[SIMD[DType.uint64, W]](result)
     else:
-        return _stdlib_gather_u64(base, indices)
+        return _scalar_gather(base, indices)
 
 
 @always_inline
@@ -383,7 +366,7 @@ def gather_i64xW[
 
     x86 AVX-512 (W=8): single `vpgatherqq` instruction (LLVM intrinsic
     `mask.gather.qpq.512` covers both signed and unsigned 64-bit integers).
-    NEON / AVX2 / scalar: stdlib `.gather()`.
+    NEON / AVX2 / scalar: `_scalar_gather`, one load per lane.
 
     Caller's contract: every `indices[k] < base.size()` (no bounds check).
     """
@@ -402,7 +385,7 @@ def gather_i64xW[
         )
         return rebind[SIMD[DType.int64, W]](result)
     else:
-        return _stdlib_gather_i64(base, indices)
+        return _scalar_gather(base, indices)
 
 
 @always_inline
@@ -415,7 +398,7 @@ def gather_f64xW[
     """Index-driven gather for Float64 lanes.
 
     x86 AVX-512 (W=8): single `vgatherqpd` instruction.
-    NEON / AVX2 / scalar: stdlib `.gather()`.
+    NEON / AVX2 / scalar: `_scalar_gather`, one load per lane.
 
     Caller's contract: every `indices[k] < base.size()` (no bounds check).
     """
@@ -434,4 +417,4 @@ def gather_f64xW[
         )
         return rebind[SIMD[DType.float64, W]](result)
     else:
-        return _stdlib_gather_f64(base, indices)
+        return _scalar_gather(base, indices)

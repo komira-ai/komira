@@ -26,6 +26,19 @@
 #   U11 extract_column nulls a row whose value is ill-formed (->>, ->,
 #       string, nested object slice, scalar whose FIRST or LAST byte is the
 #       bad one, whole document) and keeps well-formed rows
+#   U12 every continuation bound at every position of a 2-, 3- and 4-byte
+#       sequence (C3 x; E2 x 82 / E2 82 x; F1 x 98 80 / F1 9F x 80 /
+#       F1 9F 98 x): 0x80 and 0xBF accepted byte for byte, 0x7F and 0xC0
+#       refused as "not a continuation byte". One row per bound per position,
+#       so moving 0x80 or 0xBF by one in either direction is red.
+#   U13 the Unicode Table 3-7 second-byte ranges at both edges, one byte
+#       inside and one outside: E0 A0..BF, ED 80..9F, F0 90..BF, F4 80..8F,
+#       with the exact reason for each refused row
+#   U14 the Table 3-7 lead ranges at their edges: C2, DF, E1, EC, EE, EF,
+#       F1, F3 accepted with second bytes 80 and BF; BF, C1, F5, F7, F8
+#       refused with the exact reason; and after a well-formed 2-, 3- and
+#       4-byte sequence a stray 0x80 is refused at its own index, so a lead
+#       given the wrong sequence length is red
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -330,6 +343,281 @@ def test_extract_column_nulls_ill_formed_rows() raises:
     assert_true(whole.is_null_at(5))
 
 
+def _refused(
+    label: String, b: List[UInt8], reason: String, mut bad: List[String]
+):
+    """Record `label` in `bad` unless `parse_string_raw` over all of `b`
+    raises exactly `reason` for the sequence at byte 0."""
+    var want = "parse_string_raw: invalid UTF-8 at byte 0: " + reason
+    var got = _raw_error(b)
+    if got != want:
+        bad.append(label + " -> " + got)
+
+
+def _accepted(label: String, b: List[UInt8], mut bad: List[String]):
+    """Record `label` in `bad` unless `parse_string_raw` over all of `b`
+    returns `b` byte for byte."""
+    try:
+        var s = parse_string_raw(Span(b), 0, len(b))
+        var sb = s.as_bytes()
+        if len(sb) != len(b):
+            bad.append(label + " -> wrong length " + String(len(sb)))
+            return
+        for i in range(len(b)):
+            if sb[i] != b[i]:
+                bad.append(label + " -> byte " + String(i) + " differs")
+                return
+    except e:
+        bad.append(label + " -> " + String(e))
+
+
+def _raise_if_any(bad: List[String]) raises:
+    """Raise naming EVERY failed row, so a red build shows which bounds a
+    defect moved rather than only the first."""
+    if len(bad) == 0:
+        return
+    var msg = String(len(bad)) + " row(s) failed:"
+    for i in range(len(bad)):
+        msg += " [" + bad[i] + "]"
+    raise Error(msg)
+
+
+def test_continuation_bounds_every_position() raises:
+    var bad = List[String]()
+    # 2-byte, continuation position 1.
+    _accepted("C3 80", _with("", 0xC3, 0x80), bad)
+    _accepted("C3 BF", _with("", 0xC3, 0xBF), bad)
+    _refused(
+        "C3 7F",
+        _with("", 0xC3, 0x7F),
+        "lead byte 0xC3 is followed by 0x7F, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "C3 C0",
+        _with("", 0xC3, 0xC0),
+        "lead byte 0xC3 is followed by 0xC0, which is not a continuation byte",
+        bad,
+    )
+    # 3-byte, positions 1 and 2.
+    _accepted("E2 80 82", _with("", 0xE2, 0x80, 0x82), bad)
+    _accepted("E2 BF 82", _with("", 0xE2, 0xBF, 0x82), bad)
+    _accepted("E2 82 80", _with("", 0xE2, 0x82, 0x80), bad)
+    _accepted("E2 82 BF", _with("", 0xE2, 0x82, 0xBF), bad)
+    _refused(
+        "E2 7F",
+        _with("", 0xE2, 0x7F),
+        "lead byte 0xE2 is followed by 0x7F, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "E2 C0",
+        _with("", 0xE2, 0xC0),
+        "lead byte 0xE2 is followed by 0xC0, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "E2 82 7F",
+        _with("", 0xE2, 0x82, 0x7F),
+        "lead byte 0xE2 is followed by 0x7F, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "E2 82 C0",
+        _with("", 0xE2, 0x82, 0xC0),
+        "lead byte 0xE2 is followed by 0xC0, which is not a continuation byte",
+        bad,
+    )
+    # 4-byte, positions 1, 2 and 3. F1 has the full 80..BF second-byte range.
+    _accepted("F1 80 98 80", _with("", 0xF1, 0x80, 0x98, 0x80), bad)
+    _accepted("F1 BF 98 80", _with("", 0xF1, 0xBF, 0x98, 0x80), bad)
+    _accepted("F1 9F 80 80", _with("", 0xF1, 0x9F, 0x80, 0x80), bad)
+    _accepted("F1 9F BF 80", _with("", 0xF1, 0x9F, 0xBF, 0x80), bad)
+    _accepted("F1 9F 98 80", _with("", 0xF1, 0x9F, 0x98, 0x80), bad)
+    _accepted("F1 9F 98 BF", _with("", 0xF1, 0x9F, 0x98, 0xBF), bad)
+    _refused(
+        "F1 7F",
+        _with("", 0xF1, 0x7F),
+        "lead byte 0xF1 is followed by 0x7F, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "F1 C0",
+        _with("", 0xF1, 0xC0),
+        "lead byte 0xF1 is followed by 0xC0, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "F1 9F 7F",
+        _with("", 0xF1, 0x9F, 0x7F),
+        "lead byte 0xF1 is followed by 0x7F, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "F1 9F C0",
+        _with("", 0xF1, 0x9F, 0xC0),
+        "lead byte 0xF1 is followed by 0xC0, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "F1 9F 98 7F",
+        _with("", 0xF1, 0x9F, 0x98, 0x7F),
+        "lead byte 0xF1 is followed by 0x7F, which is not a continuation byte",
+        bad,
+    )
+    _refused(
+        "F1 9F 98 C0",
+        _with("", 0xF1, 0x9F, 0x98, 0xC0),
+        "lead byte 0xF1 is followed by 0xC0, which is not a continuation byte",
+        bad,
+    )
+    _raise_if_any(bad)
+
+
+def test_second_byte_special_ranges() raises:
+    var bad = List[String]()
+    # E0 A0..BF: below is overlong, above is not a continuation byte.
+    _refused(
+        "E0 9F 80",
+        _with("", 0xE0, 0x9F, 0x80),
+        "overlong encoding: 0xE0 0x9F",
+        bad,
+    )
+    _accepted("E0 A0 80", _with("", 0xE0, 0xA0, 0x80), bad)
+    _accepted("E0 BF 80", _with("", 0xE0, 0xBF, 0x80), bad)
+    _refused(
+        "E0 C0",
+        _with("", 0xE0, 0xC0),
+        "lead byte 0xE0 is followed by 0xC0, which is not a continuation byte",
+        bad,
+    )
+    # ED 80..9F: above is a UTF-16 surrogate (U+D800).
+    _refused(
+        "ED 7F",
+        _with("", 0xED, 0x7F),
+        "lead byte 0xED is followed by 0x7F, which is not a continuation byte",
+        bad,
+    )
+    _accepted("ED 80 80", _with("", 0xED, 0x80, 0x80), bad)
+    _accepted("ED 9F 80", _with("", 0xED, 0x9F, 0x80), bad)
+    _refused(
+        "ED A0 80",
+        _with("", 0xED, 0xA0, 0x80),
+        "UTF-16 surrogate encoded in UTF-8: 0xED 0xA0",
+        bad,
+    )
+    # F0 90..BF: below is overlong.
+    _refused(
+        "F0 8F 80 80",
+        _with("", 0xF0, 0x8F, 0x80, 0x80),
+        "overlong encoding: 0xF0 0x8F",
+        bad,
+    )
+    _accepted("F0 90 80 80", _with("", 0xF0, 0x90, 0x80, 0x80), bad)
+    _accepted("F0 BF 80 80", _with("", 0xF0, 0xBF, 0x80, 0x80), bad)
+    _refused(
+        "F0 C0",
+        _with("", 0xF0, 0xC0),
+        "lead byte 0xF0 is followed by 0xC0, which is not a continuation byte",
+        bad,
+    )
+    # F4 80..8F: above is beyond U+10FFFF.
+    _refused(
+        "F4 7F",
+        _with("", 0xF4, 0x7F),
+        "lead byte 0xF4 is followed by 0x7F, which is not a continuation byte",
+        bad,
+    )
+    _accepted("F4 80 80 80", _with("", 0xF4, 0x80, 0x80, 0x80), bad)
+    _accepted("F4 8F 80 80", _with("", 0xF4, 0x8F, 0x80, 0x80), bad)
+    _refused(
+        "F4 90 80 80",
+        _with("", 0xF4, 0x90, 0x80, 0x80),
+        "code point above U+10FFFF: 0xF4 0x90",
+        bad,
+    )
+    _raise_if_any(bad)
+
+
+def _refused_at(
+    label: String, b: List[UInt8], at: Int, reason: String, mut bad: List[String]
+):
+    """Record `label` in `bad` unless `parse_string_raw` over all of `b`
+    raises exactly `reason` for the sequence at byte `at`."""
+    var want = (
+        "parse_string_raw: invalid UTF-8 at byte " + String(at) + ": " + reason
+    )
+    var got = _raw_error(b)
+    if got != want:
+        bad.append(label + " -> " + got)
+
+
+def test_lead_byte_edges() raises:
+    var bad = List[String]()
+    # Table 3-7 lead ranges: C2..DF opens 2 bytes, E0..EF 3, F0..F4 4. Each
+    # range edge, and each lead next to E0, ED, F0, F4 (whose second byte is
+    # restricted), is accepted with the full 80..BF second-byte range.
+    _accepted("C2 80", _with("", 0xC2, 0x80), bad)
+    _accepted("C2 BF", _with("", 0xC2, 0xBF), bad)
+    _accepted("DF 80", _with("", 0xDF, 0x80), bad)
+    _accepted("DF BF", _with("", 0xDF, 0xBF), bad)
+    _accepted("E1 80 80", _with("", 0xE1, 0x80, 0x80), bad)
+    _accepted("E1 BF BF", _with("", 0xE1, 0xBF, 0xBF), bad)
+    _accepted("EC 80 80", _with("", 0xEC, 0x80, 0x80), bad)
+    _accepted("EC BF BF", _with("", 0xEC, 0xBF, 0xBF), bad)
+    _accepted("EE 80 80", _with("", 0xEE, 0x80, 0x80), bad)
+    _accepted("EE BF BF", _with("", 0xEE, 0xBF, 0xBF), bad)
+    _accepted("EF 80 80", _with("", 0xEF, 0x80, 0x80), bad)
+    _accepted("EF BF BF", _with("", 0xEF, 0xBF, 0xBF), bad)
+    _accepted("F1 80 80 80", _with("", 0xF1, 0x80, 0x80, 0x80), bad)
+    _accepted("F3 BF BF BF", _with("", 0xF3, 0xBF, 0xBF, 0xBF), bad)
+    # The bytes just outside the lead ranges.
+    _refused("BF", _with("", 0xBF), "stray continuation byte 0xBF", bad)
+    _refused(
+        "C1 80", _with("", 0xC1, 0x80), "overlong encoding: lead byte 0xC1", bad
+    )
+    _refused(
+        "F5 80 80 80",
+        _with("", 0xF5, 0x80, 0x80, 0x80),
+        "code point above U+10FFFF: lead byte 0xF5",
+        bad,
+    )
+    _refused(
+        "F7 80 80 80",
+        _with("", 0xF7, 0x80, 0x80, 0x80),
+        "code point above U+10FFFF: lead byte 0xF7",
+        bad,
+    )
+    _refused("F8", _with("", 0xF8), "invalid lead byte 0xF8", bad)
+    # The check resumes right after a well-formed sequence of each length, so
+    # a lead given the wrong length cannot skip the stray 0x80 that follows.
+    _refused_at(
+        "C2 BF 80", _with("", 0xC2, 0xBF, 0x80), 2,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "DF BF 80", _with("", 0xDF, 0xBF, 0x80), 2,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "E0 A0 80 80", _with("", 0xE0, 0xA0, 0x80, 0x80), 3,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "EF BF BF 80", _with("", 0xEF, 0xBF, 0xBF, 0x80), 3,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "F0 90 80 80 80", _with("", 0xF0, 0x90, 0x80, 0x80, 0x80), 4,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "F4 8F BF BF 80", _with("", 0xF4, 0x8F, 0xBF, 0xBF, 0x80), 4,
+        "stray continuation byte 0x80", bad,
+    )
+    _raise_if_any(bad)
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Run one case; a failure is recorded, not fatal, so a red build names
     EVERY failing case rather than only the first."""
@@ -354,6 +642,9 @@ def main() raises:
     _run("test_escapes_path_refuses_ill_formed_raw_bytes", test_escapes_path_refuses_ill_formed_raw_bytes, failed)
     _run("test_escaped_surrogates", test_escaped_surrogates, failed)
     _run("test_extract_column_nulls_ill_formed_rows", test_extract_column_nulls_ill_formed_rows, failed)
+    _run("test_continuation_bounds_every_position", test_continuation_bounds_every_position, failed)
+    _run("test_second_byte_special_ranges", test_second_byte_special_ranges, failed)
+    _run("test_lead_byte_edges", test_lead_byte_edges, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
-    print("utf8_check: ALL 11 CASES PASS")
+    print("utf8_check: ALL 14 CASES PASS")

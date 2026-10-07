@@ -358,10 +358,11 @@ struct GenCompactionResult(Copyable, Movable, Deinitable):
                                      prefix generation.
       var new_version: Int         — the map version after the lineage collapse.
       var collapsed: Bool          — True iff the map CAS landed (the parent was
-                                     dropped from the read order). False on a CAS
-                                     miss (the prefix-gen rows still landed —
-                                     idempotent; the caller may retry the
-                                     collapse alone).
+                                     dropped from the read order). False when
+                                     every collapse CAS attempt missed (the
+                                     prefix-gen rows landed; a re-run appends
+                                     none of them again and retries the
+                                     collapse).
     """
 
     var parent_pid: Int
@@ -417,17 +418,19 @@ def compact_split_parent_gen[
     parent's live prefix), consumed to schedule the parent's orphaned chunks for
     grace-gated reaping after the collapse CAS lands.
 
-    The generation token `<gen>` is `parent_pid` (deterministic + content-
-    addressed by `(parent_pid, child_pid)` — a re-run produces identical prefix-
-    gen bytes, so a partial prefix-gen manifest is safe to resume).
+    The generation token `<gen>` is `parent_pid`, so a re-run binds the same
+    `<child_pid>.g<gen>` prefixes. Step 3 appends only the rows a prefix
+    generation does not hold yet, so a re-run after a failure anywhere in
+    steps 3-4 (or a lost collapse, `collapsed=False`) writes each row once.
 
     Steps (idempotent, crash-safe, mirroring `compact_split_parent`):
       1. Resolve the parent tombstone -> children + the subrange midpoint.
       2. Partition every committed parent row by subrange (produce order
          preserved) — exactly as `compact_split_parent`.
       3. Write the range-pure rows into the children's PREFIX-GENERATION
-         manifests (ordinary from-0 append loops, on fresh sibling prefixes — no
-         insert-ahead-of-tail needed). Invisible until step 4
+         manifests (ordinary from-0 appends, on fresh sibling prefixes — no
+         insert-ahead-of-tail needed), skipping the rows an earlier run already
+         committed there (`_write_prefix_gen_rows`). Invisible until step 4
          references them via the map.
       4. ONE If-Match map CAS: `collapse_lineage_with_prefix_gen(parent_pid,
          gen_a, gen_b)` — drop the parent tombstone + annotate each live child
@@ -437,8 +440,13 @@ def compact_split_parent_gen[
          delete (the grace-gated ReapWorker deletes the orphaned parent segments
          after `grace_ms`) — NO new GC machinery.
 
-    Returns a `GenCompactionResult`. Raises if `parent_pid` is not a SPLIT-parent
-    tombstone or on a store error.
+    RESUME: once the collapse has landed the parent is no longer retired. A
+    call for a pid the map allocated that is neither live nor retired
+    (`_lineage_collapsed`) runs step 5 alone and returns `collapsed=True`,
+    so a failure in step 5 is finished by calling again with the same pid.
+
+    Returns a `GenCompactionResult`. Raises if `parent_pid` is neither a
+    SPLIT-parent tombstone nor a collapsed parent, or on a store error.
 
     NO PRECONDITION on child emptiness (the whole point): the children may
     already hold live writes; their live offsets are untouched."""
@@ -446,12 +454,12 @@ def compact_split_parent_gen[
     var cur = read_partition_map_with_etag[Store](store, cluster, topic)
     var tomb = cur.map.retired_for_pid(parent_pid)
     if not tomb:
-        if _collapsed_by_gen(cur.map, parent_pid):
+        if _lineage_collapsed(cur.map, parent_pid):
             # RESUME: an earlier run's collapse CAS (step 4) landed, but its
-            # step 5 did not finish (a failed advance, a crash). The parent is
-            # no longer a read step, so finish step 5 (idempotent) and stop:
-            # steps 2-4 are done, and re-running step 3 would append the rows
-            # again. The children are not re-derived (-1).
+            # step 5 may not have finished (a failed advance or tombstone, a
+            # crash). The parent is no longer a read step, so run step 5
+            # (idempotent) and stop: steps 2-4 are done. The children are not
+            # re-derived (-1).
             _schedule_parent_chunks_for_delete[Store](parent_manifest, now_ms)
             _ = parent_manifest^
             return GenCompactionResult(
@@ -503,15 +511,10 @@ def compact_split_parent_gen[
     _ = parent_batches^
 
     # Step 3: write the range-pure rows into the children's PREFIX-GENERATION
-    # manifests (fresh from-0 manifests at the `<child_pid>.g<gen>` siblings).
-    if len(a_vals) > 0:
-        var batch_a = _make_int64_batch_from_values(a_vals)
-        _ = prefix_gen_a_core.produce(batch_a^, now_ms)
-        _ = prefix_gen_a_core.flush_if_buffered(now_ms + Int64(1))
-    if len(b_vals) > 0:
-        var batch_b = _make_int64_batch_from_values(b_vals)
-        _ = prefix_gen_b_core.produce(batch_b^, now_ms)
-        _ = prefix_gen_b_core.flush_if_buffered(now_ms + Int64(1))
+    # manifests (fresh from-0 manifests at the `<child_pid>.g<gen>` siblings),
+    # minus the rows an earlier run already committed there.
+    _write_prefix_gen_rows[Store](prefix_gen_a_core, a_vals, now_ms)
+    _write_prefix_gen_rows[Store](prefix_gen_b_core, b_vals, now_ms)
     _ = prefix_gen_a_core^
     _ = prefix_gen_b_core^
 
@@ -568,16 +571,47 @@ def compact_split_parent_gen[
     )
 
 
-def _collapsed_by_gen(map: PartitionMap, parent_pid: Int) -> Bool:
-    """True iff a gen-model collapse of `parent_pid` already landed: a live
-    range carries `parent_pid`'s generation token as its `prefix_gen_seq`
-    (`collapse_lineage_with_prefix_gen`). A parent whose rows all went to no
-    child (both seqs `NO_PARENT_BASE`) leaves no such mark; its resume raises
-    like a pid that was never split."""
-    for i in range(len(map.ranges)):
-        if map.ranges[i].prefix_gen_seq == Int64(parent_pid):
-            return True
-    return False
+def _lineage_collapsed(map: PartitionMap, pid: Int) -> Bool:
+    """True iff `pid` is a pid the map allocated (`0 <= pid < next_pid`) that
+    is neither a live range nor a retired one. A pid leaves `ranges` only by
+    retiring (a split or a merge adds its `RetiredRange`), and only a lineage
+    collapse (`collapse_lineage`, `collapse_lineage_with_prefix_gen`) removes a
+    `RetiredRange`, so such a pid is a split parent whose collapse landed. This
+    holds whatever its rows did: it needs no mark on a live child, so a parent
+    that migrated no rows, or whose children have split again since, is still
+    recognised."""
+    if pid < 0 or pid >= map.next_pid:
+        return False
+    if map._range_index_for_pid(pid) >= 0:
+        return False
+    if map.retired_for_pid(pid):
+        return False
+    return True
+
+
+def _write_prefix_gen_rows[
+    Store: ConditionalWriteStore
+](mut core: BrokerCore[Store], vals: List[Int64], now_ms: Int64) raises:
+    """Append to `core`'s prefix-generation manifest the rows of `vals` it does
+    not hold yet: `vals[committed:]`, where `committed` is the manifest's
+    authoritative next offset (one offset per row, from 0). Nothing is appended
+    when the manifest already holds `len(vals)` rows or more: an earlier run
+    of the same parent committed them (its rows come in the same produce order,
+    or are a superset when retention reaped part of the parent since). The rows
+    go out in one produce and one flush, so one segment and one chunk.
+
+    `core` is a fresh core bound to the prefix-generation prefix, appending to
+    its consolidated manifest (sub-lineage write mode off)."""
+    var committed = Int(core._manifest.read_head_authoritative().next_offset)
+    var n = len(vals)
+    if committed >= n:
+        return
+    var rest = List[Int64](capacity=n - committed)
+    for i in range(committed, n):
+        rest.append(vals[i])
+    var batch = _make_int64_batch_from_values(rest)
+    _ = core.produce(batch^, now_ms)
+    _ = core.flush_if_buffered(now_ms + Int64(1))
 
 
 def _schedule_parent_chunks_for_delete[
