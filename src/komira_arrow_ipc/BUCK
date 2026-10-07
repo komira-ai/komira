@@ -107,6 +107,7 @@ mojo_library(
         "tests/test_ipc_fuzz_corpus.mojo": {
             "arrow-testing": "//third_party/arrow-testing:files",
             "ipc_fuzz_corpus_gate.txt": "tests/ipc_fuzz_corpus_gate.txt",
+            "ipc_fuzz_corpus_verdicts.txt": "tests/ipc_fuzz_corpus_verdicts.txt",
         },
     },
     visibility = ["PUBLIC"],

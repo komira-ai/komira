@@ -20,6 +20,12 @@ ACCEPTED nested arrow-ipc-file/clusterfuzz-testcase-minimized-arrow-ipc-file-fuz
 NAMED flat arrow-ipc-file/clusterfuzz-testcase-arrow-ipc-file-fuzz-5390465250951168|decode_record_batch_message: Buffer[0] range (offset=0, length=36028797018963970)
 NAMED mmap arrow-ipc-file/clusterfuzz-testcase-arrow-ipc-file-fuzz-5390465250951168|decode_record_batch_message_mmap: Buffer[0] range (offset=0, length=36028797018963970)
 NAMED nested arrow-ipc-stream/clusterfuzz-testcase-arrow-ipc-stream-fuzz-6321882936901632|decode_record_batch_message_nested: Buffer[15] range (offset=152, length=1610612736)
-NAMED dicts arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-6440533038989312|Buffer[0] range (offset=2314885530818453536, length=2314885530818453536)
-NAMED flat arrow-ipc-stream/clusterfuzz-testcase-arrow-ipc-stream-fuzz-6296372407697408|IPC frame: invalid metadata_size 4294967040
-NAMED flat arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-5661776796712960|IPC frame: invalid metadata_size 2415919104
+NAMED nested arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-4961281405222912|decode_record_batch_message_nested: Buffer[0] range (offset=2314885530818453536, length=2314885530818453536)
+# In the dicts mode the next three refusals are of DictionaryBatches: the
+# test re-frames a DictionaryBatch's data as a RecordBatch and decodes it
+# with decode_record_batch_message_nested, so the refusal is that decoder's.
+# The fourth is parse_ipc_message framing a message after the Schema.
+NAMED dicts arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-6440533038989312|decode_record_batch_message_nested: Buffer[0] range (offset=2314885530818453536, length=2314885530818453536)
+NAMED dicts arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-4757582821064704|decode_record_batch_message_nested: Buffer[0] range (offset=0, length=60129542144)
+NAMED dicts arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-4964779626856448|decode_record_batch_message_nested: Buffer[1] range (offset=0, length=605590388752)
+NAMED dicts arrow-ipc-stream/crash-09f72ba2a52b80366ab676364abec850fc668168|IPC frame: invalid metadata_size 4294967295

@@ -1,51 +1,45 @@
 # =============================================================================
 # test_ipc_fuzz_corpus.mojo: Apache arrow-testing's IPC fuzz regression corpus
-# through every komira_arrow_ipc RecordBatch decode path.
+# through komira_arrow_ipc's RecordBatch decoders.
 # =============================================================================
 #
 # The corpus (third_party/arrow-testing, staged at `arrow-testing/data/`) is
 # 80 IPC streams and 56 IPC files that once crashed or misled the Arrow C++
-# reader; upstream calls them "usually invalid". komira_arrow_ipc decodes one
-# message at a time and ships no whole-stream or whole-file reader, so this
-# test carries one (`_read_stream`, `_read_file`). It frames each stream
-# message with the library's `parse_ipc_message`, finds a file's Footer from
-# the trailing magic (like Arrow C++, it does not require the leading one),
-# reads Footer, Schema and Fields with the library's flatbuffer readers, and
-# hands every DictionaryBatch and RecordBatch frame to the library. Its own
-# refusals (a bodyLength or Block past the end, no Schema first, a Field type
-# it cannot map, a dictionary id with no field) raise with the prefix
-# `reader:`; every other error is the library's.
+# reader. komira_arrow_ipc decodes one message at a time and ships no stream
+# or file reader, so this test carries one: a stream is read message by
+# message as it is framed (`parse_ipc_message`), each decoded before the next
+# is framed, as Arrow C++ reads it; a file's Footer is found from the trailing
+# magic with Arrow C++'s bounds. Footer, Schema and Fields are read with the
+# library's readers. The reader's own refusals raise with `reader:`.
 #
-# Each file is read once per decode mode, each mode one product entry point:
-#   flat    decode_record_batch_message (schemas of flat columns)
-#   nested  decode_record_batch_message_nested (no dictionary fields)
-#   dicts   decode_record_batch_message_with_dicts (flat or dictionary
-#           columns at the top level)
-#   mmap    decode_record_batch_message_mmap over the file mapped read-only
-#           (flat, dictionary-free schemas)
-# A mode that cannot express a file's schema (a big-endian Schema, a
-# dictionary field inside a nested type, a nested field for a flat mode) is
-# `n/a` for that file. A DictionaryBatch is decompressed by the library
-# (peek_dictionary_batch_codec_from_frame, decompress_dictionary_batch_frame)
-# and its data, re-framed as a RecordBatch message, decoded by
-# decode_record_batch_message_nested.
+# Each file is read once per mode, each mode one decoder: flat
+# (decode_record_batch_message), nested (_nested), dicts (_with_dicts; a
+# DictionaryBatch is decompressed by the library and its data, re-framed as a
+# RecordBatch, decoded by _nested), mmap (_mmap over the mapped file). A mode
+# that cannot express a file's schema is n/a. Every (mode, file) gets a
+# letter (ipc_fuzz_corpus_verdicts.txt): D the library raised inside a
+# decode_record_batch_* call, R it raised before one, r the test's reader
+# raised, - n/a, A decoded. On the pinned corpus: D 52, R 26, r 235 (148 of
+# them 37 Schemas whose endianness is no Endianness value), - 229 (112 a
+# dictionary field in a nested type, 78 a nested field in a flat mode, 39 a
+# dictionary field outside the dicts mode), A 2; 33 files reach a decoder in
+# some mode. No with_dicts call carries a decoded dictionary (every
+# DictionaryBatch is refused first): the corpus does not reach that
+# decoder's dictionary-slot drain.
 #
-# What each test asserts:
-#   test_every_corpus_file_raises: every (mode, file) raises or is n/a, unless
-#     ipc_fuzz_corpus_gate.txt lists it as ACCEPTED with a reason; the list is
-#     shrink-only (a listed pair that now raises is STALE). Each NAMED entry
-#     there (a file declaring a length of 1 GiB or more) raises naming that
-#     length, i.e. at the check, before an allocation of that size. No file
-#     grows the peak resident size by `_HWM_CEILING_KIB` or the peak virtual
-#     size by `_VM_PEAK_CEILING_KIB`. The directories hold exactly the pinned
-#     counts. A crash, abort or hang fails this build action outright; one
-#     line per file prints as it lands, in name order, so the log ends at the
-#     file before it.
-#   test_decode_errors_repeat_50: the whole corpus, every mode, 50 times in
-#     one process, each pass's verdicts equal to the first. An error path that
-#     drops a value twice (the dictionary-slot drain on the unwind path of
-#     decode_record_batch_message_with_dicts was one) corrupts the allocator
-#     and crashes or changes a later verdict, which one pass can miss.
+# test_every_corpus_file_raises: every (mode, file) has its committed letter
+#   (a change of who refuses, or of whether the library is reached, fails);
+#   every A is listed ACCEPTED with a reason in ipc_fuzz_corpus_gate.txt
+#   (shrink-only: a listed pair that now raises is STALE); each NAMED file,
+#   declaring a length of 1 GiB or more, raises naming that length, i.e. at
+#   the check, before an allocation of that size; the directories hold the
+#   pinned counts. A crash, abort or hang fails the build action; one line
+#   per file prints as it lands, so the log ends at the file before it.
+# test_decode_errors_repeat_50: the corpus, every mode, 50 times in one
+#   process with the same verdicts each pass: an error path that frees twice
+#   or leaks corrupts the allocator and changes a later verdict or crashes.
+# Both: no file grows the peak resident size by `_HWM_CEILING_KIB` or the
+#   peak virtual size by `_VM_PEAK_CEILING_KIB`, in every pass.
 # =============================================================================
 
 from std.io import FileHandle
@@ -94,13 +88,11 @@ from komira_arrow_ipc.ipc_flatbuf import (
 )
 
 
-# Where the test declares the extracted tree (BUCK, test_data), relative to
-# the test's working directory.
+# The extracted tree as the test declares it (BUCK, test_data).
 comptime DATA = "arrow-testing/data/"
 comptime STREAM_DIR = "arrow-ipc-stream"
 comptime FILE_DIR = "arrow-ipc-file"
-# The pinned corpus's size (third_party/arrow-testing/ipc_fuzz_files.bzl).
-comptime STREAM_FILES = 80
+comptime STREAM_FILES = 80  # the pinned counts (ipc_fuzz_files.bzl)
 comptime FILE_FILES = 56
 
 comptime MODE_FLAT = 0
@@ -128,6 +120,8 @@ comptime _PASSES = 50
 
 # The reviewed accepted files and declared-size refusals (BUCK, test_data).
 comptime GATE = "ipc_fuzz_corpus_gate.txt"
+# The committed verdict letters, one `<letters> <file>` line per file.
+comptime BASELINE = "ipc_fuzz_corpus_verdicts.txt"
 
 
 def _gate_lines(kind: String) raises -> List[String]:
@@ -141,18 +135,8 @@ def _gate_lines(kind: String) raises -> List[String]:
 
 
 def _mode_name(mode: Int) -> String:
-    if mode == MODE_FLAT:
-        return "flat"
-    if mode == MODE_NESTED:
-        return "nested"
-    if mode == MODE_DICTS:
-        return "dicts"
-    return "mmap"
-
-
-# ---------------------------------------------------------------------------
-# Bytes
-# ---------------------------------------------------------------------------
+    var names: List[String] = ["flat", "nested", "dicts", "mmap"]
+    return names[mode]
 
 
 def _load(path: String) raises -> SharedAlignedBuffer[HeapRegion]:
@@ -187,11 +171,6 @@ def _slice(
 def _message(md: SharedAlignedBuffer[HeapRegion]) raises -> MessageDescriptor:
     var r = flatbuf_reader_over(md)
     return read_message(r, r.read_root_offset())
-
-
-# ---------------------------------------------------------------------------
-# Schema: Field tables to the decoders' column types
-# ---------------------------------------------------------------------------
 
 
 def _slot[
@@ -306,16 +285,8 @@ def _leaf_type[
     raise Error("reader: Field type tag " + String(Int(tag)))
 
 
-def _with_children(
-    t: ArrowType, var kids: Slab[ColumnTypeSpec], var type_ids: List[Int]
-) -> ColumnTypeSpec:
-    return ColumnTypeSpec(
-        arrow_type=t,
-        children=kids^,
-        field_names=List[String](),
-        type_ids=type_ids^,
-        inner_size=0,
-    )
+def _with_children(t: ArrowType, var kids: Slab[ColumnTypeSpec], var ids: List[Int]) -> ColumnTypeSpec:
+    return ColumnTypeSpec(arrow_type=t, children=kids^, field_names=List[String](), type_ids=ids^, inner_size=0)
 
 
 def _spec[
@@ -331,19 +302,12 @@ def _spec[
     var kids = _tables(r, _slot(r, field_pos, 5))
     var tag = fd.type_tag
     var tp = fd.type_table_pos
-    if (
-        tag == TYPE_LIST
-        or tag == TYPE_LARGE_LIST
-        or tag == TYPE_FIXED_SIZE_LIST
-        or tag == TYPE_MAP
-        or tag == TYPE_LIST_VIEW
-        or tag == TYPE_LARGE_LIST_VIEW
-    ):
+    var one_child: List[UInt8] = [
+        TYPE_LIST, TYPE_LARGE_LIST, TYPE_FIXED_SIZE_LIST, TYPE_MAP, TYPE_LIST_VIEW, TYPE_LARGE_LIST_VIEW
+    ]
+    if tag in one_child:
         if len(kids) != 1:
-            raise Error(
-                "reader: type tag " + String(Int(tag)) + " with "
-                + String(len(kids)) + " children (one required)"
-            )
+            raise Error("reader: type tag " + String(Int(tag)) + " with " + String(len(kids)) + " children")
         var inner = _spec(r, kids[0], depth + 1)
         if tag == TYPE_LIST:
             return ColumnTypeSpec.list_of(inner^)
@@ -369,25 +333,13 @@ def _spec[
         return ColumnTypeSpec.struct_of(ch^, names^)
     if tag == TYPE_UNION:
         var u = read_type_union(r, tp)
+        if len(u.type_ids) > 0 and len(u.type_ids) != len(kids):
+            raise Error("reader: Union with " + String(len(u.type_ids)) + " typeIds and " + String(len(kids)) + " children")
         var ids = List[Int]()
-        if len(u.type_ids) == 0:
-            for i in range(len(kids)):
-                ids.append(i)
-        elif len(u.type_ids) != len(kids):
-            raise Error(
-                "reader: Union with " + String(len(u.type_ids))
-                + " typeIds and " + String(len(kids)) + " children"
-            )
-        else:
-            for i in range(len(u.type_ids)):
-                ids.append(Int(u.type_ids[i]))
-        var t: ArrowType
-        if u.mode == UNION_MODE_SPARSE:
-            t = ArrowType.UNION_SPARSE
-        elif u.mode == UNION_MODE_DENSE:
-            t = ArrowType.UNION_DENSE
-        else:
-            raise Error("reader: Union mode " + String(Int(u.mode)))
+        for i in range(len(kids)):
+            ids.append(Int(u.type_ids[i]) if len(u.type_ids) > 0 else i)
+        var modes: List[UInt8] = [UNION_MODE_SPARSE, UNION_MODE_DENSE]
+        var t = _unit_type(u.mode, modes, [ArrowType.UNION_SPARSE, ArrowType.UNION_DENSE], "Union mode")
         var ch = Slab[ColumnTypeSpec]()
         for k in kids:
             ch.append(_spec(r, k, depth + 1))
@@ -404,12 +356,11 @@ def _takes_flat(spec: ColumnTypeSpec) -> Bool:
     """Whether the flat decoders take a column of this type: every leaf type
     `_leaf_type` maps to except the view types."""
     var t = spec.arrow_type
-    if len(spec.children) > 0 or t == ArrowType.BINARY_VIEW or t == ArrowType.UTF8_VIEW:
-        return False
-    return not (
-        t == ArrowType.FIXED_SIZE_BINARY or t == ArrowType.STRUCT
-        or t == ArrowType.UNION_SPARSE or t == ArrowType.UNION_DENSE
-    )
+    var not_flat: List[ArrowType] = [
+        ArrowType.BINARY_VIEW, ArrowType.UTF8_VIEW, ArrowType.FIXED_SIZE_BINARY,
+        ArrowType.STRUCT, ArrowType.UNION_SPARSE, ArrowType.UNION_DENSE,
+    ]
+    return len(spec.children) == 0 and not (t in not_flat)
 
 
 @fieldwise_init
@@ -432,6 +383,8 @@ struct _Schema(Movable):
         var tops = List[_Top]()
         var r = flatbuf_reader_over(md)
         var sd = read_schema(r, schema_pos)
+        if sd.endianness > 1:  # Schema.fbs: enum Endianness:short { Little, Big }
+            raise Error("reader: Schema endianness " + String(Int(sd.endianness)) + " is not an Endianness")
         if sd.endianness != ENDIANNESS_LITTLE:
             raise Error("n/a: a big-endian Schema (komira decodes little-endian)")
         for p in _tables(r, _slot(r, schema_pos, 1)):
@@ -443,16 +396,7 @@ struct _Schema(Movable):
             if is_dict:
                 id = fd.dictionary_encoding.value().id
                 width = fd.dictionary_encoding.value().index_type_bit_width
-            tops.append(
-                _Top(
-                    field_pos=p,
-                    arrow_type=spec.arrow_type,
-                    flat=_takes_flat(spec),
-                    is_dict=is_dict,
-                    dict_id=id,
-                    index_width=width,
-                )
-            )
+            tops.append(_Top(p, spec.arrow_type, _takes_flat(spec), is_dict, id, width))
         self.md = md^
         self.tops = tops^
 
@@ -474,10 +418,7 @@ struct _Schema(Movable):
             if t.is_dict and mode != MODE_DICTS:
                 raise Error("n/a: field " + String(i) + " is dictionary-encoded")
             if mode != MODE_NESTED and not t.is_dict and not t.flat:
-                raise Error(
-                    "n/a: field " + String(i) + " (type "
-                    + String(Int(t.arrow_type.type_id)) + ") is not flat"
-                )
+                raise Error("n/a: field " + String(i) + " (type " + String(Int(t.arrow_type.type_id)) + ") is not flat")
 
     def types(self) -> List[ArrowType]:
         var out = List[ArrowType]()
@@ -486,9 +427,14 @@ struct _Schema(Movable):
         return out^
 
 
-# ---------------------------------------------------------------------------
-# Dictionaries
-# ---------------------------------------------------------------------------
+@fieldwise_init
+struct _Trace(Copyable, Movable):
+    """What one (mode, file) read did: decode_record_batch_* calls made,
+    whether an error escaped from inside one, and with_dicts calls that
+    carried a decoded dictionary in a slot."""
+    var calls: Int
+    var in_decoder: Bool
+    var dict_slots: Int
 
 
 struct _Dicts(Movable):
@@ -504,8 +450,7 @@ struct _Dicts(Movable):
     def find(self, id: Int64) -> Int:
         var at = -1
         for i in range(len(self.ids)):
-            if self.ids[i] == id:
-                at = i
+            at = i if self.ids[i] == id else at
         return at
 
 
@@ -544,7 +489,7 @@ def _reframe_as_record_batch(
 
 
 def _decode_dictionary(
-    s: _Schema, mut d: _Dicts, var frame: SharedAlignedBuffer[HeapRegion]
+    s: _Schema, mut d: _Dicts, var frame: SharedAlignedBuffer[HeapRegion], mut tr: _Trace
 ) raises:
     var codec = peek_dictionary_batch_codec_from_frame(frame)
     var plain: SharedAlignedBuffer[HeapRegion]
@@ -563,47 +508,43 @@ def _decode_dictionary(
     var db = read_dictionary_batch(r, msg.header_table_pos)
     var k = -1
     for i in range(len(s.tops)):
-        if s.tops[i].is_dict and s.tops[i].dict_id == db.id:
-            k = i
+        k = i if s.tops[i].is_dict and s.tops[i].dict_id == db.id else k
     if k < 0:
-        raise Error(
-            "reader: DictionaryBatch id " + String(db.id)
-            + " names no dictionary field"
-        )
+        raise Error("reader: DictionaryBatch id " + String(db.id) + " names no dictionary field")
     if db.is_delta:
         if d.find(db.id) < 0:
             raise Error("reader: delta DictionaryBatch before any for its id")
         raise Error("n/a: delta DictionaryBatch (this reader replaces only)")
     var specs = Slab[ColumnTypeSpec]()
     specs.append(s.spec_of(k))
-    var cols = decode_record_batch_message_nested(
-        _reframe_as_record_batch(plain), specs^
-    )
+    var reframed = _reframe_as_record_batch(plain)
+    tr.calls += 1
+    tr.in_decoder = True
+    var cols = decode_record_batch_message_nested(reframed^, specs^)
+    tr.in_decoder = False
     if len(cols) != 1:
         raise Error("reader: dictionary decoded to " + String(len(cols)) + " columns")
     d.ids.append(db.id)
     d.cols.append(cols.take_at(0))
 
 
-# ---------------------------------------------------------------------------
-# RecordBatches, per mode
-# ---------------------------------------------------------------------------
-
-
 def _decode_batch(
-    mode: Int,
-    s: _Schema,
-    d: _Dicts,
-    var frame: SharedAlignedBuffer[HeapRegion],
-    path: String,
-    abs_offset: Int,
+    mode: Int, s: _Schema, d: _Dicts, var frame: SharedAlignedBuffer[HeapRegion],
+    path: String, abs_offset: Int, mut tr: _Trace,
 ) raises:
     if mode == MODE_FLAT:
+        tr.calls += 1
+        tr.in_decoder = True
         _ = decode_record_batch_message(frame^, s.types())
     elif mode == MODE_NESTED:
-        _ = decode_record_batch_message_nested(frame^, s.specs())
+        var specs = s.specs()
+        tr.calls += 1
+        tr.in_decoder = True
+        _ = decode_record_batch_message_nested(frame^, specs^)
     elif mode == MODE_MMAP:
         var region = ArcPointer[MmapRegion](MmapRegion.open_readonly(path))
+        tr.calls += 1
+        tr.in_decoder = True
         _ = decode_record_batch_message_mmap(frame^, s.types(), region, abs_offset)
     else:
         var is_dict = List[Bool]()
@@ -615,20 +556,15 @@ def _decode_batch(
             if t.is_dict:
                 var at = d.find(t.dict_id)
                 if at < 0:
-                    raise Error(
-                        "reader: no DictionaryBatch for id " + String(t.dict_id)
-                    )
+                    raise Error("reader: no DictionaryBatch for id " + String(t.dict_id))
                 values.append(d.cols[at].deep_copy())
             else:
                 values.append(Column[HeapRegion]())
-        _ = decode_record_batch_message_with_dicts(
-            frame^, s.types(), is_dict, values^, widths
-        )
-
-
-# ---------------------------------------------------------------------------
-# The stream and file readers
-# ---------------------------------------------------------------------------
+        tr.dict_slots += 1 if True in is_dict else 0
+        tr.calls += 1
+        tr.in_decoder = True
+        _ = decode_record_batch_message_with_dicts(frame^, s.types(), is_dict, values^, widths)
+    tr.in_decoder = False
 
 
 @fieldwise_init
@@ -638,56 +574,59 @@ struct _Span(Copyable, Movable):
     var tag: UInt8
 
 
-def _walk_stream(buf: SharedAlignedBuffer[HeapRegion]) raises -> List[_Span]:
-    """Every encapsulated message up to the end-of-stream marker or the end
-    of the bytes (both end a stream). Each message's prefix and metadata
-    length are the library's to check (`parse_ipc_message`, over the rest
-    of the stream); its bodyLength is this reader's."""
-    var out = List[_Span]()
+def _next_message(buf: SharedAlignedBuffer[HeapRegion], pos: Int) raises -> _Span:
+    """The encapsulated message at `pos`; length 0 at the end-of-stream
+    marker or the end of the bytes (both end a stream). The prefix and the
+    metadata length are the library's to check (`parse_ipc_message`, over
+    the rest of the stream); the bodyLength is this reader's."""
     var n = buf.len()
-    var pos = 0
-    while pos < n:
-        if n - pos == 4 and buf.read_u32_le_at(pos) == 0:
-            break  # the pre-0.15 end-of-stream marker
-        var rest = _slice(buf, pos, n - pos)
-        var f = parse_ipc_message(rest)
-        if f.metadata_size == 0:
-            break
-        var msg = _message(_slice(rest, f.metadata_pos, f.metadata_size))
-        var body = Int(msg.body_length)
-        if body < 0 or body > f.body_size:
-            raise Error(
-                "reader: bodyLength " + String(body) + " at " + String(pos)
-                + " runs past the end"
-            )
-        out.append(_Span(offset=pos, length=f.body_pos + body, tag=msg.header_tag))
-        pos += f.body_pos + body
-    return out^
+    if pos >= n or (n - pos == 4 and buf.read_u32_le_at(pos) == 0):
+        return _Span(offset=pos, length=0, tag=0)  # (pre-0.15 EOS: 4 zeros)
+    var rest = _slice(buf, pos, n - pos)
+    var f = parse_ipc_message(rest)
+    if f.metadata_size == 0:
+        return _Span(offset=pos, length=0, tag=0)
+    var msg = _message(_slice(rest, f.metadata_pos, f.metadata_size))
+    var body = Int(msg.body_length)
+    if body < 0 or body > f.body_size:
+        raise Error(
+            "reader: bodyLength " + String(body) + " at " + String(pos)
+            + " runs past the end"
+        )
+    return _Span(offset=pos, length=f.body_pos + body, tag=msg.header_tag)
 
 
-def _read_stream(mode: Int, path: String, buf: SharedAlignedBuffer[HeapRegion]) raises -> Int:
-    """Decode a stream in `mode`; returns the RecordBatches decoded."""
-    var spans = _walk_stream(buf)
-    if len(spans) == 0 or spans[0].tag != MESSAGE_HEADER_SCHEMA:
+def _read_stream(
+    mode: Int, path: String, buf: SharedAlignedBuffer[HeapRegion], mut tr: _Trace
+) raises -> Int:
+    """Decode a stream in `mode`, each message as it is framed (as Arrow C++
+    reads a stream, so damage after a message does not hide it); returns the
+    RecordBatches decoded."""
+    var first = _next_message(buf, 0)
+    if first.length == 0 or first.tag != MESSAGE_HEADER_SCHEMA:
         raise Error("reader: the stream does not start with a Schema message")
-    var sframe = _slice(buf, spans[0].offset, spans[0].length)
+    var sframe = _slice(buf, 0, first.length)
     var f = parse_ipc_message(sframe)
     var md = _slice(sframe, f.metadata_pos, f.metadata_size)
-    var pos = _message(md).header_table_pos
-    var s = _Schema(md^, pos)
+    var schema_pos = _message(md).header_table_pos
+    var s = _Schema(md^, schema_pos)
     s.check_mode(mode)
     var d = _Dicts()
     var batches = 0
-    for i in range(1, len(spans)):
-        ref sp = spans[i]
+    var pos = first.length
+    while True:
+        var sp = _next_message(buf, pos)
+        if sp.length == 0:
+            break
         var frame = _slice(buf, sp.offset, sp.length)
         if sp.tag == MESSAGE_HEADER_DICTIONARY_BATCH:
-            _decode_dictionary(s, d, frame^)
+            _decode_dictionary(s, d, frame^, tr)
         elif sp.tag == MESSAGE_HEADER_RECORD_BATCH:
-            _decode_batch(mode, s, d, frame^, path, sp.offset)
+            _decode_batch(mode, s, d, frame^, path, sp.offset, tr)
             batches += 1
         else:
             raise Error("reader: message type " + String(Int(sp.tag)) + " after the Schema")
+        pos += sp.length
     return batches
 
 
@@ -713,21 +652,25 @@ def _block(
     return _slice(buf, off, ml + bl)
 
 
-def _read_file(mode: Int, path: String, buf: SharedAlignedBuffer[HeapRegion]) raises -> Int:
+def _read_file(
+    mode: Int, path: String, buf: SharedAlignedBuffer[HeapRegion], mut tr: _Trace
+) raises -> Int:
     """Decode a file in `mode` from its Footer; returns the RecordBatches
     decoded."""
     var n = buf.len()
-    if n < 18:
+    # Arrow C++'s bounds: more than two 6-byte magics and the 4-byte footer
+    # length, and a footer length of at most `n - 16`. Only the trailing
+    # magic is required, as Arrow C++ requires it: the Footer is found from
+    # the end, and a file whose leading magic is damaged still reaches the
+    # library's Footer, Schema and batch readers.
+    if n <= 16:
         raise Error("reader: " + String(n) + " bytes cannot hold two magics and a footer")
-    # Only the trailing magic is required, as Arrow C++ requires it: the
-    # Footer is found from the end, and a file whose leading magic is
-    # damaged still reaches the library's Footer, Schema and batch readers.
     var magic: List[UInt8] = [0x41, 0x52, 0x52, 0x4F, 0x57, 0x31]
     for i in range(6):
         if buf.read_u8_at(n - 6 + i) != magic[i]:
             raise Error("reader: the trailing ARROW1 magic is missing")
     var flen = Int(buf.read_i32_le_at(n - 10))
-    if flen <= 0 or flen > n - 18:
+    if flen <= 0 or flen > n - 16:
         raise Error("reader: footer length " + String(flen) + " in a file of " + String(n))
     var fmd = _slice(buf, n - 10 - flen, flen)
     var foot = _footer(fmd)
@@ -736,17 +679,12 @@ def _read_file(mode: Int, path: String, buf: SharedAlignedBuffer[HeapRegion]) ra
     var limit = n - 10 - flen
     var d = _Dicts()
     for b in foot.dictionaries:
-        _decode_dictionary(s, d, _block(buf, b, limit))
+        _decode_dictionary(s, d, _block(buf, b, limit), tr)
     var batches = 0
     for b in foot.record_batches:
-        _decode_batch(mode, s, d, _block(buf, b, limit), path, Int(b.offset))
+        _decode_batch(mode, s, d, _block(buf, b, limit), path, Int(b.offset), tr)
         batches += 1
     return batches
-
-
-# ---------------------------------------------------------------------------
-# Verdicts and the gate
-# ---------------------------------------------------------------------------
 
 
 @fieldwise_init
@@ -755,35 +693,49 @@ struct _Verdict(Copyable, Movable):
     var mode: Int
     var code: Int
     var detail: String
+    # D the library raised inside a decode_record_batch_* call, R the
+    # library raised before one, r this test's reader raised, - n/a,
+    # A accepted.
+    var letter: String
+    var calls: Int
+    var dict_slots: Int
 
     def key(self) -> String:
         return _mode_name(self.mode) + " " + self.name
 
     def describe(self) -> String:
-        var c = "RAISED"
-        if self.code == V_NA:
-            c = "N/A"
-        elif self.code == V_ACCEPTED:
-            c = "ACCEPTED"
         var d = self.detail
         if len(d.codepoints()) > 160:
             d = String(d[codepoint=0:160]) + "..."
-        return self.key() + " " + c + ": " + d
+        return self.key() + " " + self.letter + ": " + d
 
 
 def _run(mode: Int, rel: String, buf: SharedAlignedBuffer[HeapRegion]) -> _Verdict:
     var path = String(DATA) + rel
+    var tr = _Trace(calls=0, in_decoder=False, dict_slots=0)
     try:
         var n: Int
         if rel.startswith(STREAM_DIR):
-            n = _read_stream(mode, path, buf)
+            n = _read_stream(mode, path, buf, tr)
         else:
-            n = _read_file(mode, path, buf)
-        return _Verdict(name=rel, mode=mode, code=V_ACCEPTED, detail=String(n) + " RecordBatches decoded")
+            n = _read_file(mode, path, buf, tr)
+        return _Verdict(
+            name=rel, mode=mode, code=V_ACCEPTED, detail=String(n) + " RecordBatches decoded",
+            letter="A", calls=tr.calls, dict_slots=tr.dict_slots,
+        )
     except e:
         var msg = String(e)
-        var code = V_NA if msg.startswith("n/a:") else V_RAISED
-        return _Verdict(name=rel, mode=mode, code=code, detail=msg^)
+        var code = V_RAISED
+        var letter = "D" if tr.in_decoder else "R"
+        if msg.startswith("n/a:"):
+            code = V_NA
+            letter = "-"
+        elif msg.startswith("reader:"):
+            letter = "r"
+        return _Verdict(
+            name=rel, mode=mode, code=code, detail=msg^, letter=letter,
+            calls=tr.calls, dict_slots=tr.dict_slots,
+        )
 
 
 def _sorted(var names: List[String]) -> List[String]:
@@ -836,14 +788,6 @@ def _vm_kib(key: String) raises -> Int:
         return _kib(f.read(), key)
 
 
-def _letter(v: _Verdict) -> String:
-    if v.code == V_NA:
-        return "-"
-    if v.code == V_ACCEPTED:
-        return "A"
-    return "r" if v.detail.startswith("reader:") else "R"
-
-
 def _load_corpus(names: List[String]) raises -> Slab[SharedAlignedBuffer[HeapRegion]]:
     """Every file's bytes, read once (opening a file on a build worker is
     slow next to decoding it)."""
@@ -857,30 +801,37 @@ def _run_corpus(
     names: List[String], bufs: Slab[SharedAlignedBuffer[HeapRegion]], loud: Bool
 ) raises -> List[_Verdict]:
     """Every mode over every file. With `loud`: one line per file as it
-    lands (a letter per mode in the order flat, nested, dicts, mmap; then the
-    first verdict that is not n/a; R the library raised, r this test's
-    reader, - n/a, A accepted), its VmPeak and VmHWM growth when 1 MiB or
-    more, and both ceilings enforced per file."""
+    lands (a `_Verdict.letter` per mode in the order flat, nested, dicts,
+    mmap; then the first verdict that is not n/a) and its VmPeak and VmHWM
+    growth when 1 MiB or more. Both memory ceilings hold for every file in
+    every pass, loud or not."""
     var out = List[_Verdict]()
     var base = _vm_kib("VmPeak:")
     var base_hwm = _vm_kib("VmHWM:")
     for k in range(len(names)):
         ref rel = names[k]
         ref buf = bufs[k]
-        var before = _vm_kib("VmPeak:") if loud else 0
-        var before_hwm = _vm_kib("VmHWM:") if loud else 0
+        var before = _vm_kib("VmPeak:")
+        var before_hwm = _vm_kib("VmHWM:")
         var letters = String("")
         var shown = -1
         for m in range(N_MODES):
             var v = _run(m, rel, buf)
-            letters += _letter(v)
+            letters += v.letter
             if shown < 0 and v.code != V_NA:
                 shown = len(out)
             out.append(v^)
-        if not loud:
-            continue
         var grew = _vm_kib("VmPeak:") - before
         var grew_hwm = _vm_kib("VmHWM:") - before_hwm
+        if grew >= _VM_PEAK_CEILING_KIB or grew_hwm >= _HWM_CEILING_KIB:
+            raise Error(
+                rel + " grew VmPeak by " + String(grew) + " KiB and VmHWM by "
+                + String(grew_hwm) + " KiB (ceilings "
+                + String(_VM_PEAK_CEILING_KIB) + ", "
+                + String(_HWM_CEILING_KIB) + ")"
+            )
+        if not loud:
+            continue
         var line = letters + " " + rel
         if grew >= 1024:
             line += " [VmPeak +" + String(grew // 1024) + " MiB]"
@@ -892,13 +843,6 @@ def _run_corpus(
         if len(d.codepoints()) > 110:
             d = String(d[codepoint=0:110]) + "..."
         print(line + ": " + d, flush=True)
-        if grew >= _VM_PEAK_CEILING_KIB or grew_hwm >= _HWM_CEILING_KIB:
-            raise Error(
-                rel + " grew VmPeak by " + String(grew) + " KiB and VmHWM by "
-                + String(grew_hwm) + " KiB (ceilings "
-                + String(_VM_PEAK_CEILING_KIB) + ", "
-                + String(_HWM_CEILING_KIB) + ")"
-            )
     if loud:
         print(
             "VmPeak", base, "->", _vm_kib("VmPeak:"), "KiB; VmHWM", base_hwm,
@@ -907,8 +851,21 @@ def _run_corpus(
     return out^
 
 
-def _gate(verdicts: List[_Verdict]) raises -> List[String]:
+def _gate(names: List[String], verdicts: List[_Verdict]) raises -> List[String]:
     var problems = List[String]()
+    var base = List[String]()
+    with open(BASELINE, "r") as f:
+        for line in f.read().split("\n"):
+            if line.byte_length() > 0 and not line.startswith("#"):
+                base.append(String(line))
+    if len(base) != len(names):
+        problems.append(BASELINE + " has " + String(len(base)) + " lines for " + String(len(names)) + " files")
+    for k in range(min(len(base), len(names))):
+        var now = String("")
+        for m in range(N_MODES):
+            now += verdicts[k * N_MODES + m].letter
+        if base[k] != now + " " + names[k]:
+            problems.append("BASELINE: `" + base[k] + "`, now `" + now + " " + names[k] + "`")
     var listed = _gate_lines("ACCEPTED")
     var used = List[Bool]()
     for _ in range(len(listed)):
@@ -942,23 +899,79 @@ def _gate(verdicts: List[_Verdict]) raises -> List[String]:
     return problems^
 
 
+def _shape(v: _Verdict) -> String:
+    """The verdict's letter and its text up to the first `:` past any
+    `reader:`/`n/a:` prefix, digits as N: the check that decided it."""
+    var d = v.detail
+    var start = 0
+    if d.startswith("reader: ") or d.startswith("n/a: "):
+        start = d.find(" ") + 1
+    var end = d.find(":", start)
+    if end < 0 or end - start > 60:
+        end = min(d.byte_length(), start + 60)
+    var out = v.letter + " "
+    var digit = False
+    for b in d.as_bytes()[start:end]:
+        if b >= 48 and b <= 57:
+            if not digit:
+                out += "N"
+            digit = True
+        else:
+            out += chr(Int(b))
+            digit = False
+    return out^
+
+
+def _summarize(names: List[String], verdicts: List[_Verdict]):
+    """Counts of letters, of files whose read reached a decoder, of
+    with_dicts calls with a filled dictionary slot, and of pairs per deciding
+    check (`_shape`)."""
+    var letters = String("DRr-A")
+    var counts: List[Int] = [0, 0, 0, 0, 0]
+    var shapes = List[String]()
+    var shape_n = List[Int]()
+    var files_calling = 0
+    var pairs_calling = 0
+    var dict_slots = 0
+    for k in range(len(names)):
+        var any = False
+        for m in range(N_MODES):
+            ref v = verdicts[k * N_MODES + m]
+            counts[letters.find(v.letter)] += 1
+            dict_slots += v.dict_slots
+            if v.calls > 0:
+                pairs_calling += 1
+                any = True
+            var sh = _shape(v)
+            var at = -1
+            for i in range(len(shapes)):
+                if shapes[i] == sh:
+                    at = i
+            if at < 0:
+                shapes.append(sh)
+                shape_n.append(1)
+            else:
+                shape_n[at] += 1
+        if any:
+            files_calling += 1
+    print(
+        len(verdicts), "pairs: D", counts[0], "R", counts[1], "r", counts[2], "-", counts[3],
+        "A", counts[4], "|", pairs_calling, "pairs and", files_calling,
+        "files reached a decode_record_batch_* call |", dict_slots,
+        "with_dicts calls carried a dictionary", flush=True,
+    )
+    var line = String("")
+    for i in range(len(shapes)):
+        line += shapes[i] + " x" + String(shape_n[i]) + "; "
+    print(line, flush=True)
+
+
 def test_every_corpus_file_raises() raises:
     var names = _corpus()
     assert_equal(len(names), STREAM_FILES + FILE_FILES)
     var verdicts = _run_corpus(names, _load_corpus(names), True)
-    var counts: List[Int] = [0, 0, 0]
-    var by_reader = 0
-    for v in verdicts:
-        counts[v.code] += 1
-        if v.code == V_RAISED and v.detail.startswith("reader:"):
-            by_reader += 1
-    print(
-        len(names), "files x", N_MODES, "modes:", counts[V_RAISED], "RAISED (",
-        by_reader, "by the test's reader,", counts[V_RAISED] - by_reader,
-        "by komira_arrow_ipc ),", counts[V_NA], "N/A,", counts[V_ACCEPTED],
-        "ACCEPTED", flush=True,
-    )
-    var problems = _gate(verdicts)
+    _summarize(names, verdicts)
+    var problems = _gate(names, verdicts)
     if len(problems) > 0:
         var text = String(len(problems)) + " corpus problems:"
         for p in problems:
