@@ -1,0 +1,3 @@
+# A private module (its name starts with `_`): its public names are not public API.
+def get(p: UnsafePointer[UInt8, o]) -> Int:
+    return 0

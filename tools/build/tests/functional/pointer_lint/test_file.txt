@@ -1,0 +1,7 @@
+# A test file: not public API.
+def helper(p: UnsafePointer[UInt8, o]) -> Int:
+    return 0
+
+
+def main():
+    pass
