@@ -50,7 +50,7 @@ from komira_async.runtime.suspendable_handler import (
     SuspendableHandler,
 )
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # -----------------------------------------------------------------------------

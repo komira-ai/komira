@@ -64,12 +64,12 @@
 
 from std.sys import size_of
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.arrow.column import Column
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.collections.slab import Slab
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.column import Column
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_collections.slab import Slab
 
 
 # =============================================================================

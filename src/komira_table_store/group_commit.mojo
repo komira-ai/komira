@@ -66,10 +66,9 @@
 
 from std.memory import OwnedPointer
 
-# komira_core's Slab, not komira_collections': the coalescing window in
-# komira_objectstore takes and returns komira_core's Slab[Item], and the two are
-# distinct types.
-from komira_core.collections.slab import Slab
+# komira_collections' Slab: the coalescing window in komira_objectstore takes and
+# returns that Slab[Item].
+from komira_collections.slab import Slab
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.reactor import Reactor

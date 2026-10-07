@@ -76,13 +76,13 @@
 #       the poc_column_format_storage probe.
 # =============================================================================
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.byte_view import ByteView
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
-from komira_core.simd.byte_class.byte_equal import bytes_equal
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.batch_view import BatchView
+from komira_buffer.byte_view import ByteView
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
+from komira_simd.byte_class.byte_equal import bytes_equal
 
 
 # -----------------------------------------------------------------------------

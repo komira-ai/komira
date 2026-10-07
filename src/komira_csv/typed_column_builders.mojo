@@ -28,12 +28,12 @@
 # `dispatch_typed_builder` consumed by `reader.mojo:_build_column`.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_buffer.heap_region import HeapRegion
 
 from .csv_options import CsvReadOptions
 from .scanned_cells import ScannedCells

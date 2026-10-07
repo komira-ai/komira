@@ -45,12 +45,12 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.schema import Field
-from komira_core.collections import Slab
-from komira_core.plan.expr import Expr
-from komira_core.plan.fs_descriptor_pod import FsDescriptorPod
-from komira_core.plan.logical_plan import ExprArray
-from komira_core.plan.physical_plan import MorselOp, ParquetSourceData
+from komira_arrow.schema import Field
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import Expr
+from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod
+from komira_plan_ir.logical_plan import ExprArray
+from komira_plan_ir.physical_plan import MorselOp, ParquetSourceData
 from komira_pplan_wire import pplan_from_bytes, pplan_to_bytes
 
 

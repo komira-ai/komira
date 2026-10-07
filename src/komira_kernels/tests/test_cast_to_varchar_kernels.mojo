@@ -17,10 +17,10 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import PrimitiveArray
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.dictionary_array import StringDictionaryArray
-from komira_core.arrow.bitmap import Bitmap
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
+from komira_arrow.dictionary_array import StringDictionaryArray
+from komira_arrow.bitmap import Bitmap
 
 from komira_kernels.cast_to_varchar_kernels import (
     cast_int8_to_string,

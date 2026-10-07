@@ -55,7 +55,7 @@ from std.os import makedirs
 from std.testing import assert_equal, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 from komira_fs.file_discovery import EagerGlobDiscovery, GlobDiscoveryOptions
 from komira_fs.local_fs import LocalFs
 from komira_fs.pruned_hive_discovery import (

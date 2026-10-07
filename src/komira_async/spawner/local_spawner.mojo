@@ -91,7 +91,7 @@ from komira_async.spawner.join_handle import (
 from komira_async.spawner.spawner import (
     SpawnableTask,
 )
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # =============================================================================

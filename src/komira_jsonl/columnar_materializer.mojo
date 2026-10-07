@@ -70,22 +70,22 @@ from komira_async.runtime.parallel_fork_join import (
     parallel_fork_join_serial,
 )
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.list_array import ListArray
-from komira_core.arrow.map_array import MapArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.struct_array import StructArray
-from komira_core.collections.slab import Slab
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.list_array import ListArray
+from komira_arrow.map_array import MapArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.string_array import StringArray
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.struct_array import StructArray
+from komira_collections.slab import Slab
 
 from komira_json_index.input_limits import (
     check_arrow_string_bytes,
@@ -264,7 +264,7 @@ struct _StringAcc(Copyable, Movable):
     a single `data.extend(span)` memcpy with NO intermediate `String`; the
     no-null hot path never touches the lazy validity list. This is the
     same primitive the ORC and Avro readers use
-    (`komira_core.arrow.string_builder`)."""
+    (`komira_arrow.string_builder`)."""
 
     var builder: ArrowStringBuilder
 

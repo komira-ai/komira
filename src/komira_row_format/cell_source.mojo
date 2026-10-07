@@ -50,8 +50,8 @@
 #   per cell either).
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.batch_view import BatchView
 from komira_row_format.row_block import RowBlock
 
 

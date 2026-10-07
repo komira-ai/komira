@@ -45,11 +45,11 @@
 # monotonic-shrinking; do NOT add new wildcard sites to this file.
 # =============================================================================
 
-from komira_core.arrow import Column
-from komira_core.collections.slab import Slab
+from komira_arrow.column import Column
+from komira_collections.slab import Slab
 
 from komira_op_agg_state.accumulator_trait import Accumulator
-from komira_core.collections.dyn_value import DynValue
+from komira_collections.dyn_value import DynValue
 from .dyn_accumulator import DynAccumulator, MAX_ACC_SIZE, _cast_acc
 
 
@@ -741,7 +741,7 @@ struct AosRowThunk(ImplicitlyCopyable, Movable):
 
         Keep in lockstep with AccTag additions in agg_layout.mojo.
         """
-        from komira_core.agg_layout import (
+        from komira_agg_api.agg_layout import (
             ACC_SUM_COUNT_MIN_MAX_F64,
             ACC_SUM_COUNT_F64,
             ACC_SUM_F64,

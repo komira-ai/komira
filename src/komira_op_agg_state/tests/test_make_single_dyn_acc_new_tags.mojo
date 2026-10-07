@@ -25,7 +25,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow import Column
+from komira_arrow.column import Column
 from komira_op_agg_state.accumulator_factory import make_single_dyn_acc
 from komira_op_agg_state.columnar_agg_accumulator import (
     ACC_SUM_F64,
@@ -34,7 +34,7 @@ from komira_op_agg_state.columnar_agg_accumulator import (
     ACC_MAX_F64,
     ACC_AVG,
 )
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 # =============================================================================

@@ -29,7 +29,7 @@
 # =============================================================================
 
 from komira_fs.file_system import FileSystem
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 @fieldwise_init

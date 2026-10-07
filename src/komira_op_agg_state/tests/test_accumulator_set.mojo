@@ -14,8 +14,8 @@
 from std.memory import ArcPointer
 
 from komira_op_agg_state.accumulator_trait import Accumulator
-from komira_core.arrow import Column
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.column import Column
+from komira_buffer.heap_region import HeapRegion
 
 from komira_op_agg_state.accumulator_set import AccumulatorSet
 from komira_op_agg_state.columnar_acc_typed import SumI64Acc, CountI64Acc, MinI64Acc

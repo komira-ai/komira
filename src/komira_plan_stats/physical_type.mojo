@@ -5,7 +5,7 @@
 # Format-agnostic physical-type tag used by `StatsProvider.column_physical_type`.
 # Mirrors the Parquet `Type` enum (parquet/types.mojo `ParquetType`) so a
 # `ParquetStatsProvider` implementation can return the same numeric tag the
-# Parquet footer carries, but lives in `komira_core.plan` so that
+# Parquet footer carries, but lives in `komira_plan_stats`.plan` so that
 # plan-time consumers (compiler, planner, optimizer rules) can inspect a
 # column's physical layout without importing `komira_parquet`.
 #

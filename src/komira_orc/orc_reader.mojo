@@ -23,15 +23,15 @@
 from komira_async.runtime.sched_trace import SITE_FORMAT_READ
 from std.memory import UnsafePointer
 from std.sys import num_physical_cores
-from komira_core.collections.slab import Slab
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_collections.slab import Slab
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_async.runtime.local_dispatcher import LocalDispatcher
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.cancellation.token import CancellationToken
-from komira_core.arrow.column import Column
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.column import Column
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
 
 from .footer import (
     OrcFileTail,
@@ -549,9 +549,11 @@ struct _OrcDecodeColsState[
     # (file_bytes_ptr, file_len).
     var file_bytes_ptr: UnsafePointer[UInt8, Self.fb_o]
     var file_len: Int
-    # OWNED per-column accumulators (workers move each out via
-    # `take_slot_unchecked`, then build the Arrow Column).
-    var accs: Optional[Slab[ColumnAcc]]
+    # OWNED per-column accumulators. Each slot is an Optional that a worker
+    # empties with `Optional.take()` before building the Arrow Column, so
+    # every slot stays initialised and the slab drops soundly on ANY unwind
+    # (a column error, a cancelled or failed dispatch).
+    var accs: Optional[Slab[Optional[ColumnAcc]]]
     # OWNED per-column Arrow-Column output channel.
     var col_out: Optional[Slab[Optional[Column[HeapRegion]]]]
     # OWNED per-column error channel (workers cannot raise; first error per
@@ -575,7 +577,7 @@ struct _OrcDecodeColsState[
         out self,
         file_bytes_ptr: UnsafePointer[UInt8, Self.fb_o],
         file_len: Int,
-        var accs: Slab[ColumnAcc],
+        var accs: Slab[Optional[ColumnAcc]],
         var col_out: Slab[Optional[Column[HeapRegion]]],
         var col_errors: List[Optional[String]],
         var stripe_locs: List[List[_StreamLoc]],
@@ -592,7 +594,7 @@ struct _OrcDecodeColsState[
     ):
         self.file_bytes_ptr = file_bytes_ptr
         self.file_len = file_len
-        self.accs = Optional[Slab[ColumnAcc]](accs^)
+        self.accs = Optional[Slab[Optional[ColumnAcc]]](accs^)
         self.col_out = Optional[Slab[Optional[Column[HeapRegion]]]](col_out^)
         self.col_errors = Optional[List[Optional[String]]](col_errors^)
         self.stripe_locs = Optional[List[List[_StreamLoc]]](stripe_locs^)
@@ -645,7 +647,7 @@ struct _OrcDecodeColsTask[
         var j = tid
         while j < n_cols_local:
             try:
-                ref acc = sp[].accs.value().get_mut_interior(j)
+                ref acc = sp[].accs.value().get_mut_interior(j).value()
                 var col_id = sp[].col_ids.value()[j]
                 var kind = sp[].col_kinds.value()[j]
                 for s in range(n_stripes_local):
@@ -663,9 +665,8 @@ struct _OrcDecodeColsTask[
                         sp[].stripe_nrows.value()[s],
                     )
                 # Build the Arrow Column in-worker (parallel), moving the
-                # now-decoded accumulator out of its slab slot. The driver
-                # marks `accs` empty so the moved-out slot is never dropped.
-                var owned_acc = sp[].accs.value().take_slot_unchecked(j)
+                # now-decoded accumulator out of its slot (left None).
+                var owned_acc = sp[].accs.value().get_mut_interior(j).take()
                 ref out_slot = sp[].col_out.value().get_mut_interior(j)
                 out_slot = Optional[Column[HeapRegion]](owned_acc^.build())
             except e:
@@ -673,25 +674,25 @@ struct _OrcDecodeColsTask[
             j = j + n_workers
 
 
-# Result of the column-parallel decode: the drained accumulator slab (every
-# slot moved out), the per-column Arrow-Column output slab, and the per-column
-# error channel. Returned by move so the caller's epilogue can drain `col_out`
-# into the RecordBatch + re-raise the first `col_errors`. `accs` comes back
-# fully drained. The three are `Optional`-wrapped + reclaimed via
-# `Optional.take()` (never a partial move; the
-# struct drop sees None placeholders after the caller takes each).
+# Result of the column-parallel decode: the accumulator slab (a slot is None
+# where its column was built, Some where its column failed), the per-column
+# Arrow-Column output slab, and the per-column error channel. Returned by
+# move so the caller's epilogue can drain `col_out` into the RecordBatch and
+# re-raise the first `col_errors`. The three are `Optional`-wrapped and
+# reclaimed via `Optional.take()` (never a partial move; the struct drop sees
+# None placeholders after the caller takes each).
 struct _OrcDecodeColsResult(Movable):
-    var accs: Optional[Slab[ColumnAcc]]
+    var accs: Optional[Slab[Optional[ColumnAcc]]]
     var col_out: Optional[Slab[Optional[Column[HeapRegion]]]]
     var col_errors: Optional[List[Optional[String]]]
 
     def __init__(
         out self,
-        var accs: Slab[ColumnAcc],
+        var accs: Slab[Optional[ColumnAcc]],
         var col_out: Slab[Optional[Column[HeapRegion]]],
         var col_errors: List[Optional[String]],
     ):
-        self.accs = Optional[Slab[ColumnAcc]](accs^)
+        self.accs = Optional[Slab[Optional[ColumnAcc]]](accs^)
         self.col_out = Optional[Slab[Optional[Column[HeapRegion]]]](col_out^)
         self.col_errors = Optional[List[Optional[String]]](col_errors^)
 
@@ -700,7 +701,7 @@ def _decode_orc_columns_parallel[
     fb_o: ImmOrigin,
 ](
     file_bytes: Span[UInt8, fb_o],
-    var accs: Slab[ColumnAcc],
+    var accs: Slab[Optional[ColumnAcc]],
     var col_out: Slab[Optional[Column[HeapRegion]]],
     var col_errors: List[Optional[String]],
     var stripe_locs: List[List[_StreamLoc]],
@@ -746,7 +747,7 @@ def _decode_orc_columns_parallel_with_dispatcher[
     disp_o: Origin[mut=True],
 ](
     file_bytes: Span[UInt8, fb_o],
-    var accs: Slab[ColumnAcc],
+    var accs: Slab[Optional[ColumnAcc]],
     var col_out: Slab[Optional[Column[HeapRegion]]],
     var col_errors: List[Optional[String]],
     var stripe_locs: List[List[_StreamLoc]],
@@ -792,7 +793,7 @@ def _decode_orc_columns_impl[
     disp_o: Origin[mut=True],
 ](
     file_bytes: Span[UInt8, fb_o],
-    var accs: Slab[ColumnAcc],
+    var accs: Slab[Optional[ColumnAcc]],
     var col_out: Slab[Optional[Column[HeapRegion]]],
     var col_errors: List[Optional[String]],
     var stripe_locs: List[List[_StreamLoc]],
@@ -815,7 +816,7 @@ def _decode_orc_columns_impl[
 
     Comptime `has_pool` prunes the parallel/serial branch — no wildcard
     origin reaches the dispatch in either path (canonical
-    `_dedup_count_parallel_impl` pattern). Returns the (drained `accs`,
+    `_dedup_count_parallel_impl` pattern). Returns the (`accs`,
     `col_out`, `col_errors`) for the caller's serial epilogue.
     """
     if n_cols == 0:
@@ -882,7 +883,7 @@ def _decode_orc_columns_impl[
         _ = cancel_token^
         for j in range(n_cols):
             try:
-                ref acc = accs.get_mut_interior(j)
+                ref acc = accs.get_mut_interior(j).value()
                 var col_id = col_ids[j]
                 var kind = col_kinds[j]
                 for s in range(n_stripes):
@@ -898,7 +899,7 @@ def _decode_orc_columns_impl[
                         col_streams,
                         stripe_nrows[s],
                     )
-                var owned_acc = accs.take_slot_unchecked(j)
+                var owned_acc = accs.get_mut_interior(j).take()
                 ref out_slot = col_out.get_mut_interior(j)
                 out_slot = Optional[Column[HeapRegion]](owned_acc^.build())
             except e:
@@ -973,7 +974,7 @@ def _read_orc_bytes_core[
             + String(len(file_bytes))
             + "-byte file"
         )
-    var accs = Slab[ColumnAcc]()
+    var accs = Slab[Optional[ColumnAcc]]()
     var col_ids = List[Int]()
     var col_kinds = List[Int]()
     for j in range(n_cols):
@@ -982,7 +983,7 @@ def _read_orc_bytes_core[
         var at = orc_node_to_arrow(schema, col_id)
         var acc = make_accumulator(child.kind, at)
         acc.reserve(total_rows)
-        accs.append(acc^)
+        accs.append(Optional[ColumnAcc](acc^))
         col_ids.append(col_id)
         col_kinds.append(child.kind)
 
@@ -1085,8 +1086,8 @@ def _read_orc_bytes_core[
         col_errors.append(Optional[String](None))
 
     # Per-column OUTPUT channel: each worker builds its own Arrow Column AFTER
-    # decoding (moving the accumulator out of `accs` via
-    # `take_slot_unchecked`), so the `acc.build()` Column materialization —
+    # decoding (moving the accumulator out of its `accs` slot via
+    # `Optional.take()`), so the `acc.build()` Column materialization —
     # otherwise the serial Amdahl tail of the decode — runs in parallel across
     # columns.
     # The serial epilogue only collects the finished Columns into a
@@ -1095,8 +1096,8 @@ def _read_orc_bytes_core[
     # `Column` is Movable-only (not Copyable), so the output channel is a
     # `Slab[Optional[Column]]` (Slab requires only Movable), not a `List`
     # (List needs Copyable). Pre-filled with None; each worker assigns its
-    # own slot j via `get_mut_interior`, the epilogue drains via
-    # `take_slot_unchecked`.
+    # own slot j via `get_mut_interior`, the epilogue drains each with
+    # `Optional.take()`.
     var col_out = Slab[Optional[Column[HeapRegion]]]()
     for _c in range(n_cols):
         col_out.append(Optional[Column[HeapRegion]](None))
@@ -1134,6 +1135,10 @@ def _read_orc_bytes_core[
         col_errors = _r.col_errors.take()
 
 
+    # No length fix-up on `accs` or `col_out`: every slot of both is an
+    # Optional that stays initialised (None once taken), so both slabs drop
+    # soundly on the re-raise below and on every other unwind.
+
     # Re-raise the first column failure, if any.
     for j in range(n_cols):
         if col_errors[j]:
@@ -1152,16 +1157,7 @@ def _read_orc_bytes_core[
     # Column materialization happens in the parallel region.
     var builder = RecordBatchBuilder.with_capacity(n_cols)
     for j in range(n_cols):
-        var slot = col_out.take_slot_unchecked(j)
-        builder.add_column(slot.take())
-    col_out.set_len_unchecked(0)
-    # SAFETY CONTRACT (Slab.take_slot_unchecked): every `accs` + `col_out` slot
-    # was moved out (inside the workers / serial loop for accs; in the drain
-    # loop above for col_out). Mark both slabs empty so their destructors do
-    # NOT destroy the moved-out (uninitialized) slots — without this the slab
-    # drop reads freed memory (UB; observed as a heap crash on the 2nd decode
-    # call).
-    accs.set_len_unchecked(0)
+        builder.add_column(col_out.get_mut_interior(j).take())
     return builder.build(out_schema.copy())
 
 
@@ -1173,7 +1169,7 @@ def read_orc_file(path: String) raises -> RecordBatch:
     # Invalid argument"` (or silently truncates) on files >2 GB due to an
     # Int32 count overflow inside `FileHandle.read*`. Mmap returns a memory
     # region directly. `read_orc_bytes` is Span-poly; `.view_range_ro(0, length).into_span()` bridges.
-    from komira_core.io.chunked_read import read_chunked
+    from komira_arrow_ipc.chunked_read import read_chunked
 
     var src_buf = read_chunked(path)
     return read_orc_bytes(
@@ -1184,7 +1180,7 @@ def read_orc_file(path: String) raises -> RecordBatch:
 def read_orc_file_opts(path: String, with_acid_columns: Bool) raises -> RecordBatch:
     """`read_orc_file` with the `with_acid_columns` ACID-exposure toggle."""
     # mmap-backed whole-file slurp — same reason as `read_orc_file` above.
-    from komira_core.io.chunked_read import read_chunked
+    from komira_arrow_ipc.chunked_read import read_chunked
 
     var src_buf = read_chunked(path)
     return read_orc_bytes_opts(
@@ -1203,7 +1199,7 @@ def read_orc_file_with_dispatcher[
     """Dispatcher-aware sibling of `read_orc_file` — mmap-slurp the file then
     decode columns in parallel via the caller-owned `LocalDispatcher`.
     Byte-identical output to `read_orc_file`."""
-    from komira_core.io.chunked_read import read_chunked
+    from komira_arrow_ipc.chunked_read import read_chunked
 
     var src_buf = read_chunked(path)
     return read_orc_bytes_with_dispatcher[disp_o=disp_o](

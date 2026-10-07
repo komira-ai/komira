@@ -60,7 +60,7 @@
 # because "this tag cannot contain a plan" is a CLAIM and a claim that is made
 # by falling off the end of an if-chain is a claim nobody reviewed.
 #
-# WHERE IT LIVES. `komira_core/plan/`, above `komira_core/source/`: it names
+# WHERE IT LIVES. The core packages, above the core packages: it names
 # both `LogicalPlan` (plan layer) and `ScanResolver` (source layer), and the
 # source layer must not depend on the plan layer — `scan_binding.mojo`'s header
 # states that constraint for the same reason.

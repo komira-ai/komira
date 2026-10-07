@@ -2317,7 +2317,9 @@ def read_field[
     """Read a Field table.
 
     Reads slots 0..4 from Schema.fbs Field:
-        0: name (string offset; required)
+        0: name (string offset; optional: Schema.fbs says "Name is not
+           required (e.g., in a List)", and an absent name reads as "",
+           as Arrow C++ reads it)
         1: nullable (bool)
         2: type_type (u8 union tag)
         3: type (offset to Type variant table; required)
@@ -2330,9 +2332,9 @@ def read_field[
     DECODE-COLUMN.
     """
     var name_pos = _read_table_field_offset(reader, table_pos, 0)
-    if name_pos < 0:
-        raise Error("Field: name field missing")
-    var name = reader.read_string_at(name_pos)
+    var name = String("")
+    if name_pos >= 0:
+        name = reader.read_string_at(name_pos)
     var nullable = _read_table_field_bool(reader, table_pos, 1)
     var type_tag = _read_table_field_u8(reader, table_pos, 2)
     var type_pos = _read_table_field_offset(reader, table_pos, 3)

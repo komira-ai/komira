@@ -38,6 +38,8 @@
 #   - RFC 8259 §7 (strings + escapes).
 # =============================================================================
 
+from komira_json_index.utf8_check import check_utf8
+
 
 def _string_from_bytes(b: List[UInt8]) raises -> String:
     """Construct a String from a List[UInt8]. Appends a NUL terminator
@@ -48,7 +50,7 @@ def _string_from_bytes(b: List[UInt8]) raises -> String:
     scratch.append(UInt8(0))
     # SAFETY: `scratch` is alive through the ctor call; the ptr it
     # passes is a NUL-terminated buffer that String copies out
-    # immediately. Mirrors `StringArray.get` in `komira_core.arrow`.
+    # immediately. Mirrors `StringArray.get` in the core packages.
     return String(unsafe_from_utf8_ptr=scratch.unsafe_ptr())
 
 
@@ -57,9 +59,13 @@ def parse_string_raw(bytes: Span[UInt8, _], start: Int, end: Int) raises -> Stri
 
     Caller MUST guarantee that the range contains no `\\` escapes (the
     Stage 1 tag must carry `has_escapes=False` for this byte range).
+
+    Raises `parse_string_raw: invalid UTF-8 at byte <i>: <reason>` when the
+    range is not well-formed UTF-8 (RFC 8259 §8.1; see `utf8_check`).
     """
     if end < start:
         raise Error("parse_string_raw: end < start")
+    check_utf8(bytes, start, end, "parse_string_raw")
     var buf = List[UInt8](capacity=(end - start) + 1)
     for i in range(start, end):
         buf.append(bytes[i])
@@ -134,9 +140,16 @@ def parse_string_with_escapes(bytes: Span[UInt8, _], start: Int, end: Int) raise
                              which is not valid UTF-8. A lone surrogate on
                              either side, a short escape, or a non-hex digit
                              raises.
+
+    The RAW range is checked first and raises
+    `parse_string_with_escapes: invalid UTF-8 at byte <i>: <reason>` when it
+    is not well-formed UTF-8. Every escape is ASCII and every decoded escape
+    appends a complete, well-formed sequence, so a well-formed raw range
+    decodes to well-formed UTF-8.
     """
     if end < start:
         raise Error("parse_string_with_escapes: end < start")
+    check_utf8(bytes, start, end, "parse_string_with_escapes")
     var buf = List[UInt8](capacity=(end - start) + 1)
     var i = start
     while i < end:

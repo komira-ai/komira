@@ -4,7 +4,7 @@
  *
  * THE AUTHORITY IS THE MOJO `comptime` DECLARATION, NOT THIS FILE:
  *   komira_async.runtime.sched_trace
- *   komira_core.runtime_traits.sched_sites
+ *   komira_async_api.sched_sites
  *
  * These tables hold one arm per declaration and are maintained BY HAND: no
  * generator or drift check ships with them, so an edit to a constant must be

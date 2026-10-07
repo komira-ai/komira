@@ -15,6 +15,6 @@
 # point they should follow their owners and this package can be dissolved.
 #
 # It depends on `komira_fs` and on the plan-expression types in
-# `komira_core` (the core package that carries `plan.expr` today; it will
+# the core packages (the core package that carries `plan.expr` today; it will
 # change when the core split is cut over).
 # =============================================================================
