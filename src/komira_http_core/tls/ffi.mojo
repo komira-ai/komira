@@ -1062,6 +1062,21 @@ def s2n_connection_get_actual_protocol_version(
     )
 
 
+def s2n_connection_get_cipher(conn: S2nOpaquePtr) -> S2nBytePtr:
+    """The negotiated cipher suite's name in s2n's OpenSSL-style spelling
+    ("TLS_AES_128_GCM_SHA256", "ECDHE-RSA-AES128-GCM-SHA256"): a pointer to a
+    NUL-terminated string in s2n's static cipher-suite table, or NULL on
+    failure.
+
+    Maps to s2n.h `const char *s2n_connection_get_cipher(
+        struct s2n_connection *conn)`.
+    """
+    # SAFETY: the returned pointer is non-owning (static storage, never
+    # freed). TlsConnection.negotiated_cipher copies it into a String, so it
+    # never escapes the FFI layer.
+    return external_call["s2n_connection_get_cipher", S2nBytePtr](conn)
+
+
 # =============================================================================
 # Handshake diagnostics
 # =============================================================================
