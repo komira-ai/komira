@@ -199,6 +199,9 @@ def test_utf8_bounds() raises:
     _refuses("%C1%BF")  # overlong U+007F
     _accepts("%F4%8F%BF%BF", [0xF4, 0x8F, 0xBF, 0xBF])  # U+10FFFF
     _refuses("%F5%80%80%80")  # lead above F4
+    # F5 with exactly one continuation byte: a lead check loosened to F5 or
+    # above lets F5 fall through to the two-byte arm, which accepts this.
+    _refuses("%F5%80")
     _refuses("%FF%80")  # lead above F4, followed by a continuation byte
     # Second byte after E0 is A0..BF (lower is an overlong three-byte form).
     _accepts("%E0%A0%80", [0xE0, 0xA0, 0x80])  # U+0800
@@ -207,13 +210,17 @@ def test_utf8_bounds() raises:
     # Second byte after ED is 80..9F (higher is a surrogate).
     _accepts("%ED%9F%BF", [0xED, 0x9F, 0xBF])  # U+D7FF
     # (ED A0 80, U+D800, is refused in test_decoder_rules.)
-    # E1..EF take any continuation byte; EF BF BF is the top of the range.
+    # E1..EF take any continuation byte; E1 80 80 is the bottom of the
+    # range and EF BF BF the top.
+    _accepts("%E1%80%80", [0xE1, 0x80, 0x80])  # U+1000
     _accepts("%EF%BF%BF", [0xEF, 0xBF, 0xBF])  # U+FFFF
     # Second byte after F0 is 90..BF (lower is an overlong four-byte form).
     _accepts("%F0%90%80%80", [0xF0, 0x90, 0x80, 0x80])  # U+10000
     _refuses("%F0%8F%BF%BF")  # overlong U+FFFF
     _refuses("%F0%80%80%AF")  # overlong '/'
-    # F1..F3 take any continuation byte.
+    # F1..F3 take any continuation byte; F1 80 80 80 is the bottom of the
+    # range and F3 BF BF BF the top.
+    _accepts("%F1%80%80%80", [0xF1, 0x80, 0x80, 0x80])  # U+40000
     _accepts("%F3%BF%BF%BF", [0xF3, 0xBF, 0xBF, 0xBF])  # U+FFFFF
     # Second byte after F4 is 80..8F (higher is above U+10FFFF).
     # (F4 90 80 80 is refused in test_decoder_rules.)
