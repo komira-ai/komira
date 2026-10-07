@@ -29,7 +29,7 @@
 # Mojo 1.0.0b2 (def-only).
 # =============================================================================
 
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     EXPR_COL_REF,
     EXPR_LITERAL,

@@ -73,19 +73,19 @@
 # `ErasedScanSourceResolver` (komira_scan_resolver), which owns its SAFETY.
 # =============================================================================
 
-from komira_core.plan.expr import Expr, BIN_AND
-from komira_core.plan.expr_helpers import flatten_and_conjuncts
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_plan_expr.expr import Expr, BIN_AND
+from komira_plan_expr.expr_helpers import flatten_and_conjuncts
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     scan_kind_id,
     SCAN_EPOCH_NONE,
     SCAN_ORIENTATION_COLUMNAR,
     SNAPSHOT_LIVE,
 )
-from komira_core.source.scan_identity_audit import ScanIdentityCorpus
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import (
+from komira_scan_source.scan_identity_audit import ScanIdentityCorpus
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import (
     ScanParams,
     param_hash_combine,
     param_hash_string,

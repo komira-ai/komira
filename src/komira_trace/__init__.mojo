@@ -12,7 +12,7 @@ storage and no atomics on the hot path. The per-worker packet ring is
 Public API: import directly from sub-modules. No facade.
 
 Dependency direction:
-  komira_trace -> komira_core (Slab)
+  komira_trace -> the core packages (Slab)
                   komira_spsc_ring, komira_name_registry, komira_clock
                   komira_atomic_alias (the atomic id counters)
 

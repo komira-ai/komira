@@ -83,7 +83,7 @@ from .credential_consumer import CredentialConsumer
 #   `komira_secret_registry.secret_bindings` and are imported above.
 #
 # Both are FLAT value types that import nothing, and the logical plan holds a
-# `SecretBindings` field. Keeping them in `komira_core` keeps this package, and
+# `SecretBindings` field. Keeping them in the core packages keeps this package, and
 # the secret-store stack below it, off the plan tier's dependency closure.
 # =============================================================================
 

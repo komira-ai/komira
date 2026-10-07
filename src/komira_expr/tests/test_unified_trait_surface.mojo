@@ -29,13 +29,13 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.collections import BatchView, ColView, batch_view_over
-from komira_core.collections.byte_view import ByteView
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.batch_view import BatchView, ColView, batch_view_over
+from komira_buffer.byte_view import ByteView
 from komira_kernels.eval_chunks import (
     EvalBoolChunk,
     EvalI64Chunk,

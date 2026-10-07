@@ -40,8 +40,8 @@ from komira_fs.glob import (
     split_static_prefix,
     glob_match_path,
 )
-from komira_core.collections.slab import Slab
-from komira_core.arrow.arrow_types import ArrowType
+from komira_collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
 
 
 # =============================================================================

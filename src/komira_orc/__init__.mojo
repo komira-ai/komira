@@ -18,7 +18,7 @@ The package is organised in layers:
 ORC metadata is Protocol Buffers (NOT Thrift like Parquet).
 
 Dependency direction (cycle-free):
-  komira_orc -> komira_core (ArrowType lattice), komira_protobuf,
+  komira_orc -> the core packages (ArrowType lattice), komira_protobuf,
                 komira_async (the parallel stripe compress / decode path)
   Query engines and the SDK consume komira_orc, never the other way round.
 """

@@ -7,7 +7,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # engine, the in-memory / local-filesystem conformers, the coalescing and
 # compaction windows, the sub-lineage shard kernel and the presigned-URL
 # signing seam. (The distributed shuffle lives in `komira_shuffle`, which depends
-# on this package.) It depends on komira_core, komira_async
+# on this package.) It depends on the core packages, komira_async
 # (the reactor and its C shim, which also carries the CAS-manifest gate lock),
 # komira_atomic_alias and komira_metrics (the escalation metrics sink).
 # komira_runtime_paths is declared because several tests take their scratch
@@ -36,8 +36,10 @@ mojo_library(
         ":komira_objectstore_posix",
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_core:komira_core",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_fs:komira_fs_posix",
+        "//src/komira_libc:komira_libc",
         "//src/komira_metrics:komira_metrics",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],

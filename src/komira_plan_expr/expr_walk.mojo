@@ -5,7 +5,7 @@
 # ⛔ WHY THIS MODULE EXISTS — READ BEFORE ADDING A WALK ANYWHERE ELSE.
 #
 # An `Expr` walk that exists TWICE (say a "complete" copy under
-# `komira_core/plan/` and a second in `komira_core/helpers/
+# the core packages and a second in `the core packages
 # compiler_helpers.mojo`) drifts: a new `EXPR_*` tag gets armed in one copy
 # and not the other, and the miss is SILENT until it is fatal. Each shape
 # below is a real failure of that kind:

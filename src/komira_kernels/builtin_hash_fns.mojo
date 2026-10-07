@@ -63,7 +63,7 @@
 from std.memory import bitcast
 from std.sys import simd_width_of
 
-from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_arrow.primitive_array import PrimitiveArray
 from komira_udf.float_quotient_order import (
     canonicalize_f32,
     canonicalize_f64,

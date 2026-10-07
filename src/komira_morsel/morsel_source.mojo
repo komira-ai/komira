@@ -29,13 +29,13 @@
 
 from komira_atomic_alias import AtomicI8
 
-from komira_core.arrow.schema import Schema
-from komira_core.traits.source_capabilities import SourceCapabilities
+from komira_arrow.schema import Schema
+from komira_scan_source.source_capabilities import SourceCapabilities
 from .dynamic_join_filter import DynamicJoinFilter
-from komira_core.traits.expr_id import ExprId
-from komira_core.plan.expr_pool import ExprPool
+from komira_plan_expr.expr_id import ExprId
+from komira_plan_expr.expr_pool import ExprPool
 from .morsel import Morsel
-from komira_core.traits.source_statistics import SourceStatistics
+from komira_plan_stats.source_statistics import SourceStatistics
 
 
 trait MorselSourceImpl(Movable, Deinitable):

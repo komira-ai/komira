@@ -41,16 +41,16 @@ PLAN-LEVEL ONLY and EXECUTOR-FREE: a stub kind, hand-built plans, a real
 from std.memory import ArcPointer, OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.collections.slab import Slab
-from komira_core.plan.corr_subquery import corr_data_inner_plan_ref
-from komira_core.plan.agg_expr import AggExpr, AGG_SUM
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_collections.slab import Slab
+from komira_plan_ir.corr_subquery import corr_data_inner_plan_ref
+from komira_plan_expr.agg_expr import AggExpr, AGG_SUM
+from komira_plan_expr.expr import (
     Expr,
     WhenCaseData,
     BIN_AND,
@@ -71,7 +71,7 @@ from komira_core.plan.expr import (
     UN_NOT,
     expr_tag_name,
 )
-from komira_core.plan.logical_plan import (
+from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ASOF_BACKWARD,
     AsofTolerance,
@@ -86,20 +86,20 @@ from komira_core.plan.logical_plan import (
     PLAN_VIEW_REF,
     plan_tag_name,
 )
-from komira_core.plan.partition_expr import PartitionExpr
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.source.in_memory_source import InMemorySource
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_plan_expr.partition_expr import PartitionExpr
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_scan_source.in_memory_source import InMemorySource
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     SCAN_EPOCH_NONE,
     SNAPSHOT_LIVE,
     scan_kind_id,
 )
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_registry import ScanRegistry
-from komira_core.source.source_variant import (
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_registry import ScanRegistry
+from komira_scan_source.source_variant import (
     LEGACY_SOURCE_TYPE_CSV,
     SOURCE_VARIANT_BINDING,
     SOURCE_VARIANT_CSV,

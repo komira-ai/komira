@@ -2,7 +2,7 @@
 # THE IDENTITY-COVERAGE GATE — one mechanical rule for a four-instance class.
 # =============================================================================
 #
-# The scan-identity audit lives in komira_core (`source/scan_identity_audit`);
+# The scan-identity audit lives in the core packages (`source/scan_identity_audit`);
 # this file runs it over every registered scan kind, including the broker
 # kind this package contributes.
 #
@@ -78,19 +78,14 @@ from std.testing import (
     assert_raises,
 )
 
-from komira_core.arrow import (
-    ArrowType,
-    Field,
-    PrimitiveArray,
-    RecordBatch,
-    Schema,
-    SchemaBuilder,
-)
-from komira_core.source.in_memory_source import InMemorySource
-from komira_core.plan.logical_plan import LogicalPlan
-from komira_core.source.arrow_source import ArrowSource
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, RecordBatch, Schema, SchemaBuilder
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_scan_source.in_memory_source import InMemorySource
+from komira_plan_ir.logical_plan import LogicalPlan
+from komira_scan_source.arrow_source import ArrowSource
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     SNAPSHOT_NONE,
     SNAPSHOT_PINNED,
@@ -103,9 +98,9 @@ from komira_core.source.scan_binding import (
     SCAN_ORIENTATION_ROW,
     scan_kind_id,
 )
-from komira_core.plan.col_expr import col
-from komira_core.plan.expr import Expr
-from komira_core.plan.scan_identity_render_audit import (
+from komira_plan_expr.col_expr import col
+from komira_plan_expr.expr import Expr
+from komira_plan_ir.scan_identity_render_audit import (
     NODE_WITNESS_ALPHA,
     _cheap_witness_binding,
     audit_scan_identity_cheap_key,
@@ -118,16 +113,16 @@ from komira_core.plan.scan_identity_render_audit import (
     render_scan_node_plan_text,
     render_scan_plan_text,
 )
-from komira_core.source.scan_identity_audit import (
+from komira_scan_source.scan_identity_audit import (
     ScanIdentityCorpus,
     audit_scan_identity_coverage,
 )
-from komira_core.source.scan_kind_registry import (
+from komira_scan_source.scan_kind_registry import (
     ScanKindDescriptor,
     ScanKindRegistry,
 )
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.source_variant import (
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.source_variant import (
     ARROW_CODEC_UNCOMPRESSED,
     ARROW_CODEC_ZSTD,
     SourceVariant,
@@ -503,7 +498,7 @@ def test_golden_rendered_plan_text_arrow() raises:
 
 
 def test_golden_rendered_plan_text_broker() raises:
-    """The same pin for a kind `komira_core` has never heard of. `type=BINDING`
+    """The same pin for a kind the core packages has never heard of. `type=BINDING`
     means "consult `kind_id`"; the reverse-DNS name and the sorted param map are
     what make EXPLAIN readable for it."""
     var expected = String('Scan(path="orders", type=BINDING')

@@ -57,9 +57,9 @@
 from std.builtin.swap import swap
 from std.collections import List
 
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.band_view import BandView
-from komira_core.collections.morsel_view import MorselView
+from komira_arrow.batch_view import BatchView
+from komira_arrow.band_view import BandView
+from komira_arrow.morsel_view import MorselView
 
 from komira_agg.aggregator import Aggregator
 from komira_udf.float_quotient_order import (

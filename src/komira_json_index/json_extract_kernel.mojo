@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Implements the path-extract kernel
-# behind `EXPR_JSON_EXTRACT` (komira_core's expression tag 19) for the SQL `->` / `->>`
+# behind `EXPR_JSON_EXTRACT` (the core packages' expression tag 19) for the SQL `->` / `->>`
 # operators and the `json_extract(payload, path)` function.
 #
 # Mechanism (a) — per-row path-aware fast-path:
@@ -38,11 +38,11 @@
 # Precedent: the EXPR_STRUCT_FIELD / EXPR_MAP_GET column evaluators.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.column import Column
-from komira_core.arrow.string_array import StringArray
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.column import Column
+from komira_arrow.string_array import StringArray
+from komira_buffer.heap_region import HeapRegion
 
 from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,

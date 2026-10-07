@@ -27,7 +27,7 @@
 # `UnsafePointer` crosses any boundary in this contract surface.
 # =============================================================================
 
-from komira_core.collections.byte_buffer import ByteBuffer
+from komira_buffer.byte_buffer import ByteBuffer
 from .morsel import Morsel
 
 

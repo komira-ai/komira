@@ -39,9 +39,9 @@
 
 from std.testing import TestSuite, assert_true, assert_false, assert_equal
 
-from komira_core.dtype_sentinel import DTYPE_NONE
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.dtype_sentinel import DTYPE_NONE
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.arrow_types import ArrowType
 from komira_udf.column_resolver import ColumnResolver
 
 

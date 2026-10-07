@@ -34,6 +34,3 @@ The value goes from the environ block straight into the `SecretValue`; no
 `ProcessEnv` reads through komira_libc's `_read_env_into`, so the binary
 keeps its one `getenv` declaration, into a stack buffer that it wipes with
 komira_crypto's `zeroize_inline_array` on every path out.
-Until the remaining `komira_core_ffi` importers move to `komira_libc`, no
-target may depend on this package and on `komira_core_ffi` together
-(`tools/core_split/no_mixed_closure.sh`).

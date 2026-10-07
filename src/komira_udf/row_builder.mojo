@@ -95,7 +95,7 @@
 # =============================================================================
 
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 
 
 @always_inline

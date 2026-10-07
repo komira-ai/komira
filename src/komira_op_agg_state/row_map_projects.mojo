@@ -59,15 +59,15 @@
 #   - NO `unsafe_from_address`, no `take_pointee`, no `ArcPointer`.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import (
     RecordBatch,
     RecordBatchBuilder,
     SchemaBuilder,
     Field,
 )
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.multi_column_builder import (
+from komira_arrow.batch_view import BatchView
+from komira_arrow.multi_column_builder import (
     MultiColumnBuilder,
     ColumnSlot,
     column_slot,

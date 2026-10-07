@@ -1,8 +1,8 @@
 # =============================================================================
-# THE SEAM DEMONSTRATION — a plan scans a source defined OUTSIDE komira_core.
+# THE SEAM DEMONSTRATION — a plan scans a source defined OUTSIDE the core packages.
 # =============================================================================
 #
-# A plan source defined outside komira_core must be a first-class plan source.
+# A plan source defined outside the core packages must be a first-class plan source.
 #
 # ---------------------------------------------------------------------------
 # WHAT IS BEING SHOWN, AND WHY THIS PARTICULAR SOURCE
@@ -11,14 +11,14 @@
 # The source under test is `komira_broker.broker_scan_binding` — chosen
 # because a broker source is the hard case:
 #
-#   * adding a broker arm to the closed `SourceVariant` union in komira_core
-#     would force `komira_core -> komira_broker -> ...`, INVERTING THE BUILD
+#   * adding a broker arm to the closed `SourceVariant` union in the core packages
+#     would force `the core packages -> komira_broker -> ...`, INVERTING THE BUILD
 #     DAG;
 #   * `ConsumeCore` is Movable-only, so the plan needs a Copyable backend
 #     HANDLE (a cheap identity token the plan builder copies, the heavy
 #     network substrate constructed at execute time) — see consumer_source.
 #
-# `komira_broker` depends on `komira_core`. `komira_core` does not depend on
+# `komira_broker` depends on the core packages. The core packages does not depend on
 # `komira_broker`. The behavioural form of that claim is
 # `test_core_ships_knowing_nothing_about_this_kind` below.
 #
@@ -45,29 +45,30 @@ from std.testing import (
     assert_raises,
 )
 
-from komira_core.arrow import ArrowType, Field, Schema, SchemaBuilder
-from komira_core.plan.expr import Expr, ScalarValue, BIN_EQ, BIN_GE, BIN_AND, BIN_OR
-from komira_core.plan.logical_plan import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_plan_expr.expr import Expr, ScalarValue, BIN_EQ, BIN_GE, BIN_AND, BIN_OR
+from komira_plan_ir.logical_plan import (
     LogicalPlan,
     SOURCE_BINDING,
     SOURCE_PARQUET,
 )
-from komira_core.plan.logical_plan_variants import SOURCE_KIND_COLUMNAR
-from komira_core.source.scan_binding import (
+from komira_plan_ir.logical_plan_variants import SOURCE_KIND_COLUMNAR
+from komira_scan_source.scan_binding import (
     ScanBinding,
     SNAPSHOT_LIVE,
     SCAN_HANDLE_UNBOUND,
 )
-from komira_core.source.scan_kind_registry import ScanKindRegistry
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_resolver import check_binding, resolve_for_execution
-from komira_core.source.source_variant import (
+from komira_scan_source.scan_kind_registry import ScanKindRegistry
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_resolver import check_binding, resolve_for_execution
+from komira_scan_source.source_variant import (
     SourceVariant,
     SOURCE_VARIANT_BINDING,
 )
 
 # ⚠ THE IMPORT THAT IS THE WHOLE POINT: a test that reaches a plan reaches
-# ACROSS a package boundary for its source. Nothing under `komira_core/`
+# ACROSS a package boundary for its source. Nothing under the core packages
 # names `komira_broker`.
 from komira_broker.broker_scan_binding import (
     BROKER_SCAN_KIND_NAME,
@@ -78,10 +79,10 @@ from komira_broker.broker_scan_binding import (
 from komira_broker.broker_core import BrokerCore
 from komira_broker.broker_scan_kind import BrokerScanRuntime
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.string_array import StringArray
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.string_array import StringArray
 from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
 from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
@@ -152,7 +153,7 @@ def _plan() raises -> LogicalPlan:
 
 
 def test_core_ships_knowing_nothing_about_this_kind() raises:
-    """The behavioural form of "no komira_core edit was needed".
+    """The behavioural form of "no the core packages edit was needed".
 
     A freshly constructed core registry does not describe the broker kind. It
     learns of it ONLY when the broker's own package hands over a descriptor —

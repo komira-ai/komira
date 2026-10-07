@@ -6,8 +6,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the filter refusals, join helpers, the row UDF chains and the alias, concat,
 # drop_nulls, rename and with_columns plan builders.
 #
-# deps is the full transitive closure. komira_core enters through komira_udf
-# (row_udf_chain's row UDF types); komira_op_agg_state and what it needs
+# deps is the full transitive closure, the deps of komira_udf (row_udf_chain's
+# row UDF types) included; komira_op_agg_state and what it needs
 # (komira_agg, komira_expr, komira_hash, komira_kernels) are there for the
 # welded test_display_stats only, which tests its statistical accumulators.
 mojo_library(
@@ -22,8 +22,6 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_compression:komira_compression",
-        "//src/komira_core:komira_core",
-        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_expr:komira_expr",

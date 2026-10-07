@@ -1,9 +1,9 @@
 # =============================================================================
-# sched_sites — the sched-trace SITE_* ids owned by `komira_core` kernels.
+# sched_sites — the sched-trace SITE_* ids owned by the core packages kernels.
 # =============================================================================
 #
 # The canonical SITE_* registry lives in `komira_async`'s sched-trace module
-# (ids 0..39) next to the recorder API. But `komira_core` sits BELOW
+# (ids 0..39) next to the recorder API. But the core packages sits BELOW
 # `komira_async`, so a core kernel that dispatches a fork-join wave —
 # `helpers/compiler_helpers.gather_batch`, stage 4 of every `ORDER BY` —
 # cannot import that registry to label its own forks. Without a label, every

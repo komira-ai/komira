@@ -19,7 +19,7 @@
 # description plus the morsel operators that run over it. The physical plan for
 # this shape is therefore not a new IR; this file gives that pair a wire form.
 #
-# NO PROTOBUF. This package depends on `komira_core` alone, so a consumer that
+# NO PROTOBUF. This package depends on the core packages alone, so a consumer that
 # decodes a physical plan does not pull a protobuf runtime into its closure. A
 # hand-rolled length-prefixed format costs a few hundred lines and adds one
 # package to the closure.

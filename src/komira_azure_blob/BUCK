@@ -11,10 +11,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_objectstore's ObjectUrlSigner as a blob service SAS. The account
 # key comes from komira_azure_core's AzureSharedKey. No environment is read.
 #
-# komira_core is a dep because komira_fs's FileSystem signatures name its
-# types (SharedAlignedBuffer, HeapRegion, Slab), so any conformer must import
-# them from there; AzureFs also takes FS_SCHEME_AZURE from it. S3Fs and GcsFs
-# depend on it for the same reason.
+# komira_buffer and komira_collections are deps because komira_fs's
+# FileSystem signatures name their types (SharedAlignedBuffer and HeapRegion,
+# Slab), so any conformer must import them from there; AzureFs also takes
+# FS_SCHEME_AZURE from komira_plan_expr. S3Fs and GcsFs depend on them for the
+# same reason.
 #
 # The tests are hermetic, no socket: test_azure_signing (canonicalization,
 # mixed-case query parameter names included, and the string-to-sign, an
@@ -41,8 +42,9 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_azure_core:komira_azure_core",
+        "//src/komira_buffer:komira_buffer",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_datetime:komira_datetime",
         "//src/komira_encoding:komira_encoding",
@@ -50,6 +52,7 @@ mojo_library(
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_xml:komira_xml",
     ],
     test_data = {

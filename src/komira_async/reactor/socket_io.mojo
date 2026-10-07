@@ -552,7 +552,7 @@ def try_io_accept(listen_fd: Int32) -> TryIoResult:
         # `external_call["fcntl", Int32]` to bypass the Apple ARM64
         # variadic-ABI gap. See `_posix_shim.c` for the rationale and
         # `socket_setup.mojo:socket_tcp_nonblocking` for the matching
-        # listener-side fix. The shim (komira_core's POSIX wrappers) is
+        # listener-side fix. The shim (the core packages' POSIX wrappers) is
         # statically linked into every
         # binary that links this library.
         _ = external_call["komira_fcntl_set_nonblock", Int32](new_fd)

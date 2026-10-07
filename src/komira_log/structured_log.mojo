@@ -641,7 +641,7 @@ def emit_structured_line(var line: String):
     splice half of one JSON object into the other. The newline is concatenated
     into the SAME String before the call for exactly that reason.
 
-    It never raises — the same choice `komira_core.io.fd_write_all` names
+    It never raises — the same choice `komira_libc.fd_write_all` names
     in its header: a logger breaks rather than raises because *losing a
     diagnostic beats wedging the process*, and a logger that can raise into a
     serve loop turns a logged fault into a dropped connection."""

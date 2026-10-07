@@ -7,9 +7,9 @@
 #
 # THE PACKAGE-DAG DECISION (keep komira_search light).
 # -----------------------------------------------------------------------------
-# `komira_search` depends only on komira_core (+ komira_lz4).
+# `komira_search` depends only on the core packages (+ komira_lz4).
 # The scan-kind contract (`ScanSourceResolver`) lives in komira_scan_resolver,
-# which depends on komira_core alone. This package joins the two and adds
+# which depends on the core packages alone. This package joins the two and adds
 # nothing else: it does not depend on the morsel layer or on any engine, so a
 # context that executes the kind links it without pulling the executor into
 # the search build, and its tests construct no executor.
@@ -48,8 +48,8 @@
 #     structs; it is never stored in a byte-backed slab.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.plan.expr import (
+from komira_arrow.record_batch import RecordBatch
+from komira_plan_expr.expr import (
     Expr,
     EXPR_BINARY_OP,
     EXPR_COL_REF,
@@ -64,7 +64,7 @@ from komira_core.plan.expr import (
     BIN_GE,
     COL_SIDE_NONE,
 )
-from komira_core.plan.scalar_value import ScalarValue
+from komira_plan_expr.scalar_value import ScalarValue
 
 from komira_search.analyzer import (
     AnalyzerConfig,

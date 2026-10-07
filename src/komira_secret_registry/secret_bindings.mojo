@@ -37,7 +37,7 @@
 # origin; no unsafe_from_address.
 # =============================================================================
 
-# ⭐ WHY THIS LIVES IN `komira_core.plan` AND NOT IN `komira_secret_registry`.
+# ⭐ WHY THIS LIVES IN `komira_secret_registry`.plan` AND NOT IN `komira_secret_registry`.
 # `PlanCarrier` — the UNIVERSAL read survivor every `ctx.read_*` returns —
 # holds an `Optional[SecretBindings]` field. If these two flat POD structs
 # lived in `komira_secret_registry`, that ONE field would put

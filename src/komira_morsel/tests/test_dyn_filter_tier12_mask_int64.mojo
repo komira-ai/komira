@@ -17,9 +17,9 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.collections.in_list_filter import InListFilter
-from komira_core.collections.range_filter import RangeFilter
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_dynamic_filter.in_list_filter import InListFilter
+from komira_dynamic_filter.range_filter import RangeFilter
 from komira_morsel.bloom_mask import (
     in_list_mask_int64,
     range_mask_int64,

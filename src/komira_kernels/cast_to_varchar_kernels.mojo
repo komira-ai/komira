@@ -51,14 +51,14 @@
 
 from std.memory import unsafe_memcpy
 
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.dictionary_array import StringDictionaryArray
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.string_array import StringArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.dictionary_array import StringDictionaryArray
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
 # STRDRAIN counter: site attribution, see
-# komira_core.helpers.strdrain_counter
-from komira_core.helpers.strdrain_counter import strdrain_note_site
+# komira_counters.strdrain_counter
+from komira_counters.strdrain_counter import strdrain_note_site
 
 
 # Float64 NaN / Inf constants (Mojo 1.0.0b1 has no Float64.nan exposed).

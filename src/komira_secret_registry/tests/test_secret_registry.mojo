@@ -5,7 +5,7 @@
 #
 # This test imports nothing outside the registry's own dependency closure:
 # `komira_secret_store` (the `SecretStore` trait, `StaticSecretStore`,
-# `SecretValue`), `komira_crypto` (the zeroize helper), and `komira_core` (the
+# `SecretValue`), `komira_crypto` (the zeroize helper), and the core packages (the
 # store-less `SecretBindings` table). The test declares no extra dependencies,
 # so a new import of a package outside that closure fails to COMPILE here. It
 # does not pass by reaching further.
