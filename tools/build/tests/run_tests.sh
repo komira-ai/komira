@@ -334,6 +334,8 @@
 #      root with no package.
 
 #  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
+#  45. Assert level, defines and memory cap: see
+#      tools/build/tests/assert_level_tests.sh.
 #  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
 #      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
 #      file of the cell, against tests/pointer_lint_ffi.tsv and
@@ -1240,6 +1242,10 @@ expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enfor
 # 41
 # shellcheck source=tools/build/tests/coverage_tests.sh
 . "$ROOT/tools/build/tests/coverage_tests.sh"
+
+# 45
+# shellcheck source=tools/build/tests/assert_level_tests.sh
+. "$ROOT/tools/build/tests/assert_level_tests.sh"
 
 # 42
 expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
