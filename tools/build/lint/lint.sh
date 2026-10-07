@@ -76,6 +76,25 @@
 #       a bad count or an empty reason is a finding, in either ledger. The
 #       <name>s are what findings call the ledgers. File names hold no
 #       whitespace.
+#   kind "public_boundary", tools <public_boundary.awk>, args <holds> <holds name> <hosts> <hosts name> <deny> <from> <public>
+#       What a public repository may not hold, read from every file under
+#       <stage> but binary data (by suffix: .arrow, .orc, .parquet, .avro,
+#       .tensor, .frame, .request, .whl, .conda and archive, image and object
+#       formats) and upstream bytes (third_party/ but its BUCK and .bzl
+#       files, which are this repository's; tools/build/third_party_srcs/
+#       testdata/, trimmed upstream trees): no date from the year <from> up to
+#       <public>, the first day of the public history (date), home directory naming a person (home_path),
+#       private or written-out network address (ip), URL host outside the
+#       reserved example names and <hosts> (host), email address outside the
+#       reserved example domains (email), commit id in prose (commit_sha), or
+#       word of <deny> (deny). public_boundary.awk, the reader, says what each
+#       rule matches. <holds>, rows `<rule> <file> <count> <reason>`, holds
+#       the findings a file must keep (fixtures, test vectors), at an exact
+#       count, so it only shrinks; <hosts>, rows `<domain> <reason>`, the
+#       domains whose hosts a URL may name, each used by the tree; `#` lines
+#       and blank lines are comments in both. <deny> is `-` or a list of
+#       words kept outside the repository (one per line), which no row may
+#       hold. The <name>s are what findings call the ledgers.
 set -eu
 
 BB=$1 RESULT=$2 KIND=$3 STAGE=$4 PREFIX=$5
@@ -320,6 +339,24 @@ pointer_lint)
             for (f in ffi)
                 if (!(f in fsites)) print FN ":" ffi[f] ": " f " names no wildcard origin; delete the row"
         }' "$T/files" "$T/marked" "$ffi" "$holds" "$T/sites" | sort >> "$REPORT"
+    ;;
+public_boundary)
+    AWK=$(abs "$1"); shift
+    [ "$1" = -- ] && shift
+    holds=$(abs "$1") holds_name=$2 hosts=$(abs "$3") hosts_name=$4 deny=$5 from=$6 public=$7
+    if [ "$deny" = - ]; then deny=/dev/null; else deny=$(abs "$deny"); fi
+    # Every file but binary data and upstream bytes (see the kind's note).
+    (cd "$STAGE" && find . \( -type f -o -type l \) | sed 's#^\./##') |
+        grep -vE '^tools/build/third_party_srcs/testdata/|\.(arrow|orc|parquet|avro|tensor|frame|request|whl|conda|gz|tgz|xz|zst|bz2|tar|zip|jar|png|jpg|jpeg|gif|ico|pdf|der|so|a|o|dylib|wasm|mojoc|mojopkg)$' |
+        grep -vE '^third_party/' > "$T/files" || true
+    (cd "$STAGE" && find third_party \( -type f -o -type l \) 2>/dev/null | grep -E '(^|/)BUCK$|\.bzl$' >> "$T/files" || true)
+    sort -o "$T/files" "$T/files"
+    checked=$(wc -l < "$T/files" | tr -d ' ')
+    # A reader that fails is a finding, never a pass.
+    if ! (cd "$STAGE" && awk -F '\t' -v P="$STAGE/" -v HN="$holds_name" -v AN="$hosts_name" -v FROM="$from" -v PUBLIC="$public" -f "$AWK" "$T/files" "$hosts" "$deny" "$holds") > "$T/pb.txt" 2> "$T/pb.err"; then
+        echo "public_boundary: the reader failed: $(head -3 "$T/pb.err")" >> "$REPORT"
+    fi
+    sort "$T/pb.txt" >> "$REPORT"
     ;;
 *)
     echo "lint.sh: unknown kind $KIND" >&2
