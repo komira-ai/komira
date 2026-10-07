@@ -5,9 +5,9 @@ holds one bounded single-producer ring per worker (`worker_id` 0 to
 `num_workers - 1`); `start_span["name"]` and `end_span` each push one small
 OPEN or CLOSE packet onto the calling worker's ring, with no lock and no
 allocation once the ring exists. The span name is a compile-time string: its
-FNV-1a id is computed at compile time and the name is registered in a
-process-wide name registry on first use. A drain (one thread) joins each OPEN
-with its CLOSE into a `SpanRecord` and hands the records to an exporter:
+FNV-1a id is computed at compile time and the name is registered in the
+tracer's own name registry on first use (each `Tracer` keeps its own). A
+drain (one thread) joins each OPEN with its CLOSE into a `SpanRecord` and hands the records to an exporter:
 `JsonlFileExporter` writes one JSON object per line to a file,
 `CapturingExporter` keeps them in memory. `format_span_json_line` is the one
 place the span line's key order and number rendering are defined.

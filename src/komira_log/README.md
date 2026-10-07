@@ -65,7 +65,8 @@ assert_true("<redacted>" in text)
 assert_false('"empty"' in text)
 ```
 
-The facade, before any engine is installed, writes one line to stderr:
+The facade, before any engine is installed, writes one line to stderr. This
+example only shows the calls; it does not check the line written:
 
 ```mojo
 import komira_log as log
