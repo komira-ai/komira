@@ -16,7 +16,8 @@
 #     `"libsnappy.so`, or the same names with `.dylib`;
 #   * an import of the owners' implementation layers, `komira_zlib` or
 #     `komira_lz4`: `from komira_zlib[.x] import ...`, `import komira_lz4[.x]`
-#     (with or without `as`), and either name in an `import a, b` list.
+#     (with or without `as`), and either name anywhere in an `import a, b`
+#     list, first or not, with or without a space after the comma.
 # A line whose first non-blank character is `#` is a comment, not a site; a
 # site with a trailing comment is a site. Not covered: a name built from
 # pieces (adjacent literals, `+`, formatting), a soname with a directory
@@ -54,7 +55,7 @@ checked=$(wc -l < "$T/files" | tr -d ' ')
 # The site patterns. Q is either quote.
 Q="[\"']"
 SITES="$Q(komira_)?snappy_[a-z0-9_]+$Q|${Q}lib(z|zstd|lz4|bz2|lzma|snappy)\\.(so|dylib)"
-SITES="$SITES|^[[:space:]]*(from|import)[[:space:]]+komira_(zlib|lz4)([.[:space:]]|\$)"
+SITES="$SITES|^[[:space:]]*(from|import)[[:space:]]+komira_(zlib|lz4)([.[:space:],]|\$)"
 SITES="$SITES|^[[:space:]]*import[[:space:]][^#]*[[:space:],]komira_(zlib|lz4)([.[:space:],]|\$)"
 if [ "$checked" -gt 0 ]; then
     (cd "$TREE" && xargs grep -nE "$SITES" /dev/null < "$T/files" || true) > "$T/hits"

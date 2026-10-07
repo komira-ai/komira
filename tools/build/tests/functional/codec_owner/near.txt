@@ -6,6 +6,8 @@
 from komira_compression import compress, decompress
 import komira_compression.lz4
 import komira_zlib_extra
+import komira_zlib_extra, os
+import komira_lz4x,os
 from komira_lz4x import thing
 import os  # komira_zlib, in a trailing comment
 

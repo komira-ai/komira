@@ -11,7 +11,7 @@ owner check is met, and none of their lines is a finding.
 near.mojo, outside the owners, names each form where it is not a site: in
 comment lines and a trailing comment, an import of komira_compression and of
 packages whose names only start like the layers' (`komira_zlib_extra`,
-`komira_lz4x`), a snappy name as an identifier, inside a longer string, after
+`komira_lz4x`, alone and first in an `import a, b` list), a snappy name as an identifier, inside a longer string, after
 another character in the string or with `-`, and a codec library name with
 no `.so` or `.dylib` after it or not at the start of the string.
 functional/codec_owner/BUCK exports the files, so negative/codec_owner plants
