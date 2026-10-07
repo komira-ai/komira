@@ -21,6 +21,15 @@ mojo_library(
         "tests/test_proto_codec_proto3_json_strictness.mojo",
         "tests/test_proto_codec_null_value.mojo",
         "tests/test_proto_codec_roundtrip.mojo",
+        # The float32 sweep (S1 of test_proto_codec_json_float32), split
+        # over disjoint index ranges so that each shard finishes within a
+        # coverage build's time limit; they run as parallel actions.
+        "tests/test_proto_codec_json_float32_sweep_0.mojo",
+        "tests/test_proto_codec_json_float32_sweep_1.mojo",
+        "tests/test_proto_codec_json_float32_sweep_2.mojo",
+        "tests/test_proto_codec_json_float32_sweep_3.mojo",
+        "tests/test_proto_codec_json_float32_sweep_4.mojo",
+        "tests/test_proto_codec_json_float32_sweep_5.mojo",
     ],
     visibility = ["PUBLIC"],
 )
@@ -67,19 +76,6 @@ mojo_test(
 mojo_test(
     name = "test_float32_json_binades",
     srcs = ["tests/test_float32_json_binades.mojo"],
-    deps = [":komira_proto_codec"],
-    optimization_level = "3",
-)
-
-# The welded S1 sweep at 16 times its density: every 16411th float32 bit
-# pattern (about 262000 values) through the writer and the exact reader,
-# with the shortest-digits checks. It catches a sparse digit defect on
-# mid-binade mantissas that the welded sample (16384 values) misses; at
-# this density the exact reads are too slow for a welded test built
-# without optimization (a coverage build), so it runs here, optimized.
-mojo_test(
-    name = "test_float32_json_sweep",
-    srcs = ["tests/test_float32_json_sweep.mojo"],
     deps = [":komira_proto_codec"],
     optimization_level = "3",
 )
