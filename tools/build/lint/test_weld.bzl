@@ -1,7 +1,8 @@
 """test_weld: every test file runs, and every package with code welds a test.
 
-A lint over the packages under `root` (each directory directly under it). It
-fails when:
+A lint over the packages under `root`: each directory directly under it, and
+each `<root>/tests/<kind>/<name>` (`<root>/tests` is not a package: it holds
+the test-only packages by kind). It fails when:
 
 - a `test_*.mojo` under a `tests/` directory is welded by no target, so it
   never runs;
