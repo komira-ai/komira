@@ -185,7 +185,7 @@ _TESTS_LINTS = [
 
 # The file-system registry stays out of the physical plan
 # (tools/build/lint/defs.bzl, fs_registry_deps; tools/build/tests/README.md,
-# test 44): no physical-plan package under src/ depends on komira_fs_registry,
+# test 46): no physical-plan package under src/ depends on komira_fs_registry,
 # directly or through other packages, or imports it. Such a package takes a
 # FileSystem-generic parameter and its caller passes the concrete backend, so
 # a compiled plan instantiates one file system; logical-plan packages may use
