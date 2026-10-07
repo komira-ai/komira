@@ -74,9 +74,9 @@ def _spin_hint():
     x86: the PAUSE instruction (`llvm.x86.sse2.pause`), which eases the
     sibling hyper-thread and the memory-order pipeline flush on exit. Other
     targets: nothing (a plain re-load), because the aarch64 hint intrinsic
-    shape is unverified here (the same choice as `komira_async`'s
-    `pause_intrinsic`). This is NOT a yield: this leaf has no libc yield it
-    may call without new FFI (see `reason()`).
+    shape is unverified here (`komira_async`'s `pause_intrinsic` instead
+    falls back to `sched_yield` there). This is NOT a yield: calling one
+    would add new FFI to this file, which it avoids (see `reason()`).
     """
     comptime if CompilationTarget.is_x86():
         llvm_intrinsic["llvm.x86.sse2.pause", NoneType]()
