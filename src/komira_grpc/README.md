@@ -17,8 +17,8 @@ with `grpc-timeout` from a `CallOptions` deadline and the caller's
 failed call raises an error whose text starts `[grpc:<code>]`;
 `parse_grpc_status_code` reads it back, `grpc_error_from_http_non_200` maps
 a proxy's HTTP error to a gRPC code), retry (`RetryPolicy.none()`,
-`idempotent()` which retries `UNAVAILABLE` 5 times with a 1 s, x1.3, 10 s
-capped backoff, and `is_retryable_grpc_error`), and the
+`idempotent()` which makes up to 5 attempts in total (4 retries) on
+`UNAVAILABLE` with a 1 s, x1.3, 10 s capped backoff, and `is_retryable_grpc_error`), and the
 `x-goog-request-params` routing header (`match_path_template`,
 `build_routing_params`). The 17 `GRPC_STATUS_*` codes are re-exported from
 `komira_connect`, which is also where the server side lives.

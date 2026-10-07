@@ -8,8 +8,10 @@ of randomness, so the 16 bytes sort in creation-time order.
   `version()`, `variant()`, `unix_ts_ms()`, `byte_at(i)`, `as_bytes()`,
   equality and unsigned big-endian ordering. `Uuid()` is the nil UUID.
 - `komira_uuid.uuid.from_hyphenated` parses text back: upper- or lower-case
-  hex, `-` separators ignored wherever they appear; it raises unless the hex
-  yields exactly 16 bytes.
+  hex, a `-` skipped where it falls between two bytes (a `-` between the two
+  hex digits of one byte raises). It raises when the text yields fewer than
+  16 bytes or holds a bad hex pair; it stops reading after the 16th byte, so
+  anything after it, hex or not, is ignored without an error.
 - `generate_uuidv7(now_ms)` mints one ID from the wall clock (or `now_ms`,
   of which only the low 48 bits are stored) and fresh CSPRNG bytes (AWS-LC
   `RAND_bytes`). Two IDs minted in the same millisecond are ordered randomly.
@@ -45,6 +47,11 @@ with assert_raises():
     _ = from_hyphenated("0190ab1c-3d4e")  # too short
 with assert_raises():
     _ = from_hyphenated("0190ab1c-3d4e-7f80-8a1b-2c3d4e5f607g")  # not hex
+with assert_raises():
+    _ = from_hyphenated("0190ab1c-3d4e-7f80-8a1b-2c3d4e5f6-071")  # `-` inside a byte
+# A `-` at a byte boundary is skipped; text after the 16th byte is ignored.
+assert_true(from_hyphenated("0190ab1c3d4e7f808a1b2c3d4e5f6071") == u)
+assert_true(from_hyphenated("0190ab1c-3d4e-7f80-8a1b-2c3d4e5f6071ffzz") == u)
 ```
 
 Mint IDs with a pinned clock. The timestamp is the one passed in; the

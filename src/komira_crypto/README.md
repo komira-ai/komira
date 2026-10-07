@@ -5,8 +5,8 @@ Cryptographic primitives for Mojo. The heavy algorithms call AWS-LC's
 Byte inputs are `Span[UInt8, _]`; fixed-size outputs are `Array[UInt8, N]`.
 
 - Hashes: `sha256`, `Sha256` / `Sha384` / `Sha512` (the streaming `Hash`
-  trait), `blake2b_256`, and `sha1` (kept for checksums a protocol demands,
-  not a `Hash` conformer).
+  trait), `blake2b_256`, and the streaming `Sha1` plus one-shot `sha1` (kept for
+  checksums a protocol demands; `Sha1` is not a `Hash` conformer).
 - MACs and KDFs: `hmac_sha256`, the generic `Hmac[H]`, `Hkdf[H]` (extract,
   expand, the TLS 1.3 `hkdf_expand_label`), `pbkdf2_hmac_sha256`.
 - AEADs: `AesGcm128`, `AesGcm256`, `ChaCha20Poly1305`, sealing and opening
