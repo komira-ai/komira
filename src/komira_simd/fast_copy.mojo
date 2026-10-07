@@ -87,7 +87,7 @@ from std.sys.intrinsics import llvm_intrinsic
 # ⛔ DO NOT PUT A FLAG IN FRONT OF IT. Both spellings are broken here:
 #
 #   * `-D` / `is_defined[...]` CANNOT WORK. The call sites live in
-#     `komira_core`, which ships as a prebuilt `.mojoc`, and a define passed
+#     the core packages, which ships as a prebuilt `.mojoc`, and a define passed
 #     when building a consumer does not reach code inside an already-compiled
 #     package. `is_defined[...]()` inside library code would be
 #     UNCONDITIONALLY False — a dead flag that only looks like a flag.

@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # WHAT IS UNDER TEST. Three fixed-width gather sites live in
-# `komira_core/helpers` and have typed-store arms:
+# the core packages and have typed-store arms:
 #
 #   * `compiler_join_assembly.emit_gather_column_projected`, NULL-AWARE arm
 #     (a `-1` index keeps the pre-zeroed destination slot)
@@ -25,7 +25,7 @@
 #
 # ⚠ THE PARALLEL TWIN IS NOT HERE. `_GatherFixedWidthWork.process` (the
 # `_parallel_fixedwidth_gather` chunk worker) needs `has_pool=True` and a live
-# dispatcher, which a `komira_core` test cannot start. It is covered by the
+# dispatcher, which a core-package test cannot start. It is covered by the
 # narrow-widths test in `komira_engine_dispatch`, where a
 # `PerCoreAsyncRuntime` is available. Stated rather than left implicit so a
 # reader does not conclude the parallel arm is unguarded.
@@ -75,7 +75,7 @@ from komira_column_kernels.compiler_helpers import gather_batch
 from komira_join_assembly.compiler_join_assembly import (
     emit_gather_column_projected,
 )
-from komira_counters.gather_width_counter import (
+from komira_column_kernels.gather_width_counter import (
     gather_narrow_fallback_colrows,
     gather_narrow_typed_colrows,
     gather_wide_fallback_colrows,

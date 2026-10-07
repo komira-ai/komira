@@ -29,7 +29,7 @@
 # only pointer field is a concrete-origin OwnedPointer home. Mojo 1.0.0b2 (def-only).
 # =============================================================================
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from kci_reconciler.erased_resource import ErasedResource
 

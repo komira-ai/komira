@@ -10,7 +10,7 @@
 # translation unit compiled: `ErasedScanMorselResolver.erase[R]` instantiates
 # `R`'s trampolines in the CONSUMER, and only code addresses and a heap home
 # cross. But the `.so`'s `@extern` half is compiled into every consumer at
-# every tier, and a tier-1 consumer has `komira_core` alone on `-I`, so no door
+# every tier, and a tier-1 consumer has only the core packages on `-I`, so no door
 # signature may NAME `ErasedScanMorselResolver` (a `komira_morsel` type). The
 # resolver therefore crosses as a `void*` to ONE heap box, and this file is the
 # only code that writes or reads that box.

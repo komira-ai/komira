@@ -19,8 +19,8 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import RecordBatch
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import RecordBatch
 
 from komira_csv import CsvReadOptions, Rfc4180, Excel, read_csv_bytes_to_batch
 from komira_csv.reader import read_csv_bytes_to_schema

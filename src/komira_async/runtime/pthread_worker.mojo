@@ -43,13 +43,13 @@ from std.memory import OwnedPointer, UnsafePointer, alloc
 # CHOSEN NUMA NODE as its mask instead of one CPU, so CFS still balances inside
 # the socket. Gated by `EnginePlacement.numa_local` and additionally an
 # identity no-op on any single-node host; a False return means "ran unconfined".
-from komira_core.runtime.cpu_topology import (
+from komira_host.cpu_topology import (
     confine_thread_to_engine_numa_node,
     engine_compute_cpus,
     engine_io_cpus,
     pin_current_thread_to,
 )
-from komira_core.runtime.engine_placement import EnginePlacement
+from komira_host.engine_placement import EnginePlacement
 
 # komira_log — bind this worker thread's TLS worker_id so a `ctx.logger.*` on
 # the thread routes to its per-core ring. the engine's pthread TLS key

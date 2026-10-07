@@ -115,19 +115,19 @@
 
 from std.ffi import external_call
 
-from komira_core.arrow.ipc_encoder_dispatch import (
+from komira_arrow_ipc.ipc_encoder_dispatch import (
     arrow_ipc_eos_bytes,
     encode_record_batch_message,
     encode_schema_message,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
 
 from komira_objectstore.cas_manifest import (
     AppendResult,

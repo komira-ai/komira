@@ -44,7 +44,7 @@ from komira_search.source import (
     AGG_ORDER_KEY_ASC,
     AGG_ORDER_KEY_DESC,
 )
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # =============================================================================

@@ -21,7 +21,7 @@
 # Dict is heap-owning + Movable-only; copy would alias).
 # =============================================================================
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_core.codec.h2.flow_control import (
     H2_INITIAL_WINDOW_SIZE_DEFAULT,

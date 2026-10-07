@@ -76,8 +76,8 @@
 #     instance-method-conformer adapter shape (`_udf: F` field).
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.multi_column_builder import (
+from komira_arrow.batch_view import BatchView
+from komira_arrow.multi_column_builder import (
     MultiColumnSink,
     SinkKind,
 )

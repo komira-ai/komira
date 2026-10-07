@@ -24,7 +24,7 @@ from komira_scan_source.source_like import SourceLike
 
 
 # =============================================================================
-# FNV-1a hash helpers — local copy (avoids pulling komira_core.collections
+# FNV-1a hash helpers — local copy (avoids pulling the core packages
 # as a dep; matches the pattern in parquet_source.mojo).
 # =============================================================================
 
@@ -170,7 +170,7 @@ struct ArrowSource(SourceLike, Movable, Copyable, Deinitable):
 #
 # This helper does NOT live as a `@staticmethod` on ArrowSource because
 # the file reader lives in the SDK layer, which depends on
-# `komira_core.arrow` — making it a method on a komira_core type would
+# the core packages — making it a method on a core-package type would
 # force the import cycle to invert. The SDK's source factories are the
 # public surface; this module provides the typed-cache field-layout entry
 # point and the trait-conformant struct.

@@ -60,7 +60,7 @@ from komira_async.runtime.parallel_fork_join_shared import (
     parallel_fork_join_shared,
 )
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
-from komira_core.runtime_traits.shared_chunk_work import SharedChunkWork
+from komira_async_api.shared_chunk_work import SharedChunkWork
 
 
 # ---------------------------------------------------------------------------

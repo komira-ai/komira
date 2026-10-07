@@ -30,11 +30,11 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.collections.batch_view import BatchView, batch_view_over
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_arrow.batch_view import BatchView, batch_view_over
 from komira_eval.expression_executor import ExpressionExecutor, DecimalSpec
 from komira_kernels.runtime_expr import (
     RuntimeExpr,
@@ -60,12 +60,12 @@ from komira_kernels.runtime_expr import (
     make_sub_i32,
     make_sub_i64,
 )
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.string_array import StringArray
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.string_array import StringArray
 from komira_eval.filter_state import FilterState
-from komira_core.eval.selection_vector_row import RowSelectionVector
+from komira_arrow.selection_vector_row import RowSelectionVector
 
 
 # -----------------------------------------------------------------------------

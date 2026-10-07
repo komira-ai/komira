@@ -45,7 +45,7 @@
 # The runner keeps a passing test's output to itself (gate_runner.sh prints
 # the log only on failure); the lines are read from a failing run.
 # No FFI is declared here: processes are komira_supervisor's, sockets
-# komira_async's, the environment komira_core_ffi's.
+# komira_async's, the environment komira_libc's.
 # =============================================================================
 
 from std.os import remove
@@ -68,7 +68,7 @@ from komira_async.reactor.socket_setup import (
     sockaddr_in_bytes,
     socket_tcp_nonblocking,
 )
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 from komira_supervisor import ChildSpec, DetachedChild, SIGKILL, Supervisor
 
 comptime _SETPRIV = "/usr/bin/setpriv"

@@ -127,7 +127,7 @@ from komira_async.reactor.reactor import Reactor
 # trigger branch in `_append_inner`'s retry loop. NO wildcard-origin field
 # the field is `Optional[OwnedPointer[MetricsSet]]`, a POD handle
 # behind the canonical OwnedPointer indirection. Cycle-free: komira_metrics deps
-# {komira_core and the small leaf packages} only — never reaches back into komira_objectstore.
+# {the core packages and the small leaf packages} only — never reaches back into komira_objectstore.
 from komira_metrics.metrics_set import MetricsSet, new_owned_metrics_set
 
 from komira_objectstore.path import Path
@@ -890,7 +890,7 @@ trait MetadataStore(Movable, Deinitable):
 # =============================================================================
 #
 # We deliberately do NOT pull a JSON library into komira_objectstore (it
-# depends only on komira_core — adding a serde dep would invert the DAG).
+# depends only on the core packages — adding a serde dep would invert the DAG).
 # The chunk object the manifest protocol manages has a tiny fixed envelope:
 #   [ record_count: Int64 LE ][ body_len: Int64 LE ][ body bytes... ]
 # The body is the consumer's opaque payload (offset record / split entry).

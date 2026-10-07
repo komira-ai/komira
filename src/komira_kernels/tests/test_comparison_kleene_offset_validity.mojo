@@ -48,15 +48,15 @@
 from std.sys import size_of
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, SchemaBuilder
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_buffer.heap_region import HeapRegion
 
 from komira_kernels.comparison_kleene import (
     NullPolicy,

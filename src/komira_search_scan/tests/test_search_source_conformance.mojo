@@ -34,9 +34,9 @@ from std.testing import (
     assert_not_equal,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.source.scan_binding import ScanBinding
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_scan_source.scan_binding import ScanBinding
 
 from komira_search.analyzer import (
     AnalyzedField,
@@ -48,8 +48,8 @@ from komira_search.inverted import InvertedIndexBuilder
 from komira_search.term_dict import TermDictBuilder
 from komira_search.split import serialize_split, DocStoreBuilder
 
-from komira_core.plan.expr import Expr, BIN_EQ
-from komira_core.plan.scalar_value import ScalarValue
+from komira_plan_expr.expr import Expr, BIN_EQ
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_search_scan.search_source import (
     FastFieldPushdownGate,
     analyzer_config_fingerprint,
