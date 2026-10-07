@@ -37,6 +37,7 @@ mojo_library(
         "tests/test_sql_parser_catalog_direct.mojo",
         "tests/test_sql_parser_exprs.mojo",
         "tests/test_sql_parser_from.mojo",
+        "tests/test_sql_parser_internals_direct.mojo",
         "tests/test_sql_parser_statements.mojo",
         "tests/test_sql_parser_windows.mojo",
         "tests/test_sql_token_ast_direct.mojo",
