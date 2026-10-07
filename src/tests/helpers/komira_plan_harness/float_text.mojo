@@ -275,9 +275,13 @@ def exact_float_bits(dec: ParsedDecimal, width: Int) raises -> UInt64:
             if n.divmod_small(5) != 0:
                 raise Error("not exactly representable")
     var e2 = e10
-    while n.is_even():
+    # n is not zero here (dec.digits is not, and only an exact division got
+    # here); the check keeps the loop finite if that ever stops holding.
+    while not n.is_zero() and n.is_even():
         n.shr1()
         e2 += 1
+    if n.is_zero():
+        raise Error("not exactly representable")
     var mbits = _mbits(width)
     var bl = n.bit_length()
     if bl > mbits + 1:

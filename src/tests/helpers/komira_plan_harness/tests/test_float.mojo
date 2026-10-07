@@ -51,6 +51,11 @@ def test_inexact_decimals_are_refused() raises:
         _ = parse_float_cell("0.1", 64)
     with assert_raises(contains="not exactly representable as float64"):
         _ = parse_float_cell("1e23", 64)
+    # Truncating instead of refusing would read 1.1 as 1.0 and 123.456 as 123.
+    with assert_raises(contains="not exactly representable as float64"):
+        _ = parse_float_cell("1.1", 64)
+    with assert_raises(contains="not exactly representable as float64"):
+        _ = parse_float_cell("123.456", 64)
     with assert_raises(contains="not exactly representable as float32"):
         _ = parse_float_cell("16777217", 32)
     with assert_raises(contains="not exactly representable as float64"):
