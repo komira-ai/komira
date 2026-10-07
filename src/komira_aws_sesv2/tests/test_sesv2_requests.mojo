@@ -151,9 +151,11 @@ def test_put_email_identity_mail_from_attributes() raises:
     )
 
 
-def test_put_with_no_mail_from_domain_clears_it() raises:
-    # The API reference: leaving MailFromDomain out removes the identity's
-    # custom MAIL FROM domain. The body is then an empty object.
+def test_put_with_no_mail_from_domain_sends_empty_object() raises:
+    # The operation "enables or disables" a custom MAIL FROM domain and
+    # MailFromDomain is optional; the v2 reference does not say what omitting
+    # it does (classic SES documents that a null MailFromDomain disables it, in
+    # SetIdentityMailFromDomain). Omitted, the body is an empty object.
     var req = build_put_email_identity_mail_from_attributes_request(
         SESv2PutEmailIdentityMailFromAttributesRequest(String("mail.example.com"))
     )
@@ -286,7 +288,7 @@ def main() raises:
     test_put_email_identity_configuration_set_attributes()
     test_put_with_no_configuration_set_unbinds()
     test_put_email_identity_mail_from_attributes()
-    test_put_with_no_mail_from_domain_clears_it()
+    test_put_with_no_mail_from_domain_sends_empty_object()
     test_create_configuration_set_event_destination()
     test_delete_configuration_set()
     test_send_email_simple()
