@@ -815,18 +815,22 @@ and, per library, with tests or without:
   and `summary.md` are `[coverage][gate]` (`cov/gate/`, action category
   `mojo_cov_gate`; [The build gate](../coverage/README.md#the-build-gate)).
 
-The package (`mojo_gate_join`) then also waits for every coverage run and
-the gate: with the switch on, a test that fails at `-O0` or traced, or a gate
-that fails in enforce mode, leaves the package unbuilt, and so every library
-compiling against it: with the switch on, every dependent waits for its
-dependencies' coverage runs and gates. A library with no test gets that join too, gated by its
-gate alone (`NotMeasured`: it fails in enforce mode), as does a library whose
-sources are all generated (a cloud SDK client). The libraries the
-gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of `policy.bzl`
-(`covcheck`, `komira_json`, `readme_examples`): their package waits for their
-coverage runs only, and their gate, `<name>_cov_gate`, is what their conda
-package waits for. `[coverage]` is the binaries, the reports and the gate's
-outputs; the branch coverage files are only its sub-targets `[bc]`,
+What ships, the library's conda package (`<name>_conda`: both its joins,
+[`conda.bzl`](../package/conda.bzl)), then also waits for every coverage run
+and the gate: with the switch on, a test that fails at `-O0` or traced, or a
+gate that fails in enforce mode, leaves the conda package unbuilt. The
+library's own package (`mojo_gate_join`) does not wait for them, so the
+library builds and every dependent compiles and tests against it: a red
+coverage run or gate blocks the package it measures from shipping, and
+nothing else. A library with no test still has a gate (`NotMeasured`: it
+fails in enforce mode), which its conda package waits for, as does a
+library whose sources are all generated (a cloud SDK client). The libraries
+the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
+`policy.bzl` (`covcheck`, `komira_json`, `readme_examples`): they have no
+gate of their own (the library would depend on the gate's tool, which
+depends on it), and their gate is `<name>_cov_gate`, which their conda
+package waits for too. `[coverage]` is the binaries, the reports and the
+gate's outputs; the branch coverage files are only its sub-targets `[bc]`,
 `[pgo_bin]` and `[branch]`.
 
 ```sh
@@ -842,19 +846,16 @@ cov_normalize), `coverage_branch` to
 `komira//tools/build/coverage/branch:cov_branch` (the branch coverage
 scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
 (cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
-(for a library of the ledger: no gate, and `coverage_join`). A buckconfig
+(for a library of the ledger: no gate). A buckconfig
 value is not part of the configuration, so no output path moves; with the
 switch off the attributes are absent and analysis is what it was without
-coverage builds. With it on, the release actions (`mojo_precompile`,
-`mojo_build_test`, `mojo_gated_test`, the README's) keep their command lines
-and inputs, so they keep their cache hits; `mojo_gate_join` keeps its command
-line and output bytes and gains the coverage markers as inputs, so it runs
-again and its dependents keep their keys; the coverage builds, runs and gate
-are new actions ([test 41](../tests/README.md#41-coverage-builds)'s
-`coverage_keys.sh`). A library with no test and no README has no join
-without coverage (its package is the compiler's output, `ungated/`); with
-coverage its package is the join's (`pkg/`), so its dependents compile again
-in a coverage build. A value other than `true` or `false` fails at load,
+coverage builds. With it on, every release action of the library
+(`mojo_precompile`, `mojo_build_test`, `mojo_gated_test`, the README's,
+`mojo_gate_join`) keeps its command line and inputs, so it keeps its cache
+hits and so do its dependents; the conda package's joins keep their command
+lines and gain the coverage markers as inputs; the coverage builds, runs
+and gate are new actions ([test 41](../tests/README.md#41-coverage-builds)'s
+`coverage_keys.sh`). A value other than `true` or `false` fails at load,
 naming it.
 
 The macro reads the switch from the buckconfig of the cell whose BUCK file
@@ -903,10 +904,10 @@ A library in the `tests` cell may pass `coverage_debug` itself (a
 `cov_link_dir`), and with it `coverage_run` (a `cov_run_dir`; the default one
 when not given) and `coverage_gate` (a `cov_gate_dir`) with `coverage_mode`
 (the policy's when not given): it then has coverage binaries and runs, and
-with `coverage_gate` the gate and the join, whatever the switch says, which
+with `coverage_gate` the gate, whatever the switch says, which
 is how tests 41, 43, 46 and 47 build them, plant a defective relocator or run
-script, and gate in enforce mode, without `-c`. Without `coverage_gate`
-its package does not wait for its runs. Anywhere else passing any of them is
+script, and gate in enforce mode, without `-c`. Its conda package, if it has
+one, waits for its runs and that gate. Anywhere else passing any of them is
 refused.
 
 ## Errors
