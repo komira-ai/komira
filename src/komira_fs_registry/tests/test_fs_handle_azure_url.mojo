@@ -24,6 +24,11 @@
 #  * the decoder: lowercase hex escapes decode as uppercase ones do; an
 #    overlong lead, a surrogate, a bad continuation byte, a code point above
 #    U+10FFFF and a truncated sequence are each refused by exact message.
+#  * the UTF-8 bounds (Unicode Table 3-7): for every bound the validator
+#    checks (lead C2..F4; second byte A0..BF after E0, 80..9F after ED,
+#    90..BF after F0, 80..8F after F4; continuation 80..BF at the second,
+#    third and fourth position) a sequence just outside is refused by exact
+#    message and one exactly on the edge decodes to its bytes.
 #  * azure_arm_config_for_url: a URL naming no account or endpoint takes the
 #    configuration's; one naming the configured endpoint (scheme and host
 #    case-insensitive, a trailing / ignored) uses it; a different account,
@@ -160,6 +165,72 @@ def test_decoder_rules() raises:
     # A two-byte lead with nothing after it.
     with assert_raises(contains=_UTF8_MSG + _BLOB + "a%C3'"):
         _ = parse_azure_url(_BLOB + "a%C3")
+
+
+def _accepts(encoded: String, expected: List[UInt8]) raises:
+    """`_BLOB + encoded` parses and its path decodes to exactly `expected`."""
+    var url = _BLOB + encoded
+    var got = parse_azure_url(url).path.as_bytes()
+    assert_equal(len(got), len(expected), url)
+    for i in range(len(expected)):
+        assert_equal(Int(got[i]), Int(expected[i]), url)
+
+
+def _refuses(encoded: String) raises:
+    """`_BLOB + encoded` is refused as not UTF-8, naming the URL."""
+    var url = _BLOB + encoded
+    var refused = False
+    try:
+        _ = parse_azure_url(url)
+    except e:
+        assert_equal(String(e), _UTF8_MSG + url + "'", url)
+        refused = True
+    assert_true(refused, "accepted, expected a UTF-8 refusal: " + url)
+
+
+def test_utf8_bounds() raises:
+    # Unicode Table 3-7 (well-formed byte sequences), edge by edge. Each
+    # bound in _is_valid_utf8 has a refused row just outside it and an
+    # accepted row exactly on it, so loosening or tightening any one bound
+    # turns a row red.
+    # Lead bytes: C2 is the lowest two-byte lead (C0 and C1 only make
+    # overlong forms), F4 the highest four-byte lead.
+    _accepts("%C2%80", [0xC2, 0x80])  # U+0080
+    _refuses("%C1%BF")  # overlong U+007F
+    _accepts("%F4%8F%BF%BF", [0xF4, 0x8F, 0xBF, 0xBF])  # U+10FFFF
+    _refuses("%F5%80%80%80")  # lead above F4
+    _refuses("%FF%80")  # lead above F4, followed by a continuation byte
+    # Second byte after E0 is A0..BF (lower is an overlong three-byte form).
+    _accepts("%E0%A0%80", [0xE0, 0xA0, 0x80])  # U+0800
+    _refuses("%E0%9F%BF")  # overlong U+07FF
+    _refuses("%E0%80%AF")  # overlong '/'
+    # Second byte after ED is 80..9F (higher is a surrogate).
+    _accepts("%ED%9F%BF", [0xED, 0x9F, 0xBF])  # U+D7FF
+    # (ED A0 80, U+D800, is refused in test_decoder_rules.)
+    # E1..EF take any continuation byte; EF BF BF is the top of the range.
+    _accepts("%EF%BF%BF", [0xEF, 0xBF, 0xBF])  # U+FFFF
+    # Second byte after F0 is 90..BF (lower is an overlong four-byte form).
+    _accepts("%F0%90%80%80", [0xF0, 0x90, 0x80, 0x80])  # U+10000
+    _refuses("%F0%8F%BF%BF")  # overlong U+FFFF
+    _refuses("%F0%80%80%AF")  # overlong '/'
+    # F1..F3 take any continuation byte.
+    _accepts("%F3%BF%BF%BF", [0xF3, 0xBF, 0xBF, 0xBF])  # U+FFFFF
+    # Second byte after F4 is 80..8F (higher is above U+10FFFF).
+    # (F4 90 80 80 is refused in test_decoder_rules.)
+    # Continuation bytes are 80..BF at every position.
+    _accepts("%DF%BF", [0xDF, 0xBF])  # U+07FF
+    _refuses("%C2%7F")  # second byte below 80
+    _refuses("%C2%C0")  # second byte above BF
+    _refuses("%E1%7F%80")
+    _refuses("%E1%C0%80")
+    _refuses("%E1%80%7F")  # third byte below 80
+    _refuses("%E1%80%C0")  # third byte above BF
+    _refuses("%F1%7F%80%80")
+    _refuses("%F1%C0%80%80")
+    _refuses("%F1%80%7F%80")
+    _refuses("%F1%80%C0%80")
+    _refuses("%F1%80%80%7F")  # fourth byte below 80
+    _refuses("%F1%80%80%C0")  # fourth byte above BF
 
 
 comptime _SCHEME_MSG = (
@@ -383,6 +454,7 @@ def main() raises:
     test_accepted_urls()
     test_encoded_paths()
     test_decoder_rules()
+    test_utf8_bounds()
     test_refused_urls()
     test_arm_config_for_url()
     test_endpoint_scheme()
