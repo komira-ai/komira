@@ -12,8 +12,11 @@
 # Each case asserts the exact refusal on both decoders. Without the buffer
 # check the too-few-buffers cases abort the test process; without the STRUCT
 # check the length cases return columns (the "" result). The field-node cases
-# pin the existing per-node refusal for a STRUCT and a LIST. Controls: a
-# well-formed STRUCT batch and LIST batch decode on both paths.
+# pin the existing per-node refusal for a STRUCT and a LIST. The
+# FIXED_SIZE_BINARY, FIXED_SIZE_LIST and LIST_VIEW cases pin the byte width,
+# list size and child count the call sites pass to the count. Controls:
+# well-formed STRUCT, LIST, FIXED_SIZE_BINARY and FIXED_SIZE_LIST batches
+# decode on both paths, and a LIST_VIEW batch on the copy-on-read path.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal
@@ -57,6 +60,9 @@ comptime K_STRUCT2 = 1  # struct<a: int64, b: int64>
 comptime K_LIST = 2  # list<int64>
 comptime K_BVIEW = 3  # binary_view
 comptime K_I64_STRUCT1 = 4  # int64, struct<a: int64>
+comptime K_FSB4 = 5  # fixed_size_binary(4)
+comptime K_FSL1 = 6  # fixed_size_list<int64>(1)
+comptime K_LVIEW = 7  # list_view<int64>
 
 
 def _node(length: Int, nulls: Int = 0) -> FieldNode:
@@ -119,6 +125,26 @@ def _specs(kind: Int) raises -> Slab[ColumnTypeSpec]:
         s.append(ColumnTypeSpec.struct_of(kids^, names^))
     elif kind == K_LIST:
         s.append(ColumnTypeSpec.list_of(ColumnTypeSpec.leaf(ArrowType.INT64)))
+    elif kind == K_FSB4:
+        s.append(ColumnTypeSpec.fixed_size_binary(4))
+    elif kind == K_FSL1:
+        s.append(
+            ColumnTypeSpec.fixed_size_list_of(
+                ColumnTypeSpec.leaf(ArrowType.INT64), 1
+            )
+        )
+    elif kind == K_LVIEW:
+        var kids = Slab[ColumnTypeSpec]()
+        kids.append(ColumnTypeSpec.leaf(ArrowType.INT64))
+        s.append(
+            ColumnTypeSpec(
+                arrow_type=ArrowType.LIST_VIEW,
+                children=kids^,
+                field_names=List[String](),
+                type_ids=List[Int](),
+                inner_size=0,
+            )
+        )
     else:
         s.append(ColumnTypeSpec.leaf(ArrowType.BINARY_VIEW))
     return s^
@@ -186,6 +212,35 @@ def _list_buffers() -> List[BufferDescriptor]:
     var out = List[BufferDescriptor]()
     out.append(_b(0, 0))
     out.append(_b(64, 8))
+    out.append(_b(0, 0))
+    out.append(_b(0, 8))
+    return out^
+
+
+def _fsb4_buffers() -> List[BufferDescriptor]:
+    """FIXED_SIZE_BINARY(4) validity, values (one 4-byte value)."""
+    var out = List[BufferDescriptor]()
+    out.append(_b(0, 0))
+    out.append(_b(0, 4))
+    return out^
+
+
+def _fsl1_buffers() -> List[BufferDescriptor]:
+    """FIXED_SIZE_LIST validity, child validity, child values (5)."""
+    var out = List[BufferDescriptor]()
+    out.append(_b(0, 0))
+    out.append(_b(0, 0))
+    out.append(_b(0, 8))
+    return out^
+
+
+def _lview_buffers() -> List[BufferDescriptor]:
+    """LIST_VIEW validity, offsets [0], sizes [1], child validity, child
+    values (5)."""
+    var out = List[BufferDescriptor]()
+    out.append(_b(0, 0))
+    out.append(_b(64, 4))
+    out.append(_b(68, 4))
     out.append(_b(0, 0))
     out.append(_b(0, 8))
     return out^
@@ -293,6 +348,24 @@ def _check_list_buffers(path: Int) raises:
     )
 
 
+def _check_fixed_size_buffers(path: Int) raises:
+    """The FIXED_SIZE_BINARY count depends on the spec's byte width and the
+    FIXED_SIZE_LIST count on its list size and child count, which the call
+    site passes in: these cases fail if it passes 0 for either."""
+    assert_equal(
+        _err(path, K_FSB4, 1, _nodes(1), List[BufferDescriptor]()),
+        _reads(path, 0, 2, 0, 0),
+    )
+    assert_equal(
+        _err(path, K_FSB4, 1, _nodes(1), _first(_fsb4_buffers(), 1)),
+        _reads(path, 0, 2, 0, 1),
+    )
+    assert_equal(
+        _err(path, K_FSL1, 1, _nodes(1, 1), List[BufferDescriptor]()),
+        _reads(path, 0, 1, 0, 0),
+    )
+
+
 def _check_node_counts(path: Int) raises:
     assert_equal(
         _err(path, K_STRUCT1, 3, _nodes(3), _struct1_buffers()),
@@ -320,6 +393,8 @@ def _check_controls(path: Int) raises:
         _err(path, K_I64_STRUCT1, 3, _nodes(3, 3, 3), _i64_struct1_buffers()),
         "",
     )
+    assert_equal(_err(path, K_FSB4, 1, _nodes(1), _fsb4_buffers()), "")
+    assert_equal(_err(path, K_FSL1, 1, _nodes(1, 1), _fsl1_buffers()), "")
 
 
 def _check_struct_values(var cols: Slab[Column[HeapRegion]]) raises:
@@ -363,6 +438,29 @@ def test_nested_refuses_too_few_buffers_list() raises:
 
 def test_nested_zerocopy_refuses_too_few_buffers_list() raises:
     _check_list_buffers(NZC)
+
+
+def test_nested_refuses_too_few_buffers_fixed_size() raises:
+    _check_fixed_size_buffers(NESTED)
+
+
+def test_nested_zerocopy_refuses_too_few_buffers_fixed_size() raises:
+    _check_fixed_size_buffers(NZC)
+
+
+def test_nested_refuses_too_few_buffers_list_view() raises:
+    """LIST_VIEW (copy-on-read only) reads validity, offsets and sizes; its
+    count depends on the child count the call site passes in. The control
+    pins that a well-formed LIST_VIEW still decodes."""
+    assert_equal(
+        _err(NESTED, K_LVIEW, 1, _nodes(1, 1), _first(_lview_buffers(), 2)),
+        _reads(NESTED, 0, 3, 0, 2),
+    )
+    assert_equal(
+        _err(NESTED, K_LVIEW, 1, _nodes(1, 1), _first(_lview_buffers(), 4)),
+        _reads(NESTED, 1, 2, 3, 4),
+    )
+    assert_equal(_err(NESTED, K_LVIEW, 1, _nodes(1, 1), _lview_buffers()), "")
 
 
 def test_nested_refuses_too_few_buffers_view_variadic() raises:

@@ -145,14 +145,16 @@ def check_struct_child_length(
     leaves struct slots with no child value. The format text does not state
     that a longer child is invalid; this decoder refuses it as well, as a
     policy: the Arrow C++ IPC writer slices each child to the struct's
-    window before writing it, and arrow-rs's IPC reader
-    (`StructArray::try_new`) refuses a child whose length differs from the
-    struct's. The policy has an interoperability cost: a writer that
-    serialises C Data Interface arrays as stored (nanoarrow's IPC encoder
-    writes each child's own length) emits a longer child for a struct
-    sliced at offset 0, Arrow C++ reads such a stream (its validation needs
-    only child length >= struct offset + length), and this decoder refuses
-    it.
+    window before writing it, so it never writes a longer child. The
+    policy has an interoperability cost: a writer that serialises C Data
+    Interface arrays as stored (nanoarrow's IPC encoder writes each child's
+    own length) emits a longer child for a struct sliced at offset 0, and
+    this decoder refuses that stream. Arrow C++ reads it (its validation
+    needs only child length >= struct offset + length). arrow-rs's IPC
+    reader refuses it when the STRUCT has nulls (its validity length must
+    equal the child length, `StructArray::try_new`) or when the children's
+    lengths differ from each other; with no nulls it reads it and takes the
+    children's length.
     """
     if child_length != struct_length:
         raise Error(
