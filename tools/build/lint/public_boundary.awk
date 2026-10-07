@@ -61,11 +61,14 @@
 #               (example.com, example.net, example.org, *.example, *.test,
 #               *.invalid, *.localhost), the local part is noreply or
 #               no-reply (a commit trailer's address names no person), or
-#               the local part starts right after `://`: that is the user
-#               of a URL's authority (`scheme://user@host`, such as Hadoop
-#               ABFS's abfss://<container>@<account>.dfs.core.windows.net),
-#               and the host rule reads the host when the scheme reaches a
-#               network. `mailto:` and an address elsewhere in a URL are read.
+#               the local part starts right after `://` and the domain is a
+#               domain of <hosts> or under one: that is the user of a URL's
+#               authority on a host the ledger names (`scheme://user@host`,
+#               such as Hadoop ABFS's
+#               abfss://<container>@<account>.dfs.core.windows.net). A
+#               user before any other host (`s3://<user>@<host>/k`,
+#               `git+ssh://<user>@<host>/r`) is read, as are `mailto:` and an
+#               address elsewhere in a URL.
 #   commit_sha  In prose, a hex string shaped like a commit id: 7 to 12, or
 #               40, lowercase hex digits holding at least two changes
 #               between digit and letter, standing alone (no letter, digit,
@@ -267,8 +270,9 @@ function find_email(s,    rest, off, pos, e, at, local, dom) {
         at = index(e, "@")
         local = tolower(substr(e, 1, at - 1)); dom = tolower(substr(e, at + 1))
         if (local == "noreply" || local == "no-reply" || reserved(dom)) continue
-        # The userinfo of a URL's authority, right after `://`, is no address.
-        if (pos > 3 && substr(s, pos - 3, 3) == "://") continue
+        # The user of a URL's authority, right after `://`, is no address when
+        # the host is a domain of <hosts> or under one.
+        if (pos > 3 && substr(s, pos - 3, 3) == "://" && allowed(dom)) continue
         return e
     }
     return ""

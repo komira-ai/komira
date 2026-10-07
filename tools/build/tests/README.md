@@ -1013,8 +1013,9 @@ person, a private, shared or link-local address or any address written with
 a port, a URL host that is neither a reserved example name nor under a domain
 of [`tests/public_boundary_hosts.tsv`](../../../tests/public_boundary_hosts.tsv),
 an email address outside the reserved example domains (the user of a URL
-right after `://`, such as `abfss://<container>@<account>...`, is none), and a
-commit id in prose. Binary data and upstream bytes are not read. Its reader is
+right after `://` is none when its host is under a domain of the hosts ledger,
+such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
+host it is read), and a commit id in prose. Binary data and upstream bytes are not read. Its reader is
 [`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
 matches and what it cannot see (vocabulary is no shape); its action is
 [`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
