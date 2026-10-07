@@ -23,9 +23,9 @@
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 #
-# ALSO PINNED: the six v1 `Resource.body` arms (10 service, 11 job, 13 table,
-# 14 bucket, 20 service account, 25 grant) by number AND by which field each
-# fills; the retired field 4 is ignored; and every enum's ordinals in both
+# ALSO PINNED: the nine v1 `Resource.body` arms (10 service, 11 job, 13
+# table, 14 bucket, 15 queue, 20 service account, 21 topic, 25 grant, 28
+# subscription) by number AND by which field each fills; the retired field 4 is ignored; and every enum's ordinals in both
 # directions, held values undeclared. EVERY HELD NUMBER (each number of each
 # held range of each message) is pinned as undeclared by one table in
 # test_resource_held_numbers.mojo.
@@ -63,6 +63,13 @@
 # order; `Table.Field` 1 name and 2 type; `FieldType` STRING 1, NUMBER 2 and
 # BYTES 3. Each by wire bytes and by name, and restated in
 # `test_added_numbers_are_kept`.
+#
+# MESSAGING: the `queue` arm 15, the `topic` arm 21 and the `subscription`
+# arm 28 (by number and by the field each fills, here, and restated in
+# `test_added_numbers_are_kept`); `Access` SEND 5 and RECEIVE 6 (in
+# `test_enum_ordinals`, and restated). `Queue`, `Topic` and `Subscription`
+# field by field are in test_resource_messaging_numbers.mojo (this file is
+# past the size a Mojo source should stay under).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -615,6 +622,38 @@ def test_added_numbers_are_kept() raises:
     _str(tres, 1, "orders")
     _msg(tres, 13, tbl)
     _same(encode_proto(decode_proto[Resource](tres.copy())), tres, "Resource 13")
+
+    # Messaging: Resource 15 (a queue, max_deliveries 3: 5), 21 (a topic) and
+    # 28 (a subscription: topic 1, queue 2); Access 5 and 6 on a Uses line.
+    var bodies = List[List[UInt8]]()
+    bodies.append(List[UInt8]())
+    _uint(bodies[0], 3, 5)
+    bodies.append(List[UInt8]())
+    bodies.append(List[UInt8]())
+    _msg(bodies[2], 1, _ref("events"))
+    _msg(bodies[2], 2, _ref("work"))
+    var arms = [15, 21, 28]
+    for i in range(3):
+        var mres = List[UInt8]()
+        _str(mres, 1, "m")
+        _msg(mres, arms[i], bodies[i])
+        var what = String("Resource ") + String(arms[i])
+        var back = encode_proto(decode_proto[Resource](mres.copy()))
+        _same(back, mres, what)
+        # The topic arm is an EMPTY record, which `_same` drops as a zero
+        # value: its tag and zero length must be in the re-encoding.
+        var arm = List[UInt8]()
+        _empty(arm, arms[i])
+        var found = False
+        for at in range(len(back) - 2):
+            if back[at] == arm[0] and back[at + 1] == arm[1] and back[at + 2] == arm[2]:
+                found = True
+        assert_true(i != 1 or found, what + ": the empty topic arm was dropped")
+    for verb in range(5, 7):
+        var mu = List[UInt8]()
+        _msg(mu, 1, _ref("work"))
+        _uint(mu, 2, UInt64(verb))
+        _same(encode_proto(decode_proto[Uses](mu.copy())), mu, String("Access ") + String(verb))
     print("  test_added_numbers_are_kept: PASS")
 
 
@@ -631,14 +670,20 @@ def _arm_of(r: Resource) -> String:
         return "table"
     if r.bucket:
         return "bucket"
+    if r.queue:
+        return "queue"
     if r.service_account:
         return "service_account"
+    if r.topic:
+        return "topic"
     if r.grant:
         return "grant"
+    if r.subscription:
+        return "subscription"
     return ""
 
 
-def test_resource_body_arms_are_10_11_13_14_20_and_25() raises:
+def test_resource_body_arms() raises:
     """Each v1 body arm, by number AND by the field it fills.
 
     The arm numbers are the adapter registry's key (one adapter per arm), so a
@@ -649,15 +694,12 @@ def test_resource_body_arms_are_10_11_13_14_20_and_25() raises:
     names.append("job")
     names.append("table")
     names.append("bucket")
+    names.append("queue")
     names.append("service_account")
+    names.append("topic")
     names.append("grant")
-    var fields = List[Int]()
-    fields.append(10)
-    fields.append(11)
-    fields.append(13)
-    fields.append(14)
-    fields.append(20)
-    fields.append(25)
+    names.append("subscription")
+    var fields: List[Int] = [10, 11, 13, 14, 15, 20, 21, 25, 28]
     for i in range(len(names)):
         var field = fields[i]
         var b = List[UInt8]()
@@ -675,7 +717,7 @@ def test_resource_body_arms_are_10_11_13_14_20_and_25() raises:
             b,
             String("Resource.body field ") + String(field),
         )
-    print("  test_resource_body_arms_are_10_11_13_14_20_and_25: PASS")
+    print("  test_resource_body_arms: PASS")
 
 
 def test_field_3_is_retention_and_4_is_retired() raises:
@@ -951,7 +993,7 @@ def test_service_account_and_grant() raises:
     _empty(a, 20)
     var ra = decode_proto[Resource](a.copy())
     assert_equal(_arm_of(ra), "service_account", "body 20 is `service_account`")
-    assert_equal(ra._oneof0_case, 5, "the service account is the fifth arm")
+    assert_equal(ra._oneof0_case, 6, "the service account is the sixth arm")
     _same(encode_proto(ra), a, "Resource with a service account")
 
     var g = List[UInt8]()
@@ -979,7 +1021,7 @@ def test_service_account_and_grant() raises:
     _msg(r, 25, g)
     var rr = decode_proto[Resource](r.copy())
     assert_equal(_arm_of(rr), "grant", "body 25 is `grant`")
-    assert_equal(rr._oneof0_case, 6, "the grant is the sixth arm")
+    assert_equal(rr._oneof0_case, 8, "the grant is the eighth arm")
     assert_equal(rr.grant.value().principal.value().resource, "runner")
     _same(encode_proto(rr), r, "Resource with a grant")
 
@@ -1076,8 +1118,8 @@ def _enum_row(got_name: String, want_name: String, n: Int, what: String) raises:
 
 def test_enum_ordinals() raises:
     """Every enum value by number AND by name: the number is what is stored.
-    The held values (Output 5; Access 5, 6, 7 and 9; CellResource 4) render
-    as bare numbers, i.e. nothing has taken them."""
+    The held values (Output 5; Access 7 and 9; CellResource 4) render as bare
+    numbers, i.e. nothing has taken them."""
     var outputs = List[String]()
     outputs.append("OUTPUT_UNSET")
     outputs.append("URL")
@@ -1095,13 +1137,15 @@ def test_enum_ordinals() raises:
     access.append("READ")
     access.append("WRITE")
     access.append("READ_WRITE")
+    access.append("SEND")
+    access.append("RECEIVE")
     for n in range(len(access)):
         _enum_row(Access(n).json_name(), access[n], n, "Access")
         assert_equal(Access.from_json_name(access[n]).value, n)
     _enum_row(Access(8).json_name(), "DESCRIBE", 8, "Access")
     assert_equal(Access.from_json_name("DESCRIBE").value, 8)
-    # 5 SEND, 6 RECEIVE, 7 ACT_AS, 9 MANAGE: held.
-    for n in range(5, 11):
+    # 7 ACT_AS, 9 MANAGE: held.
+    for n in range(7, 11):
         if n == 8:
             continue
         assert_equal(Access(n).json_name(), String(n), "Access value held")
@@ -1169,7 +1213,7 @@ def main() raises:
     test_image_platform()
     test_secret_ref()
     test_added_numbers_are_kept()
-    test_resource_body_arms_are_10_11_13_14_20_and_25()
+    test_resource_body_arms()
     test_field_3_is_retention_and_4_is_retired()
     test_resource_header_fields()
     test_service()
