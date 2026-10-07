@@ -32,9 +32,10 @@
 #    a `map_input` key that is not a VALUE_MAP input, a map value with
 #    nothing in it, a required IMAGE input unbound, and (nested) an INT
 #    input passed a STRING input of the enclosing definition.
-# 6. THE KCI NAMESPACE: a definition named `kci.job` or `kci.other` is
-#    refused (kci ships none of that name and digest); `acme.job`, the same
-#    bytes in the author's namespace, is accepted.
+# 6. THE KCI NAMESPACE: a definition named `kci.job` whose digest is not
+#    the one kci ships is refused (the shipped list is named), and so is
+#    `kci.other`, which kci does not ship; `acme.job`, the same bytes in the
+#    author's namespace, is accepted.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -327,7 +328,7 @@ def test_the_kci_namespace() raises:
     it would stand in for kci's own), and a `kci.` name kci does not ship."""
     var body = String('"version":"1","component":[') + _B + "]}"
     var k1: List[String] = [String('{"name":"kci.job",') + body]
-    _one(k1, String(_EMPTY), "kci.job@1", "name", "the kci namespace holds the definitions kci ships, and kci.job@1 sha256:")
+    _one(k1, String(_EMPTY), "kci.job@1", "name", "is not one of them (kci ships: kci.job@1 sha256:")
     var k2: List[String] = [String('{"name":"kci.other",') + body]
     _one(k2, String(_EMPTY), "kci.other@1", "name", "the kci namespace holds the definitions kci ships")
     var k3: List[String] = [String('{"name":"acme.job",') + body]

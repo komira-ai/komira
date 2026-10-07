@@ -25,7 +25,8 @@ component exist only when an input is set. An instance binds its inputs by
 type: `input` (plain values and references), `image_input` (images) and
 `map_input` (`ValueMap`s). Anywhere, a `Ref.path` reaches an exported
 component of an instance. kci_cloud expands every instance into primitives
-before validating a list.
+before validating a list; the definitions kci ships (`kci.job`, `kci.app`)
+are data files of `kci_composites`.
 Every other number the `.proto` headers list is
 held: undeclared today, so it decodes as an unknown field, and declaring it
 later is an addition. A `secret` resource is the container only; a workload

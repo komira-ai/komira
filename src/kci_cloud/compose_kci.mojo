@@ -3,13 +3,15 @@
 #   definitions kci ships.
 # =============================================================================
 #
-# The definitions kci ships are DATA, read by the same loader as any
+# kci ships two definitions, `kci.job` and `kci.app`, as files of the
+# `kci_composites` package. They are DATA, read by the same loader as any
 # author's definition (compose.mojo's load), and nothing in expansion
 # branches on them. The one rule this module adds is that the namespace is
 # kci's: a definition named `kci.<name>` is refused at load unless its name,
-# version and digest are one of the rows below (none yet), so an author's
-# file cannot stand in for one of kci's. A changed definition is a new
-# version, so a row is added, never edited.
+# version and digest are one of the rows below, so an author's file named
+# `kci.job` cannot stand in for kci's. A changed definition is a new
+# version, so a row is added, never edited; the welded test of
+# `kci_composites` holds each shipped file to its row.
 # =============================================================================
 
 
@@ -32,8 +34,18 @@ struct ShippedDefinition(Copyable, Movable):
 
 def shipped_definitions() -> List[ShippedDefinition]:
     """Every definition kci ships, by name, version and digest
-    (`compose_load.definition_digest`): none yet."""
+    (`compose_load.definition_digest`)."""
     var l = List[ShippedDefinition]()
+    l.append(
+        ShippedDefinition(
+            String("kci.job"), String("1"), String("sha256:5f6725e11b62fc3659f232b0ec3e406cf1d01a4593c336f868dc16d728da8f35")
+        )
+    )
+    l.append(
+        ShippedDefinition(
+            String("kci.app"), String("1"), String("sha256:809b753a464621b58aae999d33a5efc9216e094010bccc814a9c330483d06d08")
+        )
+    )
     return l^
 
 
