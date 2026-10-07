@@ -10,7 +10,6 @@ src/komira_arrow_ipc/c_data_stream.mojo	the Arrow C Stream Interface (ArrowArray
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_error_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe, on the error paths
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_probe.mojo	the C ABI (ArrowArrayStream pointers) of the arrow_c_abi_probe shared library
-src/komira_avro/avro_codec.mojo	OCF block decompression through the C codec libraries
 src/komira_buffer/mmap_region.mojo	mmap and the komira_open_ro C shim
 src/komira_compression/bzip2_buffer.mojo	libbz2's buffer-to-buffer calls
 src/komira_compression/codec_libraries.mojo	the process-lifetime handles of libzstd, libbz2 and liblzma
@@ -21,4 +20,3 @@ src/komira_compression/zstd_frame.mojo	libzstd's one-shot frame calls
 src/komira_csv/csv_sink.mojo	pwrite into disjoint ranges of the output file
 src/komira_lz4/frame.mojo	liblz4, loaded once per process
 src/komira_objectstore/local_fs_conditional_store.mojo	the filesystem C shim (komira_fs_enoent, komira_fs_errno_name)
-src/komira_orc/orc_codec.mojo	the ORC compression codecs (libzstd, libz, liblz4 through dlopen)

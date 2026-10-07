@@ -15,6 +15,7 @@
 //! so the harness can tell a named refusal from a defect.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use komira_proto_codegen::aws_conformance::{Direction as CorpusDirection, IgnoreList};
@@ -109,22 +110,41 @@ fn driver_protocol(p: &str) -> Result<AwsProtocol, String> {
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    let args = match parse_args(&argv) {
+    let status = cli(&argv, &mut std::io::stderr());
+    if status != 0 {
+        std::process::exit(status);
+    }
+}
+
+/// The program over `argv` (the arguments after the program name), its
+/// diagnostics written to `err`. Returns the exit status: 2 for an argument
+/// refused before anything is read (the reason, then the usage line), 1 for
+/// a failed run, 0 otherwise.
+fn cli(argv: &[String], err: &mut dyn std::io::Write) -> i32 {
+    let args = match parse_args(argv) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("aws-conformance-gen: {e}");
-            eprintln!(
+            let _ = writeln!(err, "aws-conformance-gen: {e}");
+            let _ = writeln!(
+                err,
                 "usage: aws-conformance-gen --corpus <dir> --protocol <p> [--protocol <p>...] \
                  --ignore-list <file> --out <file.mojo>"
             );
-            std::process::exit(2);
+            return 2;
         }
     };
     if let Err(e) = run(&args) {
-        eprintln!("aws-conformance-gen: {e}");
-        std::process::exit(1);
+        let _ = writeln!(err, "aws-conformance-gen: {e}");
+        return 1;
     }
+    0
 }
+
+// The command line's refusals, run through `cli` (rust_test
+// :aws_conformance_gen_cli, welded into the binary).
+#[cfg(test)]
+#[path = "main_aws_conformance_gen_test.rs"]
+mod cli_test;
 
 struct Suite {
     module: String,

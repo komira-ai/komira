@@ -13,9 +13,11 @@
 #      verb the target's type accepts, values that are resolved (a build
 #      output or a release parameter must have been substituted by the deploy
 #      facade before a cloud ever sees the resource) in `env` of a service
-#      AND of a job, a variable set by `env` or by `secret_env` but not both,
-#      a secret reference with a name, and an image platform written as
-#      `<os>/<cpu>` (empty means `linux/amd64`). And the data rules:
+#      AND of a job, and an image platform written as `<os>/<cpu>` (empty
+#      means `linux/amd64`). And the secret rules (secrets.mojo): no `uses`
+#      on a secret; each `secret_env` entry set by it and not also by
+#      `env`, naming one of a `name` and a `secret`, its `secret` a secret
+#      resource read by the identity that receives it. And the data rules:
 #      `retention` only on a type that takes one (a service or a job is
 #      deleted with its resource) and only DELETE or KEEP; and the rules of
 #      the data types (data.mojo): no `uses` on a table or a bucket (it runs
@@ -76,6 +78,7 @@ from kci_cloud.catalog import (
     FIELD_GRANT,
     FIELD_JOB,
     FIELD_QUEUE,
+    FIELD_SECRET,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_SUBSCRIPTION,
@@ -92,6 +95,7 @@ from kci_cloud.clouds import Clouds
 from kci_cloud.data import data_findings
 from kci_cloud.feed import feeds_of
 from kci_cloud.messaging import messaging_findings
+from kci_cloud.secrets import secret_env_findings, secret_findings
 from kci_cloud.grants import (
     GrantEdge,
     cell_accepted,
@@ -322,31 +326,6 @@ def _check_image(owner: String, path: String, r: Resource, mut out: List[Finding
                 ),
             )
         )
-
-
-def _check_secret(
-    owner: String,
-    path: String,
-    also_in_env: Bool,
-    name: String,
-    mut out: List[Finding],
-):
-    """One `secret_env` entry: a reference with a name, to a variable that
-    `env` does not also set (the container would get one of two values, and
-    which one is the cloud's choice, not the author's)."""
-    if also_in_env:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String(
-                    "the variable is set by env and by secret_env; set it in one"
-                ),
-            )
-        )
-    if name.byte_length() == 0:
-        out.append(Finding(FINDING_GRAPH, owner, path, String("a secret reference with no name")))
 
 
 def _type_of(catalog: Catalog, r: Resource) -> String:
@@ -725,6 +704,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
         if field == FIELD_QUEUE or field == FIELD_TOPIC or field == FIELD_SUBSCRIPTION:
             out.extend(messaging_findings(resources, field, r))
             continue
+        if field == FIELD_SECRET:
+            out.extend(secret_findings(field, r))
+            continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
             if len(r.uses) > 0:
@@ -769,14 +751,6 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                     entry.value,
                     out,
                 )
-            for entry in svc.secret_env.items():
-                _check_secret(
-                    id,
-                    String("service.secret_env.") + entry.key,
-                    entry.key in svc.env,
-                    entry.value.name,
-                    out,
-                )
         if field == FIELD_JOB:
             ref job = r.job.value()
             if job.run_as:
@@ -790,14 +764,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                     entry.value,
                     out,
                 )
-            for entry in job.secret_env.items():
-                _check_secret(
-                    id,
-                    String("job.secret_env.") + entry.key,
-                    entry.key in job.env,
-                    entry.value.name,
-                    out,
-                )
+        out.extend(secret_env_findings(resources, r))
         for u in range(len(r.uses)):
             ref use = r.uses[u]
             var has = Bool(use.target)
