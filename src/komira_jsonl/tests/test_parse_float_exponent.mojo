@@ -15,7 +15,8 @@
 #     stops accumulating at the first prefix of its digits that reaches
 #     the input length plus the margin). 1e30800 catches a margin
 #     of 301 or less, 1(19 zeros)e-3300 one of 304 or less, and 9e-3240
-#     one of 317 or less (it is held at 9e-324, a nonzero subnormal). A
+#     one of 317 or less (it is held at 9e-324 for a margin from 26 to
+#     317 and at 9e-32 below that, nonzero either way). A
 #     margin of 318 is the smallest correct one: the shortest input that
 #     needs the cap, 9e-<digits>, reads as zero only when input length
 #     plus margin is at least 325.
@@ -134,8 +135,8 @@ def test_exponent_saturates() raises:
     # finite values (1e30800 as 1e308, 1(19 zeros)e-3300 as a subnormal);
     # they must read as +Inf and +0.0. With any margin from 305 to 317 both
     # of those still read correctly, but 9e-3240 (7 bytes) is held at
-    # 9e-324 (the prefix 324) for every margin of 317 or less, a nonzero
-    # subnormal; it must read as +0.0.
+    # 9e-324 (the prefix 324) for every margin from 26 to 317 (at 9e-32,
+    # the prefix 32, below that), a nonzero value; it must read as +0.0.
     _check("1e30800", POS_INF)
     _check("1" + _zeros(19) + "e-3300", POS_ZERO)
     _check("9e-3240", POS_ZERO)
