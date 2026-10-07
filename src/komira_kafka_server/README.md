@@ -22,14 +22,33 @@ the Mojo standard library. A decoder refuses truncated or inconsistent input
 by raising.
 
 Next to it, `produce_error_for` (in `komira_kafka_server.produce_error`) maps
-the error a partition append raised to its Produce error code, using
-`komira_objectstore`'s error classifiers, the package's one dependency. A win
-in a reaped manifest slot, a fenced writer and exhausted append retries are
+the error a partition append raised to its Produce error code. A win in a
+reaped manifest slot, a fenced writer and exhausted append retries are
 `NOT_LEADER_OR_FOLLOWER` (nothing was written; retry); an append whose outcome
-is unknown is `REQUEST_TIMED_OUT`.
+is unknown is `REQUEST_TIMED_OUT`. It matches the fixed tokens of the object
+store's error texts (`slot_reaped:` and `log_start_unread:` as the leading
+token, `lease_fenced` anywhere, `(retryable)` with `exhausted`) by its own
+copies, so the package has no dependencies; the test
+`tests/kafka_produce_error_tokens` holds the copies equal to
+`komira_objectstore`'s.
 
 Every example below runs as a test when the package is built, so it cannot
 go stale.
+
+## A Produce error code
+
+```mojo
+from komira_kafka_server.produce_error import produce_error_for
+from komira_kafka_server.wire.produce_fetch import ERROR_NOT_LEADER_OR_FOLLOWER, ERROR_REQUEST_TIMED_OUT, ERROR_UNKNOWN_SERVER_ERROR
+from std.testing import assert_equal
+
+# Nothing was committed: the client retries.
+assert_equal(produce_error_for("slot_reaped: CasManifestStore.append (retryable): ..."), ERROR_NOT_LEADER_OR_FOLLOWER)
+# The outcome is unknown, whatever the cause spells.
+assert_equal(produce_error_for("log_start_unread: ... cause: slot_reaped lease_fenced"), ERROR_REQUEST_TIMED_OUT)
+# A sentinel counts only as the leading token.
+assert_equal(produce_error_for("segment PUT failed: slot_reaped: ..."), ERROR_UNKNOWN_SERVER_ERROR)
+```
 
 ## Primitives and framing
 

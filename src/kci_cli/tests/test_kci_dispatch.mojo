@@ -940,9 +940,14 @@ def test_a_local_channel_is_refused_for_a_container_validation() raises:
     assert_equal(
         kci_main_with(_local(m, "--only", "validation:install-env", "--only", "validation:install"), steps, rec), 2
     )
-    assert_true(
-        _last(rec).error.message.find(String("the selected validation 'install' is CONDA_INSTALL_SMOKE, not CONDA_INSTALL_ENV")) >= 0,
+    # exactly (args.mojo `usage_error` adds no `kci: `; `_stop` prints one)
+    assert_equal(
         _last(rec).error.message,
+        String(
+            "--channel names a local channel, which only a validation-only run reads, and the selected validation"
+            " 'install' is CONDA_INSTALL_SMOKE, not CONDA_INSTALL_ENV: a container cannot read this machine's"
+            " directory"
+        ),
     )
     assert_equal(len(steps.validated), 0)
 
@@ -953,9 +958,13 @@ def test_a_local_channel_is_refused_under_github_actions() raises:
     _under_actions(steps, _workflow(m))
     var rec = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_local(m, "--only", "validation:install-env"), steps, rec), 2)
-    assert_true(
-        _last(rec).error.message.find(String("--channel names a local channel, and GITHUB_ACTIONS is true")) >= 0,
+    # exactly: `_stop` prints it after its one `kci: `
+    assert_equal(
         _last(rec).error.message,
+        String(
+            "--channel names a local channel, and GITHUB_ACTIONS is true: a workflow validates only what was"
+            " published, from the step's channel"
+        ),
     )
     assert_equal(len(steps.validated), 0)
     # refused before the workflow is read
