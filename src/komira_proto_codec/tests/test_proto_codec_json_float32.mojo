@@ -50,14 +50,19 @@
 #       range. Catches: an exponent clamped at a fixed bound, which misreads
 #       the offset cases (0.(1000001 zeros)1e1000002 read as 10^-900002,
 #       i.e. zero).
-#   S1  a strided sweep over float32 bit patterns (about 262000 values,
-#       every exponent): each round-trips bit-exactly through encode_json /
-#       decode_json, has at most 9 significant digits, and no decimal one
-#       digit shorter reads back as the same float32. Catches: a writer that
-#       is not round-trip exact (the standard library's `String(Float32)`
-#       fails ~0.5% of this sweep at small magnitudes), one that prints the
-#       float64 expansion (up to 17 digits), and one that pads to a fixed 9
-#       digits (`%.9g`).
+#   S1  a strided sweep over float32 bit patterns (every 262147th, 16384
+#       values, every exponent): each round-trips bit-exactly through
+#       encode_json / decode_json, has at most 9 significant digits, and no
+#       decimal one digit shorter reads back as the same float32. Catches: a
+#       writer that is not round-trip exact (the standard library's
+#       `String(Float32)` fails ~0.5% of a strided sweep at small
+#       magnitudes), one that prints the float64 expansion (up to 17
+#       digits), one that pads to a fixed 9 digits (`%.9g`), and a digit
+#       defect hitting about 1 value in 1000. The sweep 16 times denser
+#       (every 16411th pattern) is the standalone test
+#       `test_float32_json_sweep`: at that density each value's three exact
+#       reads cost more than a welded test compiled without optimization
+#       may take.
 # =============================================================================
 
 from std.math import isinf, isnan
@@ -666,8 +671,8 @@ def test_s1_sweep_round_trip() raises:
                     assert_true(False, "sweep: too many digits: " + json)
                 _no_shorter_decimal(json, v)
         checked += 1
-        bits += 16411
-    assert_true(checked > 260000, "sweep covered the space")
+        bits += 262147
+    assert_true(checked > 16000, "sweep covered the space")
     print("  test_s1_sweep_round_trip: PASS (", checked, "values )")
 
 

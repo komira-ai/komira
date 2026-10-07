@@ -70,3 +70,16 @@ mojo_test(
     deps = [":komira_proto_codec"],
     optimization_level = "3",
 )
+
+# The welded S1 sweep at 16 times its density: every 16411th float32 bit
+# pattern (about 262000 values) through the writer and the exact reader,
+# with the shortest-digits checks. It catches a sparse digit defect on
+# mid-binade mantissas that the welded sample (16384 values) misses; at
+# this density the exact reads are too slow for a welded test built
+# without optimization (a coverage build), so it runs here, optimized.
+mojo_test(
+    name = "test_float32_json_sweep",
+    srcs = ["tests/test_float32_json_sweep.mojo"],
+    deps = [":komira_proto_codec"],
+    optimization_level = "3",
+)
