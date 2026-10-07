@@ -166,6 +166,37 @@
 #                 ACL policy (above).
 # Every shape hosts it, so no shape declares it NOT_YET.
 #
+# NAMES (dns.mojo lowers them): a DNS zone has one role, `zone`; a DNS
+# record one, `record`; a certificate `cert`, plus its validation helpers
+# where they are objects of their own:
+#   * `generic`   zone -> zone; record -> record; certificate -> cert.
+#   * `aws`       zone -> AWS::Route53::HostedZone; record ->
+#                 AWS::Route53::RecordSet; certificate ->
+#                 AWS::CertificateManager::Certificate (DNS-validated in the
+#                 zone; its validation records are written by the
+#                 certificate's own validation settings, not as nodes).
+#   * `gcp`       zone -> dns.googleapis.com/ManagedZone; record ->
+#                 dns.googleapis.com/ResourceRecordSet; certificate ->
+#                 dnsauth (certificatemanager.googleapis.com/DnsAuthorization,
+#                 for the certificate's first name), authrec (the
+#                 dns.googleapis.com/ResourceRecordSet that authorization
+#                 asks for, in the zone) and cert
+#                 (certificatemanager.googleapis.com/Certificate). One
+#                 authorization covers one name and its wildcard, so a
+#                 certificate for any other name is a limit here.
+#   * `azure`     zone -> Microsoft.Network/dnsZones; record ->
+#                 Microsoft.Network/dnsZones/<TYPE> (the ARM type names the
+#                 record type: `<TYPE>` is replaced by it, e.g.
+#                 Microsoft.Network/dnsZones/CNAME); certificate ->
+#                 Microsoft.App/managedEnvironments/managedCertificates, in
+#                 the cell's environment. Such a certificate covers ONE name
+#                 and no wildcard (`single_name_certificates`), so a
+#                 certificate with more names, or a wildcard, is a limit.
+#   * `onprem`    NOT_YET for all three: which DNS server an onprem cell
+#                 owns (Q18) and which issuer signs its certificates (Q19)
+#                 are open design questions, so the shape declares them
+#                 absent rather than pick one.
+#
 # A shape's ABSENCES (`not_yet`) are the catalog types it does not host yet,
 # each with its reason; the fake cloud built with the shape declares them,
 # and is complete only when there are none. A grant resource has no row: its roles
@@ -178,6 +209,9 @@
 from kci_cloud import (
     Absence,
     FIELD_BUCKET,
+    FIELD_CERTIFICATE,
+    FIELD_DNS_RECORD,
+    FIELD_DNS_ZONE,
     FIELD_JOB,
     FIELD_QUEUE,
     FIELD_SECRET,
@@ -206,6 +240,15 @@ comptime ROLE_QUEUE = "queue"
 comptime ROLE_TOPIC = "topic"
 comptime ROLE_SUB = "sub"
 comptime ROLE_SECRET = "secret"
+comptime ROLE_ZONE = "zone"
+comptime ROLE_RECORD = "record"
+comptime ROLE_CERT = "cert"
+comptime ROLE_DNS_AUTH = "dnsauth"
+"""gcp: the DNS authorization a certificate is validated by."""
+comptime ROLE_AUTH_RECORD = "authrec"
+"""gcp: the record that DNS authorization asks for, in the zone."""
+comptime RECORD_TYPE_SLOT = "<TYPE>"
+"""In a record row's kind, replaced by the record's type."""
 comptime ROLE_POLICY = "policy"
 """aws: the queue policy that lets the topics feeding a queue send to it."""
 comptime ROLE_RULES = "rules"
@@ -224,10 +267,21 @@ comptime _K8S_ROLE = "rbac.authorization.k8s.io/v1/Role"
 comptime _FIRESTORE_INDEX = "firestore.googleapis.com/Index"
 comptime _PUBSUB_TOPIC = "pubsub.googleapis.com/Topic"
 comptime _PUBSUB_SUB = "pubsub.googleapis.com/Subscription"
+comptime _CLOUD_DNS_RECORD = "dns.googleapis.com/ResourceRecordSet"
 comptime ONPREM_MESSAGING_REASON = (
     "the onprem message backing of a queue, a topic and a subscription is an"
     " open question (Q16: RabbitMQ, NATS JetStream, Apache Kafka or Redis"
     " Streams)"
+)
+comptime ONPREM_DNS_REASON = (
+    "the onprem DNS server that holds a zone and its records is an open"
+    " question (Q18: PowerDNS, CoreDNS, ExternalDNS with PowerDNS or RFC 2136,"
+    " or the customer's own DNS)"
+)
+comptime ONPREM_CERTIFICATE_REASON = (
+    "the onprem issuer of a managed certificate is an open question (Q19:"
+    " cert-manager with an ACME issuer, a Vault PKI issuer, the customer's CA,"
+    " or step-ca)"
 )
 comptime ONPREM_TABLE_REASON = (
     "the onprem datastore that backs a table is an open question (Q17:"
@@ -272,6 +326,8 @@ struct ProviderShape(Copyable, Movable, Deinitable):
     var rows: List[ShapeRow]
     var grants: List[GrantRow]
     var not_yet: List[Absence]
+    var single_name_certificates: Bool
+    """A certificate covers one name and no wildcard on this shape."""
 
     def __init__(
         out self,
@@ -279,17 +335,20 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         var rows: List[ShapeRow],
         var grants: List[GrantRow],
         var not_yet: List[Absence] = List[Absence](),
+        single_name_certificates: Bool = False,
     ):
         self.name = name
         self.rows = rows^
         self.grants = grants^
         self.not_yet = not_yet^
+        self.single_name_certificates = single_name_certificates
 
     def __init__(out self, *, copy: Self):
         self.name = copy.name.copy()
         self.rows = copy.rows.copy()
         self.grants = copy.grants.copy()
         self.not_yet = copy.not_yet.copy()
+        self.single_name_certificates = copy.single_name_certificates
 
     def hosts(self, field: Int) -> Bool:
         """False for a type the shape declares NOT_YET."""
@@ -354,6 +413,9 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String("topic")))
         r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String("subscription")))
         r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("secret")))
+        r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("zone")))
+        r.append(ShapeRow(FIELD_DNS_RECORD, String(ROLE_RECORD), String("record")))
+        r.append(ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("certificate")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("grant"), String("")))
         return ProviderShape(String("generic"), r^, g^)
@@ -375,6 +437,11 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String("AWS::SNS::Topic")))
         r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String("AWS::SNS::Subscription")))
         r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("AWS::SecretsManager::Secret")))
+        r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("AWS::Route53::HostedZone")))
+        r.append(ShapeRow(FIELD_DNS_RECORD, String(ROLE_RECORD), String("AWS::Route53::RecordSet")))
+        r.append(
+            ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("AWS::CertificateManager::Certificate"))
+        )
         var g = List[GrantRow]()
         g.append(GrantRow(FIELD_SERVICE, String("AWS::Lambda::Permission"), String("")))
         g.append(GrantRow(TARGET_ANY, String("AWS::IAM::RolePolicy"), String("")))
@@ -401,6 +468,17 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String(_PUBSUB_TOPIC)))
         r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String(_PUBSUB_SUB)))
         r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("secretmanager.googleapis.com/Secret")))
+        r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("dns.googleapis.com/ManagedZone")))
+        r.append(ShapeRow(FIELD_DNS_RECORD, String(ROLE_RECORD), String(_CLOUD_DNS_RECORD)))
+        r.append(
+            ShapeRow(
+                FIELD_CERTIFICATE, String(ROLE_DNS_AUTH), String("certificatemanager.googleapis.com/DnsAuthorization")
+            )
+        )
+        r.append(ShapeRow(FIELD_CERTIFICATE, String(ROLE_AUTH_RECORD), String(_CLOUD_DNS_RECORD)))
+        r.append(
+            ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("certificatemanager.googleapis.com/Certificate"))
+        )
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("setIamPolicy"), String("")))
         return ProviderShape(String("gcp"), r^, g^)
@@ -437,6 +515,19 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             )
         )
         r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("Microsoft.KeyVault/vaults/secrets")))
+        r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("Microsoft.Network/dnsZones")))
+        r.append(
+            ShapeRow(
+                FIELD_DNS_RECORD, String(ROLE_RECORD), String("Microsoft.Network/dnsZones/") + String(RECORD_TYPE_SLOT)
+            )
+        )
+        r.append(
+            ShapeRow(
+                FIELD_CERTIFICATE,
+                String(ROLE_CERT),
+                String("Microsoft.App/managedEnvironments/managedCertificates"),
+            )
+        )
         var g = List[GrantRow]()
         g.append(
             GrantRow(
@@ -446,7 +537,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             )
         )
         g.append(GrantRow(TARGET_ANY, String("Microsoft.Authorization/roleAssignments"), String("")))
-        return ProviderShape(String("azure"), r^, g^)
+        return ProviderShape(String("azure"), r^, g^, single_name_certificates=True)
 
     @staticmethod
     def onprem() -> ProviderShape:
@@ -476,6 +567,9 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         later.append(Absence(FIELD_QUEUE, NOT_YET, String(ONPREM_MESSAGING_REASON)))
         later.append(Absence(FIELD_TOPIC, NOT_YET, String(ONPREM_MESSAGING_REASON)))
         later.append(Absence(FIELD_SUBSCRIPTION, NOT_YET, String(ONPREM_MESSAGING_REASON)))
+        later.append(Absence(FIELD_DNS_ZONE, NOT_YET, String(ONPREM_DNS_REASON)))
+        later.append(Absence(FIELD_DNS_RECORD, NOT_YET, String(ONPREM_DNS_REASON)))
+        later.append(Absence(FIELD_CERTIFICATE, NOT_YET, String(ONPREM_CERTIFICATE_REASON)))
         return ProviderShape(String("onprem"), r^, g^, later^)
 
 
