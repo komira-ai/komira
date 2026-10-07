@@ -1,0 +1,27 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Join gather and payload kernels: the unrolled and narrow-width gathers of the deferred join assembly, its row-range-major work plan, build-side payload narrowing and its widen at the leaf exit, the parallel selection flatten, the build-key extraction, and three route counters.
+mojo_library(
+    name = "komira_dispatch_join_kernels",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_plan_expr:komira_plan_expr",
+    ],
+    test_srcs = [
+        # the narrow half's admission ladder, refusals and round trips
+        "tests/test_join_payload_narrow_exec.mojo",
+        # the widen and the shipped gather over a narrowed source
+        "tests/test_join_payload_widen.mojo",
+        # the selection egress against an absolute oracle
+        "tests/test_selection_flatten_parallel.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
