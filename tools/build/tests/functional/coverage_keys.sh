@@ -18,12 +18,14 @@
 #     with it off (its package is the compiler's output) and, with it on, a
 #     join whose inputs gained the gate and nothing else;
 #   - with it off, no coverage action (category mojo_build_cov_test,
-#     mojo_cov_run, mojo_cov_gate, mojo_emit_cov_bc, mojo_cov_pgo_link or
-#     mojo_cov_branch_run, or an output under cov/);
+#     mojo_cov_run, mojo_cov_gate, mojo_emit_cov_bc, mojo_cov_pgo_link,
+#     mojo_cov_branch_run, mojo_cov_branch_annotate or
+#     mojo_cov_branch_classify, or an output under cov/);
 #   - with it on, every new action is a coverage action, and there is one
 #     mojo_build_cov_test, one mojo_cov_run, one mojo_emit_cov_bc, one
-#     mojo_cov_pgo_link and one mojo_cov_branch_run per test (the count in
-#     the table) and one mojo_cov_gate;
+#     mojo_cov_pgo_link, one mojo_cov_branch_run, one mojo_cov_branch_annotate
+#     and one mojo_cov_branch_classify per test (the count in the table) and
+#     one mojo_cov_gate;
 #   - with it unset (`-c komira.coverage=`, which clears a global value), every
 #     fact is the one of `=false`: the default is off;
 #   - on darwin-arm64 with it on, no target has the `coverage_debug`, the
@@ -278,7 +280,10 @@ awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" -v NMOVED="$nm" '
     }
     FILENAME ~ /_false\.facts$/ { off[$1 "\t" $2] = $3; offk[$1] = 1; next }
     { on[$1 "\t" $2] = $3; onk[$1] = 1 }
-    BEGIN { branchcat["mojo_emit_cov_bc"] = 1; branchcat["mojo_cov_pgo_link"] = 1; branchcat["mojo_cov_branch_run"] = 1 }
+    BEGIN {
+        branchcat["mojo_emit_cov_bc"] = 1; branchcat["mojo_cov_pgo_link"] = 1; branchcat["mojo_cov_branch_run"] = 1
+        branchcat["mojo_cov_branch_annotate"] = 1; branchcat["mojo_cov_branch_classify"] = 1
+    }
     END {
         bad = ""
         m = split(TARGETS, ls, "\n")
@@ -319,5 +324,5 @@ awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" -v NMOVED="$nm" '
         }
         if (plats != nt) bad = bad "; the execution platform of " plats " of " nt " targets was compared"
         if (bad != "") { print "FAIL  coverage keys: " substr(bad, 3); exit 1 }
-        print "PASS  coverage keys: with -c komira.coverage=true, the " plats " targets keep their execution platform, and the " rel " release actions are all there, " cmds " command lines, " ins " input sets and " execs " sets of execution attributes unchanged, but " joins " join(s) whose inputs gained one coverage run per test and the gate, and " (bares + 0) " join(s) of a library with no test that exist only with it; the " nb " mojo_build_cov_test, " nr " mojo_cov_run, " ng " mojo_cov_gate, " (nbr + 0) " branch coverage (mojo_emit_cov_bc, mojo_cov_pgo_link, mojo_cov_branch_run, one each per test, none a join input) and " other " other coverage actions exist only with it; unset is false; on darwin-arm64 none of the " ND " targets has a coverage attribute; a build with it on after one with it off ran " NRAN " action(s) of the built targets, " NMOVED " of them (coverage actions and joins only) under a new digest"
+        print "PASS  coverage keys: with -c komira.coverage=true, the " plats " targets keep their execution platform, and the " rel " release actions are all there, " cmds " command lines, " ins " input sets and " execs " sets of execution attributes unchanged, but " joins " join(s) whose inputs gained one coverage run per test and the gate, and " (bares + 0) " join(s) of a library with no test that exist only with it; the " nb " mojo_build_cov_test, " nr " mojo_cov_run, " ng " mojo_cov_gate, " (nbr + 0) " branch coverage (mojo_emit_cov_bc, mojo_cov_pgo_link, mojo_cov_branch_run, mojo_cov_branch_annotate, mojo_cov_branch_classify, one each per test, none a join input) and " other " other coverage actions exist only with it; unset is false; on darwin-arm64 none of the " ND " targets has a coverage attribute; a build with it on after one with it off ran " NRAN " action(s) of the built targets, " NMOVED " of them (coverage actions and joins only) under a new digest"
     }' "$LOG/coverage_keys_false.facts" "$LOG/coverage_keys_true.facts"

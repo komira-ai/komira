@@ -700,7 +700,12 @@ assembly lists are generated but not built yet.
   LLVM profile runtime (`[coverage][pgo_bin][<test>]`, `mojo_cov_pgo_link`),
   and run through the same `gate_runner.sh` with `LLVM_PROFILE_FILE` set,
   whose merged profile is `[coverage][branch][<test>]` (`cov/branch/<test>.profdata`,
-  `mojo_cov_branch_run`; [branch coverage runs](../coverage/branch/README.md)).
+  `mojo_cov_branch_run`), that profile applied to the bitcode by the same
+  lld as IR text (`[coverage][branch_ir][<test>]`, `mojo_cov_branch_annotate`),
+  and its branches in the library's sources, each a source decision or a
+  known compiler-made branch, as lcov `BRDA` records
+  (`[coverage][branch_info][<test>]`, `cov/branch/<test>.info`,
+  `mojo_cov_branch_classify`; [branch coverage runs](../coverage/branch/README.md)).
   A `test_env` setting `LLVM_PROFILE_FILE` is refused.
 
 and, per library, with tests or without:
@@ -725,7 +730,7 @@ gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of `policy.bzl`
 coverage runs only, and their gate, `<name>_cov_gate`, is what their conda
 package waits for. `[coverage]` is the binaries, the reports and the gate's
 outputs; the branch coverage files are only its sub-targets `[bc]`,
-`[pgo_bin]` and `[branch]`.
+`[pgo_bin]`, `[branch]`, `[branch_ir]` and `[branch_info]`.
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true

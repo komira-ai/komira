@@ -130,9 +130,11 @@ With coverage on, each test is also emitted as LLVM bitcode, instrumented
 with IR profile counters by the Mojo package's lld, linked with the LLVM
 profile runtime and run through the release gate's runner
 ([branch coverage runs](../coverage/branch/README.md)); its merged profile
-is `[coverage][branch][<test>]`. Nothing waits for it yet (test 41's
-`coverage_keys.sh` counts one of each action per test, and no join input
-among them). [`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs
+is `[coverage][branch][<test>]`, that profile applied to the bitcode is
+`[coverage][branch_ir][<test>]`, and the branch records of the library's
+sources (`cov_branch_classify`) are `[coverage][branch_info][<test>]`.
+Nothing waits for them yet (test 41's `coverage_keys.sh` counts one of each
+action per test, and no join input among them). [`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs
 these checks:
 
 | check | what it proves | the defect planted to see it go red |
@@ -144,6 +146,12 @@ these checks:
 | [`:reproducible_branch`, `:reproducible_pgo_bin`](functional/coverage/BUCK) | `repro_a` and `repro_b` (test 41's `:reproducible`) emit the bitcode of one test and instrument and link it in two actions each with different keys, so two sandboxes: the two bitcode files have one sha256, and so do the two instrumented binaries. No `--no-remote-cache` | |
 | `tests//negative/coverage:branchenv` | must fail at analysis with `test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself` | it is the planted defect |
 | [`:link_line`](functional/coverage/BUCK) and `tests//negative/coverage:branchlinkline` | the line zig is given when `mojo build` links `test_score_arms` through `mojo_wrapper.sh` (unchanged) and the line `cov_branch_link.sh` gives it for that test's bitcode, both recorded by a stand-in zig ([`link_line.sh`](functional/coverage/link_line.sh)), are the same but for the object and one whole-archive profile runtime: the branch binary is linked as the release test is. `branchlinkline` must fail with `the branch coverage link is not the release link plus the profile runtime` | `branchlinkline`: a `cov_branch_link.sh` copy without `-lm` |
+| [`:branch_info`](functional/coverage/BUCK) | the branch records of `test_score_arms`'s run are [`golden/test_score_arms.info`](functional/coverage/golden/test_score_arms.info) byte for byte (`report.sh` golden): the `if` and both `elif`s of `classify_score`, which Mojo puts on the `if`'s line and column (4,5), are three records (`4,5:br:0/3`, `1/3`, `2/3`: 0,4, 1,3 and 1,2; arm 0 of the `if` is the never-taken "invalid"), and the `or` (4,18) and `and` (6,22) are selects with their right operands derived (`rhs` 0,4 and 1,1); `shapes.mojo` gives a `while`, one record for its `range(` loop's two branches, a ternary select, an `or` chain whose first right operand is derived from the second select, and the `if` of a plain `@always_inline` helper at its own line; `test_gate_env`, which calls none of the library, gives an empty file. The classifier's own cases ([`cov_branch_classify_cases.sh`](../coverage/branch/cov_branch_classify_cases.sh)) gate every build of it | the classifier summing branches of one location in one function (the `:n` ordinal dropped: `4,5:br` read 2,9, both arms covered although the "invalid" arm never ran), seen red in its cases' golden |
+| `tests//negative/coverage:branchmissing[coverage][branch_ir][test_one]` | must fail with `no profile data available for function`: a `cov_branch_run.sh` copy merges the profile with `--no-function=main`, so the profile lacks a function of the bitcode (as a profile of other bitcode would), which the annotation refuses (`-pgo-warn-missing-function`) rather than read as never run | it is the planted defect |
+| `tests//negative/coverage:branchweights[coverage][branch_ir][test_one]` | must fail with `already holds branch weights`: a `cov_branch_annotate.sh` copy first applies the profile and writes the module back as bitcode (lld's `--plugin-opt=emit-llvm`), so the bitcode the annotation reads holds branch weights before the profile is applied, which `pgo-instr-use` would keep on branches that never ran | it is the planted defect |
+| `tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]` | must fail with `may be a decision of count_down`: the library's helper is declared `@always_inline("nodebug")`, so its `while` is a br at the location of its call, `count_down(`, which the classifier refuses rather than take for a compiler-made branch | the classifier's `call(` class taken for any callee (its cases' `nodebug call`) |
+| `tests//negative/coverage:branchretor[coverage][branch_info][test_either]` | must fail with `the right operand of this 'or' is not counted`: `return a or b` is a select whose result no branch tests, so when `b` decides cannot be counted | the classifier writing the left operand alone (its cases' `or not tested`) |
+| `tests//negative/coverage:branchannotate[coverage][branch_ir][test_one]` | must fail with `diagnostic(s) applying the profile: lld: warning: ld-temp.o: function control flow change detected (hash mismatch)`: a `cov_branch_annotate.sh` copy runs `function(simplifycfg)` before `pgo-instr-use`, so the control flow the profile is applied to is not the instrumented one (as with a profile of other bitcode), and LLVM drops those functions' counts with a warning, which the annotation refuses rather than pass the dropped counts as branches that never ran | it is the planted defect |
 | `:branchlib` and `[coverage][branch][test_gate_env]` | `test_gate_env` asserts `LC_ALL` is unset: it passes in the release gate, and must pass in the branch coverage run, whose script sets `LC_ALL=C` for its own tools only after the test | the script exporting `LC_ALL=C` before the runner, as it first did (`LC_ALL is set, which the release gate does not set`) |
 | `:branchc` and `[coverage][branch]` | `branchc` calls into C (`komira//tools/build/examples/cshim:add`, a `cxx_library` in `deps`); its release gate passes, and its branch coverage link ends with that C library, given to `cov_branch_link.sh` as `mojo_wrapper.sh` is given it (`--link-tail`) | `cov_branch_link.sh` without the link tail (`"$@"`): `ld.lld: error: undefined symbol: komira_example_add` |
 
@@ -167,4 +175,11 @@ verdict is the exit status, as the gate's is.
 ./buck2 build tests//negative/coverage:branchenv                                        # must fail at analysis
 ./buck2 build tests//functional/coverage:link_line tests//functional/coverage:branchc 'tests//functional/coverage:branchc[coverage][branch]'
 ./buck2 build tests//negative/coverage:branchlinkline                                   # must fail: not the release link
+./buck2 build tests//functional/coverage:branch_info tests//negative/coverage:branchannotate
+./buck2 build 'tests//negative/coverage:branchannotate[coverage][branch_ir][test_one]'   # must fail: diagnostic(s) applying the profile
+./buck2 build tests//negative/coverage:branchmissing tests//negative/coverage:branchweights tests//negative/coverage:branchnodebug tests//negative/coverage:branchretor
+./buck2 build 'tests//negative/coverage:branchmissing[coverage][branch_ir][test_one]'   # must fail: no profile data available for function
+./buck2 build 'tests//negative/coverage:branchweights[coverage][branch_ir][test_one]'   # must fail: already holds branch weights
+./buck2 build 'tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]'   # must fail: may be a decision of count_down
+./buck2 build 'tests//negative/coverage:branchretor[coverage][branch_info][test_either]'   # must fail: the right operand of this 'or' is not counted
 ```

@@ -12,11 +12,14 @@ linux-x86_64, per `test_srcs` entry:
   Cobertura report in repository paths is `[coverage][tests][<test>]`
   (category `mojo_cov_run`, `cov_run.sh` in the same directory);
 - its branch coverage: the test as LLVM bitcode, that bitcode instrumented
-  with profile counters and linked, and the merged profile of its run
-  through the release gate's runner, `[coverage][bc]`, `[coverage][pgo_bin]`
-  and `[coverage][branch]` (coverage_branch.bzl; categories
-  `mojo_emit_cov_bc`, `mojo_cov_pgo_link`, `mojo_cov_branch_run`), which
-  nothing waits for yet.
+  with profile counters and linked, the merged profile of its run through
+  the release gate's runner, that profile applied to the bitcode, and the
+  branch records of the library's sources, `[coverage][bc]`,
+  `[coverage][pgo_bin]`, `[coverage][branch]`, `[coverage][branch_ir]` and
+  `[coverage][branch_info]` (coverage_branch.bzl; categories
+  `mojo_emit_cov_bc`, `mojo_cov_pgo_link`, `mojo_cov_branch_run`,
+  `mojo_cov_branch_annotate`, `mojo_cov_branch_classify`), which nothing
+  waits for yet.
 
 and, per library (tests or none):
 
@@ -210,6 +213,22 @@ def _pkg_dir(label):
     """The repository directory of `label`'s package."""
     return "/".join([d for d in [_CELL_REPO_DIR.get(label.cell, ""), label.package] if d])
 
+def coverage_sources(ctx, root):
+    """Where the library's sources are measured: (src_repo, gen), the
+    repository directory of its [src] (ending in `/`, or empty at the
+    repository root) and the paths in [src] of its generated sources, which
+    are not measured. `root` is the package directory [src] stages
+    (_package_root)."""
+    src_repo = _dir_prefix("/".join([d for d in [_pkg_dir(ctx.label), root] if d]))
+    gen = []
+    for s in ctx.attrs.srcs:
+        if not s.is_source:
+            rel = s.short_path
+            if root:
+                rel = rel[len(root) + 1:]
+            gen.append(rel)
+    return src_repo, gen
+
 def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, env_args):
     """Declares the `mojo_cov_run` action of test source `t`: its coverage
     binary `cov_bin` run under kcov by cov_run.sh, through the release gate's
@@ -228,14 +247,10 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
             fail("{}: the data destination {} is under buck-out/, where a coverage run stages the library's sources".format(where, repr(dest)))
     share = ctx.actions.copied_dir("cov/tests/{}/share".format(stem), dict(data) | {name: t})
     pkg_dir = _pkg_dir(ctx.label)
-    src_repo = _dir_prefix("/".join([d for d in [pkg_dir, root] if d]))
+    src_repo, gens = coverage_sources(ctx, root)
     gen = []
-    for s in ctx.attrs.srcs:
-        if not s.is_source:
-            rel = s.short_path
-            if root:
-                rel = rel[len(root) + 1:]
-            gen += ["--gen", rel]
+    for rel in gens:
+        gen += ["--gen", rel]
     run = ctx.attrs.coverage_run[DefaultInfo].default_outputs[0]
     xml = ctx.actions.declare_output("cov/tests/{}.xml".format(stem))
     marker = ctx.actions.declare_output("cov/tests/{}.passed".format(stem))
@@ -270,8 +285,8 @@ def coverage_sub_targets(bins, runs, gate, branch):
     """The `coverage` sub-target of a library: `bins` {stem: binary},
     `runs` {stem: (report, marker)}, `gate` (coverage_gate's, or None) and
     `branch` {stem: coverage_branch's struct} (coverage_branch.bzl: `[bc]`,
-    `[pgo_bin]` and `[branch]`, which are not among `[coverage]`'s
-    outputs)."""
+    `[pgo_bin]`, `[branch]`, `[branch_ir]` and `[branch_info]`, which are
+    not among `[coverage]`'s outputs)."""
     b = [bins[k] for k in sorted(bins)]
     x = [runs[k][0] for k in sorted(runs)]
     m = [runs[k][1] for k in sorted(runs)]

@@ -27,7 +27,7 @@ load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProg
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage_branch.bzl", "coverage_branch")
-load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_sub_targets")
+load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_sources", "coverage_sub_targets")
 load(
     ":test_runtime.bzl",
     _arg_args = "arg_args",
@@ -400,7 +400,8 @@ def _library_impl(ctx):
             cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, [ungated_tset], "0", "mojo_build_cov_test", stem, c_link, debug_link = cov_link)
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, src_root, test_data.get(key, {}), env_args)
             if ctx.attrs.coverage_branch:
-                cov_branch[stem] = coverage_branch(ctx, tc, t, stem, ungated_tset, _mojo_cmd, _link_tail(c_link), test_data.get(key, {}), env_args)
+                src_repo, gen = coverage_sources(ctx, src_root)
+                cov_branch[stem] = coverage_branch(ctx, tc, t, stem, ungated_tset, _mojo_cmd, _link_tail(c_link), test_data.get(key, {}), env_args, src_dir, src_repo, gen)
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether

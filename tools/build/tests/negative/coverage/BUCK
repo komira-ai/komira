@@ -516,6 +516,25 @@ cov_branch_dir(
     run_script = ":branchversion_run_sh",
 )
 
+# A cov_branch_annotate.sh copy that runs `simplifycfg` before applying the
+# profile: the control flow the profile is applied to is no longer the one
+# that was instrumented, as with a profile of other bitcode, and LLVM drops
+# those functions' counts with a warning. RED:
+# tests//negative/coverage:branchannotate[coverage][branch_ir][test_one],
+# "diagnostic(s) applying the profile".
+cov_plant(
+    name = "branchannotate_annotate_sh",
+    expr = "s|\"--lto-newpm-passes=pgo-instr-use\"|\"--lto-newpm-passes=function(simplifycfg),pgo-instr-use\"|",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchannotate_branch",
+    annotate_script = ":branchannotate_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
+)
+
 [
     mojo_library(
         name = name,
@@ -529,8 +548,86 @@ cov_branch_dir(
         import_name = "noop",
         test_srcs = ["tests/test_one.mojo"],
     )
-    for name in ("branchnoprof", "branchversion")
+    for name in ("branchannotate", "branchnoprof", "branchversion")
 ]
+
+# A cov_branch_run.sh copy whose merge leaves out the test's `main`: the
+# profile does not hold a function of the bitcode, as a profile of other
+# bitcode would not, and applying it would read that function as never run.
+# RED: tests//negative/coverage:branchmissing[coverage][branch_ir][test_one],
+# "no profile data available for function".
+cov_plant(
+    name = "branchmissing_run_sh",
+    expr = "s|\"$PD\" merge -o|\"$PD\" merge --no-function=main -o|",
+    out = "cov_branch_run.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_run.sh",
+)
+
+cov_branch_dir(
+    name = "branchmissing_branch",
+    exec_compatible_with = LINUX_X86_64,
+    run_script = ":branchmissing_run_sh",
+)
+
+# A cov_branch_annotate.sh copy that first applies the profile and writes
+# the module back as bitcode (lld's emit-llvm), then reads that: a bitcode
+# that holds branch weights before the profile is applied, which
+# pgo-instr-use would keep on the branches that never ran. RED:
+# tests//negative/coverage:branchweights[coverage][branch_ir][test_one],
+# "already holds branch weights".
+cov_plant(
+    name = "branchweights_annotate_sh",
+    expr = "s|^# 0\\. No branch weights before.*$|\"$LLD\" -flavor gnu -r -m elf_x86_64 \"$BC\" -o \"$K/w.bc\" --lto-O0 --plugin-opt=emit-llvm --lto-newpm-passes=pgo-instr-use -mllvm \"-pgo-test-profile-file=$PROF\" \\&\\& BC=\"$K/w.bc\"|",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchweights_branch",
+    annotate_script = ":branchweights_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
+)
+
+[
+    mojo_library(
+        name = name,
+        srcs = [
+            "noop/__init__.mojo",
+            "noop/value.mojo",
+        ],
+        conda = False,
+        coverage_branch = ":{}_branch".format(name),
+        coverage_debug = _LINK,
+        import_name = "noop",
+        test_srcs = ["tests/test_one.mojo"],
+    )
+    for name in ("branchmissing", "branchweights")
+]
+
+# A helper declared @always_inline("nodebug"): its `while` carries the
+# location of its call, `count_down(`, where the classifier cannot tell it
+# from the compiler's branches. RED:
+# tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug],
+# "may be a decision of count_down".
+mojo_library(
+    name = "branchnodebug",
+    srcs = ["branchnodebug/__init__.mojo"],
+    conda = False,
+    coverage_debug = _LINK,
+    test_srcs = ["tests/test_nodebug.mojo"],
+)
+
+# `return a or b`: the `or`'s result is never branched on, so when its right
+# operand decides cannot be counted. RED:
+# tests//negative/coverage:branchretor[coverage][branch_info][test_either],
+# "the right operand of this 'or' is not counted".
+mojo_library(
+    name = "branchretor",
+    srcs = ["branchretor/__init__.mojo"],
+    conda = False,
+    coverage_debug = _LINK,
+    test_srcs = ["tests/test_either.mojo"],
+)
 
 # A test_env setting LLVM_PROFILE_FILE, which a branch coverage run sets
 # itself. RED at analysis: tests//negative/coverage:branchenv, "test_env
