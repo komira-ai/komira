@@ -10,8 +10,8 @@
 # role.
 #
 # RETENTION. A data primitive has a VERSIONED retention default, used while
-# `Resource.retention` is unset (KEEP for a table and a bucket, DELETE for a
-# queue and a topic). A type whose default is
+# `Resource.retention` is unset (KEEP for a table, a bucket and a secret,
+# DELETE for a queue and a topic). A type whose default is
 # `RETENTION_NONE` takes no retention: it is deleted with its resource, and
 # writing `retention` on it is refused at validate. Changing a default is a
 # behaviour change for every stored list, so a default is never edited in
@@ -19,8 +19,9 @@
 #
 # THE PRIMARY ROLE is the role a reference to the resource lands on, on every
 # cloud: `run` for a service or a job, `table` for a table, `bucket` for a
-# bucket, `queue` for a queue, `topic` for a topic, `sub` for a
-# subscription, `identity` for a service account, `grant` for a grant. A
+# bucket, `queue` for a queue, `secret` for a secret, `topic` for a topic,
+# `sub` for a subscription, `identity` for a service account, `grant` for a
+# grant. A
 # cloud adapter
 # writes a dependency or an input on ANOTHER resource as that resource's id
 # alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
@@ -59,6 +60,8 @@ comptime FIELD_BUCKET: Int = 14
 """`Resource.body` field number of `bucket`."""
 comptime FIELD_QUEUE: Int = 15
 """`Resource.body` field number of `queue`."""
+comptime FIELD_SECRET: Int = 16
+"""`Resource.body` field number of `secret`."""
 comptime FIELD_SERVICE_ACCOUNT: Int = 20
 """`Resource.body` field number of `service_account`."""
 comptime FIELD_TOPIC: Int = 21
@@ -93,6 +96,8 @@ comptime ROLE_TABLE = "table"
 comptime ROLE_BUCKET = "bucket"
 comptime ROLE_QUEUE = "queue"
 comptime ROLE_TOPIC = "topic"
+comptime ROLE_SECRET = "secret"
+"""A secret's one role: its container object."""
 comptime ROLE_SUBSCRIPTION = "sub"
 """A subscription's role (8 bytes at most, like every role word)."""
 comptime ROLE_IDENTITY = "identity"
@@ -216,7 +221,7 @@ struct Catalog(Copyable, Movable, Deinitable):
     @staticmethod
     def v1() raises -> Catalog:
         """`kci.resource.v1` as declared today: `service`, `job`, `table`,
-        `bucket`, `queue`, `service_account`, `topic`, `grant` and
+        `bucket`, `queue`, `secret`, `service_account`, `topic`, `grant` and
         `subscription`."""
         var c = Catalog()
         var svc_out = List[String]()
@@ -329,6 +334,27 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_TOPIC),
             )
         )
+        # A secret is the container of a value: it exposes its cloud name;
+        # its value is READ (by the workload that receives it) and WRITTEN
+        # (a new version, by the identity that keeps it). Deleting it deletes
+        # every version, so it is kept by default, as a bucket.
+        var secret_out = List[String]()
+        secret_out.append(String(OUTPUT_NAME))
+        var secret_access = List[String]()
+        secret_access.append(String(ACCESS_READ))
+        secret_access.append(String(ACCESS_WRITE))
+        secret_access.append(String(ACCESS_READ_WRITE))
+        c.add(
+            CatalogType(
+                FIELD_SECRET,
+                String("secret"),
+                PORTABLE,
+                secret_out^,
+                secret_access^,
+                retention_default=RETENTION_KEEP,
+                primary_role=String(ROLE_SECRET),
+            )
+        )
         c.add(
             CatalogType(
                 FIELD_SUBSCRIPTION,
@@ -361,6 +387,7 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_TABLE, String("table")))
     l.append(BodyArm(FIELD_BUCKET, String("bucket")))
     l.append(BodyArm(FIELD_QUEUE, String("queue")))
+    l.append(BodyArm(FIELD_SECRET, String("secret")))
     l.append(BodyArm(FIELD_SERVICE_ACCOUNT, String("service_account")))
     l.append(BodyArm(FIELD_TOPIC, String("topic")))
     l.append(BodyArm(FIELD_GRANT, String("grant")))

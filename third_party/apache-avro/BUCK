@@ -15,7 +15,8 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 # weather-zstd.avro with the C++ codec-compatibility fix AVRO-4172. None was
 # written by komira_avro.
 #
-# Test data of //src/komira_formats_e2e (tests/test_formats_foreign_avro.mojo):
+# Test data of //src/tests/e2e/komira_formats_e2e
+# (tests/test_formats_foreign_avro.mojo):
 #   weather.avro          - codec `null`;
 #   weather-deflate.avro  - codec `deflate`;
 #   weather-snappy.avro   - codec `snappy` (raw snappy + big-endian CRC32);

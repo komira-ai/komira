@@ -56,7 +56,8 @@
 # from the live graph (`buck2 cquery`) and answers one check per path group
 # for every target no declared unit names or matches: one per library
 # package `//src/<p>/...` (named `<p>`: a change to one library builds that
-# library's units, not every library's), `repo_root` (`//:`) for the
+# library's units, not every library's) and per test-only package
+# `//src/tests/<kind>/<p>/...` (named `<p>`), `repo_root` (`//:`) for the
 # repository's own lints, `bin`, `release`, `tests`, `third_party`,
 # `tools_<t>` for each `//tools/<t>/...` tree, and `functional_tests`
 # (`tests//functional/...`) for the tests cell's positive tests (built only,
