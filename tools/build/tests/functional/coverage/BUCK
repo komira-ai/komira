@@ -22,6 +22,27 @@ mojo_library(
     ],
 )
 
+# Test 46: a library that depends on covlib. coverage_keys.sh builds it with
+# the switch off, then on: its compile and test must not run again, so
+# covlib's package (its join's output) is the same bytes either way.
+mojo_library(
+    name = "covuser",
+    srcs = ["covuser/__init__.mojo"],
+    conda = False,
+    deps = [":covlib"],
+    test_srcs = ["tests/test_user.mojo"],
+)
+
+# Test 41: a library with no test and no README. Its package is the
+# compiler's output and it has no join, with the switch off and on: its
+# coverage gate (no report: NotMeasured) is waited for by a conda package
+# only, and it has none. coverage_keys.sh reads both.
+mojo_library(
+    name = "covbare",
+    srcs = ["covbare/__init__.mojo"],
+    conda = False,
+)
+
 # The same library with coverage whatever the switch says (a tests-cell
 # fixture may name the link directory), linked through the one every library
 # uses: what the checks below read.
@@ -226,9 +247,14 @@ cov_debug_check(
     script = "check.sh",
 )
 
-# For the planted defects of tests//negative/coverage.
+# For the planted defects and the gate checks of tests//negative/coverage.
 export_file(
     name = "check.sh",
+    visibility = ["//negative/coverage:"],
+)
+
+export_file(
+    name = "report.sh",
     visibility = ["//negative/coverage:"],
 )
 
