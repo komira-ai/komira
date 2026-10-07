@@ -1,0 +1,85 @@
+# Every rule's sites, each counted in holds.tsv exactly: a site the reader
+# missed would leave a row above its count, which fails the build.
+from algorithm import parallelize
+
+
+struct Holder:
+    # wildcard_origin 1 (a field).
+    var data: UnsafePointer[UInt8, MutAnyOrigin]
+
+    # public_pointer 1 (a dunder of a public struct); wildcard_origin 2.
+    def __init__(out self, data: UnsafePointer[UInt8, MutAnyOrigin]):
+        self.data = data
+
+    # public_pointer 2 (OpaquePointer, a return type).
+    def raw(self) -> OpaquePointer:
+        return OpaquePointer()
+
+
+trait Sink:
+    # public_pointer 3 (a trait method); wildcard_origin 3.
+    def put(self, p: UnsafePointer[UInt8, MutUntrackedOrigin]):
+        ...
+
+
+# public_pointer 4 (a module-level signature over six lines).
+def fill[
+    o: Origin[mut=True]
+](
+    dst: UnsafePointer[UInt8, o],
+    n: Int,
+):
+    pass
+
+
+# wildcard_origin 4 and 5 (two in one signature, a private function).
+def _views(a: UnsafePointer[UInt8, ImmutAnyOrigin], b: UnsafePointer[UInt8, MutExternalOrigin]):
+    pass
+
+
+def _addresses(addr: Int):
+    # from_address 1; wildcard_origin 6.
+    var p = UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=addr)
+    # from_address 2 (over three lines, spaces around `=`); wildcard_origin 7.
+    var q = UnsafePointer[Int, MutUntrackedOrigin](
+        unsafe_from_address = addr
+    )
+
+
+def _moves(mut r: Record, box: OwnedPointer[Record]):
+    # partial_move 1.
+    var a = UnsafePointer(to=r.items).take_pointee()
+    # partial_move 2 (over three lines, through a dereference).
+    var b = UnsafePointer(
+        to=box[].name
+    ).take_pointee()
+    # partial_move 3 (type parameters).
+    var c = UnsafePointer[List[Int], origin_of(r)](to=r.list).take_pointee()
+    # partial_move 4 (the two-statement form).
+    var q = UnsafePointer(to=r.list)
+    var d = q.take_pointee()
+    # partial_move 5 (the two-statement form, the name typed).
+    var q2: UnsafePointer[String, origin_of(r)] = UnsafePointer(to=r.name)
+    _ = q2.take_pointee()
+
+
+def _parallel(n: Int):
+    # parallelize 1 and 2.
+    parallelize[_worker](n)
+    algorithm.parallelize[_worker](n)
+
+
+def _libc(fd: Int, path: String):
+    # libc_redeclare 1.
+    _ = external_call["read", Int](fd, 0, 0)  # "a" trailing comment
+    # libc_redeclare 2 (after a string holding an escaped quote and `#`).
+    _ = String("\"#"); _ = external_call["read", Int](fd, 0, 0)
+    # libc_redeclare 3 (over three lines).
+    _ = external_call[
+        "open", Int
+    ](path, 0)
+
+
+def _more(n: Int):
+    # One site more than holds.tsv holds.
+    parallelize[_worker](n)

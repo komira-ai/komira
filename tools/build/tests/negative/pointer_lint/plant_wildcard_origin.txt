@@ -1,0 +1,3 @@
+# A planted site: no row holds it.
+def _f(p: UnsafePointer[UInt8, MutAnyOrigin]):
+    pass

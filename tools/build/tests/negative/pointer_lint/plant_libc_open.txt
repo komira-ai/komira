@@ -1,0 +1,3 @@
+# A planted site: no row holds it.
+def _f():
+    _ = external_call["open", Int](0, 0)

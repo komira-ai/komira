@@ -1,0 +1,4 @@
+# FFI-BOUNDARY: libc write; the caller owns `buf`.
+# Marked, with no wildcard origin, so the FFI ledger does not list it.
+def _write(fd: Int, n: Int) -> Int:
+    return n

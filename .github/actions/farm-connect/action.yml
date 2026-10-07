@@ -78,9 +78,8 @@ runs:
         # The log of a public repository is public: no tailnet status, no addresses.
         log-mode: quiet
 
-    # The same check as the tailnet-probe workflow's: a TCP connection to the
-    # farm's port, retried for a minute because a new node can take a few
-    # seconds to get its routes.
+    # A TCP connection to the farm's port, retried for a minute because a new
+    # node can take a few seconds to get its routes.
     - name: refuse unless the farm answers
       shell: bash
       env:

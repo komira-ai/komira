@@ -1,0 +1,61 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The plan-building half of the Mojo SDK, first part: aggregate output naming,
+# the derived row schema, statement-scoped CTE bindings, Parquet read options,
+# the plan validator, table display, select/with_columns aggregate lowering,
+# the filter refusals, join helpers, the row UDF chains and the alias, concat,
+# drop_nulls, rename and with_columns plan builders.
+#
+# deps is the full transitive closure. komira_core enters through komira_udf
+# (row_udf_chain's row UDF types); komira_op_agg_state and what it needs
+# (komira_agg, komira_expr, komira_hash, komira_kernels) are there for the
+# welded test_display_stats only, which tests its statistical accumulators.
+mojo_library(
+    name = "komira_sdk",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_agg:komira_agg",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_op_agg_state:komira_op_agg_state",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_udf:komira_udf",
+        "//src/komira_zlib:komira_zlib",
+    ],
+    test_srcs = [
+        "tests/test_agg_output_naming_direct.mojo",
+        "tests/test_auto_schema.mojo",
+        "tests/test_auto_schema_direct.mojo",
+        "tests/test_cte_binding_direct.mojo",
+        "tests/test_dataframe_builders_direct.mojo",
+        "tests/test_display_stats.mojo",
+        "tests/test_display_width_non_ascii.mojo",
+        "tests/test_filter_refusal_direct.mojo",
+        "tests/test_parquet_read_options_direct.mojo",
+        "tests/test_plan_validator_exprs.mojo",
+        "tests/test_plan_validator_nodes.mojo",
+        "tests/test_row_udf_chain_direct.mojo",
+        "tests/test_select_aggregates_plans.mojo",
+        "tests/test_select_aggregates_shapes.mojo",
+        "tests/test_table_display_direct.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
