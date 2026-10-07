@@ -19,11 +19,9 @@
 # (flexible at v3+ for all four).
 #
 # TxnOffsetCommit v0 CommittedMetadata is a NULLABLE string in the schema
-# ("nullableVersions": "0+"); the codec reads it as a non-nullable STRING
-# and refuses the null form. The null-metadata reference is kept below
-# (_toc_req_v0_null_metadata) and excluded from main().
-# TODO(kafka-goldens): add test_txn_offset_commit_request_v0_null_metadata
-# to main() once the decoder reads a nullable string there.
+# ("nullableVersions": "0+"); test_txn_offset_commit_request_v0_null_metadata
+# checks that the decoder accepts the null form and reports it as null, and
+# test_txn_offset_commit_request_v0 that "" stays a present empty string.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -339,7 +337,6 @@ def _toc_req_v0() raises -> List[UInt8]:
 
 
 def _toc_req_v0_null_metadata() raises -> List[UInt8]:
-    # Excluded from main(): see the TODO in the file header.
     var g = _Golden()
     g.add("001c")  # RequestApiKey = 28
     g.add("0000")  # RequestApiVersion = 0
@@ -383,19 +380,31 @@ def test_txn_offset_commit_request_v0() raises:
     assert_equal(len(t0.partitions), 2)
     assert_equal(t0.partitions[0].partition, Int32(0))
     assert_equal(t0.partitions[0].offset, Int64(42))
-    assert_equal(t0.partitions[0].metadata, "md")
+    assert_equal(t0.partitions[0].metadata.value(), "md")
     assert_equal(t0.partitions[1].partition, Int32(5))
     assert_equal(t0.partitions[1].offset, Int64(4294967296))
-    assert_equal(t0.partitions[1].metadata, "")
+    assert_true(Bool(t0.partitions[1].metadata))
+    assert_equal(t0.partitions[1].metadata.value(), "")
     assert_equal(r.topics[1].topic, "t2")
     assert_equal(len(r.topics[1].partitions), 0)
     _every_prefix_refused(b, _decode_toc, "TxnOffsetCommit request v0")
 
 
 def test_txn_offset_commit_request_v0_null_metadata() raises:
-    # TODO(kafka-goldens): not in main(); the codec refuses this schema-valid
-    # message. When it is fixed, also assert the decoded metadata is null.
     var b = _toc_req_v0_null_metadata()
+    var dec = KafkaDecoder(Span(b))
+    var h = parse_request_header(dec, False)
+    assert_equal(h.api_key, API_KEY_TXN_OFFSET_COMMIT)
+    assert_equal(h.correlation_id, Int32(210))
+    assert_false(Bool(h.client_id))
+    var r = decode_txn_offset_commit_request(dec)
+    assert_equal(r.transactional_id, "tx1")
+    assert_equal(r.group_id, "g1")
+    assert_equal(len(r.topics), 1)
+    assert_equal(len(r.topics[0].partitions), 1)
+    assert_equal(r.topics[0].partitions[0].offset, Int64(42))
+    assert_false(Bool(r.topics[0].partitions[0].metadata))
+    assert_equal(dec.remaining(), 0)
     _every_prefix_refused(
         b, _decode_toc, "TxnOffsetCommit request v0 (null metadata)"
     )
@@ -439,4 +448,5 @@ def main() raises:
     test_end_txn_response_v0()
     test_txn_offset_commit_request_v0()
     test_txn_offset_commit_response_v0()
+    test_txn_offset_commit_request_v0_null_metadata()
     print("test_kafka_golden_transaction: OK")

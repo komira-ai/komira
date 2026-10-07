@@ -1,0 +1,18 @@
+name: Feature request
+description: Propose a change or a new capability.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and why komira does not do it today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: What you would change or add, and which library or doc it touches (docs/index.md says which doc is the authority for each subsystem).
+    validations:
+      required: true
