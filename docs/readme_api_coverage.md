@@ -124,19 +124,19 @@ flipping it, document the symbols or seed the ledger from `[symbols]` (its
 
 ## Census
 
-The census of 2026-10-06, `./buck2 build //:readme_api_coverage` on the farm
-over the tree this file lands with (test-only packages under `src/tests/`
-are not counted). Rebuild `[report]` for today's numbers.
+The census of 2026-10-07: `./buck2 build //:readme_api_coverage` on the
+farm over the tree of that day (test-only packages under `src/tests/` are not
+counted). A dated snapshot: rebuild `[report]` for today's numbers.
 
-**Totals.** 175 packages; 6758 public symbols exported (3610 names, 3148
-methods); 379 used by a README example, **5.6%** (names 215, 6.0%; methods
-164, 5.2%); 0 excepted; 6379 undocumented.
+**Totals.** 182 packages; 6929 public symbols exported (3719 names, 3210
+methods); 393 used by a README example, **5.7%** (names 225, 6.1%; methods
+168, 5.2%); 0 excepted; 6536 undocumented.
 
-- 88 packages export something. 29 of them have README examples, 1 have a
+- 90 packages export something. 31 of them have README examples, 1 have a
   README with no `mojo` example (`komira_secret_env`),
-  and **58 have no README** (0%; 5330 of the 6379 undocumented symbols).
-- 51 packages have an `__init__.mojo` that exports nothing (their API is
-  their submodules, which v1 does not count): `komira_agg` (no-example), `komira_agg_api` (no-example), `komira_arrow` (no-example), `komira_arrow_ipc` (no-example), `komira_async`, `komira_async_api` (no-example), `komira_buffer` (no-example), `komira_collections` (examples:4), `komira_column_format`, `komira_column_kernels` (no-example), `komira_compression` (no-example), `komira_counters` (examples:2), `komira_dispatch_agg_exec` (no-example), `komira_dynamic_filter` (no-example), `komira_eval` (no-example), `komira_exec_types` (no-example), `komira_expr` (no-example), `komira_fs`, `komira_gcp_firestore`, `komira_host` (examples:3), `komira_http_core`, `komira_http_server`, `komira_join_assembly` (no-example), `komira_json_index` (no-example), `komira_kafka_server` (examples:3), `komira_kernels`, `komira_libc` (no-example), `komira_lz4`, `komira_metrics`, `komira_morsel`, `komira_net`, `komira_op_agg_row_api`, `komira_op_agg_state`, `komira_plan_expr` (no-example), `komira_plan_ir` (no-example), `komira_plan_stats` (no-example), `komira_row_format`, `komira_scalar_arithmetic` (examples:4), `komira_scan_planning`, `komira_scan_resolver`, `komira_scan_source` (no-example), `komira_sdk` (examples:3), `komira_shuffle`, `komira_simd` (examples:4), `komira_snapshotter`, `komira_spsc_ring`, `komira_sql` (examples:2), `komira_table_store` (no-example), `komira_trace`, `komira_udf` (no-example), `komira_validation_run` (examples:3).
+  and **58 have no README** (0%; 5373 of the 6536 undocumented symbols).
+- 56 packages have an `__init__.mojo` that exports nothing (their API is
+  their submodules, which v1 does not count): `komira_agg` (no-example), `komira_agg_api` (no-example), `komira_arrow` (no-example), `komira_arrow_ipc` (no-example), `komira_async`, `komira_async_api` (no-example), `komira_buffer` (no-example), `komira_collections` (examples:4), `komira_column_format`, `komira_column_kernels` (no-example), `komira_compression` (no-example), `komira_counters` (examples:2), `komira_dispatch_agg_exec` (no-example), `komira_dispatch_agg_folds` (no-example), `komira_dispatch_join_kernels` (no-example), `komira_dispatch_scan` (no-example), `komira_dynamic_filter` (no-example), `komira_eval` (no-example), `komira_exec_types` (no-example), `komira_expr` (no-example), `komira_fs`, `komira_gcp_firestore`, `komira_host` (examples:3), `komira_http_core`, `komira_http_server`, `komira_join_assembly` (no-example), `komira_json_index` (no-example), `komira_kafka_server` (examples:4), `komira_kernels`, `komira_libc` (no-example), `komira_lz4`, `komira_metrics`, `komira_morsel`, `komira_net`, `komira_op_agg_row_api`, `komira_op_agg_state`, `komira_optimizer` (no-example), `komira_plan_expr` (no-example), `komira_plan_ir` (no-example), `komira_plan_stats` (no-example), `komira_row_format`, `komira_scalar_arithmetic` (examples:4), `komira_scan_planning`, `komira_scan_resolver`, `komira_scan_source` (no-example), `komira_sdk` (examples:3), `komira_shuffle`, `komira_shuffle_streaming` (no-example), `komira_simd` (examples:4), `komira_snapshotter`, `komira_spsc_ring`, `komira_sql` (examples:3), `komira_table_store` (no-example), `komira_trace`, `komira_udf` (no-example), `komira_validation_run` (examples:3).
 - 36 packages have no `__init__.mojo` (generated clients and protobuf
   packages): `kci_artifact_proto`, `kci_deploy_model_proto`, `kci_manifest_proto`, `kci_resource_proto` (examples:3), `komira_aws_apigatewayv2`, `komira_aws_dynamodb`, `komira_aws_dynamodbstreams`, `komira_aws_ec2`, `komira_aws_ecr`, `komira_aws_ecs`, `komira_aws_iam`, `komira_aws_lambda`, `komira_aws_logs`, `komira_aws_route53`, `komira_aws_s3`, `komira_aws_scheduler`, `komira_aws_secretsmanager`, `komira_aws_sesv2`, `komira_aws_sns`, `komira_aws_sqs`, `komira_broker_proto` (examples:2), `komira_gcp_apigateway`, `komira_gcp_artifactregistry`, `komira_gcp_cloudresourcemanager`, `komira_gcp_cloudscheduler`, `komira_gcp_compute`, `komira_gcp_iam`, `komira_gcp_logging`, `komira_gcp_monitoring_client`, `komira_gcp_run`, `komira_gcp_secretmanager`, `komira_gcp_serviceusage`, `komira_gcp_storage`, `komira_job_report_proto` (examples:3), `komira_plan_proto` (examples:1), `komira_supervisor_proto` (examples:2).
 
@@ -144,7 +144,7 @@ methods); 379 used by a README example, **5.6%** (names 215, 6.0%; methods
 
 1. `komira_http_client`: 475 undocumented of 475 (no README)
 2. `komira_broker`: 407 undocumented of 407 (no README)
-3. `komira_aws_core`: 356 undocumented of 356 (no README)
+3. `komira_aws_core`: 366 undocumented of 366 (no README)
 4. `komira_objectstore`: 278 undocumented of 278 (no README)
 5. `komira_orc`: 214 undocumented of 214 (no README)
 6. `komira_search`: 206 undocumented of 206 (no README)
@@ -178,6 +178,7 @@ undocumented count:
 | `komira_json` | examples:4 | 53 | 19 | 35.8% | 2/19 | 17/34 | 34 |
 | `kci_release_channel` | examples:4 | 28 | 9 | 32.1% | 5/23 | 4/5 | 19 |
 | `komira_parquet_api` | examples:2 | 36 | 10 | 27.8% | 9/35 | 1/1 | 26 |
+| `komira_parquet` | examples:6 | 37 | 9 | 24.3% | 6/28 | 3/9 | 28 |
 | `komira_protobuf` | examples:4 | 67 | 16 | 23.9% | 7/49 | 9/18 | 51 |
 | `kci_workflow_check` | examples:4 | 47 | 11 | 23.4% | 5/37 | 6/10 | 36 |
 | `kci_validator_report` | examples:4 | 100 | 20 | 20.0% | 16/72 | 4/28 | 80 |
@@ -186,28 +187,28 @@ undocumented count:
 | `kci_release_machine` | examples:3 | 31 | 5 | 16.1% | 2/20 | 3/11 | 26 |
 | `kci_logs` | examples:4 | 86 | 13 | 15.1% | 10/69 | 3/17 | 73 |
 | `kci_api` | examples:4 | 203 | 24 | 11.8% | 21/190 | 3/13 | 179 |
-| `komira_proto_codec` | examples:3 | 194 | 20 | 10.3% | 8/22 | 12/172 | 174 |
+| `komira_proto_codec` | examples:3 | 197 | 20 | 10.2% | 8/25 | 12/172 | 177 |
+| `komira_objectstore_gcs` | examples:2 | 88 | 5 | 5.7% | 4/37 | 1/51 | 83 |
 | `komira_http_client` | none | 475 | 0 | 0.0% | 0/152 | 0/323 | 475 |
 | `komira_broker` | none | 407 | 0 | 0.0% | 0/172 | 0/235 | 407 |
-| `komira_aws_core` | none | 356 | 0 | 0.0% | 0/252 | 0/104 | 356 |
+| `komira_aws_core` | none | 366 | 0 | 0.0% | 0/260 | 0/106 | 366 |
 | `komira_objectstore` | none | 278 | 0 | 0.0% | 0/90 | 0/188 | 278 |
 | `komira_orc` | none | 214 | 0 | 0.0% | 0/162 | 0/52 | 214 |
 | `komira_search` | none | 206 | 0 | 0.0% | 0/78 | 0/128 | 206 |
 | `komira_gcp_core` | none | 203 | 0 | 0.0% | 0/145 | 0/58 | 203 |
 | `komira_db` | none | 200 | 0 | 0.0% | 0/82 | 0/118 | 200 |
 | `kci_reconciler` | none | 185 | 0 | 0.0% | 0/99 | 0/86 | 185 |
+| `komira_avro` | none | 176 | 0 | 0.0% | 0/127 | 0/49 | 176 |
+| `kci_cloud` | none | 174 | 0 | 0.0% | 0/149 | 0/25 | 174 |
 | `komira_log` | none | 173 | 0 | 0.0% | 0/46 | 0/127 | 173 |
-| `komira_avro` | none | 169 | 0 | 0.0% | 0/120 | 0/49 | 169 |
-| `kci_cloud` | none | 154 | 0 | 0.0% | 0/129 | 0/25 | 154 |
 | `komira_grpc` | none | 132 | 0 | 0.0% | 0/56 | 0/76 | 132 |
+| `komira_objectstore_s3` | none | 125 | 0 | 0.0% | 0/42 | 0/83 | 125 |
 | `kci_pkg_upload` | none | 123 | 0 | 0.0% | 0/64 | 0/59 | 123 |
 | `kci_publish` | none | 123 | 0 | 0.0% | 0/65 | 0/58 | 123 |
-| `kci_cloud_fake` | none | 117 | 0 | 0.0% | 0/21 | 0/96 | 117 |
-| `komira_objectstore_s3` | none | 112 | 0 | 0.0% | 0/37 | 0/75 | 112 |
+| `kci_cloud_fake` | none | 121 | 0 | 0.0% | 0/25 | 0/96 | 121 |
+| `komira_azure_blob` | none | 121 | 0 | 0.0% | 0/55 | 0/66 | 121 |
 | `komira_oci` | none | 106 | 0 | 0.0% | 0/47 | 0/59 | 106 |
 | `komira_connect` | none | 98 | 0 | 0.0% | 0/85 | 0/13 | 98 |
-| `komira_azure_blob` | none | 89 | 0 | 0.0% | 0/42 | 0/47 | 89 |
-| `komira_objectstore_gcs` | none | 87 | 0 | 0.0% | 0/36 | 0/51 | 87 |
 | `komira_crypto` | none | 86 | 0 | 0.0% | 0/53 | 0/33 | 86 |
 | `komira_csv` | none | 81 | 0 | 0.0% | 0/58 | 0/23 | 81 |
 | `komira_job_supervisor` | none | 73 | 0 | 0.0% | 0/34 | 0/39 | 73 |
@@ -217,6 +218,7 @@ undocumented count:
 | `komira_plan_wire` | none | 57 | 0 | 0.0% | 0/52 | 0/5 | 57 |
 | `kci_artifact` | none | 56 | 0 | 0.0% | 0/54 | 0/2 | 56 |
 | `kci_validate` | none | 56 | 0 | 0.0% | 0/51 | 0/5 | 56 |
+| `komira_fs_registry` | none | 53 | 0 | 0.0% | 0/26 | 0/27 | 53 |
 | `komira_gcp_firestore_db` | none | 50 | 0 | 0.0% | 0/13 | 0/37 | 50 |
 | `komira_broker_coordinator` | none | 48 | 0 | 0.0% | 0/16 | 0/32 | 48 |
 | `kci_build` | none | 44 | 0 | 0.0% | 0/29 | 0/15 | 44 |
@@ -226,25 +228,25 @@ undocumented count:
 | `komira_gcp_wif` | none | 36 | 0 | 0.0% | 0/27 | 0/9 | 36 |
 | `kci_release_set` | none | 35 | 0 | 0.0% | 0/30 | 0/5 | 35 |
 | `komira_aws_lambda_http` | none | 35 | 0 | 0.0% | 0/29 | 0/6 | 35 |
+| `komira_azure_core` | none | 35 | 0 | 0.0% | 0/9 | 0/26 | 35 |
 | `komira_search_catalog` | none | 34 | 0 | 0.0% | 0/20 | 0/14 | 34 |
 | `komira_iceberg_catalog` | none | 32 | 0 | 0.0% | 0/13 | 0/19 | 32 |
-| `komira_azure_core` | none | 31 | 0 | 0.0% | 0/9 | 0/22 | 31 |
 | `komira_gcp_monitoring` | none | 27 | 0 | 0.0% | 0/22 | 0/5 | 27 |
 | `komira_pplan_wire` | none | 24 | 0 | 0.0% | 0/24 | 0/0 | 24 |
 | `komira_db_sqlite` | none | 23 | 0 | 0.0% | 0/1 | 0/22 | 23 |
 | `komira_log_query` | none | 23 | 0 | 0.0% | 0/18 | 0/5 | 23 |
 | `komira_aws_metrics` | none | 21 | 0 | 0.0% | 0/18 | 0/3 | 21 |
 | `komira_rowcell` | none | 21 | 0 | 0.0% | 0/15 | 0/6 | 21 |
-| `komira_fs_registry` | none | 19 | 0 | 0.0% | 0/9 | 0/10 | 19 |
 | `komira_secret_registry` | none | 18 | 0 | 0.0% | 0/4 | 0/14 | 18 |
 | `komira_authz_api` | none | 17 | 0 | 0.0% | 0/5 | 0/12 | 17 |
 | `kci_secret_writer` | none | 15 | 0 | 0.0% | 0/2 | 0/13 | 15 |
 | `komira_secret_env` | no-example | 14 | 0 | 0.0% | 0/7 | 0/7 | 14 |
 | `komira_secret_store` | none | 14 | 0 | 0.0% | 0/5 | 0/9 | 14 |
 | `komira_jsonl` | none | 12 | 0 | 0.0% | 0/12 | 0/0 | 12 |
+| `komira_zlib` | none | 12 | 0 | 0.0% | 0/12 | 0/0 | 12 |
 | `komira_uuid` | none | 10 | 0 | 0.0% | 0/3 | 0/7 | 10 |
-| `komira_zlib` | none | 10 | 0 | 0.0% | 0/10 | 0/0 | 10 |
 | `kci_publish_oci` | none | 6 | 0 | 0.0% | 0/4 | 0/2 | 6 |
+| `komira_sync` | none | 4 | 0 | 0.0% | 0/1 | 0/3 | 4 |
 | `komira_jwks` | none | 3 | 0 | 0.0% | 0/3 | 0/0 | 3 |
 
 ## Tests

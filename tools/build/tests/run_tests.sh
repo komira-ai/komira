@@ -169,7 +169,12 @@
 #      the verdict, --arg values arrive in order and unexported, exit 77 is
 #      red, and a test killed by SIGKILL or SIGABRT fails with its
 #      own status (137, 134) and no marker; five inadmissible data/env
-#      declarations are refused at analysis.
+#      declarations are refused at analysis. A library's `test_deps`
+#      (tests//functional/test_deps) reach its welded tests: a test imports a
+#      test-support package the library does not depend on; and nothing else
+#      (tests//negative/test_deps): the library's source and a consumer of
+#      the library importing it fail to compile, and an entry that is not a
+#      mojo_library, or is also in `deps`, is refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
 #      analysis only): mojo_test and a mojo_library's gated tests at -O1,
 #      mojo_binary and the shared libraries of a bundle at -O3, a per-target
@@ -325,7 +330,9 @@
 #      site in an FFI module, an unlisted marked module) or ledger defect,
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
-#  43. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
+#  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
+#  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
+#  45. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
 #      (every package under src/, read from the build graph) and
 #      tests//functional/src_layout:ok (a planted list) build; each target of
 #      tests//negative/src_layout fails naming its one planted finding: an
@@ -485,6 +492,7 @@ expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests/
 expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
 expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
 expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
+expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action
@@ -938,6 +946,11 @@ expect_red td_bad_dest "holds an empty, \`.\` or \`..\` segment" tests//negative
 expect_red td_bad_dest_clash "is both a file and the directory of" tests//negative/test_data:bad_dest_clash
 expect_red td_bad_data_entry "test_data[\"tests/test_nope.mojo\"]: not a test_srcs entry" tests//negative/test_data:bad_data_entry
 expect_red td_bad_env_owned "env sets TEST_TMPDIR, which the test runner sets itself" tests//negative/test_data:bad_env_owned
+expect_green td_test_deps tests//functional/test_deps:tdlib
+expect_red td_test_deps_src "unable to locate module 'tdhelper'" tests//negative/test_deps:src_imports_test_dep
+expect_red td_test_deps_consumer "unable to locate module 'tdhelper'" tests//negative/test_deps:consumer_of_test_dep
+expect_red td_test_deps_not_mojo "test_deps entry tests//negative/test_deps:not_a_package is not a Mojo package" tests//negative/test_deps:not_mojo
+expect_red td_test_deps_also_in_deps "is in both deps and test_deps" tests//negative/test_deps:also_in_deps
 expect_red td_bad_env_name "is not a shell variable name" tests//negative/test_data:bad_env_name
 
 # 30
@@ -1227,6 +1240,14 @@ expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \
 expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
 # 43
+# shellcheck source=tools/build/tests/coverage_run_tests.sh
+. "$ROOT/tools/build/tests/coverage_run_tests.sh"
+
+# 44
+# shellcheck source=tools/build/tests/public_boundary_tests.sh
+. "$ROOT/tools/build/tests/public_boundary_tests.sh"
+
+# 45
 expect_green src_layout //:src_layout tests//functional/src_layout:ok
 N=tests//negative/src_layout
 F="a test-only package directly under src/, which holds what komira ships; move it to"
