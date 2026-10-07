@@ -13,7 +13,7 @@
 #   model sha256 : 87209ff5e3cb2615b200d1c96910de79bdce9ea0d87e8fd845e74b204a5bcd62
 #   operations   : Ping, SendThing
 #   shapes       : 7 messages, 0 enums
-#   generator    : aws-client-gen version 12
+#   generator    : aws-client-gen version 13
 #   mode         : pure (no transport)
 #
 # HAND-OVERRIDE SEAM: no overrides are declared for this service.
@@ -26,6 +26,7 @@ from komira_aws_core import (
     AwsRequest,
     AwsResponse,
     aws_error_code,
+    aws_host_label,
     aws_is_error_status,
     AWS_QUERY_CONTENT_TYPE,
     AwsQueryWriter,

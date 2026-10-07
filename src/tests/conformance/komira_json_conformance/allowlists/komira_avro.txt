@@ -41,32 +41,3 @@ i_string_utf16BE_no_BOM.json REJECTS: AvroSchemaError.MALFORMED_JSON: unexpected
 i_string_utf16LE_no_BOM.json REJECTS: AvroSchemaError.MALFORMED_JSON: unexpected character
 i_structure_500_nested_arrays.json REJECTS: AvroSchemaError.SCHEMA_TOO_DEEP: JSON nesting exceeds 256 levels
 i_structure_UTF-8_BOM_empty_object.json REJECTS: AvroSchemaError.MALFORMED_JSON: unexpected character
-n_array_just_minus.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_-01.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_-1.0..json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_-2..json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_0.1.2.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_0.3e+.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_0.3e.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_0.e1.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_0_capital_E+.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_0_capital_E.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_0e+.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_0e.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_1.0e+.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_1.0e-.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_1.0e.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_1eE2.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_2.e+3.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_2.e-3.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_2.e3.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_9.e+.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_expression.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_invalid+-.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_neg_int_starting_with_zero.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_neg_real_without_int_part.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_real_without_fractional_part.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_number_with_leading_zero.json ACCEPTED: _parse_number takes any run of digits . e E + - as a number, without the JSON number grammar
-n_string_unescaped_ctrl_char.json ACCEPTED: _parse_string copies an unescaped control character (< 0x20) into the string
-n_string_unescaped_newline.json ACCEPTED: _parse_string copies an unescaped control character (< 0x20) into the string
-n_string_unescaped_tab.json ACCEPTED: _parse_string copies an unescaped control character (< 0x20) into the string

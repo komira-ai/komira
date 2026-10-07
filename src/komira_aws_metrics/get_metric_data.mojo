@@ -20,12 +20,13 @@
 #
 # ── WHY THIS IS HAND-WRITTEN AND NOT GENERATED ──────────────────────────────
 # The CloudWatch model in the pinned botocore archive
-# (//third_party/botocore:cloudwatch, api 2010-08-01) declares `protocol: smithy-rpc-v2-cbor`, and the AWS generator selects a
-# service's declared protocol and refuses `smithy-rpc-v2-cbor` by name
-# (`tools/build/proto-codegen/src/emit_aws/proto.rs`, `select_protocol`). The
-# model also lists `json` and `query` in `protocols`; a generator that chose
-# a supported protocol from that list would generate this client, and this
-# file becomes the reader's adapter over it.
+# (//third_party/botocore:cloudwatch, api 2010-08-01) declares `protocol: smithy-rpc-v2-cbor`
+# and lists `smithy-rpc-v2-cbor`, `json` and `query` in `protocols`. The AWS
+# generator chooses the first protocol of that list it supports, `json`
+# (`tools/build/proto-codegen/src/aws_in.rs`, `lower_metadata`;
+# `emit_aws/proto.rs`, `select_protocol`, refuses the choice if unsupported).
+# Generating the CloudWatch client into this package is a follow-up; when it
+# lands, this file becomes the reader's adapter over it.
 #
 # ── WHAT IS SILENT WHEN WRONG ON THIS API ───────────────────────────────────
 #   1. The signing name is `monitoring`, the service's endpoint prefix, not

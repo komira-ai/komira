@@ -21,7 +21,11 @@
 #      the data types (data.mojo): no `uses` on a table or a bucket (it runs
 #      as no identity, so it can be granted to, never grant); a bucket's
 #      `object_expiry_days` never an explicit 0; a table's key, access paths
-#      and fields complete and typed, its index names unique.
+#      and fields complete and typed, its index names unique. And the
+#      messaging rules (messaging.mojo): no `uses` on a queue, a topic or a
+#      subscription; a queue's ack deadline and max deliveries in range, its
+#      dead-letter queue a queue, never in a cycle; a subscription's topic
+#      and queue of their types, each pair once.
 #      And the identity rules (grants.mojo): `run_as` names a
 #      `service_account`; no `uses` on a grant; a `uses` line or a grant
 #      names exactly one of a target and a cell resource, with a verb that
@@ -71,9 +75,12 @@ from kci_cloud.catalog import (
     FIELD_BUCKET,
     FIELD_GRANT,
     FIELD_JOB,
+    FIELD_QUEUE,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_SUBSCRIPTION,
     FIELD_TABLE,
+    FIELD_TOPIC,
     RETENTION_DELETE,
     RETENTION_KEEP,
     RETENTION_NONE,
@@ -83,6 +90,8 @@ from kci_cloud.catalog import (
 from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
 from kci_cloud.data import data_findings
+from kci_cloud.feed import feeds_of
+from kci_cloud.messaging import messaging_findings
 from kci_cloud.grants import (
     GrantEdge,
     cell_accepted,
@@ -713,6 +722,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
         if field == FIELD_BUCKET or field == FIELD_TABLE:
             out.extend(data_findings(field, r))
             continue
+        if field == FIELD_QUEUE or field == FIELD_TOPIC or field == FIELD_SUBSCRIPTION:
+            out.extend(messaging_findings(resources, field, r))
+            continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
             if len(r.uses) > 0:
@@ -850,6 +862,7 @@ def validate_for[
         raise Error(String("unreachable: ") + pid.text())
     ref entry = clouds.entries[e]
     var out = graph_findings(clouds.catalog, resources)
+    var feeds = feeds_of(resources)
     for i in range(len(resources)):
         ref r = resources[i]
         var field: Int
@@ -861,7 +874,7 @@ def validate_for[
         if t < 0:
             continue
         if entry.implements(field):
-            var limits = cloud.check(r)
+            var limits = cloud.check(r, feeds)
             var public_refused = False
             for k in range(len(limits)):
                 if limits[k].field_path == "service.public":
