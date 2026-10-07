@@ -1137,6 +1137,9 @@ struct TlsConnection(Movable, Deinitable):
     # Freed only when BOTH the connector's TlsConfig AND this clone drop.
     # See TlsConfig's SHARE-OWNERSHIP note for the full root cause.
     var _config: TlsConfig
+    # Set when `handshake()` first returns TLS_OUTCOME_DONE; gates
+    # `negotiated_tls_version()`, whose s2n field holds a placeholder before.
+    var _handshake_done: Bool
 
     def __init__(out self, ref config: TlsConfig) raises:
         """Construct a server-mode TLS connection bound to `config`.
@@ -1162,6 +1165,7 @@ struct TlsConnection(Movable, Deinitable):
         # Co-own the config (share-ownership Arc clone) so `conn->config`
         # is provably valid for this connection's whole lifetime.
         self._config = config.copy()
+        self._handshake_done = False
 
     # NOTE: client-mode construction lives in the
     # `__init__(out self, ref config: TlsConfig, _client_mode: Bool)`
@@ -1207,6 +1211,7 @@ struct TlsConnection(Movable, Deinitable):
         # Co-own the config (share-ownership Arc clone) so `conn->config`
         # is provably valid for this connection's whole lifetime.
         self._config = config.copy()
+        self._handshake_done = False
 
     @staticmethod
     def new_client(ref config: TlsConfig) raises -> TlsConnection:
@@ -1341,7 +1346,10 @@ struct TlsConnection(Movable, Deinitable):
         # severity; only one of them was a spin.
         #
         # Pure-Int8/Int32 marshaling out of FFI; no pointer escapes.
-        return _error_typed_outcome(blocked_local, Int64(rc))
+        var outcome = _error_typed_outcome(blocked_local, Int64(rc))
+        if outcome == TLS_OUTCOME_DONE:
+            self._handshake_done = True
+        return outcome
 
     def send(mut self, data: Span[UInt8, _]) -> Tuple[UInt8, Int]:
         """Encrypt + send `data` via the bound fd. Returns a (outcome, n)
@@ -1916,8 +1924,17 @@ struct TlsConnection(Movable, Deinitable):
 
     def negotiated_tls_version(self) -> Int:
         """The TLS version the handshake negotiated: `TLS_VERSION_TLS13`,
-        `TLS_VERSION_TLS12`, another s2n protocol-version number for an older
-        version, or -1 before the handshake is DONE or on failure."""
+        `TLS_VERSION_TLS12`, or another s2n protocol-version number for an
+        older version.
+
+        -1 until `handshake()` on THIS connection has returned
+        TLS_OUTCOME_DONE (and -1 if s2n reports a failure). The guard is not
+        cosmetic: before the handshake s2n's `actual_protocol_version` holds
+        a placeholder, the highest version it supports (TLS 1.3) on a client
+        and 0 on a server, so the raw value would claim TLS 1.3 on a client
+        that never negotiated anything."""
+        if not self._handshake_done:
+            return -1
         # SAFETY: synchronous accessor; no pointer escapes.
         return Int(s2n_connection_get_actual_protocol_version(self._handle[]._raw))
 

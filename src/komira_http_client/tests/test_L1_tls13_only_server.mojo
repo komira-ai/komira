@@ -21,13 +21,18 @@
 #   1. `default_client_tls_config()`, with its trust store swapped for the
 #      fixture root, completes the handshake, and both ends report TLS 1.3
 #      (`negotiated_tls_version() == TLS_VERSION_TLS13`).
+#      `negotiated_tls_version()` is -1 until a handshake is DONE (asserted
+#      on fresh connections), so this is a negotiated value, not s2n's
+#      pre-handshake placeholder.
 #   2. A client on a fresh config (the defect's shape: TLS 1.2 at most) is
-#      refused by that server: the handshake ends in ERROR on one side. This
-#      is also what keeps (1) honest: it proves the server really does refuse
-#      anything below TLS 1.3, so (1) passing means the client offered 1.3.
+#      refused by that server for its protocol version, and reports no
+#      negotiated version. This is also what keeps (1) honest: it proves the
+#      server really does refuse anything below TLS 1.3, so (1) passing means
+#      the client offered 1.3.
 #
 # Defect it catches: `default_client_tls_config` capped at TLS 1.2 (its
-# `set_cipher_preferences` call removed or given a TLS 1.2 policy).
+# `set_cipher_preferences` call removed or given a TLS 1.2 policy);
+# `negotiated_tls_version()` returning s2n's raw field before the handshake.
 #
 # It imports the TLS layer's connection type directly, on purpose, to drive
 # the handshake without a reactor, as the other TLS tests here do.
@@ -196,6 +201,26 @@ def test_tls12_capped_client_is_refused_by_a_tls13_only_server() raises:
         r.server == TLS_OUTCOME_ERROR or r.client == TLS_OUTCOME_ERROR,
         "a TLS 1.2-only client was not refused: the server is not TLS 1.3-only",
     )
+    assert_true(
+        r.error.find("protocol version") >= 0,
+        "refused, but not for its protocol version: '" + r.error + "'",
+    )
+    assert_equal(r.client_version, -1, "a refused client reports a version")
+
+
+def test_no_version_is_reported_before_the_handshake() raises:
+    """Before the handshake s2n's version field holds a placeholder (TLS 1.3
+    on a client, 0 on a server); the wrapper must report -1 instead, or the
+    TLS 1.3 assertion above could pass with no handshake at all."""
+    tls_init()
+    var server_config = _tls13_only_server_config()
+    var client_config = default_client_tls_config()
+    var server = TlsConnection(server_config)
+    var client = TlsConnection.new_client(client_config)
+    assert_equal(client.negotiated_tls_version(), -1, "fresh client")
+    assert_equal(server.negotiated_tls_version(), -1, "fresh server")
+    _ = server^
+    _ = client^
 
 
 def main() raises:
