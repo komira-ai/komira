@@ -57,6 +57,16 @@ mojo_library(
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or
   anything depending on it) is built.
+- **`test_deps`** (optional) lists Mojo packages the welded tests are
+  compiled against besides the library and its `deps`: a test-support
+  package, such as a fake service several tests share
+  ([`test_deps.bzl`](test_deps.bzl)). They reach the tests only, never the
+  library's compile, its package, its `MojoInfo`, its README examples or
+  its conda package, so a test-only package (`conda = False`) can be one.
+  An entry that is not a `mojo_library`, or that is also in `deps`, is
+  refused; one that depends on the library is a cycle buck2 refuses
+  ([`tests//functional/test_deps`](../tests/functional/test_deps/BUCK),
+  [`tests//negative/test_deps`](../tests/negative/test_deps/BUCK)).
 
 Output layout of a library `L` with import name `I`:
 
@@ -761,7 +771,7 @@ Anywhere else passing it is refused.
 
 ## Not yet supported
 
-Test helper modules or test-only deps (each gated
-test is built from its one file against the library); extra compile flags, defines, or include roots; shared C libraries (C
+Test helper modules inside the package (each gated
+test is built from its one file against the library and its `test_deps`); extra compile flags, defines, or include roots; shared C libraries (C
 deps link statically); choosing the package root (the shallowest `__init__.mojo`
 in `srcs` is the root).
