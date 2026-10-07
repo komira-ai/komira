@@ -227,7 +227,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 | storage formats: Parquet, text and row formats, Iceberg and CDC, an MVCC table store | komira_parquet, komira_csv, komira_iceberg, komira_table_store |
 | execution and operators: pipelines and morsel dispatch, aggregation, joins, sort, top-N, window | the engine libraries |
 | plan and optimizer: logical and physical planning, the plan wire format, the query optimizer | komira_compiler, komira_optimizer |
-| SDK and SQL: the plan-carrier surface, UDFs, the Python package, the SQL front ends | komira_sdk |
+| SDK and SQL: the plan-carrier surface, UDFs, the Python package, the SQL parser and binder | komira_sdk, komira_sql (its lexer and syntax tree are in `src/`) |
 | runtime: the async runtime, the job supervisor and its job report wire | komira_async, komira_job_supervisor, komira_job_report_proto |
 | observability: logging and telemetry | komira_log |
 | agents: MCP and local models | komira_mcp_server, komira_localmodel |
