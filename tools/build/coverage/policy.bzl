@@ -54,11 +54,11 @@ COVERAGE_NO_GATE = {
 
 # The libraries whose coverage gate reads their tests' branch records
 # (tools/build/coverage/branch/README.md; covcheck's --branch-lcov), by
-# label, each with its evidence. Their packages then wait for every branch
+# label, each with its evidence. Their gates then wait for every branch
 # coverage action of their tests (bitcode, instrumented link, run, profile
 # applied, classifier), so a branch the classifier refuses fails the
-# library's coverage build in every mode, and the packages of every library
-# depending on it. The classifier refuses what it has no evidence for
+# library's coverage gate in every mode, which blocks its conda package
+# (what ships) and nothing else. The classifier refuses what it has no evidence for
 # (README.md of tools/build/coverage/branch, "Classes"), and some code has
 # shapes it refuses (an `and`/`or` whose result is returned, stored or
 # passed on; copies of a function that disagree: that README's "Refusals

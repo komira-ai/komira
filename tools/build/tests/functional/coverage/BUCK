@@ -250,13 +250,17 @@ cov_debug_check(
 
 # Test 47: branch coverage. A library whose function has every kind of
 # source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
-# its arms, never the first (and a String destroyed at an `if`): with
+# its arms, never the first (and a String destroyed at an `if`, loops over
+# collections, a Dict subscript, user masks): with
 # coverage (forced here, as for covlib_forced) it has [coverage][bc],
 # [coverage][pgo_bin] and [coverage][branch].
 mojo_library(
     name = "branchlib",
     srcs = [
         "branchlib/__init__.mojo",
+        "branchlib/lookup.mojo",
+        "branchlib/loops.mojo",
+        "branchlib/mask.mojo",
         "branchlib/score.mojo",
         "branchlib/shapes.mojo",
         "branchlib/strings.mojo",
@@ -342,7 +346,18 @@ cov_branch_check(
 # strings.mojo: `first` owns a String destroyed on its `if`'s return path,
 # so the IR holds five branches at the `if` (8,5): the `if` and the String
 # destructor's four, one record (1,1); a classifier reading the String's
-# branches as decisions there gives 8,5:br:0/5 to 4/5.
+# branches as decisions there gives 8,5:br:0/5 to 4/5. loops.mojo: a loop
+# over a List by name (9,14, at the name) and one over a list literal of
+# Strings (16,14, at the `[`, whose branch is on the `i1` that
+# `_ArrayIterOwned.__next__` returns, true when it raises StopIteration):
+# one record each, arm 0 the end and arm 1 an iteration (2,3 and 1,2); a
+# classifier dropping a raising call's flag at a loop head loses 16,14.
+# lookup.mojo: `d[key]`'s branch on `Dict.__getitem__`'s error flag at the
+# `[` is compiler-made (no record), and one refusing it fails here.
+# mask.mojo: `if ys.capacity() & (1 << 62):` (11,5) is a String's flags
+# test in shape, the `and` and `icmp ne` at the `&`; it stays a decision
+# because the test is not at the `if`'s location (`!= 0`, 9,5, is an
+# `icmp eq` and a `xor`, no String shape).
 # test_gate_env calls none of branchlib: its record file is empty.
 cov_report_check(
     name = "branch_info",

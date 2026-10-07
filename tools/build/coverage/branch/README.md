@@ -17,13 +17,14 @@ The coverage gate reads the records (`covcheck gate --branch-lcov`,
 [The build gate](../README.md#the-build-gate)) of a library of
 `COVERAGE_BRANCH_GATE` ([`policy.bzl`](../policy.bzl): every library
 whose tests' branches all classify, as the sweep of every library found
-them) and of every fixture of the tests cell: their packages wait for these
+them) and of every fixture of the tests cell: their gates wait for these
 actions, so a test failing instrumented or a branch the classifier refuses
-leaves the package unbuilt with the switch on, in every mode. The
+fails the gate with the switch on, in every mode, which leaves the
+library's conda package (what ships) unbuilt and nothing else. The
 classifier refuses what it has no evidence for, and the other libraries
-have such shapes (Refusals that stay, below) or a dependency whose
-coverage build fails, so for them nothing waits for these actions, and
-they are built when asked for:
+have such shapes (Refusals that stay, below), hold no arm, or have a
+coverage build that fails, so for them nothing waits for these actions,
+and they are built when asked for:
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage][branch_info]' -c komira.coverage=true
@@ -197,10 +198,16 @@ The tested instruction (the `icmp` of a and c, the `xor` of b) carries the
 branch's own `!dbg`; only (a)'s may sit at another location, and only at a
 token that is no decision (a call's branch reusing an earlier destructor's
 test: 74 in the triage sample). So a decision on such a test is recorded,
-never dropped: user code puts the `and` and the `icmp` of `(x & M) != 0` at
-`&` and `!=` (41 such in the sample, among them `(mode & ADVICE_HUGEPAGE)
-!= 0` and `(flg & 0x08) == 0`), and a `nodebug` helper of the library's
-would give its `icmp` the helper call's column, not the `if`'s. A branch at
+never dropped: user code computes its test at its own tokens, not at the
+`if`. Test 47's `branchlib/mask.mojo` masks a List's capacity (a field-2
+load of a `{ ptr, i64, i64 }`) with bit 62: `if ys.capacity() & (1 <<
+62):` gives the `and` and an `icmp ne` both at the `&`, shape (a) whole,
+and is kept a decision by this location check alone (relaxing it drops
+the record there); `!= 0` gives `icmp eq` and `xor` at the `!=`, none of
+the shapes, the `and` at the `&` (41 user masks in the sample put the
+`and` and the comparison on two columns, among them `(mode &
+ADVICE_HUGEPAGE) != 0` and `(flg & 0x08) == 0`). A `nodebug` helper of the
+library's would give its `icmp` the helper call's column, not the `if`'s. A branch at
 the `(` of a measured `nodebug` function's call is refused whatever its
 shape (below). Evidence: the sweep's sample of 20 libraries' IR (every
 refusal class), e.g. `kci_api/exit_codes.mojo` 101:17 (`if error_id ==
@@ -232,11 +239,11 @@ as a record, not as a branch missing from the count:
 | source decision | `elif` | br, select, switch | Mojo gives an `elif`'s branch its `if`'s location (`branchlib/score.mojo`: three branches at 4:5), so none has shown at an `elif` column yet; allowed as a decision by its meaning |
 | source decision | `while` | br | `branchlib/shapes.mojo`'s `while i < n` (a select at a `while` is a String's capacity: above) |
 | source decision | `or`, `and` | br, select | `select` at `or` (`policy.mojo` 65:20, 94:27; `score.mojo` 4:18), a chain `a or b or c` (`shapes.mojo`: the first select's result is the second's condition), `br` at `or` (short-circuit, `budget.mojo` 63:21, whose result is a phi at the token), `select` at `and` (`score.mojo` 6:22) |
-| source decision | the head of a `for <targets> in <iterable>:` line's iterable: a call's `(` when it ends in `)` (`range(`, `reversed(`, `x.items(`, `f[T](`), an attribute's last `.` (`self.cases`, `p.data().keys`), a name's first character, a list literal's `[` (one running over lines too); a chain may start at a string literal (`"ab".as_bytes()`). Any other iterable (a subscript, an operator, a tuple) has no head | br | `policy.mojo` 121:23, `shapes.mojo`'s `for _ in range(n)`: two branches on one value per loop (one decision, below); arm 0 is the iterator's end (the loop exits), arm 1 an iteration. The sweep's `for` lines: the iteration branch at the head in every one (`clouds.mojo` 207:27 `env.items(`, `float32_parse.mojo` 178:24 `reversed(`, `split.mojo` 976:14 a name, `expr.mojo` 1983:22 `self.cases`, `auto_promotion.mojo` 336:16 a list literal, `plan_validator.mojo` 463:36 `plan.join_data_ref().left_on`, `workflow_reader.mojo` 235:14 `[` over lines, `split.mojo` 967:32 `"THSPLIT".as_bytes(`). Iterator shapes: `icmp eq i8 (extractvalue {T, i8} next, 1), 0` (arm 0 the end, as for `range(`) or `call i1 @...__next__` (an array literal's; the meaning of its arms is not read). A raising call's error check at the head is a decision too (no rule drops it there: `_ArrayIterOwned::__next__`'s bare `i1` would match one), so a raise never taken reads as an arm not covered, never as a pass. A select at the head is refused |
+| source decision | the head of a `for <targets> in <iterable>:` line's iterable: a call's `(` when it ends in `)` (`range(`, `reversed(`, `x.items(`, `f[T](`), an attribute's last `.` (`self.cases`, `p.data().keys`), a name's first character, a list literal's `[` (one running over lines too); a chain may start at a string literal (`"ab".as_bytes()`). Any other iterable (a subscript, an operator, a tuple) has no head | br | `policy.mojo` 121:23, `shapes.mojo`'s `for _ in range(n)`: two branches on one value per loop (one decision, below); arm 0 is the iterator's end (the loop exits), arm 1 an iteration. The sweep's `for` lines: the iteration branch at the head in every one (`clouds.mojo` 207:27 `env.items(`, `float32_parse.mojo` 178:24 `reversed(`, `split.mojo` 976:14 a name, `expr.mojo` 1983:22 `self.cases`, `auto_promotion.mojo` 336:16 a list literal, `plan_validator.mojo` 463:36 `plan.join_data_ref().left_on`, `workflow_reader.mojo` 235:14 `[` over lines, `split.mojo` 967:32 `"THSPLIT".as_bytes(`). Iterator shapes: `icmp eq i8 (extractvalue {T, i8} next, 1), 0` (arm 0 the end, as for `range(`) or `call i1 @...__next__` (a list literal's, `_ArrayIterOwned::__next__`: the `i1` is its raising flag, true when it raises StopIteration, so arm 0 is the end too). Test 47's `branchlib/loops.mojo` pins both: `for x in xs:` 9,14 is 2,3 (a three-element and an empty List), `for s in [String("a"), String("bcd")]:` 16,14 is 1,2. A raising call's error check at the head is a decision too (no rule drops it there: `__next__`'s bare `i1` would match one), so a raise never taken reads as an arm not covered, never as a pass. A select at the head is refused |
 | compiler-made | `+` | br | a String temporary's destructor before the String-lifetime rule read it: every `+` row of `policy.mojo` (216 in `test_decide` alone), `loop.mojo` 96:66, 96:83 |
 | compiler-made | `//`, `//=`, `%` | select | the selects of floor division and modulo: `policy.mojo` 137:56 (`// 100`), 140:35 (`% UInt64(...)`), `seams.mojo` 51:44; `timestamp.mojo` 161:15 (`v //= 10`: `sdiv`, `mul`, `icmp eq`, `select`, the `//` family). `%=` has shown none and is refused |
-| compiler-made | a subscript's `[` (after a name, `]` or `)`) | br on a raising call's error flag: the `i1` a `[tail] call i1 @...` at the branch's location returns, or field 0 of the `{ i1, ... }` one returns | `clouds.mojo` 211:20 (`env[sorted[i]]`, `Dict.__getitem__`'s KeyError: `extractvalue { i1, ptr } (call), 0`); 18 such in the sample. Any other branch at `[` is refused (no user decision sits there) |
-| compiler-made | the `(` of a call off a `for` line's head: `name(`, or `name[...](` (the name before the `[`, which may be lines above: a call whose parameters run over lines) | br; select on a raising call's error flag (field 0 of a `{ i1, ... }`) or on a value a br at the same location with the same weights tests | code that carries the call's location: a raising call's error check (`loop.mojo` 100:31, `sleep_ms(`: `br i1` on the call's own `i1` result; `ipc_decoder_dispatch.mojo` 3401:56 at `_decode_column_nested_zerocopy[...](`; `parallel_fork_join.mojo` 239:14, `](` under a `run_with_state[` two lines up) and the code of standard-library functions declared `@always_inline("nodebug")` (no location of their own). A select on the error flag keeps the old value when the call raised (`ipc_encoder_dispatch.mojo` 223:59: `select i1 %err, i64 %old, i64 %new`); one on the value the call's error check branches on (`decimal256_arith.mojo` 179:31, an inlined raising callee's flag; `name_matcher.mojo` 379:39, a call's `i1`; `byte_hash_agg_table.mojo` 382:50) is that check's. Any other select at a call is refused (a `nodebug` `min(` would need evidence first). A `try`'s error check is one (the design's open question 1: the `except` body is held by line coverage) |
+| compiler-made | a subscript's `[` (after a name, `]` or `)`) | br on a raising call's error flag: the `i1` a `[tail] call i1 @...` at the branch's location returns, or field 0 of the `{ i1, ... }` one returns | `clouds.mojo` 211:20 (`env[sorted[i]]`, `Dict.__getitem__`'s KeyError: `extractvalue { i1, ptr } (call), 0`); 18 such in the sample; test 47's `branchlib/lookup.mojo` 7:13 (`d[key]`). Any other branch at `[` is refused (no user decision sits there) |
+| compiler-made | the `(` of a call off a `for` line's head: `name(`, or `name[...](` (the name before the `[`, which may be lines above: a call whose parameters run over lines; brackets in string literals and comments are skipped) | br; select on a raising call's error flag (field 0 of a `{ i1, ... }`) or on a value a br at the same location with the same weights tests | code that carries the call's location: a raising call's error check (`loop.mojo` 100:31, `sleep_ms(`: `br i1` on the call's own `i1` result; `ipc_decoder_dispatch.mojo` 3401:56 at `_decode_column_nested_zerocopy[...](`; `parallel_fork_join.mojo` 239:14, `](` under a `run_with_state[` two lines up) and the code of standard-library functions declared `@always_inline("nodebug")` (no location of their own). A select on the error flag keeps the old value when the call raised (`ipc_encoder_dispatch.mojo` 223:59: `select i1 %err, i64 %old, i64 %new`); one on the value the call's error check branches on (`decimal256_arith.mojo` 179:31, an inlined raising callee's flag; `name_matcher.mojo` 379:39, a call's `i1`; `byte_hash_agg_table.mojo` 382:50) is that check's. Any other select at a call is refused (a `nodebug` `min(` would need evidence first). A `try`'s error check is one (the design's open question 1: the `except` body is held by line coverage) |
 
 A branch at the `(` of a call to a function the library's own sources
 declare `@always_inline("nodebug")` is refused, whatever its shape: that

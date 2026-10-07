@@ -266,10 +266,27 @@ fn closing(s: []const u8, i: usize) ?usize {
     return null;
 }
 
+/// Whether `s[j]` is inside a string literal or the comment of line `s`
+/// (read from the line's start: a literal does not run over lines).
+fn inLiteral(s: []const u8, j: usize) bool {
+    var k: usize = 0;
+    while (k <= j) {
+        switch (s[k]) {
+            '#' => return true,
+            '"', '\'' => {
+                const e = skipString(s, k);
+                if (j < e) return true;
+                k = e;
+            },
+            else => k += 1,
+        }
+    }
+    return false;
+}
+
 /// The `[`, `(` or `{` opening the bracket closing at `lines[idx][i]`,
-/// on that line or up to 64 lines before it (strings and comments are not
-/// skipped: a bracket in one would be miscounted, and the call refused or
-/// named wrongly as any unmatched one is).
+/// on that line or up to 64 lines before it; brackets in string literals
+/// and comments are skipped (`gn["a[b"](v)` is a call of `gn`, not `a`).
 fn openingBack(lines: []const []const u8, idx: usize, i: usize) ?struct { line: usize, pos: usize } {
     var depth: usize = 0;
     var ln = idx;
@@ -278,6 +295,7 @@ fn openingBack(lines: []const []const u8, idx: usize, i: usize) ?struct { line: 
         const s = lines[ln];
         while (j > 0) {
             j -= 1;
+            if (inLiteral(s, j)) continue;
             switch (s[j]) {
                 ')', ']', '}' => depth += 1,
                 '(', '[', '{' => {

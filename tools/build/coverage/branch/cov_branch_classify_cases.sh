@@ -430,8 +430,9 @@ rinsert() {
 }
 
 # 11a. A String's shapes, read strictly. Kills: the `and` and `icmp` of the
-# flags test allowed at two locations (a user's `(w.c & M) != 0` gives them
-# `&` and `!=`: refused at the `!=`); any mask (bit 60); the last reference
+# flags test allowed at two locations (a made-up `icmp ne` at the `!=` of
+# `(w.c & M) != 0`, refused there; Mojo's own `!= 0` is an `icmp eq` and a
+# `xor`, test 47's mask.mojo); any mask (bit 60); the last reference
 # not inlined at the branch, or not the standard library's (--stdlib); the
 # shape taken at a call of a measured nodebug function (still refused).
 rinsert '  %83 = icmp ne i64 %82, 0, !dbg !225' '  br i1 %83, label %62, label %63, !dbg !225, !prof !288'
@@ -481,10 +482,21 @@ refused "constant under both" "src/pkg/d.mojo:38:16: a short-circuit 'and' (a br
 # refused); a select at a call on a value a br at the call tests is that
 # br's only with the same weights; a String's flags carried in phis needs
 # a leaf that is a String's (a field-2 load, or a static String's flags).
-# Kills: the nodebug check missing a call over lines; a select taken on any
-# value some br tests; phis of constants taken as a String's.
+# Kills: the nodebug check missing a call over lines, or naming the callee
+# from a bracket in a string literal or a comment; a select taken on any value some br
+# tests; phis of constants taken as a String's.
 rinsert '  br i1 %14, label %15, label %15, !dbg !314, !prof !285' '  br i1 %14, label %15, label %15, !dbg !315, !prof !285'
 refused "nodebug call over lines" "src/pkg/d.mojo:68:6: a br at 'gn[' may be a decision of gn" "$W/v.ll"
+# The same call with a string literal holding a `[`, or a comment holding
+# a `]`, in its parameters is still a call of gn. Kills: brackets in string
+# literals (the name would be `a`, no nodebug function) or comments counted
+# when the name before `[` is looked for.
+for e in '67s/^        Int,$/        Int, "a[b",/' '67s/^        Int,$/        Int,  # a]/'; do
+    sed -e "$e" "$DIR/fixtures/d.src" >"$W/$SRC/d.mojo"
+    ! cmp -s "$W/$SRC/d.mojo" "$DIR/fixtures/d.src" || red "variant '$e' does not change d.mojo"
+    refused "bracket in a literal: $e" "src/pkg/d.mojo:68:6: a br at 'gn[' may be a decision of gn" "$W/v.ll"
+done
+cp "$DIR/fixtures/d.src" "$W/$SRC/d.mojo"
 rvariant 's/^  %21 = select i1 %19, i1 true, i1 %20, !dbg !316, !prof !292/  %21 = select i1 %19, i1 true, i1 %20, !dbg !316, !prof !293/'
 refused "select, other weights than the br" "src/pkg/d.mojo:69:17: a select at 'overflows(' that is not on a raising call's error flag" "$W/v.ll"
 rvariant 's/^  %30 = phi i64 \[ %28, %27 \], \[ 2305843009213693952, %26 \]/  %30 = phi i64 [ %28, %27 ], [ 5, %26 ]/'
