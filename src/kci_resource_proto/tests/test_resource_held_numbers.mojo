@@ -48,12 +48,16 @@ from kci_resource_proto.resource import (
     Access,
     Bucket,
     CellResource,
+    Certificate,
+    DnsRecord,
+    DnsZone,
     Grant,
     Image,
     Job,
     Output,
     Queue,
     Resource,
+    Secret,
     Service,
     ServiceAccount,
     Subscription,
@@ -83,9 +87,9 @@ def _held() -> List[Held]:
     l.append(Held("Resource", 5, 5, "a typed per-cloud settings map"))
     l.append(Held("Resource", 6, 6, "physical_name"))
     l.append(Held("Resource", 12, 12, "worker"))
-    l.append(Held("Resource", 16, 19, "secret, 17 unused, DNS zone, 19 unused"))
+    l.append(Held("Resource", 17, 17, "unused"))
+    l.append(Held("Resource", 19, 19, "unused"))
     l.append(Held("Resource", 22, 24, "schedule, network, registry"))
-    l.append(Held("Resource", 26, 27, "DNS record, certificate"))
     l.append(
         Held(
             "Resource",
@@ -117,6 +121,10 @@ def _held() -> List[Held]:
     l.append(Held("Queue", 50, 53, "per-cloud extensions"))
     l.append(Held("Topic", 50, 53, "per-cloud extensions"))
     l.append(Held("Subscription", 50, 53, "per-cloud extensions"))
+    l.append(Held("Secret", 50, 53, "per-cloud extensions"))
+    l.append(Held("DnsZone", 50, 53, "per-cloud extensions"))
+    l.append(Held("DnsRecord", 50, 53, "per-cloud extensions"))
+    l.append(Held("Certificate", 50, 53, "per-cloud extensions"))
     return l^
 
 
@@ -219,6 +227,22 @@ def _undeclared_in(message: String, n: Int) raises -> Bool:
         head.append(1)
         head.append(UInt8(ord("t")))
         return _undeclared[Subscription](head, n)
+    if message == "Secret":
+        return _undeclared[Secret](head, n)
+    if message == "DnsZone":
+        head.append(0x0A)  # 1: name
+        head.append(1)
+        head.append(UInt8(ord("z")))
+        return _undeclared[DnsZone](head, n)
+    if message == "DnsRecord":
+        head.append(0x18)  # 3: type
+        head.append(3)
+        return _undeclared[DnsRecord](head, n)
+    if message == "Certificate":
+        head.append(0x0A)  # 1: domains
+        head.append(1)
+        head.append(UInt8(ord("d")))
+        return _undeclared[Certificate](head, n)
     raise Error(String("no probe for message ") + message)
 
 
@@ -312,6 +336,25 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("Subscription")
     nums.append(2)
     what.append("queue (a message)")
+    names.append("Resource")
+    nums.append(16)
+    what.append("the secret arm (an empty message in a oneof)")
+    for arm in [18, 26, 27]:
+        names.append("Resource")
+        nums.append(arm)
+        what.append("a DNS or certificate arm (a message in a oneof)")
+    names.append("DnsZone")
+    nums.append(1)
+    what.append("name (a string)")
+    names.append("DnsRecord")
+    nums.append(4)
+    what.append("values (a repeated message)")
+    names.append("DnsRecord")
+    nums.append(3)
+    what.append("type (an enum)")
+    names.append("Certificate")
+    nums.append(1)
+    what.append("domains (a repeated string)")
     for i in range(len(names)):
         assert_true(
             not _undeclared_in(names[i], nums[i]),

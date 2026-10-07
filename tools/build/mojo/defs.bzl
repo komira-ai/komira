@@ -36,6 +36,7 @@ load(
     _env_args = "env_args",
     _test_root = "test_root",
 )
+load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -170,7 +171,7 @@ _OPT_LEVELS = ["0", "1", "2", "3"]
 TEST_OPT_LEVEL = "1"
 SHIPPED_OPT_LEVEL = "3"
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = []):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
@@ -190,6 +191,9 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     With `debug_link` (a coverage build's link directory, coverage.bzl), the
     compile keeps line tables (`--debug-level line-tables`) and links through
     that directory instead of the toolchain's.
+
+    `defines`: `-D` arguments from defines.bzl's define_args, after
+    `--target-cpu`; none are written when it is empty.
     """
     if opt_level not in _OPT_LEVELS:
         fail("{}: optimization level `{}` is not one of {}".format(ctx.label, opt_level, ", ".join(_OPT_LEVELS)))
@@ -249,6 +253,7 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             opt_level,
             "--target-cpu",
             tc.target_cpu,
+            defines,
             ["--debug-level", "line-tables"] if debug_link else [],
             closure.project_as_args("include"),
             staged.project(entry),
@@ -350,6 +355,9 @@ def _library_impl(ctx):
 
     test_data = _admit_test_data(ctx)
     env_args = _env_args("{}: test_env".format(ctx.label.raw_target()), ctx.attrs.test_env)
+    where = str(ctx.label.raw_target())
+    test_defines = define_args(where, "test_assert_level", ctx.attrs.test_assert_level, "test_defines", ctx.attrs.test_defines)
+    cap = memory_cap(where, "test_memory_cap_mib", ctx.attrs.test_memory_cap_mib, ctx.attrs.test_assert_level)
 
     # The gate: one build + one run per test, against the UNGATED package.
     markers = []
@@ -378,12 +386,14 @@ def _library_impl(ctx):
             "mojo_build_test",
             stem,
             tests_c_link,
+            defines = test_defines,
         )
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         key = _test_key(ctx, t)
         root, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
+                capped_prefix(tc, mem_cap_script(ctx), "{}:{}".format(ctx.label.raw_target(), t.short_path), cap),
                 tc.busybox,
                 "sh",
                 tc.gate_runner,
@@ -401,7 +411,7 @@ def _library_impl(ctx):
         test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
         markers.append(marker)
         if cov_link and t.is_source:
-            cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link)
+            cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link, defines = test_defines)
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, src_root, test_data.get(key, {}), env_args)
             if ctx.attrs.coverage_branch:
                 cov_branch[stem] = coverage_branch(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args)
@@ -618,7 +628,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -635,8 +645,11 @@ def _executable(ctx, category):
     main = _main_src(ctx)
     srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
     _check_deps(ctx)
-    exe = _build_executable(ctx, tc, ctx.label.name, srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, category, None, _c_link(ctx))
+    exe = _build_executable(ctx, tc, ctx.label.name, srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, category, None, _c_link(ctx), defines = _exe_defines(ctx))
     return tc, exe
+
+def _exe_defines(ctx):
+    return define_args(str(ctx.label.raw_target()), "assert_level", ctx.attrs.assert_level, "defines", ctx.attrs.defines)
 
 def _runnable(ctx, tc, exe):
     """A directory holding the binary and lib/, the runtime libraries it loads.
@@ -670,7 +683,7 @@ def _run_check(ctx, tc, command):
 def _shared(ctx, tc):
     main = _main_src(ctx)
     srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
-    return _build_executable(ctx, tc, "shared/lib{}.so".format(ctx.label.name), srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, "mojo_build_shared", None, _c_link(ctx), shared = True)
+    return _build_executable(ctx, tc, "shared/lib{}.so".format(ctx.label.name), srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, "mojo_build_shared", None, _c_link(ctx), shared = True, defines = _exe_defines(ctx))
 
 def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
@@ -699,7 +712,7 @@ _EXECUTABLE_ATTRS = {
 
 mojo_binary_rule = rule(
     impl = _binary_impl,
-    attrs = _EXECUTABLE_ATTRS | {
+    attrs = _EXECUTABLE_ATTRS | BINARY_DEFINE_ATTRS | {
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         # When set, `[run_check]` fails unless the binary's stdout equals this.
         "expected_stdout": attrs.option(attrs.string(), default = None),
@@ -712,7 +725,9 @@ def _test_impl(ctx):
     data = _data_map(ctx, where + ": data", ctx.attrs.data)
     env_args = _env_args(where + ": env", ctx.attrs.env)
     root, staged = _test_root(ctx, ctx.label.name + ".testroot", exe, data)
+    cap = memory_cap(where, "memory_cap_mib", ctx.attrs.memory_cap_mib, ctx.attrs.assert_level)
     command = cmd_args(
+        capped_prefix(tc, mem_cap_script(ctx), where, cap),
         tc.busybox,
         "sh",
         tc.gate_runner,
@@ -748,7 +763,7 @@ def _test_impl(ctx):
 
 mojo_test_rule = rule(
     impl = _test_impl,
-    attrs = _EXECUTABLE_ATTRS | {
+    attrs = _EXECUTABLE_ATTRS | TEST_DEFINE_ATTRS | {
         "optimization_level": attrs.string(default = TEST_OPT_LEVEL),
         # Files staged under the test's share/, its current directory: a list
         # of sources (each at its path from the cell root) or {dest: source}.

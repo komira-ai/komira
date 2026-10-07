@@ -17,11 +17,11 @@ commit_sha	third_party/aws_c_auth/BUCK	1	the public upstream commit the archive 
 commit_sha	tools/build/package/README.md	1	the made-up source commit of the test stamp
 commit_sha	tools/build/tests/functional/public_boundary/held_c.txt	3	a planted finding of test 44 (the public boundary lint)
 commit_sha	tools/build/tests/functional/public_boundary/held_mojo.txt	5	a planted finding of test 44 (the public boundary lint)
-commit_sha	tools/build/tests/functional/public_boundary/near_c.txt	1	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/functional/public_boundary/near_c.txt	2	a planted finding of test 44 (the public boundary lint)
 commit_sha	tools/build/tests/functional/public_boundary/near_mojo.txt	4	a planted finding of test 44 (the public boundary lint)
-commit_sha	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
 commit_sha	tools/build/tests/negative/public_boundary/held_plus.txt	5	a planted finding of test 44 (the public boundary lint)
 commit_sha	tools/build/tests/negative/public_boundary/plant_sha_c.txt	1	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/negative/public_boundary/plant_sha_c_after_string.txt	1	a planted finding of test 44 (the public boundary lint)
 commit_sha	tools/build/tests/negative/public_boundary/plant_sha_comment.txt	1	a planted finding of test 44 (the public boundary lint)
 commit_sha	tools/build/tests/negative/public_boundary/plant_sha_docstring.txt	1	a planted finding of test 44 (the public boundary lint)
 commit_sha	tools/build/tests/negative/public_boundary/plant_sha_md.txt	1	a planted finding of test 44 (the public boundary lint)
@@ -56,7 +56,6 @@ email	src/komira_http_client/tests/test_url.mojo	1	userinfo of a URL (test input
 email	src/komira_log/structured_log.mojo	1	the example address of the redaction rule's docstring
 email	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/functional/public_boundary/held_mojo.txt	3	a planted finding of test 44 (the public boundary lint)
-email	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/negative/public_boundary/held_plus.txt	3	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/negative/public_boundary/plant_email.txt	1	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/negative/public_boundary/plant_email_after_url.txt	1	a planted finding of test 44 (the public boundary lint)
@@ -67,12 +66,11 @@ email	tools/build/tests/negative/public_boundary/plant_email_url_path.txt	1	a pl
 email	tools/build/tests/public_boundary_tests.sh	6	the findings test 44 expects, spelled out
 home_path	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/functional/public_boundary/held_mojo.txt	4	a planted finding of test 44 (the public boundary lint)
-home_path	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/negative/public_boundary/held_plus.txt	4	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/negative/public_boundary/plant_home_linux.txt	1	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/negative/public_boundary/plant_home_mac.txt	1	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/negative/public_boundary/plant_home_windows.txt	1	a planted finding of test 44 (the public boundary lint)
-home_path	tools/build/tests/public_boundary_tests.sh	3	the findings test 44 expects, spelled out
+home_path	tools/build/tests/public_boundary_tests.sh	4	the findings test 44 expects, spelled out
 host	src/kci_logs/run_log_path.mojo	1	a placeholder host in a docstring; an example name when the file is next edited
 host	src/kci_logs/tests/test_cloud_log_source.mojo	1	single-label or made-up hosts as test input
 host	src/kci_pkg_upload/http_read.mojo	1	a placeholder host in a comment; an example name when the file is next edited
@@ -109,7 +107,6 @@ host	src/komira_oci/oci_location.mojo	2	placeholder hosts in a comment; example 
 host	tools/build/readme_examples/tests/test_markdown.mojo	1	single-label or made-up hosts as test input
 host	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
 host	tools/build/tests/functional/public_boundary/held_mojo.txt	7	a planted finding of test 44 (the public boundary lint)
-host	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
 host	tools/build/tests/negative/public_boundary/held_plus.txt	7	a planted finding of test 44 (the public boundary lint)
 host	tools/build/tests/negative/public_boundary/plant_host_ipv6.txt	1	a planted finding of test 44 (the public boundary lint)
 host	tools/build/tests/negative/public_boundary/plant_host_private.txt	1	a planted finding of test 44 (the public boundary lint)
@@ -132,7 +129,6 @@ ip	src/komira_net/tests/test_dns_addrinfo_offsets.mojo	1	a private address as te
 ip	src/komira_net/tests/test_dns_literal.mojo	2	a private address as test input
 ip	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
 ip	tools/build/tests/functional/public_boundary/held_mojo.txt	8	a planted finding of test 44 (the public boundary lint)
-ip	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
 ip	tools/build/tests/negative/public_boundary/held_plus.txt	8	a planted finding of test 44 (the public boundary lint)
 ip	tools/build/tests/negative/public_boundary/plant_ip_link_local.txt	1	a planted finding of test 44 (the public boundary lint)
 ip	tools/build/tests/negative/public_boundary/plant_ip_port.txt	1	a planted finding of test 44 (the public boundary lint)
