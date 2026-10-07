@@ -84,8 +84,10 @@ from komira_plan_expr.expr import (
     COL_SIDE_NONE,
     COL_SIDE_LEFT,
     COL_SIDE_RIGHT,
+    WhenCaseData,
 )
 from komira_plan_expr.agg_expr import AggExpr, AGG_MEAN
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
@@ -198,10 +200,21 @@ def _expr_contains_correlated_subquery(expr: Expr) -> Bool:
         return _expr_contains_correlated_subquery(expr._in_list.value().child[])
     if expr.tag == EXPR_AGG_FN:
         return _expr_contains_correlated_subquery(expr._agg_fn.value().child[])
-    # EXPR_COL_REF / EXPR_COL_IDX / EXPR_LITERAL / EXPR_WHEN / EXPR_WINDOW_FN:
-    # WHEN has its own arms but is rare in correlated bodies; in this pass the
-    # supported parent-Expr shapes are: bare CorrelatedSubquery (Filter root)
-    # and CorrelatedSubquery within a binary-op (e.g. `>` for SCALAR/Q17).
+    if expr.tag == EXPR_WHEN:
+        # No lowering handles a subquery under a CASE; seeing it makes the
+        # pass refuse the shape instead of leaving the node in the plan.
+        ref wd = expr._when.value()
+        for i in range(len(wd.cases)):
+            if _expr_contains_correlated_subquery(wd.cases[i].condition[]):
+                return True
+            if _expr_contains_correlated_subquery(wd.cases[i].result[]):
+                return True
+        return _expr_contains_correlated_subquery(wd.default[])
+    # EXPR_COL_REF / EXPR_COL_IDX / EXPR_LITERAL / EXPR_WINDOW_FN (its
+    # arguments are column names, not expressions) and the remaining tags
+    # are not descended. The supported parent-Expr shapes are: bare
+    # CorrelatedSubquery (Filter root) and CorrelatedSubquery within a
+    # binary-op (e.g. `>` for SCALAR/Q17).
     return False
 
 
@@ -470,6 +483,29 @@ def _rewrite_inner_none_to_right(expr: Expr) -> Expr:
             expr.string_op_type(),
             _rewrite_inner_none_to_right(expr.string_op_child_ref()),
             expr.string_op_pattern(),
+        )
+    elif expr.tag == EXPR_ALIAS:
+        return Expr.alias(
+            _rewrite_inner_none_to_right(expr.alias_child_ref()), expr.alias_name()
+        )
+    elif expr.tag == EXPR_WHEN:
+        ref wd = expr._when.value()
+        var cases = List[WhenCaseData]()
+        for i in range(len(wd.cases)):
+            cases.append(WhenCaseData(
+                _rewrite_inner_none_to_right(wd.cases[i].condition[]),
+                _rewrite_inner_none_to_right(wd.cases[i].result[]),
+            ))
+        return Expr.when(cases^, _rewrite_inner_none_to_right(wd.default[]))
+    elif expr.tag == EXPR_IN_LIST:
+        ref il = expr._in_list.value()
+        var vals = List[ScalarValue]()
+        for i in range(len(il.values)):
+            vals.append(il.values[i].copy())
+        return Expr.in_list_node(_rewrite_inner_none_to_right(il.child[]), vals^)
+    elif expr.tag == EXPR_AGG_FN:
+        return Expr.agg_fn(
+            expr.agg_fn_op(), _rewrite_inner_none_to_right(expr.agg_fn_child_ref())
         )
     else:
         # Literals / col-idx / other leaves: no side-qualified col-ref to
