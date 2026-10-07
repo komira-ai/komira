@@ -9,8 +9,11 @@
 # local arm's tag is FS_SCHEME_FILE and FsHandle.FS_LOCAL, only the
 # local Optional is set, and a clone keeps both; the S3 arm's tag is
 # FS_SCHEME_S3 and FsHandle.FS_S3, only the S3 Optional is set, the bucket
-# survives a clone, and handle and clone move whole; the reserved GCS and
-# Azure codes are not either arm's tag.
+# survives a clone, and handle and clone move whole; the Azure arm's tag is
+# FS_SCHEME_AZURE and FsHandle.FS_AZURE (AzureArm.SCHEME agrees), only the
+# Azure Optional is set, the container survives a clone, and neither the arm
+# nor its clone has built a client (its connector factory raises if called);
+# the reserved GCS code is no arm's tag.
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
@@ -28,7 +31,8 @@ from komira_plan_expr.fs_descriptor_pod import (
     FS_SCHEME_S3 as CORE_FS_SCHEME_S3,
 )
 from komira_fs.local_fs import LocalFs
-from komira_fs_registry import FsHandle, LocalArm, S3Arm, S3ProdConnector
+from komira_azure_blob import AzureClientSpec, AzureConfig, AzureCredential
+from komira_fs_registry import AzureArm, FsHandle, LocalArm, S3Arm, S3ProdConnector
 from komira_http_client.client import HttpClientConfig
 from komira_objectstore_s3 import S3Config
 from komira_plan_expr.fs_descriptor_pod import (
@@ -68,6 +72,15 @@ def _s3_arm() raises -> S3Arm[S3ProdConnector]:
     )
 
 
+def _azure_arm() raises -> AzureArm[S3ProdConnector]:
+    return AzureArm[S3ProdConnector](
+        container=String("box"),
+        spec=AzureClientSpec[S3ProdConnector](
+            AzureConfig.azure("myacct"), AzureCredential.anonymous(), _never_dial
+        ),
+    )
+
+
 def test_tags_are_the_scheme_codes() raises:
     assert_equal(FsHandle.FS_LOCAL, FS_SCHEME_FILE)
     assert_equal(FsHandle.FS_S3, FS_SCHEME_S3)
@@ -75,6 +88,9 @@ def test_tags_are_the_scheme_codes() raises:
     assert_equal(Int(FS_SCHEME_S3), 1)
     assert_true(FsHandle.FS_LOCAL != FS_SCHEME_GCS)
     assert_true(FsHandle.FS_S3 != FS_SCHEME_GCS)
+    assert_equal(FsHandle.FS_AZURE, FS_SCHEME_AZURE)
+    assert_equal(Int(FS_SCHEME_AZURE), 3)
+    assert_true(FsHandle.FS_AZURE != FS_SCHEME_GCS)
     assert_true(FsHandle.FS_LOCAL != FS_SCHEME_AZURE)
     assert_true(FsHandle.FS_S3 != FS_SCHEME_AZURE)
 
@@ -83,6 +99,7 @@ def test_every_copy_of_the_scheme_codes_agrees() raises:
     # The arms' own SCHEME values.
     assert_equal(LocalArm.SCHEME, FsHandle.FS_LOCAL)
     assert_equal(S3Arm[S3ProdConnector].SCHEME, FsHandle.FS_S3)
+    assert_equal(AzureArm[S3ProdConnector].SCHEME, FsHandle.FS_AZURE)
     # the core packages' copy of the codes.
     assert_equal(CORE_FS_SCHEME_FILE, FS_SCHEME_FILE)
     assert_equal(CORE_FS_SCHEME_S3, FS_SCHEME_S3)
@@ -99,6 +116,12 @@ def test_keyword_constructors_set_their_own_arm() raises:
     assert_equal(s.tag(), FsHandle.FS_S3)
     assert_true(Bool(s.s3_ref()))
     assert_false(Bool(s.local_ref()))
+    assert_false(Bool(s.azure_ref()))
+    var a = FsHandle(azure=_azure_arm())
+    assert_equal(a.tag(), FsHandle.FS_AZURE)
+    assert_true(Bool(a.azure_ref()))
+    assert_false(Bool(a.s3_ref()))
+    assert_false(Bool(a.local_ref()))
 
 
 def test_local_arm_constructs_and_clones() raises:
@@ -138,10 +161,30 @@ def test_s3_arm_constructs_and_clones_without_dialing() raises:
     assert_equal(cc_moved.s3_ref().value().bucket(), "lake")
 
 
+def test_azure_arm_constructs_and_clones_without_dialing() raises:
+    var h = FsHandle.from_azure(_azure_arm())
+    assert_equal(h.tag(), FS_SCHEME_AZURE)
+    assert_true(h.is_azure())
+    assert_false(h.is_s3())
+    assert_false(h.is_local())
+    assert_equal(h.azure_ref().value().container(), "box")
+    assert_false(h.azure_ref().value().client_built())
+    var c = h.clone()
+    assert_equal(c.tag(), FS_SCHEME_AZURE)
+    assert_true(c.is_azure())
+    assert_false(Bool(c.s3_ref()))
+    assert_false(Bool(c.local_ref()))
+    assert_equal(c.azure_ref().value().container(), "box")
+    assert_false(c.azure_ref().value().client_built())
+    var moved = c^
+    assert_equal(moved.azure_ref().value().container(), "box")
+
+
 def main() raises:
     test_tags_are_the_scheme_codes()
     test_every_copy_of_the_scheme_codes_agrees()
     test_keyword_constructors_set_their_own_arm()
     test_local_arm_constructs_and_clones()
     test_s3_arm_constructs_and_clones_without_dialing()
+    test_azure_arm_constructs_and_clones_without_dialing()
     print("OK")

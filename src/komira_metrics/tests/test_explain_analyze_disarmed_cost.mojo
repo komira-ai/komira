@@ -26,22 +26,32 @@
 # via `@parameter if`.
 #
 # -----------------------------------------------------------------------------
-# WHY A TIMING ASSERTION, AND WHY THIS ONE IS NOT FLAKY
+# WHY A TIMING ASSERTION, AND WHY IT IS AGAINST A BASELINE
 # -----------------------------------------------------------------------------
 #
 # The claim under test IS a cost claim, so a test that does not measure cost
-# cannot falsify it. The usual objection to a timing assertion is machine
-# variance; it does not apply at this magnitude:
+# cannot falsify it. What it asserts is the cost OVER A BASELINE, not an
+# absolute number of nanoseconds:
 #
-#   * The bound is `_MAX_NS_PER_CALL` = 20 ns AMORTIZED over 400_000 calls. A
-#     relaxed atomic load plus one non-inlined C call is ~2-4 ns on any machine
-#     this decade, so the shipped path has ~5x headroom.
-#   * `_calls_accum` accumulates every return value and is asserted afterwards,
-#     so neither the loop nor the calls can be optimised away. (The shipped
+#   * `_baseline()` is the same shape as the shipped path without the C call:
+#     one non-inlined call that does one load and compares it with 0. Both are
+#     timed in the same loop, for the same `_N_CALLS`, in the same binary.
+#   * The assertion is `ns(ea_armed) - ns(baseline) <= _MAX_NS_OVER_BASELINE`
+#     (20 ns) per call. The C call and its relaxed atomic load are ~2-4 ns; a
+#     KGEN string-keyed registry lookup inside a `try`/`except` is not.
+#   * An absolute ceiling was flaky: the coverage build compiles this test at
+#     -O0 and runs it under kcov, where the loop, the call and the compare cost
+#     ~20 ns more than in a release build, and a 20 ns ceiling calibrated on
+#     release code read 26 ns/call there. That overhead is in both loops and
+#     cancels in the difference.
+#   * In a release build the optimiser may fold `_baseline()` (it returns a
+#     constant) and drop its loop. That makes the baseline ~0 ns and the
+#     assertion the old absolute one: stricter, never looser.
+#   * Each loop is timed `_N_ROUNDS` times, alternating, and the fastest round
+#     of each is kept, so a round the scheduler preempted does not count.
+#   * The loops accumulate every return value and the result is checked, so
+#     neither the loop nor the calls can be optimised away. (The shipped
 #     `ea_armed()` is an `external_call`, which is opaque to LLVM regardless.)
-#   * The loop is pure user-space arithmetic — no allocation, no IO, no fork —
-#     so it does not compete for the machine with anything the test harness is
-#     doing.
 #
 # This is a CEILING on a claim, not a benchmark. It does not assert the path got
 # faster by any particular factor; it asserts the header is not lying by an
@@ -61,48 +71,58 @@ from komira_metrics.explain_analyze_collect import (
 
 comptime _N_CALLS: Int = 400_000
 """Enough iterations that a per-call cost of a few ns is many milliseconds in
-total, so the clock's own resolution and the loop's own overhead are noise."""
+total, so the clock's own resolution is noise."""
 
-comptime _MAX_NS_PER_CALL: Int = 20
-"""The ceiling the header's claim implies. One relaxed atomic load behind one
-C call is ~2-4 ns; a KGEN string-keyed global-registry lookup inside a
-`try`/`except` is not."""
+comptime _N_ROUNDS: Int = 3
+"""Rounds per loop; the fastest is kept."""
+
+comptime _MAX_NS_OVER_BASELINE: Int = 20
+"""The ceiling the header's claim implies, per call, over `_baseline()`. One
+relaxed atomic load behind one C call is ~2-4 ns; a KGEN string-keyed
+global-registry lookup inside a `try`/`except` is not."""
 
 
-def _measure_disarmed_ns_per_call() raises -> Int:
-    """Amortized wall of ONE disarmed `ea_armed()` call, in nanoseconds.
+@no_inline
+def _baseline() -> Bool:
+    """The shipped `ea_armed()`'s shape without the C call: one non-inlined
+    call, one load, one compare with 0. Always False, like a disarmed
+    collector."""
+    var flag = Int32(0)
+    # SAFETY: `p` points at `flag`, a local of this frame that outlives the
+    # one read through `p` below; nothing else aliases it.
+    var p = Pointer(to=flag)
+    return p[] != Int32(0)
 
-    Returns the whole-loop wall divided by `_N_CALLS`. Raises if the loop's
-    accumulated result is not the all-disarmed answer — that is the guard that
-    the calls actually happened.
+
+def _loop_ns[shipped: Bool]() raises -> Int:
+    """Wall of `_N_CALLS` calls of `ea_armed()` (`shipped`) or `_baseline()`,
+    in nanoseconds, with the collector disarmed.
+
+    Raises if any call answered True: that is the guard that the calls
+    actually happened (an accumulated result consumed by a check cannot be
+    deleted) and that the collector is disarmed.
     """
-    ea_disarm()
-    # Warm: first touch of the flag may fault in a page / materialize the global.
-    # Measuring that once-per-process cost would measure the wrong thing (the
-    # claim is about the STEADY-STATE cost at a recording seam).
-    var warm = 0
-    for _ in range(1024):
-        warm += 1 if ea_armed() else 0
-    if warm != 0:
-        raise Error(
-            "test_explain_analyze_disarmed_cost: ea_armed() returned True"
-            " during the warm loop while the collector was disarmed."
-        )
-
     var calls_accum = 0
     var t0 = perf_counter_ns()
     for _ in range(_N_CALLS):
-        calls_accum += 1 if ea_armed() else 0
+        comptime if shipped:
+            calls_accum += 1 if ea_armed() else 0
+        else:
+            calls_accum += 1 if _baseline() else 0
     var t1 = perf_counter_ns()
-    # THE ANTI-ELISION GUARD. `calls_accum` is consumed by an assertion, so the
-    # loop has an observable result and cannot be deleted.
     if calls_accum != 0:
         raise Error(
             "test_explain_analyze_disarmed_cost: accumulated "
             + String(calls_accum)
-            + " armed answers from a disarmed collector."
+            + " True answers from a disarmed collector (shipped="
+            + String(shipped)
+            + ")."
         )
-    return Int(t1 - t0) // _N_CALLS
+    return Int(t1 - t0)
+
+
+def _per_call(total_ns: Int) -> Float64:
+    return Float64(total_ns) / Float64(_N_CALLS)
 
 
 def test_disarmed_ea_armed_costs_what_the_header_claims() raises:
@@ -113,26 +133,50 @@ def test_disarmed_ea_armed_costs_what_the_header_claims() raises:
     `external_call["komira_ea_armed", Int32]()`, a relaxed load of a TU-static
     in this package's C file.
     """
-    var ns = _measure_disarmed_ns_per_call()
+    ea_disarm()
+    # Warm: first touch of the flag may fault in a page / materialize the
+    # global. The claim is about the STEADY-STATE cost at a recording seam.
+    var warm = 0
+    for _ in range(1024):
+        warm += 1 if ea_armed() else 0
+        warm += 1 if _baseline() else 0
+    if warm != 0:
+        raise Error(
+            "test_explain_analyze_disarmed_cost: a call returned True"
+            " during the warm loop while the collector was disarmed."
+        )
+
+    var ea_ns = _loop_ns[True]()
+    var base_ns = _loop_ns[False]()
+    for _ in range(_N_ROUNDS - 1):
+        ea_ns = min(ea_ns, _loop_ns[True]())
+        base_ns = min(base_ns, _loop_ns[False]())
+    var delta_ns = ea_ns - base_ns
     print(
-        "[EA-DISARMED-COST] ea_armed() amortized over",
+        "[EA-DISARMED-COST] fastest of",
+        _N_ROUNDS,
+        "rounds of",
         _N_CALLS,
-        "calls:",
-        ns,
+        "calls: ea_armed()",
+        _per_call(ea_ns),
+        "ns/call, baseline",
+        _per_call(base_ns),
+        "ns/call, delta",
+        _per_call(delta_ns),
         "ns/call (ceiling",
-        _MAX_NS_PER_CALL,
-        "ns/call)",
+        _MAX_NS_OVER_BASELINE,
+        "ns/call over the baseline)",
     )
     assert_true(
-        ns <= _MAX_NS_PER_CALL,
-        String(
-            "DISARMED COST CLAIM IS FALSE: `ea_armed()` cost "
-        )
-        + String(ns)
-        + " ns/call amortized over "
-        + String(_N_CALLS)
-        + " calls, against a ceiling of "
-        + String(_MAX_NS_PER_CALL)
+        delta_ns <= _MAX_NS_OVER_BASELINE * _N_CALLS,
+        String("DISARMED COST CLAIM IS FALSE: `ea_armed()` cost ")
+        + String(_per_call(ea_ns))
+        + " ns/call against a baseline of "
+        + String(_per_call(base_ns))
+        + " ns/call for one non-inlined load-and-compare: "
+        + String(_per_call(delta_ns))
+        + " ns/call over it, against a ceiling of "
+        + String(_MAX_NS_OVER_BASELINE)
         + " ns/call implied by the module header's 'one relaxed atomic load'."
         + " This path sits at four collection seams including"
         + " `materialize_subplan._dispatch_thunk`, which every breaker passes"

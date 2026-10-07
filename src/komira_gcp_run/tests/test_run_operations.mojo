@@ -1,6 +1,6 @@
 # The long-running operations Cloud Run's mutating methods return, polled
-# through the generated `OperationsClient` (operations_mixin.proto, Run's
-# binding of the google.longrunning.Operations mixin): GetOperation and
+# through the generated `OperationsClient` (the google.longrunning.Operations
+# mixin, bound to Run's paths by run_v2.yaml's http.rules): GetOperation and
 # WaitOperation, each once on the wire byte for byte, and the three states
 # a caller reads off the Operation (running, done with a response, done
 # with an error).
@@ -23,8 +23,11 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_gcp_core import StaticTokenSource
 from komira_gcp_run.condition import Condition_State
-from komira_gcp_run.operations import GetOperationRequest, WaitOperationRequest
-from komira_gcp_run.operations_mixin import OperationsClient
+from komira_gcp_run.operations import (
+    GetOperationRequest,
+    OperationsClient,
+    WaitOperationRequest,
+)
 from komira_gcp_run.service import Service
 from komira_http_client.client import HttpClient
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
