@@ -1,7 +1,7 @@
 """The planted tree of test 44 (the public boundary lint), as {path in the tree: file}.
 
 held.mojo and shim.c hold findings of every rule in each spelling the reader
-knows (a date in each of its forms, the three home directory forms, each
+knows (a date in each of its forms, padded and not, the three home directory forms, each
 private range and each way of writing an address, hosts of each kind, email
 addresses, commit ids in a docstring, a comment, a trailing comment, a C line
 comment and a C block comment), and holds.tsv holds each rule at its exact
@@ -15,10 +15,10 @@ cloud metadata addresses, OIDs and section numbers, reserved example hosts,
 templates and patterns, noreply addresses, digests and UUIDs, quoted and
 fenced hex, and hex in code rather than prose.
 
-upstream.c (under third_party/ and under the trimmed upstream trees) and
-data.arrow (binary data, by suffix) hold findings of every rule and are not
-read; third_party/up/BUCK is read, and the only URL of the github.com row of
-hosts.tsv is there, so the row is used only if that file is read.
+data.arrow (binary data, by suffix) holds findings of every rule and is not
+read. Nothing is skipped as upstream bytes: third_party/up/BUCK and
+third_party/up/config.h are read, and the only URL of the github.com row of
+hosts.tsv is in the BUCK file, so the row is used only if it is read.
 functional/public_boundary/BUCK exports the files, so negative/public_boundary
 plants its defects in the same tree.
 """
@@ -33,8 +33,7 @@ PB_TREE = {
     "src/komira_a/shim.c": _DIR + "held_c.txt",
     "src/komira_a/tests/fixtures/data.arrow": _DIR + "data_arrow.txt",
     "third_party/up/BUCK": _DIR + "upstream_buck.txt",
-    "third_party/up/upstream.c": _DIR + "upstream_c.txt",
-    "tools/build/third_party_srcs/testdata/up/upstream.c": _DIR + "upstream_c.txt",
+    "third_party/up/config.h": _DIR + "third_party_h.txt",
 }
 
 PB_HOLDS = _DIR + "holds.tsv"
