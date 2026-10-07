@@ -27,11 +27,12 @@
 #       them through, or a wrong offset in the structural errors.
 #   G4  number shapes the grammar allows parse to the right default: 0,
 #       -0, multi-digit ints, fractions, both exponent marks and signs, and
-#       one-, two- and three-digit exponents; each literal is checked right
-#       before ',' and right before '}', and numbers (one with a two-digit
-#       exponent) sit before ',' and ']' in an array. Catches: a scanner
-#       that refuses a valid form or stops early, e.g. one that reads a
-#       single exponent digit (then the next byte is refused).
+#       one-, two- and three-digit exponents (1e001, 0E+100); each literal
+#       is checked right before ',' and right before '}', and numbers (one
+#       with a two-digit exponent) sit before ',' and ']' in an array.
+#       Catches: a scanner that refuses a valid form or stops early, e.g.
+#       one that reads at most one or two exponent digits (then the next
+#       byte is refused).
 #   G5  escaped control characters and U+007F stay legal; a raw 'é' and
 #       the escape \u00e9 decode to C3 A9, and the escaped surrogate pair
 #       \ud83d\ude00 to F0 9F 98 80, in a default. Catches: the control-character check refusing escapes or a
@@ -228,6 +229,10 @@ def test_valid_numbers_parse() raises:
     _check_float("1e10", 1e10)
     _check_float("25E-01", 2.5)
     _check_float("123e45", 123e45)
+    # Three-digit exponents, with values exact under the parser's multiply
+    # loop: a scanner that stops after two exponent digits refuses the third.
+    _check_float("1e001", 10.0)
+    _check_float("0E+100", 0.0)
     # A number right before '}' (the fixed size) and at the end of an array.
     var f = AvroSchema.parse(String('{"type":"fixed","name":"F","size":16}'))
     assert_equal(f.nodes[f.root_idx].size, 16, "size before '}'")
