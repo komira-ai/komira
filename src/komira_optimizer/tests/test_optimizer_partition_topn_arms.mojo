@@ -8,8 +8,8 @@
 #
 #   * `_collect_unsafe_window_cols` for each ancestor kind that can name the
 #     window column (Aggregate group keys and aggregate arguments, Join keys on
-#     either side, Distinct columns, TopN keys) and for the ones that only pass
-#     the names down (Limit, a Filter over a Filter). An ancestor that names
+#     either side, Distinct columns, TopN keys) and for ones that do not name
+#     it (Limit, a Filter over a Filter on another column). An ancestor that names
 #     the window column makes the fused node EMIT it; one that does not, does
 #     not. Each case also proves `fuse_partition_topn_inplace` descends through
 #     that node kind (the Filter under it became a PartitionTopN).

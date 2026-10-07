@@ -166,9 +166,11 @@ def _collect_unsafe_window_cols(
         plan: subplan to examine.
         ancestor_cols: column names referenced by operators STRICTLY
             ABOVE this plan node (Sort keys, Project exprs, Aggregate
-            exprs, Join keys, etc.). Filter predicates of THIS node are
-            NOT in ancestor_cols (the Filter is the legitimate consumer
-            of the window column).
+            exprs, Join keys, Filter predicates, etc.). Filter
+            predicates of THIS node are NOT in ancestor_cols, and a
+            Filter does not add its own child PartitionBy's window
+            column for that child (the Filter is the legitimate consumer
+            of that window column).
         unsafe_cols: out-param. Window-output column names of any
             PartitionBy that is `Filter > PartitionBy(RowNumber|Rank)`
             shaped AND whose window column name appears in
@@ -199,12 +201,25 @@ def _collect_unsafe_window_cols(
                     if win_col_name in ancestor_cols:
                         unsafe_cols.add(win_col_name)
 
-        # Recurse: the Filter's predicate consumes the window col, but
-        # operators ABOVE the Filter add to ancestor_cols. The Filter
-        # itself does NOT contribute to ancestor_cols for its child —
-        # Filter is the legitimate consumer.
+        # Recurse: the Filter's predicate is the legitimate consumer of
+        # its CHILD PartitionBy's window column, so that one name is not
+        # added for the child. Every other column the predicate reads is:
+        # a window column produced further down (e.g. under another
+        # Filter) is still read here after that lower node fuses.
+        var pred_cols = Set[String]()
+        _collect_expr_columns(plan._filter.value()[].predicate, pred_cols)
+        if plan._filter.value()[].child[].tag == PLAN_PARTITION_BY:
+            ref child_schema = plan._filter.value()[].child[].output_schema
+            var consumed = child_schema.field_name(
+                child_schema.num_columns() - 1
+            )
+            if consumed in pred_cols:
+                pred_cols.remove(consumed)
+        var new_ancestor = ancestor_cols.copy()
+        for c in pred_cols:
+            new_ancestor.add(c)
         _collect_unsafe_window_cols(
-            plan._filter.value()[].child[], ancestor_cols, unsafe_cols
+            plan._filter.value()[].child[], new_ancestor, unsafe_cols
         )
 
     elif plan.tag == PLAN_PROJECT:

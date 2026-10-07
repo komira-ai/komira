@@ -40,6 +40,7 @@ mojo_library(
         "tests/test_optimizer_or_factoring_shapes.mojo",
         "tests/test_optimizer_partial_agg_paths.mojo",
         "tests/test_optimizer_partition_topn.mojo",
+        "tests/test_optimizer_partition_topn_ancestor_refs.mojo",
         "tests/test_optimizer_partition_topn_arms.mojo",
         "tests/test_optimizer_partition_topn_rank.mojo",
         "tests/test_optimizer_payload_narrow.mojo",
