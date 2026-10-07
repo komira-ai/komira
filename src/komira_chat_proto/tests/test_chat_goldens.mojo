@@ -31,7 +31,8 @@
 #     the golden file names exactly the messages chat.proto declares, in
 #     declaration order, and the corpus has one field per message: a message
 #     added to chat.proto without a golden line (or one moved) is reported by
-#     name. Tests 1-4 then hold `_check_all` to the golden order, so a message
+#     name; a message nested inside another (an indented `message` line)
+#     is refused by name. Tests 1-4 then hold `_check_all` to the golden order, so a message
 #     with a golden line but no `_check` call fails there.
 #   test_protoc_accepted_the_corpus
 #     the report of `chat_corpus_fixture` is staged: protoc decoded the
@@ -166,8 +167,9 @@ def _load_goldens() raises -> Goldens:
 
 def _proto_message_names() raises -> List[String]:
     """The names of the messages chat.proto declares, in declaration order:
-    every line that starts `message <Name>` at column 0 (chat.proto nests no
-    message)."""
+    every line that starts `message <Name>` at column 0. A `message` line
+    indented by spaces or tabs is a nested message, which no golden line can
+    name; it raises."""
     var text = _read(_PROTO)
     var names = List[String]()
     var b = text.as_bytes()
@@ -177,6 +179,20 @@ def _proto_message_names() raises -> List[String]:
             continue
         var line = String(text[byte=start:i])
         start = i + 1
+        var lead = 0
+        var lb = line.as_bytes()
+        while lead < len(lb) and (
+            lb[lead] == UInt8(ord(" ")) or lb[lead] == UInt8(ord("\t"))
+        ):
+            lead += 1
+        if lead > 0 and String(line[byte=lead : line.byte_length()]).startswith(
+            "message "
+        ):
+            raise Error(
+                "chat.proto: a nested message has no golden line; declare it"
+                + " at top level: "
+                + line
+            )
         if not line.startswith("message "):
             continue
         var rest = String(line[byte=8 : line.byte_length()])
