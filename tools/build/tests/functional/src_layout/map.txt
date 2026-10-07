@@ -14,7 +14,7 @@ it; the src_layout lint reads any file.
 | [`komira_b_conformance`](../src/tests/conformance/komira_b_conformance/) | a conformance package. |
 | [`komira_c_e2e`](src/tests/e2e/komira_c_e2e) | a link with no leading ../ and no trailing slash. |
 | [`komira_d_loopback`](../../src/tests/e2e/komira_d_loopback/) | a link with two leading ../ |
-| [`komira_test_harness`](../src/tests/support/komira_test_harness/) | a harness. |
+| [`komira_test_harness`](../src/tests/helpers/komira_test_harness/) | a harness. |
 
 Not rows of the map: a row whose link is outside src/, a line that does not
 start a table row, and prose naming a package.
