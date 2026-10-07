@@ -368,6 +368,7 @@
 #      no package. With a module map (`map`; //:src_layout reads
 #      docs/architecture.md): a package with no row, a row naming no package,
 #      a second row for a package, and a row whose name is not its link's.
+#  46. The coverage gate and what ships waits for it: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
 set -uo pipefail
 
 umbrella=1

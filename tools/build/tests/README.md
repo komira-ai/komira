@@ -881,9 +881,7 @@ the same README in a library with `conda = False`, builds.
 [the repository lint tests](lint_tests.md#40-readme-api-coverage).
 
 ## 41. Coverage builds
-
-[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
-binary with line tables per `test_srcs` entry and leave every release action as it is; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0 binary per test and move no release action of a library, only its conda package's joins; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
 ## 42. Pointer lint
 
@@ -923,10 +921,7 @@ the tree, and must fail naming it.
 ```
 
 ## 43. Coverage runs
-
-Each test's coverage binary also runs under kcov through the release gate's runner
-([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
-[`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+Each test's coverage binary also runs under kcov ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`; [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
 
 ## 44. Public boundary
 
@@ -984,32 +979,13 @@ querying its attributes, so narrowing it fails.
 
 ## 45. The layout of src/
 
-`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in
-`docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
-[the repository lint tests](lint_tests.md#45-the-layout-of-src).
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in [the repository lint tests](lint_tests.md#45-the-layout-of-src).
+
+## 46. Coverage gate
+With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
 
 ## 52. API JSON: mojo_doc_json
-
-[`mojo_doc_json`](../mojo/README.md#api-json-mojo_doc_json) runs the pinned
-`mojo doc` on a library's sources. Test 1 builds
-`//tools/build/examples:hellopkg_doc`, whose JSON must equal the golden
-[`hellopkg_doc.json`](../examples/hellopkg_doc.json) byte for byte and
-declare `greet.greeting`. [`functional/mojo_doc_json`](functional/mojo_doc_json/BUCK)
-documents a package that imports hellopkg (so `mojo doc` sees its `deps` on
-`-I`) and requires a path of each kind the symbol check walks: a function of
-`__init__`, an alias, a trait and its method, a struct with a parametric
-header spanning lines and its methods, and a function of a subpackage's
-module. Each target of [`negative/mojo_doc_json`](negative/mojo_doc_json/BUCK)
-must fail naming its defect: a source that does not compile, a golden with
-one function renamed, and three paths the JSON does not declare (a private
-function, a function without its module, a struct field).
-
-```sh
-./buck2 build tests//functional/mojo_doc_json:docpkg_doc
-./buck2 build tests//negative/mojo_doc_json:compile_error    # must fail: could not generate documentation
-./buck2 build tests//negative/mojo_doc_json:golden_differs   # must fail: the JSON differs from its golden
-./buck2 build tests//negative/mojo_doc_json:missing_symbol   # must fail: the JSON declares no `shout`
-```
+[`mojo_doc_json`](../mojo/README.md#api-json-mojo_doc_json): `//tools/build/examples:hellopkg_doc` (in test 1) equals its golden; [`functional/mojo_doc_json`](functional/mojo_doc_json/BUCK) must build and each target of [`negative/mojo_doc_json`](negative/mojo_doc_json/BUCK) must fail naming its defect.
 
 ## Diagnostics
 
