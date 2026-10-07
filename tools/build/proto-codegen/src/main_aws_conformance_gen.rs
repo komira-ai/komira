@@ -689,9 +689,8 @@ fn emit_input_case(
     // call without a connector: the unsigned request's headers go to the
     // signer as `extra`, except a header named Content-Type in any case
     // (header names are case-insensitive), which is its own argument, and
-    // the endpoint is resolved WITHOUT `_req.host_prefix`, because `send`
-    // does not apply it (the front-end refuses an operation with a host
-    // prefix, by name, until it does).
+    // the endpoint carries `_req.host_prefix` ahead of its host
+    // (`AwsEndpoint.with_host_prefix`), as `send` passes it.
     o.line("var _ct = String(\"\")");
     o.line("var _extra = List[Header]()");
     o.line("for _i in range(len(_req.header_names)):");
@@ -702,7 +701,7 @@ fn emit_input_case(
     o.line("    _extra.append(Header(_req.header_names[_i].copy(), _req.header_values[_i].copy()))");
     o.indent -= 1;
     o.line(&format!(
-        "var _ep = AwsEndpoint.parse(String(\"{}\"), String(\"clientEndpoint\"))",
+        "var _ep = AwsEndpoint.parse(String(\"{}\"), String(\"clientEndpoint\")).with_host_prefix(_req.host_prefix)",
         esc(&endpoint)
     ));
     o.line("var _sr = build_sigv4_signed_request(");
