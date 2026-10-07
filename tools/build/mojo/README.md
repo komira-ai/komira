@@ -551,7 +551,16 @@ botocore service model at build time; no generated code is checked in.
 writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
 (imported as `<name>.<name>`) and `_layout_probe.mojo`; `<name>` is an
 ordinary `mojo_library` over them, welded like mojo_gcp_client's: the probe is
-its first `test_srcs` entry, followed by the caller's. `model` and
+its first `test_srcs` entry, then `_no_env_reads.mojo`, an environment scan
+written for the client at analysis (every file of the package is its data;
+it fails if any names one of the environment reads or FFI routes it lists,
+or has an import statement, read at the start of a line, after a `;` or
+after a `:`, outside comments and string literals, of a module outside an
+allow-list of the runtime the generator imports and std.sys, and it refuses
+a file with a t-string, whose braces it does not lex, or with an ASCII
+control byte other than a tab or a line feed (Mojo reads a carriage return,
+a vertical tab and a form feed as a line end); and it checks
+that it read the whole generated module), then the caller's. `model` and
 `model_sha256` are normally `botocore_model("<service>").model` and
 `.sha256` from [`third_party/botocore`](../../../third_party/botocore/BUCK);
 the service id is read from the model's botocore path unless `service`
@@ -571,7 +580,8 @@ module's header lists the endpoint bindings of the model it does not apply.
 generator's hand-override manifest) and `hand_srcs` (the hand-written
 modules owning the operations it names, copied into the package) each
 require the other. `deps` is required and non-empty, and nothing is added
-to it. Every refusal of the rule is at analysis. The module docstring of
+to it. Every refusal of the rule is at analysis; the scan's failure is in
+the build, as a welded test's. The module docstring of
 [`../cloud/aws.bzl`](../cloud/aws.bzl) has the details;
 [`tests//functional/mojo_aws_client`](../tests/functional/mojo_aws_client/BUCK),
 [`tests//functional/aws_client_mode`](../tests/functional/aws_client_mode/BUCK)
