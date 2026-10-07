@@ -1,0 +1,20 @@
+# Test 45: assert level, defines and memory cap
+
+The checks of [test 45](README.md#45-assert-level-defines-and-memory-cap), run by
+[`assert_level_tests.sh`](assert_level_tests.sh). The attributes are described in
+[the Mojo rules' README](../mojo/README.md#assert-level-defines-and-memory-cap).
+
+| check | what it proves | the defect planted to see it go red |
+|---|---|---|
+| [`assert_level.sh`](functional/assert_level.sh) | read from `buck2 aquery` (analysis only): `-D ASSERT=none` and `-D KOMIRA_PROBE_DEFINE=on` in the compile commands of the targets that set them (a library's test build, a mojo_test, a binary and its `[shared]` library); a library's gated test at `ASSERT=none` runs under `mem_cap.sh` at 4096 MiB, at `test_memory_cap_mib = 1024` at 1024, and at `0` uncapped; and no `-D` and no `mem_cap.sh` in any command of the targets that set nothing, the examples among them | the `-D` arguments dropped from `mojo build` (`_build_executable`); the cap prefix always empty (`capped_prefix`) |
+| [`functional/assert_level`](functional/assert_level/BUCK) | builds: at `ASSERT=none` neither of the library's `debug_assert`s is compiled into its test (`lib_none`), an `assert_mode="none"` one is not at the default level (`lib_default`), a define reaches the test file and the library's package (`lib_defines`); `bin_none[run_check]` prints past its safe assert and `buck2 test :test_none` passes | the `-D` arguments dropped: `lib_none`, `bin_none` and `test_none` fail on their safe asserts |
+| [`negative/assert_level`](negative/assert_level/BUCK) | the twins fail, naming the assert: `lib_default`'s test at `ASSERT=all` (`lib_all`: `ASSERT_PROBE all_only_probe`), `lib_none`'s at the default level (`lib_safe_default`: `ASSERT_PROBE safe_probe`), the program of `bin_none` and `test_none` at the default level (`bin_default[run_check]`, `buck2 test :test_default`: exit 132); and each inadmissible declaration fails analysis with its message (an unknown level on a library or a binary, `ASSERT` in the defines, a define name that is not an identifier, a name twice, a negative cap) | the `-D` arguments dropped: `lib_all` builds |
+| [`functional/mem_cap`](functional/mem_cap/BUCK) | a test holding 256 MiB passes under a 1024 MiB cap | |
+| [`negative/mem_cap`](negative/mem_cap/BUCK) | a test that allocates 64 MiB chunks without a bound of its own is killed past its 512 MiB cap, as a library's gated test (`GATED TEST FAILED: ... (exit 137)` and `MEMORY CAP: killed ... over its cap of 512 MiB`) and under `buck2 test`; the 256 MiB test under a 192 MiB cap is killed after it has started. The unbounded test stops itself at 2 GiB and passes, so a cap that does not act shows as a build that succeeds | the cap prefix always empty, and `mem_cap.sh` comparing against 64 times the cap: every target here builds |
+
+```sh
+tools/build/tests/functional/assert_level.sh
+./buck2 build tests//functional/assert_level: tests//functional/mem_cap: 'tests//functional/assert_level:bin_none[run_check]'
+./buck2 build tests//negative/assert_level:lib_all      # must fail: Assert Error: ASSERT_PROBE all_only_probe
+./buck2 build tests//negative/mem_cap:lib_unbounded     # must fail: MEMORY CAP: killed ... over its cap of 512 MiB
+```

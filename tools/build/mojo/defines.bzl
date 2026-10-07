@@ -9,9 +9,9 @@ same commands, and so the same action keys, as before the attributes existed.
     test_defines               defines                              `-D <define>` each
     test_memory_cap_mib        memory_cap_mib (mojo_test only)      the run under mem_cap.sh
 
-The mojo_library attributes reach each `test_srcs` build and run (and its
-coverage build), not the package's `mojo precompile` and not the README's
-examples. A `-D` given to `mojo build` also reaches the code of every package
+The mojo_library attributes reach each `test_srcs` build and run, and the
+defines its coverage build; not the package's `mojo precompile`, the README's
+examples, or a coverage run under kcov (which is not capped). A `-D` given to `mojo build` also reaches the code of every package
 compiled into the program: a `.mojoc` holds no machine code, so its
 compile-time parameters (`debug_assert`'s `ASSERT` among them) are settled in
 the `mojo build` that generates the code.

@@ -39,7 +39,7 @@ names. At the top of this directory are the driver,
 [`tool_lib.sh`](tool_lib.sh), and the sections the driver sources
 ([`cxx_tests.sh`](cxx_tests.sh), [`rust_tests.sh`](rust_tests.sh),
 [`proto_tests.sh`](proto_tests.sh), [`c_libs_tests.sh`](c_libs_tests.sh),
-[`coverage_tests.sh`](coverage_tests.sh), [`coverage_run_tests.sh`](coverage_run_tests.sh)).
+[`coverage_tests.sh`](coverage_tests.sh), [`coverage_run_tests.sh`](coverage_run_tests.sh), [`assert_level_tests.sh`](assert_level_tests.sh)).
 
 The tests run where the checkout builds, read from the execution platforms
 buck2 registers, and the first line of output names it:
@@ -946,8 +946,11 @@ defect in the same tree and must fail naming it, `enforce = True` included.
 ## 41. Coverage builds
 
 [Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
-binary with line tables per `test_srcs` entry and leave every release action as it is;
-[`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+binary with line tables per `test_srcs` entry and leave every release action as it is; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+
+## 45. Assert level, defines and memory cap
+
+[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
 
 ## 42. Pointer lint
 
