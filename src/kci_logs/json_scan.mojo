@@ -25,6 +25,15 @@
 # passed through as its literal bytes, unchanged — the conservative choice for a
 # diagnostic renderer, not a validator.
 #
+# ⛔ AND THE VALUE IS REPAIRED TO WELL-FORMED UTF-8 BEFORE IT BECOMES A
+# `String`. `json_scan_string` takes caller bytes, and a `String` holding
+# ill-formed UTF-8 breaks the invariant every `String` operation relies on.
+# This package never raises (an enrichment on a failure path), so an
+# ill-formed sequence is REPLACED, not refused: each maximal ill-formed
+# subpart becomes one U+FFFD (the Unicode Standard's recommended practice,
+# §3.9 "U+FFFD Substitution of Maximal Subparts"), and the rest of the value
+# survives for the operator to read.
+#
 # PURE. No transport, no raise, no allocation beyond the scanned value.
 # def-based, Mojo 1.0.0b2.
 # =============================================================================
@@ -46,6 +55,79 @@ def json_skip_space(b: Span[UInt8, _], i: Int) -> Int:
     return j
 
 
+def _utf8_valid_len(b: Span[UInt8, _], i: Int) -> Int:
+    """Length of the well-formed UTF-8 sequence at `b[i]`, or MINUS the length
+    of the maximal ill-formed subpart there (always at least one byte).
+
+    Well-formed is RFC 3629 / Unicode Table 3-7: no stray continuation byte,
+    no overlong form, no UTF-16 surrogate, nothing above U+10FFFF, no
+    truncated sequence."""
+    var c = b[i]
+    if c < UInt8(0x80):
+        return 1
+    if c < UInt8(0xC2) or c > UInt8(0xF4):
+        return -1
+    var need: Int
+    var lo = UInt8(0x80)
+    var hi = UInt8(0xBF)
+    if c < UInt8(0xE0):
+        need = 1
+    elif c < UInt8(0xF0):
+        need = 2
+        if c == UInt8(0xE0):
+            lo = UInt8(0xA0)
+        elif c == UInt8(0xED):
+            hi = UInt8(0x9F)
+    else:
+        need = 3
+        if c == UInt8(0xF0):
+            lo = UInt8(0x90)
+        elif c == UInt8(0xF4):
+            hi = UInt8(0x8F)
+    for k in range(1, need + 1):
+        if i + k >= len(b):
+            return -k
+        var ck = b[i + k]
+        var klo = lo if k == 1 else UInt8(0x80)
+        var khi = hi if k == 1 else UInt8(0xBF)
+        if ck < klo or ck > khi:
+            return -k
+    return need + 1
+
+
+def _utf8_repaired(var buf: List[UInt8]) -> String:
+    """`buf` as a `String`, with each maximal ill-formed UTF-8 subpart
+    replaced by one U+FFFD (`EF BF BD`). Well-formed input (the common case)
+    is checked in one pass and converted without a second copy."""
+    var n = len(buf)
+    var i = 0
+    while i < n:
+        if buf[i] < UInt8(0x80):
+            i += 1
+            continue
+        var r = _utf8_valid_len(Span(buf), i)
+        if r < 0:
+            break
+        i += r
+    if i == n:
+        return String(unsafe_from_utf8=Span(buf))
+    var fixed = List[UInt8](capacity=n + 2)
+    for k in range(i):
+        fixed.append(buf[k])
+    while i < n:
+        var r = _utf8_valid_len(Span(buf), i)
+        if r > 0:
+            for k in range(i, i + r):
+                fixed.append(buf[k])
+            i += r
+        else:
+            fixed.append(UInt8(0xEF))
+            fixed.append(UInt8(0xBF))
+            fixed.append(UInt8(0xBD))
+            i -= r
+    return String(unsafe_from_utf8=Span(fixed))
+
+
 def json_scan_string(b: Span[UInt8, _], i: Int, mut out: String) -> Int:
     """Read a JSON string starting AT its opening quote, writing the UNESCAPED
     value into `out`. Returns the index after the closing quote, or -1 when
@@ -58,7 +140,14 @@ def json_scan_string(b: Span[UInt8, _], i: Int, mut out: String) -> Int:
     and is re-stated here because this is a SECOND copy of the same loop, on a
     path whose payloads are far more likely to be non-ASCII (arbitrary container
     stdout). A `\\uXXXX` is passed through as its literal bytes, unchanged — the
-    conservative choice for a diagnostic renderer."""
+    conservative choice for a diagnostic renderer.
+
+    ⛔ THE VALUE IS WELL-FORMED UTF-8 WHATEVER `b` HOLDS: each maximal
+    ill-formed subpart becomes one U+FFFD (module header). Each escape arm
+    appends ASCII or the raw byte that followed the backslash (which may be
+    ill-formed, e.g. 0xFF); the repair runs once over the whole accumulated
+    buffer, so whatever an escape appends is repaired in sequence with the
+    bytes around it."""
     out = String()
     if i >= len(b) or b[i] != UInt8(ord('"')):
         return -1
@@ -67,7 +156,7 @@ def json_scan_string(b: Span[UInt8, _], i: Int, mut out: String) -> Int:
     while j < len(b):
         var c = b[j]
         if c == UInt8(ord('"')):
-            out = String(unsafe_from_utf8=Span(buf))
+            out = _utf8_repaired(buf^)
             return j + 1
         if c == UInt8(ord("\\")):
             if j + 1 >= len(b):
