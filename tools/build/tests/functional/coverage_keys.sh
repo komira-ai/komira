@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # coverage_keys.sh -- the coverage switch moves no release action of a
 # library, its package's join included; of its conda package, only the
-# joins (tests 41 and 46).
+# joins, which wait for the coverage runs and the gate (tests 41 and 46).
 # For each target below, reads its actions from `buck2 aquery` (analysis
 # only) with `-c komira.coverage=false`, `=true` and unset, and requires:
 #
@@ -36,16 +36,23 @@
 # traverse ("readme" in the table). Its command line is compared either way.
 #
 # The actions a README's dynamic action declares (its build and run) are
-# compared by building each README target (and each target marked `build`)
-# with the switch off in a fresh daemon (`buck2 kill` first: the daemon of
-# this checkout only), then on in the same daemon, and requiring every action
-# the second build runs to have run in the first with the same digest
-# (`buck2 log what-ran`; cache hits), but the coverage actions: the join
-# included, nothing else may run again. A fresh daemon is what
-# makes the first list complete: a daemon that had built either state
-# before lists only the actions it recomputes. covuser depends on covlib: its compile and test
-# not running again proves covlib's package (the join's output) has the same
-# bytes with the switch on, so a dependent keeps its cache hits.
+# compared by building each README target and each target marked `build`
+# or `conda` with the switch off in a fresh daemon (`buck2 kill` first: the
+# daemon of this checkout only), then on in the same daemon, and reading what
+# each build ran (`buck2 log what-ran`; cache hits included) with its digest.
+# The actions the second build ran under a digest the first did not have
+# must be exactly, for each conda package, one mojo_build_cov_test and one
+# mojo_cov_run per test of its library, the library's one mojo_cov_gate and
+# the package's conda_join (what ships waits for them; its
+# conda_release_join is not built: the release check needs a stamp), and
+# nothing else: no release action of a library, its join included, runs
+# again. Exactly, so the check fails both when a release action moves and
+# when what ships stops waiting for coverage (no coverage action would run).
+# A fresh daemon is what makes the first list complete: a daemon that had
+# built either state before lists only the actions it recomputes. covuser
+# depends on covlib: its compile and test not running again proves covlib's
+# package (the join's output) has the same bytes with the switch on, so a
+# dependent keeps its cache hits.
 #
 # What this cannot see, although the remote action key holds it: an action's
 # environment (aquery prints no env; a planted `env =` on a release action
@@ -63,7 +70,7 @@ LOG=${1:-${TMPDIR:-/tmp}}
 
 # label, its number of test_srcs (of a conda package: its library's),
 # readme (it has a README, so it is also built), build (built), conda (a
-# conda package), or no.
+# conda package `<library>_conda`, also built), or no.
 TARGETS="
 tests//functional/coverage:covlib 2 no
 tests//functional/coverage:covbare 0 no
@@ -184,15 +191,16 @@ done
 
 # A README's actions are declared by a dynamic action, which aquery cannot
 # traverse, so they are compared by building (cache hits): each target with a
-# README or marked `build` is built with the switch off, then on, in one
-# daemon, and `buck2 log what-ran` gives each action a build ran (a cache
-# hit included) with its digest. An action whose key did not move is not run
-# again, so every action of those targets that the second build runs must
-# have run in the first with the same digest, but the coverage actions (the
-# join too: its inputs must not change); a README action whose command line
-# moves with the switch runs again under another digest, and so does a
-# compile of covuser if covlib's package changed bytes.
-rl=$(printf '%s\n' "$TARGETS" | awk 'NF == 3 && ($3 == "readme" || $3 == "build") { print $1 }')
+# README or marked `build` or `conda` is built with the switch off, then on,
+# in one daemon, and `buck2 log what-ran` gives each action a build ran (a
+# cache hit included) with its digest. An action whose key did not move is
+# not run again, so the actions the second build runs under a new digest
+# are exactly those that wait for coverage or are coverage: per conda
+# package, its library's builds, runs and gate and its conda_join. A README
+# action whose command line moves with the switch runs again under another
+# digest, and so does a compile of covuser if covlib's package changed
+# bytes; a conda package that stops waiting for coverage runs none of them.
+rl=$(printf '%s\n' "$TARGETS" | awk 'NF == 3 && ($3 == "readme" || $3 == "build" || $3 == "conda") { print $1 }')
 "$BUCK2" kill > "$LOG/coverage_keys_kill.log" 2>&1 ||
     fail "buck2 kill before the komira.coverage=false build failed (see $LOG/coverage_keys_kill.log)"
 for c in false true; do
@@ -203,9 +211,10 @@ for c in false true; do
         fail "buck2 log what-ran after the komira.coverage=$c build failed (see $LOG/coverage_keys_build_$c.log)"
     inspect_tool json-lines "$LOG/coverage_keys_ran_$c.json" > "$LOG/coverage_keys_ran_$c.lines" ||
         fail "inspect cannot read $LOG/coverage_keys_ran_$c.json"
-    # `<identity> TAB <digest>` of each action of a listed target.
+    # `<identity> TAB <digest>` of each action of a listed target (a conda
+    # package's library included: its coverage actions are the library's).
     awk -F '\t' -v LABELS="$rl" '
-        BEGIN { split(LABELS, ls, "\n"); for (i in ls) if (ls[i] != "") mine[ls[i]] = 1 }
+        BEGIN { split(LABELS, ls, "\n"); for (i in ls) if (ls[i] != "") { mine[ls[i]] = 1; l = ls[i]; if (sub(/_conda$/, "", l)) mine[l] = 1 } }
         $2 == "identity" { id[$1] = $3 }
         $2 == "reproducer" && $3 == "details" && $4 == "digest" { dg[$1] = $5 }
         END { for (n in id) { l = id[n]; sub(/ .*/, "", l); if (l in mine) print id[n] "\t" dg[n] } }' "$LOG/coverage_keys_ran_$c.lines" |
@@ -214,11 +223,31 @@ for c in false true; do
 done
 LC_ALL=C comm -13 "$LOG/coverage_keys_ran_false.tsv" "$LOG/coverage_keys_ran_true.tsv" > "$LOG/coverage_keys_moved.tsv" ||
     fail "cannot compare $LOG/coverage_keys_ran_false.tsv and _true.tsv"
-# `<label> (<configuration>) (<category> [<identifier>])`: only the
-# coverage actions may run again (not the join: its inputs are the same).
-moved=$(cut -f 1 "$LOG/coverage_keys_moved.tsv" | grep -v -E ' \((mojo_build_cov_test|mojo_cov_run) [^ )]+\)$| \(mojo_cov_gate\)$' || true)
+# An identity is `<label> (<configuration>) (<category>[ <identifier>])`.
+# The moved actions, as `<label> <category>` counts, must be exactly the
+# expected ones.
+moved=$(awk -F '\t' -v TARGETS="$TARGETS" '
+    BEGIN {
+        m = split(TARGETS, ls, "\n")
+        for (i = 1; i <= m; i++) {
+            if (split(ls[i], f, " ") != 3 || f[3] != "conda") continue
+            l = f[1]; sub(/_conda$/, "", l)
+            want[l " mojo_build_cov_test"] += f[2]; want[l " mojo_cov_run"] += f[2]
+            want[l " mojo_cov_gate"] += 1; want[f[1] " conda_join"] += 1
+        }
+    }
+    {
+        l = $1; sub(/ .*/, "", l)
+        c = $1; sub(/.*\(/, "", c); sub(/[ )].*/, "", c)
+        got[l " " c]++
+    }
+    END {
+        for (k in got) if (got[k] != want[k] + 0) print k ": ran " got[k] " under a new digest, expected " (want[k] + 0)
+        for (k in want) if (!(k in got)) print k ": ran 0 under a new digest, expected " want[k]
+    }' "$LOG/coverage_keys_moved.tsv" | LC_ALL=C sort) ||
+    fail "cannot count the actions that ran again (from $LOG/coverage_keys_moved.tsv)"
 [ -z "$moved" ] ||
-    fail "with -c komira.coverage=true, building $(echo $rl) ran again, under a digest the build with it off did not have: $(printf '%s\n' "$moved" | sed 's/^\([^ ]*\) .*) (/\1 (/' | head -n 5 | paste -sd ';' -) (see $LOG/coverage_keys_ran_false.tsv and _true.tsv)"
+    fail "with -c komira.coverage=true, building $(echo $rl) after it off: $(printf '%s\n' "$moved" | head -n 5 | paste -sd ';' -) (see $LOG/coverage_keys_ran_false.tsv and _true.tsv)"
 nr=$(grep -c . "$LOG/coverage_keys_ran_true.tsv")
 nm=$(grep -c . "$LOG/coverage_keys_moved.tsv")
 
@@ -300,5 +329,5 @@ awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" -v NMOVED="$nm" '
         if (plats != nt) bad = bad "; the execution platform of " plats " of " nt " targets was compared"
         if (joins != 2 * nc) bad = bad "; " joins " conda join(s) compared, expected " (2 * nc)
         if (bad != "") { print "FAIL  coverage keys: " substr(bad, 3); exit 1 }
-        print "PASS  coverage keys: with -c komira.coverage=true, the " plats " targets keep their execution platform, and the " rel " release actions (" (pkgjoins + 0) " of them package joins) are all there, " cmds " command lines, " ins " input sets and " execs " sets of execution attributes unchanged, but " joins " conda join(s) whose inputs gained one coverage run per test and the gate; the " nb " mojo_build_cov_test, " nr " mojo_cov_run, " ng " mojo_cov_gate and " other " other coverage actions exist only with it; unset is false; on darwin-arm64 none of the " ND " libraries has a coverage attribute; a build with it on after one with it off ran " NRAN " action(s) of the built targets, " NMOVED " of them (coverage actions only) under a new digest"
+        print "PASS  coverage keys: with -c komira.coverage=true, the " plats " targets keep their execution platform, and the " rel " release actions (" (pkgjoins + 0) " of them package joins) are all there, " cmds " command lines, " ins " input sets and " execs " sets of execution attributes unchanged, but " joins " conda join(s) whose inputs gained one coverage run per test and the gate; the " nb " mojo_build_cov_test, " nr " mojo_cov_run, " ng " mojo_cov_gate and " other " other coverage actions exist only with it; unset is false; on darwin-arm64 none of the " ND " libraries has a coverage attribute; a build with it on after one with it off ran " NRAN " action(s) of the built targets, " NMOVED " of them under a new digest, exactly the coverage builds, runs and gate and the conda join"
     }' "$LOG/coverage_keys_false.facts" "$LOG/coverage_keys_true.facts"
