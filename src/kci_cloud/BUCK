@@ -13,8 +13,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # and retention marks' keys, the retention mark's values, and the rule a
 # validation run id must pass before any create.
 #
-# komira_proto_codec is here for the welded tests, which read graphs in the
-# proto3 JSON form an author writes.
+# komira_proto_codec and komira_json are also the binding of a composite's
+# input into a component (compose_bind.mojo: the component's proto3 JSON,
+# patched and decoded strictly); the welded tests read graphs in the proto3
+# JSON form an author writes.
 mojo_library(
     name = "kci_cloud",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -22,6 +24,7 @@ mojo_library(
         "//src/kci_reconciler:kci_reconciler",
         "//src/kci_resource_proto:kci_resource_proto",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_json:komira_json",
         "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_validation_run:komira_validation_run",
     ],
@@ -42,6 +45,8 @@ mojo_library(
         "tests/test_cloud_compose_refusals.mojo",
         "tests/test_cloud_compose_paths.mojo",
         "tests/test_cloud_compose_size.mojo",
+        "tests/test_cloud_compose_bind.mojo",
+        "tests/test_cloud_compose_bind_refusals.mojo",
     ],
     visibility = ["PUBLIC"],
 )

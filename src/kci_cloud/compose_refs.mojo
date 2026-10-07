@@ -21,7 +21,8 @@
 #     subscription's `topic` and `queue`; a DNS record's `zone` and `values`;
 #     a certificate's `zone`; a schedule's `target`; an event trigger's
 #     `source` and `target`; a subnet's `network`;
-#   * a composite instance's `input` values.
+#   * a composite instance's `input` values, and the values of its
+#     `map_input` maps.
 # A new reference field of the catalog is one more line in `_walk`. One
 # it lacks is not silent: `unrewritten` reads the rewritten resource's
 # proto3 JSON for a `local`, `input` or `path` key, which only a reference
@@ -215,7 +216,14 @@ def _walk(mut r: Resource, mut w: _Walk) raises:
     if r.subnet:
         w.ref_slot(r.subnet.value().network, String("subnet.network"))
     if r.composite:
-        w.value_map(r.composite.value().input, String("composite.input"))
+        ref ci = r.composite.value()
+        w.value_map(ci.input, String("composite.input"))
+        var names = _sorted(ci.map_input)
+        for i in range(len(names)):
+            var vm = ci.map_input[names[i]].copy()
+            w.value_map(vm.value, String("composite.map_input.") + names[i])
+            if w.write:
+                ci.map_input[names[i]] = vm^
 
 
 def ref_sites(r: Resource) raises -> List[RefSite]:

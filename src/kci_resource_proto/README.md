@@ -16,11 +16,16 @@ one `body` arm. Version 1 declares twenty primitives as body arms:
 (29), `ip_address` (30) and `event_trigger` (31). Arm 80, `composite`, is
 not a primitive: it is an INSTANCE of a composite (`CompositeInstance`), a
 named graph of resources defined as data in the format of `composite.proto`
-(`CompositeDefinition`, with its `Input`, `InputType` and `OutputDecl`).
-Inside a definition a `Ref` names a component with `local` or a REF input
-with `input`, and a `Value` names a STRING input with `input`; anywhere, a
-`Ref.path` reaches an exported component of an instance. kci_cloud expands
-every instance into primitives before validating a list.
+(`CompositeDefinition`, with its `Input`, `InputType`, `Binding`, `Presence`
+and `OutputDecl`). Inside a definition a `Ref` names a component with
+`local` or a REF input with `input`, a `Value` names a STRING, INT or BOOL
+input with `input`, and a `Binding` writes an input into any other field of
+a component (an image, a port, a cron, an env); a `Presence` makes a
+component exist only when an input is set. An instance binds its inputs by
+type: `input` (plain values and references), `image_input` (images) and
+`map_input` (`ValueMap`s). Anywhere, a `Ref.path` reaches an exported
+component of an instance. kci_cloud expands every instance into primitives
+before validating a list.
 Every other number the `.proto` headers list is
 held: undeclared today, so it decodes as an unknown field, and declaring it
 later is an addition. A `secret` resource is the container only; a workload
@@ -41,7 +46,9 @@ the subnet, the IP address and `Service.network` in
 `Resource.physical_name`, `labels` and `adopt` in
 `tests/test_resource_metadata_numbers.mojo`, and the bases of `Ref`,
 `Value.input`, `CompositeInstance` and the messages of `composite.proto` in
-`tests/test_resource_composite_numbers.mojo`), and
+`tests/test_resource_composite_numbers.mojo`, and `Binding`, `Presence`,
+`ValueMap`, the instance's typed inputs and the typed `InputType` values in
+`tests/test_resource_binding_numbers.mojo`), and
 `tests/test_resource_held_numbers.mojo` and
 `tests/test_held_numbers_are_unused.mojo` pin every held number as
 undeclared.

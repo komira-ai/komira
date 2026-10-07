@@ -26,17 +26,19 @@
 #    `input`; a literal followed by an input keeps the input (one arm).
 # 4. COMPOSITEINSTANCE. 1 definition, 2 version, 3 digest (optional: absent
 #    is None, a written empty digest is Some("")), 4 input (a map of string
-#    to `Value`); JSON `definition`, `version`, `digest`, `input`; 7 is not a
-#    field (5 and 6 stay held: test_resource_held_numbers). As
+#    to `Value`); JSON `definition`, `version`, `digest`, `input`; 8 is not a
+#    field (5 and 7 are test_resource_binding_numbers', and 6 stays held:
+#    test_resource_held_numbers). As
 #    `Resource.body` 80 it is the 21st arm, JSON name `composite`.
 # 5. COMPOSITEDEFINITION. 1 name, 2 version, 3 input (repeated `Input`), 4
 #    component (repeated `Resource`), 6 output (repeated `OutputDecl`), 7
 #    export (repeated string), 10 doc; JSON names the same; 11 is not a field
-#    (5, 8 and 9 stay held).
+#    (5 and 9 are test_resource_binding_numbers', and 8 stays held).
 # 6. INPUT. 1 name, 2 type (an `InputType`), 3 required, 4 default (a
 #    `Value`), 5 doc; JSON `default` (`required`, `type`); 6 is not a field.
 # 7. INPUTTYPE. Every value by number AND by name: 0 INPUT_TYPE_UNSET, 1
-#    INPUT_STRING, 5 INPUT_REF; 2-4 and 6-9 are no value (held).
+#    INPUT_STRING, 2 INPUT_INT, 3 INPUT_BOOL, 5 INPUT_REF, 6 INPUT_IMAGE, 9
+#    INPUT_VALUE_MAP; 4, 7 and 8 are no value (held).
 # 8. OUTPUTDECL. 1 name, 2 from (a `Ref`; JSON `from`, the Mojo field
 #    `from_`); 3 is not a field.
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
@@ -420,7 +422,7 @@ def test_value_input() raises:
 def test_composite_instance() raises:
     """Catches: a field at another number or wire type, `digest` without
     presence (a written empty digest read as absent), the map's key or value
-    swapped, a JSON name other than the proto3 one, a field declared at 7,
+    swapped, a JSON name other than the proto3 one, a field declared at 8,
     and the arm at another number or position."""
     var c = decode_proto[CompositeInstance](_instance())
     assert_equal(c.definition, "acme.shop", "1 is `definition`")
@@ -443,8 +445,8 @@ def test_composite_instance() raises:
     _str(e, 3, "")
     assert_equal(decode_proto[CompositeInstance](e^).digest.value(), "", "written empty: present")
     var probe = _instance()
-    _str(probe, 7, "not-a-field")
-    _same(encode_proto(decode_proto[CompositeInstance](probe.copy())), _instance(), "no field 7")
+    _str(probe, 8, "not-a-field")
+    _same(encode_proto(decode_proto[CompositeInstance](probe.copy())), _instance(), "no field 8")
 
     var r = decode_proto[Resource](_instance_resource(_instance()))
     assert_equal(r._oneof0_case, 21, "the composite is the 21st arm")
@@ -462,7 +464,7 @@ def test_composite_instance() raises:
 def test_composite_definition() raises:
     """Catches: any field at another number or wire type, a repeated field
     read as a single one, a JSON name other than the proto3 one, and a field
-    declared at 11 (5, 8 and 9 are probed by test_resource_held_numbers)."""
+    declared at 11 (8 is probed by test_resource_held_numbers)."""
     var d = decode_proto[CompositeDefinition](_definition())
     assert_equal(d.name, "acme.shop", "1 is `name`")
     assert_equal(d.version, "3", "2 is `version`")
@@ -529,12 +531,20 @@ def test_input() raises:
 def test_input_type_ordinals() raises:
     """Catches: a type renumbered or renamed (the number is what is stored),
     and a held type declared without its pin."""
-    var nums: List[Int] = [0, 1, 5]
-    var names: List[String] = ["INPUT_TYPE_UNSET", "INPUT_STRING", "INPUT_REF"]
+    var nums: List[Int] = [0, 1, 2, 3, 5, 6, 9]
+    var names: List[String] = [
+        "INPUT_TYPE_UNSET",
+        "INPUT_STRING",
+        "INPUT_INT",
+        "INPUT_BOOL",
+        "INPUT_REF",
+        "INPUT_IMAGE",
+        "INPUT_VALUE_MAP",
+    ]
     for k in range(len(nums)):
         assert_equal(InputType(nums[k]).json_name(), names[k], String("InputType ") + String(nums[k]))
         assert_equal(InputType.from_json_name(names[k]).value, nums[k], names[k])
-    for n in [2, 3, 4, 6, 7, 8, 9]:
+    for n in [4, 7, 8]:
         assert_equal(InputType(n).json_name(), String(n), String("InputType ") + String(n) + " is held")
     print("  test_input_type_ordinals: PASS")
 

@@ -14,7 +14,7 @@
 #    definitions with one name and version and different bytes (the same
 #    bytes twice are one definition, no finding).
 # 2. ITS INPUTS: name grammar, a second of one name, a type this kci does
-#    not know (2, INT, is held), a required input with a default, a default
+#    not know (4, DURATION, is held), a required input with a default, a default
 #    on a REF input, a default that is not a literal.
 # 3. ITS COMPONENTS: none at all; a reserved id (`identity`, `u-*`), an id
 #    of 13 bytes, an id with `--`, a second of one id.
@@ -137,9 +137,9 @@ def test_the_inputs_of_a_definition() raises:
     cases.append(comp + '"input":[{"name":"a","type":"INPUT_STRING"},{"name":"a","type":"INPUT_REF"}]')
     fields.append("input[a]")
     needles.append("a second input named \"a\"")
-    cases.append(comp + '"input":[{"name":"n","type":2}]')
+    cases.append(comp + '"input":[{"name":"n","type":4}]')
     fields.append("input[n].type")
-    needles.append("input type 2 is not one this kci knows")
+    needles.append("input type 4 is not one this kci knows")
     cases.append(comp + '"input":[{"name":"n","type":"INPUT_STRING","required":true,"default":{"literal":"1"}}]')
     fields.append("input[n]")
     needles.append("a required input has no default")

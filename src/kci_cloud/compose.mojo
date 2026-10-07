@@ -12,16 +12,19 @@
 # deterministic, so its result is golden-testable. It runs in five steps,
 # and a step with a finding stops the ones after it:
 #
-#   1. LOAD every definition kci was given: its name and version grammar,
+#   1. LOAD every definition kci was given (compose_load.mojo): its name and
+#      version grammar (a `kci.` name only as kci ships it, compose_kci.mojo),
 #      its inputs (name, type, required or default), its components (ids of
 #      the component grammar, unique, never reserved; an instance names a
 #      definition that was given, binds its inputs by name and type, and
 #      writes no `uses`, retention or metadata), every reference inside a
 #      component (a definition is closed: `local` names a component,
-#      `input` a REF input, `Value.input` a STRING input, never
-#      `Ref.resource`), its exports and its declared outputs. Two
-#      definitions with one name and version are refused unless their bytes
-#      are the same (`definition_digest`).
+#      `input` a REF input, `Value.input` a STRING, INT or BOOL input,
+#      never `Ref.resource`), its bindings and presences
+#      (compose_bind.mojo: each binding is tried on its component), its
+#      exports and its declared outputs. Two definitions with one name and
+#      version are refused unless their bytes are the same
+#      (`definition_digest`).
 #   2. CONTAINMENT CYCLES: "definition A has an instance of B" is an edge;
 #      a cycle (A -> A, A -> B -> A, at any length) is refused, printed as
 #      the cycle. After this the definitions form a DAG, so expansion ends.
@@ -33,8 +36,11 @@
 #      instance's count.
 #   5. EXPANSION, per top-level instance `top`, recursively: component `c`
 #      of the instance at path `P` becomes resource `P/c` (`P` starts as
-#      `top`); a nested instance recurses with its inputs bound in the
-#      enclosing one. Every reference is REWRITTEN to name the full path
+#      `top`), unless it is ABSENT (its presence input is not set: unbound
+#      at the top, or passed down from an input that is not set); a nested
+#      instance recurses with its inputs bound in the enclosing one,
+#      IMAGE and VALUE_MAP inputs included (as written, or passed down by a
+#      binding of the enclosing definition). Every reference is REWRITTEN to name the full path
 #      (`Ref.resource` alone): `local` -> `P/<local>`, `input` -> what the
 #      instance bound, `path` -> one segment deeper per component, each
 #      EXPORTED by its definition, and a reference that ends on an instance
@@ -44,9 +50,13 @@
 #      reference that names it. A reference outside every definition may use
 #      `path` and `named` the same way; `local` and `input` are refused
 #      there, and so is a `resource` holding `/` (a path into an instance
-#      is `resource` + `path`, so the export check sees it). A path that is missing, unexported or below a primitive, and a
-#      reference that ends on an instance without `named` (an instance has
-#      no object of its own), is refused where it is used.
+#      is `resource` + `path`, so the export check sees it). A path that
+#      is missing, unexported or below a primitive, a reference that ends
+#      on an instance without `named` (an instance has no object of its
+#      own), and a reference that reaches an absent component, are refused
+#      where they are used. Then each BINDING of the definition on a
+#      primitive component writes the instance's value into it
+#      (`compose_bind.bind_field`); an unset input writes nothing.
 #
 # THE RESULT (`Expansion`): the authored primitives (rewritten when they
 # reach into an instance) and every produced primitive, in list order with
@@ -62,55 +72,39 @@
 # retention hold below the top exactly as at it (deploy.mojo).
 # =============================================================================
 
-from komira_crypto import hex_lower_array_32, sha256
-from komira_proto_codec import encode_proto
-from kci_resource_proto.composite import CompositeDefinition, InputType
-from kci_resource_proto.refs import Ref, Value
-from kci_resource_proto.resource import Resource
+from kci_resource_proto.composite import CompositeDefinition
+from kci_resource_proto.refs import Image, Ref, Value
+from kci_resource_proto.resource import Resource, ValueMap
 
-from kci_cloud.adapter import FINDING_GRAPH, Finding
-from kci_cloud.catalog import Catalog, FIELD_COMPOSITE, body_field
+from kci_cloud.catalog import Catalog, body_field
+from kci_cloud.compose_bind import (
+    BindValue,
+    INPUT_IMAGE,
+    INPUT_REF,
+    INPUT_VALUE_MAP,
+    bind_field,
+    is_plain,
+    is_set,
+    nested_input_name,
+    nested_set_names,
+    presence_input,
+)
+from kci_cloud.compose_load import (
+    Loader,
+    MAX_EXPANDED_PRIMITIVES,
+    definition_digest,
+    definition_key,
+    is_composite,
+)
+from kci_cloud.adapter import Finding
 from kci_cloud.compose_refs import (
-    RefSite,
     SITE_REF,
-    component_id_problem,
-    definition_name_problem,
     id_problem,
     ref_sites,
     ref_value,
-    snake_name_problem,
     unrewritten,
-    version_problem,
     with_sites,
 )
-
-
-comptime MAX_EXPANDED_PRIMITIVES: Int = 10000
-"""The most primitives one list may expand to."""
-
-comptime INPUT_STRING: Int = 1
-"""`kci.resource.v1.INPUT_STRING`."""
-comptime INPUT_REF: Int = 5
-"""`kci.resource.v1.INPUT_REF`."""
-
-
-def definition_digest(d: CompositeDefinition) raises -> String:
-    """`sha256:<hex>` of `d`'s bytes as this kci encodes them."""
-    var b = encode_proto(d)
-    return String("sha256:") + hex_lower_array_32(sha256(Span(b)))
-
-
-def definition_key(name: String, version: String) -> String:
-    """`<name>@<version>`, how a definition is printed."""
-    return name + String("@") + version
-
-
-def is_composite(r: Resource) -> Bool:
-    """True iff `r` is a composite instance (`Resource.body` 80)."""
-    try:
-        return body_field(r) == FIELD_COMPOSITE
-    except:
-        return False
 
 
 struct Expansion(Movable):
@@ -129,6 +123,26 @@ struct Expansion(Movable):
         self.tree = String("")
 
 
+struct _Bound(Copyable, Movable):
+    """The inputs an instance sets, already resolved: plain and REF inputs
+    as `Value`s (`values`), IMAGE inputs (`images`), VALUE_MAP inputs
+    (`maps`)."""
+
+    var values: Dict[String, Value]
+    var images: Dict[String, Image]
+    var maps: Dict[String, ValueMap]
+
+    def __init__(out self):
+        self.values = Dict[String, Value]()
+        self.images = Dict[String, Image]()
+        self.maps = Dict[String, ValueMap]()
+
+    def __init__(out self, *, copy: Self):
+        self.values = copy.values.copy()
+        self.images = copy.images.copy()
+        self.maps = copy.maps.copy()
+
+
 struct _Ctx(Copyable, Movable):
     """Where a reference is resolved: inside the instance at `prefix` of
     definition `def_i` with `bindings` (its inputs, already resolved), or at
@@ -137,20 +151,23 @@ struct _Ctx(Copyable, Movable):
     var prefix: String
     var def_i: Int
     var bindings: Dict[String, Value]
+    var bound: _Bound
 
-    def __init__(out self, prefix: String, def_i: Int, var bindings: Dict[String, Value]):
+    def __init__(out self, prefix: String, def_i: Int, var bound: _Bound):
         self.prefix = prefix.copy()
         self.def_i = def_i
-        self.bindings = bindings^
+        self.bindings = bound.values.copy()
+        self.bound = bound^
 
     def __init__(out self, *, copy: Self):
         self.prefix = copy.prefix.copy()
         self.def_i = copy.def_i
         self.bindings = copy.bindings.copy()
+        self.bound = copy.bound.copy()
 
     @staticmethod
     def top() -> _Ctx:
-        return _Ctx(String(""), -1, Dict[String, Value]())
+        return _Ctx(String(""), -1, _Bound())
 
 
 struct _Got(Movable):
@@ -190,385 +207,50 @@ def _q(s: String) -> String:
 
 
 struct _Expander(Movable):
-    var catalog: Catalog
-    var defs: List[CompositeDefinition]
-    var keys: List[String]
-    var digests: List[String]
-    var findings: List[Finding]
+    var l: Loader
     var inst: Dict[String, Int]
     var prims: Dict[String, Int]
+    var absent: Dict[String, String]
     var out: List[Resource]
     var produced: List[String]
     var tree: String
 
     def __init__(out self, catalog: Catalog):
-        self.catalog = catalog.copy()
-        self.defs = List[CompositeDefinition]()
-        self.keys = List[String]()
-        self.digests = List[String]()
-        self.findings = List[Finding]()
+        self.l = Loader(catalog)
         self.inst = Dict[String, Int]()
         self.prims = Dict[String, Int]()
+        self.absent = Dict[String, String]()
         self.out = List[Resource]()
         self.produced = List[String]()
         self.tree = String("")
 
-    def add(mut self, where: String, field: String, why: String):
-        """One finding; an identical one is not repeated."""
-        for i in range(len(self.findings)):
-            ref f = self.findings[i]
-            if f.resource_id == where and f.field_path == field and f.reason == why:
-                return
-        self.findings.append(Finding(FINDING_GRAPH, where, field, why))
-
-    # ---- lookups -------------------------------------------------------------
-
-    def find_def(self, name: String, version: String) -> Int:
-        var key = definition_key(name, version)
-        for i in range(len(self.keys)):
-            if self.keys[i] == key:
-                return i
-        return -1
-
-    def versions_of(self, name: String) -> String:
-        var s = String("")
-        for i in range(len(self.defs)):
-            if self.defs[i].name == name:
-                if s.byte_length() > 0:
-                    s += String(", ")
-                s += self.keys[i]
-        return s^
-
-    def component_at(self, d: Int, id: String) -> Int:
-        ref comps = self.defs[d].component
-        for k in range(len(comps)):
-            if comps[k].id == id:
-                return k
-        return -1
-
-    def exports(self, d: Int, id: String) -> Bool:
-        ref ex = self.defs[d].export
-        for k in range(len(ex)):
-            if ex[k] == id:
-                return True
-        return False
-
-    def input_type(self, d: Int, name: String) -> Int:
-        """The declared type of input `name` of definition `d`, or -1."""
-        ref ins = self.defs[d].input
-        for k in range(len(ins)):
-            if ins[k].name == name:
-                return ins[k].type.value
-        return -1
-
-    def nested_def(self, d: Int, k: Int) -> Int:
-        """The definition component `k` of `d` instantiates, or -1."""
-        ref c = self.defs[d].component[k]
-        if not is_composite(c):
-            return -1
-        ref ci = c.composite.value()
-        return self.find_def(ci.definition, ci.version)
-
-    # ---- 1. load --------------------------------------------------------------
-
-    def load(mut self, definitions: List[CompositeDefinition]) raises:
-        for i in range(len(definitions)):
-            ref d = definitions[i]
-            var key = definition_key(d.name, d.version)
-            var digest = definition_digest(d)
-            var seen = -1
-            for k in range(len(self.keys)):
-                if self.keys[k] == key:
-                    seen = k
-            if seen >= 0:
-                if self.digests[seen] != digest:
-                    self.add(
-                        key,
-                        String(""),
-                        String("two definitions are named ")
-                        + key
-                        + String(" with different contents (")
-                        + self.digests[seen]
-                        + String(", ")
-                        + digest
-                        + String("); give a changed definition a new version"),
-                    )
-                continue
-            self.defs.append(d.copy())
-            self.keys.append(key^)
-            self.digests.append(digest^)
-        for i in range(len(self.defs)):
-            self.check_def(i)
-
-    def check_def(mut self, i: Int) raises:
-        var d = self.defs[i].copy()
-        var key = self.keys[i].copy()
-        var bad = definition_name_problem(d.name)
-        if bad.byte_length() > 0:
-            self.add(key, String("name"), bad)
-        bad = version_problem(d.version)
-        if bad.byte_length() > 0:
-            self.add(key, String("version"), bad)
-        for k in range(len(d.input)):
-            ref inp = d.input[k]
-            var at = String("input[") + inp.name + String("]")
-            bad = snake_name_problem(inp.name, String("input name"))
-            if bad.byte_length() > 0:
-                self.add(key, at, bad)
-            for q in range(k):
-                if d.input[q].name == inp.name:
-                    self.add(key, at, String("a second input named ") + _q(inp.name))
-            var t = inp.type.value
-            if t != INPUT_STRING and t != INPUT_REF:
-                self.add(key, at + String(".type"), String("input type ") + String(t) + String(" is not one this kci knows (INPUT_STRING, INPUT_REF)"))
-            if inp.default:
-                if inp.required:
-                    self.add(key, at, String("a required input has no default"))
-                if t == INPUT_REF:
-                    self.add(key, at + String(".default"), String("a REF input has no default: it names a resource outside the composite"))
-                elif inp.default.value()._oneof0_case != 1:
-                    self.add(key, at + String(".default"), String("a default is a literal"))
-        if len(d.component) == 0:
-            self.add(key, String("component"), String("a definition has at least one component"))
-        for k in range(len(d.component)):
-            self.check_component(i, k)
-        for k in range(len(d.export)):
-            var at = String("export[") + String(k) + String("]")
-            if self.component_at(i, d.export[k]) < 0:
-                self.add(key, at, String("exports ") + _q(d.export[k]) + String(", which is not a component of ") + key)
-            for q in range(k):
-                if d.export[q] == d.export[k]:
-                    self.add(key, at, String("exports ") + _q(d.export[k]) + String(" twice"))
-        for k in range(len(d.output)):
-            self.check_output(i, k)
-
-    def check_component(mut self, i: Int, k: Int) raises:
-        var c = self.defs[i].component[k].copy()
-        var key = self.keys[i].copy()
-        var at = String("component[") + c.id + String("]")
-        var bad = component_id_problem(c.id)
-        if bad.byte_length() > 0:
-            self.add(key, at + String(".id"), bad)
-        for q in range(k):
-            if self.defs[i].component[q].id == c.id:
-                self.add(key, at + String(".id"), String("a second component with this id"))
-        if is_composite(c):
-            self.check_instance(c, key, at + String("."), i)
-        var sites = ref_sites(c)
-        for s in range(len(sites)):
-            ref site = sites[s]
-            var why = String("")
-            if site.kind == SITE_REF:
-                why = self.static_ref(i, site.ref_.value())
-            else:
-                ref v = site.value.value()
-                if v._oneof0_case == 3:
-                    why = self.static_ref(i, v.ref_.value())
-                elif v._oneof0_case == 4 and not is_composite(c):
-                    var t = self.input_type(i, v.input.value())
-                    if t < 0:
-                        why = key + String(" declares no input ") + _q(v.input.value())
-                    elif t != INPUT_STRING:
-                        why = String("input ") + _q(v.input.value()) + String(" is a REF input: a reference names it, ref { input: ... }")
-            if why.byte_length() > 0:
-                self.add(key, at + String(".") + site.path, why)
-
-    def static_ref(self, i: Int, r: Ref) -> String:
-        """What is wrong with reference `r` inside definition `i`, before it
-        is instantiated (its base); empty when nothing is."""
-        var n = Int(r.resource.byte_length() > 0) + Int(Bool(r.local)) + Int(Bool(r.input))
-        if n > 1:
-            return String("names more than one base (resource, local, input); a reference has exactly one")
-        if r.resource.byte_length() > 0:
-            return String(
-                "a definition is closed: it names its own components with local, and a resource"
-                " outside it through a REF input"
-            )
-        if r.local:
-            if self.component_at(i, r.local.value()) < 0:
-                return self.keys[i] + String(" has no component ") + _q(r.local.value())
-        if r.input:
-            var t = self.input_type(i, r.input.value())
-            if t < 0:
-                return self.keys[i] + String(" declares no input ") + _q(r.input.value())
-            if t != INPUT_REF:
-                return String("input ") + _q(r.input.value()) + String(" is a STRING input: a value names it, { input: ... }")
-        return String("")
-
-    def check_instance(mut self, c: Resource, where: String, prefix: String, in_def: Int) raises:
-        """The shape, definition, digest and inputs of instance `c`; findings
-        on `where`, fields under `prefix`. `in_def` is the definition it is
-        a component of, or -1 at the top of the list."""
-        ref ci = c.composite.value()
-        if len(c.uses) > 0:
-            self.add(where, prefix + String("uses"), String("an instance has no identity of its own: a component of its definition uses"))
-        if c.retention.value != 0:
-            self.add(where, prefix + String("retention"), String("an instance has no object of its own: each component of its definition sets its retention"))
-        if c.physical_name or len(c.labels) > 0 or c.adopt:
-            self.add(where, prefix + String("composite"), String("an instance has no object of its own: physical_name, labels and adopt are written on the components of its definition"))
-        var d = self.find_def(ci.definition, ci.version)
-        if d < 0:
-            var have = self.versions_of(ci.definition)
-            self.add(
-                where,
-                prefix + String("composite.definition"),
-                String("no definition ")
-                + definition_key(ci.definition, ci.version)
-                + String(" was given")
-                + ((String(" (given: ") + have + String(")")) if have.byte_length() > 0 else String("")),
-            )
-            return
-        if ci.digest and ci.digest.value() != self.digests[d]:
-            self.add(
-                where,
-                prefix + String("composite.digest"),
-                String("digest ") + ci.digest.value() + String(" is not the digest of ") + self.keys[d] + String(", ") + self.digests[d],
-            )
-        var e = self.defs[d].copy()
-        for entry in ci.input.items():
-            var at = prefix + String("composite.input.") + entry.key
-            var t = self.input_type(d, entry.key)
-            ref v = entry.value
-            if t < 0:
-                var names = String("")
-                for q in range(len(e.input)):
-                    names += (String(", ") if q > 0 else String("")) + e.input[q].name
-                self.add(where, at, self.keys[d] + String(" declares no input ") + _q(entry.key) + String(" (it declares: ") + names + String(")"))
-                continue
-            var arm = v._oneof0_case
-            if t == INPUT_REF:
-                if arm != 3 or v.ref_.value()._oneof0_case != 0:
-                    self.add(where, at, String("a REF input takes a reference to a resource: ref { ... } with no output"))
-                continue
-            if arm == 0:
-                self.add(where, at, String("has no value"))
-            elif arm == 3 and v.ref_.value()._oneof0_case == 0:
-                self.add(where, at, String("a STRING input takes a value: name an output of the resource (standard or named)"))
-            elif arm == 4:
-                var t_in = self.input_type(in_def, v.input.value()) if in_def >= 0 else -1
-                if in_def < 0:
-                    self.add(where, at, String("an input is only for references inside a composite definition"))
-                elif t_in < 0:
-                    self.add(where, at, self.keys[in_def] + String(" declares no input ") + _q(v.input.value()))
-                elif t_in == INPUT_REF:
-                    self.add(where, at, String("input ") + _q(v.input.value()) + String(" is a REF input: pass it down as ref { input: ... }"))
-        for q in range(len(e.input)):
-            if e.input[q].required and e.input[q].name not in ci.input:
-                self.add(where, prefix + String("composite.input"), String("required input ") + _q(e.input[q].name) + String(" of ") + self.keys[d] + String(" is not bound"))
-
-    def check_output(mut self, i: Int, k: Int) raises:
-        var o = self.defs[i].output[k].copy()
-        var key = self.keys[i].copy()
-        var at = String("output[") + o.name + String("]")
-        var bad = snake_name_problem(o.name, String("output name"))
-        if bad.byte_length() > 0:
-            self.add(key, at, bad)
-        for q in range(k):
-            if self.defs[i].output[q].name == o.name:
-                self.add(key, at, String("a second output named ") + _q(o.name))
-        if not o.from_:
-            self.add(key, at + String(".from"), String("an output says which value it is: from { local: ..., standard or named }"))
-            return
-        ref f = o.from_.value()
-        if not f.local or f.resource.byte_length() > 0 or f.input:
-            self.add(key, at + String(".from"), String("an output is a value of one of the definition's own components: its base is local"))
-            return
-        if f._oneof0_case == 0:
-            self.add(key, at + String(".from"), String("an output is a value: write standard or named"))
-            return
-        var c = self.component_at(i, f.local.value())
-        if c < 0:
-            self.add(key, at + String(".from"), key + String(" has no component ") + _q(f.local.value()))
-            return
-        var comp = self.defs[i].component[c].copy()
-        if not is_composite(comp):
-            if f.path:
-                self.add(key, at + String(".from"), String("a path goes below ") + _q(f.local.value()) + String(", a primitive"))
-            elif f._oneof0_case == 2:
-                self.add(key, at + String(".from"), String("named reads a composite's declared output; ") + _q(f.local.value()) + String(" is a primitive"))
-            else:
-                var out = f.standard.value().json_name()
-                var field = body_field(comp)
-                var t = self.catalog.index_of(field)
-                if t >= 0 and not self.catalog.types[t].exposes_output(out):
-                    self.add(key, at + String(".from"), _q(f.local.value()) + String(" (") + self.catalog.name_of(field) + String(") does not expose ") + out)
-            return
-        if not f.path and f._oneof0_case != 2:
-            self.add(key, at + String(".from"), _q(f.local.value()) + String(" is a composite instance: read one of its declared outputs with named"))
-
-    # ---- 2. containment cycles ----------------------------------------------------
-
-    def check_cycles(mut self):
-        var color = List[Int]()
-        for _ in range(len(self.defs)):
-            color.append(0)
-        var stack = List[Int]()
-        for i in range(len(self.defs)):
-            if color[i] == 0:
-                self.dfs(i, color, stack)
-
-    def dfs(mut self, i: Int, mut color: List[Int], mut stack: List[Int]):
-        color[i] = 1
-        stack.append(i)
-        for k in range(len(self.defs[i].component)):
-            var j = self.nested_def(i, k)
-            if j < 0:
-                continue
-            if color[j] == 1:
-                var at = 0
-                for s in range(len(stack)):
-                    if stack[s] == j:
-                        at = s
-                # Print the cycle from its smallest key, so each cycle is
-                # reported once whichever definition the walk started at.
-                var cyc = List[Int]()
-                for s in range(at, len(stack)):
-                    cyc.append(stack[s])
-                var lo = 0
-                for s in range(len(cyc)):
-                    if self.keys[cyc[s]] < self.keys[cyc[lo]]:
-                        lo = s
-                var text = String("")
-                for s in range(len(cyc) + 1):
-                    if s > 0:
-                        text += String(" -> ")
-                    text += self.keys[cyc[(lo + s) % len(cyc)]]
-                self.add(self.keys[cyc[lo]].copy(), String("component"), String("a containment cycle: ") + text)
-            elif color[j] == 0:
-                self.dfs(j, color, stack)
-        _ = stack.pop()
-        color[i] = 2
-
-    # ---- 4. the size guard ----------------------------------------------------------
-
-    def count(self, i: Int, mut memo: List[Int]) -> Int:
-        """The primitives definition `i` expands to, capped one above the
-        limit (no overflow however wide the diamond)."""
-        if memo[i] >= 0:
-            return memo[i]
-        var n = 0
-        for k in range(len(self.defs[i].component)):
-            var j = self.nested_def(i, k)
-            n += self.count(j, memo) if j >= 0 else 1
-            if n > MAX_EXPANDED_PRIMITIVES:
-                n = MAX_EXPANDED_PRIMITIVES + 1
-                break
-        memo[i] = n
-        return n
-
     # ---- 5. expansion ---------------------------------------------------------------
 
-    def index(mut self, prefix: String, d: Int):
+    def index(mut self, prefix: String, d: Int, set_names: List[String]):
         """Record every instance and primitive path below instance `prefix`
-        of definition `d`."""
+        of definition `d`, which sets inputs `set_names`, and every ABSENT
+        component (its presence input not set) with the reason."""
         self.inst[prefix] = d
-        for k in range(len(self.defs[d].component)):
-            var path = prefix + String("/") + self.defs[d].component[k].id
-            var j = self.nested_def(d, k)
+        var e = self.l.defs[d].copy()
+        for k in range(len(e.component)):
+            ref c = e.component[k]
+            var path = prefix + String("/") + c.id
+            var by = presence_input(e, c.id)
+            if by.byte_length() > 0 and not is_set(e, set_names, by):
+                self.absent[path] = String("input ") + _q(by) + String(" of ") + self.l.keys[d] + String(" is not set")
+                continue
+            var j = self.l.nested_def(d, k)
             if j >= 0:
-                self.index(path, j)
+                self.index(path, j, nested_set_names(e, set_names, c))
             else:
                 self.prims[path] = 1
+
+    def absent_why(self, path: String) -> String:
+        """Why component `path` is absent, as a refusal, or empty."""
+        var why = self.absent.get(path)
+        if not why:
+            return String("")
+        return String("component ") + _q(path) + String(" is absent: ") + why.value()
 
     def resolve_ref(mut self, ctx: _Ctx, r: Ref) raises -> _Got:
         """`r` rewritten to name its full path (see the header)."""
@@ -595,16 +277,16 @@ struct _Expander(Movable):
             # no finding. Kept as refusals so a caller that skips load is
             # refused rather than accepted.
             if has_res:
-                return _Got.refused(self.static_ref(ctx.def_i, r))
+                return _Got.refused(self.l.static_ref(ctx.def_i, r))
             if r.local:
-                if self.component_at(ctx.def_i, r.local.value()) < 0:
-                    return _Got.refused(self.static_ref(ctx.def_i, r))
+                if self.l.component_at(ctx.def_i, r.local.value()) < 0:
+                    return _Got.refused(self.l.static_ref(ctx.def_i, r))
                 target = ctx.prefix + String("/") + r.local.value()
             else:
                 var b = ctx.bindings.get(r.input.value())
                 if not b:
-                    if self.input_type(ctx.def_i, r.input.value()) != INPUT_REF:
-                        return _Got.refused(self.static_ref(ctx.def_i, r))
+                    if self.l.input_type(ctx.def_i, r.input.value()) != INPUT_REF:
+                        return _Got.refused(self.l.static_ref(ctx.def_i, r))
                     return _Got.dropped()
                 target = b.value().ref_.value().resource.copy()
         else:
@@ -624,6 +306,9 @@ struct _Expander(Movable):
                     + String(", which names only exported components")
                 )
             target = r.resource.copy()
+        var gone = self.absent_why(target)
+        if gone.byte_length() > 0:
+            return _Got.refused(gone)
         if r.path:
             var segs = r.path.value().split("/")
             for s in range(len(segs)):
@@ -634,22 +319,25 @@ struct _Expander(Movable):
                         return _Got.refused(String("path ") + _q(r.path.value()) + String(" goes below ") + _q(target) + String(", a primitive"))
                     return _Got.refused(String("path ") + _q(r.path.value()) + String(" goes below ") + _q(target) + String(", which is not a composite instance of this list"))
                 var di = d.value()
-                if seg.byte_length() == 0 or self.component_at(di, seg) < 0:
-                    return _Got.refused(_q(target) + String(" (") + self.keys[di] + String(") has no component ") + _q(seg))
-                if not self.exports(di, seg):
-                    return _Got.refused(String("component ") + _q(seg) + String(" of ") + self.keys[di] + String(" is not exported, so nothing outside it may name it"))
+                if seg.byte_length() == 0 or self.l.component_at(di, seg) < 0:
+                    return _Got.refused(_q(target) + String(" (") + self.l.keys[di] + String(") has no component ") + _q(seg))
+                if not self.l.exports(di, seg):
+                    return _Got.refused(String("component ") + _q(seg) + String(" of ") + self.l.keys[di] + String(" is not exported, so nothing outside it may name it"))
                 target = target + String("/") + seg
+                gone = self.absent_why(target)
+                if gone.byte_length() > 0:
+                    return _Got.refused(gone)
         var d = self.inst.get(target)
         if d:
             var di = d.value()
             if r._oneof0_case == 2:
                 return self.output_of(target, di, r.named.value())
             if r._oneof0_case == 1:
-                return _Got.refused(_q(target) + String(" is an instance of ") + self.keys[di] + String(": it exposes only the outputs it declares, read with named"))
+                return _Got.refused(_q(target) + String(" is an instance of ") + self.l.keys[di] + String(": it exposes only the outputs it declares, read with named"))
             return _Got.refused(
                 _q(target)
                 + String(" is an instance of ")
-                + self.keys[di]
+                + self.l.keys[di]
                 + String(", which has no object of its own: name an exported component with path, or a declared output with named")
             )
         return _Got.of_ref(Ref(target, None, None, None, r._oneof0_case, r.standard.copy(), r.named.copy()))
@@ -657,14 +345,14 @@ struct _Expander(Movable):
     def output_of(mut self, target: String, d: Int, name: String) raises -> _Got:
         """Declared output `name` of the instance `target` of definition `d`,
         followed to the primitive that produces it."""
-        var outs = self.defs[d].output.copy()
+        var outs = self.l.defs[d].output.copy()
         for k in range(len(outs)):
             if outs[k].name == name:
-                return self.resolve_ref(_Ctx(target, d, Dict[String, Value]()), outs[k].from_.value())
+                return self.resolve_ref(_Ctx(target, d, _Bound()), outs[k].from_.value())
         var names = String("")
         for k in range(len(outs)):
             names += (String(", ") if k > 0 else String("")) + outs[k].name
-        return _Got.refused(self.keys[d] + String(" declares no output ") + _q(name) + String(" (it declares: ") + names + String(")"))
+        return _Got.refused(self.l.keys[d] + String(" declares no output ") + _q(name) + String(" (it declares: ") + names + String(")"))
 
     def resolve_value(mut self, ctx: _Ctx, v: Value) raises -> _Got:
         if v._oneof0_case == 4:
@@ -674,9 +362,9 @@ struct _Expander(Movable):
             var b = ctx.bindings.get(name)
             if b:
                 return _Got.of_value(b.value())
-            var ins = self.defs[ctx.def_i].input.copy()
+            var ins = self.l.defs[ctx.def_i].input.copy()
             for k in range(len(ins)):
-                if ins[k].name == name and ins[k].type.value == INPUT_STRING:
+                if ins[k].name == name and is_plain(ins[k].type.value):
                     if ins[k].default:
                         return _Got.of_value(ins[k].default.value())
                     return _Got.dropped()
@@ -688,7 +376,7 @@ struct _Expander(Movable):
             # (rewrite and bindings_of under instantiate), and expansion runs
             # only after a load with no finding. Kept as a refusal so a later
             # caller that skips load fails closed.
-            return _Got.refused(self.keys[ctx.def_i] + String(" declares no STRING input ") + _q(name))
+            return _Got.refused(self.l.keys[ctx.def_i] + String(" declares no STRING, INT or BOOL input ") + _q(name))
         if v._oneof0_case == 3:
             var g = self.resolve_ref(ctx, v.ref_.value())
             if g.err.byte_length() > 0 or g.drop:
@@ -706,7 +394,7 @@ struct _Expander(Movable):
             else:
                 g = self.resolve_value(ctx, sites[s].value.value())
             if g.err.byte_length() > 0:
-                self.add(id, sites[s].path, g.err)
+                self.l.add(id, sites[s].path, g.err)
             elif g.drop:
                 sites[s].drop = True
             elif sites[s].kind == SITE_REF:
@@ -717,41 +405,126 @@ struct _Expander(Movable):
         out.id = id.copy()
         return out^
 
-    def bindings_of(mut self, ctx: _Ctx, c: Resource, d: Int, id: String) raises -> Dict[String, Value]:
-        """The inputs instance `c` (now at `id`) binds, resolved in `ctx`: a
-        REF input as `ref { resource: <full path> }`, a STRING input as its
-        value. One bound to an unbound optional input is left out."""
+    def bindings_of(mut self, ctx: _Ctx, c: Resource, d: Int, id: String) raises -> _Bound:
+        """The inputs instance `c` (now at `id`) of definition `d` sets,
+        resolved in `ctx`: a REF input as `ref { resource: <full path> }`, a
+        plain input as its value, an IMAGE or VALUE_MAP input as written or
+        as a binding of the enclosing definition passes it down. One bound
+        to an unset optional input is left out."""
         var bound = self.rewrite(ctx, c, id)
-        var out = Dict[String, Value]()
-        for entry in bound.composite.value().input.items():
-            out[entry.key] = entry.value.copy()
-        var ins = self.defs[d].input.copy()
+        var out = _Bound()
+        ref ci = bound.composite.value()
+        for entry in ci.input.items():
+            out.values[entry.key] = entry.value.copy()
+        for entry in ci.image_input.items():
+            out.images[entry.key] = entry.value.copy()
+        for entry in ci.map_input.items():
+            out.maps[entry.key] = entry.value.copy()
+        var passed = List[String]()
+        if ctx.def_i >= 0:
+            var outer = self.l.defs[ctx.def_i].copy()
+            for k in range(len(outer.bind)):
+                ref b = outer.bind[k]
+                var name = nested_input_name(b.field)
+                if b.component != c.id or name.byte_length() == 0:
+                    continue
+                passed.append(name.copy())
+                var img = ctx.bound.images.get(b.input)
+                if img:
+                    out.images[name] = img.value().copy()
+                var m = ctx.bound.maps.get(b.input)
+                if m:
+                    out.maps[name] = m.value().copy()
+        var ins = self.l.defs[d].input.copy()
         for k in range(len(ins)):
-            if ins[k].required and ins[k].name not in out and ins[k].name in c.composite.value().input:
-                self.add(
+            ref n = ins[k].name
+            var written = n in c.composite.value().input
+            for q in range(len(passed)):
+                if passed[q] == n:
+                    written = True
+            var have = n in out.values or n in out.images or n in out.maps
+            if ins[k].required and not have and written:
+                self.l.add(
                     id,
-                    String("composite.input.") + ins[k].name,
-                    String("required input ") + _q(ins[k].name) + String(" of ") + self.keys[d] + String(" is bound to an input that is not set"),
+                    String("composite.input.") + n,
+                    String("required input ") + _q(n) + String(" of ") + self.l.keys[d] + String(" is bound to an input that is not set"),
                 )
         return out^
 
-    def instantiate(mut self, d: Int, prefix: String, var bindings: Dict[String, Value], depth: Int) raises:
-        var ctx = _Ctx(prefix, d, bindings^)
-        var comps = self.defs[d].component.copy()
+    def bind_value(self, ctx: _Ctx, name: String) raises -> Optional[BindValue]:
+        """The value input `name` of the instance in `ctx` writes through a
+        binding, or None when it is not set."""
+        var t = self.l.input_type(ctx.def_i, name)
+        if t == INPUT_IMAGE:
+            var img = ctx.bound.images.get(name)
+            if not img:
+                return None
+            return BindValue(t, String(""), img.value().copy(), Dict[String, Value]())
+        if t == INPUT_VALUE_MAP:
+            var m = ctx.bound.maps.get(name)
+            if not m:
+                return None
+            return BindValue(t, String(""), None, m.value().value.copy())
+        var v = ctx.bound.values.get(name)
+        if not v:
+            for k in range(len(self.l.defs[ctx.def_i].input)):
+                ref inp = self.l.defs[ctx.def_i].input[k]
+                if inp.name == name and inp.default:
+                    v = inp.default.value().copy()
+        if not v:
+            return None
+        ref got = v.value()
+        if got._oneof0_case != 1:
+            raise Error(
+                String("input ")
+                + _q(name)
+                + String(" is ")
+                + (String("a parameter") if got._oneof0_case == 2 else String("another resource's output"))
+                + String(": a binding writes a literal into a plain field")
+            )
+        return BindValue(t, got.literal.value(), None, Dict[String, Value]())
+
+    def bound_primitive(mut self, ctx: _Ctx, c: Resource, id: String) raises -> Resource:
+        """Primitive component `c` as resource `id`: its references
+        rewritten, then each binding of its definition on it written."""
+        var r = self.rewrite(ctx, c, id)
+        ref binds = self.l.defs[ctx.def_i].bind
+        for k in range(len(binds)):
+            if binds[k].component != c.id:
+                continue
+            var at = String("bind[") + String(k) + String("] ") + binds[k].field
+            try:
+                var bv = self.bind_value(ctx, binds[k].input)
+                if not bv:
+                    continue
+                var got = bind_field(r, binds[k].field, bv.value())
+                if not got.resource:
+                    self.l.add(id, at, String("input ") + _q(binds[k].input) + String(": ") + got.err)
+                    continue
+                r = got.resource.value().copy()
+            except e:
+                self.l.add(id, at, String(e))
+        return r^
+
+    def instantiate(mut self, d: Int, prefix: String, var bound: _Bound, depth: Int) raises:
+        var ctx = _Ctx(prefix, d, bound^)
+        var comps = self.l.defs[d].component.copy()
         for k in range(len(comps)):
             ref c = comps[k]
             var id = prefix + String("/") + c.id
+            if id in self.absent:
+                continue
             var pad = String("")
             for _ in range(depth):
                 pad += String("  ")
-            var j = self.nested_def(d, k)
+            var j = self.l.nested_def(d, k)
             if j >= 0:
-                self.tree += pad + id + String(": ") + self.keys[j] + String(" ") + self.digests[j] + String("\n")
+                self.tree += pad + id + String(": ") + self.l.keys[j] + String(" ") + self.l.digests[j] + String("\n")
                 var b = self.bindings_of(ctx, c, j, id)
                 self.instantiate(j, id, b^, depth + 1)
                 continue
-            self.tree += pad + id + String(": ") + self.catalog.name_of(body_field(c)) + String("\n")
-            self.out.append(self.rewrite(ctx, c, id))
+            self.tree += pad + id + String(": ") + self.l.catalog.name_of(body_field(c)) + String("\n")
+            self.out.append(self.bound_primitive(ctx, c, id))
             self.produced.append(id^)
 
 
@@ -777,24 +550,24 @@ def expand(catalog: Catalog, definitions: List[CompositeDefinition], resources: 
     not know)."""
     var e = _Expander(catalog)
     var x = Expansion()
-    e.load(definitions)
-    if len(e.findings) == 0:
-        e.check_cycles()
-    if len(e.findings) == 0:
+    e.l.load(definitions)
+    if len(e.l.findings) == 0:
+        e.l.check_cycles()
+    if len(e.l.findings) == 0:
         for i in range(len(resources)):
             ref r = resources[i]
             if not is_composite(r):
                 continue
             var bad = id_problem(r.id)
             if bad.byte_length() > 0:
-                e.add(r.id if r.id.byte_length() > 0 else String("#") + String(i), String("id"), bad)
+                e.l.add(r.id if r.id.byte_length() > 0 else String("#") + String(i), String("id"), bad)
             for k in range(len(resources)):
                 if k != i and resources[k].id == r.id:
-                    e.add(r.id, String("id"), String("duplicate id"))
-            e.check_instance(r, r.id, String(""), -1)
-    if len(e.findings) == 0:
+                    e.l.add(r.id, String("id"), String("duplicate id"))
+            e.l.check_instance(r, r.id, String(""), -1)
+    if len(e.l.findings) == 0:
         var memo = List[Int]()
-        for _ in range(len(e.defs)):
+        for _ in range(len(e.l.defs)):
             memo.append(-1)
         var total = 0
         var per = String("")
@@ -803,11 +576,11 @@ def expand(catalog: Catalog, definitions: List[CompositeDefinition], resources: 
             if not is_composite(r):
                 total += 1
                 continue
-            var n = e.count(e.find_def(r.composite.value().definition, r.composite.value().version), memo)
+            var n = e.l.count(e.l.find_def(r.composite.value().definition, r.composite.value().version), memo)
             total += n
             per += (String(", ") if per.byte_length() > 0 else String("")) + r.id + String(": ") + (String(n) if n <= MAX_EXPANDED_PRIMITIVES else String("more than ") + String(MAX_EXPANDED_PRIMITIVES))
         if total > MAX_EXPANDED_PRIMITIVES:
-            e.add(
+            e.l.add(
                 String("(list)"),
                 String(""),
                 String("the list expands to more than ")
@@ -816,13 +589,21 @@ def expand(catalog: Catalog, definitions: List[CompositeDefinition], resources: 
                 + per
                 + String("); split it, or share fewer instances of a definition"),
             )
-    if len(e.findings) > 0:
-        x.findings = e.findings.copy()
+    if len(e.l.findings) > 0:
+        x.findings = e.l.findings.copy()
         return x^
     for i in range(len(resources)):
         ref r = resources[i]
         if is_composite(r):
-            e.index(r.id, e.find_def(r.composite.value().definition, r.composite.value().version))
+            ref ci = r.composite.value()
+            var set_names = List[String]()
+            for entry in ci.input.items():
+                set_names.append(entry.key.copy())
+            for entry in ci.image_input.items():
+                set_names.append(entry.key.copy())
+            for entry in ci.map_input.items():
+                set_names.append(entry.key.copy())
+            e.index(r.id, e.l.find_def(ci.definition, ci.version), set_names)
         else:
             e.prims[r.id] = 1
     var top = _Ctx.top()
@@ -832,11 +613,11 @@ def expand(catalog: Catalog, definitions: List[CompositeDefinition], resources: 
             e.tree += r.id + String(": ") + _type_name(catalog, r) + String("\n")
             e.out.append(e.rewrite(top, r, r.id))
             continue
-        var d = e.find_def(r.composite.value().definition, r.composite.value().version)
-        e.tree += r.id + String(": ") + e.keys[d] + String(" ") + e.digests[d] + String("\n")
+        var d = e.l.find_def(r.composite.value().definition, r.composite.value().version)
+        e.tree += r.id + String(": ") + e.l.keys[d] + String(" ") + e.l.digests[d] + String("\n")
         var b = e.bindings_of(top, r, d, r.id)
         e.instantiate(d, r.id, b^, 1)
-    for i in range(len(e.out) if len(e.findings) == 0 else 0):
+    for i in range(len(e.out) if len(e.l.findings) == 0 else 0):
         var key = unrewritten(e.out[i])
         if key.byte_length() > 0:
             raise Error(
@@ -848,6 +629,6 @@ def expand(catalog: Catalog, definitions: List[CompositeDefinition], resources: 
             )
     x.resources = e.out.copy()
     x.produced = e.produced.copy()
-    x.findings = e.findings.copy()
+    x.findings = e.l.findings.copy()
     x.tree = e.tree.copy()
     return x^

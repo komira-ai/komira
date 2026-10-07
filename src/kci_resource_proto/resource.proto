@@ -54,7 +54,7 @@
 // a `reserved` number. A held number leaves its line in the same change that
 // declares it.
 // held-numbers: Resource 5 17 19 32-36 90 100-299 300-499 500-699 700-899
-// held-numbers: CompositeInstance 5 6
+// held-numbers: CompositeInstance 6
 // The list of clouds is data (a cloud is a value checked against the
 // built-in clouds); the four ranges and the four extension numbers are held
 // for the four built-in clouds, never named by a type here.
@@ -78,7 +78,8 @@
 //   * triggers.proto   `Schedule`, `SourceEvent`, `EventTrigger`;
 //   * networks.proto   `Network`, `Subnet`, `IpAddress`;
 //   * artifacts.proto  `ArtifactFormat`, `Registry`;
-//   * this file        `Resource`, `CompositeInstance`, `ResourceList`;
+//   * this file        `Resource`, `CompositeInstance`, `ValueMap`,
+//                      `ResourceList`;
 //   * composite.proto  the format of a composite definition.
 //
 // WHAT THESE FILES PROMISE
@@ -270,13 +271,24 @@ message Resource {
 // so `uses`, `retention`, `physical_name`, `labels` and `adopt` are refused
 // on it. `definition` and `version` name a given definition; `digest`, when
 // written, must be `sha256:<hex>` of its bytes as this kci encodes them.
-// `input` binds inputs by name: a STRING input takes a value, a REF input a
-// `Ref` naming a resource. 5 and 6 are held (image and secret inputs).
+// Each input is bound by name, in the map of its type: `input` a STRING,
+// INT or BOOL input (a `Value`: a literal of the type, or inside a definition
+// an input of the same type) and a REF input (a `Ref` naming a resource),
+// `image_input` an IMAGE input, `map_input` a VALUE_MAP input. 6 is held
+// (secret inputs).
 message CompositeInstance {
   string definition = 1;
   string version = 2;
   optional string digest = 3;
   map<string, Value> input = 4;
+  map<string, Image> image_input = 5;
+  map<string, ValueMap> map_input = 7;
+}
+
+// The value of a VALUE_MAP input: plain values by key (an environment, say),
+// each a literal, a parameter or another resource's output, as in `env`.
+message ValueMap {
+  map<string, Value> value = 1;
 }
 
 // The resources of one deploy step, in no particular order: ordering is

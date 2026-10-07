@@ -268,10 +268,10 @@ def test_the_proto_uses_no_held_or_reserved_number() raises:
     assert_true(_held_total(_real()) > 600, "the held lines expand to the documented ranges")
     # composite.proto's own line is read too: a number it holds is refused.
     var c = held_violations(
-        _insert_after(_real(), String("  repeated Resource component = 4;"), String("  string bind = 5;"))
+        _insert_after(_real(), String("  repeated Resource component = 4;"), String("  string variant = 8;"))
     )
     assert_equal(len(c), 1, _joined(c))
-    assert_true(c[0].find("CompositeDefinition uses held number 5") >= 0, c[0])
+    assert_true(c[0].find("CompositeDefinition uses held number 8") >= 0, c[0])
     print("  test_the_proto_uses_no_held_or_reserved_number: PASS")
 
 
