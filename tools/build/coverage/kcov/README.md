@@ -13,7 +13,7 @@ under kcov with them.
 | `:cov_normalize` | rewrites one kcov Cobertura report to repository paths, in a canonical form |
 | `:cov_zig` | the `zig` of a coverage build's link directory: keeps a link's debug info and relocates the action's directories out of it |
 | `:cov_link` | that link directory (`cov_link_dir`): `cov_zig`, `debug_relocate` and the Mojo toolchain's zig, what a coverage build of a `mojo_library` links through ([Coverage builds](../../mojo/README.md#coverage-builds)) |
-| `:cov_run` | the directory a coverage run runs from (`cov_run_dir`): [`cov_run.sh`](#cov_run), kcov (`komira//tools/build/toolchains/kcov:kcov`) and `cov_normalize` |
+| `:cov_run` | the directory a coverage run runs from (`cov_run_dir`): [`cov_run.sh`](#cov_run), kcov (`komira//tools/build/toolchains/kcov:kcov`), `cov_normalize` and `limit`, the seconds a run may take (450; only a fixture of the tests cell may set another `limit_s`) |
 
 ## Why: the sandbox path in the debug info
 
@@ -292,8 +292,22 @@ komira's kcov exits with the test's status, 128+N when signal N killed it,
 as a shell reports it; kcov v42 as released returns the status of the last
 traced process to exit, so a child the test left behind decided it
 ([Patches](../../toolchains/kcov/README.md#patches)). A test that fails under
-kcov fails the action (`GATED TEST FAILED`, then `COVERAGE RUN FAILED`),
-although its release gate passed. kcov refused by the executor (a line of
+kcov fails the action (its output from `gate_runner.sh`, then `COVERAGE RUN
+FAILED`), although its release gate passed. gate_runner's banner is left
+out: it says the library's package is not produced, and the package does
+not depend on a coverage run.
+
+**The run is bounded.** kcov waits for every process the test started
+before it writes the report, so a test that leaves a child running would
+hold the action open. `gate_runner.sh` runs in a session of its own
+(`setsid`), which kcov, the test and its children join, and a watcher kills
+that whole process group when the run has not ended after the limit, 450 s
+(the file `limit` of the `cov_run_dir`, its `limit_s`): the action fails
+with `The test left processes running or did not finish within 450 s under
+kcov`, after the output the test wrote. The slowest run measured took
+119.6 s of worker time; the limit is over three times that and under 600
+s, buck2's default timeout of a test action. Only a fixture of the tests
+cell may set another `limit_s` (test 43 uses 20 s). kcov refused by the executor (a line of
 its own starting `Can't set me as ptraced: `, `Can't set personality: `,
 `Can't get personality: ` or `Can't attach to `) is named as such, and
 kcov's own error (`kcov: error: `) as kcov's, not the test's.
@@ -305,8 +319,9 @@ source and the library's sources under `buck-out/` (the line tables name
 them relative to it); kcov shares its TMPDIR (kcov writes there only when it
 cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
 kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`);
-and the run ends when every process the test started has exited, since kcov follows each fork, where the gate waits for the test
-alone. Its CPUs are the gate's: kcov v42 pins itself and the test to one
+and the run ends when every process the test started has exited, since
+kcov follows each fork, where the gate waits for the test alone (so the run
+is bounded, above). Its CPUs are the gate's: kcov v42 pins itself and the test to one
 CPU, and komira's build patches that out (test 43's `covenv` checks it).
 
 **Why `lost/`.** kcov drops a source file it cannot open without any error,
@@ -331,12 +346,13 @@ is step 0's check (test 43's `lostdir`). A future Mojo naming them outside
 
 `cov_run.sh` is tested end to end in the tests cell, as test 43
 ([tests README](../../tests/README.md#43-coverage-runs),
-[the checks](../../tests/coverage_runs.md)): per-test reports equal to
-golden files, covcheck reading them, the gate's environment (and CPUs)
-under kcov, a traced test failing its run, the test's own exit status
-(not a child's, 128+N for a signal), lost sources refused, sources named
-by another directory refused before kcov runs, and kcov refused by the
-executor named as such.
+[the checks](../../tests/coverage_runs.md#test-43-coverage-runs)): per-test
+reports equal to golden files, covcheck reading them, the gate's
+environment (and CPUs) under kcov, a traced test failing its run, the
+test's own exit status (not a child's, 128+N for a signal) without the
+gate's banner, a test leaving a child running stopped at the limit, lost
+sources refused, sources named by another directory refused before kcov
+runs, and kcov refused by the executor named as such.
 
 Each tool's cases run as a build action (`kcov_tool_cases` in
 [defs.bzl](defs.bzl)) that exits non-zero on the first wrong result, and the

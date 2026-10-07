@@ -8,7 +8,9 @@
 #            <test_binary> <share> <src_dir> <xml_out> <marker_out>
 #            <src_repo> <test> <test_repo> <import> [--gen <file>]... [--env NAME=VALUE]...
 #
-#   <run_dir>      the cov_run_dir: this script, kcov/ (bin/kcov, lib/) and cov_normalize
+#   <run_dir>      the cov_run_dir: this script, kcov/ (bin/kcov, lib/), cov_normalize
+#                  and limit (the seconds the run may take: 450, or a tests
+#                  cell fixture's own)
 #   <test_binary>  the test built at -O0 with line tables ([coverage][bin][<test>])
 #   <share>        the test's declared data at their destinations, and its
 #                  source at <test>, its path in the package (what the line
@@ -50,8 +52,16 @@
 #      bin/<test>. komira's kcov exits with the test's status (128+N when a
 #      signal N killed it), not another traced process's (the toolchain's
 #      README.md, "Patches"), so a test that fails under kcov (at -O0, or
-#      traced) fails this action, as gate_runner reports. kcov refused by
-#      the executor (ptrace, personality) is reported as that.
+#      traced) fails this action, with the test's output from gate_runner
+#      but not its banner (which says the library's package is not produced:
+#      the package does not depend on a coverage run). kcov refused by the
+#      executor (ptrace, personality) is reported as that.
+#      The run is bounded: gate_runner runs in a session of its own (setsid),
+#      and when it has not exited after <limit> seconds, every process of
+#      that session (gate_runner, kcov, the test and any child it left) is
+#      killed and the action fails, saying so. kcov waits for every process
+#      the test started, so without the bound a test leaving a child running
+#      would hold the action open.
 #   3. kcov writes exactly one report (<out>/cov.xml); anything else fails.
 #   4. cov_normalize maps <share>/<src_dir>/ to <src_repo> and the test's
 #      directory under share/ to the repository's, requires the test's own
@@ -65,8 +75,9 @@
 # library's at <src_dir>, kcov shares its TMPDIR, its environment also holds
 # KCOV_SOLIB_PATH, which kcov always sets (with --skip-solibs, no
 # LD_PRELOAD), and the run ends when every process the test started has
-# exited (kcov follows each fork), where the gate waits for the test alone. Its CPUs are the gate's (kcov's pin is
-# patched out).
+# exited (kcov follows each fork), where the gate waits for the test alone;
+# so it is bounded (step 2). Its CPUs are the gate's (kcov's pin is patched
+# out).
 #
 # Why lost/: kcov drops a source file it cannot open without any error, so a
 # source staged where the line tables do not name it would leave the report
@@ -87,7 +98,8 @@
 # and used as a --map ABS: kcov reports realpath'd names (README.md, "Why").
 #
 # Exit status: the test's under kcov when it fails (gate_runner's); 1 when the
-# binary names the sources elsewhere, or the report is missing or refused; 2
+# binary names the sources elsewhere, the run passed its limit, or the report
+# is missing or refused; 2
 # for a usage error, which includes a `,` or `:` in a path given to kcov (its
 # options split on them).
 set -euf
@@ -119,6 +131,8 @@ case "$SRC_REPO" in /* | ?*[!/]) echo "cov_run: <src_repo> $SRC_REPO must be emp
 case "$IMPORT" in "" | *[!A-Za-z0-9_]*) echo "cov_run: <import> $IMPORT is not an import name" >&2; exit 2 ;; esac
 case "$SRC_REL" in */src/"$IMPORT") ;; *) echo "cov_run: <src_dir> $SRC_REL does not end in src/$IMPORT" >&2; exit 2 ;; esac
 SRC=$(abs "$SRC_REL")
+LIMIT=$(cat "$HERE/limit")
+case "$LIMIT" in "" | 0* | *[!0-9]*) echo "cov_run: $HERE/limit holds '$LIMIT', not a number of seconds" >&2; exit 2 ;; esac
 case "$TEST" in */*) TEST_DIR=${TEST%/*}/ ;; *) TEST_DIR="" ;; esac
 case "$TEST_REPO" in */*) TEST_REPO_DIR=${TEST_REPO%/*}/ ;; *) TEST_REPO_DIR="" ;; esac
 
@@ -204,10 +218,50 @@ set -- "$@" \
     --arg "--replace-src-path=^(?!/):$L/" \
     --arg "$OUT" \
     --arg "$R/bin/$NAME"
+# gate_runner leads a new session and process group, which kcov, the test
+# and every child it starts join (setsid needs no fork: this shell has no job
+# control, so its background job leads no group, and $! is gate_runner's
+# pid). The watcher kills that whole group once the limit has passed; it
+# stops when gate_runner has exited (and been reaped by the wait below).
 rc=0
-"$BB" sh "$GATE" "$BB" "$TC" "$LABEL" "$R/bin/kcov" "$K/gate.passed" "$@" 2>"$K/gate.err" || rc=$?
+setsid "$BB" sh "$GATE" "$BB" "$TC" "$LABEL" "$R/bin/kcov" "$K/gate.passed" "$@" 2>"$K/gate.err" &
+gate=$!
+(
+    s=0
+    while kill -0 "$gate" 2>/dev/null; do
+        if [ "$s" -ge "$LIMIT" ]; then
+            : >"$K/timed_out"
+            kill -s KILL "-$gate" 2>/dev/null
+            exit 0
+        fi
+        sleep 1
+        s=$((s + 1))
+    done
+) &
+watch=$!
+wait "$gate" || rc=$?
+kill "$watch" 2>/dev/null || true
+wait "$watch" || true
+if [ -e "$K/timed_out" ]; then
+    # gate_runner was killed, so its directory (mktemp under this one) and
+    # the test's output in it are still there.
+    find . -maxdepth 2 -path './.komira_test.*/log' -type f >"$K/logs" 2>/dev/null || true
+    while read -r l; do
+        echo "------------------------------------------------------------------ output (last 200 lines)" >&2
+        tail -n 200 "$l" >&2
+    done <"$K/logs"
+    red "The test left processes running or did not finish within $LIMIT s under kcov, and every process of the run was killed: kcov waits for every process the test started, where the release gate waits for the test alone. A test must wait for (or kill) every child it starts."
+fi
 if [ "$rc" != 0 ]; then
-    cat "$K/gate.err" >&2
+    # gate_runner's banner says the library's package is not produced: not
+    # so here (the package does not depend on a coverage run). Its other
+    # lines, the test's output among them, are kept.
+    awk -v H="GATED TEST FAILED: $LABEL (exit $rc)" \
+        -v P="The library's package is not produced until this test passes." '
+        !done && $0 == H { held = 1; next }
+        held && $0 == P { held = 0; done = 1; next }
+        held { print H; held = 0 }
+        { print }' "$K/gate.err" >&2
     # kcov's own lines (perror's, and its error macro's): the test's output
     # is in the same log, so a line must start with them.
     if grep -E "^Can't set me as ptraced: |^Can't [gs]et personality: |^Can't attach to [0-9]" "$K/gate.err" >/dev/null; then

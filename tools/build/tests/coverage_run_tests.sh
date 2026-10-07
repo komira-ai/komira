@@ -19,7 +19,11 @@
 #      tests//negative/coverage:tracer green, its kcov run red (kcov traced
 #      the test and passed its exit status on); orphan[coverage] green and
 #      exits[coverage] red, exit 1 and exit 137 (the status is the test's,
-#      not a child's it left behind, and 128+N for signal N);
+#      not a child's it left behind, and 128+N for signal N), the first
+#      without gate_runner's banner (the package is not affected);
+#      tests//negative/coverage:linger and linger[coverage][tests][test_brief]
+#      green, ...[test_lingers] red (a child left sleeping 100 s holds kcov,
+#      and the run's 20 s test-only limit kills the run);
 #      tests//negative/coverage:lost[coverage] red (sources staged where the
 #      line tables do not name them are refused as unmapped, not dropped);
 #      lostdir[coverage] red (a binary naming the sources by another
@@ -33,12 +37,22 @@ expect_green coverage_runs tests//functional/coverage:numbers tests//functional/
     tests//functional/coverage:covenv 'tests//functional/coverage:covenv[coverage]' \
     tests//functional/coverage:covgen \
     tests//negative/coverage:tracer tests//negative/coverage:lost \
-    tests//negative/coverage:orphan 'tests//negative/coverage:orphan[coverage]'
+    tests//negative/coverage:orphan 'tests//negative/coverage:orphan[coverage]' \
+    tests//negative/coverage:linger 'tests//negative/coverage:linger[coverage][tests][test_brief]'
 expect_red coverage_run_tracer "test_tracer: traced, TracerPid" 'tests//negative/coverage:tracer[coverage][tests][test_tracer]'
 expect_red coverage_run_lost "lostlib/value.mojo': no --map or --exclude prefix covers it" 'tests//negative/coverage:lost[coverage][tests][test_lost]'
 expect_red coverage_run_data_clash 'collides with its source, which a coverage run stages at "tests/test_lost.mojo"' tests//negative/coverage:clash
 expect_red coverage_run_data_buckout 'the data destination "buck-out/data.txt" is under buck-out/, where a coverage run stages' tests//negative/coverage:clash_buckout
 expect_red coverage_run_parent_fails "The test failed under kcov (exit 1)" 'tests//negative/coverage:exits[coverage][tests][test_parent_fails]'
 expect_red coverage_run_killed "The test failed under kcov (exit 137)" 'tests//negative/coverage:exits[coverage][tests][test_killed]'
+# The failing run's message is a coverage run's: not gate_runner's banner,
+# which says the library's package is not produced (it is: the package
+# does not depend on a coverage run).
+if grep -E "GATED TEST FAILED|package is not produced" "$LOG/coverage_run_parent_fails.log" > "$LOG/coverage_run_banner.txt"; then
+    fail "coverage_run_banner: a failing coverage run prints the release gate's banner: $(head -n 1 "$LOG/coverage_run_banner.txt") (see $LOG/coverage_run_parent_fails.log)"
+else
+    pass coverage_run_banner
+fi
 expect_red coverage_run_lostdir "this run stages them at buck-out/v2/art/tests/negative/coverage/__lostdir__/" 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'
 expect_red coverage_run_refused "kcov could not trace the test" 'tests//negative/coverage:refused[coverage][tests][test_one]'
+expect_red coverage_run_lingers "The test left processes running or did not finish within 20 s under kcov" 'tests//negative/coverage:linger[coverage][tests][test_lingers]'

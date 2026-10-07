@@ -234,3 +234,30 @@ mojo_library(
     import_name = "noop",
     test_srcs = ["tests/test_one.mojo"],
 )
+
+# Test 43. A coverage run is bounded: kcov waits for every process the test
+# started, so a test that leaves a child running would hold the run open.
+# :linger_run is cov_run with a test-only limit of 20 s (komira's is 450 s).
+# GREEN: tests//negative/coverage:linger (the release gate waits for the test
+# alone) and linger[coverage][tests][test_brief] (a run fits in the limit).
+# RED: tests//negative/coverage:linger[coverage][tests][test_lingers] (its
+# child sleeps 100 s): "The test left processes running or did not finish
+# within 20 s under kcov".
+cov_run_dir(
+    name = "linger_run",
+    exec_compatible_with = LINUX_X86_64,
+    limit_s = 20,
+    script = "komira//tools/build/coverage/kcov:cov_run.sh",
+)
+
+mojo_library(
+    name = "linger",
+    srcs = ["linger/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_run = ":linger_run",
+    test_srcs = [
+        "tests/test_brief.mojo",
+        "tests/test_lingers.mojo",
+    ],
+)
