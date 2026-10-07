@@ -193,6 +193,11 @@ def test_utf8_bounds() raises:
     # bound in _is_valid_utf8 has a refused row just outside it and an
     # accepted row exactly on it, so loosening or tightening any one bound
     # turns a row red.
+    # Single bytes: 00..7F stand alone. 7F is the top of that range, and a
+    # continuation byte (80..BF) where a lead is required is refused.
+    _accepts("%7F", [0x7F])  # U+007F, DEL
+    _refuses("%80")  # lone continuation byte, bottom of 80..BF
+    _refuses("%BF")  # lone continuation byte, top of 80..BF
     # Lead bytes: C2 is the lowest two-byte lead (C0 and C1 only make
     # overlong forms), F4 the highest four-byte lead.
     _accepts("%C2%80", [0xC2, 0x80])  # U+0080
