@@ -44,6 +44,8 @@
 # (List[UInt8] + String + scalars).
 # =============================================================================
 
+from komira_clock import now_ns
+
 from komira_http_core.codec.h2.connection_state import H2ConnectionState
 from komira_http_core.codec.h2.frame import (
     encode_data_frame,
@@ -201,6 +203,15 @@ trait GrpcDispatch(Movable, Deinitable):
         request_body: List[UInt8],
     ) -> GrpcResponse:
         ...
+
+    def grpc_now_ns(self) -> UInt64:
+        """The monotonic nanosecond clock the serve loop enforces
+        `grpc-timeout` against: read when a request's HEADERS block completes
+        (the arrival instant the deadline is computed from), before the
+        handler runs and after it returns. The default is
+        `komira_clock.now_ns()`; a conformer overrides it to supply another
+        clock (a test drives a manual one)."""
+        return now_ns()
 
 
 struct NoopGrpcDispatch(GrpcDispatch, GrpcStreamDispatch):
@@ -598,6 +609,38 @@ def emit_grpc_stream_response(
     )
     if idx >= 0:
         h2.streams[idx].has_deferred_response_body = True
+    return True
+
+
+def emit_grpc_trailers_only(
+    mut h2: H2ConnectionState,
+    stream_id: UInt32,
+    http_status: UInt16,
+    content_type: String,
+    grpc_status: UInt8,
+    grpc_message: String,
+    mut reqs_handled: Int64,
+) -> Bool:
+    """Close `stream_id` with one HEADERS frame (END_HEADERS + END_STREAM)
+    carrying `:status`, `content-type`, `grpc-status` and, when non-empty,
+    `grpc-message`: the gRPC "Trailers-Only" response, with no DATA.
+
+    `grpc_message` is emitted verbatim; the caller percent-encodes it.
+    """
+    var hs = List[HpackHeader]()
+    hs.append(HpackHeader(String(":status"), String(Int(http_status))))
+    hs.append(HpackHeader(String("content-type"), content_type))
+    hs.append(HpackHeader(String("grpc-status"), String(Int(grpc_status))))
+    if len(grpc_message.as_bytes()) > 0:
+        hs.append(HpackHeader(String("grpc-message"), grpc_message))
+    var block = h2.hpack_encoder.encode_block(hs^)
+    var buf = List[UInt8]()
+    encode_headers_frame(stream_id, block^, True, True, buf)
+    h2.append_out_bytes(buf^)
+    var idx = h2.find_stream_idx(stream_id)
+    if idx >= 0:
+        h2.streams[idx].advance_on_send_end_stream()
+    reqs_handled = reqs_handled + Int64(1)
     return True
 
 

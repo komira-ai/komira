@@ -57,6 +57,16 @@ mojo_library(
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or
   anything depending on it) is built.
+- **`test_deps`** (optional) lists Mojo packages the welded tests are
+  compiled against besides the library and its `deps`: a test-support
+  package, such as a fake service several tests share
+  ([`test_deps.bzl`](test_deps.bzl)). They reach the tests only, never the
+  library's compile, its package, its `MojoInfo`, its README examples or
+  its conda package, so a test-only package (`conda = False`) can be one.
+  An entry that is not a `mojo_library`, or that is also in `deps`, is
+  refused; one that depends on the library is a cycle buck2 refuses
+  ([`tests//functional/test_deps`](../tests/functional/test_deps/BUCK),
+  [`tests//negative/test_deps`](../tests/negative/test_deps/BUCK)).
 
 Output layout of a library `L` with import name `I`:
 
@@ -622,8 +632,13 @@ tools, `nm`, `objcopy` and `strip` are not provided; the features using them
 (dependency files, header maps, thin LTO, stripping) are off, and reaching one
 fails with `cxx toolchain: <tool> is not provided`.
 `toolchains//:python_bootstrap` exists only because configuring a
-`cxx_library` names it; it has no interpreter. A repository with its own
-C/C++ toolchain keeps it and passes `omit = ["cxx"]` to `komira_toolchains`.
+`cxx_library` names it; it has no interpreter.
+`toolchains//:cxx_no_default_deps` is an alias of `:cxx`: the prelude's C/C++
+rules take their toolchain from a select whose other branch names it, which no
+configured build takes but an unconfigured query (`buck2 uquery deps(...)`)
+follows; `:cxx` adds no default deps, so the variant without them is `:cxx`.
+A repository with its own C/C++ toolchain keeps it, declares its own
+`:cxx_no_default_deps`, and passes `omit = ["cxx"]` to `komira_toolchains`.
 
 A Mojo target lists C/C++ libraries in `deps` next to Mojo packages. A dep
 providing `MergedLinkInfo` (any `cxx_library`) is linked, statically, into
@@ -788,7 +803,7 @@ A library in the `tests` cell may pass `coverage_debug` itself (a
 when not given) and `coverage_gate` (a `cov_gate_dir`) with `coverage_mode`
 (the policy's when not given): it then has coverage binaries and runs, and
 with `coverage_gate` the gate and the join, whatever the switch says, which
-is how tests 41, 43 and 44 build them, plant a defective relocator or run
+is how tests 41, 43 and 45 build them, plant a defective relocator or run
 script, and gate in enforce mode, without `-c`. Without `coverage_gate`
 its package does not wait for its runs. Anywhere else passing any of them is
 refused.
@@ -820,7 +835,7 @@ refused.
 
 ## Not yet supported
 
-Test helper modules or test-only deps (each gated
-test is built from its one file against the library); extra compile flags, defines, or include roots; shared C libraries (C
+Test helper modules inside the package (each gated
+test is built from its one file against the library and its `test_deps`); extra compile flags, defines, or include roots; shared C libraries (C
 deps link statically); choosing the package root (the shallowest `__init__.mojo`
 in `srcs` is the root).

@@ -7,7 +7,9 @@
 # keeps its bucket, and nothing is dialed (its connector factory raises);
 # an S3Fs over ScriptedConnector advertises the S3 scheme but is not the arm's
 # type, so it is not an arm and wraps to None, as does an S3Fs over the plain
-# kernel connector and one with a different clock type.
+# kernel connector and one with a different clock type; the production Azure
+# arm (AzureFs over S3ProdConnector) wraps with the Azure tag and keeps its
+# container, and an AzureFs over ScriptedConnector is not an arm.
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
@@ -20,8 +22,10 @@ from komira_aws_core import (
     SystemAwsClock,
     process_creds_source,
 )
+from komira_azure_blob import AzureClientSpec, AzureConfig, AzureCredential, AzureFs
 from komira_fs.local_fs import LocalFs
 from komira_fs_registry import (
+    AzureArm,
     LocalArm,
     S3Arm,
     S3ProdConnector,
@@ -32,7 +36,7 @@ from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_http_core.transport.scripted import ScriptedConnector
 from komira_objectstore_s3 import S3Config, S3Fs
-from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_FILE, FS_SCHEME_S3
+from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_AZURE, FS_SCHEME_FILE, FS_SCHEME_S3
 
 
 def _never_dial() raises -> S3ProdConnector:
@@ -130,10 +134,36 @@ def test_other_s3_monomorphs_are_not_arms() raises:
     assert_false(Bool(fs_handle_from_typed_fs(fixed^)))
 
 
+def test_azure_arms() raises:
+    assert_true(fs_is_registry_arm[AzureArm[S3ProdConnector]]())
+    assert_false(fs_is_registry_arm[AzureFs[ScriptedConnector]]())
+    assert_false(fs_is_registry_arm[AzureFs[KernelTcpConnector]]())
+    var fs = AzureArm[S3ProdConnector](
+        container=String("box"),
+        spec=AzureClientSpec[S3ProdConnector](
+            AzureConfig.azure("myacct"), AzureCredential.anonymous(), _never_dial
+        ),
+    )
+    var h = fs_handle_from_typed_fs(fs^)
+    assert_true(Bool(h))
+    assert_equal(h.value().tag(), FS_SCHEME_AZURE)
+    assert_true(h.value().is_azure())
+    assert_equal(h.value().azure_ref().value().container(), "box")
+    var scripted = AzureFs[ScriptedConnector](
+        container=String("box"),
+        spec=AzureClientSpec[ScriptedConnector](
+            AzureConfig.azure("myacct"), AzureCredential.anonymous(), _never_script
+        ),
+    )
+    assert_equal(AzureFs[ScriptedConnector].SCHEME, FS_SCHEME_AZURE)
+    assert_false(Bool(fs_handle_from_typed_fs(scripted^)))
+
+
 def main() raises:
     test_arm_types()
     test_local_fs_wraps_with_the_local_tag()
     test_prod_s3_fs_wraps_with_the_s3_tag()
     test_scripted_s3_fs_is_not_an_arm()
     test_other_s3_monomorphs_are_not_arms()
+    test_azure_arms()
     print("OK")

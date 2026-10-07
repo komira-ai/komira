@@ -323,7 +323,7 @@ action with `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage
 gate]): covcheck gate exited 3` and the summary; exits 1 and 2 (an input
 covcheck refuses, bad usage) fail it in every mode with `COVERAGE GATE ERROR`
 and covcheck's message: a malformed ratchet fails a census gate too (test
-44). Census and neutral mode never fail on a finding.
+45). Census and neutral mode never fail on a finding.
 
 The library's package (its `mojo_gate_join`) waits for the gate's marker and
 every coverage run's, so dependents compile against a package whose
@@ -346,7 +346,7 @@ refused at load, and at analysis (a BUCK file calling the rule itself) a
 mode other than the policy's, a link, run or gate directory other than
 komira's, coverage runs with no gate, or the ledger's join (runs, no gate)
 for a library not in the ledger is refused. These refusals are outside the
-tests cell, so test 44 cannot plant them there: test 7
+tests cell, so test 45 cannot plant them there: test 7
 (`tests/functional/umbrella_cache.sh`) plants each in a consumer
 repository's own cell.
 
@@ -373,7 +373,7 @@ which their conda package (what ships) waits for. `no_gate.bxl` fails
 unless the ledger names exactly the Mojo libraries `:cov_gate` depends on,
 the ledger is within the frozen list `_CEILING` in the same file (so it
 only shrinks: a new row also needs a reviewed edit of that list), and each
-one's conda package waits for its gate (test 44). A check that builds only
+one's conda package waits for its gate (test 45). A check that builds only
 the libraries a change affects must also build their `<name>_cov_gate` (an
 rdep of the library) or these three ship ungated:
 
