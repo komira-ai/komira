@@ -41,7 +41,7 @@ from komira_async.runtime.wake_primitives import (
 )
 from komira_async.runtime.worker import Worker
 from komira_async.spawner.spawner import SpawnableTask
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 
 def _noop_sink_factory() -> NoopSink:

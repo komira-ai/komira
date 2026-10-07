@@ -419,7 +419,7 @@ def _error_typed_outcome(blocked: Int32, rc: Int64) -> UInt8:
 # (`s2n_config_new` returns NULL).
 #
 # So init state lives in the stdlib `_Global[name, init_fn]` slot — the
-# same process-lifetime, init-once, KGEN-serialized idiom komira_core's codec
+# same process-lifetime, init-once, KGEN-serialized idiom the core packages' codec
 # singletons use. `_Global` storage lives in the process's OWN
 # memory and is NOT inherited across a process boundary: a freshly `fork`ed
 # child gets a fresh, uninitialized slot and runs `s2n_init()` exactly once for

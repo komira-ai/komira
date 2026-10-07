@@ -8,7 +8,7 @@
 #     Spans inside the bodies only,
 #   * rebuilds an address from an integer,
 #   * imports a komira package that is not one of the library's deps, or
-#     names komira_core, komira_obs or komira_serde.
+#     names komira_obs or komira_serde.
 # It also checks that the files it read are every staged one, subdirectories
 # included, so a new module that the scan does not read fails it.
 from std.os import listdir
@@ -164,8 +164,8 @@ def _import_root(line: String) -> String:
 def test_imports_only_its_deps() raises:
     # The package imports only the deps its BUCK file lists. An import outside
     # them would not build, but adding the dep would make it build; this list
-    # makes a new dep a change to the test too, and komira_core, komira_obs
-    # and komira_serde are refused outright.
+    # makes a new dep a change to the test too, and komira_obs and
+    # komira_serde are refused outright.
     var allowed: List[String] = [
         "komira_buffer",
         "komira_lz4",
@@ -173,7 +173,7 @@ def test_imports_only_its_deps() raises:
         "komira_parquet_codec",
         "komira_zlib",
     ]
-    var banned: List[String] = ["komira_core", "komira_obs", "komira_serde"]
+    var banned: List[String] = ["komira_obs", "komira_serde"]
     var files = materialize[_FILES]()
     var seen = 0
     for i in range(len(files)):

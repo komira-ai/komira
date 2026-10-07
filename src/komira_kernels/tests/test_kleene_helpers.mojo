@@ -28,8 +28,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.primitive_array import PrimitiveArray
 from komira_kernels.eval_chunks import EvalBoolChunk
 from komira_kernels.kleene import (
     _kleene_and_chunk,
@@ -41,7 +41,7 @@ from komira_kernels.kleene import (
     _cmp_result_validity_byte,
     _cmp_result_validity_chunk,
 )
-from komira_core.eval.comparison import (
+from komira_column_kernels.comparison import (
     eval_col_gt_kleene,
     eval_col_lt_kleene,
     eval_col_eq_kleene,

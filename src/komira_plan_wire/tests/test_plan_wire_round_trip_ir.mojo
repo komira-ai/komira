@@ -16,7 +16,7 @@
 #
 #   2. IT COSTS SECONDS. Executing a plan comptime-instantiates the engine's
 #      whole row dispatch tree. Nothing here touches the engine, the SDK, or
-#      parquet: the imports are `komira_core` and the codec. So any
+#      parquet: the imports are the core packages and the codec. So any
 #      falsification of the codec runs here.
 #
 # A THREE-LEG TEST THAT NOBODY CAN AFFORD TO RUN IS NOT A STRONGER GATE THAN A
@@ -130,13 +130,13 @@
 from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.c_data_interface import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow_ipc.c_data_interface import (
     ARROW_FLAG_DICTIONARY_ORDERED, ARROW_FLAG_MAP_KEYS_SORTED,
 )
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections import Slab
-from komira_core.plan.agg_expr import (
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_collections.slab import Slab
+from komira_plan_expr.agg_expr import (
     AggExpr, AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX, AGG_MEAN,
     AGG_COUNT_DISTINCT, AGG_FIRST, AGG_LAST, AGG_STDDEV_SAMP, AGG_CORR,
     AGG_MEDIAN, AGG_LARGEST_K, AGG_VAR_SAMP,
@@ -147,7 +147,7 @@ from komira_core.plan.agg_expr import (
     AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, AGG_ANY_VALUE,
     AGG_KAHAN_SUM, AGG_KAHAN_AVG, AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP,
 )
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr, WhenCaseData, BIN_GT, BIN_AND, BIN_LT, UN_NOT,
     UN_NEGATE, UN_IS_NULL, UN_IS_NOT_NULL,
     UN_ABS, UN_SIGN, UN_TRUNC, UN_ROUND, UN_BIT_COUNT,
@@ -190,7 +190,7 @@ from komira_core.plan.expr import (
     REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR,
     REGEXP_SUBSTR, REGEXP_FULL_MATCH,
 )
-from komira_core.plan.plan_wire_vocabulary import (
+from komira_plan_wire.plan_wire_vocabulary import (
     AGG_FN_WIRE_MEMBERS,
     MATH_FN1_WIRE_MEMBERS,
     MATH_FN2_WIRE_MEMBERS,
@@ -204,7 +204,7 @@ from komira_core.plan.plan_wire_vocabulary import (
     extract_field_is_declared,
     window_fn_is_declared,
 )
-from komira_core.plan.logical_plan import (
+from komira_plan_ir.logical_plan import (
     LogicalPlan, ExprArray, AggExprArray, JOIN_INNER, JOIN_LEFT,
     JOIN_ALGO_AUTO, JOIN_ALGO_SORT_MERGE, SOURCE_ORC, SOURCE_PARQUET,
     PLAN_SCAN, PLAN_FILTER, PLAN_PROJECT, PLAN_AGGREGATE, PLAN_JOIN,
@@ -215,9 +215,9 @@ from komira_core.plan.logical_plan import (
     ASOF_TOL_NONE, ASOF_TOL_INT64, ASOF_TOL_FLOAT64,
     CORR_KIND_EXISTS, CORR_KIND_SCALAR, CORR_KIND_IN_CORRELATED,
 )
-from komira_core.plan.corr_subquery import corr_subq_inner_plan_ref
-from komira_core.source.parquet_source import ParquetSource
-from komira_core.plan.partition_expr import (
+from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
+from komira_scan_source.parquet_source import ParquetSource
+from komira_plan_expr.partition_expr import (
     PartitionExpr, PartitionFrame, PF_LAG,
     PF_ROW_NUMBER, PF_RANK, PF_LEAD, PF_NTILE, PF_SUM, PF_MIN,
     FRAME_UNITS_ROWS, FRAME_UNITS_RANGE,
@@ -225,24 +225,24 @@ from komira_core.plan.partition_expr import (
     FRAME_BOUND_CURRENT_ROW, FRAME_BOUND_FOLLOWING,
     FRAME_BOUND_UNBOUNDED_FOLLOWING,
 )
-from komira_core.plan.scalar_value import (
+from komira_plan_expr.scalar_value import (
     ScalarValue, SCALAR_TIME_UNIT_SECOND, SCALAR_TIME_UNIT_MILLI,
     SCALAR_TIME_UNIT_MICRO, SCALAR_TIME_UNIT_NANO,
 )
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding, scan_kind_id, SCAN_ORIENTATION_COLUMNAR,
     SCAN_ORIENTATION_ROW, SNAPSHOT_PINNED, SNAPSHOT_LIVE,
 )
-from komira_core.source.scan_params import (
+from komira_scan_source.scan_params import (
     ScanParams, PARAM_STR, PARAM_I64, PARAM_U64, PARAM_F64, PARAM_BOOL,
     PARAM_BYTES,
 )
-from komira_core.source.source_variant import (
+from komira_scan_source.source_variant import (
     SourceVariant, SOURCE_VARIANT_ORC, SOURCE_VARIANT_PARQUET,
 )
 
-from komira_core.arrow.write_target import (
+from komira_arrow.write_target import (
     WriteTarget,
     WFMT_CSV,
     WFMT_PARQUET,

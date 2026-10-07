@@ -19,7 +19,7 @@
 # description plus the morsel operators that run over it. The physical plan for
 # this shape is therefore not a new IR; this file gives that pair a wire form.
 #
-# NO PROTOBUF. This package depends on `komira_core` alone, so a consumer that
+# NO PROTOBUF. This package depends on the core packages alone, so a consumer that
 # decodes a physical plan does not pull a protobuf runtime into its closure. A
 # hand-rolled length-prefixed format costs a few hundred lines and adds one
 # package to the closure.
@@ -80,7 +80,7 @@
 #   That is value admission, which lives with the plan's consumers.
 # =============================================================================
 
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     BIN_MOD,
     BIN_EQ,
@@ -97,14 +97,14 @@ from komira_core.plan.expr import (
     EXPR_ALIAS,
     COL_SIDE_NONE,
 )
-from komira_core.plan.scalar_value import (
+from komira_plan_expr.scalar_value import (
     ScalarValue,
     SCALAR_KIND_ERROR,
     SCALAR_TIME_UNIT_NANO,
 )
-from komira_core.plan.excel_error_code import XL_ERR_CIRCULAR
-from komira_core.plan.logical_plan import ExprArray
-from komira_core.plan.physical_plan import (
+from komira_plan_expr.excel_error_code import XL_ERR_CIRCULAR
+from komira_plan_ir.logical_plan import ExprArray
+from komira_plan_ir.physical_plan import (
     ParquetSourceData,
     ParquetRowWindow,
     MorselOp,
@@ -112,11 +112,11 @@ from komira_core.plan.physical_plan import (
     OP_PROJECT,
     OP_LIMIT,
 )
-from komira_core.plan.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_AZURE
-from komira_core.collections import Slab
-from komira_core.arrow.schema import Field
+from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_AZURE
+from komira_collections.slab import Slab
+from komira_arrow.schema import Field
 from std.memory import bitcast
-from komira_core.dtype_sentinel import DTYPE_NONE
+from komira_arrow.dtype_sentinel import DTYPE_NONE
 
 
 # =============================================================================

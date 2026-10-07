@@ -15,18 +15,11 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import (
-    ArrowType,
-    Column,
-    IntervalMonthDayNanoArray,
-    INTERVAL_MDN_BYTE_WIDTH,
-    RecordBatch,
-    RecordBatchBuilder,
-    Schema,
-    SchemaBuilder,
-    Field,
-)
-from komira_core.eval import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.interval_mdn_array import IntervalMonthDayNanoArray, INTERVAL_MDN_BYTE_WIDTH
+from komira_arrow.schema import RecordBatch, RecordBatchBuilder, Schema, SchemaBuilder, Field
+from komira_column_kernels.interval_mdn_kernels import (
     eval_eq_interval_mdn,
     eval_eq_interval_mdn_scalar,
     hash_interval_mdn,
@@ -36,7 +29,7 @@ from komira_core.eval import (
     lex_lt_interval_mdn,
     lex_lt_one_interval_mdn,
 )
-from komira_core.arrow.bitmap import Bitmap
+from komira_arrow.bitmap import Bitmap
 
 
 def _triples() -> List[Tuple[Int32, Int32, Int64]]:
@@ -155,7 +148,7 @@ def test_interval_mdn_copy_column_bug_i_regression() raises:
 
     # Invoke `copy_column` via the public helper.  This is the same call
     # path used by gather_batch / project_batch / empty_batch_like.
-    from komira_core.helpers.compiler_helpers import copy_column
+    from komira_column_kernels.compiler_helpers import copy_column
 
     var copied = copy_column(batch, 0)
     assert_equal(copied.arrow_type, ArrowType.INTERVAL_MONTH_DAY_NANO)

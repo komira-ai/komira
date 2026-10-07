@@ -41,7 +41,7 @@ from std.memory import unsafe_memcpy
 from komira_async.cancellation.token import CancellationToken
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_client.body import EmptyBody
 from komira_http_client.client import HttpClient, build_get_request, build_head_request

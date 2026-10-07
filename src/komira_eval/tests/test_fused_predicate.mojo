@@ -14,19 +14,14 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow import (
-    PrimitiveArray,
-    BooleanArray,
-    Column,
-    Schema,
-    SchemaBuilder,
-    Field,
-    RecordBatch,
-    RecordBatchBuilder,
-    ArrowType,
-)
-from komira_core.eval import eval_eq, eval_lt, eval_gt, eval_and
-from komira_core.eval.fused_predicate import (
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.schema import Schema, SchemaBuilder, Field, RecordBatch, RecordBatchBuilder
+from komira_arrow.arrow_types import ArrowType
+from komira_column_kernels.comparison import eval_eq, eval_lt, eval_gt
+from komira_column_kernels.arithmetic import eval_and
+from komira_column_kernels.fused_predicate import (
     ConjunctDescI64,
     FUSED_OP_EQ,
     FUSED_OP_NE,

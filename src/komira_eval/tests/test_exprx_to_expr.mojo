@@ -7,7 +7,7 @@
 # AST's `ExprBool.to_expr()` lowering pattern.
 #
 # Each engine ExprX conformer lowers to a runtime LogicalPlan walker `Expr`
-# (`komira_core.plan.expr.Expr`):
+# (`komira_plan_expr.expr.Expr`):
 #   - ColX*  -> Expr.col_ref(name)                    (tag = EXPR_COL_REF)
 #   - LitX*  -> Expr.literal(ScalarValue.from_*(v))   (tag = EXPR_LITERAL)
 #   - Binop  -> Expr.binary(BIN_*, L.to_expr(), R.to_expr())  (EXPR_BINARY_OP)
@@ -22,7 +22,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     BIN_GT,
     BIN_LT,

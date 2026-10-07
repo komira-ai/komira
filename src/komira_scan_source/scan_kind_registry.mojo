@@ -1,5 +1,5 @@
 # =============================================================================
-# ScanKindRegistry — the PLAN/COMPILE-TIME registry. Lives in `komira_core`.
+# ScanKindRegistry — the PLAN/COMPILE-TIME registry. Lives in `komira_scan_source`.
 # =============================================================================
 #
 # WHY CORE CAN OWN THIS AND CANNOT OWN THE OTHER ONE. A `ScanKindDescriptor` is
@@ -10,11 +10,11 @@
 #
 # The execution side cannot live here: a morsel-source trait would have to
 # name `LocalDispatcher`, `CancellationToken`, `ParquetMetadataCache` — all
-# defined ABOVE komira_core, so a core-resident trait CANNOT spell those
+# defined ABOVE the core packages, so a core-resident trait CANNOT spell those
 # types (see `komira_plan_expr/fs_resolver.mojo`).
 #
 # `MorselSourceImpl` lives in `komira_morsel`, which depends on
-# `komira_core`, so the EXECUTION resolver splits into two tiers (see
+# the core packages, so the EXECUTION resolver splits into two tiers (see
 # `scan_resolver.mojo`). This registry is the tier that has no such problem.
 #
 # WHAT THE OPTIMIZER GETS FROM A KIND IT HAS NEVER HEARD OF: a pushdown gate,

@@ -17,7 +17,7 @@
 from std.memory import alloc, UnsafePointer
 from komira_atomic_alias import AtomicI64
 
-from komira_core.arrow.schema import Schema
+from komira_arrow.schema import Schema
 from komira_morsel.morsel import Morsel
 from komira_morsel.morsel_source import MorselSourceImpl, SourceCapabilities
 

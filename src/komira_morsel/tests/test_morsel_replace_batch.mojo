@@ -10,10 +10,10 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import (
     Field, RecordBatch, RecordBatchBuilder, SchemaBuilder,
 )
 from komira_morsel.morsel import Morsel

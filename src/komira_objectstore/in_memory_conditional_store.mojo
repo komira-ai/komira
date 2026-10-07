@@ -49,7 +49,7 @@
 # Slab primitive, never on a field type), so heap-reuse N/A.
 # =============================================================================
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore, ObjectStore

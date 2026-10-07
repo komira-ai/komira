@@ -59,7 +59,7 @@ def test_no_environment_read() raises:
         "_read_env",
         "std.os",
         "EnvSource",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
         "GOOGLE_APPLICATION_CREDENTIALS",
     ]

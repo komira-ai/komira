@@ -41,7 +41,7 @@ from komira_clock import now_ns as _system_now_ns
 from komira_async.cancellation.token import CancellationToken
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 from komira_http_client.body_frame import (
     BODY_FRAME_KIND_DATA,
     BODY_FRAME_KIND_END,

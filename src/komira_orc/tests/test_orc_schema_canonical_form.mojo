@@ -24,7 +24,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 from komira_orc import (
     OrcSchema,

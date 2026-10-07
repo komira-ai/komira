@@ -48,14 +48,14 @@
 #
 # Cross-references:
 #   - komira_expr.expr_x (trait declarations consumed here).
-#   - komira_core.collections.batch_view (BatchView + ColView /
+#   - komira_arrow.batch_view (BatchView + ColView /
 #     BoolColView typed accessors).
 # =============================================================================
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.collections.batch_view import BatchView
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.batch_view import BatchView
+from komira_plan_expr.expr import (
     Expr,
     BIN_ADD,
     BIN_SUB,
@@ -70,8 +70,8 @@ from komira_core.plan.expr import (
     BIN_AND,
     BIN_OR,
 )
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.eval.string_comparison import like_match_string
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_column_kernels.string_comparison import like_match_string
 from komira_udf.column_resolver import ColumnResolver
 from komira_expr.expr_x import ExprXBool, ExprXF32, ExprXF64, ExprXI32, ExprXI64, ExprXString
 from komira_row_format.row_block import RowBlock
@@ -1303,7 +1303,7 @@ struct OrX[L: ExprXBool, R: ExprXBool](ExprXBool):
 # ⛔ AND THERE IS A THIRD SIDE, WHICH IS THE TRAP.
 # `NeXF64`/`NeXF32` use `.ne`, i.e. LLVM `fcmp one` — ORDERED not-equal, so
 # `NaN != x` is FALSE here for EVERY x. The SHIPPING `!=` kernels
-# (`komira_core.eval.comparison.eval_col_ne`, `komira_kernels.sel_kernels._cmp_ne`)
+# (`komira_column_kernels.comparison.eval_col_ne`, `komira_kernels.sel_kernels._cmp_ne`)
 # deliberately do NOT use `.ne`: they use `~eq`, the UNORDERED form, where
 # `NaN != x` is TRUE for every x. Those two answer `NaN <> 1.0` OPPOSITELY, and
 # neither matches DuckDB, which answers TRUE for `NaN <> 1.0` and FALSE for
@@ -2887,7 +2887,7 @@ def _like_match(value: String, pattern: String) -> Bool:
     """SQL LIKE for the `LikeXString` conformer: `%` any run of characters, `_`
     ONE CHARACTER (a UTF-8 code point), everything else literal.
 
-    ⭐ DELEGATES to `komira_core.eval.string_comparison.like_match_string`
+    ⭐ DELEGATES to `komira_column_kernels.string_comparison.like_match_string`
 . This was its own byte-at-a-
     time copy of the matcher, so `_` matched one BYTE of a multi-byte
     character; the columnar kernel and the RuntimeExpr walker carried the same
@@ -2950,7 +2950,7 @@ struct LikeXString[Value: ExprXString, Pattern: ExprXString](ExprXBool):
 
     # --- to_expr() — raises at runtime; no BIN_LIKE in runtime Expr ---
     # SQL LIKE (`%` / `_` wildcards) has no direct Expr factory in
-    # `komira_core.plan.expr` (the closest cousin is `Expr.regexp_like`,
+    # `komira_plan_expr.expr` (the closest cousin is `Expr.regexp_like`,
     # which uses RE2-style regex syntax — NOT SQL LIKE wildcards). Adding a
     # native LIKE walker arm requires extending `Expr` + the runtime walker
     # + the engine compiler/operators. Callers that need to lower a `LikeXString` to a

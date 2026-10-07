@@ -44,7 +44,7 @@ from komira_async.runtime.parallel_fork_join_shared import (
 )
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_async.sync.select import SelectFirstNotify
-from komira_core.runtime_traits.shared_chunk_work import SharedChunkWork
+from komira_async_api.shared_chunk_work import SharedChunkWork
 
 
 # -----------------------------------------------------------------------------

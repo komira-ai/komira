@@ -42,7 +42,7 @@
 #     point `select_expression_adaptive`.
 #   - `komira_eval.adaptive_filter` — the AdaptiveFilter state
 #     machine.
-#   - `komira_core.eval.selection_vector_row` — RowSelectionVector type.
+#   - `komira_arrow.selection_vector_row` — RowSelectionVector type.
 #   - `komira_engine_operators.op_filter` — owns
 #     `Slab[FilterState]` + ExpressionExecutor.
 # =============================================================================
@@ -50,7 +50,7 @@
 from std.memory import OwnedPointer
 
 from komira_eval.adaptive_filter import AdaptiveFilter
-from komira_core.eval.selection_vector_row import (
+from komira_arrow.selection_vector_row import (
     STANDARD_VECTOR_SIZE,
     RowSelectionVector,
 )
