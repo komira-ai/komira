@@ -34,7 +34,8 @@
 #
 # The refresh is synchronous, `refresh_with_service[S, RT, C]`, driven by the
 # caller's HttpClient, runtime and reactor; the provider caches the token and
-# its wall-clock expiry, as AzureImdsProvider does.
+# its expiry on an injected komira_retry `MonotonicClock` (`SystemClock`
+# unless `with_clock` swaps it), as AzureImdsProvider does.
 #
 # No UnsafePointer in any signature, no wildcard origin.
 # =============================================================================
@@ -42,7 +43,7 @@
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_clock import now_unix_ms
+from komira_retry import MonotonicClock, SystemClock
 
 from komira_http_client.body import BytesBody, RequestBody
 from komira_http_client.client import build_request_with_body
@@ -74,10 +75,16 @@ comptime DEFAULT_SP_REFRESH_MARGIN_SECONDS: Int64 = 300
 
 
 @fieldwise_init
-struct ServicePrincipalProvider(Movable, Deinitable):
+struct ServicePrincipalProvider[K: MonotonicClock = SystemClock](
+    Movable, Deinitable
+):
     """A provider that exchanges an Entra service-principal client_id +
     client_secret for an OAuth2 access token via the client-credentials
     grant.
+
+    Refresh is due when the clock `K` reads at or past the cached token's
+    expiry minus `refresh_margin_seconds`. The factories build a provider on
+    `SystemClock`; `with_clock` moves it onto another clock.
 
     Field layout:
       var tenant_id: String             — the Entra tenant (GUID or
@@ -93,7 +100,9 @@ struct ServicePrincipalProvider(Movable, Deinitable):
       var login_port: UInt16            — 0 = scheme default
       var refresh_margin_seconds: Int64 — proactive-refresh margin (300)
       var _cached_token: AzureBearerToken
-      var _cached_expiry_unix_ms: Int64 — -1 means "no cached token"
+      var _cached_expiry_ms: Int64      — on `_clock`'s timeline; -1 means
+                                          "no cached token"
+      var _clock: K                     — the clock expiry is read against
     """
 
     var tenant_id: String
@@ -105,19 +114,20 @@ struct ServicePrincipalProvider(Movable, Deinitable):
     var login_port: UInt16
     var refresh_margin_seconds: Int64
     var _cached_token: AzureBearerToken
-    var _cached_expiry_unix_ms: Int64
+    var _cached_expiry_ms: Int64
+    var _clock: Self.K
 
     @staticmethod
     def make(
         tenant_id: String,
         client_id: String,
         client_secret: String,
-    ) raises -> ServicePrincipalProvider:
+    ) raises -> ServicePrincipalProvider[SystemClock]:
         """Default config — real Entra endpoint, storage .default scope.
         Raises if `tenant_id` is not a GUID or domain name (see the module
         header)."""
         _check_tenant_id(tenant_id)
-        return ServicePrincipalProvider(
+        return ServicePrincipalProvider[SystemClock](
             tenant_id,
             client_id,
             client_secret,
@@ -128,6 +138,7 @@ struct ServicePrincipalProvider(Movable, Deinitable):
             DEFAULT_SP_REFRESH_MARGIN_SECONDS,
             AzureBearerToken(String(""), Int64(-1)),
             Int64(-1),
+            SystemClock(),
         )
 
     @staticmethod
@@ -138,7 +149,7 @@ struct ServicePrincipalProvider(Movable, Deinitable):
         login_scheme: String,
         login_host: String,
         login_port: UInt16,
-    ) raises -> ServicePrincipalProvider:
+    ) raises -> ServicePrincipalProvider[SystemClock]:
         """Custom token endpoint: a sovereign cloud's authority, an
         emulator, or a test's scripted connector. Raises, before anything
         is dialed, unless `login_scheme` is `https` (or `http` with a
@@ -146,7 +157,7 @@ struct ServicePrincipalProvider(Movable, Deinitable):
         no empty label, and `tenant_id` is held to the same charset."""
         _check_login_endpoint(login_scheme, login_host)
         _check_tenant_id(tenant_id)
-        return ServicePrincipalProvider(
+        return ServicePrincipalProvider[SystemClock](
             tenant_id,
             client_id,
             client_secret,
@@ -157,11 +168,37 @@ struct ServicePrincipalProvider(Movable, Deinitable):
             DEFAULT_SP_REFRESH_MARGIN_SECONDS,
             AzureBearerToken(String(""), Int64(-1)),
             Int64(-1),
+            SystemClock(),
         )
+
+    def with_clock[K2: MonotonicClock](
+        deinit self, var clock: K2
+    ) -> ServicePrincipalProvider[K2]:
+        """This provider, settings and cached token kept, reading `clock`
+        from now on. A cached token's expiry was read on the old clock, so
+        swap clocks before the first refresh."""
+        return ServicePrincipalProvider[K2](
+            self.tenant_id^,
+            self.client_id^,
+            self.client_secret^,
+            self.scope^,
+            self.login_host^,
+            self.login_scheme^,
+            self.login_port,
+            self.refresh_margin_seconds,
+            self._cached_token^,
+            self._cached_expiry_ms,
+            clock^,
+        )
+
+    def clock(mut self) -> ref [self._clock] Self.K:
+        """The clock this provider reads (a test advances its fake through
+        this)."""
+        return self._clock
 
     def credential(self) raises -> AzureBearerToken:
         """Return the cached token. Raises if none fetched yet."""
-        if self._cached_expiry_unix_ms < Int64(0):
+        if self._cached_expiry_ms < Int64(0):
             raise Error(
                 "ServicePrincipalProvider.credential: no cached token;"
                 " call refresh_with_service() first"
@@ -169,17 +206,22 @@ struct ServicePrincipalProvider(Movable, Deinitable):
         return self._cached_token
 
     def has_credential(self) -> Bool:
-        return self._cached_expiry_unix_ms >= Int64(0)
+        return self._cached_expiry_ms >= Int64(0)
 
-    def cached_expiry_unix_ms(self) -> Int64:
-        return self._cached_expiry_unix_ms
+    def cached_expiry_ms(self) -> Int64:
+        """Diagnostic: cached token expiry on the provider's clock, or -1
+        if none."""
+        return self._cached_expiry_ms
 
-    def is_expired_or_near_expiry(self) -> Bool:
-        if self._cached_expiry_unix_ms < Int64(0):
+    def is_expired_or_near_expiry(mut self) -> Bool:
+        """Whether the cached token is missing, expired, or within
+        `refresh_margin_seconds` of expiry: due from the instant the clock
+        reads `expiry - margin`, inclusive."""
+        if self._cached_expiry_ms < Int64(0):
             return True
-        var now_ms = now_unix_ms()
+        var now_ms = self._clock.now_ms()
         var margin_ms = self.refresh_margin_seconds * Int64(1000)
-        return now_ms + margin_ms >= self._cached_expiry_unix_ms
+        return now_ms + margin_ms >= self._cached_expiry_ms
 
     def _token_path(self) -> String:
         return (
@@ -242,17 +284,18 @@ struct ServicePrincipalProvider(Movable, Deinitable):
             raise Error(String("ServicePrincipalProvider: ") + String(e))
         var access_token = parsed.access_token.copy()
         var expires_in = parsed.expires_in
-        var now_ms = now_unix_ms()
+        var now_ms = self._clock.now_ms()
         var expiry_ms = now_ms + (expires_in * Int64(1000))
         self._cached_token = AzureBearerToken(access_token^, expiry_ms)
-        self._cached_expiry_unix_ms = expiry_ms
+        self._cached_expiry_ms = expiry_ms
 
     def set_credential_for_test(
-        mut self, var token: AzureBearerToken, expiry_unix_ms: Int64
+        mut self, var token: AzureBearerToken, expiry_ms: Int64
     ):
-        """Test-only: bypass refresh_with_service and inject a token."""
+        """Test-only: bypass refresh_with_service and inject a token
+        expiring at `expiry_ms` on the provider's clock."""
         self._cached_token = token^
-        self._cached_expiry_unix_ms = expiry_unix_ms
+        self._cached_expiry_ms = expiry_ms
 
 
 # -----------------------------------------------------------------------------

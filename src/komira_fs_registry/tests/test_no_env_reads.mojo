@@ -24,6 +24,8 @@ def _read(name: String) raises -> String:
 comptime _FILES: List[String] = [
     "__init__.mojo",
     "fs_handle.mojo",
+    "azure_arm.mojo",
+    "s3_connector.mojo",
 ]
 
 

@@ -56,7 +56,8 @@
 # from the live graph (`buck2 cquery`) and answers one check per path group
 # for every target no declared unit names or matches: one per library
 # package `//src/<p>/...` (named `<p>`: a change to one library builds that
-# library's units, not every library's), `repo_root` (`//:`) for the
+# library's units, not every library's) and per test-only package
+# `//src/tests/<kind>/<p>/...` (named `<p>`), `repo_root` (`//:`) for the
 # repository's own lints, `bin`, `release`, `tests`, `third_party`,
 # `tools_<t>` for each `//tools/<t>/...` tree, and `functional_tests`
 # (`tests//functional/...`) for the tests cell's positive tests (built only,
@@ -489,6 +490,15 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_kafka_server"
+  build_system: "buck2"
+  args: "//src/komira_kafka_server:komira_kafka_server_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_kafka_server:komira_kafka_server_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -566,6 +576,8 @@ artifacts {
   args: "{release_dir}/komira_test_run_id/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_test_verdict/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_kafka_server/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"
