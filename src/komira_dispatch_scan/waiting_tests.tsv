@@ -1,0 +1,2 @@
+# test	gate: a test that imports this package and a package not on main yet; it moves with that package.
+tests/test_scan_share_batch.mojo, test_share_gates_default_on: the dropped check that the in-memory leaf resolve shares by default; it returns when that switch has a home	komira_dispatch_sources (inmem_leaf.mojo)

@@ -97,10 +97,10 @@
 #                 rbac.authorization.k8s.io/v1/RoleBinding with its helper
 #                 rbac.authorization.k8s.io/v1/Role; a MinIO target (bucket)
 #                 -> minio:policy (mapped to the service account's token
-#                 claim). A Vault target has no type yet: its row (a Vault
-#                 policy attached to the `vault` auth role) arrives with the
-#                 first Vault-backed type. A cell resource has NO row: the
-#                 edge folds into the identity (`cell.LOGS`).
+#                 claim); a Vault target (secret) -> vault:sys/policies/acl
+#                 (a Vault ACL policy, attached to the principal's `vault`
+#                 auth role). A cell resource has NO row: the edge folds
+#                 into the identity (`cell.LOGS`).
 #                 A TABLE IS NOT_YET on onprem: which datastore backs it is
 #                 an open design question (Q17: PostgreSQL via
 #                 CloudNativePG, CockroachDB, ScyllaDB or FoundationDB), so
@@ -122,6 +122,50 @@
 # roles are `table` on every shape that hosts it, plus `ix-<h>` and `ttl`
 # where the indexes and the TTL are objects of their own (gcp).
 #
+# MESSAGING (queue, topic, subscription; messaging.mojo lowers them):
+#   * `generic`   queue -> queue; topic -> topic; subscription -> sub.
+#   * `aws`       queue -> queue (AWS::SQS::Queue, redrive to its dead-letter
+#                 queue) and policy (AWS::SQS::QueuePolicy, wanted iff a
+#                 subscription feeds the queue: ONE policy per queue lets
+#                 every topic that feeds it send, because two policies on one
+#                 queue overwrite each other); topic -> topic
+#                 (AWS::SNS::Topic); subscription -> sub
+#                 (AWS::SNS::Subscription, after the queue's policy).
+#   * `gcp`       a queue is a PULL SUBSCRIPTION: queue -> topic (a private
+#                 pubsub.googleapis.com/Topic, wanted iff no subscription
+#                 feeds the queue) and queue (pubsub.googleapis.com/
+#                 Subscription, on the private topic, or on the topic that
+#                 feeds it); topic -> topic (pubsub.googleapis.com/Topic);
+#                 subscription -> sub, ALWAYS TURNED OFF: it has no object of
+#                 its own, it is the topic the queue's subscription is on. A
+#                 queue fed by two topics, a direct SEND to a fed queue, and a
+#                 dead-letter queue that is fed are limits (messaging.mojo).
+#   * `azure`     queue -> queue (Microsoft.ServiceBus/namespaces/queues);
+#                 topic -> topic (Microsoft.ServiceBus/namespaces/topics);
+#                 subscription -> sub
+#                 (Microsoft.ServiceBus/namespaces/topics/subscriptions,
+#                 forwarding to the queue). All in the cell's namespace.
+#   * `onprem`    NOT_YET for all three: which message backing an onprem cell
+#                 runs is an open design question (Q16: RabbitMQ, NATS
+#                 JetStream, Apache Kafka or Redis Streams), so the shape
+#                 declares them absent rather than pick one.
+#
+# SECRET (secrets.mojo lowers it): one role on every shape, `secret`, the
+# CONTAINER of a value (kci writes no value):
+#   * `generic`   secret -> secret.
+#   * `aws`       secret -> AWS::SecretsManager::Secret (created with no
+#                 secret string, so it has no version).
+#   * `gcp`       secret -> secretmanager.googleapis.com/Secret (a secret
+#                 with no version).
+#   * `azure`     secret -> Microsoft.KeyVault/vaults/secrets, in the cell's
+#                 key vault (choosing another vault per secret is per-cloud
+#                 tuning, held with every extension field).
+#   * `onprem`    secret -> vault:kv-v2/metadata, a Vault KV v2 metadata
+#                 entry on the cell's Vault: a value-less container, deleted
+#                 with every version of its value. A grant to it is a Vault
+#                 ACL policy (above).
+# Every shape hosts it, so no shape declares it NOT_YET.
+#
 # A shape's ABSENCES (`not_yet`) are the catalog types it does not host yet,
 # each with its reason; the fake cloud built with the shape declares them,
 # and is complete only when there are none. A grant resource has no row: its roles
@@ -135,9 +179,13 @@ from kci_cloud import (
     Absence,
     FIELD_BUCKET,
     FIELD_JOB,
+    FIELD_QUEUE,
+    FIELD_SECRET,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_SUBSCRIPTION,
     FIELD_TABLE,
+    FIELD_TOPIC,
     NOT_YET,
 )
 
@@ -154,6 +202,12 @@ comptime ROLE_PUBLIC = "public"
 comptime ROLE_SCHEDULE = "schedule"
 comptime ROLE_ENDPOINT = "endpoint"
 comptime ROLE_VAULT = "vault"
+comptime ROLE_QUEUE = "queue"
+comptime ROLE_TOPIC = "topic"
+comptime ROLE_SUB = "sub"
+comptime ROLE_SECRET = "secret"
+comptime ROLE_POLICY = "policy"
+"""aws: the queue policy that lets the topics feeding a queue send to it."""
 comptime ROLE_RULES = "rules"
 """The helper of a `grant` resource's edge, where its row names one."""
 
@@ -168,6 +222,13 @@ comptime _VAULT_ROLE = "vault:auth/kubernetes/role"
 comptime _K8S_BINDING = "rbac.authorization.k8s.io/v1/RoleBinding"
 comptime _K8S_ROLE = "rbac.authorization.k8s.io/v1/Role"
 comptime _FIRESTORE_INDEX = "firestore.googleapis.com/Index"
+comptime _PUBSUB_TOPIC = "pubsub.googleapis.com/Topic"
+comptime _PUBSUB_SUB = "pubsub.googleapis.com/Subscription"
+comptime ONPREM_MESSAGING_REASON = (
+    "the onprem message backing of a queue, a topic and a subscription is an"
+    " open question (Q16: RabbitMQ, NATS JetStream, Apache Kafka or Redis"
+    " Streams)"
+)
 comptime ONPREM_TABLE_REASON = (
     "the onprem datastore that backs a table is an open question (Q17:"
     " PostgreSQL via CloudNativePG, CockroachDB, ScyllaDB or FoundationDB)"
@@ -289,6 +350,10 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_TABLE, String(ROLE_TABLE), String("table")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String("identity")))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_QUEUE), String("queue")))
+        r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String("topic")))
+        r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String("subscription")))
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("secret")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("grant"), String("")))
         return ProviderShape(String("generic"), r^, g^)
@@ -305,6 +370,11 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_TABLE, String(ROLE_TABLE), String("AWS::DynamoDB::Table")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("AWS::S3::Bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_AWS_ROLE)))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_QUEUE), String("AWS::SQS::Queue")))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_POLICY), String("AWS::SQS::QueuePolicy")))
+        r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String("AWS::SNS::Topic")))
+        r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String("AWS::SNS::Subscription")))
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("AWS::SecretsManager::Secret")))
         var g = List[GrantRow]()
         g.append(GrantRow(FIELD_SERVICE, String("AWS::Lambda::Permission"), String("")))
         g.append(GrantRow(TARGET_ANY, String("AWS::IAM::RolePolicy"), String("")))
@@ -326,6 +396,11 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_TABLE, String(ROLE_TTL), String("firestore.googleapis.com/Field")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("storage.googleapis.com/Bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_GCP_SA)))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_TOPIC), String(_PUBSUB_TOPIC)))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_QUEUE), String(_PUBSUB_SUB)))
+        r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String(_PUBSUB_TOPIC)))
+        r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String(_PUBSUB_SUB)))
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("secretmanager.googleapis.com/Secret")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("setIamPolicy"), String("")))
         return ProviderShape(String("gcp"), r^, g^)
@@ -352,6 +427,16 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             )
         )
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_AZURE_ID)))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_QUEUE), String("Microsoft.ServiceBus/namespaces/queues")))
+        r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String("Microsoft.ServiceBus/namespaces/topics")))
+        r.append(
+            ShapeRow(
+                FIELD_SUBSCRIPTION,
+                String(ROLE_SUB),
+                String("Microsoft.ServiceBus/namespaces/topics/subscriptions"),
+            )
+        )
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("Microsoft.KeyVault/vaults/secrets")))
         var g = List[GrantRow]()
         g.append(
             GrantRow(
@@ -379,13 +464,18 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("minio/Bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_K8S_SA)))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_VAULT), String(_VAULT_ROLE)))
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("vault:kv-v2/metadata")))
         var g = List[GrantRow]()
         g.append(GrantRow(FIELD_SERVICE, String(_K8S_BINDING), String(_K8S_ROLE)))
         g.append(GrantRow(FIELD_JOB, String(_K8S_BINDING), String(_K8S_ROLE)))
         g.append(GrantRow(FIELD_SERVICE_ACCOUNT, String(_K8S_BINDING), String(_K8S_ROLE)))
         g.append(GrantRow(FIELD_BUCKET, String("minio:policy"), String("")))
+        g.append(GrantRow(FIELD_SECRET, String("vault:sys/policies/acl"), String("")))
         var later = List[Absence]()
         later.append(Absence(FIELD_TABLE, NOT_YET, String(ONPREM_TABLE_REASON)))
+        later.append(Absence(FIELD_QUEUE, NOT_YET, String(ONPREM_MESSAGING_REASON)))
+        later.append(Absence(FIELD_TOPIC, NOT_YET, String(ONPREM_MESSAGING_REASON)))
+        later.append(Absence(FIELD_SUBSCRIPTION, NOT_YET, String(ONPREM_MESSAGING_REASON)))
         return ProviderShape(String("onprem"), r^, g^, later^)
 
 

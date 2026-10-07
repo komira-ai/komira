@@ -1,0 +1,1 @@
+The lake abfss://lake@acct.dfs.core.windows.net/p is owned by jdoe@corp.zz.

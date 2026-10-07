@@ -24,7 +24,9 @@
 #                    library already binds.
 #   public_pointer   a public function whose signature names UnsafePointer or
 #                    OpaquePointer, in a library file: a file under
-#                    PUBLIC_ROOT, not under a `tests` directory, and with no
+#                    PUBLIC_ROOT, not under its package's `tests` directory
+#                    (a package is PUBLIC_ROOT<pkg> or, test-only,
+#                    PUBLIC_ROOT tests/<kind>/<pkg>), and with no
 #                    path segment that starts with `_` (`__init__.mojo` is
 #                    public). Public: a module-level `def`/`fn` whose name
 #                    does not start with `_`, or a method (four spaces in) of a
@@ -215,10 +217,17 @@ FNR == 1 {
     file = FILENAME; indoc = 0; container = 0; cpriv = 0
     for (k in bound) delete bound[k]
     p = file; sub(/^\.\//, "", p)
-    # A library file: under PUBLIC_ROOT, no `tests` directory, and no path
-    # segment starting with `_` but a final `__init__.mojo`.
+    # A library file: under PUBLIC_ROOT, outside its package's `tests`
+    # directory, and no path segment starting with `_` but a final
+    # `__init__.mojo`. A package is PUBLIC_ROOT<pkg>, or a test-only one
+    # PUBLIC_ROOT tests/<kind>/<pkg> (docs/architecture.md#end-to-end-tests):
+    # only a `tests` directory below the package root is skipped.
     q = p; sub(/(^|\/)__init__\.mojo$/, "/init.mojo", q)
-    libfile = PUBLIC_ROOT != "" && index(p, PUBLIC_ROOT) == 1 && q !~ /(^|\/)tests\// && q !~ /(^|\/)_/
+    r = substr(q, length(PUBLIC_ROOT) + 1)
+    if (r ~ /^tests\/[^\/]+\/[^\/]+\//) sub(/^tests\/[^\/]+\/[^\/]+\//, "", r)
+    else if (r ~ /^tests\//) r = "tests/" r
+    else sub(/^[^\/]+\//, "", r)
+    libfile = PUBLIC_ROOT != "" && index(p, PUBLIC_ROOT) == 1 && ("/" r) !~ /\/tests\// && q !~ /(^|\/)_/
 }
 
 {
