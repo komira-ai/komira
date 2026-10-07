@@ -2,9 +2,9 @@
 # komira_mail_address/errors.mojo -- the named errors.
 # =============================================================================
 #
-# Every function of the package raises an `Error` whose message starts with
-# `komira_mail_address.<Kind>: `, then the function name, what is wrong, and
-# the zero-based byte position where it was found:
+# Every parser and constructor of the package raises an `Error` whose
+# message starts with `komira_mail_address.<Kind>: `, then the function name,
+# what is wrong, and the zero-based byte position where it was found:
 #
 #   komira_mail_address.ForbiddenByte: parse_mailbox: CR, LF or NUL at position 9
 #

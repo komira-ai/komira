@@ -337,7 +337,8 @@ struct Address(Copyable, Movable):
         return False
 
     def mailbox(self) raises -> Mailbox:
-        """The mailbox; raises when this is a group."""
+        """The mailbox; raises (an unnamed error: a caller bug, not bad
+        input) when this is a group."""
         if not self._mailbox:
             raise Error("komira_mail_address: Address.mailbox: a group")
         return self._mailbox.value().copy()
