@@ -5,7 +5,7 @@
 #
 # Two parsers here turn untrusted digits into a framing length:
 #   * `codec/h1/parser.mojo:_parse_decimal`, a request's Content-Length on the
-#     server; `_parse_request_headers` frames the body on its result and only
+#     server; `parse_request_head` frames the body on its result and only
 #     rejects a NEGATIVE one;
 #   * `codec/h1/chunked.mojo:_parse_chunk_size_line`, the hex chunk size of
 #     every chunked body, either direction.
@@ -30,6 +30,9 @@
 # The client's twins (`komira_http_client.response_parser._parse_decimal` and
 # `_parse_decimal_bytes`) are pinned in that package's
 # test_L2_response_framing_precedence.mojo.
+#
+# It imports the two private parsers on purpose, to pin each guard directly
+# rather than through a whole request, as the client's twin test does.
 #
 # Defect it catches: removing or moving after the multiply the pre-multiply
 # guard (`v > _MAX_PARSED_DECIMAL_DIV10`, `v > _MAX_CHUNK_SIZE_DIV16`) in

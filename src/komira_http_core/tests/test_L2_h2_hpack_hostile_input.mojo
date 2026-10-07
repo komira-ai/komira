@@ -27,6 +27,9 @@
 #    (`len(name) + len(value) + 32`, 42 octets for `:method: GET`) per field
 #    against `max_header_list_size` and raises a named error past it.
 #
+# `decode_integer` is a module-level function the decoder uses internally; it
+# is imported on purpose, to pin its guards directly.
+#
 # Defects it catches: deleting the sum-wrap check (`summed < value`), the
 # shift-28 top-bits check, or the header-list budget in decode_block; an
 # off-by-one in that budget (the 84-octet boundary below); a ceiling that

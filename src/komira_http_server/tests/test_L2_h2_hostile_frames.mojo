@@ -15,7 +15,9 @@
 #    returns False (close the connection), the buffer is dropped and a GOAWAY
 #    with ENHANCE_YOUR_CALM is staged. The byte ceiling alone is not enough:
 #    zero-length CONTINUATION frames add no bytes and are an unbounded
-#    CPU flood, which only the frame-count ceiling closes.
+#    CPU flood, which only the frame-count ceiling closes. The HEADERS arm
+#    has its own refusal: a single HEADERS whose fragment is over the byte
+#    ceiling is refused before any CONTINUATION arrives.
 # 2. `_parse_int_safe`, the h2 request content-length. Its value becomes
 #    `StreamState.expected_content_length`, which decides the RFC 9113 §8.1.1
 #    length-equality check and gates deferred dispatch. The overflow guard
@@ -26,6 +28,9 @@
 #
 # The h2 client's twin of (1) is pinned in komira_http_client's
 # test_L2_h2_continuation_interleaving.mojo.
+#
+# It imports the private handler and parser on purpose, to drive each guard
+# with a hand-built frame or string rather than through a socket.
 #
 # Defects it catches: `append_header_block`'s refusal ignored by the HEADERS
 # or the CONTINUATION arm, a missing frame-count ceiling, a GOAWAY with the
@@ -139,6 +144,31 @@ def test_short_header_block_is_not_refused() raises:
     assert_equal(r[0], 0)
     assert_false(r[1])
     assert_equal(r[3], 16 + 8 * 100)
+
+
+def test_oversized_headers_fragment_is_refused() raises:
+    """One HEADERS (no END_HEADERS) one byte over the byte ceiling: the
+    HEADERS arm itself must refuse it, stage GOAWAY ENHANCE_YOUR_CALM and
+    leave no reassembly open."""
+    var h2 = H2ConnectionState()
+    h2.mark_preface_ok()
+    var router = Router()
+    var grpc = NoopGrpcDispatch()
+    var reqs = Int64(0)
+    var sent = Int64(0)
+    var ok = _handle_headers_or_continuation(
+        h2,
+        _frame(FRAME_HEADERS, 1, _zeros(H2_MAX_HEADER_BLOCK_BYTES + 1)),
+        router,
+        grpc,
+        reqs,
+        sent,
+    )
+    assert_false(ok, "an over-ceiling HEADERS fragment was accepted")
+    assert_true(h2.is_goaway_sent(), "no GOAWAY staged")
+    assert_equal(Int(h2.goaway_error_code), Int(H2_ERR_ENHANCE_YOUR_CALM))
+    assert_equal(len(h2.cont_reasm_buf), 0)
+    assert_equal(Int(h2.cont_reasm_stream_id), 0, "a reassembly was left open")
 
 
 # -----------------------------------------------------------------------------
