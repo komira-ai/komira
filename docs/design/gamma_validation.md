@@ -133,8 +133,8 @@ farm, as welded `test_srcs` or as standalone tests under `src/tests/e2e` and
   `.mojoc`, `tools/build/package/conda.bzl`), and nothing else. It does not
   run `src/tests/e2e`, `src/tests/conformance` (h2spec, Connect),
   `komira_secrets_e2e`, `komira_azure_blob_e2e`, `broker_e2e` or the
-  standalone tests of unreleased packages. Those ran, if at all, on the pull requests whose changes reached
-  them (see "Gaps").
+  standalone tests of unreleased packages. Those ran, if at all, on the
+  pull requests whose changes reached them (see "Gaps").
 
 These checks test the source build, not the installed package. Gamma tests
 the installed package. That split is the main decision of this document:
@@ -364,10 +364,10 @@ about the installed package itself.
 | `komira_protobuf`, `komira_textproto`, `komira_wkt`, `komira_proto_codec`, `komira_xml` (released) | EXISTS: `komira_protobuf` decodes wire goldens generated once by prost 0.13 (`test_protobuf_prost_crosscheck`); `komira_proto_codec` byte-diffs its proto3-JSON output against hand-checked reference strings, one per mapping rule (`test_proto_codec_proto3_json_conformance`); `komira_xml` checks rows that each cite an XML 1.0 or Namespaces rule (`test_xml_strict`); round trips; README examples in `install-set` | in-process, build time; gamma for the README | wire-level decode compatibility with one independent encoder; mapping-rule regressions; well-formedness refusals | no upstream conformance corpus is pinned for any of them (not protobuf's conformance suite, not the W3C XML test suite), so each oracle is prost's output once or our reading of the spec; the encode direction against an independent decoder. PROPOSED: pin the protobuf conformance runner's test list and run the binary and proto3-JSON cases at build time |
 | `komira_validation_run`, `komira_test_run_id`, `komira_test_verdict` (released test support) | EXISTS: welded tests; README examples in `install-set` | in-process, build time; gamma for the README | label legality, id format, verdict parsing as their tests state them | nothing beyond the strings: they are used by tests and kci, not against a service |
 | every released library | EXISTS: `install-set` README examples | gamma, installed package | layout and metadata errors, closure errors, README drift, a metapackage whose members drift from the release set | anything a README does not touch |
-| `komira_native` (declared by open PR #761) | EXISTS at build time on the native stack's branches (from #695 up; #763 carries it): `tools/build/native/native_check.sh` fails the build unless every exported symbol of the built `libkomira_native.so.1` starts with `komira_` and the exports are exactly the generated list, NEEDED is only glibc's libraries, there is no run path, and it was linked `-Bsymbolic`. PROPOSED, with no mechanism today: (a) the same checks, plus its highest `GLIBC_` symbol version against the declared `__glibc` floor, run on the `.so` installed from the channel; (b) loading it with `dlopen` together with a second libcrypto (OpenSSL) and one call through each side. Neither runs today: `CONDA_INSTALL_ENV`'s only `smoke` word runs README examples, which cannot read a symbol table; a `CONDA_INSTALL_SMOKE` program could, but needs `komira_native` installable as a release member (`kci_validate` carries the native kind only from #704 up), an ELF dynamic-symbol reader in Mojo (none in `src/`), a digest-pinned image with pixi, and an entry in the `validate` job's `--only` list. (a) is item 8 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma); (b) also needs item 3, because OpenSSL is not a release member and `install` names members only | build time (EXISTS on the branches); gamma, installed package (PROPOSED) | an unprefixed aws-lc, s2n or snappy symbol that would clash with another libcrypto in the same process (the reason for #672); a packaging step that ships a different `.so` from the checked one; a glibc requirement above the floor | symbol interposition by a library loaded later in a real application; other platforms |
+| `komira_native` (declared by open PR #761) | EXISTS at build time on the native stack's branches (from #681 up; #763 carries it): `tools/build/native/native_check.sh` fails the build unless every exported symbol of the built `libkomira_native.so.1` starts with `komira_` and the exports are exactly the generated list, NEEDED is only glibc's libraries, there is no run path, and it was linked `-Bsymbolic`. PROPOSED, with no mechanism today: (a) the same checks, plus its highest `GLIBC_` symbol version against the declared `__glibc` floor, run on the `.so` installed from the channel; (b) loading it with `dlopen` together with a second libcrypto (OpenSSL) and one call through each side. Neither runs today: `CONDA_INSTALL_ENV`'s only `smoke` word runs README examples, which cannot read a symbol table; a `CONDA_INSTALL_SMOKE` program could, but needs `komira_native` installable as a release member (`kci_validate` carries the native kind only from #704 up), an ELF dynamic-symbol reader in Mojo (none in `src/`), a digest-pinned image with pixi, and an entry in the `validate` job's `--only` list. (a) is item 8 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma); (b) also needs item 3, because OpenSSL is not a release member and `install` names members only | build time (EXISTS on the branches); gamma, installed package (PROPOSED) | an unprefixed aws-lc, s2n or snappy symbol that would clash with another libcrypto in the same process (the reason for #672); a packaging step that ships a different `.so` from the checked one; a glibc requirement above the floor | symbol interposition by a library loaded later in a real application; other platforms |
 | libraries requiring `komira_native` | PROPOSED, in flight: the README run gains `-Xlinker -L<env>/lib -Xlinker -lkomira_native`, with link names taken from the native package's `lib/lib<x>.so` rows (`src/kci_validate` on #763, the top of the native stack; on `main` and on #761 the README run passes no link flag) | gamma, installed package | a library that stopped requiring `komira_native`; a malformed link name; the glibc floor | per-library static archives (next row) |
-| `komira_log` and every library above it | PROPOSED: a build-mode README check (item 4 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)): `mojo build` with run path `$ORIGIN/../lib` and `-l` for each per-library `.a` row of each installed package, then run the binary. On the native stack's branches (from #672 up), `komira_log`'s package ships `lib/libkomira_log_holder.a`, and `tools/build/native/README.md` (from #695 up) states that `mojo run` does not link a static archive | gamma, installed package | a per-library archive missing from its package or misnamed; a run-path or NEEDED mistake only a built binary shows | interop; it costs a full compile per README |
-| `komira_compression`, `komira_lz4`, `komira_zlib` and the formats above them | PROPOSED, on an existing kind: a `CONDA_INSTALL_SMOKE` validation on gamma's PUBLISH step installing `komira_compression`, whose `program` (a `.mojo` file under `release/`) compresses and decompresses one frame per codec, then reads `/proc/self/maps` and fails unless each loaded codec library lies under the installed environment's `lib/` (`.pixi/envs/default` under `/work`, `src/kci_validate/container.mojo`). It cannot run today: `komira_compression` is not released (its README has no ` ```mojo ` block, which `install-set` would refuse); no image is pinned for the kind; and the `validate` job's `--only` list must name it (rule R9, item 7 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)), with its 900 s pull and 2700 s run inside that job's hour or in a part job of its own | gamma, installed package | a wrong or missing conda-forge requirement: the codecs are opened by bare soname at first use (`src/komira_compression/codec_libraries.mojo`), and the runner image ships its own copies, so today such a requirement would pass gamma | codec correctness (build time) |
+| `komira_log` and every library above it | PROPOSED: a build-mode README check (item 4 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)): `mojo build` with run path `$ORIGIN/../lib` and `-l` for each per-library `.a` row of each installed package, then run the binary. On the native stack's branches (from #685 up), `komira_log`'s package ships `lib/libkomira_log_holder.a`, and `tools/build/native/README.md` (from #685 up) states that `mojo run` does not link a static archive | gamma, installed package | a per-library archive missing from its package or misnamed; a run-path or NEEDED mistake only a built binary shows | interop; it costs a full compile per README |
+| `komira_compression`, `komira_lz4`, `komira_zlib` and the formats above them | PROPOSED, on an existing kind: a `CONDA_INSTALL_SMOKE` validation on gamma's PUBLISH step installing `komira_compression`, whose `program` (a `.mojo` file under `release/`) compresses and decompresses one frame per codec, then reads `/proc/self/maps` and fails unless each loaded codec library lies under the installed environment's `lib/` (`.pixi/envs/default` under `/work`, `src/kci_validate/container.mojo`). Whether a bare-soname `dlopen` (`OwnedDLHandle(soname)` in `src/komira_compression/codec_libraries.mojo`) under `mojo run` finds the environment's `lib/` at all depends on the calling object's run path or the loader's search path reaching it, which nothing has measured: a probe must show it first, or the check fails on every run (or, with the image's copies, proves nothing). It cannot run today: `komira_compression` is not released (its README has no ` ```mojo ` block, which `install-set` would refuse); no image is pinned for the kind; and the `validate` job's `--only` list must name it (rule R9, item 7 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)), with its 900 s pull and 2700 s run inside that job's hour or in a part job of its own | gamma, installed package | a wrong or missing conda-forge requirement: the codecs are opened by bare soname at first use (`src/komira_compression/codec_libraries.mojo`), and the runner image ships its own copies, so today such a requirement would pass gamma | codec correctness (build time) |
 | `komira_parquet`, `komira_arrow_ipc`, `komira_orc`, `komira_avro`, `komira_csv`, `komira_jsonl` | PROPOSED: an interop leg: pyarrow (Apache-2.0) and fastavro (MIT) pinned exactly from conda-forge in the same environment read what the installed komira wrote, and komira reads what they wrote | gamma, installed package; or build time with pinned downloads | the write direction; C Data Interface export into a real pyarrow process; komira's native library coexisting with pyarrow's in one process | breadth (one dataset per format); other platforms |
 
 The interop leg needs a grammar change: `install` must name release members
@@ -421,6 +421,21 @@ check (PROPOSED).
   today, `src/komira_gcp_core/adc.mojo`) and a federated credential in
   `komira_azure_core` (none exists). On AWS, a role assumed with the
   workflow's identity token.
+- **No path exists today for a credential or a run id to reach the program
+  under test.** A `CONDA_INSTALL_SMOKE` container gets four fixed `-e`
+  variables and a CI job's token-request variables and secrets never reach
+  it (`src/kci_validate/container.mojo`, lines 40 to 44); a
+  `CONDA_INSTALL_ENV` program runs in an environment built from nothing
+  (`src/kci_validate/env.mojo`, lines 28 to 37). A real-cloud validation
+  must relax one of these on purpose: kci, in the job that holds the
+  identity token, exchanges it for a short-lived credential scoped to the
+  gamma project and writes it, with the validation run id, to files under
+  `/work` (configuration is a file, not an environment variable). The
+  program then holds a live cloud credential, which is exactly what those
+  lines rule out today; item 5 of
+  [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)
+  carries this, and whether each client's credential chain can read such a
+  file without an environment variable is part of that item.
 - **The trust is created by a bootstrap, per cloud** (PROPOSED; no such verb
   exists). A human admin runs it once with their own credentials, and it
   creates exactly one trust whose subject is GitHub's environment-restricted
@@ -451,9 +466,14 @@ check (PROPOSED).
   runs.
 - Cleanup follows `komira_test_bucket`: everything under a run-scoped
   prefix, deleted, listed again, and a verdict that is not CLEAN fails the
-  run (EXISTS for S3 in the opt-in MinIO tests; `src/komira_job_supervisor/BUCK`
-  describes it). For a real project, a scheduled sweeper that
-  deletes only resources carrying an old validation run id (PROPOSED).
+  run (EXISTS for S3 in the opt-in MinIO tests;
+  `src/komira_job_supervisor/BUCK` describes it). For a real project, a
+  scheduled sweeper that deletes only resources carrying an old validation
+  run id, as a `kci-run-id` label or as a run-scoped name prefix
+  (PROPOSED). The sweeper finds only what is marked: a resource the program
+  under test creates through `komira_aws_*`, `komira_gcp_*` or
+  `komira_azure_*` is not stamped by kci (next section), so the program
+  must stamp it itself, or the resource leaks and keeps billing.
 
 ### Validation run id stamping
 
@@ -462,9 +482,14 @@ tag and a GCP label, and `kci_cloud` writes it on resources created in a
 scope that carries a validation run id (EXISTS:
 `src/komira_validation_run/validation_run_tag.mojo`,
 `src/kci_cloud/adapter.mojo`). **No kci verb sets a scope's validation run id
-yet**, so nothing real is stamped. Some resources take no labels (IAM service
-accounts), so the id must also be encodable in a resource's name or
-description, and the sweeper must know which form each type uses. The
+yet**, so nothing real is stamped. And `kci_cloud` stamps only the objects
+`kci_cloud` itself creates: a resource that a validation program creates
+through a cloud client library carries no `kci-run-id` unless the program
+reads the run id (from the `/work` file item 5 proposes) and writes the
+label, or names the resource under a run-scoped prefix. Some resources take
+no labels (IAM service accounts), so the id must also be encodable in a
+resource's name or description, and the sweeper must know which form each
+type uses. The
 validation run id is not `komira_test_run_id`, which names one test process.
 
 ### Time budget
@@ -477,8 +502,9 @@ validation run id is not `komira_test_run_id`, which names one test process.
   (GitHub's `startedAt` to `completedAt` for the job: checkout, the release
   artifact's download, pixi, both validations with their index waits,
   installs and README runs over the 37 libraries, and the hand-off steps).
-  GitHub reports no per-step times for these runs, so the installs and
-  README runs are not measured apart from the waits.
+  In run 37688200088 the one `kci run --stage gamma --only ...` step took
+  181 s of the job's 192 s; the waits, installs and README runs are all
+  inside that one step, so they are not timed apart.
 - `CONDA_INSTALL_SMOKE`: 900 s to pull, 2700 s to run
   (`src/kci_validate/container.mojo`).
 - Build-time tests run under the remote action limit (the Connect
@@ -541,9 +567,9 @@ validation run id is not `komira_test_run_id`, which names one test process.
   or has a README yet) could not pass gamma's current `mojo run` check, while
   the same example as a welded test would pass, because the build links the
   per-library archive. This is a fact of the native stack's branches, not
-  of `main`: `lib/libkomira_log_holder.a` (from #672 up) and the line of
+  of `main`: `lib/libkomira_log_holder.a` (from #685 up) and the line of
   `tools/build/native/README.md` stating that `mojo run` does not link a
-  static archive (from #695 up) exist only there.
+  static archive (also from #685 up) exist only there.
 - Nothing checks the installed `komira_native` library: its export check
   runs on the built `.so` at build time (on the native stack's branches),
   not on what the channel serves, and nothing loads it beside a second

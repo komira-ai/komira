@@ -29,12 +29,35 @@ whose rules `kci run` applies to the workflow it runs under (item 7).
    `src/kci_api/verbs.mojo`, `src/kci_release_machine/graph.mojo`), a verb
    that sets the validation run id, a bootstrap for the federated identity
    (described under
-   [Identity and secrets](gamma_validation.md#identity-and-secrets)), and an
-   INDETERMINATE outcome for a provider outage.
+   [Identity and secrets](gamma_validation.md#identity-and-secrets)), an
+   INDETERMINATE outcome for a provider outage, and two paths into the
+   program under test that do not exist:
+   - **A credential.** kci, in the job holding the identity token,
+     exchanges it for a short-lived credential scoped to the gamma project
+     and writes it to a file under `/work`. This relaxes the isolation
+     `src/kci_validate/container.mojo` states at lines 40 to 44 (four fixed
+     `-e` variables; "a CI job's token request variables and secrets never
+     reach the consumer") and `src/kci_validate/env.mojo` at lines 28 to 37
+     (the cleared environment): the program would hold a live, if
+     short-lived and scoped, cloud credential.
+   - **The validation run id.** kci writes it to a second file under
+     `/work`, and the program stamps every resource it creates with
+     `komira_validation_run`'s `kci-run-id` label, or names it under a
+     run-scoped prefix where a type takes no label. `kci_cloud`'s stamping
+     (`src/kci_cloud/adapter.mojo`) covers only objects `kci_cloud` creates,
+     not those a program creates through `komira_aws_*`, `komira_gcp_*` or
+     `komira_azure_*`. A resource stamped neither way is invisible to the
+     sweeper and keeps billing, so the program's own cleanup (delete, list
+     again, CLEAN or fail) is required, with the sweeper as the backstop.
 6. For the release revision: a run of every derived check
    (`release/ci/derive_checks.py`), not only the affected ones, before or
    alongside the `build` stage, so the standalone e2e and conformance checks
-   gate a release and not only the pull requests that reached them.
+   gate a release and not only the pull requests that reached them. It is
+   unsized: the `build` job has `timeout-minutes: 120` (`kci.yml`) and its
+   release builds took 402 to 1659 s in the five runs decision 11 cites,
+   but every derived check builds every package's standalone tests, not
+   only the released libraries, so its duration and farm cost need a
+   measurement and a note of their own before it joins that job.
 7. For any new job: amendments to the workflow rules of
    `src/kci_workflow_check/rules.mojo`, which `kci run` checks at start-up
    against the workflow it runs under (`check_running_workflow`), so a job
@@ -45,7 +68,8 @@ whose rules `kci run` applies to the workflow it runs under (item 7).
      part job runs in **no** environment.
    - **R3**: a job's `needs` is exactly the jobs of its stage's `after`,
      the part jobs included, so `prod` needs every part job of `gamma`: a
-     part job cannot be advisory.
+     part job cannot be advisory. A part job's own `needs` is the job named
+     after its stage plus that stage's `after` (R9, `_check_split`).
    - **R4**: `id-token: write` only on a job whose stage publishes by OIDC
      trusted publishing or is farm-connected; "No other job carries it".
    - **R9**: a part job runs validations only, holds no environment, no
@@ -134,6 +158,11 @@ Each is a question with a recommendation; none is decided by this document.
    identity token that does not block prod is refused today by the workflow
    rules R2, R3, R4 and R9 (`src/kci_workflow_check/rules.mojo`), and the
    rules gate the publish jobs' token; the amendment needs its own ruling.
+   It also accepts item 5's two new paths: a short-lived cloud credential
+   reaching the program under test (relaxing
+   `src/kci_validate/container.mojo` lines 40 to 44, or `env.mojo` lines 28
+   to 37), and a program that stamps and deletes what it creates, since kci
+   stamps only what `kci_cloud` creates.
 5. **Emulator images and jars at build time.** May the pull request's check
    pull Google's emulator images and other service images? *Recommendation:*
    yes, by digest only, after a farm capability row proves Docker (or the
@@ -177,9 +206,17 @@ Each is a question with a recommendation; none is decided by this document.
     leave 20 for the installs. Measured: the whole `validate` job took 151
     to 208 s in five consecutive successful `kci.yml` runs on `main` on
     2026-10-07 (job `startedAt` to `completedAt`; run 37688200088 took
-    192 s). That covers both validations' waits, two pixi solves and the
-    README runs of 37 libraries; the installs and README runs are not
-    timed apart. It is far under 20 minutes today, and grows with each
-    member (46 or more after #755 and #761). A wait that runs out fails the
+    192 s, of which its one `kci run` step took 181 s). That step holds
+    both validations' waits, two pixi solves and the README runs of 37
+    libraries, so they are not timed apart. It is far under 20 minutes
+    today, and grows with each member (46 or more after #755 and #761). A wait that runs out fails the
     validation with a logged reason, which is a verdict; a cancelled job is
-    not. Raise `timeout-minutes` only if a measured run needs more.
+    not. Raise `timeout-minutes` only if a measured run needs more. The
+    trade: `install-set` (`komira_all` and every member) pins a superset of
+    `install-komira-encoding`'s files, so if the channel has indexed
+    `komira_encoding` but not the rest, a 600 s second wait turns a slow
+    index into a red verdict, a flake traded for the job's hour. The
+    alternative is to give the long wait to `install-set` and the short one
+    to `install-komira-encoding`, which only helps if the superset runs
+    first; which order kci runs a step's validations in is not checked
+    here.
