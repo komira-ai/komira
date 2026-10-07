@@ -9,7 +9,11 @@ mojo_library(
         "//src/komira_zlib:komira_zlib",
         "//third_party/snappy:snappy",
     ],
-    dlopen = ["libzstd.so.1"],
+    dlopen = [
+        "libbz2.so.1.0",
+        "liblzma.so.5",
+        "libzstd.so.1",
+    ],
     test_data = {
         "tests/test_gzip_lz4_frame_conformers.mojo": {
             "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
@@ -17,6 +21,8 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_codec_block_api.mojo",
+        "tests/test_codec_libraries.mojo",
         "tests/test_gzip_lz4_frame_conformers.mojo",
         "tests/test_lz4_raw_conformer_roundtrip.mojo",
     ],

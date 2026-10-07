@@ -69,9 +69,9 @@ build on its own.
    `_RESOURCEMANAGER_V3_CLOSURE`, `_SERVICEUSAGE_V1_CLOSURE`, `_COMPUTE_V1_CLOSURE`,
    `_ARTIFACTREGISTRY_V1_CLOSURE`, `_APIGATEWAY_V1_CLOSURE`, `_RUN_V2_CLOSURE`,
    `_CLOUDSCHEDULER_V1_CLOSURE`, `_SECRETMANAGER_V1_CLOSURE`). Then build the
-   generated clients (`//src/komira_gcp_*:`): komira_gcp_run's
-   test_run_operations_mixin fails if run_v2.yaml moved the operations paths
-   its client was generated with.
+   generated clients (`//src/komira_gcp_*:`): komira_gcp_run generates its
+   operations client from run_v2.yaml's `http.rules`, and its
+   test_run_operations_rules fails until its golden follows a moved path.
 
 ## Adding a client
 

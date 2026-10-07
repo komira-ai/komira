@@ -32,11 +32,16 @@ from komira_trace.span_record import SPAN_STATUS_CLOSED
 # A drain that loses, duplicates or mis-attributes a record fails the test no
 # matter how fast it is.
 #
-# The rate is only a sanity floor, set far below what the farm measures (44k to
-# 84k events/s under load) so scheduler noise on a shared builder cannot fail a
-# build that merely depends on this package. A floor near the measured value
-# is a flaky gate, not a stricter one. The performance target is tracked by the
-# sustained benchmark, not by this unit test.
+# The rate is only a sanity floor. It times the producers (fork_join, 10
+# threads) AND the single drain, and the drain's OPEN/CLOSE join is part of it:
+# while the join scanned the records once per CLOSE (O(n^2), 5e7 comparisons
+# for these 10,000 spans) the join dominated, the farm measured 44k to 84k
+# events/s and a coverage build 1.7k to 2.3k, under the floor. With the
+# linear join the farm measures about 1.5M events/s, and about 250k under
+# coverage. The floor stays far below that so scheduler noise on a shared
+# builder cannot fail a build that merely depends on this package; the join's
+# growth is gated by test_drain_join_scales.mojo, the performance target by
+# the sustained benchmark.
 # =============================================================================
 
 # Generous absolute floor; only a drain that is broken (for example one that
@@ -80,7 +85,8 @@ struct _ProducerBody[o: Origin[mut=True]](ForkJoinBody):
 
 
 def run_drain_throughput() raises -> Float64:
-    """Returns aggregate ingestion+drain throughput (events/sec).
+    """Returns aggregate ingestion+drain throughput (events/sec): the
+    producers' wall time plus the drain's, join included.
 
     Uses OVERFLOW_DROP — a sustained version would BLOCK and run a
     concurrent drain thread. The single-shot DROP variant exercises the data path
