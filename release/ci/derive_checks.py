@@ -251,7 +251,7 @@ SELFTEST = [
     ("//tools/9z:t", [], "tools_9z"),
     ("//src:t", [], "src"),
     ("//src/tests/e2e/komira_x_e2e:t", [], "komira_x_e2e"),
-    ("//src/tests/support/komira_y/sub:t", [], "komira_y"),
+    ("//src/tests/helpers/komira_y/sub:t", [], "komira_y"),
     ("//src/tests/e2e:t", [], "tests"),
     ("//src/tests:t", [], "tests"),
     ("//:t", [], "repo_root"),
@@ -268,7 +268,7 @@ PATTERN_SELFTEST = [
     ("//src/komira_clock:komira_clock", "//src/komira_clock/..."),
     ("//src/tests/e2e/komira_x_e2e:t", "//src/tests/e2e/komira_x_e2e/..."),
     ("//src/tests/conformance/komira_c_conformance:t", "//src/tests/conformance/komira_c_conformance/..."),
-    ("//src/tests/support/komira_y/sub:t", "//src/tests/support/komira_y/..."),
+    ("//src/tests/helpers/komira_y/sub:t", "//src/tests/helpers/komira_y/..."),
     ("//src/tests/e2e:t", "//src/tests/e2e:"),
 ]
 

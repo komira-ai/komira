@@ -1,5 +1,5 @@
 # =============================================================================
-# join_payload_widen -- the LEAF-EXIT half of PAYLOAD-NARROW
+# join_payload_widen -- the LEAF-EXIT half of join payload narrowing
 # =============================================================================
 #
 # Split out of `join_payload_narrow_exec.mojo` for the 1000-line file rule.
@@ -316,7 +316,7 @@ def widen_payload_table_parallel[
                 dbuf,
             )
     else:
-        # PARALLELIZE-BOUNDARY: (chunk x column x row range) leaf-exit widen.
+        # Parallel region: (chunk x column x row range) leaf-exit widen.
         # Disjointness: task `t` READS `chunks[][work[t].chunk]`'s narrow
         #   column (read-only, shared with every other task) and WRITES
         #   elements [row_start, row_end) of `out[][work[t].slot]` only. The

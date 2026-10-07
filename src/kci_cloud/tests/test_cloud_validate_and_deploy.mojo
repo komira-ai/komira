@@ -103,7 +103,8 @@ from kci_cloud import (
     FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
-    FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, Feed,
+    FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SECRET, Feed,
+    FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE,
     apply_resources,
     body_field,
     describe,
@@ -273,6 +274,9 @@ struct _Stub(CloudAdapter, Movable):
                 l.append(f)
             l.append(FIELD_GRANT)
             l.append(FIELD_SUBSCRIPTION)
+            l.append(FIELD_SECRET)
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE]:
+                l.append(f)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -285,6 +289,9 @@ struct _Stub(CloudAdapter, Movable):
             l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
             for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]:
                 l.append(Absence(f, NOT_YET, String("no messaging")))
+            l.append(Absence(FIELD_SECRET, NOT_YET, String("no secret store")))
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE]:
+                l.append(Absence(f, NOT_YET, String("no names")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -652,7 +659,7 @@ def test_id_grammar_platform_and_secret_rules() raises:
         "abcdefghijklmnopqrstuvwxy|id|id is 25 bytes; at most 24",
         'bad-plat|service.image.platform|platform "amd64" is not <os>/<cpu> (for example linux/amd64)',
         "svc|service.secret_env.DB|the variable is set by env and by secret_env; set it in one",
-        "svc|service.secret_env.EMPTY|a secret reference with no name",
+        "svc|service.secret_env.EMPTY|a secret reference with no name and no secret",
         'cron|job.env.REGION|release parameter "region" is unresolved',
         'cron|job.env.API|ref to missing resource "ghost"',
         "cron|job.secret_env.TOKEN|the variable is set by env and by secret_env; set it in one",
