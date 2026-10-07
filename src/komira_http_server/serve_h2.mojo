@@ -113,6 +113,13 @@ from komira_http_core.transport.grpc_emit import (
     emit_grpc_stream_response,
     is_grpc_content_type,
 )
+from komira_http_core.transport.grpc_timeout import (
+    GRPC_TIMEOUT_MALFORMED,
+    GrpcDeadline,
+    emit_grpc_deadline_exceeded,
+    emit_grpc_malformed_timeout,
+    grpc_deadline_at_arrival,
+)
 from komira_http_core.tls.s2n_shim import (
     TLS_OUTCOME_BLOCKED_ON_READ,
     TLS_OUTCOME_BLOCKED_ON_WRITE,
@@ -832,6 +839,11 @@ def _handle_headers_or_continuation[
     # path does not depend on it). The content-length gate stays
     # for non-gRPC requests.
     var is_grpc = is_grpc_content_type(vres.content_type)
+    # A gRPC call's grpc-timeout runs from here, the arrival of its complete
+    # HEADERS block, whether the body is still to come or not.
+    var arrival_ns = UInt64(0)
+    if is_grpc:
+        arrival_ns = grpc.grpc_now_ns()
     var should_defer = (
         (vres.has_content_length or is_grpc) and not end_stream_seen
     )
@@ -858,6 +870,7 @@ def _handle_headers_or_continuation[
             method_str=vres.method_str,
             path_str=vres.path_str,
             content_type=vres.content_type,
+            arrival_ns=arrival_ns,
         )
         return True
 
@@ -874,6 +887,9 @@ def _handle_headers_or_continuation[
             vres.path_str,
             vres.content_type,
             empty_body^,
+            grpc_deadline_at_arrival(
+                headers_decoded, vres.content_type, arrival_ns
+            ),
             grpc,
             reqs_handled,
             bytes_sent,
@@ -1116,6 +1132,9 @@ def _dispatch_deferred_request[
     against locally-constructed empties. After swap, the moved-from fields
     hold empty lists (destructor-safe); `pending` drops cleanly."""
     if is_grpc_content_type(pending.content_type):
+        var deadline = grpc_deadline_at_arrival(
+            pending.headers, pending.content_type, pending.arrival_ns
+        )
         var local_body = List[UInt8]()
         swap(pending.body, local_body)
         var local_ct = String("")
@@ -1128,6 +1147,7 @@ def _dispatch_deferred_request[
             local_path,
             local_ct,
             local_body^,
+            deadline,
             grpc,
             reqs_handled,
             bytes_sent,
@@ -1153,6 +1173,7 @@ def _dispatch_grpc_request[
     path: String,
     content_type: String,
     var request_body: List[UInt8],
+    deadline: GrpcDeadline,
     mut grpc: G,
     mut reqs_handled: Int64,
     mut bytes_sent: Int64,
@@ -1178,16 +1199,41 @@ def _dispatch_grpc_request[
     (DoPut): N request envelopes -> 1 response message. The request body
     carries the inbound envelope(s) either way (captured by the deferred-body
     path); the conformer decodes the right count per `kind`.
+
+    GRPC-TIMEOUT (`deadline`, fixed when the HEADERS block arrived; see
+    komira_http_core/transport/grpc_timeout.mojo). A malformed value is
+    answered 400 / INTERNAL and the handler is not run. A deadline already
+    past at this point is answered DEADLINE_EXCEEDED and the handler is not
+    run. Otherwise the handler runs to completion: the serve loop calls it
+    synchronously and has no way to interrupt it. If the deadline passed
+    while it ran, its response is dropped and the call is answered
+    DEADLINE_EXCEEDED instead; whatever side effects the handler had stand.
     """
+    if deadline.state == GRPC_TIMEOUT_MALFORMED:
+        return emit_grpc_malformed_timeout(
+            h2, stream_id, content_type, deadline.error, reqs_handled,
+        )
+    if deadline.expired(grpc.grpc_now_ns()):
+        return emit_grpc_deadline_exceeded(
+            h2, stream_id, content_type, reqs_handled,
+        )
     var kind = grpc.grpc_stream_kind(path)
     if kind == GRPC_KIND_UNARY:
         var resp = grpc.dispatch_grpc(path, content_type, request_body^)
+        if deadline.expired(grpc.grpc_now_ns()):
+            return emit_grpc_deadline_exceeded(
+                h2, stream_id, content_type, reqs_handled,
+            )
         return emit_grpc_response(
             h2, stream_id, resp^, reqs_handled, bytes_sent,
         )
     var sresp = grpc.dispatch_grpc_stream(
         path, content_type, kind, request_body^,
     )
+    if deadline.expired(grpc.grpc_now_ns()):
+        return emit_grpc_deadline_exceeded(
+            h2, stream_id, content_type, reqs_handled,
+        )
     return emit_grpc_stream_response(
         h2, stream_id, sresp^, reqs_handled, bytes_sent,
     )
