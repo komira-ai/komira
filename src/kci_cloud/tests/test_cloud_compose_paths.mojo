@@ -23,7 +23,10 @@
 #    no object to grant to or depend on), with a standard output (it exposes
 #    only what it declares), with an output it does not declare.
 # 3. THE BASES: `local`, `input` and `Value.input` outside every definition;
-#    two bases; a written empty base; an empty path; a path with no base.
+#    two bases; a written empty base; an empty path; a path with no base;
+#    a `resource` that holds `/` (the full path of a produced resource,
+#    which would skip the export check), in a reference, in a value and in
+#    a REF input a top-level instance binds.
 # 4. INSIDE A DEFINITION, at the instance: a REF input bound to a primitive,
 #    with a path below it (only known once the input is bound), refused on
 #    the produced resource; a required input bound to an optional input of
@@ -182,6 +185,37 @@ def test_the_bases_of_a_reference() raises:
     print("  test_the_bases_of_a_reference: PASS")
 
 
+comptime _GRANT = (
+    '{"name":"acme.grant","version":"1",'
+    + '"input":[{"name":"src","type":"INPUT_REF","required":true}],'
+    + '"component":[{"id":"api","uses":[{"target":{"input":"src"},"access":"READ"}],'
+    + '"service":{"image":{"digest":"sha256:a1"},"internal":{}}}]}'
+)
+
+
+def test_a_full_path_is_not_a_base() raises:
+    """Catches: an authored `Ref.resource` holding `/` accepted at the top of
+    the list. `store/data` is the id expansion produces for the UNEXPORTED
+    `data`, so accepting it lets an outsider grant on, depend on or read a
+    private component; an exported one (`store/logs`) is refused the same
+    way, because the export check runs only on `path` segments. Mutant:
+    drop the `/` check in `resolve_ref` (each case then has no finding)."""
+    var t = String("uses[0].target")
+    _one(_reports(String('{"resource":"store/data"}'), String("")), "reports", t, "\"store/data\" is a path inside an instance: write resource \"store\" with path \"data\"")
+    _one(_reports(String('{"resource":"store/logs"}'), String("")), "reports", t, "\"store/logs\" is a path inside an instance")
+    _one(_reports(String('{"resource":"store/web/api"}'), String("")), "reports", t, "write resource \"store\" with path \"web/api\"")
+    _one(_reports(String(""), String('{"ref":{"resource":"store/data","standard":"NAME"}}')), "reports", "service.env.E", "\"store/data\" is a path inside an instance")
+    _one(
+        String('{"resource":[{"id":"store","composite":{"definition":"acme.shop","version":"3"}},')
+        + String('{"id":"g","composite":{"definition":"acme.grant","version":"1","input":{"src":{"ref":{"resource":"store/data"}}}}}]}'),
+        "g",
+        "composite.input.src",
+        "\"store/data\" is a path inside an instance",
+        String(_GRANT),
+    )
+    print("  test_a_full_path_is_not_a_base: PASS")
+
+
 # ---- 4. inside a definition, at the instance ---------------------------------------------------------
 
 comptime _READER = (
@@ -237,5 +271,6 @@ def main() raises:
     test_a_path_that_cannot_be_followed()
     test_a_reference_that_ends_on_an_instance()
     test_the_bases_of_a_reference()
+    test_a_full_path_is_not_a_base()
     test_a_reference_judged_at_the_instance()
     print("ALL kci_cloud COMPOSE PATH TESTS PASSED")

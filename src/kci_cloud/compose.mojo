@@ -43,7 +43,8 @@
 #      input's default; an optional input left unbound removes the value or
 #      reference that names it. A reference outside every definition may use
 #      `path` and `named` the same way; `local` and `input` are refused
-#      there. A path that is missing, unexported or below a primitive, and a
+#      there, and so is a `resource` holding `/` (a path into an instance
+#      is `resource` + `path`, so the export check sees it). A path that is missing, unexported or below a primitive, and a
 #      reference that ends on an instance without `named` (an instance has
 #      no object of its own), is refused where it is used.
 #
@@ -443,9 +444,12 @@ struct _Expander(Movable):
             elif arm == 3 and v.ref_.value()._oneof0_case == 0:
                 self.add(where, at, String("a STRING input takes a value: name an output of the resource (standard or named)"))
             elif arm == 4:
+                var t_in = self.input_type(in_def, v.input.value()) if in_def >= 0 else -1
                 if in_def < 0:
                     self.add(where, at, String("an input is only for references inside a composite definition"))
-                elif self.input_type(in_def, v.input.value()) == INPUT_REF:
+                elif t_in < 0:
+                    self.add(where, at, self.keys[in_def] + String(" declares no input ") + _q(v.input.value()))
+                elif t_in == INPUT_REF:
                     self.add(where, at, String("input ") + _q(v.input.value()) + String(" is a REF input: pass it down as ref { input: ... }"))
         for q in range(len(e.input)):
             if e.input[q].required and e.input[q].name not in ci.input:
@@ -597,6 +601,19 @@ struct _Expander(Movable):
         else:
             if not has_res:
                 return _Got.refused(String("local and input are for references inside a composite definition"))
+            var slash = r.resource.find("/")
+            if slash >= 0:
+                # An authored `resource` is one id: a path into an instance is
+                # written as `resource` + `path`, so every segment of it meets
+                # the export check below (`store/data` would skip it).
+                return _Got.refused(
+                    _q(r.resource)
+                    + String(" is a path inside an instance: write resource ")
+                    + _q(String(r.resource[byte=0:slash]))
+                    + String(" with path ")
+                    + _q(String(r.resource[byte = slash + 1 :]))
+                    + String(", which names only exported components")
+                )
             target = r.resource.copy()
         if r.path:
             var segs = r.path.value().split("/")

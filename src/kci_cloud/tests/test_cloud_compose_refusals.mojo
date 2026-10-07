@@ -32,14 +32,16 @@
 #    (the given versions are listed), with a digest that is not the
 #    definition's, binding an input not declared, leaving a required input
 #    unbound, a literal for a REF input, a resource with no output for a
-#    STRING input, a REF input passed down as a value, and `uses`,
+#    STRING input, a REF input passed down as a value, a value naming an
+#    input the enclosing definition does not declare, and `uses`,
 #    `retention` or labels written on it.
 # 7. CONTAINMENT CYCLES: A -> A, A -> B -> A (one finding, printed from its
 #    smallest name, whichever definition comes first), A -> B -> C -> A; a
 #    diamond (A holds two instances of B) is not a cycle.
 # 8. THE TOP OF THE LIST: an instance id outside the resource id grammar, an
 #    instance id shared with a primitive, an instance of a definition not
-#    given, `uses` on a top-level instance.
+#    given, `uses` on a top-level instance, a top-level instance binding
+#    an input to `Value.input` (there is no enclosing definition).
 # 9. AN AUTHORED ID IS STILL HELD TO THE ID GRAMMAR: `graph_findings`
 #    refuses an authored `a/b`, and accepts it only when the expansion says
 #    it produced it.
@@ -271,8 +273,10 @@ def test_the_exports_and_outputs_of_a_definition() raises:
 def test_a_nested_instance() raises:
     """Catches: an instance of a missing definition or version accepted, a
     digest not compared, an input binding not checked by name, by presence
-    or by kind, and `uses`, retention or metadata accepted on an instance
-    (which has no object to hold them)."""
+    or by kind, a binding to an input the enclosing definition does not
+    declare left for expansion (an unused definition would load clean;
+    mutant: drop the `t_in < 0` check), and `uses`, retention or metadata
+    accepted on an instance (which has no object to hold them)."""
     var web_text = String(
         '{"name":"acme.web","version":"1",'
         '"input":[{"name":"domain","type":"INPUT_STRING","required":true},{"name":"reads","type":"INPUT_REF"}],'
@@ -308,6 +312,9 @@ def test_a_nested_instance() raises:
     cases.append(w + ',"composite":{"definition":"acme.web","version":"1","input":{"domain":{"input":"r"}}}}')
     fields.append("component[w].composite.input.domain")
     needles.append("pass it down as ref { input: ... }")
+    cases.append(w + ',"composite":{"definition":"acme.web","version":"1","input":{"domain":{"input":"nope"}}}}')
+    fields.append("component[w].composite.input.domain")
+    needles.append("acme.x@1 declares no input \"nope\"")
     cases.append(w + ',"uses":[{"target":{"local":"b"},"access":"READ"}],' + inst + "}}}")
     fields.append("component[w].uses")
     needles.append("an instance has no identity of its own")
@@ -361,7 +368,9 @@ def test_the_top_of_the_list() raises:
     """Catches: an instance id that skips the id grammar or the duplicate
     check (its primitives would share an owner with another resource), an
     instance of a missing definition expanded as nothing, and `uses` on a
-    top-level instance accepted."""
+    top-level instance accepted, and a top-level binding to `Value.input`
+    left for expansion (mutant: drop the `in_def < 0` finding in
+    `check_instance`; expansion then reports a different field reason)."""
     var d: List[String] = [_x(String('"component":[') + _B + "]")]
     _one(d, '{"resource":[{"id":"Store","composite":{"definition":"acme.x","version":"1"}}]}', "Store", "id", "starts with a lowercase letter")
     _one(
@@ -378,6 +387,14 @@ def test_the_top_of_the_list() raises:
         "s",
         "uses",
         "an instance has no identity of its own",
+    )
+    var dn: List[String] = [_x(String('"input":[{"name":"n","type":"INPUT_STRING"}],"component":[') + _B + "]")]
+    _one(
+        dn,
+        '{"resource":[{"id":"s","composite":{"definition":"acme.x","version":"1","input":{"n":{"input":"m"}}}}]}',
+        "s",
+        "composite.input.n",
+        "an input is only for references inside a composite definition",
     )
     print("  test_the_top_of_the_list: PASS")
 
