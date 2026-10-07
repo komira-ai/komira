@@ -168,6 +168,21 @@ retired_names_rule = rule(
     },
 )
 
+def _src_layout_impl(ctx):
+    staged, _ = _stage(ctx, [])
+    args = [ctx.attrs.root, ",".join(ctx.attrs.shipped) or "-", ctx.label.cell + "//"] + ctx.attrs.packages
+    return _lint(ctx, "src_layout", [], args, staged)
+
+src_layout_rule = rule(
+    impl = _src_layout_impl,
+    doc = "`root` (src) holds what komira ships: each of `packages` (package paths in the cell) is `<root>/<name>`, or a test-only package `<root>/tests/<kind>/<name>`, kind `e2e` (named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `helpers` (neither). A `komira_test_*` package directly under `root` must be one `shipped` names. The `src_layout` macro fills `packages` from the build graph.",
+    attrs = _COMMON | {
+        "packages": attrs.list(attrs.string()),
+        "root": attrs.string(default = "src"),
+        "shipped": attrs.list(attrs.string(), default = []),
+    },
+)
+
 def _pointer_lint_impl(ctx):
     if (ctx.attrs.tree == None) == (not ctx.attrs.files):
         fail("pointer_lint {}: name the files in exactly one of `tree` and `files`".format(ctx.label))
@@ -330,6 +345,20 @@ def retired_names(**kwargs):
 def tar_member(**kwargs):
     tar_member_rule(**_linux(kwargs))
 
+# The layout of src/: see src_layout_rule. Without `packages`, in the cell's
+# root package only, they are every package under `root`, as Buck2 lists the
+# root package's subpackages: a directory holding a BUCK file, the nearest
+# below the root (src/ and src/tests/ hold none, so src/<name> and
+# src/tests/<kind>/<name> are listed, and so is any other package a missing
+# BUCK file leaves nearest). A fixture names `packages` instead.
+def src_layout(**kwargs):
+    if "packages" not in kwargs:
+        if package_name():
+            fail("src_layout {}: without `packages` it lists the root package's subpackages, so it belongs in the cell's root BUCK".format(kwargs.get("name", "")))
+        root = kwargs.get("root", "src")
+        kwargs["packages"] = sorted([p for p in __internal__.sub_packages() if p.startswith(root + "/")])
+    src_layout_rule(**_linux(kwargs))
+
 # Markdown: see markdown_docs_rule. The root BUCK applies it to the
 # repository's documentation (//:docs).
 def markdown_docs(**kwargs):
@@ -347,5 +376,6 @@ public_boundary = declares_docs(public_boundary)
 push_verdicts = declares_docs(push_verdicts)
 retired_names = declares_docs(retired_names)
 shell_lint = declares_docs(shell_lint)
+src_layout = declares_docs(src_layout)
 tar_member = declares_docs(tar_member)
 workflow_lint = declares_docs(workflow_lint)
