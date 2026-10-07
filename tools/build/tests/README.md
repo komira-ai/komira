@@ -941,7 +941,10 @@ of [`tests/public_boundary_hosts.tsv`](../../../tests/public_boundary_hosts.tsv)
 an email address outside the reserved example domains (the user of a URL
 right after `://` is none when its host is under a domain of the hosts ledger,
 such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
-host it is read), and a commit id in prose. Binary data and upstream bytes are not read. Its reader is
+host it is read), and a commit id in prose, in a file's contents or (dates,
+home directories, deny-list words) its path. Binary data is not read, but its
+path is; nothing committed is upstream bytes, so `third_party/` is read whole.
+Its reader is
 [`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
 matches and what it cannot see (vocabulary is no shape); its action is
 [`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
@@ -958,17 +961,20 @@ planted tree ([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose
 held at exact counts, so a spelling the reader missed would fail the build;
 whose near misses (dates outside the window, placeholders, loopback and
 documentation addresses, reserved hosts, templates, digests, UUIDs, hex in
-code) must find nothing; and whose upstream and binary files hold findings
-that must not be read. The planted tree's window is 2030 up to 2031-09-01,
+code, a `//` in a C string) must find nothing; and whose binary file holds
+findings that must not be read. The planted tree's window is 2030 up to 2031-09-01,
 so none of its files holds a date the root target refuses. Each target of
 [`negative/public_boundary`](negative/public_boundary/BUCK) plants one finding
-(each spelling of each rule, a date in a `third_party/` BUCK file, one over a
-hold, a deny-list word) or one ledger defect (malformed, repeated,
-unknown-rule, zero-count or reasonless rows, a row for a missing file, binary
-data or upstream bytes, a count above the findings, a row for no finding, a
-row holding a deny-list word, a hosts row that is reserved or unused), sets
-a window that does not end on the first day of a month, or empties the tree,
-and must fail naming it.
+(each spelling of each rule, a date in a `third_party/` BUCK file and C
+header, a date, home directory or deny-list word in a path, the path of
+binary data, a file given by `paths`, one over a hold, a deny-list word) or
+one ledger defect (malformed, repeated, unknown-rule, zero-count or
+reasonless rows, a row for a missing file or for binary data, a count above
+the findings, a row for no finding, a row holding a deny-list word, a hosts
+row that is reserved or unused), sets a window with month 13 or not ending
+on the first day of a month, or empties the tree, and must fail naming it.
+The test also pins the root target's window (2025 up to 2026-09-01) by
+querying its attributes, so narrowing it fails.
 [`public_boundary_tests.sh`](public_boundary_tests.sh) lists them.
 
 ```sh

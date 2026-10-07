@@ -418,7 +418,7 @@ struct _UploadBody[T: ChannelTransport, W: WorkerSleeper, o: MutOrigin](ForkJoin
         self.pool = pool
 
     def run(self, tid: Int) raises:
-        # PARALLELIZE-BOUNDARY: thread `tid` writes only `workers[tid]` and
+        # Parallel region: thread `tid` writes only `workers[tid]` and
         # the `outcomes[k]` of the jobs `k` it took from the atomic counter
         # (each `k` is taken by exactly one thread). Neither list is resized
         # while the threads run. Everything else is read only.

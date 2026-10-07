@@ -93,10 +93,12 @@
 #       What a public repository may not hold, read from every file under
 #       <stage> but binary data (by suffix: .arrow, .orc, .parquet, .avro,
 #       .tensor, .frame, .request, .whl, .conda and archive, image and object
-#       formats) and upstream bytes (third_party/ but its BUCK and .bzl
-#       files, which are this repository's; tools/build/third_party_srcs/
-#       testdata/, trimmed upstream trees): no date from the year <from> up to
-#       <public>, the first day of the public history (date), home directory naming a person (home_path),
+#       formats), and from the path of every file, binary data included.
+#       Nothing is skipped as upstream bytes: upstream sources are pinned
+#       downloads, never committed, and what third_party/ and the
+#       third_party_srcs test trees commit was written here. No date from the
+#       year <from> up to <public>, the first day of the public history
+#       (date), home directory naming a person (home_path),
 #       private or written-out network address (ip), URL host outside the
 #       reserved example names and <hosts> (host), email address outside the
 #       reserved example domains (email), commit id in prose (commit_sha), or
@@ -397,15 +399,12 @@ public_boundary)
     [ "$1" = -- ] && shift
     holds=$(abs "$1") holds_name=$2 hosts=$(abs "$3") hosts_name=$4 deny=$5 from=$6 public=$7
     if [ "$deny" = - ]; then deny=/dev/null; else deny=$(abs "$deny"); fi
-    # Every file but binary data and upstream bytes (see the kind's note).
-    (cd "$STAGE" && find . \( -type f -o -type l \) | sed 's#^\./##') |
-        grep -vE '^tools/build/third_party_srcs/testdata/|\.(arrow|orc|parquet|avro|tensor|frame|request|whl|conda|gz|tgz|xz|zst|bz2|tar|zip|jar|png|jpg|jpeg|gif|ico|pdf|der|so|a|o|dylib|wasm|mojoc|mojopkg)$' |
-        grep -vE '^third_party/' > "$T/files" || true
-    (cd "$STAGE" && find third_party \( -type f -o -type l \) 2>/dev/null | grep -E '(^|/)BUCK$|\.bzl$' >> "$T/files" || true)
-    sort -o "$T/files" "$T/files"
+    # Every path; every file but binary data (see the kind's note).
+    (cd "$STAGE" && find . \( -type f -o -type l \) | sed 's#^\./##') | sort > "$T/paths"
+    grep -vE '\.(arrow|orc|parquet|avro|tensor|frame|request|whl|conda|gz|tgz|xz|zst|bz2|tar|zip|jar|png|jpg|jpeg|gif|ico|pdf|der|so|a|o|dylib|wasm|mojoc|mojopkg)$' "$T/paths" > "$T/files" || true
     checked=$(wc -l < "$T/files" | tr -d ' ')
     # A reader that fails is a finding, never a pass.
-    if ! (cd "$STAGE" && awk -F '\t' -v P="$STAGE/" -v HN="$holds_name" -v AN="$hosts_name" -v FROM="$from" -v PUBLIC="$public" -f "$AWK" "$T/files" "$hosts" "$deny" "$holds") > "$T/pb.txt" 2> "$T/pb.err"; then
+    if ! (cd "$STAGE" && awk -F '\t' -v P="$STAGE/" -v HN="$holds_name" -v AN="$hosts_name" -v FROM="$from" -v PUBLIC="$public" -f "$AWK" "$T/files" "$T/paths" "$hosts" "$deny" "$holds") > "$T/pb.txt" 2> "$T/pb.err"; then
         echo "public_boundary: the reader failed: $(head -3 "$T/pb.err")" >> "$REPORT"
     fi
     sort "$T/pb.txt" >> "$REPORT"
