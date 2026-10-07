@@ -46,6 +46,17 @@ opens no file), resolves names case-insensitively (`has`, `schema_of`,
 name, refuses a name the grammar or a lowering builtin already claims, and
 replaces an earlier declaration of the same name.
 
+`komira_sql.sql_tvf_bind` gives the `read_csv`, `read_json` and `read_avro`
+table functions their schema at bind time and builds their scan leaf. A CSV
+schema is inferred from a bounded prefix with the call's `delimiter` and
+`has_header` (`all_varchar` then types every column STRING); a JSONL schema is
+inferred from a newline-snapped 256 KiB prefix; an Avro schema is read from the
+OCF container header. A `.gz`, `.zst` or `.lz4` CSV or JSONL file is
+decompressed whole first (`komira_parquet_codec.text_decompress`). An inference
+that finds no column raises an `Error` naming the file. `tvf_relation_scan`
+returns a lazy row-oriented scan whose source carries the dialect and the
+file's mtime, so two dialects of one file are two different sources.
+
 ## Examples
 
 Lexing a statement:
