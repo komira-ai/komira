@@ -10,16 +10,22 @@
 #      by-name reference to a fixed is resolved.
 #   T3 refusals: a code point above U+00FF; a non-string default for bytes;
 #      a fixed default of the wrong length (exact messages).
-#   T4 unions: [bytes, null] reads the default as bytes; [string, bytes] reads
-#      it as a string; ["null", bytes] keeps a null default.
+#   T4 unions: the default is read as the first branch it matches. [bytes,
+#      null] reads a string default as bytes and keeps a null default;
+#      [null, bytes] reads a string default as bytes; [string, bytes] reads it
+#      as a string; a by-name fixed inside a union is resolved and its length
+#      checked; a default matching no branch is checked against the first.
 #   T5 schema resolution: reader fields absent from the writer get the
-#      Latin-1 bytes in the decoded batch.
+#      Latin-1 bytes in the decoded batch, for bytes, fixed, [bytes, null],
+#      [null, bytes] and [fixed, null] fields.
+#   T6 a writer schema with [bytes, null] and default null still opens.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
 
 from komira_avro import (
     AvroSchema,
+    read_avro_bytes,
     AVRO_DEFAULT_BYTES,
     AVRO_DEFAULT_NULL,
     AVRO_DEFAULT_STRING,
@@ -157,10 +163,46 @@ def test_union_first_branch() raises:
         _field_default_kind(_one_field('["null","bytes"]', "null"), 0),
         AVRO_DEFAULT_NULL,
     )
+    # Default null matches the second branch.
     assert_equal(
-        _refusal(_one_field('["bytes","null"]', "null")),
+        _field_default_kind(_one_field('["bytes","null"]', "null"), 0),
+        AVRO_DEFAULT_NULL,
+    )
+    # A string default skips the null branch and is read as bytes.
+    var nb = _field_default_bytes(_one_field('["null","bytes"]', '"ÿ"'), 0)
+    assert_equal(len(nb), 1, "[null,bytes] default is one byte")
+    assert_equal(Int(nb[0]), 0xFF)
+    # A default matching no branch is checked against the first branch.
+    assert_equal(
+        _refusal(_one_field('["bytes","null"]', "5")),
         "AvroSchemaError.INVALID_DEFAULT: field 'f' default for bytes is not"
         " a JSON string",
+    )
+    # Field g's union names the fixed defined by field f.
+    var rf = _field_default_bytes(
+        '{"type":"record","name":"R","fields":['
+        '{"name":"f","type":{"type":"fixed","name":"F1","size":1}},'
+        '{"name":"g","type":["F1","null"],"default":"ÿ"}]}',
+        1,
+    )
+    assert_equal(len(rf), 1, "[F1,null] default is one byte")
+    assert_equal(Int(rf[0]), 0xFF)
+    var rn = _field_default_bytes(
+        '{"type":"record","name":"R","fields":['
+        '{"name":"f","type":{"type":"fixed","name":"F1","size":1}},'
+        '{"name":"g","type":["null","F1"],"default":"ÿ"}]}',
+        1,
+    )
+    assert_equal(len(rn), 1, "[null,F1] default is one byte")
+    assert_equal(Int(rn[0]), 0xFF)
+    assert_equal(
+        _refusal(
+            '{"type":"record","name":"R","fields":['
+            '{"name":"f","type":{"type":"fixed","name":"F2","size":2}},'
+            '{"name":"g","type":["F2","null"],"default":"ÿ"}]}'
+        ),
+        "AvroSchemaError.INVALID_DEFAULT: field 'g' default is 1 bytes;"
+        " fixed 'F2' has size 2",
     )
 
 
@@ -213,8 +255,9 @@ def _ocf(writer_schema: String, payload: List[UInt8], rows: Int) -> List[UInt8]:
 
 
 def test_resolution_applies_latin1_default() raises:
-    """T5: writer has only `id`; the reader adds bytes, fixed and
-    union[bytes, null] fields with defaults."""
+    """T5: writer has only `id`; the reader adds bytes, fixed,
+    union[bytes, null], union[null, bytes] and union[fixed, null] fields
+    with defaults."""
     var writer = String(
         '{"type":"record","name":"R","fields":[{"name":"id","type":"long"}]}'
     )
@@ -224,7 +267,10 @@ def test_resolution_applies_latin1_default() raises:
         '{"name":"b","type":"bytes","default":"ÿ"},'
         '{"name":"x","type":{"type":"fixed","name":"F2","size":2},'
         '"default":"\\u00e9\\u0000"},'
-        '{"name":"u","type":["bytes","null"],"default":"\\u0080"}]}'
+        '{"name":"u","type":["bytes","null"],"default":"\\u0080"},'
+        '{"name":"n","type":["null","bytes"],"default":"\\u00fe"},'
+        '{"name":"y","type":[{"type":"fixed","name":"F3","size":2},"null"],'
+        '"default":"\\u0001\\u00ff"}]}'
     )
     var p = List[UInt8]()
     _enc_long(Int64(5), p)
@@ -232,7 +278,7 @@ def test_resolution_applies_latin1_default() raises:
     var buf = _ocf(writer, p, 2)
     var rb = read_avro_bytes_resolved(Span(buf), reader)
     assert_equal(rb.num_rows(), 2)
-    assert_equal(rb.num_columns(), 4)
+    assert_equal(rb.num_columns(), 6)
     for r in range(2):
         ref bcol = rb.column_at(1)
         var b = bcol.as_binary().get(r)
@@ -249,6 +295,42 @@ def test_resolution_applies_latin1_default() raises:
         var u = ua.get(r)
         assert_equal(len(u), 1, "u is one byte")
         assert_equal(Int(u[0]), 0x80, "u == 80")
+        ref ncol = rb.column_at(4)
+        var na = ncol.as_binary()
+        assert_true(not na.is_null(r), "n is not null")
+        var nv = na.get(r)
+        assert_equal(len(nv), 1, "n is one byte")
+        assert_equal(Int(nv[0]), 0xFE, "n == FE")
+        ref ycol = rb.column_at(5)
+        var ya = ycol.as_binary()
+        assert_true(not ya.is_null(r), "y is not null")
+        var yv = ya.get(r)
+        assert_equal(len(yv), 2, "y is two bytes")
+        assert_equal(Int(yv[0]), 0x01, "y[0] == 01")
+        assert_equal(Int(yv[1]), 0xFF, "y[1] == FF")
+
+
+def test_writer_union_null_default_opens() raises:
+    """T6: a writer schema whose [bytes, null] field defaults to null (a
+    default matching the second branch) is read without resolution."""
+    var writer = String(
+        '{"type":"record","name":"R","fields":['
+        '{"name":"w","type":["bytes","null"],"default":null}]}'
+    )
+    var p = List[UInt8]()
+    _enc_long(Int64(0), p)  # row 0: branch bytes
+    _enc_long(Int64(1), p)
+    p.append(0xAB)
+    _enc_long(Int64(1), p)  # row 1: branch null
+    var buf = _ocf(writer, p, 2)
+    var rb = read_avro_bytes(Span(buf))
+    assert_equal(rb.num_rows(), 2)
+    ref wcol = rb.column_at(0)
+    var wa = wcol.as_binary()
+    assert_true(not wa.is_null(0), "row 0 is not null")
+    var w0 = wa.get(0)
+    assert_equal(Int(w0[0]), 0xAB, "row 0 == AB")
+    assert_true(wa.is_null(1), "row 1 is null")
 
 
 def main() raises:
@@ -257,4 +339,5 @@ def main() raises:
     test_refusals()
     test_union_first_branch()
     test_resolution_applies_latin1_default()
+    test_writer_union_null_default_opens()
     print("test_avro_bytes_fixed_defaults: ALL PASS")
