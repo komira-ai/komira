@@ -62,20 +62,23 @@ refuse that instant.
 
 `<dataset>.schema` is one line: the schema line of the canonical result text
 of the Mojo harness `komira_plan_harness`, one `<name>:<type>` entry per
-column, `?` when nullable, separated by TAB. Types are spelt as
+column, `?` when nullable, separated by TAB, as its `type_text.mojo` spells
+an entry and its `escape.mojo` escapes a name. Types are spelt as
 plan_vocabulary's ArrowType without `ARROW_TYPE_`, in lower case, with
-`decimal128(<p>,<s>)` and `timestamp_<unit>(<zone>)`; names and zones are
-escaped as the harness escapes names (`+05\:30`). The spelling lives in
-[`schema_text.py`](schema_text.py) alone, and only flat types are spelt: the
-harness's spelling of nested types is under revision, and a nested type is
-refused rather than spelt in a form that may not last.
+`decimal128(<p>,<s>)` and `timestamp_<unit>(<zone>)`. Names and zones are
+escaped alike: a backslash, TAB, LF, CR and other control bytes take their
+escapes, each of `: , < > [ ] { } ( )` a backslash, and so does a `#` that
+comes first (`+05\:30`, `\#a\{b\}`). The spelling lives in
+[`schema_text.py`](schema_text.py) alone, and only flat types are spelt: no
+dataset has a nested column, and a nested type is refused rather than spelt
+by code nothing exercises.
 
 ## Tests
 
 | target | what it proves | the defect it catches |
 |---|---|---|
 | `:datasets` | `gen_datasets.py` writes the same bytes in two runs, and writes exactly the files `outs` declares | a seed that is not fixed (a clock, a process id, a hash order); a dataset or format added to one of `datasets.py` and the BUCK file but not the other |
-| `:test_datasets` | in a process of its own, rebuilds every table from its seeds and, for every dataset and format: the file decodes with pyarrow to the table's columns (names in order, types with their parameters, nullability where the format keeps it, row count, and values: NULL positions equal, floats by their bits, so NaN, `-0.0` and `0.0` are told apart); each sidecar equals the line written out by hand in the test; each format leaves out exactly the columns listed by hand; the tables hold the special values, NULL pairs and join keys listed by hand; LZ4 and ZSTD IPC bodies hold frames of their codec; Parquet row groups and IPC batches are of 100 rows | a writer that turns NULL into a value (the CSV empty string), loses `-0.0` or a NaN, drops a type parameter or a column, or ignores its codec; formats that disagree; a sidecar that drifts from the harness's spelling; a generator change that drops the special values a shard relies on |
+| `:test_datasets` | in a process of its own, rebuilds every table from its seeds and, for every dataset and format: the file, taken as the format, container and codec its name says (a table written out in the test, not read from `formats.py`), decodes with pyarrow to the table's columns (names in order, types with their parameters, nullability where the format keeps it, row count, and values: NULL positions equal, floats by their bits, so NaN, `-0.0` and `0.0` are told apart); each sidecar equals the line written out by hand in the test; each format leaves out exactly the columns listed by hand; the tables hold the special values (every integer and float extreme, the least decimal step at each scale, the first and last instant of every timestamp column), NULL pairs and join keys listed by hand; LZ4 and ZSTD IPC bodies hold frames of their codec; Parquet row groups and IPC batches are of 100 rows | a writer that turns NULL into a value (the CSV empty string), loses `-0.0` or a NaN, drops a type parameter or a column, or ignores its codec; one format's bytes under another's name; formats that disagree; a wrong unit scale in the generator; a sidecar that drifts from the harness's spelling; a generator change that drops the special values a shard relies on |
 
 What none of it catches: the independence check reads the oracle's declared
 inputs only. A script that opens an absolute path on the worker is not
@@ -83,6 +86,20 @@ stopped ([Oracles](../../../../tools/build/python/README.md#oracles)); review
 holds `gen_datasets.py` to reading nothing. The two runs of one action see
 the same worker, so a dependence on the worker (its time zone, its CPU
 count) shows up only as a difference between workers.
+
+What these files will turn red in komira's own readers, though the files are
+right (pyarrow reads them as the tables):
+
+- komira_csv decides NULL after stripping a cell's quotes
+  (`is_null_cell` in [`string_column_simd.mojo`](../../../komira_csv/string_column_simd.mojo),
+  quotes skipped in [`csv_scanner_phase1.mojo`](../../../komira_csv/csv_scanner_phase1.mojo)),
+  so it reads the quoted empty string `""` as NULL, and under its default
+  null strings (`""`, `NULL`, `NA`, `NaN`, `null`) also the quoted strings
+  `"NULL"`, `"NaN"` and `"null"` that `types.str` holds. A CSV scan of
+  `types`, `nulls` and the join pair is red on those cells until the reader
+  is fixed.
+- komira_jsonl materializes no binary, unsigned or timestamp column, so a
+  JSON Lines scan of those `types` columns is red until it does.
 
 The mutants each test was seen red against are in the pull request that
 added it.

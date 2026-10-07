@@ -1,5 +1,6 @@
 """The `<dataset>.schema` sidecar: a pyarrow schema as the schema line of the
-canonical result text (komira_plan_harness, `canon_text.mojo`).
+canonical result text (komira_plan_harness: the entry in `type_text.mojo`,
+the escapes in `escape.mojo`).
 
 The line is one entry per column, separated by TAB and ended by LF:
 `<name>:<type>`, then `?` when the column is nullable. `<type>` is
@@ -8,12 +9,15 @@ the parameters a flat type carries: `decimal128(<precision>,<scale>)`,
 `timestamp_<unit>` and, with a time zone, `timestamp_<unit>(<zone>)`. Names
 and zones are escaped as the harness's `escape_name` escapes them: a
 backslash is `\\\\`, TAB `\\t`, LF `\\n`, CR `\\r`, any other control byte
-and DEL `\\xHH`, and each of `: , < > [ ]` gets a backslash.
+and DEL `\\xHH`, each of `: , < > [ ] { } ( )` gets a backslash, and so does
+a `#` that is the first character (so a schema line never reads as a comment
+line).
 
-Flat types only. The harness's spelling of nested types is being revised, so
-a nested (or any other unlisted) type is refused here rather than spelt in a
-form that may not last. This module is the only place the spelling lives:
-following a revision of the harness is an edit to this file alone.
+Flat types only. The harness spells the whole nested type tree, but no
+dataset here has a nested column, so a nested (or any other unlisted) type
+is refused rather than spelt by code no dataset exercises. This module is
+the only place the spelling lives: following a revision of the harness is an
+edit to this file alone.
 """
 
 import pyarrow as pa
@@ -36,14 +40,14 @@ _PLAIN = [
     (pa.types.is_date32, "date32"),
 ]
 
-_NAME_SPECIAL = {ord(c) for c in ":,<>[]"}
+_NAME_SPECIAL = {ord(c) for c in ":,<>[]{}()"}
 
 
 def escape_name(name):
     """`name` as the harness's escape_name writes it (a Python str is always
     well-formed UTF-8, so no byte of it needs the not-UTF-8 escape)."""
     out = []
-    for ch in name:
+    for i, ch in enumerate(name):
         b = ord(ch)
         if ch == "\\":
             out.append("\\\\")
@@ -55,7 +59,7 @@ def escape_name(name):
             out.append("\\r")
         elif b < 32 or b == 127:
             out.append("\\x%02x" % b)
-        elif b in _NAME_SPECIAL:
+        elif b in _NAME_SPECIAL or (i == 0 and ch == "#"):
             out.append("\\" + ch)
         else:
             out.append(ch)

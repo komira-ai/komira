@@ -29,7 +29,7 @@ What it checks, and the defect each check catches (README.md has the table):
    {true, false, NULL} pairs, the keys of the join pair. Catches a generator
    change that drops the cases a shard relies on; the checks above cannot,
    because they compare the generator with itself.
-6. Structure the readers rely on, against values written out here (CODECS,
+6. Structure the readers rely on, against values written out here (FILES,
    CHUNK_ROWS), not read from formats.py: an LZ4 or ZSTD IPC file holds
    compressed frames of that codec and an uncompressed one holds neither,
    and Parquet row groups and IPC record batches are of 100 rows, so a
@@ -93,6 +93,25 @@ KEEPS_NULLABILITY = {
     "arrow_stream_zstd",
 }
 
+# Each file suffix and what the file must be: its format id and, for Arrow
+# IPC, the container (file or stream) and the body codec. Written out here,
+# not read from formats.SUFFIX, so a writer that puts one format's bytes
+# under another's name (LZ4 under .zstd.arrow, a stream under .arrow, JSON
+# under .csv) is decoded as what its name says, and fails.
+FILES = {
+    "parquet": ("parquet", None, None),
+    "orc": ("orc", None, None),
+    "csv": ("csv", None, None),
+    "jsonl": ("jsonl", None, None),
+    "arrow": ("arrow_file", "file", None),
+    "lz4.arrow": ("arrow_file_lz4", "file", "lz4"),
+    "zstd.arrow": ("arrow_file_zstd", "file", "zstd"),
+    "arrows": ("arrow_stream", "stream", None),
+    "lz4.arrows": ("arrow_stream_lz4", "stream", "lz4"),
+    "zstd.arrows": ("arrow_stream_zstd", "stream", "zstd"),
+}
+SUFFIX = {fmt: suffix for suffix, (fmt, _, _) in FILES.items()}
+
 failures = []
 
 
@@ -121,7 +140,7 @@ def check_tree(out):
     for name in datasets.NAMES:
         want.add(name + ".schema")
         for fmt in datasets.FORMATS:
-            want.add(name + "." + formats.SUFFIX[fmt])
+            want.add(name + "." + SUFFIX[fmt])
     got = set()
     for parent, dirs, files in os.walk(out):
         for f in files:
@@ -144,7 +163,7 @@ def check_index(out, built):
     want = []
     for name in datasets.NAMES:
         for fmt in datasets.FORMATS:
-            want.append([name + "." + formats.SUFFIX[fmt], name, fmt, str(ROWS[name]), ",".join(built[name].carried(fmt))])
+            want.append([name + "." + SUFFIX[fmt], name, fmt, str(ROWS[name]), ",".join(built[name].carried(fmt))])
     if rows != sorted(want):
         fail("index.tsv: rows differ from the datasets: %r" % [r for r in rows if r not in want][:3])
 
@@ -156,10 +175,20 @@ def check_sidecars(out):
         if got != SIDECARS[name]:
             fail("%s.schema: %r, want %r" % (name, got, SIDECARS[name]))
     # The writer's escapes and refusals, on names and types no dataset holds.
-    named = pa.schema([pa.field("a:b,c<d>e[f]g\\h\ti\x01", pa.int8(), nullable=False)])
-    want = "a\\:b\\,c\\<d\\>e\\[f\\]g\\\\h\\ti\\x01:int8\n"
-    if schema_text.schema_line(named) != want:
-        fail("schema_text: %r, want %r" % (schema_text.schema_line(named), want))
+    # Written out from komira_plan_harness's escape.mojo: `: , < > [ ] { } ( )`
+    # and a backslash take a backslash, control bytes their escapes, and a `#`
+    # only when it comes first; a zone is escaped as a name is.
+    cases = [
+        (pa.field("a:b,c<d>e[f]g\\h\ti\x01", pa.int8(), nullable=False),
+         "a\\:b\\,c\\<d\\>e\\[f\\]g\\\\h\\ti\\x01:int8"),
+        (pa.field("#a{b}(c)#", pa.int8(), nullable=False), "\\#a\\{b\\}\\(c\\)#:int8"),
+        (pa.field("x", pa.timestamp("ms", tz="#z{1}(2)"), nullable=True), "x:timestamp_ms(\\#z\\{1\\}\\(2\\))?"),
+        (pa.field("d", pa.decimal128(5, 0), nullable=True), "d:decimal128(5,0)?"),
+    ]
+    for field, entry in cases:
+        got = schema_text.schema_line(pa.schema([field]))
+        if got != entry + "\n":
+            fail("schema_text: %r, want %r" % (got, entry + "\n"))
     for t in (pa.list_(pa.int8()), pa.large_string(), pa.float16(), pa.time32("s")):
         try:
             schema_text.schema_line(pa.schema([pa.field("x", t)]))
@@ -182,7 +211,7 @@ def check_decoded(out, built):
     for name in datasets.NAMES:
         ds = built[name]
         for fmt in datasets.FORMATS:
-            file = name + "." + formats.SUFFIX[fmt]
+            file = name + "." + SUFFIX[fmt]
             expected = ds.table.select(ds.carried(fmt))
             try:
                 got = formats.read(fmt, os.path.join(out, file), expected.schema)
@@ -220,21 +249,42 @@ def check_anchors(built):
         if not field.nullable or col.null_count == 0 or col.null_count == len(col):
             fail("types.%s: nullable=%s with %d NULLs of %d; every column must be nullable and hold both" % (
                 field.name, field.nullable, col.null_count, len(col)))
+    # The first and last instant each timestamp column holds, in its unit,
+    # worked out by hand: 0001-01-01 00:00:00 is -62135596800 s and
+    # 9999-12-31 23:59:59 is 253402300799 s; `ns` runs from the first whole
+    # second of the int64 range to its end. Each column also holds 0, -1, 1.
+    first_last = {
+        "s": [-62135596800, 253402300799],
+        "ms": [-62135596800000, 253402300799999],
+        "us": [-62135596800000000, 253402300799999999],
+        "ns": [-9223372036000000000, 9223372036854775807],
+    }
     must = {
-        "i8": [-128, 127], "i64": [-(2**63), 2**63 - 1], "u8": [255], "u64": [2**64 - 1],
-        # -0.0, the least subnormal; then NaN, +inf, -inf.
-        "f32": [0x80000000, 0x00000001], "f64": [0x8000000000000000, 0x0000000000000001],
+        "i8": [-128, 127], "i16": [-32768, 32767], "i32": [-2147483648, 2147483647],
+        "i64": [-(2**63), 2**63 - 1],
+        "u8": [0, 255], "u16": [0, 65535], "u32": [0, 4294967295], "u64": [0, 2**64 - 1],
+        # -0.0, the least subnormal, +max, -max; then NaN, +inf, -inf.
+        "f32": [0x80000000, 0x00000001, 0x7F7FFFFF, 0xFF7FFFFF],
+        "f64": [0x8000000000000000, 0x0000000000000001, 0x7FEFFFFFFFFFFFFF, 0xFFEFFFFFFFFFFFFF],
         "f32_special": [0x7FC00000, 0x7F800000, 0xFF800000],
         "f64_special": [0x7FF8000000000000, 0x7FF0000000000000, 0xFFF0000000000000],
-        "dec_38_10": [decimal.Decimal("9999999999999999999999999999.9999999999")],
-        "dec_9_2": [decimal.Decimal("-9999999.99")],
+        "dec_9_2": [decimal.Decimal("9999999.99"), decimal.Decimal("-9999999.99"),
+                    decimal.Decimal("0.01"), decimal.Decimal("-0.01")],
+        "dec_38_10": [decimal.Decimal("9999999999999999999999999999.9999999999"),
+                      decimal.Decimal("-9999999999999999999999999999.9999999999"),
+                      decimal.Decimal("0.0000000001"), decimal.Decimal("-0.0000000001")],
         "str": ["", "\\N", "NaN", "\U0001F600", "line\nbreak", 'say "hi"', "a\x00b"],
         "bin": [b"", b"\x00"], "bin_raw": [b"\xff"],
-        # 0001-01-01 and 9999-12-31, in days since the epoch.
-        "date32": [-719162, 2932896],
-        "ts_ns": [-9223372036000000000, 2**63 - 1, -1], "ts_s": [-62135596800, 253402300799],
+        # 1970-01-01, 1969-12-31, 0001-01-01 and 9999-12-31, in days since the epoch.
+        "date32": [0, -1, -719162, 2932896],
         "bool": [True, False],
     }
+    for unit, ends in first_last.items():
+        for col in ("ts_" + unit, "ts_" + unit + "_tz"):
+            must[col] = ends + [0, -1, 1]
+            values = [v for v in keys(t.column(col)) if v is not None]
+            if min(values) != ends[0] or max(values) != ends[1]:
+                fail("types.%s runs from %d to %d, want %d to %d" % (col, min(values), max(values), ends[0], ends[1]))
     for col, values in must.items():
         have = set(keys(t.column(col)))
         for v in values:
@@ -276,46 +326,39 @@ def check_anchors(built):
 
 _MAGIC = {"lz4": b"\x04\x22\x4d\x18", "zstd": b"\x28\xb5\x2f\xfd"}
 
-# The body compression each IPC format promises, written out here rather than
-# read from formats.py, whose table is what this check holds to it.
-CODECS = {
-    "arrow_file": None,
-    "arrow_file_lz4": "lz4",
-    "arrow_file_zstd": "zstd",
-    "arrow_stream": None,
-    "arrow_stream_lz4": "lz4",
-    "arrow_stream_zstd": "zstd",
-}
-
-
 # Rows per Parquet row group and IPC record batch, as the README promises.
 CHUNK_ROWS = 100
 
 
 def check_structure(out, built):
-    ipc_formats = sorted(f for f in datasets.FORMATS if f.startswith("arrow_"))
-    if ipc_formats != sorted(CODECS):
-        fail("the IPC formats are %s, CODECS lists %s" % (ipc_formats, sorted(CODECS)))
+    if sorted(SUFFIX) != sorted(datasets.FORMATS):
+        fail("the formats are %s, FILES lists %s" % (sorted(datasets.FORMATS), sorted(SUFFIX)))
     for name in datasets.NAMES:
         chunks = -(-ROWS[name] // CHUNK_ROWS)
         groups = pq.ParquetFile(os.path.join(out, name + ".parquet")).metadata.num_row_groups
         if groups != chunks:
             fail("%s.parquet: %d row groups, want %d" % (name, groups, chunks))
-        for fmt in sorted(CODECS):
-            file = name + "." + formats.SUFFIX[fmt]
+        for suffix, (fmt, container, codec) in sorted(FILES.items()):
+            if container is None:
+                continue
+            file = name + "." + suffix
             path = os.path.join(out, file)
-            if fmt.startswith("arrow_file"):
-                batches = ipc.open_file(path).num_record_batches
-            else:
-                batches = sum(1 for _ in ipc.open_stream(path))
+            try:
+                if container == "file":
+                    batches = ipc.open_file(path).num_record_batches
+                else:
+                    batches = sum(1 for _ in ipc.open_stream(path))
+            except Exception as e:
+                fail("%s: not an Arrow IPC %s: %s: %s" % (file, container, type(e).__name__, e))
+                continue
             if batches != chunks:
                 fail("%s: %d record batches, want %d" % (file, batches, chunks))
             with open(path, "rb") as f:
                 body = f.read()
             for c, magic in sorted(_MAGIC.items()):
-                if (c == CODECS[fmt]) != (magic in body):
+                if (c == codec) != (magic in body):
                     fail("%s: promises %s bodies, but %s frames are %s" % (
-                        file, CODECS[fmt], c, "found" if magic in body else "not found"))
+                        file, codec, c, "found" if magic in body else "not found"))
 
 
 def main(out):
