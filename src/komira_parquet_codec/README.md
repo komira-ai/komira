@@ -74,3 +74,10 @@ the command that made it; hand-built snappy short-offset blobs; and the
 CRC-32C check values, with the publication they come from. The `text_decompress`
 tests compress their fixtures in the test with this package's own codecs and
 write them under `$TEST_TMPDIR`.
+
+Whole Parquet files are the one committed fixture set:
+`tests/fixtures/parquet` holds seven small files pyarrow wrote (GZIP, SNAPPY,
+ZSTD and uncompressed; DATA_PAGE and DATA_PAGE_V2; INT96; a dictionary page
+per row group; zero rows; page CRCs), with the generator script that wrote
+them and a `SHA256SUMS`. `test_parquet_file_pages_e2e` walks every page of
+each through the dispatch. No Brotli file is among them.

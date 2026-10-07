@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The analytical SQL front end's tokenizer and parsed AST: tokens, expression, relation and statement nodes;
+# The analytical SQL front end's tokenizer, parsed AST and scalar-function table: tokens, expression, relation and statement nodes, and one row per SQL function name;
 # and the bind-time schemas and scan leaves of the read_csv / read_json / read_avro table functions.
 mojo_library(
     name = "komira_sql",
@@ -50,6 +50,10 @@ mojo_library(
         "tests/test_sql_ast_names.mojo",
         "tests/test_sql_ast_nodes.mojo",
         "tests/test_sql_ast_statements.mojo",
+        "tests/test_sql_fn_table_date_parts.mojo",
+        "tests/test_sql_fn_table_direct.mojo",
+        "tests/test_sql_fn_table_lowering_rows.mojo",
+        "tests/test_sql_fn_table_refusal_rows.mojo",
         "tests/test_sql_token_ast_direct.mojo",
         "tests/test_sql_token_branches.mojo",
         "tests/test_sql_tvf_bind_direct.mojo",

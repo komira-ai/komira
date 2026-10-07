@@ -16,6 +16,17 @@ relations, joins, `SelectStmt` and the top-level `SqlStatement`, and the
 name tables that say which identifiers the grammar claims
 (`sql_agg_code`, `sql_call_is_aggregate`, `sql_name_claimed_by_grammar`).
 
+`komira_sql.sql_fn_table` is the scalar-function table the binder reads: one
+row per SQL function name (aliases share their row). `sql_scalar_fn_spec(name)`
+returns a `SqlFnSpec` that says which expression node the name lowers to (its
+kind and op) and its inclusive arity, or that the name is a real DuckDB
+function this engine refuses (`FNK_REFUSED`, with the reason the binder
+raises), or that no row has it (`FNK_NONE`). `lowers_to_a_node` is True only
+for rows that become an expression, so a refused name may still be declared
+as a user function. `sql_date_part_unit`, `sql_date_part_desugar` and
+`sql_date_trunc_unit` are the separate `date_part` specifier and `date_trunc`
+period tables; the function names and the specifier names are different sets.
+
 `komira_sql.sql_tvf_bind` gives the `read_csv`, `read_json` and `read_avro`
 table functions their schema at bind time and builds their scan leaf. A CSV
 schema is inferred from a bounded prefix with the call's `delimiter` and
@@ -54,4 +65,21 @@ var e = SqlExpr.binary(
 assert_false(e.is_aggregate())
 assert_true(e.contains_aggregate())
 assert_true(e.copy().contains_aggregate())
+```
+
+Looking up a function name:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
+```mojo
+from komira_sql.sql_fn_table import sql_scalar_fn_spec, FNK_STRING_FN, FNK_REFUSED, FNK_NONE
+
+var up = sql_scalar_fn_spec("ucase")  # an alias of upper
+assert_equal(Int(up.kind), Int(FNK_STRING_FN))
+assert_equal(up.min_args, 1)
+assert_true(up.lowers_to_a_node)
+var nx = sql_scalar_fn_spec("nextafter")
+assert_equal(Int(nx.kind), Int(FNK_REFUSED))
+assert_true(nx.reason.startswith("SQL not supported"))
+assert_false(nx.lowers_to_a_node)
+assert_equal(Int(sql_scalar_fn_spec("no_such_fn").kind), Int(FNK_NONE))
 ```
