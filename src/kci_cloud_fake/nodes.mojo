@@ -28,6 +28,9 @@
 #                      topic. Each exposes NAME and ADDRESS (`addressed`, a
 #                      desired field naming what it is, like `serves`).
 #   * kind `subscription` `<id>/sub`: one subscription.
+#   * kind `secret`    `<id>/secret`: a secret's container (no value). It
+#                      exposes NAME (`secret_named`, a desired field, like
+#                      `serves`).
 # Those are the generic shape's kinds. On a provider shape (shapes.mojo) the
 # kind is the provider kind id (on onprem also a `<id>/vault` beside each
 # identity, a service's `<id>/endpoint`, which serves nothing, and a grant's
@@ -110,6 +113,10 @@ def fake_table_name(resource_id: String) -> String:
     return resource_id + String("-table")
 
 
+def fake_secret_name(resource_id: String) -> String:
+    return resource_id + String("-secret")
+
+
 def fake_messaging_name(resource_id: String, what: String) -> String:
     """`<id>-queue` or `<id>-topic`."""
     return resource_id + String("-") + what
@@ -153,13 +160,15 @@ def _unmanaged(v: FakeView) -> String:
 
 def static_digest(node: LoweredNode) raises -> String:
     """The digest of a lowered node's own desired fields, in order (the
-    `serves`, `stores`, `account`, `named` and `addressed` fields are how the
-    node behaves, not state), and a KEEP node's retention (a `kci_retain`
+    `serves`, `stores`, `account`, `named`, `addressed` and `secret_named`
+    fields are how the node behaves, not state), and a KEEP node's retention (a `kci_retain`
     digest field, not a label)."""
     var d = ModelledDigest(node.kind)
     for i in range(len(node.desired)):
         ref key = node.desired[i].key
         if key == "serves" or key == "stores" or key == "account" or key == "named" or key == "addressed":
+            continue
+        if key == "secret_named":
             continue
         d.field(node.desired[i].key, node.desired[i].value)
     if node.retention == RETAIN_KEEP:
@@ -177,6 +186,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
     var _stores: Bool
     var _account: Bool
     var _named: Bool
+    var _secret_named: Bool
     var _addressed: String
     var _retention: Int
     var _deps: List[String]
@@ -195,6 +205,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         self._stores = node.field(String("stores")) == "true"
         self._account = node.field(String("account")) == "true"
         self._named = node.field(String("named")) == "true"
+        self._secret_named = node.field(String("secret_named")) == "true"
         self._addressed = node.field(String("addressed"))
         self._retention = node.retention
         self._deps = node.depends_on.copy()
@@ -325,6 +336,9 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             return o^
         if self._named:
             o.set(String("NAME"), fake_table_name(self._owner))
+            return o^
+        if self._secret_named:
+            o.set(String("NAME"), fake_secret_name(self._owner))
             return o^
         if self._addressed.byte_length() > 0:
             o.set(String("NAME"), fake_messaging_name(self._owner, self._addressed))

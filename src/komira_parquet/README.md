@@ -45,6 +45,31 @@ page header or engine around it:
   `scan_copy_trace_dump`, which prints every counter of the decode and scan
   paths when `set_scan_copy_trace_enabled(True)`. `payload_sel_trace` and
   `staged_filter_trace` hold the gates and counters of two scan stages.
+- `dictionary`: RLE_DICTIONARY. `DictionaryDecoder` loads a PLAIN dictionary
+  page (`init_dict_int32` / `_int64` / `_float32` / `_float64` /
+  `_byte_array` / `_fixed_len_byte_array`), decodes a data page's codes
+  (`decode_indices`, or `decode_indices_into` a caller's `Span`) and resolves
+  them to values (`resolve_int32` and siblings, `resolve_flba_as_binary`,
+  `resolve_flba_decimal_to_float64`), to a `StringDictionaryArray`
+  (`resolve_as_string_dict`) or to a DICTIONARY `Column` that takes the codes
+  over (`string_dict_column`). A code outside the loaded dictionary is
+  refused before anything is read with it. The numeric resolves have two
+  arms (`set_dict_resolve_fused_enabled`): the blocked, bounds-fused gather of
+  `dict_gather_fused` (default) and the gathers of `dictionary_resolve`.
+  `dict_gather_fused` also holds `gather_flat_clamped`, the clamping gather of
+  the sub-row-group route.
+- `def_level_bitmap`: a flat column's V1 definition-level section to an Arrow
+  validity bitmap (`decode_def_levels_to_bitmap`), with an all-valid fast path.
+- `nested`: the Dremel level helpers. `compute_leaf_levels` walks a schema to
+  each leaf's maximum definition and repetition levels; `reconstruct_struct_column`,
+  `reconstruct_list_column` and `reconstruct_map_column` build a nested
+  column's validity and offsets from its levels.
+- `decode_helpers` and `null_expand`: the column decoder's helpers. The
+  Parquet-to-Arrow type map of a schema element (`schema_element_arrow_type`,
+  `field_from_schema_element`, annotation-aware: DECIMAL, unsigned, narrow and
+  date integers, timestamps, text or binary BYTE_ARRAY), the post-decode
+  re-labels, and the scatter of dense values into a nullable array by their
+  definition-level bits.
 
 Every public decoder takes the encoded bytes as a `Span[UInt8]` and writes into
 a `Span` (or a buffer) whose length it respects: a request larger than the
@@ -126,6 +151,45 @@ var data: List[UInt8] = [0xFF, 0x7F]
 var arr = decode_plain_flba_decimal_to_i128(Span(data), 1, 2, 2)
 assert_equal(arr.get_low(0), -129)
 assert_equal(arr.precision, 4)
+```
+
+## RLE_DICTIONARY
+
+```mojo
+from komira_parquet.dictionary import DictionaryDecoder
+from std.testing import assert_equal
+
+# A dictionary page of three Int64s (10, 20, 30), then a data page: bit width
+# 2, one bit-packed group of 8 codes 2, 0, 1, 2, 0, 0, 0, 0.
+var entries: List[Int] = [10, 20, 30]
+var dict_page = List[UInt8]()
+for i in range(3):
+    for k in range(8):
+        dict_page.append(UInt8((entries[i] >> (8 * k)) & 0xFF))
+var data_page: List[UInt8] = [0x02, 0x03, 0x92, 0x00]
+var dec = DictionaryDecoder()
+dec.init_dict_int64(Span(dict_page), 3)
+var codes = dec.decode_indices(Span(data_page), 4)
+var values = dec.resolve_int64(codes)
+assert_equal(values.get(0), 30)
+assert_equal(values.get(1), 10)
+assert_equal(values.get(3), 30)
+```
+
+## Nested levels
+
+```mojo
+from komira_parquet.nested import reconstruct_list_column
+from std.testing import assert_equal
+
+# A required list of required elements: [[a, b, c], [d, e]] has definition
+# level 1 at every element and repetition level 0 where a row starts.
+var def_levels: List[Int32] = [1, 1, 1, 1, 1]
+var rep_levels: List[Int32] = [0, 1, 1, 0, 1]
+var col = reconstruct_list_column(def_levels, rep_levels, False, 0, 2)
+var offsets = col._offsets.value().view_ro()
+assert_equal(offsets.read_i32_le_at(4), 3)
+assert_equal(offsets.read_i32_le_at(8), 5)
 ```
 
 ## The decode arms

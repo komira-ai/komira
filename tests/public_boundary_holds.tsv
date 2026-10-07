@@ -27,7 +27,7 @@ commit_sha	tools/build/tests/negative/public_boundary/plant_sha_docstring.txt	1	
 commit_sha	tools/build/tests/negative/public_boundary/plant_sha_md.txt	1	a planted finding of test 44 (the public boundary lint)
 date	src/komira_aws_core/tests/test_aws_codec.mojo	1	an impossible calendar day the timestamp reader must refuse (test input)
 date	src/komira_aws_core/tests/test_credential_wire.mojo	2	x-amz-date values on either side of a year boundary (test data)
-date	src/komira_azure_blob_e2e/tests/test_shared_key_oracle.mojo	2	the Azure Storage API version the signing test sends (x-ms-version), not a history date
+date	src/tests/e2e/komira_azure_blob_e2e/tests/test_shared_key_oracle.mojo	2	the Azure Storage API version the signing test sends (x-ms-version), not a history date
 date	src/komira_crypto/tests/test_asn1_primitives.mojo	1	a published certificate's notAfter (test data)
 date	src/komira_crypto/tests/test_chain_validator.mojo	1	the fixed verification time of the certificate tests (test data)
 date	src/komira_crypto/tests/test_chain_validator_ed25519.mojo	1	the fixed verification time of the certificate tests (test data)
@@ -59,7 +59,12 @@ email	tools/build/tests/functional/public_boundary/held_mojo.txt	3	a planted fin
 email	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/negative/public_boundary/held_plus.txt	3	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/negative/public_boundary/plant_email.txt	1	a planted finding of test 44 (the public boundary lint)
-email	tools/build/tests/public_boundary_tests.sh	1	the findings test 44 expects, spelled out
+email	tools/build/tests/negative/public_boundary/plant_email_after_url.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_git_ssh_user.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_mailto.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_s3_user.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_url_path.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/public_boundary_tests.sh	6	the findings test 44 expects, spelled out
 home_path	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/functional/public_boundary/held_mojo.txt	4	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
