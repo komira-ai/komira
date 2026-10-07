@@ -883,7 +883,7 @@ the same README in a library with `conda = False`, builds.
 ## 41. Coverage builds
 
 [Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0 binary per test and move no
-release action but the join; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+release action of a library, only its conda package's joins; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
 ## 42. Pointer lint
 
@@ -988,7 +988,7 @@ querying its attributes, so narrowing it fails.
 
 ## 46. Coverage gate
 
-With coverage, a library's package waits for its runs and [its gate](../coverage/README.md#the-build-gate);
+With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate);
 [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
 
 ## Diagnostics

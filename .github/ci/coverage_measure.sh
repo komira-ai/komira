@@ -35,9 +35,10 @@
 #     error) is measured too, since every run built; any other FAIL, or no
 #     entry, leaves it NOT MEASURED (coverage build failed): none of its
 #     reports is used and the summary lists it. The reports are its entry's
-#     `cov/tests/*.xml` paths. A dependency's failed gate fails the
-#     library's runs, so in enforce mode a library below its dependencies'
-#     targets is not measured.
+#     `cov/tests/*.xml` paths. A dependency's failed run or gate does not
+#     reach the library's runs (only a conda package waits for coverage), so
+#     an error of another library's gate in the entry is not expected; it
+#     would still leave the library not measured.
 #  5. `covcheck report` over the reports of the libraries measured, in the
 #     mode and against the target of <policy>, with the ratchet's rows of
 #     the measured libraries' packages only (every other row would read as
@@ -278,7 +279,7 @@ json_safe() {
 # The section the summary gains for the libraries whose build failed.
 not_measured_section() {
     printf '\n### Not measured (coverage build failed)\n\n'
-    printf 'These libraries the change touches did not build with `-c komira.coverage=true` (a test that fails at -O0 or under kcov, or a dependency that does), so their packages have no numbers here. The job log of `coverage / measure` has the end of each build.\n\n'
+    printf 'These libraries the change touches did not build with `-c komira.coverage=true` (a test that fails at -O0 or under kcov, or a dependency whose release tests fail), so their packages have no numbers here. The job log of `coverage / measure` has the end of each build.\n\n'
     while IFS= read -r l; do printf '%s\n' "- \`$l\`: not measured (coverage build failed)"; done <"$PUB/not_measured.txt"
 }
 
