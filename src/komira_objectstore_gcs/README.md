@@ -26,8 +26,13 @@ is given; which server certificates that connector accepts is its `TlsConfig`'s.
   cannot be turned off through it.
 
 There is no plaintext (h2c) route: komira_grpc carries only unary calls over
-h2c, so WriteObject and ReadObject could not use one. Nothing here reads the
-environment; the trust is whatever the caller's code passes.
+h2c, so WriteObject and ReadObject could not use one.
+
+Nothing in this package reads the environment. The trusting connector trusts
+only the root its caller passes. The default connector keeps libcrypto's
+default CA paths, which the `SSL_CERT_FILE` and `SSL_CERT_DIR` environment
+variables can redirect, so the process environment decides what the default
+connector trusts.
 
 The default connector, and a backend over it (built, not called: nothing is
 dialed until a verb runs):
