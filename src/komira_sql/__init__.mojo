@@ -1,1 +1,1 @@
-"""The analytical SQL front end's tokenizer and parsed AST: `sql_token` lexes a SQL string into tokens, and `sql_ast` holds the expression, relation and statement nodes the parser builds and the binder lowers to a plan."""
+"""The analytical SQL front end's tokenizer and parsed AST: `sql_token` lexes a SQL string into tokens, `sql_ast` holds the expression, relation and statement nodes the parser builds and the binder lowers to a plan, and `sql_tvf_bind` gives the `read_csv` / `read_json` / `read_avro` table functions their bind-time schema and scan leaf."""

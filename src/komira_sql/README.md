@@ -1,6 +1,6 @@
 # komira_sql
 
-The analytical SQL front end's first two layers. `komira_sql.sql_token` lexes a
+The analytical SQL front end's first layers. `komira_sql.sql_token` lexes a
 SQL string into a flat `List[Token]` that ends in `TK_EOF`: unquoted
 identifiers are lower-folded (keywords and function names are ordinary
 identifiers that the parser classifies by text), a single-quoted literal keeps
@@ -15,6 +15,17 @@ calls inline, with `contains_aggregate()` and a deep `copy()`), the FROM
 relations, joins, `SelectStmt` and the top-level `SqlStatement`, and the
 name tables that say which identifiers the grammar claims
 (`sql_agg_code`, `sql_call_is_aggregate`, `sql_name_claimed_by_grammar`).
+
+`komira_sql.sql_tvf_bind` gives the `read_csv`, `read_json` and `read_avro`
+table functions their schema at bind time and builds their scan leaf. A CSV
+schema is inferred from a bounded prefix with the call's `delimiter` and
+`has_header` (`all_varchar` then types every column STRING); a JSONL schema is
+inferred from a newline-snapped 256 KiB prefix; an Avro schema is read from the
+OCF container header. A `.gz`, `.zst` or `.lz4` CSV or JSONL file is
+decompressed whole first (`komira_parquet_codec.text_decompress`). An inference
+that finds no column raises an `Error` naming the file. `tvf_relation_scan`
+returns a lazy row-oriented scan whose source carries the dialect and the
+file's mtime, so two dialects of one file are two different sources.
 
 ## Examples
 
