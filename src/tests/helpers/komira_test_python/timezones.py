@@ -10,8 +10,9 @@ Fails unless:
   `TZDIR`;
 - pyarrow's ORC writer and reader round-trip a timestamp column exactly
   (ORC reads its writer's zone, `GMT`, from `TZDIR`), and with `TZDIR` naming
-  an empty directory the writer fails with exactly
-  `Time zone file <dir>/GMT does not exist.`, so ORC takes the zone from
+  an empty directory the writer raises `pyarrow.lib.ArrowException` whose
+  whole message is `Unknown error: Time zone file <dir>/GMT does not exist.
+  Please install IANA time zone database and set TZDIR env.`, so ORC takes the zone from
   `TZDIR` and from no fixed path;
 - a zoned pyarrow array's `to_pylist()` gives the exact local times, offsets
   and folds of `America/New_York` around the spring-forward gap and the
@@ -79,15 +80,19 @@ def orc_round_trip():
     os.environ["TZDIR"] = empty
     try:
         orc.write_table(table, os.path.join(empty, "x.orc"))
-    except Exception as e:  # noqa: BLE001 - the message is what is checked
-        msg = str(e)
+    except Exception as e:  # noqa: BLE001 - the type and message are what is checked
+        got = (type(e).__module__ + "." + type(e).__qualname__, str(e))
     else:
-        msg = None
+        got = None
     finally:
         os.environ["TZDIR"] = wheel_tzdir()
-    want = "Time zone file {}/GMT does not exist.".format(empty)
-    assert msg is not None and want in msg, "ORC with an empty TZDIR: {!r}, want it to name {!r}".format(msg, want)
-    print("ORC follows TZDIR:", want.replace(empty, "<empty>"))
+    want = (
+        "pyarrow.lib.ArrowException",
+        "Unknown error: Time zone file {}/GMT does not exist. "
+        "Please install IANA time zone database and set TZDIR env.".format(empty),
+    )
+    assert got == want, "ORC with an empty TZDIR: got {!r}, want {!r}".format(got, want)
+    print("ORC follows TZDIR:", want[1].replace(empty, "<empty>"))
 
 
 def zoned_to_pylist():

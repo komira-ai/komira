@@ -88,7 +88,9 @@ A `py_test` reads every time zone from the pinned tzdata wheel
   only an importable `tzdata` package;
 - `TZ=UTC0`: local time is UTC from a rule, not a file.
 
-The test `timezones` holds all of it. One reader is outside it: Arrow C++'s
+The test `timezones` holds all of it except the run without `TZDIR`, which
+the test `runner_cases` holds (its scripts run with an empty environment).
+One reader is outside it: Arrow C++'s
 compute kernels that take a zone by name (`pyarrow.compute.assume_timezone`,
 a cast of a zoned timestamp to a string, the field extractions of a zoned
 timestamp) find the database through a path compiled into the pyarrow wheel
