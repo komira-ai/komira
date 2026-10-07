@@ -364,12 +364,11 @@ def _simd_decode_f64[
 
 @always_inline
 def _require_bss_page_extent[
-    type_name: StaticString
+    type_name: StaticString, elem_size: Int
 ](
     num_values: Int,
-    byte_count: Int,
     data_len: Int,
-) raises:
+) raises -> Int:
     """Refuse a page that cannot hold `num_values` encoded values.
 
     `num_values` comes off the page header and `_simd_decode_f32/f64` then walk
@@ -386,21 +385,32 @@ def _require_bss_page_extent[
     BYTE_STREAM_SPLIT is exactly `num_values * W` bytes, so the bound is an
     EQUALITY on every real page.
 
+    The count is compared with `data_len // elem_size` BEFORE anything is
+    multiplied: `num_values * elem_size` wraps for a count near 2^64 / W (a
+    count of 2^62 + 16 Float32s is 64 bytes after the wrap), and a gate on the
+    wrapped product would let the kernel walk 2^62 values past a 64-byte page.
+
     Parameters:
         type_name: "float32" or "float64", for the error message only.
+        elem_size: Bytes per encoded value (4 or 8).
+
+    Returns:
+        `num_values * elem_size`, the page's byte count; it cannot wrap,
+        because it is at most `data_len`.
     """
-    if num_values < 0 or byte_count > data_len:
+    if num_values < 0 or num_values > data_len // elem_size:
         raise Error(
             "parquet: corrupt BYTE_STREAM_SPLIT page: declares "
             + String(num_values)
             + " "
             + String(type_name)
-            + " values ("
-            + String(byte_count)
-            + " bytes) but the page body holds only "
+            + " values of "
+            + String(elem_size)
+            + " bytes but the page body holds only "
             + String(data_len)
             + " bytes"
         )
+    return num_values * elem_size
 
 
 @always_inline
@@ -457,8 +467,9 @@ def decode_byte_stream_split_float32(
         return PrimitiveArray[DType.float32].allocate(0)
 
     comptime elem_size = size_of[Scalar[DType.float32]]()
-    var byte_count = num_values * elem_size
-    _require_bss_page_extent["float32"](num_values, byte_count, len(data))
+    var byte_count = _require_bss_page_extent["float32", elem_size](
+        num_values, len(data)
+    )
     var buf = OwnedAlignedBuffer(byte_count)
 
     # Dest via origin-tied `view_range_mut`; `_simd_decode_f32`
@@ -499,8 +510,9 @@ def decode_byte_stream_split_float64(
         return PrimitiveArray[DType.float64].allocate(0)
 
     comptime elem_size = size_of[Scalar[DType.float64]]()
-    var byte_count = num_values * elem_size
-    _require_bss_page_extent["float64"](num_values, byte_count, len(data))
+    var byte_count = _require_bss_page_extent["float64", elem_size](
+        num_values, len(data)
+    )
     var buf = OwnedAlignedBuffer(byte_count)
 
     # Dest via origin-tied `view_range_mut`.
@@ -561,8 +573,9 @@ def decode_byte_stream_split_float32_into[
         return
 
     comptime elem_size = size_of[Scalar[DType.float32]]()
-    var byte_count = num_values * elem_size
-    _require_bss_page_extent["float32"](num_values, byte_count, len(data))
+    var byte_count = _require_bss_page_extent["float32", elem_size](
+        num_values, len(data)
+    )
     _require_bss_dst_extent(byte_count, dst.len())
 
     # SAFETY: both extents are checked immediately above — `data` holds at
@@ -598,8 +611,9 @@ def decode_byte_stream_split_float64_into[
         return
 
     comptime elem_size = size_of[Scalar[DType.float64]]()
-    var byte_count = num_values * elem_size
-    _require_bss_page_extent["float64"](num_values, byte_count, len(data))
+    var byte_count = _require_bss_page_extent["float64", elem_size](
+        num_values, len(data)
+    )
     _require_bss_dst_extent(byte_count, dst.len())
 
     # SAFETY: see `decode_byte_stream_split_float32_into`.

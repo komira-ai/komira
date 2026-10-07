@@ -7,7 +7,8 @@
 # step check the vector body and the scalar tail; the `_into` variants are
 # checked at destination offsets that are not 16-byte aligned, with guard
 # bytes either side of the window; a page shorter than `num_values * W`, a
-# negative count and a window too small are refused before any byte moves.
+# negative count, a count whose byte size wraps Int, and a window too small
+# are refused before any byte moves.
 # =============================================================================
 
 from std.memory import bitcast
@@ -133,6 +134,41 @@ def test_a_short_page_or_a_negative_count_is_refused() raises:
         except e:
             i64 = _refused("corrupt BYTE_STREAM_SPLIT page", e)
         assert_true(i64, "f64 into case " + String(k))
+
+
+def test_a_count_whose_byte_size_wraps_is_refused() raises:
+    """A count whose byte size wraps Int is refused by all four entries.
+
+    2^62 + 16 Float32s is 64 bytes after `* 4` wraps, and 2^61 + 8 Float64s
+    is 64 bytes after `* 8` wraps: exactly the 64-byte page and the 64-byte
+    window used here. A gate that checked the wrapped product would pass
+    both, and the kernel would then walk 2^62 values past the page (a
+    segfault). The gate divides the page by W instead."""
+    var page = _enc32(_f32(16))
+    assert_equal(len(page), 64)
+    var c32 = (1 << 62) + 16
+    var c64 = (1 << 61) + 8
+    assert_equal(c32 * 4, 64)
+    assert_equal(c64 * 8, 64)
+    var buf = OwnedAlignedBuffer(64)
+    var hits = 0
+    try:
+        _ = decode_byte_stream_split_float32(Span(page), c32)
+    except e:
+        hits += 1 if _refused("corrupt BYTE_STREAM_SPLIT page", e) else 0
+    try:
+        _ = decode_byte_stream_split_float64(Span(page), c64)
+    except e:
+        hits += 1 if _refused("corrupt BYTE_STREAM_SPLIT page", e) else 0
+    try:
+        decode_byte_stream_split_float32_into(Span(page), c32, buf.view_range_mut(0, 64))
+    except e:
+        hits += 1 if _refused("corrupt BYTE_STREAM_SPLIT page", e) else 0
+    try:
+        decode_byte_stream_split_float64_into(Span(page), c64, buf.view_range_mut(0, 64))
+    except e:
+        hits += 1 if _refused("corrupt BYTE_STREAM_SPLIT page", e) else 0
+    assert_equal(hits, 4)
 
 
 def test_into_unaligned_windows_with_guards() raises:

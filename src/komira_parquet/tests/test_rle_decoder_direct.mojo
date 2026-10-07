@@ -6,7 +6,7 @@
 # that the bit-packed sweep does not: zero and non-zero runs, short and long
 # runs (the paired fill and its odd tail), a run whose value bytes are cut
 # off, a header cut off mid-varint, and the run-aligned `decode_run_int32`
-# with a leftover. The level functions are held to the V1 layout
+# with a leftover and with a cap of zero or less. The level functions are held to the V1 layout
 # `[i32 LE length][hybrid bytes]`, including the negative and oversized
 # length prefixes they must refuse.
 # =============================================================================
@@ -263,6 +263,30 @@ def test_decode_run_rle_arm_with_leftover() raises:
     var r4 = dec3.decode_run_int32(Span(out), 8)
     assert_true(r4.exhausted)
     assert_equal(r4.written, 0)
+
+
+def test_decode_run_a_cap_of_zero_or_less_writes_nothing() raises:
+    """A cap of 0 or less writes nothing and reports nothing written: the RLE
+    run is parked whole in `rle_leftover`, for a zero run (the memset arm)
+    and a non-zero one. Without the lower clamp a cap of -1 reaches the RLE
+    arm as a count of -1: `written` comes back -1, `rle_leftover` run_len + 1,
+    and the zero run memsets a negative length."""
+    var caps: List[Int] = [-1, 0, -1000]
+    var values: List[Int] = [0, 3]
+    for c in range(len(caps)):
+        for v in range(len(values)):
+            var d = List[UInt8]()
+            _rle(d, 4, values[v], 2)
+            var dec = RleDecoder(Span(d), 2)
+            var out = _filled(8)
+            var r = dec.decode_run_int32(Span(out), caps[c])
+            var tag = "cap " + String(caps[c]) + " value " + String(values[v])
+            assert_equal(r.written, 0, tag)
+            assert_equal(r.rle_leftover, 4, tag)
+            assert_equal(Int(r.rle_value), values[v], tag)
+            assert_true(not r.exhausted, tag)
+            for i in range(8):
+                assert_equal(out[i], _SENTINEL, tag)
 
 
 def _neg_header(low_bit: Int) -> List[UInt8]:

@@ -259,6 +259,49 @@ def test_a_destination_too_small_is_refused_before_any_write() raises:
     assert_equal(Int(ok.get_typed[Int64](0)), vals[0])
 
 
+def test_a_cap_whose_byte_size_wraps_is_refused() raises:
+    """A `max_values` whose byte size wraps Int is refused before any write.
+    2^61 Int64s and 2^62 Int32s are 0 bytes after the multiply wraps, so a
+    check on `(offset + max_values) * elem_size` passes them and the fill
+    writes past the 10-slot destination (Int64), or stages 2^62 values
+    (Int32). The check counts slots instead."""
+    var vals = _rand(20, 2, 8)
+    var enc = _encode(vals, 128, 4)
+    var dec = DeltaDecoder(Span(enc))
+    assert_true(dec.begin_resumable(20))
+    var c64 = 1 << 61
+    var c32 = 1 << 62
+    assert_equal(c64 * 8, 0)
+    assert_equal(c32 * 4, 0)
+    var dst = _buf(10, 8)
+    var raised64 = False
+    try:
+        _ = dec.resume_fill_int64(dst, 0, c64)
+    except e:
+        raised64 = String(e).find("destination too small") >= 0
+    assert_true(raised64)
+    var d32 = _buf(10, 4)
+    var raised32 = False
+    try:
+        _ = dec.resume_fill_int32(d32, 0, c32)
+    except e:
+        raised32 = String(e).find("destination too small") >= 0
+    assert_true(raised32)
+    for i in range(80):
+        assert_equal(dst.get_typed[UInt8](i), UInt8(0xEE))
+    # An offset past the destination is refused too.
+    var raised_off = False
+    try:
+        _ = dec.resume_fill_int64(dst, 11, 1)
+    except e:
+        raised_off = String(e).find("destination too small") >= 0
+    assert_true(raised_off)
+    # Nothing was consumed: the decoder still starts at the first value.
+    var ok = _buf(20, 8)
+    assert_equal(dec.resume_fill_int64(ok, 0, 20), 20)
+    assert_equal(Int(ok.get_typed[Int64](0)), vals[0])
+
+
 def test_drained_page_returns_zero_and_int32_drained_too() raises:
     var vals = _rand(5, 6, 8)
     var enc = _encode(vals, 128, 4)

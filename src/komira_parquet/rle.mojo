@@ -340,11 +340,14 @@ struct RleDecoder(Movable):
     ](mut self, output: Span[Int32, o], cap: Int) -> RleRunResult:
         """Decode the next run into `output` (up to `cap` values, and never
         more than `len(output)`) and return a run-aligned result; see
-        `_decode_run_int32_ptr`."""
-        # SAFETY: the core writes at most its `cap` slots, which is at most
-        # `len(output)`.
+        `_decode_run_int32_ptr`. A `cap` of 0 or less writes nothing: an RLE
+        run is then parked whole in `rle_leftover`."""
+        # SAFETY: the core writes at most its `cap` slots, which is clamped to
+        # [0, len(output)]. Without the lower clamp a negative `cap` reaches
+        # the RLE arm as a negative count: a negative memset length and a
+        # negative `written`.
         return self._decode_run_int32_ptr(
-            output.unsafe_ptr(), min(cap, len(output))
+            output.unsafe_ptr(), max(0, min(cap, len(output)))
         )
 
     def _decode_run_int32_ptr[
@@ -367,14 +370,15 @@ struct RleDecoder(Movable):
         resumable mid-run — `decode_int32(N)` advances past the WHOLE current run
         even when N < run-size, dropping the tail (the mid-run non-resumability
         that defeats sub-page <256KB chunking on a single large page). This method
-        is run-aligned: a BITPACKED run (<=256 values, always fits the buffer
-        headroom) is decoded whole; a long RLE run is split safely via the
+        is run-aligned: a BITPACKED run is decoded in whole 8-value groups, at
+        most `cap // 8` of them per call, with the rest parked for the next call
+        (`_decode_bitpacked_groups`); a long RLE run is split safely via the
         `rle_leftover`/`rle_value` continuation (RLE resume needs no byte cursor —
         it is just a repeated value). Byte-identical values to `decode_int32`.
 
-        SAFETY: `output` must hold at least `cap` Int32 slots. A bitpacked run is
-        assumed <= `cap` (the caller sizes the FIXED buffer with >=1024 headroom;
-        bitpacked runs cap at 256).
+        SAFETY: `output` must hold at least `cap` Int32 slots, and `cap` must
+        be >= 0. Every write is bounded by `cap`: an RLE run writes
+        `min(run_len, cap)` values, a bitpacked run `8 * min(groups, cap // 8)`.
         """
         # Resume a PARKED bitpacked run first (mid-run continuation).
         if self._bp_groups_left > 0:
@@ -423,9 +427,9 @@ struct RleDecoder(Movable):
         """Decode GROUP-ALIGNED 8-value groups of the currently-parked bitpacked
         run into `output`, up to `cap` values, advancing the reader past exactly
         the groups consumed and parking the rest (`_bp_groups_left`). This is the
-        mid-bitpacked-run resumption that makes a single large bitpacked run (my
-        writer emits the WHOLE chunk as one run) sub-page chunkable into the FIXED
-        <256KB buffer.
+        mid-bitpacked-run resumption that makes a single large bitpacked run (a
+        writer may emit a whole column chunk as one run) chunkable into a fixed
+        buffer.
 
         Decodes `g = min(_bp_groups_left, cap // 8)` groups = `g*8` values from
         the reader's CURRENT position (the next unconsumed group), then advances

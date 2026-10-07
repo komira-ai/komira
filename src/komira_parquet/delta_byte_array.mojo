@@ -206,6 +206,10 @@ def decode_delta_length_byte_array[
 # =============================================================================
 
 
+comptime _DBA_INT32_CEIL = 2147483647
+"""The largest end offset a DELTA_BYTE_ARRAY StringArray can hold (Int32)."""
+
+
 def decode_delta_byte_array[
     _mut: Bool, o: Origin[mut=_mut], //
 ](
@@ -232,8 +236,9 @@ def decode_delta_byte_array[
         A non-nullable StringArray with the decoded byte arrays.
 
     Raises:
-        Error if the encoded data is malformed or truncated, or a prefix
-        length is negative.
+        Error if the encoded data is malformed or truncated, a prefix
+        length is negative, or the values reconstruct to more than the
+        Int32 offset ceiling (2147483647 bytes).
     """
     from std.memory import alloc, unsafe_memcpy
 
@@ -289,6 +294,21 @@ def decode_delta_byte_array[
         var suffix_end = Int(suffix_offsets_view.get_typed[Int32](i + 1))
         var suffix_len = suffix_end - suffix_start
         var val_len = prefix_len + suffix_len
+        # The reconstructed values are bounded by nothing on the page: each
+        # can repeat the whole previous value as its prefix, so a page of N
+        # values over an L-byte suffix rebuilds N * L bytes. Their running
+        # end is stored as an Int32 offset, so a total past the Int32
+        # ceiling is refused here, before the allocation sized from it and
+        # before an offset is narrowed. `val_len` is >= 0: the prefix was
+        # checked above and the suffix offsets are a running sum.
+        if val_len > _DBA_INT32_CEIL - total_out_len:
+            raise Error(
+                "parquet: corrupt DELTA_BYTE_ARRAY page: value "
+                + String(i)
+                + " takes the reconstructed values past "
+                + String(_DBA_INT32_CEIL)
+                + " bytes, the Int32 offset ceiling"
+            )
         total_out_len += val_len
         prev_len = val_len
 

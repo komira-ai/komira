@@ -820,8 +820,18 @@ def _require_resume_dst_extent(
     dst_len: Int, dst_elem_offset: Int, max_values: Int, elem_size: Int
 ) raises:
     """Refuse a `resume_fill_*` destination that cannot hold `max_values`
-    elements of `elem_size` bytes from element `dst_elem_offset` on."""
-    if dst_elem_offset < 0 or (dst_elem_offset + max_values) * elem_size > dst_len:
+    elements of `elem_size` bytes from element `dst_elem_offset` on.
+
+    The bound is taken in elements (`dst_len // elem_size`) and nothing is
+    multiplied: `(dst_elem_offset + max_values) * elem_size` wraps for a
+    `max_values` near 2^64 / elem_size (2^61 Int64s is 0 bytes after the
+    wrap), and a check on the wrapped product would pass."""
+    var dst_slots = dst_len // elem_size
+    if (
+        dst_elem_offset < 0
+        or dst_elem_offset > dst_slots
+        or max_values > dst_slots - dst_elem_offset
+    ):
         raise Error(
             "parquet: DELTA_BINARY_PACKED destination too small: "
             + String(max_values)

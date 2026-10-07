@@ -8,7 +8,8 @@
 # with the strings encoded, and hold the decoders to their refusals: a
 # negative value count, a length that is negative or larger than the page,
 # and (DELTA_BYTE_ARRAY) a NEGATIVE prefix length, which without its check
-# would place the suffix before the value's start in the output buffer.
+# would place the suffix before the value's start in the output buffer, and
+# values that rebuild past the Int32 offset ceiling.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -261,6 +262,42 @@ def test_dba_refuses_a_negative_prefix_length() raises:
     except e:
         raised = String(e).find("negative prefix length") >= 0
     assert_true(raised)
+
+
+def _repeated_value_page(n: Int, big: Int) -> List[UInt8]:
+    """One `big`-byte value, then `n - 1` values that each repeat it whole as
+    their prefix with an empty suffix: a page of about `big` bytes that
+    rebuilds `n * big` bytes."""
+    var prefixes = List[Int](capacity=n)
+    var suffixes = List[String](capacity=n)
+    prefixes.append(0)
+    suffixes.append(String("q") * big)
+    for _ in range(1, n):
+        prefixes.append(big)
+        suffixes.append(String(""))
+    return _raw_dba(prefixes, suffixes)
+
+
+def test_dba_refuses_values_past_the_int32_offset_ceiling() raises:
+    """1 MiB values: 2049 of them rebuild 2^31 + 2^20 bytes, and 2048 rebuild
+    2^31, one byte past the Int32 offset ceiling. Both are refused before
+    the allocation; without the check the decoder allocates 2 GiB and
+    narrows the offsets past 2^31 to negative Int32s."""
+    var big = 1 << 20
+    var counts: List[Int] = [2049, 2048]
+    for k in range(len(counts)):
+        var page = _repeated_value_page(counts[k], big)
+        var raised = False
+        try:
+            _ = decode_delta_byte_array(Span(page), counts[k])
+        except e:
+            raised = String(e).find("Int32 offset ceiling") >= 0
+        assert_true(raised, "count " + String(counts[k]))
+    # Well under the ceiling the same shape decodes: 4 copies of 1 MiB.
+    var small = _repeated_value_page(4, big)
+    var arr = decode_delta_byte_array(Span(small), 4)
+    assert_equal(arr.length, 4)
+    assert_equal(arr.get_length(3), big)
 
 
 def test_dba_zero_negative_count_and_torn_prefixes() raises:
