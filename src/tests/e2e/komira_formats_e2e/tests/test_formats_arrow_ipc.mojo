@@ -20,28 +20,34 @@
 #      empty string kept apart from NULL, 2^53 + 1) and of the edge numerics
 #      (integer limits; -0.0, subnormals, +-Inf and NaN payloads by bit
 #      pattern), exactly.
-#   2. The bytes, against the Arrow columnar spec (format/Columnar.rst,
-#      Message.fbs, File.fbs), never against komira's output:
+#   2. The bytes. Checked by hand against the Arrow columnar spec
+#      (format/Columnar.rst), never against komira's output:
 #        * File: "ARROW1" + 2 zero pad bytes first; "ARROW1" last; the int32
-#          LE before it is the Footer flatbuffer's size, read here from the
-#          tail LocalFs.read_footer returns;
+#          LE before it (the Footer size), read from the tail
+#          LocalFs.read_footer returns;
 #        * every message starts 8-aligned with the continuation marker
 #          0xFFFFFFFF and an int32 metadata size that is a multiple of 8,
-#          the Message's version is V5, its bodyLength a multiple of 8, and
-#          the messages tile the stream exactly up to the EOS marker
+#          and the messages tile the stream exactly up to the EOS marker
 #          0xFFFFFFFF 0x00000000 (the Stream's last 8 bytes; the File's last
 #          8 before the Footer);
-#        * the Footer's Blocks are the walked RecordBatch messages (offset,
-#          metaDataLength counting the 8-byte prefix, bodyLength);
-#        * the schema in the Schema message and in the Footer: names, types
-#          (Int 64/32 signed, FloatingPoint DOUBLE, Utf8, Bool), nullability;
-#        * the body: a FieldNode per column with the source's length and
-#          null_count; every Buffer 8-aligned inside bodyLength; validity
-#          bitmaps LSB-first, bit i set iff row i is not NULL; INT64 and
-#          DOUBLE values as 8 little-endian bytes (spelled with `le_bytes`
-#          from the source values); Utf8 as int32 offsets, non-decreasing,
-#          each non-NULL slot exactly its UTF-8 bytes (the empty string a
-#          zero-length slot); Bool values bit-packed LSB-first.
+#        * the body bytes: validity bitmaps LSB-first, bit i set iff row i
+#          is not NULL (a Buffer of length 0 accepted only when null_count
+#          is 0); INT64 and DOUBLE values as 8 little-endian bytes (spelled
+#          with `le_bytes` from the source values); Utf8 int32 offsets,
+#          non-decreasing, each non-NULL slot exactly its UTF-8 bytes (the
+#          empty string a zero-length slot); Bool values bit-packed
+#          LSB-first.
+#      Read through komira's own flatbuffer readers (`read_message`,
+#      `read_record_batch`, `read_footer`, `read_schema`, `read_type_*`) and
+#      then compared with the spec's rules or the source: the Message
+#      version (V5) and bodyLength (a multiple of 8, inside the stream); the
+#      FieldNodes (length, null_count); the Buffers (8-aligned, inside
+#      bodyLength), which locate the bytes above; the Footer version and
+#      Blocks (equal to the walked messages, metaDataLength counting the
+#      8-byte prefix); the schema (names, Int 64/32 signed, FloatingPoint
+#      DOUBLE, Utf8, Bool, nullability). A defect in those readers that
+#      agreed with the encoder would pass here; komira_arrow_ipc's own
+#      tests read pyarrow-written files through them.
 #
 # Defects this reds on (each planted alone and seen red on the farm): the
 # assembly recording Block.metaDataLength without the 8-byte prefix ("Footer
@@ -480,9 +486,15 @@ def _pin_dataset_body(
             Int(rb.nodes[c].null_count) == nulls,
             at + ": FieldNode.null_count " + String(rb.nodes[c].null_count) + ", want " + String(nulls),
         )
+        # The spec lets a writer omit the validity Buffer (length 0) only
+        # when null_count is 0; a Buffer that is present must hold one bit
+        # per row, each exactly the source's validity (all set if no NULLs).
         ref vb = rb.buffers[vbuf[c]]
+        if vb.length == 0:
+            m.check(nulls == 0, at + ": validity Buffer absent, but the column has " + String(nulls) + " NULLs")
+            continue
         if Int(vb.length) < (n + 7) // 8:
-            m.add(at + ": validity Buffer of " + String(vb.length) + " bytes for " + String(n) + " rows with NULLs")
+            m.add(at + ": validity Buffer of " + String(vb.length) + " bytes for " + String(n) + " rows")
             continue
         for i in range(n):
             var got = _bit(buf, body + Int(vb.offset), i)
@@ -579,6 +591,14 @@ def test_ipc_stream_dataset() raises:
     ipc.add(first^)
     ipc.add(batch_for_city(city_oslo()))
     write_ipc(path, ipc)
+    # EOS is written once: a second finish raises instead of appending.
+    var refused = False
+    try:
+        _ = ipc.finish()
+    except e:
+        refused = String(e).startswith("IpcAssembly.finish: already finished")
+    if not refused:
+        raise Error("IpcAssembly.finish: a second call did not raise")
 
     var f = _read_stream(path, want, 2)
     var cities: List[String] = [city_zurich(), city_oslo()]

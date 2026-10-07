@@ -46,12 +46,14 @@ def _append(mut out: List[UInt8], b: SharedAlignedBuffer[HeapRegion]):
 struct IpcAssembly(Movable):
     """One Arrow IPC File (`is_file`) or Stream under construction: the
     schema message is written on creation, `add` appends one RecordBatch
-    message, `finish` appends the EOS marker (and, for a File, the footer)."""
+    message, `finish` appends the EOS marker (and, for a File, the footer)
+    and refuses a second call."""
 
     var schema: Schema
     var is_file: Bool
     var bytes: List[UInt8]
     var blocks: List[Block]
+    var finished: Bool
 
     def __init__(out self, var schema: Schema, is_file: Bool) raises:
         self.bytes = List[UInt8]()
@@ -61,6 +63,7 @@ struct IpcAssembly(Movable):
         self.schema = schema^
         self.is_file = is_file
         self.blocks = List[Block]()
+        self.finished = False
 
     def add(mut self, var batch: RecordBatch) raises:
         var frame = encode_record_batch_message(batch.take_columns())
@@ -75,6 +78,9 @@ struct IpcAssembly(Movable):
         _append(self.bytes, frame)
 
     def finish(mut self) raises -> List[UInt8]:
+        if self.finished:
+            raise Error("IpcAssembly.finish: already finished (EOS and footer are written once)")
+        self.finished = True
         _append(self.bytes, arrow_ipc_eos_bytes())
         if self.is_file:
             _append(
