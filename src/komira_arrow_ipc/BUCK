@@ -47,6 +47,7 @@ mojo_library(
         "tests/test_ipc_file_e2e_pyarrow_nullable.mojo",
         "tests/test_ipc_file_e2e_pyarrow_stream.mojo",
         "tests/test_ipc_file_e2e_write.mojo",
+        "tests/test_ipc_fuzz_corpus.mojo",
         "tests/test_ipc_mmap_buffer_bounds.mojo",
         "tests/test_ipc_nested_buffer_count.mojo",
         "tests/test_ipc_nested_buffer_table.mojo",
@@ -100,6 +101,13 @@ mojo_library(
             "tests/fixtures/arrow_ipc/primitives_int_float.arrow",
             "tests/fixtures/arrow_ipc/temporal_batch.arrow",
         ],
+        # Apache arrow-testing's IPC fuzz corpus as `arrow-testing/`
+        # (LICENSE.txt and data/arrow-ipc-{stream,file}/), pinned in
+        # //third_party/arrow-testing, and the reviewed verdicts on it.
+        "tests/test_ipc_fuzz_corpus.mojo": {
+            "arrow-testing": "//third_party/arrow-testing:files",
+            "ipc_fuzz_corpus_gate.txt": "tests/ipc_fuzz_corpus_gate.txt",
+        },
     },
     visibility = ["PUBLIC"],
 )
