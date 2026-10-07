@@ -279,7 +279,7 @@ json_safe() {
 # The section the summary gains for the libraries whose build failed.
 not_measured_section() {
     printf '\n### Not measured (coverage build failed)\n\n'
-    printf 'These libraries the change touches did not build with `-c komira.coverage=true` (a test that fails at -O0 or under kcov, or a dependency that does), so their packages have no numbers here. The job log of `coverage / measure` has the end of each build.\n\n'
+    printf 'These libraries the change touches did not build with `-c komira.coverage=true` (a test that fails at -O0 or under kcov, or a dependency whose release tests fail), so their packages have no numbers here. The job log of `coverage / measure` has the end of each build.\n\n'
     while IFS= read -r l; do printf '%s\n' "- \`$l\`: not measured (coverage build failed)"; done <"$PUB/not_measured.txt"
 }
 
