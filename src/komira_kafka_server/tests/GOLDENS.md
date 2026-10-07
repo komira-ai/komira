@@ -30,9 +30,10 @@ from a Kafka client or broker.
 
 What each golden test checks, per reference message:
 
-- Request: the reference is request header v1 plus the body. The test parses
-  the header, decodes the body at the header's version, asserts every decoded
-  field, checks the decoder consumed the message exactly, and checks that
+- Request: the reference is the request header plus the body (header v1 for
+  a non-flexible version, header v2 for a flexible one, as in InitProducerId
+  v2+). The test parses the header, decodes the body at the header's version,
+  asserts every decoded field, checks the decoder consumed the message exactly, and checks that
   every strict prefix is refused with the decoder's short-read error.
 - Response: the codec has encoders only, so the test encodes the reference's
   field values and asserts byte equality with the reference.

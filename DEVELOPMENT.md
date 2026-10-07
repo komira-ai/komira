@@ -16,7 +16,8 @@ configured only by a `.buckconfig.local` you write.
 
 | directory | holds |
 |---|---|
-| `src/<module>/` | one Mojo library per directory, directly under `src/`. The directory name is the import name (`from komira_crypto import ...`) and the name of its `mojo_library`; there are no nested Mojo namespaces, because a nested one has to re-export every child. A module's tests are in its own `tests/`, and a binary is declared in its module's own package. |
+| `src/<module>/` | one Mojo library komira ships per directory, directly under `src/`. The directory name is the import name (`from komira_crypto import ...`) and the name of its `mojo_library`; there are no nested Mojo namespaces, because a nested one has to re-export every child. A module's tests are in its own `tests/`, and a binary is declared in its module's own package. |
+| `src/tests/<kind>/<module>/` | a package that exists only to test others, by kind: `e2e` (end-to-end and loopback tests), `conformance` (against an external suite), `support` (test harnesses no shipped library depends on). Same rules as `src/<module>/`; the `src_layout` lint keeps an `*_e2e`, `*_loopback` or `*_conformance` package out of `src/<module>/` ([architecture](docs/architecture.md#end-to-end-tests)). |
 | `tools/` | the build rules, toolchains and platforms, the lints, and the end-to-end tests cell (`tools/build/tests`) |
 | `docs/` | the repository's documentation |
 | `third_party/` | C and C++ libraries built from pinned source archives |

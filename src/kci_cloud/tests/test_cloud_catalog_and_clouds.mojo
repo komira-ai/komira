@@ -22,6 +22,13 @@
 # 6. THE TABLE ROW: PORTABLE, exposes NAME only, accepts READ, WRITE,
 #    READ_WRITE and DESCRIBE (not CALL), retention default KEEP, primary
 #    role `table`; it is the third body arm, field 13.
+# 7. THE MESSAGING ROWS: a queue (field 15, the fifth arm) and a topic (21,
+#    the eighth) are PORTABLE, expose NAME and ADDRESS, take retention with
+#    the default DELETE, and land on `queue` / `topic`; a queue accepts SEND
+#    and RECEIVE, a topic SEND only. A subscription (28, the tenth) exposes
+#    and accepts nothing, takes no retention, and lands on `sub` (a role
+#    word is 8 bytes at most).
+#    SEND and RECEIVE are values of the generated `Access`.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -46,6 +53,9 @@ from kci_cloud import (
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
+    FIELD_QUEUE,
+    FIELD_TOPIC,
+    FIELD_SUBSCRIPTION,
     RETENTION_NONE,
     RETENTION_DELETE,
     RETENTION_KEEP,
@@ -87,13 +97,15 @@ def _resource_with_body(field: Int) -> List[UInt8]:
 def test_catalog_arms_match_the_wire() raises:
     var c = Catalog.v1()
     assert_equal(
-        len(c.types), 6, "v1 declares service, job, table, bucket, service_account and grant"
+        len(c.types),
+        10,
+        "v1 declares service, job, table, bucket, queue, secret, service_account, topic, grant and subscription",
     )
     for i in range(len(c.types)):
         var field = c.types[i].field
         var r = decode_proto[Resource](_resource_with_body(field))
         assert_equal(body_field(r), field, c.types[i].name + " maps back to its field")
-    var none = decode_proto[Resource](_resource_with_body(21))
+    var none = decode_proto[Resource](_resource_with_body(22))
     var raised = False
     try:
         _ = body_field(none)
@@ -176,7 +188,10 @@ def _entry(
 def _ints(
     a: Int, b: Int = -1, c: Int = -1, d: Int = -1, e: Int = -1, f: Int = -1
 ) -> List[Int]:
-    var l = List[Int]()
+    """The fields given, then the messaging fields (15 queue, 21 topic, 28
+    subscription) and 16 secret, which every entry in these tests
+    implements."""
+    var l: List[Int] = [15, 21, 28, 16]
     l.append(a)
     if b >= 0:
         l.append(b)
@@ -425,6 +440,56 @@ def test_the_table_row() raises:
     print("  test_the_table_row: PASS")
 
 
+def test_the_messaging_rows() raises:
+    var c = Catalog.v1()
+    var arms = body_arms()
+    var fields = [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]
+    var names = ["queue", "topic", "subscription"]
+    var positions = [4, 7, 9]
+    for i in range(3):
+        ref t = c.types[c.index_of(fields[i])]
+        assert_equal(t.name, String(names[i]))
+        assert_equal(t.portability, PORTABLE)
+        var role = String("sub") if i == 2 else String(names[i])
+        assert_equal(t.primary_role, role, "a reference lands on its own role")
+        assert_equal(arms[positions[i]].field, fields[i], String(names[i]) + " by declaration order")
+        assert_false(t.accepts_access("CALL"), "messaging is not called")
+        assert_false(t.accepts_access("READ"), "messaging is not READ")
+    assert_equal(FIELD_QUEUE, 15)
+    assert_equal(FIELD_TOPIC, 21)
+    assert_equal(FIELD_SUBSCRIPTION, 28)
+    ref q = c.types[c.index_of(FIELD_QUEUE)]
+    ref t = c.types[c.index_of(FIELD_TOPIC)]
+    ref s = c.types[c.index_of(FIELD_SUBSCRIPTION)]
+    for o in ["NAME", "ADDRESS"]:
+        assert_true(q.exposes_output(String(o)) and t.exposes_output(String(o)), String(o))
+    assert_equal(len(q.exposes), 2)
+    assert_equal(len(t.exposes), 2)
+    assert_equal(len(q.accepts), 2, "a queue accepts SEND and RECEIVE")
+    assert_true(q.accepts_access("SEND") and q.accepts_access("RECEIVE"))
+    assert_equal(len(t.accepts), 1, "a topic accepts SEND only")
+    assert_true(t.accepts_access("SEND"))
+    assert_false(t.accepts_access("RECEIVE"), "a topic is received from through a queue")
+    assert_equal(len(s.exposes), 0, "a subscription exposes nothing")
+    assert_equal(len(s.accepts), 0, "a subscription accepts nothing")
+    assert_equal(q.retention_default, RETENTION_DELETE, "a queue is deleted by default")
+    assert_equal(t.retention_default, RETENTION_DELETE, "a topic is deleted by default")
+    assert_false(s.takes_retention(), "a subscription is deleted with its resource")
+    assert_equal(Access.from_json_name("SEND").value, Access.SEND)
+    assert_equal(Access.from_json_name("RECEIVE").value, Access.RECEIVE)
+    var l = _list(
+        String('{"resource":[{"id":"work","queue":{}},{"id":"ev","retention":"KEEP","topic":{}},')
+        + String('{"id":"fan","subscription":{"topic":{"resource":"ev"},"queue":{"resource":"work"}}}]}')
+    )
+    assert_equal(effective_retention(c, l[0]), RETENTION_DELETE, "unset: DELETE")
+    assert_equal(effective_retention(c, l[1]), RETENTION_KEEP, "written KEEP")
+    assert_equal(effective_retention(c, l[2]), RETENTION_NONE, "a subscription takes none")
+    assert_equal(primary_node(c, l, String("work")), "work/queue")
+    assert_equal(primary_node(c, l, String("ev")), "ev/topic")
+    assert_equal(primary_node(c, l, String("fan")), "fan/sub")
+    print("  test_the_messaging_rows: PASS")
+
+
 def main() raises:
     print("test_cloud_catalog_and_clouds")
     test_catalog_arms_match_the_wire()
@@ -437,4 +502,5 @@ def main() raises:
     test_the_bucket_row_retention_and_primary_role()
     test_the_identity_rows()
     test_the_table_row()
+    test_the_messaging_rows()
     print("ALL kci_cloud CATALOG AND CLOUDS TESTS PASSED")

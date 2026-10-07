@@ -103,7 +103,7 @@ from kci_cloud import (
     FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
-    FIELD_GRANT,
+    FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SECRET, Feed,
     apply_resources,
     body_field,
     describe,
@@ -269,11 +269,11 @@ struct _Stub(CloudAdapter, Movable):
         var l = List[Int]()
         l.append(FIELD_SERVICE)
         if self._full:
-            l.append(FIELD_JOB)
-            l.append(FIELD_TABLE)
-            l.append(FIELD_BUCKET)
-            l.append(FIELD_SERVICE_ACCOUNT)
+            for f in [FIELD_JOB, FIELD_TABLE, FIELD_BUCKET, FIELD_QUEUE, FIELD_SERVICE_ACCOUNT, FIELD_TOPIC]:
+                l.append(f)
             l.append(FIELD_GRANT)
+            l.append(FIELD_SUBSCRIPTION)
+            l.append(FIELD_SECRET)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -284,6 +284,9 @@ struct _Stub(CloudAdapter, Movable):
             l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
             l.append(Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("no identities")))
             l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
+            for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]:
+                l.append(Absence(f, NOT_YET, String("no messaging")))
+            l.append(Absence(FIELD_SECRET, NOT_YET, String("no secret store")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -319,7 +322,7 @@ struct _Stub(CloudAdapter, Movable):
     def public_mechanism(self) -> String:
         return self._mechanism.copy()
 
-    def check(self, r: Resource) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
         var l = List[Finding]()
         if r._oneof0_case == 1 and r.service.value().port == 1:
             l.append(
@@ -337,7 +340,7 @@ struct _Stub(CloudAdapter, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
         if self._bad_owner:
             owner = String("someone-else")
@@ -651,7 +654,7 @@ def test_id_grammar_platform_and_secret_rules() raises:
         "abcdefghijklmnopqrstuvwxy|id|id is 25 bytes; at most 24",
         'bad-plat|service.image.platform|platform "amd64" is not <os>/<cpu> (for example linux/amd64)',
         "svc|service.secret_env.DB|the variable is set by env and by secret_env; set it in one",
-        "svc|service.secret_env.EMPTY|a secret reference with no name",
+        "svc|service.secret_env.EMPTY|a secret reference with no name and no secret",
         'cron|job.env.REGION|release parameter "region" is unresolved',
         'cron|job.env.API|ref to missing resource "ghost"',
         "cron|job.secret_env.TOKEN|the variable is set by env and by secret_env; set it in one",
