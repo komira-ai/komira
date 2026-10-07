@@ -1,5 +1,6 @@
 """`komira_formats_e2e` -- one dataset, four file formats, one Hive tree on the
-local disk, read back through discovery and projection.
+local disk, read back through discovery and projection; the same dataset as an
+Arrow IPC File and Stream.
 
 This package exists for its tests. Its sources are the shared fixture:
 
@@ -23,6 +24,10 @@ partition value with the dataset above, and pin the writers' bytes against
 literals spelled from the format specs (the oracle a writer/reader
 self-round-trip lacks). Nothing here is shipped (`conda = False`).
 
+`ipc_assembly.mojo` strings komira_arrow_ipc's message encoders into an
+Arrow IPC File or Stream (`IpcAssembly`, `write_ipc`): komira ships the
+encoders and framing pieces, not a file or stream writer.
+
 The numeric edge fixture is separate: `edge_numerics.mojo` (integer limits
 and IEEE-754 edge values, each float given by its bit pattern, with the
 expected text spelled by hand) and `edge_checks.mojo` (collect-every-
@@ -42,6 +47,7 @@ from .dataset import (
     flag_at,
     batch_for_city,
 )
+from .ipc_assembly import IpcAssembly, write_ipc
 from .hive_tree import (
     format_exts,
     partition_dir,

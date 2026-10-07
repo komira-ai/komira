@@ -1829,7 +1829,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
 
     def refresh_to_durable_head(mut self) raises -> Int64:
         """Refresh this handle's folded index to the DURABLE `_HEAD` pointer
-        (the per-request cache work, lever 2 — the per-worker cached
+        (the per-request cache work: the per-worker cached
         handle). Reads the durable `_HEAD` OBJECT (`read_durable_head()`, ONE GET,
         O(1) — NOT the O(chunks) authoritative LIST) as the freshness ORACLE, and
         delta-folds ONLY the NEW chunks `(_folded_seq, durable_head]`. Returns the
