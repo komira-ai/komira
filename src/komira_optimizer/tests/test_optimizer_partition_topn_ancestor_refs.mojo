@@ -22,6 +22,7 @@ from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_FILTER,
+    PLAN_PARTITION_BY,
     PLAN_PARTITION_TOPN,
 )
 
@@ -87,6 +88,97 @@ def test_outer_filter_on_the_rank_emits_it() raises:
     var out = fuse_partition_topn(plan^)
     assert_equal(Int(out.tag), Int(PLAN_FILTER))
     _assert_emits(out._filter.value()[].child[], rk, "inner filter")
+
+
+# =============================================================================
+# A PartitionBy or PartitionTopN above the fused Filter
+# =============================================================================
+
+
+def _fusable(rk: String, var pb: LogicalPlan) -> LogicalPlan:
+    """`Filter(rk <= 3)` over `pb`."""
+    return LogicalPlan.filter(_cmp(BIN_LE, rk, 3), pb^)
+
+
+def _outer_pb(
+    var pk: List[String], var ok: List[String], arg: String,
+    var child: LogicalPlan,
+) raises -> LogicalPlan:
+    """PartitionBy(pk; ok ASC; running_sum(arg) AS rs) over `child`."""
+    var desc = List[Bool]()
+    for _ in range(len(ok)):
+        desc.append(False)
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.running_sum(arg).with_alias(String("rs")))
+    return LogicalPlan.partition_by(pk^, ok^, desc^, exprs^, child^)
+
+
+def test_outer_partition_by_keyed_on_the_rank_emits_it() raises:
+    """`PartitionBy(PARTITION BY rk)` over the fusable Filter. Catches the
+    PartitionBy arm skipping its own partition keys."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var pk: List[String] = [rk.copy()]
+    var ok: List[String] = ["score"]
+    var plan = _outer_pb(pk^, ok^, "val", _fusable(rk, pb^))
+    var out = fuse_partition_topn(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
+    _assert_emits(out._partition_by.value()[].child[], rk, "partition key")
+
+
+def test_outer_partition_by_ordered_on_the_rank_emits_it() raises:
+    """`PartitionBy(PARTITION BY pid ORDER BY rk)` over the fusable Filter.
+    Catches the PartitionBy arm skipping its own order keys."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var pk: List[String] = ["pid"]
+    var ok: List[String] = [rk.copy()]
+    var plan = _outer_pb(pk^, ok^, "val", _fusable(rk, pb^))
+    var out = fuse_partition_topn(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
+    _assert_emits(out._partition_by.value()[].child[], rk, "order key")
+
+
+def test_outer_partition_by_summing_the_rank_emits_it() raises:
+    """`PartitionBy(... running_sum(rk))` over the fusable Filter. Catches
+    the PartitionBy arm skipping its partition expressions' argument
+    column."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var pk: List[String] = ["pid"]
+    var ok: List[String] = ["score"]
+    var plan = _outer_pb(pk^, ok^, rk, _fusable(rk, pb^))
+    var out = fuse_partition_topn(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
+    _assert_emits(out._partition_by.value()[].child[], rk, "argument")
+
+
+def test_outer_partition_topn_keyed_on_the_rank_emits_it() raises:
+    """`PartitionTopN(PARTITION BY rk)` over the fusable Filter. Catches
+    the PartitionTopN arm skipping its own partition keys."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var pk: List[String] = [rk.copy()]
+    var sk: List[String] = ["score"]
+    var desc: List[Bool] = [False]
+    var plan = LogicalPlan.partition_topn(pk^, sk^, desc^, 2, _fusable(rk, pb^))
+    var out = fuse_partition_topn(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_PARTITION_TOPN))
+    _assert_emits(out._partition_topn.value()[].child[], rk, "topn partition key")
+
+
+def test_outer_partition_topn_sorted_on_the_rank_emits_it() raises:
+    """`PartitionTopN(PARTITION BY pid ORDER BY rk)` over the fusable
+    Filter. Catches the PartitionTopN arm skipping its own sort keys."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var pk: List[String] = ["pid"]
+    var sk: List[String] = [rk.copy()]
+    var desc: List[Bool] = [False]
+    var plan = LogicalPlan.partition_topn(pk^, sk^, desc^, 2, _fusable(rk, pb^))
+    var out = fuse_partition_topn(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_PARTITION_TOPN))
+    _assert_emits(out._partition_topn.value()[].child[], rk, "topn sort key")
 
 
 def main() raises:

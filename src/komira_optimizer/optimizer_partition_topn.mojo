@@ -290,18 +290,30 @@ def _collect_unsafe_window_cols(
         )
 
     elif plan.tag == PLAN_PARTITION_BY:
-        # Recurse into the PartitionBy's own child to catch nested
-        # PartitionBy candidates. The PartitionBy's own keys are NOT
-        # added to ancestor_cols for its child — they're legitimate
-        # internal references (sort+partition keys of the window).
-        _collect_unsafe_window_cols(
-            plan._partition_by.value()[].child[], ancestor_cols, unsafe_cols
-        )
+        # The PartitionBy reads its partition keys, its order keys and
+        # each partition expression's argument column from its child; a
+        # window column produced below must survive fusion for them.
+        var new_ancestor = ancestor_cols.copy()
+        ref pbd = plan._partition_by.value()[]
+        for key in pbd.partition_keys:
+            new_ancestor.add(key)
+        for key in pbd.order_keys:
+            new_ancestor.add(key)
+        for i in range(len(pbd.partition_exprs)):
+            if pbd.partition_exprs[i].column.byte_length() > 0:
+                new_ancestor.add(pbd.partition_exprs[i].column)
+        _collect_unsafe_window_cols(pbd.child[], new_ancestor, unsafe_cols)
 
     elif plan.tag == PLAN_PARTITION_TOPN:
-        _collect_unsafe_window_cols(
-            plan._partition_topn.value()[].child[], ancestor_cols, unsafe_cols
-        )
+        # The PartitionTopN reads its partition and sort keys from its
+        # child.
+        var new_ancestor = ancestor_cols.copy()
+        ref ptd = plan._partition_topn.value()[]
+        for key in ptd.partition_keys:
+            new_ancestor.add(key)
+        for key in ptd.sort_keys:
+            new_ancestor.add(key)
+        _collect_unsafe_window_cols(ptd.child[], new_ancestor, unsafe_cols)
 
     elif plan.tag == PLAN_ASOF_JOIN:
         # Conservative: ASOF join may reference any column on either
