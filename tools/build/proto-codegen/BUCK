@@ -126,11 +126,27 @@ _PROTOCOL_TESTS = "//third_party/botocore:protocol_tests[tests/unit/protocols]"
 
 _IGNORE_LIST = "//third_party/botocore:protocol_tests[tests/unit/protocols/protocol-tests-ignore-list.json]"
 
-# The conformance driver's generator (see above).
+# The conformance driver's generator (see above). It is published behind
+# :aws_conformance_gen_cli.
 rust_binary(
     name = "aws-conformance-gen",
     srcs = ["src/main_aws_conformance_gen.rs"],
     crate_root = "src/main_aws_conformance_gen.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    tests = [":aws_conformance_gen_cli"],
+)
+
+# aws-conformance-gen's inline tests (src/main_aws_conformance_gen_test.rs):
+# its command line run through `cli` as `main` runs it, each `--protocol`
+# refusal asserted as exit status 2 with the exact reason and usage line.
+rust_test(
+    name = "aws_conformance_gen_cli",
+    srcs = [
+        "src/main_aws_conformance_gen.rs",
+        "src/main_aws_conformance_gen_test.rs",
+    ],
+    crate_root = "src/main_aws_conformance_gen.rs",
+    crate_name = "aws_conformance_gen",
     deps = _DEPS + [":komira_proto_codegen"],
 )
 

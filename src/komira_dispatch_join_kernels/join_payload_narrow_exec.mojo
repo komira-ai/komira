@@ -1,5 +1,5 @@
 # =============================================================================
-# join_payload_narrow_exec -- the DELIVERY half of PAYLOAD-NARROW
+# join_payload_narrow_exec -- the DELIVERY half of join payload narrowing
 # =============================================================================
 #
 # The decision half is an optimizer rule: it proves, off folded parquet footer
@@ -554,7 +554,7 @@ struct _PnNarrowTask(Segment):
             # SAFETY: two tiles of the same slot receive an aliased `mut` ref
             # to `out[][slot]` (through the bitcast pointer, invisible to the
             # borrow checker) but write DISJOINT element ranges -- the
-            # PARALLELIZE-BOUNDARY disjointness contract stated on the driver.
+            # parallel-region disjointness contract stated on the driver.
             ref dbuf = sp[].out[].get_mut_interior(slot)
             var ok = _pn_narrow_range(
                 sp[].src[][Int(w.col)],
@@ -757,7 +757,7 @@ def narrow_build_batch[
                 bad = True
                 break
     else:
-        # PARALLELIZE-BOUNDARY: (column x row range) build-side narrowing.
+        # Parallel region: (column x row range) build-side narrowing.
         # Disjointness: task `t` READS `src[][work[t].col]` (read-only, shared)
         #   and WRITES elements [row_start, row_end) of `out[][work[t].slot]`
         #   only. The tiles of one slot PARTITION [0, rows), and different
