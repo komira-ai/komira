@@ -81,7 +81,7 @@ def scan(owner, root, hits, agpl):
 
 def check_patterns():
     """The patterns tell the AGPL from texts that only name it, and find the GPL family."""
-    agpl_title = "                    GNU AFFERO GENERAL PUBLIC LICENSE\n                       Version 3, 19 November 2007"
+    agpl_title = "                    GNU AFFERO GENERAL PUBLIC LICENSE\n                       Version 3"
     gpl3_s13 = "13. Use with the GNU Affero General Public License."
     mpl_def = "the GNU Lesser General Public License, Version 2.1, the GNU Affero General Public License, Version 3.0"
     assert AGPL.search(agpl_title) and AGPL.search("License: AGPL-3.0-or-later"), "the AGPL pattern misses the AGPL"
