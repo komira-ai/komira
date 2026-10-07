@@ -15,7 +15,7 @@
 #   * `build_pair_buckets`: the right-only composite skip.
 #   * `composite_ndv_for_relation`: every defensive return, the per-column
 #     dedup, the saturation and overflow guards (including a zero NDV after
-#     saturation), a zero NDV and a 0-row relation.
+#     saturation), a zero NDV (the result floors at 1) and a 0-row relation.
 #   * `composite_ndv_pk_side`: only the second endpoint qualifies; an
 #     endpoint outside chain.relations answers -1.
 #   * The hand-written `copy()` of ColumnBinding, EquivalenceClass and
@@ -335,8 +335,8 @@ def test_composite_ndv_saturated_product_ignores_zero_ndv() raises:
     ndv 0. A saturated product stays SAT_CAP, so the result clamps to
     |rel| = 1000.
     Catches: the `ndv_product >= SAT_CAP` term dropped from the cap check
-    (the product would be multiplied by 0 and the answer would be 0); the
-    whole cap check dropped gives the same 0."""
+    (the product would be multiplied by 0 and the answer would floor to 1);
+    the whole cap check dropped gives the same 1."""
     var chain = _two_rel_chain(1000, 10)
     chain.edges.append(_edge(0, 1, "a", "p"))
     chain.edges.append(_edge(0, 1, "b", "q"))
@@ -351,14 +351,15 @@ def test_composite_ndv_saturated_product_ignores_zero_ndv() raises:
 
 def test_composite_ndv_zero_ndv_and_empty_relation() raises:
     """A provider answering ndv 0 makes the product 0 without a division by
-    zero; a 0-row relation clamps |rel| to 1.
-    Catches: the `v.ndv > 0` guard removed (SAT_CAP // 0); the `rel_card < 1`
-    floor removed (the 0-row relation would answer 0)."""
+    zero, and the result floors at 1; a 0-row relation clamps |rel| to 1.
+    Catches: the `v.ndv > 0` guard removed (SAT_CAP // 0); the result floor
+    removed (the zero-NDV case would answer 0); the `rel_card < 1` floor
+    removed (the 0-row relation would answer 0)."""
     var chain = _two_rel_chain(1000, 0)
     chain.edges.append(_edge(0, 1, "a", "b"))
     var buckets = build_pair_buckets(chain)
     assert_equal(
-        composite_ndv_for_relation(chain, buckets[0], 0, _ZeroNdvProvider()), 0
+        composite_ndv_for_relation(chain, buckets[0], 0, _ZeroNdvProvider()), 1
     )
     var p = SyntheticColumnStatsProvider()
     p.inject(1, "b", 50, True, TIER_PARQUET_METADATA)
