@@ -25,12 +25,13 @@ an extension module needing one finds that copy, not the worker's: the
 loader resolves a needed name to an object already loaded under that soname.
 The environment of the `python_wheel`, `py_test` and `python_oracle` actions
 is `LC_ALL=C` and `TZ=UTC0` (a POSIX rule: local time is UTC and the C
-library reads no zone file for it); a `py_test`'s also has `TZDIR`, the
-`zoneinfo` directory of its `tzdata` wheel, which `pyrun.py` makes Python's
-only zone path, so no zone is read from the worker. An oracle's script runs
-in a child interpreter `oracle_run.py` starts with `-s -S -P` instead (no
-user site directory, no `site`, no script directory put first by the
-interpreter) and the environment `LC_ALL=C PYTHONHASHSEED=0` and nothing
+library reads no zone file for it); a `py_test`'s and a `python_oracle`'s
+also has `TZDIR`, the `zoneinfo` directory of its `tzdata` wheel, which
+`pyrun.py` and `oracle_run.py` make Python's only zone path, so no zone is
+read from the worker. An oracle's script runs in a child interpreter
+`oracle_run.py` starts with `-s -S -P` instead (no user site directory, no
+`site`, no script directory put first by the interpreter) and the
+environment `LC_ALL=C PYTHONHASHSEED=0 TZ=UTC0 TZDIR=<absolute>` and nothing
 else, so that string hashes are the same in every run; `-I` would ignore
 `PYTHONHASHSEED`.
 
@@ -309,7 +310,7 @@ def _python_oracle_impl(ctx):
             fail("{}: {} is listed twice".format(ctx.label, s.short_path))
         srcs[s.short_path] = s
     closure = {}
-    for d in ctx.attrs.deps:
+    for d in ctx.attrs.deps + [ctx.attrs.tzdata]:
         for k, v in d[PythonWheelInfo].closure.items():
             _check_independent(ctx, "wheel {}".format(k), v[1])
             if k in closure and closure[k][0] != v[0]:
@@ -332,7 +333,12 @@ def _python_oracle_impl(ctx):
     for p in ctx.attrs.outs:
         cmd.add("--outs", p)
     cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), ctx.attrs.args)
-    ctx.actions.run(cmd, env = _ENV, category = "python_oracle")
+    # The zone database, as in a py_test: oracle_run.py passes TZDIR (made
+    # absolute) and TZ=UTC0 to each run and makes TZDIR zoneinfo's only path.
+    tzdata = ctx.attrs.tzdata[PythonWheelInfo].closure[ctx.attrs.tzdata[PythonWheelInfo].name][1]
+    env = dict(_ENV)
+    env["TZDIR"] = cmd_args(tzdata, format = "{}/tzdata/zoneinfo")
+    ctx.actions.run(cmd, env = env, category = "python_oracle")
     return [DefaultInfo(
         default_output = out,
         other_outputs = [tmp],
@@ -341,7 +347,7 @@ def _python_oracle_impl(ctx):
 
 _python_oracle = rule(
     impl = _python_oracle_impl,
-    doc = "Runs `src` twice with the hermetic interpreter (`oracle_run.py`) and outputs the directory the first run wrote, only if both runs wrote the same tree; each `outs` path is a sub-target `[<path>]`. The script gets `sys.argv = [src, <output directory>, <data directory>, *args]`; `data` ({dest: source}, or sources staged at their paths) is staged in the data directory, `srcs` next to `src`. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under third_party/.",
+    doc = "Runs `src` twice with the hermetic interpreter (`oracle_run.py`) and outputs the directory the first run wrote, only if both runs wrote the same tree; each `outs` path is a sub-target `[<path>]`. The script gets `sys.argv = [src, <output directory>, <data directory>, *args]`; `data` ({dest: source}, or sources staged at their paths) is staged in the data directory, `srcs` next to `src`. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under third_party/. `tzdata` is the wheel whose `tzdata/zoneinfo` directory is each run's `TZDIR` and Python's only zone path; it is in the closure.",
     attrs = {
         "args": attrs.list(attrs.string(), default = []),
         "data": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = {}),
@@ -350,6 +356,7 @@ _python_oracle = rule(
         "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
         "src": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
+        "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
         "_runner": attrs.source(default = "komira//tools/build/python:oracle_run.py"),
     },
 )

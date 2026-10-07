@@ -27,15 +27,15 @@ No source distribution is built and pip never runs.
 | protobuf | 7.36.2 | | protobuf interop |
 | grpcio | 1.84.0 | typing-extensions | gRPC interop |
 | typing-extensions | 4.16.0 | | grpcio |
-| tzdata | 2026.5 | | the time-zone database of every `py_test` (IANA 2026e) |
+| tzdata | 2026.5 | | the time-zone database of every `py_test` and `python_oracle` (IANA 2026e) |
 
 polars is pinned at 1.44.2, the version komira's Python surface implements;
 moving to polars 2 is a later change. pandas 3.0.6 is the version the
 surface implements.
 
-tzdata is in every `py_test`'s closure whether or not its `deps` name it:
-its `tzdata/zoneinfo` directory is the action's `TZDIR` and Python's only
-zone path ([tools/build/python](../../tools/build/python/README.md#time-zones)),
+tzdata is in every `py_test`'s and `python_oracle`'s closure whether or not
+its `deps` name it: its `tzdata/zoneinfo` directory is the action's `TZDIR`
+and Python's only zone path ([tools/build/python](../../tools/build/python/README.md#time-zones)),
 so a zone is never read from the worker.
 
 protobuf 7.36.2 loads the Python gencode of the repository's protoc (29.1,

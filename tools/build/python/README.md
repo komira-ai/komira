@@ -22,7 +22,7 @@ surfaces. Nothing built with these rules is shipped
 | `python_dist(name, archive, version, native_libs, preload)` | a CPython `install_only` archive (python-build-standalone) unpacked into one directory by busybox `tar`, with the packages of its `site-packages` (pip) removed. Fails unless `bin/python<major>.<minor>` runs and prints `version` (`python_dist: the interpreter in <archive> is <got>, the pin says <version>`). `native_libs` is a directory of shared libraries, `preload` the paths in it a `py_test` loads before its script. |
 | `python_wheel(name, distribution, version, wheel, python, deps)` | one wheel installed into a directory of its own by `wheel_install.py`, run with `python`: every member at its path, a `<name>-<version>.data/` directory's `purelib/` and `platlib/` merged in, its `scripts/`, `headers/` and `data/` left out. Fails unless the wheel holds exactly one `.dist-info` and that directory's name and its METADATA `Name` and `Version` are `distribution` and `version`. `deps` are the wheels it imports; a closure holding one distribution at two versions fails analysis. |
 | `py_test(name, src, srcs, deps, args, expect_error, python, tzdata)` | runs `src` with the interpreter as a build action; its output (`<name>.pass`) exists only if the script passed, so building the target is running the test. `srcs` are staged next to `src` and importable from it, `deps` are `python_wheel` targets (each with its deps), `args` the script's arguments (`$(location ...)` expands). With `expect_error`, the script passes only if it raises an exception whose last traceback line (`Type: message`) is exactly that string. `python` defaults to `komira//third_party/python:cpython`; `tzdata` (default `komira//third_party/python:tzdata`) is the wheel whose `tzdata/zoneinfo` directory is the action's time-zone database ([Time zones](#time-zones)), and is in the closure whether or not `deps` names it. |
-| `python_oracle(name, src, srcs, data, deps, args, outs, python)` | runs `src` twice ([Oracles](#oracles)) and outputs the directory the first run wrote (`<name>/`), only if both runs wrote the same tree. Other targets take it as test data: the directory as `:<name>`, each `outs` path as the sub-target `:<name>[<path>]` (a Mojo library's `test_data`, a `py_test`'s `args` through `$(location ...)`). `data` is `{dest: source}` (or sources, each staged at its path from the cell root), staged in the data directory; `srcs` are staged next to `src`; `deps` are `python_wheel` targets; `args` are plain strings. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under `third_party/`. |
+| `python_oracle(name, src, srcs, data, deps, args, outs, python, tzdata)` | runs `src` twice ([Oracles](#oracles)) and outputs the directory the first run wrote (`<name>/`), only if both runs wrote the same tree. Other targets take it as test data: the directory as `:<name>`, each `outs` path as the sub-target `:<name>[<path>]` (a Mojo library's `test_data`, a `py_test`'s `args` through `$(location ...)`). `data` is `{dest: source}` (or sources, each staged at its path from the cell root), staged in the data directory; `srcs` are staged next to `src`; `deps` are `python_wheel` targets; `args` are plain strings. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under `third_party/`. `tzdata` is as in `py_test` (in the closure, so its wheel is checked too). |
 | `python_proto(name, src)` | the module `<stem>_pb2.py` that the pinned protoc (`komira//tools/build/toolchains/proto:protoc`, 29.1) generates for one `.proto` with no imports, for a `py_test`'s `srcs` (staged next to its script, so `import <stem>_pb2`). protoc 29.1 writes Python gencode 5.29.1; the test `protobuf_gencode` holds the pinned protobuf runtime to it. |
 
 The macros set `exec_compatible_with` to the linux x86_64 execution
@@ -84,9 +84,11 @@ runs
 - **Two runs.** `oracle_run.py` runs the script in two child interpreters,
   one after the other, the first writing into the output, the second into a
   directory under `<name>.tmp`. Each child is `python3.13 -s -S -P` with the
-  environment `LC_ALL=C PYTHONHASHSEED=0` and nothing else (`-I` would ignore
-  `PYTHONHASHSEED`; the child refuses to run with a random hash seed), so the
-  iteration order of a set of strings is the same in every run. The oracle
+  environment `LC_ALL=C PYTHONHASHSEED=0 TZ=UTC0 TZDIR=<absolute>` and
+  nothing else (`-I` would ignore `PYTHONHASHSEED`; the child refuses to run
+  with a random hash seed), so the iteration order of a set of strings is the
+  same in every run. Time zones come from the tzdata wheel as in a `py_test`
+  ([Time zones](#time-zones)). The oracle
   passes only if the two trees hold the same paths, each a directory or a
   regular file, with the same bytes and executable bit; a symlink is
   refused. A clock, a random number, a process id or the output path
@@ -133,8 +135,10 @@ of the floor either ([Time zones](#time-zones)).
 
 ## Time zones
 
-A `py_test` reads every time zone from the pinned tzdata wheel
-([third_party/python](../../../third_party/python/README.md#the-closure)):
+A `py_test` and each run of a `python_oracle` read every time zone from the
+pinned tzdata wheel
+([third_party/python](../../../third_party/python/README.md#the-closure)).
+For a `py_test`:
 
 - the rule sets `TZDIR` to the wheel's `tzdata/zoneinfo` directory, and
   `pyrun.py` makes it absolute in the environment, so the C library and ORC
@@ -147,6 +151,14 @@ A `py_test` reads every time zone from the pinned tzdata wheel
   Run without `TZDIR`, `pyrun.py` sets the path empty, so `zoneinfo` reads
   only an importable `tzdata` package;
 - `TZ=UTC0`: local time is UTC from a rule, not a file.
+
+A `python_oracle` sets the same `TZDIR` and `TZ`; `oracle_run.py` passes them
+to each child run (`TZDIR` made absolute, since the child changes directory)
+and the child makes `TZDIR` `zoneinfo`'s only search path, or, without
+`TZDIR`, an empty one. The test `oracle_cases` holds the runner's half; the
+oracle `orc_timestamps` holds the rule's (it asserts the zone setup, then
+writes an ORC timestamp column, which needs the `GMT` zone from `TZDIR`, and
+its two runs must write the same bytes).
 
 The test `timezones` holds all of it except the run without `TZDIR`, which
 the test `runner_cases` holds (its scripts run with an empty environment).

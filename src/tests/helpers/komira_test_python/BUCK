@@ -112,6 +112,17 @@ py_test(
     ],
 )
 
+# An oracle that needs the zone database: pyarrow writes an ORC timestamp
+# column (ORC reads its writer's zone, GMT, from TZDIR) and the script asserts
+# the zone setup the rule gives each run; it builds only if both runs wrote
+# the same bytes.
+python_oracle(
+    name = "orc_timestamps",
+    src = "orc_timestamps.py",
+    outs = ["ts.orc"],
+    deps = ["//third_party/python:pyarrow"],
+)
+
 py_test(
     name = "oracle_cases",
     src = "oracle_cases.py",
