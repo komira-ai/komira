@@ -282,6 +282,11 @@ def _collect_unsafe_window_cols(
         if plan._distinct.value()[].columns:
             for c in plan._distinct.value()[].columns.value():
                 new_ancestor.add(c)
+        else:
+            # A Distinct over all columns reads every column of its child.
+            ref child_schema = plan._distinct.value()[].child[].output_schema
+            for i in range(child_schema.num_columns()):
+                new_ancestor.add(child_schema.field_name(i))
         _collect_unsafe_window_cols(
             plan._distinct.value()[].child[], new_ancestor, unsafe_cols
         )

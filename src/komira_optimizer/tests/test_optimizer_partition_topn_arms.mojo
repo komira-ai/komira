@@ -219,14 +219,14 @@ def test_distinct_on_the_rank_emits_it() raises:
     _assert_fused(out._distinct.value()[].child[], True, "distinct child")
 
 
-def test_distinct_over_all_columns_does_not_emit_it() raises:
-    """Pins what the code does for a Distinct with no column list: it names
-    no column, so the window column is NOT emitted. (The Distinct's own
-    output schema was built over the PartitionBy's columns, rank included.)
-    Catches the `columns` guard being inverted."""
+def test_distinct_over_all_columns_emits_it() raises:
+    """A Distinct with no column list reads every column of its child, the
+    window column included (its own output schema was built over the
+    PartitionBy's columns, rank included), so the fused node emits it.
+    Catches the arm adding nothing when `columns` is None."""
     var plan = LogicalPlan.distinct(None, _fused_filter(_rank_pb(), 3))
     var out = fuse_partition_topn(plan^)
-    _assert_fused(out._distinct.value()[].child[], False, "distinct child")
+    _assert_fused(out._distinct.value()[].child[], True, "distinct child")
 
 
 def test_topn_on_the_rank_emits_it() raises:
