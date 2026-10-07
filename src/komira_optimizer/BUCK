@@ -28,6 +28,7 @@ mojo_library(
         "tests/test_optimizer_cse_axes.mojo",
         "tests/test_optimizer_eager_agg.mojo",
         "tests/test_optimizer_eager_agg_paths.mojo",
+        "tests/test_optimizer_expr_agg_join_sites.mojo",
         "tests/test_optimizer_expr_cse_branches.mojo",
         "tests/test_optimizer_expr_rules.mojo",
         "tests/test_optimizer_filter_pushdown_arms.mojo",
