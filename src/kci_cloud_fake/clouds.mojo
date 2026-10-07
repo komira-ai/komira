@@ -8,7 +8,8 @@
 #   * `FakeLimitedCloud` ("fake-limited")   is DELIBERATELY PARTIAL: it does
 #     not host `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a
 #     catalog that marks `job` CLOUD_BOUND), `table`, `bucket`,
-#     `service_account` nor `grant` (NOT_YET), and it has no public ingress,
+#     `service_account`, `grant`, `queue`, `topic` nor `subscription`
+#     (NOT_YET), and it has no public ingress,
 #     so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
@@ -22,6 +23,8 @@
 #              scheduled), and the same grants
 #   table   -> `<id>/table` (data.mojo; it holds no identity, so no grants)
 #   bucket  -> `<id>/bucket` (it holds no identity, so no grants)
+#   queue, topic, subscription -> `<id>/queue`, `<id>/topic`, `<id>/sub`
+#              (messaging.mojo, from kci's feeds; no identity, no grants)
 #   service account -> `<id>/identity` (it exposes NAME), and its grants
 #   grant   -> `<id>/grant`
 # The grants are kci's EDGES (`kci_cloud.grants`), handed to `lower` with
@@ -42,9 +45,11 @@
 # schedule folded into the run node, a grant's helper `r-<h>` (the
 # Kubernetes Role a RoleBinding binds) where its row names one, and a cell
 # edge folded into the identity as the field `cell.<NAME>`; on the gcp shape
-# a table's indexes and TTL policy as nodes of their own. A shape's NOT_YET
-# types (onprem: `table`) are the cloud's absences, and such a cloud is not
-# complete. `list_owned` reports a table object's stored key
+# a table's indexes and TTL policy as nodes of their own, and a queue as a
+# pull subscription (its private topic, its subscription turned off); on the
+# aws shape a queue's policy. A shape's NOT_YET types (onprem: `table`,
+# `queue`, `topic`, `subscription`) are the cloud's absences, and such a
+# cloud is not complete. `list_owned` reports a table object's stored key
 # (`OwnedRecord.key`) and the validation run that created the object (its
 # `kci-run-id` label, `OwnedRecord.validation_run_id`), both read back from
 # the object.
@@ -102,13 +107,17 @@ from kci_cloud import (
     FIELD_BUCKET,
     FIELD_GRANT,
     FIELD_JOB,
+    FIELD_QUEUE,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_SUBSCRIPTION,
     FIELD_TABLE,
+    FIELD_TOPIC,
     FINDING_CELL,
     FINDING_LIMIT,
     NOT_YET,
     V1_IMAGE_PLATFORM,
+    Feed,
     GrantEdge,
     body_field,
     holds_own_identity,
@@ -123,6 +132,7 @@ from kci_resource_proto.resource import Image, Resource, SecretRef, Size, Value
 
 from kci_cloud_fake.data import lower_bucket, lower_table
 from kci_cloud_fake.fake_store import FakeStore
+from kci_cloud_fake.messaging import lower_queue, lower_subscription, lower_topic, messaging_limits
 from kci_cloud_fake.limits import (
     FAKE_CITATION,
     common_limits,
@@ -336,7 +346,7 @@ def _lower_edges(
 
 
 def _lower(
-    r: Resource, edges: List[GrantEdge], mechanism: String, shape: ProviderShape
+    r: Resource, edges: List[GrantEdge], feeds: List[Feed], mechanism: String, shape: ProviderShape
 ) raises -> List[LoweredNode]:
     """The complete fixed set of roles of `r` on `shape`, as data."""
     var field = body_field(r)
@@ -344,6 +354,12 @@ def _lower(
         return lower_bucket(r, shape)
     if field == FIELD_TABLE:
         return lower_table(r, shape)
+    if field == FIELD_QUEUE:
+        return lower_queue(r, feeds, shape)
+    if field == FIELD_TOPIC:
+        return lower_topic(r, shape)
+    if field == FIELD_SUBSCRIPTION:
+        return lower_subscription(r, shape)
     var out = List[LoweredNode]()
     if field == FIELD_GRANT:
         _lower_edges(r, edges, shape, out)
@@ -613,6 +629,9 @@ struct FakeCloud(ConformanceTarget, Movable):
         all.append(FIELD_BUCKET)
         all.append(FIELD_SERVICE_ACCOUNT)
         all.append(FIELD_GRANT)
+        all.append(FIELD_QUEUE)
+        all.append(FIELD_TOPIC)
+        all.append(FIELD_SUBSCRIPTION)
         var l = List[Int]()
         for i in range(len(all)):
             if self._shape.hosts(all[i]):
@@ -649,18 +668,19 @@ struct FakeCloud(ConformanceTarget, Movable):
     def public_mechanism(self) -> String:
         return self._mechanism.copy()
 
-    def check(self, r: Resource) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
         var out = List[Finding]()
         common_limits(r, out)
         fold_limits(r, self._shape, self._id, out)
         index_limits(r, self._shape, self._id, out)
+        messaging_limits(r, feeds, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
 
-    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
-        return _lower(r, edges, self._mechanism, self._shape)
+    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
+        return _lower(r, edges, feeds, self._mechanism, self._shape)
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))
@@ -795,6 +815,8 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
             Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("fake-limited has no shared identities"))
         )
         l.append(Absence(FIELD_GRANT, NOT_YET, String("fake-limited has no standalone grants")))
+        for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]:
+            l.append(Absence(f, NOT_YET, String("fake-limited has no messaging")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -815,7 +837,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def public_mechanism(self) -> String:
         return String("")
 
-    def check(self, r: Resource) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
         var out = List[Finding]()
         common_limits(r, out)
         if r._oneof0_case == 1 and r.service.value()._oneof0_case == 1:
@@ -833,8 +855,8 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
 
-    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
-        return _lower(r, edges, String(""), ProviderShape.generic())
+    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
+        return _lower(r, edges, feeds, String(""), ProviderShape.generic())
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))

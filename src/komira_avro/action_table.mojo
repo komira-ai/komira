@@ -49,6 +49,7 @@ from .avro_schema import (
     AvroNode,
     AvroDefault,
     avro_node_to_arrow,
+    avro_kind_name,
     AVRO_DEFAULT_NONE,
     AVRO_DEFAULT_NULL,
     AVRO_DEFAULT_BOOL,
@@ -2155,6 +2156,69 @@ def _named_types_match(writer: AvroNode, reader: AvroNode) -> Bool:
     return False
 
 
+def _default_kind_name(dk: Int) -> String:
+    """`a <kind>` / `an <kind>` for an AVRO_DEFAULT_* (diagnostics only)."""
+    if dk == AVRO_DEFAULT_NULL:
+        return String("a null")
+    if dk == AVRO_DEFAULT_BOOL:
+        return String("a boolean")
+    if dk == AVRO_DEFAULT_INT:
+        return String("an int")
+    if dk == AVRO_DEFAULT_DOUBLE:
+        return String("a double")
+    if dk == AVRO_DEFAULT_STRING:
+        return String("a string")
+    if dk == AVRO_DEFAULT_BYTES:
+        return String("a bytes")
+    return String("a kind#") + String(dk)
+
+
+def _check_default_fits(
+    fname: String, dk: Int, rfd: ReadFieldData
+) raises:
+    """Refuse a reader default that `_synthesize_default` cannot push into
+    the column accumulator `rfd` selects: null needs a nullable column; a
+    boolean needs a boolean column; an int needs an int/long/float/double
+    column; a double needs a float/double column; a string needs a string
+    column; bytes need a binary column."""
+    var fits: Bool
+    if dk == AVRO_DEFAULT_NULL:
+        fits = rfd.nullability != NULL_NONE
+    else:
+        var tag = ColumnAccVariant.create(rfd).tag
+        if dk == AVRO_DEFAULT_BOOL:
+            fits = tag == ACC_BOOL
+        elif dk == AVRO_DEFAULT_INT:
+            fits = (
+                tag == ACC_I32
+                or tag == ACC_I64
+                or tag == ACC_F32
+                or tag == ACC_F64
+            )
+        elif dk == AVRO_DEFAULT_DOUBLE:
+            fits = tag == ACC_F32 or tag == ACC_F64
+        elif dk == AVRO_DEFAULT_STRING:
+            fits = tag == ACC_STRING
+        elif dk == AVRO_DEFAULT_BYTES:
+            fits = tag == ACC_BINARY
+        else:
+            fits = False
+    if fits:
+        return
+    var ty = String("Avro ") + avro_kind_name(rfd.avro_kind)
+    if rfd.logical_type.byte_length() > 0:
+        ty += ", logical " + rfd.logical_type
+    raise Error(
+        "AvroResolutionError.INVALID_DEFAULT: reader field '"
+        + fname
+        + "' has "
+        + _default_kind_name(dk)
+        + " default that does not fit its type ("
+        + ty
+        + ")"
+    )
+
+
 def _resolve_schemas(
     writer: AvroSchema, reader: AvroSchema
 ) raises -> ResolutionTable:
@@ -2328,6 +2392,7 @@ def _resolve_schemas(
                 " declared default"
             )
         var rfd = out_specs[ri].copy()
+        _check_default_fits(rname, rdefault.kind, rfd)
         actions.append(
             FieldAction.synth_default(
                 rname,

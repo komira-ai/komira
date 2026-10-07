@@ -16,6 +16,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_proto_codec_json_float32.mojo",
+        "tests/test_proto_codec_json_float64.mojo",
         "tests/test_proto_codec_json_nonascii_roundtrip.mojo",
         "tests/test_proto_codec_proto3_json_conformance.mojo",
         "tests/test_proto_codec_proto3_json_strictness.mojo",

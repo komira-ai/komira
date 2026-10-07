@@ -326,6 +326,7 @@
 #      site in an FFI module, an unlisted marked module) or ledger defect,
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
+#  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
 set -uo pipefail
 
 umbrella=1
@@ -1219,6 +1220,10 @@ for want in \
 done
 expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
 expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
+
+# 43
+# shellcheck source=tools/build/tests/coverage_run_tests.sh
+. "$ROOT/tools/build/tests/coverage_run_tests.sh"
 
 # 37
 pt_rc=0
