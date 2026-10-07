@@ -14,11 +14,15 @@
 #      null] reads a string default as bytes and keeps a null default;
 #      [null, bytes] reads a string default as bytes; [string, bytes] reads it
 #      as a string; a by-name fixed inside a union is resolved and its length
-#      checked; a default matching no branch is checked against the first.
+#      checked; a default matching no branch is checked against the first;
+#      int, boolean, number, array and map defaults skip a leading bytes
+#      branch; a by-name enum branch takes a string default as a string.
 #   T5 schema resolution: reader fields absent from the writer get the
 #      Latin-1 bytes in the decoded batch, for bytes, fixed, [bytes, null],
 #      [null, bytes] and [fixed, null] fields.
 #   T6 a writer schema with [bytes, null] and default null still opens.
+#   T7 schema resolution refuses a reader default that does not fit the
+#      reader column (exact messages), and still accepts one that fits.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -26,7 +30,11 @@ from std.testing import assert_equal, assert_true
 from komira_avro import (
     AvroSchema,
     read_avro_bytes,
+    AVRO_DEFAULT_BOOL,
     AVRO_DEFAULT_BYTES,
+    AVRO_DEFAULT_DOUBLE,
+    AVRO_DEFAULT_INT,
+    AVRO_DEFAULT_NONE,
     AVRO_DEFAULT_NULL,
     AVRO_DEFAULT_STRING,
     OCF_SYNC_LEN,
@@ -204,6 +212,48 @@ def test_union_first_branch() raises:
         "AvroSchemaError.INVALID_DEFAULT: field 'g' default is 1 bytes;"
         " fixed 'F2' has size 2",
     )
+    # Each JSON value type skips a leading bytes branch and matches the
+    # later branch of its type.
+    assert_equal(
+        _field_default_kind(_one_field('["bytes","long"]', "5"), 0),
+        AVRO_DEFAULT_INT,
+    )
+    assert_equal(
+        _field_default_kind(_one_field('["bytes","boolean"]', "true"), 0),
+        AVRO_DEFAULT_BOOL,
+    )
+    assert_equal(
+        _field_default_kind(_one_field('["bytes","double"]', "1"), 0),
+        AVRO_DEFAULT_INT,
+    )
+    assert_equal(
+        _field_default_kind(_one_field('["bytes","double"]', "1.5"), 0),
+        AVRO_DEFAULT_DOUBLE,
+    )
+    # Array and map defaults are accepted and not captured.
+    assert_equal(
+        _field_default_kind(
+            _one_field('["bytes",{"type":"array","items":"int"}]', "[]"), 0
+        ),
+        AVRO_DEFAULT_NONE,
+    )
+    assert_equal(
+        _field_default_kind(
+            _one_field('["bytes",{"type":"map","values":"int"}]', "{}"), 0
+        ),
+        AVRO_DEFAULT_NONE,
+    )
+    # Field g's union names the enum defined by field e; a string default
+    # matches the enum branch and is not read as bytes.
+    assert_equal(
+        _field_default_kind(
+            '{"type":"record","name":"R","fields":['
+            '{"name":"e","type":{"type":"enum","name":"E","symbols":["A"]}},'
+            '{"name":"g","type":["E","bytes"],"default":"A"}]}',
+            1,
+        ),
+        AVRO_DEFAULT_STRING,
+    )
 
 
 # ---- OCF fixture helpers (decoder-inverse, as in the resolution tests). ----
@@ -333,6 +383,79 @@ def test_writer_union_null_default_opens() raises:
     assert_true(wa.is_null(1), "row 1 is null")
 
 
+def _resolve_refusal(reader_field: String) -> String:
+    """Resolve a one-row file whose writer has only `id` against a reader
+    that adds `reader_field`; return the error text."""
+    var writer = String(
+        '{"type":"record","name":"R","fields":[{"name":"id","type":"long"}]}'
+    )
+    var reader = (
+        String('{"type":"record","name":"R","fields":[')
+        + '{"name":"id","type":"long"},'
+        + reader_field
+        + "]}"
+    )
+    var p = List[UInt8]()
+    _enc_long(Int64(5), p)
+    var buf = _ocf(writer, p, 1)
+    try:
+        _ = read_avro_bytes_resolved(Span(buf), reader)
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
+def test_resolution_refuses_unfit_default() raises:
+    """T7: a reader default whose kind does not fit the reader column is
+    refused when the resolution table is built, before any row is filled."""
+    # The int default matches no branch; the first branch (null) is not
+    # bytes, so the schema parses and the default is captured as int.
+    assert_equal(
+        _resolve_refusal(
+            '{"name":"n","type":["null","bytes"],"default":5}'
+        ),
+        "AvroResolutionError.INVALID_DEFAULT: reader field 'n' has an int"
+        " default that does not fit its type (Avro bytes)",
+    )
+    assert_equal(
+        _resolve_refusal('{"name":"s","type":"long","default":"x"}'),
+        "AvroResolutionError.INVALID_DEFAULT: reader field 's' has a string"
+        " default that does not fit its type (Avro long)",
+    )
+    assert_equal(
+        _resolve_refusal('{"name":"z","type":"int","default":null}'),
+        "AvroResolutionError.INVALID_DEFAULT: reader field 'z' has a null"
+        " default that does not fit its type (Avro int)",
+    )
+    assert_equal(
+        _resolve_refusal('{"name":"t","type":"string","default":true}'),
+        "AvroResolutionError.INVALID_DEFAULT: reader field 't' has a boolean"
+        " default that does not fit its type (Avro string)",
+    )
+    assert_equal(
+        _resolve_refusal('{"name":"i","type":"int","default":1.5}'),
+        "AvroResolutionError.INVALID_DEFAULT: reader field 'i' has a double"
+        " default that does not fit its type (Avro int)",
+    )
+    assert_equal(
+        _resolve_refusal(
+            '{"name":"d","type":{"type":"bytes","logicalType":"decimal",'
+            '"precision":4,"scale":0},"default":"\\u0001"}'
+        ),
+        "AvroResolutionError.INVALID_DEFAULT: reader field 'd' has a bytes"
+        " default that does not fit its type (Avro bytes, logical decimal)",
+    )
+    # Defaults that fit are still accepted.
+    assert_equal(
+        _resolve_refusal('{"name":"k","type":"double","default":2}'),
+        "<accepted>",
+    )
+    assert_equal(
+        _resolve_refusal('{"name":"m","type":["null","long"],"default":null}'),
+        "<accepted>",
+    )
+
+
 def main() raises:
     test_bytes_default_is_latin1()
     test_fixed_default()
@@ -340,4 +463,5 @@ def main() raises:
     test_union_first_branch()
     test_resolution_applies_latin1_default()
     test_writer_union_null_default_opens()
+    test_resolution_refuses_unfit_default()
     print("test_avro_bytes_fixed_defaults: ALL PASS")
