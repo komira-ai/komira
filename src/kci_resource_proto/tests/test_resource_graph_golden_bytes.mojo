@@ -1,12 +1,12 @@
 # =============================================================================
-# test_resource_graph_golden_bytes.mojo: the bytes of four resource graphs,
+# test_resource_graph_golden_bytes.mojo: the bytes of five resource graphs,
 # frozen, so protoc can read them.
 # =============================================================================
 #
 # The other tests of this package hold `kci.resource.v1` to bytes written by
 # hand here and to this package's own decoder. Neither is read by anything
 # that did not come from this repository. This file freezes the bytes this
-# package's encoder writes for four composed graphs, as `.hex` fixtures; the
+# package's encoder writes for five composed graphs, as `.hex` fixtures; the
 # `resource_graph_fixtures` check in BUCK has protoc (which learned the format
 # from `resource.proto` alone) decode those bytes to the committed `.txtpb`,
 # and encode that text to the committed `.canonical.hex`. A symmetric defect,
@@ -15,7 +15,7 @@
 #
 # THE CORPUS. Each graph is authored as proto3 JSON, the form an author
 # writes and the one kci reads (`decode_json[ResourceList]`), then encoded
-# with `encode_proto`. Between them the four graphs set every field of every
+# with `encode_proto`. Between them the five graphs set every field of every
 # message of `resource.proto` at least once, to a value other than its
 # default (a field at its default is not on protoc's side of the wire, so it
 # would check nothing), and every `Resource.body` arm:
@@ -44,6 +44,12 @@
 #                   `SecretRef.secret` (one pinned to a version) and READs
 #                   both, an identity that may READ_WRITE one, and a grant
 #                   that lets it WRITE the other.
+#   dns_graph       a DNS zone kept on delete (every `DnsZone` field), a
+#                   service, a CNAME record that follows the service's HOST
+#                   with a TTL (every `DnsRecord` field), an MX record with
+#                   two values, and a certificate for the zone's name and
+#                   its wildcard (every `Certificate` field), deleted with
+#                   its resource.
 #
 # Map keys are authored in sorted order. protoc prints and re-encodes a map
 # sorted by key, and this encoder writes a map in insertion order, so a
@@ -215,6 +221,24 @@ comptime _SECRET_GRAPH = (
     + '"uses":[{"target":{"resource":"token"},"access":"READ_WRITE"}]},'
     + '{"id":"rotator-db","grant":{"principal":{"resource":"rotator"},'
     + '"target":{"resource":"db"},"access":"WRITE"}}'
+    + "]}"
+)
+
+
+comptime _DNS_GRAPH = (
+    '{"resource":['
+    # A zone, kept on delete.
+    + '{"id":"site","retention":"KEEP","dnsZone":{"name":"example.com"}},'
+    # The service the CNAME follows.
+    + '{"id":"api","service":{"image":{"digest":"sha256:d0e5"},"internal":{}}},'
+    # A CNAME to the service's HOST, with a TTL; an MX with two values.
+    + '{"id":"www","dnsRecord":{"name":"www.example.com","zone":{"resource":"site"},'
+    + '"type":"CNAME","values":[{"ref":{"resource":"api","standard":"HOST"}}],"ttl":"600s"}},'
+    + '{"id":"mx","dnsRecord":{"name":"example.com","zone":{"resource":"site"},"type":"MX",'
+    + '"values":[{"literal":"10 mail.example.com"},{"literal":"20 backup.example.com"}]}},'
+    # A certificate for the zone's name and its wildcard, deleted with it.
+    + '{"id":"tls","retention":"DELETE","certificate":{"domains":["example.com","*.example.com"],'
+    + '"zone":{"resource":"site"}}}'
     + "]}"
 )
 
@@ -430,14 +454,20 @@ def test_secret_graph_bytes_are_frozen() raises:
     _assert_frozen("secret_graph", _SECRET_GRAPH, 5)
 
 
+def test_dns_graph_bytes_are_frozen() raises:
+    _assert_frozen("dns_graph", _DNS_GRAPH, 5)
+
+
 def main() raises:
     print("test_resource_graph_golden_bytes")
     _print_golden("service_graph", _SERVICE_GRAPH)
     _print_golden("job_bucket_graph", _JOB_BUCKET_GRAPH)
     _print_golden("messaging_graph", _MESSAGING_GRAPH)
     _print_golden("secret_graph", _SECRET_GRAPH)
+    _print_golden("dns_graph", _DNS_GRAPH)
     test_service_graph_bytes_are_frozen()
     test_job_bucket_graph_bytes_are_frozen()
     test_messaging_graph_bytes_are_frozen()
     test_secret_graph_bytes_are_frozen()
+    test_dns_graph_bytes_are_frozen()
     print("ALL kci.resource.v1 GRAPH GOLDEN-BYTES TESTS PASSED")

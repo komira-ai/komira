@@ -57,7 +57,6 @@ CALLERS = [
     "//src/komira_log:komira_log",
     "//src/komira_metrics:komira_metrics",
     "//src/komira_objectstore:komira_objectstore",
-    "//src/komira_parquet_codec:komira_parquet_codec",
     "//src/komira_scan_source:komira_scan_source",
     "//src/komira_supervisor:komira_supervisor",
     "//src/komira_uuid:komira_uuid",
