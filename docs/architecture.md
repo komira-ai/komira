@@ -161,6 +161,16 @@ dependency order is the order of the rows.
 | [`komira_test_bucket`](../src/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
 | [`komira_test_s3_adapter`](../src/komira_test_s3_adapter/) | the real adapters behind those seams, for a test that runs on an embedded MinIO: `SpawnedProcessRunner` (starts the server through `spawn_detached` and setpriv so it dies with the test, Linux only; readiness from MinIO's health endpoint) and `MinioObjectStore` (an `S3Store`, path-style plaintext, the credential from the shared-credentials file), and `open_embedded_minio_test_bucket`, which opens a run's bucket from the test's flags with both. The only one of these libraries with an HTTP stack and a process supervisor. |
 
+[`komira_test_fake_s3`](../src/tests/support/komira_test_fake_s3/) is a
+test-support library of another kind: a fake S3 in memory for hermetic
+welded tests, with no flags and no socket. It is a komira_http_core
+`Connector` whose streams answer GET (ranges, suffix ranges, If-Match),
+HEAD, ListObjectsV2, conditional PutObject, DeleteObject and multipart
+uploads, with faults a test sets (a 409 conflict, a request budget, a
+trapped key, an overwrite racing a read, failed multipart steps).
+komira_objectstore_s3 names it in `test_deps`, which reaches its welded
+tests and nothing it ships.
+
 ### End-to-end test packages
 
 Packages that exist for their welded tests: each runs several libraries
