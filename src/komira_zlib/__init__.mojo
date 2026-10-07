@@ -10,14 +10,16 @@
 # of zlib framing (for example, a git server's loose-object framing) would pull
 # parquet, the compiler, the engine operators and runtime, and every format
 # reader into its build closure, and a compile break in any of them would block
-# a release of code that never touches them. `komira_parquet` depends on this
-# library for its GZIP/zlib page codec instead of containing it.
+# a release of code that never touches them. It is komira_compression's
+# implementation layer for libz, and komira_compression is its one importer
+# (the root BUCK's `codec_owner` lint): the Parquet, Avro and ORC codecs call
+# komira_compression.zlib, which re-exports this API.
 #
 # Both compression directions delegate to the system libz through a runtime
 # dlopen: a native inflate/deflate implementation is not worth carrying when
 # libz is already the reference it would be measured against.
 #
-# Public symbols (stable surface for `komira_parquet`'s compression codec):
+# Public symbols (the surface komira_compression.zlib re-exports):
 #   * `zlib_inflate_into(dst, src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int`
 #   * `zlib_inflate_once(dst, src, window_bits) -> ZlibInflateOutcome` (one
 #     `inflate` call, its return code and counts handed back unjudged)

@@ -4,9 +4,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the compress bound) and the frame (LZ4F_*, the Arrow IPC LZ4_FRAME
 # framing). liblz4 is loaded at run time with dlopen and kept in one
 # process-lifetime `_Global` slot, so there is no link dep, and there are no
-# first-party deps: the Parquet page codecs, the document store's `_source`
-# compression and komira_compression's codecs depend on this leaf and on
-# nothing of each other.
+# first-party deps. It is komira_compression's implementation layer for
+# liblz4 and komira_compression is its one importer (the root BUCK's
+# `codec_owner` lint): the Parquet page codecs, the ORC codecs and the
+# document store's `_source` compression call komira_compression.lz4, which
+# re-exports this API.
 #
 # The welded tests:
 # - test_codec: the List API (`lz4_compress` / `lz4_decompress`) round trips.

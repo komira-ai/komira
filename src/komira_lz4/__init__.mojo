@@ -14,3 +14,7 @@
 #     concatenated frames) and `Lz4FrameDecoder` (a reusable decompression
 #     context). Same liblz4 handle as codec.mojo; no pointer in
 #     any public signature.
+#
+# komira_compression is this package's one importer (the root BUCK's
+# `codec_owner` lint): other packages call komira_compression.lz4, which
+# re-exports this API.
