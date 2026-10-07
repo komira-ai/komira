@@ -110,7 +110,8 @@ struct PresentedCredential(Copyable, Movable, Deinitable):
 
     It is deliberately not `Writable`, the trait every formatting path goes
     through, so nothing prints it. `redacted()` is the text to log in its place; `expose()` is the
-    only way to read the value.
+    only public way to read the value. `_value` is private by convention
+    only: Mojo does not enforce the leading underscore.
     """
 
     var _value: String
