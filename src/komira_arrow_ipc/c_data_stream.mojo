@@ -178,13 +178,20 @@ comptime _ArrayPtr = UnsafePointer[CArrowArray, MutUntrackedOrigin]
 # `UnsafePointer[CArrowArrayStream, ...]` to avoid the recursive struct type
 # in a stored fn-ptr field (the callbacks bitcast it back internally). `thin`
 # = non-capturing (required for a stored fn-ptr field); `abi("C")` = the C
-# calling convention, which is what the C Stream Interface's struct declares
-# for these slots. A foreign producer (pyarrow, arrow-rs, a C library) fills
-# them with C functions, and a foreign consumer calls ours as C functions, so
-# a Mojo-convention type here reads a garbage return code from a C callee
-# (the `raises` convention returns differently; measured in the block above
-# `drain_c_abi_record_batch_stream`). No callback raises: errors are a
-# non-zero errno-style return and the text `get_last_error` returns.
+# calling convention. The slots are `abi("C")` because the C Stream Interface
+# declares them as C function pointers (a foreign producer such as pyarrow,
+# arrow-rs or a C library fills them with C functions, and a foreign consumer
+# calls ours as C functions), and because the Mojo manual requires `abi("C")`
+# on a function that crosses the FFI boundary. Mojo documents no guarantee
+# that its default convention matches C. The bug these types fixed came from
+# `raises`, not from a missing `abi("C")`: a `raises thin` slot read a garbage
+# return code from a C callee (measured in the block above
+# `drain_c_abi_record_batch_stream`). A non-raising default-convention slot
+# returning `Int32` or a pointer was measured to interoperate with C on
+# linux-x86_64, so the dlopen gate of `:arrow_c_abi_probe` would not catch
+# these slots losing `abi("C")`. It does catch them gaining `raises`. No
+# callback raises: errors are a non-zero errno-style return and the text
+# `get_last_error` returns.
 comptime _GetSchemaFn = def(OpaquePtr, _SchemaPtr) abi("C") thin -> Int32
 comptime _GetNextFn = def(OpaquePtr, _ArrayPtr) abi("C") thin -> Int32
 comptime _GetLastErrorFn = def(OpaquePtr) abi("C") thin -> UnsafePointer[Int8, MutUntrackedOrigin]
@@ -726,9 +733,15 @@ def _release_schema(sch_ptr: _SchemaPtr) -> None:
 #     void (*release)(struct ArrowArrayStream*);
 # `thin` = non-capturing (no context word). These release slots keep the Mojo
 # default calling convention, unlike the three `abi("C")` stream slots
-# (`_GetSchemaFn`/`_GetNextFn`/`_GetLastErrorFn`): a release callback returns
-# nothing, and the return value is where the conventions differ. Evidence that
-# this works across the seam: the RELEASE arm of the measurement block above
+# (`_GetSchemaFn`/`_GetNextFn`/`_GetLastErrorFn`). That is a deviation from
+# what the spec declares and from the Mojo manual's rule that a function
+# crossing the FFI boundary be `abi("C")`; Mojo documents no guarantee that
+# its default convention matches C. It holds today by measurement, not by
+# contract: the measured return-code skew came from the `raises` convention,
+# and these slots do not raise (a non-raising default-convention stream slot
+# was also measured to work with C callers and callees on linux-x86_64).
+# Evidence that the release slots work across the seam: the RELEASE arm of
+# the measurement block above
 # `drain_c_abi_record_batch_stream`, and the dlopen gate of
 # `:arrow_c_abi_probe`, which releases every exported and imported struct
 # through these slots. VERIFIED against a real C caller,
@@ -3177,9 +3190,11 @@ def _stream_error_text(stream: UnsafePointer[CArrowArrayStream, MutUntrackedOrig
 # callbacks but no `ArrowArrayStream` struct. Both call the callbacks through
 # `abi("C")` function types.
 #
-# WHY THE TYPES ARE `abi("C")`. A Mojo function type without it is not the C
-# calling convention for a function that returns a value. Measured, four arms
-# in one process:
+# WHY THE TYPES ARE `abi("C")`. The C Stream Interface declares these
+# callbacks as C function pointers, and the Mojo manual requires `abi("C")` on
+# a function that crosses the FFI boundary; Mojo documents no guarantee that
+# its default convention matches C. What was MEASURED to break is the
+# `raises` convention. Four arms in one process:
 #
 #     POSITIVE CONTROL  a MOJO `raises thin` fn through a `raises thin` alias -> rc = 42 ✓
 #     SUBJECT           a plain C fn through the SAME alias                   -> rc = 128385032 ✗
@@ -3188,7 +3203,12 @@ def _stream_error_text(stream: UnsafePointer[CArrowArrayStream, MutUntrackedOrig
 #
 # The out-params landed correctly in every arm, so this is a RETURN-convention
 # skew, not an argument one; the garbage value is pointer-derived and differs
-# between builds. The fourth arm is why the release callbacks
+# between builds. SUBJECT and CONTROL 2 differ in two things at once (`raises`
+# and `abi("C")`), so these arms alone do not say which one matters. A
+# separate measurement on linux-x86_64 settles it: with every stream slot,
+# stub and exported callback on the Mojo default convention but non-raising,
+# the dlopen gate of `:arrow_c_abi_probe` passes in both directions. The skew
+# is the `raises` convention's. The fourth arm is why the release callbacks
 # (`_ArrayReleaseFn = def (_ArrayPtr) thin -> None`) work across the seam. The
 # Mojo stdlib states the rule at `std/ffi/__init__.mojo:get_function`: *"Using
 # a plain Mojo function type causes silent ABI corruption for struct arguments
