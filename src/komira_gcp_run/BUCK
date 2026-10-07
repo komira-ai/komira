@@ -30,9 +30,10 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # host (longrunning.googleapis.com) are not Run's. `service_config` gives the
 # generator run_v2.yaml at the pin: its `http.rules` bind GetOperation and
 # WaitOperation of google.longrunning.Operations (bundled operations.proto)
-# to Run's paths, and its `name`, run.googleapis.com, is the host of every
-# service its `apis` lists, the mixin included. test_run_operations_rules
-# holds the generated client to a golden and to run_v2.yaml's rules.
+# to Run's paths, and its `name`, run.googleapis.com, is the host the
+# operations client starts at (the client says so in place of naming
+# operations.proto's annotation). test_run_operations_rules holds the
+# generated client to a golden and to run_v2.yaml's rules.
 #
 # `bundle_only` is the part of the run_v2 closure those methods reach.
 # `module_names` gives two files their modules: `k8s.min.proto` (its stem

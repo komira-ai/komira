@@ -32,8 +32,8 @@ struct OperationsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
 
     var _rest_host: String
     """The host the request URLs target: it drives BOTH the dial DNS
-        target and the `Host:` header. Starts at the service's
-        `google.api.default_host`, `run.googleapis.com`; `set_rest_host` replaces it."""
+        target and the `Host:` header. Starts at the API's service
+        configuration `name`, `run.googleapis.com`; `set_rest_host` replaces it."""
 
     var _rest_port: UInt16
     """The port the request URLs name; 0, the default, is the scheme's."""
@@ -86,7 +86,7 @@ struct OperationsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
     def _rest_require_host(self, method: String) raises:
         """Raise, naming the method, when no host is set."""
         if self._rest_host.byte_length() == 0:
-            raise Error(String("OperationsClient.") + method + String(": no REST host: the host was set empty (the service's google.api.default_host is run.googleapis.com); call set_rest_host(host) with a host before sending"))
+            raise Error(String("OperationsClient.") + method + String(": no REST host: the host was set empty (the API's service configuration name is run.googleapis.com); call set_rest_host(host) with a host before sending"))
 
     def _rest_apply_default_headers(self, mut headers: HeaderMap) raises:
         """Merge the per-client default headers into `headers`."""

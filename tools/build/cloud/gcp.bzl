@@ -77,17 +77,21 @@ generator reads two things from it (proto-codegen's service_config.rs):
 its `http.rules`, each binding the method its `selector` names in full
 (`google.longrunning.Operations.GetOperation`) to a verb and path, `body`
 and `additional_bindings`, in place of the method's own
-`(google.api.http)`; and its `name`, the host every service its `apis`
-lists starts at. That is how a mixin (google.longrunning.Operations,
-google.iam.v1.IAMPolicy, google.cloud.location.Locations), whose protos
-bind it to its own generic paths and host, is generated at the API's
-paths: name the mixin's methods in `methods`, bundle its `.proto`, and
-give the API's configuration. A rule for a method the target does not
-generate is not used. Refused at generation: a rule applied to a service
-`apis` does not list, a rule with `response_body`, the `custom` verb, a
-wildcard selector, YAML outside the block subset the reader takes
-(proto-codegen's yaml_subset.rs), and a `service_config` with
-`protocol = "grpc"` (the rules bind REST methods).
+`(google.api.http)`; and its `name`, the host a service starts at when
+its `apis` lists it or a rule binds one of its generated methods (every
+rule is served at the API's host, listed or not). That is how a mixin
+(google.longrunning.Operations, google.iam.v1.IAMPolicy,
+google.cloud.location.Locations), whose protos bind it to its own generic
+paths and host, is generated at the API's paths and host: name in
+`methods` mixin methods the configuration binds, bundle the mixin's
+`.proto`, and give the API's configuration. A rule for a method the target
+does not generate is not used. Refused at generation: a generated method
+with no rule whose service moves off its own host (its proto path is the
+mixin's, which the API's host does not serve), a rule or additional
+binding with `response_body`, the `custom` verb, a wildcard selector, YAML
+outside the block subset the reader takes (proto-codegen's
+yaml_subset.rs), and a `service_config` with `protocol = "grpc"` (the
+rules bind REST methods).
 
 Bundling. The plugin writes a reference to a message of another `.proto` as
 `<name>.<stem>`, so every file the closure reaches is generated into this

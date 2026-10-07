@@ -619,8 +619,8 @@ struct OperationsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
 
     var _rest_host: String
     """The host the request URLs target: it drives BOTH the dial DNS
-        target and the `Host:` header. Starts at the service's
-        `google.api.default_host`, `fixture.googleapis.com`; `set_rest_host` replaces it."""
+        target and the `Host:` header. Starts at the API's service
+        configuration `name`, `fixture.googleapis.com`; `set_rest_host` replaces it."""
 
     var _rest_port: UInt16
     """The port the request URLs name; 0, the default, is the scheme's."""
@@ -673,7 +673,7 @@ struct OperationsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
     def _rest_require_host(self, method: String) raises:
         """Raise, naming the method, when no host is set."""
         if self._rest_host.byte_length() == 0:
-            raise Error(String("OperationsClient.") + method + String(": no REST host: the host was set empty (the service's google.api.default_host is fixture.googleapis.com); call set_rest_host(host) with a host before sending"))
+            raise Error(String("OperationsClient.") + method + String(": no REST host: the host was set empty (the API's service configuration name is fixture.googleapis.com); call set_rest_host(host) with a host before sending"))
 
     def _rest_apply_default_headers(self, mut headers: HeaderMap) raises:
         """Merge the per-client default headers into `headers`."""
@@ -791,12 +791,13 @@ struct OperationsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         return decode_json_lenient[Operation](resp_text)
 
     def list_operations[RT: Runtime](mut self, req: ListOperationsRequest, mut reactor: Reactor[RT.Sink]) raises -> ListOperationsResponse:
-        """GET `/v1/{name=operations}` — REST/JSON."""
+        """GET `/v9/{name=projects/*}/operations` — REST/JSON."""
         self._rest_require_host(String("list_operations"))
         var path = String("")
-        path += String("/v1")
+        path += String("/v9")
         path += String("/")
-        path += _rest_path_var(_rest_to_str(req.name), String("operations"), String("name"))
+        path += _rest_path_var(_rest_to_str(req.name), String("projects/*"), String("name"))
+        path += String("/operations")
         var query = String("")
         if req.filter.byte_length() > 0:
             if query.byte_length() > 0:

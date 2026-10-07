@@ -1,6 +1,7 @@
 # A service configuration of a fixture API that serves the mixin.v1.Operations
 # mixin (corpus/mixin/v1/operations.proto) at its own paths and host. Shaped
-# as googleapis writes one (google/cloud/run/v2/run_v2.yaml).
+# as googleapis writes one; like google/cloud/apigateway/v1/apigateway_v1.yaml,
+# its `apis` does not list the mixin its `http.rules` bind.
 type: google.api.Service
 config_version: 3
 name: fixture.googleapis.com
@@ -8,7 +9,6 @@ title: Fixture API
 
 apis:
 - name: fixture.v1.Things
-- name: mixin.v1.Operations
 
 documentation:
   summary: |-
@@ -26,5 +26,7 @@ http:
   - selector: mixin.v1.Operations.CancelOperation
     post: '/v9/{name=projects/*/operations/*}:cancel'
     body: spec
+  - selector: mixin.v1.Operations.ListOperations
+    get: '/v9/{name=projects/*}/operations'
   - selector: mixin.v1.Operations.DeleteOperation
     delete: '/v9/{name=projects/*/operations/*}'

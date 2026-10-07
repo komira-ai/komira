@@ -11,8 +11,15 @@
 //!     `selector` of a rule takes that rule as its HTTP binding (verb and
 //!     path, `body`, `additional_bindings`) in place of its own
 //!     `(google.api.http)` annotation, if it has one;
-//!   * a service the configuration's `apis` lists starts at the
-//!     configuration's `name` in place of its `(google.api.default_host)`.
+//!   * a service starts at the configuration's `name` in place of its
+//!     `(google.api.default_host)` when the configuration's `apis` lists it
+//!     or a rule binds one of its generated methods: every `http.rules`
+//!     binding is served at the API's host, whether or not `apis` lists the
+//!     mixin (googleapis' API Gateway configuration binds
+//!     google.longrunning.Operations without listing it). When that replaces
+//!     a different host, the service is marked
+//!     (`IrService::host_from_service_config`) so the client names the
+//!     configuration as its host's source.
 //!
 //! A rule naming no method of the model is not used: the configuration
 //! describes the whole API, a target generates part of it.
@@ -23,9 +30,12 @@
 //! the `custom` verb, a key `http` or a rule does not define here, an
 //! additional binding with a `selector` or bindings of its own, and
 //! `fully_decode_reserved_expansion: true`. A rule applied to a generated
-//! method is refused when its service is not in `apis` (the client would
-//! keep the mixin's own host) or when it sets `response_body` (the emitter
-//! decodes the whole response as the method's output).
+//! method is refused when it, or one of its additional bindings, sets
+//! `response_body` (the emitter decodes the whole response as the method's
+//! output). Refused naming the configuration and the method: a generated
+//! method with no rule whose service moves from its own declared host to
+//! `name` (a mixin): its proto binding is the mixin's generic path, which
+//! the API's host does not serve.
 
 use std::collections::BTreeMap;
 
@@ -270,21 +280,10 @@ impl ServiceConfig {
                 } else {
                     format!("{}.{}", file.proto_package, svc.name)
                 };
-                let listed = self.apis.contains(&fq_svc);
-                if listed {
-                    svc.default_host = Some(self.name.clone());
-                }
-                for m in &mut svc.methods {
+                let mut bound = false;
+                for m in &svc.methods {
                     let sel = format!("{fq_svc}.{}", m.name);
                     let Some(rule) = self.rules.get(&sel) else { continue };
-                    if !listed {
-                        return Err(format!(
-                            "service config `{}`: line {}: the http rule for `{sel}` binds a \
-                             service its `apis` does not list, so the client would not start \
-                             at `{}`",
-                            self.origin, rule.line, self.name
-                        ));
-                    }
                     if let Some(line) = rule.response_body_line() {
                         return Err(format!(
                             "service config `{}`: line {line}: the http rule for `{sel}` sets \
@@ -292,7 +291,35 @@ impl ServiceConfig {
                             self.origin
                         ));
                     }
-                    m.http_rule = Some(rule.to_ir());
+                    bound = true;
+                }
+                if !bound && !self.apis.contains(&fq_svc) {
+                    continue;
+                }
+                if let Some(own) = svc.default_host.as_deref().filter(|h| *h != self.name) {
+                    let unbound = svc
+                        .methods
+                        .iter()
+                        .map(|m| format!("{fq_svc}.{}", m.name))
+                        .find(|sel| !self.rules.contains_key(sel));
+                    if let Some(sel) = unbound {
+                        return Err(format!(
+                            "service config `{}`: `{sel}` is generated with no http rule in \
+                             it, but its service starts at the configuration's `name`, `{}`, \
+                             not its own `{own}`: the proto's binding is not served there; bind \
+                             the method in `http.rules` or leave it out of the target",
+                            self.origin, self.name
+                        ));
+                    }
+                }
+                if svc.default_host.as_deref() != Some(self.name.as_str()) {
+                    svc.default_host = Some(self.name.clone());
+                    svc.host_from_service_config = true;
+                }
+                for m in &mut svc.methods {
+                    if let Some(rule) = self.rules.get(&format!("{fq_svc}.{}", m.name)) {
+                        m.http_rule = Some(rule.to_ir());
+                    }
                 }
             }
         }
@@ -359,6 +386,7 @@ http:
                     name: service.into(),
                     methods,
                     default_host: Some("ops.example.com".into()),
+                    host_from_service_config: false,
                 }],
                 imports: vec![],
             }],
@@ -396,12 +424,12 @@ http:
             vec![
                 method("GetOperation", Some(rule("get", "/v1/{name=operations/**}", ""))),
                 method("WaitOperation", None),
-                method("ListOperations", Some(rule("get", "/v1/{name=operations}", ""))),
             ],
         );
         c.apply(&mut m).unwrap();
         let svc = &m.files[0].services[0];
         assert_eq!(svc.default_host.as_deref(), Some("fixture.googleapis.com"));
+        assert!(svc.host_from_service_config);
         let mut want_get = rule("get", "/v9/{name=projects/*/operations/*}", "");
         want_get.additional_bindings = vec![rule("get", "/v9/{name=folders/*/operations/*}", "")];
         assert_eq!(svc.methods[0].http_rule, Some(want_get));
@@ -409,8 +437,6 @@ http:
             svc.methods[1].http_rule,
             Some(rule("post", "/v9/{name=projects/*/operations/*}:wait", "*"))
         );
-        // No rule in the configuration: the proto's own binding stays.
-        assert_eq!(svc.methods[2].http_rule, Some(rule("get", "/v1/{name=operations}", "")));
     }
 
     #[test]
@@ -419,20 +445,88 @@ http:
         let mut m = model("example.ops.v2", "Operations", vec![method("GetOperation", None)]);
         c.apply(&mut m).unwrap();
         assert_eq!(m.files[0].services[0].default_host.as_deref(), Some("ops.example.com"));
+        assert!(!m.files[0].services[0].host_from_service_config);
         assert_eq!(m.files[0].services[0].methods[0].http_rule, None);
     }
 
     #[test]
-    fn a_rule_for_a_service_apis_does_not_list_is_refused() {
+    fn a_service_apis_does_not_list_starts_at_name_when_a_rule_binds_it() {
+        // googleapis' apigateway_v1.yaml: http.rules bind
+        // google.longrunning.Operations, `apis` does not list it. Every rule
+        // is served at the API's host.
         let text = CONFIG.replace("- name: example.ops.v1.Operations\n", "- name: example.Other\n");
         let c = parse(&text).unwrap();
         let mut m = model("example.ops.v1", "Operations", vec![method("WaitOperation", None)]);
+        c.apply(&mut m).unwrap();
+        let svc = &m.files[0].services[0];
+        assert_eq!(svc.default_host.as_deref(), Some("fixture.googleapis.com"));
+        assert!(svc.host_from_service_config);
         assert_eq!(
-            c.apply(&mut m).unwrap_err(),
-            "service config `fixture_v1.yaml`: line 18: the http rule for \
-             `example.ops.v1.Operations.WaitOperation` binds a service its `apis` does not \
-             list, so the client would not start at `fixture.googleapis.com`"
+            svc.methods[0].http_rule,
+            Some(rule("post", "/v9/{name=projects/*/operations/*}:wait", "*"))
         );
+    }
+
+    #[test]
+    fn a_mixin_method_with_no_rule_is_refused() {
+        // Listed or not, a service moved off its own host needs a rule for
+        // every generated method: the proto's generic path is the mixin's.
+        for text in [
+            CONFIG.to_string(),
+            CONFIG.replace("- name: example.ops.v1.Operations\n", "- name: example.Other\n"),
+        ] {
+            let c = parse(&text).unwrap();
+            let mut m = model(
+                "example.ops.v1",
+                "Operations",
+                vec![
+                    method("GetOperation", None),
+                    method("ListOperations", Some(rule("get", "/v1/{name=operations}", ""))),
+                ],
+            );
+            assert_eq!(
+                c.apply(&mut m).unwrap_err(),
+                "service config `fixture_v1.yaml`: `example.ops.v1.Operations.ListOperations` \
+                 is generated with no http rule in it, but its service starts at the \
+                 configuration's `name`, `fixture.googleapis.com`, not its own \
+                 `ops.example.com`: the proto's binding is not served there; bind the method \
+                 in `http.rules` or leave it out of the target"
+            );
+        }
+    }
+
+    #[test]
+    fn a_listed_service_with_no_rule_keeps_its_bindings() {
+        let text = CONFIG.replace(
+            "- name: example.ops.v1.Operations\n",
+            "- name: example.ops.v1.Operations\n- name: example.api.v1.Things\n",
+        );
+        let c = parse(&text).unwrap();
+        // The API's own service, declaring the configuration's host: nothing
+        // moves, and the client says the host is its own annotation's.
+        let mut same = model(
+            "example.api.v1",
+            "Things",
+            vec![method("ListThings", Some(rule("get", "/v1/things", "")))],
+        );
+        same.files[0].services[0].default_host = Some("fixture.googleapis.com".into());
+        c.apply(&mut same).unwrap();
+        let svc = &same.files[0].services[0];
+        assert_eq!(svc.default_host.as_deref(), Some("fixture.googleapis.com"));
+        assert!(!svc.host_from_service_config);
+        assert_eq!(svc.methods[0].http_rule, Some(rule("get", "/v1/things", "")));
+        // Declaring no host: listing it gives it `name`, its bindings stay.
+        let mut none = model(
+            "example.api.v1",
+            "Things",
+            vec![method("ListThings", Some(rule("get", "/v1/things", "")))],
+        );
+        none.files[0].services[0].default_host = None;
+        c.apply(&mut none).unwrap();
+        let svc = &none.files[0].services[0];
+        assert_eq!(svc.default_host.as_deref(), Some("fixture.googleapis.com"));
+        assert!(svc.host_from_service_config);
+        assert_eq!(svc.methods[0].http_rule, Some(rule("get", "/v1/things", "")));
     }
 
     #[test]
@@ -446,6 +540,22 @@ http:
             c.apply(&mut m).unwrap_err(),
             "service config `fixture_v1.yaml`: line 18: the http rule for \
              `example.ops.v1.Operations.WaitOperation` sets `response_body`, which is not \
+             generated"
+        );
+    }
+
+    #[test]
+    fn a_response_body_on_an_additional_binding_is_refused() {
+        let text = CONFIG.replace(
+            "    - get: '/v9/{name=folders/*/operations/*}'\n",
+            "    - get: '/v9/{name=folders/*/operations/*}'\n      response_body: done\n",
+        );
+        let c = parse(&text).unwrap();
+        let mut m = model("example.ops.v1", "Operations", vec![method("GetOperation", None)]);
+        assert_eq!(
+            c.apply(&mut m).unwrap_err(),
+            "service config `fixture_v1.yaml`: line 17: the http rule for \
+             `example.ops.v1.Operations.GetOperation` sets `response_body`, which is not \
              generated"
         );
     }
