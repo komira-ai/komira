@@ -12,8 +12,8 @@
 #      tests//functional/assert_level and tests//functional/mem_cap build (a
 #      library's debug_asserts are off in its test at ASSERT=none, an
 #      assert_mode=none one is off at the default level, a define reaches the
-#      test and the library's package, a test holding 256 MiB passes under a
-#      1024 MiB cap), :bin_none's [run_check] and `buck2 test` of :test_none
+#      test and the library's package, a test holding 256 MiB for 2 s passes
+#      under a 1024 MiB cap), :bin_none's [run_check] and `buck2 test` of :test_none
 #      pass at ASSERT=none; each twin in tests//negative/assert_level fails
 #      (the same tests at ASSERT=all and at the default level, the same
 #      programs at the default level) and each inadmissible declaration is

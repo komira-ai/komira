@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # target here builds; the twins that must go red are in
 # tests//negative/mem_cap.
 
-# A test holding 256 MiB passes under a 1024 MiB cap: the cap leaves a test
+# A test holding 256 MiB for 2 s passes under a 1024 MiB cap: the cap leaves a test
 # that stays under it alone. Twin: negative:lib_over_cap.
 mojo_library(
     name = "lib_under_cap",
