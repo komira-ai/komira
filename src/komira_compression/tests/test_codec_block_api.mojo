@@ -18,10 +18,12 @@
 # drops the code, the input length or the capacity.
 #
 # What it cannot catch: an empty Span handed to C as a null pointer. Spans
-# and Lists built in Mojo carry a dangling, non-null pointer when empty, and
-# snappy, libzstd, libbz2 and liblzma accept a null pointer at length 0
-# anyway, so removing the empty-Span scratch branches leaves these tests
-# green.
+# and Lists built in Mojo carry a dangling, non-null pointer when empty, so
+# no test here can hand C a null, and removing the empty-Span scratch
+# branches leaves these tests green. snappy, libzstd and liblzma accept a
+# null pointer at length 0 anyway; libbz2 refuses it (BZ_PARAM_ERROR, -2,
+# whatever the length), so the scratch branch in bzip2_buffer is what keeps
+# an empty Span built from a null pointer working.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
