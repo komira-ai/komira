@@ -16,11 +16,13 @@
 #   J1  invalid lead byte 0xFF                         -> 1 x U+FFFD
 #   J2  stray continuation byte 0x80                   -> 1 x U+FFFD
 #   J3  truncated 3-byte sequence before the quote     -> 1 x U+FFFD
-#   J4  overlong C0 AF -> 2, E0 80 AF -> 3
+#   J4  overlong C0 AF -> 2, C1 BF -> 2, E0 80 AF -> 3, F0 8F BF BF -> 4
 #   J5  surrogate encoded in UTF-8, ED A0 80           -> 3 x U+FFFD
 #   J6  above U+10FFFF, F4 90 80 80 -> 4, lead F5 -> 1 each
 #   J7  well-formed 2/3/4-byte text is kept byte for byte
 #   J8  a bad byte after an escape is repaired; the escape still decodes
+#   J9  a non-continuation byte at continuation position 3 (F0 9F 98 41)
+#       ends a 3-byte subpart and is kept: U+FFFD then `A`
 #   Every case also asserts the scan ends just after the closing quote.
 # =============================================================================
 
@@ -75,7 +77,11 @@ def test_truncated_sequence() raises:
 
 def test_overlong_encodings() raises:
     assert_equal(_scan(_quoted("", 0xC0, 0xAF)), String(R) + R + "z")
+    assert_equal(_scan(_quoted("", 0xC1, 0xBF)), String(R) + R + "z")
     assert_equal(_scan(_quoted("", 0xE0, 0x80, 0xAF)), String(R) + R + R + "z")
+    assert_equal(
+        _scan(_quoted("", 0xF0, 0x8F, 0xBF, 0xBF)), String(R) + R + R + R + "z"
+    )
 
 
 def test_surrogate_encoded_in_utf8() raises:
@@ -110,6 +116,10 @@ def test_escape_then_bad_byte() raises:
     assert_equal(_scan(_quoted("\\é")), String("éz"))
 
 
+def test_non_continuation_at_position_3() raises:
+    assert_equal(_scan(_quoted("", 0xF0, 0x9F, 0x98, 0x41)), String(R) + "Az")
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Run one case; a failure is recorded, not fatal, so a red build names
     EVERY failing case rather than only the first."""
@@ -131,6 +141,7 @@ def main() raises:
     _run("test_code_point_above_max", test_code_point_above_max, failed)
     _run("test_well_formed_multibyte_kept", test_well_formed_multibyte_kept, failed)
     _run("test_escape_then_bad_byte", test_escape_then_bad_byte, failed)
+    _run("test_non_continuation_at_position_3", test_non_continuation_at_position_3, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
-    print("test_json_scan_utf8: ALL 8 CASES PASS")
+    print("test_json_scan_utf8: ALL 9 CASES PASS")

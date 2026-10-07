@@ -11,8 +11,10 @@
 #   U1  invalid lead byte 0xFF
 #   U2  stray continuation byte 0x80
 #   U3  truncated 3-byte sequence at the end of the span
-#   U4  lead byte followed by a non-continuation byte
-#   U5  overlong encoding, 2-byte lead (C0 AF) and 3-byte (E0 80 AF)
+#   U4  lead byte followed by a non-continuation byte, at continuation
+#       position 1 (C3 41), 2 (E2 82 41) and 3 (F0 9F 98 41)
+#   U5  overlong encoding: 2-byte leads C0 and C1, 3-byte (E0 80 AF) and
+#       4-byte (F0 8F BF BF)
 #   U6  UTF-16 surrogate encoded in UTF-8 (ED A0 80)
 #   U7  code point above U+10FFFF (F4 90 80 80, and lead F5)
 #   U8  well-formed 2/3/4-byte text accepted byte for byte
@@ -20,7 +22,8 @@
 #   U10 escaped surrogates: lone high, lone low, high + non-low refused;
 #       a pair decodes to the 4-byte sequence
 #   U11 extract_column nulls a row whose value is ill-formed (->>, ->,
-#       nested object slice, whole document) and keeps well-formed rows
+#       string, nested object slice, scalar whose FIRST or LAST byte is the
+#       bad one, whole document) and keeps well-formed rows
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -121,6 +124,16 @@ def test_lead_followed_by_non_continuation() raises:
         "parse_string_raw: invalid UTF-8 at byte 0: lead byte 0xC3 is followed"
         " by 0x41, which is not a continuation byte",
     )
+    assert_equal(
+        _raw_error(_with("", 0xE2, 0x82, 0x41)),
+        "parse_string_raw: invalid UTF-8 at byte 0: lead byte 0xE2 is followed"
+        " by 0x41, which is not a continuation byte",
+    )
+    assert_equal(
+        _raw_error(_with("", 0xF0, 0x9F, 0x98, 0x41)),
+        "parse_string_raw: invalid UTF-8 at byte 0: lead byte 0xF0 is followed"
+        " by 0x41, which is not a continuation byte",
+    )
 
 
 def test_overlong_encodings() raises:
@@ -128,6 +141,11 @@ def test_overlong_encodings() raises:
         _raw_error(_with("", 0xC0, 0xAF)),
         "parse_string_raw: invalid UTF-8 at byte 0: overlong encoding: lead"
         " byte 0xC0",
+    )
+    assert_equal(
+        _raw_error(_with("", 0xC1, 0xBF)),
+        "parse_string_raw: invalid UTF-8 at byte 0: overlong encoding: lead"
+        " byte 0xC1",
     )
     assert_equal(
         _raw_error(_with("x", 0xE0, 0x80, 0xAF)),
@@ -245,6 +263,17 @@ def test_extract_column_nulls_ill_formed_rows() raises:
     bad_elsewhere.append(0xC0)
     bad_elsewhere.extend(_bytes('","k":"ok"}'))
     rows.append(bad_elsewhere^)
+    # Scalar values: the bad byte is the FIRST byte of the value (row 4) and
+    # the LAST byte of the value (row 5), so a check that skips either end of
+    # the slice is red.
+    var bad_scalar_first = _bytes('{"k":')
+    bad_scalar_first.append(0xFF)
+    bad_scalar_first.append(UInt8(ord("}")))
+    rows.append(bad_scalar_first^)
+    var bad_scalar_last = _bytes('{"k":1')
+    bad_scalar_last.append(0xC3)
+    bad_scalar_last.append(UInt8(ord("}")))
+    rows.append(bad_scalar_last^)
 
     var col = _column(rows)
     var unq = extract_column(col, parse_json_path(String("$.k")), ArrowType.STRING, False)
@@ -254,6 +283,8 @@ def test_extract_column_nulls_ill_formed_rows() raises:
     assert_true(unq.is_null_at(2), "a nested object slice holding a surrogate")
     assert_false(unq.is_null_at(3))
     assert_equal(unq.as_string().get(3), String("ok"))
+    assert_true(unq.is_null_at(4), "->> over a scalar whose first byte is 0xFF")
+    assert_true(unq.is_null_at(5), "->> over a scalar whose last byte is 0xC3")
 
     var col2 = _column(rows)
     var raw = extract_column(col2, parse_json_path(String("$.k")), ArrowType.STRING, True)
@@ -262,6 +293,8 @@ def test_extract_column_nulls_ill_formed_rows() raises:
     assert_true(raw.is_null_at(1), "-> raw slice of an ill-formed string value")
     assert_true(raw.is_null_at(2))
     assert_false(raw.is_null_at(3))
+    assert_true(raw.is_null_at(4), "-> over a scalar whose first byte is 0xFF")
+    assert_true(raw.is_null_at(5), "-> over a scalar whose last byte is 0xC3")
 
     var col3 = _column(rows)
     var whole = extract_column(col3, List[String](), ArrowType.STRING, True)
@@ -269,6 +302,8 @@ def test_extract_column_nulls_ill_formed_rows() raises:
     assert_true(whole.is_null_at(1), "whole-document extract of an ill-formed row")
     assert_true(whole.is_null_at(2))
     assert_true(whole.is_null_at(3))
+    assert_true(whole.is_null_at(4))
+    assert_true(whole.is_null_at(5))
 
 
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):

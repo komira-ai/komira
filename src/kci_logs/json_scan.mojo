@@ -143,9 +143,11 @@ def json_scan_string(b: Span[UInt8, _], i: Int, mut out: String) -> Int:
     conservative choice for a diagnostic renderer.
 
     ⛔ THE VALUE IS WELL-FORMED UTF-8 WHATEVER `b` HOLDS: each maximal
-    ill-formed subpart becomes one U+FFFD (module header). An escape never
-    adds an ill-formed byte: every escape arm appends ASCII or the byte that
-    followed the backslash, which the repair then sees in sequence."""
+    ill-formed subpart becomes one U+FFFD (module header). Each escape arm
+    appends ASCII or the raw byte that followed the backslash (which may be
+    ill-formed, e.g. 0xFF); the repair runs once over the whole accumulated
+    buffer, so whatever an escape appends is repaired in sequence with the
+    bytes around it."""
     out = String()
     if i >= len(b) or b[i] != UInt8(ord('"')):
         return -1
