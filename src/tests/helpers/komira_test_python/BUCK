@@ -23,8 +23,17 @@ py_test(
     src = "oracle_demo.py",
     deps = [
         "//third_party/python:duckdb",
+        "//third_party/python:pandas",
+        "//third_party/python:polars",
         "//third_party/python:pyarrow",
     ],
+)
+
+py_test(
+    name = "timezones",
+    src = "timezones.py",
+    # No tzdata here: py_test adds the wheel its `tzdata` names.
+    deps = ["//third_party/python:pyarrow"],
 )
 
 py_test(

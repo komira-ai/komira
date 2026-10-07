@@ -53,6 +53,7 @@ CASES_TABLE = [
         "ValueError: planted: 42",
         (1, "pyrun: exits_3.py was expected to fail with 'ValueError: planted: 42', it failed with 'SystemExit: 3'", False),
     ),
+    ("no_tzdir_empty_tzpath", "tzpath_empty.py", None, (0, "", True)),
 ]
 
 bad = []
