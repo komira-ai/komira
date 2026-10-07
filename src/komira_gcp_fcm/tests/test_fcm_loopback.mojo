@@ -427,6 +427,25 @@ def test_endpoint_refusals() raises:
     except e:
         msg = String(e)
     assert_equal(msg, "komira_gcp_fcm: the FCM port is 0")
+    # A plaintext endpoint built by hand for a host other than 127.0.0.1
+    # (`localhost`, so a client without the check dials loopback, finds
+    # nothing listening and returns an outcome instead of raising).
+    var cleartext = _StaticClient(
+        _http(),
+        StaticTokenSource(String(_BEARER)),
+        String(_PROJECT),
+        FcmEndpoint(String("localhost"), _closed_port(), False),
+    )
+    msg = String()
+    try:
+        _ = cleartext.send_one(String("tok-ok"), _wake())
+    except e:
+        msg = String(e)
+    assert_equal(
+        msg,
+        "komira_gcp_fcm: plain http is only for 127.0.0.1; the bearer token"
+        " would cross the network in clear",
+    )
     var p = FcmEndpoint.public()
     assert_equal(p.host, "fcm.googleapis.com")
     assert_equal(Int(p.port), 443)

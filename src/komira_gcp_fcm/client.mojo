@@ -32,7 +32,8 @@
 # `FcmEndpoint.https(host, port)` is another TLS host (a proxy in front of
 # FCM). `FcmEndpoint.loopback_plaintext(port)` is plain http to 127.0.0.1,
 # for a fake FCM in a test: the bearer token is sent in clear, so the host is
-# fixed to the loopback address and cannot be set. The connector type
+# fixed to the loopback address and cannot be set (and `url` refuses a
+# plaintext endpoint for any other host, however it was built). The connector type
 # follows the scheme: komira_http_client refuses an https URL over a
 # plaintext connector and an http URL over a TLS one.
 #
@@ -125,9 +126,16 @@ struct FcmEndpoint(Copyable, Movable, Deinitable):
             raise Error("komira_gcp_fcm: the FCM port is 0")
         return FcmEndpoint(String(LOOPBACK_HOST), port, False)
 
-    def url(self, var path: String) -> Url:
+    def url(self, var path: String) raises -> Url:
+        """The request URL. A plaintext endpoint built by hand for any host
+        but 127.0.0.1 is refused here, before a token is asked for."""
         if self.tls:
             return Url.https(self.host.copy(), self.port, path^)
+        if self.host != String(LOOPBACK_HOST):
+            raise Error(
+                "komira_gcp_fcm: plain http is only for 127.0.0.1; the bearer"
+                " token would cross the network in clear"
+            )
         return Url.http(self.host.copy(), self.port, path^)
 
 
@@ -221,7 +229,7 @@ struct FcmClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         """Send `wake` to one registration token (module header for what
         raises and what is an outcome)."""
         var body = fcm_message_json(device_token, wake)
-        var path = fcm_send_path(self._project_id)
+        var url = self._endpoint.url(fcm_send_path(self._project_id))
         var bearer: String
         try:
             bearer = self._tokens.access_token()
@@ -237,7 +245,7 @@ struct FcmClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         headers.append(String("Authorization"), String("Bearer ") + bearer)
         var req = build_request_with_body[BytesBody](
             HttpMethod.post(),
-            self._endpoint.url(path^),
+            url^,
             headers^,
             BytesBody.from_str(body),
         )
