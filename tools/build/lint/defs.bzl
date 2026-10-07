@@ -175,7 +175,7 @@ def _src_layout_impl(ctx):
 
 src_layout_rule = rule(
     impl = _src_layout_impl,
-    doc = "`root` (src) holds what komira ships: each of `packages` (package paths in the cell) is `<root>/<name>`, or a test-only package `<root>/tests/<kind>/<name>`, kind `e2e` (named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `support` (neither). A `komira_test_*` package directly under `root` must be one `shipped` names. The `src_layout` macro fills `packages` from the build graph.",
+    doc = "`root` (src) holds what komira ships: each of `packages` (package paths in the cell) is `<root>/<name>`, or a test-only package `<root>/tests/<kind>/<name>`, kind `e2e` (named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `helpers` (neither). A `komira_test_*` package directly under `root` must be one `shipped` names. The `src_layout` macro fills `packages` from the build graph.",
     attrs = _COMMON | {
         "packages": attrs.list(attrs.string()),
         "root": attrs.string(default = "src"),
