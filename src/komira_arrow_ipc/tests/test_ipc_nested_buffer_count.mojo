@@ -14,9 +14,11 @@
 # check the length cases return columns (the "" result). The field-node cases
 # pin the existing per-node refusal for a STRUCT and a LIST. The
 # FIXED_SIZE_BINARY, FIXED_SIZE_LIST and LIST_VIEW cases pin the byte width,
-# list size and child count the call sites pass to the count. Controls:
-# well-formed STRUCT, LIST, FIXED_SIZE_BINARY and FIXED_SIZE_LIST batches
-# decode on both paths, and a LIST_VIEW batch on the copy-on-read path.
+# list size and child count the call sites pass to the count; FIXED_SIZE_BINARY
+# runs at byte widths 4 and 1. The two-BINARY_VIEW case pins the view column
+# index the copy-on-read call site passes. Controls: well-formed STRUCT, LIST,
+# FIXED_SIZE_BINARY and FIXED_SIZE_LIST batches decode on both paths, and
+# LIST_VIEW and two-BINARY_VIEW batches on the copy-on-read path.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal
@@ -63,6 +65,8 @@ comptime K_I64_STRUCT1 = 4  # int64, struct<a: int64>
 comptime K_FSB4 = 5  # fixed_size_binary(4)
 comptime K_FSL1 = 6  # fixed_size_list<int64>(1)
 comptime K_LVIEW = 7  # list_view<int64>
+comptime K_BVIEW2 = 8  # binary_view, binary_view
+comptime K_FSB1 = 9  # fixed_size_binary(1)
 
 
 def _node(length: Int, nulls: Int = 0) -> FieldNode:
@@ -127,6 +131,8 @@ def _specs(kind: Int) raises -> Slab[ColumnTypeSpec]:
         s.append(ColumnTypeSpec.list_of(ColumnTypeSpec.leaf(ArrowType.INT64)))
     elif kind == K_FSB4:
         s.append(ColumnTypeSpec.fixed_size_binary(4))
+    elif kind == K_FSB1:
+        s.append(ColumnTypeSpec.fixed_size_binary(1))
     elif kind == K_FSL1:
         s.append(
             ColumnTypeSpec.fixed_size_list_of(
@@ -145,6 +151,9 @@ def _specs(kind: Int) raises -> Slab[ColumnTypeSpec]:
                 inner_size=0,
             )
         )
+    elif kind == K_BVIEW2:
+        s.append(ColumnTypeSpec.leaf(ArrowType.BINARY_VIEW))
+        s.append(ColumnTypeSpec.leaf(ArrowType.BINARY_VIEW))
     else:
         s.append(ColumnTypeSpec.leaf(ArrowType.BINARY_VIEW))
     return s^
@@ -222,6 +231,14 @@ def _fsb4_buffers() -> List[BufferDescriptor]:
     var out = List[BufferDescriptor]()
     out.append(_b(0, 0))
     out.append(_b(0, 4))
+    return out^
+
+
+def _fsb1_buffers() -> List[BufferDescriptor]:
+    """FIXED_SIZE_BINARY(1) validity, values (one 1-byte value)."""
+    var out = List[BufferDescriptor]()
+    out.append(_b(0, 0))
+    out.append(_b(0, 1))
     return out^
 
 
@@ -364,6 +381,16 @@ def _check_fixed_size_buffers(path: Int) raises:
         _err(path, K_FSL1, 1, _nodes(1, 1), List[BufferDescriptor]()),
         _reads(path, 0, 1, 0, 0),
     )
+    # Byte width 1, the smallest that has a values buffer: these fail if
+    # the count treats width 1 as no buffers.
+    assert_equal(
+        _err(path, K_FSB1, 1, _nodes(1), List[BufferDescriptor]()),
+        _reads(path, 0, 2, 0, 0),
+    )
+    assert_equal(
+        _err(path, K_FSB1, 1, _nodes(1), _first(_fsb1_buffers(), 1)),
+        _reads(path, 0, 2, 0, 1),
+    )
 
 
 def _check_node_counts(path: Int) raises:
@@ -394,6 +421,7 @@ def _check_controls(path: Int) raises:
         "",
     )
     assert_equal(_err(path, K_FSB4, 1, _nodes(1), _fsb4_buffers()), "")
+    assert_equal(_err(path, K_FSB1, 1, _nodes(1), _fsb1_buffers()), "")
     assert_equal(_err(path, K_FSL1, 1, _nodes(1, 1), _fsl1_buffers()), "")
 
 
@@ -482,6 +510,37 @@ def test_nested_refuses_too_few_buffers_view_variadic() raises:
         _err(NESTED, K_BVIEW, 1, _nodes(1), two^, huge^),
         _reads(NESTED, 0, 4611686018427387904, 0, 2),
     )
+
+
+def test_nested_refuses_too_few_buffers_second_view_column() raises:
+    """Two BINARY_VIEW columns: the second column's count reads
+    variadicBufferCounts[1], not [0]. With counts [0, 1] the second column
+    lacks its variadic buffer, and the refusal fails if the call site reads
+    the first column's count. The control, counts [1, 0] with the buffers
+    they name, decodes, and fails if the second column takes the first
+    column's count (it would read one buffer too many)."""
+    var short = List[BufferDescriptor]()
+    short.append(_b(0, 0))
+    short.append(_b(0, 16))
+    short.append(_b(0, 0))
+    short.append(_b(0, 16))
+    var v01 = List[Int64]()
+    v01.append(Int64(0))
+    v01.append(Int64(1))
+    assert_equal(
+        _err(NESTED, K_BVIEW2, 1, _nodes(1, 1), short^, v01^),
+        _reads(NESTED, 1, 3, 2, 4),
+    )
+    var full = List[BufferDescriptor]()
+    full.append(_b(0, 0))
+    full.append(_b(0, 16))
+    full.append(_b(0, 0))
+    full.append(_b(0, 0))
+    full.append(_b(0, 16))
+    var v10 = List[Int64]()
+    v10.append(Int64(1))
+    v10.append(Int64(0))
+    assert_equal(_err(NESTED, K_BVIEW2, 1, _nodes(1, 1), full^, v10^), "")
 
 
 def test_nested_refuses_too_few_field_nodes() raises:

@@ -151,9 +151,13 @@ def check_struct_child_length(
     own length) emits a longer child for a struct sliced at offset 0, and
     this decoder refuses that stream. Arrow C++ reads it (its validation
     needs only child length >= struct offset + length). arrow-rs's IPC
-    reader refuses it when the STRUCT has nulls (its validity length must
-    equal the child length, `StructArray::try_new`) or when the children's
-    lengths differ from each other; with no nulls it reads it and takes the
+    reader builds the struct with `StructArray::try_new`, which refuses a
+    validity bitmap (present only when the STRUCT has nulls) whose length
+    differs from the children's, and children whose lengths differ from
+    each other; otherwise the struct takes the children's length. A
+    top-level STRUCT column then fails the row-count check of
+    `RecordBatch::try_new_with_options` and the batch is refused; only a
+    STRUCT with no nulls under a LIST, LARGE_LIST or MAP is read, with the
     children's length.
     """
     if child_length != struct_length:
