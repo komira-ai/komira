@@ -11,7 +11,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # a version 1 block that disagrees with the version 2 one); test_posix_tz
 # checks the grammar and the rule dates against a printed calendar;
 # test_resolve checks gaps, folds and each policy on zones from POSIX TZ
-# strings, against instants built with komira_datetime.
+# strings, against instants built with komira_datetime; test_zone_name checks
+# the name check that keeps a zone name inside the zoneinfo directory.
 mojo_library(
     name = "komira_tz",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -20,6 +21,7 @@ mojo_library(
         "tests/test_posix_tz.mojo",
         "tests/test_resolve.mojo",
         "tests/test_tzif.mojo",
+        "tests/test_zone_name.mojo",
     ],
     visibility = ["PUBLIC"],
 )
