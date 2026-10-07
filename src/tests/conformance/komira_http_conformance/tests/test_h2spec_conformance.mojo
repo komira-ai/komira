@@ -69,7 +69,7 @@ from komira_http_conformance import (
 )
 
 comptime _Rt = BlockingRuntime[NoopSink]
-comptime _ALLOWLIST = "src/komira_http_conformance/h2spec_allowlist.txt"
+comptime _ALLOWLIST = "src/tests/conformance/komira_http_conformance/h2spec_allowlist.txt"
 # h2spec's per-case timeout, in seconds: how long a case waits for the
 # server's answer before it fails. h2spec's default is 2; a passing case needs
 # a TLS handshake and the answer of a server stepped by one thread on a shared
