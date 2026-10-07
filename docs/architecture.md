@@ -118,6 +118,7 @@ runs a whole plan yet ([Layers still to come](#layers-still-to-come)).
 | [`komira_json_index`](../src/komira_json_index/) | the JSON structural index (the SIMD stage-1 primitives, the structural-token indexer, input limits, the string unescaper, a UTF-8 check) and the `json_extract` kernel over a string column. |
 | [`komira_proto_codec`](../src/komira_proto_codec/) | the `Serializable` / `WireFormat` codec runtime every generated protobuf message conforms to: a message's fields are written once and encode as protobuf binary or proto3 canonical JSON, the format chosen at compile time. JSON decoding refuses an unknown key; `decode_json_lenient` ignores it. |
 | [`komira_wkt`](../src/komira_wkt/) | the protobuf well-known types (`Timestamp`, `Duration`, `Empty`, the scalar wrappers, `FieldMask`, `Struct` / `Value` / `ListValue`, an opaque `Any`) as Mojo structs, each with its special proto3 JSON form. Generated clients import them. |
+| [`komira_git`](../src/komira_git/) | git's object model and wire primitives, with no I/O: SHA-1 and SHA-256 object ids that carry their format, blob, tree, commit and tag parse and serialize (refusing what `git fsck` reports), loose objects, pkt-line framing and the `git check-ref-format` rules. |
 
 ### File formats
 
