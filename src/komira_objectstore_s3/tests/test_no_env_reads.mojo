@@ -26,9 +26,12 @@ comptime _FILES: List[String] = [
     "conditional_store.mojo",
     "config.mojo",
     "errors.mojo",
+    "inflight.mojo",
     "presign.mojo",
     "ranges.mojo",
     "s3_fs.mojo",
+    "s3_fs_jobs.mojo",
+    "s3_fs_options.mojo",
     "store.mojo",
 ]
 

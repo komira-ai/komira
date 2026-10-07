@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_tests.sh -- end-to-end tests of the Mojo rules. Each test can fail.
 #
-# usage: tools/build/tests/run_tests.sh [--no-umbrella] [--no-run] [--no-uncached] [--host-check-only]
+# usage: tools/build/tests/run_tests.sh [--no-umbrella] [--no-run] [--no-uncached] [--require-install] [--host-check-only]
 #        (from the repo root; BUCK2 overrides the binary)
 #
 # Where the tests run is where this checkout builds: read from the execution
@@ -169,7 +169,12 @@
 #      the verdict, --arg values arrive in order and unexported, exit 77 is
 #      red, and a test killed by SIGKILL or SIGABRT fails with its
 #      own status (137, 134) and no marker; five inadmissible data/env
-#      declarations are refused at analysis.
+#      declarations are refused at analysis. A library's `test_deps`
+#      (tests//functional/test_deps) reach its welded tests: a test imports a
+#      test-support package the library does not depend on; and nothing else
+#      (tests//negative/test_deps): the library's source and a consumer of
+#      the library importing it fail to compile, and an entry that is not a
+#      mojo_library, or is also in `deps`, is refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
 #      analysis only): mojo_test and a mojo_library's gated tests at -O1,
 #      mojo_binary and the shared libraries of a bundle at -O3, a per-target
@@ -185,13 +190,15 @@
 #       a new library gets its package from the macro with no declaration; the
 #       refusals, as targets that build and releases that do not; the stamp; two
 #       uncached builds, skipped with --no-uncached; a pixi install from a
-#       file:// channel and a Mojo program importing the library, skipped with
-#       --no-install).
+#       file:// channel and a Mojo program importing the library, skipped
+#       without pixi or network, a FAIL instead with --require-install, as the
+#       nightly workflow runs it). tests//functional/install_gate:cases holds
+#       that switch: no pixi on PATH is a SKIP line, and a FAIL line with it.
 #  33b. The conda package set and metapackage: see tools/build/tests/functional/conda_set.sh
 #       (every library's package target builds; the stamped releases; the metapackage
 #       from the members' manifests; kci's own parser over the emitted manifests; the
 #       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
-#       the metapackage alone, skipped with --no-install).
+#       the metapackage alone, skipped or failed as in 33a).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -258,10 +265,11 @@
 #      which builds only once its layout probe and a caller test over a
 #      scripted connector and komira_aws_core's echo connector pass. For
 #      each, exactly its files are generated, nothing of an operation not
-#      named, and exactly its two welded tests ran. A second client adds a
-#      hand_srcs module and the overrides manifest naming it: the module is
-#      copied into the package, the header names its owner, and a caller test
-#      imports it. A client-mode client (tests//functional/aws_client_mode)
+#      named, and exactly its welded tests ran (the layout probe, the
+#      environment scan mojo_aws_client writes, the caller's). A second
+#      client adds a hand_srcs module and the overrides manifest naming it:
+#      the module is copied into the package, the header names its owner,
+#      and a caller test imports it. A client-mode client (tests//functional/aws_client_mode)
 #      carries the signed-send surface, the komira_http_core and
 #      komira_http_client imports, the constructor's HttpClientConfig and
 #      the error builder, and builds against the same stubs with their client
@@ -271,9 +279,22 @@
 #      analysis: empty, joined or repeated `operations`, empty `deps`,
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
-#      model path the service id cannot be read from; an operation the model
-#      lacks by the generator; and a failing caller test reds the client
-#      (tests//negative/mojo_aws_client).
+#      model path the service id cannot be read from, and a caller
+#      `test_data` entry for the environment scan; an operation the model
+#      lacks by the generator; a failing caller test reds the client; and so
+#      does a hand-written module of the package that reads HOME, through
+#      the environment scan (tests//negative/mojo_aws_client): by a banned
+#      name, or by an import of std.pathlib off its allow-list, which it reads
+#      at the start of a line, at an indent, after a `;`, after a one-line
+#      function's `:`, and as the second name of a plain `import` list,
+#      after a backtick name holding a quote or `#`, after a string (one or
+#      three quotes, raw or not) holding an escaped quote, and joined after a
+#      backslash-ended line; a file with a t-string (prefix `t`, `T`, `tr`,
+#      `Rt`) or an ASCII control byte other than a tab or a line feed (a
+#      carriage return, lone or after a backslash, a vertical tab or a form
+#      feed after an import) is refused;
+#      the same text in a docstring, a comment or a string is not an import
+#      (the hand_srcs client of tests//functional/mojo_aws_client builds).
 #  37. The platform table (tools/build/platforms/table.bzl, one row per
 #      (os, cpu)) is complete and the default target platform is the client's
 #      own: loading tests//functional/platform_table: runs the load-time
@@ -303,7 +324,7 @@
 #      reason, and a root with no package.
 #  40. README API coverage (tools/build/lint/readme_api_coverage.bzl;
 #      docs/readme_api_coverage.md): //:readme_api_coverage (the census of
-#      every package under src/, report-only) and
+#      every package under src/ but the test-only ones, report-only) and
 #      tests//functional/readme_api_coverage:ok (a planted tree whose census
 #      must equal its expected files, counts and statuses exactly) build; each
 #      target of tests//negative/readme_api_coverage fails naming its one
@@ -313,6 +334,8 @@
 #      root with no package.
 
 #  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
+#  45. Assert level, defines and memory cap: see
+#      tools/build/tests/assert_level_tests.sh.
 #  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
 #      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
 #      file of the cell, against tests/pointer_lint_ffi.tsv and
@@ -320,23 +343,37 @@
 #      planted tree whose every site is held at its exact count, beside near
 #      misses) build; each target of tests//negative/pointer_lint fails naming
 #      its one planted site (each rule, the two-statement partial move, a
-#      public method and __init__.mojo, one site over a hold, a non-origin
+#      public method and __init__.mojo, a library file of a test-only package
+#      under src/tests/<kind>/, one site over a hold, a non-origin
 #      site in an FFI module, an unlisted marked module) or ledger defect,
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
+#  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
+#  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
+#  45. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
+#      (every package under src/, read from the build graph) and
+#      tests//functional/src_layout:ok (a planted list) build; each target of
+#      tests//negative/src_layout fails naming its one planted finding: an
+#      *_e2e, *_loopback or *_conformance package directly under src/, an
+#      unshipped komira_test_* there, a stale `shipped` name, a package nested
+#      where none is, a src/tests kind it does not hold or a package not at
+#      src/tests/<kind>/<name>, a package under the wrong kind, and a root with
+#      no package.
 set -uo pipefail
 
 umbrella=1
 run=1
 uncached=1
+require_install=0
 host_only=0
 for a in "$@"; do
     case "$a" in
         --no-umbrella) umbrella=0 ;;
         --no-run) run=0 ;;
         --no-uncached) uncached=0 ;;
+        --require-install) require_install=1 ;;
         --host-check-only) host_only=1 ;;
-        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached] [--host-check-only]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached] [--require-install] [--host-check-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -475,6 +512,7 @@ expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests/
 expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
 expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
 expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
+expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action
@@ -928,6 +966,11 @@ expect_red td_bad_dest "holds an empty, \`.\` or \`..\` segment" tests//negative
 expect_red td_bad_dest_clash "is both a file and the directory of" tests//negative/test_data:bad_dest_clash
 expect_red td_bad_data_entry "test_data[\"tests/test_nope.mojo\"]: not a test_srcs entry" tests//negative/test_data:bad_data_entry
 expect_red td_bad_env_owned "env sets TEST_TMPDIR, which the test runner sets itself" tests//negative/test_data:bad_env_owned
+expect_green td_test_deps tests//functional/test_deps:tdlib
+expect_red td_test_deps_src "unable to locate module 'tdhelper'" tests//negative/test_deps:src_imports_test_dep
+expect_red td_test_deps_consumer "unable to locate module 'tdhelper'" tests//negative/test_deps:consumer_of_test_dep
+expect_red td_test_deps_not_mojo "test_deps entry tests//negative/test_deps:not_a_package is not a Mojo package" tests//negative/test_deps:not_mojo
+expect_red td_test_deps_also_in_deps "is in both deps and test_deps" tests//negative/test_deps:also_in_deps
 expect_red td_bad_env_name "is not a shell variable name" tests//negative/test_data:bad_env_name
 
 # 30
@@ -955,6 +998,8 @@ fi
 # 33a
 conda_args=()
 [ "$uncached" = 1 ] || conda_args+=(--no-uncached)
+[ "$require_install" = 0 ] || conda_args+=(--require-install)
+expect_green install_gate tests//functional/install_gate:cases
 BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
 while IFS= read -r line; do
     case "$line" in
@@ -1061,6 +1106,29 @@ expect_red aws_client_hand_src_is_label '`hand_srcs` entry `:hand_owner_label` i
 expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is not a source path of a `.mojo` file' tests//negative/mojo_aws_client:hand_src_not_mojo
 expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/mojo_aws_client:hand_src_clashes
 expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/mojo_aws_client:service_unreadable
+expect_red aws_client_env_read_hand 'env_reader.mojo names getenv; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_hand
+expect_red aws_client_env_read_home "env_home.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_home
+expect_red aws_client_env_read_std_os 'env_std_os.mojo names expanduser; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_std_os
+expect_red aws_client_env_read_semicolon "env_semicolon.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_semicolon
+expect_red aws_client_env_read_import_as "env_import_as.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_import_as
+expect_red aws_client_env_read_indented "env_indented.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_indented
+expect_red aws_client_env_read_compound "env_compound.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_compound
+expect_red aws_client_env_read_backtick_quote "env_backtick_quote.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_backtick_quote
+expect_red aws_client_env_read_backtick_hash "env_backtick_hash.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_backtick_hash
+expect_red aws_client_env_read_backtick_triple "env_backtick_triple.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_backtick_triple
+expect_red aws_client_env_read_escaped_quote "env_escaped_quote.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_escaped_quote
+expect_red aws_client_env_read_raw_quote "env_raw_quote.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_raw_quote
+expect_red aws_client_env_read_continuation "env_continuation.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_continuation
+expect_red aws_client_env_read_t_string 'env_t_string.mojo has a t-string, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_t_string
+expect_red aws_client_env_read_t_upper 'env_t_upper.mojo has a t-string, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_t_upper
+expect_red aws_client_env_read_t_tr 'env_t_tr.mojo has a t-string, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_t_tr
+expect_red aws_client_env_read_t_rt 'env_t_rt.mojo has a t-string, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_t_rt
+expect_red aws_client_env_read_triple_escape "env_triple_escape.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_triple_escape
+expect_red aws_client_env_read_cr 'env_cr.mojo has the control byte 0x0D (carriage return), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_cr
+expect_red aws_client_env_read_crlf_continuation 'env_crlf_continuation.mojo has the control byte 0x0D (carriage return), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_crlf_continuation
+expect_red aws_client_env_read_ff 'env_ff.mojo has the control byte 0x0C (form feed), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_ff
+expect_red aws_client_env_read_vt 'env_vt.mojo has the control byte 0x0B (vertical tab), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_vt
+expect_red aws_client_env_scan_data_given '`test_data` has an entry for `tests/_no_env_reads.mojo`, the generated environment scan' tests//negative/mojo_aws_client:env_scan_data_given
 
 # 9
 if [ "$MODE" = local ]; then
@@ -1121,6 +1189,7 @@ tw_tree=tests//functional/test_weld/src
 for want in \
     "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \
     "untested|$tw_tree/komira_b: 1 .mojo source(s) and no welded test" \
+    "untested|$tw_tree/tests/helpers/komira_e: 1 .mojo source(s) and no welded test" \
     "shrink_package|src/komira_c: the package welds 1 test(s) now; delete the row (the ledger only shrinks)" \
     "shrink_file|src/komira_c/wire/tests/test_wire.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
     "shrink_computed|src/komira_a/tests/test_one.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
@@ -1174,6 +1243,10 @@ expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enfor
 # shellcheck source=tools/build/tests/coverage_tests.sh
 . "$ROOT/tools/build/tests/coverage_tests.sh"
 
+# 45
+# shellcheck source=tools/build/tests/assert_level_tests.sh
+. "$ROOT/tools/build/tests/assert_level_tests.sh"
+
 # 42
 expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
 N=tests//negative/pointer_lint
@@ -1188,6 +1261,7 @@ for want in \
     "libc_open|$S:3: libc_redeclare: " \
     "public_pointer|$S:2: public_pointer: " \
     "public_method|$S:3: public_pointer: " \
+    "public_pointer_container|$N/src/tests/e2e/komira_c_e2e/plant.mojo:2: public_pointer: " \
     "public_init|$N/src/komira_b/__init__.mojo:2: public_pointer: " \
     "held_new_site|$N/src/komira_a/held.mojo:85: parallelize: parallelize[_worker](n) -- the standard library's parallelize[: run the work on a ParallelDispatch (3 sites, held 2)" \
     "ffi_from_address|$N/src/komira_a/ffi.mojo:11: from_address: " \
@@ -1213,6 +1287,35 @@ for want in \
 done
 expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
 expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
+
+# 43
+# shellcheck source=tools/build/tests/coverage_run_tests.sh
+. "$ROOT/tools/build/tests/coverage_run_tests.sh"
+
+# 44
+# shellcheck source=tools/build/tests/public_boundary_tests.sh
+. "$ROOT/tools/build/tests/public_boundary_tests.sh"
+
+# 45
+expect_green src_layout //:src_layout tests//functional/src_layout:ok
+N=tests//negative/src_layout
+F="a test-only package directly under src/, which holds what komira ships; move it to"
+for want in \
+    "top_e2e|//src/komira_foo_e2e: $F src/tests/e2e/komira_foo_e2e" \
+    "top_loopback|//src/komira_foo_loopback: $F src/tests/e2e/komira_foo_loopback" \
+    "top_conformance|//src/komira_foo_conformance: $F src/tests/conformance/komira_foo_conformance" \
+    "top_test_library|//src/komira_test_unlisted: a test library directly under src/ that \`shipped\` does not name" \
+    "shipped_missing|shipped names komira_test_gone, which is no package directly under src/; delete it" \
+    "nested|//src/komira_a_extra/komira_x_e2e: a package is src/<name>" \
+    "bad_kind|//src/tests/bench/komira_y: src/tests holds packages only at src/tests/<kind>/<name>" \
+    "shallow|//src/tests/komira_z_e2e: src/tests holds packages only at src/tests/<kind>/<name>" \
+    "e2e_in_conformance|this one belongs in src/tests/e2e/komira_w_e2e" \
+    "conformance_in_e2e|this one belongs in src/tests/conformance/komira_v_conformance" \
+    "e2e_in_helpers|this one belongs in src/tests/e2e/komira_u_loopback" \
+    "harness_in_e2e|this one belongs in src/tests/helpers/komira_t" \
+    "empty|src_layout: checked nothing"; do
+    expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
 
 # 37
 pt_rc=0

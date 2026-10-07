@@ -538,7 +538,7 @@ def _parse_decimal(s: String) -> Int:
     wrap is two's-complement, so the wrapped value can land small and
     POSITIVE and sail through the test. At ASSERT=none
     `Content-Length: 18446744073709551621` (2^64 + 5) would parse to **5** and
-    be accepted by `_parse_request_headers` as the framing length. The
+    be accepted by `parse_request_head` as the framing length. The
     `content_length_invalid` rejection at the call site only catches a
     NEGATIVE result, so it does not cover this. That is request smuggling, and
     it is live in every assert mode — nothing on this path was ever a bounds
