@@ -53,9 +53,11 @@
 #      signal N killed it), not another traced process's (the toolchain's
 #      README.md, "Patches"), so a test that fails under kcov (at -O0, or
 #      traced) fails this action, with the test's output from gate_runner
-#      but not its banner (which says the library's package is not produced:
-#      the package does not depend on a coverage run). kcov refused by the
-#      executor (ptrace, personality) is reported as that.
+#      but not its banner (which says the release gate's test failed: that
+#      one passed; this action's own message says what failed). With
+#      coverage on, the conda package (<name>_conda) waits for this action
+#      too, the library does not (tools/build/mojo/coverage.bzl). kcov refused by the executor
+#      (ptrace, personality) is reported as that.
 #      The run is bounded: gate_runner runs in a session of its own (setsid),
 #      and when it has not exited after <limit> seconds, every process of
 #      that session (gate_runner, kcov, the test and any child it left) is
@@ -286,9 +288,9 @@ if [ -e "$K/timed_out" ]; then
     red "The test left processes running or did not finish within $LIMIT s under kcov, and every process of the run was killed: kcov waits for every process the test started, where the release gate waits for the test alone. A test must wait for (or kill) every child it starts."
 fi
 if [ "$rc" != 0 ]; then
-    # gate_runner's banner says the library's package is not produced: not
-    # so here (the package does not depend on a coverage run). Its other
-    # lines, the test's output among them, are kept.
+    # gate_runner's banner says the release gate's test failed, which it did
+    # not (this is the coverage run). Its other lines, the test's output
+    # among them, are kept.
     awk -v H="GATED TEST FAILED: $LABEL (exit $rc)" \
         -v P="The library's package is not produced until this test passes." '
         !done && $0 == H { held = 1; next }
