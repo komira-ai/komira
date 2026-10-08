@@ -1,0 +1,62 @@
+{
+  "decl": {
+    "description": "",
+    "kind": "package",
+    "modules": [
+      {
+        "aliases": [],
+        "description": "",
+        "functions": [],
+        "kind": "module",
+        "name": "__init__",
+        "structs": [],
+        "summary": "hellopkg: the smallest package, consumed by hello_pkg_user.",
+        "traits": []
+      },
+      {
+        "aliases": [],
+        "description": "",
+        "functions": [
+          {
+            "kind": "function",
+            "name": "greeting",
+            "overloads": [
+              {
+                "args": [],
+                "async": false,
+                "constraints": "",
+                "deprecated": "",
+                "description": "",
+                "hasDefaultImplementation": false,
+                "isImplicitConversion": false,
+                "isStabilityTracked": false,
+                "isStable": false,
+                "isStatic": false,
+                "kind": "function",
+                "name": "greeting",
+                "parameters": [],
+                "raises": false,
+                "raisesDoc": "",
+                "returns": {
+                  "type": "String"
+                },
+                "signature": "def greeting() -> String",
+                "sinceVersion": "",
+                "summary": ""
+              }
+            ]
+          }
+        ],
+        "kind": "module",
+        "name": "greet",
+        "structs": [],
+        "summary": "",
+        "traits": []
+      }
+    ],
+    "name": "hellopkg",
+    "packages": [],
+    "summary": "hellopkg: the smallest package, consumed by hello_pkg_user."
+  },
+  "version": "1.0.0"
+}

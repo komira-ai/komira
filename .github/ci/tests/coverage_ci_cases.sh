@@ -152,6 +152,73 @@ grep -qxF '          overwrite: true' "$WF" || red "W1: a second upload of the a
 ! grep -q 'run_attempt' "$WF" || red "W1: an artifact name holds the run attempt"
 pass
 
+# H. A head commit cut before coverage measurement existed has no
+# .github/ci/coverage_measure.sh (nor covcheck's BUCK): on `pull_request`
+# the workflow file is the merge commit's, so it runs, but the steps reading
+# the head's tree would fail (exit 127) and turn the check red. The
+# `head_measured` function between coverage.yml's markers decides, from the
+# head's tree, whether the head can be measured; every later step of
+# `measure` and the whole `post` job are skipped when it cannot.
+extract head_measured
+# shellcheck disable=SC1090,SC1091
+. "$T/head_measured.sh"
+pass
+measured() { # <case> <dir> <want: yes|no>
+    : >"$W/gh_output"
+    run head_measured --dir "$2" --output "$W/gh_output"
+    [ "$RC" -eq 0 ] || red "$1: head_measured exited $RC"
+    [ "$(cat "$W/gh_output")" = "measured=$3" ] || red "$1: the output is not measured=$3: $(cat "$W/gh_output")"
+    if [ "$3" = no ]; then
+        grep -q '^::notice title=coverage not measured::.*merge main' "$W/out" ||
+            red "$1: no notice telling the author to merge main"
+    else
+        [ ! -s "$W/out" ] || red "$1: a notice for a head that can be measured"
+    fi
+    pass
+}
+mkdir -p "$W/h_old" "$W/h_half/.github/ci" "$W/h_new/.github/ci" "$W/h_new/tools/build/coverage"
+measured H1 "$W/h_old" no
+: >"$W/h_half/.github/ci/coverage_measure.sh"
+measured H2 "$W/h_half" no
+# The commonest old head: covcheck's BUCK (much older) without the script.
+mkdir -p "$W/h_buck/tools/build/coverage"
+: >"$W/h_buck/tools/build/coverage/BUCK"
+measured H5 "$W/h_buck" no
+: >"$W/h_new/.github/ci/coverage_measure.sh"
+: >"$W/h_new/tools/build/coverage/BUCK"
+measured H3 "$W/h_new" yes
+run head_measured --dir "$W/h_new"
+[ "$RC" -eq 2 ] || red "H4: head_measured without --output exited $RC, not 2"
+pass
+
+# W2. The wiring the function cannot show: it runs on the head's checkout
+# with the step output file, `measure` exports its answer, `post` runs only
+# on yes, and in `measure` the order is the checkout, then the check (step
+# id `head`), then every other step skipped on no (all but the summary,
+# which says why nothing was measured).
+wf_once W2 'head_measured --dir . --output "$GITHUB_OUTPUT"'
+wf_once W2 '        id: head'
+wf_once W2 "measured: \${{ steps.head.outputs.measured }}"
+wf_once W2 "    if: github.event.pull_request.head.repo.full_name == github.repository && needs.measure.outputs.measured == 'yes'"
+wrong=$(awk '
+    /^  measure:$/ { on = 1; next }
+    /^  [a-z]/ { on = 0 }
+    !on { next }
+    function close_step() {
+        if (kind == "checkout") { if (seen) print "the checkout comes after the head check"; checked = 1 }
+        else if (kind == "head") { if (!checked) print "the head check comes before the checkout" }
+        else if (kind == "step" && name != "the summary" && !(gated && seen_before)) print name
+    }
+    /^      - / { close_step(); kind = "step"; seen_before = seen; name = $0; sub(/^      - (name: )?/, "", name); gated = 0 }
+    /^      - uses: actions\/checkout@/ { kind = "checkout" }
+    /^        id: head$/ { kind = "head"; seen = 1 }
+    /^        name: / { name = substr($0, 15) }
+    index($0, "steps.head.outputs.measured == '\''yes'\''") { gated = 1 }
+    END { close_step(); if (!seen) print "no step with id head" }
+' "$WF")
+[ -z "$wrong" ] || red "W2: measure's steps are not checkout, head check, then gated steps: $wrong"
+pass
+
 HEAD_SHA=0123456789abcdef0123456789abcdef01234567
 REPO=example-owner/example-repo
 

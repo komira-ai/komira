@@ -965,7 +965,10 @@ uploaded. A pull request from a fork runs neither, and nor does one whose
 base is not `main`: a stacked pull request gets no coverage run until it is
 retargeted to `main` and then pushed to (a retarget alone is an `edited`
 event, which neither workflow listens for; the pull request adding the
-workflow sees its first real run then). Making it a required check, or switching coverage on in
+workflow sees its first real run then). A pull request whose head predates the workflow (no
+`.github/ci/coverage_measure.sh`) is not measured: job `measure` is green
+with a notice to merge `main`, job `post` is skipped, and no `coverage` check
+run is posted. Making it a required check, or switching coverage on in
 `pr / check`, waits for the sweep of tests that fail at `-O0` or under kcov
 (in a coverage build one such test leaves its library's conda package
 unbuilt: a coverage run or gate blocks only the package it measures from

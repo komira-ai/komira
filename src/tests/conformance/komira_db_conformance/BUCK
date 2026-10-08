@@ -1,0 +1,55 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: the komira_db contract, written once, generic over the
+# `Database` / `SqlDatabase` traits, and run against every implementation
+# that can run in a build action. The library (the checks, the target traits
+# and the gate) imports komira_db and komira_async only; each implementation
+# is imported by its own welded test:
+#
+#   tests/test_sqlite.mojo          SqliteDatabase, both suites, a new
+#                                   in-memory database per check.
+#   tests/test_firestore_mock.mojo  FirestoreDatabase over MockFirestore, the
+#                                   neutral suite (it has no SQL surface).
+#   tests/test_postgres.mojo        PgDatabase: the server-free dialect
+#                                   check runs; the live suites are wired
+#                                   but need a server (see the file).
+#   tests/test_gate.mojo            the gate itself: an unlisted failure, a
+#                                   stale gap, a gap failing differently and
+#                                   a misspelt gap all fail it.
+#
+# The suites run here, not in each implementation's test_srcs: a welded test
+# sees only its library's `deps`, so running them there would put this
+# test-only package in the closure of every consumer of the driver (the same
+# reason komira_db_sqlite keeps its CRUD test standalone). Nothing depends on
+# this package.
+mojo_library(
+    name = "komira_db_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_db:komira_db",
+        # Imported only by the tests (the implementations under test).
+        "//src/komira_db_postgres:komira_db_postgres",
+        "//src/komira_db_sqlite:komira_db_sqlite",
+        "//src/komira_gcp_firestore:komira_gcp_firestore",
+        "//src/komira_gcp_firestore_db:komira_gcp_firestore_db",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_firestore_mock.mojo",
+        "tests/test_gate.mojo",
+        "tests/test_postgres.mojo",
+        "tests/test_sqlite.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
