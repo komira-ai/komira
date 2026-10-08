@@ -35,6 +35,13 @@ welded_fixture(
     test_srcs = ["src/komira_c/wire/tests/test_wire.mojo"],
 )
 
+# A test-only package, under tests/<kind>/: its test is welded as any
+# package's is.
+welded_fixture(
+    name = "komira_d_e2e",
+    test_srcs = ["src/tests/e2e/komira_d_e2e/tests/test_d.mojo"],
+)
+
 test_weld(
     name = "ok",
     files = TEST_WELD_FILES,

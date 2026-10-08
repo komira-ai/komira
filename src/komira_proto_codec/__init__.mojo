@@ -65,8 +65,14 @@ from .proto_binary import (
 )
 
 from .proto3_json import JsonEncoder, JsonDecoder, UnknownFields
-from .proto3_json_float import read_proto3_json_f32, write_proto3_json_f32
+from .proto3_json_float import (
+    read_proto3_json_f32,
+    read_proto3_json_f64,
+    write_proto3_json_f32,
+    write_proto3_json_f64,
+)
 from .float32_parse import parse_decimal_f32
+from .float64_parse import parse_decimal_f64
 
 from .codec import (
     encode_proto,

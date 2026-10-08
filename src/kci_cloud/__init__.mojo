@@ -20,6 +20,12 @@ interface. This package names no cloud:
                        bootstrap resources, the label rule, `list_owned`,
                        `whoami`, `trust_render` / `trust_check`; typed
                        absences (ABSENT_BY_DESIGN / NOT_YET) and `Finding`.
+  * workload.mojo    — the three workload types (service, container job,
+                       worker) as one view of their shared container fields
+                       and identity.
+  * compute.mojo     — the rules of the workloads: their graph findings
+                       (image, run_as, env, command, a worker's replicas)
+                       and a worker's versioned replicas default.
   * grants.mojo      — who a resource runs as (its identity owner), and
                        every grant edge it lowers (`uses` lines, a grant
                        resource, the implicit `cell LOGS WRITE`), each
@@ -27,6 +33,22 @@ interface. This package names no cloud:
   * data.mojo        — the rules of the data types (table, bucket): their
                        graph findings, a table's key as text, the index
                        role `ix-<h>`, and the refusal of a changed key.
+  * feed.mojo        — the FEEDS: the list's subscriptions as (subscription,
+                       topic, queue), handed to every adapter's `check` and
+                       `lower`.
+  * messaging.mojo   — the rules of the messaging types (queue, topic,
+                       subscription): their graph findings and the queue's
+                       versioned ack deadline.
+  * secrets.mojo     — the rules of the secret type and of the `secret_env`
+                       references to it: their graph findings (one of a
+                       name and a secret; a secret resource read by the
+                       identity that receives it).
+  * values.mojo      — the checks of a configuration value (a literal, a
+                       parameter, a reference to another resource's
+                       output), shared by `env` and a DNS record's values.
+  * dns.mojo         — the rules of the name types (DNS zone, DNS record,
+                       certificate): their graph findings, the DNS name
+                       grammar, and the record's versioned TTL.
   * labels.mojo      — the standard label rule (encode, decode, check), and
                        komira_validation_run's two marks: the retention
                        mark `kci-retention=<retain|delete>` on every object
@@ -63,11 +85,19 @@ from kci_cloud.catalog import (
     PORTABLE,
     CLOUD_BOUND,
     FIELD_SERVICE,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
+    FIELD_WORKER,
     FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
+    FIELD_QUEUE,
+    FIELD_SECRET,
+    FIELD_DNS_ZONE,
+    FIELD_TOPIC,
+    FIELD_DNS_RECORD,
+    FIELD_CERTIFICATE,
+    FIELD_SUBSCRIPTION,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -77,6 +107,8 @@ from kci_cloud.catalog import (
     ACCESS_WRITE,
     ACCESS_READ_WRITE,
     ACCESS_DESCRIBE,
+    ACCESS_SEND,
+    ACCESS_RECEIVE,
     RETENTION_NONE,
     RETENTION_DELETE,
     RETENTION_KEEP,
@@ -85,6 +117,13 @@ from kci_cloud.catalog import (
     ROLE_BUCKET,
     ROLE_IDENTITY,
     ROLE_GRANT,
+    ROLE_QUEUE,
+    ROLE_SECRET,
+    ROLE_TOPIC,
+    ROLE_SUBSCRIPTION,
+    ROLE_ZONE,
+    ROLE_RECORD,
+    ROLE_CERT,
     BodyArm,
     body_arms,
     body_field,
@@ -146,6 +185,39 @@ from kci_cloud.data import (
     path_text,
     table_key_text,
 )
+from kci_cloud.feed import Feed, feeds_into, feeds_of, field_of_id
+from kci_cloud.workload import Workload, is_workload, workload_of
+from kci_cloud.compute import (
+    V1_IMAGE_PLATFORM,
+    WORKER_REPLICAS_DEFAULT,
+    image_platform,
+    worker_replicas,
+    workload_findings,
+)
+from kci_cloud.secrets import secret_env_findings, secret_findings, secret_of
+from kci_cloud.values import check_value, check_value_ref
+from kci_cloud.dns import (
+    CERTIFICATE_DOMAINS_MAX,
+    TTL_DEFAULT_SECONDS,
+    TTL_MAX_SECONDS,
+    TTL_MIN_SECONDS,
+    dns_findings,
+    dns_name_problem,
+    in_zone,
+    record_type_word,
+    ttl_seconds,
+    zone_name_of,
+)
+from kci_cloud.messaging import (
+    ACK_DEADLINE_DEFAULT_SECONDS,
+    ACK_DEADLINE_MAX_SECONDS,
+    ACK_DEADLINE_MIN_SECONDS,
+    MAX_DELIVERIES_MAX,
+    MAX_DELIVERIES_MIN,
+    ack_deadline_seconds,
+    dead_letter_of,
+    messaging_findings,
+)
 from kci_cloud.labels import (
     LABEL_VALUE_MAX,
     retain_labels,
@@ -177,11 +249,9 @@ from kci_cloud.validate import (
     validate_for,
     refusal_text,
     id_problem,
-    image_platform,
     node_role,
     role_budget_findings,
     ID_MAX_BYTES,
-    V1_IMAGE_PLATFORM,
 )
 from kci_cloud.deploy import (
     ApplyOutcome,

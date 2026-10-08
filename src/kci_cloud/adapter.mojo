@@ -39,9 +39,15 @@
 #     (catalog.mojo). `retention` is set by kci from the resource, never by
 #     the adapter. Grants are decided by kci too (grants.mojo): `lower` is
 #     handed the resource's edges, each with its role and its target's type,
-#     and lowers each one by the cloud's own grant kinds. A service, a job
-#     and a service account lower the role `<id>/identity` (turned off for a
-#     service or a job with `run_as`): a grant's principal is that node. `realize` turns one lowered node into the engine node,
+#     and lowers each one by the cloud's own grant kinds. So are the FEEDS
+#     (feed.mojo, the list's subscriptions as (subscription, topic, queue)):
+#     `check` and `lower` are handed them with every resource, so a cloud
+#     whose queue IS its subscription to a topic lowers the queue from its
+#     feed, and refuses as a limit what it cannot host. A workload (a
+#     service, a container job, a worker) and a service account lower the
+#     role `<id>/identity` (turned off for a workload with `run_as`): a
+#     grant's principal is that node. `realize` turns one lowered node into
+#     the engine node,
 #     and must keep its id, owner, wanted and retention.
 #   * Every object carries the non-identity retention mark
 #     `kci-retention=<retain|delete>` (komira_validation_run's, written by
@@ -117,6 +123,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource
 
 from kci_cloud.cloud_id import CloudId
+from kci_cloud.feed import Feed
 from kci_cloud.grants import GrantEdge
 
 
@@ -493,18 +500,21 @@ trait CloudAdapter(Movable):
         service)."""
         ...
 
-    def check(self, r: Resource) -> List[Finding]:
-        """Every value or shape of `r` this cloud refuses. Pure."""
+    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
+        """Every value or shape of `r` this cloud refuses, given the list's
+        `feeds` (kci's, from `feed.feeds_of`). Pure."""
         ...
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         """The artifact type and platform `r` needs on this cloud."""
         ...
 
-    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+    def lower(
+        self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]
+    ) raises -> List[LoweredNode]:
         """`r`'s engine nodes, as data, including one grant per edge of
-        `edges` (kci's, from `grants.edges_for`). Pure: no network, no
-        clock."""
+        `edges` (kci's, from `grants.edges_for`), given the list's `feeds`
+        (kci's, from `feed.feeds_of`). Pure: no network, no clock."""
         ...
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:

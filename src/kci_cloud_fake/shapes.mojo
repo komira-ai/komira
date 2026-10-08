@@ -10,9 +10,10 @@
 # MinIO API class); and per TARGET TYPE, the kind a grant edge to it lowers
 # to (`GrantRow`).
 #
-# IDENTITY. Every shape has an `identity` row for a service, a job and a
-# service account: the private identity of a service or a job (turned off
-# under `run_as`), and the one object of a service account. The onprem shape
+# IDENTITY. Every shape has an `identity` row for each workload (a service, a
+# container job, a worker) and a service account: the private identity of a
+# workload (turned off under `run_as`), and the one object of a service
+# account. The onprem shape
 # adds a fixed helper, `vault`: the Vault `kubernetes` auth role bound to the
 # Kubernetes service account, so the workload can log in to the cell's
 # Vault with its service account token.
@@ -28,13 +29,16 @@
 # validate, as a limit).
 #
 #   * `generic`   the fake's own shape: service -> identity, run, public;
-#                 job -> identity, run, schedule; table -> table; bucket ->
-#                 bucket; service account -> identity; every grant ->
-#                 `grant`.
+#                 container job -> identity, run; worker -> identity, run;
+#                 table -> table; bucket -> bucket; service account ->
+#                 identity; every grant -> `grant`.
 #   * `aws`       service -> identity (AWS::IAM::Role), run
 #                 (AWS::Lambda::Function), public (AWS::Lambda::Url);
-#                 job -> identity, run (AWS::ECS::TaskDefinition), schedule
-#                 (AWS::Scheduler::Schedule); table -> table
+#                 container job -> identity, run (AWS::ECS::TaskDefinition:
+#                 each run is one RunTask of it, an execution, not a lowered
+#                 object); worker -> identity, task
+#                 (AWS::ECS::TaskDefinition: the container), run
+#                 (AWS::ECS::Service: its replicas); table -> table
 #                 (AWS::DynamoDB::Table: its indexes are GSIs and its TTL
 #                 a setting, both inline); bucket -> bucket
 #                 (AWS::S3::Bucket); service account -> identity
@@ -44,8 +48,9 @@
 #                 policy of the principal's role (AWS::IAM::RolePolicy).
 #   * `gcp`       service -> identity (iam.googleapis.com/ServiceAccount), run
 #                 (run.googleapis.com/Service), public (an invoker member
-#                 binding); job -> identity, run (run.googleapis.com/Job),
-#                 schedule (cloudscheduler.googleapis.com/Job); table ->
+#                 binding); container job -> identity, run
+#                 (run.googleapis.com/Job); worker -> identity, run
+#                 (run.googleapis.com/WorkerPool); table ->
 #                 Firestore has NO table object: a table is a collection
 #                 group, and what kci creates for it is ONE COMPOSITE INDEX
 #                 PER ACCESS PATH (firestore.googleapis.com/Index) and a TTL
@@ -63,8 +68,9 @@
 #                 the call that writes it, `setIamPolicy`.
 #   * `azure`     service -> identity
 #                 (Microsoft.ManagedIdentity/userAssignedIdentities), run
-#                 (Microsoft.App/containerApps); job -> identity, run
-#                 (Microsoft.App/jobs); table -> table
+#                 (Microsoft.App/containerApps); container job -> identity,
+#                 run (Microsoft.App/jobs); worker -> identity, run
+#                 (Microsoft.App/containerApps, with no ingress); table -> table
 #                 (Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers,
 #                 in the cell's Cosmos account: indexes and TTL are settings
 #                 of the container); bucket -> bucket
@@ -75,38 +81,53 @@
 #                 Cosmos data access is granted by its own role assignment
 #                 (Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments),
 #                 not by ARM RBAC. There is NO public
-#                 row and NO schedule row: a container app's ingress and a
-#                 job's schedule trigger are settings of the run object, so
-#                 they FOLD into the run node's desired fields (`ingress`,
-#                 `trigger`) and are never nodes of their own.
+#                 row: a container app's ingress is a setting of the run
+#                 object, so it FOLDS into the run node's desired field
+#                 `ingress` and is never a node of its own.
 #   * `onprem`    the self-hosted cloud: Kubernetes + MinIO + Vault.
 #                 service -> identity (v1/ServiceAccount), vault
 #                 (vault:auth/kubernetes/role), run (apps/v1/Deployment),
 #                 endpoint (v1/Service: the in-cluster address of the
 #                 Deployment, always wanted), public
 #                 (networking.k8s.io/v1/Ingress, which fronts the endpoint);
-#                 job -> identity, vault, run (batch/v1/CronJob); bucket ->
+#                 container job -> identity, vault, run (batch/v1/CronJob,
+#                 standing for the job's TEMPLATE: a run of it is a
+#                 batch/v1/Job made from the template, an execution, not a
+#                 lowered object); worker -> identity, vault, run
+#                 (apps/v1/Deployment, with no Service in front); bucket ->
 #                 bucket (minio/Bucket: an S3-API bucket on the cell's MinIO);
-#                 service account -> identity, vault. There is NO schedule
-#                 row: a job is a CronJob, and its schedule FOLDS into it
-#                 (`trigger`; an on-demand job is a suspended CronJob, and a
-#                 run of it is a batch/v1/Job made from the CronJob's
-#                 template, which is an execution, not a lowered object).
+#                 service account -> identity, vault.
 #                 Grants by the target's backing, one row per target type:
-#                 a Kubernetes target (service, job, service account) ->
+#                 a Kubernetes target (service, container job, service
+#                 account) ->
 #                 rbac.authorization.k8s.io/v1/RoleBinding with its helper
 #                 rbac.authorization.k8s.io/v1/Role; a MinIO target (bucket)
 #                 -> minio:policy (mapped to the service account's token
-#                 claim). A Vault target has no type yet: its row (a Vault
-#                 policy attached to the `vault` auth role) arrives with the
-#                 first Vault-backed type. A cell resource has NO row: the
-#                 edge folds into the identity (`cell.LOGS`).
+#                 claim); a Vault target (secret) -> vault:sys/policies/acl
+#                 (a Vault ACL policy, attached to the principal's `vault`
+#                 auth role). A cell resource has NO row: the edge folds
+#                 into the identity (`cell.LOGS`).
 #                 A TABLE IS NOT_YET on onprem: which datastore backs it is
 #                 an open design question (Q17: PostgreSQL via
 #                 CloudNativePG, CockroachDB, ScyllaDB or FoundationDB), so
 #                 the shape declares it absent rather than pick one, and a
 #                 graph with a table is refused on onprem before anything is
 #                 lowered (a coverage finding naming the type and Q17).
+#
+# COMPUTE LIMITS, as data per shape (workloads.mojo refuses them at validate,
+# as limits):
+#   * `gpu_limit`: why no workload of the shape may ask for a GPU
+#     (`Size.gpus` above 0), or empty where one may (generic). aws: a service
+#     is a Lambda function, which runs on no GPU, and an ECS task (a container
+#     job, a worker) has one only on a launch type with GPUs, which is not
+#     decided. gcp, azure and onprem: which GPU each attaches to a workload
+#     (and, on onprem, which device plugin offers it) is not decided. Each
+#     shape takes none rather than pick one.
+#   * `scale_to_zero_limit`: why a service there keeps one instance running
+#     (a scale whose `min` is 0, written or by default, is refused), or empty
+#     where a service scales to zero. onprem: a service is a plain Deployment
+#     until the open question Q21 (a plain Deployment, Knative Serving or the
+#     KEDA HTTP add-on) is answered.
 #
 # THE BUILT-IN CLOUDS ARE DATA: `builtin_shapes()` is the list aws, gcp,
 # azure, onprem, and `shape_named(name)` looks a cloud name up in it and
@@ -122,6 +143,83 @@
 # roles are `table` on every shape that hosts it, plus `ix-<h>` and `ttl`
 # where the indexes and the TTL are objects of their own (gcp).
 #
+# MESSAGING (queue, topic, subscription; messaging.mojo lowers them):
+#   * `generic`   queue -> queue; topic -> topic; subscription -> sub.
+#   * `aws`       queue -> queue (AWS::SQS::Queue, redrive to its dead-letter
+#                 queue) and policy (AWS::SQS::QueuePolicy, wanted iff a
+#                 subscription feeds the queue: ONE policy per queue lets
+#                 every topic that feeds it send, because two policies on one
+#                 queue overwrite each other); topic -> topic
+#                 (AWS::SNS::Topic); subscription -> sub
+#                 (AWS::SNS::Subscription, after the queue's policy).
+#   * `gcp`       a queue is a PULL SUBSCRIPTION: queue -> topic (a private
+#                 pubsub.googleapis.com/Topic, wanted iff no subscription
+#                 feeds the queue) and queue (pubsub.googleapis.com/
+#                 Subscription, on the private topic, or on the topic that
+#                 feeds it); topic -> topic (pubsub.googleapis.com/Topic);
+#                 subscription -> sub, ALWAYS TURNED OFF: it has no object of
+#                 its own, it is the topic the queue's subscription is on. A
+#                 queue fed by two topics, a direct SEND to a fed queue, and a
+#                 dead-letter queue that is fed are limits (messaging.mojo).
+#   * `azure`     queue -> queue (Microsoft.ServiceBus/namespaces/queues);
+#                 topic -> topic (Microsoft.ServiceBus/namespaces/topics);
+#                 subscription -> sub
+#                 (Microsoft.ServiceBus/namespaces/topics/subscriptions,
+#                 forwarding to the queue). All in the cell's namespace.
+#   * `onprem`    NOT_YET for all three: which message backing an onprem cell
+#                 runs is an open design question (Q16: RabbitMQ, NATS
+#                 JetStream, Apache Kafka or Redis Streams), so the shape
+#                 declares them absent rather than pick one.
+#
+# SECRET (secrets.mojo lowers it): one role on every shape, `secret`, the
+# CONTAINER of a value (kci writes no value):
+#   * `generic`   secret -> secret.
+#   * `aws`       secret -> AWS::SecretsManager::Secret (created with no
+#                 secret string, so it has no version).
+#   * `gcp`       secret -> secretmanager.googleapis.com/Secret (a secret
+#                 with no version).
+#   * `azure`     secret -> Microsoft.KeyVault/vaults/secrets, in the cell's
+#                 key vault (choosing another vault per secret is per-cloud
+#                 tuning, held with every extension field).
+#   * `onprem`    secret -> vault:kv-v2/metadata, a Vault KV v2 metadata
+#                 entry on the cell's Vault: a value-less container, deleted
+#                 with every version of its value. A grant to it is a Vault
+#                 ACL policy (above).
+# Every shape hosts it, so no shape declares it NOT_YET.
+#
+# NAMES (dns.mojo lowers them): a DNS zone has one role, `zone`; a DNS
+# record one, `record`; a certificate `cert`, plus its validation helpers
+# where they are objects of their own:
+#   * `generic`   zone -> zone; record -> record; certificate -> cert.
+#   * `aws`       zone -> AWS::Route53::HostedZone; record ->
+#                 AWS::Route53::RecordSet; certificate ->
+#                 AWS::CertificateManager::Certificate (DNS-validated in the
+#                 zone; its validation records are written by the
+#                 certificate's own validation settings, not as nodes).
+#   * `gcp`       zone -> dns.googleapis.com/ManagedZone; record ->
+#                 dns.googleapis.com/ResourceRecordSet; certificate ->
+#                 dnsauth (certificatemanager.googleapis.com/DnsAuthorization,
+#                 for the certificate's first name), authrec (the
+#                 dns.googleapis.com/ResourceRecordSet that authorization
+#                 asks for, in the zone) and cert
+#                 (certificatemanager.googleapis.com/Certificate). The
+#                 fake lowers ONE authorization per certificate (the
+#                 cloud accepts several), and one authorization covers one
+#                 name and its wildcard, so a certificate for any other
+#                 name is a limit of this lowering.
+#   * `azure`     zone -> Microsoft.Network/dnsZones; record ->
+#                 Microsoft.Network/dnsZones/<TYPE> (the ARM type names the
+#                 record type: `<TYPE>` is replaced by it, e.g.
+#                 Microsoft.Network/dnsZones/CNAME); certificate ->
+#                 Microsoft.App/managedEnvironments/managedCertificates, in
+#                 the cell's environment. Such a certificate covers ONE name
+#                 and no wildcard (`single_name_certificates`), so a
+#                 certificate with more names, or a wildcard, is a limit.
+#   * `onprem`    NOT_YET for all three: which DNS server an onprem cell
+#                 owns (Q18) and which issuer signs its certificates (Q19)
+#                 are open design questions, so the shape declares them
+#                 absent rather than pick one.
+#
 # A shape's ABSENCES (`not_yet`) are the catalog types it does not host yet,
 # each with its reason; the fake cloud built with the shape declares them,
 # and is complete only when there are none. A grant resource has no row: its roles
@@ -134,10 +232,18 @@
 from kci_cloud import (
     Absence,
     FIELD_BUCKET,
-    FIELD_JOB,
+    FIELD_CERTIFICATE,
+    FIELD_DNS_RECORD,
+    FIELD_DNS_ZONE,
+    FIELD_CONTAINER_JOB,
+    FIELD_QUEUE,
+    FIELD_SECRET,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_SUBSCRIPTION,
     FIELD_TABLE,
+    FIELD_TOPIC,
+    FIELD_WORKER,
     NOT_YET,
 )
 
@@ -151,9 +257,26 @@ comptime ROLE_TTL = "ttl"
 comptime ROLE_IDENTITY = "identity"
 comptime ROLE_RUN = "run"
 comptime ROLE_PUBLIC = "public"
-comptime ROLE_SCHEDULE = "schedule"
+comptime ROLE_TASK = "task"
+"""A worker's container definition where it is an object of its own (aws:
+the task definition its service runs)."""
 comptime ROLE_ENDPOINT = "endpoint"
 comptime ROLE_VAULT = "vault"
+comptime ROLE_QUEUE = "queue"
+comptime ROLE_TOPIC = "topic"
+comptime ROLE_SUB = "sub"
+comptime ROLE_SECRET = "secret"
+comptime ROLE_ZONE = "zone"
+comptime ROLE_RECORD = "record"
+comptime ROLE_CERT = "cert"
+comptime ROLE_DNS_AUTH = "dnsauth"
+"""gcp: the DNS authorization a certificate is validated by."""
+comptime ROLE_AUTH_RECORD = "authrec"
+"""gcp: the record that DNS authorization asks for, in the zone."""
+comptime RECORD_TYPE_SLOT = "<TYPE>"
+"""In a record row's kind, replaced by the record's type."""
+comptime ROLE_POLICY = "policy"
+"""aws: the queue policy that lets the topics feeding a queue send to it."""
 comptime ROLE_RULES = "rules"
 """The helper of a `grant` resource's edge, where its row names one."""
 
@@ -168,6 +291,40 @@ comptime _VAULT_ROLE = "vault:auth/kubernetes/role"
 comptime _K8S_BINDING = "rbac.authorization.k8s.io/v1/RoleBinding"
 comptime _K8S_ROLE = "rbac.authorization.k8s.io/v1/Role"
 comptime _FIRESTORE_INDEX = "firestore.googleapis.com/Index"
+comptime _PUBSUB_TOPIC = "pubsub.googleapis.com/Topic"
+comptime _PUBSUB_SUB = "pubsub.googleapis.com/Subscription"
+comptime _CLOUD_DNS_RECORD = "dns.googleapis.com/ResourceRecordSet"
+comptime _ECS_TASK = "AWS::ECS::TaskDefinition"
+comptime ONPREM_MESSAGING_REASON = (
+    "the onprem message backing of a queue, a topic and a subscription is an"
+    " open question (Q16: RabbitMQ, NATS JetStream, Apache Kafka or Redis"
+    " Streams)"
+)
+comptime ONPREM_DNS_REASON = (
+    "the onprem DNS server that holds a zone and its records is an open"
+    " question (Q18: PowerDNS, CoreDNS, ExternalDNS with PowerDNS or RFC 2136,"
+    " or the customer's own DNS)"
+)
+comptime ONPREM_CERTIFICATE_REASON = (
+    "the onprem issuer of a managed certificate is an open question (Q19:"
+    " cert-manager with an ACME issuer, a Vault PKI issuer, the customer's CA,"
+    " or step-ca)"
+)
+comptime GPU_REASON_AWS = (
+    "a service here is a Lambda function, which runs on no GPU, and an ECS"
+    " task (a container job, a worker) has one only on a launch type with"
+    " GPUs, which is not decided yet"
+)
+comptime GPU_REASON_UNDECIDED = (
+    "which GPU this cloud attaches to a workload is not decided yet (a design"
+    " decision that is still open), so no workload may ask for one"
+)
+comptime ONPREM_SCALE_TO_ZERO_REASON = (
+    "a service is a plain Deployment, which keeps at least one instance:"
+    " whether scaling to zero is part of a service's meaning is an open"
+    " question (Q21: a plain Deployment, Knative Serving or the KEDA HTTP"
+    " add-on)"
+)
 comptime ONPREM_TABLE_REASON = (
     "the onprem datastore that backs a table is an open question (Q17:"
     " PostgreSQL via CloudNativePG, CockroachDB, ScyllaDB or FoundationDB)"
@@ -211,6 +368,13 @@ struct ProviderShape(Copyable, Movable, Deinitable):
     var rows: List[ShapeRow]
     var grants: List[GrantRow]
     var not_yet: List[Absence]
+    var single_name_certificates: Bool
+    """A certificate covers one name and no wildcard on this shape."""
+    var gpu_limit: String
+    """Why no workload here may ask for a GPU; empty where one may."""
+    var scale_to_zero_limit: String
+    """Why a service here keeps one instance; empty where it scales to
+    zero."""
 
     def __init__(
         out self,
@@ -218,17 +382,26 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         var rows: List[ShapeRow],
         var grants: List[GrantRow],
         var not_yet: List[Absence] = List[Absence](),
+        single_name_certificates: Bool = False,
+        gpu_limit: String = String(""),
+        scale_to_zero_limit: String = String(""),
     ):
         self.name = name
         self.rows = rows^
         self.grants = grants^
         self.not_yet = not_yet^
+        self.single_name_certificates = single_name_certificates
+        self.gpu_limit = gpu_limit
+        self.scale_to_zero_limit = scale_to_zero_limit
 
     def __init__(out self, *, copy: Self):
         self.name = copy.name.copy()
         self.rows = copy.rows.copy()
         self.grants = copy.grants.copy()
         self.not_yet = copy.not_yet.copy()
+        self.single_name_certificates = copy.single_name_certificates
+        self.gpu_limit = copy.gpu_limit.copy()
+        self.scale_to_zero_limit = copy.scale_to_zero_limit.copy()
 
     def hosts(self, field: Int) -> Bool:
         """False for a type the shape declares NOT_YET."""
@@ -283,12 +456,20 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_IDENTITY), String("identity")))
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_RUN), String("run")))
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_PUBLIC), String("public")))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_IDENTITY), String("identity")))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("run")))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("schedule")))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_IDENTITY), String("identity")))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_RUN), String("run")))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_IDENTITY), String("identity")))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_RUN), String("run")))
         r.append(ShapeRow(FIELD_TABLE, String(ROLE_TABLE), String("table")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String("identity")))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_QUEUE), String("queue")))
+        r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String("topic")))
+        r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String("subscription")))
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("secret")))
+        r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("zone")))
+        r.append(ShapeRow(FIELD_DNS_RECORD, String(ROLE_RECORD), String("record")))
+        r.append(ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("certificate")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("grant"), String("")))
         return ProviderShape(String("generic"), r^, g^)
@@ -299,16 +480,28 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_IDENTITY), String(_AWS_ROLE)))
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_RUN), String("AWS::Lambda::Function")))
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_PUBLIC), String("AWS::Lambda::Url")))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_IDENTITY), String(_AWS_ROLE)))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("AWS::ECS::TaskDefinition")))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("AWS::Scheduler::Schedule")))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_IDENTITY), String(_AWS_ROLE)))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_RUN), String(_ECS_TASK)))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_IDENTITY), String(_AWS_ROLE)))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_TASK), String(_ECS_TASK)))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_RUN), String("AWS::ECS::Service")))
         r.append(ShapeRow(FIELD_TABLE, String(ROLE_TABLE), String("AWS::DynamoDB::Table")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("AWS::S3::Bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_AWS_ROLE)))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_QUEUE), String("AWS::SQS::Queue")))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_POLICY), String("AWS::SQS::QueuePolicy")))
+        r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String("AWS::SNS::Topic")))
+        r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String("AWS::SNS::Subscription")))
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("AWS::SecretsManager::Secret")))
+        r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("AWS::Route53::HostedZone")))
+        r.append(ShapeRow(FIELD_DNS_RECORD, String(ROLE_RECORD), String("AWS::Route53::RecordSet")))
+        r.append(
+            ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("AWS::CertificateManager::Certificate"))
+        )
         var g = List[GrantRow]()
         g.append(GrantRow(FIELD_SERVICE, String("AWS::Lambda::Permission"), String("")))
         g.append(GrantRow(TARGET_ANY, String("AWS::IAM::RolePolicy"), String("")))
-        return ProviderShape(String("aws"), r^, g^)
+        return ProviderShape(String("aws"), r^, g^, gpu_limit=String(GPU_REASON_AWS))
 
     @staticmethod
     def gcp() -> ProviderShape:
@@ -316,27 +509,44 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_IDENTITY), String(_GCP_SA)))
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_RUN), String("run.googleapis.com/Service")))
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_PUBLIC), String("setIamPolicy")))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_IDENTITY), String(_GCP_SA)))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("run.googleapis.com/Job")))
-        r.append(
-            ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("cloudscheduler.googleapis.com/Job"))
-        )
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_IDENTITY), String(_GCP_SA)))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_RUN), String("run.googleapis.com/Job")))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_IDENTITY), String(_GCP_SA)))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_RUN), String("run.googleapis.com/WorkerPool")))
         r.append(ShapeRow(FIELD_TABLE, String(ROLE_TABLE), String(_FIRESTORE_INDEX)))
         r.append(ShapeRow(FIELD_TABLE, String(ROLE_INDEX), String(_FIRESTORE_INDEX)))
         r.append(ShapeRow(FIELD_TABLE, String(ROLE_TTL), String("firestore.googleapis.com/Field")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("storage.googleapis.com/Bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_GCP_SA)))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_TOPIC), String(_PUBSUB_TOPIC)))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_QUEUE), String(_PUBSUB_SUB)))
+        r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String(_PUBSUB_TOPIC)))
+        r.append(ShapeRow(FIELD_SUBSCRIPTION, String(ROLE_SUB), String(_PUBSUB_SUB)))
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("secretmanager.googleapis.com/Secret")))
+        r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("dns.googleapis.com/ManagedZone")))
+        r.append(ShapeRow(FIELD_DNS_RECORD, String(ROLE_RECORD), String(_CLOUD_DNS_RECORD)))
+        r.append(
+            ShapeRow(
+                FIELD_CERTIFICATE, String(ROLE_DNS_AUTH), String("certificatemanager.googleapis.com/DnsAuthorization")
+            )
+        )
+        r.append(ShapeRow(FIELD_CERTIFICATE, String(ROLE_AUTH_RECORD), String(_CLOUD_DNS_RECORD)))
+        r.append(
+            ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("certificatemanager.googleapis.com/Certificate"))
+        )
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("setIamPolicy"), String("")))
-        return ProviderShape(String("gcp"), r^, g^)
+        return ProviderShape(String("gcp"), r^, g^, gpu_limit=String(GPU_REASON_UNDECIDED))
 
     @staticmethod
     def azure() -> ProviderShape:
         var r = List[ShapeRow]()
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_IDENTITY), String(_AZURE_ID)))
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_RUN), String("Microsoft.App/containerApps")))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_IDENTITY), String(_AZURE_ID)))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("Microsoft.App/jobs")))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_IDENTITY), String(_AZURE_ID)))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_RUN), String("Microsoft.App/jobs")))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_IDENTITY), String(_AZURE_ID)))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_RUN), String("Microsoft.App/containerApps")))
         r.append(
             ShapeRow(
                 FIELD_TABLE,
@@ -352,6 +562,29 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             )
         )
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_AZURE_ID)))
+        r.append(ShapeRow(FIELD_QUEUE, String(ROLE_QUEUE), String("Microsoft.ServiceBus/namespaces/queues")))
+        r.append(ShapeRow(FIELD_TOPIC, String(ROLE_TOPIC), String("Microsoft.ServiceBus/namespaces/topics")))
+        r.append(
+            ShapeRow(
+                FIELD_SUBSCRIPTION,
+                String(ROLE_SUB),
+                String("Microsoft.ServiceBus/namespaces/topics/subscriptions"),
+            )
+        )
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("Microsoft.KeyVault/vaults/secrets")))
+        r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("Microsoft.Network/dnsZones")))
+        r.append(
+            ShapeRow(
+                FIELD_DNS_RECORD, String(ROLE_RECORD), String("Microsoft.Network/dnsZones/") + String(RECORD_TYPE_SLOT)
+            )
+        )
+        r.append(
+            ShapeRow(
+                FIELD_CERTIFICATE,
+                String(ROLE_CERT),
+                String("Microsoft.App/managedEnvironments/managedCertificates"),
+            )
+        )
         var g = List[GrantRow]()
         g.append(
             GrantRow(
@@ -361,7 +594,9 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             )
         )
         g.append(GrantRow(TARGET_ANY, String("Microsoft.Authorization/roleAssignments"), String("")))
-        return ProviderShape(String("azure"), r^, g^)
+        return ProviderShape(
+            String("azure"), r^, g^, single_name_certificates=True, gpu_limit=String(GPU_REASON_UNDECIDED)
+        )
 
     @staticmethod
     def onprem() -> ProviderShape:
@@ -373,20 +608,38 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(
             ShapeRow(FIELD_SERVICE, String(ROLE_PUBLIC), String("networking.k8s.io/v1/Ingress"))
         )
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_IDENTITY), String(_K8S_SA)))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_VAULT), String(_VAULT_ROLE)))
-        r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("batch/v1/CronJob")))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_IDENTITY), String(_K8S_SA)))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_VAULT), String(_VAULT_ROLE)))
+        r.append(ShapeRow(FIELD_CONTAINER_JOB, String(ROLE_RUN), String("batch/v1/CronJob")))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_IDENTITY), String(_K8S_SA)))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_VAULT), String(_VAULT_ROLE)))
+        r.append(ShapeRow(FIELD_WORKER, String(ROLE_RUN), String("apps/v1/Deployment")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("minio/Bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_K8S_SA)))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_VAULT), String(_VAULT_ROLE)))
+        r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("vault:kv-v2/metadata")))
         var g = List[GrantRow]()
         g.append(GrantRow(FIELD_SERVICE, String(_K8S_BINDING), String(_K8S_ROLE)))
-        g.append(GrantRow(FIELD_JOB, String(_K8S_BINDING), String(_K8S_ROLE)))
+        g.append(GrantRow(FIELD_CONTAINER_JOB, String(_K8S_BINDING), String(_K8S_ROLE)))
         g.append(GrantRow(FIELD_SERVICE_ACCOUNT, String(_K8S_BINDING), String(_K8S_ROLE)))
         g.append(GrantRow(FIELD_BUCKET, String("minio:policy"), String("")))
+        g.append(GrantRow(FIELD_SECRET, String("vault:sys/policies/acl"), String("")))
         var later = List[Absence]()
         later.append(Absence(FIELD_TABLE, NOT_YET, String(ONPREM_TABLE_REASON)))
-        return ProviderShape(String("onprem"), r^, g^, later^)
+        later.append(Absence(FIELD_QUEUE, NOT_YET, String(ONPREM_MESSAGING_REASON)))
+        later.append(Absence(FIELD_TOPIC, NOT_YET, String(ONPREM_MESSAGING_REASON)))
+        later.append(Absence(FIELD_SUBSCRIPTION, NOT_YET, String(ONPREM_MESSAGING_REASON)))
+        later.append(Absence(FIELD_DNS_ZONE, NOT_YET, String(ONPREM_DNS_REASON)))
+        later.append(Absence(FIELD_DNS_RECORD, NOT_YET, String(ONPREM_DNS_REASON)))
+        later.append(Absence(FIELD_CERTIFICATE, NOT_YET, String(ONPREM_CERTIFICATE_REASON)))
+        return ProviderShape(
+            String("onprem"),
+            r^,
+            g^,
+            later^,
+            gpu_limit=String(GPU_REASON_UNDECIDED),
+            scale_to_zero_limit=String(ONPREM_SCALE_TO_ZERO_REASON),
+        )
 
 
 def builtin_shapes() -> List[ProviderShape]:

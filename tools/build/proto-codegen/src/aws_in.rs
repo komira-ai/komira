@@ -32,10 +32,17 @@ pub struct AwsLowering {
 pub struct AwsServiceMeta {
     pub service: String,
     pub api_version: String,
-    /// `metadata.protocol`: `json` / `rest-json` / `rest-xml` / `query` /
-    /// `ec2` / `smithy-rpc-v2-cbor`.
+    /// The protocol the client is generated for: the first entry of
+    /// `protocols` the generator implements
+    /// ([`crate::emit_aws::SUPPORTED_PROTOCOLS`]), else (no entry is
+    /// implemented, or the model lists none) `metadata.protocol`, which the
+    /// emitter then refuses unless it implements it. One of `json` /
+    /// `rest-json` / `rest-xml` / `query` / `ec2` / `smithy-rpc-v2-cbor`.
     pub protocol: String,
-    /// `metadata.protocols` — the multi-protocol list newer models carry.
+    /// `metadata.protocol` as the model declares it.
+    pub declared_protocol: String,
+    /// `metadata.protocols` — the multi-protocol list newer models carry, in
+    /// the model's order.
     pub protocols: Vec<String>,
     /// `metadata.jsonVersion` (`"1.0"` / `"1.1"`), for the awsJson family.
     pub json_version: Option<String>,
@@ -659,6 +666,7 @@ pub fn lower_aws_service(
         vec![IrService {
             name: service_struct_name(&lowerer.meta),
             default_host: None,
+            host_from_service_config: false,
             methods,
         }]
     };
@@ -1308,21 +1316,6 @@ impl<'a> AwsLowerer<'a> {
             }
             errors.push(aws_fq(&self.meta.service, s));
         }
-        // REFUSED, by name: an operation with an `endpoint.hostPrefix`. The
-        // request builder fills `AwsRequest.host_prefix`, but the generated
-        // `send` resolves the endpoint without it, so the client would send
-        // the request to the unprefixed host.
-        if let Some(hp) = op
-            .get("endpoint")
-            .and_then(|e| e.get("hostPrefix"))
-            .and_then(Json::as_str)
-        {
-            return Err(format!(
-                "aws front-end: REFUSED host-prefix: operation `{op_name}` has the \
-                 host prefix `{hp}`, and the generated send does not apply a host prefix"
-            ));
-        }
-
         let facts = AwsOperationFacts {
             name: op_name.to_string(),
             ir_method_name: ir_method_name.clone(),
@@ -1495,15 +1488,23 @@ fn lower_metadata(root: &JsonObject, service: &str) -> Result<AwsServiceMeta, St
             .ok_or_else(|| format!("AWS service model `metadata` has no `{k}`"))
     };
     let endpoint_prefix = need("endpointPrefix")?;
+    let declared_protocol = need("protocol")?;
+    let protocols: Vec<String> = m
+        .get("protocols")
+        .and_then(Json::as_array)
+        .map(|a| a.iter().filter_map(Json::as_str).map(String::from).collect())
+        .unwrap_or_default();
+    let protocol = protocols
+        .iter()
+        .find(|p| crate::emit_aws::SUPPORTED_PROTOCOLS.contains(&p.as_str()))
+        .cloned()
+        .unwrap_or_else(|| declared_protocol.clone());
     Ok(AwsServiceMeta {
         service: service.to_string(),
         api_version: need("apiVersion")?,
-        protocol: need("protocol")?,
-        protocols: m
-            .get("protocols")
-            .and_then(Json::as_array)
-            .map(|a| a.iter().filter_map(Json::as_str).map(String::from).collect())
-            .unwrap_or_default(),
+        protocol,
+        declared_protocol,
+        protocols,
         json_version: str_of(m, "jsonVersion"),
         target_prefix: str_of(m, "targetPrefix"),
         signing_name: str_of(m, "signingName").unwrap_or_else(|| endpoint_prefix.clone()),
@@ -1891,9 +1892,11 @@ mod tests {
     }
 
     #[test]
-    fn a_host_prefix_is_a_named_refusal() {
+    fn a_host_prefix_lowers_and_is_recorded() {
         let op = r#", "endpoint": {"hostPrefix": "data-"}"#;
-        assert_eq!(refusal_of(&tiny_model("", op, "Str")).as_deref(), Some("host-prefix"));
+        let lowering = lower_tiny(&tiny_model("", op, "Str")).unwrap();
+        let facts = lowering.facts.operation("Op").unwrap();
+        assert_eq!(facts.host_prefix.as_deref(), Some("data-"));
     }
 
     #[test]
