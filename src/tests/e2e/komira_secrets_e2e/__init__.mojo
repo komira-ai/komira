@@ -1,12 +1,15 @@
-# komira_secrets_e2e: the generated AWS Secrets Manager client
-# (komira_aws_secretsmanager) against a stateful fake of the service, over a
-# real socket on 127.0.0.1, in one process.
+# komira_secrets_e2e: the generated secret-store clients against stateful
+# fakes of their services, over a real socket on 127.0.0.1, in one process:
+# AWS Secrets Manager (komira_aws_secretsmanager) over plaintext HTTP, and
+# GCP Secret Manager v1 (komira_gcp_secretmanager) over TLS.
 #
 # A test-only package: its welded tests are the point. The library holds
-# what they share: the fake (fake_store.mojo, fake_service.mojo), its own
-# SigV4 verifier (sigv4_check.mojo), the runner that steps the server on one
-# thread while the client runs on another (duet.mojo), and the client
-# pointed at the fake with canned credentials (client.mojo).
+# what they share: the AWS fake (fake_store.mojo, fake_service.mojo), its
+# own SigV4 verifier (sigv4_check.mojo) and client (client.mojo); the GCP
+# fake (gcp_store.mojo, gcp_fake.mojo), the TLS terminator in front of it
+# (tls_front.mojo) and its server and client (gcp_server.mojo); and the
+# runner that steps a server on one thread while the client runs on another
+# (duet.mojo).
 
 from .sigv4_check import (
     CannedCredential,
@@ -33,7 +36,7 @@ from .fake_service import (
     ScriptedFault,
     WireRecord,
 )
-from .duet import ClientLeg, FakeServer, serve_while
+from .duet import ClientLeg, FakeServer, ServeStep, serve_while
 from .client import (
     EXAMPLE_ACCESS_KEY_ID,
     EXAMPLE_SECRET_ACCESS_KEY,
@@ -43,4 +46,29 @@ from .client import (
     fake_credentials,
     leaks,
     loopback_client,
+)
+from .gcp_store import (
+    GCP_PROJECT_ID,
+    GCP_PROJECT_NUMBER,
+    GCP_REGION,
+    GcpSecret,
+    GcpStore,
+    GcpVersion,
+    crc32c,
+)
+from .gcp_fake import (
+    INVALID_CREDENTIAL_MESSAGE,
+    MISSING_CREDENTIAL_MESSAGE,
+    FakeSecretManager,
+)
+from .tls_front import TlsFront
+from .gcp_server import (
+    GLOBAL_HOST,
+    OTHER_ACCESS_TOKEN,
+    REGIONAL_HOST,
+    TEST_ACCESS_TOKEN,
+    GcpFakeServer,
+    NoTokenSource,
+    gcp_fake_server,
+    gcp_loopback_client,
 )
