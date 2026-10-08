@@ -49,6 +49,20 @@ What it proves, and the defect it catches:
   stale name today and a DuckDB upgrade that adds one.
 - session settings and variables: `current_setting()` and `getvariable()`,
   listed by hand, are refused. Catches either name dropped from the list.
+- the functions DuckDB leaves CONSISTENT whose answer reads more than
+  their arguments, listed by hand, each refused by a call:
+  `json_serialize_plan` (its SQL text is bound and optimized, so
+  `optimize := true` folds `now()` into the answer), `json_serialize_sql`,
+  `json_deserialize_sql`, `make_type`, `parse_duckdb_log_message`,
+  `st_setcrs`, `version` and `vector_type`; each hand-listed name must be
+  a function of the running DuckDB. Catches any one name dropped from the
+  list, and a name DuckDB renames on an upgrade. `list_aggregate` (and
+  `aggregate`, `list_aggr`, `array_aggregate`, `array_aggr`) calls the
+  aggregate its string argument names, which no rule here reads; it is
+  not refused (`list_sum` and some forty other built-in macros call it with
+  a fixed name), so the test requires instead that DuckDB mark no
+  aggregate unstable. Catches a DuckDB upgrade that makes an aggregate
+  reachable by name past the list.
 - FROM, by allowlist: a table function that runs SQL text (`query`,
   `query_table`, `json_execute_serialized_sql`) or reads the worker's files
   (`read_text`, `read_blob`, `glob`), or an allowed one qualified; a catalog
@@ -58,12 +72,15 @@ What it proves, and the defect it catches:
   (UNPIVOT) or SHOW_REF (SUMMARIZE) reference; each refused at a join's
   side, in a FROM subquery, in a WHERE subquery and in a table function's
   argument; a CTE read outside the query that defines it, and in its own
-  body, is refused. Accepted: the registered tables in any case, joined
+  body, is refused; a registered table read with `AT (VERSION => ...)` or
+  `AT (TIMESTAMP => ...)` (time travel), alone and at a join's side, is
+  refused. Accepted: the registered tables in any case, joined
   and unioned; no FROM; VALUES; range, generate_series and unnest; a CTE
   named like a dataset or a catalog view, one read by the next CTE or from
   a subquery, and the recursive half of WITH RECURSIVE. Catches a table or
   table function allowlist that is off or skipped below the first
-  reference, a qualifier or replacement-scan rule that is off, a CTE scope
+  reference, a FROM rule that admits a registered table by name without
+  looking at its AT clause, a qualifier or replacement-scan rule that is off, a CTE scope
   that is shared, global or given to the CTE's own body, and one that is
   never opened (over-strict).
 - SQL value keywords: each of the eleven names DuckDB's binder maps to a
@@ -132,11 +149,13 @@ REFUSED = [
     ("SELECT a FROM t LIMIT (SELECT a FROM t WHERE a = 2)",
      (".limit.", "where_clause.right: a literal that is not the operand of a CAST")),
     # Clocks and randomness.
-    ("SELECT random() FROM t", "random() depends on when the query runs"),
-    ("SELECT now() FROM t", "now() depends on when the query runs"),
+    ("SELECT random() FROM t", "random() depends on when, where or in which session the query runs"),
+    ("SELECT now() FROM t", "now() depends on when, where or in which session the query runs"),
     # ICU's spellings of LOCALTIME and LOCALTIMESTAMP, called by name.
-    ("SELECT current_localtime() FROM t", "current_localtime() depends on when the query runs"),
-    ("SELECT current_localtimestamp() FROM t", "current_localtimestamp() depends on when the query runs"),
+    ("SELECT current_localtime() FROM t",
+     "current_localtime() depends on when, where or in which session the query runs"),
+    ("SELECT current_localtimestamp() FROM t",
+     "current_localtimestamp() depends on when, where or in which session the query runs"),
     ("SELECT a FROM t USING SAMPLE 10%", ".sample: USING SAMPLE or TABLESAMPLE"),
     ("SELECT a FROM t TABLESAMPLE 10%", ".sample: USING SAMPLE or TABLESAMPLE"),
     ("SELECT a FROM t USING SAMPLE reservoir(10%) REPEATABLE (7)", ".sample: USING SAMPLE or TABLESAMPLE"),
@@ -168,11 +187,13 @@ REFUSED = [
     ("SELECT COLUMNS(CAST(x.current_date AS VARCHAR)[CAST(10 AS BIGINT)]) FROM t",
      (".select_list[0].expr.", "x.current_date is a SQL value keyword")),
     # Built-in macros over current_timestamp (default_functions.cpp).
-    ("SELECT ago(CAST('1 day' AS INTERVAL)) FROM t", "ago() depends on when the query runs"),
-    ("SELECT pg_postmaster_start_time() FROM t", "pg_postmaster_start_time() depends on when the query runs"),
-    ("SELECT pg_catalog.pg_conf_load_time() FROM t", "pg_conf_load_time() depends on when the query runs"),
+    ("SELECT ago(CAST('1 day' AS INTERVAL)) FROM t", "ago() depends on when, where or in which session the query runs"),
+    ("SELECT pg_postmaster_start_time() FROM t",
+     "pg_postmaster_start_time() depends on when, where or in which session the query runs"),
+    ("SELECT pg_catalog.pg_conf_load_time() FROM t",
+     "pg_conf_load_time() depends on when, where or in which session the query runs"),
     # A session read DuckDB marks CONSISTENT_WITHIN_QUERY.
-    ("SELECT current_schema() FROM t", "current_schema() depends on when the query runs"),
+    ("SELECT current_schema() FROM t", "current_schema() depends on when, where or in which session the query runs"),
     # A catalog or settings table function.
     ("SELECT name FROM duckdb_settings()", "duckdb_settings() reads the session's catalog, settings or storage"),
     ("SELECT * FROM pragma_database_size()", "pragma_database_size() reads the session's catalog"),
@@ -182,8 +203,23 @@ REFUSED = [
     ("SELECT CAST('2026-10-01' AS TIMESTAMP).age() FROM t", "age() with one argument"),
     # The session's settings and variables: listed by hand, as
     # duckdb_functions() does not mark them unstable.
-    ("SELECT current_setting(CAST('threads' AS VARCHAR)) FROM t", "current_setting() depends on when the query runs"),
-    ("SELECT getvariable(CAST('x' AS VARCHAR)) FROM t", "getvariable() depends on when the query runs"),
+    ("SELECT current_setting(CAST('threads' AS VARCHAR)) FROM t",
+     "current_setting() depends on when, where or in which session the query runs"),
+    ("SELECT getvariable(CAST('x' AS VARCHAR)) FROM t",
+     "getvariable() depends on when, where or in which session the query runs"),
+    # Functions DuckDB leaves CONSISTENT whose answer reads more than their
+    # arguments, listed by hand. json_serialize_plan binds and optimizes
+    # its SQL text, so this answer is the clock's.
+    ("SELECT json_serialize_plan(CAST('SELECT now()' AS VARCHAR), optimize := CAST(true AS BOOLEAN))",
+     "select_list[0]: json_serialize_plan() depends on when, where or in which session"),
+    ("SELECT json_serialize_sql(CAST('SELECT 1' AS VARCHAR)) FROM t", "json_serialize_sql() depends on"),
+    ("SELECT json_deserialize_sql(CAST('{}' AS JSON)) FROM t", "json_deserialize_sql() depends on"),
+    ("SELECT make_type(CAST('main.mood' AS VARCHAR)) FROM t", "make_type() depends on"),
+    ("SELECT parse_duckdb_log_message(CAST('FileSystem' AS VARCHAR), s) FROM t",
+     "parse_duckdb_log_message() depends on"),
+    ("SELECT st_setcrs(g, CAST('EPSG:4326' AS VARCHAR)) FROM t", "st_setcrs() depends on"),
+    ("SELECT version() FROM t", "version() depends on"),
+    ("SELECT vector_type(a) FROM t", "vector_type() depends on"),
     # FROM: a table function that runs SQL text, which the parse holds as
     # a string literal no rule here reads.
     ("SELECT CAST(n AS VARCHAR) FROM query(CAST('SELECT now() AS n' AS VARCHAR))",
@@ -218,6 +254,11 @@ REFUSED = [
     # oracle registers its tables bare, so a qualifier only reaches others.
     ("SELECT k FROM main.groups", "statement.node.from_table: main.groups names a schema or catalog"),
     ("SELECT k FROM temp.main.groups", "statement.node.from_table: temp.main.groups names a schema or catalog"),
+    # Time travel: a registered table read at another version.
+    ("SELECT a FROM t AT (VERSION => CAST(1 AS BIGINT))",
+     "statement.node.from_table.at_clause: t AT (...) reads another version"),
+    ("SELECT t.a FROM groups JOIN t AT (TIMESTAMP => CAST('2026-10-01' AS TIMESTAMP)) ON t.a = groups.k",
+     "from_table.right.at_clause: t AT (...) reads another version"),
     # A replacement scan: a quoted path parses to a BASE_TABLE.
     ("SELECT * FROM 'x.parquet'", "statement.node.from_table: x.parquet is a file path"),
     ("SELECT * FROM '/data/rows.csv'", "statement.node.from_table: /data/rows.csv is a file path"),
@@ -299,6 +340,14 @@ TABLES = ("t", "groups")
 # is its own argument, read at no particular time.
 _STABLE_VOLATILE = frozenset(["error"])
 _NOT_FUNCTIONS = ("current_time", "current_timestamp", "localtime", "localtimestamp")
+# The names sql_discipline.py lists by hand (DuckDB marks them CONSISTENT):
+# each must be a function of the running DuckDB, so a rename on an upgrade
+# is seen.
+_HAND = (
+    "current_localtime", "current_localtimestamp", "current_setting", "getvariable",
+    "json_deserialize_sql", "json_serialize_plan", "json_serialize_sql", "make_type",
+    "parse_duckdb_log_message", "st_setcrs", "vector_type", "version",
+)
 
 
 def _reached(con, body, params):
@@ -385,6 +434,9 @@ def check_list_is_duckdbs(con):
     for name in _NOT_FUNCTIONS:
         if name in known:
             FAILURES.append("%s is a function in this DuckDB; the comment in _UNSTABLE says it is not" % name)
+    for name in _HAND:
+        if name not in known:
+            FAILURES.append("_UNSTABLE lists %s by hand, which is no function in this DuckDB" % name)
     kinds = {}
     for r in rows:
         kinds.setdefault(r[0], set()).add(r[1])
@@ -394,6 +446,11 @@ def check_list_is_duckdbs(con):
                             % (name, sorted(kinds.get(name, set()))))
     unstable = {r[0] for r in rows if r[1] in ("scalar", "aggregate") and r[2] not in (None, "CONSISTENT")}
     unstable -= _STABLE_VOLATILE
+    # list_aggregate(l, 'name') calls an aggregate by a string no rule
+    # reads: it is safe only while no aggregate is unstable.
+    for name in sorted(n for n in unstable if "aggregate" in kinds.get(n, set())):
+        FAILURES.append("DuckDB marks aggregate %s() unstable; list_aggregate(l, '%s') reaches it by a string"
+                        % (name, name))
     for name in sorted(unstable - sql_discipline._UNSTABLE):
         FAILURES.append("DuckDB marks %s() unstable; _UNSTABLE does not list it" % name)
     macros = []

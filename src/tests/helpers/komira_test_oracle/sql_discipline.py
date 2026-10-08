@@ -2,8 +2,10 @@
 
 An expected answer is only as good as the query that computed it, so
 gen_expected.py refuses, before it runs a query, one that leaves its
-semantics to DuckDB's defaults or to the moment it runs, or that reads
-anything but the tables the oracle registers:
+semantics to DuckDB's defaults or to the moment it runs, or that reaches
+past the tables the oracle registers by a way the rules below name (in
+FROM, any table, table function, view or file not allowed there; anywhere,
+a function on the lists below):
 
 - every `ORDER BY` key (of the query, a subquery or a window) states its
   direction (ASC or DESC) and its NULL placement (NULLS FIRST or NULLS
@@ -21,8 +23,9 @@ anything but the tables the oracle registers:
   uncast `2` beside a BIGINT column computes the same answer, so again only
   this check notices;
 - FROM reads only what the oracle hands DuckDB, by allowlist (below): a
-  table the caller registered or a CTE in scope, a subquery, a join, a
-  VALUES list, no FROM at all, or a table function in `_TABLE_FUNCTIONS`;
+  table the caller registered or a CTE in scope, with no `AT (...)` clause,
+  a subquery, a join, a VALUES list, no FROM at all, or a table function in
+  `_TABLE_FUNCTIONS`;
 - no call to a function in `_UNSTABLE` (below), to a function whose
   name begins `duckdb_` or `pragma_` (each reads the session's catalog,
   settings, logs or storage), or to `age` with one argument (it subtracts
@@ -39,7 +42,9 @@ BASE_TABLE in the parse, which is also how a catalog view such as
 `duckdb_tables` or `pg_catalog.pg_settings` parses) must be bare, with no
 schema or catalog: the oracle registers its tables unqualified. Its name
 must not be a file path (`.`, `/`, `\\` or `:` in it: `FROM 'x.parquet'`
-is a BASE_TABLE that DuckDB reads by a replacement scan). And it must be a
+is a BASE_TABLE that DuckDB reads by a replacement scan). It must have no
+`at_clause` (`FROM t AT (VERSION => ...)`, time travel, which reads a
+version of the table other than the one registered). And it must be a
 CTE in scope or one of the names the caller passes to `check()`, compared
 without case as DuckDB's catalog compares them. A CTE is in scope in the
 query that defines it (its FROM, its subqueries at any depth, the CTEs
@@ -76,8 +81,15 @@ marks VOLATILE or CONSISTENT_WITHIN_QUERY (`duckdb_functions().stability`),
 except `error` (VOLATILE only so that it is never folded; its answer is its
 argument); ICU's current_localtime and current_localtimestamp, which read
 the clock but keep the default CONSISTENT; `current_setting` and
-`getvariable`, which read the session's settings and variables (these four
-are listed by hand: `duckdb_functions()` does not mark them unstable); and
+`getvariable`, which read the session's settings and variables; the
+functions whose argument is SQL text or the name of something DuckDB looks
+up (a type, a log type, a coordinate system), and those that answer with
+the running DuckDB rather than a value: `json_serialize_plan`,
+`json_serialize_sql`, `json_deserialize_sql`, `make_type`,
+`parse_duckdb_log_message`, `st_setcrs`, `version` and `vector_type`
+(each with its reason in the list; these are listed by hand:
+`duckdb_functions()` does not mark them unstable, and the test requires
+each to be a function of the running DuckDB); and
 `_MACROS`, every built-in scalar macro whose body reaches any of these, a
 `duckdb_`/`pragma_` function, a table or a table function outside
 `_TABLE_FUNCTIONS`, directly or through another macro (`ago` is
@@ -147,6 +159,33 @@ _UNSTABLE = frozenset([
     "current_localtimestamp",
     "current_setting",
     "getvariable",
+    # DuckDB leaves these CONSISTENT, but each answers with more than its
+    # arguments' values (DuckDB v1.5.6 sources; the test requires each to
+    # be a function of the running DuckDB).
+    # Binds and plans its SQL text on the session: with `optimize` it folds
+    # the clock and settings into its answer, and its errors read the
+    # catalog and the worker's files.
+    "json_serialize_plan",
+    # Parses its SQL text; its JSON is the running DuckDB's parse-tree
+    # format, written per the session's `serialization_compatibility`.
+    "json_serialize_sql",
+    # Renders a DuckDB parse-tree JSON back to SQL: the running DuckDB's
+    # format, the inverse of the one above.
+    "json_deserialize_sql",
+    # Resolves its type name, which may name a catalog and schema, in the
+    # session's catalog.
+    "make_type",
+    # Looks its log type up in the database's log manager, whose types are
+    # those of the extensions loaded.
+    "parse_duckdb_log_message",
+    # Looks its coordinate system up in the system catalog, whose entries
+    # are those of the extensions loaded.
+    "st_setcrs",
+    # The running DuckDB's version.
+    "version",
+    # How DuckDB holds its argument in memory (FLAT, CONSTANT,
+    # DICTIONARY...), which depends on the plan DuckDB ran.
+    "vector_type",
     # Not functions in v1.5.6, kept so a parse that calls them by these
     # names (`current_time()`, `localtime()`) is refused too.
     "current_time",
@@ -252,6 +291,8 @@ def _check_ref(node, path, scope, tables, problems):
                             % (path, ".".join(qualifier + [name])))
         elif any(c in name for c in _PATH_CHARS):
             problems.append("%s: %s is a file path, which DuckDB reads by a replacement scan" % (path, name))
+        elif node.get("at_clause") is not None:
+            problems.append("%s.at_clause: %s AT (...) reads another version of the table (time travel)" % (path, name))
         elif name not in scope and name.lower() not in tables:
             problems.append("%s: %s is neither a table the oracle registers nor a CTE in scope" % (path, name))
     elif kind == "TABLE_FUNCTION":
@@ -290,7 +331,8 @@ def _walk(node, path, in_cast, is_count, in_table_fn, is_ref, scope, ctx):
     if cls == "FUNCTION":
         fname = str(node.get("function_name", "")).lower()
         if fname in _UNSTABLE:
-            problems.append("%s: %s() depends on when the query runs" % (path, node["function_name"]))
+            problems.append("%s: %s() depends on when, where or in which session the query runs"
+                            % (path, node["function_name"]))
         elif fname.startswith(_SESSION_PREFIXES):
             problems.append("%s: %s() reads the session's catalog, settings or storage" % (path, node["function_name"]))
         elif fname == "age" and len(node.get("children") or []) == 1:

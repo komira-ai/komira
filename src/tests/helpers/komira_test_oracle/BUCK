@@ -60,9 +60,11 @@ py_test(
 # render.py to `expect/<shard>/<case>.tsv` (a sub-target,
 # `:expected[expect/filter_3vl/filter_not_and.tsv]`). Both runs of the action
 # must write the same bytes, and gen_expected.py refuses a query that leaves
-# NULL placement or a literal's type to DuckDB, calls a clock, random or
-# session function, or reads in FROM anything but the tables it registers,
-# the query's own CTEs and the allowed table functions (sql_discipline.py).
+# NULL placement or a literal's type to DuckDB, calls a function on its list
+# of those reading more than their arguments (a clock, a random draw, the
+# session, SQL text, the running DuckDB), or reads in FROM anything but the
+# tables it registers (with no AT clause), the query's own CTEs and the
+# allowed table functions (sql_discipline.py).
 _CASES = [p[len("oracle/"):-len(".sql")] for p in glob(["oracle/*/*.sql"])]
 
 _EXPECTED_MODULES = _MODULES + [
