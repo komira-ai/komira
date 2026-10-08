@@ -23,7 +23,9 @@
 #      (`negotiated_tls_version() == TLS_VERSION_TLS13`).
 #      `negotiated_tls_version()` is -1 until a handshake is DONE (asserted
 #      on fresh connections), so this is a negotiated value, not s2n's
-#      pre-handshake placeholder.
+#      pre-handshake placeholder. Both ends also report the same cipher
+#      suite (`negotiated_cipher()`), one of the three TLS 1.3 suites, and
+#      the empty string before the handshake and on a refused client.
 #   2. A client on a fresh config (the defect's shape: TLS 1.2 at most) is
 #      refused by that server for its protocol version, and reports no
 #      negotiated version. This is also what keeps (1) honest: it proves the
@@ -32,7 +34,9 @@
 #
 # Defect it catches: `default_client_tls_config` capped at TLS 1.2 (its
 # `set_cipher_preferences` call removed or given a TLS 1.2 policy);
-# `negotiated_tls_version()` returning s2n's raw field before the handshake.
+# `negotiated_tls_version()` returning s2n's raw field before the handshake;
+# `negotiated_cipher()` returning s2n's cipher field before the handshake
+# (its `_handshake_done` guard dropped).
 #
 # It imports the TLS layer's connection type directly, on purpose, to drive
 # the handshake without a reactor, as the other TLS tests here do.
@@ -111,6 +115,8 @@ struct _Handshake(Copyable, Movable):
     var error: String
     var server_version: Int
     var client_version: Int
+    var server_cipher: String
+    var client_cipher: String
 
     def __init__(out self):
         self.server = UInt8(255)
@@ -118,6 +124,8 @@ struct _Handshake(Copyable, Movable):
         self.error = String("")
         self.server_version = -1
         self.client_version = -1
+        self.server_cipher = String("")
+        self.client_cipher = String("")
 
 
 def _handshake(ref server_config: TlsConfig, ref client_config: TlsConfig) raises -> _Handshake:
@@ -152,6 +160,8 @@ def _handshake(ref server_config: TlsConfig, ref client_config: TlsConfig) raise
                 break
         r.server_version = server.negotiated_tls_version()
         r.client_version = client.negotiated_tls_version()
+        r.server_cipher = server.negotiated_cipher()
+        r.client_cipher = client.negotiated_cipher()
         _ = server^
         _ = client^
     finally:
@@ -179,6 +189,13 @@ def test_default_client_negotiates_tls13_with_a_tls13_only_server() raises:
     )
     assert_equal(r.client_version, TLS_VERSION_TLS13)
     assert_equal(r.server_version, TLS_VERSION_TLS13)
+    assert_equal(r.client_cipher, r.server_cipher, "both ends' cipher suite")
+    assert_true(
+        r.client_cipher == "TLS_AES_128_GCM_SHA256"
+        or r.client_cipher == "TLS_AES_256_GCM_SHA384"
+        or r.client_cipher == "TLS_CHACHA20_POLY1305_SHA256",
+        "not a TLS 1.3 suite: '" + r.client_cipher + "'",
+    )
 
 
 def test_tls12_capped_client_is_refused_by_a_tls13_only_server() raises:
@@ -203,6 +220,7 @@ def test_tls12_capped_client_is_refused_by_a_tls13_only_server() raises:
         "refused, but not for its protocol version: '" + r.error + "'",
     )
     assert_equal(r.client_version, -1, "a refused client reports a version")
+    assert_equal(r.client_cipher, String(""), "a refused client reports a cipher suite")
 
 
 def test_no_version_is_reported_before_the_handshake() raises:
@@ -216,6 +234,8 @@ def test_no_version_is_reported_before_the_handshake() raises:
     var client = TlsConnection.new_client(client_config)
     assert_equal(client.negotiated_tls_version(), -1, "fresh client")
     assert_equal(server.negotiated_tls_version(), -1, "fresh server")
+    assert_equal(client.negotiated_cipher(), String(""), "fresh client's cipher suite")
+    assert_equal(server.negotiated_cipher(), String(""), "fresh server's cipher suite")
     _ = server^
     _ = client^
 

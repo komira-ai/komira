@@ -1288,7 +1288,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         """Create a Sort node. Output schema = child schema.
 
         `nulls_first` is an optional per-key NULL
-        placement override (SQL `NULLS FIRST/LAST`, Excel). None (default)
+        placement override (SQL `NULLS FIRST/LAST`). None (default)
         takes `null_order_policy.derived_nulls_first` (NULLS LAST, both
             directions).
         """
@@ -2108,9 +2108,9 @@ def agg_func_base_name(func: UInt8) -> StaticString:
     .alias_name` before `LogicalPlan.aggregate` runs, and this ladder is then
     never consulted for that aggregate — see `komira_sdk/agg_output_naming.mojo`
     (the Mojo dataframe surface, polars' rule) and `sql_binder._duckdb_agg_text`
-    (the SQL surface, DuckDB's deparse). What still lands here is the Excel /
-    XLFN surface, which has no convention to be faithful to, and any child-less
-    aggregate that is not `count(*)`.
+    (the SQL surface, DuckDB's deparse). What still lands here is a surface
+    that has no convention to be faithful to, and any child-less aggregate
+    that is not `count(*)`.
 
     ⚠ THERE IS NO COMPTIME MIRROR OF THIS LADDER, DELIBERATELY. The typed
     grouped-agg `S_out` brand asks `agg_output_naming.polars_agg_out_name` —
