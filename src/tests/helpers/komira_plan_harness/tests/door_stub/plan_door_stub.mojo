@@ -22,8 +22,23 @@
 #                      report.
 #   PLAN_SHORT_FILL    Door B: the fill call copies and reports one byte fewer
 #                      than the probe reported: the producer fault the door
-#                      must report. (Door A answers it with the table.)
+#                      must report.
+#   PLAN_OK_UNWRITTEN  Door A: DOOR_OK without writing `*out`.
+#   PLAN_OK_RELEASED   Door A: DOOR_OK with `*out` a released (zeroed) struct.
+#   PLAN_RELEASE_KEEPS_SLOT
+#                      Door A: the table, but the stream's release callback,
+#                      after releasing everything, leaves `release` non-NULL.
+#   PLAN_OVERRUN       Door B: the fill copies the result and writes one more
+#                      byte, at out[cap] (inside the guard bytes door.mojo
+#                      allocates past cap), and reports the right length.
+#   PLAN_FILL_REFUSE   Door B: the probe answers, the fill refuses
+#                      (`PLAN_ENDPOINT_EXECUTION_FAILED(20): ...`) without
+#                      writing `*out_len`.
+#   PLAN_FILL_DIRTY_REFUSE
+#                      the same, but the fill writes `*out_len` first.
 #   anything else      DOOR_ERR_ENGINE, `PLAN_ENDPOINT_MALFORMED(5): ...`.
+# A plan named for one door gets the table through the other one; each of
+# the producer faults above is one the door must name (door.mojo's header).
 #
 # Every plan holds a NUL byte, so a door that measured the plan with strlen
 # would send the wrong bytes and get the MALFORMED refusal.
@@ -116,6 +131,12 @@ comptime _TABLE = 1
 comptime _REFUSE = 2
 comptime _DIRTY_REFUSE = 3
 comptime _SHORT_FILL = 4
+comptime _OK_UNWRITTEN = 5
+comptime _OK_RELEASED = 6
+comptime _OVERRUN = 7
+comptime _RELEASE_KEEPS_SLOT = 8
+comptime _FILL_REFUSE = 9
+comptime _FILL_DIRTY_REFUSE = 10
 
 
 def _classify(plan: List[UInt8]) -> Int:
@@ -125,7 +146,7 @@ def _classify(plan: List[UInt8]) -> Int:
     if plan[0] != 0x08 or plan[1] != 0x02 or plan[2] != 0x12 or plan[3] != 0x00:
         return _UNKNOWN
     var tag = Int(plan[4])
-    if tag >= _TABLE and tag <= _SHORT_FILL:
+    if tag >= _TABLE and tag <= _FILL_DIRTY_REFUSE:
         return tag
     return _UNKNOWN
 
@@ -341,10 +362,17 @@ struct _CountedStream(Movable):
 
     var inner: _StreamPtr
     var session: UnsafePointer[_Session, MutUntrackedOrigin]
+    var keep_slot: Bool
 
-    def __init__(out self, inner: _StreamPtr, session: UnsafePointer[_Session, MutUntrackedOrigin]):
+    def __init__(
+        out self,
+        inner: _StreamPtr,
+        session: UnsafePointer[_Session, MutUntrackedOrigin],
+        keep_slot: Bool,
+    ):
         self.inner = inner
         self.session = session
+        self.keep_slot = keep_slot
 
 
 def _counted(stream: _VoidPtr) -> UnsafePointer[_CountedStream, MutUntrackedOrigin]:
@@ -353,6 +381,11 @@ def _counted(stream: _VoidPtr) -> UnsafePointer[_CountedStream, MutUntrackedOrig
     return stream.bitcast[CArrowArrayStream]()[].private_data.bitcast[_CountedStream]()
 
 
+# SAFETY (the three forwarding callbacks below): the consumer calls them only
+# on a live stream of this library, so `_counted(stream)` is the live
+# `_CountedStream` and its `inner` the live stream komira_arrow_ipc built; the
+# inner callbacks get the inner stream as their self, and the consumer's out
+# struct passes through unread.
 def _counted_get_schema(stream: _VoidPtr, out_schema: _SchemaPtr) abi("C") -> Int32:
     var inner = _counted(stream)[].inner
     return inner[].get_schema(inner.bitcast[NoneType](), out_schema)
@@ -372,6 +405,9 @@ def _release_inner(cs: UnsafePointer[_CountedStream, MutUntrackedOrigin]):
     """One release of the stream's state: counted, then the inner stream's
     batches freed (release_c_stream is the producer half, and komira_arrow_ipc
     produced the inner stream)."""
+    # SAFETY: `cs` is the live `_CountedStream` of a stream being released;
+    # its session outlives the stream (the caller releases before
+    # komira_ctx_free), and `inner` is still allocated (freed after this).
     cs[].session[].releases += 1
     release_c_stream(cs[].inner)
 
@@ -379,23 +415,43 @@ def _release_inner(cs: UnsafePointer[_CountedStream, MutUntrackedOrigin]):
 def _counted_release(stream_ptr: _StreamPtr) -> None:
     """The exported stream's release callback: release the state once, free
     the two boxes, mark the caller's struct released (release = NULL)."""
+    # SAFETY: `stream_ptr` is the consumer's struct, which this library
+    # filled; a released one (release NULL) or a spent one (private_data NULL,
+    # PLAN_RELEASE_KEEPS_SLOT's leftover) is left alone.
     if Int(stream_ptr) == 0 or stream_ptr[].is_released():
         return
+    if Int(stream_ptr[].private_data) == 0:
+        return
     var cs = _counted(stream_ptr.bitcast[NoneType]())
+    var keep_slot = cs[].keep_slot
     _release_inner(cs)
     cs[].inner.free()
     # SAFETY: `cs` was allocated and initialised by `_export_counted`; this is
-    # its one destruction, guarded by the release slot checked above.
+    # its one destruction, guarded by the two slots checked above.
     cs.destroy_pointee()
     cs.free()
+    # SAFETY: the consumer's struct, rewritten as released (all callbacks the
+    # no-op stubs, release and private_data NULL)...
     stream_ptr.unsafe_write(CArrowArrayStream())
+    if keep_slot:
+        # ...except for PLAN_RELEASE_KEEPS_SLOT, whose release stays set (to
+        # this function, which the private_data check above makes a no-op):
+        # the fault door.mojo must report.
+        var f: _ReleaseFn = _counted_release
+        stream_ptr[].release = UnsafePointer(to=f).bitcast[_VoidPtr]()[]
 
 
 def _export_counted(
     var batches: Slab[RecordBatch],
     session: UnsafePointer[_Session, MutUntrackedOrigin],
     out_stream: _StreamPtr,
+    keep_slot: Bool,
 ) raises:
+    # SAFETY (the two allocations below): `inner` and `cs` are heap slots of
+    # this library, untracked because they outlive this call (the consumer
+    # holds the stream). Each is initialised by `unsafe_write` before any
+    # read, and `_counted_release` frees both, once; `inner` is freed here
+    # if build_record_batch_stream raises.
     var inner = alloc[CArrowArrayStream](1).unsafe_origin_cast[MutUntrackedOrigin]()
     inner.unsafe_write(CArrowArrayStream())
     try:
@@ -404,7 +460,7 @@ def _export_counted(
         inner.free()
         raise e^
     var cs = alloc[_CountedStream](1).unsafe_origin_cast[MutUntrackedOrigin]()
-    cs.unsafe_write(_CountedStream(inner, session))
+    cs.unsafe_write(_CountedStream(inner, session, keep_slot))
     var outer = CArrowArrayStream()
     outer.get_schema = _counted_get_schema
     outer.get_next = _counted_get_next
@@ -437,6 +493,10 @@ def komira_abi_version() abi("C") -> Int32:
 @export
 def komira_ctx_new() abi("C") -> _VoidPtr:
     """A session with a started runtime, or NULL."""
+    # SAFETY: one heap slot for the session, untracked because the caller
+    # holds it as a `void*` between calls. `unsafe_write` initialises it
+    # before `p[]` is read; on a failed start the session is destroyed and
+    # freed here, otherwise komira_ctx_free does both, once.
     var p = alloc[_Session](1).unsafe_origin_cast[MutUntrackedOrigin]()
     p.unsafe_write(_Session())
     try:
@@ -512,8 +572,14 @@ def komira_plan_stream(
     if which == _UNKNOWN:
         s[].set_error(_MALFORMED)
         return _ERR_ENGINE
+    if which == _OK_UNWRITTEN:
+        return _OK
+    if which == _OK_RELEASED:
+        # SAFETY: the caller's struct, written as a released one.
+        out_stream.unsafe_write(CArrowArrayStream())
+        return _OK
     try:
-        _export_counted(_table_batches(s[]), s, out_stream)
+        _export_counted(_table_batches(s[]), s, out_stream, which == _RELEASE_KEEPS_SLOT)
     except e:
         s[].set_error(String("PLAN_ENDPOINT_EXECUTION_FAILED(20): ") + String(e))
         return _ERR_ENGINE
@@ -554,6 +620,14 @@ def komira_plan_bytes(
         s[].set_error(String("PLAN_ENDPOINT_EXECUTION_FAILED(20): ") + String(e))
         return _ERR_ENGINE
     var need = len(s[].parked)
+    var fill = out_cap >= UInt64(need) and Int(out_buf) != 0
+    if fill and (which == _FILL_REFUSE or which == _FILL_DIRTY_REFUSE):
+        s[].drop_park()
+        if which == _FILL_DIRTY_REFUSE:
+            # SAFETY: the caller's slot; the fault this plan exists to show.
+            out_len[] = 77
+        s[].set_error("PLAN_ENDPOINT_EXECUTION_FAILED(20): the stub refuses the fill")
+        return _ERR_ENGINE
     # SAFETY: the caller's slot, written before the capacity test so the probe
     # gets its answer.
     out_len[] = UInt64(need)
@@ -567,5 +641,10 @@ def komira_plan_bytes(
         out_len[] = UInt64(n)
     # SAFETY: `out_buf` holds at least `out_cap >= need >= n` bytes.
     unsafe_memcpy(dest=out_buf, src=s[].parked.unsafe_ptr(), count=n)
+    if which == _OVERRUN:
+        # SAFETY: deliberately one byte past `cap`: inside the guard bytes
+        # door.mojo allocates after `cap` (the fault this plan exists to show;
+        # it is not safe against a caller without them).
+        out_buf[need] = 0
     s[].drop_park()
     return _OK

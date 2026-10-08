@@ -45,9 +45,16 @@
 # otherwise). Eight guard bytes past `cap` must be left as written
 # (PLAN_DOOR_OVERRUN otherwise).
 #
-# A refusal (DOOR_ERR_ENGINE) must leave `*out` (Door A) and `*out_len`
-# (Door B) as the caller wrote them: both are pre-filled with a sentinel,
-# and a changed byte is PLAN_DOOR_OUT_TOUCHED_ON_REFUSAL. The refusal itself
+# DOOR_OK from Door A must come with every slot of `*out` written and its
+# release set: PLAN_DOOR_OUT_NOT_WRITTEN and
+# PLAN_DOOR_STREAM_RELEASED_ON_RETURN otherwise, raised before any callback
+# is called.
+#
+# A refusal (DOOR_ERR_ENGINE, from Door A, or from Door B's probe or fill)
+# must leave `*out` (Door A) and `*out_len` (Door B) as the caller wrote
+# them: both are pre-filled with a sentinel, and a changed byte is
+# PLAN_DOOR_OUT_TOUCHED_ON_REFUSAL. An empty plan is PLAN_DOOR_EMPTY_PLAN,
+# refused before any call. The refusal itself
 # is PLAN_DOOR_REFUSED: <the library's last_error text>; parse_endpoint_refusal
 # reads the name and the code back out of it.
 #
@@ -62,10 +69,12 @@
 #   - the last_error text: owned by the library's session, valid until the
 #     next call on it; copied into a String at once.
 #   - the plan bytes: the caller's List, borrowed for one synchronous call.
-#   - the ArrowArrayStream box (Door A), the `*out_len` slot and the output
-#     buffer (Door B): allocated and freed here, around one call each; the
-#     stream's own buffers belong to the library until its release callback
-#     runs, and drain_record_batch_stream calls it.
+#   - the ArrowArrayStream box (Door A): allocated and freed here, around one
+#     call; the stream's own buffers belong to the library until its release
+#     callback runs, and drain_record_batch_stream calls it.
+#   - the `*out_len` slot and the output buffer (Door B): two Lists of the
+#     call, passed by their own (tracked) pointers; the output List is
+#     returned.
 # =============================================================================
 
 from std.ffi import OwnedDLHandle
@@ -110,16 +119,24 @@ comptime _MAX_ERROR = 1 << 20
 def door_path_from_args(args: List[String]) raises -> String:
     """The path given as `--plan-door=<path>` or `--plan-door <path>`.
     Raises PLAN_DOOR_FLAG_MISSING when neither is there or the value is
-    empty."""
+    empty, and PLAN_DOOR_FLAG_BAD_VALUE when the value starts with `--` (the
+    next flag taken for the path)."""
     var prefix = String(PLAN_DOOR_FLAG) + "="
     for i in range(len(args)):
+        var v = String("")
         if args[i].startswith(prefix):
-            var v = String(args[i][byte = prefix.byte_length() :])
-            if v.byte_length() > 0:
-                return v^
+            v = String(args[i][byte = prefix.byte_length() :])
         elif args[i] == PLAN_DOOR_FLAG and i + 1 < len(args):
-            if args[i + 1].byte_length() > 0:
-                return args[i + 1].copy()
+            v = args[i + 1].copy()
+        else:
+            continue
+        if v.startswith("--"):
+            raise Error(
+                String("PLAN_DOOR_FLAG_BAD_VALUE: ") + PLAN_DOOR_FLAG
+                + " takes a path, not the flag `" + v + "`"
+            )
+        if v.byte_length() > 0:
+            return v^
     raise Error(
         String("PLAN_DOOR_FLAG_MISSING: no ") + PLAN_DOOR_FLAG + "=<path> argument"
     )
@@ -198,6 +215,11 @@ def _bad_return(symbol: String, rc: Int32, step: String) -> Error:
     )
 
 
+def _require_plan(plan: List[UInt8]) raises:
+    if len(plan) == 0:
+        raise Error("PLAN_DOOR_EMPTY_PLAN: a plan is at least one byte (an empty List has no buffer to pass)")
+
+
 def _null_bytes() -> _Bytes:
     # SAFETY: Optional of a pointer has the layout of the bare pointer, and
     # None is the all-zero (NULL) pattern; the result is only passed as a C
@@ -259,6 +281,11 @@ struct PlanDoor(Movable):
         PLAN_DOOR_ABI_MISMATCH, PLAN_DOOR_MISSING_SYMBOL or
         PLAN_DOOR_CTX_NEW_FAILED. komira_abi_version is the first and, on a
         mismatch, the only symbol called."""
+        # SAFETY: one heap slot for the OwnedDLHandle, re-originated to the
+        # untracked origin because it outlives every Mojo scope: it is never
+        # freed once written (the file header says why). Every `lib[]` below
+        # reads that slot, which `unsafe_write` initialised before the first
+        # one; on a raise the slot (and the library) leak by design.
         var lib = alloc[OwnedDLHandle](1).unsafe_origin_cast[MutUntrackedOrigin]()
         try:
             # SAFETY: `lib` is a fresh one-element allocation; written once.
@@ -283,6 +310,8 @@ struct PlanDoor(Movable):
                 raise Error(
                     String("PLAN_DOOR_MISSING_SYMBOL: ") + path + " has no " + symbols[i]
                 )
+        # SAFETY: komira_ctx_new takes nothing and returns the session handle
+        # this PlanDoor then owns (freed once by _DoorSession.__deinit__).
         var ctx = lib[].call["komira_ctx_new", _Void]()
         if Int(ctx) == 0:
             raise Error(String("PLAN_DOOR_CTX_NEW_FAILED: ") + path + ": komira_ctx_new returned NULL")
@@ -290,6 +319,8 @@ struct PlanDoor(Movable):
 
     def last_error(self) -> String:
         """The library's last error text for this session ("" when none)."""
+        # SAFETY: `lib[]` is the handle slot `open` wrote (never freed);
+        # `ctx` is this session's live handle. The result is borrowed text.
         var p = self._s.lib[].call["komira_last_error", _Bytes](self._s.ctx)
         if Int(p) == 0:
             return String("")
@@ -307,11 +338,14 @@ struct PlanDoor(Movable):
         """Call `int64_t <symbol>(void *ctx)`: a counter a test library
         exports beside the door symbols (a stub's release count, say). A
         library without the symbol is PLAN_DOOR_MISSING_SYMBOL, not a crash."""
+        # SAFETY: `lib[]` is the handle slot `open` wrote (never freed); the
+        # symbol is checked before the call, which passes this session's ctx.
         if not self._s.lib[].check_symbol(String(symbol)):
             raise Error(String("PLAN_DOOR_MISSING_SYMBOL: ") + self.path + " has no " + String(symbol))
         return self._s.lib[].call[symbol, Int64](self._s.ctx)
 
     def has_symbol(self, name: String) -> Bool:
+        # SAFETY: `lib[]` is the handle slot `open` wrote (never freed).
         return self._s.lib[].check_symbol(name)
 
     def _refused(self) -> Error:
@@ -319,7 +353,14 @@ struct PlanDoor(Movable):
 
     def plan_stream(mut self, plan: List[UInt8]) raises -> Table:
         """Door A: execute `plan`, drain the Arrow C stream it returns into a
-        Table (every buffer copied), the stream released exactly once."""
+        Table (every buffer copied), the stream released exactly once.
+        Raises PLAN_DOOR_EMPTY_PLAN for an empty plan, before any call."""
+        _require_plan(plan)
+        # SAFETY: one heap slot for the ArrowArrayStream, untracked because
+        # komira_arrow_ipc's C-stream functions take that origin; freed on
+        # every path below. `words` views the same five pointer-sized slots as
+        # UInt64s (size asserted next); every `words[i]` and `box[]` below
+        # stays inside that one slot.
         var box = alloc[CArrowArrayStream](1).unsafe_origin_cast[MutUntrackedOrigin]()
         var words = box.bitcast[UInt64]()
         comptime assert size_of[CArrowArrayStream]() == _STREAM_WORDS * 8, "ArrowArrayStream is five pointer slots"
@@ -346,6 +387,25 @@ struct PlanDoor(Movable):
             if rc == DOOR_ERR_ENGINE:
                 raise self._refused()
             raise _bad_return("komira_plan_stream", rc, "for a non-NULL plan and out_stream")
+        # DOOR_OK must mean a live stream: every slot written, release set.
+        # Calling get_schema through an unwritten slot would jump to the
+        # sentinel address.
+        var unwritten = False
+        for i in range(_STREAM_WORDS):
+            if words[i] == _SENTINEL:
+                unwritten = True
+        if unwritten:
+            box.free()
+            raise Error(
+                "PLAN_DOOR_OUT_NOT_WRITTEN: komira_plan_stream returned DOOR_OK and"
+                " left out_stream (or a slot of it) as the caller wrote it"
+            )
+        if box[].is_released():
+            box.free()
+            raise Error(
+                "PLAN_DOOR_STREAM_RELEASED_ON_RETURN: komira_plan_stream returned"
+                " DOOR_OK with a released out_stream (release is NULL)"
+            )
         # SAFETY (both calls): on DOOR_OK the library filled the box with a
         # live stream that this call now owns. c_abi_stream_schema calls
         # get_schema and does not release; drain_record_batch_stream calls
@@ -364,6 +424,8 @@ struct PlanDoor(Movable):
         try:
             batches = drain_record_batch_stream(box)
         except e:
+            # SAFETY: the box is still allocated; after the drain it holds the
+            # struct the release callback left (only `release` is read).
             var live = not box[].is_released()
             box.free()
             if live:
@@ -372,6 +434,7 @@ struct PlanDoor(Movable):
                     + String(e)
                 )
             raise e^
+        # SAFETY: as above; the box is freed right after this read.
         var released = box[].is_released()
         box.free()
         if not released:
@@ -383,18 +446,22 @@ struct PlanDoor(Movable):
 
     def plan_ipc_bytes(mut self, plan: List[UInt8]) raises -> List[UInt8]:
         """Door B: execute `plan` through the probe-then-fill protocol and
-        return the Arrow IPC stream bytes it fills."""
-        var len_box = alloc[UInt64](1).unsafe_origin_cast[MutUntrackedOrigin]()
-        # SAFETY: a one-word slot of ours, read back after each call.
-        len_box[] = _SENTINEL
-        # SAFETY: `plan` borrowed for the call as in plan_stream; the probe's
-        # `out` is NULL with `cap` 0, so the library writes only `*len_box`.
+        return the Arrow IPC stream bytes it fills. Raises
+        PLAN_DOOR_EMPTY_PLAN for an empty plan, before any call."""
+        _require_plan(plan)
+        # The `*out_len` slot and the output buffer are Lists of this call:
+        # their pointers carry the Lists' own origins, and the Lists outlive
+        # both calls (each is read after them).
+        var len_slot: List[UInt64] = [_SENTINEL]
+        # SAFETY: `plan` borrowed for the call (the library copies `len(plan)`
+        # bytes and keeps no pointer); the probe's `out` is NULL with `cap`
+        # 0, so the library may write only `len_slot[0]`.
         var rc = self._s.lib[].call["komira_plan_bytes", Int32](
-            self._s.ctx, plan.unsafe_ptr(), UInt64(len(plan)), _null_bytes(), UInt64(0), len_box
+            self._s.ctx, plan.unsafe_ptr(), UInt64(len(plan)), _null_bytes(), UInt64(0),
+            len_slot.unsafe_ptr(),
         )
-        var reported = len_box[]
+        var reported = len_slot[0]
         if rc == DOOR_ERR_ENGINE:
-            len_box.free()
             if reported != _SENTINEL:
                 raise Error(
                     "PLAN_DOOR_OUT_TOUCHED_ON_REFUSAL: komira_plan_bytes refused the probe"
@@ -402,52 +469,43 @@ struct PlanDoor(Movable):
                 )
             raise self._refused()
         if rc != DOOR_ERR_BUFFER_TOO_SMALL:
-            len_box.free()
             raise _bad_return("komira_plan_bytes", rc, "to the probe (out NULL, cap 0)")
         if reported == _SENTINEL or reported > UInt64(_MAX_RESULT):
-            len_box.free()
             raise Error(
                 "PLAN_DOOR_LENGTH_MISMATCH: the probe reported out_len = " + String(reported)
             )
         var need = Int(reported)
-        var buf = alloc[UInt8](need + _GUARD).unsafe_origin_cast[MutUntrackedOrigin]()
-        for i in range(_GUARD):
-            # SAFETY: bytes [need, need + _GUARD) are inside the allocation.
-            buf[need + i] = _GUARD_BYTE
-        len_box[] = _SENTINEL
-        # SAFETY: `buf` holds `need` bytes for the library plus _GUARD bytes it
-        # must not touch; `cap` says `need`.
+        # `need` bytes for the library, then _GUARD bytes it must not touch.
+        var buf = List[UInt8](length=need + _GUARD, fill=_GUARD_BYTE)
+        len_slot[0] = _SENTINEL
+        # SAFETY: `buf` holds `need + _GUARD` bytes and `cap` says `need`, so
+        # a conforming library writes `buf[0, need)` and `len_slot[0]` only.
         var rc2 = self._s.lib[].call["komira_plan_bytes", Int32](
-            self._s.ctx, plan.unsafe_ptr(), UInt64(len(plan)), buf, UInt64(need), len_box
+            self._s.ctx, plan.unsafe_ptr(), UInt64(len(plan)), buf.unsafe_ptr(), UInt64(need),
+            len_slot.unsafe_ptr(),
         )
-        var filled = len_box[]
-        len_box.free()
-        var overrun = False
+        var filled = len_slot[0]
         for i in range(_GUARD):
             if buf[need + i] != _GUARD_BYTE:
-                overrun = True
-        if overrun:
-            buf.free()
-            raise Error(
-                String("PLAN_DOOR_OVERRUN: komira_plan_bytes wrote past cap = ") + String(need)
-            )
+                raise Error(
+                    String("PLAN_DOOR_OVERRUN: komira_plan_bytes wrote past cap = ") + String(need)
+                )
         if rc2 == DOOR_ERR_ENGINE:
-            buf.free()
+            if filled != _SENTINEL:
+                raise Error(
+                    "PLAN_DOOR_OUT_TOUCHED_ON_REFUSAL: komira_plan_bytes refused the fill"
+                    " and wrote out_len = " + String(filled)
+                )
             raise self._refused()
         if rc2 != DOOR_OK:
-            buf.free()
             raise _bad_return("komira_plan_bytes", rc2, "to the fill (cap = the probe's length)")
         if filled != UInt64(need):
-            buf.free()
             raise Error(
                 String("PLAN_DOOR_LENGTH_MISMATCH: the probe reported ") + String(need)
                 + " bytes, the fill reported " + String(filled)
             )
-        var out = List[UInt8](capacity=need)
-        for i in range(need):
-            out.append(buf[i])
-        buf.free()
-        return out^
+        buf.resize(need, 0)
+        return buf^
 
     def plan_bytes(mut self, plan: List[UInt8]) raises -> Table:
         """Door B, decoded: the Table its Arrow IPC stream holds."""
