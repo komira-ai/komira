@@ -125,6 +125,7 @@ _TESTS_LINTS = [
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
     "//src/tests/conformance/komira_connect_conformance:deps_lint",
+    "//src/tests/conformance/komira_db_conformance:deps_lint",
     "//src/tests/conformance/komira_http_conformance:deps_lint",
     "//src/tests/conformance/komira_json_conformance:deps_lint",
     "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
@@ -133,6 +134,7 @@ _TESTS_LINTS = [
     "//src/tests/e2e/komira_job_supervisor_loopback:deps_lint",
     "//src/tests/e2e/komira_pandas_door_e2e:deps_lint",
     "//src/tests/e2e/komira_secrets_e2e:deps_lint",
+    "//src/tests/e2e/komira_shuffle_e2e:deps_lint",
     "//src/tests/e2e/komira_udf_e2e:deps_lint",
 ] if read_root_config("cells", "tests") else []
 

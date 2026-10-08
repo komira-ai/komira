@@ -30,6 +30,7 @@ comptime _FILES: List[String] = [
     "azure_sas.mojo",
     "azure_sas_query.mojo",
     "azure_signing.mojo",
+    "azure_url.mojo",
     "azure_xml.mojo",
 ]
 
@@ -79,6 +80,7 @@ def test_the_scan_saw_the_package() raises:
     assert_equal(_count(_read("azure_fs.mojo"), "\nstruct AzureFs["), 1)
     assert_equal(_count(_read("azure_sas.mojo"), "\nstruct AzureSasSigner["), 1)
     assert_equal(_count(_read("azure_signing.mojo"), "\nstruct SharedKeySigningLayer["), 1)
+    assert_equal(_count(_read("azure_url.mojo"), "\ndef parse_azure_url("), 1)
     assert_true(_read("azure_fs.mojo").byte_length() > 10000)
 
 

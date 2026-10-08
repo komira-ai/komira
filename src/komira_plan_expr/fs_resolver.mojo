@@ -1,31 +1,25 @@
 # =============================================================================
-# komira_plan_expr.fs_resolver — the FS-ERASED resolver trait the
-# materialize spine threads as `[REG: FsResolver = LocalOnlyResolver]`.
+# komira_plan_expr.fs_resolver — the FS-ERASED resolver trait: which scheme
+# a plan's scan node is bound to, without naming a file system.
 # =============================================================================
 #
-# THE CRUX: `_resolve_source` lives in `komira_engine_dispatch`,
-# which is BELOW `komira_fs_registry` — so the engine spine CANNOT name the
-# concrete `FsHandle` union (it lives in the top package). The resolution is a
-# TINY trait, FS-ERASED, RESIDENT IN CORE, that the spine threads as ONE
-# comptime type param `[REG: FsResolver = LocalOnlyResolver]`:
-#   * the spine never names any FS-adjacent concrete type — it calls trait
-#     methods on `reg`;
-#   * `komira_fs_registry`'s `FsRegistry` conforms to `FsResolver` and holds
-#     the live `FsHandle` side table; its conformer method bodies are where the
-#     4-arm FS fan-out lives (the `FsHandle` tag ladder) — visible there because
-#     all 4 FS packages are below `komira_fs_registry`;
-#   * `LocalOnlyResolver` (below) is the defaulted comptime resolver that keeps
-#     every local call site on the local default (it resolves any source to
-#     the local default — zero config, no registry).
+# The logical plan names the exact source each scan reads (its
+# `FsDescriptorPod`; a surface maps the source URL's prefix to the scheme
+# code with komira_source_url before it builds the plan). A compiled plan
+# reads with the one file system that code names, so no table of live file
+# systems is threaded anywhere: what code below the file-system packages
+# needs is the FS-erased answer to "is this node bound, and to which
+# scheme", and that is this trait.
 #
-# WHY THE TRAIT CANNOT NAME `materialize_parquet_collect`:
-#   `materialize_parquet_collect` (`komira_parquet`) takes `LocalDispatcher`,
-#   `CancellationToken` and `ParquetMetadataCache` — ALL ABOVE the core packages. A
-#   core-resident trait CANNOT spell those types. So the trait carries only the
-#   FS-ERASED, core-expressible IDENTITY-RESOLUTION method (`resolve_scheme`).
-#   The heavy materialize-driving method (sketched in the docstring below)
-#   belongs at the spine seam in `komira_fs_registry` /
-#   `komira_engine_dispatch`, where the heavy types are visible.
+#   * `FsBindings` (fs_bindings.mojo) conforms: the per-query
+#     `node_id -> scheme` table a plan carries.
+#   * `LocalOnlyResolver` (below) conforms: it resolves every node to the
+#     local default, with no table at all.
+#
+# The trait carries identity resolution only (`resolve_scheme`,
+# `has_binding`). It cannot carry a materialize-driving method: the
+# Parquet reader's dispatcher, cancellation token and footer cache are all
+# above the core packages, so a core-resident trait cannot spell them.
 #
 # Pointer discipline: the resolver threads its `self` as a
 #   normal trait-method receiver (a lifetime-tracked `ref`), NOT a fn-ptr, NOT a
@@ -36,47 +30,16 @@ from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_FILE
 
 
 trait FsResolver(Movable, Deinitable):
-    """FS-ERASED resolver the materialize spine threads as
-    `[REG: FsResolver = LocalOnlyResolver]`.
-
-    This trait defines the FS-erased identity-resolution surface that
-    the core packages can express. The heavy materialize-driving method has this
-    shape:
-
-        # NOT in core — it belongs at the spine seam in komira_fs_registry /
-        # komira_engine_dispatch, where the heavy parquet/engine arg types are
-        # visible; the trait is then either widened there or the spine calls a
-        # registry-resident method directly:
-        #
-        #   fn materialize_source(
-        #       self,
-        #       node_id: Int,
-        #       mut dispatcher: LocalDispatcher[NoopSink],
-        #       var cancel_token: CancellationToken,
-        #       pq_data: ParquetSourceData,
-        #       operators: Slab[MorselOp],
-        #       policy: MorselSizingPolicy,
-        #       mut footer_cache: ParquetMetadataCache,
-        #       count_only: Bool = False,
-        #       ...dyn-filter args...,
-        #   ) raises -> RecordBatch
-        #
-        # The conformer (`FsRegistry`) resolves `registry[node_id] -> FsHandle`
-        # and dispatches the 4-arm `FsHandle.materialize_parquet(...)` tag
-        # ladder, each arm calling `materialize_parquet_collect[ConcreteFS]`.
-        # `LocalOnlyResolver` ignores `node_id` and binds `LocalFs[NoopSink]`.
-
-    The FS-erased, core-expressible surface:
-    """
+    """FS-ERASED resolver: the `FS_SCHEME_*` code a plan's scan node is
+    bound to, and whether it is bound at all, with no file system named."""
 
     def resolve_scheme(self, node_id: Int) -> UInt8:
         """Return the `FS_SCHEME_*` code bound to `node_id`, or `FS_SCHEME_FILE`
-        if `node_id` has no explicit binding (the local default). This is the
-        FS-erased probe the spine uses to decide whether a source needs the
-        registry path or the local default — without naming any FS type.
+        if `node_id` has no explicit binding (the local default), without
+        naming any FS type.
 
-        The conformer (`komira_fs_registry.FsRegistry`) reads its side table;
-        `LocalOnlyResolver` returns `FS_SCHEME_FILE` unconditionally."""
+        `FsBindings` reads its table; `LocalOnlyResolver` returns
+        `FS_SCHEME_FILE` unconditionally."""
         ...
 
     def has_binding(self, node_id: Int) -> Bool:
@@ -87,23 +50,13 @@ trait FsResolver(Movable, Deinitable):
 
 @fieldwise_init
 struct LocalOnlyResolver(FsResolver, Movable, Deinitable):
-    """The DEFAULTED comptime resolver (`[REG: FsResolver = LocalOnlyResolver]`).
+    """The resolver that binds nothing: every source resolves to the local
+    default. `resolve_scheme` always returns `FS_SCHEME_FILE` and
+    `has_binding` is always False; no table, no FS type named.
 
-    Resolves EVERY source to the local default — zero config, no side table, no
-    FS type named. The spine threads this resolver by default: `resolve_scheme`
-    always returns `FS_SCHEME_FILE`, `has_binding` is always False, so the
-    engine never consults a registry and runs the local `LocalFs[NoopSink]`
-    path.
-
-    A zero-field POD (Movable + Deinitable). The `[REG: FsResolver =
-    LocalOnlyResolver]` spine monomorphizes twice (this + `FsRegistry`), not
-    4x — the 4-way FS fan-out lives in `FsRegistry`'s conformer, not the spine.
-
-    Lives in `komira_plan_expr` (NOT `komira_fs_registry`): it binds the LOCAL
-    default and names NO cloud FS type, so it is core-expressible. The
-    materialize-driving body (binding `LocalFs[NoopSink]`) is added at the spine
-    seam where `LocalFs` is reachable; the FS-erased surface here needs no FS
-    type at all.
+    A zero-field POD (Movable + Deinitable). It lives in `komira_plan_expr`
+    because it names no file system at all, so the core packages can
+    express it.
     """
 
     def resolve_scheme(self, node_id: Int) -> UInt8:
