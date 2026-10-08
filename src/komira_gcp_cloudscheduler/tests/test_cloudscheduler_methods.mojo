@@ -3,7 +3,7 @@
 # query, the headers, the JSON body), and the response it reads back.
 #
 # The expected forms are written here from the Cloud Scheduler v1 REST
-# reference (projects.locations.jobs.create, .get, .patch, .delete); no
+# reference (projects.locations.jobs.create, .get, .list, .patch, .delete); no
 # upstream test body is copied. The job is the shape komira deploys: an
 # HTTP target called on a cron schedule with an OIDC token for an invoker
 # service account, and a per-attempt deadline. The connector is
@@ -28,6 +28,7 @@ from komira_gcp_cloudscheduler.cloudscheduler import (
     CreateJobRequest,
     DeleteJobRequest,
     GetJobRequest,
+    ListJobsRequest,
     UpdateJobRequest,
 )
 from komira_gcp_cloudscheduler.job import Job, Job_State
@@ -196,6 +197,34 @@ def test_get_job() raises:
     _check_answered_job(job)
 
 
+def test_list_jobs() raises:
+    # GET .../locations/{location}/jobs, the page in the query.
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var c = _client(
+        capture,
+        String('{"jobs":[') + _JOB_ANSWER + '],"nextPageToken":"CgZuaWdodA=="}',
+    )
+    var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var page = c.list_jobs[_RT](
+        decode_json[ListJobsRequest](
+            '{"parent":"projects/demo-project/locations/us-central1",'
+            + '"pageSize":100,"pageToken":"CgRh="}'
+        ),
+        reactor,
+    )
+    assert_equal(
+        _wire(capture),
+        _expected(
+            "GET /v1/projects/demo-project/locations/us-central1/jobs"
+            + "?pageSize=100&pageToken=CgRh%3D"
+        ),
+    )
+    assert_equal(len(page.jobs), 1)
+    _check_answered_job(page.jobs[0])
+    assert_equal(page.next_page_token, "CgZuaWdodA==")
+
+
 def test_update_job() raises:
     # PATCH /v1/{job.name=...}: the path is the body's job name, and the
     # update mask is one query parameter, its paths in lowerCamelCase joined
@@ -277,6 +306,7 @@ def test_delete_job() raises:
 def main() raises:
     test_create_job()
     test_get_job()
+    test_list_jobs()
     test_update_job()
     test_update_job_without_a_mask_sends_none()
     test_update_job_without_a_job_is_refused_before_any_send()
