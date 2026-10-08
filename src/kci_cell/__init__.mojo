@@ -3,8 +3,9 @@
 # =============================================================================
 #
 # A cell is one closed world: one cloud, one place, owned by one machine. A
-# DEPLOY step names the cells file and picks one cell from it, the way a
-# PUBLISH step names a channels file and picks one channel.
+# DEPLOY step will name the cells file and pick one cell from it, the way a
+# PUBLISH step names a channels file and picks one channel (that wiring is not
+# built yet; kci_release_machine still refuses a DEPLOY step).
 # `cell.mojo` holds the types and the lookups; `parse.mojo` reads and checks
 # a cells file with `parse_cells_file`.
 #
