@@ -7,7 +7,7 @@ written by one program, in any language, and executed by another. A decoded
 plan renders to the same text as the original, so its structural hash is the
 same; `plan_round_trip` does both directions in one call.
 `plan_to_bytes_with_write_target` adds a destination (`COPY <plan> TO
-<target>`) and declares format version 3; a plain plan declares version 2,
+<target>`) and declares format version 5; a plain plan declares version 4,
 and `plan_wire_supported_versions` is the set this build reads.
 `schema_to_bytes` and `binding_to_bytes` let a frontend in another language
 write the schema of a Parquet scan or a whole scan binding without computing
