@@ -278,9 +278,10 @@ def _decode_one(
         src.append(fill)
     var input = Span(src)[_LEAD : _LEAD + len(stream)]
 
-    var buf = List[UInt8](capacity=_GUARD + cap + _GUARD)
-    for _ in range(_GUARD + cap + _GUARD):
-        buf.append(_SENTINEL)
+    # Filled in one call, not byte by byte: a window is up to 1 MiB and each
+    # stream fills 18 of them, which a per-byte append loop makes the bulk of
+    # this test's time in an unoptimized (coverage) build.
+    var buf = List[UInt8](length=_GUARD + cap + _GUARD, fill=_SENTINEL)
     var window = Span(buf)[_GUARD : _GUARD + cap]
 
     set_snappy_decoder(
