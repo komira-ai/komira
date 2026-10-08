@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/registry.mojo: how the fake clouds lower the REGISTRY type.
+# kci_cloud/shape/registry.mojo: how the shared shapes lower the REGISTRY type.
 # =============================================================================
 #
 # A registry runs as no identity: it holds no `identity` role and no grant
@@ -16,11 +16,13 @@
 # =============================================================================
 
 from kci_reconciler import InputRef
-from kci_cloud import FIELD_REGISTRY, LoweredNode, Setting, format_word, registry_format
+from kci_cloud.adapter import LoweredNode, Setting
+from kci_cloud.catalog import FIELD_REGISTRY
+from kci_cloud.registry import format_word, registry_format
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.metadata import fake_physical_name
-from kci_cloud_fake.shapes import ProviderShape, ROLE_REGISTRY
+from kci_cloud.shape.metadata import fake_physical_name
+from kci_cloud.shape.shapes import ProviderShape, ROLE_REGISTRY
 
 
 def fake_registry_address(resource_id: String) -> String:

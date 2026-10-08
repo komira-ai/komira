@@ -92,7 +92,15 @@ def _graph(
     read_db: Bool = True,
     read_seed: Bool = True,
     db: String = String('{"id":"db","secret":{}},'),
+    derived: Bool = False,
 ) -> String:
+    """`derived`: the graph a shape whose grants are DERIVED reads: the
+    grant `rot-db` written as `uses db WRITE` on its principal `rot`."""
+    var rot = String('{"id":"rot","serviceAccount":{}},')
+    rot += String('{"id":"rot-db","grant":{"principal":{"resource":"rot"},"target":{"resource":"db"},')
+    rot += String('"access":"WRITE"}}')
+    if derived:
+        rot = String('{"id":"rot","serviceAccount":{},"uses":[{"target":{"resource":"db"},"access":"WRITE"}]}')
     var uses = String("")
     if read_db:
         uses += String('{"target":{"resource":"db"},"access":"READ"}')
@@ -109,9 +117,7 @@ def _graph(
         + String('"uses":[') + uses + String("]},")
         + db
         + String('{"id":"seed","retention":"DELETE","secret":{}},')
-        + String('{"id":"rot","serviceAccount":{}},')
-        + String('{"id":"rot-db","grant":{"principal":{"resource":"rot"},"target":{"resource":"db"},')
-        + String('"access":"WRITE"}}')
+        + rot
         + String("]}")
     )
 
@@ -301,13 +307,14 @@ def test_the_kit_on_every_shape() raises:
             # The kit destroys what it applied and expects nothing left, so
             # `db` is written DELETE here (its KEEP default is test 3's).
             var d = String('{"id":"db","retention":"DELETE","secret":{}},')
+            var dv = shapes[s].grants_derived()
             run_conformance(
                 reg,
                 cloud,
                 _ctx(),
-                _list(_graph(db=d)),
-                _list(_graph(String("9090"), db=d)),
-                _list(_graph(String("9090"), read_seed=False, db=d)),
+                _list(_graph(db=d, derived=dv)),
+                _list(_graph(String("9090"), db=d, derived=dv)),
+                _list(_graph(String("9090"), read_seed=False, db=d, derived=dv)),
                 String("db/secret"),
             )
         except e:
@@ -375,7 +382,8 @@ def test_a_reference_without_read_is_refused_on_every_shape() raises:
         var raised = False
         try:
             var st = InMemoryStateStore()
-            _ = plan_resources(reg, cloud, _ctx(), _list(_graph(read_db=False)), Creds.none(), st)
+            var dv = shapes[s].grants_derived()
+            _ = plan_resources(reg, cloud, _ctx(), _list(_graph(read_db=False, derived=dv)), Creds.none(), st)
         except e:
             raised = True
             assert_equal(

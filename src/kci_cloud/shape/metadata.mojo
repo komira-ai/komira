@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/metadata.mojo: what each fake shape refuses of a resource's
+# kci_cloud/shape/metadata.mojo: what each shape refuses of a resource's
 # metadata (`labels`, `physical_name`), as data.
 # =============================================================================
 #
@@ -42,7 +42,8 @@
 #                 bytes (a CronJob's name); a bucket at least 3.
 # =============================================================================
 
-from kci_cloud import (
+from kci_cloud.adapter import FINDING_LIMIT, Finding
+from kci_cloud.catalog import (
     FIELD_BUCKET,
     FIELD_CERTIFICATE,
     FIELD_CONTAINER_JOB,
@@ -59,13 +60,11 @@ from kci_cloud import (
     FIELD_TABLE,
     FIELD_TOPIC,
     FIELD_WORKER,
-    FINDING_LIMIT,
-    Finding,
-    Firing,
-    KCI_LABELS_MAX,
     body_field,
     body_is,
 )
+from kci_cloud.firing import Firing
+from kci_cloud.metadata import KCI_LABELS_MAX
 from kci_resource_proto.resource import Resource
 
 

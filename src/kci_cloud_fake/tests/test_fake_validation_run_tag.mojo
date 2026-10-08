@@ -91,6 +91,7 @@ from kci_reconciler import (
     VERB_UPDATE,
 )
 from kci_cloud import (
+    FIELD_GRANT,
     ApplyOutcome,
     Catalog,
     CellContext,
@@ -206,6 +207,7 @@ def _full(
     events: Bool = False,
     networks: Bool = False,
     registry: Bool = False,
+    derived: Bool = False,
 ) -> String:
     """A public service with a `uses` grant, an internal service reading its
     URL (each keeping one instance, as onprem requires until Q21), a
@@ -217,12 +219,20 @@ def _full(
     adds an event trigger delivering `store`'s new objects to `api`;
     `networks` adds `_NETWORKS`; `registry` adds `_REGISTRY`.
     `roles_on` False makes api
-    internal and removes web's grant on api."""
-    var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
+    internal and removes web's grant on api. `derived`: the graph a shape
+    whose grants are DERIVED reads: the grant `see` written as `uses runner
+    DESCRIBE` on web (kept when the roles are off)."""
+    var see = String('{"target":{"resource":"runner"},"access":"DESCRIBE"}')
+    var call = String('{"target":{"resource":"api"},"access":"CALL"}')
+    var web_uses = String('"uses":[') + call + ((String(",") + see) if derived else String("")) + String("]},")
     var exposure = String('"public":{}')
     if not roles_on:
-        web_uses = String('"uses":[]},')
+        web_uses = String('"uses":[') + (see if derived else String("")) + String("]},")
         exposure = String('"internal":{}')
+    var grant = String('{"id":"see","grant":{"principal":{"resource":"web"},')
+    grant += String('"target":{"resource":"runner"},"access":"DESCRIBE"}},')
+    if derived:
+        grant = String("")
     return (
         String('{"resource":[')
         + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"port":8080,"internal":{},')
@@ -237,8 +247,7 @@ def _full(
         + String('{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"},')
         + String('"runAs":{"resource":"runner"}}},')
         + String('{"id":"runner","serviceAccount":{}},')
-        + String('{"id":"see","grant":{"principal":{"resource":"web"},')
-        + String('"target":{"resource":"runner"},"access":"DESCRIBE"}},')
+        + grant
         + String('{"id":"relay","worker":{"image":{"digest":"sha256:d4"},"command":["/bin/relay"],"replicas":2}},')
         + String('{"id":"store","retention":"DELETE","bucket":{"versioning":true}}')
         + (String(',{"id":"vault","bucket":{}}') if kept else String(""))
@@ -431,10 +440,17 @@ def _apply_and_check[
 
 def _covers_every_hosted_type[
     S: ConformanceTarget
-](cloud: S, resources: List[Resource], nodes: List[LoweredNode], where: String) raises:
+](cloud: S, resources: List[Resource], nodes: List[LoweredNode], where: String, derived: Bool = False) raises:
     """The graph holds exactly the types `cloud` hosts, and every resource
-    owns at least one wanted node (so each type's nodes were checked)."""
-    var hosted = cloud.implemented()
+    owns at least one wanted node (so each type's nodes were checked). On a
+    shape whose grants are DERIVED (`derived`, read from the shape) a grant
+    resource is refused, so the graph holds none and `grant` is not
+    counted."""
+    var hosted = List[Int]()
+    var all = cloud.implemented()
+    for k in range(len(all)):
+        if not (derived and all[k] == FIELD_GRANT):
+            hosted.append(all[k])
     var used = List[Int]()
     for i in range(len(resources)):
         var f = body_field(resources[i])
@@ -503,11 +519,12 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
             events=_hosts_events(cloud),
             networks=_hosts_networks(cloud),
             registry=_hosts_registry(cloud),
+            derived=shapes[s].grants_derived(),
         )
         _ = _apply_and_check(cloud, json, _run(String(_RUN)), String(_RUN), where)
         var resources = _list(json)
         var nodes = lower_data(cloud, resources)
-        _covers_every_hosted_type(cloud, resources, nodes, where)
+        _covers_every_hosted_type(cloud, resources, nodes, where, shapes[s].grants_derived())
         _both_marks_seen(cloud, nodes, where)
         if _hosts_table(cloud):
             assert_equal(_mark(cloud.live_labels(String("orders/table"))), "retain", where + ": a default table")
@@ -535,6 +552,7 @@ def test_outside_a_run_no_object_carries_a_tag() raises:
             messaging=_hosts_messaging(cloud),
             secret=True,
             names=_hosts_names(cloud),
+            derived=shapes[s].grants_derived(),
         )
         _ = _apply_and_check(cloud, json, None, String("(none)"), shapes[s].name)
     var limited = FakeLimitedCloud()
@@ -599,7 +617,7 @@ def test_an_invalid_run_id_is_refused_before_any_create() raises:
         var reg = _reg()
         var cloud = FakeCloud(shape=shapes[s].copy())
         var store = InMemoryStateStore()
-        var graph = _list(_full("8080"))
+        var graph = _list(_full("8080", derived=shapes[s].grants_derived()))
         _ok(apply_resources(reg, cloud, _ctx(_run(String(_RUN))), graph, Creds.none(), store), shapes[s].name)
         assert_true(cloud.live_count() > 0)
         _ = destroy_resources(reg, cloud, _ctx(_run(String("Vr-1"))), graph, Creds.none(), store)
@@ -644,7 +662,8 @@ def test_the_tag_names_the_run_that_created_the_object() raises:
         var reg = _reg_for(FakeCloud(shape=shapes[s].copy()))
         var cloud = FakeCloud(shape=shapes[s].copy())
         var store = InMemoryStateStore()
-        var first = _list(_full("8080", False))
+        var d = shapes[s].grants_derived()
+        var first = _list(_full("8080", False, derived=d))
         _ok(apply_resources(reg, cloud, _ctx(_run(String(_RUN))), first, Creds.none(), store), where)
         var before = lower_data(cloud, first)
         var created_first = List[String]()
@@ -652,7 +671,8 @@ def test_the_tag_names_the_run_that_created_the_object() raises:
             if before[k].wanted:
                 created_first.append(before[k].id.copy())
 
-        var second = _list(_full("9090", True))
+        var second = _list(_full("9090", True, derived=d))
+        var after = lower_data(cloud, second)
         var o = apply_resources(reg, cloud, _ctx(_run(String(_OTHER_RUN))), second, Creds.none(), store)
         _ok(o, where)
         var updated = 0
@@ -666,9 +686,16 @@ def test_the_tag_names_the_run_that_created_the_object() raises:
             if a.verb == VERB_CREATE:
                 created += 1
                 assert_false(mine, where + String(": ") + a.logical_id + String(" re-created"))
+                # A member binding (a DERIVED shape's grant) carries no label:
+                # it reads the run id of the identity it binds (or, public,
+                # of its target), which the first run created.
+                var want = String(_OTHER_RUN)
+                for k in range(len(after)):
+                    if after[k].id == a.logical_id and shapes[s].is_binding(after[k].kind):
+                        want = String(_RUN)
                 assert_equal(
                     _tag_of(cloud, a.logical_id),
-                    _OTHER_RUN,
+                    want,
                     where + String(": ") + a.logical_id + String(" created by the second run"),
                 )
             elif a.verb == VERB_UPDATE and mine:

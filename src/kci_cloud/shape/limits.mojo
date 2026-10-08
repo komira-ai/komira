@@ -1,9 +1,11 @@
 # =============================================================================
-# kci_cloud_fake/limits.mojo: the limits the fake clouds refuse (`check`).
+# kci_cloud/shape/limits.mojo: the reference limits every shape refuses.
 # =============================================================================
 #
-# ⚠ These are the FAKE clouds' own limits, chosen to be exercisable; they cite
-# this package, not any real cloud.
+# ⚠ These are the reference limits the fake clouds were built to exercise;
+# they cite kci_cloud_fake (`FAKE_CITATION`, the text they carried there), not
+# any real cloud. A built-in adapter that lowers through the shapes refuses
+# them too (`shape_limits`), and cites its own sources for any limit it adds.
 #   * a request timeout above 3600 s, a container job's timeout above
 #     86400 s, and a service whose scale max is below its min (every fake
 #     cloud);
@@ -15,22 +17,18 @@
 # workloads.mojo's.
 # =============================================================================
 
-from kci_cloud import (
-    EDGE_TARGET_CELL,
+from kci_cloud.adapter import FINDING_LIMIT, Finding
+from kci_cloud.catalog import (
     FIELD_CONTAINER_JOB,
     FIELD_SERVICE,
     FIELD_TABLE,
-    FINDING_LIMIT,
-    Finding,
-    GrantEdge,
     body_is,
-    edges_of,
-    index_role,
-    index_role_collisions,
 )
+from kci_cloud.data import index_role, index_role_collisions
+from kci_cloud.grants import EDGE_TARGET_CELL, GrantEdge, edges_of
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.shapes import ProviderShape, ROLE_INDEX
+from kci_cloud.shape.shapes import ProviderShape, ROLE_INDEX
 
 
 comptime FAKE_CITATION = "kci_cloud_fake: reference limits"

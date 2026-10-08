@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/workloads.mojo: how the fake clouds lower and limit the
+# kci_cloud/shape/workloads.mojo: how the shared shapes lower and limit the
 # WORKLOADS (service, container job, worker).
 # =============================================================================
 #
@@ -46,31 +46,31 @@
 # =============================================================================
 
 from kci_reconciler import InputRef
-from kci_cloud import (
-    FIELD_CONTAINER_JOB,
-    Firing,
-    FIELD_SERVICE,
-    FIELD_WORKER,
+from kci_cloud.adapter import (
     FINDING_LIMIT,
     Finding,
     LoweredNode,
     Setting,
-    V1_IMAGE_PLATFORM,
-    Workload,
+)
+from kci_cloud.catalog import (
+    FIELD_CONTAINER_JOB,
+    FIELD_SERVICE,
+    FIELD_WORKER,
     body_field,
     body_is,
-    worker_replicas,
-    workload_of,
 )
+from kci_cloud.compute import V1_IMAGE_PLATFORM, worker_replicas
+from kci_cloud.firing import Firing
+from kci_cloud.workload import Workload, workload_of
 from kci_resource_proto.compute import Size
 from kci_resource_proto.refs import Image, Value
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.limits import FAKE_CITATION
-from kci_cloud_fake.network import network_input
-from kci_cloud_fake.secrets import secret_env_fields
-from kci_cloud_fake.triggers import folded_fields
-from kci_cloud_fake.shapes import (
+from kci_cloud.shape.limits import FAKE_CITATION
+from kci_cloud.shape.network import network_input
+from kci_cloud.shape.secrets import secret_env_fields
+from kci_cloud.shape.triggers import folded_fields
+from kci_cloud.shape.shapes import (
     ProviderShape,
     ROLE_ENDPOINT,
     ROLE_IDENTITY,

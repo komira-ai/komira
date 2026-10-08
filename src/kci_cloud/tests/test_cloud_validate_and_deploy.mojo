@@ -66,6 +66,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    RegistryLogin,
     GrantEdge,
     CloudAdapter,
     Absence,
@@ -423,6 +424,12 @@ struct _Stub(CloudAdapter, Movable):
                 Finding(FINDING_CELL, String("(cell)"), String("trust"), creds.token + String(" is not deployer"))
             )
         return l^
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return String("")
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return RegistryLogin(String(""), String(""))
 
 
 def _ctx() -> CellContext:

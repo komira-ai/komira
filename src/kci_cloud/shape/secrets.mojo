@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/secrets.mojo: how the fake clouds lower the SECRET type, and
+# kci_cloud/shape/secrets.mojo: how the shared shapes lower the SECRET type, and
 # the `secret_env` of a workload's run node (or of the node holding its
 # container, where that is an object of its own).
 # =============================================================================
@@ -24,11 +24,12 @@
 # =============================================================================
 
 from kci_reconciler import InputRef
-from kci_cloud import FIELD_SECRET, LoweredNode, Setting
+from kci_cloud.adapter import LoweredNode, Setting
+from kci_cloud.catalog import FIELD_SECRET
 from kci_resource_proto.refs import SecretRef
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.shapes import ProviderShape, ROLE_SECRET
+from kci_cloud.shape.shapes import ProviderShape, ROLE_SECRET
 
 
 comptime SECRET_NAMED = "secret_named"

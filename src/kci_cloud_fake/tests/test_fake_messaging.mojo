@@ -59,6 +59,7 @@ from kci_reconciler import (
     VERB_UPDATE,
 )
 from kci_cloud import (
+    DERIVED_CITATION,
     Feed,
     Firing,
     GrantEdge,
@@ -416,7 +417,18 @@ def test_gcp_refuses_what_a_pull_subscription_cannot_be() raises:
         ' directly; send to "ev"'
     )
     assert_true(t.find(String('resource "pusher" field grant: on cloud "p-g" ') + why + String(_CITE)) >= 0, t)
-    assert_equal(_count(t, String('\n  resource "')), 1, "one finding: " + t)
+    # gcp's grants are DERIVED, so `pusher`, a grant resource, is refused for
+    # that too (its `uses` twin, `direct` below, is not).
+    assert_true(
+        t.find(
+            String('resource "pusher" field grant: cloud "p-g" derives a binding\'s stamp from its principal, so a')
+            + String(" binding cannot be owned by a grant resource: write a uses line on the principal instead")
+            + String(" (same target, same access) (citation: ") + String(DERIVED_CITATION) + String(")")
+        )
+        >= 0,
+        t,
+    )
+    assert_equal(_count(t, String('\n  resource "')), 2, "two findings, the limit and the grant: " + t)
     var direct = _graph().replace(String('"access":"RECEIVE"'), String('"access":"SEND"'))
     t = _refusal(ProviderShape.gcp(), direct)
     assert_true(t.find(String('resource "api" field uses[1]: on cloud "p-g" ') + why + String(_CITE)) >= 0, t)

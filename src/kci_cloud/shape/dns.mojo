@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/dns.mojo: how the fake clouds lower the NAME types (DNS zone,
+# kci_cloud/shape/dns.mojo: how the shared shapes lower the NAME types (DNS zone,
 # DNS record, certificate), and the limits a shape puts on a certificate.
 # =============================================================================
 #
@@ -41,23 +41,24 @@
 # =============================================================================
 
 from kci_reconciler import InputRef
-from kci_cloud import (
-    FIELD_CERTIFICATE,
-    FIELD_DNS_RECORD,
-    FIELD_DNS_ZONE,
+from kci_cloud.adapter import (
     FINDING_LIMIT,
     Finding,
     LoweredNode,
     Setting,
-    body_is,
-    record_type_word,
-    ttl_seconds,
 )
+from kci_cloud.catalog import (
+    FIELD_CERTIFICATE,
+    FIELD_DNS_RECORD,
+    FIELD_DNS_ZONE,
+    body_is,
+)
+from kci_cloud.dns import record_type_word, ttl_seconds
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.limits import FAKE_CITATION
-from kci_cloud_fake.metadata import fake_physical_name
-from kci_cloud_fake.shapes import (
+from kci_cloud.shape.limits import FAKE_CITATION
+from kci_cloud.shape.metadata import fake_physical_name
+from kci_cloud.shape.shapes import (
     ProviderShape,
     RECORD_TYPE_SLOT,
     ROLE_AUTH_RECORD,
