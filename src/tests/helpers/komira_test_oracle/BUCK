@@ -87,7 +87,8 @@ python_oracle(
 # sql_discipline.py against queries that each break one rule (refused,
 # naming where the parse keeps the offence) and the same queries with the
 # ORDER BY and literal rules kept, and value keywords qualified by a table
-# (accepted). DuckDB only parses them.
+# (accepted). DuckDB only parses them; the list of unstable functions is
+# also held to the running DuckDB's duckdb_functions().
 py_test(
     name = "test_sql_discipline",
     src = "test_sql_discipline.py",

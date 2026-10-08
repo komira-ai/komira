@@ -19,11 +19,13 @@ semantics to DuckDB's defaults or to the moment it runs:
   the count is not exempt). An
   uncast `2` beside a BIGINT column computes the same answer, so again only
   this check notices;
-- no call to a function in `_UNSTABLE` (each reads a clock or draws a
-  random number), no SQL value keyword that DuckDB's binder may turn into a
-  call (below), and no `USING SAMPLE` or `TABLESAMPLE` (a sample is not a
-  function call: DuckDB keeps it in a `sample` key of the SELECT or the
-  table reference);
+- no call to a function in `_UNSTABLE` (below), to a function whose
+  name begins `duckdb_` or `pragma_` (each reads the session's catalog,
+  settings, logs or storage), or to `age` with one argument (it subtracts
+  from today's midnight; `age(a, b)` reads no clock); no SQL value keyword
+  that DuckDB's binder may turn into a call (below); and no `USING SAMPLE`
+  or `TABLESAMPLE` (a sample is not a function call: DuckDB keeps it in a
+  `sample` key of the SELECT or the table reference);
 - exactly one statement, a SELECT.
 
 SQL value keywords. DuckDB's grammar has no CURRENT_DATE keyword: `SELECT
@@ -35,12 +37,26 @@ it is the function unless a table in scope has such a column. The parse
 alone cannot tell which, so a COLUMN_REF whose last name is one of
 `_VALUE_KEYWORDS` (all eleven names the map knows: the five clock keywords
 and the six that read the session's user, role, catalog or schema) is
-refused where the binder would try the map: a one-part name, a two-part name
-qualified by `alias` (`IsPotentialAlias`), and any name inside a table
-function's arguments (TableFunctionBinder tries the map on the last part of
-a qualified name too; a subquery there is held to this rule as well, more
-than DuckDB needs). A column of that name is read qualified by its table,
-`t.current_date`, which the binder resolves to the column or refuses.
+refused in each of the four places the binder would try the map: a
+one-part name; a two-part name qualified by `alias`, in any case
+(`IsPotentialAlias`); any name inside a table function's arguments; and any
+name inside the expression of a `COLUMNS(...)` star. The last two are bound
+by TableFunctionBinder, which tries the map on the last part of a qualified
+name too, so `COLUMNS(x.current_date)` is the clock (a subquery there is
+held to this rule as well, more than DuckDB needs). A column of that name is
+read qualified by its table, `t.current_date`, which the binder resolves to
+the column or refuses.
+
+`_UNSTABLE` holds every function DuckDB v1.5.6 itself marks VOLATILE or
+CONSISTENT_WITHIN_QUERY (`duckdb_functions().stability`), except `error`
+(VOLATILE only so that it is never folded; its answer is its argument);
+ICU's current_localtime and current_localtimestamp, which read the clock
+but keep the default CONSISTENT; `current_setting` and `getvariable`, which
+read the session's settings and variables; and every built-in macro whose
+body reaches any of these or a `duckdb_`/`pragma_` table function, directly
+or through another macro (`ago` is `current_timestamp - i::interval`).
+test_sql_discipline.py derives that set from the running DuckDB's
+`duckdb_functions()` and fails if a name is missing here.
 
 The check walks the JSON DuckDB's `json_serialize_sql` makes of the
 statement, not the text, so a comment, a string literal or a line break
@@ -49,27 +65,64 @@ cannot hide or fake a keyword.
 
 import json
 
-# Functions whose answer depends on when or where the query runs.
+# Functions whose answer depends on when, where or in which session the
+# query runs (the module docstring says how the list is derived).
 _UNSTABLE = frozenset([
+    # DuckDB marks these CONSISTENT_WITHIN_QUERY: a clock or the session.
+    "current_database",
     "current_date",
-    "current_time",
-    "current_timestamp",
+    "current_schema",
+    "current_schemas",
     "get_current_time",
     "get_current_timestamp",
-    "gen_random_uuid",
-    "current_localtime",
-    "current_localtimestamp",
-    "localtime",
-    "localtimestamp",
+    "in_search_path",
     "now",
-    "random",
-    "setseed",
     "today",
     "transaction_timestamp",
+    "txid_current",
+    # DuckDB marks these VOLATILE.
+    "current_connection_id",
+    "current_query",
+    "current_query_id",
+    "current_transaction_id",
+    "currval",
+    "gen_random_uuid",
+    "nextval",
+    "random",
+    "setseed",
+    "sleep_ms",
+    "stats",
     "uuid",
     "uuidv4",
     "uuidv7",
+    "write_log",
+    # ICU's clock readers that DuckDB leaves CONSISTENT; the session's
+    # settings and variables.
+    "current_localtime",
+    "current_localtimestamp",
+    "current_setting",
+    "getvariable",
+    # Not functions in v1.5.6, kept so a parse that calls them by these
+    # names (`current_time()`, `localtime()`) is refused too.
+    "current_time",
+    "current_timestamp",
+    "localtime",
+    "localtimestamp",
+    # Built-in macros that reach one of the above or a duckdb_/pragma_
+    # table function (default_functions.cpp, default_table_functions.cpp).
+    "ago",
+    "current_catalog",
+    "format_type",
+    "get_block_size",
+    "pg_conf_load_time",
+    "pg_get_constraintdef",
+    "pg_get_viewdef",
+    "pg_postmaster_start_time",
+    "pg_sleep",
 ])
+
+# Function names that read the session's catalog, settings, logs or storage.
+_SESSION_PREFIXES = ("duckdb_", "pragma_")
 
 
 # GetSQLValueFunctionName's map in DuckDB v1.5.6: a column name the binder
@@ -115,7 +168,8 @@ def _value_keyword(node, in_table_fn):
 def _walk(node, path, in_cast, is_count, in_table_fn, problems):
     """`in_cast`: `node` is a CAST's operand; `is_count`: `node` is the
     count of a LIMIT or an OFFSET. Neither is inherited below `node`.
-    `in_table_fn`: `node` is inside a table function's arguments; it is
+    `in_table_fn`: `node` is inside a table function's arguments or a
+    COLUMNS star's expression (both bound by TableFunctionBinder); it is
     inherited by everything below."""
     if isinstance(node, list):
         for i, item in enumerate(node):
@@ -126,8 +180,14 @@ def _walk(node, path, in_cast, is_count, in_table_fn, problems):
     cls = node.get("class")
     if cls == "CONSTANT" and not in_cast and not is_count:
         problems.append("%s: a literal that is not the operand of a CAST: %s" % (path, json.dumps(node.get("value"))))
-    if cls == "FUNCTION" and str(node.get("function_name", "")).lower() in _UNSTABLE:
-        problems.append("%s: %s() depends on when the query runs" % (path, node["function_name"]))
+    if cls == "FUNCTION":
+        fname = str(node.get("function_name", "")).lower()
+        if fname in _UNSTABLE:
+            problems.append("%s: %s() depends on when the query runs" % (path, node["function_name"]))
+        elif fname.startswith(_SESSION_PREFIXES):
+            problems.append("%s: %s() reads the session's catalog, settings or storage" % (path, node["function_name"]))
+        elif fname == "age" and len(node.get("children") or []) == 1:
+            problems.append("%s: age() with one argument subtracts from today's midnight" % path)
     if cls == "COLUMN_REF":
         target = _value_keyword(node, in_table_fn)
         if target is not None:
@@ -147,10 +207,12 @@ def _walk(node, path, in_cast, is_count, in_table_fn, problems):
     for key in sorted(node):
         # A CAST's operand is its `child`, a limit modifier's counts its
         # `limit` and `offset`; anything deeper is neither. A table
-        # function's arguments are under its `function`.
+        # function's arguments are under its `function`, a COLUMNS star's
+        # expression under its `expr`.
         _walk(node[key], path + "." + key, cls == "CAST" and key == "child",
               limit and key in ("limit", "offset"),
-              in_table_fn or (table_fn and key == "function"), problems)
+              in_table_fn or (table_fn and key == "function") or (cls == "STAR" and key == "expr"),
+              problems)
 
 
 def check(con, sql):

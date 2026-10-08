@@ -26,7 +26,7 @@ is read back, and nothing komira wrote is an input.
 DuckDB runs with `threads = 1`, `TimeZone = 'UTC'` and its defaults
 otherwise (query semantics, preamble). Each query is first held to
 sql_discipline.py (every ORDER BY key states ASC/DESC and NULLS FIRST/LAST,
-every literal is CAST, no clock or random function), on the exact text that
+every literal is CAST, no clock, random or session function), on the exact text that
 is then run. The result is rendered by render.py to
 
     <output directory>/expect/<shard>/<case>.tsv
