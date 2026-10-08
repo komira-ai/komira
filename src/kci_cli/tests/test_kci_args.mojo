@@ -121,6 +121,17 @@ def test_no_other_operation_selector() raises:
     _refused(_run("--steps", "b"), String("unknown flag '--steps'"))
 
 
+def test_a_usage_refusal_carries_no_kci_prefix() raises:
+    # The message is recorded as is and printed after the one `kci: ` the
+    # dispatcher's `_stop` writes: a prefix here would print `kci: kci: `.
+    try:
+        _ = parse_kci_args(_run("--no-such-flag"))
+    except e:
+        assert_equal(String(e), String("unknown flag '--no-such-flag' for kci run"))
+        return
+    raise Error(String("--no-such-flag is not refused"))
+
+
 def test_help() raises:
     assert_equal(parse_kci_args(_args("--help")).verb, String(CLI_VERB_HELP))
     assert_equal(parse_kci_args(_args("run", "-h")).verb, String(CLI_VERB_HELP))

@@ -1,0 +1,11 @@
+surface	capability	status	target	note
+pandas	scan_csv	filled	tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e:pandas_e2e	its welded test_srcs
+pandas	filter	filled	//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e:test_filter	a mojo_test, by a cell-relative label
+pandas	join_left	missing	-	no test yet
+pandas	udf_map	missing	-	
+pandas	errors	missing	-	no test yet
+polars	scan_csv	missing	-	no test yet
+polars	filter	filled	tests//functional/surface_capability_matrix/src/tests/e2e/polars_e2e:test_filter	a mojo_test
+polars	join_left	missing	-	no test yet
+polars	udf_map	missing	-	no test yet
+polars	errors	missing	-	no test yet

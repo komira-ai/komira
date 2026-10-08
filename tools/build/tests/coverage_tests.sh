@@ -5,8 +5,12 @@
 # expect_green and expect_red); not run on its own.
 #
 #  41. Coverage builds: with -c komira.coverage=true, every release action
-#      of tests//functional/coverage:covlib and //src/komira_retry keeps its
-#      command line and inputs, and the only new actions are coverage ones,
+#      of tests//functional/coverage:covlib, :covuser and //src/komira_retry
+#      keeps its command line and inputs, but the join, whose inputs gain
+#      exactly one coverage run per test and the gate (test 46), and covuser
+#      (a dependent of covlib) does not compile again; :covbare (no test, no
+#      README) has a join only with the switch on, waiting for its gate
+#      alone; and the only new actions are coverage ones,
 #      one -O0 build per test, unset is false, darwin-arm64 gets no coverage
 #      attribute, and a README's build and run do not run again when the
 #      switch turns on (tools/build/tests/functional/coverage_keys.sh: aquery,
