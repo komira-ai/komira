@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.2: a filter keeps a row only when temp > 0 is TRUE. Of
+# weather.json's temps (upstream Apache Avro, not komira) 0, 22, -11, 111
+# and 78, the filter keeps 22, 111 and 78; 0 > 0 and -11 > 0 are FALSE. No
+# temp is NULL. No sort: compared as a multiset (§4.8).
+station:string	time:int64	temp:int32
+011990-99999	-619506000000	22
+012650-99999	-655531200000	111
+012650-99999	-655509600000	78

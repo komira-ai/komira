@@ -20,7 +20,11 @@
 #   .err files: the accepted form and each refusal;
 #   datasets: a wrong member, a wrong kind, a null in a non-nullable column,
 #     a string, a bool and an out-of-range number (1e400, -1e400) in a
-#     float64 column, a missing and an orphan dataset file.
+#     float64 column, values past either end of int32 and a non-integral
+#     one in an int32 column, a missing and an orphan dataset file; for a
+#     dataset with any member order, an unknown and a repeated member (and
+#     the same permuted line refused by an ordered dataset);
+#   inputs: a registered input that is not staged, and an orphan.
 #
 # NOT planted here, because each needs a broken codec rather than a broken
 # case: plan_to_bytes refusing a plan, plan_wire_check_values refusing one,
@@ -43,12 +47,23 @@ from komira_plan_conformance import (
     check_dataset_files,
     check_expectation,
     check_files,
+    check_input_files,
     check_partition,
     check_schema,
     check_wire,
     parse_err,
 )
-from komira_plan_conformance.datasets import bool_pairs, ints_nullable, scan, sort_rows
+from komira_plan_conformance.datasets import (
+    all_inputs,
+    avro_input,
+    bool_pairs,
+    ints_nullable,
+    scan,
+    scan_key_order,
+    scan_rows,
+    sort_rows,
+    weather,
+)
 
 
 def _ints() raises -> LogicalPlan:
@@ -353,12 +368,75 @@ def test_dataset_files() raises:
             String("stat_rows.jsonl"), String("avg_rows.jsonl"),
             String("div_pairs.jsonl"), String("float_pairs.jsonl"),
             String("set_left.jsonl"), String("set_right.jsonl"),
-            String("str_rows.jsonl"), String("extra.csv"),
+            String("str_rows.jsonl"), String("scan_rows.jsonl"),
+            String("scan_key_order.jsonl"), String("weather.jsonl"),
+            String("extra.csv"),
         ],
     )
     assert_true(_any_contains(p, "datasets/ints_nullable.jsonl is missing"))
     assert_true(_any_contains(p, "datasets/extra.csv is an orphan"))
     assert_equal(len(p), 2)
+
+
+def test_dataset_int32_column() raises:
+    # weather's temp is int32: both ends of the range pass; one past either
+    # end, a fraction and a string are refused.
+    assert_equal(
+        len(check_dataset(
+            weather(),
+            '{"station": "a", "time": -1, "temp": -2147483648}\n'
+            + '{"station": "b", "time": 1, "temp": 2147483647}\n',
+        )),
+        0,
+    )
+    var p = check_dataset(
+        weather(),
+        '{"station": "a", "time": 1, "temp": 2147483648}\n'
+        + '{"station": "a", "time": 1, "temp": -2147483649}\n'
+        + '{"station": "a", "time": 1, "temp": 1.0}\n'
+        + '{"station": "a", "time": 1, "temp": "1"}\n',
+    )
+    assert_true(_any_contains(p, ":1: 'temp' is 2147483648, not in the range of int32"))
+    assert_true(_any_contains(p, ":2: 'temp' is -2147483649, not in the range of int32"))
+    assert_true(_any_contains(p, ":3: 'temp' is 1.0, not a int32"))
+    assert_true(_any_contains(p, ":4: 'temp' is \"1\", not a int32"))
+    assert_equal(len(p), 4)
+
+
+def test_dataset_any_member_order() raises:
+    # scan_key_order takes each column once in any order; an unknown member
+    # and a repeated one are refused, and the kind and null checks still
+    # apply by name. scan_rows, the ordered twin, refuses the permuted line.
+    var permuted = String('{"s": "", "id": 2, "x": null}\n')
+    assert_equal(len(check_dataset(scan_key_order(), permuted)), 0)
+    assert_true(
+        _any_contains(check_dataset(scan_rows(), permuted), ":1: member 0 is 's', the schema's column is 'id'")
+    )
+    var p = check_dataset(
+        scan_key_order(),
+        '{"x": 1, "id": 1, "t": "a"}\n{"x": 1, "id": 1, "x": 2}\n'
+        + '{"s": "a", "x": 1, "id": null}\n{"s": 1, "x": 1, "id": 1}\n',
+    )
+    assert_true(_any_contains(p, ":1: member 't' is not a column of the schema"))
+    assert_true(_any_contains(p, ":2: member 'x' appears twice"))
+    assert_true(_any_contains(p, ":3: 'id' is null in a non-nullable column"))
+    assert_true(_any_contains(p, ":4: 's' is 1, not a string"))
+    assert_equal(len(p), 4)
+
+
+def test_input_files() raises:
+    var inputs = all_inputs()
+    assert_equal(len(inputs), 4)
+    var staged = inputs.copy()
+    assert_equal(len(check_input_files(inputs, staged)), 0)
+    _ = staged.pop()
+    staged.append(String("inputs/avro/weather-bzip2.avro"))
+    var p = check_input_files(inputs, staged)
+    assert_true(_any_contains(p, "input: " + inputs[3] + " is missing"))
+    assert_true(_any_contains(p, "input: inputs/avro/weather-bzip2.avro is an orphan"))
+    assert_equal(len(p), 2)
+    with assert_raises(contains="no Avro weather file for codec 'bzip2'"):
+        _ = avro_input("bzip2")
 
 
 def main() raises:

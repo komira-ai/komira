@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: the five records of upstream Apache Avro's weather.json (not
+# komira's output), which weather.avro (codec null) holds. No row is NULL:
+# test.Weather has no union field, and Avro carries NULL explicitly, never
+# by conversion (§7.13). No sort: compared as a multiset (§4.8).
+# Types: the Avro writer schema (string, long, int) as the scan declares it.
+station:string	time:int64	temp:int32
+011990-99999	-619524000000	0
+011990-99999	-619506000000	22
+011990-99999	-619484400000	-11
+012650-99999	-655531200000	111
+012650-99999	-655509600000	78

@@ -2,14 +2,15 @@
 # test_corpus.mojo -- every registered case, through every check in corpus.mojo.
 # =============================================================================
 #
-# The data root is the test's working directory: BUCK stages expect/ and
-# datasets/ there. For every case: it builds; plan_to_bytes encodes it;
+# The data root is the test's working directory: BUCK stages expect/,
+# datasets/ and inputs/ there. For every case: it builds; plan_to_bytes encodes it;
 # plan_wire_admit accepts the bytes; plan_wire_check_values accepts the plan;
 # plan_from_bytes decodes it with the same structural hash and root output
 # schema; its one expectation file parses, carries its derivation, states the
 # case's order/float policy and has the plan's root output schema. Also: every
-# case is in exactly one shard, every file under expect/ and datasets/ belongs
-# to a case or dataset, and every dataset matches its declared schema. Every
+# case is in exactly one shard, every file under expect/, datasets/ and
+# inputs/ belongs to a case, dataset or registered input, every registered
+# input is staged, and every dataset matches its declared schema. Every
 # problem is reported in one failure, not only the first.
 # =============================================================================
 
@@ -24,10 +25,10 @@ def test_corpus() raises:
 
 def test_corpus_is_not_empty() raises:
     # A registry that lost its shards would pass every check vacuously.
-    if len(registered_cases()) < 96:
+    if len(registered_cases()) < 109:
         raise Error(
             "plan_conformance: " + String(len(registered_cases()))
-            + " cases registered, the ten shards hold 96"
+            + " cases registered, the twelve shards hold 109"
         )
 
 

@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: scan_key_order holds scan_rows' four rows with each line's
+# members in another order. A JSON object is an unordered collection of
+# name/value pairs (RFC 8259 §4), so each member binds to the declared column
+# of its name and the rows equal explicit_null_and_empty's: null is NULL and
+# "" is '' (§7.13, proposed; §7.12). The columns come out in the declared
+# order, id x s. No sort: compared as a multiset (§4.8).
+id:int64	x:int64?	s:string?
+1	10	a
+2	\N	
+3	30	\N
+4	-5	d

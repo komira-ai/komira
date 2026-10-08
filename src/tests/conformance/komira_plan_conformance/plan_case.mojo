@@ -20,10 +20,14 @@
 # tolerance). The expectation file states the same policy in its header, and
 # test_corpus requires the two to agree, so neither can drift alone.
 #
-# A dataset is a hand-written JSON Lines file, datasets/<name>.jsonl, with the
-# schema the cases declare for it. JSON Lines rather than CSV: whether an
-# empty CSV field is NULL is open, and reading a JSON `null` as NULL is what
-# the query-semantics document proposes (§7.13, undecided).
+# A dataset is a JSON Lines file, datasets/<name>.jsonl, with the schema the
+# cases declare for it: written by hand, except `weather`, which is Apache
+# Avro's own weather.json (datasets.mojo says why). JSON Lines rather than
+# CSV: whether an empty CSV field is NULL is open, and reading a JSON `null`
+# as NULL is what the query-semantics document proposes (§7.13, undecided).
+#
+# A scan input that is not JSON Lines lives under inputs/ (the upstream Avro
+# files, staged from third_party by BUCK); datasets.mojo registers each one.
 # =============================================================================
 
 from komira_arrow.schema import Schema
@@ -37,6 +41,7 @@ comptime EXPECT_ERROR: Int = 2
 
 comptime EXPECT_DIR = "expect"
 comptime DATASET_DIR = "datasets"
+comptime INPUT_DIR = "inputs"
 
 comptime BuildFn = def () raises thin -> LogicalPlan
 """A case's plan builder: no captures, so the registry is plain data."""
@@ -111,15 +116,21 @@ struct Case(Copyable, Movable):
 
 
 struct Dataset(Copyable, Movable):
-    """A hand-written input: datasets/<name>.jsonl, one JSON object per line,
-    its members exactly the schema's columns in order."""
+    """An input: datasets/<name>.jsonl, one JSON object per line, its members
+    exactly the schema's columns in order. With `any_member_order`, each line
+    holds every column exactly once in any order (a file that tests a scan's
+    binding by name)."""
 
     var name: String
     var schema: Schema
+    var any_member_order: Bool
 
-    def __init__(out self, name: String, var schema: Schema):
+    def __init__(
+        out self, name: String, var schema: Schema, any_member_order: Bool = False
+    ):
         self.name = name
         self.schema = schema^
+        self.any_member_order = any_member_order
 
     def path(self) -> String:
         return String(DATASET_DIR) + "/" + self.name + ".jsonl"

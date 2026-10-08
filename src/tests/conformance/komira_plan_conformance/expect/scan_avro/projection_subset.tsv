@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: weather.json's five records (upstream Apache Avro, not komira),
+# projected to temp then station in that order; time is not read. No NULL
+# (§7.13). No sort: compared as a multiset (§4.8). No query-semantics item
+# covers a scan's projection: the columns are those named, in the order
+# named, each keeping its declared type.
+temp:int32	station:string
+0	011990-99999
+22	011990-99999
+-11	011990-99999
+111	012650-99999
+78	012650-99999

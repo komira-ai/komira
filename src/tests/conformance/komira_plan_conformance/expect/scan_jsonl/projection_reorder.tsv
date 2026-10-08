@@ -1,0 +1,13 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: scan_rows projected to s then id, in that order; x is not
+# read. s keeps '' on id 2 and NULL on id 3 (§7.13, proposed; §7.12). No
+# sort: compared as a multiset (§4.8). No query-semantics item covers a
+# scan's projection: the columns are those named, in the order named, each
+# keeping its declared type and nullability.
+s:string?	id:int64
+a	1
+	2
+\N	3
+d	4

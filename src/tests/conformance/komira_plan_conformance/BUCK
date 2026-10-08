@@ -25,10 +25,26 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   test_corpus_checks  the checks fed planted defects (README.md lists them,
 #                       and the three wire legs only a broken codec can trip).
 #
-# expect/ and datasets/ are staged at those paths under the test's working
-# directory, by glob, so an orphan file reaches the test and is refused.
+# expect/, datasets/ and inputs/ are staged at those paths under the test's
+# working directory, by glob, so an orphan file reaches the test and is
+# refused.
 # Nothing depends on this package.
-_DATA = {f: f for f in glob(["expect/**", "datasets/**"])}
+#
+# Apache Avro's weather files are staged from //third_party/apache-avro
+# (sha256-pinned there, nothing committed here): the four .avro files under
+# inputs/avro/, scanned by shard scan_avro, and upstream's weather.json as
+# datasets/weather.jsonl, which test_corpus checks against the schema
+# scan_avro declares. A file under inputs/ that datasets.mojo does not
+# register is refused, like an orphan under expect/.
+_DATA = {f: f for f in glob(["expect/**", "datasets/**", "inputs/**"])}
+
+_DATA.update({
+    "datasets/weather.jsonl": "//third_party/apache-avro:weather.json",
+    "inputs/avro/weather-deflate.avro": "//third_party/apache-avro:weather-deflate.avro",
+    "inputs/avro/weather-snappy.avro": "//third_party/apache-avro:weather-snappy.avro",
+    "inputs/avro/weather-zstd.avro": "//third_party/apache-avro:weather-zstd.avro",
+    "inputs/avro/weather.avro": "//third_party/apache-avro:weather.avro",
+})
 
 mojo_library(
     name = "komira_plan_conformance",

@@ -1,0 +1,15 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: weather-zstd.avro (codec zstandard) holds the same five records as
+# weather.avro; these are the rows of upstream Apache Avro's weather.json
+# (not komira's output), which upstream's DataFileTests.cc checks against
+# every one of the four files. The block codec is not part of the content:
+# the rows equal full_scan's. No NULL (§7.13: Avro carries NULL explicitly).
+# No sort: compared as a multiset (§4.8).
+station:string	time:int64	temp:int32
+011990-99999	-619524000000	0
+011990-99999	-619506000000	22
+011990-99999	-619484400000	-11
+012650-99999	-655531200000	111
+012650-99999	-655509600000	78
