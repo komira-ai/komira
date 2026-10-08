@@ -296,6 +296,12 @@ def test_another_scheme_is_a_bare_challenge() raises:
     cases.append(String("Basic dXNlcjpwYXNz, Basic dXNlcjpwYXNz"))
     cases.append(String("Bearerx ") + good)
     cases.append(String("Basic"))
+    # Schemes holding RFC 9110 tchar specials ("-" and the rest of the set
+    # beyond letters and digits) are tokens, so another scheme, not
+    # malformed.
+    cases.append(String("X-Api-Key abc"))
+    cases.append(String("Hawk-1 abc"))
+    cases.append(String("A!#$%&'*+.^_`|~ abc"))
     for i in range(len(cases)):
         var rig = _MwRig(key)
         var req = _req(Optional[String](cases[i]))
@@ -326,6 +332,13 @@ def test_two_authorization_fields_are_invalid_request() raises:
     cases.append(String(", Bearer ") + good)
     cases.append(String("Bearer ") + good + String(",") + good)
     cases.append(String("bearer ") + good + String(",\tBEARER ") + good)
+    # The ONLY Bearer element follows a comma and a horizontal tab: the
+    # whitespace before an element's scheme is spaces and tabs alike.
+    cases.append(String("Basic dXNlcjpwYXNz,\tBearer ") + good)
+    # A comma inside another scheme's quoted parameter is not parsed as
+    # quoting: the element after it names Bearer, so this is classified as
+    # repeated. Fail-closed by design (module header, step 2).
+    cases.append(String('Digest username="a, Bearer b"'))
     for i in range(len(cases)):
         var rig = _MwRig(key)
         var req = _req(Optional[String](cases[i]))

@@ -34,7 +34,10 @@
 #   4. on success sets `ctx.principal` and lets the request through.
 #
 # The scheme name is compared case-insensitively. A comma list with no Bearer
-# element (`Digest a=b, c=d`, or two Basic fields folded) is another scheme.
+# element (`Digest a=b, c=d`, or two Basic fields folded) is another scheme,
+# 401. The list is split at every comma, quoted or not, so a comma inside
+# another scheme's quoted parameter (`Digest username="a, Bearer b"`) is read
+# as a Bearer element and answered 400: fail-closed by design.
 #
 # HTTP/2: komira_http_server's chained (middleware) serving path closes h2
 # connections and its h2 path runs no middleware, so no h2 request reaches
@@ -141,7 +144,13 @@ def _classify_authorization(value: String) -> Int:
     (scheme Bearer, which `bearer_token_from_header` then parses),
     `_AUTH_OTHER_SCHEME`, `_AUTH_MALFORMED` (scheme not a token) or
     `_AUTH_REPEATED`. Byte by byte: the HTTP/1 parser maps an obs-text byte
-    to a two-byte UTF-8 character, so a String slice could split one."""
+    to a two-byte UTF-8 character, so a String slice could split one.
+
+    The comma list is split at EVERY comma; quoted strings are not parsed.
+    So a comma inside another scheme's quoted parameter (`Digest
+    username="a, Bearer b"`) makes an element whose scheme is Bearer, and
+    the value is `_AUTH_REPEATED` (400). Fail-closed by design: reading
+    quotes would put a quoted-string parser in front of the gate."""
     var b = value.as_bytes()
     var n = len(b)
     # A comma list with an element whose scheme is Bearer.

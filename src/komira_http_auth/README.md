@@ -10,10 +10,16 @@ Bearer-JWT authentication for `komira_http_server`.
    says:
    - no `Authorization` header, or a credential of another scheme such as
      `Basic`: `401` with a bare `WWW-Authenticate: Bearer` and no error code
-     (the request carries no Bearer credential at all);
-   - a malformed header, or two `Authorization` fields (the HTTP/1 parser
-     folds them into `a, b`, and a Bearer token never holds a comma): `400`
-     with `WWW-Authenticate: Bearer error="invalid_request"`;
+     (the request carries no Bearer credential at all). Two `Authorization`
+     fields of which none is Bearer (two `Basic` fields, folded into
+     `Basic a, Basic b`) are another scheme too: `401`;
+   - a malformed header, or a comma list one of whose elements has the
+     scheme `Bearer` (the HTTP/1 parser folds two `Authorization` fields into
+     `a, b`, and a Bearer token never holds a comma): `400` with
+     `WWW-Authenticate: Bearer error="invalid_request"`. The list is split at
+     every comma, quoted or not, so a comma inside another scheme's quoted
+     parameter (`Digest username="a, Bearer b"`) is also read as a second,
+     Bearer credential and gets `400`. That is fail-closed by design;
 3. asks the verifier `V`. If it has no usable keys (see stale keys below),
    the answer is `503` with `Retry-After`, the number of seconds until the
    next JWKS refresh may start, and no challenge: the token was not judged.

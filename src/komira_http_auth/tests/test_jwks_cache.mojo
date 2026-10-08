@@ -12,7 +12,9 @@
 # Stale keys are bounded: a set past its expiry plus max-stale, with every
 # refresh failing, refuses every token as keys_unavailable with the rest of
 # the refetch window as its retry-after, and the first successful refresh
-# recovers; a set never fetched is keys_unavailable too.
+# recovers; a set never fetched is keys_unavailable too. A 200 whose document
+# is refused (empty keys, repeated kid, invalid JSON) does not renew
+# freshness: the bound still ends at the last good set's expiry + max-stale.
 # =============================================================================
 
 from std.pathlib import Path
@@ -536,6 +538,52 @@ def test_max_stale_zero_refuses_as_soon_as_a_refresh_fails() raises:
     assert_equal(rig.verifier.verify(tok).reason, String(REASON_OK))
     rig.clock.set(NOW + 61)
     assert_equal(rig.verifier.verify(tok).reason, String(REASON_KEYS_UNAVAILABLE))
+
+
+def _refused_200_does_not_renew_freshness(bad_body: String) raises:
+    # Fetch 1 at NOW publishes KID with max-age=0 (expiry NOW); every later
+    # fetch is a 200 whose body is refused, sent with max-age=3600. A refused
+    # document must not move the expiry: only a set that REPLACES the keys
+    # renews freshness. Had it renewed, KID would stay usable past
+    # NOW + max-stale (3600 s default).
+    var key = _key()
+    var rig = _Rig(_config())
+    rig.fetcher.add(200, String("max-age=0"), rsa_jwks_json(key, KID))
+    for _ in range(3):
+        rig.fetcher.add(200, String("max-age=3600"), bad_body)
+    assert_equal(_verify_now(rig, key).reason, String(REASON_OK))
+    # Stale; the refresh returns the refused 200; inside max-stale.
+    rig.clock.set(NOW + 61)
+    assert_equal(_verify_now(rig, key).reason, String(REASON_OK), bad_body)
+    assert_equal(rig.fetcher.fetch_count(), 2, bad_body)
+    # Exactly expiry + max-stale: still in use, and still stale (refetched).
+    rig.clock.set(NOW + 3600)
+    assert_equal(_verify_now(rig, key).reason, String(REASON_OK), bad_body)
+    assert_equal(rig.fetcher.fetch_count(), 3, bad_body)
+    # One second past it: refused, whatever the refused 200s said.
+    rig.clock.set(NOW + 3601)
+    var past = _verify_now(rig, key)
+    assert_equal(past.reason, String(REASON_KEYS_UNAVAILABLE), bad_body)
+    assert_equal(past.retry_after_s, 59, bad_body)
+    # The next window's refresh is refused again: still unavailable.
+    rig.clock.set(NOW + 3660)
+    var again = _verify_now(rig, key)
+    assert_equal(again.reason, String(REASON_KEYS_UNAVAILABLE), bad_body)
+    assert_equal(rig.fetcher.fetch_count(), 4, bad_body)
+    assert_equal(rig.verifier.key_count(), 1, "the set is kept, not used")
+
+
+def test_a_refused_200_document_does_not_renew_freshness() raises:
+    var key = _key()
+    var other = rsa_jwk_json(key, String("other"))
+    # No keys at all.
+    _refused_200_does_not_renew_freshness(String('{"keys":[]}'))
+    # Two keys under one kid.
+    _refused_200_does_not_renew_freshness(
+        String('{"keys":[') + other + String(",") + other + String("]}")
+    )
+    # Not JSON: cut short.
+    _refused_200_does_not_renew_freshness(String('{"keys":[') + other)
 
 
 # =============================================================================

@@ -393,6 +393,9 @@ def test_jwks_max_stale_flag() raises:
     want.append(Int64(86400))
     cases.append(String("86400s"))
     want.append(Int64(86400))
+    # Leading zeros are digits like any other: 0001h is one hour.
+    cases.append(String("0001h"))
+    want.append(Int64(3600))
     for i in range(len(cases)):
         var cfg = parse_bearer_jwt_flags(
             _plus(_base(), String("--jwks-max-stale=") + cases[i])
