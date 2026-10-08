@@ -504,12 +504,12 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_async_api"
+  name: "komira_collections"
   build_system: "buck2"
-  args: "//src/komira_async_api:komira_async_api_conda[release]"
+  args: "//src/komira_collections:komira_collections_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_async_api:komira_async_api_conda"
+  targets: "//src/komira_collections:komira_collections_conda"
 }
 
 artifacts {
@@ -522,12 +522,30 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_collections"
+  name: "komira_supervisor_proto"
   build_system: "buck2"
-  args: "//src/komira_collections:komira_collections_conda[release]"
+  args: "//src/komira_supervisor_proto:komira_supervisor_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_collections:komira_collections_conda"
+  targets: "//src/komira_supervisor_proto:komira_supervisor_proto_conda"
+}
+
+artifacts {
+  name: "komira_plan_proto"
+  build_system: "buck2"
+  args: "//src/komira_plan_proto:komira_plan_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_plan_proto:komira_plan_proto_conda"
+}
+
+artifacts {
+  name: "komira_async_api"
+  build_system: "buck2"
+  args: "//src/komira_async_api:komira_async_api_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_async_api:komira_async_api_conda"
 }
 
 artifacts {
@@ -555,24 +573,6 @@ artifacts {
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_dynamic_filter:komira_dynamic_filter_conda"
-}
-
-artifacts {
-  name: "komira_plan_proto"
-  build_system: "buck2"
-  args: "//src/komira_plan_proto:komira_plan_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_plan_proto:komira_plan_proto_conda"
-}
-
-artifacts {
-  name: "komira_supervisor_proto"
-  build_system: "buck2"
-  args: "//src/komira_supervisor_proto:komira_supervisor_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_supervisor_proto:komira_supervisor_proto_conda"
 }
 
 artifacts {
@@ -665,21 +665,21 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_kafka_server/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_async_api/manifest.json"
+  args: "{release_dir}/komira_collections/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_broker_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_collections/manifest.json"
+  args: "{release_dir}/komira_supervisor_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_plan_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_async_api/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_libc/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_buffer/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_dynamic_filter/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_plan_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_supervisor_proto/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_native/manifest.json"
   args: "--license"

@@ -220,6 +220,16 @@ test that holds kci's copy equal to it).
 `komira_pack conda-install` and `conda_prefix` ([`conda_prefix.bzl`](conda_prefix.bzl))
 make an environment from packages by their run requirements, for a build
 action to run programs in.
+
+With coverage on (`-c komira.coverage=true`), both copies of a conda package
+(its default output and `[release]`) also wait for the library's coverage runs
+and its coverage gate, which the library hands over in its
+`MojoCoverageGateInfo` ([The build gate](../coverage/README.md#the-build-gate)):
+what ships is the one target a library's coverage blocks, a refused package
+included, and the library and its dependents build whatever their coverage. A
+bundle, a tarball and an OCI image do not wait for the coverage of the
+libraries their program is built from.
+
 `conda_manifest_kci` ([`manifest_probe/BUCK`](manifest_probe/BUCK)) is the build
 gate between the two: it builds one real package and reads its manifest and
 its `metadata.json` with kci's parsers (of the kind the target states), so

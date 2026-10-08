@@ -890,9 +890,7 @@ the same README in a library with `conda = False`, builds.
 [the repository lint tests](lint_tests.md#40-readme-api-coverage).
 
 ## 41. Coverage builds
-
-[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
-binary with line tables per `test_srcs` entry and leave every release action as it is; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0 binary per test and move no release action of a library, only its conda package's joins; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
 ## 42. Pointer lint
 
@@ -932,10 +930,7 @@ the tree, and must fail naming it.
 ```
 
 ## 43. Coverage runs
-
-Each test's coverage binary also runs under kcov through the release gate's runner
-([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
-[`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+Each test's coverage binary also runs under kcov ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`; [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
 
 ## 44. Public boundary
 
@@ -993,8 +988,12 @@ querying its attributes, so narrowing it fails.
 
 ## 45. The layout of src/
 
-`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`. The test is in
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in
+`docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
 [the repository lint tests](lint_tests.md#45-the-layout-of-src).
+
+## 46. Coverage gate
+With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
 
 ## Diagnostics
 

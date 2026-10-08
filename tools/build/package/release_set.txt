@@ -48,14 +48,14 @@ member komira_validation_run
 member komira_test_run_id
 member komira_test_verdict
 member komira_kafka_server
-member komira_async_api
-member komira_broker_proto
 member komira_collections
+member komira_broker_proto
+member komira_supervisor_proto
+member komira_plan_proto
+member komira_async_api
 member komira_libc
 member komira_buffer
 member komira_dynamic_filter
-member komira_plan_proto
-member komira_supervisor_proto
 member komira_native
 license Apache-2.0
 summary Every komira library of one release.

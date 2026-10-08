@@ -142,7 +142,8 @@ def test_report_end_to_end() raises:
     assert_equal(Int(result.get(String("diff")).get(String("uncovered")).as_int64()), 2)
     assert_equal(result.get(String("touched_packages")).element_at(0).as_string(), "src/alpha")
     var findings = result.get(String("findings"))
-    assert_equal(findings.array_len(), 6)
+    # src/beta: every line covered, no branch record, so BranchNotMeasured.
+    assert_equal(findings.array_len(), 7)
     var unmeasured = 0
     for i in range(findings.array_len()):
         var f = findings.element_at(i)
@@ -314,6 +315,75 @@ def test_input_errors_exit_1() raises:
     assert_equal(run(_with(nopkg^, String("--package"), String("src/nothere"))), EXIT_INPUT)
 
 
+def test_gate_with_no_report() raises:
+    # A library with no test has no report: `gate` takes none (`report`
+    # still needs one, test_usage_errors_exit_2). The gated package is
+    # measured all the same: NotMeasured, its files counted from their
+    # source, exit 3 in enforce mode and 0 in census.
+    var dir = _tmp(String("gate_none"))
+    var a = _without(_without(_without(_gate(dir, String("enforce")), String("--cobertura")), String("--cobertura")), String("--mutants"))
+    assert_equal(run(a), EXIT_GATE)
+    var result = parse_json_value(read_text(dir + "/result.json"))
+    assert_equal(result.get(String("conclusion")).as_string(), "failure")
+    var kinds = String("")
+    var findings = result.get(String("findings"))
+    for i in range(findings.array_len()):
+        kinds += findings.element_at(i).get(String("kind")).as_string() + String(" ")
+    assert_equal(kinds, "BelowTarget MissingRow NotMeasured UnmeasuredFile UnmeasuredFile ")
+    assert_true(read_text(dir + "/summary.md").find("- **NotMeasured** `src/alpha`: ") >= 0)
+    var cdir = _tmp(String("gate_none_census"))
+    var c = _without(_without(_without(_gate(cdir, String("census")), String("--cobertura")), String("--cobertura")), String("--mutants"))
+    assert_equal(run(c), EXIT_OK)
+    assert_equal(parse_json_value(read_text(cdir + "/result.json")).get(String("conclusion")).as_string(), "neutral")
+
+
+def test_gate_test_sources() raises:
+    # `gate --test-source P` sets aside a welded test outside the package's
+    # tests/ (here src/alpha/z.mojo): with no report, z.mojo is no longer a
+    # file no test compiled, so one UnmeasuredFile goes. A path that is no
+    # repository file, or a file of another package, is an input error;
+    # `report` has no such flag.
+    var dir = _tmp(String("gate_test_source"))
+    var base = _without(_without(_without(_gate(dir, String("census")), String("--cobertura")), String("--cobertura")), String("--mutants"))
+    assert_equal(run(_with(base.copy(), String("--test-source"), String("src/alpha/z.mojo"))), EXIT_OK)
+    var kinds = String("")
+    var result = parse_json_value(read_text(dir + "/result.json"))
+    var findings = result.get(String("findings"))
+    for i in range(findings.array_len()):
+        kinds += findings.element_at(i).get(String("kind")).as_string() + String(" ")
+    assert_equal(kinds, "BelowTarget MissingRow NotMeasured UnmeasuredFile ")
+    assert_equal(run(_with(base.copy(), String("--test-source"), String("src/alpha/gone.mojo"))), EXIT_INPUT)
+    assert_equal(run(_with(base.copy(), String("--test-source"), String("src/beta/c.mojo"))), EXIT_INPUT)
+    assert_equal(run(_with(_report(_tmp(String("report_test_source"))), String("--test-source"), String("src/alpha/z.mojo"))), EXIT_USAGE)
+
+
+def test_report_file_names() raises:
+    # `[PKGDIR=]FILE`: the package directory is before the first `=`; a file
+    # name holding `=` is given as `=FILE`, which is the same as no PKGDIR.
+    var a = List[String]()
+    a.append("gate")
+    a.extend(_common(_tmp(String("file_names"))))
+    a.append("--package")
+    a.append("src/alpha")
+    a.append("--mode")
+    a.append("census")
+    a.append("--cobertura")
+    a.append("=out/a=b.xml")
+    a.append("--cobertura")
+    a.append("plain.xml")
+    a.append("--cobertura")
+    a.append("src/x/=c.xml")
+    var p = parse_args(a)
+    assert_equal(len(p.reports), 5)
+    assert_equal(p.reports[0].pkgdir, "src/alpha")
+    assert_equal(p.reports[2].pkgdir, "")
+    assert_equal(p.reports[2].file, "out/a=b.xml")
+    assert_equal(p.reports[3].pkgdir, "")
+    assert_equal(p.reports[3].file, "plain.xml")
+    assert_equal(p.reports[4].pkgdir, "src/x")
+    assert_equal(p.reports[4].file, "c.xml")
+
+
 def main() raises:
     test_report_end_to_end()
     test_gate_entry_is_the_report_entry()
@@ -321,4 +391,7 @@ def main() raises:
     test_annotation_cap_and_full_list()
     test_usage_errors_exit_2()
     test_input_errors_exit_1()
+    test_gate_with_no_report()
+    test_gate_test_sources()
+    test_report_file_names()
     print("test_cli: PASS")
