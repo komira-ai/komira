@@ -198,7 +198,9 @@ git_() {
     # as one space; grep without -q reads all its input, so tr is never cut off
     # by SIGPIPE under pipefail) and (2) the NOTICE, read as sentences, names
     # each file, and every sentence naming a file says that row's claim and no
-    # other row's.
+    # other row's. The split leaves the last sentence with no newline (tr
+    # turns the NOTICE's own into a space), so the reader also takes a last
+    # line that read reports as unterminated.
     says() {
         tr -s ' \t\n' '   ' <"$g/$1" | grep -F "$2" >/dev/null || {
             echo "git_build: git's $1 does not say: $2" >&2
@@ -225,7 +227,7 @@ EOF
     while IFS='|' read -r file sentence claim; do
         says "$file" "$sentence"
         named=0
-        while IFS= read -r s; do
+        while IFS= read -r s || [ -n "$s" ]; do
             case "$s" in *"$file"*) ;; *) continue ;; esac
             named=1
             case "$s" in
