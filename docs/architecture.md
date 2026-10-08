@@ -281,7 +281,7 @@ dependency order is the order of the rows.
 | module | what it is |
 |---|---|
 | [`komira_calendar_proto`](../src/komira_calendar_proto/) | the resources of a simple calendar service's JSON API, `komira.calendar.v1`, generated: `Calendar`, `Event` (all-day or timed in an IANA zone), a structured `Recurrence` rule (not RRULE text), `Reminder`, `OccurrenceOverride` and the `ErrorResponse` envelope. |
-| [`komira_calendar`](../src/komira_calendar/) | a simple calendar's model and validation over `komira_calendar_proto`: `check_calendar`, `check_event` (timing, the recurrence rule, removed occurrences, reminders) and `check_override`, each refusal a stable code, a JSON field path and a sentence; the local date and date-time text forms. No zone rules, no expansion, no store. |
+| [`komira_calendar`](../src/komira_calendar/) | a simple calendar's model and validation over `komira_calendar_proto`: `check_calendar`, `check_event` (timing, the recurrence rule, removed occurrences, reminders) and `check_override`, each refusal a stable code, a JSON field path and a sentence; the local date and date-time text forms; `expand` and `series_span`, an event's occurrences in a window and its whole span, in local time. No zone rules, no store. |
 
 ### CI and deploy (`kci`)
 

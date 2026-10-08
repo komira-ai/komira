@@ -1,0 +1,306 @@
+# =============================================================================
+# test_expand_rules.mojo: each part of the structured rule, the window, and
+# series_span, against dates derived by hand.
+#
+# Calendar facts the rows rely on: 2026-10-30 is a Friday and the last one of
+# October; the last Fridays of the next five months are 2026-11-27,
+# 2026-12-25, 2027-01-29, 2027-02-26 and 2027-03-26. November 2026 starts on a
+# Sunday. November, February, April, June, September have no 31st. 2028,
+# 2032 and 2036 are leap years; 2029 to 2031 and 2033 to 2035 are not.
+#
+# Each test names the defect it catches.
+# =============================================================================
+
+from std.testing import assert_equal, assert_false, assert_true
+
+from komira_calendar import (
+    MAX_WINDOW_OCCURRENCES,
+    OPEN_END,
+    Occurrence,
+    SeriesSpan,
+    expand,
+    parse_local_date,
+    parse_local_datetime,
+    series_span,
+)
+from komira_calendar_proto.calendar import Event
+from komira_datetime import format_iso_date
+from komira_proto_codec import decode_json
+
+
+def _at(text: String) raises -> Int:
+    return parse_local_datetime(text).seconds()
+
+
+def _two(v: Int) -> String:
+    return (String("0") if v < 10 else String("")) + String(v)
+
+
+def _text(seconds: Int) raises -> String:
+    var sod = seconds % 86400
+    return (
+        format_iso_date(seconds // 86400)
+        + "T"
+        + _two(sod // 3600)
+        + ":"
+        + _two(sod // 60 % 60)
+        + ":"
+        + _two(sod % 60)
+    )
+
+
+def _starts(occurrences: List[Occurrence]) raises -> String:
+    var out = String("")
+    for i in range(len(occurrences)):
+        if i > 0:
+            out += " "
+        out += _text(occurrences[i].start)
+    return out
+
+
+def _timed(start: String, duration: Int, recurrence: String, exdates: String = "") raises -> Event:
+    var text = '{"title":"t","start":"' + start + '","timeZone":"America/New_York","durationSeconds":' + String(
+        duration
+    )
+    if recurrence.byte_length() > 0:
+        text += ',"recurrence":' + recurrence
+    if exdates.byte_length() > 0:
+        text += ',"exdates":' + exdates
+    return decode_json[Event](text + "}")
+
+
+def _all_day(start_date: String, days: Int, recurrence: String) raises -> Event:
+    return decode_json[Event](
+        '{"title":"d","showWithoutTime":true,"startDate":"'
+        + start_date
+        + '","days":'
+        + String(days)
+        + ',"recurrence":'
+        + recurrence
+        + "}"
+    )
+
+
+# Wide enough for every finite series below.
+def _everything(e: Event) raises -> List[Occurrence]:
+    return expand(e, _at("2026-01-01T00:00:00"), _at("2040-01-01T00:00:00"))
+
+
+def test_last_friday() raises:
+    # Catches the last weekday (-1) read as the first.
+    var e = _timed(
+        "2026-10-30T15:00:00",
+        3600,
+        '{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"FRIDAY","count":6}',
+    )
+    assert_equal(
+        _starts(_everything(e)),
+        "2026-10-30T15:00:00 2026-11-27T15:00:00 2026-12-25T15:00:00 2027-01-29T15:00:00"
+        + " 2027-02-26T15:00:00 2027-03-26T15:00:00",
+    )
+
+
+def test_interval() raises:
+    # Catches an ignored interval, on a day period and on a week period.
+    var daily = _timed("2026-11-02T08:00:00", 600, '{"freq":"DAILY","interval":3,"count":4}')
+    assert_equal(
+        _starts(_everything(daily)), "2026-11-02T08:00:00 2026-11-05T08:00:00 2026-11-08T08:00:00 2026-11-11T08:00:00"
+    )
+    var fortnightly = _timed(
+        "2026-11-02T08:00:00", 600, '{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY","THURSDAY"],"count":5}'
+    )
+    assert_equal(
+        _starts(_everything(fortnightly)),
+        "2026-11-02T08:00:00 2026-11-05T08:00:00 2026-11-16T08:00:00 2026-11-19T08:00:00 2026-11-30T08:00:00",
+    )
+
+
+def test_until_on_a_picked_day_is_kept() raises:
+    # Catches an exclusive until: the last Thursday is the until day itself.
+    var e = _timed(
+        "2026-11-05T18:30:00", 3600, '{"freq":"WEEKLY","interval":1,"weekdays":["THURSDAY"],"until":"2026-11-26"}'
+    )
+    assert_equal(
+        _starts(_everything(e)), "2026-11-05T18:30:00 2026-11-12T18:30:00 2026-11-19T18:30:00 2026-11-26T18:30:00"
+    )
+
+
+def test_month_day_skips_short_months() raises:
+    # Catches the 31st clamped to a shorter month's last day.
+    var e = _timed("2026-10-31T12:00:00", 600, '{"freq":"MONTHLY","interval":1,"monthDay":31,"count":4}')
+    assert_equal(
+        _starts(_everything(e)), "2026-10-31T12:00:00 2026-12-31T12:00:00 2027-01-31T12:00:00 2027-03-31T12:00:00"
+    )
+
+
+def test_yearly_on_the_leap_day() raises:
+    # Catches 29 February moved to 28 February (or 1 March) in a common year.
+    var e = _all_day("2028-02-29", 1, '{"freq":"YEARLY","interval":1,"count":3}')
+    assert_equal(
+        _starts(_everything(e)), "2028-02-29T00:00:00 2032-02-29T00:00:00 2036-02-29T00:00:00"
+    )
+
+
+def test_weekly_from_an_unpicked_day() raises:
+    # Catches the first day counted as an occurrence when the rule does not
+    # pick it, and a picked weekday before the first day kept.
+    var e = _timed("2026-11-04T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY","FRIDAY"],"count":3}')
+    assert_equal(_starts(_everything(e)), "2026-11-06T10:00:00 2026-11-09T10:00:00 2026-11-13T10:00:00")
+
+
+def test_count_includes_removed_occurrences() raises:
+    # Catches a count that skips excluded occurrences: three are counted, the
+    # second is removed, two remain.
+    var e = _timed("2026-11-02T09:00:00", 600, '{"freq":"DAILY","interval":1,"count":3}', '["2026-11-03T09:00:00"]')
+    assert_equal(_starts(_everything(e)), "2026-11-02T09:00:00 2026-11-04T09:00:00")
+
+
+def test_all_day_occurrences() raises:
+    # Two-day all-day occurrences; a window on the second day still finds one.
+    var e = _all_day("2026-12-24", 2, '{"freq":"YEARLY","interval":1,"count":2}')
+    var all = _everything(e)
+    assert_equal(len(all), 2)
+    assert_true(all[0] == Occurrence(_at("2026-12-24T00:00:00"), _at("2026-12-26T00:00:00")))
+    assert_true(all[1] == Occurrence(_at("2027-12-24T00:00:00"), _at("2027-12-26T00:00:00")))
+    var second_day = expand(e, _at("2026-12-25T12:00:00"), _at("2026-12-25T13:00:00"))
+    assert_equal(_starts(second_day), "2026-12-24T00:00:00")
+
+
+def test_window_on_an_open_series() raises:
+    # A series without an end, cut by the window, far from its first day.
+    var e = _timed("2026-11-02T09:00:00", 1800, '{"freq":"DAILY","interval":1}')
+    assert_equal(
+        _starts(expand(e, _at("2030-06-01T00:00:00"), _at("2030-06-04T00:00:00"))),
+        "2030-06-01T09:00:00 2030-06-02T09:00:00 2030-06-03T09:00:00",
+    )
+    # Overlap, not containment: an occurrence that started before the window
+    # and ends inside it is in; one starting at the window's end is out.
+    assert_equal(
+        _starts(expand(e, _at("2030-06-01T09:15:00"), _at("2030-06-02T09:00:00"))), "2030-06-01T09:00:00"
+    )
+    assert_equal(len(expand(e, _at("9000-01-01T00:00:00"), _at("9000-01-02T00:00:00"))), 1)
+    # Nothing after 9999-12-31.
+    var last_day = parse_local_date("9999-12-31")
+    assert_equal(
+        _starts(expand(e, last_day * 86400, (last_day + 3) * 86400)), "9999-12-31T09:00:00"
+    )
+
+
+def test_window_reaches_back_by_the_length() raises:
+    # Catches a window search that starts at the window's own day: five-day
+    # occurrences from the 16th to the 20th all overlap the 20th at noon.
+    var e = _timed("2026-11-02T09:00:00", 5 * 86400, '{"freq":"DAILY","interval":1}')
+    assert_equal(
+        _starts(expand(e, _at("2026-11-20T12:00:00"), _at("2026-11-20T13:00:00"))),
+        "2026-11-16T09:00:00 2026-11-17T09:00:00 2026-11-18T09:00:00 2026-11-19T09:00:00 2026-11-20T09:00:00",
+    )
+
+
+def test_single_event() raises:
+    var e = _timed("2026-11-02T09:00:00", 3600, "")
+    assert_equal(_starts(expand(e, _at("2026-11-02T09:59:59"), _at("2026-11-03T00:00:00"))), "2026-11-02T09:00:00")
+    assert_equal(len(expand(e, _at("2026-11-02T10:00:00"), _at("2026-11-03T00:00:00"))), 0)
+    assert_equal(len(expand(e, _at("2026-11-01T00:00:00"), _at("2026-11-02T09:00:00"))), 0)
+
+
+def _span(e: Event) raises -> SeriesSpan:
+    var s = series_span(e)
+    if not s:
+        raise Error("no span")
+    return s.value()
+
+
+def test_series_span() raises:
+    # Catches an open series given 0 (or any finite end) instead of OPEN_END,
+    # and a counted series ending anywhere but its last occurrence's end.
+    var open = _timed("2026-11-02T09:00:00", 1800, '{"freq":"WEEKLY","interval":1}')
+    assert_true(_span(open) == SeriesSpan(_at("2026-11-02T09:00:00"), OPEN_END))
+    assert_equal(OPEN_END, Int(Int64.MAX))
+    var counted = _timed("2026-11-02T09:00:00", 3600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"],"count":3}')
+    assert_true(_span(counted) == SeriesSpan(_at("2026-11-02T09:00:00"), _at("2026-11-16T10:00:00")))
+    var occurrences = _everything(counted)
+    assert_equal(_span(counted).last_end, occurrences[len(occurrences) - 1].end)
+    # An until that is not a picked day: the last Friday before it.
+    var last_friday = _timed(
+        "2026-10-30T15:00:00",
+        3600,
+        '{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"FRIDAY","until":"2027-01-31"}',
+    )
+    assert_true(_span(last_friday) == SeriesSpan(_at("2026-10-30T15:00:00"), _at("2027-01-29T16:00:00")))
+    # Backwards over a month the rule skips.
+    var month_end = _timed(
+        "2026-10-31T12:00:00", 600, '{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2027-02-28"}'
+    )
+    assert_true(_span(month_end) == SeriesSpan(_at("2026-10-31T12:00:00"), _at("2027-01-31T12:10:00")))
+    # The first occurrence is the first picked day, not the event's start.
+    var unpicked = _timed("2026-11-04T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"],"count":2}')
+    assert_true(_span(unpicked) == SeriesSpan(_at("2026-11-09T10:00:00"), _at("2026-11-16T10:10:00")))
+    # An until before the first picked day: no occurrence, no span.
+    var none = _timed(
+        "2026-11-04T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"],"until":"2026-11-08"}'
+    )
+    assert_false(Bool(series_span(none)))
+    assert_equal(len(_everything(none)), 0)
+    var single = _all_day("2026-12-24", 2, '{"freq":"DAILY","interval":1,"count":1}')
+    assert_true(_span(single) == SeriesSpan(_at("2026-12-24T00:00:00"), _at("2026-12-26T00:00:00")))
+    var one_off = _timed("2026-11-02T09:00:00", 3600, "")
+    assert_true(_span(one_off) == SeriesSpan(_at("2026-11-02T09:00:00"), _at("2026-11-02T10:00:00")))
+
+
+def _refuses(e: Event, window_start: Int, window_end: Int, message: String) raises:
+    try:
+        _ = expand(e, window_start, window_end)
+    except err:
+        assert_equal(String(err), message)
+        return
+    raise Error("expanded; want: " + message)
+
+
+def test_refusals() raises:
+    var both = _timed("2026-11-02T09:00:00", 600, '{"freq":"DAILY","interval":1,"count":2,"until":"2026-11-30"}')
+    var lo = _at("2026-11-01T00:00:00")
+    var hi = _at("2026-12-01T00:00:00")
+    _refuses(
+        both,
+        lo,
+        hi,
+        "the event is refused: COUNT_WITH_UNTIL at recurrence.count: a recurrence ends by count or by until, not both",
+    )
+    try:
+        _ = series_span(both)
+        raise Error("series_span accepted a refused event")
+    except err:
+        assert_equal(
+            String(err),
+            "the event is refused: COUNT_WITH_UNTIL at recurrence.count: a recurrence ends by count or by until,"
+            + " not both",
+        )
+    var daily = _timed("2026-11-02T09:00:00", 600, '{"freq":"DAILY","interval":1}')
+    _refuses(daily, hi, hi, "the window is empty: its end is not after its start")
+    # The cap: exactly MAX_WINDOW_OCCURRENCES fit, one more is refused.
+    var first = parse_local_date("2026-11-02") * 86400
+    assert_equal(len(expand(daily, first, first + MAX_WINDOW_OCCURRENCES * 86400)), MAX_WINDOW_OCCURRENCES)
+    _refuses(
+        daily,
+        first,
+        first + (MAX_WINDOW_OCCURRENCES + 1) * 86400,
+        "the window holds more than 10000 occurrences; narrow it",
+    )
+
+
+def main() raises:
+    print("test_expand_rules: the structured rule, the window and series_span")
+    test_last_friday()
+    test_interval()
+    test_until_on_a_picked_day_is_kept()
+    test_month_day_skips_short_months()
+    test_yearly_on_the_leap_day()
+    test_weekly_from_an_unpicked_day()
+    test_count_includes_removed_occurrences()
+    test_all_day_occurrences()
+    test_window_on_an_open_series()
+    test_window_reaches_back_by_the_length()
+    test_single_event()
+    test_series_span()
+    test_refusals()
+    print("ALL EXPANSION RULE TESTS PASSED")
