@@ -215,10 +215,24 @@ def chat_err(var msg: String) -> Error:
     return Error(String("komira_chat_store: ") + msg)
 
 
+# The largest page size a pager accepts.
+comptime MAX_PAGE_SIZE: Int = 10_000
+
+
 def require_page_size(n: Int, name: StaticString) raises:
-    """Refuse a page size below 1: such a page holds nothing, so following
-    it never moves on."""
+    """Refuse a page size below 1 or above `MAX_PAGE_SIZE`. A page below 1
+    holds nothing, so following it never moves on. A pager reads one row
+    more than its page through a `UInt32` limit, which wraps for a size
+    near or above 2^32 (`Int.MAX + 1` wraps and reads as a limit of 0)."""
     if n < 1:
         raise chat_err(
             String(name) + String(" must be at least 1, got ") + String(n)
+        )
+    if n > MAX_PAGE_SIZE:
+        raise chat_err(
+            String(name)
+            + String(" must be at most ")
+            + String(MAX_PAGE_SIZE)
+            + String(", got ")
+            + String(n)
         )

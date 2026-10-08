@@ -295,8 +295,8 @@ def _page_refs(page: MentionPage) -> String:
 def check_mention_paging[T: ChatTarget](mut t: T) raises:
     """Following `next_before_ms` from page to page returns every mention
     exactly once, when a page ends inside a millisecond and when one
-    millisecond holds more mentions than a page, and orders one
-    millisecond's mentions by channel, then seq."""
+    millisecond holds more mentions than a page (the last page included),
+    and orders one millisecond's mentions by channel, then seq."""
     var s = ChatStore[T.DB, NoSendProbe](t.fresh(), NoSendProbe())
     var rt = new_rt()
     ref reactor = rt.reactor()
@@ -344,6 +344,23 @@ def check_mention_paging[T: ChatTarget](mut t: T) raises:
     var p6 = s.mentions[Rt](reactor, String("u-bob"), p5.next_before_ms, 2)
     assert_equal(_page_seqs(p6), String("[14]"), "page 6")
     assert_equal(p6.next_before_ms, Int64(0), "page 6 is the last")
+    # One page holding every mention: the 3-mention and 4-mention
+    # milliseconds come back in seq order whatever order the backend
+    # returns ties in (a sort that moves a row at most one place fails).
+    var whole = s.mentions[Rt](reactor, String("u-bob"), T0 + 1000, 50)
+    assert_equal(_page_seqs(whole), String("[3,4,5,6,7,8,9,10,11,12,13,14]"), "one page of every mention")
+    assert_equal(whole.next_before_ms, Int64(0), "one page is the last")
+    # The oldest millisecond holds more than two pages: the page is all of
+    # it, and it is the last page.
+    _ = s.create_channel[Rt](
+        reactor, String("c-d"), CHANNEL_PUBLIC, String("d"), String(""),
+        String("u-alice"), ids("u-dee"), T0,
+    )
+    for _ in range(5):
+        _ = s.send_message[Rt](reactor, String("c-d"), String("u-alice"), String("@dee"), Int64(0), String(), ids("u-dee"), False, no_ids(), T0 + 3)
+    var last = s.mentions[Rt](reactor, String("u-dee"), T0 + 1000, 2)
+    assert_equal(_page_seqs(last), String("[3,4,5,6,7]"), "the oldest millisecond, whole")
+    assert_equal(last.next_before_ms, Int64(0), "the oldest millisecond is the last page")
     # One page of 1 over ms 30: both 30s, and older mentions remain.
     var one = s.mentions[Rt](reactor, String("u-bob"), T0 + 31, 1)
     assert_equal(_page_seqs(one), String("[4,5]"), "a millisecond is never split")

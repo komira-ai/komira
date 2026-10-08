@@ -18,6 +18,7 @@ from komira_chat_store import (
     EVENT_EDIT,
     EVENT_JOIN,
     EVENT_MESSAGE,
+    MAX_PAGE_SIZE,
     ChatEvent,
     ChatStore,
     NoSendProbe,
@@ -417,8 +418,9 @@ def _pager_err[
 
 
 def check_page_size_refused[T: ChatTarget](mut t: T) raises:
-    """Every pager refuses a page size below 1 by name: such a page holds
-    nothing, and the mentions pager would index past an empty page."""
+    """Every pager refuses, by name, a page size below 1 (such a page holds
+    nothing, and the mentions pager would index past an empty page) or above
+    MAX_PAGE_SIZE (the row limit would wrap), and accepts MAX_PAGE_SIZE."""
     var s = ChatStore[T.DB, NoSendProbe](t.fresh(), NoSendProbe())
     var rt = new_rt()
     ref reactor = rt.reactor()
@@ -440,3 +442,22 @@ def check_page_size_refused[T: ChatTarget](mut t: T) raises:
                 String("komira_chat_store: ") + names[which] + String(" must be at least 1, got ") + String(n),
                 String("pager ") + String(which) + String(", size ") + String(n),
             )
+        # Above the cap: a pager reads one more row than its page through a
+        # UInt32 limit, so a size of Int.MAX or 2^32 - 1 would read 0 rows and
+        # 2^32 would read 1, each a short page reported as the last.
+        var big = List[Int]()
+        big.append(MAX_PAGE_SIZE + 1)
+        big.append(4294967295)
+        big.append(4294967296)
+        big.append(Int.MAX)
+        for k in range(len(big)):
+            assert_err(
+                _pager_err(s, reactor, which, big[k]),
+                String("komira_chat_store: ") + names[which] + String(" must be at most ") + String(MAX_PAGE_SIZE) + String(", got ") + String(big[k]),
+                String("pager ") + String(which) + String(", size ") + String(big[k]),
+            )
+        assert_equal(
+            _pager_err(s, reactor, which, MAX_PAGE_SIZE),
+            returned(),
+            String("pager ") + String(which) + String(" at the cap"),
+        )

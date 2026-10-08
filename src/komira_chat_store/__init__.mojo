@@ -65,5 +65,6 @@ from .schema import (
     T_USERS,
 )
 from .erasure import finish_sql_erasure, prepare_sql_connection
+from .ops import MAX_PAGE_SIZE
 from .store import ChatStore
 from .timeline import MAX_APPEND_ATTEMPTS
