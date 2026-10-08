@@ -10,6 +10,9 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_release_machine import (
     PROBE_TIMEOUT_MAX_SECONDS,
+    StageStep,
+    StageValidation,
+    has_probe,
     is_probe_case_id,
     parse_machine_file,
 )
@@ -163,6 +166,12 @@ def test_args_may_not_carry_the_flags_kci_appends() raises:
         _probe_machine(_ok(String("args: \"--target-url\""))),
         String(_WHERE) + String(" has args '--target-url'; kci appends"),
     )
+    # every arg is checked, not only the first: a harmless first arg, then
+    # the flag kci appends
+    _assert_refused(
+        _probe_machine(_ok(String("args: \"-v\" args: \"--target-url=x\""))),
+        String(_WHERE) + String(" has args '--target-url=x'; kci appends"),
+    )
     # a flag that only starts with the same letters is the image's own
     var g = parse_machine_file(_probe_machine(_ok(String("args: \"--target-urls=a,b\""))), String(_SRC))
     assert_equal(g.stages[0].steps[0].validations[0].args[0], String("--target-urls=a,b"))
@@ -248,9 +257,41 @@ def test_expect_ids() raises:
         _probe_machine(_probe(head + String(" expect: \"a\" expect: \"b\" expect: \"a\""))),
         String(_WHERE) + String(" names expect 'a' twice"),
     )
+    # every expect is checked, not only the first: a valid first id, then a
+    # bad one
+    _assert_refused(
+        _probe_machine(_probe(head + String(" expect: \"health\" expect: \"Bad\""))),
+        String(_WHERE) + String(" has expect 'Bad'; a case id is [a-z0-9_-]+"),
+    )
+    # a repeat is found against every earlier id, not only the first
+    _assert_refused(
+        _probe_machine(_probe(head + String(" expect: \"a\" expect: \"b\" expect: \"b\""))),
+        String(_WHERE) + String(" names expect 'b' twice"),
+    )
     assert_true(is_probe_case_id(String("login_2-fast")))
     assert_false(is_probe_case_id(String("a.b")))
     assert_false(is_probe_case_id(String("a b")))
+
+
+# ---- has_probe ---------------------------------------------------------------
+
+
+def test_has_probe_looks_at_every_validation() raises:
+    # Through the parser a DEPLOY step carries DEPLOY_PROBE validations only
+    # (graph.mojo), so the promoted-DEPLOY rule cannot reach a probe that is
+    # not first. has_probe is public and says "at least one": a step whose
+    # probe is its second validation has one.
+    var step = StageStep(1)
+    step.kind = String("DEPLOY")
+    assert_false(has_probe(step))
+    var smoke = StageValidation(2)
+    smoke.kind = String("CONDA_INSTALL_SMOKE")
+    step.validations.append(smoke^)
+    assert_false(has_probe(step))
+    var probe = StageValidation(3)
+    probe.kind = String("DEPLOY_PROBE")
+    step.validations.append(probe^)
+    assert_true(has_probe(step))
 
 
 # ---- the CONDA_* fields, and secret_env ---------------------------------------
