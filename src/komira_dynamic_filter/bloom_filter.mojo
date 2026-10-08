@@ -29,10 +29,11 @@
 # xxHash64 spec: https://github.com/Cyan4973/xxHash/blob/dev/doc/xxhash_spec.md
 # Parquet spec: https://github.com/apache/parquet-format/blob/master/BloomFilter.md
 #
-# SAFETY: Functions in this module take UnsafePointer[UInt8] and
-# UnsafePointer[UInt32] for raw byte-level access to bloom filter blocks.
-# The SBBF format requires direct word-level reads/writes into 32-byte
-# blocks. Raw pointers are required for the bitwise hash probing logic.
+# SAFETY: The public byte-input functions (xxhash64, from_bytes, hash_bytes,
+# insert_bytes, might_contain_bytes) take a `Span[UInt8, _]`; no public
+# function takes or returns a pointer. Raw pointers appear only inside
+# function bodies and in the private `_read_u64_le` / `_read_u32_le`
+# helpers, each derived from a borrowed Span and never escaping the call.
 # =============================================================================
 
 
@@ -214,6 +215,7 @@ def _read_u64_le(data: UnsafePointer[UInt8, _], offset: Int) -> UInt64:
 @always_inline
 def _read_u32_le(data: UnsafePointer[UInt8, _], offset: Int) -> UInt32:
     """Read a 4-byte little-endian u32. Unaligned-safe."""
+    # SAFETY: caller asserts offset+4 <= length; bytewise reads, no escape.
     var p = data + offset
     return (
         UInt32(p[0])
@@ -224,20 +226,24 @@ def _read_u32_le(data: UnsafePointer[UInt8, _], offset: Int) -> UInt32:
 
 
 @always_inline
-def xxhash64(data: UnsafePointer[UInt8, _], length: Int) -> UInt64:
-    """Compute xxHash64(seed=0) of `length` bytes at `data`.
+def xxhash64(data: Span[UInt8, _]) -> UInt64:
+    """Compute xxHash64(seed=0) of the bytes of `data`.
 
     Spec-compliant per
     https://github.com/Cyan4973/xxHash/blob/dev/doc/xxhash_spec.md.
 
     Args:
-        data: Pointer to the input bytes (must outlive the call).
-        length: Byte count.
+        data: The input bytes.
 
     Returns:
         64-bit hash; deterministic; matches the reference C
         implementation byte-for-byte at seed=0.
     """
+    var length = len(data)
+    # SAFETY: `p` is the start of the borrowed `data`, alive for this call;
+    # every read below is at an offset `pos` with `pos + width <= length`
+    # (the loop guards), and `p` does not escape.
+    var p = data.unsafe_ptr()
     var hash: UInt64
     var pos = 0
 
@@ -248,10 +254,10 @@ def xxhash64(data: UnsafePointer[UInt8, _], length: Int) -> UInt64:
         var v3 = UInt64(0)
         var v4 = UInt64(0) - _XXH_P1
         while pos + 32 <= length:
-            v1 = _xxh_round(v1, _read_u64_le(data, pos))
-            v2 = _xxh_round(v2, _read_u64_le(data, pos + 8))
-            v3 = _xxh_round(v3, _read_u64_le(data, pos + 16))
-            v4 = _xxh_round(v4, _read_u64_le(data, pos + 24))
+            v1 = _xxh_round(v1, _read_u64_le(p, pos))
+            v2 = _xxh_round(v2, _read_u64_le(p, pos + 8))
+            v3 = _xxh_round(v3, _read_u64_le(p, pos + 16))
+            v4 = _xxh_round(v4, _read_u64_le(p, pos + 24))
             pos = pos + 32
         # Combine lanes.
         hash = (
@@ -273,18 +279,18 @@ def xxhash64(data: UnsafePointer[UInt8, _], length: Int) -> UInt64:
 
     # Tail: drain 8-byte, 4-byte, 1-byte lanes.
     while pos + 8 <= length:
-        var k1 = _xxh_round(0, _read_u64_le(data, pos))
+        var k1 = _xxh_round(0, _read_u64_le(p, pos))
         hash = hash ^ k1
         hash = _rotl64(hash, 27) * _XXH_P1 + _XXH_P4
         pos = pos + 8
 
     if pos + 4 <= length:
-        hash = hash ^ (UInt64(_read_u32_le(data, pos)) * _XXH_P1)
+        hash = hash ^ (UInt64(_read_u32_le(p, pos)) * _XXH_P1)
         hash = _rotl64(hash, 23) * _XXH_P2 + _XXH_P3
         pos = pos + 4
 
     while pos < length:
-        hash = hash ^ (UInt64((data + pos)[]) * _XXH_P5)
+        hash = hash ^ (UInt64((p + pos)[]) * _XXH_P5)
         hash = _rotl64(hash, 11) * _XXH_P1
         pos = pos + 1
 
@@ -295,7 +301,7 @@ def xxhash64(data: UnsafePointer[UInt8, _], length: Int) -> UInt64:
 def xxhash64_int64(value: Int64) -> UInt64:
     """Compute xxHash64(seed=0) of an Int64 value serialized as 8 little-endian
     bytes. Equivalent to laying out `value` into an 8-byte buffer (LE)
-    and calling `xxhash64(buf, 8)`.
+    and calling `xxhash64(Span(buf))`.
 
     Args:
         value: 64-bit signed integer.
@@ -324,20 +330,19 @@ def xxhash64_int64(value: Int64) -> UInt64:
 
 
 @always_inline
-def _fnv1a_hash(data: UnsafePointer[UInt8, _], length: Int) -> UInt64:
+def _fnv1a_hash(data: Span[UInt8, _]) -> UInt64:
     """FNV-1a 64-bit hash. LEGACY — use xxhash64 for new code.
 
     Args:
-        data: Pointer to the bytes to hash.
-        length: Number of bytes.
+        data: The bytes to hash.
 
     Returns:
         64-bit hash value.
     """
     var hash = UInt64(0xCBF29CE484222325)
     comptime fnv_prime = UInt64(0x00000100000001B3)
-    for i in range(length):
-        hash = hash ^ UInt64((data + i)[])
+    for i in range(len(data)):
+        hash = hash ^ UInt64(data[i])
         hash = hash * fnv_prime
     return hash
 
@@ -686,8 +691,7 @@ struct BloomFilter(Movable):
 
     @staticmethod
     def from_bytes(
-        raw: UnsafePointer[UInt8, _],
-        num_bytes: Int,
+        raw: Span[UInt8, _],
         hash_family: HashFamily = HashFamily.xxhash64(),
     ) -> BloomFilter:
         """Construct from raw bloom filter bytes read from a Parquet file.
@@ -696,29 +700,28 @@ struct BloomFilter(Movable):
         Each 32-byte chunk is one block.
 
         Args:
-            raw: Pointer to the raw bitset bytes.
-            num_bytes: Number of bytes in the bitset.
+            raw: The raw bitset bytes; its length is the bitset size.
             hash_family: Hash function used by the writer (default xxHash64).
 
         Returns:
             A BloomFilter wrapping the provided data.
         """
+        var num_bytes = len(raw)
         var actual = max(num_bytes, BITSET_MIN_BYTES)
         # Round up to next multiple of 32.
         actual = ((actual + BLOCK_SIZE_BYTES - 1) // BLOCK_SIZE_BYTES) * BLOCK_SIZE_BYTES
         var buf = OwnedAlignedBuffer(actual)
-        # `raw` comes from Parquet decompression scratch memory with a
-        # wildcard origin, so no ByteView[origin] can be built around it.
-        # The destination is routed through `view_mut` (origin-tied) + the
-        # module-private escape within the same core package.
+        # komira_buffer has no ByteView over a Span, so the copy is a
+        # memcpy between the two views' start pointers.
         if num_bytes > 0:
             var copy_n = min(num_bytes, actual)
-            # SAFETY: `buf` outlives this call; destination bytes are
-            # bounds-checked against `actual` above. Source `raw` is the
-            # caller's responsibility (see above).
+            # SAFETY: `buf` outlives this call and `copy_n <= actual` is
+            # its length; `raw` is a borrowed Span of `num_bytes >= copy_n`
+            # bytes, alive for this call, and cannot alias the fresh `buf`.
+            # Neither pointer escapes.
             unsafe_memcpy(
                 dest=buf.view_range_mut(0, copy_n)._unsafe_ptr(),
-                src=raw,
+                src=raw.unsafe_ptr(),
                 count=copy_n,
             )
         # Zero any padding using fill.
@@ -750,21 +753,18 @@ struct BloomFilter(Movable):
         return _fnv1a_hash_int64(value)
 
     @always_inline
-    def hash_bytes(
-        self, data: UnsafePointer[UInt8, _], length: Int
-    ) -> UInt64:
+    def hash_bytes(self, data: Span[UInt8, _]) -> UInt64:
         """Hash a byte array using this filter's `hash_family`.
 
         Args:
-            data: Pointer to the bytes to hash.
-            length: Number of bytes.
+            data: The bytes to hash.
 
         Returns:
             64-bit hash.
         """
         if self.hash_family.is_xxhash64():
-            return xxhash64(data, length)
-        return _fnv1a_hash(data, length)
+            return xxhash64(data)
+        return _fnv1a_hash(data)
 
     @always_inline
     def insert_hash(mut self, hash: UInt64):
@@ -843,18 +843,15 @@ struct BloomFilter(Movable):
         else:
             self.insert_int64(value)
 
-    def insert_bytes(
-        mut self, data: UnsafePointer[UInt8, _], length: Int
-    ):
+    def insert_bytes(mut self, data: Span[UInt8, _]):
         """Insert a byte array value into the filter.
 
         Hash function dispatches on `self.hash_family`.
 
         Args:
-            data: Pointer to the bytes.
-            length: Number of bytes.
+            data: The bytes to insert.
         """
-        self.insert_hash(self.hash_bytes(data, length))
+        self.insert_hash(self.hash_bytes(data))
 
     @always_inline
     def check_hash(self, hash: UInt64) -> Bool:
@@ -917,21 +914,18 @@ struct BloomFilter(Movable):
             return self.check_hash(fib_hash)
         return self.might_contain_int64(value)
 
-    def might_contain_bytes(
-        self, data: UnsafePointer[UInt8, _], length: Int
-    ) -> Bool:
+    def might_contain_bytes(self, data: Span[UInt8, _]) -> Bool:
         """Check if a byte array value MIGHT be in the set.
 
         Hash function dispatches on `self.hash_family`.
 
         Args:
-            data: Pointer to the bytes to check.
-            length: Number of bytes.
+            data: The bytes to check.
 
         Returns:
             False = definitely not present. True = possibly present.
         """
-        return self.check_hash(self.hash_bytes(data, length))
+        return self.check_hash(self.hash_bytes(data))
 
     def merge_or_range[
         _mut: Bool, o_other: Origin[mut=_mut], //,

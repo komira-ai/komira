@@ -1040,10 +1040,7 @@ struct _ReplaceMemo(Movable):
         hand-rolling a
         second one is deliberate: a memo whose hash nobody else exercises is a
         memo whose hash nobody else tests."""
-        # SAFETY: `subj` is a borrowed Span over the caller's Arrow data
-        # buffer, alive for the duration of this call; the pointer is read
-        # only, never written through, and never escapes.
-        return xxhash64(subj.unsafe_ptr(), len(subj))
+        return xxhash64(subj)
 
     def find(mut self, subj: Span[UInt8, _]) -> Int:
         """The slot for `subj`: an occupied one iff the subject is remembered.

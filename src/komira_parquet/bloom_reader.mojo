@@ -224,16 +224,9 @@ def load_bloom_filter[fs_o: FileSystem](
     # Materialize a BloomFilter wrapping the bitset bytes. `from_bytes`
     # round-trips the SBBF bitset layout (32-byte blocks, 8 x UInt32
     # little-endian words per block) used by both write and read sides.
-    #
-    # SAFETY: `buf` is owned by this stack frame; `view_range_ro` returns
-    # a ByteView origin-tied to it; the `_unsafe_ptr()` here is used solely
-    # to bridge BloomFilter.from_bytes, which takes an
-    # `UnsafePointer[UInt8, _]`. `buf` outlives the from_bytes call (the
-    # BloomFilter copies the bytes).
+    # The BloomFilter copies the bytes out of the Span over `buf`.
     var bitset_view = buf.view_range_ro(bitset_start, header.num_bytes)
-    var bf = BloomFilter.from_bytes(
-        bitset_view._unsafe_ptr(), header.num_bytes, hash_family,
-    )
+    var bf = BloomFilter.from_bytes(bitset_view.into_span(), hash_family)
     return Optional(bf^)
 
 

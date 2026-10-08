@@ -84,7 +84,7 @@ def _int64_filter(values: List[Int64]) -> List[UInt8]:
     var bf = BloomFilter.create(1024, HashFamily.xxhash64())
     for i in range(len(values)):
         var le = _le(values[i], 8)
-        bf.insert_bytes(le.unsafe_ptr(), 8)
+        bf.insert_bytes(Span(le))
     return _filter_bytes(bf^)
 
 
@@ -92,7 +92,7 @@ def _int32_filter(values: List[Int64]) -> List[UInt8]:
     var bf = BloomFilter.create(1024, HashFamily.xxhash64())
     for i in range(len(values)):
         var le = _le(values[i], 4)
-        bf.insert_bytes(le.unsafe_ptr(), 4)
+        bf.insert_bytes(Span(le))
     return _filter_bytes(bf^)
 
 
@@ -100,7 +100,7 @@ def _string_filter(values: List[String]) -> List[UInt8]:
     var bf = BloomFilter.create(1024, HashFamily.xxhash64())
     for i in range(len(values)):
         var s = values[i].copy()
-        bf.insert_bytes(s.unsafe_ptr(), s.byte_length())
+        bf.insert_bytes(s.as_bytes())
     return _filter_bytes(bf^)
 
 
