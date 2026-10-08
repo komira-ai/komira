@@ -26,8 +26,9 @@ is read back, and nothing komira wrote is an input.
 DuckDB runs with `threads = 1`, `TimeZone = 'UTC'` and its defaults
 otherwise (query semantics, preamble). Each query is first held to
 sql_discipline.py (every ORDER BY key states ASC/DESC and NULLS FIRST/LAST,
-every literal is CAST, no clock, random or session function), on the exact text that
-is then run. The result is rendered by render.py to
+every literal is CAST, no clock, random or session function, and FROM names
+only the tables registered here, its own CTEs and the allowed table
+functions), on the exact text that is then run. The result is rendered by render.py to
 
     <output directory>/expect/<shard>/<case>.tsv
 
@@ -48,6 +49,10 @@ import sql_discipline
 import twin_inputs
 
 
+# Every table connect() registers: the only tables a case's FROM may name.
+TABLES = list(datasets.NAMES) + list(twin_inputs.NAMES)
+
+
 def connect():
     con = duckdb.connect(config={"threads": 1})
     con.execute("SET threads = 1")
@@ -63,7 +68,7 @@ def connect():
 
 def run_query(con, sql):
     """Check `sql` and run that same text; the result as a pyarrow Table."""
-    sql_discipline.check(con, sql)
+    sql_discipline.check(con, sql, TABLES)
     res = con.execute(sql)
     if hasattr(res, "to_arrow_table"):
         table = res.to_arrow_table()

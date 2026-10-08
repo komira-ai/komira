@@ -60,7 +60,9 @@ py_test(
 # render.py to `expect/<shard>/<case>.tsv` (a sub-target,
 # `:expected[expect/filter_3vl/filter_not_and.tsv]`). Both runs of the action
 # must write the same bytes, and gen_expected.py refuses a query that leaves
-# NULL placement or a literal's type to DuckDB (sql_discipline.py).
+# NULL placement or a literal's type to DuckDB, calls a clock, random or
+# session function, or reads in FROM anything but the tables it registers,
+# the query's own CTEs and the allowed table functions (sql_discipline.py).
 _CASES = [p[len("oracle/"):-len(".sql")] for p in glob(["oracle/*/*.sql"])]
 
 _EXPECTED_MODULES = _MODULES + [
@@ -86,9 +88,11 @@ python_oracle(
 
 # sql_discipline.py against queries that each break one rule (refused,
 # naming where the parse keeps the offence) and the same queries with the
-# ORDER BY and literal rules kept, and value keywords qualified by a table
-# (accepted). DuckDB only parses them; the list of unstable functions is
-# also held to the running DuckDB's duckdb_functions().
+# ORDER BY and literal rules kept, value keywords qualified by a table, and
+# FROM naming the registered tables, CTEs in scope and the allowed table
+# functions (accepted). DuckDB only parses them; the list of unstable
+# functions and macros, and the allowed table functions, are also held to
+# the running DuckDB's duckdb_functions().
 py_test(
     name = "test_sql_discipline",
     src = "test_sql_discipline.py",
