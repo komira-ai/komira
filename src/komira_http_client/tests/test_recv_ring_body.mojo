@@ -24,6 +24,9 @@ from komira_http_client.body_frame import (
     BodyFrame,
 )
 from komira_http_client.header_map import HeaderMap
+# Module-private, imported on purpose: it is the value the driver stamps
+# (`_effective_deadline_us`), and test_outbound_budget_rule pins it equal to
+# the public `OUTBOUND_BUDGET_DEFAULT_US`.
 from komira_http_client.state_machine import _HEAD_DRIVE_DEFAULT_TIMEOUT_US
 from komira_http_client.response_body import (
     RecvRingBody,
