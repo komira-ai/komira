@@ -155,6 +155,10 @@ What it proves, and the defect it catches:
   the accepted spellings do not. Catches the rule off, `DEFAULT` taken for
   a direction, only the argument count checked, and a premise DuckDB no
   longer holds.
+- collations: a COLLATE in the select list, an ORDER BY key, a WHERE, a
+  GROUP BY and a FROM subquery is refused; a column named `collation` and
+  the words in a string literal are accepted. Catches the rule off, or
+  read from the text.
 - one SELECT: two statements and a DELETE are refused (the DELETE by
   `json_serialize_sql` itself, which serializes only SELECTs).
 """
@@ -449,8 +453,24 @@ REFUSED += [
      "select_list[0]: histogram() " + _BINS),
 ]
 
+# A collation ties strings that differ: in the select list, an ORDER BY
+# key, a WHERE, a GROUP BY and a FROM subquery.
+_COLL = "COLLATE %s compares strings that differ as equal"
+REFUSED += [
+    ("SELECT s COLLATE nocase AS s FROM t ORDER BY s ASC NULLS LAST", "statement.node.select_list[0]: " + _COLL % "nocase"),
+    ("SELECT s FROM t ORDER BY s COLLATE noaccent ASC NULLS LAST",
+     "statement.node.modifiers[0].orders[0].expression: " + _COLL % "noaccent"),
+    ("SELECT s FROM t WHERE s COLLATE nocase = CAST('A' AS VARCHAR)", ("where_clause", _COLL % "nocase")),
+    ("SELECT count(*) FROM t GROUP BY s COLLATE nocase", "group_expressions[0]: " + _COLL % "nocase"),
+    ("SELECT s FROM (SELECT s COLLATE nocase AS s FROM t) AS q",
+     "from_table.subquery.node.select_list[0]: " + _COLL % "nocase"),
+]
+
 # The ORDER BY and literal queries above, their rule kept.
 ACCEPTED = [
+    # A column named collation and the word as a string: the rule reads
+    # the parse's COLLATE nodes, not the text.
+    "SELECT t.collation, CAST('COLLATE nocase' AS VARCHAR) AS c FROM t ORDER BY s ASC NULLS LAST",
     "SELECT a FROM t ORDER BY a ASC NULLS LAST",
     "SELECT row_number() OVER (ORDER BY a DESC NULLS FIRST) FROM t",
     "SELECT first_value(a ORDER BY b ASC NULLS LAST) OVER (ORDER BY id ASC NULLS LAST) FROM t",

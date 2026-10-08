@@ -63,9 +63,11 @@ py_test(
 # every table it reads rotated to each position and each rotation reversed,
 # every combination of the tables' orders when there are at most 5000
 # (compared under the case's policy), its `-- order:` policy must be held
-# by its outermost ORDER BY (`total`: one that fixes the order of rows that
-# differ, the tie check; `keys=<cols>`: led by exactly those columns), and
-# gen_expected.py refuses a query that leaves NULL placement, an aggregate's
+# by its outermost ORDER BY (`total`: one; `keys=<cols>`: led by exactly
+# those columns), every ORDER BY in it must fix the order its answer shows
+# (the tie check: each run again with tiebreak keys ascending and
+# descending), and gen_expected.py refuses a query that uses COLLATE or
+# leaves NULL placement, an aggregate's
 # row order, a window frame's, a LIMIT's or a DISTINCT ON's row order, a
 # list sort's direction or a literal's type to DuckDB, calls a function on
 # its list
@@ -175,8 +177,11 @@ py_test(
 # one led by exactly those bare columns in order; a window's partition
 # order or a subquery's ORDER BY is refused under either, and main()
 # refuses such a case before writing it; main()'s tie check refuses a
-# `total` case whose outermost ORDER BY ties rows that differ (a constant
-# or tied key over an inner sort's order) and keeps `keys=` cases.
+# case whose answer shows a tie of any ORDER BY in it (the outermost's
+# under `total`; an inner LIMIT's, a position-reading window's or an
+# ordered aggregate's, behind an inner sort, under `total` and `none`),
+# keeps ties the policy does not compare or the answer does not show,
+# and main() refuses a COLLATE.
 py_test(
     name = "test_order_policy",
     src = "test_order_policy.py",

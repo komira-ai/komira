@@ -1,4 +1,4 @@
-"""An ORACLE case's `-- order:` policy is held to its query's outermost ORDER BY, and under `total` that ORDER BY fixes the order.
+"""An ORACLE case's `-- order:` policy is held to its query's outermost ORDER BY, and every ORDER BY fixes the order the answer shows.
 
     test_order_policy.py
 
@@ -49,7 +49,29 @@ check, gen_expected.order_ties()), in a process of its own:
    at its cut, and the tied subquery under `keys=a` (a run of equal keys
    is a multiset). Catches the tie check off, run ascending or descending
    only, adding only the first output column, comparing the zero signs DuckDB rewrites in a sorted column,
-   without its zero-sign rule, or applied under `keys=`.
+   without its zero-sign rule, or comparing a `keys=` case row for row.
+5. Every ORDER BY, not only the outermost: main() refuses, under `total`
+   and under `none`, queries whose answer depends on a tie an inner sort
+   resolves (gen_expected.tie_sites()): row_number() over a tied key fed
+   by a subquery ordered by id DESC, and fed by an unused rank() over id
+   DESC; string_agg() and arg_max() whose own ORDER BY ties within a
+   group; an inner LIMIT tied at its cut, and the same through stars
+   with the tied rows differing only in the column the select list's
+   length does not count; a window with a constant key over GROUP BY
+   groups; a window over ROLLUP groups that only grouping() tells
+   apart; two inner LIMITs whose ties show only when both turn the same
+   way. It writes each with a unique inner key, the rank family and a
+   RANGE sum over a tied key (peers answer alike), ORDER BY ALL, and
+   under `none` the tied subquery whose order is not compared. Catches
+   the tie check on the outermost ORDER BY only, the window, ordered
+   aggregate or inner LIMIT perturbation off, a GROUP BY window keyed by
+   the whole row (DuckDB refuses it) or with no keys, grouping() left
+   out, the output width taken from a select list holding a star, the
+   all-at-once runs left out, a tiebreak that splits the rank family's
+   peers, ORDER BY ALL given keys (DuckDB then expands its star over the
+   FROM), and a check comparing a `none` case row for row.
+6. main() refuses a COLLATE query (sql_discipline.check) before writing
+   it. Catches the COLLATE rule off.
 """
 
 import os
@@ -191,9 +213,105 @@ for order, sql in TIES_ACCEPTED:
     if err is not None or not wrote:
         FAILURES.append("main() over %r under order: %s: %r, want its file written" % (sql, order, err))
 
+# 5. Every ORDER BY, not only the outermost: an inner sort (a subquery's
+# ORDER BY, a window's) fixes the order rows reach a window, an ordered
+# aggregate or an inner LIMIT in, whatever the tables' order, so neither
+# the row-order check nor a tiebreak on the outermost ORDER BY sees a tie
+# there. Each query below is refused under `total` and under `none`.
+_U = "(SELECT id, k FROM groups ORDER BY id DESC NULLS LAST) AS u"
+_RN = "CAST(row_number() OVER (ORDER BY k ASC NULLS LAST%s) AS BIGINT) AS rn"
+_BY_ID = " ORDER BY id ASC NULLS LAST"
+_ALL = " ORDER BY ALL ASC NULLS LAST"
+_TWO = ("SELECT CAST(x.id = CAST(2 AS BIGINT) AND y.id = CAST(2 AS BIGINT) AS BOOLEAN) AS both_second FROM "
+        "(SELECT id FROM (SELECT id, k FROM groups WHERE k = CAST(1 AS BIGINT) ORDER BY id ASC NULLS LAST) AS u "
+        "ORDER BY k ASC NULLS LAST LIMIT CAST(1 AS BIGINT)) AS x, "
+        "(SELECT id FROM (SELECT id, k FROM groups WHERE k = CAST(1 AS BIGINT) ORDER BY id ASC NULLS LAST) AS u "
+        "ORDER BY k ASC NULLS LAST LIMIT CAST(1 AS BIGINT)) AS y ORDER BY ALL ASC NULLS LAST")
+_ROLLUP = ("SELECT k, v, CAST(count(*) AS BIGINT) AS n, "
+           "CAST(row_number() OVER (ORDER BY k ASC NULLS LAST, v ASC NULLS LAST%s) AS BIGINT) AS rn "
+           "FROM groups GROUP BY ROLLUP (k, v) ORDER BY ALL ASC NULLS LAST")
+INNER_REFUSED = [
+    # row_number() over k, ties by the order the subquery's id DESC fixes.
+    "SELECT id, rn FROM (SELECT id, " + _RN % "" + " FROM " + _U + ") AS t" + _BY_ID,
+    # The same with an unused rank() over id DESC fixing that order.
+    "SELECT id, rn FROM (SELECT id, " + _RN % "" + " FROM (SELECT id, k, CAST(rank() OVER (ORDER BY id DESC NULLS "
+    "LAST) AS BIGINT) AS r FROM groups) AS u) AS t" + _BY_ID,
+    # An ordered aggregate whose ORDER BY ties within each group.
+    "SELECT k, string_agg(CAST(id AS VARCHAR), CAST(',' AS VARCHAR) ORDER BY k ASC NULLS LAST) AS s FROM " + _U +
+    " GROUP BY k ORDER BY k ASC NULLS LAST",
+    # arg_max over equal values keeps the first row its ORDER BY reaches.
+    "SELECT arg_max(id, CAST(0 AS BIGINT) ORDER BY k ASC NULLS LAST) AS m FROM " + _U + _ALL,
+    # An inner LIMIT tied at its cut (k = 2 holds ids 5 and 6).
+    "SELECT id FROM (SELECT id, k FROM " + _U + " ORDER BY k ASC NULLS LAST LIMIT CAST(3 AS BIGINT)) AS t" + _BY_ID,
+    # The same through stars: the tied rows differ only in the second
+    # column a star writes, which the select list's length does not count.
+    "SELECT * FROM (SELECT * FROM (SELECT k, id FROM groups ORDER BY id DESC NULLS LAST) AS u ORDER BY k ASC "
+    "NULLS LAST LIMIT CAST(3 AS BIGINT)) AS t" + _BY_ID,
+    # A window over GROUP BY groups with a constant key: the order the
+    # groups leave the aggregate in, which the subquery's order fixes.
+    "SELECT k, CAST(row_number() OVER (ORDER BY CAST(0 AS BIGINT) ASC NULLS LAST) AS BIGINT) AS rn FROM " + _U +
+    " GROUP BY k ORDER BY k ASC NULLS LAST",
+    # Grouping sets: (2, NULL) is a group and a subtotal, (NULL, NULL) a
+    # group, a subtotal and the total; only grouping() tells them apart.
+    _ROLLUP % "",
+    # Two inner LIMITs whose ties matter only together: each run that
+    # turns one tiebreak around keeps the other's first row.
+    _TWO,
+]
+INNER_ACCEPTED = [
+    # The same with unique inner keys: the tiebreak changes nothing.
+    "SELECT id, rn FROM (SELECT id, " + _RN % ", id ASC NULLS LAST" + " FROM " + _U + ") AS t" + _BY_ID,
+    "SELECT id, rn FROM (SELECT id, " + _RN % ", id ASC NULLS LAST" + " FROM (SELECT id, k, CAST(rank() OVER (ORDER "
+    "BY id DESC NULLS LAST) AS BIGINT) AS r FROM groups) AS u) AS t" + _BY_ID,
+    "SELECT k, string_agg(CAST(id AS VARCHAR), CAST(',' AS VARCHAR) ORDER BY k ASC NULLS LAST, id ASC NULLS LAST) "
+    "AS s FROM " + _U + " GROUP BY k ORDER BY k ASC NULLS LAST",
+    "SELECT arg_max(id, CAST(0 AS BIGINT) ORDER BY k ASC NULLS LAST, id DESC NULLS LAST) AS m FROM " + _U + _ALL,
+    "SELECT id FROM (SELECT id, k FROM " + _U + " ORDER BY k ASC NULLS LAST, id ASC NULLS LAST LIMIT "
+    "CAST(3 AS BIGINT)) AS t" + _BY_ID,
+    "SELECT * FROM (SELECT * FROM (SELECT k, id FROM groups ORDER BY id DESC NULLS LAST) AS u ORDER BY k ASC "
+    "NULLS LAST, id ASC NULLS LAST LIMIT CAST(3 AS BIGINT)) AS t" + _BY_ID,
+    "SELECT k, CAST(row_number() OVER (ORDER BY k ASC NULLS LAST) AS BIGINT) AS rn FROM " + _U + " GROUP BY k "
+    "ORDER BY k ASC NULLS LAST",
+    _ROLLUP % ", grouping(k, v) ASC NULLS LAST",
+    # The rank family and a RANGE frame answer the same for every peer: a
+    # tie in their ORDER BY is no tie in the answer, and is not split.
+    "SELECT id, CAST(rank() OVER (ORDER BY k ASC NULLS LAST) AS BIGINT) AS r, CAST(sum(v) OVER (ORDER BY k ASC "
+    "NULLS LAST) AS BIGINT) AS s FROM (SELECT id, k, v FROM groups ORDER BY id DESC NULLS LAST) AS u" + _BY_ID,
+    # ORDER BY ALL orders by every output column (k, then id) already.
+    "SELECT k, id FROM " + _U + " ORDER BY ALL ASC NULLS LAST",
+    # The tied subquery under `none` with no LIMIT: the order is not
+    # compared.
+    "SELECT id, a FROM " + _DESC + " ORDER BY a ASC NULLS LAST",
+]
+for order in ("total", "none"):
+    for sql in INNER_REFUSED:
+        err, wrote = run_main("-- order: %s\n%s\n" % (order, sql))
+        if err is None or "oracle/plant/case.sql" not in err or "ORDER BY does not fix the order" not in err:
+            FAILURES.append("main() over %r under order: %s: %r, want a CaseError naming the case and saying the "
+                            "ORDER BY does not fix the order" % (sql, order, err))
+        if wrote:
+            FAILURES.append("main() over %r under order: %s wrote its file" % (sql, order))
+    for sql in INNER_ACCEPTED:
+        if order == "total" and sql.endswith(" ORDER BY a ASC NULLS LAST"):
+            continue
+        err, wrote = run_main("-- order: %s\n%s\n" % (order, sql))
+        if err is not None or not wrote:
+            FAILURES.append("main() over %r under order: %s: %r, want its file written" % (sql, order, err))
+
+# 6. A collation ties strings that differ, and the tiebreak keys sort
+# under it: main() refuses the COLLATE (sql_discipline.check) before the
+# tie check runs.
+_NOCASE = ("SELECT s COLLATE nocase AS s FROM (VALUES (CAST('a' AS VARCHAR)), (CAST('A' AS VARCHAR)), "
+           "(CAST('a' AS VARCHAR))) AS v(s) ORDER BY s ASC NULLS LAST")
+err, wrote = run_main("-- order: total\n" + _NOCASE + "\n")
+if err is None or "COLLATE nocase" not in err or wrote:
+    FAILURES.append("main() over %r: %r (wrote %s), want a CaseError naming the COLLATE" % (_NOCASE, err, wrote))
+
 if FAILURES:
     for f in FAILURES:
         print("FAIL", f)
     raise SystemExit("test_order_policy: %d failures" % len(FAILURES))
-print("test_order_policy: %d refused, %d accepted, main() refuses 3 and writes 2; %d ties refused, %d accepted, "
-      "all as expected" % (len(REFUSED), len(ACCEPTED), len(TIES_REFUSED), len(TIES_ACCEPTED)))
+print("test_order_policy: %d refused, %d accepted, main() refuses 3 and writes 2; %d ties refused, %d accepted; "
+      "%d inner ties refused and %d accepted under total and none; COLLATE refused; all as expected"
+      % (len(REFUSED), len(ACCEPTED), len(TIES_REFUSED), len(TIES_ACCEPTED), len(INNER_REFUSED),
+         len(INNER_ACCEPTED)))

@@ -90,6 +90,17 @@ a function on the lists below):
   that DuckDB's binder may turn into a call (below); and no `USING SAMPLE`
   or `TABLESAMPLE` (a sample is not a function call: DuckDB keeps it in a
   `sample` key of the SELECT or the table reference);
+- no `COLLATE` expression (DuckDB's class COLLATE, at any depth): a
+  collation (`nocase`,
+  `noaccent`, ICU's) makes strings that differ compare equal, so a sort, a
+  GROUP BY, a DISTINCT, a join or a comparison under it ties rows that
+  differ and keeps whichever DuckDB reaches first, and gen_expected.py's
+  tie check, whose keys sort under the column's collation, cannot tell
+  them apart (`SELECT s COLLATE nocase AS s ... ORDER BY s` writes `a, A,
+  a` in DuckDB's order). The plan compares strings by their bytes. DuckDB
+  1.5.6's grammar has no collation in a type name (`CAST(s AS VARCHAR
+  COLLATE nocase)` does not parse), the tables the oracle registers carry
+  none, and the oracle never sets `default_collation`;
 - exactly one statement, a SELECT.
 
 FROM. Every table reference (a SELECT's `from_table` and each side of a
@@ -203,11 +214,11 @@ one-part column name (`ORDER BY a`, not `t.a` nor an expression), which
 DuckDB binds to the output column so named before a table's. Without it
 the file holds an order no ORDER BY asked for: a window's partition
 order, a subquery's ORDER BY (SQL keeps no subquery's order), a hash
-table's. An ORDER BY whose keys tie is not seen here: under `total`,
-gen_expected.py's tie check refuses one that leaves two rows differing in
-any column in an order its keys do not fix (an inner sort's order behind
-a tied or constant key included), and its row-order check a tie the
-tables' order decides.
+table's. An ORDER BY whose keys tie is not seen here: gen_expected.py's
+tie check refuses a case whose answer shows the order a tie of any
+ORDER BY in it leaves (the outermost's, an inner query's, a window's or
+an aggregate's, an inner sort's order behind a tied or constant key
+included), and its row-order check a tie the tables' order decides.
 """
 
 import json
@@ -632,6 +643,9 @@ def _walk(node, path, in_cast, is_count, in_table_fn, is_ref, scope, ctx):
     _check_modifiers(node, path, problems)
     if node.get("sample") is not None:
         problems.append("%s.sample: USING SAMPLE or TABLESAMPLE draws rows at random" % path)
+    if cls == "COLLATE":
+        problems.append("%s: COLLATE %s compares strings that differ as equal; the plan compares bytes"
+                        % (path, node.get("collation")))
     for key in _ORDER_KEYS:
         for i, order in enumerate(node.get(key) or []):
             where = "%s.%s[%d]" % (path, key, i)
