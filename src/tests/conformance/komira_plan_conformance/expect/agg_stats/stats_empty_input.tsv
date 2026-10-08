@@ -1,0 +1,15 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+#  float[avg_f]: ulps=1
+#  float[med_i]: ulps=1
+# derivation: the input is stat_rows WHERE id < 0; ids are 1 to 7, so no row
+# passes (§1.2). §2.3: no grouping keys over zero rows gives one row, COUNT
+# 0 (COUNT(DISTINCT) included) and every other aggregate NULL; §2.11 also
+# makes the population statistics NULL over no value. Types: COUNT INT64,
+# never NULL (§8.6); AVG, VAR, STDDEV FLOAT64 (§8.5); MEDIAN FLOAT64
+# (§8.16); MIN the input's type (§8.7); all but COUNT nullable (§2.3).
+# avg_f carries §2.10's float AVG tolerance and med_i §2.14's MEDIAN one.
+# §2.2 also makes every aggregate but COUNT NULL over an empty group.
+n:int64	nd_distinct:int64	avg_i:float64?	avg_f:float64?	var_samp_i:float64?	var_pop_i:float64?	sd_samp_i:float64?	sd_pop_i:float64?	med_i:float64?	lo:string?
+0	0	\N	\N	\N	\N	\N	\N	\N	\N

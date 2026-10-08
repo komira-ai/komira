@@ -1,0 +1,7 @@
+{"id": 1, "g": 1, "i": 2, "f": 1.0, "s": "apple", "d": 4}
+{"id": 2, "g": 1, "i": 5, "f": 2.5, "s": "Zebra", "d": 4}
+{"id": 3, "g": 1, "i": 8, "f": 4.0, "s": "app", "d": 9}
+{"id": 4, "g": 1, "i": null, "f": null, "s": null, "d": null}
+{"id": 5, "g": 2, "i": 7, "f": -0.5, "s": "pear", "d": 4}
+{"id": 6, "g": 3, "i": null, "f": null, "s": null, "d": null}
+{"id": 7, "g": 3, "i": null, "f": null, "s": null, "d": null}

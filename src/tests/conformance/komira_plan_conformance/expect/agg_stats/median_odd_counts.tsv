@@ -1,0 +1,15 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+#  float[med_i]: ulps=1
+#  float[med_f]: ulps=1
+# derivation: stat_rows WHERE g < 3 keeps g = 1 and g = 2 (§1.2). MEDIAN
+# skips NULLs (§2.1) and is quantile_cont(x, 0.5) (§2.14): at an odd count,
+# the middle value. g = 1 has i = 2, 5, 8 and f = 1.0, 2.5, 4.0, so 5 and
+# 2.5; g = 2 has one value, 7 and -0.5. Tolerance: §2.14 compares a float
+# MEDIAN with §2.10's tolerance; the exact answers are input values, and
+# ulps=1 is §2.14's tolerance, the least that is not bit for bit. Types: MEDIAN of an integer or FLOAT64 is FLOAT64
+# (§8.16), nullable (§2.2).
+g:int64	med_i:float64?	med_f:float64?
+1	5.0	2.5
+2	7.0	-0.5

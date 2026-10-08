@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+#  float[med_i]: ulps=1
+#  float[med_f]: ulps=1
+# derivation: stat_rows WHERE g > 2 keeps ids 6 and 7, g = 3 (§1.2); both
+# have NULL i and f. §2.2: every aggregate except COUNT is NULL over a group
+# with no non-NULL input, MEDIAN (the holistic aggregate, §2.14) included.
+# Types: FLOAT64 (§8.16), nullable (§2.2).
+g:int64	med_i:float64?	med_f:float64?
+3	\N	\N

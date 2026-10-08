@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §5.0: every arithmetic operator with a NULL operand is NULL, so
+# ids 2, 3 and 4 (x, y or both NULL) are NULL in every column. id 1: 1 + 10
+# = 11, 1 - 10 = -9, 1 * 10 = 10; id 5: 5 + 5 = 10, 5 - 5 = 0, 5 * 5 = 25,
+# none near overflow (§5.5). Types: INT64 with INT64 is INT64 under each
+# option of §8.9; nullable by §8's default; id keeps its scanned type.
+id:int64	sum_xy:int64?	diff_xy:int64?	prod_xy:int64?
+1	11	-9	10
+2	\N	\N	\N
+3	\N	\N	\N
+4	\N	\N	\N
+5	10	0	25

@@ -1,0 +1,18 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+#  float[avg_f]: ulps=1
+# derivation: AVG skips NULLs (§2.1) and divides by the count of non-NULL
+# values. §2.12: AVG of integers sums exactly and divides once, in DOUBLE.
+# g = 1: (2^53 + 1) + 1 = 9007199254740994 exactly; / 2 = 4503599627370497
+# = 2^52 + 1, a double (below 2^53). Summing in DOUBLE would read 2^53 + 1
+# as 2^53 and answer 2^52. f: (0.25 + 0.5) / 2 = 0.375. g = 2: i = 1 + 2 +
+# 3 + 5 = 11 over 4 values (id 7 is NULL) = 2.75; f = -1.5 + 2.0 + 0.5 +
+# 1.0 = 2.0 over 4 = 0.5. g = 3: no non-NULL value, so NULL (§2.2).
+# Tolerance: float AVG may vary with summation order (§2.10), so avg_f is
+# compared within 1 ulp; avg_i is integer AVG, exact (§2.12). Types: AVG is
+# FLOAT64 (§8.5), nullable (§2.2); g keeps its scanned type.
+g:int64	avg_i:float64?	avg_f:float64?
+1	4503599627370497.0	0.375
+2	2.75	0.5
+3	\N	\N

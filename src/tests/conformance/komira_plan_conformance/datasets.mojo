@@ -37,6 +37,26 @@
 #                  (ids 1 to 6: a tie and two NULL order keys); g = 2 one
 #                  row (id 7, o = 5); g NULL three rows (ids 8 to 10, o =
 #                  7, 7, 9), a partition of their own (§9.9).
+#   stat_rows      id, g, i, f, s, d: g = 1 holds i = 2, 5, 8, f = 1.0,
+#                  2.5, 4.0, s = "apple", "Zebra", "app", d = 4, 4, 9 and
+#                  one all-NULL row (id 4); g = 2 one row (id 5: 7, -0.5,
+#                  "pear", 4); g = 3 two all-NULL rows (ids 6, 7). The
+#                  values are chosen so AVG, VAR_SAMP, VAR_POP and
+#                  STDDEV_SAMP are exact doubles; STDDEV_POP is not
+#                  (cases_agg_stats.mojo says why).
+#   avg_rows       id, g, i, f: g = 1 holds i = 2^53 + 1 and 1, f = 0.25,
+#                  0.5; g = 2 holds i = 1, 2, 3, 5, f = -1.5, 2.0, 0.5,
+#                  1.0 and one all-NULL row; g = 3 one all-NULL row.
+#   div_pairs      id, a, b: a over b for every sign pair of 7 and 2, four
+#                  zero divisors (one under a NULL a), 6 / 3, a NULL b,
+#                  0 / 5 and -1 / 5 (truncating and flooring differ).
+#   float_pairs    id, p, q, r: p over q gives +inf, -inf, NaN (0.0 / 0.0
+#                  and 0.0 / -0.0), a NULL p, a NULL q and 1.0 / 4.0; q
+#                  holds -0.0 twice; r is NULL on the 0.0 / 0.0 row only.
+#                  JSON has no NaN or infinity: they are made by §5.6.
+#                  A reader of these files must keep -0.0's sign (float_pairs,
+#                  sort_rows) and read 9007199254740993 (2^53 + 1, avg_rows)
+#                  as that exact INT64, never through a double.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
@@ -154,12 +174,60 @@ def rank_rows() -> Dataset:
     )
 
 
+def stat_rows() -> Dataset:
+    return Dataset(
+        "stat_rows",
+        _schema(
+            [String("id"), String("g"), String("i"), String("f"), String("s"), String("d")],
+            [
+                ArrowType.INT64, ArrowType.INT64, ArrowType.INT64,
+                ArrowType.FLOAT64, ArrowType.STRING, ArrowType.INT64,
+            ],
+            [False, False, True, True, True, True],
+        ),
+    )
+
+
+def avg_rows() -> Dataset:
+    return Dataset(
+        "avg_rows",
+        _schema(
+            [String("id"), String("g"), String("i"), String("f")],
+            [ArrowType.INT64, ArrowType.INT64, ArrowType.INT64, ArrowType.FLOAT64],
+            [False, False, True, True],
+        ),
+    )
+
+
+def div_pairs() -> Dataset:
+    return Dataset(
+        "div_pairs",
+        _schema(
+            [String("id"), String("a"), String("b")],
+            [ArrowType.INT64, ArrowType.INT64, ArrowType.INT64],
+            [False, True, True],
+        ),
+    )
+
+
+def float_pairs() -> Dataset:
+    return Dataset(
+        "float_pairs",
+        _schema(
+            [String("id"), String("p"), String("q"), String("r")],
+            [ArrowType.INT64, ArrowType.FLOAT64, ArrowType.FLOAT64, ArrowType.FLOAT64],
+            [False, True, True, True],
+        ),
+    )
+
+
 def all_datasets() -> List[Dataset]:
     """Every dataset a case may scan; test_corpus refuses a file under
     datasets/ that is not one of these."""
     return [
         bool_pairs(), ints_nullable(), groups(), join_left(), join_right(),
-        sort_rows(), int_pairs(), window_rows(), rank_rows(),
+        sort_rows(), int_pairs(), window_rows(), rank_rows(), stat_rows(),
+        avg_rows(), div_pairs(), float_pairs(),
     ]
 
 

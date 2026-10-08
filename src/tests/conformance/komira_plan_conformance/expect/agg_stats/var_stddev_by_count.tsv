@@ -1,0 +1,21 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §2.1: NULLs are skipped, so g = 1 has n = 3 (i = 2, 5, 8;
+# f = 1.0, 2.5, 4.0), g = 2 n = 1, g = 3 n = 0. g = 1, i: mean 5,
+# deviations -3, 0, 3, M2 = 18; VAR_SAMP = 18 / 2 = 9, VAR_POP = 18 / 3 = 6,
+# STDDEV_SAMP = 3, STDDEV_POP = sqrt(6). f: mean 2.5, deviations -1.5, 0,
+# 1.5, M2 = 4.5; VAR_SAMP 2.25, VAR_POP 1.5, STDDEV_SAMP 1.5, STDDEV_POP
+# sqrt(1.5). sqrt(6) = m * 2^-51 rounded, m = 5515760546423086: m^2 <=
+# 6 * 2^102 < (m + 1)^2 and (2m + 1)^2 > 24 * 2^102, so it rounds down to m:
+# bits 0x4003988E1409212E. sqrt(1.5) = sqrt(6) / 2: same m, exponent one
+# less, 0x3FF3988E1409212E. §2.11: with one value (g = 2) the sample
+# statistics are NULL and the population ones 0, written +0.0: M2 is a sum
+# of squares that starts at +0 and stays +0 over one value, and DuckDB answers
+# a literal 0 at count 1 (+0.0, the stddev.hpp §2.11 cites); with none
+# (g = 3) all four are NULL (§2.2, §2.11). Types: §8.5 FLOAT64, nullable
+# (§2.11); COUNT INT64, never NULL (§8.6).
+g:int64	n:int64	var_samp_i:float64?	var_pop_i:float64?	sd_samp_i:float64?	sd_pop_i:float64?	var_samp_f:float64?	var_pop_f:float64?	sd_samp_f:float64?	sd_pop_f:float64?
+1	3	9.0	6.0	3.0	2.449489742783178|0x4003988E1409212E	2.25	1.5	1.5	1.224744871391589|0x3FF3988E1409212E
+2	1	\N	0.0	\N	0.0	\N	0.0	\N	0.0
+3	0	\N	\N	\N	\N	\N	\N	\N	\N
