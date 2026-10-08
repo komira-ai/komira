@@ -183,6 +183,10 @@ def aes128gcm_encrypt(
     var cipher = AesGcm128(keys.cek)
     var empty = List[UInt8]()
     var nonce = _record_nonce(keys.nonce, 0)
+    # seal_in_place raises for a buffer under 16 bytes or a failing
+    # EVP_AEAD_CTX_seal. Here the record is at least 17 bytes and below
+    # 2^32 (rs fits 32 bits), under AES-GCM's 2^36 - 32 input limit, and
+    # the nonce is 12 bytes, so it does not raise.
     try:
         cipher.seal_in_place(nonce, Span[UInt8](empty), Span[UInt8](record))
     finally:
