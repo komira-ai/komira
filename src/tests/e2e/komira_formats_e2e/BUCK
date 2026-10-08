@@ -1,12 +1,23 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # A test-only package: one nullable dataset written through the ORC, Avro OCF,
 # JSONL and CSV (CsvSink) writers into a Hive tree with a non-ASCII partition
 # value (`city=Zürich`), discovered over the real LocalFs and read back with
-# projections. The sources are the shared fixture (the dataset and the tree
-# writer); the tests are the point. Nothing ships, so `conda = False`.
+# projections; the same dataset as an Arrow IPC File and Stream. The sources
+# are the shared fixture (the dataset, the tree writer, the IPC assembly); the
+# tests are the point. Nothing ships, so `conda = False`.
 #
 # The tests, each run as a build action:
+#   test_formats_arrow_ipc -- the dataset (two RecordBatches) as an Arrow IPC
+#     File and Stream assembled from komira_arrow_ipc's message encoders,
+#     written and read through LocalFs, decoded by the copy decoder (and the
+#     mmap decoder for the File): every value and NULL exact, the edge
+#     numerics bit-exact; and the bytes against the Arrow spec (ARROW1 magic
+#     and padding, footer size, continuation markers, 8-byte alignment, EOS,
+#     Footer Blocks, schema, FieldNodes, LSB-first validity, value bytes,
+#     Utf8 offsets and slots). The Parquet leg is pending the komira_parquet
+#     reader and writer port; it lands as soon as that port does.
 #   test_formats_hive_discovery -- EagerGlobDiscovery (directory and glob,
 #     including a glob whose static prefix is the non-ASCII directory) and
 #     PrunedHiveDiscovery (inferred partition schema, byte-exact partition
@@ -59,6 +70,20 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     stay green, since none of them reads through a dispatcher). The same
 #     move in the serial loop: 13 komira_orc tests red (exit 139/132/1).
 #
+# Planted against test_formats_arrow_ipc:
+#   * the copy decoder reads each validity bitmap one byte late
+#     (_maybe_decode_validity_bitmap): komira_arrow_ipc's own tests red
+#     (test_ipc_file_e2e_write, test_ipc_file_e2e_pyarrow_batches,
+#     test_ipc_file_e2e_pyarrow_nullable, test_ipc_field_node_flat) and so
+#     does komira_orc's test_orc_arrow_write_primitive_null_drop, so this
+#     package does not build under it at all.
+#   * the assembly records Block.metaDataLength without the 8-byte prefix:
+#     red ("Footer Block 0 (264, 296, 192) is not the RecordBatch message at
+#     (264, 304, 192)").
+#   * the assembly flips the first validity bit of each RecordBatch: red, six
+#     mismatches, e.g. "file Zürich id: validity bit 0 (row 0) is False" and
+#     "file Zürich copy row 0 id: NULL, want 1" (copy and mmap).
+#
 # `deps` lists the Mojo packages of the full transitive closure of the five
 # format/storage packages the fixture and tests use (each package's C helper
 # libraries come with it).
@@ -68,11 +93,13 @@ mojo_library(
     conda = False,
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_avro:komira_avro",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
         "//src/komira_csv:komira_csv",
         "//src/komira_fork_join:komira_fork_join",
         "//src/komira_fs:komira_fs",
@@ -108,6 +135,7 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_formats_arrow_ipc.mojo",
         "tests/test_formats_edge_binary.mojo",
         "tests/test_formats_edge_text.mojo",
         "tests/test_formats_foreign_avro.mojo",
@@ -117,4 +145,13 @@ mojo_library(
         "tests/test_formats_projected_roundtrip.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
 )

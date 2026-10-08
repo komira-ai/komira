@@ -1,10 +1,13 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
+load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
+load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 load("@komira//tools/build/lint:codec_owner.bzl", "codec_owner")
+load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -27,7 +30,27 @@ export_file(
 
 shell_lint(
     name = "shell_lint",
-    srcs = ["buck2"] + glob([".github/ci/*.sh"]),
+    srcs = ["buck2"] + glob([".github/ci/**/*.sh"]),
+)
+
+# The cases of the coverage workflow's two scripts (.github/workflows/coverage.yml's
+# poster and .github/ci/coverage_measure.sh), against stand-ins for gh, git and
+# buck2 and the real covcheck: .github/ci/tests/coverage_ci_cases.sh. A
+# validation, so building this target (or `//...`) runs them.
+coverage_ci_cases(
+    name = "coverage_ci_cases",
+    script = ".github/ci/tests/coverage_ci_cases.sh",
+    srcs = [
+        ".github/ci/coverage_measure.sh",
+        ".github/ci/tests/build_report_branch_failed.json",
+        ".github/ci/tests/build_report_gate_failed.json",
+        ".github/workflows/coverage.yml",
+    ],
+    data = {
+        "tools/build/coverage/policy.bzl": "//tools/build/coverage:policy.bzl",
+        "tools/build/coverage/ratchet.tsv": "//tools/build/coverage:ratchet.tsv",
+        "tools/build/mojo/coverage_branch.bzl": "//tools/build/mojo:coverage_branch.bzl",
+    },
 )
 
 WORKFLOWS = glob([".github/workflows/*.yml"])
@@ -63,10 +86,14 @@ no_endpoint(
 # says which). So a *_e2e, *_loopback or *_conformance package directly
 # under src/ fails the build, and so does a komira_test_* one `shipped` does
 # not name. The packages are read from the build graph (every BUCK file under
-# src/), so a new one is checked with no edit here. Declared in every
-# checkout, so a repository using komira as a cell builds it by name.
+# src/), so a new one is checked with no edit here. `map` is the module map:
+# every one of those packages has exactly one row there, and no row names a
+# directory that is not a package, so a new, moved or deleted package fails
+# here until the map says so. Declared in every checkout, so a repository
+# using komira as a cell builds it by name.
 src_layout(
     name = "src_layout",
+    map = "docs/architecture.md",
     # The test libraries komira ships, directly under src/ (the harnesses
     # under src/tests/helpers build on them).
     shipped = [
@@ -100,12 +127,18 @@ _TESTS_LINTS = [
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
+    "//src/tests/conformance/komira_connect_conformance:deps_lint",
+    "//src/tests/conformance/komira_db_conformance:deps_lint",
     "//src/tests/conformance/komira_http_conformance:deps_lint",
     "//src/tests/conformance/komira_json_conformance:deps_lint",
     "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
+    "//src/tests/e2e/komira_formats_e2e:deps_lint",
     "//src/tests/e2e/komira_http_tls_e2e:deps_lint",
     "//src/tests/e2e/komira_job_supervisor_loopback:deps_lint",
+    "//src/tests/e2e/komira_pandas_door_e2e:deps_lint",
     "//src/tests/e2e/komira_secrets_e2e:deps_lint",
+    "//src/tests/e2e/komira_shuffle_e2e:deps_lint",
+    "//src/tests/e2e/komira_tls_interop_e2e:deps_lint",
     "//src/tests/e2e/komira_udf_e2e:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
@@ -204,6 +237,37 @@ _TESTS_LINTS = [
     name = "readme_api_coverage",
     enforce = False,
     exceptions = "tests/readme_api_exceptions.tsv",
+    tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# The surface x capability matrix (tools/build/lint/surface_capability_matrix.bzl;
+# the rules and today's census: docs/surface_capability_matrix.md): for every
+# surface and every capability of the plan, the surface e2e test target that
+# exercises it end to end (in src/tests/e2e/<surface>_e2e/), or `-`. The
+# ledger is tests/surface_capability_matrix.bzl, Starlark so the build graph
+# resolves each named target (one that does not exist fails the build). It
+# fails on a malformed or lying row (a duplicate pair, an unknown name, a
+# target outside its surface's package or no test), on a capability not
+# grounded in the plan constants of the files `grounding` names (or a
+# constant of those families no capability or NOT_CAPABILITIES row names),
+# and on fewer filled cells than `floor`. Raising the floor to the new count
+# in the change that fills a cell, and never lowering it, is a review rule:
+# the lint fails only below it. A missing cell is never a finding:
+# `[report]` and `[matrix]` are the census.
+[surface_capability_matrix(
+    name = "surface_capability_matrix",
+    capabilities = CAPABILITIES,
+    floor = 0,
+    grounding = {
+        "src/komira_arrow/write_target.mojo": ["WFMT_"],
+        "src/komira_plan_expr/expr.mojo": ["EXPR_"],
+        "src/komira_plan_expr/fs_descriptor_pod.mojo": ["FS_SCHEME_"],
+        "src/komira_plan_expr/udf_data.mojo": ["UDF_KIND_"],
+        "src/komira_plan_ir/logical_plan.mojo": ["PLAN_", "SOURCE_", "JOIN_"],
+    },
+    not_capabilities = NOT_CAPABILITIES,
+    rows = MATRIX,
+    surfaces = SURFACES,
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 

@@ -1,8 +1,8 @@
 # Repository lint tests
 
 The sections of [the tests](README.md) for the lints that hold the
-repository's own tree: test welding, README API coverage and the layout of
-`src/`. Each keeps its number; [`run_tests.sh`](run_tests.sh) runs them with
+repository's own tree: test welding, README API coverage, the layout of
+`src/`, the codec owner lint and the surface capability matrix. Each keeps its number; [`run_tests.sh`](run_tests.sh) runs them with
 the rest.
 
 ## 39. Test welding
@@ -109,15 +109,120 @@ not name, a `shipped` name that is no package there, and any package not at
 one of the two places. `//:src_layout` in the root [`BUCK`](../../../BUCK)
 reads the packages from the build graph (the root package's subpackages, the
 nearest directories holding a BUCK file), so it is declared in every checkout
-and a new package is checked with no edit.
+and a new package is checked with no edit to a BUCK file. Given a `map` (the
+root target names [docs/architecture.md](../../../docs/architecture.md#the-module-map)),
+it also reads the module map's table rows, so a new package needs its row
+there: every package under `src/` has
+exactly one row whose link is its directory and whose name is the
+directory's, and no row links a directory under `src/` that is not a
+package. The root call must name `map`: without it the
+macro fails at load, so the map check cannot be dropped silently.
 [`functional/src_layout:ok`](functional/src_layout/BUCK) is a planted list
 ([`fixture.bzl`](functional/src_layout/fixture.bzl): a package of each kind,
 a `*_loopback` under `e2e`, a shipped `komira_test_*`, a name holding `e2e`
 without ending in it, and an `*_e2e` package outside `src/`) that must pass;
 each target of [`negative/src_layout`](negative/src_layout/BUCK) adds one
-defect to it and must fail naming it.
+defect to it and must fail naming it; the `map_*` ones plant a defect in the
+map ([`map.txt`](functional/src_layout/map.txt)): a package with no row, a
+row for a package that is gone, two rows for one package, a misnamed row.
 
 ```sh
 ./buck2 build //:src_layout tests//functional/src_layout:ok
 ./buck2 build tests//negative/src_layout:top_e2e   # must fail: //src/komira_foo_e2e: a test-only package directly under src/
+./buck2 build tests//negative/src_layout:map_missing_row   # must fail: //src/komira_new: no row in ...
+```
+
+## 48. Codec owner lint
+
+[`codec_owner`](../lint/codec_owner.bzl) is a validation over every `.mojo`
+file under `src/` of a tree: outside its owner directories (for
+`//:codec_owner`, `komira_compression` and its implementation layers
+`komira_zlib` and `komira_lz4`) no file names a snappy C symbol as a whole
+string literal (either quote, with or without the `komira_` prefix), starts a
+string literal with a codec library soname (`libz`, `libzstd`, `liblz4`,
+`libbz2`, `liblzma`, `libsnappy`; `.so` or `.dylib`), or imports
+`komira_zlib` or `komira_lz4`. A comment line is not a site; a line with a
+trailing comment is. The owners must hold a snappy declaration and the five
+sonames, so those patterns cannot stop matching unnoticed; this test pins
+the rest. Its action is [`codec_owner.sh`](../lint/codec_owner.sh).
+[`functional/codec_owner:ok`](functional/codec_owner/BUCK) builds a planted
+tree ([`fixture.bzl`](functional/codec_owner/fixture.bzl)) whose owners hold
+every form, beside near misses outside them (comment lines, indented or not,
+a trailing comment, packages whose names only start or end like the layers'
+(`komira_zlibx` in the middle of an import list, `my_komira_lz4`), an import
+list inside a string, a snappy name as
+an identifier or inside a longer string, a codec library name with no soname
+suffix); `:ok_prefixed` builds the same tree with the snappy owner declaring
+`"komira_snappy_uncompress"`. Each target of
+[`negative/codec_owner`](negative/codec_owner/BUCK) plants one site in the
+same tree and must fail naming its file, line and code: a snappy symbol on
+the `external_call[` line, on the next, prefixed, single- and triple-quoted;
+each soname as `.so`, one as `.dylib`, one single-quoted, one with a trailing
+comment; each import shape (`from x import`, `from x.m import`, a
+parenthesised import, `import x.m`, `import x as y`, `import a, x`,
+`import x, a`, `import a,x`, `import x,a`, `import a, x, b`, `import a, b, x`,
+`import a, x.m`, `import a, x as y`, an indented
+`from x import` and an indented `import a, x`); a directory whose name only starts with an owner's. Two
+more drop an owner file (the snappy owner, the libz layer) and must fail
+naming the unmet check; an empty tree fails as checking nothing, and a target
+with no owners, or naming both or neither of `tree` and `files`, is refused
+at analysis.
+
+```sh
+./buck2 build //:codec_owner tests//functional/codec_owner:ok tests//functional/codec_owner:ok_prefixed
+./buck2 build tests//negative/codec_owner:snappy_single   # must fail: plant.mojo:2: _ = external_call['snappy_compress', Int32]() -- codec FFI outside its owners
+```
+
+## 53. The surface capability matrix
+
+Product coverage is every capability of the plan exercised through every
+surface by an end-to-end test of that surface.
+[`surface_capability_matrix`](../lint/surface_capability_matrix.bzl) is a
+validation over its ledger, one row per (surface, capability) naming the test
+target that exercises the capability, or `-`. It writes the census
+(`[matrix]`, `[report]`) and never fails on a missing cell. It fails on a row
+that is malformed or lies: an unknown surface or capability, a pair with two
+rows or none, an empty field, a target outside its surface's own package
+exactly (`src/tests/e2e/<surface>_e2e`, read from where Buck2 puts the
+target, not from the label's text: not a subpackage, not a longer name), a
+target whose default outputs another package's target made (an alias of a
+test elsewhere), a target that is no test (no `ExternalRunnerTestInfo`, no
+welded `test_srcs`), one test filling two cells of a surface, and a target
+that does not exist (the macro makes every named target a dependency, so
+Buck2 refuses the graph; a target incompatible with the lint's platform fails
+it too, even under a pattern). It also fails when the vocabulary is not
+grounded in the plan: a capability naming a constant no grounding file
+declares (as `comptime <ID>: UInt8 = <n>` or `comptime <ID> = UInt8(<n>)`),
+a constant of a grounding family (a prefix such as `PLAN_` or `EXPR_`) that
+no capability and no `NOT_CAPABILITIES` row names or that is written in
+another form, a capability listed twice; and when fewer cells are filled than
+its `floor` (that the floor only rises is a review rule). The ledger is
+[`tests/surface_capability_matrix.bzl`](../../../tests/surface_capability_matrix.bzl);
+the rules and today's census are in
+[`docs/surface_capability_matrix.md`](../../../docs/surface_capability_matrix.md).
+[`functional/surface_capability_matrix:ok`](functional/surface_capability_matrix/BUCK)
+holds a planted matrix ([`fixture.bzl`](functional/surface_capability_matrix/fixture.bzl):
+two surfaces, five capabilities, two grounding files with near misses (a
+constant of type `Int`, a commented-out one, an indented one) and an
+unannotated `UInt8(16)` constant that must be read, and three cells filled by
+real `mojo_library` and `mojo_test` targets in planted `pandas_e2e` and
+`polars_e2e` packages, one named by a cell-relative label), whose census must
+equal
+[`expect_matrix.tsv`](functional/surface_capability_matrix/expect_matrix.tsv)
+and [`expect_report.txt`](functional/surface_capability_matrix/expect_report.txt)
+byte for byte. Each target of
+[`negative/surface_capability_matrix`](negative/surface_capability_matrix/BUCK)
+plants one defect in the same lists and must fail naming it (five of them
+must name exactly one finding); the planted targets they name are a
+test-less library, an alias of a test outside `src/tests/e2e`, a
+subpackage and a longer-named package of the pandas package, and a macOS-only
+test, which
+[`negative/surface_capability_matrix/incompatible`](negative/surface_capability_matrix/incompatible/BUCK)
+names and which is built by its package pattern. The lint only analyses the
+e2e targets; `tests//functional/...` builds them.
+
+```sh
+./buck2 build //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
+./buck2 build tests//negative/surface_capability_matrix:alias           # must fail: ... stands for a target of tests//functional/surface_capability_matrix
+./buck2 build tests//negative/surface_capability_matrix/incompatible:   # must fail: ... because its transitive dep .../pandas_e2e:test_mac
 ```

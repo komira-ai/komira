@@ -70,6 +70,18 @@ page header or engine around it:
   date integers, timestamps, text or binary BYTE_ARRAY), the post-decode
   re-labels, and the scatter of dense values into a nullable array by their
   definition-level bits.
+- `selection_vector`, `gather_common`, `gather_byte_array` and `gather_dict`:
+  reading only the selected rows of a column chunk. `SelectionInterval` is a
+  (skip, select) run of a row filter; `SelectionInterval.from_bool_mask` (or
+  `boolean_to_intervals`) turns a `BooleanArray` mask into the runs, a 64-bit
+  word at a time. The package-private gathers copy the selected rows out of
+  decompressed pages, non-null or nullable: PLAIN BYTE_ARRAY pages by walking
+  the length prefixes and copying only the selected bodies, dictionary-encoded
+  pages by decoding the codes and looking up only the selected ones (a code
+  outside the dictionary gathers 0, or an empty string). Each refuses a
+  `num_selected` that is not the intervals' total, intervals past the last
+  page, and output past the Int32 string offsets; the BYTE_ARRAY walk refuses
+  a malformed length prefix with the PLAIN decode's message.
 
 Every public decoder takes the encoded bytes as a `Span[UInt8]` and writes into
 a `Span` (or a buffer) whose length it respects: a request larger than the
@@ -78,7 +90,62 @@ negative length, a value count the page cannot hold, a run or block header
 that decodes to a negative or overflowing size) raises or stops the decode; it
 never reads or writes outside the input and output.
 
+The package also reads a Parquet file's footer and the metadata around its
+pages:
+
+- `file_reader`: `ParquetFileReader[FS]`, a reader over any `FileSystem`.
+  `read_parquet_preamble` fetches the trailer and the Thrift footer in one
+  tail read (or two, when the footer is larger than the read); the reader
+  keeps the footer bytes and reads data ranges, from a mapping of the file on
+  an mmap-backed file system (`LocalFs`) and through `fs.read_at` on any
+  other. `open_metadata_only` (no mapping) and `open_footer_only` (no I/O)
+  serve callers that never read data; `clone_sharing_mmap` gives a second
+  reader over the same mapping. Every range is checked against the file.
+- `thrift_compact`: `ThriftCompactReader`, the Thrift Compact Protocol reader
+  every parser here shares. It never reads outside its view, refuses a
+  varint past 64 bits, a length or element count the bytes cannot hold, and
+  nesting past 64 levels; `parse_metadata_summary` reads the footer's
+  top-level fields.
+- `metadata_parser`: `parse_full_metadata`, the whole `FileMetaData` (schema,
+  row groups, column chunks, statistics, key-value metadata). Statistics
+  field 9 is the spec's `nan_count`; a chunk's HyperLogLog registers come
+  from its own key-value metadata (`komira_parquet_api.hll_footer`).
+- `footer_header`: the light parses. `parse_metadata_header_and_schema`
+  stops once `num_rows` and the schema are read and finds `ARROW:schema` by
+  a backward byte search instead of walking the row groups;
+  `parse_metadata_num_rows_only` reads `num_rows` alone. Both report the
+  bytes they examined.
+- `page_header_parser`: the PageHeader of a data page (V1 and V2) or a
+  dictionary page, from a `Span`, with every size and count checked before a
+  decoder can use it.
+- `bloom_reader`, `bloom_pruner`: a column chunk's split-block bloom filter
+  (xxHash64, as parquet-format's BloomFilter.md defines it), and the
+  row-group pruner that probes it for `col == literal` leaves under AND and
+  OR. It prunes only when a filter proves a value absent.
+- `num_rows_cache`: `ParquetNumRowsCache`, a `(path, size) -> num_rows`
+  cache.
+- `partition_pred_bridge`: maps a partition predicate between its plan form
+  (`komira_plan_expr.partition_pred_pod`) and the form the Hive discovery
+  prunes with (`komira_fs.pruned_hive_discovery`).
+
 Every example below runs as a test when the package is built.
+
+## The footer
+
+```mojo
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_parquet.metadata_parser import parse_full_metadata
+from std.testing import assert_equal
+
+# FileMetaData with version 2 (field 1, i32) and num_rows 3 (field 3, i64):
+# each field header is `delta << 4 | type`, each integer a zigzag varint.
+var footer: List[UInt8] = [0x15, 0x04, 0x26, 0x06, 0x00]
+var buf = OwnedAlignedBuffer(len(footer))
+buf.copy_from_bytes_list(footer)
+var md = parse_full_metadata(buf.view_ro())
+assert_equal(md.version, 2)
+assert_equal(md.num_rows, 3)
+```
 
 ## RLE / Bit-Packing Hybrid
 
@@ -192,6 +259,24 @@ assert_equal(offsets.read_i32_le_at(4), 3)
 assert_equal(offsets.read_i32_le_at(8), 5)
 ```
 
+## Selection intervals
+
+```mojo
+from komira_arrow.boolean_array import BooleanArray
+from komira_parquet.selection_vector import SelectionInterval
+from std.testing import assert_equal
+
+# Rows 2, 3 and 6 of 8 pass a filter: skip 2, select 2, then skip 2, select 1.
+var mask = BooleanArray.allocate(8)
+mask.data.set(2)
+mask.data.set(3)
+mask.data.set(6)
+var runs = SelectionInterval.from_bool_mask(mask)
+assert_equal(len(runs), 2)
+assert_equal(Int(runs[1].skip), 2)
+assert_equal(Int(runs[1].select), 1)
+```
+
 ## The decode arms
 
 ```mojo
@@ -212,6 +297,10 @@ them fails. Each encoding is checked against values encoded by the test itself
 from the format's definition (parquet-format's Encodings.md), at every bit
 width and at counts on both sides of each kernel's vector step, with sentinels
 past every output to catch a write too far. The refusals are tested with the
-hostile inputs they exist for. `test_no_env_reads` scans the package's
-sources: no environment read, no raw pointer in a public signature, no import
-outside the package's deps.
+hostile inputs they exist for. The footer readers are checked the same way:
+footers, page headers and bloom filter headers are written by the tests from
+parquet.thrift's field ids, files are written into the test's own scratch
+directory, and a file system that is not mmap-backed is stood in by an
+in-memory one. `test_no_env_reads` scans the package's sources: no
+environment read, no raw pointer in a public signature, no import outside
+the package's deps.

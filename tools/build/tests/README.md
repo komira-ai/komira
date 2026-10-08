@@ -881,9 +881,7 @@ the same README in a library with `conda = False`, builds.
 [the repository lint tests](lint_tests.md#40-readme-api-coverage).
 
 ## 41. Coverage builds
-
-[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
-binary with line tables per `test_srcs` entry and leave every release action as it is; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0 binary per test and move no release action of a library, only its conda package's joins; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
 ## 42. Pointer lint
 
@@ -923,10 +921,7 @@ the tree, and must fail naming it.
 ```
 
 ## 43. Coverage runs
-
-Each test's coverage binary also runs under kcov through the release gate's runner
-([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
-[`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+Each test's coverage binary also runs under kcov ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`; [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
 
 ## 44. Public boundary
 
@@ -984,49 +979,15 @@ querying its attributes, so narrowing it fails.
 
 ## 45. The layout of src/
 
-`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`. The test is in
-[the repository lint tests](lint_tests.md#45-the-layout-of-src).
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in [the repository lint tests](lint_tests.md#45-the-layout-of-src).
 
-## 48. Codec owner lint
-
-[`codec_owner`](../lint/codec_owner.bzl) is a validation over every `.mojo`
-file under `src/` of a tree: outside its owner directories (for
-`//:codec_owner`, `komira_compression` and its implementation layers
-`komira_zlib` and `komira_lz4`) no file names a snappy C symbol as a whole
-string literal (either quote, with or without the `komira_` prefix), starts a
-string literal with a codec library soname (`libz`, `libzstd`, `liblz4`,
-`libbz2`, `liblzma`, `libsnappy`; `.so` or `.dylib`), or imports
-`komira_zlib` or `komira_lz4`. A comment line is not a site; a line with a
-trailing comment is. The owners must hold a snappy declaration and the five
-sonames, so those patterns cannot stop matching unnoticed; this test pins
-the rest. Its action is [`codec_owner.sh`](../lint/codec_owner.sh).
-[`functional/codec_owner:ok`](functional/codec_owner/BUCK) builds a planted
-tree ([`fixture.bzl`](functional/codec_owner/fixture.bzl)) whose owners hold
-every form, beside near misses outside them (comment lines, indented or not,
-a trailing comment, packages whose names only start or end like the layers'
-(`komira_zlibx` in the middle of an import list, `my_komira_lz4`), an import
-list inside a string, a snappy name as
-an identifier or inside a longer string, a codec library name with no soname
-suffix); `:ok_prefixed` builds the same tree with the snappy owner declaring
-`"komira_snappy_uncompress"`. Each target of
-[`negative/codec_owner`](negative/codec_owner/BUCK) plants one site in the
-same tree and must fail naming its file, line and code: a snappy symbol on
-the `external_call[` line, on the next, prefixed, single- and triple-quoted;
-each soname as `.so`, one as `.dylib`, one single-quoted, one with a trailing
-comment; each import shape (`from x import`, `from x.m import`, a
-parenthesised import, `import x.m`, `import x as y`, `import a, x`,
-`import x, a`, `import a,x`, `import x,a`, `import a, x, b`, `import a, b, x`,
-`import a, x.m`, `import a, x as y`, an indented
-`from x import` and an indented `import a, x`); a directory whose name only starts with an owner's. Two
-more drop an owner file (the snappy owner, the libz layer) and must fail
-naming the unmet check; an empty tree fails as checking nothing, and a target
-with no owners, or naming both or neither of `tree` and `files`, is refused
-at analysis.
-
-```sh
-./buck2 build //:codec_owner tests//functional/codec_owner:ok tests//functional/codec_owner:ok_prefixed
-./buck2 build tests//negative/codec_owner:snappy_single   # must fail: plant.mojo:2: _ = external_call['snappy_compress', Int32]() -- codec FFI outside its owners
-```
+## 46. Coverage gate
+With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
+## 47. Branch coverage runs
+[`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs [these checks](coverage_runs.md#test-47-branch-coverage-runs).
+## 48. [Codec owner lint](lint_tests.md#48-codec-owner-lint)
+## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
+## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
 
 ## Diagnostics
 

@@ -465,7 +465,7 @@ struct TlsClientStream[US: IoStream & Movable & Deinitable](
         # RETURNS the bit directly (verified against api/unstable/quic.h; there
         # is NO out-parameter). We marshal the bool return.
         var raw = self._conn._raw_conn_ptr_for_test()
-        var enabled = external_call["s2n_connection_is_quic_enabled", Bool](raw)
+        var enabled = external_call["komira_s2n_connection_is_quic_enabled", Bool](raw)
         if enabled:
             return Int32(1)
         return Int32(0)

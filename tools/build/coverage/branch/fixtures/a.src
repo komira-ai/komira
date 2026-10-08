@@ -1,0 +1,22 @@
+# A made-up library source for cov_branch_classify's cases (README.md), staged as a.mojo.
+def pick(n: Int, flag: Bool) raises -> String:
+    if n < 0:
+        raise Error(String("negative: ") + String(n))
+    elif n == 0:
+        return "zero"
+    var kind = String("big") if n > 9 else String("small")
+    var i = 0
+    while i < n:
+        i += 1
+    for _ in range(1, n):
+        i -= 1
+    if n > 3 or flag:
+        return kind
+    if n > 2 and flag:
+        return kind + "!"
+    var half = n // 2
+    var rest = n % 2
+    check(half + rest)
+    for part in kind.split(sep(",")):
+        i += 1
+    return kind

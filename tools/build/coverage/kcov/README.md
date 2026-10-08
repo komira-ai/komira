@@ -294,8 +294,10 @@ traced process to exit, so a child the test left behind decided it
 ([Patches](../../toolchains/kcov/README.md#patches)). A test that fails under
 kcov fails the action (its output from `gate_runner.sh`, then `COVERAGE RUN
 FAILED`), although its release gate passed. gate_runner's banner is left
-out: it says the library's package is not produced, and the package does
-not depend on a coverage run.
+out: it would say the release gate's test failed. With coverage on, the
+conda package (`<name>_conda`) waits for every coverage run; the library
+and its dependents do not
+([The build gate](../README.md#the-build-gate)).
 
 **The run is bounded.** kcov waits for every process the test started
 before it writes the report, so a test that leaves a child running would
@@ -306,7 +308,10 @@ that whole process group when the run has not ended after the limit, 450 s
 with `The test left processes running or did not finish within 450 s under
 kcov`, after the output the test wrote. A process of the group still
 running (not a zombie) 10 s after that kill fails the action instead with
-`processes of the coverage run survived the kill`, naming it. The slowest run measured took
+`processes of the coverage run survived the kill`, naming it. That scan reads /proc, so it first
+requires /proc to show the run's shell under its own pid (`/proc/$$/stat` and `/proc/self/stat`
+both start with `$$`): a /proc of another PID namespace, or one hiding processes, would list none
+of the group, and the action fails instead with `/proc is not readable as this run's own`. The slowest run measured took
 119.6 s of worker time; the limit is over three times that and under 600
 s, buck2's default timeout of a test action. Only a fixture of the tests
 cell may set another `limit_s` (test 43 uses 20 s). kcov refused by the executor (a line of
@@ -320,7 +325,10 @@ kcov's) and runs without address randomization (kcov sets
 source and the library's sources under `buck-out/` (the line tables name
 them relative to it); kcov shares its TMPDIR (kcov writes there only when it
 cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
-kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`);
+kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`),
+and nothing of `cov_run.sh`'s own (its tools get `LC_ALL=C` per command
+before the test and exported after it, since `gate_runner.sh` passes on what
+it does not set);
 and the run ends when every process the test started has exited, since
 kcov follows each fork, where the gate waits for the test alone (so the run
 is bounded, above). Its CPUs are the gate's: kcov v42 pins itself and the test to one
@@ -393,6 +401,7 @@ part way; a probe first checks that the shell can do this.
 | section headers past the end | refused, exit 1, untouched | reading section headers without a bounds check (ReleaseSafe panics, exit 134) |
 | compressed section, `e_shnum` 0 | an ELF64 file whose `e_shnum` is 0 and whose section 0 `sh_size` holds the count (3): the compressed section is found and refused; with flags 0x2 it is relocated | the count in section 0 not read (planted: red) |
 | compressed section, ELF32 | an ELF32 file (40-byte section headers, 32-bit flags) with a compressed section: refused, untouched; with flags 0x2 it is relocated | ELF32 files not looked at (planted: red) |
+| compressed section, ELF32, `e_shnum` 0 | an ELF32 file whose `e_shnum` is 0 and whose section 0 holds the count (3) in its 32-bit `sh_size` (offset 0x14 of its header): the compressed section is found and refused; with flags 0x2 it is relocated | the ELF32 count in section 0 not read (planted: red) |
 
 `cov_zig_cases.sh` runs `cov_zig` from a directory whose `real/zig` is a
 stand-in (a script that records its arguments and copies a given ELF file to
@@ -414,6 +423,7 @@ fixtures put the working directory where a C runtime unit's
 | not ELF | exit 1 | |
 | logical directory | reached through a symbolic link: `$PWD` and an absolute `$BUCK_SCRATCH_PATH` outside it are relocated too | `$PWD` ignored |
 | logical only | the output names only `$PWD`, not `getcwd`: relocated, exit 0 | a zero count of `getcwd` alone failing the link (red-first: it did) |
+| scratch only | the output names only an absolute `$BUCK_SCRATCH_PATH` outside the working directory, given: it is relocated, and the link fails with `has debug sections but holds the working directory`, exit 1 | the zero count summing every directory given, not only the working directory's spellings (planted: red) |
 | release level | `-O1` to `-O4`, `-Ofast`, `-Os`, `-Oz` on a link: exit 1 naming the level, `real/zig` not run; `-O0`, `-Og`, `-O` and a `-c -O2` compile pass | no refusal (red-first); refusing a Debug level (red-first: `-Og` was refused) |
 | pinned zig | a C file compiled with `-g` and linked through `cov_zig` with `-Wl,--strip-debug`: `.debug_line` kept, the placeholder present, the directory absent, no compressed section | the flags rejected by zig 0.12 |
 | pinned zig, release | the same link through zig directly has no `.debug_line`, so the previous case's line tables are `cov_zig`'s doing | |
