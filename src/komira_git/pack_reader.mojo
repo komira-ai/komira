@@ -114,8 +114,8 @@ struct ExternalBases(Copyable, Movable):
         self._kinds = List[ObjectKind]()
         self._payloads = List[List[UInt8]]()
 
-    def add(mut self, kind: ObjectKind, payload: Span[UInt8, _]) -> ObjectId:
-        """Add an object; returns its id."""
+    def add(mut self, kind: ObjectKind, payload: Span[UInt8, _]) raises -> ObjectId:
+        """Add an object; returns its id. Raises what `hash_object` raises."""
         var id = hash_object(self._format, kind, payload)
         var key = id.to_hex()
         if key not in self._by_id:
