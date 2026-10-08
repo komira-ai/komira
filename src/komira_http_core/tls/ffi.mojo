@@ -38,6 +38,8 @@
 #   - s2n_shutdown
 #   - s2n_get_server_name
 #   - s2n_strerror
+#   - s2n_connection_request_key_update / s2n_connection_get_key_update_counts
+#     / s2n_connection_get_actual_protocol_version (TLS 1.3 key update)
 #
 # CALLBACK API DELIBERATELY EXCLUDED (no trampolines):
 # s2n_connection_set_send_cb / s2n_connection_set_recv_cb
@@ -1120,3 +1122,45 @@ def s2n_strerror_debug(
         "komira_s2n_strerror_debug",
         S2nBytePtr,
     ](error, lang)
+
+
+# =============================================================================
+# TLS 1.3 key update (safe surface: key_update.mojo, TlsConnection)
+# =============================================================================
+
+# s2n_peer_key_update (s2n.h): whether the KeyUpdate message also asks the
+# peer to update its sending key. s2n 1.5.6 accepts only NOT_REQUESTED.
+comptime S2N_KEY_UPDATE_NOT_REQUESTED: Int32 = 0
+comptime S2N_KEY_UPDATE_REQUESTED: Int32 = 1
+
+# S2N_TLS13 (s2n.h): the actual_protocol_version value of TLS 1.3.
+comptime S2N_TLS13: Int32 = 34
+
+
+def s2n_connection_request_key_update(
+    conn: S2nOpaquePtr, peer_request: Int32
+) -> Int32:
+    """s2n.h `int s2n_connection_request_key_update(struct s2n_connection
+    *conn, s2n_peer_key_update peer_request)`. Only marks the update
+    pending: the KeyUpdate goes out (and the sending key changes) on the next
+    `s2n_send`. Fails with S2N_ERR_INVALID_ARGUMENT for any `peer_request`
+    but NOT_REQUESTED; it does not check the handshake or the version."""
+    # SAFETY: synchronous call; `conn` is a live handle owned by the caller's
+    # TlsConnection; the enum is passed by value (C int ABI).
+    return external_call["s2n_connection_request_key_update", Int32](
+        conn, peer_request
+    )
+
+
+def s2n_connection_get_key_update_counts(
+    conn: S2nOpaquePtr, send_key_updates: S2nBytePtr, recv_key_updates: S2nBytePtr
+) -> Int32:
+    """api/unstable/ktls.h `int s2n_connection_get_key_update_counts(struct
+    s2n_connection *conn, uint8_t *send_key_updates, uint8_t
+    *recv_key_updates)`. Saturates at 255."""
+    # SAFETY: synchronous call. Both out-pointers address caller-owned stack
+    # bytes alive across the call; s2n writes one uint8_t through each and
+    # keeps neither.
+    return external_call["s2n_connection_get_key_update_counts", Int32](
+        conn, send_key_updates, recv_key_updates
+    )
