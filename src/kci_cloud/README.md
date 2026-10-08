@@ -34,7 +34,8 @@ The catalog says what each body arm of a resource is:
 from kci_cloud import ACCESS_CALL, FIELD_QUEUE, FIELD_SERVICE, FIELD_TABLE, PORTABLE, RETENTION_KEEP, Catalog, portability_word, retention_word
 
 var catalog = Catalog.v1()
-assert_equal(len(catalog.types), 13)
+for i in range(len(catalog.types)):  # every row is found by its own body arm
+    assert_equal(catalog.index_of(catalog.types[i].field), i)
 assert_equal(catalog.name_of(FIELD_SERVICE), "service")
 assert_equal(catalog.name_of(FIELD_QUEUE), "queue")
 ref service = catalog.types[catalog.index_of(FIELD_SERVICE)]
