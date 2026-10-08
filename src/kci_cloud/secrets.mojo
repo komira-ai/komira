@@ -1,6 +1,6 @@
 # =============================================================================
 # kci_cloud/secrets.mojo: the rules of the SECRET primitive, and of the
-# `secret_env` references a service or a job makes to a secret.
+# `secret_env` references a workload makes to a secret.
 # =============================================================================
 #
 # A `secret` resource is the CONTAINER of a secret value: kci creates it with
@@ -8,10 +8,11 @@
 # every cloud, that validate collects:
 #
 #   * on a `secret` (`secret_findings`): it runs as no identity, so it has no
-#     `uses` lines (write the line on the service or job that reads it, or on
-#     the identity that writes it);
-#   * on each `secret_env` entry of a service or a job
-#     (`secret_env_findings`), at `<service|job>.secret_env.<KEY>`:
+#     `uses` lines (write the line on the workload that reads it, or on the
+#     identity that writes it);
+#   * on each `secret_env` entry of a workload (a service, a container job
+#     or a worker; `secret_env_findings`), at `<arm>.secret_env.<KEY>`
+#     (`service.secret_env.TOKEN`):
 #       - the variable is not also set by `env` (the container would get one
 #         of two values, and which one is the cloud's choice, not the
 #         author's);
@@ -21,7 +22,7 @@
 #       - a `secret` names a `secret` resource of the list, the resource
 #         itself (never one of its outputs), and has no `store` beside it
 #         (the resource is in the store its cloud puts it in);
-#       - the identity the service or job runs as (its own, or its `run_as`
+#       - the identity the workload runs as (its own, or its `run_as`
 #         account) holds READ or READ_WRITE on that secret, through a `uses`
 #         line or a `grant`. THE REFERENCE IS NOT A GRANT: an edge that lets
 #         an identity read a secret is printed in the plan like every other
@@ -33,19 +34,17 @@
 # kci resolves to `<id>/secret`), so the run is created after the secret.
 # =============================================================================
 
-from kci_resource_proto.resource import Resource, SecretRef, Value
+from kci_resource_proto.resource import Resource, SecretRef
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding
 from kci_cloud.catalog import (
     ACCESS_READ,
     ACCESS_READ_WRITE,
-    FIELD_JOB,
     FIELD_SECRET,
-    FIELD_SERVICE,
-    body_field,
 )
 from kci_cloud.grants import GrantEdge, edges_of, identity_owner
 from kci_cloud.messaging import check_typed_ref
+from kci_cloud.workload import workload_of
 
 
 def secret_of(s: SecretRef) -> String:
@@ -70,8 +69,8 @@ def secret_findings(field: Int, r: Resource) -> List[Finding]:
                 String("uses"),
                 String(
                     "a secret runs as no identity, so it cannot use another resource;"
-                    " write the uses line on the service or job that reads it, or on"
-                    " the identity that writes it"
+                    " write the uses line on the workload that reads it, or on the"
+                    " identity that writes it"
                 ),
             )
         )
@@ -196,26 +195,16 @@ def _sorted_keys(d: Dict[String, SecretRef]) -> List[String]:
 
 
 def secret_env_findings(resources: List[Resource], r: Resource) -> List[Finding]:
-    """Every graph finding of the `secret_env` entries of the service or
-    job `r`, in key order; empty for any other type."""
+    """Every graph finding of the `secret_env` entries of the workload `r`,
+    in key order; empty for any other type."""
     var out = List[Finding]()
-    var field: Int
-    try:
-        field = body_field(r)
-    except:
-        return out^
-    if field != FIELD_SERVICE and field != FIELD_JOB:
+    var w = workload_of(r)
+    if not w:
         return out^
     var edges = _all_edges(resources)
-    var kind = String("service") if field == FIELD_SERVICE else String("job")
-    var secrets: Dict[String, SecretRef]
-    var env: Dict[String, Value]
-    if field == FIELD_SERVICE:
-        secrets = r.service.value().secret_env.copy()
-        env = r.service.value().env.copy()
-    else:
-        secrets = r.job.value().secret_env.copy()
-        env = r.job.value().env.copy()
+    var kind = w.value().kind.copy()
+    var secrets = w.value().secret_env.copy()
+    var env = w.value().env.copy()
     var keys = _sorted_keys(secrets)
     for i in range(len(keys)):
         try:

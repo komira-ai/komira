@@ -140,8 +140,8 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
     # list + list_dir_shallow work for prefix pruning, nothing more.
     comptime SUPPORTS_LAZY_HIVE: Bool = True
 
-    # The scheme tag: FS_SCHEME_AZURE (byte-identical to
-    # FsHandle.FS_AZURE). The SDK cloud read seam picks `FsHandle.from_azure`.
+    # The scheme tag: FS_SCHEME_AZURE, the code komira_source_url maps
+    # az://, abfs[s]:// and Azure Blob https:// URLs to.
     comptime SCHEME: UInt8 = FS_SCHEME_AZURE
 
     var _container: String

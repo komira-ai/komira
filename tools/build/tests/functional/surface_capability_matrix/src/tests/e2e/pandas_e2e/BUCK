@@ -1,0 +1,56 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+
+# Test 53 (the surface capability matrix): the planted pandas surface e2e
+# package. The matrix lint only analyses these targets; tests//functional/...
+# builds them (test_mac is skipped there, incompatible).
+#   pandas_e2e   a mojo_library whose test_srcs weld a test (WeldedTestsInfo),
+#                so a row may name it
+#   test_filter  a mojo_test (ExternalRunnerTestInfo), so a row may name it
+#   data.csv     no test, so a row naming it is a finding (negative not_test)
+#   lib_no_tests a mojo_library that welds no test: no test (negative lib_no_tests)
+#   alias_outside an alias of a test outside the package: its outputs are
+#                made there, so a row naming it is a finding (negative alias)
+#   test_mac     a test incompatible with the lint's platform: Buck2 refuses
+#                the lint that depends on it, even under a pattern (negative
+#                incompatible)
+
+mojo_library(
+    name = "pandas_e2e",
+    srcs = ["__init__.mojo"],
+    test_srcs = ["tests/test_scan_csv.mojo"],
+    conda = False,
+    visibility = ["PUBLIC"],
+)
+
+mojo_test(
+    name = "test_filter",
+    main = "tests/test_filter.mojo",
+    srcs = ["tests/test_filter.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "data.csv",
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "lib_no_tests",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    visibility = ["PUBLIC"],
+)
+
+alias(
+    name = "alias_outside",
+    actual = "//functional/surface_capability_matrix:test_outside",
+    visibility = ["PUBLIC"],
+)
+
+mojo_test(
+    name = "test_mac",
+    main = "tests/test_filter.mojo",
+    srcs = ["tests/test_filter.mojo"],
+    target_compatible_with = ["prelude//os/constraints:macos"],  # komira-limit:surface-matrix-incompatible-fixture
+    visibility = ["PUBLIC"],
+)

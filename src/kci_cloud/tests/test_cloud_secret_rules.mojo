@@ -7,7 +7,7 @@
 # validate. No cloud is needed: the fakes in kci_cloud_fake run these graphs
 # on every shape.
 #
-# 1. THE SECRET ROW: field 16, the sixth body arm (after the queue);
+# 1. THE SECRET ROW: field 16, the seventh body arm (after the queue);
 #    PORTABLE; exposes NAME only; accepts READ, WRITE and READ_WRITE (not
 #    CALL, SEND, RECEIVE or DESCRIBE); retention default KEEP (a written
 #    DELETE wins); a reference lands on `<id>/secret`.
@@ -95,8 +95,8 @@ def test_the_secret_row() raises:
     ref t = c.types[c.index_of(FIELD_SECRET)]
     assert_equal(t.name, "secret")
     assert_equal(t.portability, PORTABLE)
-    assert_equal(body_arms()[5].field, FIELD_SECRET, "the sixth arm, after the queue")
-    assert_equal(body_arms()[4].field, FIELD_QUEUE, "the queue stays the fifth")
+    assert_equal(body_arms()[6].field, FIELD_SECRET, "the seventh arm, after the queue")
+    assert_equal(body_arms()[5].field, FIELD_QUEUE, "the queue stays the sixth")
     assert_equal(len(t.exposes), 1, "a secret exposes NAME only")
     assert_true(t.exposes_output(String("NAME")))
     assert_false(t.exposes_output(String("ADDRESS")))
@@ -143,9 +143,9 @@ def test_every_secret_refusal_in_one_pass() raises:
         + String('"uses":[{"target":{"resource":"db"},"access":"READ"},')
         + String('{"target":{"resource":"other"},"access":"CALL"}]},')
         + String('{"id":"wr","serviceAccount":{},"uses":[{"target":{"resource":"other"},"access":"WRITE"}]},')
-        + String('{"id":"cron","job":{') + String(IMG) + String(',"onDemand":{},"runAs":{"resource":"wr"},')
+        + String('{"id":"cron","containerJob":{') + String(IMG) + String(',"runAs":{"resource":"wr"},')
         + String('"secretEnv":{"K":{"secret":{"resource":"other"}}}}},')
-        + String('{"id":"lost","job":{') + String(IMG) + String(',"onDemand":{},"runAs":{"resource":"nobody"},')
+        + String('{"id":"lost","containerJob":{') + String(IMG) + String(',"runAs":{"resource":"nobody"},')
         + String('"secretEnv":{"K":{"secret":{"resource":"db"}}}}},')
         + String('{"id":"g-describe","grant":{"principal":{"resource":"wr"},"target":{"resource":"db"},')
         + String('"access":"DESCRIBE"}}')
@@ -167,11 +167,11 @@ def test_every_secret_refusal_in_one_pass() raises:
     _expect(l, "api|service.secret_env.DUP|", "the variable is set by env and by secret_env")
     _expect(l, "api|service.env.ADDR|", '"db" (secret) does not expose ADDRESS')
     _expect(l, "api|uses[1]|", 'secret "other" does not accept access CALL')
-    _expect(l, "cron|job.secret_env.K.secret|", 'identity "wr" may not READ secret "other"')
+    _expect(l, "cron|container_job.secret_env.K.secret|", 'identity "wr" may not READ secret "other"')
     _expect(l, "g-describe|grant|", 'secret "db" does not accept access DESCRIBE')
     # a `run_as` naming no resource is refused once, on run_as; the READ rule
     # does not add a second finding about an identity that does not exist
-    _expect(l, "lost|job.run_as|", 'ref to missing resource "nobody"')
+    _expect(l, "lost|container_job.run_as|", 'ref to missing resource "nobody"')
     assert_equal(len(l), 14, "no other finding")
     print("  test_every_secret_refusal_in_one_pass: PASS")
 
@@ -190,7 +190,7 @@ comptime _GOOD = (
     '"LEGACY":{"name":"legacy","store":"primary"}}},'
     '"uses":[{"target":{"resource":"db"},"access":"READ"}]},'
     '{"id":"rot","serviceAccount":{}},'
-    '{"id":"cron","job":{"image":{"digest":"sha256:0011"},"onDemand":{},"runAs":{"resource":"rot"},'
+    '{"id":"cron","containerJob":{"image":{"digest":"sha256:0011"},"runAs":{"resource":"rot"},'
     '"secretEnv":{"T":{"secret":{"resource":"token"}}}}},'
     '{"id":"rot-token","grant":{"principal":{"resource":"rot"},"target":{"resource":"token"},'
     '"access":"READ_WRITE"}},'

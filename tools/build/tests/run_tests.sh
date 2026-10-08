@@ -361,6 +361,24 @@
 #      no package. With a module map (`map`; //:src_layout reads
 #      docs/architecture.md): a package with no row, a row naming no package,
 #      a second row for a package, and a row whose name is not its link's.
+#  46. The coverage gate and what ships waits for it: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
+#  53. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
+#      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
+#      surface and capability of the plan, against tests/surface_capability_matrix.bzl)
+#      and tests//functional/surface_capability_matrix:ok (a planted matrix,
+#      three cells filled by planted surface e2e targets, whose census must
+#      equal its expected files) build; each target of
+#      tests//negative/surface_capability_matrix fails naming its one planted
+#      defect: a target that does not exist, a repeated pair, an unknown
+#      capability or surface, a target in another surface's package, outside
+#      src/tests/e2e, in a subpackage or a longer-named package, an alias of a
+#      test elsewhere, a target that is no test (a file, a mojo_library that
+#      welds none), one test filling two cells of a surface, a pair with no
+#      row, an empty field, a capability grounded in no declared constant, a
+#      family constant no capability names or in a form the lint cannot read,
+#      a repeated capability, fewer filled cells than the floor, no surface,
+#      and (built by package pattern) a test incompatible with the lint's
+#      platform.
 set -uo pipefail
 
 umbrella=1
@@ -1322,6 +1340,42 @@ for want in \
     "empty|src_layout: checked nothing"; do
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
+
+# 53
+expect_green surface_capability_matrix //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
+N=tests//negative/surface_capability_matrix
+E=tests//functional/surface_capability_matrix/src/tests/e2e
+for want in \
+    "dangling|Unknown target \`test_join_left\` from package \`$E/polars_e2e\`" \
+    "duplicate|matrix row 11 (pandas, filter): a second row for the pair, first at row 2" \
+    "unknown_capability|matrix row 11 (pandas, window): unknown capability \`window\`" \
+    "unknown_surface|matrix row 11 (spark, filter): unknown surface \`spark\`" \
+    "other_surface|matrix row 7 (polars, filter): $E/pandas_e2e:test_filter is in $E/pandas_e2e, not $E/polars_e2e, the surface's own package" \
+    "outside_e2e|matrix row 5 (pandas, errors): tests//functional/surface_capability_matrix:test_outside is in tests//functional/surface_capability_matrix, not $E/pandas_e2e" \
+    "prefix_package|matrix row 5 (pandas, errors): $E/pandas_e2e_extra:test_x is in $E/pandas_e2e_extra, not $E/pandas_e2e" \
+    "subpackage|matrix row 5 (pandas, errors): $E/pandas_e2e/sub:test_sub is in $E/pandas_e2e/sub, not $E/pandas_e2e" \
+    "alias|matrix row 5 (pandas, errors): $E/pandas_e2e:alias_outside stands for a target of tests//functional/surface_capability_matrix (its outputs are made there" \
+    "lib_no_tests|matrix row 5 (pandas, errors): $E/pandas_e2e:lib_no_tests is no test" \
+    "shared_target|matrix row 5 (pandas, errors): $E/pandas_e2e:test_filter fills (pandas, filter) already, at row 2" \
+    "unparseable|src/plan/plan.mojo:14: PLAN_ODD is a constant of a grounding family in a form this lint cannot read" \
+    "not_test|matrix row 5 (pandas, errors): $E/pandas_e2e:data.csv is no test" \
+    "missing_pair|matrix: no row for (polars, errors)" \
+    "empty_field|matrix row 10 (polars, errors): an empty field" \
+    "ungrounded|capability udf_map: grounding \`UDF_KIND_MAPX\` is declared by no grounding file" \
+    "unclaimed|src/plan/plan.mojo:5: PLAN_CSE_REF is a plan constant that no capability and no not_capabilities row names" \
+    "vocabulary_duplicate|capabilities: filter is listed twice" \
+    "floor|floor: 3 cell(s) are filled and the floor is 4" \
+    "empty|surface_capability_matrix: checked nothing (no surface or no capability)"; do
+    expect_red "surface_capability_matrix_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+# Each of those yields its one finding and no other.
+for t in outside_e2e ungrounded empty_field alias shared_target; do
+    n=$(grep -o "surface_capability_matrix: [0-9]* finding line(s)" "$LOG/surface_capability_matrix_$t.log" | head -1)
+    if [ "$n" = "surface_capability_matrix: 1 finding line(s)" ]; then pass "surface_capability_matrix_${t}_alone"; else fail "surface_capability_matrix_${t}_alone: '$n', want 1 finding (see $LOG/surface_capability_matrix_$t.log)"; fi
+done
+# A row naming a test incompatible with the lint's platform fails the build
+# even under a package pattern, so the lint never drops out of //... silently.
+expect_red surface_capability_matrix_incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
 
 # 37
 pt_rc=0
