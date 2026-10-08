@@ -69,7 +69,8 @@ from .azure_client_spec import AzureClientSpec
 # or proxy that keeps returning a non-empty `<NextMarker>` (the same one
 # forever, say) would otherwise spin the loop, and grow its result, without
 # bound. At 5000 entries a page (Azure's maximum) this admits 500 million
-# names, far past any listing this filesystem is meant to serve.
+# names, far past any listing this filesystem is meant to serve. It is the
+# cap of every AzureFs until `set_list_max_pages` gives one another.
 comptime AZURE_LIST_MAX_PAGES: Int = 100_000
 
 
@@ -126,6 +127,8 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         the read methods reach it mutably from immutable `self` via
         `get_mut_interior(0)`.
       * `_spec: AzureClientSpec[C]` — what each client is built from.
+      * `_list_max_pages: Int` — the page cap of `list` and
+        `list_dir_shallow` (AZURE_LIST_MAX_PAGES unless set).
     """
 
     comptime File = AzureFileHandle
@@ -154,6 +157,8 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
     # What the lazy build (the lazy form's first verb, a clone's) makes a
     # client from: endpoint, credential and connector factory.
     var _spec: AzureClientSpec[Self.C]
+    # The most List Blobs pages one listing drains before it raises.
+    var _list_max_pages: Int
 
     def __init__(
         out self,
@@ -175,6 +180,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         slab.append(Optional[AzureClient[Self.C]](client^))
         self._client = slab^
         self._spec = spec^
+        self._list_max_pages = AZURE_LIST_MAX_PAGES
 
     def __init__(out self, var container: String, var spec: AzureClientSpec[Self.C]):
         """Construct an AzureFs bound to `container` whose client is built
@@ -184,23 +190,26 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         slab.append(Optional[AzureClient[Self.C]](None))
         self._client = slab^
         self._spec = spec^
+        self._list_max_pages = AZURE_LIST_MAX_PAGES
 
     def __init__(
         out self,
         var _container: String,
         var _client: Slab[Optional[AzureClient[Self.C]]],
         var _spec: AzureClientSpec[Self.C],
+        _list_max_pages: Int,
     ):
         """INTERNAL fieldwise ctor — used by `clone()` (infallible)."""
         self._container = _container^
         self._client = _client^
         self._spec = _spec^
+        self._list_max_pages = _list_max_pages
 
     # ---- FileSystem trait conformance ----
 
     def clone(self) -> Self:
         """Return a fresh `AzureFs[C]` with the same container + spec and
-        an EMPTY (lazily-built) client slab. INFALLIBLE per the FileSystem
+        an EMPTY (lazily-built) client slab and the same page cap. INFALLIBLE per the FileSystem
         trait; the AzureClient is built on the clone's FIRST read (it cannot
         be deep-copied, and the ctor is fallible)."""
         var slab = Slab[Optional[AzureClient[Self.C]]]()
@@ -209,6 +218,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
             _container=self._container.copy(),
             _client=slab^,
             _spec=self._spec.copy(),
+            _list_max_pages=self._list_max_pages,
         )
 
     # ---- Lazy client build (private helper, inlined into read methods) ----
@@ -236,6 +246,17 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         """A copy of the spec this file system builds its clients from."""
         return self._spec.copy()
 
+    def list_max_pages(self) -> Int:
+        """The most List Blobs pages `list` and `list_dir_shallow` drain
+        before they raise: AZURE_LIST_MAX_PAGES unless `set_list_max_pages`
+        gave another."""
+        return self._list_max_pages
+
+    def set_list_max_pages(mut self, n: Int):
+        """Set the page cap of `list` and `list_dir_shallow`; a value below
+        1 is taken as 1."""
+        self._list_max_pages = n if n >= 1 else 1
+
     def client_built(self) -> Bool:
         """True once this file system holds a client (seeded, or built by
         a verb)."""
@@ -253,7 +274,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         a "truncated-but-empty-marker" termination guard against a
         non-conforming proxy looping forever on the same URL, and a page cap:
         a service that keeps returning a non-empty `<NextMarker>` (the same
-        one forever, say) gets AZURE_LIST_MAX_PAGES requests and then an
+        one forever, say) gets `list_max_pages()` requests and then an
         error, never an unbounded loop.
 
         RECURSIVE listing (no delimiter), as S3Fs.list and GcsFs.list do:
@@ -276,7 +297,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         Raises:
           * If the borrowed AzureClient is the sentinel (not configured).
           * HTTP 4xx/5xx via AzureStore.list_page's error channel.
-          * After AZURE_LIST_MAX_PAGES pages that each carry a `<NextMarker>`
+          * After `list_max_pages()` pages that each carry a `<NextMarker>`
             ("page cap exceeded").
         """
         # Interior-mut ref to the owned AzureClient (single-worker;
@@ -291,14 +312,14 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         var marker = String("")
         var pages = 0
         # Pagination loop (mirror GcsFs.list): follow next_marker until
-        # is_truncated() is False, at most AZURE_LIST_MAX_PAGES requests.
+        # is_truncated() is False, at most `self._list_max_pages` requests.
         # Flat listing -> delimiter="".
         while True:
             pages += 1
-            if pages > AZURE_LIST_MAX_PAGES:
+            if pages > self._list_max_pages:
                 raise Error(
                     String("AzureFs.list: page cap exceeded (")
-                    + String(AZURE_LIST_MAX_PAGES)
+                    + String(self._list_max_pages)
                     + String(" List Blobs pages and the service still returns"
                     " a NextMarker)")
                 )
@@ -572,7 +593,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         loop lives HERE — mirroring `AzureFs.list`'s loop over `<NextMarker>`
         until `is_truncated()` is False, including the defensive
         truncated-but-empty-marker termination guard (non-conforming proxy)
-        and the AZURE_LIST_MAX_PAGES page cap. Here we list WITH `delimiter="/"` to get the one-level folded view.
+        and the `list_max_pages()` page cap. Here we list WITH `delimiter="/"` to get the one-level folded view.
 
         KEY FORM: returned entry names are BARE final path components (G.3
         finding). We do NOT re-prepend `az://container/`.
@@ -584,7 +605,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         Raises:
           * If the borrowed AzureClient is the sentinel (not configured).
           * HTTP 4xx/5xx via AzureStore.list_page's error channel.
-          * After AZURE_LIST_MAX_PAGES pages that each carry a `<NextMarker>`
+          * After `list_max_pages()` pages that each carry a `<NextMarker>`
             ("page cap exceeded").
         """
         var probe_prefix = prefix
@@ -604,13 +625,13 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         # folded view. BlobPrefixes -> dirs, Blobs -> files; the cloud store
         # returns keys lexicographically, and we append in arrival order so the
         # natural sorted order survives across pages. At most
-        # AZURE_LIST_MAX_PAGES requests, as `list`.
+        # `self._list_max_pages` requests, as `list`.
         while True:
             pages += 1
-            if pages > AZURE_LIST_MAX_PAGES:
+            if pages > self._list_max_pages:
                 raise Error(
                     String("AzureFs.list_dir_shallow: page cap exceeded (")
-                    + String(AZURE_LIST_MAX_PAGES)
+                    + String(self._list_max_pages)
                     + String(" List Blobs pages and the service still returns"
                     " a NextMarker)")
                 )

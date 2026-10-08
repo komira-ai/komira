@@ -11,8 +11,9 @@
 # and nothing for the empty (anonymous) credential; and AzureFs: open, the
 # capability flags, is_dir's `/`-normalized probe, `list` walking
 # `<NextMarker>` and unioning pages, `list_dir_shallow` across pages, both
-# refusing a `<NextMarker>` that never ends after exactly
-# AZURE_LIST_MAX_PAGES requests, the read verbs reaching the transport, the write verbs refused (AzureFs is
+# refusing a `<NextMarker>` that never ends after exactly the AzureFs's page
+# cap of requests (AZURE_LIST_MAX_PAGES unless set; a small one here), the
+# read verbs reaching the transport, the write verbs refused (AzureFs is
 # read-only) and delete left to komira_fs's raising default.
 from std.memory import ArcPointer
 from std.sys.info import CompilationTarget
@@ -1251,6 +1252,14 @@ def test_azurefs_delete_is_the_trait_default() raises:
 # A <NextMarker> that never ends hits the page cap.
 # -----------------------------------------------------------------------------
 
+# The cap the looping fixtures set on their AzureFs. The cap is a field read by
+# the same loop whatever its value, so a small one exercises the same code as
+# the default AZURE_LIST_MAX_PAGES (100_000), which would cost 100_000 List
+# Blobs round trips per case through the HTTP stack (about 8 minutes each in an
+# unoptimized coverage build); test_azurefs_page_cap_is_the_shipped_cap_by_default
+# holds the default to that constant.
+comptime _TEST_PAGE_CAP = 4
+
 
 struct LoopingListConnector(Connector, Movable, Deinitable):
     """A Connector whose every dial answers one List Blobs page that is
@@ -1259,7 +1268,7 @@ struct LoopingListConnector(Connector, Movable, Deinitable):
     the last-page form (`<NextMarker />`) instead.
 
     Every dial is counted in a shared `ArcPointer[Int]`, so the test can
-    state how many requests went out. A dial past AZURE_LIST_MAX_PAGES
+    state how many requests went out. A dial past _TEST_PAGE_CAP
     raises its own error, so a missing cap fails the test (with this
     message, not the page-cap one) instead of hanging it."""
 
@@ -1286,7 +1295,7 @@ struct LoopingListConnector(Connector, Movable, Deinitable):
         _ = ip_be
         _ = port
         self._calls[] = self._calls[] + 1
-        if self._calls[] > AZURE_LIST_MAX_PAGES:
+        if self._calls[] > _TEST_PAGE_CAP:
             raise Error(
                 "LoopingListConnector: List Blobs request past the page cap"
             )
@@ -1326,7 +1335,8 @@ def _azure_fs_looping(
     calls: ArcPointer[Int], end_at: Int, delimiter: String
 ) raises -> AzureFs[LoopingListConnector]:
     """An AzureFs whose per-call connector (the one `list_page` dials) is a
-    LoopingListConnector counting into `calls`."""
+    LoopingListConnector counting into `calls`, with a page cap of
+    _TEST_PAGE_CAP."""
     var client = AzureClient[LoopingListConnector](
         account=String("devstoreaccount1"),
         key_b64=String(
@@ -1338,11 +1348,13 @@ def _azure_fs_looping(
         call_connector=LoopingListConnector(calls, end_at, delimiter),
         config=_azurite_config(),
     )
-    return AzureFs[LoopingListConnector](
+    var fs = AzureFs[LoopingListConnector](
         container=String("c"),
         client=client^,
         spec=_looping_spec_unused(),
     )
+    fs.set_list_max_pages(_TEST_PAGE_CAP)
+    return fs^
 
 
 def _assert_azure_page_cap_error(msg: String, verb: String) raises:
@@ -1352,10 +1364,49 @@ def _assert_azure_page_cap_error(msg: String, verb: String) raises:
         String("want the AzureFs.") + verb + String(" page-cap error, got: ")
         + msg,
     )
+    assert_true(
+        msg.find(String("(") + String(_TEST_PAGE_CAP) + String(" List Blobs"))
+        >= 0,
+        String("want the page-cap error to name the cap this AzureFs was")
+        + String(" given, got: ") + msg,
+    )
+
+
+def test_azurefs_page_cap_is_the_shipped_cap_by_default() raises:
+    """Both constructors give AZURE_LIST_MAX_PAGES (100_000); a clone keeps
+    the cap it was given; a cap below 1 is taken as 1."""
+    assert_equal(AZURE_LIST_MAX_PAGES, 100_000)
+    var seeded = _azure_fs_looping(ArcPointer[Int](0), 1, String(""))
+    var lazy = AzureFs[LoopingListConnector](
+        container=String("c"), spec=_looping_spec_unused()
+    )
+    assert_equal(lazy.list_max_pages(), AZURE_LIST_MAX_PAGES)
+    assert_equal(seeded.list_max_pages(), _TEST_PAGE_CAP)
+    var fresh_client = AzureClient[LoopingListConnector](
+        account=String("devstoreaccount1"),
+        key_b64=String(
+            "VGhpcyBpcyBhIGZha2Uga2V5IGZvciB0ZXN0aW5nIDEyMzQ1Njc4OTAxMjMK"
+        ),
+        connector=LoopingListConnector(ArcPointer[Int](0), 1, String("")),
+        call_connector=LoopingListConnector(ArcPointer[Int](0), 1, String("")),
+        config=_azurite_config(),
+    )
+    var seeded_default = AzureFs[LoopingListConnector](
+        container=String("c"),
+        client=fresh_client^,
+        spec=_looping_spec_unused(),
+    )
+    assert_equal(seeded_default.list_max_pages(), AZURE_LIST_MAX_PAGES)
+    assert_equal(seeded.clone().list_max_pages(), _TEST_PAGE_CAP)
+    assert_equal(lazy.clone().list_max_pages(), AZURE_LIST_MAX_PAGES)
+    lazy.set_list_max_pages(0)
+    assert_equal(lazy.list_max_pages(), 1)
+    lazy.set_list_max_pages(-5)
+    assert_equal(lazy.list_max_pages(), 1)
 
 
 def test_azurefs_list_page_cap_refuses_a_looping_marker() raises:
-    """`list` raises a clear error once it has drained AZURE_LIST_MAX_PAGES
+    """`list` raises a clear error once it has drained its cap of
     pages of a `<NextMarker>` that never ends, after exactly that many
     requests (the connector's own guard proves none went past the cap). A
     listing that ends on exactly the last allowed page succeeds."""
@@ -1368,14 +1419,14 @@ def test_azurefs_list_page_cap_refuses_a_looping_marker() raises:
         raised = True
         _assert_azure_page_cap_error(String(e), String("list"))
     assert_true(raised, "a NextMarker that never ends must hit the page cap")
-    assert_equal(calls[], AZURE_LIST_MAX_PAGES)
+    assert_equal(calls[], _TEST_PAGE_CAP)
 
     var at_cap_calls = ArcPointer[Int](0)
     var at_cap = _azure_fs_looping(
-        at_cap_calls, AZURE_LIST_MAX_PAGES, String("")
+        at_cap_calls, _TEST_PAGE_CAP, String("")
     )
     assert_equal(len(at_cap.list(String("data/"))), 0)
-    assert_equal(at_cap_calls[], AZURE_LIST_MAX_PAGES)
+    assert_equal(at_cap_calls[], _TEST_PAGE_CAP)
 
 
 def test_azurefs_list_dir_shallow_page_cap_refuses_a_looping_marker() raises:
@@ -1389,14 +1440,14 @@ def test_azurefs_list_dir_shallow_page_cap_refuses_a_looping_marker() raises:
         raised = True
         _assert_azure_page_cap_error(String(e), String("list_dir_shallow"))
     assert_true(raised, "a NextMarker that never ends must hit the page cap")
-    assert_equal(calls[], AZURE_LIST_MAX_PAGES)
+    assert_equal(calls[], _TEST_PAGE_CAP)
 
     var at_cap_calls = ArcPointer[Int](0)
     var at_cap = _azure_fs_looping(
-        at_cap_calls, AZURE_LIST_MAX_PAGES, String("/")
+        at_cap_calls, _TEST_PAGE_CAP, String("/")
     )
     assert_equal(len(at_cap.list_dir_shallow(String("data"))), 0)
-    assert_equal(at_cap_calls[], AZURE_LIST_MAX_PAGES)
+    assert_equal(at_cap_calls[], _TEST_PAGE_CAP)
 
 
 # -----------------------------------------------------------------------------
@@ -1428,6 +1479,7 @@ def main() raises:
     test_azurefs_list_walks_nextmarker_and_unions_pages()
     test_azurefs_list_single_page_does_not_loop()
     test_azurefs_list_dir_shallow_walks_nextmarker_across_pages()
+    test_azurefs_page_cap_is_the_shipped_cap_by_default()
     test_azurefs_list_page_cap_refuses_a_looping_marker()
     test_azurefs_list_dir_shallow_page_cap_refuses_a_looping_marker()
     test_azurefs_read_verbs_reach_the_transport()

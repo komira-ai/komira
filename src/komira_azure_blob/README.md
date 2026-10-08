@@ -20,7 +20,8 @@ Azure Blob Storage, hand-written:
   token together are refused) and the connector factory a client is built
   from.
 - **`AzureFs`**: komira_fs's `FileSystem` over one container, read-only;
-  its `list` follows `NextMarker` for at most `AZURE_LIST_MAX_PAGES` pages.
+  its `list` follows `NextMarker` for at most `AZURE_LIST_MAX_PAGES` pages
+  (`set_list_max_pages` gives an AzureFs another cap).
 - **`AzureSasSigner`**: komira_objectstore's `ObjectUrlSigner`, minting
   blob service SAS URLs signed at the instant its `AzureSasClock` reports.
 
