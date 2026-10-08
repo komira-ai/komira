@@ -25,7 +25,10 @@
 # bytes after the footer, typecnt or charcnt of zero, an isutcnt or isstdcnt
 # other than 0 or typecnt, transition times not strictly ascending, a type
 # index past typecnt, an isdst other than 0 or 1, a UTC offset outside
-# -26..+26 hours, an abbreviation index past charcnt or with no NUL after it,
+# -26..+26 hours (both ends inclusive, so -93600 and +93600 are read: RFC
+# 9636 section 3.2 says utoff MUST NOT be -2^31 and SHOULD be in
+# [-89999, 93599]; that SHOULD binds writers, and this reader accepts the
+# wider band and refuses -2^31 with everything else past it), an abbreviation index past charcnt or with no NUL after it,
 # an abbreviation byte other than a letter, digit, `+` or `-`, an
 # unparseable footer, a footer that gives another type at the last
 # transition than the file does (RFC 9636 section 3.3: the string MUST be
@@ -44,7 +47,7 @@ from .posix_tz import PosixRule, PosixTz, RULE_JULIAN, parse_posix_tz
 from .zone import Zone
 
 comptime _HEADER_BYTES = 44
-comptime _MAX_UTC_OFFSET = 26 * 3600
+comptime _MAX_UTC_OFFSET = 26 * 3600  # inclusive; see the module header
 
 
 struct _Counts(Copyable, ImplicitlyCopyable, Movable):
