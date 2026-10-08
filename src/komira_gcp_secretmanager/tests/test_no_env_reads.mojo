@@ -9,9 +9,9 @@
 # passes.
 #
 # Scope: AccessSecretVersion, AddSecretVersion, CreateSecret, DeleteSecret,
-# ListSecrets and ListSecretVersions. The service's other methods (secret
-# reads and updates, version state changes and destruction, IAM policy,
-# rotation) are not in the generated code.
+# GetSecretVersion, ListSecrets and ListSecretVersions. The service's other
+# methods (secret reads and updates, version state changes and
+# destruction, IAM policy, rotation) are not in the generated code.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -76,7 +76,6 @@ def test_only_the_used_methods_are_generated() raises:
     var absent: List[String] = [
         "def get_secret[",
         "def update_secret[",
-        "def get_secret_version[",
         "def disable_secret_version[",
         "def enable_secret_version[",
         "def destroy_secret_version[",
@@ -116,6 +115,7 @@ def test_the_scan_saw_the_client() raises:
         "    def add_secret_version[RT: Runtime](",
         "    def create_secret[RT: Runtime](",
         "    def delete_secret[RT: Runtime](",
+        "    def get_secret_version[RT: Runtime](",
         "    def list_secrets[RT: Runtime](",
         "    def list_secret_versions[RT: Runtime](",
     ]

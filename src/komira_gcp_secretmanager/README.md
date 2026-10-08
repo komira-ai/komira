@@ -2,9 +2,10 @@
 
 A Secret Manager v1 client, generated at build time from the googleapis
 protos (`google/cloud/secretmanager/v1`) over REST/JSON.
-`SecretManagerServiceClient` carries six methods: `access_secret_version`
+`SecretManagerServiceClient` carries seven methods: `access_secret_version`
 (read a value), `create_secret`, `add_secret_version` (give a secret a new
-value), `list_secret_versions`, `list_secrets` and `delete_secret`. The
+value), `get_secret_version` (a version's metadata and state, never its
+payload), `list_secret_versions`, `list_secrets` and `delete_secret`. The
 request types and the `Secret` and `SecretVersion` resources are generated
 with it; a request can be written as its proto3 JSON and read with
 komira_proto_codec's `decode_json`.

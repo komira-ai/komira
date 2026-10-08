@@ -4,7 +4,7 @@
 #
 # The expected forms are written here from the Secret Manager v1 REST
 # reference (projects.secrets.create, .addVersion, .delete, .list,
-# projects.secrets.versions.access, .list); no upstream test body is
+# projects.secrets.versions.access, .get, .list); no upstream test body is
 # copied. The connector is komira_http_core's ScriptedConnector with a
 # shared write capture, so the bytes the client wrote outlive the stream it
 # dialled; no socket is opened. Each client is pointed at `localhost`
@@ -28,6 +28,7 @@ from komira_gcp_secretmanager.service import (
     AddSecretVersionRequest,
     CreateSecretRequest,
     DeleteSecretRequest,
+    GetSecretVersionRequest,
     ListSecretVersionsRequest,
     ListSecretsRequest,
     SecretManagerServiceClient,
@@ -292,6 +293,51 @@ def test_list_secret_versions() raises:
     assert_equal(resp.total_size, Int32(2))
 
 
+def test_get_secret_version() raises:
+    # GET .../versions/{version}, no verb: the version's metadata (its state
+    # among it) and never a payload; `latest` is a version alias here too.
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var c = _client(
+        capture,
+        '{"name":"projects/123456789012/secrets/smtp-password/versions/3",'
+        + '"createTime":"2026-09-30T12:00:00Z","state":"DISABLED","etag":"\\"e3\\""}',
+    )
+    var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var resp = c.get_secret_version[_RT](
+        decode_json[GetSecretVersionRequest](
+            '{"name":"projects/demo-project/secrets/smtp-password/versions/latest"}'
+        ),
+        reactor,
+    )
+    assert_equal(
+        _wire(capture),
+        _expected("GET /v1/projects/demo-project/secrets/smtp-password/versions/latest"),
+    )
+    assert_equal(resp.name, "projects/123456789012/secrets/smtp-password/versions/3")
+    assert_true(resp.state == SecretVersion_State(SecretVersion_State.DISABLED))
+    assert_equal(resp.create_time.value().seconds, _T0)
+
+    # A regional version is sent at its regional path.
+    var regional = ArcPointer[List[UInt8]](List[UInt8]())
+    var r = _client(
+        regional,
+        '{"name":"projects/123456789012/locations/us-central1/secrets/s/versions/1",'
+        + '"state":"ENABLED"}',
+    )
+    var resp_r = r.get_secret_version[_RT](
+        decode_json[GetSecretVersionRequest](
+            '{"name":"projects/demo-project/locations/us-central1/secrets/s/versions/1"}'
+        ),
+        reactor,
+    )
+    assert_equal(
+        _wire(regional),
+        _expected("GET /v1/projects/demo-project/locations/us-central1/secrets/s/versions/1"),
+    )
+    assert_true(resp_r.state == SecretVersion_State(SecretVersion_State.ENABLED))
+
+
 def main() raises:
     test_access_secret_version()
     test_add_secret_version()
@@ -299,4 +345,5 @@ def main() raises:
     test_delete_secret()
     test_list_secrets()
     test_list_secret_versions()
+    test_get_secret_version()
     print("OK")
