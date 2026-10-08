@@ -25,14 +25,16 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "creat
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo", "welded_tests_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
-load(":native_facts.bzl", "dlopen_refusal", "dlopen_rows", "native_facts", "native_refusal")
+load(":native_facts.bzl", "dlopen_rows", "native_facts", _conda_facts = "conda_facts")
 load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_sub_targets")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(
     ":test_runtime.bzl",
+    _admit_test_data = "admit_test_data",
     _arg_args = "arg_args",
     _data_map = "data_map",
     _env_args = "env_args",
+    _test_key = "test_key",
     _test_root = "test_root",
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
@@ -266,27 +268,10 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
 # ---- mojo_library ----------------------------------------------------------
 
-def _test_key(ctx, t):
-    """The package-relative path of test source `t`: its test_data key."""
-    p = t.short_path
-    pkg = ctx.label.package
-    if pkg and p.startswith(pkg + "/"):
-        p = p[len(pkg) + 1:]
-    return p
-
 # The test runtime contract (the staged tree a test runs from, its data,
-# environment and arguments) is in test_runtime.bzl.
-
-def _admit_test_data(ctx):
-    """{test_srcs key: {dest: artifact}} for mojo_library's `test_data`."""
-    keys = [_test_key(ctx, t) for t in ctx.attrs.test_srcs]
-    where = "{}: test_data".format(ctx.label.raw_target())
-    out = {}
-    for entry, data in ctx.attrs.test_data.items():
-        if entry not in keys:
-            fail("{}[{}]: not a test_srcs entry (entries: {}). Data keyed to no test is staged for nothing.".format(where, repr(entry), ", ".join(keys)))
-        out[entry] = _data_map(ctx, "{}[{}]".format(where, repr(entry)), data)
-    return out
+# environment and arguments, and the admission of `test_data`) is in
+# test_runtime.bzl; the conda facts of a library (`_conda_facts`) are in
+# native_facts.bzl.
 
 def _check_import_name(ctx, name):
     # The `.mojoc` basename is the import name. A name that is not a Mojo
@@ -294,35 +279,6 @@ def _check_import_name(ctx, name):
     # no error, so refuse it here.
     if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
         fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
-
-def _conda_facts(ctx, import_name, native_direct, has_tests):
-    """(conda name, refusal) of this library's conda package.
-
-    The name is None when the library opted out. The refusal is None when the
-    package can be built, else the reason it cannot: a reason known without
-    reading a source (C that libkomira_native.so.1 does not hold, no tests, a
-    dependency with no package, a name that is not a conda name). The package
-    target still builds, as a directory holding the reason
-    (tools/build/package/conda.bzl).
-    """
-    if not ctx.attrs.conda:
-        return None, None
-    name = ctx.attrs.conda_name or import_name
-    if not regex_match("^[a-z][a-z0-9_]*$", name):
-        return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
-    refusal = native_refusal(ctx, native_direct) or dlopen_refusal(ctx)
-    if refusal != None:
-        return name, refusal
-    if not has_tests:
-        return name, "{} has no tests, so its package would not be gated by any; declare test_srcs on the library".format(ctx.label.raw_target())
-    for d in ctx.attrs.deps:
-        if MojoInfo in d:
-            di = d[MojoInfo]
-            if di.conda_name == None:
-                return name, "it depends on {}, which has no conda package (`conda = False`, or it is not a mojo_library)".format(d.label.raw_target())
-            if di.conda_refusal != None:
-                return name, "it depends on {}, which has no conda package: {}".format(d.label.raw_target(), di.conda_refusal)
-    return name, None
 
 def _library_impl(ctx):
     tc = _toolchain(ctx)
