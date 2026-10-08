@@ -15,7 +15,8 @@
 # The empty line starts a logical line of its own: a white-space line right
 # after it continues that empty line, not the line before the blank, and the
 # logical line's number is the blank line's. An empty logical line (a blank
-# no fold follows, or the end of input) is skipped. So the physical lines of
+# no fold follows, a blank whose continuations are only white space, or the
+# end of input) is skipped together with its folds. So the physical lines of
 # one logical line are always consecutive: it spans `line_number` to
 # `line_number + len(folds)`, and a first fold at offset 0 means it began
 # with an empty line.
@@ -93,6 +94,9 @@ def _finish(
     start_line: Int,
 ) raises:
     if len(buf) == 0:
+        # An empty logical line is skipped, and so are its folds (a blank
+        # line's white-space-only continuations): they belong to no line.
+        folds = List[Fold]()
         return
     var bad = utf8_invalid_at(Span(buf))
     if bad >= 0:

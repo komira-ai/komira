@@ -230,6 +230,35 @@ def test_blank_line_ends_line() raises:
     print("  test_blank_line_ends_line PASS")
 
 
+def test_blank_then_white_space_only_line() raises:
+    # A blank line, then a line that is only white space: that line
+    # continues the blank, the logical line stays empty and is skipped with
+    # its fold. The next line starts clean: no fold, its own number.
+    var d = _b("A:1\r\n\r\n \r\nB:2\r\n")
+    var lines = unfold(Span(d))
+    assert_equal(len(lines), 2)
+    assert_equal(lines[0].text, "A:1")
+    assert_equal(len(lines[0].folds), 0)
+    assert_equal(lines[1].text, "B:2")
+    assert_equal(lines[1].line_number, 4)
+    assert_equal(len(lines[1].folds), 0)
+    # The same at the end of input: nothing follows, nothing is kept.
+    var e = _b("A:1\r\n\r\n \r\n\t")
+    var tail = unfold(Span(e))
+    assert_equal(len(tail), 1)
+    assert_equal(tail[0].text, "A:1")
+    assert_equal(len(tail[0].folds), 0)
+    # A white-space-only line after a non-blank line is a fold of it.
+    var f = _b("A:1\r\n \r\nB:2")
+    var kept = unfold(Span(f))
+    assert_equal(len(kept), 2)
+    assert_equal(len(kept[0].folds), 1)
+    assert_equal(kept[0].folds[0].at, 3)
+    assert_equal(kept[1].line_number, 3)
+    assert_equal(len(kept[1].folds), 0)
+    print("  test_blank_then_white_space_only_line PASS")
+
+
 def test_lex_group_name_params() raises:
     var cl = parse_content_line("item1.email;type=INTERNET,pref:a@example.com", 1)
     assert_equal(cl.group, "item1")
@@ -352,6 +381,7 @@ def main() raises:
     test_leading_continuation()
     test_line_endings_and_numbers()
     test_blank_line_ends_line()
+    test_blank_then_white_space_only_line()
     test_lex_group_name_params()
     test_lex_rfc6350_adr_label()
     test_lex_rfc6868_caret()

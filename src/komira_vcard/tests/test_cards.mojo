@@ -318,7 +318,59 @@ def test_qp_blank_then_white_space() raises:
         ),
         "value=[abcde]",
     )
+    # A soft break, a blank line, then two white-space lines: the blank's
+    # logical line has two folds and is not joined (the blank is its first
+    # fold, not its last).
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;QUOTED-PRINTABLE:abc=\r\n\r\n d\r\n e\r\nEND:VCARD\r\n"
+        ),
+        "error=[content line: line 4 has no ':' after the property name]",
+    )
     print("  test_qp_blank_then_white_space PASS")
+
+
+def _lines_or_error(s: String) -> String:
+    try:
+        var cards = parse_vcards(s.as_bytes())
+        var out = String("")
+        for ref l in cards[0].lines:
+            out += (
+                l.line.name
+                + "="
+                + l.line.value
+                + "@"
+                + String(l.line_number)
+                + ";"
+            )
+        return out
+    except e:
+        return String("error=[") + String(e) + "]"
+
+
+def test_qp_after_blank_and_white_space_line() raises:
+    # A blank line then a white-space-only line before a QP line: the empty
+    # logical line is skipped with its fold, so the NOTE line carries no
+    # stale fold and the soft-break adjacency count is exact both ways.
+    # A blank after the "=" ends the value; TEL stays its own line.
+    assert_equal(
+        _lines_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n\r\n \r\n"
+            "NOTE;ENCODING=QUOTED-PRINTABLE:abc=\r\n\r\nTEL:123\r\n"
+            "END:VCARD\r\n"
+        ),
+        "NOTE=abc@5;TEL=123@7;",
+    )
+    # The physical line right after the "=" is joined.
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n\r\n \r\n"
+            "NOTE;QUOTED-PRINTABLE:abc=\r\ndef\r\nEND:VCARD\r\n"
+        ),
+        "value=[abcdef]",
+    )
+    print("  test_qp_after_blank_and_white_space_line PASS")
 
 
 def test_qp_soft_break_at_end() raises:
@@ -367,6 +419,7 @@ def main() raises:
     test_qp_soft_break_space()
     test_qp_blank_after_soft_break()
     test_qp_blank_then_white_space()
+    test_qp_after_blank_and_white_space_line()
     test_qp_soft_break_at_end()
     test_qp_param_fold()
     test_qp_join_limit()
