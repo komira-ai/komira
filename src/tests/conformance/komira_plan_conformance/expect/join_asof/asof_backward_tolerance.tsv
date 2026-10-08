@@ -1,0 +1,24 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §3.6's BACKWARD candidates (see asof_backward), then §3.8: a
+# candidate with |lt - rt| above the tolerance 4 is no match, and the LEFT
+# ASOF row keeps NULL right columns (§3.4). The bound is inclusive (§3.8),
+# so a distance of exactly 4 matches. §3.8 is DEPARTS (a komira extension)
+# pending its ruling. lid 1: rid 2 at 0; lid 2: rid 2 at 4, kept; lid 3: rid
+# 2 at 5, dropped; lid 4: no candidate; lid 5: rid 3 at 5, dropped; lid 6:
+# rid 4 at 2; lid 7 (lg NULL, §3.17), lid 8 (lt NULL, §3.6, §3.17), lid 9
+# (no group): none.
+# Types: the left columns then the right, in input order (§3.13); the left
+# side is never padded and keeps its nullability (lid non-nullable); the
+# right side is padded, so every right column is nullable (§3.13).
+lid:int64	lg:int64?	lt:int64?	rid:int64?	rg:int64?	rt:int64?	rv:int64?
+1	1	20	2	1	20	200
+2	1	24	2	1	20	200
+3	1	25	\N	\N	\N	\N
+4	1	5	\N	\N	\N	\N
+5	1	35	\N	\N	\N	\N
+6	2	7	4	2	5	400
+7	\N	15	\N	\N	\N	\N
+8	1	\N	\N	\N	\N	\N
+9	3	10	\N	\N	\N	\N

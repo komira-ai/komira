@@ -385,8 +385,9 @@ def test_dataset_files() raises:
             String("set_left.jsonl"), String("set_right.jsonl"),
             String("str_rows.jsonl"), String("scan_rows.jsonl"),
             String("scan_key_order.jsonl"), String("scan_sparse.jsonl"),
-            String("scan_numbers.jsonl"), String("weather.jsonl"),
-            String("extra.csv"),
+            String("scan_numbers.jsonl"), String("frame_rows.jsonl"),
+            String("asof_left.jsonl"), String("asof_right.jsonl"),
+            String("weather.jsonl"), String("extra.csv"),
         ],
     )
     assert_true(_any_contains(p, "datasets/ints_nullable.jsonl is missing"))

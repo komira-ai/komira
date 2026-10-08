@@ -18,12 +18,14 @@ from .cases_agg_stats import cases as agg_stats_cases
 from .cases_conditional import cases as conditional_cases
 from .cases_distinct_union import cases as distinct_union_cases
 from .cases_filter_3vl import cases as filter_3vl_cases
+from .cases_join_asof import cases as join_asof_cases
 from .cases_join_residual_nullkeys import cases as join_residual_nullkeys_cases
 from .cases_project_arith import cases as project_arith_cases
 from .cases_scan_avro import cases as scan_avro_cases
 from .cases_scan_jsonl import cases as scan_jsonl_cases
 from .cases_sort_topn_limit import cases as sort_topn_limit_cases
 from .cases_string import cases as string_cases
+from .cases_window_frames import cases as window_frames_cases
 from .cases_window_rank import cases as window_rank_cases
 
 
@@ -41,6 +43,8 @@ def shard_names() -> List[String]:
         String("string"),
         String("scan_avro"),
         String("scan_jsonl"),
+        String("window_frames"),
+        String("join_asof"),
     ]
 
 
@@ -69,6 +73,10 @@ def shard_cases(name: String) raises -> List[Case]:
         return scan_avro_cases()
     if name == "scan_jsonl":
         return scan_jsonl_cases()
+    if name == "window_frames":
+        return window_frames_cases()
+    if name == "join_asof":
+        return join_asof_cases()
     raise Error("plan_conformance: no shard named '" + name + "'")
 
 

@@ -1,0 +1,22 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.1: FIRST_VALUE and LAST_VALUE read their frame, here ROWS
+# BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW, by id; under ROWS the frame
+# ends at the current physical row (§9.7). first_x is the partition's first
+# w, last_x the current row's w (w = 10 * id). g = 1: first 10; last 10,
+# 20, 30, 40, 50. g = 2: 60; 60, 70. g = 3: 80; 80.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
+# Types: id, g, v, w, u keep their scanned types; FIRST_VALUE and LAST_VALUE
+# have w's type, INT64, non-nullable: w is non-nullable and this frame
+# always holds the current row (§8.25).
+id:int64	g:int64	v:int64?	w:int64	u:int64?	first_x:int64	last_x:int64
+1	1	3	10	1	10	10
+2	1	\N	20	2	10	20
+3	1	5	30	3	10	30
+4	1	1	40	4	10	40
+5	1	4	50	5	10	50
+6	2	\N	60	6	60	60
+7	2	\N	70	7	60	70
+8	3	9	80	8	80	80

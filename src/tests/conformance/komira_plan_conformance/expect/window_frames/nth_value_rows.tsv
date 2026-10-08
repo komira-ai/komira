@@ -1,0 +1,25 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.10: NTH_VALUE(x, n) is the value of the frame's n-th row,
+# counting from 1 and counting rows whose value is NULL; NULL when the frame
+# has fewer than n rows. nth_v = NTH_VALUE(v, 2) over ROWS 1 PRECEDING .. 1
+# FOLLOWING (§9.1, §9.7): g = 1 (v 3, NULL, 5, 1, 4): id 1 {1, 2}: id 2's
+# NULL; id 2 {1, 2, 3}: id 2's NULL; id 3 {2, 3, 4}: 5; id 4 {3, 4, 5}: 1;
+# id 5 {4, 5}: 4. g = 2: ids 6, 7 {6, 7}: id 7's NULL. g = 3: id 8 {8}, one
+# row: NULL. nth_w = NTH_VALUE(w, 3) over ROWS UNBOUNDED PRECEDING .. CURRENT
+# ROW: g = 1: NULL, NULL (one and two rows), then 30 for ids 3 to 5; g = 2:
+# NULL, NULL; g = 3: NULL.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
+# Types: id, g, v, w, u keep their scanned types; NTH_VALUE has the input's
+# type, INT64, and is always nullable (§8.25).
+id:int64	g:int64	v:int64?	w:int64	u:int64?	nth_v:int64?	nth_w:int64?
+1	1	3	10	1	\N	\N
+2	1	\N	20	2	\N	\N
+3	1	5	30	3	5	30
+4	1	1	40	4	1	30
+5	1	4	50	5	4	30
+6	2	\N	60	6	\N	\N
+7	2	\N	70	7	\N	\N
+8	3	9	80	8	\N	\N

@@ -1,0 +1,26 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §3.7: NEAREST matches the right row of the lg = rg group with
+# the smallest |lt - rt|; on a tie the earlier (backward) row wins. §3.7 is
+# DEPARTS (a komira extension, no DuckDB counterpart), pending its ruling;
+# these rows rest on its rule alone. A NULL rt (rid 6) and a NULL lt match
+# nothing (§3.6); a NULL lg matches nothing (§3.17); unmatched left rows
+# keep NULL right columns (§3.8 LEFT ASOF, §3.4). rg = 1 holds rt 10, 20,
+# 30. lid 1 (20): rid 2 at 0; lid 2 (24): rid 2 at 4 over rid 3 at 6; lid 3
+# (25): rid 2 and rid 3 both at 5, rid 2 (earlier) wins; lid 4 (5): rid 1 at
+# 5; lid 5 (35): rid 3 at 5; lid 6 (rg 2, lt 7): rid 4 at 2; lid 7, lid 8,
+# lid 9: none.
+# Types: the left columns then the right, in input order (§3.13); the left
+# side is never padded and keeps its nullability (lid non-nullable); the
+# right side is padded, so every right column is nullable (§3.13).
+lid:int64	lg:int64?	lt:int64?	rid:int64?	rg:int64?	rt:int64?	rv:int64?
+1	1	20	2	1	20	200
+2	1	24	2	1	20	200
+3	1	25	2	1	20	200
+4	1	5	1	1	10	100
+5	1	35	3	1	30	300
+6	2	7	4	2	5	400
+7	\N	15	\N	\N	\N	\N
+8	1	\N	\N	\N	\N	\N
+9	3	10	\N	\N	\N	\N
