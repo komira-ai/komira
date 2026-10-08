@@ -99,7 +99,11 @@ comptime _OVER = 4  # moments an armed request saw more than K in flight
 comptime _GAVE_UP = 5  # 1 once a request waited out _GATHER_GUARD_MS
 
 
-def _arm(k: Int) raises:
+def _arm(k: Int, n: Int) raises:
+    """Count the next run's `n` slow requests against the bound `k`. `n` must
+    be a multiple of `k`: a last round of fewer than `k` would wait out
+    _GATHER_GUARD_MS and read as a runner that does not keep its bound."""
+    assert_true(k > 0 and n % k == 0, String(n) + " requests are not whole rounds of " + String(k))
     _Counts.reset()
     _Counts.add(_ARMED_K, k)
 
@@ -470,7 +474,7 @@ def _timed_prefetch_ms(bound: Int, expect_k: Int, max_inflight: Int = 64) raises
     var fs = _fs(bound, max_inflight=max_inflight)
     var f = fs.open("v/big")
     _check(fs.read_ranges_prefetched(f, _far_ranges()))
-    _arm(expect_k)
+    _arm(expect_k, _RANGES)
     var start = perf_counter_ns()
     var out = fs.read_ranges_prefetched(f, _far_ranges())
     var ms = Int((perf_counter_ns() - start) // 1_000_000)
@@ -547,7 +551,7 @@ def _timed_write_ms(bound: Int) raises -> Int:
     for i in range(total):
         data.append(_pattern_at(i))
     var w = fs.open_write("w/big", WriteMode.create_truncate())
-    _arm(bound)
+    _arm(bound, _PARTS)
     var start = perf_counter_ns()
     assert_equal(fs.write_at(w, Span(data)), Int64(total))
     fs.close_write(w^)
