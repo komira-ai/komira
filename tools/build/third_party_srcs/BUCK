@@ -15,8 +15,10 @@ mojo_binary(
 # :gen must give for each (a drift test apiece). Every rule of both
 # libraries' readers is exercised: the CMake patterns, comments inside a
 # list, the generated-src fallback, the #include closure through quoted,
-# relative and -I includes, the s2n-bignum key, non-recursive and recursive
-# GLOBs, and the feature probes with their flags.
+# relative and -I includes, the s2n-bignum key, libssl's and the bssl tool's
+# lists (a C file among the C++ ones, a test and a benchmark left out, an
+# include of a file the archive lacks), non-recursive and recursive GLOBs,
+# and the feature probes with their flags.
 fixture_archive(
     name = "aws-lc-mini.tar.gz",
     srcs = glob(["testdata/aws-lc-mini/**"]),

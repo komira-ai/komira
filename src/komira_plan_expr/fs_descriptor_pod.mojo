@@ -10,11 +10,13 @@
 #   (`LocalFs` / `S3Fs[C]` / `GcsFs[C]` / `AzureFs[C]`) without inverting the
 #   dependency graph. So the plan node carries an FS-DESCRIPTOR POD: a pure
 #   IDENTITY value (scheme + bucket/container + a stable `node_id`) — NO FS
-#   type named. The LIVE FsHandle lives in the upper-layer `komira_fs_registry`
-#   side table, paired to this POD by `node_id` at materialize time. This is
-#   the same shape as `PartitionPredicatePod`
-#   (`komira_plan_expr/partition_pred_pod.mojo`) — a core-resident
-#   structural identity whose live counterpart resolves in an upper layer.
+#   type named. It names the exact source the scan reads: a surface maps the
+#   source URL's prefix to the scheme code (komira_source_url) before it
+#   builds the plan, and the file system that reads the source is the one
+#   whose `SCHEME` is that code. This is the same shape as
+#   `PartitionPredicatePod` (`komira_plan_expr/partition_pred_pod.mojo`) — a
+#   core-resident structural identity whose live counterpart is an upper
+#   layer's.
 #
 # Pointer discipline:
 #   * Copyable + Movable + Deinitable. Owns only `UInt8` + `String`
@@ -27,10 +29,9 @@
 # =============================================================================
 
 
-# Scheme codes — the URI scheme the descriptor identifies. The registry maps a
-# scheme + node_id to the matching `FsHandle` arm. These are stable wire
-# constants; the engine resolver branches on them (and on `FsHandle.tag`,
-# which is kept byte-identical to these in `komira_fs_registry`).
+# Scheme codes — the URI scheme the descriptor identifies, and the `SCHEME`
+# each file system advertises (komira_source_url's test_source_scheme_agrees
+# holds the two together). These are stable wire constants.
 comptime FS_SCHEME_FILE: UInt8 = 0  # local POSIX ("file://" / bare path)
 comptime FS_SCHEME_S3: UInt8 = 1  # AWS S3 ("s3://")
 comptime FS_SCHEME_GCS: UInt8 = 2  # Google Cloud Storage ("gs://")
@@ -42,21 +43,21 @@ struct FsDescriptorPod(Copyable, Movable, Deinitable):
     """The core packages identity POD for a per-source filesystem.
 
     A pure identity value carried on the plan node (`ParquetSourceData`). It
-    names NO concrete FS type — the live `FsHandle` lives in the upper-layer
-    `komira_fs_registry` side table and is paired to this POD by `node_id` at
-    materialize time.
+    names the source and NO concrete FS type: the file system that reads it
+    is the one whose `SCHEME` is `scheme`.
 
     Owns only `UInt8` + `String` + `Int`, so there is no stale-pointer hazard.
     Rides on the plan node by value; never a byte-slab element. Same safety
     posture as `PartitionPredicatePod`.
     Field contract:
       * `scheme`  — one of `FS_SCHEME_*` (UInt8). The URI scheme identifying
-                    which FS arm the registry must resolve. The registry keeps
-                    `FsHandle.tag` byte-identical to these scheme codes.
+                    which file system reads the source
+                    (komira_source_url's `check_source_descriptor` refuses
+                    any other code).
       * `bucket`  — the bucket (S3 / GCS) or container (Azure) name. EMPTY for
                     local (`FS_SCHEME_FILE`).
       * `node_id` — a STABLE per-source id minted when the scan node is built.
-                    The key the registry side table is indexed by. The default
+                    The key `FsBindings` is indexed by. The default
                     descriptor (`local()`) uses `node_id = -1` ("no explicit
                     binding"; resolves to the local default).
     """
@@ -78,7 +79,7 @@ struct FsDescriptorPod(Copyable, Movable, Deinitable):
     @staticmethod
     def cloud(scheme: UInt8, bucket: String, node_id: Int) -> FsDescriptorPod:
         """A cloud-source descriptor: `scheme` in {S3, GCS, AZURE}, a bucket /
-        container name, and the stable `node_id` the registry is keyed by."""
+        container name, and the stable `node_id` `FsBindings` is keyed by."""
         return FsDescriptorPod(scheme=scheme, bucket=bucket, node_id=node_id)
 
     @always_inline
@@ -88,7 +89,6 @@ struct FsDescriptorPod(Copyable, Movable, Deinitable):
 
     @always_inline
     def has_binding(self) -> Bool:
-        """True if this descriptor carries an explicit registry binding (a
-        non-negative `node_id`). The engine resolver consults the registry only
-        when this is True; otherwise it uses the local default."""
+        """True if this descriptor carries an explicit binding (a
+        non-negative `node_id`); otherwise it is the local default."""
         return self.node_id >= 0

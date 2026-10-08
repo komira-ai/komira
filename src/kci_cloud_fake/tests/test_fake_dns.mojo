@@ -52,6 +52,7 @@ from kci_reconciler import (
 )
 from kci_cloud import (
     Feed,
+    Firing,
     Finding,
     GrantEdge,
     FIELD_CERTIFICATE,
@@ -102,7 +103,7 @@ def _graph(
     var j = (
         String('{"resource":[')
         + String('{"id":"api",') + uses
-        + String('"service":{"image":{"digest":"sha256:a1"},"internal":{}}},')
+        + String('"service":{"image":{"digest":"sha256:a1"},"internal":{},"scale":{"min":1,"max":2}}},')
         + String('{"id":"site","retention":"') + zone_retention + String('","dnsZone":{"name":"example.com"}},')
         + String('{"id":"www","dnsRecord":{"name":"www.example.com","zone":{"resource":"site"},"type":"CNAME",')
         + String('"values":[{"ref":{"resource":"api","standard":"HOST"}}],"ttl":"') + ttl + String('s"}},')
@@ -380,7 +381,7 @@ def _check_lines(shape: ProviderShape, domains: String) raises -> List[String]:
     """The limit findings of `tls` on `shape`, as `path|reason`."""
     var cloud = FakeCloud(String("p-l"), shape=shape.copy())
     var l = _list(_graph(domains=domains))
-    var got = cloud.check(l[4], List[Feed]())
+    var got = cloud.check(l[4], List[Feed](), List[Firing]())
     var out = List[String]()
     for i in range(len(got)):
         out.append(got[i].field_path + String("|") + got[i].reason)
@@ -496,7 +497,7 @@ def test_uses_on_a_name_never_reaches_a_lowering() raises:
     for i in range(3):
         var raised = False
         try:
-            _ = FakeCloud().lower(bad[i], List[GrantEdge](), List[Feed]())
+            _ = FakeCloud().lower(bad[i], List[GrantEdge](), List[Feed](), List[Firing]())
         except e:
             raised = True
             assert_true(String(e).find(String(what[i]) + ' "') >= 0, String(e))
