@@ -24,6 +24,7 @@ gate's JSON entry for a package equal to the report's.
 | `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
+| `mutate/` | the mutation tool: `:mutate` (the library, its tests welded), `:mutate_bin`, `:mut_dir` (what every library's `[mutation]` runs from) ([Mutation score](#mutation-score)) |
 
 ## What line coverage means here
 
@@ -710,6 +711,116 @@ assert_equal(m.reason, "the caller checked n > 0")
 assert_true(not marker_in("    abort()  #cov: unreachable no").found)
 assert_equal(render_bp(basis_points(2, 3)), "66.66%")
 ```
+
+## Mutation score
+
+The branch-strength measure where branch coverage is not enforced: a
+mutant is the package with one small fault planted, and a test suite that
+cannot tell the two apart (every welded test still passes) leaves a
+decision untested. Report-only: nothing runs it by default, and no build
+action passes its mutants file to covcheck.
+
+```sh
+./buck2 build -c komira.mutation=true '//src/komira_retry:komira_retry[mutation]'
+```
+
+`-c komira.mutation=true` gives every `mojo_library` on linux-x86_64 the
+sub-target `[mutation]` (`tools/build/mojo/mutation.bzl`), whose outputs
+are `mut/mutants.tsv`, the mutants file above (paths from the repository
+root, `col <c>: <change>; <why>` as the description), and `mut/summary.md`:
+the score, every survivor as `<file>:<line>:<col> <operator>: <change>`,
+timeouts and errors with their reason, the compiler's last lines for each
+mutant that did not compile, and the mutants a marker suppressed. Nothing
+depends on it, so only building it by name runs anything; with the switch
+off the attributes are absent and every other action keeps its key.
+
+| setting (`-c komira.<name>=`) | default | what |
+|---|---|---|
+| `mutation` | `false` | the switch |
+| `mutation_sample` | `30` | mutants built per library; `0` is every one |
+| `mutation_seed` | `0` | which ones (below) |
+| `mutation_timeout_secs` | `300` | the limit of each compile and each test run of a mutant |
+
+### The mutants
+
+`mutate` (`mutate/`, a `mojo_library` with its tests welded, and
+`:mutate_bin`) lexes each hand-written source of the library (`srcs` that
+are source files; generated ones are compiled, not mutated): identifiers,
+numbers, strings (`"..."`, `'...'`, triple-quoted, prefixed such as
+`r"..."`, and backtick-quoted MLIR text), comments, operators by longest
+match, and logical line ends (none inside brackets or after a backslash).
+Only tokens outside strings and comments are mutated, one change per
+mutant, named `<file>:<line>:<col>:<operator>` (line and column, in bytes,
+of the changed text):
+
+| operator | change |
+|---|---|
+| `cmp_negate` | `==` `!=` `<` `<=` `>` `>=` to its negation: `!=` `==` `>=` `>` `<=` `<` |
+| `arith_swap` | a binary `+` to `-` and back (the token before it is an operand: a name that is not a keyword, a number, a string, a closing bracket), `+=` to `-=` and back |
+| `bool_swap` | `and` to `or` and back |
+| `not_delete` | `not` deleted |
+| `const_inc`, `const_dec` | a decimal integer literal of at most 18 digits (no `_`, `.`, exponent or base prefix) plus one; minus one (not for `0`) |
+| `raise_delete` | a `raise` statement, to its end (over lines while brackets are open, or to a `;`), replaced by `pass` |
+| `return_early` | `return` inserted before the first statement (after a docstring) of a `def` returning nothing (no `->`, or `-> None`) |
+| `return_true`, `return_false` | `return True`; `return False` inserted likewise in a `def` returning `Bool` |
+
+No early return is made for a `def` taking `out` (a constructor), one with
+a one-line body, or one whose first statement is `pass`, `...` or already
+the inserted statement: those mutants are equivalent or cannot compile.
+Shifts, `->`, a unary sign, floats, exponents and hex literals are left
+alone.
+
+**Equivalent mutants.** A mutant no test can kill because it does not
+change behaviour is suppressed in the source by an end-of-line comment on
+the line it is reported at: `# mutation: equivalent <operator>[,<operator>...] <reason>`
+suppresses those operators on that line, and `# cov: unreachable <reason>`
+(see Exemptions) every mutant of the line. A marker with no reason, or
+naming an unknown operator, fails the list. Suppressed mutants are listed
+in the list file and in the summary under "Suppressed by a marker (need
+approval)", as exemptions are. A mutant that does not compile is not
+equivalent: it is `error`, outside the score's numerator.
+
+**The sample.** Of the library's mutants, the `mutation_sample` whose
+FNV-1a 64 hash of `<seed>` LF `<id>` is smallest are built, in source
+order. A mutant's place in the sample depends on its id, the seed and the
+others' hashes only, so an edit elsewhere moves few mutants in or out, and
+a larger sample with the same seed holds the smaller one. A nightly run
+varies the seed (the date, say) to cover a package over time.
+
+### One mutant's build
+
+For each sampled mutant, under
+`mut/m/<file>/<line>_<col>_<operator>/` (a path named by the id, so a
+mutant's actions are the same actions whatever else was sampled, and
+the cache keeps them while the library's sources, deps and tests are
+unchanged):
+
+1. `mutation_apply`: `mutate apply` writes the file with the change;
+2. `mutation_precompile`: the library's sources with that file in place,
+   precompiled against its deps;
+3. per `test_srcs` entry, `mutation_build_test`: the test built against
+   that package exactly as its gated build is (optimization level,
+   defines, test deps, link), and `mutation_run_test`: its run through the
+   gate's runner with the test's data and environment, under a memory cap
+   (the library's `test_memory_cap_mib`, else 4096 MiB).
+
+Each step runs through `mutate/mut_step.sh`, which never fails its action:
+it records `ok`, `fail <status>`, `timeout <secs>` (the step was killed at
+`mutation_timeout_secs`) or `skipped` (a step it waits for was not `ok`),
+then the last lines of the output. A README's examples are not run against
+a mutant. `mutation_score` (`mutate score`) reads every status and decides,
+first rule that holds:
+
+| status | when |
+|---|---|
+| `error` | the precompile is not `ok`: the mutated library does not compile |
+| `killed` | a test does not compile against it, or a test run fails (an assertion, a crash, the memory cap) |
+| `timeout` | a test's compile or run timed out |
+| `survived` | every test compiled and passed |
+
+The score is covcheck's: `killed * 10000 / total` basis points over every
+sampled mutant; the summary also gives the detected share
+(killed or timeout) and the score over the mutants that compiled.
 
 ## Tests
 

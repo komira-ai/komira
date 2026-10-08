@@ -27,6 +27,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_branch_of", "coverage_sub_targets")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
+load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
 load(
     ":test_runtime.bzl",
     _arg_args = "arg_args",
@@ -429,6 +430,7 @@ def _library_impl(ctx):
     # With coverage on, the gate (coverage.bzl); only the conda package waits
     # for it and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch) if cov_link else (None, [])
+    mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
@@ -455,7 +457,7 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}),
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}) | mutation,
         ),
         MojoInfo(
             c_link = c_link,
@@ -621,7 +623,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | MUTATION_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -973,6 +975,7 @@ def _mojo_library(**kwargs):
         kwargs["readme"] = readme[0]
         kwargs["readme_tool"] = _README_TOOL
     cov_gate = coverage_kwargs(kwargs)
+    mutation_kwargs(kwargs)
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):
         name = kwargs["name"]
