@@ -618,7 +618,8 @@ enum ArrowType {
   ARROW_TYPE_UTF8_VIEW = 48;
   ARROW_TYPE_LIST_VIEW = 49;
   ARROW_TYPE_LARGE_LIST_VIEW = 50;
-  ARROW_TYPE_ERROR = 51;
+  reserved 51;  // ARROW_TYPE_ERROR
+  reserved "ARROW_TYPE_ERROR";
 }
 
 // ----------------------------------------------------------------------
@@ -684,7 +685,8 @@ enum ScalarKind {
   SCALAR_KIND_DURATION = 8;
   SCALAR_KIND_DECIMAL256 = 9;
   SCALAR_KIND_BINARY = 10;
-  SCALAR_KIND_ERROR = 11;
+  reserved 11;  // SCALAR_KIND_ERROR
+  reserved "SCALAR_KIND_ERROR";
 }
 
 // ----------------------------------------------------------------------
@@ -700,28 +702,6 @@ enum ScalarTimeUnit {
   SCALAR_TIME_UNIT_MILLI = 2;
   SCALAR_TIME_UNIT_MICRO = 3;
   SCALAR_TIME_UNIT_NANO = 4;
-}
-
-// ----------------------------------------------------------------------
-// The Excel error value carried by a SCALAR_KIND_ERROR literal.
-// Core-owned; a frontend copies its error code onto it verbatim, so an
-// unknown code decodes as a DIFFERENT error, not as an error.
-// Derived from: src/komira_plan_expr/excel_error_code.mojo
-// Engine prefix: XL_ERR_
-// ----------------------------------------------------------------------
-enum ExcelErrorCode {
-  XL_ERR_WIRE_UNSPECIFIED = 0;
-  XL_ERR_NONE = 1;
-  XL_ERR_DIV0 = 2;
-  XL_ERR_NA = 3;
-  XL_ERR_VALUE = 4;
-  XL_ERR_REF = 5;
-  XL_ERR_NAME = 6;
-  XL_ERR_NUM = 7;
-  XL_ERR_NULL = 8;
-  XL_ERR_SPILL = 9;
-  XL_ERR_CALC = 10;
-  XL_ERR_CIRCULAR = 11;
 }
 
 // ----------------------------------------------------------------------
@@ -784,7 +764,7 @@ enum SnapshotPolicy {
 // `DType` is an opaque MLIR-backed type with no stable integer in the
 // Mojo stdlib, so there is no engine declaration site to derive from and
 // the codec owns the table. ★ THIS ENUM EXISTS SO A READER CAN NAME THE
-// TYPE OF A COLUMN: as bare `uint32`s, a Python or Excel frontend that
+// TYPE OF A COLUMN: as bare `uint32`s, a Python or TypeScript frontend that
 // decoded `dtype_code: 5` would have nowhere to look up what 5 IS — in a
 // format whose entire purpose is that four languages share one plan. It
 // has no entry in `plan_wire_vocabulary.mojo`,

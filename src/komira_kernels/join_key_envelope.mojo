@@ -235,11 +235,11 @@ comptime JOIN_KEY_FAMILY_BINARY = 13
 # `join_key_params_equal` is what refuses the pair; it is not optional here.
 comptime JOIN_KEY_FAMILY_DECIMAL128 = 14
 
-# The whole ArrowType space. `ArrowType.ERROR` is 50 and is the largest tag
-# declared in `arrow_types.mojo`. Used only to DERIVE the envelope's
+# The whole ArrowType space. `ArrowType.LARGE_LIST_VIEW` is 49 and is the
+# largest tag declared in `arrow_types.mojo`. Used only to DERIVE the envelope's
 # human-readable description from the table, so no second list of admitted
 # tags is ever written down.
-comptime JOIN_KEY_MAX_ARROW_TYPE_ID = 50
+comptime JOIN_KEY_MAX_ARROW_TYPE_ID = 49
 
 
 @fieldwise_init
