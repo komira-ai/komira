@@ -21,6 +21,11 @@
 # starting 1 January 00:00 and ending 31 December 24:00 plus the DST
 # difference is DST all year (RFC 8536 section 3.3.1): its end equals the next
 # year's start.
+#
+# Known limitation, see komira-ai/komira#883: a rule time that carries the
+# start past 31 December ("AAA0BBB,J365/120,J30" starts DST on 5 January of
+# the next year) is folded into that next year's own end-before-start test,
+# so 1..4 January read as DST where tzcode starts DST on 5 January.
 # =============================================================================
 
 from .civil import (

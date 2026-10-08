@@ -190,22 +190,48 @@ def test_footer_after_the_last_transition() raises:
 
 
 def test_v1_only_file() raises:
+    # The first transition is at -2^31, the earliest 32-bit time (older zic
+    # wrote it as a "big bang" transition): its bytes are 80 00 00 00, so a
+    # reader whose sign test misses 0x80000000 reads +2^31, after -100, and
+    # refuses the file as out of order.
     var b = _Block()
+    b.times.append(-(1 << 31))
     b.times.append(-100)
     b.idx.append(1)
+    b.idx.append(2)
     b.offsets.append(0)
     b.dsts.append(0)
     b.abbr_idx.append(0)
     b.offsets.append(-18000)
     b.dsts.append(0)
     b.abbr_idx.append(4)
-    b.chars = _chars("LMT", "EST")
-    b.isstdcnt = 2
-    b.isutcnt = 2
+    b.offsets.append(-14400)
+    b.dsts.append(1)
+    b.abbr_idx.append(8)
+    b.chars = _chars("LMT", "EST", "EDT")
+    b.isstdcnt = 3
+    b.isutcnt = 3
     var z = parse_tzif(Span(_v1_only(b)), "t")
     assert_equal(z.footer(), "")
-    assert_equal(z.offset_at(-101).abbreviation, "LMT")
-    assert_equal(z.offset_at(-100).utc_offset, -18000)
+    assert_equal(z.transition_count(), 2)
+    assert_equal(z.next_transition(-(1 << 40)).value().at, -(1 << 31))
+    assert_equal(z.offset_at(-(1 << 31) - 1).abbreviation, "LMT")
+    assert_equal(z.offset_at(-(1 << 31)).abbreviation, "EST")
+    assert_equal(z.offset_at(-(1 << 31)).utc_offset, -18000)
+    assert_equal(z.offset_at(-101).abbreviation, "EST")
+    assert_equal(z.offset_at(-100).abbreviation, "EDT")
+    assert_equal(z.offset_at(-100).utc_offset, -14400)
+
+
+def test_utc_offset_band_ends_are_read() raises:
+    # -26 h and +26 h exactly are inside the band (the module header); the
+    # refusals one second past each end are in test_refusals.
+    var b = _two_types()
+    b.offsets[0] = -26 * 3600
+    b.offsets[1] = 26 * 3600
+    var z = parse_tzif(Span(_v2(_decoy_v1(), b, "")), "t")
+    assert_equal(z.offset_at(-1).utc_offset, -93600)
+    assert_equal(z.offset_at(0).utc_offset, 93600)
 
 
 def test_no_transitions_no_footer() raises:
@@ -380,6 +406,7 @@ def main() raises:
     test_versions_3_and_4_read_like_2()
     test_footer_after_the_last_transition()
     test_v1_only_file()
+    test_utc_offset_band_ends_are_read()
     test_no_transitions_no_footer()
     test_refusals()
     print("all tzif tests passed")
