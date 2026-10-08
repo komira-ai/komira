@@ -1,0 +1,17 @@
+# A made-up library source for cov_branch_classify's cases (README.md), staged as c.mojo.
+def spend(cost: Int, avail: Int) -> Bool:
+    if cost < 0 or cost > avail:
+        return False
+    return True
+def both(a: Int, b: Int) -> Bool:
+    if a > 0 and b > 0:
+        return True
+    return False
+def neg(a: Bool, b: Bool) -> Int:
+    if not (a or b):
+        return quick(1)
+    var r = a or b
+    return 0
+@always_inline("nodebug")
+def quick(n: Int) -> Int:
+    return n

@@ -31,6 +31,7 @@ from .avro_names import (
     check_avro_namespace,
     latin1_default_bytes,
 )
+from .json_number import scan_json_number
 from .json_string import decode_json_string
 
 
@@ -334,7 +335,7 @@ struct AvroSchema(Movable):
         var value = parser.parse_value()
         parser.skip_ws()
         if not parser.at_end():
-            raise Error("AvroSchemaError.MALFORMED_JSON: trailing data after schema")
+            raise parser._malformed("trailing data after schema")
 
         var nodes = List[AvroNode]()
         var named_in_scope = List[String]()  # visit-stack for recursion detect
@@ -708,21 +709,62 @@ def _contains(list: List[String], target: String) -> Bool:
     return False
 
 
-def _default_target(nodes: List[AvroNode], type_idx: Int) -> Int:
-    """The arena index of the type a field default is read as: the field's
-    type, or a union's first branch. A by-name reference to a fixed (built as
-    a record placeholder carrying the name) resolves to the fixed node."""
-    var idx = type_idx
-    if nodes[idx].kind == AVRO_KIND_UNION and len(nodes[idx].children) > 0:
-        idx = nodes[idx].children[0]
+def _resolve_named_ref(nodes: List[AvroNode], idx: Int) -> Int:
+    """A by-name reference is built as a record placeholder carrying the name;
+    when that name belongs to a fixed or an enum, return that node instead."""
     if nodes[idx].kind == AVRO_KIND_RECORD and len(nodes[idx].children) == 0:
         for j in range(len(nodes)):
-            if (
+            if nodes[j].name == nodes[idx].name and (
                 nodes[j].kind == AVRO_KIND_FIXED
-                and nodes[j].name == nodes[idx].name
+                or nodes[j].kind == AVRO_KIND_ENUM
             ):
                 return j
     return idx
+
+
+def _default_matches(kind: Int, tag: Int) -> Bool:
+    """Whether a JSON default of `tag` is a value of Avro type `kind`
+    (Avro field default table: numbers for int/long/float/double, strings
+    for bytes/string/enum/fixed, objects for record/map)."""
+    if kind == AVRO_KIND_NULL:
+        return tag == _JSON_NULL
+    if kind == AVRO_KIND_BOOLEAN:
+        return tag == _JSON_BOOL
+    if kind == AVRO_KIND_INT or kind == AVRO_KIND_LONG:
+        return tag == _JSON_INT
+    if kind == AVRO_KIND_FLOAT or kind == AVRO_KIND_DOUBLE:
+        return tag == _JSON_INT or tag == _JSON_FLOAT
+    if (
+        kind == AVRO_KIND_BYTES
+        or kind == AVRO_KIND_STRING
+        or kind == AVRO_KIND_ENUM
+        or kind == AVRO_KIND_FIXED
+    ):
+        return tag == _JSON_STRING
+    if kind == AVRO_KIND_RECORD or kind == AVRO_KIND_MAP:
+        return tag == _JSON_OBJECT
+    if kind == AVRO_KIND_ARRAY:
+        return tag == _JSON_ARRAY
+    return False
+
+
+def _default_target(nodes: List[AvroNode], type_idx: Int, tag: Int) -> Int:
+    """The arena index of the type a field default of JSON `tag` is read as.
+    For a non-union field it is the field's type. For a union it is the first
+    branch the default matches (Avro spec: "Default values for union fields
+    correspond to the first schema that matches in the union"), or the first
+    branch when none matches. By-name references to a fixed or an enum are
+    resolved to that node."""
+    if nodes[type_idx].kind != AVRO_KIND_UNION:
+        return _resolve_named_ref(nodes, type_idx)
+    var n = len(nodes[type_idx].children)
+    if n == 0:
+        return type_idx
+    for i in range(n):
+        var b = _resolve_named_ref(nodes, nodes[type_idx].children[i])
+        if _default_matches(nodes[b].kind, tag):
+            return b
+    return _resolve_named_ref(nodes, nodes[type_idx].children[0])
 
 
 def _capture_default(
@@ -735,10 +777,10 @@ def _capture_default(
     yields AvroDefault.none(). Complex defaults (object / array) are treated
     as `none()` (a complex default is not synthesized).
 
-    When the default is read as `bytes` or `fixed` (the field's type, or a
-    union's first branch), it must be a JSON string; its code points are read
-    as Latin-1 byte values (AVRO_DEFAULT_BYTES), and a fixed default must be
-    exactly the fixed size."""
+    When the default is read as `bytes` or `fixed` (the field's type, or the
+    union branch `_default_target` picks), it must be a JSON string; its code
+    points are read as Latin-1 byte values (AVRO_DEFAULT_BYTES), and a fixed
+    default must be exactly the fixed size."""
     # Detect presence: scan the object keys for "default".
     var found = False
     for i in range(len(fobj.obj_keys)):
@@ -748,7 +790,7 @@ def _capture_default(
     if not found:
         return AvroDefault.none()
     var v = _obj_get(fobj, "default")
-    var target = _default_target(nodes, type_idx)
+    var target = _default_target(nodes, type_idx, v.tag)
     var tkind = nodes[target].kind
     if tkind == AVRO_KIND_BYTES or tkind == AVRO_KIND_FIXED:
         if v.tag != _JSON_STRING:
@@ -1168,6 +1210,16 @@ struct _JsonParser:
             self.data.append(b[i])
         self.pos = 0
 
+    def _malformed(self, reason: String) -> Error:
+        """A MALFORMED_JSON error naming `reason` and the byte offset the
+        parser stands on."""
+        return Error(
+            String("AvroSchemaError.MALFORMED_JSON: ")
+            + reason
+            + " at byte "
+            + String(self.pos)
+        )
+
     @always_inline
     def at_end(self) -> Bool:
         return self.pos >= len(self.data)
@@ -1207,7 +1259,7 @@ struct _JsonParser:
             )
         self.skip_ws()
         if self.at_end():
-            raise Error("AvroSchemaError.MALFORMED_JSON: unexpected end of input")
+            raise self._malformed("unexpected end of input")
         var c = self._peek()
         if c == UInt8(ord('"')):
             return self._parse_string()
@@ -1221,7 +1273,7 @@ struct _JsonParser:
             return self._parse_null()
         elif c == UInt8(ord("-")) or (c >= UInt8(ord("0")) and c <= UInt8(ord("9"))):
             return self._parse_number()
-        raise Error("AvroSchemaError.MALFORMED_JSON: unexpected character")
+        raise self._malformed("unexpected character")
 
     def _parse_string(mut self) raises -> _JsonValue:
         # Escapes (including UTF-16 surrogate pairs) and raw UTF-8 are decoded
@@ -1242,11 +1294,11 @@ struct _JsonParser:
         while True:
             self.skip_ws()
             if self._peek() != UInt8(ord('"')):
-                raise Error("AvroSchemaError.MALFORMED_JSON: object key not string")
+                raise self._malformed("object key not string")
             var key = self._parse_string()
             self.skip_ws()
             if self._peek() != UInt8(ord(":")):
-                raise Error("AvroSchemaError.MALFORMED_JSON: expected ':'")
+                raise self._malformed("expected ':'")
             self.pos += 1
             var val = self.parse_value(depth + 1)
             v.obj_keys.append(key.str_val)
@@ -1259,7 +1311,7 @@ struct _JsonParser:
             elif c == UInt8(ord("}")):
                 self.pos += 1
                 break
-            raise Error("AvroSchemaError.MALFORMED_JSON: expected ',' or '}'")
+            raise self._malformed("expected ',' or '}'")
         return v^
 
     def _parse_array(mut self, depth: Int) raises -> _JsonValue:
@@ -1281,7 +1333,7 @@ struct _JsonParser:
             elif c == UInt8(ord("]")):
                 self.pos += 1
                 break
-            raise Error("AvroSchemaError.MALFORMED_JSON: expected ',' or ']'")
+            raise self._malformed("expected ',' or ']'")
         return v^
 
     def _parse_bool(mut self) raises -> _JsonValue:
@@ -1292,30 +1344,22 @@ struct _JsonParser:
         elif self._match_literal("false"):
             v.bool_val = False
         else:
-            raise Error("AvroSchemaError.MALFORMED_JSON: bad boolean literal")
+            raise self._malformed("bad boolean literal")
         return v^
 
     def _parse_null(mut self) raises -> _JsonValue:
         if not self._match_literal("null"):
-            raise Error("AvroSchemaError.MALFORMED_JSON: bad null literal")
+            raise self._malformed("bad null literal")
         return _json_null()
 
     def _parse_number(mut self) raises -> _JsonValue:
+        # The literal is checked against the RFC 8259 number grammar first
+        # (json_number.mojo); the value parsers below rely on it.
         var start = self.pos
-        var is_float = False
-        if self._peek() == UInt8(ord("-")):
-            self.pos += 1
-        while not self.at_end():
-            var c = self.data[self.pos]
-            if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
-                self.pos += 1
-            elif c == UInt8(ord(".")) or c == UInt8(ord("e")) or c == UInt8(ord("E")) or c == UInt8(ord("+")) or c == UInt8(ord("-")):
-                is_float = True
-                self.pos += 1
-            else:
-                break
+        var scan = scan_json_number(Span(self.data), start)
+        self.pos = scan.end
         var v = _json_null()
-        if is_float:
+        if scan.is_float:
             v.tag = _JSON_FLOAT
             # Parse the consumed digits as a Float64 (the substring start..pos)
             # via a small hand decimal parser (no stdlib atof). Used

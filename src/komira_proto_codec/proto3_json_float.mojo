@@ -1,5 +1,6 @@
 # =============================================================================
-# proto3_json_float.mojo — the proto3-JSON form of a `float` (float32) value.
+# proto3_json_float.mojo — the proto3-JSON form of a `float` (float32) value,
+# and of a `double` (float64) one (the last section).
 # =============================================================================
 #
 # One writer and one reader, used by every float32 path in the codec (the
@@ -77,7 +78,13 @@
 from std.math import isinf, isnan
 from std.memory import bitcast
 
-from komira_json import JsonValue, JSON_NUMBER, JSON_STRING, write_json_string
+from komira_json import (
+    JsonValue,
+    JSON_NUMBER,
+    JSON_STRING,
+    write_f64_dtoa,
+    write_json_string,
+)
 
 from .float32_bignum import (
     big_add,
@@ -89,6 +96,7 @@ from .float32_bignum import (
     big_sub,
 )
 from .float32_parse import parse_decimal_f32
+from .float64_parse import parse_decimal_f64
 
 
 # =============================================================================
@@ -323,3 +331,56 @@ def _f32_inf() -> Float32:
 
 def _f32_nan() -> Float32:
     return bitcast[DType.float32](UInt32(0x7FC00000))
+
+
+# =============================================================================
+# The `double` (float64) form: the same rules as float32's, at float64's
+# width. WRITE: a finite value is the shortest round-trip JSON number
+# (`write_f64_dtoa`); NaN / +Inf / -Inf are the strings "NaN" / "Infinity" /
+# "-Infinity" (`write_f64_dtoa` alone would write `null`, which reads back as
+# an absent field). READ: the three spec strings, or a JSON number or numeric
+# string of any length rounded to the nearest double (`parse_decimal_f64`);
+# a value past the double range is refused, so every value the reader
+# returns is one the writer writes and reads back as itself.
+# =============================================================================
+
+
+def write_proto3_json_f64(mut buf: List[UInt8], v: Float64):
+    """Append the proto3-JSON text of a double: a JSON number, or one of the
+    strings "NaN" / "Infinity" / "-Infinity"."""
+    if isnan(v):
+        write_json_string(buf, String("NaN"))
+    elif isinf(v):
+        if v > 0:
+            write_json_string(buf, String("Infinity"))
+        else:
+            write_json_string(buf, String("-Infinity"))
+    else:
+        write_f64_dtoa(buf, v)
+
+
+def read_proto3_json_f64(v: JsonValue) raises -> Float64:
+    """Read a double from a proto3-JSON value (a number, or a string holding
+    a number or one of the three non-finite spellings), correctly rounded.
+    Refuses a value that rounds past the largest double and any other
+    non-finite spelling."""
+    if v.kind == JSON_STRING:
+        if v.text == "NaN":
+            return _f64_nan()
+        if v.text == "Infinity":
+            return _f64_inf()
+        if v.text == "-Infinity":
+            return -_f64_inf()
+    elif v.kind != JSON_NUMBER:
+        # A bool, null, object or array: the JSON value's own refusal.
+        _ = v.as_float64()
+        raise Error("JsonError: not a proto3 double")
+    return parse_decimal_f64(v.text)
+
+
+def _f64_inf() -> Float64:
+    return bitcast[DType.float64](UInt64(0x7FF0000000000000))
+
+
+def _f64_nan() -> Float64:
+    return bitcast[DType.float64](UInt64(0x7FF8000000000000))

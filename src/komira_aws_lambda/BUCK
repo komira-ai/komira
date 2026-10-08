@@ -43,8 +43,8 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # independently computed signatures), test_lambda_client (the generated
 # client over a scripted connector: two calls answered, one error per verb
 # raised under its code, and each verb's request as it reached the wire,
-# through komira_aws_core's AwsEchoConnector) and test_no_env_reads (the
-# generated module reads no environment).
+# through komira_aws_core's AwsEchoConnector) and _no_env_reads (written
+# by mojo_aws_client: the package reads no environment).
 #
 # No test here talks to the service.
 
@@ -76,17 +76,12 @@ mojo_aws_client(
         "tests/test_lambda_endpoints.mojo": {
             _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
         },
-        "tests/test_no_env_reads.mojo": {
-            "gen/" + f: ":komira_aws_lambda_gen[{}]".format(f)
-            for f in ["__init__.mojo", "_layout_probe.mojo", "komira_aws_lambda.mojo"]
-        },
     },
     test_srcs = [
         "tests/test_lambda_client.mojo",
         "tests/test_lambda_endpoints.mojo",
         "tests/test_lambda_requests.mojo",
         "tests/test_lambda_responses.mojo",
-        "tests/test_no_env_reads.mojo",
     ],
     visibility = ["PUBLIC"],
     deps = [

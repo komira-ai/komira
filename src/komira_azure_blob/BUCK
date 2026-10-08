@@ -3,13 +3,24 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Azure Blob Storage, hand-written: Shared Key signing (the 13-field
 # string-to-sign) as a pure function and as SharedKeySigningLayer, an
 # HttpService layer that stamps `x-ms-date` and signs each request, its query
-# parameters included; AzureStore (HEAD, range GET and List Blobs over any
+# parameters, standard Content-* / If-* / Range headers and body length
+# included; AzureStore (HEAD, range GET, List Blobs and Put Blob over any
 # komira_http_client HttpService, real Azure or Azurite addressing) and the
-# List Blobs / error XML readers; AzureClient, the per-worker bundle of
-# HttpClient, signing layer, store, connector and reactor; AzureFs,
-# komira_fs's FileSystem over one container (read-only); and AzureSasSigner,
-# komira_objectstore's ObjectUrlSigner as a blob service SAS. The account
-# key comes from komira_azure_core's AzureSharedKey. No environment is read.
+# List Blobs / error XML readers (komira_xml's tree); AzureClient, the
+# per-worker bundle of HttpClient, signing layer, SAS query layer (a SAS token
+# on every request), store, connector and reactor; AzureCredential (a Shared
+# Key, a SAS token, or anonymous) and AzureClientSpec, the endpoint,
+# credential and connector factory a client is built from; AzureFs,
+# komira_fs's FileSystem over one container (read-only), which builds its
+# clients from a spec; parse_azure_url and AzureFsConfig (azure_url.mojo:
+# az://, abfs[s]://, the Blob service's https:// URL and an emulator's
+# path-style http:// URL, merged with the configured account and endpoint),
+# and azure_prod_fs, an AzureFs over komira_http_client's
+# KernelSchemeConnector that dials plaintext only for an http:// endpoint;
+# and AzureSasSigner, komira_objectstore's
+# ObjectUrlSigner as a blob service SAS, signed at the instant its injected
+# clock reports at each mint. The account key comes from komira_azure_core's
+# AzureSharedKey. No environment is read.
 #
 # komira_buffer and komira_collections are deps because komira_fs's
 # FileSystem signatures name their types (SharedAlignedBuffer and HeapRegion,
@@ -25,16 +36,44 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # a pinned x-ms-date stamped and signed, the wall clock's date stamped when
 # none is pinned, a caller's date kept or replaced without a duplicate, a List
 # Blobs request's query parameters signed, each against an independent golden,
-# and query values that are not UTF-8 refused), test_azure_xml (List Blobs
-# entries, prefixes, markers, error bodies and entity decoding),
+# and query values that are not UTF-8 refused), test_azure_signing_body (the
+# layer over requests with a body: the Shared Key document's zero-length PUT
+# at versions 2014-02-14 and 2015-02-21, a Put Blob signing Content-Length,
+# Content-MD5 and Content-Type with its body kept on the wire, every
+# standard slot in its place, a streamed body, and the refusal of a body of
+# unknown length or one whose framing disagrees), test_azure_client_spec (the
+# SAS token check and its refusals, SasQueryLayer appending the token after
+# an existing query and keeping headers and body bytes, an AzureClient with a
+# token sending it and no Authorization, a key and a token refused together,
+# a spec for another account refused, and an AzureFs from a spec building
+# nothing until its first verb, its clone building a client of its own from
+# the same spec), test_azure_xml (List Blobs
+# entries, prefixes, markers, the root's ContainerName attribute with its
+# entities decoded, error bodies, entity decoding and the refusal of a body
+# that is not well-formed XML),
 # test_azure_store_fs (AzureStore, AzureClient and AzureFs over scripted HTTP:
 # URLs, each verb, the status taxonomy, NextMarker pagination and its page cap
 # (a NextMarker that never ends is refused after AZURE_LIST_MAX_PAGES
 # requests), the shallow listing, the read verbs reaching the transport, the
-# refused writes and the inherited delete default), test_azure_presign (the
-# service SAS against independent goldens, its sixteen-field string-to-sign
-# and its refusals) and test_no_env_reads (the package's sources read no
-# environment). The same verbs over a real socket, against a fake service
+# refused writes and the inherited delete default), test_azure_store_put
+# (AzureStore.put_blob through the signing layer: the signed request and its
+# body on the wire, a zero-byte blob, a 403, an empty blob name),
+# test_azure_store_body (response bodies read as UTF-8: a List Blobs or error
+# body that starts with Azure's byte order mark, a multi-byte blob name, and
+# bodies that are not UTF-8), test_azure_presign (the service SAS against independent goldens, its
+# sixteen-field string-to-sign, its refusals, and a clock read at each mint
+# so an advancing clock gives a new window per URL, and the production clock
+# reading whole wall-clock seconds), test_azure_url (parse_azure_url's
+# accepted forms and its refusals by exact message, the encoded forms' paths
+# percent-decoded once, a URL merged with the configured account and
+# endpoint (a URL naming any other endpoint refused), and an endpoint into
+# AzureConfig), test_azure_fs_scheme_read (an AzureFs from azure_fs_for read
+# over a scripted connector that keeps the wire: a SAS token in the query, a
+# Shared Key signing, anonymous, a clone signing as its source does, the
+# endpoint's scheme picking the connector, azure_prod_fs's connector and
+# refusals, and the production type cloning without dialing) and
+# test_no_env_reads
+# (the package's sources read no environment). The same verbs over a real socket, against a fake service
 # that checks each signature itself, are komira_azure_blob_e2e's test.
 mojo_library(
     name = "komira_azure_blob",
@@ -62,10 +101,16 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_azure_client_spec.mojo",
+        "tests/test_azure_fs_scheme_read.mojo",
         "tests/test_azure_presign.mojo",
         "tests/test_azure_signing.mojo",
+        "tests/test_azure_signing_body.mojo",
         "tests/test_azure_signing_layer.mojo",
+        "tests/test_azure_store_body.mojo",
         "tests/test_azure_store_fs.mojo",
+        "tests/test_azure_store_put.mojo",
+        "tests/test_azure_url.mojo",
         "tests/test_azure_xml.mojo",
         "tests/test_no_env_reads.mojo",
     ],
