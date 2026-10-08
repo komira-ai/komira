@@ -1,6 +1,6 @@
 # Query semantics: further items
 
-These items belong to [query semantics](query_semantics.md) and keep its numbering: §7.16 extends section 7 (strings) and §11.7 extends section 11 (set operations). The conventions, the oracle settings, "Rulings needed" and the counts are in the main document. They live here only to keep each file under 1000 lines.
+These items belong to [query semantics](query_semantics.md) and keep its numbering: §7.16 and §7.17 extend section 7 (strings) and §11.7 extends section 11 (set operations). The conventions, the oracle settings, "Rulings needed" and the counts are in the main document. They live here only to keep each file under 1000 lines.
 
 ### 7.16 SUBSTRING
 
@@ -17,6 +17,13 @@ These items belong to [query semantics](query_semantics.md) and keep its numberi
 - **Options.** (a) DuckDB's meaning, as proposed. The two-argument form then needs its own encoding (a flag, or a missing length on the wire) instead of the `length < 0` sentinel. (b) Keep the standard-SQL meaning and record a departure for negative `start` and negative `length`.
 - **Recommendation.** (a): a SQL frontend that answers like DuckDB needs it, and the sentinel is the only obstacle. Until it is ruled, oracle cases use `start >= 1` and `length >= 0`, where the two meanings agree.
 - **Mark.** UNDECIDED.
+
+### 7.17 JSON and columnar formats: NULL and the empty string
+
+- **Rule.** JSON `null` reads as NULL and the JSON string `""` as `''`; a missing member is §13.8. Parquet, ORC, Arrow IPC and Avro carry NULL in their own validity encoding and never turn an empty string into NULL or the reverse. (CSV, which has no NULL marker of its own, is §7.13.)
+- **DuckDB.** `read_json` reads `null` as NULL and `""` as an empty VARCHAR; its columnar readers keep the file's validity.
+- **Current behaviour.** The JSON reader tests for the literal `null` before parsing a value and pushes NULL, raising for a NOT NULL field (`src/komira_jsonl/columnar_materializer.mojo:1385-1392`); a quoted value, empty included, goes to the STRING accumulator (`:1235-1262`).
+- **Mark.** MATCHES.
 
 ### 11.7 Nullability across set-operation inputs
 

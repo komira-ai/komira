@@ -27,7 +27,7 @@ Each item has four parts:
 
 Scope is the plan: the logical-plan IR (`src/komira_plan_ir`, `src/komira_plan_expr`) and its wire form (`src/komira_plan_wire`). A frontend (SQL, a dataframe API, a spreadsheet) maps its own surface onto these rules; where a frontend's spelling differs from the plan operator of the same name (SQL `/` against the plan's `BIN_DIV`), the item says so. Out of scope: collations other than binary, intervals, nested types (struct, list, map), JSON functions, the temporal field extracts beyond time zones and §8.15, and UDF null modes. Each of those needs its own section before a hand expectation may depend on it.
 
-Items §7.16 and §11.7 are in [further items](query_semantics_more.md), numbered as part of this document. Many operators named here have no executor in this repository yet (the engine operators arrive separately). Where that is so, "current behaviour" cites the IR, the wire admission or a kernel, and says that nothing executes the operator end to end.
+Items §7.16, §7.17 and §11.7 are in [further items](query_semantics_more.md) and section 13 (scans) is in [scans](query_semantics_scans.md), numbered as part of this document. Many operators named here have no executor in this repository yet (the engine operators arrive separately). Where that is so, "current behaviour" cites the IR, the wire admission or a kernel, and says that nothing executes the operator end to end.
 
 ## Rulings needed
 
@@ -71,6 +71,10 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §11.3 | INTERSECT and EXCEPT | UNDECIDED | Frontends refuse them by name until a null-safe join key exists; a SEMI/ANTI join on `=` is not a lowering. |
 | §11.4 | Set-operation inputs must have identical types and names | DEPARTS | Accept: the frontend inserts the casts DuckDB inserts implicitly. |
 | §12.3 | No infinite dates or timestamps | DEPARTS | Accept: Arrow cannot represent them; refused by name. |
+| §13.5 | Avro logical and complex types | UNDECIDED | `timestamp-*` as UTC-zoned instants, `local-timestamp-*` unzoned, `enum` as STRING; refuse `uuid`, `duration`, multi-type unions and nested types by name; measure DuckDB first. |
+| §13.7 | JSON value of another type than its column | UNDECIDED | Convert where DuckDB converts without loss (a numeric string into a number), once measured; refuse by name otherwise. |
+| §13.9 | A repeated JSON key the schema reads | UNDECIDED | Refuse by name, unless DuckDB answers last- or first-wins without an error, in which case match it. |
+| §13.10 | Non-nullable declared column over a file holding NULL | DEPARTS | Accept: the reader raises naming the column and row; DuckDB has no declared nullability. |
 
 ## Code that does not follow a MATCHES rule today
 
@@ -93,6 +97,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 12. **Join output schema (§3.13, §3.14).** `LogicalPlan.join` (`src/komira_plan_ir/logical_plan.mojo:1255-1273`) keeps each side's input nullability for the padded side of LEFT, RIGHT and FULL joins, so a padded NULL lands in a column declared non-nullable; and it checks a right column's name only against left names before appending `_right`, so `a`, `a_right` on the left with `a` on the right, or `a` on the left with `a`, `a_right` on the right, yields two columns named `a_right`. The comparison is case-sensitive, so `A` and `a` do not collide.
 13. **Window function nullability and SUM types (§8.25 to §8.27).** `partition_expr_output_field` (`src/komira_plan_expr/partition_expr.mojo:404-505`) declares windowed SUM and AVG non-nullable (`:471-488`), though a frame holding only NULLs, or no rows, gives NULL; types a windowed SUM of DECIMAL or of an unsigned integer as FLOAT64 (`:471-480`), where §8.2 and §8.4 give UINT64 and DECIMAL(38, s); and gives windowed MIN/MAX and FIRST_VALUE/LAST_VALUE the input's nullability (`:463`, `:489-496`), which is sound only for frames that always contain the current row.
 14. **UNION refuses branches that differ only in nullability (§11.7).** The wire's check compares name, type and nullability (`src/komira_plan_wire/plan_wire_codec.mojo:3540-3556`), and `LogicalPlan.union` requires every child to advertise the output schema exactly.
+15. **A scan drops a projected name its schema lacks (§13.2).** `LogicalPlan.scan_from_source` and the positional `scan` factory skip it silently (`src/komira_plan_ir/logical_plan.mojo:925-930`, `:775-780`); only the wire's value gate refuses it.
 
 ## 1. Three-valued logic
 
@@ -739,9 +744,9 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 - **Current behaviour.** A plan literal keeps `''` distinct from NULL (`src/komira_plan_expr/scalar_value.mojo:33-38`). The CSV writer renders NULL as an empty field (`src/komira_csv/csv_sink.mojo:32`), so a written CSV does not distinguish them.
 - **Mark.** MATCHES.
 
-### 7.13 Where readers turn an empty field into NULL
+### 7.13 Where the CSV reader turns an empty field into NULL
 
-- **Rule (proposed).** As DuckDB's `read_csv` with default options: an empty unquoted field is NULL; a quoted empty field (`""`) is `''`. JSON `""` is `''` and JSON `null` is NULL. Columnar formats (Parquet, ORC, Arrow IPC, Avro) carry NULL explicitly and never convert.
+- **Rule (proposed).** As DuckDB's `read_csv` with default options: an empty unquoted field is NULL; a quoted empty field (`""`) is `''`. The settled JSON and columnar half of this question is §7.17.
 - **DuckDB.** The CSV defaults are to be measured by the oracle.
 - **Current behaviour.** The CSV format's blank-line policy is in the [text and row formats](text_and_row_formats.md) design doc; the empty-field rule is not stated there.
 - **Recommendation.** Match DuckDB, measured, and state the rule in the formats doc.
@@ -950,7 +955,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 101, DEPARTS 18, UNDECIDED 18: 137 marks, across this file, [the result-type table](query_semantics_types.md) and [further items](query_semantics_more.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 36 rows of "Rulings needed" are the 18 DEPARTS and 18 UNDECIDED items.
+MATCHES 108, DEPARTS 19, UNDECIDED 21: 148 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 40 rows of "Rulings needed" are the 19 DEPARTS and 21 UNDECIDED items.
 
 ## What are its limits and open questions?
 
