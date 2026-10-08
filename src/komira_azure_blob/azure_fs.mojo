@@ -253,8 +253,18 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         return self._list_max_pages
 
     def set_list_max_pages(mut self, n: Int):
-        """Set the page cap of `list` and `list_dir_shallow`; a value below
-        1 is taken as 1."""
+        """Set the page cap of `list` and `list_dir_shallow`.
+
+        The cap bounds their List Blobs page loop against a service or proxy
+        that never stops returning a `<NextMarker>`: after `n` such pages the
+        listing raises instead of looping and growing its result without
+        end. The default is AZURE_LIST_MAX_PAGES. A value below 1 is taken
+        as 1. A very large value weakens that guard: a looping service then
+        costs that many requests (and their memory) before the error.
+
+        Args:
+            n: The most pages one listing drains.
+        """
         self._list_max_pages = n if n >= 1 else 1
 
     def client_built(self) -> Bool:

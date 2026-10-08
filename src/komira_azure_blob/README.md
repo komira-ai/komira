@@ -21,7 +21,9 @@ Azure Blob Storage, hand-written:
   from.
 - **`AzureFs`**: komira_fs's `FileSystem` over one container, read-only;
   its `list` follows `NextMarker` for at most `AZURE_LIST_MAX_PAGES` pages
-  (`set_list_max_pages` gives an AzureFs another cap).
+  (`set_list_max_pages` gives an AzureFs another cap; the cap is the guard
+  against a service that never stops returning `NextMarker`, so a very
+  large one weakens it).
 - **`AzureSasSigner`**: komira_objectstore's `ObjectUrlSigner`, minting
   blob service SAS URLs signed at the instant its `AzureSasClock` reports.
 

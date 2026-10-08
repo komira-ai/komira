@@ -166,8 +166,10 @@ struct SharedInMemoryConditionalStore(
     def _acquire(self):
         # SAFETY (interior mut via Arc): the lock is an Atomic in the shared
         # _SharedMap; concurrent acquire from K threads is the whole point.
-        # Spin on CAS 0→1. The critical sections are O(entries) and tiny, so
-        # a spin (no futex) is fine for the offline characterization.
+        # Spin on CAS 0→1. The critical sections are short: a keyed verb is
+        # one index lookup plus a copy of the object's bytes; only `list`
+        # and `delete` walk every entry. So a spin (no futex) is fine for the
+        # offline characterization.
         ref m = self._map[]
         while True:
             var expected = Int32(0)
