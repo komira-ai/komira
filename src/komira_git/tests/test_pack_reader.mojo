@@ -21,19 +21,23 @@
 #     inherit its base's kind, a wrong depth, base id, offset, packed size or
 #     CRC-32 (each checked per entry), and an index that does not find each
 #     object at its offset.
-#   * test_thin_pack: a REF_DELTA on an object outside the pack is refused
-#     by `index_pack` and resolved by `index_thin_pack` from
-#     `ExternalBases` (depth 1, base id the outside object's), and read back
-#     with `read_thin_pack_object`.
+#   * test_thin_pack: two REF_DELTAs on one object outside the pack (and an
+#     OFS_DELTA on one of them) are refused by `index_pack`, and by
+#     `index_thin_pack` given bases of the other format; resolved by
+#     `index_thin_pack` from `ExternalBases` (depth 1, base id the outside
+#     object's), and read back with `read_thin_pack_object`.
 #   * test_reader_refusals: `read_pack_object` refuses an id not in the
 #     index, an index of another pack, an index entry whose offset holds a
-#     different object, a chain over the depth limit, and a REF base that is
-#     neither in the pack nor given.
+#     different object or lies at the trailer, a chain over the depth limit,
+#     and a REF base that is neither in the pack nor given.
+#   * test_sha256_pack: a sha256 pack (32-byte REF base id and trailer)
+#     indexed, read and its index round-tripped; the same bytes read as sha1
+#     fail the trailer check. Catches an id or checksum width fixed at 20.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
 
-from komira_crypto import Sha1
+from komira_crypto import Sha1, Sha256
 from komira_zlib import ZLIB_WINDOW_BITS_ZLIB, zlib_compress_bound, zlib_crc32, zlib_deflate_into
 
 from komira_git import (
@@ -191,6 +195,24 @@ def _pack_of(entries: List[List[UInt8]]) -> List[UInt8]:
     return out^
 
 
+def _pack256_of(entries: List[List[UInt8]]) -> List[UInt8]:
+    """`_pack_of` with a SHA-256 trailer."""
+    var out = _bytes("PACK")
+    for b in [0, 0, 0, 2]:
+        out.append(UInt8(b))
+    var n = len(entries)
+    for s in [24, 16, 8, 0]:
+        out.append(UInt8((n >> s) & 255))
+    for i in range(len(entries)):
+        out.extend(Span(entries[i]))
+    var h = Sha256()
+    h.update(Span(out))
+    var sum = List[UInt8](length=32, fill=UInt8(0))
+    h.finalize_into(Span(sum))
+    out.extend(Span(sum))
+    return out^
+
+
 def _offsets(entries: List[List[UInt8]]) -> List[Int]:
     var out = List[Int]()
     var at = 12
@@ -336,20 +358,35 @@ def test_thin_pack() raises:
     var at1 = offs0[0] + len(entries[0])
     var r2 = _rebuilt(r1, 5, "+2")
     entries.append(_ofs_delta(at1 - offs0[0], _delta(r1, 5, "+2")))
+    var r3 = _rebuilt(outside, 30, "-other")
+    entries.append(_ref_delta(id_out, _delta(outside, 30, "-other")))
     var pack = _pack_of(entries)
     var limits = PackLimits()
     try:
         _ = index_pack(f, Span(pack), limits)
         assert_true(False)
     except e:
-        assert_equal(String(e), "komira_git: pack: 2 deltas have no base in the pack")
+        assert_equal(String(e), "komira_git: pack: 3 deltas have no base in the pack")
+    # Bases of the other format name no sha1 id.
+    var other_format = ExternalBases(ObjectFormat.sha256())
+    _ = other_format.add(ObjectKind.blob(), Span(outside))
+    try:
+        _ = index_thin_pack(f, Span(pack), limits, other_format)
+        assert_true(False)
+    except e:
+        assert_equal(String(e), "komira_git: pack: 3 deltas have no base in the pack")
     var bases = ExternalBases(f)
     assert_equal(bases.add(ObjectKind.blob(), Span(outside)), id_out)
     _ = bases.add(ObjectKind.blob(), Span(outside))
     assert_equal(bases.count(), 1)
     var got = index_thin_pack(f, Span(pack), limits, bases)
-    assert_equal(got.index.count(), 2)
+    assert_equal(got.index.count(), 3)
     assert_equal(got.index.find(id_out), -1)
+    var id3 = hash_object(f, ObjectKind.blob(), Span(r3))
+    assert_equal(got.entries[2].id, id3)
+    assert_equal(got.entries[2].depth, 1)
+    assert_equal(got.entries[2].base_id, id_out)
+    assert_true(_same(read_thin_pack_object(Span(pack), got.index, id3, limits, bases).payload, r3))
     var id1 = hash_object(f, ObjectKind.blob(), Span(r1))
     var id2 = hash_object(f, ObjectKind.blob(), Span(r2))
     assert_equal(got.entries[0].id, id1)
@@ -424,10 +461,53 @@ def test_reader_refusals() raises:
         p + "the entry at offset " + String(offs[1]) + " is object " + id_b.to_hex()
         + ", the index says " + id_a.to_hex(),
     )
+    # An index offset at the trailer names no entry.
+    var ids2 = List[ObjectId]()
+    var offsets2 = List[Int]()
+    var crcs2 = List[UInt32]()
+    ids2.append(id_a)
+    offsets2.append(len(pack) - 20)
+    crcs2.append(0)
+    var past = PackIndex(f, ids2^, offsets2^, crcs2^, got.index.pack_checksum())
+    assert_equal(
+        _read_err(pack, past, id_a, limits),
+        p + "entry at offset " + String(len(pack) - 20) + ": outside the entries",
+    )
+
+
+def test_sha256_pack() raises:
+    var f = ObjectFormat.sha256()
+    var a = _bytes("a blob in a sha256 repository\n")
+    var id_a = hash_object(f, ObjectKind.blob(), Span(a))
+    var a1 = _rebuilt(a, 12, "+256")
+    var entries = List[List[UInt8]]()
+    entries.append(_ref_delta(id_a, _delta(a, 12, "+256")))
+    entries.append(_obj(PACK_OBJ_BLOB, a))
+    var pack = _pack256_of(entries)
+    var limits = PackLimits()
+    var got = index_pack(f, Span(pack), limits)
+    assert_equal(got.index.count(), 2)
+    var id_a1 = hash_object(f, ObjectKind.blob(), Span(a1))
+    assert_equal(got.entries[0].id, id_a1)
+    assert_equal(got.entries[0].base_id, id_a)
+    assert_equal(got.entries[0].depth, 1)
+    assert_equal(len(got.index.pack_checksum()), 32)
+    assert_true(_same(read_pack_object(Span(pack), got.index, id_a1, limits).payload, a1))
+    var back = parse_pack_index(f, Span(got.index.serialize()))
+    assert_equal(back.count(), 2)
+    assert_equal(back.id_at(0), got.index.id_at(0))
+    assert_equal(back.offset_at(1), got.index.offset_at(1))
+    # The same bytes read as sha1 fail the 20-byte trailer check.
+    try:
+        _ = index_pack(ObjectFormat.sha1(), Span(pack), limits)
+        assert_true(False)
+    except e:
+        assert_equal(String(e), "komira_git: pack: the trailer is not the checksum of the pack")
 
 
 def main() raises:
     test_index_and_read()
     test_thin_pack()
     test_reader_refusals()
+    test_sha256_pack()
     print("komira_git pack reader tests passed")

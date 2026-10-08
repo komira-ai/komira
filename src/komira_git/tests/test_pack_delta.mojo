@@ -156,6 +156,9 @@ def test_refusals() raises:
     d.append(0x91)
     d.append(1)
     assert_equal(_err(base, d), p + "truncated copy instruction")
+    d = _header(10, 3)
+    d.append(0x81)  # an offset byte announced, none follows
+    assert_equal(_err(base, d), p + "truncated copy instruction")
     d = List[UInt8]()
     for _ in range(10):
         d.append(0xFF)

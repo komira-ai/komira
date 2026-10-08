@@ -155,7 +155,7 @@ struct _Resolver:
     var limits: PackLimits
     var budget: Int
     var produced: Int
-    var heads: List[_EntryInfoHead]
+    var base_pos: List[Int]
     var deltas: List[List[UInt8]]
     var payloads: List[List[UInt8]]
     var resolved: List[Bool]
@@ -169,7 +169,7 @@ struct _Resolver:
         self.limits = limits
         self.budget = budget
         self.produced = 0
-        self.heads = List[_EntryInfoHead]()
+        self.base_pos = List[Int]()
         self.deltas = List[List[UInt8]]()
         self.payloads = List[List[UInt8]]()
         self.resolved = List[Bool]()
@@ -253,24 +253,8 @@ struct _Resolver:
             var depth = self.info[j].depth + 1
             for k in range(len(kids)):
                 var c = kids[k]
-                if self.resolved[c]:
-                    continue
                 self.rebuild(c, Span(base), kind, depth)
                 stack.append(c)
-
-
-struct _EntryInfoHead(ImplicitlyCopyable, Movable):
-    """What phase 2 needs of an entry's header: where its zlib stream starts,
-    its declared size, and its OFS base position (-1 when none)."""
-
-    var data_start: Int
-    var size: Int
-    var base_pos: Int
-
-    def __init__(out self, data_start: Int, size: Int, base_pos: Int):
-        self.data_start = data_start
-        self.size = size
-        self.base_pos = base_pos
 
 
 def index_pack(
@@ -316,7 +300,7 @@ def index_thin_pack(
         base_offsets.append(head.base_offset)
         base_ids.append(head.base_id)
         types.append(head.type_code)
-        r.heads.append(_EntryInfoHead(head.data_start, head.size, -1))
+        r.base_pos.append(-1)
         if head.is_delta():
             r.deltas.append(data^)
             r.resolved.append(False)
@@ -348,7 +332,7 @@ def index_thin_pack(
                     + ": delta base offset " + String(base_offsets[i])
                     + " starts no entry"
                 )
-            r.heads[i].base_pos = b
+            r.base_pos[i] = b
             r.next_sibling[i] = r.ofs_child[b]
             r.ofs_child[b] = i
         elif types[i] == PACK_OBJ_REF_DELTA:
@@ -381,8 +365,6 @@ def index_thin_pack(
         var kids = r.ref_children(base_ids[j])
         for k in range(len(kids)):
             var c = kids[k]
-            if r.resolved[c]:
-                continue
             r.rebuild(c, Span(bases._payloads[x]), bases._kinds[x], 1)
             r.descend(c)
     var unresolved = 0
@@ -396,7 +378,7 @@ def index_thin_pack(
         )
     for j in range(count):
         if types[j] == PACK_OBJ_OFS_DELTA:
-            r.info[j].base_id = r.info[r.heads[j].base_pos].id
+            r.info[j].base_id = r.info[r.base_pos[j]].id
         elif types[j] == PACK_OBJ_REF_DELTA:
             r.info[j].base_id = base_ids[j]
     # The index, in id order.
