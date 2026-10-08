@@ -186,6 +186,17 @@ def test_values() raises:
     for _ in range(990):
         long_line += "x"
     assert_equal(_attachment_error("message/rfc822", long_line), not_7bit)
+    # RFC 5322 section 2.1.1: a 998-octet line is legal; 999 (above) is not.
+    var line_998 = String("Subject: ")
+    for _ in range(989):
+        line_998 += "x"
+    assert_equal(_attachment_error("message/rfc822", line_998), "OK")
+    # Media types are case-insensitive (RFC 2045 section 5.1): the 7bit check
+    # holds for `Message/RFC822` too.
+    assert_equal(
+        _attachment_error("Message/RFC822", String("Subject: caf") + chr(0xE9) + "\r\n\r\n"),
+        not_7bit,
+    )
     assert_equal(_attachment_error("message/rfc822", "Subject: a\n\nb\n"), "OK")
     var b = _builder()
     var msg = String(NOT_SET)

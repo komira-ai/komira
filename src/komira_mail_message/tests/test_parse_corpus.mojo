@@ -235,6 +235,26 @@ def test_transfer_encodings() raises:
     assert_equal(att[1], 3)
 
 
+def test_content_type_name_fallback() raises:
+    # With no Content-Disposition filename, filename() reads the Content-Type
+    # `name`. An RFC 2231 value is taken as written; a plain value has its
+    # RFC 2047 encoded words decoded.
+    var data = _b(
+        String("Content-Type: multipart/mixed; boundary=b\r\n\r\n")
+        + "--b\r\n"
+        + "Content-Type: application/x; name*=utf-8''%3D%3FUTF-8%3FQ%3Fx%3F%3D\r\n\r\n"
+        + "a\r\n"
+        + "--b\r\n"
+        + "Content-Type: application/x; name=\"=?UTF-8?Q?y?=\"\r\n\r\n"
+        + "b\r\n"
+        + "--b--\r\n"
+    )
+    var m = parse_message(Span(data))
+    assert_equal(m.part_count(), 3)
+    assert_equal(m.part(1).filename().value(), "=?UTF-8?Q?x?=")
+    assert_equal(m.part(2).filename().value(), "y")
+
+
 def test_malformed_headers() raises:
     assert_equal(
         _error("Subject: a\r\nno colon here\r\n\r\n"),
@@ -362,6 +382,7 @@ def main() raises:
     test_lf_only_and_no_body()
     test_8bit_and_non_utf8_kept_as_bytes()
     test_transfer_encodings()
+    test_content_type_name_fallback()
     test_malformed_headers()
     test_malformed_multipart()
     test_lenient_multipart_reading()

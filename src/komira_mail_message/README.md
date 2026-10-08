@@ -13,8 +13,9 @@ Every example below runs as a test when the package is built.
 
 The builder writes CRLF line breaks only, folds every header line to at most
 76 characters, and picks the transfer encoding (7bit, quoted-printable for
-non-ASCII text, base64 for attachments). It keeps no clock and draws no
-random numbers: the caller gives the time and a unique message id.
+non-ASCII text, base64 for attachments, 7bit for a `message/*` attachment).
+It keeps no clock and draws no random numbers: the caller gives the time and
+a unique message id.
 
 ```mojo
 from komira_mail_address import AddrSpec
