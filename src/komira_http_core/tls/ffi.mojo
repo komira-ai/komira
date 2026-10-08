@@ -1064,6 +1064,21 @@ def s2n_connection_get_actual_protocol_version(
     )
 
 
+def s2n_connection_get_cipher(conn: S2nOpaquePtr) -> S2nBytePtr:
+    """The negotiated cipher suite's name in s2n's OpenSSL-style spelling
+    ("TLS_AES_128_GCM_SHA256", "ECDHE-RSA-AES128-GCM-SHA256"): a pointer to a
+    NUL-terminated string in s2n's static cipher-suite table, or NULL on
+    failure.
+
+    Maps to s2n.h `const char *s2n_connection_get_cipher(
+        struct s2n_connection *conn)`.
+    """
+    # SAFETY: the returned pointer is non-owning (static storage, never
+    # freed). TlsConnection.negotiated_cipher copies it into a String, so it
+    # never escapes the FFI layer.
+    return external_call["komira_s2n_connection_get_cipher", S2nBytePtr](conn)
+
+
 # =============================================================================
 # Handshake diagnostics
 # =============================================================================
@@ -1147,7 +1162,7 @@ def s2n_connection_request_key_update(
     but NOT_REQUESTED; it does not check the handshake or the version."""
     # SAFETY: synchronous call; `conn` is a live handle owned by the caller's
     # TlsConnection; the enum is passed by value (C int ABI).
-    return external_call["s2n_connection_request_key_update", Int32](
+    return external_call["komira_s2n_connection_request_key_update", Int32](
         conn, peer_request
     )
 
@@ -1161,6 +1176,6 @@ def s2n_connection_get_key_update_counts(
     # SAFETY: synchronous call. Both out-pointers address caller-owned stack
     # bytes alive across the call; s2n writes one uint8_t through each and
     # keeps neither.
-    return external_call["s2n_connection_get_key_update_counts", Int32](
+    return external_call["komira_s2n_connection_get_key_update_counts", Int32](
         conn, send_key_updates, recv_key_updates
     )

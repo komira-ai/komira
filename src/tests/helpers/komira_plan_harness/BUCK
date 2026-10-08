@@ -1,0 +1,56 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: the canonical result text of a query result, for conformance
+# suites that run plans and compare results (canon_text.mojo states the
+# format). render.mojo turns a komira_arrow RecordBatch or Table into the
+# text, reading the Arrow buffers itself; parse.mojo reads an expected file
+# (a hand-written one may give a float as an exactly representable decimal);
+# compare.mojo compares the two under the expected file's order and float
+# policy and reports every mismatch. fixtures.mojo builds columns of every
+# type from raw buffers for the tests here and for suites that use canon.
+#
+# The welded tests, and the defect each one catches:
+#   test_render       a cell spelling per type; NULL taken from validity for
+#                     every type; the string `\N` against NULL; a type canon
+#                     cannot render refused by name.
+#   test_float        decimal-only floats accepted only when exact; a decimal
+#                     that disagrees with its bits refused (ties to even);
+#                     NaN and -0.0
+#                     compared by bits; ulps and rel tolerances.
+#   test_compare      order total / keys / none; every mismatch reported, not
+#                     only the first; schema and row-count mismatches; the
+#                     escapes and nested cells a parser refuses.
+#   test_round_trip   render -> text -> parse -> compare is equal, and the
+#                     text is a fixed point, for a batch of every type.
+#   test_types_and_slices
+#                     the full type tree (cells that read alike never share a
+#                     schema line); floats in nested values as bits and in
+#                     dictionaries as floats; a leading `#` in a name; slice
+#                     offsets on every layout; a dense union by type code.
+mojo_library(
+    name = "komira_plan_harness",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+    ],
+    test_srcs = [
+        "tests/test_compare.mojo",
+        "tests/test_float.mojo",
+        "tests/test_render.mojo",
+        "tests/test_round_trip.mojo",
+        "tests/test_types_and_slices.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
