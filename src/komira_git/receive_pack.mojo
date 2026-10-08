@@ -12,8 +12,9 @@
 # decides each command; `PushReport` collects those verdicts and writes the
 # report-status git's client reads, with git's rules:
 #   - an unpack failure fails every command with `unpacker error`;
-#   - in an atomic push, one refused command fails every other one with
-#     `atomic push failure`.
+#   - in an atomic push, the first refused command (in command order)
+#     keeps its reason and every other command, refused or not, reports
+#     `atomic push failure` (git stops at the first update() that fails).
 # `refuse_funny_refnames` applies the one verdict that needs no repository:
 # a ref outside `refs/`, or one `git check-ref-format` refuses (one level
 # allowed for a delete), is `funny refname`.
@@ -27,7 +28,13 @@
 # `option` lines only for refs a proc-receive hook rewrote, and there is
 # none here. `ofs-delta` promises that the caller's pack reader accepts
 # OFS_DELTA entries. `quiet` asks for no progress, and this server writes
-# none. A push certificate (`push-cert`) is not advertised and is refused.
+# none. A push certificate (`push-cert`) is not advertised and is refused
+# with this module's own message; git's receive-pack would read an
+# unsolicited one.
+#
+# Each command, shallow and push-option line loses one trailing LF before it
+# is read, as git reads them with PACKET_READ_CHOMP_NEWLINE (git's send-pack
+# writes none; libgit2 ends every command line with one).
 # =============================================================================
 
 from .bytes_util import _append_str
@@ -243,14 +250,15 @@ struct ReceivePackServer(Movable):
             if line.kind != PKT_DATA:
                 raise Error("komira_git: receive-pack: protocol error: expected old/new/ref")
             ref p = line.payload
+            var n = _chomp_len(Span(p))
             var nul = -1
-            for i in range(len(p)):
+            for i in range(n):
                 if p[i] == 0:
                     nul = i
                     break
-            var end = len(p) if nul < 0 else nul
+            var end = n if nul < 0 else nul
             var text = _utf8(Span(p), 0, end, "receive-pack")
-            if len(p) > 8 and text.startswith("shallow "):
+            if n > 8 and text.startswith("shallow "):
                 var hex = String(text[byte=8 : text.byte_length()])
                 var id = _parse_id(format, hex)
                 if not id:
@@ -262,7 +270,7 @@ struct ReceivePackServer(Movable):
                 continue
             if nul >= 0:
                 self._read_features(
-                    _utf8(Span(p), nul + 1, len(p), "receive-pack"), req
+                    _utf8(Span(p), nul + 1, n, "receive-pack"), req
                 )
             if text == "push-cert":
                 raise Error("komira_git: receive-pack: push certificates are not supported")
@@ -276,7 +284,12 @@ struct ReceivePackServer(Movable):
                 if line.kind != PKT_DATA:
                     break
                 req.push_options.append(
-                    _utf8(Span(line.payload), 0, len(line.payload), "push option")
+                    _utf8(
+                        Span(line.payload),
+                        0,
+                        _chomp_len(Span(line.payload)),
+                        "push option",
+                    )
                 )
         req.complete = True
         return req^
@@ -309,6 +322,15 @@ struct ReceivePackServer(Movable):
     def take_buffered(mut self) -> List[UInt8]:
         """The input fed after the commands: the start of the packfile."""
         return self._reader.take_buffered()
+
+
+@always_inline
+def _chomp_len(p: Span[UInt8, _]) -> Int:
+    """The length of `p` without one trailing LF."""
+    var n = len(p)
+    if n > 0 and p[n - 1] == 10:
+        return n - 1
+    return n
 
 
 def _parse_command(format: ObjectFormat, text: String) raises -> PushCommand:
@@ -378,20 +400,23 @@ struct PushReport(Movable):
 
     def final_reasons(self, request: PushRequest) -> List[String]:
         """Each command's reason after git's rules: all `unpacker error`
-        when the pack failed, and in an atomic push with any refusal, every
-        command not refused itself gets `atomic push failure`."""
+        when the pack failed; in an atomic push with any refusal, the first
+        refused command keeps its reason and every other one gets `atomic
+        push failure`, as git's execute_commands_atomic stops at the first
+        update() that fails."""
         var out = List[String]()
-        var any_refused = False
+        var first_refused = -1
         for i in range(len(self.reasons)):
             if self.reasons[i].byte_length() > 0:
-                any_refused = True
+                first_refused = i
+                break
         for i in range(len(self.reasons)):
             if self.unpack_error.byte_length() > 0:
                 out.append(String(UNPACKER_ERROR))
+            elif request.atomic and first_refused >= 0 and i != first_refused:
+                out.append(String(ATOMIC_PUSH_FAILURE))
             elif self.reasons[i].byte_length() > 0:
                 out.append(self.reasons[i])
-            elif request.atomic and any_refused:
-                out.append(String(ATOMIC_PUSH_FAILURE))
             else:
                 out.append(String())
         return out^

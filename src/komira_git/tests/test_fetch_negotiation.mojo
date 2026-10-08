@@ -135,6 +135,8 @@ def test_ready() raises:
     assert_false(negotiate(_args([C5], [MISSING]), g).ready)
     # A tag want is peeled to its commit; a blob want counts as reached.
     assert_true(negotiate(_args([T1, B1], [C2]), g).ready)
+    # t1 peels to c1, which r1 (whose parent m9 is absent) does not reach.
+    assert_false(negotiate(_args([T1], [R1]), g).ready)
     var waiting = _args([C5], [C3])
     waiting.wait_for_done = True
     var w = negotiate(waiting, g)

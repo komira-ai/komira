@@ -23,7 +23,12 @@
 #     closing flush for side-band; nothing written without report-status
 #     or without commands.
 #   * test_funny_refnames: a ref outside refs/ or failing check-ref-format
-#     accepted; a one-level delete refused.
+#     accepted; a one-level delete refused; in an atomic push with two
+#     funny refs, the second keeping its own reason (git reports `atomic
+#     push failure` for every command after the first failed update()).
+#   * test_lf_terminated_request: libgit2's form (an LF after the
+#     capabilities and after each command, shallow and push option) not
+#     chomped, so side-band-64k is missed and ref names carry the LF.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -301,6 +306,54 @@ def test_funny_refnames() raises:
     assert_equal(reasons[3], "funny refname")
     assert_equal(reasons[4], "funny refname")
     assert_equal(reasons[5], "")
+    # Atomic, two funny refs: the first keeps its reason, the rest fail.
+    var w2 = List[UInt8]()
+    append_pkt_data(w2, Span(_with_caps(A + " " + B + " refs/heads/ok", " report-status atomic")))
+    append_pkt_text(w2, A + " " + B + " refs/heads/a..b")
+    append_pkt_text(w2, A + " " + B + " refs/heads/c..d")
+    append_pkt_flush(w2)
+    var s2 = ReceivePackServer(_config(True, False))
+    s2.feed(Span(w2))
+    var r2 = s2.read_request()
+    assert_true(r2.atomic)
+    var rep2 = PushReport(r2)
+    rep2.refuse_funny_refnames(r2)
+    var reasons2 = rep2.final_reasons(r2)
+    assert_equal(reasons2[0], "atomic push failure")
+    assert_equal(reasons2[1], "funny refname")
+    assert_equal(reasons2[2], "atomic push failure")
+
+
+def test_lf_terminated_request() raises:
+    var w = List[UInt8]()
+    append_pkt_text(w, "shallow " + A + "\n")
+    append_pkt_data(
+        w, Span(_with_caps(A + " " + B + " refs/heads/main", " report-status side-band-64k push-options\n"))
+    )
+    append_pkt_text(w, Z + " " + B + " refs/heads/new\n")
+    append_pkt_flush(w)
+    append_pkt_text(w, "note=one\n")
+    append_pkt_flush(w)
+    var s = ReceivePackServer(_config(True, True))
+    s.feed(Span(w))
+    var r = s.read_request()
+    assert_true(r.complete)
+    assert_true(r.side_band and r.report_status and r.use_push_options)
+    assert_equal(len(r.shallows), 1)
+    assert_equal(len(r.commands), 2)
+    assert_equal(r.commands[0].ref_name, "refs/heads/main")
+    assert_equal(r.commands[1].ref_name, "refs/heads/new")
+    assert_equal(len(r.push_options), 1)
+    assert_equal(r.push_options[0], "note=one")
+    var rep = PushReport(r)
+    rep.refuse_funny_refnames(r)
+    var out = List[UInt8]()
+    append_push_report(out, r, rep)
+    assert_equal(
+        _show(out),
+        "0044\\x01000eunpack ok\\x0a0017ok refs/heads/main\\x0a0016ok refs/heads/new\\x0a0000"
+        + "0000",
+    )
 
 
 def test_more_refusals() raises:
@@ -358,5 +411,6 @@ def main() raises:
     test_request_refusals()
     test_report()
     test_funny_refnames()
+    test_lf_terminated_request()
     test_more_refusals()
     print("komira_git receive-pack tests passed")

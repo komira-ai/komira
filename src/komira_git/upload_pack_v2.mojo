@@ -11,19 +11,22 @@
 # server reads requests until the client sends a lone flush (`V2_END`);
 # over smart HTTP each POST body is one request.
 #
-# What is advertised is what is implemented, and nothing else:
+# The advertisement is git's own default one:
 #   agent=<agent>, ls-refs=unborn, fetch=shallow wait-for-done,
 #   server-option, object-format=<format>
-# which is git's own default advertisement. A request naming anything
-# else is refused with git's words for it (serve.c, ls-refs.c,
-# upload-pack.c): `filter`, `want-ref`, `sideband-all`, `packfile-uris`,
-# `deepen-since` and `deepen-not` are "unexpected line", and the
+# A request naming a feature not advertised is refused with git's words
+# for it (serve.c, ls-refs.c, upload-pack.c): `filter`, `want-ref`,
+# `sideband-all` and `packfile-uris` are "unexpected line", and the
 # `session-id`, `object-info`, `bundle-uri` and `promisor-remote`
 # capabilities are unknown.
 #
-# One deliberate difference: `deepen <n>` takes a plain decimal (no sign, no
-# leading zero, at most 2147483647). git reads it with strtol(.., 0), so it
-# would also take `0x10` or octal `010`; git's own client writes `%d`.
+# Two deliberate differences from git:
+#   - advertising `shallow` promises `deepen-since` and `deepen-not`, and
+#     git accepts both; this server refuses them as "unexpected line", so
+#     git's `--shallow-since` and `--shallow-exclude` fail against it;
+#   - `deepen <n>` takes a plain decimal (no sign, no leading zero, at most
+#     2147483647). git reads it with strtol(.., 0), so it would also take
+#     `0x10` or octal `010`; git's own client writes `%d`.
 # =============================================================================
 
 from .object_id import ObjectFormat, ObjectId

@@ -358,6 +358,11 @@ def test_fetch_refusals() raises:
         _response_error(True, ["shallow-info\n", "shallow 12", "0001"]),
         P + "invalid shallow line: shallow 12",
     )
+    # A second shallow-info section is refused, as git's fetch-pack does.
+    assert_equal(
+        _response_error(True, ["shallow-info\n", "0001", "shallow-info\n"]),
+        P + "expected 'packfile', received 'shallow-info'",
+    )
     assert_equal(
         _response_error(True, ["packfile\n", "band3fatal: out of memory"]),
         P + "remote error: fatal: out of memory",

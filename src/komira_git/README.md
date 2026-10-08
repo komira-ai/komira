@@ -76,9 +76,11 @@ of a git server or client build on.
   `refuse_funny_refnames`, `final_reasons`, `accepted`), and
   `append_push_message` and `append_push_report` write the messages and
   the report-status. git's rules hold: an unpack failure fails every
-  command with `UNPACKER_ERROR`, one refusal in an atomic push fails every
-  other command with `ATOMIC_PUSH_FAILURE`, and `FUNNY_REFNAME` is the
-  reason for a ref receive-pack will not update.
+  command with `UNPACKER_ERROR`; in an atomic push the first refused
+  command keeps its reason and every other one reports
+  `ATOMIC_PUSH_FAILURE`; and `FUNNY_REFNAME` is the reason for a ref
+  receive-pack will not update. Command, shallow and push-option lines
+  lose one trailing LF, as in git (libgit2 sends one).
 - **Push, client side (send-pack).** `SendPackClient(agent, format)`:
   `feed`, `read_advertisement` (into `advertisement`, a
   `PushAdvertisement` with `supports` and `value`), `append_push_request`
@@ -86,15 +88,24 @@ of a git server or client build on.
 
 ## The protocol
 
-What the servers advertise is what is implemented, and it is git's own
-default advertisement: `agent`, `ls-refs=unborn`, `fetch=shallow
-wait-for-done`, `server-option` and `object-format` for fetch;
-`report-status report-status-v2 delete-refs side-band-64k quiet atomic
-ofs-delta [push-options] object-format agent` for push. A request using
-anything else (`filter`, `want-ref`, `sideband-all`, `packfile-uris`,
-`deepen-since`, `deepen-not`, a push certificate) is refused with git's
-words for it. Push is protocol v0 even for a v2 client, as in git:
-protocol v2 has no push command.
+The servers advertise git's own default advertisement: `agent`,
+`ls-refs=unborn`, `fetch=shallow wait-for-done`, `server-option` and
+`object-format` for fetch; `report-status report-status-v2 delete-refs
+side-band-64k quiet atomic ofs-delta [push-options] object-format agent`
+for push. A request using a feature not advertised (`filter`, `want-ref`,
+`sideband-all`, `packfile-uris`) is refused with git's words for it. Push
+is protocol v0 even for a v2 client, as in git: protocol v2 has no push
+command.
+
+Three refusals differ from git:
+- `deepen-since` and `deepen-not` are part of the advertised `shallow`
+  feature, and git accepts them; this server refuses them as "unexpected
+  line", so `git clone --shallow-since` and `--shallow-exclude` fail
+  against it.
+- A push certificate (`push-cert`) is refused with this package's own
+  message; git's receive-pack reads an unsolicited one.
+- `deepen <n>` must be plain decimal (git's strtol would also read `0x10`
+  and octal).
 
 The repository is the caller's: which haves a server holds and whether
 every want reaches one come from its `CommitGraph`; which commits a depth
@@ -102,8 +113,7 @@ cuts (the shallow and unshallow lines), the pack, and each push command's
 verdict are computed by the caller and written by these state machines.
 `negotiate` differs from git in one way: git stops its walk at commits
 older than the oldest acknowledged have, and this walk does not, so it can
-say `ready` a round sooner. `deepen <n>` must be plain decimal (git's
-strtol would also read `0x10` and octal).
+say `ready` a round sooner.
 
 The requests the clients write and the responses the servers write are
 byte for byte git's: `src/tests/conformance/komira_git_conformance`
