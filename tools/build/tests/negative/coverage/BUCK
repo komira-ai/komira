@@ -358,6 +358,12 @@ _GATED = {
     # one `if` whose false arm test_clamp_high never takes: the one finding
     # is BelowTarget on branch (its branch records, not BranchNotMeasured).
     "covbranch": (["covbranch/__init__.mojo", "covbranch/clamp.mojo"], ["tests/test_clamp_high.mojo"], ":covbranch_gate"),
+    # Every line covered, the `except` body included (the first raising call
+    # in its `try:` body raises once), but the second call never raises: the
+    # one finding is BelowTarget on branch, a `try` decision's raise arm
+    # (tools/build/coverage/branch/README.md, "try"), which line coverage
+    # cannot see.
+    "covtry": (["covtry/__init__.mojo", "covtry/total.mojo"], ["tests/test_total_first.mojo"], ":covbranch_gate"),
 }
 
 cov_gate_dir(
@@ -380,6 +386,22 @@ mojo_library(
     coverage_mode = "enforce",
     import_name = "covbranch",
     test_srcs = ["tests/test_clamp_both.mojo"],
+)
+
+# GREEN in enforce mode: covtry with a test making each raising call of its
+# `try:` body raise once: no finding.
+mojo_library(
+    name = "covtry_both",
+    srcs = [
+        "covtry/__init__.mojo",
+        "covtry/total.mojo",
+    ],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = ":covbranch_gate",
+    coverage_mode = "enforce",
+    import_name = "covtry",
+    test_srcs = ["tests/test_total_both.mojo"],
 )
 
 cov_gate_dir(
@@ -411,13 +433,14 @@ cov_gate_dir(
 ]
 
 # RED: tests//negative/coverage:covlow[coverage][gate], :covnotests[...],
-# :covun[...], :covfull_unread[...], :covbranch[...] (enforce), and
+# :covun[...], :covfull_unread[...], :covbranch[...], :covtry[...] (enforce), and
 # :covlow_conda, :covnotests_conda (a library with no test: a REFUSED conda
 # package, which waits for its NotMeasured gate all the same). GREEN:
-# :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch (the
-# libraries), :covfull[coverage][gate] (enforce), :covlow_census,
-# :covnotests_census, :covun_census, :covfull_census, :covbranch_census and
-# their :<name>_census_result checks.
+# :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch,
+# :covtry (the libraries), :covfull[coverage][gate] and
+# :covtry_both[coverage][gate] (enforce), :covlow_census,
+# :covnotests_census, :covun_census, :covfull_census, :covbranch_census,
+# :covtry_census and their :<name>_census_result checks.
 [
     mojo_library(
         name = name + suffix,
@@ -479,6 +502,14 @@ _RESULTS = {
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":3,"line_found":3,"line_bp":10000,"branch_hit":1,"branch_found":2,"branch_bp":5000,',
         '"line_floor_bp":10000,"branch_floor_bp":0}',
         '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"branch 50.00% is below the target 100.00%","count":null}],"exemptions"',
+    ],
+    # Every line (9 of 9), 5 of 6 arms: check's `if` (2 of 2), the first
+    # call's `try` decision (2 of 2), the second's (returned, never raised:
+    # 1 of 2). BelowTarget on branch is the only finding.
+    "covtry": [
+        '"conclusion":"neutral","mode":"census",',
+        _PKG + '"files":1,"unmeasured_files":0,"line_hit":9,"line_found":9,"line_bp":10000,"branch_hit":5,"branch_found":6,"branch_bp":8333,',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":8333,"bound_bp":10000,"path":"","line":0,"message":"branch 83.33% is below the target 100.00%","count":null}],"exemptions"',
     ],
 }
 
@@ -600,52 +631,14 @@ mojo_test(
 )
 
 # Test 46. What a library may name in `coverage_tests`: a mojo_test that
-# depends on it, whose main is a source and that has no `args` (a coverage
-# run passes none). RED at analysis: :covmt_stray_cov_gate (test_tracer_mt
-# does not depend on covmt_stray) and :covmt_args_cov_gate (a test with
-# `args`).
-mojo_library(
-    name = "covmt_stray",
-    srcs = ["tracer/__init__.mojo"],
-    conda = False,
-    coverage_debug = _LINK,
-    coverage_gate = _GATE,
-    coverage_mode = "census",
-    coverage_tests = [":test_tracer_mt"],
-    import_name = "tracer",
-)
-
-mojo_library(
-    name = "covmt_args",
-    srcs = ["tracer/__init__.mojo"],
-    conda = False,
-    coverage_debug = _LINK,
-    coverage_gate = _GATE,
-    coverage_mode = "census",
-    coverage_tests = [":test_args"],
-    import_name = "tracer",
-)
-
-mojo_test(
-    name = "test_args",
-    srcs = ["tests/test_tracer.mojo"],
-    args = ["--one"],
-    coverage_debug = _LINK,
-    deps = [":covmt_args"],
-)
-
-# Test 46. Two more refusals of `coverage_tests`, each RED at analysis of
-# the library's gate: :covmt_gen_cov_gate names a mojo_test whose main is
-# generated (`cannot run under kcov: its main source ... is generated`), and
-# :covmt_nocov_cov_gate one with no coverage build (no coverage_debug, and
-# no switch: `is not a mojo_test with a coverage build`).
-cov_plant(
-    name = "test_gen_main_src",
-    expr = "s/traced, TracerPid/traced (generated copy), TracerPid/",
-    out = "tests/test_gen_main.mojo",
-    src = "tests/test_tracer.mojo",
-)
-
+# depends on it, whose main is a source, that has no `args` (a coverage run
+# passes none) and that has a coverage build. Each RED at analysis of the
+# library's gate: :covmt_stray_cov_gate (test_tracer_mt does not depend on
+# covmt_stray), :covmt_args_cov_gate (a test with `args`),
+# :covmt_gen_cov_gate (a mojo_test whose main is generated: `cannot run
+# under kcov: its main source ... is generated`) and :covmt_nocov_cov_gate
+# (no coverage_debug, and no switch: `is not a mojo_test with a coverage
+# build`).
 [
     mojo_library(
         name = name,
@@ -657,8 +650,28 @@ cov_plant(
         coverage_tests = [test],
         import_name = "tracer",
     )
-    for name, test in (("covmt_gen", ":test_gen_main"), ("covmt_nocov", ":test_nocov"))
+    for name, test in (
+        ("covmt_stray", ":test_tracer_mt"),
+        ("covmt_args", ":test_args"),
+        ("covmt_gen", ":test_gen_main"),
+        ("covmt_nocov", ":test_nocov"),
+    )
 ]
+
+mojo_test(
+    name = "test_args",
+    srcs = ["tests/test_tracer.mojo"],
+    args = ["--one"],
+    coverage_debug = _LINK,
+    deps = [":covmt_args"],
+)
+
+cov_plant(
+    name = "test_gen_main_src",
+    expr = "s/traced, TracerPid/traced (generated copy), TracerPid/",
+    out = "tests/test_gen_main.mojo",
+    src = "tests/test_tracer.mojo",
+)
 
 mojo_test(
     name = "test_gen_main",

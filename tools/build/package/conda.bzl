@@ -156,14 +156,30 @@ def _subdir(ctx):
         return "linux-64"
     return None
 
+# The command lines of a conda package's two joins (`conda_join`, what
+# [default] is; `conda_release_join`, what [release] is), the very cmd_args
+# given to the actions, and `lib`, the label of the library packaged. A check
+# reads their `inputs`: tests//functional/coverage:conda_gate fails at
+# analysis unless both wait for every coverage marker of the library
+# (MojoCoverageGateInfo) and the `coverage_gate` given, in a build without
+# `-c komira.coverage=true`.
+CondaJoinInfo = provider(fields = {
+    "join": provider_field(typing.Any),
+    "lib": provider_field(typing.Any),
+    "release_join": provider_field(typing.Any),
+})
+
 def _copy_dir(ctx, bb, src, dst, category, identifier, hidden):
     # The published directories are copies made after the check passed, so none
     # of them exists unless it did (the gate join of mojo_library, one level up).
+    # Returns the command line, for CondaJoinInfo.
+    cmd = cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, src, dst.as_output(), hidden = hidden)
     ctx.actions.run(
-        cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, src, dst.as_output(), hidden = hidden),
+        cmd,
         category = category,
         identifier = identifier,
     )
+    return cmd
 
 def _doc_args(info):
     # The package's documentation: its README.md, installed at
@@ -292,15 +308,15 @@ def _conda_package_impl(ctx):
 
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("out", dir = True)
-    _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded] + gate)
+    join = _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded] + gate)
 
     # [release]: the same directory, copied only after the RELEASE check passed
     # (stamped, with its source commit and a positive commit time, and not
     # refused) and the kcov guard passed. This is the only thing an uploader
     # reads.
     rel = ctx.actions.declare_output("release", dir = True)
-    _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded] + gate)
-    return [DefaultInfo(
+    release_join = _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded] + gate)
+    return [CondaJoinInfo(join = join, lib = lib.label, release_join = release_join), DefaultInfo(
         default_output = out,
         sub_targets = {
             "check": [DefaultInfo(default_output = checked)],

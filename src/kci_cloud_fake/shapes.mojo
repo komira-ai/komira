@@ -283,6 +283,21 @@
 # A service's `network` lowers to an input of its run node on the subnet's
 # NAME, on every shape that takes it.
 #
+# REGISTRY (registry.mojo lowers it): one role, `registry`, the object that
+# holds the artifacts; a grant to it (WRITE: push, READ: pull) is the
+# shape's grant kind for any target:
+#   * `generic`   registry -> registry.
+#   * `aws`       registry -> AWS::ECR::Repository (an image repository;
+#                 grants are inline policies of the principal's role).
+#   * `gcp`       registry -> artifactregistry.googleapis.com/Repository (a
+#                 Docker-format repository; grants are member bindings on it).
+#   * `azure`     registry -> Microsoft.ContainerRegistry/registries (its
+#                 repositories are implicit, so the registry is the object;
+#                 grants are role assignments on it).
+#   * `onprem`    NOT_YET: which registry an onprem cell runs is an open
+#                 question (Q24), so the shape declares it absent rather than
+#                 pick one.
+#
 # A shape's ABSENCES (`not_yet`) are the catalog types it does not host yet,
 # each with its reason; the fake cloud built with the shape declares them,
 # and is complete only when there are none. A grant resource has no row: its roles
@@ -303,6 +318,7 @@ from kci_cloud import (
     FIELD_IP_ADDRESS,
     FIELD_NETWORK,
     FIELD_QUEUE,
+    FIELD_REGISTRY,
     FIELD_SCHEDULE,
     FIELD_SECRET,
     FIELD_SERVICE,
@@ -350,6 +366,7 @@ comptime ROLE_TRIGGER = "trigger"
 comptime ROLE_NETWORK = "network"
 comptime ROLE_SUBNET = "subnet"
 comptime ROLE_ADDRESS = "address"
+comptime ROLE_REGISTRY = "registry"
 comptime ROLE_RULES = "rules"
 """The helper of a `grant` resource's edge, where its row names one."""
 
@@ -421,6 +438,10 @@ comptime ONPREM_NETWORK_REASON = (
     "the onprem backing of a network, a subnet and an IP address is an open question (Q23: a Namespace"
     " with a default-deny NetworkPolicy, which has no address space; Kube-OVN VPCs and subnets; Cilium;"
     " a MetalLB or LB-IPAM address pool for an IP address)"
+)
+comptime ONPREM_REGISTRY_REASON = (
+    "the onprem registry that holds a registry's artifacts is an open question (Q24: Harbor, Sonatype"
+    " Nexus or JFrog Artifactory, Zot or the CNCF Distribution registry, or Gitea packages)"
 )
 comptime ONPREM_TABLE_REASON = (
     "the onprem datastore that backs a table is an open question (Q17:"
@@ -615,6 +636,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_NETWORK, String(ROLE_NETWORK), String("network")))
         r.append(ShapeRow(FIELD_SUBNET, String(ROLE_SUBNET), String("subnet")))
         r.append(ShapeRow(FIELD_IP_ADDRESS, String(ROLE_ADDRESS), String("address")))
+        r.append(ShapeRow(FIELD_REGISTRY, String(ROLE_REGISTRY), String("registry")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("grant"), String("")))
         return ProviderShape(String("generic"), r^, g^)
@@ -650,6 +672,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_NETWORK, String(ROLE_NETWORK), String("AWS::EC2::VPC")))
         r.append(ShapeRow(FIELD_SUBNET, String(ROLE_SUBNET), String("AWS::EC2::Subnet")))
         r.append(ShapeRow(FIELD_IP_ADDRESS, String(ROLE_ADDRESS), String("AWS::EC2::EIP")))
+        r.append(ShapeRow(FIELD_REGISTRY, String(ROLE_REGISTRY), String("AWS::ECR::Repository")))
         var g = List[GrantRow]()
         g.append(GrantRow(FIELD_SERVICE, String("AWS::Lambda::Permission"), String("")))
         g.append(GrantRow(TARGET_ANY, String("AWS::IAM::RolePolicy"), String("")))
@@ -700,6 +723,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_NETWORK, String(ROLE_NETWORK), String("compute.googleapis.com/Network")))
         r.append(ShapeRow(FIELD_SUBNET, String(ROLE_SUBNET), String("compute.googleapis.com/Subnetwork")))
         r.append(ShapeRow(FIELD_IP_ADDRESS, String(ROLE_ADDRESS), String("compute.googleapis.com/Address")))
+        r.append(ShapeRow(FIELD_REGISTRY, String(ROLE_REGISTRY), String("artifactregistry.googleapis.com/Repository")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("setIamPolicy"), String("")))
         return ProviderShape(String("gcp"), r^, g^, gpu_limit=String(GPU_REASON_UNDECIDED), network_ranged=False)
@@ -764,6 +788,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_NETWORK, String(ROLE_NETWORK), String("Microsoft.Network/virtualNetworks")))
         r.append(ShapeRow(FIELD_SUBNET, String(ROLE_SUBNET), String("Microsoft.Network/virtualNetworks/subnets")))
         r.append(ShapeRow(FIELD_IP_ADDRESS, String(ROLE_ADDRESS), String("Microsoft.Network/publicIPAddresses")))
+        r.append(ShapeRow(FIELD_REGISTRY, String(ROLE_REGISTRY), String("Microsoft.ContainerRegistry/registries")))
         var g = List[GrantRow]()
         g.append(
             GrantRow(
@@ -823,6 +848,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         later.append(Absence(FIELD_EVENT_TRIGGER, NOT_YET, String(ONPREM_EVENT_TRIGGER_REASON)))
         for f in [FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS]:
             later.append(Absence(f, NOT_YET, String(ONPREM_NETWORK_REASON)))
+        later.append(Absence(FIELD_REGISTRY, NOT_YET, String(ONPREM_REGISTRY_REASON)))
         return ProviderShape(
             String("onprem"),
             r^,

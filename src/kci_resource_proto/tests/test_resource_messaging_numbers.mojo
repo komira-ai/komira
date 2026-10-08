@@ -26,7 +26,7 @@
 #      `Ref`s are absent messages.
 #   5. AS ITS ARM. As `Resource.body` 15 (`queue`), 21 (`topic`) and 28
 #      (`subscription`), each fills its own field, at its position in
-#      declaration order (6th, 10th and 15th; the census of every arm is in
+#      declaration order (6th, 10th and 17th; the census of every arm is in
 #      test_resource_compute_numbers.mojo).
 # The bytes are a LITERAL restatement of the proto, deliberately.
 # =============================================================================
@@ -273,7 +273,7 @@ def test_topic() raises:
 
 def test_subscription() raises:
     """Subscription: 1 topic, 2 queue (each a Ref); by name, binary, JSON,
-    absent = unset; as the `subscription` arm 28 (the sixteenth)."""
+    absent = unset; as the `subscription` arm 28 (the seventeenth)."""
     var b = List[UInt8]()
     _msg(b, 1, _ref("events"))
     _msg(b, 2, _ref("work"))
@@ -296,7 +296,7 @@ def test_subscription() raises:
     _msg(r, 28, b)
     var rr = decode_proto[Resource](r.copy())
     assert_true(Bool(rr.subscription), "body 28 is `subscription`")
-    assert_equal(rr._oneof0_case, 16, "the subscription is the sixteenth arm")
+    assert_equal(rr._oneof0_case, 17, "the subscription is the seventeenth arm")
     assert_equal(rr.subscription.value().queue.value().resource, "work")
     _same(encode_proto(rr), r, "Resource with a subscription")
     print("  test_subscription: PASS")

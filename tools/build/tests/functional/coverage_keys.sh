@@ -206,11 +206,17 @@ cmp -s "$LOG/coverage_keys_false.facts" "$LOG/coverage_keys_unset.facts" ||
 
 # Another platform behaves as coverage off: on darwin-arm64, with the switch
 # on, no library has a coverage attribute (the select in coverage.bzl), so
-# it declares no coverage action.
+# it declares no coverage action. A darwin-arm64 target configures only with
+# a macOS execution platform registered (a library's README tool is an exec
+# dep), which a checkout without `[komira_re] darwin_arm64_properties` has
+# not, so the query registers placeholder macOS properties and hosts, as
+# tools/build/tests/functional/darwin/check.sh does: analysis only, nothing
+# runs on them.
 DARWIN=komira//tools/build/platforms:darwin-arm64
+DARWIN_PLACEHOLDER=(-c komira_re.darwin_arm64_properties=pool=unreachable-check-only -c komira_re.darwin_macos_hosts=0.0-check)
 nt=$(printf '%s\n' "$libs" | grep -c .)
 # shellcheck disable=SC2086 # one label per word
-"$BUCK2" cquery "set($(printf '%s ' $libs))" --target-platforms "$DARWIN" -c komira.coverage=true -a '^coverage_(debug|run|branch|gate)$' --json > "$LOG/coverage_keys_darwin.json" 2> "$LOG/coverage_keys_darwin.err" ||
+"$BUCK2" cquery "set($(printf '%s ' $libs))" --target-platforms "$DARWIN" "${DARWIN_PLACEHOLDER[@]}" -c komira.coverage=true -a '^coverage_(debug|run|branch|gate)$' --json > "$LOG/coverage_keys_darwin.json" 2> "$LOG/coverage_keys_darwin.err" ||
     fail "cquery on $DARWIN failed (see $LOG/coverage_keys_darwin.err)"
 inspect_tool json "$LOG/coverage_keys_darwin.json" > "$LOG/coverage_keys_darwin.tsv" ||
     fail "inspect cannot read $LOG/coverage_keys_darwin.json"
