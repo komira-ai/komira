@@ -36,10 +36,14 @@
 //! call's error flag), and the `(` of a call off a `for` line (`name(` or
 //! `name[...](`: br; select only on a raising call's error flag), unless the
 //! callee is a measured `@always_inline("nodebug")` function, whose code
-//! carries its callers' locations. Anything else is refused.
+//! carries its callers' locations. In the body of a `try:` of its function,
+//! a br at a call, a subscript or a `+` is a source decision of kind `try`
+//! when it tests a raising call's error flag (arm 0: the call returned,
+//! arm 1: it raised into the handler), and refused otherwise. Anything else
+//! is refused.
 //!
 //! Records. `BRDA:<line>,<col>:<kind>:<n>/<N>,<arm>,<count>`: <kind> is `br`,
-//! `select`, `switch` or `rhs` (the right operand of `and`/`or`); <N> is how
+//! `select`, `switch`, `try` or `rhs` (the right operand of `and`/`or`); <N> is how
 //! many decisions of that kind one copy of a function (an LLVM function, or
 //! one inlined copy of it) holds at that location, <n> which one, in IR
 //! order. Copies are summed arm by arm and must agree on <N> and on where
@@ -209,6 +213,20 @@ const State = struct {
         return .{ .file = self.fileOf(w.name), .line = w.line, .col = w.col, .inlined_at = w.inlined_at };
     }
 
+    /// Whether location `loc` is inlined at `at`, directly or through
+    /// another inlined call.
+    pub fn inlinedAt(self: *State, loc: u32, at: u32) bool {
+        var l = loc;
+        for (0..32) |_| {
+            const m = self.meta.get(l) orelse return false;
+            if (m != .location) return false;
+            const i = m.location.inlined_at orelse return false;
+            if (i == at) return true;
+            l = i;
+        }
+        return false;
+    }
+
     /// Whether `loc` is in the standard library (--stdlib), inlined at `at`.
     pub fn stdlibInlinedAt(self: *State, loc: u32, at: u32) bool {
         const w = self.where(loc) orelse return false;
@@ -298,6 +316,16 @@ fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u
         st.counts[@intFromEnum(Class.string)] += 1;
         return .{ .weights = w };
     }
+    // In a `try:` body of its function, a br at a call, a subscript or a `+`
+    // is a raising call's error check, and a decision: whether the call
+    // raised into the handler. Any other br there is refused: whether its
+    // error reaches the handler is not known.
+    if (kind == .br and (c.class == .call or c.class == .subscript or c.class == .plus) and source.inTry(st.alloc, at.file, at.line)) {
+        if (st.fun.errorFlag(cond, dbg, st)) return tryDecision(st, at, w, cond, prof, blk);
+        st.counts[@intFromEnum(Class.unknown)] += 1;
+        st.err("{s}: a br at '{s}' in a try body that is not a raising call's error flag (the i1, or field 0 of the {{ i1, ... }}, a call at this location returns, or a phi of such flags, constants and the code of a callee inlined here): whether it is the call's error check is not known: {s}", .{ where, c.token, code });
+        return .{ .weights = w };
+    }
     st.counts[@intFromEnum(c.class)] += 1;
     if (c.class == .unknown) {
         st.err("{s}: a {s} at '{s}' is neither a source decision nor a known compiler-made branch: {s}", .{ where, @tagName(kind), c.token, code });
@@ -318,17 +346,37 @@ fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u
         return .{ .weights = w };
     }
     if (!c.class.decision()) return .{ .weights = w };
-    // Where its condition is computed, when in this copy of the function.
-    var fp = Pos{};
-    if (st.fun.defs.get(cond)) |dd| {
-        if (dd.dbg) |d| {
-            if (st.locate(d)) |ca| {
-                if (ca.inlined_at == at.inlined_at and ca.file == at.file) fp = .{ .line = ca.line, .col = ca.col };
-            }
+    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = kind, .class = c.class, .arms = arms, .weights = w, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
+    return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = true };
+}
+
+/// Where condition `cond` of a branch at `at` is computed, when in the same
+/// copy of the function and file (line 0: elsewhere).
+fn condPos(st: *State, cond: []const u8, at: State.At) Pos {
+    const dd = st.fun.defs.get(cond) orelse return .{};
+    const d = dd.dbg orelse return .{};
+    const ca = st.locate(d) orelse return .{};
+    if (ca.inlined_at == at.inlined_at and ca.file == at.file) return .{ .line = ca.line, .col = ca.col };
+    return .{};
+}
+
+/// A `try:` body's raising call (README.md, "try"): its br is a decision
+/// whose arm 0 is the call returning (LLVM's false, the second weight) and
+/// arm 1 the call raising into the handler (true, the first).
+fn tryDecision(st: *State, at: State.At, w: ?[]const u64, cond: []const u8, prof: ?u32, blk: []const u8) Seen {
+    st.counts[@intFromEnum(Class.try_)] += 1;
+    var arms: ?[]const u64 = w;
+    if (w) |x| {
+        if (x.len == 2) {
+            const sw = st.alloc.alloc(u64, 2) catch oom();
+            sw[0] = x[1];
+            sw[1] = x[0];
+            arms = sw;
         }
     }
-    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = kind, .class = c.class, .arms = arms, .weights = w, .cond = cond, .prof = prof, .fp = fp, .block = blk }) catch oom();
-    return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = true };
+    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = .@"try", .class = .try_, .arms = 2, .weights = arms, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
+    // No source decision's test: an and/or's result is never counted from it.
+    return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = false };
 }
 
 fn total(w: []const u64) u64 {
@@ -532,7 +580,7 @@ fn endFunction(st: *State) void {
             if (!b.keep or b.kind == .rhs or b.class != a.class) continue;
             if (b.file != a.file or b.line != a.line or b.col != a.col or b.inl != a.inl or !std.mem.eql(u8, b.cond, a.cond)) continue;
             if ((a.prof == null) != (b.prof == null) or (a.prof != null and a.prof.? != b.prof.?)) continue;
-            const rank = [_]u8{ 0, 3, 2, 1 }; // br, rhs, select, switch
+            const rank = [_]u8{ 0, 3, 2, 1, 0 }; // br, rhs, select, switch, try
             if (rank[@intFromEnum(b.kind)] < rank[@intFromEnum(a.kind)]) {
                 a.keep = false;
                 b.keep = true;
@@ -889,9 +937,10 @@ pub fn main() void {
         if (c.decision()) decisions += st.counts[f.value] else if (c != .unknown) made += st.counts[f.value];
     }
     const cn = st.counts;
-    std.debug.print("cov_branch_classify: {d} measured file(s): {d} source decision(s) (if {d}, elif {d}, while {d}, and {d}, or {d}, for-in {d}; {d} right operand(s) derived, {d} a second test of one decision), {d} compiler-made (String lifetime {d}, + {d}, call( {d}, [ {d}, // {d}, % {d}) not written; {d} branch(es) outside the measured sources\n", .{
+    std.debug.print("cov_branch_classify: {d} measured file(s): {d} source decision(s) (if {d}, elif {d}, while {d}, and {d}, or {d}, for-in {d}, try {d}; {d} right operand(s) derived, {d} a second test of one decision), {d} compiler-made (String lifetime {d}, + {d}, call( {d}, [ {d}, // {d}, % {d}) not written; {d} branch(es) outside the measured sources\n", .{
         measured_files,                      decisions,                              cn[@intFromEnum(Class.if_)],       cn[@intFromEnum(Class.elif)],
         cn[@intFromEnum(Class.while_)],       cn[@intFromEnum(Class.and_)],            cn[@intFromEnum(Class.or_)],       cn[@intFromEnum(Class.for_in)],
+        cn[@intFromEnum(Class.try_)],
         st.derived,                          st.same,                                made,                             cn[@intFromEnum(Class.string)],
         cn[@intFromEnum(Class.plus)],         cn[@intFromEnum(Class.call)],            cn[@intFromEnum(Class.subscript)], cn[@intFromEnum(Class.floordiv)],
         cn[@intFromEnum(Class.mod)],          st.outside,

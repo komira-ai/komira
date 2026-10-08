@@ -303,6 +303,12 @@ counted apart and are neither killed nor survived. The mutation score is
 a carriage return, an empty line, another number of fields, a malformed line
 number, an unknown status, an empty path or operator.
 
+Mutation testing is not the enforced gate of a package whose branch
+coverage is enforced (`policy.bzl`, `COVERAGE_BRANCH_GATE`):
+its branch arms are what its tests must take, and its mutants, when a
+run gives them, are reported as findings in census, not required. No
+build action passes `--mutants` today.
+
 ## Numbers and findings
 
 All numbers are integers. A percentage is basis points,

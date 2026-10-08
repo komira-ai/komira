@@ -2,13 +2,14 @@
 # The cases of cov_branch_classify (README.md), run as a build action by the
 # `cov_branch_classify_cases` target (kcov/defs.bzl, kcov_tool_cases):
 #   sh cov_branch_classify_cases.sh <busybox> <result.json> <cov_branch_classify> <dir>
-# <dir> holds fixtures/case.ll and fixtures/rules.ll, annotated IR made by
-# hand in the form cov_branch_annotate.sh writes it (made-up paths and
-# counts; rules.ll holds the shapes of README.md's String lifetime, raising
-# call, loop head and short-circuit rules, each excerpted from a library's
-# IR), fixtures/case.golden.info and fixtures/rules.golden.info, the outputs
-# they must give byte for byte, and fixtures/{a,b,c,d,gen}.src, the library
-# sources the IR names as a.mojo, b.mojo, c.mojo, d.mojo and gen.mojo, staged
+# <dir> holds fixtures/case.ll, fixtures/rules.ll and fixtures/try.ll,
+# annotated IR made by hand in the form cov_branch_annotate.sh writes it
+# (made-up paths and counts; rules.ll holds the shapes of README.md's String
+# lifetime, raising call, loop head and short-circuit rules, each excerpted
+# from a library's IR; try.ll those of a `try:` body), their outputs
+# fixtures/{case,rules,try}.golden.info, which they must give byte for
+# byte, and fixtures/{a,b,c,d,gen,t}.src, the library sources the IR names
+# as a.mojo, b.mojo, c.mojo, d.mojo, gen.mojo and t.mojo, staged
 # here under the made-up [src] name the IR gives them (kept as .src so no
 # lint of the cell reads them as Mojo). Each case says the defect
 # (mutant) it kills. Exits 1 on the first wrong result, naming it; writes the
@@ -26,6 +27,8 @@ FX="$DIR/fixtures/case.ll"
 GOLDEN="$DIR/fixtures/case.golden.info"
 RX="$DIR/fixtures/rules.ll"
 RGOLDEN="$DIR/fixtures/rules.golden.info"
+TX="$DIR/fixtures/try.ll"
+TGOLDEN="$DIR/fixtures/try.golden.info"
 
 case "${BUCK_SCRATCH_PATH:-}" in
     "") T="$PWD/.cov_branch_classify_cases" ;;
@@ -39,7 +42,7 @@ export PATH LC_ALL=C
 W="$T/work"
 SRC=buck-out/v2/art/cell/src/pkg/__pkg__/0123456789abcdef/src/pkg
 mkdir -p "$W/$SRC"
-for f in a b c d gen; do cp "$DIR/fixtures/$f.src" "$W/$SRC/$f.mojo"; done
+for f in a b c d gen t; do cp "$DIR/fixtures/$f.src" "$W/$SRC/$f.mojo"; done
 # The tool reads the sources at the names the IR gives them, relative to its
 # working directory, as the action runs it from the root holding [src].
 cd "$W"
@@ -111,7 +114,7 @@ if ! cmp -s "$W/out.info" "$GOLDEN"; then
     diff -u "$GOLDEN" "$W/out.info" >&2 || true
     red "golden: the output differs from fixtures/case.golden.info"
 fi
-want="3 measured file(s): 23 source decision(s) (if 13, elif 1, while 2, and 2, or 3, for-in 2; 5 right operand(s) derived, 2 a second test of one decision), 5 compiler-made (String lifetime 0, + 1, call( 2, [ 0, // 1, % 1) not written; 6 branch(es) outside the measured sources"
+want="3 measured file(s): 23 source decision(s) (if 13, elif 1, while 2, and 2, or 3, for-in 2, try 0; 5 right operand(s) derived, 2 a second test of one decision), 5 compiler-made (String lifetime 0, + 1, call( 2, [ 0, // 1, % 1) not written; 6 branch(es) outside the measured sources"
 grep -qF "$want" "$W/err" || red "golden: stderr does not say '$want'"
 pass
 
@@ -401,7 +404,7 @@ if ! cmp -s "$W/out.info" "$RGOLDEN"; then
     diff -u "$RGOLDEN" "$W/out.info" >&2 || true
     red "rules golden: the output differs from fixtures/rules.golden.info"
 fi
-want="1 measured file(s): 33 source decision(s) (if 15, elif 0, while 0, and 6, or 2, for-in 10; 8 right operand(s) derived, 1 a second test of one decision), 26 compiler-made (String lifetime 15, + 0, call( 9, [ 1, // 1, % 0) not written; 0 branch(es) outside the measured sources"
+want="1 measured file(s): 33 source decision(s) (if 15, elif 0, while 0, and 6, or 2, for-in 10, try 0; 8 right operand(s) derived, 1 a second test of one decision), 26 compiler-made (String lifetime 15, + 0, call( 9, [ 1, // 1, % 0) not written; 0 branch(es) outside the measured sources"
 grep -qF "$want" "$W/err" || red "rules golden: stderr does not say '$want'"
 [ "$(grep -c '^BRDA:3,5:' "$W/out.info")" = 2 ] || red "String at a decision: 3,5 is not one decision of two arms (a destructor's branch recorded as the if's)"
 grep -qx 'BRDA:16,5:br:0/1,0,2' "$W/out.info" || red "String strictness: 16,5 (a flags test computed at 5:10, tested at the if) is not a decision"
@@ -518,6 +521,81 @@ refused "flags phis, no String leaf" "src/pkg/d.mojo:71:28: a select at 'read(' 
 # positions taken).
 rvariant 's/^  br i1 %3, label %4, label %5, !dbg !266, !prof !273/  br i1 %6, label %4, label %5, !dbg !266, !prof !273/; s/^  br i1 %6, label %4, label %4, !dbg !266, !prof !274/  br i1 %3, label %4, label %4, !dbg !266, !prof !274/'
 refused "copies, elif line" "src/pkg/d.mojo:44:5 (br): two copies of its function hold different branches here" "$W/v.ll"
+
+# 12. A `try:` body (README.md, "try"), on try.ll and t.mojo: the golden
+# output, byte for byte. Each raising call's error check in a `try:` body of
+# its function is a decision of two arms, arm 0 the call returned (LLVM's
+# false), arm 1 it raised into the handler (true): a call's `i1` (6,14), the
+# field 0 of its `{ i1, ... }` (5,14), a Dict subscript's `[` (7,15), an
+# inlined raising callee's flag, a phi of its `if`'s condition (8,17), a
+# phi of a call's flag (9,17), a call in a nested `try:` (11,19), one in
+# the `except` body of a `try` inside another's body (13,19), a one-line
+# `try: return f(x)` (35,18), one that never ran (28,22: `-`), and the
+# raising right operand of an `and` (49,23), whose error check tests a phi
+# of the and's result shape: the `if` (49,9) is the and's test, not the
+# `try` decision (as rules.ll's 74,12, in a `try:` body), and a callee
+# inlined from another file whose flag is a phi of `true` and `false`
+# arriving from its raise path and its return (56,30, as
+# `komira_parquet`'s rle.mojo 226:54, `read_uleb128`). A
+# String's destructor and a select at 5,14 stay compiler-made, so does the
+# error check of a call in an `except` (17), an `else` (19) or after the
+# `try` (22), in a `def` nested in a `try:` body (27), in a `with` body
+# (33), and after a triple-quoted string holding `try:` (41). Kills, named
+# below: the rule removed (no `try` record); the scope ignored (a call
+# outside a `try:` body recorded); the arms in LLVM's order (5,14 is 5,2);
+# the clause rule (an `except`/`else` body read as the `try`'s); the `def`
+# boundary; the triple-quoted lines read as statements; a `try` decision
+# taken as an and/or's test (49,16's right operand derived from 49,23).
+run "$TOOL" --ir "$TX" --out "$W/out.info" $MAP $EXC
+[ "$RC" -eq 0 ] || red "try golden: exit $RC, want 0"
+if ! cmp -s "$W/out.info" "$TGOLDEN"; then
+    diff -u "$TGOLDEN" "$W/out.info" >&2 || true
+    red "try golden: the output differs from fixtures/try.golden.info"
+fi
+want="1 measured file(s): 15 source decision(s) (if 3, elif 0, while 0, and 1, or 0, for-in 0, try 11; 1 right operand(s) derived, 0 a second test of one decision), 8 compiler-made (String lifetime 1, + 0, call( 7, [ 0, // 0, % 0) not written; 1 branch(es) outside the measured sources"
+grep -qF "$want" "$W/err" || red "try golden: stderr does not say '$want'"
+[ "$(grep -c ':try:' "$W/out.info")" = 22 ] || red "try: not eleven try decisions of two arms (the rule removed, or the scope ignored)"
+grep -qx 'BRDA:49,16:rhs:0/1,0,1' "$W/out.info" || red "try and and: 49,16's right operand is not 1 true (derived from the call's try decision, not the if)"
+grep -qx 'BRDA:5,14:try:0/1,0,5' "$W/out.info" || red "try arms: 5,14 arm 0 (the call returned) is not 5 (arms in LLVM's order)"
+grep -qx 'BRDA:13,19:try:0/1,1,0' "$W/out.info" || red "nested try: 13,19 (an inner except body, in the outer try body) is not a try decision"
+! grep -qE '^BRDA:(17|19|22|27|33|41),' "$W/out.info" || red "try scope: a call outside a try body (except, else, after, nested def, with, after a quoted try:) was recorded"
+pass
+
+# tinsert <line of try.ll> <line>...: try.ll with the lines after that one.
+tinsert() {
+    at=$1
+    shift
+    awk -v at="$at" -v add="$(printf '%s\n' "$@")" '{ print } $0 == at { print add }' "$TX" >"$W/v.ll"
+    ! cmp -s "$W/v.ll" "$TX" || red "insert after '$at' changes nothing, so its case checks nothing"
+}
+
+# 12a. In a `try:` body a br at a call, `[` or `+` that is not a raising
+# call's error flag is refused (whether it is the call's error check is not
+# known); so is a phi whose value is not inlined at the call, or whose
+# constants arrive from no block of a callee inlined there; `try` and
+# `with` keep no branch of their own. Kills: the refusal dropped (any br at
+# a call in a try body dropped or taken); the inlined-at check of the phi
+# dropped; `try` or `with` taken as a token.
+tinsert '  %6 = extractvalue { i1, i64 } %5, 0, !dbg !410' '  %900 = icmp slt i64 %0, 0, !dbg !410' '  br i1 %900, label %9, label %14, !dbg !410, !prof !480'
+refused "try, a call's br not on its flag" "src/pkg/t.mojo:5:14: a br at 'f(' in a try body that is not a raising call's error flag" "$W/v.ll"
+tinsert '  %32 = extractvalue { i1, i64 } %31, 0, !dbg !418' '  %900 = icmp slt i64 %0, 0, !dbg !439' '  br i1 %900, label %33, label %36, !dbg !439, !prof !480' '!439 = !DILocation(line: 11, column: 22, scope: !403)'
+sed -e '/^!439 = /d' "$W/v.ll" >"$W/v2.ll"
+printf '%s\n' '!439 = !DILocation(line: 11, column: 22, scope: !403)' >>"$W/v2.ll"
+refused "try, a br at '+'" "src/pkg/t.mojo:11:22: a br at '+' in a try body that is not a raising call's error flag" "$W/v2.ll"
+sed -e 's/^!414 = !DILocation(line: 44, column: 10, scope: !409, inlinedAt: !413)/!414 = !DILocation(line: 44, column: 10, scope: !409, inlinedAt: !421)/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "variant: the inlinedAt edit changed nothing"
+refused "try, a phi of code inlined elsewhere" "src/pkg/t.mojo:8:17: a br at 'inl(' in a try body that is not a raising call's error flag" "$W/v.ll"
+sed -e 's/^!455 = !DILocation(line: 283, column: 17, scope: !459, inlinedAt: !452)/!455 = !DILocation(line: 57, column: 5, scope: !451)/' \
+    -e 's/^!456 = !DILocation(line: 292, column: 9, scope: !459, inlinedAt: !452)/!456 = !DILocation(line: 56, column: 9, scope: !451)/' "$TX" >"$W/v.ll"
+grep -qx '!455 = !DILocation(line: 57, column: 5, scope: !451)' "$W/v.ll" && grep -qx '!456 = !DILocation(line: 56, column: 9, scope: !451)' "$W/v.ll" || red "variant: the two block locations were not both changed"
+refused "try, constants from no callee block" "src/pkg/t.mojo:56:30: a br at 'read_uleb128(' in a try body that is not a raising call's error flag" "$W/v.ll"
+tinsert '  %15 = call i1 @"pkg::t::touch"(i64 %0, ptr %3), !dbg !411' '  br i1 %15, label %90, label %16, !dbg !440, !prof !482' '!440 = !DILocation(line: 4, column: 5, scope: !403)'
+sed -e '/^!440 = /d' "$W/v.ll" >"$W/v2.ll"
+printf '%s\n' '!440 = !DILocation(line: 4, column: 5, scope: !403)' >>"$W/v2.ll"
+refused "try keyword" "src/pkg/t.mojo:4:5: a br at 'try' is neither" "$W/v2.ll"
+sed -e 's/^  br i1 %4, label %5, label %5, !dbg !432, !prof !489/  br i1 %4, label %5, label %5, !dbg !433, !prof !489/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "variant: the with edit changed nothing"
+refused "with keyword" "src/pkg/t.mojo:32:5: a br at 'with' is neither" "$W/v.ll"
 
 # 10. Bad usage exits 2.
 for args in "--out $W/out.info $MAP $STD" "--ir $FX $MAP $STD" "--ir $FX --out $W/out.info $STD" \
