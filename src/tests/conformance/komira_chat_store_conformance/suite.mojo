@@ -14,6 +14,7 @@ from .checks_directory import (
 from .checks_timeline import (
     check_abandoned_send_leaves_no_hole,
     check_edit_and_delete,
+    check_edit_racing_delete,
     check_idempotent_send,
     check_paging,
     check_seq_interleaving,
@@ -25,7 +26,7 @@ from .targets import ChatTarget
 def run_chat_suite[T: ChatTarget](mut t: T) raises:
     """Run every check against `t`; raises naming each one that failed."""
     var failures = String()
-    var ran = 12
+    var ran = 13
     try:
         check_seq_interleaving[T](t)
     except e:
@@ -50,6 +51,10 @@ def run_chat_suite[T: ChatTarget](mut t: T) raises:
         check_edit_and_delete[T](t)
     except e:
         failures += String("edit_and_delete: ") + String(e) + String("\n")
+    try:
+        check_edit_racing_delete[T](t)
+    except e:
+        failures += String("edit_racing_delete: ") + String(e) + String("\n")
     try:
         check_users[T](t)
     except e:

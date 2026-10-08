@@ -25,7 +25,13 @@ from komira_chat_store import (
     T_MENTIONS,
 )
 
-from .probes import CRASH_TEXT, INTERLEAVED_BODY, CrashProbe, InterleaveProbe
+from .probes import (
+    CRASH_TEXT,
+    INTERLEAVED_BODY,
+    CrashProbe,
+    DeleteDuringEditProbe,
+    InterleaveProbe,
+)
 from .targets import (
     ChatTarget,
     Rt,
@@ -329,3 +335,36 @@ def check_edit_and_delete[T: ChatTarget](mut t: T) raises:
     var whole = s.events_after[Rt](reactor, String(GENERAL), Int64(0), 100)
     assert_contiguous(whole, String("after edits and deletes"))
     assert_equal(whole.events[3].kind, EVENT_MESSAGE)
+
+
+def check_edit_racing_delete[T: ChatTarget](mut t: T) raises:
+    """An edit that read its message live, but whose EDIT event lands after
+    a delete of the message (here the delete runs through a second
+    connection inside the edit's window), redacts its own EDIT event: no
+    body survives a delete."""
+    var db_a = t.fresh()
+    var db_b = t.second()
+    var probe = DeleteDuringEditProbe[T.DB](
+        ChatStore[T.DB, NoSendProbe](db_b^, NoSendProbe()),
+        String(GENERAL),
+        Int64(4),
+        String("u-bob"),
+    )
+    var a = ChatStore[T.DB, DeleteDuringEditProbe[T.DB]](db_a^, probe^)
+    var rt = new_rt()
+    ref reactor = rt.reactor()
+    _general(a, reactor)
+    var m = _send(a, reactor, "u-bob", "before the race")
+    assert_equal(m.seq, Int64(4))
+    a.probe().armed = True
+    var e = a.edit_message[Rt](
+        reactor, String(GENERAL), m.seq, String("u-bob"), String("lost to the delete"), T0 + 80
+    )
+    assert_equal(e.seq, Int64(6), "the DELETE took 5; the EDIT retried at 6")
+    assert_equal(e.body, String(""), "the edit reports its body redacted")
+    var stored = a.event[Rt](reactor, String(GENERAL), e.seq).value().copy()
+    assert_equal(stored.kind, EVENT_EDIT)
+    assert_equal(stored.body, String(""), "the stored EDIT event keeps no body")
+    var msg = a.event[Rt](reactor, String(GENERAL), m.seq).value().copy()
+    assert_true(msg.deleted)
+    assert_equal(msg.body, String(""))

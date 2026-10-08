@@ -9,6 +9,8 @@
 #                    the seq the outer send is about to take minus one, as a
 #                    client paging from its cursor would, and keeps what it
 #                    saw.
+#   DeleteDuringEditProbe  once armed, deletes a message through a second
+#                    store on the next attempt.
 #   CrashProbe       once armed, raises on the next attempt, standing for a
 #                    process that dies before its insert.
 # =============================================================================
@@ -83,3 +85,38 @@ struct CrashProbe(SendProbe):
         if self.armed:
             self.armed = False
             raise Error(String(CRASH_TEXT))
+
+
+struct DeleteDuringEditProbe[DB: Database](SendProbe):
+    """Once armed, on the next attempt it deletes the message at `seq`
+    through a second store, so the outer edit finds the message deleted
+    after its own EDIT event is in."""
+
+    var other: Optional[ChatStore[Self.DB, NoSendProbe]]
+    var armed: Bool
+    var channel_id: String
+    var seq: Int64
+    var sender_user_id: String
+
+    def __init__(
+        out self,
+        var other: ChatStore[Self.DB, NoSendProbe],
+        channel_id: String,
+        seq: Int64,
+        sender_user_id: String,
+    ):
+        self.other = Optional[ChatStore[Self.DB, NoSendProbe]](other^)
+        self.armed = False
+        self.channel_id = channel_id
+        self.seq = seq
+        self.sender_user_id = sender_user_id
+
+    def before_insert(mut self, channel_id: String, seq: Int64) raises:
+        if not self.armed:
+            return
+        self.armed = False
+        var rt = new_rt()
+        ref reactor = rt.reactor()
+        _ = self.other.value().delete_message[Rt](
+            reactor, self.channel_id, self.seq, self.sender_user_id, False, T0 + 70
+        )
