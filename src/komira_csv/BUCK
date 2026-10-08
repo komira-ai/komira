@@ -51,6 +51,7 @@ mojo_library(
         "tests/test_csv_record_shape_edges.mojo",
         "tests/test_csv_record_shape_parallel.mojo",
         "tests/test_csv_sink_quoting.mojo",
+        "tests/test_csv_typed_column_builders.mojo",
         "tests/test_phase_4_stage_breakdown.mojo",
         "tests/test_simd_row_boundary_scan.mojo",
     ],
