@@ -212,7 +212,8 @@ def _drain_peer(peer_fd: Int32) raises -> Int:
 
     ⚠ The drain is not optional: closing an AF_UNIX stream socket with unread
     bytes queued makes the other end's read fail with ECONNRESET instead of
-    seeing a clean EOF, which is a different departure from the one measured.
+    seeing a clean EOF, which is a different departure from the one measured:
+    without the drain §0 measures a misreport TWO probes deep, not one.
 
     ⚠ `recv`, NOT `read`: the Mojo stdlib RESERVES the libc `read` symbol with
     its own binding, and a second declaration with a differing signature fails
