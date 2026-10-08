@@ -57,6 +57,7 @@ mojo_library(
         "tests/test_L2_h2_hpack_hostile_input.mojo",
         "tests/test_L2_h2_preface_alpn.mojo",
         "tests/test_L2_h2_stream.mojo",
+        "tests/test_L2_stream_park_coverage.mojo",
         "tests/test_grpc_content_type_nonascii.mojo",
         "tests/test_grpc_timeout_parse.mojo",
         "tests/test_kernel_tcp_loopback.mojo",
