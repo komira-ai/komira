@@ -183,6 +183,33 @@ def _raw_body(byte: UInt8) -> List[UInt8]:
     return out^
 
 
+def _long_body(last: List[UInt8]) -> List[UInt8]:
+    """`Subject: a`, CRLF CRLF, then 80 body lines of 60 `x` (4960 octets
+    with their CRLFs, past any 4 KiB prefix), then `last` and CRLF, as raw
+    bytes (not UTF-8)."""
+    var out = List[UInt8]()
+    for c in "Subject: a\r\n\r\n".as_bytes():
+        out.append(c)
+    for _ in range(80):
+        for _ in range(60):
+            out.append(UInt8(ord("x")))
+        for c in "\r\n".as_bytes():
+            out.append(c)
+    for c in last:
+        out.append(c)
+    for c in "\r\n".as_bytes():
+        out.append(c)
+    return out^
+
+
+def _x_line(n: Int) -> List[UInt8]:
+    """`n` octets of `x`."""
+    var out = List[UInt8]()
+    for _ in range(n):
+        out.append(UInt8(ord("x")))
+    return out^
+
+
 comptime NOT_A_MEDIA_TYPE = "komira_mail_message.InvalidValue: MessageBuilder.add_attachment: a media type that is not type/subtype tokens"
 
 
@@ -268,6 +295,33 @@ def test_values() raises:
     assert_equal(_attachment_error("message/rfc822", body_998 + "\r\n"), "OK")
     assert_equal(
         _attachment_error("message/rfc822", body_998 + "x\r\n"), not_7bit
+    )
+    # A forwarded message is usually longer than 4 KiB and has many body
+    # lines: a violation on the last line, past the first body line and past
+    # the first 4096 octets, is refused too.
+    var cafe = List[UInt8]()
+    for c in "caf".as_bytes():
+        cafe.append(c)
+    cafe.append(0xC3)
+    cafe.append(0xA9)
+    assert_equal(
+        _raw_attachment_error("message/rfc822", _long_body(cafe)), not_7bit
+    )
+    assert_equal(
+        _raw_attachment_error("message/rfc822", _long_body([UInt8(0x80)])),
+        not_7bit,
+    )
+    assert_equal(
+        _raw_attachment_error("message/rfc822", _long_body([UInt8(0x7F)])),
+        "OK",
+    )
+    assert_equal(
+        _raw_attachment_error("message/rfc822", _long_body(_x_line(999))),
+        not_7bit,
+    )
+    assert_equal(
+        _raw_attachment_error("message/rfc822", _long_body(_x_line(998))),
+        "OK",
     )
     # The 7bit rule is for every message/* subtype (RFC 2046 section 5.2.2
     # for message/partial), not just message/rfc822.
