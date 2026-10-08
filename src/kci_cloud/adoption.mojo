@@ -41,8 +41,9 @@
 #      - a DELETE of an object carrying the mark (`delete_findings`): on plan
 #        and apply, a node the file turned off or a role its resource no
 #        longer lowers (the resource is still in the list: its type
-#        changed); on destroy, every node of the file. An object kept by
-#        retention is never deleted, so it is not refused.
+#        changed); on destroy, every node of the file. A node whose
+#        retention in this run is not delete (the file's, which is what the
+#        engine deletes by) is never deleted, so it is not refused.
 #      - a REPLACE of an adopted node (`replace_findings`): the engine plans
 #        it when the cloud cannot make a change in place. Apply plans first
 #        when the run has adopted nodes, so it refuses before any change too.
@@ -67,7 +68,7 @@
 # verified; no kci verb sets that list but `with_adopted`.
 # =============================================================================
 
-from kci_reconciler import ChangeAction, Creds, VERB_REPLACE
+from kci_reconciler import ChangeAction, Creds, RETAIN_DELETE, VERB_REPLACE
 from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import (
@@ -228,17 +229,23 @@ def delete_findings(
     """Rule 3, DELETE: one finding per object carrying the adoption mark that
     this run would delete (`nodes` holds the lowering and the roles to
     remove; on `destroy` every node of it is deleted, else only a node not
-    wanted), unless it is kept by retention or its resource writes
-    `adopt_deletable`."""
+    wanted), unless the node's retention in this run is not RETAIN_DELETE
+    (the engine deletes by it, not by the object's label) or its resource
+    writes `adopt_deletable`."""
     var out = List[Finding]()
     for i in range(len(owned)):
         ref rec = owned[i]
-        if not rec.adopted or rec.retained:
+        if not rec.adopted:
             continue
         for k in range(len(nodes)):
             ref n = nodes[k]
             if n.id != rec.owner_node:
                 continue
+            # The engine deletes by the node's retention in this run (the
+            # file's), not by the label the object carries, so a node it
+            # would keep or cannot delete is the one skipped here.
+            if n.retention != RETAIN_DELETE:
+                break
             if (destroy or not n.wanted) and not deletable(resources, n.id):
                 var what = String("this destroy would delete it") if destroy else String(
                     "this change would delete it (the resource no longer lowers it)"

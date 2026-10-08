@@ -25,7 +25,9 @@
 #    kept object is never deleted, so never refused): refused before any
 #    change while the bucket does not write `adopt_deletable` (the refusal
 #    names the node and both ways out); with it, the destroy deletes the
-#    adopted bucket.
+#    adopted bucket. The retention that counts is the file's, never the
+#    object's label: a bucket adopted under KEEP and destroyed by a file
+#    that now writes DELETE is refused, and the KEEP destroy deletes nothing.
 # 4. THE RESOURCE STAYS BUT NO LONGER LOWERS IT (`logs` becomes a secret):
 #    the delete of the adopted bucket (written DELETE) is refused at plan
 #    and apply before any change. An adopted bucket kept by retention (KEEP)
@@ -274,6 +276,35 @@ def test_destroy_needs_adopt_deletable() raises:
     print("  test_destroy_needs_adopt_deletable: PASS")
 
 
+def test_destroy_judges_by_the_file_retention_not_the_label() raises:
+    """Proves a destroy is judged by the retention the engine deletes by (the
+    file's), not the label the object was stamped with. `logs` is adopted
+    under KEEP (the bucket default, so its label says retain); a destroy of a
+    file that now writes it DELETE would delete it, so it is refused before
+    any change, no delete call reaches the adapter, and the object stands.
+    The same destroy with the file still KEEP deletes nothing and is not
+    refused. Catches: the skip read from the object's label (mutant:
+    `rec.retained` in `delete_findings`; the DELETE destroy deletes the
+    adopted bucket with no opt-in)."""
+    var shapes = _shapes()
+    for s in range(len(shapes)):
+        ref sh = shapes[s]
+        var id = String("re3k-") + sh.name
+        var cloud = FakeCloud(id, shape=sh.copy())
+        var reg = _reg(FakeCloud(id, shape=sh.copy()))
+        var st = InMemoryStateStore()
+        _adopted(cloud, reg, _list(_logs(), String(_READER)), st)
+        var says = _refused(cloud, reg, _list(_logs(retention=String("DELETE")), String(_READER)), st, True)
+        assert_true(says.find("logs/bucket: kci adopted this object") >= 0, sh.name + ": " + says)
+        assert_true(says.find("this destroy would delete it") >= 0, says)
+        assert_true(not _served(cloud, String("delete logs/bucket")), sh.name + ": no delete reaches the adapter")
+        assert_true(cloud.store[].find(String("logs/bucket")) >= 0, sh.name + ": the adopted bucket stands")
+        _ = destroy_resources(reg, cloud, _ctx(), _list(_logs(), String(_READER)), Creds.none(), st)
+        assert_true(not _served(cloud, String("delete logs/bucket")), sh.name + ": a KEEP destroy deletes nothing")
+        assert_true(cloud.store[].find(String("logs/bucket")) >= 0, sh.name + ": still standing")
+    print("  test_destroy_judges_by_the_file_retention_not_the_label: PASS")
+
+
 # ---- 4. the resource stays but no longer lowers it ---------------------------------------------------
 
 
@@ -373,6 +404,7 @@ def main() raises:
     test_a_resource_leaving_the_list_releases_its_adopted_object()
     test_a_failed_release_is_reported_and_retried()
     test_destroy_needs_adopt_deletable()
+    test_destroy_judges_by_the_file_retention_not_the_label()
     test_a_type_change_does_not_delete_an_adopted_object()
     test_a_dropped_component_releases_its_adopted_object()
     print("ALL FAKE ADOPTION RELEASE TESTS PASSED")

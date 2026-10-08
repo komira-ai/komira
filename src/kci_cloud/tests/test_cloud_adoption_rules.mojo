@@ -18,9 +18,11 @@
 # 4. THE ADOPTED NODES (`adopted_nodes_of`): the nodes taken over this run,
 #    then each node whose object carries the mark, each once.
 # 5. A DELETE OF AN ADOPTED OBJECT (`delete_findings`): refused when a plan
-#    turns its node off or a destroy reaches it, unless kept by retention or
-#    its resource writes `adopt_deletable`; a wanted node on a plan, an
-#    unmarked object, or a node not in the run is not refused.
+#    turns its node off or a destroy reaches it, unless the node's retention
+#    in this run is not delete or its resource writes `adopt_deletable`; a
+#    wanted node on a plan, an unmarked object, or a node not in the run is
+#    not refused. The retention that counts is the node's (the file's, which
+#    the engine deletes by), never the label the object carries.
 # 6. A REPLACE OF AN ADOPTED NODE (`replace_findings`): refused unless its
 #    resource writes `adopt_deletable`, naming the engine's reason; an
 #    update, or a replace of a node kci created, is not.
@@ -47,6 +49,8 @@ from kci_reconciler import (
     OwnerStamp,
     Provenance,
     RETAIN_DELETE,
+    RETAIN_KEEP,
+    RETAIN_UNDELETABLE,
     VERB_DELETE,
     VERB_NOOP,
     VERB_REPLACE,
@@ -86,7 +90,7 @@ def _list(json: String) raises -> List[Resource]:
     return decode_json[ResourceList](json).resource.copy()
 
 
-def _node(id: String, wanted: Bool = True, adopted: Bool = True) -> LoweredNode:
+def _node(id: String, wanted: Bool = True, adopted: Bool = True, retention: Int = RETAIN_DELETE) -> LoweredNode:
     """`id` as a bucket node that declares versioning false, tier STANDARD,
     one label and the cloud name `acme-logs`."""
     var desired = List[Setting]()
@@ -96,7 +100,7 @@ def _node(id: String, wanted: Bool = True, adopted: Bool = True) -> LoweredNode:
     desired.append(Setting(String("physical_name"), String("acme-logs")))
     var owner = String(id[byte = 0 : id.find("/")])
     return LoweredNode(
-        id, owner, String("bucket"), List[String](), List[InputRef](), desired^, wanted, RETAIN_DELETE, adopted
+        id, owner, String("bucket"), List[String](), List[InputRef](), desired^, wanted, retention, adopted
     )
 
 
@@ -244,7 +248,7 @@ def test_a_delete_of_an_adopted_object_is_refused() raises:
     var off = List[LoweredNode]()
     off.append(_node(String("logs/bucket"), wanted=False))
     off.append(_node(String("own/bucket"), wanted=False))
-    off.append(_node(String("kept/bucket"), wanted=False))
+    off.append(_node(String("kept/bucket"), wanted=False, retention=RETAIN_KEEP))
     off.append(_node(String("made/bucket"), wanted=False, adopted=False))
     var plan = delete_findings(off, owned, l, False)
     assert_equal(len(plan), 1, "only logs: own opted in, kept is retained, made is kci's")
@@ -262,6 +266,42 @@ def test_a_delete_of_an_adopted_object_is_refused() raises:
     assert_equal(len(gone), 1, "a destroy reaches logs; own opted in")
     assert_true(gone[0].reason.find("this destroy would delete it") >= 0, gone[0].reason)
     print("  test_a_delete_of_an_adopted_object_is_refused: PASS")
+
+
+def test_a_delete_is_judged_by_the_node_retention_not_the_label() raises:
+    """Proves the skip follows the retention the engine deletes by. An object
+    adopted under KEEP (its label says retained) and destroyed by a file that
+    now says DELETE is deleted by the engine, so it is refused; an object
+    whose label says delete but whose node is KEEP or UNDELETABLE is never
+    deleted, so it is not refused. Catches: the skip read from the label
+    (`rec.retained`; mutant: the first destroy lets the delete through) and
+    the skip dropped (mutant: the KEEP and UNDELETABLE nodes refused)."""
+    var l = _list(
+        String('{"resource":[')
+        + String('{"id":"was","physicalName":"was-1","adopt":true,"bucket":{}},')
+        + String('{"id":"keep","physicalName":"keep-1","adopt":true,"bucket":{}},')
+        + String('{"id":"fixed","physicalName":"fixed-1","adopt":true,"bucket":{}}')
+        + String("]}")
+    )
+    var owned = List[OwnedRecord]()
+    owned.append(_record(String("was/bucket"), True, retained=True))
+    owned.append(_record(String("keep/bucket"), True))
+    owned.append(_record(String("fixed/bucket"), True))
+    var nodes = List[LoweredNode]()
+    nodes.append(_node(String("was/bucket")))
+    nodes.append(_node(String("keep/bucket"), retention=RETAIN_KEEP))
+    nodes.append(_node(String("fixed/bucket"), retention=RETAIN_UNDELETABLE))
+    var gone = delete_findings(nodes, owned, l, True)
+    assert_equal(len(gone), 1, "only was: its node now says delete; keep and fixed are never deleted")
+    assert_equal(gone[0].resource_id, "was")
+    assert_true(gone[0].reason.find("this destroy would delete it") >= 0, gone[0].reason)
+    var off = List[LoweredNode]()
+    off.append(_node(String("was/bucket"), wanted=False))
+    off.append(_node(String("keep/bucket"), wanted=False, retention=RETAIN_KEEP))
+    var plan = delete_findings(off, owned, l, False)
+    assert_equal(len(plan), 1, "a plan that turns was off is refused; keep is left")
+    assert_equal(plan[0].resource_id, "was")
+    print("  test_a_delete_is_judged_by_the_node_retention_not_the_label: PASS")
 
 
 # ---- 6. a replace of an adopted node --------------------------------------------------------
@@ -374,6 +414,7 @@ def main() raises:
     test_the_resource_of_a_node_is_the_longest_prefix()
     test_adopted_nodes_are_taken_and_marked_once()
     test_a_delete_of_an_adopted_object_is_refused()
+    test_a_delete_is_judged_by_the_node_retention_not_the_label()
     test_a_replace_of_an_adopted_node_is_refused()
     test_the_adoption_mark()
     test_only_the_adopted_node_renders_adopted()
