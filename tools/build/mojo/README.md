@@ -299,10 +299,11 @@ keys, it had before they existed.
   Linux only: on macOS a capped test is refused.
 
 The `mojo_library` attributes apply to each `test_srcs` build and run, and
-the assert level and defines to its coverage build; not to the package's
+the assert level and defines to its coverage builds (the coverage binary and
+the branch coverage bitcode); not to the package's
 `mojo precompile`, the README's examples, or a coverage run under kcov, which
 is not capped. `mojo_binary`'s apply to its `[shared]` library too.
-Test 45 ([`tests/README.md`](../tests/README.md#45-assert-level-defines-and-memory-cap))
+Test 49 ([`tests/README.md`](../tests/README.md#49-assert-level-defines-and-memory-cap))
 reads the commands and runs the fixtures.
 
 ## Test data, environment and scratch

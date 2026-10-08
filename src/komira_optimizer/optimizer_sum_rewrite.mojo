@@ -6,11 +6,11 @@
 #
 # ⛔⛔ THIS PASS IS HALF OF A PAIR AND IS A PESSIMISATION ON ITS OWN.
 # ==================================================================
-# It deliberately emits ONE `SUM(x)` AND ONE `COUNT(x)` PER MATCHED AGGREGATE,
-# i.e. it TURNS N AGGREGATES INTO 2N. What makes that a win is
+# It emits ONE `SUM(x)` PER MATCHED AGGREGATE plus ONE `COUNT(x)` per non-zero
+# offset, i.e. UP TO 2N AGGREGATES WHERE THERE WERE N. What makes that a win is
 # `dedup_common_aggregates` (`optimizer_agg_cse.mojo`), which runs immediately
 # after and collapses the structurally-identical ones: for ClickBench cbq29
-# (`SELECT sum(rw), sum(rw+1), ... sum(rw+89)`) this pass produces **180**
+# (`SELECT sum(rw), sum(rw+1), ... sum(rw+89)`) this pass produces **179**
 # aggregates and the dedup collapses them to **2**. Run this pass WITHOUT the
 # dedup and the cell gets SLOWER, measurably. The two are wired as one step in
 # `optimizer.mojo`; do not fund, move or gate one without the other.

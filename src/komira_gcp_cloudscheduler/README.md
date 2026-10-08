@@ -7,11 +7,11 @@ is given, takes each request's bearer token from a komira_gcp_core
 `GcpTokenSource`, and raises a non-2xx answer through komira_gcp_core's
 `gcp_status_error`. It reads no environment.
 
-Four methods are generated, what it takes to keep a scheduled call in step
+Five methods are generated, what it takes to keep a scheduled call in step
 with its declaration: GetJob (NOT_FOUND means absent), CreateJob, UpdateJob
-(PATCH, with an update mask naming the fields stated) and DeleteJob. The
-service's other methods (listing, pausing, resuming, running a job) are not
-generated. None of these methods returns a long-running operation. The
+(PATCH, with an update mask naming the fields stated), DeleteJob, and
+ListJobs (a location's jobs, a page at a time). The service's other methods
+(pausing, resuming, running a job) are not generated. None of these methods returns a long-running operation. The
 client starts at `cloudscheduler.googleapis.com`, the service's one
 endpoint; a job's region is part of its name.
 

@@ -171,6 +171,37 @@ mojo_library(
     test_srcs = ["tests/test_lost.mojo"],
 )
 
+# Test 43. cov_run.sh's refusal of a kcov argument too long for kcov (2048
+# bytes or more: kcov reads each as a path and fails "Too long string!"),
+# made to trip with a limit of 64 bytes, which the --include-path argument
+# passes: the run fails before kcov starts, naming the argument. RED:
+# tests//negative/coverage:longarg[coverage][tests][test_lost]
+cov_plant(
+    name = "longarg_run_sh",
+    expr = "s|^KCOV_ARG_MAX=2047$|KCOV_ARG_MAX=64|",
+    out = "cov_run.sh",
+    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+)
+
+cov_run_dir(
+    name = "longarg_run",
+    exec_compatible_with = LINUX_X86_64,
+    script = ":longarg_run_sh",
+)
+
+mojo_library(
+    name = "longarg",
+    srcs = [
+        "lostlib/__init__.mojo",
+        "lostlib/value.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_run = ":longarg_run",
+    import_name = "lostlib",
+    test_srcs = ["tests/test_lost.mojo"],
+)
+
 # Test 43. The exit status of a coverage run is the test's: not that of the
 # last process kcov traced, and 128+N for a test killed by signal N, as the
 # release gate reports it. GREEN: tests//negative/coverage:orphan and its
@@ -327,6 +358,12 @@ _GATED = {
     # one `if` whose false arm test_clamp_high never takes: the one finding
     # is BelowTarget on branch (its branch records, not BranchNotMeasured).
     "covbranch": (["covbranch/__init__.mojo", "covbranch/clamp.mojo"], ["tests/test_clamp_high.mojo"], ":covbranch_gate"),
+    # Every line covered, the `except` body included (the first raising call
+    # in its `try:` body raises once), but the second call never raises: the
+    # one finding is BelowTarget on branch, a `try` decision's raise arm
+    # (tools/build/coverage/branch/README.md, "try"), which line coverage
+    # cannot see.
+    "covtry": (["covtry/__init__.mojo", "covtry/total.mojo"], ["tests/test_total_first.mojo"], ":covbranch_gate"),
 }
 
 cov_gate_dir(
@@ -349,6 +386,22 @@ mojo_library(
     coverage_mode = "enforce",
     import_name = "covbranch",
     test_srcs = ["tests/test_clamp_both.mojo"],
+)
+
+# GREEN in enforce mode: covtry with a test making each raising call of its
+# `try:` body raise once: no finding.
+mojo_library(
+    name = "covtry_both",
+    srcs = [
+        "covtry/__init__.mojo",
+        "covtry/total.mojo",
+    ],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = ":covbranch_gate",
+    coverage_mode = "enforce",
+    import_name = "covtry",
+    test_srcs = ["tests/test_total_both.mojo"],
 )
 
 cov_gate_dir(
@@ -380,13 +433,14 @@ cov_gate_dir(
 ]
 
 # RED: tests//negative/coverage:covlow[coverage][gate], :covnotests[...],
-# :covun[...], :covfull_unread[...], :covbranch[...] (enforce), and
+# :covun[...], :covfull_unread[...], :covbranch[...], :covtry[...] (enforce), and
 # :covlow_conda, :covnotests_conda (a library with no test: a REFUSED conda
 # package, which waits for its NotMeasured gate all the same). GREEN:
-# :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch (the
-# libraries), :covfull[coverage][gate] (enforce), :covlow_census,
-# :covnotests_census, :covun_census, :covfull_census, :covbranch_census and
-# their :<name>_census_result checks.
+# :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch,
+# :covtry (the libraries), :covfull[coverage][gate] and
+# :covtry_both[coverage][gate] (enforce), :covlow_census,
+# :covnotests_census, :covun_census, :covfull_census, :covbranch_census,
+# :covtry_census and their :<name>_census_result checks.
 [
     mojo_library(
         name = name + suffix,
@@ -448,6 +502,14 @@ _RESULTS = {
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":3,"line_found":3,"line_bp":10000,"branch_hit":1,"branch_found":2,"branch_bp":5000,',
         '"line_floor_bp":10000,"branch_floor_bp":0}',
         '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"branch 50.00% is below the target 100.00%","count":null}],"exemptions"',
+    ],
+    # Every line (9 of 9), 5 of 6 arms: check's `if` (2 of 2), the first
+    # call's `try` decision (2 of 2), the second's (returned, never raised:
+    # 1 of 2). BelowTarget on branch is the only finding.
+    "covtry": [
+        '"conclusion":"neutral","mode":"census",',
+        _PKG + '"files":1,"unmeasured_files":0,"line_hit":9,"line_found":9,"line_bp":10000,"branch_hit":5,"branch_found":6,"branch_bp":8333,',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":8333,"bound_bp":10000,"path":"","line":0,"message":"branch 83.33% is below the target 100.00%","count":null}],"exemptions"',
     ],
 }
 
