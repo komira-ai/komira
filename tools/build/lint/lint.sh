@@ -51,7 +51,7 @@
 #       that carries no YYYY-MM-DD date: a retired name survives only in a
 #       dated history note. Checks nothing, so fails, when the tree holds no
 #       file.
-#   kind "src_layout", args <root> <shipped> <cell prefix> <package>...
+#   kind "src_layout", args <root> <shipped> <cell prefix> <map> <package>...
 #       <root> (src) holds what komira ships: each <package> (a package path in
 #       the cell, as Buck2 lists the root package's subpackages) is
 #       <root>/<name>, or a test-only package <root>/tests/<kind>/<name> with
@@ -63,7 +63,12 @@
 #       harness komira does not ship is under <root>/tests/helpers. A
 #       <shipped> name that is no package directly under <root> is a finding
 #       too. Findings name a package <cell prefix><package>. Checks nothing,
-#       so fails, when no <package> is under <root>.
+#       so fails, when no <package> is under <root>. <map> is `-` or the
+#       module map, a Markdown file: a row is a line starting
+#       "| [`<name>`](<link>) |", and a row whose <link>, less its leading
+#       `../`s and trailing `/`, is a path under <root> names that path. Each
+#       <package> under <root> has exactly one row; no row names a path that
+#       is not a <package>; a row's <name> is its path's last component.
 #   kind "doc_links", tools <inspect runnable dir>, args <tree> <unchecked> [<path> <tree>]...
 #       Every relative link and #anchor in every .md file under <tree> resolves
 #       to a file, directory or heading under <tree>, with each further tree
@@ -93,10 +98,12 @@
 #       What a public repository may not hold, read from every file under
 #       <stage> but binary data (by suffix: .arrow, .orc, .parquet, .avro,
 #       .tensor, .frame, .request, .whl, .conda and archive, image and object
-#       formats) and upstream bytes (third_party/ but its BUCK and .bzl
-#       files, which are this repository's; tools/build/third_party_srcs/
-#       testdata/, trimmed upstream trees): no date from the year <from> up to
-#       <public>, the first day of the public history (date), home directory naming a person (home_path),
+#       formats), and from the path of every file, binary data included.
+#       Nothing is skipped as upstream bytes: upstream sources are pinned
+#       downloads, never committed, and what third_party/ and the
+#       third_party_srcs test trees commit was written here. No date from the
+#       year <from> up to <public>, the first day of the public history
+#       (date), home directory naming a person (home_path),
 #       private or written-out network address (ip), URL host outside the
 #       reserved example names and <hosts> (host), email address outside the
 #       reserved example domains (email), commit id in prose (commit_sha), or
@@ -253,9 +260,10 @@ retired_names)
     ;;
 src_layout)
     [ "$1" = -- ] && shift
-    root=$1 shipped=$2 cell=$3
-    shift 3
-    printf '%s\n' "$@" | awk -v root="$root" -v pre="$cell" -v shipped_list="$shipped" -v out="$T/sl_checked" '
+    root=$1 shipped=$2 cell=$3 map=$4
+    shift 4
+    printf '%s\n' "$@" > "$T/sl_packages"
+    awk -v root="$root" -v pre="$cell" -v shipped_list="$shipped" -v out="$T/sl_checked" '
         function kind(name) {
             if (name ~ /_(e2e|loopback)$/) return "e2e"
             if (name ~ /_conformance$/) return "conformance"
@@ -287,8 +295,29 @@ src_layout)
         END {
             for (s in ship) if (!(s in top)) print "shipped names " s ", which is no package directly under " root "/; delete it"
             print checked + 0 > out
-        }' >> "$REPORT"
+        }' "$T/sl_packages" >> "$REPORT"
     checked=$(cat "$T/sl_checked")
+    # The module map: one row per package, and no row for a path that is none.
+    [ "$map" = - ] || awk -v root="$root" -v pre="$cell" -v map="$map" '
+        FILENAME != map { if (index($0, root "/") == 1) pkg[$0] = 1; next }
+        /^[|] [[]`[^`]+`[]][(][^)]*[)] [|]/ {
+            name = $0; sub(/^[|] [[]`/, "", name); sub(/`.*/, "", name)
+            path = $0; sub(/^[^(]*[(]/, "", path); sub(/[)].*/, "", path)
+            while (substr(path, 1, 3) == "../") path = substr(path, 4)
+            sub(/\/$/, "", path)
+            if (index(path, root "/") != 1) next
+            if (path in row) {
+                print map ":" FNR ": a second row for " path " (the first is line " row[path] "); a package has one row"
+                next
+            }
+            row[path] = FNR
+            n = split(path, p, "/")
+            if (p[n] != name) print map ":" FNR ": the row names " name " but links " path "; name it " p[n]
+            if (!(path in pkg)) print map ":" FNR ": a row for " path ", which is no package; delete the row or fix its link"
+        }
+        END {
+            for (k in pkg) if (!(k in row)) print pre k ": no row in " map "; add one to the section it belongs in"
+        }' "$T/sl_packages" "$map" | sort >> "$REPORT"
     ;;
 doc_links)
     INSPECT=$(abs "$1"); shift
@@ -397,15 +426,12 @@ public_boundary)
     [ "$1" = -- ] && shift
     holds=$(abs "$1") holds_name=$2 hosts=$(abs "$3") hosts_name=$4 deny=$5 from=$6 public=$7
     if [ "$deny" = - ]; then deny=/dev/null; else deny=$(abs "$deny"); fi
-    # Every file but binary data and upstream bytes (see the kind's note).
-    (cd "$STAGE" && find . \( -type f -o -type l \) | sed 's#^\./##') |
-        grep -vE '^tools/build/third_party_srcs/testdata/|\.(arrow|orc|parquet|avro|tensor|frame|request|whl|conda|gz|tgz|xz|zst|bz2|tar|zip|jar|png|jpg|jpeg|gif|ico|pdf|der|so|a|o|dylib|wasm|mojoc|mojopkg)$' |
-        grep -vE '^third_party/' > "$T/files" || true
-    (cd "$STAGE" && find third_party \( -type f -o -type l \) 2>/dev/null | grep -E '(^|/)BUCK$|\.bzl$' >> "$T/files" || true)
-    sort -o "$T/files" "$T/files"
+    # Every path; every file but binary data (see the kind's note).
+    (cd "$STAGE" && find . \( -type f -o -type l \) | sed 's#^\./##') | sort > "$T/paths"
+    grep -vE '\.(arrow|orc|parquet|avro|tensor|frame|request|whl|conda|gz|tgz|xz|zst|bz2|tar|zip|jar|png|jpg|jpeg|gif|ico|pdf|der|so|a|o|dylib|wasm|mojoc|mojopkg)$' "$T/paths" > "$T/files" || true
     checked=$(wc -l < "$T/files" | tr -d ' ')
     # A reader that fails is a finding, never a pass.
-    if ! (cd "$STAGE" && awk -F '\t' -v P="$STAGE/" -v HN="$holds_name" -v AN="$hosts_name" -v FROM="$from" -v PUBLIC="$public" -f "$AWK" "$T/files" "$hosts" "$deny" "$holds") > "$T/pb.txt" 2> "$T/pb.err"; then
+    if ! (cd "$STAGE" && awk -F '\t' -v P="$STAGE/" -v HN="$holds_name" -v AN="$hosts_name" -v FROM="$from" -v PUBLIC="$public" -f "$AWK" "$T/files" "$T/paths" "$hosts" "$deny" "$holds") > "$T/pb.txt" 2> "$T/pb.err"; then
         echo "public_boundary: the reader failed: $(head -3 "$T/pb.err")" >> "$REPORT"
     fi
     sort "$T/pb.txt" >> "$REPORT"

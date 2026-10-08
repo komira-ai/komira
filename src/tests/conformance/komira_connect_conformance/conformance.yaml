@@ -1,0 +1,39 @@
+# The features of the server under test: the conformance_server binary
+# (server/), a komira_connect ConnectService behind a komira_http_server
+# HttpServer. The runner computes the cases to run from them
+# (docs/configuring_and_running_tests.md of the pinned suite).
+#
+# The subset is what komira_connect serves today:
+#   - HTTP/2 over TLS only: the HttpServer routes RPCs to a ConnectService
+#     only on its h2 path, reached through ALPN; it has no h2c.
+#   - all three protocols (Connect, gRPC, gRPC-Web): ConnectService accepts
+#     each one's content types;
+#   - the proto codec, identity compression: it has no JSON transcoding of
+#     these messages (a JSON request reaches the handler as JSON text) and no
+#     compression;
+#   - unary, client-streaming and server-streaming RPCs: it has no
+#     bidirectional streaming;
+#   - no Connect GET, no message receive limit, no TLS client certificates:
+#     it implements none of them.
+features:
+  versions:
+    - HTTP_VERSION_2
+  protocols:
+    - PROTOCOL_CONNECT
+    - PROTOCOL_GRPC
+    - PROTOCOL_GRPC_WEB
+  codecs:
+    - CODEC_PROTO
+  compressions:
+    - COMPRESSION_IDENTITY
+  streamTypes:
+    - STREAM_TYPE_UNARY
+    - STREAM_TYPE_CLIENT_STREAM
+    - STREAM_TYPE_SERVER_STREAM
+  supportsH2c: false
+  supportsTls: true
+  supportsTlsClientCerts: false
+  supportsTrailers: true
+  supportsHalfDuplexBidiOverHttp1: false
+  supportsConnectGet: false
+  supportsMessageReceiveLimit: false
