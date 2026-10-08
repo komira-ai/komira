@@ -301,6 +301,9 @@ def test_another_scheme_is_a_bare_challenge() raises:
     cases.append(String("Digest a=b, c=d"))
     # BWS around `=` is still an auth-param.
     cases.append(String('Digest realm = "r" ,\tnonce\t="n"'))
+    # BWS between `=` and `"` still opens the quoted-string, so the comma
+    # inside it does not split off a `Basic b` credential.
+    cases.append(String('Digest realm = "a, Basic b"'))
     # Commas inside quoted-strings do not split, even before something that
     # looks like a second credential.
     cases.append(String('Digest username="a, Bearer b", realm="r"'))
@@ -363,6 +366,9 @@ def test_two_authorization_fields_are_invalid_request() raises:
     cases.append(String("Basic, Basic"))
     # The first element always starts a credential, whatever its shape.
     cases.append(String("a=b, Basic dXNlcjpwYXNz"))
+    # A later element that starts with `=` has no token before it, so it is
+    # not an auth-param: it starts a second credential (failing closed).
+    cases.append(String("Basic dXNlcjpwYXNz, =x"))
     # A quoted comma does not split, but the credential after it does.
     cases.append(String('Digest username="a, b", Bearer ') + good)
     # A `"` not after `=` opens no quoted-string, so it cannot swallow the

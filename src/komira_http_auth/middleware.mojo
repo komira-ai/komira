@@ -187,7 +187,8 @@ def _classify_authorization(value: String) -> Int:
     inside a quoted-string. A quoted-string opens only at a `"` whose
     previous non-blank byte in the element is `=` (the value of an
     auth-param, `token BWS "=" BWS quoted-string`), and inside it a
-    backslash escapes the next byte. One pass, no allocation, linear in the value.
+    backslash escapes the next byte. Linear in the value, no allocation (the
+    list scan, then a scan of the scheme).
 
     THE ELEMENTS. After leading spaces and tabs, an element is
       * EMPTY when nothing is left;
