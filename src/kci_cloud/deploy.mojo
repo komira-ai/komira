@@ -75,8 +75,10 @@
 # SAFE ADOPTION (adoption.mojo). `lower_data` marks the primary node of a
 # resource that writes `adopt` (`LoweredNode.adopted`). Plan and apply then
 # read each marked node's object and refuse a missing one or an unstamped
-# one that is not what the file declares (`adoption_check`), after
-# `list_owned` and before anything is realized. An object carrying the
+# one that is not what the file declares (`adoption_check`), and an object
+# carrying the adoption mark whose resource does not write `adopt`
+# (`unadopted_findings`), after `list_owned` and before anything is
+# realized. An object carrying the
 # adoption mark whose resource left the list is RELEASED by the apply, never
 # deleted (`Removals.releases`; its state record is retired, then
 # `CloudAdapter.release`), and is not leftover. A delete of an adopted
@@ -135,6 +137,7 @@ from kci_cloud.adoption import (
     adoption_check,
     delete_findings,
     replace_findings,
+    unadopted_findings,
     resource_of_node,
 )
 from kci_cloud.catalog import (
@@ -510,8 +513,9 @@ def _prepare[
     """Lowering + the roles `list_owned` says to remove. Called after
     validate, which has refused a role over the label budget. Refused after
     `list_owned` and before realize: a changed cloud name; a changed table
-    key (not on a destroy); on plan and apply, an adopted object missing or
-    not the one declared; and a delete of an object carrying the adoption
+    key (not on a destroy); on plan and apply, an object carrying the
+    adoption mark whose resource does not write `adopt`, and an adopted
+    object missing or not the one declared; and a delete of an object carrying the adoption
     mark that its resource does not allow."""
     var out = _Prepared()
     out.nodes = lower_data(cloud, resources)
@@ -522,6 +526,9 @@ def _prepare[
         raise Error(refusal_text(cloud.cloud_id(), rem.key_changes))
     var taking = List[String]()
     if not destroy:
+        var marked = unadopted_findings(out.nodes, rem.owned, resources)
+        if len(marked) > 0:
+            raise Error(refusal_text(cloud.cloud_id(), marked))
         var check = adoption_check(cloud, creds, out.nodes)
         if len(check.findings) > 0:
             raise Error(refusal_text(cloud.cloud_id(), check.findings))

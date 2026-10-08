@@ -58,6 +58,12 @@
 #    The resource whose `adopt` counts for a delete is the one the node
 #    belongs to (`resource_of_node`: the longest resource id that prefixes
 #    it).
+# 3b. A MARKED OBJECT IS NEVER TAKEN FOR KCI'S OWN (`unadopted_findings`,
+#    plan and apply): an object carrying the stamp and the mark whose wanted
+#    node belongs to a resource that does not write `adopt` (a release
+#    whose cloud call failed leaves the object so, its record retired) is
+#    refused before any change, as a clean release would have left it
+#    foreign. With `adopt` written again, kci keeps managing it as adopted.
 # 4. RELEASE, NEVER DELETE, WHEN THE RESOURCE LEAVES THE LIST (deploy.mojo's
 #    `removals`). An object carrying the mark whose resource is no longer in
 #    the (expanded) list is RELEASED: the apply retires its state record,
@@ -91,7 +97,7 @@ from kci_cloud.adapter import (
     OwnedRecord,
 )
 from kci_cloud.compose_refs import owner_of_node
-from kci_cloud.metadata import LABEL_FIELD_PREFIX, PHYSICAL_NAME_FIELD
+from kci_cloud.metadata import LABEL_FIELD_PREFIX, PHYSICAL_NAME_FIELD, adopts
 
 
 def resource_of_node(resources: List[Resource], node_id: String) -> Int:
@@ -267,6 +273,38 @@ def delete_findings(
                 )
                 out.append(
                     Finding(FINDING_ADOPTION, owner_of_node(n.id), String("adopt"), _refusal(n.id, what))
+                )
+            break
+    return out^
+
+
+def unadopted_findings(
+    nodes: List[LoweredNode], owned: List[OwnedRecord], resources: List[Resource]
+) -> List[Finding]:
+    """Rule 3b: one finding per object carrying the adoption mark whose
+    wanted node belongs to a resource that does not write `adopt`."""
+    var out = List[Finding]()
+    for i in range(len(owned)):
+        ref rec = owned[i]
+        if not rec.adopted:
+            continue
+        for k in range(len(nodes)):
+            ref n = nodes[k]
+            if n.id != rec.owner_node:
+                continue
+            var r = resource_of_node(resources, n.id)
+            if n.wanted and r >= 0 and not adopts(resources[r]):
+                out.append(
+                    Finding(
+                        FINDING_ADOPTION,
+                        owner_of_node(n.id),
+                        String("adopt"),
+                        n.id
+                        + String(": the object carries kci's adoption mark (kci adopted it and did not create it),")
+                        + String(" and the resource does not write adopt. kci does not take an adopted object for its")
+                        + String(" own: write adopt ADOPT on the resource to keep it adopted, or ")
+                        + String(_RELEASE_HINT),
+                    )
                 )
             break
     return out^

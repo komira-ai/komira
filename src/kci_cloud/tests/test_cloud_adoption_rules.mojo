@@ -23,6 +23,10 @@
 #    wanted node on a plan, an unmarked object, or a node not in the run is
 #    not refused. The retention that counts is the node's (the file's, which
 #    the engine deletes by), never the label the object carries.
+# 5b. A MARKED OBJECT WHOSE RESOURCE DOES NOT ADOPT (`unadopted_findings`):
+#    refused for a wanted node of a resource in the list that does not
+#    write `adopt`; a resource that adopts, an unmarked object, a node not
+#    wanted (the delete side's) and a node no resource lowers are not.
 # 6. A REPLACE OF AN ADOPTED NODE (`replace_findings`): refused at either
 #    value of `adopt` (ADOPT_DELETABLE allows a delete, never a replace),
 #    naming the engine's reason and both ways out; an update, or a replace
@@ -82,6 +86,7 @@ from kci_cloud import (
     replace_findings,
     resource_of_node,
     standard_identity_of,
+    unadopted_findings,
     standard_label_rule,
     Catalog,
 )
@@ -306,6 +311,43 @@ def test_a_delete_is_judged_by_the_node_retention_not_the_label() raises:
     print("  test_a_delete_is_judged_by_the_node_retention_not_the_label: PASS")
 
 
+# ---- 5b. a marked object whose resource does not adopt --------------------------------------
+
+
+def test_a_marked_object_whose_resource_does_not_adopt_is_refused() raises:
+    """Catches: the check dropped (mutant: no finding; kci would then manage
+    an object it did not create as its own, and could delete it), a
+    resource that adopts refused, an unmarked object refused, and a node
+    not wanted or of no resource refused."""
+    var l = _list(
+        String('{"resource":[')
+        + String('{"id":"logs","physicalName":"acme-logs","adopt":"ADOPT","bucket":{}},')
+        + String('{"id":"plain","physicalName":"plain-1","bucket":{}},')
+        + String('{"id":"off","physicalName":"off-1","bucket":{}},')
+        + String('{"id":"made","bucket":{}}')
+        + String("]}")
+    )
+    var owned = List[OwnedRecord]()
+    owned.append(_record(String("logs/bucket"), True))
+    owned.append(_record(String("plain/bucket"), True))
+    owned.append(_record(String("off/bucket"), True))
+    owned.append(_record(String("made/bucket"), False))
+    owned.append(_record(String("gone/bucket"), True))
+    var nodes = List[LoweredNode]()
+    nodes.append(_node(String("logs/bucket")))
+    nodes.append(_node(String("plain/bucket"), adopted=False))
+    nodes.append(_node(String("off/bucket"), wanted=False, adopted=False))
+    nodes.append(_node(String("made/bucket"), adopted=False))
+    var got = unadopted_findings(nodes, owned, l)
+    assert_equal(len(got), 1, "only plain")
+    assert_equal(got[0].kind, FINDING_ADOPTION)
+    assert_equal(got[0].resource_id, "plain")
+    assert_equal(got[0].field_path, "adopt")
+    assert_true(got[0].reason.startswith("plain/bucket: the object carries kci's adoption mark"), got[0].reason)
+    assert_true(got[0].reason.find("write adopt ADOPT on the resource to keep it adopted") >= 0, got[0].reason)
+    print("  test_a_marked_object_whose_resource_does_not_adopt_is_refused: PASS")
+
+
 # ---- 6. a replace of an adopted node --------------------------------------------------------
 
 
@@ -417,6 +459,7 @@ def main() raises:
     test_adopted_nodes_are_taken_and_marked_once()
     test_a_delete_of_an_adopted_object_is_refused()
     test_a_delete_is_judged_by_the_node_retention_not_the_label()
+    test_a_marked_object_whose_resource_does_not_adopt_is_refused()
     test_a_replace_of_an_adopted_node_is_refused()
     test_the_adoption_mark()
     test_only_the_adopted_node_renders_adopted()

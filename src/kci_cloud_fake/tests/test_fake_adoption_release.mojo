@@ -25,7 +25,11 @@
 #    next apply releases it. The store refuses to retire the record
 #    (`_ReapFails`): the same outcome, the record kept, the object still
 #    stamped and marked, the next apply releases it, and a file that then
-#    adopts it again takes it over.
+#    adopts it again takes it over. AFTER THE FAILED CLOUD CALL (the record
+#    retired, the object stamped and marked) the file names the bucket
+#    again: without `adopt` the plan and the apply are refused before any
+#    change, naming the mark (a clean release would have left it foreign);
+#    with `adopt` the apply keeps it adopted, still marked.
 # 3. DESTROY (the bucket written DELETE; a bucket is KEEP by default, and a
 #    kept object is never deleted, so never refused): refused before any
 #    change while the bucket does not write ADOPT_DELETABLE (the refusal
@@ -330,6 +334,40 @@ def test_a_failed_retire_is_reported_and_retried() raises:
     print("  test_a_failed_retire_is_reported_and_retried: PASS")
 
 
+def test_a_marked_object_relisted_needs_adopt() raises:
+    """Catches: an object left stamped and marked by a failed release taken
+    for kci's own when the file names it again without `adopt` (mutant: no
+    `unadopted_findings` in `_prepare`; the apply would succeed and the
+    bucket would be kci's to delete), a refusal that changes something
+    first, and the same file with `adopt` refused."""
+    var shapes = _shapes()
+    for s in range(len(shapes)):
+        ref sh = shapes[s]
+        var id = String("re2m-") + sh.name
+        var cloud = FakeCloud(id, shape=sh.copy())
+        var reg = _reg(FakeCloud(id, shape=sh.copy()))
+        var st = InMemoryStateStore()
+        _adopted(cloud, reg, _list(_logs(), String(_READER)), st)
+        cloud.store[].fail_at_call = cloud.store[]._attempts + 1
+        var out = apply_resources(reg, cloud, _ctx(), _list(String(_READER)), Creds.none(), st)
+        assert_true(Bool(out.error), sh.name + ": the release failed")
+        assert_equal(_label_of(cloud, String("logs/bucket"), String("kci_adopted")), "true", "still marked")
+        var plain = _list(_logs(adopt=False), String(_READER))
+        var says = _refused(cloud, reg, plain, st, False)
+        assert_true(says.find("logs/bucket: the object carries kci's adoption mark") >= 0, sh.name + ": " + says)
+        var plan_says = String("")
+        try:
+            _ = plan_report(reg, cloud, _ctx(), plain, Creds.none(), st)
+        except e:
+            plan_says = String(e)
+        assert_equal(plan_says, says, sh.name + ": the plan refuses the same way")
+        var back = apply_resources(reg, cloud, _ctx(), _list(_logs(), String(_READER)), Creds.none(), st)
+        assert_true(not back.error, sh.name + ": with adopt: " + (back.error.value() if back.error else String("")))
+        assert_true(_listed(cloud, String("logs/bucket")), sh.name + ": still kci's")
+        assert_equal(_label_of(cloud, String("logs/bucket"), String("kci_adopted")), "true", "still marked")
+    print("  test_a_marked_object_relisted_needs_adopt: PASS")
+
+
 # ---- 3. destroy ----------------------------------------------------------------------------------
 
 
@@ -487,6 +525,7 @@ def main() raises:
     test_a_resource_leaving_the_list_releases_its_adopted_object()
     test_a_failed_release_is_reported_and_retried()
     test_a_failed_retire_is_reported_and_retried()
+    test_a_marked_object_relisted_needs_adopt()
     test_destroy_needs_adopt_deletable_value()
     test_destroy_judges_by_the_file_retention_not_the_label()
     test_a_type_change_does_not_delete_an_adopted_object()

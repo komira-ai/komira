@@ -418,6 +418,7 @@ from kci_cloud.adoption import (
     existing_mismatches,
     replace_findings,
     resource_of_node,
+    unadopted_findings,
 )
 from kci_cloud.metadata import (
     KCI_LABELS_MAX,
