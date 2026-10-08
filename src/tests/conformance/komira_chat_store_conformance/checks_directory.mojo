@@ -6,6 +6,7 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.reactor.reactor import Reactor
+from komira_db import Database, DbValue, Filter, Pred
 
 from komira_chat_store import (
     CHANNEL_DM,
@@ -16,7 +17,10 @@ from komira_chat_store import (
     FILE_COMPLETE,
     FILE_PENDING,
     ChatStore,
+    MentionPage,
     NoSendProbe,
+    T_SUBJECTS,
+    T_USERS,
     dm_channel_id,
 )
 
@@ -194,6 +198,27 @@ def check_dms[T: ChatTarget](mut t: T) raises:
     assert_err(err, String("komira_chat_store: a DM's members are fixed"), "add to a DM")
     err = returned()
     try:
+        _ = s.remove_member[Rt](reactor, dm.channel_id, String("u-bob"), T0)
+    except e:
+        err = String(e)
+    assert_err(err, String("komira_chat_store: a DM's members are fixed"), "remove from a DM")
+    assert_true(s.is_member[Rt](reactor, dm.channel_id, String("u-bob")), "still a member")
+    assert_equal(s.head_seq[Rt](reactor, dm.channel_id), Int64(2), "no LEAVE appended")
+    err = returned()
+    try:
+        _ = s.create_channel[Rt](
+            reactor, dm.channel_id, CHANNEL_PUBLIC, String("dm"), String(""),
+            String("u-carol"), no_ids(), T0,
+        )
+    except e:
+        err = String(e)
+    assert_err(
+        err,
+        String("komira_chat_store: invalid channel id \"dm-u-alice.u-bob\""),
+        "no channel takes a DM's id",
+    )
+    err = returned()
+    try:
         _ = s.update_channel[Rt](
             reactor, dm.channel_id, Optional[String](String("x")), Optional[String](),
             Optional[Bool](),
@@ -247,6 +272,59 @@ def check_read_state_and_mentions[T: ChatTarget](mut t: T) raises:
     assert_equal(first.next_before_ms, T0 + 40)
     var rest = s.mentions[Rt](reactor, String("u-bob"), first.next_before_ms, 1)
     assert_equal(rest.mentions[0].seq, Int64(4))
+
+
+def _page_seqs(page: MentionPage) -> String:
+    var out = String("[")
+    for i in range(len(page.mentions)):
+        if i > 0:
+            out += String(",")
+        out += String(page.mentions[i].seq)
+    return out + String("]")
+
+
+def check_mention_paging[T: ChatTarget](mut t: T) raises:
+    """Following `next_before_ms` from page to page returns every mention
+    exactly once, when a page ends inside a millisecond and when one
+    millisecond holds more mentions than a page."""
+    var s = ChatStore[T.DB, NoSendProbe](t.fresh(), NoSendProbe())
+    var rt = new_rt()
+    ref reactor = rt.reactor()
+    _ = s.create_channel[Rt](
+        reactor, String("c-m"), CHANNEL_PUBLIC, String("m"), String(""),
+        String("u-alice"), ids("u-bob"), T0,
+    )
+    # seqs 3..9 mention bob at ms +40, +30, +30, +20, +10, +10, +10.
+    var at = List[Int64]()
+    at.append(T0 + 40)
+    at.append(T0 + 30)
+    at.append(T0 + 30)
+    at.append(T0 + 20)
+    at.append(T0 + 10)
+    at.append(T0 + 10)
+    at.append(T0 + 10)
+    for i in range(len(at)):
+        _ = s.send_message[Rt](reactor, String("c-m"), String("u-alice"), String("@bob"), Int64(0), String(), ids("u-bob"), False, no_ids(), at[i])
+    # [40, 30, 30]: the page ends inside ms 30, so the 30s move on together.
+    var p1 = s.mentions[Rt](reactor, String("u-bob"), T0 + 1000, 2)
+    assert_equal(_page_seqs(p1), String("[3]"), "page 1")
+    assert_equal(p1.next_before_ms, T0 + 31, "page 1 next")
+    # [30, 30, 20]: the page holds all of ms 30.
+    var p2 = s.mentions[Rt](reactor, String("u-bob"), p1.next_before_ms, 2)
+    assert_equal(_page_seqs(p2), String("[4,5]"), "page 2")
+    assert_equal(p2.next_before_ms, T0 + 30, "page 2 next")
+    # [20, 10, 10]
+    var p3 = s.mentions[Rt](reactor, String("u-bob"), p2.next_before_ms, 2)
+    assert_equal(_page_seqs(p3), String("[6]"), "page 3")
+    assert_equal(p3.next_before_ms, T0 + 11, "page 3 next")
+    # [10, 10, 10]: one millisecond fills the page; all of it is returned.
+    var p4 = s.mentions[Rt](reactor, String("u-bob"), p3.next_before_ms, 2)
+    assert_equal(_page_seqs(p4), String("[7,8,9]"), "page 4: the whole millisecond")
+    assert_equal(p4.next_before_ms, Int64(0), "page 4 is the last")
+    # One page of 1 over ms 30: both 30s, and older mentions remain.
+    var one = s.mentions[Rt](reactor, String("u-bob"), T0 + 31, 1)
+    assert_equal(_page_seqs(one), String("[4,5]"), "a millisecond is never split")
+    assert_equal(one.next_before_ms, T0 + 30, "older mentions remain")
 
 
 def check_files[T: ChatTarget](mut t: T) raises:
@@ -343,3 +421,37 @@ def check_erasure[T: ChatTarget](mut t: T) raises:
     var by_subject = s.erase_subject[Rt](reactor, String(ISS), String("sub-bob"))
     assert_equal(by_subject.bodies_redacted, 1)
     assert_false(Bool(s.user[Rt](reactor, String("u-bob"))))
+
+
+def _delete_rows_of[
+    DB: Database
+](mut s: ChatStore[DB, NoSendProbe], mut reactor: Reactor[Rt.Sink], table: StaticString, user: StaticString) raises -> Int:
+    return Int(
+        s.db().delete_where[Rt](
+            reactor,
+            String(table),
+            Filter.just(Pred.eq(String("user_id"), DbValue.text(String(user)))),
+        )
+    )
+
+
+def check_erasure_retry[T: ChatTarget](mut t: T) raises:
+    """An erasure that stopped between its last two deletes finishes when
+    it is run again, by user id or by subject."""
+    var s = ChatStore[T.DB, NoSendProbe](t.fresh(), NoSendProbe())
+    var rt = new_rt()
+    ref reactor = rt.reactor()
+    # Stopped after the subject row, before the user row: erasing by subject
+    # finds the user row by (iss, sub).
+    _ = s.ensure_user[Rt](reactor, String("u-carol"), String(ISS), String("sub-carol"), String("Carol"), String("c@example.com"), T0)
+    assert_equal(_delete_rows_of(s, reactor, T_SUBJECTS, "u-carol"), 1)
+    var c = s.erase_subject[Rt](reactor, String(ISS), String("sub-carol"))
+    assert_equal(c.rows_erased, 1, "the user row")
+    assert_false(Bool(s.user[Rt](reactor, String("u-carol"))), "erased by subject without its subject row")
+    # Stopped after the user row, before the subject row: erasing by user id
+    # finds the subject row by its user_id.
+    _ = s.ensure_user[Rt](reactor, String("u-dave"), String(ISS), String("sub-dave"), String("Dave"), String(""), T0)
+    assert_equal(_delete_rows_of(s, reactor, T_USERS, "u-dave"), 1)
+    var d = s.erase_user[Rt](reactor, String("u-dave"))
+    assert_equal(d.rows_erased, 1, "the subject row")
+    assert_equal(_delete_rows_of(s, reactor, T_SUBJECTS, "u-dave"), 0, "no subject row is left")

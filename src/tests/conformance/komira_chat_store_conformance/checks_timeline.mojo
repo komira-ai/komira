@@ -203,6 +203,24 @@ def check_idempotent_send[T: ChatTarget](mut t: T) raises:
         Int64(0), String("k-1"), no_ids(), False, no_ids(), T0 + 300,
     )
     assert_equal(bob.seq, Int64(5))
+    # A retry of a send whose message was deleted since writes no mention.
+    var gone = s.send_message[Rt](
+        reactor, String(GENERAL), String("u-alice"), String("bye @carol"),
+        Int64(0), String("k-2"), ids("u-carol"), False, no_ids(), T0 + 400,
+    )
+    _ = s.delete_message[Rt](reactor, String(GENERAL), gone.seq, String("u-alice"), False, T0 + 500)
+    assert_equal(_mentions_of(s, reactor, "u-carol"), String("[c-general#4]"))
+    var late = s.send_message[Rt](
+        reactor, String(GENERAL), String("u-alice"), String("bye @carol"),
+        Int64(0), String("k-2"), ids("u-carol"), False, no_ids(), T0 + 600,
+    )
+    assert_equal(late.seq, gone.seq, "the retry returns the deleted event")
+    assert_true(late.deleted)
+    assert_equal(
+        _mentions_of(s, reactor, "u-carol"),
+        String("[c-general#4]"),
+        "a retry of a deleted send writes no mention row",
+    )
 
 
 def check_paging[T: ChatTarget](mut t: T) raises:

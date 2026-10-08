@@ -38,6 +38,7 @@ def test_id_shape() raises:
     assert_false(is_valid_id(max_id + String("a")), "65 bytes is refused")
     assert_false(is_valid_id(String("")), "empty")
     assert_false(is_valid_id(String("a,b")), "the id-list separator")
+    assert_false(is_valid_id(String("a.b")), "the DM-id separator")
     assert_false(is_valid_id(String("a/b")), "a document-name separator")
     assert_false(is_valid_id(String("a b")), "a space")
     assert_false(is_valid_id(String("é")), "non-ASCII")

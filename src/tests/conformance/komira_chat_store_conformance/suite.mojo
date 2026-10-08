@@ -7,7 +7,9 @@ from .checks_directory import (
     check_channels_and_members,
     check_dms,
     check_erasure,
+    check_erasure_retry,
     check_files,
+    check_mention_paging,
     check_read_state_and_mentions,
     check_users,
 )
@@ -26,7 +28,7 @@ from .targets import ChatTarget
 def run_chat_suite[T: ChatTarget](mut t: T) raises:
     """Run every check against `t`; raises naming each one that failed."""
     var failures = String()
-    var ran = 13
+    var ran = 15
     try:
         check_seq_interleaving[T](t)
     except e:
@@ -72,6 +74,10 @@ def run_chat_suite[T: ChatTarget](mut t: T) raises:
     except e:
         failures += String("read_state_and_mentions: ") + String(e) + String("\n")
     try:
+        check_mention_paging[T](t)
+    except e:
+        failures += String("mention_paging: ") + String(e) + String("\n")
+    try:
         check_files[T](t)
     except e:
         failures += String("files: ") + String(e) + String("\n")
@@ -79,6 +85,10 @@ def run_chat_suite[T: ChatTarget](mut t: T) raises:
         check_erasure[T](t)
     except e:
         failures += String("erasure: ") + String(e) + String("\n")
+    try:
+        check_erasure_retry[T](t)
+    except e:
+        failures += String("erasure_retry: ") + String(e) + String("\n")
     if failures.byte_length() > 0:
         raise Error(t.name() + String(": checks failed:\n") + failures)
     print(t.name() + String(": ") + String(ran) + String(" checks passed"))
