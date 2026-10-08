@@ -31,9 +31,13 @@
 #     the golden file names exactly the messages chat.proto declares, in
 #     declaration order, and the corpus has one field per message: a message
 #     added to chat.proto without a golden line (or one moved) is reported by
-#     name; a message nested inside another (an indented `message` line)
-#     is refused by name. Tests 1-4 then hold `_check_all` to the golden order, so a message
-#     with a golden line but no `_check` call fails there.
+#     name. The declarations are found by a token scan (past comments and
+#     strings, counting braces), not by line prefix: a `message <Name> {`
+#     inside another message's braces is refused as nested, by line, wherever
+#     it sits on its line and whatever whitespace separates its tokens; a
+#     top-level one not written `message <Name> {` at column 0 is refused
+#     too. Tests 1-4 then hold `_check_all` to the golden order, so a
+#     message with a golden line but no `_check` call fails there.
 #   test_protoc_accepted_the_corpus
 #     the report of `chat_corpus_fixture` is staged: protoc decoded the
 #     committed bytes to corpus.txtpb and encoded corpus.txtpb to them.
@@ -165,41 +169,141 @@ def _load_goldens() raises -> Goldens:
     return g^
 
 
-def _proto_message_names() raises -> List[String]:
-    """The names of the messages chat.proto declares, in declaration order:
-    every line that starts `message <Name>` at column 0. A `message` line
-    indented by spaces or tabs is a nested message, which no golden line can
-    name; it raises."""
-    var text = _read(_PROTO)
-    var names = List[String]()
+def _is_ident(c: UInt8) -> Bool:
+    return (
+        (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+        or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+        or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+        or c == UInt8(ord("_"))
+    )
+
+
+def _is_space(c: UInt8) -> Bool:
+    return (
+        c == UInt8(ord(" "))
+        or c == UInt8(ord("\t"))
+        or c == UInt8(ord("\n"))
+        or c == UInt8(ord("\r"))
+    )
+
+
+def _line_of(text: String, at: Int) -> String:
+    """`line N: <text>` for the line of chat.proto holding byte `at`."""
     var b = text.as_bytes()
-    var start = 0
-    for i in range(len(b) + 1):
-        if i < len(b) and b[i] != UInt8(ord("\n")):
+    var start = at
+    while start > 0 and b[start - 1] != UInt8(ord("\n")):
+        start -= 1
+    var end = at
+    while end < len(b) and b[end] != UInt8(ord("\n")):
+        end += 1
+    var n = 1
+    for i in range(start):
+        if b[i] == UInt8(ord("\n")):
+            n += 1
+    return "line " + String(n) + ": " + String(text[byte=start:end])
+
+
+def _proto_message_names() raises -> List[String]:
+    """The names of the messages chat.proto declares, in declaration order.
+
+    A token scan over the whole file, past `//` and `/* */` comments and
+    quoted strings, counting braces. Every `message` keyword followed by
+    whitespace, an identifier, whitespace and `{` is a declaration, wherever
+    it sits on a line and whatever whitespace (spaces, tabs, newlines)
+    separates the tokens. One at brace depth 0, at column 0, written exactly
+    `message <Name> {`, is a top-level message and is returned. Any other
+    declaration raises, naming the line: inside braces it is a nested
+    message, which no golden line can name; at depth 0 in another layout it
+    is refused so the declaration form stays one the reader can check.
+    A `message` that is not followed by `<Name> {` (the field
+    `string message = 2;`, the type `Message message = 1;`) is not a
+    declaration."""
+    var text = _read(_PROTO)
+    var b = text.as_bytes()
+    var names = List[String]()
+    var depth = 0
+    var i = 0
+    var n = len(b)
+    while i < n:
+        var c = b[i]
+        if c == UInt8(ord("/")) and i + 1 < n and b[i + 1] == UInt8(ord("/")):
+            while i < n and b[i] != UInt8(ord("\n")):
+                i += 1
             continue
-        var line = String(text[byte=start:i])
-        start = i + 1
-        var lead = 0
-        var lb = line.as_bytes()
-        while lead < len(lb) and (
-            lb[lead] == UInt8(ord(" ")) or lb[lead] == UInt8(ord("\t"))
-        ):
-            lead += 1
-        if lead > 0 and String(line[byte=lead : line.byte_length()]).startswith(
-            "message "
-        ):
+        if c == UInt8(ord("/")) and i + 1 < n and b[i + 1] == UInt8(ord("*")):
+            i += 2
+            while i + 1 < n and not (
+                b[i] == UInt8(ord("*")) and b[i + 1] == UInt8(ord("/"))
+            ):
+                i += 1
+            if i + 1 >= n:
+                raise Error("chat.proto: a `/*` comment is not closed")
+            i += 2
+            continue
+        if c == UInt8(ord('"')) or c == UInt8(ord("'")):
+            var q = c
+            i += 1
+            while i < n and b[i] != q:
+                if b[i] == UInt8(ord("\\")):
+                    i += 1
+                i += 1
+            if i >= n:
+                raise Error("chat.proto: a string is not closed")
+            i += 1
+            continue
+        if c == UInt8(ord("{")):
+            depth += 1
+            i += 1
+            continue
+        if c == UInt8(ord("}")):
+            depth -= 1
+            if depth < 0:
+                raise Error("chat.proto: a `}` closes nothing: " + _line_of(text, i))
+            i += 1
+            continue
+        if not _is_ident(c):
+            i += 1
+            continue
+        var word_start = i
+        while i < n and _is_ident(b[i]):
+            i += 1
+        if String(text[byte=word_start:i]) != "message":
+            continue
+        # `message` + whitespace + identifier + whitespace + `{`?
+        var j = i
+        while j < n and _is_space(b[j]):
+            j += 1
+        if j == i or j >= n or not _is_ident(b[j]):
+            continue
+        var name_start = j
+        while j < n and _is_ident(b[j]):
+            j += 1
+        var name_end = j
+        while j < n and _is_space(b[j]):
+            j += 1
+        if j >= n or b[j] != UInt8(ord("{")):
+            continue
+        var canonical = (
+            (word_start == 0 or b[word_start - 1] == UInt8(ord("\n")))
+            and name_start == i + 1
+            and b[i] == UInt8(ord(" "))
+            and j == name_end + 1
+            and b[name_end] == UInt8(ord(" "))
+        )
+        if depth > 0:
             raise Error(
                 "chat.proto: a nested message has no golden line; declare it"
                 + " at top level: "
-                + line
+                + _line_of(text, word_start)
             )
-        if not line.startswith("message "):
-            continue
-        var rest = String(line[byte=8 : line.byte_length()])
-        var end = rest.find(" ")
-        if end <= 0:
-            raise Error("chat.proto: a `message` line without `<Name> {`: " + line)
-        names.append(String(rest[byte=0:end]))
+        if not canonical:
+            raise Error(
+                "chat.proto: a message declared other than `message <Name> {`"
+                + " at column 0: "
+                + _line_of(text, word_start)
+            )
+        names.append(String(text[byte=name_start:name_end]))
+        i = j  # the `{` is counted on the next pass
     return names^
 
 
