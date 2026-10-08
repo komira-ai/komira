@@ -40,6 +40,8 @@ from .s2n_shim import (
     TLS_OUTCOME_BLOCKED_ON_WRITE,
     TLS_OUTCOME_DONE,
     TLS_OUTCOME_ERROR,
+    TLS_VERSION_TLS12,
+    TLS_VERSION_TLS13,
     TlsConfig,
     TlsConnection,
     last_s2n_errno,

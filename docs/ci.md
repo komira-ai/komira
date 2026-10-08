@@ -11,12 +11,13 @@ Nothing is compiled on the runner.
 | event | runs |
 |---|---|
 | push to `main` | the release path of `kci.yml` |
-| pull request from a branch of this repository | `pr / check` |
+| pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
 
-There is no separate static or lint job, and no other pull request check. The
-only scheduled run is the
+There is no separate static or lint job, and no other pull request check
+that can block a merge: the `coverage` workflow only reports. The only
+scheduled run is the
 [build-system self-tests](#build-system-self-tests), which is not the gate.
 `ci.yml` and its check `ci / build` no longer exist. The whole-repository
 `//...` build they ran on every push to `main` is not run by any workflow now;
@@ -179,8 +180,8 @@ approved run as able to affect every build that uses the same service.
 
 ## What a farm test action can do
 
-`./buck2 test //src/komira_test_minio:farm_capability_probe`
-([the probe](../src/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
+`./buck2 test //src/tests/helpers/komira_test_minio:farm_capability_probe`
+([the probe](../src/tests/helpers/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
 inside one test action (on the farm, a Linux worker; with no farm
 configured, the client, like any other standalone test), each thing an
 end-to-end test of a real server needs, and prints one
@@ -189,7 +190,7 @@ rows are required: the test fails, naming the capability, when one is
 missing. The rest are reported and never fail it.
 
 The probe watches the workers only when it runs: the PR check runs it when
-its unit (`//src/komira_test_minio/...`) is affected, that is, when a PR
+its unit (`//src/tests/helpers/komira_test_minio/...`) is affected, that is, when a PR
 touches `komira_test_minio` or one of its dependencies. Anyone can run it on
 demand with the command above. A test result is not cached, so each run is a
 fresh probe.
@@ -807,7 +808,8 @@ so the release files list no package:
   `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
   from the live graph (`buck2 cquery`) and answers one check per path group
   for every target no declared unit names or matches: `<p>` for each
-  library `//src/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
+  library `//src/<p>/...` and each test-only package
+  `//src/tests/<kind>/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
   `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
   for `tests//functional/...`; a name an artifact holds gets `_package`.
   Every name is one kci accepts (`[a-z][a-z0-9_]*`) whatever the directory
@@ -942,6 +944,30 @@ to the release workflow's), and the welded test
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
+
+## coverage.yml: the pull request's coverage (not a gate)
+
+[`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) posts
+the check run `coverage`: the line coverage of the `mojo_library` targets the
+change touches, as covcheck's summary and annotations on the lines of the
+"Files changed" view. It is **informational**: not a required check, its
+conclusion is `neutral` in the policy's census mode, and it cannot make
+`pr / check` red. Job `measure` (the same farm connection and permissions as
+`pr / check`) builds the touched libraries' `[coverage][tests]` with
+`-c komira.coverage=true` on the farm, in one call, and runs `covcheck
+report`; a library whose coverage build fails is listed as not measured and
+the job stays green. Job `post` holds the only write permission
+(`checks: write`), checks nothing out and sends the bodies `measure`
+uploaded. A pull request from a fork runs neither, and nor does one whose
+base is not `main`: a stacked pull request gets no coverage run until it is
+retargeted to `main` and then pushed to (a retarget alone is an `edited`
+event, which neither workflow listens for; the pull request adding the
+workflow sees its first real run then). Making it a required check, or switching coverage on in
+`pr / check`, waits for the sweep of tests that fail at `-O0` or under kcov
+(in a coverage build one such test leaves its library's conda package
+unbuilt: a coverage run or gate blocks only the package it measures from
+shipping, never the library or its dependents) and is the CEO's decision. Details:
+[The coverage workflow](../tools/build/coverage/README.md#the-coverage-workflow).
 
 ## merge-from-live (not yet running)
 

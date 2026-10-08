@@ -3,7 +3,7 @@
 The change 5e6f7a8b9c is in a docstring line, which is prose.
 """
 
-# Dates, one spelling a line (13):
+# Dates, one spelling a line (15):
 # iso 2031-08-31
 # underscore notes_2031_08_31
 # slash 2031/08/31
@@ -17,6 +17,8 @@ The change 5e6f7a8b9c is in a docstring line, which is prose.
 # 8/31/2031
 # 31.08.2030
 # 2030-12-01T00:00:00Z
+# unpadded 2031-8-31
+# day first with dashes 31-08-2031
 
 # Home directories (4):
 # /home/jdoe/src
@@ -38,7 +40,7 @@ var p = "C:\\Users\\jdoe\\AppData"
 # http://builder:8980/ a single label
 # https://build.corp.zz/x a domain no row allows
 # http://svc.corp.internal/ a private name
-# http://[fd7a:115c::1]:80/ an IPv6 address
+# http://[2001:db8::1]:80/ an IPv6 address
 # https://u:p@deploy.corp.zz:8443/ userinfo and a port
 # HTTPS://UPPER.CORP.ZZ/ capitals
 # postgres://db.corp.zz:5432/x another scheme

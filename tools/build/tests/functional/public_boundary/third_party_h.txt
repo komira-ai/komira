@@ -1,0 +1,2 @@
+/* A header written here for an upstream build: read, like all of third_party/. */
+#define CONFIG_OK 1

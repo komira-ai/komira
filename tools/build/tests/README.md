@@ -40,7 +40,7 @@ names. At the top of this directory are the driver,
 [`tool_lib.sh`](tool_lib.sh), and the sections the driver sources
 ([`cxx_tests.sh`](cxx_tests.sh), [`rust_tests.sh`](rust_tests.sh),
 [`proto_tests.sh`](proto_tests.sh), [`c_libs_tests.sh`](c_libs_tests.sh),
-[`coverage_tests.sh`](coverage_tests.sh), [`coverage_run_tests.sh`](coverage_run_tests.sh)).
+[`coverage_tests.sh`](coverage_tests.sh), [`coverage_run_tests.sh`](coverage_run_tests.sh), [`assert_level_tests.sh`](assert_level_tests.sh)).
 
 The tests run where the checkout builds, read from the execution platforms
 buck2 registers, and the first line of output names it:
@@ -872,95 +872,16 @@ the same README in a library with `conda = False`, builds.
 
 ## 39. Test welding
 
-A test file that no target welds never runs, and nothing else notices.
-[`test_weld`](../lint/test_weld.bzl) is a lint over the packages under
-`src/` (each directory directly under it). It requires every `test_*.mojo`
-under a `tests/` directory to be welded, and every package with a `.mojo`
-source to weld a test. What is welded is read from the build graph, not from
-the text of a BUCK file: the `test_srcs` of every `mojo_library` and the
-`main` of every `mojo_test` under `src/` (its binary runs `main` only), as the
-rules received them. A query of the graph gives the targets; each rule gives
-its test files in a `WeldedTestsInfo` ([`providers.bzl`](../mojo/providers.bzl)),
-and Buck2 says where each file is. So a list a BUCK file computes counts entry
-by entry, an entry left in a comment does not, and an entry naming another
-package's file by label welds that file, not a same-named one.
-The exceptions are the rows of
-[`tests/known_untested.tsv`](../../../tests/known_untested.tsv), each with its
-reason, and that ledger only shrinks: a row whose test is welded, or whose
-package welds a test, is a finding, as is a row naming nothing. `//:test_weld`
-in the root [`BUCK`](../../../BUCK) holds the repository to them.
-
-[`functional/test_weld:ok`](functional/test_weld/BUCK) is a planted tree
-([`fixture.bzl`](functional/test_weld/fixture.bzl): a computed `test_srcs`
-list holding an entry in a comment, a helper under `tests/`, a nested test, a
-test welded by a target of its own, a package with no `.mojo`) whose ledger
-holds it exactly, and each target of
-[`negative/test_weld`](negative/test_weld/BUCK) plants one defect in the same
-tree and must fail naming it; `shrink_computed` is a ledger row for a test
-welded only by the computed list. That tree's welds come from a stand-in rule;
-[`negative/test_weld/real`](negative/test_weld/real/BUCK) runs the lint over a
-real `mojo_library` (a computed `test_srcs` with an entry in a comment and an
-entry naming another package's file by label) and a real `mojo_test` (a
-second `srcs` beside its `main`): `real:ok` holds the three unwelded files in
-its ledger and must pass, `real:red` has no row and must name exactly those
-three. Neither is built: the lint only analyses them.
-
-A rule cannot query the targets of `//src/...` (a query attribute takes
-labels only), so building a `test_weld` target checks nothing: it declares the
-lint, and [`test_weld.bxl`](../lint/test_weld.bxl) checks it, running the
-check as a build action whose inputs are the list of `.mojo` paths, the list
-of welded paths and the ledger. The pull request's check runs it for each
-`test_weld` target of a unit it builds
-([`build_targets.sh`](../../../release/ci/build_targets.sh)); this test runs it
-for each target above.
-
-```sh
-./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld
-./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//functional/test_weld:ok
-./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//negative/test_weld:untested   # must fail: .../src/komira_b: 1 .mojo source(s) and no welded test
-```
+`test_weld`: every test file is welded, and every package with code welds a test. The test is in
+[the repository lint tests](lint_tests.md#39-test-welding).
 
 ## 40. README API coverage
 
-A package's README examples are its smoke tests (test 38), so a public name
-no example uses is a public name nothing smoke-tests.
-[`readme_api_coverage`](../lint/readme_api_coverage.bzl) is a validation
-that counts, per package under `src/`, the public API its `__init__.mojo`
-exports (and the public methods of the structs among it) and which of it the
-README's examples use, reading each README through the tool the gate runs, so
-hidden lines count and prose does not. It writes the census (`[packages]`,
-`[symbols]`, `[report]`) and is report-only today; it fails on its ledger,
-[`tests/readme_api_exceptions.tsv`](../../../tests/readme_api_exceptions.tsv),
-when a row is malformed, repeated, or names a symbol that is not exported or
-that the README now uses (the ledger only shrinks). The rules and today's
-numbers are in [`docs/readme_api_coverage.md`](../../../docs/readme_api_coverage.md).
-[`functional/readme_api_coverage:ok`](functional/readme_api_coverage/BUCK)
-builds a planted tree ([`fixture.bzl`](functional/readme_api_coverage/fixture.bzl):
-an alias, a parenthesised and a backslash-continued import, a self-qualified
-import, a module export, declarations in `__init__.mojo`, overloads, a
-docstring `def`, a struct in `tests/`, a struct header over three lines, a
-same-named struct outside the imported module, a `write_to`, hidden lines, a
-name only in a comment, a string, an import line, a README declaration, a
-`text` fence or prose, a package with no README, one with no example, one
-the readme tool refuses, a `from .x import *`, one with no `__init__.mojo`)
-whose census must equal
-[`expect_packages.tsv`](functional/readme_api_coverage/expect_packages.tsv),
-[`expect_symbols.tsv`](functional/readme_api_coverage/expect_symbols.tsv)
-and [`expect_report.txt`](functional/readme_api_coverage/expect_report.txt)
-byte for byte; each target of
-[`negative/readme_api_coverage`](negative/readme_api_coverage/BUCK) plants one
-defect in the same tree and must fail naming it, `enforce = True` included.
-
-```sh
-./buck2 build //:readme_api_coverage tests//functional/readme_api_coverage:ok
-./buck2 build tests//negative/readme_api_coverage:stale_used   # must fail: komira_a bye: src/komira_a/README.md uses it now
-```
+`readme_api_coverage`: the census of the public API each README example uses. The test is in
+[the repository lint tests](lint_tests.md#40-readme-api-coverage).
 
 ## 41. Coverage builds
-
-[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
-binary with line tables per `test_srcs` entry and leave every release action as it is;
-[`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0 binary per test and move no release action of a library, only its conda package's joins; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
 ## 42. Pointer lint
 
@@ -984,8 +905,11 @@ dunder, a trait method, a return type), held at their exact counts, so a
 site the reader missed would fail the build; and whose `near.mojo` names
 every banned spelling where it is not a site (docstrings, comments, strings,
 longer identifiers, private and nested functions, whole-value moves, a
-rebound name). Each target of [`negative/pointer_lint`](negative/pointer_lint/BUCK)
-plants one site of a rule in the same tree, or one defect in a ledger (a
+rebound name); a test file is not a site, in a package's own `tests/` and in
+a test-only package's under `src/tests/<kind>/`. Each target of
+[`negative/pointer_lint`](negative/pointer_lint/BUCK)
+plants one site of a rule in the same tree (a library file of a test-only
+package included), or one defect in a ledger (a
 malformed, repeated, unknown-rule, zero-count or reasonless row, a row for
 no file, a count above the sites, a row for an FFI module's origins, an FFI
 row with no `# FFI-BOUNDARY:` comment line or no wildcard origin), or empties
@@ -997,10 +921,7 @@ the tree, and must fail naming it.
 ```
 
 ## 43. Coverage runs
-
-Each test's coverage binary also runs under kcov through the release gate's runner
-([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
-[`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+Each test's coverage binary also runs under kcov ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`; [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
 
 ## 44. Public boundary
 
@@ -1015,7 +936,10 @@ of [`tests/public_boundary_hosts.tsv`](../../../tests/public_boundary_hosts.tsv)
 an email address outside the reserved example domains (the user of a URL
 right after `://` is none when its host is under a domain of the hosts ledger,
 such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
-host it is read), and a commit id in prose. Binary data and upstream bytes are not read. Its reader is
+host it is read), and a commit id in prose, in a file's contents or (dates,
+home directories, deny-list words) its path. Binary data is not read, but its
+path is; nothing committed is upstream bytes, so `third_party/` is read whole.
+Its reader is
 [`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
 matches and what it cannot see (vocabulary is no shape); its action is
 [`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
@@ -1032,17 +956,20 @@ planted tree ([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose
 held at exact counts, so a spelling the reader missed would fail the build;
 whose near misses (dates outside the window, placeholders, loopback and
 documentation addresses, reserved hosts, templates, digests, UUIDs, hex in
-code) must find nothing; and whose upstream and binary files hold findings
-that must not be read. The planted tree's window is 2030 up to 2031-09-01,
+code, a `//` in a C string) must find nothing; and whose binary file holds
+findings that must not be read. The planted tree's window is 2030 up to 2031-09-01,
 so none of its files holds a date the root target refuses. Each target of
 [`negative/public_boundary`](negative/public_boundary/BUCK) plants one finding
-(each spelling of each rule, a date in a `third_party/` BUCK file, one over a
-hold, a deny-list word) or one ledger defect (malformed, repeated,
-unknown-rule, zero-count or reasonless rows, a row for a missing file, binary
-data or upstream bytes, a count above the findings, a row for no finding, a
-row holding a deny-list word, a hosts row that is reserved or unused), sets
-a window that does not end on the first day of a month, or empties the tree,
-and must fail naming it.
+(each spelling of each rule, a date in a `third_party/` BUCK file and C
+header, a date, home directory or deny-list word in a path, the path of
+binary data, a file given by `paths`, one over a hold, a deny-list word) or
+one ledger defect (malformed, repeated, unknown-rule, zero-count or
+reasonless rows, a row for a missing file or for binary data, a count above
+the findings, a row for no finding, a row holding a deny-list word, a hosts
+row that is reserved or unused), sets a window with month 13 or not ending
+on the first day of a month, or empties the tree, and must fail naming it.
+The test also pins the root target's window (2025 up to 2026-09-01) by
+querying its attributes, so narrowing it fails.
 [`public_boundary_tests.sh`](public_boundary_tests.sh) lists them.
 
 ```sh
@@ -1050,8 +977,21 @@ and must fail naming it.
 ./buck2 build tests//negative/public_boundary:host_single   # must fail: docs/plant.md:1: host: builder
 ```
 
+## 45. The layout of src/
+
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in
+`docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
+[the repository lint tests](lint_tests.md#45-the-layout-of-src).
+
+## 46. Coverage gate
+With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
 records what a remote worker provides, the evidence behind the
 [host floor](../toolchains/README.md#host-floor).
+
+## 45. Assert level, defines and memory cap
+
+[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
