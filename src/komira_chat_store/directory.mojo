@@ -40,6 +40,7 @@ from .ops import (
     i64,
     limit,
     no_order,
+    require_page_size,
     select,
     set_to,
     sets,
@@ -196,6 +197,7 @@ def _ids_page[
     from_id: String,
     max_ids: Int,
 ) raises -> IdPage:
+    require_page_size(max_ids, "max_ids")
     preds.append(Pred.gte(String(id_col), txt(from_id)))
     var cols = List[String]()
     cols.append(String(id_col))

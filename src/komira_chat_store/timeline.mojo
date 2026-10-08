@@ -60,6 +60,7 @@ from .ops import (
     limit,
     no_limit,
     no_order,
+    require_page_size,
     select,
     set_to,
     sets,
@@ -465,6 +466,7 @@ def page_after[
     max_events: Int,
 ) raises -> EventPage:
     """Up to `max_events` events after `since_seq`, oldest first."""
+    require_page_size(max_events, "max_events")
     var rows = select[RT, DB](
         db,
         reactor,
@@ -496,6 +498,7 @@ def page_before[
 ) raises -> EventPage:
     """Up to `max_events` of the newest events before `before_seq`, oldest
     first."""
+    require_page_size(max_events, "max_events")
     var rows = select[RT, DB](
         db,
         reactor,
@@ -533,6 +536,7 @@ def thread_page[
 ) raises -> EventPage:
     """Up to `max_events` replies in the thread of `root_seq` after
     `since_seq`, oldest first."""
+    require_page_size(max_events, "max_events")
     var rows = select[RT, DB](
         db,
         reactor,
@@ -595,6 +599,7 @@ def mentions_page[
     would end partway through one, that millisecond's mentions move to the
     next page; when one millisecond alone holds more than `max_mentions`,
     the page is all of that millisecond, longer than `max_mentions`."""
+    require_page_size(max_mentions, "max_mentions")
     var out = _mention_refs(
         select[RT, DB](
             db,

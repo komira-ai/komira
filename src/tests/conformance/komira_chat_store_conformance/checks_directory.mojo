@@ -283,10 +283,20 @@ def _page_seqs(page: MentionPage) -> String:
     return out + String("]")
 
 
+def _page_refs(page: MentionPage) -> String:
+    var out = String("[")
+    for i in range(len(page.mentions)):
+        if i > 0:
+            out += String(",")
+        out += page.mentions[i].channel_id + String(":") + String(page.mentions[i].seq)
+    return out + String("]")
+
+
 def check_mention_paging[T: ChatTarget](mut t: T) raises:
     """Following `next_before_ms` from page to page returns every mention
     exactly once, when a page ends inside a millisecond and when one
-    millisecond holds more mentions than a page."""
+    millisecond holds more mentions than a page, and orders one
+    millisecond's mentions by channel, then seq."""
     var s = ChatStore[T.DB, NoSendProbe](t.fresh(), NoSendProbe())
     var rt = new_rt()
     ref reactor = rt.reactor()
@@ -294,7 +304,8 @@ def check_mention_paging[T: ChatTarget](mut t: T) raises:
         reactor, String("c-m"), CHANNEL_PUBLIC, String("m"), String(""),
         String("u-alice"), ids("u-bob"), T0,
     )
-    # seqs 3..9 mention bob at ms +40, +30, +30, +20, +10, +10, +10.
+    # seqs 3..14 mention bob at ms +40, +30, +30, +20, +10, +10, +10, +5,
+    # +5, +5, +5, +1.
     var at = List[Int64]()
     at.append(T0 + 40)
     at.append(T0 + 30)
@@ -303,6 +314,9 @@ def check_mention_paging[T: ChatTarget](mut t: T) raises:
     at.append(T0 + 10)
     at.append(T0 + 10)
     at.append(T0 + 10)
+    for _ in range(4):
+        at.append(T0 + 5)
+    at.append(T0 + 1)
     for i in range(len(at)):
         _ = s.send_message[Rt](reactor, String("c-m"), String("u-alice"), String("@bob"), Int64(0), String(), ids("u-bob"), False, no_ids(), at[i])
     # [40, 30, 30]: the page ends inside ms 30, so the 30s move on together.
@@ -317,14 +331,39 @@ def check_mention_paging[T: ChatTarget](mut t: T) raises:
     var p3 = s.mentions[Rt](reactor, String("u-bob"), p2.next_before_ms, 2)
     assert_equal(_page_seqs(p3), String("[6]"), "page 3")
     assert_equal(p3.next_before_ms, T0 + 11, "page 3 next")
-    # [10, 10, 10]: one millisecond fills the page; all of it is returned.
+    # [10, 10, 10]: one millisecond fills the page; all of it is returned,
+    # and the mentions at +5 and +1 remain.
     var p4 = s.mentions[Rt](reactor, String("u-bob"), p3.next_before_ms, 2)
     assert_equal(_page_seqs(p4), String("[7,8,9]"), "page 4: the whole millisecond")
-    assert_equal(p4.next_before_ms, Int64(0), "page 4 is the last")
+    assert_equal(p4.next_before_ms, T0 + 10, "page 4 next")
+    # [5, 5, 5, 5]: a millisecond of two more than a page; a read of the
+    # millisecond capped at a page and one would lose seq 13.
+    var p5 = s.mentions[Rt](reactor, String("u-bob"), p4.next_before_ms, 2)
+    assert_equal(_page_seqs(p5), String("[10,11,12,13]"), "page 5: the whole millisecond")
+    assert_equal(p5.next_before_ms, T0 + 5, "page 5 next")
+    var p6 = s.mentions[Rt](reactor, String("u-bob"), p5.next_before_ms, 2)
+    assert_equal(_page_seqs(p6), String("[14]"), "page 6")
+    assert_equal(p6.next_before_ms, Int64(0), "page 6 is the last")
     # One page of 1 over ms 30: both 30s, and older mentions remain.
     var one = s.mentions[Rt](reactor, String("u-bob"), T0 + 31, 1)
     assert_equal(_page_seqs(one), String("[4,5]"), "a millisecond is never split")
     assert_equal(one.next_before_ms, T0 + 30, "older mentions remain")
+    # Within a millisecond, channel ids order before seqs: c-tb is created
+    # first and its mention has the lower seq, yet c-ta's comes first.
+    _ = s.create_channel[Rt](
+        reactor, String("c-tb"), CHANNEL_PUBLIC, String("tb"), String(""),
+        String("u-alice"), ids("u-cy"), T0,
+    )
+    _ = s.create_channel[Rt](
+        reactor, String("c-ta"), CHANNEL_PUBLIC, String("ta"), String(""),
+        String("u-alice"), ids("u-cy"), T0,
+    )
+    _ = s.send_message[Rt](reactor, String("c-ta"), String("u-alice"), String("no mention"), Int64(0), String(), no_ids(), False, no_ids(), T0 + 6)
+    var in_b = s.send_message[Rt](reactor, String("c-tb"), String("u-alice"), String("@cy"), Int64(0), String(), ids("u-cy"), False, no_ids(), T0 + 7)
+    var in_a = s.send_message[Rt](reactor, String("c-ta"), String("u-alice"), String("@cy"), Int64(0), String(), ids("u-cy"), False, no_ids(), T0 + 7)
+    assert_true(in_a.seq > in_b.seq, "c-ta's mention has the higher seq")
+    var tie = s.mentions[Rt](reactor, String("u-cy"), T0 + 1000, 10)
+    assert_equal(_page_refs(tie), String("[c-ta:") + String(in_a.seq) + String(",c-tb:") + String(in_b.seq) + String("]"), "channel before seq")
 
 
 def check_files[T: ChatTarget](mut t: T) raises:
@@ -436,13 +475,16 @@ def _delete_rows_of[
 
 
 def check_erasure_retry[T: ChatTarget](mut t: T) raises:
-    """An erasure that stopped between its last two deletes finishes when
-    it is run again, by user id or by subject."""
+    """An erasure that stopped between its last two deletes (user row
+    gone, subject row kept) finishes when it is run again, by user id or by
+    subject; and erasing by subject finds a user whose subject row is
+    missing (deleted out of band, left by a run that deleted the subject
+    row first, or racing a first `ensure_user`)."""
     var s = ChatStore[T.DB, NoSendProbe](t.fresh(), NoSendProbe())
     var rt = new_rt()
     ref reactor = rt.reactor()
-    # Stopped after the subject row, before the user row: erasing by subject
-    # finds the user row by (iss, sub).
+    # The subject row is missing and the user row is kept: erasing by
+    # subject finds the user row by (iss, sub).
     _ = s.ensure_user[Rt](reactor, String("u-carol"), String(ISS), String("sub-carol"), String("Carol"), String("c@example.com"), T0)
     assert_equal(_delete_rows_of(s, reactor, T_SUBJECTS, "u-carol"), 1)
     var c = s.erase_subject[Rt](reactor, String(ISS), String("sub-carol"))
@@ -455,3 +497,11 @@ def check_erasure_retry[T: ChatTarget](mut t: T) raises:
     var d = s.erase_user[Rt](reactor, String("u-dave"))
     assert_equal(d.rows_erased, 1, "the subject row")
     assert_equal(_delete_rows_of(s, reactor, T_SUBJECTS, "u-dave"), 0, "no subject row is left")
+    # The same stopped state, rerun by subject: the subject row names the
+    # user, and both deletes of it find the one row.
+    _ = s.ensure_user[Rt](reactor, String("u-erin"), String(ISS), String("sub-erin"), String("Erin"), String(""), T0)
+    assert_equal(_delete_rows_of(s, reactor, T_USERS, "u-erin"), 1)
+    var e = s.erase_subject[Rt](reactor, String(ISS), String("sub-erin"))
+    assert_equal(e.rows_erased, 1, "the subject row")
+    assert_false(Bool(s.user_for_subject[Rt](reactor, String(ISS), String("sub-erin"))), "no subject row maps sub-erin")
+    assert_equal(_delete_rows_of(s, reactor, T_SUBJECTS, "u-erin"), 0, "no subject row is left")

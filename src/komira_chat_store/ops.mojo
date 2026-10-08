@@ -213,3 +213,12 @@ def event_key_cols() -> List[String]:
 
 def chat_err(var msg: String) -> Error:
     return Error(String("komira_chat_store: ") + msg)
+
+
+def require_page_size(n: Int, name: StaticString) raises:
+    """Refuse a page size below 1: such a page holds nothing, so following
+    it never moves on."""
+    if n < 1:
+        raise chat_err(
+            String(name) + String(" must be at least 1, got ") + String(n)
+        )

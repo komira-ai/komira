@@ -18,6 +18,7 @@ from .checks_timeline import (
     check_edit_and_delete,
     check_edit_racing_delete,
     check_idempotent_send,
+    check_page_size_refused,
     check_paging,
     check_seq_interleaving,
     check_threads,
@@ -28,7 +29,7 @@ from .targets import ChatTarget
 def run_chat_suite[T: ChatTarget](mut t: T) raises:
     """Run every check against `t`; raises naming each one that failed."""
     var failures = String()
-    var ran = 15
+    var ran = 16
     try:
         check_seq_interleaving[T](t)
     except e:
@@ -45,6 +46,10 @@ def run_chat_suite[T: ChatTarget](mut t: T) raises:
         check_paging[T](t)
     except e:
         failures += String("paging: ") + String(e) + String("\n")
+    try:
+        check_page_size_refused[T](t)
+    except e:
+        failures += String("page_size_refused: ") + String(e) + String("\n")
     try:
         check_threads[T](t)
     except e:

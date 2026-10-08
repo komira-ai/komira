@@ -386,3 +386,57 @@ def check_edit_racing_delete[T: ChatTarget](mut t: T) raises:
     var msg = a.event[Rt](reactor, String(GENERAL), m.seq).value().copy()
     assert_true(msg.deleted)
     assert_equal(msg.body, String(""))
+
+
+def _pager_err[
+    DB: Database
+](
+    mut s: ChatStore[DB, NoSendProbe], mut reactor: Reactor[Rt.Sink], which: Int, n: Int
+) raises -> String:
+    """What pager `which` raised for a page size of `n`."""
+    try:
+        if which == 0:
+            _ = s.users[Rt](reactor, String(""), n)
+        elif which == 1:
+            _ = s.browse_channels[Rt](reactor, String(""), n, True)
+        elif which == 2:
+            _ = s.channels_of[Rt](reactor, String("u-bob"), String(""), n)
+        elif which == 3:
+            _ = s.members[Rt](reactor, String(GENERAL), String(""), n)
+        elif which == 4:
+            _ = s.events_after[Rt](reactor, String(GENERAL), Int64(0), n)
+        elif which == 5:
+            _ = s.events_before[Rt](reactor, String(GENERAL), Int64(100), n)
+        elif which == 6:
+            _ = s.thread[Rt](reactor, String(GENERAL), Int64(4), Int64(0), n)
+        else:
+            _ = s.mentions[Rt](reactor, String("u-bob"), T0 + 1000, n)
+    except e:
+        return String(e)
+    return returned()
+
+
+def check_page_size_refused[T: ChatTarget](mut t: T) raises:
+    """Every pager refuses a page size below 1 by name: such a page holds
+    nothing, and the mentions pager would index past an empty page."""
+    var s = ChatStore[T.DB, NoSendProbe](t.fresh(), NoSendProbe())
+    var rt = new_rt()
+    ref reactor = rt.reactor()
+    _general(s, reactor)
+    _ = s.ensure_user[Rt](reactor, String("u-bob"), String("https://issuer.example"), String("sub-bob"), String("Bob"), String(""), T0)
+    # seq 4 mentions bob; seq 5 replies to it, so every pager has a row.
+    _ = s.send_message[Rt](reactor, String(GENERAL), String("u-alice"), String("@bob"), Int64(0), String(), ids("u-bob"), False, no_ids(), T0 + 10)
+    _ = s.send_message[Rt](reactor, String(GENERAL), String("u-bob"), String("re"), Int64(4), String(), no_ids(), False, no_ids(), T0 + 20)
+    var names = List[String]()
+    for _ in range(4):
+        names.append(String("max_ids"))
+    for _ in range(3):
+        names.append(String("max_events"))
+    names.append(String("max_mentions"))
+    for which in range(len(names)):
+        for n in range(-1, 1):
+            assert_err(
+                _pager_err(s, reactor, which, n),
+                String("komira_chat_store: ") + names[which] + String(" must be at least 1, got ") + String(n),
+                String("pager ") + String(which) + String(", size ") + String(n),
+            )
