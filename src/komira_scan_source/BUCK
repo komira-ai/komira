@@ -35,6 +35,7 @@ mojo_library(
         "tests/test_in_memory_source.mojo",
         "tests/test_inmem_structural_id_memo_oracle.mojo",
         "tests/test_parquet_source.mojo",
+        "tests/test_scan_identity_audit.mojo",
         "tests/test_source_trait_conformance.mojo",
         "tests/test_source_variant.mojo",
         "tests/test_supports_filter_pushdown.mojo",
