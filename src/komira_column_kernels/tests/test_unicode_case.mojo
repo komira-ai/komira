@@ -246,9 +246,11 @@ def test_kuhn_lonely_start_bytes_resynchronise() raises:
 
 
 def test_folding_resumes_after_a_malformed_byte() raises:
-    # The 3.3.6 and 3.3.7 lines of the test file, as it writes them: a heading,
-    # the truncated sequence in quotes, a bar. The ASCII after each malformed
-    # sequence is still folded, so the driver resynchronised on the next byte.
+    # Modelled on the 3.3.6 and 3.3.7 lines of the test file: a heading, the
+    # truncated sequence in quotes, a bar. The malformed bytes are the file's,
+    # exactly; the surrounding ASCII is a paraphrase of its layout, not a copy.
+    # The ASCII after each malformed sequence is still folded, so the driver
+    # resynchronised on the next byte.
     var line1 = _cat(
         _cat(
             _ascii('3.3.6  2-byte sequence with last byte missing (U-000007FF):    "'),

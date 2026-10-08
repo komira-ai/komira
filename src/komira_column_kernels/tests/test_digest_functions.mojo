@@ -15,6 +15,11 @@
 #     message and 56 the first two-block one. A ShortMsg vector with Len = 0
 #     carries `Msg = 00` by convention and is the empty message here.
 #   * SHA-256: FIPS 180-2 appendix B.1 ("abc") and B.2 (the 448-bit message).
+#   * One million 'a' (8,000,000 bits, so the bit length needs more than 16
+#     bits): SHA-1 from RFC 3174 TEST3 / FIPS 180 (RFC 3174's printed result
+#     has a known typo, "CD C4"; the FIPS value is 34aa973c d4c4daa4 ...),
+#     SHA-256 from FIPS 180-2 appendix B.3, MD5 from the NESSIE project's MD5
+#     test vectors, Set 1, vector #8.
 # The CAVP messages are arbitrary bytes, not UTF-8: the kernels digest the
 # bytes of the string, whatever they are, and so are handed them unvalidated.
 
@@ -291,6 +296,30 @@ def test_sha256_cavp_short_msg_all_65() raises:
         var msg = _hex_to_bytes(v[i][0])
         assert_equal(len(msg), i, "vector i is i bytes")
         assert_equal(_text(sha256_hex_bytes(_text(msg))), v[i][1], String("Len ") + String(8 * i))
+
+
+# -----------------------------------------------------------------------------
+# One million 'a': the high bytes of the 64-bit bit length
+# -----------------------------------------------------------------------------
+
+
+def _million_a() -> String:
+    # Built at run time: a literal of this size would bloat the test binary.
+    var bs = List[UInt8](capacity=1_000_000)
+    for _ in range(1_000_000):
+        bs.append(0x61)
+    return _text(bs)
+
+
+def test_one_million_a() raises:
+    var m = _million_a()
+    assert_equal(m.byte_length(), 1_000_000)
+    assert_equal(_md5(m), "7707d6ae4e027c70eea2a935c2296f21")
+    assert_equal(_sha1(m), "34aa973cd4c4daa4f61eeb2bdbad27316534016f")
+    assert_equal(
+        _sha256(m),
+        "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
+    )
 
 
 # -----------------------------------------------------------------------------
