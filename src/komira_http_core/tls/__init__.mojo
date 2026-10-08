@@ -11,6 +11,7 @@
 # Exports:
 #   - `TlsConfig`     — per-server cert + ALPN
 #   - `TlsConnection` — per-conn TLS state
+#   - `PeerKeyUpdate` / `KeyUpdateCounts` — TLS 1.3 key update values
 #   - `TLS_OUTCOME_*` — 3-state handshake/IO result enum
 #   - `CONN_STATE_TLS_*` — L0 state-machine variants (extends transport)
 #   - `outcome_to_interest` / `outcome_to_conn_state` — reactor glue
@@ -33,6 +34,7 @@ from .handshake_state import (
     outcome_to_conn_state,
     outcome_to_interest,
 )
+from .key_update import KeyUpdateCounts, PeerKeyUpdate
 from .s2n_shim import (
     TLS_OUTCOME_BLOCKED_ON_READ,
     TLS_OUTCOME_BLOCKED_ON_WRITE,

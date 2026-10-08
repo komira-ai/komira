@@ -16,15 +16,6 @@
 #   pandas skin     `python/komira/_frame.py`             the INPUT COLUMN
 #   polars skin     `python/komira/pl.py`                 the INPUT COLUMN
 #   Mojo dataframe  THIS MODULE                           polars' rule
-#   Excel / XLFN    `logical_plan.agg_func_base_name`     — it has no ecosystem
-#                                                          convention to be
-#                                                          faithful to and no
-#                                                          alias syntax to write
-#                                                          one, so it keeps the
-#                                                          plan's declared word
-#                                                          (pinned by
-#                                                          plan_exec_tsv_gate.sh
-#                                                          LEG 11b)
 #
 # ⛔ THIS MODULE EXISTS RATHER THAN A METHOD ON ONE FRAME BECAUSE THE MOJO
 # SURFACE HAS **EIGHT** AGGREGATE TERMINALS, and a rule written at one of them

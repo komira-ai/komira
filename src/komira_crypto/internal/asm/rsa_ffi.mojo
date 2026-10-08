@@ -167,7 +167,7 @@ def _rsa_new() -> _FfiHandle:
     # Returns NULL on OOM (caller MUST check via `Int(ptr) != 0`).
     """
     return external_call[
-        "RSA_new",
+        "komira_awslc_RSA_new",
         _FfiHandle,
     ]()
 
@@ -182,7 +182,7 @@ def _rsa_free(rsa: _FfiHandle):
     """
     if Int(rsa) != 0:
         external_call[
-            "RSA_free", NoneType,
+            "komira_awslc_RSA_free", NoneType,
             _FfiHandle,
         ](rsa)
 
@@ -195,7 +195,7 @@ def _bn_free(bn: _FfiHandle):
     """
     if Int(bn) != 0:
         external_call[
-            "BN_free", NoneType,
+            "komira_awslc_BN_free", NoneType,
             _FfiHandle,
         ](bn)
 
@@ -218,7 +218,7 @@ def _bn_bin2bn_from_span(
     # (canonical pattern; same shape as p256_ffi.mojo).
     var ret_null = _ffi_null()
     return external_call[
-        "BN_bin2bn",
+        "komira_awslc_BN_bin2bn",
         _FfiHandle,
         _FfiByte,   # in
         UInt,                                       # len
@@ -261,17 +261,17 @@ def _evp_md_for_kind(
     """
     if md_kind == MD_SHA256:
         return external_call[
-            "EVP_sha256",
+            "komira_awslc_EVP_sha256",
             _FfiHandle,
         ]()
     if md_kind == MD_SHA384:
         return external_call[
-            "EVP_sha384",
+            "komira_awslc_EVP_sha384",
             _FfiHandle,
         ]()
     if md_kind == MD_SHA512:
         return external_call[
-            "EVP_sha512",
+            "komira_awslc_EVP_sha512",
             _FfiHandle,
         ]()
     return _ffi_null()
@@ -352,7 +352,7 @@ def rsa_pss_verify_ffi(
         # with the caller. d = NULL (no private key for verify path).
         var d_null = _ffi_null()
         var rc_set = external_call[
-            "RSA_set0_key", Int32,
+            "komira_awslc_RSA_set0_key", Int32,
             _FfiHandle,  # rsa
             _FfiHandle,  # n
             _FfiHandle,  # e
@@ -382,7 +382,7 @@ def rsa_pss_verify_ffi(
         var digest_ptr = _span_ptr_mut(digest)
         var sig_ptr = _span_ptr_mut(sig)
         var rc_v = external_call[
-            "RSA_verify_pss_mgf1", Int32,
+            "komira_awslc_RSA_verify_pss_mgf1", Int32,
             _FfiHandle,  # rsa
             _FfiByte,     # hash (digest)
             UInt,                                         # hash_len
@@ -503,7 +503,7 @@ def rsa_pkcs1_sha256_verify_ffi(
         # caller. d = NULL (no private key on the verify path).
         var d_null = _ffi_null()
         var rc_set = external_call[
-            "RSA_set0_key", Int32,
+            "komira_awslc_RSA_set0_key", Int32,
             _FfiHandle,  # rsa
             _FfiHandle,  # n
             _FfiHandle,  # e
@@ -520,7 +520,7 @@ def rsa_pkcs1_sha256_verify_ffi(
         var digest_ptr = _span_ptr_mut(digest)
         var sig_ptr = _span_ptr_mut(sig)
         var rc_v = external_call[
-            "RSA_verify", Int32,
+            "komira_awslc_RSA_verify", Int32,
             Int32,      # hash_nid
             _FfiByte,   # digest
             UInt,       # digest_len
