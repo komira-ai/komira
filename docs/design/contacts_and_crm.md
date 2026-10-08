@@ -74,6 +74,8 @@ What the model takes from this:
 - `owner` is the pair `(issuer, subject)` of the principal, never the subject alone: a service that trusts two
   issuers must not let two different principals with the same `sub` share a book. It is empty for SHARED and DIRECTORY.
 - `modseq` is the book's change counter (see [the change feed](#how-does-the-change-feed-work)).
+- `is_default` is not stored on the book row: it is read from the owner's `contacts_default_books` row, so "at most one
+  default book" is one key row and not a flag that two rows could both carry.
 
 **Card** `{id, book_id, uid, kind, name, nickname, organization, title, emails, phones, addresses, urls, birthday,
 notes, members, vcard_extra, version, modseq, deleted, created_at, updated_at}`
@@ -81,6 +83,8 @@ notes, members, vcard_extra, version, modseq, deleted, created_at, updated_at}`
 - `id` is minted by the server. `uid` is the vCard `UID` when an import carries one, otherwise the server mints
   `urn:uuid:<UUID v4>` (RFC 9553 §2.1.9 recommends that form). `uid` never changes after create.
 - `kind` is `individual`, `org` or `group` (the JSContact names). The other JSContact kinds are refused.
+- A card in the DIRECTORY book is the projection of one directory subject `(issuer, subject)`; the pair is kept in the
+  key table `contacts_directory_subjects`, not on the card, so the card shape is the same in every book.
 - `name` is `{full, given, surname, middle, prefix, suffix}`; `organization` is `{name, units[]}`; `emails`, `phones`
   and `urls` are lists of `{value, label, pref}`; `addresses` is a list of structured addresses with a label and `pref`.
 - `birthday` is text in the RFC 6350 date form, so a date without a year (`--MMDD`) survives. It is not a timestamp:
@@ -105,7 +109,7 @@ exist both in the CRM book and in someone's personal book of a contacts deployme
 | **AccountContact** | `account_id, card_id, role` |
 | **Pipeline** | `id, name, stages (ordered {key, label, kind: open, won, lost}), version` |
 | **Deal** | `id, pipeline_id, stage_key, title, account_id (optional), primary_contact_card_id (optional), amount_minor (int64), currency (ISO 4217 alphabetic code), close_date (a calendar date), owner, external_id, status (active, archived), custom_fields, last_activity_at, version, created_at, updated_at` |
-| **Activity** | `id, kind (note, call, meeting, email_logged, stage_changed), subject_kind (deal, account, card), subject_id, body, actor, occurred_at, system (bool), version` |
+| **Activity** | `id, kind (note, call, meeting, email_logged, stage_changed), subject_kind (deal, account, card), subject_id, body, actor (issuer, subject), occurred_at, system (bool), version` |
 | **CustomFieldDef** | `id, entity_kind (account, deal, card), key, label, type (text, number, date, bool), version` |
 
 - Money is an integer count of the currency's minor unit, with the code beside it. An amount is exact and sortable,
@@ -134,12 +138,13 @@ filters only on the scalar columns below.
 | `contacts_card_uids` (key table) | `(book_id, uid)` | `card_id` |
 | `contacts_default_books` (key table) | `(owner_iss, owner_sub)` | `book_id` |
 | `contacts_book_roles` (key table) | `role` | `book_id` |
+| `contacts_directory_subjects` (key table) | `(subject_iss, subject_sub)` | `card_id` |
 | `crm_accounts` | `id` | `org_card_id`, `owner_iss`, `owner_sub`, `status`, `external_id`, `version` |
 | `crm_account_contacts` (key table) | `(account_id, card_id)` | `role` |
 | `crm_account_org_cards` (key table) | `org_card_id` | `account_id` |
 | `crm_pipelines` | `id` | `version` |
 | `crm_deals` | `id` | `pipeline_id`, `stage_key`, `account_id`, `owner_iss`, `owner_sub`, `status`, `close_date`, `version` |
-| `crm_activities` | `id` | `subject_kind`, `subject_id`, `occurred_at`, `system` |
+| `crm_activities` | `id` | `subject_kind`, `subject_id`, `actor_iss`, `actor_sub`, `occurred_at`, `system`, `version` |
 | `crm_external_ids` (key table) | `(entity_kind, external_id)` | `entity_id` |
 | `crm_custom_field_defs` | `id` | `entity_kind`, `key` |
 | `crm_custom_field_keys` (key table) | `(entity_kind, key)` | `def_id` |
@@ -170,22 +175,47 @@ primary key is that constraint. No table here uses `(komira.db.unique_together)`
 | a `uid` is unique within a book, and the same `uid` may exist in two books | `contacts_card_uids (book_id, uid)` | create: a conflict; import: an update of the existing card (import is an upsert on `uid`) |
 | an owner has at most one default book | `contacts_default_books (owner_iss, owner_sub)` | changing the default is a `conditional_update` of that row |
 | exactly one DIRECTORY book, exactly one CRM book | `contacts_book_roles (role)` with roles `directory` and `crm` | the second create loses and reads the winner |
+| a directory subject has at most one card in the DIRECTORY book | `contacts_directory_subjects (subject_iss, subject_sub)` | the projection updates the existing card |
 | an org card backs at most one account | `crm_account_org_cards (org_card_id)` | a conflict |
 | a card is linked to an account once | `crm_account_contacts (account_id, card_id)` | the link's role is updated |
 | an `external_id` is unique per entity kind, so an account and a deal may carry the same one | `crm_external_ids (entity_kind, external_id)` | CSV import: an update of the existing entity (import is an upsert on `external_id`) |
 | a custom-field key is unique per entity kind | `crm_custom_field_keys (entity_kind, key)` | a conflict |
 
-**Write order and crashes.** On SQLite and Postgres the key row and the row it points to are written in one
-transaction. The Firestore driver has no multi-document transaction, so there the store writes the key row first and
-the row second. A crash between the two leaves a key row whose target does not exist. A writer that loses a key reads
-the target; when the target is absent it deletes the key row with `delete_where` on the tuple and the absent target id,
-and retries the create once. Two writers that both find the orphan both delete it (the delete is idempotent) and both
-create; exactly one create wins.
+**Write order and crashes.** On SQLite and Postgres the row and its key row are written in one transaction. The
+Firestore driver has no multi-document transaction: each operation commits alone, and the driver's `begin` and
+`rollback` keep a journal of the documents created since `begin` and delete them on `rollback`. The store uses the same
+order on every backend, the order that driver is built for:
+
+1. `begin`; write the row; create the key row pointing at it; `commit` when the key create wins, `rollback` when it
+   loses (on Firestore the rollback deletes the row just written).
+2. **A row whose uniqueness is held by a key table is live only while its key row points back at it.** Every read
+   that returns such a row (by id, by `uid`, in a list) checks the key row and skips a row the key does not name. On
+   SQLite and Postgres the check never skips anything, because the two writes commit together; the store runs it on
+   every backend so that one store source serves them all.
+3. A key row is never deleted to make room for a create. A writer that loses a key reads the holder; a create reports
+   a conflict and an import updates the holder.
+
+What a crash or a slow writer leaves behind, and why uniqueness still holds:
+
+- A crash after the row and before the key leaves an orphan row. No key names it, so no read returns it, and the next
+  create of the same tuple wins the key. Orphan rows are kept in v1; deleting them is a later sweep, which must skip
+  rows younger than a stated age, because a row whose key create is still in flight looks the same as an orphan.
+- A slow writer A that has written row X but not yet its key, racing writer B on the same tuple: whichever key create
+  lands first wins. If B wins, A's create loses and its rollback deletes X; if A's process dies first, X is an orphan
+  as above. In neither case do two rows with one tuple become live.
+- Rejected: write the key first and let a loser delete a key whose target is absent. A loser cannot tell a crashed
+  writer from one between its two writes, so it deletes a live writer's key, and both rows end up live with one `uid`.
+  It is one of the mutants the always-hold test below must turn red.
+- Erasure and other deletes remove the key row before the row, so a crash between the two leaves an orphan row, never a
+  key naming a row that is gone.
+
+The cost is one key read per returned row of a guarded table. Rows that no key row guards need no check: activities,
+pipelines, books that hold no role, and deals without an `external_id`.
 
 ## How does the change feed work?
 
 `GET .../changes?since=<modseq>` returns, in `modseq` order, every card of one book changed after `since`, tombstones
-included, and the book's current `modseq`. The CRM has one feed for the dataset (`crm_feed`) covering accounts, deals,
+included, and a cursor for the next call. The CRM has one feed for the dataset (`crm_feed`) covering accounts, deals,
 activities, pipelines and the CRM book's cards. Nothing is pushed: a search index, a knowledge graph or a UI that wants
 the data pulls this feed.
 
@@ -201,6 +231,13 @@ the data pulls this feed.
   Postgres when a test target for it exists), and every other store property on SQLite and the Firestore mock.
 - The CRM's single counter row serializes every CRM write. That is the price of one ordered feed and is acceptable for
   the write rates a CRM sees; it is a limit, not a goal.
+- **The cursor is the highest `modseq` among the returned rows**, and `since` itself when no row is returned. With a
+  page limit the rows are the lowest `modseq`s above `since` and the cursor is the last row's. The cursor is never the
+  counter row's value: a reader that reads the counter after its row query (each statement takes its own snapshot on
+  Postgres READ COMMITTED, and on SQLite outside one transaction) would return a counter that covers a change committed
+  between the two reads and that the rows did not include, and the client would skip it for good. Because changes
+  commit in `modseq` order (above), every change the row query did not see has a `modseq` above every row it did see,
+  so it is above the cursor.
 - Tombstones are kept in v1. Purging them below a horizon, and answering a `since` below the horizon with "resync from
   scratch", is a later change.
 
@@ -223,7 +260,9 @@ service. Every route maps to one of the three actions, and the service enforces 
 
 - a PERSONAL book and its cards are reachable only by its owner `(issuer, subject)`; anyone else gets 404, not 403, so
   a guessed id does not confirm that the object exists;
-- SHARED books are written only with `admin`;
+- SHARED books of a contacts deployment are written only with `admin`;
+- the CRM book (the book `contacts_book_roles` names under role `crm`) is a SHARED book whose cards are written with
+  the CRM's `write`, like every other CRM object; the admin-only rule above does not apply to it;
 - the DIRECTORY book refuses every write from a caller with 403, `admin` included;
 - CRM objects are readable with `read` and writable with `write`; `owner` is a field to filter on, not a permission;
 - erasure needs `admin`.
@@ -237,12 +276,24 @@ against another kind, or with an empty id, is a defect the recording-authorizati
 An administrator's erase call, `POST /v1/admin/erase {subject: {iss, sub}}`, is idempotent and returns a count per
 table. A second call returns zeros.
 
-- **Contacts** deletes every PERSONAL book owned by `(iss, sub)` with all its cards, tombstones and key rows, the
-  owner's default-book row, and the subject's card in the DIRECTORY book. Cards in other principals' books and in
-  SHARED books are not searched or changed: they are those owners' data.
-- **CRM** keeps the dataset's business records and removes the subject from them: `owner` columns equal to the subject
-  become empty (unowned), and `actor` columns of activities become the fixed value `erased`. Whether erasure should also
-  delete activity bodies the subject wrote is open (see below).
+Each step names the columns it filters on; every one is a scalar column of the table above. Key rows go before the
+rows they guard (see [write order](#how-is-uniqueness-enforced)).
+
+- **Contacts**
+  - books: `contacts_books` where `kind = PERSONAL`, `owner_iss = iss` and `owner_sub = sub`;
+  - for each such book: `contacts_card_uids` where `book_id` is the book, then `contacts_cards` where `book_id` is the
+    book (cards and tombstones), then the book row;
+  - the default-book row: `contacts_default_books` by its key `(iss, sub)`;
+  - the directory card: `contacts_directory_subjects` by its key `(iss, sub)` gives `card_id`; the key row, then the
+    card's `contacts_card_uids` row, then the card row are deleted.
+  Cards in other principals' books and in SHARED books are not searched or changed: they are those owners' data.
+- **CRM** keeps the dataset's business records and removes the subject from them:
+  - `crm_accounts` and `crm_deals` where `owner_iss = iss` and `owner_sub = sub`: both owner columns become empty
+    (unowned);
+  - `crm_activities` where `actor_iss = iss` and `actor_sub = sub`: `actor_iss` becomes empty and `actor_sub` the fixed
+    value `erased`.
+  Each rewrite is a write like any other: it bumps `version` and the `crm_feed` counter, so a consumer of the feed sees
+  it. Whether erasure should also delete activity bodies the subject wrote is open (see below).
 - A directory entry with `active = false` (SCIM, RFC 7643 §4.1.1) is not erasure. SCIM `active` is often a reversible
   suspension, so it only disables access: the subject's requests get 403 and their card leaves the DIRECTORY book, and
   their PERSONAL rows stay until an erase call.
@@ -253,7 +304,7 @@ table. A second call returns zeros.
 |---|---|---|---|---|
 | `id` | none (server id) | none | `id` | `identifier` |
 | `uid` | `uid` (§2.1.9) | `UID` (§6.7.6) | none | none |
-| `kind` (`individual`, `org`, `group`) | `kind` (§2.1.4), a subset | `KIND` (§6.1.4) | none (always a person) | `contactType` (person, organization); groups are `CNGroup` |
+| `kind` (`individual`, `org`, `group`) | `kind` (§2.1.4), a subset | `KIND` (§6.1.4) | none (no kind field; an organization is a contact with only `companyName`) | `contactType` (person, organization); groups are `CNGroup` |
 | `name.full` | `name.full` (§2.2.1) | `FN` (§6.2.1) | `displayName` | none (formatted on the device) |
 | `name.given`, `surname`, `middle` | `name.components` of kind `given`, `surname`, `given2` | `N` (§6.2.2) components 2, 1, 3 | `givenName`, `surname`, `middleName` | `givenName`, `familyName`, `middleName` |
 | `name.prefix`, `suffix` | components of kind `title`, `credential` | `N` components 4, 5 | `title`, `generation` | `namePrefix`, `nameSuffix` |
@@ -290,8 +341,16 @@ Each rule names the test the implementing change must carry and the mutant that 
   the version guard from `conditional_update`.
 - **`modseq` strictly increases within a book across creates, updates and deletes, and a delete leaves a tombstone in
   the feed.** Mutants: stamp `modseq` outside the write transaction; skip the bump on delete.
-- **An orphan key row is reclaimed once and only once.** A seeded orphan (a key row with no target) is replaced by the
-  next create; two racing creates over an orphan yield one winner. Mutant: retry without deleting the orphan.
+- **One live row per unique tuple, with a writer paused between its two writes.** Over a `Database` wrapper that can
+  pause a writer after a named operation, on SQLite and the Firestore mock: writer A writes card X with `uid` U and is
+  paused before its key create; writer B creates a card with `uid` U and wins; A resumes, loses and rolls back. The
+  book then lists exactly one card with `uid` U and `get` by `uid` returns B's. A second case kills A at the pause:
+  X is returned by no read, and the next create of U wins. Mutants: a read that skips the back-pointer check (two
+  cards with U listed); the key-first order with a loser that deletes a key whose target is absent (A's late row and
+  B's both live).
+- **The feed cursor never passes an unseen change.** A writer commits between the reader's row query and the building
+  of its response; the next call with the returned cursor returns that change. Mutant: return the book's counter read
+  after the row query.
 - **A stage change and its `stage_changed` activity commit together.** A fault injected between them leaves neither.
   Mutant: write them in two transactions.
 - **An `external_id` is unique per entity kind.** An account and a deal with one `external_id` both insert; two accounts
@@ -304,9 +363,12 @@ Each rule names the test the implementing change must carry and the mutant that 
 - **Every route asks for the action and resource the route table declares.** A recording `AuthzPort` asserts the
   action, kind and id per route. Mutant: one route that skips the check.
 - **The DIRECTORY book refuses every caller's write, `admin` included.** Mutant: drop the read-only guard.
+- **The CRM book is written with `write`, other SHARED books only with `admin`.** A principal allowed `write` and not
+  `admin` adds a card to the CRM book, and gets 403 writing a SHARED book of a contacts deployment. Mutants: apply the
+  admin-only rule to the CRM book; drop it for the other SHARED books.
 - **Erasure removes every row of the subject in every declared table and nothing else.** A closed-world test seeds
   every table for two subjects, erases one, and compares the full table contents. Mutants: skip one table; delete by
-  `sub` without `iss`.
+  `sub` without `iss`; skip the `contacts_directory_subjects` lookup.
 - **`active = false` disables and does not delete.** Mutants: erase on `active = false`; skip the disable.
 
 ## What are its limits and open questions?
@@ -314,6 +376,7 @@ Each rule names the test the implementing change must carry and the mutant that 
 - **Limit: no change feed on a backend without multi-statement transactions** (see the change feed). Running the CRM
   or the contacts feed on Firestore needs a watermark design that is not part of this document.
 - **Limit: one ordered CRM feed serializes CRM writes.**
+- **Limit: orphan rows stay until a sweep exists** (see write order); the sweep needs an age guard.
 - **Limit: no proven vendor export fixtures.** What Outlook and Apple actually write into a `.vcf` (vCard 2.1, 3.0 or
   4.0, and which extensions) is not established here; the vCard conformance package carries synthetic fixtures until
   real exports are captured.
