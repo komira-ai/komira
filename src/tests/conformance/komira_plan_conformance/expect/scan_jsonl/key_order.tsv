@@ -1,0 +1,13 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: scan_key_order holds scan_rows' four rows with each line's
+# members in another order. Members bind to columns by name whatever their
+# order (§13.8), so the rows equal explicit_null_and_empty's: null is NULL
+# and "" is '' (§7.17, §7.12). The columns come out in the declared order,
+# id x s (§13.1). No sort: compared as a multiset (§4.8).
+id:int64	x:int64?	s:string?
+1	10	a
+2	\N	
+3	30	\N
+4	-5	d

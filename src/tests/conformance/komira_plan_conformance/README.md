@@ -14,7 +14,11 @@ datasets.mojo             the datasets and their schemas
 cases_<shard>.mojo        one shard's plans, built with komira_plan_ir factories
 registry.mojo             the shards, and the cases each one registers
 corpus.mojo               the checks test_corpus runs
-datasets/<name>.jsonl     hand-written inputs, one JSON object per line
+oracle_checks.mojo        rows tied to an oracle file; the Avro header schema
+datasets/<name>.jsonl     inputs, one JSON object per line (hand-written;
+                          weather.jsonl is Apache Avro's weather.json, staged)
+inputs/avro/              Apache Avro's four weather .avro files, staged
+                          from third_party/apache-avro by BUCK
 expect/<shard>/<id>.tsv   expected result, canonical text (komira_plan_harness)
 expect/<shard>/<id>.err   expected refusal
 ```
@@ -33,6 +37,8 @@ expect/<shard>/<id>.err   expected refusal
 | `project_arith` | integer `+ - *` with NULL operands, none near overflow; BIN_DIV truncating and BIN_MOD taking the dividend's sign, for every sign pair; the identity a = (a / b) * b + a % b; a zero divisor, in a column and as a literal, answering NULL, and a NULL operand answering NULL before the divisor is checked; float division by zero giving inf, -inf and NaN, and NaN and inf carried through `+ - *`, with NULL dominating NaN. Both operands always have one type: mixed arithmetic is §8.9, undecided | §4.8, §5.0 to §5.3, §5.5 to §5.7, §8.9, §8.10, §8.19 |
 | `distinct_union` | DISTINCT with NULLs equal and strings equal only byte for byte; DISTINCT over -0.0 and 0.0 (counted: §2.6 leaves the representative open) and over NaN, inf and NULL; UNION ALL keeping duplicates; UNION as DISTINCT over UNION ALL; UNION ALL and UNION with an empty input, and of two empty inputs. Every UNION's inputs have identical names and types (§11.4); no INTERSECT or EXCEPT (§11.3, undecided) | §1.2, §2.1, §2.3, §2.4, §2.6, §4.6, §4.8, §5.0, §5.6, §7.14, §8.6, §11.1, §11.2, §11.4, §11.6 |
 | `string` | length in code points against strlen and bit_length in bytes over 1- to 4-byte characters; CONCAT skipping NULLs; CONCAT_WS with a NULL argument, a NULL separator and ''; LIKE's `%` and `_` (one code point), case-sensitive, with a NULL subject, as a value and a filter; UPPER and LOWER by simple Unicode mapping; comparison by bytes with no padding; '' against NULL as a value and a grouping key. No SUBSTRING (no item), no regular expressions | §1.2, §2.4, §4.6, §4.8, §7.1, §7.2, §7.4, §7.6, §7.9, §7.12, §7.14, §8.6, §8.8, §8.15, §8.21 |
+| `scan_avro` | the scan node over Apache Avro's four upstream weather files: the output schema (string, int64, int32, none nullable, by §13.4 from the writer schema); a full scan; the same rows from each block codec; a projection to a reordered subset; a filter above the scan; a filter carried by the scan onto a column the projection drops. Expected rows are upstream's weather.json, not komira's output, and test_corpus holds every case's rows to it. Not the encoding (komira_formats_e2e reads these files by value); no NULL (test.Weather has no union); no logical or complex types (§13.5, undecided) | §1.2, §4.8, §13.1, §13.3, §13.4 |
+| `scan_jsonl` | the scan node itself, built in each case (not `datasets.scan`), over hand-written JSON Lines: explicit null and "" in integer and string columns; members bound by name in any order; a missing member as NULL and an undeclared one ignored; a JSON integer read into FLOAT64; a projection reordering columns; filters carried by the scan, one on a dropped column and one on ''; a declared schema more nullable than the file. No nested NULLs (nested types out of scope), mistyped values (§13.7) or repeated keys (§13.9), both undecided; no reader-error cases until an error code is fixed | §1.2, §4.8, §7.12, §7.17, §13.1, §13.3, §13.6, §13.8, §13.10 |
 
 ## Adding a case
 
@@ -89,14 +95,29 @@ Never copy the plan's schema into the expectation.
   value of its column's type, and its schema must equal the plan's root
   output schema. This catches an expectation whose types
   drift from the plan, in either direction.
-- **Datasets.** Each line's members are the declared columns, in order. Each
-  value has the column's JSON kind, and `null` appears only where the column
-  is nullable. Every file under `datasets/` is a registered dataset. This
-  catches a hand edit that changes one side only.
+- **Datasets.** Each line's members are the declared columns, in order (or,
+  for a dataset declared with any member order, each column exactly once;
+  a sparse dataset may omit a nullable column and carry the undeclared
+  members it names). Each value has the column's JSON kind (an int32 value
+  within range), and `null` appears only where the column is nullable.
+  Every file under `datasets/` is a registered dataset. This catches a hand
+  edit that changes one side only, and a narrowing drift of the scan_avro
+  schema against upstream's weather.json (time declared int32); a widening
+  one (temp declared int64) is caught by the Avro header check below.
+- **Oracle.** A case registered `with_rows_from` must expect exactly its
+  oracle file's rows, filtered and projected as the case restates, as a
+  multiset: every scan_avro case against upstream's weather.json. This
+  catches a hand edit to one expected row (22 written 23). Each staged Avro
+  file's header schema (`avro.schema`) must give the declared columns'
+  names, types and nullability by §13.4. This catches a declared schema
+  that drifts from the files in either direction.
+- **Inputs.** Every file a case may name under `inputs/` (`all_inputs`) is
+  staged, and every file staged there is registered. This catches a BUCK
+  edit that drops a staged Avro file, or stages one no case names.
 
 Every problem is reported in one failure, not only the first.
 `test_corpus_checks` plants defects for the partition, file, expectation,
-cell, `.err` and dataset checks. On the wire it plants a build that raises
+cell, `.err`, dataset, input and oracle checks. On the wire it plants a build that raises
 and a plan the admission gate refuses. Three wire legs are not planted,
 because each needs a broken codec rather than a broken case:
 `plan_to_bytes` refusing a plan, `plan_wire_check_values` refusing one, and

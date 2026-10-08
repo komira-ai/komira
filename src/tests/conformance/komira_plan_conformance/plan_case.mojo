@@ -20,10 +20,14 @@
 # tolerance). The expectation file states the same policy in its header, and
 # test_corpus requires the two to agree, so neither can drift alone.
 #
-# A dataset is a hand-written JSON Lines file, datasets/<name>.jsonl, with the
-# schema the cases declare for it. JSON Lines rather than CSV: whether an
-# empty CSV field is NULL is open, and reading a JSON `null` as NULL is what
-# the query-semantics document proposes (§7.13, undecided).
+# A dataset is a JSON Lines file, datasets/<name>.jsonl, with the schema the
+# cases declare for it: written by hand, except `weather`, which is Apache
+# Avro's own weather.json (datasets.mojo says why). JSON Lines rather than
+# CSV: whether an empty CSV field is NULL is open (§7.13, undecided), while
+# JSON `null` reads as NULL and `""` as '' (§7.17).
+#
+# A scan input that is not JSON Lines lives under inputs/ (the upstream Avro
+# files, staged from third_party by BUCK); datasets.mojo registers each one.
 # =============================================================================
 
 from komira_arrow.schema import Schema
@@ -31,12 +35,15 @@ from komira_plan_harness import CanonPolicy
 from komira_plan_ir.logical_plan import LogicalPlan
 from komira_plan_harness.type_text import schema_entry_of_field
 
+from .oracle_checks import RowsFrom
+
 comptime EXPECT_HAND: Int = 0
 comptime EXPECT_ORACLE: Int = 1
 comptime EXPECT_ERROR: Int = 2
 
 comptime EXPECT_DIR = "expect"
 comptime DATASET_DIR = "datasets"
+comptime INPUT_DIR = "inputs"
 
 comptime BuildFn = def () raises thin -> LogicalPlan
 """A case's plan builder: no captures, so the registry is plain data."""
@@ -68,6 +75,9 @@ struct Case(Copyable, Movable):
     var build: BuildFn
     var expect: Int
     var policy: CanonPolicy
+    var rows_from: Optional[RowsFrom]
+    """Set when the expected rows must equal an oracle file's
+    (`oracle_checks.check_rows_from`); see `with_rows_from`."""
 
     def __init__(
         out self,
@@ -82,6 +92,12 @@ struct Case(Copyable, Movable):
         self.build = build
         self.expect = expect
         self.policy = policy^
+        self.rows_from = None
+
+    def with_rows_from(var self, var spec: RowsFrom) -> Case:
+        """This case, with its expected rows tied to `spec`'s oracle file."""
+        self.rows_from = spec^
+        return self^
 
     @staticmethod
     def hand(
@@ -111,15 +127,32 @@ struct Case(Copyable, Movable):
 
 
 struct Dataset(Copyable, Movable):
-    """A hand-written input: datasets/<name>.jsonl, one JSON object per line,
-    its members exactly the schema's columns in order."""
+    """An input: datasets/<name>.jsonl, one JSON object per line, its members
+    exactly the schema's columns in order. With `any_member_order`, each line
+    holds every column at most once, in any order (a file that tests a
+    scan's binding by name, §13.8); `missing_ok` lets a line omit a NULLABLE
+    column, and `extra_members` names the undeclared members a line may
+    carry. Both need `any_member_order`."""
 
     var name: String
     var schema: Schema
+    var any_member_order: Bool
+    var missing_ok: Bool
+    var extra_members: List[String]
 
-    def __init__(out self, name: String, var schema: Schema):
+    def __init__(
+        out self,
+        name: String,
+        var schema: Schema,
+        any_member_order: Bool = False,
+        missing_ok: Bool = False,
+        var extra_members: List[String] = List[String](),
+    ):
         self.name = name
         self.schema = schema^
+        self.any_member_order = any_member_order
+        self.missing_ok = missing_ok
+        self.extra_members = extra_members^
 
     def path(self) -> String:
         return String(DATASET_DIR) + "/" + self.name + ".jsonl"

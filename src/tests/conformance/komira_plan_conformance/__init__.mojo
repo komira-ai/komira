@@ -6,10 +6,13 @@ query-semantics document (or, later, by an independent oracle). Nothing here
 executes a plan yet; test_corpus checks every case through the plan wire and
 against its expectation's schema. Modules:
   - plan_case.mojo: `Case`, `Dataset`, the expectation kinds, the .err format;
-  - datasets.mojo : the hand-written JSON Lines inputs and their schemas;
+  - datasets.mojo : the JSON Lines inputs and their schemas, and the
+    registered files under inputs/ (the upstream Avro files);
   - cases_<shard>.mojo : one shard's plans;
   - registry.mojo : the shards and what each registers;
-  - corpus.mojo   : the checks, gathered by `check_corpus`.
+  - corpus.mojo   : the checks, gathered by `check_corpus`;
+  - oracle_checks.mojo : expected rows tied to an oracle file, and the
+    Avro header schema.
 """
 
 from .plan_case import (
@@ -18,6 +21,7 @@ from .plan_case import (
     EXPECT_ERROR,
     EXPECT_HAND,
     EXPECT_ORACLE,
+    INPUT_DIR,
     BuildFn,
     Case,
     Dataset,
@@ -33,12 +37,15 @@ from .corpus import (
     check_dataset_files,
     check_expectation,
     check_files,
+    check_input_files,
     check_partition,
     check_schema,
     check_wire,
     list_expect_files,
+    list_input_files,
     require_corpus,
     schema_entries,
 )
-from .datasets import all_datasets
+from .datasets import all_datasets, all_inputs
+from .oracle_checks import RowsFrom, check_avro_schema, check_rows_from
 from .registry import Registered, registered_cases, shard_cases, shard_names

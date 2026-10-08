@@ -30,6 +30,11 @@
 #                     a question for review, never a cue to copy the plan.
 #   check_dataset     a dataset file matches the schema its cases declare;
 #                     every file under datasets/ is a registered dataset.
+#   check_input_files every registered file under inputs/ (the Avro files) is
+#                     staged, and every staged file there is registered.
+#   oracle_checks     a case with `rows_from` expects exactly its oracle
+#                     file's rows (check_rows_from); each staged Avro file's
+#                     header schema is the declared one (check_avro_schema).
 # =============================================================================
 
 from std.os import listdir
@@ -53,6 +58,7 @@ from komira_plan_wire import (
 from .plan_case import (
     DATASET_DIR,
     EXPECT_DIR,
+    INPUT_DIR,
     EXPECT_ERROR,
     EXPECT_HAND,
     EXPECT_ORACLE,
@@ -61,7 +67,8 @@ from .plan_case import (
     expect_kind_name,
     parse_err,
 )
-from .datasets import all_datasets
+from .datasets import all_datasets, all_inputs, avro_codecs, avro_input, weather_schema
+from .oracle_checks import check_avro_schema, check_rows_from
 from .registry import Registered, registered_cases, shard_names
 
 
@@ -478,12 +485,20 @@ def check_expectation(c: Case, text: String, plan: LogicalPlan) -> List[String]:
 
 
 def _value_fits(
-    t: ArrowType, v_is_int: Bool, v_is_finite_number: Bool, v_is_bool: Bool, v_is_string: Bool
+    t: ArrowType,
+    v_is_int: Bool,
+    v_is_int32: Bool,
+    v_is_finite_number: Bool,
+    v_is_bool: Bool,
+    v_is_string: Bool,
 ) raises -> Bool:
     if t == ArrowType.BOOL:
         return v_is_bool
     if t == ArrowType.INT64:
         return v_is_int
+    if t == ArrowType.INT32:
+        # An integral JSON number in [-2^31, 2^31 - 1].
+        return v_is_int32
     if t == ArrowType.FLOAT64:
         # A JSON number whose value is a finite float64. JSON cannot spell
         # NaN or infinity, but `1e400` is valid JSON and reads as +inf, so a
@@ -494,10 +509,19 @@ def _value_fits(
     raise Error("no JSON check for column type " + arrow_type_name(t))
 
 
+def _column_index(schema: Schema, name: String) -> Int:
+    for i in range(schema.num_columns()):
+        if schema.field_name(i) == name:
+            return i
+    return -1
+
+
 def check_dataset(ds: Dataset, text: String) -> List[String]:
     """Every line is one JSON object whose members are the schema's columns
-    in order, each value of the column's JSON kind or `null` where the column
-    is nullable."""
+    in order (with `any_member_order`: each column exactly once, in any
+    order; `missing_ok` excuses a missing nullable column, `extra_members`
+    names the undeclared members allowed, each at most once), each value of
+    the column's JSON kind or `null` where the column is nullable."""
     var problems = List[String]()
     var line_no = 0
     var where = String("dataset: ") + ds.path()
@@ -512,14 +536,42 @@ def check_dataset(ds: Dataset, text: String) -> List[String]:
             if not obj.is_object():
                 problems.append(at + "not a JSON object")
                 continue
-            if obj.num_members() != ds.schema.num_columns():
+            var sparse = ds.missing_ok or len(ds.extra_members) > 0
+            if not sparse and obj.num_members() != ds.schema.num_columns():
                 problems.append(
                     at + String(obj.num_members()) + " members, the schema "
                     + String(ds.schema.num_columns()) + " columns"
                 )
                 continue
+            var before = len(problems)
+            var seen = List[Bool](length=ds.schema.num_columns(), fill=False)
+            var extra_seen = List[String]()
             for i in range(obj.num_members()):
-                var name = ds.schema.field_name(i)
+                var col = i
+                if ds.any_member_order:
+                    col = _column_index(ds.schema, obj.key_at(i))
+                    if col < 0:
+                        if _contains(ds.extra_members, obj.key_at(i)):
+                            if _contains(extra_seen, obj.key_at(i)):
+                                problems.append(
+                                    at + "member '" + obj.key_at(i)
+                                    + "' appears twice"
+                                )
+                            extra_seen.append(obj.key_at(i))
+                            continue
+                        problems.append(
+                            at + "member '" + obj.key_at(i)
+                            + "' is not a column of the schema"
+                        )
+                        continue
+                    if seen[col]:
+                        problems.append(
+                            at + "member '" + obj.key_at(i)
+                            + "' appears twice"
+                        )
+                        continue
+                    seen[col] = True
+                var name = ds.schema.field_name(col)
                 if obj.key_at(i) != name:
                     problems.append(
                         at + "member " + String(i) + " is '" + obj.key_at(i)
@@ -528,10 +580,10 @@ def check_dataset(ds: Dataset, text: String) -> List[String]:
                     continue
                 var v = obj.value_at(i)
                 if v.is_null():
-                    if not ds.schema.field_nullable(i):
+                    if not ds.schema.field_nullable(col):
                         problems.append(at + "'" + name + "' is null in a non-nullable column")
                     continue
-                var t = ds.schema.field_arrow_type(i)
+                var t = ds.schema.field_arrow_type(col)
                 var finite = False
                 if v.is_number():
                     try:
@@ -539,16 +591,40 @@ def check_dataset(ds: Dataset, text: String) -> List[String]:
                         finite = (x - x) == 0.0  # NaN for inf and NaN
                     except:
                         finite = False
+                var int32 = False
+                if v.is_integral_number():
+                    try:
+                        var n = v.as_int64()
+                        int32 = n >= Int64(-2147483648) and n <= Int64(2147483647)
+                    except:
+                        int32 = False
                 if not _value_fits(
-                    t, v.is_integral_number(), finite, v.is_bool(), v.is_string()
+                    t, v.is_integral_number(), int32, finite, v.is_bool(),
+                    v.is_string(),
                 ):
                     var why = String(", not a ")
                     if t == ArrowType.FLOAT64 and v.is_number():
                         why = String(", not a finite ")
+                    elif t == ArrowType.INT32 and v.is_integral_number():
+                        why = String(", not in the range of ")
                     problems.append(
                         at + "'" + name + "' is " + v.serialize() + why
                         + arrow_type_name(t)
                     )
+            # A column no member named: allowed only for a nullable column of
+            # a `missing_ok` dataset (it reads as NULL, §13.8). Checked only
+            # on a line with no other problem, which already explains it.
+            if ds.any_member_order and len(problems) == before:
+                for c in range(ds.schema.num_columns()):
+                    if seen[c]:
+                        continue
+                    if not ds.missing_ok:
+                        problems.append(at + "column '" + ds.schema.field_name(c) + "' is missing")
+                    elif not ds.schema.field_nullable(c):
+                        problems.append(
+                            at + "column '" + ds.schema.field_name(c)
+                            + "' is missing, and it is not nullable"
+                        )
         except e:
             problems.append(at + String(e))
     return problems^
@@ -573,6 +649,39 @@ def check_dataset_files(datasets: List[Dataset], files: List[String]) -> List[St
                 + " is an orphan: no registered dataset names it"
             )
     return problems^
+
+
+def check_input_files(inputs: List[String], files: List[String]) -> List[String]:
+    """`inputs` are the registered paths under inputs/ (`all_inputs`),
+    `files` every file found there (`list_input_files`). Each input must be
+    staged, and each staged file registered."""
+    var problems = List[String]()
+    for i in inputs:
+        if not _contains(files, i):
+            problems.append("input: " + i + " is missing")
+    for f in files:
+        if not _contains(inputs, f):
+            problems.append(
+                "input: " + f + " is an orphan: no registered input names it"
+            )
+    return problems^
+
+
+def list_input_files(root: String) raises -> List[String]:
+    """Every file under <root>/inputs, as `inputs/<format>/<name>` (a file
+    directly under inputs/ as `inputs/<name>`)."""
+    var res = List[String]()
+    var top = root + "/" + INPUT_DIR
+    if not exists(top):
+        return res^
+    for d in listdir(top):
+        var dir_path = top + "/" + d
+        if isdir(dir_path):
+            for f in listdir(dir_path):
+                res.append(String(INPUT_DIR) + "/" + d + "/" + f)
+        else:
+            res.append(String(INPUT_DIR) + "/" + d)
+    return res^
 
 
 # -----------------------------------------------------------------------------
@@ -610,8 +719,19 @@ def check_corpus(root: String) raises -> List[String]:
         var path = root + "/" + c.expect_file()
         if not exists(path):
             continue  # reported by check_files
-        for p in check_expectation(c, Path(path).read_text(), plan.value()):
+        var text = Path(path).read_text()
+        for p in check_expectation(c, text, plan.value()):
             problems.append(p)
+        if c.rows_from:
+            ref spec = c.rows_from.value()
+            var oracle = root + "/" + spec.dataset_path
+            if not exists(oracle):
+                problems.append(
+                    "oracle: " + c.label() + ": " + spec.dataset_path + " is not staged"
+                )
+                continue
+            for p in check_rows_from(c.label(), spec, text, Path(oracle).read_text()):
+                problems.append(p)
 
     var datasets = all_datasets()
     var ds_files = List[String]()
@@ -623,6 +743,16 @@ def check_corpus(root: String) raises -> List[String]:
         var path = root + "/" + d.path()
         if exists(path):
             for p in check_dataset(d, Path(path).read_text()):
+                problems.append(p)
+    for p in check_input_files(all_inputs(), list_input_files(root)):
+        problems.append(p)
+    # Each staged weather file's header schema is the one scan_avro declares.
+    for codec in avro_codecs():
+        var rel = avro_input(codec)
+        if exists(root + "/" + rel):
+            for p in check_avro_schema(
+                rel, Path(root + "/" + rel).read_bytes(), weather_schema()
+            ):
                 problems.append(p)
     return problems^
 

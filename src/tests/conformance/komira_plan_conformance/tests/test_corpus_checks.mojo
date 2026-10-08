@@ -20,7 +20,18 @@
 #   .err files: the accepted form and each refusal;
 #   datasets: a wrong member, a wrong kind, a null in a non-nullable column,
 #     a string, a bool and an out-of-range number (1e400, -1e400) in a
-#     float64 column, a missing and an orphan dataset file.
+#     float64 column, values past either end of int32 and a non-integral
+#     one in an int32 column, a missing and an orphan dataset file; for a
+#     dataset with any member order, an unknown and a repeated member (and
+#     the same permuted line refused by an ordered dataset);
+#   inputs: a registered input that is not staged, and an orphan;
+#   sparse datasets: a missing nullable column passes, a missing
+#     non-nullable one, an undeclared member not named, and a named one
+#     twice are refused;
+#   oracle rows: one changed cell (22 for 23), a missing and an extra row,
+#     a filter boundary row (temp 0) kept, and columns in another order;
+#   Avro header: a widened and a narrowed type, a union against a
+#     non-nullable column, a renamed field, an unmodelled type, no magic.
 #
 # NOT planted here, because each needs a broken codec rather than a broken
 # case: plan_to_bytes refusing a plan, plan_wire_check_values refusing one,
@@ -34,8 +45,11 @@ from komira_plan_expr.expr import BIN_EQ, Expr
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_harness import CanonPolicy, parse_canon
 from komira_plan_ir.logical_plan import LogicalPlan
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_plan_conformance import (
     Case,
+    Dataset,
     Registered,
     all_datasets,
     check_cells,
@@ -43,12 +57,28 @@ from komira_plan_conformance import (
     check_dataset_files,
     check_expectation,
     check_files,
+    check_input_files,
     check_partition,
     check_schema,
     check_wire,
     parse_err,
 )
-from komira_plan_conformance.datasets import bool_pairs, ints_nullable, scan, sort_rows
+from komira_plan_conformance.datasets import (
+    all_inputs,
+    avro_input,
+    bool_pairs,
+    ints_nullable,
+    scan,
+    scan_key_order,
+    scan_rows,
+    scan_sparse,
+    sort_rows,
+)
+from komira_plan_conformance.oracle_checks import (
+    RowsFrom,
+    check_avro_schema,
+    check_rows_from,
+)
 
 
 def _ints() raises -> LogicalPlan:
@@ -353,12 +383,206 @@ def test_dataset_files() raises:
             String("stat_rows.jsonl"), String("avg_rows.jsonl"),
             String("div_pairs.jsonl"), String("float_pairs.jsonl"),
             String("set_left.jsonl"), String("set_right.jsonl"),
-            String("str_rows.jsonl"), String("extra.csv"),
+            String("str_rows.jsonl"), String("scan_rows.jsonl"),
+            String("scan_key_order.jsonl"), String("scan_sparse.jsonl"),
+            String("scan_numbers.jsonl"), String("weather.jsonl"),
+            String("extra.csv"),
         ],
     )
     assert_true(_any_contains(p, "datasets/ints_nullable.jsonl is missing"))
     assert_true(_any_contains(p, "datasets/extra.csv is an orphan"))
     assert_equal(len(p), 2)
+
+
+def _weather_like() -> Schema:
+    """test.Weather's columns, built here rather than taken from
+    datasets.weather_schema, so a drift planted there is caught by
+    test_corpus, not hidden behind these tests."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("station", ArrowType.STRING, False))
+    sb.add_field(Field("time", ArrowType.INT64, False))
+    sb.add_field(Field("temp", ArrowType.INT32, False))
+    return sb.build()
+
+
+def test_dataset_int32_column() raises:
+    # temp is int32: both ends of the range pass; one past either
+    # end, a fraction and a string are refused.
+    assert_equal(
+        len(check_dataset(
+            Dataset("w", _weather_like()),
+            '{"station": "a", "time": -1, "temp": -2147483648}\n'
+            + '{"station": "b", "time": 1, "temp": 2147483647}\n',
+        )),
+        0,
+    )
+    var p = check_dataset(
+        Dataset("w", _weather_like()),
+        '{"station": "a", "time": 1, "temp": 2147483648}\n'
+        + '{"station": "a", "time": 1, "temp": -2147483649}\n'
+        + '{"station": "a", "time": 1, "temp": 1.0}\n'
+        + '{"station": "a", "time": 1, "temp": "1"}\n',
+    )
+    assert_true(_any_contains(p, ":1: 'temp' is 2147483648, not in the range of int32"))
+    assert_true(_any_contains(p, ":2: 'temp' is -2147483649, not in the range of int32"))
+    assert_true(_any_contains(p, ":3: 'temp' is 1.0, not a int32"))
+    assert_true(_any_contains(p, ":4: 'temp' is \"1\", not a int32"))
+    assert_equal(len(p), 4)
+
+
+def test_dataset_any_member_order() raises:
+    # scan_key_order takes each column once in any order; an unknown member
+    # and a repeated one are refused, and the kind and null checks still
+    # apply by name. scan_rows, the ordered twin, refuses the permuted line.
+    var permuted = String('{"s": "", "id": 2, "x": null}\n')
+    assert_equal(len(check_dataset(scan_key_order(), permuted)), 0)
+    assert_true(
+        _any_contains(check_dataset(scan_rows(), permuted), ":1: member 0 is 's', the schema's column is 'id'")
+    )
+    var p = check_dataset(
+        scan_key_order(),
+        '{"x": 1, "id": 1, "t": "a"}\n{"x": 1, "id": 1, "x": 2}\n'
+        + '{"s": "a", "x": 1, "id": null}\n{"s": 1, "x": 1, "id": 1}\n',
+    )
+    assert_true(_any_contains(p, ":1: member 't' is not a column of the schema"))
+    assert_true(_any_contains(p, ":2: member 'x' appears twice"))
+    assert_true(_any_contains(p, ":3: 'id' is null in a non-nullable column"))
+    assert_true(_any_contains(p, ":4: 's' is 1, not a string"))
+    assert_equal(len(p), 4)
+
+
+def test_input_files() raises:
+    var inputs = all_inputs()
+    assert_equal(len(inputs), 4)
+    var staged = inputs.copy()
+    assert_equal(len(check_input_files(inputs, staged)), 0)
+    _ = staged.pop()
+    staged.append(String("inputs/avro/weather-bzip2.avro"))
+    var p = check_input_files(inputs, staged)
+    assert_true(_any_contains(p, "input: " + inputs[3] + " is missing"))
+    assert_true(_any_contains(p, "input: inputs/avro/weather-bzip2.avro is an orphan"))
+    assert_equal(len(p), 2)
+    with assert_raises(contains="no Avro weather file for codec 'bzip2'"):
+        _ = avro_input("bzip2")
+
+
+def test_dataset_sparse() raises:
+    assert_equal(
+        len(check_dataset(
+            scan_sparse(),
+            '{"id": 1, "x": 10}\n{"id": 2, "s": "b", "note": "extra"}\n'
+            + '{"s": "c", "note": 7, "id": 3, "x": 30}\n',
+        )),
+        0,
+    )
+    var p = check_dataset(
+        scan_sparse(),
+        '{"x": 10}\n{"id": 2, "other": 1}\n{"id": 3, "note": 1, "note": 2}\n',
+    )
+    assert_true(_any_contains(p, ":1: column 'id' is missing, and it is not nullable"))
+    assert_true(_any_contains(p, ":2: member 'other' is not a column of the schema"))
+    assert_true(_any_contains(p, ":3: member 'note' appears twice"))
+    assert_equal(len(p), 3)
+    # A strict any-order dataset still refuses a missing column.
+    assert_true(
+        _any_contains(check_dataset(scan_key_order(), '{"id": 1, "x": 2}\n'), ":1: 2 members, the schema 3 columns")
+    )
+
+
+comptime _WEATHER = (
+    '{"station":"011990-99999","time":-619524000000,"temp":0}\n'
+    + '{"station":"011990-99999","time":-619506000000,"temp":22}\n'
+    + '{"station":"012650-99999","time":-655531200000,"temp":111}\n'
+)
+
+
+def _cols(a: String, b: String) -> List[String]:
+    return [a, b]
+
+
+def test_rows_from_clean_and_filtered() raises:
+    var all = String(_HEAD) + "station:string\ttemp:int32\n" + "011990-99999\t22\n012650-99999\t111\n011990-99999\t0\n"
+    assert_equal(len(check_rows_from("c", RowsFrom("w", _cols("station", "temp")), all, _WEATHER)), 0)
+    # temp > 0 drops the boundary row temp = 0; keeping it is refused.
+    var p = check_rows_from("c", RowsFrom("w", _cols("station", "temp"), "temp", 0), all, _WEATHER)
+    assert_equal(len(p), 1)
+    assert_equal(p[0], "oracle: c: expected row 3 `011990-99999\t0` is not a row of w")
+
+
+def test_rows_from_changed_cell() raises:
+    # 22 written 23: one row the oracle lacks, one oracle row unexpected.
+    var text = String(_HEAD) + "station:string\ttemp:int32\n" + "011990-99999\t0\n011990-99999\t23\n012650-99999\t111\n"
+    var p = check_rows_from("scan_avro/full_scan", RowsFrom("datasets/weather.jsonl", _cols("station", "temp")), text, _WEATHER)
+    assert_true(_any_contains(p, "oracle: scan_avro/full_scan: expected row 2 `011990-99999\t23` is not a row of datasets/weather.jsonl"))
+    assert_true(_any_contains(p, "the row `011990-99999\t22` of datasets/weather.jsonl is missing from the expectation"))
+    assert_equal(len(p), 2)
+
+
+def test_rows_from_missing_extra_and_columns() raises:
+    var spec = RowsFrom("w", _cols("station", "temp"))
+    var short = String(_HEAD) + "station:string\ttemp:int32\n011990-99999\t0\n011990-99999\t22\n"
+    assert_true(_any_contains(check_rows_from("c", spec, short, _WEATHER), "the row `012650-99999\t111` of w is missing"))
+    var extra = short + "012650-99999\t111\n012650-99999\t111\n"
+    assert_true(_any_contains(check_rows_from("c", spec, extra, _WEATHER), "expected row 4 `012650-99999\t111` is not a row of w"))
+    var swapped = String(_HEAD) + "temp:int32\tstation:string\n"
+    assert_true(_any_contains(check_rows_from("c", spec, swapped, _WEATHER), "the expectation's columns are [temp, station], the oracle's [station, temp]"))
+
+
+def _put_zz(mut res: List[UInt8], n: Int):
+    """Append `n` as an Avro zig-zag varint."""
+    var z = UInt64((n << 1) ^ (n >> 63))
+    while z >= 0x80:
+        res.append(UInt8((z & 0x7F) | 0x80))
+        z >>= 7
+    res.append(UInt8(z))
+
+
+def _ocf_header(schema_json: String) -> List[UInt8]:
+    """The header of an Avro object container file: magic, a one-entry
+    metadata map holding `avro.schema`, the map's end, a sync marker."""
+    var res: List[UInt8] = [0x4F, 0x62, 0x6A, 0x01]
+    _put_zz(res, 1)
+    var key = String("avro.schema")
+    _put_zz(res, key.byte_length())
+    for b in key.as_bytes():
+        res.append(b)
+    _put_zz(res, schema_json.byte_length())
+    for b in schema_json.as_bytes():
+        res.append(b)
+    _put_zz(res, 0)
+    for _ in range(16):
+        res.append(0xAB)
+    return res^
+
+
+def _weather_avsc(station: String, time: String, temp: String, temp_name: String = "temp") -> String:
+    return (
+        '{"type":"record","name":"Weather","namespace":"test","fields":['
+        + '{"name":"station","type":' + station + '},'
+        + '{"name":"time","type":' + time + '},'
+        + '{"name":"' + temp_name + '","type":' + temp + '}]}'
+    )
+
+
+def test_avro_schema_clean() raises:
+    var h = _ocf_header(_weather_avsc('"string"', '"long"', '"int"'))
+    assert_equal(len(check_avro_schema("f", h, _weather_like())), 0)
+
+
+def test_avro_schema_defects() raises:
+    var widened = check_avro_schema("f", _ocf_header(_weather_avsc('"string"', '"long"', '"long"')), _weather_like())
+    assert_equal(len(widened), 1)
+    assert_equal(widened[0], "avro: f: field 'temp' is int64 in the header, the declared column int32")
+    var narrowed = check_avro_schema("f", _ocf_header(_weather_avsc('"string"', '"int"', '"int"')), _weather_like())
+    assert_true(_any_contains(narrowed, "field 'time' is int32 in the header, the declared column int64"))
+    var union = check_avro_schema("f", _ocf_header(_weather_avsc('["null","string"]', '"long"', '"int"')), _weather_like())
+    assert_true(_any_contains(union, "field 'station' is string? in the header, the declared column string"))
+    var renamed = check_avro_schema("f", _ocf_header(_weather_avsc('"string"', '"long"', '"int"', "tmp")), _weather_like())
+    assert_true(_any_contains(renamed, "field 2 is 'tmp', the declared column is 'temp'"))
+    var unmodelled = check_avro_schema("f", _ocf_header(_weather_avsc('"string"', '"double"', '"int"')), _weather_like())
+    assert_true(_any_contains(unmodelled, "field 1 'time' has type \"double\", which this check does not model"))
+    var not_avro: List[UInt8] = [0x50, 0x41, 0x52, 0x31]
+    assert_true(_any_contains(check_avro_schema("f", not_avro, _weather_like()), "not an Avro object container file"))
 
 
 def main() raises:

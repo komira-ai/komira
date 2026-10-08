@@ -20,6 +20,8 @@ from .cases_distinct_union import cases as distinct_union_cases
 from .cases_filter_3vl import cases as filter_3vl_cases
 from .cases_join_residual_nullkeys import cases as join_residual_nullkeys_cases
 from .cases_project_arith import cases as project_arith_cases
+from .cases_scan_avro import cases as scan_avro_cases
+from .cases_scan_jsonl import cases as scan_jsonl_cases
 from .cases_sort_topn_limit import cases as sort_topn_limit_cases
 from .cases_string import cases as string_cases
 from .cases_window_rank import cases as window_rank_cases
@@ -37,6 +39,8 @@ def shard_names() -> List[String]:
         String("project_arith"),
         String("distinct_union"),
         String("string"),
+        String("scan_avro"),
+        String("scan_jsonl"),
     ]
 
 
@@ -61,6 +65,10 @@ def shard_cases(name: String) raises -> List[Case]:
         return distinct_union_cases()
     if name == "string":
         return string_cases()
+    if name == "scan_avro":
+        return scan_avro_cases()
+    if name == "scan_jsonl":
+        return scan_jsonl_cases()
     raise Error("plan_conformance: no shard named '" + name + "'")
 
 

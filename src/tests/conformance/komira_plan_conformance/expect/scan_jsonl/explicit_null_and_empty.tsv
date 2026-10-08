@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: scan_rows as written: JSON null is NULL and JSON "" is ''
+# (§7.17), and '' is a value, not NULL (§7.12). So x is NULL on id 2, s is
+# NULL on id 3, and s is '' on id 2. A JSON integer reads into INT64 and a
+# string into STRING (§13.6). No projection: the declared columns in order
+# (§13.1). No sort: compared as a multiset (§4.8).
+# Types: the declared schema, which is the file's.
+id:int64	x:int64?	s:string?
+1	10	a
+2	\N	
+3	30	\N
+4	-5	d

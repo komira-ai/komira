@@ -1,0 +1,12 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §13.3: the scan's filter x > 0 is a Filter above the scan,
+# on the source columns, whether or not komira.json prunes with it (it
+# declines every predicate). §1.2: it is TRUE for x = 10 (id 1) and x = 30
+# (id 3), FALSE for x = -5 (id 4) and NULL for the NULL x of id 2 (§7.17);
+# only the TRUE rows are kept. The projection then keeps only id (§13.1).
+# No sort: compared as a multiset (§4.8).
+id:int64
+1
+3

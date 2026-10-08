@@ -1,14 +1,16 @@
 # =============================================================================
-# komira_plan_conformance/datasets.mojo -- the hand-written inputs.
+# komira_plan_conformance/datasets.mojo -- the scan inputs and their schemas.
 # =============================================================================
 #
-# Each dataset is datasets/<name>.jsonl, written by hand, never by a komira
-# writer: a reader or writer defect must not be able to shape both the input
-# and the answer. The schema here is what every case scanning the file
-# declares; test_corpus checks the file against it (member names in order,
-# each value's JSON kind against the column type, `null` only where the
-# column is nullable), so a hand edit to one side cannot leave the other
-# behind.
+# Each dataset is datasets/<name>.jsonl, written by hand (or, for weather,
+# by upstream Apache Avro), never by a komira writer: a reader or writer
+# defect must not be able to shape both the input and the answer. The schema
+# here is what every case scanning the file declares; test_corpus checks the
+# file against it (member names in order, or in any order for a dataset with
+# `any_member_order`, with the missing and extra members a sparse dataset
+# allows; each value's JSON kind against the column type, an int32 value in
+# range; `null` only where the column is nullable), so a hand
+# edit to one side cannot leave the other behind.
 #
 #   bool_pairs     id, a, b: every pair of {true, false, null}, nine rows.
 #   ints_nullable  id, x: x = 1, 2, null, 5.
@@ -69,6 +71,32 @@
 #                  U+00C4 U+00D6, NULL, U+FF21 (fullwidth A: EF BC A1,
 #                  below U+1F600's F0 by bytes, above its UTF-16 lead
 #                  surrogate D83D).
+#   scan_rows      id, x, s: (1, 10, "a"), (2, null, ""), (3, 30, null),
+#                  (4, -5, "d"): an explicit null in an integer and in a
+#                  string column, and "" beside null. Scanned only by
+#                  scan_jsonl, which builds its scans itself.
+#   scan_key_order the same four rows as scan_rows, each line's members in
+#                  a different order (id x s, s id x, x s id, x id s), with
+#                  `any_member_order`: every column exactly once per line,
+#                  in any order.
+#   scan_sparse    id, x, s, with `any_member_order`, `missing_ok` and the
+#                  extra member `note`: {"id": 1, "x": 10} (s missing),
+#                  {"id": 2, "s": "b", "note": "extra"} (x missing, an
+#                  undeclared member), {"s": "c", "note": 7, "id": 3, "x":
+#                  30} (every column, out of order, and `note` again).
+#   scan_numbers   id, f (float64, nullable): f = 1 (a JSON integer), 2.5,
+#                  null, -3 (a negative JSON integer).
+#   weather        station, time, temp: NOT hand-written. BUCK stages Apache
+#                  Avro's share/test/data/weather.json here (pinned by
+#                  sha256 in third_party/apache-avro), upstream's own
+#                  statement of the five records in its four weather .avro
+#                  files. No case scans it; it is registered so test_corpus
+#                  checks the schema scan_avro declares (`weather_schema`)
+#                  against upstream's statement, member names, order and
+#                  kinds, temp in INT32 range. The types are the Avro
+#                  writer schema's (string, long, int; no union, so no
+#                  NULL), as each file's header and upstream's
+#                  share/test/schemas/weather.avsc spell it.
 #                  A reader of these files must keep -0.0's sign (float_pairs,
 #                  sort_rows) and read 9007199254740993 (2^53 + 1, avg_rows)
 #                  as that exact INT64, never through a double. It must keep
@@ -82,7 +110,7 @@ from komira_plan_ir.logical_plan import LogicalPlan
 from komira_scan_source.json_source import JsonSource
 from komira_scan_source.source_variant import SourceVariant
 
-from .plan_case import Dataset
+from .plan_case import INPUT_DIR, Dataset
 
 
 def _schema(names: List[String], types: List[ArrowType], nullable: List[Bool]) -> Schema:
@@ -268,6 +296,57 @@ def str_rows() -> Dataset:
     )
 
 
+def scan_rows_schema() -> Schema:
+    return _schema(
+        [String("id"), String("x"), String("s")],
+        [ArrowType.INT64, ArrowType.INT64, ArrowType.STRING],
+        [False, True, True],
+    )
+
+
+def scan_rows() -> Dataset:
+    return Dataset("scan_rows", scan_rows_schema())
+
+
+def scan_key_order() -> Dataset:
+    return Dataset("scan_key_order", scan_rows_schema(), any_member_order=True)
+
+
+def scan_sparse() -> Dataset:
+    return Dataset(
+        "scan_sparse",
+        scan_rows_schema(),
+        any_member_order=True,
+        missing_ok=True,
+        extra_members=[String("note")],
+    )
+
+
+def scan_numbers() -> Dataset:
+    return Dataset(
+        "scan_numbers",
+        _schema(
+            [String("id"), String("f")],
+            [ArrowType.INT64, ArrowType.FLOAT64],
+            [False, True],
+        ),
+    )
+
+
+def weather_schema() -> Schema:
+    """test.Weather as Avro's writer schema states it: station string, time
+    long, temp int, none of them a union (so none nullable)."""
+    return _schema(
+        [String("station"), String("time"), String("temp")],
+        [ArrowType.STRING, ArrowType.INT64, ArrowType.INT32],
+        [False, False, False],
+    )
+
+
+def weather() -> Dataset:
+    return Dataset("weather", weather_schema())
+
+
 def all_datasets() -> List[Dataset]:
     """Every dataset a case may scan; test_corpus refuses a file under
     datasets/ that is not one of these."""
@@ -275,8 +354,49 @@ def all_datasets() -> List[Dataset]:
         bool_pairs(), ints_nullable(), groups(), join_left(), join_right(),
         sort_rows(), int_pairs(), window_rows(), rank_rows(), stat_rows(),
         avg_rows(), div_pairs(), float_pairs(), set_left(), set_right(),
-        str_rows(),
+        str_rows(), scan_rows(), scan_key_order(), scan_sparse(),
+        scan_numbers(), weather(),
     ]
+
+
+# -----------------------------------------------------------------------------
+# Inputs that are not JSON Lines: inputs/<format>/<file>
+# -----------------------------------------------------------------------------
+#
+# The four Apache Avro interop files, staged by BUCK from
+# //third_party/apache-avro (sha256-pinned, nothing committed here). Each
+# holds the same five test.Weather records under a different block codec;
+# upstream's own C++ test (lang/c++/test/DataFileTests.cc,
+# testCompatibility) reads every one and checks the same records, which
+# weather.json lists. A case names a file only through `avro_input`, which
+# refuses a codec that is not here, and test_corpus requires every path
+# below to be staged and every file under inputs/ to be one of them.
+
+
+def avro_codecs() -> List[String]:
+    return [String("null"), String("deflate"), String("snappy"), String("zstandard")]
+
+
+def avro_input(codec: String) raises -> String:
+    """The staged path of the weather file written with `codec`."""
+    if codec == "null":
+        return String(INPUT_DIR) + "/avro/weather.avro"
+    if codec == "deflate":
+        return String(INPUT_DIR) + "/avro/weather-deflate.avro"
+    if codec == "snappy":
+        return String(INPUT_DIR) + "/avro/weather-snappy.avro"
+    if codec == "zstandard":
+        return String(INPUT_DIR) + "/avro/weather-zstd.avro"
+    raise Error("plan_conformance: no Avro weather file for codec '" + codec + "'")
+
+
+def all_inputs() raises -> List[String]:
+    """Every file a case may name under inputs/, as a path under the data
+    root."""
+    var res = List[String]()
+    for c in avro_codecs():
+        res.append(avro_input(c))
+    return res^
 
 
 def scan(ds: Dataset) raises -> LogicalPlan:
