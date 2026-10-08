@@ -146,3 +146,37 @@ rust_library(
     crate_root = "src/ext_lib.rs",
     test_srcs = ["tests/ext_pass.rs", "tests/ext_data.txt"],
 )
+
+# `tests` and `test_srcs` together: the markers of both gate the library.
+
+# green: the unit test and the external test pass, so the library builds.
+rust_library(
+    name = "both",
+    crate_name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    tests = [":env_scrubbed"],
+    test_srcs = ["tests/ext_pass.rs", "tests/common/mod.rs"],
+)
+
+# must fail: the external test passes, but the unit test fails, and it still
+# gates (a gate built from the external markers alone would publish this).
+rust_library(
+    name = "both_red",
+    crate_name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    tests = [":red"],
+    test_srcs = ["tests/ext_pass.rs", "tests/common/mod.rs"],
+)
+
+# must fail: the unit test passes, but an external test fails, and it still
+# gates (a gate built from the `tests` markers alone would publish this).
+rust_library(
+    name = "both_ext_red",
+    crate_name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    tests = [":env_scrubbed"],
+    test_srcs = ["tests/ext_pass.rs", "tests/ext_fail.rs", "tests/common/mod.rs"],
+)
