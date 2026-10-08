@@ -336,7 +336,10 @@ kcov's) and runs without address randomization (kcov sets
 source and the library's sources under `buck-out/` (the line tables name
 them relative to it); kcov shares its TMPDIR (kcov writes there only when it
 cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
-kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`);
+kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`),
+and nothing of `cov_run.sh`'s own (its tools get `LC_ALL=C` per command
+before the test and exported after it, since `gate_runner.sh` passes on what
+it does not set);
 and the run ends when every process the test started has exited, since
 kcov follows each fork, where the gate waits for the test alone (so the run
 is bounded, above). Its CPUs are the gate's: kcov v42 pins itself and the test to one

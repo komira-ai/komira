@@ -17,14 +17,18 @@
 #    is seen) with a KEEP bucket, a default-KEEP table and a queue, a topic
 #    and a subscription (where hosted), a default-KEEP secret, a zone, a
 #    CNAME and a certificate (where hosted; gcp adds the certificate's DNS
-#    authorization and its record) and a DELETE
+#    authorization and its record), a schedule that starts the container
+#    job, an event trigger on the DELETE bucket (where hosted), a network, a
+#    subnet of it and an IP address (where hosted) and a DELETE
 #    bucket, every wanted node's live object carries exactly one
 #    run-id label, with the key `validation_run_tag_key("kci")` (spelled
 #    `kci-run-id`) and the run id verbatim, and exactly one retention mark
 #    with `resource_retention_tag_key("kci")` and `retention_tag_value` of
 #    the node's retention (`retain` and `delete` both seen); every resource
 #    owns at least one checked node (except a gcp subscription, which has no
-#    object: its one node is turned off); `list_owned` reports the same id for
+#    object: its one node is turned off, and a schedule an azure or onprem
+#    job holds as its own setting: its nodes are turned off and the job's
+#    run carries it); `list_owned` reports the same id for
 #    every object; the provenance run id is a different value and does not
 #    leak into the tag. Catches: the create path dropping the tag or the
 #    mark, a second spelling of a key, the provenance id written instead, a
@@ -93,6 +97,9 @@ from kci_cloud import (
     ConformanceTarget,
     FIELD_QUEUE,
     FIELD_DNS_ZONE,
+    FIELD_EVENT_TRIGGER,
+    FIELD_NETWORK,
+    FIELD_SCHEDULE,
     FIELD_SUBSCRIPTION,
     FIELD_TABLE,
     LoweredNode,
@@ -173,6 +180,14 @@ comptime _NAMES = (
 """A zone, a CNAME that follows `api`'s HOST, and a certificate: gcp adds
 `tls/dnsauth` and `tls/authrec`."""
 
+comptime _NETWORKS = (
+    '{"id":"core","network":{"ipv4Cidr":"10.20.0.0/16"}},'
+    '{"id":"edge","subnet":{"network":{"resource":"core"},"ipv4Cidr":"10.20.4.0/24","zone":1}},'
+    '{"id":"ingress-ip","ipAddress":{}}'
+)
+"""A network, a subnet of it (in a zone, which aws needs) and an IP
+address, each with the default retention (DELETE)."""
+
 
 def _full(
     api_port: String,
@@ -182,6 +197,9 @@ def _full(
     messaging: Bool = False,
     secret: Bool = False,
     names: Bool = False,
+    schedule: Bool = False,
+    events: Bool = False,
+    networks: Bool = False,
 ) -> String:
     """A public service with a `uses` grant, an internal service reading its
     URL (each keeping one instance, as onprem requires until Q21), a
@@ -189,7 +207,9 @@ def _full(
     worker with its own identity and a DELETE bucket. `kept` adds a bucket with the default
     retention (KEEP); `table` adds `_TABLE`; `messaging` adds `_MESSAGING`;
     `secret` adds a secret with the default retention (KEEP); `names` adds
-    `_NAMES`.
+    `_NAMES`; `schedule` adds a schedule that starts `nightly`; `events`
+    adds an event trigger delivering `store`'s new objects to `api`;
+    `networks` adds `_NETWORKS`.
     `roles_on` False makes api
     internal and removes web's grant on api."""
     var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
@@ -220,6 +240,12 @@ def _full(
         + ((String(",") + String(_MESSAGING)) if messaging else String(""))
         + (String(',{"id":"creds","secret":{}}') if secret else String(""))
         + ((String(",") + String(_NAMES)) if names else String(""))
+        + (String(',{"id":"tick","schedule":{"cron":"0 3 * * *","target":{"resource":"nightly"}}}') if schedule else String(""))
+        + (
+            String(',{"id":"on-store","eventTrigger":{"source":{"resource":"store"},"event":"OBJECT_CREATED",')
+            + String('"target":{"resource":"api"}}}') if events else String("")
+        )
+        + ((String(",") + String(_NETWORKS)) if networks else String(""))
         + String("]}")
     )
 
@@ -236,6 +262,22 @@ def _hosts_messaging[S: ConformanceTarget](cloud: S) -> Bool:
     var l = cloud.implemented()
     for i in range(len(l)):
         if l[i] == FIELD_QUEUE:
+            return True
+    return False
+
+
+def _hosts_events[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_EVENT_TRIGGER:
+            return True
+    return False
+
+
+def _hosts_networks[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_NETWORK:
             return True
     return False
 
@@ -396,9 +438,10 @@ def _covers_every_hosted_type[
                 else:
                     off = True
         # A subscription with no object of its own (gcp: it is the topic its
-        # queue's subscription is on) lowers one node, turned off.
+        # queue's subscription is on) lowers one node, turned off; so does a
+        # schedule its job holds as a setting (azure, onprem) lower its nodes.
         assert_true(
-            owns or (f == FIELD_SUBSCRIPTION and off),
+            owns or ((f == FIELD_SUBSCRIPTION or f == FIELD_SCHEDULE) and off),
             where + String(": ") + resources[i].id + String(" owns a checked node"),
         )
     assert_equal(len(used), len(hosted), where + String(": one resource per hosted type"))
@@ -441,6 +484,9 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
             messaging=_hosts_messaging(cloud),
             secret=True,
             names=_hosts_names(cloud),
+            schedule=True,
+            events=_hosts_events(cloud),
+            networks=_hosts_networks(cloud),
         )
         _ = _apply_and_check(cloud, json, _run(String(_RUN)), String(_RUN), where)
         var resources = _list(json)

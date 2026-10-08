@@ -1,6 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load(":defs.bzl", "cov_debug_check", "cov_plant", "cov_report_check", "cov_set_check")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
 # Coverage builds and runs (tools/build/mojo/README.md, "Coverage builds";
 # tests 41 and 43 of tools/build/tests/run_tests.sh).
@@ -282,6 +283,164 @@ cov_debug_check(
     script = "check.sh",
 )
 
+# Test 47: branch coverage. A library whose function has every kind of
+# source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
+# its arms, never the first (and a String destroyed at an `if`, loops over
+# collections, a Dict subscript, user masks): with
+# coverage (forced here, as for covlib_forced) it has [coverage][bc],
+# [coverage][pgo_bin] and [coverage][branch].
+mojo_library(
+    name = "branchlib",
+    srcs = [
+        "branchlib/__init__.mojo",
+        "branchlib/lookup.mojo",
+        "branchlib/loops.mojo",
+        "branchlib/mask.mojo",
+        "branchlib/score.mojo",
+        "branchlib/shapes.mojo",
+        "branchlib/strings.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = [
+        "tests/test_gate_env.mojo",
+        "tests/test_score_arms.mojo",
+    ],
+)
+
+# Test 47: a library with a C library in its closure (the cshim example's,
+# a cxx_library): its tests' links end with the C library, as mojo_wrapper.sh
+# appends it (--link-tail), and its branch coverage links pass the same
+# arguments in the same order. Its test calls into C and takes two of the
+# three arms of add_clamped.
+mojo_library(
+    name = "branchc",
+    srcs = ["branchc/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_add_clamped.mojo"],
+    deps = ["komira//tools/build/examples/cshim:add"],
+)
+
+# Test 47: a library whose test imports a package only its `test_deps`
+# give it (branchtdsup), which has a C library in its closure (the cshim
+# example's): the test's branch coverage bitcode is compiled against that
+# package and its binary links that C library, as its release build and its
+# [coverage][bin] are.
+mojo_library(
+    name = "branchtdsup",
+    srcs = ["branchtdsup/__init__.mojo"],
+    conda = False,
+    deps = ["komira//tools/build/examples/cshim:add"],
+)
+
+mojo_library(
+    name = "branchtd",
+    srcs = ["branchtd/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_deps = [":branchtdsup"],
+    test_srcs = ["tests/test_with_support.mojo"],
+)
+
+# The profile of test_score_arms's instrumented run holds one function named
+# like classify_score (`ld-temp.o;branchlib::score::classify_score(...)`),
+# with six counters. IR profile counters sit on the edges outside a spanning
+# tree of the function's control flow, not one per arm, so the list is what
+# the instrumentation of this function gives, sorted, as measured remotely:
+# 1 and 1 are "top" and "high" (one call each), 2 is "pass" (two calls), and
+# the zeros include the "invalid" arm, which the test never takes. A run
+# whose counters were not written would read all zeros, and a test taking
+# another set of arms other numbers.
+cov_branch_check(
+    name = "branch_counts",
+    counts = [0, 0, 1, 1, 2, 2],
+    exec_compatible_with = LINUX_X86_64,
+    function = "classify_score",
+    profdata = ":branchlib[coverage][branch][test_score_arms]",
+    script = "branch_check.sh",
+)
+
+# Test 47: the branch records of test_score_arms's run
+# ([coverage][branch_info], cov_branch_classify) are its golden file byte for
+# byte. classify_score's `if` and both `elif`s are three branches Mojo puts
+# on the `if`'s line and column (4,5): 0/3 is the `if` (0 taken: the test
+# never asks for "invalid"), 1/3 the first `elif` (1 of 4), 2/3 the second
+# (1 of 3). The `or` (4,18) is a select whose right operand never decides
+# true (rhs 0,4), and the `and` (6,22) one whose right operand, `bonus`,
+# decides both ways once (rhs 1,1). shapes.mojo: the plain @always_inline
+# `pick`'s `if` is a select at its own line (9,5: 1,1), not at its call;
+# in `a > 0 or b > 0 or c > 0` (15) the first `or`'s result is the second's
+# condition, so its right operand is derived from the second select (rhs
+# 0,1: `b` never decides true) and the second's from the `if`'s branch
+# (rhs 1,0); the `while` (23,5: 3,2); the `range(` loop's two branches on
+# one value, one record (25,19: arm 0 the loop's end, 2, arm 1 an
+# iteration, 3); the ternary (27,15: 1,1). A classifier summing the three
+# branches at 4,5 into one record would give 2,9 here; one losing a
+# derivation, no rhs; one writing a decision tested twice, 25,19 twice.
+# strings.mojo: `first` owns a String destroyed on its `if`'s return path,
+# so the IR holds five branches at the `if` (8,5): the `if` and the String
+# destructor's four, one record (1,1); a classifier reading the String's
+# branches as decisions there gives 8,5:br:0/5 to 4/5. loops.mojo: a loop
+# over a List by name (9,14, at the name) and one over a list literal of
+# Strings (16,14, at the `[`, whose branch is on the `i1` that
+# `_ArrayIterOwned.__next__` returns, true when it raises StopIteration):
+# one record each, arm 0 the end and arm 1 an iteration (2,3 and 1,2); a
+# classifier dropping a raising call's flag at a loop head loses 16,14.
+# lookup.mojo: `d[key]`'s branch on `Dict.__getitem__`'s error flag at the
+# `[` is compiler-made (no record), and one refusing it fails here.
+# mask.mojo: `if ys.capacity() & (1 << 62):` (11,5) is a String's flags
+# test in shape, the `and` and `icmp ne` at the `&`; it stays a decision
+# because the test is not at the `if`'s location (`!= 0`, 9,5, is an
+# `icmp eq` and a `xor`, no String shape).
+# test_gate_env calls none of branchlib: its record file is empty.
+cov_report_check(
+    name = "branch_info",
+    goldens = ["golden/test_score_arms.info"],
+    mode = "golden",
+    reports = [":branchlib[coverage][branch_info][test_score_arms]"],
+    script = "report.sh",
+)
+
+# Test 47: the branch coverage link of test_score_arms is the link of its
+# release build plus the profile runtime: mojo_wrapper.sh's `cc` shim gives
+# zig what `mojo build` asks for (the compiler's runtime library,
+# --gc-sections, -lm, the shim's --strip-debug and run path), and
+# cov_branch_link.sh gives zig the same line for the instrumented object
+# (link_line.sh). A Mojo release linking with another library, or a link
+# script that drops one, fails here.
+cov_link_line_check(
+    name = "link_line",
+    bc = ":branchlib[coverage][bc][test_score_arms]",
+    exec_compatible_with = LINUX_X86_64,
+    lib = ":branchlib",
+    script = "link_line.sh",
+    src = "tests/test_score_arms.mojo",
+)
+
+# Test 47: the bitcode and the instrumented binary of one test built in two
+# actions with different keys (repro_a and repro_b, above), so two
+# sandboxes, are the same bytes. No --no-remote-cache.
+cov_debug_check(
+    name = "reproducible_branch",
+    bins = [
+        ":repro_a[coverage][bc][test_same]",
+        ":repro_b[coverage][bc][test_same]",
+    ],
+    mode = "same",
+    script = "check.sh",
+)
+
+cov_debug_check(
+    name = "reproducible_pgo_bin",
+    bins = [
+        ":repro_a[coverage][pgo_bin][test_same]",
+        ":repro_b[coverage][pgo_bin][test_same]",
+    ],
+    mode = "same",
+    script = "check.sh",
+)
+
 # For the planted defects and the gate checks of tests//negative/coverage.
 export_file(
     name = "check.sh",
@@ -293,10 +452,17 @@ export_file(
     visibility = ["//negative/coverage:"],
 )
 
+export_file(
+    name = "link_line.sh",
+    visibility = ["//negative/coverage:"],
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = [
+        "branch_check.sh",
         "check.sh",
+        "link_line.sh",
         "report.sh",
     ],
     visibility = ["komira//:tests_lints"],
