@@ -375,6 +375,10 @@ C and C++ libraries are built from pinned source archives under
 [`third_party/`](../third_party/), among them aws-lc, s2n-tls, snappy and sqlite, plus the
 crates.io crates the Rust rules use. Mojo code calls them through `deps` on
 their targets ([C and C++](../tools/build/mojo/README.md#c-and-c)).
+Some pinned third-party programs are test input only, run by conformance
+tests as child processes and linked into nothing: h2spec, the Connect
+conformance runner, and git with git-lfs, the oracle of komira_git, which
+is built from source on the farm ([third_party/git](../third_party/git/README.md)).
 
 ## How the build holds it together
 
