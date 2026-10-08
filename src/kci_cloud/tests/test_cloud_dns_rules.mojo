@@ -7,9 +7,9 @@
 # cloud-independent half of validate. No cloud is needed: the fakes in
 # kci_cloud_fake run these graphs on every shape.
 #
-# 1. THE ROWS: a DNS zone (field 18, the seventh body arm, after the
-#    secret), a DNS record (26, the eleventh, after the grant) and a
-#    certificate (27, the twelfth); each PORTABLE; a zone and a certificate
+# 1. THE ROWS: a DNS zone (field 18, the eighth body arm, after the
+#    secret), a DNS record (26, the twelfth, after the grant) and a
+#    certificate (27, the thirteenth); each PORTABLE; a zone and a certificate
 #    expose NAME only, a record HOST only; none accepts a verb; each takes
 #    retention, default DELETE (a written KEEP wins); a reference lands on
 #    `<id>/zone`, `<id>/record` and `<id>/cert`.
@@ -100,11 +100,11 @@ def test_the_name_rows() raises:
     assert_equal(FIELD_DNS_RECORD, 26)
     assert_equal(FIELD_CERTIFICATE, 27)
     var arms = body_arms()
-    assert_equal(arms[5].field, FIELD_SECRET, "the secret stays the sixth arm")
-    assert_equal(arms[6].field, FIELD_DNS_ZONE, "the seventh arm, after the secret")
-    assert_equal(arms[9].field, FIELD_GRANT, "the grant is the tenth")
-    assert_equal(arms[10].field, FIELD_DNS_RECORD, "the eleventh arm, after the grant")
-    assert_equal(arms[11].field, FIELD_CERTIFICATE, "the twelfth arm")
+    assert_equal(arms[6].field, FIELD_SECRET, "the secret stays the seventh arm")
+    assert_equal(arms[7].field, FIELD_DNS_ZONE, "the eighth arm, after the secret")
+    assert_equal(arms[10].field, FIELD_GRANT, "the grant is the eleventh")
+    assert_equal(arms[11].field, FIELD_DNS_RECORD, "the twelfth arm, after the grant")
+    assert_equal(arms[12].field, FIELD_CERTIFICATE, "the thirteenth arm")
     var fields = [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE]
     var names = ["dns_zone", "dns_record", "certificate"]
     var outs = ["NAME", "HOST", "NAME"]
