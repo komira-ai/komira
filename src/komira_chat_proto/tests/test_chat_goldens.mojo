@@ -34,7 +34,8 @@
 #     name. The declarations are found by a token scan (past comments and
 #     strings, counting braces), not by line prefix: a `message <Name> {`
 #     inside another message's braces is refused as nested, by line, wherever
-#     it sits on its line and whatever whitespace separates its tokens; a
+#     it sits on its line and whatever protoc skips between its tokens
+#     (spaces, tabs, newlines, CR, \v, \f, `//` and `/* */` comments); a
 #     top-level one not written `message <Name> {` at column 0 is refused
 #     too. Tests 1-4 then hold `_check_all` to the golden order, so a
 #     message with a golden line but no `_check` call fails there.
@@ -184,7 +185,37 @@ def _is_space(c: UInt8) -> Bool:
         or c == UInt8(ord("\t"))
         or c == UInt8(ord("\n"))
         or c == UInt8(ord("\r"))
+        or c == UInt8(11)  # \v
+        or c == UInt8(12)  # \f
     )
+
+
+def _skip_trivia(text: String, at: Int) -> Int:
+    """The first byte at or after `at` that is not whitespace or a comment,
+    as protoc's tokenizer skips them: space, tab, newline, CR, \\v, \\f,
+    `// ...` to the end of the line and `/* ... */`. An unclosed `/*` runs
+    to the end (the main scan raises on it)."""
+    var b = text.as_bytes()
+    var n = len(b)
+    var j = at
+    while j < n:
+        if _is_space(b[j]):
+            j += 1
+            continue
+        if b[j] == UInt8(ord("/")) and j + 1 < n and b[j + 1] == UInt8(ord("/")):
+            while j < n and b[j] != UInt8(ord("\n")):
+                j += 1
+            continue
+        if b[j] == UInt8(ord("/")) and j + 1 < n and b[j + 1] == UInt8(ord("*")):
+            j += 2
+            while j + 1 < n and not (
+                b[j] == UInt8(ord("*")) and b[j + 1] == UInt8(ord("/"))
+            ):
+                j += 1
+            j = min(j + 2, n)
+            continue
+        break
+    return j
 
 
 def _line_of(text: String, at: Int) -> String:
@@ -208,13 +239,15 @@ def _proto_message_names() raises -> List[String]:
 
     A token scan over the whole file, past `//` and `/* */` comments and
     quoted strings, counting braces. Every `message` keyword followed by
-    whitespace, an identifier, whitespace and `{` is a declaration, wherever
-    it sits on a line and whatever whitespace (spaces, tabs, newlines)
-    separates the tokens. One at brace depth 0, at column 0, written exactly
-    `message <Name> {`, is a top-level message and is returned. Any other
-    declaration raises, naming the line: inside braces it is a nested
-    message, which no golden line can name; at depth 0 in another layout it
-    is refused so the declaration form stays one the reader can check.
+    trivia, an identifier, trivia and `{` is a declaration, wherever it sits
+    on a line; trivia is what protoc skips between tokens (`_skip_trivia`:
+    space, tab, newline, CR, \\v, \\f, `//` and `/* */` comments). One
+    at brace depth 0, at column 0, written exactly `message <Name> {` (one
+    space each side of the name, no comment), is a top-level message and
+    is returned. Any other declaration raises, naming the line: inside
+    braces it is a nested message, which no golden line can name; at depth
+    0 in another layout it is refused so the declaration form stays one the
+    reader can check.
     A `message` that is not followed by `<Name> {` (the field
     `string message = 2;`, the type `Message message = 1;`) is not a
     declaration."""
@@ -269,18 +302,16 @@ def _proto_message_names() raises -> List[String]:
             i += 1
         if String(text[byte=word_start:i]) != "message":
             continue
-        # `message` + whitespace + identifier + whitespace + `{`?
-        var j = i
-        while j < n and _is_space(b[j]):
-            j += 1
+        # `message` + trivia + identifier + trivia + `{`? Trivia is what
+        # protoc skips between tokens: whitespace and comments.
+        var j = _skip_trivia(text, i)
         if j == i or j >= n or not _is_ident(b[j]):
             continue
         var name_start = j
         while j < n and _is_ident(b[j]):
             j += 1
         var name_end = j
-        while j < n and _is_space(b[j]):
-            j += 1
+        j = _skip_trivia(text, j)
         if j >= n or b[j] != UInt8(ord("{")):
             continue
         var canonical = (
