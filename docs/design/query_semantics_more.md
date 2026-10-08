@@ -11,7 +11,7 @@ These items belong to [query semantics](query_semantics.md) and keep its numberi
   - a negative `length` takes characters backwards from `start`, excluding the character at `start`: `substring('hello', 3, -2)` is `'he'`;
   - `length = 0` gives `''`.
 
-  The two-argument form `substring(s, start)` runs to the end of the string. A `start` or `length` outside the 32-bit range (beyond ±(2^32 - 1)) is an error, as DuckDB's OutOfRange.
+  The two-argument form `substring(s, start)` runs to the end of the string. A `start` or `length` below -2^32 or above 2^32 - 1 is an error, as DuckDB's OutOfRange (its bounds are asymmetric).
 - **DuckDB.** `SubstringStartEnd` (`src/function/scalar/string/substring.cpp:51-82` at v1.5.6) implements the cases above, and `AssertInSupportedRange` raises OutOfRange beyond the bounds set at `:15-16` (±`uint32` maximum). `substring` uses the code-point path (`SubstringUnicode`, `:97`); grapheme clusters are the separate `substring_grapheme`.
 - **Current behaviour.** The IR defines the standard-SQL meaning instead (`src/komira_plan_expr/expr.mojo:1821-1838`). A `start <= 0` clamps to the first character but still consumes `length` from `start`, so `substring('hello', -1, 3)` is `'h'`, where DuckDB answers `'o'`. A negative `length` is the sentinel for the two-argument form, so it cannot mean "backwards". No SUBSTRING kernel is in this repository.
 - **Options.** (a) DuckDB's meaning, as proposed. The two-argument form then needs its own encoding (a flag, or a missing length on the wire) instead of the `length < 0` sentinel. (b) Keep the standard-SQL meaning and record a departure for negative `start` and negative `length`.
