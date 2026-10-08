@@ -13,13 +13,15 @@
 # anchor is never widened to accept a second issuer or a second `alg`.
 #
 # What this file refuses at startup:
-#   * a JWKS URL that is not `https://host/...` (no userinfo, no fragment);
+#   * a JWKS URL that is not `https://<host>/...` (no userinfo, no fragment);
 #   * an `alg` other than RS256;
 #   * a `typ` other than JWT. komira_crypto's RS256 verifier compares the
 #     header's `typ` to "JWT" itself, so no other value could ever verify in
 #     this slice; refusing it here makes that visible at startup;
 #   * a max TTL outside 1..86400 seconds;
 #   * a clock leeway outside 0..60 seconds;
+#   * a JWKS fetch timeout outside 1 us..60 s (the fetch stalls a serving
+#     worker: jwks_fetch.mojo header);
 #   * a copy-claim name that is empty, repeated, or one of sub/iss/aud (the
 #     principal sets those itself).
 #
@@ -42,12 +44,14 @@ comptime DEFAULT_LEEWAY_S: Int64 = 30
 comptime MAX_LEEWAY_S: Int64 = 60
 
 # JWKS cache defaults: the max-age used when the response names none, the
-# longest max-age honoured, the refetch rate-limit window and the fetch
-# timeout.
+# longest max-age honoured, the refetch rate-limit window, and the fetch
+# timeout with its cap. The timeout bounds the TLS handshake and the request
+# each; DNS and the TCP connect are outside it (jwks_fetch.mojo header).
 comptime DEFAULT_JWKS_MAX_AGE_S: Int64 = 300
 comptime MAX_JWKS_MAX_AGE_S: Int64 = 86400
 comptime DEFAULT_JWKS_REFETCH_WINDOW_S: Int64 = 60
 comptime DEFAULT_JWKS_FETCH_TIMEOUT_US: Int = 5_000_000
+comptime MAX_JWKS_FETCH_TIMEOUT_US: Int = 60_000_000
 
 
 @fieldwise_init
@@ -176,6 +180,12 @@ struct BearerJwtConfig(Copyable, Movable, Deinitable):
         self.jwks_refetch_window_s = seconds
         return self^
 
+    def with_jwks_fetch_timeout_us(var self, micros: Int) -> BearerJwtConfig:
+        """The JWKS fetch timeout: the bound on the TLS handshake and on the
+        request, each (jwks_fetch.mojo header has the whole worst case)."""
+        self.jwks_fetch_timeout_us = micros
+        return self^
+
     def with_jwks_default_max_age_s(
         var self, seconds: Int64
     ) -> BearerJwtConfig:
@@ -206,9 +216,15 @@ struct BearerJwtConfig(Copyable, Movable, Deinitable):
                     " 0..86400 seconds"
                 )
             )
-        if self.jwks_fetch_timeout_us < 1:
+        if (
+            self.jwks_fetch_timeout_us < 1
+            or self.jwks_fetch_timeout_us > MAX_JWKS_FETCH_TIMEOUT_US
+        ):
             raise Error(
-                String("komira_http_auth: the JWKS fetch timeout must be set")
+                String(
+                    "komira_http_auth: the JWKS fetch timeout must be 1 us..60"
+                    " seconds"
+                )
             )
         for i in range(len(self.copy_claims)):
             ref n = self.copy_claims[i]

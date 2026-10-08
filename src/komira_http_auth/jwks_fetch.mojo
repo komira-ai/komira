@@ -22,13 +22,28 @@
 #     test (a test cannot dial the public internet);
 #   * redirects are not followed (a 3xx is a failed fetch);
 #   * the response body is capped at komira_crypto's RS256_MAX_JWKS_BYTES
-#     (256 KiB) and the round trip at the configured timeout, because the
-#     fetch runs on the serving thread.
+#     (256 KiB);
+#   * the fetch timeout (`BearerJwtConfig.jwks_fetch_timeout_us`, which the
+#     verifier hands over through `set_timeout_us`) bounds two phases: the
+#     TLS handshake (`TlsConnector.set_handshake_deadline_us`, timed from the
+#     end of the TCP connect) and the request (komira_http_client's
+#     `request_timeout_us`, one wall-clock deadline armed at send-start).
+#
+# WORST CASE, stated honestly. A fetch runs on the serving worker's
+# event-loop thread and stalls that worker for its whole duration. It is the
+# sum of: DNS resolution, which is UNBOUNDED (`getaddrinfo` takes no timeout
+# and cannot be cancelled); the TCP connect, up to komira_http_core's fixed
+# 5 s; the TLS handshake, up to the fetch timeout; and the request, up to the
+# fetch timeout again. So a fetch takes the DNS time plus at most 5 s + 2 x
+# the fetch timeout (15 s at the 5 s default), and with a hanging resolver it
+# has no bound. The cache (jwks_cache.mojo) starts at most one fetch per
+# refetch window, so a worker stalls this way at most once per window.
 #
 # `ScriptedJwksFetcher` is the test double: a queue of canned replies (or
-# transport failures), with every fetched URL recorded. Its handles share one
-# script (`share()`), so a test keeps one after moving the fetcher into the
-# verifier. A fetch with nothing scripted raises, loudly.
+# transport failures), with every fetched URL and the timeout it was given
+# recorded. Its handles share one script (`share()`), so a test keeps one
+# after moving the fetcher into the verifier. A fetch with nothing scripted
+# raises, loudly.
 #
 # No pointer in any signature. The connector factory is a `thin` code pointer
 # (the same carve-out komira_http_client's TlsHttpTransport uses); the scripted
@@ -78,10 +93,17 @@ trait JwksFetcher(Movable, Deinitable):
     def fetch(mut self, url: String) raises -> JwksFetchResult:
         ...
 
+    def set_timeout_us(mut self, timeout_us: Int):
+        """Set the fetch timeout in microseconds. `Rs256JwksVerifier` calls
+        this with `BearerJwtConfig.jwks_fetch_timeout_us` when it is built, so
+        the configuration is the one source of the value."""
+        ...
+
 
 struct HttpsJwksFetcher(JwksFetcher, Movable, Deinitable):
     """The production fetcher: HTTPS only, certificate-checked, no redirects,
-    body capped at 256 KiB, bounded by a timeout."""
+    body capped at 256 KiB, the TLS handshake and the request each bounded by
+    the fetch timeout (DNS and the TCP connect are not: module header)."""
 
     # SAFETY: a `thin` code pointer to a connector factory. It holds a code
     # address only, no heap and no origin; called once per fetch with the URL
@@ -90,12 +112,40 @@ struct HttpsJwksFetcher(JwksFetcher, Movable, Deinitable):
     var _timeout_us: Int
 
     def __init__(out self):
+        """The public-CA connector factory and the default fetch timeout
+        (the verifier replaces it with the configured one)."""
         self._mk_connector = default_tls_factory
         self._timeout_us = DEFAULT_JWKS_FETCH_TIMEOUT_US
 
-    def __init__(out self, mk_connector: TlsConnectorFactory, timeout_us: Int):
+    def __init__(out self, mk_connector: TlsConnectorFactory):
+        """An explicit connector factory (tests), the default timeout."""
         self._mk_connector = mk_connector
+        self._timeout_us = DEFAULT_JWKS_FETCH_TIMEOUT_US
+
+    def set_timeout_us(mut self, timeout_us: Int):
         self._timeout_us = timeout_us
+
+    def timeout_us(self) -> Int:
+        """The fetch timeout in microseconds."""
+        return self._timeout_us
+
+    def client_config(self) -> HttpClientConfig:
+        """The client settings `fetch` uses: the 256 KiB body cap and the
+        request bound. A method so a test can read them without a network."""
+        var cfg = HttpClientConfig.defaults()
+        cfg.max_response_body_bytes = RS256_MAX_JWKS_BYTES
+        cfg.request_timeout_us = self._timeout_us
+        return cfg^
+
+    def connector_for(
+        self, host: String
+    ) raises -> TlsConnector[KernelTcpConnector]:
+        """The connector `fetch` dials `host` with: the factory's, with its
+        TLS handshake bounded by the fetch timeout. A method so a test can read
+        the deadline without a network."""
+        var connector = self._mk_connector(host)
+        connector.set_handshake_deadline_us(Int64(self._timeout_us))
+        return connector^
 
     def fetch(mut self, url: String) raises -> JwksFetchResult:
         # Refused before the factory is called, so nothing is dialed.
@@ -105,10 +155,8 @@ struct HttpsJwksFetcher(JwksFetcher, Movable, Deinitable):
         var headers = HeaderMap()
         headers.append(String("Accept"), String("application/json"))
         var req = build_get_request(parsed^, headers^)
-        var connector = self._mk_connector(host)
-        var cfg = HttpClientConfig.defaults()
-        cfg.max_response_body_bytes = RS256_MAX_JWKS_BYTES
-        cfg.request_timeout_us = self._timeout_us
+        var connector = self.connector_for(host)
+        var cfg = self.client_config()
         var client = HttpClient[TlsConnector[KernelTcpConnector]](
             config=cfg, connector=connector^
         )
@@ -139,10 +187,12 @@ struct _ScriptedReply(Copyable, Movable, Deinitable):
 struct _ScriptState(Movable):
     var replies: List[_ScriptedReply]
     var urls: List[String]
+    var timeout_us: Int
 
     def __init__(out self):
         self.replies = List[_ScriptedReply]()
         self.urls = List[String]()
+        self.timeout_us = DEFAULT_JWKS_FETCH_TIMEOUT_US
 
 
 struct ScriptedJwksFetcher(JwksFetcher, Movable, Deinitable):
@@ -194,6 +244,14 @@ struct ScriptedJwksFetcher(JwksFetcher, Movable, Deinitable):
                 body=String(""),
             )
         )
+
+    def set_timeout_us(mut self, timeout_us: Int):
+        """Recorded only (`timeout_us`); a scripted fetch never waits."""
+        self._p[].timeout_us = timeout_us
+
+    def timeout_us(self) -> Int:
+        """The last timeout set on any handle of this script."""
+        return self._p[].timeout_us
 
     def fetch_count(self) -> Int:
         return len(self._p[].urls)

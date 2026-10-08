@@ -38,8 +38,12 @@
 # `before` never raises (a raise would become a 500 in ErrorMappingMiddleware):
 # anything unexpected is an invalid_token refusal.
 #
-# The verifier runs on the serving thread, so a JWKS fetch blocks it for at
-# most the fetch timeout, at most once per refetch window.
+# The verifier runs on the serving worker's event-loop thread, so a JWKS
+# fetch stalls that whole worker while it runs, at most once per refetch
+# window. The fetch timeout bounds its TLS handshake and its request; the TCP
+# connect adds up to 5 s and DNS resolution is not bounded at all, so a fetch
+# takes the DNS time plus at most 5 s + 2 x the fetch timeout, and has no
+# bound with a hanging resolver (jwks_fetch.mojo header).
 # =============================================================================
 
 from komira_http_core.codec.types import HttpRequest, HttpResponse

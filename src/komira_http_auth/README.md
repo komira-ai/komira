@@ -49,7 +49,13 @@ service-account ID tokens. It checks each token in this order:
   - a document that does not parse whole, or that publishes one `kid` twice,
     never replaces the current keys;
   - when a refresh fails, the last good keys stay in use with no age limit
-    (an open policy question: see `jwks_cache.mojo`).
+    (an open policy question: see `jwks_cache.mojo`);
+  - a fetch runs on the serving worker's thread and stalls that worker while it
+    runs, at most once per refetch window. The fetch timeout (5 s by default,
+    at most 60 s, set with `BearerJwtConfig.with_jwks_fetch_timeout_us`)
+    bounds the TLS handshake and the request separately. The TCP connect adds
+    up to 5 s, and DNS resolution has no bound, so a fetch takes the DNS time
+    plus at most 5 s + 2 x the fetch timeout.
 - **Signature**, checked by `komira_crypto`'s `verify_rs256_jws`. This package
   adds no RS256 verifier of its own.
 - **Claims**:
@@ -66,7 +72,9 @@ planned for a later release.
 
 ## Flags
 
-All flags use the form `--name=value`. No setting of this package is read from
+All flags use the form `--name=value`. The clock leeway and the JWKS refetch
+window, default max-age and fetch timeout have no flags: set them with
+`BearerJwtConfig`'s `with_*` methods. No setting of this package is read from
 the environment. The TLS library's default trust store, used for the JWKS
 fetch, does honour `SSL_CERT_FILE` and `SSL_CERT_DIR`.
 

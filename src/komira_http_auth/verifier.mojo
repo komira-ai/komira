@@ -96,6 +96,9 @@ struct Rs256JwksVerifier[F: JwksFetcher, C: AuthClock](
         self._anchor = config.anchor.copy()
         self._copy_claims = config.copy_claims.copy()
         self._leeway_s = config.leeway_s
+        # The configured fetch timeout reaches the fetcher here, whatever
+        # timeout the embedder built it with.
+        fetcher.set_timeout_us(config.jwks_fetch_timeout_us)
         self._cache = JwksCache[Self.F](
             fetcher^,
             config.anchor.jwks_url,

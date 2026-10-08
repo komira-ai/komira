@@ -5,9 +5,10 @@
 # Single-anchor flags and their defaults, the --trust-anchor form (exactly
 # one accepted; a second is refused), non-https JWKS URLs refused at startup
 # (by the flags and by the verifier constructor), RS256/JWT only, max TTL,
-# copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap, an
-# anchor built in code with an empty name, issuer or audience, and the
-# --name=value syntax.
+# copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap, the
+# 1 us..60 s JWKS fetch timeout and its hand-over to the fetcher, an anchor
+# built in code with an empty name, issuer or audience, and the --name=value
+# syntax.
 # =============================================================================
 
 from std.pathlib import Path
@@ -116,8 +117,8 @@ from komira_http_auth import (
     SystemAuthClock,
     bearer_jwt_flag_names,
     parse_bearer_jwt_flags,
-    validate_trust_anchor,
 )
+from komira_http_auth.config import validate_trust_anchor
 
 
 def _args(*xs: String) -> List[String]:
@@ -277,6 +278,36 @@ def test_leeway_is_capped_at_60_seconds() raises:
     _ = Verifier(
         _config().with_leeway_s(Int64(0)), ScriptedJwksFetcher(), FixedAuthClock(NOW)
     )
+
+
+def test_jwks_fetch_timeout_is_capped_and_reaches_the_fetcher() raises:
+    # A fetch stalls a serving worker, so the bound has a ceiling.
+    _verifier_refused(_config().with_jwks_fetch_timeout_us(0), "fetch timeout")
+    _verifier_refused(_config().with_jwks_fetch_timeout_us(-1), "fetch timeout")
+    _verifier_refused(
+        _config().with_jwks_fetch_timeout_us(60_000_001), "fetch timeout"
+    )
+    # The configured value reaches the fetcher, whatever it held before; the
+    # fetcher turns it into the handshake and request bounds
+    # (test_https_fetcher).
+    var f = ScriptedJwksFetcher()
+    f.set_timeout_us(7)
+    _ = Verifier(
+        _config().with_jwks_fetch_timeout_us(2_500_000),
+        f.share(),
+        FixedAuthClock(NOW),
+    )
+    assert_equal(f.timeout_us(), 2_500_000)
+    _ = Verifier(
+        _config().with_jwks_fetch_timeout_us(60_000_000),
+        f.share(),
+        FixedAuthClock(NOW),
+    )
+    assert_equal(f.timeout_us(), 60_000_000)
+    # The default config hands over the 5 s default.
+    f.set_timeout_us(7)
+    _ = Verifier(_config(), f.share(), FixedAuthClock(NOW))
+    assert_equal(f.timeout_us(), 5_000_000)
 
 
 def _anchor_refused(var a: TrustAnchor, needle: String) raises:
