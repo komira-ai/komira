@@ -57,7 +57,11 @@
 #     same records with covcheck, failed (so `report` could refuse them too).
 #  5. `covcheck report` over the reports of the libraries measured, and
 #     their branch records (`--branch-lcov`), in the
-#     mode and against the target of <policy>, with the ratchet's rows of
+#     mode and against the target of <policy>, each directory of its
+#     COVERAGE_INFO_ONLY_DIRS (test-only packages, relative to the root
+#     cell's root, which is the repository's) an `--info-package`, so what
+#     covcheck finds in a package under one is information: no finding, no
+#     failure conclusion, its annotations notices; with the ratchet's rows of
 #     the measured libraries' packages only (every other row would read as
 #     a Regression: nothing of it was measured here). When there is no
 #     report (no library touched, none built, none has a test, or the
@@ -130,11 +134,23 @@ mkdir -p "$OUT"
 PUB="$OUT/publish"
 mkdir -p "$PUB" "$OUT/logs"
 
-# The policy: one COVERAGE_MODE line and one COVERAGE_TARGET_BP line.
+# The policy: one COVERAGE_MODE line, one COVERAGE_TARGET_BP line and one
+# COVERAGE_INFO_ONLY_DIRS line (a list of quoted directories).
 MODE=$(sed -n 's/^COVERAGE_MODE = "\([a-z]*\)"$/\1/p' "$POLICY") || die "cannot read $POLICY"
 case "$MODE" in census | neutral | enforce) ;; *) die "$POLICY has no single COVERAGE_MODE line naming census, neutral or enforce" ;; esac
 TARGET=$(sed -n 's/^COVERAGE_TARGET_BP = \([0-9][0-9]*\)$/\1/p' "$POLICY")
 case "$TARGET" in "" | *[!0-9]*) die "$POLICY has no single COVERAGE_TARGET_BP line" ;; esac
+INFO_DIRS=$(sed -n 's/^COVERAGE_INFO_ONLY_DIRS = \[\(.*\)\]$/\1/p' "$POLICY")
+[ "$(grep -c '^COVERAGE_INFO_ONLY_DIRS = ' "$POLICY")" -eq 1 ] && grep -q '^COVERAGE_INFO_ONLY_DIRS = \[.*\]$' "$POLICY" ||
+    die "$POLICY has no single COVERAGE_INFO_ONLY_DIRS line listing directories"
+INFO_DIRS=$(printf '%s\n' "$INFO_DIRS" | tr ',' '\n' | sed 's/^ *//; s/ *$//')
+for d in $INFO_DIRS; do
+    case "$d" in '"'*'"') ;; *) die "$POLICY: COVERAGE_INFO_ONLY_DIRS item $d is not a quoted directory" ;; esac
+    d=${d#\"}
+    d=${d%\"}
+    case "$d" in "" | /* | */ | *//* | *[!A-Za-z0-9_./+-]*) die "$POLICY: COVERAGE_INFO_ONLY_DIRS item '$d' is not a repository directory" ;; esac
+done
+INFO_DIRS=$(printf '%s\n' "$INFO_DIRS" | tr -d '"')
 
 # 1. The change.
 MB=$("$GIT" merge-base "$BASE" "$HEAD") || die "git merge-base $BASE $HEAD failed"
@@ -145,7 +161,7 @@ is_sha "$MB" || die "git merge-base answered '$MB', not a commit id"
     die "git diff --name-only $MB $HEAD failed"
 "$GIT" ls-files -z >"$OUT/repo-files" || die "git ls-files failed"
 tr '\0' '\n' <"$OUT/changed.z" >"$OUT/changed.txt"
-say "head $HEAD, merge base $MB: $(grep -c . "$OUT/changed.txt" || true) path(s) changed; policy $MODE, target $TARGET bp"
+say "head $HEAD, merge base $MB: $(grep -c . "$OUT/changed.txt" || true) path(s) changed; policy $MODE, target $TARGET bp, test-only $(echo $INFO_DIRS)"
 
 # 2. The packages. The directories of the other cells come from [cells].
 awk '
@@ -389,6 +405,7 @@ if [ "$N_REPORTS" -gt 0 ]; then
         --result-out "$PUB/result.json" --annotations-out "$PUB/annotations.json"
     while IFS= read -r x; do set -- "$@" --cobertura "$x"; done <"$OUT/reports.txt"
     while IFS= read -r x; do set -- "$@" --branch-lcov "$x"; done <"$OUT/branch_records.txt"
+    for d in $INFO_DIRS; do set -- "$@" --info-package "$d"; done
     rc=0
     "$COVCHECK" "$@" >"$OUT/logs/covcheck.log" 2>&1 || rc=$?
     cat "$OUT/logs/covcheck.log"

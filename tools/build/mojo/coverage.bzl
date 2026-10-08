@@ -30,7 +30,10 @@ and, per library (tests or none):
   branches) and the library's sources, in the mode of
   tools/build/coverage/policy.bzl, whose result.json and summary.md are
   `[coverage][gate]` (category `mojo_cov_gate`, cov_gate.sh of
-  tools/build/coverage).
+  tools/build/coverage). A library of a test-only package (its package's
+  directory in its cell is one of COVERAGE_INFO_ONLY_DIRS or under one)
+  has the same gate, which reports its findings as information
+  (`--info-package`) and so passes in every mode.
 
 What ships, the library's conda package (`<name>_conda`, its joins
 `conda_join` and `conda_release_join`), then also waits for every coverage
@@ -72,7 +75,7 @@ mojo_gcp_client, whose hand-written sources pass through its generator too)
 is NotMeasured in its gate.
 """
 
-load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_BRANCH_GATE", "COVERAGE_MODE", "COVERAGE_NO_GATE", "COVERAGE_TARGET_BP")
+load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_BRANCH_GATE", "COVERAGE_INFO_ONLY_DIRS", "COVERAGE_MODE", "COVERAGE_NO_GATE", "COVERAGE_TARGET_BP")
 load(":coverage_branch.bzl", "coverage_branch", "coverage_branch_sub_targets")
 load(":providers.bzl", "MojoToolchainInfo")
 
@@ -402,13 +405,23 @@ def _gate_inputs(ctx, runs, branch, markers):
         tests = ctx.actions.write("cov/gate/tests.txt", "".join([t + "\n" for t in sorted(tests)])),
     )
 
+def _info_only(label):
+    """Whether `label`'s package is test-only: its directory, relative to its
+    cell's root, is one of COVERAGE_INFO_ONLY_DIRS (policy.bzl) or under
+    one."""
+    for d in COVERAGE_INFO_ONLY_DIRS:
+        if label.package == d or label.package.startswith(d + "/"):
+            return True
+    return False
+
 def _gate_action(actions, bb, gate_dir, mode, info, prefix):
     """Declares the `mojo_cov_gate` action of `info` (MojoCoverageGateInfo):
     cov_gate.sh of `gate_dir` (a cov_gate_dir dependency) in `mode`, writing
     `<prefix>result.json`, `<prefix>summary.md` and `<prefix>gate.passed`.
     The branch records follow the reports after the argument
     `--branch-lcov` (none, and no such argument, for a library with no
-    test)."""
+    test). For a test-only package (_info_only), `--info-package` and its
+    package come before the reports."""
     d = gate_dir[DefaultInfo].default_outputs[0]
     result = actions.declare_output(prefix + "result.json")
     summary = actions.declare_output(prefix + "summary.md")
@@ -428,6 +441,7 @@ def _gate_action(actions, bb, gate_dir, mode, info, prefix):
             result.as_output(),
             summary.as_output(),
             marker.as_output(),
+            ["--info-package", info.package] if _info_only(info.label) else [],
             info.reports,
             ["--branch-lcov"] + info.branch_infos if info.branch_infos else [],
             hidden = d,

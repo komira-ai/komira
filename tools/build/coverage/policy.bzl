@@ -29,6 +29,17 @@ COVERAGE_MODE = "census"
 # Basis points of line (and branch) coverage per package: 10000 is 100%.
 COVERAGE_TARGET_BP = 10000
 
+# The directories of test-only packages, relative to a cell's root (the
+# layout of src/: test-only packages are under src/tests/<kind>/). A
+# package in one of them or under it is measured and shown as every package
+# is, but held to no target: what covcheck finds in it is information
+# (covcheck --info-package), never a finding, so its coverage gate passes
+# in every mode and a check run neither fails on it nor annotates it above
+# `notice`. Every finding of the package is information, BelowTarget and
+# the ratchet's included. Read by the gate (tools/build/mojo/coverage.bzl)
+# and, as written on this one line, by .github/ci/coverage_measure.sh.
+COVERAGE_INFO_ONLY_DIRS = ["src/tests"]
+
 # The ledger of libraries that cannot have a coverage gate of their own, by
 # label, each with why and where it is gated instead.
 # tools/build/coverage/no_gate.bxl holds this list equal to the Mojo

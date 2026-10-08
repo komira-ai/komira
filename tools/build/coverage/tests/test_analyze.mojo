@@ -4,6 +4,7 @@ from covcheck.analyze import FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Opt
 from covcheck.paths import RepoFiles, repo_files_of
 from covcheck.ratchet import Ratchet, parse_ratchet
 from covcheck.result import package_json
+from covcheck.stats import is_info_package
 from covcheck.text import render_bp
 
 # The one computation behind `report` and `gate`: merging reports, test
@@ -402,6 +403,39 @@ def test_unmapped_mutant_path_is_an_error() raises:
     assert_true(raised)
 
 
+def test_info_packages() raises:
+    # A test-only package's findings are information (step 8): out of
+    # `findings`, so out of the conclusion; a directory covers itself and
+    # what is under it, at a segment boundary.
+    var dirs = List[String]()
+    dirs.append("src/tests")
+    assert_true(is_info_package(String("src/tests"), dirs))
+    assert_true(is_info_package(String("src/tests/e2e/komira_x_e2e"), dirs))
+    assert_true(not is_info_package(String("src/testsuite"), dirs))
+    assert_true(not is_info_package(String("src/komira_x"), dirs))
+    assert_true(not is_info_package(String("(root)"), dirs))
+    var t = _lcov(String("SF:src/alpha/a.mojo\nDA:1,0\nend_of_record\nSF:src/beta/c.mojo\nDA:1,0\nend_of_record\n"))
+    var o = Options()
+    o.mode = String("enforce")
+    o.info_packages.append("src/beta")
+    var a = _run(t, _none(), _sources(), o)
+    assert_equal(_kinds(a), "BelowTarget:line BranchNotMeasured:branch MissingRow:line")
+    assert_equal(len(a.info_findings), 3)
+    for i in range(len(a.findings)):
+        assert_equal(a.findings[i].package, "src/alpha")
+    for i in range(len(a.info_findings)):
+        assert_equal(a.info_findings[i].package, "src/beta")
+    assert_equal(len(a.info_packages), 1)
+    assert_equal(a.info_packages[0], "src/beta")
+    assert_equal(len(a.packages), 2)
+    assert_equal(a.conclusion, "failure")
+    o.info_packages.append("src/alpha")
+    var b = _run(t, _none(), _sources(), o)
+    assert_equal(len(b.findings), 0)
+    assert_equal(len(b.info_findings), 6)
+    assert_equal(b.conclusion, "success")
+
+
 def main() raises:
     test_two_cobertura_inputs_sum_per_line()
     test_test_sources_left_out_by_default()
@@ -420,4 +454,5 @@ def main() raises:
     test_unmapped_mutant_path_is_an_error()
     test_outside_files_are_counted_once()
     test_missing_source_is_an_error()
+    test_info_packages()
     print("test_analyze: PASS")
