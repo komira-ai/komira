@@ -249,6 +249,12 @@ def test_request_id_rules() raises:
         '{"jsonrpc":"2.0","id":3,"error":{"code":-32600,"message":"Invalid Request"}}',
         "null params",
     )
+    # A boolean params is the last non-structured JSON type; refused too.
+    _expect(
+        s.handle('{"jsonrpc":"2.0","id":4,"method":"ping","params":true}'),
+        '{"jsonrpc":"2.0","id":4,"error":{"code":-32600,"message":"Invalid Request"}}',
+        "bool params",
+    )
     # The rule holds for a notification as well: scalar params make it an
     # invalid request, answered with a null id.
     _expect(

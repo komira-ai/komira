@@ -154,7 +154,7 @@ Welded (`test_srcs`), so they run whenever the library is built:
   examples (section 7): parse error, invalid request, unknown method,
   notifications, batches (one Invalid Request under MCP) and responses.
 - `tests/test_mcp_lifecycle.mojo`: the initialize gate, version negotiation,
-  request-id rules (including null and scalar `params`, on requests and notifications), initialize
+  request-id rules (including string, number, boolean and null `params`, on requests and notifications), initialize
   params checks (each member missing and of the wrong type), the cursor
   refusal, and how provider raises map to replies, each error reply
   compared whole.
