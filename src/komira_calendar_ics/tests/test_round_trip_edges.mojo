@@ -6,7 +6,8 @@
 # export moves to its first occurrence; series that start before 1970; and
 # one with no occurrence, which the export leaves out and names, without
 # resolving its zone, checking its edits or shifting the forms of the
-# events after it.
+# events after it; and an event with both a uid and an id, which the
+# export names by its uid, written or left out.
 #
 # Events and edits are compared as the API's JSON, and every report line as
 # exact text. Each test runs even when an earlier one fails, and the
@@ -330,6 +331,50 @@ def test_skipped_series_without_uid_is_named_by_id() raises:
     assert_equal(exported.skipped[0], "e9")
     assert_equal(exported.text.find("VEVENT"), -1, exported.text)
 
+
+def test_uid_is_written_over_the_id() raises:
+    # A stored event carries both an id and a uid; the uid is what an .ics
+    # names it by, on the series and on each edit.
+    var edits = List[OccurrenceOverride]()
+    edits.append(_ov('{"originalStart":"2030-09-10T09:00:00","title":"Moved"}'))
+    var a = List[IcsEvent]()
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"id":"e10","uid":"u10","start":"2030-09-03T09:00:00","timeZone":"UTC","durationSeconds":60,'
+                + '"recurrence":{"freq":"WEEKLY","interval":1,"weekdays":["TUESDAY"],"count":3}}'
+            ),
+            edits^,
+        )
+    )
+    var exported = write_ics(a, ZoneTable(), 1914364800)
+    assert_equal(len(exported.skipped), 0, "skipped")
+    assert_equal(exported.text.count("UID:u10"), 2, exported.text)
+    assert_equal(exported.text.find("e10"), -1, exported.text)
+    var back = read_ics(exported.text.as_bytes(), ZoneTable())
+    assert_equal(_report(back.report), "", "report of the re-import")
+    assert_equal(len(back.events), 1)
+    assert_equal(back.events[0].event.uid, "u10")
+    assert_equal(len(back.events[0].overrides), 1)
+
+
+def test_skipped_series_with_uid_and_id_is_named_by_uid() raises:
+    # A left-out series that has both is named in `skipped` by its uid.
+    var a = List[IcsEvent]()
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"id":"e10","uid":"u10","start":"2030-09-02T09:00:00","timeZone":"UTC","durationSeconds":60,'
+                + '"recurrence":{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2030-10-30"}}'
+            )
+        )
+    )
+    var exported = write_ics(a, ZoneTable(), 1914364800)
+    assert_equal(len(exported.skipped), 1, "skipped")
+    assert_equal(exported.skipped[0], "u10")
+    assert_equal(exported.text.find("VEVENT"), -1, exported.text)
+
+
 def main() raises:
     print("test_round_trip_edges")
     var failed = List[String]()
@@ -388,6 +433,16 @@ def main() raises:
         print("  test_skipped_series_without_uid_is_named_by_id PASS")
     except e:
         failed.append("test_skipped_series_without_uid_is_named_by_id: " + String(e))
+    try:
+        test_uid_is_written_over_the_id()
+        print("  test_uid_is_written_over_the_id PASS")
+    except e:
+        failed.append("test_uid_is_written_over_the_id: " + String(e))
+    try:
+        test_skipped_series_with_uid_and_id_is_named_by_uid()
+        print("  test_skipped_series_with_uid_and_id_is_named_by_uid PASS")
+    except e:
+        failed.append("test_skipped_series_with_uid_and_id_is_named_by_uid: " + String(e))
     for f in failed:
         print("  FAIL " + f)
     assert_true(len(failed) == 0, String(len(failed)) + " tests failed")
