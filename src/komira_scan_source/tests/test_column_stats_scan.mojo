@@ -8,14 +8,17 @@
 # from the input values by definition, never by the code under test, and a
 # null slot holds an extreme value, so reading it as a value moves min or max.
 #
-#   5. Scanners. Every integer arrow type in three layouts: no validity (the
-#      SIMD kernel and its scalar tail), with nulls (the scalar path), and a
-#      zero-copy slice at offset 3 (the SIMD load honours the offset).
+#   5. Scanners. Every integer arrow type in four layouts: no validity (the
+#      SIMD kernel and its scalar tail), with nulls (the scalar path), a
+#      zero-copy slice at offset 3 (the SIMD load honours the offset), and
+#      that slice with nulls (the scalar path honours it too).
 #      Unsigned types carry their maximum, so a sign-extending widen shows.
-#      Floats in both widths, with and without nulls. Bools: bit addressing
-#      in the second byte through an offset view, and nulls over a false bit.
-#      Strings with Int32 and Int64 offsets: nulls, an empty string (first
-#      value and new minimum), prefixes in both directions, an all-null
+#      Floats in both widths, whole and sliced, with and without nulls.
+#      Bools: bit addressing in the second byte through an offset view, with
+#      and without a null, and nulls over a false bit.
+#      Strings with Int32 and Int64 offsets: an offset view with a null,
+#      nulls, an empty string (first value and new minimum), prefixes in
+#      both directions, an all-null
 #      column, and a field that says STRING over a column with no offsets.
 #      The no-scanner arms (a DECIMAL128 field, DATE64), held only to what
 #      is right whether or not komira-ai/komira#940 is fixed. An empty batch,
@@ -152,7 +155,8 @@ def _assert_int_stats(
 
 
 def _within(est: Int64, n: Int, label: String) raises:
-    """A HyperLogLog estimate within 5% (three standard errors) of `n`."""
+    """A HyperLogLog estimate within 5% (about three standard errors at
+    p=12) of `n`."""
     var err = abs(Int(est) - n)
     assert_true(
         err * 100 <= n * 5,
@@ -175,7 +179,7 @@ def _assert_unscanned(s: ColumnStats, nulls: Int, label: String) raises:
 
 
 def _check_int[dt: DType](at: ArrowType, vals: List[Int], width: Float64, label: String) raises:
-    """Three layouts of the 11-row `vals`; index 2 holds the maximum and
+    """Four layouts of the 11-row `vals`; index 2 holds the maximum and
     index 7 the minimum of the signed fixtures."""
     var none = List[Int]()
     var c1 = _int_col[dt](vals)
@@ -197,6 +201,19 @@ def _check_int[dt: DType](at: ArrowType, vals: List[Int], width: Float64, label:
         sub.append(vals[i])
     _assert_int_stats(_stats1(c3.slice(3, 8), at), sub, none, width, label + " slice")
 
+    # The slice with nulls at physical 4 and 7 (logical 1 and 4): the
+    # scalar path must read value and validity at offset + i.
+    var c4 = _int_col[dt](vals)
+    c4.arrow_type = at
+    var pnulls = List[Int]()
+    pnulls.append(4)
+    pnulls.append(7)
+    _set_nulls(c4, pnulls)
+    var lnulls = List[Int]()
+    lnulls.append(1)
+    lnulls.append(4)
+    _assert_int_stats(_stats1(c4.slice(3, 8), at), sub, lnulls, width, label + " slice nulls")
+
 
 def _signed() -> List[Int]:
     var v = List[Int]()
@@ -212,7 +229,7 @@ def _unsigned(top: Int) -> List[Int]:
     return v^
 
 
-def test_every_integer_type_in_three_layouts() raises:
+def test_every_integer_type_in_four_layouts() raises:
     _check_int[DType.int8](ArrowType.INT8, _signed(), 1.0, "INT8")
     _check_int[DType.int16](ArrowType.INT16, _signed(), 2.0, "INT16")
     _check_int[DType.int32](ArrowType.INT32, _signed(), 4.0, "INT32")
@@ -229,35 +246,60 @@ def test_every_integer_type_in_three_layouts() raises:
     _check_int[DType.uint64](ArrowType.UINT64, _unsigned(1 << 40), 8.0, "UINT64")
 
 
-def test_floats_both_widths_with_and_without_nulls() raises:
+def _float_col(vals: List[Float64], f32: Bool) -> Column[HeapRegion]:
+    if f32:
+        var l = List[Float32]()
+        for i in range(len(vals)):
+            l.append(Float32(vals[i]))
+        return Column.from_primitive[DType.float32](PrimitiveArray[DType.float32].from_list(l^))
+    return Column.from_primitive[DType.float64](PrimitiveArray[DType.float64].from_list(vals.copy()))
+
+
+def test_floats_both_widths_four_layouts() raises:
+    """Whole column and a slice at offset 2, each with and without nulls at
+    physical 2 and 5. Expected values are folded here from the values in
+    row order (all dyadic, so float32 and the sums are exact)."""
     var vals = List[Float64]()
     for x in [1.5, -2.25, 1048576.0, 1.5, 0.5, -1048576.0, 8.0]:
         vals.append(x)
-    var nulls = List[Int]()
-    nulls.append(2)
-    nulls.append(5)
+    var pnulls = List[Int]()
+    pnulls.append(2)
+    pnulls.append(5)
     for width in range(2):
         var at = ArrowType.FLOAT32 if width == 0 else ArrowType.FLOAT64
         var w = 4.0 if width == 0 else 8.0
-        for with_nulls in range(2):
-            var col: Column[HeapRegion]
-            if width == 0:
-                var l = List[Float32]()
-                for i in range(len(vals)):
-                    l.append(Float32(vals[i]))
-                col = Column.from_primitive[DType.float32](PrimitiveArray[DType.float32].from_list(l^))
-            else:
-                col = Column.from_primitive[DType.float64](PrimitiveArray[DType.float64].from_list(vals.copy()))
-            if with_nulls == 1:
-                _set_nulls(col, nulls)
+        for layout in range(4):
+            var off = 2 if layout >= 2 else 0
+            var n = 7 - off
+            var with_nulls = layout % 2 == 1
+            var col = _float_col(vals, width == 0)
+            if with_nulls:
+                _set_nulls(col, pnulls)
+            if off > 0:
+                col = col.slice(off, n)
+            var mn = Float64.MAX_FINITE
+            var mx = -Float64.MAX_FINITE
+            var sm = 0.0
+            var seen = List[Float64]()
+            var nnull = 0
+            for p in range(off, 7):
+                if with_nulls and p in pnulls:
+                    nnull += 1
+                    continue
+                var v = vals[p]
+                mn = min(mn, v)
+                mx = max(mx, v)
+                sm += v
+                if not (v in seen):
+                    seen.append(v)
             var s = _stats1(col^, at)
-            var label = String("width ") + String(w) + " nulls " + String(with_nulls)
+            var label = String("width ") + String(w) + " layout " + String(layout)
             assert_true(s.min.is_exact() and s.max.is_exact() and s.sum.is_exact(), label)
-            assert_equal(s.min.value.value().float_val, -1048576.0 if with_nulls == 0 else -2.25, label + " min")
-            assert_equal(s.max.value.value().float_val, 1048576.0 if with_nulls == 0 else 8.0, label + " max")
-            assert_equal(s.sum.value.value().float_val, 9.25, label + " sum")
-            assert_equal(s.distinct_count.value.value().int_val, Int64(6 if with_nulls == 0 else 4), label + " NDV")
-            assert_equal(s.null_count, 2 * with_nulls, label + " nulls")
+            assert_equal(s.min.value.value().float_val, mn, label + " min")
+            assert_equal(s.max.value.value().float_val, mx, label + " max")
+            assert_equal(s.sum.value.value().float_val, sm, label + " sum")
+            assert_equal(s.distinct_count.value.value().int_val, Int64(len(seen)), label + " NDV")
+            assert_equal(s.null_count, nnull, label + " nulls")
             assert_equal(s.avg_size_bytes, w, label + " avg")
 
 
@@ -293,6 +335,15 @@ def test_bools_bits_slice_and_nulls() raises:
     nulls.append(0)
     _set_nulls(c, nulls)
     _assert_bool(_stats1(c^, ArrowType.BOOL), 1, 1, 1, 1, "null over a false bit")
+    # Offset 9 with a null at physical 11 (a false bit): logical rows are
+    # true, true, null. Validity must be read at offset + i too.
+    var v = _bools("FFFFFFFFFTTF")
+    v._offset = 9
+    v._length = 3
+    var vnull = List[Int]()
+    vnull.append(11)
+    _set_nulls(v, vnull)
+    _assert_bool(_stats1(v^, ArrowType.BOOL), 1, 1, 1, 1, "offset 9 with a null")
 
 
 def _strs(vals: List[String], valid: List[Bool], large: Bool) raises -> Column[HeapRegion]:
@@ -344,6 +395,22 @@ def test_strings_both_offset_widths() raises:
         assert_true(s3.min.is_absent() and s3.max.is_absent(), "all null" + tag)
         assert_equal(s3.distinct_count.value.value().int_val, Int64(0), "all null" + tag)
         assert_equal(s3.avg_size_bytes, 0.0, "all null" + tag)
+        # A view at offset 1, length 5, with a null at physical 3: logical
+        # rows "a", "m", null, "b", "zz". "zzz" (physical 0) and "aaa"
+        # (physical 6) lie outside, so offsets or validity read at i
+        # instead of offset + i move min, max or the counts. (`slice`
+        # refuses strings, so the view is set by hand.)
+        var v4 = List[String]()
+        var ok4 = List[Bool]()
+        for x in ["zzz", "a", "m", "q", "b", "zz", "aaa"]:
+            v4.append(String(x))
+        for x in [True, True, True, False, True, True, True]:
+            ok4.append(x)
+        var c4 = _strs(v4, ok4, large == 1)
+        c4._offset = 1
+        c4._length = 5
+        c4._null_count = 1
+        _assert_str(_stats1(c4^, at), "a", "zz", 4, 1, 5.0 / 4.0, "offset view" + tag)
 
 
 def test_string_field_over_a_column_without_offsets() raises:

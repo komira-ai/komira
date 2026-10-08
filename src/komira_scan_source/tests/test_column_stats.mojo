@@ -13,7 +13,7 @@
 #   2. HyperLogLog. Register index and run length are checked bit by bit on
 #      hand-built hashes; `add_bulk` equals the scalar `add`; `merge` of two
 #      sketches equals the sketch of the union; `copy` is deep; `count` is
-#      exact for 0, 1 and 10 values and within 5% (three standard errors) for
+#      exact for 0, 1 and 10 values and within 5% (about three standard errors at p=12) for
 #      larger sets. `_hll_sigma` / `_hll_tau` are held to their series
 #      definitions, and are non-negative over their whole input domain (the
 #      4097 fractions k/4096 `count` can pass), which is why `count`'s
@@ -129,7 +129,8 @@ def _stats1(var col: Column[HeapRegion], at: ArrowType) raises -> ColumnStats:
 
 
 def _within(est: Int64, n: Int, label: String) raises:
-    """A HyperLogLog estimate within 5% (three standard errors) of `n`."""
+    """A HyperLogLog estimate within 5% (about three standard errors at
+    p=12) of `n`."""
     var err = abs(Int(est) - n)
     assert_true(
         err * 100 <= n * 5,
@@ -469,14 +470,14 @@ def test_note_string_min_max_length_and_ndv() raises:
 def test_finalize_no_scanner_kind_with_values() raises:
     """A NONE-kind accumulator that saw values (unreachable from
     `compute_column_stats`, which never feeds one) gets no min/max/sum but
-    keeps its exact NDV. Its average size (0 for BINARY, which is not
-    fixed-width) is not asserted (komira-ai/komira#940)."""
+    computes an NDV. Neither the NDV (komira-ai/komira#940 may make it
+    Absent for NONE kinds) nor the average size (0 for BINARY, which is not
+    fixed-width) is asserted."""
     var acc = _ColAccum(ArrowType.BINARY, 2)
     acc.note_int(Int64(3))
     acc.note_int(Int64(4))
     var s = _finalize_accum(acc)
     assert_true(s.min.is_absent() and s.max.is_absent() and s.sum.is_absent())
-    assert_equal(s.distinct_count.value.value().int_val, Int64(2))
 
 
 def test_note_bool_and_note_float_extremes() raises:
