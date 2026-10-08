@@ -1,15 +1,30 @@
-"""The oracle's DuckDB connection loads no extension and reads nothing but its tables.
+"""The oracle's DuckDB connection pins its calendar and zone, loads no extension and reads nothing but its tables.
 
     test_connect.py
 
 On the connection gen_expected.connect() returns (the one :expected runs
 every case on), in a process of its own:
 
-1. The settings are what CONFIG says: autoload_known_extensions,
-   autoinstall_known_extensions and enable_external_access are all false.
-   Catches any one of them dropped from CONFIG or left at DuckDB's default
-   (autoinstall alone has no other witness here: with autoload off, no
-   query reaches the install).
+0. The process runs under a locale whose calendar is not Gregorian and a
+   time zone that is not UTC: `LC_ALL=th_TH.UTF-8` and `TZ=Asia/Kathmandu`
+   are set in the environment before duckdb is imported, so ICU reads
+   them when the first database loads it (ICU computes its default locale
+   and zone once, from LC_ALL and TZ; no glibc locale need be installed).
+   On the oracle's connection `date_part('year', ...)` and
+   `date_part('hour', ...)` of the TIMESTAMPTZ `2026-10-01 00:00:00+00`
+   are 2026 and 0, through run_query() as a case runs. A connection of the
+   test's own that pins neither must answer 2569 (the Buddhist year) and 5
+   (+05:45), or the environment did not reach ICU and the probe proves
+   nothing: that is a failure too. Catches `Calendar` dropped from CONFIG
+   and `SET TimeZone` dropped from connect(): the oracle's answers would
+   then follow the worker's locale and zone.
+1. The settings are what CONFIG and connect() say: autoload_known_extensions,
+   autoinstall_known_extensions and enable_external_access are all false,
+   Calendar is `gregorian` and TimeZone `UTC`. Catches any one of them
+   dropped from CONFIG or left at DuckDB's default (autoinstall alone has
+   no other witness here: with autoload off, no query reaches the install;
+   under 0's environment the Calendar and TimeZone defaults are `buddhist`
+   and `Asia/Kathmandu`, so a dropped pin is seen here as well).
 2. A case that calls a function of an extension DuckDB 1.5.6 would
    autoload but the wheel does not hold (inet's `html_escape`), through
    run_query() as gen_expected.py runs a case, fails as a catalog error
@@ -35,9 +50,13 @@ every case on), in a process of its own:
 
 import os
 
-import duckdb
+# Before duckdb is imported: ICU reads these once, when it first loads.
+os.environ["LC_ALL"] = "th_TH.UTF-8"
+os.environ["TZ"] = "Asia/Kathmandu"
 
-import gen_expected
+import duckdb  # noqa: E402
+
+import gen_expected  # noqa: E402
 
 FAILURES = []
 
@@ -73,10 +92,38 @@ def check_settings(con):
         ("autoinstall_known_extensions", False),
         ("enable_external_access", False),
         ("threads", 1),
+        ("Calendar", "gregorian"),
+        ("TimeZone", "UTC"),
     ]:
         got = con.execute("SELECT current_setting(CAST(? AS VARCHAR))", [name]).fetchone()[0]
         if got != want:
             fail("setting %s is %r, want %r" % (name, got, want))
+
+
+# ICU's date_part of one instant: its year in the session's Calendar, its
+# hour in the session's TimeZone.
+_YEAR_HOUR = (
+    "SELECT date_part(CAST('year' AS VARCHAR), CAST('2026-10-01 00:00:00+00' AS TIMESTAMPTZ)) AS y, "
+    "date_part(CAST('hour' AS VARCHAR), CAST('2026-10-01 00:00:00+00' AS TIMESTAMPTZ)) AS h"
+)
+
+
+def check_calendar_zone(con):
+    """The oracle's connection answers in the Gregorian calendar and UTC
+    under a Thai locale and a +05:45 zone; a connection pinning neither
+    must not, or the environment did not reach ICU."""
+    got = gen_expected.run_query(con, _YEAR_HOUR).to_pylist()
+    if got != [{"y": 2026, "h": 0}]:
+        fail("date_part on the oracle's connection is %s, want year 2026 and hour 0 (Gregorian, UTC)" % got)
+    side = duckdb.connect(config={"autoload_known_extensions": False, "autoinstall_known_extensions": False})
+    raw = side.execute(_YEAR_HOUR).fetchall()
+    settings = side.execute("SELECT current_setting(CAST('Calendar' AS VARCHAR)), "
+                            "current_setting(CAST('TimeZone' AS VARCHAR))").fetchall()
+    side.close()
+    if raw != [(2569, 5)]:
+        fail("date_part on an unpinned connection under LC_ALL=th_TH.UTF-8, TZ=Asia/Kathmandu is %s "
+             "(Calendar, TimeZone %s), want (2569, 5): the environment did not reach ICU, so the probe "
+             "proves nothing" % (raw, settings))
 
 
 def check_no_autoload(con):
@@ -132,6 +179,7 @@ def check_tables(con):
 
 con = gen_expected.connect()
 check_settings(con)
+check_calendar_zone(con)
 check_no_autoload(con)
 check_no_file_read(con)
 check_tables(con)

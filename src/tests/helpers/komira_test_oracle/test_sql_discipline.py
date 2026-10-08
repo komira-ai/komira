@@ -93,6 +93,40 @@ What it proves, and the defect it catches:
   that reads FUNCTION nodes only (the keywords are COLUMN_REFs in the
   parse), a missing name, a missed binding place, and a rule that refuses
   every column so named.
+- row order: each aggregate on `_ORDER_SENSITIVE` (`list`, `first`,
+  `arg_max`, `mode`...) is refused with no ORDER BY of its own, as a plain
+  aggregate and as a window function (an OVER clause's ORDER BY is not
+  its own), schema-qualified and upper case too, and accepted with one;
+  its ORDER BY key is held to the ASC/DESC and NULLS rule. JSON's
+  `json_group_array` and its kin are refused with an ORDER BY or without.
+  Catches the rule off, a list missing a name, a check that reads
+  `order_bys` but not a window's `arg_orders`, and one that refuses the
+  aggregate even ordered. The list is the running DuckDB's: every
+  aggregate `duckdb_functions()` holds must be on `_ORDER_SENSITIVE` or on
+  `_ORDER_FREE` here (each group with the reason its answer is the same in
+  any order), never both, and every name on either must be an aggregate;
+  `_ORDER_MACROS` must be exactly the built-in macros that reach a listed
+  aggregate with no ORDER BY, directly or through another macro. Catches a
+  name dropped, misspelt or renamed, and a DuckDB upgrade that adds an
+  aggregate or such a macro. DuckDB lists its window functions as
+  aggregates too: each on `_WINDOW_ORDERED` (`row_number`, `lead`,
+  `first_value`...) is refused with an empty OVER clause (and
+  `row_number()` with only a PARTITION BY) and accepted with an ORDER BY
+  in its OVER clause or of its own; the rank family, order-free, is
+  accepted with an empty OVER clause. Catches a window rule that reads
+  only `arg_orders` or only `orders`.
+- list sorts: `list_sort` (`array_sort`) and `list_grade_up`
+  (`array_grade_up`, `grade_up`) are refused with no direction, with a
+  direction but no NULL placement, with `DEFAULT` or `ORDER_DEFAULT` for
+  either, with a column for either, and as a method call; accepted with
+  both as cast literals in either of DuckDB's spellings and any case.
+  `list_reverse_sort` (`array_reverse_sort`) is refused even with its NULL
+  placement. The premise is run, not only parsed: under `default_order`
+  ASC and DESC and `default_null_order` NULLS_FIRST and NULLS_LAST, one-
+  argument `list_sort` and `list_reverse_sort` change their answer while
+  the accepted spellings do not. Catches the rule off, `DEFAULT` taken for
+  a direction, only the argument count checked, and a premise DuckDB no
+  longer holds.
 - one SELECT: two statements and a DELETE are refused (the DELETE by
   `json_serialize_sql` itself, which serializes only SELECTs).
 """
@@ -284,6 +318,53 @@ REFUSED = [
     ("DELETE FROM t", "Only SELECT statements can be serialized"),
 ]
 
+# Row order: each order-sensitive aggregate, unordered, plain and as a
+# window function; JSON's macros over string_agg, ordered or not; list sorts
+# that leave their direction or NULL placement to the session.
+REFUSED += [
+    ("SELECT %s(a) FROM t" % name,
+     "select_list[0]: %s() with no ORDER BY of its own depends on the order rows reach it" % name)
+    for name in sorted(sql_discipline._ORDER_SENSITIVE)
+] + [
+    ("SELECT %s(a) OVER (ORDER BY id ASC NULLS LAST) FROM t" % name,
+     "select_list[0]: %s() with no ORDER BY of its own" % name)
+    for name in ("list", "first", "arg_max")
+] + [
+    # Qualified and upper case: the name is compared without case.
+    ("SELECT %s(a) OVER () FROM t" % name,
+     "select_list[0]: %s() with no ORDER BY in its OVER clause or of its own" % name)
+    for name in sorted(sql_discipline._WINDOW_ORDERED)
+] + [
+    ("SELECT row_number() OVER (PARTITION BY k) FROM t",
+     "select_list[0]: row_number() with no ORDER BY in its OVER clause or of its own"),
+    ("SELECT main.FIRST(a) FROM t", ("select_list[0]: ", "() with no ORDER BY of its own")),
+    ("SELECT k FROM groups GROUP BY k HAVING CAST(string_agg(v, CAST(',' AS VARCHAR)) AS VARCHAR) <> CAST('' AS VARCHAR)",
+     "having.left.child: string_agg() with no ORDER BY of its own"),
+    ("SELECT list(a ORDER BY b ASC) FROM t",
+     "order_bys.orders[0]: an ORDER BY key without NULLS FIRST or NULLS LAST"),
+    ("SELECT json_group_array(a) FROM t", "select_list[0]: json_group_array() is a macro over an aggregate"),
+    ("SELECT json_group_object(k, v ORDER BY k ASC NULLS LAST) FROM t",
+     "select_list[0]: json_group_object() is a macro over an aggregate"),
+    ("SELECT json_group_structure(a) FROM t", "select_list[0]: json_group_structure() is a macro over an aggregate"),
+    ("SELECT list_sort(l) FROM t", "select_list[0]: list_sort() without a direction and a NULL placement"),
+    ("SELECT l.list_sort() FROM t", "select_list[0]: list_sort() without a direction"),
+    ("SELECT list_sort(l, CAST('ASC' AS VARCHAR)) FROM t", "select_list[0]: list_sort() without a direction"),
+    ("SELECT list_sort(l, CAST('DEFAULT' AS VARCHAR), CAST('NULLS LAST' AS VARCHAR)) FROM t",
+     "select_list[0]: list_sort() without a direction"),
+    ("SELECT array_sort(l, CAST('DESC' AS VARCHAR), CAST('ORDER_DEFAULT' AS VARCHAR)) FROM t",
+     "select_list[0]: array_sort() without a direction"),
+    ("SELECT list_sort(l, s, CAST('NULLS LAST' AS VARCHAR)) FROM t", "select_list[0]: list_sort() without a direction"),
+    ("SELECT grade_up(l) FROM t", "select_list[0]: grade_up() without a direction"),
+    ("SELECT list_grade_up(l, CAST('ASC' AS VARCHAR), CAST('DEFAULT' AS VARCHAR)) FROM t",
+     "select_list[0]: list_grade_up() without a direction"),
+    ("SELECT array_grade_up(l, CAST('ASC' AS VARCHAR), CAST(NULL AS VARCHAR)) FROM t",
+     "select_list[0]: array_grade_up() without a direction"),
+    ("SELECT list_reverse_sort(l, CAST('NULLS LAST' AS VARCHAR)) FROM t",
+     "select_list[0]: list_reverse_sort() sorts against the session's default_order"),
+    ("SELECT array_reverse_sort(l) FROM t",
+     "select_list[0]: array_reverse_sort() sorts against the session's default_order"),
+]
+
 # The ORDER BY and literal queries above, their rule kept.
 ACCEPTED = [
     "SELECT a FROM t ORDER BY a ASC NULLS LAST",
@@ -331,6 +412,26 @@ ACCEPTED = [
     "WITH c AS (SELECT a FROM t) SELECT a FROM t WHERE a IN (SELECT a FROM c)",
     "WITH RECURSIVE r(n) AS (SELECT CAST(1 AS BIGINT) UNION ALL "
     "SELECT n + CAST(1 AS BIGINT) FROM r WHERE n < CAST(3 AS BIGINT)) SELECT n FROM r",
+]
+
+# Row order kept: each order-sensitive aggregate with its own ORDER BY,
+# plain and as a window function; the order-free aggregates unordered; list
+# sorts naming direction and NULL placement in either spelling and case.
+ACCEPTED += [
+    "SELECT %s(a ORDER BY b ASC NULLS LAST) FROM t" % name for name in sorted(sql_discipline._ORDER_SENSITIVE)
+] + [
+    "SELECT list(a ORDER BY b DESC NULLS FIRST) OVER (ORDER BY id ASC NULLS LAST) FROM t",
+    "SELECT first(a ORDER BY b ASC NULLS LAST) OVER () FROM t",
+] + [
+    "SELECT %s(a) OVER (ORDER BY b ASC NULLS LAST) FROM t" % name for name in sorted(sql_discipline._WINDOW_ORDERED)
+] + [
+    "SELECT lead(a ORDER BY b ASC NULLS LAST) OVER () FROM t",
+    "SELECT rank() OVER (), dense_rank() OVER (), percent_rank() OVER (), cume_dist() OVER () FROM t",
+    "SELECT count(a), sum(a), min(a), max(a), histogram(a), bitstring_agg(a), avg(a) FROM t",
+    "SELECT list_sort(l, CAST('ASC' AS VARCHAR), CAST('NULLS LAST' AS VARCHAR)) FROM t",
+    "SELECT array_sort(l, CAST('DESCENDING' AS VARCHAR), CAST('NULLS_FIRST' AS VARCHAR)) FROM t",
+    "SELECT array_grade_up(l, CAST('desc' AS VARCHAR), CAST('nulls first' AS VARCHAR)) FROM t",
+    "SELECT list_sort(list(a ORDER BY b ASC NULLS LAST), CAST('ASC' AS VARCHAR), CAST('NULLS LAST' AS VARCHAR)) FROM t",
 ]
 
 # The tables the queries above may name, as gen_expected.py passes its own.
@@ -483,10 +584,140 @@ def check_list_is_duckdbs(con):
         FAILURES.append("_MACROS lists %s, which is no built-in macro reaching anything unstable" % name)
 
 
+# Every other aggregate of DuckDB v1.5.6, and why its answer is the same in
+# any order of the same rows (rounding aside, which a case's `float` policy
+# is for). test_sql_discipline requires this and _ORDER_SENSITIVE to cover
+# duckdb_functions()'s aggregates, apart.
+_ORDER_FREE = frozenset([
+    # Counts, extremes, logic and bits: commutative and associative.
+    "bit_and", "bit_or", "bit_xor", "bool_and", "bool_or", "count", "count_if", "count_star",
+    "countif", "max", "min",
+    # Integer and decimal sums are exact; float sums, products and moments
+    # differ only by rounding.
+    "avg", "corr", "covar_pop", "covar_samp", "favg", "fsum", "kahan_sum", "kurtosis",
+    "kurtosis_pop", "mean", "product", "regr_avgx", "regr_avgy", "regr_count", "regr_intercept",
+    "regr_r2", "regr_slope", "regr_sxx", "regr_sxy", "regr_syy", "sem", "skewness", "stddev",
+    "stddev_pop", "stddev_samp", "sum", "sum_no_overflow", "sumkahan", "var_pop", "var_samp",
+    "variance",
+    # Order statistics of the multiset; a HyperLogLog's registers are
+    # maxima; counts per value.
+    "approx_count_distinct", "entropy", "mad", "median", "quantile", "quantile_cont", "quantile_disc",
+    # A map ordered by key (histogram), counts over fixed bins
+    # (histogram_exact), bits set by value (bitstring_agg).
+    "bitstring_agg", "histogram", "histogram_exact",
+    # Window functions DuckDB lists as aggregates: with no ORDER BY every
+    # row is a peer, so each row ranks 1 (percent_rank 0, cume_dist 1).
+    "cume_dist", "dense_rank", "percent_rank", "rank", "rank_dense",
+])
+
+
+def _unordered_calls(con, body):
+    """The names of the calls in a macro body that carry no ORDER BY of
+    their own."""
+    text = con.execute("SELECT json_serialize_sql(CAST(? AS VARCHAR))", [body]).fetchone()[0]
+    tree = json.loads(text)
+    if tree.get("error"):
+        raise ValueError(tree.get("error_message"))
+    names = set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        cls = node.get("class")
+        if cls in ("FUNCTION", "WINDOW") and not sql_discipline._own_orders(node, cls):
+            names.add(str(node.get("function_name", "")).lower())
+        for value in node.values():
+            walk(value)
+
+    walk(tree)
+    return names
+
+
+def check_order_lists(con):
+    """_ORDER_SENSITIVE, _WINDOW_ORDERED and _ORDER_FREE split the running
+    DuckDB's aggregates (window functions included) between them, and _ORDER_MACROS is exactly the built-in
+    macros that reach an order-sensitive aggregate with no ORDER BY."""
+    rows = con.execute(
+        "SELECT DISTINCT lower(function_name), function_type, macro_definition FROM duckdb_functions()").fetchall()
+    aggregates = {r[0] for r in rows if r[1] == "aggregate"}
+    sensitive = sql_discipline._ORDER_SENSITIVE | sql_discipline._WINDOW_ORDERED
+    for name in sorted(sql_discipline._ORDER_SENSITIVE & sql_discipline._WINDOW_ORDERED):
+        FAILURES.append("%s is on both _ORDER_SENSITIVE and _WINDOW_ORDERED" % name)
+    for name in sorted(sensitive & _ORDER_FREE):
+        FAILURES.append("aggregate %s is on both _ORDER_SENSITIVE and _ORDER_FREE" % name)
+    for name in sorted((sensitive | _ORDER_FREE) - aggregates):
+        FAILURES.append("%s is listed as an aggregate, which this DuckDB does not have" % name)
+    for name in sorted(aggregates - sensitive - _ORDER_FREE):
+        FAILURES.append("aggregate %s is on neither _ORDER_SENSITIVE nor _ORDER_FREE" % name)
+    macros = []
+    for name, ftype, body in rows:
+        if ftype == "macro" and body is not None:
+            try:
+                macros.append((name, _unordered_calls(con, "SELECT " + body)))
+            except ValueError as e:
+                FAILURES.append("macro %s: DuckDB does not parse its definition: %s" % (name, e))
+    bad = set(sensitive)
+    derived = set()
+    changed = True
+    while changed:
+        changed = False
+        for name, calls in macros:
+            if name not in bad and calls & bad:
+                bad.add(name)
+                derived.add(name)
+                changed = True
+    for name in sorted(derived - sql_discipline._ORDER_MACROS):
+        FAILURES.append("macro %s reaches an order-sensitive aggregate unordered; _ORDER_MACROS does not list it" % name)
+    for name in sorted(sql_discipline._ORDER_MACROS - derived):
+        FAILURES.append("_ORDER_MACROS lists %s, which is no built-in macro reaching one" % name)
+
+
+def check_sort_premise():
+    """Run, not only parsed: a list sort with no direction follows
+    default_order and default_null_order, list_reverse_sort follows
+    default_order whatever its argument, and the spellings check() accepts
+    do not."""
+    con = duckdb.connect()
+    lst = "[CAST(2 AS BIGINT), CAST(NULL AS BIGINT), CAST(1 AS BIGINT)]"
+    queries = {
+        "list_sort(l)": "SELECT list_sort(%s)" % lst,
+        "list_reverse_sort(l, NULLS LAST)": "SELECT list_reverse_sort(%s, CAST('NULLS LAST' AS VARCHAR))" % lst,
+        "list_sort(l, ASC, NULLS LAST)":
+            "SELECT list_sort(%s, CAST('ASC' AS VARCHAR), CAST('NULLS LAST' AS VARCHAR))" % lst,
+        "array_grade_up(l, desc, nulls_first)":
+            "SELECT array_grade_up(%s, CAST('desc' AS VARCHAR), CAST('nulls_first' AS VARCHAR))" % lst,
+    }
+    seen = {k: set() for k in queries}
+    for order in ("ASC", "DESC"):
+        for nulls in ("NULLS_FIRST", "NULLS_LAST"):
+            con.execute("SET default_order = '%s'" % order)
+            con.execute("SET default_null_order = '%s'" % nulls)
+            for key, sql in queries.items():
+                seen[key].add(repr(con.execute(sql).fetchone()[0]))
+    con.close()
+    for key in ("list_sort(l)", "list_reverse_sort(l, NULLS LAST)"):
+        if len(seen[key]) < 2:
+            FAILURES.append("%s answers %s under every default_order and default_null_order; "
+                            "the rule that refuses it rests on a premise this DuckDB does not hold" % (key, seen[key]))
+    for key in ("list_sort(l, ASC, NULLS LAST)", "array_grade_up(l, desc, nulls_first)"):
+        if len(seen[key]) != 1:
+            FAILURES.append("%s answers %s, varying with the session's defaults; check() accepts it" % (key, sorted(seen[key])))
+        try:
+            sql_discipline.check(duckdb.connect(), queries[key], ())
+        except sql_discipline.DisciplineError as e:
+            FAILURES.append("check() refuses the run spelling %s: %s" % (key, e))
+
+
 def main():
     con = duckdb.connect()
     check_reached(con)
     check_list_is_duckdbs(con)
+    check_order_lists(con)
+    check_sort_premise()
     for sql in ACCEPTED:
         try:
             sql_discipline.check(con, sql, TABLES)

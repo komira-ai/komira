@@ -23,14 +23,19 @@ The tables a query names are the datasets of datasets.py (`types`, `nulls`,
 from its seed or its rows and handed to DuckDB as a pyarrow table: no file
 is read back, and nothing komira wrote is an input.
 
-DuckDB runs with `threads = 1`, `TimeZone = 'UTC'`, no extension
-autoloaded or autoinstalled, no external access (CONFIG) and its defaults
-otherwise (query semantics, preamble). Each query is first held to
+DuckDB runs with `threads = 1`, no extension autoloaded or autoinstalled,
+no external access (CONFIG, set when the database opens), `TimeZone =
+'UTC'` and `Calendar = 'gregorian'` (set right after, before any query) and
+its defaults otherwise (query semantics, preamble): ICU takes its default
+TimeZone and Calendar from the process's TZ and locale, so both are pinned. Each query is first held to
 sql_discipline.py (every ORDER BY key states ASC/DESC and NULLS FIRST/LAST,
 every literal is CAST, no function on its list of those reading more than
 their arguments (a clock, a random draw, the session, SQL text, the running
-DuckDB), and FROM names only the tables registered here, with no AT
-clause, its own CTEs and the allowed table functions), on the exact text that is then run. The result is rendered by render.py to
+DuckDB), no aggregate whose answer depends on the order rows reach it
+(`list`, `string_agg`, `first`...) without an ORDER BY of its own, no
+`list_sort` that leaves its direction or NULL placement to the session,
+and FROM names only the tables registered here, with no AT clause, its own
+CTEs and the allowed table functions), on the exact text that is then run. The result is rendered by render.py to
 
     <output directory>/expect/<shard>/<case>.tsv
 
@@ -74,7 +79,15 @@ CONFIG = {
 def connect():
     con = duckdb.connect(config=CONFIG)
     con.execute("SET threads = 1")
+    # ICU (in the wheel) takes its default TimeZone from the process's TZ
+    # and its default Calendar from its locale when it loads
+    # (icu_extension.cpp, LoadInternal): under LC_ALL=th_TH.UTF-8 the
+    # Calendar is `buddhist`, and date_part('year', ...) of a TIMESTAMPTZ in
+    # 2026 answers 2569. Both are set here, before the first query: the
+    # wheel refuses `Calendar` in the config DuckDB opens with ("options
+    # were not recognized").
     con.execute("SET TimeZone = 'UTC'")
+    con.execute("SET Calendar = 'gregorian'")
     for name in datasets.NAMES:
         con.register(name, datasets.build(name).table)
     for name in twin_inputs.NAMES:

@@ -15,6 +15,28 @@ a function on the lists below):
   stated. A window function's own ORDER BY (`first_value(x ORDER BY y)
   OVER (...)`) is held to the same rule: DuckDB keeps it in the window's
   `arg_orders`, beside the OVER clause's `orders`;
+- an aggregate in `_ORDER_SENSITIVE` (below: `list`, `string_agg`,
+  `first`, `arg_max`, `mode`...) has an ORDER BY of its own, which the rule
+  above holds like any other: as a plain aggregate (`list(v ORDER BY k ASC
+  NULLS LAST)`, DuckDB's `order_bys`) and as a window function
+  (`list(v ORDER BY k ASC NULLS LAST) OVER (...)`, its `arg_orders`; the
+  OVER clause's ORDER BY is not taken for it, more than DuckDB needs for
+  some frames). Without one its answer is the order the rows reach it,
+  which is DuckDB's physical order: a plan computes the same aggregate in
+  its own. A built-in macro in `_ORDER_MACROS` (JSON's `json_group_array`
+  and its kin, over `string_agg` with no ORDER BY) is refused outright: no
+  ORDER BY reaches the aggregate inside it. A window function in
+  `_WINDOW_ORDERED` (`row_number`, `lead`, `first_value`...) needs an ORDER
+  BY in its OVER clause or of its own. Neither rule sees ties: an ORDER BY
+  whose keys tie leaves the tied rows in DuckDB's order;
+- `list_sort` and its aliases and `list_grade_up` and its aliases name
+  their direction and NULL placement as their second and third arguments,
+  each a cast string literal DuckDB reads as one (`ASC`/`DESC`, `NULLS
+  FIRST`/`NULLS LAST`, either spelling DuckDB's EnumUtil knows): with fewer
+  arguments, or `DEFAULT`, DuckDB takes the session's `default_order` and
+  `default_null_order` (ListNormalSortBind, ListGradeUpBind, list_sort.cpp).
+  `list_reverse_sort` (`array_reverse_sort`) is refused: it always reads
+  `default_order` and sorts the other way (ListReverseSortBind);
 - every literal is the operand of a CAST (query semantics, preamble: the
   oracle casts every literal to the plan literal's type), except a literal
   that is itself the count of a LIMIT or an OFFSET, which is a plan
@@ -98,6 +120,31 @@ unstable functions and `_MACROS` from the running DuckDB's
 `duckdb_functions()` and fails if a function is missing here or `_MACROS`
 differs from the macros it derives. Table functions and table macros are
 outside that derivation: the FROM allowlist refuses every one not named.
+
+`_ORDER_SENSITIVE` holds every aggregate of DuckDB v1.5.6 (its
+functions.json files under src/function/aggregate and
+extension/core_functions/aggregate, with their aliases) whose answer,
+beyond floating-point rounding, can differ between two orders of the same
+rows: those that keep a row's value by its position (`first`/`arbitrary`,
+`last`, `any_value`), collect values in arrival order (`list`/`array_agg`,
+`string_agg`/`group_concat`/`listagg`), break a tie by arrival (the
+`arg_min`/`arg_max` family and `min_by`/`max_by`, which keep the first row
+of an equal key; `mode`, the lowest insert position; `approx_top_k`), or
+summarize by an order-dependent sketch (`approx_quantile`'s t-digest,
+`reservoir_quantile`'s reservoir). DuckDB's own flag
+(AggregateOrderDependent) is no guide: every aggregate but count, min, max,
+bool_and/bool_or, the integer sums, mad and quantile keeps the default
+ORDER_DEPENDENT, `avg` and `bitstring_agg` included. Not listed: `histogram`
+(an ordered map keyed by value), `histogram_exact` and `bitstring_agg`
+(counts and bits over fixed bins), the float aggregates whose order changes
+only rounding (`sum`, `avg`, `var_*`, `corr`... which the case's `float`
+policy is for), and the rest, which commute. DuckDB v1.5.6's
+`duckdb_functions()` also lists its window functions as aggregates; those
+are `_WINDOW_ORDERED` or, the rank family, order-free. test_sql_discipline.py
+holds the lists to the running DuckDB: every aggregate it has must be on
+one of these lists or on the test's own list of order-free aggregates, and
+`_ORDER_MACROS` must
+be exactly the built-in macros reaching a listed aggregate with no ORDER BY.
 
 The check walks the JSON DuckDB's `json_serialize_sql` makes of the
 statement, not the text, so a comment, a string literal or a line break
@@ -197,6 +244,77 @@ _UNSTABLE = frozenset([
 # Function names that read the session's catalog, settings, logs or storage.
 _SESSION_PREFIXES = ("duckdb_", "pragma_")
 
+# Aggregates whose answer depends on the order rows reach them (the module
+# docstring says how the list is derived); each needs an ORDER BY of its own.
+_ORDER_SENSITIVE = frozenset([
+    # Keep a row's value by its position.
+    "any_value",
+    "arbitrary",
+    "first",
+    "last",
+    # Collect values in arrival order.
+    "array_agg",
+    "group_concat",
+    "list",
+    "listagg",
+    "string_agg",
+    # Break a tie by arrival: the first row of an equal key wins.
+    "arg_max",
+    "arg_max_null",
+    "arg_max_nulls_last",
+    "arg_min",
+    "arg_min_null",
+    "arg_min_nulls_last",
+    "argmax",
+    "argmin",
+    "max_by",
+    "min_by",
+    # The most frequent value, a tie to the lowest insert position; the top
+    # k by count, ties in arrival order.
+    "approx_top_k",
+    "mode",
+    # Order-dependent sketches: a t-digest, a reservoir.
+    "approx_quantile",
+    "reservoir_quantile",
+])
+
+# Window functions whose answer is a row's position among the others:
+# with neither an OVER clause ORDER BY nor one of their own, that position
+# is DuckDB's physical order. (rank, dense_rank, rank_dense, percent_rank
+# and cume_dist are not here: with no ORDER BY every row is a peer of every
+# other, and each answers the same for all.)
+_WINDOW_ORDERED = frozenset([
+    "fill",
+    "first_value",
+    "lag",
+    "last_value",
+    "lead",
+    "nth_value",
+    "ntile",
+    "row_number",
+])
+
+# Built-in scalar macros over an _ORDER_SENSITIVE aggregate with no ORDER
+# BY (the JSON extension's: string_agg(...)); an ORDER BY on the call does
+# not reach it. test_sql_discipline.py requires this set to be exactly the
+# one it derives.
+_ORDER_MACROS = frozenset([
+    "json_group_array",
+    "json_group_object",
+    "json_group_structure",
+])
+
+# List sorts whose direction and NULL placement default to the session's
+# settings unless their 2nd and 3rd arguments name them.
+_LIST_SORTS = frozenset(["array_grade_up", "array_sort", "grade_up", "list_grade_up", "list_sort"])
+# A list sort whose direction is always the session's default_order, flipped.
+_REVERSE_SORTS = frozenset(["array_reverse_sort", "list_reverse_sort"])
+# What DuckDB's EnumUtil reads as a direction and a NULL placement, upper
+# case (list_sort upper-cases its argument); `DEFAULT` and `ORDER_DEFAULT`
+# are not here: they read the session.
+_DIRECTIONS = frozenset(["ASC", "ASCENDING", "DESC", "DESCENDING"])
+_NULL_ORDERS = frozenset(["NULLS FIRST", "NULLS LAST", "NULLS_FIRST", "NULLS_LAST"])
+
 # The table functions a query may call in FROM. Each computes its rows from
 # its arguments alone, and the arguments are held to every rule here. No
 # ORACLE case calls one today; these are the row sources a plan case needs
@@ -268,6 +386,49 @@ def _value_keyword(node, in_table_fn):
     return None
 
 
+def _string_literal(node):
+    """The upper-cased text of a string literal, cast or not, or None."""
+    if isinstance(node, dict) and node.get("class") == "CAST":
+        node = node.get("child")
+    if not isinstance(node, dict) or node.get("class") != "CONSTANT":
+        return None
+    value = node.get("value") or {}
+    if value.get("is_null") or not isinstance(value.get("value"), str):
+        return None
+    return value["value"].upper()
+
+
+def _own_orders(node, cls):
+    """The ORDER BY keys a call carries for its own arguments."""
+    if cls == "WINDOW":
+        return node.get("arg_orders") or []
+    return (node.get("order_bys") or {}).get("orders") or []
+
+
+def _check_order_reads(node, cls, path, problems):
+    """Hold a FUNCTION or WINDOW node to the row-order and list-sort rules."""
+    fname = str(node.get("function_name", "")).lower()
+    if fname in _ORDER_SENSITIVE and not _own_orders(node, cls):
+        problems.append("%s: %s() with no ORDER BY of its own depends on the order rows reach it"
+                        % (path, node["function_name"]))
+    if cls == "WINDOW" and fname in _WINDOW_ORDERED and not node.get("orders") and not node.get("arg_orders"):
+        problems.append("%s: %s() with no ORDER BY in its OVER clause or of its own depends on the order rows reach it"
+                        % (path, node["function_name"]))
+    if cls != "FUNCTION":
+        return
+    if fname in _ORDER_MACROS:
+        problems.append("%s: %s() is a macro over an aggregate with no ORDER BY; no ORDER BY reaches it"
+                        % (path, node["function_name"]))
+    elif fname in _REVERSE_SORTS:
+        problems.append("%s: %s() sorts against the session's default_order" % (path, node["function_name"]))
+    elif fname in _LIST_SORTS:
+        args = node.get("children") or []
+        if (len(args) != 3 or _string_literal(args[1]) not in _DIRECTIONS
+                or _string_literal(args[2]) not in _NULL_ORDERS):
+            problems.append("%s: %s() without a direction and a NULL placement as cast literals reads the "
+                            "session's default_order and default_null_order" % (path, node["function_name"]))
+
+
 def _ctes(node):
     """The (name, info) pairs of the WITH of query node `node`, in order."""
     cte_map = node.get("cte_map")
@@ -337,6 +498,8 @@ def _walk(node, path, in_cast, is_count, in_table_fn, is_ref, scope, ctx):
             problems.append("%s: %s() reads the session's catalog, settings or storage" % (path, node["function_name"]))
         elif fname == "age" and len(node.get("children") or []) == 1:
             problems.append("%s: age() with one argument subtracts from today's midnight" % path)
+    if cls in ("FUNCTION", "WINDOW"):
+        _check_order_reads(node, cls, path, problems)
     if cls == "COLUMN_REF":
         target = _value_keyword(node, in_table_fn)
         if target is not None:

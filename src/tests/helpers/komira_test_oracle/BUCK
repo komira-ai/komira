@@ -60,7 +60,8 @@ py_test(
 # render.py to `expect/<shard>/<case>.tsv` (a sub-target,
 # `:expected[expect/filter_3vl/filter_not_and.tsv]`). Both runs of the action
 # must write the same bytes, and gen_expected.py refuses a query that leaves
-# NULL placement or a literal's type to DuckDB, calls a function on its list
+# NULL placement, an aggregate's row order, a list sort's direction or a
+# literal's type to DuckDB, calls a function on its list
 # of those reading more than their arguments (a clock, a random draw, the
 # session, SQL text, the running DuckDB), or reads in FROM anything but the
 # tables it registers (with no AT clause), the query's own CTEs and the
@@ -111,7 +112,9 @@ py_test(
     deps = ["//third_party/python:pyarrow"],
 )
 
-# gen_expected.connect()'s connection: no extension autoloaded or
+# gen_expected.connect()'s connection: the Gregorian calendar and UTC under
+# a Thai locale and a +05:45 TZ (date_part's year and hour), no extension
+# autoloaded or
 # autoinstalled (a function of inet, which DuckDB would autoload, is a
 # catalog error and the loaded and installed lists stay as they were), no
 # file read, external access not re-enabled, and every registered table
