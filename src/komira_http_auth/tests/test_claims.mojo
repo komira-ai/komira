@@ -4,7 +4,8 @@
 #
 # The positive case (a valid RS256 token yields Principal{scheme jwt, sub,
 # iss, aud, copied claims, presented credential}) and every claim refusal:
-# iss, aud (missing, other, array without ours), sub, exp (missing, not an
+# iss (including a case variant), aud (missing, other, a case variant as a
+# string or an array element, array without ours), sub, exp (missing, not an
 # integer, expired past the 30 s leeway, and a configured leeway of 0 or
 # 60 s honoured in place of it), iat, nbf, negative or past-9999
 # times, lifetime over max TTL, duplicate payload keys, and a spliced payload
@@ -214,6 +215,16 @@ def test_wrong_issuer_is_refused() raises:
     _expect(
         s.replace(String(ISSUER), String("accounts.google.com")), REASON_ISS
     )
+    # iss is compared EXACTLY, never case-folded: the issuer upper-cased,
+    # and one letter changed in case, are other issuers.
+    _expect(
+        s.replace(String(ISSUER), String("HTTPS://ACCOUNTS.GOOGLE.COM")),
+        REASON_ISS,
+    )
+    _expect(
+        s.replace(String(ISSUER), String("https://accounts.Google.com")),
+        REASON_ISS,
+    )
 
 
 def test_missing_issuer_is_refused() raises:
@@ -251,6 +262,10 @@ def test_other_audience_is_refused() raises:
     _expect(_with_aud(String('"aud":"https://other.example.com/",')), REASON_AUD)
     # A prefix of ours is not ours.
     _expect(_with_aud(String('"aud":"https://api.example.com",')), REASON_AUD)
+    # aud is compared EXACTLY, never case-folded: ours upper-cased, and one
+    # letter changed in case, are other audiences.
+    _expect(_with_aud(String('"aud":"HTTPS://API.EXAMPLE.COM/",')), REASON_AUD)
+    _expect(_with_aud(String('"aud":"https://api.Example.com/",')), REASON_AUD)
 
 
 def test_audience_array_without_ours_is_refused() raises:
@@ -263,6 +278,16 @@ def test_audience_array_without_ours_is_refused() raises:
         _with_aud(String('"aud":["https://api.example.com/",7],')), REASON_AUD
     )
     _expect(_with_aud(String('"aud":{"x":"https://api.example.com/"},')), REASON_AUD)
+    # An array element that is ours only when case-folded is not ours.
+    _expect(
+        _with_aud(
+            String('"aud":["https://a.example/","HTTPS://API.EXAMPLE.COM/"],')
+        ),
+        REASON_AUD,
+    )
+    _expect(
+        _with_aud(String('"aud":["https://api.Example.com/"],')), REASON_AUD
+    )
 
 
 def test_audience_array_with_ours_is_accepted() raises:

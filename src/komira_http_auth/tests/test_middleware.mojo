@@ -4,8 +4,8 @@
 #
 # invalid_request for a missing or malformed Authorization header (including
 # two comma-folded headers and a token over MAX_TOKEN_BYTES), invalid_token
-# for every verification failure, the RFC 6750 WWW-Authenticate values, no
-# token text in any response, and
+# for every verification failure, the RFC 6750 WWW-Authenticate values,
+# `cache-control: no-store` on every 401, no token text in any response, and
 # ctx.principal REPLACED on success and cleared on every refusal.
 # =============================================================================
 
@@ -185,6 +185,9 @@ def _assert_401(
     assert_equal(
         resp.headers[String("content-length")], String(len(resp.body)), what
     )
+    # A refusal must never be cached: a shared cache that kept this 401
+    # would answer a later, valid request with it.
+    assert_equal(resp.headers[String("cache-control")], String("no-store"), what)
 
 
 def _assert_no_echo(ref resp: HttpResponse, secret: String) raises:

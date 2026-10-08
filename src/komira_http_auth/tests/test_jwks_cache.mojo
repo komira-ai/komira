@@ -6,9 +6,9 @@
 # and the window runs from a FAILED attempt too (non-200 or transport);
 # Cache-Control max-age decides freshness; a clock stepped back does not lock
 # refreshes out; a truncated, partial, invalid, duplicate-keyed, repeated-kid,
-# reader-ambiguous, non-ASCII-kid, empty, non-200 or failed fetch never
-# replaces the current key set (the token under the current kid keeps
-# verifying and the cache still holds one key).
+# reader-ambiguous, non-ASCII-kid, over-64-entry, empty, non-200 or failed
+# fetch never replaces the current key set (the token under the current kid
+# keeps verifying and the cache still holds one key); exactly 64 entries do.
 # =============================================================================
 
 from std.pathlib import Path
@@ -351,6 +351,57 @@ def test_no_usable_key_keeps_the_current_set() raises:
         ),
     )
     _bad_document_keeps_current_set(200, String('{"keys":[]}'))
+
+
+comptime _EC_ENTRY = '{"kty":"EC","crv":"P-256","kid":"ec","x":"AA","y":"AA"}'
+
+
+def _rsa_entries(key: List[UInt8], prefix: String, count: Int) raises -> String:
+    """`count` RSA JWK objects, comma-separated, under kids prefix0..."""
+    var out = String("")
+    for i in range(count):
+        if i > 0:
+            out += String(",")
+        out += rsa_jwk_json(key, prefix + String(i))
+    return out^
+
+
+def test_more_than_64_entries_keeps_the_current_set() raises:
+    # 65 entries: one EC entry (skipped by both readers) then 64 RSA keys
+    # under kids that are not KID. Every check but the entry count passes:
+    # komira_crypto lifts exactly the 64 RSA kids this reader expects. Only
+    # `n > RS256_MAX_JWKS_KEYS` (entries, not RSA keys) refuses it; were the
+    # limit raised, the set would be replaced and KID become unknown.
+    var key = _key()
+    _bad_document_keeps_current_set(
+        200,
+        String('{"keys":[')
+        + String(_EC_ENTRY)
+        + String(",")
+        + _rsa_entries(key, String("other-"), 64)
+        + String("]}"),
+    )
+
+
+def test_exactly_64_entries_replace_the_set() raises:
+    # The limit is inclusive: 64 RSA entries, KID last, are all lifted.
+    var key = _key()
+    var rig = _Rig(_config())
+    rig.fetcher.add(
+        200,
+        String("max-age=3600"),
+        String('{"keys":[')
+        + _rsa_entries(key, String("k-"), 63)
+        + String(",")
+        + rsa_jwk_json(key, KID)
+        + String("]}"),
+    )
+    assert_equal(rig.verifier.verify(_tok(key, KID)).reason, String(REASON_OK))
+    assert_equal(rig.verifier.key_count(), 64)
+    assert_equal(
+        rig.verifier.verify(_tok(key, String("k-0"))).reason, String(REASON_OK)
+    )
+    assert_equal(rig.fetcher.fetch_count(), 1)
 
 
 def test_http_error_keeps_the_current_set() raises:

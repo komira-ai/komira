@@ -5,7 +5,8 @@
 # Single-anchor flags and their defaults, the --trust-anchor form (exactly
 # one accepted; a second is refused), non-https JWKS URLs refused at startup
 # (by the flags and by the verifier constructor), RS256/JWT only, max TTL,
-# copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap, and the
+# copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap, an
+# anchor built in code with an empty name, issuer or audience, and the
 # --name=value syntax.
 # =============================================================================
 
@@ -115,6 +116,7 @@ from komira_http_auth import (
     SystemAuthClock,
     bearer_jwt_flag_names,
     parse_bearer_jwt_flags,
+    validate_trust_anchor,
 )
 
 
@@ -274,6 +276,42 @@ def test_leeway_is_capped_at_60_seconds() raises:
     )
     _ = Verifier(
         _config().with_leeway_s(Int64(0)), ScriptedJwksFetcher(), FixedAuthClock(NOW)
+    )
+
+
+def _anchor_refused(var a: TrustAnchor, needle: String) raises:
+    """`validate_trust_anchor(a)` and a verifier built over `a` both refuse,
+    naming `needle`."""
+    try:
+        validate_trust_anchor(a)
+    except e:
+        var msg = String(e)
+        assert_true(needle in msg, "want '" + needle + "' in: " + msg)
+        _verifier_refused(BearerJwtConfig(a^), needle)
+        return
+    raise Error("expected a refusal containing '" + needle + "'")
+
+
+def test_an_anchor_built_in_code_with_an_empty_field_is_refused() raises:
+    # The flag parser refuses an empty value before an anchor exists, so
+    # these reach only through TrustAnchor.rs256. An empty issuer or
+    # audience must never build: the claim check compares them exactly, and
+    # no verifier may exist whose accepted issuer or audience is "".
+    _anchor_refused(
+        TrustAnchor.rs256(String(""), ISSUER, AUDIENCE, JWKS_URL),
+        "needs a name",
+    )
+    _anchor_refused(
+        TrustAnchor.rs256(String("t"), String(""), AUDIENCE, JWKS_URL),
+        "empty issuer",
+    )
+    _anchor_refused(
+        TrustAnchor.rs256(String("t"), ISSUER, String(""), JWKS_URL),
+        "empty audience",
+    )
+    # Control: the same anchor with every field set validates.
+    validate_trust_anchor(
+        TrustAnchor.rs256(String("t"), ISSUER, AUDIENCE, JWKS_URL)
     )
 
 
