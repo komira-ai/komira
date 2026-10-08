@@ -691,7 +691,8 @@ answers is: CAN A READER THAT DID NOT BUMP MIS-READ THESE BYTES?
 VERSION 2 carries two changes:
   * the `WirePlan.tag` / `WireExpr.tag` retirement; and
   * six vocabulary fields moving from ENGINE-VERBATIM `uint32` to the derived
-    +1-offset enums — `WireScalar.kind` / `.time_unit` / `.error_code`,
+    +1-offset enums — `WireScalar.kind` / `.time_unit` / `.error_code` (the
+    last deleted in version 4),
     `WireParam.tag`, `WirePushdownGate.mode`, `WireScanBinding.snapshot_policy`.
     Same bytes, every value shifted by one, which is the meaning change this
     rule's first line has always been about.
@@ -701,10 +702,10 @@ THE FIRST RULE ABOVE ON PURPOSE. `WirePlanEnvelope.write_target` is a field
 whose OMISSION IS THE FAILURE: "ADD a field -> NO BUMP" is sound exactly when
 proto3's skip-what-you-do-not-know loses nothing the caller needed, and here it
 loses the entire point of the message — the reader runs the query, returns rows,
-writes no file, and raises nothing. So version 3 is declared ONLY by envelopes
-that carry field 3, which makes it a MINIMUM READER CAPABILITY rather than a
-format generation: a version-2 reader refuses a write envelope by name instead
-of executing half of it.
+writes no file, and raises nothing. So the write version (3 then, 5 now) is
+declared ONLY by envelopes that carry field 3, which makes it a MINIMUM READER
+CAPABILITY rather than a format generation: a version-2 reader refuses a write
+envelope by name instead of executing half of it.
 
 VERSIONS 4 AND 5 DELETE `WireScalar.error_code` (field 20; its number and name
 are reserved). Both envelope shapes carry scalars, so both move: a plain
@@ -727,8 +728,8 @@ def plan_wire_supported_versions() raises -> PlanWireVersionSet:
     ⚠ AND IT IS A SET, WHICH IS THE WHOLE POINT. `>=` would claim that any
     reader speaking a lower version can read a higher one, which is precisely
     false for the CHANGE-A-MEANING case this format's version field exists for.
-    Versions 4 and 5 are that case: this build reads `{4, 5}` and refuses 2
-    and 3, which an ordering could not express.
+    A DELETE-a-field bump needs the same: this build reads `{4, 5}` and
+    refuses 2 and 3, which an ordering could not express.
     """
     return PlanWireVersionSet.only(PLAN_WIRE_FORMAT_VERSION).plus(
         PLAN_WIRE_WRITE_TARGET_MIN_VERSION
