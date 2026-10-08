@@ -1,0 +1,37 @@
+{
+  "name": "kci.app",
+  "version": "1",
+  "doc": "A container that answers requests, as its own identity, with an optional DNS name. `api` (a service) runs as `account` (a service_account); `host` (a CNAME record in `zone` naming `api`'s HOST) exists only when `domain` is set. Whether `api` has a public URL is the required input `public`: it has no default. `account` and `api` are exported: grant to `account` to let the service reach a resource, and grant CALL on `api` to let another identity call it.",
+  "input": [
+    {"name": "image", "type": "INPUT_IMAGE", "required": true, "doc": "What the service runs: a build step's output or a digest."},
+    {"name": "public", "type": "INPUT_BOOL", "required": true, "doc": "true: the service has a public URL (Service.public). false: it has none. Required, with no default."},
+    {"name": "port", "type": "INPUT_INT", "doc": "The port the container listens on (Service.port). Unset: the versioned default."},
+    {"name": "min_instances", "type": "INPUT_INT", "doc": "The fewest instances that run (Service.scale.min): 0 lets the service scale to zero. Unset: the versioned default. A cloud whose services cannot scale to zero refuses an unset or 0 value when the graph is validated. Set max_instances with it: a scale written with a min only has a max of 0 (Scale.max has no presence)."},
+    {"name": "max_instances", "type": "INPUT_INT", "doc": "The most instances that run (Service.scale.max). Unset: the versioned default."},
+    {"name": "env", "type": "INPUT_VALUE_MAP", "doc": "The service's environment: plain values, each a literal, a parameter or another resource's output."},
+    {"name": "domain", "type": "INPUT_STRING", "doc": "A DNS name for the service: a CNAME record `host` naming its HOST, in `zone`. The record's rules are DnsRecord's: the name is below the zone's own name (a CNAME is never at it)."},
+    {"name": "zone", "type": "INPUT_REF", "doc": "The dns_zone `host` is written in. Read only when `domain` is set, and then needed."}
+  ],
+  "component": [
+    {"id": "account", "serviceAccount": {}},
+    {"id": "api", "service": {"runAs": {"local": "account"}}},
+    {"id": "host", "dnsRecord": {"zone": {"input": "zone"}, "type": "CNAME", "values": [{"ref": {"local": "api", "standard": "HOST"}}]}}
+  ],
+  "bind": [
+    {"component": "api", "field": "service.image", "input": "image"},
+    {"component": "api", "field": "service.public", "input": "public"},
+    {"component": "api", "field": "service.port", "input": "port"},
+    {"component": "api", "field": "service.scale.min", "input": "min_instances"},
+    {"component": "api", "field": "service.scale.max", "input": "max_instances"},
+    {"component": "api", "field": "service.env", "input": "env"},
+    {"component": "host", "field": "dns_record.name", "input": "domain"}
+  ],
+  "presence": [
+    {"component": "host", "ifInput": "domain"}
+  ],
+  "output": [
+    {"name": "url", "from": {"local": "api", "standard": "URL"}},
+    {"name": "host", "from": {"local": "api", "standard": "HOST"}}
+  ],
+  "export": ["account", "api"]
+}

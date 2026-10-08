@@ -1,0 +1,47 @@
+// The ARTIFACT primitive of the kci resource catalog (`kci.resource.v1`):
+// `registry`.
+// The field numbers are what is stored, pinned as literal wire bytes by the
+// welded tests in tests/ (resource.proto says how the files are split).
+// held-numbers: Registry 2 50-53
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "kci/resource/v1/refs.proto";
+
+// ---- artifacts: registry --------------------------------------------------------
+
+// What a registry holds, by the protocol its clients speak. OCI: container
+// images and the other artifacts an OCI distribution client pushes and
+// pulls. No other format is declared in this version: a Python package index
+// and an npm registry need a parent object on one built-in cloud and an
+// onprem backing that is not chosen, and a conda channel is native on no
+// built-in cloud. Each would be a new value, an addition.
+enum ArtifactFormat {
+  ARTIFACT_FORMAT_UNSET = 0;
+  OCI = 1;
+}
+
+// A private store of artifacts of one `format`. Its ADDRESS is the name a
+// client pushes and pulls an image as (`host/path`: no scheme, no tag; a
+// client appends `:<tag>` or `@<digest>`). An identity granted WRITE pushes
+// artifacts (a push may move a tag); one granted READ pulls them. Nobody else
+// reads it: who may read it beyond its grants (field 2) is held. Deleting it
+// deletes every artifact in it, so its retention default is KEEP: removing a
+// registry from the file leaves it in the cloud unless `retention: DELETE` is
+// written.
+//
+// A workload's `image` names a build step's output or a digest, never a
+// registry of the list: an image source that names one is not declared
+// (`Image` 4 is held for an artifact reference). A registry holds what the
+// graph's own workloads push and pull, through their grants and its ADDRESS.
+message Registry {
+  option (portability) = PORTABLE;
+  option (exposes) = ADDRESS;
+
+  // Required: UNSET is refused when the graph is validated.
+  ArtifactFormat format = 1;
+  // 2 is held for who may read it beyond the identities granted READ (public
+  // read is an open question); 50 to 53 for the per-cloud extensions
+  // (resource.proto header).
+}

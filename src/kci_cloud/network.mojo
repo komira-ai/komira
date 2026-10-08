@@ -24,7 +24,8 @@
 # place a service in a subnet at all is that cloud's limit, not a rule here.
 # =============================================================================
 
-from kci_resource_proto.resource import Ref, Resource
+from kci_resource_proto.refs import Ref
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding
 from kci_cloud.catalog import FIELD_IP_ADDRESS, FIELD_NETWORK, FIELD_SUBNET

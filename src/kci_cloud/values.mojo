@@ -16,7 +16,8 @@
 # values of a DNS record (dns.mojo).
 # =============================================================================
 
-from kci_resource_proto.resource import Ref, Resource, Value
+from kci_resource_proto.refs import Ref, Value
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding
 from kci_cloud.catalog import Catalog, body_field

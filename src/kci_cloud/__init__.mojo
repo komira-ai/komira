@@ -83,13 +83,22 @@ interface. This package names no cloud:
                        and name grammars of resources and composites, and
                        the owner of a node or path (`owner_of_node`, its
                        first segment at any depth).
+  * compose_bind.mojo — the input types of a composite, and BINDINGS: an
+                       input written into a field of a primitive component
+                       through its proto3 JSON (`bind_field`), the load
+                       rules of bindings and presences.
+  * compose_kci.mojo — the `kci` namespace: the definitions kci ships, by
+                       name, version and digest.
+  * compose_load.mojo — LOADING definitions: their checks, containment
+                       cycles, the instances at the top of a list, and the
+                       count the size guard reads (`Loader`).
   * compose.mojo     — EXPANSION: a list with composite instances -> a list
                        of primitives with path ids `top/c1/.../ck`
-                       (`expand`): the definitions loaded and checked,
-                       containment cycles and the size guard refused,
-                       every reference rewritten to a full path through
-                       exports and declared outputs, and the tree a plan
-                       prints (`Expansion`).
+                       (`expand`): after a load with no finding and the
+                       size guard, every reference rewritten to a full path
+                       through exports and declared outputs, every binding
+                       written, every absent component left out, and the
+                       tree a plan prints (`Expansion`).
   * validate.mojo    — the validate phase: expansion first, then graph,
                        coverage and limit
                        findings, collected in one pass; on a graph with
@@ -333,16 +342,25 @@ from kci_cloud.compose_refs import (
     unrewritten,
     with_sites,
 )
-from kci_cloud.compose import (
-    Expansion,
+from kci_cloud.compose_bind import (
+    BindValue,
+    INPUT_BOOL,
+    INPUT_IMAGE,
+    INPUT_INT,
     INPUT_REF,
     INPUT_STRING,
+    INPUT_VALUE_MAP,
+    bind_field,
+    binding_problem,
+)
+from kci_cloud.compose_kci import KCI_NAMESPACE, ShippedDefinition, kci_definition_problem, shipped_definitions
+from kci_cloud.compose_load import (
     MAX_EXPANDED_PRIMITIVES,
     definition_digest,
     definition_key,
-    expand,
     is_composite,
 )
+from kci_cloud.compose import Expansion, expand
 from kci_cloud.validate import (
     graph_findings,
     edge_findings,

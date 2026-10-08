@@ -1,0 +1,161 @@
+// The WORKLOADS of the kci resource catalog (`kci.resource.v1`): `service`,
+// `container_job` and `worker`, and the shapes they share (`Size`, `Scale`).
+// The field numbers are what is stored, pinned as literal wire bytes by the
+// welded tests in tests/ (resource.proto says how the files are split).
+// held-numbers: Service 13 50-53
+// held-numbers: ContainerJob 8 50-53
+// held-numbers: Worker 12 50-53
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "google/protobuf/duration.proto";
+import "kci/resource/v1/refs.proto";
+
+// ---- shared shapes -------------------------------------------------------------
+
+// Neutral sizes, per instance. `gpus` is a count of whole GPUs (0: none);
+// which GPU a cloud attaches is that cloud's, and a cloud that attaches none
+// to a workload refuses a non-zero count when the graph is validated.
+message Size {
+  uint32 cpu_millis = 1;
+  uint32 memory_mb = 2;
+  uint32 gpus = 3;
+}
+
+// Instance bounds. `min = 0` allows scaling to zero; `min` has presence, so
+// an explicit 0 is told apart from "not written" (the versioned default).
+message Scale {
+  optional uint32 min = 1;
+  uint32 max = 2;
+}
+
+// ---- compute: service, container job and worker ----------------------------------
+//
+// Three WORKLOADS, each a container: one that answers requests (`service`),
+// one that runs to completion when started (`container_job`), and one that
+// runs always (`worker`). Each has an image, an optional `command` (the
+// program to run, replacing the image's entrypoint; unset: the image's own),
+// `args` (passed to it), `env` and `secret_env`, a `size` per instance, and
+// the `run_as` account.
+
+// A container that answers requests, scales (to zero if allowed) and may have
+// a public URL.
+message Service {
+  option (portability) = PORTABLE;
+  option (exposes) = URL;
+  option (exposes) = HOST;
+
+  Image image = 1;
+  uint32 port = 2;
+  repeated string args = 3;
+  map<string, Value> env = 4;
+  Size size = 5;
+  Scale scale = 6;
+  string health_path = 7;
+  // Behaviours, not products: an adapter reports a finding when the
+  // cloud's ceiling is lower.
+  google.protobuf.Duration request_timeout = 8;
+  uint32 max_concurrency = 9;
+
+  // "A public URL" is an arm, not a gateway resource.
+  oneof exposure {
+    Public public = 10;
+    Internal internal = 11;
+  }
+
+  // Secrets this service receives by reference, keyed by environment
+  // variable. A key must not also appear in `env`.
+  map<string, SecretRef> secret_env = 12;
+  // 13 is held for a `source` that may be a non-image artifact.
+  // The `service_account` this service runs as. Unset: a private identity of
+  // its own.
+  Ref run_as = 14;
+  // The program to run, replacing the image's entrypoint; `args` follow it.
+  // Unset: the image's own entrypoint.
+  repeated string command = 15;
+  // The `subnet` the service's outbound connections leave through (the
+  // resource itself, no output). Every outbound connection takes it: the
+  // service reaches the private addresses of the subnet's network, and
+  // reaches a public address only if the network has a way out (a NAT is not
+  // a primitive yet). It says nothing about who may call the service. Unset:
+  // the cloud's own outbound path, in no network of the list.
+  Ref network = 16;
+  // 50 to 53 are held for the per-cloud extensions (resource.proto header).
+
+  // Reachable from outside the graph at a URL.
+  message Public {}
+  // No public URL; callable by other resources of this graph. Not a
+  // statement about networks.
+  message Internal {}
+}
+
+// A container that runs to completion: a run-to-completion DEFINITION. kci
+// declares the job; each run is started by an identity granted CALL on it,
+// and a run is an execution of the definition, never a declared object. It
+// was `job` (the same arm, 11, and fields 1 to 7 and 13 at the same
+// numbers). Its trigger (10 on demand, 11 a schedule) is no longer part of
+// it: both numbers are reserved, so a list written with a trigger decodes
+// without it, and its JSON form is refused. A schedule is a primitive of its
+// own (`schedule`, `Resource.body` 22).
+message ContainerJob {
+  option (portability) = PORTABLE;
+
+  Image image = 1;
+  repeated string args = 2;
+  Size size = 3;
+  // Presence: an explicit 0 ("never retry") is told apart from "not
+  // written" (the versioned default).
+  optional uint32 max_retries = 4;
+  google.protobuf.Duration timeout = 5;
+  // Plain values only, as on `Service.env`: a literal, a parameter or
+  // another resource's output. Secrets go in `secret_env`.
+  map<string, Value> env = 6;
+  // Secrets this job receives by reference, keyed by environment variable.
+  // A key must not also appear in `env`.
+  map<string, SecretRef> secret_env = 7;
+  // 8 is held for a `source` that may be a non-image artifact.
+  // The program to run, replacing the image's entrypoint; `args` follow it.
+  // Unset: the image's own entrypoint.
+  repeated string command = 9;
+  // The trigger that was part of the job: `on_demand` 10 and `schedule` 11.
+  reserved 10, 11;
+  reserved "on_demand", "schedule";
+  // The `service_account` this job runs as. Unset: a private identity of its
+  // own.
+  Ref run_as = 13;
+  // 50 to 53 are held for the per-cloud extensions (resource.proto header).
+}
+
+// A container that runs ALWAYS, on a fixed number of instances, and answers
+// no request: it takes its own work (from a queue, say, through a `uses`
+// line). It exposes nothing and accepts no verb. An early draft of this arm
+// had `scale` at 3 and a `source` oneof at 10 and 11; those three numbers
+// are reserved, so a list written against the draft decodes without them
+// rather than as another field.
+message Worker {
+  option (portability) = PORTABLE;
+
+  Image image = 1;
+  Size size = 2;
+  reserved 3, 10, 11;
+  reserved "scale", "always_on", "queue";
+  repeated string args = 4;
+  // The program to run, replacing the image's entrypoint; `args` follow it.
+  // Unset: the image's own entrypoint.
+  repeated string command = 5;
+  // Plain values only, as on `Service.env`. Secrets go in `secret_env`.
+  map<string, Value> env = 6;
+  // Secrets this worker receives by reference, keyed by environment
+  // variable. A key must not also appear in `env`.
+  map<string, SecretRef> secret_env = 7;
+  // How many instances run, always: 1 or more. Presence: unset is the
+  // versioned default, 1; an explicit 0 is refused when the graph is
+  // validated (a worker that runs nowhere is no worker).
+  optional uint32 replicas = 8;
+  // The `service_account` this worker runs as. Unset: a private identity of
+  // its own.
+  Ref run_as = 9;
+  // 12 is held for a `source` that may be a non-image artifact; 50 to 53
+  // for the per-cloud extensions (resource.proto header).
+}

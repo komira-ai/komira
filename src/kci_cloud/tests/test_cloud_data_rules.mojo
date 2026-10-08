@@ -59,7 +59,8 @@ from kci_reconciler import (
     VERB_CREATE,
     VERB_NOOP,
 )
-from kci_resource_proto.resource import Resource, ResourceList, Retention
+from kci_resource_proto.refs import Retention
+from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
     GrantEdge,

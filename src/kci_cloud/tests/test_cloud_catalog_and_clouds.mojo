@@ -35,7 +35,8 @@
 from std.testing import assert_equal, assert_true, assert_false
 
 from komira_proto_codec import decode_json, decode_proto
-from kci_resource_proto.resource import Access, Output, Resource, ResourceList
+from kci_resource_proto.refs import Access, Output
+from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
     Absence,

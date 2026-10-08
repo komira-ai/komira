@@ -83,30 +83,23 @@
 from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import decode_proto, encode_proto
-from kci_resource_proto.resource import (
+from kci_resource_proto.compute import ContainerJob, Scale, Service
+from kci_resource_proto.data import Bucket, FieldType, StorageTier, Table
+from kci_resource_proto.identity import Grant, ServiceAccount
+from kci_resource_proto.refs import (
     Access,
-    Bucket,
     CellResource,
-    FieldType,
-    Grant,
-    ContainerJob,
     Image,
     Output,
     Portability,
     Ref,
-    Resource,
-    ResourceList,
     Retention,
-    Scale,
     SecretRef,
-    Service,
-    ServiceAccount,
     StepOutput,
-    StorageTier,
-    Table,
     Uses,
     Value,
 )
+from kci_resource_proto.resource import Resource, ResourceList
 
 
 # ---- a hand-written wire stream ------------------------------------------------

@@ -12,7 +12,8 @@
 # where each site is kept, replaced or dropped. Both are `_walk`, so the two
 # orders cannot differ.
 #
-# THE POSITIONS (resource.proto, every `Ref`, `Value` and `SecretRef`):
+# THE POSITIONS (the catalog's `.proto` files, every `Ref`, `Value` and
+# `SecretRef`):
 #   * `uses[i].target`;
 #   * a workload's (`service`, `container_job`, `worker`) `env` values,
 #     `secret_env` secrets and `run_as`, and a service's `network`;
@@ -20,8 +21,9 @@
 #     subscription's `topic` and `queue`; a DNS record's `zone` and `values`;
 #     a certificate's `zone`; a schedule's `target`; an event trigger's
 #     `source` and `target`; a subnet's `network`;
-#   * a composite instance's `input` values.
-# A new reference field of resource.proto is one more line in `_walk`. One
+#   * a composite instance's `input` values, and the values of its
+#     `map_input` maps.
+# A new reference field of the catalog is one more line in `_walk`. One
 # it lacks is not silent: `unrewritten` reads the rewritten resource's
 # proto3 JSON for a `local`, `input` or `path` key, which only a reference
 # can hold, and expansion raises on one (compose.mojo).
@@ -32,7 +34,8 @@
 # =============================================================================
 
 from komira_proto_codec import encode_json
-from kci_resource_proto.resource import Ref, Resource, SecretRef, Value
+from kci_resource_proto.refs import Ref, SecretRef, Value
+from kci_resource_proto.resource import Resource
 
 
 comptime SITE_REF: Int = 1
@@ -213,7 +216,14 @@ def _walk(mut r: Resource, mut w: _Walk) raises:
     if r.subnet:
         w.ref_slot(r.subnet.value().network, String("subnet.network"))
     if r.composite:
-        w.value_map(r.composite.value().input, String("composite.input"))
+        ref ci = r.composite.value()
+        w.value_map(ci.input, String("composite.input"))
+        var names = _sorted(ci.map_input)
+        for i in range(len(names)):
+            var vm = ci.map_input[names[i]].copy()
+            w.value_map(vm.value, String("composite.map_input.") + names[i])
+            if w.write:
+                ci.map_input[names[i]] = vm^
 
 
 def ref_sites(r: Resource) raises -> List[RefSite]:

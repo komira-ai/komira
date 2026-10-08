@@ -36,7 +36,8 @@
 # file means the same thing whichever cloud's own default differs.
 # =============================================================================
 
-from kci_resource_proto.resource import Ref, Resource
+from kci_resource_proto.refs import Ref
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.compose_refs import no_ref
 from kci_cloud.adapter import FINDING_GRAPH, Finding
