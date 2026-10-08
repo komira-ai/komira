@@ -10,8 +10,9 @@
 # then one thing at a time is changed and the exact message is required:
 #   * git's index with one byte flipped: require_same_bytes;
 #   * a verify-pack listing with one line fewer, one id replaced, one
-#     line's offset, size in the pack, kind, depth or base changed, and the
-#     first entry's offset changed;
+#     line's offset, size in the pack, kind, depth or base changed (each
+#     numeric field one higher and one lower), and the first entry's offset
+#     changed;
 #   * a cat-file dump with one object fewer, one id replaced, one kind
 #     changed, one payload byte flipped and one payload a byte longer.
 # A check deleted, or comparing the wrong field, lets its case through (or
@@ -166,6 +167,30 @@ def test_check_pack_each_check_fails() raises:
     assert_equal(
         _check(pack, idx, depth, objects),
         at + "depth " + String(lines[j].depth) + ", git's " + String(lines[j].depth + 1),
+    )
+
+    # The same three numeric fields one lower: a check that only refuses
+    # git's value being the larger one passes the +1 cases above.
+    var offset_lo = lines.copy()
+    offset_lo[j].offset -= 1
+    assert_equal(
+        _check(pack, idx, offset_lo, objects),
+        at + "offset " + String(lines[j].offset) + ", git's " + String(lines[j].offset - 1),
+    )
+
+    var size_lo = lines.copy()
+    size_lo[j].packed_size -= 1
+    assert_equal(
+        _check(pack, idx, size_lo, objects),
+        at + "size in pack " + String(lines[j].packed_size) + ", git's "
+        + String(lines[j].packed_size - 1),
+    )
+
+    var depth_lo = lines.copy()
+    depth_lo[j].depth -= 1
+    assert_equal(
+        _check(pack, idx, depth_lo, objects),
+        at + "depth " + String(lines[j].depth) + ", git's " + String(lines[j].depth - 1),
     )
 
     var base = lines.copy()
