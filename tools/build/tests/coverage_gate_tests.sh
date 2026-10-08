@@ -22,7 +22,10 @@
 #      (the library of covfull_unread, no decision, its records naming its
 #      file with no arm) are green in enforce mode, gate included; the
 #      census twins are green and their result.json says so
-#      (:<name>_census_result); covtop_census_result: a library whose welded
+#      (:<name>_census_result); covlow's library in a test-only package
+#      (tests//src/tests/coverage:covinfo, under COVERAGE_INFO_ONLY_DIRS) has a
+#      green gate in enforce mode, its BelowTarget and MissingRow information
+#      (:covinfo_result), while covlow's stays red; covtop_census_result: a library whose welded
 #      tests are outside its package's tests/ analyzes with coverage, and
 #      its gate leaves both tests out of its numbers (--test-source); covbad:
 #      a census gate over a malformed ratchet is red (covcheck exit 1 fails
@@ -52,6 +55,10 @@ expect_green coverage_gate_census "$N:covlow_census_result" "$N:covnotests_censu
     "$N:covun_census_result" "$N:covfull_census_result" "$N:covfull_unread_census_result" \
     "$N:covtop_census_result" "$N:covbranch_census_result" \
     "$N:covbranch_both[coverage][gate]" "$N:covfull[coverage][gate]"
+# A test-only package below the target: its gate is green in enforce mode,
+# what it found information (covlow, the same library elsewhere, is red
+# below).
+expect_green coverage_gate_test_only "tests//src/tests/coverage:covinfo[coverage][gate]" tests//src/tests/coverage:covinfo_result
 expect_red coverage_gate_census_malformed "COVERAGE GATE ERROR: $P ($N:covbad [coverage gate]): covcheck exited 1" "$N:covbad[coverage][gate]"
 expect_red coverage_gate_enforce "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow[coverage][gate]"
 expect_red coverage_gate_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests[coverage][gate]"

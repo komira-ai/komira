@@ -385,7 +385,8 @@ cov_debug_check(
     script = "check.sh",
 )
 
-# For the planted defects and the gate checks of tests//negative/coverage.
+# For the planted defects and the gate checks of tests//negative/coverage
+# (and, report.sh, of the test-only package tests//src/tests/coverage).
 export_file(
     name = "check.sh",
     visibility = ["//negative/coverage:"],
@@ -393,7 +394,10 @@ export_file(
 
 export_file(
     name = "report.sh",
-    visibility = ["//negative/coverage:"],
+    visibility = [
+        "//negative/coverage:",
+        "//src/tests/coverage:",
+    ],
 )
 
 export_file(
