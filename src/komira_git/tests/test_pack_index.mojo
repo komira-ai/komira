@@ -218,11 +218,11 @@ def test_parse_refusals() raises:
     b[8 + 4 * 4 + 3] = 2
     _reseal(b)
     assert_equal(_err(b), p + "the fan-out table disagrees with object 1")
-    # Fan-out says only two objects start with 0x05 or lower, so object 2
-    # (first byte 0x05) is past its group's end; the table stays monotone.
+    # Fan-out entry 5 alone says only two objects start with 0x05 or lower,
+    # so object 2 (first byte 0x05) is past its group's end. Entries 6 and
+    # up stay 3, so the table is monotone and only entry 5 under-counts.
     b = good.copy()
-    for k in range(5, 255):
-        b[8 + 4 * k + 3] = 2
+    b[8 + 4 * 5 + 3] = 2
     _reseal(b)
     assert_equal(_err(b), p + "the fan-out table disagrees with object 2")
     var offs_at = ids_at + 80 + 16
