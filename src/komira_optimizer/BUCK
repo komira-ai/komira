@@ -23,6 +23,8 @@ mojo_library(
         "tests/test_optimizer_agg_pushdown.mojo",
         "tests/test_optimizer_column_stats_provider.mojo",
         "tests/test_optimizer_column_stats_provider_branches.mojo",
+        "tests/test_optimizer_coverage_filter.mojo",
+        "tests/test_optimizer_coverage_misc.mojo",
         "tests/test_optimizer_cross_join_and_walker.mojo",
         "tests/test_optimizer_eager_agg.mojo",
         "tests/test_optimizer_eager_agg_paths.mojo",
