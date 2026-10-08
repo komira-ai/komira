@@ -19,7 +19,7 @@ Mode: **neutral**, conclusion **neutral**. Target: 100.00% line and branch cover
 - **MissingRow** `src/alpha`: no ratchet row; measured line 25.00%
 - **MutantSurvived** `src/alpha` `src/alpha/a.mojo:2`: mutant survived: negate: x > 0 -> x <= 0
 - **UnmeasuredFile** `src/alpha` `src/alpha/z.mojo`: no test binary compiled this file: its 3 executable lines count as not covered
-- **BranchNotMeasured** `src/beta`: no branch of this package was measured (the reports hold no branch record for it; kcov's Cobertura has none): its branch coverage cannot be shown to meet the target
+- **BranchNotMeasured** `src/beta`: no branch of this package was measured (no report names a file of it with branch records: kcov's Cobertura holds none, and a gate reads its tests' branch records only for a library of COVERAGE_BRANCH_GATE, tools/build/coverage/policy.bzl): its branch coverage cannot be shown to meet the target
 - **ExtraRow** `src/gone`: the ratchet has a row for a directory with no BUCK file
 
 ### Exemptions (need approval) (2)

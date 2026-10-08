@@ -3,8 +3,8 @@
 `komira//tools/build/toolchains/llvm_branch:llvm_branch` is the LLVM part of
 branch coverage for Mojo: the linker that instruments a test's LLVM bitcode,
 the profile runtime the instrumented test is linked with, and the tool that
-reads the profile the test writes. Nothing uses it yet; the coverage rules
-that will use it come later.
+reads the profile the test writes. The branch coverage runs of
+[`coverage/branch`](../../coverage/branch/README.md) use it.
 
 | target | what |
 |---|---|
@@ -27,16 +27,15 @@ run, not code that komira ships.
 
 ## How branch coverage uses it
 
-This is the plan of the coverage rules that are still to come; nothing here
-runs it but `:raw_version_check`, which runs all of it but `pgo-instr-use`
-on a C fixture. A coverage build will compile a test to LLVM bitcode. `bin/lld`
-will run over that bitcode as an LTO link with `-r`, `--lto-O0` and
+A coverage build compiles a test to LLVM bitcode. `bin/lld` runs over that
+bitcode as an LTO link with `-r`, `--lto-O0` and
 `--lto-newpm-passes=pgo-instr-gen,instrprof,default<O0>`, which adds IR
-profile counters. zig will link the result with the profile runtime (whole
-archive), the test will run and write a raw profile, and `llvm-profdata
-merge` will turn it into an indexed profile. `bin/lld` will then read that
-back with `pgo-instr-use`, so that every branch of the IR carries its
-counts.
+profile counters. zig links the result with the profile runtime (whole
+archive), the test runs and writes a raw profile, and `llvm-profdata merge`
+turns it into an indexed profile ([coverage/branch](../../coverage/branch/README.md)).
+Still to come: `bin/lld` reads that back with `pgo-instr-use`, so that every
+branch of the IR carries its counts. `:raw_version_check` runs all of it but
+`pgo-instr-use` on a C fixture.
 
 ## Why LLVM 23 tools are safe next to LLVM 24
 
@@ -95,8 +94,12 @@ runtime writes the profile that `llvm-profdata` merges.
   `:raw_version_check`: if it fails, pin the profile runtime and
   `llvm-profdata` of an LLVM release whose raw version is the one the new
   `lld` writes (the LLVM release the Mojo LLVM branched from, or a later
-  one with the same version), and re-run the branch coverage of a Mojo test
-  end to end.
+  one with the same version), set `RAW_PROFILE_VERSION` in
+  [`defs.bzl`](defs.bzl) to that version (every branch coverage run
+  requires it of each raw profile, and `:raw_version_check` requires
+  `llvm-profdata` to accept it), and re-run the branch coverage of a Mojo
+  test end to end
+  ([coverage/branch](../../coverage/branch/README.md)).
 - **New LLVM 23 pins.** Change the `llvm_branch_*` roles of
   [`table.bzl`](../../platforms/table.bzl) and `profdata` in `BUCK`. A
   package whose libraries change needs the members of `:llvm23` and the
@@ -159,7 +162,7 @@ made the build fail with the message shown, then removed.
 |---|---|---|---|
 | `:lld24_check` | `:lld24` holds `bin/lld` and its two libraries, regular files, nothing else; with a decoy `LD_LIBRARY_PATH` the loader resolves `bin/lld`'s libraries to its own `lib/` and glibc only; `lld -flavor gnu --version` prints `LLD 24.` | a Mojo built on another LLVM; a library taken from the worker | `lld = "25"`: `does not print 'LLD 25.'` |
 | `:llvm23_check` | `:llvm23` holds exactly its files; the loader resolves the libraries of `llvm-profdata` and `llvm-nm` to its `lib/` and glibc only; `llvm-profdata --version` prints `LLVM version 23.1.3`; the runtime is an ar archive defining `__llvm_profile_runtime` and `__llvm_profile_write_file` | a library missing from `lib/` (the worker has some, e.g. `libz.so.1`, so the tool would run there and nowhere else); another tool version; another runtime | `profdata = "23.1.4"`; `libz.so.1` left out: `loads 'libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1'`; the runtime member pointed at `libclang_rt.ctx_profile-x86_64.a`: `does not define __llvm_profile_runtime` |
-| `:raw_version_check` | [`fixtures/profile_fixture.c`](fixtures/profile_fixture.c), compiled to bitcode by zig, instrumented by `bin/lld` with the passes above, linked with the runtime and run, writes a raw profile with the 64-bit magic; the instrumented object defines `__llvm_profile_raw_version` strongly and the runtime only weakly, and the profile's flags carry the IR bit `0x01000000`; `llvm-profdata` merges it, and `show` reports 3 functions and `classify`'s counters 2 and 3; the same profile with its version raised by one is refused as LLVM's `raw profile version mismatch`, with llvm-profdata expecting the measured version | the version coupling (above); a profile whose version is the runtime's default rather than the instrumenter's; a runtime that writes no or another profile; a check of the version that cannot fail, or that takes any other refusal for a version refusal | the profile's version raised before the merge: `raw profile version 12 not accepted by llvm-profdata 23.1.3, which expects 11`; the merge's failure ignored: `llvm-profdata accepted raw version 12: the version check cannot fail`; the doctored profile also cut to 24 bytes: `the doctored profile was refused, but not for its version: ... (file header is corrupt)`; the instrumented object's `__llvm_profile_raw_version` renamed in its string table: `does not define __llvm_profile_raw_version strongly (llvm-nm class '')`, and with that check bypassed: `variant flags 0x00000000 lack the IR-instrumentation bit`; the runtime lookup pointed at `__llvm_profile_write_file`: `does not define __llvm_profile_raw_version once and weakly (llvm-nm classes 'T')` |
+| `:raw_version_check` | [`fixtures/profile_fixture.c`](fixtures/profile_fixture.c), compiled to bitcode by zig, instrumented by `bin/lld` with the passes above, linked with the runtime and run, writes a raw profile with the 64-bit magic; the instrumented object defines `__llvm_profile_raw_version` strongly and the runtime only weakly, and the profile's flags carry the IR bit `0x01000000`; `llvm-profdata` merges it, its version is `RAW_PROFILE_VERSION` of [`defs.bzl`](defs.bzl) (11), and `show` reports 3 functions and `classify`'s counters 2 and 3; the same profile with its version raised by one is refused as LLVM's `raw profile version mismatch`, with llvm-profdata expecting the measured version | the version coupling (above); a profile whose version is the runtime's default rather than the instrumenter's; a runtime that writes no or another profile; a check of the version that cannot fail, or that takes any other refusal for a version refusal; a `RAW_PROFILE_VERSION` that is not the version written and read | the profile's version raised before the merge: `raw profile version 12 not accepted by llvm-profdata 23.1.3, which expects 11`; the merge's failure ignored: `llvm-profdata accepted raw version 12: the version check cannot fail`; the doctored profile also cut to 24 bytes: `the doctored profile was refused, but not for its version: ... (file header is corrupt)`; the instrumented object's `__llvm_profile_raw_version` renamed in its string table: `does not define __llvm_profile_raw_version strongly (llvm-nm class '')`, and with that check bypassed: `variant flags 0x00000000 lack the IR-instrumentation bit`; the runtime lookup pointed at `__llvm_profile_write_file`: `does not define __llvm_profile_raw_version once and weakly (llvm-nm classes 'T')`; `RAW_PROFILE_VERSION = 12`: `llvm-profdata accepts raw version 11, but RAW_PROFILE_VERSION of defs.bzl ... is 12` |
 | `:shell_lint` | shellcheck over `check.sh` and `unpack.sh` | | |
 
 `unpack.sh` fails on a member that is not in its package (the profdata

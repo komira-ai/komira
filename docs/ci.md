@@ -949,20 +949,26 @@ The repository's branch settings require the check **`pr / check`**.
 
 [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) posts
 the check run `coverage`: the line coverage of the `mojo_library` targets the
-change touches, as covcheck's summary and annotations on the lines of the
-"Files changed" view. It is **informational**: not a required check, its
+change touches, and the branch coverage of those whose coverage gate reads
+branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
+annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
 conclusion is `neutral` in the policy's census mode, and it cannot make
 `pr / check` red. Job `measure` (the same farm connection and permissions as
-`pr / check`) builds the touched libraries' `[coverage][tests]` with
+`pr / check`) builds the touched libraries' `[coverage][tests]`, and
+`[coverage][branch_info]` of those whose gate reads branch records, with
 `-c komira.coverage=true` on the farm, in one call, and runs `covcheck
-report`; a library whose coverage build fails is listed as not measured and
-the job stays green. Job `post` holds the only write permission
+report` over the reports and those records (`--branch-lcov`); a library
+whose coverage build fails is listed as not measured, one whose branch
+records (or gate) fail as branch not measured, and the job stays green. Job `post` holds the only write permission
 (`checks: write`), checks nothing out and sends the bodies `measure`
 uploaded. A pull request from a fork runs neither, and nor does one whose
 base is not `main`: a stacked pull request gets no coverage run until it is
 retargeted to `main` and then pushed to (a retarget alone is an `edited`
 event, which neither workflow listens for; the pull request adding the
-workflow sees its first real run then). Making it a required check, or switching coverage on in
+workflow sees its first real run then). A pull request whose head predates the workflow (no
+`.github/ci/coverage_measure.sh`) is not measured: job `measure` is green
+with a notice to merge `main`, job `post` is skipped, and no `coverage` check
+run is posted. Making it a required check, or switching coverage on in
 `pr / check`, waits for the sweep of tests that fail at `-O0` or under kcov
 (in a coverage build one such test leaves its library's conda package
 unbuilt: a coverage run or gate blocks only the package it measures from

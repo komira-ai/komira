@@ -3,30 +3,40 @@
 # order and an unset member absent. One or more rows per operation, in the
 # shapes the Amazon SES API v2 reference documents: a domain identity
 # created with Easy DKIM (and an email-address identity, whose `@` is
-# percent-encoded in the path), read back, bound to a configuration set and
-# unbound, deleted; a configuration set created; a simple message sent.
+# percent-encoded in the path), read back, given a custom MAIL FROM domain
+# and cleared of it, bound to a configuration set and unbound, deleted; a
+# configuration set created, given an SNS event destination, deleted; a
+# simple message sent.
 from komira_aws_sesv2.komira_aws_sesv2 import (
     SESV2_CONTENT_TYPE,
     SESv2Body,
     SESv2Content,
+    SESv2CreateConfigurationSetEventDestinationRequest,
     SESv2CreateConfigurationSetRequest,
     SESv2CreateEmailIdentityRequest,
+    SESv2DeleteConfigurationSetRequest,
     SESv2DeleteEmailIdentityRequest,
     SESv2DeliveryOptions,
     SESv2Destination,
     SESv2EmailContent,
+    SESv2EventDestinationDefinition,
     SESv2GetEmailIdentityRequest,
     SESv2Message,
     SESv2MessageTag,
     SESv2PutEmailIdentityConfigurationSetAttributesRequest,
+    SESv2PutEmailIdentityMailFromAttributesRequest,
     SESv2RawMessage,
     SESv2SendEmailRequest,
+    SESv2SnsDestination,
     SESv2Tag,
+    build_create_configuration_set_event_destination_request,
     build_create_configuration_set_request,
     build_create_email_identity_request,
+    build_delete_configuration_set_request,
     build_delete_email_identity_request,
     build_get_email_identity_request,
     build_put_email_identity_configuration_set_attributes_request,
+    build_put_email_identity_mail_from_attributes_request,
     build_send_email_request,
 )
 from komira_aws_core import AwsRequest
@@ -127,6 +137,65 @@ def test_put_with_no_configuration_set_unbinds() raises:
     _check_json(req)
 
 
+def test_put_email_identity_mail_from_attributes() raises:
+    var input = SESv2PutEmailIdentityMailFromAttributesRequest(String("mail.example.com"))
+    input.set_mail_from_domain(String("bounce.mail.example.com"))
+    input.set_behavior_on_mx_failure(String("USE_DEFAULT_VALUE"))
+    var req = build_put_email_identity_mail_from_attributes_request(input)
+    assert_equal(req.method, "PUT")
+    assert_equal(req.uri, "/v2/email/identities/mail.example.com/mail-from")
+    _check_json(req)
+    assert_equal(
+        req.body_text(),
+        '{"MailFromDomain":"bounce.mail.example.com","BehaviorOnMxFailure":"USE_DEFAULT_VALUE"}',
+    )
+
+
+def test_put_with_no_mail_from_domain_sends_empty_object() raises:
+    # The operation "enables or disables" a custom MAIL FROM domain and
+    # MailFromDomain is optional; the v2 reference does not say what omitting
+    # it does (classic SES documents that a null MailFromDomain disables it, in
+    # SetIdentityMailFromDomain). Omitted, the body is an empty object.
+    var req = build_put_email_identity_mail_from_attributes_request(
+        SESv2PutEmailIdentityMailFromAttributesRequest(String("mail.example.com"))
+    )
+    assert_equal(req.uri, "/v2/email/identities/mail.example.com/mail-from")
+    _check_json(req)
+    assert_equal(req.body_text(), "{}")
+
+
+def _feedback() -> SESv2EventDestinationDefinition:
+    var dest = SESv2EventDestinationDefinition()
+    dest.set_enabled(True)
+    dest.set_matching_event_types([String("BOUNCE"), String("COMPLAINT"), String("DELIVERY_DELAY")])
+    dest.set_sns_destination(SESv2SnsDestination(String("arn:aws:sns:us-east-1:123456789012:ses-feedback")))
+    return dest^
+
+
+def test_create_configuration_set_event_destination() raises:
+    # The configuration set is the URI label; the destination's name and
+    # definition are the body.
+    var req = build_create_configuration_set_event_destination_request(
+        SESv2CreateConfigurationSetEventDestinationRequest(String("mail-example-com"), String("feedback"), _feedback())
+    )
+    assert_equal(req.method, "POST")
+    assert_equal(req.uri, "/v2/email/configuration-sets/mail-example-com/event-destinations")
+    _check_json(req)
+    assert_equal(
+        req.body_text(),
+        '{"EventDestinationName":"feedback","EventDestination":{"Enabled":true,'
+        + '"MatchingEventTypes":["BOUNCE","COMPLAINT","DELIVERY_DELAY"],'
+        + '"SnsDestination":{"TopicArn":"arn:aws:sns:us-east-1:123456789012:ses-feedback"}}}',
+    )
+
+
+def test_delete_configuration_set() raises:
+    var req = build_delete_configuration_set_request(SESv2DeleteConfigurationSetRequest(String("mail-example-com")))
+    assert_equal(req.method, "DELETE")
+    assert_equal(req.uri, "/v2/email/configuration-sets/mail-example-com")
+    _check_bodiless(req)
+
+
 def _simple() -> SESv2EmailContent:
     var text = SESv2Body()
     text.set_text(SESv2Content(String("Hi there")))
@@ -194,6 +263,18 @@ def test_refusals_before_the_wire() raises:
         _ = build_get_email_identity_request(SESv2GetEmailIdentityRequest(String("")))
     with assert_raises(contains="EmailIdentity"):
         _ = build_create_email_identity_request(SESv2CreateEmailIdentityRequest(String("")))
+    with assert_raises(contains="EmailIdentity"):
+        _ = build_put_email_identity_mail_from_attributes_request(
+            SESv2PutEmailIdentityMailFromAttributesRequest(String(""))
+        )
+    # A nested bound is checked too: the destination's topic is an
+    # AmazonResourceName, `min: 1`.
+    var dest = SESv2EventDestinationDefinition()
+    dest.set_sns_destination(SESv2SnsDestination(String("")))
+    with assert_raises(contains="SESv2SnsDestination.TopicArn: the model states min length 1, got 0"):
+        _ = build_create_configuration_set_event_destination_request(
+            SESv2CreateConfigurationSetEventDestinationRequest(String("mail-example-com"), String("feedback"), dest^)
+        )
 
 
 def main() raises:
@@ -206,6 +287,10 @@ def main() raises:
     test_create_configuration_set()
     test_put_email_identity_configuration_set_attributes()
     test_put_with_no_configuration_set_unbinds()
+    test_put_email_identity_mail_from_attributes()
+    test_put_with_no_mail_from_domain_sends_empty_object()
+    test_create_configuration_set_event_destination()
+    test_delete_configuration_set()
     test_send_email_simple()
     test_send_email_html_charset_reply_to_and_tags()
     test_send_email_raw_is_base64()
