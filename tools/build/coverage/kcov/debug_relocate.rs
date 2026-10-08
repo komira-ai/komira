@@ -37,12 +37,22 @@
 //!
 //! Exit status: 0 done; 1 an occurrence followed by another byte, a
 //! compressed or unreadable ELF file, a symbolic link, or an I/O error,
-//! stdout included (the file is unchanged in every case); 2 bad usage.
+//! including a failed write to an open stdout (the file is unchanged in
+//! every case); 2 bad usage.
 //!
 //! An I/O error is named as the Zig 0.12 standard library names the errno of
 //! that call (`FileNotFound`, `FileTooBig`, ...), the names this tool printed
 //! when it was written in Zig, so its messages did not change with the
 //! rewrite.
+//!
+//! Two behaviours differ from the Zig tool this replaces; no caller hits
+//! either (cov_zig reads stdout through a pipe):
+//! - A closed stdout: the Rust runtime reopens fd 0-2 on /dev/null before
+//!   main when they are closed, so the counts are written there and the tool
+//!   exits 0. The Zig tool exited 1 with `stdout: NotOpenForWriting`.
+//! - Out of memory: the file is read into one allocation of its size, and a
+//!   failed allocation aborts the process (SIGABRT). The Zig tool printed
+//!   `out of memory` and exited 1. Either way the file is unchanged.
 //!
 //! A Rust executable linked against glibc (2.34 or newer, tools/build/rust/
 //! README.md); it runs with no shell, no PATH and no network.
@@ -190,6 +200,9 @@ fn zig_name(call: Call, err: &io::Error) -> &'static str {
         Call::Write => match e {
             EINVAL => "InvalidArgument",
             EAGAIN => "WouldBlock",
+            // Unreachable through stdout (see the header: a closed stdout is
+            // reopened on /dev/null) and through the temporary file, which is
+            // opened for writing; kept so the table stays Zig 0.12's.
             EBADF => "NotOpenForWriting",
             EDQUOT => "DiskQuota",
             EFBIG => "FileTooBig",
