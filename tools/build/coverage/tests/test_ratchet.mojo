@@ -50,10 +50,15 @@ def _refused(text: String, want: String) raises:
     assert_true(raised, String("accepted: ") + text)
 
 
-def test_shipped_file_parses_and_has_no_rows() raises:
+def test_shipped_file_parses() raises:
+    # The rows are the census's (census.sh render): libraries under src/,
+    # never the test packages under src/tests/.
     var r = parse_ratchet(read_text(String(SHIPPED)), String(SHIPPED))
-    assert_equal(len(r.rows), 0)
+    assert_true(len(r.rows) > 0)
     assert_true(len(r.comments) > 3)
+    for i in range(len(r.rows)):
+        assert_true(r.rows[i].package.startswith("src/"), r.rows[i].package)
+        assert_true(not r.rows[i].package.startswith("src/tests/"), r.rows[i].package)
 
 
 def test_rows_parse() raises:
@@ -169,7 +174,7 @@ def test_proposal_adds_drops_and_sorts() raises:
 
 
 def main() raises:
-    test_shipped_file_parses_and_has_no_rows()
+    test_shipped_file_parses()
     test_rows_parse()
     test_malformed_rows_refused()
     test_unsorted_and_duplicate_rows_refused()

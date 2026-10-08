@@ -1,0 +1,214 @@
+# The coverage census: the data docs/coverage_census.md is rendered from (census.sh; README.md, "The census").
+census	2026-10-08	dd3907091b133862ffd49e4b0f3c2b392eefdabe	main after #787, with #860 applied: main itself does not link komira_crypto's and komira_http_core's tests
+komira//src/kci_api:kci_api	src/kci_api	library	OK	1361	1393	-	-	no	release	-	-
+komira//src/kci_artifact:kci_artifact	src/kci_artifact	library	OK	893	918	-	-	no	conda	-	-
+komira//src/kci_artifact_manifest:kci_artifact_manifest	src/kci_artifact_manifest	library	OK	159	162	-	-	no	release	-	-
+komira//src/kci_build:kci_build_lib	src/kci_build	library	OK	1057	1130	-	-	no	conda	-	-
+komira//src/kci_cli:kci_cli	src/kci_cli	library	OK	1190	1323	-	-	no	conda	-	-
+komira//src/kci_cloud:kci_cloud	src/kci_cloud	library	OK	2493	2937	-	-	no	conda	src/kci_cloud/conformance.mojo	-
+komira//src/kci_cloud_fake:kci_cloud_fake	src/kci_cloud_fake	library	RUN_FAILED	-	-	-	-	yes	conda	-	mojo_gated_test readme: 1 of 3 README examples failed
+komira//src/kci_logs:kci_logs	src/kci_logs	library	OK	905	1078	-	-	no	release	-	-
+komira//src/kci_params:kci_params	src/kci_params	library	OK	259	326	-	-	no	release	-	-
+komira//src/kci_pkg_upload:kci_pkg_upload	src/kci_pkg_upload	library	OK	1953	2193	-	-	no	conda	-	-
+komira//src/kci_publish:kci_publish_lib	src/kci_publish	library	OK	1954	2131	-	-	no	conda	src/kci_publish/workers.mojo	-
+komira//src/kci_publish_oci:kci_publish_oci	src/kci_publish_oci	library	OK	87	89	-	-	no	conda	-	-
+komira//src/kci_reconciler:kci_reconciler	src/kci_reconciler	library	OK	1237	1406	-	-	no	conda	-	-
+komira//src/kci_release_channel:kci_release_channel	src/kci_release_channel	library	OK	452	460	-	-	no	release	-	-
+komira//src/kci_release_machine:kci_release_machine	src/kci_release_machine	library	OK	643	651	-	-	no	release	-	-
+komira//src/kci_release_set:kci_release_set	src/kci_release_set	library	OK	738	746	-	-	no	conda	-	-
+komira//src/kci_resource_proto:kci_resource_proto	src/kci_resource_proto	library	OK	0	0	-	-	no	release	-	-
+komira//src/kci_secret_writer:kci_secret_writer	src/kci_secret_writer	library	OK	42	45	13	16	yes	conda	-	-
+komira//src/kci_validate:kci_validate	src/kci_validate	library	OK	1227	1347	-	-	no	conda	-	-
+komira//src/kci_validator_report:kci_validator_report	src/kci_validator_report	library	OK	521	568	-	-	no	release	-	-
+komira//src/kci_validator_rows:kci_validator_rows	src/kci_validator_rows	library	OK	108	119	40	40	yes	release	src/kci_validator_rows/live.mojo	-
+komira//src/kci_workflow_check:kci_workflow_check	src/kci_workflow_check	library	OK	1784	1849	-	-	no	release	-	-
+komira//src/komira_agg:komira_agg	src/komira_agg	library	OK	339	943	194	228	yes	conda	src/komira_agg/agg_op_traits.mojo,src/komira_agg/builtin_agg_fns_bool.mojo,src/komira_agg/builtin_agg_fns_states.mojo,src/komira_agg/builtin_agg_fns_string.mojo,src/komira_agg/builtin_agg_fns_sum_product.mojo,src/komira_agg/builtin_agg_fns_vec.mojo,src/komira_agg/hash_agg_op_aggregator.mojo,src/komira_agg/pod_state_gate.mojo	-
+komira//src/komira_agg_api:komira_agg_api	src/komira_agg_api	library	OK	154	548	-	-	no	conda	src/komira_agg_api/accumulator_trait.mojo,src/komira_agg_api/agg_column_ptrs.mojo,src/komira_agg_api/cd_distinct_key.mojo	-
+komira//src/komira_anomaly:komira_anomaly	src/komira_anomaly	library	OK	828	869	-	-	no	release	-	-
+komira//src/komira_arrow:komira_arrow	src/komira_arrow	library	OK	4572	7259	-	-	no	conda	src/komira_arrow/band_view.mojo,src/komira_arrow/batch_format.mojo,src/komira_arrow/chunk_typed.mojo,src/komira_arrow/column_native.mojo,src/komira_arrow/column_native_nested.mojo,src/komira_arrow/copy_column_ref.mojo,src/komira_arrow/decimal256_array.mojo,src/komira_arrow/dtype_sentinel.mojo,src/komira_arrow/interval_mdn_array.mojo,src/komira_arrow/morsel_view.mojo,src/komira_arrow/parallel_work.mojo,src/komira_arrow/quote_styles.mojo,src/komira_arrow/schema_identity.mojo,src/komira_arrow/selection_column.mojo,src/komira_arrow/selection_vector.mojo,src/komira_arrow/selection_vector_row.mojo,src/komira_arrow/serde_format.mojo,src/komira_arrow/write_target.mojo	-
+komira//src/komira_arrow_ipc:komira_arrow_ipc	src/komira_arrow_ipc	library	OK	5258	6799	-	-	no	conda	-	-
+komira//src/komira_async:komira_async	src/komira_async	library	OK	4025	4927	-	-	no	conda	src/komira_async/channel/message.mojo,src/komira_async/errors/io_error.mojo,src/komira_async/primitives/never_origin.mojo,src/komira_async/reactor/graceful_shutdown.mojo,src/komira_async/runtime/aws_lambda_runtime.mojo,src/komira_async/runtime/chunk_work.mojo,src/komira_async/runtime/idle_hook.mojo,src/komira_async/runtime/multiphase_work.mojo,src/komira_async/runtime/runtime_trait.mojo,src/komira_async/runtime/steal_work.mojo,src/komira_async/sources/prefetch_source.mojo	-
+komira//src/komira_async_api:komira_async_api	src/komira_async_api	library	OK	20	313	1	2	yes	conda	src/komira_async_api/fork_join_shared.mojo,src/komira_async_api/parallel_dispatch.mojo,src/komira_async_api/scale_signal.mojo,src/komira_async_api/sched_sites.mojo,src/komira_async_api/shared_chunk_work.mojo,src/komira_async_api/token.mojo,src/komira_async_api/worker_pool_traits.mojo	-
+komira//src/komira_atomic_alias:komira_atomic_alias	src/komira_atomic_alias	library	OK	0	6	-	-	no	release	src/komira_atomic_alias/atypes.mojo	-
+komira//src/komira_authz_api:komira_authz_api	src/komira_authz_api	library	OK	32	32	-	-	no	conda	-	-
+komira//src/komira_avro:komira_avro	src/komira_avro	library	OK	2896	3372	-	-	no	conda	-	-
+komira//src/komira_aws_apigatewayv2:komira_aws_apigatewayv2	src/komira_aws_apigatewayv2	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_core:komira_aws_core	src/komira_aws_core	library	OK	4939	5297	-	-	no	conda	src/komira_aws_core/process_creds.mojo	-
+komira//src/komira_aws_dynamodb:komira_aws_dynamodb	src/komira_aws_dynamodb	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_dynamodbstreams:komira_aws_dynamodbstreams	src/komira_aws_dynamodbstreams	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_ec2:komira_aws_ec2	src/komira_aws_ec2	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_ecr:komira_aws_ecr	src/komira_aws_ecr	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_ecs:komira_aws_ecs	src/komira_aws_ecs	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_iam:komira_aws_iam	src/komira_aws_iam	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_lambda:komira_aws_lambda	src/komira_aws_lambda	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_lambda_http:komira_aws_lambda_http	src/komira_aws_lambda_http	library	OK	565	601	-	-	no	conda	-	-
+komira//src/komira_aws_logs:komira_aws_logs	src/komira_aws_logs	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_metrics:komira_aws_metrics	src/komira_aws_metrics	library	OK	305	316	-	-	no	conda	-	-
+komira//src/komira_aws_route53:komira_aws_route53	src/komira_aws_route53	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_s3:komira_aws_s3	src/komira_aws_s3	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_scheduler:komira_aws_scheduler	src/komira_aws_scheduler	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_secretsmanager:komira_aws_secretsmanager	src/komira_aws_secretsmanager	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_ses:komira_aws_ses	src/komira_aws_ses	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_sesv2:komira_aws_sesv2	src/komira_aws_sesv2	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_sns:komira_aws_sns	src/komira_aws_sns	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_aws_sqs:komira_aws_sqs	src/komira_aws_sqs	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_azure_blob:komira_azure_blob	src/komira_azure_blob	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_azure_store_fs takes longer than the 450 s run limit under kcov (sharding it is pending)
+komira//src/komira_azure_core:komira_azure_core	src/komira_azure_core	library	OK	325	329	-	-	no	conda	-	-
+komira//src/komira_broker:komira_broker	src/komira_broker	library	OK	4448	5697	-	-	no	conda	src/komira_broker/broker_node_state.mojo,src/komira_broker/producer_dedupe.mojo,src/komira_broker/producer_registry.mojo,src/komira_broker/sublineage_rollout_metrics.mojo	-
+komira//src/komira_broker_coordinator:komira_broker_coordinator	src/komira_broker_coordinator	library	OK	439	524	-	-	no	conda	-	-
+komira//src/komira_broker_proto:komira_broker_proto	src/komira_broker_proto	library	OK	0	0	-	-	no	release	-	-
+komira//src/komira_buffer:komira_buffer	src/komira_buffer	library	OK	408	834	133	154	yes	conda	src/komira_buffer/aligned_buffer_trait.mojo,src/komira_buffer/byte_buffer.mojo,src/komira_buffer/constants.mojo,src/komira_buffer/file_identity.mojo,src/komira_buffer/memory_region.mojo	-
+komira//src/komira_calendar:komira_calendar	src/komira_calendar	library	OK	452	464	-	-	no	conda	src/komira_calendar/limits.mojo	-
+komira//src/komira_calendar_proto:komira_calendar_proto	src/komira_calendar_proto	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_clock:komira_clock	src/komira_clock	library	OK	12	13	1	2	yes	release	-	-
+komira//src/komira_collections:komira_collections	src/komira_collections	library	OK	313	336	-	-	no	release	src/komira_collections/variadic_pack.mojo	-
+komira//src/komira_column_format:komira_column_format	src/komira_column_format	library	OK	201	258	87	170	yes	conda	-	-
+komira//src/komira_column_kernels:komira_column_kernels	src/komira_column_kernels	library	OK	3501	7473	-	-	no	conda	src/komira_column_kernels/dict_filter.mojo,src/komira_column_kernels/digest_functions.mojo,src/komira_column_kernels/fused_predicate.mojo,src/komira_column_kernels/gather_recordbatch.mojo,src/komira_column_kernels/numeric_unary.mojo,src/komira_column_kernels/selective_decode.mojo,src/komira_column_kernels/unicode_case.mojo,src/komira_column_kernels/unicode_case_table.mojo	-
+komira//src/komira_compression:komira_compression	src/komira_compression	library	OK	341	449	48	64	yes	conda	src/komira_compression/compression.mojo,src/komira_compression/zlib.mojo	-
+komira//src/komira_connect:komira_connect	src/komira_connect	library	OK	751	855	-	-	no	conda	-	-
+komira//src/komira_content_line:komira_content_line	src/komira_content_line	library	OK	350	355	-	-	no	conda	-	-
+komira//src/komira_counters:komira_counters	src/komira_counters	library	OK	266	319	76	78	yes	release	src/komira_counters/runtime_introspection.mojo	-
+komira//src/komira_crypto:komira_crypto	src/komira_crypto	library	OK	2351	2932	-	-	no	conda	src/komira_crypto/aead.mojo,src/komira_crypto/internal/asm/sha256_compress.mojo,src/komira_crypto/pbkdf2.mojo,src/komira_crypto/traits.mojo	-
+komira//src/komira_csv:komira_csv	src/komira_csv	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_csv_parallel_reader and test_csv_phase_4_column_parallel_concat take about 450 s under kcov, the run limit (sharding them is pending)
+komira//src/komira_datetime:komira_datetime	src/komira_datetime	library	OK	313	313	-	-	no	release	-	-
+komira//src/komira_db:komira_db	src/komira_db	library	OK	66	2183	-	-	no	conda	src/komira_db/blocking.mojo,src/komira_db/database.mojo,src/komira_db/db_row.mojo,src/komira_db/db_schema.mojo,src/komira_db/db_storable.mojo,src/komira_db/db_uuid.mojo,src/komira_db/db_value.mojo,src/komira_db/migration.mojo,src/komira_db/neutral_ops.mojo,src/komira_db/proto_json.mojo,src/komira_db/sql_neutral_ops.mojo,src/komira_db/timestamptz.mojo	-
+komira//src/komira_db_postgres:komira_db_postgres	src/komira_db_postgres	library	OK	762	1285	-	-	no	conda	src/komira_db_postgres/pg_driver.mojo,src/komira_db_postgres/pg_pool.mojo	-
+komira//src/komira_db_sqlite:komira_db_sqlite	src/komira_db_sqlite	library	OK	0	718	-	-	no	conda	src/komira_db_sqlite/ffi.mojo,src/komira_db_sqlite/sqlite_driver.mojo	-
+komira//src/komira_dispatch_agg_exec:komira_dispatch_agg_exec	src/komira_dispatch_agg_exec	library	OK	407	411	-	-	no	conda	-	-
+komira//src/komira_dispatch_agg_folds:komira_dispatch_agg_folds	src/komira_dispatch_agg_folds	library	OK	1616	1616	-	-	no	conda	-	-
+komira//src/komira_dispatch_join_kernels:komira_dispatch_join_kernels	src/komira_dispatch_join_kernels	library	OK	709	709	-	-	no	conda	-	-
+komira//src/komira_dispatch_scan:komira_dispatch_scan	src/komira_dispatch_scan	library	OK	1002	1002	-	-	no	conda	-	-
+komira//src/komira_dynamic_filter:komira_dynamic_filter	src/komira_dynamic_filter	library	OK	186	219	42	52	yes	conda	src/komira_dynamic_filter/constant_filter.mojo	-
+komira//src/komira_encoding:komira_encoding	src/komira_encoding	library	OK	319	321	-	-	no	release	-	-
+komira//src/komira_eval:komira_eval	src/komira_eval	library	OK	1345	2393	-	-	no	conda	-	-
+komira//src/komira_exec_types:komira_exec_types	src/komira_exec_types	library	OK	105	223	36	58	yes	conda	src/komira_exec_types/byte_size.mojo,src/komira_exec_types/exec_result.mojo,src/komira_exec_types/partition_by_output_contract.mojo,src/komira_exec_types/process_result.mojo,src/komira_exec_types/query_context.mojo	-
+komira//src/komira_expr:komira_expr	src/komira_expr	library	OK	151	1124	-	-	no	conda	src/komira_expr/composite_key.mojo,src/komira_expr/expr_sortable_key.mojo,src/komira_expr/stage_program.mojo,src/komira_expr/typed_projects.mojo	-
+komira//src/komira_fork_join:komira_fork_join	src/komira_fork_join	library	OK	51	59	22	24	yes	release	-	-
+komira//src/komira_fs:komira_fs	src/komira_fs	library	OK	839	1238	-	-	no	conda	src/komira_fs/byte_range.mojo,src/komira_fs/column_set.mojo,src/komira_fs/file_format.mojo,src/komira_fs/file_format_capabilities.mojo,src/komira_fs/footer_region.mojo,src/komira_fs/footer_window_hints.mojo,src/komira_fs/handle.mojo,src/komira_fs/metadata_cache.mojo	-
+komira//src/komira_gcp_apigateway:komira_gcp_apigateway	src/komira_gcp_apigateway	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_apigateway_default_host: kcov: error: Too long string!
+komira//src/komira_gcp_artifactregistry:komira_gcp_artifactregistry	src/komira_gcp_artifactregistry	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_artifactregistry_default_host: kcov: error: Too long string!
+komira//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager	src/komira_gcp_cloudresourcemanager	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_crm_default_host: kcov: error: Too long string!
+komira//src/komira_gcp_cloudscheduler:komira_gcp_cloudscheduler	src/komira_gcp_cloudscheduler	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_cloudscheduler_endpoint: kcov: error: Too long string!
+komira//src/komira_gcp_compute:komira_gcp_compute	src/komira_gcp_compute	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_gcp_core:komira_gcp_core	src/komira_gcp_core	library	OK	1580	1645	-	-	no	conda	-	-
+komira//src/komira_gcp_fcm:komira_gcp_fcm	src/komira_gcp_fcm	library	OK	214	228	-	-	no	conda	-	-
+komira//src/komira_gcp_firestore:komira_gcp_firestore	src/komira_gcp_firestore	library	OK	1829	1950	-	-	no	conda	-	-
+komira//src/komira_gcp_firestore:komira_gcp_firestore_listen	src/komira_gcp_firestore	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_firestore_listen_client: kcov: error: Too long string!
+komira//src/komira_gcp_firestore:komira_gcp_firestore_v1	src/komira_gcp_firestore	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_firestore_v1_errors: kcov: error: Too long string!
+komira//src/komira_gcp_firestore_db:komira_gcp_firestore_db	src/komira_gcp_firestore_db	library	OK	801	1047	-	-	no	conda	-	-
+komira//src/komira_gcp_iam:komira_gcp_iam	src/komira_gcp_iam	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_iam_default_host: kcov: error: Too long string!
+komira//src/komira_gcp_logging:komira_gcp_logging	src/komira_gcp_logging	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_logging_default_host: kcov: error: Too long string!
+komira//src/komira_gcp_monitoring:komira_gcp_monitoring	src/komira_gcp_monitoring	library	OK	364	370	-	-	no	conda	-	-
+komira//src/komira_gcp_monitoring_client:komira_gcp_monitoring_client	src/komira_gcp_monitoring_client	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_list_time_series_query: kcov: error: Too long string!
+komira//src/komira_gcp_run:komira_gcp_run	src/komira_gcp_run	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_no_env_reads: kcov: error: Too long string!
+komira//src/komira_gcp_secretmanager:komira_gcp_secretmanager	src/komira_gcp_secretmanager	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_no_env_reads: kcov: error: Too long string!
+komira//src/komira_gcp_serviceusage:komira_gcp_serviceusage	src/komira_gcp_serviceusage	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_no_env_reads: kcov: error: Too long string!
+komira//src/komira_gcp_storage:komira_gcp_storage	src/komira_gcp_storage	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_no_env_reads: kcov: error: Too long string!
+komira//src/komira_gcp_wif:komira_gcp_wif	src/komira_gcp_wif	library	OK	248	258	-	-	no	conda	-	-
+komira//src/komira_git:komira_git	src/komira_git	library	OK	885	898	-	-	no	conda	-	-
+komira//src/komira_grpc:komira_grpc	src/komira_grpc	library	OK	1049	1138	-	-	no	conda	-	-
+komira//src/komira_hash:komira_hash	src/komira_hash	library	OK	8	8	4	4	yes	release	-	-
+komira//src/komira_host:komira_host	src/komira_host	library	OK	403	977	-	-	no	release	src/komira_host/proc_probe.mojo,src/komira_host/thp_policy.mojo	-
+komira//src/komira_http_client:komira_http_client	src/komira_http_client	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_recv_ring_body: HttpError[TIMEOUT]: response body deadline exceeded after 298858 body bytes -- no deadline was stamped on this body, so the drain fell back to its unstamped backstop of 400000 us (collect_body). A ...
+komira//src/komira_http_core:komira_http_core	src/komira_http_core	library	OK	2352	3557	-	-	no	conda	src/komira_http_core/codec/h2/connection_state.mojo,src/komira_http_core/codec/h2/response_validation.mojo,src/komira_http_core/transport/stream_park.mojo	-
+komira//src/komira_http_server:komira_http_server	src/komira_http_server	library	OK	1168	2391	-	-	no	conda	src/komira_http_server/middleware/passthrough.mojo	-
+komira//src/komira_iceberg_catalog:komira_iceberg_catalog	src/komira_iceberg_catalog	library	OK	204	234	-	-	no	conda	-	-
+komira//src/komira_job_report_proto:komira_job_report_proto	src/komira_job_report_proto	library	OK	0	0	-	-	no	release	-	-
+komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	765	930	-	-	no	conda	-	-
+komira//src/komira_join_assembly:komira_join_assembly	src/komira_join_assembly	library	OK	540	834	-	-	no	conda	-	-
+komira//src/komira_json:komira_json	src/komira_json	library	OK	635	655	538	580	yes	release	-	-
+komira//src/komira_json_index:komira_json_index	src/komira_json_index	library	OK	462	545	-	-	no	conda	-	-
+komira//src/komira_jsonl:komira_jsonl	src/komira_jsonl	library	OK	2780	3620	-	-	no	conda	src/komira_jsonl/decode.mojo,src/komira_jsonl/json_compatible.mojo	-
+komira//src/komira_jwks:komira_jwks	src/komira_jwks	library	RUN_FAILED	-	-	-	-	yes	conda	-	mojo_cov_branch_classify test_jwk_rfc_vectors
+komira//src/komira_kafka_server:komira_kafka_server	src/komira_kafka_server	library	OK	1174	1206	-	-	no	release	-	-
+komira//src/komira_kernels:komira_kernels	src/komira_kernels	library	OK	474	4156	-	-	no	conda	src/komira_kernels/binary_fn.mojo,src/komira_kernels/builtin_binary_fns.mojo,src/komira_kernels/builtin_hash_fns.mojo,src/komira_kernels/builtin_match_fns.mojo,src/komira_kernels/builtin_string_hash_fns.mojo,src/komira_kernels/eval_chunks.mojo,src/komira_kernels/expr_kernel_templates.mojo,src/komira_kernels/hash_fn.mojo,src/komira_kernels/join_key_envelope.mojo,src/komira_kernels/match_fn.mojo,src/komira_kernels/runtime_expr.mojo,src/komira_kernels/temporal_extract.mojo	-
+komira//src/komira_libc:komira_libc	src/komira_libc	library	OK	181	237	74	94	yes	conda	-	-
+komira//src/komira_log:komira_log	src/komira_log	library	OK	1812	1992	-	-	no	conda	src/komira_log/engine/metric_sink.mojo	-
+komira//src/komira_log_query:komira_log_query	src/komira_log_query	library	OK	468	491	-	-	no	conda	-	-
+komira//src/komira_lz4:komira_lz4	src/komira_lz4	library	OK	183	228	46	60	yes	conda	-	-
+komira//src/komira_mail_address:komira_mail_address	src/komira_mail_address	library	OK	533	552	-	-	no	conda	-	-
+komira//src/komira_mcp_server:komira_mcp_server	src/komira_mcp_server	library	OK	438	455	-	-	no	conda	-	-
+komira//src/komira_metrics:komira_metrics	src/komira_metrics	library	OK	896	922	-	-	no	conda	-	-
+komira//src/komira_metrics_reader:komira_metrics_reader	src/komira_metrics_reader	library	OK	572	588	-	-	no	conda	-	-
+komira//src/komira_morsel:komira_morsel	src/komira_morsel	library	OK	1191	1840	-	-	no	conda	src/komira_morsel/bypass_ref.mojo,src/komira_morsel/hash_agg_decoded.mojo,src/komira_morsel/morsel_operator.mojo,src/komira_morsel/morsel_sink.mojo,src/komira_morsel/morsel_source.mojo,src/komira_morsel/pipeline_execution.mojo,src/komira_morsel/source_hooks.mojo,src/komira_morsel/streaming_sink.mojo,src/komira_morsel/streaming_source.mojo	-
+komira//src/komira_name_registry:komira_name_registry	src/komira_name_registry	library	OK	50	60	24	32	yes	release	-	-
+komira//src/komira_net:komira_net	src/komira_net	library	OK	98	115	-	-	no	conda	-	-
+komira//src/komira_objectstore:komira_objectstore	src/komira_objectstore	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_cas_manifest_concurrent_offline: At tests/test_cas_manifest_concurrent_offline.mojo:292:17: AssertionError: `left == right` comparison failed:
+komira//src/komira_objectstore_gcs:komira_objectstore_gcs	src/komira_objectstore_gcs	library	OK	901	991	-	-	no	conda	src/komira_objectstore_gcs/backend.mojo	-
+komira//src/komira_objectstore_s3:komira_objectstore_s3	src/komira_objectstore_s3	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_s3_fs_inflight: At tests/test_s3_fs_inflight.mojo:470:16: AssertionError: 6 parts under a bound of 3 took 9493 ms: they were not sent 3 at a time
+komira//src/komira_oci:komira_oci	src/komira_oci	library	OK	1394	1685	-	-	no	conda	-	-
+komira//src/komira_op_agg_row_api:komira_op_agg_row_api	src/komira_op_agg_row_api	library	OK	38	69	-	-	no	conda	src/komira_op_agg_row_api/agg_chunk_rows.mojo,src/komira_op_agg_row_api/combine_agg_plan.mojo	-
+komira//src/komira_op_agg_state:komira_op_agg_state	src/komira_op_agg_state	library	OK	2202	2813	-	-	no	conda	src/komira_op_agg_state/accumulator_trait.mojo,src/komira_op_agg_state/agg_fn_fused_kernel.mojo,src/komira_op_agg_state/aggregator_with_struct_trait.mojo,src/komira_op_agg_state/int_sum_overflow.mojo,src/komira_op_agg_state/row_map_projects.mojo	-
+komira//src/komira_optimizer:komira_optimizer	src/komira_optimizer	library	OK	6399	6435	-	-	no	conda	-	-
+komira//src/komira_orc:komira_orc	src/komira_orc	library	OK	3580	4688	-	-	no	conda	-	-
+komira//src/komira_parquet:komira_parquet	src/komira_parquet	library	OK	4797	4801	-	-	no	conda	-	-
+komira//src/komira_parquet_api:komira_parquet_api	src/komira_parquet_api	library	OK	235	241	118	124	yes	release	-	-
+komira//src/komira_parquet_codec:komira_parquet_codec	src/komira_parquet_codec	library	OK	557	586	375	402	yes	conda	src/komira_parquet_codec/snappy/format.mojo	-
+komira//src/komira_plan_expr:komira_plan_expr	src/komira_plan_expr	library	OK	903	3824	-	-	no	conda	src/komira_plan_expr/col_expr_bind.mojo,src/komira_plan_expr/col_expr_name.mojo,src/komira_plan_expr/declared_scalar_udf.mojo,src/komira_plan_expr/expr_id.mojo,src/komira_plan_expr/expr_pool.mojo,src/komira_plan_expr/expr_walk.mojo,src/komira_plan_expr/fs_bindings.mojo,src/komira_plan_expr/fs_descriptor_pod.mojo,src/komira_plan_expr/fs_resolver.mojo,src/komira_plan_expr/literal_domain.mojo,src/komira_plan_expr/null_order_policy.mojo,src/komira_plan_expr/partition_expr.mojo,src/komira_plan_expr/partition_pred_pod.mojo,src/komira_plan_expr/payload_narrow.mojo,src/komira_plan_expr/scalar_desugar.mojo,src/komira_plan_expr/typed_schema.mojo,src/komira_plan_expr/udf_data.mojo	-
+komira//src/komira_plan_ir:komira_plan_ir	src/komira_plan_ir	library	OK	1025	2328	598	1126	yes	conda	src/komira_plan_ir/scan_binding_bind_pass.mojo,src/komira_plan_ir/scan_binding_gate.mojo,src/komira_plan_ir/schema_propagation.mojo	-
+komira//src/komira_plan_proto:komira_plan_proto	src/komira_plan_proto	library	OK	0	0	-	-	no	release	-	-
+komira//src/komira_plan_stats:komira_plan_stats	src/komira_plan_stats	library	OK	163	308	91	116	yes	conda	src/komira_plan_stats/physical_type.mojo,src/komira_plan_stats/precision_scalar.mojo,src/komira_plan_stats/source_statistics.mojo,src/komira_plan_stats/stats_provider.mojo	-
+komira//src/komira_plan_wire:komira_plan_wire	src/komira_plan_wire	library	OK	3521	5052	-	-	no	conda	-	-
+komira//src/komira_pplan_wire:komira_pplan_wire	src/komira_pplan_wire	library	OK	485	556	-	-	no	conda	-	-
+komira//src/komira_proto_codec:implicit_presence_proto	src/komira_proto_codec	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_proto_codec:komira_proto_codec	src/komira_proto_codec	library	OK	1041	1102	-	-	no	release	-	-
+komira//src/komira_protobuf:komira_protobuf	src/komira_protobuf	library	OK	252	294	80	106	yes	release	-	-
+komira//src/komira_resources:komira_resources	src/komira_resources	library	OK	17	17	2	2	yes	release	-	-
+komira//src/komira_retry:komira_retry	src/komira_retry	library	OK	201	202	73	74	yes	release	-	-
+komira//src/komira_row_format:komira_row_format	src/komira_row_format	library	OK	1065	1758	455	682	yes	conda	src/komira_row_format/cell_source.mojo,src/komira_row_format/row_directory.mojo,src/komira_row_format/row_evaluator.mojo,src/komira_row_format/row_output.mojo,src/komira_row_format/row_sink.mojo	-
+komira//src/komira_rowcell:komira_rowcell	src/komira_rowcell	library	OK	46	46	-	-	no	conda	-	-
+komira//src/komira_scalar_arithmetic:komira_scalar_arithmetic	src/komira_scalar_arithmetic	library	OK	62	525	19	24	yes	release	src/komira_scalar_arithmetic/decimal_arith.mojo,src/komira_scalar_arithmetic/decimal_cast.mojo,src/komira_scalar_arithmetic/decimal_compare.mojo,src/komira_scalar_arithmetic/int_overflow.mojo	-
+komira//src/komira_scan_planning:komira_scan_planning	src/komira_scan_planning	library	OK	158	406	-	-	no	conda	src/komira_scan_planning/reader_factory.mojo,src/komira_scan_planning/source_capability_config.mojo	-
+komira//src/komira_scan_resolver:komira_scan_resolver	src/komira_scan_resolver	library	OK	499	520	-	-	no	conda	-	-
+komira//src/komira_scan_source:komira_scan_source	src/komira_scan_source	library	OK	644	2282	-	-	no	conda	src/komira_scan_source/arrow_source.mojo,src/komira_scan_source/avro_source.mojo,src/komira_scan_source/compiler_registry.mojo,src/komira_scan_source/json_source.mojo,src/komira_scan_source/orc_source.mojo,src/komira_scan_source/scan_identity_audit.mojo,src/komira_scan_source/scan_kind_registry.mojo,src/komira_scan_source/scan_registry.mojo,src/komira_scan_source/scan_resolver.mojo,src/komira_scan_source/sink.mojo,src/komira_scan_source/source_capabilities.mojo,src/komira_scan_source/source_like.mojo	-
+komira//src/komira_sdk:komira_sdk	src/komira_sdk	library	OK	1347	1360	-	-	no	conda	-	-
+komira//src/komira_search:komira_search	src/komira_search	library	OK	3420	4133	-	-	no	conda	-	-
+komira//src/komira_search_catalog:komira_search_catalog	src/komira_search_catalog	library	OK	572	684	-	-	no	conda	-	-
+komira//src/komira_search_scan:komira_search_scan	src/komira_search_scan	library	OK	479	552	-	-	no	conda	-	-
+komira//src/komira_secret_env:komira_secret_env	src/komira_secret_env	library	OK	105	108	-	-	no	conda	-	-
+komira//src/komira_secret_registry:komira_secret_registry	src/komira_secret_registry	library	OK	58	64	13	16	yes	conda	src/komira_secret_registry/credential_consumer.mojo	-
+komira//src/komira_secret_store:komira_secret_store	src/komira_secret_store	library	OK	49	49	9	10	yes	conda	-	-
+komira//src/komira_shuffle:komira_shuffle	src/komira_shuffle	library	OK	464	541	-	-	no	conda	-	-
+komira//src/komira_shuffle_streaming:komira_shuffle_streaming	src/komira_shuffle_streaming	library	OK	159	159	-	-	no	conda	-	-
+komira//src/komira_simd:komira_simd	src/komira_simd	library	OK	631	758	-	-	no	release	src/komira_simd/byte_class/broadcast_iota.mojo,src/komira_simd/byte_class/prefix_xor.mojo,src/komira_simd/width_policy.mojo	-
+komira//src/komira_snapshotter:komira_snapshotter	src/komira_snapshotter	library	OK	59	67	22	28	yes	conda	-	-
+komira//src/komira_source_url:komira_source_url	src/komira_source_url	library	OK	102	104	-	-	no	conda	-	-
+komira//src/komira_spsc_ring:komira_spsc_ring	src/komira_spsc_ring	library	OK	119	138	38	48	yes	conda	-	-
+komira//src/komira_sql:komira_sql	src/komira_sql	library	OK	3192	3196	-	-	no	conda	-	-
+komira//src/komira_supervisor:komira_supervisor	src/komira_supervisor	library	OK	286	343	-	-	no	conda	src/komira_supervisor/exit_monitor.mojo	-
+komira//src/komira_supervisor_proto:komira_supervisor_proto	src/komira_supervisor_proto	library	OK	0	0	-	-	no	release	-	-
+komira//src/komira_sync:komira_sync	src/komira_sync	library	OK	16	16	4	4	yes	conda	-	-
+komira//src/komira_table_store:komira_table_store	src/komira_table_store	library	OK	884	1037	-	-	no	conda	-	-
+komira//src/komira_test_run_id:komira_test_run_id	src/komira_test_run_id	library	OK	46	49	10	12	yes	release	-	-
+komira//src/komira_test_verdict:komira_test_verdict	src/komira_test_verdict	library	OK	65	65	-	-	no	release	-	-
+komira//src/komira_textproto:komira_textproto	src/komira_textproto	library	OK	168	174	-	-	no	release	-	-
+komira//src/komira_trace:komira_trace	src/komira_trace	library	OK	291	375	89	102	yes	conda	src/komira_trace/span_ring.mojo,src/komira_trace/tracer_handle.mojo	-
+komira//src/komira_udf:komira_udf	src/komira_udf	library	OK	118	770	36	36	yes	conda	src/komira_udf/agg_fn.mojo,src/komira_udf/auto_komira_schema.mojo,src/komira_udf/expr_scalar_fn.mojo,src/komira_udf/filter_fn.mojo,src/komira_udf/float_quotient_order.mojo,src/komira_udf/frame_view.mojo,src/komira_udf/map_fn.mojo,src/komira_udf/partition_local_map_fn.mojo,src/komira_udf/partition_row_view.mojo,src/komira_udf/predicate.mojo,src/komira_udf/purity.mojo,src/komira_udf/row_transform.mojo,src/komira_udf/row_udf.mojo,src/komira_udf/scalar_udf.mojo,src/komira_udf/stateful_contract.mojo,src/komira_udf/udf_descriptor.mojo,src/komira_udf/window_fn.mojo,src/komira_udf/window_frame_spec.mojo	-
+komira//src/komira_uuid:komira_uuid	src/komira_uuid	library	OK	121	127	75	84	yes	conda	-	-
+komira//src/komira_validation_run:komira_validation_run	src/komira_validation_run	library	OK	53	53	-	-	no	release	-	-
+komira//src/komira_vcard:komira_vcard	src/komira_vcard	library	OK	609	641	-	-	no	conda	-	-
+komira//src/komira_viewport:komira_viewport	src/komira_viewport	library	OK	457	522	-	-	no	conda	-	-
+komira//src/komira_wkt:komira_wkt	src/komira_wkt	library	OK	730	776	408	548	yes	release	-	-
+komira//src/komira_wkt:value_null_proto	src/komira_wkt	library	OK	0	0	-	-	no	conda	-	-
+komira//src/komira_xml:komira_xml	src/komira_xml	library	OK	858	896	-	-	no	release	-	-
+komira//src/komira_zlib:komira_zlib	src/komira_zlib	library	OK	180	240	52	74	yes	conda	-	-
+komira//src/tests/conformance/komira_connect_conformance:komira_connect_conformance	src/tests/conformance/komira_connect_conformance	test	OK	126	132	-	-	no	conda	-	-
+komira//src/tests/conformance/komira_db_conformance:komira_db_conformance	src/tests/conformance/komira_db_conformance	test	OK	1136	1228	-	-	no	no	src/tests/conformance/komira_db_conformance/targets.mojo	-
+komira//src/tests/conformance/komira_http_conformance:komira_http_conformance	src/tests/conformance/komira_http_conformance	test	OK	273	301	-	-	no	conda	-	-
+komira//src/tests/conformance/komira_json_conformance:komira_json_conformance	src/tests/conformance/komira_json_conformance	test	OK	475	498	-	-	no	no	-	-
+komira//src/tests/conformance/komira_vcard_conformance:komira_vcard_conformance	src/tests/conformance/komira_vcard_conformance	test	OK	10	10	-	-	no	no	-	-
+komira//src/tests/e2e/komira_azure_blob_e2e:komira_azure_blob_e2e	src/tests/e2e/komira_azure_blob_e2e	test	OK	389	426	-	-	no	no	-	-
+komira//src/tests/e2e/komira_formats_e2e:komira_formats_e2e	src/tests/e2e/komira_formats_e2e	test	OK	394	441	-	-	no	no	-	-
+komira//src/tests/e2e/komira_http_tls_e2e:komira_http_tls_e2e	src/tests/e2e/komira_http_tls_e2e	test	OK	59	63	-	-	no	conda	-	-
+komira//src/tests/e2e/komira_job_supervisor_loopback:komira_job_supervisor_loopback	src/tests/e2e/komira_job_supervisor_loopback	test	OK	228	281	-	-	no	conda	-	-
+komira//src/tests/e2e/komira_pandas_door_e2e:komira_pandas_door_e2e	src/tests/e2e/komira_pandas_door_e2e	test	OK	238	265	-	-	no	no	-	-
+komira//src/tests/e2e/komira_search_e2e:komira_search_e2e	src/tests/e2e/komira_search_e2e	test	OK	247	294	-	-	no	no	-	-
+komira//src/tests/e2e/komira_secrets_e2e:komira_secrets_e2e	src/tests/e2e/komira_secrets_e2e	test	OK	1054	1202	-	-	no	no	-	-
+komira//src/tests/e2e/komira_shuffle_e2e:komira_shuffle_e2e	src/tests/e2e/komira_shuffle_e2e	test	OK	49	397	-	-	no	conda	src/tests/e2e/komira_shuffle_e2e/children.mojo,src/tests/e2e/komira_shuffle_e2e/harness.mojo	-
+komira//src/tests/e2e/komira_tls_interop_e2e:komira_tls_interop_e2e	src/tests/e2e/komira_tls_interop_e2e	test	OK	39	393	-	-	no	conda	src/tests/e2e/komira_tls_interop_e2e/children.mojo,src/tests/e2e/komira_tls_interop_e2e/fixtures.mojo,src/tests/e2e/komira_tls_interop_e2e/tls_io.mojo	-
+komira//src/tests/e2e/komira_udf_e2e:komira_udf_e2e	src/tests/e2e/komira_udf_e2e	test	OK	35	38	15	16	yes	no	-	-
+komira//src/tests/helpers/komira_plan_harness:komira_plan_harness	src/tests/helpers/komira_plan_harness	test	RUN_FAILED	-	-	-	-	no	no	-	mojo_precompile : buck-out/v2/art/komira/src/tests/helpers/komira_plan_harness/__komira_plan_harness__/47365a912b650570/src/komira_plan_harness/type_text.mojo:145:22: error: 'ArrowType' value has no attribute 'ERROR'
+komira//src/tests/helpers/komira_test_bucket:komira_test_bucket	src/tests/helpers/komira_test_bucket	test	OK	595	616	-	-	no	conda	-	-
+komira//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3	src/tests/helpers/komira_test_fake_s3	test	OK	28	28	-	-	no	no	-	-
+komira//src/tests/helpers/komira_test_minio:komira_test_minio	src/tests/helpers/komira_test_minio	test	OK	221	245	47	68	yes	conda	-	-
+komira//src/tests/helpers/komira_test_s3_adapter:komira_test_s3_adapter	src/tests/helpers/komira_test_s3_adapter	test	OK	205	245	-	-	no	conda	src/tests/helpers/komira_test_s3_adapter/open.mojo	-

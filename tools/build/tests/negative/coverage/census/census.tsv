@@ -1,0 +1,6 @@
+# The census of tests//negative/coverage:census_* (test 46): two libraries of one package, one failed, a test package.
+census	2026-10-08	-	-
+komira//src/a:a	src/a	library	OK	5	10	1	4	yes	release	src/a/x.mojo,src/a/y.mojo	-
+komira//src/b:b	src/b	library	OK	10	10	-	-	no	no	-	-
+komira//src/b:b2	src/b	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_x: boom
+komira//src/tests/e2e/t:t	src/tests/e2e/t	test	OK	3	4	-	-	no	no	-	-

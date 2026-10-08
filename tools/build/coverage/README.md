@@ -22,6 +22,7 @@ gate's JSON entry for a package equal to the report's.
 | `:covcheck_bin` | the command line (`main.mojo`, dispatching to `covcheck/cli.mojo`) |
 | `:ratchet.tsv` | the floors (`ratchet.tsv`) |
 | `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
+| `:census.tsv`, `:census.sh`, `census.bzl` | the census: every library's numbers, the script that measures them and renders `docs/coverage_census.md` and the floors, and the rule of the root's `:coverage_census` check ([The census](#the-census)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
 | `branch_gate.bxl` | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a library: a row naming none is read by nothing (test 46) |
@@ -90,15 +91,16 @@ Every input is a flag; nothing is read from the environment.
 
 `report` exits 0 whenever it wrote its outputs, whatever they conclude: in
 enforce mode a failing package fails the PR through the check run's
-`conclusion: "failure"`, never through the exit code. `gate` exits 3 in
-enforce mode when the package has a finding, so the build fails.
+`conclusion: "failure"`, never through the exit code. `gate` exits 3 when
+its conclusion is `failure` (in enforce mode a finding; in every mode a
+`Regression`), so the build fails.
 
 | code | meaning |
 |---|---|
 | 0 | the outputs were written, whatever they conclude (`report` never carries the conclusion in its exit code) |
 | 1 | an input is malformed (each reader names the file and line, or the byte's line), branch record files disagree on a location's decisions, a file has branch data from both a line report and a branch record file, a report path is unmapped, a source cannot be read, `--checkrun-dir` is not empty, `--package` holds no BUCK file, or an output cannot be written |
 | 2 | bad usage: no or unknown command, an unknown flag, a flag without its value or given twice, a required flag missing, no report (`report`), both `--cobertura` and `--lcov` reports, a malformed `--mode`, `--target-bp` or `--head-sha`, a `--max-annotations` that is not a number of 1 or more |
-| 3 | `gate` only: `--mode enforce` and the package has at least one finding |
+| 3 | `gate` only: `--mode enforce` and the package has at least one finding, or a `Regression` in any mode (a floor not held) |
 
 ## Reading the reports
 
@@ -325,8 +327,10 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | `BranchUnmeasuredFile` | a file with a line record, in a package one of whose kept files a branch record file names, that no branch record file names and whose line report gives no branch record of its own: cov_branch_classify names every measured file its test holds code of (a decision-free one with no `BRDA`), so this file's branches were not read, and counting them as none would lift the package's branch number. A failure in enforce mode, listed in census mode, as `UnmeasuredFile` is |
 | `ExemptionWithoutReason`, `StaleExemption` | see Exemptions |
 
-Conclusion: `neutral` in census and neutral mode whatever was found; in
-enforce mode `failure` with any finding, else `success`.
+Conclusion: `failure` with any `Regression`, in every mode (a floor holds
+whatever the mode: [The ratchet](#the-ratchet)); otherwise `neutral` in
+census and neutral mode whatever was found, and in enforce mode `failure`
+with any finding, else `success`.
 
 ## The build gate
 
@@ -361,14 +365,15 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
    `summary.md` are the library's `[coverage][gate]`
    (`[coverage][gate][result]`, `[coverage][gate][summary]`).
 
-Exit 0 writes the gate's marker. Exit 3 (enforce mode, a finding) fails the
-action with `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage
-gate]): covcheck gate exited 3`, `The conda package (<name>_conda) is not
+Exit 0 writes the gate's marker. Exit 3 (enforce mode and a finding, or a
+`Regression` in any mode) fails the action with `COVERAGE GATE FAILED
+(<mode>): <package> (<label> [coverage gate]): covcheck gate exited 3`, `The conda package (<name>_conda) is not
 produced until its coverage meets the policy; the library and its
 dependents still build.` and the summary; exits 1 and 2 (an input
 covcheck refuses, bad usage) fail it in every mode with `COVERAGE GATE ERROR`
 and covcheck's message: a malformed ratchet fails a census gate too (test
-46). Census and neutral mode never fail on a finding.
+46). Census and neutral mode fail on no finding but a `Regression`: a
+package measured under its floor of `ratchet.tsv` (test 46's covfloor).
 
 **What the gate blocks: the shipped package, nothing else.** The library's
 conda package (`<name>_conda`, `tools/build/package/conda.bzl`: both its
@@ -485,9 +490,13 @@ failed to build: then it lists the library as branch not measured).
 `ratchet.tsv`: comment lines start with `#`; a row is
 `<package>\t<line floor>\t<branch floor>`, floors in basis points, the branch
 floor `-` when there is none, rows sorted by package in byte order, each
-package once; anything else is refused naming the line. The shipped file
-has no rows: the floors arrive with the first coverage runs, as the file
-`--ratchet-out` proposes: every floor raised to what was measured
+package once; anything else is refused naming the line. A floor holds in
+every mode: a package measured under it is a `Regression`, whose
+conclusion is `failure` in census and neutral mode too, so its gate fails
+and its conda package is not built (the library and its dependents still
+build). Coverage can only go up. The shipped rows are the census's ([The
+census](#the-census)); `--ratchet-out` proposes the same rule for the
+packages of one report: every floor raised to what was measured
 (`max(floor, measured)`), a row added for each measured package without one,
 the rows of directories without a BUCK file dropped, the comment lines kept
 first. A value above its floor is never a finding; copying the proposal in is
@@ -495,6 +504,68 @@ how a floor rises. Every package in the reports and every row is compared,
 not only the packages a change touches: `report` expects the reports of
 every package, and a row whose package has no data is a `Regression`, so a
 floor cannot be escaped by dropping a package's tests or report.
+
+## The census
+
+`docs/coverage_census.md` is the census of every library under `src/`: one
+coverage build of each library's gate, ranked by line coverage, with its
+branch coverage (the libraries of `COVERAGE_BRANCH_GATE`; the others show
+*not gated*), uncovered lines, files no test compiles, whether it is
+published (in `release/artifacts.textproto`, or a conda package only), its
+package's floors, and the libraries a run or the gate failed for, with why.
+The libraries under `src/tests/` are test code, outside the target: listed
+for information, with no floor. `census.sh` makes it in three steps, the
+first two at the top of a checkout with the coverage build's remote
+execution configured (they run `./buck2`):
+
+```sh
+tools/build/coverage/census.sh run --out <dir>      # every gate, --keep-going; rerun until one finishes
+tools/build/coverage/census.sh collect --out <dir>  # <dir>/census.tsv from the last build report
+cp <dir>/census.tsv tools/build/coverage/census.tsv
+BB=$(./buck2 build komira//tools/build/toolchains:busybox --show-full-simple-output | tail -1)
+tools/build/coverage/census.sh render "$BB" tools/build/coverage/census.tsv \
+    tools/build/coverage/ratchet.tsv docs/coverage_census.md <dir>/ratchet.tsv
+cp <dir>/ratchet.tsv tools/build/coverage/ratchet.tsv
+```
+
+`run` caps each build at 265 s (`--cap`) and starts it again while the cap
+stops it; the remote cache keeps what finished. `collect` reads the last
+finished build report: a library whose gate result it has is `OK`, one an
+action before the gate failed for `RUN_FAILED`, one whose gate failed
+`GATE_FAILED`, with the failing actions and the first error line of their
+output. `render` says each floor it raised, each row it dropped (a package
+no library of the census is in) and each library under its floor.
+
+**The floors** are per package (a directory), in basis points. `render`
+sets a package's floor to the lowest number of its libraries (two
+libraries in one directory share a row), 0 for line and none for branch
+when one of them was not measured, and never lowers one: a floor is
+`max(current floor, measured)`. A library that failed keeps its floor (or
+0), so a failing run neither blocks the census nor lowers anything.
+
+**The check.** `//:coverage_census` (`census.bzl`) renders from the
+committed census.tsv and ratchet.tsv in a build action and fails unless
+`docs/coverage_census.md` and `ratchet.tsv` are byte for byte what it
+renders. So the doc is never edited by hand, every floor is at least what
+the census measured, and every library package of the census has a row
+and no other row is there.
+
+**Updating** (weekly, or on demand, as one pull request of the three files):
+
+- *Raising* is the regenerated files: `render` raises a floor to what the
+  census measured, and the diff of `ratchet.tsv` lists every raise for the
+  review. A number moves only with the tests or the sources: a cached run
+  is the same run, so a flaky test cannot raise a floor by passing once
+  more on unchanged inputs. A coverage number that depends on timing (a
+  retry path taken only when slow) is a test to fix; until it is, lower
+  that package's floor by hand (below) with the reason in the commit.
+- *Lowering* is only a hand edit of the package's row of `ratchet.tsv`, then
+  `render` again for the doc: `render` never lowers a floor, and the check
+  refuses a floor under what census.tsv measured, so a lowered floor needs a
+  census that measured no more (the change that lowered the coverage, or a
+  new census of it), and says so in its diff.
+- A library whose run fails is `RUN_FAILED` with floor 0 (or its old floor);
+  fix the run and refresh.
 
 ## Outputs of `report`
 
@@ -582,7 +653,8 @@ gate reads branch records, as the check run `coverage`: covcheck's summary and
 its annotations on the lines of the "Files changed" view. It is
 informational. It is not `pr / check`, it is not a required check, and its
 result cannot make `pr / check` red; its conclusion is `neutral` in census
-mode (the policy's today). Making it required, or switching coverage on in
+mode (the policy's today), or `failure` when a measured package is under its
+floor. Making it required, or switching coverage on in
 `pr / check` itself, waits for the tree-wide sweep of tests that fail at
 `-O0` or under kcov: today such a library's conda package is unbuilt in a
 coverage build (its dependents build). Like `pr / check` it runs only for a

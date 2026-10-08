@@ -174,8 +174,10 @@ def test_gate_equals_report_with_unmeasured_files() raises:
     assert_equal(package_json(gate.packages[0]), package_json(full.packages[full.package_index(String("src/p"))]))
     assert_equal(_kinds(gate), _kinds(full))
     assert_true(package_json(gate.packages[0]).find("\"unmeasured_files\":1") >= 0, package_json(gate.packages[0]))
-    # Neutral mode: the same finding, no failure.
-    assert_equal(full.conclusion, "neutral")
+    # Neutral mode: the same findings; the line under its floor of 90.00%
+    # is a Regression, which fails in every mode.
+    assert_true(_kinds(full).find("Regression") >= 0, _kinds(full))
+    assert_equal(full.conclusion, "failure")
 
 
 def test_annotations_of_a_file_no_test_compiled() raises:

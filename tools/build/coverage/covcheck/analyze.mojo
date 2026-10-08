@@ -47,6 +47,8 @@ and the findings: the one computation both `covcheck report` and
    whose line report gives no branch record (its branches were not read,
    and would count as none),
    `ExemptionWithoutReason` and `StaleExemption`.
+8. The conclusion (stats.conclusion_of): `failure` with any `Regression`
+   in every mode, so a floor holds even in census mode; otherwise by mode.
 
 The line reports must all be lcov or all Cobertura: the two formats
 identify a line's branches differently, so one file in both would count its
@@ -77,6 +79,7 @@ from covcheck.stats import (
     BRANCH_UNMEASURED_FILE,
     NOT_MEASURED,
     EXEMPTION_WITHOUT_REASON,
+    REGRESSION,
     MODE_NEUTRAL,
     MUTANT_SURVIVED,
     STALE_EXEMPTION,
@@ -634,5 +637,9 @@ def analyze(
         a.total.timeout += p.timeout
         a.total.error += p.error
     a.proposal = propose(ratchet, a.packages, repo)
-    a.conclusion = conclusion_of(opts.mode, len(a.findings))
+    var regressions = 0
+    for i in range(len(a.findings)):
+        if a.findings[i].kind == String(REGRESSION):
+            regressions += 1
+    a.conclusion = conclusion_of(opts.mode, len(a.findings), regressions)
     return a^

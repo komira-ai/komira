@@ -12,6 +12,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | The end-to-end tests | [tools/build/tests/README.md](../tools/build/tests/README.md) |
 | README API coverage: which public symbols the README examples use, its ledger, and the census | [readme_api_coverage.md](readme_api_coverage.md) |
 | Product coverage: which plan capability each surface's end-to-end tests exercise, the matrix ledger, and the census | [surface_capability_matrix.md](surface_capability_matrix.md) |
+| Coverage census: each library's line and branch coverage, ranked, files no test compiles, and the floors that only rise | [coverage_census.md](coverage_census.md) |
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
 | The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |
 | Columnar memory: Arrow buffers, columns, batches, IPC and the C Data Interface | [design/columnar_memory_and_arrow.md](design/columnar_memory_and_arrow.md) |

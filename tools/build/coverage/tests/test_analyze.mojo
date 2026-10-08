@@ -402,6 +402,41 @@ def test_unmapped_mutant_path_is_an_error() raises:
     assert_true(raised)
 
 
+def test_a_floor_holds_in_every_mode() raises:
+    # A ratchet floor is the one finding that fails in census and neutral
+    # mode too (ratchet.mojo; README.md, "The ratchet"): line 50.00% under a
+    # floor of 50.01% is a Regression and the conclusion is failure in every
+    # mode; at its floor, or above it, census stays neutral. A branch floor
+    # holds the same way, and so does a floor whose package measured nothing.
+    var t = _lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nDA:2,0\nBRDA:1,0,0,1\nBRDA:1,0,1,0\nend_of_record\n"))
+    var o = Options()
+    o.target_bp = 0
+    var modes = List[String]()
+    modes.append(String("census"))
+    modes.append(String("neutral"))
+    modes.append(String("enforce"))
+    for i in range(len(modes)):
+        o.mode = modes[i]
+        var below = analyze(t, _none(), _repo(), parse_ratchet(String("src/alpha\t5001\t5000\n"), String("r.tsv")), _sources(), o)
+        assert_equal(_kinds(below), "Regression:line", modes[i])
+        assert_equal(below.conclusion, "failure", modes[i])
+        var branch = analyze(t, _none(), _repo(), parse_ratchet(String("src/alpha\t5000\t5001\n"), String("r.tsv")), _sources(), o)
+        assert_equal(_kinds(branch), "Regression:branch", modes[i])
+        assert_equal(branch.conclusion, "failure", modes[i])
+    for i in range(2):
+        o.mode = modes[i]
+        for floor in [String("5000"), String("4999")]:
+            var at = analyze(t, _none(), _repo(), parse_ratchet(String("src/alpha\t") + floor + String("\t5000\n"), String("r.tsv")), _sources(), o)
+            assert_equal(len(at.findings), 0, modes[i] + floor)
+            assert_equal(at.conclusion, "neutral", modes[i] + floor)
+    # No data for a package whose row has a floor: failure in census too.
+    o.mode = String("census")
+    o.only_package = String("src/alpha")
+    var gone = analyze(_lcov(String("SF:src/beta/c.mojo\nDA:1,1\nend_of_record\n")), _none(), _repo(), parse_ratchet(String("src/alpha\t9000\t-\n"), String("r.tsv")), _sources(), o)
+    assert_true(_kinds(gone).find("Regression:line") >= 0, _kinds(gone))
+    assert_equal(gone.conclusion, "failure")
+
+
 def main() raises:
     test_two_cobertura_inputs_sum_per_line()
     test_test_sources_left_out_by_default()
@@ -411,6 +446,7 @@ def main() raises:
     test_mutants_score_and_survivors()
     test_target_and_branch_na()
     test_conclusion_per_mode()
+    test_a_floor_holds_in_every_mode()
     test_branch_not_measured()
     test_enforce_fails_on_a_single_finding()
     test_gate_numbers_equal_the_report()

@@ -22,8 +22,10 @@ branch) and a decision for generated libraries (README.md, "The build
 gate").
 """
 
-# census: findings are listed, never fatal; neutral: the same; enforce: a
-# package with any finding fails its build (covcheck gate exits 3).
+# census: findings are listed, never fatal, except a Regression (a package
+# under its floor of ratchet.tsv), which fails the gate in every mode;
+# neutral: the same; enforce: a package with any finding fails its build
+# (covcheck gate exits 3).
 COVERAGE_MODE = "census"
 
 # Basis points of line (and branch) coverage per package: 10000 is 100%.

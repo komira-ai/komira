@@ -1,0 +1,3 @@
+# The floors of tests//negative/coverage:covfloor (test 46): covlow's sources and test measure line 50.00%
+# and branch 25.00%; the line floor is one basis point above it.
+tools/build/tests/negative/coverage	5001	2500
