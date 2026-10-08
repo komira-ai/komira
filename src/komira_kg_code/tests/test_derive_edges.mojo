@@ -148,8 +148,8 @@ def test_a_method_whose_struct_header_is_not_found_has_line_0() raises:
     assert_equal(_line(g, "lib.S.area"), 0)
 
 
-# c//p:lib with the modules a (function fa) and b (function fb), listed in
-# that order: the doc JSON keeps module order, so a's file is read first.
+# c//p:lib with the modules a (function fa) and b (function fb, struct U with
+# method m), listed in that order: the doc JSON keeps module order, so a's file is read first.
 comptime _UQ_TWO = (
     '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [],'
     ' "srcs": ["c//p/lib/__init__.mojo", "c//p/lib/a.mojo", "c//p/lib/b.mojo"]}}'
@@ -159,21 +159,26 @@ comptime _DOC_TWO = (
     '{"kind": "module", "name": "a",'
     ' "functions": [{"name": "fa", "overloads": [{"signature": "def fa()", "summary": "Fa."}]}]},'
     ' {"kind": "module", "name": "b",'
-    ' "functions": [{"name": "fb", "overloads": [{"signature": "def fb()", "summary": "Fb."}]}]}],'
+    ' "functions": [{"name": "fb", "overloads": [{"signature": "def fb()", "summary": "Fb."}]}],'
+    ' "structs": [{"name": "U", "signature": "struct U", "summary": "U.",'
+    ' "functions": [{"name": "m", "overloads": [{"signature": "def m(self)", "summary": "M."}]}]}]}],'
     ' "packages": []}, "version": "1.0.0"}'
 )
 
 
 def test_a_module_whose_source_is_not_added_leaves_later_modules_lines() raises:
-    # a's source is not added, so fa has line 0; b's is, so fb has its line.
-    # A missing source zeroes its own file only, not the files after it.
+    # a's source is not added, so fa has line 0; b's is, so fb, U and U.m
+    # have their lines. A missing source zeroes its own file only, not the
+    # top-level declarations or the methods of the files after it.
     var b = CodeGraphBuilder()
     b.add_uquery_json(_UQ_TWO)
     b.add_mojo_doc_json("c//p:lib", _DOC_TWO)
-    b.add_source("c//p/lib/b.mojo", "# b\ndef fb():\n    pass\n")
+    b.add_source("c//p/lib/b.mojo", "# b\ndef fb():\n    pass\nstruct U:\n    def m(self):\n        pass\n")
     var g = b.build()
     assert_equal(_line(g, "lib.a.fa"), 0)
     assert_equal(_line(g, "lib.b.fb"), 2)
+    assert_equal(_line(g, "lib.b.U"), 4)
+    assert_equal(_line(g, "lib.b.U.m"), 5)
 
 
 # _DOC_ONE's module with a second struct T after S: per file the declarations
@@ -184,22 +189,28 @@ comptime _DOC_S_THEN_T = (
     ' "functions": [],'
     ' "structs": [{"name": "S", "signature": "struct S", "summary": "S.",'
     ' "functions": [{"name": "area", "overloads": [{"signature": "def area(self) -> Int", "summary": "A."}]}]},'
-    ' {"name": "T", "signature": "struct T", "summary": "T.", "functions": []}]}],'
+    ' {"name": "T", "signature": "struct T", "summary": "T.",'
+    ' "functions": [{"name": "m", "overloads": [{"signature": "def m(self)", "summary": "M."}]}]}]}],'
     ' "packages": []}, "version": "1.0.0"}'
 )
 
 
 def test_a_struct_after_a_method_whose_header_is_not_found_has_its_line() raises:
     # S's header is not in the source, so area has line 0; T's header is,
-    # and T is no member of S, so T has its line.
+    # and T is no member of S, so T and its method m have their lines. A
+    # missing struct header zeroes only that struct's methods.
     var b = CodeGraphBuilder()
     b.add_uquery_json(_UQ_ONE)
     b.add_mojo_doc_json("c//p:lib", _DOC_S_THEN_T)
-    b.add_source("c//p/lib/__init__.mojo", "    def area(self) -> Int:\n        return 0\nstruct T:\n    pass\n")
+    b.add_source(
+        "c//p/lib/__init__.mojo",
+        "    def area(self) -> Int:\n        return 0\nstruct T:\n    def m(self):\n        pass\n",
+    )
     var g = b.build()
     assert_equal(_line(g, "lib.S"), 0)
     assert_equal(_line(g, "lib.S.area"), 0)
     assert_equal(_line(g, "lib.T"), 3)
+    assert_equal(_line(g, "lib.T.m"), 4)
 
 
 def test_dump_escapes_backslash_tab_and_newline() raises:
