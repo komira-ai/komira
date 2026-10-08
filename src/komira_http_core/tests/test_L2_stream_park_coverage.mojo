@@ -24,7 +24,8 @@
 # an empty send buffer is always write-ready (a ready write wait). No test
 # sleeps; the only clock reads are lower bounds the function itself
 # guarantees (it re-polls until its own clock says the slice is spent) and
-# one upper bound that is three orders of magnitude above the work.
+# two upper bounds (half a 30 s slice) that are three orders of magnitude
+# above the work.
 # =============================================================================
 
 from std.ffi import external_call
@@ -111,9 +112,11 @@ struct _ProbeStream(IoStream, Movable, Deinitable):
     `token_is_direction=True` makes it answer `pending_wait_is_write` from
     bit 0 of the Pending token and ignore `call_is_write` (as
     `TlsClientStream` decodes the bit it wrote), so a test can ask for the
-    direction OPPOSITE to the call. `False` gives the trait's own default
-    (`return call_is_write`, the kernel-socket answer). The park never reads
-    or writes through the stream, so `try_read` and `try_write` raise."""
+    direction OPPOSITE to the call. `False` makes it answer like the trait
+    default (`return call_is_write`, the kernel-socket answer); the trait's
+    own default body runs only in `_DefaultDirectionStream`, below. The park
+    never reads or writes through the stream, so `try_read` and `try_write`
+    raise."""
 
     var _fd: Int32
     var _buffered: Bool
@@ -160,8 +163,45 @@ struct _ProbeStream(IoStream, Movable, Deinitable):
         return call_is_write
 
 
+struct _DefaultDirectionStream(IoStream, Movable, Deinitable):
+    """An `IoStream` that does NOT define `pending_wait_is_write` or
+    `has_buffered_readable`, so the park runs the trait's own default bodies
+    for both (as a kernel-socket conformer does)."""
+
+    var _fd: Int32
+
+    def __init__(out self, fd: Int32):
+        self._fd = fd
+
+    def try_read[
+        RT: Runtime, o: Origin[mut=True],
+    ](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        dst: Span[UInt8, o],
+    ) raises -> StreamIo:
+        raise Error("_DefaultDirectionStream.try_read: the park must not read")
+
+    def try_write[RT: Runtime](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        src: Span[UInt8, _],
+    ) raises -> StreamIo:
+        raise Error("_DefaultDirectionStream.try_write: the park must not write")
+
+    def close(var self):
+        pass
+
+    def negotiated_protocol(self) -> UInt8:
+        return NEGOTIATED_HTTP_1_1
+
+    def fd(self) -> Int32:
+        return self._fd
+
+
 def _kernel_like(fd: Int32) -> _ProbeStream:
-    """No buffered bytes; the direction is the call's (the trait default)."""
+    """No buffered bytes; the direction is the call's (a probe answering
+    like the trait default)."""
     return _ProbeStream(fd, buffered=False, token_is_direction=False)
 
 
@@ -186,8 +226,39 @@ def _assert_no_registration_left(mut reactor: Reactor[NoopSink]) raises:
 # =============================================================================
 
 
+def test_trait_default_write_call_waits_for_write_and_is_ready() raises:
+    """The trait's own `pending_wait_is_write` body (a conformer that does
+    not define it), write call: the park waits for write readiness, which a
+    fresh socket has, so it returns True. Waiting for read here would idle."""
+    var reactor = _make_reactor()
+    var sp = _socketpair()
+    var s = _DefaultDirectionStream(sp[0])
+    assert_true(park_on_pending[_DefaultDirectionStream, _RT](
+        s, reactor, pending_token=Int64(1), call_is_write=True,
+        slice_us=_IDLE_SLICE_US,
+    ))
+    _close_fd(sp[0])
+    _close_fd(sp[1])
+
+
+def test_trait_default_read_call_on_quiet_socket_idles() raises:
+    """The trait's own default body, read call, nothing sent: the park waits
+    for read readiness and returns False. The token's bit 0 is set, so a
+    default that decoded the token instead of the call would wait for write
+    and return True."""
+    var reactor = _make_reactor()
+    var sp = _socketpair()
+    var s = _DefaultDirectionStream(sp[0])
+    assert_false(park_on_pending[_DefaultDirectionStream, _RT](
+        s, reactor, pending_token=_TOKEN_WAIT_WRITE, call_is_write=False,
+        slice_us=_IDLE_SLICE_US,
+    ))
+    _close_fd(sp[0])
+    _close_fd(sp[1])
+
+
 def test_kernel_like_write_call_waits_for_write_and_is_ready() raises:
-    """Trait default, write call: the park waits for write readiness, which a
+    """A probe answering like the trait default, write call: the park waits for write readiness, which a
     fresh socket has, so it returns True. Waiting for read here would idle."""
     var reactor = _make_reactor()
     var sp = _socketpair()
@@ -201,7 +272,7 @@ def test_kernel_like_write_call_waits_for_write_and_is_ready() raises:
 
 
 def test_kernel_like_read_call_on_quiet_socket_idles() raises:
-    """Trait default, read call, nothing sent: the park waits for read
+    """A probe answering like the trait default, read call, nothing sent: the park waits for read
     readiness, never gets it, and returns False. Waiting for write here
     would return True at once."""
     var reactor = _make_reactor()
@@ -216,7 +287,7 @@ def test_kernel_like_read_call_on_quiet_socket_idles() raises:
 
 
 def test_kernel_like_read_call_with_a_byte_waiting_is_ready() raises:
-    """Trait default, read call, one byte sent by the peer: read-ready, True.
+    """A probe answering like the trait default, read call, one byte sent by the peer: read-ready, True.
     (Level-triggered: a byte that arrived before the registration counts.)"""
     var reactor = _make_reactor()
     var sp = _socketpair()
@@ -396,7 +467,9 @@ def test_default_slice_is_250_ms() raises:
 
 def test_zero_slice_returns_false_without_polling() raises:
     """`slice_us=0` on a write-READY socket returns False: the spent slice
-    ends the park before the first poll, so readiness is never looked at."""
+    ends the park before the first poll, so readiness is never looked at.
+    (Against a `left_us <= 0` -> `< 0` mutant this goes red only when the
+    park's two clock reads are less than 1000 ns apart, the normal case.)"""
     var reactor = _make_reactor()
     var sp = _socketpair()
     var s = _kernel_like(sp[0])
@@ -433,6 +506,31 @@ def test_one_poll_cap_sees_a_ready_socket() raises:
         s, reactor, pending_token=Int64(0), call_is_write=True,
         slice_us=_IDLE_SLICE_US, polls_per_slice_cap=1,
     ))
+    _close_fd(sp[0])
+    _close_fd(sp[1])
+
+
+def test_ready_park_returns_at_once_not_at_the_slice_end() raises:
+    """A park that sees its own readiness stops polling: on a write-ready
+    socket with a 30 s slice and no effective poll cap, it returns True in
+    far less than the slice. A loop that kept polling after the fd became
+    ready would re-see the level-triggered readiness on every poll and run
+    until the slice ended (30 s), then fail the time bound."""
+    var reactor = _make_reactor()
+    var sp = _socketpair()
+    var s = _kernel_like(sp[0])
+    var t0 = now_ns()
+    var ready = park_on_pending[_ProbeStream, _RT](
+        s, reactor, pending_token=Int64(0), call_is_write=True,
+        slice_us=_LONG_SLICE_US, polls_per_slice_cap=Int(1) << 40,
+    )
+    var waited = _elapsed_us(t0)
+    assert_true(ready)
+    assert_true(
+        waited < Int64(_LONG_SLICE_US) // Int64(2),
+        "ready park returned after " + String(waited) + " us",
+    )
+    _assert_no_registration_left(reactor)
     _close_fd(sp[0])
     _close_fd(sp[1])
 
@@ -474,7 +572,10 @@ def test_foreign_wakeup_does_not_end_the_slice() raises:
     """Invariant (ii), the re-poll: a foreign one-shot timer fires 10 ms into
     a 100 ms idle park. The poll it ends is not this op's readiness, so the
     park re-polls for the rest of its slice and returns False only after
-    the whole 100 ms."""
+    the whole 100 ms. The timer's readiness is checked after one more
+    zero-timeout poll, so a thread stalled past the slice before the park's
+    first poll (the park then never polls) still observes the fired timer;
+    that check is about the fixture, not the park."""
     var reactor = _make_reactor()
     var sp = _socketpair()
     var timer_op = reactor.register_timer(Int64(10_000_000))
@@ -490,6 +591,7 @@ def test_foreign_wakeup_does_not_end_the_slice() raises:
         waited >= Int64(_IDLE_SLICE_US),
         "park ended after " + String(waited) + " us",
     )
+    var _drained = reactor.poll_completions(timeout_us=Int32(0))
     assert_true(reactor.is_ready(timer_op))
     reactor.deregister(timer_op)
     _close_fd(sp[0])
