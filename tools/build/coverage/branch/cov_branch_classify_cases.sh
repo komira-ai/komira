@@ -598,6 +598,24 @@ refused "try, constants from no callee block" "src/pkg/t.mojo:56:30: a br at 're
 sed -e 's/^  %7 = phi i1 \[ false, %5 \], \[ true, %4 \], !dbg !452$/  %7 = phi i1 [ true, %5 ], [ false, %4 ], !dbg !452/' "$TX" >"$W/v.ll"
 ! cmp -s "$W/v.ll" "$TX" || red "variant: the constant swap changed nothing"
 refused "try, constants of the wrong polarity" "src/pkg/t.mojo:56:30: a br at 'read_uleb128(' in a try body that is not a raising call's error flag" "$W/v.ll"
+# Both constants `true`, one from the raise path and one from the return:
+# the raise block's `true` is there, but the return's says raised too.
+# Kills: the polarity check dropped alone (the `true` from the raise block
+# still required).
+sed -e 's/^  %7 = phi i1 \[ false, %5 \], \[ true, %4 \], !dbg !452$/  %7 = phi i1 [ true, %5 ], [ true, %4 ], !dbg !452/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "variant: the true/true edit changed nothing"
+refused "try, true from the return too" "src/pkg/t.mojo:56:30: a br at 'read_uleb128(' in a try body that is not a raising call's error flag" "$W/v.ll"
+# 12b. Brackets that do not balance in a measured file: which lines are
+# continuations cannot be told, so whether a call is in a `try:` body
+# cannot either; refused once, naming the file and the line. Kills: the
+# refusal removed (every later line skipped, inTry false: the calls in
+# `try:` bodies read as the compiler's, silently).
+printf '    v = f(\n' >>"$W/$SRC/t.mojo"
+refused "unbalanced, never closed" "src/pkg/t.mojo: the brackets of the file do not balance (a bracket line 68 opens is never closed)" "$TX"
+cp "$DIR/fixtures/t.src" "$W/$SRC/t.mojo"
+printf '    )\n' >>"$W/$SRC/t.mojo"
+refused "unbalanced, closed twice" "src/pkg/t.mojo: the brackets of the file do not balance (line 68 closes a bracket no line opened)" "$TX"
+cp "$DIR/fixtures/t.src" "$W/$SRC/t.mojo"
 tinsert '  %15 = call i1 @"pkg::t::touch"(i64 %0, ptr %3), !dbg !411' '  br i1 %15, label %90, label %16, !dbg !440, !prof !482' '!440 = !DILocation(line: 4, column: 5, scope: !403)'
 sed -e '/^!440 = /d' "$W/v.ll" >"$W/v2.ll"
 printf '%s\n' '!440 = !DILocation(line: 4, column: 5, scope: !403)' >>"$W/v2.ll"

@@ -445,7 +445,11 @@ the scope is read from the source, and the shape from the IR:
   last one met (blank, comment and triple-quoted-string lines skipped, and
   continuation lines, which start inside an open bracket: the `) raises:`
   closing a nested `def`'s signature over lines has the `def`'s
-  indentation, and read as a statement it would hide the `def`), a
+  indentation, and read as a statement it would hide the `def`; a file
+  whose brackets do not balance, outside strings and comments, is refused
+  at its first such branch, naming the line that opens the last bracket
+  never closed or closes one never opened: no line's statement can be
+  told there), a
   `try` line met before a `def`, `fn`, `struct`, `trait` or `class` line
   (another function: a `def` nested in a `try:` body is one), or the
   call's own line `try: <statement>`. An `except`, `else` or `finally`
@@ -472,7 +476,8 @@ the scope is read from the source, and the shape from the IR:
   block: `true` from the raise path (the block calling
   `__mojo_debugger_raise_hook`, which Mojo emits at every `raise`: both
   shapes seen), `false` from any other; a phi saying `true` from the
-  return would swap the arms, and is refused. Any other br there is refused: whether it is the call's
+  return (with `false` or `true` from the raise path) would swap or blur
+  the arms, and is refused. Any other br there is refused: whether it is the call's
   error check is not known. A String's destructor at the call (the
   handler destroying the error's String) is the String's, as anywhere; a
   select on the flag stays compiler-made (the br is the decision).

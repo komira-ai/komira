@@ -33,6 +33,11 @@ pub const File = struct {
     branches: usize = 0,
     // Per line: no statement's first line (quotedLines; null: not read yet).
     quoted: ?[]bool = null,
+    // Why the brackets of the file do not balance ("" when they do): no
+    // line's statement can be told, so inTry gives null.
+    unbalanced: []const u8 = "",
+    // Whether the refusal for `unbalanced` has been written.
+    unbalanced_told: bool = false,
 };
 
 pub const Opts = struct {
@@ -434,10 +439,13 @@ pub fn forHead(alloc: Alloc, lines: []const []const u8, idx: usize) ?u64 {
 /// it starts inside, or holds, a `"""` or `'''` string's quotes, or it
 /// starts inside an open bracket (a continuation: the `) raises:` closing a
 /// signature over lines has the `def`'s indentation).
-fn quotedLines(alloc: Alloc, lines: []const []const u8) []bool {
+fn quotedLines(alloc: Alloc, f: *File) []bool {
+    const lines = f.lines;
     const out = alloc.alloc(bool, lines.len) catch oom();
     var open: u8 = 0; // the quote of the triple-quoted string open, or 0
     var depth: usize = 0; // brackets open outside strings and comments
+    // The 1-based line of each bracket still open, innermost last.
+    var opened = std.ArrayList(usize).init(alloc);
     for (lines, 0..) |l, n| {
         out[n] = open != 0 or depth > 0;
         var i: usize = 0;
@@ -461,14 +469,26 @@ fn quotedLines(alloc: Alloc, lines: []const []const u8) []bool {
                 i = skipString(l, i);
             } else {
                 switch (c) {
-                    '(', '[', '{' => depth += 1,
-                    ')', ']', '}' => depth -|= 1,
+                    '(', '[', '{' => {
+                        depth += 1;
+                        opened.append(n + 1) catch oom();
+                    },
+                    ')', ']', '}' => {
+                        if (depth == 0) {
+                            if (f.unbalanced.len == 0) f.unbalanced = std.fmt.allocPrint(alloc, "line {d} closes a bracket no line opened", .{n + 1}) catch oom();
+                        } else {
+                            depth -= 1;
+                            _ = opened.pop();
+                        }
+                    },
                     else => {},
                 }
                 i += 1;
             }
         }
     }
+    if (f.unbalanced.len == 0 and opened.items.len > 0)
+        f.unbalanced = std.fmt.allocPrint(alloc, "a bracket line {d} opens is never closed", .{opened.items[opened.items.len - 1]}) catch oom();
     return out;
 }
 
@@ -487,13 +507,17 @@ fn indentOf(l: []const u8) usize {
 /// `finally` clause has its `try`'s indentation, so its body is no body of
 /// that `try` (only of one around it); a `def` nested in a `try:` body is
 /// another function.
-pub fn inTry(alloc: Alloc, f: *File, line: u64) bool {
-    if (line < 1 or line > f.lines.len) return false;
+pub fn inTry(alloc: Alloc, f: *File, line: u64) ?bool {
     const q = f.quoted orelse blk: {
-        const m = quotedLines(alloc, f.lines);
+        const m = quotedLines(alloc, f);
         f.quoted = m;
         break :blk m;
     };
+    // Brackets that do not balance (a misread string, a construct the scan
+    // does not know): which lines are continuations cannot be told, so
+    // whether a line is in a `try:` body cannot either. Fail closed.
+    if (f.unbalanced.len > 0) return null;
+    if (line < 1 or line > f.lines.len) return false;
     const stops = [_][]const u8{ "def", "fn", "struct", "trait", "class" };
     var idx: usize = @intCast(line - 1);
     const own = firstWord(f.lines[idx]);

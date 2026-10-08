@@ -320,7 +320,16 @@ fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u
     // is a raising call's error check, and a decision: whether the call
     // raised into the handler. Any other br there is refused: whether its
     // error reaches the handler is not known.
-    if (kind == .br and (c.class == .call or c.class == .subscript or c.class == .plus) and source.inTry(st.alloc, at.file, at.line)) {
+    const in_try = if (kind == .br and (c.class == .call or c.class == .subscript or c.class == .plus)) source.inTry(st.alloc, at.file, at.line) else false;
+    if (in_try == null) {
+        st.counts[@intFromEnum(Class.unknown)] += 1;
+        if (!at.file.unbalanced_told) {
+            at.file.unbalanced_told = true;
+            st.err("{s}: the brackets of the file do not balance ({s}): which lines are continuations, and so whether a call is in a try body, cannot be read", .{ at.file.repo, at.file.unbalanced });
+        }
+        return .{ .weights = w };
+    }
+    if (in_try.?) {
         if (st.fun.errorFlag(cond, dbg, st)) return tryDecision(st, at, w, cond, prof, blk);
         st.counts[@intFromEnum(Class.unknown)] += 1;
         st.err("{s}: a br at '{s}' in a try body that is not a raising call's error flag (the i1, or field 0 of the {{ i1, ... }}, a call at this location returns, or a phi of such flags, constants and the code of a callee inlined here): whether it is the call's error check is not known: {s}", .{ where, c.token, code });
