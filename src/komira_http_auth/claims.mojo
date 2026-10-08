@@ -24,7 +24,8 @@
 #
 # THE PRINCIPAL. scheme "jwt", subject = sub, claim "iss" = the issuer, claim
 # "aud" = OUR audience (the value that matched, even when the token listed
-# several), then each --copy-claim present in the payload: a string verbatim,
+# several), then each --copy-claim present in the payload (never a name in
+# config.mojo's RESERVED_CLAIM_NAMES; refused at startup): a string verbatim,
 # any other JSON value as its compact JSON text. A copy-claim absent from the
 # payload is not set. The token itself rides along as the principal's
 # `presented` credential (redacted; never printable).
@@ -45,7 +46,12 @@ from komira_http_server.middleware import (
     Principal,
 )
 
-from komira_http_auth.config import TrustAnchor
+from komira_http_auth.config import (
+    CLAIM_AUD,
+    CLAIM_ISS,
+    CLAIM_SUB,
+    TrustAnchor,
+)
 from komira_http_auth.dup_keys import refuse_duplicate_keys
 from komira_http_auth.reasons import (
     REASON_AUD,
@@ -169,14 +175,16 @@ def principal_from_claims(
 ) raises -> Principal:
     """The principal for a payload that passed `check_claims` (module
     header)."""
-    var sub = string_member(p, String("sub"))
+    var sub = string_member(p, String(CLAIM_SUB))
     if not sub:
         raise Error(REASON_SUB)
     var pr = Principal(
         scheme=String(PRINCIPAL_SCHEME_JWT), subject=sub.value()
     )
-    pr = pr^.with_claim(String("iss"), anchor.issuer)
-    pr = pr^.with_claim(String("aud"), anchor.audience)
+    # Every claim written here is named by a constant in RESERVED_CLAIM_NAMES
+    # (config.mojo), so no --copy-claim can name it.
+    pr = pr^.with_claim(String(CLAIM_ISS), anchor.issuer)
+    pr = pr^.with_claim(String(CLAIM_AUD), anchor.audience)
     for i in range(len(copy_claims)):
         ref name = copy_claims[i]
         if not p.has(name):

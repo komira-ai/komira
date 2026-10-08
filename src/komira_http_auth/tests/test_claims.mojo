@@ -9,7 +9,9 @@
 # integer, expired past the 30 s leeway, and a configured leeway of 0 or
 # 60 s honoured in place of it), iat, nbf, negative or past-9999
 # times, lifetime over max TTL, duplicate payload keys, and a spliced payload
-# failing the signature.
+# failing the signature. A token carrying `scheme` (or another reserved
+# name) never puts it into the principal's claims, and every claim the
+# principal sets itself is a reserved name.
 # =============================================================================
 
 from std.pathlib import Path
@@ -48,6 +50,7 @@ from komira_http_auth.reasons import (
     REASON_TYP,
     REASON_UNKNOWN_KID,
 )
+from komira_http_auth.config import is_reserved_claim_name
 from komira_http_auth.testing import (
     rsa_jwk_json,
     rsa_jwks_json,
@@ -204,6 +207,83 @@ def test_valid_token_yields_the_jwt_principal() raises:
     assert_true(Bool(p.presented))
     assert_equal(p.presented.value().expose(), tok)
     assert_false(tok in p.presented.value().redacted())
+
+
+def _forging_payload() -> String:
+    """A valid payload that also carries a claim under every Principal field
+    name, `scheme` naming the other scheme."""
+    return _std(
+        String(
+            '"email":"svc@example.com","scheme":"session",'
+            '"subject":"admin","claims":"{}","presented":"x"'
+        )
+    )
+
+
+def test_a_scheme_claim_never_reaches_the_principal() raises:
+    var key = _key()
+    var tok = sign_rs256_compact(_header(KID), _forging_payload(), key)
+
+    # Copying only `email`: the token's `scheme` (and the other field names)
+    # are not copied; the principal's scheme is jwt.
+    var rig = _Rig(_config().with_copy_claim(String("email")))
+    rig.fetcher.add(200, rsa_jwks_json(key, KID))
+    var out = rig.verifier.verify(tok)
+    assert_equal(out.reason, String(REASON_OK))
+    var p = out.principal.value().copy()
+    assert_equal(p.scheme, String("jwt"))
+    assert_equal(p.subject, String("svc-1"))
+    assert_false(p.claims.has(String("scheme")))
+    assert_false(p.claims.has(String("subject")))
+    assert_false(p.claims.has(String("claims")))
+    assert_false(p.claims.has(String("presented")))
+    assert_equal(
+        p.claims.get(String("email")).value(), String("svc@example.com")
+    )
+
+    # An operator asking to copy `scheme`: the verifier is never built. Were
+    # it built, the token below would plant claims['scheme'] = "session",
+    # which this then reports as the forgery it is.
+    var built = False
+    try:
+        var r2 = _Rig(_config().with_copy_claim(String("scheme")))
+        built = True
+        r2.fetcher.add(200, rsa_jwks_json(key, KID))
+        var o2 = r2.verifier.verify(tok)
+        if o2.ok():
+            var p2 = o2.principal.value().copy()
+            assert_false(
+                p2.claims.has(String("scheme")),
+                "forged claims['scheme'] = "
+                + p2.claims.get(String("scheme")).or_else(String("")),
+            )
+    except e:
+        if built:
+            raise e^
+        assert_true(
+            String("--copy-claim=scheme is a reserved claim name") in String(e),
+            String(e),
+        )
+        return
+    raise Error("a verifier copying `scheme` was built")
+
+
+def test_every_claim_the_principal_sets_is_reserved() raises:
+    # Drift guard: a claim principal_from_claims writes that is not in
+    # RESERVED_CLAIM_NAMES could be overwritten by a --copy-claim of the
+    # same name. No copy-claims configured, so every key here is ours.
+    var key = _key()
+    var rig = _Rig(_config())
+    rig.fetcher.add(200, rsa_jwks_json(key, KID))
+    var out = rig.verifier.verify(
+        sign_rs256_compact(_header(KID), _std(String("")), key)
+    )
+    assert_equal(out.reason, String(REASON_OK))
+    var p = out.principal.value().copy()
+    assert_true(p.claims.len() > 0)
+    for i in range(p.claims.len()):
+        var k = p.claims.key_at(i)
+        assert_true(is_reserved_claim_name(k), k)
 
 
 def test_wrong_issuer_is_refused() raises:

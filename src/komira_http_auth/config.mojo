@@ -25,8 +25,10 @@
 #     distant issuer cannot finish, so every refresh would fail);
 #   * a JWKS max-stale outside 0..86400 seconds (how long past its freshness
 #     a key set stays in use while every refresh fails: jwks_cache.mojo);
-#   * a copy-claim name that is empty, repeated, or one of sub/iss/aud (the
-#     principal sets those itself).
+#   * a copy-claim name that is empty, repeated, or reserved: one of
+#     RESERVED_CLAIM_NAMES below (the claims the principal sets itself, the
+#     claim its subject comes from, and the names of the Principal's own
+#     fields, which a reader of the claims map could take for them).
 #
 # No pointer in any signature; plain values.
 # =============================================================================
@@ -35,6 +37,44 @@ from komira_http_client.url import Url
 
 
 comptime ALG_RS256: String = "RS256"
+
+# The claim names this package writes into `Principal.claims` itself
+# (claims.mojo, `principal_from_claims`), and the claim the subject is read
+# from. claims.mojo writes through these constants.
+comptime CLAIM_ISS: StaticString = "iss"
+comptime CLAIM_AUD: StaticString = "aud"
+comptime CLAIM_SUB: StaticString = "sub"
+
+# The names a --copy-claim may never name, refused at startup by
+# `BearerJwtConfig.validate`. A copied claim is written into the same map
+# as the claims above, so copying one of these would let a token choose its
+# value:
+#   * iss, aud: written by this package (copying one would overwrite it);
+#   * sub: the principal's subject;
+#   * scheme, subject, claims, presented: the Principal's own field names. A
+#     reader that flattens a principal into one map, or looks a field up in
+#     the claims (an embedder decoding `claims['scheme']`), would take a
+#     copied claim of that name for the field.
+# The set is built from CLAIM_ISS and CLAIM_AUD, so a claim this package
+# writes is reserved by construction.
+comptime RESERVED_CLAIM_NAMES: InlineArray[StaticString, 7] = [
+    CLAIM_ISS,
+    CLAIM_AUD,
+    CLAIM_SUB,
+    "scheme",
+    "subject",
+    "claims",
+    "presented",
+]
+
+
+def is_reserved_claim_name(name: String) -> Bool:
+    """True when `name` is one of RESERVED_CLAIM_NAMES."""
+    var names = materialize[RESERVED_CLAIM_NAMES]()
+    for i in range(len(names)):
+        if name == String(names[i]):
+            return True
+    return False
 comptime TYP_JWT: String = "JWT"
 
 # The longest lifetime (exp - iat) a token of this anchor may claim. Google
@@ -260,16 +300,13 @@ struct BearerJwtConfig(Copyable, Movable, Deinitable):
                 raise Error(
                     String("komira_http_auth: --copy-claim names an empty claim")
                 )
-            if (
-                n == String("sub")
-                or n == String("iss")
-                or n == String("aud")
-            ):
+            if is_reserved_claim_name(n):
                 raise Error(
                     String("komira_http_auth: --copy-claim=")
                     + n
                     + String(
-                        " is always set on the principal and cannot be copied"
+                        " is a reserved claim name and cannot be copied (the"
+                        " principal sets it, or it names a Principal field)"
                     )
                 )
             for j in range(i):

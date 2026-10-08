@@ -6,7 +6,8 @@
 # all seven members required (exactly one accepted; a second is refused),
 # non-https JWKS URLs refused at startup (by the flags and by the verifier
 # constructor), RS256/JWT only, max TTL,
-# copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap and the
+# copy-claim rules (every reserved name refused, scheme by name, by the flags
+# and by the verifier constructor), the 0..60 s leeway cap and the
 # --leeway-s flag (wired into the claim check), --jwks-max-stale (units,
 # range, default 1 h), the 100 ms..60 s JWKS fetch timeout and its hand-over
 # to the fetcher, an anchor
@@ -121,7 +122,11 @@ from komira_http_auth import (
     bearer_jwt_flag_names,
     parse_bearer_jwt_flags,
 )
-from komira_http_auth.config import validate_trust_anchor
+from komira_http_auth.config import (
+    RESERVED_CLAIM_NAMES,
+    is_reserved_claim_name,
+    validate_trust_anchor,
+)
 
 
 def _args(*xs: String) -> List[String]:
@@ -326,12 +331,67 @@ def test_bad_max_ttl_is_refused() raises:
     )
 
 
+def _reserved_refusal(name: String) -> String:
+    return String("--copy-claim=") + name + String(" is a reserved claim name")
+
+
 def test_copy_claim_rules() raises:
-    _refused(_plus(_base(), String("--copy-claim=sub")), "always set")
-    _refused(_plus(_base(), String("--copy-claim=aud")), "always set")
-    _refused(_plus(_base(), String("--copy-claim=iss")), "always set")
     var a = _plus(_base(), String("--copy-claim=email"))
     _refused(_plus(a^, String("--copy-claim=email")), "more than once")
+
+
+def test_copy_claim_scheme_is_refused_at_startup() raises:
+    # An embedder may read claims['scheme'] as the principal's scheme; a
+    # token claim copied under that name would forge it. Refused by the
+    # flags and by the verifier constructor, naming the claim.
+    _refused(
+        _plus(_base(), String("--copy-claim=scheme")),
+        _reserved_refusal(String("scheme")),
+    )
+    _verifier_refused(
+        _config().with_copy_claim(String("scheme")),
+        _reserved_refusal(String("scheme")),
+    )
+    # Exact match only: a name that merely contains a reserved one is copied.
+    var ok = parse_bearer_jwt_flags(
+        _plus(_base(), String("--copy-claim=schemes"))
+    )
+    assert_equal(ok.copy_claims[0], String("schemes"))
+
+
+def test_the_reserved_set_is_exactly_these_names() raises:
+    # Pins the set's contents: dropping any name from RESERVED_CLAIM_NAMES
+    # turns this red even though the loop below iterates the constant.
+    var want = List[String]()
+    want.append(String("iss"))
+    want.append(String("aud"))
+    want.append(String("sub"))
+    want.append(String("scheme"))
+    want.append(String("subject"))
+    want.append(String("claims"))
+    want.append(String("presented"))
+    var names = materialize[RESERVED_CLAIM_NAMES]()
+    assert_equal(len(names), len(want))
+    for i in range(len(want)):
+        assert_true(is_reserved_claim_name(want[i]), want[i])
+    assert_false(is_reserved_claim_name(String("email")))
+    assert_false(is_reserved_claim_name(String("Scheme")))
+
+
+def test_every_reserved_name_is_refused_by_flag_and_by_verifier() raises:
+    var names = materialize[RESERVED_CLAIM_NAMES]()
+    for i in range(len(names)):
+        var n = String(names[i])
+        _refused(
+            _plus(_base(), String("--copy-claim=") + n), _reserved_refusal(n)
+        )
+        # Listed after an accepted name: every entry is checked, not the first.
+        _verifier_refused(
+            _config()
+            .with_copy_claim(String("email"))
+            .with_copy_claim(n),
+            _reserved_refusal(n),
+        )
 
 
 def _verifier_refused(var cfg: BearerJwtConfig, needle: String) raises:

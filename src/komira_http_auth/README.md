@@ -45,6 +45,18 @@ Bearer-JWT authentication for `komira_http_server`.
    subject `sub`, claims `iss`, `aud` (our audience) and each `--copy-claim`.
    The principal is replaced, never merged with an earlier one.
 
+**Reserved claim names.** `--copy-claim` refuses these names at startup,
+naming the flag (`RESERVED_CLAIM_NAMES` in `config.mojo`; the claims the
+principal sets are written through the same constants):
+
+- `iss`, `aud`: set on the principal by this package;
+- `sub`: the principal's subject;
+- `scheme`, `subject`, `claims`, `presented`: the `Principal` field names. A
+  reader that looks a field up in the claims map (`claims['scheme']`) would
+  otherwise take a token's claim of that name for the field.
+
+The match is exact and case-sensitive (`Scheme` or `schemes` may be copied).
+
 **Authentication is not authorization.** For Google service-account ID tokens,
 a token that passes every check here proves only that SOME Google service
 account asked for a token with your audience. The audience is any string the
@@ -132,7 +144,7 @@ fetch, does honour `SSL_CERT_FILE` and `SSL_CERT_DIR`.
 | `--jwks-alg` | required; `RS256`, the only value accepted in this release |
 | `--accept-typ` | required; `JWT`, the only value accepted in this release |
 | `--max-ttl` | required; the longest `exp - iat` accepted, in seconds (1 to 86400; Google ID tokens live 3600) |
-| `--copy-claim` | a claim copied into the principal (may be repeated) |
+| `--copy-claim` | a claim copied into the principal (may be repeated); a reserved name is refused at startup (below) |
 | `--trust-anchor` | `name=,issuer=,audience=,jwks_url=,alg=,typ=,max_ttl=`, all seven required: the general form of the first six flags, and cannot be combined with them |
 | `--leeway-s` | the clock skew forgiven on `exp`, `iat` and `nbf`, 0 to 60 seconds (default 30); `BearerJwtConfig.with_leeway_s` in code |
 | `--jwks-max-stale` | how long past its freshness the last good key set stays in use while every refresh fails: digits and one unit `s`, `m` or `h` (`90s`, `30m`, `1h`), 0s to 24h (default `1h`); `BearerJwtConfig.with_jwks_max_stale_s` in code |
