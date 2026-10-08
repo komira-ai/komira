@@ -58,15 +58,21 @@ komira//tools/build/examples:test_hellopkg !mem_cap
 bad=""
 ok=0
 
-# aquery_tsv <out> <expect> <sub-target> [buck2 options...]: one line per
-# action of the expectation's targets' <sub-target> ("" for the default
-# outputs) and their deps, in <out>.tsv: label <TAB> category <TAB> command.
+# aquery_tsv <out> <expect> <query function> [buck2 options...]: one line per
+# action of the expectation's targets, in <out>.tsv: label <TAB> category <TAB>
+# command. <query function> `deps`: the actions of each target's default
+# outputs and of their deps; `all_actions`: every action each target's own
+# analysis declares, and no dep's. The coverage query is all_actions: with the
+# switch on, a library's deps reach the coverage gate's tool, covcheck, a
+# library with a README, whose examples' actions come from a dynamic action
+# aquery cannot traverse (it fails, refusing to run the README's generate
+# step), and the expectations name only the targets' own actions.
 aquery_tsv() {
-    local o=$1 e=$2 sub=$3 targets query t
+    local o=$1 e=$2 fn=$3 targets query t
     shift 3
     targets=$(printf '%s\n' "$e" | awk 'NF { print $1 }' | LC_ALL=C sort -u)
     query=""
-    for t in $targets; do query="${query:+$query + }deps('$t$sub')"; done
+    for t in $targets; do query="${query:+$query + }$fn('$t')"; done
     # A binary's [shared] library is built only for that sub-target.
     case "$e" in *bin_none*) query="$query + deps('tests//functional/assert_level:bin_none[shared]')" ;; esac
     if ! "$BUCK2" aquery "$query" "$@" --output-attribute cmd --output-attribute category > "$o" 2> "$o.err"; then
@@ -110,9 +116,9 @@ check() {
     done <<< "$e"
 }
 
-aquery_tsv "$out" "$EXPECT" ""
+aquery_tsv "$out" "$EXPECT" deps
 check "$out.tsv" "$EXPECT" ""
-aquery_tsv "$out.cov" "$COV_EXPECT" "[coverage]" -c komira.coverage=true
+aquery_tsv "$out.cov" "$COV_EXPECT" all_actions -c komira.coverage=true
 check "$out.cov.tsv" "$COV_EXPECT" "with komira.coverage=true: "
 
 # The provider dump's ExternalRunnerTestInfo command, on one line, as the

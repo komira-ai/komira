@@ -19,7 +19,8 @@
 #    CNAME and a certificate (where hosted; gcp adds the certificate's DNS
 #    authorization and its record), a schedule that starts the container
 #    job, an event trigger on the DELETE bucket (where hosted), a network, a
-#    subnet of it and an IP address (where hosted) and a DELETE
+#    subnet of it and an IP address (where hosted), a registry (where
+#    hosted) and a DELETE
 #    bucket, every wanted node's live object carries exactly one
 #    run-id label, with the key `validation_run_tag_key("kci")` (spelled
 #    `kci-run-id`) and the run id verbatim, and exactly one retention mark
@@ -99,6 +100,7 @@ from kci_cloud import (
     FIELD_DNS_ZONE,
     FIELD_EVENT_TRIGGER,
     FIELD_NETWORK,
+    FIELD_REGISTRY,
     FIELD_SCHEDULE,
     FIELD_SUBSCRIPTION,
     FIELD_TABLE,
@@ -188,6 +190,9 @@ comptime _NETWORKS = (
 """A network, a subnet of it (in a zone, which aws needs) and an IP
 address, each with the default retention (DELETE)."""
 
+comptime _REGISTRY = '{"id":"images","registry":{"format":"OCI"}}'
+"""A registry with the default retention (KEEP)."""
+
 
 def _full(
     api_port: String,
@@ -200,6 +205,7 @@ def _full(
     schedule: Bool = False,
     events: Bool = False,
     networks: Bool = False,
+    registry: Bool = False,
 ) -> String:
     """A public service with a `uses` grant, an internal service reading its
     URL (each keeping one instance, as onprem requires until Q21), a
@@ -209,7 +215,7 @@ def _full(
     `secret` adds a secret with the default retention (KEEP); `names` adds
     `_NAMES`; `schedule` adds a schedule that starts `nightly`; `events`
     adds an event trigger delivering `store`'s new objects to `api`;
-    `networks` adds `_NETWORKS`.
+    `networks` adds `_NETWORKS`; `registry` adds `_REGISTRY`.
     `roles_on` False makes api
     internal and removes web's grant on api."""
     var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
@@ -246,6 +252,7 @@ def _full(
             + String('"target":{"resource":"api"}}}') if events else String("")
         )
         + ((String(",") + String(_NETWORKS)) if networks else String(""))
+        + ((String(",") + String(_REGISTRY)) if registry else String(""))
         + String("]}")
     )
 
@@ -278,6 +285,14 @@ def _hosts_networks[S: ConformanceTarget](cloud: S) -> Bool:
     var l = cloud.implemented()
     for i in range(len(l)):
         if l[i] == FIELD_NETWORK:
+            return True
+    return False
+
+
+def _hosts_registry[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_REGISTRY:
             return True
     return False
 
@@ -487,6 +502,7 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
             schedule=True,
             events=_hosts_events(cloud),
             networks=_hosts_networks(cloud),
+            registry=_hosts_registry(cloud),
         )
         _ = _apply_and_check(cloud, json, _run(String(_RUN)), String(_RUN), where)
         var resources = _list(json)
@@ -495,6 +511,8 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
         _both_marks_seen(cloud, nodes, where)
         if _hosts_table(cloud):
             assert_equal(_mark(cloud.live_labels(String("orders/table"))), "retain", where + ": a default table")
+        if _hosts_registry(cloud):
+            assert_equal(_mark(cloud.live_labels(String("images/registry"))), "retain", where + ": a default registry")
     var limited = FakeLimitedCloud()
     var n = _apply_and_check(limited, _limited("8080"), _run(String(_RUN)), String(_RUN), String("fake-limited"))
     assert_equal(n, 3, "fake-limited: identity, run and the cell LOGS grant")
