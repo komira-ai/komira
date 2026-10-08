@@ -219,7 +219,24 @@ def test_the_error_body_escapes_and_decodes() raises:
         error_body(String('a"b'), String("c\\d\ne\tf")),
         String('{"error":{"code":"a\\"b","message":"c\\\\d\\ne\\tf"}}'),
     )
+    # A carriage return and a control byte (0x1F) take the \r and \u00XX
+    # escapes.
+    assert_equal(
+        error_body(String("c"), String("a\rb") + String(chr(0x1F))),
+        String('{"error":{"code":"c","message":"a\\rb\\u001f"}}'),
+    )
+    # An empty value is written, not omitted (proto3 JSON would omit it):
+    # both members are always present.
+    assert_equal(
+        error_body(String("x"), String("")),
+        String('{"error":{"code":"x","message":""}}'),
+    )
+    assert_equal(
+        error_body(String(""), String("m")),
+        String('{"error":{"code":"","message":"m"}}'),
+    )
     _round_trip(String("invalid_request"), String('say "no"'))
+    _round_trip(String(""), String(""))
     _round_trip(String("x"), String("back\\slash, new\nline, café"))
 
 
