@@ -11,7 +11,8 @@
 #
 #   books      create (PERSONAL, default, SHARED by an admin), a second
 #              default refused and rolled back, a SHARED default refused, an
-#              empty name refused, get, list sorted by name
+#              empty name refused, get, list sorted PERSONAL before SHARED,
+#              then by name
 #   cards      create (a uid minted when empty), get, list, update (the
 #              version bumped, an empty uid keeps the uid, a changed uid
 #              refused), a stale version refused, delete (a tombstone not
@@ -155,12 +156,15 @@ def check_books() raises:
     assert_false(aux.is_default)
     var team = store.create_book[Rt](reactor, _admin(), BookKind.SHARED, "Team", False)
     assert_equal(team.owner, "", "a SHARED book has no owner")
+    # "Alpha" sorts before every PERSONAL name: only the kind key puts it after them.
+    _ = store.create_book[Rt](reactor, _admin(), BookKind.SHARED, "Alpha", False)
     var books = store.list_books[Rt](reactor, _alice())
-    assert_equal(len(books), 3, "alice's two books and the shared one")
-    assert_equal(books[0].name, "Aux", "sorted by kind, then name")
-    assert_equal(books[1].name, "Main")
-    assert_equal(books[2].name, "Team")
-    assert_equal(len(store.list_books[Rt](reactor, _bob())), 1, "bob sees the shared book only")
+    assert_equal(len(books), 4, "alice's two books and the two shared ones")
+    assert_equal(books[0].name, "Aux", "PERSONAL before SHARED, then by name")
+    assert_equal(books[1].name, "Main", "PERSONAL before SHARED, then by name")
+    assert_equal(books[2].name, "Alpha", "PERSONAL before SHARED, then by name")
+    assert_equal(books[3].name, "Team", "PERSONAL before SHARED, then by name")
+    assert_equal(len(store.list_books[Rt](reactor, _bob())), 2, "bob sees the shared books only")
     assert_equal(store.get_book[Rt](reactor, _alice(), home.id).name, "Main")
     # Another subject gets the text of an id that does not exist.
     assert_equal(_err_create(store, reactor, _bob(), home.id, "b"), ERR_NOT_FOUND, "bob writes alice's book")

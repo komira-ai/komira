@@ -290,7 +290,8 @@ struct ContactsStore[DB: Database](Movable):
     def list_books[
         RT: Runtime
     ](mut self, mut reactor: Reactor[RT.Sink], caller: Caller) raises -> List[AddressBook]:
-        """The caller's PERSONAL books and every SHARED book."""
+        """The caller's PERSONAL books and every SHARED book: PERSONAL first, then
+        by name, then by id."""
         var out = List[AddressBook]()
         if caller.subject.byte_length() > 0:
             var mine = List[Pred]()
