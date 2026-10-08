@@ -30,6 +30,8 @@
 #     still reports; detection off reports nothing; the unavoidable bit
 #     condition filter off finds the same collision.
 #   * test_reduced_round: reduced-round detection reports only when on.
+#   * test_recompress_inverts: a backward step that does not undo its forward
+#     step, or a state stored at the wrong step (58, 65).
 #   * test_is_object_id_collision: the error test matches only that error.
 # =============================================================================
 
@@ -38,6 +40,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_crypto import Sha1
 from komira_git import OBJECT_ID_COLLISION, Sha1dc, is_object_id_collision, sha1dc
+from komira_git.sha1dc import _compress_states, _expand, _recompress
 
 comptime _SHATTERED_PLAIN = "38762cf7f55934b34d179ae6a4c80cadccbb7f0a"
 comptime _SHATTERED_1_SAFE = "16e96b70000dd1e7c85b8368ee197754400e58ec"
@@ -220,6 +223,38 @@ def test_reduced_round() raises:
     assert_true(red[1])
 
 
+def test_recompress_inverts() raises:
+    # With no message difference, recompressing from the state stored at step
+    # 58 or 65 must give back the block's own input and output chaining
+    # values: the backward steps invert the forward ones.
+    var x: UInt64 = 2024
+    for trial in range(256):
+        var ihv = InlineArray[UInt32, 5](fill=0)
+        for i in range(5):
+            x = x * 6364136223846793005 + 1442695040888963407
+            ihv[i] = UInt32(x >> 32)
+        var w = InlineArray[UInt32, 80](fill=0)
+        for t in range(16):
+            x = x * 6364136223846793005 + 1442695040888963407
+            w[t] = UInt32(x >> 32)
+        var before = ihv.copy()
+        var s58 = InlineArray[UInt32, 5](fill=0)
+        var s65 = InlineArray[UInt32, 5](fill=0)
+        _compress_states(ihv, w, s58, s65)
+        var me2 = w.copy()
+        _expand(me2)
+        var ihvin = InlineArray[UInt32, 5](fill=0)
+        var ihvout = InlineArray[UInt32, 5](fill=0)
+        _recompress[58](me2, s58, ihvin, ihvout)
+        for i in range(5):
+            assert_equal(ihvin[i], before[i], "step 58 in, trial " + String(trial))
+            assert_equal(ihvout[i], ihv[i], "step 58 out, trial " + String(trial))
+        _recompress[65](me2, s65, ihvin, ihvout)
+        for i in range(5):
+            assert_equal(ihvin[i], before[i], "step 65 in, trial " + String(trial))
+            assert_equal(ihvout[i], ihv[i], "step 65 out, trial " + String(trial))
+
+
 def test_is_object_id_collision() raises:
     var one = _read("shattered-1.pdf")
     var msg = String()
@@ -239,5 +274,6 @@ def main() raises:
     test_shattered_detected()
     test_shattered_switches()
     test_reduced_round()
+    test_recompress_inverts()
     test_is_object_id_collision()
     print("komira_git sha1dc tests passed")

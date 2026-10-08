@@ -91,7 +91,7 @@ def _k[t: Int]() -> UInt32:
 @always_inline
 def _expand(mut w: _Words):
     """Fill w[16:80] from w[0:16] (SHA-1 message expansion)."""
-    for t in range(16, 80):
+    comptime for t in range(16, 80):
         w[t] = _rotl[1](w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16])
 
 
@@ -144,6 +144,23 @@ def _backward[last: Int](mut s: _State, w: _Words):
     s[2] = c
     s[3] = d
     s[4] = e
+
+
+@always_inline
+def _load_block(data: Span[UInt8, _], pos: Int, mut w: _Words):
+    """w[0:16] from the 64 bytes at data[pos], big-endian. The caller has
+    checked that pos + 64 <= len(data)."""
+    # SAFETY: p points into `data`, which the caller borrows for the whole
+    # call, and the caller has checked that data[pos] to data[pos + 63]
+    # exist; only those 64 bytes are read, once each.
+    var p = data.unsafe_ptr() + pos
+    comptime for i in range(16):
+        w[i] = (
+            (UInt32(p[4 * i]) << 24)
+            | (UInt32(p[4 * i + 1]) << 16)
+            | (UInt32(p[4 * i + 2]) << 8)
+            | UInt32(p[4 * i + 3])
+        )
 
 
 def _compress(mut ihv: _State, w: _Words):
@@ -212,7 +229,7 @@ struct Sha1dc(Copyable, Movable):
 
     def __init__(out self):
         """An empty hash state with upstream's default switches."""
-        self._ihv = _State(_IV0, _IV1, _IV2, _IV3, _IV4)
+        self._ihv = [_IV0, _IV1, _IV2, _IV3, _IV4]
         self._buffer = InlineArray[UInt8, 64](fill=0)
         self._total = 0
         self._found = False
@@ -262,15 +279,8 @@ struct Sha1dc(Copyable, Movable):
                 return
             self._process_buffer()
         while n - pos >= 64:
-            var w = _Words(fill=0)
-            for i in range(16):
-                var p = pos + 4 * i
-                w[i] = (
-                    (UInt32(data[p]) << 24)
-                    | (UInt32(data[p + 1]) << 16)
-                    | (UInt32(data[p + 2]) << 8)
-                    | UInt32(data[p + 3])
-                )
+            var w = _Words(uninitialized=True)
+            _load_block(data, pos, w)
             self._process(w)
             self._total += 64
             pos += 64
@@ -314,8 +324,8 @@ struct Sha1dc(Copyable, Movable):
             self._process_buffer()
 
     def _process_buffer(mut self):
-        var w = _Words(fill=0)
-        for i in range(16):
+        var w = _Words(uninitialized=True)
+        comptime for i in range(16):
             w[i] = (
                 (UInt32(self._buffer[4 * i]) << 24)
                 | (UInt32(self._buffer[4 * i + 1]) << 16)
@@ -338,7 +348,7 @@ struct Sha1dc(Copyable, Movable):
             mask = _ubc_check(w)
         if mask == 0:
             return
-        var m2 = _Words(fill=0)
+        var m2 = _Words(uninitialized=True)
         var ihv2 = _State(fill=0)
         var ihvtmp = _State(fill=0)
         for dv in range(_DV_COUNT):

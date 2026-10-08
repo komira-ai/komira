@@ -63,8 +63,8 @@ staged_files(
 # The library with upstream's C API (sha1.h: SHA1DCInit, SHA1DCUpdate,
 # SHA1DCFinal and the SHA1DCSet* switches; ubc_check.h: ubc_check), plus the
 # read accessors of komira_sha1dc_oracle.c (the SHA1_CTX size and the
-# sha1_dvs table). Upstream's names are not prefixed: only a test binary
-# links it.
+# sha1_dvs table). Upstream's names are not prefixed: only test binaries
+# and the one-definition gate (tools/build/one_definition) link it.
 cxx_library(
     name = "sha1dc",
     srcs = [
@@ -81,5 +81,8 @@ cxx_library(
         "-DNDEBUG",
     ],
     header_namespace = "",
-    visibility = ["//src/tests/conformance/komira_git_conformance/..."],
+    visibility = [
+        "//src/tests/conformance/komira_git_conformance/...",
+        "//tools/build/one_definition/...",
+    ],
 )
