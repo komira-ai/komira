@@ -211,7 +211,8 @@ sequence numbers is what makes a concurrent publish safe: a split published afte
 outside the retired set.
 
 **The merge policy must drive erasure.** Whatever policy selects merges for size, it must also
-select every live split that a live delete set resolves to, a merged split included, within a bound
+select every live split that a live delete set resolves to with a doc id that is not dropped, a
+merged split included, within a bound
 the index states (the erasure deadline, measured from the delete set's commit). A selection of one
 input is allowed: it rewrites that split without its deleted documents. Without this rule a
 size-tiered policy may never merge a large split again, and a delete that committed after that
@@ -235,24 +236,40 @@ through the merge that hid its target.
   its runs are one per stretch between dropped documents; a merge that interleaves inputs (one that
   sorts by a fast field) stays correct and writes more runs. A map of "first merged id plus dropped
   ids" would be correct only for the first kind, so the format does not use it.
-- A reader resolving a delete set whose target is hidden by a live merged split maps each doc id
-  through that split's input map (a dropped doc id needs nothing) and applies the result to the
-  merged split, repeating while the result is itself hidden by a live merged split. The deleted
-  document is hidden from the generation the delete set commits, whatever the order of that commit
-  and the publish.
-- The compactor retires every delete set in its snapshot whose target is one of its inputs, or
-  resolves to one of its inputs through an input map, directly or composed. So a delete set that
-  committed after one merge's snapshot is retired by the next compaction that takes the merged split
-  as an input; the decision on the merge policy below makes sure that compaction happens.
+- The map is a region of the merged split's bytes. The merged split's summary lists in
+  `merge_input_uuids` every UUID that has an entry in its map: its direct inputs and every composed
+  entry (next rule). So the summary alone tells a reader which live split carries the map entry for a
+  target, and the existing hiding rule keeps hiding every input the map still names.
 - When a merged split is itself merged, every entry of its input map is composed into the new one,
-  so a delete set naming a grandparent still resolves after the parent is retired. A composed entry
-  is dropped by a later compaction only once its input was retired more than one grace period
-  before that compaction's snapshot and no delete set in the snapshot resolves through it. A delete
-  writer commits within the grace period of the live-split read it looked its keys up in, or reads
-  again, so a delete set that keeps that bound always resolves.
+  and the new summary lists those UUIDs too. A delete set naming a grandparent therefore resolves
+  through the newest merged split after the parent is retired: that split lists the grandparent and
+  its map takes the grandparent's doc ids to its own in one step. A composed entry (and its UUID in
+  `merge_input_uuids`) is dropped by a later compaction only once its input was retired more than
+  one grace period before that compaction's snapshot and no delete set in the snapshot resolves
+  through it. A delete writer commits within the grace period of the live-split read it looked its
+  keys up in, or reads again, so a delete set that keeps that bound always resolves.
+- A reader resolving a delete set whose target is hidden finds the live merged split whose summary
+  lists the target and that is not itself hidden (while a parent awaits retirement, it and its
+  successor both list the target; the successor hides the parent). It maps each doc id through that
+  split's input map (a dropped doc id needs nothing) and applies the result to that split. The
+  deleted document is hidden from the generation the delete set commits, whatever the order of that
+  commit and the publish.
+- **A merge whose output has no documents still publishes a merged split**: zero documents, and an
+  input map whose entries have no runs. This is the usual end of a one-input rewrite of a split whose
+  every document was deleted. Without it nothing would carry the input map, and a redundant or
+  retried delete set for that split committed after the snapshot would resolve to no live split.
+- The compactor retires every delete set in its snapshot whose target is one of its inputs, or
+  resolves to one of its inputs through an input map, directly or composed. It also retires, in any
+  run and without selecting a split, every delete set in its snapshot whose doc ids all resolve to
+  dropped ones: such a set hides nothing. So a delete set that committed after one merge's snapshot
+  is retired by the next compaction whose snapshot contains it and that takes the merged split as an
+  input (or by any compaction, if all its documents were already dropped); the merge-policy rule
+  above makes sure that compaction happens. A zero-document merged split is retired, with no output,
+  by the first compaction that may drop every entry of its map.
 - A delete set whose target resolves to no live split refuses the scan by name (the delete set's
-  sequence number and its target UUID). It can exist only if a writer broke the commit bound or a
-  compactor broke the retire rule; ignoring it would show a deleted document again.
+  sequence number and its target UUID). It can exist only if a writer broke the commit bound, or a
+  compactor broke the retire rule or retired an input without publishing a merged split that maps
+  it; ignoring it would show a deleted document again.
 - Two other ways were weighed. Conditioning the publish on no new delete set since the snapshot
   needs one compare-and-swap over several shard lineages, which the catalog does not have.
   Applying deletes only to splits that will not be merged again (Quickwit's rule) does not hide a
@@ -272,10 +289,11 @@ For erasure the merge must drop, not just skip:
 Its bytes are gone from the store once a compaction whose snapshot contains the delete set has
 rewritten the split that holds the document, been published, and had its inputs reaped after the
 grace period. For a delete that races a merge, the first merge does not do it (its snapshot predates
-the delete set, so the merged split still holds the bytes); the next compaction of the merged split
-does. The merge policy rule above bounds when that happens: the erasure deadline, plus the grace
-period, plus one reap pass. Documents written after the delete are new data; a
-caller that must keep a subject out has to stop writing it.
+the delete set, so the merged split still holds the bytes); the next compaction whose snapshot
+contains the delete set and that takes the split holding the document as an input does. The merge
+policy rule above bounds when that happens: the erasure deadline, plus the grace period, plus one
+reap pass. Documents written after the delete are new data; a caller that must keep a subject out
+has to stop writing it.
 
 **Proof.** The test written to fail first: index documents naming subject X among others, delete by
 X, assert no query returns them, compact, reap, then read every object left in the store and assert
@@ -284,10 +302,17 @@ commit a delete set for one of its inputs, then publish the merged split; the de
 stay hidden while the merged split is live. The test then runs the next compaction and the reap and
 asserts three things: the late delete set is retired, the writer shard that held it drains, and the
 byte scan finds none of the document's bytes. The race test runs twice, once with a merger that
-concatenates its inputs and once with a test merger that interleaves two inputs by a fast field. A
-third test: a writer shard that holds only a live delete set is not reaped. Mutants: skip the
+concatenates its inputs and once with a test merger that interleaves two inputs by a fast field. It
+has a two-hop case: a delete set for input A commits after the first merge's snapshot (A into M1)
+and after a second merge's snapshot (M1 into M2), and is resolved once M1 is retired; it must stay
+hidden, through M2's composed entry for A, with no scan refused. A third test: a writer shard that
+holds only a live delete set is not reaped. A fourth test: the sole input of a merge has every
+document deleted, and a redundant delete set for it commits after the snapshot; no scan is refused,
+and after the next compaction that delete set is retired and its writer shard drains. Mutants: skip the
 deleted set in one query path (each path has a test that goes red); keep an empty term in the merged
 dictionary (the byte scan goes red); skip the input-map lookup for a hidden target (the race test
+goes red); list only direct inputs in `merge_input_uuids` (the two-hop case refuses the scan and
+goes red); skip publishing a merge output with no documents (the fourth test refuses the scan and
 goes red); derive the map from the first surviving merged id and the dropped ids (the interleaving
 race test goes red); retire only delete sets that target an input directly (the late delete set
 stays live and its shard does not drain: the extended race test goes red); let the merge policy skip
@@ -424,7 +449,7 @@ concern before it grows.
     still arrive? Recommend: until the input was retired more than one grace period ago and no
     delete set in the compactor's snapshot resolves through it; a delete set that resolves nowhere
     refuses the scan.
-12. The erasure deadline: what bound must the merge policy meet when it selects a split that a live
-    delete set resolves to? Recommend a per-index setting, checked by the compactor's tests.
 11. The L0-postings region: refuse it by name now and put it under a `required_features` bit in
     version 2 (recommended), or bring its reader into komira first?
+12. The erasure deadline: what bound must the merge policy meet when it selects a split that a live
+    delete set resolves to? Recommend a per-index setting, checked by the compactor's tests.
