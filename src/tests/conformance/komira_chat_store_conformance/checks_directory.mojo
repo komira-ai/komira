@@ -358,9 +358,14 @@ def check_mention_paging[T: ChatTarget](mut t: T) raises:
     )
     for _ in range(5):
         _ = s.send_message[Rt](reactor, String("c-d"), String("u-alice"), String("@dee"), Int64(0), String(), ids("u-dee"), False, no_ids(), T0 + 3)
+    # Bob is mentioned in the same millisecond: dee's whole-millisecond
+    # read must still hold only dee's mentions.
+    _ = s.send_message[Rt](reactor, String("c-m"), String("u-alice"), String("@bob"), Int64(0), String(), ids("u-bob"), False, no_ids(), T0 + 3)
     var last = s.mentions[Rt](reactor, String("u-dee"), T0 + 1000, 2)
-    assert_equal(_page_seqs(last), String("[3,4,5,6,7]"), "the oldest millisecond, whole")
+    assert_equal(_page_refs(last), String("[c-d:3,c-d:4,c-d:5,c-d:6,c-d:7]"), "the oldest millisecond, whole")
     assert_equal(last.next_before_ms, Int64(0), "the oldest millisecond is the last page")
+    var bob_old = s.mentions[Rt](reactor, String("u-bob"), T0 + 4, 10)
+    assert_equal(_page_refs(bob_old), String("[c-m:15,c-m:14]"), "bob's mention at +3 is there")
     # One page of 1 over ms 30: both 30s, and older mentions remain.
     var one = s.mentions[Rt](reactor, String("u-bob"), T0 + 31, 1)
     assert_equal(_page_seqs(one), String("[4,5]"), "a millisecond is never split")
