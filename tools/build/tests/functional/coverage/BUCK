@@ -305,7 +305,8 @@ cov_debug_check(
 # Test 47: branch coverage. A library whose function has every kind of
 # source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
 # its arms, never the first (and a String destroyed at an `if`, loops over
-# collections, a Dict subscript, user masks): with
+# collections, a Dict subscript, user masks, raising calls in `try:`
+# bodies): with
 # coverage (forced here, as for covlib_forced) it has [coverage][bc],
 # [coverage][pgo_bin] and [coverage][branch].
 mojo_library(
@@ -318,6 +319,7 @@ mojo_library(
         "branchlib/score.mojo",
         "branchlib/shapes.mojo",
         "branchlib/strings.mojo",
+        "branchlib/trial.mojo",
     ],
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
@@ -412,6 +414,20 @@ cov_branch_check(
 # test in shape, the `and` and `icmp ne` at the `&`; it stays a decision
 # because the test is not at the `if`'s location (`!= 0`, 9,5, is an
 # `icmp eq` and a `xor`, no String shape).
+# trial.mojo: each raising call in a `try:` body is a `try` decision, arm 0
+# the call returned, arm 1 it raised into the handler: `both` (15,23: 1,1),
+# `normal_only` (23,20: 1,0, its raise never taken), a nested `try` (35,24
+# outer, 37,25 inner, 39,25 a call in the inner `except` body, still in the
+# outer `try:` body: 1,0), a `try`/`finally` (57,20), a `try`/`else` (66,20;
+# the call in the `else` body, 70, is the compiler's), a Dict subscript
+# (76,17, at the `[`), and in `calls` a call returning only its flag (110),
+# an inlined raising callee (111,16: its `if` is 88,5 at its own line), the
+# two calls of `checked(checked(x))` (112,29 inner, 112,21 outer: 4,0), a
+# raising constructor (113), a method (114) and `Int(s)` (115); one in a
+# loop (125,25). `outside`'s call (30), whose error goes to its caller, and
+# `raise` (48) give no record. A classifier without the `try` rule loses
+# every try record; one ignoring the `try:` scope records 70 (and
+# lookup.mojo's 7,13); one keeping LLVM's arm order gives 23,20 as 0,1.
 # test_gate_env calls none of branchlib: its record file is empty.
 cov_report_check(
     name = "branch_info",
