@@ -9,8 +9,9 @@
 # Here the `nodelta` pack's own fixtures pass `check_pack` unchanged, and
 # then one thing at a time is changed and the exact message is required:
 #   * git's index with one byte flipped: require_same_bytes;
-#   * a verify-pack listing with one line fewer, one id replaced, and one
-#     line's offset, size in the pack, kind, depth or base changed;
+#   * a verify-pack listing with one line fewer, one id replaced, one
+#     line's offset, size in the pack, kind, depth or base changed, and the
+#     first entry's offset changed;
 #   * a cat-file dump with one object fewer, one id replaced, one kind
 #     changed, one payload byte flipped and one payload a byte longer.
 # A check deleted, or comparing the wrong field, lets its case through (or
@@ -172,6 +173,20 @@ def test_check_pack_each_check_fails() raises:
     assert_equal(
         _check(pack, idx, base, objects),
         at + "base " + lines[j].base + ", git's x",
+    )
+
+    # The first entry in pack order (offset 12, right after the header),
+    # its offset changed: the per-entry loop must start at entry 0.
+    var j0 = -1
+    for i in range(n):
+        if lines[i].offset == 12:
+            j0 = i
+    assert_equal(j0 >= 0, True)
+    var first = lines.copy()
+    first[j0].offset += 1
+    assert_equal(
+        _check(pack, idx, first, objects),
+        _NAME + ": " + lines[j0].id + ": offset 12, git's 13",
     )
 
     # The cat-file dump. Unchanged after the round trip through _batch.
