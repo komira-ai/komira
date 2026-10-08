@@ -24,14 +24,14 @@ def _files() raises -> List[String]:
     make each scan below pass over nothing."""
     var names = listdir(String(_DIR))
     var has_service = False
-    var has_mixin = False
+    var has_operations = False
     for i in range(len(names)):
         if names[i] == "service.mojo":
             has_service = True
-        if names[i] == "operations_mixin.mojo":
-            has_mixin = True
+        if names[i] == "operations.mojo":
+            has_operations = True
     assert_true(len(names) > 0, "nothing is staged under gen/")
-    assert_true(has_service and has_mixin, "gen/ is not the generated package")
+    assert_true(has_service and has_operations, "gen/ is not the generated package")
     return names^
 
 
@@ -97,16 +97,16 @@ def test_only_the_used_methods_are_generated() raises:
         ["create_job", "get_job", "list_jobs", "update_job", "delete_job", "run_job"],
     )
     total += _methods_of("execution.mojo", ["get_execution", "cancel_execution"])
-    total += _methods_of("operations_mixin.mojo", ["get_operation", "wait_operation"])
+    total += _methods_of("operations.mojo", ["get_operation", "wait_operation"])
     assert_equal(total, 17)
     var files = _files()
     var methods = 0
     for i in range(len(files)):
         methods += _count(_read(files[i]), "[RT: Runtime](")
     assert_equal(methods, total, "a method outside the list was generated")
-    # google.longrunning's own service is not generated: the operations
-    # client is Run's binding (operations_mixin.mojo).
-    assert_equal(_count(_read("operations.mojo"), "Client["), 0)
+    # One operations client: google.longrunning.Operations, generated into
+    # operations.mojo with run_v2.yaml's bindings.
+    assert_equal(_count(_read("operations.mojo"), "struct OperationsClient["), 1)
 
 
 def main() raises:

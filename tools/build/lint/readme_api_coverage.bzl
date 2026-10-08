@@ -4,7 +4,8 @@ A package's README `mojo` examples run as the welded `[tests][readme]` test
 (tools/build/mojo/README.md, "README examples"), so a public name an example
 uses in code is a public name that is smoke-tested (an import line alone, or
 the README declaring the same name, is not a use). This lint counts, per package
-under `root` (each directory directly under it), the public API (the names
+under `root` (each directory directly under it but `<root>/tests`, which
+holds the test-only packages), the public API (the names
 its `__init__.mojo` re-exports, and the public methods of the structs among
 them) and which of it the README's examples use, reading each README through
 the same tool the gate runs (//tools/build/readme_examples:tool, `generate`),
