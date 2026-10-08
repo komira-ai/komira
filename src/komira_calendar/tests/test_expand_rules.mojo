@@ -182,6 +182,10 @@ def test_window_on_an_open_series() raises:
     assert_equal(
         _starts(expand(e, _at("2030-06-01T09:15:00"), _at("2030-06-02T09:00:00"))), "2030-06-01T09:00:00"
     )
+    # One ending exactly at the window's start is out. Catches the end edge
+    # of a recurring occurrence's overlap test taken as `>=`.
+    var hour = _timed("2026-11-02T09:00:00", 3600, '{"freq":"DAILY","interval":1}')
+    assert_equal(len(expand(hour, _at("2026-11-20T10:00:00"), _at("2026-11-20T11:00:00"))), 0)
     assert_equal(len(expand(e, _at("9000-01-01T00:00:00"), _at("9000-01-02T00:00:00"))), 1)
     # Nothing after 9999-12-31.
     var last_day = parse_local_date("9999-12-31")
@@ -344,6 +348,20 @@ def test_series_span() raises:
         _starts(expand(weekend, _at("9999-12-01T00:00:00"), end_of_time + 3 * 86400)),
         "9999-12-25T10:00:00 9999-12-26T10:00:00",
     )
+    # A counted series whose last pick is 9999-12-31 itself, in a period
+    # that starts on it. Catches the count search's period loop stopping
+    # before a period that starts on the last day (`<`) and its pick test
+    # dropping a pick on the last day (`>=`): either ends on the 30th.
+    var to_the_end = _timed("9999-12-30T09:00:00", 600, '{"freq":"DAILY","interval":1,"count":3}')
+    assert_true(_span(to_the_end) == SeriesSpan(_at("9999-12-30T09:00:00"), _at("9999-12-31T09:10:00")))
+    # A first period that starts by 9999-12-31 but picks only after it: the
+    # week of Monday 9999-12-27 picks Saturday, which is in the year 10000.
+    # No occurrence, no span. Catches series_span taking period 0's first
+    # pick without checking it against the last day.
+    var past_the_end = _timed(
+        "9999-12-27T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["SATURDAY"],"count":2}'
+    )
+    assert_false(Bool(series_span(past_the_end)))
     # The first occurrence is the first picked day, not the event's start.
     var unpicked = _timed("2026-11-04T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"],"count":2}')
     assert_true(_span(unpicked) == SeriesSpan(_at("2026-11-09T10:00:00"), _at("2026-11-16T10:10:00")))
