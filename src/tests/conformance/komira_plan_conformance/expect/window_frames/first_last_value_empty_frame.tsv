@@ -1,0 +1,21 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.1, §9.7: ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING within the
+# partition, by id; first_x is the frame's first row's u, last_x its last
+# (u = id, never NULL in the data). An empty frame answers NULL (§8.25
+# note). g = 1: id 1 {2, 3}: 2, 3; id 2 {3, 4}: 3, 4; id 3 {4, 5}: 4, 5;
+# id 4 {5}: 5, 5; id 5 {}: NULL, NULL. g = 2: id 6 {7}: 7, 7; id 7 {}: NULL,
+# NULL. g = 3: id 8 {}: NULL, NULL.
+# Types: id, g, v, w, u keep their scanned types; FIRST_VALUE and LAST_VALUE
+# have u's type, INT64, nullable: u is declared nullable, and this frame
+# can be empty (§8.25).
+id:int64	g:int64	v:int64?	w:int64	u:int64?	first_x:int64?	last_x:int64?
+1	1	3	10	1	2	3
+2	1	\N	20	2	3	4
+3	1	5	30	3	4	5
+4	1	1	40	4	5	5
+5	1	4	50	5	\N	\N
+6	2	\N	60	6	7	7
+7	2	\N	70	7	\N	\N
+8	3	9	80	8	\N	\N

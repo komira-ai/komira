@@ -86,6 +86,23 @@
 #                  30} (every column, out of order, and `note` again).
 #   scan_numbers   id, f (float64, nullable): f = 1 (a JSON integer), 2.5,
 #                  null, -3 (a negative JSON integer).
+#   frame_rows     id, g, v, w, u: g = 1 ids 1 to 5, v = 3, NULL, 5, 1, 4;
+#                  g = 2 ids 6, 7, v NULL on both (a partition of only
+#                  NULLs); g = 3 id 8, v = 9 (a partition of one row). w =
+#                  10 * id, non-nullable; u = id, declared nullable but
+#                  holding no NULL, so a NULL FIRST_VALUE or LAST_VALUE of u
+#                  can only come from an empty frame. id is a total order
+#                  key within each g, so a ROWS frame has one answer.
+#   asof_left      lid, lg, lt: lid non-nullable; lg the equality key, lt
+#                  the ordering value. lg = 1 rows with lt = 20 (equal to a
+#                  right rt), 24, 25 (equidistant from rt 20 and 30), 5
+#                  (below every rt), 35 (above every rt); lg = 2 with lt 7;
+#                  a NULL lg (lt 15); a NULL lt (lg 1); lg = 3 (no right
+#                  group).
+#   asof_right     rid, rg, rt, rv: rg = 1 holds rt = 10, 20, 30 and one
+#                  NULL rt; rg = 2 rt 5; a NULL rg with rt 15 (the NULL-lg
+#                  left row's lt). No two rows of one rg share an rt, so
+#                  which of two tied right rows matches is never asked.
 #   weather        station, time, temp: NOT hand-written. BUCK stages Apache
 #                  Avro's share/test/data/weather.json here (pinned by
 #                  sha256 in third_party/apache-avro), upstream's own
@@ -333,6 +350,42 @@ def scan_numbers() -> Dataset:
     )
 
 
+def frame_rows() -> Dataset:
+    return Dataset(
+        "frame_rows",
+        _schema(
+            [String("id"), String("g"), String("v"), String("w"), String("u")],
+            [
+                ArrowType.INT64, ArrowType.INT64, ArrowType.INT64,
+                ArrowType.INT64, ArrowType.INT64,
+            ],
+            [False, False, True, False, True],
+        ),
+    )
+
+
+def asof_left() -> Dataset:
+    return Dataset(
+        "asof_left",
+        _schema(
+            [String("lid"), String("lg"), String("lt")],
+            [ArrowType.INT64, ArrowType.INT64, ArrowType.INT64],
+            [False, True, True],
+        ),
+    )
+
+
+def asof_right() -> Dataset:
+    return Dataset(
+        "asof_right",
+        _schema(
+            [String("rid"), String("rg"), String("rt"), String("rv")],
+            [ArrowType.INT64, ArrowType.INT64, ArrowType.INT64, ArrowType.INT64],
+            [False, True, True, False],
+        ),
+    )
+
+
 def weather_schema() -> Schema:
     """test.Weather as Avro's writer schema states it: station string, time
     long, temp int, none of them a union (so none nullable)."""
@@ -355,7 +408,7 @@ def all_datasets() -> List[Dataset]:
         sort_rows(), int_pairs(), window_rows(), rank_rows(), stat_rows(),
         avg_rows(), div_pairs(), float_pairs(), set_left(), set_right(),
         str_rows(), scan_rows(), scan_key_order(), scan_sparse(),
-        scan_numbers(), weather(),
+        scan_numbers(), frame_rows(), asof_left(), asof_right(), weather(),
     ]
 
 
