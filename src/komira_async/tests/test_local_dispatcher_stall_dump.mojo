@@ -11,8 +11,8 @@
 # its place and is refused. Built deterministically:
 #
 #   * 1 real worker + P PSEUDO workers (queues this test reads); static split,
-#     n = P + 1, so shard `w` owns task `w`. P = 64 gives one further 64-wid
-#     band in the dump; P = 1024 gives the 15 the mark table holds, and wid
+#     n = P + 1, so shard `w` owns task `w`. P = 127 gives one further 64-wid
+#     band in the dump (128 workers, a band boundary); P = 1024 gives the 15 the mark table holds, and wid
 #     1024, past the table, is counted as overflow.
 #   * Dispatch 1 (setup): task 0 runs on the real worker and runs every pseudo
 #     shard inline. It keeps the handles of wid 1 and wid P after running them.
@@ -29,9 +29,12 @@
 #     settles the 2 stranded charges and the dispatch raises.
 #   * Dispatch 3 is healthy and finds no leftover charge.
 #
-# Each scenario takes about ten seconds: the dump's threshold. It does not sleep;
-# every wait is on a condition, with bounds of minutes so a regression fails
-# instead of hanging.
+# Each scenario takes about ten seconds: the dump's threshold. Nothing sleeps;
+# every wait is on a condition. The test's own waits are bounded (task 0's wait
+# for a pseudo shard to be posted: 120 s; its read of the dump: 300 s; the read
+# to end of stream after the dispatch: 300 s), so a dump that never comes fails
+# the test. The driver's barrier wait inside `run_with_state` has no bound: a
+# regression that leaves a charge unreleased and unrefused hangs this test.
 # =============================================================================
 
 from std.ffi import external_call
@@ -119,6 +122,23 @@ def _poll_readable(fd: Int32, timeout_ms: Int32) -> Bool:
 # The dump's last line: the queue of the highest pseudo worker.
 def _last_dump_line(n_pseudo: Int) -> String:
     return "[BARRIER-STALL]   worker " + String(n_pseudo) + " queue_depth= 1\n"
+
+
+def _read_to_eof(fd: Int32, mut buf: List[UInt8]) -> Bool:
+    """Append the socket's remaining bytes until end of stream (bounded)."""
+    var chunk = List[UInt8](capacity=4096)
+    for _ in range(4096):
+        chunk.append(UInt8(0))
+    var deadline = Int64(perf_counter_ns()) + _DUMP_GIVE_UP_NS
+    while Int64(perf_counter_ns()) < deadline:
+        if not _poll_readable(fd, Int32(1000)):
+            continue
+        var n = try_recv(fd, Span(chunk))
+        if n == Int64(0):
+            return True
+        for i in range(Int(n)):
+            buf.append(chunk[i])
+    return False
 
 
 def _read_dump(fd: Int32, n_pseudo: Int, mut buf: List[UInt8]) -> Bool:
@@ -324,12 +344,20 @@ def _stall_scenario(n_pseudo: Int, bands: Int) raises:
     st.dump_fd = sv[0]
     st.phase = 2
     var saved = external_call["dup", Int32](Int32(2))
+    if saved < Int32(0):
+        _ = external_call["close", Int32](sv[1])
+        _ = external_call["close", Int32](sv[0])
+        raise Error("dup(2) failed: cannot capture stderr")
     _ = external_call["dup2", Int32](sv[1], Int32(2))
     var msg = _dispatch(d, st, n)
     _ = external_call["dup2", Int32](saved, Int32(2))
     _ = external_call["close", Int32](saved)
     _ = external_call["close", Int32](sv[1])
+    # Every write end is closed now, so what is left on the socket is all the
+    # dispatch printed after the dump's last line; read it to end of stream.
+    var eof = _read_to_eof(sv[0], st.dump)
     _ = external_call["close", Int32](sv[0])
+    assert_true(eof, "the captured stderr did not reach end of stream")
 
     assert_equal(st.missed[].load(), Int64(0))
     assert_true(st.dump_ok, "no [BARRIER-STALL] dump arrived")
@@ -413,7 +441,8 @@ def _stall_scenario(n_pseudo: Int, bands: Int) raises:
             dump,
             "\n[BARRIER-STALL]   worker " + String(w) + " queue_depth= 1\n",
         )
-    # Workers whose queue is empty print no depth line; the dump is printed once.
+    # Workers whose queue is empty print no depth line. The capture holds
+    # everything written to fd 2 during the dispatch: the dump came once.
     assert_equal(dump.count("queue_depth="), n - 2)
     assert_equal(dump.count("stuck >10s"), 1)
 
@@ -428,9 +457,10 @@ def _stall_scenario(n_pseudo: Int, bands: Int) raises:
 
 
 def test_stall_dump_one_extra_band() raises:
-    """65 workers: one band past the first word; the band loop stops on the
-    worker count."""
-    _stall_scenario(64, 1)
+    """128 workers: one band past the first word; the band loop stops on the
+    worker count, exactly at a band boundary (128 = 2 * 64), so a `<=` there
+    would print a second band."""
+    _stall_scenario(127, 1)
 
 
 def test_stall_dump_wider_than_the_mark_table() raises:

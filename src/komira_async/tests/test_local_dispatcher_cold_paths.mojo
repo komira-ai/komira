@@ -641,22 +641,23 @@ def test_for_each_morsel_without_workers_raises() raises:
 
 
 def test_for_each_morsel_static_body_error_is_raised() raises:
-    """Two morsels over two workers is the static mode (one task per morsel).
-    Morsel 1's body raises; the error reaches the caller with the dispatcher's
-    prefix, and morsel 0 still ran."""
-    var rt = _runtime(2)
+    """One morsel over one worker is the static mode (one task per morsel).
+    Its body raises; the error reaches the caller with the dispatcher's prefix.
+    One worker keeps it deterministic: with two, the shard that claimed the
+    other morsel could see the error first and skip its morsel."""
+    var rt = _runtime(1)
     ref d = rt.dispatcher()
     var st = _ArmState()
     var msg = String("")
     try:
         var b = d.for_each_index[_ArmState, _FailOnBody](
-            st, 2, _FailOnBody(bad=1), CancellationToken.never(),
+            st, 1, _FailOnBody(bad=0), CancellationToken.never(),
         )
         _ = b^
     except e:
         msg = String(e)
-    assert_equal(msg, String("LocalDispatcher.run_with_state: bad morsel 1"))
-    assert_equal(st.ran_mask(), Int64(0b11))
+    assert_equal(msg, String("LocalDispatcher.run_with_state: bad morsel 0"))
+    assert_equal(st.ran_mask(), Int64(1))
     _ = st^
     rt.shutdown()
 
