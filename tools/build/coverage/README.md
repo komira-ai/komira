@@ -37,11 +37,11 @@ counts too, uncovered (see "Files no test compiled"), so a file nobody
 tests cannot leave a package reading 100%.
 
 What is still missing: inside a file some test compiled, a function no test
-reaches may emit no lines at all (a generic that is never instantiated is
-never compiled), so it is absent from the report rather than uncovered.
-These numbers are upper bounds until declaration reachability lands; it
-will also replace the executable-line heuristic below with what the
-compiler emits.
+reaches emits no lines at all (Mojo compiles a function only when something
+the test reaches calls it, a generic once per instantiation), so it is
+absent from the report rather than uncovered. covcheck lists those
+functions (see "Functions no test compiled") but does not count them yet,
+so these numbers are upper bounds.
 
 ## Command line
 
@@ -236,7 +236,8 @@ executable line is exempted) raises no `UnmeasuredFile` and is not in
 `unmeasured_files`; its markers are listed like any other.
 
 The executable lines are a heuristic over a lexed source
-(`covcheck/lexer.mojo`); declaration reachability will refine it. A line
+(`covcheck/lexer.mojo`): no test binary holds any code of such a file,
+so nothing the compiler wrote can say which lines would have code. A line
 is executable unless it is:
 
 - blank (spaces, tabs, form feeds);
@@ -255,6 +256,42 @@ the end of a line (CRLF) are not part of the line.
 
 Everything else counts, declarations included (`def`, `struct`,
 `comptime`, a decorator, a lone `)`).
+
+## Functions no test compiled
+
+Report only: this list changes no number and raises no finding yet.
+
+A report holds the lines the compiler emitted code for in a test binary:
+kcov lists exactly the DWARF line rows of the measured sources. A function
+no test reaches has no row, so in a file some test compiled it is not
+uncovered but absent. For each kept file with a line record, covcheck reads
+the functions the source declares (`covcheck/decls.mojo`) and lists every
+function none of whose lines has a record in any report, in the result
+JSON's `uncompiled_functions`: package, path, `def` line, name, and
+`lines`, its executable lines (the heuristic above) that carry no exemption
+marker with a reason. A function whose every line is so marked is not
+listed.
+
+- A declaration is a `def` or `fn` line (code, not in a string). The
+  signature runs until its `(` `)` and `[` `]` close; code after its `:` on
+  that line is a one-line body; otherwise the body runs until the first
+  code line indented no deeper than the `def` (a docstring line further
+  left does not end it).
+- A body of only `...` (a trait's requirement) is no function; `pass` is.
+- A nested function owns its lines, and is compiled or not on its own: a
+  compiled closure does not make the function around it compiled.
+- A file no test compiled lists no function: its lines are already counted
+  ("Files no test compiled").
+
+It cannot see a `comptime if` arm the compiler dropped inside a compiled
+function (the unit is the whole function), nor a function the compiler
+emits without line rows (a `nodebug` function may be one; not measured). Why the line records
+and not the DWARF subprograms: in a coverage test binary the library's
+functions (compiled from its precompiled package) have no named
+`DW_TAG_subprogram` at all, only a compile unit named `<unknown>` with a
+line table, and a line-tables-only subprogram carries no `decl_file` or
+`decl_line` anyway; the line rows are the one place a library function
+shows up.
 
 ## Exemptions
 
@@ -576,7 +613,8 @@ run at 20 requests (1 POST and 19 PATCHes).
 
 **Result** (`covcheck/result.mojo`): `conclusion`,
 `mode`, `target_bp`, `total`, `diff`, `touched_packages`, `packages`,
-`findings`, `exemptions` and the set-aside counts; `gate` writes `package`
+`findings`, `exemptions`, `uncompiled_functions` (report only: see
+"Functions no test compiled") and the set-aside counts; `gate` writes `package`
 in place of `total`, `diff`, `touched_packages` and `packages`. A percentage
 or floor that does not apply is `null`. A package's `files` counts every
 file in its numbers and `unmeasured_files` those that raised

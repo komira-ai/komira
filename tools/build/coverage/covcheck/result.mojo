@@ -6,7 +6,7 @@
      "diff": {"covered", "uncovered", "not_instrumented", "exempt"},
      "touched_packages": [...], "packages": [<package>...],
      "findings": [<finding>...], "exemptions": [<exemption>...],
-     "ignored_files", "excluded_test_files", "ignored_mutants",
+     "uncompiled_functions": [<function>...], "ignored_files", "excluded_test_files", "ignored_mutants",
      "excluded_test_mutants"}
 
 `covcheck gate`: `{"conclusion", "mode", "target_bp", "package": <package>,
@@ -19,6 +19,10 @@ package has no row (or, for the branch floor, the row has `-`). A package's
 `files` counts every file in its numbers, `unmeasured_files` those that
 raised `UnmeasuredFile`; a finding's `line` is 0 when it is about a whole file, its `count`
 the lines an `UnmeasuredFile` counts uncovered (`null` for other kinds).
+A `<function>` (`{"package", "path", "line", "name", "lines"}`) is a
+function of a measured file no test binary compiled (analyze.mojo, step 8),
+`lines` its executable lines without an exemption marker with a reason; the list is
+reported only: no number or finding counts it yet.
 """
 
 from covcheck.analyze import Analysis
@@ -88,6 +92,19 @@ def _tail(mut j: JsonOut, a: Analysis):
         j.field_int(String("line"), e.line)
         j.field_str(String("reason"), e.reason)
         j.field_str(String("status"), e.status)
+        j.end_object()
+    j.end_array()
+    j.key(String("uncompiled_functions"))
+    j.begin_array()
+    for i in range(len(a.uncompiled_functions)):
+        ref u = a.uncompiled_functions[i]
+        j.item()
+        j.begin_object()
+        j.field_str(String("package"), u.package)
+        j.field_str(String("path"), u.path)
+        j.field_int(String("line"), u.line)
+        j.field_str(String("name"), u.name)
+        j.field_int(String("lines"), u.lines)
         j.end_object()
     j.end_array()
     j.field_int(String("ignored_files"), a.ignored_files)
