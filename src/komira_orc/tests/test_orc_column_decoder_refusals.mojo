@@ -71,6 +71,16 @@ def _rlev2_one_u64_sign_bit() -> List[UInt8]:
     return _bytes(0x7E, 0x00, 0x80, 0, 0, 0, 0, 0, 0, 0)
 
 
+def _rlev2_two_u64_sign_bit_first() -> List[UInt8]:
+    """RLEv2 Direct, two unsigned values at width 64: header 0x7e 0x01, then
+    0x8000000000000000 (negative as an Int64) and 1, big-endian. The negative
+    value is NOT the last one, so a guard that looks only at the last value
+    (an overwrite instead of an OR into the accumulator) accepts it."""
+    return _bytes(
+        0x7E, 0x01, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+    )
+
+
 # -----------------------------------------------------------------------------
 # Encoders (spec "Run Length Encoding" and "Column Encoding" sections).
 # -----------------------------------------------------------------------------
@@ -382,6 +392,44 @@ def test_negative_length_refused() raises:
         )
 
 
+comptime _NEG_LEN_MSG = (
+    "OrcDecodeError.NEGATIVE_LENGTH: the LENGTH stream decoded a negative"
+    " value length (an unsigned RLE run wide enough to set the Int64 sign"
+    " bit); a byte length cannot be negative"
+)
+
+
+def test_negative_length_before_valid_one_refused() raises:
+    # LENGTH [-2^63, 1]: the negative value comes first and a valid one
+    # follows. Kills `sign_acc |= lens[i]` -> `sign_acc = lens[i]` in
+    # `_check_lengths_non_negative` (only the last value would be checked;
+    # the one-value stream above cannot tell them apart). Every LENGTH
+    # decoder, on the no-PRESENT and the PRESENT path: direct STRING, BINARY,
+    # and the dictionary's own LENGTH decode.
+    var e = ORC_ENCODING_DIRECT_V2
+    for p in range(2):
+        for kind in [ORC_KIND_STRING, ORC_KIND_BINARY]:
+            var streams = List[StreamSpan]()
+            if p == 1:
+                streams.append(StreamSpan(ORC_STREAM_PRESENT, _present("vv")))
+            streams.append(StreamSpan(ORC_STREAM_DATA, _bytes(0x41)))
+            streams.append(
+                StreamSpan(ORC_STREAM_LENGTH, _rlev2_two_u64_sign_bit_first())
+            )
+            _expect_missing(kind, e, streams^, 2, _NEG_LEN_MSG)
+        var d = List[StreamSpan]()
+        if p == 1:
+            d.append(StreamSpan(ORC_STREAM_PRESENT, _present("v")))
+        d.append(StreamSpan(ORC_STREAM_DICTIONARY_DATA, _text("x")))
+        d.append(StreamSpan(ORC_STREAM_LENGTH, _rlev2_two_u64_sign_bit_first()))
+        d.append(StreamSpan(ORC_STREAM_DATA, _rlev2_direct(_i64s(0), 1, False)))
+        var acc = make_accumulator(ORC_KIND_STRING, ArrowType.STRING)
+        with assert_raises(contains=_NEG_LEN_MSG):
+            decode_stripe_column(
+                acc, ORC_KIND_STRING, ORC_ENCODING_DICTIONARY_V2, 2, d, 1
+            )
+
+
 def test_dictionary_length_overrun() raises:
     # LENGTH [4, 4] against the 7 bytes of "bluered": the second entry
     # ends one byte past the dictionary.
@@ -479,6 +527,7 @@ def main() raises:
     test_float_double_truncated_every_arm()
     test_lengths_overrun_data_spec_delta()
     test_negative_length_refused()
+    test_negative_length_before_valid_one_refused()
     test_dictionary_length_overrun()
     test_dictionary_data_over_int32_offsets()
     test_dictionary_index_out_of_range()
