@@ -171,8 +171,6 @@ def find_bytes(
     """The first index `i` in `[start, end)` where `needle` occurs wholly
     inside `data[start:end]`, or -1."""
     var m = len(needle)
-    if m == 0:
-        return start
     var i = start
     while i + m <= end:
         var k = 0
