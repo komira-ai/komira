@@ -315,6 +315,21 @@ def object_header(kind: ObjectKind, size: Int) -> List[UInt8]:
     return out^
 
 
+def _sha1_object_digest(
+    h: Sha1dc, kind: ObjectKind, size: Int
+) raises -> InlineArray[UInt8, 20]:
+    """The digest of the object stream `h` absorbed (the header of a `kind`
+    object of `size` payload bytes, then the payload), or the
+    OBJECT_ID_COLLISION error naming that object when `h` detected a
+    collision."""
+    var d = InlineArray[UInt8, 20](fill=0)
+    if h.finalize_into(d):
+        raise _collision_error(
+            "the " + kind.name() + " of " + String(size) + " bytes"
+        )
+    return d^
+
+
 def hash_object(
     format: ObjectFormat, kind: ObjectKind, payload: Span[UInt8, _]
 ) raises -> ObjectId:
@@ -329,11 +344,7 @@ def hash_object(
         var h = Sha1dc()
         h.update(Span(header))
         h.update(payload)
-        var d = InlineArray[UInt8, 20](fill=0)
-        if h.finalize_into(d):
-            raise _collision_error(
-                "the " + kind.name() + " of " + String(len(payload)) + " bytes"
-            )
+        var d = _sha1_object_digest(h, kind, len(payload))
         for i in range(20):
             id._set_byte(i, d[i])
     else:

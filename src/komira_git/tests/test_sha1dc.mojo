@@ -38,6 +38,10 @@
 #   * test_shattered_blob_has_id: hash_object refusing a blob whose
 #     content is a SHAttered PDF (detection run over the bare content
 #     instead of the header-prefixed stream git hashes).
+#   * test_object_collision_error: the check hash_object runs on the SHA-1
+#     stream of an object not raising on a detected collision, or an error
+#     that does not name the object's kind and payload size (fed the
+#     SHAttered PDF: no git object stream is a public collision).
 #   * test_is_object_id_collision: the error test matches only that error.
 # =============================================================================
 
@@ -52,8 +56,10 @@ from komira_git import (
     Sha1dc,
     hash_object,
     is_object_id_collision,
+    object_header,
     sha1dc,
 )
+from komira_git.object_id import _sha1_object_digest
 from komira_git.sha1dc import _compress_states, _expand, _recompress
 
 comptime _SHATTERED_PLAIN = "38762cf7f55934b34d179ae6a4c80cadccbb7f0a"
@@ -286,6 +292,29 @@ def test_shattered_blob_has_id() raises:
     )
 
 
+def test_object_collision_error() raises:
+    var one = _read("shattered-1.pdf")
+    var h = Sha1dc()
+    h.update(Span(one))
+    var raised = String()
+    try:
+        _ = _sha1_object_digest(h, ObjectKind.tree(), 7)
+    except e:
+        raised = String(e)
+    assert_equal(
+        raised,
+        "komira_git: ObjectIdCollision: the tree of 7 bytes holds a block"
+        " of a SHA-1 collision attack",
+    )
+    # No collision: the digest of the stream (`git hash-object` of "abc").
+    var header = object_header(ObjectKind.blob(), 3)
+    var plain = Sha1dc()
+    plain.update(Span(header))
+    plain.update(Span(_bytes("abc")))
+    var d = _sha1_object_digest(plain, ObjectKind.blob(), 3)
+    assert_equal(_hex(d), "f2ba8f84ab5c1bce84a7b441cb1959cfc7093b7f")
+
+
 def test_is_object_id_collision() raises:
     var one = _read("shattered-1.pdf")
     var msg = String()
@@ -307,5 +336,6 @@ def main() raises:
     test_reduced_round()
     test_recompress_inverts()
     test_shattered_blob_has_id()
+    test_object_collision_error()
     test_is_object_id_collision()
     print("komira_git sha1dc tests passed")
