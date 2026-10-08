@@ -51,7 +51,7 @@ def _b(s: String) -> List[UInt8]:
     return List[UInt8](s.as_bytes())
 
 
-def _blob(format: ObjectFormat, content: String) -> ObjectId:
+def _blob(format: ObjectFormat, content: String) raises -> ObjectId:
     var data = _b(content)
     return hash_object(format, ObjectKind.blob(), Span(data))
 

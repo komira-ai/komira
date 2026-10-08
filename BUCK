@@ -130,6 +130,7 @@ _TESTS_LINTS = [
     "//src/tests/conformance/komira_calendar_ics_conformance:deps_lint",
     "//src/tests/conformance/komira_connect_conformance:deps_lint",
     "//src/tests/conformance/komira_db_conformance:deps_lint",
+    "//src/tests/conformance/komira_git_conformance:deps_lint",
     "//src/tests/conformance/komira_http_conformance:deps_lint",
     "//src/tests/conformance/komira_datetime_conformance:deps_lint",
     "//src/tests/conformance/komira_json_conformance:deps_lint",

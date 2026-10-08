@@ -7,6 +7,11 @@ extra headers they carry; loose objects (`encode_loose`, `decode_loose`,
 `read_loose`, `loose_path`). Every parser refuses what `git fsck` reports as
 an error, so an accepted object serializes back to its own bytes and id.
 
+SHA-1 with collision detection (sha1collisiondetection, as git uses):
+`Sha1dc`, the one-shot `sha1dc`, and `is_object_id_collision` for the error
+(`OBJECT_ID_COLLISION`) that `hash_object` and `read_loose` raise for an
+object holding a block of a detected collision.
+
 Wire: pkt-line framing (`append_pkt_*`, `read_pkt_line`) and the ref name
 rules of `git check-ref-format` (`check_ref_format`, `normalize_ref_name`).
 
@@ -48,3 +53,4 @@ from .pkt_line import (
     read_pkt_line,
 )
 from .ref_name import check_ref_format, check_ref_name, is_valid_ref_name, normalize_ref_name
+from .sha1dc import OBJECT_ID_COLLISION, Sha1dc, is_object_id_collision, sha1dc

@@ -53,6 +53,7 @@ mojo_shared_lib(
         "komira_awslc_CRYPTO_library_init",
         "BrotliDecoderCreateInstance",
         "komira_s2n_init",
+        "SHA1DCInit",
         "komira_snappy_compress",
         "sqlite3_open",
     ],
