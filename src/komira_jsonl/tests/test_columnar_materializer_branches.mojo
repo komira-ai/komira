@@ -25,7 +25,8 @@
 #     the Stage 1 tape of JSONTestSuite n_ cases (or a truncated or retagged
 #     tape of a y_ case) without the line check that refuses them first;
 #   - line ranges and the parallel entries: one worker, worker count
-#     defaults and cap, a 4 MiB input of one line, partition lists that
+#     defaults, the cap of 32 (seen through the range a cell-budget
+#     refusal names), a 4 MiB input of one line, partition lists that
 #     disagree or do not fit the input, and the dispatcher entries on a
 #     one-worker runtime;
 #   - ColumnarMaterializer.init_for_schema.
@@ -337,7 +338,14 @@ def test_decimal_string_number_and_defaults() raises:
     var h = List[Field]()
     h.append(Field(String("p"), ArrowType.DECIMAL128, True))
     var msg = _err_of(String('{"p":"1234567890123456789"}\n'), _schema(h^))
-    _starts(msg, "komira_jsonl: line 1: ")
+    assert_equal(
+        msg,
+        "komira_jsonl: line 1: parse_decimal128_unscaled: value has 19"
+        + " integer digits, which does not fit DECIMAL128(18, 0) — at most"
+        + " 18 integer digits are representable. Past ~38 significant digits"
+        + " the i128 accumulator wraps and would store an arbitrary wrong"
+        + " value.",
+    )
 
 
 # --- schema refusals -----------------------------------------------------------
@@ -646,6 +654,7 @@ def test_line_ranges_degenerate() raises:
     # An empty input: one empty range.
     _compute_jsonl_line_ranges(Span(b), 0, 4, los, his)
     assert_equal(len(los), 1)
+    assert_equal(los[0], 0)
     assert_equal(his[0], 0)
     # Two workers, the midpoint past the last LF: no boundary, one range.
     _compute_jsonl_line_ranges(Span(b), len(b), 2, los, his)
@@ -664,13 +673,74 @@ def _i64(batch: RecordBatch, row: Int) raises -> Int:
 def test_parallel_small_input_worker_counts() raises:
     var b = _bytes_of(String('{"a":1}\n{"a":2}\n'))
     # 0 workers: the core count; 33: capped at 32; below 4 MiB both read
-    # serially.
+    # serially, so these rows do not see the cap (the next test does).
     var r0 = materialize_jsonl_to_batch_parallel(Span(b), _ab_schema())
     assert_equal(r0.num_rows(), 2)
     assert_equal(_i64(r0, 1), 2)
     var r33 = materialize_jsonl_to_batch_parallel(Span(b), _ab_schema(), 33)
     assert_equal(r33.num_rows(), 2)
     assert_equal(_i64(r33, 0), 1)
+
+
+def _pad_line(mut out: List[UInt8], lf_at: Int):
+    # `{`, spaces, `}`, LF: one record whose LF lands at byte `lf_at`.
+    out.append(UInt8(0x7B))
+    while len(out) < lf_at - 1:
+        out.append(UInt8(0x20))
+    out.append(UInt8(0x7D))
+    out.append(UInt8(0x0A))
+
+
+comptime _CAP_SPAN = 131200  # n / 32, with n = 32 * 131200 past 4 MiB
+
+
+def _cap_input() -> List[UInt8]:
+    # A padding line whose LF is the first at or past n*w/32 for w < 16,
+    # 101 `{}` lines whose last LF is the first past 16n/32, a padding line
+    # to the end. 32 ranges: the `{}` lines are a 303-byte range of their
+    # own. 33 ranges: 16n/33 and 17n/33 fall before and after them, so they
+    # share a 2 MiB range with the second padding line.
+    var s = _CAP_SPAN
+    var out = List[UInt8](capacity=32 * s)
+    _pad_line(out, 16 * s - 301)
+    for _ in range(101):
+        out.append(UInt8(0x7B))
+        out.append(UInt8(0x7D))
+        out.append(UInt8(0x0A))
+    _pad_line(out, 32 * s - 1)
+    return out^
+
+
+def test_parallel_worker_cap_decides_the_ranges() raises:
+    var b = _cap_input()
+    var los = List[Int]()
+    var his = List[Int]()
+    _compute_jsonl_line_ranges(Span(b), len(b), 32, los, his)
+    assert_equal(len(los), 3)
+    assert_equal(los[1], 16 * _CAP_SPAN - 300)
+    assert_equal(his[1] - los[1], 303)
+    _compute_jsonl_line_ranges(Span(b), len(b), 33, los, his)
+    assert_equal(len(los), 2)
+    # Each range has its own cell budget, 256 * (bytes + 1) // columns rows.
+    # 1000 columns: the 303-byte range fits 77 rows and refuses the 78th
+    # (line 79, after the first padding line); a 2 MiB range fits every
+    # row. 33 workers asked, capped at 32: the 303-byte range is read on its
+    # own and refused, naming its own byte count. A cap above 32 reads it
+    # inside a 2 MiB range and returns 103 rows.
+    var msg = String()
+    var rows = -1
+    try:
+        var r = materialize_jsonl_to_batch_parallel(Span(b), _wide(1000), 33)
+        rows = r.num_rows()
+    except e:
+        msg = String(e)
+    assert_equal(rows, -1)
+    _starts(
+        msg,
+        "komira_jsonl: line 79: JSON reader: materializing 78 rows x 1000"
+        + " columns = 78000 accumulator cells from a 303-byte input,"
+        + " exceeding the budget of 256 cells per input byte.",
+    )
 
 
 def _big_one_line() -> List[UInt8]:
@@ -758,14 +828,15 @@ def _noop_sink_factory() -> NoopSink:
 
 
 def _big_lines(mut rows: Int) -> List[UInt8]:
-    # Lines `{` + 1000 spaces + `"a":7}` LF, past 4 MiB.
+    # Lines `{` + 1000 spaces + `"a":<line index>}` LF, past 4 MiB: each
+    # row holds its own index, so parts joined out of order fail.
     var out = List[UInt8]()
-    var line = String("{")
+    var pad = String("{")
     for _ in range(1000):
-        line += " "
-    line += '"a":7}\n'
+        pad += " "
     rows = 0
     while len(out) <= 4 * 1024 * 1024:
+        var line = pad + '"a":' + String(rows) + "}\n"
         out.extend(Span(line.as_bytes()))
         rows += 1
     return out^
@@ -819,10 +890,8 @@ def test_dispatcher_entries() raises:
     )
     assert_equal(r3.num_rows(), rows)
     var col = r3.column_at(0).as_primitive[DType.int64]()
-    var total = 0
     for i in range(rows):
-        total += Int(col.get(i))
-    assert_equal(total, 7 * rows)
+        assert_equal(Int(col.get(i)), i)
     _ = rt^
 
 
@@ -874,6 +943,7 @@ def main() raises:
     test_walk_skips_what_it_does_not_understand()
     test_line_ranges_degenerate()
     test_parallel_small_input_worker_counts()
+    test_parallel_worker_cap_decides_the_ranges()
     test_parallel_4mib_one_line()
     test_partitions_that_disagree_fall_back()
     test_partitions_outside_the_input_refused()
