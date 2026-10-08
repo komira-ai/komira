@@ -5,8 +5,9 @@ What each part proves, and the defect it catches:
 - floats: the decimal half is what Mojo's float writer prints. float64 is
   held to CPython's `repr` (shortest round trip, the same layout as Mojo's
   writer: `_format_float.mojo` "writing the decimal following python
-  behavior") over 3000 seeded bit patterns and the layout edges; float32 to
-  vectors from Mojo's own float32 formatting test; float16 is widened to
+  behavior") over 3000 seeded bit patterns and the layout edges, and to
+  every vector of Mojo's own float64 formatting test; float32 to the
+  vectors of its float32 test; float16 is widened to
   float32 as the harness does. Catches a non-shortest or misrounded digit
   string, a wrong switch to scientific notation, a missing `.0`.
 - every flat type: one table, each column a value, a NULL and a value,
@@ -105,6 +106,41 @@ _MOJO_F32 = [
 def test_float32_is_mojo():
     for lit, want in _MOJO_F32:
         eq(render.float_decimal_text(_bits32(float(lit)), 32), want, "float32 decimal of %s" % lit)
+
+
+# From the same file's test_float64, every vector (its two duplicate
+# entries once): the text Mojo prints for Float64(<literal>). The seeded
+# patterns above hold float64 to CPython's repr; these hold it to Mojo.
+_MOJO_F64 = [
+    ("0.0", "0.0"), ("-0.0", "-0.0"), ("1.0", "1.0"), ("-1.0", "-1.0"),
+    ("42.0", "42.0"), ("0.5", "0.5"), ("-0.5", "-0.5"), ("1.23", "1.23"),
+    ("-1.23", "-1.23"), ("1.18e-38", "1.18e-38"), ("-1.18e-38", "-1.18e-38"),
+    ("1e-35", "1e-35"), ("-1e-35", "-1e-35"), ("1e35", "1e+35"), ("-1e35", "-1e+35"),
+    ("1.23e15", "1230000000000000.0"), ("-1.23e15", "-1230000000000000.0"),
+    ("1.23e-15", "1.23e-15"), ("-1.23e-15", "-1.23e-15"), ("1.23e20", "1.23e+20"),
+    ("-1.23e20", "-1.23e+20"), ("9.9999e14", "999990000000000.0"),
+    ("-9.9999e14", "-999990000000000.0"), ("1e15", "1000000000000000.0"),
+    ("-1e15", "-1000000000000000.0"), ("0.3333", "0.3333"), ("-0.3333", "-0.3333"),
+    ("0.6666", "0.6666"), ("3.141592653589793", "3.141592653589793"),
+    ("-3.141592653589793", "-3.141592653589793"),
+    ("1.999999999999999", "1.999999999999999"),
+    ("-1.999999999999999", "-1.999999999999999"),
+    ("2.0000000000000004", "2.0000000000000004"),
+    ("-2.0000000000000004", "-2.0000000000000004"),
+    ("2.2250738585072014e-308", "2.2250738585072014e-308"),
+    ("-2.2250738585072014e-308", "-2.2250738585072014e-308"),
+    ("1.7976931348623157e308", "1.7976931348623157e+308"),
+    ("-1.7976931348623157e308", "-1.7976931348623157e+308"), ("1000000.0", "1000000.0"),
+    ("0.000001", "1e-06"), ("1.100", "1.1"), ("-1.100", "-1.1"), ("1.0010", "1.001"),
+    ("-1.0010", "-1.001"), ("999999.999999", "999999.999999"),
+    ("-999999.999999", "-999999.999999"), ("0.000000999999", "9.99999e-07"),
+    ("-0.000000999999", "-9.99999e-07"),
+]
+
+
+def test_float64_is_mojo():
+    for lit, want in _MOJO_F64:
+        eq(render.float_decimal_text(_bits64(float(lit)), 64), want, "float64 decimal of %s" % lit)
 
 
 def test_float16_widens_to_float32():

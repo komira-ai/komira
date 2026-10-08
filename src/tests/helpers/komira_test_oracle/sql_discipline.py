@@ -9,13 +9,19 @@ semantics to DuckDB's defaults or to the moment it runs:
   LAST). DuckDB's `default_null_order` is NULLS LAST, the same as the plan's
   default (query semantics §4.1), so a key that relies on it computes the
   same rows today: nothing but this check notices the placement was never
-  stated;
+  stated. A window function's own ORDER BY (`first_value(x ORDER BY y)
+  OVER (...)`) is held to the same rule: DuckDB keeps it in the window's
+  `arg_orders`, beside the OVER clause's `orders`;
 - every literal is the operand of a CAST (query semantics, preamble: the
-  oracle casts every literal to the plan literal's type), except the counts
-  of LIMIT and OFFSET, which are plan constants and not typed values. An
+  oracle casts every literal to the plan literal's type), except a literal
+  that is itself the count of a LIMIT or an OFFSET, which is a plan
+  constant and not a typed value (a literal inside a subquery that computes
+  the count is not exempt). An
   uncast `2` beside a BIGINT column computes the same answer, so again only
   this check notices;
-- no function that reads a clock or draws a random number;
+- no function that reads a clock or draws a random number, and no
+  `USING SAMPLE` or `TABLESAMPLE` (a sample is not a function call: DuckDB
+  keeps it in a `sample` key of the SELECT or the table reference);
 - exactly one statement, a SELECT.
 
 The check walks the JSON DuckDB's `json_serialize_sql` makes of the
@@ -50,30 +56,39 @@ class DisciplineError(ValueError):
     pass
 
 
-def _walk(node, path, in_cast, in_limit, problems):
+_ORDER_KEYS = ("orders", "arg_orders")
+_LIMIT_MODIFIERS = ("LIMIT_MODIFIER", "LIMIT_PERCENT_MODIFIER")
+
+
+def _walk(node, path, in_cast, is_count, problems):
+    """`in_cast`: `node` is a CAST's operand; `is_count`: `node` is the
+    count of a LIMIT or an OFFSET. Neither is inherited below `node`."""
     if isinstance(node, list):
         for i, item in enumerate(node):
-            _walk(item, "%s[%d]" % (path, i), in_cast, in_limit, problems)
+            _walk(item, "%s[%d]" % (path, i), False, False, problems)
         return
     if not isinstance(node, dict):
         return
     cls = node.get("class")
-    if cls == "CONSTANT" and not in_cast and not in_limit:
+    if cls == "CONSTANT" and not in_cast and not is_count:
         problems.append("%s: a literal that is not the operand of a CAST: %s" % (path, json.dumps(node.get("value"))))
     if cls == "FUNCTION" and str(node.get("function_name", "")).lower() in _UNSTABLE:
         problems.append("%s: %s() depends on when the query runs" % (path, node["function_name"]))
-    if node.get("type") == "ORDER_MODIFIER" or "orders" in node:
-        for i, order in enumerate(node.get("orders") or []):
-            where = "%s.orders[%d]" % (path, i)
+    if node.get("sample") is not None:
+        problems.append("%s.sample: USING SAMPLE or TABLESAMPLE draws rows at random" % path)
+    for key in _ORDER_KEYS:
+        for i, order in enumerate(node.get(key) or []):
+            where = "%s.%s[%d]" % (path, key, i)
             if order.get("type") not in ("ASCENDING", "DESCENDING"):
                 problems.append("%s: an ORDER BY key without ASC or DESC (%s)" % (where, order.get("type")))
             if order.get("null_order") not in ("NULLS FIRST", "NULLS LAST"):
                 problems.append("%s: an ORDER BY key without NULLS FIRST or NULLS LAST (%s)" % (where, order.get("null_order")))
-    limit = in_limit or node.get("type") in ("LIMIT_MODIFIER", "LIMIT_PERCENT_MODIFIER")
+    limit = node.get("type") in _LIMIT_MODIFIERS
     for key in sorted(node):
-        child = node[key]
-        # A CAST's operand is its `child`; anything deeper is not cast.
-        _walk(child, path + "." + key, cls == "CAST" and key == "child", limit, problems)
+        # A CAST's operand is its `child`, a limit modifier's counts its
+        # `limit` and `offset`; anything deeper is neither.
+        _walk(node[key], path + "." + key, cls == "CAST" and key == "child",
+              limit and key in ("limit", "offset"), problems)
 
 
 def check(con, sql):

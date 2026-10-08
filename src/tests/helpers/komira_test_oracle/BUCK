@@ -84,8 +84,18 @@ python_oracle(
     visibility = ["//src/tests/..."],
 )
 
-# render.py and canon.py against hand-spelt cells, Mojo's float formatting
-# and the datasets; no DuckDB.
+# sql_discipline.py against queries that each break one rule (refused,
+# naming where the parse keeps the offence) and the same queries with the
+# ORDER BY and literal rules kept (accepted). DuckDB only parses them.
+py_test(
+    name = "test_sql_discipline",
+    src = "test_sql_discipline.py",
+    srcs = ["sql_discipline.py"],
+    deps = ["//third_party/python:duckdb"],
+)
+
+# render.py and canon.py against hand-spelt cells, Mojo's float32 and float64
+# formatting vectors and the datasets; no DuckDB.
 py_test(
     name = "test_render",
     src = "test_render.py",
