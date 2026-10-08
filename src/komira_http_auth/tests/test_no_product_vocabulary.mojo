@@ -1,6 +1,7 @@
 # =============================================================================
 # test_no_product_vocabulary.mojo: the package names no product concept and
-# holds no date before September 2026.
+# holds no early year-month (2024 or 2025 with any month, or 2026 with month
+# 01 to 08; earlier years are not matched).
 # =============================================================================
 #
 # komira_http_auth is a generic, open-source bearer-JWT layer. It reads every
