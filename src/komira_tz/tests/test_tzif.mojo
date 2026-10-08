@@ -339,6 +339,14 @@ def test_refusals() raises:
         'TZif t: the footer "ZZZ0" gives ZZZ (utoff 0, isdst 0) at the'
         " last transition 8589934592; the file gives AAA (utoff 0, isdst 0)",
     )
+    # Same offset and abbreviation, the other DST flag: DST all year with
+    # AAA (+0) as the DST type, so the footer's type is AAA with isdst 1.
+    _refused(
+        _v2(_decoy_v1(), _two_types(), "XXX1AAA0,0/0,J365/25"),
+        'TZif t: the footer "XXX1AAA0,0/0,J365/25" gives AAA (utoff 0, isdst'
+        " 1) at the last transition 8589934592; the file gives AAA (utoff 0,"
+        " isdst 0)",
+    )
 
 
 def main() raises:
