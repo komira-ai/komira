@@ -12,7 +12,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Key, a SAS token, or anonymous) and AzureClientSpec, the endpoint,
 # credential and connector factory a client is built from; AzureFs,
 # komira_fs's FileSystem over one container (read-only), which builds its
-# clients from a spec; and AzureSasSigner, komira_objectstore's
+# clients from a spec; parse_azure_url and AzureFsConfig (azure_url.mojo:
+# az://, abfs[s]://, the Blob service's https:// URL and an emulator's
+# path-style http:// URL, merged with the configured account and endpoint),
+# and azure_prod_fs, an AzureFs over komira_http_client's
+# KernelSchemeConnector that dials plaintext only for an http:// endpoint;
+# and AzureSasSigner, komira_objectstore's
 # ObjectUrlSigner as a blob service SAS, signed at the instant its injected
 # clock reports at each mint. The account key comes from komira_azure_core's
 # AzureSharedKey. No environment is read.
@@ -58,7 +63,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # bodies that are not UTF-8), test_azure_presign (the service SAS against independent goldens, its
 # sixteen-field string-to-sign, its refusals, and a clock read at each mint
 # so an advancing clock gives a new window per URL, and the production clock
-# reading whole wall-clock seconds) and test_no_env_reads
+# reading whole wall-clock seconds), test_azure_url (parse_azure_url's
+# accepted forms and its refusals by exact message, the encoded forms' paths
+# percent-decoded once, a URL merged with the configured account and
+# endpoint (a URL naming any other endpoint refused), and an endpoint into
+# AzureConfig), test_azure_fs_scheme_read (an AzureFs from azure_fs_for read
+# over a scripted connector that keeps the wire: a SAS token in the query, a
+# Shared Key signing, anonymous, a clone signing as its source does, the
+# endpoint's scheme picking the connector, azure_prod_fs's connector and
+# refusals, and the production type cloning without dialing) and
+# test_no_env_reads
 # (the package's sources read no environment). The same verbs over a real socket, against a fake service
 # that checks each signature itself, are komira_azure_blob_e2e's test.
 mojo_library(
@@ -88,6 +102,7 @@ mojo_library(
     },
     test_srcs = [
         "tests/test_azure_client_spec.mojo",
+        "tests/test_azure_fs_scheme_read.mojo",
         "tests/test_azure_presign.mojo",
         "tests/test_azure_signing.mojo",
         "tests/test_azure_signing_body.mojo",
@@ -95,6 +110,7 @@ mojo_library(
         "tests/test_azure_store_body.mojo",
         "tests/test_azure_store_fs.mojo",
         "tests/test_azure_store_put.mojo",
+        "tests/test_azure_url.mojo",
         "tests/test_azure_xml.mojo",
         "tests/test_no_env_reads.mojo",
     ],

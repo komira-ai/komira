@@ -111,7 +111,7 @@ def _graph(
     return (
         String('{"resource":[')
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":') + port
-        + String(',"internal":{},"env":{"ORDERS":{"ref":{"resource":"orders","standard":"NAME"}}}},')
+        + String(',"internal":{},"scale":{"min":1,"max":2},"env":{"ORDERS":{"ref":{"resource":"orders","standard":"NAME"}}}},')
         + u + String("},")
         + String('{"id":"orders",') + ret + String('"table":{"key":') + key
         + String(',"indexes":') + indexes + t + String("}}")
