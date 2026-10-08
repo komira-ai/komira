@@ -1,5 +1,5 @@
 # proto-message: komira.plan.v1.WirePlanEnvelope
-format_version: 2
+format_version: 4
 plan {
   output_schema {
     fields {
