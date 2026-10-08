@@ -1,8 +1,9 @@
 # The edges the fixture repo does not reach: which targets give a `tests`
 # edge, a library whose import name is not its target name, and stubs (labels
 # named only in `deps`) that share a target name. Also the lines it does not
-# reach: a symbol whose source is not added, a method whose struct header
-# is not found, and the escapes of `dump`.
+# reach: a symbol whose source is not added (and the module after it, whose
+# source is), a method whose struct header is not found (and the struct after
+# it, whose header is), and the escapes of `dump`.
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_kg_code import CodeGraph, CodeGraphBuilder, EDGE_IMPORTS, EDGE_TESTS, KgEdge, KgNode
@@ -147,6 +148,60 @@ def test_a_method_whose_struct_header_is_not_found_has_line_0() raises:
     assert_equal(_line(g, "lib.S.area"), 0)
 
 
+# c//p:lib with the modules a (function fa) and b (function fb), listed in
+# that order: the doc JSON keeps module order, so a's file is read first.
+comptime _UQ_TWO = (
+    '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [],'
+    ' "srcs": ["c//p/lib/__init__.mojo", "c//p/lib/a.mojo", "c//p/lib/b.mojo"]}}'
+)
+comptime _DOC_TWO = (
+    '{"decl": {"kind": "package", "name": "lib", "modules": ['
+    '{"kind": "module", "name": "a",'
+    ' "functions": [{"name": "fa", "overloads": [{"signature": "def fa()", "summary": "Fa."}]}]},'
+    ' {"kind": "module", "name": "b",'
+    ' "functions": [{"name": "fb", "overloads": [{"signature": "def fb()", "summary": "Fb."}]}]}],'
+    ' "packages": []}, "version": "1.0.0"}'
+)
+
+
+def test_a_module_whose_source_is_not_added_leaves_later_modules_lines() raises:
+    # a's source is not added, so fa has line 0; b's is, so fb has its line.
+    # A missing source zeroes its own file only, not the files after it.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_UQ_TWO)
+    b.add_mojo_doc_json("c//p:lib", _DOC_TWO)
+    b.add_source("c//p/lib/b.mojo", "# b\ndef fb():\n    pass\n")
+    var g = b.build()
+    assert_equal(_line(g, "lib.a.fa"), 0)
+    assert_equal(_line(g, "lib.b.fb"), 2)
+
+
+# _DOC_ONE's module with a second struct T after S: per file the declarations
+# go functions, then each struct followed by its methods, so T comes after
+# S.area.
+comptime _DOC_S_THEN_T = (
+    '{"decl": {"kind": "package", "name": "lib", "modules": [{"kind": "module", "name": "__init__",'
+    ' "functions": [],'
+    ' "structs": [{"name": "S", "signature": "struct S", "summary": "S.",'
+    ' "functions": [{"name": "area", "overloads": [{"signature": "def area(self) -> Int", "summary": "A."}]}]},'
+    ' {"name": "T", "signature": "struct T", "summary": "T.", "functions": []}]}],'
+    ' "packages": []}, "version": "1.0.0"}'
+)
+
+
+def test_a_struct_after_a_method_whose_header_is_not_found_has_its_line() raises:
+    # S's header is not in the source, so area has line 0; T's header is,
+    # and T is no member of S, so T has its line.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_UQ_ONE)
+    b.add_mojo_doc_json("c//p:lib", _DOC_S_THEN_T)
+    b.add_source("c//p/lib/__init__.mojo", "    def area(self) -> Int:\n        return 0\nstruct T:\n    pass\n")
+    var g = b.build()
+    assert_equal(_line(g, "lib.S"), 0)
+    assert_equal(_line(g, "lib.S.area"), 0)
+    assert_equal(_line(g, "lib.T"), 3)
+
+
 def test_dump_escapes_backslash_tab_and_newline() raises:
     var nodes = List[KgNode]()
     nodes.append(KgNode(String("a\\b"), String("doc"), String("t\tu"), String("p"), 7, String("x\ny")))
@@ -175,6 +230,8 @@ def main() raises:
     _run("stub_vs_library", test_a_stub_never_takes_a_library_import_name, failed)
     _run("no_source_line", test_a_symbol_whose_source_is_not_added_has_line_0, failed)
     _run("method_no_header", test_a_method_whose_struct_header_is_not_found_has_line_0, failed)
+    _run("later_module_line", test_a_module_whose_source_is_not_added_leaves_later_modules_lines, failed)
+    _run("struct_after_no_header", test_a_struct_after_a_method_whose_header_is_not_found_has_its_line, failed)
     _run("dump_escapes", test_dump_escapes_backslash_tab_and_newline, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
