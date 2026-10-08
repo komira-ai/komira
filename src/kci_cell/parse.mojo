@@ -32,9 +32,11 @@
 #
 #   * an unknown field at any level;
 #   * a scalar field set twice;
-#   * a duplicate cell name, and a setting key set twice in one cell;
+#   * a duplicate cell name, and a setting key set twice in one cell (keys
+#     compare byte for byte: `Project` and `project` are two keys);
 #   * a setting with no key;
-#   * an empty (or whitespace-only) or missing `cloud`;
+#   * an empty (or whitespace-only) or missing `cloud` (any other value is
+#     kept as written: its form is checked where the step runs);
 #   * a cell name outside the step-name grammar (kci_api's `is_step_name`),
 #     a missing name included;
 #   * a `bootstrap_level` other than the integer 1, a missing one included;

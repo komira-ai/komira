@@ -5,8 +5,10 @@ cloud, one place, owned by one machine. Every cell is declared once, in one
 cells file (format `kci.cells`, a textproto), and a step names the file and
 picks one cell from it, the way a PUBLISH step names a channels file and picks
 one channel. A cell has a `name` (the step-name grammar: `[a-z][a-z0-9-]*`, at
-most 63 bytes, not ending in `-`), a `cloud` (a cloud id word; whether this kci
-was built with it is checked where the step runs), `setting`s (keys and values
+most 63 bytes, not ending in `-`), a `cloud` (a cloud id; the parser refuses
+only an empty or whitespace-only one and does not check the word's form, which
+is checked, with whether this kci was built with that cloud, where the step
+runs), `setting`s (case-sensitive keys and values
 kci does not interpret: the cloud's adapter reads them) and a
 `bootstrap_level`, which today must be `1`.
 

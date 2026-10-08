@@ -130,6 +130,52 @@ def test_duplicate_setting_key() raises:
     )
 
 
+def _named_cell(name: String) -> String:
+    """Six lines, the name on the second, like `_ok_cell`."""
+    return _cell(String("  name: \"") + name + String("\"\n") + String(_CLOUD) + String(_PROJECT) + String(_LEVEL))
+
+
+def test_duplicate_cell_name_not_adjacent() raises:
+    # staging (lines 2..7), prod (8..13), staging again (14..19, name on 15):
+    # the repeat is checked against EVERY earlier cell, not only the last one
+    assert_equal(
+        _refusal(_file(_named_cell(String("staging")) + _named_cell(String("prod")) + _named_cell(String("staging")))),
+        String("cells file: line 15: cell 'staging' is declared twice (first on line 3)"),
+    )
+
+
+def test_duplicate_setting_key_not_adjacent() raises:
+    # project (line 5), region (6), project again (7): checked against every
+    # earlier setting of the cell, and the first one's line is named
+    assert_equal(
+        _refusal(_file(_cell(
+            String(_NAME) + String(_CLOUD) + String(_PROJECT)
+            + String("  setting { key: \"region\" value: \"europe-west1\" }\n")
+            + String(_PROJECT) + String(_LEVEL)
+        ))),
+        String("cells file: line 7: setting 'project' is set twice in cell 'staging' (first on line 5)"),
+    )
+
+
+def test_setting_keys_differing_by_case_are_two_keys() raises:
+    # kci does not interpret settings: `Project` and `project` are distinct
+    var cells = parse_cells_file(_file(_cell(
+        String(_NAME) + String(_CLOUD) + String(_PROJECT)
+        + String("  setting { key: \"Project\" value: \"other\" }\n")
+        + String(_LEVEL)
+    )))
+    assert_equal(len(cells[0].settings), 2)
+    assert_equal(cells[0].setting(String("project")), String("example-staging"))
+    assert_equal(cells[0].setting(String("Project")), String("other"))
+
+
+def test_setting_with_an_empty_key() raises:
+    assert_equal(
+        _refusal(_file(_cell(String(_NAME) + String(_CLOUD) + String("  setting { key: \"\" value: \"x\" }\n") + String(_LEVEL)))),
+        String("cells file: line 5: a setting of cell 'staging' has no key"),
+    )
+
+
 def test_setting_with_no_key() raises:
     assert_equal(
         _refusal(_file(_cell(String(_NAME) + String(_CLOUD) + String("  setting { value: \"x\" }\n") + String(_LEVEL)))),
@@ -152,6 +198,15 @@ def test_whitespace_cloud() raises:
         _refusal(_file(_cell(String(_NAME) + String("  cloud: \" \"\n") + String(_LEVEL)))),
         String("cells file: line 4: cell 'staging' has an empty cloud (a cloud id such as \"gcp\" is required)"),
     )
+
+
+def test_tab_cr_lf_cloud() raises:
+    # every whitespace byte counts as blank, not only a space
+    for ws in [String("\\t"), String("\\r"), String("\\n"), String(" \\t\\r\\n")]:
+        assert_equal(
+            _refusal(_file(_cell(String(_NAME) + String("  cloud: \"") + ws + String("\"\n") + String(_LEVEL)))),
+            String("cells file: line 4: cell 'staging' has an empty cloud (a cloud id such as \"gcp\" is required)"),
+        )
 
 
 def test_missing_cloud() raises:
@@ -280,6 +335,29 @@ def test_schema_version_too_new() raises:
         _refusal(_ok_cell() + String("schema_version: 2\n")),
         String(
             "cells file: line 7: schema_version 2 needs a newer kci"
+            " (this kci reads kci.cells up to major 1)"
+        ),
+    )
+
+
+def test_schema_version_missing_at_top_level_but_nested() raises:
+    # a `schema_version` inside a cell is not the file's: the refusal is
+    # "missing" on line 1, never the nested field's line 3
+    assert_equal(
+        _refusal(_cell(String(_NAME) + String("  schema_version: 1\n") + String(_CLOUD) + String(_LEVEL))),
+        String(
+            "cells file: line 1: no schema_version; add `schema_version: 1`"
+            " (this kci reads kci.cells up to major 1)"
+        ),
+    )
+
+
+def test_schema_version_word_as_a_value_is_not_the_field() raises:
+    # line 1 holds `schema_version` as a VALUE; the field is on line 2
+    assert_equal(
+        _refusal(String("zone: schema_version\nschema_version: 2\n") + _ok_cell()),
+        String(
+            "cells file: line 2: schema_version 2 needs a newer kci"
             " (this kci reads kci.cells up to major 1)"
         ),
     )
