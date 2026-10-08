@@ -34,6 +34,15 @@ def _id(first: Int, last: Int) raises -> ObjectId:
     return ObjectId.from_raw(ObjectFormat.sha1(), Span(raw))
 
 
+def _list(a: Int, b: Int, c: Int, d: Int) -> List[Int]:
+    var out = List[Int]()
+    out.append(a)
+    out.append(b)
+    out.append(c)
+    out.append(d)
+    return out^
+
+
 def _checksum() -> List[UInt8]:
     var out = List[UInt8]()
     for i in range(20):
@@ -74,7 +83,7 @@ def _reseal(mut b: List[UInt8]):
 
 
 def test_layout() raises:
-    var offsets = [12, 40, 300, 77]
+    var offsets = _list(12, 40, 300, 77)
     var idx = _sample(offsets)
     var b = idx.serialize()
     assert_equal(len(b), 8 + 1024 + 4 * (20 + 8) + 40)
@@ -115,7 +124,7 @@ def test_layout() raises:
 
 
 def test_large_offsets() raises:
-    var offsets = [12, 0x41, 1 << 33, 0x40]
+    var offsets = _list(12, 0x41, 1 << 33, 0x40)
     var idx = _sample(offsets)
     var b = idx.serialize(0x40)
     assert_equal(len(b), 8 + 1024 + 4 * 28 + 2 * 8 + 40)
@@ -144,7 +153,7 @@ def test_large_offsets() raises:
 
 
 def test_find() raises:
-    var idx = _sample([12, 13, 14, 15])
+    var idx = _sample(_list(12, 13, 14, 15))
     assert_equal(idx.find(_id(0x00, 1)), 0)
     assert_equal(idx.find(_id(0x05, 2)), 2)
     assert_equal(idx.find(_id(0xFF, 1)), 3)
@@ -167,7 +176,7 @@ def _err(b: List[UInt8]) -> String:
 
 def test_parse_refusals() raises:
     var p = "komira_git: pack index: "
-    var good = _sample([12, 40, 300, 77]).serialize()
+    var good = _sample(_list(12, 40, 300, 77)).serialize()
     assert_equal(_err(good), "OK")
     assert_equal(_err(List[UInt8](length=1071, fill=UInt8(0))), p + "1071 bytes is shorter than an empty index")
     var b = good.copy()
@@ -219,7 +228,7 @@ def test_parse_refusals() raises:
     b[offs_at + 7] = 0
     _reseal(b)
     assert_equal(_err(b), p + "object 1 names eight-byte offset 0 of 0")
-    var big = _sample([12, 1 << 33, 14, 15]).serialize()
+    var big = _sample(_list(12, 1 << 33, 14, 15)).serialize()
     assert_equal(_err(big), "OK")
     b = big.copy()
     b[offs_at + 16] = 0x80  # the eight-byte offset's top bit

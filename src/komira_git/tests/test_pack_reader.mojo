@@ -155,6 +155,16 @@ def _delta(base: List[UInt8], keep: Int, tail: String) -> List[UInt8]:
     return out^
 
 
+def _insert_delta(base: List[UInt8], payload: List[UInt8]) -> List[UInt8]:
+    """A delta that ignores `base` and inserts `payload` (at most 127 bytes)."""
+    var out = List[UInt8]()
+    _varint(out, len(base))
+    _varint(out, len(payload))
+    out.append(UInt8(len(payload)))
+    out.extend(Span(payload))
+    return out^
+
+
 def _rebuilt(base: List[UInt8], keep: Int, tail: String) -> List[UInt8]:
     var out = List[UInt8]()
     out.extend(Span(base)[0:keep])
@@ -216,7 +226,11 @@ def test_index_and_read() raises:
     var a1 = _rebuilt(a, 100, "tail-1")
     var a2 = _rebuilt(a1, 50, "tail-2")
     var b1 = _rebuilt(b, 10, "ref")
-    var t1 = _rebuilt(t, len(t), "")
+    var tree2 = Tree(f)
+    tree2.add(MODE_BLOB, "a.bin", hash_object(f, ObjectKind.blob(), Span(a)))
+    tree2.add(MODE_BLOB, "b.txt", hash_object(f, ObjectKind.blob(), Span(b)))
+    var t1 = tree2.serialize()
+    assert_true(len(t1) < 128)
     var id_a = hash_object(f, ObjectKind.blob(), Span(a))
     var id_b = hash_object(f, ObjectKind.blob(), Span(b))
     var id_t = hash_object(f, ObjectKind.tree(), Span(t))
@@ -232,7 +246,7 @@ def test_index_and_read() raises:
     entries.append(_ref_delta(id_b, _delta(b, 10, "ref")))  # 4
     entries.append(_obj(PACK_OBJ_BLOB, b))  # 5
     entries.append(_obj(PACK_OBJ_TREE, t))  # 6
-    entries.append(_ref_delta(id_t, _delta(t, len(t), "")))  # 7
+    entries.append(_ref_delta(id_t, _insert_delta(t, t1)))  # 7
     offs = _offsets(entries)
     assert_true(offs[2] - offs[0] > 300)
     assert_equal(len(_entry_header(PACK_OBJ_BLOB, len(a))), 2)

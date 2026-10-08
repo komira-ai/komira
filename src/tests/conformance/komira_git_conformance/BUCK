@@ -17,14 +17,6 @@ load(":defs.bzl", "git_packs")
 # cat-file's. tests/test_git_packs.mojo says what each check catches. The
 # fixtures are a build action, so the cache keeps them for exactly these inputs
 # (the pinned git and the script). Nothing depends on this package.
-git_packs(
-    name = "packs",
-    exec_compatible_with = LINUX_X86_64,
-    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
-    git = "//third_party/git:git",
-    script = "gen_packs.sh",
-)
-
 mojo_library(
     name = "komira_git_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -47,6 +39,15 @@ mojo_library(
         "tests/test_git_thin_sha256.mojo": {"packs": ":packs"},
     },
     visibility = ["PUBLIC"],
+)
+
+# The fixtures: one build action with the pinned git (gen_packs.sh).
+git_packs(
+    name = "packs",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    git = "//third_party/git:git",
+    script = "gen_packs.sh",
 )
 
 shell_lint(

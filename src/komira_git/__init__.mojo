@@ -7,6 +7,11 @@ extra headers they carry; loose objects (`encode_loose`, `decode_loose`,
 `read_loose`, `loose_path`). Every parser refuses what `git fsck` reports as
 an error, so an accepted object serializes back to its own bytes and id.
 
+Packs: `index_pack` and `index_thin_pack` (an `IndexedPack` of a
+`PackIndex` and `PackEntryInfo`s), `read_pack_object`, `PackIndex` written and
+read as an index v2 file (`serialize`, `parse_pack_index`), `apply_delta`,
+and the `PackLimits` every reader enforces.
+
 Wire: pkt-line framing (`append_pkt_*`, `read_pkt_line`) and the ref name
 rules of `git check-ref-format` (`check_ref_format`, `normalize_ref_name`).
 

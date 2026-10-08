@@ -49,9 +49,9 @@ def main() raises:
     assert_equal(ofs.ref_deltas, 0)
     assert_true(ofs.max_depth >= 2)
 
-    var ref = check_git_pack(f, "ref", objects)
-    assert_true(ref.ref_deltas > 0)
-    assert_equal(ref.ofs_deltas, 0)
+    var refs = check_git_pack(f, "ref", objects)
+    assert_true(refs.ref_deltas > 0)
+    assert_equal(refs.ofs_deltas, 0)
 
     var nodelta = check_git_pack(f, "nodelta", objects)
     assert_equal(nodelta.ofs_deltas + nodelta.ref_deltas, 0)
