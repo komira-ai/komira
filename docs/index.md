@@ -27,6 +27,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Why the build is shaped this way: pinned tools as action inputs, the compiler wrapper and its watchdog, the fixed target CPU, whole-closure deps, vendored C and C++ libraries, one execution platform per OS | [design/mojo_rules_and_toolchain.md](design/mojo_rules_and_toolchain.md) |
 | Why the build is the gate: a library's test_srcs gate its published package, the staged test environment, and the build lints as validations (shell, workflows, action pins, endpoints, doc links) | [design/gates_test_welding_and_lints.md](design/gates_test_welding_and_lints.md) |
 | Release machines: bundles, tarballs and OCI images of a program, the CPU-level launcher, reproducible outputs, komira's release stages and validations | [design/release_machine.md](design/release_machine.md) |
+| kci resource-model decision notes: an encryption key as a resource; importing and changing a network on any cloud; overrides, the escape hatch for what is cloud-specific | [design/kci_encryption_keys.md](design/kci_encryption_keys.md), [design/kci_networks_import_and_change.md](design/kci_networks_import_and_change.md), [design/kci_overrides.md](design/kci_overrides.md) |
 
 ## Design docs
 
@@ -49,5 +50,5 @@ and its limits. A family's doc lands together with the libraries it describes;
 | observability | [logging and telemetry](design/logging_and_telemetry.md) |
 | agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |
 | cloud | the AWS, GCP and Azure clients and their credentials and secrets: no design doc yet; deploy marks: coming with the cloud SDK libraries |
-| CI and deploy | the `kci` command line, the resource model and its cloud providers, apply, validate and rollout: no design doc yet ([release machines](design/release_machine.md) covers komira's own release stages) |
+| CI and deploy | the resource model's open decisions: [encryption keys](design/kci_encryption_keys.md), [importing and changing networks](design/kci_networks_import_and_change.md), [overrides](design/kci_overrides.md); the `kci` command line, the resource model and its cloud providers, apply, validate and rollout: no design doc yet ([release machines](design/release_machine.md) covers komira's own release stages) |
 | packaging | [release machines: bundles, tarballs and OCI images](design/release_machine.md); the shared-library ABI: coming with `komira_so` |
