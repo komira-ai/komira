@@ -35,6 +35,7 @@ load(
     _test_root = "test_root",
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
+load(":readme.bzl", "readme_kwargs")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -480,7 +481,8 @@ def _library_impl(ctx):
 # A library whose package holds a README.md runs the README's ```mojo
 # examples as one more welded test, `[tests][readme]`: the docs cannot rot.
 # The macro passes the README (declaring is gating: a README is declared by
-# existing) and the tool, //tools/build/readme_examples:tool, whose
+# existing; a library of a several-library package can refuse it with
+# `readme = False`, readme.bzl) and the tool, //tools/build/readme_examples:tool, whose
 # `generate` writes `readme_<import name>.mojo` and the number of examples.
 # The convention (what an example is, hidden lines, the refusals) is in that
 # package and in README.md here.
@@ -617,7 +619,7 @@ mojo_library_rule = rule(
         # Environment for every gated test of this library.
         "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
         # The package's README.md and the tool that runs its examples; the
-        # macro sets both (see _readme_gate). No default tool: the tool is
+        # macro sets both, or neither (readme.bzl, _readme_gate). No default tool: the tool is
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
@@ -951,9 +953,6 @@ mojo_shared_lib_rule = rule(
     } | _TOOLCHAIN_ATTR,
 )
 
-_README_TOOL_PACKAGE = "tools/build/readme_examples"
-_README_TOOL = "komira//" + _README_TOOL_PACKAGE + ":tool"
-
 def _mojo_library(**kwargs):
     # Refused by name, so a stale BUCK file says why rather than buck2's
     # generic "unexpected parameter".
@@ -963,15 +962,8 @@ def _mojo_library(**kwargs):
     # out with `conda = False`. Nothing is published by that: the release tool's
     # artifact declarations say which packages are (tools/build/package/conda.bzl).
     summary = kwargs.pop("conda_summary", None)
-    for attr in ("readme", "readme_tool"):
-        if attr in kwargs:
-            fail("{}: `{}` is set by mojo_library from the package's README.md; do not pass it".format(kwargs.get("name", "mojo_library"), attr))
-    readme = glob(["README.md"])
-    if readme:
-        if package_name() == _README_TOOL_PACKAGE:
-            fail("{}: {} may hold no README.md: every library with a README runs {} on it, so the tool would depend on itself".format(kwargs.get("name", "mojo_library"), _README_TOOL_PACKAGE, _README_TOOL))
-        kwargs["readme"] = readme[0]
-        kwargs["readme_tool"] = _README_TOOL
+    # The package's README.md, unless `readme = False` (readme.bzl).
+    readme_kwargs(kwargs)
     cov_gate = coverage_kwargs(kwargs)
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):

@@ -313,6 +313,12 @@
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
+#      Two libraries, one README (`readme`, tools/build/mojo/readme.bzl):
+#      .../owner builds with the README on :owner only (`readme = False` on
+#      :owner_base, which has no [tests][readme]); without the keyword
+#      (tests//negative/readme_examples/unowned) the base library's README
+#      compile fails; `readme = True` with no README.md and a non-bool
+#      `readme` are refused at load (.../readme_keyword, per -c case).
 #  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
 #      its BXL script: //:test_weld (every package under src/) and
 #      tests//functional/test_weld:ok (a planted tree with its ledger) pass;
@@ -1195,6 +1201,20 @@ expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 check
 expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
 expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
+expect_red readme_owner_base_no_readme 'requested sub target named `readme`' 'tests//functional/readme_examples/owner:owner_base[tests][readme]'
+expect_red readme_unowned 'from unowned import top_word  # README.md:7' tests//negative/readme_examples/unowned:unowned_base
+# Load-time refusals: the case is a config value, so not expect_red's one target.
+for want in 'true_without_readme|`readme = True` and //negative/readme_examples/readme_keyword holds no README.md' \
+    'not_bool|`readme` takes True, False or nothing'; do
+    c=${want%%|*}
+    if "$BUCK2" build -c "readme_keyword.case=$c" tests//negative/readme_examples/readme_keyword:kw > "$LOG/readme_keyword_$c.log" 2>&1; then
+        fail "readme_keyword_$c: tests//negative/readme_examples/readme_keyword:kw built, but it must fail"
+    elif grep -qF -- "${want#*|}" "$LOG/readme_keyword_$c.log"; then
+        pass "readme_keyword_$c"
+    else
+        fail "readme_keyword_$c: failed without '${want#*|}' (see $LOG/readme_keyword_$c.log)"
+    fi
+done
 
 # 39
 # A test_weld target only declares its lint; its BXL script checks it
