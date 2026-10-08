@@ -51,24 +51,27 @@ another. Every file loads the rules as `@komira//tools/build/mojo:...`, and the
 
 ## Languages for build tools
 
-Build tools are written in Rust. Zig is kept only where it is truly needed;
-the exceptions are:
+Every build tool under `tools/build` is written in Zig. Zig is already the
+pinned hermetic C compiler and linker (`zig cc`), so a Zig tool needs no
+extra toolchain, builds to a small static binary and calls C directly.
+Rust is for long-running services, not for build tools.
 
-- [`coverage/kcov/cov_zig.zig`](coverage/kcov/cov_zig.zig) and
-  [`mojo/tools/zig_cc_launcher.zig`](mojo/tools/zig_cc_launcher.zig): the C
-  compiler and linker shims, which wrap `zig cc` itself.
-- [`mojo/tools/conda_unpack.zig`](mojo/tools/conda_unpack.zig): the bootstrap
-  tool. The Rust toolchain unpacks its conda libraries with it (`rustc_libs`
-  in [`toolchains/rust/BUCK`](toolchains/rust/BUCK) sets
-  `unpacker = "komira//tools/build/toolchains:conda_unpack"`), so a Rust
-  version would be a build cycle.
-- [`tests/negative/coverage/kcov_refused.zig`](tests/negative/coverage/kcov_refused.zig)
-  and [`noop_relocate.zig`](tests/negative/coverage/noop_relocate.zig): two
-  tiny negative-test fixtures.
+[`mojo/tools/conda_unpack.zig`](mojo/tools/conda_unpack.zig) must be Zig
+regardless: the Rust toolchain's conda libraries are unpacked by it
+(`rustc_libs` in [`toolchains/rust/BUCK`](toolchains/rust/BUCK) sets
+`unpacker = "komira//tools/build/toolchains:conda_unpack"`), so a Rust
+version would be a bootstrap cycle.
 
-`zig cc` stays the hermetic C/C++ compiler, linker and glibc-floor toolchain.
-Other `.zig` sources in this tree predate the policy and are not exceptions
-to it.
+The one exception is [`proto-codegen/`](proto-codegen/) (`protoc-gen-mojo`
+and its sibling generators), which stays in Rust because it is built on
+`prost`, the mature Rust protobuf library; Zig has no equivalent.
+
+The Rust sources under [`tests/negative/`](tests/negative/) and
+[`examples/rust/`](examples/rust/) are fixtures and examples that exercise
+the Rust rules. They are not tools, and this policy does not cover them.
+
+A new build tool is written in Zig unless it needs a library only Rust has;
+that needs a written justification like the one for `proto-codegen` above.
 
 ## Using komira from another repository
 
