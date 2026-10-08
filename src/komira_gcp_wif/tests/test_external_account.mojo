@@ -497,7 +497,7 @@ def test_endpoints_must_be_bare_https_hosts() raises:
     var good = _file_json(_file_source(), True)
     assert_true(
         "\"token_url\" that is not https"
-        in _refusal(good.replace("https://sts.", "http://sts."))
+        in _refusal(good.replace("https://sts.googleapis.com", "http://sts.googleapis.com"))
     )
     assert_true(
         "a port, a query" in _refusal(good.replace("/v1/token", "/v1/token?x=1"))
@@ -579,7 +579,7 @@ def test_required_fields_empty_or_not_strings_are_refused_by_name() raises:
 def test_an_http_impersonation_url_is_refused() raises:
     var good = _file_json(_file_source(), True)
     _ = parse_external_account(good)
-    var msg = _refusal(good.replace("https://iamcredentials.", "http://iamcredentials."))
+    var msg = _refusal(good.replace("https://iamcredentials.googleapis.com", "http://iamcredentials.googleapis.com"))
     assert_true("\"service_account_impersonation_url\" that is not https" in msg, msg)
 
 
