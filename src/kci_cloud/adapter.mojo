@@ -200,8 +200,10 @@ comptime FINDING_CELL: Int = 4
 """The cell is wrong for this cloud: a setting, or the deploy identity."""
 comptime FINDING_ADOPTION: Int = 5
 """What the cloud holds refuses an adoption: the object an adopted resource
-names is missing or is not the one it declares, or a planned change would
-replace or delete an adopted object the resource does not let kci delete."""
+names is missing or is not the one it declares; a planned change would
+replace an adopted object (always refused) or delete one whose resource is
+not ADOPT_DELETABLE; or an object carries kci's stamp and adoption mark while
+its resource no longer writes adopt."""
 
 
 struct Finding(Copyable, Movable, Deinitable):
