@@ -1,0 +1,19 @@
+load("@komira//tools/build/package:release_set.bzl", "conda_release_set_check")
+
+# A release set whose library requires the native package and which gives no
+# `native` must fail analysis (test 33b): komira_crypto requires
+# komira_native (its closure links aws-lc, which libkomira_native.so.1
+# holds), so a metapackage made without it would require a library whose
+# requirement nothing in the set satisfies. The working half is
+# komira//tools/build/package:release_set_native_check.
+
+# RED at analysis: komira_crypto requires komira_native, and no `native`.
+conda_release_set_check(
+    name = "no_native",
+    metapackage = "komira_native_set",
+    libs = [
+        "komira//src/komira_encoding:komira_encoding",
+        "komira//src/komira_crypto:komira_crypto",
+    ],
+    release_set = "release_set.txt",
+)

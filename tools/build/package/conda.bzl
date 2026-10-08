@@ -192,6 +192,11 @@ def _native_deps(info):
         return [NATIVE_CONDA_NAME]
     return []
 
+def requires_native(info):
+    """Whether the package of the library of MojoInfo `info` requires
+    `komira_native` (release_set.bzl reads this)."""
+    return len(_native_deps(info)) > 0
+
 def _lib_args(info):
     # The `per_library` C archives the library names in `deps`, installed at
     # lib/lib<name>.a: a program links them into its own image. The same
@@ -578,14 +583,33 @@ def conda_native_package(**kwargs):
     sub-targets. Its run requirements are the platform guard and
     `__glibc >=<NATIVE_GLIBC>`; it holds no Mojo and requires no compiler.
     """
-    _conda_native_package(
+    _conda_native_package_with_stamp(
         commit = read_config("komira", "package_commit", ""),
         stamp = read_config("komira", "package_stamp", "0"),
+        timestamp_ms = read_config("komira", "package_timestamp_ms", "0"),
+        **kwargs
+    )
+
+def conda_native_package_test_stamped(**kwargs):
+    """The same package as conda_native_package, stamped with the fixed TEST
+    stamp (conda_package_test_stamped), for release_set.bzl's native slot.
+    """
+    _conda_native_package_with_stamp(
+        commit = TEST_COMMIT,
+        stamp = TEST_STAMP,
+        timestamp_ms = TEST_TIMESTAMP_MS,
+        **kwargs
+    )
+
+def _conda_native_package_with_stamp(commit, stamp, timestamp_ms, **kwargs):
+    _conda_native_package(
+        commit = commit,
+        stamp = stamp,
         subdir = select({
             "komira//tools/build/package:is_linux_x86_64": "linux-64",
             "DEFAULT": "unsupported",
         }),
-        timestamp_ms = read_config("komira", "package_timestamp_ms", "0"),
+        timestamp_ms = timestamp_ms,
         exec_compatible_with = LINUX_X86_64,
         **kwargs
     )
@@ -734,6 +758,7 @@ def conda_doc_check(**kwargs):
 
 conda_package = declares_docs(conda_package)
 conda_native_package = declares_docs(conda_native_package)
+conda_native_package_test_stamped = declares_docs(conda_native_package_test_stamped)
 conda_package_test_stamped = declares_docs(conda_package_test_stamped)
 conda_manifest_kci = declares_docs(conda_manifest_kci)
 conda_doc_check = declares_docs(conda_doc_check)

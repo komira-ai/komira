@@ -35,8 +35,8 @@
 # the build is the BUILD step's; the set-level checks over the built manifests
 # (every artifact built, lockstep versions, metapackage last, requirement
 # closure) are the PUBLISH step's, and the BUILD step also refuses a library
-# requirement whose name is not the conda name of another library of the set
-# (the platform guard and the compiler pin aside).
+# requirement whose name is not the conda name of another library or of the
+# native package of the set (the platform guard and the compiler pin aside).
 # =============================================================================
 
 from kci_artifact.placeholders import (

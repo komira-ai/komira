@@ -19,6 +19,15 @@ both, with a stamp that no release carries:
         release_set = "release_set.txt",
     )
 
+`native` (optional) is the komira_native library
+(`//tools/build/native:komira_native`, the shared object). Given, the macro
+also declares `<name>_native_conda` with conda_native_package_test_stamped
+(conda.bzl: the package `komira_native` with the same test stamp), and the
+native package is a member of the set after every library: `release_set`
+lists it LAST, and every check below covers it as it covers a library.
+Not given, a library in `libs` whose package requires komira_native fails
+the analysis, naming it: the set would require a package it does not hold.
+
 For each library it declares `<name>_<lib>_conda` with
 conda_package_test_stamped (conda.bzl: the same rule as `<lib>_conda`, with
 build number `TEST_STAMP`, source commit `TEST_COMMIT` and commit time
@@ -64,6 +73,7 @@ member on another and agreement across members.
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/native:members.bzl", NATIVE_CONDA_NAME = "CONDA_NAME")
 load(
     "@komira//tools/build/package:conda.bzl",
     "MOJO_COMPILER_VERSION",
@@ -73,7 +83,9 @@ load(
     "TEST_COMMIT",
     "TEST_STAMP",
     "TEST_TIMESTAMP_MS",
+    "conda_native_package_test_stamped",
     "conda_package_test_stamped",
+    "requires_native",
 )
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
@@ -137,7 +149,7 @@ while [ "$#" -gt 0 ]; do
     names="$names $1"
     shift 2
 done
-[ "$names" = "$want" ] || no "libs are [$names ], $SET's members are [$want ]: the two lists of the release set differ"
+[ "$names" = "$want" ] || no "libs (then the native package) are [$names ], $SET's members are [$want ]: the two lists of the release set differ"
 stamped metapackage "$META" "$MDIR"
 for m in $names; do
     grep -qF "\\"$m ==$V $B\\"" "$MDIR/metadata.json" ||
@@ -156,11 +168,26 @@ def _impl(ctx):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     meta = ctx.attrs.metapackage
     members = []
+    requirers = []
     for lib, pkg in zip(ctx.attrs.libs, ctx.attrs.packages):
         name = lib[MojoInfo].conda_name
         if name == None:
             fail("{}: {} has no conda package".format(ctx.label, lib.label))
+        if requires_native(lib[MojoInfo]):
+            requirers.append(name)
         members.append((name, pkg[DefaultInfo].sub_targets["release"][DefaultInfo].default_outputs[0]))
+    native = ctx.attrs.native_package
+    if native == None:
+        if requirers:
+            fail("{}: {} require{} {}, which this set does not hold: give `native` (the komira_native library, //tools/build/native:komira_native)".format(
+                ctx.label,
+                ", ".join(requirers),
+                "s" if len(requirers) == 1 else "",
+                NATIVE_CONDA_NAME,
+            ))
+    else:
+        # The native package, after every library (the module documentation).
+        members.append((NATIVE_CONDA_NAME, native[DefaultInfo].sub_targets["release"][DefaultInfo].default_outputs[0]))
     manifests = [cmd_args("--member-manifest", cmd_args(d, format = "{}/manifest.json")) for _, d in members]
 
     raw = ctx.actions.declare_output("raw/" + meta, dir = True)
@@ -252,6 +279,8 @@ _conda_release_set_check = rule(
     attrs = {
         "libs": attrs.list(attrs.dep(providers = [MojoInfo])),
         "metapackage": attrs.string(),
+        # The macro's `<name>_native_conda`, when `native` is given.
+        "native_package": attrs.option(attrs.dep(), default = None),
         "packages": attrs.list(attrs.dep()),
         "release_set": attrs.source(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
@@ -260,7 +289,7 @@ _conda_release_set_check = rule(
     },
 )
 
-def _release_set_check(name, metapackage, libs, release_set, **kwargs):
+def _release_set_check(name, metapackage, libs, release_set, native = None, **kwargs):
     """See the module documentation."""
     packages = []
     for lib in libs:
@@ -271,10 +300,20 @@ def _release_set_check(name, metapackage, libs, release_set, **kwargs):
             summary = "{} with the test stamp of {}; a build-time check only.".format(lib, name),
         )
         packages.append(":" + pkg)
+    native_package = None
+    if native != None:
+        native_package = "{}_native_conda".format(name)
+        conda_native_package_test_stamped(
+            name = native_package,
+            lib = native,
+            summary = "{} with the test stamp of {}; a build-time check only.".format(native, name),
+        )
+        native_package = ":" + native_package
     _conda_release_set_check(
         name = name,
         metapackage = metapackage,
         libs = libs,
+        native_package = native_package,
         packages = packages,
         release_set = release_set,
         exec_compatible_with = LINUX_X86_64,

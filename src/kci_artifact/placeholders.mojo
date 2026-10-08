@@ -63,9 +63,9 @@
 #
 # ONE METAPACKAGE (a recommendation; the CEO has not answered it): a set holds
 # exactly one metapackage per subdir, declared LAST, whose members are every
-# library of the set. The BUILD step places it last by file order; the PUBLISH step
-# refuses a set with zero or two metapackages, or one whose members are not
-# every library.
+# library and the native package of the set. The BUILD step places it last by
+# file order; the PUBLISH step refuses a set with zero or two metapackages, or
+# one whose members are not every library and the native package.
 #
 # Pure functions over owned values; no pointer, no process.
 # =============================================================================

@@ -305,7 +305,7 @@ def _expect_run(
     mut runner: ScriptedRunner, fx: Fixture, said: String = String(COUNT_OK) + String("\n"), err: String = String(""),
     exit_code: Int32 = Int32(0),
 ):
-    runner.expect(ScriptedStep(run_program_argv(fx.work(), String(PROGRAM)), exit_code=exit_code, stdout_text=said.copy(), stderr_text=err.copy()))
+    runner.expect(ScriptedStep(run_program_argv(fx.work(), String(PROGRAM), List[String]()), exit_code=exit_code, stdout_text=said.copy(), stderr_text=err.copy()))
 
 
 def _run(mut runner: ScriptedRunner, mut t: ScriptedPkgTransport, mut sl: NoWaitSleeper, fx: Fixture) raises -> ResultValidation:
@@ -793,7 +793,7 @@ def test_the_set_installs_the_metapackage_alone_and_checks_every_member() raises
     _expect_run(runner, fx)
     runner.expect(
         ScriptedStep(
-            run_program_argv(fx.work(), String(PROGRAM_BETA)), stdout_text=String(COUNT_BETA_OK) + String("\n")
+            run_program_argv(fx.work(), String(PROGRAM_BETA), List[String]()), stdout_text=String(COUNT_BETA_OK) + String("\n")
         )
     )
     var t = _set_channel(fx)

@@ -14,7 +14,10 @@
 #                location from the channels file; each `install` name a
 #                conda member of the set, pinned to release.json's version,
 #                build and sha256 (metadata.json: payload path and sha256,
-#                mojo_pin)
+#                mojo_pin), then the native package a library among them
+#                requires (request.mojo `with_native`): pinned and read
+#                back like the rest, never named in pixi.toml (the library's
+#                own requirement must bring it), no payload of its own
 #   1  channel   ANONYMOUS reads from this machine (channel_index.mojo): the
 #                index lists every pinned file with its sha256 and serves
 #                those bytes; the absence of a file is waited for up to
@@ -26,7 +29,8 @@
 #                the payloads' sha256, mojo run (container.mojo)
 #   2  install   read back: the install's exit, then every conda-meta record
 #                (readback.mojo)
-#   3  payload   each library's installed payload is the build's
+#   3  payload   each library's installed payload is the build's (the
+#                native package has none)
 #   4  program   `<stem> validation: N of N checks passed`, N > 0
 #
 # FAIL CLOSED. Every way this can go wrong is VALIDATION_FAILED with a check
@@ -84,7 +88,15 @@ from .container import (
     work_subdirs,
 )
 from .readback import check_installed, check_payloads, check_program, install_exited_zero
-from .request import ContainerHost, InstallPin, ValidateRequest, install_pins, load_validated_release, mojo_pin_of
+from .request import (
+    ContainerHost,
+    InstallPin,
+    ValidateRequest,
+    install_pins,
+    load_validated_release,
+    mojo_pin_of,
+    with_native,
+)
 
 
 def _finish(var row: ResultValidation, var checks: List[ResultValidationCheck]) -> ResultValidation:
@@ -159,13 +171,17 @@ def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPol
     row.environment = String(VALIDATION_ENVIRONMENT_CONTAINER)
     var checks = List[ResultValidationCheck]()
 
-    # 0. the release, the channel's location, the pins
+    # 0. the release, the channel's location, the pins: the install names,
+    # then the native package a library among them requires (request.mojo
+    # `with_native`), read back but never named in pixi.toml
+    var named: List[InstallPin]
     var pins: List[InstallPin]
     var mojo_pin: String
     var channel_url: String
     try:
         var rel = load_validated_release(req)
-        pins = install_pins(rel.loaded, v.installs)
+        named = install_pins(rel.loaded, v.installs)
+        pins = with_native(rel.loaded, named)
         mojo_pin = mojo_pin_of(rel.loaded)
         channel_url = rel.channel_url.copy()
         row.channel_url = channel_url.copy()
@@ -213,9 +229,9 @@ def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPol
             var subs = work_subdirs()
             for i in range(len(subs)):
                 makedirs(join_path(work, subs[i]), exist_ok=True)
-            var subdir = pins[0].subdir.copy()
+            var subdir = named[0].subdir.copy()
             var f = open(join_path(work, String(MANIFEST_NAME)), "w")
-            f.write_bytes(install_manifest_text(v, channel_url, subdir, pins, mojo_pin).as_bytes())
+            f.write_bytes(install_manifest_text(v, channel_url, subdir, named, mojo_pin).as_bytes())
             f.close()
             var program = open(join_path(req.repo_root, v.program), "r").read()
             var g = open(join_path(work, String(PROGRAM_COPY)), "w")

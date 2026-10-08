@@ -5,6 +5,7 @@ load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
 load(":release_set.bzl", "conda_release_set_check")
+load(":system_libs_record.bzl", "system_libs_record")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
 launcher_level_test(
@@ -92,7 +93,9 @@ config_setting(
 # not carry the test stamp, if the metapackage does not require a member at
 # that version and build string, if conda-check refuses it, or if `libs` and
 # `metapackage` are not release_set.txt's (which kci_artifact's welded test
-# holds equal to release/artifacts.textproto's metapackage).
+# holds equal to release/artifacts.textproto's metapackage). Libraries of the
+# set call komira's C, so `native` packages komira_native with the same test
+# stamp as the set's last member (release_set.txt lists it last).
 conda_release_set_check(
     name = "release_set_check",
     metapackage = "komira_all",
@@ -138,8 +141,33 @@ conda_release_set_check(
         "//src/komira_broker_proto:komira_broker_proto",
         "//src/komira_supervisor_proto:komira_supervisor_proto",
         "//src/komira_plan_proto:komira_plan_proto",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
     ],
+    native = "//tools/build/native:komira_native",
     release_set = "release_set.txt",
+)
+
+# The native slot of the same rule, on a set of its own: komira_crypto
+# requires komira_native (its closure links aws-lc, which
+# libkomira_native.so.1 holds), so the set carries the native package,
+# packaged with the same test stamp from //tools/build/native:komira_native.
+# Red if the native package's [release_check] fails, if it does not carry
+# the test stamp, if the metapackage does not require it at that version and
+# build string, or if release_set_native.txt does not list it as the last
+# member. This set is not a release (nothing holds release_set_native.txt
+# equal to release/artifacts.textproto): this target checks the rule.
+conda_release_set_check(
+    name = "release_set_native_check",
+    metapackage = "komira_native_set",
+    libs = [
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_crypto:komira_crypto",
+    ],
+    native = "//tools/build/native:komira_native",
+    release_set = "release_set_native.txt",
 )
 
 # The release set file: kci_artifact's welded test holds it equal to
@@ -150,10 +178,25 @@ export_file(
     visibility = ["//src/kci_artifact:"],
 )
 
+# system_libs.bzl's table as `<soname> <requirement>` lines: kci_release_set's
+# welded test holds kci's compiled copy (the conda-forge requirements its
+# closure checks accept) equal to it, so the two cannot drift.
+system_libs_record(
+    name = "system_libs",
+    visibility = ["//src/kci_release_set:"],
+)
+
 # The stamped metapackage above, read with kci's own manifest parser
 # (manifest_probe/BUCK): what a PUBLISH step reads.
 conda_manifest_kci(
     name = "release_set_kci",
     kind = "metapackage",
     package = ":release_set_check",
+)
+
+# The native set's metapackage, read the same way.
+conda_manifest_kci(
+    name = "release_set_native_kci",
+    kind = "metapackage",
+    package = ":release_set_native_check",
 )

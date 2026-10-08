@@ -198,7 +198,9 @@
 #       (every library's package target builds; the stamped releases; the metapackage
 #       from the members' manifests; kci's own parser over the emitted manifests; the
 #       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
-#       the metapackage alone, skipped or failed as in 33a).
+#       the metapackage alone, skipped or failed as in 33a). A release set whose
+#       library requires komira_native and which gives no `native` fails analysis
+#       (tests//negative/release_set_native:no_native).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -1023,6 +1025,7 @@ while IFS= read -r line; do
     esac
 done < "$LOG/conda_set.log"
 grep -qE '^(PASS|FAIL)  conda_set ' "$LOG/conda_set.log" || fail "conda_set: tools/build/tests/functional/conda_set.sh reported nothing (see $LOG/conda_set.log)"
+expect_red release_set_no_native "komira_crypto requires komira_native, which this set does not hold: give \`native\`" tests//negative/release_set_native:no_native
 
 # 33
 S="$LOG/uname_shim"

@@ -18,9 +18,13 @@
 #   version and B its build:
 #   * a LIBRARY's `depends` is exactly: G, `mojo-compiler ==V`, and
 #     `<n> ==V B` for set libraries or the set's native package `n` (each at
-#     most once, never itself). Anything else (an outside package, another
-#     version or build, a pin on the metapackage) is refused naming the
-#     entry;
+#     most once, never itself), and any of the conda-forge requirements of
+#     the system libraries a library may open (kci_release_set's
+#     `is_system_lib_requirement`, held to tools/build/package/system_libs.bzl:
+#     `zstd >=1.5.2,<2`), byte-equal, each at most once. Anything else (an
+#     outside package, another version or build, a pin on the metapackage,
+#     a system library at another range, in another case or behind a
+#     `<channel>::` prefix) is refused naming the entry;
 #   * the NATIVE package's (libkomira_native.so.1, no Mojo) `depends` is
 #     exactly G and one `__glibc >=<floor>`: no compiler pin, nothing else;
 #   * the set holds EXACTLY ONE metapackage, and its `members` are exactly
@@ -47,6 +51,7 @@ from kci_release_channel import ARTIFACT_TYPE_CONDA
 from kci_release_set.conda_metadata import KIND_METAPACKAGE, KIND_NATIVE, CondaMetadata, is_member_kind
 from kci_release_set.closure import MOJO_COMPILER_PACKAGE
 from kci_release_set.member import ReleaseMember
+from kci_release_set.system_libs import is_system_lib_requirement
 
 from .inputs import LoadedRelease
 from .release_version import ReleaseVersion
@@ -157,17 +162,45 @@ def _member_index(members: List[ReleaseMember], name: String) -> Int:
     return -1
 
 
+def _is_version(s: String) -> Bool:
+    """Digits in dot-separated groups: `2`, `2.34`, `2.34.1`; never empty,
+    no empty group."""
+    var b = s.as_bytes()
+    if len(b) == 0:
+        return False
+    var group = 0
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c == 46:
+            if group == 0:
+                return False
+            group = 0
+        elif c >= 48 and c <= 57:
+            group += 1
+        else:
+            return False
+    return group > 0
+
+
 def _native_depends(c: CondaMetadata, who: String, guard: String, mut refusals: List[String]):
-    """The native package's `depends`: G and one `__glibc >=<floor>`."""
+    """The native package's `depends`: G and one `__glibc >=<floor>`, the
+    floor a version. A requirement given twice is one refusal, said once."""
     var floors = 0
     for d in range(len(c.depends)):
         ref dep = c.depends[d]
+        var earlier = 0
+        for k in range(d):
+            if c.depends[k] == dep:
+                earlier += 1
+        if earlier > 0:
+            continue  # said at its first occurrence
         if _count(c.depends, dep) > 1:
             refusals.append(who + String("requirement '") + dep + String("' is listed twice"))
-            continue
         if dep == guard:
             continue
-        if dep.startswith(GLIBC_FLOOR_PREFIX) and dep.byte_length() > GLIBC_FLOOR_PREFIX.byte_length():
+        if dep.startswith(GLIBC_FLOOR_PREFIX) and _is_version(
+            String(dep[byte = GLIBC_FLOOR_PREFIX.byte_length() :])
+        ):
             floors += 1
             continue
         refusals.append(
@@ -178,9 +211,10 @@ def _native_depends(c: CondaMetadata, who: String, guard: String, mut refusals: 
             + guard
             + String("' or '")
             + GLIBC_FLOOR_PREFIX
-            + String("<floor>': the native package holds no Mojo and requires nothing else")
+            + String("<floor>' (<floor> a version, digits and dots): the native package holds no Mojo and")
+            + String(" requires nothing else")
         )
-    if _count(c.depends, guard) != 1:
+    if _count(c.depends, guard) == 0:
         refusals.append(who + String("does not require the platform guard '") + guard + String("'"))
     if floors != 1:
         refusals.append(
@@ -231,6 +265,8 @@ def require_closure(members: List[ReleaseMember]) raises:
                 continue
             if dep == guard or dep == compiler_pin:
                 continue
+            if is_system_lib_requirement(dep):
+                continue
             var sp = dep.find(String(" =="))
             var ok = False
             if sp > 0:
@@ -247,11 +283,11 @@ def require_closure(members: List[ReleaseMember]) raises:
                     + guard
                     + String("', '")
                     + compiler_pin
-                    + String("', or another library of this set at '==")
+                    + String("', another library of this set at '==")
                     + version
                     + String(" ")
                     + build
-                    + String("'")
+                    + String("', or a system library requirement of tools/build/package/system_libs.bzl")
                 )
         if _count(c.depends, guard) != 1:
             refusals.append(who + String("does not require the platform guard '") + guard + String("'"))
@@ -279,7 +315,8 @@ def require_closure(members: List[ReleaseMember]) raises:
         var j = _member_index(members, row.name)
         if j < 0:
             refusals.append(
-                who + String("member '") + row.name + String("' is not a library of this set")
+                who + String("member '") + row.name
+                + String("' is neither a library nor the native package of this set")
             )
             continue
         if row.version != version or not row.has_build or row.build != build:

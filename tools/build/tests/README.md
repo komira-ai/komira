@@ -684,8 +684,15 @@ sha256 for every file of every package and of the metapackage made from each
 run (`--no-uncached` skips); and `pixi` installs ONLY the metapackage from a
 `file://` channel of the set, the solver brings every library and the compiler,
 and a program importing two libraries prints the right bytes (`--no-install`, no
-`pixi` or no network skips; a FAIL with `--require-install`, as in 33a). See
+`pixi` or no network skips; a FAIL with `--require-install`, as in 33a). A
+release set check whose library requires `komira_native` and which gives no
+`native` fails analysis naming the library
+([`negative/release_set_native`](negative/release_set_native/BUCK)). See
 [packaging/conda](../../../packaging/conda/README.md).
+
+```sh
+./buck2 build tests//negative/release_set_native:no_native   # must fail: komira_crypto requires komira_native, which this set does not hold
+```
 
 ## 33. Client
 

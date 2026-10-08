@@ -15,9 +15,14 @@
 #                every member of a named metapackage (request.mojo
 #                `with_members`: read from the built metapackage's own
 #                depends, at release.json's version and build, equal to
-#                the set's libraries). pixi.toml names ONLY the install
-#                names, so the solver must bring each member through the
-#                metapackage; every later check covers EVERY pin
+#                the set's libraries and native package), then the native
+#                package a library pin requires (`with_native`). pixi.toml
+#                names ONLY the install names, so the solver must bring each
+#                member through the metapackage and the native package
+#                through the library requiring it; every later check
+#                covers EVERY pin. The native package (no Mojo) has no
+#                README, no payload and no mojo_pin: checks 1 and 2 cover
+#                it, `readme`, 3 and 4 skip it
 #   -  network   every declared host asked once (network.mojo): NONE
 #                answered is no network, the one case that is not a FAIL:
 #                outcome INDETERMINATE (exit 5, never a pass) with
@@ -97,7 +102,14 @@ from kci_pkg_upload import PkgTransport
 from kci_release_set.member import file_sha256_hex
 
 from .channel_index import ChannelUrl, IndexPollLog, check_channel
-from .container import MANIFEST_NAME, install_manifest_text, join_path, payload_record_name, work_subdirs
+from .container import (
+    MANIFEST_NAME,
+    install_manifest_text,
+    join_path,
+    native_link_args,
+    payload_record_name,
+    work_subdirs,
+)
 from .env import (
     AUTH_FILE,
     AUTH_FILE_TEXT,
@@ -444,14 +456,17 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
     if not readme_ok:
         return _finish(row^, checks^)
 
-    # 4. each README program, from the installed package only
+    # 4. each README program, from the installed package only, linking the
+    # native package when the environment holds it
+    var link = native_link_args(env_dir, pins)
     for i in range(len(programs)):
         ref p = programs[i]
         var record = _record_of(p.file)
         var raw_out = join_path(out_dir, record + String(".stdout"))
         var raw_err = join_path(out_dir, record + String(".stderr"))
         var run = RunSpec(
-            pixi.copy(), run_program_argv(work, p.file), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
+            pixi.copy(), run_program_argv(work, p.file, link), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(),
+            raw_err.copy(),
         )
         run.set_env(env.copy())
         var started = True

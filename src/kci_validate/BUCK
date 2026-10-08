@@ -65,6 +65,12 @@ mojo_library(
         # the child's whole environment, the pixi argv, the manifest, and
         # the installed README's program byte-equal to SOURCE mode's, golden
         "tests/test_install_env_golden.mojo",
+        # a release set holding komira_native: the metapackage brings it as a
+        # member, a library requiring it brings it (ENV and SMOKE), each read
+        # back from the environment with no README or payload of its own; a
+        # library pinning another build of it, a metapackage not requiring
+        # it, and it installed alone are each refused by name
+        "tests/test_native_member.mojo",
     ],
     visibility = ["PUBLIC"],
 )

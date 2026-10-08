@@ -1,0 +1,11 @@
+# The release set of //tools/build/package:release_set_native_check
+# (release_set.bzl, BUCK): two libraries, one of which requires the native
+# package, and the native package, listed LAST. Not a release: nothing holds
+# it equal to release/artifacts.textproto.
+metapackage komira_native_set
+member komira_encoding
+member komira_crypto
+member komira_native
+license Apache-2.0
+summary Every komira library of one release.
+home https://github.com/komira-ai/komira

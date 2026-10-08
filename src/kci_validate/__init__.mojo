@@ -25,7 +25,8 @@
 #                             byte-equal to the welded SOURCE-mode program
 #   request.mojo              `ValidateRequest`, `ContainerHost`; the release
 #                             and the pins, read the PUBLISH step's way; a
-#                             metapackage's members from its own depends
+#                             metapackage's members from its own depends;
+#                             the native package a library requires
 #   channel_index.mojo        check 1: the index lists and serves the bytes
 #                             the build made, with the wait for the index
 #   file_channel.mojo         a LOCAL channel (`file:///<dir>`, kci run
@@ -83,6 +84,7 @@ from kci_validate.container import (
     container_script,
     docker_child_env,
     install_manifest_text,
+    native_link_args,
     payload_record_name,
     pull_argv,
     run_argv,
@@ -98,4 +100,5 @@ from kci_validate.request import (
     mojo_pin_of,
     readme_doc_path,
     with_members,
+    with_native,
 )

@@ -213,7 +213,10 @@ packaged keeps a target that builds as a refusal, and the bytes are reproducible
 A library calling komira's C requires the package `komira_native`
 (`conda_native_package`, libkomira_native.so.1, built in
 [`../native`](../native/README.md)); one opening a system library at run time
-requires the package [`system_libs.bzl`](system_libs.bzl) names for its soname.
+requires the package [`system_libs.bzl`](system_libs.bzl) names for its soname
+(kci's closure checks accept exactly those requirements; the target `:system_libs`,
+[`system_libs_record.bzl`](system_libs_record.bzl), writes the table for the welded
+test that holds kci's copy equal to it).
 `komira_pack conda-install` and `conda_prefix` ([`conda_prefix.bzl`](conda_prefix.bzl))
 make an environment from packages by their run requirements, for a build
 action to run programs in.
@@ -252,6 +255,18 @@ fails the build in these cases:
   metapackage;
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`
   it gives conda-meta differ from [`release_set.txt`](release_set.txt).
+
+The rule's optional `native` slot takes the komira_native library
+(`//tools/build/native:komira_native`): the macro packages it as `komira_native`
+with the same test stamp (`conda_native_package_test_stamped`), and the set holds
+it after every library, so its release file lists it as the last member and every
+case above covers it. Without `native`, a library whose package requires
+komira_native fails the analysis, naming it. `:release_set_native_check`
+(`komira_encoding`, `komira_crypto`, which requires komira_native, and
+`komira_native`; [`release_set_native.txt`](release_set_native.txt)) builds that
+path, and `:release_set_native_kci` reads its metapackage with kci's parser. The
+release set itself holds komira_native too: `:release_set_check` gives `native`,
+and `komira_native` is the last member of `release_set.txt`.
 
 The welded test `test_release_artifacts_file` of `src/kci_artifact` holds
 `release_set.txt` equal to `release/artifacts.textproto`'s metapackage, so a

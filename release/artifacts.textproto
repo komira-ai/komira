@@ -4,7 +4,11 @@
 # (KCI_ARTIFACTS). Changing it changes what is released: CODEOWNERS
 # requires the release approver's review for everything under release/.
 #
-# The release is the libraries below and their metapackage. kci builds them
+# The release is the libraries below, the native package komira_native
+# (libkomira_native.so.1: the libraries that call komira's C require it at
+# the release's version and build string; it is the last entry before the
+# metapackage, as tools/build/package/release_set.txt lists it last) and
+# their metapackage. kci builds them
 # one at a time, in THIS ORDER (each library after the libraries it depends
 # on), each into its own empty directory under the
 # release directory R (`{release_dir}`: the platform's directory,
@@ -24,7 +28,8 @@
 #
 # THE METAPACKAGE `komira_all` is the LAST artifact: `{release_dir}` holds
 # every artifact above it, already built and verified. Its members are every
-# library of this file, one `--member-manifest` each; adding a library is
+# library and the native package of this file, one `--member-manifest` each;
+# adding a library is
 # two edits here: its entry above the metapackage, and its manifest in
 # the metapackage's args. A PUBLISH step refuses a set whose metapackage misses
 # a library, and the welded test
@@ -535,6 +540,51 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_async_api"
+  build_system: "buck2"
+  args: "//src/komira_async_api:komira_async_api_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_async_api:komira_async_api_conda"
+}
+
+artifacts {
+  name: "komira_libc"
+  build_system: "buck2"
+  args: "//src/komira_libc:komira_libc_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_libc:komira_libc_conda"
+}
+
+artifacts {
+  name: "komira_buffer"
+  build_system: "buck2"
+  args: "//src/komira_buffer:komira_buffer_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_buffer:komira_buffer_conda"
+}
+
+artifacts {
+  name: "komira_dynamic_filter"
+  build_system: "buck2"
+  args: "//src/komira_dynamic_filter:komira_dynamic_filter_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_dynamic_filter:komira_dynamic_filter_conda"
+}
+
+artifacts {
+  name: "komira_native"
+  build_system: "buck2"
+  args: "//tools/build/native:komira_native_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//tools/build/native:komira_native_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -622,6 +672,16 @@ artifacts {
   args: "{release_dir}/komira_supervisor_proto/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_plan_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_async_api/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_libc/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_buffer/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_dynamic_filter/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_native/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"
