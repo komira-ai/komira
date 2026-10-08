@@ -78,12 +78,14 @@
 # one that is not what the file declares (`adoption_check`), after
 # `list_owned` and before anything is realized. An object carrying the
 # adoption mark whose resource left the list is RELEASED by the apply, never
-# deleted (`Removals.releases`; `CloudAdapter.release`, then its state
-# record is retired), and is not leftover. A delete or a replace of an
+# deleted (`Removals.releases`; its state record is retired, then
+# `CloudAdapter.release`), and is not leftover. A delete or a replace of an
 # adopted object is refused before any change unless its resource writes
 # `adopt_deletable` (`delete_findings` on plan, apply and destroy;
 # `replace_findings` on the engine's plan, which apply runs first when the
-# run has adopted nodes). `plan_report` returns the plan with its adopted
+# run has adopted nodes; a replace the plan cannot see, of a node it reports
+# as known after apply, is not refused: the engine stops the apply there
+# instead of replacing). `plan_report` returns the plan with its adopted
 # nodes and releases, and `render_plan` prints them.
 #
 # THE ROLE LABEL BUDGET. Every node's role must fit the 63-byte label value;
@@ -691,11 +693,16 @@ def apply_resources[
     refusal included, is NOT raised: it is returned in the outcome with what
     landed and what is pending, so the caller can report a partial apply or
     a refusal instead of a bare failure. With adopted nodes, the engine's
-    plan runs first (reads only) to refuse a replace before any change; a
-    plan that cannot run (an ownership refusal) leaves the refusal to the
-    apply, which makes it the same way. After the engine's apply succeeds,
-    each release is made (`CloudAdapter.release`, then the record is
-    retired)."""
+    plan runs first (reads only) to refuse a planned replace before any
+    change; an ownership refusal from that plan is left to the apply, which
+    makes it the same way, and any other error of that plan is raised before
+    any change. An adopted node the plan reports as known after apply (a
+    producer of it changes in this run) is not read by the plan, so whether
+    it needs a replace is not known before the apply; the engine never
+    replaces an object (a drift it cannot converge in place stops the apply
+    at that node, after the nodes before it landed). After the engine's
+    apply succeeds, each release is made (its record retired, then
+    `CloudAdapter.release`)."""
     var expanded = valid_expansion(clouds, cloud, ctx, resources, True, definitions)
     var p = _prepare(cloud, ctx, expanded, creds)
     var scope = with_adopted(ctx, expanded).scope.copy()
@@ -704,8 +711,12 @@ def apply_resources[
         var actions = List[ChangeAction]()
         try:
             actions = plan_graph_owned(pre, creds, scope, store)
-        except:
-            pass  # the apply below refuses the same way, before any change
+        except e:
+            # Only the ownership refusal steps aside: the apply below makes
+            # it the same way, before any change, and returns it. Any other
+            # error (a cloud read included) is raised here, before any change.
+            if not String(e).startswith(REFUSED_TOKEN):
+                raise e^
         var bad = replace_findings(actions, p.adopted, expanded)
         if len(bad) > 0:
             raise Error(refusal_text(cloud.cloud_id(), bad))
@@ -741,15 +752,20 @@ def _release[
     mut error: Optional[String],
 ) -> List[String]:
     """Release each object of `releases` in order (adoption.mojo, rule 4):
-    the cloud drops its kci labels, then its state record is retired. The
+    its state record is retired, then the cloud drops its kci labels. The
     first failure stops the run and is set in `error`; the ids released
-    before it are returned."""
+    before it are returned. Either failure leaves the object carrying its
+    stamp and the adoption mark, so the next apply's `list_owned` reports it
+    and releases it again (retiring a retired record is a no-op in
+    `InMemoryStateStore`). The other order would leave, on a failed retire,
+    an unstamped object with a live record, which the engine refuses as a
+    conflict when a file names it again."""
     var done = List[String]()
     for i in range(len(releases)):
         ref rec = releases[i]
         try:
-            cloud.release(creds, rec)
             store.mark_reaped(scope.key(rec.owner_node))
+            cloud.release(creds, rec)
         except e:
             error = String("release of ") + rec.owner_node + String(" failed: ") + String(e)
             return done^

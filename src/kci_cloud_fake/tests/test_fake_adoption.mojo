@@ -36,7 +36,9 @@
 # 6. APPLY'S OWN PLAN STEPS ASIDE FOR AN OWNERSHIP REFUSAL: with an adopted
 #    bucket and a foreign object at the reader's node, apply returns the
 #    engine's refusal in its outcome (it does not raise), and nothing
-#    changes.
+#    changes. Any other error of that plan is raised before any change: with
+#    the reader's live read refused (`FakeStore.fail_reads_of`), apply
+#    raises the read error and the cloud served no call.
 # 7. ONLY THE PRIMARY NODE IS MARKED: a service `api` that adopts lowers
 #    its identity, its run, its public ingress and its grant, and only the
 #    run (its primary node) is marked `adopted`; nothing of `reader`.
@@ -360,6 +362,30 @@ def test_an_ownership_refusal_is_still_an_outcome() raises:
     print("  test_an_ownership_refusal_is_still_an_outcome: PASS")
 
 
+def test_another_plan_error_is_raised_before_any_change() raises:
+    """Catches: apply's plan-first step swallowing every error (mutant: a
+    bare `except: pass`), where only the ownership refusal steps aside: the
+    apply would then go on and return the read error as an outcome instead
+    of raising it before any change."""
+    var shapes = _shapes()
+    for s in range(len(shapes)):
+        ref sh = shapes[s]
+        var id = String("ad6r-") + sh.name
+        var cloud = FakeCloud(id, shape=sh.copy())
+        var reg = _reg(FakeCloud(id, shape=sh.copy()))
+        cloud.plant_like(_primary(cloud, _list()))
+        cloud.store[].fail_reads_of(String("reader/identity"))
+        var st = InMemoryStateStore()
+        var says = String("")
+        try:
+            _ = apply_resources(reg, cloud, _ctx(), _list(), Creds.none(), st)
+        except e:
+            says = String(e)
+        assert_true(says.find("fake: injected read fault (reader/identity)") >= 0, sh.name + ": raised: " + says)
+        assert_equal(cloud.mutations(), 0, sh.name + ": nothing changed")
+    print("  test_another_plan_error_is_raised_before_any_change: PASS")
+
+
 # ---- 7. only the primary node is marked -----------------------------------------------------------
 
 
@@ -394,5 +420,6 @@ def main() raises:
     test_an_adopted_object_takes_the_files_changes()
     test_a_replace_of_an_adopted_object_is_refused()
     test_an_ownership_refusal_is_still_an_outcome()
+    test_another_plan_error_is_raised_before_any_change()
     test_only_the_primary_node_is_marked()
     print("ALL FAKE ADOPTION TESTS PASSED")

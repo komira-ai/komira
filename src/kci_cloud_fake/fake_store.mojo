@@ -32,6 +32,10 @@
 #   * `foreign = [names]`: objects that exist before kci ever ran, carrying
 #     no kci stamp (made by hand, or by another tool). `plant_object` makes
 #     one of a given kind, state (digest) and name: what an adoption reads.
+#   * `fail_reads_of(id)`: from then on every live read of the node `id`
+#     (`read_status`, `read_presence`) raises, as when a cloud API refuses
+#     a read. Lists and the adoption read (`read_existing`) are not
+#     affected.
 #   * `race_next()`: the next create meets an object a second apply of the
 #     same cell created a moment earlier (same name, same labels): that
 #     create is served for the other writer and logged, and this one is
@@ -108,6 +112,7 @@ struct FakeStore(Movable):
     var _ghost_views: List[FakeView]
     var _ghost_left: List[Int]
     var replaces: List[String]
+    var read_faults: List[String]
 
     def __init__(
         out self,
@@ -138,6 +143,7 @@ struct FakeStore(Movable):
         self._ghost_views = List[FakeView]()
         self._ghost_left = List[Int]()
         self.replaces = List[String]()
+        self.read_faults = List[String]()
         for i in range(len(foreign)):
             self.plant(foreign[i], String("foreign"))
 
@@ -247,6 +253,17 @@ struct FakeStore(Movable):
             if self.replaces[i] == id:
                 return True
         return False
+
+    def fail_reads_of(mut self, id: String):
+        """Every live read of the node `id` raises from now on (the file
+        header)."""
+        self.read_faults.append(id)
+
+    def read_fault(self, id: String) raises:
+        """Raise if a live read of `id` is refused (`fail_reads_of`)."""
+        for i in range(len(self.read_faults)):
+            if self.read_faults[i] == id:
+                raise Error(String("fake: injected read fault (") + id + String(")"))
 
     def race_next(mut self):
         self._race_next = True

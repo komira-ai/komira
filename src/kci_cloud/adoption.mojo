@@ -47,12 +47,20 @@
 #      - a REPLACE of an adopted node (`replace_findings`): the engine plans
 #        it when the cloud cannot make a change in place. Apply plans first
 #        when the run has adopted nodes, so it refuses before any change too.
+#        A node the plan reports as known after apply (a producer of it
+#        changes in this run) is not read by the plan, so a replace of it is
+#        not known before the apply and is not refused here. The engine's
+#        apply never replaces an object: a drift it cannot converge in place
+#        stops the apply at that node, after the nodes before it landed, and
+#        the adopted object stands.
 #    The resource whose `adopt_deletable` counts is the one the node belongs
 #    to (`resource_of_node`: the longest resource id that prefixes it).
 # 4. RELEASE, NEVER DELETE, WHEN THE RESOURCE LEAVES THE LIST (deploy.mojo's
 #    `removals`). An object carrying the mark whose resource is no longer in
-#    the (expanded) list is RELEASED: the apply asks the cloud to drop every
-#    kci label of it (`CloudAdapter.release`) and retires its state record.
+#    the (expanded) list is RELEASED: the apply retires its state record,
+#    then asks the cloud to drop every kci label of it
+#    (`CloudAdapter.release`). A failure at either step leaves the object
+#    stamped and marked, so the next apply releases it again.
 #    No delete call reaches the adapter, the object stands as it was, and a
 #    later file that names it again meets an unstamped object. A plan
 #    reports each release; a destroy, which acts only on the file's nodes,

@@ -18,9 +18,14 @@
 #    and its state record is retired. A file that names it again without
 #    `adopt` meets an unstamped object: refused as foreign. A bucket kci
 #    created that leaves the same list stays leftover, as before.
-# 2. A RELEASE THAT FAILS: the cloud refuses the release call; the outcome
-#    carries the error and no release, the object keeps its stamp and its
-#    record, and the next apply releases it.
+# 2. A RELEASE THAT FAILS, at either of its two steps (the record is
+#    retired first, then the cloud drops the labels). The cloud refuses the
+#    release call: the outcome carries the error and no release, the record
+#    is retired, the object keeps its stamp and the adoption mark, and the
+#    next apply releases it. The store refuses to retire the record
+#    (`_ReapFails`): the same outcome, the record kept, the object still
+#    stamped and marked, the next apply releases it, and a file that then
+#    adopts it again takes it over.
 # 3. DESTROY (the bucket written DELETE; a bucket is KEEP by default, and a
 #    kept object is never deleted, so never refused): refused before any
 #    change while the bucket does not write `adopt_deletable` (the refusal
@@ -48,7 +53,10 @@ from kci_reconciler import (
     CellScope,
     Creds,
     InMemoryStateStore,
+    IntentTicket,
+    Outputs,
     Provenance,
+    ResourceKey,
     StateStore,
     VERB_DELETE,
 )
@@ -145,6 +153,14 @@ def _kci_labels(cloud: FakeCloud, id: String) -> Int:
     return n
 
 
+def _label_of(cloud: FakeCloud, id: String, key: String) -> String:
+    var labels = cloud.live_labels(id)
+    for i in range(len(labels)):
+        if labels[i].key == key:
+            return labels[i].value.copy()
+    return String("")
+
+
 def _listed(mut cloud: FakeCloud, id: String) raises -> Bool:
     var owned = cloud.list_owned(Creds.none(), _ctx().scope)
     for i in range(len(owned)):
@@ -219,10 +235,42 @@ def test_a_resource_leaving_the_list_releases_its_adopted_object() raises:
 # ---- 2. a release that fails -------------------------------------------------------------------
 
 
+struct _ReapFails(StateStore, Movable, Deinitable):
+    """An `InMemoryStateStore` whose `mark_reaped` raises while `fail` is
+    set; every other call is the inner store's."""
+
+    var inner: InMemoryStateStore
+    var fail: Bool
+
+    def __init__(out self):
+        self.inner = InMemoryStateStore()
+        self.fail = False
+
+    def record_or_adopt_intent(mut self, key: ResourceKey, stamp: String) raises -> IntentTicket:
+        return self.inner.record_or_adopt_intent(key, stamp)
+
+    def confirm(mut self, ticket: IntentTicket, physical_id: String) raises:
+        self.inner.confirm(ticket, physical_id)
+
+    def mark_reaped(mut self, key: ResourceKey) raises:
+        if self.fail:
+            raise Error(String("store: injected fault on mark_reaped ") + key.text())
+        self.inner.mark_reaped(key)
+
+    def physical_id_for(mut self, key: ResourceKey) raises -> String:
+        return self.inner.physical_id_for(key)
+
+    def record_outputs(mut self, key: ResourceKey, outputs: Outputs) raises:
+        self.inner.record_outputs(key, outputs)
+
+    def outputs_for(mut self, key: ResourceKey) raises -> Outputs:
+        return self.inner.outputs_for(key)
+
+
 def test_a_failed_release_is_reported_and_retried() raises:
-    """Catches: a failed release reported as done, its record retired anyway
-    (mutant: `mark_reaped` before the cloud call), and a next apply that
-    does not release it."""
+    """Catches: a failed release reported as done, the cloud call made before
+    the record is retired (mutant: the two steps swapped; the record would
+    be kept here), and a next apply that does not release it."""
     var shapes = _shapes()
     for s in range(len(shapes)):
         ref sh = shapes[s]
@@ -238,13 +286,48 @@ def test_a_failed_release_is_reported_and_retried() raises:
         assert_true(out.error.value().startswith("release of logs/bucket failed: "), out.error.value())
         assert_equal(len(out.released), 0)
         assert_true(_listed(cloud, String("logs/bucket")), sh.name + ": still kci's")
-        assert_true(
-            st.physical_id_for(_ctx().scope.key(String("logs/bucket"))).byte_length() > 0, "the record is kept"
-        )
+        assert_equal(_label_of(cloud, String("logs/bucket"), String("kci_adopted")), "true", "still marked")
+        assert_equal(st.physical_id_for(_ctx().scope.key(String("logs/bucket"))), "", "the record is retired")
         var retry = apply_resources(reg, cloud, _ctx(), _list(String(_READER)), Creds.none(), st)
         assert_true(not retry.error)
         assert_equal(len(retry.released), 1, sh.name + ": released on the next apply")
     print("  test_a_failed_release_is_reported_and_retried: PASS")
+
+
+def test_a_failed_retire_is_reported_and_retried() raises:
+    """Catches: the cloud call made before the record is retired (mutant:
+    the two steps swapped): a failed retire would then leave an unstamped
+    object with a live record, which no later apply releases and which the
+    engine refuses as a conflict when a file adopts it again."""
+    var shapes = _shapes()
+    for s in range(len(shapes)):
+        ref sh = shapes[s]
+        var id = String("re2r-") + sh.name
+        var cloud = FakeCloud(id, shape=sh.copy())
+        var reg = _reg(FakeCloud(id, shape=sh.copy()))
+        var st = _ReapFails()
+        _adopted(cloud, reg, _list(_logs(), String(_READER)), st.inner)
+        st.fail = True
+        var out = apply_resources(reg, cloud, _ctx(), _list(String(_READER)), Creds.none(), st)
+        assert_true(Bool(out.error), sh.name + ": the failure is reported")
+        assert_true(out.error.value().startswith("release of logs/bucket failed: "), out.error.value())
+        assert_equal(len(out.released), 0)
+        assert_true(not _served(cloud, String("release logs/bucket")), sh.name + ": no release call yet")
+        assert_true(_listed(cloud, String("logs/bucket")), sh.name + ": still kci's")
+        assert_equal(_label_of(cloud, String("logs/bucket"), String("kci_adopted")), "true", "still marked")
+        assert_true(
+            st.physical_id_for(_ctx().scope.key(String("logs/bucket"))).byte_length() > 0, "the record is kept"
+        )
+        st.fail = False
+        var retry = apply_resources(reg, cloud, _ctx(), _list(String(_READER)), Creds.none(), st)
+        assert_true(not retry.error, sh.name + ": " + (retry.error.value() if retry.error else String("")))
+        assert_equal(len(retry.released), 1, sh.name + ": released on the next apply")
+        assert_equal(_kci_labels(cloud, String("logs/bucket")), 0, sh.name + ": no kci label is left on it")
+        assert_equal(st.physical_id_for(_ctx().scope.key(String("logs/bucket"))), "", sh.name + ": record retired")
+        var back = apply_resources(reg, cloud, _ctx(), _list(_logs(), String(_READER)), Creds.none(), st)
+        assert_true(not back.error, sh.name + ": adopted again: " + (back.error.value() if back.error else String("")))
+        assert_equal(_label_of(cloud, String("logs/bucket"), String("kci_adopted")), "true", "marked again")
+    print("  test_a_failed_retire_is_reported_and_retried: PASS")
 
 
 # ---- 3. destroy ----------------------------------------------------------------------------------
@@ -403,6 +486,7 @@ def main() raises:
     print("test_fake_adoption_release")
     test_a_resource_leaving_the_list_releases_its_adopted_object()
     test_a_failed_release_is_reported_and_retried()
+    test_a_failed_retire_is_reported_and_retried()
     test_destroy_needs_adopt_deletable()
     test_destroy_judges_by_the_file_retention_not_the_label()
     test_a_type_change_does_not_delete_an_adopted_object()

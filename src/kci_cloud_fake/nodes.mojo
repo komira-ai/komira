@@ -294,6 +294,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         return self._retention
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
+        self._store[].read_fault(self._id)
         var v = self._store[].read(self._id)
         if not v.present:
             return ResourceStatus.absent()
@@ -320,6 +321,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         return ResourceStatus.drifted(self._id, v.digest, v.url, String(""), stamp, extra)
 
     def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        self._store[].read_fault(self._id)
         var v = self._store[].read(self._id)
         if not v.present:
             return ResourceStatus.absent()
