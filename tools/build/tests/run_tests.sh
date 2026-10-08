@@ -563,20 +563,23 @@ abs_path_re="[\"' =:]/[A-Za-z][A-Za-z0-9_.-]*"
 # README's generate step (a local-only dynamic action) and fails on it unless
 # this daemon has already built it, so the scan builds what it reads first
 # rather than depend on an earlier test having done so. Sub-targets get their
-# own invocation (see RUN_CHECKS).
+# own invocation (see RUN_CHECKS). The builds keep going and their failure is
+# not this test's: a target that does not build is reported by the tests that
+# build it, and the scan still reads every action aquery can reach (it fails,
+# and names the build log, only if that leaves a README unbuilt).
+host_paths_built=yes
+"$BUCK2" build --keep-going "${EXAMPLES[@]}" "${SCAN_TARGETS[@]}" > "$LOG/host_paths_build.log" 2>&1 || host_paths_built=no
+"$BUCK2" build --keep-going "${RUN_CHECKS[@]}" >> "$LOG/host_paths_build.log" 2>&1 || host_paths_built=no
 if ! printf '%s\n' "\"cmd\": \"['/bin/sh', 'x']\"" | grep -qE "$abs_path_re"; then
     fail "host paths: the scan pattern does not detect a planted absolute path"
-elif ! "$BUCK2" build "${EXAMPLES[@]}" "${SCAN_TARGETS[@]}" > "$LOG/host_paths_build.log" 2>&1 \
-    || ! "$BUCK2" build "${RUN_CHECKS[@]}" >> "$LOG/host_paths_build.log" 2>&1; then
-    fail "host paths: cannot build the scanned targets (see $LOG/host_paths_build.log)"
 elif ! "$BUCK2" aquery "$query" --output-attribute cmd --output-attribute env --json > "$LOG/aquery.json" 2> "$LOG/aquery.err"; then
-    fail "host paths: aquery failed (see $LOG/aquery.err)"
+    fail "host paths: aquery failed (see $LOG/aquery.err; building the scanned targets succeeded: $host_paths_built, see $LOG/host_paths_build.log)"
 elif ! grep -q '"cmd"' "$LOG/aquery.json"; then
     fail "host paths: aquery returned no commands"
 elif grep -oE "$abs_path_re" "$LOG/aquery.json" > "$LOG/abs_paths.txt"; then
     fail "host paths: absolute paths in action commands: $(sort -u "$LOG/abs_paths.txt" | tr '\n' ' ')"
 else
-    pass "host paths: no absolute path in $(grep -c '"cmd"' "$LOG/aquery.json") action commands"
+    pass "host paths: no absolute path in $(grep -c '"cmd"' "$LOG/aquery.json") action commands$([ "$host_paths_built" = yes ] || echo " (some scanned targets did not build; see $LOG/host_paths_build.log)")"
 fi
 
 # 6
