@@ -75,6 +75,11 @@ def test_hash_bytes_dispatches_on_family() raises:
     assert_equal(
         fnv.hash_bytes(String("").as_bytes()), UInt64(0xCBF29CE484222325)
     )
+    # A multi-byte vector: every byte of the input must feed the hash, so a
+    # loop that reads one fixed byte (or stops early) gives another value.
+    assert_equal(
+        fnv.hash_bytes(String("foobar").as_bytes()), UInt64(0x85944171F73967E8)
+    )
 
 
 def test_from_bytes_copies_span_and_pads() raises:

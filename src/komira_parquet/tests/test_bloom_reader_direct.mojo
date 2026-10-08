@@ -219,6 +219,22 @@ def test_load_reads_the_filter_and_answers_membership() raises:
     assert_true(fnv.value().hash_family.is_fnv1a())
 
 
+def test_load_copies_every_bitset_byte() raises:
+    # Every byte nonzero and distinct from its neighbours, so a load that
+    # drops, shifts or zero-pads any byte (the last one included) differs.
+    var bits = List[UInt8](capacity=1024)
+    for i in range(1024):
+        bits.append(UInt8((i * 7 + 1) & 0xFF))
+    var f = _file("bloom_bytes.parquet", [_block(_header(1024), bits)])
+    var reader = ParquetFileReader[_Fs].open(f.path)
+    var bf = load_bloom_filter(reader, _meta(f.offsets[0], f.lengths[0]))
+    assert_true(Bool(bf))
+    assert_equal(bf.value().num_bytes, 1024)
+    var got = bf.value().data.view_range_ro(0, 1024).into_span()
+    for i in range(1024):
+        assert_equal(got[i], bits[i], "bitset byte " + String(i))
+
+
 def test_load_returns_none_for_every_unusable_filter() raises:
     var bits = _bitset([Int64(1)])
     var blocks: List[List[UInt8]] = [
