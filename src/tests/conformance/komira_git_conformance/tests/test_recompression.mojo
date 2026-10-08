@@ -19,18 +19,20 @@
 #     early, a mask bit read for the wrong DV, a DV recompressed from the
 #     wrong stored state (58 for 65 or the reverse), the wrong difference
 #     applied, and a backward recompression that differs from upstream's.
-#     Only the last DV recompressed for a block is observable this way,
-#     which is why the cases are chosen by highest bit. A missed detection
-#     itself (the final comparison) is pinned by test_digests on the
-#     SHAttered PDFs, through DV 27 only.
+#     m2 and ihv2 show only the last DV recompressed for a block, which is
+#     why the cases are chosen by highest bit. The set of DVs recompressed
+#     (`_recompressed`) must also equal upstream's ubc_check mask for the
+#     block, which catches a loop or mask that drops a DV below the highest.
+#     A missed detection itself (the final comparison) is pinned by
+#     test_digests on the SHAttered PDFs, through DV 27 only.
 #   * test_filter_off_checks_every_dv: with the filter off on both sides
 #     (`set_use_ubc(False)`), upstream recompresses every DV for every
 #     block, so its last is DV 31 whatever the block. Random two-block
-#     inputs must leave the same m2 and ihv2 on both sides, and upstream's
-#     m2 must be DV 31's. It catches a filter-off mask that leaves out
-#     DV 31 (one that leaves out another DV is caught by test_dv_table's
-#     check of `_ALL_DVS`), and a filter-off path that still applies the
-#     filter.
+#     inputs must leave the same m2 and ihv2 on both sides, upstream's m2
+#     must be DV 31's, and `_recompressed` must have all 32 bits set.
+#     It catches a filter-off mask that leaves out any DV, whether the
+#     constant `_ALL_DVS` or the line in `_process` that uses it is
+#     narrowed, and a filter-off path that still applies the filter.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -104,6 +106,12 @@ def _check_case(
             assert_equal(
                 ours._ihv2[i], ihv2[i], what + ": ihv2[" + String(i) + "]"
             )
+    # Upstream's loop recompresses exactly the DVs of its mask: ubc_check's
+    # with the filter on, every bit with it off.
+    var expected = c_ubc_check(w) if use_ubc else UInt32(0xFFFFFFFF)
+    assert_equal(
+        ours._recompressed, expected, what + ": the DVs recompressed"
+    )
 
 
 def test_last_dv_every_dv() raises:

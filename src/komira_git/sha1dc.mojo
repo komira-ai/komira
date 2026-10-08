@@ -268,6 +268,11 @@ struct Sha1dc(Copyable, Movable):
     # them with upstream's ctx->m2 and ctx->ihv2.
     var _m2: _Words
     var _ihv2: _State
+    # The disturbance vectors `_process` recompressed for the last block,
+    # bit k for DV k: the ubc mask with the filter on, all 32 with it off,
+    # fewer when a detection ends the loop early, zero with detection off.
+    # komira_git_conformance compares it with upstream's ubc_check mask.
+    var _recompressed: UInt32
 
     def __init__(out self):
         """An empty hash state with upstream's default switches."""
@@ -281,6 +286,7 @@ struct Sha1dc(Copyable, Movable):
         self._reduced_round = False
         self._m2 = _Words(fill=0)
         self._ihv2 = _State(fill=0)
+        self._recompressed = 0
 
     def set_safe_hash(mut self, on: Bool):
         """Whether a detected block is compressed twice more (default on), so
@@ -385,6 +391,7 @@ struct Sha1dc(Copyable, Movable):
         var s58 = _State(fill=0)
         var s65 = _State(fill=0)
         _compress_states(self._ihv, w, s58, s65)
+        self._recompressed = 0
         if not self._detect:
             return
         var mask = _ALL_DVS
@@ -403,6 +410,7 @@ struct Sha1dc(Copyable, Movable):
                 _recompress[58](self._m2, s58, self._ihv2, ihvtmp)
             else:
                 _recompress[65](self._m2, s65, self._ihv2, ihvtmp)
+            self._recompressed |= UInt32(1) << UInt32(dv)
             if _same(ihvtmp, self._ihv) or (
                 self._reduced_round and _same(ihv1, self._ihv2)
             ):

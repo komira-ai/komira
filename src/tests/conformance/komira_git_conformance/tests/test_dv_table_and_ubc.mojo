@@ -11,8 +11,9 @@
 #     table (komira_git keeps the first 16 and expands them with its own
 #     `_expand`, so this also checks that expansion).
 #     It also checks that `_ALL_DVS`, the mask sha1dc checks with the
-#     filter off, is the OR of every DV's upstream mask bit, so a filter-off
-#     mask that drops a DV is caught.
+#     filter off, is the OR of every DV's upstream mask bit, so an edit to
+#     that constant that drops a DV is caught (its use in `_process` is
+#     pinned by test_recompression).
 #   * test_ubc_random_words: any statement of `_ubc_check` that disagrees
 #     with upstream's `ubc_check`. The input is 80 arbitrary words (the
 #     check reads them as given, expanded or not), 2^20 of them, four words

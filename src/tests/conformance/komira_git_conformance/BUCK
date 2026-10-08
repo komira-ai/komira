@@ -22,7 +22,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   test_recompression -- the disturbance-vector loop one DV at a time:
 #     for every DV, blocks whose ubc mask has it as the highest bit, and
 #     the recompressed message and starting chaining value of that DV
-#     (upstream's ctx->m2 and ctx->ihv2) against komira_git's.
+#     (upstream's ctx->m2 and ctx->ihv2) against komira_git's, and the set
+#     of DVs recompressed against upstream's mask (all 32 with the filter
+#     off).
 mojo_library(
     name = "komira_git_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
