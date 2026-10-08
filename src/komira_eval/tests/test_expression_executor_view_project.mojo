@@ -7,8 +7,8 @@
 # Integer division is checked only where truncation and flooring agree (no
 # negative quotient): SQL integer division truncates toward zero (DuckDB:
 # -7 // 2 is -3), and this walker's `//` floors (-4). A zero divisor raises
-# here where DuckDB answers NULL; the tests pin the raise as what the code
-# does today. Decimal result types follow the code's rules
+# here, as standard SQL does (a division-by-zero exception), where DuckDB
+# answers NULL; the tests pin the raise as what the code does today. Decimal result types follow the code's rules
 # (`decimal_*_result_ps`).
 # =============================================================================
 

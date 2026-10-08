@@ -283,6 +283,27 @@ def test_bool_column_and_bool_literals() raises:
     _expect(_run(ExpressionExecutor(p3^, 0, _numeric_names()), batch), List[Int](), "FALSE")
 
 
+def test_bool_leaves_as_a_later_conjunct() raises:
+    """i <= 3 AND b, and i <= 3 AND TRUE: the Bool leaf sees the first
+    conjunct's survivors [1, 3, 4] (i = [5, 1, 4, 2, 3]), not [0..n).
+    b = [T, F, T, F, T] keeps only row 4 of them; TRUE keeps all three."""
+    var batch = _numeric_batch()
+    var p1 = List[RuntimeExpr]()
+    p1.append(make_col(I))
+    p1.append(make_lit_i64(3))
+    p1.append(make_le_i64(0, 1))
+    p1.append(make_col_bool(B))
+    p1.append(make_and(2, 3))
+    _expect(_run(ExpressionExecutor(p1^, 4, _numeric_names()), batch, 2), [4], "i <= 3 AND b")
+    var p2 = List[RuntimeExpr]()
+    p2.append(make_col(I))
+    p2.append(make_lit_i64(3))
+    p2.append(make_le_i64(0, 1))
+    p2.append(make_lit_bool(True))
+    p2.append(make_and(2, 3))
+    _expect(_run(ExpressionExecutor(p2^, 4, _numeric_names()), batch, 2), [1, 3, 4], "i <= 3 AND TRUE")
+
+
 def test_not_is_the_complement_within_the_input() raises:
     """NOT (i > 3): i > 3 keeps [0, 2]; the complement in [0..4] is [1, 3, 4]."""
     var batch = _numeric_batch()
@@ -439,9 +460,13 @@ def test_in_list_int64_skips_null_and_non_integer_values() raises:
     vals.append(ScalarValue.from_int(1))
     vals.append(ScalarValue.from_float(2.5))
     _expect(_run(_in_exec(make_col(0), vals^), batch), [0, 3], "a64 IN (0, 1, 2.5)")
+    # A list of non-integral floats only: no Int64 value is taken, no row
+    # matches. A whole-number float such as 3.0 is skipped the same way,
+    # where SQL coerces it and would keep row 2; that answer is not pinned
+    # here (komira-ai/komira#932).
     var only_float = List[ScalarValue]()
-    only_float.append(ScalarValue.from_float(3.0))
-    _expect(_run(_in_exec(make_col(0), only_float^), batch), List[Int](), "a64 IN (3.0)")
+    only_float.append(ScalarValue.from_float(3.5))
+    _expect(_run(_in_exec(make_col(0), only_float^), batch), List[Int](), "a64 IN (3.5)")
 
 
 def test_in_list_int32_skips_null_and_non_integer_values() raises:
@@ -653,6 +678,7 @@ def main() raises:
     suite.test[test_int32_left_against_int64_right_column_is_refused]()
     suite.test[test_comparison_shape_refusals]()
     suite.test[test_bool_column_and_bool_literals]()
+    suite.test[test_bool_leaves_as_a_later_conjunct]()
     suite.test[test_not_is_the_complement_within_the_input]()
     suite.test[test_or_merges_both_sides_in_row_order]()
     suite.test[test_and_nested_under_or]()
