@@ -2,16 +2,17 @@
 # kci_cloud/grants.mojo: identities and grant edges, as kci decides them.
 # =============================================================================
 #
-# WHO A RESOURCE RUNS AS. A `service_account` is an identity. A `service` or
-# a `job` runs as the account its `run_as` names; with no `run_as` it runs as
-# its PRIVATE identity, the role `<id>/identity` of its own fixed set. A
-# bucket and a grant run as nobody. So the IDENTITY OWNER of a resource is
-# the id whose `<owner>/identity` node is the principal:
+# WHO A RESOURCE RUNS AS. A `service_account` is an identity. A WORKLOAD (a
+# `service`, a `container_job` or a `worker`; workload.mojo) runs as the
+# account its `run_as` names; with no `run_as` it runs as its PRIVATE
+# identity, the role `<id>/identity` of its own fixed set. A bucket and a
+# grant run as nobody. So the IDENTITY OWNER of a resource is the id whose
+# `<owner>/identity` node is the principal:
 #   * a service account: itself;
-#   * a service or a job: its `run_as` account, else itself;
+#   * a workload: its `run_as` account, else itself;
 #   * anything else: none.
-# Every type that can hold an identity (service, job, service account)
-# lowers `<id>/identity` on every cloud. A compute resource with `run_as`
+# Every type that can hold an identity (the three workloads, a service
+# account) lowers `<id>/identity` on every cloud. A compute resource with `run_as`
 # lowers it turned off (`wanted` False): the closed world removes a private
 # identity the file no longer uses.
 #
@@ -21,8 +22,8 @@
 #   * each `uses` line of a resource that has an identity owner;
 #   * a `grant` resource (its one edge, role `grant`);
 #   * the IMPLICIT edge `cell LOGS WRITE`, which every resource that holds
-#     its OWN identity (a service account, or a service or job with no
-#     `run_as`) gets unless it writes that edge itself. It is lowered and
+#     its OWN identity (a service account, or a workload with no `run_as`)
+#     gets unless it writes that edge itself. It is lowered and
 #     printed like any other edge, never hidden.
 # One (principal, target) pair is ONE edge in the whole list: validate
 # refuses a second, whether it comes from a `uses` line, a grant or the
@@ -53,13 +54,12 @@ from kci_cloud.catalog import (
     ACCESS_READ,
     ACCESS_WRITE,
     FIELD_GRANT,
-    FIELD_JOB,
-    FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
     ROLE_GRANT,
     ROLE_IDENTITY,
     body_field,
 )
+from kci_cloud.workload import workload_of
 
 
 comptime GRANT_ROLE_PREFIX = "u-"
@@ -151,25 +151,19 @@ def _field(r: Resource) -> Int:
 
 def holds_own_identity(r: Resource) -> Bool:
     """True iff `r` holds an identity of its own: a service account, or a
-    service or a job with no `run_as`."""
-    var f = _field(r)
-    if f == FIELD_SERVICE_ACCOUNT:
+    workload with no `run_as`."""
+    if _field(r) == FIELD_SERVICE_ACCOUNT:
         return True
-    if f == FIELD_SERVICE:
-        return not Bool(r.service.value().run_as)
-    if f == FIELD_JOB:
-        return not Bool(r.job.value().run_as)
-    return False
+    var w = workload_of(r)
+    return Bool(w) and not Bool(w.value().run_as)
 
 
 def run_as_of(r: Resource) -> String:
-    """The account a service or a job names in `run_as`, or empty."""
-    var f = _field(r)
-    if f == FIELD_SERVICE and Bool(r.service.value().run_as):
-        return r.service.value().run_as.value().resource.copy()
-    if f == FIELD_JOB and Bool(r.job.value().run_as):
-        return r.job.value().run_as.value().resource.copy()
-    return String("")
+    """The account a workload names in `run_as`, or empty."""
+    var w = workload_of(r)
+    if not w:
+        return String("")
+    return w.value().account()
 
 
 def identity_owner(r: Resource) -> String:
