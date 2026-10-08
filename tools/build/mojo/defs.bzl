@@ -27,6 +27,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_branch_of", "coverage_sub_targets")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
+load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
 load(
     ":test_runtime.bzl",
     _arg_args = "arg_args",
@@ -35,6 +36,7 @@ load(
     _test_root = "test_root",
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
+load(":readme.bzl", "readme_kwargs")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -407,7 +409,7 @@ def _library_impl(ctx):
         if cov_link and t.is_source:
             cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link, defines = test_defines)
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, root, test_data.get(key, {}), env_args)
-            cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root))
+            cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root, test_defines))
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether
@@ -429,6 +431,7 @@ def _library_impl(ctx):
     # With coverage on, the gate (coverage.bzl); only the conda package waits
     # for it and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch) if cov_link else (None, [])
+    mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
@@ -455,7 +458,7 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}),
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}) | mutation,
         ),
         MojoInfo(
             c_link = c_link,
@@ -480,7 +483,8 @@ def _library_impl(ctx):
 # A library whose package holds a README.md runs the README's ```mojo
 # examples as one more welded test, `[tests][readme]`: the docs cannot rot.
 # The macro passes the README (declaring is gating: a README is declared by
-# existing) and the tool, //tools/build/readme_examples:tool, whose
+# existing; a library of a several-library package can refuse it with
+# `readme = False`, readme.bzl) and the tool, //tools/build/readme_examples:tool, whose
 # `generate` writes `readme_<import name>.mojo` and the number of examples.
 # The convention (what an example is, hidden lines, the refusals) is in that
 # package and in README.md here.
@@ -617,11 +621,11 @@ mojo_library_rule = rule(
         # Environment for every gated test of this library.
         "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
         # The package's README.md and the tool that runs its examples; the
-        # macro sets both (see _readme_gate). No default tool: the tool is
+        # macro sets both, or neither (readme.bzl, _readme_gate). No default tool: the tool is
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | MUTATION_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -951,9 +955,6 @@ mojo_shared_lib_rule = rule(
     } | _TOOLCHAIN_ATTR,
 )
 
-_README_TOOL_PACKAGE = "tools/build/readme_examples"
-_README_TOOL = "komira//" + _README_TOOL_PACKAGE + ":tool"
-
 def _mojo_library(**kwargs):
     # Refused by name, so a stale BUCK file says why rather than buck2's
     # generic "unexpected parameter".
@@ -963,16 +964,10 @@ def _mojo_library(**kwargs):
     # out with `conda = False`. Nothing is published by that: the release tool's
     # artifact declarations say which packages are (tools/build/package/conda.bzl).
     summary = kwargs.pop("conda_summary", None)
-    for attr in ("readme", "readme_tool"):
-        if attr in kwargs:
-            fail("{}: `{}` is set by mojo_library from the package's README.md; do not pass it".format(kwargs.get("name", "mojo_library"), attr))
-    readme = glob(["README.md"])
-    if readme:
-        if package_name() == _README_TOOL_PACKAGE:
-            fail("{}: {} may hold no README.md: every library with a README runs {} on it, so the tool would depend on itself".format(kwargs.get("name", "mojo_library"), _README_TOOL_PACKAGE, _README_TOOL))
-        kwargs["readme"] = readme[0]
-        kwargs["readme_tool"] = _README_TOOL
+    # The package's README.md, unless `readme = False` (readme.bzl).
+    readme_kwargs(kwargs)
     cov_gate = coverage_kwargs(kwargs)
+    mutation_kwargs(kwargs)
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):
         name = kwargs["name"]

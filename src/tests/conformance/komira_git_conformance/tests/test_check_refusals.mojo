@@ -5,9 +5,10 @@
 # =============================================================================
 #
 # test_git_packs and test_git_thin_sha256 pass only if every check of
-# `check_pack` holds; that proves something only if each check can fail.
-# Here the `nodelta` pack's own fixtures pass `check_pack` unchanged, and
-# then one thing at a time is changed and the exact message is required:
+# `check_pack_against_git` holds; that proves something only if each check
+# can fail. Here the `nodelta` pack's own fixtures pass
+# `check_pack_against_git` unchanged, and then one thing at a time is
+# changed and the exact message is required:
 #   * git's index with one byte flipped: require_same_bytes;
 #   * a verify-pack listing with one line fewer and one line more, one id
 #     replaced, one line's offset, size in the pack, kind, depth or base
@@ -34,7 +35,7 @@ from komira_git import ObjectFormat, ObjectId, ObjectKind, PackIndex, hash_objec
 from komira_git_conformance import (
     GitObjects,
     VerifyLine,
-    check_pack,
+    check_pack_against_git,
     parse_batch,
     parse_ids,
     parse_verify,
@@ -57,7 +58,9 @@ def _check(
     pack: List[UInt8], idx: List[UInt8], lines: List[VerifyLine], objects: GitObjects
 ) -> String:
     try:
-        var stats = check_pack(ObjectFormat.sha1(), _NAME, pack, idx, lines, objects)
+        var stats = check_pack_against_git(
+            ObjectFormat.sha1(), _NAME, pack, idx, lines, objects
+        )
         return "OK " + String(stats.entries)
     except e:
         return String(e)

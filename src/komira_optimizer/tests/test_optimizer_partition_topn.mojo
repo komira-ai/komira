@@ -6,6 +6,7 @@
 # a single PartitionTopN node.
 # =============================================================================
 
+from std.os import getenv, setenv
 from std.testing import assert_equal, assert_true
 
 from komira_arrow.schema import Schema, SchemaBuilder, Field
@@ -22,29 +23,19 @@ from komira_plan_expr.expr import Expr, EXPR_COL_REF, BIN_LE, BIN_LT, BIN_GT
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.partition_expr import PartitionExpr, PF_ROW_NUMBER, PF_RANK, PF_SUM
 from komira_optimizer.optimizer_partition_topn import fuse_partition_topn
-from komira_libc.posix import _read_env
+from komira_runtime_paths import test_tmpdir
 
 
 # ---------------------------------------------------------------------------
 # ⚠ $TEST_TMPDIR, NOT A HARD-CODED `/tmp` PATH.
 #
-# The test runner makes `TEST_TMPDIR` (equal to `TMPDIR`) a fresh directory
-# for each run, so no two executions share it; a fixed `/tmp` path would be
-# shared by every execution on a worker. The `/tmp` fallback below is reached
-# only when neither variable is set.
-#
-# ⚠ `_read_env`, NOT `std.os.getenv` — Mojo's MLIR FFI legalization allows at
-# most ONE `getenv` declaration per link unit and `komira_libc.posix` is
-# the canonical one.
+# The test runner makes `TEST_TMPDIR` a fresh directory for each run, so no
+# two executions share it. `test_tmpdir()` raises when it is unset or empty
+# instead of falling back to a directory other runs share.
 # ---------------------------------------------------------------------------
-def _scratch_dir() -> String:
+def _scratch_dir() raises -> String:
     """The directory THIS execution may write scratch files into."""
-    var d = _read_env("TEST_TMPDIR")
-    if d.byte_length() == 0:
-        d = _read_env("TMPDIR")
-    if d.byte_length() == 0:
-        return String("/tmp")
-    return d
+    return test_tmpdir()
 
 
 # =============================================================================
@@ -61,7 +52,7 @@ def _schema_3col() -> Schema:
     return builder.build()
 
 
-def _scan_node() -> LogicalPlan:
+def _scan_node() raises -> LogicalPlan:
     """Create a dummy scan node."""
     var schema = _schema_3col()
     return LogicalPlan.scan(
@@ -314,6 +305,25 @@ def test_output_schema_no_rn_column() raises:
     print("PASS test_output_schema_no_rn_column")
 
 
+def test_scratch_dir_refuses_without_a_test_tmpdir() raises:
+    """With TEST_TMPDIR and TMPDIR both empty, `_scratch_dir` raises rather
+    than hand back a directory this run does not own. Restores both."""
+    var saved_test = getenv("TEST_TMPDIR")
+    var saved_tmp = getenv("TMPDIR")
+    _ = setenv("TEST_TMPDIR", "", True)
+    _ = setenv("TMPDIR", "", True)
+    var got = String("")
+    var raised = False
+    try:
+        got = _scratch_dir()
+    except:
+        raised = True
+    _ = setenv("TEST_TMPDIR", saved_test, True)
+    _ = setenv("TMPDIR", saved_tmp, True)
+    assert_true(raised, "_scratch_dir returned " + got)
+    print("PASS test_scratch_dir_refuses_without_a_test_tmpdir")
+
+
 def main() raises:
     test_basic_lteq()
     test_lt()
@@ -324,3 +334,4 @@ def main() raises:
     test_no_fire_wrong_op()
     test_output_schema_no_rn_column()
     print("All fuse_partition_topn tests passed")
+    test_scratch_dir_refuses_without_a_test_tmpdir()

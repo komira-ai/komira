@@ -17,8 +17,15 @@ SHA-1 with collision detection (sha1collisiondetection, as git uses):
 (`OBJECT_ID_COLLISION`) that `hash_object` and `read_loose` raise for an
 object holding a block of a detected collision.
 
-Wire: pkt-line framing (`append_pkt_*`, `read_pkt_line`) and the ref name
-rules of `git check-ref-format` (`check_ref_format`, `normalize_ref_name`).
+Wire: pkt-line framing (`append_pkt_*`, `read_pkt_line`, `PktReader`,
+side-band) and the ref name rules of `git check-ref-format`
+(`check_ref_format`, `normalize_ref_name`).
+
+Protocol: sans-I/O state machines for both ends of a fetch over protocol v2
+(`UploadPackV2Server`, `append_ls_refs_response`, `negotiate` over a
+`CommitGraph`, `FetchResponder`; `FetchV2Client`) and of a push
+(`ReceivePackServer`, `PushReport`, `append_push_report`;
+`SendPackClient`).
 
 No I/O: every function maps bytes to values or values to bytes.
 """
@@ -79,4 +86,53 @@ from .pack_reader import (
     read_pack_object,
     read_thin_pack_object,
 )
+from .pkt_stream import (
+    SIDEBAND_DATA,
+    SIDEBAND_ERROR,
+    SIDEBAND_MAX_CHUNK,
+    SIDEBAND_PROGRESS,
+    PktReader,
+    append_sideband,
+)
+from .protocol_types import AdvertisedRef, FetchArgs, LsRefsArgs
+from .upload_pack_v2 import (
+    V2_END,
+    V2_FETCH,
+    V2_LS_REFS,
+    V2_NEED_MORE,
+    UploadPackV2Server,
+    V2Request,
+    append_ls_refs_response,
+)
+from .fetch_negotiation import CommitGraph, FetchResponder, Negotiation, negotiate
+from .fetch_v2_client import (
+    FETCH_ACK,
+    FETCH_END,
+    FETCH_NAK,
+    FETCH_NEED_MORE,
+    FETCH_PACK_DATA,
+    FETCH_PROGRESS,
+    FETCH_READY,
+    FETCH_ROUND_END,
+    FETCH_SHALLOW,
+    FETCH_UNSHALLOW,
+    FetchEvent,
+    FetchV2Client,
+    LsRefsResult,
+    ServerCapabilities,
+)
+from .receive_pack import (
+    ATOMIC_PUSH_FAILURE,
+    FUNNY_REFNAME,
+    UNPACKER_ERROR,
+    PushCommand,
+    PushReport,
+    PushRequest,
+    ReceivePackConfig,
+    ReceivePackServer,
+    append_push_message,
+    append_push_report,
+    append_receive_pack_advertisement,
+)
+from .send_pack import PushAdvertisement, PushStatus, SendPackClient
 from .sha1dc import OBJECT_ID_COLLISION, Sha1dc, is_object_id_collision, sha1dc

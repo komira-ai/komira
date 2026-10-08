@@ -73,8 +73,8 @@ def _same(a: List[UInt8], b: List[UInt8]) -> Bool:
 
 def check_git_pack(format: ObjectFormat, name: String, objects: GitObjects) raises -> PackStats:
     """Read `<name>.pack`, `<name>.idx` and `<name>.verify` and check them
-    with `check_pack`."""
-    return check_pack(
+    with `check_pack_against_git`."""
+    return check_pack_against_git(
         format,
         name,
         read_fixture(name + ".pack"),
@@ -84,7 +84,7 @@ def check_git_pack(format: ObjectFormat, name: String, objects: GitObjects) rais
     )
 
 
-def check_pack(
+def check_pack_against_git(
     format: ObjectFormat,
     name: String,
     pack: List[UInt8],

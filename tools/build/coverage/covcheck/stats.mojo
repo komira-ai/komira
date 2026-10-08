@@ -129,6 +129,16 @@ struct Finding(Copyable, Movable):
         self.count = count
 
 
+def is_info_package(package: String, dirs: List[String]) -> Bool:
+    """Whether `package` is one of `dirs` (`--info-package`, a test-only
+    package's directory) or under one, at a path-segment boundary: `src/tests`
+    covers `src/tests/e2e/x`, not `src/testsuite`."""
+    for i in range(len(dirs)):
+        if package == dirs[i] or package.startswith(dirs[i] + String("/")):
+            return True
+    return False
+
+
 def valid_mode(mode: String) -> Bool:
     return mode == String(MODE_CENSUS) or mode == String(MODE_NEUTRAL) or mode == String(MODE_ENFORCE)
 
