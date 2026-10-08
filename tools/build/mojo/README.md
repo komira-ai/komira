@@ -14,7 +14,7 @@ the compiler sees. Worked uses of each rule are in
 
 | rule | produces | example |
 |---|---|---|
-| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
+| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level, readme)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
@@ -117,6 +117,16 @@ fence reader, so the link check and the examples agree on what is code).
   README's examples do not count as the tests a conda package needs.
 - The tool's own package, `tools/build/readme_examples`, may hold no README:
   the tool would depend on itself.
+- **Which library**: a BUCK file of one library says nothing. Every library
+  of a BUCK file takes the directory's `README.md` unless it says otherwise,
+  so a BUCK file of several libraries names the one the README is about with
+  `readme` ([`readme.bzl`](readme.bzl)): `readme = False` takes no README
+  (no `[tests][readme]`, none in its conda package); `readme = True` takes
+  `README.md` and is refused if there is none. Left on a library that does
+  not reach what the README imports, the README fails that library's
+  `[tests][readme]` compile; left on several, it ships in each of their
+  packages. `mojo_gcp_client`, `mojo_aws_client` and the welded
+  `mojo_proto_library` pass `readme` through.
 - **A README that ships** (the library has a conda package the build can
   make, which installs it at `share/doc/<conda name>/README.md`; see
   [Conda packages](../../../packaging/conda/README.md#the-readme-in-the-package))
@@ -125,7 +135,9 @@ fence reader, so the link check and the examples agree on what is code).
 
 Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
 a README that uses every form, and requires a raising example, a compile
-error and a `mojo skip` fence each to fail naming its README line.
+error and a `mojo skip` fence each to fail naming its README line; it also
+builds a two-library package whose README is one library's, and requires
+the same package without `readme = False` to fail.
 
 ### The compile watchdog
 
@@ -299,10 +311,11 @@ keys, it had before they existed.
   Linux only: on macOS a capped test is refused.
 
 The `mojo_library` attributes apply to each `test_srcs` build and run, and
-the assert level and defines to its coverage build; not to the package's
+the assert level and defines to its coverage builds (the coverage binary and
+the branch coverage bitcode); not to the package's
 `mojo precompile`, the README's examples, or a coverage run under kcov, which
 is not capped. `mojo_binary`'s apply to its `[shared]` library too.
-Test 45 ([`tests/README.md`](../tests/README.md#45-assert-level-defines-and-memory-cap))
+Test 49 ([`tests/README.md`](../tests/README.md#49-assert-level-defines-and-memory-cap))
 reads the commands and runs the fixtures.
 
 ## Test data, environment and scratch
@@ -832,56 +845,42 @@ and, per library, with tests or without:
   and `summary.md` are `[coverage][gate]` (`cov/gate/`, action category
   `mojo_cov_gate`; [The build gate](../coverage/README.md#the-build-gate)).
 
-What ships, the library's conda package (`<name>_conda`: both its joins,
-[`conda.bzl`](../package/conda.bzl)), then also waits for every coverage run
-and the gate: with the switch on, a test that fails at `-O0` or traced, or a
-gate that fails in enforce mode, leaves the conda package unbuilt. The
-library's own package (`mojo_gate_join`) does not wait for them, so the
-library builds and every dependent compiles and tests against it: a red
-coverage run or gate blocks the package it measures from shipping, and
-nothing else. A library with no test still has a gate (`NotMeasured`: it
-fails in enforce mode), which its conda package waits for, as does a
-library whose sources are all generated (a cloud SDK client). The libraries
-the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
-`policy.bzl` (`covcheck`, `komira_json`, `readme_examples`): they have no
-gate of their own (the library would depend on the gate's tool, which
-depends on it), and their gate is `<name>_cov_gate`, which their conda
-package waits for too. `[coverage]` is the binaries, the reports and the
-gate's outputs; the branch coverage files are only its sub-targets `[bc]`,
-`[pgo_bin]`, `[branch]`, `[branch_ir]` and `[branch_info]`.
+What ships, the library's conda package (`<name>_conda`: both its joins, [`conda.bzl`](../package/conda.bzl)),
+then also waits for every coverage run and the gate: with the switch on, a test that fails at `-O0` or
+traced, or a gate that fails in enforce mode, leaves the conda package unbuilt. The library's own package
+(`mojo_gate_join`) does not wait for them, so the library builds and every dependent compiles and tests
+against it: a red coverage run or gate blocks the package it measures from shipping, and nothing else. A
+library with no test still has a gate (`NotMeasured`: it fails in enforce mode), which its conda package waits
+for, as does a library whose sources are all generated (a cloud SDK client). The libraries the gate's own tool
+depends on are the ledger `COVERAGE_NO_GATE` of `policy.bzl` (`covcheck`, `komira_json`, `readme_examples`):
+they have no gate of their own (the library would depend on the gate's tool, which depends on it), and their
+gate is `<name>_cov_gate`, which their conda package waits for too. `[coverage]` is the binaries, the reports
+and the gate's outputs; the branch coverage files are only its sub-targets `[bc]`, `[pgo_bin]`, `[branch]`,
+`[branch_ir]` and `[branch_info]`.
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage][gate][summary]' -c komira.coverage=true --show-full-output
 ```
 
-The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
-and does one thing: it sets the attributes `coverage_debug` to
-`komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
-`komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and
-cov_normalize), `coverage_branch` to
-`komira//tools/build/coverage/branch:cov_branch` (the branch coverage
-scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
-(cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
-(for a library of the ledger: no gate). A buckconfig
-value is not part of the configuration, so no output path moves; with the
-switch off the attributes are absent and analysis is what it was without
-coverage builds. With it on, every release action of the library
-(`mojo_precompile`, `mojo_build_test`, `mojo_gated_test`, the README's,
-`mojo_gate_join`) keeps its command line and inputs, so it keeps its cache
-hits and so do its dependents; the conda package's joins keep their command
-lines and gain the coverage markers as inputs; the coverage builds, runs
-and gate are new actions ([test 41](../tests/README.md#41-coverage-builds)'s
-`coverage_keys.sh`). A value other than `true` or `false` fails at load,
-naming it.
+The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl)) and does one thing: it
+sets the attributes `coverage_debug` to `komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
+`komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and cov_normalize), `coverage_branch` to
+`komira//tools/build/coverage/branch:cov_branch` (the branch coverage scripts and the LLVM pieces),
+`coverage_gate` to `komira//tools/build/coverage:cov_gate` (cov_gate.sh, covcheck and the ratchet) and
+`coverage_mode` to the policy's (for a library of the ledger: no gate). A buckconfig value is not part of the
+configuration, so no output path moves; with the switch off the attributes are absent and analysis is what it was
+without coverage builds. With it on, every release action of the library (`mojo_precompile`, `mojo_build_test`,
+`mojo_gated_test`, the README's, `mojo_gate_join`) keeps its command line and inputs, so it keeps its cache hits
+and so do its dependents; the conda package's joins keep their command lines and gain the coverage markers as
+inputs; the coverage builds, runs and gate are new actions ([test 41](../tests/README.md#41-coverage-builds)'s
+`coverage_keys.sh`). A value other than `true` or `false` fails at load, naming it.
 
-The macro reads the switch from the buckconfig of the cell whose BUCK file
-it runs in. `-c komira.coverage=true` on the command line, or a global
-buckconfig (`~/.buckconfig.d`), applies to every cell. `[komira] coverage =
-true` in a cell's own `.buckconfig` or `.buckconfig.local` applies to that
-cell only: in a repository that mounts komira as the cell `komira`, setting it
-in the root cell's file leaves komira's libraries without `[coverage]`
-("unknown subtarget").
+The macro reads the switch from the buckconfig of the cell whose BUCK file it runs in. `-c komira.coverage=true`
+on the command line, or a global buckconfig (`~/.buckconfig.d`), applies to every cell. `[komira] coverage =
+true` in a cell's own `.buckconfig` or `.buckconfig.local` applies to that cell only: in a repository that
+mounts komira as the cell `komira`, setting it in the root cell's file leaves komira's libraries without
+`[coverage]` ("unknown subtarget").
 
 A coverage build runs the same `mojo_wrapper.sh` as every compile, byte for
 byte, with one argument changed: its link directory (`<zig_dir>`) is

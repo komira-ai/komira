@@ -1,0 +1,8 @@
+load(":cases.bzl", "readme_keyword_case")
+
+# Must FAIL loading (test 38), one case per `-c readme_keyword.case=<case>`:
+# mojo_library's `readme` keyword (tools/build/mojo/readme.bzl) refuses
+# `readme = True` in a package with no README.md (`true_without_readme`) and
+# a value other than True or False (`not_bool`). With no case set the package
+# declares only its doc_tree, so loading it never fails by accident.
+readme_keyword_case()

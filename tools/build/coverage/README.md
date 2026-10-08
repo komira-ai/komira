@@ -26,6 +26,7 @@ gate's JSON entry for a package equal to the report's.
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
 | `branch_gate.bxl` | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a library: a row naming none is read by nothing (test 46) |
+| `mutate/` | the mutation tool: `:mutate` (the library, its tests welded), `:mutate_bin`, `:mut_dir` (what every library's `[mutation]` runs from) ([Mutation score](#mutation-score)) |
 
 ## What line coverage means here
 
@@ -49,15 +50,15 @@ covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR
                 (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]...
                 [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce]
-                [--target-bp N] [--include-tests] [--name N] [--max-annotations N]
-                --summary-out F --checkrun-dir D --result-out F
+                [--target-bp N] [--include-tests] [--info-package DIR]... [--name N]
+                [--max-annotations N] --summary-out F --checkrun-dir D --result-out F
                 [--annotations-out F] [--ratchet-out F]
 
 covcheck gate   --package DIR --repo-files F --source-root DIR
                 [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]...
                 [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... --ratchet F --mode census|neutral|enforce
-                [--target-bp N] [--include-tests] [--test-source P]...
+                [--target-bp N] [--include-tests] [--test-source P]... [--info-package DIR]...
                 --result-out F --summary-out F
 ```
 
@@ -76,6 +77,7 @@ Every input is a flag; nothing is read from the environment.
 | `--target-bp N` | the target, basis points 0 to 10000; default 10000 (100%) |
 | `--include-tests` | count test sources (left out by default) |
 | `--test-source P` | `gate`: repeatable; the repository path of a test source of `--package` outside its `tests/` (a welded test elsewhere), left out like those; a path that is not a file of `--repo-files` or not in `--package` is an error (exit 1) |
+| `--info-package DIR` | repeatable; `DIR` (a trailing `/` dropped; an absolute path, `.` or one holding `//` is bad usage) and every package under it, at a path-segment boundary, are test-only: see Test-only packages |
 | `--diff F` | the output of `git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ --unified=0 -M <merge-base> <head>` (the explicit prefixes override a `diff.noprefix` setting) |
 | `--head-sha SHA` | the commit the check run is for: 40 lowercase hex digits |
 | `--name N` | the check run's name; default `coverage` |
@@ -337,6 +339,26 @@ hits > 0), branch (only when the package has a branch record), mutants.
 Conclusion: `neutral` in census and neutral mode whatever was found; in
 enforce mode `failure` with any finding, else `success`.
 
+### Test-only packages
+
+A package that is an `--info-package DIR` or under one (`src/tests` covers
+`src/tests/e2e/x`, not `src/testsuite`) is measured, counted in the totals
+and shown as every package is, but held to no target: whatever the policy
+would find in it (every kind above, `BelowTarget` and the ratchet's
+included, so a `Regression` below a row the package has) is information.
+Those findings move from `findings` to `info_findings` in the result
+(which also lists the measured test-only packages, `info_packages`), so
+they count for no conclusion and no `gate` exit 3: a test-only package's
+gate never fails on a finding, in any mode. An input covcheck refuses
+(exit 1 or 2) still fails it. `--ratchet-out` proposes no row for a
+test-only package (a row it has is kept as it was), so test-only packages
+have no floor. The summary's status
+column says `info` (with the kinds, `info: BelowTarget, MissingRow`), its
+findings are listed under `### Info: test-only packages (N)`, the target
+line names the directories, the title counts them (`N info`), and the
+annotations of its files are `notice` in every mode. The policy names the
+directories (`COVERAGE_INFO_ONLY_DIRS`, The build gate).
+
 ## The build gate
 
 With `-c komira.coverage=true`, every `mojo_library` on linux-x86_64 has a
@@ -367,7 +389,8 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
    (`policy.bzl`) or a fixture of the tests cell (unless it passes
    `coverage_branch_gate = False`) each test's branch records
    (`[coverage][branch_info][<test>]`, `branch/README.md`); they are in
-   repository paths, so no `PKGDIR=` is given. Its `result.json` and
+   repository paths, so no `PKGDIR=` is given; and `--info-package
+   <dir>` for a test-only package (`COVERAGE_INFO_ONLY_DIRS` below). Its `result.json` and
    `summary.md` are the library's `[coverage][gate]`
    (`[coverage][gate][result]`, `[coverage][gate][summary]`).
 
@@ -431,7 +454,25 @@ from its Mojo dependencies (an engine's), which their own tests measure in
 their own gates.
 
 **Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
-`COVERAGE_TARGET_BP = 10000`. A fixture of the `tests` cell may name another mode
+`COVERAGE_TARGET_BP = 10000`, and `COVERAGE_INFO_ONLY_DIRS = ["src/tests"]`:
+test-only packages (`src/` holds what komira ships, and its test-only
+packages are under `src/tests/<kind>/`: e2e tests, conformance suites, test
+helpers). A library whose package's directory, relative to its cell's root,
+is one of these or under one is held to no target: the rule passes its
+package to covcheck as `--info-package`, so it is measured and shown (the
+gate's summary and result, and the pull request's check run) and what
+covcheck finds is information, never a finding (Test-only packages): its
+gate never fails on a finding, in any mode, so its conda package is never
+held back by a finding (a test failing at -O0 or under kcov, or an input
+covcheck refuses, still holds it back), and it gets no ratchet floor. An
+entry must be a relative directory (no empty, `.` or `..` segment, no
+trailing `/`): `tools/build/mojo/coverage.bzl` fails at load otherwise,
+and `coverage_measure.sh` refuses the line. The rule is a path prefix, not a list of packages: a new
+package under `src/tests/` is test-only with no edit here, and one
+anywhere else is held to the target (`src/testsuite` included: the match
+is at a path-segment boundary). Test 46 builds a library of
+`tests//src/tests/coverage` (the tests cell's `src/tests`) below the target
+green in enforce mode, beside the same library red elsewhere. A fixture of the `tests` cell may name another mode
 (`coverage_mode`), and with it its own gate directory (`coverage_gate`, a
 `cov_gate_dir` with another ratchet or script); anywhere else both are
 refused at load, and at analysis (a BUCK file calling the rule itself) a
@@ -564,7 +605,7 @@ file no test compiled, `Branch not covered`
 per line some of whose branches were not taken (`k of n branches taken on
 this line`), `Mutant survived` per surviving mutant, `Coverage exemption`
 (`notice`) per marker. Level `warning` in census and neutral mode, `failure`
-in enforce mode.
+in enforce mode; `notice` in every mode for a test-only package's files.
 
 The check run carries the first `--max-annotations` (default 1000) of that
 list, in that order, and the summary then says
@@ -679,7 +720,12 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    measured`, with the reason, in both summaries; the job stays green;
 5. `covcheck report` over the reports of the libraries measured and their
    branch records (`--branch-lcov`), with the
-   policy's mode and target, `git ls-files -z` as `--repo-files`, the head
+   policy's mode and target, each directory of its
+   `COVERAGE_INFO_ONLY_DIRS` as an `--info-package` (the root cell's root
+   is the repository's, so a directory relative to it is a repository
+   directory; a test-only package's findings are information, so they
+   neither fail the check run in enforce mode nor annotate above `notice`),
+   `git ls-files -z` as `--repo-files`, the head
    as `--head-sha`, and the ratchet's comment lines and the rows of the
    measured libraries' packages only (`report` compares every row it is
    given, and a row of a package not measured here would read as a
@@ -751,6 +797,141 @@ assert_equal(m.reason, "the caller checked n > 0")
 assert_true(not marker_in("    abort()  #cov: unreachable no").found)
 assert_equal(render_bp(basis_points(2, 3)), "66.66%")
 ```
+
+## Mutation score
+
+The branch-strength measure where branch coverage is not enforced: a
+mutant is the package with one small fault planted, and a test suite that
+cannot tell the two apart (every welded test still passes) leaves a
+decision untested. Report-only: nothing runs it by default, and no build
+action passes its mutants file to covcheck.
+
+```sh
+./buck2 build -c komira.mutation=true '//src/komira_retry:komira_retry[mutation]'
+```
+
+`-c komira.mutation=true` gives every `mojo_library` on linux-x86_64 the
+sub-target `[mutation]` (`tools/build/mojo/mutation.bzl`), whose outputs
+are `mut/mutants.tsv`, the mutants file above (paths from the repository
+root, `col <c>: <change>; <why>` as the description), and `mut/summary.md`:
+the score, every survivor as `<file>:<line>:<col> <operator>: <change>`,
+timeouts and errors with their reason, the compiler's last lines for each
+`error`, and the mutants a marker suppressed. Nothing
+depends on it, so only building it by name runs anything. With the switch
+off the `mutation_*` attributes are unset (their defaults) and no action
+changes; with it on, no other action of the library changes either.
+
+| setting (`-c komira.<name>=`) | default | what |
+|---|---|---|
+| `mutation` | `false` | the switch |
+| `mutation_sample` | `30` | mutants built per library; `0` is every one |
+| `mutation_seed` | `0` | which ones (below) |
+| `mutation_compile_timeout_secs` | `900` | the limit of each compile of a mutant (its library, each test) |
+| `mutation_run_timeout_secs` | `120` | the limit of each test run of a mutant |
+
+### The mutants
+
+`mutate` (`mutate/`, a `mojo_library` with its tests welded, and
+`:mutate_bin`) lexes each hand-written source of the library (`srcs` that
+are source files; generated ones are compiled, not mutated): identifiers,
+numbers, strings (`"..."`, `'...'`, triple-quoted, prefixed such as
+`r"..."`, and backtick-quoted MLIR text), comments, operators by longest
+match, and logical line ends (none inside brackets or after a backslash).
+Only tokens outside strings and comments are mutated, one change per
+mutant, named `<file>:<line>:<col>:<operator>` (line and column, in bytes,
+of the changed text):
+
+| operator | change |
+|---|---|
+| `cmp_negate` | `==` `!=` `<` `<=` `>` `>=` to its negation: `!=` `==` `>=` `>` `<=` `<` |
+| `arith_swap` | a binary `+` to `-` and back (the token before it is an operand: a name that is not a keyword, a number, a string, a closing bracket), `+=` to `-=` and back |
+| `bool_swap` | `and` to `or` and back |
+| `not_delete` | `not` deleted |
+| `const_inc`, `const_dec` | a decimal integer literal of at most 18 digits (no `_`, `.`, exponent or base prefix) plus one; minus one (not for `0`) |
+| `raise_delete` | a `raise` statement, to its end (over lines while brackets are open, or to a `;`), replaced by `pass` |
+| `return_early` | `return` inserted before the first statement (after a docstring) of a `def` returning nothing (no `->`, or `-> None`) |
+| `return_true`, `return_false` | `return True`; `return False` inserted likewise in a `def` returning `Bool` |
+
+No early return is made for a `def` taking `out` (a constructor), one with
+a one-line body, or one whose first statement is `pass`, `...` or already
+the inserted statement: those mutants are equivalent or cannot compile.
+Shifts, `->`, a unary sign, floats, exponents and hex literals are left
+alone.
+
+**Equivalent mutants.** A mutant no test can kill because it does not
+change behaviour is suppressed in the source by an end-of-line comment on
+the line it is reported at: `# mutation: equivalent <operator>[,<operator>...] <reason>`
+suppresses those operators on that line, and `# cov: unreachable <reason>`
+(see Exemptions) every mutant of the line. Any other comment starting
+`# mutation:` (a bare `# mutation: equivalent`, a misspelt kind), a marker
+with no reason, or one naming an unknown operator, fails the list, naming
+`<file>:<line>`. Suppressed mutants are listed
+in the list file and in the summary under "Suppressed by a marker (need
+approval)", as exemptions are. A mutant that does not compile is not
+equivalent: it is `error`, outside the score's numerator.
+
+**The sample.** Of the library's mutants, the `mutation_sample` whose
+FNV-1a 64 hash of `<seed>` LF `<id>` is smallest are built, in source
+order. A mutant's place in the sample depends on its id, the seed and the
+others' hashes only, so an edit elsewhere moves few mutants in or out, and
+a larger sample with the same seed holds the smaller one. A nightly run
+varies the seed (the date, say) to cover a package over time.
+
+### One mutant's build
+
+For each sampled mutant, under
+`mut/m/<file>/<line>_<col>_<operator>/` (a path named by the id, so a
+mutant's actions are the same actions whatever else was sampled, and
+the cache keeps them while the library's sources, deps and tests are
+unchanged):
+
+1. `mutation_apply`: `mutate apply` writes the file with the change;
+2. `mutation_precompile`: the library's sources with that file in place,
+   precompiled against its deps;
+3. per `test_srcs` entry, `mutation_build_test`: the test built against
+   that package exactly as its gated build is (optimization level,
+   defines, test deps, link), and `mutation_run_test`: its run through the
+   gate's runner exactly as the gate runs it: the test's data, environment
+   and memory cap (none when the gate's run has none).
+
+**The baseline.** The library unchanged goes through the same steps under
+`mut/baseline/` (a no-op `mutate apply` of its first source, the
+precompile, every test's build and run). `mutate score` refuses (the build
+fails, naming the step and its output) unless every baseline step is
+`ok`: a harness that fails every test, such as a wrong runner argument or
+environment, would otherwise count every mutant killed and score 100%.
+
+Each step runs through `mutate/mut_step.sh`, in a session of its own. It
+records `ok`, `fail <status>`, `timeout <secs>` (the step was still running
+at its limit; its whole process group was killed) or `skipped` (a step it
+waits for was not `ok`), then the last lines of the output, and exits 0:
+that is the mutant's result, cached as any action's output. One exception:
+a compile that exits with a status of the compile wrapper's own
+(`mojo_wrapper.sh`: 2, 3 and 4, its refusals; 124, the watchdog; 129, 130
+and 143, a signal) fails the action. That is the machine failing, not the
+mutant, so it is never cached as a result: the build fails and a rerun
+retries it. A file the step writes that is no output (the runner's PASS
+marker, the log) goes to buck2's scratch directory for the action.
+`mut_step_cases` (`mut_step_cases.sh`) holds each of these outcomes. A README's examples are not run against
+a mutant. `mutation_score` (`mutate score`) reads every status and decides,
+first rule that holds:
+
+| status | when |
+|---|---|
+| `error` | the precompile is not `ok`: the mutated library does not compile |
+| `killed` | a test run fails (an assertion, a crash, the memory cap) |
+| `timeout` | a test run timed out |
+| `error` | a test does not compile against it (or its compile timed out) |
+| `survived` | every test compiled and passed |
+
+A test that does not compile is not a kill: `mojo precompile` does not
+instantiate generic code, so a mutant the compiler rejects is often first
+rejected when a test is built against it, and that is the compiler's
+verdict on a stillborn mutant, not a test's.
+
+The score is covcheck's: `killed * 10000 / total` basis points over every
+sampled mutant; the summary also gives the detected share
+(killed or timeout) and the score over the mutants that compiled.
 
 ## Tests
 
