@@ -347,6 +347,16 @@ def test_refusals() raises:
         " 1) at the last transition 8589934592; the file gives AAA (utoff 0,"
         " isdst 0)",
     )
+    # One transition (Africa/Abidjan's shape): the check still runs. The
+    # only transition goes to BBB (+1h DST) at 0, so "AAA0" contradicts it.
+    var one = _two_types()
+    _ = one.times.pop()
+    _ = one.idx.pop()
+    _refused(
+        _v2(_decoy_v1(), one, "AAA0"),
+        'TZif t: the footer "AAA0" gives AAA (utoff 0, isdst 0) at the'
+        " last transition 0; the file gives BBB (utoff 3600, isdst 1)",
+    )
 
 
 def main() raises:
