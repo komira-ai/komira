@@ -18,7 +18,9 @@
 #      assert_mode=none one is off at the default level, a define reaches the
 #      test and the library's package, a test holding 256 MiB for 2 s passes
 #      under a 1024 MiB cap), :bin_none's [run_check] and `buck2 test` of :test_none
-#      pass at ASSERT=none; each twin in tests//negative/assert_level fails
+#      pass at ASSERT=none, and with komira.coverage=true the branch coverage
+#      runs of :lib_none, :lib_defines and :lib_level_and_defines pass (their
+#      bitcode got the level and every define); each twin in tests//negative/assert_level fails
 #      (the same tests at ASSERT=all and at the default level, the same
 #      programs at the default level) and each inadmissible declaration is
 #      refused at analysis; a test that allocates without bound and the
@@ -32,6 +34,14 @@ else
     fail "$(grep -o 'FAIL  assert level: .*' "$LOG/assert_level.log" | cut -c 7- | cut -c 1-400) (see $LOG/assert_level.log)"
 fi
 expect_green assert_level_functional tests//functional/assert_level: tests//functional/mem_cap:
+# Each test's branch coverage run (its bitcode compiled, linked and run, as
+# the gate would read it) passes only when the bitcode got the test's level
+# and defines: at the default level safe_probe's assert fires (exit 132), and
+# a missing define fails the test's assert_equal.
+expect_green assert_level_branch_runs -c komira.coverage=true \
+    'tests//functional/assert_level:lib_none[coverage][branch][test_quiet_at_none]' \
+    'tests//functional/assert_level:lib_defines[coverage][branch][test_define_seen]' \
+    'tests//functional/assert_level:lib_level_and_defines[coverage][branch][test_level_and_defines]'
 if ! "$BUCK2" build tests//functional/mem_cap:cases --show-full-simple-output > "$LOG/mem_cap_cases.txt" 2> "$LOG/mem_cap_cases.log"; then
     fail "mem_cap cases: $(grep '^BAD ' "$LOG/mem_cap_cases.log" | sort -u | tr '\n' ' ')(see $LOG/mem_cap_cases.log)"
 else
