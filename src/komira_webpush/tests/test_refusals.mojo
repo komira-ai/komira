@@ -2,22 +2,29 @@
 # komira_webpush/tests/test_refusals.mojo
 # =============================================================================
 #
-# Every malformed input is refused with its exact message.
+# Each malformed input listed below is refused with its exact message, and
+# the accepting side of each numeric limit listed is pinned.
 #
 #   aes128gcm_decrypt: a body shorter than the header, rs below 18, a keyid
 #     running past the body, a header with no record, a record shorter than
 #     17 bytes, a flipped ciphertext bit, the wrong IKM, a record of only
 #     zero bytes, delimiter 1 in the last record (the RFC 8188 3.2 body cut
 #     after its first record: a truncation), delimiter 2 before the last
-#     record, and a delimiter of 3.
+#     record, and a delimiter of 3; accepted: 257 records at rs 18 (record
+#     256 needs the second sequence-number byte in its nonce).
 #   aes128gcm_encrypt: a 15-byte salt, a 256-byte keyid, rs 17 and 2^32,
-#     a plaintext one byte over one record.
+#     a plaintext one byte over one record; accepted: rs 18 and 2^32 - 1,
+#     a 255-byte keyid.
 #   webpush_encrypt: 3994 bytes of plaintext, a 15-byte auth secret, a
 #     64-byte and an off-curve user agent key, and a sender key source that
 #     returns the group order n.
 #   webpush_decrypt: a 64-byte keyid, two records, a public key that is not
-#     the private key's, an off-curve keyid, the wrong auth secret.
-#   p256_public_key: zero, n and a 31-byte key; n - 1 is accepted.
+#     the private key's, an off-curve keyid, the wrong auth secret, a
+#     64-byte user agent key, a 15-byte auth secret.
+#   webpush_ikm: a 15-byte auth secret, a 64-byte user agent key, a 64-byte
+#     application server key.
+#   p256_public_key: zero, n and a 31-byte key; 1 (point G) and n - 1
+#     (point -G) are accepted.
 # =============================================================================
 
 from std.testing import assert_equal
@@ -33,6 +40,7 @@ from komira_webpush import (
     webpush_decrypt,
     webpush_encrypt,
     webpush_encrypt_with,
+    webpush_ikm,
 )
 
 
@@ -107,7 +115,11 @@ def _sealed(ikm: List[UInt8], var body: List[UInt8], seq: Int, record: List[UInt
         salt.append(body[i])
     var keys = aes128gcm_keys(Span[UInt8](ikm), Span[UInt8](salt))
     var nonce = keys.nonce.copy()
-    nonce[11] = nonce[11] ^ UInt8(seq)
+    # RFC 8188 2.3: the 96-bit nonce is the base nonce XOR the sequence
+    # number as a 96-bit big-endian integer (its top 4 bytes are zero here).
+    for i in range(8):
+        var shift = 8 * (7 - i)
+        nonce[4 + i] = nonce[4 + i] ^ UInt8((seq >> shift) & 0xFF)
     var buf = record.copy()
     for _ in range(16):
         buf.append(UInt8(0))
@@ -211,6 +223,29 @@ def test_content_coding_delimiter_refusals() raises:
     assert_equal(_decrypt_outcome(ikm, good), "OK 414141424242")
 
 
+def test_content_coding_257_records() raises:
+    """rs 18: 257 records of one data byte and a delimiter each. Record 256
+    is the first whose sequence number has a bit above the low byte, so a
+    nonce that XORs only the low byte reuses record 0's nonce there and
+    fails authentication."""
+    var ikm = _b(_IKM_1)
+    var none = List[UInt8]()
+    var body = _header(7, 18, none)
+    var data = List[UInt8]()
+    for seq in range(257):
+        var v = UInt8(seq & 0xFF)
+        var record = List[UInt8]()
+        record.append(v)
+        record.append(UInt8(1) if seq < 256 else UInt8(2))
+        body = _sealed(ikm, body^, seq, record)
+        data.append(v)
+    assert_equal(len(body), 21 + 257 * 18)
+    assert_equal(
+        _decrypt_outcome(ikm, body),
+        String("OK ") + hex_lower(Span[UInt8](data)),
+    )
+
+
 def _encrypt_outcome(
     salt: List[UInt8], keyid: List[UInt8], rs: Int, plaintext: List[UInt8]
 ) -> String:
@@ -254,6 +289,12 @@ def test_content_coding_encrypt_refusals() raises:
         " (at most 1)",
     )
     assert_equal(_encrypt_outcome(salt, none, 18, one), "OK 39")
+    # The accepting side of each limit: rs 2^32 - 1 and a 255-byte keyid.
+    # 21-byte header + keyid + 1 data byte + delimiter + 16-byte tag.
+    assert_equal(_encrypt_outcome(salt, none, 4294967295, one), "OK 39")
+    assert_equal(
+        _encrypt_outcome(salt, _filled(255, 0x61), 4096, one), "OK 294"
+    )
 
 
 def _webpush_outcome(
@@ -382,6 +423,58 @@ def test_webpush_decrypt_refusals() raises:
         _ua_outcome(ua, wrong_auth, body),
         "aes128gcm: record 0 failed authentication",
     )
+    var ua_64 = List[UInt8]()
+    for i in range(64):
+        ua_64.append(ua[i])
+    assert_equal(
+        _ua_outcome(ua_64, auth, body),
+        "webpush: user agent public key must be 65 bytes, got 64",
+    )
+    var auth_15 = List[UInt8]()
+    for i in range(15):
+        auth_15.append(auth[i])
+    assert_equal(
+        _ua_outcome(ua, auth_15, body),
+        "webpush: auth secret must be 16 bytes, got 15",
+    )
+
+
+def _ikm_outcome(
+    auth: List[UInt8], ua_public: List[UInt8], as_public: List[UInt8]
+) -> String:
+    try:
+        var secret = _filled(32, 0x33)
+        var ikm = webpush_ikm(
+            Span[UInt8](secret),
+            Span[UInt8](auth),
+            Span[UInt8](ua_public),
+            Span[UInt8](as_public),
+        )
+        return String("OK ") + String(len(ikm))
+    except e:
+        return String(e)
+
+
+def test_webpush_ikm_refusals() raises:
+    """`webpush_ikm` is public: its own size checks, reached directly."""
+    var ua = _b(_UA_PUBLIC)
+    var auth = _b(_AUTH_SECRET)
+    var ua_64 = List[UInt8]()
+    for i in range(64):
+        ua_64.append(ua[i])
+    assert_equal(_ikm_outcome(auth, ua, ua), "OK 32")
+    assert_equal(
+        _ikm_outcome(_filled(15, 1), ua, ua),
+        "webpush: auth secret must be 16 bytes, got 15",
+    )
+    assert_equal(
+        _ikm_outcome(auth, ua_64, ua),
+        "webpush: user agent public key must be 65 bytes, got 64",
+    )
+    assert_equal(
+        _ikm_outcome(auth, ua, ua_64),
+        "webpush: application server public key must be 65 bytes, got 64",
+    )
 
 
 def _pub_outcome(key: List[UInt8]) -> String:
@@ -403,6 +496,16 @@ def test_p256_public_key_refusals() raises:
         _pub_outcome(_filled(31, 1)),
         "webpush: private key must be 32 bytes, got 31",
     )
+    # 1 is the lower bound and has a zero top byte, as 1 in 256 valid keys
+    # do: its point is the generator G (FIPS 186-4 D.1.2.3).
+    var k_one = _filled(32, 0)
+    k_one[31] = UInt8(1)
+    assert_equal(
+        _pub_outcome(k_one),
+        "OK 04"
+        + "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"
+        + "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+    )
     # n - 1 is -1: its point is -G = (Gx, p - Gy).
     assert_equal(
         _pub_outcome(_hex(_N_MINUS_1_HEX)),
@@ -417,11 +520,15 @@ def main() raises:
     print("PASS aes128gcm_decrypt refusals")
     test_content_coding_delimiter_refusals()
     print("PASS aes128gcm_decrypt delimiter refusals")
+    test_content_coding_257_records()
+    print("PASS aes128gcm_decrypt 257 records")
     test_content_coding_encrypt_refusals()
     print("PASS aes128gcm_encrypt refusals")
     test_webpush_encrypt_refusals()
     print("PASS webpush_encrypt refusals")
     test_webpush_decrypt_refusals()
     print("PASS webpush_decrypt refusals")
+    test_webpush_ikm_refusals()
+    print("PASS webpush_ikm refusals")
     test_p256_public_key_refusals()
     print("PASS p256_public_key refusals")

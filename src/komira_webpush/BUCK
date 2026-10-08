@@ -15,9 +15,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   test_webpush_round_trip  two encryptions over the system CSPRNG differ in
 #                            salt, sender key and ciphertext and both decrypt;
 #                            header shape; 3993 and 0 bytes of plaintext.
-#   test_refusals            every malformed input refused with its exact
-#                            message (header, record, delimiter, key sizes,
-#                            off-curve points, scalar range, record count).
+#   test_refusals            the malformed inputs it lists refused with their
+#                            exact messages (header, record, delimiter, key
+#                            sizes, off-curve points, scalar range, record
+#                            count) and the accepting side of each limit
+#                            (rs, keyid length, scalar 1 and n - 1, 257
+#                            records).
 mojo_library(
     name = "komira_webpush",
     srcs = glob(["*.mojo"]),
