@@ -1,4 +1,9 @@
 # =============================================================================
+# FFI-BOUNDARY: a consumer of the Arrow C Stream Interface structs this
+# library exports. The stream and schema boxes are allocated here with
+# `alloc` and freed here; the exported schema is freed by its own release
+# callback (`release_c_schema`) and the stream by the drain's release call.
+#
 # Arrow C Stream Interface: nested columns through export and import.
 #
 # Spec: https://arrow.apache.org/docs/format/CDataInterface.html (format

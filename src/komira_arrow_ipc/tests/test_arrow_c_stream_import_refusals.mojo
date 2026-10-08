@@ -1,4 +1,12 @@
 # =============================================================================
+# FFI-BOUNDARY: a stand-in foreign producer of Arrow C Data Interface
+# structs. The structs, children arrays and buffers below are allocated here
+# with `alloc`, read by the importer (which copies, and frees nothing of a
+# foreign struct), and left allocated for the life of the test process: each
+# case's struct must outlive the importer's read, and none carries a release.
+# The two schemas the export cases at the end build are released through
+# `release_c_schema` and their boxes freed.
+#
 # Arrow C Stream Interface: what the import side of `c_data_stream.mojo`
 # refuses, and the small tables it decides by.
 #

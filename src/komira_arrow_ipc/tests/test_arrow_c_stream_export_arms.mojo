@@ -1,4 +1,10 @@
 # =============================================================================
+# FFI-BOUNDARY: a consumer of the Arrow C Stream Interface structs this
+# library exports, and a stand-in producer of a few of them. Each stream,
+# schema and array box is allocated here with `alloc` and freed here; what
+# the library filled into a box is freed first by that struct's own release
+# callback (`release_c_*`, or the drain's release of the stream).
+#
 # Arrow C Stream Interface: the export arms of `c_data_stream.mojo`.
 #
 # Spec: https://arrow.apache.org/docs/format/CStreamInterface.html and
