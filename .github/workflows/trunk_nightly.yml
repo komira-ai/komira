@@ -111,8 +111,10 @@ jobs:
               echo "### \`$cmd\`: ${outcome:-not run}"
               echo
               echo '```'
-              # buck2's console stamps some lines with the time: `[<time>] Commands: ...`.
-              lines=$(sed -n -E 's/^(\[[^]]*\] )?((Commands:|BUILD (SUCCEEDED|FAILED)|Tests finished:).*)$/\2/p' "$d/$step.log" 2>/dev/null || true)
+              # buck2's console stamps some lines with the time
+              # (`[<time>] Commands: ...`) and colours some (`Tests finished:`).
+              lines=$(sed -E 's/\x1b\[[0-9;]*m//g' "$d/$step.log" 2>/dev/null |
+                sed -n -E 's/^(\[[^]]*\] )?((Commands:|BUILD (SUCCEEDED|FAILED)|Tests finished:).*)$/\2/p' || true)
               printf '%s\n' "${lines:-(no buck2 summary line)}"
               echo '```'
               if [ -s "$d/$step.report.json" ]; then
@@ -121,7 +123,7 @@ jobs:
                   echo
                   echo "Failed targets:"
                   echo
-                  printf '%s\n' "$failed" | head -n 200 | sed 's/^/- `/; s/$/`/'
+                  printf '%s\n' "$failed" | sed -n '1,200p' | while IFS= read -r t; do printf -- "- \`%s\`\n" "$t"; done
                 fi
               fi
             done
