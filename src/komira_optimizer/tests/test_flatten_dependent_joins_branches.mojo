@@ -193,7 +193,7 @@ def test_walk_lowers_under_every_node_kind() raises:
     partition kinds) it reports the subquery before and not after.
 
     Catches: any one recursion arm of the walk removed (that subquery stays
-    and reaches the engine); a Join arm walking one input only; any one arm
+    in the plan unlowered); a Join arm walking one input only; any one arm
     of `_plan_contains_correlated_subquery` removed (it misses the subquery
     before lowering)."""
     for kind in range(10):

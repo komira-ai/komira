@@ -3,7 +3,7 @@
 # Decorrelation of correlated subqueries
 # =============================================================================
 #
-# Pass-1 INDEP rule. Lowers every `EXPR_CORRELATED_SUBQUERY` Expr node
+# A statistics-independent rule. Lowers every `EXPR_CORRELATED_SUBQUERY` Expr node
 # into existing `LogicalJoin` shapes. After this
 # rule runs, the resulting plan has ZERO `EXPR_CORRELATED_SUBQUERY` nodes
 # remaining (assertable invariant).
@@ -44,8 +44,8 @@
 #                         maps directly to JOIN_SEMI. `outer_refs` may be
 #                         empty (uncorrelated `IN` whose RHS is a subquery).
 #
-# Wiring: invoked from `optimizer.optimize()` as a pass-1 INDEP
-# rule BEFORE join structural rewrites.
+# Pass order: komira_optimizer has no driver that orders its passes. This
+# pass is designed to run BEFORE join structural rewrites.
 #
 # Design constraint:
 #   - SCALAR + parent=Filter (Q17): the agg sink shape implies the parent
@@ -53,7 +53,7 @@
 #     node BELOW the Filter, then replace the inner-scalar Expr in the
 #     Filter predicate with `col_ref(<agg-output-name>)`. To keep the
 #     pass simple and avoid an explicit "lateral" operator (and
-#     add no new engine operators), we lower SCALAR by inserting
+#     add no new physical operators), we lower SCALAR by inserting
 #     an Aggregate above the LEFT join that groups by `outer_refs` and
 #     emits a single aggregated column whose name the rewritten Expr
 #     references. This composes with existing operators (Join + Aggregate +
@@ -391,8 +391,8 @@ def _join_conjuncts(var conjuncts: ExprArray) raises -> Optional[Expr]:
 #     inner NONE refs are re-marked COL_SIDE_RIGHT so the downstream
 #     `join_predicate_decompose` pass rewrites them to the joined-row schema,
 #     applying the `_right` collision-rename that a self-join needs). The
-#     engine's `execute_residual_join_probe` evaluates the residual
-#     per matched pair for SEMI/ANTI/INNER/LEFT.
+#     residual is designed to be evaluated per matched pair for
+#     SEMI/ANTI/INNER/LEFT, outside komira_optimizer.
 #
 # This preserves the outer reference through the flatten — the pre-fix bug was
 # that a non-EQ outer conjunct stayed in the inner Filter where BOTH sides
@@ -932,10 +932,10 @@ def _lower_correlated_into_join(
 
     # Non-equi outer-referencing conjuncts (Q21 `l_suppkey <> l1.l_suppkey`)
     # become a side-qualified join `residual`. `join_predicate_decompose`
-    # (which runs after this pass) rewrites the residual to the
-    # joined-row schema and the engine's `execute_residual_join_probe`
-    # evaluates it per matched pair (SEMI/ANTI single-equi-key + residual is
-    # exactly the Q21 shape). `None` when no non-equi correlation exists.
+    # (designed to run after this pass) rewrites the residual to the
+    # joined-row schema; it is evaluated per matched pair outside
+    # komira_optimizer (SEMI/ANTI single-equi-key + residual is exactly the
+    # Q21 shape). `None` when no non-equi correlation exists.
     var residual: Optional[OwnedPointer[Expr]] = None
     if len(residual_conjuncts) > 0:
         var acc = residual_conjuncts[0].copy()

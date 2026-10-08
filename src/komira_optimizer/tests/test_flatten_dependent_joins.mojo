@@ -1,5 +1,5 @@
 """`flatten_dependent_joins`
-pass-1 INDEP compiler rule unit tests.
+rule unit tests.
 
 Validates the lowering shape per kind, the outer-ref hoist algorithm, the
 UnresolvedOuterRef negative case, and the nested-correlation handling.

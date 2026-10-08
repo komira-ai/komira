@@ -41,10 +41,10 @@
 # only when S is large AND the join keeps most of S's rows (i.e. `other`
 # is NOT selectively filtered). If `other` carries a selective filter the
 # join discards most S rows cheaply and the full agg pass over S is pure
-# overhead — this is the historic Q10 +7% regression. We gate on the
-# DOWNSTREAM join selectivity using real footer row_count (per-column NDV
-# is not wired into the live optimize path, so `estimate_cardinality`
-# row-count + the raw scan `row_count` are the signals we have).
+# overhead — this is the Q10 shape. We gate on the DOWNSTREAM join
+# selectivity using real footer row_count (this pass reads no per-column
+# NDV, so `estimate_cardinality` row-count + the raw scan `row_count` are
+# the signals it has).
 #
 # ⛔ AND THE HALF THAT SENTENCE LEAVES OUT, WHICH HAS BEEN MISQUOTED TWICE AS
 # "eager agg is gated on real footer row counts". WHEN THERE
@@ -67,9 +67,7 @@
 # the only gate. Every such source gets the pre-aggregation whenever the shape
 # qualifies, REGARDLESS OF ACTUAL SIZE. That is not a bug report — it is the
 # documented behaviour of a stats-free plan — but do not cite this pass as
-# "runtime-data-gated" without saying "when a footer exists". Measured with an
-# in-memory 4-row-per-side fixture, which writes ONE aggregate and gets TWO
-# breaker segments.
+# "runtime-data-gated" without saying "when a footer exists".
 #
 # ⭐ AND THE OTHER HALF OF THAT PARAGRAPH IS NO LONGER TRUE, BY DELIBERATE FIX
 # (2026-09-17). The paragraph above described TWO failures under ONE `-1`, and
@@ -79,20 +77,16 @@
 # DENOMINATOR: there is nothing for a cover ratio to be a ratio OF. That case
 # now returns `EAGER_BASE_MULTI_WAY` and gate 3 DECLINES on it (clause 3a).
 # Before the split it merely skipped the test, so the pass fired unguarded on
-# every 3-or-more-table query. Measured on `tpch/q3_shipping_priority`:
-# 3,241,776 filtered lineitem rows
-# pre-aggregated into 829,958 groups of which the join kept 11,620 — 98.60%
-# built and discarded, and 40.69% of that process's cycles in a hash-aggregate
-# family the SQL does not contain. q3's own cover ratio, had it been computed,
-# is 147,126/1,500,000 = 9.81% against the 1/2 threshold.
+# every 3-or-more-table query. `tpch/q3_shipping_priority` is that shape: its
+# cover ratio, had it been computed, is 147,126/1,500,000 = 9.81% against the
+# 1/2 threshold.
 # ⛔ Do NOT "finish" this by declining `EAGER_BASE_NO_STATS` too — that is the
 # documented behaviour immediately above. Both halves, decline and
 # carve-out, are pinned by `tests/test_optimizer_eager_agg_paths.mojo`.
 #
 # NO KILL SWITCH: the pass is UNCONDITIONAL (no environment variable turns
-# it off). The opt-out that remains is a plain `eager_agg` parameter of the
-# optimizer pipeline — production never passes it; a test can, to reproduce
-# the selectivity-driven decline its tiny fixtures cannot.
+# it off). Whether it runs is the caller's decision: komira_optimizer has no
+# driver that orders its passes.
 # =============================================================================
 
 from std.collections import Set
@@ -305,8 +299,8 @@ def _eager_pushdown_beneficial(
 ) -> Bool:
     """Row-count cost gate. Fire only when the pushed side S is large, is
     the many side, and the join is NON-selective on S (the other side is
-    not selectively filtered). Per-column NDV is unavailable in the live
-    optimize path, so this is a row-count / footer-row-count model."""
+    not selectively filtered). This pass reads no per-column NDV, so this
+    is a row-count / footer-row-count model."""
     ref jd = join_plan._join.value()[]
     var s_est: Int
     var other_est: Int
@@ -338,12 +332,8 @@ def _eager_pushdown_beneficial(
     # shape that throws the pre-aggregate away. This clause used to be guarded
     # by `if other_base > 0:` alone, so this case SKIPPED the test instead of
     # FAILING it and the pass fired unguarded on every 3+-table query.
-    # Measured on `tpch/q3_shipping_priority`: the synthesised pre-aggregate
-    # folded 3,241,776 filtered lineitem rows into 829,958 groups of which the
-    # join kept 11,620 — 818,338 (98.60%) built and discarded, 40.69% of the
-    # process's cycles in a hash-aggregate family the SQL does not contain.
-    # Had this clause run, q3's cover ratio is 147,126/1,500,000 = 9.81%
-    # against the 1/2 threshold: a clear decline.
+    # `tpch/q3_shipping_priority` is that shape: its cover ratio is
+    # 147,126/1,500,000 = 9.81% against the 1/2 threshold, a clear decline.
     # ⚠ NOTE WHAT IS *NOT* DECLINED HERE — `EAGER_BASE_NO_STATS`, a reachable
     # scan base that simply carries no `row_count`, still skips the ratio and
     # may fire. That is the documented stats-free behaviour in this file's
@@ -352,7 +342,7 @@ def _eager_pushdown_beneficial(
     # `tests/test_optimizer_eager_agg_paths.mojo`.
     if other_base == EAGER_BASE_MULTI_WAY:
         return False
-    # 3b. The measured ratio, when there IS a base to measure against.
+    # 3b. The cover ratio, when there IS a base to compute it against.
     if other_base > 0:
         # other_est / other_base >= COVER_NUM / COVER_DEN  (avoid float)
         if (
@@ -482,10 +472,10 @@ def _classify_eager_push(
 
     # --- S must be a REDUCIBLE LEAF (Scan / Filter* / Project* over ONE
     #     scan — no join/aggregate underneath). Pushing a partial agg over
-    #     a multi-way sub-join intermediate is the historic Q10 +7%
-    #     overhead (the pre-agg pass costs more than the buried-selective
-    #     join saves). Restricting S to a leaf keeps Q10 (whose fact side
-    #     is a sub-join) declined while admitting q13 (orders = Filter(Scan)).
+    #     a multi-way sub-join intermediate is the Q10 shape (the pre-agg
+    #     pass costs more than the buried-selective join saves). Restricting
+    #     S to a leaf keeps Q10 (whose fact side is a sub-join) declined
+    #     while admitting q13 (orders = Filter(Scan)).
     if push_to_left:
         if not _is_reducible_leaf(jd.left[]):
             return _EagerDecision(_EAGER_NONE)
@@ -628,9 +618,9 @@ def _perform_eager_rewrite(
 
 
 def eager_aggregate_pushdown(var plan: LogicalPlan) raises -> LogicalPlan:
-    """Cross-side eager aggregation pushdown. UNCONDITIONAL — the caller
-    (`_optimize_pipeline_core`) owns the opt-out via its `eager_agg`
-    parameter, so this entry always rewrites."""
+    """Cross-side eager aggregation pushdown. UNCONDITIONAL — whether to run
+    the pass is the caller's decision (komira_optimizer has no driver that
+    orders its passes), so this entry always rewrites."""
     return _eager_rec(plan^)
 
 

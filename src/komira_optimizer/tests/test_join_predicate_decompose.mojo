@@ -549,7 +549,7 @@ def test_case_walks_reach_every_when_case() raises:
     1's condition, or only in case 1's result, and False when no case has one.
 
     Catches: either WHEN loop bounded to the first case (case 1 dropped from
-    the rebuilt CASE, or copied with `right.k` raw so the engine sees a
+    the rebuilt CASE, or copied with `right.k` raw so the residual keeps a
     side-qualified ref; or a raw `predicate=` residual whose only side ref
     is in a later case is never decomposed)."""
     var cols = _left_cols()

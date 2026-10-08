@@ -222,31 +222,17 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 # that renames or computes a comparator column.
 #
 #   * ClickBench Q35. The agg-group FD rule re-emits
-#     `client_ip - 1/-2/-3` in the post-aggregate Project; the walker evaluated
-#     them serially on the driver over all 9,762,046 groups before the TopN —
-#     449 ms of a 1,557 ms query. The pushed plan, written by hand as
-#     SQL: -450 ms alone there. This rule emits that plan
-#     (`Project[5] > TopN > Aggregate[1 key]`, runner `--explain`).
-#
-# REACH, MEASURED 2026-09-23 by materializing the 42 benchmark queries
-# with GROUP BY + ORDER BY + LIMIT: a pre-rule binary vs this one, comparing the
-# AGG-TOPK trace and `--dump`. The TopN's input
-# changes on EXACTLY FOUR queries, and on each the stamp flips from refused to
-# STAMPED: cbq35 (the computed restore above), and three pure renames, cbq18
-# (`__grp_key_0 AS m`), cbq39 (`__grp_key_0 AS src`, `url AS dst`, under
-# `OFFSET 1000`) and cbq42 (`__grp_key_0 AS m`, `OFFSET 1000`). All 42 dumps
-# are row-for-row identical between the two binaries; cbq35, cbq18 and cbq39
-# also match DuckDB row for row, and cbq42 matches it up to timestamp rendering.
-# Only cbq35 has a measured cost effect. On the three renames the bounded drain
-# still declines (the drain refuses a var-width ORDER BY key, and cbq42
-# has only 1,440 groups), so their route is otherwise unchanged.
-# ⚠ Measure reach by materializing the plan, never with `--explain`: explain
-# optimizes BEFORE an OFFSET is absorbed into the plan.
+#     `client_ip - 1/-2/-3` in the post-aggregate Project, which is then
+#     evaluated over every group before the TopN. This rule emits the pushed
+#     plan instead (`Project[5] > TopN > Aggregate[1 key]`).
+#   * Pure renames over an aggregate (ClickBench cbq18 `__grp_key_0 AS m`,
+#     cbq39 `__grp_key_0 AS src`, `url AS dst`, cbq42 `__grp_key_0 AS m`):
+#     the TopN's child becomes the aggregate, as above.
 #
 # ── THE ONE HAZARD: THE TIE ORDER ───────────────────────────────────────────
 #
-# The engine does not sort by `keys` alone. Before the cut it WIDENS them with
-# a deterministic tie-break over the TopN's INPUT schema
+# A TopN is not designed to sort by `keys` alone. Before the cut its keys are
+# WIDENED with a deterministic tie-break over the TopN's INPUT schema
 # (`topn_tiebreak_policy.append_deterministic_tiebreak_schema`
 # — every INT64/INT32/FLOAT64 column not already a key, in schema order, ASC).
 # Moving the TopN below the Project CHANGES ITS INPUT SCHEMA, so the widened
@@ -257,8 +243,8 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 # prove it cannot happen, and declines whenever it cannot.
 #
 # THE PROOF, per candidate:
-#   1. Widen `keys` over the PROJECT's schema exactly as the engine does today:
-#      that is the comparator the un-rewritten plan executes.
+#   1. Widen `keys` over the PROJECT's schema exactly as `topn_tiebreak_policy`
+#      does: that is the comparator the un-rewritten plan is designed to use.
 #   2. Translate every entry through the Project. A col-ref (renamed or not)
 #      maps to its aggregate column. An entry that orders NOTHING is dropped:
 #      a column already in the list (two names for one column), or a
@@ -283,9 +269,9 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 #
 # ⛔ WHAT IT DELIBERATELY DOES NOT DO: make the translated tie-break keys
 # EXPLICIT on the new TopN so that a reordering Project could be served too.
-# The engine pads each appended tie-break key's NULL placement
-# (in the engine's TopN operator); an explicit key would have to restate
-# that padding here — a second copy of an engine rule — and the resulting
+# An appended tie-break key's NULL placement is padded at execution, outside
+# komira_optimizer; an explicit key would have to restate that padding here —
+# a second copy of an executor rule — and the resulting
 # non-default placement list would make the AGG-TOPK stamp decline
 # (`is_explicit_nulls_first_request`) -- the stamp this rule exists to reach. Declined, not
 # approximated.
@@ -293,8 +279,8 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 # ⛔ ONLY OVER AN AGGREGATE, AND ONLY WHEN THE PROJECT DOES WORK. A pure
 # same-name col-ref Project is already peeled by the AGG-TOPK stamp and costs a
 # column narrow; moving the TopN buys nothing there, so the plan is left as it
-# is. Over a join, a scan or a distinct the totality argument is unavailable
-# and nothing has been measured.
+# is. Over a join, a scan or a distinct the totality argument is unavailable,
+# so the rule declines.
 #
 # ⛔ THE PROJECT IS NOW EVALUATED OVER `n` ROWS INSTEAD OF EVERY GROUP. For a
 # deterministic, row-local expression that is the same value on every row it
@@ -367,7 +353,7 @@ def _row_local_shape(e: Expr) -> Bool:
         expression hiding one would under-report its inputs and a comparator
         entry that DOES order rows would be dropped -- a wrong answer.
     Any other tag returns False and the rule DECLINES. That covers both
-    measured shapes (Q35's `client_ip - k`, cbq18's rename) and costs, at worst,
+    target shapes (Q35's `client_ip - k`, cbq18's rename) and costs, at worst,
     a missed rewrite -- never a wrong one. Widening it is a per-tag decision
     with a test, not a default."""
     var tag = e.tag
@@ -461,8 +447,8 @@ def _build_topn_below_project(imm plan: LogicalPlan) raises -> Optional[LogicalP
         or len(td.nulls_first) != n_explicit
     ):
         return None
-    # Two output columns under one name: the engine resolves a key to the
-    # FIRST, and so would this rule, but nothing here needs to reason about it.
+    # Two output columns under one name: a key would resolve to the FIRST,
+    # but nothing here needs to reason about it, so decline.
     for i in range(n_out):
         for j in range(i):
             if s_p.field_name(i) == s_p.field_name(j):

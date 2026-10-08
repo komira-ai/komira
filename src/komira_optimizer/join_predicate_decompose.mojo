@@ -22,18 +22,12 @@
 #     `<name>_right` form (matching `LogicalPlan.join`'s schema-builder) is
 #     used. If no residual conjunct survives, `residual` becomes None and the
 #     join is a pure equi-join indistinguishable from a classic `on=` join.
-#   - The engine residual-eval is wired.
-#     `plan_compiler._compile_join` threads a surviving `residual` onto the
-#     emitted OP_JOIN_PROBE; `engine_operators.nested_loop_join.
-#     execute_residual_join_probe` collects candidate equi-matched (or, with
-#     zero equi-keys, cross-product) pairs, assembles the matched-pair batch,
-#     evaluates the residual via `_eval_predicate`, and emits per join type
-#     (INNER: filter; LEFT: bitmap + NULL-fill; SEMI/ANTI: bitmap). The two
-#     remaining carve-outs raise a clear error in `_compile_join` /
-#     `execute_residual_join_probe`: (a) MORE THAN ONE lifted equi-key plus a
-#     residual; (b) RIGHT / FULL join + residual. (TPC-H Q21 — the canonical
-#     NEQ-correlated shape — is single-equi-key SEMI/ANTI, so neither
-#     carve-out blocks the headline use case.)
+#   - Evaluating the residual is outside komira_optimizer: the plan
+#     compiler and the residual join probe that consume it are not in this
+#     tree. The residual is designed to be evaluated per candidate
+#     equi-matched (or, with zero equi-keys, cross-product) pair, emitting
+#     per join type (INNER: filter; LEFT: bitmap + NULL-fill; SEMI/ANTI:
+#     bitmap).
 #
 #   Important downstream-rule invariant: this pass runs
 #   BEFORE every join-reorder / rebuild rule. The ~20 sites that
@@ -60,15 +54,14 @@
 #   - DataFusion `physical-plan/src/joins/`: `HashJoinExec` carries
 #     `filter: Option<JoinFilter>` evaluated per matched probe-row in the
 #     probe loop (`apply_join_filter_to_indices` in `utils.rs`) — exactly
-#     the `residual` shape; the engine-side `execute_residual_join_probe`
-#     follows it. `nested_loop_join.rs` is the reference for the zero-equi-
+#     the `residual` shape. `nested_loop_join.rs` is the reference for the zero-equi-
 #     key (pure-range / band) fallback.
 #
-# Wiring: invoked from `optimizer.optimize()` AFTER
-# `flatten_dependent_joins` and BEFORE the `plan_compile_cache`
-# `structural_hash` is taken. Idempotent: a re-run is a no-op because after
-# the first run the residual contains only plain (COL_SIDE_NONE) col-refs,
-# so `_residual_needs_decompose` returns False.
+# Pass order: komira_optimizer has no driver that orders its passes. This
+# pass is designed to run AFTER `flatten_dependent_joins` and BEFORE the
+# plan's `structural_hash` is taken for a compile cache key. Idempotent: a
+# re-run is a no-op because after the first run the residual contains only
+# plain (COL_SIDE_NONE) col-refs, so `_residual_needs_decompose` returns False.
 # =============================================================================
 
 from std.memory import OwnedPointer

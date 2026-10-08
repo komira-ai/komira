@@ -44,8 +44,8 @@
 #       edges. E.g. if the chain has `l_partkey = p_partkey` AND
 #       `l_partkey = ps_partkey`, then `p_partkey = ps_partkey` follows
 #       by transitivity. The synthetic edge ADDS no constraint to the
-#       join query — it's a redundant condition that the engine can
-#       choose to enforce or not.
+#       join query — it's a redundant condition that execution may
+#       enforce or not without changing the answer.
 #
 #   (b) DPccp consumes `chain.edges` via `_build_neighbors`, which
 #       deduplicates per-pair neighbors.

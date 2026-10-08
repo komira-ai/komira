@@ -30,7 +30,8 @@
 # EXPR_WINDOW_FN / EXPR_WHEN halts the rewrite for that OR (sub-branches
 # still get a chance via the recursive descent).
 #
-# Slot in the pipeline: BEFORE `push_predicates_down` so the newly
+# Pass order: komira_optimizer has no driver that orders its passes. This
+# pass is designed to run BEFORE `push_predicates_down` so the newly
 # hoisted conjuncts become predicate-pushdown candidates. Same shape as
 # `decompose_symmetric_or` -- see `optimizer_symmetric_or.mojo`.
 #

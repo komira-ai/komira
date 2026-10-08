@@ -9,11 +9,11 @@
 # `_build_topn_below_project` and every arm of its walk with plans built in
 # memory, and assert the SHAPE: fired (Project over TopN over Aggregate, keys
 # translated, placement carried) or declined (the plan comes back as built).
-# The answer-on-ties oracle runs the engine's TopN kernel and moves with the
-# engine; it is an extra integration test, not this module's coverage.
+# An answer-on-ties oracle needs a TopN executor, which is not in this tree;
+# it is an integration test, not this module's coverage.
 #
-# The fixtures are the measured shapes the rule was written for (ClickBench
-# Q35 and Q39, a renamed string key) plus one falsifier per gate.
+# The fixtures are the shapes the rule was written for (ClickBench Q35 and
+# Q39, a renamed string key) plus one falsifier per gate.
 # =============================================================================
 
 from std.memory import OwnedPointer

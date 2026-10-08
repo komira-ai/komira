@@ -962,12 +962,10 @@ def greedy_join_order(var chain: JoinChain) raises -> LogicalPlan:
     Cost model: legacy `max(l, r)` fallback via
     `estimate_join_cardinality_for_reorder`. The NDV-aware path
     (`estimate_join_cardinality_with_ndv`) is the DPccp cost function
-    (`optimizer_dpccp._cost_for_pair`); greedy intentionally does NOT
-    consume it. Re-enabling greedy-NDV was measured: TPC-H
-    Q9 regressed 39%, Q7 33% and Q8 31%. Multi-way reordering wins flow through
-    DPccp (n>=4 chains via `should_use_dpccp`); greedy serves the
-    n<4 fallback path where the small chain shape makes the FK-PK
-    cost signal moot.
+    (`optimizer_dpccp._cost_for_pair`, not in this tree); greedy
+    intentionally does NOT consume it. Multi-way reordering is designed to
+    go through DPccp (n>=4 chains); greedy serves the n<4 fallback path,
+    where the small chain shape makes the FK-PK cost signal moot.
     """
     var first = _take_smallest_relation(chain.relations)
     var current_set = RelationSet.singleton(first.id)
@@ -1047,7 +1045,7 @@ def reorder_joins(var plan: LogicalPlan) raises -> LogicalPlan:
     first reorder both children (so any nested chains become part of the
     outer chain's leaves), then extract and apply greedy.
 
-    For non-INNER joins (LEFT / RIGHT / FULL / SEMI / ANTI / CROSS / SMJ)
+    For non-INNER joins (LEFT / RIGHT / FULL / SEMI / ANTI / CROSS)
     we only recurse -- they're reorder barriers because their semantics
     depend on side.
     """

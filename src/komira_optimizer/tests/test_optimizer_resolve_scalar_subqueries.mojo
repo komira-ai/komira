@@ -140,7 +140,7 @@ def test_a_plan_without_a_subquery_passes_through() raises:
 
 def test_a_miss_requests_the_inner_plan_and_leaves_the_site() raises:
     # Catches: a miss that rewrites anyway, or a request keyed on anything but
-    # the inner plan's structural hash (the engine binds by that key).
+    # the inner plan's structural hash (bindings are keyed by it).
     var plan = LogicalPlan.filter(_gt(_q(), _subq()), _lineitem())
     var before = plan.structural_hash()
     var deps = ScalarDepTable()

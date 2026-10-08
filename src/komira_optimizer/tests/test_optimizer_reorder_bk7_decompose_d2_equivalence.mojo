@@ -113,8 +113,9 @@ def _build_bk7_residual_composite_join(
 def plan_default_algo() -> UInt8:
     """Default join algo hint constant (JOIN_ALGO_AUTO = 0).
 
-    Local constant to avoid importing JOIN_ALGO_AUTO from the engine
-    layer; the wire format is a UInt8 and AUTO is 0 by contract."""
+    Local constant rather than importing JOIN_ALGO_AUTO from
+    `komira_plan_ir.logical_plan`; the wire format is a UInt8 and AUTO is 0
+    by contract."""
     return UInt8(0)
 
 

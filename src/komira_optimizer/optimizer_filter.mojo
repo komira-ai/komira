@@ -243,8 +243,9 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
     paths use in-place walks via push_predicates_down_inplace_walk so
     operators above a Filter no longer rebuild on every pass.
     """
-    # ★★ A UDF-CARRYING NODE IS OPAQUE TO THIS PASS. Restored 2026-09-01 after
-    # `test_optimizer_udf_node_opacity.mojo` measured BOTH halves failing.
+    # ★★ A UDF-CARRYING NODE IS OPAQUE TO THIS PASS. Pinned by
+    # `test_optimizer_udf_node_opacity.mojo`, which fails on BOTH halves
+    # without it.
     #
     # This node's `predicate` is a PLACEHOLDER — the UDF path stamps `lit(true)`
     # because the customer's predicate IS the UDF — and `lit(true)` is the most
@@ -299,7 +300,7 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             # is illegal for non-stateless UDFs") outlived the guard by fifteen
             # months: a change removed it on day one because `ProjectData`
             # had lost its `udf` field, and a later change PUT THE FIELD BACK ON
-            # day two. Measured 2026-09-01: without this, a Filter pushed
+            # day two. Without this, a Filter pushed
             # through a UDF-Project rebuilds it via `LogicalPlan.project(...)`
             # — the NON-UDF factory — and the customer's function is simply
             # GONE, leaving the placeholder col-refs to execute in its place.
@@ -428,12 +429,9 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             # `scan_from_source` to preserve the SourceVariant's inline
             # batch payload (for SOURCE_IN_MEMORY scans built from
             # an in-memory record batch or by the scalar-broadcast rewrite).
-            # Earlier, this path called `LogicalPlan.scan(source_path,
-            # source_type, ...)` which builds an EMPTY InMemorySource
-            # Slab (the inline_batch param was retired); for
-            # registry-backed legacy scans the engine then resolved via
-            # `registry.lookup(name)`, but a later change removed the producer-
-            # side registry write so this path must preserve the inline
+            # `LogicalPlan.scan(source_path, source_type, ...)` would build
+            # an EMPTY InMemorySource Slab, and nothing resolves an
+            # in-memory scan by name, so this path must preserve the inline
             # batch. `SourceVariant.copy()` is a refcount-bump on the
             # ArcPointer[Slab[RecordBatch]] payload (no buffer byte-copy).
             var src_copy = child._scan.value()[].source.copy()
@@ -752,11 +750,9 @@ def _predicate_refs_in_schema(expr: Expr, schema: Schema) -> Bool:
     #
     # ⚠ THIS FALLBACK IS OPEN, AND THAT IS WHY THIS BUG HAS NOW HAPPENED TWICE.
     # It is correctness-SAFE (claiming "refs every schema" only ever PREVENTS a
-    # pushdown) and performance-PESSIMAL. Measured when this landed, this walker has
-    # arms for 8 tags while its complete sibling
-    # (`optimizer_helpers._collect_expr_columns`) has 15. EXPR_REGEXP was one
-    # of the eight missing and this commit closes it; SEVEN are still missing.
-    # A predicate built from any of those still never descends.
+    # pushdown) and performance-PESSIMAL. This walker has fewer arms than its
+    # complete sibling (`optimizer_helpers._collect_expr_columns`); the counts
+    # are below. A predicate built from any missing tag never descends.
     #
     # ⚠ THIS PARAGRAPH WAS HAND-COUNTED AND WAS WRONG ON BOTH NUMBERS THE DAY
     # IT LANDED: it said the sibling had 14 arms and named SIX
@@ -768,8 +764,7 @@ def _predicate_refs_in_schema(expr: Expr, schema: Schema) -> Bool:
     # walker arms: 10
     # sibling arms: 17
     # missing: EXPR_AGG_FN EXPR_CORRELATED_SUBQUERY EXPR_MATH_FN EXPR_MATH_FN2 EXPR_SUBSTRING EXPR_WHEN EXPR_WINDOW_FN
-    # None has a measured cost in the 119-query corpus today, which is why they
-    # are named here rather than fixed blind.
+    # They are named here rather than fixed blind.
     return True
 
 
@@ -1346,9 +1341,7 @@ def _right_key_orig(
 #
 # It was a SIXTH statement of a join-key admission rule — "INT64 only",
 # written for the era when every single-key hash-join probe hardcoded
-# `as_primitive[DType.int64]` — and it had ZERO callers. Measured 2026-09-21:
-# `grep -rn _column_is_int64 src/ tests/` found its own definition and two
-# test COMMENTS naming it as history, nothing else. The path it guarded went
+# `as_primitive[DType.int64]` — and it had ZERO callers. The path it guarded went
 # away with an earlier deletion. A dead rule that disagrees with the live
 # one is the thing this unification exists to remove, so it goes rather than
 # being re-pointed at the table.
@@ -1365,8 +1358,8 @@ def _column_is_supported_key(name: String, schema: Schema) -> Bool:
       * this gate REFUSING a key the executor serves is the expensive one. The
         equi-conjunct then stays `Filter(equi, CROSS)` and the walker
         materializes the full N*M Cartesian product first — a single
-        mis-sized allocation that returns null (a 2M x 2M varchar join,
-        as measured). That is strictly worse than the refusal it stands in
+        mis-sized allocation that returns null (a 2M x 2M varchar join).
+        That is strictly worse than the refusal it stands in
         for, and it is exactly what happened between an earlier day and
         2026-09-21, when INT32 was admitted to all three executor-side ladders
         and this one was never moved.

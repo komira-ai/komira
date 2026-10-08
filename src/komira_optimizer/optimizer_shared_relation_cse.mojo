@@ -8,7 +8,7 @@
 # q11 is `partsupp x supplier x nation[GERMANY] GROUP BY ps_partkey HAVING
 # sum(value) > (SELECT sum(value)*fraction FROM the SAME germany join)`.
 # `scalar_subquery_decorrelate` turns the uncorrelated scalar
-# threshold into a broadcast `JOIN_CROSS`, so after optimize() the plan is:
+# threshold into a broadcast `JOIN_CROSS`, so after that pass the plan is:
 #
 #   Filter(part_value > __scalar_subq_0)
 #     Join(CROSS)
@@ -18,16 +18,15 @@
 #         Aggregate(group_by=[], SUM(value) AS __scalar_total)
 #           <GERMANY JOIN>                                           (needs value)
 #
-# BOTH branches re-read the identical `partsupp x supplier x nation[GERMANY]`
-# join -- the base join is executed TWICE. DuckDB computes it once (the HAVING
-# scalar is one aggregate over the same relation). Subtree-level plan-CSE
-# (`plan_cse_eliminate`) WOULD fold them, but its `PLAN_CSE_REF` output is a DAG
-# edge the tree-shaped walker (`materialize_subplan`) cannot execute, so it is
-# DEAD on every live engine path; and the CSE-aware column-need-union that would
-# keep the two germany-join subtrees structurally identical is OFF by default
-# (a deliberate q2 win). So the two germany joins are pruned
-# DIFFERENTIALLY (the LEFT reads ps_partkey, the RIGHT does not) -> different
-# `structural_hash` -> nothing folds them.
+# BOTH branches carry the identical `partsupp x supplier x nation[GERMANY]`
+# join, so executing the plan as written runs the base join TWICE. DuckDB
+# computes it once (the HAVING scalar is one aggregate over the same relation).
+# Subtree-level plan-CSE (`plan_cse_eliminate`, not in this tree) would fold
+# them, but its `PLAN_CSE_REF` output is a DAG edge a tree-shaped executor
+# cannot run; and column pruning does not keep the two germany-join subtrees
+# structurally identical: they are pruned DIFFERENTIALLY (the LEFT reads
+# ps_partkey, the RIGHT does not) -> different `structural_hash` -> nothing
+# folds them.
 #
 # THE FIX (the same walker-safe "materialize once, share the OUTPUT batch"
 # pattern `optimizer_agg_cse` uses for the q15 shared grouped aggregate)
@@ -36,11 +35,14 @@
 # projection (a projection-insensitive fingerprint), materialize the WIDER of
 # the two (whose output columns are a superset) EXACTLY ONCE to a `RecordBatch`,
 # and replace BOTH aggregate children with an `InMemorySource` scan leaf that
-# shares that batch by ArcPointer refcount. The IR stays a TREE (walker-safe --
+# shares that batch by ArcPointer refcount. This module does the two pure
+# halves (`detect_shared_cross_canonical`, `install_shared_cross_source`);
+# materializing the batch between them is the caller's, outside
+# komira_optimizer. The IR stays a TREE (walker-safe --
 # an in-memory scan is a leaf the walker already resolves) and each consumer
 # reads its OWN copy of the shared batch, so the single-consumer invariant is
-# preserved and the compared values are byte-identical. The germany join is now
-# BUILT ONCE.
+# preserved and the compared values are byte-identical. The germany join is
+# then BUILT ONCE.
 #
 # BYTE-SAFETY: an aggregate's output schema depends ONLY on its group_by + agg
 # exprs (resolved by column NAME against its child), never on which EXTRA

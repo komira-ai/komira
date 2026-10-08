@@ -2,8 +2,8 @@
 # test_optimizer_scalar_deps -- the dependency channel, in isolation
 # =============================================================================
 #
-# `ScalarDepTable` carries requests from the optimizer to the engine and
-# bindings back. These tests pin its four contracts:
+# `ScalarDepTable` carries requests from the passes to a caller that executes
+# plans (not in this tree) and bindings back. These tests pin its four contracts:
 #   * a request is de-duplicated by (kind, key), keeping the FIRST plan;
 #   * `clear_requests` drops requests and keeps bindings;
 #   * a lookup matches kind AND key;
@@ -93,7 +93,8 @@ def test_the_same_key_under_another_kind_is_a_second_request() raises:
 
 def test_clear_requests_keeps_the_bindings() raises:
     # Catches: `clear_requests` that also clears the bindings (the second
-    # optimizer pass would then miss again and the engine loop never ends).
+    # run of the passes would then miss again and the protocol loop never
+    # ends).
     var deps = ScalarDepTable()
     deps.bind_scalar(5, ScalarValue.from_int(42))
     deps.request(DEP_SCALAR_SUBQUERY, 9, _scan(String("a.parquet"), String("x")))

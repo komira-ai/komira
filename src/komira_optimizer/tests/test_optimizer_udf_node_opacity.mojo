@@ -203,8 +203,7 @@ def test_copy_plan_preserves_the_udf_on_all_three_carriers() raises:
     the NON-UDF factory, under a comment saying the field no longer existed —
     removed one day, field restored the next, note never updated. Every
     `_take_*_child` helper routes through `_copy_plan`, and `_copy_plan` is
-    called from ~60 sites across six optimizer rule modules plus
-    `EngineContext.explain_analyze`.
+    called from ~60 sites across six optimizer rule modules.
 
     ⚠ AND `_copy_plan`'s EXISTING POST-CONDITION PASSED OVER IT. It checks that
     the VARIANT payload is present — and a Filter whose `_filter` is populated

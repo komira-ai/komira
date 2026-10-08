@@ -117,10 +117,10 @@
 # Pipeline placement
 # ==================
 #
-# The rule runs AFTER predicate pushdown (so pushed filters shrink the
+# komira_optimizer has no driver that orders its passes. The rule is
+# designed to run AFTER predicate pushdown (so pushed filters shrink the
 # partial agg input) and BEFORE inner->semi conversion and join
 # reordering (so downstream cost models see the reduced cardinality).
-# This matches v0.3's pipeline ordering.
 #
 # Interaction with the existing (naive) push_aggregate_below_join rule:
 # the v0.4 optimizer previously contained a simplified version in
@@ -128,7 +128,7 @@
 # on the left side. That version was unsound for non-trivial joins
 # (it dropped the join key and skipped the merge step), so we delete it
 # in favour of this partial/merge rule. The public entry-point name
-# `push_aggregate_below_join` is preserved for the optimizer pipeline.
+# `push_aggregate_below_join` is kept.
 # =============================================================================
 
 from std.collections import Set

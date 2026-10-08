@@ -272,7 +272,7 @@ def test_a_side_whose_only_column_is_the_key_returns_zero() raises:
 
 def test_a_residual_or_a_multi_key_join_is_refused() raises:
     # Catches: narrowing under a residual the leaf evaluates by name over the
-    # joined batch, or under a multi-key join the measured route never takes.
+    # joined batch, or under a multi-key join the leaf is not designed for.
     var residual = Optional[OwnedPointer[Expr]](
         OwnedPointer(
             Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("bv"))

@@ -7,9 +7,8 @@
 # to its owning scan — it stayed as a Filter above the ENTIRE join tree, so the
 # multi-way join processed every row and applied the (typically ~5% selective)
 # string filter LAST. On TPC-H q9 (`p_name LIKE '%green%'`) this left the
-# ~800K-partsupp / 6M-lineitem join chain running at full width; pushing the
-# filter onto the `part` scan cut the join-chain intermediate ~18x and moved q9
-# from ~781ms to ~313ms (2.5x).
+# ~800K-partsupp / 6M-lineitem join chain running at full width instead of
+# filtering `part` first.
 #
 # TWO root causes, both in `optimizer_filter.push_predicates_down` /
 # `_predicate_refs_in_schema`:
@@ -41,62 +40,21 @@
 # `.str.contains("a.*b")` in pandas and polars alike (the skins' LIKE
 # lowering, its `"regex"` arm).
 #
-# WHAT LED HERE — AND NOT WHAT THIS FIXES. On the 119-query four-surface
-# corpus the sql and mojo surfaces emit `StringOp(LIKE, ...)` for a query whose
-# two skins emit `Regexp`, so the surfaces execute two different plans for one
-# question:
-#
-#   tpch/q13 `o_comment NOT LIKE '%special%requests%'`   skins 3,013 ms vs sql 88 ms   33.4x
-#   tpch/q16 `s_comment LIKE '%Customer%Complaints%'`    skins   321 ms vs sql 41 ms    8.1x
-#
-# ⛔ NEITHER RATIO IS CLOSED BY THE ARM BELOW, AND NO TEST IN THIS FILE GUARDS
-# EITHER ONE. Both are KERNEL gaps, not pushdown gaps: the skins ALREADY push
-# q13's ON-conjunct onto the `orders` side themselves
-# (the skins' own residual pushdown), so the skin plan and
-# the sql/mojo plan differ only in the PREDICATE NODE — `Regexp` against
-# `StringOp(LIKE)`. `eval_string_like` decomposes `%lit%lit%` into ordered
-# libc `memmem` searches (a fast path added FOR q13).
-#
-# ⛔ AND `eval_regexp_like` NO LONGER LACKS THAT PATH — THIS PARAGRAPH SAID IT
-# DID, AND WAS ALREADY FALSE WHEN IT LANDED. A kernel commit (10:11,
-# EIGHT MINUTES before this file's prose was written at 10:19) added
-# `regexp_like_as_like_pattern`: it reads the compiled `RegexProgram` for the
-# shape `SAVE0 (CHAR)+ ( .* (CHAR)+ )* SAVE1 MATCH` and hands the equivalent
-# `%seg1%seg2%` to `eval_string_like`, so the two surfaces now author different
-# NODES and execute the SAME KERNEL. q13 and q16 are exactly that shape —
-# `like_shape`'s regex arm emits `(?s)special.*requests`, and the inline `(?s)`
-# is load-bearing here twice over: it is there because SQL's `%` crosses a
-# newline and a bare `.` does not, and it is also what satisfies the
-# recogniser's DOTALL refusal (`OP_ANY` with `a == 1`). A non-DOTALL `.*` is
-# REFUSED and falls back to the Pike VM.
-#
-# ⚠ SO THE KERNEL HALF IS CLOSED, AND THE SENTENCE BELOW ABOUT THESE
-# RATIOS SURVIVING IS ABOUT **THIS FILE'S ARM ONLY** (the pushdown), which is
-# still true and is the only thing these tests guard. Do not read it as a claim
-# that the corpus gap is open.
-#
-# ⚠ THE TWO FIGURES ABOVE ARE ONE COLD SAMPLE EACH (n=1, `--warmup 0`) — read
-# them as "there is a large gap", never as its size. Their provenance is the
-# earlier corpus sweep, where q13's own verdict line reads 34.12x
-# (pandas 3,013.2 ms against the fastest surface, sql 88.3 ms) and 33.4x is
-# pandas against mojo. A separate run re-measured q13 at 32.59x (n=8, warm)
-# AFTER the EXPR_REGEXP arm landed, which is the evidence that this arm does
-# not close it.
-#
-# ⚠ THAT 32.59x IS A PRE-FIX BASELINE, NOT A STANDING NUMBER. It is the BEFORE
-# figure in the kernel change's own commit message — the kernel routing landed on the
-# strength of it. Quoting it as the current state of q13 (this file did, via
-# "Tracked separately") reports a fixed gap as an open one. The AFTER number is
-# not measured here and is not asserted anywhere in this file.
+# WHAT LED HERE — AND NOT WHAT THIS FIXES. For tpch/q13
+# (`o_comment NOT LIKE '%special%requests%'`) and tpch/q16
+# (`s_comment LIKE '%Customer%Complaints%'`) the sql and mojo surfaces emit
+# `StringOp(LIKE, ...)` while the two Python skins emit `Regexp`, so the
+# surfaces author two different predicate nodes for one question. This file
+# guards only where the `Regexp` filter lands (the pushdown); it says nothing
+# about how either node is evaluated.
 #
 # The other three corpus LIKEs (q2 `%BRASS`, q9 `%green%`, q20 `forest%`) are
-# single-wildcard, lower to STRING_OP's contains/starts_with/ends_with, and sit
-# at 1.13-1.14x — i.e. the gap tracks the REGEXP tag exactly, not LIKE.
+# single-wildcard and lower to STRING_OP's contains/starts_with/ends_with.
 #
 # The sibling column-need walker (`optimizer_helpers._collect_expr_columns`)
 # grew its EXPR_REGEXP arm earlier, which is why this defect costs TIME
 # and not CORRECTNESS: projection pushdown still requests the column, so the
-# answer agrees on all four surfaces while one plan reads far more rows.
+# answer is the same while one plan reads far more rows.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -312,11 +270,8 @@ def test_regexp_filter_descends_to_scan_through_bridging_conjunct() raises:
     filter is stranded above the join, so the join runs at full width and the
     selective predicate is applied LAST.
 
-    ⚠ THIS IS THE PREDICATE SHAPE q13 AND q16 HAVE. IT IS NOT THEIR RATIO. The
-    33.4x/8.1x in the header are the regexp KERNEL and they SURVIVE this fix —
-    nothing in this file guards them. They are closed by a DIFFERENT
-    commit (kernel routing); see the header. `survives this fix`
-    is a statement about this ARM, never about the corpus."""
+    ⚠ THIS IS THE PREDICATE SHAPE q13 AND q16 HAVE. The test guards where the
+    filter lands, never how the predicate is evaluated."""
     var part = _scan("part.parquet", _part_schema())
     var line = _scan("lineitem.parquet", _line_schema())
 

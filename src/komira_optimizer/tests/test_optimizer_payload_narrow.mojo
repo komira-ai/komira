@@ -7,8 +7,8 @@
 # guard did NOT flip its guarded case to admit, because a SECOND term declined
 # it too — a `assert not admitted` would have passed over a deleted guard and
 # reported the guard as tested. So the ladder tests assert the exact BYTE COUNT
-# (a 4 where a 2 belongs is ~3 wall points on the measured hc4 ladder and is
-# invisible to `narrowed != 0`), and every refusal test asserts that the column
+# (a 4 where a 2 belongs is a wrong width and is invisible to
+# `narrowed != 0`), and every refusal test asserts that the column
 # it names carries NO spec while a sibling column in the SAME plan still does —
 # which is what distinguishes "this refusal fired" from "the rule never ran".
 # =============================================================================
@@ -192,7 +192,7 @@ def _side(
 
 
 def _hc4_shaped_join(join_type: UInt8 = JOIN_INNER) raises -> LogicalPlan:
-    """The hc4 cell's shape, with hc4's measured ranges:
+    """The hc4 cell's shape, with hc4's column ranges:
     `probe(key[0,25M], probe_val[1,999]) INNER JOIN build(key, build_val[1,9999])`.
     """
     var l = List[String]()
@@ -407,9 +407,9 @@ def test_a_non_parquet_side_is_refused() raises:
 
 
 def test_the_rule_is_idempotent() raises:
-    """A second pass must not double-stamp — the plan-compile cache and the
-    optimizer's own re-entry both re-run passes over an already-optimized
-    plan."""
+    """A second pass must not double-stamp — the scalar-dependency protocol
+    (`optimizer_scalar_deps.mojo`) runs every pass again, and a compile cache
+    may re-run passes over an already-optimized plan."""
     var plan = _hc4_shaped_join()
     _ = narrow_join_payload_inplace(plan)
     _ = narrow_join_payload_inplace(plan)

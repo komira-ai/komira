@@ -3,10 +3,11 @@
 # View resolution: inline registered views
 # =============================================================================
 #
-# Pass-1 INDEP sub-pass. Walks a LogicalPlan and replaces every
+# A statistics-independent pass. Walks a LogicalPlan and replaces every
 # `PLAN_VIEW_REF` leaf with the registered view's *expanded* plan
 # (recursively — a view may reference another view; depth-first; depth
-# limit 16; cycle detection via a name-stack). Runs in `optimize()`:
+# limit 16; cycle detection via a name-stack). komira_optimizer has no
+# driver that orders its passes; the order this pass is designed for is:
 #
 #   * BEFORE `flatten_dependent_joins` — so a view whose body
 #     contains a correlated subquery gets inlined first, then flattened.
@@ -22,8 +23,8 @@
 #     invariant that makes the view machinery cache-effective.
 #
 # After this pass returns, the plan is guaranteed to contain ZERO
-# `PLAN_VIEW_REF` nodes (an assertable invariant — the engine has no
-# eval-time handler for that tag; a surviving `PLAN_VIEW_REF` is a bug).
+# `PLAN_VIEW_REF` nodes (an assertable invariant — a surviving
+# `PLAN_VIEW_REF` is a bug).
 #
 # May raise `ViewRecursionLimitExceeded` (depth or cycle) at compile time.
 # This is strictly stronger than `create_view`'s create-time depth guard:
@@ -45,8 +46,8 @@
 #     "inline table scan"). Same shape; DataFusion's recursion guard is
 #     `recursion_limit` on the rewriter.
 #
-# Wiring: invoked from `optimizer.optimize()` as a pass-1 INDEP
-# rule, FIRST (before `partition_prune_scans` / `propagate_statistics` /
+# Pass order: designed to run FIRST (before
+# `partition_prune_scans` / `propagate_statistics` /
 # `flatten_dependent_joins`). The pass takes the view registry by `ref`
 # (the `Slab[Optional[LogicalPlan]]` plan store + the `Dict[String, Int]`
 # name→idx map) — both `komira_collections` container types, so the compiler does
@@ -84,7 +85,7 @@ from komira_plan_ir.logical_plan import (
 # Maximum chain length of view-of-view-of-view resolution. A chain of 16
 # views resolves successfully (16 nested resolutions, depths 0..15); a
 # chain of 17 raises `ViewRecursionLimitExceeded` (the 17th resolution
-# would be at depth 16). Mirrors `EngineContext.VIEW_RECURSION_LIMIT`.
+# would be at depth 16).
 comptime VIEW_RESOLUTION_DEPTH_LIMIT: Int = 16
 
 
@@ -105,8 +106,8 @@ def view_resolution_pass(
     Walks the plan recursively. At any `PLAN_VIEW_REF` node, looks up the
     referenced name in TWO scopes — first the statement-scoped CTE bindings
     (`cte_names` / `cte_plans` — the `with_cte["name"](inner^)` registry,
-    threaded in by the SDK for the duration of `optimize()` only), then the
-    persistent EngineContext view registry (`view_name_to_idx` /
+    threaded in by the caller for one statement only), then the
+    persistent view registry (`view_name_to_idx` /
     `view_slab` — `ctx.create_view`). **CTE scope wins**: a name bound by
     `with_cte` shadows a same-name `ctx`-registered view (matching DuckDB,
     which resolves CTEs before catalog tables). It deep-copies the matched
@@ -150,8 +151,8 @@ def view_resolution_pass(
 ) raises -> LogicalPlan:
     """Convenience overload — resolve only against the ctx view registry
     (no CTE scope). Equivalent to the 5-arg form with empty `cte_names` /
-    `cte_plans`. The optimizer's `optimize()` always calls the 5-arg form
-    (threading the per-statement `CteScope`); this overload exists for
+    `cte_plans`. A caller with a per-statement CTE scope calls the 5-arg
+    form; this overload exists for
     callers (e.g. focused unit tests) that exercise the `ctx.view` path
     in isolation. (`ref` params can't carry defaults, hence the overload
     rather than a default arg).
@@ -174,7 +175,7 @@ def view_resolution_pass_inplace(
     """In-place rewrite mirror of `view_resolution_pass`.
 
     Mirrors `flatten_dependent_joins_inplace` / `partition_prune_scans_inplace`
-    — the in-tree precedent for an in-place LogicalPlan-rewriting pass-1 rule.
+    — the in-tree precedent for an in-place LogicalPlan-rewriting rule.
     """
     var name_stack = List[String]()
     _resolve_view_refs_inplace(
@@ -203,7 +204,7 @@ def _resolve_view_refs_inplace(
     explicitly for clarity). `name_stack` is the chain of names currently
     being resolved — used for cycle detection. A `PLAN_VIEW_REF` is
     resolved against the CTE scope (`cte_names` / `cte_plans`) FIRST, then
-    the EngineContext view registry (`view_name_to_idx` / `view_slab`).
+    the persistent view registry (`view_name_to_idx` / `view_slab`).
     """
     if plan.tag == PLAN_VIEW_REF:
         # --- depth guard ---

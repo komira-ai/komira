@@ -163,7 +163,7 @@ def test_no_site_passes_through() raises:
 
 
 def test_a_miss_requests_the_aggregate_with_its_op_and_column() raises:
-    # Catches: a request without the (op, column) the engine needs for the
+    # Catches: a request without the (op, column) the caller needs for the
     # second, ungrouped execution; a key other than the Aggregate's hash; a
     # rewrite on a miss.
     var plan = _site()
@@ -270,7 +270,7 @@ def _when(var cond: Expr, var result: Expr, var default: Expr) -> Expr:
 
 def test_has_agg_fn_sees_every_walked_container() raises:
     # Catches: an arm dropped from `_expr_has_agg_fn` (an aggregate under
-    # that container reaches the engine unnamed).
+    # that container is left in the plan unrewritten).
     var t = _total()
     assert_true(_expr_has_agg_fn(_max_total()))
     assert_true(_expr_has_agg_fn(_gt(_max_total(), _lit(1))))

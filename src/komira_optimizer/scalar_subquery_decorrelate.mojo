@@ -9,20 +9,20 @@
 #
 # Motivation (design goal — "multiple reads/writes go through the same
 # compiler so we can optimize and just read once"):
-#   The existing `resolve_scalar_subqueries` does
-#   MATERIALIZE-AND-SUBSTITUTE: it executes the inner plan DURING optimize()
-#   and inlines a literal. So `df.filter(col("c_acctbal") > scalar_subquery(
-#   <agg over customer>))` scans `customer` TWICE — once for the agg during
-#   optimize, once for the outer query during materialize — two physical
-#   plans, plan-CSE can't span them.
+#   The `resolve_scalar_subqueries` pass does MATERIALIZE-AND-SUBSTITUTE:
+#   the inner plan is executed on its own (a `ScalarDepTable` request) and
+#   its value inlined as a literal. So `df.filter(col("c_acctbal") >
+#   scalar_subquery(<agg over customer>))` scans `customer` TWICE — once for
+#   the agg, once for the outer query — two physical plans, and a plan-CSE
+#   cannot span them.
 #
 #   When the inner plan is provably single-row, we can instead lower it to a
 #   broadcast CROSS join: the plan node that USES the subquery gets its child
 #   replaced by `Join(CROSS, left=old_child, right=inner_aliased)`, and the
-#   subquery Expr becomes `col_ref("__scalar_subq_N")`. Then plan-CSE
-#   (already ON — `_ENABLE_CSE_REWRITE`) dedups the base scan shared between
-#   the inner-agg branch and the outer branch → ONE physical plan, ONE
-#   execution, `customer` (Q22) / the germany-join (Q11) read ONCE.
+#   subquery Expr becomes `col_ref("__scalar_subq_N")`. Then a plan-CSE
+#   (not in this tree) can dedup the base scan shared between the inner-agg
+#   branch and the outer branch → ONE physical plan, in which `customer`
+#   (Q22) / the germany-join (Q11) is read ONCE.
 #
 # "PROVABLY <= 1 row" predicate (conservative — fall through to
 # materialize-and-substitute otherwise):
@@ -50,12 +50,12 @@
 # trailing identity `Project` restoring the original output columns — the
 # `__scalar_subq_N` columns never escape past the node that introduced them.
 #
-# Wiring: invoked from `komira_optimizer.optimizer.optimize()` BEFORE
-# `resolve_scalar_subqueries_rewrite` (so it claims the decorrelatable
-# sites first; whatever's left goes to materialize-and-substitute) and
-# BEFORE `flatten_dependent_joins` (which only handles CORRELATED subqueries
-# — outer_refs >= 1) and BEFORE plan-CSE (run by `pipeline_compiler` after
-# `optimize()` returns, so any in-`optimize()` ordering is "before CSE").
+# Pass order: komira_optimizer has no driver that orders its passes. This
+# pass is designed to run BEFORE `resolve_scalar_subqueries_rewrite` (so it
+# claims the decorrelatable sites first; whatever's left goes to
+# materialize-and-substitute), BEFORE `flatten_dependent_joins` (which only
+# handles CORRELATED subqueries — outer_refs >= 1) and BEFORE plan-CSE (which
+# is designed to run after every optimizer pass).
 #
 # DuckDB reference (`src/planner/subquery/flatten_dependent_join.cpp` +
 # `plan_subquery.cpp:77-153`): an uncorrelated scalar subquery is
@@ -67,7 +67,7 @@
 # flattening only; the uncorrelated CROSS-decorrelate is a v0.4 addition.
 #
 # This module is PURE + NON-PARAMETRIC (no FileHandle reach, no
-# `EngineContext`) — it lives entirely in `komira_optimizer`. No 3-phase
+# execution context) — it lives entirely in `komira_optimizer`. No 3-phase
 # split needed (the monomorphizer trap requires a parametric +
 # recursive + FileHandle-reaching function; this has none).
 # =============================================================================

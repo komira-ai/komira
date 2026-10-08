@@ -303,7 +303,7 @@ def test_below_pass_through_returns_the_predicate_itself() raises:
 def test_below_computed_row_local_is_substituted_without_alias() raises:
     # `v > 8` over `x * 2 AS v` becomes `x * 2 > 8`, with the alias stripped.
     # Defect: pushed raw (reads the child's own v), or the alias left inside
-    # the comparison (the pipeline compiler cannot resolve it).
+    # the comparison (no column below the Project carries that name).
     var got = _below(_gt(Expr.col_ref("v"), 8))
     assert_true(Bool(got))
     var r = _render(got.value())

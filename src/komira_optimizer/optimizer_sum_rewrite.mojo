@@ -7,28 +7,25 @@
 # ⛔⛔ THIS PASS IS HALF OF A PAIR AND IS A PESSIMISATION ON ITS OWN.
 # ==================================================================
 # It deliberately emits ONE `SUM(x)` AND ONE `COUNT(x)` PER MATCHED AGGREGATE,
-# i.e. it TURNS N AGGREGATES INTO 2N. What makes that a win is
-# `dedup_common_aggregates` (`optimizer_agg_cse.mojo`), which runs immediately
-# after and collapses the structurally-identical ones: for ClickBench cbq29
+# i.e. it TURNS N AGGREGATES INTO 2N. It is designed to run immediately before
+# a pass that collapses structurally-identical aggregates (a common-aggregate
+# dedup, `dedup_common_aggregates`, not in this tree): for ClickBench cbq29
 # (`SELECT sum(rw), sum(rw+1), ... sum(rw+89)`) this pass produces **180**
-# aggregates and the dedup collapses them to **2**. Run this pass WITHOUT the
-# dedup and the cell gets SLOWER, measurably. The two are wired as one step in
-# `optimizer.mojo`; do not fund, move or gate one without the other.
+# aggregates and such a dedup collapses them to **2**. komira_optimizer has no
+# driver that orders its passes; the order this pass is designed for is this
+# pass, then the aggregate dedup. Without the dedup the plan carries 2N
+# aggregates where it had N.
 #
 # WHY IT IS WORTH ANYTHING AT ALL
 # ===============================
 # `sum(rw + 1)` is a SUM over a COMPUTED input, so `materialize_agg_input`
 # (this file's downstream neighbour) mints a `__agg_in_<k>` column for
 # it and splices a Project below the aggregate to materialise it. At 90
-# aggregates that is 90 derived 100M-row columns -- measured as the DOMINANT
-# per-aggregate cost of that cell -- and it also pushes the aggregate's child
-# from a bare SCAN to a PROJECT, which costs a ROUTE (the fused streaming
-# parquet agg leaf matches `FILTER? -> SCAN` only).
+# aggregates that is 90 derived columns, and it also pushes the aggregate's
+# child from a bare SCAN to a PROJECT.
 #
 # After the rewrite, every aggregate input is the RAW column: nothing is
-# materialised, the aggregate's child stays the SCAN, and the 0-key scalar fold
-# (`agg_scalar_fold.scalar_agg_servable`) serves `SUM(col_ref)` / `COUNT(col_ref)`
-# in ONE pass instead of `ceil(N / MAX_AGGS)` independent re-scans of the column.
+# materialised and the aggregate's child stays the SCAN.
 #
 # SCOPE -- ALL FOUR GATES ARE LOAD-BEARING
 # ========================================
