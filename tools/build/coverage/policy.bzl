@@ -40,7 +40,13 @@ COVERAGE_TARGET_BP = 10000
 # moves no shared library. coverage.bzl refuses `enforce` here, and for any
 # mojo_shared_lib, a tests-cell fixture included (in analysis); and nothing
 # waits for a shared library's coverage runs or gate (it ships no conda
-# package), so its published file builds whatever they find.
+# package), so its published file builds whatever they find. Reported means
+# its `[coverage]` (`[coverage][gate][summary]`) when built by name: the pull
+# request's coverage workflow (.github/ci/coverage_measure.sh) selects
+# mojo_library targets only, so no workflow reports a shared library's gate
+# yet. Its report counts the shared library's own sources (its C ABI), not
+# the code compiled into it from its Mojo dependencies, which their own
+# tests measure.
 COVERAGE_SHARED_LIB_MODE = "census"
 
 # The ledger of libraries that cannot have a coverage gate of their own, by

@@ -31,7 +31,8 @@
 #                  is how the library's line tables name it (as a test's name
 #                  it), at that path in <share>: measured, and mapped to the
 #                  package's repository directory (<test_repo> without
-#                  <test>); the report must hold the first
+#                  <test>); the report must hold the first. --solib with
+#                  none (every source generated) is refused
 #   --gen <file>   a generated source in <src_dir> (its path there): not measured
 #   --env          passed to gate_runner.sh as given
 #
@@ -230,6 +231,13 @@ group_left() {
                 print $1, f[1], substr($0, index($0, "(") + 1, i - index($0, "(") - 1)
         }'
 }
+
+# A shared library's driver with no source of the library to require in the
+# report: every one generated (not measured), so a run in which kcov did not
+# measure the library could not be told from one in which it did.
+if [ -n "$SOLIB" ] && [ -z "$SOLIB_SRCS" ]; then
+    red "cov_run: --solib with no --solib-src: every source of the shared library $SOLIB is generated, so none is measured and whether kcov measured the library cannot be checked; its drivers have no coverage run."
+fi
 
 # 0. Where the binary names the library's sources. Each string is on a line
 # of its own (tr), so the expression sees one name at a time. Only a

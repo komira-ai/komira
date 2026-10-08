@@ -413,7 +413,13 @@ coverage is reported, never enforced. That is its own constant, so moving
 any `mojo_shared_lib`'s `coverage_mode` (a fixture of the tests cell
 included), is refused in analysis (test 46). Nothing waits for
 a shared library's coverage runs or gate: it ships no conda package, and
-its published file waits for its release gate alone.
+its published file waits for its release gate alone. Its gate is reported
+when its `[coverage]` is built by name: the coverage workflow
+(`.github/ci/coverage_measure.sh`) selects `mojo_library` targets only, so
+no workflow reports a shared library's gate yet. A shared library's report
+counts its own sources (its C ABI layer), not the code compiled into it
+from its Mojo dependencies (an engine's), which their own tests measure in
+their own gates.
 
 **Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
 `COVERAGE_TARGET_BP = 10000`. A fixture of the `tests` cell may name another mode

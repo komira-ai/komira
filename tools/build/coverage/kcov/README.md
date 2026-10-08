@@ -328,7 +328,19 @@ so a run in which kcov did not measure the library fails (`no class for
 differs from a library test's run: the driver's environment holds
 `LD_PRELOAD` (kcov's library). An `--include-path` too long for kcov (many
 `--solib-src` paths) fails the run before kcov starts, as any too-long
-argument does (above).
+argument does (above). A shared library none of whose sources is a source
+file (every one generated) gives no `--solib-src`, so nothing could show
+that kcov measured it: the run is refused, saying so (`--solib with no
+--solib-src`), rather than passing unchecked; nothing waits for it.
+
+A possible race, not seen: kcov learns of a library the driver loads
+through its preload library, which writes the load to kcov's FIFO, and
+sets its breakpoints in that library when it reads it. Code of the library
+that ran before kcov had patched it would not be recorded, so its lines
+would read as not run (fewer hits, never a failed run). covso's driver
+calls into the library right after loading it, and nine fresh runs of it,
+and the run after each change of `cov_run.sh` since, gave its golden
+report byte for byte.
 
 **The run is bounded.** kcov waits for every process the test started
 before it writes the report, so a test that leaves a child running would

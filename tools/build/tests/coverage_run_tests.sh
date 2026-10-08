@@ -48,7 +48,8 @@
 #      argument is 64 bytes refuses the run before kcov starts, naming it);
 #      shared libraries: covso's driver report and census gate, covso_skip
 #      red with kcov skipping the loaded library, the examples' [coverage]
-#      with the switch, and coverage_shared_lib.sh (no release action moves).
+#      with the switch, coverage_shared_lib.sh (no release action moves),
+#      and covso_gen's run red (every source generated: nothing to check).
 #      The release actions with the switch on: coverage_keys.sh (test 41).
 
 expect_green coverage_runs tests//functional/coverage:numbers tests//functional/coverage:census \
@@ -105,6 +106,8 @@ expect_green coverage_run_shared_lib tests//functional/coverage:covso_report tes
     tests//negative/coverage:covso_skip
 expect_red coverage_run_shared_lib_skip "no class for tools/build/tests/negative/coverage/covso/covso_one.mojo (--must-contain)" \
     'tests//negative/coverage:covso_skip[coverage][tests][covso_one_driver]'
+expect_red coverage_run_shared_lib_generated "cov_run: --solib with no --solib-src: every source of the shared library covso_one.so is generated" \
+    'tests//negative/coverage:covso_gen[coverage][tests][covso_one_driver]'
 expect_green coverage_run_shared_lib_switch 'komira//tools/build/examples/shared_lib:spike[coverage]' \
     'komira//tools/build/examples/shared_lib:plain[coverage]' 'komira//tools/build/examples/shared_lib:spike_exact[coverage]' \
     -c komira.coverage=true

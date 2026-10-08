@@ -938,14 +938,20 @@ over those reports and the library's own non-generated sources (`srcs` and
 the shared library's own sources only: the code of its Mojo dependencies
 compiled into it is measured by their own tests, in their own gates (a
 library's numbers do not depend on what links it). The generated exports
-driver is not run: it only loads the library and looks its symbols up. The
+driver is not run: it only loads the library and looks its symbols up. A
+shared library none of whose sources is a source file (all generated) has
+nothing measured, and its drivers' coverage runs are refused, saying so. The
 gate's mode is `COVERAGE_SHARED_LIB_MODE` of
 [`policy.bzl`](../coverage/policy.bzl), census: a shared library's line
 coverage is reported, never enforced (one loaded by end-to-end tests exists
 for them), and `enforce` is refused for every `mojo_shared_lib`, a fixture
 of the tests cell included (in analysis). Nothing waits for any of it: the published file
 (`mojo_shared_lib_join`) waits for the release gate only, and a shared
-library ships no conda package. A source under the package's `tests/` (a
+library ships no conda package. No workflow reports it yet: the coverage
+workflow (`.github/ci/coverage_measure.sh`) selects `mojo_library` targets
+only, so a shared library's `[coverage]` is built by name. For a shared
+library over an engine, the report covers its own C-ABI sources only, not
+the engine code compiled in from its dependencies. A source under the package's `tests/` (a
 probe library such as `komira_arrow_ipc`'s `arrow_c_abi_probe`) is set aside
 by covcheck like a test, so such a library's gate is `NotMeasured`.
 
