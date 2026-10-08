@@ -4,7 +4,8 @@
 #
 # One node type, `FakeNode`, realized from a `LoweredNode` (data):
 #
-#   * kind `run`       `<id>/run`: the running thing of a service or a job.
+#   * kind `run`       `<id>/run`: the running thing of a workload (a
+#                      service, a container job's definition, a worker).
 #                      Its desired digest renders every modelled field (the
 #                      lowered node's `desired` fields, defaults filled in),
 #                      then each `Ref` value as it resolved; with a reference
@@ -12,9 +13,8 @@
 #                      placeholder. A service's run node exposes URL and HOST.
 #   * kind `public`    `<id>/public`: the public ingress of a service, by the
 #                      mechanism the cell chose at validate time.
-#   * kind `schedule`  `<id>/schedule`: the trigger of a scheduled job.
-#   * kind `identity`  `<id>/identity`: the private identity of a service or
-#                      a job, or a service account; an account's exposes
+#   * kind `identity`  `<id>/identity`: the private identity of a workload,
+#                      or a service account; an account's exposes
 #                      NAME (`account`, a desired field, like `serves`).
 #   * kind `grant`     `<id>/u-<h>` or `<id>/grant`: one grant edge.
 #   * kind `bucket`    `<id>/bucket`: a bucket. It exposes NAME and ADDRESS
@@ -39,7 +39,8 @@
 # Those are the generic shape's kinds. On a provider shape (shapes.mojo) the
 # kind is the provider kind id (on onprem also a `<id>/vault` beside each
 # identity, a service's `<id>/endpoint`, which serves nothing, and a grant's
-# helper `<id>/r-<h>`; on gcp a table's `<id>/ix-<h>` and `<id>/ttl`); the
+# helper `<id>/r-<h>`; on gcp a table's `<id>/ix-<h>` and `<id>/ttl`; on aws
+# a worker's `<id>/task`, which serves nothing); the
 # node behaves the same: `serves`, `stores`, `account` and `named` (desired
 # fields), not the kind, decide what it exposes. On aws a queue also has a
 # `<id>/policy`; on gcp a queue has its private `<id>/topic`, which
