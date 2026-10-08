@@ -4,8 +4,9 @@
 # derivation: §5.1: BIN_DIV on integers truncates toward zero: 7 / 2 = 3,
 # -7 / 2 = -3, 7 / -2 = -3, -7 / -2 = 3, 6 / 3 = 2, 0 / 5 = 0, -1 / 5 = 0
 # (-0.2 truncated; flooring would give -1). §5.3: a zero divisor answers
-# NULL for that row (ids 5, 6, 7; id 8 is also NULL by §5.7). §5.7: a NULL
-# b (id 10) gives NULL. Types: the integer type, INT64 (§5.1, §8.10),
+# NULL for that row (ids 5, 6, 7). §5.0: a NULL operand gives NULL, checked
+# before the divisor, so NULL / 0 (id 8) is NULL by §5.0, and so is a NULL
+# b (id 10). Types: the integer type, INT64 (§5.1, §8.10),
 # nullable (§5.3).
 id:int64	q:int64?
 1	3

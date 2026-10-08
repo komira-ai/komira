@@ -2,13 +2,13 @@
 #  order: none
 #  float: ulps=0
 # derivation: d = p / q is +inf (id 1), -inf (ids 2, 5), NaN (ids 3, 7),
-# NULL (ids 4, 8) and 0.25 (id 6) by §5.6. §5.7, float arithmetic is IEEE
+# NULL (ids 4, 8, by §5.0) and 0.25 (id 6) by §5.6. §5.7, float arithmetic is IEEE
 # 754: inf + 1.0 = inf and -inf + 1.0 = -inf; an operation with a NaN
 # operand is NaN; inf - inf is NaN (so d - d is NaN for both infinities);
 # 0 * inf is NaN; 0.25 + 1.0 = 1.25; 0.25 - 0.25 = +0.0 and 0.25 * 0.0 =
 # +0.0 (an exact zero result is +0 under round-to-nearest). d + r: r is 1.0
 # except on id 3, where it is NULL, and an arithmetic operation with a NULL
-# operand is NULL, NaN included (NULL dominates NaN, §5.7). Types: FLOAT64
+# operand is NULL, NaN included (NULL dominates NaN, §5.0, §5.7). Types: FLOAT64
 # under each option of §8.9, the literals 1.0 and 0.0 FLOAT64 (§8.19);
 # nullable.
 id:int64	plus_one:float64?	minus_self:float64?	times_zero:float64?	plus_r:float64?

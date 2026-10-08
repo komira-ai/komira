@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+#  float[med_i]: ulps=1
+#  float[med_f]: ulps=1
+# derivation: avg_rows WHERE g = 2 keeps ids 3 to 7 (§1.2). MEDIAN skips
+# NULLs (§2.1; id 7), leaving four values, and at an even count is the mean
+# of the two middle values, an integer input included (§2.14). i sorted: 1,
+# 2, 3, 5, so (2 + 3) / 2 = 2.5, not 2. f sorted: -1.5, 0.5, 1.0, 2.0, so
+# (0.5 + 1.0) / 2 = 0.75. Both interpolation forms §2.14 names give these
+# exactly (2 + 0.5 * 1 = 2 * 0.5 + 3 * 0.5 = 2.5). Tolerance: §2.14 applies
+# §2.10's. Types: FLOAT64 (§8.16), nullable (§2.2).
+g:int64	med_i:float64?	med_f:float64?
+2	2.5	0.75

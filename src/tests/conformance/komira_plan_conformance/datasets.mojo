@@ -54,6 +54,9 @@
 #                  and 0.0 / -0.0), a NULL p, a NULL q and 1.0 / 4.0; q
 #                  holds -0.0 twice; r is NULL on the 0.0 / 0.0 row only.
 #                  JSON has no NaN or infinity: they are made by §5.6.
+#                  A reader of these files must keep -0.0's sign (float_pairs,
+#                  sort_rows) and read 9007199254740993 (2^53 + 1, avg_rows)
+#                  as that exact INT64, never through a double.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType

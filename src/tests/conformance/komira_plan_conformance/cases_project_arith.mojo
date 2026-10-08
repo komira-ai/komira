@@ -2,8 +2,9 @@
 # komira_plan_conformance/cases_project_arith.mojo -- shard project_arith.
 # =============================================================================
 #
-# Arithmetic in a projection, citing query semantics §5.1 to §5.3, §5.6,
-# §5.7, §8.9, §8.10 and §8.19. Three datasets:
+# Arithmetic in a projection, citing query semantics §4.8, §5.0 to §5.3,
+# §5.5 to §5.7, §8.9, §8.10 and §8.19. A NULL operand gives NULL before the
+# zero-divisor rule is consulted (§5.0). Three datasets:
 #   int_pairs    x, y = (1, 10), (NULL, 20), (3, NULL), (NULL, NULL), (5, 5):
 #                integer + - * with each operand NULL alone and both NULL.
 #   div_pairs    a / b and a % b for every sign pair of 7 and 2, four zero
@@ -22,12 +23,12 @@
 # INT64 with INT64 and FLOAT64 for FLOAT64 with FLOAT64: option (a)'s table
 # answers the narrowest type both convert to without loss, and option (b)
 # requires same-typed operands, which these are. BIN_DIV of two integers is
-# the integer type (§5.1, §8.10, DEPARTS from DuckDB's `/` and settled as
-# the plan's one division operator). Every arithmetic result is nullable by
-# §8's default.
+# the integer type (§5.1, §8.10: DEPARTS, pending ruling (recommended:
+# accept)). Every arithmetic result is nullable by §8's default.
 #
-# The plan's BIN_DIV on integers is DuckDB's `//` (§5.1, DEPARTS): it
-# truncates. The other rules here are MATCHES.
+# The plan's BIN_DIV on integers is DuckDB's `//` (§5.1, DEPARTS, pending
+# ruling (recommended: accept)): it truncates. The other rules here are
+# MATCHES.
 #
 # Not here, and why:
 #   - mixed-type operands (INT64 with FLOAT64, a narrower integer): their
@@ -40,7 +41,8 @@
 #   - NaN or infinity as an input: JSON cannot carry them.
 #
 # The defect each case would catch once it executes:
-#   int_add_sub_mul_nulls     a NULL operand read as 0 (id 2's x + y as 20)
+#   int_add_sub_mul_nulls     a NULL operand read as 0 (id 2's x + y as 20);
+#                             no value is near overflow (§5.5)
 #   int_div_trunc             flooring division (-7 / 2 as -4, -1 / 5 as -1),
 #                             true division (7 / 2 as 3.5), a zero divisor
 #                             raising or answering 0

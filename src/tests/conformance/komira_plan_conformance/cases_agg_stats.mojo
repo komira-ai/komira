@@ -3,8 +3,9 @@
 # =============================================================================
 #
 # AVG, the variance and standard-deviation family, MEDIAN, COUNT(DISTINCT)
-# and MIN/MAX over strings, citing query semantics §2.1 to §2.5, §2.10 to
-# §2.12, §4.6, and the result types of §8.5 to §8.7 and §8.16. Two datasets:
+# and MIN/MAX over strings, citing query semantics §1.2, §2.1 to §2.3,
+# §2.5, §2.10 to §2.12, §2.14, §4.6, §4.8, and the result types of §8.5 to
+# §8.7 and §8.16. Two datasets:
 #   stat_rows  g = 1: i = 2, 5, 8; f = 1.0, 2.5, 4.0; s = "apple", "Zebra",
 #              "app"; d = 4, 4, 9; plus one all-NULL row. g = 2: one row
 #              (i = 7, f = -0.5, s = "pear", d = 4). g = 3: two all-NULL
@@ -22,22 +23,27 @@
 # STDDEV_SAMP 3 and 1.5. No n = 3 group can make both standard deviations
 # rational (n / (n - 1) is not a square), so STDDEV_POP is sqrt(6) and
 # sqrt(1.5): the expected cell is the double nearest the exact root, with its
-# bits and the integer bounds that fix them in the derivation. Only float
-# SUM and AVG may vary with summation order (§2.10), so only the float AVG
-# columns carry a tolerance (ulps=1, the least that is not bit for bit);
-# their inputs are dyadic with short mantissas, so every partial sum is exact
-# in any order and the stated bits are the only answer. Every other float
-# column is compared bit for bit.
+# bits and the integer bounds that fix them in the derivation. Float SUM
+# and AVG may vary with summation order (§2.10), and a float MEDIAN with
+# its interpolation's last bit (§2.14, which applies §2.10's tolerance), so
+# the float AVG and every MEDIAN column carry a tolerance (ulps=1, the least
+# that is not bit for bit). Their inputs are dyadic with short mantissas, so
+# every partial sum and every interpolation here is exact and the stated
+# bits are the only answer. Every other float column is compared bit for
+# bit.
+#
+# MEDIAN (§2.14) is quantile_cont(x, 0.5) over the non-NULL values: the
+# middle value at an odd count, the mean of the two middle values at an
+# even count, FLOAT64 for an integer input (§8.16). No middle pair here is
+# infinite or near overflow, where §2.14 records that the two interpolation
+# formulas disagree.
 #
 # Not here, and why:
 #   - MEDIAN of FLOAT32 or DECIMAL: the result type is UNDECIDED (§8.17).
-#   - MEDIAN over an even count, and over a group with no non-NULL value:
-#     the document fixes MEDIAN's type (§8.16) and its NULL skipping (§2.1)
-#     but not its value between the two middle values, and §2.2's all-NULL
-#     rule names SUM, AVG, MIN and MAX only. Every MEDIAN group here has an
-#     odd count (median_odd_counts filters out g = 3); MEDIAN over empty
-#     input is §2.3's "every other aggregate NULL".
 #   - MEDIAN over NaN: UNDECIDED (§2.8). JSON cannot carry NaN anyway.
+#   - MEDIAN over avg_rows g = 1 (2^53 + 1 and 1): the exact mean of the
+#     pair, 2^52 + 1, is a double, but 2^53 + 1 is not, and §2.14 says
+#     nothing about an integer middle value a double cannot hold.
 #   - VAR/STDDEV over floats whose sum varies with order: §2.10 names SUM
 #     and AVG only, so no tolerance could be cited for them.
 #
@@ -50,8 +56,12 @@
 #                          (§2.11; "Code that does not follow", item 7);
 #                          VAR_POP of one value as NULL; population and
 #                          sample divisors swapped; NULL counted as 0
-#   median_odd_counts      the NULL in g = 1 taken as a value; an integer
-#                          median truncated
+#   median_odd_counts      the NULL in g = 1 taken as a value (2, 5, 8 with
+#                          the NULL as 0 gives 3.5); an integer median
+#                          typed INT64 (§8.16, a schema check)
+#   median_even_count      the lower middle value instead of the mean, or
+#                          an integer median truncated (2.5 as 2)
+#   median_all_null        an all-NULL MEDIAN as 0 or NaN (§2.2)
 #   min_max_strings        a case-insensitive or locale collation (min
 #                          "app", max "Zebra"); a prefix sorting after its
 #                          extension
@@ -73,7 +83,7 @@ from komira_plan_expr.agg_expr import (
     AGG_VAR_SAMP,
     AggExpr,
 )
-from komira_plan_expr.expr import BIN_LT, Expr
+from komira_plan_expr.expr import BIN_EQ, BIN_GT, BIN_LT, Expr
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_harness import CanonPolicy, FloatTolerance
 from komira_plan_ir.logical_plan import AggExprArray, ExprArray, LogicalPlan
@@ -100,9 +110,14 @@ def _by_g() -> ExprArray:
 
 def _where_lt(column: String, bound: Int, var input: LogicalPlan) raises -> LogicalPlan:
     """`input WHERE column < bound`."""
+    return _where(BIN_LT, column, bound, input^)
+
+
+def _where(op: UInt8, column: String, bound: Int, var input: LogicalPlan) raises -> LogicalPlan:
+    """`input WHERE column <op> bound`."""
     return LogicalPlan.filter(
         Expr.binary(
-            BIN_LT,
+            op,
             Expr.col_ref(column),
             Expr.literal(ScalarValue.from_int64(Int64(bound))),
         ),
@@ -111,8 +126,8 @@ def _where_lt(column: String, bound: Int, var input: LogicalPlan) raises -> Logi
 
 
 def _float_avg_policy(*columns: String) -> CanonPolicy:
-    """Multiset rows, bit-exact floats except the named float AVG columns,
-    which §2.10 compares within a tolerance."""
+    """Multiset rows, bit-exact floats except the named float AVG and MEDIAN
+    columns, which §2.10 and §2.14 compare within a tolerance."""
     var p = CanonPolicy.unordered()
     for c in columns:
         p.set_column_tolerance(c, FloatTolerance.of_ulps(1))
@@ -147,6 +162,22 @@ def _median_odd_counts() raises -> LogicalPlan:
     a.append(_agg(AGG_MEDIAN, "i", "med_i"))
     a.append(_agg(AGG_MEDIAN, "f", "med_f"))
     return LogicalPlan.aggregate(_by_g(), a^, _where_lt("g", 3, scan(stat_rows())))
+
+
+def _median_even_count() raises -> LogicalPlan:
+    """MEDIAN over avg_rows WHERE g = 2: four non-NULL values each."""
+    var a = AggExprArray()
+    a.append(_agg(AGG_MEDIAN, "i", "med_i"))
+    a.append(_agg(AGG_MEDIAN, "f", "med_f"))
+    return LogicalPlan.aggregate(_by_g(), a^, _where(BIN_EQ, "g", 2, scan(avg_rows())))
+
+
+def _median_all_null() raises -> LogicalPlan:
+    """MEDIAN over stat_rows WHERE g > 2: g = 3, two all-NULL rows."""
+    var a = AggExprArray()
+    a.append(_agg(AGG_MEDIAN, "i", "med_i"))
+    a.append(_agg(AGG_MEDIAN, "f", "med_f"))
+    return LogicalPlan.aggregate(_by_g(), a^, _where(BIN_GT, "g", 2, scan(stat_rows())))
 
 
 def _min_max_strings() raises -> LogicalPlan:
@@ -184,8 +215,10 @@ def cases() -> List[Case]:
     return [
         Case.hand("avg_int_float", SHARD, _avg_int_float, _float_avg_policy("avg_f")),
         Case.hand("var_stddev_by_count", SHARD, _var_stddev_by_count, CanonPolicy.unordered()),
-        Case.hand("median_odd_counts", SHARD, _median_odd_counts, CanonPolicy.unordered()),
+        Case.hand("median_odd_counts", SHARD, _median_odd_counts, _float_avg_policy("med_i", "med_f")),
+        Case.hand("median_even_count", SHARD, _median_even_count, _float_avg_policy("med_i", "med_f")),
+        Case.hand("median_all_null", SHARD, _median_all_null, _float_avg_policy("med_i", "med_f")),
         Case.hand("min_max_strings", SHARD, _min_max_strings, CanonPolicy.unordered()),
         Case.hand("count_distinct_nulls", SHARD, _count_distinct_nulls, CanonPolicy.unordered()),
-        Case.hand("stats_empty_input", SHARD, _stats_empty_input, _float_avg_policy("avg_f")),
+        Case.hand("stats_empty_input", SHARD, _stats_empty_input, _float_avg_policy("avg_f", "med_i")),
     ]

@@ -4,8 +4,10 @@
 # derivation: §5.6: float division by zero is IEEE 754: 1.5 / 0.0 = +inf,
 # -1.5 / 0.0 = -inf, 2.0 / -0.0 = -inf (the signs of x and the zero),
 # 0.0 / 0.0 and 0.0 / -0.0 = NaN; no NULL and no error. 1.0 / 4.0 = 0.25.
-# §5.7: a NULL p (id 4) or q (id 8) gives NULL. NaN is written bare: its
-# sign and payload are the machine's (§2.6 compares floats without them).
+# §5.0: a NULL p (id 4, NULL / 0.0) or q (id 8) gives NULL, before §5.6 is
+# consulted. NaN is written bare: its sign and payload are the machine's,
+# and the harness matches a bare expected NaN against any NaN
+# (komira_plan_harness float_text.mojo).
 # Types: FLOAT64 with FLOAT64 is FLOAT64 under each option of §8.9;
 # nullable by §8's default.
 id:int64	d:float64?
