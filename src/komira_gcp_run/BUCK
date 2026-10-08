@@ -57,8 +57,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # ScriptedConnector (no socket, no DNS: the wire tests send to localhost):
 # test_run_services, test_run_jobs and test_run_worker_pools (each method's
 # request line with its resource-name captures and query, headers and JSON
-# body byte for byte, an Update with no resource refused before the token is
-# asked, and each response decoded), test_run_iam_policy (each Services and
+# body byte for byte, and each response decoded; in services and worker
+# pools, an Update with no resource refused before the token is asked), test_run_iam_policy (each Services and
 # Jobs IAM policy method's request line and body, the policy decoded),
 # test_run_operations (the operation polls on the wire,
 # a done operation's response decoded as its type, a failed one's status,
