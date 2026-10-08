@@ -1,0 +1,21 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A Model Context Protocol (MCP) server library: JSON-RPC 2.0 framing, the
+# session lifecycle (initialize, version negotiation, the initialized
+# notification), ping, tools and resources, behind two provider traits. It
+# does no I/O: a transport hands McpServer.handle one message as text and
+# writes back what it returns. See __init__.mojo.
+mojo_library(
+    name = "komira_mcp_server",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_json:komira_json",
+    ],
+    test_srcs = [
+        "tests/test_jsonrpc_spec_examples.mojo",
+        "tests/test_mcp_lifecycle.mojo",
+        "tests/test_mcp_spec_examples.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
