@@ -97,10 +97,57 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   docker run --rm komira/hello:0.1.0
   ```
 
+`[layers]` is the digest of each layer of the image manifest, one per line,
+in order: the base's layers, then the one the build adds.
+
+An image can instead add a tree laid at `/`, made by `oci_tree` from
+bundles and files at paths, with an explicit entrypoint (a bundle's program
+can be given another name in it with `mojo_bundle`'s `program`):
+
+```python
+load("@komira//tools/build/package:defs.bzl", "mojo_bundle", "oci_image", "oci_tree")
+load("@komira//tools/build/package:oci_check.bzl", "oci_image_check")
+
+mojo_bundle(name = "tool_bundle", binary = ":tool", program = "tool", version = "0.1.0")
+oci_tree(
+    name = "tree",
+    bundles = {"app/": ":tool_bundle"},          # /app/bin/tool, /app/lib/...
+    files = {"bin/sh": "//tools/build/toolchains:busybox"},
+    version = "0.1.0",
+)
+oci_image(name = "image_unchecked", tree = ":tree", entrypoint = "/app/bin/tool", repository = "example/tool")
+oci_image_check(
+    name = "image",
+    image = ":image_unchecked",
+    entrypoint = "/app/bin/tool",
+    executables = ["bin/sh"],
+    files = ["etc/ssl/certs/ca-certificates.crt"],
+)
+```
+
+No path of an `oci_tree` may be inside another, and modes are 0755 for
+directories and files with an exec bit, else 0644; the kcov guard reads the
+whole tree before it is packed. `komira_pack` refuses an entrypoint that is
+not a file of the tree with an exec bit. `oci_image_check`
+([`oci_check.bzl`](oci_check.bzl), [`oci_check.sh`](oci_check.sh)) reads the
+built image back in a build action and is that image with the check's output
+added to its default output and each sub-target, so the image cannot be built
+through it unless: the config's Entrypoint is exactly the one named; it and
+each of `executables` is a regular file with mode 0755 in the image's
+filesystem (layers applied in order, whiteouts and symbolic links followed);
+each of `files` is a non-empty regular file there; `[layers]` is the
+manifest's layers in order; and the added layer changes the type of no base
+entry (a directory over a base symlink such as `bin -> usr/bin` would hide
+what the link reaches). The komira base image is built this way:
+[`packaging/images/base`](../../../packaging/images/base/README.md).
+
 The base image is `komira//tools/build/toolchains:distroless_base` (distroless base-debian12,
 which has glibc, CA certificates and no shell), declared with `oci_base`: the
 digest of its linux/amd64 manifest, that manifest's bytes checked in, and one
-pinned download per blob. The packing action does not use the network: it
+pinned download per blob. A base is pinned by digest only: `oci_base` fails
+unless the manifest, the config and each layer is a `sha256:<64 hex>` digest,
+so a tag is refused (`oci_base_refusals`, the same check as a function a
+load-time case can call). The packing action does not use the network: it
 takes no URLs, reads only those files and refuses unless the manifest hashes to its
 digest and names exactly the downloaded blobs.
 

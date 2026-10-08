@@ -8,18 +8,23 @@
 //!   komira_pack conda-check ...     (reads a package directory back and refuses what is wrong; both kinds)
 //!   komira_pack conda-index --out-dir <dir> --package-manifest <m.json>...
 //!                                   (a local channel: the packages and each subdir's repodata.json)
-//!   komira_pack oci --bundle <dir> --name <n> --version <v> --repo <r>
+//!   komira_pack oci (--bundle <dir> | --root <dir> --entrypoint </path>)
+//!       --name <n> --version <v> --repo <r>
 //!       --manifest <base manifest> --manifest-digest sha256:<hex>
 //!       --config <base config>
 //!       [--layer <base layer blob>]...
 //!       --out <layout dir> --archive <file.tar> --digest <file>
+//!       [--layer-list <file>]
 //!
 //! `tar` writes the bundle under <top>/ as a gzip-compressed ustar archive.
 //! `oci` writes an OCI image layout: the base image's layers, then one layer
 //! holding the bundle at /opt/<name>/, with the entrypoint
-//! /opt/<name>/bin/<name>. `--archive` is the same layout as one tar plus a
+//! /opt/<name>/bin/<name>; or, with `--root`, one layer holding that directory
+//! at /, with the entrypoint `--entrypoint`, which must be a file of that
+//! layer with an exec bit. `--archive` is the same layout as one tar plus a
 //! Docker `manifest.json`, which `docker load` reads; `--digest` holds the
-//! image manifest digest.
+//! image manifest digest; `--layer-list` the digest of each layer of the
+//! manifest, one per line, in the manifest's order.
 //!
 //! `conda` writes one Mojo package as a conda v2 package (`.conda`) for linux-64:
 //! a zip of three stored members (`metadata.json`, `pkg-*.tar.zst` holding
@@ -146,8 +151,9 @@ fn writeTar(alloc: Alloc, entries: []Entry) ![]u8 {
 
 /// Every directory named by `prefix` (e.g. "opt/hello/" -> "opt/", "opt/hello/"),
 /// then the bundle's files and directories under it.
+/// An empty `prefix` puts the tree at the root of the archive.
 fn bundleEntries(alloc: Alloc, bundle: []const u8, prefix: []const u8) ![]Entry {
-    if (prefix.len == 0 or prefix[prefix.len - 1] != '/' or prefix[0] == '/')
+    if (prefix.len != 0 and (prefix[prefix.len - 1] != '/' or prefix[0] == '/'))
         fail("prefix `{s}` must be a relative path ending in /", .{prefix});
     var list = std.ArrayList(Entry).init(alloc);
     var at: usize = 0;
@@ -398,13 +404,18 @@ fn all(alloc: Alloc, a: Args, flag: []const u8) ![][]const u8 {
 
 fn cmdTar(alloc: Alloc, a: Args) !void {
     allow(a, &.{});
-    const entries = try bundleEntries(alloc, need(a.bundle, "--bundle"), need(a.prefix, "--prefix"));
+    const top = need(a.prefix, "--prefix");
+    if (top.len == 0) fail("prefix is empty", .{});
+    const entries = try bundleEntries(alloc, need(a.bundle, "--bundle"), top);
     const tar = try writeTar(alloc, entries);
     try writeFile(std.fs.cwd(), need(a.out, "--out"), try gzip(alloc, tar));
 }
 
 fn cmdOci(alloc: Alloc, a: Args) !void {
-    allow(a, &.{});
+    allow(a, &.{ "--root", "--entrypoint", "--layer-list" });
+    const root = one(a, "--root");
+    if ((root == null) == (a.bundle == null)) fail("give exactly one of --bundle and --root", .{});
+    if ((root == null) != (one(a, "--entrypoint") == null)) fail("--entrypoint goes with --root, and only with it", .{});
     const name = plain(need(a.name, "--name"), "name", "");
     const version = plain(need(a.version, "--version"), "version", "~");
     const repo = plain(need(a.repo, "--repo"), "repo", "/:");
@@ -438,9 +449,19 @@ fn cmdOci(alloc: Alloc, a: Args) !void {
         if (!std.mem.eql(u8, memberStr(d, "mediaType", "base layer"), oci_layer_type)) fail("base layer {d}: not {s}", .{ i, oci_layer_type });
     }
 
-    // Our layer: the bundle at /opt/<name>/.
-    const prefix = try std.fmt.allocPrint(alloc, "opt/{s}/", .{name});
-    const layer_tar = try writeTar(alloc, try bundleEntries(alloc, need(a.bundle, "--bundle"), prefix));
+    // Our layer: the bundle at /opt/<name>/, entrypoint its bin/<name>; or
+    // the --root tree at /, entrypoint --entrypoint: a file of the layer
+    // with an exec bit.
+    const prefix = if (root == null) try std.fmt.allocPrint(alloc, "opt/{s}/", .{name}) else "";
+    const layer_entries = try bundleEntries(alloc, root orelse a.bundle.?, prefix);
+    const entry_path = one(a, "--entrypoint") orelse try std.fmt.allocPrint(alloc, "/{s}bin/{s}", .{ prefix, name });
+    if (entry_path.len < 2 or entry_path[0] != '/') fail("entrypoint `{s}` is not an absolute path", .{entry_path});
+    var entry_ok = false;
+    for (layer_entries) |e| {
+        if (std.mem.eql(u8, e.path, entry_path[1..])) entry_ok = e.mode == 0o755 and e.path[e.path.len - 1] != '/';
+    }
+    if (!entry_ok) fail("entrypoint {s} is not a file of the image's layer with an exec bit", .{entry_path});
+    const layer_tar = try writeTar(alloc, layer_entries);
     const layer_gz = try gzip(alloc, layer_tar);
 
     // The config: the base's, with our layer, entrypoint and label.
@@ -459,7 +480,7 @@ fn cmdOci(alloc: Alloc, a: Args) !void {
     var cc = config.object.get("config") orelse newObject(alloc);
     if (cc != .object) fail("base config: `config` is not an object", .{});
     var entrypoint = newArray(alloc);
-    try entrypoint.array.append(str(try std.fmt.allocPrint(alloc, "/{s}bin/{s}", .{ prefix, name })));
+    try entrypoint.array.append(str(entry_path));
     try cc.object.put("Entrypoint", entrypoint);
     _ = cc.object.orderedRemove("Cmd");
     var labels = cc.object.get("Labels") orelse newObject(alloc);
@@ -558,6 +579,11 @@ fn cmdOci(alloc: Alloc, a: Args) !void {
     try entries.append(.{ .path = "manifest.json", .mode = 0o644, .data = docker_manifest_bytes });
     try writeFile(std.fs.cwd(), need(a.archive, "--archive"), try writeTar(alloc, entries.items));
     try writeFile(std.fs.cwd(), need(a.digest, "--digest"), try std.fmt.allocPrint(alloc, "{s}\n", .{manifest_digest}));
+    if (one(a, "--layer-list")) |path| {
+        var list = std.ArrayList(u8).init(alloc);
+        for (layers.array.items) |d| try list.writer().print("{s}\n", .{memberStr(d, "digest", "layer")});
+        try writeFile(std.fs.cwd(), path, list.items);
+    }
 }
 
 // ---- conda ---------------------------------------------------------------

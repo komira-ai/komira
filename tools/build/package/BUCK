@@ -31,8 +31,16 @@ shell_lint(
     srcs = [
         "kcov_guard.sh",
         "list_conda_targets.sh",
+        "oci_check.sh",
         "release_version.sh",
     ],
+)
+
+# The check oci_image_check runs over an image (oci_check.bzl).
+export_file(
+    name = "oci_check.sh",
+    src = "oci_check.sh",
+    visibility = ["PUBLIC"],
 )
 
 # kcov is GPL-2.0 and build-only: every package format runs this guard over
