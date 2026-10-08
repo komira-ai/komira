@@ -24,7 +24,7 @@ from komira_http_client.body_frame import (
     BodyFrame,
 )
 from komira_http_client.header_map import HeaderMap
-from komira_http_client.outbound_budget import OUTBOUND_BUDGET_DEFAULT_US
+from komira_http_client.state_machine import _HEAD_DRIVE_DEFAULT_TIMEOUT_US
 from komira_http_client.response_body import (
     RecvRingBody,
     ResponseBody,
@@ -67,8 +67,8 @@ def _make_reactor() raises -> Reactor[NoopSink]:
 
 def _stamp_as_the_driver_does(mut body: RecvRingBody[ScriptedStream]):
     """Stamp `body` with the deadline an `OutboundDriver` with no configured
-    request timeout stamps on every body it builds: now plus
-    `OUTBOUND_BUDGET_DEFAULT_US`.
+    request timeout stamps on every body it builds: now plus the driver's own
+    default, `_HEAD_DRIVE_DEFAULT_TIMEOUT_US` (`_effective_deadline_us`).
 
     WHY THE LARGE-BODY CASES STAMP. A hand-built body carries no stamp, and
     `collect_body` bounds an unstamped drain by `_UNSTAMPED_DRAIN_BACKSTOP_US`
@@ -82,7 +82,7 @@ def _stamp_as_the_driver_does(mut body: RecvRingBody[ScriptedStream]):
     drains: one the driver stamped. The small cases stay unstamped; they are
     the hand-built shape the backstop is sized for."""
     body.set_deadline_us(
-        Int(_now_ns() // UInt64(1000)) + OUTBOUND_BUDGET_DEFAULT_US
+        Int(_now_ns() // UInt64(1000)) + _HEAD_DRIVE_DEFAULT_TIMEOUT_US
     )
 
 
