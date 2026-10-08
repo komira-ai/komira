@@ -129,6 +129,7 @@ _TESTS_LINTS = [
     "//src/tests/conformance/komira_connect_conformance:deps_lint",
     "//src/tests/conformance/komira_db_conformance:deps_lint",
     "//src/tests/conformance/komira_http_conformance:deps_lint",
+    "//src/tests/conformance/komira_datetime_conformance:deps_lint",
     "//src/tests/conformance/komira_json_conformance:deps_lint",
     "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
     "//src/tests/e2e/komira_formats_e2e:deps_lint",
