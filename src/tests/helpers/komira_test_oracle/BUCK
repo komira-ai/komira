@@ -54,3 +54,55 @@ py_test(
     args = ["$(location :datasets)"],
     deps = ["//third_party/python:pyarrow"],
 )
+
+# The ORACLE cases (README.md, Expected answers): `oracle/<shard>/<case>.sql`,
+# each run by DuckDB in the python_oracle `:expected` and rendered by
+# render.py to `expect/<shard>/<case>.tsv` (a sub-target,
+# `:expected[expect/filter_3vl/filter_not_and.tsv]`). Both runs of the action
+# must write the same bytes, and gen_expected.py refuses a query that leaves
+# NULL placement or a literal's type to DuckDB (sql_discipline.py).
+_CASES = [p[len("oracle/"):-len(".sql")] for p in glob(["oracle/*/*.sql"])]
+
+_EXPECTED_MODULES = _MODULES + [
+    "canon.py",
+    "oracle_case.py",
+    "render.py",
+    "sql_discipline.py",
+    "twin_inputs.py",
+]
+
+python_oracle(
+    name = "expected",
+    src = "gen_expected.py",
+    srcs = _EXPECTED_MODULES,
+    data = {c + ".sql": "oracle/" + c + ".sql" for c in _CASES},
+    outs = ["expect/" + c + ".tsv" for c in _CASES],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+    visibility = ["//src/tests/..."],
+)
+
+# render.py and canon.py against hand-spelt cells, Mojo's float formatting
+# and the datasets; no DuckDB.
+py_test(
+    name = "test_render",
+    src = "test_render.py",
+    srcs = _EXPECTED_MODULES,
+    deps = ["//third_party/python:pyarrow"],
+)
+
+# :expected's files parse and are canonical, and each equals its HAND twin
+# (twins/hand, copies of komira_plan_conformance's expectations); the twins'
+# inputs equal the corpus's datasets (twins/inputs).
+py_test(
+    name = "test_expected",
+    src = "test_expected.py",
+    srcs = _EXPECTED_MODULES + glob(["oracle/**", "twins/**"]),
+    args = ["$(location :expected)"],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+)
