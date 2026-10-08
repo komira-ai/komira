@@ -11,11 +11,16 @@
 #   * the mention rows of the user's messages, and every mention row naming
 #     the user, are deleted;
 #   * the user's memberships, read cursors, file rows, user row and subject
-#     row are deleted. The deleted file ids are returned so the caller
-#     deletes their objects.
-# JOIN and LEAVE events keep the user's id, which no row maps to a person
-# once the user and subject rows are gone. Running it again finds nothing
-# left and returns zero counts.
+#     row are deleted, the subject row last. The deleted file ids are
+#     returned so the caller deletes their objects.
+# The user's id stays where it is part of a row that is not the user's: the
+# sender of the event rows (JOIN, LEAVE and the redacted MESSAGE and EDIT
+# events), the mention list of other users' messages, and a channel's
+# `created_by`, and a DM's channel id and `dm_user_ids`. No row maps that id
+# to a person once the user and subject rows are gone. Running it again
+# finds nothing left and returns zero counts; a run that stopped between the
+# user row and the subject row is finished by running it again, by user id
+# or by subject.
 #
 # ON SQLITE a deleted or overwritten value stays in the file's free space,
 # and in the write-ahead log, unless the connection says otherwise:
@@ -27,7 +32,9 @@
 #     bytes, so the old page images in it are gone.
 # This covers the file contents, not the storage device beneath them. On
 # Postgres both steps do nothing: a dead tuple stays readable until VACUUM,
-# and backups keep data until they expire, so erasure there is logical.
+# and backups keep data until they expire, so erasure there is logical. On a
+# document store erasure is logical too: this package makes no claim about
+# the bytes, point-in-time recovery or backups beneath it.
 # =============================================================================
 
 from komira_async.reactor.reactor import Reactor
@@ -35,7 +42,6 @@ from komira_async.runtime.runtime_trait import Runtime
 
 from komira_db import Database, DbValue, Pred, SqlDatabase
 
-from .keys import subject_key
 from .ops import (
     all_of,
     chat_err,
@@ -61,7 +67,6 @@ from .schema import (
     T_SUBJECTS,
     T_USERS,
 )
-from .directory import user_by_id
 
 
 def erase_user_rows[
@@ -163,23 +168,40 @@ def erase_user_rows[
         db, reactor, T_FILES, all_of(eq("uploader_user_id", txt(user_id)))
     )
 
-    var user = user_by_id[RT, DB](db, reactor, user_id)
-    if user:
-        rows_erased += delete_all[RT, DB](
-            db,
-            reactor,
-            T_SUBJECTS,
-            all_of(
-                eq(
-                    "subject_key",
-                    txt(subject_key(user.value().iss, user.value().sub)),
-                )
-            ),
-        )
+    # The user row first, then the subject row found by its user_id: a run
+    # that stops between the two leaves the subject row (the subject key and
+    # the user id), and a rerun by user id or by subject deletes it.
     rows_erased += delete_all[RT, DB](
         db, reactor, T_USERS, all_of(eq("user_id", txt(user_id)))
     )
+    rows_erased += delete_all[RT, DB](
+        db, reactor, T_SUBJECTS, all_of(eq("user_id", txt(user_id)))
+    )
     return EraseCounts(rows_erased, redacted, file_ids^)
+
+
+def user_ids_with_subject[
+    RT: Runtime, DB: Database
+](
+    mut db: DB, mut reactor: Reactor[RT.Sink], iss: String, sub: String
+) raises -> List[String]:
+    """The ids of the user rows that hold (iss, sub). Two equalities need no
+    composite index on a document store."""
+    var cols = List[String]()
+    cols.append(String("user_id"))
+    var rows = select[RT, DB](
+        db,
+        reactor,
+        T_USERS,
+        cols,
+        all_of(eq("iss", txt(iss)), eq("sub", txt(sub))),
+        no_order(),
+        no_limit(),
+    )
+    var out = List[String]()
+    for i in range(rows.__len__()):
+        out.append(rows.row(i).get_text(0))
+    return out^
 
 
 def prepare_sql_connection[

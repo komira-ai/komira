@@ -4,10 +4,12 @@
 # =============================================================================
 #
 # The store owns one database handle and renders no SQL: every call is one of
-# the neutral structured ops, so the same store runs on SQLite, Postgres and a
-# document store. On a SQL backend, create the schema with `chat_migrations()`
-# and pass the handle through `prepare_sql_connection` first; on a document
-# store, declare `CHAT_DOCUMENT_KEYS` and `CHAT_DOCUMENT_INDEXES` (schema.mojo).
+# the neutral structured ops. It is run against SQLite, and against a
+# document store only through komira_gcp_firestore_db's in-process mock; the
+# Postgres path is written (the SQL schema, the dialect check) but has not
+# been run. On a SQL backend, create the schema with `chat_migrations()` and
+# pass the handle through `prepare_sql_connection` first; the mock is run with
+# `CHAT_DOCUMENT_KEYS` and `CHAT_DOCUMENT_INDEXES` (schema.mojo) declared.
 #
 # What the store checks, so that no caller can break the timeline: that ids
 # have the id shape, a send or edit or delete goes to an existing, unarchived
@@ -51,7 +53,7 @@ from .directory import (
     users_page,
     writable_channel,
 )
-from .erasure import erase_user_rows
+from .erasure import erase_user_rows, user_ids_with_subject
 from .keys import require_id, subject_key
 from .ops import all_of, chat_err, delete_all, eq, txt
 from .probe import NoSendProbe, SendProbe
@@ -555,11 +557,26 @@ struct ChatStore[DB: Database, P: SendProbe = NoSendProbe](Movable):
     ](
         mut self, mut reactor: Reactor[RT.Sink], iss: String, sub: String
     ) raises -> EraseCounts:
-        """Erase the user of (iss, sub), if any, and the subject row."""
+        """Erase the user of (iss, sub), if any, and the subject row. The
+        user is the subject row's; without a subject row, every user row
+        that holds (iss, sub)."""
+        var targets = List[String]()
         var id = user_id_for_subject[RT, Self.DB](self._db, reactor, iss, sub)
-        if not id:
-            return EraseCounts(0, 0, List[String]())
-        var counts = erase_user_rows[RT, Self.DB](self._db, reactor, id.value())
+        if id:
+            targets.append(id.take())
+        else:
+            targets = user_ids_with_subject[RT, Self.DB](
+                self._db, reactor, iss, sub
+            )
+        var counts = EraseCounts(0, 0, List[String]())
+        for i in range(len(targets)):
+            var one = erase_user_rows[RT, Self.DB](
+                self._db, reactor, targets[i]
+            )
+            counts.rows_erased += one.rows_erased
+            counts.bodies_redacted += one.bodies_redacted
+            for j in range(len(one.file_ids)):
+                counts.file_ids.append(one.file_ids[j])
         counts.rows_erased += delete_all[RT, Self.DB](
             self._db,
             reactor,

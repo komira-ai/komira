@@ -20,8 +20,11 @@
 #
 # IDEMPOTENT SEND. A send with a non-empty `client_msg_id` first looks for the
 # sender's MESSAGE event with that key in the channel and, if it finds one,
-# returns it and writes its mention rows again. Two retries of one key that
-# run at the same moment can both miss the lookup and both append.
+# returns it and writes its mention rows again (none if it has been deleted
+# since, whose mention rows the delete removed). Two retries of one key that
+# run at the same moment can both miss the lookup and both append, and a
+# retry that read the message just before a delete removed its mention rows
+# writes them back.
 #
 # MENTION ROWS are written after the event, one per (channel, seq, user), each
 # with `create_if_absent_composite`, so writing them twice is harmless. A
@@ -55,6 +58,7 @@ from .ops import (
     flag,
     i64,
     limit,
+    no_limit,
     no_order,
     select,
     set_to,
@@ -239,7 +243,8 @@ def send_checked[
 ) raises -> ChatEvent:
     """Append the MESSAGE `msg` (whose channel, membership, thread root and
     files the caller has checked), or return the sender's earlier event with
-    the same non-empty `client_msg_id`. Writes its mention rows either way."""
+    the same non-empty `client_msg_id`. Writes its mention rows either way,
+    unless the earlier event has been deleted."""
     if msg.client_msg_id.byte_length() > MAX_CLIENT_MSG_ID_BYTES:
         raise chat_err(
             String("client_msg_id is longer than ")
@@ -252,7 +257,8 @@ def send_checked[
         )
         if earlier:
             var ev = earlier.take()
-            write_mentions[RT, DB](db, reactor, ev)
+            if not ev.deleted:
+                write_mentions[RT, DB](db, reactor, ev)
             return ev^
     var ev = append_event[RT, DB, P](db, probe, reactor, msg^)
     write_mentions[RT, DB](db, reactor, ev)
@@ -548,6 +554,33 @@ def thread_page[
     return EventPage(evs^, head, more)
 
 
+def _mention_before(a: MentionRef, b: MentionRef) -> Bool:
+    """The mentions view's order: newest first, then by channel and seq."""
+    if a.created_at_ms != b.created_at_ms:
+        return a.created_at_ms > b.created_at_ms
+    if a.channel_id != b.channel_id:
+        return a.channel_id < b.channel_id
+    return a.seq < b.seq
+
+
+def _mention_refs(rows: DbRows) raises -> List[MentionRef]:
+    """The rows as mentions, in the view's order."""
+    var out = List[MentionRef]()
+    var ci = rows.column_index(String("channel_id"))
+    var si = rows.column_index(String("seq"))
+    var ti = rows.column_index(String("created_at_ms"))
+    for i in range(rows.__len__()):
+        ref r = rows.row(i)
+        var m = MentionRef(r.get_text(ci), r.get_int8(si), r.get_int8(ti))
+        var j = len(out)
+        out.append(m.copy())
+        while j > 0 and _mention_before(m, out[j - 1]):
+            out[j] = out[j - 1].copy()
+            j -= 1
+        out[j] = m^
+    return out^
+
+
 def mentions_page[
     RT: Runtime, DB: Database
 ](
@@ -557,43 +590,71 @@ def mentions_page[
     before_ms: Int64,
     max_mentions: Int,
 ) raises -> MentionPage:
-    """Mentions of `user_id` created before `before_ms`, newest first. A page
-    ends at a millisecond boundary: when the page is full, the trailing
-    mentions that share the last one's millisecond move to the next page,
-    unless they are all the page holds."""
-    var rows = select[RT, DB](
+    """Mentions of `user_id` created before `before_ms`, newest first, then by
+    channel and seq. A page never splits a millisecond: when a full page
+    would end partway through one, that millisecond's mentions move to the
+    next page; when one millisecond alone holds more than `max_mentions`,
+    the page is all of that millisecond, longer than `max_mentions`."""
+    var out = _mention_refs(
+        select[RT, DB](
+            db,
+            reactor,
+            T_MENTIONS,
+            mention_cols(),
+            all_of(
+                eq("user_id", txt(user_id)),
+                Pred.lt(String("created_at_ms"), i64(before_ms)),
+            ),
+            desc("created_at_ms"),
+            limit(max_mentions + 1),
+        )
+    )
+    if len(out) <= max_mentions:
+        return MentionPage(out^, Int64(0))
+    var extra = out.pop()
+    var last_ms = out[len(out) - 1].created_at_ms
+    if extra.created_at_ms != last_ms:
+        # The page holds every mention of its last millisecond.
+        return MentionPage(out^, last_ms)
+    var keep = len(out)
+    while keep > 0 and out[keep - 1].created_at_ms == last_ms:
+        keep -= 1
+    if keep > 0:
+        # Drop the partial last millisecond; the next page starts with it.
+        while len(out) > keep:
+            _ = out.pop()
+        return MentionPage(out^, last_ms + 1)
+    # One millisecond fills the page: return all of it. Two equalities need
+    # no composite index on a document store.
+    var group = _mention_refs(
+        select[RT, DB](
+            db,
+            reactor,
+            T_MENTIONS,
+            mention_cols(),
+            all_of(
+                eq("user_id", txt(user_id)),
+                eq("created_at_ms", i64(last_ms)),
+            ),
+            no_order(),
+            no_limit(),
+        )
+    )
+    var older = select[RT, DB](
         db,
         reactor,
         T_MENTIONS,
         mention_cols(),
         all_of(
             eq("user_id", txt(user_id)),
-            Pred.lt(String("created_at_ms"), i64(before_ms)),
+            Pred.lt(String("created_at_ms"), i64(last_ms)),
         ),
         desc("created_at_ms"),
-        limit(max_mentions + 1),
+        limit(1),
     )
-    var out = List[MentionRef]()
-    var ci = rows.column_index(String("channel_id"))
-    var si = rows.column_index(String("seq"))
-    var ti = rows.column_index(String("created_at_ms"))
-    for i in range(rows.__len__()):
-        ref r = rows.row(i)
-        out.append(
-            MentionRef(r.get_text(ci), r.get_int8(si), r.get_int8(ti))
-        )
-    if len(out) <= max_mentions:
-        return MentionPage(out^, Int64(0))
-    _ = out.pop()
-    var last_ms = out[len(out) - 1].created_at_ms
-    var keep = len(out)
-    while keep > 0 and out[keep - 1].created_at_ms == last_ms:
-        keep -= 1
-    if keep == 0:
-        return MentionPage(out^, last_ms)
-    while len(out) > keep:
-        _ = out.pop()
-    return MentionPage(out^, last_ms)
+    if older.__len__() == 0:
+        return MentionPage(group^, Int64(0))
+    return MentionPage(group^, last_ms)
 
 
 def read_seq_of[

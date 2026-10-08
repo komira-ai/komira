@@ -125,8 +125,9 @@ struct MentionRef(Copyable, Movable):
 
 @fieldwise_init
 struct MentionPage(Copyable, Movable):
-    """Mentions newest first. `next_before_ms` is 0 on the last page,
-    otherwise the `before_ms` of the next page."""
+    """Mentions newest first, then by channel and seq. `next_before_ms` is 0
+    on the last page, otherwise the `before_ms` of the next page: following
+    it returns every mention once (a page never splits a millisecond)."""
 
     var mentions: List[MentionRef]
     var next_before_ms: Int64
