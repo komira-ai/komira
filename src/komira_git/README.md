@@ -56,8 +56,8 @@ client build on.
   delta, max_size)` and `read_delta_header` are git's delta format.
   `PackLimits` bounds the object count, each object's size, the delta chain
   depth (4095 by default, the deepest `git pack-objects` writes) and the
-  bytes a pack may inflate to (`max_inflate_ratio` times its size plus one
-  object), each checked before the work it bounds.
+  bytes one index or read call may inflate (`max_inflate_ratio` times the
+  pack size plus one object), each checked before the work it bounds.
 
 ## What the parsers accept
 

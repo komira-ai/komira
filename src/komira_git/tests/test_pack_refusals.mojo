@@ -24,6 +24,11 @@
 #     refused once their sum passes the budget (`max_inflate_ratio *
 #     len(pack) + max_object_size`), naming the entry that crossed it; and a
 #     delta whose result passes the budget, refused before it is applied.
+#   * test_budget_exact: the budget is charged exactly: `index_pack` at the
+#     count of bytes it produces passes and one byte under is refused,
+#     including the second inflation of a root that has deltas;
+#     `read_pack_object` the same with its own count. Catches any one
+#     charge dropped or counted twice.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -38,9 +43,11 @@ from komira_git import (
     ObjectFormat,
     ObjectId,
     ObjectKind,
+    PackIndex,
     PackLimits,
     hash_object,
     index_pack,
+    read_pack_object,
 )
 
 
@@ -403,8 +410,61 @@ def test_limits() raises:
     )
 
 
+def _read_err(pack: List[UInt8], index: PackIndex, id: ObjectId, limits: PackLimits) -> String:
+    try:
+        _ = read_pack_object(Span(pack), index, id, limits)
+        return "OK"
+    except e:
+        return String(e)
+
+
+def test_budget_exact() raises:
+    # A 1000-byte blob and an OFS_DELTA rebuilding 12 bytes of it. Under
+    # `max_inflate_ratio=0` the budget is `max_object_size`, so each limit
+    # below is the exact count of bytes produced, or one byte short of it.
+    var f = ObjectFormat.sha1()
+    var root = _noise(1000, 7)
+    var delta = _delta(root, 10, "+r")
+    var s = len(root)
+    var d = len(delta)
+    var t = 12
+    var body = _obj(PACK_OBJ_BLOB, root)
+    var d_at = 12 + len(body)
+    body.extend(Span(_ofs_delta(d_at - 12, delta)))
+    var pack = _pack_with(2, body)
+    # index_pack inflates the root twice (walked, then again to resolve its
+    # delta), the delta once, and produces the delta's result.
+    assert_equal(_err(pack, PackLimits(max_object_size=2 * s + d + t, max_inflate_ratio=0)), "OK")
+    assert_equal(
+        _err(pack, PackLimits(max_object_size=2 * s + d + t - 1, max_inflate_ratio=0)),
+        _P + "entry at offset " + String(d_at) + ": the pack inflates past its budget of "
+        + String(2 * s + d + t - 1) + " bytes",
+    )
+    # A budget that fits the walk and the result but not the root's second
+    # inflation is refused at the root.
+    assert_equal(
+        _err(pack, PackLimits(max_object_size=s + d + t, max_inflate_ratio=0)),
+        _E12 + "the pack inflates past its budget of " + String(s + d + t) + " bytes",
+    )
+    # read_pack_object inflates the delta and the root once each and
+    # produces the result, against a budget of its own.
+    var got = index_pack(f, Span(pack), PackLimits())
+    var id_r = hash_object(f, ObjectKind.blob(), Span(_rebuilt(root, 10, "+r")))
+    assert_equal(_read_err(pack, got.index, id_r, PackLimits(max_object_size=s + d + t, max_inflate_ratio=0)), "OK")
+    assert_equal(
+        _read_err(pack, got.index, id_r, PackLimits(max_object_size=s + d + t - 1, max_inflate_ratio=0)),
+        _P + "entry at offset " + String(d_at) + ": the pack inflates past its budget of "
+        + String(s + d + t - 1) + " bytes",
+    )
+    assert_equal(
+        _read_err(pack, got.index, id_r, PackLimits(max_object_size=s + d - 1, max_inflate_ratio=0)),
+        _E12 + "the pack inflates past its budget of " + String(s + d - 1) + " bytes",
+    )
+
+
 def main() raises:
     test_header_refusals()
     test_entry_refusals()
     test_limits()
+    test_budget_exact()
     print("komira_git pack refusal tests passed")

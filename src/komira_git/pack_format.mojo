@@ -62,8 +62,9 @@ struct PackLimits(ImplicitlyCopyable, Movable):
     * `max_delta_depth`: the length of a delta chain (a delta of a
       non-delta has depth 1). The default is 4095, the deepest chain
       `git pack-objects` writes.
-    * `max_inflate_ratio`: every byte the reader produces (each entry
-      inflated, each delta result) counts against a budget of
+    * `max_inflate_ratio`: every byte one `index_pack` or
+      `read_pack_object` call produces (each entry inflation, each delta
+      result) counts against that call's budget of
       `max_inflate_ratio * len(pack) + max_object_size`, checked before the
       bytes are produced. It bounds the work a small pack can cause (a zlib
       or delta bomb); the default allows the ratios real histories reach,

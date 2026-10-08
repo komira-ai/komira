@@ -30,7 +30,12 @@
 #
 # Limits (`PackLimits`): the object count, each declared or rebuilt size,
 # the chain depth, and the bytes produced against the pack's budget are all
-# checked before the work they bound is done.
+# checked before the work they bound is done. Every inflation counts against
+# the budget, so `index_thin_pack` counts a non-delta with delta children
+# twice (walked, then inflated again to resolve them), and every delta
+# result counts once; `read_thin_pack_object` keeps a budget of its own per
+# call, counting each entry of the chain and each delta result. An
+# `ExternalBases` object is not counted: the reader did not produce it.
 # =============================================================================
 
 from std.builtin.swap import swap
@@ -148,6 +153,18 @@ def _offset_lookup(offsets: List[Int], want: Int) -> Int:
     return -1
 
 
+def _charge(produced: Int, budget: Int, n: Int, offset: Int) raises -> Int:
+    """`produced + n`, or a refusal naming the entry at `offset` when that
+    passes `budget`."""
+    if n > budget - produced:
+        raise Error(
+            "komira_git: pack: entry at offset " + String(offset)
+            + ": the pack inflates past its budget of " + String(budget)
+            + " bytes"
+        )
+    return produced + n
+
+
 struct _Resolver:
     """The state of one `index_thin_pack` call."""
 
@@ -180,13 +197,7 @@ struct _Resolver:
 
     def charge(mut self, n: Int, offset: Int) raises:
         """Count `n` more bytes produced against the budget."""
-        if n > self.budget - self.produced:
-            raise Error(
-                "komira_git: pack: entry at offset " + String(offset)
-                + ": the pack inflates past its budget of " + String(self.budget)
-                + " bytes"
-            )
-        self.produced += n
+        self.produced = _charge(self.produced, self.budget, n, offset)
 
     def rebuild(mut self, c: Int, base: Span[UInt8, _], kind: ObjectKind, depth: Int) raises:
         """Rebuild delta entry `c` from `base` (of `kind`, at `depth - 1`)."""
@@ -438,12 +449,16 @@ def read_thin_pack_object(
     if pos < 0:
         raise Error("komira_git: pack: object " + id.to_hex() + " is not in the pack")
     var offset = index.offset_at(pos)
+    var budget = limits.budget(len(pack))
+    var produced = 0
     var chain = List[List[UInt8]]()
+    var chain_at = List[Int]()
     var base = List[UInt8]()
     var kind = ObjectKind.blob()
     while True:
         var head = _parse_entry_head(format, pack, offset, end, limits)
         if not head.is_delta():
+            produced = _charge(produced, budget, head.size, offset)
             _ = _inflate_entry(pack, offset, head, end, base)
             kind = ObjectKind.from_code(head.type_code)
             break
@@ -453,9 +468,11 @@ def read_thin_pack_object(
                 + ": delta chain is longer than the limit "
                 + String(limits.max_delta_depth)
             )
+        produced = _charge(produced, budget, head.size, offset)
         var delta = List[UInt8]()
         _ = _inflate_entry(pack, offset, head, end, delta)
         chain.append(delta^)
+        chain_at.append(offset)
         if head.type_code == PACK_OBJ_OFS_DELTA:
             offset = head.base_offset
             continue
@@ -474,6 +491,9 @@ def read_thin_pack_object(
         break
     var k = len(chain) - 1
     while k >= 0:
+        var result_size = read_delta_header(Span(chain[k])).result_size
+        if result_size <= limits.max_object_size:
+            produced = _charge(produced, budget, result_size, chain_at[k])
         var out = apply_delta(Span(base), Span(chain[k]), limits.max_object_size)
         base = out^
         k -= 1

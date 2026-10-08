@@ -10,8 +10,9 @@
 # `git rev-list --objects main ^main~10` lists, with at least one delta on an
 # object outside the pack (else the pack was not thin and the test proves
 # nothing), and read each back with cat-file's kind and payload. Catches a
-# REF_DELTA base looked up only in the pack, an outside base taken at the
-# wrong depth, a thin pack accepted as complete.
+# REF_DELTA base looked up only in the pack, and a thin pack accepted as
+# complete. The depth of a delta on an outside base is checked by
+# komira_git's test_pack_reader, not here.
 #
 # test_sha256: the same history in a sha256 repository: `check_git_pack`
 # with 32-byte ids in REF bases, the index and the trailer. Catches an id or

@@ -21,14 +21,18 @@
 #     inherit its base's kind, a wrong depth, base id, offset, packed size or
 #     CRC-32 (each checked per entry), and an index that does not find each
 #     object at its offset.
-#   * test_thin_pack: two REF_DELTAs on one object outside the pack (and an
-#     OFS_DELTA on one of them) are refused by `index_pack`, and by
+#   * test_thin_pack: two REF_DELTAs on one blob outside the pack (and an
+#     OFS_DELTA on one of them) and one on a tree outside it are refused
+#     by `index_pack`, and by
 #     `index_thin_pack` given bases of the other format; resolved by
 #     `index_thin_pack` from `ExternalBases` (depth 1, base id the outside
-#     object's), and read back with `read_thin_pack_object`.
+#     object's, the tree delta a tree), and read back with
+#     `read_thin_pack_object` (the tree with the tree kind). Catches an
+#     outside base whose kind is not passed on.
 #   * test_reader_refusals: `read_pack_object` refuses an id not in the
 #     index, an index of another pack, an index entry whose offset holds a
-#     different object or lies at the trailer, a chain over the depth limit,
+#     different object or lies at the trailer, a chain over the depth limit
+#     (and reads one exactly at it),
 #     and a REF base that is neither in the pack nor given.
 #   * test_sha256_pack: a sha256 pack (32-byte REF base id and trailer)
 #     indexed, read and its index round-tripped; the same bytes read as sha1
@@ -360,13 +364,24 @@ def test_thin_pack() raises:
     entries.append(_ofs_delta(at1 - offs0[0], _delta(r1, 5, "+2")))
     var r3 = _rebuilt(outside, 30, "-other")
     entries.append(_ref_delta(id_out, _delta(outside, 30, "-other")))
+    # A REF_DELTA on a tree outside the pack: the rebuilt object is a tree.
+    var out_tree = Tree(f)
+    out_tree.add(MODE_BLOB, "a.txt", id_out)
+    var t_out = out_tree.serialize()
+    var id_t_out = hash_object(f, ObjectKind.tree(), Span(t_out))
+    var t_next = Tree(f)
+    t_next.add(MODE_BLOB, "a.txt", id_out)
+    t_next.add(MODE_BLOB, "b.txt", id_out)
+    var t4 = t_next.serialize()
+    assert_true(len(t4) < 128)
+    entries.append(_ref_delta(id_t_out, _insert_delta(t_out, t4)))
     var pack = _pack_of(entries)
     var limits = PackLimits()
     try:
         _ = index_pack(f, Span(pack), limits)
         assert_true(False)
     except e:
-        assert_equal(String(e), "komira_git: pack: 3 deltas have no base in the pack")
+        assert_equal(String(e), "komira_git: pack: 4 deltas have no base in the pack")
     # Bases of the other format name no sha1 id.
     var other_format = ExternalBases(ObjectFormat.sha256())
     _ = other_format.add(ObjectKind.blob(), Span(outside))
@@ -374,19 +389,29 @@ def test_thin_pack() raises:
         _ = index_thin_pack(f, Span(pack), limits, other_format)
         assert_true(False)
     except e:
-        assert_equal(String(e), "komira_git: pack: 3 deltas have no base in the pack")
+        assert_equal(String(e), "komira_git: pack: 4 deltas have no base in the pack")
     var bases = ExternalBases(f)
     assert_equal(bases.add(ObjectKind.blob(), Span(outside)), id_out)
     _ = bases.add(ObjectKind.blob(), Span(outside))
     assert_equal(bases.count(), 1)
+    assert_equal(bases.add(ObjectKind.tree(), Span(t_out)), id_t_out)
+    assert_equal(bases.count(), 2)
     var got = index_thin_pack(f, Span(pack), limits, bases)
-    assert_equal(got.index.count(), 3)
+    assert_equal(got.index.count(), 4)
     assert_equal(got.index.find(id_out), -1)
     var id3 = hash_object(f, ObjectKind.blob(), Span(r3))
     assert_equal(got.entries[2].id, id3)
     assert_equal(got.entries[2].depth, 1)
     assert_equal(got.entries[2].base_id, id_out)
     assert_true(_same(read_thin_pack_object(Span(pack), got.index, id3, limits, bases).payload, r3))
+    var id4 = hash_object(f, ObjectKind.tree(), Span(t4))
+    assert_equal(got.entries[3].id, id4)
+    assert_true(got.entries[3].kind == ObjectKind.tree())
+    assert_equal(got.entries[3].depth, 1)
+    assert_equal(got.entries[3].base_id, id_t_out)
+    var tree_obj = read_thin_pack_object(Span(pack), got.index, id4, limits, bases)
+    assert_true(tree_obj.kind == ObjectKind.tree())
+    assert_true(_same(tree_obj.payload, t4))
     var id1 = hash_object(f, ObjectKind.blob(), Span(r1))
     var id2 = hash_object(f, ObjectKind.blob(), Span(r2))
     assert_equal(got.entries[0].id, id1)
@@ -444,6 +469,10 @@ def test_reader_refusals() raises:
         _read_err(pack, got.index, id_a2, PackLimits(max_delta_depth=1)),
         p + "object " + id_a2.to_hex() + ": delta chain is longer than the limit 1",
     )
+    # A chain exactly as deep as the limit is read.
+    var id_a1 = hash_object(f, ObjectKind.blob(), Span(a1))
+    assert_equal(_read_err(pack, got.index, id_a2, PackLimits(max_delta_depth=2)), "OK")
+    assert_equal(_read_err(pack, got.index, id_a1, PackLimits(max_delta_depth=1)), "OK")
     var other = pack.copy()
     other[len(other) - 1] ^= 1
     assert_equal(_read_err(other, got.index, id_a, limits), p + "the index describes another pack")
