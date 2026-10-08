@@ -24,7 +24,8 @@ comments.
 Spaces, tabs, form feeds, carriage returns and a backslash continuing a line
 make no token. Unbalanced brackets never go below depth 0. The lexer does not
 refuse anything: a source the compiler rejects still yields tokens, and the
-mutants made of them are counted `error` by the scorer (README.md).
+mutants made of them are counted `error` by the scorer (tools/build/coverage/README.md,
+"Mutation score").
 """
 
 comptime IDENT: Int = 1

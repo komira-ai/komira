@@ -32,8 +32,10 @@ Markers (end-of-line comments, on the line where the mutant's location is):
 `# cov: unreachable <reason>` suppresses every mutant on the line, and
 `# mutation: equivalent <operator>[,<operator>...] <reason>` suppresses
 those operators on the line. Suppressed mutants are returned apart, with the
-marker's reason, so a reviewer sees each. An equivalent marker naming an
-unknown operator, or with no reason, raises.
+marker's reason, so a reviewer sees each. Any other comment starting
+`# mutation:` (a bare `# mutation: equivalent`, a misspelt kind), an
+equivalent marker naming an unknown operator, or one with no reason,
+raises.
 """
 
 from mutate.lex import COMMENT, IDENT, NEWLINE, NUMBER, OP, STRING, Token, line_of, line_starts, text_of, tokenize
@@ -150,7 +152,9 @@ def _markers(src: String, toks: List[Token], starts: List[Int], path: String) ra
         if c.startswith("# cov: unreachable"):
             var reason = String(c[byte=18 : c.byte_length()]).strip()
             out.append(_Marker(line, String("unreachable"), List[String](), String(reason)))
-        elif c.startswith("# mutation: equivalent "):
+        elif c.startswith("# mutation:"):
+            if not c.startswith("# mutation: equivalent "):
+                raise Error(path + ":" + String(line) + ": a `# mutation:` comment is `# mutation: equivalent <operator>[,<operator>...] <reason>`")
             var words = _split_ws(_rest_after(c, String("# mutation: equivalent ")))
             if len(words) < 2:
                 raise Error(path + ":" + String(line) + ": a `# mutation: equivalent` marker needs operators and a reason")

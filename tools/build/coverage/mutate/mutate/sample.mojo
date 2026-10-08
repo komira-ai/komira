@@ -5,7 +5,7 @@ id)` is smallest (ties by position), in their original order; `n` of 0, or
 not below the count, keeps all. A mutant's place in the sample depends only on
 its own id, the seed and the other ids' hashes, so a change elsewhere in a
 package moves few mutants in or out of the sample, and the build actions of
-a mutant that stays are the same actions (README.md, "Mutation score").
+a mutant that stays are the same actions (tools/build/coverage/README.md, "Mutation score").
 
 The list file (`render_list`, `parse_list`) is what the build reads to
 declare one set of actions per sampled mutant:

@@ -38,6 +38,10 @@ comptime SURVIVED = "survived"
 comptime TIMEOUT = "timeout"
 comptime ERROR = "error"
 
+# The id of the baseline: the library unchanged, built and tested through
+# the same steps as every mutant (`check_baseline`).
+comptime BASELINE = "baseline"
+
 
 struct TestSteps(Copyable, Movable):
     var name: String
@@ -138,6 +142,20 @@ def verdict(precompile: String, tests: List[TestSteps]) raises -> Verdict:
     if stillborn != "":
         return Verdict(String(ERROR), stillborn, stillborn_log)
     return Verdict(String(SURVIVED), String("every test passed"))
+
+
+def check_baseline(precompile: String, tests: List[TestSteps]) raises:
+    """Refuses unless every step of the baseline (the library unchanged) is
+    `ok`: a harness that fails an unchanged library's tests would count
+    every mutant killed. The error names the first step that is not, with
+    its output."""
+    if first_line(precompile) != "ok":
+        raise Error("the baseline (the library unchanged) did not pass its precompile: " + first_line(precompile) + "; the mutation harness is broken, nothing is scored\n" + after_first_line(precompile))
+    for t in tests:
+        if first_line(t.build) != "ok":
+            raise Error("the baseline (the library unchanged) did not pass " + t.name + " build: " + first_line(t.build) + "; the mutation harness is broken, nothing is scored\n" + after_first_line(t.build))
+        if first_line(t.run) != "ok":
+            raise Error("the baseline (the library unchanged) did not pass " + t.name + " run: " + first_line(t.run) + "; the mutation harness is broken, nothing is scored\n" + after_first_line(t.run))
 
 
 struct Scored(Copyable, Movable):

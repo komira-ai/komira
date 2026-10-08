@@ -145,6 +145,9 @@ def test_markers() raises:
     var bad = List[String]()
     bad.append("a = 1  # mutation: equivalent cmp_negate\n")
     bad.append("a = 1  # mutation: equivalent cmp_negat why\n")
+    bad.append("a = 1  # mutation: equivalent\n")
+    bad.append("a = 1  # mutation: equivalent \n")
+    bad.append("a = 1  # mutation: equivalnt cmp_negate why\n")
     for i in range(len(bad)):
         var refused = False
         try:

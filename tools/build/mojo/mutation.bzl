@@ -17,11 +17,13 @@ building it by name runs anything.
    against the library's deps (`mutation_precompile`); per `test_srcs` entry
    the test built against that package exactly as its gated build (same
    optimization level, defines, test deps and link) (`mutation_build_test`)
-   and run through the gate's runner with its data and environment under a
-   memory cap, the library's `test_memory_cap_mib` or 4096 MiB
-   (`mutation_run_test`). Each of those steps runs through mut_step.sh, which
-   never fails the action and records `ok`, `fail <n>`, `timeout <s>` or
-   `skipped`; `[komira] mutation_compile_timeout_secs` (default 900) bounds
+   and run through the gate's runner exactly as the gate runs it: its data,
+   environment and memory cap (`mutation_run_test`). The baseline, the
+   library unchanged, takes the same steps under `mut/baseline/`, and
+   `mutate score` refuses unless each is ok. Each step runs through
+   mut_step.sh, which records `ok`, `fail <n>`, `timeout <s>` or `skipped`
+   and fails the action only on a compile wrapper's own exit status
+   (_INFRA_EXITS); `[komira] mutation_compile_timeout_secs` (default 900) bounds
    each compile and `[komira] mutation_run_timeout_secs` (default 120)
    each test run.
    Every input of a mutant's actions is the library's sources, its deps, its
@@ -35,8 +37,8 @@ building it by name runs anything.
 
 A README's examples are not run against a mutant: only `test_srcs` can kill.
 The switch is read in the macro and sets the `mutation_*` attributes only;
-with it off they are absent and analysis is what it was before they existed,
-and with it on no other action of the library changes. The tool's own
+with it off they are unset (their defaults) and no action changes, and with
+it on no other action of the library changes. The tool's own
 package (`tools/build/coverage/mutate`) gets no attributes: its sub-target
 would depend on itself.
 """
@@ -48,7 +50,6 @@ load(":test_runtime.bzl", "test_root")
 
 _MUTATION_DIR = "komira//tools/build/coverage/mutate:mut_dir"
 _MUTATE_PACKAGE = "tools/build/coverage/mutate"
-_DEFAULT_CAP_MIB = 4096
 
 MUTATION_ATTRS = {
     # A mut_dir (tools/build/coverage/mutate/defs.bzl): set by the macro
@@ -165,13 +166,14 @@ def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, 
             mdir = mdir,
             step = step,
             files = files,
+            mutable = sorted(mutable),
             deps = deps,
             extra = extra_closure,
             link_tail = link_tail,
             tests = tests,
             defines = defines,
             opt_level = ctx.attrs.test_optimization_level,
-            cap = cap or _DEFAULT_CAP_MIB,
+            cap = cap,
             mem_cap = mem_cap,
             env_args = env_args,
             compile_limit = str(ctx.attrs.mutation_compile_timeout_secs),
@@ -182,8 +184,9 @@ def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, 
     ))
     return {"mutation": [DefaultInfo(default_outputs = [tsv, md], sub_targets = {"list": [DefaultInfo(default_output = lst)]})]}
 
-def _step(v, status, limit, after, command):
-    # One mutant step through mut_step.sh (never fails; records the outcome).
+def _step(v, status, limit, after, command, infra_exits):
+    # One mutant step through mut_step.sh (records the outcome; fails the
+    # action only on an `infra_exits` status).
     return cmd_args(
         v.tc.busybox,
         "sh",
@@ -192,15 +195,99 @@ def _step(v, status, limit, after, command):
         status.as_output(),
         limit,
         [["--after", a] for a in after],
+        [["--infra-exit", e] for e in infra_exits],
         "--",
         command,
     )
 
+# The compile wrapper's exit statuses that are a failure of the machine, not
+# of the mutant (mojo_wrapper.sh): a refusal, an output missing or naming the
+# action's directory, the watchdog, a signal. mut_step.sh fails the action on
+# them, so they are never cached as a mutant's result.
+_INFRA_EXITS = ["2", "3", "4", "124", "129", "130", "143"]
+
+def _mutant_actions(actions, v, shim, base, mid, path):
+    """Declares one mutant's steps under `base` and returns its `mutate
+    score` arguments. `path` is the file `mid` changes (applied by `mutate
+    apply`), or None for the baseline of a library with no source to mutate,
+    which compiles the sources unchanged."""
+    tc = v.tc
+    files = v.files
+    if path != None:
+        mutated = actions.declare_output(base + "/file/" + path)
+        actions.run(
+            cmd_args(v.mdir.project("mutate/mutate"), "apply", "--src", v.files[path], "--path", path, "--id", mid, "--out", mutated.as_output(), hidden = v.mdir),
+            category = "mutation_apply",
+            identifier = mid,
+        )
+        files = v.files | {path: mutated}
+
+    # The directory's name is the package's import name, as [src]'s is.
+    src = actions.copied_dir(base + "/src/" + v.import_name, files)
+    mojoc = actions.declare_output(base + "/pkg/" + v.import_name + ".mojoc")
+    pre = actions.declare_output(base + "/precompile.status")
+    dep_closure = actions.tset(MojoPkgTSet, children = v.deps)
+    actions.run(
+        _step(v, pre, v.compile_limit, [], v.mojo_cmd(tc, ["precompile", dep_closure.project_as_args("include"), src, "-o", mojoc.as_output()]), _INFRA_EXITS),
+        category = "mutation_precompile",
+        identifier = mid,
+    )
+    closure = actions.tset(MojoPkgTSet, children = [actions.tset(MojoPkgTSet, value = mojoc, children = v.deps)] + v.extra)
+    score = ["--mutant", mid, "--precompile", pre]
+    for t in v.tests:
+        exe = actions.declare_output("{}/tests/{}/{}".format(base, t.stem, t.stem))
+        built = actions.declare_output("{}/tests/{}.build.status".format(base, t.stem))
+        actions.run(
+            _step(v, built, v.compile_limit, [pre], v.mojo_cmd(tc, [
+                "build",
+                "--optimization-level",
+                v.opt_level,
+                "--target-cpu",
+                tc.target_cpu,
+                v.defines,
+                closure.project_as_args("include"),
+                t.staged.project(t.entry),
+                "-o",
+                exe.as_output(),
+            ], source_root = t.staged, link_tail = v.link_tail), _INFRA_EXITS),
+            category = "mutation_build_test",
+            identifier = "{} {}".format(mid, t.stem),
+        )
+        root_dir, binary = test_root(shim, "{}/tests/{}/root".format(base, t.stem), exe, t.data)
+        ran = actions.declare_output("{}/tests/{}.run.status".format(base, t.stem))
+        actions.run(
+            _step(v, ran, v.run_limit, [built], cmd_args(
+                # The gate's own run: its memory cap (none when the gate
+                # runs uncapped), runner, environment and data.
+                capped_prefix(tc, v.mem_cap, t.label, v.cap),
+                tc.busybox,
+                "sh",
+                tc.gate_runner,
+                tc.busybox,
+                tc.compiler,
+                t.label,
+                binary,
+                # gate_runner's PASS marker: not an output (the status is),
+                # so it goes to mut_step.sh's private scratch directory.
+                "@MUT_SCRATCH@/passed",
+                v.env_args,
+                hidden = root_dir,
+            ), []),
+            category = "mutation_run_test",
+            identifier = "{} {}".format(mid, t.stem),
+        )
+        score += ["--test", t.stem, "--build", built, "--run", ran]
+    return score
+
 def _mutants_impl(actions, list_value, list_file, tsv, md, ctx_values):
     v = ctx_values
-    tc = v.tc
     shim = struct(actions = actions)
-    score = []
+
+    # The baseline: the library unchanged (a no-op `apply` of its first
+    # source), through every step a mutant takes. `mutate score` refuses to
+    # score unless each of its steps is ok, so a harness that fails every
+    # test (and so would kill every mutant) fails the build instead.
+    score = _mutant_actions(actions, v, shim, "mut/baseline", "baseline", v.mutable[0] if v.mutable else None)
     for line in list_value.read_string().splitlines():
         if line.startswith("#") or not line:
             continue
@@ -210,65 +297,7 @@ def _mutants_impl(actions, list_value, list_file, tsv, md, ctx_values):
         mid, path, op = f[0], f[1], f[4]
         if path not in v.files:
             fail("{}: mutant {} names {}, not a source of the library".format(v.label, mid, path))
-        base = "mut/m/{}/{}_{}_{}".format(path, f[2], f[3], op)
-        mutated = actions.declare_output(base + "/file/" + path)
-        actions.run(
-            cmd_args(v.mdir.project("mutate/mutate"), "apply", "--src", v.files[path], "--path", path, "--id", mid, "--out", mutated.as_output(), hidden = v.mdir),
-            category = "mutation_apply",
-            identifier = mid,
-        )
-        # The directory's name is the package's import name, as [src]'s is.
-        src = actions.copied_dir(base + "/src/" + v.import_name, v.files | {path: mutated})
-        mojoc = actions.declare_output(base + "/pkg/" + v.import_name + ".mojoc")
-        pre = actions.declare_output(base + "/precompile.status")
-        dep_closure = actions.tset(MojoPkgTSet, children = v.deps)
-        actions.run(
-            _step(v, pre, v.compile_limit, [], v.mojo_cmd(tc, ["precompile", dep_closure.project_as_args("include"), src, "-o", mojoc.as_output()])),
-            category = "mutation_precompile",
-            identifier = mid,
-        )
-        closure = actions.tset(MojoPkgTSet, children = [actions.tset(MojoPkgTSet, value = mojoc, children = v.deps)] + v.extra)
-        score += ["--mutant", mid, "--precompile", pre]
-        for t in v.tests:
-            exe = actions.declare_output("{}/tests/{}/{}".format(base, t.stem, t.stem))
-            built = actions.declare_output("{}/tests/{}.build.status".format(base, t.stem))
-            actions.run(
-                _step(v, built, v.compile_limit, [pre], v.mojo_cmd(tc, [
-                    "build",
-                    "--optimization-level",
-                    v.opt_level,
-                    "--target-cpu",
-                    tc.target_cpu,
-                    v.defines,
-                    closure.project_as_args("include"),
-                    t.staged.project(t.entry),
-                    "-o",
-                    exe.as_output(),
-                ], source_root = t.staged, link_tail = v.link_tail)),
-                category = "mutation_build_test",
-                identifier = "{} {}".format(mid, t.stem),
-            )
-            root_dir, binary = test_root(shim, "{}/tests/{}/root".format(base, t.stem), exe, t.data)
-            ran = actions.declare_output("{}/tests/{}.run.status".format(base, t.stem))
-            actions.run(
-                _step(v, ran, v.run_limit, [built], cmd_args(
-                    capped_prefix(tc, v.mem_cap, t.label, v.cap),
-                    tc.busybox,
-                    "sh",
-                    tc.gate_runner,
-                    tc.busybox,
-                    tc.compiler,
-                    t.label,
-                    binary,
-                    # gate_runner's PASS marker: not an output, the status is.
-                    "mutant.passed",
-                    v.env_args,
-                    hidden = root_dir,
-                )),
-                category = "mutation_run_test",
-                identifier = "{} {}".format(mid, t.stem),
-            )
-            score += ["--test", t.stem, "--build", built, "--run", ran]
+        score += _mutant_actions(actions, v, shim, "mut/m/{}/{}_{}_{}".format(path, f[2], f[3], op), mid, path)
     actions.run(
         cmd_args(
             v.mdir.project("mutate/mutate"),

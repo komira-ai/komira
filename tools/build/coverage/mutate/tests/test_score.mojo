@@ -1,6 +1,6 @@
 from std.testing import assert_equal, assert_true
 
-from mutate.score import Scored, TestSteps, Verdict, render_bp, render_mutants, render_summary, verdict
+from mutate.score import Scored, check_baseline, TestSteps, Verdict, render_bp, render_mutants, render_summary, verdict
 
 # The scorer: each verdict rule and its precedence, statuses that disagree
 # with how the steps were declared refused, and the report: a surviving
@@ -81,6 +81,44 @@ def test_a_test_that_does_not_compile_is_error() raises:
     ts.append(_t("test_a", "fail 1", "skipped"))
     ts.append(_t("test_b", "ok", "timeout 120"))
     assert_equal(_v("ok", ts^).status, "timeout")
+
+
+def test_baseline_must_pass_every_step() raises:
+    var ok = List[TestSteps]()
+    ok.append(_t("test_a", "ok", "ok"))
+    check_baseline("ok", ok)
+    # a harness that fails every test (exit 2: the runner refused), a test
+    # that does not build unchanged, a library that does not compile
+    var flat = List[String]()
+    for x in [
+        "ok", "ok", "fail 2\ngate_runner: usage error\n", "test_a run: fail 2",
+        "ok", "fail 1", "skipped", "test_a build: fail 1",
+        "fail 1", "skipped", "skipped", "precompile: fail 1",
+        "ok", "ok", "timeout 120", "test_a run: timeout 120",
+    ]:
+        flat.append(String(x))
+    var cases = List[List[String]]()
+    for k in range(0, len(flat), 4):
+        var row = List[String]()
+        for j in range(4):
+            row.append(flat[k + j])
+        cases.append(row^)
+    for c in cases:
+        var ts = List[TestSteps]()
+        ts.append(_t("test_a", c[1], c[2]))
+        var msg = String("")
+        try:
+            check_baseline(c[0], ts)
+        except e:
+            msg = String(e)
+        assert_true(msg.find(c[3]) >= 0, msg)
+        assert_true(msg.find("the mutation harness is broken") >= 0, msg)
+    var runner = List[TestSteps]()
+    runner.append(_t("test_a", "ok", "fail 2\ngate_runner: usage error\n"))
+    try:
+        check_baseline("ok", runner)
+    except e:
+        assert_true(String(e).find("gate_runner: usage error") >= 0, "the failing step's output is in the error")
 
 
 def test_inconsistent_statuses_refused() raises:
@@ -180,6 +218,7 @@ def main() raises:
     test_a_test_that_does_not_compile_is_error()
     test_killed_beats_timeout_and_first_kill_named()
     test_error_when_the_library_does_not_compile()
+    test_baseline_must_pass_every_step()
     test_inconsistent_statuses_refused()
     test_mutants_file()
     test_summary_lists_the_survivor_not_the_killed()

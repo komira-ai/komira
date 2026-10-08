@@ -11,9 +11,11 @@ score"):
 `list` writes the list file of the `--file`s (paths in the package, read
 under `--src-dir`; `--sample 0` keeps every mutant). `apply` writes the file
 `--src` with mutant `--id` applied (`--path` is the file's path in the
-package, which the id names). `score` reads each sampled mutant's step
+package, which the id names); the id `baseline` writes it unchanged. `score` reads each sampled mutant's step
 statuses and writes the report; every mutant of the list must be given
-exactly once.
+exactly once, and so must the baseline (`--mutant baseline`), the library
+unchanged through the same steps: unless every one of its steps is ok, the
+harness is broken and nothing is scored (exit 1).
 
 Exit status: 0 done, 1 an input is malformed or a mutant unknown, 2 bad usage.
 """
@@ -22,7 +24,7 @@ from std.io import FileDescriptor
 
 from mutate.gen import Mutant, Suppressed, apply, generate
 from mutate.sample import parse_list, render_list
-from mutate.score import Scored, TestSteps, render_mutants, render_summary, verdict
+from mutate.score import BASELINE, Scored, TestSteps, check_baseline, render_mutants, render_summary, verdict
 
 comptime EXIT_OK = 0
 comptime EXIT_INPUT = 1
@@ -117,6 +119,9 @@ def run_apply(args: List[String]) raises:
         raise Error("usage: apply needs --src, --path, --id and --out")
     var text = read_text(src)
     var g = generate(path, text)
+    if id == BASELINE:
+        write_text(out, text)
+        return
     for m in g.mutants:
         if m.id() == id:
             write_text(out, apply(text, m))
@@ -173,8 +178,17 @@ def run_score(args: List[String]) raises:
     if list_path == "" or out_tsv == "" or out_md == "":
         raise Error("usage: score needs --list, --out-tsv and --out-md")
     var lf = parse_list(read_text(list_path))
-    if len(ids) != len(lf.rows):
-        raise Error("the list names " + String(len(lf.rows)) + " mutants; " + String(len(ids)) + " were given")
+    var b = -1
+    for k in range(len(ids)):
+        if ids[k] == BASELINE:
+            if b >= 0:
+                raise Error("the baseline was given twice")
+            b = k
+    if b < 0:
+        raise Error("no baseline (`--mutant baseline`): without it a broken harness would score every mutant killed")
+    check_baseline(pre[b], steps[b])
+    if len(ids) - 1 != len(lf.rows):
+        raise Error("the list names " + String(len(lf.rows)) + " mutants; " + String(len(ids) - 1) + " were given")
     var rows = List[Scored]()
     for r in range(len(lf.rows)):
         ref row = lf.rows[r]

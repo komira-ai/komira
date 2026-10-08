@@ -54,6 +54,11 @@ def test_list_and_apply() raises:
     a.append(d + "/a.out")
     assert_equal(run(a), EXIT_OK)
     assert_equal(read_text(d + "/a.out"), "def f(x: Int) -> Bool:\n    return x >= 3\n")
+    # the baseline writes the file unchanged
+    var base = a.copy()
+    base[6] = "baseline"
+    assert_equal(run(base), EXIT_OK)
+    assert_equal(read_text(d + "/a.out"), "def f(x: Int) -> Bool:\n    return x < 3\n")
     # an id the file does not have, and one naming another path
     var bad = a.copy()
     bad[6] = "a.mojo:2:15:cmp_negate"
@@ -69,7 +74,7 @@ def _status(d: String, name: String, text: String) raises -> String:
     return p
 
 
-def _score_args(d: String, list: String, ids: List[String], surviving: String, drop_last: Bool) raises -> List[String]:
+def _score_args(d: String, list: String, ids: List[String], surviving: String, drop_last: Bool, baseline_run: String = "ok") raises -> List[String]:
     var a = List[String]()
     a.append("score")
     a.append("--list")
@@ -82,6 +87,18 @@ def _score_args(d: String, list: String, ids: List[String], surviving: String, d
     a.append(d + "/mutants.tsv")
     a.append("--out-md")
     a.append(d + "/summary.md")
+    # The baseline first, as the build gives it; "" leaves it out.
+    if baseline_run != "":
+        a.append("--mutant")
+        a.append("baseline")
+        a.append("--precompile")
+        a.append(_status(d, String("b.pre"), "ok"))
+        a.append("--test")
+        a.append("test_x")
+        a.append("--build")
+        a.append(_status(d, String("b.build"), "ok"))
+        a.append("--run")
+        a.append(_status(d, String("b.run"), baseline_run))
     var n = len(ids) - 1 if drop_last else len(ids)
     for i in range(n):
         a.append("--mutant")
@@ -137,6 +154,12 @@ def test_score_refusals() raises:
     var twice = ids.copy()
     twice[1] = twice[0]
     assert_equal(run(_score_args(d, list, twice, String(""), False)), EXIT_INPUT)
+    # no baseline; a baseline whose run failed (a broken harness: every test
+    # fails, so every mutant would be killed) scores nothing
+    assert_equal(run(_score_args(d, list, ids, String(""), False, String(""))), EXIT_INPUT)
+    write_text(d + "/mutants.tsv", "stale")
+    assert_equal(run(_score_args(d, list, ids, String(""), False, String("fail 2"))), EXIT_INPUT)
+    assert_equal(read_text(d + "/mutants.tsv"), "stale")
     # usage: no command, an unknown command, an unknown flag, a missing value
     assert_equal(run(List[String]()), EXIT_USAGE)
     var unknown = List[String]()

@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "mut_dir")
+load(":defs.bzl", "mut_dir", "mut_step_cases")
 
 # mutate: operator mutants of one Mojo package's sources, a deterministic
 # sample of them, and their score from the statuses of each mutant's build
@@ -55,7 +55,19 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+# mut_step.sh's cases: ok, fail <n>, timeout (the process group killed),
+# skipped, empty -o outputs, --infra-exit, @MUT_SCRATCH@, usage errors.
+mut_step_cases(
+    name = "mut_step_cases",
+    exec_compatible_with = LINUX_X86_64,
+    script = "mut_step_cases.sh",
+    step = "mut_step.sh",
+)
+
 shell_lint(
     name = "shell_lint",
-    srcs = ["mut_step.sh"],
+    srcs = [
+        "mut_step.sh",
+        "mut_step_cases.sh",
+    ],
 )
