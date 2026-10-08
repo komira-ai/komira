@@ -19,7 +19,8 @@ clients.
   `parse_<op>_response` reads) and `HttpResult` (what a transport returns).
   Every body is bytes.
 - `aws_error.mojo`: `AwsErrorInfo` (status, code, message, request id of a
-  failed response), `aws_json_error_info` and `aws_query_error_code`.
+  failed response), `aws_json_error_info`, `aws_query_error_code`, and
+  `aws_client_error_code` (the code in a generated client's raised text).
 - `aws_codec.mojo`: the awsJson scalar encoding (`AwsJsonToken`, the
   `aws_token_*` encoders and decoders, the AWS_TS_* timestamp formats) and
   the error shape (`aws_error_code*`, `aws_error_message_from_body`).
@@ -133,6 +134,7 @@ from .aws_json import (
 from .aws_error import (
     AWS_REQUEST_ID_MAX_BYTES,
     AwsErrorInfo,
+    aws_client_error_code,
     aws_json_error_info,
     aws_query_error_code,
     aws_request_id,

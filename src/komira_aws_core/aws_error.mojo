@@ -28,6 +28,13 @@
 # A response that names no code has code "". botocore's JSON parser puts
 # the status there instead (`str(status_code)`); here the status is already
 # `status`, and a code that is a number would match no modeled error.
+#
+# `aws_client_error_code` reads the code back out of the text a generated
+# client raises for a non-2xx answer (`<Service>.<Op> failed: HTTP <status>
+# <code> <message>`, the form tools/build/proto-codegen emits; not
+# `AwsErrorInfo.to_error`'s), so a caller that maps an error code onto its
+# own outcome (a missing resource answered False, a taken name treated as
+# done) reads it here instead of parsing the text itself.
 # =============================================================================
 
 from ._text import has_control, sub
@@ -117,3 +124,28 @@ def aws_json_error_info(resp: AwsResponse) -> AwsErrorInfo:
         aws_error_message_from_body(resp.body),
         aws_request_id(resp, String("x-amzn-RequestId")),
     )
+
+
+def aws_client_error_code(operation: String, text: String) -> String:
+    """The error code in `text`, an error a generated client raised for
+    `operation` (`<Service>.<Op>`, as in `SecretsManager.PutSecretValue`):
+    `<operation> failed: HTTP <status> <code> <message>`. "" when `text`
+    is not such an error (a transport failure, a request the client
+    refused before sending, another operation's error) or the answer named
+    no code."""
+    var head = operation + " failed: HTTP "
+    if not text.startswith(head):
+        return String("")
+    var b = text.as_bytes()
+    var i = head.byte_length()
+    var digits = 0
+    while i < len(b) and b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
+        i += 1
+        digits += 1
+    if digits == 0 or i >= len(b) or b[i] != UInt8(ord(" ")):
+        return String("")
+    i += 1
+    var start = i
+    while i < len(b) and b[i] != UInt8(ord(" ")):
+        i += 1
+    return String(text[byte=start:i])
