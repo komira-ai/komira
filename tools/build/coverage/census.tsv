@@ -1,12 +1,13 @@
 # The coverage census: the data docs/coverage_census.md is rendered from (census.sh; README.md, "The census").
-census	2026-10-08	dd3907091b133862ffd49e4b0f3c2b392eefdabe	main after #787, with #860 applied: main itself does not link komira_crypto's and komira_http_core's tests
-komira//src/kci_api:kci_api	src/kci_api	library	OK	1361	1393	-	-	no	release	-	-
+census	2026-10-08	18c899ef3aab3399a180e34f0a8ac563897117f5	-
+komira//src/kci_api:kci_api	src/kci_api	library	OK	1507	1540	-	-	no	release	-	-
 komira//src/kci_artifact:kci_artifact	src/kci_artifact	library	OK	893	918	-	-	no	conda	-	-
 komira//src/kci_artifact_manifest:kci_artifact_manifest	src/kci_artifact_manifest	library	OK	159	162	-	-	no	release	-	-
 komira//src/kci_build:kci_build_lib	src/kci_build	library	OK	1057	1130	-	-	no	conda	-	-
+komira//src/kci_cell:kci_cell	src/kci_cell	library	OK	246	246	-	-	no	conda	-	-
 komira//src/kci_cli:kci_cli	src/kci_cli	library	OK	1190	1323	-	-	no	conda	-	-
-komira//src/kci_cloud:kci_cloud	src/kci_cloud	library	OK	2493	2937	-	-	no	conda	src/kci_cloud/conformance.mojo	-
-komira//src/kci_cloud_fake:kci_cloud_fake	src/kci_cloud_fake	library	RUN_FAILED	-	-	-	-	yes	conda	-	mojo_gated_test readme: 1 of 3 README examples failed
+komira//src/kci_cloud:kci_cloud	src/kci_cloud	library	OK	2536	2980	-	-	no	conda	src/kci_cloud/conformance.mojo	-
+komira//src/kci_cloud_fake:kci_cloud_fake	src/kci_cloud_fake	library	OK	1816	1883	629	690	yes	conda	-	-
 komira//src/kci_logs:kci_logs	src/kci_logs	library	OK	905	1078	-	-	no	release	-	-
 komira//src/kci_params:kci_params	src/kci_params	library	OK	259	326	-	-	no	release	-	-
 komira//src/kci_pkg_upload:kci_pkg_upload	src/kci_pkg_upload	library	OK	1953	2193	-	-	no	conda	-	-
@@ -105,12 +106,12 @@ komira//src/komira_gcp_secretmanager:komira_gcp_secretmanager	src/komira_gcp_sec
 komira//src/komira_gcp_serviceusage:komira_gcp_serviceusage	src/komira_gcp_serviceusage	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_no_env_reads: kcov: error: Too long string!
 komira//src/komira_gcp_storage:komira_gcp_storage	src/komira_gcp_storage	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_no_env_reads: kcov: error: Too long string!
 komira//src/komira_gcp_wif:komira_gcp_wif	src/komira_gcp_wif	library	OK	248	258	-	-	no	conda	-	-
-komira//src/komira_git:komira_git	src/komira_git	library	OK	885	898	-	-	no	conda	-	-
+komira//src/komira_git:komira_git	src/komira_git	library	OK	1329	1342	-	-	no	conda	-	-
 komira//src/komira_grpc:komira_grpc	src/komira_grpc	library	OK	1049	1138	-	-	no	conda	-	-
 komira//src/komira_hash:komira_hash	src/komira_hash	library	OK	8	8	4	4	yes	release	-	-
 komira//src/komira_host:komira_host	src/komira_host	library	OK	403	977	-	-	no	release	src/komira_host/proc_probe.mojo,src/komira_host/thp_policy.mojo	-
-komira//src/komira_http_client:komira_http_client	src/komira_http_client	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_recv_ring_body: HttpError[TIMEOUT]: response body deadline exceeded after 298858 body bytes -- no deadline was stamped on this body, so the drain fell back to its unstamped backstop of 400000 us (collect_body). A ...
-komira//src/komira_http_core:komira_http_core	src/komira_http_core	library	OK	2352	3557	-	-	no	conda	src/komira_http_core/codec/h2/connection_state.mojo,src/komira_http_core/codec/h2/response_validation.mojo,src/komira_http_core/transport/stream_park.mojo	-
+komira//src/komira_http_client:komira_http_client	src/komira_http_client	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_recv_ring_body: HttpError[TIMEOUT]: response body deadline exceeded after 208794 body bytes -- no deadline was stamped on this body, so the drain fell back to its unstamped backstop of 400000 us (collect_body). A ...
+komira//src/komira_http_core:komira_http_core	src/komira_http_core	library	OK	2706	3473	-	-	no	conda	src/komira_http_core/codec/h2/connection_state.mojo	-
 komira//src/komira_http_server:komira_http_server	src/komira_http_server	library	OK	1168	2391	-	-	no	conda	src/komira_http_server/middleware/passthrough.mojo	-
 komira//src/komira_iceberg_catalog:komira_iceberg_catalog	src/komira_iceberg_catalog	library	OK	204	234	-	-	no	conda	-	-
 komira//src/komira_job_report_proto:komira_job_report_proto	src/komira_job_report_proto	library	OK	0	0	-	-	no	release	-	-
@@ -127,6 +128,7 @@ komira//src/komira_log:komira_log	src/komira_log	library	OK	1812	1992	-	-	no	con
 komira//src/komira_log_query:komira_log_query	src/komira_log_query	library	OK	468	491	-	-	no	conda	-	-
 komira//src/komira_lz4:komira_lz4	src/komira_lz4	library	OK	183	228	46	60	yes	conda	-	-
 komira//src/komira_mail_address:komira_mail_address	src/komira_mail_address	library	OK	533	552	-	-	no	conda	-	-
+komira//src/komira_managed_mail_proto:komira_managed_mail_proto	src/komira_managed_mail_proto	library	OK	0	0	-	-	no	conda	-	-
 komira//src/komira_mcp_server:komira_mcp_server	src/komira_mcp_server	library	OK	438	455	-	-	no	conda	-	-
 komira//src/komira_metrics:komira_metrics	src/komira_metrics	library	OK	896	922	-	-	no	conda	-	-
 komira//src/komira_metrics_reader:komira_metrics_reader	src/komira_metrics_reader	library	OK	572	588	-	-	no	conda	-	-
@@ -135,11 +137,11 @@ komira//src/komira_name_registry:komira_name_registry	src/komira_name_registry	l
 komira//src/komira_net:komira_net	src/komira_net	library	OK	98	115	-	-	no	conda	-	-
 komira//src/komira_objectstore:komira_objectstore	src/komira_objectstore	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_cas_manifest_concurrent_offline: At tests/test_cas_manifest_concurrent_offline.mojo:292:17: AssertionError: `left == right` comparison failed:
 komira//src/komira_objectstore_gcs:komira_objectstore_gcs	src/komira_objectstore_gcs	library	OK	901	991	-	-	no	conda	src/komira_objectstore_gcs/backend.mojo	-
-komira//src/komira_objectstore_s3:komira_objectstore_s3	src/komira_objectstore_s3	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_s3_fs_inflight: At tests/test_s3_fs_inflight.mojo:470:16: AssertionError: 6 parts under a bound of 3 took 9493 ms: they were not sent 3 at a time
+komira//src/komira_objectstore_s3:komira_objectstore_s3	src/komira_objectstore_s3	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_s3_fs_inflight: At tests/test_s3_fs_inflight.mojo:470:16: AssertionError: 6 parts under a bound of 3 took 9270 ms: they were not sent 3 at a time
 komira//src/komira_oci:komira_oci	src/komira_oci	library	OK	1394	1685	-	-	no	conda	-	-
 komira//src/komira_op_agg_row_api:komira_op_agg_row_api	src/komira_op_agg_row_api	library	OK	38	69	-	-	no	conda	src/komira_op_agg_row_api/agg_chunk_rows.mojo,src/komira_op_agg_row_api/combine_agg_plan.mojo	-
 komira//src/komira_op_agg_state:komira_op_agg_state	src/komira_op_agg_state	library	OK	2202	2813	-	-	no	conda	src/komira_op_agg_state/accumulator_trait.mojo,src/komira_op_agg_state/agg_fn_fused_kernel.mojo,src/komira_op_agg_state/aggregator_with_struct_trait.mojo,src/komira_op_agg_state/int_sum_overflow.mojo,src/komira_op_agg_state/row_map_projects.mojo	-
-komira//src/komira_optimizer:komira_optimizer	src/komira_optimizer	library	OK	6399	6435	-	-	no	conda	-	-
+komira//src/komira_optimizer:komira_optimizer	src/komira_optimizer	library	OK	6874	6910	-	-	no	conda	-	-
 komira//src/komira_orc:komira_orc	src/komira_orc	library	OK	3580	4688	-	-	no	conda	-	-
 komira//src/komira_parquet:komira_parquet	src/komira_parquet	library	OK	4797	4801	-	-	no	conda	-	-
 komira//src/komira_parquet_api:komira_parquet_api	src/komira_parquet_api	library	OK	235	241	118	124	yes	release	-	-
@@ -194,6 +196,7 @@ komira//src/komira_xml:komira_xml	src/komira_xml	library	OK	858	896	-	-	no	relea
 komira//src/komira_zlib:komira_zlib	src/komira_zlib	library	OK	180	240	52	74	yes	conda	-	-
 komira//src/tests/conformance/komira_connect_conformance:komira_connect_conformance	src/tests/conformance/komira_connect_conformance	test	OK	126	132	-	-	no	conda	-	-
 komira//src/tests/conformance/komira_db_conformance:komira_db_conformance	src/tests/conformance/komira_db_conformance	test	OK	1136	1228	-	-	no	no	src/tests/conformance/komira_db_conformance/targets.mojo	-
+komira//src/tests/conformance/komira_git_conformance:komira_git_conformance	src/tests/conformance/komira_git_conformance	test	OK	39	39	-	-	no	no	-	-
 komira//src/tests/conformance/komira_http_conformance:komira_http_conformance	src/tests/conformance/komira_http_conformance	test	OK	273	301	-	-	no	conda	-	-
 komira//src/tests/conformance/komira_json_conformance:komira_json_conformance	src/tests/conformance/komira_json_conformance	test	OK	475	498	-	-	no	no	-	-
 komira//src/tests/conformance/komira_vcard_conformance:komira_vcard_conformance	src/tests/conformance/komira_vcard_conformance	test	OK	10	10	-	-	no	no	-	-
@@ -207,7 +210,7 @@ komira//src/tests/e2e/komira_secrets_e2e:komira_secrets_e2e	src/tests/e2e/komira
 komira//src/tests/e2e/komira_shuffle_e2e:komira_shuffle_e2e	src/tests/e2e/komira_shuffle_e2e	test	OK	49	397	-	-	no	conda	src/tests/e2e/komira_shuffle_e2e/children.mojo,src/tests/e2e/komira_shuffle_e2e/harness.mojo	-
 komira//src/tests/e2e/komira_tls_interop_e2e:komira_tls_interop_e2e	src/tests/e2e/komira_tls_interop_e2e	test	OK	39	393	-	-	no	conda	src/tests/e2e/komira_tls_interop_e2e/children.mojo,src/tests/e2e/komira_tls_interop_e2e/fixtures.mojo,src/tests/e2e/komira_tls_interop_e2e/tls_io.mojo	-
 komira//src/tests/e2e/komira_udf_e2e:komira_udf_e2e	src/tests/e2e/komira_udf_e2e	test	OK	35	38	15	16	yes	no	-	-
-komira//src/tests/helpers/komira_plan_harness:komira_plan_harness	src/tests/helpers/komira_plan_harness	test	RUN_FAILED	-	-	-	-	no	no	-	mojo_precompile : buck-out/v2/art/komira/src/tests/helpers/komira_plan_harness/__komira_plan_harness__/47365a912b650570/src/komira_plan_harness/type_text.mojo:145:22: error: 'ArrowType' value has no attribute 'ERROR'
+komira//src/tests/helpers/komira_plan_harness:komira_plan_harness	src/tests/helpers/komira_plan_harness	test	OK	2312	2534	-	-	no	no	-	-
 komira//src/tests/helpers/komira_test_bucket:komira_test_bucket	src/tests/helpers/komira_test_bucket	test	OK	595	616	-	-	no	conda	-	-
 komira//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3	src/tests/helpers/komira_test_fake_s3	test	OK	28	28	-	-	no	no	-	-
 komira//src/tests/helpers/komira_test_minio:komira_test_minio	src/tests/helpers/komira_test_minio	test	OK	221	245	47	68	yes	conda	-	-

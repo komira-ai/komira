@@ -105,6 +105,7 @@ expect_green coverage_gate_floor_held "$N:covfloor" "$N:covfloor_held[coverage][
 expect_green coverage_census_ok "$N:census_ok"
 expect_red coverage_census_doc_edited "docs/coverage_census.md is not what census.sh render writes" "$N:census_doc_edited"
 expect_red coverage_census_floor_lowered "ratchet.tsv is not what census.sh render writes" "$N:census_floor_lowered"
+expect_red coverage_census_pin_no_reason "has an empty reason" "$N:census_pin_no_reason"
 # A generated client whose welded tests are at its package's top analyzes
 # with the switch on, and has its gate (analysis only: aquery).
 CG=//tools/build/proto-codegen/aws_query:komira_aws_tiny_query

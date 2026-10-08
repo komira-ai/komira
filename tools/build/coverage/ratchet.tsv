@@ -3,7 +3,9 @@
 # A row is: <package>	<line floor>	<branch floor>, separated by one tab.
 # <package> is a directory holding a BUCK file (src/<module>); the floors are
 # basis points (1/100 of a percent, 0 to 10000, so 8734 is 87.34%); the
-# branch floor is '-' when the package has none. Rows are sorted by package
+# branch floor is '-' when the package has none. A pinned row has a fourth
+# field, its reason (never empty): floors set by hand under what was measured,
+# for lines covered only on some runs; they are kept as written. Rows are sorted by package
 # in byte order, each package once. A floor may only rise: covcheck reports a
 # package measured below its floor, or a floor above 0 with nothing measured
 # for it (Regression), a measured package with no row (MissingRow), a row whose directory has no BUCK file (ExtraRow) and a
@@ -14,15 +16,16 @@
 #
 # The rows are the census's: census.sh render writes them from census.tsv,
 # raising a floor to what was measured and never lowering one, and the build
-# (//:coverage_census) holds them to it. Lower a floor only by editing its row
-# here (README.md, "The census").
-src/kci_api	9770	-
+# (//:coverage_census) holds them to it. A floor that must stay under the
+# measurement is a pinned row here (README.md, "The census").
+src/kci_api	9785	-
 src/kci_artifact	9727	-
 src/kci_artifact_manifest	9814	-
 src/kci_build	9353	-
+src/kci_cell	10000	-
 src/kci_cli	8994	-
-src/kci_cloud	8488	-
-src/kci_cloud_fake	0	-
+src/kci_cloud	8510	-
+src/kci_cloud_fake	9644	9115
 src/kci_logs	8395	-
 src/kci_params	7944	-
 src/kci_pkg_upload	8905	-
@@ -43,7 +46,7 @@ src/komira_agg_api	2810	-
 src/komira_anomaly	9528	-
 src/komira_arrow	6298	-
 src/komira_arrow_ipc	7733	-
-src/komira_async	8169	-
+src/komira_async	8157	-	async_mutex.mojo:197-198 and semaphore.mojo:213-218 (the contended slow paths) run only when the unsynchronised two-thread smoke tests contend; 8157 is 81.69% without those 6 lines
 src/komira_async_api	638	5000
 src/komira_atomic_alias	0	-
 src/komira_authz_api	10000	-
@@ -119,12 +122,12 @@ src/komira_gcp_secretmanager	0	-
 src/komira_gcp_serviceusage	0	-
 src/komira_gcp_storage	0	-
 src/komira_gcp_wif	9612	-
-src/komira_git	9855	-
+src/komira_git	9903	-
 src/komira_grpc	9217	-
 src/komira_hash	10000	10000
 src/komira_host	4124	-
 src/komira_http_client	0	-
-src/komira_http_core	6612	-
+src/komira_http_core	7791	-
 src/komira_http_server	4884	-
 src/komira_iceberg_catalog	8717	-
 src/komira_job_report_proto	0	-
@@ -141,6 +144,7 @@ src/komira_log	9096	-
 src/komira_log_query	9531	-
 src/komira_lz4	8026	7666
 src/komira_mail_address	9655	-
+src/komira_managed_mail_proto	0	-
 src/komira_mcp_server	9626	-
 src/komira_metrics	9718	-
 src/komira_metrics_reader	9727	-
@@ -153,7 +157,7 @@ src/komira_objectstore_s3	0	-
 src/komira_oci	8272	-
 src/komira_op_agg_row_api	5507	-
 src/komira_op_agg_state	7827	-
-src/komira_optimizer	9944	-
+src/komira_optimizer	9947	-
 src/komira_orc	7636	-
 src/komira_parquet	9991	-
 src/komira_parquet_api	9751	9516
@@ -164,7 +168,7 @@ src/komira_plan_proto	0	-
 src/komira_plan_stats	5292	7844
 src/komira_plan_wire	6969	-
 src/komira_pplan_wire	8723	-
-src/komira_proto_codec	0	-
+src/komira_proto_codec	9446	-
 src/komira_protobuf	8571	7547
 src/komira_resources	10000	10000
 src/komira_retry	9950	9864
@@ -201,6 +205,6 @@ src/komira_uuid	9527	8928
 src/komira_validation_run	10000	-
 src/komira_vcard	9500	-
 src/komira_viewport	8754	-
-src/komira_wkt	0	-
+src/komira_wkt	9407	7445
 src/komira_xml	9575	-
 src/komira_zlib	7500	7027

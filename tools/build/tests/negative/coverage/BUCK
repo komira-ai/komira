@@ -568,9 +568,12 @@ mojo_library(
 
 # Test 46. The census check (tools/build/coverage/census.bzl): a doc and
 # floors exactly as census.sh renders them from census/census.tsv are GREEN
-# (:census_ok); a doc edited by hand (doc_edited.txt: one percentage changed)
-# and a floor lowered under what the census measured (ratchet_lowered.tsv)
-# are RED (:census_doc_edited, :census_floor_lowered). The docs are .txt so
+# (:census_ok: a package floor is its lowest library, an old floor above the
+# measurement survives, a 0/0 library sets nothing, a pinned row is kept as
+# written); a doc edited by hand (doc_edited.txt: one percentage changed), a
+# floor lowered under what the census measured (ratchet_lowered.tsv) and a
+# pinned row with no reason (ratchet_pin_no_reason.tsv) are RED
+# (:census_doc_edited, :census_floor_lowered, :census_pin_no_reason). The docs are .txt so
 # the Markdown checks of this cell do not read their links.
 [
     coverage_census(
@@ -583,6 +586,7 @@ mojo_library(
         ("census_ok", "doc.txt", "ratchet.tsv"),
         ("census_doc_edited", "doc_edited.txt", "ratchet.tsv"),
         ("census_floor_lowered", "doc.txt", "ratchet_lowered.tsv"),
+        ("census_pin_no_reason", "doc.txt", "ratchet_pin_no_reason.tsv"),
     )
 ]
 

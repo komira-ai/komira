@@ -102,7 +102,11 @@ render() { # busybox census ratchet doc_out ratchet_out
         BEGIN {
             while ((getline l < rat) > 0) {
                 if (l ~ /^#/) { com[++ncom] = l; continue }
-                split(l, r, "\t"); old[r[1]] = r[2]; oldb[r[1]] = r[3]; oldn++
+                n = split(l, r, "\t")
+                if (n != 3 && n != 4) die(rat ": a row has 3 fields, or 4 (a pinned row and its reason): " l)
+                if (n == 4 && r[4] == "") die(rat ": the pinned row of " r[1] " has an empty reason")
+                old[r[1]] = r[2]; oldb[r[1]] = r[3]; oldn++
+                if (n == 4) pin[r[1]] = r[4]
             }
         }
         /^#/ { next }
@@ -131,13 +135,17 @@ render() { # busybox census ratchet doc_out ratchet_out
             } else if ($5 != "-" || $6 != "-" || $7 != "-" || $8 != "-" || $12 == "-") die(FILENAME ":" FNR ": a row that is not OK has no numbers and a note")
             nu = $11 == "-" ? 0 : split($11, u, ",")
             if ($3 == "test") { print "T\t" $1 "\t" $0 > tmp; next }
-            # The package floors: the lowest library; none when one is not measured.
+            # The package floors: the lowest library; line 0 when one is not
+            # measured. A library with no executable line (0/0: its sources
+            # are all generated) has nothing to cover and sets nothing; its
+            # gate finds no unmeasured floor (covcheck, ratchet.mojo).
             if (!(pkg in seen)) { seen[pkg] = 1; pl[pkg] = 10001; pb[pkg] = 10001; pbm[pkg] = 0; pkgs[++np] = pkg }
-            if (lb < 0) pl[pkg] = 0; else if (lb < pl[pkg]) pl[pkg] = lb
+            empty = $4 == "OK" && lf == 0
+            if (empty) { } else if (lb < 0) pl[pkg] = 0; else if (lb < pl[pkg]) pl[pkg] = lb
             # A branch floor only when every library of the package has a
             # branch number: the gate of one without would find the floor
             # unmeasured (a Regression).
-            if ($4 != "OK" || bb < 0) pbm[pkg] = -1
+            if (empty) { } else if ($4 != "OK" || bb < 0) pbm[pkg] = -1
             else if (pbm[pkg] >= 0) { pbm[pkg] = 1; if (bb < pb[pkg]) pb[pkg] = bb }
             row[NR] = $0; rpkg[NR] = pkg; rlb[NR] = lb; rbb[NR] = bb; rows[++nr] = NR
         }
@@ -147,12 +155,20 @@ render() { # busybox census ratchet doc_out ratchet_out
             for (i = 1; i <= ncom; i++) print com[i] > rout
             for (i = 1; i <= np; i++) {
                 p = pkgs[i]
-                m = pl[p]; mb = pbm[p] == 1 ? pb[p] : -1
+                m = pl[p] == 10001 ? 0 : pl[p]; mb = pbm[p] == 1 ? pb[p] : -1
+                if (p in pin) {
+                    # A pinned row is kept as written: never raised, never lowered.
+                    fl[p] = old[p] + 0; flb[p] = oldb[p] == "-" ? -1 : oldb[p] + 0
+                    print "R\t" p "\t" p "\t" old[p] "\t" oldb[p] "\t" pin[p] > tmp
+                    print "P\t" p "\t" p "\t" old[p] "\t" oldb[p] "\t" pin[p] "\t" m "\t" (mb < 0 ? "-" : mb) > tmp
+                    done[p] = 1
+                    continue
+                }
                 f = m; if (p in old) { if (old[p] + 0 > m) f = old[p] + 0; else if (old[p] + 0 < m) print "census.sh: note: raised " p " line " old[p] " -> " m > "/dev/stderr" }
                 fb = mb
                 if (p in old && oldb[p] != "-") { if (oldb[p] + 0 > mb) fb = oldb[p] + 0; else if (oldb[p] + 0 < mb) print "census.sh: note: raised " p " branch " oldb[p] " -> " mb > "/dev/stderr" }
                 fl[p] = f; flb[p] = fb
-                print "R\t" p "\t" p "\t" f "\t" (fb < 0 ? "-" : fb) > tmp
+                print "R\t" p "\t" p "\t" f "\t" (fb < 0 ? "-" : fb) "\t" > tmp
                 done[p] = 1
             }
             for (p in old) if (!(p in done)) print "census.sh: note: dropped the row of " p " (no library of the census)" > "/dev/stderr"
@@ -160,14 +176,15 @@ render() { # busybox census ratchet doc_out ratchet_out
                 i = rows[k]; $0 = row[i]; p = rpkg[i]
                 below = (rlb[i] >= 0 && rlb[i] < fl[p]) || (rbb[i] >= 0 && rbb[i] < flb[p])
                 if (below) print "census.sh: note: " $1 " is under its floor" > "/dev/stderr"
-                if ($4 == "OK") print "L\t" sprintf("%05d", rlb[i] < 0 ? 10001 : rlb[i]) " " $1 "\t" $0 "\t" fl[p] "\t" (flb[p] < 0 ? "-" : flb[p]) "\t" below > tmp
-                else print "F\t" $1 "\t" $0 "\t" fl[p] "\t" (flb[p] < 0 ? "-" : flb[p]) "\t0" > tmp
+                pn = (p in pin) ? 1 : 0
+                if ($4 == "OK") print "L\t" sprintf("%05d", rlb[i] < 0 ? 10001 : rlb[i]) " " $1 "\t" $0 "\t" fl[p] "\t" (flb[p] < 0 ? "-" : flb[p]) "\t" below "\t" pn > tmp
+                else print "F\t" $1 "\t" $0 "\t" fl[p] "\t" (flb[p] < 0 ? "-" : flb[p]) "\t0\t" pn > tmp
             }
         }
     ' "$CENSUS" || return 1
     LC_ALL=C "$BB" sort -t "$(printf '\t')" -k1,1 -k2,2 "$T" > "$T.sorted"
     {
-        "$BB" awk -F '\t' '$1 == "R" { print $3 "\t" $4 "\t" $5 }' "$T.sorted"
+        "$BB" awk -F '\t' '$1 == "R" { print $3 "\t" $4 "\t" $5 ($6 == "" ? "" : "\t" $6) }' "$T.sorted"
     } >> "$ROUT"
     # Pass 2: the doc, from the sorted rows.
     "$BB" awk -F '\t' '
@@ -182,14 +199,15 @@ render() { # busybox census ratchet doc_out ratchet_out
         $1 == "L" {
             # $3.. is the census row (12 fields), then floor line, floor branch, below.
             n++; lib[n] = $3; st[n] = $6; lh[n] = $7; lf[n] = $8; bh[n] = $9; bf[n] = $10; bg[n] = $11; pub[n] = $12; un[n] = $13
-            fl[n] = $15; fb[n] = $16; below[n] = $17
+            fl[n] = $15; fb[n] = $16; below[n] = $17; pinned[n] = $18
             th += $7; tf += $8; if ($9 != "-") { tbh += $9; tbf += $10; nb++ }
             if ($8 > 0) { b = bp($7, $8); m++; v[m] = b; if (b == 10000) full++; else if (b >= 9000) hi++; else if (b >= 5000) mid++; else lo++ } else na++
             if (nfiles($13) > 0) { nul++; nuf += nfiles($13) }
             np[$12]++; if ($17 == 1) nbelow++
             next
         }
-        $1 == "F" { k++; flib[k] = $3; fst[k] = $6; fpub[k] = $12; fnote[k] = $14; ffl[k] = $15; ffb[k] = $16; np[$12]++; next }
+        $1 == "F" { k++; flib[k] = $3; fst[k] = $6; fpub[k] = $12; fnote[k] = $14; ffl[k] = $15; ffb[k] = $16; fpin[k] = $18; np[$12]++; next }
+        $1 == "P" { q++; ppkg[q] = $3; pfl[q] = $4; pfb[q] = $5; pwhy[q] = $6; pml[q] = $7; pmb[q] = $8; next }
         $1 == "T" { t++; trow[t] = $0; next }
         END {
             print "# Coverage census"
@@ -234,12 +252,13 @@ render() { # busybox census ratchet doc_out ratchet_out
             print ""
             print "Lowest first. *Uncovered* counts executable lines no test ran, the lines of"
             print "files no test compiles included; *Floor* is the package'"'"'s (ratchet.tsv), line /"
-            print "branch, `-` for none; **under floor** marks a library measured under it."
+            print "branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors));"
+            print "**under floor** marks a library measured under it."
             print ""
             print "| # | Library | Line | Uncovered | Branch | Files no test compiles | Published | Floor |"
             print "|---:|---|---:|---:|---|---:|---|---|"
             for (i = 1; i <= n; i++)
-                print "| " i " | `" short(lib[i]) "` | " frac(lh[i], lf[i]) " | " lf[i] - lh[i] " | " branch(bg[i], bh[i], bf[i]) " | " nfiles(un[i]) " | " pub[i] " | " floors(fl[i], fb[i]) (below[i] ? " **under floor**" : "") " |"
+                print "| " i " | `" short(lib[i]) "` | " frac(lh[i], lf[i]) " | " lf[i] - lh[i] " | " branch(bg[i], bh[i], bf[i]) " | " nfiles(un[i]) " | " pub[i] " | " floors(fl[i], fb[i]) (pinned[i] ? " pinned" : "") (below[i] ? " **under floor**" : "") " |"
             print ""
             print "## Not measured"
             print ""
@@ -247,7 +266,20 @@ render() { # busybox census ratchet doc_out ratchet_out
             else {
                 print "| Library | Status | Why | Published | Floor |"
                 print "|---|---|---|---|---|"
-                for (i = 1; i <= k; i++) print "| `" short(flib[i]) "` | " fst[i] " | " fnote[i] " | " fpub[i] " | " floors(ffl[i], ffb[i]) " |"
+                for (i = 1; i <= k; i++) print "| `" short(flib[i]) "` | " fst[i] " | " fnote[i] " | " fpub[i] " | " floors(ffl[i], ffb[i]) (fpin[i] ? " pinned" : "") " |"
+            }
+            print ""
+            print "## Pinned floors"
+            print ""
+            print "A pinned row of ratchet.tsv holds a floor set by hand, with its reason;"
+            print "render keeps it as written, whatever the census measured (*measured* is"
+            print "the package floor the census would give it)."
+            print ""
+            if (q == 0) print "None."
+            else {
+                print "| Package | Floor | Measured | Why |"
+                print "|---|---|---|---|"
+                for (i = 1; i <= q; i++) print "| `" ppkg[i] "` | " floors(pfl[i], pfb[i]) " | " floors(pml[i], pmb[i]) " | " pwhy[i] " |"
             }
             print ""
             print "## Files no test compiles"
@@ -288,7 +320,7 @@ check)
     "$BB" mkdir -p "$S"
     msg=""
     if ! render "$BB" "$2" "$3" "$S/doc.md" "$S/ratchet.tsv" 2> "$S/err"; then
-        msg="census.tsv is not one census.sh renders: $("$BB" grep '^census.sh: error' "$S/err" | "$BB" head -5)"
+        msg="census.tsv or ratchet.tsv is not one census.sh renders: $("$BB" grep '^census.sh: error' "$S/err" | "$BB" head -5)"
     elif ! "$BB" cmp -s "$S/ratchet.tsv" "$3"; then
         msg="ratchet.tsv is not what census.sh render writes from census.tsv and it (a floor under what census.tsv measured, a row of no library of the census, or a package with none): $("$BB" diff "$3" "$S/ratchet.tsv" | "$BB" grep '^[-+][^-+]' | "$BB" head -10)"
     elif ! "$BB" cmp -s "$S/doc.md" "$4"; then
@@ -398,6 +430,8 @@ REPORT=$OUT/$(cat "$OUT/last").json
             l = a[i]
             if (l ~ /Unhandled exception caught during execution: |kcov: error: |^- \*\*Regression\*\*|timed out|[Tt]imeout|error: /) {
                 sub(/.*Unhandled exception caught during execution: /, "", l); gsub(/\\"/, "\"", l); gsub(/\\t/, " ", l); gsub(/\|/, "/", l); gsub(/\\\\/, "\\", l)
+                # A path in buck-out names the build, not the source: keep its repository part.
+                gsub(/buck-out\/[^ ]*\/[0-9a-f][0-9a-f]*\//, "", l)
                 return length(l) > 200 ? substr(l, 1, 197) "..." : l
             }
         }

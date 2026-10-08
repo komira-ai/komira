@@ -489,7 +489,9 @@ failed to build: then it lists the library as branch not measured).
 
 `ratchet.tsv`: comment lines start with `#`; a row is
 `<package>\t<line floor>\t<branch floor>`, floors in basis points, the branch
-floor `-` when there is none, rows sorted by package in byte order, each
+floor `-` when there is none, or a pinned row with a fourth field, its
+reason (kept as written by `--ratchet-out` and by the census, [The
+census](#the-census)), rows sorted by package in byte order, each
 package once; anything else is refused naming the line. A floor holds in
 every mode: a package measured under it is a `Regression`, whose
 conclusion is `failure` in census and neutral mode too, so its gate fails
@@ -541,8 +543,11 @@ sets a package's floor to the lowest number of its libraries (two
 libraries in one directory share a row): line 0 when one of them was not
 measured, and no branch floor unless every one of them has a branch number
 (a library outside `COVERAGE_BRANCH_GATE` in the same directory as one in
-it would otherwise fail its gate on an unmeasured branch floor). It never
-lowers one: a floor is
+it would otherwise fail its gate on an unmeasured branch floor). A library
+with no executable line (0/0: its sources are all generated) sets nothing,
+and its gate finds no unmeasured floor for its package (the gate counts
+every source of the library, so it has nothing to cover). It never lowers
+one: a floor is
 `max(current floor, measured)`. A library that failed keeps its floor (or
 0), so a failing run neither blocks the census nor lowers anything.
 
@@ -559,14 +564,22 @@ and no other row is there.
   census measured, and the diff of `ratchet.tsv` lists every raise for the
   review. A number moves only with the tests or the sources: a cached run
   is the same run, so a flaky test cannot raise a floor by passing once
-  more on unchanged inputs. A coverage number that depends on timing (a
-  retry path taken only when slow) is a test to fix; until it is, lower
-  that package's floor by hand (below) with the reason in the commit.
-- *Lowering* is only a hand edit of the package's row of `ratchet.tsv`, then
-  `render` again for the doc: `render` never lowers a floor, and the check
-  refuses a floor under what census.tsv measured, so a lowered floor needs a
-  census that measured no more (the change that lowered the coverage, or a
-  new census of it), and says so in its diff.
+  more on unchanged inputs.
+- *Floors are exact*, so one line fewer is a `Regression`. Where a covered
+  line depends on timing (a contended slow path that only an unsynchronised
+  two-thread test reaches, and kcov records a line once it ran), **pin** the
+  row: a fourth field, its reason, naming the lines
+  (`src/p\t9871\t-\tasync_mutex.mojo:197-198 run only when contended`).
+  Its floors are what you write (the measured value without those lines);
+  `render` keeps a pinned row as written, never raising or lowering it, and
+  the doc lists it under "Pinned floors" with what the census measured. A
+  pinned row with an empty reason is refused (covcheck and `render`). Unpin
+  (drop the reason) when the test is fixed; the next `render` raises it.
+- *Lowering* an unpinned floor is a hand edit of its row, then `render` again
+  for the doc: `render` never lowers one, and the check refuses an unpinned
+  floor under what census.tsv measured, so it needs a census that measured
+  no more (the change that lowered the coverage, or a new census of it); a
+  floor that must stay under the measurement is a pinned row.
 - A library whose run fails is `RUN_FAILED` with floor 0 (or its old floor);
   fix the run and refresh.
 
@@ -656,8 +669,9 @@ gate reads branch records, as the check run `coverage`: covcheck's summary and
 its annotations on the lines of the "Files changed" view. It is
 informational. It is not `pr / check`, it is not a required check, and its
 result cannot make `pr / check` red; its conclusion is `neutral` in census
-mode (the policy's today), or `failure` when a measured package is under its
-floor. Making it required, or switching coverage on in
+mode (the policy's today), and `failure` when a measured package is under
+its floor (a `Regression` fails in every mode; the check run is not
+required, so the failure is a signal on the pull request, not a block). Making it required, or switching coverage on in
 `pr / check` itself, waits for the tree-wide sweep of tests that fail at
 `-O0` or under kcov: today such a library's conda package is unbuilt in a
 coverage build (its dependents build). Like `pr / check` it runs only for a
