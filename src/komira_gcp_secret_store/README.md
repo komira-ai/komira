@@ -9,13 +9,17 @@ checksum.
   payload as a zeroizing `SecretValue`, after checking it against the
   `dataCrc32c` the answer must carry (the service keeps one for every
   version, computing it when the writer sent none, and returns it with
-  each access; an answer without one is refused). Bound in a
+  each access; an answer without one is refused). `dataCrc32c` is
+  required: the service stores one for every version, so a version ever
+  returned without one is refused, which is the safe direction. Bound in a
   `komira_secret_registry.SecretRegistry`, it is what a connector's
   `CredentialConsumer` receives the bytes through.
 - `parse_gcp_secret_ref` reads a handle, a resource name as the service
   spells it: `projects/<p>[/locations/<l>]/secrets/<s>` resolves `latest`
-  (the most recently created version), and `.../versions/<n>` or
-  `.../versions/latest` names a version. Each part has its shape: a secret
+  (the most recently created version), and `.../versions/<n>`,
+  `.../versions/latest` or `.../versions/<alias>` names a version (an alias
+  is 1 to 63 of `A-Z a-z 0-9 _ -`, a letter first, and not `latest` or
+  `new` in any case, the names Google reserves). Each part has its shape: a secret
   id is 1 to 255 of `A-Z a-z 0-9 _ -`, a project a project number or a
   project id (optionally domain-scoped), a location a location id. Anything
   else is refused, so a value pasted into a handle field is refused rather
@@ -52,7 +56,10 @@ var regional = parse_gcp_secret_ref("projects/demo-project/locations/us-central1
 assert_true(regional.is_regional())
 assert_equal(regional.parent(), "projects/demo-project/locations/us-central1")
 
-with assert_raises(contains="neither 'latest' nor a version number"):
+var aliased = parse_gcp_secret_ref("projects/demo-project/secrets/smtp/versions/prod")
+assert_equal(aliased.version, "prod")
+
+with assert_raises(contains="neither 'latest', a version number nor a version alias"):
     _ = parse_gcp_secret_ref("projects/demo-project/secrets/smtp/versions/03")
 with assert_raises(contains="secret id is not 1 to 255"):
     _ = parse_gcp_secret_ref('projects/demo-project/secrets/{"password":"hunter2"}')
@@ -109,8 +116,8 @@ with assert_raises(contains="the answer carries no dataCrc32c"):
 ## Tests
 
 The welded test, `tests/test_gcp_secret_store.mojo`, needs no socket: the
-handle grammar and its refusals (the secret-id, project and location
-shapes, a pasted value), none quoting the handle; CRC-32C against published
+handle grammar and its refusals (the secret-id, project, location and
+version shapes, version aliases among them, a pasted value), none quoting the handle; CRC-32C against published
 values; a resolve's request line for `latest` and for a version number, the
 payload decoded, and a checksum mismatch, an answer with no checksum and an
 answer with no payload raised; and an error answer raised naming the handle

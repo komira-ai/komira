@@ -10,8 +10,12 @@
 #   projects/<p>/locations/<l>/secrets/<s>               a regional secret
 #   ...followed by /versions/<v>                         one of its versions
 #
-# <v> is `latest` (an alias of the most recently created version) or a
-# version number (a decimal without a leading zero). A handle that names a
+# <v> is `latest` (an alias of the most recently created version), a
+# version number (a decimal without a leading zero), or a version alias the
+# secret's owner assigned (1 to 63 of `[A-Za-z0-9_-]`, starting with a
+# letter, and not `latest` or `new` in any case: Google reserves both
+# names; only `latest`, spelled so, is the service's). The service reads a
+# version by alias as it reads one by number. A handle that names a
 # secret resolves to its `latest` version; a writer's handle names the
 # secret (a write adds a version; a version number is the service's to
 # assign). Which endpoint a regional secret is served at is the client's
@@ -50,7 +54,8 @@ struct GcpSecretRef(Copyable, Movable, Writable):
     var secret_id: String
     """The secret's id within its project (and location)."""
     var version: String
-    """`latest` or a version number; "" when the handle names the secret."""
+    """`latest`, a version number or a version alias; "" when the handle
+    names the secret."""
 
     def is_regional(self) -> Bool:
         return self.location.byte_length() > 0
@@ -165,16 +170,41 @@ def _location_ok(s: String) -> Bool:
     return True
 
 
+def _upper(c: UInt8) -> Bool:
+    return c >= UInt8(ord("A")) and c <= UInt8(ord("Z"))
+
+
+def _alias_ok(v: String) -> Bool:
+    """A version alias: 1 to 63 of `[A-Za-z0-9_-]`, a letter first, and not
+    `latest` or `new` in any case."""
+    var b = v.as_bytes()
+    if len(b) == 0 or len(b) > 63 or not (_lower(b[0]) or _upper(b[0])):
+        return False
+    for i in range(len(b)):
+        var c = b[i]
+        if not (
+            _lower(c) or _upper(c) or _digit(c) or c == UInt8(ord("_")) or c == UInt8(ord("-"))
+        ):
+            return False
+    var folded = v.lower()
+    return folded != "latest" and folded != "new"
+
+
 def _version_ok(v: String) -> Bool:
+    """`latest`, a version number, or a version alias."""
     if v == GCP_VERSION_LATEST:
         return True
     var b = v.as_bytes()
-    if len(b) == 0 or b[0] == UInt8(ord("0")):
+    if len(b) == 0:
         return False
-    for i in range(len(b)):
-        if b[i] < UInt8(ord("0")) or b[i] > UInt8(ord("9")):
+    if _digit(b[0]):
+        if b[0] == UInt8(ord("0")):
             return False
-    return True
+        for i in range(len(b)):
+            if not _digit(b[i]):
+                return False
+        return True
+    return _alias_ok(v)
 
 
 def parse_gcp_secret_ref(secret_ref: String) raises -> GcpSecretRef:
@@ -215,7 +245,10 @@ def parse_gcp_secret_ref(secret_ref: String) raises -> GcpSecretRef:
             " A-Z a-z 0-9 _ -"
         )
     if n == at + 4 and not _version_ok(version):
-        raise Error("secret_ref's version is neither 'latest' nor a version number")
+        raise Error(
+            "secret_ref's version is neither 'latest', a version number nor"
+            " a version alias"
+        )
     return GcpSecretRef(project^, location^, secret_id^, version^)
 
 

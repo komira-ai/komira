@@ -12,8 +12,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # The welded test, test_gcp_secret_store, sends over komira_http_core's
 # ScriptedConnector with a write capture: the handle grammar (the project,
-# location and secret-id shapes) and its refusals, never quoting the
-# handle; CRC32C against published values; a resolve's request line for
+# location, secret-id and version shapes, version aliases among them) and
+# its refusals, never quoting the handle; CRC32C against published values; a resolve's request line for
 # `latest` and for a version number; a payload decoded; a checksum mismatch,
 # an answer with no checksum and an answer with no payload raised; an error
 # answer raised naming the handle without the body's canary. The service's

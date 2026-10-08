@@ -20,6 +20,10 @@
 #     not a location id accepted (a pasted value among them), a refusal that
 #     quotes the handle; and the edges that must pass (255 bytes, a
 #     domain-scoped project, a project number).
+#   * test_version_aliases: a version alias refused (Google reads a version
+#     by alias as by number), or one outside the alias rule accepted: a
+#     digit or `_` first, a dot, over 63 bytes, and `new` or `latest` in a
+#     case other than the special name's.
 #   * test_crc32c_published_values: a checksum that is not CRC-32C (the
 #     writer's dataCrc32c and the store's check both rest on it).
 #   * test_resolve_reads_and_checks: the wrong version name on the wire, the
@@ -130,7 +134,7 @@ def test_handle_grammar() raises:
         "projects/canary-zz9/secrets/s/versions",
         "projects/canary-zz9/secrets/s/versions/0",
         "projects/canary-zz9/secrets/s/versions/01",
-        "projects/canary-zz9/secrets/s/versions/first",
+        "projects/canary-zz9/secrets/s/versions/first.second",
         "projects/canary-zz9/secrets/s/versions/1/extra",
         "projects/canary-zz9/locations//secrets/s",
         "projects/canary-zz9/zones/z/secrets/s",
@@ -310,8 +314,51 @@ def test_handle_shapes() raises:
     print("  test_handle_shapes PASS")
 
 
+def test_version_aliases() raises:
+    var a63 = String("p")
+    for _ in range(62):
+        a63 += "9"
+    var accepted: List[String] = [
+        "projects/demo-project/secrets/smtp/versions/prod",
+        "projects/demo-project/secrets/smtp/versions/Prod_2-b",
+        "projects/demo-project/secrets/smtp/versions/" + a63,
+        "projects/demo-project/locations/us-central1/secrets/smtp/versions/newer",
+        "projects/demo-project/secrets/smtp/versions/latest2",
+    ]
+    for i in range(len(accepted)):
+        var parsed = parse_gcp_secret_ref(accepted[i])
+        assert_true(parsed.names_version())
+        assert_equal(parsed.version_name(), accepted[i])
+    assert_equal(
+        parse_gcp_secret_ref(String("projects/demo-project/secrets/smtp/versions/prod")).version,
+        "prod",
+    )
+
+    var refused: List[String] = [
+        # Malformed aliases: a digit then a letter, `_` or `-` first, a dot,
+        # 64 bytes.
+        "projects/canary-zz9/secrets/s/versions/2prod",
+        "projects/canary-zz9/secrets/s/versions/_prod",
+        "projects/canary-zz9/secrets/s/versions/-prod",
+        "projects/canary-zz9/secrets/s/versions/pr.od",
+        "projects/canary-zz9/secrets/s/versions/" + a63 + "9",
+        # Reserved in any case; only `latest`, spelled so, is the service's.
+        "projects/canary-zz9/secrets/s/versions/new",
+        "projects/canary-zz9/secrets/s/versions/NEW",
+        "projects/canary-zz9/secrets/s/versions/New",
+        "projects/canary-zz9/secrets/s/versions/LATEST",
+        "projects/canary-zz9/secrets/s/versions/Latest",
+    ]
+    for i in range(len(refused)):
+        var text = _refusal(refused[i])
+        assert_true(text.find("version is neither") >= 0, String(i) + ": " + text)
+        assert_false(text.find("canary") >= 0, text)
+    print("  test_version_aliases PASS")
+
+
 def main() raises:
     test_handle_grammar()
+    test_version_aliases()
     test_crc32c_published_values()
     test_resolve_reads_and_checks()
     test_resolve_error_names_the_handle()

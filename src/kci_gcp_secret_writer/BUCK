@@ -13,7 +13,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # dial: the write's request (payload and dataCrc32c) as written; the
 # create-if-absent race (AddSecretVersion not found, CreateSecret finding
 # the id taken, AddSecretVersion again) and a create refused otherwise; the
-# probe's request line (GET <secret>/versions/latest, never :access) and
+# CreateSecret body (automatic replication for a global secret, none for a
+# regional one); the probe's request line (GET <secret>/versions/latest, never :access) and
 # its reading of the version's state (ENABLED, DISABLED, DESTROYED), of
 # NOT_FOUND and of another error; and the writer's refusals (a deploy token,
 # a version handle, a handle outside the grammar) with nothing on the wire.

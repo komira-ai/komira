@@ -147,6 +147,9 @@ trait SecretWriter(Movable, Deinitable):
         """Does `secret_ref` already hold at least one usable VERSION? The
         seed-if-absent probe — a caller writes a first value only when this is
         False, so a re-deploy ADOPTS the live version instead of stacking another.
+        A usable version is, for a live writer, the version a bare handle
+        (one naming the secret, not a version) resolves to; `StaticSecretWriter`
+        counts any version it holds.
 
         ★ WHY THIS SITS ON THE WRITE TRAIT AND IS STILL NOT A READ CAPABILITY.
         The obvious probe is AccessSecretVersion, and it is the wrong one: it

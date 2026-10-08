@@ -99,7 +99,9 @@ The welded test, `tests/test_gcp_secret_writer.mojo`, needs no socket: the
 write's request (payload and `dataCrc32c`) as it reached the wire; the
 create-if-absent race (AddSecretVersion answered 404, CreateSecret answered
 409, AddSecretVersion again: three request lines, in that order) and a
-create refused for another reason (raised, two requests); the probe's
+create refused for another reason (raised, two requests); the CreateSecret
+body, automatic replication for a global secret and no replication policy
+for a regional one; the probe's
 request line (`GET .../versions/latest`) and its reading of ENABLED,
 DISABLED, DESTROYED, NOT_FOUND and PERMISSION_DENIED; and the writer's
 refusals (a deploy token, a version handle, a handle outside the grammar)

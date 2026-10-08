@@ -25,6 +25,11 @@
 #   * test_write_create_other_error: the same, but CreateSecret answered 403
 #     PERMISSION_DENIED: the write raises naming the handle and the code,
 #     after two requests. Red under "swallow any create error".
+#   * test_create_body_replication: the CreateSecret a write sends after a
+#     404, for a global secret (its body asks for automatic replication)
+#     and for a regional one (its parent names the location and its body
+#     carries no replication policy, which a regional secret refuses). Red
+#     under "always send automatic replication" and "never send it".
 #   * test_has_version_reads_latest: the probe's request line (GET
 #     `<secret>/versions/latest`, never `:access` and never a list); an
 #     ENABLED `latest` answers True; a DISABLED `latest` (whatever older
@@ -191,6 +196,49 @@ def test_write_create_other_error() raises:
     print("  test_write_create_other_error PASS")
 
 
+def _create_body(secret_ref: String, mut line: String) raises -> String:
+    """Write to `secret_ref` over add 404, create 200, add 200; return the
+    CreateSecret body and set `line` to its request line."""
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var answers = List[List[UInt8]]()
+    answers.append(_http(404, "Not Found", _status(404, String("NOT_FOUND"))))
+    answers.append(_http(200, "OK", '{"name":"projects/000000000000/secrets/smtp"}'))
+    answers.append(
+        _http(200, "OK", '{"name":"projects/000000000000/secrets/smtp/versions/1","state":"ENABLED"}')
+    )
+    var w = GcpSecretManagerWriter(_client(capture, answers))
+    _write(w, secret_ref, String("first-value"), String(""))
+    var lines = _lines(capture)
+    assert_equal(len(lines), 3, _wire(capture))
+    line = lines[1].copy()
+    var wire = _wire(capture)
+    var at = wire.find("?secretId=")
+    assert_true(at >= 0, wire)
+    var start = wire.find("\r\n\r\n", at)
+    assert_true(start >= 0, wire)
+    start += 4
+    var end = wire.find("POST /v1/", start)
+    assert_true(end > start, wire)
+    return String(wire[byte=start:end])
+
+
+def test_create_body_replication() raises:
+    var line = String("")
+    var global_body = _create_body(String(_S), line)
+    assert_equal(line, "POST /v1/projects/demo-project/secrets?secretId=smtp")
+    assert_true(global_body.find('"replication":{"automatic":{') >= 0, global_body)
+
+    var regional_body = _create_body(
+        String("projects/demo-project/locations/us-central1/secrets/smtp"), line
+    )
+    assert_equal(
+        line, "POST /v1/projects/demo-project/locations/us-central1/secrets?secretId=smtp"
+    )
+    assert_false(regional_body.find("replication") >= 0, regional_body)
+    assert_false(regional_body.find("automatic") >= 0, regional_body)
+    print("  test_create_body_replication PASS")
+
+
 def _probe(answer: List[UInt8], mut line: String) raises -> Bool:
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
     var w = GcpSecretManagerWriter(_one(capture, answer))
@@ -307,6 +355,10 @@ def main() raises:
         test_write_create_other_error()
     except e:
         failed.append(String("test_write_create_other_error: ") + String(e))
+    try:
+        test_create_body_replication()
+    except e:
+        failed.append(String("test_create_body_replication: ") + String(e))
     try:
         test_has_version_reads_latest()
     except e:
