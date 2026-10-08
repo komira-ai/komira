@@ -9,12 +9,14 @@
 # Here the `nodelta` pack's own fixtures pass `check_pack` unchanged, and
 # then one thing at a time is changed and the exact message is required:
 #   * git's index with one byte flipped: require_same_bytes;
-#   * a verify-pack listing with one line fewer, one id replaced, one
-#     line's offset, size in the pack, kind, depth or base changed (each
-#     numeric field one higher and one lower), and the first entry's offset
-#     changed;
-#   * a cat-file dump with one object fewer, one id replaced, one kind
-#     changed, one payload byte flipped and one payload a byte longer.
+#   * a verify-pack listing with one line fewer and one line more, one id
+#     replaced, one line's offset, size in the pack, kind, depth or base
+#     changed (each numeric field one higher and one lower), and the first
+#     entry's offset changed;
+#   * a cat-file dump with one object fewer and one more (a blob that is
+#     not in the pack, under its own id), one id replaced, one kind
+#     changed, one payload byte flipped, one payload a byte longer and
+#     one a byte shorter.
 # A check deleted, or comparing the wrong field, lets its case through (or
 # raises another case's message) and fails here. require_same_bytes and
 # require_same_index are also driven directly (each length order; for
@@ -26,7 +28,7 @@
 
 from std.testing import assert_equal
 
-from komira_git import ObjectFormat, ObjectId, PackIndex
+from komira_git import ObjectFormat, ObjectId, ObjectKind, PackIndex, hash_object
 
 from komira_git_conformance import (
     GitObjects,
@@ -67,11 +69,15 @@ def _batch(
     kind_at: Int = -1,
     flip_at: Int = -1,
     grow_at: Int = -1,
+    shrink_at: Int = -1,
+    extra: Bool = False,
 ) raises -> GitObjects:
     """`o` written back as `git cat-file --batch` prints it and parsed again,
     with object `drop` left out, object `zero_id_at` given the null id,
     object `kind_at` another kind, object `flip_at`'s first payload byte
-    flipped and object `grow_at`'s payload one byte longer."""
+    flipped, object `grow_at`'s payload one byte longer and object
+    `shrink_at`'s one byte shorter; with `extra`, one more object after
+    them: a blob that is not in the pack, under its own id."""
     var out = List[UInt8]()
     for i in range(o.count()):
         if i == drop:
@@ -85,8 +91,16 @@ def _batch(
             payload[0] = payload[0] ^ 1
         if i == grow_at:
             payload.append(10)
+        if i == shrink_at:
+            _ = payload.pop()
         out.extend(_bytes(hex + " " + kind + " " + String(len(payload)) + "\n"))
         out.extend(Span(payload))
+        out.append(10)
+    if extra:
+        var blob = _bytes("not in the pack\n")
+        var id = hash_object(o.format, ObjectKind.blob(), Span(blob))
+        out.extend(_bytes(id.to_hex() + " blob " + String(len(blob)) + "\n"))
+        out.extend(Span(blob))
         out.append(10)
     return parse_batch(o.format, Span(out))
 
@@ -124,6 +138,15 @@ def test_check_pack_each_check_fails() raises:
     assert_equal(
         _check(pack, idx, fewer, objects),
         _NAME + ": verify-pack lists " + String(n - 1) + " entries, we read " + String(n),
+    )
+
+    # The listing, one line more: a copy of the first line under the null id.
+    var more = lines.copy()
+    more.append(lines[0].copy())
+    more[n].id = ObjectId.zero(f).to_hex()
+    assert_equal(
+        _check(pack, idx, more, objects),
+        _NAME + ": verify-pack lists " + String(n + 1) + " entries, we read " + String(n),
     )
 
     # The listing: the last line changed, field by field. The entries are
@@ -221,6 +244,12 @@ def test_check_pack_each_check_fails() raises:
         _check(pack, idx, lines, _batch(objects, drop=0)),
         _NAME + ": " + String(n) + " entries, the repository has " + String(n - 1) + " objects",
     )
+    var with_extra = _batch(objects, extra=True)
+    assert_equal(with_extra.count(), objects.count() + 1)
+    assert_equal(
+        _check(pack, idx, lines, with_extra),
+        _NAME + ": " + String(n) + " entries, the repository has " + String(n + 1) + " objects",
+    )
 
     var k = objects.count() - 1
     var at_k = _NAME + ": " + objects.ids[k].to_hex() + ": "
@@ -247,6 +276,11 @@ def test_check_pack_each_check_fails() raises:
         _check(pack, idx, lines, _batch(objects, grow_at=p)),
         at_p + "payload differs from cat-file's (" + size_p + " bytes, git's "
         + String(len(objects.payloads[p]) + 1) + ")",
+    )
+    assert_equal(
+        _check(pack, idx, lines, _batch(objects, shrink_at=p)),
+        at_p + "payload differs from cat-file's (" + size_p + " bytes, git's "
+        + String(len(objects.payloads[p]) - 1) + ")",
     )
 
 
