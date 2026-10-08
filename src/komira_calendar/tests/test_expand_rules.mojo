@@ -305,10 +305,22 @@ def test_series_span() raises:
     assert_true(_span(single) == SeriesSpan(_at("2026-12-24T00:00:00"), _at("2026-12-26T00:00:00")))
     var one_off = _timed("2026-11-02T09:00:00", 3600, "")
     assert_true(_span(one_off) == SeriesSpan(_at("2026-11-02T09:00:00"), _at("2026-11-02T10:00:00")))
-    # A yearly until: the search back starts in the until's year, so the
-    # last occurrence is 2029, not the first one.
+    # A yearly until whose own year picks nothing before it: the last
+    # occurrence is 2029, not the first one. Catches a search back that
+    # starts at period 0; one that starts a year early is the row below's.
     var yearly = _all_day("2026-12-24", 1, '{"freq":"YEARLY","interval":1,"until":"2030-01-01"}')
     assert_true(_span(yearly) == SeriesSpan(_at("2026-12-24T00:00:00"), _at("2029-12-25T00:00:00")))
+    # An until on or after the pick of its own period, one row per frequency
+    # the MONTHLY row above leaves open: the last occurrence is in the
+    # until's period. Catches a search back that starts one period early.
+    var until_thursday = _timed(
+        "2026-11-05T18:30:00", 3600, '{"freq":"WEEKLY","interval":1,"weekdays":["THURSDAY"],"until":"2026-11-26"}'
+    )
+    assert_true(_span(until_thursday) == SeriesSpan(_at("2026-11-05T18:30:00"), _at("2026-11-26T19:30:00")))
+    var until_day = _timed("2026-11-02T09:00:00", 3600, '{"freq":"DAILY","interval":1,"until":"2026-11-04"}')
+    assert_true(_span(until_day) == SeriesSpan(_at("2026-11-02T09:00:00"), _at("2026-11-04T10:00:00")))
+    var until_year = _all_day("2026-12-24", 1, '{"freq":"YEARLY","interval":1,"until":"2029-12-31"}')
+    assert_true(_span(until_year) == SeriesSpan(_at("2026-12-24T00:00:00"), _at("2029-12-25T00:00:00")))
 
 
 def _refuses(e: Event, window_start: Int, window_end: Int, message: String) raises:
