@@ -159,8 +159,8 @@ struct Timing(Copyable, Movable):
 def _length[Z: ZoneSource](
     comp: IcsComponent, props: EventProps, all_day: Bool, start_local: Int,
     home: Optional[ResolvedZone], mut zr: ZoneResolver, zones: Z,
-) raises -> Int:
-    """The length from DTEND or DURATION, or -1 when neither is there."""
+) raises -> Optional[Int]:
+    """The length from DTEND or DURATION, or None when neither is there."""
     if props.dtend >= 0 and props.duration >= 0:
         raise refusal(IcsCode.END_AND_DURATION, "DTEND and DURATION are both given; RFC 5545 allows one")
     if props.dtend >= 0:
@@ -168,11 +168,11 @@ def _length[Z: ZoneSource](
         if e.is_date != all_day:
             raise _form_mismatch("DTEND", all_day)
         if all_day:
-            return e.day() - start_local // SECONDS_PER_DAY
+            return Optional[Int](e.day() - start_local // SECONDS_PER_DAY)
         if e.is_floating():
             raise refusal(IcsCode.FLOATING_TIME, "DTEND is a floating time (no TZID, no Z)")
         var h = home.value().copy()
-        return _instant(e, h, zr, zones) - _to_utc(h, start_local)
+        return Optional[Int](_instant(e, h, zr, zones) - _to_utc(h, start_local))
     if props.duration >= 0:
         ref p = comp.properties[props.duration]
         var d = parse_ics_duration(p.line.value)
@@ -181,10 +181,10 @@ def _length[Z: ZoneSource](
         if all_day:
             if d.seconds != 0:
                 raise refusal(IcsCode.FORM_MISMATCH, 'DURATION "' + p.line.value + '" of an all-day event is not whole days')
-            return d.days
+            return Optional[Int](d.days)
         var h = home.value().copy()
-        return _to_utc(h, start_local + d.days * SECONDS_PER_DAY) + d.seconds - _to_utc(h, start_local)
-    return -1
+        return Optional[Int](_to_utc(h, start_local + d.days * SECONDS_PER_DAY) + d.seconds - _to_utc(h, start_local))
+    return None
 
 
 def read_timing[Z: ZoneSource](
@@ -195,9 +195,10 @@ def read_timing[Z: ZoneSource](
         raise refusal(IcsCode.DTSTART_MISSING, "the VEVENT has no DTSTART")
     var t = time_of(comp.properties[props.dtstart])
     if t.is_date:
-        var days = _length(comp, props, True, t.local, None, zr, zones)
-        if days == -1:
+        var given = _length(comp, props, True, t.local, None, zr, zones)
+        if not given:
             return Timing(True, t.local, None, 1, False)
+        var days = given.value()
         if days <= 0:
             raise refusal(IcsCode.NOT_AFTER_START, "the event's end is not after its start")
         return Timing(True, t.local, None, days, True)
@@ -208,12 +209,13 @@ def read_timing[Z: ZoneSource](
             + '" is a floating time (no TZID, no Z); the calendar keeps zoned times only',
         )
     var home = _zone_of(t, zr, zones)
-    var seconds = _length(comp, props, False, t.local, Optional[ResolvedZone](home.copy()), zr, zones)
-    if seconds == -1:
+    var timed_end = _length(comp, props, False, t.local, Optional[ResolvedZone](home.copy()), zr, zones)
+    if not timed_end:
         raise refusal(
             IcsCode.NOT_AFTER_START,
             "a timed event with neither DTEND nor DURATION lasts no time; the calendar needs at least one second",
         )
+    var seconds = timed_end.value()
     if seconds <= 0:
         raise refusal(IcsCode.NOT_AFTER_START, "the event's end is not after its start")
     if seconds > MAX_DURATION_SECONDS:
@@ -490,18 +492,19 @@ def read_edit[Z: ZoneSource](
         if t.is_date != all_day:
             raise _form_mismatch("DTSTART", all_day)
         start_local = t.local if all_day else _wall(t, home.value(), zr, zones)
-    var length = _length(comp, props, all_day, start_local, home, zr, zones)
-    if length != -1 and length <= 0:
+    var given = _length(comp, props, all_day, start_local, home, zr, zones)
+    var length = given.value() if given else 0
+    if given and length <= 0:
         raise refusal(IcsCode.NOT_AFTER_START, "the occurrence's end is not after its start")
     var changed = False
     if start_local != original_local:
         var start_text = format_iso_date(start_local // SECONDS_PER_DAY) if all_day else format_local(start_local)
         edit.start = Optional[String](start_text^)
         changed = True
-    if all_day and length != -1 and length != Int(series.days):
+    if all_day and given and length != Int(series.days):
         edit.days = Optional[UInt32](UInt32(length))
         changed = True
-    if not all_day and length != -1 and length != Int(series.duration_seconds):
+    if not all_day and given and length != Int(series.duration_seconds):
         if length > MAX_DURATION_SECONDS:
             raise refusal(
                 RefusalCode.DURATION_TOO_LONG,

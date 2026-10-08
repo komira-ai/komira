@@ -15,7 +15,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_datetime import days_from_civil
 from komira_proto_codec import encode_json
-from komira_calendar_ics.rrule import format_rrule, parse_rrule
+from komira_calendar_ics.rrule import format_rrule, parse_rrule, weekday_name
 
 
 def _day(y: Int, m: Int, d: Int) -> Int:
@@ -173,7 +173,17 @@ def test_malformed() raises:
     _no("FREQ=MONTHLY;BYDAY=F", mon, BAD, 'RRULE BYDAY item "F" is not [+/-][n]weekday')
     _no("FREQ=MONTHLY;BYMONTHDAY=0", mon, BAD, "RRULE BYMONTHDAY=0 is not a list of non-zero numbers")
     _no("FREQ=WEEKLY;WKST=XX", mon, BAD, "RRULE WKST=XX is not a weekday")
+    _no("FREQ=DAILY;INTERVAL=", mon, BAD, "RRULE INTERVAL= is not a positive number")
+    _no("FREQ=DAILY;COUNT=1234567", mon, BAD, "RRULE COUNT=1234567 is not a positive number")
     print("  test_malformed PASS")
+
+
+def test_weekday_names() raises:
+    assert_equal(weekday_name(1), "MO")
+    assert_equal(weekday_name(7), "SU")
+    assert_equal(weekday_name(0), "")
+    assert_equal(weekday_name(8), "")
+    print("  test_weekday_names PASS")
 
 
 def main() raises:
@@ -181,4 +191,5 @@ def main() raises:
     test_accepted()
     test_out_of_subset()
     test_malformed()
+    test_weekday_names()
     print("ALL TESTS PASS")

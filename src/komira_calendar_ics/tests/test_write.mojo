@@ -233,6 +233,16 @@ def test_vtimezones() raises:
         + "TZOFFSETFROM:+1100\nTZOFFSETTO:+1000\nEND:STANDARD\n"
         + "END:VTIMEZONE\n",
     )
+    # Footer rules not in the Mm.w.d form (Jn): every change is written as
+    # its own observance, one year before `from_utc` to 100 years after:
+    # 27 October 2029 to 1 March 2130, 101 of each kind, no RRULE.
+    var julian = write_vtimezone("Test/Julian", posix_zone("Test/Julian", "EST5EDT,J60,J300"), from_utc)
+    assert_equal(len(julian.split("BEGIN:DAYLIGHT")) - 1, 101)
+    assert_equal(len(julian.split("BEGIN:STANDARD")) - 1, 101)
+    assert_equal(julian.find("RRULE"), -1)
+    assert_true(julian.find("BEGIN:STANDARD\r\nDTSTART:20291027T020000\r\n") >= 0)
+    assert_true(julian.find("BEGIN:DAYLIGHT\r\nDTSTART:21300301T020000\r\n") >= 0)
+    assert_equal(julian.find("DTSTART:21301027"), -1)
     print("  test_vtimezones PASS")
 
 
@@ -330,10 +340,20 @@ def test_round_trip() raises:
         IcsEvent(
             _ev(
                 '{"uid":"yearly","title":"Birthday","showWithoutTime":true,"startDate":"2032-02-29","days":1,'
-                + '"recurrence":{"freq":"YEARLY","interval":1},"reminders":[{"minutesBefore":40320}]}'
+                + '"recurrence":{"freq":"YEARLY","interval":1,"until":"2040-03-01"},"reminders":[{"minutesBefore":40320}]}'
             )
         )
     )
+    # A third London event starting before the other two: London's
+    # VTIMEZONE covers a year before it, so its first DAYLIGHT onset is 25
+    # March 2029 (from the first London event it would be 31 March 2030).
+    more.append(
+        IcsEvent(
+            _ev('{"uid":"early","title":"Early","start":"2030-01-15T08:00:00","timeZone":"Europe/London","durationSeconds":600}')
+        )
+    )
+    var text = write_ics(more, _zones(), _stamp())
+    assert_true(text.find("TZID:Europe/London\r\nBEGIN:DAYLIGHT\r\nDTSTART:20290325T010000\r\n") >= 0)
     _round_trip(more^)
     print("  test_round_trip PASS")
 

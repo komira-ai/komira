@@ -116,6 +116,12 @@ def test_writers() raises:
     assert_equal(format_utc_offset(0), "+0000")
     assert_equal(format_utc_offset(3723), "+010203")
     assert_equal(format_utc_offset(-37800), "-1030")
+    var msg = String()
+    try:
+        _ = format_ics_date(days_from_civil(10000, 1, 1))
+    except e:
+        msg = String(e)
+    assert_equal(msg, "year 10000 cannot be written in four digits")
     print("  test_writers PASS")
 
 

@@ -9,8 +9,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_values pins the DATE, DATE-TIME, DURATION and UTC offset forms;
 # test_rrule the RRULE subset, accepted and refused rule by rule;
 # test_read the file-level refusals, the event mapping and every report
-# entry; test_write the export line by line and its VTIMEZONEs. The RFC 5545
-# examples and client-shaped files are in
+# entry; test_read_edges the rarer refusals and all-day edits; test_write
+# the export line by line and its VTIMEZONEs. The RFC 5545 examples and
+# client-shaped files are in
 # //src/tests/conformance/komira_calendar_ics_conformance. README.md's
 # examples run as one more welded test.
 mojo_library(
@@ -27,6 +28,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_read.mojo",
+        "tests/test_read_edges.mojo",
         "tests/test_rrule.mojo",
         "tests/test_values.mojo",
         "tests/test_write.mojo",
