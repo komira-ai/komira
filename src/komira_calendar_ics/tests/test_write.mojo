@@ -175,7 +175,7 @@ comptime GOLDEN = (
 
 
 def test_golden() raises:
-    var text = write_ics(_events(), _zones(), _stamp())
+    var text = write_ics(_events(), _zones(), _stamp()).text.copy()
     assert_equal(_lines(text), GOLDEN)
     # Every line ends in CRLF: the CRLF count equals the line count.
     assert_equal(len(text.split("\r\n")), len(GOLDEN.split("\n")))
@@ -280,7 +280,7 @@ def test_refusals() raises:
 
 
 def _round_trip(var events: List[IcsEvent]) raises:
-    var text = write_ics(events, _zones(), _stamp())
+    var text = write_ics(events, _zones(), _stamp()).text.copy()
     var back = read_ics(text.as_bytes(), _zones())
     var report = String()
     for r in back.report.refused:
@@ -352,7 +352,7 @@ def test_round_trip() raises:
             _ev('{"uid":"early","title":"Early","start":"2030-01-15T08:00:00","timeZone":"Europe/London","durationSeconds":600}')
         )
     )
-    var text = write_ics(more, _zones(), _stamp())
+    var text = write_ics(more, _zones(), _stamp()).text.copy()
     assert_true(text.find("TZID:Europe/London\r\nBEGIN:DAYLIGHT\r\nDTSTART:20290325T010000\r\n") >= 0)
     _round_trip(more^)
     print("  test_round_trip PASS")
@@ -366,7 +366,7 @@ def test_fold() raises:
         title += "é"
     var events = List[IcsEvent]()
     events.append(IcsEvent(_ev('{"uid":"f","title":"' + title + '","showWithoutTime":true,"startDate":"2030-09-02","days":1}')))
-    var text = write_ics(events, _zones(), _stamp())
+    var text = write_ics(events, _zones(), _stamp()).text.copy()
     var longest = 0
     for line in text.split("\r\n"):
         if line.byte_length() > longest:

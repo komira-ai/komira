@@ -16,7 +16,7 @@ kinds, one line counts the rest).
   read_event.mojo  one VEVENT to an event or a one-occurrence edit
   rrule.mojo       RRULE text to and from the structured rule
   read.mojo        read_ics: a file to events and a report
-  write.mojo       write_ics: events to a file
+  write.mojo       write_ics, IcsExport: events to a file
   vtimezone.mojo   the VTIMEZONE an export writes for a zone
   values.mojo      DATE, DATE-TIME, DURATION and UTC offset values
   zones.mojo       ZoneSource, ZoneinfoDirectory, ZoneTable; TZID mapping
@@ -27,5 +27,5 @@ from .read import IcsImport, read_ics
 from .read_event import IcsEvent
 from .report import MAX_DROPPED_KINDS, OVERFLOW_DETAIL, IcsCode, IcsDropped, IcsRefusal, IcsReport
 from .tree import IcsLimits
-from .write import PRODID, write_ics
+from .write import PRODID, IcsExport, write_ics
 from .zones import ZoneSource, ZoneTable, ZoneinfoDirectory

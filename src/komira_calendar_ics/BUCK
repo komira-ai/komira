@@ -15,7 +15,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # its rule skips, the report's cap, two series edited at one start and a
 # titled event's alarm text; test_write the export line by line
 # and its VTIMEZONEs; test_round_trip_edges the values a round trip can
-# lose, a start the export moves and a series it refuses. The RFC 5545
+# lose, a start the export moves, series before 1970 and a series it
+# leaves out. The RFC 5545
 # examples and client-shaped files are in
 # //src/tests/conformance/komira_calendar_ics_conformance. README.md's
 # examples run as one more welded test.

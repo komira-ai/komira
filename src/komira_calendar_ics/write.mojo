@@ -2,12 +2,13 @@
 # write.mojo -- calendar events to one iCalendar 2.0 file (RFC 5545).
 # =============================================================================
 #
-# `write_ics(events, zones, stamp_utc)` writes a VCALENDAR (VERSION 2.0, a
-# PRODID, CALSCALE GREGORIAN), a VTIMEZONE for each zone a timed event uses
-# other than `UTC` (vtimezone.mojo), in name order, then the events in
-# order. Each event and edit is checked first (`komira_calendar.check_event`
-# and `check_override`); one that breaks the model, or names a zone
-# `zones` does not know, refuses the export.
+# `write_ics(events, zones, stamp_utc)` returns an `IcsExport`: the text of
+# a VCALENDAR (VERSION 2.0, a PRODID, CALSCALE GREGORIAN), a VTIMEZONE for
+# each zone a written timed event uses other than `UTC` (vtimezone.mojo), in
+# name order, then the events in order; and the series it skipped. Each
+# event is checked first (`komira_calendar.check_event`), then each edit of
+# a series it writes (`check_override`); one that breaks the model, or a
+# written event naming a zone `zones` does not know, refuses the export.
 #
 # A series is one VEVENT:
 #   UID (the event's uid, or its id when the uid is empty), DTSTAMP
@@ -30,11 +31,14 @@
 # (`first_occurrence`): RFC 5545 §3.8.5.3 leaves the set of an
 # unsynchronized DTSTART undefined, and the model's series started there has
 # the same occurrences. A series whose rule picks no day from its start to
-# its until refuses the export.
+# its until (`komira_calendar.check_event` accepts one) is left out with its
+# edits and its uid listed in `IcsExport.skipped`: no VEVENT reads back as
+# it (DTSTART must be an occurrence, and an UNTIL before DTSTART is refused),
+# and the rest of the calendar is still written.
 # Every TEXT value is escaped and every line folded at 75 octets
-# (komira_content_line). Reading the file back gives the same events and a
-# clean report, with four exceptions: a CR or CRLF in a TEXT value comes
-# back as LF (TEXT has one escape, `\n`, for a line break); an event with no
+# (komira_content_line). Reading the file back gives the events written
+# and a clean report, with four exceptions: a CR or CRLF in a TEXT value
+# comes back as LF (TEXT has one escape, `\n`, for a line break); an event with no
 # uid comes back with its id as the uid; an edit's replacement equal to
 # the series' value is not kept (the occurrence shows the same), so an edit
 # whose every replacement is such a value is reported as one that changes
@@ -198,15 +202,31 @@ def _edit(event: Event, edit: OccurrenceOverride, uid: String, stamp: String, fo
     return out^
 
 
-def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) raises -> String:
+struct IcsExport(Movable):
+    """What `write_ics` wrote: the iCalendar `text`, and the uid (or id) of
+    each series it `skipped`, in input order."""
+
+    var text: String
+    var skipped: List[String]
+
+    def __init__(out self, var text: String, var skipped: List[String]):
+        self.text = text^
+        self.skipped = skipped^
+
+
+def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) raises -> IcsExport:
     """`events` as one iCalendar file (module header). `stamp_utc` is the
-    DTSTAMP of every VEVENT, in epoch seconds."""
+    DTSTAMP of every VEVENT, in epoch seconds. A series whose rule picks no
+    day from its start to its until is left out, its edits with it, and
+    named in `skipped`."""
     var stamp = format_ics_datetime(stamp_utc, True)
     var zr = ZoneResolver()
     var names = List[String]()
     var firsts = List[Int]()
     var forms = List[_Form]()
     var shifts = List[Int]()
+    var skips = List[Bool]()
+    var skipped = List[String]()
     for ref ie in events:
         ref e = ie.event
         var uid = e.uid.copy() if e.uid.byte_length() > 0 else e.id.copy()
@@ -216,18 +236,22 @@ def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) r
         if r:
             raise Error('ics export: event "' + uid + '": ' + String(r.value()))
         var shift = 0
+        var skip = False
         if e.recurrence:
             ref rule = e.recurrence.value()
             var day = parse_local_date(e.start_date) if e.show_without_time else parse_local_datetime(e.start).days
             var until_day = parse_local_date(rule.until) if rule.until.byte_length() > 0 else LAST_DAY
             var first = first_occurrence(rule, day, until_day)
-            if not first:
-                raise Error(
-                    'ics export: event "' + uid + '": its recurrence picks no day from its start to its until,'
-                    + " and an iCalendar series always holds its DTSTART"
-                )
-            shift = first.value() - day
+            if first:
+                shift = first.value() - day
+            else:
+                skip = True
         shifts.append(shift)
+        skips.append(skip)
+        if skip:
+            skipped.append(uid.copy())
+            forms.append(_Form(True, None))
+            continue
         for ref o in ie.overrides:
             var ro = check_override(o, e)
             if ro:
@@ -266,6 +290,8 @@ def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) r
                 first = firsts[k]
         out += write_vtimezone(name, zr.resolve(name, zones).zone, first)
     for i in range(len(events)):
+        if skips[i]:
+            continue
         ref ie = events[i]
         ref e = ie.event
         var uid = e.uid.copy() if e.uid.byte_length() > 0 else e.id.copy()
@@ -273,4 +299,4 @@ def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) r
         for ref o in ie.overrides:
             out += _edit(e, o, uid, stamp, forms[i])
     out += prop_line("END", "VCALENDAR")
-    return out^
+    return IcsExport(out^, skipped^)

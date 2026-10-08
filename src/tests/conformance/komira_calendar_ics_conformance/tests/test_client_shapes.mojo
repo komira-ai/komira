@@ -27,7 +27,7 @@ from komira_calendar_ics_conformance import client_zones, crlf, events_text, rep
 
 
 def _round_trip(got: IcsImport) raises:
-    var text = write_ics(got.events, client_zones(), seconds_from_fields(2030, 10, 2))
+    var text = write_ics(got.events, client_zones(), seconds_from_fields(2030, 10, 2)).text.copy()
     var again = read_ics(text.as_bytes(), client_zones())
     assert_equal(report_text(again.report), "", "report of the re-import")
     assert_equal(events_text(again), events_text(got))

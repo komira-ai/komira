@@ -3,12 +3,12 @@
 # round trip can lose: an event with no title and a reminder, an edit that
 # clears a field, an edit whose replacement equals the series' value, a CR in
 # a description; a series whose start its rule does not pick, which the
-# export moves to its first occurrence; and one with no occurrence, which
-# the export refuses.
+# export moves to its first occurrence; series that start before 1970; and
+# one with no occurrence, which the export leaves out and names.
 #
-# Events and edits are compared as the API's JSON, and every report line and
-# export refusal as exact text. Each test runs even when an earlier one
-# fails, and the failures are listed together.
+# Events and edits are compared as the API's JSON, and every report line as
+# exact text. Each test runs even when an earlier one fails, and the
+# failures are listed together.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -36,7 +36,7 @@ def _report(rep: IcsReport) -> String:
 
 
 def _back(events: List[IcsEvent]) raises -> IcsImport:
-    var text = write_ics(events, ZoneTable(), 1914364800)
+    var text = write_ics(events, ZoneTable(), 1914364800).text.copy()
     return read_ics(text.as_bytes(), ZoneTable())
 
 
@@ -61,7 +61,7 @@ def test_untitled_event_with_a_reminder() raises:
     events.append(
         IcsEvent(_ev('{"uid":"untitled","showWithoutTime":true,"startDate":"2030-09-02","days":1,"reminders":[{"minutesBefore":15}]}'))
     )
-    var text = write_ics(events, ZoneTable(), 1914364800)
+    var text = write_ics(events, ZoneTable(), 1914364800).text.copy()
     assert_true(text.find("BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\n") >= 0, text)
     _same(events^)
 
@@ -106,19 +106,11 @@ def test_carriage_return_comes_back_as_line_feed() raises:
     events.append(
         IcsEvent(_ev('{"uid":"cr","description":"a\\r\\nb\\rc","showWithoutTime":true,"startDate":"2030-09-02","days":1}'))
     )
-    var text = write_ics(events, ZoneTable(), 1914364800)
+    var text = write_ics(events, ZoneTable(), 1914364800).text.copy()
     assert_true(text.find("DESCRIPTION:a\\nb\\nc\r\n") >= 0, text)
     var back = read_ics(text.as_bytes(), ZoneTable())
     assert_equal(_report(back.report), "")
     assert_equal(back.events[0].event.description, "a\nb\nc")
-
-
-def _export_err(var events: List[IcsEvent]) raises -> String:
-    try:
-        _ = write_ics(events, ZoneTable(), 0)
-    except e:
-        return String(e)
-    raise Error("exported")
 
 
 def _moved(json: String, want: String, dtstart: String) raises:
@@ -126,7 +118,7 @@ def _moved(json: String, want: String, dtstart: String) raises:
     DTSTART line `dtstart` and comes back as `want` with a clean report."""
     var events = List[IcsEvent]()
     events.append(IcsEvent(_ev(json)))
-    var text = write_ics(events, ZoneTable(), 1914364800)
+    var text = write_ics(events, ZoneTable(), 1914364800).text.copy()
     assert_true(text.find("\r\n" + dtstart + "\r\n") >= 0, text)
     var back = read_ics(text.as_bytes(), ZoneTable())
     assert_equal(_report(back.report), "", "report of the re-import")
@@ -205,23 +197,53 @@ def test_export_before_1970() raises:
     )
 
 
-def test_export_refuses_a_series_with_no_occurrence() raises:
+def test_export_skips_a_series_with_no_occurrence() raises:
     # No 31st from 2 September to 30 October 2030: the model's series is
-    # empty, and an iCalendar series always holds its DTSTART.
+    # empty (komira_calendar.check_event accepts it), and no VEVENT reads
+    # back as it. It is left out with its edit and named in `skipped`; the
+    # events around it are written and come back as they were.
+    var edits = List[OccurrenceOverride]()
+    edits.append(_ov('{"originalStart":"2030-09-02T09:00:00","title":"Moved"}'))
     var a = List[IcsEvent]()
+    a.append(IcsEvent(_ev('{"uid":"before","showWithoutTime":true,"startDate":"2030-09-01","days":1}')))
     a.append(
         IcsEvent(
             _ev(
-                '{"uid":"never","showWithoutTime":true,"startDate":"2030-09-02","days":1,'
+                '{"uid":"never","start":"2030-09-02T09:00:00","timeZone":"UTC","durationSeconds":60,'
                 + '"recurrence":{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2030-10-30"}}'
+            ),
+            edits^,
+        )
+    )
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"uid":"after","start":"2030-09-03T09:00:00","timeZone":"UTC","durationSeconds":60,'
+                + '"recurrence":{"freq":"WEEKLY","interval":1,"weekdays":["TUESDAY"],"count":3}}'
             )
         )
     )
-    assert_equal(
-        _export_err(a^),
-        'ics export: event "never": its recurrence picks no day from its start to its until,'
-        + " and an iCalendar series always holds its DTSTART",
+    var exported = write_ics(a, ZoneTable(), 1914364800)
+    assert_equal(len(exported.skipped), 1, "skipped")
+    assert_equal(exported.skipped[0], "never")
+    assert_equal(exported.text.find("never"), -1, exported.text)
+    assert_equal(exported.text.find("Moved"), -1, exported.text)
+    var back = read_ics(exported.text.as_bytes(), ZoneTable())
+    assert_equal(_report(back.report), "", "report of the re-import")
+    assert_equal(len(back.events), 2)
+    assert_equal(encode_json(back.events[0].event), encode_json(a[0].event))
+    assert_equal(encode_json(back.events[1].event), encode_json(a[2].event))
+    # The same series with an until on the 31st is written.
+    var b = List[IcsEvent]()
+    b.append(
+        IcsEvent(
+            _ev(
+                '{"uid":"once","start":"2030-09-02T09:00:00","timeZone":"UTC","durationSeconds":60,'
+                + '"recurrence":{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2030-10-31"}}'
+            )
+        )
     )
+    assert_equal(len(write_ics(b, ZoneTable(), 1914364800).skipped), 0)
 
 
 def main() raises:
@@ -258,10 +280,10 @@ def main() raises:
     except e:
         failed.append("test_export_before_1970: " + String(e))
     try:
-        test_export_refuses_a_series_with_no_occurrence()
-        print("  test_export_refuses_a_series_with_no_occurrence PASS")
+        test_export_skips_a_series_with_no_occurrence()
+        print("  test_export_skips_a_series_with_no_occurrence PASS")
     except e:
-        failed.append("test_export_refuses_a_series_with_no_occurrence: " + String(e))
+        failed.append("test_export_skips_a_series_with_no_occurrence: " + String(e))
     for f in failed:
         print("  FAIL " + f)
     assert_true(len(failed) == 0, String(len(failed)) + " tests failed")
