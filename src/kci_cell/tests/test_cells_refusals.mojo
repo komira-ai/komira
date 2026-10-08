@@ -157,6 +157,32 @@ def test_duplicate_setting_key_not_adjacent() raises:
     )
 
 
+def test_duplicate_cell_name_with_another_cloud() raises:
+    # staging on gcp (lines 2..7), then staging on aws (8..13, name on 9):
+    # the name alone conflicts, whatever the rest of the cell says
+    var aws_staging = _cell(
+        String(_NAME) + String("  cloud: \"aws\"\n")
+        + String("  setting { key: \"region\" value: \"eu-west-1\" }\n") + String(_LEVEL)
+    )
+    assert_equal(
+        _refusal(_file(_ok_cell() + aws_staging)),
+        String("cells file: line 9: cell 'staging' is declared twice (first on line 3)"),
+    )
+
+
+def test_duplicate_setting_key_with_another_value() raises:
+    # project = example-staging (line 5), then project = other (line 6):
+    # the key alone conflicts, whatever the value
+    assert_equal(
+        _refusal(_file(_cell(
+            String(_NAME) + String(_CLOUD) + String(_PROJECT)
+            + String("  setting { key: \"project\" value: \"other\" }\n")
+            + String(_LEVEL)
+        ))),
+        String("cells file: line 6: setting 'project' is set twice in cell 'staging' (first on line 5)"),
+    )
+
+
 def test_setting_keys_differing_by_case_are_two_keys() raises:
     # kci does not interpret settings: `Project` and `project` are distinct
     var cells = parse_cells_file(_file(_cell(
@@ -313,6 +339,15 @@ def test_no_cell() raises:
     assert_equal(
         _refusal(String("schema_version: 1\n# nothing declared\n")),
         String("cells file: line 1: the file declares no cell (expected at least one `cell { ... }`)"),
+    )
+
+
+def test_no_cell_names_the_last_token_line() raises:
+    # the only token sits on line 3, after a comment and a blank line: the
+    # refusal names the file's last token, not a fixed line 1
+    assert_equal(
+        _refusal(String("# a cells file\n\nschema_version: 1\n")),
+        String("cells file: line 3: the file declares no cell (expected at least one `cell { ... }`)"),
     )
 
 
