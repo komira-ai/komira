@@ -321,6 +321,21 @@ def test_series_span() raises:
     assert_true(_span(until_day) == SeriesSpan(_at("2026-11-02T09:00:00"), _at("2026-11-04T10:00:00")))
     var until_year = _all_day("2026-12-24", 1, '{"freq":"YEARLY","interval":1,"until":"2029-12-31"}')
     assert_true(_span(until_year) == SeriesSpan(_at("2026-12-24T00:00:00"), _at("2029-12-25T00:00:00")))
+    # Weekly picks on several weekdays, an until (Wednesday 2026-11-25)
+    # earlier in its week than the start's weekday (Thursday), and two picks
+    # of that week (Monday 23, Tuesday 24) on or before it. The last
+    # occurrence is Tuesday 24. Catches a week counted from the start day
+    # instead of its Monday (the search starts at the week of the 16th and
+    # ends on Thursday 19) and a scan of the until's week from its first
+    # pick (ends on Monday 23).
+    var mo_tu_th = _timed(
+        "2026-11-05T18:30:00",
+        3600,
+        '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY","TUESDAY","THURSDAY"],"until":"2026-11-25"}',
+    )
+    assert_true(_span(mo_tu_th) == SeriesSpan(_at("2026-11-05T18:30:00"), _at("2026-11-24T19:30:00")))
+    var mo_tu_th_all = _everything(mo_tu_th)
+    assert_equal(_span(mo_tu_th).last_end, mo_tu_th_all[len(mo_tu_th_all) - 1].end)
 
 
 def _refuses(e: Event, window_start: Int, window_end: Int, message: String) raises:
