@@ -41,12 +41,14 @@ coverage_ci_cases(
     script = ".github/ci/tests/coverage_ci_cases.sh",
     srcs = [
         ".github/ci/coverage_measure.sh",
+        ".github/ci/tests/build_report_branch_failed.json",
         ".github/ci/tests/build_report_gate_failed.json",
         ".github/workflows/coverage.yml",
     ],
     data = {
         "tools/build/coverage/policy.bzl": "//tools/build/coverage:policy.bzl",
         "tools/build/coverage/ratchet.tsv": "//tools/build/coverage:ratchet.tsv",
+        "tools/build/mojo/coverage_branch.bzl": "//tools/build/mojo:coverage_branch.bzl",
     },
 )
 
@@ -135,6 +137,7 @@ _TESTS_LINTS = [
     "//src/tests/e2e/komira_pandas_door_e2e:deps_lint",
     "//src/tests/e2e/komira_secrets_e2e:deps_lint",
     "//src/tests/e2e/komira_shuffle_e2e:deps_lint",
+    "//src/tests/e2e/komira_tls_interop_e2e:deps_lint",
     "//src/tests/e2e/komira_udf_e2e:deps_lint",
     "//src/tests/helpers/komira_plan_harness:deps_lint",
 ] if read_root_config("cells", "tests") else []

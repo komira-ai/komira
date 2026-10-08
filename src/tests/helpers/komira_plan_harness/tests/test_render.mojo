@@ -238,10 +238,9 @@ def test_types_canon_cannot_render_are_refused_by_name() raises:
         ArrowType.UTF8_VIEW,
         ArrowType.LIST_VIEW,
         ArrowType.LARGE_LIST_VIEW,
-        ArrowType.ERROR,
     ]
     var names: List[String] = [
-        "binary_view", "utf8_view", "list_view", "large_list_view", "error"
+        "binary_view", "utf8_view", "list_view", "large_list_view"
     ]
     for i in range(len(ts)):
         var batch = _one_column_batch(ts[i])

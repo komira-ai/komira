@@ -19,8 +19,16 @@ to take the tool's configuration instead.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
+# The raw profile version that code Mojo's lld instruments writes and that the
+# pinned llvm-profdata accepts (README.md, The version coupling):
+# `:raw_version_check` requires the one it measures to be this, and every
+# branch coverage run requires each raw profile to have it
+# (tools/build/coverage/branch). A new Mojo or new LLVM 23 pins that change it
+# change this number.
+RAW_PROFILE_VERSION = 11
+
 LlvmBranchInfo = provider(
-    doc = "The LLVM pieces of branch coverage (README.md). Nothing reads it yet.",
+    doc = "The LLVM pieces of branch coverage (README.md), which tools/build/coverage/branch:cov_branch reads.",
     fields = {
         "lld": provider_field(typing.Any, default = None),  # cmd_args: `bin/lld` of `lld_dir`, with `lld_dir` (its lib/) as a hidden input
         "lld_dir": provider_field(typing.Any, default = None),  # artifact: Mojo's lld (LLVM 24) with the C++ runtime it loads

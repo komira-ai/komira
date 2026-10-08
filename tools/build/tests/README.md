@@ -979,13 +979,13 @@ querying its attributes, so narrowing it fails.
 
 ## 45. The layout of src/
 
-`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in
-`docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
-[the repository lint tests](lint_tests.md#45-the-layout-of-src).
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in [the repository lint tests](lint_tests.md#45-the-layout-of-src).
 
 ## 46. Coverage gate
 With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
-
+## 47. Branch coverage runs
+[`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs [these checks](coverage_runs.md#test-47-branch-coverage-runs).
+## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
 
 ## Diagnostics

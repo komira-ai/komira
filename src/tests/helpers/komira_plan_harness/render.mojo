@@ -34,7 +34,7 @@
 # the bracket characters escaped in strings and struct names escaped as names
 # (escape.mojo). The schema entry spells the whole type tree (type_text.mojo),
 # so two columns whose cells could read alike never share a schema line. The view types (binary_view,
-# utf8_view, list_view, large_list_view), `error` and any unknown type are
+# utf8_view, list_view, large_list_view) and any unknown type are
 # REFUSED by name: canon never renders a value it cannot render exactly.
 #
 # canon reads the Arrow buffers itself (the values buffer through

@@ -143,8 +143,8 @@ def test_byte_identical_spread() raises:
 # same formula must match.
 #
 # The idiom (and its `(z - 146096) // 146097` twin) misfires ONLY for a BC
-# instant, and no clock reading, RFC3339 stamp, AWS signing date, iCalendar
-# timestamp or Excel serial can BE one — so a copy elsewhere is a defect only
+# instant, and no clock reading, RFC3339 stamp, AWS signing date or iCalendar
+# timestamp can BE one — so a copy elsewhere is a defect only
 # once a BC input can actually reach it. Prove reachability with an executing
 # call before changing one.
 #

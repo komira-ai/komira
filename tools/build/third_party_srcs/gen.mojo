@@ -52,7 +52,7 @@ struct Archive(Movable):
     # Every regular file, relative to the top directory.
     var all: Dict[String, Int]
     var all_sorted: List[String]
-    # The .c .h .S .txt .flags .inc files: relative path -> member index.
+    # The .c .cc .h .S .txt .flags .inc files: relative path -> member index.
     var offsets: Dict[String, Int]
     var sizes: Dict[String, Int]
 
@@ -88,6 +88,7 @@ struct Archive(Movable):
             self.all_sorted.append(rel)
             if (
                 rel.endswith(".c")
+                or rel.endswith(".cc")
                 or rel.endswith(".h")
                 or rel.endswith(".S")
                 or rel.endswith(".txt")
@@ -439,10 +440,45 @@ def _asm_ext(xs: List[String]) -> List[String]:
 
 # ---- aws-lc -------------------------------------------------------------------
 #
-# The configuration: libcrypto only (no libssl, no tool), not FIPS, a Release
-# build without Perl or Go -- the pre-generated assembly and err_data.c that
-# the archive ships under generated-src/ -- and Dilithium off (the CMake
-# defaults for everything else).
+# The configuration: libcrypto, not FIPS, a Release build without Perl or Go
+# -- the pre-generated assembly and err_data.c that the archive ships under
+# generated-src/ -- and Dilithium off (the CMake defaults for everything
+# else); and libssl with the bssl tool, which BUILD_LIBSSL and BUILD_TOOL (on
+# by default) add, as their own lists (see ssl_and_tool).
+
+
+def ssl_and_tool(arc: Archive) raises -> Tuple[List[String], List[String], List[String]]:
+    """libssl's sources (ssl/CMakeLists.txt: add_library(ssl)), the bssl
+    tool's (tool/CMakeLists.txt: add_executable(bssl)), and every other file
+    they #include outside the public headers, by archive path (they include
+    them relatively, or as <openssl/...> from include/)."""
+    var none = List[String]()
+    var ssl_words = only_files(
+        cmake_block(arc.text("ssl/CMakeLists.txt"), "add_library\\(\\s*ssl\\b", "ssl library"), none, "ssl"
+    )
+    var ssl = List[String]()
+    for i in range(len(ssl_words)):
+        ssl.append(arc.need("ssl/" + ssl_words[i]))
+    var tool_words = only_files(
+        cmake_block(arc.text("tool/CMakeLists.txt"), "add_executable\\(\\s*bssl\\b", "bssl executable"), none, "bssl"
+    )
+    var tool = List[String]()
+    for i in range(len(tool_words)):
+        tool.append(arc.need("tool/" + tool_words[i]))
+    var sources = ssl.copy()
+    for i in range(len(tool)):
+        sources.append(tool[i])
+    var roots: List[String] = ["include"]
+    var closure = include_closure(arc, sources, roots)
+    var headers = List[String]()
+    for i in range(len(closure)):
+        var f = closure[i]
+        if f.startswith("include/"):
+            if not (f.startswith("include/openssl/") and f.endswith(".h")):
+                die(f + " is reached through #include but is not a public header")
+            continue
+        headers.append(f)
+    return (ssl^, tool^, headers^)
 
 
 def aws_lc(arc: Archive, labels: Labels) raises -> List[String]:
@@ -580,6 +616,12 @@ def aws_lc(arc: Archive, labels: Labels) raises -> List[String]:
     bzl_dict(out, "PRIVATE_HEADERS", sk, sv,
         "The other files the sources above #include, keyed by the name they are\n"
         + "included by from an -I directory (the archive path when included relatively).")
+    var st = ssl_and_tool(arc)
+    bzl_list(out, "SSL_SRCS", st[0], "ssl/CMakeLists.txt: add_library(ssl), libssl (C++ but for one C file).")
+    bzl_list(out, "TOOL_SRCS", st[1], "tool/CMakeLists.txt: add_executable(bssl), the bssl tool (C++).")
+    bzl_list(out, "SSL_TOOL_HEADERS", st[2],
+        "The other files SSL_SRCS and TOOL_SRCS #include (the public headers aside),\n"
+        + "by archive path: they include them relatively.")
     return out^
 
 
