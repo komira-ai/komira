@@ -140,9 +140,30 @@ def test_header_fields_big_endian_on_decode() raises:
 
 def test_unknown_type_ignored_h2spec_4_1_1() raises:
     """§4.1 / §5.5: frames of unknown types MUST be ignored and discarded.
-    h2spec http2/4.1/1 sends type 0x16 with 8 bytes, then a PING; the
-    decoder returns the unknown frame as OK with its raw payload and
-    consumes exactly it, so the PING after it decodes next."""
+    h2spec http2/4.1/1's bytes: type 0x16, length 8, stream 0, eight zero
+    payload bytes, then a PING whose data is all zero. The decoder returns
+    the unknown frame as OK and consumes exactly it, so the PING decodes
+    next."""
+    var wire = List[UInt8]()
+    _push(wire, 0x00, 0x00, 0x08, 0x16, 0x00, 0x00, 0x00, 0x00, 0x00)
+    _zeros(wire, 8)
+    encode_ping_frame(SIMD[DType.uint8, 8](0), False, wire)
+    var dec = _decode(wire)
+    assert_true(dec.is_ok())
+    assert_equal(Int(dec.frame.header.kind), 0x16)
+    assert_equal(dec.consumed, 17)
+    assert_equal(len(dec.frame.payload), 8)
+    var nxt = decode_frame(Span(wire)[dec.consumed:], MAX_FRAME_PAYLOAD_DEFAULT)
+    assert_true(nxt.is_ok())
+    assert_equal(Int(nxt.frame.header.kind), Int(FRAME_PING))
+    assert_equal(nxt.consumed, 17)
+
+
+def test_unknown_type_keeps_raw_payload() raises:
+    """§4.1 / §5.5: the same unknown-type frame as h2spec http2/4.1/1 but
+    with distinct non-zero payload bytes (not h2spec's), so a dropped,
+    reordered or zeroed payload byte shows. The PING after it carries data
+    byte 7, read back to show the decoder resumed at the PING."""
     var wire = List[UInt8]()
     _push(wire, 0x00, 0x00, 0x08, 0x16, 0x00, 0x00, 0x00, 0x00, 0x00)
     _push(wire, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17)
@@ -316,15 +337,16 @@ def test_data_invalid_pad_length_h2spec_6_1_3() raises:
 
 def test_data_padded_empty_payload() raises:
     """§6.1: PADDED with a zero-length payload has no room for Pad Length.
-    The decoder refuses it as a connection PROTOCOL_ERROR. A byte follows
-    the frame so that a decoder reading a Pad Length anyway reads 0 there,
-    and the `Pad Length >= length` check refuses that with the same code:
-    this test pins the outcome, not which check gives it. RFC 9113 §4.2
-    names FRAME_SIZE_ERROR for a frame "too small to contain mandatory
-    frame data"; this pins the code the decoder sends today."""
+    The input is exactly the 9-byte header and nothing after it, so a
+    decoder that reads a Pad Length anyway reads one byte past the input:
+    the `length == 0` check is what refuses this frame (with it disabled,
+    the read aborts out of bounds). Refused as a connection PROTOCOL_ERROR.
+    RFC 9113 §4.2 names FRAME_SIZE_ERROR for a frame "too small to contain
+    mandatory frame data"; this pins today's code, a departure tracked in
+    #866, so the fix for #866 flips this test on purpose."""
     var wire = List[UInt8]()
     encode_frame_header(UInt32(0), FRAME_DATA, FLAG_PADDED, UInt32(1), wire)
-    wire.append(UInt8(0))
+    assert_equal(len(wire), 9)
     _assert_conn_error(_decode(wire), H2_ERR_PROTOCOL_ERROR)
 
 
@@ -386,10 +408,13 @@ def test_headers_pad_length_equal_to_payload_length() raises:
 
 def test_headers_padded_empty_payload() raises:
     """§6.2: PADDED with no room for Pad Length; as DATA (see
-    test_data_padded_empty_payload), refused as PROTOCOL_ERROR today."""
+    test_data_padded_empty_payload), the input ends at the 9-byte header so
+    only the `length == 0` check stands between the decoder and a read past
+    the input. Refused as PROTOCOL_ERROR today; §4.2 says FRAME_SIZE_ERROR,
+    the departure tracked in #866."""
     var wire = List[UInt8]()
     encode_frame_header(UInt32(0), FRAME_HEADERS, FLAG_PADDED, UInt32(1), wire)
-    wire.append(UInt8(0))
+    assert_equal(len(wire), 9)
     _assert_conn_error(_decode(wire), H2_ERR_PROTOCOL_ERROR)
 
 
@@ -752,9 +777,14 @@ def test_window_update_reserved_bit_ignored() raises:
 
 
 def test_window_update_only_reserved_bit_is_zero_increment() raises:
-    """§6.9.1: an increment of 0 is a PROTOCOL_ERROR; with the reserved
+    """§6.9: an increment of 0 is a PROTOCOL_ERROR; with the reserved
     bit ignored, 0x80000000 is an increment of 0. On stream 0 that is a
-    connection error (h2spec http2/6.9/1 is the bare-zero case)."""
+    connection error (h2spec http2/6.9/1 is the bare-zero case).
+
+    `consumed` is the whole frame (13), not the 0 every other connection
+    error returns (`_assert_conn_error`) and FrameDecodeResult's doc
+    promises: the WINDOW_UPDATE arms set `consumed = total` for both
+    scopes. Pinned as today's value so a change to it is deliberate."""
     var wire = List[UInt8]()
     encode_frame_header(UInt32(4), FRAME_WINDOW_UPDATE, UInt8(0), UInt32(0), wire)
     _push(wire, 0x80, 0x00, 0x00, 0x00)
@@ -762,15 +792,20 @@ def test_window_update_only_reserved_bit_is_zero_increment() raises:
     assert_equal(Int(dec.status), Int(FRAME_DECODE_ERROR))
     assert_equal(Int(dec.error_code), Int(H2_ERR_PROTOCOL_ERROR))
     assert_true(dec.is_connection_error)
+    assert_equal(Int(dec.error_stream_id), 0)
+    assert_equal(dec.consumed, 13)
 
 
 def test_window_update_zero_on_stream_resyncs_h2spec_6_9_2() raises:
-    """§6.9.1 / §5.4.2, h2spec http2/6.9/2: increment 0 on a stream is a
-    stream error; it consumes the frame (13 bytes) and names the stream."""
+    """§6.9 / §5.4.2, h2spec http2/6.9/2: increment 0 on a stream is a
+    stream error of type PROTOCOL_ERROR; it consumes the frame (13 bytes)
+    and names the stream."""
     var wire = List[UInt8]()
     encode_frame_header(UInt32(4), FRAME_WINDOW_UPDATE, UInt8(0), UInt32(1), wire)
     _zeros(wire, 4)
     var dec = _decode(wire)
+    assert_equal(Int(dec.status), Int(FRAME_DECODE_ERROR))
+    assert_equal(Int(dec.error_code), Int(H2_ERR_PROTOCOL_ERROR))
     assert_false(dec.is_connection_error)
     assert_equal(Int(dec.error_stream_id), 1)
     assert_equal(dec.consumed, 13)
@@ -778,13 +813,19 @@ def test_window_update_zero_on_stream_resyncs_h2spec_6_9_2() raises:
 
 def test_window_update_wrong_length_h2spec_6_9_3() raises:
     """§6.9: a length other than 4 is a connection FRAME_SIZE_ERROR
-    (h2spec http2/6.9/3 bytes: length 3, stream 0)."""
+    (h2spec http2/6.9/3 bytes: length 3, stream 0).
+
+    As in test_window_update_only_reserved_bit_is_zero_increment, this
+    connection arm sets `consumed` to the whole frame (12), unlike the
+    other connection arms, which consume 0. Pinned as today's value."""
     var wire = _b(0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00)
     _push(wire, 0x00, 0x00, 0x01)
     var dec = _decode(wire)
     assert_equal(Int(dec.status), Int(FRAME_DECODE_ERROR))
     assert_equal(Int(dec.error_code), Int(H2_ERR_FRAME_SIZE_ERROR))
     assert_true(dec.is_connection_error)
+    assert_equal(Int(dec.error_stream_id), 0)
+    assert_equal(dec.consumed, 12)
 
 
 # =============================================================================
