@@ -123,6 +123,33 @@ def test_image_is_required_and_pinned_by_digest() raises:
     )
 
 
+def test_every_probe_on_a_step_is_checked() raises:
+    # A valid probe on line 6, then a second probe on line 7 whose image is a
+    # tag: the second is refused, so the field rules hold for every probe on a
+    # step, not only the first.
+    var second = (
+        String(" }\n  validation { name: \"probe2\" kind: DEPLOY_PROBE")
+        + String(" image: \"registry.example.invalid/probe:1.0\" timeout_seconds: 60 expect: \"h\"")
+    )
+    _assert_refused(
+        _probe_machine(_ok() + second),
+        String("machine file: line 7: validation 'probe2' of step 'deploy' of stage 'staging'")
+        + String(" has image 'registry.example.invalid/probe:1.0'; a probe image is pinned by digest"),
+    )
+    # and two valid probes are accepted
+    var g = parse_machine_file(
+        _probe_machine(
+            _ok()
+            + String(" }\n  validation { name: \"probe2\" kind: DEPLOY_PROBE image: \"")
+            + String(_IMAGE)
+            + String("\" timeout_seconds: 30 expect: \"login\"")
+        ),
+        String(_SRC),
+    )
+    assert_equal(len(g.stages[0].steps[0].validations), 2)
+    assert_equal(g.stages[0].steps[0].validations[1].line, 7)
+
+
 # ---- args --------------------------------------------------------------------
 
 
