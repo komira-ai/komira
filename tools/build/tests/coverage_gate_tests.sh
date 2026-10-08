@@ -10,15 +10,17 @@
 #      itself, and so every dependent, does not.
 #      tests//negative/coverage (tools/build/coverage/README.md, "The build
 #      gate"; tools/build/tests/coverage_runs.md, test 46):
-#      the [coverage][gate] of covlow, covnotests, covun, covfull_unread and
-#      covbranch in enforce mode is red, each naming its finding:
+#      the [coverage][gate] of covlow, covnotests, covun, covfull_unread,
+#      covbranch and covtry in enforce mode is red, each naming its finding:
 #      BelowTarget (a test covering 3 of 6 lines, and 1 of the 4 arms of its
 #      two `if`s), NotMeasured (a library with no test still has a gate),
 #      UnmeasuredFile (a source no test compiles), BranchNotMeasured alone
 #      (every line covered and a ratchet row, its gate reading no branch
 #      record: coverage_branch_gate = False), BelowTarget on branch alone
 #      (every line covered, one arm of its `if` never taken: the branch
-#      records reach the gate); covbranch_both (both arms taken) and covfull
+#      records reach the gate), BelowTarget on branch alone again (every
+#      line covered, a raising call in a `try:` body never raising);
+#      covbranch_both and covtry_both (every arm taken) and covfull
 #      (the library of covfull_unread, no decision, its records naming its
 #      file with no arm) are green in enforce mode, gate included; the
 #      census twins are green and their result.json says so
@@ -52,24 +54,28 @@ N=tests//negative/coverage
 P=tools/build/tests/negative/coverage
 expect_green coverage_gate_census "$N:covlow_census_result" "$N:covnotests_census_result" \
     "$N:covun_census_result" "$N:covfull_census_result" "$N:covfull_unread_census_result" \
-    "$N:covtop_census_result" "$N:covbranch_census_result" \
-    "$N:covbranch_both[coverage][gate]" "$N:covfull[coverage][gate]"
+    "$N:covtop_census_result" "$N:covbranch_census_result" "$N:covtry_census_result" \
+    "$N:covbranch_both[coverage][gate]" "$N:covtry_both[coverage][gate]" "$N:covfull[coverage][gate]"
 expect_red coverage_gate_census_malformed "COVERAGE GATE ERROR: $P ($N:covbad [coverage gate]): covcheck exited 1" "$N:covbad[coverage][gate]"
 expect_red coverage_gate_enforce "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow[coverage][gate]"
 expect_red coverage_gate_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests[coverage][gate]"
 expect_red coverage_gate_unmeasured "- **UnmeasuredFile** \`$P\` \`$P/covun/unused.mojo\`: no test binary compiled this file" "$N:covun[coverage][gate]"
 expect_red coverage_gate_branch "- **BranchNotMeasured** \`$P\`: no branch of this package was measured" "$N:covfull_unread[coverage][gate]"
 expect_red coverage_gate_branch_arm "COVERAGE GATE FAILED (enforce): $P ($N:covbranch [coverage gate]): covcheck gate exited 3" "$N:covbranch[coverage][gate]"
+expect_red coverage_gate_branch_try "COVERAGE GATE FAILED (enforce): $P ($N:covtry [coverage gate]): covcheck gate exited 3" "$N:covtry[coverage][gate]"
 # Each red is its own finding: covlow's is BelowTarget, covfull_unread's
 # only finding is BranchNotMeasured (line 100%, a ratchet row), and covbranch's
 # only finding is BelowTarget on branch (line 100%, a ratchet row, its
-# branch records read). The enforce banner names what a red gate blocks:
+# branch records read), and so is covtry's (a `try` decision's raise arm).
+# The enforce banner names what a red gate blocks:
 # the conda package only.
 for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is below the target 100.00%" \
     "coverage_gate_enforce|The conda package (covlow_conda) is not produced until its coverage meets the policy;" \
     "coverage_gate_branch|### Findings (1)" \
     "coverage_gate_branch_arm|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
-    "coverage_gate_branch_arm|### Findings (1)"; do
+    "coverage_gate_branch_arm|### Findings (1)" \
+    "coverage_gate_branch_try|- **BelowTarget** \`$P\`: branch 83.33% is below the target 100.00%" \
+    "coverage_gate_branch_try|### Findings (1)"; do
     if grep -qF -- "${want#*|}" "$LOG/${want%%|*}.log"; then
         pass "${want%%|*}_finding"
     else
@@ -81,7 +87,7 @@ done
 # and runs its test). A library with no test has a REFUSED conda package,
 # which waits for its gate all the same.
 expect_green coverage_gate_library "$N:covlow" "$N:covnotests" "$N:covun" "$N:covfull" "$N:covfull_unread" \
-    "$N:covbranch" "$N:covbad" "$N:covlow_user"
+    "$N:covbranch" "$N:covtry" "$N:covbad" "$N:covlow_user"
 expect_red coverage_gate_conda "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow_conda"
 expect_red coverage_gate_conda_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests_conda"
 # A generated client whose welded tests are at its package's top analyzes
