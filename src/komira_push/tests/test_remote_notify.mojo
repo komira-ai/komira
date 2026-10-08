@@ -269,6 +269,31 @@ def test_a_raising_transport_is_a_failure() raises:
     assert_equal(spy.call_count(), 1)
 
 
+def test_a_raising_transport_is_a_failed_registration() raises:
+    # No scripted row: SharedScriptedTransport raises on the request.
+    var t = SharedScriptedTransport()
+    var spy = t.share()
+    var port = Port(t^, StaticTokenSource(String("client-token")), String(BASE))
+    var out = port.register_device(_register_request())
+    assert_false(out.ok)
+    assert_equal(out.status, 0)
+    assert_equal(
+        out.reason, String("komira_push: no answer from the notify service")
+    )
+    assert_equal(spy.call_count(), 1)
+
+
+def test_an_unreadable_device_answer_is_a_failure() raises:
+    var spy = SharedScriptedTransport()
+    var port = _port(200, String(SECRET_BODY), spy)
+    var out = port.register_device(_register_request())
+    assert_false(out.ok)
+    assert_equal(out.status, 200)
+    assert_equal(
+        out.reason, String("komira_push: the device answer is unreadable")
+    )
+
+
 def test_a_missing_token_sends_nothing() raises:
     var t = SharedScriptedTransport()
     t.add(String(""), 202, String('{"sent":0}'))
@@ -395,6 +420,8 @@ def main() raises:
     test_a_newer_result_member_is_skipped()
     test_an_empty_device_id_is_a_failure()
     test_a_raising_transport_is_a_failure()
+    test_a_raising_transport_is_a_failed_registration()
+    test_an_unreadable_device_answer_is_a_failure()
     test_a_missing_token_sends_nothing()
     test_a_refused_request_sends_nothing()
     test_a_refused_registration_sends_nothing()

@@ -18,11 +18,13 @@
 from std.testing import assert_equal
 
 from komira_http_server.middleware import Principal
-from komira_notify_proto.notify import Device, DeviceTransport
+from komira_notify_proto.notify import Device, DeviceTransport, ErrorEnvelope
+from komira_proto_codec import decode_json
 from komira_push import (
     NoopNotify,
     RecordingNotify,
     RegisterOutcome,
+    error_body,
     register_device_for,
 )
 
@@ -180,6 +182,47 @@ def test_the_status_table() raises:
     )
 
 
+def test_a_success_without_a_device_id_is_503() raises:
+    # A port that answers ok with an empty device id (RemoteNotifyPort
+    # refuses one; another port may not) must not reach the UI as a 200.
+    var port = RecordingNotify()
+    port.answer_register(
+        RegisterOutcome.registered(
+            200,
+            Device(
+                String(""),
+                DeviceTransport(DeviceTransport.DEVICE_TRANSPORT_WEB_PUSH),
+            ),
+        )
+    )
+    var reply = register_device_for(port, _user(), String(WEB_BODY))
+    assert_equal(reply.status, 503)
+    assert_equal(
+        reply.body,
+        String(
+            '{"error":{"code":"unavailable",'
+            '"message":"device registration failed"}}'
+        ),
+    )
+
+
+def _round_trip(code: String, message: String) raises:
+    var env = decode_json[ErrorEnvelope](error_body(code, message))
+    assert_equal(env.error.value().code, code)
+    assert_equal(env.error.value().message, message)
+
+
+def test_the_error_body_escapes_and_decodes() raises:
+    # error_body writes the envelope itself; the strict proto3 decoder of
+    # ErrorEnvelope must read back exactly what went in, escapes included.
+    assert_equal(
+        error_body(String('a"b'), String("c\\d\ne\tf")),
+        String('{"error":{"code":"a\\"b","message":"c\\\\d\\ne\\tf"}}'),
+    )
+    _round_trip(String("invalid_request"), String('say "no"'))
+    _round_trip(String("x"), String("back\\slash, new\nline, café"))
+
+
 def test_noop_is_503() raises:
     var port = NoopNotify()
     var reply = register_device_for(port, _user(), String(WEB_BODY))
@@ -200,5 +243,7 @@ def main() raises:
     test_a_web_push_device_without_a_subscription_is_400()
     test_no_subject_or_issuer_is_401()
     test_the_status_table()
+    test_a_success_without_a_device_id_is_503()
+    test_the_error_body_escapes_and_decodes()
     test_noop_is_503()
     print("PASS komira_push device proxy")

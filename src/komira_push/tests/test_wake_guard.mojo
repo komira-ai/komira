@@ -94,6 +94,27 @@ def test_an_empty_field_is_refused() raises:
     assert_equal(msg, String("komira_push: the wake source is empty"))
 
 
+def _err_wake(id: String, kind: String, source: String) -> String:
+    try:
+        _ = WakeTrigger(id.copy(), kind.copy(), source.copy()).payload_json()
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
+def test_an_empty_id_or_kind_is_refused() raises:
+    # Each field is checked on its own: a wake missing only its id, or only
+    # its kind, names that field (the other two are present).
+    assert_equal(
+        _err_wake(String(""), String("k"), String("s")),
+        String("komira_push: the wake id is empty"),
+    )
+    assert_equal(
+        _err_wake(String("i"), String(""), String("s")),
+        String("komira_push: the wake kind is empty"),
+    )
+
+
 def test_an_extra_member_is_refused() raises:
     assert_equal(
         _err_payload(
@@ -146,6 +167,7 @@ def main() raises:
     test_the_plaintext_byte_for_byte()
     test_the_plaintext_escapes_quotes()
     test_an_empty_field_is_refused()
+    test_an_empty_id_or_kind_is_refused()
     test_an_extra_member_is_refused()
     test_a_non_string_member_is_refused()
     test_a_duplicate_member_is_refused()

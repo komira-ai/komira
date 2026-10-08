@@ -164,12 +164,12 @@ struct RemoteNotifyPort[T: HttpTransport, S: BearerTokenSource](
             return String("")
 
     def notify(mut self, request: NotifyRequest) -> NotifyOutcome:
-        try:
-            check_notify_request(request)
-        except e:
-            return NotifyOutcome.failed(0, String(e))
+        # The shape check is the only refusal here: encode_json raises for
+        # none of the notify messages (strings, uint32s, an enum and
+        # sub-messages), so one handler serves both calls.
         var body: String
         try:
+            check_notify_request(request)
             body = encode_json(request)
         except e:
             return NotifyOutcome.failed(0, String(e))
@@ -211,12 +211,12 @@ struct RemoteNotifyPort[T: HttpTransport, S: BearerTokenSource](
             )
 
     def register_device(mut self, request: RegisterDevice) -> RegisterOutcome:
-        try:
-            check_register_device(request)
-        except e:
-            return RegisterOutcome.failed(0, String(e))
+        # The shape check is the only refusal here: encode_json raises for
+        # none of the notify messages (strings, uint32s, an enum and
+        # sub-messages), so one handler serves both calls.
         var body: String
         try:
+            check_register_device(request)
             body = encode_json(request)
         except e:
             return RegisterOutcome.failed(0, String(e))

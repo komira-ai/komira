@@ -135,6 +135,26 @@ def test_the_trigger_and_key_rules() raises:
     )
 
 
+def test_a_missing_trigger_is_refused() raises:
+    var r = NotifyRequest(
+        Optional[PrincipalRef](
+            PrincipalRef(String("https://issuer.example"), String("u"))
+        ),
+        Optional[Trigger](None),
+        String("key"),
+    )
+    assert_equal(_err(r), String("komira_push: the trigger is missing"))
+    assert_equal(
+        _parse_err(
+            String(
+                '{"recipient":{"iss":"https://issuer.example","sub":"u"},'
+                '"idempotencyKey":"key"}'
+            )
+        ),
+        String("komira_push: the trigger is missing"),
+    )
+
+
 def test_parse_accepts_a_well_formed_body() raises:
     var r = parse_notify_request(
         String(
@@ -232,6 +252,24 @@ def test_a_subscription_naming_a_principal_is_refused() raises:
     )
 
 
+def test_parse_device_subscription() raises:
+    # A well-formed body decodes; a body that decodes but breaks a device
+    # rule is refused by the shape check, with the rule's message.
+    var d = parse_device_subscription(
+        String('{"transport":"DEVICE_TRANSPORT_FCM","fcmToken":"t"}')
+    )
+    assert_equal(d.transport.value, DeviceTransport.DEVICE_TRANSPORT_FCM)
+    assert_equal(d.fcm_token, String("t"))
+    var msg = String("<accepted>")
+    try:
+        _ = parse_device_subscription(
+            String('{"transport":"DEVICE_TRANSPORT_FCM"}')
+        )
+    except e:
+        msg = String(e)
+    assert_equal(msg, String("komira_push: an FCM device has no token"))
+
+
 def test_parse_register_device() raises:
     var r = parse_register_device(
         String(
@@ -266,10 +304,12 @@ def main() raises:
     test_a_well_formed_request_is_accepted()
     test_the_recipient_rules()
     test_the_trigger_and_key_rules()
+    test_a_missing_trigger_is_refused()
     test_parse_accepts_a_well_formed_body()
     test_parse_refuses_a_source()
     test_parse_checks_the_shape()
     test_the_device_rules()
     test_a_subscription_naming_a_principal_is_refused()
+    test_parse_device_subscription()
     test_parse_register_device()
     print("PASS komira_push notify requests")

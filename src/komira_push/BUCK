@@ -23,7 +23,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   test_ports           NoopNotify answers "not configured"; RecordingNotify
 #                        records through a shared handle.
 #   test_device_proxy    the principal comes from the verified token, a
-#                        body naming one is refused, and the status mapping.
+#                        body naming one is refused, the status mapping (a
+#                        success without a device id is 503), and the error
+#                        envelope's escaping, read back by the strict decoder.
 mojo_library(
     name = "komira_push",
     srcs = glob(["*.mojo"]),
