@@ -74,6 +74,7 @@ from komira_http_core.tls.ffi import (
     s2n_config_wipe_trust_store,
     s2n_connection_free,
     s2n_connection_get_actual_protocol_version,
+    s2n_connection_get_cipher,
     s2n_connection_get_session,
     s2n_connection_get_session_length,
     s2n_connection_is_session_resumed,
@@ -1942,6 +1943,22 @@ struct TlsConnection(Movable, Deinitable):
             return -1
         # SAFETY: synchronous accessor; no pointer escapes.
         return Int(s2n_connection_get_actual_protocol_version(self._handle[]._raw))
+
+    def negotiated_cipher(self) -> String:
+        """The cipher suite the handshake negotiated, in s2n's OpenSSL-style
+        spelling: "TLS_AES_128_GCM_SHA256" for a TLS 1.3 suite,
+        "ECDHE-RSA-AES128-GCM-SHA256" for a TLS 1.2 one. The empty string
+        until `handshake()` on THIS connection has returned TLS_OUTCOME_DONE
+        (the guard of `negotiated_tls_version`), or when s2n reports none."""
+        if not self._handshake_done:
+            return String()
+        # SAFETY: s2n_connection_get_cipher returns a pointer into s2n's
+        # static cipher-suite table or NULL; it is copied here and does not
+        # escape this method.
+        var p = s2n_connection_get_cipher(self._handle[]._raw)
+        if Int(p) == 0:
+            return String()
+        return _ptr_to_string(p)
 
     def last_handshake_message_name(self) -> String:
         """Get the name of the last handshake message the connection was
