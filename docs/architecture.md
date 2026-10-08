@@ -269,6 +269,16 @@ The dependency order is the order of the rows.
 | [`komira_search_scan`](../src/komira_search_scan/) | the `komira.search.index` scan kind: a search index read as a relation of hit rows, one per matching live document. Its binding builder and identity corpus, `SearchIndexCatalog` (the store seam, with an in-memory catalog), the split reader and fast-field pushdown gate, and `SearchScanResolver`, the `komira_scan_resolver` resolver an engine executes (one split per split object live at the resolved generation). Neither it nor `komira_search` depends on an engine. |
 | [`komira_search_catalog`](../src/komira_search_catalog/) | the durable split catalog of a search index: the `SplitSummary` record and its binary codec, and `SearchMetastore`, which publishes, lists, retires and reaps splits on one append-only manifest lineage, reads across per-writer sub-lineages, retires drained writer shards, and keeps durable records so the generation never goes down. Generic over `komira_objectstore`'s conditional-write stores; it names no cloud client. It is the store behind the `SearchIndexCatalog` seam, but the adapter between them is not a library today (`komira_search_e2e` writes one for its tests). |
 
+### Applications
+
+The libraries of the applications komira serves over an open JSON API. The
+dependency order is the order of the rows.
+
+| module | what it is |
+|---|---|
+| [`komira_calendar_proto`](../src/komira_calendar_proto/) | the resources of a simple calendar service's JSON API, `komira.calendar.v1`, generated: `Calendar`, `Event` (all-day or timed in an IANA zone), a structured `Recurrence` rule (not RRULE text), `Reminder`, `OccurrenceOverride` and the `ErrorResponse` envelope. |
+| [`komira_calendar`](../src/komira_calendar/) | a simple calendar's model and validation over `komira_calendar_proto`: `check_calendar`, `check_event` (timing, the recurrence rule, removed occurrences, reminders) and `check_override`, each refusal a stable code, a JSON field path and a sentence; the local date and date-time text forms. No zone rules, no expansion, no store. |
+
 ### CI and deploy (`kci`)
 
 A library `kci` owns is named `kci_<x>`. The release side (build, publish,
