@@ -770,28 +770,32 @@ def _xorshift64(var x: UInt64) -> UInt64:
 
 
 @always_inline
-def _jittered_sleep_us(upper_us: Int64, salt: UInt64) raises:
+def _jittered_sleep_us(upper_us: Int64, attempt: Int):
     """Sleep a uniform-random duration in [0, upper_us] microseconds.
 
     Full jitter. Seeds an xorshift from the high-resolution
-    clock XORed with a per-call `salt` (the attempt count) so two threads
+    clock XORed with a per-call salt (the attempt count) so two threads
     entering backoff at nearly the same instant still draw different waits.
+    Every backoff is counted (`cas_backoff_probe`), a zero bound included:
+    the attempt, its bound, the draw and the time the sleep took, so a test
+    can hold them to the policy.
     """
-    # Every draw is counted (`cas_backoff_probe`), a zero bound included, so a
-    # test can hold the draws equal to the 412s that were retried.
     if upper_us <= Int64(0):
-        record_cas_backoff(Int64(0), upper_us)
+        record_cas_backoff(attempt, upper_us, Int64(0), Int64(0))
         return
+    var salt = UInt64(attempt)
     var seed = UInt64(perf_counter_ns()) ^ (salt * UInt64(0x9E3779B97F4A7C15))
     var r = _xorshift64(seed | UInt64(1))
     var draw_us = r % UInt64(upper_us + 1)
-    record_cas_backoff(Int64(draw_us), upper_us)
+    var t0 = perf_counter_ns()
     # Use `usleep` (microsecond, distinct symbol) instead of stdlib
     # `time.sleep` → `nanosleep`: an AOT binary that links komira_async (whose
     # reactor declares its OWN `external_call["nanosleep", ...]`) hits a
     # "conflicting nanosleep signature" legalization failure. Same fix as
     # komira_job_supervisor._sleep_secs / komira_supervisor._sleep_ms.
     _ = external_call["usleep", Int32](UInt32(draw_us))
+    var slept_us = Int64((perf_counter_ns() - t0) // 1000)
+    record_cas_backoff(attempt, upper_us, Int64(draw_us), slept_us)
 
 
 # =============================================================================
@@ -2632,7 +2636,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                     + self._prefix
                 )
             var upper = self._retry.backoff_us_for_attempt(attempt)
-            _jittered_sleep_us(upper, UInt64(attempt))
+            _jittered_sleep_us(upper, attempt)
             # FORWARD-PROBE re-anchor: the slot we just tried
             # (`head.chunk_seq + 1`) is TAKEN — read THAT chunk directly (one GET
             # of a known key, NOT a LIST, NOT the lagging cached `_HEAD`) to learn

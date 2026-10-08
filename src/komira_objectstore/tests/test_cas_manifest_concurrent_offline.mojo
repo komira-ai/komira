@@ -23,8 +23,10 @@
 #       it (as a caller must) fails no more often than the OTHER writers
 #       commit. See "THE LOCK-FREEDOM BOUND" below for why that bound holds at
 #       any speed, and why "zero exhausted calls" was not the property.
-#       And every retried 412 is followed by exactly one full-jitter backoff
-#       draw within `backoff_us_for_attempt(attempt)`, counted by the product
+#       And every retried 412 is followed by exactly one full-jitter backoff:
+#       the k-th 412 of a call draws within THIS test's
+#       `RetryPolicy.fast_test().backoff_us_for_attempt(k)` and sleeps at
+#       least the draw, counted per attempt by the product
 #       (`cas_backoff_probe`): full jitter may draw 0, so no time floor can.
 #
 # This is the offline contention gate. A live S3-compatible stress run
@@ -40,6 +42,7 @@ from std.testing import assert_equal, assert_true
 from komira_collections.slab import Slab
 
 from komira_objectstore.cas_backoff_probe import (
+    CAS_BACKOFF_PROBE_MAX_ATTEMPT,
     cas_backoff_counts,
     reset_cas_backoff_counts,
 )
@@ -350,6 +353,9 @@ def _run_k_writers(
     var max_attempts_seen = Int64(0)
     var exhausted_calls = Int64(0)
     var retried_412s = Int64(0)
+    # expected_at[k - 1]: retried k-th 412s, i.e. calls that made more than k
+    # attempts (an exhausted call's last 412 raises instead of backing off).
+    var expected_at = List[Int](length=CAS_BACKOFF_PROBE_MAX_ATTEMPT, fill=0)
     var max_exhausted_one_writer = Int64(0)
     var hard_errors = Int64(0)
 
@@ -367,6 +373,8 @@ def _run_k_writers(
             total_commits += Int64(1)
             total_attempts += r.attempts
             retried_412s += r.attempts - Int64(1)
+            for a in range(1, Int(r.attempts)):
+                expected_at[min(a, CAS_BACKOFF_PROBE_MAX_ATTEMPT) - 1] += 1
             if r.attempts > max_attempts_seen:
                 max_attempts_seen = r.attempts
             all_seqs.append(r.chunk_seq)
@@ -374,6 +382,8 @@ def _run_k_writers(
             latencies.append(r.latency_ns)
     # An exhausted call retried `max_retries` 412s (its last one raised).
     retried_412s += exhausted_calls * Int64(RetryPolicy.fast_test().max_retries)
+    for a in range(1, RetryPolicy.fast_test().max_retries + 1):
+        expected_at[min(a, CAS_BACKOFF_PROBE_MAX_ATTEMPT) - 1] += Int(exhausted_calls)
 
     # ---- (1) no-gap, one-winner-per-slot, contiguous ----
     var expected = Int64(k) * appends_per_writer
@@ -468,23 +478,49 @@ def _run_k_writers(
     )
 
     # ---- (3) livelock bound ----
-    # BACKOFF. Every retried 412 is followed by one full-jitter draw within
-    # `backoff_us_for_attempt(attempt)`: a committed call that took `a`
-    # attempts retried `a - 1` 412s, an exhausted call `max_retries` (its last
-    # 412 raises instead). Counted by the product (cas_backoff_probe), because
-    # full jitter may draw 0 and no wall-clock floor can see a missing sleep.
-    # Without backoff the writers re-collide in lockstep: this is the check a
-    # loop that retries at once fails.
+    # BACKOFF. Every retried 412 is followed by one full-jitter backoff: a
+    # committed call that took `a` attempts retried its 412s 1 .. a - 1, an
+    # exhausted call 1 .. max_retries (its last 412 raises instead). The
+    # product counts each backoff by attempt (cas_backoff_probe), because full
+    # jitter may draw 0 and no wall-clock floor can see a missing sleep; the
+    # bound is computed HERE, from this test's own policy, so a call site that
+    # passes a looser bound than the policy's is caught too. Without backoff
+    # the writers re-collide in lockstep.
     var backoff = cas_backoff_counts()
     assert_equal(
-        Int64(backoff.draws),
+        Int64(backoff.draws()),
         retried_412s,
         "each retried 412 must be followed by exactly one backoff draw",
     )
+    for a in range(1, CAS_BACKOFF_PROBE_MAX_ATTEMPT + 1):
+        assert_equal(
+            backoff.draws_at[a - 1],
+            expected_at[a - 1],
+            "backoffs after the " + String(a) + "-th 412 of a call",
+        )
+        assert_equal(
+            backoff.upper_sum_at[a - 1],
+            expected_at[a - 1] * Int(policy.backoff_us_for_attempt(a)),
+            "the backoff bound after the "
+            + String(a)
+            + "-th 412 is not RetryPolicy.backoff_us_for_attempt("
+            + String(a)
+            + ") = "
+            + String(Int(policy.backoff_us_for_attempt(a)))
+            + " us",
+        )
     assert_equal(
-        backoff.draws_over_bound,
+        backoff.draws_over_upper,
         0,
-        "a backoff draw exceeded RetryPolicy.backoff_us_for_attempt(attempt)",
+        "a backoff draw exceeded the bound it was drawn under",
+    )
+    assert_true(
+        backoff.slept_us >= backoff.drawn_us,
+        "the backoffs slept "
+        + String(backoff.slept_us)
+        + " us in all, less than the "
+        + String(backoff.drawn_us)
+        + " us drawn: a draw was not slept",
     )
     assert_true(
         max_attempts_seen <= Int64(policy.max_retries + 1),
