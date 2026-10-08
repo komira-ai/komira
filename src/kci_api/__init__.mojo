@@ -86,6 +86,7 @@ from kci_api.exit_codes import (
 from kci_api.formats import (
     FORMAT_ARTIFACTS,
     FORMAT_ARTIFACT_MANIFEST,
+    FORMAT_CELLS,
     FORMAT_CHANNELS,
     FORMAT_CONDA_METADATA,
     FORMAT_KEY,
