@@ -520,7 +520,7 @@ cov_debug_check(
 # source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
 # its arms, never the first (and a String destroyed at an `if`, loops over
 # collections, a Dict subscript, user masks, raising calls in `try:`
-# bodies): with
+# bodies, a function only a folded-away assert failure calls): with
 # coverage (forced here, as for covlib_forced) it has [coverage][bc],
 # [coverage][pgo_bin] and [coverage][branch].
 mojo_library(
@@ -534,12 +534,14 @@ mojo_library(
         "branchlib/shapes.mojo",
         "branchlib/strings.mojo",
         "branchlib/trial.mojo",
+        "branchlib/unrun.mojo",
     ],
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     test_srcs = [
         "tests/test_gate_env.mojo",
         "tests/test_score_arms.mojo",
+        "tests/test_unrun.mojo",
     ],
 )
 
@@ -643,11 +645,25 @@ cov_branch_check(
 # every try record; one ignoring the `try:` scope records 70 (and
 # lookup.mojo's 7,13); one keeping LLVM's arm order gives 23,20 as 0,1.
 # test_gate_env calls none of branchlib: its record file is empty.
+# test_unrun asserts two known equal Tags equal: assert_equal's failure path,
+# which writes them (unrun.mojo's Tag.write_to), is a branch Mojo folds to
+# never taken, so the instrumented link drops Tag.write_to with its counters
+# and the run's profile holds no record of it. Its `if` (24,9) is one record
+# with both arms never run (`-`); an annotation refusing a function the
+# profile lacks fails this test's [branch_ir] (as every one did, naming
+# Tag::write_to among 182), and one dropping such a function's branches
+# gives an empty file.
 cov_report_check(
     name = "branch_info",
-    goldens = ["golden/test_score_arms.info"],
+    goldens = [
+        "golden/test_score_arms.info",
+        "golden/test_unrun.info",
+    ],
     mode = "golden",
-    reports = [":branchlib[coverage][branch_info][test_score_arms]"],
+    reports = [
+        ":branchlib[coverage][branch_info][test_score_arms]",
+        ":branchlib[coverage][branch_info][test_unrun]",
+    ],
     script = "report.sh",
 )
 
@@ -690,7 +706,8 @@ cov_debug_check(
     script = "check.sh",
 )
 
-# For the planted defects and the gate checks of tests//negative/coverage.
+# For the planted defects and the gate checks of tests//negative/coverage
+# (and, report.sh, of the test-only package tests//src/tests/coverage).
 export_file(
     name = "check.sh",
     visibility = ["//negative/coverage:"],
@@ -698,7 +715,10 @@ export_file(
 
 export_file(
     name = "report.sh",
-    visibility = ["//negative/coverage:"],
+    visibility = [
+        "//negative/coverage:",
+        "//src/tests/coverage:",
+    ],
 )
 
 export_file(

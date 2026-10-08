@@ -52,15 +52,15 @@ covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR
                 (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]...
                 [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce]
-                [--target-bp N] [--include-tests] [--name N] [--max-annotations N]
-                --summary-out F --checkrun-dir D --result-out F
+                [--target-bp N] [--include-tests] [--info-package DIR]... [--name N]
+                [--max-annotations N] --summary-out F --checkrun-dir D --result-out F
                 [--annotations-out F] [--ratchet-out F]
 
 covcheck gate   --package DIR --repo-files F --source-root DIR
                 [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]...
                 [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... --ratchet F --mode census|neutral|enforce
-                [--target-bp N] [--include-tests] [--test-source P]...
+                [--target-bp N] [--include-tests] [--test-source P]... [--info-package DIR]...
                 --result-out F --summary-out F
 ```
 
@@ -79,6 +79,7 @@ Every input is a flag; nothing is read from the environment.
 | `--target-bp N` | the target, basis points 0 to 10000; default 10000 (100%) |
 | `--include-tests` | count test sources (left out by default) |
 | `--test-source P` | `gate`: repeatable; the repository path of a test source of `--package` outside its `tests/` (a welded test elsewhere), left out like those; a path that is not a file of `--repo-files` or not in `--package` is an error (exit 1) |
+| `--info-package DIR` | repeatable; `DIR` (a trailing `/` dropped; an absolute path, `.` or one holding `//` is bad usage) and every package under it, at a path-segment boundary, are test-only: see Test-only packages |
 | `--diff F` | the output of `git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ --unified=0 -M <merge-base> <head>` (the explicit prefixes override a `diff.noprefix` setting) |
 | `--head-sha SHA` | the commit the check run is for: 40 lowercase hex digits |
 | `--name N` | the check run's name; default `coverage` |
@@ -340,6 +341,26 @@ hits > 0), branch (only when the package has a branch record), mutants.
 Conclusion: `neutral` in census and neutral mode whatever was found; in
 enforce mode `failure` with any finding, else `success`.
 
+### Test-only packages
+
+A package that is an `--info-package DIR` or under one (`src/tests` covers
+`src/tests/e2e/x`, not `src/testsuite`) is measured, counted in the totals
+and shown as every package is, but held to no target: whatever the policy
+would find in it (every kind above, `BelowTarget` and the ratchet's
+included, so a `Regression` below a row the package has) is information.
+Those findings move from `findings` to `info_findings` in the result
+(which also lists the measured test-only packages, `info_packages`), so
+they count for no conclusion and no `gate` exit 3: a test-only package's
+gate never fails on a finding, in any mode. An input covcheck refuses
+(exit 1 or 2) still fails it. `--ratchet-out` proposes no row for a
+test-only package (a row it has is kept as it was), so test-only packages
+have no floor. The summary's status
+column says `info` (with the kinds, `info: BelowTarget, MissingRow`), its
+findings are listed under `### Info: test-only packages (N)`, the target
+line names the directories, the title counts them (`N info`), and the
+annotations of its files are `notice` in every mode. The policy names the
+directories (`COVERAGE_INFO_ONLY_DIRS`, The build gate).
+
 ## The build gate
 
 With `-c komira.coverage=true`, every `mojo_library` on linux-x86_64 has a
@@ -370,7 +391,8 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
    (`policy.bzl`) or a fixture of the tests cell (unless it passes
    `coverage_branch_gate = False`) each test's branch records
    (`[coverage][branch_info][<test>]`, `branch/README.md`); they are in
-   repository paths, so no `PKGDIR=` is given. Its `result.json` and
+   repository paths, so no `PKGDIR=` is given; and `--info-package
+   <dir>` for a test-only package (`COVERAGE_INFO_ONLY_DIRS` below). Its `result.json` and
    `summary.md` are the library's `[coverage][gate]`
    (`[coverage][gate][result]`, `[coverage][gate][summary]`).
 
@@ -454,7 +476,25 @@ from its Mojo dependencies (an engine's), which their own tests measure in
 their own gates.
 
 **Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
-`COVERAGE_TARGET_BP = 10000`. A fixture of the `tests` cell may name another mode
+`COVERAGE_TARGET_BP = 10000`, and `COVERAGE_INFO_ONLY_DIRS = ["src/tests"]`:
+test-only packages (`src/` holds what komira ships, and its test-only
+packages are under `src/tests/<kind>/`: e2e tests, conformance suites, test
+helpers). A library whose package's directory, relative to its cell's root,
+is one of these or under one is held to no target: the rule passes its
+package to covcheck as `--info-package`, so it is measured and shown (the
+gate's summary and result, and the pull request's check run) and what
+covcheck finds is information, never a finding (Test-only packages): its
+gate never fails on a finding, in any mode, so its conda package is never
+held back by a finding (a test failing at -O0 or under kcov, or an input
+covcheck refuses, still holds it back), and it gets no ratchet floor. An
+entry must be a relative directory (no empty, `.` or `..` segment, no
+trailing `/`): `tools/build/mojo/coverage.bzl` fails at load otherwise,
+and `coverage_measure.sh` refuses the line. The rule is a path prefix, not a list of packages: a new
+package under `src/tests/` is test-only with no edit here, and one
+anywhere else is held to the target (`src/testsuite` included: the match
+is at a path-segment boundary). Test 46 builds a library of
+`tests//src/tests/coverage` (the tests cell's `src/tests`) below the target
+green in enforce mode, beside the same library red elsewhere. A fixture of the `tests` cell may name another mode
 (`coverage_mode`), and with it its own gate directory (`coverage_gate`, a
 `cov_gate_dir` with another ratchet or script); anywhere else both are
 refused at load, and at analysis (a BUCK file calling the rule itself) a
@@ -595,7 +635,7 @@ file no test compiled, `Branch not covered`
 per line some of whose branches were not taken (`k of n branches taken on
 this line`), `Mutant survived` per surviving mutant, `Coverage exemption`
 (`notice`) per marker. Level `warning` in census and neutral mode, `failure`
-in enforce mode.
+in enforce mode; `notice` in every mode for a test-only package's files.
 
 The check run carries the first `--max-annotations` (default 1000) of that
 list, in that order, and the summary then says
@@ -717,7 +757,12 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    measured`, with the reason, in both summaries; the job stays green;
 5. `covcheck report` over the reports of the libraries measured and their
    branch records (`--branch-lcov`), with the
-   policy's mode and target, `git ls-files -z` as `--repo-files`, the head
+   policy's mode and target, each directory of its
+   `COVERAGE_INFO_ONLY_DIRS` as an `--info-package` (the root cell's root
+   is the repository's, so a directory relative to it is a repository
+   directory; a test-only package's findings are information, so they
+   neither fail the check run in enforce mode nor annotate above `notice`),
+   `git ls-files -z` as `--repo-files`, the head
    as `--head-sha`, and the ratchet's comment lines and the rows of the
    measured libraries' packages only (`report` compares every row it is
    given, and a row of a package not measured here would read as a
