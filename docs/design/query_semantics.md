@@ -334,7 +334,7 @@ The table of every DEPARTS and UNDECIDED item with its recommendation, and the l
 
 ### 3.17 ASOF equality keys and NULL
 
-- **Rule.** An ASOF join's equality keys are equi-join keys: a left row whose equality key holds a NULL matches nothing (§3.1), and so does a NULL ASOF key (§3.6). In a LEFT ASOF join such a row appears once with the right columns NULL.
+- **Rule.** An ASOF join's equality keys are equi-join keys: a left row whose equality key holds a NULL matches nothing (§3.1), and so does a NULL ASOF key (§3.6). In a LEFT ASOF join such a row appears once with the right columns NULL. The plan's ASOF equality keys are `=` only: DuckDB also accepts `IS NOT DISTINCT FROM` keys, which do match NULL to NULL, but the plan has no such key (§1.6), so a frontend refuses one by name.
 - **DuckDB.** The conditions other than the inequality "must be equalities (or NOT DISTINCT)"; an equality with NULL is not TRUE (§1.2), so it does not match ([FROM and JOIN](https://duckdb.org/docs/current/sql/query_syntax/from.html)).
 - **Current behaviour.** The IR carries `left_keys` / `right_keys` as equi-keys (`src/komira_plan_ir/logical_plan.mojo:1472-1474`); no ASOF operator is in this repository.
 - **Mark.** MATCHES.
@@ -763,7 +763,7 @@ The type of every result column is in [the result-type table](query_semantics_ty
 ### 9.5 IGNORE NULLS
 
 - **Rule.** LAG, LEAD, FIRST_VALUE, LAST_VALUE and NTH_VALUE count every row, NULL or not (§9.10). `IGNORE NULLS` is not in the plan vocabulary and a frontend refuses it by name.
-- **DuckDB.** Supports `IGNORE NULLS` for lag and lead ([window functions](https://duckdb.org/docs/current/sql/functions/window_functions.html)).
+- **DuckDB.** Its signatures accept `[IGNORE NULLS]` on `first_value`, `last_value`, `nth_value`, `lag` and `lead` ([window functions](https://duckdb.org/docs/current/sql/functions/window_functions.html)).
 - **Current behaviour.** No such field on `PartitionExpr` (`src/komira_plan_expr/partition_expr.mojo:110-150`).
 - **Mark.** DEPARTS: a narrowing, refused by name.
 
