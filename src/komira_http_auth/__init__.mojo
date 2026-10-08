@@ -2,8 +2,11 @@
 
 `BearerJwtMiddleware[V]` sits in the server's auth slot. It reads
 `Authorization: Bearer <token>`, hands the token to a `BearerVerifier` `V`,
-and either sets `ctx.principal` (scheme "jwt") or answers 401 with an RFC 6750
-`WWW-Authenticate` header. This release ships one verifier kind,
+and either sets `ctx.principal` (scheme "jwt") or refuses as RFC 6750 says:
+401 with a bare `Bearer` challenge when no Bearer credential was sent, 400
+`invalid_request` for a malformed or repeated one, 401 `invalid_token` for a
+token that fails verification, and 503 with `Retry-After` when no usable key
+set exists. This release ships one verifier kind,
 `Rs256JwksVerifier`: RS256 tokens of one issuer (for example Google
 service-account ID tokens) checked against that issuer's JWK Set, which it
 fetches over HTTPS and caches.
@@ -17,7 +20,7 @@ with `email_verified` (both copied with --copy-claim).
 
 Modules:
   - middleware.mojo : `BearerJwtMiddleware`, the Authorization header parse,
-                      the 401 responses.
+                      the 400 / 401 / 503 responses.
   - verifier.mojo   : `BearerVerifier`, `VerifyOutcome`, `Rs256JwksVerifier`.
   - token.mojo      : compact-JWS split and the JOSE header gate.
   - claims.mojo     : iss / aud / sub / exp / iat / nbf / lifetime checks and
@@ -53,6 +56,7 @@ from .jwks_fetch import (
 )
 from .middleware import (
     BearerJwtMiddleware,
+    WWW_AUTHENTICATE_BEARER,
     WWW_AUTHENTICATE_INVALID_REQUEST,
     WWW_AUTHENTICATE_INVALID_TOKEN,
 )

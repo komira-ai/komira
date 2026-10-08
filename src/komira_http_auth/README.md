@@ -6,10 +6,18 @@ Bearer-JWT authentication for `komira_http_server`.
 `serve_one_iteration_dispatch_chained`). For every request it:
 
 1. clears `ctx.principal`;
-2. reads `Authorization: Bearer <token>`. A missing or malformed header,
-   including two headers folded into one, is answered
-   `401` with `WWW-Authenticate: Bearer error="invalid_request"`;
-3. asks the verifier `V`. Any refusal is answered `401` with
+2. reads `Authorization: Bearer <token>` and answers as RFC 6750 section 3
+   says:
+   - no `Authorization` header, or a credential of another scheme such as
+     `Basic`: `401` with a bare `WWW-Authenticate: Bearer` and no error code
+     (the request carries no Bearer credential at all);
+   - a malformed header, or two `Authorization` fields (the HTTP/1 parser
+     folds them into `a, b`, and a Bearer token never holds a comma): `400`
+     with `WWW-Authenticate: Bearer error="invalid_request"`;
+3. asks the verifier `V`. If it has no usable keys (see stale keys below),
+   the answer is `503` with `Retry-After`, the number of seconds until the
+   next JWKS refresh may start, and no challenge: the token was not judged.
+   Any other refusal is answered `401` with
    `WWW-Authenticate: Bearer error="invalid_token"`;
 4. on success sets `ctx.principal` to a new `Principal` with scheme `jwt`,
    subject `sub`, claims `iss`, `aud` (our audience) and each `--copy-claim`.
@@ -25,8 +33,13 @@ allowlist, by `sub` (the account's stable numeric id) or by the `email` claim
 together with `email_verified` being `true` (copy both with `--copy-claim`). Do
 not treat "a principal is set" as "the caller is allowed".
 
-The 401 body is fixed text. No response carries any part of the token, and the
-middleware logs nothing. `last_reason()` returns the reason code of the last
+HTTP/2 requests do not reach the middleware today: `komira_http_server`'s
+chained serving path closes HTTP/2 connections. When they do, the server must
+fold a repeated field as its HTTP/1 parser does for the second
+`Authorization` field to be refused.
+
+Every refusal body is fixed text. No response carries any part of the token,
+and the middleware logs nothing. `last_reason()` returns the reason code of the last
 decision (`reasons.mojo`), which is safe to log.
 
 ## The RS256 trust anchor
@@ -48,11 +61,14 @@ service-account ID tokens. It checks each token in this order:
     refused;
   - a document that does not parse whole, or that publishes one `kid` twice,
     never replaces the current keys;
-  - when a refresh fails, the last good keys stay in use with no age limit
-    (an open policy question: see `jwks_cache.mojo`);
+  - when a refresh fails, the last good keys stay in use for at most the
+    max-stale time past their freshness (1 h by default, `--jwks-max-stale`,
+    0 s to 24 h). Past that, every token is refused with `503` until a
+    refresh succeeds, so blocking the fetch cannot keep a withdrawn key
+    trusted for longer. A key set that was never fetched also gives `503`;
   - a fetch runs on the serving worker's thread and stalls that worker while it
     runs, at most once per refetch window. The fetch timeout (5 s by default,
-    at most 60 s, set with `BearerJwtConfig.with_jwks_fetch_timeout_us`)
+    100 ms to 60 s, set with `BearerJwtConfig.with_jwks_fetch_timeout_us`)
     bounds the TLS handshake and the request separately. The TCP connect adds
     up to 5 s, and DNS resolution has no bound, so a fetch takes the DNS time
     plus at most 5 s + 2 x the fetch timeout.
@@ -63,7 +79,8 @@ service-account ID tokens. It checks each token in this order:
   - `aud` must be ours, or an array that contains ours;
   - `sub` must be non-empty;
   - `exp` and `iat` are required;
-  - `exp`, `iat` and `nbf` are checked with 30 s of leeway;
+  - `exp`, `iat` and `nbf` are checked with 30 s of leeway by default
+    (`--leeway-s`, 0 to 60);
   - `exp - iat` must be at most the max TTL (3600 s by default).
 
 There is one verifier per trust anchor. In this release a process accepts one
@@ -72,9 +89,9 @@ planned for a later release.
 
 ## Flags
 
-All flags use the form `--name=value`. The clock leeway and the JWKS refetch
-window, default max-age and fetch timeout have no flags: set them with
-`BearerJwtConfig`'s `with_*` methods. No setting of this package is read from
+All flags use the form `--name=value`. The JWKS refetch window, default
+max-age and fetch timeout have no flags: set them with `BearerJwtConfig`'s
+`with_*` methods. No setting of this package is read from
 the environment. The TLS library's default trust store, used for the JWKS
 fetch, does honour `SSL_CERT_FILE` and `SSL_CERT_DIR`.
 
@@ -88,6 +105,8 @@ fetch, does honour `SSL_CERT_FILE` and `SSL_CERT_DIR`.
 | `--max-ttl` | the longest `exp - iat` accepted, in seconds (default 3600) |
 | `--copy-claim` | a claim copied into the principal (may be repeated) |
 | `--trust-anchor` | `name=,issuer=,audience=,jwks_url=[,alg=][,typ=][,max_ttl=]`: the general form of the first six flags, and cannot be combined with them |
+| `--leeway-s` | the clock skew forgiven on `exp`, `iat` and `nbf`, 0 to 60 seconds (default 30); `BearerJwtConfig.with_leeway_s` in code |
+| `--jwks-max-stale` | how long past its freshness the last good key set stays in use while every refresh fails: digits and one unit `s`, `m` or `h` (`90s`, `30m`, `1h`), 0s to 24h (default `1h`); `BearerJwtConfig.with_jwks_max_stale_s` in code |
 
 ## Example
 
@@ -97,8 +116,8 @@ This example uses the test doubles, so it does no network I/O:
 
 ```mojo
 from std.testing import assert_equal, assert_false
-from komira_http_auth import BearerJwtMiddleware, Rs256JwksVerifier, parse_bearer_jwt_flags
-from komira_http_auth import FixedAuthClock, ScriptedJwksFetcher, WWW_AUTHENTICATE_INVALID_REQUEST
+from komira_http_auth import BearerJwtConfig, BearerJwtMiddleware, Rs256JwksVerifier, parse_bearer_jwt_flags
+from komira_http_auth import FixedAuthClock, ScriptedJwksFetcher, WWW_AUTHENTICATE_BEARER
 from komira_http_core.codec.types import HttpRequest
 from komira_http_server.middleware import RequestContext
 
@@ -110,16 +129,24 @@ args.append("--audience=https://api.example.com/")
 args.append("--jwks-url=https://www.googleapis.com/oauth2/v3/certs")
 args.append("--copy-claim=email")
 args.append("--copy-claim=email_verified")
+args.append("--leeway-s=10")
+args.append("--jwks-max-stale=30m")
 var config = parse_bearer_jwt_flags(args)
+assert_equal(config.jwks_max_stale_s, Int64(1800))
+# The same two settings in code, through BearerJwtConfig's with_* setters.
+var in_code = BearerJwtConfig(config.anchor.copy()).with_leeway_s(10).with_jwks_max_stale_s(1800)
+assert_equal(in_code.leeway_s, config.leeway_s)
+assert_equal(in_code.jwks_max_stale_s, config.jwks_max_stale_s)
 
 var verifier = ExampleVerifier(config, ScriptedJwksFetcher(), FixedAuthClock(1800000000))
 var auth = BearerJwtMiddleware[ExampleVerifier](verifier^)
 
-# A request with no Authorization header is refused before any key work.
+# A request with no Authorization header gets a bare challenge (RFC 6750
+# section 3) before any key work.
 var req = HttpRequest()
 var ctx = RequestContext.new()
 var refused = auth.before(req, ctx)
 assert_equal(Int(refused.value().status), 401)
-assert_equal(refused.value().headers["www-authenticate"], WWW_AUTHENTICATE_INVALID_REQUEST)
+assert_equal(refused.value().headers["www-authenticate"], WWW_AUTHENTICATE_BEARER)
 assert_false(Bool(ctx.principal))
 ```

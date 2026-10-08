@@ -38,6 +38,7 @@ mojo_library(
     test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
     test_data = {
         "tests/test_claims.mojo": _KEY,
+        "tests/test_flags.mojo": _KEY,
         "tests/test_header_gate.mojo": _KEY,
         "tests/test_jwks_cache.mojo": _KEY,
         "tests/test_middleware.mojo": _KEY,

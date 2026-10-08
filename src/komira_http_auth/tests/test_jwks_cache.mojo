@@ -9,6 +9,10 @@
 # reader-ambiguous, non-ASCII-kid, over-64-entry, empty, non-200 or failed
 # fetch never replaces the current key set (the token under the current kid
 # keeps verifying and the cache still holds one key); exactly 64 entries do.
+# Stale keys are bounded: a set past its expiry plus max-stale, with every
+# refresh failing, refuses every token as keys_unavailable with the rest of
+# the refetch window as its retry-after, and the first successful refresh
+# recovers; a set never fetched is keys_unavailable too.
 # =============================================================================
 
 from std.pathlib import Path
@@ -33,6 +37,7 @@ from komira_http_auth.reasons import (
     REASON_HEADER_JSON,
     REASON_IAT,
     REASON_ISS,
+    REASON_KEYS_UNAVAILABLE,
     REASON_KEY_IN_HEADER,
     REASON_KID,
     REASON_MALFORMED_HEADER,
@@ -180,13 +185,15 @@ def test_unknown_kid_refetches_once_per_window_then_refuses() raises:
 def _failed_fetch_still_starts_the_window(var rig: _Rig, key: List[UInt8]) raises:
     """Fetch 1 (scripted by the caller) fails; fetch 2 publishes KID. The
     window runs from the failed ATTEMPT: a retry inside it would fetch KID
-    and verify at NOW+10, so the token must stay unknown until NOW+61."""
+    and verify at NOW+10, so the keys must stay unavailable until NOW+61."""
     rig.fetcher.add(200, String("max-age=3600"), rsa_jwks_json(key, KID))
     var tok = _tok(key, KID)
-    assert_equal(rig.verifier.verify(tok).reason, String(REASON_UNKNOWN_KID))
+    assert_equal(rig.verifier.verify(tok).reason, String(REASON_KEYS_UNAVAILABLE))
     assert_equal(rig.fetcher.fetch_count(), 1)
     rig.clock.set(NOW + 10)
-    assert_equal(rig.verifier.verify(tok).reason, String(REASON_UNKNOWN_KID))
+    var out = rig.verifier.verify(tok)
+    assert_equal(out.reason, String(REASON_KEYS_UNAVAILABLE))
+    assert_equal(out.retry_after_s, 50)
     assert_equal(rig.fetcher.fetch_count(), 1, "no retry inside the window")
     rig.clock.set(NOW + 61)
     assert_equal(rig.verifier.verify(tok).reason, String(REASON_OK))
@@ -428,13 +435,107 @@ def test_transport_failure_keeps_the_current_set() raises:
     assert_equal(rig.fetcher.fetch_count(), 2)
 
 
-def test_first_fetch_failing_is_invalid_token_not_a_pass() raises:
+def test_first_fetch_failing_is_keys_unavailable_not_a_pass() raises:
+    # No key set was ever fetched: the token cannot be judged, so it is
+    # refused as keys_unavailable (503 in the middleware), not as a bad
+    # token, and never passed.
     var key = _key()
     var rig = _Rig(_config())
     rig.fetcher.add_failure()
     var out = rig.verifier.verify(_tok(key, KID))
     assert_false(out.ok())
-    assert_equal(out.reason, String(REASON_UNKNOWN_KID))
+    assert_true(out.keys_unavailable())
+    assert_equal(out.reason, String(REASON_KEYS_UNAVAILABLE))
+    assert_equal(out.retry_after_s, 60)
+
+
+# =============================================================================
+# Stale keys are bounded by max-stale.
+# =============================================================================
+
+
+def _verify_now(mut rig: _Rig, key: List[UInt8]) raises -> VerifyOutcome:
+    """Verify a KID token issued at the rig's current time, so that only the
+    key set, never the token's own lifetime, decides these tests."""
+    var t = rig.clock.now_unix_seconds()
+    var tok = sign_rs256_compact(_header(KID), _claims(t, t + 600), key)
+    return rig.verifier.verify(tok)
+
+
+def test_stale_keys_are_used_within_max_stale_and_refused_past_it() raises:
+    # Fetch 1 at NOW publishes KID with max-age=0, so the set expires at NOW;
+    # every refresh after it fails. Max-stale is the 3600 s default.
+    var key = _key()
+    var rig = _Rig(_config())
+    rig.fetcher.add(200, String("max-age=0"), rsa_jwks_json(key, KID))
+    for _ in range(3):
+        rig.fetcher.add_failure()
+    assert_equal(_verify_now(rig, key).reason, String(REASON_OK))
+    # Stale, a refresh fails, but inside max-stale: still in use.
+    rig.clock.set(NOW + 61)
+    assert_equal(_verify_now(rig, key).reason, String(REASON_OK))
+    assert_equal(rig.fetcher.fetch_count(), 2)
+    # Exactly at expiry + max-stale: still in use (refused only past it).
+    rig.clock.set(NOW + 3600)
+    var at = _verify_now(rig, key)
+    assert_equal(at.reason, String(REASON_OK))
+    assert_equal(rig.fetcher.fetch_count(), 3)
+    # One second past it, inside the window (no fetch): fails closed.
+    rig.clock.set(NOW + 3601)
+    var past = _verify_now(rig, key)
+    assert_false(past.ok())
+    assert_true(past.keys_unavailable())
+    assert_equal(past.reason, String(REASON_KEYS_UNAVAILABLE))
+    assert_equal(past.retry_after_s, 59)
+    assert_equal(rig.fetcher.fetch_count(), 3)
+    # The window passes, the refresh fails again: still refused, and the
+    # retry-after is the whole new window.
+    rig.clock.set(NOW + 3660)
+    var again = _verify_now(rig, key)
+    assert_equal(again.reason, String(REASON_KEYS_UNAVAILABLE))
+    assert_equal(again.retry_after_s, 60)
+    assert_equal(rig.fetcher.fetch_count(), 4)
+    assert_equal(rig.verifier.key_count(), 1, "the set is kept, not used")
+
+
+def test_configured_max_stale_is_honoured_and_a_refresh_recovers() raises:
+    # Max-stale 100 s: a verifier that kept the 3600 s default would still
+    # accept at NOW+101.
+    var key = _key()
+    var rig = _Rig(_config().with_jwks_max_stale_s(Int64(100)))
+    rig.fetcher.add(200, String("max-age=0"), rsa_jwks_json(key, KID))
+    rig.fetcher.add_failure()
+    rig.fetcher.add(200, String("max-age=600"), rsa_jwks_json(key, KID))
+    assert_equal(_verify_now(rig, key).reason, String(REASON_OK))
+    rig.clock.set(NOW + 101)
+    var out = _verify_now(rig, key)
+    assert_equal(out.reason, String(REASON_KEYS_UNAVAILABLE))
+    assert_equal(out.retry_after_s, 60)
+    assert_equal(rig.fetcher.fetch_count(), 2)
+    # The next window's refresh succeeds: recovered, fresh for 600 s.
+    rig.clock.set(NOW + 161)
+    assert_equal(_verify_now(rig, key).reason, String(REASON_OK))
+    assert_equal(rig.fetcher.fetch_count(), 3)
+    # Expiry NOW+761 plus 100 s: in use at NOW+861, refused at NOW+862 (the
+    # refresh at NOW+861 has nothing scripted, so it fails).
+    rig.clock.set(NOW + 861)
+    assert_equal(_verify_now(rig, key).reason, String(REASON_OK))
+    assert_equal(rig.fetcher.fetch_count(), 4)
+    rig.clock.set(NOW + 862)
+    assert_equal(_verify_now(rig, key).reason, String(REASON_KEYS_UNAVAILABLE))
+
+
+def test_max_stale_zero_refuses_as_soon_as_a_refresh_fails() raises:
+    var key = _key()
+    var rig = _Rig(_config().with_jwks_max_stale_s(Int64(0)))
+    rig.fetcher.add(200, String("max-age=60"), rsa_jwks_json(key, KID))
+    rig.fetcher.add_failure()
+    var tok = _tok(key, KID)
+    assert_equal(rig.verifier.verify(tok).reason, String(REASON_OK))
+    rig.clock.set(NOW + 60)
+    assert_equal(rig.verifier.verify(tok).reason, String(REASON_OK))
+    rig.clock.set(NOW + 61)
+    assert_equal(rig.verifier.verify(tok).reason, String(REASON_KEYS_UNAVAILABLE))
 
 
 # =============================================================================

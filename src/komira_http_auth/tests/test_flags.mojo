@@ -5,8 +5,10 @@
 # Single-anchor flags and their defaults, the --trust-anchor form (exactly
 # one accepted; a second is refused), non-https JWKS URLs refused at startup
 # (by the flags and by the verifier constructor), RS256/JWT only, max TTL,
-# copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap, the
-# 1 us..60 s JWKS fetch timeout and its hand-over to the fetcher, an anchor
+# copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap and the
+# --leeway-s flag (wired into the claim check), --jwks-max-stale (units,
+# range, default 1 h), the 100 ms..60 s JWKS fetch timeout and its hand-over
+# to the fetcher, an anchor
 # built in code with an empty name, issuer or audience, and the --name=value
 # syntax.
 # =============================================================================
@@ -180,10 +182,11 @@ def test_defaults_and_explicit_defaults() raises:
 
 def test_flag_names_cover_the_documented_set() raises:
     var n = bearer_jwt_flag_names()
-    assert_equal(len(n), 8)
+    assert_equal(len(n), 10)
     var want = _args(
         "--issuer", "--audience", "--jwks-url", "--jwks-alg",
         "--accept-typ", "--max-ttl", "--copy-claim", "--trust-anchor",
+        "--leeway-s", "--jwks-max-stale",
     )
     for i in range(len(want)):
         assert_equal(n[i], want[i])
@@ -284,6 +287,12 @@ def test_jwks_fetch_timeout_is_capped_and_reaches_the_fetcher() raises:
     # A fetch stalls a serving worker, so the bound has a ceiling.
     _verifier_refused(_config().with_jwks_fetch_timeout_us(0), "fetch timeout")
     _verifier_refused(_config().with_jwks_fetch_timeout_us(-1), "fetch timeout")
+    # The floor is 100 ms: below it a TLS handshake cannot finish and every
+    # refresh would fail.
+    _verifier_refused(_config().with_jwks_fetch_timeout_us(1), "100 ms..60")
+    _verifier_refused(
+        _config().with_jwks_fetch_timeout_us(99_999), "fetch timeout"
+    )
     _verifier_refused(
         _config().with_jwks_fetch_timeout_us(60_000_001), "fetch timeout"
     )
@@ -304,10 +313,120 @@ def test_jwks_fetch_timeout_is_capped_and_reaches_the_fetcher() raises:
         FixedAuthClock(NOW),
     )
     assert_equal(f.timeout_us(), 60_000_000)
+    _ = Verifier(
+        _config().with_jwks_fetch_timeout_us(100_000),
+        f.share(),
+        FixedAuthClock(NOW),
+    )
+    assert_equal(f.timeout_us(), 100_000)
     # The default config hands over the 5 s default.
     f.set_timeout_us(7)
     _ = Verifier(_config(), f.share(), FixedAuthClock(NOW))
     assert_equal(f.timeout_us(), 5_000_000)
+
+
+def test_leeway_flag() raises:
+    # Absent: the 30 s default.
+    assert_equal(parse_bearer_jwt_flags(_base()).leeway_s, Int64(30))
+    # Both ends of the range, with either anchor form.
+    assert_equal(
+        parse_bearer_jwt_flags(_plus(_base(), String("--leeway-s=0"))).leeway_s,
+        Int64(0),
+    )
+    assert_equal(
+        parse_bearer_jwt_flags(_plus(_base(), String("--leeway-s=60"))).leeway_s,
+        Int64(60),
+    )
+    assert_equal(
+        parse_bearer_jwt_flags(
+            _args(_anchor_flag(String("a")), String("--leeway-s=5"))
+        ).leeway_s,
+        Int64(5),
+    )
+    # Out of range, not a number, twice.
+    _refused(_plus(_base(), String("--leeway-s=61")), "0..60")
+    _refused(_plus(_base(), String("--leeway-s=3600")), "0..60")
+    _refused(_plus(_base(), String("--leeway-s=-1")), "non-negative integer")
+    _refused(_plus(_base(), String("--leeway-s=30s")), "non-negative integer")
+    _refused(_plus(_base(), String("--leeway-s=1234567890")), "non-negative")
+    _refused(
+        _plus(_plus(_base(), String("--leeway-s=1")), String("--leeway-s=2")),
+        "more than once",
+    )
+
+
+def test_leeway_flag_reaches_the_claim_check() raises:
+    # A verifier built from `--leeway-s=0` refuses a token at its exp, which
+    # the 30 s default accepts: the parsed value is the one the claim check
+    # uses.
+    var key = _key()
+    var tok = sign_rs256_compact(_header(KID), _claims(NOW - 600, NOW), key)
+    var dflt = _Rig(parse_bearer_jwt_flags(_base()))
+    dflt.fetcher.add(200, rsa_jwks_json(key, KID))
+    assert_equal(dflt.verifier.verify(tok).reason, String(REASON_OK))
+    var zero = _Rig(parse_bearer_jwt_flags(_plus(_base(), String("--leeway-s=0"))))
+    zero.fetcher.add(200, rsa_jwks_json(key, KID))
+    assert_equal(zero.verifier.verify(tok).reason, String(REASON_EXPIRED))
+
+
+def test_jwks_max_stale_flag() raises:
+    # Absent: one hour.
+    assert_equal(parse_bearer_jwt_flags(_base()).jwks_max_stale_s, Int64(3600))
+    assert_equal(
+        BearerJwtConfig(
+            TrustAnchor.rs256(String("t"), ISSUER, AUDIENCE, JWKS_URL)
+        ).jwks_max_stale_s,
+        Int64(3600),
+    )
+    # Each unit, and both ends of the range.
+    var cases = List[String]()
+    var want = List[Int64]()
+    cases.append(String("90s"))
+    want.append(Int64(90))
+    cases.append(String("30m"))
+    want.append(Int64(1800))
+    cases.append(String("2h"))
+    want.append(Int64(7200))
+    cases.append(String("0s"))
+    want.append(Int64(0))
+    cases.append(String("24h"))
+    want.append(Int64(86400))
+    cases.append(String("86400s"))
+    want.append(Int64(86400))
+    for i in range(len(cases)):
+        var cfg = parse_bearer_jwt_flags(
+            _plus(_base(), String("--jwks-max-stale=") + cases[i])
+        )
+        assert_equal(cfg.jwks_max_stale_s, want[i], cases[i])
+    # Out of range.
+    _refused(_plus(_base(), String("--jwks-max-stale=25h")), "0..86400")
+    _refused(_plus(_base(), String("--jwks-max-stale=86401s")), "0..86400")
+    _refused(_plus(_base(), String("--jwks-max-stale=999999999h")), "0..86400")
+    # Not a duration: no unit, another unit, a sign, no digits, too long.
+    var bad = List[String]()
+    bad.append(String("3600"))
+    bad.append(String("1d"))
+    bad.append(String("1H"))
+    bad.append(String("-1s"))
+    bad.append(String("h"))
+    bad.append(String("1.5h"))
+    bad.append(String("1h30m"))
+    bad.append(String("1234567890s"))
+    for i in range(len(bad)):
+        _refused(
+            _plus(_base(), String("--jwks-max-stale=") + bad[i]),
+            "is not a duration",
+        )
+    _refused(
+        _plus(
+            _plus(_base(), String("--jwks-max-stale=1h")),
+            String("--jwks-max-stale=2h"),
+        ),
+        "more than once",
+    )
+    # The setter's range is the same.
+    _verifier_refused(_config().with_jwks_max_stale_s(Int64(-1)), "max-stale")
+    _verifier_refused(_config().with_jwks_max_stale_s(Int64(86401)), "max-stale")
 
 
 def _anchor_refused(var a: TrustAnchor, needle: String) raises:

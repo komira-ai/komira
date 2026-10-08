@@ -13,8 +13,11 @@
 #   2. the JOSE header gate (token.mojo): alg, jwk/jku/x5u/x5c, crit, typ,
 #      kid, repeated keys. Nothing has been fetched or computed yet;
 #   3. the key set (jwks_cache.mojo): refreshed if empty, stale, or missing
-#      the token's kid, at most once per refetch window; a kid still missing
-#      is refused here;
+#      the token's kid, at most once per refetch window. A set that is not
+#      usable (never fetched, or past its freshness plus max-stale with every
+#      refresh failing) refuses the token as REASON_KEYS_UNAVAILABLE, an
+#      outcome that is no verdict on the token (`keys_unavailable()`, with
+#      `retry_after_s`); a kid still missing is refused here;
 #   4. the signature: komira_crypto's `verify_rs256_jws`, the one RS256 JWS
 #      verifier in the repository. It repeats the alg/typ/crit/kid checks over
 #      its own reader, so a token passes only if both readers agree;
@@ -42,6 +45,7 @@ from komira_http_auth.jwks_cache import JwksCache
 from komira_http_auth.jwks_fetch import JwksFetcher
 from komira_http_auth.reasons import (
     REASON_INTERNAL,
+    REASON_KEYS_UNAVAILABLE,
     REASON_MALFORMED_TOKEN,
     REASON_OK,
     REASON_SIGNATURE,
@@ -52,21 +56,41 @@ from komira_http_auth.token import check_jose_header, split_compact_jws
 
 struct VerifyOutcome(Copyable, Movable, Deinitable):
     """A verified principal (and `reason` REASON_OK), or no principal and the
-    reason code of the check that refused the token."""
+    reason code of the check that refused the token. A refusal with reason
+    REASON_KEYS_UNAVAILABLE says nothing about the token: the verifier had no
+    usable keys, and `retry_after_s` is when it may have them again."""
 
     var principal: Optional[Principal]
     var reason: String
+    var retry_after_s: Int
 
     def __init__(out self, var principal: Principal):
         self.principal = Optional[Principal](principal^)
         self.reason = String(REASON_OK)
+        self.retry_after_s = 0
 
     def __init__(out self, *, refused: String):
         self.principal = Optional[Principal]()
         self.reason = refused
+        self.retry_after_s = 0
+
+    def __init__(out self, *, keys_unavailable_retry_after_s: Int):
+        """No usable keys; try again in `keys_unavailable_retry_after_s`
+        seconds (at least 1 is reported)."""
+        self.principal = Optional[Principal]()
+        self.reason = String(REASON_KEYS_UNAVAILABLE)
+        self.retry_after_s = (
+            keys_unavailable_retry_after_s if keys_unavailable_retry_after_s
+            >= 1 else 1
+        )
 
     def ok(self) -> Bool:
         return Bool(self.principal)
+
+    def keys_unavailable(self) -> Bool:
+        """Refused because no usable key set exists, not because of the
+        token (the middleware answers 503)."""
+        return not self.principal and self.reason == REASON_KEYS_UNAVAILABLE
 
 
 trait BearerVerifier(Movable, Deinitable):
@@ -104,6 +128,7 @@ struct Rs256JwksVerifier[F: JwksFetcher, C: AuthClock](
             config.anchor.jwks_url,
             config.jwks_refetch_window_s,
             config.jwks_default_max_age_s,
+            config.jwks_max_stale_s,
         )
         self._clock = clock^
 
@@ -129,6 +154,10 @@ struct Rs256JwksVerifier[F: JwksFetcher, C: AuthClock](
 
         var now = self._clock.now_unix_seconds()
         self._cache.ensure(hv.kid, now)
+        if not self._cache.keys_usable(now):
+            return VerifyOutcome(
+                keys_unavailable_retry_after_s=self._cache.retry_after_s(now)
+            )
         if not self._cache.has_kid(hv.kid):
             return VerifyOutcome(refused=REASON_UNKNOWN_KID)
 

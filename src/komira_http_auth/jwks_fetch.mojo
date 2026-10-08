@@ -28,6 +28,9 @@
 #     TLS handshake (`TlsConnector.set_handshake_deadline_us`, timed from the
 #     end of the TCP connect) and the request (komira_http_client's
 #     `request_timeout_us`, one wall-clock deadline armed at send-start).
+#     Tests read both bounds through `connector_for` and `client_config`;
+#     that fetch() dials through connector_for/client_config is checked by
+#     review.
 #
 # WORST CASE, stated honestly. A fetch runs on the serving worker's
 # event-loop thread and stalls that worker for its whole duration. It is the

@@ -15,6 +15,13 @@
 #   --max-ttl=SECONDS     the longest `exp - iat` accepted (default 3600)
 #   --copy-claim=NAME     a payload claim copied into the principal (repeated)
 #   --trust-anchor='name=N,issuer=I,audience=A,jwks_url=U[,alg=RS256][,typ=JWT][,max_ttl=S]'
+#   --leeway-s=SECONDS    clock skew forgiven on exp/iat/nbf, 0..60 (default 30)
+#   --jwks-max-stale=DURATION
+#                         how long past its freshness the last good key set
+#                         stays in use while every refresh fails: digits and
+#                         one unit, `s`, `m` or `h` (`90s`, `30m`, `1h`);
+#                         0s..24h (default 1h). Past it, every token is
+#                         refused with 503 until a refresh succeeds.
 #
 # The single flags (--issuer, --audience, --jwks-url, --jwks-alg,
 # --accept-typ, --max-ttl) are shorthand for one trust anchor named
@@ -26,11 +33,12 @@
 # returns several anchors: `BearerJwtConfig`'s single `anchor` field becomes a
 # list, which is a public API change. Dispatch by `iss` also requires the
 # anchors to have distinct issuers, so a repeated issuer will be refused at
-# startup. `--copy-claim` goes with either form.
+# startup. `--copy-claim`, `--leeway-s` and `--jwks-max-stale` go with
+# either form.
 #
-# The clock leeway and the JWKS settings (refetch window, default max-age,
-# fetch timeout) have no flags; an embedder sets them with `BearerJwtConfig`'s
-# `with_*` setters.
+# The other JWKS settings (refetch window, default max-age, fetch timeout)
+# have no flags; an embedder sets them with `BearerJwtConfig`'s `with_*`
+# setters.
 #
 # A `--trust-anchor` value is comma-separated `key=value` pairs; a value is
 # everything after the first `=`, so it cannot hold a comma. An unknown key, a
@@ -57,6 +65,8 @@ comptime FLAG_ACCEPT_TYP: String = "--accept-typ"
 comptime FLAG_MAX_TTL: String = "--max-ttl"
 comptime FLAG_COPY_CLAIM: String = "--copy-claim"
 comptime FLAG_TRUST_ANCHOR: String = "--trust-anchor"
+comptime FLAG_LEEWAY_S: String = "--leeway-s"
+comptime FLAG_JWKS_MAX_STALE: String = "--jwks-max-stale"
 
 
 def bearer_jwt_flag_names() -> List[String]:
@@ -70,6 +80,8 @@ def bearer_jwt_flag_names() -> List[String]:
     out.append(FLAG_MAX_TTL)
     out.append(FLAG_COPY_CLAIM)
     out.append(FLAG_TRUST_ANCHOR)
+    out.append(FLAG_LEEWAY_S)
+    out.append(FLAG_JWKS_MAX_STALE)
     return out^
 
 
@@ -162,6 +174,57 @@ def _parse_seconds(what: String, text: String) raises -> Int64:
     if n <= Int64(0):
         raise Error(String("komira_http_auth: ") + what + String(" must be at least 1"))
     return n
+
+
+def _parse_count(what: String, text: String) raises -> Int64:
+    """A non-negative decimal integer of 1..9 digits."""
+    var b = text.as_bytes()
+    if len(b) == 0 or len(b) > 9:
+        raise Error(
+            String("komira_http_auth: ")
+            + what
+            + String(" is not a non-negative integer")
+        )
+    var n = Int64(0)
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c < 0x30 or c > 0x39:
+            raise Error(
+                String("komira_http_auth: ")
+                + what
+                + String(" is not a non-negative integer")
+            )
+        n = n * Int64(10) + Int64(c - 0x30)
+    return n
+
+
+def _parse_duration_s(what: String, text: String) raises -> Int64:
+    """`<digits><unit>`, the unit one of `s`, `m`, `h`, in seconds. The range
+    is `BearerJwtConfig.validate`'s."""
+    var b = text.as_bytes()
+    var bad = (
+        String("komira_http_auth: ")
+        + what
+        + String(" is not a duration (digits and one unit: s, m or h; 90s, 30m, 1h)")
+    )
+    if len(b) < 2:
+        raise Error(bad)
+    var unit = b[len(b) - 1]
+    var scale = Int64(0)
+    if unit == UInt8(ord("s")):
+        scale = Int64(1)
+    elif unit == UInt8(ord("m")):
+        scale = Int64(60)
+    elif unit == UInt8(ord("h")):
+        scale = Int64(3600)
+    else:
+        raise Error(bad)
+    if len(b) - 1 > 9:
+        raise Error(bad)
+    for i in range(len(b) - 1):
+        if b[i] < UInt8(0x30) or b[i] > UInt8(0x39):
+            raise Error(bad)
+    return _parse_count(what, String(text[byte=0 : len(b) - 1])) * scale
 
 
 def parse_trust_anchor(spec: String) raises -> TrustAnchor:
@@ -317,5 +380,13 @@ def parse_bearer_jwt_flags(args: List[String]) raises -> BearerJwtConfig:
     var claims = f.all(FLAG_COPY_CLAIM)
     for i in range(len(claims)):
         cfg.copy_claims.append(claims[i])
+    var leeway = f.single(FLAG_LEEWAY_S)
+    if leeway:
+        cfg.leeway_s = _parse_count(FLAG_LEEWAY_S, leeway.value())
+    var max_stale = f.single(FLAG_JWKS_MAX_STALE)
+    if max_stale:
+        cfg.jwks_max_stale_s = _parse_duration_s(
+            FLAG_JWKS_MAX_STALE, max_stale.value()
+        )
     cfg.validate()
     return cfg^

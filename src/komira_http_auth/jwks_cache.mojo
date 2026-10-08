@@ -12,7 +12,8 @@
 # MAX-AGE. The `Cache-Control` of a successful fetch sets how long the set is
 # fresh: the smallest `max-age=N` directive, clamped to 0..86400; `no-store`
 # or `no-cache` mean 0. With neither, the configured default (300 s) applies.
-# A stale set stays in use until a refresh succeeds.
+# A stale set stays in use while refreshes fail, up to the max-stale bound
+# below.
 #
 # WHAT MAY REPLACE THE SET. A fetched document replaces the current keys only
 # if ALL of these hold; otherwise the current set is kept, unchanged:
@@ -40,11 +41,20 @@
 # accident. One unreadable RSA entry therefore refuses the whole document; the
 # last good set stays.
 #
-# STALE KEYS. A failed refresh keeps the last good set with no age limit, so
-# an attacker who can block the HTTPS fetch (no certificate needed) keeps a
-# key the issuer has withdrawn trusted for as long as the block lasts. A hard
-# ceiling (refuse every token once the set is, say, 24 h past its max-age) is
-# an open policy question for this package's spec; it is not implemented.
+# STALE KEYS. A failed refresh keeps the last good set, but only for a
+# bounded time: `keys_usable(now)` is true while `now` is at most the set's
+# expiry (fetch time + max-age) plus the configured max-stale (default 1 h,
+# 0..86400 s). Past that, and with no refresh succeeding, the verifier refuses
+# every token as REASON_KEYS_UNAVAILABLE, which the middleware answers 503
+# with `Retry-After`. Without the bound, an attacker who can block the HTTPS
+# fetch (no certificate needed) would keep a key the issuer has withdrawn
+# trusted for as long as the block lasted; with it, the exposure ends
+# max-stale after the set went stale. A set never fetched is unusable too.
+# The first successful refresh makes the set usable again.
+#
+# RETRY-AFTER. `retry_after_s(now)` is the time left until the next refresh
+# may start (the rest of the refetch window, counted from the last attempt),
+# at least 1 s: before then no request can make the keys usable again.
 #
 # Each verifier owns its cache; N serving workers make N fetches.
 # =============================================================================
@@ -185,6 +195,7 @@ struct JwksCache[F: JwksFetcher](Movable, Deinitable):
     var _last_attempt_s: Int64
     var _window_s: Int64
     var _default_max_age_s: Int64
+    var _max_stale_s: Int64
 
     def __init__(
         out self,
@@ -192,6 +203,7 @@ struct JwksCache[F: JwksFetcher](Movable, Deinitable):
         url: String,
         refetch_window_s: Int64,
         default_max_age_s: Int64,
+        max_stale_s: Int64,
     ):
         self._fetcher = fetcher^
         self._url = url
@@ -201,6 +213,7 @@ struct JwksCache[F: JwksFetcher](Movable, Deinitable):
         self._last_attempt_s = Int64(0)
         self._window_s = refetch_window_s
         self._default_max_age_s = default_max_age_s
+        self._max_stale_s = max_stale_s
 
     def has_kid(self, kid: String) -> Bool:
         for i in range(len(self._keys)):
@@ -214,6 +227,24 @@ struct JwksCache[F: JwksFetcher](Movable, Deinitable):
     def key_set(ref self) -> ref [self._keys] List[RsaJwk]:
         """The current keys (possibly empty)."""
         return self._keys
+
+    def keys_usable(self, now_s: Int64) -> Bool:
+        """Whether the current set may verify a token at `now_s`: there is
+        one, and `now_s` is at most its expiry plus max-stale (module
+        header, STALE KEYS)."""
+        if len(self._keys) == 0:
+            return False
+        return now_s - self._expires_at_s <= self._max_stale_s
+
+    def retry_after_s(self, now_s: Int64) -> Int:
+        """Seconds until the next refresh may start, at least 1 (module
+        header, RETRY-AFTER)."""
+        if self._may_attempt(now_s):
+            return 1
+        var left = self._window_s - (now_s - self._last_attempt_s)
+        if left < Int64(1):
+            return 1
+        return Int(left)
 
     def _may_attempt(self, now_s: Int64) -> Bool:
         if not self._attempted:

@@ -20,8 +20,11 @@
 #     this slice; refusing it here makes that visible at startup;
 #   * a max TTL outside 1..86400 seconds;
 #   * a clock leeway outside 0..60 seconds;
-#   * a JWKS fetch timeout outside 1 us..60 s (the fetch stalls a serving
-#     worker: jwks_fetch.mojo header);
+#   * a JWKS fetch timeout outside 100 ms..60 s (the fetch stalls a serving
+#     worker: jwks_fetch.mojo header; below 100 ms a TLS handshake to a
+#     distant issuer cannot finish, so every refresh would fail);
+#   * a JWKS max-stale outside 0..86400 seconds (how long past its freshness
+#     a key set stays in use while every refresh fails: jwks_cache.mojo);
 #   * a copy-claim name that is empty, repeated, or one of sub/iss/aud (the
 #     principal sets those itself).
 #
@@ -51,7 +54,13 @@ comptime DEFAULT_JWKS_MAX_AGE_S: Int64 = 300
 comptime MAX_JWKS_MAX_AGE_S: Int64 = 86400
 comptime DEFAULT_JWKS_REFETCH_WINDOW_S: Int64 = 60
 comptime DEFAULT_JWKS_FETCH_TIMEOUT_US: Int = 5_000_000
+comptime MIN_JWKS_FETCH_TIMEOUT_US: Int = 100_000
 comptime MAX_JWKS_FETCH_TIMEOUT_US: Int = 60_000_000
+
+# How long past its freshness the last good key set stays in use while every
+# refresh fails, and the cap (jwks_cache.mojo, STALE KEYS).
+comptime DEFAULT_JWKS_MAX_STALE_S: Int64 = 3600
+comptime MAX_JWKS_MAX_STALE_S: Int64 = 86400
 
 
 @fieldwise_init
@@ -159,6 +168,7 @@ struct BearerJwtConfig(Copyable, Movable, Deinitable):
     var jwks_default_max_age_s: Int64
     var jwks_refetch_window_s: Int64
     var jwks_fetch_timeout_us: Int
+    var jwks_max_stale_s: Int64
 
     def __init__(out self, var anchor: TrustAnchor):
         self.anchor = anchor^
@@ -167,6 +177,7 @@ struct BearerJwtConfig(Copyable, Movable, Deinitable):
         self.jwks_default_max_age_s = DEFAULT_JWKS_MAX_AGE_S
         self.jwks_refetch_window_s = DEFAULT_JWKS_REFETCH_WINDOW_S
         self.jwks_fetch_timeout_us = DEFAULT_JWKS_FETCH_TIMEOUT_US
+        self.jwks_max_stale_s = DEFAULT_JWKS_MAX_STALE_S
 
     def with_copy_claim(var self, name: String) -> BearerJwtConfig:
         self.copy_claims.append(name)
@@ -184,6 +195,13 @@ struct BearerJwtConfig(Copyable, Movable, Deinitable):
         """The JWKS fetch timeout: the bound on the TLS handshake and on the
         request, each (jwks_fetch.mojo header has the whole worst case)."""
         self.jwks_fetch_timeout_us = micros
+        return self^
+
+    def with_jwks_max_stale_s(var self, seconds: Int64) -> BearerJwtConfig:
+        """How long past its freshness the last good key set stays in use
+        while every refresh fails (0..86400 s, default 3600); after that every
+        token is refused with 503 until a refresh succeeds."""
+        self.jwks_max_stale_s = seconds
         return self^
 
     def with_jwks_default_max_age_s(
@@ -217,12 +235,22 @@ struct BearerJwtConfig(Copyable, Movable, Deinitable):
                 )
             )
         if (
-            self.jwks_fetch_timeout_us < 1
+            self.jwks_fetch_timeout_us < MIN_JWKS_FETCH_TIMEOUT_US
             or self.jwks_fetch_timeout_us > MAX_JWKS_FETCH_TIMEOUT_US
         ):
             raise Error(
                 String(
-                    "komira_http_auth: the JWKS fetch timeout must be 1 us..60"
+                    "komira_http_auth: the JWKS fetch timeout must be 100 ms..60"
+                    " seconds"
+                )
+            )
+        if (
+            self.jwks_max_stale_s < Int64(0)
+            or self.jwks_max_stale_s > MAX_JWKS_MAX_STALE_S
+        ):
+            raise Error(
+                String(
+                    "komira_http_auth: the JWKS max-stale must be 0..86400"
                     " seconds"
                 )
             )
