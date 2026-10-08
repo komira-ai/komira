@@ -282,6 +282,7 @@ dependency order is the order of the rows.
 |---|---|
 | [`komira_calendar_proto`](../src/komira_calendar_proto/) | the resources of a simple calendar service's JSON API, `komira.calendar.v1`, generated: `Calendar`, `Event` (all-day or timed in an IANA zone), a structured `Recurrence` rule (not RRULE text), `Reminder`, `OccurrenceOverride` and the `ErrorResponse` envelope. |
 | [`komira_calendar`](../src/komira_calendar/) | a simple calendar's model and validation over `komira_calendar_proto`: `check_calendar`, `check_event` (timing, the recurrence rule, removed occurrences, reminders) and `check_override`, each refusal a stable code, a JSON field path and a sentence; the local date and date-time text forms. No zone rules, no expansion, no store. |
+| [`komira_managed_mail_proto`](../src/komira_managed_mail_proto/) | the managed mail API, `komira.managed_mail.v1`, generated: the messages of a simple mail app (mailboxes, emails in a fixed set of folders, their parts, threads, sending through a queue of submissions, raw and mbox export), and its two HTTP contracts with a submission service, inbound delivery (the raw message as the body, an `InboundEnvelope` in a header field) and HTTP submission (`RawMessageRequest`), carried as proto3 canonical JSON. Not IMAP or JMAP. `mail_service.proto` lists the methods and their HTTP routes as `.proto` source only. |
 
 ### CI and deploy (`kci`)
 
