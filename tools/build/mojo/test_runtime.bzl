@@ -81,3 +81,22 @@ def test_root(ctx, path, exe, data):
         files["share/" + dest] = a
     root = ctx.actions.copied_dir(path, files)
     return root, root.project("bin/" + name)
+
+def test_key(ctx, t):
+    """The package-relative path of test source `t`: its test_data key."""
+    p = t.short_path
+    pkg = ctx.label.package
+    if pkg and p.startswith(pkg + "/"):
+        p = p[len(pkg) + 1:]
+    return p
+
+def admit_test_data(ctx):
+    """{test_srcs key: {dest: artifact}} for mojo_library's `test_data`."""
+    keys = [test_key(ctx, t) for t in ctx.attrs.test_srcs]
+    where = "{}: test_data".format(ctx.label.raw_target())
+    out = {}
+    for entry, data in ctx.attrs.test_data.items():
+        if entry not in keys:
+            fail("{}[{}]: not a test_srcs entry (entries: {}). Data keyed to no test is staged for nothing.".format(where, repr(entry), ", ".join(keys)))
+        out[entry] = data_map(ctx, "{}[{}]".format(where, repr(entry)), data)
+    return out
