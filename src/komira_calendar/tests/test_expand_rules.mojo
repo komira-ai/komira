@@ -338,6 +338,42 @@ def test_series_span() raises:
     assert_equal(_span(mo_tu_th).last_end, mo_tu_th_all[len(mo_tu_th_all) - 1].end)
 
 
+def _span_matches_expand(e: Event, first: String, last_end: String) raises:
+    """The span is first to last_end, and last_end is the end of the last
+    occurrence `expand` produces."""
+    assert_true(_span(e) == SeriesSpan(_at(first), _at(last_end)))
+    var occurrences = _everything(e)
+    assert_equal(_span(e).last_end, occurrences[len(occurrences) - 1].end)
+
+
+def test_series_span_period_edges() raises:
+    # An until on the first day of a period that picks that day: the last
+    # occurrence is the until itself. Catches a search back that starts one
+    # period early when the until is the period's first day (a Monday, the
+    # 1st of a month, 1 January).
+    var mondays = _timed(
+        "2026-11-02T09:00:00", 3600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"],"until":"2026-11-23"}'
+    )
+    _span_matches_expand(mondays, "2026-11-02T09:00:00", "2026-11-23T10:00:00")
+    var firsts = _timed(
+        "2026-11-01T08:00:00", 1800, '{"freq":"MONTHLY","interval":1,"monthDay":1,"until":"2027-03-01"}'
+    )
+    _span_matches_expand(firsts, "2026-11-01T08:00:00", "2027-03-01T08:30:00")
+    var new_year = _all_day("2027-01-01", 1, '{"freq":"YEARLY","interval":1,"until":"2030-01-01"}')
+    _span_matches_expand(new_year, "2027-01-01T00:00:00", "2030-01-02T00:00:00")
+    # An until inside period 0: the last occurrence is in period 0. Catches a
+    # search back that stops before period 0 (no last day, and the span
+    # aborts on the missing value).
+    var one_week = _timed(
+        "2026-11-02T09:00:00",
+        3600,
+        '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY","WEDNESDAY","FRIDAY"],"until":"2026-11-06"}',
+    )
+    _span_matches_expand(one_week, "2026-11-02T09:00:00", "2026-11-06T10:00:00")
+    var start_only = _timed("2026-11-02T09:00:00", 3600, '{"freq":"DAILY","interval":1,"until":"2026-11-02"}')
+    _span_matches_expand(start_only, "2026-11-02T09:00:00", "2026-11-02T10:00:00")
+
+
 def _refuses(e: Event, window_start: Int, window_end: Int, message: String) raises:
     try:
         _ = expand(e, window_start, window_end)
@@ -396,5 +432,6 @@ def main() raises:
     test_all_day_exdates()
     test_single_event()
     test_series_span()
+    test_series_span_period_edges()
     test_refusals()
     print("ALL EXPANSION RULE TESTS PASSED")
