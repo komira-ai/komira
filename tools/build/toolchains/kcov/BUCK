@@ -6,6 +6,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_test")
 load(":defs.bzl", "kcov_check", "kcov_check_cases", "kcov_dist", "kcov_identity", "kcov_same", "kcov_tool")
 load(":identity.bzl", "KCOV_BIN_SHA256", "KCOV_USAGE_LINE")
 
@@ -32,16 +33,35 @@ _PIN = {r: ":" + pinned_kwargs(_ROW, r)["name"] for r in ["kcov_bzip2", "kcov_el
 # ---- Built by remote actions -------------------------------------------------
 
 # The payload tar of a .conda package: the pinned busybox reads neither the
-# zip64 fields of its zip nor the zstd of its payload.
-zig_exe(
+# zip64 fields of its zip nor the zstd of its payload. Published behind its
+# unit tests (conda_payload_test.rs).
+rust_binary(
     name = "conda_payload",
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
-    src = "conda_payload.zig",
-    busybox = "komira//tools/build/toolchains:busybox",
+    srcs = ["conda_payload.rs"],
+    crate_root = "conda_payload.rs",
+    deps = ["komira//third_party/rust:ruzstd"],
+    tests = [":conda_payload_unit"],
     # llvm_branch unpacks its conda packages with it too.
     visibility = ["komira//tools/build/toolchains/llvm_branch:"],
-    zig = "komira//tools/build/toolchains:zig",
+)
+
+# conda_payload's inline tests: the zip walk's messages and the zstd checks.
+rust_test(
+    name = "conda_payload_unit",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    srcs = [
+        "conda_payload.rs",
+        "conda_payload_test.rs",
+    ],
+    crate_root = "conda_payload.rs",
+    crate_name = "conda_payload",
+    deps = [
+        "komira//third_party/rust:ruzstd",
+        "komira//third_party/rust:twox-hash",
+    ],
 )
 
 # DT_RUNPATH -> DT_RPATH, which zig 0.12 cannot link into an executable.

@@ -9,7 +9,7 @@
 # member that is missing or empty, a link that leaves its package, or a
 # package named by no `<name>=`.
 # The pinned busybox reads neither the zip64 fields nor the zstd payload of a
-# `.conda`, so conda_payload (toolchains/kcov/conda_payload.zig) writes the
+# `.conda`, so conda_payload (toolchains/kcov/conda_payload.rs) writes the
 # payload tar first; busybox tar then extracts only the members asked for.
 # Every pipeline fails when any of its stages fails (pipefail).
 set -eu

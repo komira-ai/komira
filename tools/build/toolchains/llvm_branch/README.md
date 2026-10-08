@@ -138,7 +138,7 @@ names a path that exists nowhere.
 ## How it is unpacked
 
 [`unpack.sh`](unpack.sh) is one action per directory. For each package,
-`conda_payload` ([`../kcov/conda_payload.zig`](../kcov/conda_payload.zig))
+`conda_payload` ([`../kcov/conda_payload.rs`](../kcov/conda_payload.rs))
 writes the payload tar, and busybox `tar` extracts only the members named
 in `BUCK`. A member that is a link in its package (most library sonames)
 is followed within the package, and the file it resolves to is written; a

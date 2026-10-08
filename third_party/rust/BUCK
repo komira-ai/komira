@@ -95,6 +95,21 @@ crates_io_library(
     deps = [":proc-macro2"],
 )
 
+# The zstd decoder of tools/build/toolchains/kcov:conda_payload, with the
+# xxhash64 its frame checksums need. Features are the ones Cargo resolves for
+# `ruzstd` with default features (twox-hash with only `xxhash64`, as ruzstd
+# asks for it). ruzstd 0.8.1 is the last release that builds with rustc 1.85
+# (0.8.2 calls `is_multiple_of`, stable in 1.87). Neither has a build script.
+crates_io_library(
+    name = "ruzstd",
+    version = "0.8.1",
+    sha256 = "3640bec8aad418d7d03c72ea2de10d5c646a598f9883c7babc160d91e3c1b26c",
+    size = 97738,
+    edition = "2018",
+    features = ["default", "hash", "std"],
+    deps = [":twox-hash"],
+)
+
 crates_io_library(
     name = "syn",
     version = "2.0.117",
@@ -106,6 +121,14 @@ crates_io_library(
         ":quote",
         ":unicode-ident",
     ],
+)
+
+crates_io_library(
+    name = "twox-hash",
+    version = "2.1.5",
+    sha256 = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2",
+    size = 38461,
+    features = ["xxhash64"],
 )
 
 crates_io_library(
