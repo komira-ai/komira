@@ -902,10 +902,12 @@ struct TlsConnector[
         the refusal sees them.
 
         Bytes the peer sent that are still in the kernel socket buffer are
-        read by s2n as the start of the server handshake; they are not a
-        ServerHello, so the upgrade raises (a handshake failure, or the
-        wall-clock deadline when the bogus record header announces more
-        bytes than arrive). No session is established over them.
+        read by s2n as TLS records. A non-TLS byte sequence fails the
+        handshake, or runs into the wall-clock deadline when its bogus
+        record header announces more bytes than arrive. A well-formed
+        record of a type s2n does not handle during the handshake is
+        discarded and the handshake goes on, so the upgrade can succeed.
+        Either way none of those bytes is ever served as application data.
 
         No session ticket is looked up or stored: the session cache is keyed
         for HTTPS dials.
