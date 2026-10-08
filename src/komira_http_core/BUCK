@@ -36,9 +36,11 @@ mojo_library(
         "tests/test_L1_tls_handshake.mojo",
         "tests/test_L1_tls_handshake_departed_peer_fails_fast.mojo",
         "tests/test_L1_tls_init_process_local_not_env_inherited.mojo",
+        "tests/test_L1_tls_init_refused.mojo",
         "tests/test_L1_tls_key_update.mojo",
         "tests/test_L1_tls_partial_send_resumption.mojo",
         "tests/test_L1_tls_reactor_mapping.mojo",
+        "tests/test_L1_tls_s2n_shim_coverage.mojo",
         "tests/test_L1_tls_session_resumption.mojo",
         "tests/test_L1_tls_smoke.mojo",
         "tests/test_L2_chunked_response_encoding.mojo",
@@ -107,6 +109,10 @@ mojo_library(
             "tests/fixtures/tls/leaf_cert.pem",
             "tests/fixtures/tls/leaf_key.pem",
         ],
+        "tests/test_L1_tls_init_refused.mojo": [
+            "tests/fixtures/tls/leaf_cert.pem",
+            "tests/fixtures/tls/leaf_key.pem",
+        ],
         "tests/test_L1_tls_key_update.mojo": [
             "tests/fixtures/tls/leaf_cert.pem",
             "tests/fixtures/tls/leaf_key.pem",
@@ -114,6 +120,11 @@ mojo_library(
         "tests/test_L1_tls_partial_send_resumption.mojo": [
             "tests/fixtures/tls/leaf_cert.pem",
             "tests/fixtures/tls/leaf_key.pem",
+        ],
+        "tests/test_L1_tls_s2n_shim_coverage.mojo": [
+            "tests/fixtures/tls/leaf_cert.pem",
+            "tests/fixtures/tls/leaf_key.pem",
+            "tests/fixtures/tls/root_ca.pem",
         ],
         "tests/test_L1_tls_session_resumption.mojo": [
             "tests/fixtures/tls/leaf_cert.pem",
