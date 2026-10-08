@@ -365,7 +365,9 @@ message ExportMailboxRequest {
 message InboundEnvelope {
   // The `MAIL FROM` reverse path; empty for a null reverse path (a bounce).
   string mail_from = 1;
-  // The `RCPT TO` forward paths. Each names a mailbox of the app.
+  // The `RCPT TO` forward paths, each an `addr-spec` at a domain the app
+  // serves. A recipient that names no mailbox of the app is listed in the
+  // reply's `unknown_recipients`, and the reply is still 2xx.
   repeated string rcpt_to = 2;
   string sha256 = 3;
 }
@@ -384,7 +386,10 @@ message InboundDelivery {
 
 // The reply to `POST /v1/inbound`. A 2xx reply, duplicates included, means
 // the app holds the message for every recipient it delivered to; the sender
-// may then discard its copy.
+// may then discard its copy. When no recipient names a mailbox of the app the
+// reply is still 2xx, with no `deliveries` and every recipient in
+// `unknown_recipients`: the app never answers an unknown recipient with 4xx,
+// which the sender would take as a permanent refusal of the whole message.
 message InboundDeliveryResponse {
   repeated InboundDelivery deliveries = 1;
   // Recipients that name no mailbox of the app; nothing was stored for them.
