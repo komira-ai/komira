@@ -155,7 +155,7 @@ def hmac_oneshot[OUTPUT_SIZE: Int](
     var out_ptr = UnsafePointer(to=out[0]).unsafe_mut_cast[False]().unsafe_origin_cast[_FFI_ORIGIN]()
     var out_len = UInt32(0)
     var ret = external_call[
-        "HMAC",
+        "komira_awslc_HMAC",
         _FfiByte,
         _FfiHandle,  # evp_md
         _FfiByte,     # key
@@ -228,7 +228,7 @@ struct HmacFfiCtx[OUTPUT_SIZE: Int](Movable, Deinitable):
         # SAFETY: HMAC_CTX_new() allocates a heap CTX. Retained in
         # self._ctx; freed in __del__.
         self._ctx = external_call[
-            "HMAC_CTX_new", _FfiHandle
+            "komira_awslc_HMAC_CTX_new", _FfiHandle
         ]()
         debug_assert(
             Int(self._ctx) != 0,
@@ -242,7 +242,7 @@ struct HmacFfiCtx[OUTPUT_SIZE: Int](Movable, Deinitable):
         var md = _evp_md_for_size[Self.OUTPUT_SIZE]()
         var key_ptr = _span_ptr_mut(key)
         var rc = external_call[
-            "HMAC_Init_ex",
+            "komira_awslc_HMAC_Init_ex",
             Int,
             _FfiHandle,  # ctx
             _FfiByte,     # key
@@ -271,7 +271,7 @@ struct HmacFfiCtx[OUTPUT_SIZE: Int](Movable, Deinitable):
         # Buffer caller-owned for the synchronous call.
         var data_ptr = _span_ptr_mut(data)
         var rc = external_call[
-            "HMAC_Update",
+            "komira_awslc_HMAC_Update",
             Int,
             _FfiHandle,
             _FfiByte,
@@ -301,14 +301,14 @@ struct HmacFfiCtx[OUTPUT_SIZE: Int](Movable, Deinitable):
         # Allocate a fresh ctx for the clone.
         # SAFETY: clone_ctx is local-owned; freed before this fn returns.
         var clone_ctx = external_call[
-            "HMAC_CTX_new", _FfiHandle
+            "komira_awslc_HMAC_CTX_new", _FfiHandle
         ]()
         debug_assert(
             Int(clone_ctx) != 0,
             "HmacFfiCtx.finalize_into: HMAC_CTX_new returned NULL",
         )
         var rc = external_call[
-            "HMAC_CTX_copy_ex",
+            "komira_awslc_HMAC_CTX_copy_ex",
             Int,
             _FfiHandle,  # dst
             _FfiHandle,  # src
@@ -321,7 +321,7 @@ struct HmacFfiCtx[OUTPUT_SIZE: Int](Movable, Deinitable):
         var dst_ptr = _span_ptr_mut(dst)
         var out_len = UInt32(0)
         var rc2 = external_call[
-            "HMAC_Final",
+            "komira_awslc_HMAC_Final",
             Int,
             _FfiHandle,
             _FfiByte,
@@ -339,7 +339,7 @@ struct HmacFfiCtx[OUTPUT_SIZE: Int](Movable, Deinitable):
 
         # Free the clone.
         external_call[
-            "HMAC_CTX_free",
+            "komira_awslc_HMAC_CTX_free",
             NoneType,
             _FfiHandle,
         ](clone_ctx)
@@ -353,14 +353,14 @@ struct HmacFfiCtx[OUTPUT_SIZE: Int](Movable, Deinitable):
         # SAFETY: clone_ctx is owned by returned Self; freed by its
         # __del__. Original self._ctx is separate heap allocation.
         var clone_ctx = external_call[
-            "HMAC_CTX_new", _FfiHandle
+            "komira_awslc_HMAC_CTX_new", _FfiHandle
         ]()
         debug_assert(
             Int(clone_ctx) != 0,
             "HmacFfiCtx.fork: HMAC_CTX_new returned NULL",
         )
         var rc = external_call[
-            "HMAC_CTX_copy_ex",
+            "komira_awslc_HMAC_CTX_copy_ex",
             Int,
             _FfiHandle,
             _FfiHandle,
@@ -374,7 +374,7 @@ struct HmacFfiCtx[OUTPUT_SIZE: Int](Movable, Deinitable):
         # suppresses source-side __del__ post-move; runs exactly once.
         if Int(self._ctx) != 0:
             external_call[
-                "HMAC_CTX_free",
+                "komira_awslc_HMAC_CTX_free",
                 NoneType,
                 _FfiHandle,
             ](self._ctx)
