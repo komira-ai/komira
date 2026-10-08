@@ -32,7 +32,10 @@
 #       one AGGREGATE node with COUNT(*) and every member of the AggFn
 #       vocabulary, each with its own arguments (unary: one column; bivariate:
 #       x in slot 0, y in slot 1). Red on: any member's tag remapped, any
-#       member's argument dropped or replaced, slots 0 and 1 swapped.
+#       member's argument dropped or replaced, slots 0 and 1 swapped. No
+#       member here fills slots 2 or 3; those are carried and refused by
+#       `test_the_two_unread_agg_slots_are_carried_and_refused`
+#       (test_plan_wire_round_trip_ir.mojo).
 #   test_every_agg_fn_bytes_are_frozen
 #       the same plan, frozen as `tests/fixtures/golden/aggregate_every_fn.hex`
 #       and held to protoc by `plan_wire_golden_fixtures` (BUCK): the `.txtpb`
