@@ -267,9 +267,10 @@ def test_onprem_refuses_a_table_naming_q17() raises:
     var absent = cloud.absences()
     assert_equal(
         len(absent),
-        11,
+        12,
         "the table, the three messaging types (test_fake_messaging), the three name types (test_fake_dns), the"
-        + " event trigger (test_fake_triggers) and the three network types (test_fake_network)",
+        + " event trigger (test_fake_triggers), the three network types (test_fake_network) and the registry"
+        + " (test_fake_registry)",
     )
     assert_equal(absent[0].field, FIELD_TABLE)
     assert_equal(absent[0].kind, NOT_YET)

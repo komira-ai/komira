@@ -8,8 +8,8 @@
 # kci_cloud_fake run these graphs on every shape.
 #
 # 1. THE ROWS: a DNS zone (field 18, the eighth body arm, after the
-#    secret), a DNS record (26, the fourteenth, after the grant) and a
-#    certificate (27, the fifteenth); each PORTABLE; a zone and a certificate
+#    secret), a DNS record (26, the fifteenth, after the grant) and a
+#    certificate (27, the sixteenth); each PORTABLE; a zone and a certificate
 #    expose NAME only, a record HOST only; none accepts a verb; each takes
 #    retention, default DELETE (a written KEEP wins); a reference lands on
 #    `<id>/zone`, `<id>/record` and `<id>/cert`.
@@ -102,9 +102,9 @@ def test_the_name_rows() raises:
     var arms = body_arms()
     assert_equal(arms[6].field, FIELD_SECRET, "the secret stays the seventh arm")
     assert_equal(arms[7].field, FIELD_DNS_ZONE, "the eighth arm, after the secret")
-    assert_equal(arms[12].field, FIELD_GRANT, "the grant is the thirteenth (the schedule 22, the network 23 before)")
-    assert_equal(arms[13].field, FIELD_DNS_RECORD, "the fourteenth arm, after the grant")
-    assert_equal(arms[14].field, FIELD_CERTIFICATE, "the fifteenth arm")
+    assert_equal(arms[13].field, FIELD_GRANT, "the grant is the fourteenth (the schedule 22 to the registry 24 before)")
+    assert_equal(arms[14].field, FIELD_DNS_RECORD, "the fifteenth arm, after the grant")
+    assert_equal(arms[15].field, FIELD_CERTIFICATE, "the sixteenth arm")
     var fields = [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE]
     var names = ["dns_zone", "dns_record", "certificate"]
     var outs = ["NAME", "HOST", "NAME"]
