@@ -15,14 +15,14 @@ mojo_library(
     ],
     deps = ["//src/komira_json:komira_json"],
     conda = False,
-    test_srcs = ["kgfix_tests/test_grid.mojo"],
+    test_srcs = ["tests/test_grid.mojo"],
 )
 
 # kgfix's standalone test, so the fixture graph has a test target that is
 # not welded.
 mojo_test(
     name = "kgfix_dot_test",
-    srcs = ["kgfix_tests/test_dot.mojo"],
+    srcs = ["tests/test_dot.mojo"],
     deps = [":kgfix"],
 )
 
@@ -42,8 +42,8 @@ filegroup(
         "kgfix/shapes.mojo",
         "kgfix/sub/__init__.mojo",
         "kgfix/sub/leaf.mojo",
-        "kgfix_tests/test_dot.mojo",
-        "kgfix_tests/test_grid.mojo",
+        "tests/test_dot.mojo",
+        "tests/test_grid.mojo",
     ],
     visibility = ["//src/komira_kg_code:"],
 )

@@ -34,8 +34,8 @@ def _sources() -> List[String]:
         String("kgfix/shapes.mojo"),
         String("kgfix/sub/__init__.mojo"),
         String("kgfix/sub/leaf.mojo"),
-        String("kgfix_tests/test_dot.mojo"),
-        String("kgfix_tests/test_grid.mojo"),
+        String("tests/test_dot.mojo"),
+        String("tests/test_grid.mojo"),
     ]
 
 
@@ -116,7 +116,7 @@ def test_tests_are_the_welded_file_and_the_standalone_target() raises:
     var g = _derive(False)
     var t = g.targets_of("komira//src/komira_kg_code/tests/fixtures/repo:kgfix", EDGE_TESTS)
     assert_equal(len(t), 2)
-    assert_equal(t[0], String(_P) + "kgfix_tests/test_grid.mojo")
+    assert_equal(t[0], String(_P) + "tests/test_grid.mojo")
     assert_equal(t[1], "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test")
 
 

@@ -111,6 +111,39 @@ def test_unclosed_front_matter_is_refused() raises:
     assert_equal(msg, "komira_kg_code: docs/open.md: the front matter opened on line 1 is not closed by a `---` line")
 
 
+def test_a_last_line_without_a_newline_is_a_line() raises:
+    var l = split_lines("a\r\nb")
+    assert_equal(len(l), 2)
+    assert_equal(l[0], "a")
+    assert_equal(l[1], "b")
+
+
+def test_an_import_with_no_module_name_gives_none() raises:
+    # `import (x)`: no dotted name follows, so no module, not an empty one.
+    var m = imported_modules("import (x)\nimport ok\n")
+    assert_equal(len(m), 1)
+    assert_equal(m[0], "ok")
+
+
+def test_a_header_ending_its_line_after_the_name() raises:
+    var lines = split_lines("x = 1\nstruct Bare\n")
+    assert_equal(declaration_line(lines, "struct", "Bare", 0, 0), 2)
+
+
+def test_front_matter_blank_lines_scalars_and_trailing_spaces() raises:
+    # A blank indented line inside a governs list keeps the list open; a
+    # value's trailing spaces are not part of it.
+    var block = read_front_matter("a.md", "---\ntitle: The A  \ngoverns:\n  - one\n  \n  - two\n---\n")
+    assert_equal(block.title, "The A")
+    assert_equal(len(block.governs), 2)
+    assert_equal(block.governs[0], "one")
+    assert_equal(block.governs[1], "two")
+    # `governs: <entry>` with no brackets is one entry.
+    var scalar = read_front_matter("b.md", "---\ngoverns: '//src/a:a'\n---\n")
+    assert_equal(len(scalar.governs), 1)
+    assert_equal(scalar.governs[0], "//src/a:a")
+
+
 def main() raises:
     test_imports_of_each_form()
     test_an_import_shown_in_a_docstring_is_not_an_import()
@@ -118,4 +151,8 @@ def main() raises:
     test_a_method_is_looked_for_in_its_own_struct_only()
     test_front_matter_block_and_inline_lists()
     test_unclosed_front_matter_is_refused()
+    test_a_last_line_without_a_newline_is_a_line()
+    test_an_import_with_no_module_name_gives_none()
+    test_a_header_ending_its_line_after_the_name()
+    test_front_matter_blank_lines_scalars_and_trailing_spaces()
     print("OK")

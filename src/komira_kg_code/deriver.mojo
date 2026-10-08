@@ -84,9 +84,9 @@ def _err(msg: String) -> Error:
 
 
 def _member(v: JsonValue, key: String) -> Int:
-    """The index of member `key` of the object `v`, or -1."""
-    if v.kind != JSON_OBJECT:
-        return -1
+    """The index of member `key` of `v`, or -1. A value that is not an
+    object has none: komira_json's parser fills `obj_keys` for objects
+    only."""
     for i in range(len(v.obj_keys)):
         if v.obj_keys[i] == key:
             return i
@@ -141,9 +141,9 @@ def _basename(path: String) -> String:
 
 
 def _dirname(path: String) -> String:
+    """The directory of `path`, which holds a `/` (the one caller passes
+    a path ending in `/__init__.mojo`)."""
     var slash = path.rfind("/")
-    if slash < 0:
-        return String("")
     return String(path[byte=0:slash])
 
 

@@ -89,8 +89,8 @@ def imported_modules(text: String) -> List[String]:
         if line.find("from ", i) == i:
             var s = _skip_spaces(b, i + 5)
             var e = _dotted_name_end(b, s)
-            if e == s:
-                continue
+            # No name (e == s): `after` is `e` (`s` is past the spaces
+            # already), so the line is not taken.
             var after = _skip_spaces(b, e)
             if after > e and line.find("import", after) == after:
                 out.append(String(line[byte=s:e]))

@@ -1,9 +1,11 @@
 # The edges the fixture repo does not reach: which targets give a `tests`
 # edge, a library whose import name is not its target name, and stubs (labels
-# named only in `deps`) that share a target name.
+# named only in `deps`) that share a target name. Also the lines it does not
+# reach: a symbol whose source is not added, a method whose struct header
+# is not found, and the escapes of `dump`.
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_kg_code import CodeGraph, CodeGraphBuilder, EDGE_IMPORTS, EDGE_TESTS
+from komira_kg_code import CodeGraph, CodeGraphBuilder, EDGE_IMPORTS, EDGE_TESTS, KgEdge, KgNode
 
 # lib imports as libx. tool is a binary on lib; lib_test is a test target on
 # c//q:helper, which no uquery output defines (a stub), and on the libraries
@@ -101,6 +103,59 @@ def test_a_stub_never_takes_a_library_import_name() raises:
     assert_equal(i[0], "c//p:lib")
 
 
+# c//p:lib with one module, __init__, declaring the function f and the
+# struct S with the method area.
+comptime _UQ_ONE = (
+    '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "srcs": ["c//p/lib/__init__.mojo"]}}'
+)
+comptime _DOC_ONE = (
+    '{"decl": {"kind": "package", "name": "lib", "modules": [{"kind": "module", "name": "__init__",'
+    ' "functions": [{"name": "f", "overloads": [{"signature": "def f()", "summary": "F."}]}],'
+    ' "structs": [{"name": "S", "signature": "struct S", "summary": "S.",'
+    ' "functions": [{"name": "area", "overloads": [{"signature": "def area(self) -> Int", "summary": "A."}]}]}]}],'
+    ' "packages": []}, "version": "1.0.0"}'
+)
+
+
+def _line(g: CodeGraph, id: String) raises -> Int:
+    var i = g.node_index(id)
+    assert_true(i >= 0, id)
+    return g.nodes[i].line
+
+
+def test_a_symbol_whose_source_is_not_added_has_line_0() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_UQ_ONE)
+    b.add_mojo_doc_json("c//p:lib", _DOC_ONE)
+    var g = b.build()
+    assert_equal(_line(g, "lib.f"), 0)
+    assert_equal(_line(g, "lib.S"), 0)
+    assert_equal(_line(g, "lib.S.area"), 0)
+
+
+def test_a_method_whose_struct_header_is_not_found_has_line_0() raises:
+    # The source has a method-shaped line but no `struct S` header: S's
+    # line is unknown, so area's is too (not the first `    def area` of
+    # the file). f is found, so the source was read.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_UQ_ONE)
+    b.add_mojo_doc_json("c//p:lib", _DOC_ONE)
+    b.add_source("c//p/lib/__init__.mojo", "    def area(self) -> Int:\n        return 0\ndef f():\n    pass\n")
+    var g = b.build()
+    assert_equal(_line(g, "lib.f"), 3)
+    assert_equal(_line(g, "lib.S"), 0)
+    assert_equal(_line(g, "lib.S.area"), 0)
+
+
+def test_dump_escapes_backslash_tab_and_newline() raises:
+    var nodes = List[KgNode]()
+    nodes.append(KgNode(String("a\\b"), String("doc"), String("t\tu"), String("p"), 7, String("x\ny")))
+    var edges = List[KgEdge]()
+    edges.append(KgEdge(String("a\\b"), String("k\tk"), String("d")))
+    var g = CodeGraph(nodes^, edges^)
+    assert_equal(g.dump(), "N\ta\\\\b\tdoc\tt\\tu\tp\t7\tx\\ny\nE\ta\\\\b\tk\\tk\td\n")
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Runs one case; a failure is printed, not fatal, so one build names
     every case a planted defect breaks."""
@@ -118,6 +173,9 @@ def main() raises:
     _run("stub_order", test_stubs_sharing_a_name_give_the_same_graph_in_either_order, failed)
     _run("stub_alone", test_a_stub_alone_imports_under_its_name, failed)
     _run("stub_vs_library", test_a_stub_never_takes_a_library_import_name, failed)
+    _run("no_source_line", test_a_symbol_whose_source_is_not_added_has_line_0, failed)
+    _run("method_no_header", test_a_method_whose_struct_header_is_not_found_has_line_0, failed)
+    _run("dump_escapes", test_dump_escapes_backslash_tab_and_newline, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
     print("OK")

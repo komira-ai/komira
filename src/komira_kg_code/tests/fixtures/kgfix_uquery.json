@@ -12,7 +12,7 @@
       "komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo"
     ],
     "test_srcs": [
-      "komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_grid.mojo"
+      "komira//src/komira_kg_code/tests/fixtures/repo/tests/test_grid.mojo"
     ]
   },
   "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test": {
@@ -21,7 +21,7 @@
       "komira//src/komira_kg_code/tests/fixtures/repo:kgfix"
     ],
     "srcs": [
-      "komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_dot.mojo"
+      "komira//src/komira_kg_code/tests/fixtures/repo/tests/test_dot.mojo"
     ]
   }
 }
