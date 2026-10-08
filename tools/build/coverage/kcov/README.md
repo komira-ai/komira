@@ -294,8 +294,10 @@ traced process to exit, so a child the test left behind decided it
 ([Patches](../../toolchains/kcov/README.md#patches)). A test that fails under
 kcov fails the action (its output from `gate_runner.sh`, then `COVERAGE RUN
 FAILED`), although its release gate passed. gate_runner's banner is left
-out: it says the library's package is not produced, and the package does
-not depend on a coverage run.
+out: it would say the release gate's test failed. With coverage on, the
+conda package (`<name>_conda`) waits for every coverage run; the library
+and its dependents do not
+([The build gate](../README.md#the-build-gate)).
 
 **The run is bounded.** kcov waits for every process the test started
 before it writes the report, so a test that leaves a child running would
