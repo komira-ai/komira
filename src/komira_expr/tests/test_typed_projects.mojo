@@ -108,7 +108,7 @@ struct LeafI64[name: StringLiteral](ExprXI64):
         raise Error(String("LeafI64.to_expr: not needed"))
 
 
-struct HalfF64[name: StringLiteral](ExprXF64):
+struct QuarterF64[name: StringLiteral](ExprXF64):
     """The column's value divided by 4.0 (exact in binary)."""
 
     var _idx: Int
@@ -135,7 +135,7 @@ struct HalfF64[name: StringLiteral](ExprXF64):
 
     @staticmethod
     def to_expr() raises -> Expr:
-        raise Error(String("HalfF64.to_expr: not needed"))
+        raise Error(String("QuarterF64.to_expr: not needed"))
 
 
 struct NegF32[name: StringLiteral](ExprXF32):
@@ -224,13 +224,13 @@ struct TagStr[name: StringLiteral](ExprXString):
 
 
 comptime Five = ProjectList[
-    LeafI64["y"], HalfF64["x"], NegF32["x"], PlusI32["y"], TagStr["x"]
+    LeafI64["y"], QuarterF64["x"], NegF32["x"], PlusI32["y"], TagStr["x"]
 ]
 
 
 def _five() -> Five:
     return Five(
-        LeafI64["y"](), HalfF64["x"](), NegF32["x"](), PlusI32["y"](), TagStr["x"]()
+        LeafI64["y"](), QuarterF64["x"](), NegF32["x"](), PlusI32["y"](), TagStr["x"]()
     )
 
 
@@ -329,12 +329,12 @@ def test_emit_projected_no_survivors() raises:
 
 def test_out_kind_and_dtype_defaults() raises:
     assert_true(LeafI64["y"].out_kind_at[0]() == SinkKind.NUMERIC)
-    assert_true(HalfF64["x"].out_kind_at[0]() == SinkKind.NUMERIC)
+    assert_true(QuarterF64["x"].out_kind_at[0]() == SinkKind.NUMERIC)
     assert_true(NegF32["x"].out_kind_at[0]() == SinkKind.NUMERIC)
     assert_true(PlusI32["y"].out_kind_at[0]() == SinkKind.NUMERIC)
     assert_true(TagStr["x"].out_kind_at[0]() == SinkKind.STRING)
     assert_true(LeafI64["y"].dtype_at[0]() == DType.int64)
-    assert_true(HalfF64["x"].dtype_at[0]() == DType.float64)
+    assert_true(QuarterF64["x"].dtype_at[0]() == DType.float64)
     assert_true(NegF32["x"].dtype_at[0]() == DType.float32)
     assert_true(PlusI32["y"].dtype_at[0]() == DType.int32)
     # The documented STRING placeholder.
@@ -356,7 +356,7 @@ def test_write_one_defaults_land_in_slot_zero() raises:
         Int64(3),
     )
 
-    var hf = HalfF64["x"]()
+    var hf = QuarterF64["x"]()
     hf.bind(resolver)
     var bf = MultiColumnBuilder[ColumnSlot[DType.float64]](
         column_slot[DType.float64](1)

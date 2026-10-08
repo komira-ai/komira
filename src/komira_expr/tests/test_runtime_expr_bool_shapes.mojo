@@ -6,16 +6,20 @@
 #   - comparison sub-ops: LE / GE / EQ / NE give the lane results of their
 #     operator (T06 there covers LT / GT); an unknown sub-op is refused by
 #     name and number.
-#   - validity: a comparison of two nullable columns is valid only where
-#     both are (Kleene); a column-vs-literal comparison keeps the column's
-#     validity; IS_NULL / IS_NOT_NULL read a real null bitmap and are always
-#     valid; BETWEEN with column bounds reads them and ANDs their validity.
+#   - validity (strict null propagation: a result is null wherever any
+#     operand is): a comparison of two nullable columns is valid only where
+#     both are; a column-vs-literal comparison keeps the column's validity;
+#     IS_NULL / IS_NOT_NULL read a real null bitmap and are always valid;
+#     BETWEEN with column bounds reads them and ANDs their validity.
 #   - refusals: each operand shape the walker does not support raises with
 #     the message naming the evaluator, the operand and the tag it got; a
 #     child index outside [0, node_count) is refused by _eval_node, on both
 #     sides of the range.
-#   - run_filter_self with a validity buffer writes 0xFF to the mask and the
-#     validity bytes the row count needs, and to no byte after them.
+#   - run_filter_self with a validity buffer writes the validity bytes the
+#     row count needs and no mask or validity byte after them. Its mask
+#     VALUES are not pinned: today the body is a scaffold that ignores the
+#     expression (an always-false filter reads all rows kept), so only what
+#     a correct implementation must also do is asserted.
 #
 # Batches (expectations read off these by hand):
 #   _ab():  a = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -394,11 +398,15 @@ def test_between_high_bool_raises() raises:
 # =============================================================================
 
 
-def test_run_filter_self_writes_validity_bytes() raises:
-    """10 rows need (10 + 7) // 8 = 2 bytes: bytes 0 and 1 of both the mask
-    and the validity buffer become 0xFF, byte 2 of each stays 0x00."""
+comptime _UNTOUCHED: UInt8 = 0xA5
+
+
+def _run_filter_self_bytes(n: Int) raises -> List[UInt8]:
+    """Runs `rt_lit_bool(False).run_filter_self` over an `n`-row batch into a
+    3-byte mask and a 3-byte validity buffer, both prefilled with
+    _UNTOUCHED; returns [mask0, mask1, mask2, val0, val1, val2]."""
     var a = List[Scalar[DType.int64]]()
-    for i in range(10):
+    for i in range(n):
         a.append(Scalar[DType.int64](Int64(i)))
     var batch = RecordBatch.from_typed_columns_1(
         Schema.from_fields_1(Field("a", DType.int64, False)),
@@ -418,18 +426,44 @@ def test_run_filter_self_writes_validity_bytes() raises:
     val_buf.set_length(3)
     var val_view = val_buf.view_mut()
     for k in range(3):
-        mask_view.write_u8_at(k, UInt8(0))
-        val_view.write_u8_at(k, UInt8(0))
+        mask_view.write_u8_at(k, _UNTOUCHED)
+        val_view.write_u8_at(k, _UNTOUCHED)
     var validity = Optional[ByteView[val_view.origin]](val_view)
     expr.run_filter_self(bv, mask_view, validity)
-    assert_equal(Int(mask_view.read_u8_at(0)), 0xFF)
-    assert_equal(Int(mask_view.read_u8_at(1)), 0xFF)
-    assert_equal(Int(mask_view.read_u8_at(2)), 0x00)
-    assert_equal(Int(val_view.read_u8_at(0)), 0xFF)
-    assert_equal(Int(val_view.read_u8_at(1)), 0xFF)
-    assert_equal(Int(val_view.read_u8_at(2)), 0x00)
+    var out = List[UInt8]()
+    for k in range(3):
+        out.append(mask_view.read_u8_at(k))
+    for k in range(3):
+        out.append(val_view.read_u8_at(k))
     _ = mask_buf^
     _ = val_buf^
+    return out^
+
+
+def test_run_filter_self_writes_validity_bytes() raises:
+    """10 rows need (10 + 7) // 8 = 2 bytes.
+
+    run_filter_self is a scaffold today (it ignores the expression), so the
+    mask values are NOT pinned. Asserted, true of a correct implementation
+    too: the literal is never null, so validity rows 0..7 (byte 0) and rows
+    8, 9 (bits 0, 1 of byte 1) are valid; byte 2 of the mask and of the
+    validity buffer, past the 2 bytes 10 rows need, is untouched."""
+    var b = _run_filter_self_bytes(10)
+    assert_equal(Int(b[2]), Int(_UNTOUCHED), "mask byte 2")
+    assert_equal(Int(b[3]), 0xFF, "validity byte 0")
+    assert_equal(Int(b[4] & 0x03), 0x03, "validity rows 8, 9")
+    assert_equal(Int(b[5]), Int(_UNTOUCHED), "validity byte 2")
+
+
+def test_run_filter_self_whole_bytes_stop_at_n_bytes() raises:
+    """16 rows need exactly 2 bytes (not 16 // 8 + 1 = 3): both validity
+    bytes are all-valid and byte 2 of the mask and validity buffers is
+    untouched. Mask values are not pinned (scaffold, see above)."""
+    var b = _run_filter_self_bytes(16)
+    assert_equal(Int(b[2]), Int(_UNTOUCHED), "mask byte 2")
+    assert_equal(Int(b[3]), 0xFF, "validity byte 0")
+    assert_equal(Int(b[4]), 0xFF, "validity byte 1")
+    assert_equal(Int(b[5]), Int(_UNTOUCHED), "validity byte 2")
 
 
 # =============================================================================
