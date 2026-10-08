@@ -23,6 +23,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                            the decryption, scalar 1 and n - 1, 257
 #                            records); a salt-source error re-raised by
 #                            webpush_encrypt_with, not an empty body.
+#   test_key_seams           the sender-key draw skips n and 0, wipes each
+#                            refused candidate and refuses after 8 draws;
+#                            an all-zero derived point is refused.
 mojo_library(
     name = "komira_webpush",
     srcs = glob(["*.mojo"]),
@@ -35,6 +38,7 @@ mojo_library(
         "tests/test_rfc8188_vectors.mojo",
         "tests/test_webpush_round_trip.mojo",
         "tests/test_refusals.mojo",
+        "tests/test_key_seams.mojo",
     ],
     visibility = ["PUBLIC"],
 )

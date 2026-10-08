@@ -85,24 +85,23 @@ def aes128gcm_keys(ikm: Span[UInt8, _], salt: Span[UInt8, _]) raises -> Aes128Gc
     if len(salt) != SALT_SIZE:
         raise Error("aes128gcm: salt must be 16 bytes, got " + String(len(salt)))
     var prk = Hkdf[Sha256].extract(salt, ikm)
-    var cek = Array[UInt8, 16](fill=UInt8(0))
-    var nonce = Array[UInt8, 12](fill=UInt8(0))
+    # The keys are expanded into an Aes128GcmKeys, whose destructor wipes
+    # them if an expand raises.
+    var keys = Aes128GcmKeys(
+        Array[UInt8, 16](fill=UInt8(0)), Array[UInt8, 12](fill=UInt8(0))
+    )
     var cek_info = _ascii_with_nul("Content-Encoding: aes128gcm")
     var nonce_info = _ascii_with_nul("Content-Encoding: nonce")
     try:
         Hkdf[Sha256].expand(
-            Span[UInt8](prk), Span[UInt8](cek_info), Span[UInt8](cek)
+            Span[UInt8](prk), Span[UInt8](cek_info), Span[UInt8](keys.cek)
         )
         Hkdf[Sha256].expand(
-            Span[UInt8](prk), Span[UInt8](nonce_info), Span[UInt8](nonce)
+            Span[UInt8](prk), Span[UInt8](nonce_info), Span[UInt8](keys.nonce)
         )
-    except e:
+    finally:
         zeroize_inline_array(prk)
-        zeroize_inline_array(cek)
-        zeroize_inline_array(nonce)
-        raise e^
-    zeroize_inline_array(prk)
-    return Aes128GcmKeys(cek^, nonce^)
+    return keys^
 
 
 def _record_nonce(base: Array[UInt8, 12], seq: Int) -> Array[UInt8, 12]:
@@ -186,10 +185,8 @@ def aes128gcm_encrypt(
     var nonce = _record_nonce(keys.nonce, 0)
     try:
         cipher.seal_in_place(nonce, Span[UInt8](empty), Span[UInt8](record))
-    except e:
+    finally:
         zeroize_inline_array(nonce)
-        raise e^
-    zeroize_inline_array(nonce)
     for i in range(len(record)):
         out.append(record[i])
     return out^

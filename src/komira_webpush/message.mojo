@@ -86,21 +86,47 @@ struct SystemWebPushRandomness(WebPushRandomness):
         return s^
 
     def sender_private_key(mut self) raises -> Array[UInt8, 32]:
-        # A random 32-byte string is >= n with probability below 2^-32;
-        # `p256_public_key` refuses such a scalar and the loop draws again.
-        for _ in range(8):
-            var k = Array[UInt8, 32](fill=UInt8(0))
-            try:
-                system_entropy(Span[UInt8](k))
-            except e:
-                zeroize_inline_array(k)
-                raise e^
-            try:
-                _ = p256_public_key(Span[UInt8](k))
-                return k^
-            except:
-                zeroize_inline_array(k)
-        raise Error("webpush: no valid P-256 private key in 8 draws")
+        var source = _SystemScalarSource()
+        return _draw_private_key(source)
+
+
+trait _ScalarSource:
+    """Where `_draw_private_key` gets its candidate scalars."""
+
+    def fill(mut self, mut k: Array[UInt8, 32]) raises:
+        """Overwrites all 32 bytes of `k` with a fresh candidate."""
+        ...
+
+
+struct _SystemScalarSource(_ScalarSource):
+    """Candidates from the system CSPRNG."""
+
+    def __init__(out self):
+        pass
+
+    def fill(mut self, mut k: Array[UInt8, 32]) raises:
+        # AWS-LC's RAND_bytes returns 1 or aborts the process, so
+        # system_entropy does not raise and `k` holds no partial draw.
+        system_entropy(Span[UInt8](k))
+
+
+def _draw_private_key[S: _ScalarSource](mut source: S) raises -> Array[UInt8, 32]:
+    """The first of up to 8 candidates from `source` that lies in [1, n-1].
+
+    A random 32-byte string is >= n with probability below 2^-32, so the
+    system source almost never needs a second draw. A refused candidate is
+    wiped before the next draw.
+
+    Raises:
+        "webpush: no valid P-256 private key in 8 draws"
+    """
+    var k = Array[UInt8, 32](fill=UInt8(0))
+    for _ in range(8):
+        source.fill(k)
+        if _scalar_in_range(Span[UInt8](k)):
+            return k^
+        zeroize_inline_array(k)
+    raise Error("webpush: no valid P-256 private key in 8 draws")
 
 
 def _p256_order() -> Array[UInt8, 32]:
@@ -146,12 +172,23 @@ def p256_public_key(private_key: Span[UInt8, _]) raises -> Array[UInt8, 65]:
         )
     if not _scalar_in_range(private_key):
         raise Error("webpush: private key is not in [1, n-1]")
-    var xy = ecdsa_p256_generate_pubkey(private_key)
+    return _uncompressed_point(ecdsa_p256_generate_pubkey(private_key))
+
+
+def _uncompressed_point(xy: Array[UInt8, 64]) raises -> Array[UInt8, 65]:
+    """0x04 || x || y from the x || y `ecdsa_p256_generate_pubkey` returns.
+
+    That function returns all zeros when AWS-LC fails, which for a scalar
+    in [1, n-1] means an allocation failed; (0, 0) is not a point of P-256
+    (it would need b = 0), so a derived key is never all zeros.
+
+    Raises:
+        "webpush: P-256 public key derivation failed"
+    """
     var any_bits = UInt8(0)
     for i in range(64):
         any_bits = any_bits | xy[i]
     if any_bits == UInt8(0):
-        # ecdsa_p256_generate_pubkey returns all zeros when AWS-LC fails.
         raise Error("webpush: P-256 public key derivation failed")
     var out = Array[UInt8, 65](fill=UInt8(0))
     out[0] = UInt8(0x04)
@@ -199,15 +236,14 @@ def webpush_ikm(
         key_info.append(as_public[i])
     var prk = Hkdf[Sha256].extract(auth_secret, ecdh_secret)
     var ikm = Array[UInt8, 32](fill=UInt8(0))
+    # Hkdf.expand raises only for an output over 255 * 32 bytes, before it
+    # writes any byte, so `ikm` holds no key material if it raises.
     try:
         Hkdf[Sha256].expand(
             Span[UInt8](prk), Span[UInt8](key_info), Span[UInt8](ikm)
         )
-    except e:
+    finally:
         zeroize_inline_array(prk)
-        zeroize_inline_array(ikm)
-        raise e^
-    zeroize_inline_array(prk)
     return ikm^
 
 
@@ -260,10 +296,8 @@ def webpush_encrypt_with[R: WebPushRandomness](
             ua_public,
             Span[UInt8](as_public),
         )
-    except e:
+    finally:
         zeroize_inline_array(ecdh_secret)
-        raise e^
-    zeroize_inline_array(ecdh_secret)
     try:
         var salt = randomness.salt()
         var body = aes128gcm_encrypt(
