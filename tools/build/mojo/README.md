@@ -795,7 +795,11 @@ assembly lists are generated but not built yet.
   did not finish. komira's kcov exits with the test's status (128+N for
   signal N), so a test that fails at `-O0` or traced fails this action,
   whatever its gated run did;
-- its branch coverage, which nothing waits for yet: the test emitted as
+- its branch coverage, which the gate reads when the library's
+  `coverage_branch_gate` is set (a library of `COVERAGE_BRANCH_GATE` in
+  [`policy.bzl`](../coverage/policy.bzl), or a fixture of the tests cell
+  that does not pass `coverage_branch_gate = False`), and nothing waits
+  for otherwise: the test emitted as
   LLVM bitcode at `-O0` with line tables (`[coverage][bc][<test>]`,
   `mojo_emit_cov_bc`, through the same `mojo_wrapper.sh`), instrumented
   with IR profile counters by the Mojo package's lld and linked with the
@@ -812,9 +816,10 @@ assembly lists are generated but not built yet.
 
 and, per library, with tests or without:
 
-- the gate: `covcheck gate` over those reports and the library's sources
-  (each non-generated `srcs` file, recorded or not; every welded test set
-  aside, under the package's `tests/` or not: `--test-source`), in
+- the gate: `covcheck gate` over those reports (and, as above, the branch
+  records: `--branch-lcov`) and the library's sources (each non-generated
+  `srcs` file, recorded or not; every welded test set aside, under the
+  package's `tests/` or not: `--test-source`), in
   the mode and against the target of
   [`policy.bzl`](../coverage/policy.bzl) (census, 100%), whose `result.json`
   and `summary.md` are `[coverage][gate]` (`cov/gate/`, action category
@@ -902,8 +907,10 @@ Scope, for now:
 - A test's data may not be staged at its own source's path or under
   `buck-out/`: a coverage run stages the sources there (analysis fails,
   naming the destination).
-- Line coverage only: kcov gives no branch data, so the gate's branch is
-  `not measured` and never passes in enforce mode (`BranchNotMeasured`).
+- Branch coverage only where the gate reads the branch records
+  (`coverage_branch_gate`, above): kcov gives no branch data, so for any
+  other library the gate's branch is `not measured` and never passes in
+  enforce mode (`BranchNotMeasured`).
 
 A library in the `tests` cell may pass `coverage_debug` itself (a
 `cov_link_dir`), and with it `coverage_run` (a `cov_run_dir`; the default one
@@ -912,7 +919,9 @@ when not given) and `coverage_gate` (a `cov_gate_dir`) with `coverage_mode`
 with `coverage_gate` the gate, whatever the switch says, which
 is how tests 41, 43, 46 and 47 build them, plant a defective relocator or run
 script, and gate in enforce mode, without `-c`. Its conda package, if it has
-one, waits for its runs and that gate. Anywhere else passing any of them is
+one, waits for its runs and that gate. It may also pass
+`coverage_branch_gate = False`, so its gate does not read its branch
+records (test 46's `covfull_unread`). Anywhere else passing any of them is
 refused.
 
 ## Errors

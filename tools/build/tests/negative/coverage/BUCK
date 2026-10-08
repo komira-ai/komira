@@ -312,17 +312,44 @@ _GATE = "komira//tools/build/coverage:cov_gate"
 # name: (sources, tests, gate directory)
 _GATED = {
     # covlow/word.mojo: test_word calls word(0) only; three of its six lines
-    # run (BelowTarget).
+    # run, and one of the four arms of its two `if`s (BelowTarget on both).
     "covlow": (["covlow/__init__.mojo", "covlow/word.mojo"], ["tests/test_word.mojo"], _GATE),
     # No test: no report, so the gate sees nothing measured (NotMeasured).
     "covnotests": (["covnotests/__init__.mojo", "covnotests/inc.mojo"], [], _GATE),
     # covun/unused.mojo: in the package, compiled into no test binary
     # (UnmeasuredFile).
     "covun": (["covun/__init__.mojo", "covun/unused.mojo", "covun/used.mojo"], ["tests/test_used.mojo"], _GATE),
-    # Every line covered, a ratchet row at 100% line: the one finding left is
-    # that kcov measures no branch (BranchNotMeasured).
+    # Every line covered, a ratchet row at 100% line, and no decision: its
+    # branch records name full.mojo with no arm (measured, none to take), so
+    # it has no finding and its gate is GREEN in enforce mode too.
     "covfull": (["covfull/__init__.mojo", "covfull/full.mojo"], ["tests/test_full.mojo"], ":covfull_gate"),
+    # Every line covered, a ratchet row at 100% line and branch floor 0, and
+    # one `if` whose false arm test_clamp_high never takes: the one finding
+    # is BelowTarget on branch (its branch records, not BranchNotMeasured).
+    "covbranch": (["covbranch/__init__.mojo", "covbranch/clamp.mojo"], ["tests/test_clamp_high.mojo"], ":covbranch_gate"),
 }
+
+cov_gate_dir(
+    name = "covbranch_gate",
+    exec_compatible_with = LINUX_X86_64,
+    ratchet = "covbranch_ratchet.tsv",
+)
+
+# GREEN in enforce mode: covbranch with a test taking both arms of its `if`,
+# every line covered: no finding, so its [coverage][gate] is green.
+mojo_library(
+    name = "covbranch_both",
+    srcs = [
+        "covbranch/__init__.mojo",
+        "covbranch/clamp.mojo",
+    ],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = ":covbranch_gate",
+    coverage_mode = "enforce",
+    import_name = "covbranch",
+    test_srcs = ["tests/test_clamp_both.mojo"],
+)
 
 cov_gate_dir(
     name = "covfull_gate",
@@ -330,12 +357,36 @@ cov_gate_dir(
     ratchet = "covfull_ratchet.tsv",
 )
 
+# covfull with `coverage_branch_gate = False`: its gate reads no branch
+# record (the side of a library not in COVERAGE_BRANCH_GATE), so the one
+# finding left is BranchNotMeasured. Its gate is RED in enforce mode; its
+# census twin's result.json says so (:covfull_unread_census_result).
+[
+    mojo_library(
+        name = "covfull_unread" + suffix,
+        srcs = [
+            "covfull/__init__.mojo",
+            "covfull/full.mojo",
+        ],
+        conda = False,
+        coverage_branch_gate = False,
+        coverage_debug = _LINK,
+        coverage_gate = ":covfull_gate",
+        coverage_mode = mode,
+        import_name = "covfull",
+        test_srcs = ["tests/test_full.mojo"],
+    )
+    for suffix, mode in (("", "enforce"), ("_census", "census"))
+]
+
 # RED: tests//negative/coverage:covlow[coverage][gate], :covnotests[...],
-# :covun[...], :covfull[...] (enforce), and :covlow_conda, :covnotests_conda
-# (a library with no test: a REFUSED conda package, which waits for its
-# NotMeasured gate all the same). GREEN: :covlow, :covnotests, :covun,
-# :covfull (the libraries), :covlow_census, :covnotests_census,
-# :covun_census, :covfull_census and their :<name>_census_result checks.
+# :covun[...], :covfull_unread[...], :covbranch[...] (enforce), and
+# :covlow_conda, :covnotests_conda (a library with no test: a REFUSED conda
+# package, which waits for its NotMeasured gate all the same). GREEN:
+# :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch (the
+# libraries), :covfull[coverage][gate] (enforce), :covlow_census,
+# :covnotests_census, :covun_census, :covfull_census, :covbranch_census and
+# their :<name>_census_result checks.
 [
     mojo_library(
         name = name + suffix,
@@ -355,11 +406,13 @@ cov_gate_dir(
 _PKG = '"package":{"package":"tools/build/tests/negative/coverage",'
 
 _RESULTS = {
+    # Its branch records: word(0) takes one arm of `if x == 0` and never
+    # reaches `if x > 0` (both arms `-`): 1 of 4, and no BranchNotMeasured
+    # (the whole findings list).
     "covlow": [
         '"conclusion":"neutral","mode":"census","target_bp":10000,',
-        _PKG + '"files":1,"unmeasured_files":0,"line_hit":3,"line_found":6,"line_bp":5000,"branch_hit":0,"branch_found":0,"branch_bp":null,',
-        '"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"line","measured_bp":5000,"bound_bp":10000,',
-        '"kind":"BranchNotMeasured",',
+        _PKG + '"files":1,"unmeasured_files":0,"line_hit":3,"line_found":6,"line_bp":5000,"branch_hit":1,"branch_found":4,"branch_bp":2500,',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":2500,"bound_bp":10000,"path":"","line":0,"message":"branch 25.00% is below the target 100.00%","count":null},{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"line","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"line 50.00% is below the target 100.00%","count":null},{"kind":"MissingRow","package":"tools/build/tests/negative/coverage","metric":"line","measured_bp":5000,"bound_bp":null,"path":"","line":0,"message":"no ratchet row; measured line 50.00%","count":null}],"exemptions"',
         '"excluded_test_files":1,',
     ],
     "covnotests": [
@@ -373,11 +426,28 @@ _RESULTS = {
         _PKG + '"files":2,"unmeasured_files":1,"line_hit":1,"line_found":3,',
         '"kind":"UnmeasuredFile","package":"tools/build/tests/negative/coverage","metric":"","measured_bp":null,"bound_bp":null,"path":"tools/build/tests/negative/coverage/covun/unused.mojo","line":0,',
     ],
+    # No decision, its file named by its branch records: no finding (the
+    # whole findings list), branch measured with nothing to take.
     "covfull": [
         '"conclusion":"neutral","mode":"census",',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,"branch_hit":0,"branch_found":0,"branch_bp":null,',
         '"line_floor_bp":10000,"branch_floor_bp":null}',
+        '"findings":[],"exemptions"',
+    ],
+    # The same, its gate reading no branch record: BranchNotMeasured alone.
+    "covfull_unread": [
+        '"conclusion":"neutral","mode":"census",',
+        _PKG + '"files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,"branch_hit":0,"branch_found":0,"branch_bp":null,',
+        '"line_floor_bp":10000,"branch_floor_bp":null}',
         '"findings":[{"kind":"BranchNotMeasured","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":null,"bound_bp":10000,"path":"","line":0,',
+    ],
+    # Every line, one of the two arms: BelowTarget on branch is the only
+    # finding (the whole findings list).
+    "covbranch": [
+        '"conclusion":"neutral","mode":"census",',
+        _PKG + '"files":1,"unmeasured_files":0,"line_hit":3,"line_found":3,"line_bp":10000,"branch_hit":1,"branch_found":2,"branch_bp":5000,',
+        '"line_floor_bp":10000,"branch_floor_bp":0}',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"branch 50.00% is below the target 100.00%","count":null}],"exemptions"',
     ],
 }
 
@@ -478,8 +548,9 @@ mojo_library(
 # ---- Test 47: branch coverage runs --------------------------------------------
 #
 # Each library below has coverage builds whatever the switch says
-# (coverage_debug), so its [coverage][branch][<test>] exists. Its default
-# output, the package, is green: nothing waits for a branch coverage run.
+# (coverage_debug), so its [coverage][branch][<test>] exists. It has no
+# gate, so its default output, the package, is green: nothing waits for a
+# branch coverage run (a gate of the tests cell would read its records).
 
 # A test that passes in the release gate and fails in its branch coverage
 # run (it asserts that LLVM_PROFILE_FILE is unset). RED:

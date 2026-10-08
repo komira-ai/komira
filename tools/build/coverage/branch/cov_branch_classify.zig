@@ -42,6 +42,10 @@
 //! the phi of a short-circuit form whose deciding constant arrives from the
 //! br's target for that left value, or through `xor ..., true`).
 //!
+//! Output: per measured file the IR holds code of, `SF:<repository path>`,
+//! its records, `end_of_record` (a file with no decision: no record), files
+//! sorted bytewise; empty when the IR holds no code of a measured file.
+//!
 //! Refused, exit 1, nothing written: see README.md. Exit 2: bad usage.
 //! A static executable: no shell, no PATH, no network.
 
@@ -673,8 +677,37 @@ fn scan(st: *State, ir: []const u8) void {
 
 // ---- output ----------------------------------------------------------------
 
-fn render(alloc: Alloc, recs: []Record) []const u8 {
+fn pathLess(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.order(u8, a, b) == .lt;
+}
+
+/// Writes `SF:` and `end_of_record` for each path of `coded` (sorted) from
+/// `p.*` on that sorts before `upto` (every one left when null), and steps
+/// past `upto` itself: a measured file the IR holds code of, with no record.
+fn writeNoRecord(w: anytype, coded: []const []const u8, p: *usize, upto: ?[]const u8) void {
+    while (p.* < coded.len) {
+        if (upto) |u| {
+            switch (std.mem.order(u8, coded[p.*], u)) {
+                .gt => return,
+                .eq => {
+                    p.* += 1;
+                    return;
+                },
+                .lt => {},
+            }
+        }
+        w.print("SF:{s}\nend_of_record\n", .{coded[p.*]}) catch oom();
+        p.* += 1;
+    }
+}
+
+/// The output: the records of `recs`, per file, and each measured file of
+/// `coded` (the repository paths of the measured files the IR holds code
+/// of) with no record named all the same, files sorted bytewise.
+fn render(alloc: Alloc, recs: []Record, coded: [][]const u8) []const u8 {
     std.mem.sort(Record, recs, {}, recordLess);
+    std.mem.sort([]const u8, coded, {}, pathLess);
+    var p: usize = 0;
     var buf = std.ArrayList(u8).init(alloc);
     const w = buf.writer();
     var i: usize = 0;
@@ -691,6 +724,7 @@ fn render(alloc: Alloc, recs: []Record) []const u8 {
         }
         if (cur == null or !std.mem.eql(u8, cur.?, recs[i].repo)) {
             if (cur != null) w.writeAll("end_of_record\n") catch oom();
+            writeNoRecord(w, coded, &p, recs[i].repo);
             cur = recs[i].repo;
             w.print("SF:{s}\n", .{recs[i].repo}) catch oom();
         }
@@ -709,6 +743,7 @@ fn render(alloc: Alloc, recs: []Record) []const u8 {
         i = j;
     }
     if (cur != null) w.writeAll("end_of_record\n") catch oom();
+    writeNoRecord(w, coded, &p, null);
     return buf.items;
 }
 
@@ -881,7 +916,15 @@ pub fn main() void {
         fail("{d} error(s) in {s}; nothing written", .{ st.errors.items.len, in_file });
     }
 
-    const bytes = render(alloc, st.records.items);
+    // Every measured file the IR holds code of is named, a decision-free
+    // one with no record, so covcheck can tell "measured, nothing to take"
+    // from "not measured".
+    var coded = std.ArrayList([]const u8).init(alloc);
+    var cf = st.files.valueIterator();
+    while (cf.next()) |fp| {
+        if (fp.*.where == .measured and fp.*.exec.count() > 0) coded.append(fp.*.repo) catch oom();
+    }
+    const bytes = render(alloc, st.records.items, coded.items);
     writeOut(out_file, bytes) catch |err| fail("{s}: {s}; nothing written", .{ out_file, @errorName(err) });
     var decisions: usize = 0;
     var made: usize = 0;

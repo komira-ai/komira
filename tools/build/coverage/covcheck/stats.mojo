@@ -21,6 +21,7 @@ comptime MUTANT_SURVIVED = "MutantSurvived"
 comptime EXEMPTION_WITHOUT_REASON = "ExemptionWithoutReason"
 comptime STALE_EXEMPTION = "StaleExemption"
 comptime UNMEASURED_FILE = "UnmeasuredFile"
+comptime BRANCH_UNMEASURED_FILE = "BranchUnmeasuredFile"
 
 comptime NO_FLOOR: Int = -1
 

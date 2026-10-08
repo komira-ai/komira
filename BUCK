@@ -39,12 +39,14 @@ coverage_ci_cases(
     script = ".github/ci/tests/coverage_ci_cases.sh",
     srcs = [
         ".github/ci/coverage_measure.sh",
+        ".github/ci/tests/build_report_branch_failed.json",
         ".github/ci/tests/build_report_gate_failed.json",
         ".github/workflows/coverage.yml",
     ],
     data = {
         "tools/build/coverage/policy.bzl": "//tools/build/coverage:policy.bzl",
         "tools/build/coverage/ratchet.tsv": "//tools/build/coverage:ratchet.tsv",
+        "tools/build/mojo/coverage_branch.bzl": "//tools/build/mojo:coverage_branch.bzl",
     },
 )
 

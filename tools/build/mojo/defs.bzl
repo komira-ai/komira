@@ -428,7 +428,7 @@ def _library_impl(ctx):
 
     # With coverage on, the gate (coverage.bzl); only the conda package waits
     # for it and the runs, never this package.
-    cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs) if cov_link else (None, [])
+    cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch) if cov_link else (None, [])
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(

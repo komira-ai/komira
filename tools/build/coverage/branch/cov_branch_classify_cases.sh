@@ -324,6 +324,44 @@ awk '/^attributes #0/ { print "define internal i1 @\"pkg::e::pick\"(i1 %0, i1 %1
 refused "zero branches, and" "src/pkg/e.mojo: zero branches parsed, yet the IR has code on its decision line 3" "$W/v.ll"
 rm "$SRC/e.mojo"
 
+# 9h. A measured file whose code the IR holds, with no decision in it, is
+# named with no record (`SF:` then `end_of_record`) in its sorted place:
+# bb.mojo between b.mojo's and c.mojo's records, e.mojo after the last. So
+# covcheck counts its package's branches as measured, with none to take.
+# Kills: a decision-free file left out (its package BranchNotMeasured in
+# covcheck whatever its tests run), or written out of order.
+printf '# made up\ndef one() -> Int:\n    return 1\n' >"$SRC/bb.mojo"
+printf '# made up\ndef two() -> Int:\n    return 2\n' >"$SRC/e.mojo"
+awk '/^attributes #0/ { print "define internal i64 @\"pkg::bb::one\"() #0 !dbg !141 {"; print "1:"; print "  ret i64 1, !dbg !142"; print "}"; print ""; print "define internal i64 @\"pkg::e::two\"() #0 !dbg !144 {"; print "1:"; print "  ret i64 2, !dbg !145"; print "}"; print "" } { print } END { print "!140 = !DIFile(filename: \"'"$SRC"'/bb.mojo\", directory: \"\")"; print "!141 = distinct !DISubprogram(name: \"one\", scope: !140, file: !140, line: 2, type: !9, unit: !0)"; print "!142 = !DILocation(line: 3, column: 5, scope: !141)"; print "!143 = !DIFile(filename: \"'"$SRC"'/e.mojo\", directory: \"\")"; print "!144 = distinct !DISubprogram(name: \"two\", scope: !143, file: !143, line: 2, type: !9, unit: !0)"; print "!145 = !DILocation(line: 3, column: 5, scope: !144)" }' "$FX" >"$W/v.ll"
+run "$TOOL" --ir "$W/v.ll" --out "$W/out.info" $MAP $EXC
+[ "$RC" -eq 0 ] || red "no decision: exit $RC, want 0"
+awk '{ print } $0 == "end_of_record" && f == "SF:src/pkg/b.mojo" { print "SF:src/pkg/bb.mojo"; print "end_of_record" } /^SF:/ { f = $0 } END { print "SF:src/pkg/e.mojo"; print "end_of_record" }' "$GOLDEN" >"$W/want.info"
+if ! cmp -s "$W/out.info" "$W/want.info"; then
+    diff -u "$W/want.info" "$W/out.info" >&2 || true
+    red "no decision: bb.mojo and e.mojo are not each named with no record in their sorted place"
+fi
+grep -qF "5 measured file(s)" "$W/err" || red "no decision: stderr does not count 5 measured files"
+rm "$SRC/bb.mojo" "$SRC/e.mojo"
+pass
+
+# 9i. Two debug-info spellings of one file (b.mojo as `filename` alone and as
+# `directory` + `filename`, two DIFile nodes) are one measured file: one
+# `SF:` in its sorted place, the golden output byte for byte, 3 measured
+# files. A file is keyed by its joined name and --map's PREFIX is one string,
+# so one repository path has one name. Kills: files keyed by the DIFile node
+# (or any raw spelling), which names b.mojo twice and covcheck refuses the
+# duplicate `SF:`.
+awk '/^attributes #0/ { print "define internal i64 @\"pkg::b::tail\"() #0 !dbg !151 {"; print "1:"; print "  ret i64 3, !dbg !152"; print "}"; print "" } { print } END { print "!150 = !DIFile(filename: \"b.mojo\", directory: \"'"$SRC"'\")"; print "!151 = distinct !DISubprogram(name: \"tail\", scope: !150, file: !150, line: 2, type: !9, unit: !0)"; print "!152 = !DILocation(line: 7, column: 5, scope: !151)" }' "$FX" >"$W/v.ll"
+run "$TOOL" --ir "$W/v.ll" --out "$W/out.info" $MAP $EXC
+[ "$RC" -eq 0 ] || red "two spellings: exit $RC, want 0"
+if ! cmp -s "$W/out.info" "$GOLDEN"; then
+    diff -u "$GOLDEN" "$W/out.info" >&2 || true
+    red "two spellings: b.mojo under two DIFile spellings is not one SF (the output differs from the golden)"
+fi
+[ "$(grep -cx 'SF:src/pkg/b.mojo' "$W/out.info")" = 1 ] || red "two spellings: SF:src/pkg/b.mojo is not written once"
+grep -qF "3 measured file(s)" "$W/err" || red "two spellings: stderr does not count 3 measured files"
+pass
+
 # 10. Bad usage exits 2.
 for args in "--out $W/out.info $MAP" "--ir $FX $MAP" "--ir $FX --out $W/out.info" \
     "--ir $FX --out $W/out.info --map $SRC=src/pkg/" "--ir $FX --out $W/out.info --map $SRC/=/abs/" \
