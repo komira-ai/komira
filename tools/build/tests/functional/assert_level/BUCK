@@ -53,6 +53,22 @@ mojo_library(
     test_srcs = ["tests/test_define_seen.mojo"],
 )
 
+# An assert level and two defines: every `-D`, in order, reaches each build
+# of the test (assert_level.sh pins the whole list), and the test passes
+# only with all three.
+mojo_library(
+    name = "lib_level_and_defines",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_assert_level = "none",
+    test_defines = [
+        "KOMIRA_PROBE_DEFINE=on",
+        "KOMIRA_PROBE_SECOND=2",
+    ],
+    test_srcs = ["tests/test_level_and_defines.mojo"],
+)
+
 # `buck2 test`: passes at ASSERT=none; its twin negative:test_default fails.
 mojo_test(
     name = "test_none",

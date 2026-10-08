@@ -258,7 +258,7 @@ def coverage_sources(ctx, root):
             gen.append(rel)
     return src_repo, gen
 
-def coverage_branch_of(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, root):
+def coverage_branch_of(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, root, defines):
     """The branch coverage actions of test source `t` (coverage_branch.bzl),
     as {stem: their outputs}, with `coverage_branch` set; {} otherwise. The
     arguments are coverage_branch's, but `root`, the package directory [src]
@@ -267,7 +267,7 @@ def coverage_branch_of(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, dat
     if not ctx.attrs.coverage_branch:
         return {}
     src_repo, gen = coverage_sources(ctx, root)
-    return {stem: coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, src_repo, gen)}
+    return {stem: coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, src_repo, gen, defines)}
 
 def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, env_args):
     """Declares the `mojo_cov_run` action of test source `t`: its coverage
