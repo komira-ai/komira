@@ -19,8 +19,13 @@
 #   * `crit` is refused whatever it holds: this verifier understands no JOSE
 #     extension (RFC 7515 section 4.1.11);
 #   * `typ` must be present and equal to the anchor's typ (exact match);
-#   * `kid` must be a non-empty string (it selects the key; see
-#     komira_crypto's rs256_jwks.mojo for why it is required).
+#   * `kid` must be a non-empty string of printable ASCII (it selects the
+#     key; see komira_crypto's rs256_jwks.mojo for why it is required).
+#     ASCII because komira_crypto reads a JWK's kid one byte per character,
+#     so a non-ASCII kid could never match a published key: it is refused
+#     here as a bad kid, before it can cost a JWKS refetch. The JWKS side
+#     refuses a non-ASCII kid too (jwks_cache.mojo). Real issuers' kids are
+#     hex.
 #
 # Results are reason codes (reasons.mojo); nothing here echoes the token.
 # =============================================================================
@@ -99,6 +104,17 @@ def split_compact_jws(token: String) -> Optional[CompactJws]:
     )
 
 
+def is_printable_ascii(s: String) -> Bool:
+    """True when `s` is non-empty and every byte is in 0x20..0x7E."""
+    var b = s.as_bytes()
+    if len(b) == 0:
+        return False
+    for i in range(len(b)):
+        if b[i] < UInt8(0x20) or b[i] > UInt8(0x7E):
+            return False
+    return True
+
+
 def string_member(v: JsonValue, name: String) -> Optional[String]:
     """The value of member `name` when it is present and a string."""
     if not v.has(name):
@@ -168,6 +184,6 @@ def check_jose_header(header_seg: String, anchor: TrustAnchor) -> HeaderVerdict:
         return _refuse(REASON_TYP)
 
     var kid = string_member(h, String("kid"))
-    if not kid or kid.value().byte_length() == 0:
+    if not kid or not is_printable_ascii(kid.value()):
         return _refuse(REASON_KID)
     return HeaderVerdict(reason=REASON_OK, kid=kid.value())

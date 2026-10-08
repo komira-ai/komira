@@ -20,13 +20,31 @@
 #   2. the body is strict JSON (komira_json, which also refuses ill-formed
 #      UTF-8) with no repeated object key at any depth;
 #   3. it is an object whose `keys` is an array of 1..64 objects;
-#   4. komira_crypto's `parse_rsa_jwks` lifts EXACTLY as many keys as the
-#      document has RSA signing entries (kty "RSA", alg absent or "RS256",
-#      use absent or "sig"), and at least one.
-# Check 4 is what catches a partial parse: `parse_rsa_jwks` never raises and
+#   4. every RSA entry is one this package and komira_crypto read the same
+#      way: an RSA entry whose `alg` or `use` is present but not a string is
+#      refused (komira_crypto would treat it as absent; this reader cannot
+#      agree with that silently), and every RSA signing entry (kty "RSA", alg
+#      absent or "RS256", use absent or "sig") has a `kid` of printable
+#      ASCII (komira_crypto builds a kid one byte per character, so only
+#      ASCII reads the same in both);
+#   5. no two RSA signing entries share a `kid`. Two keys under one kid make
+#      every token with that kid unverifiable (komira_crypto refuses the
+#      ambiguity), and because the kid is "known" no refetch would ever fix
+#      it; so such a document never replaces a working set;
+#   6. komira_crypto's `parse_rsa_jwks` lifts EXACTLY the kids of those
+#      entries, in document order, and at least one.
+# Check 6 is what catches a partial parse: `parse_rsa_jwks` never raises and
 # returns the keys read so far when a later entry is malformed, so its result
-# alone cannot tell a whole set from a truncated one. One unreadable RSA entry
-# therefore refuses the whole document; the last good set stays.
+# alone cannot tell a whole set from a truncated one. It compares kids, not
+# counts, so two readers that each drop a different entry cannot agree by
+# accident. One unreadable RSA entry therefore refuses the whole document; the
+# last good set stays.
+#
+# STALE KEYS. A failed refresh keeps the last good set with no age limit, so
+# an attacker who can block the HTTPS fetch (no certificate needed) keeps a
+# key the issuer has withdrawn trusted for as long as the block lasts. A hard
+# ceiling (refuse every token once the set is, say, 24 h past its max-age) is
+# an open policy question for this package's spec; it is not implemented.
 #
 # Each verifier owns its cache; N serving workers make N fetches.
 # =============================================================================
@@ -42,7 +60,7 @@ from komira_json import JsonValue, parse_json_bytes
 from komira_http_auth.config import MAX_JWKS_MAX_AGE_S
 from komira_http_auth.dup_keys import refuse_duplicate_keys
 from komira_http_auth.jwks_fetch import JwksFetcher
-from komira_http_auth.token import string_member
+from komira_http_auth.token import is_printable_ascii, string_member
 
 
 comptime _JWKS_MAX_DEPTH: Int = 8
@@ -91,24 +109,35 @@ def parse_cache_max_age(header: Optional[String], default_s: Int64) -> Int64:
     return best
 
 
-def _rsa_signing_entry(e: JsonValue) -> Bool:
+def _rsa_signing_kid(e: JsonValue) raises -> Optional[String]:
+    """The kid of `e` when it is an RSA signing entry (check 4 of the module
+    header); None for an entry komira_crypto skips too (not RSA, or labelled
+    for another alg or use). Raises on an RSA entry the two readers could see
+    differently."""
     var kty = string_member(e, String("kty"))
     if not kty or kty.value() != String("RSA"):
-        return False
+        return Optional[String]()
     if e.has(String("alg")):
         var alg = string_member(e, String("alg"))
-        if not alg or alg.value() != String("RS256"):
-            return False
+        if not alg:
+            raise Error(String("komira_http_auth: JWKS RSA alg is not a string"))
+        if alg.value() != String("RS256"):
+            return Optional[String]()
     if e.has(String("use")):
         var use = string_member(e, String("use"))
-        if not use or use.value() != String("sig"):
-            return False
-    return True
+        if not use:
+            raise Error(String("komira_http_auth: JWKS RSA use is not a string"))
+        if use.value() != String("sig"):
+            return Optional[String]()
+    var kid = string_member(e, String("kid"))
+    if not kid or not is_printable_ascii(kid.value()):
+        raise Error(String("komira_http_auth: JWKS RSA kid is not usable"))
+    return kid^
 
 
 def parse_complete_rsa_jwks(body: List[UInt8]) raises -> List[RsaJwk]:
     """The RSA keys of a JWK Set document, only if the WHOLE document passes
-    checks 1..4 of the module header (status aside); raises otherwise."""
+    checks 1..6 of the module header (status aside); raises otherwise."""
     if len(body) == 0 or len(body) > RS256_MAX_JWKS_BYTES:
         raise Error(String("komira_http_auth: JWKS size out of range"))
     var v = parse_json_bytes(body, _JWKS_MAX_DEPTH)
@@ -121,18 +150,26 @@ def parse_complete_rsa_jwks(body: List[UInt8]) raises -> List[RsaJwk]:
     var n = keys.array_len()
     if n == 0 or n > RS256_MAX_JWKS_KEYS:
         raise Error(String("komira_http_auth: JWKS key count out of range"))
-    var expected = 0
+    var expected = List[String]()
     for i in range(n):
         var e = keys.element_at(i)
         if not e.is_object():
             raise Error(String("komira_http_auth: JWKS entry is not an object"))
-        if _rsa_signing_entry(e):
-            expected += 1
+        var kid = _rsa_signing_kid(e)
+        if not kid:
+            continue
+        for j in range(len(expected)):
+            if expected[j] == kid.value():
+                raise Error(String("komira_http_auth: JWKS repeats a kid"))
+        expected.append(kid.value())
     # SAFETY (UTF-8): parse_json_bytes above refused ill-formed UTF-8.
     var doc = String(unsafe_from_utf8=Span(body))
     var parsed = parse_rsa_jwks(doc)
-    if expected == 0 or len(parsed) != expected:
+    if len(expected) == 0 or len(parsed) != len(expected):
         raise Error(String("komira_http_auth: JWKS parsed partially"))
+    for i in range(len(parsed)):
+        if parsed[i].kid != expected[i]:
+            raise Error(String("komira_http_auth: JWKS parsed differently"))
     return parsed^
 
 

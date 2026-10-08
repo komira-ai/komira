@@ -3,10 +3,11 @@
 # =============================================================================
 #
 # An unknown kid costs exactly one refetch per window and is then refused;
-# Cache-Control max-age decides freshness; a truncated, partial, invalid,
-# duplicate-keyed, empty, non-200 or failed fetch never replaces the current
-# key set (the token under the current kid keeps verifying and the cache
-# still holds one key).
+# Cache-Control max-age decides freshness; a clock stepped back does not lock
+# refreshes out; a truncated, partial, invalid, duplicate-keyed, repeated-kid,
+# reader-ambiguous, non-ASCII-kid, empty, non-200 or failed fetch never
+# replaces the current key set (the token under the current kid keeps
+# verifying and the cache still holds one key).
 # =============================================================================
 
 from std.pathlib import Path
@@ -175,6 +176,27 @@ def test_unknown_kid_refetches_once_per_window_then_refuses() raises:
     assert_equal(rig.fetcher.pending(), 0)
 
 
+def test_a_clock_stepped_back_does_not_lock_refreshes_out() raises:
+    # Fetch at NOW, then the wall clock steps back 1000 s (an NTP
+    # correction). `now - last_attempt` is negative; were it read as "inside
+    # the window", a rotated kid would stay unknown until the clock passed
+    # NOW + window again. It must refetch at once.
+    var key = _key()
+    var rig = _Rig(_config())
+    rig.fetcher.add(200, String("max-age=3600"), rsa_jwks_json(key, KID))
+    rig.fetcher.add(
+        200, String("max-age=3600"), _jwks_two(key, KID, String("rotated"))
+    )
+    assert_equal(rig.verifier.verify(_tok(key, KID)).reason, String(REASON_OK))
+    assert_equal(rig.fetcher.fetch_count(), 1)
+    rig.clock.set(NOW - 1000)
+    var rotated = sign_rs256_compact(
+        _header(String("rotated")), _claims(NOW - 1000, NOW - 400), key
+    )
+    assert_equal(rig.verifier.verify(rotated).reason, String(REASON_OK))
+    assert_equal(rig.fetcher.fetch_count(), 2)
+
+
 # =============================================================================
 # A document that does not parse WHOLE never replaces the current set. Each
 # case: fetch 1 publishes KID (max-age=0, so the set is stale at once and the
@@ -243,6 +265,48 @@ def test_duplicate_keys_document_keeps_the_current_set() raises:
     _bad_document_keeps_current_set(
         200,
         String('{"keys":[') + other + String('],"keys":[]}'),
+    )
+
+
+def test_repeated_kid_keeps_the_current_set() raises:
+    # Two keys under one kid: every token with that kid would be refused by
+    # komira_crypto as ambiguous, and no refetch would fire because the kid
+    # is "known". Such a document must not replace a working set.
+    var key = _key()
+    var other = rsa_jwk_json(key, String("other"))
+    _bad_document_keeps_current_set(
+        200, String('{"keys":[') + other + String(",") + other + String("]}")
+    )
+
+
+def test_readers_disagreeing_with_equal_counts_keeps_the_current_set() raises:
+    # Entry "a" labels alg with a number: komira_crypto treats it as absent
+    # and lifts the key; entry "b" has a too-short modulus, so komira_crypto
+    # drops it. Each reader sees ONE key, but not the same one. The document
+    # is refused: an RSA entry with a non-string alg or use is unreadable.
+    var key = _key()
+    var a = rsa_jwk_json(key, String("a")).replace(
+        String('"alg":"RS256"'), String('"alg":5')
+    )
+    var b = String('{"kty":"RSA","kid":"b","n":"AQAB","e":"AQAB"}')
+    _bad_document_keeps_current_set(
+        200, String('{"keys":[') + a + String(",") + b + String("]}")
+    )
+    var u = rsa_jwk_json(key, String("a")).replace(
+        String('"use":"sig"'), String('"use":["sig"]')
+    )
+    _bad_document_keeps_current_set(
+        200, String('{"keys":[') + u + String(",") + b + String("]}")
+    )
+
+
+def test_non_ascii_kid_keeps_the_current_set() raises:
+    # komira_crypto builds a kid one byte per character, so a non-ASCII kid
+    # reads differently in the two readers; the document is refused.
+    var key = _key()
+    var k = rsa_jwk_json(key, String("k") + chr(0xE9) + String("y"))
+    _bad_document_keeps_current_set(
+        200, String('{"keys":[') + k + String("]}")
     )
 
 

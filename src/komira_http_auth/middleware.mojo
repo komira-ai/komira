@@ -18,8 +18,17 @@
 #      `WWW-Authenticate: Bearer error="invalid_token"`;
 #   4. on success sets `ctx.principal` and lets the request through.
 #
-# RFC 6750 section 3.1 pairs invalid_request with 400; here every
-# authentication failure is a 401 so a client has one status to handle.
+# Two deliberate departures from RFC 6750 section 3.1, both from the package
+# spec: (a) it pairs invalid_request with 400; here every authentication
+# failure is a 401 so a client has one status to handle; (b) it says a request
+# with no credentials, or with another scheme such as `Basic`, SHOULD get a
+# bare `WWW-Authenticate: Bearer` with no error code; here it gets
+# invalid_request like any other unusable Authorization header. A bare
+# challenge for those two cases is a candidate change for the spec owner.
+#
+# The HTTP request's headers are one map entry per name; the HTTP/1 parser
+# comma-folds a repeated `Authorization` into one value, and the comma makes
+# it malformed, so two Authorization headers are invalid_request.
 #
 # The 401 body is a fixed text and its headers are fixed values: nothing in a
 # response, and nothing this file logs (it logs nothing), comes from the
@@ -73,8 +82,18 @@ def bearer_token_from_header(value: String) -> Optional[String]:
     var b = value.as_bytes()
     if len(b) < 8 or len(b) > 7 + MAX_TOKEN_BYTES:
         return Optional[String]()
-    var scheme = String(value[byte=0:6]).lower()
-    if scheme != String("bearer") or b[6] != UInt8(ord(" ")):
+    # The scheme is compared byte by byte, never by slicing the String: the
+    # HTTP/1 parser maps an obs-text byte to a two-byte UTF-8 character, so
+    # byte 6 of a hostile value can fall inside a character.
+    var bearer = String("bearer")
+    var want = bearer.as_bytes()
+    for k in range(6):
+        var c = b[k]
+        if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
+            c = c + UInt8(0x20)
+        if c != want[k]:
+            return Optional[String]()
+    if b[6] != UInt8(ord(" ")):
         return Optional[String]()
     var i = 7
     while i < len(b) and _is_token68_byte(b[i]):

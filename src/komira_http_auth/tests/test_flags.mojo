@@ -5,7 +5,8 @@
 # Single-anchor flags and their defaults, the --trust-anchor form (exactly
 # one accepted; a second is refused), non-https JWKS URLs refused at startup
 # (by the flags and by the verifier constructor), RS256/JWT only, max TTL,
-# copy-claim rules, and the --name=value syntax.
+# copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap, and the
+# --name=value syntax.
 # =============================================================================
 
 from std.pathlib import Path
@@ -238,8 +239,34 @@ def test_bad_max_ttl_is_refused() raises:
 def test_copy_claim_rules() raises:
     _refused(_plus(_base(), String("--copy-claim=sub")), "always set")
     _refused(_plus(_base(), String("--copy-claim=aud")), "always set")
+    _refused(_plus(_base(), String("--copy-claim=iss")), "always set")
     var a = _plus(_base(), String("--copy-claim=email"))
     _refused(_plus(a^, String("--copy-claim=email")), "more than once")
+
+
+def _verifier_refused(var cfg: BearerJwtConfig, needle: String) raises:
+    try:
+        _ = Verifier(cfg^, ScriptedJwksFetcher(), FixedAuthClock(NOW))
+    except e:
+        var msg = String(e)
+        assert_true(needle in msg, "want '" + needle + "' in: " + msg)
+        return
+    raise Error("expected a refusal containing '" + needle + "'")
+
+
+def test_leeway_is_capped_at_60_seconds() raises:
+    # The cap: a verifier with more than 60 s (or a negative) leeway is never
+    # built, so an hour-expired token can never be accepted by configuration.
+    _verifier_refused(_config().with_leeway_s(Int64(61)), "0..60")
+    _verifier_refused(_config().with_leeway_s(Int64(3600)), "0..60")
+    _verifier_refused(_config().with_leeway_s(Int64(-1)), "0..60")
+    # Controls: both ends of the range build.
+    _ = Verifier(
+        _config().with_leeway_s(Int64(60)), ScriptedJwksFetcher(), FixedAuthClock(NOW)
+    )
+    _ = Verifier(
+        _config().with_leeway_s(Int64(0)), ScriptedJwksFetcher(), FixedAuthClock(NOW)
+    )
 
 
 def test_flag_syntax_is_one_spelling() raises:

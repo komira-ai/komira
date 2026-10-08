@@ -258,6 +258,30 @@ def test_malformed_authorization_is_invalid_request() raises:
         assert_equal(rig.fetcher.fetch_count(), 0)
 
 
+def test_non_ascii_authorization_is_invalid_request() raises:
+    # The HTTP/1 parser turns an obs-text byte into a two-byte character, so
+    # a byte-6 boundary of these values falls inside a character. The scheme
+    # is compared byte by byte; each is a plain invalid_request, never an
+    # abort.
+    var key = _key()
+    var cases = List[String]()
+    cases.append(String("Beare") + chr(0xE9) + String(" abc.def.ghi"))
+    cases.append(String("Bearer") + chr(0xE9) + String("abc.def.ghi"))
+    cases.append(chr(0xE9) + String("earer abc.def.ghi"))
+    cases.append(String("Bearer ") + chr(0xE9) + String("abc.def.ghi"))
+    cases.append(String("Bearer abc.def") + chr(0xE9))
+    for i in range(len(cases)):
+        var rig = _MwRig(key)
+        var req = _req(Optional[String](cases[i]))
+        var ctx = RequestContext.new()
+        var r = rig.mw.before(req, ctx)
+        assert_true(Bool(r), "case " + String(i))
+        _assert_401(r.value(), WWW_AUTHENTICATE_INVALID_REQUEST, "case " + String(i))
+        assert_equal(rig.mw.last_reason(), String(REASON_MALFORMED_HEADER))
+        assert_false(Bool(ctx.principal))
+        assert_equal(rig.fetcher.fetch_count(), 0)
+
+
 def test_bad_token_is_invalid_token_and_not_echoed() raises:
     var key = _key()
     var good = _good_token(key)
