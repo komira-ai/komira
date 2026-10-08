@@ -27,8 +27,9 @@
 #      `_col_is_null`, `_fixed_width_bytes`. Some of these are unreachable
 #      from `compute_column_stats`; each says so.
 #
-# Assertions that pin behaviour departing from the module's docstring or
-# from the type's real width say "current behaviour".
+# Nothing here asserts a value believed wrong (komira-ai/komira#940): where
+# the code departs from its docstring or from the type, the test runs the
+# line and asserts only what is right under both behaviours.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -277,30 +278,31 @@ def test_hll_count_small_and_large() raises:
 
 
 def test_hll_count_clamps_a_forged_register() raises:
-    """`registers` is a public field: a value above Q + 1 counts as Q + 1.
+    """`registers` is a public field: a value above Q + 1 counts as Q + 1,
+    so a sketch of forged registers counts exactly as one holding Q + 1.
 
     In `count` the Q + 1 bucket and the Q bucket differ only by a 2^-52
     weight in z, which shows only when no register is lower: so every
-    register is forged. At Q + 1 the sketch is saturated (z == 0, count 0,
-    see the next test); at Q it is not."""
+    register is forged. The value both counts take is not asserted (what a
+    saturated sketch should estimate is komira-ai/komira#940)."""
     var forged = HyperLogLog()
-    var below = HyperLogLog()
+    var honest = HyperLogLog()
     for i in range(4096):
         forged.registers[i] = UInt8(255)
-        below.registers[i] = UInt8(52)
-    assert_equal(forged.count(), UInt64(0), "255 counts as Q + 1")
-    assert_true(below.count() > UInt64(1) << 60, "the fixture tells Q from Q + 1")
+        honest.registers[i] = UInt8(53)
+    assert_equal(forged.count(), honest.count(), "255 counts as Q + 1")
 
 
-def test_hll_count_of_a_saturated_sketch_is_zero() raises:
-    """Every register at Q + 1 makes the Ertl sum z exactly 0; `count`
-    answers 0 (current behaviour: a saturated sketch reads as empty)."""
+def test_hll_saturating_hashes_and_count_returns() raises:
+    """Hashes below 4096 put Q + 1 in every register, which makes the Ertl
+    sum z exactly 0. `count` returns there (the z == 0 arm); its value is
+    not asserted: 0 for a saturated sketch is wrong (komira-ai/komira#940)."""
     var h = HyperLogLog()
     for i in range(4096):
         h.add(UInt64(i))
     for i in range(4096):
         assert_equal(h.registers[i], UInt8(53))
-    assert_equal(h.count(), UInt64(0))
+    _ = h.count()
 
 
 def test_hll_sigma_tau_series_and_domain() raises:
@@ -467,14 +469,14 @@ def test_note_string_min_max_length_and_ndv() raises:
 def test_finalize_no_scanner_kind_with_values() raises:
     """A NONE-kind accumulator that saw values (unreachable from
     `compute_column_stats`, which never feeds one) gets no min/max/sum but
-    keeps its exact NDV."""
+    keeps its exact NDV. Its average size (0 for BINARY, which is not
+    fixed-width) is not asserted (komira-ai/komira#940)."""
     var acc = _ColAccum(ArrowType.BINARY, 2)
     acc.note_int(Int64(3))
     acc.note_int(Int64(4))
     var s = _finalize_accum(acc)
     assert_true(s.min.is_absent() and s.max.is_absent() and s.sum.is_absent())
     assert_equal(s.distinct_count.value.value().int_val, Int64(2))
-    assert_equal(s.avg_size_bytes, 0.0)
 
 
 def test_note_bool_and_note_float_extremes() raises:
@@ -495,8 +497,10 @@ def test_note_bool_and_note_float_extremes() raises:
 
 
 def test_scan_float_column_float16_counts_only() raises:
-    """`_scan_float_column`'s FLOAT16 arm: nulls and values counted, nothing
-    scanned (unreachable from `compute_column_stats`: FLOAT16 is NONE kind)."""
+    """`_scan_float_column`'s FLOAT16 arm counts nulls and values exactly
+    (unreachable from `compute_column_stats`: FLOAT16 is NONE kind). Whether
+    it should also scan is komira-ai/komira#940, so `seen_value` is not
+    asserted."""
     var vals = List[Int]()
     vals.append(1)
     vals.append(2)
@@ -509,7 +513,6 @@ def test_scan_float_column_float16_counts_only() raises:
     _scan_float_column(acc, col, ArrowType.FLOAT16, 3)
     assert_equal(acc.null_count, 1)
     assert_equal(acc.n_values, 2)
-    assert_false(acc.seen_value)
 
 
 def test_simd_scan_of_zero_rows_sees_nothing() raises:
@@ -569,9 +572,10 @@ def test_fixed_width_bytes_table() raises:
         assert_equal(_fixed_width_bytes(w8[i]), 8, "8-byte " + String(i))
     assert_equal(_fixed_width_bytes(ArrowType.DECIMAL128), 16)
     assert_equal(_fixed_width_bytes(ArrowType.STRING), 0)
-    # Current behaviour: DATE64 (8 bytes) and FLOAT16 (2 bytes) read 0.
-    assert_equal(_fixed_width_bytes(ArrowType.DATE64), 0)
-    assert_equal(_fixed_width_bytes(ArrowType.FLOAT16), 0)
+    # DATE64 (8 bytes) and FLOAT16 (2 bytes) read 0 today; neither is
+    # asserted (komira-ai/komira#940). The calls keep the fall-through run.
+    _ = _fixed_width_bytes(ArrowType.DATE64)
+    _ = _fixed_width_bytes(ArrowType.FLOAT16)
 
 
 def main() raises:

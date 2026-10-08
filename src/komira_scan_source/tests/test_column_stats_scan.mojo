@@ -17,7 +17,8 @@
 #      Strings with Int32 and Int64 offsets: nulls, an empty string (first
 #      value and new minimum), prefixes in both directions, an all-null
 #      column, and a field that says STRING over a column with no offsets.
-#      The no-scanner arms (a DECIMAL128 field, DATE64). An empty batch,
+#      The no-scanner arms (a DECIMAL128 field, DATE64), held only to what
+#      is right whether or not komira-ai/komira#940 is fixed. An empty batch,
 #      several batches whose SIMD blocks must fold into the running min/max,
 #      and no batches at all.
 #   6. Cardinality regimes, each on the SIMD path (no validity) and the
@@ -29,8 +30,7 @@
 #      leaves no trace in the final stats, so it is checked on the
 #      accumulator's `bloom_active`.
 #
-# Assertions that pin behaviour departing from the module's docstring say
-# "current behaviour".
+# Nothing here asserts a value believed wrong (komira-ai/komira#940).
 # =============================================================================
 
 from std.testing import (
@@ -160,18 +160,13 @@ def _within(est: Int64, n: Int, label: String) raises:
     )
 
 
-def _assert_unscanned(s: ColumnStats, nulls: Int, avg: Float64, label: String) raises:
-    """A column no scanner read: exact nulls, no min/max/sum.
-
-    Current behaviour: NDV is Exact 0 although the column holds values (the
-    `compute_column_stats` docstring says NDV is Absent)."""
+def _assert_unscanned(s: ColumnStats, nulls: Int, label: String) raises:
+    """A column the docstring gives null_count only: exact nulls, no
+    min/max/sum. NDV is not asserted: the code reports Exact 0 for a column
+    holding values, the docstring says Absent (komira-ai/komira#940)."""
     assert_equal(s.null_count, nulls, label + ": null_count")
     assert_true(s.min.is_absent() and s.max.is_absent(), label + ": no min/max")
     assert_true(s.sum.is_absent(), label + ": no sum")
-    assert_true(s.distinct_count.is_exact(), label + ": NDV tag")
-    assert_equal(s.distinct_count.value.value().int_val, Int64(0), label + ": NDV 0")
-    assert_equal(s.avg_size_bytes, avg, label + ": avg_size_bytes")
-    assert_false(Bool(s.hll) or Bool(s.bloom), label + ": no sketch, no bloom")
 
 
 # =============================================================================
@@ -353,11 +348,12 @@ def test_strings_both_offset_widths() raises:
 
 def test_string_field_over_a_column_without_offsets() raises:
     """A field that says STRING over an INT32 column: no offsets buffer, so
-    the string scanner reads nothing (no values seen, average 0)."""
+    the string scanner returns early. Exact nulls and no min/max are right
+    either way; NDV and average size are komira-ai/komira#940."""
     var vals = List[Int]()
     vals.append(1)
     vals.append(2)
-    _assert_unscanned(_stats1(_int_col[DType.int32](vals), ArrowType.STRING), 0, 0.0, "no offsets")
+    _assert_unscanned(_stats1(_int_col[DType.int32](vals), ArrowType.STRING), 0, "no offsets")
 
 
 def test_no_scanner_arms() raises:
@@ -370,13 +366,16 @@ def test_no_scanner_arms() raises:
     # A DECIMAL128 field: NONE kind, the dispatcher's own count-only arm.
     var d = _int_col[DType.int64](vals)
     _set_nulls(d, nulls)
-    _assert_unscanned(_stats1(d^, ArrowType.DECIMAL128), 2, 16.0, "DECIMAL128")
-    # DATE64 is INT kind, but `_scan_int_column` has no DATE64 arm.
-    # Current behaviour: unscanned, and width 0 (the type is 8 bytes).
+    var ds = _stats1(d^, ArrowType.DECIMAL128)
+    _assert_unscanned(ds, 2, "DECIMAL128")
+    assert_equal(ds.avg_size_bytes, 16.0, "DECIMAL128 is 16 bytes")
+    # DATE64 is INT kind, but `_scan_int_column` has no DATE64 arm, so its
+    # min/max/NDV and width are wrong today (komira-ai/komira#940). Only the
+    # null count, right either way, is asserted.
     var t = _int_col[DType.int64](vals)
     t.arrow_type = ArrowType.DATE64
     _set_nulls(t, nulls)
-    _assert_unscanned(_stats1(t^, ArrowType.DATE64), 2, 0.0, "DATE64")
+    assert_equal(_stats1(t^, ArrowType.DATE64).null_count, 2, "DATE64 nulls")
 
 
 def test_empty_and_multiple_batches_fold() raises:
@@ -406,7 +405,12 @@ def test_empty_and_multiple_batches_fold() raises:
     )
     var none = Slab[RecordBatch].create(1)
     var empty = compute_column_stats(none, schema)
-    _assert_unscanned(empty[0], 0, 8.0, "no batches")
+    # No rows at all: NDV Exact 0 is right here.
+    ref e = empty[0]
+    _assert_unscanned(e, 0, "no batches")
+    assert_true(e.distinct_count.is_exact(), "no batches: NDV Exact")
+    assert_equal(e.distinct_count.value.value().int_val, Int64(0), "no batches: NDV 0")
+    assert_equal(e.avg_size_bytes, 8.0, "no batches: INT64 width")
 
 
 # =============================================================================
