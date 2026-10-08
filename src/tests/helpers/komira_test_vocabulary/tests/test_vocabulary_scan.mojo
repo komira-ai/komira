@@ -2,10 +2,11 @@
 # test_vocabulary_scan.mojo — what the scan flags and what it lets through.
 # =============================================================================
 #
-#   - `early_date_at`: each year 2024 and 2025 and 2026 months 01 to 08, with
-#     each separator and with none, is found at its offset; September 2026 and
-#     later, month 00 or 13, a year that continues a longer number, and a year
-#     with one month digit are not.
+#   - `early_date_at`: every month 01 to 12 of 2024 and 2025 and every month
+#     01 to 08 of 2026, with each separator and with none, is found at its
+#     offset; 2026 months 09 to 12 with each separator and with none are not;
+#     nor are later years, month 00 or 13, a year that continues a longer
+#     number, and a year with one month digit.
 #   - `scan_text`: a banned word in any case is reported once per word with
 #     its line number; a clean line adds nothing; a line with both a word and
 #     a date gives two hits, in that order.
@@ -30,6 +31,15 @@ def test_early_dates_are_found() raises:
     seps.append(String(""))
     for s in range(len(seps)):
         var sep = seps[s]
+        for year in range(2000 + 24, 2000 + 27):
+            for month in range(1, 13):
+                var mm = String(month) if month >= 10 else "0" + String(month)
+                var want = 2 if (year < 2000 + 26 or month <= 8) else -1
+                assert_equal(
+                    early_date_at("x " + _y(year) + sep + mm + " y"),
+                    want,
+                    msg=_y(year) + sep + mm,
+                )
         assert_equal(early_date_at("x " + _y(2026) + sep + "08" + sep + "31"), 2)
         assert_equal(early_date_at(_y(2026) + sep + "01"), 0)
         assert_equal(early_date_at("(" + _y(2025) + sep + "12)"), 1)
