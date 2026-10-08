@@ -6,6 +6,9 @@
 # delimited, decoded bytes that are not UTF-8 or that hold CR, LF or NUL.
 # The addresses of the section 8 examples are replaced by reserved example
 # names (RFC 2606); the encoded words are the RFC's bytes.
+# Ill-formed UTF-8 outside encoded words: one U+FFFD per octet that does not
+# start a well-formed sequence, with a vector on each side of every edge of
+# the RFC 3629 section 4 lead-byte and continuation-byte ranges.
 # Encoding: exact output for a Q and a B case, every word at most 75
 # characters with no UTF-8 sequence split, and decode(encode(x)) == x.
 
@@ -164,6 +167,80 @@ def test_ill_formed_utf8_outside_words_is_replaced() raises:
     assert_equal(_lossy(0xE2, 0x82, 0xC0), "���")
 
 
+def _hex(text: String) -> List[UInt8]:
+    """The octets written as space-separated hex pairs in `text`."""
+    var out = List[UInt8]()
+    var b = text.as_bytes()
+    var i = 0
+    while i + 1 < len(b):
+        out.append(UInt8(_nibble(b[i]) * 16 + _nibble(b[i + 1])))
+        i += 3
+    return out^
+
+
+def _nibble(c: UInt8) -> Int:
+    if c >= 0x41:
+        return Int(c) - 0x41 + 10
+    return Int(c) - 0x30
+
+
+def _check_lossy(hex: String, want: String) raises:
+    assert_equal(decode_header_text(Span(_hex(hex))), want, hex)
+
+
+def _ffd(count: Int) -> String:
+    var out = String("")
+    for _ in range(count):
+        out += chr(0xFFFD)
+    return out
+
+
+def test_utf8_lead_and_continuation_byte_edges() raises:
+    # RFC 3629 section 4: every edge of the lead-byte table and of each
+    # continuation-byte range, as a well-formed sequence and its code point
+    # on the inside and one U+FFFD per octet on the outside.
+    _check_lossy("7F", chr(0x7F))
+    _check_lossy("80", _ffd(1))
+    _check_lossy("C1 BF", _ffd(2))
+    _check_lossy("C2 80", chr(0x80))
+    _check_lossy("DF BF", chr(0x7FF))
+    _check_lossy("E0 A0 80", chr(0x800))
+    _check_lossy("E0 9F BF", _ffd(3))
+    _check_lossy("E1 80 80", chr(0x1000))
+    _check_lossy("EC BF BF", chr(0xCFFF))
+    _check_lossy("ED 80 80", chr(0xD000))
+    _check_lossy("EE 80 80", chr(0xE000))
+    _check_lossy("EF BF BF", chr(0xFFFF))
+    _check_lossy("F0 90 80 80", chr(0x10000))
+    _check_lossy("F1 80 80 80", chr(0x40000))
+    _check_lossy("F3 BF BF BF", chr(0xFFFFF))
+    _check_lossy("F4 80 80 80", chr(0x100000))
+    _check_lossy("F4 8F BF BF", chr(0x10FFFF))
+    _check_lossy("F4 90 80 80", _ffd(4))
+    # F5..FF never appear (RFC 3629 section 1).
+    _check_lossy("F5 80 80 80", _ffd(4))
+    _check_lossy("F7 8F 80 80", _ffd(4))
+    _check_lossy("FF 80", _ffd(2))
+    # The default continuation range 80..BF, second byte.
+    _check_lossy("C2 7F", _ffd(1) + chr(0x7F))
+    _check_lossy("DF C0", _ffd(2))
+    # Third byte.
+    _check_lossy("E2 82 7F", _ffd(2) + chr(0x7F))
+    _check_lossy("E2 82 80", chr(0x2080))
+    _check_lossy("E2 82 BF", chr(0x20BF))
+    # Third and fourth bytes of a four-byte sequence.
+    _check_lossy("F0 90 41 80", _ffd(2) + "A" + _ffd(1))
+    _check_lossy("F0 90 80 7F", _ffd(3) + chr(0x7F))
+    _check_lossy("F0 90 80 C0", _ffd(4))
+    # A sequence cut short by the end of the token, and one that ends
+    # exactly there.
+    _check_lossy("C3", _ffd(1))
+    _check_lossy("E2 82", _ffd(2))
+    _check_lossy("F0 90 80", _ffd(3))
+    _check_lossy("61 C3 A9", "a" + chr(0xE9))
+    _check_lossy("61 F0 90 80 80", "a" + chr(0x10000))
+
+
 def test_plain_text_and_white_space_are_kept() raises:
     assert_equal(decode_header_text("  Hello\tworld  "), "  Hello\tworld  ")
     assert_equal(decode_header_text("=?UTF-8?Q?a?= b =?UTF-8?Q?c?="), "a b c")
@@ -227,6 +304,7 @@ def main() raises:
     test_words_kept_as_written()
     test_malformed_words_each_rule()
     test_ill_formed_utf8_outside_words_is_replaced()
+    test_utf8_lead_and_continuation_byte_edges()
     test_plain_text_and_white_space_are_kept()
     test_encode_exact()
     test_encode_round_trip()
