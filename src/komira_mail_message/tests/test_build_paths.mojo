@@ -92,6 +92,20 @@ def test_line_of_998_is_7bit() raises:
     assert_equal(_body_of(built), line + "\r\nnext\r\n")
 
 
+def test_line_of_998_after_a_line_is_7bit() raises:
+    # The line break before a 998-octet line ends the line before it and is
+    # not counted in the 998-octet line.
+    var line = String("")
+    for _ in range(998):
+        line += "x"
+    var b = _builder()
+    b.set_text("a\n" + line)
+    var built = b.build()
+    var text = _s(built)
+    assert_true(text.find("Content-Transfer-Encoding: 7bit\r\n") > 0, text)
+    assert_equal(_body_of(built), "a\r\n" + line + "\r\n")
+
+
 def test_boundary_held_by_a_part_is_changed() raises:
     var b = _builder()
     b.set_text("before\n--=_komira_0\nafter")
@@ -262,6 +276,7 @@ def main() raises:
     test_html_only_and_line_breaks()
     test_line_over_998_is_quoted_printable()
     test_line_of_998_is_7bit()
+    test_line_of_998_after_a_line_is_7bit()
     test_boundary_held_by_a_part_is_changed()
     test_long_non_ascii_file_name_is_split_into_sections()
     test_section_ends_on_a_character_boundary()

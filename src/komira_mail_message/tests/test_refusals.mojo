@@ -151,6 +151,26 @@ def _attachment_error(media_type: String, data: String = "") raises -> String:
     return String("OK")
 
 
+def _raw_attachment_error(media_type: String, data: List[UInt8]) raises -> String:
+    var b = _builder()
+    try:
+        b.add_attachment("f", media_type, Span(data))
+    except e:
+        return String(e)
+    return String("OK")
+
+
+def _raw_line(byte: UInt8) -> List[UInt8]:
+    """`Subject: a`, then `byte`, then CRLF CRLF, as raw bytes (not UTF-8)."""
+    var out = List[UInt8]()
+    for c in "Subject: a".as_bytes():
+        out.append(c)
+    out.append(byte)
+    for c in "\r\n\r\n".as_bytes():
+        out.append(c)
+    return out^
+
+
 comptime NOT_A_MEDIA_TYPE = "komira_mail_message.InvalidValue: MessageBuilder.add_attachment: a media type that is not type/subtype tokens"
 
 
@@ -195,6 +215,29 @@ def test_values() raises:
         _attachment_error("message/rfc822", line_998 + "\r\n\r\nbody\r\n"), "OK"
     )
     assert_equal(_attachment_error("message/rfc822", line_998 + "\n\nbody\n"), "OK")
+    # A 998-octet line after another line: the LF of the CRLF before it is
+    # not counted into it either.
+    assert_equal(
+        _attachment_error(
+            "message/rfc822",
+            String("To: a@example.com\r\n") + line_998 + "\r\n\r\nbody\r\n",
+        ),
+        "OK",
+    )
+    assert_equal(
+        _attachment_error(
+            "message/rfc822", String("To: a@example.com\n") + line_998 + "\n\nb\n"
+        ),
+        "OK",
+    )
+    # RFC 2045 section 2.7: 7bit is octets 1 to 127. Raw bytes, not UTF-8,
+    # reach the edge itself: 0x80 (a windows-1252 euro sign) is refused,
+    # 0x7F (DEL) is 7bit.
+    assert_equal(
+        _raw_attachment_error("message/rfc822", _raw_line(0x80)), not_7bit
+    )
+    assert_equal(_raw_attachment_error("message/rfc822", _raw_line(0x7F)), "OK")
+    assert_equal(_raw_attachment_error("message/rfc822", _raw_line(0x01)), "OK")
     # The 7bit rule is for every message/* subtype (RFC 2046 section 5.2.2
     # for message/partial), not just message/rfc822.
     assert_equal(
