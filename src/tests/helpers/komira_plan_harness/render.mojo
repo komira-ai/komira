@@ -609,14 +609,29 @@ def _same_strings(a: List[String], b: List[String]) -> Bool:
     return True
 
 
+def _field_heads(batch: RecordBatch) raises -> List[String]:
+    """Per column, the name, top-level type and nullability of its Field:
+    what a zero-row chunk must agree on (its dictionary and children may be
+    absent, so the rest of its type is not compared)."""
+    var heads = List[String]()
+    for c in range(batch.schema.num_columns()):
+        var f = batch.schema.field_at(c)
+        var h = escape_name(f.name) + ":" + arrow_type_name(f.arrow_type)
+        if f.nullable:
+            h += "?"
+        heads.append(h^)
+    return heads^
+
+
 def render_table(table: Table, var policy: CanonPolicy) raises -> CanonText:
     """The canonical text of a chunked result: its chunks' rows in order.
     The schema is spelled from the first chunk that holds rows (from chunk 0
     when none does, from the Fields alone when there is no chunk), and every
     chunk that holds rows must spell the same. A zero-row chunk (an engine's
-    empty morsel) is neither compared nor rendered: a zero-row nested or
-    dictionary column may have no children or dictionary to spell its type
-    or read its cells from."""
+    empty morsel) is not rendered, and only its Fields' names, top-level
+    types and nullability are compared with the reference chunk's: a
+    zero-row nested or dictionary column may have no children or dictionary
+    to spell its full type or read its cells from."""
     var res = CanonText(policy^)
     var n = table.num_chunks()
     if n == 0:
@@ -625,9 +640,17 @@ def render_table(table: Table, var policy: CanonPolicy) raises -> CanonText:
     var first = 0
     while first < n and table.chunk(first).num_rows() == 0:
         first += 1
-    _schema_of_batch(res, table.chunk(first if first < n else 0))
+    var reference = first if first < n else 0
+    _schema_of_batch(res, table.chunk(reference))
+    var heads = _field_heads(table.chunk(reference))
     for i in range(n):
         ref chunk = table.chunk(i)
+        if i != reference and chunk.num_rows() == 0:
+            if not _same_strings(_field_heads(chunk), heads):
+                raise Error(
+                    "canon: table chunk " + String(i)
+                    + " (zero rows) has another column name, type or nullability"
+                )
         if i != first and chunk.num_rows() > 0:
             var probe = CanonText(CanonPolicy())
             _schema_of_batch(probe, chunk)

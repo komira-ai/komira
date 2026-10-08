@@ -226,17 +226,19 @@ def _canon_hex_escape(bs: Span[UInt8, _], i: Int) -> Bool:
         return True
     if v < 128:
         return False
-    var seq = List[UInt8](capacity=4)
-    seq.append(UInt8(v))
+    var seq = InlineArray[UInt8, 4](fill=UInt8(0))
+    seq[0] = UInt8(v)
+    var count = 1
     var j = i + 4
-    while len(seq) < 4 and j < len(bs):
+    while count < 4 and j < len(bs):
         var after = j
         var b = _byte_at(bs, j, after)
         if b < 0:
             break
-        seq.append(UInt8(b))
+        seq[count] = UInt8(b)
+        count += 1
         j = after
-    return _utf8_len(Span(seq), 0) == 0
+    return _utf8_len(Span(seq)[:count], 0) == 0
 
 
 def _is_open(b: UInt8) -> Bool:

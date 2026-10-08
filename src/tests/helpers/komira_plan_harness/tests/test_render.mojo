@@ -7,7 +7,10 @@
 # test_table_with_zero_row_chunks: a zero-row chunk (an engine's empty
 # morsel) whose dictionary and list columns have no dictionary or child must
 # neither fail the schema check nor be read, and the schema comes from the
-# first chunk that holds rows.
+# first chunk that holds rows. test_zero_row_chunk_with_another_name_is_refused
+# and test_zero_row_chunk_with_another_nullability_is_refused: a renderer that
+# skips a zero-row chunk's Fields entirely passes an empty morsel whose
+# column is renamed or changes nullability; both must be refused.
 
 from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
@@ -361,6 +364,59 @@ def test_table_with_zero_row_chunks() raises:
     var none = render_table(Table.from_chunks(empties^, es^), CanonPolicy.total())
     assert_equal(none.num_rows(), 0)
     assert_equal(none.schema[0], "s:dictionary<int64>")
+
+
+def _int32_batch(name: String, nullable: Bool, rows: Int) raises -> RecordBatch:
+    var bb = BatchBuilder()
+    var vals = List[Int]()
+    for r in range(rows):
+        vals.append(r)
+    bb.add(
+        Field(name, ArrowType.INT32, nullable),
+        fixed_column(ArrowType.INT32, 4, ints(vals), all_valid(rows)),
+    )
+    return bb.build()
+
+
+def test_zero_row_chunk_with_another_name_is_refused() raises:
+    """An empty chunk is not rendered, but its column names are the
+    result's: a zero-row chunk naming its column `b` where the others name
+    it `a` is refused, before or after the chunk that holds rows."""
+    for at_front in range(2):
+        var chunks = List[RecordBatch]()
+        if at_front == 1:
+            chunks.append(_int32_batch("b", False, 0))
+        chunks.append(_int32_batch("a", False, 2))
+        if at_front == 0:
+            chunks.append(_int32_batch("b", False, 0))
+        var schema = chunks[at_front].schema.copy()
+        var table = Table.from_chunks(chunks^, schema^)
+        with assert_raises(contains="(zero rows) has another column name"):
+            _ = render_table(table, CanonPolicy.total())
+    # The same name and nullability passes.
+    var ok = List[RecordBatch]()
+    ok.append(_int32_batch("a", False, 0))
+    ok.append(_int32_batch("a", False, 2))
+    var os = ok[1].schema.copy()
+    assert_equal(render_table(Table.from_chunks(ok^, os^), CanonPolicy.total()).num_rows(), 2)
+
+
+def test_zero_row_chunk_with_another_nullability_is_refused() raises:
+    """A zero-row chunk whose column is nullable where the others' is not
+    (or not where they are) is refused; with every chunk empty, chunk 0 is
+    the reference."""
+    var chunks = List[RecordBatch]()
+    chunks.append(_int32_batch("a", False, 2))
+    chunks.append(_int32_batch("a", True, 0))
+    var schema = chunks[0].schema.copy()
+    with assert_raises(contains="(zero rows) has another column name"):
+        _ = render_table(Table.from_chunks(chunks^, schema^), CanonPolicy.total())
+    var empties = List[RecordBatch]()
+    empties.append(_int32_batch("a", True, 0))
+    empties.append(_int32_batch("a", False, 0))
+    var es = empties[0].schema.copy()
+    with assert_raises(contains="(zero rows) has another column name"):
+        _ = render_table(Table.from_chunks(empties^, es^), CanonPolicy.total())
 
 
 def main() raises:

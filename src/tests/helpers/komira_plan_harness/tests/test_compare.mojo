@@ -314,6 +314,23 @@ def test_exact_multiset_skips_the_first_fit_search() raises:
     assert_true(tr.first_fit_probes > 0)
 
 
+def test_rel_tolerance_runs_the_first_fit_search() raises:
+    """A `rel=` tolerance (ulps stays 0) also makes the walk inexact. Sorted,
+    expected is (1.0,b),(1.0625,a) and actual (1.0,a),(1.0625,b): the walk
+    pairs (1.0,b) with (1.0625,b) under rel=0.1 and leaves (1.0625,a) and
+    (1.0,a) unpaired, which match only under the tolerance. The search must
+    pair them; skipping it reports a missing and an extra row."""
+    var head = String(
+        "#! komira-plan-conformance v1\n#  order: none\n#  float: rel=0.1\nx:float64\ts:string\n"
+    )
+    var e = parse_canon(head + "1.0\tb\n1.0625\ta\n")
+    var a = parse_canon(head + "1.0625\tb\n1.0\ta\n")
+    var report = compare_canon(e, a)
+    if not report.ok():
+        raise Error(String(report))
+    assert_true(report.first_fit_probes > 0)
+
+
 def test_check_batch_end_to_end() raises:
     var bb = BatchBuilder()
     var k: List[Int] = [2, 1]
