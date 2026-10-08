@@ -209,6 +209,18 @@ def test_vtimezones() raises:
         + "BEGIN:STANDARD\nDTSTART:20301027T030000\nTZNAME:CET\nTZOFFSETFROM:+0200\nTZOFFSETTO:+0100\nEND:STANDARD\n"
         + "END:VTIMEZONE\n",
     )
+    # A "last Sunday" rule (week 5 of the POSIX string) is BYDAY=-1SU; the
+    # end comes first in this span, so STANDARD is written first.
+    var london = posix_zone("Europe/London", "GMT0BST,M3.5.0/1,M10.5.0")
+    assert_equal(
+        _lines(write_vtimezone("Europe/London", london, from_utc)),
+        "BEGIN:VTIMEZONE\nTZID:Europe/London\n"
+        + "BEGIN:STANDARD\nDTSTART:20291028T020000\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\nTZNAME:GMT\n"
+        + "TZOFFSETFROM:+0100\nTZOFFSETTO:+0000\nEND:STANDARD\n"
+        + "BEGIN:DAYLIGHT\nDTSTART:20300331T010000\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\nTZNAME:BST\n"
+        + "TZOFFSETFROM:+0000\nTZOFFSETTO:+0100\nEND:DAYLIGHT\n"
+        + "END:VTIMEZONE\n",
+    )
     # Southern hemisphere rules (daylight time spans the new year): the two
     # observances are written in the order of their first onsets in the span.
     var sydney = posix_zone("Australia/Sydney", "AEST-10AEDT,M10.1.0,M4.1.0/3")
