@@ -15,6 +15,7 @@ from komira_contacts_store_conformance.checks import (
     check_idor_personal_book,
     check_refused_write_moves_nothing,
     check_shared_book_rules,
+    check_stale_uid_key,
     check_uid_unique_per_book,
     check_version_cas,
 )
@@ -69,6 +70,11 @@ def run_contacts_suite[T: ContactsTarget](mut t: T) raises:
         passed += 1
     except e:
         _fail(failures, "card_round_trip", who, e)
+    try:
+        check_stale_uid_key[T](t)
+        passed += 1
+    except e:
+        _fail(failures, "stale_uid_key", who, e)
     if failures.byte_length() > 0:
         raise Error(failures)
     print(String("komira_contacts_store_conformance: ") + String(passed) + String(" checks passed on ") + who)

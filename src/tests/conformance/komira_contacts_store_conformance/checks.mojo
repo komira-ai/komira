@@ -6,23 +6,30 @@
 # catches. Refusals are compared by their exact text (komira_contacts.ERR_*).
 #
 #   uid_unique_per_book   one uid in two books succeeds, twice in one book is
-#                         refused, and a delete releases it. Catches a uid
-#                         unique across books (a global UNIQUE, which also
-#                         reveals that the uid exists elsewhere).
+#                         refused, and a delete releases it in its own book
+#                         only. Catches a uid unique across books (a global
+#                         UNIQUE, which also reveals that the uid exists
+#                         elsewhere) and a delete that releases the uid in
+#                         every book.
 #   version_cas           of two writes naming the same version, exactly one
 #                         succeeds; the other, and a stale delete, are refused
-#                         and change nothing. Catches a CAS without the
-#                         version term.
+#                         and change nothing; the uid cannot change, and an
+#                         update with no uid keeps it. Catches a CAS without
+#                         the version term and an empty uid refused as a
+#                         change.
 #   changes_feed          modseq strictly increases within a book across
 #                         creates, updates and deletes; the feed lists each
 #                         card once at its latest modseq (a delete as a
 #                         tombstone), from any cursor; another book's modseq
 #                         does not move. Catches a delete that does not bump
-#                         modseq, and a modseq shared across books.
-#   refused_write_moves_nothing  a stale update, a stale delete, a taken uid
-#                         and an invalid card leave the book's modseq and the
+#                         modseq, a modseq shared across books, and a deleted
+#                         card still read, updated or deleted by its id.
+#   refused_write_moves_nothing  a stale update, a stale delete, a taken uid,
+#                         an invalid card created and an invalid card
+#                         written by an update leave the book's modseq and the
 #                         feed unchanged. Catches a modseq bump outside the
-#                         write's transaction.
+#                         write's transaction, and an update that skips
+#                         validation.
 #   idor_personal_book    another subject (admin or not) gets the not-found
 #                         text, byte for byte the text of an id that does not
 #                         exist, for every read and write of a PERSONAL book
@@ -33,18 +40,28 @@
 #   shared_book_rules     a SHARED book is read by everyone and written only
 #                         by an admin; a DIRECTORY book cannot be created.
 #   default_book          one default book per owner; a refused second default
-#                         leaves no book behind (the rollback).
+#                         leaves no book behind (the rollback); an empty book
+#                         name is refused.
 #   card_round_trip       every card field survives a write and a read; the
 #                         server-written fields a client sends are ignored.
+#   stale_uid_key         a uid key row naming no card (a create stopped
+#                         between its key and its card) or a tombstone (a
+#                         delete stopped before releasing the uid) does not
+#                         hold the uid: the next create of it succeeds, and
+#                         the key then holds it again. The rows are planted
+#                         through the database directly. Catches a stale key
+#                         that refuses its uid in that book for good.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.reactor.reactor import Reactor
+from komira_db import DbValue
 from komira_proto_codec import decode_json, encode_json
 from komira_contacts_proto.contacts import BookKind, Card, CardKind
 
 from komira_contacts import (
+    CARD_UIDS,
     Caller,
     ContactsStore,
     ERR_DEFAULT_TAKEN,
@@ -143,6 +160,13 @@ def check_uid_unique_per_book[T: ContactsTarget](mut t: T) raises:
     # A delete releases the uid.
     _ = store.delete_card[Rt](reactor, _alice(), x.id, in_x.id, in_x.version)
     var again = store.create_card[Rt](reactor, _alice(), x.id, _uid_card("u-1", "Back"))
+    # The delete released the uid in book X only: Y still holds it.
+    got = String(OK)
+    try:
+        _ = store.create_card[Rt](reactor, _alice(), y.id, _uid_card("u-1", "Dup in Y"))
+    except e:
+        got = String(e)
+    assert_equal(got, ERR_UID_TAKEN, "a delete in X releases nothing in Y")
     assert_true(again.id != in_x.id, "a new card holds the released uid")
     # A card written without a uid is given urn:uuid:<id>.
     var minted = store.create_card[Rt](reactor, _alice(), x.id, _card('{"name":{"full":"No uid"}}'))
@@ -183,6 +207,13 @@ def check_version_cas[T: ContactsTarget](mut t: T) raises:
     except e:
         got = String(e)
     assert_equal(got, "contacts: invalid uid: cannot change")
+    # An empty uid keeps the card's uid.
+    var kept = store.update_card[Rt](reactor, _alice(), b.id, c.id, UInt64(2), _uid_card("", "Third"))
+    assert_equal(kept.uid, "u", "what the update returns")
+    assert_equal(kept.version, UInt64(3))
+    var reread = store.get_card[Rt](reactor, _alice(), b.id, c.id)
+    assert_equal(reread.uid, "u", "what a read returns")
+    assert_equal(reread.name.value().full, "Third")
 
 
 # ---- changes_feed ------------------------------------------------------------
@@ -209,6 +240,11 @@ def check_changes_feed[T: ContactsTarget](mut t: T) raises:
     assert_equal(_feed[T](store, reactor, al, b.id, UInt64(4)), "|4", "the feed at the cursor")
     assert_equal(_feed[T](store, reactor, al, b.id, UInt64(9)), "|4", "a cursor past the book")
     assert_equal(_uids(store.list_cards[Rt](reactor, al, b.id)), "a", "a tombstone is not listed")
+    # A tombstone is not found by id, and cannot be updated or deleted again.
+    assert_equal(_err_get_card[T](store, reactor, al, b.id, c.id), ERR_NOT_FOUND, "get a deleted card")
+    assert_equal(_err_update[T](store, reactor, al, b.id, c.id), ERR_NOT_FOUND, "update a deleted card")
+    assert_equal(_err_delete[T](store, reactor, al, b.id, c.id), ERR_NOT_FOUND, "delete a deleted card")
+    assert_equal(_feed[T](store, reactor, al, b.id, UInt64(0)), "a@3,c@4-|4", "the refusals moved nothing")
     assert_equal(_book_modseq[T](store, reactor, al, other.id), UInt64(0), "another book did not move")
     var o = store.create_card[Rt](reactor, al, other.id, _uid_card("o", "O"))
     assert_equal(o.modseq, UInt64(1), "each book counts on its own")
@@ -253,7 +289,14 @@ def check_refused_write_moves_nothing[T: ContactsTarget](mut t: T) raises:
         got = String(e)
     assert_equal(got, "contacts: invalid members: only a GROUP card has members")
     assert_equal(_book_modseq[T](store, reactor, al, b.id), UInt64(1), "an invalid card")
-    assert_equal(_feed[T](store, reactor, al, b.id, UInt64(0)), "a@1|1", "the feed after four refusals")
+    got = String(OK)
+    try:
+        _ = store.update_card[Rt](reactor, al, b.id, a.id, a.version, _card('{"uid":"a","members":["x"]}'))
+    except e:
+        got = String(e)
+    assert_equal(got, "contacts: invalid members: only a GROUP card has members", "an update is validated")
+    assert_equal(_book_modseq[T](store, reactor, al, b.id), UInt64(1), "an invalid update")
+    assert_equal(_feed[T](store, reactor, al, b.id, UInt64(0)), "a@1|1", "the feed after five refusals")
     assert_equal(_uids(store.list_cards[Rt](reactor, al, b.id)), "a")
     assert_equal(store.get_card[Rt](reactor, al, b.id, a.id).name.value().full, "A")
 
@@ -434,6 +477,12 @@ def check_default_book[T: ContactsTarget](mut t: T) raises:
     except e:
         got = String(e)
     assert_equal(got, "contacts: invalid is_default: only a PERSONAL book can be a default")
+    got = String(OK)
+    try:
+        _ = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "", False)
+    except e:
+        got = String(e)
+    assert_equal(got, "contacts: invalid name: required", "a book name is validated")
     var again = store.list_books[Rt](reactor, _alice())
     assert_equal(len(again), 2)
     assert_equal(again[0].name, "Main", "sorted by name")
@@ -486,3 +535,61 @@ def check_card_round_trip[T: ContactsTarget](mut t: T) raises:
     assert_equal(encode_json(store.get_card[Rt](reactor, _alice(), b.id, made.id)), want, "what a read returns")
     var listed = store.list_cards[Rt](reactor, _alice(), b.id)
     assert_equal(encode_json(listed[0]), want, "what a list returns")
+
+
+# ---- stale_uid_key -----------------------------------------------------------
+
+
+def _plant_uid_key[
+    T: ContactsTarget
+](mut store: ContactsStore[T.DB], mut reactor: Reactor[Rt.Sink], book_id: String, uid: StaticString, card_id: String) raises:
+    """Write a uid key row directly, as a write that stopped part way leaves
+    it."""
+    var cols = List[String]()
+    cols.append(String("address_book_id"))
+    cols.append(String("uid"))
+    cols.append(String("card_id"))
+    var conflict = List[String]()
+    conflict.append(String("address_book_id"))
+    conflict.append(String("uid"))
+    var vals = List[DbValue]()
+    vals.append(DbValue.text(String(book_id)))
+    vals.append(DbValue.text(String(uid)))
+    vals.append(DbValue.text(String(card_id)))
+    var won = store.database().create_if_absent_composite[Rt](reactor, String(CARD_UIDS), conflict^, cols^, vals^)
+    assert_true(won, "the planted key is new")
+
+
+def check_stale_uid_key[T: ContactsTarget](mut t: T) raises:
+    var store = _store[T](t)
+    var rt = new_rt()
+    ref reactor = rt.reactor()
+    var al = _alice()
+    var b = store.create_book[Rt](reactor, al, BookKind.PERSONAL, "B", False)
+    # A create that claimed the uid and stopped before the card was written.
+    _plant_uid_key[T](store, reactor, b.id, "u-crash", String(NO_SUCH_ID))
+    var c = store.create_card[Rt](reactor, al, b.id, _uid_card("u-crash", "Crash"))
+    assert_equal(c.uid, "u-crash", "a key naming no card does not hold the uid")
+    assert_equal(store.get_card[Rt](reactor, al, b.id, c.id).name.value().full, "Crash")
+    # A delete that wrote the tombstone and stopped before releasing the uid.
+    var d = store.create_card[Rt](reactor, al, b.id, _uid_card("u-del", "Del"))
+    _ = store.delete_card[Rt](reactor, al, b.id, d.id, d.version)
+    _plant_uid_key[T](store, reactor, b.id, "u-del", d.id)
+    var again = store.create_card[Rt](reactor, al, b.id, _uid_card("u-del", "Again"))
+    assert_true(again.id != d.id, "a key naming a tombstone does not hold the uid")
+    assert_equal(_err_get_card[T](store, reactor, al, b.id, d.id), ERR_NOT_FOUND, "the tombstone stays deleted")
+    assert_equal(_uids(store.list_cards[Rt](reactor, al, b.id)), "u-crash,u-del")
+    # Both keys now name live cards and hold their uids again.
+    assert_equal(_err_create_uid[T](store, reactor, al, b.id, "u-crash"), ERR_UID_TAKEN, "u-crash after the repair")
+    assert_equal(_err_create_uid[T](store, reactor, al, b.id, "u-del"), ERR_UID_TAKEN, "u-del after the repair")
+    assert_equal(_feed[T](store, reactor, al, b.id, UInt64(0)), "u-crash@1,u-del@3-,u-del@4|4", "the feed after the repairs")
+
+
+def _err_create_uid[
+    T: ContactsTarget
+](mut store: ContactsStore[T.DB], mut reactor: Reactor[Rt.Sink], who: Caller, book_id: String, uid: StaticString) -> String:
+    try:
+        _ = store.create_card[Rt](reactor, who, book_id, _uid_card(uid, "Dup"))
+        return String(OK)
+    except e:
+        return String(e)
