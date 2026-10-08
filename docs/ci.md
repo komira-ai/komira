@@ -14,15 +14,18 @@ Nothing is compiled on the runner.
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
+| schedule (nightly) and manual | [`trunk-nightly`](#trunk_nightlyyml-the-whole-repository-every-night) (the whole repository) and the [build-system self-tests](#build-system-self-tests); neither is a pull request check |
 
 There is no separate static or lint job, and no other pull request check
-that can block a merge: the `coverage` workflow only reports. The only
-scheduled run is the
-[build-system self-tests](#build-system-self-tests), which is not the gate.
-`ci.yml` and its check `ci / build` no longer exist. The whole-repository
-`//...` build they ran on every push to `main` is not run by any workflow now;
-a pull request's check covers the units the change reaches, and every target of
-the graph is in some unit, so a change to any target is built by its unit.
+that can block a merge: the `coverage` workflow only reports. The scheduled
+runs are [`trunk-nightly`](#trunk_nightlyyml-the-whole-repository-every-night)
+and the [build-system self-tests](#build-system-self-tests); neither is the gate.
+`ci.yml` and its check `ci / build` no longer exist. A pull request's check
+covers the units the change reaches, and every target of the graph is in some
+unit, so a change to any target is built by its unit; `trunk-nightly` builds
+the whole of `main` once a night, which shows a red `main` that no pull
+request's check showed (one merged on a check that went green before `main`
+moved).
 
 ## What the check builds
 
@@ -974,6 +977,23 @@ run is posted. Making it a required check, or switching coverage on in
 unbuilt: a coverage run or gate blocks only the package it measures from
 shipping, never the library or its dependents) and is the CEO's decision. Details:
 [The coverage workflow](../tools/build/coverage/README.md#the-coverage-workflow).
+
+## trunk_nightly.yml: the whole repository, every night
+
+[`.github/workflows/trunk_nightly.yml`](../.github/workflows/trunk_nightly.yml)
+runs the three commands of [Running it yourself](#running-it-yourself), each
+with `--keep-going`, on `main` every night (and on demand, on the chosen ref:
+`gh workflow run trunk_nightly.yml --ref <branch>`), with the same farm
+connection and job permissions as `pr / check`. Every command runs even when
+an earlier one failed, so one run names every failure; the job is red when
+any target fails to build or any test fails. It uses the cache, so a cache hit
+is a pass, and a step's time limit leaves a cold build room. The job summary
+gives each command's outcome, its `Commands:` line (cached, remote, local) and
+the targets its build report names as failed; the artifact holds each
+command's console output and build report, scrubbed of the farm's address,
+every IPv4 address and the worker property set (the upload is refused if the
+farm's host is still in them). It has no write permission: it opens no issue.
+Two runs never overlap.
 
 ## merge-from-live (not yet running)
 

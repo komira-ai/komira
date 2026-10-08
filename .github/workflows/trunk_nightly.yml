@@ -1,0 +1,177 @@
+# The whole repository, built and tested on the farm every night and on
+# demand (docs/ci.md, "trunk_nightly.yml"): the three commands of "Running it
+# yourself" there, on `main` (a manual run: on the chosen ref).
+#
+#   ./buck2 build --keep-going //...                   every target of the komira cell, welded tests and lints
+#   ./buck2 test  --keep-going //...                   the standalone tests
+#   ./buck2 build --keep-going tests//functional/...   every positive target of the tests cell
+#
+# `pr / check` builds only the units a pull request reaches, and a pull
+# request can merge on a check that went green before main moved, so main
+# can go red with no pull request showing it. This run shows it: any target
+# that fails to build or any test that fails makes the job red. Each command
+# runs even when an earlier one failed (--keep-going within each), so one run
+# names every failure. It uses the cache like any build: a target whose
+# inputs are unchanged is a cache hit, which is a pass (its welded tests
+# passed on identical inputs).
+#
+# It reaches the farm as pr.yml does, through the local action
+# .github/actions/farm-connect, and holds `id-token: write` for that alone. It
+# has no push or pull_request trigger, so it never holds up a change, no
+# secret, and no write permission: it opens no issue and posts nothing.
+#
+# The artifact holds each command's console output and build report. The
+# job's log is masked for the farm's address; an artifact is not, so the
+# files are scrubbed of the farm's host, of every IPv4 address and of the
+# worker property set, and the upload is refused if the host is still in them.
+name: trunk-nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "43 6 * * *"
+
+permissions: {}
+
+concurrency:
+  # Two runs never overlap; a run in progress is left to finish.
+  group: trunk-nightly
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    # A cold build of the whole repository: the steps' own limits below add
+    # up to less, so the summary and the artifact are still written when a
+    # build step runs out of time.
+    timeout-minutes: 350
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+      # Every buck2 step below runs only when this one passed: with no farm
+      # configured buck2 would build on the runner.
+      - name: the buckconfig names the farm
+        id: farm
+        run: |
+          for key in linux_x86_64_properties; do
+            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
+              { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
+          done
+          mkdir -p "$RUNNER_TEMP/trunk"
+      # `shell: bash` runs with -e -o pipefail, so the step fails when buck2
+      # does, not when tee succeeds.
+      - name: build //...
+        id: build
+        if: ${{ !cancelled() && steps.farm.outcome == 'success' }}
+        timeout-minutes: 240
+        run: ./buck2 build --keep-going //... --build-report "$RUNNER_TEMP/trunk/build.report.json" 2>&1 | tee "$RUNNER_TEMP/trunk/build.log"
+      - name: test //...
+        id: test
+        if: ${{ !cancelled() && steps.farm.outcome == 'success' }}
+        timeout-minutes: 60
+        run: ./buck2 test --keep-going //... --build-report "$RUNNER_TEMP/trunk/test.report.json" 2>&1 | tee "$RUNNER_TEMP/trunk/test.log"
+      - name: build tests//functional/...
+        id: functional
+        if: ${{ !cancelled() && steps.farm.outcome == 'success' }}
+        timeout-minutes: 30
+        run: ./buck2 build --keep-going tests//functional/... --build-report "$RUNNER_TEMP/trunk/functional.report.json" 2>&1 | tee "$RUNNER_TEMP/trunk/functional.log"
+      # Per command: its outcome, buck2's `Commands:` line (how many actions
+      # were cache hits, ran remotely, ran on this runner; buck2 prints none
+      # when every action was already held) and the targets its build report
+      # names as failed.
+      - name: the summary
+        if: always()
+        env:
+          BUILD: ${{ steps.build.outcome }}
+          TEST: ${{ steps.test.outcome }}
+          FUNCTIONAL: ${{ steps.functional.outcome }}
+        run: |
+          d="$RUNNER_TEMP/trunk"
+          {
+            echo "## trunk-nightly: $(git rev-parse HEAD)"
+            for step in build test functional; do
+              case "$step" in
+                build) outcome=$BUILD cmd="./buck2 build --keep-going //..." ;;
+                test) outcome=$TEST cmd="./buck2 test --keep-going //..." ;;
+                functional) outcome=$FUNCTIONAL cmd="./buck2 build --keep-going tests//functional/..." ;;
+              esac
+              echo
+              echo "### \`$cmd\`: ${outcome:-not run}"
+              echo
+              echo '```'
+              # buck2's console stamps some lines with the time: `[<time>] Commands: ...`.
+              lines=$(sed -n -E 's/^(\[[^]]*\] )?((Commands:|BUILD (SUCCEEDED|FAILED)|Tests finished:).*)$/\2/p' "$d/$step.log" 2>/dev/null || true)
+              printf '%s\n' "${lines:-(no buck2 summary line)}"
+              echo '```'
+              if [ -s "$d/$step.report.json" ]; then
+                failed=$(jq -r '[(.failures // {} | keys[]), ((.results // {}) | to_entries[] | select(.value.success == "FAIL") | .key)] | unique | .[]' "$d/$step.report.json" 2>/dev/null || true)
+                if [ -n "$failed" ]; then
+                  echo
+                  echo "Failed targets:"
+                  echo
+                  printf '%s\n' "$failed" | head -n 200 | sed 's/^/- `/; s/$/`/'
+                fi
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: scrub the logs of the farm's address
+        id: scrub
+        if: always()
+        env:
+          FARM_ADDRESS: ${{ vars.FARM_ADDRESS }}
+          FARM_PROPERTIES: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+        run: |
+          d="$RUNNER_TEMP/trunk"
+          [ -d "$d" ] || exit 0
+          hostport="${FARM_ADDRESS#*://}"
+          hostport="${hostport%%/*}"
+          host="${hostport%:*}"
+          [ -n "$host" ] || { echo "::error::FARM_ADDRESS has no host: refusing to upload unscrubbed logs"; exit 1; }
+          for f in "$d"/*; do
+            [ -f "$f" ] || continue
+            # Literal strings, not patterns: each value is passed through
+            # awk's index(), so a `.` or `/` in it means itself.
+            awk -v host="$host" -v props="$FARM_PROPERTIES" '
+              function cut(s, lit, rep,   i, out) {
+                if (lit == "") return s
+                out = ""
+                while ((i = index(s, lit)) > 0) { out = out substr(s, 1, i - 1) rep; s = substr(s, i + length(lit)) }
+                return out s
+              }
+              BEGIN { n = split(props, p, ",") }
+              {
+                line = cut($0, props, "<farm-properties>")
+                for (k = 1; k <= n; k++) line = cut(line, p[k], "<farm-property>")
+                line = cut(line, host, "<farm>")
+                gsub(/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/, "<ip>", line)
+                print line
+              }' "$f" > "$f.scrubbed"
+            mv "$f.scrubbed" "$f"
+          done
+          if grep -rlF -- "$host" "$d"; then
+            echo "::error::the farm's host is still in the files above: not uploading them"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # Only files the scrub step passed.
+        if: always() && steps.scrub.outcome == 'success'
+        with:
+          name: trunk-nightly-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trunk
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
