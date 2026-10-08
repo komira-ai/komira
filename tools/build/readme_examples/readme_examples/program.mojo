@@ -3,7 +3,8 @@
 An example is a FRAGMENT, the shape of Rust's doctests. Its column-0
 `from`/`import` statements are hoisted to module level, deduplicated across
 the README; a statement runs on while a `(` it opened is unclosed or its
-line ends with a backslash, and is hoisted and compared whole. So are its
+line ends with a backslash outside a `#` comment (a `(` or `)` in a comment
+does not count), and is hoisted and compared whole. So are its
 column-0 declarations (`def`, `struct`, `trait`, `comptime`, a decorator),
 each running to the next column-0 line. The other lines are the body of
 `def _example_<line>() raises:`, `<line>` being the README line of the
@@ -52,6 +53,23 @@ def _paren_depth(line: String) -> Int:
         elif c == 41:
             d -= 1
     return d
+
+
+def _continues(line: String) -> Bool:
+    """Whether an import line runs on to the next: it ends with a backslash
+    that is code, not comment text. As in Python, a comment cannot continue
+    a line, and an import holds no string literal, so any `#` starts one."""
+    return line.endswith("\\") and line.find("#") < 0
+
+
+def _tagged_import(line: String, readme_line: Int) -> String:
+    """An import line with its README-line tail, unless it continues (a tail
+    after the backslash would end the line)."""
+    if is_blank(line):
+        return ""
+    if _continues(line):
+        return line
+    return line + TAIL + String(readme_line)
 
 
 def _is_declaration(line: String) -> Bool:
@@ -104,11 +122,11 @@ def generate_program(examples: List[Example], package: String, display: String) 
                 import_depth = 0
             if in_import:
                 import_depth += _paren_depth(line)
-                import_lines.append(_tagged(line, n, False))
+                import_lines.append(_tagged_import(line, n))
                 if import_key.byte_length() > 0:
                     import_key += "\n"
                 import_key += line
-                if import_depth > 0 or line.endswith("\\"):
+                if import_depth > 0 or _continues(line):
                     continue
                 in_import = False
                 var seen = False
