@@ -242,6 +242,21 @@ def test_blank_then_white_space_only_line() raises:
     assert_equal(lines[1].text, "B:2")
     assert_equal(lines[1].line_number, 4)
     assert_equal(len(lines[1].folds), 0)
+    # Two white-space-only continuations (SPACE, then HTAB) mid-stream: both
+    # folds go with the skipped line, not only the last one.
+    var two = _b("A:1\r\n\r\n \r\n\t\r\nB:2\r\n")
+    var pr = unfold(Span(two))
+    assert_equal(len(pr), 2)
+    assert_equal(pr[1].text, "B:2")
+    assert_equal(pr[1].line_number, 5)
+    assert_equal(len(pr[1].folds), 0)
+    # An HTAB-only continuation of a blank is dropped like a SPACE one.
+    var tab = _b("A:1\r\n\r\n\t\r\nB:2\r\n")
+    var tb = unfold(Span(tab))
+    assert_equal(len(tb), 2)
+    assert_equal(tb[1].text, "B:2")
+    assert_equal(tb[1].line_number, 4)
+    assert_equal(len(tb[1].folds), 0)
     # The same at the end of input: nothing follows, nothing is kept.
     var e = _b("A:1\r\n\r\n \r\n\t")
     var tail = unfold(Span(e))

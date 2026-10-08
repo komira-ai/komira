@@ -370,6 +370,15 @@ def test_qp_after_blank_and_white_space_line() raises:
         ),
         "value=[abcdef]",
     )
+    # Two continuations of the blank (SPACE, then HTAB): both folds are
+    # dropped, so the soft break still joins the next physical line.
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n\r\n \r\n\t\r\n"
+            "NOTE;QUOTED-PRINTABLE:abc=\r\ndef\r\nEND:VCARD\r\n"
+        ),
+        "value=[abcdef]",
+    )
     print("  test_qp_after_blank_and_white_space_line PASS")
 
 
