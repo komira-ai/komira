@@ -239,6 +239,12 @@ def test_report() raises:
         + "00000000",
     )
     var accepted = arep.accepted(atomic)
+    # The refused command first: every later one fails too, the last included.
+    var first = PushReport(atomic)
+    first.reject(0, "non-fast-forward")
+    var later = first.final_reasons(atomic)
+    assert_equal(later[1], "atomic push failure")
+    assert_equal(later[2], "atomic push failure")
     assert_false(accepted[0] or accepted[1] or accepted[2])
     var urep = PushReport(plain)
     urep.set_unpack_error("index-pack abnormal exit")

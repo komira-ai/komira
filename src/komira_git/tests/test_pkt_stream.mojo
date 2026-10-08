@@ -113,6 +113,9 @@ def test_reader_rewind() raises:
 
 def test_reader_compaction() raises:
     # 1100 lines of 64 bytes: 70400 bytes, past the 65536 compaction point.
+    # Fed 1201 bytes at a time, so a feed never ends on a line boundary
+    # (lcm(1201, 64) > 70400): the read position is never the end of the
+    # buffer at a feed, and the buffer is compacted rather than cleared.
     var wire = List[UInt8]()
     var payload = List[UInt8](length=60, fill=UInt8(0x7A))
     for i in range(1100):
@@ -122,7 +125,7 @@ def test_reader_compaction() raises:
     var seen = 0
     var pos = 0
     while pos < len(wire):
-        var end = pos + 1000 if pos + 1000 < len(wire) else len(wire)
+        var end = pos + 1201 if pos + 1201 < len(wire) else len(wire)
         r.feed(Span(wire)[pos:end])
         pos = end
         while True:
