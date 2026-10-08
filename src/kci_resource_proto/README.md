@@ -6,11 +6,11 @@ The kci resource catalog (`kci.resource.v1`) as protobuf messages and the
 Mojo structs generated from them: what an author writes in a deploy step.
 A `ResourceList` holds `Resource` entries; each has an author-chosen `id`,
 the other resources it `uses` (a `Ref` plus an `Access`), a `retention`, and
-one `body` arm. Version 1 declares fourteen primitives as body arms:
+one `body` arm. Version 1 declares sixteen primitives as body arms:
 `service` (10), `container_job` (11), `worker` (12), `table` (13), `bucket`
 (14), `queue` (15), `secret` (16), `dns_zone` (18), `service_account` (20),
-`topic` (21), `grant` (25), `dns_record` (26), `certificate` (27) and
-`subscription` (28).
+`topic` (21), `schedule` (22), `grant` (25), `dns_record` (26),
+`certificate` (27), `subscription` (28) and `event_trigger` (31).
 Every other number the header of `resource.proto` lists is
 held: undeclared today, so it decodes as an unknown field, and declaring it
 later is an addition. A `secret` resource is the container only; a workload
@@ -23,7 +23,8 @@ pins every declared number as wire bytes (the messaging types in
 `tests/test_resource_secret_numbers.mojo`, the DNS zone, the DNS record and
 the certificate in `tests/test_resource_dns_numbers.mojo`, the container
 job, the worker, the `command` fields and `Size.gpus` in
-`tests/test_resource_compute_numbers.mojo`), and
+`tests/test_resource_compute_numbers.mojo`, the schedule, the event trigger
+and `SourceEvent` in `tests/test_resource_trigger_numbers.mojo`), and
 `tests/test_resource_held_numbers.mojo` and
 `tests/test_held_numbers_are_unused.mojo` pin every held number as
 undeclared.
@@ -108,4 +109,22 @@ var pinned = decode_json[SecretRef]('{"name":"db-password","version":""}')
 var back2 = decode_proto[SecretRef](encode_proto(pinned))
 assert_true(Bool(back2.version))
 assert_equal(back2.version.value(), "")
+```
+
+A `schedule` starts a container job (or calls a service) at the times its
+cron names; `timezone` unset means UTC:
+
+```mojo
+from kci_resource_proto.resource import Resource
+from komira_proto_codec import decode_json, decode_proto, encode_proto
+from std.testing import assert_equal
+
+var s = decode_json[Resource](
+    String('{"id":"nightly-at-2","schedule":{"cron":"30 2 * * 1-5",')
+    + '"target":{"resource":"nightly"}}}'
+)
+var back = decode_proto[Resource](encode_proto(s))
+assert_equal(back.schedule.value().cron, "30 2 * * 1-5")
+assert_equal(back.schedule.value().timezone, "")
+assert_equal(back.schedule.value().target.value().resource, "nightly")
 ```

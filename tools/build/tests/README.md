@@ -985,26 +985,10 @@ querying its attributes, so narrowing it fails.
 
 ## 46. Coverage gate
 With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
-
-## 51. Python oracles
-
-An oracle (`python_oracle`, [tools/build/python](../python/README.md#oracles))
-computes the answer a komira test compares against, so an input an action
-built must be the output of a target under `third_party/`. Each target of
-[`negative/python_oracle`](negative/python_oracle/BUCK) fails analysis naming
-the input: a komira library's gated package as `data`, a komira binary in
-`srcs` or as `src`, a wheel installed by a target outside `third_party/` (as
-a dep or as the `tzdata` wheel) and an interpreter unpacked outside it. The
-oracles that work, the runner's verdicts and a welded Mojo test reading an
-oracle's output are in
-[`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md).
-
-```sh
-./buck2 build tests//negative/python_oracle:komira_data   # must fail: is built by komira//src/komira_encoding:komira_encoding, which is not under third_party/
-```
-
+## 47. Branch coverage runs
+[`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs [these checks](coverage_runs.md#test-47-branch-coverage-runs).
+## 51. [Python oracles](../python/README.md#test-51-python-oracles)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
-
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`

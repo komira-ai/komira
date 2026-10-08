@@ -220,6 +220,43 @@
 #                 are open design questions, so the shape declares them
 #                 absent rather than pick one.
 #
+# TRIGGERS (triggers.mojo lowers them): a schedule and an event trigger each
+# have an `identity` (the private identity the cloud's scheduling or eventing
+# service uses to reach the target: its one edge, CALL on the target, is
+# lowered by the grant rows above) and one object, `schedule` or `trigger`:
+#   * `generic`   schedule -> identity, schedule; event trigger -> identity,
+#                 trigger.
+#   * `aws`       schedule -> identity (AWS::IAM::Role, trusted by the
+#                 scheduling service only), schedule
+#                 (AWS::Scheduler::Schedule); event trigger -> identity
+#                 (AWS::IAM::Role), trigger (AWS::Events::Rule, with the
+#                 target in it). Its cron takes a day of the month or a day
+#                 of the week, never both (`schedule_day_limit`).
+#   * `gcp`       schedule -> identity (iam.googleapis.com/ServiceAccount),
+#                 schedule (cloudscheduler.googleapis.com/Job); event trigger
+#                 -> identity, trigger (eventarc.googleapis.com/Trigger).
+#   * `azure`     schedule -> identity
+#                 (Microsoft.ManagedIdentity/userAssignedIdentities), schedule
+#                 (Microsoft.Logic/workflows, a recurrence); event trigger ->
+#                 identity, trigger
+#                 (Microsoft.EventGrid/systemTopics/eventSubscriptions, on the
+#                 system topic of the cell's storage account). A schedule
+#                 whose target is a CONTAINER JOB FOLDS (`schedule_folds`):
+#                 it is the job's own schedule trigger, written into the
+#                 job's run node (`schedule`, `cron`, `timezone`), and its
+#                 identity, its CALL edge and its `schedule` node are lowered
+#                 turned off. That schedule is read in UTC
+#                 (`schedule_utc_limit`), and a job holds one.
+#   * `onprem`    schedule -> identity (v1/ServiceAccount), schedule
+#                 (batch/v1/CronJob: a caller that calls a service). A
+#                 schedule whose target is a container job FOLDS into the
+#                 job's CronJob as on azure (its `suspend` lifts and it gets
+#                 the cron and the time zone), so a job holds one; a schedule
+#                 that calls a SERVICE is a limit (`schedule_call_limit`):
+#                 the caller image the cell pins is an open question (Q28).
+#                 An EVENT TRIGGER IS NOT_YET: its event plumbing is an open
+#                 question (Q22).
+#
 # A shape's ABSENCES (`not_yet`) are the catalog types it does not host yet,
 # each with its reason; the fake cloud built with the shape declares them,
 # and is complete only when there are none. A grant resource has no row: its roles
@@ -236,7 +273,9 @@ from kci_cloud import (
     FIELD_DNS_RECORD,
     FIELD_DNS_ZONE,
     FIELD_CONTAINER_JOB,
+    FIELD_EVENT_TRIGGER,
     FIELD_QUEUE,
+    FIELD_SCHEDULE,
     FIELD_SECRET,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
@@ -277,6 +316,8 @@ comptime RECORD_TYPE_SLOT = "<TYPE>"
 """In a record row's kind, replaced by the record's type."""
 comptime ROLE_POLICY = "policy"
 """aws: the queue policy that lets the topics feeding a queue send to it."""
+comptime ROLE_SCHEDULE = "schedule"
+comptime ROLE_TRIGGER = "trigger"
 comptime ROLE_RULES = "rules"
 """The helper of a `grant` resource's edge, where its row names one."""
 
@@ -324,6 +365,21 @@ comptime ONPREM_SCALE_TO_ZERO_REASON = (
     " whether scaling to zero is part of a service's meaning is an open"
     " question (Q21: a plain Deployment, Knative Serving or the KEDA HTTP"
     " add-on)"
+)
+comptime SCHEDULE_DAY_REASON_AWS = (
+    "EventBridge Scheduler's cron takes a day of the month or a day of the week, never both"
+)
+comptime SCHEDULE_UTC_REASON_AZURE = (
+    "a container app job's schedule is a cron read in UTC, with no time zone of its own"
+)
+comptime ONPREM_SCHEDULE_CALL_REASON = (
+    "a schedule that calls a service runs a caller image the cell pins, and what an onprem"
+    " cell installs at bootstrap is an open question (Q28)"
+)
+comptime ONPREM_EVENT_TRIGGER_REASON = (
+    "the onprem event plumbing of an event trigger is an open question (Q22: MinIO bucket"
+    " notifications through the Q16 message backing and a dispatcher, Knative Eventing, or"
+    " Argo Events)"
 )
 comptime ONPREM_TABLE_REASON = (
     "the onprem datastore that backs a table is an open question (Q17:"
@@ -375,6 +431,17 @@ struct ProviderShape(Copyable, Movable, Deinitable):
     var scale_to_zero_limit: String
     """Why a service here keeps one instance; empty where it scales to
     zero."""
+    var schedule_folds: Bool
+    """A schedule whose target is a container job is a setting of the job's
+    own object here."""
+    var schedule_day_limit: String
+    """Why a cron here cannot name both a day of the month and a day of the
+    week; empty where it can."""
+    var schedule_utc_limit: String
+    """Why a folded schedule here is read in UTC; empty where it takes a
+    time zone."""
+    var schedule_call_limit: String
+    """Why a schedule here cannot call a service; empty where it can."""
 
     def __init__(
         out self,
@@ -385,6 +452,10 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         single_name_certificates: Bool = False,
         gpu_limit: String = String(""),
         scale_to_zero_limit: String = String(""),
+        schedule_folds: Bool = False,
+        schedule_day_limit: String = String(""),
+        schedule_utc_limit: String = String(""),
+        schedule_call_limit: String = String(""),
     ):
         self.name = name
         self.rows = rows^
@@ -393,6 +464,10 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         self.single_name_certificates = single_name_certificates
         self.gpu_limit = gpu_limit
         self.scale_to_zero_limit = scale_to_zero_limit
+        self.schedule_folds = schedule_folds
+        self.schedule_day_limit = schedule_day_limit
+        self.schedule_utc_limit = schedule_utc_limit
+        self.schedule_call_limit = schedule_call_limit
 
     def __init__(out self, *, copy: Self):
         self.name = copy.name.copy()
@@ -402,6 +477,10 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         self.single_name_certificates = copy.single_name_certificates
         self.gpu_limit = copy.gpu_limit.copy()
         self.scale_to_zero_limit = copy.scale_to_zero_limit.copy()
+        self.schedule_folds = copy.schedule_folds
+        self.schedule_day_limit = copy.schedule_day_limit.copy()
+        self.schedule_utc_limit = copy.schedule_utc_limit.copy()
+        self.schedule_call_limit = copy.schedule_call_limit.copy()
 
     def hosts(self, field: Int) -> Bool:
         """False for a type the shape declares NOT_YET."""
@@ -470,6 +549,10 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_DNS_ZONE, String(ROLE_ZONE), String("zone")))
         r.append(ShapeRow(FIELD_DNS_RECORD, String(ROLE_RECORD), String("record")))
         r.append(ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("certificate")))
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_IDENTITY), String("identity")))
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_SCHEDULE), String("schedule")))
+        r.append(ShapeRow(FIELD_EVENT_TRIGGER, String(ROLE_IDENTITY), String("identity")))
+        r.append(ShapeRow(FIELD_EVENT_TRIGGER, String(ROLE_TRIGGER), String("trigger")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("grant"), String("")))
         return ProviderShape(String("generic"), r^, g^)
@@ -498,10 +581,16 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(
             ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("AWS::CertificateManager::Certificate"))
         )
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_IDENTITY), String(_AWS_ROLE)))
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_SCHEDULE), String("AWS::Scheduler::Schedule")))
+        r.append(ShapeRow(FIELD_EVENT_TRIGGER, String(ROLE_IDENTITY), String(_AWS_ROLE)))
+        r.append(ShapeRow(FIELD_EVENT_TRIGGER, String(ROLE_TRIGGER), String("AWS::Events::Rule")))
         var g = List[GrantRow]()
         g.append(GrantRow(FIELD_SERVICE, String("AWS::Lambda::Permission"), String("")))
         g.append(GrantRow(TARGET_ANY, String("AWS::IAM::RolePolicy"), String("")))
-        return ProviderShape(String("aws"), r^, g^, gpu_limit=String(GPU_REASON_AWS))
+        return ProviderShape(
+            String("aws"), r^, g^, gpu_limit=String(GPU_REASON_AWS), schedule_day_limit=String(SCHEDULE_DAY_REASON_AWS)
+        )
 
     @staticmethod
     def gcp() -> ProviderShape:
@@ -534,6 +623,10 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(
             ShapeRow(FIELD_CERTIFICATE, String(ROLE_CERT), String("certificatemanager.googleapis.com/Certificate"))
         )
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_IDENTITY), String(_GCP_SA)))
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_SCHEDULE), String("cloudscheduler.googleapis.com/Job")))
+        r.append(ShapeRow(FIELD_EVENT_TRIGGER, String(ROLE_IDENTITY), String(_GCP_SA)))
+        r.append(ShapeRow(FIELD_EVENT_TRIGGER, String(ROLE_TRIGGER), String("eventarc.googleapis.com/Trigger")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("setIamPolicy"), String("")))
         return ProviderShape(String("gcp"), r^, g^, gpu_limit=String(GPU_REASON_UNDECIDED))
@@ -585,6 +678,16 @@ struct ProviderShape(Copyable, Movable, Deinitable):
                 String("Microsoft.App/managedEnvironments/managedCertificates"),
             )
         )
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_IDENTITY), String(_AZURE_ID)))
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_SCHEDULE), String("Microsoft.Logic/workflows")))
+        r.append(ShapeRow(FIELD_EVENT_TRIGGER, String(ROLE_IDENTITY), String(_AZURE_ID)))
+        r.append(
+            ShapeRow(
+                FIELD_EVENT_TRIGGER,
+                String(ROLE_TRIGGER),
+                String("Microsoft.EventGrid/systemTopics/eventSubscriptions"),
+            )
+        )
         var g = List[GrantRow]()
         g.append(
             GrantRow(
@@ -595,7 +698,13 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         )
         g.append(GrantRow(TARGET_ANY, String("Microsoft.Authorization/roleAssignments"), String("")))
         return ProviderShape(
-            String("azure"), r^, g^, single_name_certificates=True, gpu_limit=String(GPU_REASON_UNDECIDED)
+            String("azure"),
+            r^,
+            g^,
+            single_name_certificates=True,
+            gpu_limit=String(GPU_REASON_UNDECIDED),
+            schedule_folds=True,
+            schedule_utc_limit=String(SCHEDULE_UTC_REASON_AZURE),
         )
 
     @staticmethod
@@ -618,6 +727,8 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_K8S_SA)))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_VAULT), String(_VAULT_ROLE)))
         r.append(ShapeRow(FIELD_SECRET, String(ROLE_SECRET), String("vault:kv-v2/metadata")))
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_IDENTITY), String(_K8S_SA)))
+        r.append(ShapeRow(FIELD_SCHEDULE, String(ROLE_SCHEDULE), String("batch/v1/CronJob")))
         var g = List[GrantRow]()
         g.append(GrantRow(FIELD_SERVICE, String(_K8S_BINDING), String(_K8S_ROLE)))
         g.append(GrantRow(FIELD_CONTAINER_JOB, String(_K8S_BINDING), String(_K8S_ROLE)))
@@ -632,6 +743,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         later.append(Absence(FIELD_DNS_ZONE, NOT_YET, String(ONPREM_DNS_REASON)))
         later.append(Absence(FIELD_DNS_RECORD, NOT_YET, String(ONPREM_DNS_REASON)))
         later.append(Absence(FIELD_CERTIFICATE, NOT_YET, String(ONPREM_CERTIFICATE_REASON)))
+        later.append(Absence(FIELD_EVENT_TRIGGER, NOT_YET, String(ONPREM_EVENT_TRIGGER_REASON)))
         return ProviderShape(
             String("onprem"),
             r^,
@@ -639,6 +751,8 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             later^,
             gpu_limit=String(GPU_REASON_UNDECIDED),
             scale_to_zero_limit=String(ONPREM_SCALE_TO_ZERO_REASON),
+            schedule_folds=True,
+            schedule_call_limit=String(ONPREM_SCHEDULE_CALL_REASON),
         )
 
 

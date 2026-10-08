@@ -60,6 +60,7 @@ from kci_reconciler import (
 )
 from kci_cloud import (
     Feed,
+    Firing,
     GrantEdge,
     FIELD_QUEUE,
     FIELD_SUBSCRIPTION,
@@ -532,7 +533,7 @@ def test_uses_on_messaging_never_reaches_a_lowering() raises:
     for i in range(3):
         var raised = False
         try:
-            _ = cloud.lower(l[i], List[GrantEdge](), List[Feed]())
+            _ = cloud.lower(l[i], List[GrantEdge](), List[Feed](), List[Firing]())
         except e:
             raised = True
             assert_true(String(e).find("has uses lines; validate refuses them") >= 0, String(e))

@@ -12,8 +12,10 @@
 #                 endpoint or the run; a shape with no public row FOLDS the
 #                 exposure into the run's field `ingress`.
 #   container job `<id>/run`: the run-to-completion DEFINITION. A run of it
-#                 is an execution, never a node: no shape lowers a trigger
-#                 (a schedule is a primitive of its own, not declared yet).
+#                 is an execution, never a node. A schedule is a primitive
+#                 of its own (triggers.mojo); on a shape that folds it into
+#                 the job, the run also carries the schedule's `schedule`,
+#                 `cron` and `timezone` (from kci's firing).
 #   worker        `<id>/run`, always on, with its `replicas`. Where the shape
 #                 has a `task` row (aws), the container is `<id>/task` and the
 #                 run (the service that keeps `replicas` copies of it)
@@ -30,7 +32,8 @@
 # `<arm>.secret_env.<KEY>` in key order (a reference is an input, bound at
 # apply time), `size` (`<cpu>m/<memory>MB`, with `/<n>gpu` when GPUs are
 # asked for), then a service's `scale`, `health`, `timeout` and
-# `concurrency`, a job's `retries` and `timeout`, a worker's `replicas`.
+# `concurrency`, a job's `retries` and `timeout` (and a folded schedule), a
+# worker's `replicas`.
 #
 # THE LIMITS (`workload_limits`), from the shape's data, never its name:
 #   * a workload asking for a GPU (`Size.gpus` above 0) on a shape whose
@@ -45,6 +48,7 @@
 from kci_reconciler import InputRef
 from kci_cloud import (
     FIELD_CONTAINER_JOB,
+    Firing,
     FIELD_SERVICE,
     FIELD_WORKER,
     FINDING_LIMIT,
@@ -61,6 +65,7 @@ from kci_resource_proto.resource import Image, Resource, Size, Value
 
 from kci_cloud_fake.limits import FAKE_CITATION
 from kci_cloud_fake.secrets import secret_env_fields
+from kci_cloud_fake.triggers import folded_fields
 from kci_cloud_fake.shapes import (
     ProviderShape,
     ROLE_ENDPOINT,
@@ -181,11 +186,14 @@ def _service_min(r: Resource) -> Int:
     return 0
 
 
-def lower_run(r: Resource, own: Bool, mechanism: String, shape: ProviderShape) raises -> List[LoweredNode]:
+def lower_run(
+    r: Resource, own: Bool, mechanism: String, shape: ProviderShape, firings: List[Firing]
+) raises -> List[LoweredNode]:
     """The nodes of the workload `r` after its identity (file header), as
     data. `own`: `r` runs as its own identity (else as its `run_as`
     account). `mechanism`: the cell's public mechanism, for a service's
-    public role or its folded ingress."""
+    public role or its folded ingress. `firings`: kci's, for a schedule a
+    shape folds into a container job."""
     var found = workload_of(r)
     if not found:
         raise Error(String("fake: resource \"") + r.id + String("\" is not a workload"))
@@ -269,6 +277,7 @@ def lower_run(r: Resource, own: Bool, mechanism: String, shape: ProviderShape) r
         if job.timeout:
             timeout = _duration(Int(job.timeout.value().seconds), Int(job.timeout.value().nanos))
         fields.append(Setting(String("timeout"), timeout^))
+        folded_fields(r, firings, shape, fields)
         if not own:
             fields.append(Setting(String("run_as"), account.copy()))
         fields.append(Setting(String("serves"), String("false")))

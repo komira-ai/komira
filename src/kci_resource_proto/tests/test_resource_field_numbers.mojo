@@ -23,14 +23,14 @@
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 #
-# ALSO PINNED: the fourteen v1 `Resource.body` arms (10 service, 11 container
+# ALSO PINNED: fourteen v1 `Resource.body` arms (10 service, 11 container
 # job, 12 worker, 13 table, 14 bucket, 15 queue, 16 secret, 18 DNS zone, 20
 # service account, 21 topic, 25 grant, 26 DNS record, 27 certificate, 28
-# subscription) by number AND by which field each fills; the retired field 4
-# is ignored; and every enum's ordinals in both
-# directions, held values undeclared. EVERY HELD NUMBER (each number of each
-# held range of each message) is pinned as undeclared by one table in
-# test_resource_held_numbers.mojo.
+# subscription; 22 and 31 are in test_resource_trigger_numbers.mojo) by
+# number AND by which field each fills; the retired field 4 is ignored; and
+# every enum's ordinals in both directions, held values undeclared. EVERY
+# HELD NUMBER (each number of each held range of each message) is pinned as
+# undeclared by one table in test_resource_held_numbers.mojo.
 #
 # THE FIELDS ADDED AFTER THE FIRST DRAFT, each pinned the same two ways:
 # `Image.platform` 3 (an OCI-style string), `SecretRef` 1 name, 2 store and
@@ -721,7 +721,7 @@ def test_resource_body_arms() raises:
             names[i],
             String("Resource.body field ") + String(field) + " fills",
         )
-        assert_equal(r._oneof0_case, i + 1, "the arm index follows the number")
+        assert_equal(r._oneof0_case, i + 1 if field < 22 else i + 2, "the arm index follows the number (22 sits before 25)")
         _same(
             encode_proto(r),
             b,
@@ -974,7 +974,7 @@ def test_service_account_and_grant() raises:
     _msg(r, 25, g)
     var rr = decode_proto[Resource](r.copy())
     assert_equal(_arm_of(rr), "grant", "body 25 is `grant`")
-    assert_equal(rr._oneof0_case, 11, "the grant is the eleventh arm")
+    assert_equal(rr._oneof0_case, 12, "the grant is the twelfth arm")
     assert_equal(rr.grant.value().principal.value().resource, "runner")
     _same(encode_proto(rr), r, "Resource with a grant")
 
