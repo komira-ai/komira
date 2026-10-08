@@ -22,6 +22,7 @@ mojo_library(
         "tests/test_expr_kernel_template_coverage.mojo",
         "tests/test_flatten_dependent_joins.mojo",
         "tests/test_flatten_dependent_joins_branches.mojo",
+        "tests/test_flatten_dependent_joins_nested_exprs.mojo",
         "tests/test_join_predicate_decompose.mojo",
         "tests/test_optimizer_agg_cse.mojo",
         "tests/test_optimizer_agg_cse_paths.mojo",

@@ -1,0 +1,76 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "relay-runner"
+  uses {
+    target {
+      resource: "work"
+    }
+    access: RECEIVE
+  }
+  service_account {
+  }
+}
+resource {
+  id: "work"
+  queue {
+  }
+}
+resource {
+  id: "relay"
+  worker {
+    image {
+      digest: "sha256:7a11c0de"
+      platform: "linux/amd64"
+    }
+    size {
+      cpu_millis: 500
+      memory_mb: 1024
+      gpus: 1
+    }
+    args: "--queue=work"
+    command: "/bin/relay"
+    command: "--drain"
+    env {
+      key: "MODE"
+      value {
+        literal: "drain"
+      }
+    }
+    env {
+      key: "QUEUE"
+      value {
+        ref {
+          resource: "work"
+          standard: ADDRESS
+        }
+      }
+    }
+    secret_env {
+      key: "TOKEN"
+      value {
+        name: "relay-token"
+      }
+    }
+    replicas: 3
+    run_as {
+      resource: "relay-runner"
+    }
+  }
+}
+resource {
+  id: "infer"
+  service {
+    image {
+      digest: "sha256:1f2e3d4c"
+    }
+    size {
+      cpu_millis: 8000
+      memory_mb: 32768
+      gpus: 2
+    }
+    internal {
+    }
+    command: "/opt/serve"
+    command: "--model=/m"
+  }
+}

@@ -1,0 +1,82 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+
+# Test-only: komira_shuffle across separate processes. `shuffle_task` runs one
+# task of a shuffle (a map, the driver's seal, a reduce of one partition, or a
+# pool reducer that pulls partitions by claim) over a LocalFsConditionalStore
+# root it shares with the other tasks; the store is all they share. Each
+# mojo_test below starts the tasks as child processes (komira_supervisor),
+# kills some of them at chosen points, and judges what the survivors and
+# their replacements produce against the rows the library computes. The
+# tests get the binary through `args` ($(exe_target)), and run under
+# `./buck2 test`, not as part of this library's build.
+#
+# The library holds the rows and the oracle (rows.mojo), the child-process
+# group (children.mojo) and the shuffle-level harness (harness.mojo); its
+# welded test checks the oracle on its own.
+mojo_library(
+    name = "komira_shuffle_e2e",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_shuffle:komira_shuffle",
+        "//src/komira_supervisor:komira_supervisor",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_rows.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+_DEPS = [
+    ":komira_shuffle_e2e",
+    "//src/komira_objectstore:komira_objectstore",
+    "//src/komira_shuffle:komira_shuffle",
+    "//src/komira_supervisor:komira_supervisor",
+    "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+]
+
+# A test program, so it states the tests' optimization level.
+mojo_binary(
+    name = "shuffle_task",
+    srcs = ["bin/shuffle_task.mojo"],
+    optimization_level = "1",
+    deps = _DEPS,
+)
+
+# test_shuffle_dead_map_replay: a map SIGKILLed between its .seg and its
+#   _entries entry (the driver must refuse to seal), and one SIGKILLed after
+#   its entry and replayed twice at once (_entries keeps one chunk per
+#   producer); every partition then reads its rows exactly once.
+# test_shuffle_dead_reducer_reread: reducers SIGKILLed inside
+#   read_shuffle_partition after its first slice (a store wrapper in the
+#   binary parks there) and after the whole read; fresh ones read bytes
+#   identical to a no-fault run made after the kills, and the map output and
+#   the seal are unchanged.
+# test_shuffle_elastic_reducers: 4, 4, 4 and 2 racing pool workers, then one
+#   that leaves after one claim and three that join; every partition is
+#   claimed and reduced exactly once each round, with the bytes the library
+#   computes (no no-fault baseline run).
+[
+    mojo_test(
+        name = name,
+        srcs = ["tests/{}.mojo".format(name)],
+        args = ["--task-bin=$(exe_target :shuffle_task)"],
+        deps = _DEPS,
+    )
+    for name in [
+        "test_shuffle_dead_map_replay",
+        "test_shuffle_dead_reducer_reread",
+        "test_shuffle_elastic_reducers",
+    ]
+]
+
+# The deps above name every komira_* module the library, the binary and the
+# tests import (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

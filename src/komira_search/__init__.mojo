@@ -76,7 +76,7 @@
 # Dependencies (cycle-free):
 #   komira_search -> the core packages   (StringColumnView / StringArray / Schema)
 #   komira_search -> komira_hash   (the FNV-1a-64 byte kernel for the posting build)
-#   komira_search -> komira_lz4    (the `_source` block codec)
+#   komira_search -> komira_compression (the `_source` LZ4 block codec)
 # =============================================================================
 
 from .analyzer import (

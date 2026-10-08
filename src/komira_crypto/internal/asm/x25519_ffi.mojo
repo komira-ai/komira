@@ -46,7 +46,7 @@
 #     takes Span[UInt8, _] + mut InlineArray[UInt8, 32] — ZERO
 #     UnsafePointer in the public signature.
 # Internal FFI:
-#   * The `external_call["X25519", ...]` site uses `UnsafePointer(to=...)`
+#   * The `external_call["komira_awslc_X25519", ...]` site uses `UnsafePointer(to=...)`
 #     with INFERRED origin (NOT wildcard widening), following the same
 #     pattern as `sha256_compress.mojo` (and `zeroize.mojo` for memset_s).
 #   * ZERO `unsafe_from_address`.
@@ -129,7 +129,7 @@ def x25519_scalarmult(
     # type parameters would force a specific origin which is
     # incompatible with `Span[UInt8, _]` inputs potentially having
     # immutable origin.
-    var rc = external_call["X25519", Int32](
+    var rc = external_call["komira_awslc_X25519", Int32](
         UnsafePointer(to=shared_out[0]).bitcast[UInt8](),
         scalar.unsafe_ptr().bitcast[UInt8](),
         peer_public.unsafe_ptr().bitcast[UInt8](),
