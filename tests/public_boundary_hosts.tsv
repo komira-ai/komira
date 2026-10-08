@@ -19,6 +19,7 @@ microsoftonline.us	the Azure Government identity endpoint
 azure.com	the Azure management endpoint
 windows.net	the Azure Storage endpoints
 microsoft.com	Microsoft documentation
+apple.com	Apple developer documentation
 pkg.dev	Google Artifact Registry's regional endpoints
 localstack.cloud	the local AWS emulator's documented endpoint names
 github.com	the source of upstream projects and actions
