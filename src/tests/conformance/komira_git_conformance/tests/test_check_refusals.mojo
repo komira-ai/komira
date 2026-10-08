@@ -15,9 +15,10 @@
 #     changed, one payload byte flipped and one payload a byte longer.
 # A check deleted, or comparing the wrong field, lets its case through (or
 # raises another case's message) and fails here. require_same_bytes and
-# require_same_index are also driven directly (a difference at the last
-# position, each length order), and every refusal of parse_batch,
-# parse_verify and parse_ids gets input of the wrong shape.
+# require_same_index are also driven directly (each length order; for
+# require_same_index an id, offset and CRC-32 difference at the first and at
+# the last entry), and every refusal of parse_batch, parse_verify and
+# parse_ids gets input of the wrong shape, with too few and too many fields.
 # =============================================================================
 
 from std.testing import assert_equal
@@ -256,6 +257,24 @@ def test_require_same_index() raises:
     assert_equal(_index_err(_index(f, [a, b], [12, 40], [7, 9]), want), "OK")
     assert_equal(_index_err(_index(f, [a], [12], [7]), want), "w: 1 objects, git's has 2")
     assert_equal(
+        _index_err(_index(f, [a, b, c], [12, 40, 52], [7, 9, 3]), want),
+        "w: 3 objects, git's has 2",
+    )
+    # A difference at entry 0: the loop must start at the first entry.
+    assert_equal(
+        _index_err(_index(f, [c, b], [12, 40], [7, 9]), want),
+        "w: object 0 is " + c.to_hex() + ", git's " + a.to_hex(),
+    )
+    assert_equal(
+        _index_err(_index(f, [a, b], [11, 40], [7, 9]), want),
+        "w: offset of " + a.to_hex() + " differs",
+    )
+    assert_equal(
+        _index_err(_index(f, [a, b], [12, 40], [6, 9]), want),
+        "w: CRC-32 of " + a.to_hex() + " differs",
+    )
+    # A difference at the last entry: the loop must reach it.
+    assert_equal(
         _index_err(_index(f, [a, c], [12, 40], [7, 9]), want),
         "w: object 1 is " + c.to_hex() + ", git's " + b.to_hex(),
     )
@@ -295,6 +314,7 @@ def test_fixture_refusals() raises:
     var hex = _hex_id(ObjectFormat.sha1(), "d").to_hex()
     assert_equal(_batch_err(hex + " blob 2\nab\n"), "OK 1")
     assert_equal(_batch_err("x blob\n"), "fixtures: batch header at 0 has 2 fields")
+    assert_equal(_batch_err(hex + " blob 2 extra\nab\n"), "fixtures: batch header at 0 has 4 fields")
     # The payload runs past the end, and the byte after it is not a newline.
     assert_equal(
         _batch_err(hex + " blob 5\nab\n"),
@@ -312,6 +332,7 @@ def test_fixture_refusals() raises:
 
     assert_equal(_ids_err("x\ny\n"), "OK 2")
     assert_equal(_ids_err("x\ny z\n"), "fixtures: id line at 2 has 2 fields")
+    assert_equal(_ids_err("x\n\n"), "fixtures: id line at 2 has 0 fields")
     assert_equal(_ids_err("x\ny"), "fixtures: no newline after offset 2")
 
     var o = parse_batch(ObjectFormat.sha1(), Span(_bytes(hex + " blob 2\nab\n")))
