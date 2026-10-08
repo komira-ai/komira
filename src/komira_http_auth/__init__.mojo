@@ -31,29 +31,20 @@ Modules:
   - reasons.mojo    : the fixed refusal codes.
   - testing.mojo    : sign test tokens and publish a test key as a JWK Set.
 
+The package root exports what an embedder needs: the middleware and its
+challenge values, the verifier and its trait, the configuration and flags,
+the fetcher and clock traits with their production and test conformers. The
+parsing and validation helpers and the reason codes stay importable by module
+path (`komira_http_auth.reasons` and so on).
+
 No pointer type in any public signature; configuration comes from flags,
 never from the environment. RS256 verification is komira_crypto's
 `verify_rs256_jws`; this package adds no second verifier.
 """
 
 from .clock import AuthClock, FixedAuthClock, SystemAuthClock
-from .config import (
-    ALG_RS256,
-    BearerJwtConfig,
-    DEFAULT_LEEWAY_S,
-    DEFAULT_MAX_TTL_S,
-    MAX_LEEWAY_S,
-    TYP_JWT,
-    TrustAnchor,
-    validate_jwks_url,
-    validate_trust_anchor,
-)
-from .flags import (
-    bearer_jwt_flag_names,
-    parse_bearer_jwt_flags,
-    parse_trust_anchor,
-)
-from .jwks_cache import JwksCache, parse_cache_max_age, parse_complete_rsa_jwks
+from .config import BearerJwtConfig, TrustAnchor
+from .flags import bearer_jwt_flag_names, parse_bearer_jwt_flags
 from .jwks_fetch import (
     HttpsJwksFetcher,
     JwksFetchResult,
@@ -64,31 +55,5 @@ from .middleware import (
     BearerJwtMiddleware,
     WWW_AUTHENTICATE_INVALID_REQUEST,
     WWW_AUTHENTICATE_INVALID_TOKEN,
-    bearer_token_from_header,
-)
-from .reasons import (
-    REASON_ALG,
-    REASON_AUD,
-    REASON_CRIT,
-    REASON_DUPLICATE_KEY,
-    REASON_EXP,
-    REASON_EXPIRED,
-    REASON_HEADER_JSON,
-    REASON_IAT,
-    REASON_INTERNAL,
-    REASON_ISS,
-    REASON_KEY_IN_HEADER,
-    REASON_KID,
-    REASON_MALFORMED_HEADER,
-    REASON_MALFORMED_TOKEN,
-    REASON_MISSING_HEADER,
-    REASON_NBF,
-    REASON_OK,
-    REASON_PAYLOAD_JSON,
-    REASON_SIGNATURE,
-    REASON_SUB,
-    REASON_TTL,
-    REASON_TYP,
-    REASON_UNKNOWN_KID,
 )
 from .verifier import BearerVerifier, Rs256JwksVerifier, VerifyOutcome

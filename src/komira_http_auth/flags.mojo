@@ -22,8 +22,15 @@
 # them. In this release exactly one anchor is accepted: a second
 # `--trust-anchor` is refused. Choosing an anchor per token (by its `iss`)
 # needs one key cache per anchor and a dispatch step, which is a later change;
-# until then one process verifies one issuer. `--copy-claim` goes with either
-# form.
+# until then one process verifies one issuer. When that change lands, parsing
+# returns several anchors: `BearerJwtConfig`'s single `anchor` field becomes a
+# list, which is a public API change. Dispatch by `iss` also requires the
+# anchors to have distinct issuers, so a repeated issuer will be refused at
+# startup. `--copy-claim` goes with either form.
+#
+# The clock leeway and the JWKS settings (refetch window, default max-age,
+# fetch timeout) have no flags; an embedder sets them with `BearerJwtConfig`'s
+# `with_*` setters.
 #
 # A `--trust-anchor` value is comma-separated `key=value` pairs; a value is
 # everything after the first `=`, so it cannot hold a comma. An unknown key, a

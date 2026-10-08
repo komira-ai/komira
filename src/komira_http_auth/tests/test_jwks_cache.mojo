@@ -112,7 +112,7 @@ struct _Rig(Movable):
         self.verifier = v^
 
 
-from komira_http_auth import parse_cache_max_age
+from komira_http_auth.jwks_cache import parse_cache_max_age
 
 
 def _tok(key: List[UInt8], kid: String) raises -> String:
