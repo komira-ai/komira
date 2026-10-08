@@ -69,6 +69,9 @@ from komira_managed_mail_proto.mail import (
     EmailAddress,
     EmailPart,
     Envelope,
+    EraseSubjectRequest,
+    EraseSubjectResponse,
+    ErrorResponse,
     ExportMailboxRequest,
     GetEmailPartRequest,
     GetEmailRawRequest,
@@ -92,6 +95,7 @@ from komira_managed_mail_proto.mail import (
     SendEmailRequest,
     SendEmailResponse,
     Submission,
+    Subject,
     Thread,
     UpdateEmailRequest,
     UpdateEmailResponse,
@@ -110,7 +114,7 @@ comptime _PROTO: String = "src/komira_managed_mail_proto/mail.proto"
 # mail.proto's messages by `test_every_message_has_a_golden_and_a_corpus_field`
 # and `_check_all` is held to the golden file by `_check`, so this is also the
 # number of messages mail.proto declares.
-comptime _MESSAGES: Int = 36
+comptime _MESSAGES: Int = 40
 
 comptime _LEG_JSON: Int = 0
 comptime _LEG_PROTOC: Int = 1
@@ -474,6 +478,10 @@ def _check_all(leg: Int, g: Goldens, wire: List[List[UInt8]]) raises -> Int:
     _check[InboundDeliveryResponse](leg, 33, "InboundDeliveryResponse", g, wire, n)
     _check[RawMessageRequest](leg, 34, "RawMessageRequest", g, wire, n)
     _check[RawMessageResponse](leg, 35, "RawMessageResponse", g, wire, n)
+    _check[ErrorResponse](leg, 36, "ErrorResponse", g, wire, n)
+    _check[Subject](leg, 37, "Subject", g, wire, n)
+    _check[EraseSubjectRequest](leg, 38, "EraseSubjectRequest", g, wire, n)
+    _check[EraseSubjectResponse](leg, 39, "EraseSubjectResponse", g, wire, n)
     return n
 
 

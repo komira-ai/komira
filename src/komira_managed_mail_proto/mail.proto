@@ -79,6 +79,10 @@ message Mailbox {
   string display_name = 3;
   MailboxKind kind = 4;
   int64 created_at_ms = 5;
+  // The person a MAILBOX_KIND_PERSONAL mailbox is for; unset for a
+  // MAILBOX_KIND_SHARED one. EraseSubject deletes the personal mailboxes of
+  // its subject.
+  Subject owner = 6;
 }
 
 // One stored message of a mailbox, as listed. The raw bytes are
@@ -183,12 +187,19 @@ message Attachment {
   bytes content = 3;
 }
 
-// The body of every error reply.
+// The error an error reply carries, as the `error` member of its body
+// (ErrorResponse).
 message ApiError {
   // A stable machine-readable code (`not_found`, `invalid_argument`).
   string code = 1;
   // A sentence for a person.
   string message = 2;
+  // For a refused request: the JSON name of the request field at fault;
+  // empty when no one field is.
+  string field = 3;
+  // For a fault (an error the server did not mean to send): the id it was
+  // logged under; empty otherwise.
+  string incident_id = 4;
 }
 
 // The response a method names when its reply body is raw bytes, not JSON
@@ -215,6 +226,9 @@ message CreateMailboxRequest {
   string address = 1;
   string display_name = 2;
   MailboxKind kind = 3;
+  // Required for MAILBOX_KIND_PERSONAL; must be unset for
+  // MAILBOX_KIND_SHARED.
+  Subject owner = 4;
 }
 
 message CreateMailboxResponse {
@@ -397,4 +411,41 @@ message RawMessageResponse {
   // Recipients the service did not send to because they are on its
   // suppression list (earlier bounces or complaints).
   repeated string suppressed = 2;
+}
+
+// ---- errors ------------------------------------------------------------------
+
+// The body of every error reply (4xx and 5xx):
+// `{"error":{"code":...,"message":...}}`. komira_http_server writes a fault
+// (an uncaught error) in this shape too, with `incidentId`, so a refusal and
+// a fault decode the same way.
+message ErrorResponse {
+  ApiError error = 1;
+}
+
+// ---- erasure -----------------------------------------------------------------
+
+// The identity a bearer token carries: its `iss` and `sub` claims.
+message Subject {
+  string iss = 1;
+  string sub = 2;
+}
+
+// Erases what the deployment holds about one subject: every
+// MAILBOX_KIND_PERSONAL mailbox whose `owner` is the subject, with its emails,
+// threads and submissions (a QUEUED submission is never sent), and every raw
+// message that no remaining mailbox holds. A MAILBOX_KIND_SHARED mailbox has
+// no owner and is kept, including mail the subject sent from it. Idempotent:
+// a repeat finds nothing and returns zeros.
+message EraseSubjectRequest {
+  Subject subject = 1;
+}
+
+// What the erasure removed; all zero when nothing was left.
+message EraseSubjectResponse {
+  int64 mailboxes_deleted = 1;
+  int64 emails_deleted = 2;
+  int64 submissions_deleted = 3;
+  // Raw messages removed from the blob store.
+  int64 blobs_deleted = 4;
 }

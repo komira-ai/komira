@@ -44,4 +44,8 @@ message MailCorpus {
   komira.managed_mail.v1.InboundDeliveryResponse inbound_delivery_response = 34;
   komira.managed_mail.v1.RawMessageRequest raw_message_request = 35;
   komira.managed_mail.v1.RawMessageResponse raw_message_response = 36;
+  komira.managed_mail.v1.ErrorResponse error_response = 37;
+  komira.managed_mail.v1.Subject subject = 38;
+  komira.managed_mail.v1.EraseSubjectRequest erase_subject_request = 39;
+  komira.managed_mail.v1.EraseSubjectResponse erase_subject_response = 40;
 }

@@ -9,6 +9,10 @@ mailbox {
   display_name: "Ada Lovelace"
   kind: MAILBOX_KIND_PERSONAL
   created_at_ms: 1790000000000
+  owner {
+    iss: "https://id.example.com"
+    sub: "user-ada"
+  }
 }
 email {
   email_id: "em-0001"
@@ -81,8 +85,10 @@ attachment {
   content: "%PDF-1.7"
 }
 api_error {
-  code: "not_found"
-  message: "No mailbox has the id mb-zed."
+  code: "invalid_argument"
+  message: "The field to must name at least one address."
+  field: "to"
+  incident_id: "inc-0001"
 }
 raw_body_reply {
 }
@@ -97,13 +103,21 @@ list_mailboxes_response {
     display_name: "Ada Lovelace"
     kind: MAILBOX_KIND_PERSONAL
     created_at_ms: 1790000000000
+    owner {
+      iss: "https://id.example.com"
+      sub: "user-ada"
+    }
   }
   next_cursor: "c-0003"
 }
 create_mailbox_request {
-  address: "support@example.com"
-  display_name: "Support"
-  kind: MAILBOX_KIND_SHARED
+  address: "ada@example.com"
+  display_name: "Ada Lovelace"
+  kind: MAILBOX_KIND_PERSONAL
+  owner {
+    iss: "https://id.example.com"
+    sub: "user-ada"
+  }
 }
 create_mailbox_response {
   mailbox {
@@ -112,6 +126,10 @@ create_mailbox_response {
     display_name: "Ada Lovelace"
     kind: MAILBOX_KIND_PERSONAL
     created_at_ms: 1790000000000
+    owner {
+      iss: "https://id.example.com"
+      sub: "user-ada"
+    }
   }
 }
 delete_mailbox_request {
@@ -367,4 +385,28 @@ raw_message_request {
 raw_message_response {
   message_id: "0100018f-msg-0001"
   suppressed: "carol@example.net"
+}
+error_response {
+  error {
+    code: "internal"
+    message: "The server failed to answer."
+    field: "to"
+    incident_id: "inc-0002"
+  }
+}
+subject {
+  iss: "https://id.example.com"
+  sub: "user-ada"
+}
+erase_subject_request {
+  subject {
+    iss: "https://id.example.com"
+    sub: "user-ada"
+  }
+}
+erase_subject_response {
+  mailboxes_deleted: 1
+  emails_deleted: 17
+  submissions_deleted: 3
+  blobs_deleted: 12
 }

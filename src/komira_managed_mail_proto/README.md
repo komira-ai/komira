@@ -10,14 +10,19 @@ of every message. It is its own JSON API, not IMAP or JMAP. A client and the
 app exchange these messages as proto3 canonical JSON over HTTP; this package
 is the published wire, and holds no server or client code.
 
-- Resources: `Mailbox` (one address with a display name), `Email`,
-  `EmailAddress`, `EmailPart`, `Thread`, `Envelope`, `Submission` (one
-  outbound message in the send queue), `Attachment`, and `ApiError`, the body
-  of every error reply.
+- Resources: `Mailbox` (one address with a display name; a personal
+  mailbox names its owner, a `Subject`), `Email`, `EmailAddress`, `EmailPart`,
+  `Thread`, `Envelope`, `Submission` (one outbound message in the send queue)
+  and `Attachment`.
+- `ErrorResponse`, the body of every error reply,
+  `{"error":{"code":...,"message":...}}`, with an `ApiError` inside. It is the
+  shape `komira_http_server` writes for a fault, so a refusal and a fault
+  decode the same way.
 - A request and a response message per method: mailboxes (`ListMailboxes`,
   `CreateMailbox`, `DeleteMailbox`); emails and threads (`ListEmails`,
   `GetEmail`, `GetEmailRaw`, `GetEmailPart`, `UpdateEmail`, `GetThread`);
-  sending (`SendEmail`, `GetSubmission`); and `ExportMailbox`, an mbox file.
+  sending (`SendEmail`, `GetSubmission`); `ExportMailbox`, an mbox file; and
+  `EraseSubject`, which deletes the personal mailboxes of one subject.
   `RawBodyReply` stands for a reply body that is raw bytes, not JSON.
 - The two contracts with a submission service that sends and receives mail
   for the app over HTTP: inbound delivery (`InboundEnvelope`,
@@ -107,4 +112,20 @@ assert_equal(
     encode_json(send),
     '{"envelopeFrom":"ada@example.com","recipients":["bob@example.org"],"raw":"SGkNCg=="}',
 )
+```
+
+An error reply's body is an `ErrorResponse`. A fault body from
+`komira_http_server` (`{"error":{"code":...,"message":...,"incidentId":...}}`)
+decodes as one too:
+
+```mojo
+from komira_managed_mail_proto.mail import ErrorResponse
+from komira_proto_codec import decode_json
+from std.testing import assert_equal
+
+var reply = decode_json[ErrorResponse](
+    '{"error":{"code":"internal","message":"Internal error.","incidentId":"inc-7"}}'
+)
+assert_equal(reply.error.value().code, "internal")
+assert_equal(reply.error.value().incident_id, "inc-7")
 ```
