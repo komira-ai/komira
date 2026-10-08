@@ -32,8 +32,7 @@
 #   distinct_nulls_equal        NULL keys compared with `=` (each NULL row
 #                               kept, 9 rows); NULLs dropped; DISTINCT over
 #                               a normalized string (65 CC 81 kept apart)
-#   distinct_float_zero_count   -0.0 and 0.0 kept apart (n = 6); NULL not
-#                               one value (n = 5 with nf still 4 is right)
+#   distinct_float_zero_count   -0.0 and 0.0 kept apart (n = 6)
 #   distinct_float_nan_inf      NaN never equal to itself (two NaN rows);
 #                               the NULLs dropped or kept twice
 #   union_all_keeps_duplicates  UNION ALL deduplicating (fewer than 15)

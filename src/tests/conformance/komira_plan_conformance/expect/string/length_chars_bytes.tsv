@@ -8,7 +8,8 @@
 # and not NULL (§7.12); 6 and 8 NULL; 7 S, t, r, a, U+00DF (2 bytes), e:
 # 6 / 7; 9 one 4-byte character: 1 / 4. bits = 8 * bytes. Second count, by
 # bytes: 1+2+1+1+1 = 6, 3+3 = 6, 1+4+1 = 6, 1+1+1+1+2+1 = 7.
-# Types: INT64 (§8.15), nullable by §8's default; id as scanned.
+# Types: INT64 (§8.15 for len and bytes, §7.1 for bits), nullable by §8's
+# default; id as scanned.
 id:int64	len:int64?	bytes:int64?	bits:int64?
 1	3	3	24
 2	5	6	48
