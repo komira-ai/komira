@@ -14,27 +14,43 @@ linux-x86_64), per `test_srcs` entry that is a source file:
   `cov/branch/<test>`;
 - `[coverage][branch][<test>]` (category `mojo_cov_branch_run`): the merged
   profile of its run through the release gate's runner (cov_branch_run.sh),
-  `cov/branch/<test>.profdata`.
+  `cov/branch/<test>.profdata`;
+- `[coverage][branch_ir][<test>]` (category `mojo_cov_branch_annotate`): the
+  bitcode with that profile applied by Mojo's lld, as IR text whose branches
+  carry their counts (cov_branch_annotate.sh), `cov/branch/<test>.ll`;
+- `[coverage][branch_info][<test>]` (category `mojo_cov_branch_classify`):
+  the branches of the library's measured sources in that IR, each a source
+  decision or a known compiler-made branch, as lcov `BRDA` records in
+  repository paths (cov_branch_classify), `cov/branch/<test>.info`.
 
-Nothing waits for them: the package's join, `[coverage]` and the gate are
-what they are without them.
+The gate (coverage.bzl) reads each test's `cov/branch/<test>.info` when
+the library's `coverage_branch_gate` is set (a library of
+COVERAGE_BRANCH_GATE in tools/build/coverage/policy.bzl, or a fixture of
+the tests cell that does not pass False), so its conda package (what
+ships) waits for all five through the gate; for any other library nothing
+waits for them. No join takes them directly (the library's own package
+waits for no coverage action), and `[coverage]` does not include them.
 """
 
 load(":providers.bzl", "MojoPkgTSet")
 load(":test_runtime.bzl", "test_root")
 
-def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args):
-    """Declares the three branch coverage actions of test source `t`
-    (module docstring) and returns (bitcode, binary, profdata).
+def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, src_repo, gen):
+    """Declares the five branch coverage actions of test source `t` (module
+    docstring) and returns their outputs (bc, binary, profdata, ir, info).
     `closure_tsets` are the MojoPkgTSets the test compiles against (defs.bzl's
     tests_closure: the ungated package and its deps, then the `test_deps`),
     `mojo_cmd` defs.bzl's _mojo_cmd, `link_tail` the C libraries of the
-    test's link, `test_deps` included (or None),
-    `data` its staged data and `env_args` its runner's --env arguments."""
+    test's link, `test_deps` included (or None), `data` its staged data,
+    `env_args` its runner's --env arguments, `src_dir` the library's [src]
+    (the directory its package is compiled from, so the name its sources have
+    in the IR), `src_repo` the repository directory of those sources (ending
+    in `/`) and `gen` the paths in `src_dir` of its generated sources, which
+    are not measured."""
     where = "{}: branch coverage of {}".format(ctx.label.raw_target(), t.short_path)
     if "LLVM_PROFILE_FILE" in ctx.attrs.test_env:
         fail("{}: test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself (where the test's profile is written)".format(where))
-    link_dir, run_dir = ctx.attrs.coverage_branch[DefaultInfo].default_outputs
+    link_dir, run_dir, annotate_dir, classify = ctx.attrs.coverage_branch[DefaultInfo].default_outputs
     # As _build_executable makes the release test's closure from the same list.
     closure = ctx.actions.tset(MojoPkgTSet, children = closure_tsets)
 
@@ -100,14 +116,61 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
         category = "mojo_cov_branch_run",
         identifier = stem,
     )
-    return struct(bc = bc, binary = exe, profdata = profdata)
+
+    ir = ctx.actions.declare_output("cov/branch/{}.ll".format(stem))
+    ctx.actions.run(
+        cmd_args(
+            tc.busybox,
+            "sh",
+            annotate_dir.project("cov_branch_annotate.sh"),
+            tc.busybox,
+            bc,
+            profdata,
+            ir.as_output(),
+            hidden = annotate_dir,
+        ),
+        category = "mojo_cov_branch_annotate",
+        identifier = stem,
+    )
+
+    # The library's sources are named in the IR by their path in [src] (the
+    # package is compiled from it, by a relative path), and read there: the
+    # classifier reads the token of each branch's line and column.
+    info = ctx.actions.declare_output("cov/branch/{}.info".format(stem))
+    ctx.actions.run(
+        cmd_args(
+            classify,
+            "--ir",
+            ir,
+            "--out",
+            info.as_output(),
+            "--map",
+            cmd_args(src_dir, format = "{}/=" + src_repo),
+            [["--gen", g] for g in gen],
+            # The standard library, the closure's other libraries (each a
+            # [src] under buck-out/), the test itself and the compile unit
+            # with no file are not measured.
+            "--exclude",
+            "oss/modular/",
+            "--exclude",
+            "buck-out/",
+            "--exclude-file",
+            t.short_path,
+            "--exclude-file",
+            "<unknown>",
+            hidden = src_dir,
+        ),
+        category = "mojo_cov_branch_classify",
+        identifier = stem,
+    )
+    return struct(bc = bc, binary = exe, profdata = profdata, ir = ir, info = info)
 
 def coverage_branch_sub_targets(branch):
-    """`bc`, `pgo_bin` and `branch` of a library's `coverage` sub-target:
-    `branch` {stem: coverage_branch's struct}. Each is every test's file, and
-    `[<test>]` one test's."""
+    """`bc`, `pgo_bin`, `branch`, `branch_ir` and `branch_info` of a
+    library's `coverage` sub-target: `branch` {stem: coverage_branch's
+    struct}. Each is every test's file, and `[<test>]` one test's."""
     out = {}
-    for name, field in (("bc", "bc"), ("pgo_bin", "binary"), ("branch", "profdata")):
+    for name, field in (("bc", "bc"), ("pgo_bin", "binary"), ("branch", "profdata"), ("branch_ir", "ir"), ("branch_info", "info")):
         out[name] = [DefaultInfo(
             default_outputs = [getattr(branch[k], field) for k in sorted(branch)],
             sub_targets = {k: [DefaultInfo(default_output = getattr(v, field))] for k, v in branch.items()},

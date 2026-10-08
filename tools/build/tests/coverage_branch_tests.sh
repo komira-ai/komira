@@ -7,7 +7,9 @@
 #  47. Branch coverage runs: with coverage, each welded test is also emitted
 #      as LLVM bitcode, instrumented with IR profile counters by Mojo's lld,
 #      linked with the profile runtime, and run through the release gate's
-#      runner; its merged profile is [coverage][branch][<test>]
+#      runner; its merged profile is [coverage][branch][<test>], that
+#      profile applied to the bitcode [coverage][branch_ir][<test>], and the
+#      branch records of the library's sources [coverage][branch_info][<test>]
 #      (tools/build/tests/coverage_runs.md, test 47).
 #      tests//functional/coverage:branch_counts (branchlib's test takes some
 #      arms of classify_score, an if/elif/or/and function: its counters,
@@ -20,14 +22,28 @@
 #      library: the tests' closure and C link); :reproducible_branch and
 #      :reproducible_pgo_bin (one test's bitcode and instrumented binary,
 #      built in two actions with different keys, are the same bytes);
-#      tests//negative/coverage: branchfail,
+#      :branch_info (the branch records cov_branch_classify writes for
+#      test_score_arms are its golden file: the `if` and both `elif`s, which
+#      Mojo puts on one location, three records; the `or` and `and` with
+#      their right operands derived; shapes.mojo's while, range( loop,
+#      ternary, or chain and plain @always_inline helper);
+#      tests//negative/coverage: branchfail, branchannotate,
 #      branchnoprof and branchversion build green (their release gates),
 #      and branchfail[coverage][branch][test_profile_env] is red (a test
 #      failing only instrumented: the run's message, without gate_runner's
 #      banner), branchnoprof[...] red (a cov_branch_run.sh copy whose test
 #      gets no LLVM_PROFILE_FILE: no .profraw), branchversion[...] red (a
 #      copy raising each raw profile's version to 12: refused as version 12,
-#      not 11), branchenv red at analysis (a test_env setting
+#      not 11), branchannotate[coverage][branch_ir][test_one] red (a
+#      cov_branch_annotate.sh copy changing the control flow before the
+#      profile is applied: LLVM's hash mismatch warning, refused),
+#      branchmissing[...][branch_ir] red (a cov_branch_run.sh copy merging
+#      without the test's main: a function the profile lacks, refused),
+#      branchweights[...][branch_ir] red (a copy annotating a bitcode that
+#      already holds branch weights), branchnodebug[...][branch_info] red
+#      (a nodebug helper's decision at its call), branchretor[...]
+#      [branch_info] red (`return a or b`: the right operand not counted),
+#      branchenv red at analysis (a test_env setting
 #      LLVM_PROFILE_FILE), branchlinkline red (a cov_branch_link.sh copy
 #      without -lm: not the release link). The actions exist only with the
 #      switch on: coverage_keys.sh (test 41).
@@ -37,7 +53,11 @@ expect_green coverage_branch tests//functional/coverage:branch_counts tests//fun
     tests//functional/coverage:branchc 'tests//functional/coverage:branchc[coverage][branch]' \
     tests//functional/coverage:branchtd 'tests//functional/coverage:branchtd[coverage][branch]' \
     tests//functional/coverage:reproducible_branch tests//functional/coverage:reproducible_pgo_bin \
-    tests//negative/coverage:branchfail tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion
+    tests//functional/coverage:branch_info \
+    tests//negative/coverage:branchfail tests//negative/coverage:branchannotate \
+    tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion \
+    tests//negative/coverage:branchmissing tests//negative/coverage:branchweights \
+    tests//negative/coverage:branchnodebug tests//negative/coverage:branchretor
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'
 # The failing run's message is a branch coverage run's: not gate_runner's
@@ -54,6 +74,16 @@ expect_red coverage_branch_no_profile "The test passed but wrote no .profraw" \
     'tests//negative/coverage:branchnoprof[coverage][branch][test_one]'
 expect_red coverage_branch_raw_version "has raw profile version 12, not 11" \
     'tests//negative/coverage:branchversion[coverage][branch][test_one]'
+expect_red coverage_branch_annotate_mismatch "diagnostic(s) applying the profile: lld: warning: ld-temp.o: function control flow change detected (hash mismatch)" \
+    'tests//negative/coverage:branchannotate[coverage][branch_ir][test_one]'
+expect_red coverage_branch_missing_function "no profile data available for function" \
+    'tests//negative/coverage:branchmissing[coverage][branch_ir][test_one]'
+expect_red coverage_branch_static_weights "already holds branch weights" \
+    'tests//negative/coverage:branchweights[coverage][branch_ir][test_one]'
+expect_red coverage_branch_nodebug "may be a decision of count_down" \
+    'tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]'
+expect_red coverage_branch_return_or "the right operand of this 'or' is not counted" \
+    'tests//negative/coverage:branchretor[coverage][branch_info][test_either]'
 expect_red coverage_branch_test_env "test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself" \
     tests//negative/coverage:branchenv
 expect_red coverage_branch_link_line "the branch coverage link is not the release link plus the profile runtime" \
