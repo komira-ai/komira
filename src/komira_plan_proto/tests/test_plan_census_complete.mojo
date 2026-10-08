@@ -120,7 +120,6 @@ from komira_plan_proto.plan_vocabulary import (
     ColSide,
     CorrelatedKind,
     DTypeCode,
-    ExcelErrorCode,
     ExprTag,
     ExtractField,
     FrameBound,
@@ -530,8 +529,6 @@ def _values_of(enum: String) raises -> String:
         return ScalarKind.known_json_names()
     elif enum == "ScalarTimeUnit":
         return ScalarTimeUnit.known_json_names()
-    elif enum == "ExcelErrorCode":
-        return ExcelErrorCode.known_json_names()
     elif enum == "ParamTag":
         return ParamTag.known_json_names()
     elif enum == "PushdownGateMode":

@@ -18,7 +18,8 @@
 #    and a subscription (where hosted), a default-KEEP secret, a zone, a
 #    CNAME and a certificate (where hosted; gcp adds the certificate's DNS
 #    authorization and its record), a schedule that starts the container
-#    job, an event trigger on the DELETE bucket (where hosted) and a DELETE
+#    job, an event trigger on the DELETE bucket (where hosted), a network, a
+#    subnet of it and an IP address (where hosted) and a DELETE
 #    bucket, every wanted node's live object carries exactly one
 #    run-id label, with the key `validation_run_tag_key("kci")` (spelled
 #    `kci-run-id`) and the run id verbatim, and exactly one retention mark
@@ -97,6 +98,7 @@ from kci_cloud import (
     FIELD_QUEUE,
     FIELD_DNS_ZONE,
     FIELD_EVENT_TRIGGER,
+    FIELD_NETWORK,
     FIELD_SCHEDULE,
     FIELD_SUBSCRIPTION,
     FIELD_TABLE,
@@ -178,6 +180,14 @@ comptime _NAMES = (
 """A zone, a CNAME that follows `api`'s HOST, and a certificate: gcp adds
 `tls/dnsauth` and `tls/authrec`."""
 
+comptime _NETWORKS = (
+    '{"id":"core","network":{"ipv4Cidr":"10.20.0.0/16"}},'
+    '{"id":"edge","subnet":{"network":{"resource":"core"},"ipv4Cidr":"10.20.4.0/24","zone":1}},'
+    '{"id":"ingress-ip","ipAddress":{}}'
+)
+"""A network, a subnet of it (in a zone, which aws needs) and an IP
+address, each with the default retention (DELETE)."""
+
 
 def _full(
     api_port: String,
@@ -189,6 +199,7 @@ def _full(
     names: Bool = False,
     schedule: Bool = False,
     events: Bool = False,
+    networks: Bool = False,
 ) -> String:
     """A public service with a `uses` grant, an internal service reading its
     URL (each keeping one instance, as onprem requires until Q21), a
@@ -197,7 +208,8 @@ def _full(
     retention (KEEP); `table` adds `_TABLE`; `messaging` adds `_MESSAGING`;
     `secret` adds a secret with the default retention (KEEP); `names` adds
     `_NAMES`; `schedule` adds a schedule that starts `nightly`; `events`
-    adds an event trigger delivering `store`'s new objects to `api`.
+    adds an event trigger delivering `store`'s new objects to `api`;
+    `networks` adds `_NETWORKS`.
     `roles_on` False makes api
     internal and removes web's grant on api."""
     var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
@@ -233,6 +245,7 @@ def _full(
             String(',{"id":"on-store","eventTrigger":{"source":{"resource":"store"},"event":"OBJECT_CREATED",')
             + String('"target":{"resource":"api"}}}') if events else String("")
         )
+        + ((String(",") + String(_NETWORKS)) if networks else String(""))
         + String("]}")
     )
 
@@ -257,6 +270,14 @@ def _hosts_events[S: ConformanceTarget](cloud: S) -> Bool:
     var l = cloud.implemented()
     for i in range(len(l)):
         if l[i] == FIELD_EVENT_TRIGGER:
+            return True
+    return False
+
+
+def _hosts_networks[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_NETWORK:
             return True
     return False
 
@@ -465,6 +486,7 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
             names=_hosts_names(cloud),
             schedule=True,
             events=_hosts_events(cloud),
+            networks=_hosts_networks(cloud),
         )
         _ = _apply_and_check(cloud, json, _run(String(_RUN)), String(_RUN), where)
         var resources = _list(json)

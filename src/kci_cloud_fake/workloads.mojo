@@ -30,7 +30,7 @@
 # one is drift): `img` (digest@platform), `port` (a service), one `cmd` per
 # command entry and one `arg` per argument (in order), `<arm>.env.<KEY>` and
 # `<arm>.secret_env.<KEY>` in key order (a reference is an input, bound at
-# apply time), `size` (`<cpu>m/<memory>MB`, with `/<n>gpu` when GPUs are
+# apply time; so is a service's `network`, on its subnet's NAME), `size` (`<cpu>m/<memory>MB`, with `/<n>gpu` when GPUs are
 # asked for), then a service's `scale`, `health`, `timeout` and
 # `concurrency`, a job's `retries` and `timeout` (and a folded schedule), a
 # worker's `replicas`.
@@ -64,6 +64,7 @@ from kci_cloud import (
 from kci_resource_proto.resource import Image, Resource, Size, Value
 
 from kci_cloud_fake.limits import FAKE_CITATION
+from kci_cloud_fake.network import network_input
 from kci_cloud_fake.secrets import secret_env_fields
 from kci_cloud_fake.triggers import folded_fields
 from kci_cloud_fake.shapes import (
@@ -215,6 +216,7 @@ def lower_run(
         ref svc = r.service.value()
         var port = String(Int(svc.port)) if svc.port != 0 else String(DEFAULT_PORT)
         _container(w, port, fields, refs)
+        network_input(r, refs)
         fields.append(Setting(String("scale"), _service_scale(r)))
         fields.append(Setting(String("health"), svc.health_path.copy()))
         var timeout = String(DEFAULT_REQUEST_TIMEOUT)

@@ -349,6 +349,13 @@
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
 #  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
+#  52. API JSON (tools/build/mojo/doc.bzl, mojo_doc_json):
+#      //tools/build/examples:hellopkg_doc (in test 1) equals its golden;
+#      tests//functional/mojo_doc_json:docpkg_doc resolves an import through
+#      `deps` and declares a path of each kind the symbol check walks; each
+#      target of tests//negative/mojo_doc_json fails naming its defect: a
+#      source that does not compile, a golden that differs, and three paths
+#      the JSON does not declare.
 #  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
 #  45. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
 #      (every package under src/, read from the build graph) and
@@ -482,6 +489,7 @@ expect_red() { # name, required text, target
 EXAMPLES=(
     //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user
     //tools/build/examples/libgate_ok:libgate_ok //tools/build/examples:test_hellopkg
+    //tools/build/examples:hellopkg_doc
     //tools/build/mojo/runtime_paths:komira_runtime_paths
     //tools/build/examples:hello_bundle //tools/build/package:level_test
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
@@ -1358,6 +1366,17 @@ expect_red python_oracle_local_wheel "the oracle's wheel local is built by tests
 expect_red python_oracle_local_tzdata "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_tzdata"
 expect_red python_oracle_komira_src "the oracle's src is built by komira//tools/build/examples:hello, $F" "$N:komira_src"
 expect_red python_oracle_local_python "the oracle's python is built by tests//negative/python_oracle:stand_in_python, $F" "$N:local_python"
+
+# 52
+expect_green mojo_doc_json tests//functional/mojo_doc_json:docpkg_doc
+N=tests//negative/mojo_doc_json
+expect_red mojo_doc_json_compile_error "could not generate documentation" "$N:compile_error"
+expect_red mojo_doc_json_compile_error_source "cannot implicitly convert" "$N:compile_error"
+expect_red mojo_doc_json_golden_differs "mojo_doc_json: $N:golden_differs: the JSON differs from its golden" "$N:golden_differs"
+expect_red mojo_doc_json_golden_differs_shown '-            "name": "greetings",' "$N:golden_differs"
+for want in __init__._hidden shout shapes.Grid.cells; do
+    expect_red "mojo_doc_json_missing_$want" "mojo_doc_json: $N:missing_symbol: the JSON declares no \`$want\`" "$N:missing_symbol"
+done
 
 # 53
 expect_green surface_capability_matrix //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
