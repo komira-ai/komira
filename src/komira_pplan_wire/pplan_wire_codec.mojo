@@ -127,7 +127,10 @@ comptime PPLAN_WIRE_MAGIC_1: UInt8 = 0x50  # 'P'
 comptime PPLAN_WIRE_MAGIC_2: UInt8 = 0x57  # 'W'
 comptime PPLAN_WIRE_MAGIC_3: UInt8 = 0x31  # '1'
 
-comptime PPLAN_WIRE_FORMAT_VERSION: UInt32 = 1
+comptime PPLAN_WIRE_FORMAT_VERSION: UInt32 = 2
+"""The only version `pplan_from_bytes` reads; every other one is refused by
+`PPLAN_WIRE_BAD_VERSION` before the body is read. Version 1 is refused: its
+scalar carried an error-code byte that this layout does not have."""
 
 comptime PPLAN_WIRE_BAD_MAGIC: String = "PPLAN_WIRE_BAD_MAGIC"
 comptime PPLAN_WIRE_BAD_VERSION: String = "PPLAN_WIRE_BAD_VERSION"
