@@ -233,6 +233,28 @@ def test_far_window_keeps_the_interval() raises:
     assert_equal(len(expand(biennial, _at("2031-12-01T00:00:00"), _at("2032-01-01T00:00:00"))), 0)
 
 
+def test_counted_series_is_counted_from_its_start() raises:
+    # Catches the window search skipping periods on a counted series: the
+    # count runs from the first day, so a window after the last occurrence
+    # holds nothing. A search that jumped to the window would count its
+    # first occurrences from the jumped-to period instead.
+    # Daily, three: 11-02, 11-03, 11-04. A jump would count 11-18 to 11-20.
+    var daily = _timed("2026-11-02T09:00:00", 600, '{"freq":"DAILY","interval":1,"count":3}')
+    assert_equal(len(expand(daily, _at("2026-11-20T00:00:00"), _at("2026-11-21T00:00:00"))), 0)
+    # Mondays, three: 11-02, 11-09, 11-16. A jump would count 11-30, 12-07
+    # and 12-14, and 12-07 is in the window.
+    var weekly = _timed("2026-11-02T09:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"],"count":3}')
+    assert_equal(len(expand(weekly, _at("2026-12-02T00:00:00"), _at("2026-12-10T00:00:00"))), 0)
+    # The 15th, twice: 2026-11-15 and 2026-12-15. A jump would count
+    # 2027-03-15 first.
+    var monthly = _timed("2026-11-15T09:00:00", 600, '{"freq":"MONTHLY","interval":1,"monthDay":15,"count":2}')
+    assert_equal(len(expand(monthly, _at("2027-03-10T00:00:00"), _at("2027-03-20T00:00:00"))), 0)
+    # The last occurrence itself, with the window past the first day.
+    assert_equal(
+        _starts(expand(daily, _at("2026-11-04T00:00:00"), _at("2026-11-21T00:00:00"))), "2026-11-04T09:00:00"
+    )
+
+
 def test_window_inside_a_period() raises:
     # Catches the window search landing one period late: the window starts
     # mid-period and that period's pick is inside the window. The search day
@@ -446,6 +468,7 @@ def main() raises:
     test_month_day_skips_short_months()
     test_yearly_on_the_leap_day()
     test_weekly_from_an_unpicked_day()
+    test_counted_series_is_counted_from_its_start()
     test_count_includes_removed_occurrences()
     test_all_day_occurrences()
     test_window_on_an_open_series()
