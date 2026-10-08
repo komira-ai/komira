@@ -15,14 +15,15 @@
 #     entry's offset changed;
 #   * a cat-file dump with one object fewer and one more (a blob that is
 #     not in the pack, under its own id), one id replaced, one kind
-#     changed, one payload byte flipped, one payload a byte longer and
-#     one a byte shorter.
+#     changed, the first payload byte one higher and one lower, the last
+#     payload byte changed, one payload a byte longer and one a byte
+#     shorter.
 # A check deleted, or comparing the wrong field, lets its case through (or
 # raises another case's message) and fails here. require_same_bytes and
 # require_same_index are also driven directly (each length order; for
 # require_same_bytes a difference at the first and at the last byte, for
 # require_same_index an id, offset and CRC-32 difference at the first and at
-# the last entry), and every refusal of parse_batch, parse_verify and
+# the last entry, and a CRC-32 one higher and one lower), and every refusal of parse_batch, parse_verify and
 # parse_ids gets input of the wrong shape, with too few and too many fields.
 # =============================================================================
 
@@ -67,15 +68,17 @@ def _batch(
     drop: Int = -1,
     zero_id_at: Int = -1,
     kind_at: Int = -1,
-    flip_at: Int = -1,
+    poke_at: Int = -1,
+    poke_last: Bool = False,
+    poke_value: UInt8 = 0,
     grow_at: Int = -1,
     shrink_at: Int = -1,
     extra: Bool = False,
 ) raises -> GitObjects:
     """`o` written back as `git cat-file --batch` prints it and parsed again,
     with object `drop` left out, object `zero_id_at` given the null id,
-    object `kind_at` another kind, object `flip_at`'s first payload byte
-    flipped, object `grow_at`'s payload one byte longer and object
+    object `kind_at` another kind, object `poke_at`'s first payload byte
+    (its last with `poke_last`) set to `poke_value`, object `grow_at`'s payload one byte longer and object
     `shrink_at`'s one byte shorter; with `extra`, one more object after
     them: a blob that is not in the pack, under its own id."""
     var out = List[UInt8]()
@@ -87,8 +90,8 @@ def _batch(
         if i == kind_at:
             kind = "tree" if kind == "blob" else "blob"
         var payload = o.payloads[i].copy()
-        if i == flip_at:
-            payload[0] = payload[0] ^ 1
+        if i == poke_at:
+            payload[len(payload) - 1 if poke_last else 0] = poke_value
         if i == grow_at:
             payload.append(10)
         if i == shrink_at:
@@ -184,6 +187,15 @@ def test_check_pack_each_check_fails() raises:
         _check(pack, idx, kind, objects),
         at + "kind " + lines[j].kind + ", git's " + kind[j].kind,
     )
+    # git's kind sorting below and above every kind name: a string check
+    # that only refuses one order passes one of them.
+    for name in ["a", "zz"]:
+        var kind_o = lines.copy()
+        kind_o[j].kind = name
+        assert_equal(
+            _check(pack, idx, kind_o, objects),
+            at + "kind " + lines[j].kind + ", git's " + name,
+        )
 
     var depth = lines.copy()
     depth[j].depth += 1
@@ -216,12 +228,15 @@ def test_check_pack_each_check_fails() raises:
         at + "depth " + String(lines[j].depth) + ", git's " + String(lines[j].depth - 1),
     )
 
-    var base = lines.copy()
-    base[j].base = "x"
-    assert_equal(
-        _check(pack, idx, base, objects),
-        at + "base " + lines[j].base + ", git's x",
-    )
+    # git's base sorting above ("x") and below ("!") ours, which is "-" or
+    # a hex id: a string check that only refuses one order passes one.
+    for name in ["x", "!"]:
+        var base = lines.copy()
+        base[j].base = name
+        assert_equal(
+            _check(pack, idx, base, objects),
+            at + "base " + lines[j].base + ", git's " + name,
+        )
 
     # The first entry in pack order (offset 12, right after the header),
     # its offset changed: the per-entry loop must start at entry 0.
@@ -268,9 +283,20 @@ def test_check_pack_each_check_fails() raises:
     var p = _first_nonempty(objects)
     var at_p = _NAME + ": " + objects.ids[p].to_hex() + ": "
     var size_p = String(len(objects.payloads[p]))
+    var differs_p = at_p + "payload differs from cat-file's (" + size_p + " bytes, git's " + size_p + ")"
+    # The first payload byte, cat-file's one higher and one lower: a check
+    # that only refuses one order passes one of them. (The first byte of a
+    # commit, tree or text blob is printable, so both exist.)
+    var b0 = objects.payloads[p][0]
+    assert_equal(b0 > 0 and b0 < 255, True)
+    assert_equal(_check(pack, idx, lines, _batch(objects, poke_at=p, poke_value=b0 + 1)), differs_p)
+    assert_equal(_check(pack, idx, lines, _batch(objects, poke_at=p, poke_value=b0 - 1)), differs_p)
+    # The last payload byte changed: the comparison must reach it.
+    var last = objects.payloads[p][len(objects.payloads[p]) - 1]
+    var other_last = last + 1 if last < 255 else last - 1
     assert_equal(
-        _check(pack, idx, lines, _batch(objects, flip_at=p)),
-        at_p + "payload differs from cat-file's (" + size_p + " bytes, git's " + size_p + ")",
+        _check(pack, idx, lines, _batch(objects, poke_at=p, poke_last=True, poke_value=other_last)),
+        differs_p,
     )
     assert_equal(
         _check(pack, idx, lines, _batch(objects, grow_at=p)),
@@ -361,6 +387,12 @@ def test_require_same_index() raises:
     )
     assert_equal(
         _index_err(_index(f, [a, b], [12, 40], [7, 8]), want),
+        "w: CRC-32 of " + b.to_hex() + " differs",
+    )
+    # A CRC-32 one higher than git's (the cases above are one lower): a
+    # check that only refuses one order passes one of them.
+    assert_equal(
+        _index_err(_index(f, [a, b], [12, 40], [7, 10]), want),
         "w: CRC-32 of " + b.to_hex() + " differs",
     )
 
