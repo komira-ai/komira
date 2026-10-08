@@ -263,6 +263,38 @@ mojo_library(
     ],
 )
 
+# Test 43. After the limit's kill, cov_run.sh lists the group's processes
+# from /proc, so it first requires /proc to show its own shell under its own
+# pid. A cov_run.sh copy takes 1 for its own pid: /proc/1/stat exists and
+# starts with 1, as /proc/<pid> of another PID namespace names another
+# process with that pid, where the scan would list none of the group and
+# pass; only /proc/self/stat, which the shell reads itself, shows the other
+# pid. RED: tests//negative/coverage:lingerproc[coverage][tests][test_lingers]:
+# "/proc is not readable as this run's own".
+cov_plant(
+    name = "lingerproc_run_sh",
+    expr = "s|^    me=\\$\\$$|    me=1|",
+    out = "cov_run.sh",
+    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+)
+
+cov_run_dir(
+    name = "lingerproc_run",
+    exec_compatible_with = LINUX_X86_64,
+    limit_s = 20,
+    script = ":lingerproc_run_sh",
+)
+
+mojo_library(
+    name = "lingerproc",
+    srcs = ["linger/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_run = ":lingerproc_run",
+    import_name = "linger",
+    test_srcs = ["tests/test_lingers.mojo"],
+)
+
 # ---- Test 46: the coverage gate -------------------------------------------
 #
 # Each library below has coverage builds and the gate whatever the switch

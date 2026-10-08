@@ -238,7 +238,23 @@ run env STUB_OUT="$W/fx" PWD="$L" "$S/zig" cc a.o -o out
 grep -qF "$(placeholder "$L")" out || red "logical only: the output does not hold the placeholder of $L"
 pass
 
-# 13. A link at a release optimization level is refused before real/zig
+# 13. Only the absolute $BUCK_SCRATCH_PATH, outside the working directory:
+# the output names it and neither spelling of the working directory. It is
+# relocated (debug_relocate counts it), but the zero-count check counts the
+# working directory's spellings alone, so the link fails: a count of every
+# directory given would pass it, and the runtime's DWARF could then name a
+# directory nobody relocated.
+cased scratch_only
+mkdir -p "$W/sbx_scratch"
+fixture "$W/fx" .debug_line 0 "$W/sbx_scratch/zig/crt.c"
+case "$W/sbx_scratch" in "$C"/*) red "scratch only: the scratch directory is under the working directory; the case cannot be made" ;; esac
+run env STUB_OUT="$W/fx" BUCK_SCRATCH_PATH="$W/sbx_scratch" PWD="$C" "$S/zig" cc a.o -o out
+[ "$RC" -eq 1 ] || red "scratch only: exit $RC, want 1"
+grep -qF "has debug sections but holds the working directory" "$W/err" || red "scratch only: the message does not say so"
+! grep -qF "$W/sbx_scratch" out || red "scratch only: the output still holds $W/sbx_scratch (not relocated)"
+pass
+
+# 14. A link at a release optimization level is refused before real/zig
 # runs: zig 0.12 then gives lld -O2 or -O3 (link/Elf.zig), which merges
 # string tails, and a string that is the tail of a relocated directory would
 # be rewritten with it. -O0 and -Og are Debug for zig, and a bare -O goes to
@@ -263,7 +279,7 @@ run env STUB_OUT="$W/fx" "$S/zig" cc -c a.c -O2 -o a.o
 [ "$RC" -eq 0 ] || red "compile with -O2: exit $RC, want 0 (only a link is refused)"
 pass
 
-# 14. The pinned zig, end to end, as a Mojo link uses it: a C file compiled
+# 15. The pinned zig, end to end, as a Mojo link uses it: a C file compiled
 # with line tables (-g, -c: passed through), then linked through cov_zig with
 # -Wl,--strip-debug. The binary keeps .debug_line, holds the placeholder of
 # the working directory and not the directory, and has no compressed section
@@ -287,11 +303,11 @@ run "$RELOC" hello.copy /nonexistent/directory/name
 [ "$RC" -eq 0 ] || red "pinned zig: debug_relocate refused the binary (a compressed section?)"
 pass
 
-# 15. The same link through the pinned zig directly, as a release build runs
-# it: no .debug_line. So case 14's line tables are cov_zig's doing.
+# 16. The same link through the pinned zig directly, as a release build runs
+# it: no .debug_line. So case 15's line tables are cov_zig's doing.
 run "$ZIG/zig" cc -target "$TGT" -Wl,--strip-debug -Wl,--enable-new-dtags hello.o -o hello_release
 [ "$RC" -eq 0 ] || red "pinned zig, release: the link exited $RC"
-! grep -qF .debug_line hello_release || red "pinned zig, release: the binary has .debug_line; case 14 proves nothing"
+! grep -qF .debug_line hello_release || red "pinned zig, release: the binary has .debug_line; case 15 proves nothing"
 pass
 
 cd /
