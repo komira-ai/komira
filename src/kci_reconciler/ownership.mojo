@@ -38,7 +38,7 @@
 # THE OWNERSHIP RULE (the cases the engine can decide alone). For a
 # node whose object is PRESENT:
 #   * stamped with this node's identity                         -> ours
-#   * no stamp, no ledger record, adopted by name (`--adopt`)   -> ours, after
+#   * no stamp, no ledger record, adopted by its resource (`adopt`)   -> ours, after
 #                                                                  the stamp
 #   * no stamp, no ledger record                                -> FOREIGN
 #   * no stamp but a ledger record                              -> CONFLICT
@@ -234,7 +234,7 @@ struct OwnerStamp(Copyable, Movable, Deinitable):
 
 struct CellScope(Copyable, Movable, Deinitable):
     """What an apply runs in: the release machine, the cell, the provenance of
-    this run, the logical ids the run was told to ADOPT (`--adopt <id>`, the
+    this run, the logical ids the run was told to ADOPT (each resource whose `adopt` is set, the
     only way an unstamped object of a wanted name is taken over), and the id
     of the validation run this apply is part of (None outside one)."""
 
