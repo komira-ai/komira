@@ -24,7 +24,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     the recompressed message and starting chaining value of that DV
 #     (upstream's ctx->m2 and ctx->ihv2) against komira_git's, and the set
 #     of DVs recompressed against upstream's mask (all 32 with the filter
-#     off).
+#     off); for every DV below 31, blocks where it is set below a higher
+#     DV, sampled from the blocks meeting DV 27 to 31's bit conditions.
 mojo_library(
     name = "komira_git_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
