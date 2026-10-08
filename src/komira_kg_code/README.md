@@ -28,7 +28,8 @@ The graph holds each node once and each edge once, nodes sorted by id and
 edges by source, kind and destination, so equal inputs give equal bytes.
 An input added twice counts once. An input added again with other content
 is refused: a document, a source or a label's doc JSON with other text
-(byte for byte), a target with another rule, `srcs`, `test_srcs`, `deps`
+(byte for byte), a target with another rule (any `buck.type`, also one
+the deriver reads nothing from), `srcs`, `test_srcs`, `deps`
 or import name. So is a symbol two libraries declare in two files. Every
 edge any input gives is kept, so the order of adding never decides.
 `dump()` writes it as text, one line per node and edge; `node_batch()` and

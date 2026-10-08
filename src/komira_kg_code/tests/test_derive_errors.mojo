@@ -281,6 +281,26 @@ def test_a_library_listed_twice_with_other_test_srcs() raises:
     assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different test_srcs")
 
 
+def test_a_library_listed_twice_with_one_other_dep() raises:
+    # As many deps as the first listing, one of them another target.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": ["c//z:a"], "srcs": ["c//p/lib/__init__.mojo"]}}')
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": ["c//z:b"], "srcs": ["c//p/lib/__init__.mojo"]}}')
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different deps")
+
+
+def test_a_library_listed_twice_with_one_other_test_src() raises:
+    # As many test_srcs as the first listing, one of them another file.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_library_rule", "srcs": ["c//p/lib/__init__.mojo"], "test_srcs": ["c//p/t1.mojo"]}}'
+    )
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_library_rule", "srcs": ["c//p/lib/__init__.mojo"], "test_srcs": ["c//p/t2.mojo"]}}'
+    )
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different test_srcs")
+
+
 def test_a_binary_listed_twice_with_other_srcs() raises:
     var b = CodeGraphBuilder()
     b.add_uquery_json('{"c//p:app": {"buck.type": "mojo_binary_rule", "srcs": ["c//p/main.mojo"]}}')
@@ -295,7 +315,30 @@ def test_a_target_listed_twice_with_another_rule() raises:
         '{"c//p:lib": {"buck.type": "mojo_binary_rule", "deps": [], "import_name": null,'
         ' "srcs": ["c//p/lib/__init__.mojo", "c//p/lib/a.mojo"], "test_srcs": []}}'
     )
-    assert_equal(_error_of(b), "komira_kg_code: two different target nodes have the id c//p:lib")
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different rules")
+
+
+def test_a_library_listed_again_with_a_rule_the_deriver_skips() raises:
+    # A rule the deriver reads no nodes from still counts as the label's rule.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "srcs": ["c//p/lib/__init__.mojo"]}}')
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_shared_lib_rule"}}')
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different rules")
+
+
+def test_a_skipped_rule_listed_first_then_a_library() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_shared_lib_rule"}}')
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "srcs": ["c//p/lib/__init__.mojo"]}}')
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different rules")
+
+
+def test_two_skipped_rules_for_one_label() raises:
+    # Two rules the deriver skips still disagree.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:x": {"buck.type": "mojo_shared_lib_rule"}}')
+    b.add_uquery_json('{"c//p:x": {"buck.type": "mojo_proto_library_rule"}}')
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:x is listed twice with different rules")
 
 
 def test_a_library_listed_twice_with_other_import_names() raises:
@@ -355,8 +398,13 @@ def main() raises:
     _run("library_twice_srcs_order", test_a_library_listed_twice_with_srcs_in_other_order, failed)
     _run("library_twice_deps", test_a_library_listed_twice_with_other_deps, failed)
     _run("library_twice_test_srcs", test_a_library_listed_twice_with_other_test_srcs, failed)
+    _run("library_twice_one_other_dep", test_a_library_listed_twice_with_one_other_dep, failed)
+    _run("library_twice_one_other_test_src", test_a_library_listed_twice_with_one_other_test_src, failed)
     _run("binary_twice_srcs", test_a_binary_listed_twice_with_other_srcs, failed)
     _run("target_twice_rule", test_a_target_listed_twice_with_another_rule, failed)
+    _run("library_then_skipped_rule", test_a_library_listed_again_with_a_rule_the_deriver_skips, failed)
+    _run("skipped_rule_then_library", test_a_skipped_rule_listed_first_then_a_library, failed)
+    _run("two_skipped_rules", test_two_skipped_rules_for_one_label, failed)
     _run("library_twice_import", test_a_library_listed_twice_with_other_import_names, failed)
     _run("source_twice", test_a_source_added_twice_with_other_text, failed)
     if len(failed) > 0:

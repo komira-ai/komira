@@ -40,7 +40,8 @@ a doc JSON for a label that is no library, a module with no source file, a
 source that no target lists, a `governs` entry that names nothing or
 several targets or files, two nodes with one id and another kind, file
 or text (a symbol two libraries declare in two files), a target listed
-twice with a different rule, `srcs`, `test_srcs`, `deps` or import name,
+twice with a different rule (any `buck.type`, one the deriver skips too),
+`srcs`, `test_srcs`, `deps` or import name,
 and a source, a document or a label's doc JSON added twice with different
 text (compared byte for byte).
 """
@@ -271,6 +272,9 @@ struct CodeGraphBuilder(Movable):
         var import_names = Dict[String, String]()
         # Library label -> its srcs.
         var lib_srcs = Dict[String, List[String]]()
+        # Target label -> the `buck.type` it was first listed with, for
+        # every rule, read or skipped.
+        var rules = Dict[String, String]()
         # Target label -> the attributes it was first listed with.
         var listed = Dict[String, _Listing]()
         # File id -> labels listing it in srcs.
@@ -278,7 +282,7 @@ struct CodeGraphBuilder(Movable):
         var stubs = List[String]()
         var test_targets = List[KgEdge]()
         for q in range(len(self._uquery)):
-            _read_uquery(self._uquery[q], g, import_names, lib_srcs, listed, src_owners, stubs, test_targets)
+            _read_uquery(self._uquery[q], g, import_names, lib_srcs, rules, listed, src_owners, stubs, test_targets)
         for i in range(len(test_targets)):
             if test_targets[i].src in lib_srcs:
                 g.link(test_targets[i].src, EDGE_TESTS, test_targets[i].dst)
@@ -384,6 +388,7 @@ def _read_uquery(
     mut g: _Graph,
     mut import_names: Dict[String, String],
     mut lib_srcs: Dict[String, List[String]],
+    mut rules: Dict[String, String],
     mut listed: Dict[String, _Listing],
     mut src_owners: Dict[String, List[String]],
     mut stubs: List[String],
@@ -400,12 +405,18 @@ def _read_uquery(
         if _member(attrs, "buck.type") < 0:
             raise _err("uquery JSON: " + label + " has no `buck.type`; run uquery with --output-attribute")
         var rule = _string_member(attrs, "buck.type", label)
+        # The rule is recorded before rules the deriver reads no nodes from
+        # are skipped, so a label listed with two rules is refused whichever
+        # they are.
+        if label in rules:
+            if rules[label] != rule:
+                raise _err("uquery JSON: " + label + " is listed twice with different rules")
+        else:
+            rules[label] = rule
         if rule != _LIBRARY and rule != _BINARY and rule != _TEST:
             continue
         var short = String(rule[byte = 0 : rule.byte_length() - 5])
         var name = _target_name(label)
-        # Another rule kind for the same label is refused here (the text
-        # names the rule).
         _ = g.put(KgNode(label, NODE_TARGET, name, _cell_path(label), 0, short + " " + name))
         var srcs = _string_list(attrs, "srcs", label)
         var test_srcs = _string_list(attrs, "test_srcs", label)
