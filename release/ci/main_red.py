@@ -39,11 +39,14 @@ build another revision, and a run of any other branch is not main.
        After creating an issue it lists the open ones again: if two runs
        raced, every issue but the oldest is closed as its duplicate, its
        body posted on the oldest.
-  success: every open `main-red` issue whose recorded heads (every `Head:`
-    line of its body and comments) this commit contains is closed, with the
-    comment `Fixed: main is green at <sha> (run <url>)`. An issue holding a
-    head the green commit does not contain (a re-run of an older commit
-    went green) stays open.
+  success: every open `main-red` issue is closed, with the comment
+    `Fixed: main is green at <sha> (run <url>)`, unless it records a head
+    the green commit does not contain (a re-run of an older commit went
+    green): then it stays open. The recorded heads are the `Head:` lines
+    of the issue's body and of the comments WORKFLOW_LOGIN wrote; anyone
+    can comment on a public issue, so no other comment counts. A head the
+    compare API does not know (404) or places off main's line (diverged)
+    is logged and skipped.
   cancelled, skipped, anything else: nothing.
 
 The pure parts (log lines, the range, the issue text, the decisions) are
@@ -63,6 +66,9 @@ import time
 LABEL = "main-red"
 LABEL_COLOR = "b60205"
 LABEL_DESCRIPTION = "main's release build failed (docs/ci.md, main_red.yml)"
+# The login the workflow's GITHUB_TOKEN writes as: only its comments record
+# heads (anyone can comment on a public issue).
+WORKFLOW_LOGIN = "github-actions[bot]"
 WORKFLOW_FILE = "kci.yml"
 MAIN = "main"
 MAX_TARGETS = 5
@@ -86,6 +92,10 @@ _HEAD_LINE = re.compile(r"^Head: ([0-9a-f]{40})$")
 
 class NotFound(Exception):
     """An API path answered 404."""
+
+
+class AlreadyExists(Exception):
+    """A create answered 422 `already_exists` (another run made it first)."""
 
 
 # ---- log lines ---------------------------------------------------------------
@@ -288,10 +298,12 @@ def decide_red(open_issues):
 
 
 def decide_green(heads_by_issue, contains):
-    """[(issue, "close" | "keep")], by issue number: close when the green
-    commit contains every recorded head."""
+    """[(issue, "close" | "keep")], by issue number: close unless the green
+    commit is known NOT to contain a recorded head. `contains(head)` is True,
+    False, or None for a head it cannot place (unknown to the API, or off
+    main's line), which neither blocks nor counts."""
     return [
-        (n, "close" if all(contains(h) for h in heads_by_issue[n]) else "keep")
+        (n, "keep" if any(contains(h) is False for h in heads_by_issue[n]) else "close")
         for n in sorted(heads_by_issue)
     ]
 
@@ -391,10 +403,23 @@ def _green(api, repo, run, out):
     heads_by_issue = {}
     for issue in _open_issues(api, repo):
         comments = api.get("repos/%s/issues/%d/comments?per_page=100" % (repo, issue["number"])) or []
-        heads_by_issue[issue["number"]] = heads_in([issue.get("body")] + [c.get("body") for c in comments])
+        # The body, and the workflow's own comments: no one else's.
+        mine = [c.get("body") for c in comments if (c.get("user") or {}).get("login") == WORKFLOW_LOGIN]
+        heads_by_issue[issue["number"]] = heads_in([issue.get("body")] + mine)
 
     def contains(head):
-        return head == sha or _compare(api, repo, head, sha, 1).get("status") in ("ahead", "identical")
+        if head == sha:
+            return True
+        try:
+            status = _compare(api, repo, head, sha, 1).get("status")
+        except NotFound:
+            status = "unknown"
+        if status in ("ahead", "identical"):
+            return True
+        if status == "behind":
+            return False
+        out.write("main_red: recorded head %s is %s against %s; skipped\n" % (head, status, sha))
+        return None
 
     for number, action in decide_green(heads_by_issue, contains):
         if action == "close":
@@ -421,7 +446,10 @@ def _ensure_label(api, repo):
     try:
         api.get("repos/%s/labels/%s" % (repo, LABEL))
     except NotFound:
-        api.write("POST", "repos/%s/labels" % repo, {"name": LABEL, "color": LABEL_COLOR, "description": LABEL_DESCRIPTION})
+        try:
+            api.write("POST", "repos/%s/labels" % repo, {"name": LABEL, "color": LABEL_COLOR, "description": LABEL_DESCRIPTION})
+        except AlreadyExists:
+            pass
 
 
 def run(api, repo, run_id, out=sys.stdout):
@@ -438,23 +466,28 @@ def run(api, repo, run_id, out=sys.stdout):
 
 class GhApi:
     """The GitHub API through `gh api` (GH_TOKEN in the environment). Each
-    call is tried three times; a 404 is NotFound. With `dry_run`, a write is
-    printed, not sent."""
+    call is tried three times; a 404 is NotFound, a 422 `already_exists`
+    AlreadyExists, neither retried. With `dry_run`, a write is printed, not
+    sent."""
 
-    def __init__(self, dry_run=False, out=sys.stdout):
+    def __init__(self, dry_run=False, out=sys.stdout, runner=subprocess.run, sleep=time.sleep):
         self.dry_run = dry_run
         self.out = out
+        self.runner = runner
+        self.sleep = sleep
 
     def _gh(self, args, stdin=None):
         last = ""
         for attempt in range(3):
-            p = subprocess.run(["gh", "api"] + args, input=stdin, capture_output=True, text=True)
+            p = self.runner(["gh", "api"] + args, input=stdin, capture_output=True, text=True)
             if p.returncode == 0:
                 return p.stdout
             last = (p.stderr or "").strip()
             if "HTTP 404" in last:
                 raise NotFound(args[-1])
-            time.sleep(2 ** attempt)
+            if "HTTP 422" in last and "already_exists" in (p.stdout or "") + last:
+                raise AlreadyExists(args[-1])
+            self.sleep(2 ** attempt)
         raise SystemExit("main_red: gh api %s failed: %s" % (" ".join(args), last))
 
     def get(self, path):

@@ -213,6 +213,13 @@ class Issue(unittest.TestCase):
         texts = [main_red.issue_body(RUN_URL, HEAD, None, None, ["x"], []), "Head: " + G2 + "\n", "Head: short"]
         self.assertEqual(main_red.heads_in(texts), [HEAD, G2])
 
+    def test_a_head_mid_line_is_not_read(self):
+        # A target or log line quoting `Head: <sha>` (any value of the
+        # contract) must not record a head: only a line that IS `Head: <sha>`.
+        body = main_red.issue_body(RUN_URL, HEAD, None, None, ["//a:b Head: " + G1], ["x Head: " + G2])
+        self.assertEqual(main_red.heads_in([body]), [HEAD])
+        self.assertEqual(main_red.heads_in(["Log: Head: " + G1, "  Head: " + G2]), [G2])
+
     def test_fixed_comment(self):
         self.assertEqual(main_red.fixed_comment(G1, RUN_URL), "Fixed: main is green at %s (run %s)" % (G1, RUN_URL))
 
@@ -241,6 +248,12 @@ class Decision(unittest.TestCase):
         contains = {G1: True, G2: False}
         self.assertEqual(main_red.decide_green(issues, contains.get), [(3, "close"), (4, "keep"), (5, "close")])
 
+    def test_green_skips_a_head_it_cannot_place(self):
+        # None: the compare API does not know the head (404) or it is not on
+        # main's line (diverged); it neither blocks nor counts.
+        self.assertEqual(main_red.decide_green({3: [G1, G2]}, {G1: True, G2: None}.get), [(3, "close")])
+        self.assertEqual(main_red.decide_green({3: [G1, G2]}, {G1: False, G2: None}.get), [(3, "keep")])
+
     def test_duplicates_after_a_race_close_all_but_the_oldest(self):
         self.assertEqual(main_red.duplicates([{"number": 8}, {"number": 3}, {"number": 5}]), (3, [5, 8]))
         self.assertEqual(main_red.duplicates([{"number": 3}]), (3, []))
@@ -265,7 +278,11 @@ class FakeApi:
     def text(self, path):
         return self.get(path)
 
+    fail_label = False
+
     def write(self, method, path, fields):
+        if self.fail_label and path.endswith("/labels"):
+            raise main_red.AlreadyExists(path)
         self.writes.append((method, path, fields))
         if method == "POST" and path.endswith("/issues"):
             return {"number": 21}
@@ -280,6 +297,7 @@ class Answers:
 
 
 R = "repos/o/r"
+BOT = "github-actions[bot]"
 
 
 def red_gets(open_issues, label=True):
@@ -360,7 +378,7 @@ class Run(unittest.TestCase):
                 "head_sha": G2, "html_url": RUN_URL, "run_attempt": 1, "name": "kci",
             },
             R + "/issues?labels=main-red&state=open&per_page=100": [{"number": 4, "body": "Run: x\nHead: " + HEAD + "\n"}],
-            R + "/issues/4/comments?per_page=100": [{"body": "Head: " + G1 + "\n"}],
+            R + "/issues/4/comments?per_page=100": [{"user": {"login": BOT}, "body": "Head: " + G1 + "\n"}],
             R + "/compare/%s...%s?per_page=1&page=1" % (HEAD, G2): {"status": "ahead"},
             R + "/compare/%s...%s?per_page=1&page=1" % (G1, G2): {"status": "ahead"},
         }
@@ -384,6 +402,90 @@ class Run(unittest.TestCase):
         api = FakeApi(gets)
         main_red.run(api, "o/r", 8, out=open(os.devnull, "w"))
         self.assertEqual(api.writes, [])
+
+    def green_gets(self, comments, compares):
+        gets = {
+            R + "/actions/runs/8": {
+                "id": 8, "conclusion": "success", "event": "push", "head_branch": "main",
+                "head_sha": G2, "html_url": RUN_URL, "run_attempt": 1, "name": "kci",
+            },
+            R + "/issues?labels=main-red&state=open&per_page=100": [
+                {"number": 4, "user": {"login": BOT}, "body": "Head: " + HEAD + "\n"}],
+            R + "/issues/4/comments?per_page=100": comments,
+            R + "/compare/%s...%s?per_page=1&page=1" % (HEAD, G2): {"status": "ahead"},
+        }
+        for base, status in compares.items():
+            gets[R + "/compare/%s...%s?per_page=1&page=1" % (base, G2)] = {"status": status}
+        return gets
+
+    CLOSED = [
+        ("POST", R + "/issues/4/comments", {"body": "Fixed: main is green at %s (run %s)" % (G2, RUN_URL)}),
+        ("PATCH", R + "/issues/4", {"state": "closed", "state_reason": "completed"}),
+    ]
+
+    def test_green_ignores_heads_in_comments_by_anyone_but_the_workflow(self):
+        # A public comment can say anything: a head main does not contain
+        # (`behind`) or one no API knows must not keep the issue open.
+        fake = "0f" * 20
+        comments = [
+            {"user": {"login": "someone"}, "body": "Head: " + G1 + "\n"},
+            {"user": {"login": "github-actions"}, "body": "Head: " + fake + "\n"},
+        ]
+        api = FakeApi(self.green_gets(comments, {G1: "behind"}))
+        main_red.run(api, "o/r", 8, out=open(os.devnull, "w"))
+        self.assertEqual(api.writes, self.CLOSED)
+
+    def test_green_skips_a_recorded_head_the_api_does_not_know(self):
+        fake = "0f" * 20
+        api = FakeApi(self.green_gets([{"user": {"login": BOT}, "body": "Head: " + fake + "\n"}], {}))
+        main_red.run(api, "o/r", 8, out=open(os.devnull, "w"))
+        self.assertEqual(api.writes, self.CLOSED)
+
+    def test_green_skips_a_recorded_head_off_mains_line(self):
+        api = FakeApi(self.green_gets([{"user": {"login": BOT}, "body": "Head: " + G1 + "\n"}], {G1: "diverged"}))
+        main_red.run(api, "o/r", 8, out=open(os.devnull, "w"))
+        self.assertEqual(api.writes, self.CLOSED)
+
+    def test_green_keeps_for_a_workflow_head_it_does_not_contain(self):
+        api = FakeApi(self.green_gets([{"user": {"login": BOT}, "body": "Head: " + G1 + "\n"}], {G1: "behind"}))
+        main_red.run(api, "o/r", 8, out=open(os.devnull, "w"))
+        self.assertEqual(api.writes, [])
+
+    def test_a_rerun_reads_its_own_attempts_jobs(self):
+        gets = red_gets([])
+        gets[R + "/actions/runs/7"] = dict(gets[R + "/actions/runs/7"], run_attempt=2)
+        # Attempt 1 failed elsewhere; attempt 2 is the run that just ended.
+        gets[R + "/actions/runs/7/attempts/1/jobs?per_page=100"] = {"jobs": [
+            {"id": 69, "name": "gamma", "conclusion": "failure", "steps": [{"name": "publish", "conclusion": "failure"}]}]}
+        gets[R + "/actions/runs/7/attempts/2/jobs?per_page=100"] = {"jobs": [
+            {"id": 70, "name": "build", "conclusion": "failure", "steps": [{"name": "kci run --stage build", "conclusion": "failure"}]}]}
+        gets[R + "/actions/jobs/69/logs"] = "Action failed: //wrong:attempt (cfg)\n"
+        api = FakeApi(gets)
+        main_red.run(api, "o/r", 7, out=open(os.devnull, "w"))
+        self.assertEqual(api.writes[-1][2]["title"], "main red: komira//tools/build/toolchains:busybox")
+
+    def test_a_label_another_run_just_created_is_not_an_error(self):
+        api = FakeApi(red_gets([], label=False))
+        api.fail_label = True
+        main_red.run(api, "o/r", 7, out=open(os.devnull, "w"))
+        self.assertEqual(api.writes[-1][0:2], ("POST", R + "/issues"))
+
+    def test_gh_reads_422_already_exists_as_already_exists_without_retrying(self):
+        calls = []
+
+        class P:
+            returncode = 1
+            stdout = '{"message":"Validation Failed","errors":[{"resource":"Label","code":"already_exists","field":"name"}]}'
+            stderr = "gh: Validation Failed (HTTP 422)\n"
+
+        def runner(*a, **k):
+            calls.append(a)
+            return P()
+
+        api = main_red.GhApi(runner=runner, sleep=lambda s: None)
+        with self.assertRaises(main_red.AlreadyExists):
+            api.write("POST", "repos/o/r/labels", {"name": "main-red"})
+        self.assertEqual(len(calls), 1)
 
     def test_cancelled_writes_nothing_and_reads_nothing_else(self):
         gets = {R + "/actions/runs/9": {"id": 9, "conclusion": "cancelled", "event": "push", "head_branch": "main",

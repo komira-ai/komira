@@ -1003,9 +1003,13 @@ push to `main`:
   failing target>`; otherwise it comments on the open one. A red commit
   that a later green run already contains (a re-run of an old run) is
   left alone.
-- **Green** (`success`): every open `main-red` issue whose recorded heads
-  the green commit contains is closed with the comment `Fixed: main is
-  green at <commit> (run <url>)`.
+- **Green** (`success`): every open `main-red` issue is closed with the
+  comment `Fixed: main is green at <commit> (run <url>)`, unless it records
+  a red head the green commit does not contain (a re-run of an older
+  commit went green). The recorded heads are the `Head:` lines of the
+  issue's body and of the workflow's own comments (`github-actions[bot]`);
+  no other comment counts, and a head the API cannot place on `main`'s
+  line is skipped.
 - **Cancelled or skipped**: nothing.
 
 The issue body, and each comment on a later red run, is one `Key: value`
