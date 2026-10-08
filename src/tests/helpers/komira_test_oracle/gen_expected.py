@@ -436,6 +436,12 @@ def _output_width(con, statement, path, node, spell):
                                 "ORDER BY position %d" % (_path_text(path[:-3]), _PAST_THE_END))
 
 
+# The rank family: each answers the same for every peer of its ORDER BY,
+# an OVER clause's or its own (DuckDB 1.5.6 takes one for rank,
+# percent_rank and cume_dist), so a tie there is no tie in the answer.
+_PEERS_ALIKE = frozenset(["cume_dist", "dense_rank", "percent_rank", "rank", "rank_dense"])
+
+
 def _window_input_keys(select, spell):
     """Expressions whose values tell apart every row that reaches a window
     of query node `select`: its GROUP BY expressions (each group is one
@@ -476,10 +482,19 @@ def tie_sites(con, statement):
       window told apart. Its arguments are not enough: row_number() has
       none, `lag(k ORDER BY k)` reads which row comes before the current
       one, not only k, and lag's offset and default are not among its
-      arguments (`children`);
+      arguments (`children`). Not the rank family's (`rank(ORDER BY k)
+      OVER ()`): it answers the same for every peer of its own ORDER BY
+      in the frame, and a tiebreak would split the peers;
     - an aggregate's own ORDER BY (`order_bys`): keys are the function's
-      arguments, all it reads of a row (a `*` argument, count(*)'s, is
-      not one)."""
+      arguments, all it reads of a row, each as written. A `COLUMNS(*)`
+      argument is a STAR node too, and is a key like any other: DuckDB
+      expands the same star in the argument and in the key in lockstep,
+      one aggregate per column (`first(s ORDER BY t, s)`), and each reads
+      only its own column of the row. (count(*) is count_star() with no
+      argument, and DuckDB's binder refuses a bare `*` or `u.*` argument,
+      so no ordered aggregate that runs has one; the whole row,
+      `row(*COLUMNS(*))`, cannot be the key: DuckDB 1.5.6 refuses a
+      second, different star in the expression.)"""
     spell = _Spelling(con)
     sites = []
 
@@ -510,13 +525,12 @@ def tie_sites(con, statement):
                 sites.append(_Site(path + ("orders",), "%s()'s OVER ORDER BY at %s" % (fname, _path_text(path)),
                                    lambda d, ks=keys: [spell.key(d, k) for k in ks]))
         own = None
-        if cls == "WINDOW" and node.get("arg_orders"):
+        if cls == "WINDOW" and node.get("arg_orders") and fname not in _PEERS_ALIKE:
             own = path + ("arg_orders",)
             own_keys = _window_input_keys(select or {}, spell)
         elif cls == "FUNCTION" and (node.get("order_bys") or {}).get("orders"):
             own = path + ("order_bys", "orders")
-            own_keys = [a for a in node.get("children") or []
-                        if not (isinstance(a, dict) and a.get("class") == "STAR")]
+            own_keys = list(node.get("children") or [])
         if own is not None and own_keys:
             sites.append(_Site(own, "%s()'s own ORDER BY at %s" % (fname, _path_text(path)),
                                lambda d, ks=own_keys: [spell.key(d, k) for k in ks]))
@@ -580,18 +594,25 @@ def order_ties(con, sql, table, policy):
     equal in every column but the sign of a zero tie in every sort, so two
     such rows next to each other in `table` are refused too, even where a
     key outside the output (`ORDER BY id` over `SELECT f`) does tell them
-    apart."""
+    apart. Each run's columns take `table`'s names, by position: a column
+    DuckDB names after its expression (`string_agg(s, ',' ORDER BY s)`,
+    `row_number(ORDER BY s) OVER ()` unaliased) is named after the run's
+    rewritten ORDER BY, and appending keys to an ORDER BY changes neither
+    how many columns there are nor their types, which the comparison
+    still checks."""
     def text(t):
         return canon.parse(render.render_table(_zeros_positive(t), policy, (), ()))
 
     want = text(table)
     for name, variant in tie_variants(con, sql):
         try:
-            got = text(execute(con, variant))
+            got = execute(con, variant)
         except duckdb.Error as e:
             raise oracle_case.CaseError("the tie check's run with %s failed (%s): %s"
                                         % (name, e, variant)) from e
-        diffs = canon.compare(want, got)
+        if got.num_columns == table.num_columns:
+            got = got.rename_columns(table.column_names)
+        diffs = canon.compare(want, text(got))
         if diffs:
             return "with %s, %s" % (name, diffs[0])
     if policy.order == "total":

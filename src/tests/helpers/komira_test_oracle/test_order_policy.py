@@ -63,17 +63,25 @@ check, gen_expected.order_ties()), in a process of its own:
    way; a window function's own ORDER BY tied over that subquery,
    `row_number(ORDER BY k) OVER ()` (no arguments), `lag(k ORDER BY k)`
    (it reads the row before) and `lag(k, 1, id ORDER BY k)` (offset and
-   default are not arguments). It writes each with a unique inner key,
-   the rank family and a RANGE sum over a tied key (peers answer
-   alike), ORDER BY ALL, and under `none` the tied subquery whose order
-   is not compared. Catches the tie check on the outermost ORDER BY
-   only, the window, ordered aggregate or inner LIMIT perturbation off,
-   a window function's own ORDER BY given its arguments as keys (or
-   none when it has none), a GROUP BY window keyed by the whole row
+   default are not arguments); first(), last() and string_agg() over a
+   COLUMNS(*) argument whose own ORDER BY ties. It writes each with a
+   unique inner key (the COLUMNS(*) ones with `s` after `t`), the rank
+   family and a RANGE sum over a tied key (peers answer alike), rank(),
+   percent_rank() and cume_dist() with their own ORDER BY over a tied
+   key, two unaliased columns DuckDB names after their own ORDER BY,
+   ORDER BY ALL, and under `none` the tied subquery whose order is not
+   compared. Catches the tie check on the outermost ORDER BY only, the
+   window, ordered aggregate or inner LIMIT perturbation off, a window
+   function's own ORDER BY given its arguments as keys (or none when it
+   has none), an ordered aggregate's COLUMNS(*) argument dropped from its
+   keys (the STAR exclusion), the rank family's own ORDER BY split (or
+   any name of it dropped, or every window's own ORDER BY exempted), a
+   run compared by column name, a GROUP BY window keyed by the whole row
    (DuckDB refuses it) or with no keys, grouping() left out, the output
    width taken from a select list holding a star, the all-at-once runs
-   left out, a tiebreak that splits the rank family's peers, ORDER BY ALL given keys (DuckDB then expands its star over the
-   FROM), and a check comparing a `none` case row for row.
+   left out, a tiebreak that splits the rank family's peers, ORDER BY
+   ALL given keys (DuckDB then expands its star over the FROM), and a
+   check comparing a `none` case row for row.
 6. main() refuses a COLLATE query (sql_discipline.check) before writing
    it. Catches the COLLATE rule off.
 """
@@ -99,8 +107,8 @@ _ORD = " ORDER BY id ASC NULLS LAST"
 REFUSED = [
     (_WINDOW, "total", ()),
     (_SUB, "total", ()),
-    ("(SELECT id FROM groups ORDER BY id ASC NULLS LAST) UNION ALL (SELECT id FROM sort_rows ORDER BY id ASC NULLS LAST)",
-     "total", ()),
+    ("(SELECT id FROM groups ORDER BY id ASC NULLS LAST) UNION ALL "
+     "(SELECT id FROM sort_rows ORDER BY id ASC NULLS LAST)", "total", ()),
     (_SUB, "keys", ("id",)),
     ("SELECT id, a FROM sort_rows ORDER BY id ASC NULLS LAST, a ASC NULLS LAST", "keys", ("a",)),
     ("SELECT id, a, b FROM sort_rows ORDER BY a ASC NULLS LAST", "keys", ("a", "b")),
@@ -240,6 +248,15 @@ _OWN_FUNCS = [
     "lag(k ORDER BY k ASC NULLS LAST%s) OVER ()",
     "lag(k, CAST(1 AS BIGINT), id ORDER BY k ASC NULLS LAST%s) OVER ()",
 ]
+# An ordered aggregate over a COLUMNS(*) argument: DuckDB writes one
+# aggregate per column of u (s, t), and `first(s ORDER BY t)` reads s of
+# the first row the tied t reaches it in.
+_UV = "(SELECT CAST(id AS VARCHAR) AS s, CAST(k AS VARCHAR) AS t FROM groups ORDER BY id DESC NULLS LAST) AS u"
+_STAR_AGGS = [
+    "SELECT first(COLUMNS(*) ORDER BY t ASC NULLS LAST%s) FROM " + _UV + _ALL,
+    "SELECT last(COLUMNS(*) ORDER BY t ASC NULLS LAST%s) FROM " + _UV + _ALL,
+    "SELECT string_agg(COLUMNS(*), CAST(',' AS VARCHAR) ORDER BY t ASC NULLS LAST%s) FROM " + _UV + _ALL,
+]
 _ROLLUP = ("SELECT k, v, CAST(count(*) AS BIGINT) AS n, "
            "CAST(row_number() OVER (ORDER BY k ASC NULLS LAST, v ASC NULLS LAST%s) AS BIGINT) AS rn "
            "FROM groups GROUP BY ROLLUP (k, v) ORDER BY ALL ASC NULLS LAST")
@@ -270,7 +287,7 @@ INNER_REFUSED = [
     # Two inner LIMITs whose ties matter only together: each run that
     # turns one tiebreak around keeps the other's first row.
     _TWO,
-] + [_OWN % (f % "") for f in _OWN_FUNCS]
+] + [_OWN % (f % "") for f in _OWN_FUNCS] + [q % "" for q in _STAR_AGGS]
 INNER_ACCEPTED = [
     # The same with unique inner keys: the tiebreak changes nothing.
     "SELECT id, rn FROM (SELECT id, " + _RN % ", id ASC NULLS LAST" + " FROM " + _U + ") AS t" + _BY_ID,
@@ -295,7 +312,14 @@ INNER_ACCEPTED = [
     # The tied subquery under `none` with no LIMIT: the order is not
     # compared.
     "SELECT id, a FROM " + _DESC + " ORDER BY a ASC NULLS LAST",
-] + [_OWN % (f % ", id ASC NULLS LAST") for f in _OWN_FUNCS]
+    # The rank family's own ORDER BY over a tied k: peers answer alike.
+    "SELECT id, CAST(rank(ORDER BY k ASC NULLS LAST) OVER () AS BIGINT) AS r, percent_rank(ORDER BY k ASC NULLS "
+    "LAST) OVER () AS p, cume_dist(ORDER BY k ASC NULLS LAST) OVER () AS c FROM " + _U + _BY_ID,
+    # Unaliased columns named after their own ORDER BY, which the tiebreak
+    # rewrites: compared by position, they pass.
+    "SELECT string_agg(s, CAST(',' AS VARCHAR) ORDER BY s ASC NULLS LAST) FROM " + _UV + _ALL,
+    "SELECT s, row_number(ORDER BY s ASC NULLS LAST) OVER () FROM " + _UV + _ALL,
+] + [_OWN % (f % ", id ASC NULLS LAST") for f in _OWN_FUNCS] + [q % ", s ASC NULLS LAST" for q in _STAR_AGGS]
 for order in ("total", "none"):
     for sql in INNER_REFUSED:
         err, wrote = run_main("-- order: %s\n%s\n" % (order, sql))
