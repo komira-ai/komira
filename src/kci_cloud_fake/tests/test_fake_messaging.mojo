@@ -115,7 +115,7 @@ def _graph(
     var s = (
         String('{"resource":[')
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":') + port
-        + String(',"internal":{},"env":{"Q":{"ref":{"resource":"work","standard":"ADDRESS"}}}},')
+        + String(',"internal":{},"scale":{"min":1,"max":2},"env":{"Q":{"ref":{"resource":"work","standard":"ADDRESS"}}}},')
         + u + String("},")
         + String('{"id":"dl","queue":{}},')
         + String('{"id":"work",') + ret
