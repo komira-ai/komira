@@ -118,3 +118,31 @@ rust_library(
     crate_root = "src/ext_lib.rs",
     test_srcs = ["tests/common/mod.rs"],
 )
+
+# must fail at analysis: a test_srcs file outside tests/ (it would otherwise be
+# cut to a crate named from the tail of its path).
+rust_library(
+    name = "ext_outside",
+    crate_name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    test_srcs = ["tests/ext_pass.rs", "tests/common/mod.rs", "src/ext_misplaced.rs"],
+)
+
+# must fail at analysis: tests/1bad.rs does not name a Rust identifier.
+rust_library(
+    name = "ext_bad_name",
+    crate_name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    test_srcs = ["tests/1bad.rs"],
+)
+
+# must fail at analysis: a file directly under tests/ that is not a .rs file.
+rust_library(
+    name = "ext_not_rs",
+    crate_name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    test_srcs = ["tests/ext_pass.rs", "tests/ext_data.txt"],
+)

@@ -52,8 +52,9 @@ same runner; its `.passed` marker joins the gate with those of `tests`, and
 `edition`, `features`, `cfgs` and `rustc_flags`; there are no
 dev-dependencies (`test_deps`) yet. Any other `test_srcs` file is a module
 the test crates reach with `mod` (`tests/common/mod.rs`). A file outside
-`tests/`, a `tests/<name>.rs` whose name is not a Rust identifier, and
-`test_srcs` with no test crate are refused at analysis. Each run has the
+`tests/`, a file directly under `tests/` that is not `.rs`, a
+`tests/<name>.rs` whose name is not a Rust identifier, and `test_srcs` with
+no test crate are refused at analysis. Each run has the
 default 600 s timeout. A failure names the file:
 `GATED TEST FAILED: <label> tests/<name>.rs`. `buck2 test` of the library
 runs the `rust_test`s in its `tests`, not its `test_srcs`; building the

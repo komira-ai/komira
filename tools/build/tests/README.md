@@ -783,9 +783,9 @@ welded to `env_scrubbed`, must build and run (`[run_check]`); `env_scrubbed`
 must build: its test asserts the harness's environment is exactly `HOME`,
 `PATH` and `TMPDIR`. Each of these must fail, naming its cause: no tests
 (`empty`, `EMPTY GATE`), an `#[ignore]`d test (`ignored`), and a test that
-hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). `ext` and `ext_consumer` build (its
-external `test_srcs` test passes); `ext_red` and `ext_red_consumer` fail naming `tests/ext_fail.rs` with
-`1 passed; 1 failed`; `ext_no_crate` (no `tests/<name>.rs`) fails at analysis ([`rust_tests.sh`](rust_tests.sh)).
+hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). `ext` and `ext_consumer` build (its external `test_srcs` test passes);
+`ext_red` and `ext_red_consumer` fail naming `tests/ext_fail.rs` with `1 passed; 1 failed`. Refused at analysis: `ext_no_crate` (no
+`tests/<name>.rs`), `ext_outside` (outside `tests/`), `ext_bad_name` (`tests/1bad.rs`), `ext_not_rs` (`tests/ext_data.txt`) ([`rust_tests.sh`](rust_tests.sh)).
 
 `buck2 test //tools/build/proto-codegen:komira_proto_codegen` must pass and
 print the harness's `komira_proto_codegen_unit: <n> passed`: `rust_test`
