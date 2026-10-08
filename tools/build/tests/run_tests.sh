@@ -1365,8 +1365,16 @@ done
 expect_green surface_capability_matrix //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
 N=tests//negative/surface_capability_matrix
 E=tests//functional/surface_capability_matrix/src/tests/e2e
+# dangling and incompatible are loadable only for their own build (their .BUCK
+# files say why); both directories are gitignored in case a run is cut short.
+D="$ROOT/tools/build/tests/negative/surface_capability_matrix"
+scm_planted() { # case, required text, target
+    mkdir -p "$D/$1" && cp "$D/$1.BUCK" "$D/$1/BUCK"
+    expect_red "surface_capability_matrix_$1" "$2" "$3"
+    rm -f "$D/$1/BUCK" && rmdir "$D/$1"
+}
+scm_planted dangling "Unknown target \`test_join_left\` from package \`$E/polars_e2e\`" "$N/dangling:dangling"
 for want in \
-    "dangling|Unknown target \`test_join_left\` from package \`$E/polars_e2e\`" \
     "duplicate|matrix row 11 (pandas, filter): a second row for the pair, first at row 2" \
     "unknown_capability|matrix row 11 (pandas, window): unknown capability \`window\`" \
     "unknown_surface|matrix row 11 (spark, filter): unknown surface \`spark\`" \
@@ -1395,7 +1403,7 @@ for t in outside_e2e ungrounded empty_field alias shared_target; do
 done
 # A row naming a test incompatible with the lint's platform fails the build
 # even under a package pattern, so the lint never drops out of //... silently.
-expect_red surface_capability_matrix_incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
+scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
 
 # 37
 pt_rc=0
