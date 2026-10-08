@@ -10,11 +10,11 @@
 #   --issuer=URL          the exact `iss` accepted
 #   --audience=STRING     our audience: `aud` must be it or contain it
 #   --jwks-url=URL        the issuer's JWK Set (https only)
-#   --jwks-alg=RS256      the one `alg` accepted (RS256 only, the default)
-#   --accept-typ=JWT      the one header `typ` accepted (JWT only, the default)
-#   --max-ttl=SECONDS     the longest `exp - iat` accepted (default 3600)
+#   --jwks-alg=RS256      the one `alg` accepted (RS256 only; required)
+#   --accept-typ=JWT      the one header `typ` accepted (JWT only; required)
+#   --max-ttl=SECONDS     the longest `exp - iat` accepted (required)
 #   --copy-claim=NAME     a payload claim copied into the principal (repeated)
-#   --trust-anchor='name=N,issuer=I,audience=A,jwks_url=U[,alg=RS256][,typ=JWT][,max_ttl=S]'
+#   --trust-anchor='name=N,issuer=I,audience=A,jwks_url=U,alg=RS256,typ=JWT,max_ttl=S'
 #   --leeway-s=SECONDS    clock skew forgiven on exp/iat/nbf, 0..60 (default 30)
 #   --jwks-max-stale=DURATION
 #                         how long past its freshness the last good key set
@@ -25,7 +25,11 @@
 #
 # The single flags (--issuer, --audience, --jwks-url, --jwks-alg,
 # --accept-typ, --max-ttl) are shorthand for one trust anchor named
-# "default". `--trust-anchor` is the general form and cannot be mixed with
+# "default". Every one of them is required, as is every member of a
+# `--trust-anchor` value: an anchor has no defaults, because a later release
+# that brought in different ones (another `alg`, `typ` or lifetime) would
+# silently change what a running deployment accepts. `TrustAnchor.rs256` is
+# the code-level shorthand and keeps its values. `--trust-anchor` is the general form and cannot be mixed with
 # them. In this release exactly one anchor is accepted: a second
 # `--trust-anchor` is refused. Choosing an anchor per token (by its `iss`)
 # needs one key cache per anchor and a dispatch step, which is a later change;
@@ -42,19 +46,19 @@
 #
 # A `--trust-anchor` value is comma-separated `key=value` pairs; a value is
 # everything after the first `=`, so it cannot hold a comma. An unknown key, a
-# repeated key, an empty value or a missing required key is refused.
+# repeated key, an empty value or a missing key (all seven are required) is
+# refused.
+#
+# Two spellings of a time exist, each on purpose: `--leeway-s` and
+# `--max-ttl` take bare seconds (the unit is in the name or the meaning),
+# while `--jwks-max-stale` takes digits and a unit (`90s`, `30m`, `1h`). A new
+# flag picks one of these two forms deliberately; it never invents a third.
 #
 # The embedding binary splits its own argv: `bearer_jwt_flag_names()` lists
 # the names this file owns, and `parse_bearer_jwt_flags` takes only those.
 # =============================================================================
 
-from komira_http_auth.config import (
-    ALG_RS256,
-    BearerJwtConfig,
-    DEFAULT_MAX_TTL_S,
-    TYP_JWT,
-    TrustAnchor,
-)
+from komira_http_auth.config import BearerJwtConfig, TrustAnchor
 
 
 comptime FLAG_ISSUER: String = "--issuer"
@@ -300,17 +304,22 @@ def parse_trust_anchor(spec: String) raises -> TrustAnchor:
         raise Error(String("komira_http_auth: --trust-anchor needs audience="))
     if not jwks_url:
         raise Error(String("komira_http_auth: --trust-anchor needs jwks_url="))
-    var ttl = DEFAULT_MAX_TTL_S
-    if max_ttl:
-        ttl = _parse_seconds(String("--trust-anchor max_ttl"), max_ttl.value())
+    if not alg:
+        raise Error(String("komira_http_auth: --trust-anchor needs alg="))
+    if not typ:
+        raise Error(String("komira_http_auth: --trust-anchor needs typ="))
+    if not max_ttl:
+        raise Error(String("komira_http_auth: --trust-anchor needs max_ttl="))
     return TrustAnchor(
         name=name.value(),
         issuer=issuer.value(),
         audience=audience.value(),
         jwks_url=jwks_url.value(),
-        alg=alg.value() if alg else ALG_RS256,
-        typ=typ.value() if typ else TYP_JWT,
-        max_ttl_s=ttl,
+        alg=alg.value(),
+        typ=typ.value(),
+        max_ttl_s=_parse_seconds(
+            String("--trust-anchor max_ttl"), max_ttl.value()
+        ),
     )
 
 
@@ -353,6 +362,9 @@ def parse_bearer_jwt_flags(args: List[String]) raises -> BearerJwtConfig:
         var issuer = f.single(FLAG_ISSUER)
         var audience = f.single(FLAG_AUDIENCE)
         var jwks_url = f.single(FLAG_JWKS_URL)
+        var alg = f.single(FLAG_JWKS_ALG)
+        var typ = f.single(FLAG_ACCEPT_TYP)
+        var ttl = f.single(FLAG_MAX_TTL)
         if not issuer:
             raise Error(String("komira_http_auth: missing required flag --issuer="))
         if not audience:
@@ -363,18 +375,27 @@ def parse_bearer_jwt_flags(args: List[String]) raises -> BearerJwtConfig:
             raise Error(
                 String("komira_http_auth: missing required flag --jwks-url=")
             )
-        anchor = TrustAnchor.rs256(
-            String("default"), issuer.value(), audience.value(), jwks_url.value()
+        if not alg:
+            raise Error(
+                String("komira_http_auth: missing required flag --jwks-alg=")
+            )
+        if not typ:
+            raise Error(
+                String("komira_http_auth: missing required flag --accept-typ=")
+            )
+        if not ttl:
+            raise Error(
+                String("komira_http_auth: missing required flag --max-ttl=")
+            )
+        anchor = TrustAnchor(
+            name=String("default"),
+            issuer=issuer.value(),
+            audience=audience.value(),
+            jwks_url=jwks_url.value(),
+            alg=alg.value(),
+            typ=typ.value(),
+            max_ttl_s=_parse_seconds(FLAG_MAX_TTL, ttl.value()),
         )
-        var alg = f.single(FLAG_JWKS_ALG)
-        if alg:
-            anchor.alg = alg.value()
-        var typ = f.single(FLAG_ACCEPT_TYP)
-        if typ:
-            anchor.typ = typ.value()
-        var ttl = f.single(FLAG_MAX_TTL)
-        if ttl:
-            anchor.max_ttl_s = _parse_seconds(FLAG_MAX_TTL, ttl.value())
 
     var cfg = BearerJwtConfig(anchor^)
     var claims = f.all(FLAG_COPY_CLAIM)

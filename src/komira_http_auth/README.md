@@ -8,18 +8,34 @@ Bearer-JWT authentication for `komira_http_server`.
 1. clears `ctx.principal`;
 2. reads `Authorization: Bearer <token>` and answers as RFC 6750 section 3
    says:
-   - no `Authorization` header, or a credential of another scheme such as
-     `Basic`: `401` with a bare `WWW-Authenticate: Bearer` and no error code
-     (the request carries no Bearer credential at all). Two `Authorization`
-     fields of which none is Bearer (two `Basic` fields, folded into
-     `Basic a, Basic b`) are another scheme too: `401`;
-   - a malformed header, or a comma list one of whose elements has the
-     scheme `Bearer` (the HTTP/1 parser folds two `Authorization` fields into
-     `a, b`, and a Bearer token never holds a comma): `400` with
-     `WWW-Authenticate: Bearer error="invalid_request"`. The list is split at
-     every comma, quoted or not, so a comma inside another scheme's quoted
-     parameter (`Digest username="a, Bearer b"`) is also read as a second,
-     Bearer credential and gets `400`. That is fail-closed by design;
+   - no `Authorization` header, or ONE credential of another scheme such as
+     `Basic` or `Digest username="a", realm="b"`: `401` with a bare
+     `WWW-Authenticate: Bearer` and no error code (the request carries no
+     Bearer credential at all);
+   - two `Authorization` fields, whatever their schemes: `400` with
+     `WWW-Authenticate: Bearer error="invalid_request"` and reason
+     `repeated_authorization`. The HTTP/1 parser folds them into one value,
+     `a, b`. The value is split at commas outside quoted-strings (a
+     quoted-string opens at a `"` right after an auth-param's `=`, and `\`
+     escapes inside it), and it is refused when:
+     - two elements start a credential. The first element always does; a
+       later one does unless it is empty or an auth-param (`token`, optional
+       blanks, `=`), so `Basic a, Basic b` is two credentials and
+       `Digest username="a, b", realm="c"` is one;
+     - an element is empty (an empty field folded in: `, Basic a`); or
+     - the list holds a `Bearer` credential, which is one token68 and never
+       holds a comma (`Bearer t, realm="x"`).
+
+     So two fields get `400` whenever the second is a well-formed credential
+     (RFC 9110: `auth-scheme [ 1*SP ( token68 / #auth-param ) ]`) and the
+     first leaves no quoted-string open. Otherwise (a second field that is
+     only `a=b`, or a quoted-string the first field leaves open, which
+     swallows the fold) the value reads as one malformed or other-scheme
+     credential and gets `400` or `401`. No such value is ever accepted:
+     acceptance needs exactly `Bearer <token68>`;
+   - a malformed header (an unterminated quoted-string, a scheme that is not
+     an RFC 9110 token, or `Bearer` not followed by exactly one space and a
+     token68): `400` invalid_request as above;
 3. asks the verifier `V`. If it has no usable keys (see stale keys below),
    the answer is `503` with `Retry-After`, the number of seconds until the
    next JWKS refresh may start, and no challenge: the token was not judged.
@@ -81,13 +97,16 @@ service-account ID tokens. It checks each token in this order:
 - **Signature**, checked by `komira_crypto`'s `verify_rs256_jws`. This package
   adds no RS256 verifier of its own.
 - **Claims**:
-  - `iss` must match exactly;
+  - `iss` must match exactly. So `https://accounts.google.com` does not
+    accept the bare `accounts.google.com` form some Google tokens carry;
+    Google service-account ID tokens carry `https://accounts.google.com`;
   - `aud` must be ours, or an array that contains ours;
   - `sub` must be non-empty;
   - `exp` and `iat` are required;
   - `exp`, `iat` and `nbf` are checked with 30 s of leeway by default
     (`--leeway-s`, 0 to 60);
-  - `exp - iat` must be at most the max TTL (3600 s by default).
+  - `exp - iat` must be at most the anchor's max TTL (`--max-ttl`, which has
+    no default).
 
 There is one verifier per trust anchor. In this release a process accepts one
 anchor. A second `--trust-anchor` is refused; choosing an anchor per token is
@@ -95,7 +114,11 @@ planned for a later release.
 
 ## Flags
 
-All flags use the form `--name=value`. The JWKS refetch window, default
+All flags use the form `--name=value`. A trust anchor has no defaults: the
+six single-anchor flags, or all seven members of `--trust-anchor`, are
+required, so a later release cannot change what a running deployment
+accepts. `TrustAnchor.rs256(...)` is the code-level shorthand. The JWKS
+refetch window, default
 max-age and fetch timeout have no flags: set them with `BearerJwtConfig`'s
 `with_*` methods. No setting of this package is read from
 the environment. The TLS library's default trust store, used for the JWKS
@@ -106,11 +129,11 @@ fetch, does honour `SSL_CERT_FILE` and `SSL_CERT_DIR`.
 | `--issuer` | the exact `iss` accepted |
 | `--audience` | our audience |
 | `--jwks-url` | the issuer's JWK Set; must be `https://` |
-| `--jwks-alg` | `RS256`, the only value accepted, and the default |
-| `--accept-typ` | `JWT`, the only value accepted, and the default |
-| `--max-ttl` | the longest `exp - iat` accepted, in seconds (default 3600) |
+| `--jwks-alg` | required; `RS256`, the only value accepted in this release |
+| `--accept-typ` | required; `JWT`, the only value accepted in this release |
+| `--max-ttl` | required; the longest `exp - iat` accepted, in seconds (1 to 86400; Google ID tokens live 3600) |
 | `--copy-claim` | a claim copied into the principal (may be repeated) |
-| `--trust-anchor` | `name=,issuer=,audience=,jwks_url=[,alg=][,typ=][,max_ttl=]`: the general form of the first six flags, and cannot be combined with them |
+| `--trust-anchor` | `name=,issuer=,audience=,jwks_url=,alg=,typ=,max_ttl=`, all seven required: the general form of the first six flags, and cannot be combined with them |
 | `--leeway-s` | the clock skew forgiven on `exp`, `iat` and `nbf`, 0 to 60 seconds (default 30); `BearerJwtConfig.with_leeway_s` in code |
 | `--jwks-max-stale` | how long past its freshness the last good key set stays in use while every refresh fails: digits and one unit `s`, `m` or `h` (`90s`, `30m`, `1h`), 0s to 24h (default `1h`); `BearerJwtConfig.with_jwks_max_stale_s` in code |
 
@@ -133,6 +156,9 @@ var args = List[String]()
 args.append("--issuer=https://accounts.google.com")
 args.append("--audience=https://api.example.com/")
 args.append("--jwks-url=https://www.googleapis.com/oauth2/v3/certs")
+args.append("--jwks-alg=RS256")
+args.append("--accept-typ=JWT")
+args.append("--max-ttl=3600")
 args.append("--copy-claim=email")
 args.append("--copy-claim=email_verified")
 args.append("--leeway-s=10")

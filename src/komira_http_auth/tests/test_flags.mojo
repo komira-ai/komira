@@ -2,9 +2,10 @@
 # test_flags.mojo: the flag set, its one spelling, and startup refusals.
 # =============================================================================
 #
-# Single-anchor flags and their defaults, the --trust-anchor form (exactly
-# one accepted; a second is refused), non-https JWKS URLs refused at startup
-# (by the flags and by the verifier constructor), RS256/JWT only, max TTL,
+# Single-anchor flags, every one required, and the --trust-anchor form with
+# all seven members required (exactly one accepted; a second is refused),
+# non-https JWKS URLs refused at startup (by the flags and by the verifier
+# constructor), RS256/JWT only, max TTL,
 # copy-claim rules (sub, iss, aud refused), the 0..60 s leeway cap and the
 # --leeway-s flag (wired into the claim check), --jwks-max-stale (units,
 # range, default 1 h), the 100 ms..60 s JWKS fetch timeout and its hand-over
@@ -130,12 +131,26 @@ def _args(*xs: String) -> List[String]:
     return out^
 
 
-def _base() -> List[String]:
-    return _args(
+def _shorthand(skip: String) -> List[String]:
+    """The six single-anchor flags, all required, less the one named `skip`
+    (none when `skip` is empty)."""
+    var every = _args(
         String("--issuer=") + ISSUER,
         String("--audience=") + AUDIENCE,
         String("--jwks-url=") + JWKS_URL,
+        String("--jwks-alg=RS256"),
+        String("--accept-typ=JWT"),
+        String("--max-ttl=3600"),
     )
+    var out = List[String]()
+    for i in range(len(every)):
+        if skip.byte_length() == 0 or not every[i].startswith(skip + String("=")):
+            out.append(every[i])
+    return out^
+
+
+def _base() -> List[String]:
+    return _shorthand(String(""))
 
 
 def _refused(args: List[String], needle: String) raises:
@@ -154,7 +169,7 @@ def _plus(var base: List[String], extra: String) -> List[String]:
 
 
 def test_single_anchor_flags() raises:
-    var a = _base()
+    var a = _shorthand(String("--max-ttl"))
     a.append(String("--copy-claim=email"))
     a.append(String("--copy-claim=email_verified"))
     a.append(String("--max-ttl=600"))
@@ -171,13 +186,68 @@ def test_single_anchor_flags() raises:
     assert_equal(cfg.leeway_s, Int64(30))
 
 
-def test_defaults_and_explicit_defaults() raises:
+# An anchor has no defaults (flags.mojo header): a later release that
+# brought in other ones would change what a running deployment accepts. One
+# test per flag and per member, so a mutant that restores any one default
+# names itself.
+
+
+def test_the_shorthand_needs_every_flag() raises:
+    # Control: all six parse, to exactly the values given.
     var cfg = parse_bearer_jwt_flags(_base())
+    assert_equal(cfg.anchor.alg, String("RS256"))
+    assert_equal(cfg.anchor.typ, String("JWT"))
     assert_equal(cfg.anchor.max_ttl_s, Int64(3600))
-    var a = _base()
-    a.append(String("--jwks-alg=RS256"))
-    a.append(String("--accept-typ=JWT"))
-    _ = parse_bearer_jwt_flags(a)
+    var names = _args(
+        "--issuer", "--audience", "--jwks-url", "--jwks-alg", "--accept-typ",
+        "--max-ttl",
+    )
+    for i in range(len(names)):
+        _refused(
+            _shorthand(names[i]),
+            String("missing required flag ") + names[i] + String("="),
+        )
+
+
+def test_the_shorthand_needs_jwks_alg() raises:
+    _refused(_shorthand(String("--jwks-alg")), "missing required flag --jwks-alg=")
+
+
+def test_the_shorthand_needs_accept_typ() raises:
+    _refused(
+        _shorthand(String("--accept-typ")), "missing required flag --accept-typ="
+    )
+
+
+def test_the_shorthand_needs_max_ttl() raises:
+    _refused(_shorthand(String("--max-ttl")), "missing required flag --max-ttl=")
+
+
+def test_a_trust_anchor_needs_every_member() raises:
+    var keys = _args(
+        "name", "issuer", "audience", "jwks_url", "alg", "typ", "max_ttl"
+    )
+    for i in range(len(keys)):
+        _refused(
+            _args(_anchor_flag_without(keys[i])),
+            String("--trust-anchor needs ") + keys[i] + String("="),
+        )
+    # Control: all seven parse.
+    var cfg = parse_bearer_jwt_flags(_args(_anchor_flag(String("a"))))
+    assert_equal(cfg.anchor.name, String("a"))
+    assert_equal(cfg.anchor.max_ttl_s, Int64(3600))
+
+
+def test_a_trust_anchor_needs_alg() raises:
+    _refused(_args(_anchor_flag_without(String("alg"))), "needs alg=")
+
+
+def test_a_trust_anchor_needs_typ() raises:
+    _refused(_args(_anchor_flag_without(String("typ"))), "needs typ=")
+
+
+def test_a_trust_anchor_needs_max_ttl() raises:
+    _refused(_args(_anchor_flag_without(String("max_ttl"))), "needs max_ttl=")
 
 
 def test_flag_names_cover_the_documented_set() raises:
@@ -194,25 +264,22 @@ def test_flag_names_cover_the_documented_set() raises:
 
 def test_non_https_jwks_url_is_refused_at_startup() raises:
     _refused(
-        _args(
-            String("--issuer=") + ISSUER,
-            String("--audience=") + AUDIENCE,
+        _plus(
+            _shorthand(String("--jwks-url")),
             String("--jwks-url=http://www.googleapis.com/oauth2/v3/certs"),
         ),
         "https",
     )
     _refused(
-        _args(
-            String("--issuer=") + ISSUER,
-            String("--audience=") + AUDIENCE,
+        _plus(
+            _shorthand(String("--jwks-url")),
             String("--jwks-url=https://user:pw@keys.example.com/certs"),
         ),
         "userinfo",
     )
     _refused(
-        _args(
-            String("--issuer=") + ISSUER,
-            String("--audience=") + AUDIENCE,
+        _plus(
+            _shorthand(String("--jwks-url")),
             String("--jwks-url=https://keys.example.com/certs#k"),
         ),
         "fragment",
@@ -238,16 +305,25 @@ def test_non_https_jwks_url_is_refused_when_a_verifier_is_built() raises:
 
 
 def test_only_rs256_and_jwt_are_accepted_in_this_release() raises:
-    _refused(_plus(_base(), String("--jwks-alg=ES256")), "alg must be RS256")
-    _refused(_plus(_base(), String("--jwks-alg=HS256")), "alg must be RS256")
-    _refused(_plus(_base(), String("--accept-typ=at+jwt")), "typ must be JWT")
+    var no_alg = _shorthand(String("--jwks-alg"))
+    var no_typ = _shorthand(String("--accept-typ"))
+    _refused(_plus(no_alg.copy(), String("--jwks-alg=ES256")), "alg must be RS256")
+    _refused(_plus(no_alg.copy(), String("--jwks-alg=HS256")), "alg must be RS256")
+    _refused(_plus(no_typ.copy(), String("--accept-typ=at+jwt")), "typ must be JWT")
+    _refused(_args(_anchor_flag_without(String("alg")) + String(",alg=ES256")), "alg must be RS256")
+    _refused(_args(_anchor_flag_without(String("typ")) + String(",typ=at+jwt")), "typ must be JWT")
 
 
 def test_bad_max_ttl_is_refused() raises:
-    _refused(_plus(_base(), String("--max-ttl=0")), "at least 1")
-    _refused(_plus(_base(), String("--max-ttl=abc")), "positive integer")
-    _refused(_plus(_base(), String("--max-ttl=-5")), "positive integer")
-    _refused(_plus(_base(), String("--max-ttl=86401")), "max_ttl must be")
+    var no_ttl = _shorthand(String("--max-ttl"))
+    _refused(_plus(no_ttl.copy(), String("--max-ttl=0")), "at least 1")
+    _refused(_plus(no_ttl.copy(), String("--max-ttl=abc")), "positive integer")
+    _refused(_plus(no_ttl.copy(), String("--max-ttl=-5")), "positive integer")
+    _refused(_plus(no_ttl.copy(), String("--max-ttl=86401")), "max_ttl must be")
+    _refused(
+        _args(_anchor_flag_without(String("max_ttl")) + String(",max_ttl=0")),
+        "at least 1",
+    )
 
 
 def test_copy_claim_rules() raises:
@@ -502,6 +578,7 @@ def test_one_trust_anchor() raises:
 
 
 def _anchor_flag(name: String) -> String:
+    """A `--trust-anchor` with all seven members."""
     return (
         String("--trust-anchor=name=")
         + name
@@ -511,7 +588,31 @@ def _anchor_flag(name: String) -> String:
         + AUDIENCE
         + String(",jwks_url=")
         + JWKS_URL
+        + String(",alg=RS256,typ=JWT,max_ttl=3600")
     )
+
+
+def _anchor_flag_without(skip: String) -> String:
+    """`_anchor_flag("a")` less the member `skip`."""
+    var members = _args(
+        String("name=a"),
+        String("issuer=") + ISSUER,
+        String("audience=") + AUDIENCE,
+        String("jwks_url=") + JWKS_URL,
+        String("alg=RS256"),
+        String("typ=JWT"),
+        String("max_ttl=3600"),
+    )
+    var out = String("--trust-anchor=")
+    var first = True
+    for i in range(len(members)):
+        if members[i].startswith(skip + String("=")):
+            continue
+        if not first:
+            out += String(",")
+        out += members[i]
+        first = False
+    return out^
 
 
 def test_a_second_trust_anchor_is_refused() raises:
@@ -525,16 +626,8 @@ def test_trust_anchor_value_rules() raises:
     _refused(_args(_anchor_flag(String("a")) + String(",colour=blue")), "unknown key")
     _refused(_args(_anchor_flag(String("a")) + String(",name=b")), "more than once")
     _refused(_args(_anchor_flag(String("a")) + String(",typ=")), "empty value")
-    _refused(_args(_anchor_flag(String("a")) + String(",alg=ES256")), "alg must be RS256")
-    _refused(
-        _args(
-            String("--trust-anchor=name=a,issuer=")
-            + ISSUER
-            + String(",jwks_url=")
-            + JWKS_URL
-        ),
-        "audience=",
-    )
+    _refused(_args(_anchor_flag(String("a")) + String(",alg=RS256")), "more than once")
+    _refused(_args(_anchor_flag_without(String("audience"))), "audience=")
     _refused(
         _args(_anchor_flag(String("a")), String("--issuer=") + ISSUER),
         "cannot be combined",

@@ -3,10 +3,14 @@
 `BearerJwtMiddleware[V]` sits in the server's auth slot. It reads
 `Authorization: Bearer <token>`, hands the token to a `BearerVerifier` `V`,
 and either sets `ctx.principal` (scheme "jwt") or refuses as RFC 6750 says:
-401 with a bare `Bearer` challenge when no Bearer credential was sent, 400
-`invalid_request` for a malformed or repeated one, 401 `invalid_token` for a
-token that fails verification, and 503 with `Retry-After` when no usable key
-set exists. This release ships one verifier kind,
+401 with a bare `Bearer` challenge when no credential or one credential of
+another scheme was sent; 400 `invalid_request` for a malformed header or for
+two credentials of any schemes (two Authorization fields, which the HTTP/1
+parser folds into `a, b`: a comma outside a quoted-string followed by a
+second credential, an empty element, or a list holding Bearer; middleware.mojo
+states the rule exactly); 401 `invalid_token` for a token that fails
+verification; and 503 with `Retry-After` when no usable key set exists. A
+trust anchor configured by flags has no defaults: every member is required. This release ships one verifier kind,
 `Rs256JwksVerifier`: RS256 tokens of one issuer (for example Google
 service-account ID tokens) checked against that issuer's JWK Set, which it
 fetches over HTTPS and caches.
