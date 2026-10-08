@@ -16,8 +16,11 @@ from komira_datetime import (
     FoldPolicy,
     GapPolicy,
     LocalKind,
+    Zone,
+    ZoneOffset,
     format_local,
     local_seconds,
+    parse_posix_tz,
     posix_zone,
     seconds_from_fields,
     utc_zone,
@@ -167,12 +170,43 @@ def test_dst_all_year_zone() raises:
 def test_format_local_and_fields() raises:
     assert_equal(format_local(local_seconds(2030, 3, 10, 2, 30)), "2030-03-10T02:30:00")
     assert_equal(format_local(local_seconds(1883, 11, 18, 12, 3, 58)), "1883-11-18T12:03:58")
+    # Years below 1000 keep four digits.
+    assert_equal(format_local(local_seconds(999, 12, 31, 23, 59, 59)), "0999-12-31T23:59:59")
+    assert_equal(format_local(local_seconds(5, 1, 2, 3, 4, 5)), "0005-01-02T03:04:05")
     var got = String()
     try:
         _ = local_seconds(2030, 2, 29)
     except e:
         got = String(e)
     assert_equal(got, "day 29 does not exist in month 2 of year 2030")
+
+
+def test_no_instant_and_no_gap_in_reach() raises:
+    # Zone takes its parts as given; the TZif reader bounds an offset to 26 h,
+    # and resolve looks for instants within 26 h of the local time. With a
+    # +30 h type, 28:00 on 1 January 1970 lies in the gap the transition at 0
+    # opens ([0 h, 30 h) local), but that transition is 28 h away: resolve
+    # finds neither an instant nor a gap and says so, as does to_utc.
+    var types = List[ZoneOffset]()
+    types.append(ZoneOffset(0, False, "AAA"))
+    types.append(ZoneOffset(30 * 3600, False, "FAR"))
+    var z = Zone("far", [0], [1], types^, False, parse_posix_tz("AAA0"))
+    var l = local_seconds(1970, 1, 2, 4)
+    var want = (
+        "zone far: local time 1970-01-02T04:00:00 has no instant and lies in no gap"
+    )
+    var got = String()
+    try:
+        _ = z.resolve(l)
+    except e:
+        got = String(e)
+    assert_equal(got, want)
+    got = String()
+    try:
+        _ = z.to_utc(l, GapPolicy.SHIFT_FORWARD, FoldPolicy.EARLIER)
+    except e:
+        got = String(e)
+    assert_equal(got, want)
 
 
 def main() raises:
@@ -183,4 +217,5 @@ def main() raises:
     test_utc()
     test_dst_all_year_zone()
     test_format_local_and_fields()
+    test_no_instant_and_no_gap_in_reach()
     print("all resolve tests passed")

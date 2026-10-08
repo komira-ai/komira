@@ -208,6 +208,23 @@ def test_v1_only_file() raises:
     assert_equal(z.offset_at(-100).utc_offset, -18000)
 
 
+def test_no_transitions_no_footer() raises:
+    # A version 1 file with two types and no transition (a fixed zone):
+    # every instant is in type 0 (RFC 8536 section 3.2), not the last type.
+    var b = _two_types()
+    b.times.clear()
+    b.idx.clear()
+    var z = parse_tzif(Span(_v1_only(b)), "t")
+    assert_equal(z.transition_count(), 0)
+    assert_equal(z.footer(), "")
+    for at in [-(1 << 40), 0, 1 << 40]:
+        var o = z.offset_at(at)
+        assert_equal(o.abbreviation, "AAA")
+        assert_equal(o.utc_offset, 0)
+        assert_false(o.is_dst)
+    assert_false(Bool(z.next_transition(0)))
+
+
 def test_refusals() raises:
     var good = _v2(_decoy_v1(), _two_types(), "")
     var short = List[UInt8]()
@@ -363,5 +380,6 @@ def main() raises:
     test_versions_3_and_4_read_like_2()
     test_footer_after_the_last_transition()
     test_v1_only_file()
+    test_no_transitions_no_footer()
     test_refusals()
     print("all tzif tests passed")

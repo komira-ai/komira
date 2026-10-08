@@ -174,6 +174,7 @@ def test_refusals() raises:
     _refused("EST5ED,M3.2.0,M11.1.0", "DST name: fewer than 3 characters")
     _refused("EST5EDT,M13.1.0,M11.1.0", "DST start: month 13 is outside 1..12")
     _refused("EST5EDT,M3.6.0,M11.1.0", "DST start: week 6 is outside 1..5")
+    _refused("EST5EDT,M3.2-0,M11.1.0", "DST start: expected . after the week")
     _refused("EST5EDT,M3.2.7,M11.1.0", "DST start: weekday 7 is outside 0..6")
     _refused("EST5EDT,M3-2.0,M11.1.0", "DST start: expected . after the month")
     _refused("EST5EDT,J0,J300", "DST start: Julian day 0 is outside 1..365")
