@@ -29,6 +29,9 @@
 #     including the second inflation of a root that has deltas;
 #     `read_pack_object` the same with its own count. Catches any one
 #     charge dropped or counted twice.
+#   * test_budget_result_at_limit: `read_pack_object` charges a delta result
+#     of exactly `max_object_size` bytes; a reader that skips the result
+#     charge at that size reads the object past its budget.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -462,9 +465,50 @@ def test_budget_exact() raises:
     )
 
 
+def test_budget_result_at_limit() raises:
+    # A delta whose result is exactly `max_object_size` bytes: the 1000-byte
+    # root copied four times. Under `max_inflate_ratio=0` the budget is
+    # `max_object_size` = 4000; the walk (delta, root) fits under it and only
+    # the result's charge crosses it, so the refusal names the delta.
+    var f = ObjectFormat.sha1()
+    var root = _noise(1000, 11)
+    var delta = List[UInt8]()
+    _varint(delta, 1000)
+    _varint(delta, 4000)
+    for _ in range(4):
+        delta.append(0x80 | 0x10 | 0x20)  # copy: offset 0, two size bytes
+        delta.append(UInt8(1000 & 255))
+        delta.append(UInt8(1000 >> 8))
+    var result = List[UInt8]()
+    for _ in range(4):
+        result.extend(Span(root))
+    var s = len(root)
+    var d = len(delta)
+    var body = _obj(PACK_OBJ_BLOB, root)
+    var d_at = 12 + len(body)
+    body.extend(Span(_ofs_delta(d_at - 12, delta)))
+    var pack = _pack_with(2, body)
+    var got = index_pack(f, Span(pack), PackLimits())
+    var id_r = hash_object(f, ObjectKind.blob(), Span(result))
+    assert_true(s + d <= 4000)
+    assert_equal(
+        _read_err(pack, got.index, id_r, PackLimits(max_object_size=4000, max_inflate_ratio=0)),
+        _P + "entry at offset " + String(d_at) + ": the pack inflates past its budget of 4000 bytes",
+    )
+    # One ratio step up the budget is `len(pack) + 4000`, which covers the
+    # walk, so the same result at the same object limit is read.
+    assert_true(s + d <= len(pack))
+    assert_equal(
+        _read_err(pack, got.index, id_r, PackLimits(max_object_size=4000, max_inflate_ratio=1)), "OK"
+    )
+    var obj = read_pack_object(Span(pack), got.index, id_r, PackLimits(max_object_size=4000, max_inflate_ratio=1))
+    assert_true(_same(obj.payload, result))
+
+
 def main() raises:
     test_header_refusals()
     test_entry_refusals()
     test_limits()
     test_budget_exact()
+    test_budget_result_at_limit()
     print("komira_git pack refusal tests passed")
