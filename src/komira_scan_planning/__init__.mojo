@@ -9,6 +9,8 @@
 #     filter into a partition-column part and a data-column part.
 #   * `source_capability_config.mojo` -- the format-agnostic scan capability
 #     bundle.
+#   * `partition_pred_bridge.mojo` -- the mapping between the plan's
+#     `PartitionPredicatePod` and the filesystem's `PartitionPredicate`.
 #
 # These are format and optimizer contracts. They are parked here, one layer
 # above `komira_fs`, until the optimizer and parquet packages move; at that

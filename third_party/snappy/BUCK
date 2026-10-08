@@ -2,6 +2,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
 
 # google/snappy 1.2.2, BSD-3-Clause (COPYING in the archive).
 pinned_file(
@@ -78,8 +79,8 @@ staged_files(
     srcs = ["config.h"],
 )
 
-cxx_library(
-    name = "snappy",
+# Every argument of the snappy compile but the prefix (below).
+_SNAPPY = dict(
     srcs = [
         ":src[snappy-c.cc]",
         ":src[snappy-sinksource.cc]",
@@ -107,5 +108,53 @@ cxx_library(
     },
     header_namespace = "",
     preprocessor_flags = ["-DHAVE_CONFIG_H"],
+)
+
+# snappy with its own C API names. Nothing links it: its archive's symbol
+# table is the list of names :prefix_symbols renames.
+cxx_library(
+    name = "snappy_unprefixed",
+    **_SNAPPY
+)
+
+# The C API (snappy-c.h) renamed komira_snappy_*: snappy_X becomes
+# komira_snappy_X. The C++ names (_Z...) are left alone: they are in
+# namespace snappy, and no Mojo code calls them.
+prefix_header(
+    name = "prefix_symbols",
+    archive = ":snappy_unprefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    header = "snappy_prefix_symbols.h",
+    min_symbols = 5,
+    prefix = "komira_snappy_",
+    strip = "snappy_",
+    style = "strip",
+)
+
+cxx_library(
+    name = "snappy_prefixed",
+    exported_preprocessor_flags = ["-include", "$(location :prefix_symbols)"],
+    **_SNAPPY
+)
+
+# Every symbol :snappy_prefixed defines outside C++ (_Z...) is
+# komira_snappy_*, and it references none of the C API's unprefixed names.
+prefixed_archive_check(
+    name = "snappy_symbols",
+    allow = ["_Z.*"],
+    archive = ":snappy_prefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    min_defined = 5,
+    original_names = [":prefix_symbols[symbols]"],
+    prefix = "komira_snappy_",
+)
+
+# snappy as its users take it: the C API is komira_snappy_compress,
+# komira_snappy_uncompress, ... (C callers that include snappy-c.h get the
+# renamed names), and :snappy_symbols gates every build holding it.
+checked_cxx_library(
+    name = "snappy",
+    checks = [":snappy_symbols"],
+    lib = ":snappy_prefixed",
     visibility = ["PUBLIC"],
 )

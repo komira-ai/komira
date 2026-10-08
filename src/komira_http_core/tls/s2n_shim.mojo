@@ -13,7 +13,8 @@
 #                              TlsConnection; __del__ calls s2n_connection_free.
 #   - `TlsConfig`            — public safe wrapper; ALPN + cert loading.
 #   - `TlsConnection`        — public safe wrapper; handshake / send /
-#                              recv / shutdown / SNI extraction.
+#                              recv / shutdown / SNI extraction /
+#                              TLS 1.3 key update (types in key_update.mojo).
 #   - `HandshakeOutcome`     — enum-like UInt8 alias for the 3-state result.
 #   - `TlsIoOutcome`         — same shape for send/recv/shutdown.
 #
@@ -53,6 +54,7 @@ from komira_http_core.tls.ffi import (
     S2N_NOT_BLOCKED,
     S2N_SERVER,
     S2N_SUCCESS,
+    S2N_TLS13,
     S2nBytePtr,
     S2nInt32Ptr,
     S2nOpaquePtr,
@@ -71,6 +73,8 @@ from komira_http_core.tls.ffi import (
     s2n_config_set_session_tickets_onoff,
     s2n_config_wipe_trust_store,
     s2n_connection_free,
+    s2n_connection_get_actual_protocol_version,
+    s2n_connection_get_cipher,
     s2n_connection_get_session,
     s2n_connection_get_session_length,
     s2n_connection_is_session_resumed,
@@ -78,6 +82,8 @@ from komira_http_core.tls.ffi import (
     s2n_connection_set_config,
     s2n_connection_set_fd,
     s2n_connection_set_session,
+    s2n_connection_get_key_update_counts,
+    s2n_connection_request_key_update,
     s2n_connection_get_wire_bytes_in,
     s2n_connection_get_wire_bytes_out,
     s2n_errno_location,
@@ -95,6 +101,7 @@ from komira_http_core.tls.ffi import (
     s2n_strerror,
     s2n_strerror_debug,
 )
+from komira_http_core.tls.key_update import KeyUpdateCounts, PeerKeyUpdate
 
 
 @always_inline
@@ -138,6 +145,12 @@ comptime TLS_OUTCOME_ERROR: UInt8 = 3
 protocol-violation). The caller MUST close the connection. The
 specific s2n errno is queryable via `last_s2n_errno()` immediately
 after the call (thread-local; do not call into s2n in between)."""
+
+comptime TLS_VERSION_TLS12: Int = 33
+"""`TlsConnection.negotiated_tls_version()` for TLS 1.2 (s2n's S2N_TLS12)."""
+
+comptime TLS_VERSION_TLS13: Int = 34
+"""`TlsConnection.negotiated_tls_version()` for TLS 1.3 (s2n's S2N_TLS13)."""
 
 
 @always_inline
@@ -1130,6 +1143,9 @@ struct TlsConnection(Movable, Deinitable):
     # Freed only when BOTH the connector's TlsConfig AND this clone drop.
     # See TlsConfig's SHARE-OWNERSHIP note for the full root cause.
     var _config: TlsConfig
+    # Set when `handshake()` first returns TLS_OUTCOME_DONE; gates
+    # `negotiated_tls_version()`, whose s2n field holds a placeholder before.
+    var _handshake_done: Bool
 
     def __init__(out self, ref config: TlsConfig) raises:
         """Construct a server-mode TLS connection bound to `config`.
@@ -1155,6 +1171,7 @@ struct TlsConnection(Movable, Deinitable):
         # Co-own the config (share-ownership Arc clone) so `conn->config`
         # is provably valid for this connection's whole lifetime.
         self._config = config.copy()
+        self._handshake_done = False
 
     # NOTE: client-mode construction lives in the
     # `__init__(out self, ref config: TlsConfig, _client_mode: Bool)`
@@ -1200,6 +1217,7 @@ struct TlsConnection(Movable, Deinitable):
         # Co-own the config (share-ownership Arc clone) so `conn->config`
         # is provably valid for this connection's whole lifetime.
         self._config = config.copy()
+        self._handshake_done = False
 
     @staticmethod
     def new_client(ref config: TlsConfig) raises -> TlsConnection:
@@ -1334,7 +1352,10 @@ struct TlsConnection(Movable, Deinitable):
         # severity; only one of them was a spin.
         #
         # Pure-Int8/Int32 marshaling out of FFI; no pointer escapes.
-        return _error_typed_outcome(blocked_local, Int64(rc))
+        var outcome = _error_typed_outcome(blocked_local, Int64(rc))
+        if outcome == TLS_OUTCOME_DONE:
+            self._handshake_done = True
+        return outcome
 
     def send(mut self, data: Span[UInt8, _]) -> Tuple[UInt8, Int]:
         """Encrypt + send `data` via the bound fd. Returns a (outcome, n)
@@ -1907,6 +1928,38 @@ struct TlsConnection(Movable, Deinitable):
         var rc = s2n_connection_is_session_resumed(self._handle[]._raw)
         return rc == Int32(1)
 
+    def negotiated_tls_version(self) -> Int:
+        """The TLS version the handshake negotiated: `TLS_VERSION_TLS13`,
+        `TLS_VERSION_TLS12`, or another s2n protocol-version number for an
+        older version.
+
+        -1 until `handshake()` on THIS connection has returned
+        TLS_OUTCOME_DONE (and -1 if s2n reports a failure). The guard is not
+        cosmetic: before the handshake s2n's `actual_protocol_version` holds
+        a placeholder, the highest version it supports (TLS 1.3) on a client
+        and 0 on a server, so the raw value would claim TLS 1.3 on a client
+        that never negotiated anything."""
+        if not self._handshake_done:
+            return -1
+        # SAFETY: synchronous accessor; no pointer escapes.
+        return Int(s2n_connection_get_actual_protocol_version(self._handle[]._raw))
+
+    def negotiated_cipher(self) -> String:
+        """The cipher suite the handshake negotiated, in s2n's OpenSSL-style
+        spelling: "TLS_AES_128_GCM_SHA256" for a TLS 1.3 suite,
+        "ECDHE-RSA-AES128-GCM-SHA256" for a TLS 1.2 one. The empty string
+        until `handshake()` on THIS connection has returned TLS_OUTCOME_DONE
+        (the guard of `negotiated_tls_version`), or when s2n reports none."""
+        if not self._handshake_done:
+            return String()
+        # SAFETY: s2n_connection_get_cipher returns a pointer into s2n's
+        # static cipher-suite table or NULL; it is copied here and does not
+        # escape this method.
+        var p = s2n_connection_get_cipher(self._handle[]._raw)
+        if Int(p) == 0:
+            return String()
+        return _ptr_to_string(p)
+
     def last_handshake_message_name(self) -> String:
         """Get the name of the last handshake message the connection was
         processing at the time of a failure.
@@ -1963,6 +2016,52 @@ struct TlsConnection(Movable, Deinitable):
             s += chr(Int(p[j]))
             j = j + 1
         return Optional[String](s^)
+
+    def request_key_update(mut self, peer: PeerKeyUpdate) raises:
+        """Mark a TLS 1.3 key update pending: the next `send` emits a
+        KeyUpdate and switches this side's sending key (key_update.mojo).
+
+        Raises, leaving the connection untouched, before the handshake is
+        complete or on a version below TLS 1.3: s2n would accept the request
+        there and either send it at the end of the handshake or never (TLS
+        1.2 has no key update; s2n drops it silently). Raises with s2n's
+        message when s2n refuses `peer` (1.5.6 refuses `REQUESTED`).
+        """
+        # SAFETY: every call below is synchronous on the live handle this
+        # connection owns; no pointer escapes.
+        var raw = self._handle[]._raw
+        if s2n_last_message_name(raw) != "APPLICATION_DATA":
+            raise Error("TlsConnection.request_key_update: handshake not complete")
+        var version = s2n_connection_get_actual_protocol_version(raw)
+        if version < S2N_TLS13:
+            raise Error(
+                "TlsConnection.request_key_update: key update needs TLS 1.3"
+                " (negotiated protocol version " + String(Int(version)) + ")"
+            )
+        if s2n_connection_request_key_update(raw, peer.raw()) != S2N_SUCCESS:
+            raise Error(
+                "TlsConnection.request_key_update: "
+                + s2n_strerror_message(last_s2n_errno())
+            )
+
+    def key_update_counts(self) raises -> KeyUpdateCounts:
+        """How many times this side's sending and receiving keys were
+        updated (0 and 0 on a fresh connection; s2n saturates at 255)."""
+        var sent = UInt8(0)
+        var received = UInt8(0)
+        # SAFETY: both out-pointers address the two stack bytes above, alive
+        # across the synchronous call; s2n writes one uint8_t through each.
+        var sent_ptr = UnsafePointer(to=sent).unsafe_mut_cast[False]().unsafe_origin_cast[_S2N_FFI_ORIGIN]()
+        var received_ptr = UnsafePointer(to=received).unsafe_mut_cast[False]().unsafe_origin_cast[_S2N_FFI_ORIGIN]()
+        var rc = s2n_connection_get_key_update_counts(
+            self._handle[]._raw, sent_ptr, received_ptr
+        )
+        if rc != S2N_SUCCESS:
+            raise Error(
+                "TlsConnection.key_update_counts: "
+                + s2n_strerror_message(last_s2n_errno())
+            )
+        return KeyUpdateCounts(sent=Int(sent), received=Int(received))
 
 
 # =============================================================================

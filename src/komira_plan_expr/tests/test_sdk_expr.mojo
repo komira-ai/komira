@@ -42,24 +42,11 @@ from komira_plan_expr.expr import (
 # `binop_name` / `unop_name` live in `komira_plan_expr.expr_helpers`.
 from komira_plan_expr.expr_helpers import binop_name, unop_name
 from komira_plan_expr.col_expr import ColExpr, col, lit
-from komira_arrow.arrow_types import ArrowType
 
 # Mojo 1.0.0 removed `DType.invalid`. `ScalarValue`'s NULL discriminant is
 # `dtype == DTYPE_NONE` (`ScalarValue.is_null`), so the assertions
 # below read the same constant the type writes.
 from komira_arrow.dtype_sentinel import DTYPE_NONE
-from komira_plan_expr.excel_error_code import (
-    XL_ERR_NONE,
-    XL_ERR_DIV0,
-    XL_ERR_NA,
-    XL_ERR_VALUE,
-    STATUS_VALID,
-    STATUS_NULL,
-    STATUS_ERROR,
-    excel_error_text,
-    excel_error_code_from_literal,
-    SparseErrorSidecar,
-)
 from komira_plan_expr.agg_expr import (
     AggExpr,
     AGG_SUM,
@@ -346,8 +333,8 @@ def test_scalar_empty_string_is_not_null() raises:
 
     An encoding of `from_string("")` as `(DTYPE_NONE, "")` would make
     `is_null()` report True and `is_string()` report False — conflating `''`
-    with NULL. Both SQL (`'' <> NULL`) and Excel (`""` is a value) require them
-    distinct; the SCALAR_KIND_STRING encoding keeps them apart.
+    with NULL. SQL (`'' <> NULL`) requires them distinct; the
+    SCALAR_KIND_STRING encoding keeps them apart.
     """
     var empty = ScalarValue.from_string("")
     # The empty string is a string value, not a null.
@@ -538,84 +525,6 @@ def test_scalar_binary() raises:
     var eb = ScalarValue.from_binary(String(""))
     assert_true(eb.is_binary())
     assert_false(eb.is_null())
-
-
-# =============================================================================
-# 18f. ERROR-VALUE TYPE
-# =============================================================================
-
-def test_scalar_error_value() raises:
-    """ScalarValue carries an Excel ERROR value with an XL_ERR_* code.
-
-    A #VALUE!-class error is a first-class scalar (not a null, not a value);
-    two errors are equal iff their codes match."""
-    var e = ScalarValue.from_error(XL_ERR_DIV0)
-    assert_true(e.is_error())
-    assert_false(e.is_null())
-    assert_false(e.is_string())
-    assert_false(e.is_int())
-    assert_equal(Int(e.error_code_value()), Int(XL_ERR_DIV0))
-
-    # Same code => equal; different code => not equal.
-    assert_true(e == ScalarValue.from_error(XL_ERR_DIV0))
-    assert_true(e != ScalarValue.from_error(XL_ERR_NA))
-    # An error is not a null and not a value.
-    assert_true(e != ScalarValue.null(DType.int64))
-    assert_true(e != ScalarValue.from_int(0))
-
-
-def test_scalar_error_expr_roundtrip() raises:
-    """an error literal round-trips through the Expr IR."""
-    var lit_e = Expr.literal(ScalarValue.from_error(XL_ERR_NA))
-    assert_equal(lit_e.tag, EXPR_LITERAL)
-    var back = lit_e.literal_value()
-    assert_true(back.is_error())
-    assert_equal(Int(back.error_code_value()), Int(XL_ERR_NA))
-
-
-def test_excel_error_code_space() raises:
-    """the shared error-code space renders + parses round-trip
-    (the scalar<->columnar boundary is a 1:1 code copy)."""
-    assert_equal(excel_error_text(XL_ERR_DIV0), "#DIV/0!")
-    assert_equal(excel_error_text(XL_ERR_NA), "#N/A")
-    assert_equal(excel_error_text(XL_ERR_VALUE), "#VALUE!")
-    # Literal -> code round-trip.
-    assert_equal(Int(excel_error_code_from_literal(String("#DIV/0!"))), Int(XL_ERR_DIV0))
-    assert_equal(Int(excel_error_code_from_literal(String("#N/A"))), Int(XL_ERR_NA))
-    # Status lane constants are distinct (VALID / NULL / ERROR).
-    assert_true(STATUS_VALID != STATUS_NULL)
-    assert_true(STATUS_NULL != STATUS_ERROR)
-
-
-def test_sparse_error_sidecar() raises:
-    """the sparse error-code sidecar carrier (TYPE shape)."""
-    var s = SparseErrorSidecar()
-    assert_true(s.is_empty())
-    assert_equal(s.num_errors(), 0)
-    # A row absent from the run is not an error (XL_ERR_NONE).
-    assert_equal(Int(s.code_for(3)), Int(XL_ERR_NONE))
-
-    s.set_error(3, XL_ERR_DIV0)
-    s.set_error(7, XL_ERR_NA)
-    assert_false(s.is_empty())
-    assert_equal(s.num_errors(), 2)
-    assert_equal(Int(s.code_for(3)), Int(XL_ERR_DIV0))
-    assert_equal(Int(s.code_for(7)), Int(XL_ERR_NA))
-    assert_equal(Int(s.code_for(5)), Int(XL_ERR_NONE))  # not an error row
-
-    # copy() preserves the run.
-    var s2 = s.copy()
-    assert_equal(s2.num_errors(), 2)
-    assert_equal(Int(s2.code_for(7)), Int(XL_ERR_NA))
-
-
-def test_arrow_type_error_member() raises:
-    """ArrowType.ERROR exists, is distinct, and renders 'error'."""
-    assert_true(ArrowType.ERROR != ArrowType.INT64)
-    assert_true(ArrowType.ERROR != ArrowType.STRING)
-    var s = String("")
-    s.write(ArrowType.ERROR)
-    assert_equal(s, "error")
 
 
 # =============================================================================
