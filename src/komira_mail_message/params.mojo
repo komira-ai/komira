@@ -19,8 +19,8 @@
 # Formatting (`append_param`) writes a token as itself, other printable
 # ASCII of at most 60 octets as a quoted string, and anything else as RFC
 # 2231 `name*=utf-8''...` percent-encoded, split into `name*0*`, `name*1*`,
-# ... sections of at most 60 characters, each after `; ` so a header folds
-# between them.
+# ... sections of at most 60 characters that end on a character boundary,
+# each after `; ` so a header folds between them.
 # =============================================================================
 
 from .chars import (
@@ -47,6 +47,7 @@ from .chars import (
     lower_ascii_string,
     range_bytes,
     utf8_invalid_at,
+    utf8_sequence_length,
 )
 from .encoded_word import charset_kind
 
@@ -426,18 +427,27 @@ def append_param(mut out: List[UInt8], name: StaticString, value: Span[UInt8, _]
     _append_section_name(out, name, 0 if split else -1)
     append_bytes(out, prefix.as_bytes())
     var used = 7
-    for i in range(n):
-        var c = value[i]
-        var width = 1 if _is_attr_char(c) else 3
-        # A new section starts only at the start of a UTF-8 sequence.
-        if split and used + width > PARAM_SECTION_MAX and (c < 0x80 or c >= 0xC0):
+    var i = 0
+    while i < n:
+        # One character at a time (a whole UTF-8 sequence, or one byte that
+        # is not UTF-8), so a section never ends inside a character and
+        # never holds more than 60 characters.
+        var length = utf8_sequence_length(value, i)
+        if length == 0:
+            length = 1
+        var width = 0
+        for k in range(i, i + length):
+            width += 1 if _is_attr_char(value[k]) else 3
+        if split and used + width > PARAM_SECTION_MAX:
             section += 1
             out.append(SEMI)
             out.append(SP)
             _append_section_name(out, name, section)
             used = 0
-        if width == 1:
-            out.append(c)
-        else:
-            append_hex(out, c, PERCENT)
+        for k in range(i, i + length):
+            if _is_attr_char(value[k]):
+                out.append(value[k])
+            else:
+                append_hex(out, value[k], PERCENT)
         used += width
+        i += length

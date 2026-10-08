@@ -15,6 +15,7 @@ mojo_library(
         "tests/test_rfc2047.mojo",
         "tests/test_mime_values.mojo",
         "tests/test_build_golden.mojo",
+        "tests/test_build_paths.mojo",
         "tests/test_folding.mojo",
         "tests/test_parse_corpus.mojo",
         "tests/test_refusals.mojo",
