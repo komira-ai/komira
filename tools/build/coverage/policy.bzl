@@ -72,7 +72,9 @@ COVERAGE_NO_GATE = {
 # generic functions with another specialisation can turn its coverage gate
 # red in census mode. A fixture of the tests cell reads its branch records
 # unless it passes `coverage_branch_gate = False` (coverage.bzl). A library
-# not on the list keeps BranchNotMeasured.
+# not on the list keeps BranchNotMeasured. mojo_library looks itself up by
+# its label, so a row whose library moved would be read by nothing:
+# branch_gate.bxl fails unless every row names a mojo_library.
 #
 # A raising call in a `try:` body of its function is a decision of two arms
 # (kind `try`: the call returned, it raised into the handler), so a

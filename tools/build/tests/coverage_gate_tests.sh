@@ -39,7 +39,9 @@
 #      its conda package red (it waits for the coverage run);
 #      no_gate.bxl holds the ledger COVERAGE_NO_GATE equal to the Mojo
 #      libraries the gate's tool depends on, and each one's conda package
-#      depends on its `<name>_cov_gate`; as actions (aquery): the package
+#      depends on its `<name>_cov_gate`; branch_gate.bxl holds every row of
+#      COVERAGE_BRANCH_GATE to a mojo_library of komira//src/... (a row
+#      whose library moved is read by nothing); as actions (aquery): the package
 #      joins of tracer_shipped (outside the ledger, coverage from the
 #      switch) and readme_examples (in it) wait for no coverage action, and both joins of each one's conda
 #      package wait for each of its coverage runs and its one gate (the
@@ -112,6 +114,11 @@ if "$BUCK2" bxl //tools/build/coverage/no_gate.bxl:check -c komira.coverage=true
     pass "coverage_no_gate: $(grep -o 'the [0-9]* libraries of the ledger.*' "$LOG/coverage_no_gate.log" | cut -c 1-160)"
 else
     fail "coverage_no_gate: $(grep -E 'no_gate: |cycle' "$LOG/coverage_no_gate.log" | head -n 1 | cut -c 1-400) (see $LOG/coverage_no_gate.log)"
+fi
+if "$BUCK2" bxl //tools/build/coverage/branch_gate.bxl:check > "$LOG/coverage_branch_gate_rows.log" 2>&1; then
+    pass "coverage_branch_gate_rows: $(grep -o 'the [0-9]* rows of COVERAGE_BRANCH_GATE.*' "$LOG/coverage_branch_gate_rows.log" | cut -c 1-160)"
+else
+    fail "coverage_branch_gate_rows: $(grep -E 'branch_gate: ' "$LOG/coverage_branch_gate_rows.log" | head -n 1 | cut -c 1-400) (see $LOG/coverage_branch_gate_rows.log)"
 fi
 # What waits, as actions (no_gate.bxl reads only the targets' deps), for a
 # library outside the ledger whose coverage comes from the switch
