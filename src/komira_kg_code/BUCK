@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
 
 # The code graph deriver: buck2 uquery JSON, the `mojo doc` JSON of each
@@ -15,16 +15,10 @@ mojo_library(
     ],
     test_data = {
         "tests/test_derive_fixture.mojo": {
-            "kgfix_doc.json": ":kgfix_doc",
+            "kgfix_doc.json": "//src/komira_kg_code/tests/fixtures/repo:kgfix_doc",
             "src/komira_kg_code/tests/fixtures/kgfix_graph.golden": "tests/fixtures/kgfix_graph.golden",
             "src/komira_kg_code/tests/fixtures/kgfix_uquery.json": "tests/fixtures/kgfix_uquery.json",
-            "src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md": "tests/fixtures/repo/docs/kgfix.md",
-            "src/komira_kg_code/tests/fixtures/repo/kgfix/__init__.mojo": "tests/fixtures/repo/kgfix/__init__.mojo",
-            "src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo": "tests/fixtures/repo/kgfix/shapes.mojo",
-            "src/komira_kg_code/tests/fixtures/repo/kgfix/sub/__init__.mojo": "tests/fixtures/repo/kgfix/sub/__init__.mojo",
-            "src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo": "tests/fixtures/repo/kgfix/sub/leaf.mojo",
-            "src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_dot.mojo": "tests/fixtures/repo/kgfix_tests/test_dot.mojo",
-            "src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_grid.mojo": "tests/fixtures/repo/kgfix_tests/test_grid.mojo",
+            "src/komira_kg_code/tests/fixtures/repo": "//src/komira_kg_code/tests/fixtures/repo:files",
         },
         "tests/test_derive_real_library.mojo": {
             "mcp_server_doc.json": ":mcp_server_doc",
@@ -38,35 +32,6 @@ mojo_library(
         "tests/test_text_scan.mojo",
     ],
     visibility = ["PUBLIC"],
-)
-
-# kgfix: the frozen fixture package of the deriver's golden (sources under
-# tests/fixtures/repo/). Only this package's tests read it.
-mojo_library(
-    name = "kgfix",
-    srcs = [
-        "tests/fixtures/repo/kgfix/__init__.mojo",
-        "tests/fixtures/repo/kgfix/shapes.mojo",
-        "tests/fixtures/repo/kgfix/sub/__init__.mojo",
-        "tests/fixtures/repo/kgfix/sub/leaf.mojo",
-    ],
-    deps = ["//src/komira_json:komira_json"],
-    conda = False,
-    test_srcs = ["tests/fixtures/repo/kgfix_tests/test_grid.mojo"],
-)
-
-# kgfix's standalone test, so the fixture graph has a test target that is
-# not welded.
-mojo_test(
-    name = "kgfix_dot_test",
-    srcs = ["tests/fixtures/repo/kgfix_tests/test_dot.mojo"],
-    deps = [":kgfix"],
-)
-
-# The compiler's reading of kgfix, the fixture test's doc JSON input.
-mojo_doc_json(
-    name = "kgfix_doc",
-    lib = ":kgfix",
 )
 
 # The doc JSON of a real library, komira_mcp_server, the real-library

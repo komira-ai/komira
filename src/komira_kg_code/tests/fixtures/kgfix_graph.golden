@@ -17,8 +17,8 @@ N	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/__init__.mojo	file	__
 N	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo	file	leaf.mojo	src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo	0	
 N	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_dot.mojo	file	test_dot.mojo	src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_dot.mojo	0	
 N	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_grid.mojo	file	test_grid.mojo	src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_grid.mojo	0	
-N	komira//src/komira_kg_code:kgfix	target	kgfix	src/komira_kg_code	0	mojo_library kgfix
-N	komira//src/komira_kg_code:kgfix_dot_test	target	kgfix_dot_test	src/komira_kg_code	0	mojo_test kgfix_dot_test
+N	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	target	kgfix	src/komira_kg_code/tests/fixtures/repo	0	mojo_library kgfix
+N	komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test	target	kgfix_dot_test	src/komira_kg_code/tests/fixtures/repo	0	mojo_test kgfix_dot_test
 N	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	doc	kgfix.md	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	0	kgfix
 E	kgfix.shapes.Dot	conforms	kgfix.shapes.Shaped
 E	kgfix.shapes.Dot	declares	kgfix.shapes.Dot.__init__
@@ -35,16 +35,16 @@ E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	declares	kgfi
 E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	declares	kgfix.shapes.total_area
 E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	imports	komira//src/komira_json:komira_json
 E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo	declares	kgfix.sub.leaf.leaf_area
-E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_dot.mojo	imports	komira//src/komira_kg_code:kgfix
-E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_grid.mojo	imports	komira//src/komira_kg_code:kgfix
-E	komira//src/komira_kg_code:kgfix	deps	komira//src/komira_json:komira_json
-E	komira//src/komira_kg_code:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/__init__.mojo
-E	komira//src/komira_kg_code:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo
-E	komira//src/komira_kg_code:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/__init__.mojo
-E	komira//src/komira_kg_code:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo
-E	komira//src/komira_kg_code:kgfix	tests	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_grid.mojo
-E	komira//src/komira_kg_code:kgfix	tests	komira//src/komira_kg_code:kgfix_dot_test
-E	komira//src/komira_kg_code:kgfix_dot_test	deps	komira//src/komira_kg_code:kgfix
-E	komira//src/komira_kg_code:kgfix_dot_test	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_dot.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_dot.mojo	imports	komira//src/komira_kg_code/tests/fixtures/repo:kgfix
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_grid.mojo	imports	komira//src/komira_kg_code/tests/fixtures/repo:kgfix
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	deps	komira//src/komira_json:komira_json
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/__init__.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/__init__.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	tests	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_grid.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	tests	komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test	deps	komira//src/komira_kg_code/tests/fixtures/repo:kgfix
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix_tests/test_dot.mojo
 E	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	governs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo
-E	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	governs	komira//src/komira_kg_code:kgfix
+E	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	governs	komira//src/komira_kg_code/tests/fixtures/repo:kgfix

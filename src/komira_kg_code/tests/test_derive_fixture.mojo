@@ -47,7 +47,7 @@ def _derive(reverse: Bool) raises -> CodeGraph:
     var doc_path = String(_DIR) + "repo/docs/kgfix.md"
     if not reverse:
         b.add_uquery_json(_read(String(_DIR) + "kgfix_uquery.json"))
-        b.add_mojo_doc_json(String("komira//src/komira_kg_code:kgfix"), _read("kgfix_doc.json"))
+        b.add_mojo_doc_json(String("komira//src/komira_kg_code/tests/fixtures/repo:kgfix"), _read("kgfix_doc.json"))
         for i in range(len(srcs)):
             b.add_source(String(_P) + srcs[i], _read(String(_DIR) + "repo/" + srcs[i]))
         b.add_markdown(doc_path, _read(doc_path))
@@ -55,7 +55,7 @@ def _derive(reverse: Bool) raises -> CodeGraph:
         b.add_markdown(doc_path, _read(doc_path))
         for i in range(len(srcs) - 1, -1, -1):
             b.add_source(String(_P) + srcs[i], _read(String(_DIR) + "repo/" + srcs[i]))
-        b.add_mojo_doc_json(String("komira//src/komira_kg_code:kgfix"), _read("kgfix_doc.json"))
+        b.add_mojo_doc_json(String("komira//src/komira_kg_code/tests/fixtures/repo:kgfix"), _read("kgfix_doc.json"))
         b.add_uquery_json(_read(String(_DIR) + "kgfix_uquery.json"))
     return b.build()
 
@@ -94,10 +94,10 @@ def test_both_conformers_of_shaped_including_the_multi_line_header() raises:
 
 def test_tests_are_the_welded_file_and_the_standalone_target() raises:
     var g = _derive(False)
-    var t = g.targets_of("komira//src/komira_kg_code:kgfix", EDGE_TESTS)
+    var t = g.targets_of("komira//src/komira_kg_code/tests/fixtures/repo:kgfix", EDGE_TESTS)
     assert_equal(len(t), 2)
     assert_equal(t[0], String(_P) + "kgfix_tests/test_grid.mojo")
-    assert_equal(t[1], "komira//src/komira_kg_code:kgfix_dot_test")
+    assert_equal(t[1], "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test")
 
 
 def test_batches_hold_the_graph_in_order() raises:
