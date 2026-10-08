@@ -446,7 +446,7 @@ def _build_fd_elided(imm plan: LogicalPlan) raises -> Optional[LogicalPlan]:
     for i in range(n_keys):
         if not elide[i]:
             if new_agg_schema.field_name(s) != key_names[i]:
-                return None  # cov: unreachable every key kept its own name in the old aggregate, so no earlier surviving key can collide with it
+                return None
             s += 1
     for a in range(n_aggs):
         if new_agg_schema.field_name(n_surv + a) != agg_schema.field_name(n_keys + a):
