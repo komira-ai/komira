@@ -988,12 +988,12 @@ With coverage, a library's conda package (what ships), not the library, waits fo
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
 
+## 49. Assert level, defines and memory cap
+
+[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
 records what a remote worker provides, the evidence behind the
 [host floor](../toolchains/README.md#host-floor).
-
-## 45. Assert level, defines and memory cap
-
-[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).

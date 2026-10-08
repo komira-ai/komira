@@ -1,6 +1,6 @@
-# Test 45: assert level, defines and memory cap
+# Test 49: assert level, defines and memory cap
 
-The checks of [test 45](README.md#45-assert-level-defines-and-memory-cap), run by
+The checks of [test 49](README.md#49-assert-level-defines-and-memory-cap), run by
 [`assert_level_tests.sh`](assert_level_tests.sh). The attributes are described in
 [the Mojo rules' README](../mojo/README.md#assert-level-defines-and-memory-cap).
 
