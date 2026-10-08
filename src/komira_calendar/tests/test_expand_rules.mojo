@@ -144,7 +144,9 @@ def test_yearly_on_the_leap_day() raises:
 def test_weekly_from_an_unpicked_day() raises:
     # Catches the first day counted as an occurrence when the rule does not
     # pick it, and a picked weekday before the first day kept.
-    var e = _timed("2026-11-04T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY","FRIDAY"],"count":3}')
+    var e = _timed(
+        "2026-11-04T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY","FRIDAY"],"count":3}'
+    )
     assert_equal(_starts(_everything(e)), "2026-11-06T10:00:00 2026-11-09T10:00:00 2026-11-13T10:00:00")
 
 
@@ -232,6 +234,23 @@ def test_series_span() raises:
         "2026-10-31T12:00:00", 600, '{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2027-02-28"}'
     )
     assert_true(_span(month_end) == SeriesSpan(_at("2026-10-31T12:00:00"), _at("2027-01-31T12:10:00")))
+    # An until inside a period, before that period's pick: the pick of the
+    # period before. Catches the last day read without the until.
+    var thursdays = _timed(
+        "2026-11-05T18:30:00", 3600, '{"freq":"WEEKLY","interval":1,"weekdays":["THURSDAY"],"until":"2026-11-24"}'
+    )
+    assert_true(_span(thursdays) == SeriesSpan(_at("2026-11-05T18:30:00"), _at("2026-11-19T19:30:00")))
+    # A count the calendar cannot hold: 9999-12-31 is a Friday, so after the
+    # weekend of the 25th the next picks would be in the year 10000.
+    var weekend = _timed(
+        "9999-12-25T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["SATURDAY","SUNDAY"],"count":5}'
+    )
+    assert_true(_span(weekend) == SeriesSpan(_at("9999-12-25T10:00:00"), _at("9999-12-26T10:10:00")))
+    var end_of_time = parse_local_date("9999-12-31") * 86400
+    assert_equal(
+        _starts(expand(weekend, _at("9999-12-01T00:00:00"), end_of_time + 3 * 86400)),
+        "9999-12-25T10:00:00 9999-12-26T10:00:00",
+    )
     # The first occurrence is the first picked day, not the event's start.
     var unpicked = _timed("2026-11-04T10:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"],"count":2}')
     assert_true(_span(unpicked) == SeriesSpan(_at("2026-11-09T10:00:00"), _at("2026-11-16T10:10:00")))

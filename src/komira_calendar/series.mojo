@@ -12,9 +12,9 @@ holds the days the rule picks in it:
   YEARLY   the first day's month and day, skipped when the year has no such
            day (29 February in a common year)
 
-A day before the series' first day is never picked. Nothing after
-9999-12-31 (LAST_DAY) is picked: a local date has four year digits. All
-arithmetic is on local dates (days since 1970-01-01); no zone is consulted.
+A day before the series' first day is never picked. A series without
+`until` ends on 9999-12-31 (LAST_DAY): a local date has four year digits.
+All arithmetic is on local dates (days since 1970-01-01); no zone is consulted.
 """
 
 from komira_calendar_proto.calendar import Frequency, Recurrence
@@ -37,8 +37,8 @@ def iso_weekday(day: Int) -> Int:
 @fieldwise_init
 struct ResolvedRule(Copyable, Movable, ImplicitlyCopyable):
     """A validated `Recurrence` with its text read and its anchors computed.
-    `until_day` is LAST_DAY when the rule names no `until`; `count` is 0
-    when it names none."""
+    `until_day` is the last day an occurrence may fall on: the `until` date,
+    or LAST_DAY when the rule names none. `count` is 0 when it names none."""
 
     var freq: Int
     var interval: Int
@@ -69,7 +69,7 @@ def resolve_rule(rule: Recurrence, first_day: Int) raises -> ResolvedRule:
         mask = 1 << iso_weekday(first_day)
     var until_day = LAST_DAY
     if rule.until.byte_length() > 0:
-        until_day = min(parse_local_date(rule.until), LAST_DAY)
+        until_day = parse_local_date(rule.until)
     var c = civil_from_days(first_day)
     return ResolvedRule(
         freq=Int(rule.freq.value),
@@ -130,8 +130,7 @@ def _nth_weekday(year: Int, month: Int, ordinal: Int, weekday: Int) -> Int:
 
 def period_days(r: ResolvedRule, k: Int, mut out: List[Int]):
     """Replace `out` with the days period `k` picks, ascending, none before
-    the first day and none after LAST_DAY. `until` and `count` are the
-    caller's."""
+    the first day. `until_day` and `count` are the caller's to apply."""
     out.clear()
     if r.freq == Frequency.DAILY:
         out.append(r.first_day + k * r.interval)
@@ -155,7 +154,7 @@ def period_days(r: ResolvedRule, k: Int, mut out: List[Int]):
             out.append(days_from_civil(year, r.first_month_of_year, r.first_day_of_month))
     var kept = 0
     for i in range(len(out)):
-        if out[i] >= r.first_day and out[i] <= LAST_DAY:
+        if out[i] >= r.first_day:
             out[kept] = out[i]
             kept += 1
     while len(out) > kept:

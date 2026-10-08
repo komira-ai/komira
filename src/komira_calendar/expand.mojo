@@ -20,7 +20,7 @@ from std.collections import Set
 from komira_calendar_proto.calendar import Event
 
 from .local_time import parse_local_date, parse_local_datetime
-from .series import LAST_DAY, ResolvedRule, period_at, period_days, period_first_day, resolve_rule
+from .series import ResolvedRule, period_at, period_days, period_first_day, resolve_rule
 from .validate import check_event
 
 
@@ -162,9 +162,11 @@ def _last_day(r: ResolvedRule) -> Optional[Int]:
         var produced = 0
         var last = Optional[Int](None)
         var k = 0
-        while period_first_day(r, k) <= LAST_DAY:
+        while period_first_day(r, k) <= r.until_day:
             period_days(r, k, days)
             for i in range(len(days)):
+                if days[i] > r.until_day:
+                    return last
                 last = days[i]
                 produced += 1
                 if produced == r.count:
