@@ -130,6 +130,7 @@ from komira_async.reactor.reactor import Reactor
 # {the core packages and the small leaf packages} only — never reaches back into komira_objectstore.
 from komira_metrics.metrics_set import MetricsSet, new_owned_metrics_set
 
+from komira_objectstore.cas_backoff_probe import record_cas_backoff
 from komira_objectstore.path import Path
 
 # Reclamation never touches a live chunk (at or above `_LOG_START`):
@@ -657,6 +658,14 @@ struct _LocalHeadCache(Copyable, Movable, Deinitable):
 # -----------------------------------------------------------------------------
 
 
+comptime CAS_LIST_ESCALATE_AFTER: Int = 3
+"""Consecutive 412s after which `CasManifestStore.append` re-anchors on the
+bucket's authoritative tail (the LIST escalation) instead of probing one slot
+forward. Public so a test can state what its bound relies on: a call whose
+budget (`max_retries + 1` attempts) exceeds this many attempts makes at least
+one attempt past a re-anchor."""
+
+
 @fieldwise_init
 struct RetryPolicy(
     Copyable, ImplicitlyCopyable, Movable, Deinitable
@@ -768,11 +777,15 @@ def _jittered_sleep_us(upper_us: Int64, salt: UInt64) raises:
     clock XORed with a per-call `salt` (the attempt count) so two threads
     entering backoff at nearly the same instant still draw different waits.
     """
+    # Every draw is counted (`cas_backoff_probe`), a zero bound included, so a
+    # test can hold the draws equal to the 412s that were retried.
     if upper_us <= Int64(0):
+        record_cas_backoff(Int64(0), upper_us)
         return
     var seed = UInt64(perf_counter_ns()) ^ (salt * UInt64(0x9E3779B97F4A7C15))
     var r = _xorshift64(seed | UInt64(1))
     var draw_us = r % UInt64(upper_us + 1)
+    record_cas_backoff(Int64(draw_us), upper_us)
     # Use `usleep` (microsecond, distinct symbol) instead of stdlib
     # `time.sleep` → `nanosleep`: an AOT binary that links komira_async (whose
     # reactor declares its OWN `external_call["nanosleep", ...]`) hits a
@@ -2544,7 +2557,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # `candidate_seq` from a stale-low _HEAD instead computes a fresh seq
         # beyond ALL taken slots. We re-escalate every N 412s so a writer that
         # is still losing keeps re-anchoring on the true tail.
-        comptime LIST_ESCALATE_AFTER = 3
+        comptime LIST_ESCALATE_AFTER = CAS_LIST_ESCALATE_AFTER
         var consecutive_412 = 0
         while True:
             attempt += 1

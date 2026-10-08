@@ -23,6 +23,9 @@
 #       it (as a caller must) fails no more often than the OTHER writers
 #       commit. See "THE LOCK-FREEDOM BOUND" below for why that bound holds at
 #       any speed, and why "zero exhausted calls" was not the property.
+#       And every retried 412 is followed by exactly one full-jitter backoff
+#       draw within `backoff_us_for_attempt(attempt)`, counted by the product
+#       (`cas_backoff_probe`): full jitter may draw 0, so no time floor can.
 #
 # This is the offline contention gate. A live S3-compatible stress run
 # additionally exercises the real S3 transport; this test guarantees the
@@ -36,7 +39,16 @@ from std.testing import assert_equal, assert_true
 
 from komira_collections.slab import Slab
 
-from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
+from komira_objectstore.cas_backoff_probe import (
+    cas_backoff_counts,
+    reset_cas_backoff_counts,
+)
+from komira_objectstore.cas_manifest import (
+    CAS_LIST_ESCALATE_AFTER,
+    CasManifestStore,
+    RetryPolicy,
+    is_retryable_contention,
+)
 from komira_objectstore.shared_in_memory_conditional_store import (
 
 
@@ -207,8 +219,7 @@ def _run_writer(mut arg: _WriterArg) raises:
                 attempts = Int64(res.attempts)
                 break
             except e:
-                var msg = String(e)
-                if "exhausted" in msg and "(retryable)" in msg:
+                if is_retryable_contention(String(e)):
                     results_ptr[].exhausted_calls += Int64(1)
                     if results_ptr[].exhausted_calls <= arg.exhausted_bound:
                         continue
@@ -299,6 +310,7 @@ def _run_k_writers(
     # ONE shared store; every writer gets a clone() that SHARES the map.
     var shared = SharedInMemoryConditionalStore()
     var prefix = String("offline/k") + String(k)
+    reset_cas_backoff_counts()
 
     var results = Slab[OwnedPointer[_WriterResults]]()
     for _w in range(k):
@@ -337,6 +349,7 @@ def _run_k_writers(
     var terminal_fails = Int64(0)
     var max_attempts_seen = Int64(0)
     var exhausted_calls = Int64(0)
+    var retried_412s = Int64(0)
     var max_exhausted_one_writer = Int64(0)
     var hard_errors = Int64(0)
 
@@ -353,15 +366,26 @@ def _run_k_writers(
                 continue
             total_commits += Int64(1)
             total_attempts += r.attempts
+            retried_412s += r.attempts - Int64(1)
             if r.attempts > max_attempts_seen:
                 max_attempts_seen = r.attempts
             all_seqs.append(r.chunk_seq)
             all_bases.append(r.base_offset)
             latencies.append(r.latency_ns)
+    # An exhausted call retried `max_retries` 412s (its last one raised).
+    retried_412s += exhausted_calls * Int64(RetryPolicy.fast_test().max_retries)
 
     # ---- (1) no-gap, one-winner-per-slot, contiguous ----
     var expected = Int64(k) * appends_per_writer
     var exhausted_bound = Int64(k - 1) * appends_per_writer
+    var policy = RetryPolicy.fast_test()
+    # The bound's argument needs an exhausted call to make at least one
+    # attempt past its first re-anchor (see THE LOCK-FREEDOM BOUND).
+    assert_true(
+        policy.max_retries + 1 > CAS_LIST_ESCALATE_AFTER + 1,
+        "the retry budget must outlast the LIST escalation, or the"
+        " lock-freedom bound below does not follow",
+    )
     assert_equal(
         hard_errors,
         Int64(0),
@@ -428,7 +452,9 @@ def _run_k_writers(
         + String(Int(max_exhausted_one_writer))
         + ", bound "
         + String(Int(exhausted_bound))
-        + ")  terminal-fails="
+        + ")  backoff-draws="
+        + String(Int(retried_412s))
+        + "  terminal-fails="
         + String(Int(terminal_fails))
     )
     print(
@@ -442,7 +468,24 @@ def _run_k_writers(
     )
 
     # ---- (3) livelock bound ----
-    var policy = RetryPolicy.fast_test()
+    # BACKOFF. Every retried 412 is followed by one full-jitter draw within
+    # `backoff_us_for_attempt(attempt)`: a committed call that took `a`
+    # attempts retried `a - 1` 412s, an exhausted call `max_retries` (its last
+    # 412 raises instead). Counted by the product (cas_backoff_probe), because
+    # full jitter may draw 0 and no wall-clock floor can see a missing sleep.
+    # Without backoff the writers re-collide in lockstep: this is the check a
+    # loop that retries at once fails.
+    var backoff = cas_backoff_counts()
+    assert_equal(
+        Int64(backoff.draws),
+        retried_412s,
+        "each retried 412 must be followed by exactly one backoff draw",
+    )
+    assert_equal(
+        backoff.draws_over_bound,
+        0,
+        "a backoff draw exceeded RetryPolicy.backoff_us_for_attempt(attempt)",
+    )
     assert_true(
         max_attempts_seen <= Int64(policy.max_retries + 1),
         "no writer exceeded max_retries+1 (livelock bound held)",
