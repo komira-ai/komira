@@ -7,18 +7,18 @@
 # `A-Z a-z 0-9 _ -`. The service mints them; the store refuses any other
 # shape, so an id can never hold the `,` an id list is joined with, nor a `/`
 # a document store cannot name a document with.
+#
+# A DM's id is `dm-` and its sorted users joined by `.`: no other id holds a
+# `.`, so a DM id is never a valid id of a channel `create_channel` makes, and
+# two sets of users never share one. It is at most 3 + 9 * 64 + 8 = 587 bytes.
 # =============================================================================
-
-from komira_crypto import hex_lower_array_32, sha256_string
 
 comptime MAX_ID_BYTES: Int = 64
 # A DM holds 2 to 9 users.
 comptime MIN_DM_USERS: Int = 2
 comptime MAX_DM_USERS: Int = 9
-# The DM id is this prefix and the first 40 hex digits (160 bits) of the
-# SHA-256 of the sorted users, each followed by a newline.
 comptime DM_ID_PREFIX: StaticString = "dm-"
-comptime DM_ID_HEX_DIGITS: Int = 40
+comptime DM_ID_SEPARATOR: StaticString = "."
 
 
 def is_valid_id(id: String) -> Bool:
@@ -113,8 +113,9 @@ def dm_channel_id(ids: List[String]) raises -> String:
     """The channel id of the DM between `ids` (in any order, repeats
     ignored): one set of users has one DM."""
     var users = dm_users(ids)
-    var text = String()
+    var out = String(DM_ID_PREFIX)
     for i in range(len(users)):
-        text += users[i] + String("\n")
-    var hex = hex_lower_array_32(sha256_string(text))
-    return String(DM_ID_PREFIX) + String(hex[byte=0:DM_ID_HEX_DIGITS])
+        if i > 0:
+            out += String(DM_ID_SEPARATOR)
+        out += users[i]
+    return out^

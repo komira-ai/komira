@@ -2,12 +2,6 @@
 # test_chat_store_keys.mojo -- the id shape, the subject key, the DM id and
 #   the id-list form, with no database.
 # =============================================================================
-#
-# The DM ids are checked against SHA-256 values computed outside Mojo
-# (coreutils `sha256sum` of the sorted users, each followed by a newline):
-#   printf 'u-alice\nu-bob\n'          | sha256sum -> 739254d19674b3c7f888...
-#   printf 'u-alice\nu-bob\nu-carol\n' | sha256sum -> 6578d6dc265515c8b0ac...
-# =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -61,16 +55,16 @@ def test_subject_key_is_injective() raises:
 def test_dm_channel_id_vectors() raises:
     assert_equal(
         dm_channel_id(_ids("u-bob", "u-alice")),
-        String("dm-739254d19674b3c7f88881f418e47f1f55e0ca4e"),
+        String("dm-u-alice.u-bob"),
     )
     # Order and repeats do not matter: one set of users has one DM.
     assert_equal(
         dm_channel_id(_ids("u-alice", "u-bob", "u-alice")),
-        String("dm-739254d19674b3c7f88881f418e47f1f55e0ca4e"),
+        String("dm-u-alice.u-bob"),
     )
     assert_equal(
         dm_channel_id(_ids("u-carol", "u-alice", "u-bob")),
-        String("dm-6578d6dc265515c8b0acddd302b7072bda13c55b"),
+        String("dm-u-alice.u-bob.u-carol"),
     )
 
 
