@@ -35,6 +35,7 @@ load(
     _test_root = "test_root",
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
+load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -720,6 +721,7 @@ def _test_impl(ctx):
     root, staged = _test_root(ctx, ctx.label.name + ".testroot", exe, data)
     cap = memory_cap(where, "memory_cap_mib", ctx.attrs.memory_cap_mib, ctx.attrs.assert_level)
     command = cmd_args(
+        deadline_prefix(ctx, tc.busybox, where),
         capped_prefix(tc, mem_cap_script(ctx), where, cap),
         tc.busybox,
         "sh",
@@ -756,7 +758,7 @@ def _test_impl(ctx):
 
 mojo_test_rule = rule(
     impl = _test_impl,
-    attrs = _EXECUTABLE_ATTRS | TEST_DEFINE_ATTRS | {
+    attrs = _EXECUTABLE_ATTRS | TEST_DEFINE_ATTRS | TEST_LIMIT_ATTRS | {
         "optimization_level": attrs.string(default = TEST_OPT_LEVEL),
         # Files staged under the test's share/, its current directory: a list
         # of sources (each at its path from the cell root) or {dest: source}.
@@ -990,4 +992,4 @@ def _mojo_library(**kwargs):
 mojo_binary = declares_docs(mojo_binary_rule)
 mojo_library = declares_docs(_mojo_library)
 mojo_shared_lib = declares_docs(mojo_shared_lib_rule)
-mojo_test = declares_docs(mojo_test_rule)
+mojo_test = declares_docs(with_test_limit(mojo_test_rule))
