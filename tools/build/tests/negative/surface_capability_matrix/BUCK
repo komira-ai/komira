@@ -1,0 +1,89 @@
+load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
+load(
+    "//functional/surface_capability_matrix:fixture.bzl",
+    "E2E",
+    "SCM_CAPABILITIES",
+    "SCM_FILES",
+    "SCM_FLOOR",
+    "SCM_GROUNDING",
+    "SCM_MATRIX",
+    "SCM_NOT_CAPABILITIES",
+    "SCM_ROOT",
+    "SCM_SURFACES",
+    "scm_set",
+)
+
+# Test 53 (the surface capability matrix), the half that must go red: one
+# planted defect per target, in the lists of functional/surface_capability_matrix
+# (whose `ok` builds). run_tests.sh requires each to fail naming its finding.
+# Two cases are not here: a row naming a target that does not exist
+# (dangling.BUCK) and one naming a test incompatible with Linux
+# (incompatible.BUCK). Loadable, either fails every cquery over tests//...,
+# the CI affected step's included; run_tests.sh copies each into its own
+# directory for its one build.
+
+[
+    surface_capability_matrix(
+        name = name,
+        capabilities = capabilities or SCM_CAPABILITIES,
+        files = SCM_FILES,
+        floor = SCM_FLOOR if floor == None else floor,
+        grounding = SCM_GROUNDING,
+        not_capabilities = SCM_NOT_CAPABILITIES if not_capabilities == None else not_capabilities,
+        root = SCM_ROOT,
+        rows = SCM_MATRIX if rows == None else rows,
+        surfaces = SCM_SURFACES if surfaces == None else surfaces,
+    )
+    for name, rows, capabilities, not_capabilities, surfaces, floor in [
+        # A second row for (pandas, filter).
+        ("duplicate", SCM_MATRIX + [("pandas", "filter", "-", "again")], None, None, None, None),
+        # A capability the vocabulary does not hold.
+        ("unknown_capability", SCM_MATRIX + [("pandas", "window", "-", "")], None, None, None, None),
+        # A surface the list does not hold.
+        ("unknown_surface", SCM_MATRIX + [("spark", "filter", "-", "")], None, None, None, None),
+        # polars filter credited to the pandas package's test.
+        ("other_surface", scm_set(SCM_MATRIX, "polars", "filter", E2E + "pandas_e2e:test_filter"), None, None, None, None),
+        # A test outside src/tests/e2e: one of the fixture's own package.
+        ("outside_e2e", scm_set(SCM_MATRIX, "pandas", "errors", "tests//functional/surface_capability_matrix:test_outside"), None, None, None, None),
+        # A package whose name starts with the surface's: not its package.
+        ("prefix_package", scm_set(SCM_MATRIX, "pandas", "errors", "tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e_extra:test_x"), None, None, None, None),
+        # A subpackage of the surface's package: not its package.
+        ("subpackage", scm_set(SCM_MATRIX, "pandas", "errors", E2E + "pandas_e2e/sub:test_sub"), None, None, None, None),
+        # An alias in the surface's package standing for test_outside.
+        ("alias", scm_set(SCM_MATRIX, "pandas", "errors", E2E + "pandas_e2e:alias_outside"), None, None, None, None),
+        # A mojo_library of the surface's package that welds no test.
+        ("lib_no_tests", scm_set(SCM_MATRIX, "pandas", "errors", E2E + "pandas_e2e:lib_no_tests"), None, None, None, None),
+        # pandas filter's test, spelt in full, filling pandas errors as well.
+        ("shared_target", scm_set(SCM_MATRIX, "pandas", "errors", E2E + "pandas_e2e:test_filter"), None, None, None, None),
+        # A target of the surface's package that is no test.
+        ("not_test", scm_set(SCM_MATRIX, "pandas", "errors", E2E + "pandas_e2e:data.csv"), None, None, None, None),
+        # (polars, errors) has no row.
+        ("missing_pair", SCM_MATRIX[:-1], None, None, None, None),
+        # A row with an empty target (a missing cell is `-`).
+        ("empty_field", scm_set(SCM_MATRIX, "polars", "errors", ""), None, None, None, None),
+        # udf_map re-grounded in a constant no grounding file declares.
+        ("ungrounded", None, [(c, "UDF_KIND_MAPX" if c == "udf_map" else g, m) for c, g, m in SCM_CAPABILITIES], None, None, None),
+        # PLAN_CSE_REF, of the PLAN_ family, named by no capability and no row.
+        ("unclaimed", None, None, SCM_NOT_CAPABILITIES[1:], None, None),
+        # The vocabulary lists filter twice.
+        ("vocabulary_duplicate", None, SCM_CAPABILITIES + [("filter", "PLAN_FILTER", "again")], None, None, None),
+        # The floor above the three filled cells: one was emptied.
+        ("floor", None, None, None, None, SCM_FLOOR + 1),
+        # No surface: the lint checks nothing, so it fails.
+        ("empty", [], None, None, [], 0),
+    ]
+]
+
+# A PLAN_ constant in neither readable form (`comptime PLAN_ODD = 17`): a
+# finding, not a constant skipped.
+surface_capability_matrix(
+    name = "unparseable",
+    capabilities = SCM_CAPABILITIES,
+    files = SCM_FILES | {"src/plan/plan.mojo": "plan_odd.txt"},
+    floor = SCM_FLOOR,
+    grounding = SCM_GROUNDING,
+    not_capabilities = SCM_NOT_CAPABILITIES,
+    root = SCM_ROOT,
+    rows = SCM_MATRIX,
+    surfaces = SCM_SURFACES,
+)

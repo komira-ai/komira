@@ -100,7 +100,7 @@ def system_entropy[o: Origin[mut=True]](dst: Span[UInt8, o]) raises:
     # retains no reference to it. AWS-LC is thread-safe.
     var dst_ptr = _span_ptr_mut(dst)
     var rc = external_call[
-        "RAND_bytes",
+        "komira_awslc_RAND_bytes",
         Int,
         _FfiByte,
         UInt,
