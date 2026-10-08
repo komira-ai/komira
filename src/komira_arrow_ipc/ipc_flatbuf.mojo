@@ -2317,7 +2317,9 @@ def read_field[
     """Read a Field table.
 
     Reads slots 0..4 from Schema.fbs Field:
-        0: name (string offset; required)
+        0: name (string offset; optional: Schema.fbs says "Name is not
+           required (e.g., in a List)", and an absent name reads as "",
+           as Arrow C++ reads it)
         1: nullable (bool)
         2: type_type (u8 union tag)
         3: type (offset to Type variant table; required)
@@ -2330,9 +2332,9 @@ def read_field[
     DECODE-COLUMN.
     """
     var name_pos = _read_table_field_offset(reader, table_pos, 0)
-    if name_pos < 0:
-        raise Error("Field: name field missing")
-    var name = reader.read_string_at(name_pos)
+    var name = String("")
+    if name_pos >= 0:
+        name = reader.read_string_at(name_pos)
     var nullable = _read_table_field_bool(reader, table_pos, 1)
     var type_tag = _read_table_field_u8(reader, table_pos, 2)
     var type_pos = _read_table_field_offset(reader, table_pos, 3)
@@ -2628,18 +2630,25 @@ def write_record_batch(
     length: Int64,
     nodes: List[FieldNode],
     buffers: List[BufferDescriptor],
+    variadic_buffer_counts: List[Int64] = List[Int64](),
 ) raises -> Int:
-    """Write a RecordBatch table.
-
-    Minimal: no compression, no variadicBufferCounts.
+    """Write a RecordBatch table without a BodyCompression field.
 
     Fields:
         0: length: i64
         1: nodes: [FieldNode] vector offset
         2: buffers: [Buffer] vector offset
+        4: variadicBufferCounts: [i64] vector offset, written only when
+           `variadic_buffer_counts` is non-empty (one entry per
+           BinaryView / Utf8View field, in schema order, nested
+           included). Absent when empty, so a batch with no view fields
+           is byte-identical to the three-field table.
     """
     var nodes_pos = _write_field_node_vector(writer, nodes)
     var buffers_pos = _write_buffer_vector(writer, buffers)
+    var variadic_pos = -1
+    if len(variadic_buffer_counts) > 0:
+        variadic_pos = _write_i64_vector(writer, variadic_buffer_counts)
 
     # WIRE-CANONICAL: length is i64 inline (was
     # u32-truncated in v1; pyarrow read 8 bytes there and got
@@ -2648,6 +2657,8 @@ def write_record_batch(
     add_field_i64(tb, 0, length)
     add_field_offset(tb, 1, nodes_pos)
     add_field_offset(tb, 2, buffers_pos)
+    if variadic_pos >= 0:
+        add_field_offset(tb, 4, variadic_pos)
     return end_table(writer, tb^)
 
 
@@ -2685,6 +2696,7 @@ def write_record_batch_compressed(
     nodes: List[FieldNode],
     buffers: List[BufferDescriptor],
     body_compression_pos: Int,
+    variadic_buffer_counts: List[Int64] = List[Int64](),
 ) raises -> Int:
     """Write a RecordBatch table WITH a BodyCompression child reference.
 
@@ -2693,6 +2705,9 @@ def write_record_batch_compressed(
         1: nodes: [FieldNode] vector offset
         2: buffers: [Buffer] vector offset
         3: compression: BodyCompression offset
+        4: variadicBufferCounts: [i64] vector offset, written only when
+           `variadic_buffer_counts` is non-empty (as in
+           `write_record_batch`)
 
     Used by the per-buffer compression encoder path. Caller
     must call `write_body_compression` BEFORE invoking this helper
@@ -2707,12 +2722,17 @@ def write_record_batch_compressed(
     """
     var nodes_pos = _write_field_node_vector(writer, nodes)
     var buffers_pos = _write_buffer_vector(writer, buffers)
+    var variadic_pos = -1
+    if len(variadic_buffer_counts) > 0:
+        variadic_pos = _write_i64_vector(writer, variadic_buffer_counts)
 
     var tb = start_table()
     add_field_i64(tb, 0, length)
     add_field_offset(tb, 1, nodes_pos)
     add_field_offset(tb, 2, buffers_pos)
     add_field_offset(tb, 3, body_compression_pos)
+    if variadic_pos >= 0:
+        add_field_offset(tb, 4, variadic_pos)
     return end_table(writer, tb^)
 
 

@@ -5,7 +5,9 @@ Today the package holds its wire codec, the `wire` subpackage
 with CRC-32C, and the request/response message schemas, which are pure bytes
 and import nothing outside `wire`; and `produce_error`
 (`produce_error_for`), which maps a partition append's error to its Produce
-error code using `komira_objectstore`'s error classifiers.
+error code by the fixed tokens of the object store's error texts. The
+package has no dependencies: `produce_error` carries its own copies of those
+tokens.
 
 The server part (connection handling and request dispatch on top of the
 broker core) arrives later, in this same package, next to `wire`.

@@ -1,12 +1,12 @@
 # =============================================================================
-# test_resource_graph_golden_bytes.mojo: the bytes of two resource graphs,
+# test_resource_graph_golden_bytes.mojo: the bytes of six resource graphs,
 # frozen, so protoc can read them.
 # =============================================================================
 #
 # The other tests of this package hold `kci.resource.v1` to bytes written by
 # hand here and to this package's own decoder. Neither is read by anything
 # that did not come from this repository. This file freezes the bytes this
-# package's encoder writes for two composed graphs, as `.hex` fixtures; the
+# package's encoder writes for six composed graphs, as `.hex` fixtures; the
 # `resource_graph_fixtures` check in BUCK has protoc (which learned the format
 # from `resource.proto` alone) decode those bytes to the committed `.txtpb`,
 # and encode that text to the committed `.canonical.hex`. A symmetric defect,
@@ -15,7 +15,7 @@
 #
 # THE CORPUS. Each graph is authored as proto3 JSON, the form an author
 # writes and the one kci reads (`decode_json[ResourceList]`), then encoded
-# with `encode_proto`. Between them the two graphs set every field of every
+# with `encode_proto`. Between them the six graphs set every field of every
 # message of `resource.proto` at least once, to a value other than its
 # default (a field at its default is not on protoc's side of the wire, so it
 # would check nothing), and every `Resource.body` arm:
@@ -29,11 +29,31 @@
 #                   zero (presence: protoc must print it); the identity
 #                   `api` runs as; and grants between them, one on a target
 #                   and one on a cell.
-#   job_bucket_graph  a scheduled job (every `Job` field), an on-demand job
-#                   with `max_retries` set to zero (presence again), a bucket
+#   job_bucket_graph  a container job (every `ContainerJob` field, a
+#                   `command` among them), a second one with `max_retries`
+#                   set to zero (presence again), a bucket
 #                   and a table kept on delete (`Retention.KEEP`) with every
 #                   `Bucket` and `Table` field, the job's identity, and three
 #                   grants from it.
+#   messaging_graph  a queue kept on delete with every `Queue` field set (an
+#                   ack deadline, a dead-letter queue, max deliveries), its
+#                   dead-letter queue, a topic, the subscription that feeds
+#                   the queue from the topic, an identity that RECEIVEs from
+#                   the queue, and a grant that lets it SEND to the topic.
+#   secret_graph    a secret kept on delete and one deleted (`Retention`
+#                   written both ways), a service that receives both by
+#                   `SecretRef.secret` (one pinned to a version) and READs
+#                   both, an identity that may READ_WRITE one, and a grant
+#                   that lets it WRITE the other.
+#   dns_graph       a DNS zone kept on delete (every `DnsZone` field), a
+#                   service, a CNAME record that follows the service's HOST
+#                   with a TTL (every `DnsRecord` field), an MX record with
+#                   two values, and a certificate for the zone's name and
+#                   its wildcard (every `Certificate` field), deleted with
+#                   its resource.
+#   compute_graph   a worker that RECEIVEs from a queue (every `Worker`
+#                   field, a `Size` with `gpus`), the identity it runs as,
+#                   the queue, and a service with a `command` and a GPU.
 #
 # Map keys are authored in sorted order. protoc prints and re-encodes a map
 # sorted by key, and this encoder writes a map in insertion order, so a
@@ -132,13 +152,13 @@ comptime _JOB_BUCKET_GRAPH = (
     + '"partition":{"name":"digest","type":"BYTES"},'
     + '"order":{"name":"seq","type":"NUMBER"}}],'
     + '"ttlField":"expires_at"}},'
-    # The scheduled job. Every Job field is set.
+    # A container job. Every ContainerJob field is set.
     + '{"id":"nightly","retention":"DELETE",'
     + '"uses":[{"target":{"resource":"exports","standard":"NAME"},'
     + '"access":"READ_WRITE"},'
     + '{"target":{"resource":"events","standard":"ADDRESS"},"access":"READ"},'
     + '{"access":"READ","cell":"ARTIFACTS"}],'
-    + '"job":{'
+    + '"containerJob":{'
     + '"image":{"digest":"sha256:9e27b4aa","platform":"linux/arm64"},'
     + '"args":["export","--since=24h"],'
     + '"size":{"cpuMillis":4000,"memoryMb":8192},'
@@ -148,11 +168,11 @@ comptime _JOB_BUCKET_GRAPH = (
     + '"TENANT":{"param":"tenant"}},'
     + '"secretEnv":{"EXPORT_TOKEN":{"name":"export-token","version":"3"}},'
     + '"runAs":{"resource":"nightly-runner"},'
-    + '"schedule":{"cron":"0 3 * * *","timezone":"Europe/Berlin"}}},'
-    # An on-demand job that is never retried: `maxRetries` zero, present.
-    + '{"id":"reindex","retention":"DELETE","job":{'
+    + '"command":["/usr/bin/exporter","--quiet"]}},'
+    # A job that is never retried: `maxRetries` zero, present.
+    + '{"id":"reindex","retention":"DELETE","containerJob":{'
     + '"image":{"output":{"step":"build-reindex","name":"oci"}},'
-    + '"maxRetries":0,"onDemand":{},'
+    + '"maxRetries":0,'
     + '"runAs":{"resource":"nightly-runner"}}},'
     # The grants from the job's identity.
     + '{"id":"nightly-writes-exports","grant":{'
@@ -165,6 +185,89 @@ comptime _JOB_BUCKET_GRAPH = (
     + '{"id":"nightly-writes-logs","grant":{'
     + '"principal":{"resource":"nightly-runner"},'
     + '"access":"WRITE","cell":"LOGS"}}'
+    + "]}"
+)
+
+
+comptime _MESSAGING_GRAPH = (
+    '{"resource":['
+    # The receiver's identity: RECEIVE on the queue.
+    + '{"id":"rx","serviceAccount":{},'
+    + '"uses":[{"target":{"resource":"work"},"access":"RECEIVE"}]},'
+    # The dead-letter queue, then the queue. Every Queue field is set.
+    + '{"id":"dl","retention":"DELETE","queue":{}},'
+    + '{"id":"work","retention":"KEEP","queue":{"ackDeadline":"45s",'
+    + '"deadLetter":{"resource":"dl"},"maxDeliveries":7}},'
+    # The topic, and the subscription that feeds the queue from it.
+    + '{"id":"ev","retention":"DELETE","topic":{}},'
+    + '{"id":"ev-work","subscription":{"topic":{"resource":"ev"},'
+    + '"queue":{"resource":"work"}}},'
+    # A grant: the identity may SEND to the topic.
+    + '{"id":"rx-send","grant":{"principal":{"resource":"rx"},'
+    + '"target":{"resource":"ev"},"access":"SEND"}}'
+    + "]}"
+)
+
+
+comptime _SECRET_GRAPH = (
+    '{"resource":['
+    # Two secrets: one kept on delete, one deleted with its resource.
+    + '{"id":"db","retention":"KEEP","secret":{}},'
+    + '{"id":"token","retention":"DELETE","secret":{}},'
+    # A service that receives both by reference and may READ both.
+    + '{"id":"api","service":{"image":{"digest":"sha256:5ec2"},"internal":{},'
+    + '"secretEnv":{"DB_PASSWORD":{"version":"2","secret":{"resource":"db"}},'
+    + '"TOKEN":{"secret":{"resource":"token"}}}},'
+    + '"uses":[{"target":{"resource":"db"},"access":"READ"},'
+    + '{"target":{"resource":"token"},"access":"READ"}]},'
+    # The identity that rotates them: READ_WRITE one, a grant to WRITE the other.
+    + '{"id":"rotator","serviceAccount":{},'
+    + '"uses":[{"target":{"resource":"token"},"access":"READ_WRITE"}]},'
+    + '{"id":"rotator-db","grant":{"principal":{"resource":"rotator"},'
+    + '"target":{"resource":"db"},"access":"WRITE"}}'
+    + "]}"
+)
+
+
+comptime _DNS_GRAPH = (
+    '{"resource":['
+    # A zone, kept on delete.
+    + '{"id":"site","retention":"KEEP","dnsZone":{"name":"example.com"}},'
+    # The service the CNAME follows.
+    + '{"id":"api","service":{"image":{"digest":"sha256:d0e5"},"internal":{}}},'
+    # A CNAME to the service's HOST, with a TTL; an MX with two values.
+    + '{"id":"www","dnsRecord":{"name":"www.example.com","zone":{"resource":"site"},'
+    + '"type":"CNAME","values":[{"ref":{"resource":"api","standard":"HOST"}}],"ttl":"600s"}},'
+    + '{"id":"mx","dnsRecord":{"name":"example.com","zone":{"resource":"site"},"type":"MX",'
+    + '"values":[{"literal":"10 mail.example.com"},{"literal":"20 backup.example.com"}]}},'
+    # A certificate for the zone's name and its wildcard, deleted with it.
+    + '{"id":"tls","retention":"DELETE","certificate":{"domains":["example.com","*.example.com"],'
+    + '"zone":{"resource":"site"}}}'
+    + "]}"
+)
+
+
+comptime _COMPUTE_GRAPH = (
+    '{"resource":['
+    # The identity the worker runs as; the queue it receives from.
+    + '{"id":"relay-runner","serviceAccount":{},'
+    + '"uses":[{"target":{"resource":"work"},"access":"RECEIVE"}]},'
+    + '{"id":"work","queue":{}},'
+    # The worker. Every Worker field is set, and every Size field.
+    + '{"id":"relay","worker":{'
+    + '"image":{"digest":"sha256:7a11c0de","platform":"linux/amd64"},'
+    + '"size":{"cpuMillis":500,"memoryMb":1024,"gpus":1},'
+    + '"args":["--queue=work"],'
+    + '"command":["/bin/relay","--drain"],'
+    + '"env":{"MODE":{"literal":"drain"},'
+    + '"QUEUE":{"ref":{"resource":"work","standard":"ADDRESS"}}},'
+    + '"secretEnv":{"TOKEN":{"name":"relay-token"}},'
+    + '"replicas":3,'
+    + '"runAs":{"resource":"relay-runner"}}},'
+    # A service with a command of its own and two GPUs per instance.
+    + '{"id":"infer","service":{"image":{"digest":"sha256:1f2e3d4c"},'
+    + '"size":{"cpuMillis":8000,"memoryMb":32768,"gpus":2},'
+    + '"internal":{},"command":["/opt/serve","--model=/m"]}}'
     + "]}"
 )
 
@@ -372,10 +475,34 @@ def test_job_bucket_graph_bytes_are_frozen() raises:
     _assert_frozen("job_bucket_graph", _JOB_BUCKET_GRAPH, 8)
 
 
+def test_messaging_graph_bytes_are_frozen() raises:
+    _assert_frozen("messaging_graph", _MESSAGING_GRAPH, 6)
+
+
+def test_secret_graph_bytes_are_frozen() raises:
+    _assert_frozen("secret_graph", _SECRET_GRAPH, 5)
+
+
+def test_dns_graph_bytes_are_frozen() raises:
+    _assert_frozen("dns_graph", _DNS_GRAPH, 5)
+
+
+def test_compute_graph_bytes_are_frozen() raises:
+    _assert_frozen("compute_graph", _COMPUTE_GRAPH, 4)
+
+
 def main() raises:
     print("test_resource_graph_golden_bytes")
     _print_golden("service_graph", _SERVICE_GRAPH)
     _print_golden("job_bucket_graph", _JOB_BUCKET_GRAPH)
+    _print_golden("messaging_graph", _MESSAGING_GRAPH)
+    _print_golden("secret_graph", _SECRET_GRAPH)
+    _print_golden("dns_graph", _DNS_GRAPH)
+    _print_golden("compute_graph", _COMPUTE_GRAPH)
     test_service_graph_bytes_are_frozen()
     test_job_bucket_graph_bytes_are_frozen()
+    test_messaging_graph_bytes_are_frozen()
+    test_secret_graph_bytes_are_frozen()
+    test_dns_graph_bytes_are_frozen()
+    test_compute_graph_bytes_are_frozen()
     print("ALL kci.resource.v1 GRAPH GOLDEN-BYTES TESTS PASSED")

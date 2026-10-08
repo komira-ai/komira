@@ -1,0 +1,76 @@
+# The check of the coverage gate's ledger (policy.bzl, COVERAGE_NO_GATE):
+#
+#   buck2 bxl //tools/build/coverage/no_gate.bxl:check -c komira.coverage=true
+#
+# The libraries the ledger lists are those with no coverage gate of their
+# own, because the gate's directory (`:cov_gate`, which holds covcheck_bin)
+# depends on them. Queries that dependency closure
+# (configured, so covcheck_bin and, through komira_json's README, the README
+# tool are in it) for every mojo_library, and fails unless the ledger names
+# exactly those: a row whose library left the closure is stale (delete it),
+# and a library that joined it needs a row (without one, with coverage on,
+# the library would depend on its own gate's directory, and the query
+# itself fails on the cycle). Then checks that with coverage on each listed library has no
+# gate of its own, and that its gate, the target `<name>_cov_gate`, is a
+# dependency of its conda package `<name>_conda`.
+#
+# First, the ledger must be within `_CEILING`, frozen here: the ledger only
+# shrinks. A library joining covcheck's closure fails the equality above, and
+# the row it needs fails this until `_CEILING` is edited too, which a review
+# sees as letting one more library have its gate outside itself.
+# When a row goes, delete it here as well.
+
+load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_NO_GATE")
+
+_GATE_DIR = "komira//tools/build/coverage:cov_gate"
+
+_CEILING = [
+    "komira//src/komira_json:komira_json",
+    "komira//tools/build/coverage:covcheck",
+    "komira//tools/build/readme_examples:readme_examples",
+]
+
+def _check_impl(ctx):
+    grown = [k for k in sorted(COVERAGE_NO_GATE.keys()) if k not in _CEILING]
+    if grown:
+        fail("no_gate: the ledger COVERAGE_NO_GATE (tools/build/coverage/policy.bzl) only shrinks; these rows are not in its frozen list _CEILING (tools/build/coverage/no_gate.bxl): {}. Rather than add one, keep the library out of covcheck's closure".format(", ".join(grown)))
+    closure = ctx.cquery().eval("kind('^mojo_library_rule$', deps({}))".format(_GATE_DIR))
+    got = sorted([str(t.label.raw_target()) for t in closure])
+    want = sorted(COVERAGE_NO_GATE.keys())
+    stale = [w for w in want if w not in got]
+    missing = [g for g in got if g not in want]
+    if stale or missing:
+        fail("no_gate: the ledger COVERAGE_NO_GATE (tools/build/coverage/policy.bzl) must name exactly the Mojo libraries {} depends on ({}); {}{}".format(
+            _GATE_DIR,
+            ", ".join(got),
+            "rows naming no library of that closure (delete them): {}; ".format(", ".join(stale)) if stale else "",
+            "libraries of that closure with no row (give each one, with its reason): {}".format(", ".join(missing)) if missing else "",
+        ))
+    gated = []
+    for t in closure:
+        attrs = t.attrs_lazy()
+        gate = attrs.get("coverage_gate")
+        if gate != None and gate.value() != None:
+            gated.append(str(t.label.raw_target()))
+    if gated:
+        fail("no_gate: these libraries are in the ledger but have a coverage gate of their own: {}".format(", ".join(gated)))
+    # Each one's gate is `<name>_cov_gate`, and its conda package (what
+    # ships) depends on it: otherwise the gate would gate nothing.
+    shipped = []
+    for k in want:
+        pkg = k[:k.rfind(":")]
+        users = [str(t.label.raw_target()) for t in ctx.cquery().eval("rdeps({}:, {}_cov_gate, 1)".format(pkg, k))]
+        if k + "_conda" not in users:
+            fail("no_gate: {}'s gate {}_cov_gate has no conda package waiting for it ({} in its package depend on it); a library of the ledger is gated at what ships".format(k, k, ", ".join(users)))
+        shipped.append(k + "_conda")
+    ctx.output.print("no_gate: the {} libraries of the ledger are within its frozen list and exactly the Mojo libraries {} depends on ({}); none has a gate of its own; each one's `<name>_cov_gate` is waited for by its conda package ({})".format(
+        len(want),
+        _GATE_DIR,
+        ", ".join(got),
+        ", ".join(shipped),
+    ))
+
+check = bxl_main(
+    impl = _check_impl,
+    cli_args = {},
+)
