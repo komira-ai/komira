@@ -1,0 +1,31 @@
+# Symbol prefixing of the vendored C libraries (README.md): the symbol reader
+# and the scripts of the rules in defs.bzl.
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "c_exe")
+
+# elfsyms: an archive's symbol table and its members' symbols (elfsyms.c).
+c_exe(
+    name = "elfsyms",
+    exec_compatible_with = LINUX_X86_64,
+    src = "elfsyms.c",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "prefix_header.sh",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "archive_check.sh",
+    visibility = ["PUBLIC"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "archive_check.sh",
+        "prefix_header.sh",
+    ],
+)
