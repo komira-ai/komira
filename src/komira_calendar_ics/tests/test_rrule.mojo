@@ -274,6 +274,8 @@ def test_first_occurrence() raises:
     )
     _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":2}', mon, end), _on(2030, 9, 2))
     _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":1}', mon, end), _on(2030, 10, 1))
+    # The until on the 1st of the month the answer falls in: that 1st.
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":1}', mon, _day(2030, 10, 1)), _on(2030, 10, 1))
     _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, end), _on(2030, 10, 31))
     # September and November have no 31st; January 2031, four months on, does.
     _row(bad, _first('{"freq":"MONTHLY","interval":2,"monthDay":31}', mon, end), _on(2031, 1, 31))
@@ -298,6 +300,9 @@ def test_first_occurrence() raises:
         _first('{"freq":"MONTHLY","interval":1,"ordinal":1,"ordinalWeekday":"MONDAY"}', _day(2030, 6, 5), end),
         _on(2030, 7, 1),
     )
+    # The until on that 1st.
+    var first_monday = '{"freq":"MONTHLY","interval":1,"ordinal":1,"ordinalWeekday":"MONDAY"}'
+    _row(bad, _first(first_monday, _day(2030, 6, 5), _day(2030, 7, 1)), _on(2030, 7, 1))
     _row(
         bad,
         _first('{"freq":"MONTHLY","interval":1,"ordinal":4,"ordinalWeekday":"SATURDAY"}', mon, end), _on(2030, 9, 28)

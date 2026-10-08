@@ -4,7 +4,9 @@
 # clears a field, an edit whose replacement equals the series' value, a CR in
 # a description; a series whose start its rule does not pick, which the
 # export moves to its first occurrence; series that start before 1970; and
-# one with no occurrence, which the export leaves out and names.
+# one with no occurrence, which the export leaves out and names, without
+# resolving its zone, checking its edits or shifting the forms of the
+# events after it.
 #
 # Events and edits are compared as the API's JSON, and every report line as
 # exact text. Each test runs even when an earlier one fails, and the
@@ -246,6 +248,72 @@ def test_export_skips_a_series_with_no_occurrence() raises:
     assert_equal(len(write_ics(b, ZoneTable(), 1914364800).skipped), 0)
 
 
+def test_skipped_series_names_no_zone() raises:
+    # A left-out series counts toward neither the VTIMEZONEs written nor the
+    # unknown-zone refusal: its zone, unknown to an empty table, is not
+    # resolved and gets no VTIMEZONE.
+    var a = List[IcsEvent]()
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"uid":"berlin","start":"2030-09-02T09:00:00","timeZone":"Europe/Berlin","durationSeconds":60,'
+                + '"recurrence":{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2030-10-30"}}'
+            )
+        )
+    )
+    var exported = write_ics(a, ZoneTable(), 1914364800)
+    assert_equal(len(exported.skipped), 1, "skipped")
+    assert_equal(exported.skipped[0], "berlin")
+    assert_equal(exported.text.find("VTIMEZONE"), -1, exported.text)
+    assert_equal(exported.text.find("Europe/Berlin"), -1, exported.text)
+
+
+def test_skipped_series_edits_are_not_checked() raises:
+    # Edits are checked only for a series the export writes: an edit that
+    # neither cancels nor changes anything, on a left-out series, does not
+    # refuse the calendar.
+    var edits = List[OccurrenceOverride]()
+    edits.append(_ov('{"originalStart":"2030-09-02T09:00:00"}'))
+    var a = List[IcsEvent]()
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"uid":"never","start":"2030-09-02T09:00:00","timeZone":"UTC","durationSeconds":60,'
+                + '"recurrence":{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2030-10-30"}}'
+            ),
+            edits^,
+        )
+    )
+    var exported = write_ics(a, ZoneTable(), 1914364800)
+    assert_equal(len(exported.skipped), 1, "skipped")
+    assert_equal(exported.skipped[0], "never")
+    assert_equal(exported.text.find("VEVENT"), -1, exported.text)
+
+
+def test_skipped_all_day_series_before_a_timed_one() raises:
+    # A left-out all-day series, then a timed one: the timed event is
+    # written with its own form (a UTC DTSTART), not the all-day form of
+    # the series before it.
+    var a = List[IcsEvent]()
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"uid":"never","showWithoutTime":true,"startDate":"2030-09-02","days":1,'
+                + '"recurrence":{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2030-10-30"}}'
+            )
+        )
+    )
+    a.append(IcsEvent(_ev('{"uid":"timed","start":"2030-09-03T09:00:00","timeZone":"UTC","durationSeconds":60}')))
+    var exported = write_ics(a, ZoneTable(), 1914364800)
+    assert_equal(len(exported.skipped), 1, "skipped")
+    assert_equal(exported.skipped[0], "never")
+    assert_true(exported.text.find("DTSTART:20300903T090000Z") >= 0, exported.text)
+    var back = read_ics(exported.text.as_bytes(), ZoneTable())
+    assert_equal(_report(back.report), "", "report of the re-import")
+    assert_equal(len(back.events), 1)
+    assert_equal(encode_json(back.events[0].event), encode_json(a[1].event))
+
+
 def main() raises:
     print("test_round_trip_edges")
     var failed = List[String]()
@@ -284,6 +352,21 @@ def main() raises:
         print("  test_export_skips_a_series_with_no_occurrence PASS")
     except e:
         failed.append("test_export_skips_a_series_with_no_occurrence: " + String(e))
+    try:
+        test_skipped_series_names_no_zone()
+        print("  test_skipped_series_names_no_zone PASS")
+    except e:
+        failed.append("test_skipped_series_names_no_zone: " + String(e))
+    try:
+        test_skipped_series_edits_are_not_checked()
+        print("  test_skipped_series_edits_are_not_checked PASS")
+    except e:
+        failed.append("test_skipped_series_edits_are_not_checked: " + String(e))
+    try:
+        test_skipped_all_day_series_before_a_timed_one()
+        print("  test_skipped_all_day_series_before_a_timed_one PASS")
+    except e:
+        failed.append("test_skipped_all_day_series_before_a_timed_one: " + String(e))
     for f in failed:
         print("  FAIL " + f)
     assert_true(len(failed) == 0, String(len(failed)) + " tests failed")
