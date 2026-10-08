@@ -465,7 +465,7 @@ struct TlsClientStream[US: IoStream & Movable & Deinitable](
         # RETURNS the bit directly (verified against api/unstable/quic.h; there
         # is NO out-parameter). We marshal the bool return.
         var raw = self._conn._raw_conn_ptr_for_test()
-        var enabled = external_call["s2n_connection_is_quic_enabled", Bool](raw)
+        var enabled = external_call["komira_s2n_connection_is_quic_enabled", Bool](raw)
         if enabled:
             return Int32(1)
         return Int32(0)
@@ -871,7 +871,89 @@ struct TlsConnector[
         var underlying = self._underlying.connect[RT](
             reactor=reactor, ip_be=ip_be, port=port,
         )
+        return self._handshake_over[RT](
+            reactor, underlying^, port, use_session_cache=True,
+            verb="connect",
+        )
 
+    def upgrade[RT: Runtime](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        var plain: Self.U.Stream,
+    ) raises -> TlsClientStream[Self.U.Stream]:
+        """Upgrade an already-connected plaintext stream to TLS on the same
+        connection: the STARTTLS entry point (RFC 3207 for SMTP; the same
+        shape serves IMAP, POP3 and LDAP).
+
+        The caller has spoken the plaintext protocol on `plain` up to the
+        server's go-ahead (SMTP `220 Ready to start TLS`) and hands the
+        stream over. This method runs the client handshake on the stream's
+        descriptor exactly as `connect` does after its dial, and returns the
+        TLS stream, which owns `plain`.
+
+        Refuses, and closes the connection (by dropping `plain`), when
+        `plain.has_buffered_readable()` is True: the stream holds bytes the
+        peer sent before the handshake, which a reader took off the socket
+        and handed back with `unread`. Those bytes are plaintext an on-path
+        attacker can inject after the go-ahead (the STARTTLS
+        command-injection class); they are never handed to the TLS layer
+        and never served after it. A caller whose own reader holds bytes
+        past the go-ahead line must `unread` them before calling this, so
+        the refusal sees them.
+
+        Bytes the peer sent that are still in the kernel socket buffer are
+        read by s2n as TLS records. A non-TLS byte sequence fails the
+        handshake, or runs into the wall-clock deadline when its bogus
+        record header announces more bytes than arrive. A well-formed
+        record of a type s2n does not handle during the handshake is
+        discarded and the handshake goes on, so the upgrade can succeed.
+        Either way none of those bytes is ever served as application data.
+
+        No session ticket is looked up or stored: the session cache is keyed
+        for HTTPS dials.
+
+        Preconditions: the caller holds no reactor registration on the
+        stream's descriptor (the handshake loop registers and deregisters
+        its own each round). The server name rule is that of `connect`: a
+        VERIFY_PEER connector with no server name is refused.
+
+        Raises:
+          * `TlsConnector.upgrade: refusing the TLS upgrade ...` for
+            buffered pre-handshake bytes.
+          * `TlsConnector: refusing VERIFY_PEER connect with an empty
+            server name ...`, `connect`'s server-name refusal unchanged.
+          * Handshake failures, the wall-clock deadline and the no-descriptor
+            refusal, with the `TlsConnector.upgrade:` prefix.
+          * Errors from creating, binding or naming the s2n connection,
+            with their own prefixes.
+        """
+        self._refuse_unverifiable_peer()
+        if plain.has_buffered_readable():
+            raise Error(
+                "TlsConnector.upgrade: refusing the TLS upgrade: the"
+                " plaintext stream holds bytes the peer sent before the"
+                " TLS handshake. They are not handed to TLS and not served"
+                " after it; the connection is closed."
+            )
+        return self._handshake_over[RT](
+            reactor, plain^, UInt16(0), use_session_cache=False,
+            verb="upgrade",
+        )
+
+    def _handshake_over[RT: Runtime](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        var underlying: Self.U.Stream,
+        port: UInt16,
+        use_session_cache: Bool,
+        verb: StaticString,
+    ) raises -> TlsClientStream[Self.U.Stream]:
+        """Steps 2-5 of `connect`, shared with `upgrade`: bind a client TLS
+        connection to `underlying`'s descriptor, drive the handshake to DONE
+        within the wall-clock budget, and wrap. `port` keys the session
+        cache and is read only when `use_session_cache`; `verb` names the
+        public entry point in the handshake, deadline and no-descriptor
+        error messages."""
         # Step 2: client-mode TLS connection bound to the underlying fd.
         # SAFETY: ref borrow into self._config — alive for the duration
         # of this method (we hold mut self). new_client + bind_fd happen
@@ -881,7 +963,7 @@ struct TlsConnector[
         # never allocates an s2n connection it is only going to throw away.
         # Same discipline as step 1 above, where a refused underlying dial
         # returns before any TLS object exists.
-        var fd = Self._extract_fd(underlying)
+        var fd = Self._extract_fd(underlying, verb)
         var conn = TlsConnection.new_client(self._config[])
         conn.bind_fd(fd)
 
@@ -904,7 +986,7 @@ struct TlsConnector[
         # Best-effort: if SNI is empty (e.g. IP-literal dial without
         # explicit set_server_name_for_next_connect), we skip cache
         # lookup entirely (no cache key to derive).
-        if self._server_name.byte_length() > 0:
+        if use_session_cache and self._server_name.byte_length() > 0:
             var lookup_key = PoolKey(
                 scheme=SCHEME_HTTPS,
                 host=self._server_name,
@@ -986,7 +1068,7 @@ struct TlsConnector[
                 # is_session_resumed BEFORE moving conn into the stream
                 # (the connection is still owned by us here).
                 var resumed = conn.is_session_resumed()
-                if self._server_name.byte_length() > 0:
+                if use_session_cache and self._server_name.byte_length() > 0:
                     try:
                         var ticket_opt = conn.get_session()
                         if ticket_opt.__bool__():
@@ -1038,7 +1120,8 @@ struct TlsConnector[
                 var dbg = s2n_strerror_debug_message(errno)
                 var last_msg = conn.last_handshake_message_name()
                 raise Error(
-                    "TlsConnector.connect: handshake failed (s2n_errno="
+                    "TlsConnector." + String(verb)
+                    + ": handshake failed (s2n_errno="
                     + String(Int(errno)) + ", msg='" + msg
                     + "', debug='" + dbg
                     + "', last_handshake_msg='" + last_msg + "')"
@@ -1051,7 +1134,7 @@ struct TlsConnector[
             if elapsed_us >= deadline_us:
                 raise self._handshake_deadline_error(
                     elapsed_us, deadline_us, parks, idle_slices,
-                    blocked_on_write,
+                    blocked_on_write, verb,
                 )
             if fd < Int32(0):
                 # ⚠ UNREACHABLE VIA `connect` — `_extract_fd`
@@ -1072,7 +1155,7 @@ struct TlsConnector[
                 if no_fd_iters >= _HANDSHAKE_NO_FD_ITER_CAP:
                     raise self._handshake_deadline_error(
                         elapsed_us, deadline_us, parks, idle_slices,
-                        blocked_on_write,
+                        blocked_on_write, verb,
                     )
                 continue
 
@@ -1125,6 +1208,7 @@ struct TlsConnector[
         parks: Int,
         idle_slices: Int,
         blocked_on_write: Bool,
+        verb: StaticString,
     ) -> Error:
         """The give-up error, carrying the evidence needed to tell the two
         causes apart WITHOUT a rebuild.
@@ -1152,7 +1236,7 @@ struct TlsConnector[
             String("WRITE") if blocked_on_write else String("READ")
         )
         return Error(
-            "TlsConnector.connect: TLS handshake to '" + host
+            "TlsConnector." + String(verb) + ": TLS handshake to '" + host
             + "' did not complete within its wall-clock budget — elapsed_ms="
             + String(elapsed_us // Int64(1000))
             + ", deadline_ms=" + String(deadline_us // Int64(1000))
@@ -1187,7 +1271,9 @@ struct TlsConnector[
 
     @staticmethod
     @always_inline
-    def _extract_fd(ref stream: Self.U.Stream) raises -> Int32:
+    def _extract_fd(
+        ref stream: Self.U.Stream, verb: StaticString,
+    ) raises -> Int32:
         """Extract the underlying fd from the IoStream, REFUSING one that is
         not a descriptor.
 
@@ -1219,7 +1305,8 @@ struct TlsConnector[
         var fd = stream.fd()
         if fd < Int32(0):
             raise Error(
-                "TlsConnector.connect: the underlying stream has no kernel"
+                "TlsConnector." + String(verb)
+                + ": the underlying stream has no kernel"
                 " descriptor (fd=" + String(Int(fd)) + "), so there is nothing"
                 " for s2n to bind a TLS connection to. This is the"
                 " `IoStream.fd` contract's -1 sentinel, not an I/O failure:"
@@ -1261,6 +1348,25 @@ struct TlsConnector[
 # UnsafePointer / wildcard origin / unsafe_from_address crosses this boundary.
 
 
+def default_client_tls_config(alpn_h2: Bool = False) raises -> TlsConfig:
+    """The client TLS configuration both public-CA connectors build on:
+    the `"default_tls13"` security policy (TLS 1.3 and 1.2 offered; a fresh
+    s2n config offers TLS 1.2 only, which a TLS 1.3-only server refuses
+    before ServerHello), ALPN `["http/1.1"]` or `["h2", "http/1.1"]`, and
+    peer verification on. The trust store is s2n's default; a caller that
+    pins a CA wipes it and adds its own.
+    """
+    var config = TlsConfig()
+    config.set_cipher_preferences(String("default_tls13"))
+    var alpn = List[String]()
+    if alpn_h2:
+        alpn.append(String("h2"))
+    alpn.append(String("http/1.1"))
+    config.set_alpn_protocols(alpn)
+    config.enable_verify_default()
+    return config^
+
+
 def build_public_ca_tls_connector(
     server_name: String, alpn_h2: Bool = False,
 ) raises -> TlsConnector[KernelTcpConnector]:
@@ -1288,13 +1394,7 @@ def build_public_ca_tls_connector(
 
     Raises on any s2n FFI configuration failure.
     """
-    var config = TlsConfig()
-    config.set_cipher_preferences(String("default_tls13"))
-    var alpn = List[String]()
-    if alpn_h2:
-        alpn.append(String("h2"))
-    alpn.append(String("http/1.1"))
-    config.set_alpn_protocols(alpn)
+    var config = default_client_tls_config(alpn_h2)
     # PUBLIC-CA TRUST: keep s2n's default OS trust store (do NOT wipe_trust /
     # add_trust_pem) and keep verification ON. enable_verify_default() is the
     # documented no-op that marks the verify-peer intent at the call site.
@@ -1343,13 +1443,7 @@ def build_unpinned_public_ca_tls_connector(
     connector is UNPINNED and `set_dial_host` fills it per request.
 
     Raises on any s2n FFI configuration failure."""
-    var config = TlsConfig()
-    config.set_cipher_preferences(String("default_tls13"))
-    var alpn = List[String]()
-    if alpn_h2:
-        alpn.append(String("h2"))
-    alpn.append(String("http/1.1"))
-    config.set_alpn_protocols(alpn)
+    var config = default_client_tls_config(alpn_h2)
     config.enable_verify_default()
 
     # ⛔ NO `set_server_name_for_next_connect` HERE. Adding one "for safety"

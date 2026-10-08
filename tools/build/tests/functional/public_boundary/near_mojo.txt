@@ -1,0 +1,13 @@
+"""Near misses in code: hex outside prose is not read for commit ids.
+
+A docstring is prose; these are digests: 3243f6a8... and d7a8fbb3…
+"""
+
+comptime PIN = pin_of(9f8e7d6c5b)
+var s = "a # 9f8e7d6c5b"
+var t = "b" + "c # 1a2b3c4d5e"
+
+
+def f():
+    """One line docstring with no hex."""
+    return h(1a2b3c4d5e)  # a trailing comment with none
