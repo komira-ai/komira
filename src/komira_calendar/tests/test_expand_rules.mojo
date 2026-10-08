@@ -69,21 +69,23 @@ def _timed(start: String, duration: Int, recurrence: String, exdates: String = "
     return decode_json[Event](text + "}")
 
 
-def _all_day(start_date: String, days: Int, recurrence: String) raises -> Event:
-    return decode_json[Event](
+def _all_day(start_date: String, days: Int, recurrence: String, exdates: String = "") raises -> Event:
+    var text = (
         '{"title":"d","showWithoutTime":true,"startDate":"'
         + start_date
         + '","days":'
         + String(days)
         + ',"recurrence":'
         + recurrence
-        + "}"
     )
+    if exdates.byte_length() > 0:
+        text += ',"exdates":' + exdates
+    return decode_json[Event](text + "}")
 
 
 # Wide enough for every finite series below.
 def _everything(e: Event) raises -> List[Occurrence]:
-    return expand(e, _at("2026-01-01T00:00:00"), _at("2040-01-01T00:00:00"))
+    return expand(e, _at("2026-10-01T00:00:00"), _at("2040-01-01T00:00:00"))
 
 
 def test_last_friday() raises:
@@ -198,6 +200,45 @@ def test_window_reaches_back_by_the_length() raises:
     )
 
 
+def test_window_reaches_back_overnight() raises:
+    # Catches the window search's margin dropped: a 23:00 occurrence lasting
+    # two hours runs into the next day, so the day before the window's own
+    # day must be searched even though the length is under one day.
+    var e = _timed("2026-11-02T23:00:00", 7200, '{"freq":"DAILY","interval":1}')
+    assert_equal(_starts(expand(e, _at("2026-11-20T00:00:00"), _at("2026-11-20T00:30:00"))), "2026-11-19T23:00:00")
+    assert_equal(_starts(expand(e, _at("2026-11-20T00:30:00"), _at("2026-11-20T01:00:00"))), "2026-11-19T23:00:00")
+
+
+def test_far_window_keeps_the_interval() raises:
+    # Catches the window search ignoring the interval, for each frequency:
+    # an open series with interval above 1, queried several periods out.
+    # Every third day from Monday 2026-11-02: day 27 is 11-29, day 30 is 12-02.
+    var daily = _timed("2026-11-02T09:00:00", 600, '{"freq":"DAILY","interval":3}')
+    assert_equal(_starts(expand(daily, _at("2026-12-01T00:00:00"), _at("2026-12-03T00:00:00"))), "2026-12-02T09:00:00")
+    # 2027-03-01 is 119 days (17 weeks) after 2026-11-02, an odd week: off.
+    var fortnightly = _timed("2026-11-02T09:00:00", 600, '{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}')
+    assert_equal(
+        _starts(expand(fortnightly, _at("2027-03-01T00:00:00"), _at("2027-03-15T00:00:00"))), "2027-03-08T09:00:00"
+    )
+    # Every third month from November: February, May, August.
+    var quarterly = _timed("2026-11-15T09:00:00", 600, '{"freq":"MONTHLY","interval":3,"monthDay":15}')
+    assert_equal(
+        _starts(expand(quarterly, _at("2027-08-01T00:00:00"), _at("2027-09-01T00:00:00"))), "2027-08-15T09:00:00"
+    )
+    # Every second year from 2026: 2028, 2030, 2032.
+    var biennial = _all_day("2026-12-24", 1, '{"freq":"YEARLY","interval":2}')
+    assert_equal(
+        _starts(expand(biennial, _at("2032-12-01T00:00:00"), _at("2033-01-01T00:00:00"))), "2032-12-24T00:00:00"
+    )
+    assert_equal(len(expand(biennial, _at("2031-12-01T00:00:00"), _at("2032-01-01T00:00:00"))), 0)
+
+
+def test_all_day_exdates() raises:
+    # Catches an all-day exdate read as anything but the date's midnight.
+    var e = _all_day("2026-12-24", 1, '{"freq":"DAILY","interval":1,"count":3}', '["2026-12-25"]')
+    assert_equal(_starts(_everything(e)), "2026-12-24T00:00:00 2026-12-26T00:00:00")
+
+
 def test_single_event() raises:
     var e = _timed("2026-11-02T09:00:00", 3600, "")
     assert_equal(_starts(expand(e, _at("2026-11-02T09:59:59"), _at("2026-11-03T00:00:00"))), "2026-11-02T09:00:00")
@@ -264,6 +305,10 @@ def test_series_span() raises:
     assert_true(_span(single) == SeriesSpan(_at("2026-12-24T00:00:00"), _at("2026-12-26T00:00:00")))
     var one_off = _timed("2026-11-02T09:00:00", 3600, "")
     assert_true(_span(one_off) == SeriesSpan(_at("2026-11-02T09:00:00"), _at("2026-11-02T10:00:00")))
+    # A yearly until: the search back starts in the until's year, so the
+    # last occurrence is 2029, not the first one.
+    var yearly = _all_day("2026-12-24", 1, '{"freq":"YEARLY","interval":1,"until":"2030-01-01"}')
+    assert_true(_span(yearly) == SeriesSpan(_at("2026-12-24T00:00:00"), _at("2029-12-25T00:00:00")))
 
 
 def _refuses(e: Event, window_start: Int, window_end: Int, message: String) raises:
@@ -319,6 +364,9 @@ def main() raises:
     test_all_day_occurrences()
     test_window_on_an_open_series()
     test_window_reaches_back_by_the_length()
+    test_window_reaches_back_overnight()
+    test_far_window_keeps_the_interval()
+    test_all_day_exdates()
     test_single_event()
     test_series_span()
     test_refusals()
