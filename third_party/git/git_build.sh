@@ -191,10 +191,24 @@ git_() {
     mkdir -p "$OUT/share/licenses/git"
     cp "$g/COPYING" "$g/LGPL-2.1" "$OUT/share/licenses/git/"
     cp -a "$D/share/licenses/." "$OUT/share/licenses/"
+    # The NOTICE says which file says each licence; the build refuses the
+    # NOTICE if that file does not hold the sentence (with runs of blanks
+    # and newlines read as one space; grep without -q reads all its input,
+    # so tr is never cut off by SIGPIPE under pipefail).
+    says() {
+        tr -s ' \t\n' '   ' <"$g/$1" | grep -F "$2" >/dev/null || {
+            echo "git_build: git's $1 does not say: $2" >&2
+            exit 2
+        }
+    }
+    says README.md "some parts of it are under different licenses, compatible with the GPLv2"
+    says compat/regex/regex.c "under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version."
     cat >"$OUT/share/licenses/NOTICE" <<'EOF'
 This directory is git, built from its release source archive. git is
-GPL-2.0-only (git/COPYING); some parts of it, compat/regex among them,
-are LGPL-2.1 (git/LGPL-2.1), as git's README.md says.
+GPL-2.0-only (git/COPYING); git's README.md says some parts of it are
+under different licences, compatible with GPLv2. compat/regex is
+LGPL-2.1-or-later (git/LGPL-2.1), as the header of compat/regex/regex.c
+says.
 
 bin/git and the programs of libexec/git-core also hold, linked statically:
   zlib       Zlib (zlib/LICENSE)

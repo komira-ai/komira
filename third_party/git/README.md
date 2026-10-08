@@ -130,6 +130,7 @@ defect:
 | `curl_config.h` with proxy support, a TLS backend, or no HTTP | `--disable-proxy` dropped: `git_build: libcurl was configured with proxy support` |
 | an installed file naming the action's scratch directory | the `#!` rewrite skipped: `git_build: these files name the build's scratch directory: .../templates/hooks/post-update.sample` |
 | an installed file naming a path under the action's directory | `CC_LD_DYNPATH=` dropped: `git_build: these files name the build's scratch directory: /worker/build/<id>/root/.../git/bin/git`, then `bin/git-upload-pack`, `bin/scalar` and the other programs (the run path to `:deps`) |
+| a `NOTICE` citing a file of git's source for a licence sentence that file does not hold (`README.md` for the general statement, `compat/regex/regex.c` for LGPL-2.1-or-later) | the regex.c sentence looked for in `README.md` (the citation an earlier `NOTICE` made): `git_build: git's README.md does not say: under the terms of the GNU Lesser General Public License ...` |
 | `bin/git`, `git-remote-http`, `git-upload-pack` or `git-receive-pack` not installed | `NO_CURL`: `git_build: libexec/git-core/git-remote-http was not installed`; `SKIP_DASHED_BUILT_INS`: the same for `git-upload-pack` |
 
 git-lfs runs `git` from `PATH` (`git version`, `git rev-parse`, `git
@@ -140,7 +141,8 @@ git-lfs finds the distribution's git through the exec path git puts first.
 
 ## Licences
 
-git is GPL-2.0-only, with parts under LGPL-2.1; curl is under the curl
+git is GPL-2.0-only, with parts under other GPLv2-compatible licences
+(compat/regex is LGPL-2.1-or-later, as its header says); curl is under the curl
 licence and zlib under the zlib licence; GNU make (GPL-3.0-or-later) only
 builds and is not in the distribution. As with kcov, the repository holds
 only the recipe: the sources are fetched by their pinned hashes and built on
