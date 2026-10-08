@@ -122,7 +122,7 @@ def p256_ecdh_shared_x(
         # EC_KEY_set_private_key copies the scalar and returns 0 when it is
         # zero or not below the group order n; priv_bn stays ours.
         var rc_priv = external_call[
-            "EC_KEY_set_private_key", Int32,
+            "komira_awslc_EC_KEY_set_private_key", Int32,
             _FfiHandle,  # eckey
             _FfiHandle,  # priv (const BIGNUM*)
         ](eckey, priv_bn)
@@ -131,7 +131,7 @@ def p256_ecdh_shared_x(
 
         # SAFETY: group is borrowed from eckey, which outlives this call.
         peer_pt = external_call[
-            "EC_POINT_new", _FfiHandle,
+            "komira_awslc_EC_POINT_new", _FfiHandle,
             _FfiHandle,  # group
         ](group)
         if Int(peer_pt) == 0:
@@ -147,7 +147,7 @@ def p256_ecdh_shared_x(
         # must be 1 or 33) returns 0 and leaves peer_pt untouched.
         var peer_ptr = _span_ptr_mut(peer_uncompressed)
         var rc_oct = external_call[
-            "EC_POINT_oct2point", Int32,
+            "komira_awslc_EC_POINT_oct2point", Int32,
             _FfiHandle,  # group
             _FfiHandle,  # point (out)
             _FfiByte,    # buf
@@ -159,7 +159,7 @@ def p256_ecdh_shared_x(
 
         # SAFETY: group is borrowed from eckey.
         shared_pt = external_call[
-            "EC_POINT_new", _FfiHandle,
+            "komira_awslc_EC_POINT_new", _FfiHandle,
             _FfiHandle,  # group
         ](group)
         if Int(shared_pt) == 0:
@@ -169,7 +169,7 @@ def p256_ecdh_shared_x(
         # n = NULL selects r = m*q, AWS-LC's constant-time variable-point
         # multiply. Every handle is live and owned (or borrowed) above.
         var rc_mul = external_call[
-            "EC_POINT_mul", Int32,
+            "komira_awslc_EC_POINT_mul", Int32,
             _FfiHandle,  # group
             _FfiHandle,  # r (out)
             _FfiHandle,  # n (NULL)
@@ -189,7 +189,7 @@ def p256_ecdh_shared_x(
         # unreachable here.
         var raw_ptr = _inline65_ptr_mut(raw65)
         var n_written = external_call[
-            "EC_POINT_point2oct", UInt,
+            "komira_awslc_EC_POINT_point2oct", UInt,
             _FfiHandle,  # group
             _FfiHandle,  # point
             Int32,       # form
@@ -212,11 +212,11 @@ def p256_ecdh_shared_x(
         # SAFETY: each handle is NULL or was allocated above and is freed
         # exactly once here; the guarded calls skip NULL.
         if Int(shared_pt) != 0:
-            external_call["EC_POINT_clear_free", NoneType, _FfiHandle](
+            external_call["komira_awslc_EC_POINT_clear_free", NoneType, _FfiHandle](
                 shared_pt
             )
         if Int(peer_pt) != 0:
-            external_call["EC_POINT_free", NoneType, _FfiHandle](peer_pt)
+            external_call["komira_awslc_EC_POINT_free", NoneType, _FfiHandle](peer_pt)
         if Int(priv_bn) != 0:
-            external_call["BN_clear_free", NoneType, _FfiHandle](priv_bn)
+            external_call["komira_awslc_BN_clear_free", NoneType, _FfiHandle](priv_bn)
         _ec_key_free(eckey)
