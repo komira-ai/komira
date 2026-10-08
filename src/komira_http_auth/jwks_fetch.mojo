@@ -11,8 +11,15 @@
 #   * the URL must be `https://` and is re-checked before any dial, so a
 #     fetcher can never be pointed at plain HTTP whatever its caller did;
 #   * the TLS connector comes from an injectable factory; the default is
-#     `default_tls_factory` (peer verification against the public CA store,
-#     SNI = the host);
+#     `default_tls_factory` (peer verification against the TLS library's
+#     default trust store, SNI = the host). That trust store is found
+#     through the TLS library's default verify paths, which honour the
+#     `SSL_CERT_FILE` and `SSL_CERT_DIR` environment variables: whoever sets
+#     those for the process chooses which CAs may vouch for the JWKS host.
+#     This is the one environment input on this path, and it is the TLS
+#     library's, not a configuration flag of this package. That the default
+#     constructor uses `default_tls_factory` is checked by review, not by a
+#     test (a test cannot dial the public internet);
 #   * redirects are not followed (a 3xx is a failed fetch);
 #   * the response body is capped at komira_crypto's RS256_MAX_JWKS_BYTES
 #     (256 KiB) and the round trip at the configured timeout, because the

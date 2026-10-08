@@ -15,6 +15,16 @@ Bearer-JWT authentication for `komira_http_server`.
    subject `sub`, claims `iss`, `aud` (our audience) and each `--copy-claim`.
    The principal is replaced, never merged with an earlier one.
 
+**Authentication is not authorization.** For Google service-account ID tokens,
+a token that passes every check here proves only that SOME Google service
+account asked for a token with your audience. The audience is any string the
+requester chooses, so it is not a secret: anyone can create a service account in
+their own project and get an ID token for `https://api.example.com/`, and that
+token is accepted here. The embedder MUST then authorize the principal against an
+allowlist, by `sub` (the account's stable numeric id) or by the `email` claim
+together with `email_verified` being `true` (copy both with `--copy-claim`). Do
+not treat "a principal is set" as "the caller is allowed".
+
 The 401 body is fixed text. No response carries any part of the token, and the
 middleware logs nothing. `last_reason()` returns the reason code of the last
 decision (`reasons.mojo`), which is safe to log.
@@ -29,14 +39,17 @@ service-account ID tokens. It checks each token in this order:
   - a `jwk`, `jku`, `x5u` or `x5c` member;
   - any `crit` member;
   - a `typ` other than the accepted one;
-  - a missing `kid`;
+  - a missing `kid`, or one that is not printable ASCII;
   - a repeated JSON key;
   - padded or malformed segments.
 - **Keys**, from the issuer's JWK Set, fetched over HTTPS:
   - freshness follows `Cache-Control: max-age`, with a default of 300 s;
   - an unknown `kid` causes at most one refetch per 60 s window and is then
     refused;
-  - a document that does not parse whole never replaces the current keys.
+  - a document that does not parse whole, or that publishes one `kid` twice,
+    never replaces the current keys;
+  - when a refresh fails, the last good keys stay in use with no age limit
+    (an open policy question: see `jwks_cache.mojo`).
 - **Signature**, checked by `komira_crypto`'s `verify_rs256_jws`. This package
   adds no RS256 verifier of its own.
 - **Claims**:
@@ -53,7 +66,9 @@ planned for a later release.
 
 ## Flags
 
-All flags use the form `--name=value`. Nothing is read from the environment.
+All flags use the form `--name=value`. No setting of this package is read from
+the environment. The TLS library's default trust store, used for the JWKS
+fetch, does honour `SSL_CERT_FILE` and `SSL_CERT_DIR`.
 
 | flag | meaning |
 |---|---|
@@ -86,6 +101,7 @@ args.append("--issuer=https://accounts.google.com")
 args.append("--audience=https://api.example.com/")
 args.append("--jwks-url=https://www.googleapis.com/oauth2/v3/certs")
 args.append("--copy-claim=email")
+args.append("--copy-claim=email_verified")
 var config = parse_bearer_jwt_flags(args)
 
 var verifier = ExampleVerifier(config, ScriptedJwksFetcher(), FixedAuthClock(1800000000))

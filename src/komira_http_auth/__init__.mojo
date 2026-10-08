@@ -8,6 +8,13 @@ and either sets `ctx.principal` (scheme "jwt") or answers 401 with an RFC 6750
 service-account ID tokens) checked against that issuer's JWK Set, which it
 fetches over HTTPS and caches.
 
+AUTHENTICATION IS NOT AUTHORIZATION. A Google service-account ID token that
+passes every check proves only that SOME service account asked for a token
+with our audience, and the audience is not a secret: anyone can mint such a
+token from their own project. The embedder must authorize the principal
+against an allowlist, by `sub` (the stable numeric id) or by `email` together
+with `email_verified` (both copied with --copy-claim).
+
 Modules:
   - middleware.mojo : `BearerJwtMiddleware`, the Authorization header parse,
                       the 401 responses.
