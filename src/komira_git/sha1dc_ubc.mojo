@@ -65,6 +65,10 @@ from std.builtin.globals import global_constant
 comptime _DV_COUNT: Int = 32
 """The number of disturbance vectors sha1dc checks."""
 
+comptime _ALL_DVS: UInt32 = UInt32((1 << _DV_COUNT) - 1)
+"""The ubc mask with every DV's bit set: the mask checked when the filter is
+off."""
+
 # Bit i of a ubc mask is DV i (upstream's DV_<type>_<K>_<b>_bit).
 comptime _DV_I_43_0: UInt32 = 1 << 0
 comptime _DV_I_44_0: UInt32 = 1 << 1

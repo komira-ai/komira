@@ -10,6 +10,9 @@
 #     the 80 words of a DV's message difference that differs from upstream's
 #     table (komira_git keeps the first 16 and expands them with its own
 #     `_expand`, so this also checks that expansion).
+#     It also checks that `_ALL_DVS`, the mask sha1dc checks with the
+#     filter off, is the OR of every DV's upstream mask bit, so a filter-off
+#     mask that drops a DV is caught.
 #   * test_ubc_random_words: any statement of `_ubc_check` that disagrees
 #     with upstream's `ubc_check`. The input is 80 arbitrary words (the
 #     check reads them as given, expanded or not), 2^20 of them, four words
@@ -25,7 +28,7 @@ from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
 from komira_git.sha1dc import _expand
-from komira_git.sha1dc_ubc import _DV_COUNT, _dv_field, _dv_word, _ubc_check
+from komira_git.sha1dc_ubc import _ALL_DVS, _DV_COUNT, _dv_field, _dv_word, _ubc_check
 
 from komira_git_conformance import c_dv_count, c_dv_field, c_dv_word, c_ubc_check
 
@@ -43,6 +46,7 @@ struct _Rng(Movable):
 
 def test_dv_table() raises:
     assert_equal(c_dv_count(), _DV_COUNT)
+    var all_bits: UInt32 = 0
     for dv in range(_DV_COUNT):
         for f in range(4):
             assert_equal(
@@ -52,6 +56,7 @@ def test_dv_table() raises:
             )
         assert_equal(c_dv_field(dv, 4), 0, "maski of DV " + String(dv))
         assert_equal(c_dv_field(dv, 5), dv, "maskb of DV " + String(dv))
+        all_bits |= UInt32(1) << UInt32(c_dv_field(dv, 5))
         var dm = InlineArray[UInt32, 80](fill=0)
         for t in range(16):
             dm[t] = _dv_word(dv, t)
@@ -60,6 +65,8 @@ def test_dv_table() raises:
             assert_equal(
                 dm[t], c_dv_word(dv, t), "DV " + String(dv) + " dm[" + String(t) + "]"
             )
+    assert_equal(all_bits, UInt32(0xFFFFFFFF))
+    assert_equal(_ALL_DVS, all_bits, "the filter-off mask")
 
 
 def test_ubc_random_words() raises:

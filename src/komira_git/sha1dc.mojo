@@ -62,7 +62,7 @@
 #   USE OR OTHER DEALINGS IN THE SOFTWARE.
 # =============================================================================
 
-from .sha1dc_ubc import _DV_COUNT, _dv_field, _dv_word, _ubc_check
+from .sha1dc_ubc import _ALL_DVS, _DV_COUNT, _dv_field, _dv_word, _ubc_check
 
 comptime OBJECT_ID_COLLISION: StaticString = "komira_git: ObjectIdCollision: "
 """The prefix of the error raised when SHA-1 collision detection fires; test
@@ -387,7 +387,7 @@ struct Sha1dc(Copyable, Movable):
         _compress_states(self._ihv, w, s58, s65)
         if not self._detect:
             return
-        var mask: UInt32 = 0xFFFFFFFF
+        var mask = _ALL_DVS
         if self._use_ubc:
             mask = _ubc_check(w)
         if mask == 0:

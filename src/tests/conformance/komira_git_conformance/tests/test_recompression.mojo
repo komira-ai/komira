@@ -23,6 +23,14 @@
 #     which is why the cases are chosen by highest bit. A missed detection
 #     itself (the final comparison) is pinned by test_digests on the
 #     SHAttered PDFs, through DV 27 only.
+#   * test_filter_off_checks_every_dv: with the filter off on both sides
+#     (`set_use_ubc(False)`), upstream recompresses every DV for every
+#     block, so its last is DV 31 whatever the block. Random two-block
+#     inputs must leave the same m2 and ihv2 on both sides, and upstream's
+#     m2 must be DV 31's. It catches a filter-off mask that leaves out
+#     DV 31 (one that leaves out another DV is caught by test_dv_table's
+#     check of `_ALL_DVS`), and a filter-off path that still applies the
+#     filter.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -35,6 +43,7 @@ from komira_git_conformance import CSha1dc, c_dv_word, c_ubc_check
 
 comptime _CASES_PER_DV = 2
 comptime _MAX_TRIALS = 1 << 22
+comptime _FILTER_OFF_CASES = 16
 
 
 struct _Rng(Movable):
@@ -64,15 +73,21 @@ def _put_word(mut data: List[UInt8], pos: Int, v: UInt32):
 
 
 def _check_case(
-    mut rng: _Rng, w: InlineArray[UInt32, 80], dv: Int, what: String
+    mut rng: _Rng,
+    w: InlineArray[UInt32, 80],
+    dv: Int,
+    use_ubc: Bool,
+    what: String,
 ) raises:
     var data = List[UInt8](length=128, fill=0)
     for t in range(16):
         _put_word(data, 4 * t, rng.next())
         _put_word(data, 64 + 4 * t, w[t])
     var ours = Sha1dc()
+    ours.set_use_ubc(use_ubc)
     ours.update(Span(data))
     var theirs = CSha1dc()
+    theirs.set_use_ubc(use_ubc)
     theirs.update(Span(data))
     var ihv2 = InlineArray[UInt32, 5](fill=0)
     var m2 = InlineArray[UInt32, 80](fill=0)
@@ -112,7 +127,11 @@ def test_last_dv_every_dv() raises:
         if hits[dv] == _CASES_PER_DV:
             covered += 1
         _check_case(
-            rng, w, dv, "DV " + String(dv) + ", trial " + String(trial)
+            rng,
+            w,
+            dv,
+            True,
+            "DV " + String(dv) + ", trial " + String(trial),
         )
     for dv in range(_DV_COUNT):
         assert_equal(
@@ -123,6 +142,19 @@ def test_last_dv_every_dv() raises:
     assert_true(covered == _DV_COUNT)
 
 
+def test_filter_off_checks_every_dv() raises:
+    var rng = _Rng(0x0FF0FF0F)
+    var w = InlineArray[UInt32, 80](fill=0)
+    for n in range(_FILTER_OFF_CASES):
+        for t in range(16):
+            w[t] = rng.next()
+        _expand(w)
+        _check_case(
+            rng, w, _DV_COUNT - 1, False, "filter off, case " + String(n)
+        )
+
+
 def main() raises:
     test_last_dv_every_dv()
+    test_filter_off_checks_every_dv()
     print("komira_git_conformance recompression tests passed")
