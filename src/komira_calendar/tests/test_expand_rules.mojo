@@ -186,6 +186,26 @@ def test_window_on_an_open_series() raises:
     # of a recurring occurrence's overlap test taken as `>=`.
     var hour = _timed("2026-11-02T09:00:00", 3600, '{"freq":"DAILY","interval":1}')
     assert_equal(len(expand(hour, _at("2026-11-20T10:00:00"), _at("2026-11-20T11:00:00"))), 0)
+    # One ending a second after the window's start is in. Catches that end
+    # edge moved one second later.
+    assert_equal(
+        _starts(expand(hour, _at("2026-11-20T09:59:59"), _at("2026-11-20T11:00:00"))), "2026-11-20T09:00:00"
+    )
+    # One starting a second before the window's end is in, on a period's
+    # first day. Catches the period exit or the per-pick start edge moved one
+    # second earlier.
+    assert_equal(
+        _starts(expand(e, _at("2030-06-02T00:00:00"), _at("2030-06-02T09:00:01"))), "2030-06-02T09:00:00"
+    )
+    # A weekly pick later in its week than the Monday reaches the per-pick
+    # start edge rather than the period exit. Starting exactly at the
+    # window's end it is out (catches that edge taken as `<=`); a second
+    # before the end it is in.
+    var friday = _timed("2026-11-06T09:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["FRIDAY"]}')
+    assert_equal(len(expand(friday, _at("2026-11-19T00:00:00"), _at("2026-11-20T09:00:00"))), 0)
+    assert_equal(
+        _starts(expand(friday, _at("2026-11-19T00:00:00"), _at("2026-11-20T09:00:01"))), "2026-11-20T09:00:00"
+    )
     assert_equal(len(expand(e, _at("9000-01-01T00:00:00"), _at("9000-01-02T00:00:00"))), 1)
     # Nothing after 9999-12-31.
     var last_day = parse_local_date("9999-12-31")
