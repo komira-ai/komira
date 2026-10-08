@@ -60,15 +60,19 @@ check, gen_expected.order_ties()), in a process of its own:
    length does not count; a window with a constant key over GROUP BY
    groups; a window over ROLLUP groups that only grouping() tells
    apart; two inner LIMITs whose ties show only when both turn the same
-   way. It writes each with a unique inner key, the rank family and a
-   RANGE sum over a tied key (peers answer alike), ORDER BY ALL, and
-   under `none` the tied subquery whose order is not compared. Catches
-   the tie check on the outermost ORDER BY only, the window, ordered
-   aggregate or inner LIMIT perturbation off, a GROUP BY window keyed by
-   the whole row (DuckDB refuses it) or with no keys, grouping() left
-   out, the output width taken from a select list holding a star, the
-   all-at-once runs left out, a tiebreak that splits the rank family's
-   peers, ORDER BY ALL given keys (DuckDB then expands its star over the
+   way; a window function's own ORDER BY tied over that subquery,
+   `row_number(ORDER BY k) OVER ()` (no arguments), `lag(k ORDER BY k)`
+   (it reads the row before) and `lag(k, 1, id ORDER BY k)` (offset and
+   default are not arguments). It writes each with a unique inner key,
+   the rank family and a RANGE sum over a tied key (peers answer
+   alike), ORDER BY ALL, and under `none` the tied subquery whose order
+   is not compared. Catches the tie check on the outermost ORDER BY
+   only, the window, ordered aggregate or inner LIMIT perturbation off,
+   a window function's own ORDER BY given its arguments as keys (or
+   none when it has none), a GROUP BY window keyed by the whole row
+   (DuckDB refuses it) or with no keys, grouping() left out, the output
+   width taken from a select list holding a star, the all-at-once runs
+   left out, a tiebreak that splits the rank family's peers, ORDER BY ALL given keys (DuckDB then expands its star over the
    FROM), and a check comparing a `none` case row for row.
 6. main() refuses a COLLATE query (sql_discipline.check) before writing
    it. Catches the COLLATE rule off.
@@ -227,6 +231,15 @@ _TWO = ("SELECT CAST(x.id = CAST(2 AS BIGINT) AND y.id = CAST(2 AS BIGINT) AS BO
         "ORDER BY k ASC NULLS LAST LIMIT CAST(1 AS BIGINT)) AS x, "
         "(SELECT id FROM (SELECT id, k FROM groups WHERE k = CAST(1 AS BIGINT) ORDER BY id ASC NULLS LAST) AS u "
         "ORDER BY k ASC NULLS LAST LIMIT CAST(1 AS BIGINT)) AS y ORDER BY ALL ASC NULLS LAST")
+# A window function's own ORDER BY over that subquery: row_number() has
+# no arguments, lag() reads the row before, and lag's offset and default
+# (id) are not among its arguments, so argument keys leave the tie.
+_OWN = "SELECT id, k, w FROM (SELECT id, k, %s AS w FROM " + _U + ") AS q" + _BY_ID
+_OWN_FUNCS = [
+    "row_number(ORDER BY k ASC NULLS LAST%s) OVER ()",
+    "lag(k ORDER BY k ASC NULLS LAST%s) OVER ()",
+    "lag(k, CAST(1 AS BIGINT), id ORDER BY k ASC NULLS LAST%s) OVER ()",
+]
 _ROLLUP = ("SELECT k, v, CAST(count(*) AS BIGINT) AS n, "
            "CAST(row_number() OVER (ORDER BY k ASC NULLS LAST, v ASC NULLS LAST%s) AS BIGINT) AS rn "
            "FROM groups GROUP BY ROLLUP (k, v) ORDER BY ALL ASC NULLS LAST")
@@ -257,7 +270,7 @@ INNER_REFUSED = [
     # Two inner LIMITs whose ties matter only together: each run that
     # turns one tiebreak around keeps the other's first row.
     _TWO,
-]
+] + [_OWN % (f % "") for f in _OWN_FUNCS]
 INNER_ACCEPTED = [
     # The same with unique inner keys: the tiebreak changes nothing.
     "SELECT id, rn FROM (SELECT id, " + _RN % ", id ASC NULLS LAST" + " FROM " + _U + ") AS t" + _BY_ID,
@@ -282,7 +295,7 @@ INNER_ACCEPTED = [
     # The tied subquery under `none` with no LIMIT: the order is not
     # compared.
     "SELECT id, a FROM " + _DESC + " ORDER BY a ASC NULLS LAST",
-]
+] + [_OWN % (f % ", id ASC NULLS LAST") for f in _OWN_FUNCS]
 for order in ("total", "none"):
     for sql in INNER_REFUSED:
         err, wrote = run_main("-- order: %s\n%s\n" % (order, sql))

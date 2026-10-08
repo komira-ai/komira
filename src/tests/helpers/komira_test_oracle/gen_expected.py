@@ -80,16 +80,18 @@ CTE's, a set operation's or a branch's) every output column of that
 node, by position; a window's OVER ORDER BY, when its function reads
 row positions (sql_discipline._WINDOW_ORDERED) or its frame counts rows,
 `row(*COLUMNS(*))` (with a GROUP BY, the group expressions, and
-grouping() under grouping sets); a window function's or an aggregate's
-own ORDER BY, the function's arguments. The case runs again with each
+grouping() under grouping sets); a window function's own ORDER BY, the
+same keys as its OVER ORDER BY; an aggregate's own ORDER BY, the
+function's arguments. The case runs again with each
 ORDER BY's keys appended ascending, then descending, one ORDER BY at a
 time and, with two or more, all at once each way (tie_variants()), and
 is refused unless every run equals the first under the case's policy
 (as the row-order check compares), every float zero taken as 0.0
 (DuckDB 1.5.6 returns a column it sorts on by position with -0.0 turned
 into 0.0). Not seen: a dependence only on an order between the two
-extremes, or on two ORDER BYs turned opposite ways at once; a tie
-between -0.0 and 0.0; an order an aggregate with no ORDER BY reads
+extremes, or on two ORDER BYs turned opposite ways at once; two
+windows over rows equal in every column of their FROM, which no key
+tells apart; a tie between -0.0 and 0.0; an order an aggregate with no ORDER BY reads
 that sql_discipline.py accepts (a float sum's rounding). A collation
 would make the keys tie strings that differ: sql_discipline.py refuses
 COLLATE. Under `total`, rows equal in every column but the sign of a
@@ -469,9 +471,15 @@ def tie_sites(con, statement):
       reaches the window (_window_input_keys). Not the rank family and
       not a RANGE or GROUPS aggregate: they answer the same for every
       peer, and a tiebreak would split the peers;
-    - a window function's own ORDER BY (`arg_orders`) and an aggregate's
-      (`order_bys`): keys are the function's arguments, all it reads of
-      a row (a `*` argument, count(*)'s, is not one)."""
+    - a window function's own ORDER BY (`arg_orders`): the same keys as
+      an OVER ORDER BY (_window_input_keys), every row that reaches the
+      window told apart. Its arguments are not enough: row_number() has
+      none, `lag(k ORDER BY k)` reads which row comes before the current
+      one, not only k, and lag's offset and default are not among its
+      arguments (`children`);
+    - an aggregate's own ORDER BY (`order_bys`): keys are the function's
+      arguments, all it reads of a row (a `*` argument, count(*)'s, is
+      not one)."""
     spell = _Spelling(con)
     sites = []
 
@@ -504,12 +512,14 @@ def tie_sites(con, statement):
         own = None
         if cls == "WINDOW" and node.get("arg_orders"):
             own = path + ("arg_orders",)
+            own_keys = _window_input_keys(select or {}, spell)
         elif cls == "FUNCTION" and (node.get("order_bys") or {}).get("orders"):
             own = path + ("order_bys", "orders")
-        args = [a for a in node.get("children") or [] if not (isinstance(a, dict) and a.get("class") == "STAR")]
-        if own is not None and args:
+            own_keys = [a for a in node.get("children") or []
+                        if not (isinstance(a, dict) and a.get("class") == "STAR")]
+        if own is not None and own_keys:
             sites.append(_Site(own, "%s()'s own ORDER BY at %s" % (fname, _path_text(path)),
-                               lambda d, ks=args: [spell.key(d, k) for k in ks]))
+                               lambda d, ks=own_keys: [spell.key(d, k) for k in ks]))
         for key in node:
             walk(node[key], path + (key,), select)
 
