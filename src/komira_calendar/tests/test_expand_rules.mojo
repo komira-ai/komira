@@ -434,6 +434,16 @@ def test_series_span_period_edges() raises:
     assert_equal(
         len(expand(to_the_end, _at("9995-01-01T00:00:00"), parse_local_date("9999-12-31") * 86400 + 86400)), 5
     )
+    # The same exit when the last period picks nothing: 29 February picks
+    # 9996 only, then 9997 to 9999 pick no day, so the period loop ends on
+    # an empty period. Catches that exit returning the last period's final
+    # pick instead of the running last pick (there is none to index).
+    var last_period_empty = _all_day("9996-02-29", 1, '{"freq":"YEARLY","interval":1,"count":3}')
+    assert_true(_span(last_period_empty) == SeriesSpan(_at("9996-02-29T00:00:00"), _at("9996-03-01T00:00:00")))
+    assert_equal(
+        len(expand(last_period_empty, _at("9996-01-01T00:00:00"), parse_local_date("9999-12-31") * 86400 + 86400)),
+        1,
+    )
 
 
 def _refuses(e: Event, window_start: Int, window_end: Int, message: String) raises:
