@@ -48,9 +48,10 @@
 #   render   writes the doc and the ratchet from census.tsv and the current
 #            ratchet.tsv. A library row of census.tsv is a library under
 #            src/ but not under src/tests/ (`kind` library); its package's
-#            floors are the lowest of its libraries' numbers (0 for line, and
-#            no branch floor, when one of them has none: not measured, or
-#            n/a), never below the current floor: a floor is raised to what
+#            floors are the lowest of its libraries' numbers (line 0 when one
+#            of them was not measured or has no line; no branch floor when one
+#            has no branch number, since its gate would find the floor
+#            unmeasured), never below the current floor: a floor is raised to what
 #            was measured and never lowered (lowering one is a hand edit of
 #            ratchet.tsv, which check accepts only where census.tsv measured
 #            no more than the new floor). A row of the current ratchet whose
@@ -133,8 +134,11 @@ render() { # busybox census ratchet doc_out ratchet_out
             # The package floors: the lowest library; none when one is not measured.
             if (!(pkg in seen)) { seen[pkg] = 1; pl[pkg] = 10001; pb[pkg] = 10001; pbm[pkg] = 0; pkgs[++np] = pkg }
             if (lb < 0) pl[pkg] = 0; else if (lb < pl[pkg]) pl[pkg] = lb
-            if ($4 != "OK") pbm[pkg] = -1
-            else if (bb >= 0 && pbm[pkg] >= 0) { pbm[pkg] = 1; if (bb < pb[pkg]) pb[pkg] = bb }
+            # A branch floor only when every library of the package has a
+            # branch number: the gate of one without would find the floor
+            # unmeasured (a Regression).
+            if ($4 != "OK" || bb < 0) pbm[pkg] = -1
+            else if (pbm[pkg] >= 0) { pbm[pkg] = 1; if (bb < pb[pkg]) pb[pkg] = bb }
             row[NR] = $0; rpkg[NR] = pkg; rlb[NR] = lb; rbb[NR] = bb; rows[++nr] = NR
         }
         END {

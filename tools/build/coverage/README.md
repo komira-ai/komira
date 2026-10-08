@@ -538,8 +538,11 @@ no library of the census is in) and each library under its floor.
 
 **The floors** are per package (a directory), in basis points. `render`
 sets a package's floor to the lowest number of its libraries (two
-libraries in one directory share a row), 0 for line and none for branch
-when one of them was not measured, and never lowers one: a floor is
+libraries in one directory share a row): line 0 when one of them was not
+measured, and no branch floor unless every one of them has a branch number
+(a library outside `COVERAGE_BRANCH_GATE` in the same directory as one in
+it would otherwise fail its gate on an unmeasured branch floor). It never
+lowers one: a floor is
 `max(current floor, measured)`. A library that failed keeps its floor (or
 0), so a failing run neither blocks the census nor lowers anything.
 

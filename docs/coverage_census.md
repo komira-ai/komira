@@ -131,7 +131,7 @@ branch, `-` for none; **under floor** marks a library measured under it.
 | 89 | `src/komira_gcp_fcm:komira_gcp_fcm` | 93.85% (214/228) | 14 | not gated | 0 | conda | 93.85% / - |
 | 90 | `src/komira_test_run_id:komira_test_run_id` | 93.87% (46/49) | 3 | 83.33% (10/12) | 0 | release | 93.87% / 83.33% |
 | 91 | `src/komira_aws_lambda_http:komira_aws_lambda_http` | 94.00% (565/601) | 36 | not gated | 0 | conda | 94.00% / - |
-| 92 | `src/komira_wkt:komira_wkt` | 94.07% (730/776) | 46 | 74.45% (408/548) | 0 | release | 0.00% / 74.45% |
+| 92 | `src/komira_wkt:komira_wkt` | 94.07% (730/776) | 46 | 74.45% (408/548) | 0 | release | 0.00% / - |
 | 93 | `src/komira_proto_codec:komira_proto_codec` | 94.46% (1041/1102) | 61 | not gated | 0 | release | 0.00% / - |
 | 94 | `src/komira_vcard:komira_vcard` | 95.00% (609/641) | 32 | not gated | 0 | conda | 95.00% / - |
 | 95 | `src/komira_parquet_codec:komira_parquet_codec` | 95.05% (557/586) | 29 | 93.28% (375/402) | 1 | conda | 95.05% / 93.28% |
@@ -211,7 +211,7 @@ branch, `-` for none; **under floor** marks a library measured under it.
 | 169 | `src/komira_plan_proto:komira_plan_proto` | n/a | 0 | not gated | 0 | release | 0.00% / - |
 | 170 | `src/komira_proto_codec:implicit_presence_proto` | n/a | 0 | not gated | 0 | conda | 0.00% / - |
 | 171 | `src/komira_supervisor_proto:komira_supervisor_proto` | n/a | 0 | not gated | 0 | release | 0.00% / - |
-| 172 | `src/komira_wkt:value_null_proto` | n/a | 0 | not gated | 0 | conda | 0.00% / 74.45% |
+| 172 | `src/komira_wkt:value_null_proto` | n/a | 0 | not gated | 0 | conda | 0.00% / - |
 
 ## Not measured
 

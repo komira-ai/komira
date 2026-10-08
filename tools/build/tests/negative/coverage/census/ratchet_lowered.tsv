@@ -1,3 +1,4 @@
 # The floors of tests//negative/coverage:census_floor_lowered (test 46): census_ok's, with src/a lowered under what census.tsv measured.
 src/a	4999	2500
 src/b	0	-
+src/c	5000	-
