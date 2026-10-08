@@ -171,6 +171,7 @@ mojo_library(
         "tests/test_worker_adaptive_spin_tuning.mojo",
         "tests/test_worker_no_leak_after_runtime_drop.mojo",
         "tests/test_worker_observability_integration.mojo",
+        "tests/test_worker_shutdown_park_race.mojo",
         "tests/test_worker_spin_kevent_frequency.mojo",
     ],
     visibility = ["PUBLIC"],

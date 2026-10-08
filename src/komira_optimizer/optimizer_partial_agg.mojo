@@ -270,6 +270,11 @@ def push_aggregate_below_join(var plan: LogicalPlan) raises -> LogicalPlan:
         return LogicalPlan.project(new_exprs^, new_child^)
 
     elif plan.tag == PLAN_JOIN:
+        # preserve `residual` + `algo_hint` across this recurse-rebuild.
+        var algo = plan._join.value()[].algo_hint
+        var join_resid: Optional[OwnedPointer[Expr]] = None
+        if plan._join.value()[].has_residual():
+            join_resid = OwnedPointer(plan._join.value()[].residual.value()[].copy())
         var left = _take_join_left(plan)
         var right = _take_join_right(plan)
         var new_left = push_aggregate_below_join(left^)
@@ -280,6 +285,8 @@ def push_aggregate_below_join(var plan: LogicalPlan) raises -> LogicalPlan:
             plan._join.value()[].left_on.copy(),
             plan._join.value()[].right_on.copy(),
             plan._join.value()[].join_type,
+            algo,
+            join_resid^,
         )
 
     elif plan.tag == PLAN_SORT:
