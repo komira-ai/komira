@@ -1,0 +1,13 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: stat_rows WHERE g < 3 keeps g = 1 and g = 2 (§1.2). MEDIAN
+# skips NULLs (§2.1): g = 1 has i = 2, 5, 8 and f = 1.0, 2.5, 4.0, three
+# values each, so the median is the middle one, 5 and 2.5; g = 2 has one
+# value, 7 and -0.5. An odd count has one middle value, so the answer does
+# not depend on how two middle values would be combined, which the document
+# does not state. Types: MEDIAN of an integer or FLOAT64 is FLOAT64 (§8.16),
+# nullable by §8's default.
+g:int64	med_i:float64?	med_f:float64?
+1	5.0	2.5
+2	7.0	-0.5

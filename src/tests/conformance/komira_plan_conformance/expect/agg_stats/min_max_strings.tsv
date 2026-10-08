@@ -1,0 +1,13 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §4.6: strings order by their UTF-8 bytes, and a prefix sorts
+# before its extension. g = 1 has "apple", "Zebra", "app" and a NULL,
+# skipped (§2.1): "Z" is 0x5A and "a" 0x61, so MIN is "Zebra"; "app" is a
+# prefix of "apple", so MAX is "apple". g = 2 has only "pear". g = 3 has no
+# non-NULL value, so both are NULL (§2.2). Types: the input's type (§8.7),
+# nullable (§2.2).
+g:int64	lo:string?	hi:string?
+1	Zebra	apple
+2	pear	pear
+3	\N	\N

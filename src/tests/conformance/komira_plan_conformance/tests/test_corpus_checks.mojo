@@ -350,6 +350,8 @@ def test_dataset_files() raises:
             String("join_left.jsonl"), String("join_right.jsonl"),
             String("sort_rows.jsonl"), String("int_pairs.jsonl"),
             String("window_rows.jsonl"), String("rank_rows.jsonl"),
+            String("stat_rows.jsonl"), String("avg_rows.jsonl"),
+            String("div_pairs.jsonl"), String("float_pairs.jsonl"),
             String("extra.csv"),
         ],
     )

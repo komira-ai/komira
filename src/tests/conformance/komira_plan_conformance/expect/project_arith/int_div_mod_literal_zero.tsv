@@ -1,0 +1,22 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §5.3: an integer BIN_DIV or BIN_MOD whose divisor is zero
+# answers NULL for that row, and raises no error; the literal 0 is INT64
+# (§8.19), so every row of every computed column is NULL, over the
+# nullable a and the non-nullable id alike. Types: INT64 (§5.1, §8.10, and
+# §8.9 for same-typed operands), nullable by §8's default, which §5.3's
+# NULLs require even though id is non-nullable.
+id:int64	a_div_0:int64?	a_mod_0:int64?	id_div_0:int64?	id_mod_0:int64?
+1	\N	\N	\N	\N
+2	\N	\N	\N	\N
+3	\N	\N	\N	\N
+4	\N	\N	\N	\N
+5	\N	\N	\N	\N
+6	\N	\N	\N	\N
+7	\N	\N	\N	\N
+8	\N	\N	\N	\N
+9	\N	\N	\N	\N
+10	\N	\N	\N	\N
+11	\N	\N	\N	\N
+12	\N	\N	\N	\N

@@ -1,0 +1,22 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §5.2: a = (a / b) * b + (a % b) with §5.1's division.
+# Rows: 3 * 2 + 1 = 7; -3 * 2 + -1 = -7; -3 * -2 + 1 = 7; 3 * -2 + -1 = -7;
+# 2 * 3 + 0 = 6; 0 * 5 + 0 = 0; 0 * 5 + -1 = -1, so back = a wherever b is
+# a non-NULL non-zero. A zero divisor makes a / b NULL (§5.3) and a NULL
+# operand makes the sum NULL (§5.7): ids 5 to 8 and 10. Types: a as
+# scanned; back INT64 (§8.9 for same-typed operands, §8.10), nullable.
+id:int64	a:int64?	back:int64?
+1	7	7
+2	-7	-7
+3	7	7
+4	-7	-7
+5	7	\N
+6	0	\N
+7	-7	\N
+8	\N	\N
+9	6	6
+10	1	\N
+11	0	0
+12	-1	-1
