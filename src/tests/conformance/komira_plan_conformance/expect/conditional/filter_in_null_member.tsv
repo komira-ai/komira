@@ -1,0 +1,9 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.4: x IN (1, NULL) over x = 1, NULL, 3, NULL, 5 is TRUE, NULL,
+# NULL, NULL, NULL; §1.2: a filter keeps a row only when its predicate is
+# TRUE, so only id 1 remains. Types: a filter keeps its input columns, as
+# scanned.
+id:int64	x:int64?	y:int64?
+1	1	10

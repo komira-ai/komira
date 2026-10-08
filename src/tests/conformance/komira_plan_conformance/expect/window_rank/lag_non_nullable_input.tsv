@@ -1,0 +1,17 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.4 over PARTITION BY g ORDER BY id on window_rows (g = 1, 1,
+# 1, 2, 2, 3 by id): LAG(g, 1, 0) is 0 at each partition's first row (ids
+# 1, 4, 6) and the previous g otherwise (1, 1 for ids 2, 3; 2 for id 5);
+# LAG(g) is NULL at those edges instead.
+# Types: id, g, v keep their scanned types. §8.24: LAG has g's type, INT64;
+# lag_g_d is non-nullable (g is non-nullable and the default 0 is not NULL),
+# lag_g is nullable (no default).
+id:int64	g:int64	v:int64?	lag_g_d:int64	lag_g:int64?
+1	1	10	0	\N
+2	1	\N	1	1
+3	1	30	1	1
+4	2	40	0	\N
+5	2	50	2	2
+6	3	60	0	\N

@@ -1,0 +1,18 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.4: LAG and LEAD read the row 1 before or after in the
+# partition's order (g, ordered by id); where that row does not exist the
+# result is the default, NULL when none is given. §9.5: every row counts,
+# NULL or not. g = 1 (ids 1, 2, 3; v 10, NULL, 30): LAG is NULL (edge), 10,
+# NULL (id 2's v); LEAD is NULL (id 2's v), 30, NULL (edge). g = 2 (ids 4, 5;
+# v 40, 50): LAG NULL, 40; LEAD 50, NULL. g = 3 (id 6): both NULL (edges).
+# Types: id, g, v keep their scanned types; each LAG/LEAD column is v's type,
+# INT64, and nullable because v is nullable (§8.24).
+id:int64	g:int64	v:int64?	lag_v:int64?	lead_v:int64?
+1	1	10	\N	\N
+2	1	\N	10	30
+3	1	30	\N	\N
+4	2	40	\N	50
+5	2	50	40	\N
+6	3	60	\N	\N

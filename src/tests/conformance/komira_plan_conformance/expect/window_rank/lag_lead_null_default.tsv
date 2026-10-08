@@ -1,0 +1,17 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.4: an explicit NULL default is the same as no default, so
+# LAG(v, 1, NULL) and LEAD(v, 1, NULL) give the rows of LAG(v) and LEAD(v).
+# g = 1 (v 10, NULL, 30): LAG NULL (edge), 10, NULL (id 2's v); LEAD NULL
+# (id 2's v), 30, NULL (edge). g = 2 (v 40, 50): LAG NULL, 40; LEAD 50, NULL.
+# g = 3: both NULL.
+# Types: id, g, v keep their scanned types; each LAG/LEAD column is v's type,
+# INT64, and nullable because v is nullable (§8.24).
+id:int64	g:int64	v:int64?	lag_v:int64?	lead_v:int64?
+1	1	10	\N	\N
+2	1	\N	10	30
+3	1	30	\N	\N
+4	2	40	\N	50
+5	2	50	40	\N
+6	3	60	\N	\N

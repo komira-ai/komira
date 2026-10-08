@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.5: x NOT IN (...) is NOT (x IN (...)), with §1.4 for the IN
+# and §1.1 for the NOT (NOT NULL is NULL). Over x = 1, NULL, 3, NULL, 5: x IN
+# (1, NULL) is TRUE, NULL, NULL, NULL, NULL, so NOT IN is FALSE, NULL, NULL,
+# NULL, NULL; x IN (1, 3) is TRUE, NULL, TRUE, NULL, FALSE, so NOT IN is
+# FALSE, NULL, FALSE, NULL, TRUE. Types: §8.8.
+id:int64	nin_1_null:bool?	nin_1_3:bool?
+1	false	false
+2	\N	\N
+3	\N	false
+4	\N	\N
+5	\N	true

@@ -1,0 +1,22 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.2: ROW_NUMBER numbers a partition's rows 1 to n in its
+# order (PARTITION BY g ORDER BY o; NULL o last by §4.1; NULL g one
+# partition by §9.9). §9.3: which peer gets which number is not promised, so
+# the plan projects id away and the peers' rows compare as a set. g = 1: o
+# 10 is 1, the two 20s are 2 and 3, 30 is 4, the two NULLs 5 and 6. g = 2:
+# 1. g NULL: the two 7s are 1 and 2, 9 is 3.
+# Types: g, o keep their scanned types; ROW_NUMBER is INT64, non-nullable
+# (§8.22).
+g:int64?	o:int64?	rn:int64
+1	10	1
+1	20	2
+1	20	3
+1	30	4
+1	\N	5
+1	\N	6
+2	5	1
+\N	7	1
+\N	7	2
+\N	9	3
