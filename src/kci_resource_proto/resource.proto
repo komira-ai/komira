@@ -145,12 +145,15 @@
 // "kci cannot delete this", is a capability of a cloud object, not a policy
 // an author chooses, so it has no value here.
 //
-// METADATA (`Resource.physical_name` 6, `labels` 7, `adopt` 8) means the
-// same on every type that takes it. `physical_name` is the cloud name of
+// METADATA (`Resource.physical_name` 6, `labels` 7, `adopt` 8,
+// `adopt_deletable` 9) means the same on every type that takes it. `physical_name` is the cloud name of
 // the resource's primary object; a `grant` (an edge: its objects are
 // bindings) and a `dns_record` (named by the DNS name and type it writes)
 // have no name of their own, so writing one there is refused. `adopt` takes
-// over the existing object of that name instead of refusing it as foreign.
+// over the existing object of that name instead of refusing it as foreign,
+// once kci has read it and found what the resource declares; kci never
+// deletes or replaces an adopted object unless `adopt_deletable` says it
+// may, and releases it when the resource leaves the list.
 // `labels` are the author's, written beside kci's own; a key in kci's own
 // label space (`kci_*`, `kci-*`) is refused. A name or a label a cloud
 // refuses (a name too long or too short, a kind with no name of its own
@@ -228,12 +231,24 @@ message Resource {
   // refused.
   map<string, string> labels = 7;
   // Take over the existing object named `physical_name` (which must be
-  // written): an object of that name that carries no kci stamp is stamped
-  // and recorded instead of being refused as foreign, and is then the
-  // resource's like any object kci created (the closed world and the
-  // resource's retention apply to it). With no such object, it is created.
-  // Without `adopt`, an unstamped object of that name refuses the apply.
+  // written). Before anything is planned, the object must exist and be what
+  // the resource declares (its kind, its name and every field of its shape
+  // the cloud can read); a missing or different object refuses the plan.
+  // The object is then stamped and recorded instead of being refused as
+  // foreign, and kci keeps it in step with the file like any of its own.
+  // kci did not create it, so it never deletes it on its own: when the
+  // resource leaves the list, kci RELEASES the object (drops its stamp and
+  // its record) and leaves it standing. Without `adopt`, an unstamped
+  // object of that name refuses the apply.
   bool adopt = 8;
+  // With `adopt` only: kci may also replace the adopted object (a change
+  // the cloud cannot make in place) or delete it (a destroy, or the
+  // resource lowering it no more while it stays in the list). Without it,
+  // a plan with such a change is refused before any change. `optional` so
+  // that a resource that does not write it encodes no bytes for it: every
+  // list stored, and the digest of every composite definition, stays as it
+  // was. Unset and written false mean the same.
+  optional bool adopt_deletable = 9;
 
   // Typed and closed. Held, not declared (see the file header): 17, 19
   // and 32 to 36 the later neutral primitives, 90 the escape hatch,

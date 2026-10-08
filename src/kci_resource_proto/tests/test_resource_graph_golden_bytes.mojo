@@ -68,7 +68,8 @@
 #                   (WRITE) and reads its ADDRESS, and an identity that
 #                   pulls from it (READ) through a grant.
 #   metadata_graph  a bucket kept on delete under a cloud name of the
-#                   author's, adopted, with two labels (every metadata field
+#                   author's, adopted (and deletable), with two labels
+#                   (every metadata field
 #                   of `Resource`), an identity with one label and a
 #                   written-empty cloud name (presence: protoc must print
 #                   it), and a grant that lets it READ the bucket.
@@ -344,7 +345,7 @@ comptime _METADATA_GRAPH = (
     '{"resource":['
     # Every metadata field of Resource, on a bucket kept on delete.
     + '{"id":"logs","retention":"KEEP","physicalName":"acme-logs",'
-    + '"labels":{"team":"data","tier":"gold"},"adopt":true,"bucket":{}},'
+    + '"labels":{"team":"data","tier":"gold"},"adopt":true,"adoptDeletable":true,"bucket":{}},'
     # A written-empty cloud name (presence) and one label.
     + '{"id":"reader","physicalName":"","labels":{"team":"data"},"serviceAccount":{}},'
     + '{"id":"read-logs","grant":{"principal":{"resource":"reader"},'

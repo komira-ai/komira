@@ -3,13 +3,15 @@
 # =============================================================================
 #
 # THE METADATA OF EVERY `kci.resource.v1` RESOURCE, AS WIRE BYTES:
-# `Resource.physical_name` 6, `Resource.labels` 7 and `Resource.adopt` 8. The
+# `Resource.physical_name` 6, `Resource.labels` 7, `Resource.adopt` 8 and
+# `Resource.adopt_deletable` 9. The
 # field template of test_resource_field_numbers.mojo, in a file of its own
 # (that file is past the size a Mojo source should stay under).
 #
 # 1. KEPT, BY BYTES ONLY. Nothing is read by name: a `Resource` holding a
 #    bucket with field 6 (a string), two field-7 map entries (each a message
-#    of 1 key and 2 value) and field 8 (a varint 1) survives decode then
+#    of 1 key and 2 value), field 8 and field 9 (each a varint 1) survives
+#    decode then
 #    encode, and so does a written-empty field 6 (its tag and a zero length
 #    must be written). Every failure is collected, so one run names every
 #    number that is missing.
@@ -21,9 +23,13 @@
 #    is empty.
 # 4. ADOPT. 8 is `adopt`, a bool: by name, binary, JSON (`"adopt":true`);
 #    absent is false.
-# 5. BESIDE EVERY OTHER FIELD. The three ride with `uses` 2, `retention` 3
-#    and a body arm without moving them; 9 is not a field of `Resource` (5
-#    stays held: test_resource_held_numbers).
+# 5. ADOPT_DELETABLE. 9 is `adopt_deletable`, an optional bool: by name,
+#    binary, JSON (`"adoptDeletable":true`); absent is None and encodes no
+#    bytes (so no stored list and no definition digest moves), a written
+#    false is present.
+# 6. BESIDE EVERY OTHER FIELD. The four ride with `uses` 2, `retention` 3
+#    and a body arm without moving them (5 stays held and 4 reserved:
+#    test_resource_held_numbers).
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 # =============================================================================
@@ -173,6 +179,24 @@ def _same(got: List[UInt8], want: List[UInt8], what: String) raises:
     )
 
 
+def _writes(b: List[UInt8], field: Int) -> Bool:
+    """True iff the top-level records of `b` hold one of `field` (varint and
+    length-delimited records only)."""
+    var pos = 0
+    var ok = True
+    while pos < len(b):
+        var tag = _read_varint(b, pos, ok)
+        if not ok:
+            return False
+        if Int(tag >> 3) == field:
+            return True
+        if Int(tag & 7) == _VARINT:
+            _ = _read_varint(b, pos, ok)
+        else:
+            pos += Int(_read_varint(b, pos, ok))
+    return False
+
+
 def _bytes_equal(a: List[UInt8], b: List[UInt8], what: String) raises:
     assert_equal(_hex(a), _hex(b), what)
 
@@ -190,13 +214,14 @@ def _entry(key: String, value: String) -> List[UInt8]:
 
 def _metadata() -> List[UInt8]:
     """Resource { 1 id, 6 physical_name, 7 labels (two entries, sorted by
-    key), 8 adopt = true, 14 bucket {} }."""
+    key), 8 adopt = true, 9 adopt_deletable = true, 14 bucket {} }."""
     var b = List[UInt8]()
     _str(b, 1, "logs")
     _str(b, 6, "acme-logs")
     _msg(b, 7, _entry("team", "data"))
     _msg(b, 7, _entry("tier", "gold"))
     _uint(b, 8, 1)
+    _uint(b, 9, 1)
     _msg(b, 14, List[UInt8]())
     return b^
 
@@ -205,7 +230,7 @@ def _metadata() -> List[UInt8]:
 
 
 def test_added_metadata_numbers_are_kept() raises:
-    """Catches: `Resource` 6, 7 or 8 undeclared, renumbered or of another
+    """Catches: `Resource` 6, 7, 8 or 9 undeclared, renumbered or of another
     wire type (each is dropped or misread on re-encode), a map entry's key
     and value swapped, and a written-empty `physical_name` dropped by the
     encoder (presence lost). Collects every failure, so the red run against
@@ -227,9 +252,13 @@ def test_added_metadata_numbers_are_kept() raises:
     _uint(eight, 8, 1)
     if not _kept(encode_proto(decode_proto[Resource](eight.copy())), eight):
         bad.append("Resource 8 (adopt, a bool)")
+    var nine = head.copy()
+    _uint(nine, 9, 1)
+    if not _kept(encode_proto(decode_proto[Resource](nine.copy())), nine):
+        bad.append("Resource 9 (adopt_deletable, an optional bool)")
     var all = _metadata()
     if not _kept(encode_proto(decode_proto[Resource](all.copy())), all):
-        bad.append("Resource 6, 7 and 8 together")
+        bad.append("Resource 6, 7, 8 and 9 together")
     # `_kept` drops an empty record as a zero value: a written-empty
     # physical_name keeps its tag (6, length-delimited: 0x32) and a zero
     # length, because the field has presence.
@@ -241,7 +270,7 @@ def test_added_metadata_numbers_are_kept() raises:
     var names = String("")
     for i in range(len(bad)):
         names += String("\n  ") + bad[i]
-    assert_equal(len(bad), 0, String("not kept as P12 declares them:") + names)
+    assert_equal(len(bad), 0, String("not kept as the schema declares them:") + names)
     print("  test_added_metadata_numbers_are_kept: PASS")
 
 
@@ -320,12 +349,47 @@ def test_adopt() raises:
     print("  test_adopt: PASS")
 
 
-# ---- 5. beside every other field -----------------------------------------------------
+# ---- 5. adopt_deletable -------------------------------------------------------------
+
+
+def test_adopt_deletable() raises:
+    """Catches: `adopt_deletable` at another number or wire type (8 or 10
+    would take `adopt` or the service arm), a JSON name other than the
+    proto3 one, a missing field read as present or true, presence lost (a
+    plain bool would write `48 00` on every resource, moving every stored
+    list and every definition digest), and one of `adopt` and
+    `adopt_deletable` read for the other."""
+    var head = List[UInt8]()
+    _str(head, 1, "logs")
+    var b = head.copy()
+    _uint(b, 9, 1)
+    var r = decode_proto[Resource](b.copy())
+    assert_true(Bool(r.adopt_deletable) and r.adopt_deletable.value(), "field 9 is `adopt_deletable`")
+    assert_true(not r.adopt, "field 9 is not `adopt`")
+    _same(encode_proto(r), b, "Resource.adopt_deletable")
+    var text = encode_json(r)
+    assert_true('"adoptDeletable":true' in text, "JSON name adoptDeletable: " + text)
+    _bytes_equal(encode_proto(decode_json[Resource](text)), encode_proto(r), "adopt_deletable: JSON round trip")
+    var absent = decode_proto[Resource](head.copy())
+    assert_true(not Bool(absent.adopt_deletable), "absent: None")
+    assert_true(not _writes(encode_proto(absent), 9), "absent: no record of field 9 is written")
+    var f = head.copy()
+    _uint(f, 9, 0)
+    var written = decode_proto[Resource](f.copy())
+    assert_true(Bool(written.adopt_deletable) and not written.adopt_deletable.value(), "a written false is present")
+    assert_true(_writes(encode_proto(written), 9), "a written false is encoded")
+    var eight = head.copy()
+    _uint(eight, 8, 1)
+    assert_true(not Bool(decode_proto[Resource](eight.copy()).adopt_deletable), "field 8 is not `adopt_deletable`")
+    print("  test_adopt_deletable: PASS")
+
+
+# ---- 6. beside every other field -----------------------------------------------------
 
 
 def test_metadata_beside_the_other_fields() raises:
-    """Catches: one of the three taking (or moving) `uses` 2, `retention` 3
-    or the body arm, and a field declared at 9."""
+    """Catches: one of the four taking (or moving) `uses` 2, `retention` 3
+    or the body arm."""
     var u = List[UInt8]()
     _msg(u, 1, _ref("reader"))
     _uint(u, 2, 2)  # READ
@@ -336,6 +400,7 @@ def test_metadata_beside_the_other_fields() raises:
     _str(b, 6, "acme-logs")
     _msg(b, 7, _entry("team", "data"))
     _uint(b, 8, 1)
+    _uint(b, 9, 1)
     _msg(b, 14, List[UInt8]())
     var r = decode_proto[Resource](b.copy())
     assert_equal(r.id, "logs")
@@ -345,19 +410,17 @@ def test_metadata_beside_the_other_fields() raises:
     assert_equal(r.physical_name.value(), "acme-logs")
     assert_equal(r.labels["team"], "data")
     assert_true(r.adopt)
+    assert_true(r.adopt_deletable.value())
     _same(encode_proto(r), b, "Resource with every header field")
-
-    var probe = b.copy()
-    _str(probe, 9, "not-a-field")
-    _same(encode_proto(decode_proto[Resource](probe.copy())), b, "Resource has no field 9")
     print("  test_metadata_beside_the_other_fields: PASS")
 
 
 def main() raises:
-    print("test_resource_metadata_numbers: physical_name, labels, adopt")
+    print("test_resource_metadata_numbers: physical_name, labels, adopt, adopt_deletable")
     test_added_metadata_numbers_are_kept()
     test_physical_name()
     test_labels()
     test_adopt()
+    test_adopt_deletable()
     test_metadata_beside_the_other_fields()
     print("ALL kci.resource.v1 METADATA FIELD-NUMBER TESTS PASSED")

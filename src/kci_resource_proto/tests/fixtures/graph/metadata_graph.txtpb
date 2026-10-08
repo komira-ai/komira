@@ -12,6 +12,7 @@ resource {
     value: "gold"
   }
   adopt: true
+  adopt_deletable: true
   bucket {
   }
 }

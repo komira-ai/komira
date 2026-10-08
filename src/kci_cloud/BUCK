@@ -40,6 +40,7 @@ mojo_library(
         "tests/test_cloud_network_rules.mojo",
         "tests/test_cloud_registry_rules.mojo",
         "tests/test_cloud_metadata_rules.mojo",
+        "tests/test_cloud_adoption_rules.mojo",
         "tests/test_cloud_validate_and_deploy.mojo",
         "tests/test_cloud_compose_expand.mojo",
         "tests/test_cloud_compose_refusals.mojo",

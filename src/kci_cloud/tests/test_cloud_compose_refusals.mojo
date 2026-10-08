@@ -358,6 +358,9 @@ def test_a_nested_instance() raises:
     cases.append(w + ',"adopt":true,' + inst + "}}}")
     fields.append("component[w].composite")
     needles.append("physical_name, labels and adopt are written on the components")
+    cases.append(w + ',"adoptDeletable":true,' + inst + "}}}")
+    fields.append("component[w].composite")
+    needles.append("physical_name, labels and adopt are written on the components")
     for i in range(len(cases)):
         var d: List[String] = [web_text, _x(ins + cases[i] + "]")]
         _one(d, '{"resource":[]}', "acme.x@1", fields[i], needles[i])

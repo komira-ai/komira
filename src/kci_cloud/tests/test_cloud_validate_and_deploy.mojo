@@ -79,6 +79,7 @@ from kci_cloud import (
     Finding,
     LoweredNode,
     OwnedRecord,
+    ExistingObject,
     Principal,
     RUN_UNKNOWN,
     Setting,
@@ -406,6 +407,12 @@ struct _Stub(CloudAdapter, Movable):
                 )
             )
         return l^
+
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return ExistingObject()  # nothing stands anywhere: these tests adopt nothing
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        raise Error("stub: these tests release nothing")
 
     def whoami(mut self, creds: Creds) raises -> Principal:
         return Principal(creds.token.copy(), String("stub-account"))
