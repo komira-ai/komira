@@ -11,8 +11,10 @@
 # `<db>` and `<db>-wal` are read and scanned:
 #   * none of Alice's strings, and neither of the bodies of Bob's deleted
 #     message (the original and the edit), may appear in either file;
-#   * Bob's live message must appear in the database file. Without that
+#   * Bob's live message must appear in the bytes read. Without that
 #     positive control an empty or unreadable file would pass.
+# The connection stays open until after the scan, as a server's does: the
+# close of the last connection checkpoints the log on its own.
 # The scope is the file contents, not the storage device beneath them.
 # =============================================================================
 
@@ -139,8 +141,8 @@ def main() raises:
     var wal = _bytes_of(path + String("-wal"))
     assert_true(len(file) > 0, "the database file was read")
     assert_true(
-        _contains(file, BOB_LIVE),
-        "positive control: a live message is in the database file",
+        _contains(file, BOB_LIVE) or _contains(wal, BOB_LIVE),
+        "positive control: a live message is in the bytes read",
     )
     var found = String()
     _absent(file, wal, ALICE_SUB, found)
@@ -153,6 +155,10 @@ def main() raises:
     _absent(file, wal, BOB_EDITED, found)
     if found.byte_length() > 0:
         raise Error(String("erased text is still in the bytes:") + found)
+    # The store, and so its connection, is used after the scan: closing the
+    # last connection checkpoints the log itself, which would hide a missing
+    # `finish_sql_erasure`. A server keeps its connections open.
+    assert_equal(s.head_seq[Rt](reactor, String("c-x")), Int64(9))
     print(
         "PASS komira_chat_store_conformance sqlite erasure bytes ("
         + String(len(file))
