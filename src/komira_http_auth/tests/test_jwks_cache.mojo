@@ -2,7 +2,8 @@
 # test_jwks_cache.mojo: refetch rate limit, max-age, and validate-before-replace.
 # =============================================================================
 #
-# An unknown kid costs exactly one refetch per window and is then refused;
+# An unknown kid costs exactly one refetch per window and is then refused,
+# and the window runs from a FAILED attempt too (non-200 or transport);
 # Cache-Control max-age decides freshness; a clock stepped back does not lock
 # refreshes out; a truncated, partial, invalid, duplicate-keyed, repeated-kid,
 # reader-ambiguous, non-ASCII-kid, empty, non-200 or failed fetch never
@@ -174,6 +175,37 @@ def test_unknown_kid_refetches_once_per_window_then_refuses() raises:
     assert_equal(rig.verifier.verify(rotated).reason, String(REASON_OK))
     assert_equal(rig.fetcher.fetch_count(), 3)
     assert_equal(rig.fetcher.pending(), 0)
+
+
+def _failed_fetch_still_starts_the_window(var rig: _Rig, key: List[UInt8]) raises:
+    """Fetch 1 (scripted by the caller) fails; fetch 2 publishes KID. The
+    window runs from the failed ATTEMPT: a retry inside it would fetch KID
+    and verify at NOW+10, so the token must stay unknown until NOW+61."""
+    rig.fetcher.add(200, String("max-age=3600"), rsa_jwks_json(key, KID))
+    var tok = _tok(key, KID)
+    assert_equal(rig.verifier.verify(tok).reason, String(REASON_UNKNOWN_KID))
+    assert_equal(rig.fetcher.fetch_count(), 1)
+    rig.clock.set(NOW + 10)
+    assert_equal(rig.verifier.verify(tok).reason, String(REASON_UNKNOWN_KID))
+    assert_equal(rig.fetcher.fetch_count(), 1, "no retry inside the window")
+    rig.clock.set(NOW + 61)
+    assert_equal(rig.verifier.verify(tok).reason, String(REASON_OK))
+    assert_equal(rig.fetcher.fetch_count(), 2)
+    assert_equal(rig.fetcher.pending(), 0)
+
+
+def test_a_non_200_fetch_starts_the_refetch_window() raises:
+    var key = _key()
+    var rig = _Rig(_config())
+    rig.fetcher.add(503, rsa_jwks_json(key, KID))
+    _failed_fetch_still_starts_the_window(rig^, key)
+
+
+def test_a_transport_failure_starts_the_refetch_window() raises:
+    var key = _key()
+    var rig = _Rig(_config())
+    rig.fetcher.add_failure()
+    _failed_fetch_still_starts_the_window(rig^, key)
 
 
 def test_a_clock_stepped_back_does_not_lock_refreshes_out() raises:

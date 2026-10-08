@@ -245,6 +245,9 @@ def test_malformed_authorization_is_invalid_request() raises:
     cases.append(String("Bearer ") + good + String(", Bearer ") + good)
     cases.append(String("Bearer ") + good + String(",") + good)
     cases.append(String("Bearer a=b"))
+    # ':' is not a token68 byte (RFC 7235 2.1), so a Basic-style pair is
+    # refused as a malformed header, not passed on to the verifier.
+    cases.append(String("Bearer a:b"))
     for i in range(len(cases)):
         var rig = _MwRig(key)
         var req = _req(Optional[String](cases[i]))

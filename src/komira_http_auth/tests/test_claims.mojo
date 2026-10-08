@@ -5,7 +5,8 @@
 # The positive case (a valid RS256 token yields Principal{scheme jwt, sub,
 # iss, aud, copied claims, presented credential}) and every claim refusal:
 # iss, aud (missing, other, array without ours), sub, exp (missing, not an
-# integer, expired past the 30 s leeway), iat, nbf, negative or past-9999
+# integer, expired past the 30 s leeway, and a configured leeway of 0 or
+# 60 s honoured in place of it), iat, nbf, negative or past-9999
 # times, lifetime over max TTL, duplicate payload keys, and a spliced payload
 # failing the signature.
 # =============================================================================
@@ -332,6 +333,45 @@ def test_expired_past_leeway_is_refused_and_inside_leeway_accepted() raises:
     _expect(_iat_exp(NOW - 600, NOW - 30), REASON_EXPIRED)
     _expect(_iat_exp(NOW - 600, NOW - 31), REASON_EXPIRED)
     _expect(_iat_exp(NOW - 600, NOW - 29), REASON_OK)
+
+
+def _verify_with(var cfg: BearerJwtConfig, payload_json: String) raises -> String:
+    """The reason a verifier built from `cfg` gives for a token carrying
+    `payload_json`, at NOW."""
+    var key = _key()
+    var rig = _Rig(cfg^)
+    rig.fetcher.add(200, rsa_jwks_json(key, KID))
+    var tok = sign_rs256_compact(_header(KID), payload_json, key)
+    return rig.verifier.verify(tok).reason
+
+
+def test_leeway_zero_refuses_at_exp_where_the_default_accepts() raises:
+    # The configured leeway reaches the claim check (a verifier that kept the
+    # 30 s default whatever the config said would accept exp == NOW here).
+    var at_exp = _iat_exp(NOW - 600, NOW)
+    assert_equal(_verify_with(_config(), at_exp), String(REASON_OK))
+    assert_equal(
+        _verify_with(_config().with_leeway_s(0), at_exp), String(REASON_EXPIRED)
+    )
+    # One second before exp is still inside a zero leeway.
+    assert_equal(
+        _verify_with(_config().with_leeway_s(0), _iat_exp(NOW - 600, NOW + 1)),
+        String(REASON_OK),
+    )
+
+
+def test_leeway_sixty_accepts_past_the_default() raises:
+    # NOW == exp + 45: past the default 30 s, inside a configured 60 s.
+    var past_45 = _iat_exp(NOW - 600, NOW - 45)
+    assert_equal(_verify_with(_config(), past_45), String(REASON_EXPIRED))
+    assert_equal(
+        _verify_with(_config().with_leeway_s(60), past_45), String(REASON_OK)
+    )
+    # Refused at exp + 60 (refused at or after exp + leeway).
+    assert_equal(
+        _verify_with(_config().with_leeway_s(60), _iat_exp(NOW - 600, NOW - 60)),
+        String(REASON_EXPIRED),
+    )
 
 
 def test_nbf_in_the_future_is_refused() raises:
