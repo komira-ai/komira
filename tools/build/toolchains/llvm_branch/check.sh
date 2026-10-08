@@ -24,8 +24,8 @@
 #   4. The runtime is an ar archive that defines each of <symbols>
 #      (llvm-nm --defined-only).
 # `raw_version`, against both and <fixture_dir> (want: functions=<n>,
-# counts=<function>:<count>,<count>..., triple=<zig triple>), the version
-# coupling of README.md:
+# counts=<function>:<count>,<count>..., raw=<raw>, triple=<zig triple>),
+# the version coupling of README.md:
 #   1. zig cc compiles fixtures/profile_fixture.c to LLVM bitcode.
 #   2. Mojo's lld instruments it as a coverage build does (`-r`,
 #      `pgo-instr-gen,instrprof,default<O0>`). The instrumented object
@@ -42,7 +42,9 @@
 #      wrote is one this llvm-profdata accepts. Otherwise: `raw profile
 #      version <N> not accepted by llvm-profdata <version>, which expects
 #      <M>` when llvm-profdata reports LLVM's `raw profile version mismatch`,
-#      and `llvm-profdata merge failed on ...` for any other refusal.
+#      and `llvm-profdata merge failed on ...` for any other refusal. The
+#      version it accepted must be <raw> (RAW_PROFILE_VERSION of defs.bzl,
+#      which every branch coverage run requires of each raw profile).
 #   6. `llvm-profdata show` reports <functions> functions, and <function>'s
 #      counters hold <count>... (sorted: the order is the instrumentation's).
 #   7. The same profile with its version field set to <N>+1 is refused by
@@ -245,6 +247,7 @@ poke8() {
 raw_version_mode() {
     functions=$(want functions)
     counts=$(want counts)
+    raw=$(want raw)
     triple=$(want triple)
     W="$T/w"
     mkdir -p "$W"
@@ -285,6 +288,8 @@ raw_version_mode() {
         red "the raw profile's variant flags 0x$flags lack the IR-instrumentation bit 0x01000000: its version word is the runtime's default, not the instrumenter's"
     pass
     why=$(accepts "$W/pg.profraw" "$W/pg.profdata") || red "$why (README.md, The version coupling)"
+    [ "$v" = "$raw" ] ||
+        red "llvm-profdata accepts raw version $v, but RAW_PROFILE_VERSION of defs.bzl, which every branch coverage run requires of each raw profile, is $raw: change it to $v (README.md, Updating)"
     pass
     "$TOOLS_DIR/bin/llvm-profdata" show "$W/pg.profdata" >"$T/log" 2>&1 || red "llvm-profdata show failed"
     cp "$T/log" "$REPORT/show.txt"
