@@ -1,6 +1,7 @@
 # =============================================================================
 # test_no_product_vocabulary.mojo — the generic HTTP server names no product
-# concept and holds no date before September 2026.
+# concept and holds no early year-month (2024 or 2025 with any month, or 2026
+# with month 01 to 08; earlier years are not matched).
 # =============================================================================
 #
 # This package is general-purpose and open source. Whatever identity, tenancy or

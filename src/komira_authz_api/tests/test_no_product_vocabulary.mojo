@@ -1,6 +1,7 @@
 # =============================================================================
 # test_no_product_vocabulary.mojo — the authorization interface names no
-# product concept and holds no date before September 2026.
+# product concept and holds no early year-month (2024 or 2025 with any month,
+# or 2026 with month 01 to 08; earlier years are not matched).
 # =============================================================================
 #
 # A host's identity, tenancy and permission model is the host's own conformer's
