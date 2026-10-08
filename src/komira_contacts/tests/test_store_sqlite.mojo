@@ -151,7 +151,7 @@ def check_books() raises:
     var home = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Main", True)
     assert_true(home.is_default)
     assert_equal(home.owner, "alice")
-    # A second default is refused and leaves no book (the rollback).
+    # A second default is refused at its default claim, before it writes anything.
     assert_equal(_err_book(store, reactor, _alice(), BookKind.PERSONAL, "Two", True), ERR_DEFAULT_TAKEN)
     assert_equal(
         _err_book(store, reactor, _admin(), BookKind.SHARED, "Team", True),

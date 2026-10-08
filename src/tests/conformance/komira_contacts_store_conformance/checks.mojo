@@ -39,9 +39,10 @@
 #                         and a card looked up without its book.
 #   shared_book_rules     a SHARED book is read by everyone and written only
 #                         by an admin; a DIRECTORY book cannot be created.
-#   default_book          one default book per owner; a refused second default
-#                         leaves no book behind (the rollback); an empty book
-#                         name is refused.
+#   default_book          one default book per owner; a second default is
+#                         refused at its claim, before it writes anything, and
+#                         the next create runs (its transaction was closed);
+#                         an empty book name is refused.
 #   card_round_trip       every card field survives a write and a read; the
 #                         server-written fields a client sends are ignored.
 #   stale_uid_key         a uid key row naming no card (a create stopped

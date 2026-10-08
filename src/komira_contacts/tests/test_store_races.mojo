@@ -30,6 +30,11 @@
 #   update_book_written  the same peer after update_card's card write: refused,
 #                  and the card keeps its version and modseq. Catches the
 #                  same defect in update_card.
+#   book_put_fails  create_book of a default wins the default claim, then its
+#                  book write fails: the error propagates, no book is listed,
+#                  and the next default create for the owner succeeds.
+#                  Catches a failed create_book that commits (the claim kept,
+#                  naming no book) or skips the rollback.
 # =============================================================================
 
 from std.testing import assert_equal
@@ -62,6 +67,8 @@ comptime NO_RACE = 0
 comptime BOOK_WRITTEN = 1
 comptime KEY_RELEASED = 2
 comptime KEY_TAKEN = 3
+comptime BOOK_PUT_FAILS = 4
+comptime PUT_FAILED = "racing db: book write failed"
 
 
 def _key(book_id: String, uid: String) -> Filter:
@@ -110,6 +117,10 @@ struct RacingDb(Database, Movable, Deinitable):
     def put[
         RT: Runtime,
     ](mut self, mut reactor: Reactor[RT.Sink], table: String, cols: List[String], vals: List[DbValue]) raises -> UInt64:
+        if self.race == BOOK_PUT_FAILS and table == String(BOOKS):
+            # The book write fails after the default claim was written.
+            self.race = NO_RACE
+            raise Error(String(PUT_FAILED))
         return self.inner.put[RT](reactor, table, cols, vals)
 
     def delete_by_key[
@@ -365,10 +376,28 @@ def check_update_book_written() raises:
     assert_equal(now.modseq, c.modseq, "and its modseq")
 
 
+def check_book_put_fails() raises:
+    var store = _store()
+    var rt = Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    store.database().arm(BOOK_PUT_FAILS, "", "")
+    var got = String(OK)
+    try:
+        _ = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Main", True)
+    except e:
+        got = String(e)
+    assert_equal(got, PUT_FAILED, "the book write failed after the default claim")
+    assert_equal(store.database().race, NO_RACE, "the failing write ran")
+    assert_equal(len(store.list_books[Rt](reactor, _alice())), 0, "the failed create left no book")
+    var home = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Main", True)
+    assert_equal(home.is_default, True, "the rollback freed the default claim")
+
+
 def main() raises:
     check_book_written()
     check_key_released()
     check_key_taken()
     check_delete_book_written()
     check_update_book_written()
+    check_book_put_fails()
     print("PASS komira_contacts test_store_races")
