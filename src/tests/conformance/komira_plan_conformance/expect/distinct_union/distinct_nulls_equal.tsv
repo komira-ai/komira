@@ -1,0 +1,19 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §2.4: for DISTINCT, NULL equals NULL and multi-column keys
+# compare column by column. set_left's (k, s): (1, "a") twice, (NULL, "a")
+# twice, (NULL, NULL) twice, (2, NULL), (2, "b"), (4, e + U+0301). Each pair
+# keeps one row: 9 rows less 3 repeats = 6. (2, NULL) and (NULL, NULL) differ
+# in k, so both stay. The last s is the decomposed e-acute (65 CC 81),
+# written as those bytes below; strings are equal only byte for byte
+# (§4.6, §7.14), so no normalization applies.
+# Types: DISTINCT and UNION keep their input's columns, here k and s as
+# scanned (§11.1, §11.4: the output names and types are the inputs').
+k:int64?	s:string?
+1	a
+\N	a
+\N	\N
+2	\N
+2	b
+4	é

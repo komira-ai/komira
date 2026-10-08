@@ -1,0 +1,17 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §7.12: '' IS NULL is FALSE. s IS NULL is TRUE only for
+# rows 6 and 8, whose s is NULL; row 5's '' is a value. s is passed through
+# as scanned.
+# Types: BOOLEAN, never NULL (§8.21); id and s as scanned.
+id:int64	s:string?	s_null:bool
+1	abc	false
+2	héllo	false
+3	日本	false
+4	a😀b	false
+5		false
+6	\N	true
+7	Straße	false
+8	\N	true
+9	😀	false

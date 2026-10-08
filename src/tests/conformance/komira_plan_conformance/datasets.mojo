@@ -54,9 +54,26 @@
 #                  and 0.0 / -0.0), a NULL p, a NULL q and 1.0 / 4.0; q
 #                  holds -0.0 twice; r is NULL on the 0.0 / 0.0 row only.
 #                  JSON has no NaN or infinity: they are made by §5.6.
+#   set_left       id, k, s: (1, "a") twice, (NULL, "a") twice, (NULL,
+#                  NULL) twice, (2, NULL), (2, "b"), and (4, "e" followed
+#                  by U+0301, the decomposed e-acute: bytes 65 CC 81).
+#   set_right      id, k, s: (1, "a") and (NULL, NULL), both also in
+#                  set_left; (3, U+65E5, 3 bytes); (2, "B"); (4, U+00E9, the
+#                  precomposed e-acute: bytes C3 A9); (5, U+1F600, 4 bytes).
+#                  The two sides have identical column names and types, as
+#                  §11.1 and §11.4 require of set-operation inputs.
+#   str_rows       id, s, t: s = "abc", "h" U+00E9 "llo", U+65E5 U+672C,
+#                  "a" U+1F600 "b", "", NULL, "Stra" U+00DF "e", NULL,
+#                  U+1F600 (1-, 2-, 3- and 4-byte characters, the empty
+#                  string and NULL); t = "x", NULL, "", "-", NULL, "y",
+#                  U+00C4 U+00D6, NULL, U+FF21 (fullwidth A: EF BC A1,
+#                  below U+1F600's F0 by bytes, above its UTF-16 lead
+#                  surrogate D83D).
 #                  A reader of these files must keep -0.0's sign (float_pairs,
 #                  sort_rows) and read 9007199254740993 (2^53 + 1, avg_rows)
-#                  as that exact INT64, never through a double.
+#                  as that exact INT64, never through a double. It must keep
+#                  string bytes as written: no Unicode normalization
+#                  (set_left and set_right differ only by it on k = 4).
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
@@ -221,13 +238,44 @@ def float_pairs() -> Dataset:
     )
 
 
+def _set_side(name: String) -> Dataset:
+    return Dataset(
+        name,
+        _schema(
+            [String("id"), String("k"), String("s")],
+            [ArrowType.INT64, ArrowType.INT64, ArrowType.STRING],
+            [False, True, True],
+        ),
+    )
+
+
+def set_left() -> Dataset:
+    return _set_side("set_left")
+
+
+def set_right() -> Dataset:
+    return _set_side("set_right")
+
+
+def str_rows() -> Dataset:
+    return Dataset(
+        "str_rows",
+        _schema(
+            [String("id"), String("s"), String("t")],
+            [ArrowType.INT64, ArrowType.STRING, ArrowType.STRING],
+            [False, True, True],
+        ),
+    )
+
+
 def all_datasets() -> List[Dataset]:
     """Every dataset a case may scan; test_corpus refuses a file under
     datasets/ that is not one of these."""
     return [
         bool_pairs(), ints_nullable(), groups(), join_left(), join_right(),
         sort_rows(), int_pairs(), window_rows(), rank_rows(), stat_rows(),
-        avg_rows(), div_pairs(), float_pairs(),
+        avg_rows(), div_pairs(), float_pairs(), set_left(), set_right(),
+        str_rows(),
     ]
 
 

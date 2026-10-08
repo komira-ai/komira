@@ -16,10 +16,12 @@ from .plan_case import Case
 from .cases_agg_grouping import cases as agg_grouping_cases
 from .cases_agg_stats import cases as agg_stats_cases
 from .cases_conditional import cases as conditional_cases
+from .cases_distinct_union import cases as distinct_union_cases
 from .cases_filter_3vl import cases as filter_3vl_cases
 from .cases_join_residual_nullkeys import cases as join_residual_nullkeys_cases
 from .cases_project_arith import cases as project_arith_cases
 from .cases_sort_topn_limit import cases as sort_topn_limit_cases
+from .cases_string import cases as string_cases
 from .cases_window_rank import cases as window_rank_cases
 
 
@@ -33,6 +35,8 @@ def shard_names() -> List[String]:
         String("conditional"),
         String("agg_stats"),
         String("project_arith"),
+        String("distinct_union"),
+        String("string"),
     ]
 
 
@@ -53,6 +57,10 @@ def shard_cases(name: String) raises -> List[Case]:
         return agg_stats_cases()
     if name == "project_arith":
         return project_arith_cases()
+    if name == "distinct_union":
+        return distinct_union_cases()
+    if name == "string":
+        return string_cases()
     raise Error("plan_conformance: no shard named '" + name + "'")
 
 

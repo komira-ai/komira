@@ -1,0 +1,8 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: both inputs filtered by id < 0 have no row (§1.2).
+# §11.6: a UNION ALL of empty inputs is empty, and carries its full schema.
+# Types: DISTINCT and UNION keep their input's columns, here k and s as
+# scanned (§11.1, §11.4: the output names and types are the inputs').
+k:int64?	s:string?

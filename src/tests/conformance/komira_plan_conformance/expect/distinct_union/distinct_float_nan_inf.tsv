@@ -1,0 +1,18 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: DISTINCT (p / q AS d) over float_pairs. §5.6: 1.5 / 0.0 =
+# inf, -1.5 / 0.0 = -inf, 2.0 / -0.0 = -inf, 0.0 / 0.0 and 0.0 / -0.0 =
+# NaN, 1.0 / 4.0 = 0.25; §5.0: a NULL p (id 4) or q (id 8) gives NULL. So d
+# = inf, -inf, NaN, NULL, -inf, 0.25, NaN, NULL. §2.6: as a DISTINCT key all
+# NaNs are one value; §2.4: the NULLs are one row. Distinct: inf, -inf, NaN,
+# NULL, 0.25 (8 rows less the repeated -inf, NaN and NULL = 5). NaN is
+# written bare (any NaN matches, as in project_arith/float_div_zero).
+# Types: FLOAT64 / FLOAT64 is FLOAT64 under every option of §8.9, nullable
+# by §8's default; DISTINCT keeps it.
+d:float64?
+inf
+-inf
+NaN
+\N
+0.25

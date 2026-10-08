@@ -1,0 +1,17 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: s LIKE '%' is TRUE for every non-NULL s, '' included
+# (§7.6: `%` matches zero characters; §7.12: '' is a value), and NULL for a
+# NULL s (§7.6). §1.2: a filter keeps the rows whose predicate is TRUE, so
+# rows 6 and 8 (s NULL) go and the other seven stay, every column as
+# scanned. Row 3's t and row 5's s are the empty string, not \N.
+# Types: a filter keeps its input's columns, as scanned.
+id:int64	s:string?	t:string?
+1	abc	x
+2	héllo	\N
+3	日本	
+4	a😀b	-
+5		\N
+7	Straße	ÄÖ
+9	😀	Ａ

@@ -1,0 +1,23 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §7.6: LIKE matches the whole string; `%` is any run of
+# zero or more characters, `_` exactly one code point; case-sensitive and
+# byte-exact; a NULL subject gives NULL (rows 6 and 8, every column).
+# 'h_llo': only row 2, h, U+00E9 (one code point), l, l, o. 'a_b': only
+# row 4, U+1F600 one code point between a and b; "abc" has c, not b, third.
+# '%': every non-NULL s, '' included (zero characters). '__': exactly two
+# code points, only row 3 (lengths by §7.1: 3, 5, 2, 3, 0, 6, 1). '%b':
+# ends in b, only row 4. 'ABC': "abc" differs in case, so no row. '_':
+# one code point, only row 9 (U+1F600, 4 bytes).
+# Types: BOOLEAN, nullable (§8.8); id as scanned.
+id:int64	l_h_llo:bool?	l_a_b:bool?	l_pct:bool?	l_2:bool?	l_pct_b:bool?	l_ABC:bool?	l_1:bool?
+1	false	false	true	false	false	false	false
+2	true	false	true	false	false	false	false
+3	false	false	true	true	false	false	false
+4	false	true	true	false	true	false	false
+5	false	false	true	false	false	false	false
+6	\N	\N	\N	\N	\N	\N	\N
+7	false	false	true	false	false	false	false
+8	\N	\N	\N	\N	\N	\N	\N
+9	false	false	true	false	false	false	true
