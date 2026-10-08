@@ -5,6 +5,11 @@ libraries have moved here, as a Mojo tool built with Buck2 and shipped as a
 pinned prebuilt binary, which a git hook then runs; the build and its tooling
 use no Python.
 
+Its source of a library's declarations is in place: the build rule
+[`mojo_doc_json`](../tools/build/mojo/doc.md) runs
+the pinned compiler's `mojo doc` on a library and makes the JSON a build
+output. That JSON holds no source locations.
+
 Until then, the build graph itself answers what the graph would:
 
 ```sh
