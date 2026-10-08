@@ -984,8 +984,9 @@ querying its attributes, so narrowing it fails.
 ## 46. Coverage gate
 With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
 
-## 52. API JSON: mojo_doc_json
-[`mojo_doc_json`](../mojo/README.md#api-json-mojo_doc_json): `//tools/build/examples:hellopkg_doc` (in test 1) equals its golden; [`functional/mojo_doc_json`](functional/mojo_doc_json/BUCK) must build and each target of [`negative/mojo_doc_json`](negative/mojo_doc_json/BUCK) must fail naming its defect.
+## 52. [API JSON: mojo_doc_json](../mojo/README.md#api-json-mojo_doc_json)
+
+## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
 
 ## Diagnostics
 

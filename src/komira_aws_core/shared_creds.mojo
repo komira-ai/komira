@@ -5,8 +5,8 @@
 # THE PROBLEM. `DefaultChainCredsSource` refreshes a temporary credential (an
 # instance or container role, STS, web identity) before it expires, but it owns
 # its caches and is not Copyable. A client that must be cloned (S3Store,
-# S3ConditionalStore, S3Fs and the FsHandle S3 arm clone their credential
-# source with every clone, and each clone is used on its own thread) could
+# S3ConditionalStore and S3Fs clone their credential source with every
+# clone, and each clone is used on its own thread) could
 # therefore only hold a `StaticCredsSource`, a credential fetched once that went
 # stale after its expiry.
 #

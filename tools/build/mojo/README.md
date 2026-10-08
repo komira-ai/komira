@@ -942,7 +942,11 @@ mojo_doc_json(
 - With either check, `[raw]` is the unchecked JSON.
 
 Test 52 ([`tests/README.md`](../tests/README.md#52-api-json-mojo_doc_json))
-covers both checks and a source that does not compile.
+covers both checks and a source that does not compile:
+[`functional/mojo_doc_json`](../tests/functional/mojo_doc_json/BUCK) must build
+and each target of [`negative/mojo_doc_json`](../tests/negative/mojo_doc_json/BUCK)
+must fail naming its defect. Test 1 builds `hellopkg_doc`, so the example's JSON
+equals its golden.
 
 ```sh
 ./buck2 build tests//functional/mojo_doc_json:docpkg_doc

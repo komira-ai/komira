@@ -26,6 +26,11 @@
 #      green, ...[test_lingers] red (a child left sleeping 100 s holds kcov,
 #      and the run's 20 s test-only limit kills the run), and its log without
 #      "survived the kill" (the kill reached the run's whole process group);
+#      lingerproc[coverage][tests][test_lingers] red (a cov_run.sh copy
+#      taking 1 for its own pid, so /proc/<pid> is another process, as in a
+#      /proc of another PID namespace: a /proc that does not show the run's
+#      shell under its own pid is refused before the survivor scan, which
+#      would see none of the group there);
 #      tests//negative/coverage:lost[coverage] red (sources staged where the
 #      line tables do not name them are refused as unmapped, not dropped);
 #      lostdir[coverage] red (a binary naming the sources by another
@@ -49,7 +54,10 @@ expect_red coverage_run_parent_fails "The test failed under kcov (exit 1)" 'test
 expect_red coverage_run_killed "The test failed under kcov (exit 137)" 'tests//negative/coverage:exits[coverage][tests][test_killed]'
 # The failing run's message is a coverage run's: not gate_runner's banner,
 # which would say the release gate's test failed (it passed).
-if grep -E "GATED TEST FAILED|package is not produced" "$LOG/coverage_run_parent_fails.log" > "$LOG/coverage_run_banner.txt"; then
+# A missing log is a failure, not a pass (grep's exit 2 is not "absent").
+if [ ! -f "$LOG/coverage_run_parent_fails.log" ]; then
+    fail "coverage_run_banner: $LOG/coverage_run_parent_fails.log does not exist, so the banner cannot be checked"
+elif grep -E "GATED TEST FAILED|package is not produced" "$LOG/coverage_run_parent_fails.log" > "$LOG/coverage_run_banner.txt"; then
     fail "coverage_run_banner: a failing coverage run prints the release gate's banner: $(head -n 1 "$LOG/coverage_run_banner.txt") (see $LOG/coverage_run_parent_fails.log)"
 else
     pass coverage_run_banner
@@ -59,11 +67,15 @@ expect_red coverage_run_refused "kcov could not trace the test" 'tests//negative
 expect_red coverage_run_lingers "The test left processes running or did not finish within 20 s under kcov" 'tests//negative/coverage:linger[coverage][tests][test_lingers]'
 # The limit's kill reached the whole group: cov_run.sh says when a process
 # of it survived (a kill of gate_runner alone, its pid without the '-').
-if grep -F "processes of the coverage run survived the kill" "$LOG/coverage_run_lingers.log" > "$LOG/coverage_run_lingers_survivors.txt"; then
+# A missing log is a failure, not a pass (grep's exit 2 is not "absent").
+if [ ! -f "$LOG/coverage_run_lingers.log" ]; then
+    fail "coverage_run_lingers_group: $LOG/coverage_run_lingers.log does not exist, so whether the kill reached the whole group cannot be checked"
+elif grep -F "processes of the coverage run survived the kill" "$LOG/coverage_run_lingers.log" > "$LOG/coverage_run_lingers_survivors.txt"; then
     fail "coverage_run_lingers_group: the time limit's kill left processes of the run: $(head -n 1 "$LOG/coverage_run_lingers_survivors.txt") (see $LOG/coverage_run_lingers.log)"
 else
     pass coverage_run_lingers_group
 fi
+expect_red coverage_run_proc "/proc is not readable as this run's own" 'tests//negative/coverage:lingerproc[coverage][tests][test_lingers]'
 
 # 46
 # shellcheck source=tools/build/tests/coverage_gate_tests.sh
