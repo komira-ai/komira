@@ -16,6 +16,9 @@ load(
 # Test 53 (the surface capability matrix), the half that must go red: one
 # planted defect per target, in the lists of functional/surface_capability_matrix
 # (whose `ok` builds). run_tests.sh requires each to fail naming its finding.
+# The row naming a target that does not exist is not here: a loadable target
+# with a dangling dep fails every query over tests//..., the CI affected step's
+# included. run_tests.sh copies dangling.BUCK into dangling/BUCK for its build.
 
 [
     surface_capability_matrix(
@@ -30,8 +33,6 @@ load(
         surfaces = SCM_SURFACES if surfaces == None else surfaces,
     )
     for name, rows, capabilities, not_capabilities, surfaces, floor in [
-        # A row naming a target that does not exist: Buck2 refuses the graph.
-        ("dangling", scm_set(SCM_MATRIX, "polars", "join_left", E2E + "polars_e2e:test_join_left"), None, None, None, None),
         # A second row for (pandas, filter).
         ("duplicate", SCM_MATRIX + [("pandas", "filter", "-", "again")], None, None, None, None),
         # A capability the vocabulary does not hold.

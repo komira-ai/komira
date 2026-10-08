@@ -1365,8 +1365,13 @@ done
 expect_green surface_capability_matrix //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
 N=tests//negative/surface_capability_matrix
 E=tests//functional/surface_capability_matrix/src/tests/e2e
+# The dangling row's target is loadable only for this build (dangling.BUCK says
+# why); dangling/ is gitignored in case a run is cut short here.
+D="$ROOT/tools/build/tests/negative/surface_capability_matrix"
+mkdir -p "$D/dangling" && cp "$D/dangling.BUCK" "$D/dangling/BUCK"
+expect_red surface_capability_matrix_dangling "Unknown target \`test_join_left\` from package \`$E/polars_e2e\`" "$N/dangling:dangling"
+rm -f "$D/dangling/BUCK" && rmdir "$D/dangling"
 for want in \
-    "dangling|Unknown target \`test_join_left\` from package \`$E/polars_e2e\`" \
     "duplicate|matrix row 11 (pandas, filter): a second row for the pair, first at row 2" \
     "unknown_capability|matrix row 11 (pandas, window): unknown capability \`window\`" \
     "unknown_surface|matrix row 11 (spark, filter): unknown surface \`spark\`" \
