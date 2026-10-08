@@ -10,12 +10,12 @@
 #
 # 1. KEPT, BY BYTES ONLY. Nothing is read by name: `Resource` 16 (an empty
 #    record) and `SecretRef` 4 (a `Ref`), alone and inside a service's and a
-#    job's `secret_env`, survive decode then encode. Against a schema that
+#    container job's `secret_env`, survive decode then encode. Against a schema that
 #    lacks either number the record is unknown and dropped, and this fails.
 # 2. SECRET. `Secret` declares no field: any record in it is unknown and
 #    dropped. As `Resource.body` 16 it fills the `secret` field, at its
-#    position in declaration order (the sixth: service, job, table, bucket,
-#    queue, secret), its empty record is kept on re-encode and in JSON, and
+#    position in declaration order (the seventh: service, container job,
+#    worker, table, bucket, queue, secret), its empty record is kept on re-encode and in JSON, and
 #    `retention` 3 rides beside it.
 # 3. SECRETREF.SECRET. Field 4 is `secret`, a `Ref`; by name, binary round
 #    trip, JSON (`"secret":{"resource":"db"}`), and absent = unset. Fields 1
@@ -23,7 +23,7 @@
 #    referenced decodes with both (refusing that is validate's job, never
 #    the codec's).
 # The census of every arm's number and oneof position is in
-# test_resource_dns_numbers.mojo (the latest arms decide every position).
+# test_resource_compute_numbers.mojo (the latest arms decide every position).
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 # =============================================================================
@@ -32,7 +32,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
 from kci_resource_proto.resource import (
-    Job,
+    ContainerJob,
     Resource,
     Retention,
     Secret,
@@ -224,7 +224,7 @@ def test_added_secret_numbers_are_kept() raises:
     _same(encode_proto(decode_proto[Service](svc.copy())), svc, "Service.secret_env with SecretRef 4")
     var job = List[UInt8]()
     _msg(job, 7, _entry("API_TOKEN", _secret_ref_to("token")))
-    _same(encode_proto(decode_proto[Job](job.copy())), job, "Job.secret_env with SecretRef 4")
+    _same(encode_proto(decode_proto[ContainerJob](job.copy())), job, "ContainerJob.secret_env with SecretRef 4")
     print("  test_added_secret_numbers_are_kept: PASS")
 
 
@@ -248,7 +248,7 @@ def test_secret() raises:
     _msg(r, 16, List[UInt8]())
     var rr = decode_proto[Resource](r.copy())
     assert_true(Bool(rr.secret), "body 16 is `secret`")
-    assert_equal(rr._oneof0_case, 6, "the secret is the sixth arm")
+    assert_equal(rr._oneof0_case, 7, "the secret is the seventh arm")
     assert_equal(rr.retention.value, Retention.DELETE, "retention 3 beside the secret arm")
     assert_true(not Bool(rr.queue) and not Bool(rr.service_account), "no other arm is set")
     var again = encode_proto(rr)

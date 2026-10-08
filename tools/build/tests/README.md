@@ -986,6 +986,8 @@ querying its attributes, so narrowing it fails.
 ## 46. Coverage gate
 With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
 
+## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
