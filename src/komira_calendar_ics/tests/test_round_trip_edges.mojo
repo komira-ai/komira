@@ -314,6 +314,22 @@ def test_skipped_all_day_series_before_a_timed_one() raises:
     assert_equal(encode_json(back.events[0].event), encode_json(a[1].event))
 
 
+def test_skipped_series_without_uid_is_named_by_id() raises:
+    # A left-out series with an empty uid is named in `skipped` by its id.
+    var a = List[IcsEvent]()
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"id":"e9","uid":"","start":"2030-09-02T09:00:00","timeZone":"UTC","durationSeconds":60,'
+                + '"recurrence":{"freq":"MONTHLY","interval":1,"monthDay":31,"until":"2030-10-30"}}'
+            )
+        )
+    )
+    var exported = write_ics(a, ZoneTable(), 1914364800)
+    assert_equal(len(exported.skipped), 1, "skipped")
+    assert_equal(exported.skipped[0], "e9")
+    assert_equal(exported.text.find("VEVENT"), -1, exported.text)
+
 def main() raises:
     print("test_round_trip_edges")
     var failed = List[String]()
@@ -367,6 +383,11 @@ def main() raises:
         print("  test_skipped_all_day_series_before_a_timed_one PASS")
     except e:
         failed.append("test_skipped_all_day_series_before_a_timed_one: " + String(e))
+    try:
+        test_skipped_series_without_uid_is_named_by_id()
+        print("  test_skipped_series_without_uid_is_named_by_id PASS")
+    except e:
+        failed.append("test_skipped_series_without_uid_is_named_by_id: " + String(e))
     for f in failed:
         print("  FAIL " + f)
     assert_true(len(failed) == 0, String(len(failed)) + " tests failed")
