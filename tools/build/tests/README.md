@@ -124,10 +124,10 @@ buck2 build tests//negative/closure_refusal:hello_incomplete_toolchain
 
 ## 5. Host paths
 
-No action's argv or environment names an absolute host path, read from
-`buck2 aquery` over the examples and their run checks, the Rust example and
-the protobuf tests (rustc, protoc, the plugin, the generated packages). The
-scan first proves it detects a planted absolute path.
+No action's argv or environment names an absolute host path, read from `buck2 aquery` over the examples and their run checks, the Rust example,
+the protobuf tests (rustc, protoc, the plugin, the generated packages) and the aws-lc and s2n-tls tests, which it builds first in the same daemon:
+aquery cannot run a README's generate step (a local-only dynamic action) that the daemon has not built, so the check does not depend on an earlier test.
+The scan first proves it detects a planted absolute path.
 
 ## 6. Outputs
 

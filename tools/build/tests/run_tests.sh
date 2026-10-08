@@ -552,13 +552,23 @@ expect_red closure_refusal "REFUSING: toolchain member" tests//negative/closure_
 # 5
 # The scan covers the Rust and protobuf actions too (rustc, protoc, the
 # plugin, the generated packages), and aws-lc's and s2n-tls's.
-SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" //tools/build/examples/rust:prost_roundtrip
+SCAN_TARGETS=(//tools/build/examples/rust:prost_roundtrip
     tests//functional/proto:test_person tests//functional/proto:team_proto
     //tools/build/examples/aws_lc:test_aws_lc //tools/build/examples/s2n_tls:test_s2n_handshake)
+SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" "${SCAN_TARGETS[@]}")
 query="deps(set($(printf '"%s" ' "${SCAN[@]}")))"
 abs_path_re="[\"' =:]/[A-Za-z][A-Za-z0-9_.-]*"
+# The closure holds libraries with a README (komira_runtime_paths among
+# them, and komira libraries the examples import). aquery cannot run a
+# README's generate step (a local-only dynamic action) and fails on it unless
+# this daemon has already built it, so the scan builds what it reads first
+# rather than depend on an earlier test having done so. Sub-targets get their
+# own invocation (see RUN_CHECKS).
 if ! printf '%s\n' "\"cmd\": \"['/bin/sh', 'x']\"" | grep -qE "$abs_path_re"; then
     fail "host paths: the scan pattern does not detect a planted absolute path"
+elif ! "$BUCK2" build "${EXAMPLES[@]}" "${SCAN_TARGETS[@]}" > "$LOG/host_paths_build.log" 2>&1 \
+    || ! "$BUCK2" build "${RUN_CHECKS[@]}" >> "$LOG/host_paths_build.log" 2>&1; then
+    fail "host paths: cannot build the scanned targets (see $LOG/host_paths_build.log)"
 elif ! "$BUCK2" aquery "$query" --output-attribute cmd --output-attribute env --json > "$LOG/aquery.json" 2> "$LOG/aquery.err"; then
     fail "host paths: aquery failed (see $LOG/aquery.err)"
 elif ! grep -q '"cmd"' "$LOG/aquery.json"; then
