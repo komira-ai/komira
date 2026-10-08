@@ -196,9 +196,11 @@ def _ffd(count: Int) -> String:
 
 
 def test_utf8_lead_and_continuation_byte_edges() raises:
-    # RFC 3629 section 4: every edge of the lead-byte table and of each
-    # continuation-byte range, as a well-formed sequence and its code point
-    # on the inside and one U+FFFD per octet on the outside.
+    # RFC 3629 section 4: every edge of the lead-byte table and of the
+    # continuation-byte range of each lead byte and each byte position, as a
+    # well-formed sequence and its code point on the inside, and on the
+    # outside one U+FFFD per octet that does not start a well-formed
+    # sequence.
     _check_lossy("7F", chr(0x7F))
     _check_lossy("80", _ffd(1))
     _check_lossy("C1 BF", _ffd(2))
@@ -221,6 +223,26 @@ def test_utf8_lead_and_continuation_byte_edges() raises:
     _check_lossy("F5 80 80 80", _ffd(4))
     _check_lossy("F7 8F 80 80", _ffd(4))
     _check_lossy("FF 80", _ffd(2))
+    # A byte that never starts a sequence (80..C1), followed by three bytes
+    # in 80..BF: one U+FFFD each, not a four-byte sequence.
+    _check_lossy("80 80 80 80", _ffd(4))
+    _check_lossy("C1 BF BF BF", _ffd(4))
+    # The second-byte ranges of E0 (A0..BF), ED (80..9F), F0 (90..BF) and
+    # F4 (80..8F): the edges not pinned by the lead-byte vectors above.
+    _check_lossy("E0 BF BF", chr(0xFFF))
+    _check_lossy("E0 C0 80", _ffd(3))
+    _check_lossy("ED 7F 80", _ffd(1) + chr(0x7F) + _ffd(1))
+    _check_lossy("F0 BF BF BF", chr(0x3FFFF))
+    _check_lossy("F0 C0 80 80", _ffd(4))
+    _check_lossy("F4 7F 80 80", _ffd(1) + chr(0x7F) + _ffd(2))
+    # The outside edges of 80..BF as the second byte after each lead-byte
+    # range that uses it.
+    _check_lossy("E1 7F 80", _ffd(1) + chr(0x7F) + _ffd(1))
+    _check_lossy("EC C0 80", _ffd(3))
+    _check_lossy("EE 7F 80", _ffd(1) + chr(0x7F) + _ffd(1))
+    _check_lossy("EF C0 80", _ffd(3))
+    _check_lossy("F1 7F 80 80", _ffd(1) + chr(0x7F) + _ffd(2))
+    _check_lossy("F3 C0 80 80", _ffd(4))
     # The default continuation range 80..BF, second byte.
     _check_lossy("C2 7F", _ffd(1) + chr(0x7F))
     _check_lossy("DF C0", _ffd(2))
@@ -230,6 +252,8 @@ def test_utf8_lead_and_continuation_byte_edges() raises:
     _check_lossy("E2 82 BF", chr(0x20BF))
     # Third and fourth bytes of a four-byte sequence.
     _check_lossy("F0 90 41 80", _ffd(2) + "A" + _ffd(1))
+    _check_lossy("F0 90 7F 80", _ffd(2) + chr(0x7F) + _ffd(1))
+    _check_lossy("F0 90 C0 80", _ffd(4))
     _check_lossy("F0 90 80 7F", _ffd(3) + chr(0x7F))
     _check_lossy("F0 90 80 C0", _ffd(4))
     # A sequence cut short by the end of the token, and one that ends
