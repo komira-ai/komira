@@ -12,7 +12,7 @@
 #     resource of the list, asks for a named output (only the escape hatch,
 #     which this kci does not have, has those), asks for no output, or asks
 #     for an output the producer's type does not expose.
-# Used for `env` of a service and of a job (validate.mojo) and for the
+# Used for `env` of every workload (compute.mojo) and for the
 # values of a DNS record (dns.mojo).
 # =============================================================================
 

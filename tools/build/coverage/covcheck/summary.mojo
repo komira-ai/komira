@@ -38,6 +38,14 @@ def _ratio(hit: Int, found: Int) -> String:
     return render_bp(basis_points(hit, found)) + String(" (") + String(hit) + String("/") + String(found) + String(")")
 
 
+def _branch_ratio(hit: Int, found: Int) -> String:
+    """`_ratio` of branches, `not measured` when none was found: no report
+    gave a branch record (kcov's Cobertura has none), which is not 100%."""
+    if found <= 0:
+        return String("not measured")
+    return _ratio(hit, found)
+
+
 def _floor(p: PackageStats) -> String:
     if not p.has_row:
         return String("-")
@@ -78,7 +86,7 @@ def _row(a: Analysis, p: PackageStats, touched: Bool) -> String:
     var name = md_code(p.package) + (String(" (touched)") if touched else String(""))
     return (
         String("| ") + name + String(" | ") + _ratio(p.line_hit, p.line_found) + String(" | ")
-        + _ratio(p.branch_hit, p.branch_found) + String(" | ") + _mutants(p) + String(" | ")
+        + _branch_ratio(p.branch_hit, p.branch_found) + String(" | ") + _mutants(p) + String(" | ")
         + _floor(p) + String(" | ") + _status(a, p.package) + String(" |\n")
     )
 
@@ -102,7 +110,7 @@ def render_summary(
     if scope.byte_length() > 0:
         s += String(" of ") + md_code(scope)
     s += String(": line ") + _ratio(a.total.line_hit, a.total.line_found)
-    s += String(", branch ") + _ratio(a.total.branch_hit, a.total.branch_found)
+    s += String(", branch ") + _branch_ratio(a.total.branch_hit, a.total.branch_found)
     if with_diff:
         s += String("; changed lines ") + _ratio(d.covered, d.covered + d.uncovered)
     s += String("\n\n") + String(CAVEAT) + String("\n\n")
@@ -125,7 +133,7 @@ def render_summary(
                 s += _row(a, a.packages[i], False)
         if scope.byte_length() == 0:
             s += String("| **total** | ") + _ratio(a.total.line_hit, a.total.line_found) + String(" | ")
-            s += _ratio(a.total.branch_hit, a.total.branch_found) + String(" | ") + _mutants(a.total) + String(" | - | - |\n")
+            s += _branch_ratio(a.total.branch_hit, a.total.branch_found) + String(" | ") + _mutants(a.total) + String(" | - | - |\n")
         s += String("\n")
 
     s += String("### Findings (") + String(len(a.findings)) + String(")\n\n")
@@ -182,7 +190,7 @@ def render_summary(
 
     s += String("### Set aside\n\n")
     s += String("- ") + String(a.ignored_files) + String(" report files outside the repository (the Mojo standard library, other code not in the repository)\n")
-    s += String("- ") + String(a.excluded_test_files) + String(" test source files (`<package>/tests/`; `--include-tests` counts them)\n")
+    s += String("- ") + String(a.excluded_test_files) + String(" test source files (`<package>/tests/` and each `--test-source`; `--include-tests` counts them)\n")
     s += String("- ") + String(a.ignored_mutants) + String(" mutants outside the repository, ") + String(a.excluded_test_mutants) + String(" in test sources\n")
     return s^
 

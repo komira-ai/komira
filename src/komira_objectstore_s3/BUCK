@@ -17,7 +17,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # version per file handle, one-request footers, multipart writes, delete,
 # and up to its in-flight bounds of requests at once on threads of
 # komira_fork_join, each over a store of its own; its settings in
-# S3FsOptions).
+# S3FsOptions), and s3_prod_fs, the production S3Fs over komira_http_client's
+# KernelSchemeConnector, which dials plaintext only for an http:// endpoint.
 #
 # the core packages supplies the ByteView of komira_objectstore's RangeFetchStore
 # signature, and S3Fs's buffers, Slab and FS_SCHEME_S3. komira_async is the
@@ -64,8 +65,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # credentials rotate under cloned clients: komira_aws_core's
 # SharedCredsSource over the real default chain, scripted, signs the request
 # after the refresh window with the new credential on an S3Fs, an
-# S3ConditionalStore and each one's clone, one refresh for all of them) and
-# test_no_env_reads (the package's sources read no environment).
+# S3ConditionalStore and each one's clone, one refresh for all of them),
+# test_s3_fs_shared_creds_clone (an S3Fs and its clone, over AwsEchoConnector,
+# sign with the shared chain's credential of the moment: one refresh for
+# both), test_s3_endpoint_scheme (the endpoint's scheme picks the connector:
+# s3_endpoint_is_plaintext's answers and refusals, an http:// endpoint read
+# over the plaintext side of komira_http_client's SchemeConnector and an
+# https:// one over the TLS side, the production factory's and s3_prod_fs's
+# choice, and the production type cloning without dialing),
+# test_s3_fs_scripted_read (an S3Fs and its clone each read over a
+# ScriptedConnector with a store of their own, a built store kept through a
+# move, and the production connector's TLS form refusing a plaintext
+# http:// endpoint) and test_no_env_reads (the package's sources read no
+# environment).
 #
 # test_s3_conditional_store and test_s3_fs share one fake S3,
 # komira_test_fake_s3 (src/tests/helpers), named in `test_deps`: it reaches
@@ -101,11 +113,14 @@ mojo_library(
         "tests/test_no_env_reads.mojo",
         "tests/test_s3_basics.mojo",
         "tests/test_s3_conditional_store.mojo",
+        "tests/test_s3_endpoint_scheme.mojo",
         "tests/test_s3_fs.mojo",
         "tests/test_s3_fs_clone.mojo",
         "tests/test_s3_fs_inflight.mojo",
         "tests/test_s3_fs_one_version.mojo",
         "tests/test_s3_fs_options.mojo",
+        "tests/test_s3_fs_scripted_read.mojo",
+        "tests/test_s3_fs_shared_creds_clone.mojo",
         "tests/test_s3_http_config.mojo",
         "tests/test_s3_presign.mojo",
         "tests/test_s3_retry_quota_clones.mojo",

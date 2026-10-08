@@ -136,12 +136,12 @@ def _storage(api_port: String, roles_on: Bool = True) -> String:
     return (
         String('{"resource":[')
         + String('{"id":"store","retention":"DELETE","bucket":{"versioning":true}},')
-        + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"internal":{},')
+        + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"internal":{},"scale":{"min":1,"max":2},')
         + String('"env":{"STORE":{"ref":{"resource":"store","standard":"NAME"}}}},')
         + web_uses
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":')
         + api_port
-        + String(",")
+        + String(',"scale":{"min":1,"max":2},')
         + exposure
         + String("}}")
         + String("]}")

@@ -6,8 +6,7 @@
 # GRAPH findings, true on every cloud, that validate collects for a
 # messaging resource (`messaging_findings`):
 #   * a queue, a topic and a subscription run as no identity, so none has
-#     `uses` lines (write the line on the service or job that sends or
-#     receives);
+#     `uses` lines (write the line on the workload that sends or receives);
 #   * a queue's `ack_deadline`, when written, is whole seconds from 10 to
 #     300; its `max_deliveries`, when written, is from 5 to 100. Both ranges
 #     are the ones every built-in cloud honours, so a value means the same on
@@ -250,7 +249,7 @@ def messaging_findings(resources: List[Resource], field: Int, r: Resource) -> Li
                 + name
                 + String(
                     " runs as no identity, so it cannot use another resource; write"
-                    " the uses line on the service or job that sends or receives"
+                    " the uses line on the workload that sends or receives"
                 ),
             )
         )

@@ -7,7 +7,7 @@
 # them):
 #
 # 1. THE DATA REFUSALS, every one collected in one pass: an explicit
-#    `object_expiry_days: 0`; `retention` on a service and on a job;
+#    `object_expiry_days: 0`; `retention` on a service and on a container job;
 #    a retention value that is neither DELETE nor KEEP; READ asked of a
 #    service; a NAME reference to a service; `uses` on a bucket.
 # 2. A GOOD DATA GRAPH IS CLEAN: buckets with and without retention, a
@@ -81,7 +81,8 @@ from kci_cloud import (
     FIELD_TABLE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
+    FIELD_WORKER,
     FIELD_QUEUE,
     FIELD_TOPIC,
     FIELD_SUBSCRIPTION,
@@ -198,8 +199,8 @@ struct _DNode(EngineResource, Movable, Deinitable):
 
 
 struct _Data(CloudAdapter, Movable):
-    """Hosts every v1 type. A bucket lowers to `<id>/bucket`; a service or a
-    job to `<id>/run`, depending on each `uses` target and reading each env
+    """Hosts every v1 type. A bucket lowers to `<id>/bucket`; a workload to
+    `<id>/run`, depending on each `uses` target and reading each env
     reference BY THE BARE RESOURCE ID (kci resolves it). `drop_retention`
     realizes every node with RETAIN_DELETE whatever kci set. `owned` is what
     `list_owned` reports."""
@@ -222,7 +223,8 @@ struct _Data(CloudAdapter, Movable):
     def implemented(self) -> List[Int]:
         var l = List[Int]()
         l.append(FIELD_SERVICE)
-        l.append(FIELD_JOB)
+        l.append(FIELD_CONTAINER_JOB)
+        l.append(FIELD_WORKER)
         l.append(FIELD_TABLE)
         l.append(FIELD_BUCKET)
         l.append(FIELD_SERVICE_ACCOUNT)
@@ -335,7 +337,7 @@ def test_the_data_refusals_in_one_pass() raises:
         String('{"resource":[')
         + String('{"id":"zero","bucket":{"objectExpiryDays":0}},')
         + String('{"id":"svc-keep","retention":"KEEP","service":{') + String(IMG) + String("}},")
-        + String('{"id":"job-del","retention":"DELETE","job":{') + String(IMG) + String(',"onDemand":{}}},')
+        + String('{"id":"job-del","retention":"DELETE","containerJob":{') + String(IMG) + String('}},')
         + String('{"id":"reader","service":{') + String(IMG)
         + String(',"env":{"N":{"ref":{"resource":"svc-keep","standard":"NAME"}}}},')
         + String('"uses":[{"target":{"resource":"svc-keep"},"access":"READ"}]},')
@@ -353,7 +355,7 @@ def test_the_data_refusals_in_one_pass() raises:
     for want in [
         "zero|bucket.object_expiry_days|0 would expire every object at once",
         "svc-keep|retention|a service takes no retention: it is deleted with its resource",
-        "job-del|retention|a job takes no retention",
+        "job-del|retention|a container_job takes no retention",
         "odd|retention|retention value 7 is not DELETE or KEEP",
         'reader|uses[0]|service "svc-keep" does not accept access READ',
         'reader|service.env.N|"svc-keep" (service) does not expose NAME',
