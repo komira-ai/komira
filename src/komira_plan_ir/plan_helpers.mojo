@@ -972,8 +972,6 @@ def _expr_fingerprint(expr: Expr) -> String:
             )
         elif sv.is_binary():
             return "L:bin:" + sv.string_val
-        elif sv.is_error():
-            return "L:err:" + String(Int(sv.error_code))
         elif sv.is_signed_int_narrow() or sv.is_uint():
             return (
                 "L:in:" + String(sv.dtype) + ":" + String(Int(sv.int_val))
@@ -1312,9 +1310,6 @@ def _write_scalar_fingerprint[W: Writer](mut writer: W, sv: ScalarValue):
         return
     elif sv.is_binary():
         writer.write(String("L:bin:") + sv.string_val)
-        return
-    elif sv.is_error():
-        writer.write(String("L:err:") + String(Int(sv.error_code)))
         return
     elif sv.is_signed_int_narrow() or sv.is_uint():
         writer.write(

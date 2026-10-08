@@ -4,7 +4,8 @@
 #
 # One node type, `FakeNode`, realized from a `LoweredNode` (data):
 #
-#   * kind `run`       `<id>/run`: the running thing of a service or a job.
+#   * kind `run`       `<id>/run`: the running thing of a workload (a
+#                      service, a container job's definition, a worker).
 #                      Its desired digest renders every modelled field (the
 #                      lowered node's `desired` fields, defaults filled in),
 #                      then each `Ref` value as it resolved; with a reference
@@ -12,9 +13,8 @@
 #                      placeholder. A service's run node exposes URL and HOST.
 #   * kind `public`    `<id>/public`: the public ingress of a service, by the
 #                      mechanism the cell chose at validate time.
-#   * kind `schedule`  `<id>/schedule`: the trigger of a scheduled job.
-#   * kind `identity`  `<id>/identity`: the private identity of a service or
-#                      a job, or a service account; an account's exposes
+#   * kind `identity`  `<id>/identity`: the private identity of a workload,
+#                      or a service account; an account's exposes
 #                      NAME (`account`, a desired field, like `serves`).
 #   * kind `grant`     `<id>/u-<h>` or `<id>/grant`: one grant edge.
 #   * kind `bucket`    `<id>/bucket`: a bucket. It exposes NAME and ADDRESS
@@ -31,10 +31,16 @@
 #   * kind `secret`    `<id>/secret`: a secret's container (no value). It
 #                      exposes NAME (`secret_named`, a desired field, like
 #                      `serves`).
+#   * kind `zone`, `record`, `certificate`: a DNS zone, a DNS record set, a
+#                      certificate. Each exposes what its `out.<OUTPUT>`
+#                      desired fields say, with the value written there
+#                      (`out.NAME`, `out.HOST`): how the node behaves, not
+#                      state, so never in its digest.
 # Those are the generic shape's kinds. On a provider shape (shapes.mojo) the
 # kind is the provider kind id (on onprem also a `<id>/vault` beside each
 # identity, a service's `<id>/endpoint`, which serves nothing, and a grant's
-# helper `<id>/r-<h>`; on gcp a table's `<id>/ix-<h>` and `<id>/ttl`); the
+# helper `<id>/r-<h>`; on gcp a table's `<id>/ix-<h>` and `<id>/ttl`; on aws
+# a worker's `<id>/task`, which serves nothing); the
 # node behaves the same: `serves`, `stores`, `account` and `named` (desired
 # fields), not the kind, decide what it exposes. On aws a queue also has a
 # `<id>/policy`; on gcp a queue has its private `<id>/topic`, which
@@ -160,15 +166,15 @@ def _unmanaged(v: FakeView) -> String:
 
 def static_digest(node: LoweredNode) raises -> String:
     """The digest of a lowered node's own desired fields, in order (the
-    `serves`, `stores`, `account`, `named`, `addressed` and `secret_named`
-    fields are how the node behaves, not state), and a KEEP node's retention (a `kci_retain`
-    digest field, not a label)."""
+    `serves`, `stores`, `account`, `named`, `addressed`, `secret_named` and
+    `out.<OUTPUT>` fields are how the node behaves, not state), and a KEEP
+    node's retention (a `kci_retain` digest field, not a label)."""
     var d = ModelledDigest(node.kind)
     for i in range(len(node.desired)):
         ref key = node.desired[i].key
         if key == "serves" or key == "stores" or key == "account" or key == "named" or key == "addressed":
             continue
-        if key == "secret_named":
+        if key == "secret_named" or key.startswith("out."):
             continue
         d.field(node.desired[i].key, node.desired[i].value)
     if node.retention == RETAIN_KEEP:
@@ -188,6 +194,9 @@ struct FakeNode(EngineResource, Movable, Deinitable):
     var _named: Bool
     var _secret_named: Bool
     var _addressed: String
+    var _outs: List[String]
+    """`out.<OUTPUT>` fields in order, two entries each: the OUTPUT name,
+    then its value."""
     var _retention: Int
     var _deps: List[String]
     var _refs: List[InputRef]
@@ -207,6 +216,12 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         self._named = node.field(String("named")) == "true"
         self._secret_named = node.field(String("secret_named")) == "true"
         self._addressed = node.field(String("addressed"))
+        self._outs = List[String]()
+        for i in range(len(node.desired)):
+            ref k = node.desired[i].key
+            if k.startswith("out."):
+                self._outs.append(String(k[byte = 4 : k.byte_length()]))
+                self._outs.append(node.desired[i].value.copy())
         self._retention = node.retention
         self._deps = node.depends_on.copy()
         self._refs = node.inputs.copy()
@@ -327,6 +342,10 @@ struct FakeNode(EngineResource, Movable, Deinitable):
 
     def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
         var o = Outputs()
+        if len(self._outs) > 0:
+            for i in range(0, len(self._outs), 2):
+                o.set(self._outs[i], self._outs[i + 1])
+            return o^
         if self._stores:
             o.set(String("NAME"), fake_bucket_name(self._owner))
             o.set(String("ADDRESS"), fake_bucket_address(self._owner))

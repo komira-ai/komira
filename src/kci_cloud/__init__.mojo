@@ -20,9 +20,16 @@ interface. This package names no cloud:
                        bootstrap resources, the label rule, `list_owned`,
                        `whoami`, `trust_render` / `trust_check`; typed
                        absences (ABSENT_BY_DESIGN / NOT_YET) and `Finding`.
+  * workload.mojo    — the three workload types (service, container job,
+                       worker) as one view of their shared container fields
+                       and identity.
+  * compute.mojo     — the rules of the workloads: their graph findings
+                       (image, run_as, env, command, a worker's replicas)
+                       and a worker's versioned replicas default.
   * grants.mojo      — who a resource runs as (its identity owner), and
                        every grant edge it lowers (`uses` lines, a grant
-                       resource, the implicit `cell LOGS WRITE`), each
+                       resource, the implicit `cell LOGS WRITE`, a
+                       trigger's implicit CALL on its target), each
                        with its role `u-<h>` (or `grant`) decided by kci.
   * data.mojo        — the rules of the data types (table, bucket): their
                        graph findings, a table's key as text, the index
@@ -30,6 +37,16 @@ interface. This package names no cloud:
   * feed.mojo        — the FEEDS: the list's subscriptions as (subscription,
                        topic, queue), handed to every adapter's `check` and
                        `lower`.
+  * firing.mojo      — the FIRINGS: the list's schedules as (schedule,
+                       target, target type, cron, time zone), handed to
+                       every adapter's `check` and `lower`; and the
+                       schedule's versioned time zone.
+  * network.mojo     — the rules of the network types (network, subnet, IP
+                       address) and of a service's `network`: their graph
+                       findings and the IPv4 range form.
+  * triggers.mojo    — the rules of the trigger types (schedule, event
+                       trigger): their graph findings, the portable cron
+                       form and a time zone name's shape.
   * messaging.mojo   — the rules of the messaging types (queue, topic,
                        subscription): their graph findings and the queue's
                        versioned ack deadline.
@@ -37,6 +54,12 @@ interface. This package names no cloud:
                        references to it: their graph findings (one of a
                        name and a secret; a secret resource read by the
                        identity that receives it).
+  * values.mojo      — the checks of a configuration value (a literal, a
+                       parameter, a reference to another resource's
+                       output), shared by `env` and a DNS record's values.
+  * dns.mojo         — the rules of the name types (DNS zone, DNS record,
+                       certificate): their graph findings, the DNS name
+                       grammar, and the record's versioned TTL.
   * labels.mojo      — the standard label rule (encode, decode, check), and
                        komira_validation_run's two marks: the retention
                        mark `kci-retention=<retain|delete>` on every object
@@ -73,15 +96,24 @@ from kci_cloud.catalog import (
     PORTABLE,
     CLOUD_BOUND,
     FIELD_SERVICE,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
+    FIELD_WORKER,
     FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
     FIELD_QUEUE,
     FIELD_SECRET,
+    FIELD_DNS_ZONE,
     FIELD_TOPIC,
+    FIELD_DNS_RECORD,
+    FIELD_CERTIFICATE,
     FIELD_SUBSCRIPTION,
+    FIELD_SCHEDULE,
+    FIELD_EVENT_TRIGGER,
+    FIELD_NETWORK,
+    FIELD_SUBNET,
+    FIELD_IP_ADDRESS,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -105,6 +137,14 @@ from kci_cloud.catalog import (
     ROLE_SECRET,
     ROLE_TOPIC,
     ROLE_SUBSCRIPTION,
+    ROLE_ZONE,
+    ROLE_RECORD,
+    ROLE_CERT,
+    ROLE_SCHEDULE,
+    ROLE_TRIGGER,
+    ROLE_NETWORK,
+    ROLE_SUBNET,
+    ROLE_ADDRESS,
     BodyArm,
     body_arms,
     body_field,
@@ -130,6 +170,8 @@ from kci_cloud.grants import (
     role_hash,
     holds_own_identity,
     identity_owner,
+    is_trigger,
+    trigger_target,
     principal_node,
     run_as_of,
     uses_role,
@@ -167,7 +209,51 @@ from kci_cloud.data import (
     table_key_text,
 )
 from kci_cloud.feed import Feed, feeds_into, feeds_of, field_of_id
+from kci_cloud.firing import TIMEZONE_DEFAULT, Firing, firing_of, firings_into, firings_of, schedule_timezone
+from kci_cloud.triggers import (
+    EVENT_OBJECT_CREATED,
+    EVENT_OBJECT_DELETED,
+    cron_fields,
+    cron_problem,
+    timezone_problem,
+    trigger_findings,
+)
+from kci_cloud.network import (
+    CIDR_PREFIX_MAX,
+    CIDR_PREFIX_MIN,
+    ZONE_MAX,
+    ZONE_MIN,
+    contains,
+    ipv4_cidr_problem,
+    ipv4_text,
+    is_private,
+    network_findings,
+    overlaps,
+    service_network_findings,
+    service_subnet,
+)
+from kci_cloud.workload import Workload, is_workload, workload_of
+from kci_cloud.compute import (
+    V1_IMAGE_PLATFORM,
+    WORKER_REPLICAS_DEFAULT,
+    image_platform,
+    worker_replicas,
+    workload_findings,
+)
 from kci_cloud.secrets import secret_env_findings, secret_findings, secret_of
+from kci_cloud.values import check_value, check_value_ref
+from kci_cloud.dns import (
+    CERTIFICATE_DOMAINS_MAX,
+    TTL_DEFAULT_SECONDS,
+    TTL_MAX_SECONDS,
+    TTL_MIN_SECONDS,
+    dns_findings,
+    dns_name_problem,
+    in_zone,
+    record_type_word,
+    ttl_seconds,
+    zone_name_of,
+)
 from kci_cloud.messaging import (
     ACK_DEADLINE_DEFAULT_SECONDS,
     ACK_DEADLINE_MAX_SECONDS,
@@ -209,11 +295,9 @@ from kci_cloud.validate import (
     validate_for,
     refusal_text,
     id_problem,
-    image_platform,
     node_role,
     role_budget_findings,
     ID_MAX_BYTES,
-    V1_IMAGE_PLATFORM,
 )
 from kci_cloud.deploy import (
     ApplyOutcome,

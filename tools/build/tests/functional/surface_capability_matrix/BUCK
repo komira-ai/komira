@@ -1,0 +1,42 @@
+load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+load(":fixture.bzl", "SCM_CAPABILITIES", "SCM_FILES", "SCM_FLOOR", "SCM_GROUNDING", "SCM_MATRIX", "SCM_NOT_CAPABILITIES", "SCM_ROOT", "SCM_SURFACES")
+
+# Test 53 (the surface capability matrix), the half that must build: the
+# planted matrix of fixture.bzl, three of its ten cells filled by planted
+# surface e2e targets under src/tests/e2e/, whose census must equal
+# expect_matrix.tsv and expect_report.txt byte for byte.
+# negative/surface_capability_matrix plants one defect each in the same lists.
+[
+    export_file(
+        name = f,
+        visibility = ["tests//negative/surface_capability_matrix/..."],
+    )
+    for f in [
+        "plan.txt",
+        "udf.txt",
+    ]
+]
+
+surface_capability_matrix(
+    name = "ok",
+    capabilities = SCM_CAPABILITIES,
+    expect_matrix = "expect_matrix.tsv",
+    expect_report = "expect_report.txt",
+    files = SCM_FILES,
+    floor = SCM_FLOOR,
+    grounding = SCM_GROUNDING,
+    not_capabilities = SCM_NOT_CAPABILITIES,
+    root = SCM_ROOT,
+    rows = SCM_MATRIX,
+    surfaces = SCM_SURFACES,
+)
+
+# A test outside src/tests/e2e: negative outside_e2e names it, and the alias
+# pandas_e2e:alias_outside stands for it (negative alias).
+mojo_test(
+    name = "test_outside",
+    main = "test_outside.mojo",
+    srcs = ["test_outside.mojo"],
+    visibility = ["PUBLIC"],
+)

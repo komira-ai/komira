@@ -881,9 +881,7 @@ the same README in a library with `conda = False`, builds.
 [the repository lint tests](lint_tests.md#40-readme-api-coverage).
 
 ## 41. Coverage builds
-
-[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
-binary with line tables per `test_srcs` entry and leave every release action as it is; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0 binary per test and move no release action of a library, only its conda package's joins; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
 ## 42. Pointer lint
 
@@ -923,10 +921,7 @@ the tree, and must fail naming it.
 ```
 
 ## 43. Coverage runs
-
-Each test's coverage binary also runs under kcov through the release gate's runner
-([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
-[`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+Each test's coverage binary also runs under kcov ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`; [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
 
 ## 44. Public boundary
 
@@ -941,7 +936,10 @@ of [`tests/public_boundary_hosts.tsv`](../../../tests/public_boundary_hosts.tsv)
 an email address outside the reserved example domains (the user of a URL
 right after `://` is none when its host is under a domain of the hosts ledger,
 such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
-host it is read), and a commit id in prose. Binary data and upstream bytes are not read. Its reader is
+host it is read), and a commit id in prose, in a file's contents or (dates,
+home directories, deny-list words) its path. Binary data is not read, but its
+path is; nothing committed is upstream bytes, so `third_party/` is read whole.
+Its reader is
 [`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
 matches and what it cannot see (vocabulary is no shape); its action is
 [`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
@@ -958,17 +956,20 @@ planted tree ([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose
 held at exact counts, so a spelling the reader missed would fail the build;
 whose near misses (dates outside the window, placeholders, loopback and
 documentation addresses, reserved hosts, templates, digests, UUIDs, hex in
-code) must find nothing; and whose upstream and binary files hold findings
-that must not be read. The planted tree's window is 2030 up to 2031-09-01,
+code, a `//` in a C string) must find nothing; and whose binary file holds
+findings that must not be read. The planted tree's window is 2030 up to 2031-09-01,
 so none of its files holds a date the root target refuses. Each target of
 [`negative/public_boundary`](negative/public_boundary/BUCK) plants one finding
-(each spelling of each rule, a date in a `third_party/` BUCK file, one over a
-hold, a deny-list word) or one ledger defect (malformed, repeated,
-unknown-rule, zero-count or reasonless rows, a row for a missing file, binary
-data or upstream bytes, a count above the findings, a row for no finding, a
-row holding a deny-list word, a hosts row that is reserved or unused), sets
-a window that does not end on the first day of a month, or empties the tree,
-and must fail naming it.
+(each spelling of each rule, a date in a `third_party/` BUCK file and C
+header, a date, home directory or deny-list word in a path, the path of
+binary data, a file given by `paths`, one over a hold, a deny-list word) or
+one ledger defect (malformed, repeated, unknown-rule, zero-count or
+reasonless rows, a row for a missing file or for binary data, a count above
+the findings, a row for no finding, a row holding a deny-list word, a hosts
+row that is reserved or unused), sets a window with month 13 or not ending
+on the first day of a month, or empties the tree, and must fail naming it.
+The test also pins the root target's window (2025 up to 2026-09-01) by
+querying its attributes, so narrowing it fails.
 [`public_boundary_tests.sh`](public_boundary_tests.sh) lists them.
 
 ```sh
@@ -978,8 +979,14 @@ and must fail naming it.
 
 ## 45. The layout of src/
 
-`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`. The test is in
-[the repository lint tests](lint_tests.md#45-the-layout-of-src).
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in [the repository lint tests](lint_tests.md#45-the-layout-of-src).
+
+## 46. Coverage gate
+With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
+## 47. Branch coverage runs
+[`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs [these checks](coverage_runs.md#test-47-branch-coverage-runs).
+## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
+## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
 
 ## 49. Assert level, defines and memory cap
 

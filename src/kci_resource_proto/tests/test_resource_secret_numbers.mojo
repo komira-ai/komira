@@ -10,24 +10,20 @@
 #
 # 1. KEPT, BY BYTES ONLY. Nothing is read by name: `Resource` 16 (an empty
 #    record) and `SecretRef` 4 (a `Ref`), alone and inside a service's and a
-#    job's `secret_env`, survive decode then encode. Against a schema that
+#    container job's `secret_env`, survive decode then encode. Against a schema that
 #    lacks either number the record is unknown and dropped, and this fails.
 # 2. SECRET. `Secret` declares no field: any record in it is unknown and
 #    dropped. As `Resource.body` 16 it fills the `secret` field, at its
-#    position in declaration order (the sixth: service, job, table, bucket,
-#    queue, secret), its empty record is kept on re-encode and in JSON, and
+#    position in declaration order (the seventh: service, container job,
+#    worker, table, bucket, queue, secret), its empty record is kept on re-encode and in JSON, and
 #    `retention` 3 rides beside it.
 # 3. SECRETREF.SECRET. Field 4 is `secret`, a `Ref`; by name, binary round
 #    trip, JSON (`"secret":{"resource":"db"}`), and absent = unset. Fields 1
 #    to 3 keep their numbers beside it, and a record both named and
 #    referenced decodes with both (refusing that is validate's job, never
 #    the codec's).
-# 4. THE ARM CENSUS. Every declared `Resource.body` arm, by number and by
-#    the oneof position the generated struct records: 10 service 1, 11 job
-#    2, 13 table 3, 14 bucket 4, 15 queue 5, 16 secret 6, 20 service account
-#    7, 21 topic 8, 25 grant 9, 28 subscription 10. A position that moves is
-#    a different arm to every reader of `_oneof0_case` (kci_cloud's
-#    `body_arms`).
+# The census of every arm's number and oneof position is in
+# test_resource_compute_numbers.mojo (the latest arms decide every position).
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 # =============================================================================
@@ -36,7 +32,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
 from kci_resource_proto.resource import (
-    Job,
+    ContainerJob,
     Resource,
     Retention,
     Secret,
@@ -228,7 +224,7 @@ def test_added_secret_numbers_are_kept() raises:
     _same(encode_proto(decode_proto[Service](svc.copy())), svc, "Service.secret_env with SecretRef 4")
     var job = List[UInt8]()
     _msg(job, 7, _entry("API_TOKEN", _secret_ref_to("token")))
-    _same(encode_proto(decode_proto[Job](job.copy())), job, "Job.secret_env with SecretRef 4")
+    _same(encode_proto(decode_proto[ContainerJob](job.copy())), job, "ContainerJob.secret_env with SecretRef 4")
     print("  test_added_secret_numbers_are_kept: PASS")
 
 
@@ -252,7 +248,7 @@ def test_secret() raises:
     _msg(r, 16, List[UInt8]())
     var rr = decode_proto[Resource](r.copy())
     assert_true(Bool(rr.secret), "body 16 is `secret`")
-    assert_equal(rr._oneof0_case, 6, "the secret is the sixth arm")
+    assert_equal(rr._oneof0_case, 7, "the secret is the seventh arm")
     assert_equal(rr.retention.value, Retention.DELETE, "retention 3 beside the secret arm")
     assert_true(not Bool(rr.queue) and not Bool(rr.service_account), "no other arm is set")
     var again = encode_proto(rr)
@@ -315,36 +311,9 @@ def test_secret_ref_secret() raises:
     print("  test_secret_ref_secret: PASS")
 
 
-# ---- 4. the arm census -----------------------------------------------------------------
-
-
-def test_body_arm_census() raises:
-    """Catches: any arm renumbered, and any arm's oneof position moved (the
-    secret arm declared anywhere but after the queue arm shifts every later
-    position, and kci_cloud maps positions to fields)."""
-    var fields: List[Int] = [10, 11, 13, 14, 15, 16, 20, 21, 25, 28]
-    for i in range(len(fields)):
-        var b = List[UInt8]()
-        _str(b, 1, "x")
-        _msg(b, fields[i], List[UInt8]())
-        var r = decode_proto[Resource](b.copy())
-        assert_equal(r._oneof0_case, i + 1, String("Resource.body ") + String(fields[i]) + " position")
-        # The arm survives a re-encode (an empty body may re-encode with its
-        # zero-valued fields written out, so the arm is compared, not bytes).
-        var again = decode_proto[Resource](encode_proto(r))
-        assert_equal(again._oneof0_case, i + 1, String("arm ") + String(fields[i]) + " re-encodes")
-    for held in [12, 17, 18, 19, 22]:
-        var b = List[UInt8]()
-        _str(b, 1, "x")
-        _msg(b, held, List[UInt8]())
-        assert_equal(decode_proto[Resource](b.copy())._oneof0_case, 0, String(held) + " is held")
-    print("  test_body_arm_census: PASS")
-
-
 def main() raises:
     print("test_resource_secret_numbers: secret, SecretRef.secret")
     test_added_secret_numbers_are_kept()
     test_secret()
     test_secret_ref_secret()
-    test_body_arm_census()
     print("ALL kci.resource.v1 SECRET FIELD-NUMBER TESTS PASSED")

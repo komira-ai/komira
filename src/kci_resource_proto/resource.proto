@@ -30,17 +30,17 @@
 //     field is the provider's own language, or one provider object would be
 //     shared by several owners).
 //
-// V1 DECLARES TEN PRIMITIVES: `service` 10, `job` 11, `table` 13, `bucket`
-// 14, `queue` 15, `secret` 16, `service_account` 20, `topic` 21, `grant` 25
-// and `subscription` 28. Every other number below is HELD:
+// V1 DECLARES NINETEEN PRIMITIVES: `service` 10, `container_job` 11,
+// `worker` 12, `table` 13, `bucket` 14, `queue` 15, `secret` 16, `dns_zone`
+// 18, `service_account` 20, `topic` 21, `schedule` 22, `network` 23, `grant`
+// 25, `dns_record` 26, `certificate` 27, `subscription` 28, `subnet` 29,
+// `ip_address` 30 and `event_trigger` 31. Every other number below is HELD:
 // not declared, so it decodes as an unknown field today, and declaring it
 // later is an addition, never a renumber. The welded tests pin each held
 // number as undeclared.
-//   * `Resource.body` 12, 17 to 19, 22 to 24, 26, 27 and 29 to 36: the
-//     later neutral primitives (12 worker, 17 and 19 unused, 18 DNS zone, 22 schedule, 23 network, 24 registry, 26 DNS record, 27
-//     certificate, 29 subnet, 30 IP address, 31 event trigger, 32 mail
-//     domain, 33 parameter, 34 encryption key, 35 function, 36 virtual
-//     machine).
+//   * `Resource.body` 17, 19, 24 and 32 to 36: the later neutral
+//     primitives (17 and 19 unused, 24 registry, 32 mail domain, 33
+//     parameter, 34 encryption key, 35 function, 36 virtual machine).
 //   * `Resource.body` 80: a composite instance.
 //   * `Resource.body` 90: the `raw` escape hatch, specified separately.
 //   * `Resource.body` 100-299, 300-499, 500-699 and 700-899: provider
@@ -51,12 +51,13 @@
 // test `test_held_numbers_are_unused` reads: no field of the named message may
 // use a held number, and no message may reuse a `reserved` number. A held
 // number leaves this list in the same change that declares it.
-// held-numbers: Resource 5 6 12 17-19 22-24 26-27 29-36 80 90 100-299 300-499 500-699 700-899
+// held-numbers: Resource 5 6 17 19 24 32-36 80 90 100-299 300-499 500-699 700-899
 // held-numbers: Value 4
 // held-numbers: Image 4
 // held-numbers: Uses 3
 // held-numbers: Service 13 50-53
-// held-numbers: Job 8 50-53
+// held-numbers: ContainerJob 8 50-53
+// held-numbers: Worker 12 50-53
 // held-numbers: Table 4 50-53
 // held-numbers: Bucket 50-53
 // held-numbers: ServiceAccount 50-53
@@ -65,6 +66,14 @@
 // held-numbers: Topic 50-53
 // held-numbers: Subscription 50-53
 // held-numbers: Secret 50-53
+// held-numbers: DnsZone 50-53
+// held-numbers: DnsRecord 50-53
+// held-numbers: Certificate 50-53
+// held-numbers: Schedule 50-53
+// held-numbers: EventTrigger 50-53
+// held-numbers: Network 50-53
+// held-numbers: Subnet 50-53
+// held-numbers: IpAddress 50-53
 // The list of clouds is data (a cloud is a value checked against the
 // built-in clouds); the four ranges and the four extension numbers are held
 // for the four built-in clouds, never named by a type here.
@@ -85,56 +94,68 @@
 //     every edge of the graph.
 //
 // IDENTITY AND GRANTS
-//   * A `service_account` is a workload identity. A `service` or a `job`
-//     runs as the account its `run_as` names; with no `run_as` it runs as a
-//     PRIVATE identity of its own, a helper object that exists only for it
-//     and dies with it.
+//   * A `service_account` is a workload identity. A WORKLOAD (a `service`, a
+//     `container_job` or a `worker`) runs as the account its `run_as` names;
+//     with no `run_as` it runs as a PRIVATE identity of its own, a helper
+//     object that exists only for it and dies with it.
 //   * A `grant` is one edge: `principal` may do `access` to `target` (or to
 //     a resource the cell provides, `cell`). Its principal is an identity: a
-//     `service_account`, or a `service` or `job` with no `run_as`.
+//     `service_account`, or a workload with no `run_as`.
 //   * `Resource.uses` is the same edge written on the grantee: on a
-//     `service_account` it means "this identity may"; on a `service` or a
-//     `job` it means "the identity I run as may". It is refused on every
-//     other type. A `uses` line and a `grant` for one (principal, target)
+//     `service_account` it means "this identity may"; on a workload it
+//     means "the identity I run as may". It is refused on every other
+//     type. A `uses` line and a `grant` for one (principal, target)
 //     pair are the same edge, so writing both is refused.
 //   * Every identity a resource holds of its own also gets the edge
 //     `cell LOGS WRITE` (its logs), unless the resource writes it. It is
 //     lowered and printed like any other edge, never hidden.
+//   * A TRIGGER (a `schedule` or an `event_trigger`) starts or calls its
+//     `target` through an identity of its own: a private helper of the
+//     trigger that only the cloud's scheduling or eventing service may use.
+//     It gets exactly one edge, CALL on the target, lowered and printed like
+//     any other edge; it is never a grant's principal, and it has no `uses`.
 //
 // WHAT IS NOT HERE YET, ON PURPOSE
-//   * Permission sets, raw provider role bindings, federation, networks,
-//     gateways, load balancers and DNS records as resources of their own.
+//   * Permission sets, raw provider role bindings, federation, firewalls,
+//     NAT, peering, gateways, load balancers and mail domains as resources
+//     of their own.
 //     Each is a later primitive at a held number above (or a provider
 //     primitive).
 //   * Stage names. A stage's list of resources lives in the release machine
 //     file; no resource carries the name of a stage.
-//   * Secret VALUES. A `secret` resource is the CONTAINER only. A service or
-//     a job receives a secret BY REFERENCE (`SecretRef`: the name of one
+//   * Secret VALUES. A `secret` resource is the CONTAINER only. A workload
+//     receives a secret BY REFERENCE (`SecretRef`: the name of one
 //     that already exists, or a `secret` resource of the list); kci never
 //     reads, writes or stores the value. No `Value` ever carries a secret:
 //     `Value` field 4 stays held.
 //
 // RETENTION (`Resource.retention`) says whether a resource's objects are
 // deleted when the resource leaves the file or the graph is destroyed. It
-// is for the primitives that hold data, messages or secrets (v1: `table`,
-// `bucket`, `queue`, `topic` and `secret`); each such type has a versioned
-// default (KEEP for a table, a bucket and a secret, DELETE for a queue and a
-// topic) that applies while the field is unset. A service, a job, a service account, a grant or a
-// subscription is always deleted with its resource, and setting retention on
-// one is refused when the graph is validated. A third answer,
+// is for the primitives that hold data, messages, secrets, names or
+// addresses (v1: `table`, `bucket`, `queue`, `topic`, `secret`, `dns_zone`,
+// `dns_record`, `certificate`, `network`, `subnet` and `ip_address`); each
+// such type has a versioned default (KEEP for a table, a bucket and a
+// secret, DELETE for the others) that applies while the field is unset. A workload (a
+// service, a container job, a worker), a service account, a grant, a
+// subscription, a schedule or an event trigger is always deleted with its
+// resource, and setting retention on one is refused when the graph is
+// validated. A third answer,
 // "kci cannot delete this", is a capability of a cloud object, not a policy
 // an author chooses, so it has no value here.
 //
 // RESERVED NOW, BUILT LATER (held numbers, not declared; each is an addition
 // when it lands): `Resource` 5 a typed per-cloud settings map, `Resource` 6
 // `physical_name` (keep an existing cloud name), `Image` 4 an `artifact_ref
-// { name, platform, revision }` source arm beside `output`, `Service` 13 and
-// `Job` 8 a `source` that may also be a non-image artifact, and `Output` 5
-// REVISION (the cloud's own revision of a service, not kci's revision id).
-// `Table` 4 an analytics replica (its meaning differs per cloud, so it waits
-// for a decision). Per-cloud extensions 50 to 53 are held on `Table`,
-// `Bucket`, `ServiceAccount`, `Grant`, `Queue`, `Topic`, `Subscription` and
-// `Secret` as on every primitive.
+// { name, platform, revision }` source arm beside `output`, `Service` 13,
+// `ContainerJob` 8 and `Worker` 12 a `source` that may also be a non-image
+// artifact, and `Output` 5 REVISION (the cloud's own revision of a service,
+// not kci's revision id). `Table` 4 an analytics replica (its meaning
+// differs per cloud, so it waits for a decision). Per-cloud extensions 50 to
+// 53 are held on `Service`, `ContainerJob`, `Worker`, `Table`, `Bucket`,
+// `ServiceAccount`, `Grant`, `Queue`, `Topic`, `Subscription`, `Secret`,
+// `DnsZone`, `DnsRecord`, `Certificate`, `Schedule`, `EventTrigger`,
+// `Network`, `Subnet` and `IpAddress` as on every primitive. `SourceEvent` 3 is held for a message published to a
+// topic.
 //
 // "PLATFORM" MEANS OS + CPU AND NOTHING ELSE (`Image.platform`). The deploy
 // target is the cloud, which this file never names.
@@ -162,9 +183,10 @@ enum Portability {
 }
 
 extend google.protobuf.MessageOptions {
-  // Marks each resource type message below (v1: `Service`, `Job`, `Table`,
-  // `Bucket`, `Queue`, `Secret`, `ServiceAccount`, `Topic`, `Grant`,
-  // `Subscription`).
+  // Marks each resource type message below (v1: `Service`, `ContainerJob`,
+  // `Worker`, `Table`, `Bucket`, `Queue`, `Secret`, `DnsZone`,
+  // `ServiceAccount`, `Topic`, `Schedule`, `Network`, `Grant`, `DnsRecord`,
+  // `Certificate`, `Subscription`, `Subnet`, `IpAddress`, `EventTrigger`).
   Portability portability = 50001;
   // The outputs a type exposes to a `Ref`. A `Ref` asking a type for an
   // output it does not expose is refused when the graph is loaded.
@@ -198,8 +220,11 @@ message Ref {
   }
 }
 
-// What a consumer may do to a resource. CALL is accepted by a service and a
-// job; READ, WRITE and READ_WRITE by a table, a bucket and a secret (on a
+// What a consumer may do to a resource. CALL is accepted by a service (call
+// it) and a container job (start a run of it); a worker accepts no verb, and
+// neither does a schedule, an event trigger, a network, a subnet or an IP
+// address.
+// READ, WRITE and READ_WRITE by a table, a bucket and a secret (on a
 // secret: READ its value, WRITE a new version of it); SEND (put a
 // message in) by a queue and a topic; RECEIVE (take a message out and
 // acknowledge it) by a queue; DESCRIBE by a table (read its definition,
@@ -290,7 +315,9 @@ message Image {
 
 // A secret, referenced, never valued: EITHER one that already exists in the
 // cell's secret store, by `name`, OR a `secret` resource of this list, by
-// `secret` (exactly one of the two; validate refuses both and neither).
+// `secret` (exactly one of the two; validate refuses both and neither). A
+// workload (a service, a container job or a worker) names it in its
+// `secret_env`.
 // kci passes the REFERENCE to the cloud adapter, which makes the secret's
 // value available to the container at run time; the value is never in this
 // file, in kci's state or in kci's memory. The map key of a `secret_env`
@@ -301,8 +328,8 @@ message Image {
 // `store` beside `secret` is refused. `version` pins one version of the
 // value (unset: the latest). Both have presence, so "not written" is never
 // confused with a written empty string. `secret` names the resource itself
-// (its `output` unset), and the identity the service or job runs as must
-// hold READ (or READ_WRITE) on it: the reference is not a grant.
+// (its `output` unset), and the identity the workload runs as must hold
+// READ (or READ_WRITE) on it: the reference is not a grant.
 message SecretRef {
   string name = 1;
   optional string store = 2;
@@ -324,21 +351,30 @@ message Resource {
   reserved "only_in";
   // 5 is held for a typed per-cloud settings map, 6 for `physical_name`.
 
-  // Typed and closed. Held, not declared (see the file header): 12,
-  // 17 to 19, 22 to 24, 26, 27 and 29 to 36 the later neutral primitives, 80
+  // Typed and closed. Held, not declared (see the file header): 17, 19,
+  // 24 and 32 to 36 the later neutral primitives, 80
   // a composite instance, 90 the escape hatch, 100-299 / 300-499 / 500-699 /
   // 700-899 the provider primitives of four clouds.
   oneof body {
     Service service = 10;
-    Job job = 11;
+    ContainerJob container_job = 11;
+    Worker worker = 12;
     Table table = 13;
     Bucket bucket = 14;
     Queue queue = 15;
     Secret secret = 16;
+    DnsZone dns_zone = 18;
     ServiceAccount service_account = 20;
     Topic topic = 21;
+    Schedule schedule = 22;
+    Network network = 23;
     Grant grant = 25;
+    DnsRecord dns_record = 26;
+    Certificate certificate = 27;
     Subscription subscription = 28;
+    Subnet subnet = 29;
+    IpAddress ip_address = 30;
+    EventTrigger event_trigger = 31;
   }
 }
 
@@ -350,10 +386,13 @@ message ResourceList {
 
 // ---- shared shapes -------------------------------------------------------------
 
-// Neutral sizes.
+// Neutral sizes, per instance. `gpus` is a count of whole GPUs (0: none);
+// which GPU a cloud attaches is that cloud's, and a cloud that attaches none
+// to a workload refuses a non-zero count when the graph is validated.
 message Size {
   uint32 cpu_millis = 1;
   uint32 memory_mb = 2;
+  uint32 gpus = 3;
 }
 
 // Instance bounds. `min = 0` allows scaling to zero; `min` has presence, so
@@ -363,7 +402,14 @@ message Scale {
   uint32 max = 2;
 }
 
-// ---- the v1 types: service and job -------------------------------------------------
+// ---- compute: service, container job and worker ----------------------------------
+//
+// Three WORKLOADS, each a container: one that answers requests (`service`),
+// one that runs to completion when started (`container_job`), and one that
+// runs always (`worker`). Each has an image, an optional `command` (the
+// program to run, replacing the image's entrypoint; unset: the image's own),
+// `args` (passed to it), `env` and `secret_env`, a `size` per instance, and
+// the `run_as` account.
 
 // A container that answers requests, scales (to zero if allowed) and may have
 // a public URL.
@@ -397,6 +443,16 @@ message Service {
   // The `service_account` this service runs as. Unset: a private identity of
   // its own.
   Ref run_as = 14;
+  // The program to run, replacing the image's entrypoint; `args` follow it.
+  // Unset: the image's own entrypoint.
+  repeated string command = 15;
+  // The `subnet` the service's outbound connections leave through (the
+  // resource itself, no output). Every outbound connection takes it: the
+  // service reaches the private addresses of the subnet's network, and
+  // reaches a public address only if the network has a way out (a NAT is not
+  // a primitive yet). It says nothing about who may call the service. Unset:
+  // the cloud's own outbound path, in no network of the list.
+  Ref network = 16;
   // 50 to 53 are held for the per-cloud extensions (file header).
 
   // Reachable from outside the graph at a URL.
@@ -406,8 +462,15 @@ message Service {
   message Internal {}
 }
 
-// A container that runs to completion, on demand or on a schedule.
-message Job {
+// A container that runs to completion: a run-to-completion DEFINITION. kci
+// declares the job; each run is started by an identity granted CALL on it,
+// and a run is an execution of the definition, never a declared object. It
+// was `job` (the same arm, 11, and fields 1 to 7 and 13 at the same
+// numbers). Its trigger (10 on demand, 11 a schedule) is no longer part of
+// it: both numbers are reserved, so a list written with a trigger decodes
+// without it, and its JSON form is refused. A schedule is a primitive of its
+// own (`schedule`, `Resource.body` 22).
+message ContainerJob {
   option (portability) = PORTABLE;
 
   Image image = 1;
@@ -424,22 +487,49 @@ message Job {
   // A key must not also appear in `env`.
   map<string, SecretRef> secret_env = 7;
   // 8 is held for a `source` that may be a non-image artifact.
+  // The program to run, replacing the image's entrypoint; `args` follow it.
+  // Unset: the image's own entrypoint.
+  repeated string command = 9;
+  // The trigger that was part of the job: `on_demand` 10 and `schedule` 11.
+  reserved 10, 11;
+  reserved "on_demand", "schedule";
   // The `service_account` this job runs as. Unset: a private identity of its
   // own.
   Ref run_as = 13;
   // 50 to 53 are held for the per-cloud extensions (file header).
+}
 
-  oneof trigger {
-    OnDemand on_demand = 10;
-    Schedule schedule = 11;
-  }
+// A container that runs ALWAYS, on a fixed number of instances, and answers
+// no request: it takes its own work (from a queue, say, through a `uses`
+// line). It exposes nothing and accepts no verb. An early draft of this arm
+// had `scale` at 3 and a `source` oneof at 10 and 11; those three numbers
+// are reserved, so a list written against the draft decodes without them
+// rather than as another field.
+message Worker {
+  option (portability) = PORTABLE;
 
-  message OnDemand {}
-  // Part of the job, not a second resource.
-  message Schedule {
-    string cron = 1;
-    string timezone = 2;
-  }
+  Image image = 1;
+  Size size = 2;
+  reserved 3, 10, 11;
+  reserved "scale", "always_on", "queue";
+  repeated string args = 4;
+  // The program to run, replacing the image's entrypoint; `args` follow it.
+  // Unset: the image's own entrypoint.
+  repeated string command = 5;
+  // Plain values only, as on `Service.env`. Secrets go in `secret_env`.
+  map<string, Value> env = 6;
+  // Secrets this worker receives by reference, keyed by environment
+  // variable. A key must not also appear in `env`.
+  map<string, SecretRef> secret_env = 7;
+  // How many instances run, always: 1 or more. Presence: unset is the
+  // versioned default, 1; an explicit 0 is refused when the graph is
+  // validated (a worker that runs nowhere is no worker).
+  optional uint32 replicas = 8;
+  // The `service_account` this worker runs as. Unset: a private identity of
+  // its own.
+  Ref run_as = 9;
+  // 12 is held for a `source` that may be a non-image artifact; 50 to 53
+  // for the per-cloud extensions (file header).
 }
 
 // ---- data: table -----------------------------------------------------------------
@@ -531,7 +621,7 @@ message ServiceAccount {
 
 // One edge: `principal` may do `access` to `target`, or to the cell's
 // `cell` (exactly one of the two). `principal` names a `service_account`,
-// or a `service` or `job` with no `run_as` (its private identity). The verb
+// or a workload with no `run_as` (its private identity). The verb
 // must be one the target accepts. A grant exposes nothing and accepts
 // nothing. 50 to 53 are held for the per-cloud extensions (file header).
 message Grant {
@@ -597,7 +687,7 @@ message Subscription {
 // The CONTAINER of a secret value: the provider's secret object, created with
 // no value, so kci still writes none. Its value is written by an identity
 // granted WRITE on it (or by a person, out of band), and read by an identity
-// granted READ, which a service or a job names in `secret_env` through
+// granted READ, which a workload names in `secret_env` through
 // `SecretRef.secret`. Its NAME is the cloud's name for it. Deleting it deletes
 // every version of its value, so its retention default is KEEP: removing a
 // secret from the file leaves it in the cloud unless `retention: DELETE` is
@@ -606,4 +696,187 @@ message Subscription {
 message Secret {
   option (portability) = PORTABLE;
   option (exposes) = NAME;
+}
+
+// ---- names: DNS zone, DNS record and certificate ------------------------------------
+
+// A PUBLIC DNS zone: the servers that answer for `name` and every name below
+// it that no other zone holds. A private zone (one answered only inside a
+// network) is not this type. Its NAME is the cloud's name for the zone
+// object, not the domain. kci creates the zone; pointing the domain's
+// registrar at the zone's servers is the domain owner's step, outside kci.
+// A zone re-created after a delete may be answered by other servers, which
+// is the domain owner's step again. Its retention default is DELETE. 50 to
+// 53 are held for the per-cloud extensions (file header).
+message DnsZone {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // The domain, lowercase, with no trailing dot ("example.com"): at least
+  // two labels, each of letters, digits and inner hyphens. One zone per
+  // domain in a list.
+  string name = 1;
+}
+
+// What a DNS record set holds. Only the types every built-in cloud hosts
+// with one meaning: A (IPv4 addresses), AAAA (IPv6 addresses), CNAME
+// (another name: one value, never at a zone's own name), TXT (text) and MX
+// (mail servers, each "<preference> <host>").
+enum RecordType {
+  RECORD_TYPE_UNSET = 0;
+  A = 1;
+  AAAA = 2;
+  CNAME = 3;
+  TXT = 4;
+  MX = 5;
+}
+
+// One record set: every value of one `type` at one `name`, in one `zone`
+// of the list. Its HOST is `name`. A value is a literal, or (for a CNAME
+// only) a `Ref` to the HOST another resource exposes, so the record follows
+// the service it names. Its retention default is DELETE. 50 to 53 are held
+// for the per-cloud extensions (file header).
+message DnsRecord {
+  option (portability) = PORTABLE;
+  option (exposes) = HOST;
+
+  // The full name, lowercase, with no trailing dot: the zone's own name or
+  // a name below it. A first label `*` is a wildcard.
+  string name = 1;
+  // The `dns_zone` the record is in (the resource itself, no output).
+  Ref zone = 2;
+  RecordType type = 3;
+  // At least one, in order; a CNAME has exactly one.
+  repeated Value values = 4;
+  // Whole seconds from 60 to 86400. Unset: the versioned default, 300
+  // seconds.
+  google.protobuf.Duration ttl = 5;
+}
+
+// A MANAGED, DOMAIN-VALIDATED certificate, publicly trusted: the cloud
+// obtains it, proves control of each domain with records in `zone`, and
+// renews it. kci never holds its private key. This version means a publicly
+// trusted certificate only; whether private-CA certificates join this type
+// (a new field) or another type is open. Its NAME is the cloud's name for
+// it. Its retention default is DELETE. 50 to 53 are held for the per-cloud extensions (file header).
+message Certificate {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // From 1 to 10 names, each the zone's own name or below it; a first label
+  // `*` is a wildcard. The first is the certificate's subject.
+  repeated string domains = 1;
+  // The `dns_zone` the validation records go in (the resource itself, no
+  // output).
+  Ref zone = 2;
+}
+
+// ---- triggers: schedule and event trigger ------------------------------------------
+//
+// A TRIGGER starts a run of a container job, or calls a service, when
+// something happens: a time comes (`schedule`) or a resource of the list
+// changes (`event_trigger`). Its `target` is the resource itself (its
+// `output` unset). The trigger reaches the target through an identity of its
+// own, a private helper that only the cloud's scheduling or eventing service
+// may use, holding exactly one edge: CALL on the target (file header). A
+// trigger exposes nothing, accepts no verb and takes no retention: it is
+// deleted with its resource, and it is never a grant's principal.
+
+// Starts its `target` at the times `cron` names, in `timezone`.
+message Schedule {
+  option (portability) = PORTABLE;
+
+  // When: five fields separated by single spaces, minute (0-59), hour
+  // (0-23), day of the month (1-31), month (1-12) and day of the week (0-6,
+  // 0 is Sunday). Each field is `*`, a number or a range `a-b`, either with
+  // a step `/n`, or a comma-separated list of those. No names (`MON`) and no
+  // shorthands (`@daily`): the form every built-in cloud reads alike. A cron
+  // a cloud cannot express is refused when the graph is validated.
+  string cron = 1;
+  // An IANA time zone name ("Europe/Paris"). Empty: UTC.
+  string timezone = 2;
+  // A `container_job` (each time starts a run of it) or a `service` (each
+  // time is an HTTP POST, with no body, to its URL).
+  Ref target = 3;
+  // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// What happened to a resource, as every built-in cloud delivers it with one
+// meaning. 3 is held for a message published to a topic (how a cloud
+// delivers that to a service is not decided).
+enum SourceEvent {
+  SOURCE_EVENT_UNSET = 0;
+  // An object was written to the bucket: created, or overwritten.
+  OBJECT_CREATED = 1;
+  // An object was removed from the bucket. Where a cloud also reports the
+  // replaced copy of an overwritten object as removed, an overwrite
+  // delivers this too: a receiver reads the object before it acts.
+  OBJECT_DELETED = 2;
+}
+
+// Delivers each `event` of `source` to `target`: one call per event,
+// carrying it.
+message EventTrigger {
+  option (portability) = PORTABLE;
+
+  // The `bucket` whose events are delivered.
+  Ref source = 1;
+  SourceEvent event = 2;
+  // The `service` each event is delivered to, as an HTTP POST to its URL.
+  Ref target = 3;
+  // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// ---- networks: network, subnet and IP address --------------------------------------
+//
+// A private NETWORK (an address space), the SUBNETS cut from it, and a static
+// public IP ADDRESS. None runs as an identity or accepts a verb; each takes
+// retention, DELETE by default. A network and a subnet expose their cloud
+// name (NAME), an IP address the address itself (ADDRESS). This version
+// speaks IPv4 only: another address family would be a new field of each
+// message (an addition), and whether one is added is not decided. Firewalls,
+// NAT, peering and the objects a cloud needs to attach a workload are not
+// primitives here yet.
+
+// A private network: the IPv4 range its subnets are cut from.
+message Network {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // "a.b.c.d/n": a private range (inside 10.0.0.0/8, 172.16.0.0/12 or
+  // 192.168.0.0/16, the ranges every built-in cloud takes alike), n from 16
+  // to 28, no bit set after the first n. Every subnet of the network lies
+  // inside it.
+  string ipv4_cidr = 1;
+  // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// A range of a `network`'s addresses that the workloads placed in it take
+// their private addresses from.
+message Subnet {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // The `network` (the resource itself, no output).
+  Ref network = 1;
+  // "a.b.c.d/n": inside its network's range, n from 16 to 28, no bit set
+  // after the first n, overlapping no other subnet of the network.
+  string ipv4_cidr = 2;
+  // A zone of the cell's region, from 1 to 3 (the cloud's own zones, in its
+  // own order). Presence: an explicit 0 is refused when the graph is
+  // validated. A cloud whose subnets are each in one zone refuses an unset
+  // zone; a cloud whose subnets span the region has the subnet in every
+  // zone, the one written included.
+  optional uint32 zone = 3;
+  // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// A static public IPv4 address, reserved in the cell's region: it stays the
+// same until the resource is deleted, and once deleted it cannot be taken
+// back. Its ADDRESS is the address. Nothing in this version serves on it (a load
+// balancer is a later primitive). No field yet; 50 to 53 are held for the
+// per-cloud extensions (file header).
+message IpAddress {
+  option (portability) = PORTABLE;
+  option (exposes) = ADDRESS;
 }

@@ -5,8 +5,8 @@
 # THE MESSAGING TYPES OF `kci.resource.v1`, FIELD BY FIELD, AS WIRE BYTES:
 # the field template of test_resource_field_numbers.mojo for `Queue`,
 # `Topic` and `Subscription` (that file is past the size a Mojo source should
-# stay under, so the three are pinned here; its census still pins their body
-# arms 15, 21 and 28 and `Access` SEND 5 and RECEIVE 6).
+# stay under, so the three are pinned here; it still pins their body arms
+# 15, 21 and 28 by the field each fills, and `Access` SEND 5 and RECEIVE 6).
 #
 # For each message:
 #   1. WIRE BYTES BY NAME. A byte stream written by hand, field by field,
@@ -26,7 +26,8 @@
 #      `Ref`s are absent messages.
 #   5. AS ITS ARM. As `Resource.body` 15 (`queue`), 21 (`topic`) and 28
 #      (`subscription`), each fills its own field, at its position in
-#      declaration order (5th, 8th and 10th; 16 `secret` is the 6th).
+#      declaration order (6th, 10th and 15th; the census of every arm is in
+#      test_resource_compute_numbers.mojo).
 # The bytes are a LITERAL restatement of the proto, deliberately.
 # =============================================================================
 
@@ -198,7 +199,7 @@ def _queue() -> List[UInt8]:
 def test_queue() raises:
     """Queue: 1 ack_deadline (a Duration), 2 dead_letter (a Ref), 3
     max_deliveries (presence); by name, binary, JSON, absent = unset; as the
-    `queue` arm 15 (the fifth) of a Resource with retention 3."""
+    `queue` arm 15 (the sixth) of a Resource with retention 3."""
     var b = _queue()
     var q = decode_proto[Queue](b.copy())
     assert_equal(Int(q.ack_deadline.value().seconds), 45, "field 1 is `ack_deadline`")
@@ -232,7 +233,7 @@ def test_queue() raises:
     _msg(r, 15, b)
     var rr = decode_proto[Resource](r.copy())
     assert_true(Bool(rr.queue), "body 15 is `queue`")
-    assert_equal(rr._oneof0_case, 5, "the queue is the fifth arm")
+    assert_equal(rr._oneof0_case, 6, "the queue is the sixth arm")
     assert_equal(rr.retention.value, Retention.KEEP)
     assert_equal(Int(rr.queue.value().max_deliveries.value()), 7)
     _same(encode_proto(rr), r, "Resource with a queue")
@@ -244,7 +245,7 @@ def test_queue() raises:
 
 def test_topic() raises:
     """Topic declares no field: any record in it is unknown and dropped. As
-    the `topic` arm 21 (the eighth), its empty record is kept."""
+    the `topic` arm 21 (the tenth), its empty record is kept."""
     var probe = List[UInt8]()
     _uint(probe, 1, 9)
     _str(probe, 2, "x")
@@ -256,7 +257,7 @@ def test_topic() raises:
     _msg(r, 21, List[UInt8]())
     var rr = decode_proto[Resource](r.copy())
     assert_true(Bool(rr.topic), "body 21 is `topic`")
-    assert_equal(rr._oneof0_case, 8, "the topic is the eighth arm")
+    assert_equal(rr._oneof0_case, 10, "the topic is the tenth arm")
     var again = encode_proto(rr)
     # `_same` drops an empty record as a zero value; the arm's tag (21,
     # length-delimited: 0xAA 0x01) and its zero length must be there.
@@ -272,7 +273,7 @@ def test_topic() raises:
 
 def test_subscription() raises:
     """Subscription: 1 topic, 2 queue (each a Ref); by name, binary, JSON,
-    absent = unset; as the `subscription` arm 28 (the tenth)."""
+    absent = unset; as the `subscription` arm 28 (the sixteenth)."""
     var b = List[UInt8]()
     _msg(b, 1, _ref("events"))
     _msg(b, 2, _ref("work"))
@@ -295,7 +296,7 @@ def test_subscription() raises:
     _msg(r, 28, b)
     var rr = decode_proto[Resource](r.copy())
     assert_true(Bool(rr.subscription), "body 28 is `subscription`")
-    assert_equal(rr._oneof0_case, 10, "the subscription is the tenth arm")
+    assert_equal(rr._oneof0_case, 16, "the subscription is the sixteenth arm")
     assert_equal(rr.subscription.value().queue.value().resource, "work")
     _same(encode_proto(rr), r, "Resource with a subscription")
     print("  test_subscription: PASS")

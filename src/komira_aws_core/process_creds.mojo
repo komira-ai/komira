@@ -8,9 +8,10 @@
 # process's environment and files (`ProcessEnv`, `ProcessFiles`), its HTTP
 # transport (`ProcessCredentialTransport`: plain TCP for the instance-metadata
 # and container endpoints, TLS for STS) and the system clock, behind a
-# `SharedCredsSource`. A type that must be one concrete type for every value
-# (the FsHandle S3 arm) uses it; a type generic over `AwsCredsSource` takes
-# it as the default.
+# `SharedCredsSource`. A caller that needs one concrete type for every value
+# (the production S3Fs a surface builds with komira_objectstore_s3's
+# `s3_prod_fs`) names it; a type generic over `AwsCredsSource` takes it as
+# the default.
 #
 # FIXED KEYS. A credential stated in `params.credential` wins over every
 # provider and carries no expiry, so `process_creds_source` with such params
