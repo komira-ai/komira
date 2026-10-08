@@ -47,6 +47,11 @@
 #    version 2 of the definition no longer has `files`, though its owner
 #    `site` is still in the list, where a bucket kci created would be
 #    deleted.
+# 6. A COMPONENT'S ADOPT IS HONOURED ON DESTROY (generic shape; both
+#    buckets written DELETE): a destroy of `site` is refused before any
+#    change while the adopted component writes ADOPT, naming
+#    `site/files/bucket`; with ADOPT_DELETABLE it deletes the adopted
+#    bucket with the rest of the instance.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -520,6 +525,49 @@ def test_a_dropped_component_releases_its_adopted_object() raises:
     print("  test_a_dropped_component_releases_its_adopted_object: PASS")
 
 
+def _del(adopt: String) raises -> List[CompositeDefinition]:
+    var out = List[CompositeDefinition]()
+    out.append(
+        decode_json[CompositeDefinition](
+            String('{"name":"acme.del","version":"1","component":[')
+            + String('{"id":"files","physicalName":"acme-files","retention":"DELETE","adopt":"') + adopt
+            + String('","bucket":{}},{"id":"made","retention":"DELETE","bucket":{}}]}')
+        )
+    )
+    return out^
+
+
+def test_a_component_adopt_deletable_is_honoured_on_destroy() raises:
+    """Catches: the opt-in read from the instance's owner `site` instead of
+    the component resource `site/files` (mutant: `delete_findings` asks
+    `deletable` about `site`, which is no resource of the expanded list, so
+    the ADOPT_DELETABLE destroy is refused), and a component that writes
+    ADOPT deleted by a destroy."""
+    var site = _list(String('{"id":"site","composite":{"definition":"acme.del","version":"1"}}'))
+    var cloud = FakeCloud(String("re6"))
+    var reg = _reg(FakeCloud(String("re6")))
+    var st = InMemoryStateStore()
+    var x = expand(Catalog.v1(), _del(String("ADOPT")), site)
+    var nodes = lower_data(cloud, x.resources)
+    for i in range(len(nodes)):
+        if nodes[i].adopted:
+            cloud.plant_like(nodes[i])
+    var first = apply_resources(reg, cloud, _ctx(), site, Creds.none(), st, _del(String("ADOPT")))
+    assert_true(not first.error, first.error.value() if first.error else String(""))
+    var before = cloud.mutations()
+    var says = String("")
+    try:
+        _ = destroy_resources(reg, cloud, _ctx(), site, Creds.none(), st, _del(String("ADOPT")))
+    except e:
+        says = String(e)
+    assert_true(says.find("site/files/bucket: kci adopted this object") >= 0, "ADOPT refuses the destroy: " + says)
+    assert_equal(cloud.mutations(), before, "the refusal changed nothing")
+    _ = destroy_resources(reg, cloud, _ctx(), site, Creds.none(), st, _del(String("ADOPT_DELETABLE")))
+    assert_true(_served(cloud, String("delete site/files/bucket")), "ADOPT_DELETABLE: the adopted bucket is deleted")
+    assert_equal(cloud.live_count(), 0, "the whole instance is destroyed")
+    print("  test_a_component_adopt_deletable_is_honoured_on_destroy: PASS")
+
+
 def main() raises:
     print("test_fake_adoption_release")
     test_a_resource_leaving_the_list_releases_its_adopted_object()
@@ -530,4 +578,5 @@ def main() raises:
     test_destroy_judges_by_the_file_retention_not_the_label()
     test_a_type_change_does_not_delete_an_adopted_object()
     test_a_dropped_component_releases_its_adopted_object()
+    test_a_component_adopt_deletable_is_honoured_on_destroy()
     print("ALL FAKE ADOPTION RELEASE TESTS PASSED")

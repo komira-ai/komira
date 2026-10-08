@@ -84,8 +84,8 @@
 #     kci refuses a plan, an apply or a destroy whose primary node asks for
 #     another one, before any change (`metadata.name_change_findings`): a
 #     new name is a new object. `Resource.adopt` adds the primary node to
-#     the scope's adopt list on plan and apply (the engine's `--adopt`), so
-#     an unstamped object of that name is stamped instead of refused.
+#     the scope's adopt list on plan and apply (`with_adopted`), so an
+#     unstamped object of that name is stamped instead of refused.
 #   * SAFE ADOPTION (adoption.mojo). kci marks the primary node of a
 #     resource that writes `adopt` (`LoweredNode.adopted`). Before planning,
 #     kci asks the cloud what stands at that node (`read_existing`: present,

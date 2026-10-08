@@ -70,8 +70,10 @@
 #    then asks the cloud to drop every kci label of it
 #    (`CloudAdapter.release`). A failure at either step leaves the object
 #    stamped and marked, so the next apply releases it again.
-#    No delete call reaches the adapter, the object stands as it was, and a
-#    later file that names it again meets an unstamped object. A plan
+#    No delete call reaches the adapter, the object stands as kci last left
+#    it (with the fields and the author's labels kci wrote; only kci's own
+#    labels are dropped), and a later file that names it again meets an
+#    unstamped object. A plan
 #    reports each release; a destroy, which acts only on the file's nodes,
 #    leaves it to the apply.
 # 5. THE PLAN SAYS SO (`PlanReport`, deploy.render_plan): each adopted node

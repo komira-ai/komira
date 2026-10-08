@@ -439,7 +439,7 @@ def test_a_foreign_object_refuses_the_run_before_any_change() raises:
         msg = String(e)
     assert_true(_has(msg, "REFUSED apply"), msg)
     assert_true(_has(msg, "api/run: foreign"), msg)
-    assert_true(_has(msg, "--adopt api/run"), msg)
+    assert_true(_has(msg, "unless its resource writes adopt (which puts api/run in the run's adopt list)"), msg)
     assert_equal(cloud[].mutations(), 0, "nothing was created")
     assert_equal(len(landed), 0)
     assert_equal(len(pending), 3)

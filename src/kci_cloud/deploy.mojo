@@ -633,8 +633,12 @@ struct ApplyOutcome(Movable, Deinitable):
       * `released` — objects kci adopted whose resource left the list, that
                      this apply released (their kci labels and state record
                      dropped, the object left standing), in order. A release
-                     runs only after the engine's apply succeeded; on an
-                     error it lists those released before it.
+                     runs only after the engine's apply succeeded. When one
+                     fails, `error` says which (`release of <node> failed:
+                     ...`), `released` lists those released before it,
+                     `landed` holds every node the engine applied, `pending`
+                     is empty (the engine finished) and `applied` is empty;
+                     the next apply releases the rest.
 
     A caller that only got a bool (or only the error) could not tell "nothing
     happened" from "half the graph is live": that is the PARTIAL outcome a
@@ -743,6 +747,8 @@ def apply_resources[
         )
     var released = _release(cloud, creds, scope, store, p.releases, error)
     if error:
+        # A failed release: the engine finished, so every node landed and
+        # none is pending.
         return ApplyOutcome(
             List[AppliedNode](), applied^, pending^, error^, p.leftover.copy(), p.left_behind.copy(), released^
         )

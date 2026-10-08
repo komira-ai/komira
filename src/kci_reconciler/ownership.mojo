@@ -347,10 +347,10 @@ def ownership_problem(
             return String("")
         return (
             String("foreign: an object named for this node exists and carries no")
-            + String(" kci stamp; kci never takes it over unless the run adopts it")
-            + String(" (--adopt ")
+            + String(" kci stamp; kci never takes it over unless its resource writes")
+            + String(" adopt (which puts ")
             + logical_id
-            + String(")")
+            + String(" in the run's adopt list)")
         )
     return (
         String("conflict: the live object is stamped for another owner (")
