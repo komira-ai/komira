@@ -1,0 +1,232 @@
+# =============================================================================
+# write.mojo -- calendar events to one iCalendar 2.0 file (RFC 5545).
+# =============================================================================
+#
+# `write_ics(events, zones, stamp_utc)` writes a VCALENDAR (VERSION 2.0, a
+# PRODID, CALSCALE GREGORIAN), a VTIMEZONE for each zone a timed event uses
+# other than `UTC` (vtimezone.mojo), in name order, then the events in
+# order. Each event and edit is checked first (`komira_calendar.check_event`
+# and `check_override`); one that breaks the model, or names a zone
+# `zones` does not know, refuses the export.
+#
+# A series is one VEVENT:
+#   UID (the event's uid, or its id when the uid is empty), DTSTAMP
+#   (`stamp_utc`), DTSTART (`VALUE=DATE` all-day; `TZID=<zone>` timed;
+#   UTC with `Z` when the zone is `UTC`), then DTEND (`VALUE=DATE`, all-day)
+#   or DURATION (exact `PT..`, timed), SUMMARY, LOCATION, DESCRIPTION (each
+#   only when not empty), STATUS:CANCELLED when cancelled, RRULE (UNTIL is
+#   the event's last allowed start: a DATE all-day, else the UTC instant of
+#   the until date at the start's time of day), EXDATE in the DTSTART form,
+#   and one VALARM per reminder (ACTION:DISPLAY, the title as DESCRIPTION,
+#   TRIGGER:-PT<n>M).
+# An edit is one more VEVENT of the same UID with RECURRENCE-ID (the original
+# start, in the DTSTART form). A cancelled occurrence has STATUS:CANCELLED
+# and DTSTART at the original start; a kept one has every field the
+# occurrence shows: the replacement where the edit has one, else the
+# series' value.
+# Every TEXT value is escaped and every line folded at 75 octets
+# (komira_content_line), so reading the file back gives the same events.
+# =============================================================================
+
+from komira_calendar import check_event, check_override, parse_local_date, parse_local_datetime
+from komira_calendar_proto.calendar import Event, EventStatus, OccurrenceOverride
+from komira_content_line import ContentLine, Param, escape_text, fold_line, format_content_line
+from komira_tz import FoldPolicy, GapPolicy
+
+from .read_event import IcsEvent
+from .rrule import format_rrule
+from .values import (
+    SECONDS_PER_DAY,
+    format_ics_date,
+    format_ics_datetime,
+    format_ics_seconds,
+)
+from .vtimezone import prop_line, write_vtimezone
+from .zones import ResolvedZone, ZoneResolver, ZoneSource
+
+comptime PRODID = "-//komira//komira_calendar_ics//EN"
+
+
+def _line(name: String, var params: List[Param], value: String) raises -> String:
+    return fold_line(format_content_line(ContentLine(String(), name.copy(), params^, value.copy())))
+
+
+def _text(name: String, value: String) raises -> String:
+    return _line(name, List[Param](), escape_text(value))
+
+
+def _one(name: String, value: String) -> List[Param]:
+    var values = List[String]()
+    values.append(value.copy())
+    var out = List[Param]()
+    out.append(Param(name.copy(), values^))
+    return out^
+
+
+struct _Form(Copyable, Movable):
+    """How an event's times are written: all-day, or timed in a zone."""
+
+    var all_day: Bool
+    var zone: Optional[ResolvedZone]
+
+    def __init__(out self, all_day: Bool, var zone: Optional[ResolvedZone]):
+        self.all_day = all_day
+        self.zone = zone^
+
+    def time(self, name: String, text: String) raises -> String:
+        """Property `name` holding the model's local start text `text`."""
+        if self.all_day:
+            return _line(name, _one("VALUE", "DATE"), format_ics_date(parse_local_date(text)))
+        ref z = self.zone.value()
+        var t = parse_local_datetime(text)
+        var local = t.days * SECONDS_PER_DAY + t.second_of_day
+        if z.name == "UTC":
+            return _line(name, List[Param](), format_ics_datetime(local, True))
+        return _line(name, _one("TZID", z.name), format_ics_datetime(local, False))
+
+    def start_utc(self, text: String) raises -> Int:
+        var t = parse_local_datetime(text)
+        return self.zone.value().zone.to_utc(
+            t.days * SECONDS_PER_DAY + t.second_of_day, GapPolicy.SHIFT_FORWARD, FoldPolicy.EARLIER
+        )
+
+
+def _ending(form: _Form, start: String, days: Int, seconds: Int) raises -> String:
+    if form.all_day:
+        return _line("DTEND", _one("VALUE", "DATE"), format_ics_date(parse_local_date(start) + days))
+    return _line("DURATION", List[Param](), format_ics_seconds(seconds))
+
+
+def _until(form: _Form, event: Event) raises -> String:
+    var until = event.recurrence.value().until.copy()
+    if until.byte_length() == 0:
+        return String()
+    var day = parse_local_date(until)
+    if form.all_day:
+        return format_ics_date(day)
+    var sod = parse_local_datetime(event.start).second_of_day
+    var u = form.zone.value().zone.to_utc(day * SECONDS_PER_DAY + sod, GapPolicy.SHIFT_FORWARD, FoldPolicy.EARLIER)
+    return format_ics_datetime(u, True)
+
+
+def _texts(title: String, location: String, description: String) raises -> String:
+    var out = String()
+    if title.byte_length() > 0:
+        out += _text("SUMMARY", title)
+    if location.byte_length() > 0:
+        out += _text("LOCATION", location)
+    if description.byte_length() > 0:
+        out += _text("DESCRIPTION", description)
+    return out^
+
+
+def _series(event: Event, uid: String, stamp: String, form: _Form) raises -> String:
+    var start = event.start_date.copy() if event.show_without_time else event.start.copy()
+    var out = prop_line("BEGIN", "VEVENT")
+    out += _text("UID", uid)
+    out += prop_line("DTSTAMP", stamp)
+    out += form.time("DTSTART", start)
+    out += _ending(form, start, Int(event.days), Int(event.duration_seconds))
+    out += _texts(event.title, event.location, event.description)
+    if event.status.value == EventStatus.CANCELLED:
+        out += prop_line("STATUS", "CANCELLED")
+    if event.recurrence:
+        out += prop_line("RRULE", format_rrule(event.recurrence.value(), _until(form, event)))
+    for x in event.exdates:
+        out += form.time("EXDATE", x)
+    for r in event.reminders:
+        out += prop_line("BEGIN", "VALARM")
+        out += prop_line("ACTION", "DISPLAY")
+        out += _text("DESCRIPTION", event.title if event.title.byte_length() > 0 else String("Reminder"))
+        out += prop_line("TRIGGER", "-PT" + String(r.minutes_before) + "M")
+        out += prop_line("END", "VALARM")
+    out += prop_line("END", "VEVENT")
+    return out^
+
+
+def _edit(event: Event, edit: OccurrenceOverride, uid: String, stamp: String, form: _Form) raises -> String:
+    var out = prop_line("BEGIN", "VEVENT")
+    out += _text("UID", uid)
+    out += prop_line("DTSTAMP", stamp)
+    out += form.time("RECURRENCE-ID", edit.original_start)
+    if edit.cancelled:
+        out += form.time("DTSTART", edit.original_start)
+        out += prop_line("STATUS", "CANCELLED")
+        out += prop_line("END", "VEVENT")
+        return out^
+    var start = edit.start.value().copy() if edit.start else edit.original_start.copy()
+    out += form.time("DTSTART", start)
+    var days = Int(edit.days.value()) if edit.days else Int(event.days)
+    var seconds = Int(edit.duration_seconds.value()) if edit.duration_seconds else Int(event.duration_seconds)
+    out += _ending(form, start, days, seconds)
+    out += _texts(
+        edit.title.value() if edit.title else event.title,
+        edit.location.value() if edit.location else event.location,
+        edit.description.value() if edit.description else event.description,
+    )
+    out += prop_line("END", "VEVENT")
+    return out^
+
+
+def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) raises -> String:
+    """`events` as one iCalendar file (module header). `stamp_utc` is the
+    DTSTAMP of every VEVENT, in epoch seconds."""
+    var stamp = format_ics_datetime(stamp_utc, True)
+    var zr = ZoneResolver()
+    var names = List[String]()
+    var firsts = List[Int]()
+    var forms = List[_Form]()
+    for ref ie in events:
+        ref e = ie.event
+        var uid = e.uid.copy() if e.uid.byte_length() > 0 else e.id.copy()
+        if uid.byte_length() == 0:
+            raise Error("ics export: an event has neither uid nor id")
+        var r = check_event(e)
+        if r:
+            raise Error('ics export: event "' + uid + '": ' + String(r.value()))
+        for ref o in ie.overrides:
+            var ro = check_override(o, e)
+            if ro:
+                raise Error('ics export: event "' + uid + '", occurrence ' + o.original_start + ": " + String(ro.value()))
+        if e.show_without_time:
+            forms.append(_Form(True, None))
+            continue
+        var z: ResolvedZone
+        try:
+            z = zr.resolve(e.time_zone, zones)
+        except err:
+            raise Error('ics export: event "' + uid + '": ' + String(err))
+        var form = _Form(False, Optional[ResolvedZone](z.copy()))
+        var first = form.start_utc(e.start)
+        if e.time_zone != "UTC":
+            var at = -1
+            for k in range(len(names)):
+                if names[k] == e.time_zone:
+                    at = k
+            if at < 0:
+                names.append(e.time_zone.copy())
+                firsts.append(first)
+            elif first < firsts[at]:
+                firsts[at] = first
+        forms.append(form^)
+    var out = prop_line("BEGIN", "VCALENDAR")
+    out += prop_line("VERSION", "2.0")
+    out += _text("PRODID", PRODID)
+    out += prop_line("CALSCALE", "GREGORIAN")
+    var ordered = names.copy()
+    sort(ordered)
+    for ref name in ordered:
+        var first = 0
+        for k in range(len(names)):
+            if names[k] == name:
+                first = firsts[k]
+        out += write_vtimezone(name, zr.resolve(name, zones).zone, first)
+    for i in range(len(events)):
+        ref ie = events[i]
+        ref e = ie.event
+        var uid = e.uid.copy() if e.uid.byte_length() > 0 else e.id.copy()
+        out += _series(e, uid, stamp, forms[i])
+        for ref o in ie.overrides:
+            out += _edit(e, o, uid, stamp, forms[i])
+    out += prop_line("END", "VCALENDAR")
+    return out^
