@@ -39,7 +39,7 @@ comptime _JOB = "projects/demo-project/locations/us-central1/jobs/nightly"
 # "BwXhqDuVJ8g=".
 comptime _POLICY = (
     '{"version":3,"bindings":[{"role":"roles/run.invoker",'
-    + '"members":["serviceAccount:caller@demo-project.iam.gserviceaccount.com"]}],'
+    + '"members":["serviceAccount:caller@example.com"]}],'
     + '"etag":"BwXhqDuVJ8g="}'
 )
 

@@ -20,7 +20,7 @@ from std.testing import assert_equal, assert_false
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_gcp_core import StaticTokenSource
+from komira_gcp_core import GcpTokenSource, StaticTokenSource
 from komira_gcp_run.worker_pool import (
     CreateWorkerPoolRequest,
     DeleteWorkerPoolRequest,
@@ -43,7 +43,7 @@ comptime _NAME = "projects/demo-project/locations/us-central1/workerPools/queue"
 # fields set, in declaration order.
 comptime _POOL_TAIL = (
     '"labels":{"app":"queue"},"template":{'
-    + '"serviceAccount":"queue-runtime@demo-project.iam.gserviceaccount.com",'
+    + '"serviceAccount":"queue-runtime@example.com",'
     + '"containers":[{"image":"us-docker.pkg.dev/demo-project/apps/queue@sha256:0f1e",'
     + '"args":["--drain"]}]},"scaling":{"manualInstanceCount":2}}'
 )
@@ -61,12 +61,25 @@ comptime _POOL_ANSWER = (
     '{"name":"projects/demo-project/locations/us-central1/workerPools/queue",'
     + '"uid":"0b6e4c2a-1d3f-4a5b-8c7d-9e0f1a2b3c4d","generation":"2",'
     + '"labels":{"app":"queue"},"template":{'
-    + '"serviceAccount":"queue-runtime@demo-project.iam.gserviceaccount.com",'
+    + '"serviceAccount":"queue-runtime@example.com",'
     + '"containers":[{"image":"us-docker.pkg.dev/demo-project/apps/queue@sha256:0f1e"}]},'
     + '"scaling":{"manualInstanceCount":2},"observedGeneration":"2",'
     + '"latestReadyRevision":"projects/demo-project/locations/us-central1/workerPools/'
     + 'queue/revisions/queue-00002-abc","etag":"\\"Cx1\\"","reconciling":false}'
 )
+
+
+struct CountingTokenSource(GcpTokenSource, Movable, Deinitable):
+    """Counts the tokens asked of it in a cell the test keeps."""
+
+    var calls: ArcPointer[Int]
+
+    def __init__(out self, calls: ArcPointer[Int]):
+        self.calls = calls
+
+    def access_token(mut self) raises -> String:
+        self.calls[] += 1
+        return String("test-access-token")
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -166,7 +179,7 @@ def test_get_worker_pool() raises:
     assert_equal(pool.labels["app"], "queue")
     assert_equal(
         pool.template.value().service_account,
-        "queue-runtime@demo-project.iam.gserviceaccount.com",
+        "queue-runtime@example.com",
     )
     assert_equal(pool.scaling.value().manual_instance_count.value(), Int32(2))
     assert_equal(pool.etag, '"Cx1"')
@@ -226,6 +239,34 @@ def test_update_worker_pool() raises:
     assert_false(op.done)
 
 
+def test_update_worker_pool_without_a_pool_is_refused_before_any_send() raises:
+    # The path is built from `worker_pool.name`; with no worker pool there
+    # is no path, and the client refuses before it asks for a token or dials.
+    var calls = ArcPointer[Int](0)
+    var c = WorkerPoolsClient[ScriptedConnector, CountingTokenSource](
+        HttpClient[ScriptedConnector].with_defaults(
+            ScriptedConnector.with_stream_tls(ScriptedStream.from_read_script(_ok("{}")))
+        ),
+        CountingTokenSource(calls),
+    )
+    var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var got = String("")
+    try:
+        _ = c.update_worker_pool[_RT](
+            decode_json[UpdateWorkerPoolRequest]('{"validateOnly":true}'), reactor
+        )
+    except e:
+        got = String(e)
+    assert_equal(
+        got,
+        "update_worker_pool: the request's `worker_pool` is unset, and the path"
+        " is built from `worker_pool.name`",
+    )
+    assert_equal(calls[], 0)
+    assert_equal(c._client._connector.connect_call_count(), 0)
+
+
 def test_delete_worker_pool() raises:
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
     var c = _pools(capture, _OPERATION)
@@ -248,5 +289,6 @@ def main() raises:
     test_get_worker_pool()
     test_list_worker_pools()
     test_update_worker_pool()
+    test_update_worker_pool_without_a_pool_is_refused_before_any_send()
     test_delete_worker_pool()
     print("OK")

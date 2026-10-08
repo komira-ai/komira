@@ -38,7 +38,7 @@ comptime _REPO = "projects/demo-project/locations/us-central1/repositories/image
 # "BwXhqDuVJ8g=".
 comptime _POLICY = (
     '{"version":3,"bindings":[{"role":"roles/artifactregistry.reader",'
-    + '"members":["serviceAccount:runtime@demo-project.iam.gserviceaccount.com"]}],'
+    + '"members":["serviceAccount:runtime@example.com"]}],'
     + '"etag":"BwXhqDuVJ8g="}'
 )
 
@@ -101,7 +101,7 @@ def _check_policy(p: Policy) raises:
     assert_equal(p.bindings[0].role, "roles/artifactregistry.reader")
     assert_equal(
         p.bindings[0].members[0],
-        "serviceAccount:runtime@demo-project.iam.gserviceaccount.com",
+        "serviceAccount:runtime@example.com",
     )
     var etag: List[UInt8] = [0x07, 0x05, 0xE1, 0xA8, 0x3B, 0x95, 0x27, 0xC8]
     assert_true(p.etag == etag)

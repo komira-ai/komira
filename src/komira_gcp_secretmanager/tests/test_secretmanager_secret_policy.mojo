@@ -47,7 +47,7 @@ comptime _SECRET = (
 # A policy granting one workload read: version 3, the etag "BwXhqDuVJ8g=".
 comptime _POLICY = (
     '{"version":3,"bindings":[{"role":"roles/secretmanager.secretAccessor",'
-    + '"members":["serviceAccount:web@demo-project.iam.gserviceaccount.com"]}],'
+    + '"members":["serviceAccount:web@example.com"]}],'
     + '"etag":"BwXhqDuVJ8g="}'
 )
 
