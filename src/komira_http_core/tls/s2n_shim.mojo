@@ -81,7 +81,6 @@ from komira_http_core.tls.ffi import (
     s2n_connection_set_config,
     s2n_connection_set_fd,
     s2n_connection_set_session,
-    s2n_connection_get_actual_protocol_version,
     s2n_connection_get_key_update_counts,
     s2n_connection_request_key_update,
     s2n_connection_get_wire_bytes_in,

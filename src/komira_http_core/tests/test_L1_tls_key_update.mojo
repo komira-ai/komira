@@ -53,11 +53,11 @@ comptime _NOT_COMPLETE = "TlsConnection.request_key_update: handshake not comple
 
 def _socketpair() raises -> Tuple[Int32, Int32]:
     var sv = Array[Int32, 2](fill=Int32(-1))
-    var sv_ptr = UnsafePointer(to=sv).unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]().bitcast[Int32]()
+    # SAFETY: the pointer's origin is `sv`, which outlives the synchronous
+    # socketpair call (it is read below); the call writes two Int32 into it
+    # and keeps no pointer.
     var rc = external_call["socketpair", Int32](
-        _AF_UNIX, _SOCK_STREAM, Int32(0), sv_ptr,
+        _AF_UNIX, _SOCK_STREAM, Int32(0), sv.unsafe_ptr()
     )
     if rc != Int32(0):
         raise Error("socketpair() returned " + String(Int(rc)))

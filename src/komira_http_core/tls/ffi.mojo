@@ -1164,13 +1164,3 @@ def s2n_connection_get_key_update_counts(
     return external_call["s2n_connection_get_key_update_counts", Int32](
         conn, send_key_updates, recv_key_updates
     )
-
-
-def s2n_connection_get_actual_protocol_version(conn: S2nOpaquePtr) -> Int32:
-    """s2n.h `int s2n_connection_get_actual_protocol_version(struct
-    s2n_connection *conn)`: the negotiated version (S2N_TLS13 = 34). Before
-    the handshake a client reports its highest supported version."""
-    # SAFETY: synchronous accessor on a live handle; no pointer escapes.
-    return external_call["s2n_connection_get_actual_protocol_version", Int32](
-        conn
-    )
