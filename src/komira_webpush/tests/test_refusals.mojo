@@ -22,16 +22,17 @@
 #   webpush_encrypt: 3994 bytes of plaintext, a 15-byte auth secret, a
 #     64-byte and an off-curve user agent key, and a sender key source that
 #     returns the group order n.
-#   webpush_decrypt: a 64-byte keyid, two records, a public key that is not
-#     the private key's, an off-curve keyid, the wrong auth secret, a
-#     64-byte user agent key, a 15-byte auth secret.
+#   webpush_decrypt: a 64-byte keyid, two records, three public keys that
+#     are not the private key's (-G; -P, the same x with y negated; the
+#     key with only its last byte flipped), an off-curve keyid, the wrong
+#     auth secret, a 64-byte user agent key, a 15-byte auth secret.
 #   webpush_ikm: a 15-byte auth secret, a 64-byte user agent key, a 64-byte
 #     application server key.
 #   p256_public_key: zero, n and a 31-byte key; 1 (point G) and n - 1
 #     (point -G) are accepted.
 # =============================================================================
 
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_true
 
 from komira_crypto import AesGcm128, hex_lower
 from komira_encoding import base64_url_decode_nopad
@@ -90,6 +91,25 @@ def _hex(s: String) raises -> List[UInt8]:
     var out = List[UInt8](capacity=len(bs) // 2)
     for i in range(len(bs) // 2):
         out.append((_nibble(bs[2 * i]) << UInt8(4)) | _nibble(bs[2 * i + 1]))
+    return out^
+
+
+def _n_minus(k: List[UInt8]) raises -> List[UInt8]:
+    """Returns n - k for a 32-byte big-endian k in [1, n - 1].
+
+    n is the P-256 group order; byte-wise subtraction with borrow.
+    """
+    var n = _hex(_N_MINUS_1_HEX)
+    n[31] = n[31] + UInt8(1)  # n - 1 ends in 0x50: no carry
+    var out = List[UInt8](length=32, fill=0)
+    var borrow = 0
+    for i in range(31, -1, -1):
+        var d = Int(n[i]) - Int(k[i]) - borrow
+        borrow = 0
+        if d < 0:
+            d += 256
+            borrow = 1
+        out[i] = UInt8(d)
     return out^
 
 
@@ -551,6 +571,27 @@ def test_webpush_decrypt_refusals() raises:
         other_list.append(other[i])
     assert_equal(
         _ua_outcome(other_list, auth, body),
+        "webpush: user agent public key is not the key of the private key",
+    )
+    # -P: the RFC private key k negated (n - k) gives the same x with y
+    # negated, the key a y-sign or decompression mix-up would hand over.
+    var neg_k = _n_minus(_b(_UA_PRIVATE))
+    var neg = p256_public_key(Span[UInt8](neg_k))
+    var neg_list = List[UInt8]()
+    for i in range(65):
+        neg_list.append(neg[i])
+    for i in range(33):
+        assert_equal(neg_list[i], ua[i])
+    assert_true(neg_list[64] != ua[64])
+    assert_equal(
+        _ua_outcome(neg_list, auth, body),
+        "webpush: user agent public key is not the key of the private key",
+    )
+    # The last byte alone differs: the comparison runs before any curve check.
+    var ua_tail = ua.copy()
+    ua_tail[64] = ua_tail[64] ^ UInt8(0x01)
+    assert_equal(
+        _ua_outcome(ua_tail, auth, body),
         "webpush: user agent public key is not the key of the private key",
     )
     var bad_point = body.copy()
