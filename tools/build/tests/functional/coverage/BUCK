@@ -1,5 +1,5 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
@@ -208,6 +208,88 @@ cov_report_check(
     mode = "census",
     package = "tools/build/tests/functional/coverage",
     reports = _REPORTS,
+    script = "report.sh",
+)
+
+# Tests 43 and 46: a library whose only tests are standalone mojo_test
+# targets, which it names in `coverage_tests`: test_covmt in this package
+# calls half, test_covmt_far in //functional/coverage/covmt_far (another
+# package, as an end-to-end test under src/tests/ is) calls quarter. Its gate
+# is the target covmt_cov_gate (the library cannot depend on its tests),
+# which runs each test's coverage binary under kcov against covmt's sources
+# and gates over both reports: every line of half.mojo is covered, by one
+# test or the other. The test in this package is set aside (--test-source),
+# and the other one's source is staged with a BUCK file at its package, so
+# the gate does not measure it as covmt's.
+mojo_library(
+    name = "covmt",
+    srcs = [
+        "covmt/__init__.mojo",
+        "covmt/half.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    coverage_tests = [
+        ":test_covmt",
+        "//functional/coverage/covmt_far:test_covmt_far",
+    ],
+    visibility = ["//functional/coverage/covmt_far:"],
+)
+
+mojo_test(
+    name = "test_covmt",
+    srcs = ["tests/test_covmt.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    deps = [":covmt"],
+)
+
+# Test 46: what covmt's gate (covmt_cov_gate) found: both functions of
+# half.mojo, each compiled into one test's binary and run (a dropped test
+# leaves its function uncompiled: line_found 1); one test source set aside,
+# the other another package's.
+cov_report_check(
+    name = "covmt_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,',
+        '"ignored_files":0,"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covmt_cov_gate[gate][result]"],
+    script = "report.sh",
+)
+
+# Test 46: the gate of a library whose only test is its README's example
+# (//functional/coverage/covreadme): twice.mojo's two lines covered by the
+# example's run, the README's program counted outside the repository (its
+# report names it under buck-out/readme/). Without the README's run the
+# package is NotMeasured. And of one whose README holds no example
+# (covreadme_none): the run of a program that runs nothing, thrice.mojo
+# measured and not covered.
+cov_report_check(
+    name = "covreadme_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage/covreadme","files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,',
+        '"ignored_files":1,"excluded_test_files":0,',
+    ],
+    mode = "result",
+    reports = ["//functional/coverage/covreadme:covreadme[coverage][gate][result]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covreadme_none_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage/covreadme_none","files":1,"unmeasured_files":1,"line_hit":0,"line_found":2,"line_bp":0,',
+        '"kind":"NotMeasured",',
+        '"ignored_files":1,"excluded_test_files":0,',
+    ],
+    mode = "result",
+    reports = ["//functional/coverage/covreadme_none:covreadme_none[coverage][gate][result]"],
     script = "report.sh",
 )
 

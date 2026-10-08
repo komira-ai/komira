@@ -45,6 +45,16 @@
 #      release action of a library, its join included: coverage_keys.sh
 #      (test 41). The refusals of the coverage attributes outside the tests
 #      cell are test 7's (umbrella_cache.sh, in a consumer's cell).
+#      README examples and mojo_test targets: tests//functional/coverage
+#      covreadme_result (a library whose only test is its README's example
+#      is measured by it: 2 of 2 lines), covreadme_none_result (a README
+#      with no example: NotMeasured), covmt_result (covmt_cov_gate reads the
+#      runs of the two mojo_test targets covmt names in coverage_tests, one
+#      in another package: 2 of 2 lines, its own test set aside);
+#      tests//negative/coverage:tracer_mt and test_tracer_mt green and
+#      tracer_mt_conda red (what ships waits for the run of a test the
+#      library names); covmt_stray_cov_gate and covmt_args_cov_gate red at
+#      analysis (a named test must depend on the library and have no args).
 
 N=tests//negative/coverage
 P=tools/build/tests/negative/coverage
@@ -82,6 +92,15 @@ expect_green coverage_gate_library "$N:covlow" "$N:covnotests" "$N:covun" "$N:co
     "$N:covbranch" "$N:covbad" "$N:covlow_user"
 expect_red coverage_gate_conda "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow_conda"
 expect_red coverage_gate_conda_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests_conda"
+# README examples and the mojo_test targets a library names in
+# coverage_tests are its tests for coverage: their runs reach its gate, and
+# what ships waits for them.
+expect_green coverage_gate_readme_mojo_test tests//functional/coverage:covreadme_result \
+    tests//functional/coverage:covreadme_none_result tests//functional/coverage:covmt_result \
+    "$N:tracer_mt" "$N:test_tracer_mt"
+expect_red coverage_gate_mojo_test_conda "COVERAGE RUN FAILED: $N:test_tracer_mt [coverage of $N:tracer_mt]" "$N:tracer_mt_conda"
+expect_red coverage_gate_mojo_test_stray "$N:test_tracer_mt does not name $N:covmt_stray in its deps" "$N:covmt_stray_cov_gate"
+expect_red coverage_gate_mojo_test_args "$N:test_args cannot run under kcov: it has" "$N:covmt_args_cov_gate"
 # A generated client whose welded tests are at its package's top analyzes
 # with the switch on, and has its gate (analysis only: aquery).
 CG=//tools/build/proto-codegen/aws_query:komira_aws_tiny_query

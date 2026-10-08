@@ -1,7 +1,7 @@
 load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
 load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage/kcov:defs.bzl", "cov_link_dir", "cov_run_dir")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("//functional/coverage:defs.bzl", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "kcov_stub_dir")
@@ -543,6 +543,64 @@ mojo_library(
     srcs = ["tracer/__init__.mojo"],
     import_name = "tracer",
     test_srcs = ["tests/test_tracer.mojo"],
+)
+
+# Test 46. A mojo_test that passes as a test and fails under kcov (the
+# tracer test above), named in `coverage_tests` by a library with coverage
+# builds and a census gate (which is then tracer_mt_cov_gate). GREEN:
+# :tracer_mt and :test_tracer_mt. RED: :tracer_mt_conda ("COVERAGE RUN
+# FAILED", the test's run against tracer_mt): what ships waits for the runs
+# of the tests a library names, as for its welded tests.
+mojo_library(
+    name = "tracer_mt",
+    srcs = ["tracer/__init__.mojo"],
+    coverage_debug = _LINK,
+    coverage_gate = _GATE,
+    coverage_mode = "census",
+    coverage_tests = [":test_tracer_mt"],
+    import_name = "tracer",
+)
+
+mojo_test(
+    name = "test_tracer_mt",
+    srcs = ["tests/test_tracer.mojo"],
+    coverage_debug = _LINK,
+    deps = [":tracer_mt"],
+)
+
+# Test 46. What a library may name in `coverage_tests`: a mojo_test that
+# depends on it, whose main is a source and that has no `args` (a coverage
+# run passes none). RED at analysis: :covmt_stray_cov_gate (test_tracer_mt
+# does not depend on covmt_stray) and :covmt_args_cov_gate (a test with
+# `args`).
+mojo_library(
+    name = "covmt_stray",
+    srcs = ["tracer/__init__.mojo"],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = _GATE,
+    coverage_mode = "census",
+    coverage_tests = [":test_tracer_mt"],
+    import_name = "tracer",
+)
+
+mojo_library(
+    name = "covmt_args",
+    srcs = ["tracer/__init__.mojo"],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = _GATE,
+    coverage_mode = "census",
+    coverage_tests = [":test_args"],
+    import_name = "tracer",
+)
+
+mojo_test(
+    name = "test_args",
+    srcs = ["tests/test_tracer.mojo"],
+    args = ["--one"],
+    coverage_debug = _LINK,
+    deps = [":covmt_args"],
 )
 
 # ---- Test 47: branch coverage runs --------------------------------------------

@@ -832,6 +832,21 @@ and, per library, with tests or without:
   and `summary.md` are `[coverage][gate]` (`cov/gate/`, action category
   `mojo_cov_gate`; [The build gate](../coverage/README.md#the-build-gate)).
 
+and, as its tests for coverage (line coverage only: no branch coverage action):
+
+- its README's examples (`[tests][readme]`), built and run as a test:
+  `[coverage][bin][readme]`, `[coverage][tests][readme]`. A README with no
+  example gives a program that runs nothing (`mojo_cov_readme_source`
+  chooses). The report names the program under `buck-out/readme/`, which
+  covcheck counts outside the repository;
+- the `mojo_test` targets it names in `coverage_tests` (none by default; one
+  test may be named by several libraries), each depending on it, with a
+  source main and no `args`. It cannot depend on them, so its gate is the
+  target `<name>_cov_gate`: each test's -O0 binary (the mojo_test's
+  `[coverage][bin]`) run under kcov against the library's sources
+  (`<name>_cov_gate[tests][<test>]`), and the gate over those reports and
+  the library's (`<name>_cov_gate[gate]`), which its conda package waits for.
+
 What ships, the library's conda package (`<name>_conda`: both its joins,
 [`conda.bzl`](../package/conda.bzl)), then also waits for every coverage run
 and the gate: with the switch on, a test that fails at `-O0` or traced, or a
@@ -863,7 +878,9 @@ cov_normalize), `coverage_branch` to
 `komira//tools/build/coverage/branch:cov_branch` (the branch coverage
 scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
 (cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
-(for a library of the ledger: no gate). A buckconfig
+(for a library of the ledger or naming `coverage_tests`: no gate; its
+`<name>_cov_gate` is declared), and a `mojo_test`'s `coverage_debug`; with it
+off, `coverage_tests` is dropped. A buckconfig
 value is not part of the configuration, so no output path moves; with the
 switch off the attributes are absent and analysis is what it was without
 coverage builds. With it on, every release action of the library
@@ -907,10 +924,9 @@ Scope, for now:
   not an empty result. Whatever collects coverage asks only on linux-x86_64,
   as the pull request's `coverage` workflow does
   ([The coverage workflow](../coverage/README.md#the-coverage-workflow)).
-- A library's `test_srcs` that are source files. A README's examples,
-  `mojo_test`, the drivers of `mojo_shared_lib` and generated test sources
-  (a `test_srcs` entry that is a build output) get no coverage binary, and
-  the library's generated sources are not measured.
+- The drivers of `mojo_shared_lib`, generated test sources (a `test_srcs`
+  entry that is a build output) and a `mojo_test` no library names are not
+  run under kcov, and the library's generated sources are not measured.
 - A test's data may not be staged at its own source's path or under
   `buck-out/`: a coverage run stages the sources there (analysis fails,
   naming the destination).
@@ -946,6 +962,7 @@ holds (no source locations), its two checks and test 52.
 | `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage gate]): covcheck gate exited 3` | [`cov_gate.sh`](../coverage/cov_gate.sh) | with coverage on, the library's coverage gate in enforce mode found something (its summary follows: below the target, not measured, a file no test compiled, branch not measured, ...); the conda package (`<name>_conda`) is not produced, while the library and its dependents still build ([The build gate](../coverage/README.md#the-build-gate)) |
 | `COVERAGE GATE ERROR: <package> (<label> [coverage gate]): covcheck exited N` | [`cov_gate.sh`](../coverage/cov_gate.sh) | covcheck refused the gate's inputs (an unmapped report path, a source it cannot read: exit 1) or its command line (exit 2), in any mode; its message is above |
 | `COVERAGE RUN FAILED: <label> [coverage]` | [`cov_run.sh`](../coverage/kcov/cov_run.sh) | a coverage run failed: the test failed under kcov (with its exit status, after its output), it left processes running or did not finish within the run's limit (450 s), kcov could not trace it or failed itself, the binary names the library's sources by another directory than the run stages, or its report was missing or refused by `cov_normalize` ([cov_run](../coverage/kcov/README.md#cov_run)) |
+| `<name>_cov_gate: coverage_tests of <lib>: <test> does not name <lib> in its deps` (or `cannot run under kcov: ...`, `is not a mojo_test with a coverage build`) | [`coverage.bzl`](coverage.bzl) | with coverage on, a library's `coverage_tests` names a test that does not depend on it, has `args` or a generated main, or is not a `mojo_test` ([Coverage builds](#coverage-builds)) |
 | `<target>: tests_known_failing was removed: every welded test must pass` | [`defs.bzl`](defs.bzl) | a `mojo_library` call names `tests_known_failing`; delete it and make the test pass |
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
 | `<target>: ... data destination <d> ...` | [`test_runtime.bzl`](test_runtime.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |

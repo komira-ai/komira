@@ -38,7 +38,11 @@
 #      lostdir[coverage] red (a binary naming the sources by another
 #      directory than the run stages is refused before kcov runs); clash and
 #      clash_buckout red at analysis (data where a run stages sources);
-#      refused[coverage] red (kcov refused by the executor is said so).
+#      refused[coverage] red (kcov refused by the executor is said so);
+#      covreadme[coverage][tests][readme] and covreadme_none's (a README's
+#      examples, and a README with none, run under kcov like a test) and
+#      covmt_cov_gate[tests] (the mojo_test targets covmt names in
+#      coverage_tests, one in another package, run against its sources).
 #      The release actions with the switch on: coverage_keys.sh (test 41).
 
 expect_green coverage_runs tests//functional/coverage:numbers tests//functional/coverage:census \
@@ -47,7 +51,10 @@ expect_green coverage_runs tests//functional/coverage:numbers tests//functional/
     tests//functional/coverage:covgen 'tests//functional/coverage:branchlib[coverage][tests][test_gate_env]' \
     tests//negative/coverage:tracer tests//negative/coverage:lost \
     tests//negative/coverage:orphan 'tests//negative/coverage:orphan[coverage]' \
-    tests//negative/coverage:linger 'tests//negative/coverage:linger[coverage][tests][test_brief]'
+    tests//negative/coverage:linger 'tests//negative/coverage:linger[coverage][tests][test_brief]' \
+    'tests//functional/coverage/covreadme:covreadme[coverage][tests][readme]' \
+    'tests//functional/coverage/covreadme_none:covreadme_none[coverage][tests][readme]' \
+    'tests//functional/coverage:covmt_cov_gate[tests]'
 expect_red coverage_run_tracer "test_tracer: traced, TracerPid" 'tests//negative/coverage:tracer[coverage][tests][test_tracer]'
 expect_red coverage_run_lost "lostlib/value.mojo': no --map or --exclude prefix covers it" 'tests//negative/coverage:lost[coverage][tests][test_lost]'
 expect_red coverage_run_data_clash 'collides with its source, which a coverage run stages at "tests/test_lost.mojo"' tests//negative/coverage:clash

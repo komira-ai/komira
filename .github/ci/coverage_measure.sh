@@ -51,7 +51,9 @@
 #     coverage), so an error of another library's gate in the entry is not
 #     expected; it would still leave the library not measured. A library
 #     whose records are read and whose entry is SUCCESS gives its entry's
-#     `cov/branch/*.info` paths, one per report; a measured one whose branch
+#     `cov/branch/*.info` paths, one per report of a test (its README's
+#     report, `cov/tests/readme.xml`, has none: the README's run is line
+#     coverage only, tools/build/mojo/coverage.bzl); a measured one whose branch
 #     coverage actions or gate failed gives none and is listed as branch NOT
 #     MEASURED: its records did not all build, or its gate, which reads the
 #     same records with covcheck, failed (so `report` could refuse them too).
@@ -77,7 +79,7 @@
 # 1 when an input or a tool is wrong (a malformed policy, git failing,
 # covcheck refusing its inputs, a build report naming a file that is not on
 # disk, or a library whose records are read with a SUCCESS entry naming not
-# one record per report, buck2's query answer not a library and its
+# one record per report of a test, buck2's query answer not a library and its
 # attribute per entry, or naming something that is not a label); 2 bad usage.
 set -eu
 LC_ALL=C
@@ -331,7 +333,9 @@ if [ -s "$PUB/libraries.txt" ]; then
         fi
         paths "$lib" info >"$OUT/logs/infos.one"
         ni=$(grep -c . "$OUT/logs/infos.one" || true)
-        [ "$ni" -eq "$nr" ] || die "$lib: its gate reads branch records, and its build report entry names $ni branch record file(s) for $nr report(s)"
+        # The README's run (cov/tests/readme.xml) has no branch records.
+        nt=$(grep -c -v '/cov/tests/readme\.xml$' "$OUT/logs/reports.one" || true)
+        [ "$ni" -eq "$nt" ] || die "$lib: its gate reads branch records, and its build report entry names $ni branch record file(s) for $nt report(s) of its tests"
         cat "$OUT/logs/infos.one" >>"$OUT/branch_records.txt"
         say "$lib: $ni branch record file(s)"
     done <"$PUB/libraries.txt"

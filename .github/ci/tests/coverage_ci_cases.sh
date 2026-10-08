@@ -829,6 +829,21 @@ measure B4
 [ "$RC" -eq 1 ] && grep -q "names 0 branch record file(s) for 1 report(s)" "$W/err" || red "B4: a listed library with no record, and the script exited $RC"
 pass
 
+# B7. A listed library whose entry names its README's report
+# (cov/tests/readme.xml) beside its test's report and the test's one branch
+# record: the README's run has no branch records (line coverage only), so
+# one record for its one test is right, exit 0, and covcheck reads both
+# reports and the record. Red when the README's report is counted as a
+# test's (exit 1, "1 branch record file(s) for 2 report(s)").
+XR="buck-out/v2/art/komira/0123/src/alpha/__alpha__/cov/tests/readme.xml"
+cp "$M/$XA" "$M/$XR"
+printf 'komira//src/alpha:alpha SUCCESS - %s %s %s\n' "$XA" "$XR" "$IA" >"$W/build_table"
+measure B7
+[ "$RC" -eq 0 ] || red "B7: a listed library with a README report beside one test's report and record, and the script exited $RC: $(head -c 300 "$W/err")"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] && grep -qx "$XR" "$W/covcheck_argv" || red "B7: covcheck did not read both reports, the README's included"
+[ "$(grep -A1 -x -- --branch-lcov "$W/covcheck_argv" | tail -n 1)" = "$IA" ] || red "B7: covcheck's --branch-lcov is not the test's record"
+pass
+
 # B5. The query's answer is a library and its attribute, each: a library
 # with no value (buck2 printing `{}`) is a wrong answer, exit 1.
 printf '{\n  "komira//src/alpha:alpha": {}\n}\n' >"$W/uquery_raw"
