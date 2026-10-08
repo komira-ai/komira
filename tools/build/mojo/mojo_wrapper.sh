@@ -15,7 +15,10 @@
 # --source-root names the directory the sources were staged in. The compiler
 # records source file names in what it builds (for error locations); for a
 # `build`, the wrapper strips "<that directory's absolute path>/" from them, so
-# the output names the file by its path in the package.
+# the output names the file by its path in the package. For a `precompile`
+# (which ignores -strip-file-prefix), it runs the compiler from that
+# directory's parent and names the package by its basename, so the `.mojoc`
+# records `<name>/<file>.mojo` whatever the buck-out path of the action.
 #
 # Interpreted by the declared busybox shell; every tool it runs is an input of
 # the action. It never consults the worker's PATH, and it refuses (exit 2)
@@ -243,6 +246,37 @@ if [ -n "$STRIP" ]; then
     set -- "$SUB" "$STRIP" "$@"
 fi
 
+# A package compile records its source files by the path it names them with,
+# and `-strip-file-prefix` does not reach `precompile`. So the compiler runs
+# from the parent of the staged package directory (--source-root) and is given
+# the package by its basename: the `.mojoc` records `<name>/<file>.mojo`, the
+# same in every working directory, buck-out isolation directory and staging
+# path. The `-I` directories and the `-o` output are made absolute first.
+ACTION_DIR=$PWD
+RUN_IN=$ACTION_DIR
+if [ -n "$SRCROOT" ] && [ "$1" = "precompile" ]; then
+    RUN_IN=${SRCROOT%/*}
+    n=$#
+    prev=""
+    for a in "$@"; do
+        b=$a
+        if [ "$prev" = "-o" ]; then
+            b=$(abspath "$a")
+        else
+            case "$a" in
+                -I/*) ;;
+                -I*) b="-I$(abspath "${a#-I}")" ;;
+                *) [ "$(abspath "$a")" != "$SRCROOT" ] || b=${SRCROOT##*/} ;;
+            esac
+        fi
+        prev=$a
+        set -- "$@" "$b"
+    done
+    shift "$n"
+    EXPECT=$(abspath "$EXPECT")
+fi
+cd "$RUN_IN"
+
 # ---- compile, under the watchdog (see the header) ---------------------------
 # tree <root>: prints "<state of root> <CPU ticks of root's live process tree>"
 # (root's session plus root's descendants by ppid),
@@ -361,9 +395,9 @@ fi
 if [ "$rc" = 0 ] && [ ! -s "$EXPECT" ]; then
     echo "mojo_wrapper: compiler exited 0 but $EXPECT is missing or empty" >&2
     rc=3
-elif [ "$rc" = 0 ] && grep -qF "$PWD" "$EXPECT"; then
-    echo "mojo_wrapper: $EXPECT contains this action's working directory ($PWD):" >&2
-    strings -n 4 "$EXPECT" | grep -F "$PWD" | head -n 5 >&2
+elif [ "$rc" = 0 ] && grep -qF "$ACTION_DIR" "$EXPECT"; then
+    echo "mojo_wrapper: $EXPECT contains this action's working directory ($ACTION_DIR):" >&2
+    strings -n 4 "$EXPECT" | grep -F "$ACTION_DIR" | head -n 5 >&2
     rc=4
 fi
 rm -rf "$T"

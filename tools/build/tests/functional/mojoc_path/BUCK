@@ -1,0 +1,19 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load(":defs.bzl", "mojoc_path_cases")
+
+# A `.mojoc` must not depend on where its action staged the sources: the
+# same package precompiled under two staging paths of different depth, with
+# its dependency on `-I` from two different paths, must give the same bytes
+# (run_tests.sh, test 21).
+mojo_library(
+    name = "mpdep",
+    srcs = ["mpdep/__init__.mojo"],
+    conda = False,
+)
+
+mojoc_path_cases(
+    name = "same_bytes",
+    srcs = ["mppkg/__init__.mojo", "mppkg/twice.mojo"],
+    dep = ":mpdep",
+    import_name = "mppkg",
+)

@@ -201,6 +201,37 @@ if [ -n "$STRIP" ]; then
     set -- "$SUBCMD" "$STRIP" "$@"
 fi
 
+# A package compile records its source files by the path it names them with,
+# and `-strip-file-prefix` does not reach `precompile`. So the compiler runs
+# from the parent of the staged package directory (--source-root) and is given
+# the package by its basename: the `.mojoc` records `<name>/<file>.mojo`, the
+# same in every working directory, buck-out isolation directory and staging
+# path. The `-I` directories and the `-o` output are made absolute first.
+ACTION_DIR=$PWD
+RUN_IN=$ACTION_DIR
+if [ -n "$SRCROOT" ] && [ "$1" = "precompile" ]; then
+    RUN_IN=${SRCROOT%/*}
+    n=$#
+    prev=""
+    for a in "$@"; do
+        b=$a
+        if [ "$prev" = "-o" ]; then
+            b=$(abspath "$a")
+        else
+            case "$a" in
+                -I/*) ;;
+                -I*) b="-I$(abspath "${a#-I}")" ;;
+                *) [ "$(abspath "$a")" != "$SRCROOT" ] || b=${SRCROOT##*/} ;;
+            esac
+        fi
+        prev=$a
+        set -- "$@" "$b"
+    done
+    shift "$n"
+    EXPECT=$(abspath "$EXPECT")
+fi
+cd "$RUN_IN"
+
 # ---- compile, under the watchdog (see the header) ---------------------------
 # The same watchdog as ../mojo_wrapper.sh, read through ps(1) instead of
 # /proc, and without a session (macOS has no setsid(1)): the tree is the root
@@ -312,9 +343,9 @@ fi
 if [ "$rc" = 0 ] && [ ! -s "$EXPECT" ]; then
     echo "mojo_wrapper: compiler exited 0 but $EXPECT is missing or empty" >&2
     rc=3
-elif [ "$rc" = 0 ] && grep -qF "$PWD" "$EXPECT"; then
-    echo "mojo_wrapper: $EXPECT contains this action's working directory ($PWD):" >&2
-    grep -aoF "$PWD" "$EXPECT" | head -n 5 >&2 || true
+elif [ "$rc" = 0 ] && grep -qF "$ACTION_DIR" "$EXPECT"; then
+    echo "mojo_wrapper: $EXPECT contains this action's working directory ($ACTION_DIR):" >&2
+    grep -aoF "$ACTION_DIR" "$EXPECT" | head -n 5 >&2 || true
     rc=4
 fi
 rm -rf "$T"

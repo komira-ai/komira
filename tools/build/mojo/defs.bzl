@@ -27,6 +27,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_branch_of", "coverage_sub_targets")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
+load(":precompile.bzl", "precompile_cmd")
 load(
     ":test_runtime.bzl",
     _arg_args = "arg_args",
@@ -334,16 +335,7 @@ def _library_impl(ctx):
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     ctx.actions.run(
-        _mojo_cmd(tc, [
-            # No `--target-cpu`: `mojo precompile` rejects it ("unrecognized
-            # argument"). A `.mojoc` holds no machine code; the CPU is fixed
-            # where code is generated, in `mojo build`.
-            "precompile",
-            dep_closure.project_as_args("include"),
-            src_dir,
-            "-o",
-            ungated.as_output(),
-        ]),
+        precompile_cmd(tc, dep_closure.project_as_args("include"), src_dir, ungated.as_output(), _watchdog_flags(tc)),
         category = "mojo_precompile",
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
