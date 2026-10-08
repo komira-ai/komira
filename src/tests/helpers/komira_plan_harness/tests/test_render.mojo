@@ -4,12 +4,18 @@
 # renderer that ignores validity prints the value stored under a NULL (99,
 # "garbage", 2.0, ...) and fails here for every type at once. The string
 # `\N` must print as `\\N`, never as the NULL cell `\N`.
+# test_table_with_zero_row_chunks: a zero-row chunk (an engine's empty
+# morsel) whose dictionary and list columns have no dictionary or child must
+# neither fail the schema check nor be read, and the schema comes from the
+# first chunk that holds rows.
 
+from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.boolean_array import BooleanArray
 from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Field
 from komira_arrow.table import Table
@@ -28,6 +34,7 @@ from komira_plan_harness.fixtures import (
     all_valid,
     fixed_column,
     ints,
+    list_column,
     string_column,
     varlen_column,
 )
@@ -276,6 +283,84 @@ def test_table_renders_chunks_in_order() raises:
     # The text form parses back to the same rows.
     var again = parse_canon(got.to_text())
     assert_equal(again.num_rows(), 4)
+
+
+def _dict_batch(rows: Int) raises -> RecordBatch:
+    """Two dictionary columns (string values, float64 values) and a
+    list<int32> holding `rows` rows; with 0 rows they hold no dictionary and
+    no child column, as an engine's empty morsel may, so the dictionaries
+    spell `dictionary<index>` without a value type and the list cannot be
+    read as a list."""
+    var bb = BatchBuilder()
+    var fs = Field.dictionary("s", ArrowType.INT64, False)
+    var ff = Field.dictionary("f", ArrowType.INT32, False)
+    var fl = Field.list_of("l", ArrowType.INT32, False)
+    if rows == 0:
+        bb.add(fs, _empty_column(ArrowType.DICTIONARY))
+        bb.add(ff, _empty_column(ArrowType.DICTIONARY))
+        bb.add(fl, _empty_column(ArrowType.LIST))
+        return bb.build()
+    var codes64 = List[Int64]()
+    var codes = PrimitiveArray[DType.int32].allocate(rows)
+    for r in range(rows):
+        codes64.append(Int64(r % 2))
+        codes.set(r, Int32(r % 2))
+    var sv: List[String] = ["x", "y"]
+    bb.add(fs, Column.from_int64_dict_indices(codes64^, sv^))
+    var fv: List[Int64] = [
+        bitcast[DType.int64](Float64(2.5)),
+        bitcast[DType.int64](Float64(-1.0)),
+    ]
+    bb.add(ff, Column.from_numeric_dict[DType.int32, DType.float64](codes^, fv^))
+    var items = List[Int]()
+    var offs: List[Int] = [0]
+    for r in range(rows):
+        items.append(r)
+        offs.append(r + 1)
+    bb.add(fl, list_column(fixed_column(ArrowType.INT32, 4, ints(items), all_valid(rows)), offs, all_valid(rows)))
+    return bb.build()
+
+
+def _empty_column(t: ArrowType) -> Column[HeapRegion]:
+    return Column[HeapRegion](
+        arrow_type=t,
+        data=OwnedAlignedBuffer(0),
+        offsets=None,
+        validity=None,
+        length=0,
+        null_count=0,
+        offset=0,
+    )
+
+
+def test_table_with_zero_row_chunks() raises:
+    """Engines emit empty morsels. A zero-row dictionary chunk has no value
+    layout, so its schema text is not a full chunk's: render_table must
+    skip it in the schema check and spell the schema (and the float widths)
+    from the first chunk that holds rows, wherever that chunk is."""
+    var chunks = List[RecordBatch]()
+    chunks.append(_dict_batch(0))
+    chunks.append(_dict_batch(2))
+    chunks.append(_dict_batch(0))
+    chunks.append(_dict_batch(1))
+    var schema = chunks[1].schema.copy()
+    var table = Table.from_chunks(chunks^, schema^)
+    var got = render_table(table, CanonPolicy.total())
+    assert_equal(got.schema[0], "s:dictionary<int64,string>")
+    assert_equal(got.schema[1], "f:dictionary<int32,float64>")
+    assert_equal(got.float_widths[1], 64)
+    assert_equal(got.num_rows(), 3)
+    assert_equal(got.rows[1][0], "y")
+    assert_equal(got.rows[2][1], "2.5|0x4004000000000000")
+    assert_equal(got.rows[2][2], "[0]")
+    # Every chunk empty: the rows are none and the schema is chunk 0's.
+    var empties = List[RecordBatch]()
+    empties.append(_dict_batch(0))
+    empties.append(_dict_batch(0))
+    var es = empties[0].schema.copy()
+    var none = render_table(Table.from_chunks(empties^, es^), CanonPolicy.total())
+    assert_equal(none.num_rows(), 0)
+    assert_equal(none.schema[0], "s:dictionary<int64>")
 
 
 def main() raises:

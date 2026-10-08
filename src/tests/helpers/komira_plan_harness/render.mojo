@@ -611,18 +611,28 @@ def _same_strings(a: List[String], b: List[String]) -> Bool:
 
 def render_table(table: Table, var policy: CanonPolicy) raises -> CanonText:
     """The canonical text of a chunked result: its chunks' rows in order.
-    The schema is spelled from the first chunk's columns (from the Fields
-    alone when there is no chunk), and every chunk must spell the same."""
+    The schema is spelled from the first chunk that holds rows (from chunk 0
+    when none does, from the Fields alone when there is no chunk), and every
+    chunk that holds rows must spell the same. A zero-row chunk (an engine's
+    empty morsel) is neither compared nor rendered: a zero-row nested or
+    dictionary column may have no children or dictionary to spell its type
+    or read its cells from."""
     var res = CanonText(policy^)
-    if table.num_chunks() == 0:
+    var n = table.num_chunks()
+    if n == 0:
         _schema_of_fields(res, table.schema())
         return res^
-    _schema_of_batch(res, table.chunk(0))
-    for i in range(table.num_chunks()):
+    var first = 0
+    while first < n and table.chunk(first).num_rows() == 0:
+        first += 1
+    _schema_of_batch(res, table.chunk(first if first < n else 0))
+    for i in range(n):
         ref chunk = table.chunk(i)
-        var probe = CanonText(CanonPolicy())
-        _schema_of_batch(probe, chunk)
-        if not _same_strings(probe.schema, res.schema):
-            raise Error("canon: table chunk " + String(i) + " has another schema")
-        _rows_into(res, chunk)
+        if i != first and chunk.num_rows() > 0:
+            var probe = CanonText(CanonPolicy())
+            _schema_of_batch(probe, chunk)
+            if not _same_strings(probe.schema, res.schema):
+                raise Error("canon: table chunk " + String(i) + " has another schema")
+        if chunk.num_rows() > 0:
+            _rows_into(res, chunk)
     return res^
