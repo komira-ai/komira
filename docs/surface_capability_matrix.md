@@ -1,7 +1,10 @@
 # Surface capability matrix
 
 komira is reached through surfaces: the pandas-shaped and polars-shaped
-frontends, SQL, the polars-shaped Mojo and TypeScript APIs, and Excel. Its
+frontends, SQL, the polars-shaped Mojo and TypeScript APIs, and Excel. Excel is
+a surface of its own, built on top of the TypeScript SDK: it uses that SDK and
+maps the engine's errors to Excel's own values, so its tests exercise Excel's
+layer and, through it, the TypeScript SDK. komira's
 **product coverage** is every capability of the plan exercised through every
 surface by an end-to-end test of that surface, checked against an independent
 oracle. The **surface capability matrix** tracks it: one cell per

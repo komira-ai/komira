@@ -216,7 +216,12 @@ With coverage on (`-c komira.coverage=true`), both copies of a conda package
 and its coverage gate, which the library hands over in its
 `MojoCoverageGateInfo` ([The build gate](../coverage/README.md#the-build-gate)):
 what ships is the one target a library's coverage blocks, a refused package
-included, and the library and its dependents build whatever their coverage. A
+included, and the library and its dependents build whatever their coverage. That
+wiring is checked without the switch: a conda package returns `CondaJoinInfo`,
+the command lines of its two copies, and
+`tests//functional/coverage:conda_gate` (and `:conda_gate_ledger`, for a package
+given a `coverage_gate`) fail at analysis unless both wait for every coverage
+marker of a fixture library whose coverage is on whatever the switch says. A
 bundle, a tarball and an OCI image do not wait for the coverage of the
 libraries their program is built from.
 
