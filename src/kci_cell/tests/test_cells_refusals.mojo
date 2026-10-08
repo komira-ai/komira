@@ -343,6 +343,30 @@ def test_missing_name() raises:
     )
 
 
+def test_missing_name_labels_the_cell_by_its_place_in_the_file() raises:
+    # two named cells (lines 2..13), then one with no name opening on line
+    # 14: an unnamed cell is labelled by its position among ALL cells
+    assert_equal(
+        _refusal(_file(
+            _named_cell(String("staging")) + _named_cell(String("prod"))
+            + _cell(String(_CLOUD) + String(_LEVEL))
+        )),
+        _grammar(String("cell #3"), String(""), 14),
+    )
+
+
+def test_unnamed_second_cell_refused_before_its_name_check() raises:
+    # the second cell (opening on line 8) has no name yet when its unknown
+    # field on line 9 is refused: the label is its ordinal, #2
+    assert_equal(
+        _refusal(_file(_ok_cell() + _cell(String("  region: \"x\"\n") + String(_CLOUD) + String(_LEVEL)))),
+        String(
+            "cells file: line 9: unknown field 'region' in cell #2"
+            " (expected name, cloud, setting, bootstrap_level)"
+        ),
+    )
+
+
 # ── a bootstrap_level other than 1 ──────────────────────────────────────────
 
 

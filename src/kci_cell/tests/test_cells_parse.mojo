@@ -66,6 +66,38 @@ def test_golden_parse() raises:
     assert_equal(_render(cells), String(_GOLDEN_RENDERED))
 
 
+comptime _PREFIX_RELATED = """schema_version: 1
+cell {
+  name: "prod"
+  cloud: "gcp"
+  setting { key: "project" value: "example-prod" }
+  setting { key: "project-id" value: "example-123" }
+  setting { key: "proj" value: "example-short" }
+  bootstrap_level: 1
+}
+cell { name: "prod-eu-1" cloud: "fake" bootstrap_level: 1 }
+cell { name: "prod-eu" cloud: "fake" bootstrap_level: 1 }
+"""
+
+comptime _PREFIX_RELATED_RENDERED = (
+    "prod@2 cloud=gcp level=1 [project=example-prod, project-id=example-123, proj=example-short]\n"
+    "prod-eu-1@10 cloud=fake level=1 []\n"
+    "prod-eu@11 cloud=fake level=1 []\n"
+)
+
+
+def test_prefix_related_names_and_keys_are_distinct() raises:
+    # cell names and setting keys compare whole, never by prefix: each name
+    # and key here is a prefix of a later one (`prod` / `prod-eu-1`,
+    # `project` / `project-id`) and then of an earlier one (`prod-eu`,
+    # `proj`), and every cell and setting parses
+    var cells = parse_cells_file(String(_PREFIX_RELATED))
+    assert_equal(_render(cells), String(_PREFIX_RELATED_RENDERED))
+    assert_equal(cells[0].setting(String("project")), String("example-prod"))
+    assert_equal(cells[0].setting(String("project-id")), String("example-123"))
+    assert_equal(find_cell(cells, String("prod-eu")).line, 11)
+
+
 def test_lookups_read_the_cells_back() raises:
     var cells = parse_cells_file(String(_GOLDEN))
     var names = cell_names(cells)
