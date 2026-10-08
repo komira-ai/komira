@@ -60,10 +60,12 @@ py_test(
 # render.py to `expect/<shard>/<case>.tsv` (a sub-target,
 # `:expected[expect/filter_3vl/filter_not_and.tsv]`). Both runs of the action
 # must write the same bytes, each case must answer the same with the rows of
-# every table it reads rotated to each position and each rotation reversed
+# every table it reads rotated to each position and each rotation reversed,
+# every combination of the tables' orders when there are at most 5000
 # (compared under the case's policy), its `-- order:` policy must be held
-# by its outermost ORDER BY (`total`: one; `keys=<cols>`: led by exactly
-# those columns), and gen_expected.py refuses a query that leaves NULL placement, an aggregate's
+# by its outermost ORDER BY (`total`: one that fixes the order of rows that
+# differ, the tie check; `keys=<cols>`: led by exactly those columns), and
+# gen_expected.py refuses a query that leaves NULL placement, an aggregate's
 # row order, a window frame's, a LIMIT's or a DISTINCT ON's row order, a
 # list sort's direction or a literal's type to DuckDB, calls a function on
 # its list
@@ -150,10 +152,13 @@ py_test(
 
 # gen_expected.py's row-order check (row_order_diffs, run by main() on every
 # case): every row of every table comes first and last in some order of the
-# set, and each reordered connection holds the rows in its order; queries
+# set, a case on two or more tables runs every combination of their orders
+# within the budget (the shared scheme and a note above it), and each
+# reordered connection holds the rows in its order; queries
 # DuckDB answers by the rows' order are reported (the ones sql_discipline.py
 # refuses and the ties it cannot see, among them the zeros of sort_rows
-# that the plain reversal keeps in place), under the case's policy;
+# that the plain reversal keeps in place, and a min over a join that only
+# two tables' orders together change), under the case's policy;
 # order-free ones are not; main() refuses a case the check reports.
 py_test(
     name = "test_row_order",
@@ -169,7 +174,9 @@ py_test(
 # `order: total` needs an ORDER BY on the outermost query, `keys=<cols>`
 # one led by exactly those bare columns in order; a window's partition
 # order or a subquery's ORDER BY is refused under either, and main()
-# refuses such a case before writing it.
+# refuses such a case before writing it; main()'s tie check refuses a
+# `total` case whose outermost ORDER BY ties rows that differ (a constant
+# or tied key over an inner sort's order) and keeps `keys=` cases.
 py_test(
     name = "test_order_policy",
     src = "test_order_policy.py",

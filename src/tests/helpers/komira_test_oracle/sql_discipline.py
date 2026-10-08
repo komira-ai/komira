@@ -203,8 +203,11 @@ one-part column name (`ORDER BY a`, not `t.a` nor an expression), which
 DuckDB binds to the output column so named before a table's. Without it
 the file holds an order no ORDER BY asked for: a window's partition
 order, a subquery's ORDER BY (SQL keeps no subquery's order), a hash
-table's. An ORDER BY whose keys tie is not seen here; gen_expected.py's
-row-order check sees ties.
+table's. An ORDER BY whose keys tie is not seen here: under `total`,
+gen_expected.py's tie check refuses one that leaves two rows differing in
+any column in an order its keys do not fix (an inner sort's order behind
+a tied or constant key included), and its row-order check a tie the
+tables' order decides.
 """
 
 import json
