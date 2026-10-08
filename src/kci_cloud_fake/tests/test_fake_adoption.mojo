@@ -37,6 +37,9 @@
 #    bucket and a foreign object at the reader's node, apply returns the
 #    engine's refusal in its outcome (it does not raise), and nothing
 #    changes.
+# 7. ONLY THE PRIMARY NODE IS MARKED: a service `api` that adopts lowers
+#    its identity, its run, its public ingress and its grant, and only the
+#    run (its primary node) is marked `adopted`; nothing of `reader`.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -357,6 +360,32 @@ def test_an_ownership_refusal_is_still_an_outcome() raises:
     print("  test_an_ownership_refusal_is_still_an_outcome: PASS")
 
 
+# ---- 7. only the primary node is marked -----------------------------------------------------------
+
+
+def test_only_the_primary_node_is_marked() raises:
+    """Catches: every node of an adopting resource marked (mutant: `adopted`
+    set from `adopt` alone; kci would then demand that its helpers already
+    exist, and mark objects it creates), or none."""
+    var shapes = _shapes()
+    for s in range(len(shapes)):
+        ref sh = shapes[s]
+        var l = decode_json[ResourceList](
+            String('{"resource":[{"id":"api","physicalName":"api-1","adopt":true,')
+            + String('"service":{"image":{"digest":"sha256:0011"},"internal":{}}},')
+            + String('{"id":"reader","serviceAccount":{}}]}')
+        ).resource.copy()
+        var nodes = lower_data(FakeCloud(String("ad7"), shape=sh.copy()), l)
+        var marked = List[String]()
+        for i in range(len(nodes)):
+            if nodes[i].adopted:
+                marked.append(nodes[i].id.copy())
+        assert_true(len(nodes) > 3, sh.name + ": the service lowers several nodes")
+        assert_equal(len(marked), 1, sh.name + ": one node marked")
+        assert_equal(marked[0], "api/run", sh.name + ": the primary node")
+    print("  test_only_the_primary_node_is_marked: PASS")
+
+
 def main() raises:
     print("test_fake_adoption")
     test_a_missing_object_refuses_the_plan()
@@ -365,4 +394,5 @@ def main() raises:
     test_an_adopted_object_takes_the_files_changes()
     test_a_replace_of_an_adopted_object_is_refused()
     test_an_ownership_refusal_is_still_an_outcome()
+    test_only_the_primary_node_is_marked()
     print("ALL FAKE ADOPTION TESTS PASSED")
