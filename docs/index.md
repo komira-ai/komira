@@ -11,6 +11,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | The Mojo rules | [tools/build/mojo/README.md](../tools/build/mojo/README.md) |
 | The end-to-end tests | [tools/build/tests/README.md](../tools/build/tests/README.md) |
 | README API coverage: which public symbols the README examples use, its ledger, and the census | [readme_api_coverage.md](readme_api_coverage.md) |
+| Product coverage: which plan capability each surface's end-to-end tests exercise, the matrix ledger, and the census | [surface_capability_matrix.md](surface_capability_matrix.md) |
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
 | The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |
 | Columnar memory: Arrow buffers, columns, batches, IPC and the C Data Interface | [design/columnar_memory_and_arrow.md](design/columnar_memory_and_arrow.md) |
@@ -29,6 +30,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Release machines: bundles, tarballs and OCI images of a program, the CPU-level launcher, reproducible outputs, komira's release stages and validations | [design/release_machine.md](design/release_machine.md) |
 | Gamma validation per package family: what checks a release before prod, where each check runs (in-process, loopback, per-test service, the installed package), what it catches and misses, and its gaps | [design/gamma_validation.md](design/gamma_validation.md) |
 | What kci must add before gamma can run a service validation, and the open decisions on gamma validation, each with a recommendation | [design/gamma_validation_decisions.md](design/gamma_validation_decisions.md) |
+| kci resource-model decision notes: an encryption key as a resource; importing and changing a network on any cloud; overrides, the escape hatch for what is cloud-specific | [design/kci_encryption_keys.md](design/kci_encryption_keys.md), [design/kci_networks_import_and_change.md](design/kci_networks_import_and_change.md), [design/kci_overrides.md](design/kci_overrides.md) |
 
 ## Design docs
 
@@ -51,5 +53,5 @@ and its limits. A family's doc lands together with the libraries it describes;
 | observability | [logging and telemetry](design/logging_and_telemetry.md) |
 | agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |
 | cloud | the AWS, GCP and Azure clients and their credentials and secrets: no design doc yet; deploy marks: coming with the cloud SDK libraries |
-| CI and deploy | the `kci` command line, the resource model and its cloud providers, apply, validate and rollout: no design doc yet ([release machines](design/release_machine.md) covers komira's own release stages; [gamma validation](design/gamma_validation.md) what gamma checks per package family) |
+| CI and deploy | the resource model's open decisions: [encryption keys](design/kci_encryption_keys.md), [importing and changing networks](design/kci_networks_import_and_change.md), [overrides](design/kci_overrides.md); the `kci` command line, the resource model and its cloud providers, apply, validate and rollout: no design doc yet ([release machines](design/release_machine.md) covers komira's own release stages; [gamma validation](design/gamma_validation.md) what gamma checks per package family) |
 | packaging | [release machines: bundles, tarballs and OCI images](design/release_machine.md); the shared-library ABI: coming with `komira_so` |

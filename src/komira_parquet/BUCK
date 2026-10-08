@@ -11,8 +11,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (nested); the column decoder's type map and array helpers (decode_helpers,
 # null_expand); and the run-time arms and fire counters of the decode and scan
 # paths (decode_arm_trace, scan_copy_trace, payload_sel_trace,
-# staged_filter_trace). Every public decoder takes Spans; the arms are set by
-# setters, never by the environment.
+# staged_filter_trace); and the row-selection gathers: the (skip, select)
+# intervals of a filter mask (selection_vector), their shared page records
+# (gather_common), and the gathers of selected rows out of PLAIN BYTE_ARRAY
+# pages (gather_byte_array) and dictionary-encoded pages (gather_dict). Every
+# public decoder takes Spans; the arms are set by setters, never by the
+# environment.
 # They also read a file's footer and metadata: the file reader over any
 # FileSystem (file_reader), the Thrift Compact reader (thrift_compact), the
 # footer parsers (metadata_parser, footer_header), the page header parser
@@ -60,6 +64,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_flat_read_types_are_never_nested: the type map never yields a nested
 #   Arrow type, swept over every physical type and annotation, and the
 #   read path's column copier refuses a nested column.
+# - test_selection_interval: SelectionInterval from a mask (runs, gaps,
+#   coalescing across 64-bit words), the totals and the index fallback.
+# - test_gather_byte_array: the PLAIN BYTE_ARRAY selection gathers against a
+#   positional reference (empty, short and long values, several pages, many
+#   selections, nullable), and malformed pages refused on both walk legs.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -114,6 +123,11 @@ mojo_library(
         "tests/test_flat_read_types_are_never_nested.mojo",
         "tests/test_flba_decimal_simd_parity.mojo",
         "tests/test_footer_header_direct.mojo",
+        "tests/test_gather_byte_array.mojo",
+        "tests/test_gather_byte_array_direct.mojo",
+        "tests/test_gather_common_direct.mojo",
+        "tests/test_gather_dict_direct.mojo",
+        "tests/test_gather_dict_refusals_direct.mojo",
         "tests/test_int96_decode.mojo",
         "tests/test_metadata_parser_direct.mojo",
         "tests/test_neon_bss_decode.mojo",
@@ -135,6 +149,8 @@ mojo_library(
         "tests/test_rle_simd_bw_small.mojo",
         "tests/test_scan_copy_trace_direct.mojo",
         "tests/test_scan_trace_leaves_direct.mojo",
+        "tests/test_selection_interval.mojo",
+        "tests/test_selection_vector_direct.mojo",
         "tests/test_string_share_byte_equiv.mojo",
         "tests/test_thrift_compact_direct.mojo",
     ],

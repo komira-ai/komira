@@ -17,9 +17,8 @@
 # the core packages' deps stay minimal and that is load-bearing — almost every
 # package depends on it, so anything added to its deps goes upstream of nearly
 # everything. The codec needs `komira_proto_codec` and the generated `komira_plan_proto`
-# messages, so it lives in its own package ABOVE core. Same shape as
-# `komira_fs_registry`: the package whose job is to close over a lower layer's
-# types sits on top of it, never inside it.
+# messages, so it lives in its own package ABOVE core: the package whose job
+# is to close over a lower layer's types sits on top of it, never inside it.
 #
 # ============================ THE COVERAGE LEDGER ============================
 #
