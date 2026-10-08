@@ -13,8 +13,7 @@
 #                             `open_scan(...) -> MorselSource`, for a kind
 #                             whose payload the engine pulls.
 #   CONFORMER (a top package) — deps on core, morsel, and every package
-#                             that owns a kind. The same shape
-#                             `komira_fs_registry` has.
+#                             that owns a kind.
 #
 # `UnboundScanResolver` is the DEFAULTED comptime resolver: a call site that
 # does not name a resolver behaves exactly as if nothing were bound. It is the
@@ -48,7 +47,7 @@
 #      deterministic, named error — a tcmalloc crash becomes a test assertion.
 #   3. OWNERSHIP PLACEMENT. The conformer is owned by `EngineContext`,
 #      constructed before plan compile and dropped after the last execution
-#      that can reference the plan. The lifetime `FsRegistry` already has.
+#      that can reference the plan.
 #
 # The type system cannot express "this handle borrows from that registry"
 # across a serialization boundary — that is inherent to making the plan

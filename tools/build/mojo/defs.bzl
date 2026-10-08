@@ -25,7 +25,7 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "creat
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo", "welded_tests_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
-load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_sub_targets")
+load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_sub_targets")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(
     ":test_runtime.bzl",
@@ -428,6 +428,9 @@ def _library_impl(ctx):
         test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]])]
         markers.append(readme_marker[0])
 
+    # With coverage on, the gate (coverage.bzl); only the conda package waits
+    # for it and the runs, never this package.
+    cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs) if cov_link else (None, [])
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
@@ -454,7 +457,7 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs) if cov_link else {}),
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate) if cov_link else {}),
         ),
         MojoInfo(
             c_link = c_link,
@@ -472,7 +475,7 @@ def _library_impl(ctx):
             readme = ctx.attrs.readme,
         ),
         welded_tests_info(ctx.attrs.test_srcs),
-    ]
+    ] + cov_providers
 
 # ---- README examples ----------------------------------------------------------
 #
@@ -971,13 +974,15 @@ def _mojo_library(**kwargs):
             fail("{}: {} may hold no README.md: every library with a README runs {} on it, so the tool would depend on itself".format(kwargs.get("name", "mojo_library"), _README_TOOL_PACKAGE, _README_TOOL))
         kwargs["readme"] = readme[0]
         kwargs["readme_tool"] = _README_TOOL
-    coverage_kwargs(kwargs)
+    cov_gate = coverage_kwargs(kwargs)
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):
         name = kwargs["name"]
         conda_package(
             name = name + "_conda",
             lib = ":" + name,
+            # A library of the coverage ledger: its gate, `<name>_cov_gate`.
+            coverage_gate = cov_gate,
             summary = summary or "The `{}` Mojo library of komira, as a conda package.".format(kwargs.get("import_name") or name),
             visibility = ["PUBLIC"],
         )
