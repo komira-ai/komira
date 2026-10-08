@@ -28,7 +28,9 @@
 #      their right operands derived; shapes.mojo's while, range( loop,
 #      ternary, or chain and plain @always_inline helper; loops.mojo's
 #      loops over a List and a list literal, arm 0 the end; lookup.mojo's
-#      Dict subscript, compiler-made; mask.mojo's two user masks, decisions);
+#      Dict subscript, compiler-made; mask.mojo's two user masks, decisions;
+#      and for test_unrun, unrun.mojo's Tag.write_to, which the link drops
+#      as only a folded-away assert failure calls it: its `if`, never run);
 #      tests//negative/coverage: branchfail, branchannotate,
 #      branchnoprof and branchversion build green (their release gates),
 #      and branchfail[coverage][branch][test_profile_env] is red (a test
@@ -40,7 +42,10 @@
 #      cov_branch_annotate.sh copy changing the control flow before the
 #      profile is applied: LLVM's hash mismatch warning, refused),
 #      branchmissing[...][branch_ir] red (a cov_branch_run.sh copy merging
-#      without the test's main: a function the profile lacks, refused),
+#      without the test's main: a function the binary links that the
+#      profile lacks, refused), branchinternal[...][branch_ir] red (a copy
+#      internalizing the bitcode before the profile is applied: a function
+#      of the profile the bitcode does not hold, refused),
 #      branchweights[...][branch_ir] red (a copy annotating a bitcode that
 #      already holds branch weights), branchnodebug[...][branch_info] red
 #      (a nodebug helper's decision at its call), branchretor[...]
@@ -59,6 +64,7 @@ expect_green coverage_branch tests//functional/coverage:branch_counts tests//fun
     tests//negative/coverage:branchfail tests//negative/coverage:branchannotate \
     tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion \
     tests//negative/coverage:branchmissing tests//negative/coverage:branchweights \
+    tests//negative/coverage:branchinternal \
     tests//negative/coverage:branchnodebug tests//negative/coverage:branchretor
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'
@@ -78,8 +84,10 @@ expect_red coverage_branch_raw_version "has raw profile version 12, not 11" \
     'tests//negative/coverage:branchversion[coverage][branch][test_one]'
 expect_red coverage_branch_annotate_mismatch "diagnostic(s) applying the profile: lld: warning: ld-temp.o: function control flow change detected (hash mismatch)" \
     'tests//negative/coverage:branchannotate[coverage][branch_ir][test_one]'
-expect_red coverage_branch_missing_function "no profile data available for function" \
+expect_red coverage_branch_missing_function "a run writes the record of every function its binary links, ran or not" \
     'tests//negative/coverage:branchmissing[coverage][branch_ir][test_one]'
+expect_red coverage_branch_other_bitcode "the binary that wrote it was not made from this bitcode" \
+    'tests//negative/coverage:branchinternal[coverage][branch_ir][test_one]'
 expect_red coverage_branch_static_weights "already holds branch weights" \
     'tests//negative/coverage:branchweights[coverage][branch_ir][test_one]'
 expect_red coverage_branch_nodebug "may be a decision of count_down" \
