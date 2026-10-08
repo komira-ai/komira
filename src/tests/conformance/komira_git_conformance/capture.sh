@@ -32,6 +32,10 @@
 #   push_atomic   push --atomic with push options: an update, a create, a delete
 #   push_reject   push --atomic --force refused by receive.denyNonFastForwards
 #   push_delete   a delete-only push (no pack), default advertisement
+#   push_ff       with receive.denyNonFastForwards: a fast-forward of
+#                 refs/heads/main and a forced update of refs/review/side,
+#                 both accepted (git refuses non-fast-forwards under
+#                 refs/heads/ only)
 #   push_empty    the first push into an empty repository
 # Exits 1 on the first command that fails, naming it.
 set -eu
@@ -226,6 +230,16 @@ state "$DST" "$KGC_CAPTURE"
     red "push_delete: git push of a delete"
 "$GIT" -C "$DST" rev-list --all --parents >"$KGC_CAPTURE/parents_after.txt" 2>"$T/log" || red "rev-list dst"
 finish push_delete
+
+scenario push_ff
+echo deny-non-fast-forwards >"$KGC_CAPTURE/settings.txt"
+"$GIT" -C "$SRC" push -q "file://$DST" side:refs/review/side >"$T/log" 2>&1 || red "seed push of refs/review/side"
+state "$DST" "$KGC_CAPTURE"
+commit "$SRC" c8
+"$GIT" -C "$SRC" push -q --receive-pack="$RP" "file://$DST" main +main:refs/review/side >"$T/log" 2>&1 ||
+    red "push_ff: git push of a fast-forward and a forced update outside refs/heads/"
+"$GIT" -C "$DST" rev-list --all --parents >"$KGC_CAPTURE/parents_after.txt" 2>"$T/log" || red "rev-list dst"
+finish push_ff
 
 scenario push_empty
 "$GIT" init -q --bare -b main "$T/empty2.git" >"$T/log" 2>&1 || red "git init --bare empty2"

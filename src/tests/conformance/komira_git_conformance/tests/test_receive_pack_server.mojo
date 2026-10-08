@@ -15,13 +15,17 @@
 # The scenarios: an atomic push with push options that updates, creates and
 # deletes (all ok); an atomic push where one non-fast-forward update is
 # refused and the other command fails with `atomic push failure`; a
-# delete-only push (no pack) to a server without push-options; and the
-# first push into an empty repository (`capabilities^{}`).
+# delete-only push (no pack) to a server without push-options; the
+# first push into an empty repository (`capabilities^{}`); and, under
+# denyNonFastForwards, a fast-forward of a branch and a forced update
+# outside refs/heads/, both accepted.
 #
 # A defect this catches: a capability git advertises and komira_git does
 # not (or the reverse), an atomic push that lets one ref through, a pack
 # expected after a delete-only push, a report-status git's client would
-# read differently (the side-band framing, the closing flush).
+# read differently (the side-band framing, the closing flush), and in the
+# verdicts (push_verdicts): a fast-forward refused, or the
+# non-fast-forward rule applied outside refs/heads/.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -103,9 +107,19 @@ def test_empty_repository() raises:
     assert_equal(reasons[0], "")
 
 
+def test_fast_forward_under_deny() raises:
+    # git accepts both: main moves forward, and the forced update is
+    # outside refs/heads/, where denyNonFastForwards does not apply.
+    var reasons = _serve("push_ff")
+    assert_equal(len(reasons), 2)
+    assert_equal(reasons[0], "")
+    assert_equal(reasons[1], "")
+
+
 def main() raises:
     test_atomic_with_options()
     test_atomic_refused()
     test_delete_only()
     test_empty_repository()
+    test_fast_forward_under_deny()
     print("komira_git conformance: receive-pack server passed")

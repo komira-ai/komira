@@ -19,6 +19,9 @@ load(":defs.bzl", "git_transcripts")
 #                             byte for byte and reads git's reports
 #   test_capability_truth     every capability komira_git advertises is one
 #                             git's client used in a transcript
+#   test_harness              the library's own refusals and graph walk,
+#                             on fixtures/ (hand-written scenarios), not
+#                             transcripts
 #
 # The library holds what the tests share (loading a scenario, the scenario's
 # repository as a CommitGraph, pack and push-verdict checks). Nothing depends
@@ -45,8 +48,13 @@ mojo_library(
     conda = False,
     # The transcripts come from the git oracle, built for linux-x86_64 only.
     target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
-    test_srcs = _TESTS,
-    test_data = {t: {"transcripts": ":transcripts"} for t in _TESTS},
+    test_srcs = _TESTS + ["tests/test_harness.mojo"],
+    test_data = {t: {"transcripts": ":transcripts"} for t in _TESTS} | {
+        "tests/test_harness.mojo": {
+            "transcripts/" + f.removeprefix("fixtures/"): f
+            for f in glob(["fixtures/**"])
+        },
+    },
     visibility = ["PUBLIC"],
 )
 

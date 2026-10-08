@@ -102,9 +102,14 @@ def test_empty_repository() raises:
     _push("push_empty")
 
 
+def test_fast_forward_under_deny() raises:
+    _push("push_ff")
+
+
 def main() raises:
     test_atomic_with_options()
     test_atomic_refused()
     test_delete_only()
     test_empty_repository()
+    test_fast_forward_under_deny()
     print("komira_git conformance: send-pack client passed")

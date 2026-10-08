@@ -114,7 +114,7 @@ def test_upload_pack_v2() raises:
 def test_receive_pack() raises:
     var used = List[String]()
     var deletes = False
-    var names: List[String] = ["push_atomic", "push_reject", "push_delete", "push_empty"]
+    var names: List[String] = ["push_atomic", "push_reject", "push_delete", "push_empty", "push_ff"]
     for s in range(len(names)):
         var sc = Scenario(names[s])
         var parser = ReceivePackServer(
