@@ -10,9 +10,9 @@
 # role.
 #
 # RETENTION. A data primitive has a VERSIONED retention default, used while
-# `Resource.retention` is unset (KEEP for a table, a bucket and a secret,
-# DELETE for a queue, a topic, a DNS zone, a DNS record, a certificate, a
-# network, a subnet and an IP address). A type whose default is
+# `Resource.retention` is unset (KEEP for a table, a bucket, a secret and a
+# registry, DELETE for a queue, a topic, a DNS zone, a DNS record, a
+# certificate, a network, a subnet and an IP address). A type whose default is
 # `RETENTION_NONE` takes no retention: it is deleted with its resource, and
 # writing `retention` on it is refused at validate. Changing a default is a
 # behaviour change for every stored list, so a default is never edited in
@@ -26,7 +26,7 @@
 # grant, `zone` for a DNS zone, `record` for a DNS record, `cert` for a
 # certificate, `schedule` for a schedule, `trigger` for an event trigger,
 # `network` for a network, `subnet` for a subnet, `address` for an IP
-# address. A cloud adapter
+# address, `registry` for a registry. A cloud adapter
 # writes a dependency or an input on ANOTHER resource as that resource's id
 # alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
 # an adapter lowers one resource without reading the others.
@@ -78,6 +78,8 @@ comptime FIELD_SCHEDULE: Int = 22
 """`Resource.body` field number of `schedule`."""
 comptime FIELD_NETWORK: Int = 23
 """`Resource.body` field number of `network`."""
+comptime FIELD_REGISTRY: Int = 24
+"""`Resource.body` field number of `registry`."""
 comptime FIELD_GRANT: Int = 25
 """`Resource.body` field number of `grant`."""
 comptime FIELD_DNS_RECORD: Int = 26
@@ -144,6 +146,8 @@ comptime ROLE_SUBNET = "subnet"
 """A subnet's one role: the subnet object."""
 comptime ROLE_ADDRESS = "address"
 """An IP address's one role: the reserved address."""
+comptime ROLE_REGISTRY = "registry"
+"""A registry's one role: the registry (or repository) object."""
 
 
 def retention_word(r: Int) -> String:
@@ -261,9 +265,9 @@ struct Catalog(Copyable, Movable, Deinitable):
     def v1() raises -> Catalog:
         """`kci.resource.v1` as declared today: `service`, `container_job`,
         `worker`, `table`, `bucket`, `queue`, `secret`, `dns_zone`,
-        `service_account`, `topic`, `schedule`, `network`, `grant`,
-        `dns_record`, `certificate`, `subscription`, `subnet`, `ip_address`
-        and `event_trigger`."""
+        `service_account`, `topic`, `schedule`, `network`, `registry`,
+        `grant`, `dns_record`, `certificate`, `subscription`, `subnet`,
+        `ip_address` and `event_trigger`."""
         var c = Catalog()
         var svc_out = List[String]()
         svc_out.append(String(OUTPUT_URL))
@@ -519,6 +523,27 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_ADDRESS),
             )
         )
+        # A registry exposes its ADDRESS (the name a client pushes and pulls
+        # an image as). Its artifacts are pulled (READ) and pushed (WRITE).
+        # Deleting it deletes every artifact in it, so it is kept by
+        # default, as a bucket.
+        var registry_out = List[String]()
+        registry_out.append(String(OUTPUT_ADDRESS))
+        var registry_access = List[String]()
+        registry_access.append(String(ACCESS_READ))
+        registry_access.append(String(ACCESS_WRITE))
+        registry_access.append(String(ACCESS_READ_WRITE))
+        c.add(
+            CatalogType(
+                FIELD_REGISTRY,
+                String("registry"),
+                PORTABLE,
+                registry_out^,
+                registry_access^,
+                retention_default=RETENTION_KEEP,
+                primary_role=String(ROLE_REGISTRY),
+            )
+        )
         return c^
 
 
@@ -548,6 +573,7 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_TOPIC, String("topic")))
     l.append(BodyArm(FIELD_SCHEDULE, String("schedule")))
     l.append(BodyArm(FIELD_NETWORK, String("network")))
+    l.append(BodyArm(FIELD_REGISTRY, String("registry")))
     l.append(BodyArm(FIELD_GRANT, String("grant")))
     l.append(BodyArm(FIELD_DNS_RECORD, String("dns_record")))
     l.append(BodyArm(FIELD_CERTIFICATE, String("certificate")))
