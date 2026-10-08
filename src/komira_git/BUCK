@@ -1,0 +1,28 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# git's object model and wire primitives in pure Mojo: object formats (SHA-1,
+# SHA-256) and ids, blob/tree/commit/tag parse and serialize, loose objects,
+# pkt-line framing and the check-ref-format rules. No I/O. Deps are the
+# hashes (komira_crypto) and zlib framing for loose objects (komira_zlib).
+#
+# The welded tests check against fixed vectors from git's own test suite and
+# from git's output (each file names where its vectors come from); see
+# README.md for what each test proves.
+mojo_library(
+    name = "komira_git",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_zlib:komira_zlib",
+    ],
+    test_srcs = [
+        "tests/test_commits_tags.mojo",
+        "tests/test_loose_objects.mojo",
+        "tests/test_object_ids.mojo",
+        "tests/test_pkt_line.mojo",
+        "tests/test_ref_names.mojo",
+        "tests/test_trees.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -5,7 +5,7 @@
 # THE ENUM-VALUE CENSUS of `komira.plan.v1` (plan_vocabulary.proto),
 # part 2 of 2: the function, type and option enums: StringOp, StringFn, StringFnN, ColSide,
 # MathFn1, MathFn2, ExtractField, RegexpOp, ArrowType, WriteFormat,
-# WriteCompression, ScalarKind, ScalarTimeUnit, ExcelErrorCode, ParamTag,
+# WriteCompression, ScalarKind, ScalarTimeUnit, ParamTag,
 # PushdownGateMode, SnapshotPolicy, DTypeCode. The other part is test_plan_enum_numbers_nodes.mojo.
 #
 # An enum value's number is what is stored, like a field's: renumbering
@@ -46,7 +46,6 @@ from komira_plan_proto.plan_vocabulary import (
     ArrowType,
     ColSide,
     DTypeCode,
-    ExcelErrorCode,
     ExtractField,
     MathFn1,
     MathFn2,
@@ -415,11 +414,6 @@ def _check(enum: String, v: String, n: Int) raises:
         var b = _rec(17, n)  # WireScalar.time_unit
         var m = decode_proto[WireScalar](b.copy())
         _host(m.time_unit.json_name(), encode_proto(m), b, v, q)
-    elif enum == "ExcelErrorCode":
-        _names_agree[ExcelErrorCode](v, n, q)
-        var b = _rec(20, n)  # WireScalar.error_code
-        var m = decode_proto[WireScalar](b.copy())
-        _host(m.error_code.json_name(), encode_proto(m), b, v, q)
     elif enum == "ParamTag":
         _names_agree[ParamTag](v, n, q)
         var b = _rec(2, n)  # WireParam.tag
@@ -626,7 +620,6 @@ ArrowType.ARROW_TYPE_BINARY_VIEW 47
 ArrowType.ARROW_TYPE_UTF8_VIEW 48
 ArrowType.ARROW_TYPE_LIST_VIEW 49
 ArrowType.ARROW_TYPE_LARGE_LIST_VIEW 50
-ArrowType.ARROW_TYPE_ERROR 51
 WriteFormat.WFMT_WIRE_UNSPECIFIED 0
 WriteFormat.WFMT_PARQUET 1
 WriteFormat.WFMT_CSV 2
@@ -648,24 +641,11 @@ ScalarKind.SCALAR_KIND_TIME 7
 ScalarKind.SCALAR_KIND_DURATION 8
 ScalarKind.SCALAR_KIND_DECIMAL256 9
 ScalarKind.SCALAR_KIND_BINARY 10
-ScalarKind.SCALAR_KIND_ERROR 11
 ScalarTimeUnit.SCALAR_TIME_UNIT_WIRE_UNSPECIFIED 0
 ScalarTimeUnit.SCALAR_TIME_UNIT_SECOND 1
 ScalarTimeUnit.SCALAR_TIME_UNIT_MILLI 2
 ScalarTimeUnit.SCALAR_TIME_UNIT_MICRO 3
 ScalarTimeUnit.SCALAR_TIME_UNIT_NANO 4
-ExcelErrorCode.XL_ERR_WIRE_UNSPECIFIED 0
-ExcelErrorCode.XL_ERR_NONE 1
-ExcelErrorCode.XL_ERR_DIV0 2
-ExcelErrorCode.XL_ERR_NA 3
-ExcelErrorCode.XL_ERR_VALUE 4
-ExcelErrorCode.XL_ERR_REF 5
-ExcelErrorCode.XL_ERR_NAME 6
-ExcelErrorCode.XL_ERR_NUM 7
-ExcelErrorCode.XL_ERR_NULL 8
-ExcelErrorCode.XL_ERR_SPILL 9
-ExcelErrorCode.XL_ERR_CALC 10
-ExcelErrorCode.XL_ERR_CIRCULAR 11
 ParamTag.PARAM_WIRE_UNSPECIFIED 0
 ParamTag.PARAM_STR 1
 ParamTag.PARAM_I64 2
