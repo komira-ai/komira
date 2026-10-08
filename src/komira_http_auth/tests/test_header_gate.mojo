@@ -280,6 +280,10 @@ def test_non_ascii_kid_is_refused_before_any_fetch() raises:
     _refused_by_gate(
         String('{"alg":"RS256","typ":"JWT","kid":"k\\u0001y"}'), REASON_KID
     )
+    # DEL (0x7F) is the byte just past the printable range.
+    _refused_by_gate(
+        String('{"alg":"RS256","typ":"JWT","kid":"k\\u007fy"}'), REASON_KID
+    )
 
 
 def test_header_that_is_not_a_json_object_is_refused() raises:

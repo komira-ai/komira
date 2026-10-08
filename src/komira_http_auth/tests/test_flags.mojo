@@ -203,6 +203,14 @@ def test_non_https_jwks_url_is_refused_at_startup() raises:
         ),
         "userinfo",
     )
+    _refused(
+        _args(
+            String("--issuer=") + ISSUER,
+            String("--audience=") + AUDIENCE,
+            String("--jwks-url=https://keys.example.com/certs#k"),
+        ),
+        "fragment",
+    )
 
 
 def test_non_https_jwks_url_is_refused_when_a_verifier_is_built() raises:

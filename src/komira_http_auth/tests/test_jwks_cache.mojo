@@ -323,7 +323,14 @@ def test_no_usable_key_keeps_the_current_set() raises:
 
 def test_http_error_keeps_the_current_set() raises:
     var key = _key()
+    # Any status but 200 is refused, not only server errors: an error page,
+    # a cache or a redirect in front of the endpoint can carry a well-formed
+    # JWK Set that must not replace the current one.
     _bad_document_keeps_current_set(500, rsa_jwks_json(key, String("other")))
+    _bad_document_keeps_current_set(404, rsa_jwks_json(key, String("other")))
+    _bad_document_keeps_current_set(403, rsa_jwks_json(key, String("other")))
+    _bad_document_keeps_current_set(302, rsa_jwks_json(key, String("other")))
+    _bad_document_keeps_current_set(204, rsa_jwks_json(key, String("other")))
 
 
 def test_transport_failure_keeps_the_current_set() raises:
