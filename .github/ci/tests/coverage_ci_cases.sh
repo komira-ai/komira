@@ -874,6 +874,32 @@ levels() {
 }
 pass
 
+# T0. The policy's COVERAGE_INFO_ONLY_DIRS line is read as written, one
+# line of double-quoted directories, or the script fails (exit 1) naming
+# it: renamed (no line), given twice, a list over several lines, a
+# single-quoted item; and an item that is no repository directory ('.',
+# '..', a '..' segment, a trailing '/', empty). Red when a malformed line
+# reads as an empty list (no test-only package) or an item is passed on.
+info_policy() { # <case> <want in the message> <sed program>
+    cp "$W/policy.keep" "$M/tools/build/coverage/policy.bzl"
+    sed -i "$3" "$M/tools/build/coverage/policy.bzl"
+    measure "$1"
+    cp "$W/policy.keep" "$M/tools/build/coverage/policy.bzl"
+    sed -i 's/^COVERAGE_MODE = .*/COVERAGE_MODE = "enforce"/' "$M/tools/build/coverage/policy.bzl"
+    [ "$RC" -eq 1 ] && grep -qF -- "$2" "$W/err" || red "$1: a malformed COVERAGE_INFO_ONLY_DIRS, and the script exited $RC without '$2'"
+    [ ! -s "$W/buck2_calls" ] || red "$1: a malformed COVERAGE_INFO_ONLY_DIRS, and buck2 was asked something"
+    pass
+}
+NO1="has no single COVERAGE_INFO_ONLY_DIRS line"
+info_policy T0a "$NO1" 's/^COVERAGE_INFO_ONLY_DIRS = /COVERAGE_INFO_ONLY_DIRS_X = /'
+info_policy T0b "$NO1" 's/^\(COVERAGE_INFO_ONLY_DIRS = .*\)$/\1\n\1/'
+info_policy T0c "$NO1" 's/^COVERAGE_INFO_ONLY_DIRS = \[\(.*\)\]$/COVERAGE_INFO_ONLY_DIRS = [\n    \1,\n]/'
+info_policy T0d "$NO1" "s/^COVERAGE_INFO_ONLY_DIRS = .*/COVERAGE_INFO_ONLY_DIRS = ['src\/tests']/"
+NODIR="is not a repository directory"
+for bad in . .. src/../tests src/tests/ ""; do
+    info_policy "T0e($bad)" "$NODIR" "s|^COVERAGE_INFO_ONLY_DIRS = .*|COVERAGE_INFO_ONLY_DIRS = [\"src/tests\", \"$bad\"]|"
+done
+
 # T1. Only the test-only package is touched: covcheck is given the policy's
 # directory as --info-package; the check run concludes success in enforce
 # mode with no finding, its BelowTarget information; every annotation of the

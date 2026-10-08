@@ -141,14 +141,17 @@ case "$MODE" in census | neutral | enforce) ;; *) die "$POLICY has no single COV
 TARGET=$(sed -n 's/^COVERAGE_TARGET_BP = \([0-9][0-9]*\)$/\1/p' "$POLICY")
 case "$TARGET" in "" | *[!0-9]*) die "$POLICY has no single COVERAGE_TARGET_BP line" ;; esac
 INFO_DIRS=$(sed -n 's/^COVERAGE_INFO_ONLY_DIRS = \[\(.*\)\]$/\1/p' "$POLICY")
+NO_INFO="$POLICY has no single COVERAGE_INFO_ONLY_DIRS line listing double-quoted directories"
 [ "$(grep -c '^COVERAGE_INFO_ONLY_DIRS = ' "$POLICY")" -eq 1 ] && grep -q '^COVERAGE_INFO_ONLY_DIRS = \[.*\]$' "$POLICY" ||
-    die "$POLICY has no single COVERAGE_INFO_ONLY_DIRS line listing directories"
+    die "$NO_INFO"
 INFO_DIRS=$(printf '%s\n' "$INFO_DIRS" | tr ',' '\n' | sed 's/^ *//; s/ *$//')
 for d in $INFO_DIRS; do
-    case "$d" in '"'*'"') ;; *) die "$POLICY: COVERAGE_INFO_ONLY_DIRS item $d is not a quoted directory" ;; esac
+    case "$d" in '"'*'"') ;; *) die "$NO_INFO (item $d)" ;; esac
     d=${d#\"}
     d=${d%\"}
-    case "$d" in "" | /* | */ | *//* | *[!A-Za-z0-9_./+-]*) die "$POLICY: COVERAGE_INFO_ONLY_DIRS item '$d' is not a repository directory" ;; esac
+    case "/$d/" in
+        // | *//* | */./* | */../* | *[!A-Za-z0-9_./+-]*) die "$POLICY: COVERAGE_INFO_ONLY_DIRS item '$d' is not a repository directory" ;;
+    esac
 done
 INFO_DIRS=$(printf '%s\n' "$INFO_DIRS" | tr -d '"')
 
