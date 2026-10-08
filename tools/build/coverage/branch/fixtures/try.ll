@@ -163,6 +163,7 @@ define internal i64 @"pkg::t::consts"(ptr %0) #0 !dbg !451 !prof !499 {
   br i1 %3, label %4, label %5, !dbg !454, !prof !494
 
 4:                                                ; preds = %1
+  call void @"std::builtin::error::__mojo_debugger_raise_hook()"(), !dbg !455
   br label %6, !dbg !455
 
 5:                                                ; preds = %1
@@ -177,6 +178,28 @@ define internal i64 @"pkg::t::consts"(ptr %0) #0 !dbg !451 !prof !499 {
 
 9:                                                ; preds = %6
   ret i64 %2, !dbg !458
+}
+
+define internal { i1, i64 } @"pkg::t::sig::g"(i64 %0, ptr %1) #0 !dbg !461 !prof !499 {
+  %3 = call { i1, i64 } @"pkg::t::f"(i64 %0, ptr %1), !dbg !463
+  %4 = extractvalue { i1, i64 } %3, 0, !dbg !463
+  br i1 %4, label %5, label %5, !dbg !463, !prof !489
+
+5:                                                ; preds = %2
+  ret { i1, i64 } %3, !dbg !463
+}
+
+define internal i64 @"pkg::t::sig"(i64 %0, ptr %1) #0 !dbg !460 !prof !499 {
+  %3 = call { i1, i64 } @"pkg::t::sig::g"(i64 %0, ptr %1), !dbg !464
+  %4 = extractvalue { i1, i64 } %3, 0, !dbg !464
+  %5 = extractvalue { i1, i64 } %3, 1, !dbg !464
+  br i1 %4, label %6, label %7, !dbg !464, !prof !495
+
+6:                                                ; preds = %2
+  ret i64 0, !dbg !465
+
+7:                                                ; preds = %2
+  ret i64 %5, !dbg !464
 }
 
 attributes #0 = { noinline }
@@ -234,6 +257,11 @@ attributes #0 = { noinline }
 !457 = !DILocation(line: 58, column: 9, scope: !451)
 !458 = !DILocation(line: 56, column: 9, scope: !451)
 !459 = distinct !DISubprogram(name: "read_uleb128", linkageName: "std::io::b::B::read_uleb128", scope: !450, file: !450, line: 280, type: !438, scopeLine: 280, spFlags: DISPFlagDefinition, unit: !400)
+!460 = distinct !DISubprogram(name: "sig", linkageName: "pkg::t::sig", scope: !401, file: !401, line: 59, type: !438, scopeLine: 59, spFlags: DISPFlagDefinition, unit: !400)
+!461 = distinct !DISubprogram(name: "g", linkageName: "pkg::t::sig::g", scope: !401, file: !401, line: 61, type: !438, scopeLine: 61, spFlags: DISPFlagDefinition, unit: !400)
+!463 = !DILocation(line: 64, column: 21, scope: !461)
+!464 = !DILocation(line: 65, column: 17, scope: !460)
+!465 = !DILocation(line: 67, column: 9, scope: !460)
 !480 = !{!"branch_weights", i32 2, i32 5}
 !481 = !{!"branch_weights", i32 1, i32 1}
 !482 = !{!"branch_weights", i32 1, i32 6}
@@ -249,4 +277,5 @@ attributes #0 = { noinline }
 !492 = !{!"branch_weights", i32 0, i32 4}
 !493 = !{!"branch_weights", i32 1, i32 6}
 !494 = !{!"branch_weights", i32 1, i32 3}
+!495 = !{!"branch_weights", i32 2, i32 5}
 !499 = !{!"function_entry_count", i64 7}

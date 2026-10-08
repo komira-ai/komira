@@ -31,7 +31,7 @@ pub const File = struct {
     lines: [][]const u8 = &.{},
     exec: std.AutoHashMap(u64, void),
     branches: usize = 0,
-    // Per line: inside a triple-quoted string (tryMask; null: not read yet).
+    // Per line: no statement's first line (quotedLines; null: not read yet).
     quoted: ?[]bool = null,
 };
 
@@ -430,13 +430,16 @@ pub fn forHead(alloc: Alloc, lines: []const []const u8, idx: usize) ?u64 {
     return from + lead + h + 1;
 }
 
-/// Per line of `lines`: whether it starts inside, or holds, a `"""` or
-/// `'''` string's quotes (its text is no statement for inTry).
+/// Per line of `lines`: whether it is no statement's first line for inTry:
+/// it starts inside, or holds, a `"""` or `'''` string's quotes, or it
+/// starts inside an open bracket (a continuation: the `) raises:` closing a
+/// signature over lines has the `def`'s indentation).
 fn quotedLines(alloc: Alloc, lines: []const []const u8) []bool {
     const out = alloc.alloc(bool, lines.len) catch oom();
     var open: u8 = 0; // the quote of the triple-quoted string open, or 0
+    var depth: usize = 0; // brackets open outside strings and comments
     for (lines, 0..) |l, n| {
-        out[n] = open != 0;
+        out[n] = open != 0 or depth > 0;
         var i: usize = 0;
         while (i < l.len) {
             const c = l[i];
@@ -456,7 +459,14 @@ fn quotedLines(alloc: Alloc, lines: []const []const u8) []bool {
                 i += 3;
             } else if (c == '"' or c == '\'') {
                 i = skipString(l, i);
-            } else i += 1;
+            } else {
+                switch (c) {
+                    '(', '[', '{' => depth += 1,
+                    ')', ']', '}' => depth -|= 1,
+                    else => {},
+                }
+                i += 1;
+            }
         }
     }
     return out;
@@ -470,7 +480,8 @@ fn indentOf(l: []const u8) usize {
 
 /// Whether 1-based `line` of `f` is in the body of a `try:` of its own
 /// function (README.md, "try"): walking back over the lines indented less
-/// than the one before (blank, comment and triple-quoted lines skipped), a
+/// than the one before (blank, comment, triple-quoted and continuation
+/// lines skipped), a
 /// `try` line is met before a `def`, `fn`, `struct`, `trait` or `class`
 /// line, or the line is itself `try: <statement>`. An `except`, `else` or
 /// `finally` clause has its `try`'s indentation, so its body is no body of

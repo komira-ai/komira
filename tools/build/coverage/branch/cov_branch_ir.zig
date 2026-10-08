@@ -340,6 +340,12 @@ pub const Fn = struct {
         if (self.raisingFlag(v, dbg, true)) return true;
         const r = after(self.body(v) orelse return false, "phi i1 ") orelse return false;
         var some = false;
+        var value = false; // a non-constant incoming value
+        // Constants-only: each constant from a callee block must say what
+        // that block is, `true` from its raise path (a block calling the
+        // raise hook), `false` from any other, or the arms would swap.
+        var polarity = true;
+        var raised = false;
         var it = std.mem.splitSequence(u8, r, "], ");
         while (it.next()) |piece| {
             const p = std.mem.trim(u8, piece, " ]");
@@ -347,16 +353,35 @@ pub const Fn = struct {
             const x = operand(in);
             if (std.mem.eql(u8, x, "true") or std.mem.eql(u8, x, "false")) {
                 const from = std.mem.trim(u8, in[@min(in.len, x.len + 2)..], " ");
-                if (self.calleeBlock(from, dbg, ctx)) some = true;
+                if (self.calleeBlock(from, dbg, ctx)) {
+                    some = true;
+                    const t = std.mem.eql(u8, x, "true");
+                    const rb = self.raiseBlock(from);
+                    if (t != rb) polarity = false;
+                    if (t and rb) raised = true;
+                }
                 continue;
             }
             if (x.len == 0 or x[0] != '%') return false;
             some = true;
+            value = true;
             if (self.errorFlagAt(x, dbg, ctx, depth + 1)) continue;
             const d = self.dbgOf(x) orelse return false;
             if (!ctx.inlinedAt(d, dbg)) return false;
         }
+        if (!value) return some and polarity and raised;
         return some;
+    }
+
+    /// Whether block `b` calls the standard library's raise hook (Mojo's
+    /// code for a `raise`: test 47's trial.mojo, komira_parquet's rle.mojo).
+    fn raiseBlock(self: *const Fn, b: []const u8) bool {
+        const bi = self.by_name.get(b) orelse return false;
+        const blk = self.blocks.items[bi];
+        for (self.insts.items[blk.first..blk.end]) |x| {
+            if (std.mem.indexOf(u8, x.text, "@\"std::builtin::error::__mojo_debugger_raise_hook()\"(") != null) return true;
+        }
+        return false;
     }
 
     /// Whether block `b` ends in a branch whose location is inlined at `dbg`.

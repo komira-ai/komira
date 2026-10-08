@@ -83,12 +83,14 @@ COVERAGE_NO_GATE = {
 # library whose `try:` bodies hold a shape the classifier refuses leaves
 # the list, with the reason, rather than the rule being weakened.
 #
-# Mutation testing (covcheck's --mutants, README.md "The mutants file") is
-# not the enforced gate of a package whose branch coverage is enforced: once
-# a library of this list has its gate in enforce mode, its branch arms are
-# what its tests must take, and its mutation results, where a run gives
-# them, are reported (census), not required. No build action passes
-# --mutants today.
+# The decision on mutation testing (covcheck's --mutants, README.md "The
+# mutants file"): once a package's branch coverage is enforced, mutation
+# testing is not its enforced gate; its branch arms are. What the code does
+# today: no build action passes --mutants, so mutation never gates a
+# package. covcheck itself would still fail an enforce gate on a
+# MutantSurvived finding if a gate were given --mutants (any finding exits
+# 3 in enforce mode); making mutation results report-only there is future
+# work, not done.
 COVERAGE_BRANCH_GATE = {
     "komira//src/kci_cloud_fake:kci_cloud_fake": "its eleven tests' branches all classify (556 arms of 9 files, 6 of them `try` arms)",
     "komira//src/kci_secret_writer:kci_secret_writer": "its test's branches all classify (16 arms of 1 file)",

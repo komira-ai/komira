@@ -544,7 +544,8 @@ refused "copies, elif line" "src/pkg/d.mojo:44:5 (br): two copies of its functio
 # below: the rule removed (no `try` record); the scope ignored (a call
 # outside a `try:` body recorded); the arms in LLVM's order (5,14 is 5,2);
 # the clause rule (an `except`/`else` body read as the `try`'s); the `def`
-# boundary; the triple-quoted lines read as statements; a `try` decision
+# boundary; the triple-quoted lines, or a signature's continuation lines
+# (64: `) raises -> Int:` has the `def`'s indentation), read as statements; a `try` decision
 # taken as an and/or's test (49,16's right operand derived from 49,23).
 run "$TOOL" --ir "$TX" --out "$W/out.info" $MAP $EXC
 [ "$RC" -eq 0 ] || red "try golden: exit $RC, want 0"
@@ -552,13 +553,13 @@ if ! cmp -s "$W/out.info" "$TGOLDEN"; then
     diff -u "$TGOLDEN" "$W/out.info" >&2 || true
     red "try golden: the output differs from fixtures/try.golden.info"
 fi
-want="1 measured file(s): 15 source decision(s) (if 3, elif 0, while 0, and 1, or 0, for-in 0, try 11; 1 right operand(s) derived, 0 a second test of one decision), 8 compiler-made (String lifetime 1, + 0, call( 7, [ 0, // 0, % 0) not written; 1 branch(es) outside the measured sources"
+want="1 measured file(s): 16 source decision(s) (if 3, elif 0, while 0, and 1, or 0, for-in 0, try 12; 1 right operand(s) derived, 0 a second test of one decision), 9 compiler-made (String lifetime 1, + 0, call( 8, [ 0, // 0, % 0) not written; 1 branch(es) outside the measured sources"
 grep -qF "$want" "$W/err" || red "try golden: stderr does not say '$want'"
-[ "$(grep -c ':try:' "$W/out.info")" = 22 ] || red "try: not eleven try decisions of two arms (the rule removed, or the scope ignored)"
+[ "$(grep -c ':try:' "$W/out.info")" = 24 ] || red "try: not twelve try decisions of two arms (the rule removed, or the scope ignored)"
 grep -qx 'BRDA:49,16:rhs:0/1,0,1' "$W/out.info" || red "try and and: 49,16's right operand is not 1 true (derived from the call's try decision, not the if)"
 grep -qx 'BRDA:5,14:try:0/1,0,5' "$W/out.info" || red "try arms: 5,14 arm 0 (the call returned) is not 5 (arms in LLVM's order)"
 grep -qx 'BRDA:13,19:try:0/1,1,0' "$W/out.info" || red "nested try: 13,19 (an inner except body, in the outer try body) is not a try decision"
-! grep -qE '^BRDA:(17|19|22|27|33|41),' "$W/out.info" || red "try scope: a call outside a try body (except, else, after, nested def, with, after a quoted try:) was recorded"
+! grep -qE '^BRDA:(17|19|22|27|33|41|64),' "$W/out.info" || red "try scope: a call outside a try body (except, else, after, nested def, with, after a quoted try:, a nested def whose signature runs over lines) was recorded"
 pass
 
 # tinsert <line of try.ll> <line>...: try.ll with the lines after that one.
@@ -572,7 +573,9 @@ tinsert() {
 # 12a. In a `try:` body a br at a call, `[` or `+` that is not a raising
 # call's error flag is refused (whether it is the call's error check is not
 # known); so is a phi whose value is not inlined at the call, or whose
-# constants arrive from no block of a callee inlined there; `try` and
+# constants arrive from no block of a callee inlined there (kills: such a
+# phi accepted without that evidence), or say `true` from a block that is
+# not the callee's raise path; `try` and
 # `with` keep no branch of their own. Kills: the refusal dropped (any br at
 # a call in a try body dropped or taken); the inlined-at check of the phi
 # dropped; `try` or `with` taken as a token.
@@ -589,6 +592,12 @@ sed -e 's/^!455 = !DILocation(line: 283, column: 17, scope: !459, inlinedAt: !45
     -e 's/^!456 = !DILocation(line: 292, column: 9, scope: !459, inlinedAt: !452)/!456 = !DILocation(line: 56, column: 9, scope: !451)/' "$TX" >"$W/v.ll"
 grep -qx '!455 = !DILocation(line: 57, column: 5, scope: !451)' "$W/v.ll" && grep -qx '!456 = !DILocation(line: 56, column: 9, scope: !451)' "$W/v.ll" || red "variant: the two block locations were not both changed"
 refused "try, constants from no callee block" "src/pkg/t.mojo:56:30: a br at 'read_uleb128(' in a try body that is not a raising call's error flag" "$W/v.ll"
+# The constants swapped: `true` arrives from the callee's return, `false`
+# from its raise path (the block calling the raise hook). Read as a flag,
+# its arms would swap; it is refused. Kills: the polarity check dropped.
+sed -e 's/^  %7 = phi i1 \[ false, %5 \], \[ true, %4 \], !dbg !452$/  %7 = phi i1 [ true, %5 ], [ false, %4 ], !dbg !452/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "variant: the constant swap changed nothing"
+refused "try, constants of the wrong polarity" "src/pkg/t.mojo:56:30: a br at 'read_uleb128(' in a try body that is not a raising call's error flag" "$W/v.ll"
 tinsert '  %15 = call i1 @"pkg::t::touch"(i64 %0, ptr %3), !dbg !411' '  br i1 %15, label %90, label %16, !dbg !440, !prof !482' '!440 = !DILocation(line: 4, column: 5, scope: !403)'
 sed -e '/^!440 = /d' "$W/v.ll" >"$W/v2.ll"
 printf '%s\n' '!440 = !DILocation(line: 4, column: 5, scope: !403)' >>"$W/v2.ll"

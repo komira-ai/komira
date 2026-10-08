@@ -31,4 +31,6 @@ BRDA:49,23:try:0/1,0,4
 BRDA:49,23:try:0/1,1,0
 BRDA:56,30:try:0/1,0,3
 BRDA:56,30:try:0/1,1,1
+BRDA:65,17:try:0/1,0,5
+BRDA:65,17:try:0/1,1,2
 end_of_record

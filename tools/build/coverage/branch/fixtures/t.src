@@ -56,3 +56,12 @@ def consts(b: B) -> Int:
         return b.read_uleb128()
     except:
         return -1
+def sig(x: Int) -> Int:
+    try:
+        def g(
+            a: Int,
+        ) raises -> Int:
+            return f(a)
+        return g(x)
+    except:
+        return 0

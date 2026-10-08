@@ -442,7 +442,10 @@ flag, its raised target the handler or the propagation to the caller. So
 the scope is read from the source, and the shape from the IR:
 
 - Scope. From the call's line back, over the lines indented less than the
-  last one met (blank, comment and triple-quoted-string lines skipped), a
+  last one met (blank, comment and triple-quoted-string lines skipped, and
+  continuation lines, which start inside an open bracket: the `) raises:`
+  closing a nested `def`'s signature over lines has the `def`'s
+  indentation, and read as a statement it would hide the `def`), a
   `try` line met before a `def`, `fn`, `struct`, `trait` or `class` line
   (another function: a `def` nested in a `try:` body is one), or the
   call's own line `try: <statement>`. An `except`, `else` or `finally`
@@ -464,7 +467,12 @@ the scope is read from the source, and the shape from the IR:
   the `and`), with one such value at least, or one constant arriving from
   a block of the inlined callee's code (`komira_parquet`'s `rle.mojo`
   226:54, `read_uleb128` inlined: `phi i1 [ false, <its return> ], [
-  true, <its raise> ]`). Any other br there is refused: whether it is the call's
+  true, <its raise> ]`). A phi of constants alone says which arm is which
+  by its constants only, so each one from the callee's code must match its
+  block: `true` from the raise path (the block calling
+  `__mojo_debugger_raise_hook`, which Mojo emits at every `raise`: both
+  shapes seen), `false` from any other; a phi saying `true` from the
+  return would swap the arms, and is refused. Any other br there is refused: whether it is the call's
   error check is not known. A String's destructor at the call (the
   handler destroying the error's String) is the String's, as anywhere; a
   select on the flag stays compiler-made (the br is the decision).
