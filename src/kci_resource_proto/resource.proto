@@ -146,20 +146,20 @@
 // an author chooses, so it has no value here.
 //
 // METADATA (`Resource.physical_name` 6, `labels` 7, `adopt` 8,
-// `adopt_deletable` 9) means the same on every type that takes it. `physical_name` is the cloud name of
-// the resource's primary object; a `grant` (an edge: its objects are
-// bindings) and a `dns_record` (named by the DNS name and type it writes)
-// have no name of their own, so writing one there is refused. `adopt` takes
-// over the existing object of that name instead of refusing it as foreign,
-// once kci has read it and found what the resource declares; kci never
-// deletes or replaces an adopted object unless `adopt_deletable` says it
-// may, and releases it when the resource leaves the list.
-// `labels` are the author's, written beside kci's own; a key in kci's own
-// label space (`kci_*`, `kci-*`) is refused. A name or a label a cloud
-// refuses (a name too long or too short, a kind with no name of its own
-// there, one name on two objects of one kind there, more labels than an
-// object carries there) is refused as a limit
-// of that cloud when the graph is validated, before anything is created.
+// `adopt_deletable` 9) means the same on every type that takes it.
+// `physical_name` is the cloud name of the resource's primary object; a
+// `grant` (an edge: its objects are bindings) and a `dns_record` (named by
+// the DNS name and type it writes) have no name of their own, so writing one
+// there is refused. `adopt` takes over the existing object of that name
+// instead of refusing it as foreign, once kci has read it and found what the
+// resource declares; kci never deletes or replaces an adopted object unless
+// `adopt_deletable` says it may, and releases it when the resource leaves
+// the list. `labels` are the author's, written beside kci's own; a key in
+// kci's own label space (`kci_*`, `kci-*`) is refused. A name or a label a
+// cloud refuses (a name too long or too short, a kind with no name of its
+// own there, one name on two objects of one kind there, more labels than an
+// object carries there) is refused as a limit of that cloud when the graph
+// is validated, before anything is created.
 //
 // RESERVED NOW, BUILT LATER (held numbers, not declared; each is an addition
 // when it lands): `Resource` 5 a typed per-cloud settings map, `Image` 4 an
@@ -244,10 +244,10 @@ message Resource {
   // With `adopt` only: kci may also replace the adopted object (a change
   // the cloud cannot make in place) or delete it (a destroy, or the
   // resource lowering it no more while it stays in the list). Without it,
-  // a plan with such a change is refused before any change. `optional` so
-  // that a resource that does not write it encodes no bytes for it: every
-  // list stored, and the digest of every composite definition, stays as it
-  // was. Unset and written false mean the same.
+  // a plan with such a change is refused before any change. It is
+  // `optional`: a resource that does not write it encodes no byte of field
+  // 9, and neither does the digest of a composite definition whose
+  // components do not write it. Unset and written false mean the same.
   optional bool adopt_deletable = 9;
 
   // Typed and closed. Held, not declared (see the file header): 17, 19
