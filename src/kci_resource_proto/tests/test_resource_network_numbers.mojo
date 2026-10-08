@@ -18,9 +18,9 @@
 # 3. SUBNET. 1 network (a `Ref`), 2 ipv4_cidr, 3 zone (an optional number:
 #    an explicit 0 is present); by name, binary, JSON (`network`,
 #    `ipv4Cidr`, `zone`), absent = unset; 4 is not a field; as
-#    `Resource.body` 29, the seventeenth arm, under the JSON name `subnet`.
+#    `Resource.body` 29, the eighteenth arm, under the JSON name `subnet`.
 # 4. IPADDRESS. It declares no field: any record in it is unknown and
-#    dropped. As `Resource.body` 30, the eighteenth arm, under the JSON name
+#    dropped. As `Resource.body` 30, the nineteenth arm, under the JSON name
 #    `ipAddress`, its empty record is kept, and `retention` 3 rides beside
 #    it.
 # 5. SERVICE.NETWORK. Field 16 is `network`, a `Ref`; by name, binary, JSON
@@ -317,7 +317,7 @@ def test_subnet() raises:
 
     var rr = decode_proto[Resource](_resource("edge", 29, _subnet()))
     assert_true(Bool(rr.subnet), "body 29 is `subnet`")
-    assert_equal(rr._oneof0_case, 17, "the subnet is the seventeenth arm")
+    assert_equal(rr._oneof0_case, 18, "the subnet is the eighteenth arm")
     var rt = encode_json(rr)
     assert_true('"subnet":{' in rt, "Resource JSON names the arm subnet: " + rt)
     _bytes_equal(encode_proto(decode_json[Resource](rt)), encode_proto(rr), "Resource with a subnet: JSON round trip")
@@ -341,7 +341,7 @@ def test_ip_address() raises:
     _msg(b, 30, List[UInt8]())
     var rr = decode_proto[Resource](b.copy())
     assert_true(Bool(rr.ip_address), "body 30 is `ip_address`")
-    assert_equal(rr._oneof0_case, 18, "the IP address is the eighteenth arm")
+    assert_equal(rr._oneof0_case, 19, "the IP address is the nineteenth arm")
     assert_equal(rr.retention.value, Retention.KEEP, "retention rides beside it")
     var rt = encode_json(rr)
     assert_true('"ipAddress":{}' in rt, "Resource JSON names the empty arm ipAddress: " + rt)
