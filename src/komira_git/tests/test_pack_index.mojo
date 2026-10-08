@@ -225,6 +225,21 @@ def test_parse_refusals() raises:
     b[8 + 4 * 5 + 3] = 2
     _reseal(b)
     assert_equal(_err(b), p + "the fan-out table disagrees with object 2")
+    # Fan-out entry 0 says no object starts with 0x00, so object 0 (first
+    # byte 0x00) is past its group's end. Entries 1 to 4 stay 1, so the
+    # table is monotone; this is the only case that checks object 0.
+    b = good.copy()
+    b[8 + 3] = 0
+    _reseal(b)
+    assert_equal(_err(b), p + "the fan-out table disagrees with object 0")
+    # Object 3 now starts with 0x06 (still after 0x05), but fan-out entry 6
+    # counts only three objects, so the last object is past its group's
+    # end. With first byte 0xFF its upper bound is the count and can never
+    # be exceeded; this case checks the last object's upper bound.
+    b = good.copy()
+    b[ids_at + 60] = 6
+    _reseal(b)
+    assert_equal(_err(b), p + "the fan-out table disagrees with object 3")
     var offs_at = ids_at + 80 + 16
     b = good.copy()
     b[offs_at + 3] = 11
