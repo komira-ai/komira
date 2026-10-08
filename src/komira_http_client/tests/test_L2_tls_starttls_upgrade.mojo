@@ -31,8 +31,10 @@
 #       Mutant: drop `_refuse_unverifiable_peer()` from `upgrade` -> red.
 #
 # Pointer discipline: UnsafePointer use is confined to the socketpair and
-# pthread FFI calls of this test, with concrete or
-# MutUntrackedOrigin origins at the FFI call only.
+# pthread FFI of this test: the FFI calls, the heap `_ServerArg` handed to
+# the server thread (its fields and the functions that build, run and free
+# it) and the PEM buffers it carries, with concrete or MutUntrackedOrigin
+# origins. tests/pointer_lint_ffi.tsv lists this file as an FFI module.
 # =============================================================================
 
 from std.ffi import external_call

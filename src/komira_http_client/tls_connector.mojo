@@ -918,8 +918,12 @@ struct TlsConnector[
         Raises:
           * `TlsConnector.upgrade: refusing the TLS upgrade ...` for
             buffered pre-handshake bytes.
-          * The `connect` refusals and handshake failures, with the
-            `TlsConnector.upgrade:` prefix.
+          * `TlsConnector: refusing VERIFY_PEER connect with an empty
+            server name ...`, `connect`'s server-name refusal unchanged.
+          * Handshake failures, the wall-clock deadline and the no-descriptor
+            refusal, with the `TlsConnector.upgrade:` prefix.
+          * Errors from creating, binding or naming the s2n connection,
+            with their own prefixes.
         """
         self._refuse_unverifiable_peer()
         if plain.has_buffered_readable():
@@ -946,7 +950,8 @@ struct TlsConnector[
         connection to `underlying`'s descriptor, drive the handshake to DONE
         within the wall-clock budget, and wrap. `port` keys the session
         cache and is read only when `use_session_cache`; `verb` names the
-        public entry point in every error message."""
+        public entry point in the handshake, deadline and no-descriptor
+        error messages."""
         # Step 2: client-mode TLS connection bound to the underlying fd.
         # SAFETY: ref borrow into self._config — alive for the duration
         # of this method (we hold mut self). new_client + bind_fd happen
