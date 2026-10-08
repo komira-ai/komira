@@ -127,17 +127,20 @@ struct IcebergRestCatalog[T: IcebergRestTransport, P: CatalogCredentialProvider]
     scripted JSON in tests) with the `P: CatalogCredentialProvider` bearer-token
     seam.
 
-    Construction: `IcebergRestCatalog(host, transport, creds)`. The catalog
+    Construction: `IcebergRestCatalog(host, transport, creds, port=...)`
+    (`port` defaults to `ICEBERG_REST_PORT`, 443). The catalog
     `prefix` is fetched lazily from GET /v1/config on the FIRST resolve and
     CACHED (a multi-tenant catalog namespaces its paths under a per-catalog
     prefix; a single-tenant catalog returns an empty prefix, in which case the
     paths omit the prefix segment).
 
-    `host` / `_prefix` are owned Strings; `_config_*` are owned
+    `host` / `_prefix` are owned Strings; `port` is the catalog's port;
+    `_config_*` are owned
     `List[String]`; `_transport` / `_creds` are the parametric conformer values
     (owned, moved in). No pointer field, no wildcard origin."""
 
     var host: String
+    var port: UInt16
     var _transport: Self.T
     var _creds: Self.P
     var _prefix: String
@@ -146,9 +149,15 @@ struct IcebergRestCatalog[T: IcebergRestTransport, P: CatalogCredentialProvider]
     var _config_values: List[String]
 
     def __init__(
-        out self, var host: String, var transport: Self.T, var creds: Self.P
+        out self,
+        var host: String,
+        var transport: Self.T,
+        var creds: Self.P,
+        *,
+        port: UInt16 = ICEBERG_REST_PORT,
     ):
         self.host = host^
+        self.port = port
         self._transport = transport^
         self._creds = creds^
         self._prefix = String("")
@@ -169,14 +178,14 @@ struct IcebergRestCatalog[T: IcebergRestTransport, P: CatalogCredentialProvider]
     # -------------------------------------------------------------------------
 
     def _build_request(mut self, var path: String) raises -> IcebergRestRequest:
-        """Build a GET for `path` with the Accept header + the bearer
-        Authorization header (when the credential provider yields one). The
-        Authorization header is attached ONLY when non-empty (an unauthenticated
-        catalog gets no Authorization header)."""
+        """Build a GET for `path` to `host`:`port` with the Accept header + the
+        bearer Authorization header (when the credential provider yields one).
+        The Authorization header is attached ONLY when non-empty (an
+        unauthenticated catalog gets no Authorization header). No Host header:
+        the HTTP client writes it from the URL's authority, which carries the
+        port when it is not the scheme's default (RFC 9110 section 7.2)."""
         var names = List[String]()
         var values = List[String]()
-        names.append(String("Host"))
-        values.append(String(self.host))
         names.append(String("Accept"))
         values.append(String("application/json"))
         var auth = self._creds.authorization_header()
@@ -184,7 +193,7 @@ struct IcebergRestCatalog[T: IcebergRestTransport, P: CatalogCredentialProvider]
             names.append(String("Authorization"))
             values.append(auth)
         return IcebergRestRequest(
-            String(self.host), ICEBERG_REST_PORT, path^, names^, values^
+            String(self.host), self.port, path^, names^, values^
         )
 
     # -------------------------------------------------------------------------
