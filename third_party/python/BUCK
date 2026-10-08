@@ -15,6 +15,8 @@ load(":pins.bzl", "PYTHON", "WHEELS")
 _TEST_ONLY = [
     "komira//src/tests/e2e/komira_tls_interop_e2e/...",
     "komira//src/tests/helpers/komira_test_python/...",
+    # The tests of the CI scripts under release/ci (a py_test alone).
+    "komira//release/ci/tests:",
 ]
 
 pinned_file(

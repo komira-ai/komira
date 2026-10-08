@@ -1,0 +1,412 @@
+# proto-message: komira.managed_mail.v1.corpus.MailCorpus
+email_address {
+  address: "ada@example.com"
+  display_name: "Ada Lovelace"
+}
+mailbox {
+  mailbox_id: "mb-ada"
+  address: "ada@example.com"
+  display_name: "Ada Lovelace"
+  kind: MAILBOX_KIND_PERSONAL
+  created_at_ms: 1790000000000
+  owner {
+    iss: "https://id.example.com"
+    sub: "user-ada"
+  }
+}
+email {
+  email_id: "em-0001"
+  mailbox_id: "mb-ada"
+  thread_id: "th-0001"
+  folder: FOLDER_INBOX
+  from {
+    address: "bob@example.org"
+    display_name: "Bob"
+  }
+  to {
+    address: "ada@example.com"
+    display_name: "Ada Lovelace"
+  }
+  cc {
+    address: "support@example.com"
+    display_name: "Support"
+  }
+  subject: "Lunch on Friday?"
+  snippet: "Are you free at noon"
+  sent_at_ms: 1790000100000
+  received_at_ms: 1790000100500
+  size_bytes: 2048
+  has_attachments: true
+  seen: true
+  flagged: true
+  sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  header_message_id: "<m1@example.org>"
+}
+email_part {
+  part_index: 2
+  content_type: "application/pdf"
+  filename: "menu.pdf"
+  size_bytes: 1024
+  is_attachment: true
+  content_id: "<part2@example.org>"
+}
+thread {
+  thread_id: "th-0001"
+  mailbox_id: "mb-ada"
+  subject: "Lunch on Friday?"
+  email_count: 3
+  last_received_at_ms: 1790000200000
+}
+envelope {
+  mail_from: "ada@example.com"
+  rcpt_to: "bob@example.org"
+  rcpt_to: "carol@example.net"
+}
+submission {
+  submission_id: "sub-0001"
+  mailbox_id: "mb-ada"
+  email_id: "em-0002"
+  envelope {
+    mail_from: "ada@example.com"
+    rcpt_to: "bob@example.org"
+    rcpt_to: "carol@example.net"
+  }
+  sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  state: SUBMISSION_STATE_QUEUED
+  attempts: 2
+  next_attempt_at_ms: 1790000300000
+  provider_message_id: "pm-0001"
+  last_error: "451 4.7.1 try again later"
+  created_at_ms: 1790000250000
+}
+attachment {
+  filename: "menu.pdf"
+  content_type: "application/pdf"
+  content: "%PDF-1.7"
+}
+api_error {
+  code: "invalid_argument"
+  message: "The field to must name at least one address."
+  field: "to"
+  incident_id: "inc-0001"
+}
+raw_body_reply {
+}
+list_mailboxes_request {
+  cursor: "c-0002"
+  limit: 25
+}
+list_mailboxes_response {
+  mailboxes {
+    mailbox_id: "mb-ada"
+    address: "ada@example.com"
+    display_name: "Ada Lovelace"
+    kind: MAILBOX_KIND_PERSONAL
+    created_at_ms: 1790000000000
+    owner {
+      iss: "https://id.example.com"
+      sub: "user-ada"
+    }
+  }
+  next_cursor: "c-0003"
+}
+create_mailbox_request {
+  address: "ada@example.com"
+  display_name: "Ada Lovelace"
+  kind: MAILBOX_KIND_PERSONAL
+  owner {
+    iss: "https://id.example.com"
+    sub: "user-ada"
+  }
+}
+create_mailbox_response {
+  mailbox {
+    mailbox_id: "mb-ada"
+    address: "ada@example.com"
+    display_name: "Ada Lovelace"
+    kind: MAILBOX_KIND_PERSONAL
+    created_at_ms: 1790000000000
+    owner {
+      iss: "https://id.example.com"
+      sub: "user-ada"
+    }
+  }
+}
+delete_mailbox_request {
+  mailbox_id: "mb-ada"
+}
+delete_mailbox_response {
+  mailbox_id: "mb-ada"
+  emails_deleted: 17
+}
+list_emails_request {
+  mailbox_id: "mb-ada"
+  folder: FOLDER_SENT
+  cursor: "c-0004"
+  limit: 50
+}
+list_emails_response {
+  emails {
+    email_id: "em-0001"
+    mailbox_id: "mb-ada"
+    thread_id: "th-0001"
+    folder: FOLDER_INBOX
+    from {
+      address: "bob@example.org"
+      display_name: "Bob"
+    }
+    to {
+      address: "ada@example.com"
+      display_name: "Ada Lovelace"
+    }
+    cc {
+      address: "support@example.com"
+      display_name: "Support"
+    }
+    subject: "Lunch on Friday?"
+    snippet: "Are you free at noon"
+    sent_at_ms: 1790000100000
+    received_at_ms: 1790000100500
+    size_bytes: 2048
+    has_attachments: true
+    seen: true
+    flagged: true
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    header_message_id: "<m1@example.org>"
+  }
+  next_cursor: "c-0005"
+}
+get_email_request {
+  email_id: "em-0001"
+}
+get_email_response {
+  email {
+    email_id: "em-0001"
+    mailbox_id: "mb-ada"
+    thread_id: "th-0001"
+    folder: FOLDER_INBOX
+    from {
+      address: "bob@example.org"
+      display_name: "Bob"
+    }
+    to {
+      address: "ada@example.com"
+      display_name: "Ada Lovelace"
+    }
+    cc {
+      address: "support@example.com"
+      display_name: "Support"
+    }
+    subject: "Lunch on Friday?"
+    snippet: "Are you free at noon"
+    sent_at_ms: 1790000100000
+    received_at_ms: 1790000100500
+    size_bytes: 2048
+    has_attachments: true
+    seen: true
+    flagged: true
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    header_message_id: "<m1@example.org>"
+  }
+  text_body: "Are you free at noon on Friday?"
+  html_body: "<p>Are you free at noon on Friday?</p>"
+  parts {
+    part_index: 2
+    content_type: "application/pdf"
+    filename: "menu.pdf"
+    size_bytes: 1024
+    is_attachment: true
+    content_id: "<part2@example.org>"
+  }
+}
+get_email_raw_request {
+  email_id: "em-0001"
+}
+get_email_part_request {
+  email_id: "em-0001"
+  part_index: 2
+}
+update_email_request {
+  email_id: "em-0001"
+  seen: false
+  flagged: true
+  folder: FOLDER_ARCHIVE
+}
+update_email_response {
+  email {
+    email_id: "em-0001"
+    mailbox_id: "mb-ada"
+    thread_id: "th-0001"
+    folder: FOLDER_INBOX
+    from {
+      address: "bob@example.org"
+      display_name: "Bob"
+    }
+    to {
+      address: "ada@example.com"
+      display_name: "Ada Lovelace"
+    }
+    cc {
+      address: "support@example.com"
+      display_name: "Support"
+    }
+    subject: "Lunch on Friday?"
+    snippet: "Are you free at noon"
+    sent_at_ms: 1790000100000
+    received_at_ms: 1790000100500
+    size_bytes: 2048
+    has_attachments: true
+    seen: true
+    flagged: true
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    header_message_id: "<m1@example.org>"
+  }
+}
+get_thread_request {
+  thread_id: "th-0001"
+}
+get_thread_response {
+  thread {
+    thread_id: "th-0001"
+    mailbox_id: "mb-ada"
+    subject: "Lunch on Friday?"
+    email_count: 3
+    last_received_at_ms: 1790000200000
+  }
+  emails {
+    email_id: "em-0001"
+    mailbox_id: "mb-ada"
+    thread_id: "th-0001"
+    folder: FOLDER_INBOX
+    from {
+      address: "bob@example.org"
+      display_name: "Bob"
+    }
+    to {
+      address: "ada@example.com"
+      display_name: "Ada Lovelace"
+    }
+    cc {
+      address: "support@example.com"
+      display_name: "Support"
+    }
+    subject: "Lunch on Friday?"
+    snippet: "Are you free at noon"
+    sent_at_ms: 1790000100000
+    received_at_ms: 1790000100500
+    size_bytes: 2048
+    has_attachments: true
+    seen: true
+    flagged: true
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    header_message_id: "<m1@example.org>"
+  }
+}
+send_email_request {
+  mailbox_id: "mb-ada"
+  to {
+    address: "bob@example.org"
+    display_name: "Bob"
+  }
+  cc {
+    address: "support@example.com"
+    display_name: "Support"
+  }
+  bcc {
+    address: "carol@example.net"
+    display_name: "Carol"
+  }
+  subject: "Re: Lunch on Friday?"
+  text_body: "Noon works."
+  html_body: "<p>Noon works.</p>"
+  attachments {
+    filename: "menu.pdf"
+    content_type: "application/pdf"
+    content: "%PDF-1.7"
+  }
+  in_reply_to_email_id: "em-0001"
+}
+send_email_response {
+  email_id: "em-0002"
+  submission_id: "sub-0001"
+}
+get_submission_request {
+  submission_id: "sub-0001"
+}
+get_submission_response {
+  submission {
+    submission_id: "sub-0001"
+    mailbox_id: "mb-ada"
+    email_id: "em-0002"
+    envelope {
+      mail_from: "ada@example.com"
+      rcpt_to: "bob@example.org"
+      rcpt_to: "carol@example.net"
+    }
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    state: SUBMISSION_STATE_QUEUED
+    attempts: 2
+    next_attempt_at_ms: 1790000300000
+    provider_message_id: "pm-0001"
+    last_error: "451 4.7.1 try again later"
+    created_at_ms: 1790000250000
+  }
+}
+export_mailbox_request {
+  mailbox_id: "mb-ada"
+}
+inbound_envelope {
+  mail_from: "bob@example.org"
+  rcpt_to: "ada@example.com"
+  rcpt_to: "nobody@example.com"
+  sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+inbound_delivery {
+  recipient: "ada@example.com"
+  mailbox_id: "mb-ada"
+  email_id: "em-0001"
+  duplicate: true
+}
+inbound_delivery_response {
+  deliveries {
+    recipient: "ada@example.com"
+    mailbox_id: "mb-ada"
+    email_id: "em-0001"
+    duplicate: true
+  }
+  unknown_recipients: "nobody@example.com"
+}
+raw_message_request {
+  envelope_from: "ada@example.com"
+  recipients: "bob@example.org"
+  recipients: "carol@example.net"
+  raw: "From: Ada Lovelace <ada@example.com>\r\nTo: bob@example.org\r\nSubject: Hello\r\n\r\nHello, Bob.\r\n"
+}
+raw_message_response {
+  message_id: "0100018f-msg-0001"
+  suppressed: "carol@example.net"
+}
+error_response {
+  error {
+    code: "internal"
+    message: "The server failed to answer."
+    field: "to"
+    incident_id: "inc-0002"
+  }
+}
+subject {
+  iss: "https://id.example.com"
+  sub: "user-ada"
+}
+erase_subject_request {
+  subject {
+    iss: "https://id.example.com"
+    sub: "user-ada"
+  }
+}
+erase_subject_response {
+  mailboxes_deleted: 1
+  emails_deleted: 17
+  submissions_deleted: 3
+  blobs_deleted: 12
+}
