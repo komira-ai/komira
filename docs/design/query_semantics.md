@@ -182,9 +182,9 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ### 2.2 All-NULL groups and empty groups
 
-- **Rule.** SUM, AVG, MIN and MAX over a group with no non-NULL input are NULL (SUM is not 0). COUNT is 0.
+- **Rule.** Every aggregate except COUNT and COUNT(DISTINCT) is NULL over a group with no non-NULL input, whether the group is all-NULL or empty: SUM (not 0), AVG, MIN, MAX, the statistical aggregates (§2.11), and the holistic aggregates. The holistic aggregate the plan has is MEDIAN (§2.14); a quantile or MODE added later follows the same rule. COUNT is 0.
 - **DuckDB.** "All general aggregate functions except count return NULL on empty groups ... sum does not return zero" ([aggregate functions](https://duckdb.org/docs/current/sql/functions/aggregates.html)). **pyarrow.** `sum` with its default `min_count=1` answers null.
-- **Current behaviour.** The mixed fold emits NULL when the contributing count is 0 (`src/komira_dispatch_agg_folds/agg_mixed_cd_fold.mojo:96-99`, `:262-266`); MIN/MAX cells carry a `seen` flag (`src/komira_agg/builtin_agg_fns_minmax.mojo:39-45`). The SUM cells in `komira_agg` do not: see "Code that does not follow", item 2.
+- **Current behaviour.** The mixed fold emits NULL when the contributing count is 0 (`src/komira_dispatch_agg_folds/agg_mixed_cd_fold.mojo:96-99`, `:262-266`); MIN/MAX cells carry a `seen` flag (`src/komira_agg/builtin_agg_fns_minmax.mojo:39-45`); the MEDIAN accumulator answers NULL for an all-NULL group (`src/komira_op_agg_state/columnar_acc_agg.mojo:79`). The SUM cells in `komira_agg` do not: see "Code that does not follow", item 2.
 - **Mark.** MATCHES.
 
 ### 2.3 Empty input
@@ -264,6 +264,13 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 - **Rule.** MIN and MAX of BOOLEAN order FALSE before TRUE and return BOOLEAN. SUM of BOOLEAN counts the TRUE values (its type is §8.1's). BOOL_AND and BOOL_OR skip NULLs and are NULL over a group with no non-NULL value.
 - **DuckDB.** `sum(BOOLEAN)` exists (`extension/core_functions/aggregate/distributive/sum.cpp:163-164` at v1.5.6); `bool_and`/`bool_or` follow §2.1.
 - **Current behaviour.** `sum(<BOOL>)` is typed INT64 and answers the count of non-NULL TRUEs (`src/komira_plan_ir/logical_plan.mojo:2431-2460`); BOOL_AND/BOOL_OR are BOOLEAN (`src/komira_plan_expr/agg_expr.mojo:245-253`).
+- **Mark.** MATCHES.
+
+### 2.14 MEDIAN at an even count
+
+- **Rule.** MEDIAN is `quantile_cont(x, 0.5)` over the non-NULL values: with an odd count it is the middle value; with an even count it is the mean of the two middle values, even for an integer input, whose MEDIAN is FLOAT64 (§8.16), so `MEDIAN(1, 2)` is 1.5 and `MEDIAN(1, 2, 3, 4)` is 2.5. NaN takes part per §2.8. A float answer is compared with §2.10's tolerance, since the interpolation's last bit can differ.
+- **DuckDB.** "For even value counts, quantitative values are averaged and ordinal values return the lower value"; `quantile_cont` interpolates "between the adjacent values if the index is not an integer" ([aggregate functions](https://duckdb.org/docs/current/sql/functions/aggregates.html)).
+- **Current behaviour.** The IR defines MEDIAN as DuckDB's `quantile_cont(x, 0.5)` (`src/komira_plan_expr/agg_expr.mojo:38-40`); the accumulator interpolates `lower * (1 - frac) + upper * frac` at index `q * (n - 1)` (`src/komira_op_agg_state/columnar_acc_agg.mojo:63-71`).
 - **Mark.** MATCHES.
 
 ## 3. NULLs in joins
@@ -445,6 +452,13 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 - **Mark.** MATCHES.
 
 ## 5. Arithmetic
+
+### 5.0 NULL operands
+
+- **Rule.** Every arithmetic operator (`+`, `-`, `*`, `BIN_DIV`, `BIN_MOD`, unary minus), over integers, DECIMALs or floats, answers NULL when any operand is NULL, whatever the other operand holds (a NaN, a zero divisor, or a value that would overflow). The NULL check comes first: `NULL / 0` is NULL, not §5.3's or §5.6's answer, and `NULL + MAX` raises no overflow (§5.5).
+- **DuckDB.** "A function that has an input argument as NULL usually returns NULL"; arithmetic operators are among those that do ([NULL values](https://duckdb.org/docs/current/sql/data_types/nulls.html)).
+- **Current behaviour.** The column kernels give a result row validity only where both operands are valid (`src/komira_column_kernels/compiler_helpers.mojo:2860-2880`), and the guarded division skips NULL rows before testing the divisor (`src/komira_column_kernels/arithmetic.mojo:660-670`).
+- **Mark.** MATCHES.
 
 ### 5.1 The plan's division operator on integers
 
@@ -934,7 +948,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 94, DEPARTS 18, UNDECIDED 17: 129 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 35 rows of "Rulings needed" are the 18 DEPARTS and 17 UNDECIDED items.
+MATCHES 96, DEPARTS 18, UNDECIDED 17: 131 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 35 rows of "Rulings needed" are the 18 DEPARTS and 17 UNDECIDED items.
 
 ## What are its limits and open questions?
 
