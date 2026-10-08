@@ -138,6 +138,30 @@ def test_ill_formed_utf8_outside_words_is_replaced() raises:
     assert_equal(decode_header_text(Span(above)), "����")
     above[1] = 0x8F
     assert_equal(decode_header_text(Span(above)), chr(0x10F000))
+    # Overlong lead bytes C0 and C1 never appear (RFC 3629 section 1); each
+    # octet of C0 AF and C1 BF is U+FFFD.
+    var two = List[UInt8]()
+    two.append(0xC0)
+    two.append(0xAF)
+    assert_equal(decode_header_text(Span(two)), "��")
+    two[0] = 0xC1
+    two[1] = 0xBF
+    assert_equal(decode_header_text(Span(two)), "��")
+    # F0 needs a second byte 90..BF (RFC 3629 section 4): the overlong
+    # F0 8F BF BF is four U+FFFD, and F0 90 80 80 is U+10000.
+    var four = List[UInt8]()
+    four.append(0xF0)
+    four.append(0x8F)
+    four.append(0xBF)
+    four.append(0xBF)
+    assert_equal(decode_header_text(Span(four)), "����")
+    four[1] = 0x90
+    four[2] = 0x80
+    four[3] = 0x80
+    assert_equal(decode_header_text(Span(four)), chr(0x10000))
+    # A third byte above BF is not a continuation byte: E2 82 C0 is three
+    # U+FFFD (C0 is not a lead byte either).
+    assert_equal(_lossy(0xE2, 0x82, 0xC0), "���")
 
 
 def test_plain_text_and_white_space_are_kept() raises:
