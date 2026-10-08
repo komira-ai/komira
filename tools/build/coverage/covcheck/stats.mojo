@@ -12,6 +12,7 @@ comptime MODE_ENFORCE = "enforce"
 
 comptime BELOW_TARGET = "BelowTarget"
 comptime NOT_MEASURED = "NotMeasured"
+comptime BRANCH_NOT_MEASURED = "BranchNotMeasured"
 comptime REGRESSION = "Regression"
 comptime MISSING_ROW = "MissingRow"
 comptime EXTRA_ROW = "ExtraRow"
@@ -29,12 +30,14 @@ struct PackageStats(Copyable, Movable):
     and exemptions applied, and the package's ratchet row. `files` counts
     every file in the numbers, the files no report gave a record included;
     `unmeasured_files` those of them that raised `UnmeasuredFile`; `has_records` is whether a report had a line record (or an
-    exempted line) in the package at all."""
+    exempted line) in the package at all; `has_branch_records` whether a
+    report had a branch record in it (before exemptions)."""
 
     var package: String
     var files: Int
     var unmeasured_files: Int
     var has_records: Bool
+    var has_branch_records: Bool
     var line_found: Int
     var line_hit: Int
     var branch_found: Int
@@ -54,6 +57,7 @@ struct PackageStats(Copyable, Movable):
         self.files = 0
         self.unmeasured_files = 0
         self.has_records = False
+        self.has_branch_records = False
         self.line_found = 0
         self.line_hit = 0
         self.branch_found = 0
