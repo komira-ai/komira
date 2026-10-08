@@ -303,8 +303,9 @@ struct CellContext(Copyable, Movable, Deinitable):
 
 @fieldwise_init
 struct ArtifactNeed(Copyable, Movable, Deinitable):
-    """The artifact a resource needs on a cloud: its type (`oci-image`) and
-    platform (OS + CPU, `linux/amd64`)."""
+    """The artifact a resource needs on a cloud: its type (`OCI`, the
+    `ARTIFACT_TYPE_OCI` word, for an image) and platform (OS + CPU,
+    `linux/amd64`)."""
 
     var kind: String
     var platform: String

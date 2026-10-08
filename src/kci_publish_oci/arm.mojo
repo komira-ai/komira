@@ -90,8 +90,10 @@ from kci_api import (
 )
 from kci_api import RunResult as KciRunResult
 
-comptime ARTIFACT_TYPE_OCI_IMAGE: String = "OCI_IMAGE"
-"""`artifacts[].artifact_type` of an image row."""
+comptime ARTIFACT_TYPE_OCI: String = "OCI"
+"""`artifacts[].artifact_type` of an image row: the one word kci spells an
+image with, the value of `kci_release_channel`'s `ARTIFACT_TYPE_OCI`
+(kci_publish_oci does not depend on that package)."""
 
 
 struct ImagePublish(Copyable, Movable):
@@ -110,7 +112,7 @@ struct ImagePublish(Copyable, Movable):
         self.error_id = error_id^
         self.message = message^
         self.artifact = ResultArtifact()
-        self.artifact.artifact_type = String(ARTIFACT_TYPE_OCI_IMAGE)
+        self.artifact.artifact_type = String(ARTIFACT_TYPE_OCI)
         self.artifact.effect = String(ARTIFACT_NOT_REACHED)
 
     def ok(self) -> Bool:

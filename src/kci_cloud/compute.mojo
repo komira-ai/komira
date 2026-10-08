@@ -38,6 +38,11 @@ from kci_cloud.workload import Workload, workload_of
 comptime V1_IMAGE_PLATFORM = "linux/amd64"
 """What an empty `Image.platform` means (OS + CPU)."""
 
+comptime ARTIFACT_TYPE_OCI = "OCI"
+"""The artifact type of an image (`ArtifactNeed.kind`): the one word kci
+spells an image with, the value of `kci_release_channel`'s
+`ARTIFACT_TYPE_OCI` (kci_cloud does not depend on that package)."""
+
 comptime WORKER_REPLICAS_DEFAULT: Int = 1
 """A worker's `replicas` while unset: the versioned default."""
 

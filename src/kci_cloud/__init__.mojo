@@ -283,6 +283,7 @@ from kci_cloud.network import (
 from kci_cloud.registry import FORMAT_OCI, format_word, registry_findings, registry_format
 from kci_cloud.workload import Workload, is_workload, workload_of
 from kci_cloud.compute import (
+    ARTIFACT_TYPE_OCI,
     V1_IMAGE_PLATFORM,
     WORKER_REPLICAS_DEFAULT,
     image_platform,

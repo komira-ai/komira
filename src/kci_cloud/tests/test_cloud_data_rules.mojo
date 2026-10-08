@@ -266,7 +266,7 @@ struct _Data(CloudAdapter, Movable):
         return List[Finding]()
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
-        return ArtifactNeed(String("oci-image"), String("linux/amd64"))
+        return ArtifactNeed(String("OCI"), String("linux/amd64"))
 
     def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
