@@ -60,6 +60,7 @@ from kci_resource_proto.resource import (
     Network,
     Output,
     Queue,
+    Registry,
     Resource,
     Schedule,
     Secret,
@@ -96,7 +97,6 @@ def _held() -> List[Held]:
     l.append(Held("Resource", 6, 6, "physical_name"))
     l.append(Held("Resource", 17, 17, "unused"))
     l.append(Held("Resource", 19, 19, "unused"))
-    l.append(Held("Resource", 24, 24, "registry"))
     l.append(
         Held(
             "Resource",
@@ -142,6 +142,8 @@ def _held() -> List[Held]:
     l.append(Held("Network", 50, 53, "per-cloud extensions"))
     l.append(Held("Subnet", 50, 53, "per-cloud extensions"))
     l.append(Held("IpAddress", 50, 53, "per-cloud extensions"))
+    l.append(Held("Registry", 2, 2, "who may read it beyond its grants"))
+    l.append(Held("Registry", 50, 53, "per-cloud extensions"))
     return l^
 
 
@@ -285,6 +287,10 @@ def _undeclared_in(message: String, n: Int) raises -> Bool:
         return _undeclared[Subnet](head, n)
     if message == "IpAddress":
         return _undeclared[IpAddress](head, n)
+    if message == "Registry":
+        head.append(0x08)  # 1: format
+        head.append(1)
+        return _undeclared[Registry](head, n)
     raise Error(String("no probe for message ") + message)
 
 
@@ -447,6 +453,12 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("Service")
     nums.append(16)
     what.append("network (a message)")
+    names.append("Resource")
+    nums.append(24)
+    what.append("the registry arm (a message in a oneof)")
+    names.append("Registry")
+    nums.append(1)
+    what.append("format (an enum)")
     for i in range(len(names)):
         assert_true(
             not _undeclared_in(names[i], nums[i]),

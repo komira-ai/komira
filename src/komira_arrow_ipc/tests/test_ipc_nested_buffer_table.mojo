@@ -56,7 +56,8 @@ def test_leaf_counts() raises:
         assert_equal(_count(ArrowType.LARGE_BINARY, z), 3)
         # Unsupported here: the arm raises before reading a buffer.
         assert_equal(_count(ArrowType.DICTIONARY, z), 0)
-        assert_equal(_count(ArrowType.ERROR, z), 0)
+        # An id past the declared space reaches the catch-all.
+        assert_equal(_count(ArrowType(50), z), 0)
     # BOOL: validity + bit-packed values when copied; the zero-copy arm
     # refuses BOOL before reading.
     assert_equal(_count(ArrowType.BOOL, COPY), 2)

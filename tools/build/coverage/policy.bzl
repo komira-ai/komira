@@ -54,22 +54,76 @@ COVERAGE_NO_GATE = {
 
 # The libraries whose coverage gate reads their tests' branch records
 # (tools/build/coverage/branch/README.md; covcheck's --branch-lcov), by
-# label, each with its evidence. Their packages then wait for every branch
+# label, each with its evidence. Their gates then wait for every branch
 # coverage action of their tests (bitcode, instrumented link, run, profile
 # applied, classifier), so a branch the classifier refuses fails the
-# library's coverage build in every mode, and the packages of every library
-# depending on it. The classifier refuses what it has no evidence for
-# (README.md of tools/build/coverage/branch, "Classes"), and most code has
-# shapes it has not seen yet (a comparison of Strings, indexing, `+=`, a
-# returned `and`), so a library joins this list only when its tests'
-# branches all classify; the sweep of every library grows it. Joining also
+# library's coverage gate in every mode, which blocks its conda package
+# (what ships) and nothing else. The classifier refuses what it has no evidence for
+# (README.md of tools/build/coverage/branch, "Classes"), and some code has
+# shapes it refuses (an `and`/`or` whose result is returned, stored or
+# passed on; copies of a function that disagree: that README's "Refusals
+# that stay"), so a library joins this list only when its tests' branches
+# all classify and its records hold an arm; the sweep of every library
+# grows it. A library of the ledger COVERAGE_NO_GATE is read by its
+# `<name>_cov_gate`. Joining also
 # means covcheck's refusal of two tests' records that give one location a
 # different number of decisions (branch_lcov.mojo, DecisionShapes) fails
 # the gate in every mode: a new test instantiating one of the library's
-# generic functions with another specialisation can turn its coverage build
+# generic functions with another specialisation can turn its coverage gate
 # red in census mode. A fixture of the tests cell reads its branch records
 # unless it passes `coverage_branch_gate = False` (coverage.bzl). A library
-# not on the list keeps BranchNotMeasured.
+# not on the list keeps BranchNotMeasured. mojo_library looks itself up by
+# its label, so a row whose library moved would be read by nothing:
+# branch_gate.bxl fails unless every row names a mojo_library.
 COVERAGE_BRANCH_GATE = {
+    "komira//src/kci_cloud_fake:kci_cloud_fake": "its eleven tests' branches all classify (550 arms of 9 files)",
+    "komira//src/kci_secret_writer:kci_secret_writer": "its test's branches all classify (16 arms of 1 file)",
+    "komira//src/kci_validator_rows:kci_validator_rows": "its test's branches all classify (40 arms of 2 files)",
+    "komira//src/komira_agg:komira_agg": "its ten tests' branches all classify (228 arms of 7 files)",
+    "komira//src/komira_async_api:komira_async_api": "its test's branches all classify (2 arms of 1 file)",
+    "komira//src/komira_buffer:komira_buffer": "its eleven tests' branches all classify (154 arms of 6 files)",
+    "komira//src/komira_clock:komira_clock": "its test's branches all classify (2 arms of 1 file)",
+    "komira//src/komira_column_format:komira_column_format": "its two tests' branches all classify (170 arms of 1 file)",
+    "komira//src/komira_compression:komira_compression": "its four tests' branches all classify (64 arms of 5 files)",
+    "komira//src/komira_counters:komira_counters": "its five tests' branches all classify (78 arms of 3 files)",
+    "komira//src/komira_dynamic_filter:komira_dynamic_filter": "its six tests' branches all classify (52 arms of 4 files)",
+    "komira//src/komira_exec_types:komira_exec_types": "its test's branches all classify (58 arms of 1 file)",
+    "komira//src/komira_fork_join:komira_fork_join": "its test's branches all classify (24 arms of 1 file)",
+    "komira//src/komira_hash:komira_hash": "its test's branches all classify (4 arms of 1 file)",
+    "komira//src/komira_json:komira_json": "its six tests' branches all classify (564 arms of 3 files)",
+    "komira//src/komira_jwks:komira_jwks": "its test's branches all classify (6 arms of 2 files)",
+    "komira//src/komira_libc:komira_libc": "its eight tests' branches all classify (94 arms of 5 files)",
+    "komira//src/komira_lz4:komira_lz4": "its three tests' branches all classify (60 arms of 2 files)",
+    "komira//src/komira_name_registry:komira_name_registry": "its test's branches all classify (32 arms of 1 file)",
+    # komira_parquet left the list: ten of its tests' branches do not all
+    # classify. Its sources measured when it joined were 12 files; the
+    # files it has gained since hold shapes the classifier refuses: an `or`
+    # and an `and` whose result is returned (decode_helpers.mojo 210:9,
+    # dict_gather_fused.mojo 144:31), and at calls (def_level_bitmap.mojo
+    # 99:40 `read_byte(`, footer_header.mojo 325:31, 326:35, 330:38
+    # `byte_at(`) a select on an inlined callee's String flags carried
+    # through a `select`, which the String rule does not read. It rejoins
+    # when they classify, not by a weaker rule.
+    "komira//src/komira_parquet_api:komira_parquet_api": "its four tests' branches all classify (124 arms of 2 files)",
+    "komira//src/komira_parquet_codec:komira_parquet_codec": "its 16 tests' branches all classify (402 arms of 8 files)",
+    "komira//src/komira_plan_ir:komira_plan_ir": "its 19 tests' branches all classify (1130 arms of 9 files)",
+    "komira//src/komira_plan_stats:komira_plan_stats": "its test's branches all classify (116 arms of 2 files)",
+    "komira//src/komira_protobuf:komira_protobuf": "its two tests' branches all classify (106 arms of 2 files)",
+    "komira//src/komira_resources:komira_resources": "its test's branches all classify (2 arms of 1 file)",
     "komira//src/komira_retry:komira_retry": "its six tests' branches all classify (74 arms of 4 files)",
+    "komira//src/komira_row_format:komira_row_format": "its nine tests' branches all classify (682 arms of 5 files)",
+    "komira//src/komira_scalar_arithmetic:komira_scalar_arithmetic": "its test's branches all classify (24 arms of 1 file)",
+    "komira//src/komira_secret_registry:komira_secret_registry": "its test's branches all classify (16 arms of 2 files)",
+    "komira//src/komira_secret_store:komira_secret_store": "its test's branches all classify (10 arms of 2 files)",
+    "komira//src/komira_snapshotter:komira_snapshotter": "its test's branches all classify (28 arms of 1 file)",
+    "komira//src/komira_spsc_ring:komira_spsc_ring": "its two tests' branches all classify (48 arms of 2 files)",
+    "komira//src/komira_sync:komira_sync": "its test's branches all classify (4 arms of 1 file)",
+    "komira//src/komira_test_run_id:komira_test_run_id": "its two tests' branches all classify (12 arms of 2 files)",
+    "komira//src/komira_trace:komira_trace": "its eight tests' branches all classify (102 arms of 2 files)",
+    "komira//src/komira_udf:komira_udf": "its four tests' branches all classify (36 arms of 1 file)",
+    "komira//src/komira_uuid:komira_uuid": "its test's branches all classify (84 arms of 2 files)",
+    "komira//src/komira_wkt:komira_wkt": "its six tests' branches all classify (548 arms of 6 files)",
+    "komira//src/komira_zlib:komira_zlib": "its test's branches all classify (74 arms of 1 file)",
+    "komira//src/tests/e2e/komira_udf_e2e:komira_udf_e2e": "its four tests' branches all classify (16 arms of 1 file)",
+    "komira//src/tests/helpers/komira_test_minio:komira_test_minio": "its two tests' branches all classify (68 arms of 4 files)",
 }

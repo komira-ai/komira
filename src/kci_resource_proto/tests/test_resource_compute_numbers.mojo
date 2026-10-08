@@ -33,11 +33,11 @@
 #    the oneof position the generated struct records: 10 service 1, 11
 #    container job 2, 12 worker 3, 13 table 4, 14 bucket 5, 15 queue 6, 16
 #    secret 7, 18 DNS zone 8, 20 service account 9, 21 topic 10, 22
-#    schedule 11, 23 network 12, 25 grant 13, 26 DNS record 14, 27
-#    certificate 15, 28 subscription 16, 29 subnet 17, 30 IP address 18, 31
-#    event trigger 19. A position that moves is a different arm to every
-#    reader of `_oneof0_case` (kci_cloud's `body_arms`). 17, 19, 24, 32 and
-#    33 stay held.
+#    schedule 11, 23 network 12, 24 registry 13, 25 grant 14, 26 DNS record
+#    15, 27 certificate 16, 28 subscription 17, 29 subnet 18, 30 IP address
+#    19, 31 event trigger 20. A position that moves is a different arm to
+#    every reader of `_oneof0_case` (kci_cloud's `body_arms`). 17, 19, 32
+#    and 33 stay held.
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 # =============================================================================
@@ -532,7 +532,7 @@ def test_body_arm_census() raises:
     """Catches: any arm renumbered, and any arm's oneof position moved (an arm
     declared out of number order shifts every later position, and kci_cloud
     maps positions to fields); and a held arm declared."""
-    var fields: List[Int] = [10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 23, 25, 26, 27, 28, 29, 30, 31]
+    var fields: List[Int] = [10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     for i in range(len(fields)):
         var b = List[UInt8]()
         _str(b, 1, "x")
@@ -543,7 +543,7 @@ def test_body_arm_census() raises:
         # zero-valued fields written out, so the arm is compared, not bytes).
         var again = decode_proto[Resource](encode_proto(r))
         assert_equal(again._oneof0_case, i + 1, String("arm ") + String(fields[i]) + " re-encodes")
-    for held in [17, 19, 24, 32, 33]:
+    for held in [17, 19, 32, 33]:
         var b = List[UInt8]()
         _str(b, 1, "x")
         _msg(b, held, List[UInt8]())

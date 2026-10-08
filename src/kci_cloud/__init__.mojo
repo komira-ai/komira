@@ -44,6 +44,8 @@ interface. This package names no cloud:
   * network.mojo     — the rules of the network types (network, subnet, IP
                        address) and of a service's `network`: their graph
                        findings and the IPv4 range form.
+  * registry.mojo    — the rules of the registry type: its graph findings
+                       (no `uses`; a format written and known).
   * triggers.mojo    — the rules of the trigger types (schedule, event
                        trigger): their graph findings, the portable cron
                        form and a time zone name's shape.
@@ -114,6 +116,7 @@ from kci_cloud.catalog import (
     FIELD_NETWORK,
     FIELD_SUBNET,
     FIELD_IP_ADDRESS,
+    FIELD_REGISTRY,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -145,6 +148,7 @@ from kci_cloud.catalog import (
     ROLE_NETWORK,
     ROLE_SUBNET,
     ROLE_ADDRESS,
+    ROLE_REGISTRY,
     BodyArm,
     body_arms,
     body_field,
@@ -232,6 +236,7 @@ from kci_cloud.network import (
     service_network_findings,
     service_subnet,
 )
+from kci_cloud.registry import FORMAT_OCI, format_word, registry_findings, registry_format
 from kci_cloud.workload import Workload, is_workload, workload_of
 from kci_cloud.compute import (
     V1_IMAGE_PLATFORM,
