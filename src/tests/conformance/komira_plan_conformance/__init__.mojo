@@ -10,7 +10,9 @@ against its expectation's schema. Modules:
     registered files under inputs/ (the upstream Avro files);
   - cases_<shard>.mojo : one shard's plans;
   - registry.mojo : the shards and what each registers;
-  - corpus.mojo   : the checks, gathered by `check_corpus`.
+  - corpus.mojo   : the checks, gathered by `check_corpus`;
+  - oracle_checks.mojo : expected rows tied to an oracle file, and the
+    Avro header schema.
 """
 
 from .plan_case import (
@@ -45,4 +47,5 @@ from .corpus import (
     schema_entries,
 )
 from .datasets import all_datasets, all_inputs
+from .oracle_checks import RowsFrom, check_avro_schema, check_rows_from
 from .registry import Registered, registered_cases, shard_cases, shard_names

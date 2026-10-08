@@ -32,6 +32,9 @@
 #                     every file under datasets/ is a registered dataset.
 #   check_input_files every registered file under inputs/ (the Avro files) is
 #                     staged, and every staged file there is registered.
+#   oracle_checks     a case with `rows_from` expects exactly its oracle
+#                     file's rows (check_rows_from); each staged Avro file's
+#                     header schema is the declared one (check_avro_schema).
 # =============================================================================
 
 from std.os import listdir
@@ -64,7 +67,8 @@ from .plan_case import (
     expect_kind_name,
     parse_err,
 )
-from .datasets import all_datasets, all_inputs
+from .datasets import all_datasets, all_inputs, avro_codecs, avro_input, weather_schema
+from .oracle_checks import check_avro_schema, check_rows_from
 from .registry import Registered, registered_cases, shard_names
 
 
@@ -515,8 +519,9 @@ def _column_index(schema: Schema, name: String) -> Int:
 def check_dataset(ds: Dataset, text: String) -> List[String]:
     """Every line is one JSON object whose members are the schema's columns
     in order (with `any_member_order`: each column exactly once, in any
-    order), each value of the column's JSON kind or `null` where the column
-    is nullable."""
+    order; `missing_ok` excuses a missing nullable column, `extra_members`
+    names the undeclared members allowed, each at most once), each value of
+    the column's JSON kind or `null` where the column is nullable."""
     var problems = List[String]()
     var line_no = 0
     var where = String("dataset: ") + ds.path()
@@ -531,18 +536,29 @@ def check_dataset(ds: Dataset, text: String) -> List[String]:
             if not obj.is_object():
                 problems.append(at + "not a JSON object")
                 continue
-            if obj.num_members() != ds.schema.num_columns():
+            var sparse = ds.missing_ok or len(ds.extra_members) > 0
+            if not sparse and obj.num_members() != ds.schema.num_columns():
                 problems.append(
                     at + String(obj.num_members()) + " members, the schema "
                     + String(ds.schema.num_columns()) + " columns"
                 )
                 continue
+            var before = len(problems)
             var seen = List[Bool](length=ds.schema.num_columns(), fill=False)
+            var extra_seen = List[String]()
             for i in range(obj.num_members()):
                 var col = i
                 if ds.any_member_order:
                     col = _column_index(ds.schema, obj.key_at(i))
                     if col < 0:
+                        if _contains(ds.extra_members, obj.key_at(i)):
+                            if _contains(extra_seen, obj.key_at(i)):
+                                problems.append(
+                                    at + "member '" + obj.key_at(i)
+                                    + "' appears twice"
+                                )
+                            extra_seen.append(obj.key_at(i))
+                            continue
                         problems.append(
                             at + "member '" + obj.key_at(i)
                             + "' is not a column of the schema"
@@ -595,6 +611,20 @@ def check_dataset(ds: Dataset, text: String) -> List[String]:
                         at + "'" + name + "' is " + v.serialize() + why
                         + arrow_type_name(t)
                     )
+            # A column no member named: allowed only for a nullable column of
+            # a `missing_ok` dataset (it reads as NULL, §13.8). Checked only
+            # on a line with no other problem, which already explains it.
+            if ds.any_member_order and len(problems) == before:
+                for c in range(ds.schema.num_columns()):
+                    if seen[c]:
+                        continue
+                    if not ds.missing_ok:
+                        problems.append(at + "column '" + ds.schema.field_name(c) + "' is missing")
+                    elif not ds.schema.field_nullable(c):
+                        problems.append(
+                            at + "column '" + ds.schema.field_name(c)
+                            + "' is missing, and it is not nullable"
+                        )
         except e:
             problems.append(at + String(e))
     return problems^
@@ -689,8 +719,19 @@ def check_corpus(root: String) raises -> List[String]:
         var path = root + "/" + c.expect_file()
         if not exists(path):
             continue  # reported by check_files
-        for p in check_expectation(c, Path(path).read_text(), plan.value()):
+        var text = Path(path).read_text()
+        for p in check_expectation(c, text, plan.value()):
             problems.append(p)
+        if c.rows_from:
+            ref spec = c.rows_from.value()
+            var oracle = root + "/" + spec.dataset_path
+            if not exists(oracle):
+                problems.append(
+                    "oracle: " + c.label() + ": " + spec.dataset_path + " is not staged"
+                )
+                continue
+            for p in check_rows_from(c.label(), spec, text, Path(oracle).read_text()):
+                problems.append(p)
 
     var datasets = all_datasets()
     var ds_files = List[String]()
@@ -705,6 +746,14 @@ def check_corpus(root: String) raises -> List[String]:
                 problems.append(p)
     for p in check_input_files(all_inputs(), list_input_files(root)):
         problems.append(p)
+    # Each staged weather file's header schema is the one scan_avro declares.
+    for codec in avro_codecs():
+        var rel = avro_input(codec)
+        if exists(root + "/" + rel):
+            for p in check_avro_schema(
+                rel, Path(root + "/" + rel).read_bytes(), weather_schema()
+            ):
+                problems.append(p)
     return problems^
 
 

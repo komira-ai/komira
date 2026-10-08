@@ -1,11 +1,13 @@
 #! komira-plan-conformance v1
 #  order: none
 #  float: ulps=0
-# derivation: §1.2: the scan's pushed filter temp > 0 keeps the records of
-# weather.json (upstream Apache Avro, not komira) whose temp is 22, 111 and
-# 78, as filter_temp_positive does. The filter reads the source columns
-# before the projection keeps station and time, so temp is filtered on and
-# not output. No sort: compared as a multiset (§4.8).
+# derivation: §13.3: a filter carried by the scan is a Filter above it,
+# evaluated on the source columns before the projection, whether or not the
+# reader prunes with it (komira.avro's does not). So temp > 0 keeps the
+# records of weather.json (upstream Apache Avro, not komira) whose temp is
+# 22, 111 and 78 (§1.2), as filter_temp_positive does, and the projection
+# then keeps station and time in that order (§13.1). No sort: compared as a
+# multiset (§4.8).
 station:string	time:int64
 011990-99999	-619506000000
 012650-99999	-655531200000

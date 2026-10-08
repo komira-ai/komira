@@ -5,8 +5,8 @@
 # weather.avro; these are the rows of upstream Apache Avro's weather.json
 # (not komira's output), which upstream's DataFileTests.cc checks against
 # every one of the four files. The block codec is not part of the content:
-# the rows equal full_scan's. No NULL (§7.13: Avro carries NULL explicitly).
-# No sort: compared as a multiset (§4.8).
+# the rows equal full_scan's. No NULL (§13.4: no union). No sort: compared
+# as a multiset (§4.8).
 station:string	time:int64	temp:int32
 011990-99999	-619524000000	0
 011990-99999	-619506000000	22

@@ -11,53 +11,62 @@
 # them: the scan's output schema, which columns and rows come out, and how
 # NULL and '' flow through.
 #
-# Two inputs, the same four rows (datasets.mojo):
+# The inputs (datasets.mojo):
 #   scan_rows        {"id", "x", "s"} in that order:
 #                    (1, 10, "a"), (2, null, ""), (3, 30, null), (4, -5, "d")
 #   scan_key_order   the same rows, each line's members in another order
 #                    (id x s, s id x, x s id, x id s)
+#   scan_sparse      (1, 10, s missing), (2, x missing, "b", note "extra"),
+#                    (3, 30, "c", note 7, out of order)
+#   scan_numbers     id, f float64: 1 (a JSON integer), 2.5, null, -3
 #
-# Reading a JSON `null` as NULL and `""` as '' is what §7.13 proposes; §7.13
-# is UNDECIDED as a whole, and every shard of this corpus already relies on
-# that reading (plan_case.mojo). The CSV empty-field rule, the part §7.13
-# leaves open for text readers, does not arise in JSON. Binding a member by
-# its name, whatever its position, rests on JSON itself: RFC 8259 §4 makes an
-# object an unordered collection of name/value pairs. The query-semantics
-# document has no item for a scan node; the derivations cite the items the
-# rows rest on (§1.2, §4.8, §7.12, §7.13, §8's nullability rule).
+# The items, in query semantics section 13 (scans) and §7.17:
+#   §7.17   JSON `null` reads as NULL, JSON `""` as ''.
+#   §13.1   a projection outputs its columns in the projection's order.
+#   §13.3   a filter carried by the scan is a Filter above it, on the source
+#           columns before the projection; a NULL predicate drops the row.
+#           Pushdown is only an optimization: komira.json, like komira.avro,
+#           declines every predicate (JsonSource.supports_filter_pushdown
+#           returns False), so the executor must apply the scan's filter
+#           itself, and these cases are what show it does.
+#   §13.6   a JSON integer reads into INT64, and any JSON number (an integer
+#           included) into FLOAT64.
+#   §13.8   members bind by name in any order; a missing member is NULL in a
+#           nullable column; an undeclared member is ignored.
+#   §13.10  a column declared nullable over a file with no NULL is sound.
 #
 # No root sorts, so every case compares its rows as a multiset (§4.8).
 #
 # Not here, and why:
 #   - Nested NULLs (a null inside an object or array value): nested types
 #     are outside the document's scope.
-#   - A missing key: no item says whether an absent member reads as NULL
-#     or is refused; §7.13 speaks only of `null` and `""`.
-#   - Type coercion between the file and the declared schema (a JSON 1 in a
-#     float64 column, 1.0 in an int64 column, an int64 declared int32): the
-#     document settles no reader coercion; §6's casts are CAST expressions,
-#     not reads.
-#   - A column declared non-nullable over a file that holds a null: §8 calls
-#     the declaration a defect but no item says whether the reader refuses
-#     the file or the plan; a refusal case waits for an executor.
-#   - An extra member the declared schema does not name: no item says
-#     whether it is ignored or refused.
-#   - A projection naming a column the declared schema lacks: not a case.
-#     `scan_from_source` drops the name without raising and the plan wire's
-#     value gate refuses the plan, so it cannot pass test_corpus.
+#   - A JSON value of another type than its column (§13.7) and a repeated
+#     key (§13.9): both UNDECIDED.
+#   - A missing member, or a null, in a non-nullable column: §13.8 and
+#     §13.10 make it a reader error, but nothing fixes the error's code or
+#     kind, which an .err expectation must state; it waits for an executor.
+#   - A projection naming a column the schema lacks: §13.2 refuses it, but
+#     scan_from_source drops the name silently ("Code that does not follow",
+#     item 15); only the wire's value gate refuses it, so such a case cannot
+#     pass test_corpus.
+#   - The CSV empty field (§7.13, UNDECIDED): not JSON.
 #
 # The defect each case would catch once it executes:
 #   explicit_null_and_empty   a JSON null read as 0 or ""; "" read as NULL
 #   key_order                 members bound by position (line 2 would give
 #                             id = "", x = 2, s = NULL)
+#   missing_and_extra_members a missing member refused or read as 0 / "";
+#                             an undeclared member refused, or bound to a
+#                             column by position
 #   projection_reorder        a projection ignored, or output in the file's
 #                             column order rather than the projection's
-#   pushed_filter_drops_x
-#                             a pushed filter ignored, a NULL predicate kept
-#                             (id 2), or the filter resolved after the
-#                             projection has dropped x
+#   pushed_filter_drops_x     a pushed filter ignored (the kind declines it),
+#                             a NULL predicate kept (id 2), or the filter
+#                             resolved after the projection has dropped x
 #   pushed_filter_empty_string
 #                             '' and NULL merged (id 3 kept, or id 2 lost)
+#   json_integer_into_float64 a JSON integer refused in a FLOAT64 column, or
+#                             read as something other than its value
 #   declared_nullable_over_non_null
 #                             the scan reporting the file's nullability (id
 #                             non-nullable) rather than the declared schema's
@@ -73,7 +82,13 @@ from komira_scan_source.json_source import JsonSource
 from komira_scan_source.source_variant import SourceVariant
 
 from .plan_case import Case
-from .datasets import scan_key_order, scan_rows, scan_rows_schema
+from .datasets import (
+    scan_key_order,
+    scan_numbers,
+    scan_rows,
+    scan_rows_schema,
+    scan_sparse,
+)
 
 comptime SHARD = "scan_jsonl"
 
@@ -98,6 +113,15 @@ def _explicit_null_and_empty() raises -> LogicalPlan:
 
 def _key_order() raises -> LogicalPlan:
     return _scan(scan_key_order().path(), scan_rows_schema())
+
+
+def _missing_and_extra_members() raises -> LogicalPlan:
+    return _scan(scan_sparse().path(), scan_rows_schema())
+
+
+def _json_integer_into_float64() raises -> LogicalPlan:
+    var ds = scan_numbers()
+    return _scan(ds.path(), ds.schema.copy())
 
 
 def _projection_reorder() raises -> LogicalPlan:
@@ -139,6 +163,14 @@ def cases() -> List[Case]:
     return [
         Case.hand("explicit_null_and_empty", SHARD, _explicit_null_and_empty, CanonPolicy.unordered()),
         Case.hand("key_order", SHARD, _key_order, CanonPolicy.unordered()),
+        Case.hand(
+            "missing_and_extra_members", SHARD, _missing_and_extra_members,
+            CanonPolicy.unordered(),
+        ),
+        Case.hand(
+            "json_integer_into_float64", SHARD, _json_integer_into_float64,
+            CanonPolicy.unordered(),
+        ),
         Case.hand("projection_reorder", SHARD, _projection_reorder, CanonPolicy.unordered()),
         Case.hand(
             "pushed_filter_drops_x", SHARD, _pushed_filter_drops_x,

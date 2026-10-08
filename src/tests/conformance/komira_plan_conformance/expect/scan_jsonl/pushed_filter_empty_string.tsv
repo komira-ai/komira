@@ -1,9 +1,10 @@
 #! komira-plan-conformance v1
 #  order: none
 #  float: ulps=0
-# derivation: §1.2 and §7.12: the scan's pushed filter s = '' is TRUE for
-# id 2, whose s is '' (JSON "", §7.13, proposed), FALSE for "a" and "d",
-# and NULL for id 3, whose s is NULL; only id 2 is kept, with s = ''. No
-# sort: compared as a multiset (§4.8).
+# derivation: §13.3: the scan's filter s = '' is a Filter above the scan.
+# §1.2 and §7.12: it is TRUE for id 2, whose s is '' (JSON "", §7.17),
+# FALSE for "a" and "d", and NULL for id 3, whose s is NULL; only id 2 is
+# kept. The projection keeps id then s (§13.1). No sort: compared as a
+# multiset (§4.8).
 id:int64	s:string?
 2	

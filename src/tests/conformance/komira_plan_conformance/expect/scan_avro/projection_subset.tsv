@@ -2,10 +2,9 @@
 #  order: none
 #  float: ulps=0
 # derivation: weather.json's five records (upstream Apache Avro, not komira),
-# projected to temp then station in that order; time is not read. No NULL
-# (§7.13). No sort: compared as a multiset (§4.8). No query-semantics item
-# covers a scan's projection: the columns are those named, in the order
-# named, each keeping its declared type.
+# projected to temp then station: the projected columns in the projection's
+# order (§13.1); time is not output. No NULL (§13.4: no union). No sort:
+# compared as a multiset (§4.8). Types: §13.4.
 temp:int32	station:string
 0	011990-99999
 22	011990-99999

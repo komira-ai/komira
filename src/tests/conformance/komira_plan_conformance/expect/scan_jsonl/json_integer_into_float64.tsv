@@ -1,0 +1,12 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §13.6: any JSON number reads into a FLOAT64 column, an
+# integer included, so 1 is 1.0 and -3 is -3.0; 2.5 is exact in binary.
+# JSON null is NULL (§7.17). No sort: compared as a multiset (§4.8).
+# Types: the declared schema (id int64, f float64 nullable).
+id:int64	f:float64?
+1	1.0
+2	2.5
+3	\N
+4	-3.0

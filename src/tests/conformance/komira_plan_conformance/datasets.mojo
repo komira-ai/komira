@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_plan_conformance/datasets.mojo -- the hand-written inputs.
+# komira_plan_conformance/datasets.mojo -- the scan inputs and their schemas.
 # =============================================================================
 #
 # Each dataset is datasets/<name>.jsonl, written by hand (or, for weather,
@@ -7,8 +7,9 @@
 # defect must not be able to shape both the input and the answer. The schema
 # here is what every case scanning the file declares; test_corpus checks the
 # file against it (member names in order, or in any order for a dataset with
-# `any_member_order`; each value's JSON kind against the column type, an
-# int32 value in range; `null` only where the column is nullable), so a hand
+# `any_member_order`, with the missing and extra members a sparse dataset
+# allows; each value's JSON kind against the column type, an int32 value in
+# range; `null` only where the column is nullable), so a hand
 # edit to one side cannot leave the other behind.
 #
 #   bool_pairs     id, a, b: every pair of {true, false, null}, nine rows.
@@ -75,9 +76,16 @@
 #                  string column, and "" beside null. Scanned only by
 #                  scan_jsonl, which builds its scans itself.
 #   scan_key_order the same four rows as scan_rows, each line's members in
-#                  a different order (id x s, s id x, x s id, x id s). It
-#                  is the one dataset with `any_member_order`: every column
-#                  exactly once per line, in any order.
+#                  a different order (id x s, s id x, x s id, x id s), with
+#                  `any_member_order`: every column exactly once per line,
+#                  in any order.
+#   scan_sparse    id, x, s, with `any_member_order`, `missing_ok` and the
+#                  extra member `note`: {"id": 1, "x": 10} (s missing),
+#                  {"id": 2, "s": "b", "note": "extra"} (x missing, an
+#                  undeclared member), {"s": "c", "note": 7, "id": 3, "x":
+#                  30} (every column, out of order, and `note` again).
+#   scan_numbers   id, f (float64, nullable): f = 1 (a JSON integer), 2.5,
+#                  null, -3 (a negative JSON integer).
 #   weather        station, time, temp: NOT hand-written. BUCK stages Apache
 #                  Avro's share/test/data/weather.json here (pinned by
 #                  sha256 in third_party/apache-avro), upstream's own
@@ -304,6 +312,27 @@ def scan_key_order() -> Dataset:
     return Dataset("scan_key_order", scan_rows_schema(), any_member_order=True)
 
 
+def scan_sparse() -> Dataset:
+    return Dataset(
+        "scan_sparse",
+        scan_rows_schema(),
+        any_member_order=True,
+        missing_ok=True,
+        extra_members=[String("note")],
+    )
+
+
+def scan_numbers() -> Dataset:
+    return Dataset(
+        "scan_numbers",
+        _schema(
+            [String("id"), String("f")],
+            [ArrowType.INT64, ArrowType.FLOAT64],
+            [False, True],
+        ),
+    )
+
+
 def weather_schema() -> Schema:
     """test.Weather as Avro's writer schema states it: station string, time
     long, temp int, none of them a union (so none nullable)."""
@@ -325,7 +354,8 @@ def all_datasets() -> List[Dataset]:
         bool_pairs(), ints_nullable(), groups(), join_left(), join_right(),
         sort_rows(), int_pairs(), window_rows(), rank_rows(), stat_rows(),
         avg_rows(), div_pairs(), float_pairs(), set_left(), set_right(),
-        str_rows(), scan_rows(), scan_key_order(), weather(),
+        str_rows(), scan_rows(), scan_key_order(), scan_sparse(),
+        scan_numbers(), weather(),
     ]
 
 

@@ -3,9 +3,10 @@
 #  float: ulps=0
 # derivation: the five records of upstream Apache Avro's weather.json (not
 # komira's output), which weather.avro (codec null) holds. No row is NULL:
-# test.Weather has no union field, and Avro carries NULL explicitly, never
-# by conversion (§7.13). No sort: compared as a multiset (§4.8).
-# Types: the Avro writer schema (string, long, int) as the scan declares it.
+# test.Weather has no union field (§13.4). No projection: the declared
+# columns in order (§13.1). No sort: compared as a multiset (§4.8).
+# Types: §13.4, string, long and int outside a union are STRING, INT64 and
+# INT32, non-nullable.
 station:string	time:int64	temp:int32
 011990-99999	-619524000000	0
 011990-99999	-619506000000	22

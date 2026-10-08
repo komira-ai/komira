@@ -2,8 +2,9 @@ load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Test-only: the logical-plan conformance corpus. A case is a plan built with
-# komira_plan_ir's factories over a hand-written JSON Lines dataset
-# (datasets/), plus its expected answer (expect/<shard>/<case>.tsv in
+# komira_plan_ir's factories over a JSON Lines dataset (datasets/, hand-
+# written but for upstream's weather.json) or, for scan_avro, a staged
+# upstream Avro file (inputs/), plus its expected answer (expect/<shard>/<case>.tsv in
 # komira_plan_harness's canonical text, or .err for a refusal). A HAND
 # expectation is derived from the query-semantics document, never from engine
 # code, and cites the items it rests on in `# derivation:` lines. The
@@ -36,15 +37,21 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # datasets/weather.jsonl, which test_corpus checks against the schema
 # scan_avro declares. A file under inputs/ that datasets.mojo does not
 # register is refused, like an orphan under expect/.
+# A committed file at a staged path would be replaced silently by update(),
+# so a collision fails the load instead.
 _DATA = {f: f for f in glob(["expect/**", "datasets/**", "inputs/**"])}
 
-_DATA.update({
+_STAGED = {
     "datasets/weather.jsonl": "//third_party/apache-avro:weather.json",
     "inputs/avro/weather-deflate.avro": "//third_party/apache-avro:weather-deflate.avro",
     "inputs/avro/weather-snappy.avro": "//third_party/apache-avro:weather-snappy.avro",
     "inputs/avro/weather-zstd.avro": "//third_party/apache-avro:weather-zstd.avro",
     "inputs/avro/weather.avro": "//third_party/apache-avro:weather.avro",
-})
+}
+
+[fail("komira_plan_conformance: {} is committed here and staged from {}; keep one".format(k, _STAGED[k])) for k in _STAGED if k in _DATA]
+
+_DATA.update(_STAGED)
 
 mojo_library(
     name = "komira_plan_conformance",

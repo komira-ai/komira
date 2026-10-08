@@ -1,0 +1,13 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §13.8: members bind by name in any order, a member missing
+# from an object is NULL in a nullable column, and a member the schema does
+# not declare (note) is ignored. So id 1 has s NULL (missing), id 2 has x
+# NULL (missing) and s = "b", id 3 reads x = 30 and s = "c" from its
+# out-of-order members. Columns in the declared order (§13.1). No sort:
+# compared as a multiset (§4.8).
+id:int64	x:int64?	s:string?
+1	10	\N
+2	\N	b
+3	30	c

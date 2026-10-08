@@ -1,11 +1,11 @@
 #! komira-plan-conformance v1
 #  order: none
 #  float: ulps=0
-# derivation: scan_rows' rows as in explicit_null_and_empty (§7.13,
-# proposed; §7.12), under a declared schema that makes id nullable though
-# the file never holds a null id. §8: declaring a column nullable that never
-# holds a NULL is sound, so the scan's output keeps the declared id:int64?
-# and no id is NULL. No sort: compared as a multiset (§4.8).
+# derivation: scan_rows' rows as in explicit_null_and_empty (§7.17, §7.12),
+# under a declared schema that makes id nullable though the file never
+# holds a null id. §13.10: a column declared nullable over a file with no
+# NULL is sound and reads normally, so the scan keeps the declared
+# id:int64? and no id is NULL. No sort: compared as a multiset (§4.8).
 id:int64?	x:int64?	s:string?
 1	10	a
 2	\N	
