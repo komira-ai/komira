@@ -14,8 +14,8 @@ and a CPU). The package names no cloud. It holds:
   list of built-in clouds, in which every cloud declares every catalog type;
 - the validate phase: the cloud-independent graph findings
   (`graph_findings`: ids, references, identities and grants, data,
-  messaging and secret rules) plus each cloud's coverage and limit findings,
-  collected in one pass and rendered by `refusal_text`;
+  messaging, secret and DNS rules) plus each cloud's coverage and limit
+  findings, collected in one pass and rendered by `refusal_text`;
 - the label rule (`encode_label_value`, the `kci-retention` mark, the
   validation-run label);
 - plan / apply / destroy (`plan_resources`, `apply_resources`,
@@ -34,7 +34,7 @@ The catalog says what each body arm of a resource is:
 from kci_cloud import ACCESS_CALL, FIELD_QUEUE, FIELD_SERVICE, FIELD_TABLE, PORTABLE, RETENTION_KEEP, Catalog, portability_word, retention_word
 
 var catalog = Catalog.v1()
-assert_equal(len(catalog.types), 10)
+assert_equal(len(catalog.types), 13)
 assert_equal(catalog.name_of(FIELD_SERVICE), "service")
 assert_equal(catalog.name_of(FIELD_QUEUE), "queue")
 ref service = catalog.types[catalog.index_of(FIELD_SERVICE)]
