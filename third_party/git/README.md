@@ -88,8 +88,14 @@ make's `configure` looks for), on an otherwise empty `PATH`.
      shell's path (in the `#!` line, and in `git-filter-branch`'s body too),
      and the action rewrites it to `/bin/sh`.
    - `-O2 -g0` and `-s`: no debug information, which would hold the worker's
-     paths. The action fails if any installed file names its scratch
-     directory.
+     paths;
+   - `CC_LD_DYNPATH` empty: with `ZLIB_PATH` and `CURLDIR` set, git's
+     Makefile otherwise gives every program a run path (`-Wl,-rpath`) to
+     `:deps` on the worker that built it. Both libraries are static, so the
+     programs need none.
+
+   The action fails if any installed file names its scratch directory or
+   any other path under the action's directory on the worker.
 
 ## Checks
 
@@ -107,7 +113,7 @@ defect it was seen to fail on.
 | 1 | the distribution holds `bin/git`, `git-remote-http`, `git-upload-pack`, `git-receive-pack` and the licence files, and no shared library | a build without the HTTP transport (no libcurl found), a missing licence | `LGPL-2.1` not copied: `the distribution has no share/licenses/git/LGPL-2.1` |
 | 2 | `git --version` prints `git version 2.56.0` | the wrong source, a git that does not start | `_VERSION` set to `2.55.0`: `git --version printed 'git version 2.56.0', want 'git version 2.55.0'` |
 | 3 | no `GLIBC_2.<n>` above the row's floor in any ELF file | git or curl needing a newer glibc than the workers and users have | the floor passed as 27 (git itself is not rebuilt): `the programs need GLIBC_2.28 GLIBC_2.33 GLIBC_2.34 above the floor GLIBC_2.27` |
-| 4 | the loader's list for `bin/git` and `git-remote-http` names glibc's libraries only | libcurl or zlib linked dynamically, so taken from the worker | `libc.so.6` dropped from the check's list of glibc libraries: `bin/git loads libc.so.6, which is not glibc's` |
+| 4 | the loader's list for `bin/git`, `git-remote-http` and `git-http-fetch` (the programs that link libcurl) names glibc's libraries only | libcurl or zlib linked dynamically, so taken from the worker | `libc.so.6` dropped from the check's list of glibc libraries: `bin/git loads libc.so.6, which is not glibc's` |
 | 5 | `git --exec-path` is the distribution's `libexec/git-core` | a git built without `RUNTIME_PREFIX`, which looks for its programs at a path compiled in, and on a worker with git installed finds that git's | git built without `RUNTIME_PREFIX`: `git --exec-path is '/git/libexec/git-core', not the distribution's libexec/git-core` |
 | 6 | `hash-object` of `hello\n`, the empty tree, and a commit with fixed identities and dates are the SHA-1s of the object bytes computed by busybox `sha1sum` | a git that does not start or write objects; the object format | the expected blob computed from `hellp\n`: `hash-object of 'hello\n' is <id>, want <other id>` |
 | 7 | `clone --no-local` over `file://` (git-upload-pack) and `push` (git-receive-pack) carry that commit, and `fsck --strict` passes on both sides | the pack protocol's programs missing from the exec path | `git-upload-pack` deleted after the build's own install check, and dropped from check 1's list: `git clone over file:// failed` |
@@ -123,6 +129,7 @@ defect:
 | a source archive whose sha256 is not the pin (buck2's download) | the git pin's sha256 with one digit changed: `Invalid sha256 digest. Expected 826817fe..., got 826817fd...` |
 | `curl_config.h` with proxy support, a TLS backend, or no HTTP | `--disable-proxy` dropped: `git_build: libcurl was configured with proxy support` |
 | an installed file naming the action's scratch directory | the `#!` rewrite skipped: `git_build: these files name the build's scratch directory: .../templates/hooks/post-update.sample` |
+| an installed file naming a path under the action's directory | `CC_LD_DYNPATH=` dropped: `git_build: these files name the build's scratch directory: /worker/build/<id>/root/.../git/bin/git`, then `bin/git-upload-pack`, `bin/scalar` and the other programs (the run path to `:deps`) |
 | `bin/git`, `git-remote-http`, `git-upload-pack` or `git-receive-pack` not installed | `NO_CURL`: `git_build: libexec/git-core/git-remote-http was not installed`; `SKIP_DASHED_BUILT_INS`: the same for `git-upload-pack` |
 
 git-lfs runs `git` from `PATH` (`git version`, `git rev-parse`, `git

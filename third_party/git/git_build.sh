@@ -152,6 +152,9 @@ git_() {
     # NO_RUST: git 2.x's Rust code is optional and needs cargo.
     # LINK_FUZZ_PROGRAMS empty: config.mak.uname links the oss-fuzz programs
     # on Linux, with a linker flag zig's lld driver refuses.
+    # CC_LD_DYNPATH empty: ZLIB_PATH and CURLDIR otherwise add a run path
+    # (-Wl,-rpath) naming :deps on this worker to every program; both
+    # libraries are static, so the programs need no run path.
     set -- -C "$g" -j"$JOBS" \
         prefix=/git \
         CC=cc AR=ar \
@@ -160,7 +163,7 @@ git_() {
         NO_PERL=YesPlease NO_PYTHON=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease \
         NO_EXPAT=YesPlease NO_OPENSSL=YesPlease NO_RUST=YesPlease LINK_FUZZ_PROGRAMS= \
         RUNTIME_PREFIX=YesPlease INSTALL_SYMLINKS=YesPlease \
-        ZLIB_PATH="$D" CURLDIR="$D" CURL_CONFIG=false CURL_LDFLAGS="-lcurl -lz"
+        ZLIB_PATH="$D" CURLDIR="$D" CC_LD_DYNPATH= CURL_CONFIG=false CURL_LDFLAGS="-lcurl -lz"
     logged "$D/bin/make" "$@" all
     logged "$D/bin/make" "$@" DESTDIR="$T/inst" install
     cp -a "$T/inst/git/." "$OUT/"
@@ -174,9 +177,10 @@ git_() {
             sed -i "s|$SH|/bin/sh|g" "$f"
         fi
     done
-    # No file names this action's scratch directory: that path differs on
+    # No file names this action's scratch directory or any other path under
+    # the action's root (a run path to :deps, say): those paths differ on
     # every worker, and would make every build of git differ.
-    if leaked=$(grep -rlF "$T" "$OUT"); then
+    if leaked=$(grep -rlF -e "$T" -e "$PWD/" "$OUT"); then
         echo "git_build: these files name the build's scratch directory: $leaked" >&2
         exit 2
     fi
@@ -189,12 +193,14 @@ git_() {
     cp -a "$D/share/licenses/." "$OUT/share/licenses/"
     cat >"$OUT/share/licenses/NOTICE" <<'EOF'
 This directory is git, built from its release source archive. git is
-GPL-2.0-only (git/COPYING); some of its library code is LGPL-2.1
-(git/LGPL-2.1), as git/COPYING says.
+GPL-2.0-only (git/COPYING); some parts of it, compat/regex among them,
+are LGPL-2.1 (git/LGPL-2.1), as git's README.md says.
 
 bin/git and the programs of libexec/git-core also hold, linked statically:
   zlib       Zlib (zlib/LICENSE)
-  libcurl    curl (curl/COPYING), in git-remote-http only
+  libcurl    curl (curl/COPYING), in git-remote-http (and its links
+             git-remote-https, git-remote-ftp, git-remote-ftps) and
+             git-http-fetch only
 EOF
 }
 

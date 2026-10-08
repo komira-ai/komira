@@ -15,8 +15,8 @@
 #      the licence files, and no shared library.
 #   2. `git --version` prints `git version <version>`.
 #   3. No GLIBC_2.<n> symbol version above the floor in any of its programs.
-#   4. The loader's list for bin/git and git-remote-http holds glibc's
-#      libraries only: libcurl and zlib are linked in.
+#   4. The loader's list for bin/git, git-remote-http and git-http-fetch
+#      holds glibc's libraries only: libcurl and zlib are linked in.
 #   5. `git --exec-path` is the distribution's libexec/git-core.
 #   6. The object ids git computes are the SHA-1s of the object bytes
 #      (busybox sha1sum): a blob, the empty tree, and a commit with fixed
@@ -101,7 +101,7 @@ over=$(cat "$T/elfs" | while read -r f; do cat "$f"; done | strings -n 8 |
 pass
 
 # 4. What the loader maps: glibc's libraries and nothing else.
-for p in bin/git libexec/git-core/git-remote-http; do
+for p in bin/git libexec/git-core/git-remote-http libexec/git-core/git-http-fetch; do
     LD_TRACE_LOADED_OBJECTS=1 "$DIST/$p" >"$T/log" 2>&1 || red "the loader failed on $p"
     while read -r name _; do
         case "$name" in
