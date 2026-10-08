@@ -312,11 +312,20 @@ def test_header_and_part_edges() raises:
     assert_true(not m.subject())
     m = parse_message(Span(_b("Content-Type: text/plain; charset=UTF-8\r\n\r\nx")))
     assert_equal(m.part(0).charset(), "utf-8")
-    # A boundary byte outside bcharsnospace.
-    assert_equal(
-        _error('Content-Type: multipart/mixed; boundary="a<b"\r\n\r\n--a<b\r\n\r\nx\r\n--a<b--\r\n'),
-        "komira_mail_message.Syntax: parse_message: an invalid multipart boundary at position 0",
-    )
+    # A boundary byte outside bcharsnospace: in the middle, first and last.
+    var bad_boundaries = List[String]()
+    bad_boundaries.append("a<b")
+    bad_boundaries.append("<ab")
+    bad_boundaries.append("ab<")
+    for k in range(len(bad_boundaries)):
+        var bb = bad_boundaries[k]
+        assert_equal(
+            _error(
+                'Content-Type: multipart/mixed; boundary="' + bb + '"\r\n\r\n--'
+                + bb + "\r\n\r\nx\r\n--" + bb + "--\r\n"
+            ),
+            "komira_mail_message.Syntax: parse_message: an invalid multipart boundary at position 0",
+        )
     # base64 whose alphabet characters are not a multiple of four.
     m = parse_message(
         Span(_b("Content-Transfer-Encoding: base64\r\n\r\nQUJD\r\nR\r\n"))

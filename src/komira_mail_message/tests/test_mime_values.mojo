@@ -181,6 +181,11 @@ def test_rfc2231_suffixes_that_are_not_sections() raises:
     assert_equal(_h("text/plain; a*0=x; a*01=y").param("a").value(), "x")
     assert_true(not _h("text/plain; a*-=v").param("a"))
     assert_true(not _h("text/plain; a*1001=y").param("a"))
+    # `a*1000` is a section (the cap itself): it makes `a` an RFC 2231 name,
+    # which wins over the plain `a=p` (no section 0, so the value is empty);
+    # `a*1001` is not, so the plain value stays.
+    assert_equal(_h("text/plain; a=p; a*1000=y").param("a").value(), "")
+    assert_equal(_h("text/plain; a=p; a*1001=y").param("a").value(), "p")
     # An extended value without `charset'language'` does not read, and a
     # starred form that does not read is never taken as a plain value.
     assert_true(not _h("text/plain; a*=nolang").param("a"))

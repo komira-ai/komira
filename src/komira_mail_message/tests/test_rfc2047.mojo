@@ -126,6 +126,18 @@ def test_ill_formed_utf8_outside_words_is_replaced() raises:
     assert_equal(_lossy(0xE0, 0x80, 0x80), "���")
     assert_equal(_lossy(0xE2, 0x82, 0x41), "��A")
     assert_equal(_lossy(0xE2, 0x82, 0xAC), "€")
+    # A second byte above its lead byte's range: the surrogate ED A0 80
+    # (ED allows 80..9F) and F4 90 80 80, above U+10FFFF (F4 allows 80..8F).
+    assert_equal(_lossy(0xED, 0xA0, 0x80), "���")
+    assert_equal(_lossy(0xED, 0x9F, 0xBF), chr(0xD7FF))
+    var above = List[UInt8]()
+    above.append(0xF4)
+    above.append(0x90)
+    above.append(0x80)
+    above.append(0x80)
+    assert_equal(decode_header_text(Span(above)), "����")
+    above[1] = 0x8F
+    assert_equal(decode_header_text(Span(above)), chr(0x10F000))
 
 
 def test_plain_text_and_white_space_are_kept() raises:
