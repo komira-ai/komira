@@ -255,6 +255,22 @@ def test_content_type_name_fallback() raises:
     assert_equal(m.part(2).filename().value(), "y")
 
 
+def test_disposition_filename_wins_over_name() raises:
+    # When both are present and differ, the Content-Disposition `filename`
+    # is the file name and the Content-Type `name` is not read.
+    var data = _b(
+        String("Content-Type: multipart/mixed; boundary=b\r\n\r\n")
+        + "--b\r\n"
+        + "Content-Type: application/x; name=b.bin\r\n"
+        + "Content-Disposition: attachment; filename=a.bin\r\n\r\n"
+        + "a\r\n"
+        + "--b--\r\n"
+    )
+    var m = parse_message(Span(data))
+    assert_equal(m.part_count(), 2)
+    assert_equal(m.part(1).filename().value(), "a.bin")
+
+
 def test_malformed_headers() raises:
     assert_equal(
         _error("Subject: a\r\nno colon here\r\n\r\n"),
@@ -383,6 +399,7 @@ def main() raises:
     test_8bit_and_non_utf8_kept_as_bytes()
     test_transfer_encodings()
     test_content_type_name_fallback()
+    test_disposition_filename_wins_over_name()
     test_malformed_headers()
     test_malformed_multipart()
     test_lenient_multipart_reading()

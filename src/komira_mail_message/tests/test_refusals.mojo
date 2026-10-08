@@ -187,10 +187,23 @@ def test_values() raises:
         long_line += "x"
     assert_equal(_attachment_error("message/rfc822", long_line), not_7bit)
     # RFC 5322 section 2.1.1: a 998-octet line is legal; 999 (above) is not.
+    # The CRLF after it ends the line and is not counted in it.
     var line_998 = String("Subject: ")
     for _ in range(989):
         line_998 += "x"
-    assert_equal(_attachment_error("message/rfc822", line_998), "OK")
+    assert_equal(
+        _attachment_error("message/rfc822", line_998 + "\r\n\r\nbody\r\n"), "OK"
+    )
+    assert_equal(_attachment_error("message/rfc822", line_998 + "\n\nbody\n"), "OK")
+    # The 7bit rule is for every message/* subtype (RFC 2046 section 5.2.2
+    # for message/partial), not just message/rfc822.
+    assert_equal(
+        _attachment_error("Message/Partial", String("caf") + chr(0xE9) + "\r\n"),
+        not_7bit,
+    )
+    assert_equal(
+        _attachment_error("message/delivery-status", long_line), not_7bit
+    )
     # Media types are case-insensitive (RFC 2045 section 5.1): the 7bit check
     # holds for `Message/RFC822` too.
     assert_equal(

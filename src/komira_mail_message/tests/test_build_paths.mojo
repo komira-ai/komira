@@ -6,7 +6,8 @@
 # split into RFC 2231 sections that fold, an ASCII file name quoted with its
 # escapes, an ASCII display name holding `=?` sent as an encoded word, an
 # ASCII file name holding `=?` sent in RFC 2231 form so it reads back as
-# written, and a forwarded message/rfc822 attachment written 7bit.
+# written, and a forwarded message/rfc822 attachment and a message/partial
+# attachment written 7bit.
 
 from std.testing import assert_equal, assert_true
 
@@ -82,12 +83,13 @@ def test_line_of_998_is_7bit() raises:
     var line = String("")
     for _ in range(998):
         line += "x"
+    # The line break after it ends the line and is not counted in it.
     var b = _builder()
-    b.set_text(line)
+    b.set_text(line + "\nnext")
     var built = b.build()
     var text = _s(built)
     assert_true(text.find("Content-Transfer-Encoding: 7bit\r\n") > 0, text)
-    assert_equal(_body_of(built), line + "\r\n")
+    assert_equal(_body_of(built), line + "\r\nnext\r\n")
 
 
 def test_boundary_held_by_a_part_is_changed() raises:
@@ -219,6 +221,29 @@ def test_forwarded_message_is_7bit() raises:
     )
 
 
+def test_other_message_subtype_is_7bit() raises:
+    # RFC 2046 section 5.2.2: message/partial is 7bit; every message/*
+    # subtype is written 7bit, not base64. The media type is lower-cased.
+    var b = _builder()
+    b.set_text("see below")
+    b.add_attachment("", "Message/Partial", "id=x\n".as_bytes())
+    var built = b.build()
+    var text = _s(built)
+    assert_true(
+        text.find(
+            "Content-Type: message/partial\r\n"
+            + "Content-Disposition: attachment\r\n"
+            + "Content-Transfer-Encoding: 7bit\r\n\r\nid=x\r\n"
+        )
+        > 0,
+        text,
+    )
+    var m = parse_message(Span(built))
+    var k = m.attachments()[0]
+    assert_equal(m.part(k).transfer_encoding(), "7bit")
+    assert_equal(_s(m.decoded_body(k)), "id=x\r\n")
+
+
 def test_empty_field_name_is_refused() raises:
     var b = _builder()
     var msg = String("")
@@ -245,4 +270,5 @@ def main() raises:
     test_empty_field_name_is_refused()
     test_file_name_that_looks_encoded_round_trips()
     test_forwarded_message_is_7bit()
+    test_other_message_subtype_is_7bit()
     print("test_build_paths: OK")
