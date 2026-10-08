@@ -282,7 +282,9 @@ order, one run differs. The ORDER BYs and their tiebreak keys:
   `row_number` has none, `lag(k ORDER BY k)` reads which row comes
   before the current one, not only `k`, and `lag`'s offset and default
   are not among its arguments. The rank family's own ORDER BY
-  (`rank(ORDER BY k) OVER ()`) is left as written, as in an OVER clause;
+  (`rank(ORDER BY k) OVER ()`) is left as written, as in an OVER clause:
+  `rank`, `percent_rank` and `cume_dist`, the members DuckDB 1.5.6 takes
+  one on (it refuses one on `dense_rank` and `rank_dense`);
 - an aggregate's own ORDER BY (`string_agg(x, ',' ORDER BY y)`,
   `arg_max(x, y ORDER BY z)`): the function's arguments, all it reads
   of a row. A `COLUMNS(*)` argument is a key too: DuckDB expands the
@@ -324,7 +326,10 @@ QUALIFY, or in a query with aggregates and no GROUP BY, where DuckDB
 1.5.6 does not bind `row(*COLUMNS(*))` (the refusal says the tie
 check's run failed; compute the window in a subquery's select list); an
 outer query that names an inner column by its automatic name, which the
-tiebreak rewrites (the run fails; alias the column); and a float
+tiebreak rewrites (the run fails; alias the column); a `COLUMNS(c ->
+...)` lambda argument to an ordered aggregate, which DuckDB 1.5.6
+refuses beside the `COLUMNS(*)` key ("Multiple different STAR/COLUMNS");
+and a float
 column an inner ORDER BY passes on, whose -0.0 the tiebreak run turns
 into 0.0, when the answer reads the sign (`1 / f`). It costs two runs
 per ORDER BY, two more when there are several, and one binder probe per

@@ -436,10 +436,12 @@ def _output_width(con, statement, path, node, spell):
                                 "ORDER BY position %d" % (_path_text(path[:-3]), _PAST_THE_END))
 
 
-# The rank family: each answers the same for every peer of its ORDER BY,
-# an OVER clause's or its own (DuckDB 1.5.6 takes one for rank,
-# percent_rank and cume_dist), so a tie there is no tie in the answer.
-_PEERS_ALIKE = frozenset(["cume_dist", "dense_rank", "percent_rank", "rank", "rank_dense"])
+# The rank family members that take an own ORDER BY: each answers the
+# same for every peer of it, so a tie there is no tie in the answer.
+# DuckDB 1.5.6 refuses an own ORDER BY on dense_rank and rank_dense, so
+# they are not listed (should an upgrade take one, it is keyed like any
+# window's own ORDER BY: at worst an over-refusal).
+_PEERS_ALIKE = frozenset(["cume_dist", "percent_rank", "rank"])
 
 
 def _window_input_keys(select, spell):

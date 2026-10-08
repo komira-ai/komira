@@ -75,7 +75,9 @@ check, gen_expected.order_ties()), in a process of its own:
    function's own ORDER BY given its arguments as keys (or none when it
    has none), an ordered aggregate's COLUMNS(*) argument dropped from its
    keys (the STAR exclusion), the rank family's own ORDER BY split (or
-   any name of it dropped, or every window's own ORDER BY exempted), a
+   rank, percent_rank or cume_dist dropped from its exemption, or every
+   window's own ORDER BY exempted; DuckDB 1.5.6 refuses an own ORDER BY
+   on dense_rank and rank_dense, so the exemption leaves them out), a
    run compared by column name, a GROUP BY window keyed by the whole row
    (DuckDB refuses it) or with no keys, grouping() left out, the output
    width taken from a select list holding a star, the all-at-once runs
