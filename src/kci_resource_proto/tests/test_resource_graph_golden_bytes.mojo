@@ -1,12 +1,12 @@
 # =============================================================================
-# test_resource_graph_golden_bytes.mojo: the bytes of six resource graphs,
+# test_resource_graph_golden_bytes.mojo: the bytes of nine resource graphs,
 # frozen, so protoc can read them.
 # =============================================================================
 #
 # The other tests of this package hold `kci.resource.v1` to bytes written by
 # hand here and to this package's own decoder. Neither is read by anything
 # that did not come from this repository. This file freezes the bytes this
-# package's encoder writes for six composed graphs, as `.hex` fixtures; the
+# package's encoder writes for nine composed graphs, as `.hex` fixtures; the
 # `resource_graph_fixtures` check in BUCK has protoc (which learned the format
 # from `resource.proto` alone) decode those bytes to the committed `.txtpb`,
 # and encode that text to the committed `.canonical.hex`. A symmetric defect,
@@ -15,7 +15,7 @@
 #
 # THE CORPUS. Each graph is authored as proto3 JSON, the form an author
 # writes and the one kci reads (`decode_json[ResourceList]`), then encoded
-# with `encode_proto`. Between them the six graphs set every field of every
+# with `encode_proto`. Between them the nine graphs set every field of every
 # message of `resource.proto` at least once, to a value other than its
 # default (a field at its default is not on protoc's side of the wire, so it
 # would check nothing), and every `Resource.body` arm:
@@ -54,6 +54,19 @@
 #   compute_graph   a worker that RECEIVEs from a queue (every `Worker`
 #                   field, a `Size` with `gpus`), the identity it runs as,
 #                   the queue, and a service with a `command` and a GPU.
+#   trigger_graph   a container job started by a schedule with a time zone,
+#                   a service called by a schedule in UTC (every `Schedule`
+#                   field), and a bucket whose new objects an event trigger
+#                   delivers to the service (every `EventTrigger` field).
+#   network_graph   a network kept on delete (every `Network` field), a
+#                   subnet of it in a zone (every `Subnet` field), an IP
+#                   address, and a service whose outbound connections leave
+#                   through the subnet (`Service.network`) and that reads
+#                   the address's ADDRESS.
+#   registry_graph  a registry of OCI artifacts kept on delete (every
+#                   `Registry` field), a container job that pushes to it
+#                   (WRITE) and reads its ADDRESS, and an identity that
+#                   pulls from it (READ) through a grant.
 #
 # Map keys are authored in sorted order. protoc prints and re-encodes a map
 # sorted by key, and this encoder writes a map in insertion order, so a
@@ -268,6 +281,57 @@ comptime _COMPUTE_GRAPH = (
     + '{"id":"infer","service":{"image":{"digest":"sha256:1f2e3d4c"},'
     + '"size":{"cpuMillis":8000,"memoryMb":32768,"gpus":2},'
     + '"internal":{},"command":["/opt/serve","--model=/m"]}}'
+    + "]}"
+)
+
+comptime _TRIGGER_GRAPH = (
+    '{"resource":['
+    # What the triggers start and call, and the bucket whose events they
+    # deliver.
+    + '{"id":"nightly","containerJob":{'
+    + '"image":{"digest":"sha256:0b7e5a11","platform":"linux/amd64"}}},'
+    + '{"id":"thumbs","service":{"image":{"digest":"sha256:9c41d2e8"},'
+    + '"port":8080,"internal":{}}},'
+    + '{"id":"uploads","bucket":{"versioning":true}},'
+    # Every Schedule field: a job started at 02:30 Paris time on weekdays,
+    # and a service called every quarter hour in UTC.
+    + '{"id":"nightly-at-2","schedule":{"cron":"30 2 * * 1-5",'
+    + '"timezone":"Europe/Paris","target":{"resource":"nightly"}}},'
+    + '{"id":"warm-thumbs","schedule":{"cron":"*/15 * * * *",'
+    + '"target":{"resource":"thumbs"}}},'
+    # Every EventTrigger field.
+    + '{"id":"on-upload","eventTrigger":{"source":{"resource":"uploads"},'
+    + '"event":"OBJECT_CREATED","target":{"resource":"thumbs"}}}'
+    + "]}"
+)
+
+comptime _NETWORK_GRAPH = (
+    '{"resource":['
+    # Every Network field, kept on delete.
+    + '{"id":"core","retention":"KEEP","network":{"ipv4Cidr":"10.20.0.0/16"}},'
+    # Every Subnet field.
+    + '{"id":"edge","subnet":{"network":{"resource":"core"},'
+    + '"ipv4Cidr":"10.20.4.0/24","zone":2}},'
+    + '{"id":"ingress-ip","ipAddress":{}},'
+    # A service whose outbound connections leave through the subnet.
+    + '{"id":"api","service":{"image":{"digest":"sha256:7a3c9e10"},'
+    + '"env":{"PUBLIC_IP":{"ref":{"resource":"ingress-ip","standard":"ADDRESS"}}},'
+    + '"internal":{},"network":{"resource":"edge"}}}'
+    + "]}"
+)
+
+comptime _REGISTRY_GRAPH = (
+    '{"resource":['
+    # Every Registry field, kept on delete.
+    + '{"id":"images","retention":"KEEP","registry":{"format":"OCI"}},'
+    # A container job that pushes to it and reads its ADDRESS.
+    + '{"id":"builder","uses":[{"target":{"resource":"images"},"access":"WRITE"}],'
+    + '"containerJob":{"image":{"digest":"sha256:5e1f0a22"},'
+    + '"env":{"REGISTRY":{"ref":{"resource":"images","standard":"ADDRESS"}}}}},'
+    # An identity that pulls from it, through a grant.
+    + '{"id":"puller","serviceAccount":{}},'
+    + '{"id":"pull-images","grant":{"principal":{"resource":"puller"},'
+    + '"target":{"resource":"images"},"access":"READ"}}'
     + "]}"
 )
 
@@ -491,6 +555,18 @@ def test_compute_graph_bytes_are_frozen() raises:
     _assert_frozen("compute_graph", _COMPUTE_GRAPH, 4)
 
 
+def test_trigger_graph_bytes_are_frozen() raises:
+    _assert_frozen("trigger_graph", _TRIGGER_GRAPH, 6)
+
+
+def test_network_graph_bytes_are_frozen() raises:
+    _assert_frozen("network_graph", _NETWORK_GRAPH, 4)
+
+
+def test_registry_graph_bytes_are_frozen() raises:
+    _assert_frozen("registry_graph", _REGISTRY_GRAPH, 4)
+
+
 def main() raises:
     print("test_resource_graph_golden_bytes")
     _print_golden("service_graph", _SERVICE_GRAPH)
@@ -499,10 +575,16 @@ def main() raises:
     _print_golden("secret_graph", _SECRET_GRAPH)
     _print_golden("dns_graph", _DNS_GRAPH)
     _print_golden("compute_graph", _COMPUTE_GRAPH)
+    _print_golden("trigger_graph", _TRIGGER_GRAPH)
+    _print_golden("network_graph", _NETWORK_GRAPH)
+    _print_golden("registry_graph", _REGISTRY_GRAPH)
     test_service_graph_bytes_are_frozen()
     test_job_bucket_graph_bytes_are_frozen()
     test_messaging_graph_bytes_are_frozen()
     test_secret_graph_bytes_are_frozen()
     test_dns_graph_bytes_are_frozen()
     test_compute_graph_bytes_are_frozen()
+    test_trigger_graph_bytes_are_frozen()
+    test_network_graph_bytes_are_frozen()
+    test_registry_graph_bytes_are_frozen()
     print("ALL kci.resource.v1 GRAPH GOLDEN-BYTES TESTS PASSED")

@@ -124,6 +124,7 @@ from kci_resource_proto.resource import Resource
 
 from kci_cloud.cloud_id import CloudId
 from kci_cloud.feed import Feed
+from kci_cloud.firing import Firing
 from kci_cloud.grants import GrantEdge
 
 
@@ -500,9 +501,10 @@ trait CloudAdapter(Movable):
         service)."""
         ...
 
-    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
         """Every value or shape of `r` this cloud refuses, given the list's
-        `feeds` (kci's, from `feed.feeds_of`). Pure."""
+        `feeds` (kci's, from `feed.feeds_of`) and `firings` (kci's, from
+        `triggers.firings_of`). Pure."""
         ...
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
@@ -510,11 +512,12 @@ trait CloudAdapter(Movable):
         ...
 
     def lower(
-        self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]
+        self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
     ) raises -> List[LoweredNode]:
         """`r`'s engine nodes, as data, including one grant per edge of
         `edges` (kci's, from `grants.edges_for`), given the list's `feeds`
-        (kci's, from `feed.feeds_of`). Pure: no network, no clock."""
+        (kci's, from `feed.feeds_of`) and `firings` (kci's, from
+        `triggers.firings_of`). Pure: no network, no clock."""
         ...
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:

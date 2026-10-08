@@ -10,9 +10,9 @@
 # role.
 #
 # RETENTION. A data primitive has a VERSIONED retention default, used while
-# `Resource.retention` is unset (KEEP for a table, a bucket and a secret,
-# DELETE for a queue, a topic, a DNS zone, a DNS record and a certificate). A
-# type whose default is
+# `Resource.retention` is unset (KEEP for a table, a bucket, a secret and a
+# registry, DELETE for a queue, a topic, a DNS zone, a DNS record, a
+# certificate, a network, a subnet and an IP address). A type whose default is
 # `RETENTION_NONE` takes no retention: it is deleted with its resource, and
 # writing `retention` on it is refused at validate. Changing a default is a
 # behaviour change for every stored list, so a default is never edited in
@@ -24,8 +24,9 @@
 # bucket, `queue` for a queue, `secret` for a secret, `topic` for a topic,
 # `sub` for a subscription, `identity` for a service account, `grant` for a
 # grant, `zone` for a DNS zone, `record` for a DNS record, `cert` for a
-# certificate. A
-# cloud adapter
+# certificate, `schedule` for a schedule, `trigger` for an event trigger,
+# `network` for a network, `subnet` for a subnet, `address` for an IP
+# address, `registry` for a registry. A cloud adapter
 # writes a dependency or an input on ANOTHER resource as that resource's id
 # alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
 # an adapter lowers one resource without reading the others.
@@ -73,6 +74,12 @@ comptime FIELD_SERVICE_ACCOUNT: Int = 20
 """`Resource.body` field number of `service_account`."""
 comptime FIELD_TOPIC: Int = 21
 """`Resource.body` field number of `topic`."""
+comptime FIELD_SCHEDULE: Int = 22
+"""`Resource.body` field number of `schedule`."""
+comptime FIELD_NETWORK: Int = 23
+"""`Resource.body` field number of `network`."""
+comptime FIELD_REGISTRY: Int = 24
+"""`Resource.body` field number of `registry`."""
 comptime FIELD_GRANT: Int = 25
 """`Resource.body` field number of `grant`."""
 comptime FIELD_DNS_RECORD: Int = 26
@@ -81,6 +88,12 @@ comptime FIELD_CERTIFICATE: Int = 27
 """`Resource.body` field number of `certificate`."""
 comptime FIELD_SUBSCRIPTION: Int = 28
 """`Resource.body` field number of `subscription`."""
+comptime FIELD_SUBNET: Int = 29
+"""`Resource.body` field number of `subnet`."""
+comptime FIELD_IP_ADDRESS: Int = 30
+"""`Resource.body` field number of `ip_address`."""
+comptime FIELD_EVENT_TRIGGER: Int = 31
+"""`Resource.body` field number of `event_trigger`."""
 
 comptime OUTPUT_URL = "URL"
 comptime OUTPUT_HOST = "HOST"
@@ -122,6 +135,19 @@ comptime ROLE_IDENTITY = "identity"
 identity every workload lowers (turned off under `run_as`)."""
 comptime ROLE_GRANT = "grant"
 """A grant resource's edge."""
+comptime ROLE_SCHEDULE = "schedule"
+"""A schedule's primary role: the scheduler's object."""
+comptime ROLE_TRIGGER = "trigger"
+"""An event trigger's primary role: the rule or subscription that delivers
+the events."""
+comptime ROLE_NETWORK = "network"
+"""A network's one role: the network object."""
+comptime ROLE_SUBNET = "subnet"
+"""A subnet's one role: the subnet object."""
+comptime ROLE_ADDRESS = "address"
+"""An IP address's one role: the reserved address."""
+comptime ROLE_REGISTRY = "registry"
+"""A registry's one role: the registry (or repository) object."""
 
 
 def retention_word(r: Int) -> String:
@@ -239,8 +265,9 @@ struct Catalog(Copyable, Movable, Deinitable):
     def v1() raises -> Catalog:
         """`kci.resource.v1` as declared today: `service`, `container_job`,
         `worker`, `table`, `bucket`, `queue`, `secret`, `dns_zone`,
-        `service_account`, `topic`, `grant`, `dns_record`, `certificate` and
-        `subscription`."""
+        `service_account`, `topic`, `schedule`, `network`, `registry`,
+        `grant`, `dns_record`, `certificate`, `subscription`, `subnet`,
+        `ip_address` and `event_trigger`."""
         var c = Catalog()
         var svc_out = List[String]()
         svc_out.append(String(OUTPUT_URL))
@@ -430,6 +457,93 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_CERT),
             )
         )
+        # Triggers. A schedule and an event trigger start or call their
+        # target through a private identity of their own (grants.mojo): they
+        # expose nothing, accept no verb (nothing is granted on a trigger),
+        # and are deleted with their resource.
+        c.add(
+            CatalogType(
+                FIELD_SCHEDULE,
+                String("schedule"),
+                PORTABLE,
+                List[String](),
+                List[String](),
+                primary_role=String(ROLE_SCHEDULE),
+            )
+        )
+        c.add(
+            CatalogType(
+                FIELD_EVENT_TRIGGER,
+                String("event_trigger"),
+                PORTABLE,
+                List[String](),
+                List[String](),
+                primary_role=String(ROLE_TRIGGER),
+            )
+        )
+        # Networks. A network and a subnet expose their cloud name, an IP
+        # address the address itself. Each holds what the author wrote (a
+        # range, a reserved address), so each takes retention with the
+        # default DELETE. None runs as an identity or accepts a verb: placing
+        # a workload in a subnet is a field of the workload, not a grant.
+        var net_out = List[String]()
+        net_out.append(String(OUTPUT_NAME))
+        c.add(
+            CatalogType(
+                FIELD_NETWORK,
+                String("network"),
+                PORTABLE,
+                net_out.copy(),
+                List[String](),
+                retention_default=RETENTION_DELETE,
+                primary_role=String(ROLE_NETWORK),
+            )
+        )
+        c.add(
+            CatalogType(
+                FIELD_SUBNET,
+                String("subnet"),
+                PORTABLE,
+                net_out^,
+                List[String](),
+                retention_default=RETENTION_DELETE,
+                primary_role=String(ROLE_SUBNET),
+            )
+        )
+        var ip_out = List[String]()
+        ip_out.append(String(OUTPUT_ADDRESS))
+        c.add(
+            CatalogType(
+                FIELD_IP_ADDRESS,
+                String("ip_address"),
+                PORTABLE,
+                ip_out^,
+                List[String](),
+                retention_default=RETENTION_DELETE,
+                primary_role=String(ROLE_ADDRESS),
+            )
+        )
+        # A registry exposes its ADDRESS (the name a client pushes and pulls
+        # an image as). Its artifacts are pulled (READ) and pushed (WRITE).
+        # Deleting it deletes every artifact in it, so it is kept by
+        # default, as a bucket.
+        var registry_out = List[String]()
+        registry_out.append(String(OUTPUT_ADDRESS))
+        var registry_access = List[String]()
+        registry_access.append(String(ACCESS_READ))
+        registry_access.append(String(ACCESS_WRITE))
+        registry_access.append(String(ACCESS_READ_WRITE))
+        c.add(
+            CatalogType(
+                FIELD_REGISTRY,
+                String("registry"),
+                PORTABLE,
+                registry_out^,
+                registry_access^,
+                retention_default=RETENTION_KEEP,
+                primary_role=String(ROLE_REGISTRY),
+            )
+        )
         return c^
 
 
@@ -457,10 +571,16 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_DNS_ZONE, String("dns_zone")))
     l.append(BodyArm(FIELD_SERVICE_ACCOUNT, String("service_account")))
     l.append(BodyArm(FIELD_TOPIC, String("topic")))
+    l.append(BodyArm(FIELD_SCHEDULE, String("schedule")))
+    l.append(BodyArm(FIELD_NETWORK, String("network")))
+    l.append(BodyArm(FIELD_REGISTRY, String("registry")))
     l.append(BodyArm(FIELD_GRANT, String("grant")))
     l.append(BodyArm(FIELD_DNS_RECORD, String("dns_record")))
     l.append(BodyArm(FIELD_CERTIFICATE, String("certificate")))
     l.append(BodyArm(FIELD_SUBSCRIPTION, String("subscription")))
+    l.append(BodyArm(FIELD_SUBNET, String("subnet")))
+    l.append(BodyArm(FIELD_IP_ADDRESS, String("ip_address")))
+    l.append(BodyArm(FIELD_EVENT_TRIGGER, String("event_trigger")))
     return l^
 
 

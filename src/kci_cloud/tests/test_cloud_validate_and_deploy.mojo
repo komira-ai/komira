@@ -103,9 +103,9 @@ from kci_cloud import (
     FIELD_WORKER,
     FIELD_TABLE,
     FIELD_BUCKET,
-    FIELD_SERVICE_ACCOUNT,
-    FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SECRET, Feed,
-    FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE,
+    FIELD_SERVICE_ACCOUNT, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY,
+    FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SECRET, Feed, Firing,
+    FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER,
     apply_resources,
     body_field,
     describe,
@@ -277,7 +277,7 @@ struct _Stub(CloudAdapter, Movable):
             l.append(FIELD_GRANT)
             l.append(FIELD_SUBSCRIPTION)
             l.append(FIELD_SECRET)
-            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE]:
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY]:
                 l.append(f)
         return l^
 
@@ -290,11 +290,11 @@ struct _Stub(CloudAdapter, Movable):
             l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
             l.append(Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("no identities")))
             l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
-            for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]:
-                l.append(Absence(f, NOT_YET, String("no messaging")))
+            for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER]:
+                l.append(Absence(f, NOT_YET, String("no messaging or triggers")))
             l.append(Absence(FIELD_SECRET, NOT_YET, String("no secret store")))
-            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE]:
-                l.append(Absence(f, NOT_YET, String("no names")))
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY]:
+                l.append(Absence(f, NOT_YET, String("no names, networks or registries")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -330,7 +330,7 @@ struct _Stub(CloudAdapter, Movable):
     def public_mechanism(self) -> String:
         return self._mechanism.copy()
 
-    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
         var l = List[Finding]()
         if r._oneof0_case == 1 and r.service.value().port == 1:
             l.append(
@@ -348,7 +348,7 @@ struct _Stub(CloudAdapter, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
         if self._bad_owner:
             owner = String("someone-else")

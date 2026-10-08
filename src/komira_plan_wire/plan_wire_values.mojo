@@ -423,7 +423,7 @@ The format bounds the integer correctly and the engine still cannot run it.
 
 ⚠ WHY THIS IS NOT A CORNER CASE. Addressing columns by ORDINAL is what a
 GENERATED client does when it has a schema and no name-resolution layer, which
-is the normal shape of an Excel or a Python frontend. Every Mojo producer
+is the normal shape of a TypeScript or a Python frontend. Every Mojo producer
 emits `col_ref`, so no Mojo caller reaches it — THE FIRST NON-MOJO PRODUCER
 IS EXACTLY WHO DOES. A defect invisible to every test that shares the
 producer is the reason this door checks values at all.

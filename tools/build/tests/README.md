@@ -124,10 +124,10 @@ buck2 build tests//negative/closure_refusal:hello_incomplete_toolchain
 
 ## 5. Host paths
 
-No action's argv or environment names an absolute host path, read from
-`buck2 aquery` over the examples and their run checks, the Rust example and
-the protobuf tests (rustc, protoc, the plugin, the generated packages). The
-scan first proves it detects a planted absolute path.
+No action's argv or environment names an absolute host path, read from `buck2 aquery` over the examples and their run checks, the Rust example,
+the protobuf tests (rustc, protoc, the plugin, the generated packages) and the aws-lc and s2n-tls tests. It first builds every scanned target in the same daemon (keeping going past one that fails):
+aquery cannot run a README's generate step (a local-only dynamic action) that the daemon has not built, so the check does not depend on an earlier test.
+The scan first proves it detects a planted absolute path.
 
 ## 6. Outputs
 
@@ -979,21 +979,21 @@ querying its attributes, so narrowing it fails.
 
 ## 45. The layout of src/
 
-`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in
-`docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
-[the repository lint tests](lint_tests.md#45-the-layout-of-src).
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in [the repository lint tests](lint_tests.md#45-the-layout-of-src).
 
 ## 46. Coverage gate
 With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
-
+## 47. Branch coverage runs
+[`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs [these checks](coverage_runs.md#test-47-branch-coverage-runs).
+## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
+
+## 49. Assert level, defines and memory cap
+
+[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
 
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
 records what a remote worker provides, the evidence behind the
 [host floor](../toolchains/README.md#host-floor).
-
-## 45. Assert level, defines and memory cap
-
-[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).

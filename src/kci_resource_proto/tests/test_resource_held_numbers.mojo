@@ -33,7 +33,8 @@
 # "declared": a probe that could not see a declaration would pass the census
 # vacuously.
 #
-# Held ENUM values (`Output` 5, `Access` 7 and 9, `CellResource` 4) render
+# Held ENUM values (`Output` 5, `Access` 7 and 9, `CellResource` 4,
+# `SourceEvent` 3) render
 # as bare numbers: no name has taken them. `Access` 5 and 6 are SEND and
 # RECEIVE (messaging), declared, and pinned in test_resource_field_numbers.
 #
@@ -51,15 +52,22 @@ from kci_resource_proto.resource import (
     Certificate,
     DnsRecord,
     DnsZone,
+    EventTrigger,
     Grant,
     ContainerJob,
     Image,
+    IpAddress,
+    Network,
     Output,
     Queue,
+    Registry,
     Resource,
+    Schedule,
     Secret,
     Service,
     ServiceAccount,
+    SourceEvent,
+    Subnet,
     Subscription,
     Table,
     Topic,
@@ -89,13 +97,12 @@ def _held() -> List[Held]:
     l.append(Held("Resource", 6, 6, "physical_name"))
     l.append(Held("Resource", 17, 17, "unused"))
     l.append(Held("Resource", 19, 19, "unused"))
-    l.append(Held("Resource", 22, 24, "schedule, network, registry"))
     l.append(
         Held(
             "Resource",
-            29,
+            32,
             36,
-            "subnet .. virtual machine (the later neutral primitives)",
+            "mail domain .. virtual machine (the later neutral primitives)",
         )
     )
     l.append(Held("Resource", 80, 80, "a composite instance"))
@@ -130,6 +137,13 @@ def _held() -> List[Held]:
     l.append(Held("DnsZone", 50, 53, "per-cloud extensions"))
     l.append(Held("DnsRecord", 50, 53, "per-cloud extensions"))
     l.append(Held("Certificate", 50, 53, "per-cloud extensions"))
+    l.append(Held("Schedule", 50, 53, "per-cloud extensions"))
+    l.append(Held("EventTrigger", 50, 53, "per-cloud extensions"))
+    l.append(Held("Network", 50, 53, "per-cloud extensions"))
+    l.append(Held("Subnet", 50, 53, "per-cloud extensions"))
+    l.append(Held("IpAddress", 50, 53, "per-cloud extensions"))
+    l.append(Held("Registry", 2, 2, "who may read it beyond its grants"))
+    l.append(Held("Registry", 50, 53, "per-cloud extensions"))
     return l^
 
 
@@ -253,6 +267,30 @@ def _undeclared_in(message: String, n: Int) raises -> Bool:
         head.append(1)
         head.append(UInt8(ord("d")))
         return _undeclared[Certificate](head, n)
+    if message == "Schedule":
+        head.append(0x0A)  # 1: cron
+        head.append(1)
+        head.append(UInt8(ord("c")))
+        return _undeclared[Schedule](head, n)
+    if message == "EventTrigger":
+        head.append(0x10)  # 2: event
+        head.append(UInt8(SourceEvent.OBJECT_CREATED))
+        return _undeclared[EventTrigger](head, n)
+    if message == "Network":
+        head.append(0x0A)  # 1: ipv4_cidr
+        head.append(1)
+        head.append(UInt8(ord("n")))
+        return _undeclared[Network](head, n)
+    if message == "Subnet":
+        head.append(0x18)  # 3: zone
+        head.append(2)
+        return _undeclared[Subnet](head, n)
+    if message == "IpAddress":
+        return _undeclared[IpAddress](head, n)
+    if message == "Registry":
+        head.append(0x08)  # 1: format
+        head.append(1)
+        return _undeclared[Registry](head, n)
     raise Error(String("no probe for message ") + message)
 
 
@@ -380,6 +418,47 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("Certificate")
     nums.append(1)
     what.append("domains (a repeated string)")
+    for arm in [22, 31]:
+        names.append("Resource")
+        nums.append(arm)
+        what.append("a trigger arm (a message in a oneof)")
+    names.append("Schedule")
+    nums.append(2)
+    what.append("timezone (a string)")
+    names.append("Schedule")
+    nums.append(3)
+    what.append("target (a message)")
+    names.append("EventTrigger")
+    nums.append(1)
+    what.append("source (a message)")
+    names.append("EventTrigger")
+    nums.append(2)
+    what.append("event (an enum)")
+    for arm in [23, 29, 30]:
+        names.append("Resource")
+        nums.append(arm)
+        what.append("a network arm (a message in a oneof)")
+    names.append("Network")
+    nums.append(1)
+    what.append("ipv4_cidr (a string)")
+    names.append("Subnet")
+    nums.append(1)
+    what.append("network (a message)")
+    names.append("Subnet")
+    nums.append(2)
+    what.append("ipv4_cidr (a string)")
+    names.append("Subnet")
+    nums.append(3)
+    what.append("zone (an optional number)")
+    names.append("Service")
+    nums.append(16)
+    what.append("network (a message)")
+    names.append("Resource")
+    nums.append(24)
+    what.append("the registry arm (a message in a oneof)")
+    names.append("Registry")
+    nums.append(1)
+    what.append("format (an enum)")
     for i in range(len(names)):
         assert_true(
             not _undeclared_in(names[i], nums[i]),
@@ -395,7 +474,8 @@ def test_the_probe_sees_a_declared_number() raises:
 
 def test_held_enum_values_are_unnamed() raises:
     """`Output` 5 (REVISION), `Access` 7 (ACT_AS) and 9 (MANAGE),
-    `CellResource` 4 (COMPUTE): each renders as its bare number."""
+    `CellResource` 4 (COMPUTE), `SourceEvent` 3 (a message published to a
+    topic): each renders as its bare number."""
     assert_equal(Output(5).json_name(), "5", "Output 5 is held")
     var access = List[Int]()
     access.append(7)
@@ -407,6 +487,7 @@ def test_held_enum_values_are_unnamed() raises:
             String("Access ") + String(access[i]) + " is held",
         )
     assert_equal(CellResource(4).json_name(), "4", "CellResource 4 is held")
+    assert_equal(SourceEvent(3).json_name(), "3", "SourceEvent 3 is held")
     print("  test_held_enum_values_are_unnamed: PASS")
 
 

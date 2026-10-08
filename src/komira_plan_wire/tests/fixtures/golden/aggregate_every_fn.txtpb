@@ -1,0 +1,933 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "g"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "count_star"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f0"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f1"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f2"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f3"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f4"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f5"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f6"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f7"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f8"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f9"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f10"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f11"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f12"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f13"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f14"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f15"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f16"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f17"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f18"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f19"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f20"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f21"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f22"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f23"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f24"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f25"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f26"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f27"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f28"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f29"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f30"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f31"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f32"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f33"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f34"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f35"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f36"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  aggregate {
+    group_by {
+      col_ref {
+        name: "g"
+        side: COL_SIDE_NONE
+      }
+    }
+    agg_exprs {
+      func: AGG_COUNT
+      has_alias_name: true
+      alias_name: "count_star"
+    }
+    agg_exprs {
+      func: AGG_SUM
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f0"
+    }
+    agg_exprs {
+      func: AGG_COUNT
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f1"
+    }
+    agg_exprs {
+      func: AGG_MIN
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f2"
+    }
+    agg_exprs {
+      func: AGG_MAX
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f3"
+    }
+    agg_exprs {
+      func: AGG_MEAN
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f4"
+    }
+    agg_exprs {
+      func: AGG_COUNT_DISTINCT
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f5"
+    }
+    agg_exprs {
+      func: AGG_FIRST
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f6"
+    }
+    agg_exprs {
+      func: AGG_LAST
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f7"
+    }
+    agg_exprs {
+      func: AGG_STDDEV_SAMP
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f8"
+    }
+    agg_exprs {
+      func: AGG_CORR
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f9"
+    }
+    agg_exprs {
+      func: AGG_MEDIAN
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f10"
+    }
+    agg_exprs {
+      func: AGG_LARGEST_K
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f11"
+    }
+    agg_exprs {
+      func: AGG_VAR_SAMP
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f12"
+    }
+    agg_exprs {
+      func: AGG_COVAR_POP
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f13"
+    }
+    agg_exprs {
+      func: AGG_COVAR_SAMP
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f14"
+    }
+    agg_exprs {
+      func: AGG_REGR_AVGX
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f15"
+    }
+    agg_exprs {
+      func: AGG_REGR_AVGY
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f16"
+    }
+    agg_exprs {
+      func: AGG_REGR_COUNT
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f17"
+    }
+    agg_exprs {
+      func: AGG_REGR_SXX
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f18"
+    }
+    agg_exprs {
+      func: AGG_REGR_SXY
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f19"
+    }
+    agg_exprs {
+      func: AGG_REGR_SYY
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f20"
+    }
+    agg_exprs {
+      func: AGG_REGR_SLOPE
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f21"
+    }
+    agg_exprs {
+      func: AGG_REGR_INTERCEPT
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f22"
+    }
+    agg_exprs {
+      func: AGG_REGR_R2
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "x"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_child1: true
+      child1 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f23"
+    }
+    agg_exprs {
+      func: AGG_VAR_POP
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f24"
+    }
+    agg_exprs {
+      func: AGG_STDDEV_POP
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f25"
+    }
+    agg_exprs {
+      func: AGG_SEM
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f26"
+    }
+    agg_exprs {
+      func: AGG_COUNT_IF
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "flag"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f27"
+    }
+    agg_exprs {
+      func: AGG_BOOL_AND
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "flag"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f28"
+    }
+    agg_exprs {
+      func: AGG_BOOL_OR
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "flag"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f29"
+    }
+    agg_exprs {
+      func: AGG_PRODUCT
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f30"
+    }
+    agg_exprs {
+      func: AGG_ANY_VALUE
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f31"
+    }
+    agg_exprs {
+      func: AGG_KAHAN_SUM
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f32"
+    }
+    agg_exprs {
+      func: AGG_KAHAN_AVG
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f33"
+    }
+    agg_exprs {
+      func: AGG_SKEWNESS
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f34"
+    }
+    agg_exprs {
+      func: AGG_KURTOSIS
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f35"
+    }
+    agg_exprs {
+      func: AGG_KURTOSIS_POP
+      has_child0: true
+      child0 {
+        col_ref {
+          name: "y"
+          side: COL_SIDE_NONE
+        }
+      }
+      has_alias_name: true
+      alias_name: "f36"
+    }
+    child {
+      output_schema {
+        fields {
+          name: "g"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "x"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "y"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "flag"
+          arrow_type_id: 1
+          dtype_code: _DT_BOOL
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      scan {
+        source {
+          binding {
+            kind_id: 1056219456
+            kind_name: "komira.orc"
+            name: "events"
+            params {
+              key: "path"
+              tag: PARAM_STR
+              s: "/data/events.orc"
+            }
+            schema {
+              fields {
+                name: "g"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "x"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "y"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "flag"
+                arrow_type_id: 1
+                dtype_code: _DT_BOOL
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            fingerprint: 2662
+            structural_id: 42607
+            pushdown_gate {
+              mode: GATE_SHAPED
+              allowed_binary_ops: 63
+              allow_and_recurse: true
+              allow_in_list: true
+              require_stat_friendly_col: true
+            }
+            snapshot_policy: SNAPSHOT_PINNED
+            snapshot_token: 742
+            orientation: SOURCE_KIND_COLUMNAR
+            variant_tag: SOURCE_VARIANT_ORC
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "g"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "x"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "y"
+            arrow_type_id: 12
+            dtype_code: _DT_FLOAT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "flag"
+            arrow_type_id: 1
+            dtype_code: _DT_BOOL
+            nullable: true
+            dict_index_type_id: 4
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+  }
+}

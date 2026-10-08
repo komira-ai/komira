@@ -268,7 +268,10 @@ header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
    staged sources at the path of `[src]` from the action's directory
    (`buck-out/v2/art/...`, the name the line tables use for them). Copies,
    never links: kcov resolves each name with `realpath`. A second copy of
-   the same sources, `lost/`, sits beside it.
+   the same sources, `lost/`, sits beside it. The one exception: each
+   generated source (`--gen`) is moved to `gen/`, outside `share/` and
+   `lost/`, and linked from both, so `realpath` takes its name out of every
+   `--include-path` and it is not measured.
 2. **kcov as the gate's program.** `gate_runner.sh`, the release gate's
    runner byte for byte, runs `bin/kcov` (staged where a test binary would
    be, so `share/` is the working directory) with the test binary and kcov's
@@ -278,8 +281,16 @@ header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
    differs is below). The flags:
    `--cobertura-only --skip-solibs --configure=cobertura-full-paths=1`;
    `--include-path` of exactly the staged `[src]` directory and the test
-   source, under `share/` and under `lost/` (an `--exclude-path` per
-   generated source); `--replace-src-path='^(?!/):<lost>/'`.
+   source, under `share/` and under `lost/`;
+   `--replace-src-path='^(?!/):<lost>/'`. No argument grows with the
+   library: kcov v42 reads every argument before the program as a path
+   while it looks for the program (`configuration.cc`, through
+   `peek_file` in `utils.cc`) and fails `Too long string!` on one of 2048
+   bytes or more, and it keeps only the last `--exclude-path` given, so a
+   list of generated sources there (two absolute paths each) failed every
+   run of a library with about ten of them. An argument that is still too
+   long (a deep action directory) fails the run, saying so, before kcov
+   starts.
 3. **Exactly one report** (`--cobertura-only` writes `<out>/cov.xml`).
 4. **`cov_normalize`** maps `<share>/<[src] path>/` to the package's
    directory of those sources (with a repository prefix for a cell that is
@@ -325,7 +336,10 @@ kcov's) and runs without address randomization (kcov sets
 source and the library's sources under `buck-out/` (the line tables name
 them relative to it); kcov shares its TMPDIR (kcov writes there only when it
 cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
-kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`);
+kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`),
+and nothing of `cov_run.sh`'s own (its tools get `LC_ALL=C` per command
+before the test and exported after it, since `gate_runner.sh` passes on what
+it does not set);
 and the run ends when every process the test started has exited, since
 kcov follows each fork, where the gate waits for the test alone (so the run
 is bounded, above). Its CPUs are the gate's: kcov v42 pins itself and the test to one

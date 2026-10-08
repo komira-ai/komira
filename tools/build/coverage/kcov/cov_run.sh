@@ -40,14 +40,18 @@
 #      source by a relative path and records no compilation directory, so
 #      kcov, started in share/, resolves each name to the copy. A second
 #      copy of the sources, lost/, is where a name that does NOT resolve
-#      there lands (below).
+#      there lands (below). The one exception to the copies: each generated
+#      source (--gen) is moved to gen/, outside share/ and lost/, and linked
+#      from both, so its name resolves to gen/ and is outside every
+#      --include-path (not measured, with no argument naming it).
 #   2. gate_runner.sh (unchanged: the release gate's runner) runs bin/kcov as
 #      the program of the test root: share/ is the working directory, PATH,
 #      LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR and HOME are the gate's, each
 #      --env is exported to kcov and so reaches the test. kcov's arguments:
 #      --cobertura-only --skip-solibs --configure=cobertura-full-paths=1;
 #      --include-path of exactly <src_dir> and this test, under share/ and
-#      under lost/ (an --exclude-path per generated source);
+#      under lost/ (no --exclude-path: kcov takes no argument of 2048
+#      bytes or more, and the run refuses one before kcov does);
 #      --replace-src-path='^(?!/):<lost>/'; the output directory and
 #      bin/<test>. komira's kcov exits with the test's status (128+N when a
 #      signal N killed it), not another traced process's (the toolchain's
@@ -80,8 +84,9 @@
 # its working directory share/ also holds its own source at <test> and the
 # library's at <src_dir>, kcov shares its TMPDIR, its environment also holds
 # KCOV_SOLIB_PATH, which kcov always sets (with --skip-solibs, no
-# LD_PRELOAD), and the run ends when every process the test started has
-# exited (kcov follows each fork), where the gate waits for the test alone;
+# LD_PRELOAD), but nothing of this script's own (its LC_ALL=C, below), and
+# the run ends when every process the test started has exited (kcov follows
+# each fork), where the gate waits for the test alone;
 # so it is bounded (step 2). Its CPUs are the gate's (kcov's pin is patched
 # out).
 #
@@ -104,8 +109,8 @@
 # and used as a --map ABS: kcov reports realpath'd names (README.md, "Why").
 #
 # Exit status: the test's under kcov when it fails (gate_runner's); 1 when the
-# binary names the sources elsewhere, the run passed its limit, or the report
-# is missing or refused; 2
+# binary names the sources elsewhere, a kcov argument is too long, the run
+# passed its limit, or the report is missing or refused; 2
 # for a usage error, which includes a `,` or `:` in a path given to kcov (its
 # options split on them).
 set -euf
@@ -161,7 +166,10 @@ esac
 "$BB" mkdir -p "$K/bin"
 "$BB" --install -s "$K/bin"
 PATH="$K/bin"
-export PATH LC_ALL=C
+# LC_ALL=C is given to this script's own tools: per command before the test
+# runs, exported after it. The test gets the gate's environment, and the gate
+# sets no LC_ALL (gate_runner passes on what it does not set).
+export PATH
 
 red() {
     echo "==================================================================" >&2
@@ -194,9 +202,9 @@ group_left() {
 # directory) counts, and a name is cut after the last one: a komira
 # library's package path is itself src/<import>
 # (buck-out/v2/art/komira/src/<import>/__<import>__/<hash>/src/<import>).
-tr '\000' '\n' <"$BIN" | grep -a -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*' >"$K/names" || true
-grep -E "/__[^/]+__/.*/src/$IMPORT(/|\$)" "$K/names" | sed -E "s|^(.*/src/$IMPORT)(/.*)?\$|\1|" | sort -u >"$K/dirs" || true
-grep -v -x -F -e "$SRC_REL" "$K/dirs" >"$K/elsewhere" || true
+LC_ALL=C tr '\000' '\n' <"$BIN" | LC_ALL=C grep -a -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*' >"$K/names" || true
+LC_ALL=C grep -E "/__[^/]+__/.*/src/$IMPORT(/|\$)" "$K/names" | LC_ALL=C sed -E "s|^(.*/src/$IMPORT)(/.*)?\$|\1|" | LC_ALL=C sort -u >"$K/dirs" || true
+LC_ALL=C grep -v -x -F -e "$SRC_REL" "$K/dirs" >"$K/elsewhere" || true
 if [ -s "$K/elsewhere" ]; then
     red "the test binary names the library's sources by $(tr '\n' ' ' <"$K/elsewhere")but this run stages them at $SRC_REL: kcov would drop them without an error (README.md, \"cov_run\")."
 fi
@@ -225,9 +233,23 @@ for p in "$S" "$L" "$SRC_REL" "$TEST"; do
 done
 OUT="$K/kout"
 
-EXCL=""
+# The generated sources: in share/ and lost/, each is a symbolic link to a
+# copy under gen/, outside both. kcov resolves a name with realpath before
+# it filters (filter.cc, mangleSourcePath and PathHandler), so a generated
+# source resolves to gen/, outside every --include-path, and is not
+# measured. No argument names them: kcov reads every argument before the
+# program as a path when it looks for the program (configuration.cc, its
+# argv scan) and fails "Too long string!" at one of 2048 bytes or more
+# (utils.cc, peek_file), and it keeps only the last --exclude-path given,
+# so a list of them cannot be split over several.
+G="$K/gen"
 for g in $GEN; do
-    EXCL="${EXCL:+$EXCL,}$S/$SRC_REL/$g,$L/$SRC_REL/$g"
+    [ -f "$S/$SRC_REL/$g" ] && [ ! -L "$S/$SRC_REL/$g" ] || red "the generated source $g is not a file in $SRC_REL"
+    case "$g" in */*) mkdir -p "$G/${g%/*}" ;; *) mkdir -p "$G" ;; esac
+    mv "$S/$SRC_REL/$g" "$G/$g"
+    ln -s "$G/$g" "$S/$SRC_REL/$g"
+    rm "$L/$SRC_REL/$g"
+    ln -s "$G/$g" "$L/$SRC_REL/$g"
 done
 
 # 2. kcov under the gate's runner.
@@ -235,12 +257,25 @@ set -- "$@" \
     --arg --cobertura-only \
     --arg --skip-solibs \
     --arg --configure=cobertura-full-paths=1 \
-    --arg "--include-path=$S/$SRC_REL,$S/$TEST,$L/$SRC_REL,$L/$TEST"
-[ -z "$EXCL" ] || set -- "$@" --arg "--exclude-path=$EXCL"
-set -- "$@" \
+    --arg "--include-path=$S/$SRC_REL,$S/$TEST,$L/$SRC_REL,$L/$TEST" \
     --arg "--replace-src-path=^(?!/):$L/" \
     --arg "$OUT" \
     --arg "$R/bin/$NAME"
+# Each of kcov's arguments is shorter than its 2048 bytes (above): none
+# grows with the library, but each holds this action's directory. Bytes,
+# counted under LC_ALL=C (the shell's ${#a} counts characters in the gate's
+# locale, which this script does not set).
+KCOV_ARG_MAX=2047
+prev=""
+for a in "$@"; do
+    if [ "$prev" = --arg ]; then
+        n=$(( $(printf '%s' "$a" | LC_ALL=C wc -c) ))
+        if [ "$n" -gt "$KCOV_ARG_MAX" ]; then
+            red "cov_run: a kcov argument of $n bytes ($(printf '%s' "$a" | LC_ALL=C cut -c 1-80)...) is longer than kcov takes ($KCOV_ARG_MAX): kcov reads each argument before the program as a path and fails \"Too long string!\" (README.md, \"cov_run\")."
+        fi
+    fi
+    prev=$a
+done
 # gate_runner leads a new session and process group, which kcov, the test
 # and every child it starts join (setsid needs no fork: this shell has no job
 # control, so its background job leads no group, and $! is gate_runner's
@@ -265,6 +300,7 @@ watch=$!
 wait "$gate" || rc=$?
 kill "$watch" 2>/dev/null || true
 wait "$watch" || true
+export LC_ALL=C
 if [ -e "$K/timed_out" ]; then
     # The kill must have reached every process of the group, not gate_runner
     # alone: a process of it that is not a zombie after up to 10 s (SIGKILL

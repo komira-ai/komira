@@ -28,7 +28,8 @@ interface. This package names no cloud:
                        and a worker's versioned replicas default.
   * grants.mojo      — who a resource runs as (its identity owner), and
                        every grant edge it lowers (`uses` lines, a grant
-                       resource, the implicit `cell LOGS WRITE`), each
+                       resource, the implicit `cell LOGS WRITE`, a
+                       trigger's implicit CALL on its target), each
                        with its role `u-<h>` (or `grant`) decided by kci.
   * data.mojo        — the rules of the data types (table, bucket): their
                        graph findings, a table's key as text, the index
@@ -36,6 +37,18 @@ interface. This package names no cloud:
   * feed.mojo        — the FEEDS: the list's subscriptions as (subscription,
                        topic, queue), handed to every adapter's `check` and
                        `lower`.
+  * firing.mojo      — the FIRINGS: the list's schedules as (schedule,
+                       target, target type, cron, time zone), handed to
+                       every adapter's `check` and `lower`; and the
+                       schedule's versioned time zone.
+  * network.mojo     — the rules of the network types (network, subnet, IP
+                       address) and of a service's `network`: their graph
+                       findings and the IPv4 range form.
+  * registry.mojo    — the rules of the registry type: its graph findings
+                       (no `uses`; a format written and known).
+  * triggers.mojo    — the rules of the trigger types (schedule, event
+                       trigger): their graph findings, the portable cron
+                       form and a time zone name's shape.
   * messaging.mojo   — the rules of the messaging types (queue, topic,
                        subscription): their graph findings and the queue's
                        versioned ack deadline.
@@ -98,6 +111,12 @@ from kci_cloud.catalog import (
     FIELD_DNS_RECORD,
     FIELD_CERTIFICATE,
     FIELD_SUBSCRIPTION,
+    FIELD_SCHEDULE,
+    FIELD_EVENT_TRIGGER,
+    FIELD_NETWORK,
+    FIELD_SUBNET,
+    FIELD_IP_ADDRESS,
+    FIELD_REGISTRY,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -124,6 +143,12 @@ from kci_cloud.catalog import (
     ROLE_ZONE,
     ROLE_RECORD,
     ROLE_CERT,
+    ROLE_SCHEDULE,
+    ROLE_TRIGGER,
+    ROLE_NETWORK,
+    ROLE_SUBNET,
+    ROLE_ADDRESS,
+    ROLE_REGISTRY,
     BodyArm,
     body_arms,
     body_field,
@@ -149,6 +174,8 @@ from kci_cloud.grants import (
     role_hash,
     holds_own_identity,
     identity_owner,
+    is_trigger,
+    trigger_target,
     principal_node,
     run_as_of,
     uses_role,
@@ -186,6 +213,30 @@ from kci_cloud.data import (
     table_key_text,
 )
 from kci_cloud.feed import Feed, feeds_into, feeds_of, field_of_id
+from kci_cloud.firing import TIMEZONE_DEFAULT, Firing, firing_of, firings_into, firings_of, schedule_timezone
+from kci_cloud.triggers import (
+    EVENT_OBJECT_CREATED,
+    EVENT_OBJECT_DELETED,
+    cron_fields,
+    cron_problem,
+    timezone_problem,
+    trigger_findings,
+)
+from kci_cloud.network import (
+    CIDR_PREFIX_MAX,
+    CIDR_PREFIX_MIN,
+    ZONE_MAX,
+    ZONE_MIN,
+    contains,
+    ipv4_cidr_problem,
+    ipv4_text,
+    is_private,
+    network_findings,
+    overlaps,
+    service_network_findings,
+    service_subnet,
+)
+from kci_cloud.registry import FORMAT_OCI, format_word, registry_findings, registry_format
 from kci_cloud.workload import Workload, is_workload, workload_of
 from kci_cloud.compute import (
     V1_IMAGE_PLATFORM,

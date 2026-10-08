@@ -25,17 +25,19 @@
 #    replicas (presence), 9 run_as; by name, binary, JSON, absent = unset;
 #    3, 10 and 11 (a draft's scale and source) are reserved, their bytes
 #    skipped; 13 is not a field; as `Resource.body` 12, the third arm.
-# 4. SERVICE.COMMAND 15 (repeated, in order); by name, binary, JSON; 16 is
-#    not a field.
+# 4. SERVICE.COMMAND 15 (repeated, in order); by name, binary, JSON; 17 is
+#    not a field (16 is `network`, test_resource_network_numbers.mojo).
 # 5. SIZE. 1 cpu_millis, 2 memory_mb, 3 gpus; by name, binary, JSON, absent
 #    = 0; 4 is not a field.
 # 6. THE ARM CENSUS. Every declared `Resource.body` arm, by number and by
 #    the oneof position the generated struct records: 10 service 1, 11
 #    container job 2, 12 worker 3, 13 table 4, 14 bucket 5, 15 queue 6, 16
-#    secret 7, 18 DNS zone 8, 20 service account 9, 21 topic 10, 25 grant
-#    11, 26 DNS record 12, 27 certificate 13, 28 subscription 14. A position
-#    that moves is a different arm to every reader of `_oneof0_case`
-#    (kci_cloud's `body_arms`). 17, 19, 22 to 24, 29, 32 and 33 stay held.
+#    secret 7, 18 DNS zone 8, 20 service account 9, 21 topic 10, 22
+#    schedule 11, 23 network 12, 24 registry 13, 25 grant 14, 26 DNS record
+#    15, 27 certificate 16, 28 subscription 17, 29 subnet 18, 30 IP address
+#    19, 31 event trigger 20. A position that moves is a different arm to
+#    every reader of `_oneof0_case` (kci_cloud's `body_arms`). 17, 19, 32
+#    and 33 stay held.
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 # =============================================================================
@@ -478,7 +480,7 @@ def test_worker() raises:
 
 def test_service_command() raises:
     """Catches: `command` at another number or wire type, merged with `args`
-    (3) or reordered, its JSON name, and a field declared at 16."""
+    (3) or reordered, its JSON name, and a field declared at 17."""
     var b = List[UInt8]()
     _uint(b, 2, 8080)
     _str(b, 3, "--fast")
@@ -495,8 +497,8 @@ def test_service_command() raises:
     _bytes_equal(encode_proto(decode_json[Service](text)), encode_proto(s), "Service: JSON round trip")
     assert_equal(len(decode_proto[Service](List[UInt8]()).command), 0, "absent: no command")
     var probe = b.copy()
-    _str(probe, 16, "not-a-field")
-    _same(encode_proto(decode_proto[Service](probe.copy())), b, "Service has no field 16")
+    _str(probe, 17, "not-a-field")
+    _same(encode_proto(decode_proto[Service](probe.copy())), b, "Service has no field 17")
     print("  test_service_command: PASS")
 
 
@@ -530,7 +532,7 @@ def test_body_arm_census() raises:
     """Catches: any arm renumbered, and any arm's oneof position moved (an arm
     declared out of number order shifts every later position, and kci_cloud
     maps positions to fields); and a held arm declared."""
-    var fields: List[Int] = [10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 25, 26, 27, 28]
+    var fields: List[Int] = [10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     for i in range(len(fields)):
         var b = List[UInt8]()
         _str(b, 1, "x")
@@ -541,7 +543,7 @@ def test_body_arm_census() raises:
         # zero-valued fields written out, so the arm is compared, not bytes).
         var again = decode_proto[Resource](encode_proto(r))
         assert_equal(again._oneof0_case, i + 1, String("arm ") + String(fields[i]) + " re-encodes")
-    for held in [17, 19, 22, 23, 24, 29, 32, 33]:
+    for held in [17, 19, 32, 33]:
         var b = List[UInt8]()
         _str(b, 1, "x")
         _msg(b, held, List[UInt8]())

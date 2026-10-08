@@ -36,6 +36,8 @@ date	src/komira_crypto/tests/test_x509_letsencrypt_r3.mojo	2	the published certi
 date	src/komira_csv/tests/test_csv_cell_parsers_wire_to_builders.mojo	1	a timestamp cell (test data)
 date	src/komira_eval/tests/test_row_projection_math_extract_kerneldirect.mojo	5	a calendar day the ISO-week extraction test pins (test data)
 date	src/komira_http_client/tests/test_objectstore_http.mojo	2	a Last-Modified header value (test data)
+date	src/komira_mcp_server/protocol.mojo	2	the MCP protocol revision identifiers this server speaks, not history dates
+date	src/komira_mcp_server/tests/test_mcp_spec_examples.mojo	3	the MCP specification examples: a revision identifier and an example tool error text (test data)
 date	src/komira_plan_ir/tests/test_scan_binding_substrate.mojo	1	a partition key literal (test data)
 date	tools/build/tests/functional/darwin/check.sh	1	the build line a stubbed linker prints (test data)
 email	src/komira_crypto/tests/test_rs256_jwks_verify.mojo	1	a made-up service account or address (test data)
@@ -52,6 +54,8 @@ email	src/komira_gcp_run/tests/test_run_jobs.mojo	2	a made-up service account or
 email	src/komira_gcp_run/tests/test_run_services.mojo	4	a made-up service account or address (test data)
 email	src/komira_gcp_storage/tests/test_storage_client.mojo	3	a made-up service account or address (test data)
 email	src/komira_gcp_wif/tests/test_wif_mint.mojo	1	a made-up service account or address (test data)
+email	src/komira_git/sha1dc.mojo	2	the authors' addresses in sha1collisiondetection's MIT copyright notice, which the licence requires in every copy
+email	src/komira_git/sha1dc_ubc.mojo	2	the authors' addresses in sha1collisiondetection's MIT copyright notice, which the licence requires in every copy
 email	src/komira_http_client/tests/test_url.mojo	1	userinfo of a URL (test input)
 email	src/komira_log/structured_log.mojo	1	the example address of the redaction rule's docstring
 email	src/komira_source_url/tests/test_source_url.mojo	1	a URL's user information as test input: the refusal must not repeat it
@@ -113,7 +117,16 @@ host	tools/build/tests/negative/public_boundary/plant_host_ipv6.txt	1	a planted 
 host	tools/build/tests/negative/public_boundary/plant_host_private.txt	1	a planted finding of test 44 (the public boundary lint)
 host	tools/build/tests/negative/public_boundary/plant_host_single.txt	1	a planted finding of test 44 (the public boundary lint)
 host	tools/build/tests/negative/public_boundary/plant_host_unlisted.txt	1	a planted finding of test 44 (the public boundary lint)
+ip	src/kci_cloud/network.mojo	5	the private ranges the network rule accepts (RFC 1918)
+ip	src/kci_cloud/tests/test_cloud_network_rules.mojo	57	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_cloud_fake/tests/test_fake_network.mojo	9	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_cloud_fake/tests/test_fake_validation_run_tag.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_reconciler/tests/test_resource_outputs.mojo	2	a private address as test input
+ip	src/kci_resource_proto/README.md	2	the private range of the README's network example
+ip	src/kci_resource_proto/resource.proto	2	the private ranges the network comment names (RFC 1918)
+ip	src/kci_resource_proto/tests/fixtures/graph/network_graph.txtpb	2	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_resource_proto/tests/test_resource_graph_golden_bytes.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_resource_proto/tests/test_resource_network_numbers.mojo	6	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/komira_aws_core/tests/test_credential_wire.mojo	1	an address just outside loopback that the container credential endpoint must refuse (test input)
 ip	src/komira_aws_core/tests/test_endpoint_rules_library.mojo	3	a private address as test input
 ip	src/komira_aws_ec2/tests/test_ec2_responses.mojo	5	VPC and subnet ranges in recorded API responses (test data)
