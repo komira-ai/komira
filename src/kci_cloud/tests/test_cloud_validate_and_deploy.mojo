@@ -103,7 +103,7 @@ from kci_cloud import (
     FIELD_WORKER,
     FIELD_TABLE,
     FIELD_BUCKET,
-    FIELD_SERVICE_ACCOUNT, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS,
+    FIELD_SERVICE_ACCOUNT, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY,
     FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SECRET, Feed, Firing,
     FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER,
     apply_resources,
@@ -277,7 +277,7 @@ struct _Stub(CloudAdapter, Movable):
             l.append(FIELD_GRANT)
             l.append(FIELD_SUBSCRIPTION)
             l.append(FIELD_SECRET)
-            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS]:
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY]:
                 l.append(f)
         return l^
 
@@ -293,8 +293,8 @@ struct _Stub(CloudAdapter, Movable):
             for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER]:
                 l.append(Absence(f, NOT_YET, String("no messaging or triggers")))
             l.append(Absence(FIELD_SECRET, NOT_YET, String("no secret store")))
-            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS]:
-                l.append(Absence(f, NOT_YET, String("no names or networks")))
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY]:
+                l.append(Absence(f, NOT_YET, String("no names, networks or registries")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:

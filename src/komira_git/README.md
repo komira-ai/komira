@@ -29,6 +29,15 @@ of a git server or client build on.
   `LOOSE_LEVEL`, git's level 1), `decode_loose(bytes, max_size)` into a
   `LooseObject`, `read_loose(expected_id, bytes, max_size)`, which also
   checks the hash, and `loose_path(id)`.
+- **SHA-1 with collision detection.** `Sha1dc` (`update`, `finalize_into`,
+  `digest`, `collision_found`, and the switches `set_safe_hash`,
+  `set_use_ubc`, `set_detect_collision`,
+  `set_detect_reduced_round_collision`) and the one-shot `sha1dc(data)`: a
+  pure-Mojo port of sha1collisiondetection, the SHA-1 git hashes with.
+  `hash_object` (and so `read_loose` and every `id()`) computes SHA-1 ids
+  with it and raises an error starting with `OBJECT_ID_COLLISION` for an
+  object holding a block of a detected collision; `is_object_id_collision`
+  tells that error from the others.
 - **pkt-line.** `append_pkt_data`, `append_pkt_text`, `append_pkt_flush`,
   `append_pkt_delim`, `append_pkt_response_end`, and the sans-I/O reader
   `read_pkt_line(data, offset)`, which returns a `PktLine` of kind
@@ -159,8 +168,35 @@ and the object layer already hashes and
 parses SHA-256 objects (32-byte ids in trees, 64-digit ids in commit and tag
 headers), checked against git's own SHA-256 vectors. What a SHA-256
 repository needs beyond objects (the protocol's `object-format` capability,
-the SHA-1/SHA-256 compatibility map) is not here. SHA-1 here is plain
-SHA-1: collision detection is a separate, later module.
+the SHA-1/SHA-256 compatibility map) is not here.
+
+## Collision detection
+
+A SHA-1 id is computed as git computes it, with sha1collisiondetection
+(see the licence notice in `sha1dc.mojo`): every 64-byte block is checked
+against the 32 disturbance vectors of the known SHA-1 collision attacks,
+and a block that is one half of such a near-collision is reported.
+Ordinary input hashes to plain SHA-1. With detection on, the digest of a
+reported input is upstream's "safe hash" (the block is compressed twice
+more), not the SHA-1 its colliding twin shares. `sha1dc` and
+`Sha1dc.digest` raise instead of returning it, and so does `hash_object`
+for an object whose hash stream (`<kind> <size>\0`, then the payload)
+holds a reported block.
+
+Both SHAttered PDFs, hashed as they are, are reported by `sha1dc` and
+`Sha1dc`. A blob whose content is one of those PDFs is not refused: its
+hash stream starts with the 12-byte `blob 422435\0` header, so the
+collision blocks no longer follow the PDF's own 192-byte prefix at a block
+boundary, nothing is detected, and `hash_object` returns the id git gives
+that blob.
+
+The tests check the port against upstream's own test files (the digests
+its `make test` asserts) and, in `komira_git_conformance`, against the C
+library itself, including, for each disturbance vector, the message and
+chaining value its recompression uses. A git object that holds a collision
+block cannot be made from those files, so no test feeds `hash_object` a
+colliding object; the detection it relies on is tested through `sha1dc`
+and `Sha1dc`.
 
 ## Examples
 
@@ -238,6 +274,23 @@ var second = read_pkt_line(Span(wire), first.consumed)
 assert_equal(second.kind, PKT_FLUSH)
 var half = List[UInt8](String("0006a").as_bytes())
 assert_equal(read_pkt_line(Span(half), 0).kind, PKT_NEED_MORE)
+```
+
+Hash with collision detection (FIPS 180-2's "abc" vector; ordinary input
+is plain SHA-1 and reports no collision):
+
+```mojo
+from komira_git import Sha1dc, is_object_id_collision, sha1dc
+
+var abc = List[UInt8](String("abc").as_bytes())
+var digest = sha1dc(Span(abc))  # raises on a detected collision
+assert_equal(digest[0], UInt8(0xA9))  # a9993e36...
+var h = Sha1dc()
+h.update(Span(abc))
+var out = InlineArray[UInt8, 20](fill=0)
+assert_false(h.finalize_into(out))  # True would mean: collision detected
+assert_equal(out[19], UInt8(0x9D))  # ...9cd0d89d
+assert_false(is_object_id_collision("komira_git: loose object: empty file"))
 ```
 
 Check ref names as `git check-ref-format` does:

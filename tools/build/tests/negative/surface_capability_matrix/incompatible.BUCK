@@ -1,3 +1,7 @@
+# Not a BUCK file of the repository: run_tests.sh (test 53) copies it to
+# incompatible/BUCK, builds tests//negative/surface_capability_matrix/incompatible:
+# and deletes it. Loadable, this target would make every cquery over tests//...
+# fail (the CI affected step's among them).
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load(
     "//functional/surface_capability_matrix:fixture.bzl",
