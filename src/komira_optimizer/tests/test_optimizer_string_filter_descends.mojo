@@ -22,7 +22,7 @@
 #       through-Filter anti-recursion guard. The conditional swap now pushes the
 #       single-table filter PAST the (commuting) bridging filter to its scan.
 #
-# FAILS ON CURRENT CODE (pre-fix): `_string_filter_child_tag` returns PLAN_JOIN
+# FAILS ON PRE-FIX CODE: `_string_filter_child_tag` returns PLAN_JOIN
 # (the green filter sits above the folded `part x lineitem` INNER join) instead
 # of PLAN_SCAN — both guard tests below assert PLAN_SCAN, so both fail on the
 # pre-fix commit.
@@ -31,29 +31,30 @@
 # THE SAME HOLE, ONE TAG OVER: EXPR_REGEXP
 # =============================================================================
 #
-# `_predicate_refs_in_schema` is a CLOSED walker with an OPEN fallback: seven
-# `elif` arms and `return True` for everything else. Fixing EXPR_STRING_OP in
+# `_predicate_refs_in_schema` is a CLOSED walker with an OPEN fallback: a run
+# of `elif` arms and `return True` for everything else. Fixing EXPR_STRING_OP in
 # its own change fixed one tag, not the fallback, so the identical bug stayed live
 # for EXPR_REGEXP (tag 15) — and EXPR_REGEXP is not exotic: it is what BOTH
-# Python skins emit for an interior-wildcard LIKE, because `%a%b%` is not
+# Python skins (not in this tree) emit for an interior-wildcard LIKE, because `%a%b%` is not
 # `contains(a) AND contains(b)` (that loses the order) and lowers to
 # `.str.contains("a.*b")` in pandas and polars alike (the skins' LIKE
 # lowering, its `"regex"` arm).
 #
 # WHAT LED HERE — AND NOT WHAT THIS FIXES. For tpch/q13
 # (`o_comment NOT LIKE '%special%requests%'`) and tpch/q16
-# (`s_comment LIKE '%Customer%Complaints%'`) the sql and mojo surfaces emit
+# (`s_comment LIKE '%Customer%Complaints%'`) the sql and mojo surfaces (not in
+# this tree) emit
 # `StringOp(LIKE, ...)` while the two Python skins emit `Regexp`, so the
 # surfaces author two different predicate nodes for one question. This file
 # guards only where the `Regexp` filter lands (the pushdown); it says nothing
 # about how either node is evaluated.
 #
-# The other three corpus LIKEs (q2 `%BRASS`, q9 `%green%`, q20 `forest%`) are
+# The other three TPC-H LIKEs (q2 `%BRASS`, q9 `%green%`, q20 `forest%`) are
 # single-wildcard and lower to STRING_OP's contains/starts_with/ends_with.
 #
-# The sibling column-need walker (`optimizer_helpers._collect_expr_columns`)
-# grew its EXPR_REGEXP arm earlier, which is why this defect costs TIME
-# and not CORRECTNESS: projection pushdown still requests the column, so the
+# The sibling column-need walker (`plan_helpers._collect_expr_columns` in
+# komira_plan_ir) grew its EXPR_REGEXP arm earlier, which is why this defect
+# costs TIME and not CORRECTNESS: that walk still reports the column, so the
 # answer is the same while one plan reads far more rows.
 # =============================================================================
 
@@ -129,7 +130,7 @@ def test_string_filter_descends_to_scan_through_bridging_conjunct() raises:
     the string filter MUST sit directly above the `part` scan (child tag ==
     PLAN_SCAN), NOT above the folded INNER join.
 
-    FAILS ON CURRENT CODE (pre-fix): the string filter parks above the join
+    FAILS ON PRE-FIX CODE: the string filter parks above the join
     (child tag == PLAN_JOIN) because `_predicate_refs_in_schema` lacked the
     EXPR_STRING_OP arm AND the Filter-through-Filter guard parked it above the
     bridging conjunct."""
@@ -137,8 +138,9 @@ def test_string_filter_descends_to_scan_through_bridging_conjunct() raises:
     var line = _scan("lineitem.parquet", _line_schema())
 
     # Raw comma-join shape: CROSS join + a top AND filter carrying the bridging
-    # equi-conjunct + the single-table LIKE (exactly what the SQL binder emits
-    # for `FROM part, lineitem WHERE p_partkey = l_partkey AND p_name LIKE ...`).
+    # equi-conjunct + the single-table LIKE (the shape a SQL binder, not in this
+    # tree, produces for `FROM part, lineitem WHERE p_partkey = l_partkey AND
+    # p_name LIKE ...`).
     var empty_l = List[String]()
     var empty_r = List[String]()
     var cross = LogicalPlan.join(part^, line^, empty_l^, empty_r^, JOIN_CROSS)
@@ -150,7 +152,8 @@ def test_string_filter_descends_to_scan_through_bridging_conjunct() raises:
     var combined = Expr.binary(BIN_AND, bridging^, green^)
     var plan = LogicalPlan.filter(combined^, cross^)
 
-    # Mirror the optimizer's filter/join settle sequence.
+    # The filter/join sequence these passes are designed to run in
+    # (komira_optimizer has no driver that orders its passes).
     plan = decompose_filters(plan^)
     plan = push_predicates_down(plan^)
     plan = eliminate_cross_join(plan^)
@@ -174,7 +177,7 @@ def test_string_filter_over_inner_join_pushes_to_side() raises:
     with a real key. After push_predicates_down the top is the JOIN (the string
     filter descended into the part side), not a Filter parked above it.
 
-    FAILS ON CURRENT CODE (pre-fix): `_predicate_refs_in_schema` returns True
+    FAILS ON PRE-FIX CODE: `_predicate_refs_in_schema` returns True
     for BOTH sides on the STRING_OP (missing arm) -> "spans both" -> parked ->
     the top stays a Filter."""
     var part = _scan("part.parquet", _part_schema())
@@ -347,10 +350,10 @@ def test_regexp_left_join_residual_pushes_to_right_side() raises:
     join carries a per-row regex, and `orders` is scanned unfiltered with its
     `o_comment` column materialised for every row.
 
-    ⚠ DO NOT DELETE THIS AS DEAD CODE. The shape it repairs is produced by NO
-    corpus cell today: both Python skins pre-push q13's ON-conjunct themselves
-    (their own residual pushdown), so the
-    optimizer never sees the residual from that path. The fix is REAL but
+    ⚠ DO NOT DELETE THIS AS DEAD CODE. Both Python skins (not in this tree)
+    are designed to pre-push q13's ON-conjunct themselves (their own residual
+    pushdown), so from that path the
+    optimizer would not see the residual. The fix is REAL but
     LATENT — it is the rule that catches this shape from any OTHER author (a
     hand-built plan, a future skin that does not pre-push, SQL that reaches
     `push_join_residual_to_side` first), and this test is the only thing

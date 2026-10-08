@@ -184,7 +184,7 @@ def _count_uncorrelated_scalar_in_plan(plan: LogicalPlan) raises -> Int:
         n += _count_uncorrelated_scalar_in_plan(plan.topn_data_ref().child[])
     # Aggregate / Join / PartitionBy / PartitionTopN / Scan / Union /
     # ViewRef: leaf for this pass (a subquery deeper inside one of those
-    # is not resolved here -- see "Coverage" note on the public fn).
+    # is neither counted nor resolved here).
     return n
 
 
@@ -210,11 +210,11 @@ def resolve_scalar_subqueries(var plan: LogicalPlan) raises -> LogicalPlan:
     inner plan -- is the non-parametric driver
     `komira_optimizer.optimizer_resolve_scalar_subqueries.resolve_scalar_subqueries_rewrite`.
     It takes the `ScalarDepTable` the executing caller fills, folds each site whose
-    value is bound and requests the rest. Downstream
-    `flatten_dependent_joins` would choke on a still-present
-    uncorrelated SCALAR (its hoist algorithm needs >= 1 outer_ref) -- so
-    a plan must pass through that driver, with every site bound, before
-    flatten runs.
+    value is bound and requests the rest. `flatten_dependent_joins` has no
+    uncorrelated arm: with no outer_refs its hoist derives no join keys,
+    so a still-present uncorrelated SCALAR would become a keyless LEFT
+    join over an ungrouped Aggregate -- so a plan is designed to pass
+    through that driver, with every site bound, before flatten runs.
     """
     return plan^
 
@@ -339,8 +339,8 @@ def _rewrite_scalar_subquery_in_expr(
     """Rebuild the Expr tree, replacing each uncorrelated SCALAR subquery
     with `Expr.literal(scalars[next_idx])` and advancing `next_idx` --
     visited in the SAME pre-order as `_collect_scalar_subquery_sites_in_expr`.
-    NON-PARAMETRIC. Mojo 0.26.3 has no in-place single-node swap, so the
-    rebuild form is standard (matches `_substitute_agg_fn`).
+    NON-PARAMETRIC. The tree is rebuilt rather than swapped in place, as
+    `optimizer_scalar_broadcast._substitute_agg_fn` does.
     """
     if expr.tag == EXPR_CORRELATED_SUBQUERY:
         if _is_uncorrelated_scalar_subquery(expr):

@@ -290,8 +290,8 @@ def test_unresolved_outer_ref_raises() raises:
 def test_nested_correlated_subquery() raises:
     """The inner plan ITSELF contains a correlated subquery. After
     `flatten_dependent_joins` returns, the outer correlation AND the
-    inner correlation should both be lowered (recursive walk descends
-    through Filter children).
+    inner correlation should both be lowered (the lowering flattens the
+    subquery's inner plan before it builds the join).
 
     Shape:
       Filter(outer, EXISTS(

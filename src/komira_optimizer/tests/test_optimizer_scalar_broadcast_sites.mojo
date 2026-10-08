@@ -143,7 +143,7 @@ def _assert_folded(imm f: LogicalPlan, v: Int) raises:
 
 
 # =============================================================================
-# The driver
+# `scalar_broadcast_rewrite`
 # =============================================================================
 
 
@@ -365,10 +365,10 @@ def test_the_inner_sub_plan_is_an_ungrouped_reduction() raises:
 
 
 def test_the_rewriter_recurses_under_a_non_site_filter_on_an_aggregate() raises:
-    # The driver never reaches this arm (a Filter(Aggregate) without an
-    # agg_fn ends the collection walk, so no site sits below it); the
-    # rewriter still handles it. Catches: that arm dropping the predicate or
-    # replacing the Aggregate.
+    # `scalar_broadcast_rewrite` never reaches this arm (a Filter(Aggregate)
+    # without an agg_fn ends the collection walk, so no site sits below it);
+    # the rewriter still handles it. Catches: that arm dropping the predicate
+    # or replacing the Aggregate.
     var plan = LogicalPlan.filter(_gt(_total(), _lit(1)), _per_group())
     var sites = Slab[ScalarBroadcastSite]()
     var next_idx = 0

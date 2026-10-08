@@ -6,7 +6,7 @@
 # `.group_by(...).agg(...)` and rewrites it with values bound in the
 # `ScalarDepTable`: `Expr.literal(scalar_value)` replaces the `EXPR_AGG_FN`
 # node in the outer Filter predicate, and the inner Aggregate becomes a scan
-# of its already-materialized batch (plan-compile-time eager fold). This
+# of its already-materialized batch. This
 # module executes nothing, and komira has no caller in this tree that
 # executes the requests it records.
 #
@@ -116,7 +116,7 @@ def _expr_has_agg_fn(expr: Expr) -> Bool:
         return _expr_has_agg_fn(expr.alias_child_ref())
     if expr.tag == EXPR_STRING_OP:
         return _expr_has_agg_fn(expr.string_op_child_ref())
-    # ★ MathFn / MathFn2 / CASE (untyped API tests): `having
+    # ★ MathFn / MathFn2 / CASE: `having
     # sqrt(s) > sqrt(s.mean())` and a CASE-wrapped aggregate must be seen,
     # or the aggregate is left in the plan unrewritten. Every
     # arm here needs its twin in `_substitute_agg_fn` and `_walk_for_agg_fn`.
@@ -254,8 +254,8 @@ def _build_inner_sub_plan(
 # to keep execution (and its FileHandle reach) OUT of any recursive,
 # parametric `def`: the AOT-monomorphization trap
 # (parametric+recursive+FileHandle reach). With execution gone, no phase is
-# parametric and none reaches a FileHandle. See the closing note below
-# `scalar_broadcast_rewrite`.
+# parametric and none reaches a FileHandle. See the closing note at the end
+# of this file.
 #
 # Phase 1 — pure walker `_collect_scalar_broadcast_sites`:
 #   non-parametric, recursive on `LogicalPlan`. Identifies every
@@ -277,7 +277,7 @@ def _build_inner_sub_plan(
 #   on the same site list emitted by Phase 1 (post-order via a shared
 #   index counter passed by reference).
 #
-# Why the split closes the trap: per 35 experiments, the trap
+# Why the split closes the trap: the trap
 # requires ALL THREE legs simultaneously — parametric, recursive, and
 # FileHandle reach. Phase 1's recursion is non-parametric. Phase 2 is
 # neither recursive nor parametric. Phase 3's recursion is
@@ -687,11 +687,11 @@ def _walk_for_agg_fn(
 #
 # The previous `_recurse_into_children[ctx_origin, reg_origin]` parametric
 # recursive walker was the monomorphization trap shape: parametric on the
-# OptimizerContext's origins AND mutually recursive with
-# `scalar_broadcast_rewrite` AND reaching `FileHandle` via
-# `execute_plan_on_session` from inside the recursion. The 3-phase design
-# replaces it with the non-parametric `_collect_scalar_broadcast_sites`
+# origins of an `OptimizerContext` (not in this tree) AND mutually recursive
+# with `scalar_broadcast_rewrite` AND reaching `FileHandle` via
+# `execute_plan_on_session` (not in this tree) from inside the recursion. The
+# 3-phase design replaces it with the non-parametric `_collect_scalar_broadcast_sites`
 # (Phase 1) + non-parametric `_rewrite_scalar_broadcast_sites`
 # (Phase 3); the dependency lookup is the FLAT for-loop in
 # `scalar_broadcast_rewrite`'s body (Phase 2), and execution is outside
-# komira_optimizer. See that docstring above for the full rationale.
+# komira_optimizer. See the "Main rule body" notes above for the rationale.

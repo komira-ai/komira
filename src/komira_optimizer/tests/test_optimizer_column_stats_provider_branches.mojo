@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # The welded provider tests build every relation as a bare Scan whose
-# row_count equals its cardinality, with HLL-backed Tier-1 stats. These tests
-# reach the remaining arms:
+# row_count equals its cardinality; their Parquet-metadata (Tier-1) stats are
+# all HLL-backed. These tests reach the remaining arms:
 #   * `_leaf_raw_row_count` through Filter and Project, on a Scan with no
 #     row_count, on a non-scan leaf, and on a node whose tag names a payload
 #     the node does not carry.

@@ -14,20 +14,22 @@
 #   * BEFORE `partition_prune_scans` — so a view that wraps a
 #     partitioned Parquet scan gets resolved first, then the partition
 #     prune sees the real scan.
-#   * BEFORE the `structural_hash` is taken for the factory
-#     cache key — so two consumers of the same view (`ctx.view(h).filter(p)`
+#   * BEFORE the `structural_hash` is taken for a plan cache key (the
+#     cache and the session API that registers views are not in this tree)
+#     — so two consumers of the same view (`ctx.view(h).filter(p)`
 #     and `ctx.view(h).select(c)`) produce *resolved* plans, and a query
 #     against `ctx.view(h).filter(p)` produces the SAME structural_hash as
 #     a manually-written `base_df.filter(p)` (where `base_df` is the plan
 #     the view wraps). That structural-hash equivalence is the load-bearing
-#     invariant that makes the view machinery cache-effective.
+#     invariant that makes views cache-effective.
 #
 # After this pass returns, the plan is guaranteed to contain ZERO
 # `PLAN_VIEW_REF` nodes (an assertable invariant — a surviving
 # `PLAN_VIEW_REF` is a bug).
 #
 # May raise `ViewRecursionLimitExceeded` (depth or cycle) at compile time.
-# This is strictly stronger than `create_view`'s create-time depth guard:
+# This is strictly stronger than a create-time depth guard at view
+# registration (the registering API is not in this tree):
 # with the lazy `ctx.view(handle)` shape (a `PLAN_VIEW_REF` leaf), a chain
 # `create_view("a", df_over_view_b)` / `create_view("b", df_over_view_a)`
 # only forms a cycle once BOTH views exist — the create-time per-plan depth
@@ -40,7 +42,7 @@
 #     (DuckDB has explicit `WITH RECURSIVE`, not view-of-view recursion)
 #     are bounded by `max_expression_depth`. Our pass is the same
 #     "inline at planning time" shape; the depth/cycle guard is ours.
-#   * DataFusion `EngineContext::register_table(name, ViewTable)` +
+#   * DataFusion `SessionContext::register_table(name, ViewTable)` +
 #     `ViewTable::scan` returns the view's `LogicalPlan` which the
 #     `Analyzer`'s `InlineTableScan` rule splices in (DataFusion calls it
 #     "inline table scan"). Same shape; DataFusion's recursion guard is
@@ -50,9 +52,9 @@
 # `partition_prune_scans` / `propagate_statistics` /
 # `flatten_dependent_joins`). The pass takes the view registry by `ref`
 # (the `Slab[Optional[LogicalPlan]]` plan store + the `Dict[String, Int]`
-# name→idx map) — both `komira_collections` container types, so the compiler does
-# NOT import the SDK (`komira_optimizer` builds without it). The SDK threads
-# `session_ctx._view_slab` / `session_ctx._view_name_to_idx` at the call
+# name→idx map) — both `komira_collections` container types, so
+# `komira_optimizer` does NOT import the SDK and builds without it. The caller
+# that owns the view registry (not in this tree) threads both at the call
 # site.
 # =============================================================================
 
@@ -108,8 +110,8 @@ def view_resolution_pass(
     (`cte_names` / `cte_plans` — the `with_cte["name"](inner^)` registry,
     threaded in by the caller for one statement only), then the
     persistent view registry (`view_name_to_idx` /
-    `view_slab` — `ctx.create_view`). **CTE scope wins**: a name bound by
-    `with_cte` shadows a same-name `ctx`-registered view (matching DuckDB,
+    `view_slab`, owned by the caller). **CTE scope wins**: a name bound by
+    `with_cte` shadows a same-name registered view (matching DuckDB,
     which resolves CTEs before catalog tables). It deep-copies the matched
     plan, recursively resolves *that* plan's refs (depth-first; depth limit
     16; cycle detection via a name-stack), and splices the fully-resolved
@@ -118,10 +120,10 @@ def view_resolution_pass(
 
     `cte_names` + `cte_plans` are the `CteScope`'s internal
     storage (a parallel `List[String]` + `Slab[LogicalPlan]`), passed by
-    `ref` so the compiler stays SDK-free (both are
+    `ref` so `komira_optimizer` stays SDK-free (both are
     `komira_collections` / stdlib container types — same discipline as the view
-    registry threading). The SDK passes the `CteScope`'s `names_ref()` /
-    `plans_ref()`. Pass empty containers (`List[String]()` /
+    registry threading). A caller holding a `CteScope` is designed to pass its
+    `names_ref()` / `plans_ref()`. Pass empty containers (`List[String]()` /
     `Slab[LogicalPlan]()`) for the no-CTE case.
 
     Idempotent: a plan with no view refs is returned structurally
@@ -133,10 +135,9 @@ def view_resolution_pass(
           stack — e.g. a `cte_ref["x"]` whose bound plan transitively
           references `cte_ref["x"]`).
         * `ViewNotFound`: a `PLAN_VIEW_REF` names something present in
-          NEITHER scope (a `cte_ref["typo"]`, or a `ctx.view` whose view
-          was dropped). For a plan produced via `ctx.view(handle)` the
-          handle was already validated; for `cte_ref` this is the
-          mistyped-name surface.
+          NEITHER scope (a `cte_ref["typo"]`, or a view ref whose view
+          was dropped from the registry). For a mistyped CTE name this is
+          the error surface.
     """
     view_resolution_pass_inplace(
         plan, view_slab, view_name_to_idx, cte_names, cte_plans
@@ -149,11 +150,11 @@ def view_resolution_pass(
     ref view_slab: Slab[Optional[LogicalPlan]],
     ref view_name_to_idx: Dict[String, Int],
 ) raises -> LogicalPlan:
-    """Convenience overload — resolve only against the ctx view registry
+    """Convenience overload — resolve only against the view registry
     (no CTE scope). Equivalent to the 5-arg form with empty `cte_names` /
     `cte_plans`. A caller with a per-statement CTE scope calls the 5-arg
     form; this overload exists for
-    callers (e.g. focused unit tests) that exercise the `ctx.view` path
+    callers (e.g. focused unit tests) that exercise the view-registry path
     in isolation. (`ref` params can't carry defaults, hence the overload
     rather than a default arg).
     """
@@ -225,7 +226,7 @@ def _resolve_view_refs_inplace(
                     + " '" + vname + "' (resolution chain already contains it: "
                     + _join_names(name_stack) + ")"
                 )
-        # --- resolve: CTE scope wins over the ctx view registry ---
+        # --- resolve: CTE scope wins over the view registry ---
         # (matches DuckDB — CTEs are bound before catalog tables/views).
         var expanded = _expand_ref(
             vname, view_slab, view_name_to_idx, cte_names, cte_plans
@@ -323,21 +324,22 @@ def _expand_ref(
     ref cte_plans: Slab[LogicalPlan],
 ) raises -> LogicalPlan:
     """Look up `vname` and return a deep clone of the matched (still
-    UNRESOLVED) plan. CTE scope is consulted first, then the ctx view
+    UNRESOLVED) plan. CTE scope is consulted first, then the view
     registry. Raises `ViewNotFound` if `vname` is in neither scope or its
     registry slot is empty."""
     # --- CTE scope (statement-scoped `with_cte` bindings) ---
     for i in range(len(cte_names)):
         if cte_names[i] == vname:
             return cte_plans[i].copy()
-    # --- ctx view registry (persistent `ctx.create_view`) ---
+    # --- persistent view registry (owned by the caller) ---
     if vname in view_name_to_idx:
         var idx = view_name_to_idx[vname]
         # `view_slab[idx]` is `Optional[LogicalPlan]`; a live registry
-        # entry is always `Some` (drop_view sets it to `None` AND removes
-        # the name→idx mapping, so a name present in `view_name_to_idx`
-        # always maps to a `Some` slot). A violated invariant raises
-        # `ViewNotFound` rather than aborting in `.value()`.
+        # entry is always `Some` (the registry's owner is designed to set a
+        # dropped view's slot to `None` AND remove the name→idx mapping, so a
+        # name present in `view_name_to_idx` always maps to a `Some` slot). A
+        # violated invariant raises `ViewNotFound` rather than aborting in
+        # `.value()`.
         if not view_slab[idx]:
             raise Error(
                 "ViewNotFound: '" + vname + "' maps to an empty view-registry"

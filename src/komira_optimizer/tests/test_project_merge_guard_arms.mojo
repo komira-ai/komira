@@ -218,7 +218,8 @@ def test_safe_as_built_node_over_pass_through_and_computed() raises:
 
 
 def test_safe_alias_pass_through_spelling() raises:
-    # The python skins author Alias(ColRef(k), "k") for every kept column;
+    # A front end may author Alias(ColRef(k), "k") for every kept column (the
+    # python skins, which are not in this tree, do);
     # `_is_col_named` must see through alias layers that keep the name, and
     # must refuse one that renames. Defect: alias layers treated as computed,
     # or any alias treated as a pass-through.

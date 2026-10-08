@@ -84,9 +84,9 @@ def push_limit_down_inplace(mut plan: LogicalPlan) raises:
 
         # Pattern: Limit(N, Project(exprs, gc)) -> Project(exprs, Limit(N, gc))
         # OFFSET: only push a plain LIMIT (offset == 0) below Project. A
-        # RANGE (offset > 0) is a terminal viewport verb whose offset the
-        # materialize sink absorbs at the plan ROOT (skip-count); pushing it
-        # under Project would move it off the root and the sink would miss it.
+        # RANGE (offset > 0) is a terminal viewport verb whose offset is
+        # designed to be applied at the plan ROOT by the executing caller (not
+        # in this tree); pushing it under Project would move it off the root.
         # offset == 0 keeps the exact pre-range pushdown behavior.
         if (
             plan._limit.value()[].child[].tag == PLAN_PROJECT
@@ -217,9 +217,9 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 #
 # The Project above an Aggregate is evaluated over EVERY group when the TopN
 # sits above it, and over only `n` rows when it sits below; and below it the
-# TopN's child IS the aggregate, so the AGG-TOPK stamp (which refuses a
-# Project that does more than pass names through) no longer refuses a Project
-# that renames or computes a comparator column.
+# TopN's child IS the aggregate, so the AGG-TOPK stamp (a physical-plan step,
+# not in this tree, that refuses a Project doing more than pass names through)
+# no longer refuses a Project that renames or computes a comparator column.
 #
 #   * ClickBench Q35. The agg-group FD rule re-emits
 #     `client_ip - 1/-2/-3` in the post-aggregate Project, which is then
@@ -284,19 +284,17 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 #
 # ⛔ THE PROJECT IS NOW EVALUATED OVER `n` ROWS INSTEAD OF EVERY GROUP. For a
 # deterministic, row-local expression that is the same value on every row it
-# still sees. Anything else changes the answer: a window function (a later pass
-# would turn it into a PartitionBy over the TopN's `n` rows), an aggregate, a
+# still sees. Anything else changes the answer: a window function (it would
+# see the TopN's `n` rows instead of every group), an aggregate, a
 # UDF, a correlated subquery. So every COMPUTED Project entry must pass
 # `_row_local_shape` -- a FAIL-CLOSED allow-list walked over the WHOLE
 # expression (col-ref, literal, alias, cast, unary, binary), not a check of the
 # top tag. ⚠ A top-tag check is what the first draft of this rule used
 # (the agg-group FD rule's `_derived_key_is_deterministic`, which is right for a GROUP
-# BY key, where the binder has already refused windows): it admitted
-# `rank() OVER (...) + 1`, whose top tag is a BINARY_OP, and
-# `test_nested_window_function_in_the_project_declines` is the RED that caught
-# it. An expression that would RAISE on a group the TopN discards no longer
-# raises; that is the one observable difference and it runs in the direction
-# of answering.
+# BY key, where a binder (not in this tree) refuses windows): it admitted
+# `rank() OVER (...) + 1`, whose top tag is a BINARY_OP. An expression that
+# would RAISE on a group the TopN discards no longer raises; that is the one
+# observable difference and it runs in the direction of answering.
 # =============================================================================
 
 
@@ -590,9 +588,9 @@ def _build_topn_below_project(imm plan: LogicalPlan) raises -> Optional[LogicalP
 # =============================================================================
 
 def propagate_statistics(var plan: LogicalPlan) -> LogicalPlan:
-    """Propagate estimated row counts through the plan tree.
+    """Compute `estimate_row_count` over the plan and discard it.
 
-    This is an annotation pass -- the plan structure does not change.
+    Nothing is stored on the plan; it is returned unchanged.
     """
     _ = estimate_row_count(plan)
     return plan^
@@ -601,15 +599,18 @@ def propagate_statistics(var plan: LogicalPlan) -> LogicalPlan:
 def estimate_row_count(plan: LogicalPlan) -> Int:
     """Estimate the number of output rows for a plan node.
 
-    Uses simple heuristics:
-      Scan: 1_000_000 (default, would use Parquet stats in production)
+    Uses simple heuristics (each halving/tenth floored at 1):
+      Scan: 1_000_000 (a fixed default; no statistics are read)
       Filter: child * 0.5
       Aggregate: child * 0.1
-      Join (inner/cross): left * right * 0.3
+      Join (cross): left * right
       Join (semi/anti): left * 0.5
-      Project: child (unchanged)
-      Limit(N): min(N, child)
-      Sort/Distinct/TopN: child
+      Join (other): min(left * right, 1_000_000_000) * 0.3
+      Project / Sort: child (unchanged)
+      Limit(N, offset): min(N, max(child - offset, 0))
+      Distinct: child * 0.5
+      TopN(N): min(N, child)
+      Any other node: 1_000_000
     """
     if plan.tag == PLAN_SCAN:
         return 1_000_000

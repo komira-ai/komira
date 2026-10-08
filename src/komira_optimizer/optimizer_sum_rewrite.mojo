@@ -19,7 +19,7 @@
 # WHY IT IS WORTH ANYTHING AT ALL
 # ===============================
 # `sum(rw + 1)` is a SUM over a COMPUTED input, so `materialize_agg_input`
-# (this file's downstream neighbour) mints a `__agg_in_<k>` column for
+# (a pass designed to run after this one, not in this tree) mints a `__agg_in_<k>` column for
 # it and splices a Project below the aggregate to materialise it. At 90
 # aggregates that is 90 derived columns, and it also pushes the aggregate's
 # child from a bare SCAN to a PROJECT.
@@ -53,11 +53,12 @@
 # NULL SEMANTICS -- WHY `COUNT(x)` AND NOT `COUNT(*)`
 # ===================================================
 # `sum(x + C)` skips rows where `x` IS NULL. `COUNT(x)` counts non-NULL `x`
-# (`agg_scalar_fold`, "COUNT(col) counts non-null rows"), so
+# (standard SQL), so
 # `sum(x) + C*count(x)` skips exactly the same rows. `COUNT(*)` would count the
 # NULL rows too and answer `C` too high per NULL. Over an all-NULL or empty
 # input `sum(x)` is NULL and `NULL + C*0` is NULL -- which is what `sum(x + C)`
-# answers. Pinned by `test_optimizer_sum_rewrite.mojo`.
+# answers. `test_optimizer_sum_rewrite_gates.mojo` pins that the replacement
+# is `COUNT(x)`, not `COUNT(*)`.
 #
 # ⚠ RESIDUAL, STATED RATHER THAN GUARDED: the rewrite is exact in Int64 whenever
 # `sum(x)` itself is representable. A pathological input whose `x` values
@@ -247,7 +248,8 @@ def rewrite_sum_of_offset_inplace(mut plan: LogicalPlan) raises:
 
     Children are rewritten FIRST so a nested aggregate is settled before its
     parent is inspected. The node kinds walked mirror
-    `materialize_agg_input_inplace`; a kind not walked simply does not fold.
+    `materialize_agg_input_inplace` (not in this tree); a kind not walked
+    simply does not fold.
     """
     if plan.tag == PLAN_AGGREGATE:
         rewrite_sum_of_offset_inplace(plan._aggregate.value()[].child[])

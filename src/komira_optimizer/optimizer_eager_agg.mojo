@@ -7,7 +7,7 @@
 # below_join`, which requires ALL agg-referenced columns on one side and
 # therefore fires on ZERO TPC-H queries).
 #
-# Pattern (this file, SLICE 1 = INNER only):
+# Pattern (INNER shown; a LEFT join is handled only when S is its right side):
 #
 #     Aggregate(GB, AGGS, Join(L, R, L.lk = R.rk, INNER))
 #
@@ -50,11 +50,10 @@
 # "eager agg is gated on real footer row counts". WHEN THERE
 # IS NO FOOTER ROW COUNT, THIS COST GATE CANNOT DECLINE AT ALL:
 #
-#   * `LogicalPlan.scan_from_source` defaults `row_count = None`, and every
-#     NON-parquet reader takes that default (in-memory, CSV, NDJSON, Avro).
-#     Only the parquet readers pass `row_count=Optional(footer.row_count)` --
-#     and even a PARQUET leaf lacks it if the footer read failed, or if it was
-#     built by a path that does not stamp one.
+#   * `LogicalPlan.scan_from_source` defaults `row_count = None`. A scan has a
+#     row count only when the code that built it stamped one (a parquet footer
+#     row count is the designed source); an in-memory, CSV, NDJSON or Avro
+#     scan, or a parquet scan whose footer row count was not stamped, has none.
 #   * `estimate_cardinality` then returns `DEFAULT_ROW_COUNT` = 1,000,000, which
 #     clears `EAGER_MIN_S_ROWS` (50,000) 20x over — on a FOUR-ROW fixture.
 #   * `_leaf_base_rows` returns `EAGER_BASE_NO_STATS` for such a scan, and
@@ -69,14 +68,12 @@
 # documented behaviour of a stats-free plan — but do not cite this pass as
 # "runtime-data-gated" without saying "when a footer exists".
 #
-# ⭐ AND THE OTHER HALF OF THAT PARAGRAPH IS NO LONGER TRUE, BY DELIBERATE FIX
-# (2026-09-17). The paragraph above described TWO failures under ONE `-1`, and
-# only the FIRST is the stats-free behaviour it argues for. The second — the
-# other side of the join bottoming out on a JOIN, so `_leaf_base_rows` reaches
-# no scan base at all — is not a missing statistic, it is a MISSING
-# DENOMINATOR: there is nothing for a cover ratio to be a ratio OF. That case
-# now returns `EAGER_BASE_MULTI_WAY` and gate 3 DECLINES on it (clause 3a).
-# Before the split it merely skipped the test, so the pass fired unguarded on
+# ⭐ THE CARVE-OUT ABOVE COVERS ONLY A SCAN WITHOUT A ROW COUNT. When the other
+# side of the join bottoms out on a JOIN, `_leaf_base_rows` reaches no scan
+# base at all. That is not a missing statistic, it is a MISSING DENOMINATOR:
+# there is nothing for a cover ratio to be a ratio OF. That case returns
+# `EAGER_BASE_MULTI_WAY` and gate 3 DECLINES on it (clause 3a). Both cases once
+# shared one `-1` and this one skipped the test, so the pass fired unguarded on
 # every 3-or-more-table query. `tpch/q3_shipping_priority` is that shape: its
 # cover ratio, had it been computed, is 147,126/1,500,000 = 9.81% against the
 # 1/2 threshold.
@@ -149,7 +146,7 @@ comptime EAGER_MIN_S_ROWS: Int = 50_000
 
 # Downstream-join-selectivity gate: fire only when the OTHER side keeps at
 # least COVER_NUM/COVER_DEN of its base (pre-filter) rows. A selectively-
-# filtered other side (e.g. Q10's date-filtered orders, ~6% surviving)
+# filtered other side (e.g. Q10's orders, filtered to a three-month range)
 # means the join discards most S rows cheaply, so pre-aggregating all of S
 # is pure overhead. q13's customer side is unfiltered (100% cover) -> fire.
 comptime EAGER_OTHER_COVER_NUM: Int = 1
@@ -161,9 +158,9 @@ comptime EAGER_OTHER_COVER_DEN: Int = 2
 # keeps its meaning.
 #
 #   EAGER_BASE_NO_STATS    A single scan base IS reachable; it simply carries
-#                          no `row_count`. Every non-parquet reader takes that
-#                          default, as does any parquet leaf whose footer was
-#                          not stamped. This is the SHAPE the pass was designed
+#                          no `row_count` (a non-parquet scan, or a parquet
+#                          leaf whose footer row count was not stamped).
+#                          This is the SHAPE the pass was designed
 #                          for and only the STATISTIC is absent, so the cover
 #                          test is skipped and the pass may still fire — the
 #                          documented stats-free behaviour described in this
@@ -219,10 +216,10 @@ def _write_eager_op_tag[W: Writer](mut writer: W, func: UInt8):
     The arms live here so no string constant is ever SELECTED and
     returned. A literal-returning ladder lowers to two parallel
     (pointer, length) constant arrays whose two call-site references
-    an `--emit shared-lib` link binds INDEPENDENTLY; once a
-    shipped `_komira` bound such a pair CROSSED and took the
-    interpreter with it. See
-    `scripts/lint_literal_return_ladder.py`."""
+    an `--emit shared-lib` link binds INDEPENDENTLY, so a pair bound
+    CROSSED pairs one string's pointer with another's length. The lint
+    that checks for this (`scripts/lint_literal_return_ladder.py`) is
+    not in this tree."""
     if func == AGG_SUM:
         writer.write("sum")
         return
@@ -402,9 +399,10 @@ def _coalesce_zero(var col_name: String) -> Expr:
     SLICE 2 (LEFT-count null bin): a LEFT join's unmatched rows null-extend
     the pushed side, so the partial COUNT reads NULL. The un-pushed
     `count(col)` counts non-NULLs -> 0 for an unmatched row, so the merge
-    must map NULL partial-count -> 0. `materialize_agg_input` (which runs
-    after this pass) materializes this WHEN expr into a Project column that
-    the merge SUM then reads. This is the `0|50004` c_count=0 bin in q13."""
+    must map NULL partial-count -> 0. `materialize_agg_input` (not in this
+    tree) is designed to run after this pass and materialize this WHEN expr
+    into a Project column that the merge SUM reads. This is q13's c_count=0
+    group."""
     var isnull = Expr.unary(UN_IS_NULL, Expr.col_ref(col_name.copy()))
     var zero = Expr.literal(ScalarValue.from_int(0))
     var passthrough = Expr.col_ref(col_name^)
@@ -665,7 +663,7 @@ def _eager_rec(var plan: LogicalPlan) raises -> LogicalPlan:
                 )
 
         # Case B: Aggregate over a pure-narrowing Project over a fireable
-        # join (column-pruning inserts this Project below the aggregate).
+        # join (column pruning, not in this tree, inserts such a Project).
         # Peel the Project: the merge aggregate resolves GB + partial-agg
         # outputs against the join output directly, so dropping a plain
         # column-narrowing Project is answer-preserving.

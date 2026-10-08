@@ -48,16 +48,17 @@
 # binding into the once-optimized output. The two folding passes are designed
 # for FIXED POSITIONS in the pass order -- `resolve_scalar_subqueries_rewrite`
 # BEFORE `flatten_dependent_joins`, constant folding and `push_predicates_down`,
-# and `scalar_broadcast_rewrite` BEFORE projection pushdown, column pruning,
-# join reorder (`reorder_joins`) and limit pushdown (`push_limit_down`). Every
+# and `scalar_broadcast_rewrite` BEFORE projection pushdown and column pruning
+# (neither is in this tree), join reorder (`reorder_joins`) and limit pushdown
+# (`push_limit_down`). Every
 # one of those later passes is designed to see the FOLDED plan. Re-running from
 # the original with the bindings in hand makes the fold happen at its position
 # with its value. Binding into the already-optimized plan instead would be a
 # cheaper-looking shortcut that silently changes the plan shape.
 #
 # ★ WHY IT TERMINATES IN TWO. Both passes are FIXPOINTS once bound: after
-# `resolve_scalar_subqueries` folds, no `EXPR_CORRELATED_SUBQUERY` remains for
-# Phase 1 to collect; after `scalar_broadcast` folds, the predicate holds a
+# `resolve_scalar_subqueries_rewrite` folds, no `EXPR_CORRELATED_SUBQUERY` remains
+# for Phase 1 to collect; after `scalar_broadcast_rewrite` folds, the predicate holds a
 # literal and no `EXPR_AGG_FN` remains. So the second pass emits no requests. A
 # caller should still LOOP with a cap rather than assert two, because a chained
 # dependency (a subquery whose inner itself contains one) is a shape the cap
@@ -72,9 +73,10 @@
 # PURE passes with the value in hand (above), NOTHING is lost. Enumerated
 # against the passes in komira_optimizer, in the order they are designed for:
 #
-#   * `partition_prune_scans` and `propagate_statistics` DO route on a
-#     literal's value -- and both are designed to run BEFORE the subquery
-#     fold, so the folded scalar is never visible to them either way.
+#   * `partition_prune_scans` DOES route on a literal's value
+#     (`propagate_statistics` reads no literal at all) -- and both are designed
+#     to run BEFORE the subquery fold, so the folded scalar is never visible to
+#     them either way.
 #   * Constant folding and predicate simplification (not in this tree) are
 #     designed to run AFTER the subquery fold and can see its literal. The
 #     re-plan preserves this exactly.
@@ -141,9 +143,8 @@ struct ScalarDepTable(Movable):
 
     ⚠ REQUESTS AND BINDINGS ARE INDEXED DIFFERENTLY ON PURPOSE. A binding is
     found by KEY (the inner plan's structural hash), because the same subquery
-    appearing N times in a query is ONE dependency -- that is the Q15-shape
-    "same scalar subquery appears N times" win the pre-existing per-call cache bought,
-    and keying by hash preserves it across the execution boundary for free. A
+    appearing N times in a query is ONE dependency -- the TPC-H Q15 shape,
+    where one scalar subquery appears N times, needs one execution. A
     request is appended in ENCOUNTER order and de-duplicated by the same key, so
     the executing caller sees each distinct inner plan exactly once.
     """
@@ -233,9 +234,7 @@ struct ScalarDepTable(Movable):
         """A COPY of the i-th requested inner plan, for the caller to execute.
 
         ⚠ A COPY, NOT A BORROW, AND DELIBERATELY SO. Executing a plan CONSUMES
-        it, so the caller needs its own; and `Slab.__getitem__` hands back a
-        wildcard-origin reference, which this repo's pointer rules forbid
-        crossing a module boundary. `_copy_plan` is the same deep copy the
+        it, so the caller needs its own. `_copy_plan` is the same deep copy the
         optimizer passes use, and it REFUSES a corrupt / partially-moved node
         rather than propagating one."""
         return _copy_plan(self.req_plans[i])

@@ -3,9 +3,10 @@
 # Non-equi join predicate decomposition
 # =============================================================================
 #
-# Non-equi / range / complex join support. The DataFrame `predicate=` join
-# API (`l1.anti_join(l3, predicate=(Expr.left("a")==Expr.right("b")) & ...)`)
-# stashes the raw, side-qualified predicate Expr in `JoinData.residual` with
+# Non-equi / range / complex join support. A DataFrame-style `predicate=`
+# join (`l1.anti_join(l3, predicate=(Expr.left("a")==Expr.right("b")) & ...)`;
+# that frontend is not in this tree) builds a `LogicalPlan.join` that carries
+# the raw, side-qualified predicate Expr in `JoinData.residual` with
 # `left_on`/`right_on` empty. THIS pass walks the plan, finds every PLAN_JOIN
 # carrying such a raw residual, and decomposes it:
 #
@@ -25,17 +26,17 @@
 #   - Evaluating the residual is outside komira_optimizer: the plan
 #     compiler and the residual join probe that consume it are not in this
 #     tree. The residual is designed to be evaluated per candidate
-#     equi-matched (or, with zero equi-keys, cross-product) pair, emitting
-#     per join type (INNER: filter; LEFT: bitmap + NULL-fill; SEMI/ANTI:
-#     bitmap).
+#     equi-matched (or, with zero equi-keys, cross-product) pair, per join
+#     type (INNER keeps passing pairs; LEFT also NULL-fills left rows with no
+#     passing pair; SEMI/ANTI test whether a passing pair exists).
 #
-#   Important downstream-rule invariant: this pass runs
+#   Important downstream-rule invariant: this pass is designed to run
 #   BEFORE every join-reorder / rebuild rule. The ~20 sites that
 #   rebuild `LogicalPlan.join(...)` all default `residual=None`. For a
 #   residual-carrying join that would silently DROP the condition (→ wrong
-#   results). Today the join-reorder rules operate only on plain equi-joins,
-#   so no rule sees a residual-carrying join; any future rule that reaches
-#   one MUST preserve `residual`.
+#   results). `optimizer_reorder` treats a residual-carrying join as an
+#   opaque leaf and rebuilds it with its residual; any other rule that
+#   reaches one MUST preserve `residual`.
 #
 # References — studied before coding:
 #   - DuckDB `src/include/duckdb/planner/operator/logical_comparison_join.hpp`
@@ -48,7 +49,7 @@
 #   - DuckDB `src/planner/subquery/flatten_dependent_join.cpp:195-260`
 #     (`CreateDelimJoinConditions`): builds `JoinCondition` objects from a
 #     flattened correlated subquery, including `COMPARE_NOTEQUAL`. This
-#     pass runs AFTER `flatten_dependent_joins` so a flattened correlated
+#     pass is designed to run AFTER `flatten_dependent_joins` so a flattened correlated
 #     subquery's join gets decomposed if it ever carries a
 #     `predicate=`-style residual.
 #   - DataFusion `physical-plan/src/joins/`: `HashJoinExec` carries
@@ -59,7 +60,7 @@
 #
 # Pass order: komira_optimizer has no driver that orders its passes. This
 # pass is designed to run AFTER `flatten_dependent_joins` and BEFORE the
-# plan's `structural_hash` is taken for a compile cache key. Idempotent: a
+# join-reorder / rebuild rules (see the invariant above). Idempotent: a
 # re-run is a no-op because after the first run the residual contains only
 # plain (COL_SIDE_NONE) col-refs, so `_residual_needs_decompose` returns False.
 # =============================================================================
@@ -119,9 +120,9 @@ def join_predicate_decompose(var plan: LogicalPlan) raises -> LogicalPlan:
     equi-key conjuncts (lifted into `left_on`/`right_on`) and surviving
     conjuncts (AND'd into the rewritten residual). Idempotent.
 
-    Raises: if a residual conjunct is not a recognized join-condition shape
-    that this pass can rewrite to plain col-refs, or if a side-qualified
-    col-ref escaped a join context (surfaced via the rewrite walker).
+    Raises: no residual shape is rejected. A conjunct that does not lift
+    into an equi-key stays in the residual, rewritten to plain col-refs
+    (an Expr kind the rewrite walker does not list is deep-copied as-is).
     """
     join_predicate_decompose_inplace(plan)
     return plan^
@@ -209,26 +210,25 @@ def _maybe_decompose_join(mut plan: LogicalPlan) raises:
         new_residual = OwnedPointer(acc^)
 
     # A surviving residual (any conjunct that did not lift into an
-    # equi-key) is now executable — `plan_compiler._compile_join` threads it
-    # onto the OP_JOIN_PROBE and `execute_residual_join_probe` evaluates it
-    # against the assembled matched-pair (or, with zero equi-keys, cross-
-    # product) batch. The residual conjuncts have already been rewritten to
-    # plain (COL_SIDE_NONE) col-refs over the joined-row schema, so a re-run
-    # of this pass is a no-op (`_residual_needs_decompose` returns False).
+    # equi-key) stays on the join for the caller that executes the plan
+    # (not in this tree) to evaluate against each matched pair (or, with
+    # zero equi-keys, each cross-product pair). The residual conjuncts have
+    # already been rewritten to plain (COL_SIDE_NONE) col-refs over the
+    # joined-row schema, so a re-run of this pass is a no-op
+    # (`_residual_needs_decompose` returns False).
     #
-    # NB: this pass runs BEFORE every join-reorder /
+    # NB: this pass is designed to run BEFORE every join-reorder /
     # rebuild rule — and either fully lifts the residual into equi-keys
     # (residual=None, indistinguishable from a classic `on=` join) or
     # produces a fully-rewritten residual. Downstream rules that rebuild
     # `LogicalPlan.join(...)` default `residual=None`; for a residual-carrying
     # join those rules would silently drop the condition, so the audit
     # constraint is: NO downstream rule may reorder/split a residual-carrying
-    # join. Today the join-reorder rules (`optimizer_dpccp` / `reorder`)
-    # only operate on plain equi-joins; if a future rule reaches a
-    # residual-carrying join it must preserve `residual`. (The
-    # `plan_compiler._compile_join` backstop catches a dropped residual only
-    # in the sense that it stops being None — it cannot detect a *partially*
-    # dropped one. Keep this invariant in mind when adding join rules.)
+    # join. `optimizer_reorder` treats a residual-carrying join as an opaque
+    # leaf and rebuilds it with its residual; if another rule reaches a
+    # residual-carrying join it must preserve `residual`. Nothing in this
+    # tree detects a dropped or a *partially* dropped residual. Keep this
+    # invariant in mind when adding join rules.
 
     # Rebuild the JoinData with the lifted equi-keys + the rewritten residual.
     # Children / join_type / algo_hint preserved.
@@ -293,7 +293,8 @@ def _rewrite_strip_sides(expr: Expr, left_cols: List[String]) -> Expr:
     name unless it collides with a left-input column name, in which case
     the `<name>_right` form is used (matching `LogicalPlan.join`'s
     schema-builder collision-rename). COL_SIDE_NONE col-refs pass through
-    unchanged. All other Expr variants are walked recursively.
+    unchanged. Variants with Expr children are walked recursively; the
+    childless ones in the final arm are deep-copied as-is.
     """
     if expr.tag == EXPR_COL_REF:
         var name = expr.col_ref_name()
@@ -362,7 +363,8 @@ def _rewrite_strip_sides(expr: Expr, left_cols: List[String]) -> Expr:
         # EXPR_LITERAL, EXPR_COL_IDX, EXPR_WINDOW_FN, EXPR_CORRELATED_SUBQUERY,
         # EXPR_BETWEEN, EXPR_SORT_KEY — no side-qualified col-refs to rewrite
         # (a correlated subquery in a join residual would be a frontend bug;
-        # flatten_dependent_joins runs before this pass). Deep-copy as-is.
+        # flatten_dependent_joins is designed to run before this pass).
+        # Deep-copy as-is.
         return expr.copy()
 
 

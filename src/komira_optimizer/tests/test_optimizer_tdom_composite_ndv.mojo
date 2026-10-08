@@ -14,10 +14,9 @@
 #     (composite_NDV == |rel|) when exactly one side qualifies,
 #     -1 when neither qualifies, -2 when both qualify.
 #
-# The signal is PURELY ADDITIVE: the cost model in `optimizer_tdom_cost.mojo`
-# is NOT touched. A later step will consume these signals
-# to gate the FK-PK clamp `est = min(est, max(|L|, |R|))` and re-apply
-# the MAX-within-bucket algebra fix.
+# The cost model (`optimizer_tdom_cost.mojo`) and the cardinality model
+# (`optimizer_tdom_card.mojo`) consume these signals to gate the FK-PK clamp
+# `est = min(est, max(|L|, |R|))`.
 #
 # Test cases:
 #   1. Standalone PK detection — a 2-relation single-key join where one
@@ -188,13 +187,14 @@ def test_composite_edge_partsupp_shape() raises:
       lineitem: min(200K * 10K, 6M)     = min(2e9, 6M)    = 6M
                 → == |lineitem|   → ALSO flagged PK by the heuristic
 
-    The heuristic over-detects lineitem (true cardinality of distinct
-    (l_partkey, l_suppkey) tuples in TPC-H lineitem is ~480K-1.4M, not
-    6M — l_partkey and l_suppkey are NOT independent, but the
+    The heuristic over-detects lineitem (every distinct (l_partkey,
+    l_suppkey) tuple in TPC-H lineitem is a partsupp key, so there are at
+    most 800K, not 6M — l_partkey and l_suppkey are NOT independent, but the
     independence-product clamps at |rel| which equals the row count).
     `composite_ndv_pk_side` returns -2 (ambiguous / both qualify) in
-    this case — the clamp will own the tie-break logic (e.g. prefer the
-    side with smaller cardinality, or use additional FK signals).
+    this case — the clamp owns what -2 means
+    (`optimizer_tdom_cost._bucket_has_fkpk_signal` clamps when either side
+    is Tier-1 backed).
 
     This test pins the EXACT Q9 numbers
     (SF1 fixtures).

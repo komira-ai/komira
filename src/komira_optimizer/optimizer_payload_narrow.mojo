@@ -89,8 +89,8 @@ def _is_narrowable_declared_type(t: ArrowType) -> Bool:
 # ⚠ THIS IS DESIGNED TO MIRROR THE JOIN LEAF'S SIDE RESOLVER
 # (`join_node_exec._resolve_join_scan_side`, not in this tree) AND TO STAY A
 # SUBSET OF IT. Stamping a scan the leaf will not recognise is harmless (the
-# spec is advisory and nothing reads it) but it is dead weight and it makes the
-# EXPLAIN lie about what will happen. The shapes admitted here are
+# spec is advisory and nothing reads it) but it is dead weight. The shapes
+# admitted here are
 # `PLAN_PROJECT? -> PLAN_FILTER* -> PLAN_SCAN(parquet)`.
 
 
@@ -105,9 +105,9 @@ def _peel_to_parquet_scan(mut node: LogicalPlan) -> Bool:
     if node.tag == PLAN_FILTER and node._filter:
         return _peel_to_parquet_scan(node._filter.value()[].child[])
     if node.tag == PLAN_PROJECT and node._project:
-        # A COMPUTED project is not peeled: the leaf declines it, and a column
-        # this rule narrowed would be read by an expression evaluator that
-        # knows nothing about `base`.
+        # A COMPUTED project is not peeled: the leaf this rule is designed for
+        # declines it, and a column this rule narrowed would be read by an
+        # expression evaluator that knows nothing about `base`.
         ref pd = node._project.value()[]
         if pd.udf:
             return False
@@ -261,7 +261,7 @@ def _narrow_one_side(
 
 def narrow_join_payload_inplace(mut plan: LogicalPlan) raises -> Int:
     """In-place stamp. Returns the number of columns narrowed across the plan
-    (0 for the overwhelmingly common case — a plan with no eligible join).
+    (0 for a plan with no eligible join).
     """
     var total = 0
     if plan.tag == PLAN_JOIN and plan._join:
@@ -276,9 +276,9 @@ def narrow_join_payload_inplace(mut plan: LogicalPlan) raises -> Int:
         # consumer owns.
         if jd.join_type != JOIN_INNER:
             return total
-        # A residual is evaluated by name over the JOINED batch, inside the
-        # leaf, and this rule cannot see where that evaluation sits relative to
-        # the widen. Refuse.
+        # A residual is designed to be evaluated by name over the JOINED batch,
+        # inside the leaf, and this rule cannot see where that evaluation sits
+        # relative to the widen. Refuse.
         if jd.has_residual():
             return total
         # Single equi-key per side — the shape the leaf is designed for.

@@ -11,9 +11,9 @@
 # Without the clamp, the subgraph-merge walk produces a denom that
 # under-estimates the join multiplier for disconnected pieces, and the
 # numerator's full base-card product over-counts the disconnected
-# relations' rows. Q9's `{ps,s,n}` cardinality overshoots from DuckDB's
-# ~898K to ~200M (Cartesian shape), making DPccp pick a degenerate
-# partition over partition A.
+# relations' rows. Q9's `{ps,s,n}` cardinality overshoots DuckDB's ~898K to
+# a Cartesian-scale estimate, which would make a DPccp enumerator (not in
+# this tree) pick a degenerate partition over partition A.
 #
 # This test file pins:
 #   1. The `_is_cross_product_shaped_subset` helper detection (unit).
@@ -54,7 +54,7 @@ from komira_plan_stats.table_stats import TableStats
 
 
 # =============================================================================
-# Q9 SF1 fixture (mirrors test_optimizer_q9_partition_a_enumerated)
+# Q9 SF1 fixture
 # =============================================================================
 
 comptime R_LINEITEM: Int = 0
@@ -133,7 +133,7 @@ def _q9_provider() -> SyntheticColumnStatsProvider:
     """SF1 NDV provider matching Q9's composite-NDV truth.
 
     All injections use `from_hll=True` (Tier-1 backing) so the
-    composite-NDV PK signal is empirically reachable for any bucket
+    composite-NDV PK signal is reachable for any bucket
     that fits within the subset under test.
     """
     var p = SyntheticColumnStatsProvider()
@@ -232,8 +232,8 @@ def test_b6_q9_psn_card_clamped_to_max_base() raises:
     """The load-bearing assertion: `{ps,s,n}` cardinality is clamped at
     max(SF1_PARTSUPP, SF1_SUPPLIER, SF1_NATION) = 800K.
 
-    Without a clamp: ~200M Cartesian estimate.
-    With one: clamped at 800K.
+    Without a clamp: a Cartesian-scale estimate (8e9 raw in the
+    no-Tier-1 trace below). With one: clamped at 800K.
 
     Two clamps can cap `{ps,s,n}`. With the Tier-1 provider the FK-PK
     clamp (Step 5) fires first: in the supplier-nation bucket, nation's
@@ -241,11 +241,10 @@ def test_b6_q9_psn_card_clamped_to_max_base() raises:
     backing, so the FK-PK gate rejects and only the cross-product clamp
     (Step 5b) can cap the estimate.
 
-    DuckDB's empirical Q9 cardinality for `{ps,s,n}` is ~898K — our
-    clamp lands within 11% of DuckDB (acceptance window 10%, slight
-    over-narrowing acceptable; the (b)
-    clamp approximation is the chosen tradeoff vs the deeper (a)
-    equivalence-class-driven denom walk).
+    DuckDB's Q9 cardinality for `{ps,s,n}` is ~898K, the external
+    reference. The 800K ceiling sits below it by design (the (b) clamp
+    approximation is the chosen tradeoff vs the deeper (a)
+    equivalence-class-driven denom walk); the test accepts down to 700K.
     """
     var chain = _build_q9_6edge_chain_40k()
     var provider = _q9_provider()
@@ -267,15 +266,13 @@ def test_b6_q9_psn_card_clamped_to_max_base() raises:
     assert_equal(bound, SF1_PARTSUPP)
 
     # The cardinality should be capped at the bound. Without a clamp it
-    # would be ~200M; we assert <= bound.
+    # would be Cartesian-scale; we assert <= bound.
     assert_true(card <= bound,
                 "clamp must cap {ps,s,n} cardinality at max base card "
                 "(800K). Got card=" + String(card))
 
-    # Within 25% of DuckDB's 898K (we accept slight under-estimate
-    # because the clamp ceiling is max_base, not the post-join card).
-    # DuckDB's 898K vs our 800K = 11% under. The 25% bound is
-    # defensive — actual ratio is much tighter.
+    # Lower bound 700K: the clamp ceiling is max_base (800K), not the
+    # post-join card, so an estimate under DuckDB's 898K is accepted.
     assert_true(card >= 700_000,
                 "clamp should not crush {ps,s,n} below 700K. Got "
                 + String(card))
@@ -342,9 +339,8 @@ def test_b6_q9_lpo_card_unchanged_by_xprod_clamp() raises:
         tdom, chain, lpo_bits, provider, cache,
     )
 
-    # The estimate without the cross-product clamp: ~1.20M, within 5% of DuckDB's
-    # ~1.26M. With it the estimate must be the SAME — the clamp must not fire on
-    # the connected `{l,p,o}` subset.
+    # The cross-product clamp must not fire on the connected `{l,p,o}`
+    # subset, so the estimate stays where the unclamped walk puts it.
     # Acceptance window: within 10% of DuckDB's 1.26M, as the docstring
     # states (1_134_000 to 1_386_000).
     assert_true(card >= 1_134_000 and card <= 1_386_000,

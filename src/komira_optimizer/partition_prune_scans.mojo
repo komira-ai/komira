@@ -338,7 +338,7 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
         if all_pruned:
             # No residual + every path pruned → the result is empty. Replace
             # the Filter's predicate with a literal FALSE (keeps the Filter
-            # node so downstream ops see a zero-row stream from a valid scan).
+            # node, so the plan stays an always-false Filter over a valid scan).
             plan._filter.value()[].predicate = Expr.literal(ScalarValue.from_bool(False))
         else:
             # No residual + some paths kept → the Filter is now a no-op
@@ -464,10 +464,9 @@ def _decide(
         var lv = lit.int_val
         return _cmp_i64(rv, op, lv)
     elif arrow_type == ArrowType.DATE32:
-        # DATE32 partition values are the canonical `YYYY-MM-DD` text; the
-        # literal side of a date predicate, in practice, is also a string
-        # literal of the same shape (the SDK emits date predicates as
-        # string comparisons on the partition col before any date cast).
+        # DATE32 partition values are the canonical `YYYY-MM-DD` text; only
+        # a string literal of the same shape is compared (any other literal
+        # kind is undecided and keeps the path).
         # Byte-lexicographic comparison is order-preserving for ISO dates.
         if not lit.is_string():
             return None

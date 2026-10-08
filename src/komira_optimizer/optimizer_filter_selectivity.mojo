@@ -4,7 +4,7 @@
 #
 # The cost-model in
 # `optimizer_tdom_card.mojo` is structurally correct, but the INPUT
-# `JoinRelation.cardinality` for filtered scans is wrong. The old
+# `JoinRelation.cardinality` for filtered scans was wrong. The old
 # `estimate_cardinality` in `optimizer_stats.mojo` used a flat 50%
 # default for any filter, which under-narrows e.g. Q9's
 # `part.p_name LIKE '%green%'` (DuckDB: 200K → 40K = 20%, ours: 200K → 100K).
@@ -117,7 +117,7 @@ comptime DEFAULT_UNKNOWN_SELECTIVITY: Float64 = 0.5
 
 # BETWEEN x AND y: range-like, slightly tighter than open range (DuckDB
 # treats BETWEEN as the conjunction of two range predicates; we use a
-# single ~25% constant which matches range^2 / 2 + range = ~0.255).
+# single 25% constant, a little below the 30% of one open range).
 comptime DEFAULT_BETWEEN_SELECTIVITY: Float64 = 0.25
 
 
@@ -221,7 +221,7 @@ def _selectivity_of(predicate: Expr, table_stats: Optional[TableStats]) -> Float
         # Pattern-shape-aware differentiation:
         #   STR_STARTS_WITH (anchored prefix): 10%
         #   STR_ENDS_WITH   (anchored suffix): 15%
-        #   STR_CONTAINS    (anchored contains): 20%
+        #   STR_CONTAINS    (unanchored)       : 20%
         #   STR_LIKE        : inspect pattern's leading/trailing '%'
         #     pat%  -> prefix shape  -> 10%
         #     %pat  -> suffix shape  -> 15%
@@ -245,8 +245,8 @@ def _selectivity_of(predicate: Expr, table_stats: Optional[TableStats]) -> Float
 
     # ---- IN-list (col IN [v1, v2, ...]) ----
     if tag == EXPR_IN_LIST:
-        # min(|list| * 1/NDV, 1.0) when NDV known; else |list| * 10%
-        # capped at the 50% unknown ceiling.
+        # min(|list| * 1/NDV, 1.0) when NDV known; else |list| * 10%,
+        # also capped at 1.0.
         var n_values = predicate.in_list_len()
         ref child = predicate.in_list_child_ref()
         var per_value_sel = _equality_selectivity_for_col(child, table_stats)

@@ -1,6 +1,6 @@
 # =============================================================================
 # optimizer_reorder: chain extraction paths, the greedy search and the
-# reorder_joins driver
+# reorder_joins entry point
 # =============================================================================
 #
 # The welded reorder tests cover the per-column edge split and the

@@ -22,14 +22,14 @@
 # join, so executing the plan as written runs the base join TWICE. DuckDB
 # computes it once (the HAVING scalar is one aggregate over the same relation).
 # Subtree-level plan-CSE (`plan_cse_eliminate`, not in this tree) would fold
-# them, but its `PLAN_CSE_REF` output is a DAG edge a tree-shaped executor
-# cannot run; and column pruning does not keep the two germany-join subtrees
-# structurally identical: they are pruned DIFFERENTIALLY (the LEFT reads
-# ps_partkey, the RIGHT does not) -> different `structural_hash` -> nothing
-# folds them.
+# them, but its `PLAN_CSE_REF` output is a DAG edge, and this rewrite keeps the
+# plan a tree; and column pruning (a pass not in this tree) does not keep the
+# two germany-join subtrees structurally identical: it prunes them
+# DIFFERENTIALLY (the LEFT reads ps_partkey, the RIGHT does not) -> different
+# `structural_hash` -> nothing folds them.
 #
-# THE FIX (the same walker-safe "materialize once, share the OUTPUT batch"
-# pattern `optimizer_agg_cse` uses for the q15 shared grouped aggregate)
+# THE FIX (the walker-safe "materialize once, share the OUTPUT batch"
+# pattern; `optimizer_agg_cse`, not in this tree, applies it to q15's aggregate)
 # ============================================================================
 # Recognize the two germany-join relations as THE SAME relation modulo scan
 # projection (a projection-insensitive fingerprint), materialize the WIDER of
@@ -42,7 +42,7 @@
 # an in-memory scan is a leaf the walker already resolves) and each consumer
 # reads its OWN copy of the shared batch, so the single-consumer invariant is
 # preserved and the compared values are byte-identical. The germany join is
-# then BUILT ONCE.
+# then built once, by that caller.
 #
 # BYTE-SAFETY: an aggregate's output schema depends ONLY on its group_by + agg
 # exprs (resolved by column NAME against its child), never on which EXTRA
@@ -51,11 +51,10 @@
 # aggregate output byte-identical; the extra `ps_partkey` column the RIGHT
 # ungrouped SUM never references is simply ignored. The projection-insensitive
 # match requires one relation's output columns to be a proper SUPERSET of the
-# other's (else the fold DECLINES -- conservative, never a wrong answer), and a
-# genuine row-difference would show up in the byte-oracle acceptance test.
+# other's (else the fold DECLINES -- conservative, never a wrong answer).
 #
-# The recurse-and-rebuild walks below mirror `optimizer_agg_cse` /
-# `optimizer_scan_dedup._rewrite`; node kinds not walked simply do not fold.
+# The recurse-and-rebuild walks below cover the single-child kinds and joins;
+# node kinds not walked simply do not fold.
 # =============================================================================
 
 from std.collections import Dict, List, Optional
@@ -216,7 +215,7 @@ def _colnames_superset(a: Schema, b: Schema) -> Bool:
 
 # -----------------------------------------------------------------------------
 # Extract the base RELATION under a CROSS-branch's aggregate. Descends through
-# metadata-only single-child wrappers (Project / Filter / Sort / Limit /
+# single-child wrappers (Project / Filter / Sort / Limit /
 # Distinct / TopN) to the FIRST aggregate and returns a COPY of that aggregate's
 # child (the relation the aggregate reduces).
 # -----------------------------------------------------------------------------
@@ -239,7 +238,8 @@ def _extract_agg_relation(plan: LogicalPlan) raises -> Optional[LogicalPlan]:
 
 
 # -----------------------------------------------------------------------------
-# Phase 1 -- detect: find the FIRST decorrelated JOIN_CROSS whose two branches
+# Phase 1 -- detect: find the FIRST JOIN_CROSS (the shape a decorrelated scalar
+# subquery produces) whose two branches
 # reduce THE SAME relation (projection-insensitive) with one branch's columns a
 # superset of the other's. Returns a COPY of the WIDER relation (the one to
 # materialize once) or None.
@@ -420,5 +420,6 @@ def install_shared_cross_source(
             keys^, desc^, plan._topn.value()[].n, child^, nf_copy^
         )
 
-    # Un-walked kinds (scan / leaves / partition-by / cast): no fold.
+    # Un-walked kinds (scan, partition-by / partition-topn, asof join, union,
+    # view / cse refs, cast): no fold.
     return plan^

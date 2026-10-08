@@ -10,8 +10,9 @@
 # Motivation (design goal — "multiple reads/writes go through the same
 # compiler so we can optimize and just read once"):
 #   The `resolve_scalar_subqueries` pass does MATERIALIZE-AND-SUBSTITUTE:
-#   the inner plan is executed on its own (a `ScalarDepTable` request) and
-#   its value inlined as a literal. So `df.filter(col("c_acctbal") >
+#   the inner plan is executed on its own by the executing caller (a
+#   `ScalarDepTable` request; the caller is not in this tree) and its value
+#   inlined as a literal. So `df.filter(col("c_acctbal") >
 #   scalar_subquery(<agg over customer>))` scans `customer` TWICE — once for
 #   the agg, once for the outer query — two physical plans, and a plan-CSE
 #   cannot span them.
@@ -45,8 +46,9 @@
 # Schema bookkeeping: the CROSS join's output schema = `left.schema ++
 # [the aliased 1-col field]` (the `LogicalPlan.join` factory does this for
 # non-SEMI/ANTI joins). To keep the OWNING node's output schema STABLE
-# (downstream `_compile_node` / optimizer rules / typed-schema mirror all
-# key on the post-decorrelate schema), the rewritten node is wrapped in a
+# (optimizer rules, the typed-schema mirror and a plan compiler that is not in
+# this tree all key on the post-decorrelate schema), the rewritten node is
+# wrapped in a
 # trailing identity `Project` restoring the original output columns — the
 # `__scalar_subq_N` columns never escape past the node that introduced them.
 #
@@ -350,8 +352,8 @@ def _build_cross_chain(var left: LogicalPlan, mut sites: Slab[_DecorrSite]) rais
     """Left-deep chain of `JOIN_CROSS` nodes:
         left' = CROSS( ... CROSS( CROSS(left, inner_0), inner_1) ..., inner_{N-1})
     Each `inner_i` is `inner_plan_i` aliased to `__scalar_subq_<i>`. Empty
-    `left_on` / `right_on` (the CROSS contract — `plan_compiler` never
-    consults them for a CROSS join). Consumes each site's `inner_plan`
+    `left_on` / `right_on` (the CROSS contract — a CROSS join has no join
+    keys). Consumes each site's `inner_plan`
     Optional via `.take()` (leaves the List slot destructor-safe)."""
     var acc = left^
     for i in range(len(sites)):
@@ -379,8 +381,8 @@ def _restore_schema(var node: LogicalPlan, original_schema: Schema) raises -> Lo
     `__scalar_subq_N` columns), wrap in an identity Project restoring the
     original columns. If the schemas already match (e.g. a Project node
     whose rebuilt exprs never referenced an extra column), return `node`
-    unchanged — `eliminate_identity_projects` would only have to remove
-    a redundant Project otherwise."""
+    unchanged — an identity-Project elimination pass (not in this tree)
+    would only have to remove a redundant Project otherwise."""
     if node.output_schema.num_columns() == original_schema.num_columns():
         # Same width — assume same columns (the Project / Filter rebuild
         # preserved them). No wrapper needed.

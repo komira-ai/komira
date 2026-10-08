@@ -77,8 +77,8 @@
 #                    CALLER'S, and the whole reason it is not folded into
 #                    PASS_REFUSED: across an `@extern` seam these two doors are
 #                    what stand between a layout skew / a smuggled LogicalPlan
-#                    and tcmalloc corruption with no diagnostic. A consumer that
-#                    reads this code knows the OPTIMIZER `.so` and this binary
+#                    and memory corruption with no diagnostic. A consumer that
+#                    reads this code knows the optimizer's build and its own
 #                    disagree about the physical-plan contract, which is fixed by
 #                    rebuilding both -- never by editing the query.
 #   PASS_REFUSED     a pass refused. The catch-all.
@@ -87,8 +87,7 @@
 # `SCAN_BINDING_EPOCH_MISMATCH` / `SCAN_BINDING_HANDLE_NOT_BOUND` are imported
 # from the module that RAISES them (`komira_scan_source.scan_resolver`), so a
 # rename moves both sides at once. Re-spelling either literal in this file would
-# create the second source of truth that `lint_boundary_struct_single_
-# declaration.py` exists to prevent, one layer down.
+# create a second source of truth for the same token.
 #
 # ⚠ AND CLASSIFICATION CANNOT MANUFACTURE AN OK. `_classify` is only ever
 # reached from an `except` arm, and its most general answer is a FAILURE code,
@@ -168,10 +167,11 @@ comptime OPTIMIZE_REFUSAL_UNRESOLVED_DEPS: StaticString = (
 )
 """The named token for the round-cap refusal of the dependency protocol.
 
-⚠ THE RAISE SITE MUST IMPORT THIS, NOT RE-SPELL IT. It is the only reason
+⚠ THE RAISE SITE (the round-capped loop, not in this tree) MUST IMPORT THIS,
+NOT RE-SPELL IT. It is the only reason
 `_classify` can tell that refusal apart from any other pass refusal, and a
 second spelling makes the two silently stop matching. Same idiom, and the same
-reason, as `SCAN_BINDING_EPOCH_MISMATCH` and the 13 `PLAN_WIRE_*` tokens."""
+reason, as `SCAN_BINDING_EPOCH_MISMATCH` and the `PLAN_WIRE_*` tokens."""
 
 
 def _classify(message: String) -> Int32:

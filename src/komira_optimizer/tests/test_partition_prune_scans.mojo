@@ -5,7 +5,7 @@
 # Covers:
 #   - partition-prune: a Filter on a partition column prunes the scan's
 #     path list to the matching partitions; the conjunct is dropped.
-# We assert the PRUNED PATH COUNT (not wall time — that's flaky in CI).
+# We assert the PRUNED PATH COUNT.
 #
 # Cases: ==, <, >=, !=, AND of two partition predicates, a mixed
 # predicate (one partition conjunct + one residual conjunct), all-pruned
@@ -201,7 +201,8 @@ def test_prune_literal_on_left() raises:
 
 
 def test_prune_and_two_partition_cols() raises:
-    """`year == 2024 AND month == 01` over (year,month) partitions → 1 file."""
+    """`year == 2024 AND month == "01"` (a string literal over the INT64
+    `month`) over (year,month) partitions → 2 files."""
     var scan = _make_year_month_scan()
     var p1 = Expr.binary(BIN_EQ, Expr.col_ref(String("year")), Expr.literal(ScalarValue.from_int(2024)))
     var p2 = Expr.binary(BIN_EQ, Expr.col_ref(String("month")), Expr.literal(ScalarValue.from_string(String("01"))))

@@ -50,14 +50,15 @@
 # Mirrors DuckDB's `EstimateFilteredCardinality` FK-PK ceiling on the
 # joint set.
 #
-# Cache lifetime: the cache is per-`reorder_joins_with_dp` invocation.
-# Caller owns the Dict[UInt64, Int] and clears it between invocations.
-# DuckDB's `relation_set_2_cardinality` lives on the
-# `CardinalityEstimator` and is rebuilt per join-order optimization
-# pass; our cache is the moral equivalent threaded through DPccp as a
-# mut ref.
+# Cache lifetime: the caller owns the Dict[UInt64, Int] and clears it
+# between join-order passes. Nothing in this tree calls this function
+# outside its tests; the caller it is designed for is a DPccp join
+# enumerator (`optimizer_dpccp`, not in this tree) that threads the
+# cache through as a mut ref. DuckDB's `relation_set_2_cardinality`
+# lives on the `CardinalityEstimator` and is rebuilt per join-order
+# optimization pass; this cache is the equivalent.
 #
-# Encapsulation: SDK-internal module; no UnsafePointer crosses any
+# Encapsulation: no UnsafePointer crosses any
 # boundary. Trait-bound `P: ColumnStatsProvider` matches the rest of
 # the cost module so test SyntheticColumnStatsProvider feeds through
 # one surface.
@@ -314,9 +315,9 @@ def _numerator_for_set(
     this is the load-bearing property that makes the resulting estimate
     partition-INDEPENDENT.
 
-    Returns Float64 because the product can exceed Int64 for SF=100+
-    workloads (e.g. 6 * 1e6 * 1.5e6 * 8e5 * 1e4 * 25 ≈ 1.8e22, which
-    overflows Int64). DuckDB uses double for the same reason.
+    Returns Float64 because the product can exceed Int64 (~9.2e18) even
+    at TPC-H SF1 (Q9's six base tables: 6e6 * 2e5 * 1.5e6 * 8e5 * 1e4 *
+    25 ≈ 3.6e29). DuckDB uses double for the same reason.
 
     The base cardinality is `chain.relations[rel_id].cardinality` —
     which is the POST-FILTER cardinality (see
@@ -362,15 +363,16 @@ def _denominator_for_set[
       2. Initialize empty subgraphs list + empty unused_edge_tdoms set.
       3. For each edge in TDOM-DESC order:
          a. If a single subgraph already spans the full `combined` set,
-            this edge is "extra" — record its TDOM in `unused_edge_tdoms`
-            and continue (DuckDB :305-311).
+            this edge is "extra" — record its class HLL NDV in
+            `unused_edge_tdoms` (Tier-1 classes only, deduplicated by
+            value) and continue (DuckDB :305-311).
          b. Find which existing subgraphs contain each endpoint of the
-            edge. There are three cases:
+            edge. There are four cases:
             - Both endpoints are in NO existing subgraph → create a new
               subgraph spanning both, denom = edge.TDOM (DuckDB :313-326).
             - Both endpoints are in the SAME subgraph → "same subgraph
               edge"; CONTINUE without updating denom (DuckDB :337-342).
-              Track the TDOM in `unused_edge_tdoms`.
+              The TDOM is NOT recorded in `unused_edge_tdoms`.
             - One endpoint in subgraph S, other not in any → extend S
               with the new endpoint, multiply S.denom by edge.TDOM
               (DuckDB :327-345).
@@ -384,12 +386,8 @@ def _denominator_for_set[
       6. Return `subgraphs[0].denom * denom_multiplier`. Defensive: if
          empty or zero, return 1.0 (DuckDB :397-400 fallback).
 
-    For the Q9 worked example:
-      combined = {l, p, o, ps, s, n} (bits = 63 for ids 0..5).
-      8 internal edges f1..f8 sorted by TDOM-DESC.
-      The walk produces denom ~ 1.5e19 (matching DuckDB).
-      numerator = 6M*200K*1.5M*800K*10K*25 = 3.6e25.
-      Cardinality ~ 2.4M (close to DuckDB's 4.8M; ratio within noise).
+    For TPC-H Q9, combined = {l, p, o, ps, s, n} (bits = 63 for ids
+    0..5) and the walk visits every internal edge in TDOM-DESC order.
     """
     var sorted_edges = _collect_internal_edges_sorted(tdom, chain, combined)
 
@@ -496,9 +494,9 @@ def _denominator_for_set[
     var denom_multiplier: Float64 = 1.0 + Float64(len(unused_tdoms))
 
     # If multiple subgraphs remain after the walk (cross-product case),
-    # multiply their denoms (DuckDB :368-378). DPccp only enumerates
-    # connected (csg, cmp) pairs so this should not fire in normal Q9
-    # flow, but the defensive fold matches DuckDB's contract.
+    # multiply their denoms (DuckDB :368-378). A connected subset leaves
+    # one subgraph (a DPccp enumerator asks only for connected
+    # (csg, cmp) pairs); the defensive fold matches DuckDB's contract.
     if len(subgraphs) == 0:
         return 1.0
     var final_denom = subgraphs[0].denom
@@ -551,8 +549,7 @@ def _max_base_card_in_set(
 #
 # Local copy of `_all_bucket_cols_have_hll_signal` from
 # `optimizer_tdom_cost.mojo`. Required here because that helper is module-
-# private. Once the legacy `estimate_with_tdom` is deleted in commit 4 the
-# helper there goes with it; the local copy becomes the canonical home.
+# private.
 
 
 def _bucket_tier1_signal_on_side[
@@ -662,14 +659,14 @@ def _bucket_within_set(
 # of the in-subset edge induced subgraph do not cover all the subset's
 # relations.
 #
-# Background: with the cross-product fallback, DPccp can enumerate
-# partitions like `{ps, s, n}` for Q9 where the only internal explicit
+# Background: with a cross-product fallback, a DPccp enumerator can ask
+# for partitions like `{ps, s, n}` for Q9 where the only internal explicit
 # edge is `s ↔ n`; `ps` is isolated within the subset. The subgraph-merge
 # walk in `_denominator_for_set` then produces a denom = MAX-ndv-of-sn
 # (the single edge's contribution) times the unused-edge penalty, but
 # the numerator product includes `ps`'s 800K base cardinality untouched.
-# The resulting cardinality estimate for `{ps,s,n}` overshoots to
-# ~200M (Cartesian) instead of DuckDB's ~898K.
+# The resulting cardinality estimate for `{ps,s,n}` overshoots toward
+# the Cartesian product.
 #
 # The cross-product detection lets us apply an FK-PK upper-bound clamp
 # on these cases without firing on well-connected partitions like
@@ -847,7 +844,7 @@ def estimate_cardinality_with_set[
     # edges do NOT span all member relations), the subgraph-merge walk
     # produces a denom that doesn't reflect the disconnected pieces.
     # For Q9 partition A's `{ps, s, n}` (only s↔n internal; ps
-    # isolated), this overshoots ~250x. Apply an FK-PK upper-bound
+    # isolated), this overshoots. Apply an FK-PK upper-bound
     # clamp: est = min(est, max_base_card_in_set). This generalizes
     # the Tier-1-gated clamp above for the cross-product case where
     # the bucket walk cannot establish a PK signal (one or more
@@ -855,18 +852,19 @@ def estimate_cardinality_with_set[
     # a bucket).
     #
     # Q5 contract: this guard does NOT fire on connected subsets.
-    # Q5's all-{l,o,c,s,n,r} partitions are connected via explicit
-    # edges (lineitem↔orders, orders↔customer, supplier↔nation,
-    # nation↔region, customer↔supplier-via-l_suppkey), so
-    # `_is_cross_product_shaped_subset` returns False everywhere.
+    # Q5's {l,o,c,s,n,r} subsets that a connected-subgraph enumerator
+    # asks for are connected via explicit edges (lineitem↔orders,
+    # orders↔customer, lineitem↔supplier via l_suppkey,
+    # customer↔supplier via c_nationkey = s_nationkey, supplier↔nation,
+    # nation↔region), so `_is_cross_product_shaped_subset` returns
+    # False for them.
     #
     # The clamp is unconditional (not Tier-1-gated) when the
     # cross-product shape is detected — the rationale is that a
     # disconnected subset's denom is structurally wrong (it can't
     # capture cross-class correlations), so capping at the largest
     # base relation cardinality is the conservative-correct ceiling.
-    # Q9 SF1: `{ps,s,n}` has max(800K, 10K, 25) = 800K, close to
-    # DuckDB's 898K (within 11%).
+    # Q9 SF1: `{ps,s,n}` has max(800K, 10K, 25) = 800K.
     if not pk_clamp_fires:
         if _is_cross_product_shaped_subset(chain, combined):
             var xp_bound = _max_base_card_in_set(chain, combined)
@@ -884,9 +882,8 @@ def estimate_cardinality_with_set[
 #
 # Diagnostic-only sibling of `estimate_cardinality_with_set`. Exposes the
 # RAW numerator, denominator, raw cardinality, FK-PK clamp signal, and
-# post-clamp cardinality so a diagnosis can disambiguate
-# Candidate 1 (clamp inflating upward) vs Candidate 3 (input-wrong:
-# base-card too large) for the Q9 `{l, p, o}` 3-rel sub-set.
+# post-clamp cardinality so a test can tell a clamp that moved the
+# estimate from base cardinalities that set it.
 #
 # Contract (verbatim mirror of `estimate_cardinality_with_set` math):
 #   * `raw_numerator`  — product of BASE rel cardinalities in `combined`

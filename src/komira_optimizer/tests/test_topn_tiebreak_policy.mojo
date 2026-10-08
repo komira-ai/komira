@@ -25,8 +25,8 @@ from komira_optimizer.topn_tiebreak_policy import (
 
 def test_admitted_types_are_exactly_int64_int32_float64() raises:
     # Defect: a dropped admitted type (the list misses a tie column) or a
-    # widened one (a STRING key diverts a bounded heap to a full sort, and the
-    # optimizer's list disagrees with the executor's).
+    # widened one (a STRING key would turn the bounded heap the header describes
+    # into a full sort, and the list would no longer match the header's rule).
     assert_true(tiebreak_admits_type(ArrowType.INT64))
     assert_true(tiebreak_admits_type(ArrowType.INT32))
     assert_true(tiebreak_admits_type(ArrowType.FLOAT64))

@@ -363,7 +363,8 @@ def test_a_subquery_below_an_aggregate_is_out_of_reach() raises:
 
 
 def test_the_multiple_rows_prefix_is_stable() raises:
-    # Callers match on this prefix; catches a rename.
+    # The executing caller this is designed for (not in this tree) raises with
+    # this prefix and tests match on it; catches a rename.
     assert_equal(SCALAR_SUBQUERY_MULTIPLE_ROWS, String("ScalarSubqueryMultipleRows"))
 
 
