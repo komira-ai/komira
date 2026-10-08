@@ -42,10 +42,15 @@
 #
 # # Build wiring
 #
-# The `external_call["sha256_block_data_order_hw", ...]` decl below is a
-# symbol REFERENCE; it is resolved at the FINAL LINK of any consumer binary
-# (test or production), which is why aws-lc's libcrypto is a dependency of
-# this package.
+# The `external_call["komira_crypto_sha256_block_data_order_hw", ...]`
+# decl below is a symbol REFERENCE; it is resolved at the FINAL LINK of any
+# consumer binary (test or production). The name is this package's C
+# wrapper (`native/komira_crypto_sha256_hw.c`, the `cxx_library`
+# `:komira_crypto_sha256_hw`), which calls aws-lc's function, renamed
+# `komira_awslc_sha256_block_data_order_hw` like every aws-lc symbol. aws-lc
+# declares that function `.hidden`, so only a wrapper can export it from a
+# shared object. The wrapper and aws-lc's libcrypto are dependencies of this
+# package.
 #
 # # Encapsulation discipline
 #
@@ -54,8 +59,8 @@
 #     `mut InlineArray[UInt32, 8]` + `Span[UInt8, _]` — ZERO UnsafePointer
 #     in the public signature.
 # Internal FFI:
-#   * The `external_call["sha256_block_data_order_hw", ...]` site uses
-#     `UnsafePointer(to=...)` with inferred origin (NOT MutAnyOrigin —
+#   * The `external_call["komira_crypto_sha256_block_data_order_hw", ...]`
+#     site uses `UnsafePointer(to=...)` with inferred origin (NOT MutAnyOrigin —
 #     no wildcard widening), then `bitcast` to re-type. Same shape as
 #     `zeroize.mojo`'s `external_call["memset_s", Int]`
 #     site (the established in-tree FFI pattern for non-libcrypto symbols
@@ -73,8 +78,9 @@ from std.memory import UnsafePointer
 # -----------------------------------------------------------------------------
 # Public wrapper — sha256_compress_blocks.
 #
-# Internal FFI invocation: AWS-LC's sha256_block_data_order_hw symbol from
-# libcrypto.a. The Mojo `external_call` site receives untyped-origin
+# Internal FFI invocation: AWS-LC's sha256_block_data_order_hw from
+# libcrypto.a, through the wrapper komira_crypto_sha256_block_data_order_hw
+# (see "Build wiring" above). The Mojo `external_call` site receives untyped-origin
 # pointers (inferred from `state` + `blocks`); Mojo resolves the call at
 # AOT link time. The linker needs libcrypto from aws-lc, which is why it
 # is a dependency of this package.
@@ -134,7 +140,7 @@ def sha256_compress_blocks(
     # alternative form with explicit type parameters would force a
     # specific origin which is incompatible with `blocks: Span[UInt8, _]`
     # potentially having immutable origin).
-    external_call["sha256_block_data_order_hw", NoneType](
+    external_call["komira_crypto_sha256_block_data_order_hw", NoneType](
         UnsafePointer(to=state[0]).bitcast[UInt32](),
         blocks.unsafe_ptr().bitcast[UInt8](),
         UInt(num_blocks),

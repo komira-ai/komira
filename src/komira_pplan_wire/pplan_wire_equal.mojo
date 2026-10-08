@@ -39,7 +39,7 @@ comptime PPLAN_EQ_UNCOMPARABLE_OP: String = "PPLAN_EQ_UNCOMPARABLE_OP"
 
 
 def scalars_equal(a: ScalarValue, b: ScalarValue) -> Bool:
-    """Every one of the 20 fields. No kind-dependent shortcut: a field that is
+    """Every one of the 19 fields. No kind-dependent shortcut: a field that is
     "not meaningful for this kind" is still a field the codec either carried or
     lost, and a comparator that skips it cannot see the loss."""
     if a.dtype != b.dtype:
@@ -77,8 +77,6 @@ def scalars_equal(a: ScalarValue, b: ScalarValue) -> Bool:
     if a.dec256_high_lo != b.dec256_high_lo:
         return False
     if a.dec256_high_hi != b.dec256_high_hi:
-        return False
-    if a.error_code != b.error_code:
         return False
     return True
 

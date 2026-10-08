@@ -1,6 +1,7 @@
 # =============================================================================
 # kci_cloud_fake/secrets.mojo: how the fake clouds lower the SECRET type, and
-# the `secret_env` of a service's or a job's run node.
+# the `secret_env` of a workload's run node (or of the node holding its
+# container, where that is an object of its own).
 # =============================================================================
 #
 # A secret runs as no identity: it holds no `identity` role and no grant

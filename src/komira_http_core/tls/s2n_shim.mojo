@@ -13,7 +13,8 @@
 #                              TlsConnection; __del__ calls s2n_connection_free.
 #   - `TlsConfig`            — public safe wrapper; ALPN + cert loading.
 #   - `TlsConnection`        — public safe wrapper; handshake / send /
-#                              recv / shutdown / SNI extraction.
+#                              recv / shutdown / SNI extraction /
+#                              TLS 1.3 key update (types in key_update.mojo).
 #   - `HandshakeOutcome`     — enum-like UInt8 alias for the 3-state result.
 #   - `TlsIoOutcome`         — same shape for send/recv/shutdown.
 #
@@ -53,6 +54,7 @@ from komira_http_core.tls.ffi import (
     S2N_NOT_BLOCKED,
     S2N_SERVER,
     S2N_SUCCESS,
+    S2N_TLS13,
     S2nBytePtr,
     S2nInt32Ptr,
     S2nOpaquePtr,
@@ -80,6 +82,8 @@ from komira_http_core.tls.ffi import (
     s2n_connection_set_config,
     s2n_connection_set_fd,
     s2n_connection_set_session,
+    s2n_connection_get_key_update_counts,
+    s2n_connection_request_key_update,
     s2n_connection_get_wire_bytes_in,
     s2n_connection_get_wire_bytes_out,
     s2n_errno_location,
@@ -97,6 +101,7 @@ from komira_http_core.tls.ffi import (
     s2n_strerror,
     s2n_strerror_debug,
 )
+from komira_http_core.tls.key_update import KeyUpdateCounts, PeerKeyUpdate
 
 
 @always_inline
@@ -2011,6 +2016,52 @@ struct TlsConnection(Movable, Deinitable):
             s += chr(Int(p[j]))
             j = j + 1
         return Optional[String](s^)
+
+    def request_key_update(mut self, peer: PeerKeyUpdate) raises:
+        """Mark a TLS 1.3 key update pending: the next `send` emits a
+        KeyUpdate and switches this side's sending key (key_update.mojo).
+
+        Raises, leaving the connection untouched, before the handshake is
+        complete or on a version below TLS 1.3: s2n would accept the request
+        there and either send it at the end of the handshake or never (TLS
+        1.2 has no key update; s2n drops it silently). Raises with s2n's
+        message when s2n refuses `peer` (1.5.6 refuses `REQUESTED`).
+        """
+        # SAFETY: every call below is synchronous on the live handle this
+        # connection owns; no pointer escapes.
+        var raw = self._handle[]._raw
+        if s2n_last_message_name(raw) != "APPLICATION_DATA":
+            raise Error("TlsConnection.request_key_update: handshake not complete")
+        var version = s2n_connection_get_actual_protocol_version(raw)
+        if version < S2N_TLS13:
+            raise Error(
+                "TlsConnection.request_key_update: key update needs TLS 1.3"
+                " (negotiated protocol version " + String(Int(version)) + ")"
+            )
+        if s2n_connection_request_key_update(raw, peer.raw()) != S2N_SUCCESS:
+            raise Error(
+                "TlsConnection.request_key_update: "
+                + s2n_strerror_message(last_s2n_errno())
+            )
+
+    def key_update_counts(self) raises -> KeyUpdateCounts:
+        """How many times this side's sending and receiving keys were
+        updated (0 and 0 on a fresh connection; s2n saturates at 255)."""
+        var sent = UInt8(0)
+        var received = UInt8(0)
+        # SAFETY: both out-pointers address the two stack bytes above, alive
+        # across the synchronous call; s2n writes one uint8_t through each.
+        var sent_ptr = UnsafePointer(to=sent).unsafe_mut_cast[False]().unsafe_origin_cast[_S2N_FFI_ORIGIN]()
+        var received_ptr = UnsafePointer(to=received).unsafe_mut_cast[False]().unsafe_origin_cast[_S2N_FFI_ORIGIN]()
+        var rc = s2n_connection_get_key_update_counts(
+            self._handle[]._raw, sent_ptr, received_ptr
+        )
+        if rc != S2N_SUCCESS:
+            raise Error(
+                "TlsConnection.key_update_counts: "
+                + s2n_strerror_message(last_s2n_errno())
+            )
+        return KeyUpdateCounts(sent=Int(sent), received=Int(received))
 
 
 # =============================================================================

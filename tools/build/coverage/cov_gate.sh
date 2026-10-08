@@ -1,11 +1,12 @@
 #!/bin/sh
 # cov_gate.sh -- the coverage gate of one mojo_library in a build action
 # (`mojo_cov_gate`, tools/build/mojo/coverage.bzl): `covcheck gate` over the
-# kcov reports of the library's tests, in the policy's mode
-# (tools/build/coverage/policy.bzl). README.md, "The build gate".
+# kcov reports of the library's tests and their branch records, in the
+# policy's mode (tools/build/coverage/policy.bzl). README.md, "The build gate".
 #
 # usage: busybox sh <gate_dir>/cov_gate.sh <busybox> <label> <package> <mode> <target_bp>
 #            <root> <tests> <result_out> <summary_out> <marker_out> [<report>...]
+#            [--branch-lcov <branch_info>...]
 #
 #   <gate_dir>   the cov_gate_dir: this script, covcheck/ (the covcheck binary
 #                and the runtime libraries it loads) and ratchet.tsv
@@ -20,6 +21,10 @@
 #                library welds, one per line: each is covcheck's
 #                --test-source, set aside wherever it is in the package
 #   <report>     a test's Cobertura report, in repository paths (cov_run.sh)
+#   <branch_info> after the argument `--branch-lcov` (given at most once:
+#                every argument after it is a branch record file): a
+#                test's branch records, in repository paths
+#                (cov_branch_classify, tools/build/coverage/branch/README.md)
 #
 # The repository's files, as covcheck reads them (--repo-files, NUL-separated
 # like `git ls-files -z`), are every file under <root>: the gate measures
@@ -80,15 +85,22 @@ if [ "$PACKAGE" = "(root)" ]; then BUCKF="$ROOT/BUCK"; else BUCKF="$ROOT/$PACKAG
 (cd "$ROOT" && find . -type f) | sed 's|^\./||' | sort >"$K/files"
 tr '\n' '\000' <"$K/files" >"$K/repo_files"
 
-# Each report as `--cobertura FILE`: a file name holding `=` is given as
-# `=FILE` (covcheck reads `PKGDIR=FILE` otherwise); none needs a PKGDIR,
-# since every path in them is a repository path already.
+# Each report as `--cobertura FILE`, and each branch record file (after the
+# argument `--branch-lcov`) as `--branch-lcov FILE`: a file name holding `=`
+# is given as `=FILE` (covcheck reads `PKGDIR=FILE` otherwise); none needs a
+# PKGDIR, since every path in them is a repository path already.
 n=$#
+flag=--cobertura
 while [ "$n" -gt 0 ]; do
-    r=$(abs "$1")
+    a=$1
     shift
     n=$((n - 1))
-    case "$r" in *=*) set -- "$@" --cobertura "=$r" ;; *) set -- "$@" --cobertura "$r" ;; esac
+    if [ "$a" = --branch-lcov ] && [ "$flag" = --cobertura ]; then
+        flag=--branch-lcov
+        continue
+    fi
+    r=$(abs "$a")
+    case "$r" in *=*) set -- "$@" "$flag" "=$r" ;; *) set -- "$@" "$flag" "$r" ;; esac
 done
 while IFS= read -r t; do
     set -- "$@" --test-source "$t"

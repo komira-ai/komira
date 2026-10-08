@@ -49,6 +49,7 @@ from kci_reconciler import (
 )
 from kci_cloud import (
     Feed,
+    Firing,
     GrantEdge,
     FIELD_SECRET,
     NOT_YET,
@@ -102,7 +103,7 @@ def _graph(
     return (
         String('{"resource":[')
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":') + port
-        + String(',"internal":{},"secretEnv":{')
+        + String(',"internal":{},"scale":{"min":1,"max":2},"secretEnv":{')
         + String('"DB":{"secret":{"resource":"db"},"version":"') + version + String('"},')
         + String('"LEGACY":{"name":"legacy"}}},')
         + String('"uses":[') + uses + String("]},")
@@ -449,7 +450,7 @@ def test_uses_on_a_secret_never_reaches_a_lowering() raises:
     var l = _list(bad)
     var direct = False
     try:
-        _ = FakeCloud().lower(l[1], List[GrantEdge](), List[Feed]())
+        _ = FakeCloud().lower(l[1], List[GrantEdge](), List[Feed](), List[Firing]())
     except e:
         direct = True
         assert_true(String(e).find("has uses lines; validate refuses them") >= 0, String(e))

@@ -4,9 +4,11 @@
 # (tools/build/coverage/defs.bzl):
 #   sh coverage_ci_cases.sh <busybox> <result.json> <dir> <covcheck dir>
 # <dir> holds .github/workflows/coverage.yml, .github/ci/coverage_measure.sh,
-# .github/ci/tests/build_report_gate_failed.json and the real
-# tools/build/coverage/policy.bzl and ratchet.tsv; <covcheck dir> the real
-# covcheck with its lib/.
+# .github/ci/tests/build_report_gate_failed.json and
+# build_report_branch_failed.json, and the real
+# tools/build/coverage/policy.bzl, ratchet.tsv and
+# tools/build/mojo/coverage_branch.bzl; <covcheck dir> the real covcheck
+# with its lib/.
 #
 # The poster (P cases) is the two shell functions coverage.yml's `post` job
 # defines between its `# post_checkrun:` and `# complete_checkrun:` markers,
@@ -21,7 +23,10 @@
 # buck2's stand-in writes build reports in buck2's own shape;
 # build_report_gate_failed.json is one buck2 wrote (its trace id, project
 # root and message strings left out): `tests//negative/coverage:covlow`
-# (enforce) failing in its gate alone, beside its census twin.
+# (enforce) failing in its gate alone, beside its census twin; and so is
+# build_report_branch_failed.json: `tests//negative/coverage:branchretor`'s
+# `[coverage][tests]` and `[coverage][branch_info]` in one build, its runs
+# built and its classifier refusing its branch records.
 # Exits 1 on the first wrong result, naming it; writes the validation
 # result and exits 0 when every case holds.
 set -eu
@@ -145,6 +150,73 @@ grep -q '^BUCKCONFIG=.buckconfig NAME=coverage ' "$D/.github/ci/coverage_measure
     red "W1: the artifact is not uploaded and downloaded under one name with no attempt in it"
 grep -qxF '          overwrite: true' "$WF" || red "W1: a second upload of the artifact (re-run of measure) would fail"
 ! grep -q 'run_attempt' "$WF" || red "W1: an artifact name holds the run attempt"
+pass
+
+# H. A head commit cut before coverage measurement existed has no
+# .github/ci/coverage_measure.sh (nor covcheck's BUCK): on `pull_request`
+# the workflow file is the merge commit's, so it runs, but the steps reading
+# the head's tree would fail (exit 127) and turn the check red. The
+# `head_measured` function between coverage.yml's markers decides, from the
+# head's tree, whether the head can be measured; every later step of
+# `measure` and the whole `post` job are skipped when it cannot.
+extract head_measured
+# shellcheck disable=SC1090,SC1091
+. "$T/head_measured.sh"
+pass
+measured() { # <case> <dir> <want: yes|no>
+    : >"$W/gh_output"
+    run head_measured --dir "$2" --output "$W/gh_output"
+    [ "$RC" -eq 0 ] || red "$1: head_measured exited $RC"
+    [ "$(cat "$W/gh_output")" = "measured=$3" ] || red "$1: the output is not measured=$3: $(cat "$W/gh_output")"
+    if [ "$3" = no ]; then
+        grep -q '^::notice title=coverage not measured::.*merge main' "$W/out" ||
+            red "$1: no notice telling the author to merge main"
+    else
+        [ ! -s "$W/out" ] || red "$1: a notice for a head that can be measured"
+    fi
+    pass
+}
+mkdir -p "$W/h_old" "$W/h_half/.github/ci" "$W/h_new/.github/ci" "$W/h_new/tools/build/coverage"
+measured H1 "$W/h_old" no
+: >"$W/h_half/.github/ci/coverage_measure.sh"
+measured H2 "$W/h_half" no
+# The commonest old head: covcheck's BUCK (much older) without the script.
+mkdir -p "$W/h_buck/tools/build/coverage"
+: >"$W/h_buck/tools/build/coverage/BUCK"
+measured H5 "$W/h_buck" no
+: >"$W/h_new/.github/ci/coverage_measure.sh"
+: >"$W/h_new/tools/build/coverage/BUCK"
+measured H3 "$W/h_new" yes
+run head_measured --dir "$W/h_new"
+[ "$RC" -eq 2 ] || red "H4: head_measured without --output exited $RC, not 2"
+pass
+
+# W2. The wiring the function cannot show: it runs on the head's checkout
+# with the step output file, `measure` exports its answer, `post` runs only
+# on yes, and in `measure` the order is the checkout, then the check (step
+# id `head`), then every other step skipped on no (all but the summary,
+# which says why nothing was measured).
+wf_once W2 'head_measured --dir . --output "$GITHUB_OUTPUT"'
+wf_once W2 '        id: head'
+wf_once W2 "measured: \${{ steps.head.outputs.measured }}"
+wf_once W2 "    if: github.event.pull_request.head.repo.full_name == github.repository && needs.measure.outputs.measured == 'yes'"
+wrong=$(awk '
+    /^  measure:$/ { on = 1; next }
+    /^  [a-z]/ { on = 0 }
+    !on { next }
+    function close_step() {
+        if (kind == "checkout") { if (seen) print "the checkout comes after the head check"; checked = 1 }
+        else if (kind == "head") { if (!checked) print "the head check comes before the checkout" }
+        else if (kind == "step" && name != "the summary" && !(gated && seen_before)) print name
+    }
+    /^      - / { close_step(); kind = "step"; seen_before = seen; name = $0; sub(/^      - (name: )?/, "", name); gated = 0 }
+    /^      - uses: actions\/checkout@/ { kind = "checkout" }
+    /^        id: head$/ { kind = "head"; seen = 1 }
+    /^        name: / { name = substr($0, 15) }
+    index($0, "steps.head.outputs.measured == '\''yes'\''") { gated = 1 }
+    END { close_step(); if (!seen) print "no step with id head" }
+' "$WF")
+[ -z "$wrong" ] || red "W2: measure's steps are not checkout, head check, then gated steps: $wrong"
 pass
 
 HEAD_SHA=0123456789abcdef0123456789abcdef01234567
@@ -332,32 +404,53 @@ case "\$1" in
     *) exit 9 ;;
 esac
 EOF
-# buck2: uquery answers $W/uquery_out (exit 3 when $W/uquery_fail exists).
-# build takes every target in one call and writes the build report as
-# buck2 pretty-prints it (the fields the script reads, in buck2's nesting
-# and indent): per target, a row "<label> SUCCESS|FAIL <errors> <report>..."
-# of $W/build_table, <errors> `-` or `,`-separated `<category>@<owner>`
-# (`self` the target itself; `none` an error that is no action's); the
-# target's outputs are the reports and the gate's result.json, and every
-# target's row lists only what built, as buck2 does for a failed target.
-# Exit 3 when a target fails. With $W/build_report_copy, the report is that
-# file, as it is.
+# buck2: uquery answers each label of $W/uquery_out with its
+# coverage_branch_gate (true for a label of $W/branch_gate) in buck2's JSON
+# (`--output-attribute`), or $W/uquery_raw as it is; exit 3 when
+# $W/uquery_fail exists. build takes every target in one call
+# (`<label>[coverage][tests]`, `<label>[coverage][branch_info]`) and writes
+# the build report as buck2 pretty-prints it (the fields the script reads,
+# in buck2's nesting and indent; one entry per label, its sub-targets'
+# outputs under `coverage|branch_info` and `coverage|tests`): per label, a
+# row "<label> SUCCESS|FAIL <errors> <path>..." of $W/build_table, <errors>
+# `-` or `,`-separated `<category>@<owner>` (`self` the target itself;
+# `none` an error that is no action's); the `.xml` paths and the gate's
+# result.json are `coverage|tests`, the `.info` paths `coverage|branch_info`
+# when that sub-target is asked for, and every row lists only what built,
+# as buck2 does for a failed target. Exit 3 when a target fails. With
+# $W/build_report_copy, the report is that file, as it is.
 cat >"$T/stub/buck2" <<EOF
 #!$BB sh
 echo "\$*" >>"$W/buck2_calls"
 case "\$1" in
     uquery)
         [ ! -f "$W/uquery_fail" ] || { echo "uquery: a BUCK file failed to load" >&2; exit 3; }
-        cat "$W/uquery_out" ;;
+        if [ -f "$W/uquery_raw" ]; then cat "$W/uquery_raw"; exit 0; fi
+        printf '{\n'
+        n=0
+        while IFS= read -r l; do
+            [ "\$n" -eq 0 ] || printf '  },\n'
+            n=\$((n + 1))
+            v=false
+            if [ -f "$W/branch_gate" ] && grep -qxF -- "\$l" "$W/branch_gate"; then v=true; fi
+            printf '  "%s": {\n    "coverage_branch_gate": %s\n' "\$l" "\$v"
+        done <"$W/uquery_out"
+        [ "\$n" -eq 0 ] || printf '  }\n'
+        printf '}\n' ;;
     build)
         shift
-        br="" ts=""
+        br="" libs="" bi=" "
         while [ \$# -gt 0 ]; do
             case "\$1" in
                 --build-report) br=\$2; shift 2 ;;
                 -c) shift 2 ;;
                 -*) shift ;;
-                *) ts="\$ts \$1"; shift ;;
+                *"[coverage][tests]" | *"[coverage][branch_info]")
+                    lib=\${1%%\[*}
+                    case " \$libs " in *" \$lib "*) ;; *) libs="\$libs \$lib" ;; esac
+                    case "\$1" in *branch_info]) bi="\$bi\$lib " ;; esac
+                    shift ;;
+                *) echo "buck2 stand-in: target \$1 is not a coverage sub-target" >&2; exit 9 ;;
             esac
         done
         echo "Commands: 3 (cached: 3, remote: 0, local: 0)"
@@ -368,20 +461,42 @@ case "\$1" in
         fi
         P="komira//tools/build/platforms:linux-x86_64#0123"
         rc=0 n=0
+        # outs <indent>: the entry's outputs object, at <indent>.
+        outs() {
+            printf '%s"outputs": {\n' "\$1"
+            if [ -n "\$is" ]; then
+                printf '%s  "coverage|branch_info": [\n' "\$1"
+                k=0
+                for x in \$is; do
+                    [ "\$k" -eq 0 ] || printf ',\n'
+                    k=\$((k + 1))
+                    printf '%s    "%s"' "\$1" "\$x"
+                done
+                printf '\n%s  ],\n' "\$1"
+            fi
+            printf '%s  "coverage|tests": [\n' "\$1"
+            for x in \$xs; do printf '%s    "%s",\n' "\$1" "\$x"; done
+            printf '%s    "buck-out/v2/art/komira/0123/%s/cov/gate/result.json"\n%s  ]\n%s},\n' "\$1" "\${lib#*//}" "\$1" "\$1"
+        }
         {
             printf '{\n  "trace_id": "0",\n  "success": true,\n  "results": {\n'
-            for t in \$ts; do
-                lib=\${t%"[coverage][tests]"}
+            for lib in \$libs; do
                 row=\$(grep "^\$lib " "$W/build_table") || { echo "no row for \$lib" >&2; exit 9; }
                 set -- \$row
                 st=\$2 errs=\$3
                 shift 3
+                xs="" is=""
+                for x in "\$@"; do
+                    case "\$x" in
+                        *.info) case "\$bi" in *" \$lib "*) is="\$is \$x" ;; esac ;;
+                        *) xs="\$xs \$x" ;;
+                    esac
+                done
                 [ "\$st" = SUCCESS ] || rc=3
                 [ "\$n" -eq 0 ] || printf '    },\n'
                 n=\$((n + 1))
-                printf '    "%s": {\n      "success": "%s",\n      "outputs": {\n        "coverage|tests": [\n' "\$lib" "\$st"
-                for x in "\$@"; do printf '          "%s",\n' "\$x"; done
-                printf '          "buck-out/v2/art/komira/0123/%s/cov/gate/result.json"\n        ]\n      },\n' "\${lib#*//}"
+                printf '    "%s": {\n      "success": "%s",\n' "\$lib" "\$st"
+                outs "      "
                 printf '      "other_outputs": {},\n      "configured_graph_size": null,\n      "configured": {\n        "%s": {\n          "errors": [' "\$P"
                 if [ "\$errs" = - ]; then printf '],\n'; else
                     printf '\n'
@@ -400,9 +515,8 @@ case "\$1" in
                     done
                     printf '            }\n          ],\n'
                 fi
-                printf '          "success": "%s",\n          "outputs": {\n            "coverage|tests": [\n' "\$st"
-                for x in "\$@"; do printf '              "%s",\n' "\$x"; done
-                printf '              "buck-out/v2/art/komira/0123/%s/cov/gate/result.json"\n            ]\n          },\n' "\${lib#*//}"
+                printf '          "success": "%s",\n' "\$st"
+                outs "          "
                 printf '          "other_outputs": {},\n          "configured_graph_size": null\n        }\n      },\n      "errors": []\n'
             done
             [ "\$n" -eq 0 ] || printf '    }\n'
@@ -469,13 +583,14 @@ measure() { # <case>: a fresh out dir, fresh call records
 # outside the other cells; the libraries are built in ONE call (the farm
 # runs them in parallel), with the switch and --keep-going; covcheck reads
 # alpha's report alone, in the policy's mode and target; beta is NOT
-# MEASURED in the summary and in every body's summary; and the poster
-# accepts the bodies.
+# MEASURED in the summary and in every body's summary; no library reads
+# branch records, so none is built or passed; and the poster accepts the
+# bodies.
 printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/beta:beta FAIL mojo_cov_run@self %s\nkomira//src/gamma:gamma SUCCESS -\n' "$XA" "$XB" >"$W/build_table"
 measure M1
 [ "$RC" -eq 0 ] || red "M1: a failed coverage build, and the script exited $RC (it must exit 0)"
 {
-    echo "uquery -c komira.coverage=true $QUERY"
+    echo "uquery -c komira.coverage=true $QUERY --output-attribute ^coverage_branch_gate\$"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/beta:beta[coverage][tests] komira//src/gamma:gamma[coverage][tests]"
 } >"$W/want_buck2"
 cmp -s "$W/buck2_calls" "$W/want_buck2" || { diff "$W/want_buck2" "$W/buck2_calls" >&2 || true; red "M1: buck2 was not asked the expected query and builds"; }
@@ -483,6 +598,7 @@ pass
 [ "$(grep -c -- '^--cobertura$' "$W/covcheck_argv")" -eq 1 ] && grep -qx "$XA" "$W/covcheck_argv" ||
     red "M1: covcheck did not read alpha's report alone"
 ! grep -q "beta/__beta__" "$W/covcheck_argv" || red "M1: covcheck read the report of beta, whose coverage build failed"
+! grep -q -x -- --branch-lcov "$W/covcheck_argv" || red "M1: covcheck was given branch records, and no library reads them"
 mode=$(sed -n 's/^COVERAGE_MODE = "\([a-z]*\)"$/\1/p' "$D/tools/build/coverage/policy.bzl")
 bp=$(sed -n 's/^COVERAGE_TARGET_BP = \([0-9]*\)$/\1/p' "$D/tools/build/coverage/policy.bzl")
 [ -n "$mode" ] && [ -n "$bp" ] || red "M1: the real policy.bzl has no COVERAGE_MODE or COVERAGE_TARGET_BP line"
@@ -613,6 +729,121 @@ rt=$(grep -A1 -x -- --ratchet "$W/covcheck_argv" | tail -n 1)
 [ "$(cd "$M" && cat "$rt")" = "$(printf '# floors\nsrc/alpha\t6000\t-')" ] ||
     red "M11: covcheck's ratchet is not the comment and alpha's row alone"
 ! grep -q '"package":"src/\(delta\|beta\)"' "$O/publish/result.json" || red "M11: the result has a finding for a package this run did not measure"
+pass
+
+# The branch records (B cases): a library whose gate reads its tests'
+# branch records (its coverage_branch_gate, in the query's answer: alpha,
+# from $W/branch_gate) has its `[coverage][branch_info]` built in the same
+# call, and its `.info` paths are covcheck's --branch-lcov; any other has
+# neither. IA is alpha's record of its one test: an `if` at line 3 taken
+# one way of two.
+IA="buck-out/v2/art/komira/0123/src/alpha/__alpha__/cov/branch/test_a.info"
+mkdir -p "$M/${IA%/*}"
+printf 'SF:src/alpha/alpha.mojo\nBRDA:3,5:br:0/1,0,1\nBRDA:3,5:br:0/1,1,0\nend_of_record\n' >"$M/$IA"
+printf 'komira//src/alpha:alpha\n' >"$W/branch_gate"
+printf 'src/alpha/alpha.mojo\nsrc/beta/beta.mojo\n' >"$W/git_names"
+printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\n' >"$W/uquery_out"
+QUERY2="kind('^mojo_library_rule\$', set( //src/alpha: //src/beta: ))"
+
+# B1. alpha (listed) and beta (not) both build. ONE build call: alpha's
+# tests and branch records, beta's tests alone; covcheck reads alpha's
+# record (and no other) beside both reports, so alpha's branch row is the
+# record's 50.00% (1/2) where beta's is not measured; the lists say which
+# libraries read branch records and that none of them went unread. Exit 0.
+# Red when the script ignores the attribute (no [branch_info], no
+# --branch-lcov) or builds the records and does not pass them.
+printf 'komira//src/alpha:alpha SUCCESS - %s %s\nkomira//src/beta:beta SUCCESS - %s\n' "$XA" "$IA" "$XB" >"$W/build_table"
+measure B1
+[ "$RC" -eq 0 ] || red "B1: exited $RC"
+{
+    echo "uquery -c komira.coverage=true $QUERY2 --output-attribute ^coverage_branch_gate\$"
+    echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/alpha:alpha[coverage][branch_info] komira//src/beta:beta[coverage][tests]"
+} >"$W/want_buck2"
+cmp -s "$W/buck2_calls" "$W/want_buck2" || { diff "$W/want_buck2" "$W/buck2_calls" >&2 || true; red "B1: buck2 was not asked for alpha's branch records (alone) in the one build"; }
+pass
+[ "$(grep -c -x -- --branch-lcov "$W/covcheck_argv")" -eq 1 ] && [ "$(grep -A1 -x -- --branch-lcov "$W/covcheck_argv" | tail -n 1)" = "$IA" ] ||
+    red "B1: covcheck's --branch-lcov is not alpha's record alone"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] || red "B1: covcheck did not read both reports"
+grep -F '| `src/alpha` (touched) |' "$O/publish/summary.md" | grep -qF '| 50.00% (1/2) |' ||
+    red "B1: the summary's alpha row does not show its branch record (50.00% (1/2))"
+grep -F '| `src/beta` |' "$O/publish/summary.md" | grep -qF '| not measured |' ||
+    red "B1: the summary's beta row (no records read) is not branch not measured"
+[ "$(cat "$O/publish/branch_libraries.txt")" = "komira//src/alpha:alpha" ] || red "B1: branch_libraries.txt is not alpha alone"
+[ ! -s "$O/publish/branch_not_measured.txt" ] || red "B1: branch_not_measured.txt is not empty"
+! grep -q "Not measured: branch" "$O/publish/summary.md" || red "B1: the summary has a branch not measured section"
+pass
+
+# B2. buck2's own report (build_report_branch_failed.json) for a listed
+# library whose classifier refused its records: its runs built, so its
+# line report is read; its records are not (none is passed), it is listed
+# as branch not measured in the summary and in every body's summary, and
+# the job exits 0. Red when that failure turns the job red, or the library
+# goes unmeasured, or unlisted.
+cp "$D/.github/ci/tests/build_report_branch_failed.json" "$W/build_report_copy"
+RL="tests//negative/coverage:branchretor"
+printf '%s\n' "$RL" >"$W/uquery_out"
+printf '%s\n' "$RL" >"$W/branch_gate"
+grep -o '"buck-out/[^"]*/cov/tests/[^"]*\.xml"' "$W/build_report_copy" | tr -d '"' | sort -u >"$W/real_xml"
+[ "$(grep -c . "$W/real_xml")" -eq 1 ] || red "B2: the fixture does not name 1 report"
+while IFS= read -r x; do mkdir -p "$M/${x%/*}" && cp "$M/$XA" "$M/$x"; done <"$W/real_xml"
+measure B2
+rm "$W/build_report_copy"
+[ "$RC" -eq 0 ] || red "B2: a listed library's branch records failed to build, and the script exited $RC (it must exit 0)"
+grep -q "build .*$RL\[coverage\]\[tests\] $RL\[coverage\]\[branch_info\]\$" "$W/buck2_calls" || red "B2: the build did not ask for $RL's branch records"
+[ ! -s "$O/publish/not_measured.txt" ] || red "B2: its runs built, and it is listed as not measured"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 1 ] || red "B2: covcheck did not read its report"
+! grep -q -x -- --branch-lcov "$W/covcheck_argv" || red "B2: covcheck was given branch records of a library whose records failed"
+[ "$(cat "$O/publish/branch_not_measured.txt")" = "$RL" ] || red "B2: branch_not_measured.txt is not $RL"
+line="- \`$RL\`: branch not measured (its branch records failed to build)"
+grep -qxF -- "$line" "$O/publish/summary.md" || red "B2: the summary does not list $RL as branch not measured"
+for f in "$O"/publish/checkrun/*.json; do
+    grep -qF "\\n$line" "$f" || red "B2: ${f##*/}'s summary does not list $RL as branch not measured"
+done
+grep -q "$RL: branch NOT MEASURED: its branch records failed to build" "$W/out" || red "B2: the log does not say its branch is not measured"
+pass
+
+# B3. Read per library from the build report (stand-in): alpha (listed)
+# failed in its OWN gate alone, which reads the same records, so its line
+# report is read and its records are not (branch not measured, saying
+# why); beta (listed) failed in a branch coverage action of its dependency
+# alpha, which is no failure of its own: not measured at all. Exit 0.
+printf 'src/alpha/alpha.mojo\nsrc/beta/beta.mojo\n' >"$W/git_names"
+printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\n' >"$W/uquery_out"
+printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\n' >"$W/branch_gate"
+printf 'komira//src/alpha:alpha FAIL mojo_cov_gate@self %s %s\nkomira//src/beta:beta FAIL mojo_cov_branch_classify@komira//src/alpha:alpha %s\n' "$XA" "$IA" "$XB" >"$W/build_table"
+measure B3
+[ "$RC" -eq 0 ] || red "B3: exited $RC"
+[ "$(cat "$O/publish/not_measured.txt")" = "komira//src/beta:beta" ] || red "B3: not_measured.txt is not beta alone"
+[ "$(cat "$O/publish/branch_not_measured.txt")" = "komira//src/alpha:alpha" ] || red "B3: branch_not_measured.txt is not alpha alone"
+! grep -q -x -- --branch-lcov "$W/covcheck_argv" || red "B3: covcheck was given the records of a library whose gate failed"
+grep -A1 -x -- --cobertura "$W/covcheck_argv" | grep -qx "$XA" || red "B3: covcheck did not read alpha's report"
+grep -qxF -- '- `komira//src/alpha:alpha`: branch not measured (its coverage gate, which reads the same records, failed)' "$O/publish/summary.md" ||
+    red "B3: the summary does not say alpha's gate failed"
+pass
+
+# B4. A listed library whose entry is SUCCESS and names no branch record for
+# its report: buck2 or the rule is wrong, exit 1.
+printf 'komira//src/alpha:alpha\n' >"$W/uquery_out"
+printf 'komira//src/alpha:alpha SUCCESS - %s\n' "$XA" >"$W/build_table"
+measure B4
+[ "$RC" -eq 1 ] && grep -q "names 0 branch record file(s) for 1 report(s)" "$W/err" || red "B4: a listed library with no record, and the script exited $RC"
+pass
+
+# B5. The query's answer is a library and its attribute, each: a library
+# with no value (buck2 printing `{}`) is a wrong answer, exit 1.
+printf '{\n  "komira//src/alpha:alpha": {}\n}\n' >"$W/uquery_raw"
+measure B5
+rm "$W/uquery_raw"
+[ "$RC" -eq 1 ] && grep -q "which is not a library with its coverage_branch_gate" "$W/err" || red "B5: a library with no coverage_branch_gate, and the script exited $RC"
+pass
+
+# B6. The script's BRANCH_CATEGORIES are the categories of the branch
+# coverage actions (tools/build/mojo/coverage_branch.bzl), so a failure of
+# one of them reads as the library's branch, not as its coverage build.
+sed -n 's/^ *category = "\(mojo_[a-z_]*\)",$/\1/p' "$D/tools/build/mojo/coverage_branch.bzl" | sort >"$W/cats_rule"
+sed -n 's/^BRANCH_CATEGORIES="\([a-z_ ]*\)"$/\1/p' "$MEASURE" | tr ' ' '\n' | sort >"$W/cats_script"
+[ -s "$W/cats_rule" ] && cmp -s "$W/cats_rule" "$W/cats_script" ||
+    { diff "$W/cats_rule" "$W/cats_script" >&2 || true; red "B6: BRANCH_CATEGORIES is not the categories of coverage_branch.bzl"; }
 pass
 
 cd /

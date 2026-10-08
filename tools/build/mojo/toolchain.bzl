@@ -68,8 +68,13 @@ export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
 "$1/zig" build-exe -OReleaseSafe -target x86_64-linux-musl -fstrip "$2" "-femit-bin=$3"
 rm -rf "$T"
 """
+    cmd = busybox_sh(bb, script, zig, ctx.attrs.src, out.as_output())
+    if ctx.attrs.imports:
+        # Files `src` imports by a relative name: inputs at their paths, so
+        # beside it, and not on the command line.
+        cmd = cmd_args(cmd, hidden = ctx.attrs.imports)
     ctx.actions.run(
-        busybox_sh(bb, script, zig, ctx.attrs.src, out.as_output()),
+        cmd,
         category = "zig_build_exe",
     )
     return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out))]
@@ -78,6 +83,7 @@ zig_exe_rule = rule(
     impl = _zig_exe_impl,
     attrs = {
         "busybox": attrs.dep(),
+        "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
     },
