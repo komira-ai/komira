@@ -142,8 +142,6 @@ def arrow_type_name(t: ArrowType) raises -> String:
         return String("list_view")
     if t == ArrowType.LARGE_LIST_VIEW:
         return String("large_list_view")
-    if t == ArrowType.ERROR:
-        return String("error")
     raise Error("canon: unknown arrow type id " + String(Int(t.type_id)))
 
 
