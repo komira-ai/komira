@@ -267,6 +267,15 @@ The dependency order is the order of the rows.
 | [`komira_search_scan`](../src/komira_search_scan/) | the `komira.search.index` scan kind: a search index read as a relation of hit rows, one per matching live document. Its binding builder and identity corpus, `SearchIndexCatalog` (the store seam, with an in-memory catalog), the split reader and fast-field pushdown gate, and `SearchScanResolver`, the `komira_scan_resolver` resolver an engine executes (one split per split object live at the resolved generation). Neither it nor `komira_search` depends on an engine. |
 | [`komira_search_catalog`](../src/komira_search_catalog/) | the durable split catalog of a search index: the `SplitSummary` record and its binary codec, and `SearchMetastore`, which publishes, lists, retires and reaps splits on one append-only manifest lineage, reads across per-writer sub-lineages, retires drained writer shards, and keeps durable records so the generation never goes down. Generic over `komira_objectstore`'s conditional-write stores; it names no cloud client. It is the store behind the `SearchIndexCatalog` seam, but the adapter between them is not a library today (`komira_search_e2e` writes one for its tests). |
 
+### Apps
+
+Applications built on the libraries above. An app's API is its
+`komira_<app>_proto` package, the published wire.
+
+| module | what it is |
+|---|---|
+| [`komira_managed_mail_proto`](../src/komira_managed_mail_proto/) | the managed mail API, `komira.managed_mail.v1`, generated: the messages of a simple mail app (mailboxes, emails in a fixed set of folders, their parts, threads, sending through a queue of submissions, raw and mbox export), and its two HTTP contracts with a submission service, inbound delivery (the raw message as the body, an `InboundEnvelope` in a header field) and HTTP submission (`RawMessageRequest`), carried as proto3 canonical JSON. Not IMAP or JMAP. `mail_service.proto` lists the methods and their HTTP routes as `.proto` source only. |
+
 ### CI and deploy (`kci`)
 
 A library `kci` owns is named `kci_<x>`. The release side (build, publish,
