@@ -4,7 +4,7 @@
 #
 # SAFE ADOPTION ON EVERY SHAPE (generic, aws, gcp, azure, onprem), part 2:
 # the delete side. An object kci adopted is never deleted unless its
-# resource writes `adopt_deletable`, and is RELEASED when its resource
+# resource writes `adopt` ADOPT_DELETABLE, and is RELEASED when its resource
 # leaves the list. Part 1 (test_fake_adoption.mojo) is the read, the
 # adoption and the replace.
 #
@@ -28,7 +28,7 @@
 #    adopts it again takes it over.
 # 3. DESTROY (the bucket written DELETE; a bucket is KEEP by default, and a
 #    kept object is never deleted, so never refused): refused before any
-#    change while the bucket does not write `adopt_deletable` (the refusal
+#    change while the bucket does not write ADOPT_DELETABLE (the refusal
 #    names the node and both ways out); with it, the destroy deletes the
 #    adopted bucket. The retention that counts is the file's, never the
 #    object's label: a bucket adopted under KEEP and destroyed by a file
@@ -105,10 +105,10 @@ def _logs(adopt: Bool = True, deletable: Bool = False, retention: String = Strin
     var b = String('{"id":"logs","physicalName":"acme-logs",')
     if retention.byte_length() > 0:
         b += String('"retention":"') + retention + String('",')
-    if adopt:
-        b += String('"adopt":true,')
     if deletable:
-        b += String('"adoptDeletable":true,')
+        b += String('"adopt":"ADOPT_DELETABLE",')
+    elif adopt:
+        b += String('"adopt":"ADOPT",')
     return b + String('"bucket":{}}')
 
 
@@ -333,7 +333,7 @@ def test_a_failed_retire_is_reported_and_retried() raises:
 # ---- 3. destroy ----------------------------------------------------------------------------------
 
 
-def test_destroy_needs_adopt_deletable() raises:
+def test_destroy_needs_adopt_deletable_value() raises:
     """Catches: a destroy that deletes an adopted object without the opt-in
     (mutant: `delete_findings` dropped, or not run on destroy), a refusal
     that changes something first, and the opt-in ignored (mutant:
@@ -349,14 +349,14 @@ def test_destroy_needs_adopt_deletable() raises:
         var says = _refused(cloud, reg, _list(_logs(retention=String("DELETE")), String(_READER)), st, True)
         assert_true(says.find("logs/bucket: kci adopted this object") >= 0, sh.name + ": " + says)
         assert_true(says.find("this destroy would delete it") >= 0, says)
-        assert_true(says.find("Write adopt_deletable on the resource") >= 0, says)
+        assert_true(says.find("Write adopt ADOPT_DELETABLE on the resource") >= 0, says)
         assert_true(says.find("remove the resource from the list to release the object") >= 0, says)
         assert_true(cloud.store[].find(String("logs/bucket")) >= 0)
         var opted = _list(_logs(retention=String("DELETE"), deletable=True), String(_READER))
         _ = destroy_resources(reg, cloud, _ctx(), opted, Creds.none(), st)
-        assert_equal(cloud.live_count(), 0, sh.name + ": with adopt_deletable the destroy deletes it")
+        assert_equal(cloud.live_count(), 0, sh.name + ": with ADOPT_DELETABLE the destroy deletes it")
         assert_true(_served(cloud, String("delete logs/bucket")))
-    print("  test_destroy_needs_adopt_deletable: PASS")
+    print("  test_destroy_needs_adopt_deletable_value: PASS")
 
 
 def test_destroy_judges_by_the_file_retention_not_the_label() raises:
@@ -435,7 +435,7 @@ def test_a_type_change_does_not_delete_an_adopted_object() raises:
 
 
 def _keep(version: Int) raises -> List[CompositeDefinition]:
-    var files = String('{"id":"files","physicalName":"acme-files","retention":"DELETE","adopt":true,"bucket":{}},')
+    var files = String('{"id":"files","physicalName":"acme-files","retention":"DELETE","adopt":"ADOPT","bucket":{}},')
     var made = String('{"id":"made","retention":"DELETE","bucket":{}},')
     var comps = (files if version == 1 else String("")) + made + String('{"id":"scratch","bucket":{}}')
     if version == 3:
@@ -487,7 +487,7 @@ def main() raises:
     test_a_resource_leaving_the_list_releases_its_adopted_object()
     test_a_failed_release_is_reported_and_retried()
     test_a_failed_retire_is_reported_and_retried()
-    test_destroy_needs_adopt_deletable()
+    test_destroy_needs_adopt_deletable_value()
     test_destroy_judges_by_the_file_retention_not_the_label()
     test_a_type_change_does_not_delete_an_adopted_object()
     test_a_dropped_component_releases_its_adopted_object()

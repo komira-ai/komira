@@ -79,13 +79,14 @@
 # `list_owned` and before anything is realized. An object carrying the
 # adoption mark whose resource left the list is RELEASED by the apply, never
 # deleted (`Removals.releases`; its state record is retired, then
-# `CloudAdapter.release`), and is not leftover. A delete or a replace of an
-# adopted object is refused before any change unless its resource writes
-# `adopt_deletable` (`delete_findings` on plan, apply and destroy;
-# `replace_findings` on the engine's plan, which apply runs first when the
-# run has adopted nodes; a replace the plan cannot see, of a node it reports
-# as known after apply, is not refused: the engine stops the apply there
-# instead of replacing). `plan_report` returns the plan with its adopted
+# `CloudAdapter.release`), and is not leftover. A delete of an adopted
+# object is refused before any change unless its resource writes `adopt`
+# ADOPT_DELETABLE (`delete_findings` on plan, apply and destroy). A replace
+# of an adopted node is refused whatever `adopt` says (`replace_findings`
+# on the engine's plan, which apply runs first when the run has adopted
+# nodes; a replace the plan cannot see, of a node it reports as known after
+# apply, is not refused: the engine stops the apply there instead of
+# replacing). `plan_report` returns the plan with its adopted
 # nodes and releases, and `render_plan` prints them.
 #
 # THE ROLE LABEL BUDGET. Every node's role must fit the 63-byte label value;
@@ -152,6 +153,7 @@ from kci_cloud.metadata import (
     LABEL_FIELD_PREFIX,
     PHYSICAL_NAME_FIELD,
     adopted_nodes,
+    adopts,
     label_fields,
     name_change_findings,
 )
@@ -306,7 +308,7 @@ def lower_data[
                     )
             var low = node.copy()
             low.owner = owner_of_node(r.id)
-            low.adopted = node.id == primary and r.adopt
+            low.adopted = node.id == primary and adopts(r)
             low.desired.extend(label_fields(r))
             if node.id == primary and r.physical_name:
                 low.desired.append(Setting(String(PHYSICAL_NAME_FIELD), r.physical_name.value()))
@@ -589,15 +591,14 @@ def plan_report[
     definitions: List[CompositeDefinition] = List[CompositeDefinition](),
 ) raises -> PlanReport:
     """The dry run: configure, expand, validate, lower, check the adoptions,
-    `plan_graph_owned`, then refuse a replace of an adopted node its
-    resource does not allow. Creates nothing and writes nothing to the
+    `plan_graph_owned`, then refuse a replace of any adopted node. Creates nothing and writes nothing to the
     store. The report names the adopted nodes and the releases an apply
     would make."""
     var expanded = valid_expansion(clouds, cloud, ctx, resources, True, definitions)
     var p = _prepare(cloud, ctx, expanded, creds)
     var graph = realize_graph(cloud, p.nodes)
     var actions = plan_graph_owned(graph, creds, with_adopted(ctx, expanded).scope, store)
-    var bad = replace_findings(actions, p.adopted, expanded)
+    var bad = replace_findings(actions, p.adopted)
     if len(bad) > 0:
         raise Error(refusal_text(cloud.cloud_id(), bad))
     return PlanReport(actions^, p.adopted.copy(), _released_ids(p.releases))
@@ -688,8 +689,8 @@ def apply_resources[
 
     RAISES only before any effect: a refused graph (settings or validate), a
     broken lowering contract, or a refused adoption (adoption.mojo: a
-    missing or different adopted object, a delete or a replace of one its
-    resource does not allow). A failure inside the engine, an ownership
+    missing or different adopted object, a delete of one its resource does
+    not allow, a replace of any). A failure inside the engine, an ownership
     refusal included, is NOT raised: it is returned in the outcome with what
     landed and what is pending, so the caller can report a partial apply or
     a refusal instead of a bare failure. With adopted nodes, the engine's
@@ -717,7 +718,7 @@ def apply_resources[
             # error (a cloud read included) is raised here, before any change.
             if not String(e).startswith(REFUSED_TOKEN):
                 raise e^
-        var bad = replace_findings(actions, p.adopted, expanded)
+        var bad = replace_findings(actions, p.adopted)
         if len(bad) > 0:
             raise Error(refusal_text(cloud.cloud_id(), bad))
     var graph = realize_graph(cloud, p.nodes)

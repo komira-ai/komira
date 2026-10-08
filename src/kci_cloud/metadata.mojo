@@ -36,22 +36,21 @@
 #     resource the cloud hosts and passes (data, nothing realized) and
 #     refuses the second name of a (kind, name) pair, the kind read from the
 #     cloud's own lowering: a value, never a cloud's name.
-#   * `adopt` 8: take over the existing object named `physical_name`, so it
-#     must be written. kci adds the resource's primary node to the scope's
-#     adopt list (`with_adopted`) on plan and apply; the engine then stamps
-#     an unstamped object of that node instead of refusing it as foreign
+#   * `adopt` 8, an `Adoption`: ADOPT or ADOPT_DELETABLE takes over the
+#     existing object named `physical_name`, so it must be written; any
+#     value but those and ADOPTION_UNSET is a GRAPH finding. kci adds the
+#     primary node of a resource that adopts (`adopts`) to the scope's adopt
+#     list (`with_adopted`) on plan and apply; the engine then stamps an
+#     unstamped object of that node instead of refusing it as foreign
 #     (ownership.mojo's table). Destroy ignores the adopt list (an adoption
 #     is never a reason to delete), so an object a destroy meets unstamped
 #     is still refused. The other roles of the resource are created as
 #     usual. What makes the adoption SAFE is adoption.mojo's: the object
 #     must exist and be what the resource declares before anything is
-#     planned, it carries the adoption mark from then on, and kci never
-#     deletes or replaces it unless `adopt_deletable` is written; when its
-#     resource leaves the list, kci releases it instead.
-#   * `adopt_deletable` 9: with `adopt` only (a GRAPH finding otherwise):
-#     kci may replace or delete the adopted object. An optional bool, so
-#     that a resource that does not write it encodes no bytes for it; unset
-#     and a written false mean the same (`adopt_deletable_of`).
+#     planned, it carries the adoption mark from then on, kci never replaces
+#     it (a planned replace is refused at either value), and kci deletes it
+#     only when the resource writes ADOPT_DELETABLE (`adoption.deletable`);
+#     when its resource leaves the list, kci releases it instead.
 #
 # LOWERING. These are kci's, not the cloud's (`deploy.lower_data` writes
 # them after the adapter lowers): every node of the resource gets one
@@ -66,7 +65,7 @@
 # destroy alike: a new name is a new object, and an update cannot rename it.
 # =============================================================================
 
-from kci_resource_proto.resource import Resource
+from kci_resource_proto.resource import Adoption, Resource
 
 from kci_cloud.adapter import CloudAdapter, FINDING_GRAPH, FINDING_LIMIT, Finding, LoweredNode, OwnedRecord, Setting
 from kci_cloud.catalog import Catalog, body_field, primary_node
@@ -252,7 +251,7 @@ def metadata_findings(catalog: Catalog, resources: List[Resource], r: Resource) 
                             )
                         )
                         break
-    if r.adopt and not r.physical_name:
+    if adopts(r) and not r.physical_name:
         out.append(
             Finding(
                 FINDING_GRAPH,
@@ -261,22 +260,23 @@ def metadata_findings(catalog: Catalog, resources: List[Resource], r: Resource) 
                 String("adopt takes over the existing object named physical_name, and none is written"),
             )
         )
-    if adopt_deletable_of(r) and not r.adopt:
+    var adopt = r.adopt.value
+    if adopt != Adoption.ADOPTION_UNSET and adopt != Adoption.ADOPT and adopt != Adoption.ADOPT_DELETABLE:
         out.append(
             Finding(
                 FINDING_GRAPH,
                 r.id,
-                String("adopt_deletable"),
-                String("adopt_deletable lets kci delete an object it adopted, and this resource writes no adopt"),
+                String("adopt"),
+                String("adopt value ") + String(adopt) + String(" is not ADOPT or ADOPT_DELETABLE"),
             )
         )
     return out^
 
 
-def adopt_deletable_of(r: Resource) -> Bool:
-    """True iff `r` writes `adopt_deletable` true (unset and a written false
-    mean the same)."""
-    return Bool(r.adopt_deletable) and r.adopt_deletable.value()
+def adopts(r: Resource) -> Bool:
+    """True iff `r` takes over an existing object (`adopt` is ADOPT or
+    ADOPT_DELETABLE)."""
+    return r.adopt.value == Adoption.ADOPT or r.adopt.value == Adoption.ADOPT_DELETABLE
 
 
 def name_change_findings(nodes: List[LoweredNode], owned: List[OwnedRecord]) -> List[Finding]:
@@ -316,12 +316,12 @@ def _shown(name: String) -> String:
 
 
 def adopted_nodes(catalog: Catalog, resources: List[Resource]) raises -> List[String]:
-    """The primary node of every resource that writes `adopt`. Raises for a
-    resource of no catalog type (validate refuses it first)."""
+    """The primary node of every resource that adopts (`adopts`). Raises for
+    a resource of no catalog type (validate refuses it first)."""
     var out = List[String]()
     for i in range(len(resources)):
         ref r = resources[i]
-        if not r.adopt:
+        if not adopts(r):
             continue
         out.append(primary_node(catalog, resources, r.id))
     return out^

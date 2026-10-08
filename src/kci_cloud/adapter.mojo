@@ -95,8 +95,8 @@
 #     the adoption mark `kci_adopted=true` (`labels.adoption_labels`) when
 #     the node is marked, and `list_owned` reports it
 #     (`OwnedRecord.adopted`): kci did not create such an object, so it is
-#     never deleted or replaced unless its resource writes
-#     `adopt_deletable`, and when its resource leaves the list kci RELEASES
+#     never replaced, never deleted unless its resource writes `adopt`
+#     ADOPT_DELETABLE, and when its resource leaves the list kci RELEASES
 #     it (`release`: the cloud drops every kci label of the object, and
 #     nothing else, with no delete call).
 #

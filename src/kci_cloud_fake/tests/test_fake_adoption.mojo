@@ -31,8 +31,8 @@
 #    refuse an object kci already stamped.
 # 5. A REPLACE IS REFUSED: once the cloud cannot change the object in place
 #    (`FakeStore.replace_only`), a change to it is refused at plan and at
-#    apply before any change, naming the replace; with `adopt_deletable`
-#    the plan shows the replace.
+#    apply before any change, naming the replace; ADOPT_DELETABLE is
+#    refused the same way (it allows a delete, never a replace).
 # 6. APPLY'S OWN PLAN STEPS ASIDE FOR AN OWNERSHIP REFUSAL: with an adopted
 #    bucket and a foreign object at the reader's node, apply returns the
 #    engine's refusal in its outcome (it does not raise), and nothing
@@ -54,7 +54,6 @@ from kci_reconciler import (
     InMemoryStateStore,
     Provenance,
     VERB_NOOP,
-    VERB_REPLACE,
     VERB_UPDATE,
 )
 from kci_cloud import (
@@ -97,10 +96,10 @@ def _reg(cloud: FakeCloud) raises -> Clouds:
 
 def _list(versioning: Bool = False, deletable: Bool = False, adopt: Bool = True) raises -> List[Resource]:
     var b = String('{"id":"logs","physicalName":"acme-logs","labels":{"team":"data"},')
-    if adopt:
-        b += String('"adopt":true,')
     if deletable:
-        b += String('"adoptDeletable":true,')
+        b += String('"adopt":"ADOPT_DELETABLE",')
+    elif adopt:
+        b += String('"adopt":"ADOPT",')
     b += String('"bucket":{"versioning":') + (String("true") if versioning else String("false")) + String("}}")
     return decode_json[ResourceList](
         String('{"resource":[') + b + String(',{"id":"reader","serviceAccount":{}}]}')
@@ -303,8 +302,10 @@ def test_an_adopted_object_takes_the_files_changes() raises:
 def test_a_replace_of_an_adopted_object_is_refused() raises:
     """Catches: the replace check dropped from the plan (mutant: no
     `replace_findings`), apply not planning first (the engine would raise
-    only when it reached the node, after others landed), and the opt-in
-    ignored."""
+    only when it reached the node, after others landed), and
+    ADOPT_DELETABLE let through (mutant: the `deletable` skip kept in
+    `replace_findings`; the plan would show a replace the engine's apply
+    cannot make)."""
     var shapes = _shapes()
     for s in range(len(shapes)):
         ref sh = shapes[s]
@@ -330,12 +331,20 @@ def test_a_replace_of_an_adopted_object_is_refused() raises:
             apply_says = String(e)
         assert_equal(apply_says, says, sh.name + ": apply refuses the same way")
         assert_equal(cloud.mutations(), before, sh.name + ": nothing changed")
-        var allowed = plan_report(reg, cloud, _ctx(), _list(versioning=True, deletable=True), Creds.none(), st)
-        var replaced = False
-        for i in range(len(allowed.actions)):
-            if allowed.actions[i].logical_id == "logs/bucket":
-                replaced = allowed.actions[i].verb == VERB_REPLACE
-        assert_true(replaced, sh.name + ": with adopt_deletable the plan shows the replace")
+        for p in range(2):
+            var del_says = String("")
+            try:
+                if p == 0:
+                    _ = plan_report(reg, cloud, _ctx(), _list(versioning=True, deletable=True), Creds.none(), st)
+                else:
+                    _ = apply_resources(reg, cloud, _ctx(), _list(versioning=True, deletable=True), Creds.none(), st)
+            except e:
+                del_says = String(e)
+            assert_true(
+                del_says.find("kci never replaces an adopted object, whatever adopt says") >= 0,
+                sh.name + ": ADOPT_DELETABLE is refused too: " + del_says,
+            )
+        assert_equal(cloud.mutations(), before, sh.name + ": still nothing changed")
     print("  test_a_replace_of_an_adopted_object_is_refused: PASS")
 
 
@@ -397,7 +406,7 @@ def test_only_the_primary_node_is_marked() raises:
     for s in range(len(shapes)):
         ref sh = shapes[s]
         var l = decode_json[ResourceList](
-            String('{"resource":[{"id":"api","physicalName":"api-1","adopt":true,')
+            String('{"resource":[{"id":"api","physicalName":"api-1","adopt":"ADOPT",')
             + String('"service":{"image":{"digest":"sha256:0011"},"internal":{}}},')
             + String('{"id":"reader","serviceAccount":{}}]}')
         ).resource.copy()

@@ -72,13 +72,13 @@ interface. This package names no cloud:
                        `create_labels` is every label a create writes; and
                        kci's adoption mark `kci_adopted=true`.
   * metadata.mojo    — the rules of every resource's metadata (`labels`,
-                       `physical_name`, `adopt`, `adopt_deletable`): their
+                       `physical_name`, `adopt`): their
                        graph findings, the label fields kci lowers, the
                        adopted primary nodes, and the refusal of a changed
                        cloud name.
   * adoption.mojo    — safe adoption: an adopted object read and checked
                        before planning, the adoption mark, the refusal of
-                       a delete or a replace of an adopted object its
+                       a replace of an adopted object and of a delete its
                        resource does not allow, the release of one whose
                        resource left the list, and the plan that says so
                        (`PlanReport`).
@@ -423,8 +423,8 @@ from kci_cloud.metadata import (
     LABEL_MAX_BYTES,
     NAME_MAX_BYTES,
     PHYSICAL_NAME_FIELD,
-    adopt_deletable_of,
     adopted_nodes,
+    adopts,
     label_fields,
     label_key_problem,
     label_value_problem,

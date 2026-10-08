@@ -6,9 +6,9 @@
 # pure functions over values: no cloud is realized here. The fake clouds
 # run them end to end (kci_cloud_fake tests/test_fake_adoption*.mojo).
 #
-# 1. THE GRAPH RULE: `adopt_deletable` written true without `adopt` is one
-#    GRAPH finding on `adopt_deletable`; written false, or with `adopt`, it
-#    is none (`adopt_deletable_of` reads the value, not the presence).
+# 1. THE VALUE RULE: `adopt` at a value `Adoption` does not name is one
+#    GRAPH finding on `adopt`; ADOPTION_UNSET, ADOPT and ADOPT_DELETABLE are
+#    none. `adopts` is true for ADOPT and ADOPT_DELETABLE only.
 # 2. WHAT AN ADOPTION COMPARES (`existing_mismatches`): the kind, the cloud
 #    name and every field both sides hold, each named with both values; the
 #    author's labels and a field only the cloud reports are not compared.
@@ -19,13 +19,14 @@
 #    then each node whose object carries the mark, each once.
 # 5. A DELETE OF AN ADOPTED OBJECT (`delete_findings`): refused when a plan
 #    turns its node off or a destroy reaches it, unless the node's retention
-#    in this run is not delete or its resource writes `adopt_deletable`; a
+#    in this run is not delete or its resource writes ADOPT_DELETABLE; a
 #    wanted node on a plan, an unmarked object, or a node not in the run is
 #    not refused. The retention that counts is the node's (the file's, which
 #    the engine deletes by), never the label the object carries.
-# 6. A REPLACE OF AN ADOPTED NODE (`replace_findings`): refused unless its
-#    resource writes `adopt_deletable`, naming the engine's reason; an
-#    update, or a replace of a node kci created, is not.
+# 6. A REPLACE OF AN ADOPTED NODE (`replace_findings`): refused at either
+#    value of `adopt` (ADOPT_DELETABLE allows a delete, never a replace),
+#    naming the engine's reason and both ways out; an update, or a replace
+#    of a node kci created, is not.
 # 7. THE MARK (`adoption_labels`, `adopted_by`, `is_kci_label_key`): one
 #    label `kci_adopted=true`, read back only at that value, inside kci's
 #    label space (so a release drops it, and an author may not write it);
@@ -56,7 +57,7 @@ from kci_reconciler import (
     VERB_REPLACE,
     VERB_UPDATE,
 )
-from kci_resource_proto.resource import Resource, ResourceList
+from kci_resource_proto.resource import Adoption, Resource, ResourceList
 from kci_cloud import (
     ExistingObject,
     FINDING_ADOPTION,
@@ -65,10 +66,10 @@ from kci_cloud import (
     OwnedRecord,
     PlanReport,
     Setting,
-    adopt_deletable_of,
     adopted_by,
     adopted_nodes_of,
     adoption_labels,
+    adopts,
     deletable,
     delete_findings,
     existing_mismatches,
@@ -130,31 +131,32 @@ def _record(node: String, adopted: Bool, retained: Bool = False) -> OwnedRecord:
     )
 
 
-# ---- 1. the graph rule ------------------------------------------------------------------
+# ---- 1. the value rule ------------------------------------------------------------------
 
 
-def test_adopt_deletable_needs_adopt() raises:
-    """Catches: the graph finding dropped (mutant: `adopt_deletable` without
-    `adopt` accepted), a written false refused (the rule reading presence,
-    not the value), and the finding made with `adopt` written."""
+def test_an_adopt_value_outside_the_enum_is_refused() raises:
+    """Catches: the value check dropped (mutant: an `adopt` of 7 accepted
+    and silently read as not adopting), a named value refused, and `adopts`
+    true for UNSET or false for either adopting value."""
     var l = _list(
         String('{"resource":[')
-        + String('{"id":"a","physicalName":"a-1","adoptDeletable":true,"bucket":{}},')
-        + String('{"id":"b","physicalName":"b-1","adoptDeletable":false,"bucket":{}},')
-        + String('{"id":"c","physicalName":"c-1","adopt":true,"adoptDeletable":true,"bucket":{}},')
-        + String('{"id":"d","physicalName":"d-1","adopt":true,"bucket":{}}')
+        + String('{"id":"a","physicalName":"a-1","bucket":{}},')
+        + String('{"id":"b","physicalName":"b-1","adopt":"ADOPT","bucket":{}},')
+        + String('{"id":"c","physicalName":"c-1","adopt":"ADOPT_DELETABLE","bucket":{}},')
+        + String('{"id":"d","physicalName":"d-1","bucket":{}}')
         + String("]}")
     )
+    l[3].adopt = Adoption(7)
     var cat = Catalog.v1()
-    var a = metadata_findings(cat, l, l[0])
-    assert_equal(len(a), 1, "adopt_deletable without adopt: one finding")
-    assert_equal(a[0].kind, FINDING_GRAPH)
-    assert_equal(a[0].field_path, "adopt_deletable")
-    assert_true(a[0].reason.find("writes no adopt") >= 0, a[0].reason)
-    assert_equal(len(metadata_findings(cat, l, l[1])), 0, "a written false is the same as unset")
-    assert_equal(len(metadata_findings(cat, l, l[2])), 0, "with adopt it is taken")
-    assert_true(adopt_deletable_of(l[0]) and not adopt_deletable_of(l[1]) and not adopt_deletable_of(l[3]))
-    print("  test_adopt_deletable_needs_adopt: PASS")
+    for i in range(3):
+        assert_equal(len(metadata_findings(cat, l, l[i])), 0, l[i].id + ": a named value is taken")
+    var d = metadata_findings(cat, l, l[3])
+    assert_equal(len(d), 1, "adopt 7: one finding")
+    assert_equal(d[0].kind, FINDING_GRAPH)
+    assert_equal(d[0].field_path, "adopt")
+    assert_equal(d[0].reason, "adopt value 7 is not ADOPT or ADOPT_DELETABLE")
+    assert_true(not adopts(l[0]) and adopts(l[1]) and adopts(l[2]) and not adopts(l[3]))
+    print("  test_an_adopt_value_outside_the_enum_is_refused: PASS")
 
 
 # ---- 2. what an adoption compares ---------------------------------------------------------
@@ -184,19 +186,19 @@ def test_existing_mismatches_name_both_sides() raises:
 def test_the_resource_of_a_node_is_the_longest_prefix() raises:
     """Catches: the shortest prefix taken (`top/a` would answer for
     `top/a/files/bucket`), a bare string prefix (`top/a` is not a prefix of
-    `top/ab/x`), and the opt-in read from presence."""
+    `top/ab/x`), and ADOPT read as the opt-in."""
     var l = _list(
         String('{"resource":[')
-        + String('{"id":"top/a","physicalName":"a-1","adopt":true,"adoptDeletable":true,"bucket":{}},')
-        + String('{"id":"top/a/files","physicalName":"f-1","adopt":true,"adoptDeletable":false,"bucket":{}},')
-        + String('{"id":"logs","physicalName":"l-1","adopt":true,"adoptDeletable":true,"bucket":{}}')
+        + String('{"id":"top/a","physicalName":"a-1","adopt":"ADOPT_DELETABLE","bucket":{}},')
+        + String('{"id":"top/a/files","physicalName":"f-1","adopt":"ADOPT","bucket":{}},')
+        + String('{"id":"logs","physicalName":"l-1","adopt":"ADOPT_DELETABLE","bucket":{}}')
         + String("]}")
     )
     assert_equal(resource_of_node(l, String("top/a/files/bucket")), 1, "the longest prefix")
     assert_equal(resource_of_node(l, String("top/a/bucket")), 0)
     assert_equal(resource_of_node(l, String("top/ab/bucket")), -1, "a prefix ends at a /")
     assert_equal(resource_of_node(l, String("gone/bucket")), -1, "a resource that left the list")
-    assert_true(not deletable(l, String("top/a/files/bucket")), "written false: not deletable")
+    assert_true(not deletable(l, String("top/a/files/bucket")), "ADOPT: not deletable")
     assert_true(deletable(l, String("top/a/bucket")))
     assert_true(deletable(l, String("logs/bucket")))
     assert_true(not deletable(l, String("gone/bucket")), "no resource, no opt-in")
@@ -233,9 +235,9 @@ def test_a_delete_of_an_adopted_object_is_refused() raises:
     an unmarked object refused, and the opt-in ignored."""
     var l = _list(
         String('{"resource":[')
-        + String('{"id":"logs","physicalName":"acme-logs","adopt":true,"bucket":{}},')
-        + String('{"id":"own","physicalName":"own-1","adopt":true,"adoptDeletable":true,"bucket":{}},')
-        + String('{"id":"kept","physicalName":"kept-1","adopt":true,"bucket":{}},')
+        + String('{"id":"logs","physicalName":"acme-logs","adopt":"ADOPT","bucket":{}},')
+        + String('{"id":"own","physicalName":"own-1","adopt":"ADOPT_DELETABLE","bucket":{}},')
+        + String('{"id":"kept","physicalName":"kept-1","adopt":"ADOPT","bucket":{}},')
         + String('{"id":"made","bucket":{}}')
         + String("]}")
     )
@@ -254,7 +256,7 @@ def test_a_delete_of_an_adopted_object_is_refused() raises:
     assert_equal(len(plan), 1, "only logs: own opted in, kept is retained, made is kci's")
     assert_equal(plan[0].kind, FINDING_ADOPTION)
     assert_equal(plan[0].resource_id, "logs")
-    assert_equal(plan[0].field_path, "adopt_deletable")
+    assert_equal(plan[0].field_path, "adopt")
     assert_true(plan[0].reason.startswith("logs/bucket: kci adopted this object"), plan[0].reason)
     assert_true(plan[0].reason.find("the resource no longer lowers it") >= 0, plan[0].reason)
     assert_true(plan[0].reason.find("release the object") >= 0, plan[0].reason)
@@ -278,9 +280,9 @@ def test_a_delete_is_judged_by_the_node_retention_not_the_label() raises:
     the skip dropped (mutant: the KEEP and UNDELETABLE nodes refused)."""
     var l = _list(
         String('{"resource":[')
-        + String('{"id":"was","physicalName":"was-1","adopt":true,"bucket":{}},')
-        + String('{"id":"keep","physicalName":"keep-1","adopt":true,"bucket":{}},')
-        + String('{"id":"fixed","physicalName":"fixed-1","adopt":true,"bucket":{}}')
+        + String('{"id":"was","physicalName":"was-1","adopt":"ADOPT","bucket":{}},')
+        + String('{"id":"keep","physicalName":"keep-1","adopt":"ADOPT","bucket":{}},')
+        + String('{"id":"fixed","physicalName":"fixed-1","adopt":"ADOPT","bucket":{}}')
         + String("]}")
     )
     var owned = List[OwnedRecord]()
@@ -309,14 +311,10 @@ def test_a_delete_is_judged_by_the_node_retention_not_the_label() raises:
 
 def test_a_replace_of_an_adopted_node_is_refused() raises:
     """Catches: the check dropped, an update refused, a replace of a node kci
-    created refused, the opt-in ignored, and the engine's reason lost."""
-    var l = _list(
-        String('{"resource":[')
-        + String('{"id":"logs","physicalName":"acme-logs","adopt":true,"bucket":{}},')
-        + String('{"id":"own","physicalName":"own-1","adopt":true,"adoptDeletable":true,"bucket":{}},')
-        + String('{"id":"made","bucket":{}}')
-        + String("]}")
-    )
+    created refused, ADOPT_DELETABLE read as allowing a replace (mutant: the
+    `deletable` skip kept; `own` passes), and the engine's reason lost.
+    `logs` writes ADOPT, `own` ADOPT_DELETABLE, `made` is kci's: the
+    adopted list is what tells them apart."""
     var actions = List[ChangeAction]()
     actions.append(ChangeAction(String("logs/bucket"), VERB_REPLACE, String("tier is fixed"), RETAIN_DELETE))
     actions.append(ChangeAction(String("own/bucket"), VERB_REPLACE, String("tier is fixed"), RETAIN_DELETE))
@@ -325,11 +323,15 @@ def test_a_replace_of_an_adopted_node_is_refused() raises:
     var adopted = List[String]()
     adopted.append(String("logs/bucket"))
     adopted.append(String("own/bucket"))
-    var got = replace_findings(actions, adopted, l)
-    assert_equal(len(got), 1)
+    var got = replace_findings(actions, adopted)
+    assert_equal(len(got), 2, "logs and own; made is kci's, the update is not a replace")
     assert_equal(got[0].resource_id, "logs")
+    assert_equal(got[1].resource_id, "own", "ADOPT_DELETABLE does not allow a replace")
+    assert_equal(got[1].field_path, "adopt")
     assert_true(got[0].reason.find("this change would replace it") >= 0, got[0].reason)
     assert_true(got[0].reason.find("tier is fixed") >= 0, "the engine's reason is kept: " + got[0].reason)
+    assert_true(got[1].reason.find("kci never replaces an adopted object, whatever adopt says") >= 0, got[1].reason)
+    assert_true(got[1].reason.find("remove the resource from the list to release the object") >= 0, got[1].reason)
     print("  test_a_replace_of_an_adopted_node_is_refused: PASS")
 
 
@@ -409,7 +411,7 @@ def test_the_plan_marks_adoptions_and_releases() raises:
 
 def main() raises:
     print("test_cloud_adoption_rules")
-    test_adopt_deletable_needs_adopt()
+    test_an_adopt_value_outside_the_enum_is_refused()
     test_existing_mismatches_name_both_sides()
     test_the_resource_of_a_node_is_the_longest_prefix()
     test_adopted_nodes_are_taken_and_marked_once()

@@ -11,8 +11,7 @@ resource {
     key: "tier"
     value: "gold"
   }
-  adopt: true
-  adopt_deletable: true
+  adopt: ADOPT
   bucket {
   }
 }

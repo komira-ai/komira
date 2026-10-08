@@ -35,7 +35,7 @@
 #    apply without `adopt` (nothing changes); with `adopt` the apply stamps
 #    it (an update, never a create), `list_owned` then reports it as kci's,
 #    and a re-apply is a no-op; a destroy of the adopted bucket (written
-#    DELETE) is refused unless the bucket writes `adopt_deletable`, and then
+#    DELETE) is refused unless the bucket writes `adopt` ADOPT_DELETABLE, and then
 #    deletes it like any object of the resource. A destroy never adopts: an
 #    unstamped object refuses it, `adopt` or not.
 # 6. EACH SHAPE'S METADATA LIMITS, as data: the label cap (aws 50 tags, kci
@@ -138,17 +138,17 @@ def _graph(
     """The graph of the file header. `retention` is the bucket's written
     retention (empty: unset); `name` its cloud name (empty: unset); `tier`
     its second label; `team` the job's label; `reads` keeps the job's READ
-    line; `arg` is its one arg; `adopt` takes the bucket over, and
-    `deletable` lets kci delete it."""
+    line; `arg` is its one arg; `adopt` takes the bucket over (ADOPT), and
+    `deletable` lets kci delete it too (ADOPT_DELETABLE)."""
     var head = String('{"id":"logs",')
     if retention.byte_length() > 0:
         head += String('"retention":"') + retention + String('",')
     if name.byte_length() > 0:
         head += String('"physicalName":"') + name + String('",')
-    if adopt:
-        head += String('"adopt":true,')
     if deletable:
-        head += String('"adoptDeletable":true,')
+        head += String('"adopt":"ADOPT_DELETABLE",')
+    elif adopt:
+        head += String('"adopt":"ADOPT",')
     var uses = String('"uses":[{"target":{"resource":"logs"},"access":"READ"}],') if reads else String("")
     return (
         String('{"resource":[')
@@ -456,7 +456,7 @@ def test_adopt_takes_over_the_named_object() raises:
     refused as foreign), `adopt` not reaching the engine (the apply is
     refused anyway), an adopted object re-created instead of stamped, an
     adopted object not listed as kci's afterwards, a re-apply that is not a
-    no-op, an adopted object a destroy deletes without `adopt_deletable` or
+    no-op, an adopted object a destroy deletes without ADOPT_DELETABLE or
     does not delete at its written retention with it, and a destroy that
     adopts (it would delete an object kci
     never took over)."""
@@ -502,13 +502,13 @@ def test_adopt_takes_over_the_named_object() raises:
     try:
         _ = destroy_resources(reg, cloud, _ctx(), _list(_graph(retention=String("DELETE"), adopt=True)), Creds.none(), st)
     except e:
-        kept = String(e).find("adopt_deletable") >= 0
-    assert_true(kept, "kci did not create the bucket: a destroy without adopt_deletable is refused")
+        kept = String(e).find("ADOPT_DELETABLE") >= 0
+    assert_true(kept, "kci did not create the bucket: a destroy without ADOPT_DELETABLE is refused")
     assert_true(cloud.store[].find(String("logs/bucket")) >= 0, "the adopted bucket is still there")
     _ = destroy_resources(
         reg, cloud, _ctx(), _list(_graph(retention=String("DELETE"), adopt=True, deletable=True)), Creds.none(), st
     )
-    assert_equal(cloud.live_count(), 0, "with adopt_deletable, destroy deletes the adopted bucket at DELETE")
+    assert_equal(cloud.live_count(), 0, "with ADOPT_DELETABLE, destroy deletes the adopted bucket at DELETE")
     print("  test_adopt_takes_over_the_named_object: PASS")
 
 

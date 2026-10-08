@@ -295,8 +295,12 @@ def test_a_held_number_or_a_reserved_number_is_refused() raises:
     # a held number of a primitive's own extension range
     var j = held_violations(_insert_after(t, String("  Image image = 1;\n  repeated string args = 2;"), String("  string x = 51;")))
     assert_equal(len(j), 1, _joined(j))
+    # 9 is reserved on `Resource` (the deletable flag `Adoption` replaces)
+    var nine = held_violations(_insert_after(t, anchor, String("  bool x = 9;")))
+    assert_equal(len(nine), 1, _joined(nine))
+    assert_true(nine[0].find("reuses reserved number 9") >= 0, nine[0])
     # a free number is fine, and so is the same number in another message
-    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 9;")))), 0)
+    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 38;")))), 0)
     assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 37;")))), 0)
     # a held line for a message the file does not declare
     var d = held_violations(t + String("\n// held-numbers: NoSuchMessage 1-3\n"))

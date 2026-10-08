@@ -35,26 +35,29 @@
 #    `list_owned` reports it (`OwnedRecord.adopted`). The ADOPTED nodes of a
 #    run (`adopted_nodes_of`) are the nodes it takes over and every node
 #    whose object carries the mark.
-# 3. REFUSE DESTRUCTIVE CHANGES unless the resource writes `adopt_deletable`
-#    true (`Resource` 9; with `adopt` only, a graph finding otherwise). kci
-#    refuses, before any change:
-#      - a DELETE of an object carrying the mark (`delete_findings`): on plan
+# 3. REFUSE DESTRUCTIVE CHANGES. kci refuses, before any change:
+#      - a DELETE of an object carrying the mark (`delete_findings`), unless
+#        its resource writes `adopt` ADOPT_DELETABLE (`Adoption` 2): on plan
 #        and apply, a node the file turned off or a role its resource no
 #        longer lowers (the resource is still in the list: its type
 #        changed); on destroy, every node of the file. A node whose
 #        retention in this run is not delete (the file's, which is what the
 #        engine deletes by) is never deleted, so it is not refused.
-#      - a REPLACE of an adopted node (`replace_findings`): the engine plans
-#        it when the cloud cannot make a change in place. Apply plans first
-#        when the run has adopted nodes, so it refuses before any change too.
+#      - a REPLACE of an adopted node (`replace_findings`), at either value
+#        of `adopt`: the engine plans it when the cloud cannot make a change
+#        in place, and its apply cannot replace anything (it stops at such a
+#        node), so ADOPT_DELETABLE allows a delete and never a replace. Apply
+#        plans first when the run has adopted nodes, so it refuses before
+#        any change too.
 #        A node the plan reports as known after apply (a producer of it
 #        changes in this run) is not read by the plan, so a replace of it is
 #        not known before the apply and is not refused here. The engine's
 #        apply never replaces an object: a drift it cannot converge in place
 #        stops the apply at that node, after the nodes before it landed, and
 #        the adopted object stands.
-#    The resource whose `adopt_deletable` counts is the one the node belongs
-#    to (`resource_of_node`: the longest resource id that prefixes it).
+#    The resource whose `adopt` counts for a delete is the one the node
+#    belongs to (`resource_of_node`: the longest resource id that prefixes
+#    it).
 # 4. RELEASE, NEVER DELETE, WHEN THE RESOURCE LEAVES THE LIST (deploy.mojo's
 #    `removals`). An object carrying the mark whose resource is no longer in
 #    the (expanded) list is RELEASED: the apply retires its state record,
@@ -70,14 +73,14 @@
 #    its own.
 #
 # NOT DONE HERE. A capability that no flag lifts ("kci can never delete
-# this", whatever the file says) is a different thing: `adopt_deletable` is
+# this", whatever the file says) is a different thing: ADOPT_DELETABLE is
 # the author's choice per resource. An adoption made through the engine's
 # own adopt list alone (the conformance kit) writes no mark and is not
 # verified; no kci verb sets that list but `with_adopted`.
 # =============================================================================
 
 from kci_reconciler import ChangeAction, Creds, RETAIN_DELETE, VERB_REPLACE
-from kci_resource_proto.resource import Resource
+from kci_resource_proto.resource import Adoption, Resource
 
 from kci_cloud.adapter import (
     CloudAdapter,
@@ -88,7 +91,7 @@ from kci_cloud.adapter import (
     OwnedRecord,
 )
 from kci_cloud.compose_refs import owner_of_node
-from kci_cloud.metadata import LABEL_FIELD_PREFIX, PHYSICAL_NAME_FIELD, adopt_deletable_of
+from kci_cloud.metadata import LABEL_FIELD_PREFIX, PHYSICAL_NAME_FIELD
 
 
 def resource_of_node(resources: List[Resource], node_id: String) -> Int:
@@ -106,10 +109,10 @@ def resource_of_node(resources: List[Resource], node_id: String) -> Int:
 
 
 def deletable(resources: List[Resource], node_id: String) -> Bool:
-    """True iff the resource node `node_id` belongs to writes
-    `adopt_deletable`."""
+    """True iff the resource node `node_id` belongs to writes `adopt`
+    ADOPT_DELETABLE."""
     var i = resource_of_node(resources, node_id)
-    return i >= 0 and adopt_deletable_of(resources[i])
+    return i >= 0 and resources[i].adopt.value == Adoption.ADOPT_DELETABLE
 
 
 def _shown(v: String) -> String:
@@ -222,12 +225,16 @@ def adopted_nodes_of(owned: List[OwnedRecord], taking: List[String]) -> List[Str
     return out^
 
 
+comptime _RELEASE_HINT = (
+    "remove the resource from the list to release the object (kci drops its stamp and record and leaves it standing)"
+)
+
+
 def _refusal(node_id: String, what: String) -> String:
     return (
         node_id + String(": kci adopted this object (it did not create it), and ") + what
-        + String(". Write adopt_deletable on the resource to let kci do that, or remove the resource")
-        + String(" from the list to release the object (kci drops its stamp and record and leaves it")
-        + String(" standing)")
+        + String(". Write adopt ADOPT_DELETABLE on the resource to let kci do that, or ")
+        + String(_RELEASE_HINT)
     )
 
 
@@ -239,7 +246,7 @@ def delete_findings(
     remove; on `destroy` every node of it is deleted, else only a node not
     wanted), unless the node's retention in this run is not RETAIN_DELETE
     (the engine deletes by it, not by the object's label) or its resource
-    writes `adopt_deletable`."""
+    writes `adopt` ADOPT_DELETABLE."""
     var out = List[Finding]()
     for i in range(len(owned)):
         ref rec = owned[i]
@@ -259,17 +266,15 @@ def delete_findings(
                     "this change would delete it (the resource no longer lowers it)"
                 )
                 out.append(
-                    Finding(FINDING_ADOPTION, owner_of_node(n.id), String("adopt_deletable"), _refusal(n.id, what))
+                    Finding(FINDING_ADOPTION, owner_of_node(n.id), String("adopt"), _refusal(n.id, what))
                 )
             break
     return out^
 
 
-def replace_findings(
-    actions: List[ChangeAction], adopted: List[String], resources: List[Resource]
-) -> List[Finding]:
-    """Rule 3, REPLACE: one finding per planned replace of an adopted node
-    whose resource does not write `adopt_deletable`."""
+def replace_findings(actions: List[ChangeAction], adopted: List[String]) -> List[Finding]:
+    """Rule 3, REPLACE: one finding per planned replace of an adopted node,
+    whatever its resource's `adopt` says."""
     var out = List[Finding]()
     for i in range(len(actions)):
         ref a = actions[i]
@@ -278,19 +283,18 @@ def replace_findings(
         for k in range(len(adopted)):
             if adopted[k] != a.logical_id:
                 continue
-            if not deletable(resources, a.logical_id):
-                out.append(
-                    Finding(
-                        FINDING_ADOPTION,
-                        owner_of_node(a.logical_id),
-                        String("adopt_deletable"),
-                        _refusal(
-                            a.logical_id,
-                            String("this change would replace it (the cloud cannot make it in place: ")
-                            + a.reason + String(")"),
-                        ),
-                    )
+            out.append(
+                Finding(
+                    FINDING_ADOPTION,
+                    owner_of_node(a.logical_id),
+                    String("adopt"),
+                    a.logical_id
+                    + String(": kci adopted this object (it did not create it), and this change would replace it")
+                    + String(" (the cloud cannot make it in place: ") + a.reason
+                    + String("). kci never replaces an adopted object, whatever adopt says: write the field as")
+                    + String(" the object has it, or ") + String(_RELEASE_HINT),
                 )
+            )
             break
     return out^
 
