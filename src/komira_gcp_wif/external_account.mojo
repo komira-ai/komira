@@ -377,7 +377,7 @@ def subject_token_from(raw: List[UInt8], json_field: String) raises -> String:
     """The subject token in what the source gave: the whole text when
     `json_field` is "", else that field of a JSON object, a non-empty
     string. The text is used as given (the reference strips nothing).
-    Refused without quoting a byte."""
+    Refused without quoting a byte of `raw` or the field's name."""
     if json_field.byte_length() == 0:
         var text: String
         try:
@@ -394,14 +394,14 @@ def subject_token_from(raw: List[UInt8], json_field: String) raises -> String:
         raise Error("komira_gcp_wif: the subject token source is not JSON")
     if not doc.is_object() or not doc.has(json_field):
         raise Error(
-            "komira_gcp_wif: the subject token source has no field "
-            + json_field
+            "komira_gcp_wif: the subject token source has no field named by"
+            " subject_token_field_name"
         )
     var v = doc.get(json_field)
     if not v.is_string() or v.as_string().byte_length() == 0:
         raise Error(
-            "komira_gcp_wif: the subject token source's field " + json_field
-            + " is not a non-empty string"
+            "komira_gcp_wif: the subject token source's field named by"
+            " subject_token_field_name is not a non-empty string"
         )
     return v.as_string()
 

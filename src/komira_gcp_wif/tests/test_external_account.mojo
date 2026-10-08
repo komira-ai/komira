@@ -15,9 +15,13 @@
 #      impersonation.
 #   §2 a URL-sourced subject (one JSON field of a GET with the file's
 #      headers): the same two cases.
-#   §3 refusals: each required field absent, named; sources this reader does
-#      not run; endpoints that are not bare https hosts; an STS refusal never
+#   §3 refusals: each required field absent, empty or not a string, named;
+#      sources this reader does not run; endpoints that are not bare https
+#      hosts; source headers the client writes itself; an STS refusal never
 #      reaching IAM Credentials.
+#   §4 what the file carries reaches the wire: its subject_token_type (one
+#      that is not jwt) and its token_lifetime_seconds; a JSON subject's
+#      refusal quotes neither the source's bytes nor the field's name.
 #
 # ⛔ EVERY ABSENCE HAS A POSITIVE CONTROL. "IAM Credentials was not dialed"
 # (no impersonation URL) is paired with the impersonation case of the same
@@ -40,6 +44,7 @@ from komira_gcp_wif import (
     JWT_SUBJECT_TOKEN_TYPE,
     generate_access_token_body,
     parse_external_account,
+    subject_token_from,
 )
 
 
@@ -56,6 +61,9 @@ comptime AUDIENCE_FORM = (
     "%2FworkloadIdentityPools%2Fci-pool%2Fproviders%2Fci-oidc"
 )
 comptime JWT_FORM = "urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt"
+# A subject type that is not jwt, as a file may name it, and its form.
+comptime ID_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:id_token"
+comptime ID_TOKEN_FORM = "urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token"
 comptime IMP_URL = (
     "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
     "deployer@demo-project.example:generateAccessToken"
@@ -255,13 +263,18 @@ def _sts_form(scope_form: String) -> String:
     """The whole STS body, by hand: the reference's field order, the file's
     audience, the OIDC token (it holds only unreserved bytes) and the jwt
     type."""
+    return _sts_form_typed(scope_form, String(JWT_FORM))
+
+
+def _sts_form_typed(scope_form: String, type_form: String) -> String:
+    """`_sts_form` with the subject type `type_form` (already encoded)."""
     return (
         String("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange")
         + "&audience=" + AUDIENCE_FORM
         + "&scope=" + scope_form
         + "&requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token"
         + "&subject_token=" + OIDC
-        + "&subject_token_type=" + JWT_FORM
+        + "&subject_token_type=" + type_form
     )
 
 
@@ -401,6 +414,9 @@ def test_a_refused_source_url_never_dials_sts() raises:
 # =============================================================================
 
 
+comptime _P_TEXT = "komira_gcp_wif: the external_account file "
+
+
 def _refusal(text: String) -> String:
     try:
         _ = parse_external_account(text)
@@ -525,6 +541,158 @@ def test_a_refused_exchange_never_dials_iam_credentials() raises:
     assert_equal(len(caps.iam[]), 0)
 
 
+def _with_member(field: String, json_value: String) -> String:
+    """`_without(field)` with `field` put back holding `json_value`."""
+    var t = _without(field)
+    return String(t[byte = 0 : t.byte_length() - 1]) + ',"' + field + '":' + json_value + "}"
+
+
+def test_required_fields_empty_or_not_strings_are_refused_by_name() raises:
+    """The control first: each field put back with a good value parses.
+    Then each string field empty, and as a number, is refused naming it;
+    a non-object credential_source likewise."""
+    _ = parse_external_account(_with_member(String("audience"), String('"a"')))
+    var fields: List[String] = ["audience", "subject_token_type", "token_url"]
+    for i in range(len(fields)):
+        var empty = _refusal(_with_member(fields[i], String('""')))
+        assert_equal(empty, String(_P_TEXT) + "has an empty \"" + fields[i] + "\"")
+        var number = _refusal(_with_member(fields[i], String("1")))
+        assert_equal(
+            number,
+            String(_P_TEXT) + "has a \"" + fields[i] + "\" that is not a string",
+        )
+    var not_obj = _refusal(_with_member(String("credential_source"), String('"f"')))
+    assert_equal(
+        not_obj, String(_P_TEXT) + "has a \"credential_source\" that is not an object"
+    )
+
+
+def test_an_http_impersonation_url_is_refused() raises:
+    var good = _file_json(_file_source(), True)
+    _ = parse_external_account(good)
+    var msg = _refusal(good.replace("https://iamcredentials.", "http://iamcredentials."))
+    assert_true("\"service_account_impersonation_url\" that is not https" in msg, msg)
+
+
+def _with_header(name: String) -> String:
+    return _file_json(
+        String('{"url":"https://token.example.com/","headers":{"') + name + '":"v"}}',
+        False,
+    )
+
+
+def test_headers_the_client_writes_itself_are_refused() raises:
+    """A file cannot set Host, Content-Length, Transfer-Encoding or
+    Connection, in any case. The control: a name that only contains one of
+    them parses."""
+    var ok = parse_external_account(_with_header(String("X-Host")))
+    assert_equal(len(ok.source_header_names), 1)
+    var names: List[String] = [
+        "host", "Host", "HOST", "content-length", "Content-Length",
+        "transfer-encoding", "Transfer-Encoding", "connection", "Connection",
+    ]
+    for i in range(len(names)):
+        var msg = _refusal(_with_header(names[i]))
+        assert_equal(
+            msg,
+            String(_P_TEXT) + "names a credential_source header the client"
+            " writes itself",
+        )
+    assert_true("not an HTTP token" in _refusal(_with_header(String("X A"))))
+    assert_true("empty credential_source header" in _refusal(_with_header(String(""))))
+
+
+# =============================================================================
+# §4 — what the file carries reaches the wire.
+# =============================================================================
+
+
+def test_the_files_subject_token_type_reaches_sts() raises:
+    """The type sent is the FILE's, not the jwt constant: a file naming
+    id_token is exchanged as id_token, the rest of the form unchanged."""
+    var caps = Caps()
+    var text = _file_json(_file_source(), False).replace(
+        String(JWT_SUBJECT_TOKEN_TYPE), String(ID_TOKEN_TYPE)
+    )
+    assert_true(String(ID_TOKEN_TYPE) in text, text)
+    assert_false(String(JWT_SUBJECT_TOKEN_TYPE) in text, text)
+    var f = _fetcher(text, caps, List[UInt8]())
+    _ = f.fetch(Int64(NOW_MS))
+    assert_equal(
+        _body_of(_text(caps.sts)),
+        _sts_form_typed(String(CLOUD_FORM), String(ID_TOKEN_FORM)),
+    )
+
+
+def _with_lifetime(value: String) -> String:
+    return _file_json(_file_source(), True).replace(
+        '"credential_source":',
+        String('"service_account_impersonation":{"token_lifetime_seconds":')
+        + value + '},"credential_source":',
+    )
+
+
+def test_the_files_token_lifetime_reaches_generate_access_token() raises:
+    """A lifetime other than the 3600 default is the one asked for."""
+    var caps = Caps()
+    var f = _fetcher(_with_lifetime(String("1800")), caps, List[UInt8]())
+    _ = f.fetch(Int64(NOW_MS))
+    assert_equal(
+        _body_of(_text(caps.iam)),
+        '{"scope":["https://www.googleapis.com/auth/cloud-platform"],"lifetime":"1800s"}',
+    )
+
+
+def test_token_lifetime_outside_the_api_range_is_refused() raises:
+    """600 and 43200 are the API's bounds, both accepted; one past either is
+    refused, as is a lifetime that is not an integer."""
+    assert_equal(
+        parse_external_account(_with_lifetime(String("600"))).impersonation_lifetime_s, 600
+    )
+    assert_equal(
+        parse_external_account(_with_lifetime(String("43200"))).impersonation_lifetime_s,
+        43200,
+    )
+    var bad: List[String] = ["599", "43201"]
+    for i in range(len(bad)):
+        var msg = _refusal(_with_lifetime(bad[i]))
+        assert_true("\"token_lifetime_seconds\" outside 600 to 43200" in msg, msg)
+    assert_true(
+        "not an integer" in _refusal(_with_lifetime(String('"1800"')))
+    )
+
+
+def _bytes(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    out.extend(Span(s.as_bytes()))
+    return out^
+
+
+def _subject_refusal(raw: String, field: String) -> String:
+    try:
+        _ = subject_token_from(_bytes(raw), field)
+    except e:
+        return String(e)
+    return String("NOT REFUSED")
+
+
+def test_a_json_subject_refusal_quotes_no_field_name() raises:
+    """The field's name comes from the file, so a refusal names the key
+    `subject_token_field_name`, not its value. The control: the field
+    present reads."""
+    comptime NAME = "FIELD-NAME-FROM-FILE"
+    assert_equal(
+        subject_token_from(_bytes(String('{"') + NAME + '":"abc"}'), String(NAME)), "abc"
+    )
+    var absent = _subject_refusal(String('{"other":"SOURCE-BYTES"}'), String(NAME))
+    assert_true("subject_token_field_name" in absent, absent)
+    assert_false(NAME in absent, absent)
+    assert_false("SOURCE-BYTES" in absent, absent)
+    var empty = _subject_refusal(String('{"') + NAME + '":""}', String(NAME))
+    assert_true("not a non-empty string" in empty, empty)
+    assert_false(NAME in empty, empty)
+
+
 def main() raises:
     test_file_subject_without_impersonation_is_the_sts_token()
     test_file_subject_with_impersonation_returns_the_impersonated_token()
@@ -536,4 +704,11 @@ def main() raises:
     test_other_types_and_sources_are_refused()
     test_endpoints_must_be_bare_https_hosts()
     test_a_refused_exchange_never_dials_iam_credentials()
+    test_required_fields_empty_or_not_strings_are_refused_by_name()
+    test_an_http_impersonation_url_is_refused()
+    test_headers_the_client_writes_itself_are_refused()
+    test_the_files_subject_token_type_reaches_sts()
+    test_the_files_token_lifetime_reaches_generate_access_token()
+    test_token_lifetime_outside_the_api_range_is_refused()
+    test_a_json_subject_refusal_quotes_no_field_name()
     print("OK")
