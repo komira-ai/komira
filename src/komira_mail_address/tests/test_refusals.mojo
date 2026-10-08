@@ -301,6 +301,13 @@ def test_length_limits() raises:
     )
     var q64 = AddrSpec(_repeat("a", 60) + '"', "example.com")
     assert_equal(q64.format(), '"' + _repeat("a", 60) + '\\""@example.com')
+    # A '\' is written with a backslash too: the same 65 refused, 64 accepted.
+    assert_equal(
+        _new_addr_error(_repeat("a", 61) + "\\", "example.com"),
+        P + "TooLong: AddrSpec: a local part longer than 64 octets at position 0",
+    )
+    var b64 = AddrSpec(_repeat("a", 60) + "\\", "example.com")
+    assert_equal(b64.format(), '"' + _repeat("a", 60) + '\\\\"@example.com')
     # Label: 63 octets.
     assert_equal(parse_addr_spec("a@" + _repeat("b", 63) + ".com").domain(), _repeat("b", 63) + ".com")
     assert_equal(
