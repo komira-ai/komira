@@ -64,7 +64,7 @@ resource {
     cell: ARTIFACTS
   }
   retention: DELETE
-  job {
+  container_job {
     image {
       digest: "sha256:9e27b4aa"
       platform: "linux/arm64"
@@ -101,10 +101,8 @@ resource {
         version: "3"
       }
     }
-    schedule {
-      cron: "0 3 * * *"
-      timezone: "Europe/Berlin"
-    }
+    command: "/usr/bin/exporter"
+    command: "--quiet"
     run_as {
       resource: "nightly-runner"
     }
@@ -113,7 +111,7 @@ resource {
 resource {
   id: "reindex"
   retention: DELETE
-  job {
+  container_job {
     image {
       output {
         step: "build-reindex"
@@ -121,8 +119,6 @@ resource {
       }
     }
     max_retries: 0
-    on_demand {
-    }
     run_as {
       resource: "nightly-runner"
     }

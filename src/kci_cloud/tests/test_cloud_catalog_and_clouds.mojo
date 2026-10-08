@@ -16,16 +16,17 @@
 # 4. `CloudId` compares by value.
 # 5. THE BUCKET ROW: PORTABLE, exposes NAME and ADDRESS, accepts READ, WRITE
 #    and READ_WRITE (not CALL), retention default KEEP, primary role
-#    `bucket`; a service and a job take no retention and land on `run`. The
+#    `bucket`; a service and a container job take no retention and land on
+#    `run` (the worker's row is in test_cloud_compute_rules). The
 #    effective retention is the written one, else the default; a reference
 #    to a resource lands on its primary node.
 # 6. THE TABLE ROW: PORTABLE, exposes NAME only, accepts READ, WRITE,
 #    READ_WRITE and DESCRIBE (not CALL), retention default KEEP, primary
-#    role `table`; it is the third body arm, field 13.
-# 7. THE MESSAGING ROWS: a queue (field 15, the fifth arm) and a topic (21,
-#    the ninth) are PORTABLE, expose NAME and ADDRESS, take retention with
+#    role `table`; it is the fourth body arm, field 13.
+# 7. THE MESSAGING ROWS: a queue (field 15, the sixth arm) and a topic (21,
+#    the tenth) are PORTABLE, expose NAME and ADDRESS, take retention with
 #    the default DELETE, and land on `queue` / `topic`; a queue accepts SEND
-#    and RECEIVE, a topic SEND only. A subscription (28, the thirteenth) exposes
+#    and RECEIVE, a topic SEND only. A subscription (28, the sixteenth) exposes
 #    and accepts nothing, takes no retention, and lands on `sub` (a role
 #    word is 8 bytes at most).
 #    SEND and RECEIVE are values of the generated `Access`.
@@ -48,7 +49,7 @@ from kci_cloud import (
     PORTABLE,
     CLOUD_BOUND,
     FIELD_SERVICE,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
     FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
@@ -98,15 +99,16 @@ def test_catalog_arms_match_the_wire() raises:
     var c = Catalog.v1()
     assert_equal(
         len(c.types),
-        13,
-        "v1 declares service, job, table, bucket, queue, secret, dns_zone, service_account, topic, grant,"
-        + " dns_record, certificate and subscription",
+        19,
+        "v1 declares service, container_job, worker, table, bucket, queue, secret, dns_zone, service_account,"
+        + " topic, schedule, network, grant, dns_record, certificate, subscription, subnet, ip_address and"
+        + " event_trigger",
     )
     for i in range(len(c.types)):
         var field = c.types[i].field
         var r = decode_proto[Resource](_resource_with_body(field))
         assert_equal(body_field(r), field, c.types[i].name + " maps back to its field")
-    var none = decode_proto[Resource](_resource_with_body(22))
+    var none = decode_proto[Resource](_resource_with_body(24))
     var raised = False
     try:
         _ = body_field(none)
@@ -151,7 +153,7 @@ def test_catalog_names_are_generated_enum_values() raises:
                 t.name + " accepts a real Access: " + t.accepts[k],
             )
     assert_true(c.types[c.index_of(FIELD_SERVICE)].exposes_output("URL"))
-    assert_false(c.types[c.index_of(FIELD_JOB)].exposes_output("URL"))
+    assert_false(c.types[c.index_of(FIELD_CONTAINER_JOB)].exposes_output("URL"))
     print("  test_catalog_names_are_generated_enum_values: PASS")
 
 
@@ -190,9 +192,11 @@ def _ints(
     a: Int, b: Int = -1, c: Int = -1, d: Int = -1, e: Int = -1, f: Int = -1
 ) -> List[Int]:
     """The fields given, then the messaging fields (15 queue, 21 topic, 28
-    subscription), 16 secret and the name fields (18 DNS zone, 26 DNS
-    record, 27 certificate), which every entry in these tests implements."""
-    var l: List[Int] = [15, 21, 28, 16, 18, 26, 27]
+    subscription), 16 secret, the name fields (18 DNS zone, 26 DNS record,
+    27 certificate), 12 worker, the triggers (22 schedule, 31 event
+    trigger) and the networks (23 network, 29 subnet, 30 IP address), which
+    every entry in these tests implements."""
+    var l: List[Int] = [15, 21, 28, 16, 18, 26, 27, 12, 22, 31, 23, 29, 30]
     l.append(a)
     if b >= 0:
         l.append(b)
@@ -230,7 +234,7 @@ def test_artifact_rules() raises:
     a1.append(Absence(11, ABSENT_BY_DESIGN, String("x")))
     a1.append(Absence(32, ABSENT_BY_DESIGN, String("x")))
     p = _joined(artifact_problems(c, _entry(False, _ints(10, 13, 14, 20, 25), a1^)))
-    assert_true(_has(p, "'job' is PORTABLE; ABSENT_BY_DESIGN is legal only"), p)
+    assert_true(_has(p, "'container_job' is PORTABLE; ABSENT_BY_DESIGN is legal only"), p)
 
     # NOT_YET on a bound type
     var a2 = List[Absence]()
@@ -243,14 +247,14 @@ def test_artifact_rules() raises:
     a3.append(Absence(11, NOT_YET, String("x")))
     a3.append(Absence(32, ABSENT_BY_DESIGN, String("x")))
     p = _joined(artifact_problems(c, _entry(True, _ints(10, 13, 14, 20, 25), a3^)))
-    assert_true(_has(p, "claims to be complete but does not host PORTABLE type 'job'"), p)
+    assert_true(_has(p, "claims to be complete but does not host PORTABLE type 'container_job'"), p)
 
     # declared twice
     var a4 = List[Absence]()
     a4.append(Absence(11, NOT_YET, String("x")))
     a4.append(Absence(32, ABSENT_BY_DESIGN, String("x")))
     p = _joined(artifact_problems(c, _entry(False, _ints(10, 11, 13, 14, 20, 25), a4^)))
-    assert_true(_has(p, "'job' is declared more than once"), p)
+    assert_true(_has(p, "'container_job' is declared more than once"), p)
 
     # outside the catalog
     var a5 = List[Absence]()
@@ -282,11 +286,11 @@ def test_clouds_refuse_at_add() raises:
         reg.add(CloudEntry(CloudId(String("b")), True, _ints(10), List[Absence]()))
     except e:
         raised = True
-        assert_true(_has(String(e), "'job' is neither implemented"), String(e))
+        assert_true(_has(String(e), "'container_job' is neither implemented"), String(e))
     assert_true(raised, "an illegal declaration is refused at start-up")
     assert_equal(len(reg.entries), 1)
-    assert_equal(len(reg.implementers(FIELD_JOB)), 1)
-    assert_equal(reg.implementers(FIELD_JOB)[0], "a")
+    assert_equal(len(reg.implementers(FIELD_CONTAINER_JOB)), 1)
+    assert_equal(reg.implementers(FIELD_CONTAINER_JOB)[0], "a")
     print("  test_clouds_refuse_at_add: PASS")
 
 
@@ -355,9 +359,9 @@ def test_the_bucket_row_retention_and_primary_role() raises:
     assert_true(b.takes_retention())
     assert_equal(b.primary_role, "bucket")
     ref svc = c.types[c.index_of(FIELD_SERVICE)]
-    ref job = c.types[c.index_of(FIELD_JOB)]
+    ref job = c.types[c.index_of(FIELD_CONTAINER_JOB)]
     assert_false(svc.takes_retention(), "a service takes no retention")
-    assert_false(job.takes_retention(), "a job takes no retention")
+    assert_false(job.takes_retention(), "a container_job takes no retention")
     assert_equal(svc.primary_role, "run")
     assert_equal(job.primary_role, "run")
     assert_false(svc.accepts_access("READ"), "READ is not a service verb")
@@ -429,7 +433,7 @@ def test_the_table_row() raises:
     assert_false(t.accepts_access("CALL"), "a table is not called")
     assert_equal(t.retention_default, RETENTION_KEEP, "a table is kept by default")
     assert_equal(t.primary_role, "table")
-    assert_equal(body_arms()[2].field, FIELD_TABLE, "the third arm, by declaration order")
+    assert_equal(body_arms()[3].field, FIELD_TABLE, "the fourth arm, by declaration order")
     var l = _list(
         String('{"resource":[{"id":"orders","table":{}},')
         + String('{"id":"cache","retention":"DELETE","table":{}}]}')
@@ -446,7 +450,7 @@ def test_the_messaging_rows() raises:
     var arms = body_arms()
     var fields = [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]
     var names = ["queue", "topic", "subscription"]
-    var positions = [4, 8, 12]
+    var positions = [5, 9, 15]
     for i in range(3):
         ref t = c.types[c.index_of(fields[i])]
         assert_equal(t.name, String(names[i]))

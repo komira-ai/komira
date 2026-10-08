@@ -32,9 +32,9 @@
 #   * The policy is consulted ONCE per call (a single predictable branch in
 #     `merge_cmp_validity`, hoisted outside the per-byte loop), so the 3VL fast
 #     path pays nothing for the seam.
-# It defaults to 3VL-absorb (`NULL_POLICY_THREE_VALUED`). A future Excel
-# error-value profile plugs a new policy code into `merge_cmp_validity` WITHOUT
-# re-forking any comparison entry point — that is the point of the seam.
+# It defaults to 3VL-absorb (`NULL_POLICY_THREE_VALUED`). Another policy plugs
+# a new code into `merge_cmp_validity` WITHOUT re-forking any comparison entry
+# point — that is the point of the seam.
 #
 # BEHAVIOR CONTRACT: `current semantics == the SQL-3VL base profile`. The
 # differential test `test_comparison_kleene_convergence.mojo` pins the result over
@@ -57,10 +57,8 @@ from komira_column_kernels.comparison import (
 
 comptime NULL_POLICY_THREE_VALUED: UInt8 = 0
 """SQL/Arrow three-valued-logic absorb (the default, and the only policy
-implemented). Reserved future codes (NOT implemented here —
-they plug into `merge_cmp_validity` without re-forking any entry point):
-  1 = ERROR_DOMINANT  (Excel error-values dominate).
-"""
+implemented). Another code plugs into `merge_cmp_validity` without re-forking
+any entry point."""
 
 
 struct NullPolicy(Copyable, Movable, ImplicitlyCopyable):
@@ -362,7 +360,7 @@ def kleene_all_null_predicate(
 # left null-lane data unmasked, and covered only 3 of the 6 ops).
 #
 # No live caller wires these yet — they complete the canonical mechanism so a
-# future SQL/Excel binder binds straight onto ONE surface. Exercised by the
+# future SQL binder binds straight onto ONE surface. Exercised by the
 # differential test.
 # =============================================================================
 

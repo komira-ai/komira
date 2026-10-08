@@ -14,23 +14,18 @@
 #    Against a schema that lacks one of these numbers (or a field inside),
 #    the record is unknown and dropped, and this fails.
 # 2. DNSZONE. 1 `name` (a string); by name, binary, JSON, absent = unset; 2
-#    is not a field; as `Resource.body` 18, the seventh arm.
+#    is not a field; as `Resource.body` 18, the eighth arm.
 # 3. DNSRECORD. 1 `name`, 2 `zone` (a `Ref`), 3 `type` (a `RecordType`), 4
 #    `values` (repeated `Value`), 5 `ttl` (a `Duration`); by name, binary,
 #    JSON (`"type":"CNAME"`, `"ttl":"300s"`), absent = unset; 6 is not a
-#    field; as `Resource.body` 26, the eleventh arm.
+#    field; as `Resource.body` 26, the fourteenth arm.
 # 4. CERTIFICATE. 1 `domains` (repeated string), 2 `zone` (a `Ref`); by
 #    name, binary, JSON, absent = unset; 3 is not a field; as
-#    `Resource.body` 27, the twelfth arm.
+#    `Resource.body` 27, the fifteenth arm.
 # 5. RECORDTYPE. Every value by number AND by name: 0 RECORD_TYPE_UNSET, 1
 #    A, 2 AAAA, 3 CNAME, 4 TXT, 5 MX; 6 is no value.
-# 6. THE ARM CENSUS. Every declared `Resource.body` arm, by number and by
-#    the oneof position the generated struct records: 10 service 1, 11 job
-#    2, 13 table 3, 14 bucket 4, 15 queue 5, 16 secret 6, 18 DNS zone 7, 20
-#    service account 8, 21 topic 9, 25 grant 10, 26 DNS record 11, 27
-#    certificate 12, 28 subscription 13. A position that moves is a
-#    different arm to every reader of `_oneof0_case` (kci_cloud's
-#    `body_arms`). 32 (a mail domain) stays held.
+# The census of every arm's number and oneof position is in
+# test_resource_compute_numbers.mojo (the latest arms decide every position).
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 # =============================================================================
@@ -296,7 +291,7 @@ def test_dns_zone() raises:
     var rb = _resource("site", 18, _zone("example.com"))
     var rr = decode_proto[Resource](rb.copy())
     assert_true(Bool(rr.dns_zone), "body 18 is `dns_zone`")
-    assert_equal(rr._oneof0_case, 7, "the DNS zone is the seventh arm")
+    assert_equal(rr._oneof0_case, 8, "the DNS zone is the eighth arm")
     assert_equal(rr.dns_zone.value().name, "example.com")
     var rt = encode_json(rr)
     assert_true('"dnsZone":{"name":"example.com"}' in rt, "Resource JSON carries the zone: " + rt)
@@ -353,7 +348,7 @@ def test_dns_record() raises:
 
     var rr = decode_proto[Resource](_resource("www", 26, _record()))
     assert_true(Bool(rr.dns_record), "body 26 is `dns_record`")
-    assert_equal(rr._oneof0_case, 11, "the DNS record is the eleventh arm")
+    assert_equal(rr._oneof0_case, 14, "the DNS record is the fourteenth arm")
     var rt = encode_json(rr)
     assert_true('"dnsRecord":{' in rt, "Resource JSON carries the record: " + rt)
     print("  test_dns_record: PASS")
@@ -390,7 +385,7 @@ def test_certificate() raises:
 
     var rr = decode_proto[Resource](_resource("tls", 27, _certificate()))
     assert_true(Bool(rr.certificate), "body 27 is `certificate`")
-    assert_equal(rr._oneof0_case, 12, "the certificate is the twelfth arm")
+    assert_equal(rr._oneof0_case, 15, "the certificate is the fifteenth arm")
     var rt = encode_json(rr)
     assert_true('"certificate":{"domains":' in rt, "Resource JSON carries the certificate: " + rt)
     print("  test_certificate: PASS")
@@ -410,32 +405,6 @@ def test_record_type_ordinals() raises:
     print("  test_record_type_ordinals: PASS")
 
 
-# ---- 6. the arm census ----------------------------------------------------------------
-
-
-def test_body_arm_census() raises:
-    """Catches: any arm renumbered, and any arm's oneof position moved (an arm
-    declared out of number order shifts every later position, and kci_cloud
-    maps positions to fields)."""
-    var fields: List[Int] = [10, 11, 13, 14, 15, 16, 18, 20, 21, 25, 26, 27, 28]
-    for i in range(len(fields)):
-        var b = List[UInt8]()
-        _str(b, 1, "x")
-        _msg(b, fields[i], List[UInt8]())
-        var r = decode_proto[Resource](b.copy())
-        assert_equal(r._oneof0_case, i + 1, String("Resource.body ") + String(fields[i]) + " position")
-        # The arm survives a re-encode (an empty body may re-encode with its
-        # zero-valued fields written out, so the arm is compared, not bytes).
-        var again = decode_proto[Resource](encode_proto(r))
-        assert_equal(again._oneof0_case, i + 1, String("arm ") + String(fields[i]) + " re-encodes")
-    for held in [12, 17, 19, 22, 23, 24, 29, 32, 33]:
-        var b = List[UInt8]()
-        _str(b, 1, "x")
-        _msg(b, held, List[UInt8]())
-        assert_equal(decode_proto[Resource](b.copy())._oneof0_case, 0, String(held) + " is held")
-    print("  test_body_arm_census: PASS")
-
-
 def main() raises:
     print("test_resource_dns_numbers: dns_zone, dns_record, certificate")
     test_added_dns_numbers_are_kept()
@@ -443,5 +412,4 @@ def main() raises:
     test_dns_record()
     test_certificate()
     test_record_type_ordinals()
-    test_body_arm_census()
     print("ALL kci.resource.v1 DNS FIELD-NUMBER TESTS PASSED")

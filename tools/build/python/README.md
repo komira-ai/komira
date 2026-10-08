@@ -122,6 +122,22 @@ runs
   The interpreter can still open any absolute path on the worker; nothing
   stops a script that does.
 
+### Test 51: Python oracles
+
+Test 51 of [`tools/build/tests`](../tests/README.md) checks the
+independence rule above: each target of
+[`negative/python_oracle`](../tests/negative/python_oracle/BUCK) fails
+analysis naming the input: a komira library's gated package as `data`, a
+komira binary in `srcs` or as `src`, a wheel installed by a target outside
+`third_party/` (as a dep or as the `tzdata` wheel) and an interpreter
+unpacked outside it. The oracles that work, the runner's verdicts and a
+welded Mojo test reading an oracle's output are in
+[`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md).
+
+```sh
+./buck2 build tests//negative/python_oracle:komira_data   # must fail: is built by komira//src/komira_encoding:komira_encoding, which is not under third_party/
+```
+
 ## Host floor
 
 What a Python action takes from the worker is the floor of every action

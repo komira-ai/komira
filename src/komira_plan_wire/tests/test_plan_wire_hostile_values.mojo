@@ -5,7 +5,7 @@
 # THE INPUTS ARE FOREIGN AND THEY WERE PRODUCED THE ONLY WAY THAT WORKS: a
 # human edited a `.txtpb` and `protoc` encoded it. Every fixture this file
 # reads is structurally perfect, is inside every budget `plan_wire_admit.mojo`
-# enforces (under 300 bytes, three levels deep, `format_version: 2`), and all
+# enforces (under 300 bytes, three levels deep, `format_version: 4`), and all
 # but two of them say something about a VALUE that their own schema
 # contradicts. The two exceptions are CONTROLS, and the corpus is worthless
 # without them — see `sort_over_scan_valid` (a plan this build once REFUSED,
