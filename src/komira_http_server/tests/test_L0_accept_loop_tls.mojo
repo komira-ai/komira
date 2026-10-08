@@ -434,6 +434,21 @@ def test_expect_continue_enabled_sends_interim_then_response() raises:
     assert_equal(link.read(), String(CONTINUE) + CANNED + CANNED)
 
 
+def test_expect_continue_request_ending_the_read_is_answered() raises:
+    """The TLS twin of the plaintext expectation case: the request's last
+    byte is the last byte of the read, and the round answers it and keeps
+    the connection."""
+    var link = _Link()
+    link.write(EXPECT)
+    assert_true(link.round())
+    assert_equal(link.reqs, Int64(1))
+    assert_equal(
+        link.sent,
+        Int64(String(CONTINUE).byte_length() + String(CANNED).byte_length()),
+    )
+    assert_equal(link.read(), String(CONTINUE) + CANNED)
+
+
 def test_expect_continue_disabled_gets_417_and_close() raises:
     var link = _Link()
     link.continue_ok = False
@@ -495,7 +510,9 @@ def test_write_error_on_each_response_closes() raises:
 
 def test_blocked_write_closes() raises:
     """A response that cannot be written now is not parked on this path:
-    the round closes and counts nothing."""
+    the round closes and counts nothing. This covers today's TLS
+    blocked-write path; parking TLS writes is tracked in
+    komira-ai/komira#947."""
     var link = _Link()
     link.fill()
     link.write(GET)
