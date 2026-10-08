@@ -36,7 +36,6 @@ plan {
             int_val: 25
             kind: SCALAR_KIND_DTYPE
             time_unit: SCALAR_TIME_UNIT_MICRO
-            error_code: XL_ERR_NONE
           }
         }
       }

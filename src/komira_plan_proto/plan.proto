@@ -168,7 +168,7 @@ message WireField {
   // lossy for `DType.index`, which `ArrowType.from_dtype` folds onto INT64.
   //
   // ★ AN ENUM, NOT A BARE `uint32`, BECAUSE "LANGUAGE-AGNOSTIC" REQUIRES IT.
-  // A Python or Excel frontend that decoded `dtype_code: 5` from a bare
+  // A Python or TypeScript frontend that decoded `dtype_code: 5` from a bare
   // integer would have NOWHERE TO LOOK UP WHAT 5 IS — in a format whose whole
   // purpose is that four languages share one plan. `DTypeCode` is a real enum
   // in `plan_vocabulary.proto`, DERIVED from the codec's own `_DT_*` table,
@@ -324,12 +324,10 @@ message WireScalar {
   ScalarTimeUnit time_unit = 17;
   int64 dec256_high_lo = 18;
   int64 dec256_high_hi = 19;
-  // ⚠ MEANING CHANGED AT format_version 2, same as `kind`. The `XL_ERR_*` code
-  // of a SCALAR_KIND_ERROR literal — core-owned; a frontend copies its error
-  // code onto it verbatim.
-  // An unknown code taken verbatim becomes a DIFFERENT error, which is worse
-  // than not being an error at all.
-  ExcelErrorCode error_code = 20;
+  // 20 carried a spreadsheet error code, a value kind the engine no longer
+  // has. The number and the name stay reserved.
+  reserved 20;
+  reserved "error_code";
 }
 
 // ===========================================================================
@@ -475,8 +473,8 @@ message WireColRef {
 // ONE — it is the single most likely thing a GENERATED client gets wrong.
 //
 // Addressing a column by ORDINAL is what a client does when it has a schema and
-// no name-resolution layer, which is the normal shape of an Excel or a Python
-// frontend. Every in-tree producer emits `col_ref`, so no Mojo caller ever
+// no name-resolution layer, which is the normal shape of a TypeScript or a
+// Python frontend. Every in-tree producer emits `col_ref`, so no Mojo caller ever
 // reached this arm; THE FIRST NON-MOJO PRODUCER IS EXACTLY WHO DOES.
 //
 // An ordinal is dangerous here: `col_idx: 1` against a three-column schema —

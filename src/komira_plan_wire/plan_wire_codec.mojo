@@ -344,7 +344,7 @@
 #   NAME. There are three, all on `WireField` and all `uint32` -> `UInt8`:
 #   `arrow_type_id`, `dict_index_type_id`, `child_type_ids[]`. See
 #   `_arrow_type_from_wire` — the check is MEMBERSHIP in the derived ArrowType
-#   vocabulary, not a range test, because 51 narrows losslessly and is still
+#   vocabulary, not a range test, because 50 narrows losslessly and is still
 #   not a type. A narrowing that does not raise does not fail; it succeeds at
 #   naming a DIFFERENT type, and a decoded plan with a different schema is a
 #   silently wrong plan that LEG 2 would compare happily.
@@ -429,7 +429,6 @@ from komira_plan_proto.plan_vocabulary import (
     ColSide,
     CorrelatedKind,
     DTypeCode,
-    ExcelErrorCode,
     ExtractField,
     FrameBound,
     FrameUnits,
@@ -582,8 +581,6 @@ from komira_plan_wire.plan_wire_vocabulary import (
     scalar_kind_from_wire,
     scalar_time_unit_to_wire,
     scalar_time_unit_from_wire,
-    excel_error_code_to_wire,
-    excel_error_code_from_wire,
     param_tag_to_wire,
     param_tag_from_wire,
     pushdown_gate_mode_to_wire,
@@ -698,6 +695,10 @@ VERSION 2 carries two changes:
     `WireParam.tag`, `WirePushdownGate.mode`, `WireScanBinding.snapshot_policy`.
     Same bytes, every value shifted by one, which is the meaning change this
     rule's first line has always been about.
+
+`WireScalar.error_code` (20) was deleted without a bump, because no reader
+built before the deletion was ever deployed; its number and name are
+reserved.
 
 VERSION 3 IS THE FIRST BUMP FOR AN *ADDED* FIELD, AND IT BREAKS
 THE FIRST RULE ABOVE ON PURPOSE. `WirePlanEnvelope.write_target` is a field
@@ -893,7 +894,7 @@ def _col_ref_of_side(var name: String, side: UInt8) raises -> Expr:
 # ★ THESE NUMBERS ARE PUBLISHED, AND THEY ARE NAMED.
 # The generated plan vocabulary DERIVES the `DTypeCode` proto enum from
 # these very `comptime` lines, so `plan_vocabulary.proto` carries
-# `_DT_INT64 = 5` and a Python or Excel reader decodes `dtype_code: _DT_INT64`
+# `_DT_INT64 = 5` and a Python or TypeScript reader decodes `dtype_code: _DT_INT64`
 # instead of a bare `5` it has nowhere to look up. Adding a constant here adds
 # a member there; MOVING or reusing one is never allowed, because a published
 # number is part of the format.
@@ -1030,8 +1031,8 @@ def _dtype_from_wire(c: DTypeCode) raises -> DType:
 # ★ THE BOUND IS DERIVED, NOT WRITTEN HERE. `arrow_type_is_declared` comes out
 # of the generated plan vocabulary's ArrowType space, whose members are generated
 # from `arrow_types.mojo` itself. So this is a MEMBERSHIP check, not a range
-# check — 51 fits in a UInt8 and narrows losslessly, and is still not a type —
-# and once `comptime NEW_TYPE = ArrowType(51)` is added to the engine and the
+# check — 50 fits in a UInt8 and narrows losslessly, and is still not a type —
+# and once `comptime NEW_TYPE = ArrowType(50)` is added to the engine and the
 # vocabulary is regenerated from the engine's tag declarations, it is admitted
 # here with no edit to the codec.
 #
@@ -1221,13 +1222,13 @@ def _opt_schema_from_wire(
 
 
 def _scalar_to_wire(v: ScalarValue) raises -> WireScalar:
-    """TOTAL: 18 `var`s, 18 slots. The struct is a flat union whose live arm is
+    """TOTAL: 19 `var`s, 19 slots. The struct is a flat union whose live arm is
     (`_kind`, `dtype`); every other slot is zero, and proto3 omits zeros, so
     totality is free on the wire.
 
-    THE THREE ENUM SLOTS GO THROUGH THE DERIVED VOCABULARY, so encoding a kind
-    / unit / error code the engine does not declare RAISES here rather than
-    writing bytes no reader can name."""
+    THE ENUM SLOTS GO THROUGH THE DERIVED VOCABULARY, so encoding a kind or
+    unit the engine does not declare RAISES here rather than writing bytes no
+    reader can name."""
     return WireScalar(
         _dtype_to_wire(v.dtype),
         v.int_val,
@@ -1248,7 +1249,6 @@ def _scalar_to_wire(v: ScalarValue) raises -> WireScalar:
         ScalarTimeUnit(Int(scalar_time_unit_to_wire(v.time_unit))),
         v.dec256_high_lo,
         v.dec256_high_hi,
-        ExcelErrorCode(Int(excel_error_code_to_wire(v.error_code))),
     )
 
 
@@ -1256,10 +1256,10 @@ def _scalar_from_wire(w: WireScalar) raises -> ScalarValue:
     """⚠ `kind` IS A DISCRIMINATOR, SO IT IS NEVER ASSIGNED UNCHECKED
     (`v._kind = UInt8(Int(w.kind))` would be the bug).
 
-    `_kind` selects which of the struct's 18 payload fields is live, so an
+    `_kind` selects which of the struct's 17 payload fields is live, so an
     out-of-vocabulary kind would produce a ScalarValue that reads a field
     nothing wrote, with no arm-presence check to turn a perturbation into a
-    refusal. All three enum slots go through the derived vocabulary, which
+    refusal. Both enum slots go through the derived vocabulary, which
     validates the RANGE BEFORE the narrowing rather than after it."""
     var v = ScalarValue()
     v.dtype = _dtype_from_wire(w.dtype_code)
@@ -1281,7 +1281,6 @@ def _scalar_from_wire(w: WireScalar) raises -> ScalarValue:
     v.time_unit = scalar_time_unit_from_wire(Int32(w.time_unit.number()))
     v.dec256_high_lo = w.dec256_high_lo
     v.dec256_high_hi = w.dec256_high_hi
-    v.error_code = excel_error_code_from_wire(Int32(w.error_code.number()))
     return v^
 
 

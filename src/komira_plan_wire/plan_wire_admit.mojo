@@ -302,7 +302,7 @@ else. So the READER enforces the other half:
 
 That converts "a conformant producer declares 3" from a convention a frontend
 author may forget into a rule the wire enforces on the first message. Without
-it, a Python or Excel frontend that sets `write_target` and leaves
+it, a Python or TypeScript frontend that sets `write_target` and leaves
 `format_version = 2` produces bytes that THIS build executes correctly and that
 every older reader executes WRONG — and the difference is invisible from either
 side.

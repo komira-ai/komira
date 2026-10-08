@@ -27,8 +27,8 @@
 #                length or op count over a short buffer, and a PROJECT whose
 #                name count differs from its expression count.
 #   UNKNOWN      op tags, expr tags, dtype codes, column sides, binary/unary
-#                operator codes, fs schemes, scalar kind / time unit / error
-#                code, a bool byte that is neither 0 nor 1, a negative LIMIT or
+#                operator codes, fs schemes, scalar kind / time unit, a bool
+#                byte that is neither 0 nor 1, a negative LIMIT or
 #                row window, a non-UTF-8 identifier, an Int32 scalar field
 #                (date32, interval months/days) outside Int32.
 #   VERSION GATE version 0 and 2 refused; and refused BEFORE the body is read
@@ -180,14 +180,9 @@ def test_hostile_fixtures_are_refused_by_exact_message() raises:
     _check("binary_op_gap", "PPLAN_WIRE_BAD_ENUM: binary op 5", f)
     _check("unary_op_unknown", "PPLAN_WIRE_BAD_ENUM: unary op 9", f)
     _check("fs_scheme_unknown", "PPLAN_WIRE_BAD_ENUM: fs scheme 4", f)
-    _check("scalar_kind_unknown", "PPLAN_WIRE_BAD_ENUM: scalar kind 11", f)
+    _check("scalar_kind_unknown", "PPLAN_WIRE_BAD_ENUM: scalar kind 10", f)
     _check(
         "scalar_time_unit_unknown", "PPLAN_WIRE_BAD_ENUM: scalar time unit 4", f
-    )
-    _check(
-        "scalar_error_code_unknown",
-        "PPLAN_WIRE_BAD_ENUM: scalar error code 11",
-        f,
     )
     # Int32 fields travel as Int64: a value outside Int32 would narrow to the
     # same plan as 2^32 other spellings, and would not re-encode to itself.
