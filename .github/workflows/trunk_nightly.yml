@@ -49,6 +49,13 @@ jobs:
       contents: read
       # for farm-connect only: the token Tailscale trusts
       id-token: write
+    # Every `run:` step below: without a `shell:`, GitHub runs `bash -e {0}`,
+    # where a pipeline's status is its last command's (tee's), so a buck2
+    # step would be green whatever buck2 did. `shell: bash` makes it
+    # `bash --noprofile --norc -eo pipefail {0}`.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,12 +73,15 @@ jobs:
         id: farm
         run: |
           for key in linux_x86_64_properties; do
-            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
+            # Not piped into `grep -q`: under pipefail, grep leaving early
+            # could fail buck2 with SIGPIPE and fail a configured farm.
+            value=$(./buck2 audit config "komira_re.$key" --style json) || exit 1
+            grep -q '": *"[^"]' <<<"$value" ||
               { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
           done
           mkdir -p "$RUNNER_TEMP/trunk"
-      # `shell: bash` runs with -e -o pipefail, so the step fails when buck2
-      # does, not when tee succeeds.
+      # The job's `shell: bash` is `bash --noprofile --norc -eo pipefail {0}`:
+      # each of these three steps fails when buck2 does, though tee succeeds.
       - name: build //...
         id: build
         if: ${{ !cancelled() && steps.farm.outcome == 'success' }}
