@@ -171,6 +171,18 @@ def _raw_line(byte: UInt8) -> List[UInt8]:
     return out^
 
 
+def _raw_body(byte: UInt8) -> List[UInt8]:
+    """`Subject: a`, CRLF CRLF, then `byte` and CRLF as the body, as raw
+    bytes (not UTF-8)."""
+    var out = List[UInt8]()
+    for c in "Subject: a\r\n\r\n".as_bytes():
+        out.append(c)
+    out.append(byte)
+    for c in "\r\n".as_bytes():
+        out.append(c)
+    return out^
+
+
 comptime NOT_A_MEDIA_TYPE = "komira_mail_message.InvalidValue: MessageBuilder.add_attachment: a media type that is not type/subtype tokens"
 
 
@@ -238,6 +250,25 @@ def test_values() raises:
     )
     assert_equal(_raw_attachment_error("message/rfc822", _raw_line(0x7F)), "OK")
     assert_equal(_raw_attachment_error("message/rfc822", _raw_line(0x01)), "OK")
+    # The rule covers the whole attachment, not just its header section: a
+    # violation after the blank line is refused too.
+    assert_equal(
+        _attachment_error(
+            "message/rfc822", String("Subject: a\r\n\r\ncaf") + chr(0xE9) + "\r\n"
+        ),
+        not_7bit,
+    )
+    assert_equal(
+        _raw_attachment_error("message/rfc822", _raw_body(0x80)), not_7bit
+    )
+    assert_equal(_raw_attachment_error("message/rfc822", _raw_body(0x7F)), "OK")
+    var body_998 = String("Subject: a\r\n\r\n")
+    for _ in range(998):
+        body_998 += "x"
+    assert_equal(_attachment_error("message/rfc822", body_998 + "\r\n"), "OK")
+    assert_equal(
+        _attachment_error("message/rfc822", body_998 + "x\r\n"), not_7bit
+    )
     # The 7bit rule is for every message/* subtype (RFC 2046 section 5.2.2
     # for message/partial), not just message/rfc822.
     assert_equal(
