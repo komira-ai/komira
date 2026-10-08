@@ -221,12 +221,12 @@ def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) r
             var day = parse_local_date(e.start_date) if e.show_without_time else parse_local_datetime(e.start).days
             var until_day = parse_local_date(rule.until) if rule.until.byte_length() > 0 else LAST_DAY
             var first = first_occurrence(rule, day, until_day)
-            if first < 0:
+            if not first:
                 raise Error(
                     'ics export: event "' + uid + '": its recurrence picks no day from its start to its until,'
                     + " and an iCalendar series always holds its DTSTART"
                 )
-            shift = first - day
+            shift = first.value() - day
         shifts.append(shift)
         for ref o in ie.overrides:
             var ro = check_override(o, e)

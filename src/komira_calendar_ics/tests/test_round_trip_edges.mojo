@@ -170,6 +170,41 @@ def test_export_moves_a_start_its_rule_skips() raises:
     _same(c^)
 
 
+def test_export_before_1970() raises:
+    # Days before 1970-01-01 count negative (1969-12-31 is day -1); a series
+    # starting there exports and comes back like any other.
+    var a = List[IcsEvent]()
+    a.append(
+        IcsEvent(
+            _ev('{"uid":"bday","showWithoutTime":true,"startDate":"1965-03-14","days":1,"recurrence":{"freq":"YEARLY","interval":1}}')
+        )
+    )
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"uid":"eve","start":"1969-12-31T09:00:00","timeZone":"UTC","durationSeconds":60,'
+                + '"recurrence":{"freq":"WEEKLY","interval":1,"weekdays":["WEDNESDAY"]}}'
+            )
+        )
+    )
+    a.append(
+        IcsEvent(
+            _ev(
+                '{"uid":"june","showWithoutTime":true,"startDate":"1969-06-01","days":1,'
+                + '"recurrence":{"freq":"DAILY","interval":1,"count":3}}'
+            )
+        )
+    )
+    _same(a^)
+    # The 31st from 5 December 1969: the first occurrence is day -1.
+    var rule = String('"recurrence":{"freq":"MONTHLY","interval":1,"monthDay":31}}')
+    _moved(
+        '{"uid":"31st","start":"1969-12-05T09:00:00","timeZone":"UTC","durationSeconds":60,' + rule,
+        '{"uid":"31st","start":"1969-12-31T09:00:00","timeZone":"UTC","durationSeconds":60,' + rule,
+        "DTSTART:19691231T090000Z",
+    )
+
+
 def test_export_refuses_a_series_with_no_occurrence() raises:
     # No 31st from 2 September to 30 October 2030: the model's series is
     # empty, and an iCalendar series always holds its DTSTART.
@@ -217,6 +252,11 @@ def main() raises:
         print("  test_export_moves_a_start_its_rule_skips PASS")
     except e:
         failed.append("test_export_moves_a_start_its_rule_skips: " + String(e))
+    try:
+        test_export_before_1970()
+        print("  test_export_before_1970 PASS")
+    except e:
+        failed.append("test_export_before_1970: " + String(e))
     try:
         test_export_refuses_a_series_with_no_occurrence()
         print("  test_export_refuses_a_series_with_no_occurrence PASS")

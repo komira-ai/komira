@@ -379,13 +379,13 @@ def start_is_occurrence(rule: Recurrence, start_day: Int) -> Bool:
     return (c.day - 1) // 7 + 1 == Int(rule.ordinal)
 
 
-def _monthly_pick(rule: Recurrence, year: Int, month: Int) -> Int:
+def _monthly_pick(rule: Recurrence, year: Int, month: Int) -> Optional[Int]:
     """The day (days since 1970-01-01) a MONTHLY `rule` picks in `month` of
-    `year`, or -1 when the month is shorter than its day of the month."""
+    `year`; none when the month is shorter than its day of the month."""
     var dim = days_in_month(year, month)
     if rule.ordinal == 0:
         if Int(rule.month_day) > dim:
-            return -1
+            return None
         return days_from_civil(year, month, Int(rule.month_day))
     var w = Int(rule.ordinal_weekday.value)
     if rule.ordinal < 0:
@@ -395,15 +395,18 @@ def _monthly_pick(rule: Recurrence, year: Int, month: Int) -> Int:
     return first + (w - _model_weekday(first) + 7) % 7 + 7 * (Int(rule.ordinal) - 1)
 
 
-def first_occurrence(rule: Recurrence, start_day: Int, until_day: Int) -> Int:
+def first_occurrence(rule: Recurrence, start_day: Int, until_day: Int) -> Optional[Int]:
     """The first day on or after `start_day` and on or before `until_day`
-    that the model's `rule` picks, or -1 when there is none. The model
-    (komira_calendar) cuts a series into Monday weeks or months, counts
-    every `interval`-th one from the one holding `start_day`, and never
-    picks a day before `start_day`; so a series started on the day this
-    returns has the same occurrences as one started on `start_day`."""
+    that the model's `rule` picks, or none. Days count from 1970-01-01 and
+    are negative before it. The model (komira_calendar) cuts a series into
+    Monday weeks or months, counts every `interval`-th one from the one
+    holding `start_day`, and never picks a day before `start_day`; so a
+    series started on the day this returns has the same occurrences as one
+    started on `start_day`."""
     if start_is_occurrence(rule, start_day):
-        return start_day if start_day <= until_day else -1
+        if start_day <= until_day:
+            return start_day
+        return None
     var f = rule.freq.value
     var step = Int(rule.interval)
     if f == Frequency.WEEKLY:
@@ -418,20 +421,26 @@ def first_occurrence(rule: Recurrence, start_day: Int, until_day: Int) -> Int:
                 later = d
         var monday = start_day - (weekday - 1)
         var day = monday + later - 1 if later < 8 else monday + 7 * step + earliest - 1
-        return day if day <= until_day else -1
+        if day <= until_day:
+            return day
+        return None
     # MONTHLY: start_is_occurrence holds for every DAILY and YEARLY rule.
     var c = civil_from_days(start_day)
     var month = c.year * 12 + c.month - 1
     while True:
         var y = month // 12
         var m = month % 12 + 1
+        # A rule that picks no day in any month it reaches (the 30th, every
+        # 12 months from a February) ends here.
         if days_from_civil(y, m, 1) > until_day:
-            return -1
-        var day = _monthly_pick(rule, y, m)
-        if day > until_day:
-            return -1
-        if day >= start_day:
-            return day
+            return None
+        var pick = _monthly_pick(rule, y, m)
+        if pick:
+            var day = pick.value()
+            if day > until_day:
+                return None
+            if day >= start_day:
+                return day
         month += step
 
 

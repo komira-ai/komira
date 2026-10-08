@@ -208,52 +208,119 @@ def test_start_not_an_occurrence() raises:
     print("  test_start_not_an_occurrence PASS")
 
 
-def _first(rule_json: String, start: Int, until: Int) raises -> Int:
-    return first_occurrence(decode_json[Recurrence](rule_json), start, until)
+comptime NONE = "none"
+
+
+def _first(rule_json: String, start: Int, until: Int) raises -> String:
+    """The first day the rule picks, as `days_from_civil` of it, or NONE."""
+    var got = first_occurrence(decode_json[Recurrence](rule_json), start, until)
+    if got:
+        return String(got.value())
+    return NONE
+
+
+def _on(y: Int, m: Int, d: Int) -> String:
+    return String(_day(y, m, d))
+
+
+def _row(mut bad: List[String], got: String, want: String):
+    """Records a row whose answer `got` is not `want`; every row of the
+    test runs, so each wrong row is listed."""
+    if got != want:
+        bad.append(" got " + got + ", want " + want + ";")
+
+
+def _joined(bad: List[String]) -> String:
+    var out = String()
+    for b in bad:
+        out += b
+    return out^
 
 
 def test_first_occurrence() raises:
     # The first day the model's rule picks from a start: the start itself
     # when picked; else a later day of the start's Monday week, or the first
     # named day `interval` weeks on; else the first month `interval` months
-    # apart that has the day. -1 when that day is after the until.
+    # apart that has the day. None when that day is after the until; the
+    # until itself is a day the series may pick.
+    var bad = List[String]()
     var mon = _day(2030, 9, 2)
     var end = _day(9999, 12, 31)
-    assert_equal(_first('{"freq":"DAILY","interval":3}', mon, end), mon)
-    assert_equal(_first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', mon, end), mon)
-    assert_equal(_first('{"freq":"WEEKLY","interval":2,"weekdays":["THURSDAY","TUESDAY"]}', mon, end), _day(2030, 9, 3))
-    assert_equal(
-        _first('{"freq":"WEEKLY","interval":2,"weekdays":["SUNDAY","MONDAY"]}', _day(2030, 9, 3), end),
-        _day(2030, 9, 8),
+    _row(bad, _first('{"freq":"DAILY","interval":3}', mon, end), _on(2030, 9, 2))
+    # A start it picks, with the until on the start: the start.
+    _row(bad, _first('{"freq":"DAILY","interval":1}', mon, mon), _on(2030, 9, 2))
+    _row(bad, _first('{"freq":"DAILY","interval":1}', mon, mon - 1), NONE)
+    _row(bad, _first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', mon, end), _on(2030, 9, 2))
+    _row(bad, _first('{"freq":"WEEKLY","interval":2,"weekdays":["THURSDAY","TUESDAY"]}', mon, end), _on(2030, 9, 3))
+    _row(
+        bad,
+        _first('{"freq":"WEEKLY","interval":2,"weekdays":["SUNDAY","MONDAY"]}', _day(2030, 9, 3), end), _on(2030, 9, 8)
     )
-    assert_equal(_first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', _day(2030, 9, 3), end), _day(2030, 9, 16))
-    assert_equal(_first('{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"]}', _day(2030, 9, 3), end), _day(2030, 9, 9))
-    assert_equal(_first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', _day(2030, 9, 3), _day(2030, 9, 15)), -1)
-    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":2}', mon, end), mon)
-    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":1}', mon, end), _day(2030, 10, 1))
-    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, end), _day(2030, 10, 31))
+    _row(bad, _first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', _day(2030, 9, 3), end), _on(2030, 9, 16))
+    _row(bad, _first('{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"]}', _day(2030, 9, 3), end), _on(2030, 9, 9))
+    _row(bad, _first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', _day(2030, 9, 3), _day(2030, 9, 15)), NONE)
+    # The until on the day it picks.
+    _row(
+        bad,
+        _first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', _day(2030, 9, 3), _day(2030, 9, 16)),
+        _on(2030, 9, 16),
+    )
+    # From Thursday 5 September, nothing later in the week: the smallest
+    # named weekday two weeks on, Tuesday the 17th, whatever the list order.
+    _row(
+        bad,
+        _first('{"freq":"WEEKLY","interval":2,"weekdays":["TUESDAY","WEDNESDAY"]}', _day(2030, 9, 5), end),
+        _on(2030, 9, 17),
+    )
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":2}', mon, end), _on(2030, 9, 2))
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":1}', mon, end), _on(2030, 10, 1))
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, end), _on(2030, 10, 31))
     # September and November have no 31st; January 2031, four months on, does.
-    assert_equal(_first('{"freq":"MONTHLY","interval":2,"monthDay":31}', mon, end), _day(2031, 1, 31))
-    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, _day(2030, 10, 30)), -1)
-    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, _day(2030, 9, 30)), -1)
-    assert_equal(
-        _first('{"freq":"MONTHLY","interval":1,"ordinal":1,"ordinalWeekday":"FRIDAY"}', mon, end), _day(2030, 9, 6)
+    _row(bad, _first('{"freq":"MONTHLY","interval":2,"monthDay":31}', mon, end), _on(2031, 1, 31))
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, _day(2030, 10, 30)), NONE)
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, _day(2030, 9, 30)), NONE)
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, _day(2030, 10, 31)), _on(2030, 10, 31))
+    # The 30th every 12 months from a February picks no day before 9999.
+    _row(bad, _first('{"freq":"MONTHLY","interval":12,"monthDay":30}', _day(2031, 2, 1), end), NONE)
+    _row(
+        bad,
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":1,"ordinalWeekday":"FRIDAY"}', mon, end), _on(2030, 9, 6)
     )
     # The first Monday of September 2030 is the 2nd, before a start on the 3rd.
-    assert_equal(
+    _row(
+        bad,
         _first('{"freq":"MONTHLY","interval":2,"ordinal":1,"ordinalWeekday":"MONDAY"}', _day(2030, 9, 3), end),
-        _day(2030, 11, 4),
+        _on(2030, 11, 4),
     )
-    assert_equal(
-        _first('{"freq":"MONTHLY","interval":1,"ordinal":4,"ordinalWeekday":"SATURDAY"}', mon, end), _day(2030, 9, 28)
+    # July 2030 begins on a Monday: its first Monday is the 1st.
+    _row(
+        bad,
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":1,"ordinalWeekday":"MONDAY"}', _day(2030, 6, 5), end),
+        _on(2030, 7, 1),
     )
-    assert_equal(
-        _first('{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"MONDAY"}', mon, end), _day(2030, 9, 30)
+    _row(
+        bad,
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":4,"ordinalWeekday":"SATURDAY"}', mon, end), _on(2030, 9, 28)
     )
-    assert_equal(
-        _first('{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"TUESDAY"}', mon, end), _day(2030, 9, 24)
+    _row(
+        bad,
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"MONDAY"}', mon, end), _on(2030, 9, 30)
     )
-    assert_equal(_first('{"freq":"YEARLY","interval":4}', _day(2032, 2, 29), end), _day(2032, 2, 29))
+    _row(
+        bad,
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"TUESDAY"}', mon, end), _on(2030, 9, 24)
+    )
+    _row(bad, _first('{"freq":"YEARLY","interval":4}', _day(2032, 2, 29), end), _on(2032, 2, 29))
+    # Before 1970 the day count is negative: 1969-12-31 is day -1, a day
+    # like any other.
+    var eve = _day(1969, 12, 31)
+    _row(bad, String(eve), "-1")
+    _row(bad, _first('{"freq":"DAILY","interval":1,"count":3}', eve, end), "-1")
+    _row(bad, _first('{"freq":"WEEKLY","interval":1,"weekdays":["WEDNESDAY"]}', eve, end), "-1")
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":31}', _day(1969, 12, 5), end), "-1")
+    _row(bad, _first('{"freq":"MONTHLY","interval":1,"monthDay":30}', _day(1969, 12, 31), end), _on(1970, 1, 30))
+    _row(bad, _first('{"freq":"YEARLY","interval":1}', _day(1965, 3, 14), end), _on(1965, 3, 14))
+    assert_true(len(bad) == 0, String(len(bad)) + " rows wrong:" + _joined(bad))
 
 
 def test_malformed() raises:
