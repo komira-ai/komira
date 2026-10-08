@@ -22,6 +22,16 @@
 #                              refused, not silently joined to nothing.
 #   line_endings_and_numbers   CRLF and bare LF both end a line, blank lines
 #                              are skipped, and line numbers are physical.
+#   blank_line_ends_line       RFC 6350 §3.2 / RFC 5545 §3.1: only CRLF +
+#                              SPACE/HTAB is a fold, so the CRLF before a
+#                              blank line ends the logical line, and a
+#                              white-space line after the blank continues the
+#                              blank (empty) line, not the line before it.
+#                              Both sides: blank then a name, blank then
+#                              SPACE, blank then HTAB at the start of input,
+#                              blank at the end of input (the "skip blank
+#                              lines inside a fold" defect joined "A:1" and
+#                              " B" into "A:1B" and refused "\r\n\tx:1").
 #   lex_group_name_params      `item1.EMAIL` splits into group and upper-cased
 #                              name (the "drop the group strip" mutant).
 #   lex_rfc6350_adr_label      a quoted parameter holding ':' ',' and a fold
@@ -196,6 +206,30 @@ def test_line_endings_and_numbers() raises:
     print("  test_line_endings_and_numbers PASS")
 
 
+def test_blank_line_ends_line() raises:
+    var d = _b("A:1\r\n\r\n B:2\r\nC:3\r\n\r\nD:4\r\n\r\n")
+    var lines = unfold(Span(d))
+    assert_equal(len(lines), 4)
+    assert_equal(lines[0].text, "A:1")
+    assert_equal(len(lines[0].folds), 0)
+    # " B:2" continues the blank line 2: the logical line starts there.
+    assert_equal(lines[1].text, "B:2")
+    assert_equal(lines[1].line_number, 2)
+    assert_equal(len(lines[1].folds), 1)
+    assert_equal(lines[1].folds[0].at, 0)
+    assert_equal(Int(lines[1].folds[0].removed), 32)
+    assert_equal(lines[2].text, "C:3")
+    assert_equal(lines[2].line_number, 4)
+    assert_equal(lines[3].text, "D:4")
+    assert_equal(lines[3].line_number, 6)
+    var e = _b("\r\n\tx:1")
+    var only = unfold(Span(e))
+    assert_equal(len(only), 1)
+    assert_equal(only[0].text, "x:1")
+    assert_equal(only[0].line_number, 1)
+    print("  test_blank_line_ends_line PASS")
+
+
 def test_lex_group_name_params() raises:
     var cl = parse_content_line("item1.email;type=INTERNET,pref:a@example.com", 1)
     assert_equal(cl.group, "item1")
@@ -317,6 +351,7 @@ def main() raises:
     test_input_limit()
     test_leading_continuation()
     test_line_endings_and_numbers()
+    test_blank_line_ends_line()
     test_lex_group_name_params()
     test_lex_rfc6350_adr_label()
     test_lex_rfc6868_caret()

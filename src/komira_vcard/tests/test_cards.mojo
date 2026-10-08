@@ -35,6 +35,20 @@
 #                            value: NOTE is "abc" and the next TEL survives
 #                            (joining the next logical line read the TEL
 #                            into NOTE as "abcTEL:123" and lost it).
+#   qp_blank_then_white_space  a blank line after a soft break ends the
+#                            value even when the next line starts with
+#                            SPACE: that line continues the blank line (RFC
+#                            6350 §3.2), so it is a line of its own, not a
+#                            content line, refused at the blank's line number
+#                            (skipping the blank inside the fold read
+#                            "abc def"; dropping the soft-break check of a
+#                            line that begins blank reads "abcdef"). Same
+#                            for a fold after the blank that ends in "=".
+#   qp_soft_break_at_end     a soft break on the last line of input, with or
+#                            without a final CRLF or a trailing blank line,
+#                            ends the value and the card is refused as
+#                            unterminated, not read past the last line (the
+#                            "drop the end-of-input guard" mutant aborts).
 #   qp_join_limit            a value joined over soft breaks is refused at
 #                            max_line_octets though each physical line is
 #                            under it (the "no cap on the join" mutant).
@@ -279,6 +293,54 @@ def test_qp_blank_after_soft_break() raises:
     print("  test_qp_blank_after_soft_break PASS")
 
 
+def test_qp_blank_then_white_space() raises:
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;QUOTED-PRINTABLE:abc=\r\n\r\n def\r\nEND:VCARD\r\n"
+        ),
+        "error=[content line: line 4 has no ':' after the property name]",
+    )
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;QUOTED-PRINTABLE:ab\r\n\r\n c=\r\nde\r\nEND:VCARD\r\n"
+        ),
+        "error=[content line: line 4 has an invalid character in the"
+        " property name]",
+    )
+    # A fold inside the QP line, then a soft break: the next physical line
+    # is joined (the adjacency count includes the fold's line).
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;QUOTED-PRINTABLE:ab\r\n c=\r\nde\r\nEND:VCARD\r\n"
+        ),
+        "value=[abcde]",
+    )
+    print("  test_qp_blank_then_white_space PASS")
+
+
+def test_qp_soft_break_at_end() raises:
+    var want = "vcard: the card begun at line 1 has no END:VCARD"
+    assert_equal(
+        _err("BEGIN:VCARD\r\nVERSION:2.1\r\nNOTE;QUOTED-PRINTABLE:abc="),
+        want,
+    )
+    assert_equal(
+        _err("BEGIN:VCARD\r\nVERSION:2.1\r\nNOTE;QUOTED-PRINTABLE:abc=\r\n"),
+        want,
+    )
+    assert_equal(
+        _err(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;QUOTED-PRINTABLE:abc=\r\n\r\n"
+        ),
+        want,
+    )
+    print("  test_qp_soft_break_at_end PASS")
+
+
 def test_qp_join_limit() raises:
     # Each physical line is under 30 octets; the joined value is 36.
     assert_equal(
@@ -304,6 +366,8 @@ def main() raises:
     test_quoted_printable()
     test_qp_soft_break_space()
     test_qp_blank_after_soft_break()
+    test_qp_blank_then_white_space()
+    test_qp_soft_break_at_end()
     test_qp_param_fold()
     test_qp_join_limit()
     print("ALL TESTS PASS")

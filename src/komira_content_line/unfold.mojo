@@ -8,8 +8,19 @@
 # logical line before it: that one white-space octet is removed and the rest
 # is appended. The joining is done on octets, so a fold that falls inside a
 # multi-octet UTF-8 sequence is restored before the line is validated (RFC
-# 6350 §3.2, the note on improperly folded lines). Empty physical lines
-# are skipped. Every join is recorded in `LogicalLine.folds`: the octet offset
+# 6350 §3.2, the note on improperly folded lines).
+#
+# Only CRLF (or LF) followed by SPACE or HTAB is a fold (RFC 6350 §3.2,
+# RFC 5545 §3.1), so an empty physical line ends the logical line before it.
+# The empty line starts a logical line of its own: a white-space line right
+# after it continues that empty line, not the line before the blank, and the
+# logical line's number is the blank line's. An empty logical line (a blank
+# no fold follows, or the end of input) is skipped. So the physical lines of
+# one logical line are always consecutive: it spans `line_number` to
+# `line_number + len(folds)`, and a first fold at offset 0 means it began
+# with an empty line.
+#
+# Every join is recorded in `LogicalLine.folds`: the octet offset
 # in `text` where the continuation's octets start, and the white-space octet
 # that was removed. A reader whose own rules join a line differently (vCard
 # 2.1 quoted-printable soft breaks, where that octet is data) rebuilds the
@@ -157,6 +168,10 @@ def unfold(
                 raise _too_long(start_line, limits.max_line_octets)
             for k in range(from_, end):
                 buf.append(data[k])
+        else:
+            # An empty line: the CRLF before it was not a fold.
+            _finish(out, buf, folds, start_line)
+            start_line = line_no
         i = next
     _finish(out, buf, folds, start_line)
     return out^

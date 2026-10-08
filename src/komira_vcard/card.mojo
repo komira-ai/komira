@@ -24,8 +24,11 @@
 #   or HTAB, that octet is data, not a fold (unfold's record of the fold puts
 #   it back). Android's vCard 2.1 reader keeps it; vinnie (ez-vcard) drops
 #   it; this follows Android. A soft break is joined only to the physical
-#   line right after it: a blank line (or the end of input) ends the value
-#   and the "=" is dropped. The joined value is
+#   line right after it, and only if that line is not blank: a blank line
+#   (or the end of input) ends the value and the "=" is dropped. A line
+#   starting with SPACE or HTAB after the blank continues the blank line
+#   (RFC 6350 §3.2), so it is read as a content line of its own, not as
+#   part of the value. The joined value is
 #   bounded by `max_line_octets`, checked before each line is appended.
 #
 # A card keeps every other line in order, lexed (`line`) and as written
@@ -304,8 +307,11 @@ def parse_vcards(
             )
             # A trailing "=" is a soft break: the next logical line is joined
             # only if it starts on the physical line right after this one
-            # ends. A skipped blank line (or the end of input) ends the
-            # value, and the "=" is dropped as a break with nothing after it.
+            # ends (a logical line's physical lines are consecutive, so it
+            # ends on line_number + len(folds)) and that physical line is not
+            # blank (a first fold at offset 0). A blank line (or the end of
+            # input) ends the value, and the "=" is dropped as a break with
+            # nothing after it.
             while len(value) > 0 and value[len(value) - 1] == 61:
                 _ = value.pop()
                 ref prev = logical[i - 1]
@@ -313,6 +319,10 @@ def parse_vcards(
                     i >= len(logical)
                     or logical[i].line_number
                     != prev.line_number + len(prev.folds) + 1
+                    or (
+                        len(logical[i].folds) > 0
+                        and logical[i].folds[0].at == 0
+                    )
                 ):
                     break
                 _append_physical(

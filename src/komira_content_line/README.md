@@ -5,7 +5,10 @@ The content-line layer that vCard (RFC 6350 §3) and iCalendar (RFC 5545
 
 - `unfold(bytes, limits)` splits input into logical lines: CRLF or a bare LF
   ends a physical line, a line starting with SPACE or HTAB continues the one
-  before it, and empty lines are skipped. Joining is done on octets, so a
+  before it (RFC 6350 §3.2, RFC 5545 §3.1: only a line break followed by
+  SPACE or HTAB is a fold). An empty line ends the line before it; a
+  white-space line right after an empty line continues the empty line, and
+  an empty line nothing continues is skipped. Joining is done on octets, so a
   fold that falls inside a UTF-8 sequence is restored; each joined line is
   then validated as UTF-8. `ContentLimits` bounds the input and every
   logical line in octets (64 MiB and 1 MiB by default). Each line's
