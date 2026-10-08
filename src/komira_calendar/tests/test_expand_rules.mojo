@@ -233,6 +233,29 @@ def test_far_window_keeps_the_interval() raises:
     assert_equal(len(expand(biennial, _at("2031-12-01T00:00:00"), _at("2032-01-01T00:00:00"))), 0)
 
 
+def test_window_inside_a_period() raises:
+    # Catches the window search landing one period late: the window starts
+    # mid-period and that period's pick is inside the window. The search day
+    # is the window's day minus the length's days minus 2.
+    # Search day Tuesday 2026-11-17 is in the week of 2026-11-16; one week
+    # late is the week of 2026-11-23 and drops Friday 2026-11-20.
+    var weekly = _timed("2026-11-06T09:00:00", 600, '{"freq":"WEEKLY","interval":1,"weekdays":["FRIDAY"]}')
+    assert_equal(
+        _starts(expand(weekly, _at("2026-11-19T00:00:00"), _at("2026-11-21T00:00:00"))), "2026-11-20T09:00:00"
+    )
+    # Search day 2027-03-08 is in March; one month late is April.
+    var monthly = _timed("2026-11-15T09:00:00", 600, '{"freq":"MONTHLY","interval":1,"monthDay":15}')
+    assert_equal(
+        _starts(expand(monthly, _at("2027-03-10T00:00:00"), _at("2027-03-20T00:00:00"))), "2027-03-15T09:00:00"
+    )
+    # One day long, so the search day is 2030-12-20, in 2030; one year late
+    # is 2031.
+    var yearly = _all_day("2026-12-24", 1, '{"freq":"YEARLY","interval":1}')
+    assert_equal(
+        _starts(expand(yearly, _at("2030-12-23T00:00:00"), _at("2030-12-26T00:00:00"))), "2030-12-24T00:00:00"
+    )
+
+
 def test_all_day_exdates() raises:
     # Catches an all-day exdate read as anything but the date's midnight.
     var e = _all_day("2026-12-24", 1, '{"freq":"DAILY","interval":1,"count":3}', '["2026-12-25"]')
@@ -428,6 +451,7 @@ def main() raises:
     test_window_on_an_open_series()
     test_window_reaches_back_by_the_length()
     test_window_reaches_back_overnight()
+    test_window_inside_a_period()
     test_far_window_keeps_the_interval()
     test_all_day_exdates()
     test_single_event()
