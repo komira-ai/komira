@@ -8,12 +8,14 @@ and 2.1, and writes vCard 4.0.
   BEGIN:VCARD or END:VCARD, a card with no VERSION or two, a VERSION other
   than 2.1, 3.0 or 4.0, and card `max_cards + 1` (10000 by default).
   vCard 2.1 quoted-printable values (with soft line breaks, in UTF-8,
-  US-ASCII or ISO-8859-1) are decoded.
+  US-ASCII or ISO-8859-1) are decoded; the line after a soft break is read
+  as written, a leading SPACE or HTAB included.
 - `parse_contacts(bytes, limits)` maps each card to a `Contact`: KIND, UID,
   FN, N, NICKNAME, ORG, TITLE, EMAIL, TEL, ADR, URL, BDAY, NOTE, MEMBER and
-  Apple's X-ABLabel, following RFC 9555's conversion rules for those
-  properties. Every other property, and a repeat of a single-valued one, is
-  kept as written in `Contact.extra`. Parameters a mapping does not keep are
+  Apple's X-ABLabel, guided by RFC 9555's conversion rules for those
+  properties. Every other property, a repeat of a single-valued one, and a
+  UID, BDAY, URL or MEMBER line with VALUE=text (a value type `Contact` has
+  no field for) are kept as written in `Contact.extra`. Parameters a mapping does not keep are
   listed in `ContactImport.dropped`.
 - `emit_contacts(contacts)` writes vCard 4.0 with CRLF line breaks, folded
   at 75 octets. No value can start a line of its own.

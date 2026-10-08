@@ -18,6 +18,11 @@
 #                           (the "unescape before splitting" mutant).
 #   format_round_trip       format(parse(x)) == x for quoted, caret-encoded
 #                           and bare parameters.
+#   format_quotes_separators a parameter value holding ';' or ':' is written
+#                           quoted and reads back as the same values and the
+#                           same line value (the "quote only on ','" mutant
+#                           lets `home;VALUE=uri` add a parameter and `x:y`
+#                           move the value boundary).
 #   format_refusals         a group, name or parameter value that would break
 #                           the line is refused with an exact message.
 # =============================================================================
@@ -148,6 +153,23 @@ def test_format_round_trip() raises:
     print("  test_format_round_trip PASS")
 
 
+def test_format_quotes_separators() raises:
+    var vals = List[String]()
+    vals.append("home;VALUE=uri")
+    vals.append("x:y")
+    var ps = List[Param]()
+    ps.append(Param("TYPE", vals^))
+    var text = format_content_line(ContentLine("", "TEL", ps^, "+1-555-0100"))
+    assert_equal(text, 'TEL;TYPE="home;VALUE=uri","x:y":+1-555-0100')
+    var back = parse_content_line(text, 1)
+    assert_equal(len(back.params), 1)
+    assert_equal(len(back.params[0].values), 2)
+    assert_equal(back.params[0].values[0], "home;VALUE=uri")
+    assert_equal(back.params[0].values[1], "x:y")
+    assert_equal(back.value, "+1-555-0100")
+    print("  test_format_quotes_separators PASS")
+
+
 def _fmt_err(cl: ContentLine) -> String:
     try:
         _ = format_content_line(cl)
@@ -191,5 +213,6 @@ def main() raises:
     test_escape_unescape()
     test_split_before_unescape()
     test_format_round_trip()
+    test_format_quotes_separators()
     test_format_refusals()
     print("ALL TESTS PASS")

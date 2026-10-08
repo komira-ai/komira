@@ -89,6 +89,19 @@ def rfc6350_6_property_examples() -> String:
     )
 
 
+def rfc6350_6_2_5_bday_text() -> String:
+    """RFC 6350 §6.2.5, the text-valued BDAY example `BDAY;VALUE=text:circa
+    1800`, in a card of its own: the BEGIN, VERSION, FN and END lines are
+    added around it."""
+    return String(
+        "BEGIN:VCARD\r\n"
+        "VERSION:4.0\r\n"
+        "FN:Jane Doe\r\n"
+        "BDAY;VALUE=text:circa 1800\r\n"
+        "END:VCARD\r\n"
+    )
+
+
 def rfc6350_8_author() -> String:
     """RFC 6350 §8, the author's card. Replaced: the name (Simone Exemple),
     the e-mail address and the KEY and URL hosts (under `.example`). The

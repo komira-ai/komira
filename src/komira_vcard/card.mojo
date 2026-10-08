@@ -12,13 +12,18 @@
 #   put it there).
 # - refuses card number `max_cards + 1` before reading it.
 # - decodes ENCODING=QUOTED-PRINTABLE, or vCard 2.1's bare QUOTED-PRINTABLE
-#   parameter (also written by some 3.0 exporters): a value ending in "=" continues on the next line (a soft
-#   break), `=XX` is an octet, and the octets are read in the line's CHARSET
+#   parameter (also written by some 3.0 exporters): a physical line ending
+#   in "=" continues on the next physical line (a soft break), `=XX` is an
+#   octet, and the octets are read in the line's CHARSET
 #   (UTF-8 or US-ASCII, checked as UTF-8; ISO-8859-1, converted); a decoded
 #   line break (CRLF, CR or LF) becomes the TEXT escape `\n`. The
 #   ENCODING and CHARSET parameters are then removed and the line is written
 #   back unfolded as `text`. CHARSET is removed from every line: the input is
 #   UTF-8 by then (unfold refused anything else).
+#   The line after a soft break is read as written: if it starts with SPACE
+#   or HTAB, that octet is data, as vCard 2.1 readers take it, and not a
+#   fold (unfold's record of the fold puts it back). The joined value is
+#   bounded by `max_line_octets`, checked before each line is appended.
 #
 # A card keeps every other line in order, lexed (`line`) and as written
 # (`text`, the unfolded logical line), with its first physical line number.
@@ -27,6 +32,7 @@
 from komira_content_line import (
     ContentLimits,
     ContentLine,
+    LogicalLine,
     Param,
     format_content_line,
     parse_content_line,
@@ -100,8 +106,7 @@ def _hex(c: UInt8) -> Int:
     return -1
 
 
-def _decode_qp(value: String, charset: String, n: Int) raises -> String:
-    var b = value.as_bytes()
+def _decode_qp(b: List[UInt8], charset: String, n: Int) raises -> String:
     var raw = List[UInt8]()
     var i = 0
     while i < len(b):
@@ -158,6 +163,37 @@ def _decode_qp(value: String, charset: String, n: Int) raises -> String:
             esc.append(c)
         k += 1
     return String(StringSlice(from_utf8=Span(esc)))
+
+
+def _append_physical(
+    mut buf: List[UInt8], ll: LogicalLine, start: Int, n: Int, limit: Int
+) raises:
+    """Append `ll.text[start:]` to `buf` as its physical lines read: at a fold
+    that follows a "=" (a soft break), the "=" is removed and the removed
+    white-space octet is put back. The length does not change, so the limit
+    is checked once, before anything is appended."""
+    var b = ll.text.as_bytes()
+    if len(buf) + (len(b) - start) > limit:
+        raise Error(
+            String("content line: line ")
+            + String(n)
+            + String(" is longer than the ")
+            + String(limit)
+            + String("-octet limit")
+        )
+    var pos = start
+    for k in range(len(ll.folds)):
+        var at = ll.folds[k].at
+        if at <= start:
+            continue
+        for j in range(pos, at):
+            buf.append(b[j])
+        pos = at
+        if b[at - 1] == 61:
+            _ = buf.pop()
+            buf.append(ll.folds[k].removed)
+    for j in range(pos, len(b)):
+        buf.append(b[j])
 
 
 def _first_value(cl: ContentLine, name: String) -> String:
@@ -254,19 +290,25 @@ def parse_vcards(
         if bare_qp and not bare_qp.value().has_value:
             qp = True
         if qp:
-            var value = cl.value.copy()
-            while value.endswith("=") and i < len(logical):
-                var cut = String(value[byte = 0 : value.byte_length() - 1])
-                value = cut + logical[i].text
+            # The value is the suffix of the logical line after the ':'.
+            var value = List[UInt8]()
+            _append_physical(
+                value,
+                logical[i - 1],
+                text.byte_length() - cl.value.byte_length(),
+                n,
+                limits.max_line_octets,
+            )
+            while (
+                len(value) > 0
+                and value[len(value) - 1] == 61
+                and i < len(logical)
+            ):
+                _ = value.pop()
+                _append_physical(
+                    value, logical[i], 0, n, limits.max_line_octets
+                )
                 i += 1
-                if value.byte_length() > limits.max_line_octets:
-                    raise Error(
-                        String("content line: line ")
-                        + String(n)
-                        + String(" is longer than the ")
-                        + String(limits.max_line_octets)
-                        + String("-octet limit")
-                    )
             cl.value = _decode_qp(value, charset, n)
             var kept = _without(cl.params, "ENCODING", "CHARSET")
             cl.params = _without(kept, "QUOTED-PRINTABLE", "QUOTED-PRINTABLE")

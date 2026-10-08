@@ -22,6 +22,13 @@
 #                            ISO-8859-1, the bare QUOTED-PRINTABLE parameter;
 #                            bad hex, a bad charset and QP decoding to
 #                            invalid UTF-8 are refused.
+#   qp_soft_break_space      the line after a soft break is read as written:
+#                            a leading SPACE is data, not a fold (unfolding
+#                            first joined "abc=" and " 2Bx" into "abc=2Bx"
+#                            and decoded "+", and refused "Long=" + " note").
+#   qp_join_limit            a value joined over soft breaks is refused at
+#                            max_line_octets though each physical line is
+#                            under it (the "no cap on the join" mutant).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -196,6 +203,55 @@ def test_quoted_printable() raises:
     print("  test_quoted_printable PASS")
 
 
+def _value_or_error(s: String) -> String:
+    try:
+        var cards = parse_vcards(s.as_bytes())
+        return String("value=[") + cards[0].lines[0].line.value + "]"
+    except e:
+        return String("error=[") + String(e) + "]"
+
+
+def test_qp_soft_break_space() raises:
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;ENCODING=QUOTED-PRINTABLE:abc=\r\n 2Bx\r\nEND:VCARD\r\n"
+        ),
+        "value=[abc 2Bx]",
+    )
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;ENCODING=QUOTED-PRINTABLE:Long=\r\n note\r\nEND:VCARD\r\n"
+        ),
+        "value=[Long note]",
+    )
+    # A soft break whose next line starts with HTAB, then one with no white
+    # space, then a 3.0/4.0 fold that is not after a "=" (white space removed).
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;QUOTED-PRINTABLE:a=\r\n\tb=\r\nc=3D\r\n d\r\nEND:VCARD\r\n"
+        ),
+        "value=[a\tbc=d]",
+    )
+    print("  test_qp_soft_break_space PASS")
+
+
+def test_qp_join_limit() raises:
+    # Each physical line is under 30 octets; the joined value is 36.
+    assert_equal(
+        _err(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;QUOTED-PRINTABLE:aaaa=\r\nbbbbbbbbbbbb=\r\n"
+            "cccccccccccccccccccc\r\nEND:VCARD\r\n",
+            VCardLimits(max_line_octets=30),
+        ),
+        "content line: line 3 is longer than the 30-octet limit",
+    )
+    print("  test_qp_join_limit PASS")
+
+
 def main() raises:
     print("test_cards")
     test_two_cards_mixed_case()
@@ -205,4 +261,6 @@ def main() raises:
     test_ten_mb_line()
     test_invalid_utf8()
     test_quoted_printable()
+    test_qp_soft_break_space()
+    test_qp_join_limit()
     print("ALL TESTS PASS")

@@ -24,6 +24,7 @@ from .unfold import (
     DEFAULT_MAX_INPUT_OCTETS,
     DEFAULT_MAX_LINE_OCTETS,
     ContentLimits,
+    Fold,
     LogicalLine,
     unfold,
 )

@@ -19,7 +19,11 @@
 #   emit_golden            the exact 4.0 text for one contact, including
 #                          the synthesised `item1` group for a label.
 #   emit_refusals          a value cannot inject a line; a group or an
-#                          `extra` line that would is refused, exactly.
+#                          `extra` line that would is refused, exactly, and
+#                          each of BEGIN:VCARD, END:VCARD and VERSION is
+#                          refused as an `extra` line (dropping any one arm
+#                          of the guard lets it start a card or repeat
+#                          VERSION).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -270,6 +274,18 @@ def test_emit_refusals() raises:
     y.extra.append("END:vcard")
     assert_equal(
         _emit_err(y),
+        "vcard: extra line 1 is a BEGIN:VCARD, END:VCARD or VERSION line",
+    )
+    var yb = Contact()
+    yb.extra.append("BEGIN:VCARD")
+    assert_equal(
+        _emit_err(yb),
+        "vcard: extra line 1 is a BEGIN:VCARD, END:VCARD or VERSION line",
+    )
+    var yv = Contact()
+    yv.extra.append("VERSION:3.0")
+    assert_equal(
+        _emit_err(yv),
         "vcard: extra line 1 is a BEGIN:VCARD, END:VCARD or VERSION line",
     )
     var z = Contact()

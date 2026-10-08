@@ -8,7 +8,8 @@ The content-line layer that vCard (RFC 6350 §3) and iCalendar (RFC 5545
   before it, and empty lines are skipped. Joining is done on octets, so a
   fold that falls inside a UTF-8 sequence is restored; each joined line is
   then validated as UTF-8. `ContentLimits` bounds the input and every
-  logical line in octets (64 MiB and 1 MiB by default).
+  logical line in octets (64 MiB and 1 MiB by default). Each line's
+  `folds` records where it was joined and the white-space octet removed.
 - `parse_content_line(text, line_number)` splits one line into group, name
   (upper-cased), parameters (RFC 6868 `^n`, `^'`, `^^` decoded) and the
   value, which stays escaped. `format_content_line` writes one back and

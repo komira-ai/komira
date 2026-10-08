@@ -19,6 +19,11 @@
 #                          exactly; a PREF outside 1..100 is one of them.
 #   extra_kept_verbatim    unknown properties, a second FN and an X-ABLabel
 #                          with no labelled sibling are kept as written.
+#   value_text_kept_whole  UID, BDAY, URL and MEMBER with VALUE=text are kept
+#                          whole in `extra` (a reader that maps them loses
+#                          the value type: UID and URL would be written as
+#                          URIs, BDAY as a date); a later UID goes to
+#                          `extra` too; VALUE=text on FN is accepted.
 #   kind_and_members       KIND defaults to individual and is lower-cased;
 #                          MEMBER values are kept in order.
 # =============================================================================
@@ -159,6 +164,31 @@ def test_kind_and_members() raises:
     print("  test_kind_and_members PASS")
 
 
+def test_value_text_kept_whole() raises:
+    var got = parse_contacts(
+        (
+            "BEGIN:VCARD\r\nVERSION:4.0\r\nFN;VALUE=text:A\r\n"
+            "UID;VALUE=text:abc\r\nBDAY;VALUE=text:circa 1800\r\n"
+            "URL;VALUE=text:see office\r\nMEMBER;VALUE=TEXT:the Does\r\n"
+            "UID:urn:uuid:x\r\nEND:VCARD\r\n"
+        ).as_bytes()
+    )
+    ref c = got.contacts[0]
+    assert_equal(c.full_name, "A")
+    assert_equal(c.uid, "")
+    assert_equal(c.birthday, "")
+    assert_equal(len(c.urls), 0)
+    assert_equal(len(c.members), 0)
+    assert_equal(len(c.extra), 5)
+    assert_equal(c.extra[0], "UID;VALUE=text:abc")
+    assert_equal(c.extra[1], "BDAY;VALUE=text:circa 1800")
+    assert_equal(c.extra[2], "URL;VALUE=text:see office")
+    assert_equal(c.extra[3], "MEMBER;VALUE=TEXT:the Does")
+    assert_equal(c.extra[4], "UID:urn:uuid:x")
+    assert_equal(len(got.dropped), 0)
+    print("  test_value_text_kept_whole PASS")
+
+
 def main() raises:
     print("test_contacts")
     test_n_escaped_comma()
@@ -168,5 +198,6 @@ def main() raises:
     test_tel_uri_kept_raw()
     test_dropped_report()
     test_extra_kept_verbatim()
+    test_value_text_kept_whole()
     test_kind_and_members()
     print("ALL TESTS PASS")

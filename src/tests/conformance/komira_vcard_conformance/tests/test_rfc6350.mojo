@@ -8,11 +8,15 @@
 #                       escaped comma (`ABC\, Inc.` must stay one component).
 #   member_6_6_5        group cards: the MEMBER values of the family card are
 #                       exactly the UIDs of the two member cards.
-#   property_examples   FN with `\,`, the seven-value N of §6.2.2 (split
+#   property_examples   FN with `\,`, the five-component (eight-value) N of §6.2.2 (split
 #                       before unescape), NICKNAME lists across lines, the
 #                       folded ADR with a quoted LABEL holding ':' and ',',
 #                       TEL as a tel: URI with `;ext=`, EMAIL TYPE/PREF; the
 #                       dropped parameters are named exactly.
+#   bday_text_6_2_5     `BDAY;VALUE=text:circa 1800` is kept whole in
+#                       `extra` and written back with VALUE=text (mapping it
+#                       to `birthday` dropped the parameter and wrote
+#                       `BDAY:circa 1800`, not a date-and-or-time).
 #   author_8            the §8 card: mapped fields, the seven unmapped
 #                       properties kept as written, and the exact vCard 4.0
 #                       text written back (including the KEY line refolded
@@ -28,6 +32,7 @@ from komira_vcard import Contact, emit_contacts, parse_contacts
 from komira_vcard_conformance import (
     rfc2426_7_example,
     rfc6350_6_1_4_kind,
+    rfc6350_6_2_5_bday_text,
     rfc6350_6_6_5_member,
     rfc6350_6_property_examples,
     rfc6350_8_author,
@@ -129,6 +134,22 @@ def test_property_examples() raises:
     print("  test_property_examples PASS")
 
 
+def test_bday_text_6_2_5() raises:
+    var got = parse_contacts(rfc6350_6_2_5_bday_text().as_bytes())
+    ref c = got.contacts[0]
+    assert_equal(c.full_name, "Jane Doe")
+    assert_equal(c.birthday, "")
+    _eq(c.extra, [String("BDAY;VALUE=text:circa 1800")], "extra")
+    assert_equal(len(got.dropped), 0)
+    assert_equal(
+        emit_contacts(got.contacts),
+        "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Jane Doe\r\n"
+        "BDAY;VALUE=text:circa 1800\r\nEND:VCARD\r\n",
+    )
+    _round_trip(got.contacts)
+    print("  test_bday_text_6_2_5 PASS")
+
+
 def test_author_8() raises:
     var got = parse_contacts(rfc6350_8_author().as_bytes())
     ref c = got.contacts[0]
@@ -215,6 +236,7 @@ def main() raises:
     test_kind_6_1_4()
     test_member_6_6_5()
     test_property_examples()
+    test_bday_text_6_2_5()
     test_author_8()
     test_rfc2426_7()
     print("ALL TESTS PASS")

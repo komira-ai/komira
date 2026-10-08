@@ -14,6 +14,7 @@ from .vectors import (
     outlook_shaped_2_1,
     rfc2426_7_example,
     rfc6350_6_1_4_kind,
+    rfc6350_6_2_5_bday_text,
     rfc6350_6_6_5_member,
     rfc6350_6_property_examples,
     rfc6350_8_author,

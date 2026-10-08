@@ -9,7 +9,11 @@
 # is appended. The joining is done on octets, so a fold that falls inside a
 # multi-octet UTF-8 sequence is restored before the line is validated (RFC
 # 6350 §3.2, the note on improperly folded lines). Empty physical lines
-# are skipped.
+# are skipped. Every join is recorded in `LogicalLine.folds`: the octet offset
+# in `text` where the continuation's octets start, and the white-space octet
+# that was removed. A reader whose own rules join a line differently (vCard
+# 2.1 quoted-printable soft breaks, where that octet is data) rebuilds the
+# physical lines from them.
 #
 # Limits: the whole input and every logical line are bounded in octets
 # (`ContentLimits`); the line bound is checked while the line grows, so an
@@ -40,19 +44,42 @@ struct ContentLimits(Copyable, Movable):
         self.max_line_octets = max_line_octets
 
 
+struct Fold(Copyable, Movable):
+    """One join: the octet offset in the unfolded text where the
+    continuation line's octets start, and the white-space octet removed."""
+
+    var at: Int
+    var removed: UInt8
+
+    def __init__(out self, at: Int, removed: UInt8):
+        self.at = at
+        self.removed = removed
+
+
 struct LogicalLine(Copyable, Movable):
-    """One unfolded line and the 1-based physical line it starts on."""
+    """One unfolded line, the 1-based physical line it starts on, and where
+    it was joined (in increasing `at` order)."""
 
     var text: String
     var line_number: Int
+    var folds: List[Fold]
 
-    def __init__(out self, var text: String, line_number: Int):
+    def __init__(
+        out self,
+        var text: String,
+        line_number: Int,
+        var folds: List[Fold] = List[Fold](),
+    ):
         self.text = text^
         self.line_number = line_number
+        self.folds = folds^
 
 
 def _finish(
-    mut out: List[LogicalLine], mut buf: List[UInt8], start_line: Int
+    mut out: List[LogicalLine],
+    mut buf: List[UInt8],
+    mut folds: List[Fold],
+    start_line: Int,
 ) raises:
     if len(buf) == 0:
         return
@@ -66,9 +93,12 @@ def _finish(
             + String(" of the unfolded line)")
         )
     out.append(
-        LogicalLine(String(StringSlice(from_utf8=Span(buf))), start_line)
+        LogicalLine(
+            String(StringSlice(from_utf8=Span(buf))), start_line, folds^
+        )
     )
     buf.clear()
+    folds = List[Fold]()
 
 
 def _too_long(start_line: Int, limit: Int) -> Error:
@@ -95,6 +125,7 @@ def unfold(
         )
     var out = List[LogicalLine]()
     var buf = List[UInt8]()
+    var folds = List[Fold]()
     var start_line = 0
     var line_no = 0
     var i = 0
@@ -118,13 +149,14 @@ def unfold(
                         + String(" starts with white space and continues no line")
                     )
                 from_ = i + 1
+                folds.append(Fold(len(buf), c))
             else:
-                _finish(out, buf, start_line)
+                _finish(out, buf, folds, start_line)
                 start_line = line_no
             if len(buf) + (end - from_) > limits.max_line_octets:
                 raise _too_long(start_line, limits.max_line_octets)
             for k in range(from_, end):
                 buf.append(data[k])
         i = next
-    _finish(out, buf, start_line)
+    _finish(out, buf, folds, start_line)
     return out^

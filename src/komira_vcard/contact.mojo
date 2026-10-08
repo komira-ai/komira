@@ -29,7 +29,8 @@
 # A single-valued property (KIND, UID, FN, N, ORG, TITLE, BDAY, NOTE) maps
 # from its first line; a later line, every property not listed above, and an
 # X-ABLabel with no labelled sibling are kept in `extra` as the unfolded line,
-# so writing the contact out again loses none of them.
+# so writing the contact out again loses none of them. So is a UID, BDAY, URL
+# or MEMBER line with VALUE=text (read.mojo).
 # =============================================================================
 
 

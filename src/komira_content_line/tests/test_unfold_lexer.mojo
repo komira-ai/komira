@@ -7,6 +7,10 @@
 #   rfc6350_3_2_fold_forms     the three forms RFC 6350 §3.2 gives for one
 #                              NOTE unfold to the same line (a fold that keeps
 #                              the white space, or drops two octets).
+#   folds_recorded             each join is recorded as (offset in the
+#                              unfolded text, white-space octet removed), the
+#                              record vCard 2.1 quoted-printable reading uses
+#                              to put a soft break's continuation back.
 #   fold_inside_multibyte      a fold that splits "é" (C3 | A9) is restored
 #                              before validation (validating physical lines
 #                              would refuse it).
@@ -22,7 +26,10 @@
 #                              name (the "drop the group strip" mutant).
 #   lex_rfc6350_adr_label      a quoted parameter holding ':' ',' and a fold
 #                              (RFC 6350 §6.3.1) does not end the parameter.
-#   lex_rfc6868_caret          RFC 6868's ^' and ^n decode; ^x is kept.
+#   lex_rfc6868_caret          RFC 6868's ^' and ^n decode; ^x is kept (the
+#                              §3.1 and §3.2 examples, with the person's name
+#                              and the street address replaced by example
+#                              ones).
 #   lex_bare_param             vCard 2.1 `TEL;WORK;VOICE:` keeps bare params.
 #   lex_refusals               malformed lines raise exact messages.
 # =============================================================================
@@ -87,6 +94,20 @@ def test_rfc6350_3_2_fold_forms() raises:
     assert_equal(_one_line(b), want)
     assert_equal(_one_line(c), want)
     print("  test_rfc6350_3_2_fold_forms PASS")
+
+
+def test_folds_recorded() raises:
+    var d = _b("NOTE:ab\r\n cd\r\n\tef\r\nFN:x\r\n")
+    var lines = unfold(Span(d))
+    assert_equal(len(lines), 2)
+    assert_equal(lines[0].text, "NOTE:abcdef")
+    assert_equal(len(lines[0].folds), 2)
+    assert_equal(lines[0].folds[0].at, 7)
+    assert_equal(lines[0].folds[0].removed, UInt8(32))
+    assert_equal(lines[0].folds[1].at, 9)
+    assert_equal(lines[0].folds[1].removed, UInt8(9))
+    assert_equal(len(lines[1].folds), 0)
+    print("  test_folds_recorded PASS")
 
 
 def test_fold_inside_multibyte() raises:
@@ -216,18 +237,18 @@ def test_lex_rfc6350_adr_label() raises:
 def test_lex_rfc6868_caret() raises:
     # RFC 6868 §3.1 (unquoted) and §3.2 (quoted, folded).
     var a = parse_content_line(
-        "ATTENDEE;CN=George Herman ^'Babe^' Ruth:mailto:babe@example.com", 1
+        "ATTENDEE;CN=Jane ^'JJ^' Doe:mailto:jane@example.com", 1
     )
-    assert_equal(a.params[0].values[0], 'George Herman "Babe" Ruth')
+    assert_equal(a.params[0].values[0], 'Jane "JJ" Doe')
     var d = _b(
-        'GEO;X-ADDRESS="Pittsburgh Pirates^n115 Federal St^nPitt\r\n'
-        ' sburgh, PA 15212":geo:40.446816,-80.00566\r\n'
+        'GEO;X-ADDRESS="Example Team^n100 Example St^nAny\r\n'
+        ' town, ST 00000":geo:40.446816,-80.00566\r\n'
     )
     var lines = unfold(Span(d))
     var g = parse_content_line(lines[0].text, 1)
     assert_equal(
         g.params[0].values[0],
-        "Pittsburgh Pirates\n115 Federal St\nPittsburgh, PA 15212",
+        "Example Team\n100 Example St\nAnytown, ST 00000",
     )
     assert_equal(g.value, "geo:40.446816,-80.00566")
     var k = parse_content_line("X;P=a^^b^xc:v", 1)
@@ -289,6 +310,7 @@ def test_lex_refusals() raises:
 def main() raises:
     print("test_unfold_lexer")
     test_rfc6350_3_2_fold_forms()
+    test_folds_recorded()
     test_fold_inside_multibyte()
     test_invalid_utf8_refused()
     test_line_limit()

@@ -7,9 +7,18 @@
 # split on ";" only (its components are single values, RFC 9555 §2.9.4);
 # NICKNAME on "," only.
 #
-# Parameters a mapping keeps: TYPE and PREF on EMAIL, TEL, ADR and URL (and a
-# vCard 2.1 bare parameter, read as a TYPE value, or as PREF), VALUE=uri on
-# TEL, VALUE=text anywhere. Any other parameter of a mapped line is named in
+# A UID, BDAY, URL or MEMBER line with VALUE=text is not mapped: its value
+# type is not the property's default (URI, date-and-or-time, URI, URI), and
+# `Contact` has no field for it, so the line is kept whole in `extra`, as
+# RFC 9555 §2.15.1 keeps a value with no JSContact counterpart in vCardProps
+# (for UID and BDAY it is taken as the property's one line, so a later UID
+# or BDAY line goes to `extra` too).
+#
+# Parameters a mapping accepts: TYPE and PREF on EMAIL, TEL, ADR and URL (and
+# a vCard 2.1 bare parameter, read as a TYPE value, or as PREF), VALUE=uri on
+# TEL, and VALUE=text on the other mapped properties, whose value type is text
+# by default, so the parameter changes nothing and is not written back. Any
+# other parameter of a mapped line is named in
 # `ContactImport.dropped` as
 #     card <k> line <n>: <PROPERTY> parameter <NAME> not kept
 # where k counts cards from 1, and so is the group of a mapped property that
@@ -60,6 +69,18 @@ def _is_text_value(p: Param) -> Bool:
         and len(p.values) == 1
         and p.values[0].lower() == "text"
     )
+
+
+def _text_on_non_text(vl: VCardLine) -> Bool:
+    ref name = vl.line.name
+    if not (
+        name == "UID" or name == "BDAY" or name == "URL" or name == "MEMBER"
+    ):
+        return False
+    for k in range(len(vl.line.params)):
+        if _is_text_value(vl.line.params[k]):
+            return True
+    return False
 
 
 def _report_all(mut dropped: List[String], card: Int, vl: VCardLine):
@@ -211,6 +232,9 @@ def contact_from_vcard(
                 c.extra.append(vl.text.copy())
                 continue
             seen.append(name.copy())
+            if _text_on_non_text(vl):
+                c.extra.append(vl.text.copy())
+                continue
             _report_all(dropped, card_number, vl)
             if name == "KIND":
                 c.kind = unescape_text(vl.line.value).lower()
@@ -230,6 +254,8 @@ def contact_from_vcard(
                 c.birthday = unescape_text(vl.line.value)
             else:
                 c.note = unescape_text(vl.line.value)
+        elif _text_on_non_text(vl):
+            c.extra.append(vl.text.copy())
         elif name == "NICKNAME":
             _report_all(dropped, card_number, vl)
             var pieces = split_unescaped(vl.line.value, 44)
