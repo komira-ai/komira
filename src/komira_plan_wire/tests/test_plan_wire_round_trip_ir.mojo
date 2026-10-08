@@ -7774,18 +7774,18 @@ there a place the codec writes it where nothing reads it". A slot can pass the
 first and fail this, and the gap is where a real defect hides.
 
 ★ `WirePlanEnvelope.format_version` IS ONE OF THEM, AND THAT IS THE HONEST
-PRICE OF A VERSION SET. The reader tests SET MEMBERSHIP over `{2, 3}`, because a
-write-carrying envelope declares 3 and a plan-only one declares 2 — so on the
-plain envelopes the perturbation 2 -> 3 lands on a version the reader
+PRICE OF A VERSION SET. The reader tests SET MEMBERSHIP over `{4, 5}`, because a
+write-carrying envelope declares 5 and a plan-only one declares 4 — so on the
+plain envelopes the perturbation 4 -> 5 lands on a version the reader
 LEGITIMATELY ACCEPTS, and the decode is identical. It is noticed only on the
-write envelopes, where the perturbation runs 3 -> 2 and produces the
+write envelopes, where the perturbation runs 5 -> 4 and produces the
 UNDERSTATED shape that `PLAN_WIRE_WRITE_TARGET_VERSION_UNDERSTATED` refuses.
 
-⚠ THE OBVIOUS FIX IS WRONG. Refusing an OVERSTATED version (3 declared, no
+⚠ THE OBVIOUS FIX IS WRONG. Refusing an OVERSTATED version (5 declared, no
 write target) would restore every occurrence by making the version an exact
 function of the content. It cannot be adopted, because the case the version
 field exists for — an existing field CHANGING MEANING — is by definition not
-derivable from content: a hypothetical version 4 that re-meant `WirePlan.plan`
+derivable from content: a future version that re-meant `WirePlan.plan`
 would be carried by a plain envelope, and an exact-against-derived check would
 refuse it. So the rule is AT LEAST the required version, understating is
 refused, overstating is accepted, and the blind occurrences are the honest
@@ -8112,10 +8112,10 @@ def _observability_corpus(reg: _SlotRegistry, mut led: _SlotLedger) raises:
         # the format/codec cross is what makes the pair-check reachable.
         #
         # ⚠ AND THIS IS WHAT KEEPS `WirePlanEnvelope.format_version`
-        # OBSERVABLE. On a plain envelope (version 2) the perturbation 2 -> 3
+        # OBSERVABLE. On a plain envelope (version 4) the perturbation 4 -> 5
         # lands on a version the reader ACCEPTS (over-declaring a reader floor
         # is legal — see `PLAN_WIRE_WRITE_TARGET_VERSION_UNDERSTATED`) and the
-        # decode is identical. Here the perturbation runs the other way: 3 -> 2 on a
+        # decode is identical. Here the perturbation runs the other way: 5 -> 4 on a
         # write-carrying envelope is the UNDERSTATED shape, which is refused by
         # name. The refusal is the observation.
         _census_env(

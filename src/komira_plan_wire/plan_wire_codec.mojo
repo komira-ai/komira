@@ -650,12 +650,12 @@ from komira_scan_source.source_variant import (
 # Format version + the refusal tokens
 # =============================================================================
 
-comptime PLAN_WIRE_FORMAT_VERSION: UInt32 = 2
+comptime PLAN_WIRE_FORMAT_VERSION: UInt32 = 4
 """THE VERSION A PLAIN (non-write) ENVELOPE DECLARES.
 
 ⚠ THIS IS NO LONGER "THE" VERSION — it is the FLOOR, and reading it as the only
 one is now a bug. A write-carrying envelope declares
-`PLAN_WIRE_WRITE_TARGET_MIN_VERSION` (3) instead; see
+`PLAN_WIRE_WRITE_TARGET_MIN_VERSION` (5) instead; see
 `plan_wire_supported_versions()` for what this build READS, and
 `_envelope_version_for` for what it WRITES.
 
@@ -696,10 +696,6 @@ VERSION 2 carries two changes:
     Same bytes, every value shifted by one, which is the meaning change this
     rule's first line has always been about.
 
-`WireScalar.error_code` (20) was deleted without a bump, because no reader
-built before the deletion was ever deployed; its number and name are
-reserved.
-
 VERSION 3 IS THE FIRST BUMP FOR AN *ADDED* FIELD, AND IT BREAKS
 THE FIRST RULE ABOVE ON PURPOSE. `WirePlanEnvelope.write_target` is a field
 whose OMISSION IS THE FAILURE: "ADD a field -> NO BUMP" is sound exactly when
@@ -709,11 +705,19 @@ writes no file, and raises nothing. So version 3 is declared ONLY by envelopes
 that carry field 3, which makes it a MINIMUM READER CAPABILITY rather than a
 format generation: a version-2 reader refuses a write envelope by name instead
 of executing half of it.
+
+VERSIONS 4 AND 5 DELETE `WireScalar.error_code` (field 20; its number and name
+are reserved). Both envelope shapes carry scalars, so both move: a plain
+envelope declares 4 and a write-carrying one declares 5, and this build reads
+only `{4, 5}`. A reader of `{2, 3}` refuses either by
+`PLAN_WIRE_VERSION_MISMATCH`, and this build refuses 2 and 3 the same way.
+5 is still a minimum reader capability over 4: a write target under 4 is
+refused as understated.
 """
 
 
 def plan_wire_supported_versions() raises -> PlanWireVersionSet:
-    """THE VERSIONS THIS BUILD READS. `{2, 3}`.
+    """THE VERSIONS THIS BUILD READS. `{4, 5}`.
 
     ⚠ A FUNCTION AND NOT A `comptime`, because `PlanWireVersionSet` construction
     is `raises` (it refuses a version >= 32 rather than shifting past the end of
@@ -723,8 +727,8 @@ def plan_wire_supported_versions() raises -> PlanWireVersionSet:
     ⚠ AND IT IS A SET, WHICH IS THE WHOLE POINT. `>=` would claim that any
     reader speaking a lower version can read a higher one, which is precisely
     false for the CHANGE-A-MEANING case this format's version field exists for.
-    A future version 4 that re-meant `WirePlan.plan` would make this `{4}`, and
-    an ordering could not express that.
+    Versions 4 and 5 are that case: this build reads `{4, 5}` and refuses 2
+    and 3, which an ordering could not express.
     """
     return PlanWireVersionSet.only(PLAN_WIRE_FORMAT_VERSION).plus(
         PLAN_WIRE_WRITE_TARGET_MIN_VERSION
@@ -3946,7 +3950,7 @@ def plan_to_bytes(p: LogicalPlan) raises -> List[UInt8]:
     RAISES, by name, on any shape the wire cannot carry — see the COVERAGE
     LEDGER at the top of this file. Nothing is dropped silently.
 
-    The envelope declares `format_version = 2` and carries NO `write_target`:
+    The envelope declares `format_version = 4` and carries NO `write_target`:
     a plan alone means "run this and return the rows". To ask a receiver to
     WRITE the rows somewhere, use `plan_to_bytes_with_write_target`."""
     return encode_proto[WirePlanEnvelope](
@@ -3961,7 +3965,7 @@ def plan_to_bytes_with_write_target(
 ) raises -> List[UInt8]:
     """Encode a plan AND A DESTINATION — `COPY <plan> TO <target>` on the wire.
 
-    The envelope declares `format_version = 3`, which is not decoration: it is
+    The envelope declares `format_version = 5`, which is not decoration: it is
     what makes a reader that does not know field 3 REFUSE these bytes instead of
     skipping the field, running the query, returning rows and writing nothing.
     The version is derived from the shape (`_envelope_version_for`) rather than
@@ -4035,7 +4039,7 @@ struct DecodedPlanEnvelope(Movable):
 
     ⚠ `write_target` IS `Optional` AND MUST STAY THAT WAY. Absence is the
     ordinary case and means "return the rows" — the behaviour of every
-    format-version-2 envelope. Making it non-optional with a sentinel path
+    plain envelope. Making it non-optional with a sentinel path
     would put "no destination" and "a destination named empty-string" in the
     same value, which is the proto3 confusion `_check_write_target` refuses.
 

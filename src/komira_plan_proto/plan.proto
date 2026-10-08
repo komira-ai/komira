@@ -324,8 +324,8 @@ message WireScalar {
   ScalarTimeUnit time_unit = 17;
   int64 dec256_high_lo = 18;
   int64 dec256_high_hi = 19;
-  // 20 carried a spreadsheet error code, a value kind the engine no longer
-  // has. The number and the name stay reserved.
+  // Field number 20 and the name `error_code` are reserved: no field may
+  // use either.
   reserved 20;
   reserved "error_code";
 }
@@ -1625,18 +1625,18 @@ message WirePlanEnvelope {
   // 36 unnecessary.
   //
   // SO THE VERSION IS A MINIMUM READER CAPABILITY, not a format generation:
-  //   * a plan-only envelope declares 2, and every reader from 2 onwards runs it
-  //   * a WRITE-CARRYING envelope declares 3, and a reader that speaks only 2
+  //   * a plan-only envelope declares 4
+  //   * a WRITE-CARRYING envelope declares 5, and a reader that speaks only 4
   //     REFUSES IT BY NAME rather than silently returning rows
-  // The reader's check is SET MEMBERSHIP (`{2, 3}` today), never equality and
+  // The reader's check is SET MEMBERSHIP (`{4, 5}` today), never equality and
   // never `>=`: a future version whose meaning genuinely changed must be able to
   // leave the set. See `PLAN_WIRE_FORMAT_VERSION` and `PlanWireVersionSet` in
   // komira_plan_wire's codec and admission check.
   //
   // ⚠ A DECODER MUST ALSO REFUSE AN UNDERSTATED VERSION — field 3 present with
-  // `format_version < 3`. Bumping the writer does not help against bytes the
+  // `format_version < 5`. Bumping the writer does not help against bytes the
   // writer did not write, and an understated write envelope is precisely the
-  // shape an old reader mis-executes. Refusing it is what makes "declare 3" a
+  // shape an old reader mis-executes. Refusing it is what makes "declare 5" a
   // rule a producer cannot skip rather than a convention it may forget.
   uint32 format_version = 1;
   WirePlan plan = 2;

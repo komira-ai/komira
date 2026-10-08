@@ -1049,7 +1049,7 @@ def _assert_frozen(name: String, var plan: LogicalPlan) raises:
     print("GOLDEN-END " + name)
 
     # --- LEG C: non-trivial -------------------------------------------------
-    # `WirePlanEnvelope{format_version:2}` alone is 2 bytes. A corpus of empty
+    # `WirePlanEnvelope{format_version:4}` alone is 2 bytes. A corpus of empty
     # plans would satisfy LEG A and LEG B and prove nothing.
     assert_true(
         len(bytes) > 16,
