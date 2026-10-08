@@ -349,7 +349,8 @@ def test_dataset_files() raises:
             String("bool_pairs.jsonl"), String("groups.jsonl"),
             String("join_left.jsonl"), String("join_right.jsonl"),
             String("sort_rows.jsonl"), String("int_pairs.jsonl"),
-            String("window_rows.jsonl"), String("extra.csv"),
+            String("window_rows.jsonl"), String("rank_rows.jsonl"),
+            String("extra.csv"),
         ],
     )
     assert_true(_any_contains(p, "datasets/ints_nullable.jsonl is missing"))

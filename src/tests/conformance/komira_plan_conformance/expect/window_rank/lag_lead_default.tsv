@@ -6,9 +6,8 @@
 # over g = 1 (v 10, NULL, 30): 0 (edge), 10, NULL (id 2's v); g = 2 (v 40,
 # 50): 0, 40; g = 3: 0. LEAD(v, 1, -1) over g = 1: NULL (id 2's v), 30, -1
 # (edge); g = 2: 50, -1; g = 3: -1.
-# Types: id, g, v keep their scanned types; each LAG/LEAD column is INT64
-# (its values are cells of v, a default that is an INT64 literal (§8.19), or
-# NULL) and nullable (§8: no row exempts it).
+# Types: id, g, v keep their scanned types; each LAG/LEAD column is v's type,
+# INT64, and nullable because v is nullable (§8.24).
 id:int64	g:int64	v:int64?	lag_v:int64?	lead_v:int64?
 1	1	10	0	\N
 2	1	\N	10	30

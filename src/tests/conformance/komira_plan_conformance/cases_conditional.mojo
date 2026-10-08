@@ -2,15 +2,16 @@
 # komira_plan_conformance/cases_conditional.mojo -- shard conditional.
 # =============================================================================
 #
-# Conditional expressions and NULL, citing query semantics §1.1, §1.2, §1.4,
-# §1.5, §1.7, §8.8 and §8.19. A CASE whose condition is NULL does not take
-# that branch (§1.7); a CASE with no ELSE answers NULL; COALESCE is a CASE
-# over IS NOT NULL (§1.7); NULLIF(x, y) is CASE WHEN x = y THEN NULL ELSE x
-# (§1.2, §1.7); IN and NOT IN over a list holding a NULL member (§1.4, §1.5),
-# as values and as filters. Datasets bool_pairs (every pair of TRUE, FALSE,
-# NULL) and int_pairs (x, y = (1, 10), (NULL, 20), (3, NULL), (NULL, NULL),
-# (5, 5)). Every expectation is HAND, its derivation in the .tsv. No case's
-# root is a SORT, so every case compares its rows as a multiset (§4.8).
+# Conditional expressions and NULL, citing query semantics §1.1, §1.2,
+# §1.4, §1.5, §1.7, §1.8, §8.8 and §8.19. A CASE whose condition is NULL
+# does not take that branch (§1.7); a CASE with no ELSE answers NULL;
+# COALESCE is a CASE over IS NOT NULL (§8.14: "COALESCE, which is a CASE");
+# NULLIF(x, y) is CASE WHEN x = y THEN NULL ELSE x (§1.8); IN and NOT IN
+# over a list holding a NULL member (§1.4, §1.5), as values and as filters.
+# Datasets bool_pairs (every pair of TRUE, FALSE, NULL) and int_pairs (x, y
+# = (1, 10), (NULL, 20), (3, NULL), (NULL, NULL), (5, 5)). Every
+# expectation is HAND, its derivation in the .tsv. No case's root is a SORT,
+# so every case compares its rows as a multiset (§4.8).
 #
 # Types. The result type of a CASE over mixed branch types is UNDECIDED
 # (§8.14), so every branch of every CASE here is INT64: a column of
@@ -24,8 +25,7 @@
 #     a missing ELSE answers NULL, so the two are the same CASE;
 #   - COALESCE is built with komira_plan_expr's `coalesce_of`, the CASE over
 #     IS NOT NULL that §1.7's "current behaviour" names;
-#   - NULLIF is built here as its CASE. The document has no NULLIF item, so
-#     the case cites §1.2 and §1.7, the items the CASE rests on.
+#   - NULLIF is built here as the CASE §1.8 defines it to be, with BIN_EQ.
 # IN is the plan's IN_LIST node (`Expr.in_list_node`), the tuple form §1.4
 # defines; NOT IN is NOT over it (§1.5).
 #

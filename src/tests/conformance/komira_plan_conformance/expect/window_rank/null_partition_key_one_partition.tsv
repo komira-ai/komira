@@ -1,0 +1,20 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.9: rows whose partition key is NULL form one partition.
+# §9.2: ROW_NUMBER numbers each partition 1 to n; ordered by id, a total key
+# (§9.3 does not arise). g = 1 (ids 1 to 6): 1 to 6; g = 2 (id 7): 1; g
+# NULL (ids 8, 9, 10): 1, 2, 3.
+# Types: id, g, o keep their scanned types; ROW_NUMBER is INT64,
+# non-nullable (§8.22).
+id:int64	g:int64?	o:int64?	rn:int64
+1	1	10	1
+2	1	20	2
+3	1	20	3
+4	1	30	4
+5	1	\N	5
+6	1	\N	6
+7	2	5	1
+8	\N	7	1
+9	\N	7	2
+10	\N	9	3

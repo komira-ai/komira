@@ -32,8 +32,11 @@
 #                  equal pair.
 #   window_rows    id, g, v: partitions g = 1 (ids 1 to 3), 2 (ids 4, 5)
 #                  and 3 (id 6, a partition of one row); v NULL on id 2,
-#                  the middle row of g = 1. g holds no NULL: the document
-#                  states no rule for a NULL partition key yet.
+#                  the middle row of g = 1. g is non-nullable.
+#   rank_rows      id, g, o: g = 1 holds o = 10, 20, 20, 30, NULL, NULL
+#                  (ids 1 to 6: a tie and two NULL order keys); g = 2 one
+#                  row (id 7, o = 5); g NULL three rows (ids 8 to 10, o =
+#                  7, 7, 9), a partition of their own (§9.9).
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
@@ -140,12 +143,23 @@ def window_rows() -> Dataset:
     )
 
 
+def rank_rows() -> Dataset:
+    return Dataset(
+        "rank_rows",
+        _schema(
+            [String("id"), String("g"), String("o")],
+            [ArrowType.INT64, ArrowType.INT64, ArrowType.INT64],
+            [False, True, True],
+        ),
+    )
+
+
 def all_datasets() -> List[Dataset]:
     """Every dataset a case may scan; test_corpus refuses a file under
     datasets/ that is not one of these."""
     return [
         bool_pairs(), ints_nullable(), groups(), join_left(), join_right(),
-        sort_rows(), int_pairs(), window_rows(),
+        sort_rows(), int_pairs(), window_rows(), rank_rows(),
     ]
 
 

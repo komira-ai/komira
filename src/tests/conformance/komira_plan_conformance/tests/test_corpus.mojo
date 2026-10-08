@@ -24,10 +24,10 @@ def test_corpus() raises:
 
 def test_corpus_is_not_empty() raises:
     # A registry that lost its shards would pass every check vacuously.
-    if len(registered_cases()) < 59:
+    if len(registered_cases()) < 64:
         raise Error(
             "plan_conformance: " + String(len(registered_cases()))
-            + " cases registered, the six shards hold 59"
+            + " cases registered, the six shards hold 64"
         )
 
 

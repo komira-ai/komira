@@ -6,9 +6,8 @@
 # 5, 4; 6. LAG(v, 1, 0) reads the row before in that order: id 3 is first
 # (0), id 2 reads id 3 (30), id 1 reads id 2 (NULL, §9.5); id 5 is first (0),
 # id 4 reads id 5 (50); id 6 is alone (0).
-# Types: id, g, v keep their scanned types; the LAG column is INT64 (its
-# values are cells of v, the INT64 literal 0 (§8.19), or NULL) and nullable
-# (§8: no row exempts it).
+# Types: id, g, v keep their scanned types; the LAG column is v's type,
+# INT64, and nullable because v is nullable (§8.24).
 id:int64	g:int64	v:int64?	lag_v:int64?
 1	1	10	\N
 2	1	\N	30
