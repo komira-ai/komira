@@ -48,8 +48,12 @@ mojo_library(
     test_srcs = [
         # the one parser: verbs, flags, the stage's flags, every usage refusal
         "tests/test_kci_args.mojo",
-        # kci run over a recording fake: the steps, the workflow check, validations, NEW NAMES, the summary
+        # kci run over a recording fake: the steps, where the run stops, --only, --plan, --affected-by
         "tests/test_kci_dispatch.mojo",
+        # the same fake at start-up: the workflow check; a local --channel and its refusals, exactly
+        "tests/test_kci_dispatch_workflow.mojo",
+        # the same fake: validations, NEW NAMES, the summary
+        "tests/test_kci_dispatch_validations.mojo",
         # the start-up check accepts a pull request's check (and refuses a
         # drifted one); a dry run outside CI says its credential probe did
         # not run, next to the outcome

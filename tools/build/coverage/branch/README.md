@@ -43,7 +43,7 @@ sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
 
 | sub-target | action category | output | what it does |
 |---|---|---|---|
-| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables` against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
+| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables`, with the same `-D` arguments (the library's `test_assert_level` and `test_defines`), against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
 | `[coverage][pgo_bin][<test>]` | `mojo_cov_pgo_link` | `cov/branch/<test>` | [cov_branch_link](#cov_branch_link) |
 | `[coverage][branch][<test>]` | `mojo_cov_branch_run` | `cov/branch/<test>.profdata` | [cov_branch_run](#cov_branch_run) |
 | `[coverage][branch_ir][<test>]` | `mojo_cov_branch_annotate` | `cov/branch/<test>.ll` | [cov_branch_annotate](#cov_branch_annotate) |
