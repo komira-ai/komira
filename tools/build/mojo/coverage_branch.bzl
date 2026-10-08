@@ -18,7 +18,8 @@ linux-x86_64), per `test_srcs` entry that is a source file:
   `cov/branch/<test>.profdata`;
 - `[coverage][branch_ir][<test>]` (category `mojo_cov_branch_annotate`): the
   bitcode with that profile applied by Mojo's lld, as IR text whose branches
-  carry their counts (cov_branch_annotate.sh), `cov/branch/<test>.ll`;
+  carry their counts (cov_branch_annotate.sh, which also reads the binary:
+  the profile must hold exactly the functions it links), `cov/branch/<test>.ll`;
 - `[coverage][branch_info][<test>]` (category `mojo_cov_branch_classify`):
   the branches of the library's measured sources in that IR, each a source
   decision or a known compiler-made branch, as lcov `BRDA` records in
@@ -130,6 +131,7 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             tc.busybox,
             bc,
             profdata,
+            exe,
             ir.as_output(),
             hidden = annotate_dir,
         ),
