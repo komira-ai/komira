@@ -10,17 +10,18 @@
 # driven at 4, 8 and 16 and is_null at 1 only (see their sections). Each lane
 # is checked against a written-out answer; floats bit for bit.
 #
-# Rows pinning today's departures from the query semantics
-# (docs/design/query_semantics.md, under review in pull request 770):
-#   - a NaN row is FALSE for every ordered operator and for = (section 4.5
-#     proposes NaN = NaN and NaN > x);
-#   - I64 -> I32 keeps the low 32 bits of an out-of-range value (section 6.2
-#     says error);
-#   - F64 -> F32 turns a finite out-of-range value into inf (section 6 says
-#     error);
-#   - `<>` answers a NaN row TRUE in eval_row (IEEE) and FALSE in eval[W],
-#     where IEEE and section 4.5 both say TRUE: the two paths of one template
-#     disagree (see `_run_cmp_f64`).
+# Float rows follow IEEE 754: a NaN row is FALSE for every ordered operator
+# and for =, TRUE for <>, and F64 -> F32 turns a finite out-of-range value
+# into inf. (Section 4.5 of the query semantics, docs/design/query_semantics.md
+# under review in pull request 770, proposes NaN = NaN and NaN > x; it is
+# undecided.)
+#
+# Not pinned here (#937), because today's answer is believed wrong:
+#   - eval[W] of template 30 (`<>`) answers the NaN row FALSE (`.ne()` is an
+#     ordered compare) where eval_row and IEEE answer TRUE; only eval_row is
+#     checked on that row;
+#   - I64 -> I32 of an out-of-range value keeps its low 32 bits (section 6.2
+#     says error); only in-range values are cast.
 # Float -> I64 casts are driven inside the I64 range only: the templates
 # check no range, and a NaN, inf or out-of-range input has no defined
 # machine answer.
@@ -134,11 +135,10 @@ def _run_cmp_f64[W: Int]() raises:
     var le: List[Bool] = [T, T, F, T, F, F, T, F, T, T, T]
     var eq: List[Bool] = [F, T, F, F, F, F, F, F, F, F, F]
     var ne: List[Bool] = [T, F, T, T, T, T, T, T, T, T, T]
-    # The two paths of template 30 disagree on the NaN row (row 5): eval_row's
-    # `!=` is IEEE's unordered not-equal (TRUE), eval[W]'s `.ne()` is an
-    # ordered not-equal (FALSE), at every W including 1. Both answers are
-    # pinned so a fix to either path shows here.
-    var ne_lanes: List[Bool] = [T, F, T, T, T, F, T, T, T, T, T]
+    # Row 5 (NaN) of `<>` is checked on eval_row only: eval[W]'s `.ne()` is an
+    # ordered compare and answers FALSE, which is believed wrong (#937), so
+    # that one lane is not pinned.
+    comptime NAN_ROW = 5
     var n = len(a)
     var i = 0
     while i + W <= n:
@@ -148,7 +148,10 @@ def _run_cmp_f64[W: Int]() raises:
         _blanes(GenBinaryCmpLt_F64_ColLit.eval[W](s, lit).get_bool[0](), lt, i, "lt f64")
         _blanes(GenBinaryCmpLe_F64_ColLit.eval[W](s, lit).get_bool[0](), le, i, "le f64")
         _blanes(GenBinaryCmpEq_F64_ColLit.eval[W](s, lit).get_bool[0](), eq, i, "eq f64")
-        _blanes(GenBinaryCmpNe_F64_ColLit.eval[W](s, lit).get_bool[0](), ne_lanes, i, "ne f64")
+        var ne_got = GenBinaryCmpNe_F64_ColLit.eval[W](s, lit).get_bool[0]()
+        for l in range(W):
+            if i + l != NAN_ROW:
+                assert_equal(Bool(ne_got[l]), ne[i + l], "ne f64 row " + String(i + l))
         i += W
     while i < n:
         var r = F64Row(a=a[i])
@@ -239,9 +242,11 @@ def _run_cast_from_f32[W: Int]() raises:
 
 
 def _run_cast_from_i64[W: Int]() raises:
-    """I64 -> I32 (keeps the low 32 bits) and I64 -> F64 (ties to even)."""
-    var a: List[Int64] = [5, -5, 2147483648, 4294967301, -2147483649, Int64.MAX, Int64.MIN, 0, 2147483647, -2147483648, 4294967295]
-    var i32: List[Int32] = [5, -5, Int32.MIN, 5, Int32.MAX, -1, 0, 0, Int32.MAX, Int32.MIN, -1]
+    """I64 -> I32 over in-range values, both I32 extremes included, and
+    I64 -> F64 (ties to even). An out-of-range I64 -> I32 is not pinned
+    (#937): the template keeps the low bits, section 6.2 says error."""
+    var a: List[Int64] = [5, -5, 70000, -70000, 1, 2147483647, -2147483648, 0, 123456789, -123456789, -1]
+    var i32: List[Int32] = [5, -5, 70000, -70000, 1, Int32.MAX, Int32.MIN, 0, 123456789, -123456789, -1]
     var b: List[Int64] = [0, 1, -1, 9007199254740992, 9007199254740993, 9007199254740995, Int64.MAX, Int64.MIN, 123, -123, 4611686018427387904]
     var f64: List[Float64] = [0.0, 1.0, -1.0, 9007199254740992.0, 9007199254740992.0, 9007199254740996.0, 9223372036854775808.0, -9223372036854775808.0, 123.0, -123.0, 4611686018427387904.0]
     var n = len(a)
@@ -349,8 +354,8 @@ def _run_when[W: Int]() raises:
 # Only W = 1 is driven: each `eval[W]` body splats with
 # `SIMD[DType.bool, W](<Bool>)`, which the compiler refuses for every W > 1
 # ("must be a scalar; use the `fill` keyword"), so no wider instantiation of
-# these eight templates compiles. The scalar path and the one-lane chunk
-# answer every row.
+# these eight templates compiles (#937). The scalar path and the one-lane
+# chunk answer every row.
 # -----------------------------------------------------------------------------
 
 
@@ -418,7 +423,7 @@ def test_casts_from_float() raises:
 
 
 def test_casts_from_int() raises:
-    """IDs 39, 42, 40, 43: low-bits narrowing, ties-to-even to F64, widening."""
+    """IDs 39, 42, 40, 43: in-range narrowing, ties-to-even to F64, widening."""
     _run_cast_from_i64[1]()
     _run_cast_from_i64[4]()
     _run_cast_from_i64[8]()

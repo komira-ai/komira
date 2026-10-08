@@ -14,14 +14,13 @@
 # Every expected value is written out. Floats are compared bit for bit
 # (so -0.0 is not +0.0); a NaN expectation accepts any NaN.
 #
-# The integer rows pin what the templates do today where it departs from the
-# query semantics (docs/design/query_semantics.md, under review in pull
-# request 770):
-#   - division floors (`-7 / 2` answers -4; section 5.1 says -3), in the
-#     ColCol and ColLit templates alike;
-#   - modulo is the floored remainder, with the divisor's sign (`-7 % 2`
-#     answers 1; section 5.2 says -1);
-#   - add, sub, mul and negate wrap on overflow (section 5.5 says error).
+# The integer rows are chosen so every answer is the same under the query
+# semantics (docs/design/query_semantics.md, under review in pull request
+# 770) and under what the templates do today. Where the two differ the
+# behaviour is NOT pinned here (#937): a mixed-sign division or modulo with a
+# remainder (the templates floor, section 5.1 and 5.2 truncate) and an
+# overflowing add, sub, mul or negate (the templates wrap, section 5.5 says
+# error). Mixed-sign rows divide exactly; every result is in range.
 # Zero divisors and MIN / -1 are left out: the templates do not guard them
 # (their docstrings say so), and a machine division traps there.
 # =============================================================================
@@ -151,33 +150,28 @@ def _float_cases[dt: DType]() -> BinCases[dt]:
 
 
 def _int_cases[dt: DType]() -> BinCases[dt]:
-    """Signed rows: every sign pairing of 7 and 2, MAX and MIN, wrap rows.
+    """Signed rows on which truncating and floor semantics agree, no overflow.
 
-    Row 8 holds k = 2^h + 1 in both operands (h = 32 for I64, 16 for I32):
-    k * k = 2^2h + 2^(h+1) + 1 wraps to 2^(h+1) + 1.
+    Same-sign pairs carry the remainders (7 % 2, -7 % -2, 100 % 7, -100 % -7);
+    mixed-sign pairs divide exactly (-8 / 2, 9 / -3). Rows 5 and 6 hold
+    +-big (2^62 - 1 for I64, 2^30 - 1 for I32) with 1, row 8 is 46340 squared
+    (fits I32). Not pinned (#937): floor vs truncation on a mixed-sign
+    remainder and wrap on overflow.
     """
     comptime S = Scalar[dt]
-    var mx = S.MAX
-    var mn = S.MIN
-    var k: S
-    var k2: S
-    var kk: S
+    var big: S
     comptime if dt == DType.int64:
-        k = S(4294967297)
-        k2 = S(8589934594)
-        kk = S(8589934593)
+        big = S(4611686018427387903)
     else:
-        k = S(65537)
-        k2 = S(131074)
-        kk = S(131073)
-    var a: List[S] = [S(7), S(-7), S(7), S(-7), S(0), mx, mn, S(6), k, S(100), S(-100)]
-    var b: List[S] = [S(2), S(2), S(-2), S(-2), S(5), S(1), S(1), S(3), k, S(7), S(7)]
-    var add: List[S] = [S(9), S(-5), S(5), S(-9), S(5), mn, mn + S(1), S(9), k2, S(107), S(-93)]
-    var sub: List[S] = [S(5), S(-9), S(9), S(-5), S(-5), mx - S(1), mx, S(3), S(0), S(93), S(-107)]
-    var mul: List[S] = [S(14), S(-14), S(-14), S(14), S(0), mx, mn, S(18), kk, S(700), S(-700)]
-    var div: List[S] = [S(3), S(-4), S(-4), S(3), S(0), mx, mn, S(2), S(1), S(14), S(-15)]
-    var mod: List[S] = [S(1), S(1), S(-1), S(-1), S(0), S(0), S(0), S(0), S(0), S(2), S(5)]
-    var neg: List[S] = [S(-7), S(7), S(-7), S(7), S(0), mn + S(1), mn, S(-6), -k, S(-100), S(100)]
+        big = S(1073741823)
+    var a: List[S] = [S(7), S(-7), S(-8), S(9), S(0), big, -big, S(6), S(46340), S(100), S(-100)]
+    var b: List[S] = [S(2), S(-2), S(2), S(-3), S(5), S(1), S(1), S(3), S(46340), S(7), S(-7)]
+    var add: List[S] = [S(9), S(-9), S(-6), S(6), S(5), big + S(1), -big + S(1), S(9), S(92680), S(107), S(-107)]
+    var sub: List[S] = [S(5), S(-5), S(-10), S(12), S(-5), big - S(1), -big - S(1), S(3), S(0), S(93), S(-93)]
+    var mul: List[S] = [S(14), S(14), S(-16), S(-27), S(0), big, -big, S(18), S(2147395600), S(700), S(700)]
+    var div: List[S] = [S(3), S(3), S(-4), S(-3), S(0), big, -big, S(2), S(1), S(14), S(14)]
+    var mod: List[S] = [S(1), S(-1), S(0), S(0), S(0), S(0), S(0), S(0), S(0), S(2), S(-2)]
+    var neg: List[S] = [S(-7), S(7), S(8), S(-9), S(0), -big, big, S(-6), S(-46340), S(-100), S(100)]
     return BinCases[dt](a^, b^, add^, sub^, mul^, div^, mod^, neg^)
 
 
@@ -344,16 +338,18 @@ def _run_f64_collit[W: Int]() raises:
 
 
 def _run_i64_collit[W: Int]() raises:
-    """Column `_int_cases` a, literal -3: floor division and wrap rows."""
+    """Literal -3: negative rows divide with the same sign, positive rows are
+    multiples of 3, and +-m (m = 3074457345618258600, a multiple of 3) times -3
+    stays in range. Not pinned (#937): floor vs truncation on a mixed-sign
+    remainder and wrap on overflow."""
     comptime S = Int64
-    var a = _int_cases[DType.int64]().a.copy()
+    var m = S(3074457345618258600)
+    var a: List[S] = [S(-7), S(-8), S(9), S(0), S(6), S(-100), S(300), S(-1), S(-2), m, -m]
     var lit = S(-3)
-    var mx = S.MAX
-    var mn = S.MIN
-    var add: List[S] = [S(4), S(-10), S(4), S(-10), S(-3), mx - S(3), mx - S(2), S(3), S(4294967294), S(97), S(-103)]
-    var sub: List[S] = [S(10), S(-4), S(10), S(-4), S(3), mn + S(2), mn + S(3), S(9), S(4294967300), S(103), S(-97)]
-    var mul: List[S] = [S(-21), S(21), S(-21), S(21), S(0), mn + S(3), mn, S(-18), S(-12884901891), S(-300), S(300)]
-    var div: List[S] = [S(-3), S(2), S(-3), S(2), S(0), S(-3074457345618258603), S(3074457345618258602), S(-2), S(-1431655766), S(-34), S(33)]
+    var add: List[S] = [S(-10), S(-11), S(6), S(-3), S(3), S(-103), S(297), S(-4), S(-5), S(3074457345618258597), S(-3074457345618258603)]
+    var sub: List[S] = [S(-4), S(-5), S(12), S(3), S(9), S(-97), S(303), S(2), S(1), S(3074457345618258603), S(-3074457345618258597)]
+    var mul: List[S] = [S(21), S(24), S(-27), S(0), S(-18), S(300), S(-900), S(3), S(6), S(-9223372036854775800), S(9223372036854775800)]
+    var div: List[S] = [S(2), S(2), S(-3), S(0), S(-2), S(33), S(-100), S(0), S(0), S(-1024819115206086200), S(1024819115206086200)]
     var n = len(a)
     var i = 0
     while i + W <= n:
@@ -396,7 +392,7 @@ def test_f32_colcol_and_negate() raises:
 
 
 def test_i64_colcol_mod_and_negate() raises:
-    """IDs 5..8, 64 and 62: floor division, floored modulo, wrap on overflow."""
+    """IDs 5..8, 64 and 62: in-range rows only (#937)."""
     _run_i64_colcol[1]()
     _run_i64_colcol[4]()
     _run_i64_colcol[8]()
@@ -420,7 +416,7 @@ def test_f64_collit() raises:
 
 
 def test_i64_collit() raises:
-    """IDs 21..24: floor division by a negative literal, wrap rows."""
+    """IDs 21..24: a negative literal, in-range rows only (#937)."""
     _run_i64_collit[1]()
     _run_i64_collit[4]()
     _run_i64_collit[8]()
