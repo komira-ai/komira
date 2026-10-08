@@ -27,6 +27,7 @@ mojo_library(
         "tests/test_plan_wire_round_trip_ir.mojo",
         "tests/test_plan_wire_udf_tier.mojo",
         "tests/test_plan_wire_vocabulary.mojo",
+        "tests/test_plan_wire_vocabulary_names.mojo",
     ],
     # Declared data is staged at its repository path, and each test opens it
     # by that path: the test runs with the staged data as its current
