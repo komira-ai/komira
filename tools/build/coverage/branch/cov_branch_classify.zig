@@ -4,7 +4,8 @@
 //! ("cov_branch_classify") has the rules with their evidence; in brief:
 //!
 //! usage: cov_branch_classify --ir <test.ll> --out <file> --map <PREFIX>=<REPO>
-//!            [--gen <REL>]... [--exclude <PREFIX>]... [--exclude-file <NAME>]...
+//!            --stdlib <PREFIX> [--gen <REL>]... [--exclude <PREFIX>]...
+//!            [--exclude-file <NAME>]...
 //!
 //! <test.ll> is the module cov_branch_annotate.sh prints after LLVM's
 //! `pgo-instr-use`: each `br i1`, `select i1` and `switch` that ran carries
@@ -18,29 +19,46 @@
 //! PREFIX (the library's sources under another [src]) is refused; one equal
 //! to an --exclude-file or under an --exclude prefix is not measured; any
 //! other name is refused. Every `.mojo` file under PREFIX is read for the
-//! functions it declares `@always_inline("nodebug")`.
+//! functions it declares `@always_inline("nodebug")`. --stdlib names where
+//! the standard library's sources are (a String's last-reference test is
+//! its code, inlined at the branch).
 //!
-//! Classes, by the token at the branch's line and column, and the instruction
-//! kinds each takes: source decisions `if` (br, select, switch), `elif` (br,
-//! select, switch), `while` (br), `and`/`or` (br, select), the `(` of
-//! `range(` on a `for ... in range(` line (br); compiler-made `+` (br), `//`
-//! and `%` (select), and the `(` of any other call off a `for` line (br),
-//! unless the callee is a measured `@always_inline("nodebug")` function, whose
-//! code carries its callers' locations. Anything else is refused.
+//! Classes. First by shape: a br or select testing a String's flags word or
+//! its last reference (a destructor or copy, `nodebug` code carrying the
+//! location of the token that used the String) is compiler-made at any
+//! token, at a decision's token only when the tested instruction is at the
+//! branch's own location. Then by the token at the branch's line and column,
+//! with the instruction kinds each takes: source decisions `if` (br, select,
+//! switch), `elif` (br, select, switch), `while` (br), `and`/`or` (br,
+//! select), the head of a `for` line's iterable (br: a call's `(`, an
+//! attribute's last `.`, a name, a list literal's `[`); compiler-made `+`
+//! (br), `//`, `//=` and `%` (select), a subscript's `[` (a br on a raising
+//! call's error flag), and the `(` of a call off a `for` line (`name(` or
+//! `name[...](`: br; select only on a raising call's error flag), unless the
+//! callee is a measured `@always_inline("nodebug")` function, whose code
+//! carries its callers' locations. In the body of a `try:` of its function,
+//! a br at a call, a subscript or a `+` is a source decision of kind `try`
+//! when it tests a raising call's error flag (arm 0: the call returned,
+//! arm 1: it raised into the handler), and refused otherwise. Anything else
+//! is refused.
 //!
 //! Records. `BRDA:<line>,<col>:<kind>:<n>/<N>,<arm>,<count>`: <kind> is `br`,
-//! `select`, `switch` or `rhs` (the right operand of `and`/`or`); <N> is how
+//! `select`, `switch`, `try` or `rhs` (the right operand of `and`/`or`); <N> is how
 //! many decisions of that kind one copy of a function (an LLVM function, or
 //! one inlined copy of it) holds at that location, <n> which one, in IR
 //! order. Copies are summed arm by arm and must agree on <N> and on where
-//! each one's condition is computed. A branch on the same condition value
-//! with the same weights at the same location as another (a `range(` loop's
+//! each one's condition is computed (or, for an `if`/`elif`/`while`, compute
+//! it inside the same header). A branch on the same condition value
+//! with the same weights at the same location as another (a loop's
 //! two, an `if` both branched on and selected on) is that one. A count of an
 //! instruction that never ran is `-`. Every bool `and`/`or` must have its
 //! right operand counted: derived from the left operand's branch or select
 //! and the branch or select that tests the whole condition (directly, through
-//! the phi of a short-circuit form whose deciding constant arrives from the
-//! br's target for that left value, or through `xor ..., true`).
+//! the phi of a short-circuit form, or through `xor ..., true`), or, for one
+//! that is the right operand of a short-circuit `and`/`or`, from that one's.
+//! The phi of a short-circuit form joins one value arriving under the
+//! branch's target for the deciding left value (the constant, or a reload
+//! of the left operand) and one under the other target.
 //!
 //! Output: per measured file the IR holds code of, `SF:<repository path>`,
 //! its records, `end_of_record` (a file with no decision: no record), files
@@ -64,10 +82,25 @@ const decisionLine = source.decisionLine;
 const hashTail = source.hashTail;
 const placeFile = source.placeFile;
 const nodebugNames = source.nodebugNames;
+const headerSpan = source.headerSpan;
+const inSpan = source.inSpan;
+const ir_mod = @import("cov_branch_ir.zig");
+const Meta = ir_mod.Meta;
+const Fn = ir_mod.Fn;
+const parseMeta = ir_mod.parseMeta;
+const metaId = ir_mod.metaId;
+const operand = ir_mod.operand;
+const core = ir_mod.core;
+const records = @import("cov_branch_records.zig");
+const Record = records.Record;
+const render = records.render;
+const writeOut = records.writeOut;
+const lessStr = records.lessStr;
 
 const usage =
     \\usage: cov_branch_classify --ir <test.ll> --out <file> --map <PREFIX>=<REPO>
-    \\           [--gen <REL>]... [--exclude <PREFIX>]... [--exclude-file <NAME>]...
+    \\           --stdlib <PREFIX> [--gen <REL>]... [--exclude <PREFIX>]...
+    \\           [--exclude-file <NAME>]...
     \\
 ;
 
@@ -80,113 +113,13 @@ fn usageFail(comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(2);
 }
 
-// ---- metadata --------------------------------------------------------------
-
-const Meta = union(enum) {
-    location: struct { line: u64, col: u64, scope: u32, inlined_at: ?u32 },
-    scope: struct { file: ?u32 },
-    file: struct { name: []const u8 },
-    weights: []const u64,
-    not_counts: []const u8, // a !prof node that is not branch_weights of counts
-    other,
-};
-
-/// The value of `key: ` in a metadata node's text: the key must follow '('
-/// or ' ' (so `line` is not `scopeLine`), the value ends at ',' or ')'.
-fn field(s: []const u8, key: []const u8) ?[]const u8 {
-    var from: usize = 0;
-    while (std.mem.indexOfPos(u8, s, from, key)) |at| {
-        from = at + 1;
-        const end = at + key.len;
-        if (at == 0 or (s[at - 1] != '(' and s[at - 1] != ' ')) continue;
-        if (!std.mem.startsWith(u8, s[end..], ": ")) continue;
-        const v0 = end + 2;
-        var v1 = v0;
-        if (v1 < s.len and s[v1] == '"') {
-            v1 = std.mem.indexOfScalarPos(u8, s, v0 + 1, '"') orelse return null;
-            return s[v0 .. v1 + 1];
-        }
-        while (v1 < s.len and s[v1] != ',' and s[v1] != ')') v1 += 1;
-        return s[v0..v1];
-    }
-    return null;
-}
-
-fn ref(s: []const u8, key: []const u8) ?u32 {
-    const v = field(s, key) orelse return null;
-    if (v.len < 2 or v[0] != '!') return null;
-    return std.fmt.parseInt(u32, v[1..], 10) catch null;
-}
-
-fn decimal(s: []const u8, key: []const u8) ?u64 {
-    const v = field(s, key) orelse return null;
-    return std.fmt.parseInt(u64, v, 10) catch null;
-}
-
-fn quoted(alloc: Alloc, s: []const u8, key: []const u8) []const u8 {
-    const v = field(s, key) orelse return "";
-    if (v.len < 2 or v[0] != '"') return "";
-    // LLVM writes a byte it cannot print as \XX; a file name holding one is
-    // kept as written, and refused if it is ever measured.
-    return alloc.dupe(u8, v[1 .. v.len - 1]) catch oom();
-}
-
-fn parseMeta(alloc: Alloc, text: []const u8) Meta {
-    var t = text;
-    if (std.mem.startsWith(u8, t, "distinct ")) t = t["distinct ".len..];
-    if (std.mem.startsWith(u8, t, "!DILocation(")) {
-        const scope = ref(t, "scope") orelse return .other;
-        return .{ .location = .{ .line = decimal(t, "line") orelse 0, .col = decimal(t, "column") orelse 0, .scope = scope, .inlined_at = ref(t, "inlinedAt") } };
-    }
-    if (std.mem.startsWith(u8, t, "!DISubprogram(") or std.mem.startsWith(u8, t, "!DILexicalBlock(") or
-        std.mem.startsWith(u8, t, "!DILexicalBlockFile("))
-        return .{ .scope = .{ .file = ref(t, "file") } };
-    if (std.mem.startsWith(u8, t, "!DIFile(")) {
-        const name = quoted(alloc, t, "filename");
-        const dir = quoted(alloc, t, "directory");
-        if (dir.len == 0 or (name.len > 0 and name[0] == '/')) return .{ .file = .{ .name = name } };
-        return .{ .file = .{ .name = std.mem.concat(alloc, u8, &.{ dir, "/", name }) catch oom() } };
-    }
-    if (std.mem.startsWith(u8, t, "!{!\"branch_weights\"")) {
-        if (!std.mem.endsWith(u8, t, "}")) return .{ .not_counts = t };
-        var ws = std.ArrayList(u64).init(alloc);
-        var it = std.mem.splitSequence(u8, t["!{!\"branch_weights\"".len .. t.len - 1], ", ");
-        _ = it.next(); // the empty piece before the first ", "
-        while (it.next()) |e| {
-            const n = if (std.mem.startsWith(u8, e, "i32 ")) e[4..] else if (std.mem.startsWith(u8, e, "i64 ")) e[4..] else return .{ .not_counts = t };
-            ws.append(std.fmt.parseInt(u64, n, 10) catch return .{ .not_counts = t }) catch oom();
-        }
-        if (ws.items.len < 2) return .{ .not_counts = t };
-        return .{ .weights = ws.items };
-    }
-    return .other;
-}
-
 // ---- branches --------------------------------------------------------------
-
-/// A record: one decision summed over the copies of its function.
-const Record = struct {
-    repo: []const u8,
-    line: u64,
-    col: u64,
-    kind: Kind,
-    ordinal: usize,
-    total: usize, // how many of this kind at this location one copy holds
-    arms: usize,
-    weights: ?[]const u64, // null: never ran
-};
-
-fn recordLess(_: void, a: Record, b: Record) bool {
-    const o = std.mem.order(u8, a.repo, b.repo);
-    if (o != .eq) return o == .lt;
-    if (a.line != b.line) return a.line < b.line;
-    if (a.col != b.col) return a.col < b.col;
-    if (a.kind != b.kind) return @intFromEnum(a.kind) < @intFromEnum(b.kind);
-    return a.ordinal < b.ordinal;
-}
 
 /// What an `and`/`or` still needs before its function ends.
 const Need = enum { none, phi, observe };
+
+/// A position in a measured file; line 0: not known.
+const Pos = struct { line: u64 = 0, col: u64 = 0 };
 
 /// One measured decision of the function being read.
 const Dec = struct {
@@ -200,20 +133,27 @@ const Dec = struct {
     weights: ?[]const u64,
     cond: []const u8,
     prof: ?u32,
-    fp: []const u8, // where its condition is computed in this copy, or "" (elsewhere)
+    fp: Pos, // where its condition is computed in this copy (line 0: elsewhere)
+    block: []const u8, // the block of its instruction
     need: Need = .none,
     // A short-circuit and/or's br: its true and false targets (`%4`).
     targets: [2][]const u8 = .{ "", "" },
+    // Why no phi at its location was taken as its result (an error text),
+    // a phi joining its targets in another shape (rank 2) before one that
+    // does not join them (rank 1).
+    note: []const u8 = "",
+    note_rank: u8 = 0,
     parent: ?usize = null, // rhs: its and/or
     keep: bool = true,
     ordinal: usize = 0,
     total: usize = 0,
 };
 
-/// An SSA value whose outcomes give an and/or's right operand.
-const Await = struct { dec: usize, negated: bool };
+/// An SSA value whose outcomes give an and/or's right operand; for a
+/// short-circuit one's phi, `rhs` is the value its right operand gives it.
+const Await = struct { dec: usize, negated: bool, rhs: []const u8 = "" };
 
-const Copy = struct { key: []const u8, where: []const u8, n: usize, fp: []const []const u8 };
+const Copy = struct { key: []const u8, where: []const u8, file: *File, line: u64, col: u64, n: usize, fp: []const Pos };
 
 const State = struct {
     alloc: Alloc,
@@ -229,10 +169,10 @@ const State = struct {
     derived: usize = 0,
     same: usize = 0,
     function: usize = 0,
-    // The function being read: its decisions, the !dbg of each SSA value's
-    // definition, and the values whose outcomes an and/or awaits.
+    // The function being read: its instructions, its decisions, and the
+    // values whose outcomes an and/or awaits.
+    fun: Fn,
     decs: std.ArrayList(Dec),
-    defs: std.StringHashMap(?u32),
     awaits: std.StringHashMap(Await),
     // Every copy of a function's decisions at one location and kind.
     copies: std.StringHashMap(Copy),
@@ -255,8 +195,8 @@ const State = struct {
 
     const At = struct { file: *File, line: u64, col: u64, inlined_at: ?u32 };
 
-    /// The file and location of metadata id `loc` (a DILocation), or null.
-    fn locate(self: *State, loc: u32) ?At {
+    /// The file name and location of metadata id `loc` (a DILocation).
+    fn where(self: *State, loc: u32) ?struct { name: []const u8, line: u64, col: u64, inlined_at: ?u32 } {
         const m = self.meta.get(loc) orelse return null;
         if (m != .location) return null;
         const s = self.meta.get(m.location.scope) orelse return null;
@@ -264,7 +204,34 @@ const State = struct {
         const fid = s.scope.file orelse return null;
         const f = self.meta.get(fid) orelse return null;
         if (f != .file) return null;
-        return .{ .file = self.fileOf(f.file.name), .line = m.location.line, .col = m.location.col, .inlined_at = m.location.inlined_at };
+        return .{ .name = f.file.name, .line = m.location.line, .col = m.location.col, .inlined_at = m.location.inlined_at };
+    }
+
+    /// The file and location of metadata id `loc` (a DILocation), or null.
+    fn locate(self: *State, loc: u32) ?At {
+        const w = self.where(loc) orelse return null;
+        return .{ .file = self.fileOf(w.name), .line = w.line, .col = w.col, .inlined_at = w.inlined_at };
+    }
+
+    /// Whether location `loc` is inlined at `at`, directly or through
+    /// another inlined call.
+    pub fn inlinedAt(self: *State, loc: u32, at: u32) bool {
+        var l = loc;
+        for (0..32) |_| {
+            const m = self.meta.get(l) orelse return false;
+            if (m != .location) return false;
+            const i = m.location.inlined_at orelse return false;
+            if (i == at) return true;
+            l = i;
+        }
+        return false;
+    }
+
+    /// Whether `loc` is in the standard library (--stdlib), inlined at `at`.
+    pub fn stdlibInlinedAt(self: *State, loc: u32, at: u32) bool {
+        const w = self.where(loc) orelse return false;
+        const i = w.inlined_at orelse return false;
+        return i == at and std.mem.startsWith(u8, w.name, self.opts.stdlib);
     }
 
     fn weightsOf(self: *State, prof: ?u32, arms: usize, what: []const u8) ?[]const u64 {
@@ -289,23 +256,6 @@ const State = struct {
     }
 };
 
-fn afterKey(s: []const u8, key: []const u8) ?[]const u8 {
-    const at = std.mem.indexOf(u8, s, key) orelse return null;
-    return s[at + key.len ..];
-}
-
-fn metaId(s: []const u8, key: []const u8) ?u32 {
-    const rest = afterKey(s, key) orelse return null;
-    var j: usize = 0;
-    while (j < rest.len and std.ascii.isDigit(rest[j])) j += 1;
-    return std.fmt.parseInt(u32, rest[0..j], 10) catch null;
-}
-
-fn operand(s: []const u8) []const u8 {
-    const e = std.mem.indexOf(u8, s, ", ") orelse s.len;
-    return s[0..e];
-}
-
 fn constant(x: []const u8) bool {
     return std.mem.eql(u8, x, "i1 true") or std.mem.eql(u8, x, "i1 false");
 }
@@ -315,11 +265,13 @@ const fmf = [_][]const u8{ "nnan ", "ninf ", "nsz ", "arcp ", "contract ", "afn 
 /// What one branch instruction is: a measured decision (`dec`, an index into
 /// st.decs), or not; its weights when it is in a measured file (`parsed`),
 /// else its `!prof`, read only when an and/or awaits its outcomes.
-const Seen = struct { dec: ?usize = null, weights: ?[]const u64 = null, prof: ?u32 = null, parsed: bool = true };
+/// `decision`: a measured branch of a source decision's class (an and/or's
+/// result is counted only from such a test, never from a call's error check).
+const Seen = struct { dec: ?usize = null, weights: ?[]const u64 = null, prof: ?u32 = null, parsed: bool = true, decision: bool = false };
 
 /// One branch instruction: `kind` with `arms` arms on condition `cond`, its
-/// `!dbg` and `!prof` on `text`.
-fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u8, ln: usize) Seen {
+/// `!dbg` and `!prof` on `text`, in block `blk`.
+fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u8, ln: usize, blk: []const u8) Seen {
     const prof = metaId(text, "!prof !");
     const dbg = metaId(text, "!dbg !") orelse {
         st.err("IR line {d}: a {s} with no !dbg location: no file can be named for it", .{ ln, @tagName(kind) });
@@ -335,41 +287,126 @@ fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u
     }
     at.file.branches += 1;
     const where = std.fmt.allocPrint(st.alloc, "{s}:{d}:{d}", .{ at.file.repo, at.line, at.col }) catch oom();
-    const src: []const u8 = if (at.line >= 1 and at.line <= at.file.lines.len) at.file.lines[@intCast(at.line - 1)] else "";
-    const c = classify(src, at.col);
-    st.counts[@intFromEnum(c.class)] += 1;
+    const in_file = at.line >= 1 and at.line <= at.file.lines.len;
+    const src: []const u8 = if (in_file) at.file.lines[@intCast(at.line - 1)] else "";
+    const code = std.mem.trim(u8, src, " ");
+    const c = if (in_file) classify(st.alloc, at.file.lines, @intCast(at.line - 1), at.col) else classify(st.alloc, &.{""}, 0, at.col);
     const w = st.weightsOf(prof, arms, where);
-    if (c.class == .unknown) {
-        st.err("{s}: a {s} at '{s}' is neither a source decision nor a known compiler-made branch: {s}", .{ where, @tagName(kind), c.token, std.mem.trim(u8, src, " ") });
+    // A token that cannot be read (a call's name behind a triple-quoted
+    // string) is refused before any rule, a String's shapes included: the
+    // call may be of a nodebug function.
+    if (c.refusal.len > 0) {
+        st.counts[@intFromEnum(Class.unknown)] += 1;
+        st.err("{s}: a {s} at '{s}': {s}: {s}", .{ where, @tagName(kind), c.token, c.refusal, code });
         return .{ .weights = w };
     }
-    if (!c.class.takes(kind)) {
-        st.err("{s}: a {s} at '{s}': no {s} has been seen at this token, so what it is is not known: {s}", .{ where, @tagName(kind), c.token, @tagName(kind), std.mem.trim(u8, src, " ") });
-        return .{ .weights = w };
-    }
+    // A call of a measured nodebug function: its own code carries the
+    // call's location, whatever its shape.
     if (c.class == .call) {
-        if (st.nodebug.get(c.token[0 .. c.token.len - 1])) |decl| {
-            st.err("{s}: a {s} at '{s}' may be a decision of {s}, which {s} declares @always_inline(\"nodebug\"): its code carries the call's location, so its decisions cannot be told from the compiler's here: {s}", .{ where, @tagName(kind), c.token, c.token[0 .. c.token.len - 1], decl, std.mem.trim(u8, src, " ") });
+        if (st.nodebug.get(c.callee)) |decl| {
+            st.counts[@intFromEnum(Class.unknown)] += 1;
+            st.err("{s}: a {s} at '{s}' may be a decision of {s}, which {s} declares @always_inline(\"nodebug\"): its code carries the call's location, so its decisions cannot be told from the compiler's here: {s}", .{ where, @tagName(kind), c.token, c.callee, decl, code });
             return .{ .weights = w };
         }
     }
+    // A String's destructor or copy, at any token (README.md, "String
+    // lifetime"); at a decision's token only when the tested instruction is
+    // at the branch's own location, so a decision on such a test stays one.
+    if (kind != .@"switch" and st.fun.stringShape(cond, dbg, c.class.decision(), st)) {
+        st.counts[@intFromEnum(Class.string)] += 1;
+        return .{ .weights = w };
+    }
+    // In a `try:` body of its function, a br at a call, a subscript or a `+`
+    // is a raising call's error check, and a decision: whether the call
+    // raised into the handler. Any other br there is refused: whether its
+    // error reaches the handler is not known.
+    const in_try = if (kind == .br and (c.class == .call or c.class == .subscript or c.class == .plus)) source.inTry(st.alloc, at.file, at.line) else false;
+    if (in_try == null) {
+        st.counts[@intFromEnum(Class.unknown)] += 1;
+        if (!at.file.unbalanced_told) {
+            at.file.unbalanced_told = true;
+            st.err("{s}: the brackets of the file do not balance ({s}): which lines are continuations, and so whether a call is in a try body, cannot be read", .{ at.file.repo, at.file.unbalanced });
+        }
+        return .{ .weights = w };
+    }
+    if (in_try.?) {
+        if (st.fun.errorFlag(cond, dbg, st)) return tryDecision(st, at, w, cond, prof, blk);
+        st.counts[@intFromEnum(Class.unknown)] += 1;
+        st.err("{s}: a br at '{s}' in a try body that is not a raising call's error flag (the i1, or field 0 of the {{ i1, ... }}, a call at this location returns, or a phi of such flags, constants and the code of a callee inlined here): whether it is the call's error check is not known: {s}", .{ where, c.token, code });
+        return .{ .weights = w };
+    }
+    st.counts[@intFromEnum(c.class)] += 1;
+    if (c.class == .unknown) {
+        st.err("{s}: a {s} at '{s}' is neither a source decision nor a known compiler-made branch: {s}", .{ where, @tagName(kind), c.token, code });
+        return .{ .weights = w };
+    }
+    if (!c.class.takes(kind)) {
+        st.err("{s}: a {s} at '{s}': no {s} has been seen at this token, so what it is is not known: {s}", .{ where, @tagName(kind), c.token, @tagName(kind), code });
+        return .{ .weights = w };
+    }
+    // A subscript's branch is a raising `__getitem__`'s error flag; a select
+    // at a call keeps the old value when the call raised.
+    if (c.class == .subscript and !st.fun.raisingFlag(cond, dbg, true)) {
+        st.err("{s}: a br at '[' that is not on a raising call's error flag (the i1, or field 0 of the {{ i1, ... }}, a call at this location returns): what it is is not known: {s}", .{ where, code });
+        return .{ .weights = w };
+    }
+    if (c.class == .call and kind == .select and !st.fun.raisingFlag(cond, dbg, false) and !st.fun.brOn(cond, dbg, prof)) {
+        st.err("{s}: a select at '{s}' that is not on a raising call's error flag (field 0 of the {{ i1, ... }} a call at this location returns, or a value a br at this location with the same weights tests): what it is is not known: {s}", .{ where, c.token, code });
+        return .{ .weights = w };
+    }
     if (!c.class.decision()) return .{ .weights = w };
-    // Where its condition is computed, when in this copy of the function.
-    var fp: []const u8 = "";
-    if (st.defs.get(cond)) |dd| {
-        if (dd) |d| {
-            if (st.locate(d)) |ca| {
-                if (ca.inlined_at == at.inlined_at) fp = std.fmt.allocPrint(st.alloc, "{d}:{d}", .{ ca.line, ca.col }) catch oom();
-            }
+    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = kind, .class = c.class, .arms = arms, .weights = w, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
+    return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = true };
+}
+
+/// Where condition `cond` of a branch at `at` is computed, when in the same
+/// copy of the function and file (line 0: elsewhere).
+fn condPos(st: *State, cond: []const u8, at: State.At) Pos {
+    const dd = st.fun.defs.get(cond) orelse return .{};
+    const d = dd.dbg orelse return .{};
+    const ca = st.locate(d) orelse return .{};
+    if (ca.inlined_at == at.inlined_at and ca.file == at.file) return .{ .line = ca.line, .col = ca.col };
+    return .{};
+}
+
+/// A `try:` body's raising call (README.md, "try"): its br is a decision
+/// whose arm 0 is the call returning (LLVM's false, the second weight) and
+/// arm 1 the call raising into the handler (true, the first).
+fn tryDecision(st: *State, at: State.At, w: ?[]const u64, cond: []const u8, prof: ?u32, blk: []const u8) Seen {
+    st.counts[@intFromEnum(Class.try_)] += 1;
+    var arms: ?[]const u64 = w;
+    if (w) |x| {
+        if (x.len == 2) {
+            const sw = st.alloc.alloc(u64, 2) catch oom();
+            sw[0] = x[1];
+            sw[1] = x[0];
+            arms = sw;
         }
     }
-    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = kind, .class = c.class, .arms = arms, .weights = w, .cond = cond, .prof = prof, .fp = fp }) catch oom();
-    return .{ .dec = st.decs.items.len - 1, .weights = w };
+    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = .@"try", .class = .try_, .arms = 2, .weights = arms, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
+    // No source decision's test: an and/or's result is never counted from it.
+    return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = false };
+}
+
+fn total(w: []const u64) u64 {
+    var n: u64 = 0;
+    for (w) |x| n += x;
+    return n;
+}
+
+fn swapped(st: *State, w: ?[]const u64, negated: bool) ?[]const u64 {
+    const x = w orelse return null;
+    if (!negated or x.len != 2) return x;
+    const sw = st.alloc.alloc(u64, 2) catch oom();
+    sw[0] = x[1];
+    sw[1] = x[0];
+    return sw;
 }
 
 /// The right operand of and/or `d`: s = its own weights (the left operand:
-/// true, false), b = the whole condition's (true, false).
-fn derive(st: *State, di: usize, b_or_null: ?[]const u64) void {
+/// true, false), b = the whole condition's (true, false). A select LLVM
+/// gives no weights ran no time: with a whole of zero counts, never ran.
+fn derive(st: *State, di: usize, b_or_null: ?[]const u64, rhs_val: []const u8) void {
     const p = st.decs.items[di];
     st.decs.items[di].need = .none;
     const where = st.whereOf(p);
@@ -378,11 +415,12 @@ fn derive(st: *State, di: usize, b_or_null: ?[]const u64) void {
     rhs.kind = .rhs;
     rhs.parent = di;
     rhs.arms = 2;
-    if (p.weights == null and b_or_null == null) {
+    const b_ran = if (b_or_null) |b| total(b) > 0 else false;
+    if (p.weights == null and !b_ran) {
         rhs.weights = null;
         st.decs.append(rhs) catch oom();
         st.derived += 1;
-        return;
+        return inner(st, rhs_val, null);
     }
     const s = p.weights orelse return st.err("{s}: the '{s}' never ran but the test of its result did", .{ where, @tagName(p.class)[0 .. @tagName(p.class).len - 1] });
     const b = b_or_null orelse return st.err("{s}: the '{s}' ran but the test of its result never did", .{ where, @tagName(p.class)[0 .. @tagName(p.class).len - 1] });
@@ -403,6 +441,17 @@ fn derive(st: *State, di: usize, b_or_null: ?[]const u64) void {
     rhs.weights = w;
     st.decs.append(rhs) catch oom();
     st.derived += 1;
+    inner(st, rhs_val, w);
+}
+
+/// An and/or `p`'s right operand, `w` its outcomes, may itself be an
+/// and/or no branch tests (`a and not (b and c)`): its whole condition's
+/// outcomes are `w`, swapped through each `xor ..., true`.
+fn inner(st: *State, rhs_val: []const u8, w: ?[]const u64) void {
+    if (rhs_val.len == 0) return;
+    const a = st.awaits.get(rhs_val) orelse return;
+    if (st.decs.items[a.dec].need != .observe) return;
+    derive(st, a.dec, swapped(st, w, a.negated), a.rhs);
 }
 
 /// A branch or select `seen` tested `cond`: the whole condition of an
@@ -410,25 +459,22 @@ fn derive(st: *State, di: usize, b_or_null: ?[]const u64) void {
 fn observe(st: *State, cond: []const u8, seen: Seen) void {
     const a = st.awaits.get(cond) orelse return;
     if (st.decs.items[a.dec].need != .observe) return;
+    if (seen.parsed and !seen.decision) return;
     const w = if (seen.parsed) seen.weights else st.weightsOf(seen.prof, 2, st.whereOf(st.decs.items[a.dec]));
-    var b = w;
-    if (a.negated) {
-        if (w) |x| {
-            if (x.len == 2) {
-                const sw = st.alloc.alloc(u64, 2) catch oom();
-                sw[0] = x[1];
-                sw[1] = x[0];
-                b = sw;
-            }
-        }
-    }
-    derive(st, a.dec, b);
+    derive(st, a.dec, swapped(st, w, a.negated), a.rhs);
 }
 
-/// The phi of a short-circuit and/or: `%r = phi i1 [ x, %a ], [ y, %b ]` at
-/// the token of an and/or `br` of this copy, one of x and y the constant that
-/// decides it (`true` for or, `false` for and), arriving from the br's target
-/// for that value of the left operand (true for or, false for and).
+/// A phi at the token of an and/or `br` of this copy: a result of it when
+/// it joins one value arriving under the br's true target and one under its
+/// false target (`under`: every path from the branch to the incoming block
+/// passes through that target). A non-`i1` one is a value and/or's (no
+/// right operand decides). An `i1` one is a candidate when the value that
+/// decides (`true` for or, `false` for and) arrives under the target the
+/// left operand takes for it (true for or, false for and), as that constant
+/// or as a reload of the left operand (README.md, "and, or"); the first
+/// candidate a source decision tests is the result. Others (a raising right
+/// operand's error flag, joined the same way) are left: a phi that is no
+/// candidate is refused only when none is.
 fn phi(st: *State, t: []const u8, ln: usize) void {
     const eq = std.mem.indexOf(u8, t, " = phi ") orelse return;
     const dbg = metaId(t, "!dbg !") orelse return;
@@ -438,17 +484,14 @@ fn phi(st: *State, t: []const u8, ln: usize) void {
     const di = while (i > 0) {
         i -= 1;
         const d = st.decs.items[i];
-        if (d.need == .phi and d.kind == .br and d.file == at.file and d.line == at.line and d.col == at.col and d.inl == at.inlined_at) break i;
+        if ((d.need == .phi or d.need == .observe) and d.kind == .br and d.targets[0].len > 0 and d.file == at.file and d.line == at.line and d.col == at.col and d.inl == at.inlined_at) break i;
     } else return;
     const d = st.decs.items[di];
     const rest = t[eq + " = phi ".len ..];
-    if (!std.mem.startsWith(u8, rest, "i1 ")) {
-        st.decs.items[di].need = .none; // a value and/or: no right operand decides
-        return;
-    }
     var ins = std.ArrayList([]const u8).init(st.alloc);
     var from = std.ArrayList([]const u8).init(st.alloc);
-    var it = std.mem.splitSequence(u8, rest["i1 ".len..], "], ");
+    const ty_end = std.mem.indexOf(u8, rest, " [") orelse return;
+    var it = std.mem.splitSequence(u8, core(rest[ty_end + 1 ..]), "], ");
     while (it.next()) |piece| {
         const p = std.mem.trim(u8, piece, " ");
         if (p.len == 0 or p[0] != '[') break;
@@ -458,26 +501,50 @@ fn phi(st: *State, t: []const u8, ln: usize) void {
         from.append(if (after.len > v.len + 2) std.mem.trim(u8, after[v.len + 2 ..], " ]") else "") catch oom();
     }
     const word = @tagName(d.class)[0 .. @tagName(d.class).len - 1];
-    const k: []const u8 = if (d.class == .or_) "true" else "false";
-    const ok = ins.items.len == 2 and ((std.mem.eql(u8, ins.items[0], k) and !isConst(ins.items[1])) or (std.mem.eql(u8, ins.items[1], k) and !isConst(ins.items[0])));
-    if (!ok) return st.err("{s}: IR line {d}: the phi at this '{s}' is not that of a short-circuit one (two incoming values, one '{s}'): {s}", .{ st.whereOf(d), ln, word, k, t });
-    // The constant decides only if it arrives from the target the left
-    // operand's deciding value takes: `or` is true when its left operand is
-    // (the branch's true target), `and` false when its left operand is (the
-    // false target). From the other target the phi is of another expression
-    // (`not a or b`), and the right operand derived from it would be wrong.
-    // Only the block the branch itself jumps to is read: the constant
-    // arriving straight from the branch's own block (no forwarding block) or
-    // through a chain of them is refused, as no such IR has been seen.
-    const blk = if (std.mem.eql(u8, ins.items[0], k)) from.items[0] else from.items[1];
     const want: usize = if (d.class == .or_) 0 else 1;
     const arm = [2][]const u8{ "true", "false" };
-    if (!std.mem.eql(u8, blk, d.targets[want])) {
-        if (std.mem.eql(u8, blk, d.targets[1 - want])) return st.err("{s}: IR line {d}: the '{s}' of the phi at this '{s}' arrives from {s}, the branch's {s} target, not its {s} target ({s}): the right operand cannot be derived: {s}", .{ st.whereOf(d), ln, k, word, blk, arm[1 - want], arm[want], d.targets[want], t });
-        return st.err("{s}: IR line {d}: the '{s}' of the phi at this '{s}' arrives from {s}, which is not one of the branch's targets ({s}, {s}): the right operand cannot be derived: {s}", .{ st.whereOf(d), ln, k, word, blk, d.targets[0], d.targets[1], t });
+    const tt = d.targets[want];
+    const ot = d.targets[1 - want];
+    var ti: ?usize = null;
+    if (ins.items.len == 2) {
+        for (0..2) |x| {
+            if (st.fun.under(from.items[x], tt, d.block) and st.fun.under(from.items[1 - x], ot, d.block)) ti = x;
+        }
+    }
+    const k = ti orelse {
+        noteOn(st, di, 1, std.fmt.allocPrint(st.alloc, "{s}: a short-circuit '{s}' (a br) whose result is not a phi at its location: its right operand cannot be counted (IR line {d}: the phi at this '{s}' does not join one value arriving under the branch's {s} target {s} and one under its {s} target {s}: {s})", .{ st.whereOf(d), word, ln, word, arm[want], tt, arm[1 - want], ot, t }) catch oom());
+        return;
+    };
+    if (!std.mem.startsWith(u8, rest, "i1 ")) {
+        if (d.need == .phi) st.decs.items[di].need = .none; // a value and/or: no right operand decides
+        return;
+    }
+    const kc: []const u8 = if (d.class == .or_) "true" else "false";
+    const v = ins.items[k];
+    const other = ins.items[1 - k];
+    const deciding = std.mem.eql(u8, v, kc) or st.fun.reload(v, d.cond, from.items[k]);
+    if (!deciding or isConst(other)) {
+        // The constant arriving under the other target is the phi of
+        // another expression (`not a or b`): the right operand derived
+        // from it would be wrong.
+        const msg = if (std.mem.eql(u8, other, kc) and !isConst(v))
+            std.fmt.allocPrint(st.alloc, "{s}: IR line {d}: the '{s}' of the phi at this '{s}' arrives from {s}, the branch's {s} target, not its {s} target ({s}): the right operand cannot be derived: {s}", .{ st.whereOf(d), ln, kc, word, from.items[1 - k], arm[1 - want], arm[want], tt, t }) catch oom()
+        else
+            std.fmt.allocPrint(st.alloc, "{s}: IR line {d}: the phi at this '{s}' is not that of a short-circuit one (the value arriving under the branch's {s} target {s} is '{s}', not '{s}' or a reload of the left operand; the other is not a constant): {s}", .{ st.whereOf(d), ln, word, arm[want], tt, v, kc, t }) catch oom();
+        noteOn(st, di, 2, msg);
+        return;
     }
     st.decs.items[di].need = .observe;
-    st.awaits.put(t[0..eq], .{ .dec = di, .negated = false }) catch oom();
+    st.awaits.put(t[0..eq], .{ .dec = di, .negated = false, .rhs = other }) catch oom();
+}
+
+/// Keeps `msg` as why and/or `di` has no result phi, unless one of a higher
+/// rank (or an earlier one of its rank) is kept.
+fn noteOn(st: *State, di: usize, rank: u8, msg: []const u8) void {
+    const d = &st.decs.items[di];
+    if (d.need != .phi or rank <= d.note_rank) return;
+    d.note = msg;
+    d.note_rank = rank;
 }
 
 /// The two targets of `br i1 %c, label %t, label %f, ...`: `%t`, `%f`
@@ -505,7 +572,11 @@ fn endFunction(st: *State) void {
         if (d.need == .none) continue;
         const word = @tagName(d.class)[0 .. @tagName(d.class).len - 1];
         if (d.need == .phi) {
-            st.err("{s}: a short-circuit '{s}' (a br) whose result is not a phi at its location: its right operand cannot be counted", .{ st.whereOf(d), word });
+            if (d.note.len > 0) {
+                st.err("{s}", .{d.note});
+            } else {
+                st.err("{s}: a short-circuit '{s}' (a br) whose result is not a phi at its location: its right operand cannot be counted", .{ st.whereOf(d), word });
+            }
         } else {
             st.err("{s}: the right operand of this '{s}' is not counted: its result is not tested by a branch or select in this function (it is returned, stored or passed on), so when the right operand decides cannot be told", .{ st.whereOf(d), word });
         }
@@ -518,7 +589,7 @@ fn endFunction(st: *State) void {
             if (!b.keep or b.kind == .rhs or b.class != a.class) continue;
             if (b.file != a.file or b.line != a.line or b.col != a.col or b.inl != a.inl or !std.mem.eql(u8, b.cond, a.cond)) continue;
             if ((a.prof == null) != (b.prof == null) or (a.prof != null and a.prof.? != b.prof.?)) continue;
-            const rank = [_]u8{ 0, 3, 2, 1 }; // br, rhs, select, switch
+            const rank = [_]u8{ 0, 3, 2, 1, 0 }; // br, rhs, select, switch, try
             if (rank[@intFromEnum(b.kind)] < rank[@intFromEnum(a.kind)]) {
                 a.keep = false;
                 b.keep = true;
@@ -538,13 +609,13 @@ fn endFunction(st: *State) void {
         if (!slot.found_existing) {
             slot.value_ptr.* = std.ArrayList(usize).init(st.alloc);
             order.append(copy) catch oom();
-            st.copies.put(copy, .{ .key = key, .where = std.fmt.allocPrint(st.alloc, "{s} ({s})", .{ st.whereOf(d), @tagName(d.kind) }) catch oom(), .n = 0, .fp = &.{} }) catch oom();
+            st.copies.put(copy, .{ .key = key, .where = std.fmt.allocPrint(st.alloc, "{s} ({s})", .{ st.whereOf(d), @tagName(d.kind) }) catch oom(), .file = d.file, .line = d.line, .col = d.col, .n = 0, .fp = &.{} }) catch oom();
         }
         slot.value_ptr.append(i) catch oom();
     }
     for (order.items) |copy| {
         const idx = per.get(copy).?.items;
-        var fp = st.alloc.alloc([]const u8, idx.len) catch oom();
+        var fp = st.alloc.alloc(Pos, idx.len) catch oom();
         for (idx, 0..) |i, n| {
             ds[i].ordinal = n;
             ds[i].total = idx.len;
@@ -564,35 +635,22 @@ fn endFunction(st: *State) void {
         st.records.append(r) catch oom();
     }
     st.decs.clearRetainingCapacity();
-    st.defs.clearRetainingCapacity();
     st.awaits.clearRetainingCapacity();
 }
 
-fn scan(st: *State, ir: []const u8) void {
-    var in_fn = false;
+/// One function, its lines read into st.fun: its branches and phis, in
+/// order.
+fn walk(st: *State) void {
     var sw_cases: ?usize = null;
     var sw_cond: []const u8 = "";
-    var it = std.mem.splitScalar(u8, ir, '\n');
-    var ln: usize = 0;
-    while (it.next()) |line| {
-        ln += 1;
-        if (std.mem.startsWith(u8, line, "define ")) {
-            in_fn = true;
-            st.function += 1;
-            continue;
-        }
-        if (!in_fn) continue;
-        if (std.mem.eql(u8, line, "}")) {
-            in_fn = false;
-            endFunction(st);
-            continue;
-        }
-        if (!std.mem.startsWith(u8, line, "  ")) continue; // a label or a blank line
-        const t = std.mem.trimLeft(u8, line, " ");
+    for (st.fun.insts.items) |li| {
+        const t = li.text;
+        const ln = li.ln;
+        const blk = st.fun.blocks.items[li.block].name;
         if (sw_cases) |n| {
             if (std.mem.startsWith(u8, t, "]")) {
                 sw_cases = null;
-                _ = branch(st, .@"switch", n + 1, sw_cond, t, ln);
+                _ = branch(st, .@"switch", n + 1, sw_cond, t, ln, blk);
             } else if (std.mem.indexOf(u8, t, ", label ") != null) {
                 sw_cases = n + 1;
             }
@@ -605,13 +663,10 @@ fn scan(st: *State, ir: []const u8) void {
             }
         }
         const eq = std.mem.indexOf(u8, t, " = ");
-        if (eq) |e| {
-            if (t[0] == '%') st.defs.put(t[0..e], dbg) catch oom();
-        }
         const body = if (eq) |e| t[e + 3 ..] else t;
         if (std.mem.startsWith(u8, t, "br i1 ")) {
             const cond = operand(t["br i1 ".len..]);
-            const r = branch(st, .br, 2, cond, t, ln);
+            const r = branch(st, .br, 2, cond, t, ln, blk);
             observe(st, cond, r);
             if (r.dec) |di| {
                 const c = st.decs.items[di].class;
@@ -637,7 +692,7 @@ fn scan(st: *State, ir: []const u8) void {
             const ops = body["xor i1 ".len..];
             const x = operand(ops);
             if (ops.len > x.len + 2 and std.mem.startsWith(u8, ops[x.len + 2 ..], "true")) {
-                if (st.awaits.get(x)) |a| st.awaits.put(t[0..eq.?], .{ .dec = a.dec, .negated = !a.negated }) catch oom();
+                if (st.awaits.get(x)) |a| st.awaits.put(t[0..eq.?], .{ .dec = a.dec, .negated = !a.negated, .rhs = a.rhs }) catch oom();
             }
         } else if (std.mem.startsWith(u8, body, "select ")) {
             var rest = body["select ".len..];
@@ -654,7 +709,7 @@ fn scan(st: *State, ir: []const u8) void {
             if (!std.mem.startsWith(u8, rest, "i1 ")) continue; // a vector select: no branch
             const ops = rest["i1 ".len..];
             const cond = operand(ops);
-            const r = branch(st, .select, 2, cond, t, ln);
+            const r = branch(st, .select, 2, cond, t, ln, blk);
             observe(st, cond, r);
             const di = r.dec orelse continue;
             const c = st.decs.items[di].class;
@@ -675,87 +730,32 @@ fn scan(st: *State, ir: []const u8) void {
     }
 }
 
-// ---- output ----------------------------------------------------------------
-
-fn pathLess(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.order(u8, a, b) == .lt;
-}
-
-/// Writes `SF:` and `end_of_record` for each path of `coded` (sorted) from
-/// `p.*` on that sorts before `upto` (every one left when null), and steps
-/// past `upto` itself: a measured file the IR holds code of, with no record.
-fn writeNoRecord(w: anytype, coded: []const []const u8, p: *usize, upto: ?[]const u8) void {
-    while (p.* < coded.len) {
-        if (upto) |u| {
-            switch (std.mem.order(u8, coded[p.*], u)) {
-                .gt => return,
-                .eq => {
-                    p.* += 1;
-                    return;
-                },
-                .lt => {},
-            }
+/// Each function of the module: its lines indexed (st.fun), then walked.
+fn scan(st: *State, ir: []const u8) void {
+    var in_fn = false;
+    var it = std.mem.splitScalar(u8, ir, '\n');
+    var ln: usize = 0;
+    while (it.next()) |line| {
+        ln += 1;
+        if (std.mem.startsWith(u8, line, "define ")) {
+            in_fn = true;
+            st.function += 1;
+            st.fun.begin();
+            continue;
         }
-        w.print("SF:{s}\nend_of_record\n", .{coded[p.*]}) catch oom();
-        p.* += 1;
+        if (!in_fn) continue;
+        if (std.mem.eql(u8, line, "}")) {
+            in_fn = false;
+            walk(st);
+            endFunction(st);
+            continue;
+        }
+        if (std.mem.startsWith(u8, line, "  ")) {
+            st.fun.inst(std.mem.trimLeft(u8, line, " "), ln);
+        } else {
+            st.fun.label(line);
+        }
     }
-}
-
-/// The output: the records of `recs`, per file, and each measured file of
-/// `coded` (the repository paths of the measured files the IR holds code
-/// of) with no record named all the same, files sorted bytewise.
-fn render(alloc: Alloc, recs: []Record, coded: [][]const u8) []const u8 {
-    std.mem.sort(Record, recs, {}, recordLess);
-    std.mem.sort([]const u8, coded, {}, pathLess);
-    var p: usize = 0;
-    var buf = std.ArrayList(u8).init(alloc);
-    const w = buf.writer();
-    var i: usize = 0;
-    var cur: ?[]const u8 = null;
-    while (i < recs.len) {
-        // Sum the copies of one (file, line, column, kind, ordinal).
-        var j = i + 1;
-        while (j < recs.len and !recordLess({}, recs[i], recs[j]) and !recordLess({}, recs[j], recs[i])) j += 1;
-        const n = recs[i].arms;
-        var ran = false;
-        for (recs[i..j]) |r| {
-            if (r.arms != n) fail("{s}:{d}:{d}: two instances of one {s} have {d} and {d} arms; nothing written", .{ r.repo, r.line, r.col, @tagName(r.kind), n, r.arms });
-            if (r.weights != null) ran = true;
-        }
-        if (cur == null or !std.mem.eql(u8, cur.?, recs[i].repo)) {
-            if (cur != null) w.writeAll("end_of_record\n") catch oom();
-            writeNoRecord(w, coded, &p, recs[i].repo);
-            cur = recs[i].repo;
-            w.print("SF:{s}\n", .{recs[i].repo}) catch oom();
-        }
-        for (0..n) |arm| {
-            w.print("BRDA:{d},{d}:{s}:{d}/{d},{d},", .{ recs[i].line, recs[i].col, @tagName(recs[i].kind), recs[i].ordinal, recs[i].total, arm }) catch oom();
-            if (!ran) {
-                w.writeAll("-\n") catch oom();
-            } else {
-                var sum: u64 = 0;
-                for (recs[i..j]) |r| {
-                    if (r.weights) |x| sum += if (arm < x.len) x[arm] else 0;
-                }
-                w.print("{d}\n", .{sum}) catch oom();
-            }
-        }
-        i = j;
-    }
-    if (cur != null) w.writeAll("end_of_record\n") catch oom();
-    writeNoRecord(w, coded, &p, null);
-    return buf.items;
-}
-
-fn writeOut(path: []const u8, bytes: []const u8) !void {
-    var af = try std.fs.cwd().atomicFile(path, .{});
-    defer af.deinit();
-    try af.file.writeAll(bytes);
-    try af.finish();
-}
-
-fn lessStr(_: void, x: []const u8, y: []const u8) bool {
-    return std.mem.lessThan(u8, x, y);
 }
 
 // ---- main ------------------------------------------------------------------
@@ -768,6 +768,7 @@ pub fn main() void {
     var ir_path: ?[]const u8 = null;
     var out_path: ?[]const u8 = null;
     var map: ?[]const u8 = null;
+    var stdlib: ?[]const u8 = null;
     var gens = std.ArrayList([]const u8).init(alloc);
     var excludes = std.ArrayList([]const u8).init(alloc);
     var exclude_files = std.ArrayList([]const u8).init(alloc);
@@ -785,6 +786,10 @@ pub fn main() void {
         } else if (std.mem.eql(u8, flag, "--map")) {
             if (map != null) usageFail("--map given twice", .{});
             map = v;
+        } else if (std.mem.eql(u8, flag, "--stdlib")) {
+            if (stdlib != null) usageFail("--stdlib given twice", .{});
+            if (v.len < 2 or v[v.len - 1] != '/') usageFail("--stdlib '{s}' must end with '/'", .{v});
+            stdlib = v;
         } else if (std.mem.eql(u8, flag, "--gen")) {
             if (v.len == 0 or v[0] == '/') usageFail("--gen '{s}' must be a relative path", .{v});
             gens.append(v) catch oom();
@@ -801,6 +806,7 @@ pub fn main() void {
     const in_file = ir_path orelse usageFail("--ir is required", .{});
     const out_file = out_path orelse usageFail("--out is required", .{});
     const m = map orelse usageFail("--map is required", .{});
+    const std_prefix = stdlib orelse usageFail("--stdlib is required", .{});
     const eq = std.mem.indexOfScalar(u8, m, '=') orelse usageFail("--map '{s}' is not PREFIX=REPO", .{m});
     const opts = Opts{
         .prefix = m[0..eq],
@@ -809,6 +815,7 @@ pub fn main() void {
         .gens = gens.items,
         .excludes = excludes.items,
         .exclude_files = exclude_files.items,
+        .stdlib = std_prefix,
     };
     if (opts.prefix.len < 2 or opts.prefix[opts.prefix.len - 1] != '/') usageFail("--map PREFIX '{s}' must end with '/'", .{opts.prefix});
     if (opts.repo.len > 0 and (opts.repo[0] == '/' or opts.repo[opts.repo.len - 1] != '/')) usageFail("--map REPO '{s}' must be empty or relative and end with '/'", .{opts.repo});
@@ -830,8 +837,8 @@ pub fn main() void {
         .records = std.ArrayList(Record).init(alloc),
         .errors = std.ArrayList([]const u8).init(alloc),
         .unmapped = std.StringHashMap(void).init(alloc),
+        .fun = Fn.init(alloc),
         .decs = std.ArrayList(Dec).init(alloc),
-        .defs = std.StringHashMap(?u32).init(alloc),
         .awaits = std.StringHashMap(Await).init(alloc),
         .copies = std.StringHashMap(Copy).init(alloc),
     };
@@ -864,24 +871,30 @@ pub fn main() void {
 
     // Every copy of a function must hold as many decisions of a kind at a
     // location as the others, with their conditions computed at the same
-    // places (where both are known), or the n-th of one is not another's.
-    const First = struct { n: usize, fp: [][]const u8 };
+    // places (where both are known; for an `if`, `elif` or `while`, inside
+    // its header: a copy may have folded part of the condition away), or
+    // the n-th of one is not another's.
+    const First = struct { n: usize, fp: []Pos };
     var per_key = std.StringHashMap(First).init(alloc);
     var ci = st.copies.valueIterator();
     while (ci.next()) |c| {
         const slot = per_key.getOrPut(c.key) catch oom();
         if (!slot.found_existing) {
-            slot.value_ptr.* = .{ .n = c.n, .fp = alloc.dupe([]const u8, c.fp) catch oom() };
+            slot.value_ptr.* = .{ .n = c.n, .fp = alloc.dupe(Pos, c.fp) catch oom() };
         } else if (slot.value_ptr.n != c.n) {
             st.err("{s}: one copy of its function has {d} branch(es) of this kind here and another {d}: they cannot be matched to be summed", .{ c.where, @min(slot.value_ptr.n, c.n), @max(slot.value_ptr.n, c.n) });
             slot.value_ptr.n = c.n;
-            slot.value_ptr.fp = alloc.dupe([]const u8, c.fp) catch oom();
+            slot.value_ptr.fp = alloc.dupe(Pos, c.fp) catch oom();
         } else {
+            const span = headerSpan(c.file.lines, c.line, c.col);
             for (slot.value_ptr.fp, c.fp, 0..) |*x, y, n| {
-                if (x.len == 0) {
+                if (x.line == 0) {
                     x.* = y;
-                } else if (y.len > 0 and !std.mem.eql(u8, x.*, y)) {
-                    st.err("{s}: two copies of its function hold different branches here: the condition of the one numbered {d} is computed at {s} in one and at {s} in another", .{ c.where, n, x.*, y });
+                } else if (y.line > 0 and (x.line != y.line or x.col != y.col)) {
+                    if (span) |h| {
+                        if (inSpan(h, x.line, x.col) and inSpan(h, y.line, y.col)) continue;
+                    }
+                    st.err("{s}: two copies of its function hold different branches here: the condition of the one numbered {d} is computed at {d}:{d} in one and at {d}:{d} in another", .{ c.where, n, x.line, x.col, y.line, y.col });
                 }
             }
         }
@@ -932,10 +945,13 @@ pub fn main() void {
         const c: Class = @enumFromInt(f.value);
         if (c.decision()) decisions += st.counts[f.value] else if (c != .unknown) made += st.counts[f.value];
     }
-    std.debug.print("cov_branch_classify: {d} measured file(s): {d} source decision(s) (if {d}, elif {d}, while {d}, and {d}, or {d}, for-range( {d}; {d} right operand(s) derived, {d} a second test of one decision), {d} compiler-made (+ {d}, call( {d}, // {d}, % {d}) not written; {d} branch(es) outside the measured sources\n", .{
-        measured_files,                        decisions,                                  st.counts[@intFromEnum(Class.if_)],     st.counts[@intFromEnum(Class.elif)],
-        st.counts[@intFromEnum(Class.while_)], st.counts[@intFromEnum(Class.and_)],        st.counts[@intFromEnum(Class.or_)],     st.counts[@intFromEnum(Class.for_range)],
-        st.derived,                            st.same,                                    made,                                   st.counts[@intFromEnum(Class.plus)],
-        st.counts[@intFromEnum(Class.call)],   st.counts[@intFromEnum(Class.floordiv)],    st.counts[@intFromEnum(Class.mod)],     st.outside,
+    const cn = st.counts;
+    std.debug.print("cov_branch_classify: {d} measured file(s): {d} source decision(s) (if {d}, elif {d}, while {d}, and {d}, or {d}, for-in {d}, try {d}; {d} right operand(s) derived, {d} a second test of one decision), {d} compiler-made (String lifetime {d}, + {d}, call( {d}, [ {d}, // {d}, % {d}) not written; {d} branch(es) outside the measured sources\n", .{
+        measured_files,                      decisions,                              cn[@intFromEnum(Class.if_)],       cn[@intFromEnum(Class.elif)],
+        cn[@intFromEnum(Class.while_)],       cn[@intFromEnum(Class.and_)],            cn[@intFromEnum(Class.or_)],       cn[@intFromEnum(Class.for_in)],
+        cn[@intFromEnum(Class.try_)],
+        st.derived,                          st.same,                                made,                             cn[@intFromEnum(Class.string)],
+        cn[@intFromEnum(Class.plus)],         cn[@intFromEnum(Class.call)],            cn[@intFromEnum(Class.subscript)], cn[@intFromEnum(Class.floordiv)],
+        cn[@intFromEnum(Class.mod)],          st.outside,
     });
 }

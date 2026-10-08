@@ -16,11 +16,13 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # komira_http_core Connector it is given. The host is `email.<region>` and
 # the signing name `ses`, both from the ruleset and the model.
 #
-# `operations` is a sending domain's onboarding and its sends: an identity
-# created (Easy DKIM), read back for its DKIM tokens and verification
-# status, bound to a configuration set, and deleted; a configuration set
-# created; a message sent. An operation joins the list with its own rows in
-# the tests below.
+# `operations` is a sending domain's onboarding, its sends and its
+# removal: an identity created (Easy DKIM), read back for its DKIM tokens
+# and verification status, given a custom MAIL FROM domain, bound to a
+# configuration set, and deleted; a configuration set created, given an
+# event destination (bounces and complaints to an SNS topic), and deleted;
+# a message sent. An operation joins the list with its own rows in the
+# tests below.
 #
 # SendEmail with `EndpointId` goes to a multi-region endpoint, which the
 # ruleset signs with SigV4a. komira_aws_core signs SigV4 only, so such a
@@ -56,10 +58,13 @@ mojo_aws_client(
     model_sha256 = _M.sha256,
     operations = [
         "CreateConfigurationSet",
+        "CreateConfigurationSetEventDestination",
         "CreateEmailIdentity",
+        "DeleteConfigurationSet",
         "DeleteEmailIdentity",
         "GetEmailIdentity",
         "PutEmailIdentityConfigurationSetAttributes",
+        "PutEmailIdentityMailFromAttributes",
         "SendEmail",
     ],
     partitions = _M.partitions,
