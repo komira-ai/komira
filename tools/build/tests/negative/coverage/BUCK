@@ -171,6 +171,37 @@ mojo_library(
     test_srcs = ["tests/test_lost.mojo"],
 )
 
+# Test 43. cov_run.sh's refusal of a kcov argument too long for kcov (2048
+# bytes or more: kcov reads each as a path and fails "Too long string!"),
+# made to trip with a limit of 64 bytes, which the --include-path argument
+# passes: the run fails before kcov starts, naming the argument. RED:
+# tests//negative/coverage:longarg[coverage][tests][test_lost]
+cov_plant(
+    name = "longarg_run_sh",
+    expr = "s|^KCOV_ARG_MAX=2047$|KCOV_ARG_MAX=64|",
+    out = "cov_run.sh",
+    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+)
+
+cov_run_dir(
+    name = "longarg_run",
+    exec_compatible_with = LINUX_X86_64,
+    script = ":longarg_run_sh",
+)
+
+mojo_library(
+    name = "longarg",
+    srcs = [
+        "lostlib/__init__.mojo",
+        "lostlib/value.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_run = ":longarg_run",
+    import_name = "lostlib",
+    test_srcs = ["tests/test_lost.mojo"],
+)
+
 # Test 43. The exit status of a coverage run is the test's: not that of the
 # last process kcov traced, and 128+N for a test killed by signal N, as the
 # release gate reports it. GREEN: tests//negative/coverage:orphan and its
