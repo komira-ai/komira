@@ -1,3 +1,6 @@
+// Why Zig, not Rust: build tools are Rust (tools/build/README.md), but the
+// Rust toolchain unpacks its own conda libraries with this tool
+// (toolchains/rust/BUCK `rustc_libs`), so a Rust version would be a build cycle.
 //! conda_unpack: extract the Mojo compiler closure out of a `.conda` package.
 //!
 //! usage: conda_unpack <package.conda> <out_dir> [--keep <member>]...

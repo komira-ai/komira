@@ -49,6 +49,27 @@ another. Every file loads the rules as `@komira//tools/build/mojo:...`, and the
 `tests` cell has its own fixtures rather than reusing
 [`examples/`](examples/).
 
+## Languages for build tools
+
+Build tools are written in Rust. Zig is kept only where it is truly needed;
+the exceptions are:
+
+- [`coverage/kcov/cov_zig.zig`](coverage/kcov/cov_zig.zig) and
+  [`mojo/tools/zig_cc_launcher.zig`](mojo/tools/zig_cc_launcher.zig): the C
+  compiler and linker shims, which wrap `zig cc` itself.
+- [`mojo/tools/conda_unpack.zig`](mojo/tools/conda_unpack.zig): the bootstrap
+  tool. The Rust toolchain unpacks its conda libraries with it (`rustc_libs`
+  in [`toolchains/rust/BUCK`](toolchains/rust/BUCK) sets
+  `unpacker = "komira//tools/build/toolchains:conda_unpack"`), so a Rust
+  version would be a build cycle.
+- [`tests/negative/coverage/kcov_refused.zig`](tests/negative/coverage/kcov_refused.zig)
+  and [`noop_relocate.zig`](tests/negative/coverage/noop_relocate.zig): two
+  tiny negative-test fixtures.
+
+`zig cc` stays the hermetic C/C++ compiler, linker and glibc-floor toolchain.
+Other `.zig` sources in this tree predate the policy and are not exceptions
+to it.
+
 ## Using komira from another repository
 
 A repository builds Mojo with komira's rules by naming komira as its `komira`
