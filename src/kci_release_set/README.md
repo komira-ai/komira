@@ -83,8 +83,10 @@ try:
     _ = parse_release_manifest(tampered, "release.json")
 except e:
     message = String(e)
-assert_true(message.startswith("release manifest 'release.json': 'set_hash' c5e97905"))
-assert_true("is not the hash of its revision, platform and members" in message)
+assert_true(message.startswith(
+    "release manifest 'release.json': 'set_hash' " + r.set_hash
+    + " is not the hash of its revision, platform and members ("
+), message)
 ```
 
 A package's `metadata.json` is read and checked, and its requirements name
