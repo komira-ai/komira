@@ -41,6 +41,9 @@ mojo_library(
         "tests/test_platform_layout.mojo",
         # the result document: byte-exact render, parse(render(x)) == x, refusals
         "tests/test_result_document.mojo",
+        # the deploy keys of a step row: every key round-trips, a landed node
+        # under FAILED or REFUSED and a top-level deploy key are refused
+        "tests/test_result_deploy_keys.mojo",
     ],
     visibility = ["PUBLIC"],
 )
