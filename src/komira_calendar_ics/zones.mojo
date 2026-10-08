@@ -2,10 +2,10 @@
 # zones.mojo -- where the import and the export get time zone rules.
 # =============================================================================
 #
-# A `ZoneSource` gives the `komira_tz.Zone` of an IANA name, or raises when it
+# A `ZoneSource` gives the `komira_datetime.Zone` of an IANA name, or raises when it
 # knows none. Two are here: `ZoneinfoDirectory` reads a zoneinfo directory
-# the caller names (`komira_tz.load_zone`), and `ZoneTable` holds zones the
-# caller built. The name `UTC` is always UTC (`komira_tz.utc_zone`), whatever
+# the caller names (`komira_datetime.load_zone`), and `ZoneTable` holds zones the
+# caller built. The name `UTC` is always UTC (`komira_datetime.utc_zone`), whatever
 # the source holds.
 #
 # A TZID is read as an IANA name first. When the source knows no zone of
@@ -15,7 +15,7 @@
 # refused: an unknown TZID is never read as UTC or as floating time.
 # =============================================================================
 
-from komira_tz import Zone, load_zone, utc_zone
+from komira_datetime import Zone, load_zone, utc_zone
 
 
 trait ZoneSource:

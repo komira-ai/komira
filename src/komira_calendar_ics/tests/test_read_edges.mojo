@@ -15,7 +15,7 @@
 from std.testing import assert_equal
 
 from komira_proto_codec import encode_json
-from komira_tz import posix_zone
+from komira_datetime import posix_zone
 from komira_calendar_ics import IcsImport, IcsReport, ZoneTable, read_ics
 
 

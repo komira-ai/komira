@@ -1,5 +1,5 @@
 # =============================================================================
-# database.mojo -- a zone by IANA name from a zoneinfo directory
+# zoneinfo.mojo -- a zone by IANA name from a zoneinfo directory
 # =============================================================================
 #
 # A zoneinfo directory holds one TZif file per zone name, at the name's path

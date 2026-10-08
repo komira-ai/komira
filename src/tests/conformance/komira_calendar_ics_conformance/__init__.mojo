@@ -1,7 +1,7 @@
 """Test-only helpers of komira_calendar_ics_conformance: the zone tables the
 vectors are read with, a vector's line breaks, and a report as text.
 
-The zones are built from POSIX TZ strings (`komira_tz.posix_zone`) with the
+The zones are built from POSIX TZ strings (`komira_datetime.posix_zone`) with the
 rules in force on the vectors' dates: `rfc_zones` has New York with the
 rules of 1987 to 2006 (DST from the first Sunday of April to the last Sunday
 of October), the rules RFC 5545's 1990s examples were written under;
@@ -10,7 +10,7 @@ of October), the rules RFC 5545's 1990s examples were written under;
 
 from komira_calendar_ics import IcsImport, IcsReport, ZoneTable
 from komira_proto_codec import encode_json
-from komira_tz import posix_zone
+from komira_datetime import posix_zone
 
 
 def rfc_zones() raises -> ZoneTable:

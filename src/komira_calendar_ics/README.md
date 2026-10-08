@@ -12,7 +12,7 @@ an empty report.
 
 It is not a full iCalendar implementation. It reads a declared subset and
 refuses or reports the rest, so nothing is lost without a line in the
-report. Time zone rules come from a `ZoneSource`: `komira_tz` zones read
+report. Time zone rules come from a `ZoneSource`: `komira_datetime` zones read
 from a zoneinfo directory (`ZoneinfoDirectory`) or built by the caller
 (`ZoneTable`). A VTIMEZONE's own rules are never used.
 
@@ -61,7 +61,7 @@ hold:
 ```mojo
 from komira_calendar_ics import IcsLimits, ZoneTable, read_ics
 from komira_proto_codec import encode_json
-from komira_tz import posix_zone
+from komira_datetime import posix_zone
 from std.testing import assert_equal, assert_true
 
 var zones = ZoneTable()

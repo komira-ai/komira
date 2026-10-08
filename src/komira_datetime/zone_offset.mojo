@@ -1,5 +1,5 @@
 # =============================================================================
-# offset.mojo -- one local time type: a UTC offset, a DST flag, an abbreviation
+# zone_offset.mojo -- a local time type: UTC offset, DST flag, abbreviation
 # =============================================================================
 #
 # The value a zone gives for an instant: `utc_offset` is seconds EAST of UTC

@@ -59,7 +59,7 @@ from komira_calendar_proto.calendar import (
 )
 from komira_content_line import unescape_text
 from komira_datetime import format_iso_date
-from komira_tz import FoldPolicy, GapPolicy, format_local
+from komira_datetime import FoldPolicy, GapPolicy, format_local
 
 from .props import (
     EventProps,

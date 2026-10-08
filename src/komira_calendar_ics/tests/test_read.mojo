@@ -9,7 +9,7 @@
 # line number that drifts. Each kept event is asserted as the API's JSON
 # (`encode_json`), so a value read into the wrong field is caught.
 #
-# Zones are built from POSIX TZ strings (komira_tz.posix_zone): New York and
+# Zones are built from POSIX TZ strings (komira_datetime.posix_zone): New York and
 # London with today's rules, Kathmandu at +05:45. The dates are in 2030:
 # 2 November 2030 is a Saturday, and New York leaves daylight time on
 # Sunday 3 November.
@@ -18,7 +18,7 @@
 from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import encode_json
-from komira_tz import posix_zone
+from komira_datetime import posix_zone
 from komira_calendar_ics import IcsImport, IcsLimits, IcsReport, ZoneTable, read_ics
 
 

@@ -31,7 +31,7 @@
 from komira_calendar import check_event, check_override, parse_local_date, parse_local_datetime
 from komira_calendar_proto.calendar import Event, EventStatus, OccurrenceOverride
 from komira_content_line import ContentLine, Param, escape_text, fold_line, format_content_line
-from komira_tz import FoldPolicy, GapPolicy
+from komira_datetime import FoldPolicy, GapPolicy
 
 from .read_event import IcsEvent
 from .rrule import format_rrule

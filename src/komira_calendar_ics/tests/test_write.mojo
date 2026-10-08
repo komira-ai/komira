@@ -17,7 +17,7 @@ from std.testing import assert_equal, assert_true
 from komira_calendar_proto.calendar import Event, OccurrenceOverride
 from komira_datetime import seconds_from_fields
 from komira_proto_codec import decode_json, encode_json
-from komira_tz import ZoneOffset, Zone, parse_posix_tz, posix_zone
+from komira_datetime import ZoneOffset, Zone, parse_posix_tz, posix_zone
 from komira_calendar_ics import IcsEvent, ZoneTable, read_ics, write_ics
 from komira_calendar_ics.vtimezone import write_vtimezone
 

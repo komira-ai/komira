@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The `.ics` edge of a simple calendar: iCalendar (RFC 5545) read into
 # komira_calendar's model with a report of what was dropped or refused, and
 # the model written back as iCalendar. A declared subset only (README.md);
-# zones come from komira_tz through a ZoneSource.
+# zones come from komira_datetime through a ZoneSource.
 #
 # test_values pins the DATE, DATE-TIME, DURATION and UTC offset forms;
 # test_rrule the RRULE subset, accepted and refused rule by rule;
@@ -23,7 +23,6 @@ mojo_library(
         "//src/komira_content_line:komira_content_line",
         "//src/komira_datetime:komira_datetime",
         "//src/komira_proto_codec:komira_proto_codec",
-        "//src/komira_tz:komira_tz",
         "//src/komira_wkt:komira_wkt",
     ],
     test_srcs = [

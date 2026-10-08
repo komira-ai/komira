@@ -23,7 +23,7 @@
 # year's start.
 # =============================================================================
 
-from komira_datetime import (
+from .civil import (
     civil_from_days,
     days_from_civil,
     days_in_month,
@@ -31,7 +31,7 @@ from komira_datetime import (
     weekday_from_days,
 )
 
-from .offset import ZoneOffset
+from .zone_offset import ZoneOffset
 
 comptime RULE_JULIAN = 0  # Jn: 1..365, 29 February never counted
 comptime RULE_DAY_OF_YEAR = 1  # n: 0..365, 29 February counted

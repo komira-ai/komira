@@ -1,6 +1,6 @@
 # =============================================================================
 # vtimezone.mojo -- the VTIMEZONE an export writes for each zone it uses
-# (RFC 5545 §3.6.5), from the zone's rules in `komira_tz`.
+# (RFC 5545 §3.6.5), from the zone's rules in `komira_datetime`.
 # =============================================================================
 #
 # The component covers every instant from one year before the earliest
@@ -24,7 +24,7 @@
 # =============================================================================
 
 from komira_content_line import ContentLine, Param, fold_line, format_content_line
-from komira_tz import RULE_MONTH_WEEK_DAY, PosixRule, PosixTz, Zone, ZoneOffset, parse_posix_tz
+from komira_datetime import RULE_MONTH_WEEK_DAY, PosixRule, PosixTz, Zone, ZoneOffset, parse_posix_tz
 
 from .rrule import weekday_name
 from .values import SECONDS_PER_DAY, format_ics_datetime, format_utc_offset

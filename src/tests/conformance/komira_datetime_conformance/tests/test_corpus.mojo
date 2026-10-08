@@ -20,9 +20,8 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_datetime import seconds_from_fields
-from komira_tz import check_zone_name, load_zone, parse_posix_tz
-from komira_tz_conformance import (
+from komira_datetime import check_zone_name, load_zone, parse_posix_tz, seconds_from_fields
+from komira_datetime_conformance import (
     FOOTER_GOLDENS,
     GoldenChange,
     IANA_VERSION_LINE,

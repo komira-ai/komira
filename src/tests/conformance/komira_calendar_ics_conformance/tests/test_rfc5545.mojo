@@ -30,7 +30,7 @@ from komira_proto_codec import encode_json
 from komira_calendar_ics import read_ics
 from komira_calendar_ics.vtimezone import write_vtimezone
 from komira_datetime import seconds_from_fields
-from komira_tz import posix_zone
+from komira_datetime import posix_zone
 from komira_calendar_ics_conformance import crlf, events_text, report_text, rfc_zones
 
 

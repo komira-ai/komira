@@ -28,7 +28,6 @@ mojo_library(
         "//src/komira_content_line:komira_content_line",
         "//src/komira_datetime:komira_datetime",
         "//src/komira_proto_codec:komira_proto_codec",
-        "//src/komira_tz:komira_tz",
         "//src/komira_wkt:komira_wkt",
     ],
     conda = False,

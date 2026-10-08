@@ -1,11 +1,12 @@
 load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_tz against the IANA tz release pinned in
-# //third_party/tzdata (compiled TZif files) and against zdump's reading of
-# the same files (goldens/, written by regen_goldens.sh, which the build does
-# not run: a person reruns it when the pin moves and reviews the diff). zdump
-# is glibc's implementation, which shares no code with komira_tz.
+# Test-only: komira_datetime's time zones against the IANA tz release
+# pinned in //third_party/tzdata (compiled TZif files) and against zdump's
+# reading of the same files (goldens/, written by regen_goldens.sh, which the
+# build does not run: a person reruns it when the pin moves and reviews the
+# diff). zdump is glibc's implementation, which shares no code with
+# komira_datetime.
 #
 #   test_named_zones   New York, London, Lord Howe, Kathmandu, Sao Paulo and
 #                      Apia, every change 1800..2100 equal to zdump's, and
@@ -19,19 +20,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                      refusals
 #
 # Welded (test_srcs): a verdict is a build action the cache keeps for exactly
-# these inputs, and nothing named komira_tz_conformance exists unless every
-# test passed. Nothing depends on this package.
+# these inputs, and nothing named komira_datetime_conformance exists unless
+# every test passed. Nothing depends on this package.
 
 # The pinned release as `share/tzdata/` (LICENSE, src/tzdata/zones and
 # src/tzdata/zoneinfo/).
 _TZDATA = {"tzdata": "//third_party/tzdata:files"}
 
 mojo_library(
-    name = "komira_tz_conformance",
+    name = "komira_datetime_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_datetime:komira_datetime",
-        "//src/komira_tz:komira_tz",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     conda = False,

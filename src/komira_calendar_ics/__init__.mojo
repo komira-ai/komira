@@ -7,7 +7,7 @@ DTSTART, DTEND or DURATION, SUMMARY, DESCRIPTION, LOCATION, STATUS, an RRULE
 within the model's structured rule, EXDATE, RECURRENCE-ID edits of single
 occurrences, and VALARMs that are reminders before the start; VTIMEZONE is
 read only to map its TZID to an IANA name. Time zone rules come from a
-`ZoneSource` (`komira_tz` zones). Nothing outside the subset is kept, and
+`ZoneSource` (`komira_datetime` zones). Nothing outside the subset is kept, and
 nothing is dropped without a line in the report.
 
   tree.mojo        the content lines (komira_content_line) as components

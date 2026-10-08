@@ -16,13 +16,13 @@ load(":zones.bzl", "ZONES")
 # Nothing of it is committed here: the archive is fetched at build time and
 # checked against its sha256 (the digest PyPI publishes for the file).
 #
-# Test data of //src/tests/conformance/komira_tz_conformance only. komira_tz
-# itself reads TZif bytes or a zoneinfo directory its caller names; no
-# library or binary depends on this target.
+# Test data of //src/tests/conformance/komira_datetime_conformance only.
+# komira_datetime itself reads TZif bytes or a zoneinfo directory its caller
+# names; no library or binary depends on this target.
 #
 # A newer pin is `_VERSION`, `_URL`, `_SHA256` and `_SIZE` here, the IANA
 # release named above, zones.bzl (regenerated from the new src/tzdata/zones),
-# and the goldens of komira_tz_conformance (regenerated with its
+# and the goldens of komira_datetime_conformance (regenerated with its
 # regen_goldens.sh against the new files, then reviewed as a diff).
 _VERSION = "2026.5"
 _URL = "https://files.pythonhosted.org/packages/d9/68/f1b440335057bfce71b6e50a9d09445aa2ecbd08359a337976627b8409e7/tzdata-2026.5.tar.gz"
@@ -52,5 +52,5 @@ archive_files(
     ] + ["src/tzdata/zoneinfo/" + z for z in ZONES],
     tree_dirs = ["src/tzdata/zoneinfo"],
     strip_prefix = "tzdata-" + _VERSION,
-    visibility = ["//src/tests/conformance/komira_tz_conformance/..."],
+    visibility = ["//src/tests/conformance/komira_datetime_conformance/..."],
 )

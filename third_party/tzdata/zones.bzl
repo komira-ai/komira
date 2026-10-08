@@ -3,8 +3,8 @@
 # list, src/tzdata/zones, which names the canonical zones and the backward
 # links (each link is a copy of its target's file). The 598 names are the
 # files archive_files extracts; a name missing from the archive fails the
-# extraction, and //src/tests/conformance/komira_tz_conformance checks that
-# this list and the extracted src/tzdata/zones agree.
+# extraction, and //src/tests/conformance/komira_datetime_conformance checks
+# that this list and the extracted src/tzdata/zones agree.
 ZONES = [
     "Africa/Abidjan",
     "Africa/Accra",

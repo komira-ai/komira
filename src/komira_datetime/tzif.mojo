@@ -39,7 +39,7 @@
 # never is.
 # =============================================================================
 
-from .offset import ZoneOffset
+from .zone_offset import ZoneOffset
 from .posix_tz import PosixRule, PosixTz, RULE_JULIAN, parse_posix_tz
 from .zone import Zone
 

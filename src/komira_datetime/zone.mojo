@@ -39,9 +39,9 @@
 
 from std.collections import Optional
 
-from komira_datetime import DateTime, fields_from_seconds, seconds_from_fields
+from .timestamp import DateTime, fields_from_seconds, seconds_from_fields
 
-from .offset import Transition, ZoneOffset
+from .zone_offset import Transition, ZoneOffset
 from .posix_tz import PosixTz, parse_posix_tz
 
 # No UTC offset exceeds this (the TZif reader refuses one past 26 hours), so

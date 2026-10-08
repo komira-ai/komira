@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # goldens/named.txt is zdump -v (glibc's reading of the same pinned TZif
-# files, an implementation that shares no code with komira_tz) for New York
+# files, an implementation that shares no code with komira_datetime) for New York
 # (the 2007 US rule change), London, Lord Howe (a 30-minute DST), Kathmandu
 # (+5:45), Sao Paulo (DST abolished in 2019) and Apia (30 December 2011
 # skipped), every change from 1800 to 2100: the later ones, past the files'
@@ -19,9 +19,15 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_datetime import seconds_from_fields
-from komira_tz import FoldPolicy, GapPolicy, LocalKind, Zone, load_zone
-from komira_tz_conformance import (
+from komira_datetime import (
+    FoldPolicy,
+    GapPolicy,
+    LocalKind,
+    Zone,
+    load_zone,
+    seconds_from_fields,
+)
+from komira_datetime_conformance import (
     GoldenChange,
     NAMED_GOLDENS,
     read_goldens,

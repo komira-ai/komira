@@ -5,7 +5,7 @@
 
 from std.testing import assert_equal
 
-from komira_tz import check_zone_name
+from komira_datetime import check_zone_name
 
 
 def _refused(name: String, message: String) raises:
