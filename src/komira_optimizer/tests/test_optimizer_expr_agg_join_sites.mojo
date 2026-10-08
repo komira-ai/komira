@@ -25,7 +25,7 @@ from komira_plan_expr.expr import (
     BIN_AND,
     BIN_OR,
 )
-from komira_plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_MAX, AGG_CORR
+from komira_plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_COUNT, AGG_MAX, AGG_CORR
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
@@ -194,6 +194,126 @@ def test_simplify_rewrites_join_residual() raises:
     """Catches: predicate simplification skipping a Join's residual condition."""
     var out = simplify_predicates(_join_with(_bin(BIN_AND, _b(True), _bin(BIN_GT, _c("a"), _c("x")))))
     assert_equal(_residual(out), "(a > x)")
+
+
+# Aggregate(group_by=[b], [corr(a, a) as k]) with `slot2` / `slot3` placed in
+# the aggregate's argument slots 2 and 3 (no constructor takes four inputs;
+# the fields are set after construction, as `test_optimizer_expr_cse_branches`
+# does).
+def _agg_slots_2_3(var slot2: Optional[Expr], var slot3: Optional[Expr]) -> LogicalPlan:
+    var gb = ExprArray()
+    gb.append(_c("b"))
+    var a0 = AggExpr(AGG_CORR, Optional(_c("a")), Optional(_c("a")), Optional(String("k")))
+    a0.child2 = slot2^
+    a0.child3 = slot3^
+    var aggs = AggExprArray()
+    aggs.append(a0^)
+    return LogicalPlan.aggregate(gb^, aggs^, _scan("l.parquet", _left_schema()))
+
+
+def _slot(plan: LogicalPlan, k: Int) raises -> String:
+    assert_true(plan.tag == PLAN_AGGREGATE, "the aggregate stays on top")
+    ref agg = plan._aggregate.value()[].agg_exprs[0]
+    if k == 2:
+        if not agg.child2:
+            return String("none")
+        return _d(agg.child2.value())
+    if not agg.child3:
+        return String("none")
+    return _d(agg.child3.value())
+
+
+def test_rules_rewrite_aggregate_slot_2() raises:
+    """Catches: any of the three rules skipping an aggregate function's
+    argument slot 2 (`_rewrite_optional_site[rule](agg.child2)`); slot 3 is
+    empty and stays empty."""
+    var f = fold_constants(_agg_slots_2_3(Optional(_bin(BIN_ADD, _i(2), _i(3))), Optional[Expr]()))
+    assert_equal(_slot(f, 2), "5")
+    assert_equal(_slot(f, 3), "none")
+    var s = simplify_predicates(_agg_slots_2_3(Optional(_bin(BIN_AND, _b(True), _c("b"))), Optional[Expr]()))
+    assert_equal(_slot(s, 2), "b")
+    assert_equal(_slot(s, 3), "none")
+    var r = rewrite_in_clauses(_agg_slots_2_3(Optional(_a_eq_1_or_a_eq_2()), Optional[Expr]()))
+    assert_equal(_slot(r, 2), "a in [1,2]")
+    assert_equal(_slot(r, 3), "none")
+
+
+def test_rules_rewrite_aggregate_slot_3() raises:
+    """Catches: any of the three rules skipping an aggregate function's
+    argument slot 3 (`_rewrite_optional_site[rule](agg.child3)`), including
+    when slot 2 before it is empty."""
+    var f = fold_constants(_agg_slots_2_3(Optional[Expr](), Optional(_bin(BIN_ADD, _i(2), _i(3)))))
+    assert_equal(_slot(f, 2), "none")
+    assert_equal(_slot(f, 3), "5")
+    var s = simplify_predicates(_agg_slots_2_3(Optional[Expr](), Optional(_bin(BIN_OR, _b(False), _c("b")))))
+    assert_equal(_slot(s, 2), "none")
+    assert_equal(_slot(s, 3), "b")
+    var r = rewrite_in_clauses(_agg_slots_2_3(Optional[Expr](), Optional(_a_eq_1_or_a_eq_2())))
+    assert_equal(_slot(r, 2), "none")
+    assert_equal(_slot(r, 3), "a in [1,2]")
+
+
+# Aggregate(group_by=[a = 1 OR a = 2, a + (0 + 1), b AND TRUE],
+#           [count(*) as n, max(a + (2 + 3)) as m]): each key is a target of
+# one rule (IN rewrite, folding, simplification).
+def _agg_count_star_and_or_key() -> LogicalPlan:
+    var gb = ExprArray()
+    gb.append(_a_eq_1_or_a_eq_2())
+    gb.append(_bin(BIN_ADD, _c("a"), _bin(BIN_ADD, _i(0), _i(1))))
+    gb.append(_bin(BIN_AND, _c("b"), _b(True)))
+    var none: Optional[Expr] = None
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_COUNT, none^, Optional(String("n"))))
+    aggs.append(AggExpr(AGG_MAX, Optional(_bin(BIN_ADD, _c("a"), _bin(BIN_ADD, _i(2), _i(3)))),
+                        Optional(String("m"))))
+    return LogicalPlan.aggregate(gb^, aggs^, _scan("l.parquet", _left_schema()))
+
+
+def _count_star_view(plan: LogicalPlan) raises -> String:
+    assert_true(plan.tag == PLAN_AGGREGATE, "the aggregate stays on top")
+    ref ad = plan._aggregate.value()[]
+    assert_equal(len(ad.agg_exprs), 2)
+    ref n = ad.agg_exprs[0]
+    assert_true(not n.child and not n.child1 and not n.child2 and not n.child3,
+                "count(*) keeps every argument slot empty")
+    assert_equal(len(ad.group_by), 3)
+    return (_d(ad.group_by[0]) + " ; " + _d(ad.group_by[1]) + " ; " + _d(ad.group_by[2])
+            + " | " + _d(ad.agg_exprs[1].child.value()))
+
+
+def test_rules_keep_group_by_keys_and_empty_slots() raises:
+    """Catches: a rule rewriting an Aggregate's group-by key (the key's
+    inferred output name would no longer match the schema), and a rule
+    filling or tripping over an empty argument slot (count(*)) while it still
+    rewrites the next aggregate's argument."""
+    var f = fold_constants(_agg_count_star_and_or_key())
+    assert_equal(_count_star_view(f), "((a = 1) or (a = 2)) ; (a + (0 + 1)) ; (b and true) | (a + 5)")
+    var r = rewrite_in_clauses(_agg_count_star_and_or_key())
+    assert_equal(_count_star_view(r), "((a = 1) or (a = 2)) ; (a + (0 + 1)) ; (b and true) | (a + (2 + 3))")
+    var s = simplify_predicates(_agg_count_star_and_or_key())
+    assert_equal(_count_star_view(s), "((a = 1) or (a = 2)) ; (a + (0 + 1)) ; (b and true) | (a + (2 + 3))")
+
+
+def _join_without_residual() -> LogicalPlan:
+    var lon: List[String] = ["a"]
+    var ron: List[String] = ["x"]
+    return LogicalPlan.join(
+        _scan("l.parquet", _left_schema()), _scan("r.parquet", _right_schema()),
+        lon^, ron^, JOIN_INNER,
+    )
+
+
+def _no_residual(plan: LogicalPlan) raises -> Bool:
+    assert_true(plan.tag == PLAN_JOIN, "the join stays on top")
+    return not plan._join.value()[].residual
+
+
+def test_rules_leave_absent_join_residual_absent() raises:
+    """Catches: a rule reading or inventing a residual on a Join that has
+    none (`if j.residual:` in `_rewrite_agg_and_residual_sites`)."""
+    assert_true(_no_residual(fold_constants(_join_without_residual())), "fold: no residual")
+    assert_true(_no_residual(simplify_predicates(_join_without_residual())), "simplify: no residual")
+    assert_true(_no_residual(rewrite_in_clauses(_join_without_residual())), "in: no residual")
 
 
 def main() raises:
