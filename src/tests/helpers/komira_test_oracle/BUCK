@@ -111,6 +111,21 @@ py_test(
     deps = ["//third_party/python:pyarrow"],
 )
 
+# gen_expected.connect()'s connection: no extension autoloaded or
+# autoinstalled (a function of inet, which DuckDB would autoload, is a
+# catalog error and the loaded and installed lists stay as they were), no
+# file read, external access not re-enabled, and every registered table
+# still readable.
+py_test(
+    name = "test_connect",
+    src = "test_connect.py",
+    srcs = _EXPECTED_MODULES + ["gen_expected.py"],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+)
+
 # :expected's files parse and are canonical, and each equals its HAND twin
 # (twins/hand, copies of komira_plan_conformance's expectations); the twins'
 # inputs equal the corpus's datasets (twins/inputs).

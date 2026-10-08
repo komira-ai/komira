@@ -23,7 +23,8 @@ The tables a query names are the datasets of datasets.py (`types`, `nulls`,
 from its seed or its rows and handed to DuckDB as a pyarrow table: no file
 is read back, and nothing komira wrote is an input.
 
-DuckDB runs with `threads = 1`, `TimeZone = 'UTC'` and its defaults
+DuckDB runs with `threads = 1`, `TimeZone = 'UTC'`, no extension
+autoloaded or autoinstalled, no external access (CONFIG) and its defaults
 otherwise (query semantics, preamble). Each query is first held to
 sql_discipline.py (every ORDER BY key states ASC/DESC and NULLS FIRST/LAST,
 every literal is CAST, no function on its list of those reading more than
@@ -54,8 +55,24 @@ import twin_inputs
 TABLES = list(datasets.NAMES) + list(twin_inputs.NAMES)
 
 
+# Fixed when the database opens, before the first query. DuckDB 1.5.6 loads
+# an extension it knows (inet's html_escape(), the INET type, a `.sqlite`
+# path) the first time a query names something it holds, unless
+# autoload_known_extensions is off, and downloads it first unless
+# autoinstall_known_extensions is off; with enable_external_access off it
+# loads no extension by any path and reads no file and no Python variable
+# a query names, and a running database refuses to turn it back on. What
+# answers a case is then the wheel and the tables registered here.
+CONFIG = {
+    "threads": 1,
+    "autoload_known_extensions": False,
+    "autoinstall_known_extensions": False,
+    "enable_external_access": False,
+}
+
+
 def connect():
-    con = duckdb.connect(config={"threads": 1})
+    con = duckdb.connect(config=CONFIG)
     con.execute("SET threads = 1")
     con.execute("SET TimeZone = 'UTC'")
     for name in datasets.NAMES:
@@ -111,4 +128,5 @@ def main(out, data):
             f.write(text)
 
 
-main(sys.argv[1], sys.argv[2])
+if __name__ == "__main__":
+    main(sys.argv[1], sys.argv[2])
