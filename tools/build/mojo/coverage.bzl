@@ -33,7 +33,8 @@ and, per library (tests or none):
   tools/build/coverage). A library of a test-only package (its package's
   directory in its cell is one of COVERAGE_INFO_ONLY_DIRS or under one)
   has the same gate, which reports its findings as information
-  (`--info-package`) and so passes in every mode.
+  (`--info-package`), so it never fails on a finding (an input covcheck
+  refuses still fails it).
 
 What ships, the library's conda package (`<name>_conda`, its joins
 `conda_join` and `conda_release_join`), then also waits for every coverage
@@ -405,11 +406,25 @@ def _gate_inputs(ctx, runs, branch, markers):
         tests = ctx.actions.write("cov/gate/tests.txt", "".join([t + "\n" for t in sorted(tests)])),
     )
 
+def _checked_info_dirs(dirs):
+    """COVERAGE_INFO_ONLY_DIRS (policy.bzl), each a directory relative to a
+    cell's root: not empty, no leading or trailing `/`, no empty, `.` or
+    `..` segment. Fails at load naming the entry otherwise: a malformed
+    entry would match no package and hold the test-only packages it meant
+    to the target, silently."""
+    for d in dirs:
+        if type(d) != "string" or d == "" or d.startswith("/") or d.endswith("/") or [s for s in d.split("/") if s in ("", ".", "..")]:
+            fail("COVERAGE_INFO_ONLY_DIRS (tools/build/coverage/policy.bzl): {} is not a directory relative to a cell's root (no leading or trailing /, no empty, . or .. segment)".format(repr(d)))
+    return dirs
+
+_INFO_DIRS = _checked_info_dirs(COVERAGE_INFO_ONLY_DIRS)
+
 def _info_only(label):
     """Whether `label`'s package is test-only: its directory, relative to its
-    cell's root, is one of COVERAGE_INFO_ONLY_DIRS (policy.bzl) or under
-    one."""
-    for d in COVERAGE_INFO_ONLY_DIRS:
+    cell's root, is one of COVERAGE_INFO_ONLY_DIRS (policy.bzl) or under one,
+    at a segment boundary (`src/tests` covers `src/tests/x`, not
+    `src/testsuite`)."""
+    for d in _INFO_DIRS:
         if label.package == d or label.package.startswith(d + "/"):
             return True
     return False
