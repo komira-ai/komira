@@ -59,9 +59,11 @@ py_test(
 # each run by DuckDB in the python_oracle `:expected` and rendered by
 # render.py to `expect/<shard>/<case>.tsv` (a sub-target,
 # `:expected[expect/filter_3vl/filter_not_and.tsv]`). Both runs of the action
-# must write the same bytes, each case must answer the same with every
-# table's rows reversed and shuffled (compared under the case's policy), and
-# gen_expected.py refuses a query that leaves NULL placement, an aggregate's
+# must write the same bytes, each case must answer the same with the rows of
+# every table it reads rotated to each position and each rotation reversed
+# (compared under the case's policy), its `-- order:` policy must be held
+# by its outermost ORDER BY (`total`: one; `keys=<cols>`: led by exactly
+# those columns), and gen_expected.py refuses a query that leaves NULL placement, an aggregate's
 # row order, a window frame's, a LIMIT's or a DISTINCT ON's row order, a
 # list sort's direction or a literal's type to DuckDB, calls a function on
 # its list
@@ -147,13 +149,30 @@ py_test(
 )
 
 # gen_expected.py's row-order check (row_order_diffs, run by main() on every
-# case): each reordered connection holds the rows in its order; queries
+# case): every row of every table comes first and last in some order of the
+# set, and each reordered connection holds the rows in its order; queries
 # DuckDB answers by the rows' order are reported (the ones sql_discipline.py
-# refuses and the ties it cannot see), under the case's policy; order-free
-# ones are not; main() refuses a case the check reports.
+# refuses and the ties it cannot see, among them the zeros of sort_rows
+# that the plain reversal keeps in place), under the case's policy;
+# order-free ones are not; main() refuses a case the check reports.
 py_test(
     name = "test_row_order",
     src = "test_row_order.py",
+    srcs = _EXPECTED_MODULES + ["gen_expected.py"],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+)
+
+# sql_discipline.check_order_policy(), which main() runs on every case:
+# `order: total` needs an ORDER BY on the outermost query, `keys=<cols>`
+# one led by exactly those bare columns in order; a window's partition
+# order or a subquery's ORDER BY is refused under either, and main()
+# refuses such a case before writing it.
+py_test(
+    name = "test_order_policy",
+    src = "test_order_policy.py",
     srcs = _EXPECTED_MODULES + ["gen_expected.py"],
     deps = [
         "//third_party/python:duckdb",

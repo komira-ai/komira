@@ -179,7 +179,7 @@ commute, but for the sign of a zero: -0.0 equals 0.0, and `min` and
 `quantile_disc`...) whichever their selection lands on, and so does a
 GROUP BY or DISTINCT key; over a column holding both zeros which one they
 answer is a tie this module does not see (gen_expected.py's row-order
-check sees it when reversing or shuffling the oracle's tables changes it).
+check sees it: in its orders every row of a table arrives first and last).
 DuckDB v1.5.6's
 `duckdb_functions()` also lists its window functions as aggregates; those
 are `_WINDOW_ORDERED` or, the rank family, order-free. test_sql_discipline.py
@@ -192,6 +192,19 @@ be exactly the built-in macros reaching a listed aggregate with no ORDER BY.
 The check walks the JSON DuckDB's `json_serialize_sql` makes of the
 statement, not the text, so a comment, a string literal or a line break
 cannot hide or fake a keyword.
+
+`check_order_policy()` holds the outermost query node (the statement's
+`node`: a SELECT_NODE, or a SET_OPERATION_NODE whose modifiers are those
+of the whole UNION) to the case's `-- order:` policy, since the expected
+file freezes the rows in the order DuckDB writes them. Under `total` that
+node has an ORDER_MODIFIER; under `keys=<c1>,<c2>` its ORDER_MODIFIER's
+leading keys are exactly those columns, in that order, each a bare
+one-part column name (`ORDER BY a`, not `t.a` nor an expression), which
+DuckDB binds to the output column so named before a table's. Without it
+the file holds an order no ORDER BY asked for: a window's partition
+order, a subquery's ORDER BY (SQL keeps no subquery's order), a hash
+table's. An ORDER BY whose keys tie is not seen here; gen_expected.py's
+row-order check sees ties.
 """
 
 import json
@@ -649,11 +662,8 @@ def _walk(node, path, in_cast, is_count, in_table_fn, is_ref, scope, ctx):
               inner, ctx)
 
 
-def check(con, sql, tables):
-    """Raise DisciplineError listing every rule `sql` breaks; `con` is a
-    DuckDB connection (its parser serializes the statement), `tables` the
-    names of the tables the caller registered on the connection that runs
-    `sql`, the only tables its FROM may name besides its CTEs."""
+def _statement(con, sql):
+    """The one SELECT statement of `sql`, as DuckDB's parse serializes it."""
     text = con.execute("SELECT json_serialize_sql(CAST(? AS VARCHAR))", [sql]).fetchone()[0]
     tree = json.loads(text)
     if tree.get("error"):
@@ -664,7 +674,62 @@ def check(con, sql, tables):
     node = statements[0].get("node") or {}
     if node.get("type") not in ("SELECT_NODE", "SET_OPERATION_NODE"):
         raise DisciplineError("the statement is a %s, not a SELECT" % node.get("type"))
+    return statements[0]
+
+
+def check(con, sql, tables):
+    """Raise DisciplineError listing every rule `sql` breaks; `con` is a
+    DuckDB connection (its parser serializes the statement), `tables` the
+    names of the tables the caller registered on the connection that runs
+    `sql`, the only tables its FROM may name besides its CTEs."""
+    statement = _statement(con, sql)
     ctx = _Ctx(frozenset(str(t).lower() for t in tables))
-    _walk(statements[0], "statement", False, False, False, False, frozenset(), ctx)
+    _walk(statement, "statement", False, False, False, False, frozenset(), ctx)
     if ctx.problems:
         raise DisciplineError("; ".join(ctx.problems))
+
+
+def check_order_policy(con, sql, order, keys=()):
+    """Raise DisciplineError unless the outermost query node of `sql`
+    orders its rows as the case's policy (`order` "total", "none" or
+    "keys" with the column names `keys`) compares them: under "total" an
+    ORDER BY of that node; under "keys" an ORDER BY of that node whose
+    leading keys are exactly `keys`, in order, each a bare column name."""
+    node = _statement(con, sql)["node"]
+    orders = None
+    for mod in node.get("modifiers") or []:
+        if isinstance(mod, dict) and mod.get("type") == "ORDER_MODIFIER":
+            orders = mod.get("orders") or []
+    if order == "total" and orders is None:
+        raise DisciplineError("order: total with no ORDER BY on the outermost query: the expected file would hold "
+                              "the order DuckDB writes the rows in (an ORDER BY in a subquery or a window does not "
+                              "order the result)")
+    if order == "keys":
+        lead = []
+        for o in (orders or [])[: len(keys)]:
+            expr = o.get("expression") or {}
+            names = expr.get("column_names") if expr.get("class") == "COLUMN_REF" else None
+            lead.append(names[0] if isinstance(names, list) and len(names) == 1 else None)
+        if lead != list(keys):
+            raise DisciplineError("order: keys=%s needs the outermost query's ORDER BY to lead with exactly those "
+                                  "columns, in order, each a bare column name; it leads with %s"
+                                  % (",".join(keys), "nothing" if orders is None else lead))
+
+
+def tables_read(con, sql):
+    """The lowercase names of every table `sql`'s FROM names (each
+    BASE_TABLE of its parse, at any depth; a CTE so named included)."""
+    found = set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            if node.get("type") == "BASE_TABLE":
+                found.add(str(node.get("table_name", "")).lower())
+            for value in node.values():
+                walk(value)
+
+    walk(_statement(con, sql))
+    return found

@@ -37,17 +37,29 @@ window ROWS frame without an OVER ORDER BY, no LIMIT, OFFSET or DISTINCT
 ON without an ORDER BY in its query, no FLOAT or DOUBLE histogram, no
 `list_sort` that leaves its direction or NULL placement to the session,
 and FROM names only the tables registered here, with no AT clause, its own
-CTEs and the allowed table functions), on the exact text that is then run.
+CTEs and the allowed table functions), on the exact text that is then run,
+and to its policy (sql_discipline.check_order_policy: under `order:
+total` the outermost query has an ORDER BY, under `keys=<cols>` one that
+leads with exactly those columns), so that no file freezes the order
+DuckDB happens to write the rows in.
 
-Then the row-order check (row_order_diffs): the case runs again on a
-connection per ROW_ORDERS, which registers the same tables with each
-table's rows reversed, and shuffled by `random.Random(SHUFFLE_SEED)`, and
-each answer must equal the first under the case's policy (canon.compare:
-a multiset under `order: none`, row for row under `total`, key order with
-runs of equal keys as multisets under `keys`; floats within the
-tolerance). It sees what either order changes on these tables, ties among
-ORDER BY keys and the sign of a zero that min, max, a quantile or a
-GROUP BY key keeps included; not what neither changes.
+Then the row-order check (row_order_diffs): the case runs again once per
+order of case_orders(), on a connection of its own that registers the
+tables the case names again with their rows in that order (register()), and each answer must equal
+the first under the case's policy (canon.compare: a multiset under
+`order: none`, row for row under `total`, key order with runs of equal
+keys as multisets under `keys`; floats within the tolerance). The orders
+are every rotation of each table and the reverse of every rotation
+(permutation()), so every row of every table the case reads arrives
+first in some order and last in some order, and so does every row of any
+subset of a table (the rows a WHERE keeps, a group): the check sees any
+answer that depends on which row of a table arrives first or which
+arrives last, ties among ORDER BY keys and the sign of a zero that min,
+max, a GROUP BY or DISTINCT key or a LIMIT over tied keys keeps
+included. It does not see every dependence on the order of rows in the
+middle (all n! orders), nor one that needs two tables in a combination
+of orders no index i gives (each order rotates every table by i modulo
+its own size).
 
 The result is rendered by render.py to
 
@@ -58,7 +70,6 @@ with, after the policy lines, the line
 """
 
 import os
-import random
 import sys
 
 import duckdb
@@ -92,11 +103,9 @@ CONFIG = {
 }
 
 
-# The orders, besides the tables' own, in which the row-order check
-# registers every table again (row_order_diffs): each table's rows reversed,
-# and each table's rows shuffled by `random.Random(SHUFFLE_SEED)`.
-ROW_ORDERS = ("reversed", "shuffled")
-SHUFFLE_SEED = 839
+# The kinds of order of the row-order check (row_order_diffs): an order is
+# (kind, i), a table's rows rotated by i, and that rotation reversed.
+ORDER_KINDS = ("rotated", "reversed")
 
 _BUILT = {}
 
@@ -114,20 +123,45 @@ def tables():
 
 
 def permutation(n, order):
-    """The row indices of a table of `n` rows in row order `order`."""
-    idx = list(range(n))
-    if order == "reversed":
+    """The row indices of a table of `n` rows in row order `order`, a
+    (kind, i) pair: ("rotated", i) is rows i mod n to n - 1, then 0 to
+    i mod n - 1; ("reversed", i) is that, reversed."""
+    kind, i = order
+    if kind not in ORDER_KINDS:
+        raise ValueError("row order %r is not one of %s" % (kind, ORDER_KINDS))
+    k = i % n if n else 0
+    idx = list(range(k, n)) + list(range(k))
+    if kind == "reversed":
         idx.reverse()
-    elif order == "shuffled":
-        random.Random(SHUFFLE_SEED).shuffle(idx)
-    else:
-        raise ValueError("row order %r is not one of %s" % (order, ROW_ORDERS))
     return idx
 
 
-def connect(order=None):
-    """The oracle's connection, every table registered; with `order` (one
-    of ROW_ORDERS), each table holds the same rows in that order."""
+def row_orders(n):
+    """The orders of the row-order check for tables of at most `n` rows:
+    every rotation but the identity, and the reverse of every rotation,
+    2n - 1 orders. Over i < n every table of m <= n rows takes each of its
+    m rotations: row r arrives first rotated by r and last rotated by r +
+    1, and the reverse of each rotation runs the other way round."""
+    return [("rotated", i) for i in range(1, n)] + [("reversed", i) for i in range(n)]
+
+
+def order_name(order):
+    kind, i = order
+    return "rotated by %d" % i if kind == "rotated" else "rotated by %d and reversed" % i
+
+
+def case_orders(con, sql):
+    """row_orders() of the largest table `sql` names: the orders under
+    which the row-order check runs it."""
+    built = tables()
+    n = max([built[t].num_rows for t in sql_discipline.tables_read(con, sql) if t in built] + [0])
+    return row_orders(n)
+
+
+def connect(order=None, names=None):
+    """The oracle's connection, every table registered (with `names`,
+    those tables only); with `order` (a (kind, i) pair, permutation()),
+    each table holds the same rows in that order."""
     con = duckdb.connect(config=CONFIG)
     con.execute("SET threads = 1")
     # ICU (in the wheel) takes its default TimeZone from the process's TZ
@@ -139,11 +173,23 @@ def connect(order=None):
     # were not recognized").
     con.execute("SET TimeZone = 'UTC'")
     con.execute("SET Calendar = 'gregorian'")
+    register(con, order, names)
+    return con
+
+
+def register(con, order=None, names=None):
+    """Register on `con` every table (with `names`, those tables only), with
+    `order` (a (kind, i) pair, permutation()) in that row order. A name
+    registered before is replaced (duckdb-python's RegisterPythonObject
+    creates the view with replace set when it registered the name), so the
+    row-order check reorders one connection rather than opening one per
+    order, which costs tens of milliseconds each."""
     for name, table in tables().items():
+        if names is not None and name not in names:
+            continue
         if order is not None:
             table = table.take(pa.array(permutation(table.num_rows, order), type=pa.int64()))
         con.register(name, table)
-    return con
 
 
 def execute(con, sql):
@@ -164,19 +210,27 @@ def run_query(con, sql):
     return execute(con, sql)
 
 
-def row_order_diffs(others, sql, policy, not_null, text):
+def row_order_diffs(orders, sql, policy, not_null, text):
     """Every difference between `text` (the case's answer, rendered) and
-    the answer of the same `sql` on each connection of `others` ((order,
-    connection) pairs from connect(order)), compared as canon.compare
-    compares a result with its expectation under the case's `policy`:
-    as a multiset (`none`), row for row (`total`), or in key order with
-    each run of equal keys as a multiset (`keys`), floats within the
-    policy's tolerance. [] when every order gives the same answer."""
+    the answer of the same `sql` with the tables it names registered in
+    each order of `orders` in turn (register(), on one connection of its
+    own), compared as
+    canon.compare compares a result with its expectation under the case's
+    `policy`: as a multiset (`none`), row for row (`total`), or in key
+    order with each run of equal keys as a multiset (`keys`), floats
+    within the policy's tolerance. [] when every order gives the same
+    answer."""
     want = canon.parse(text)
+    con = connect(names=())
+    names = sql_discipline.tables_read(con, sql)
     diffs = []
-    for order, con in others:
-        got = canon.parse(render.render_table(execute(con, sql), policy, (), not_null))
-        diffs += ["rows %s: %s" % (order, d) for d in canon.compare(want, got)]
+    try:
+        for order in orders:
+            register(con, order, names)
+            got = canon.parse(render.render_table(execute(con, sql), policy, (), not_null))
+            diffs += ["rows %s: %s" % (order_name(order), d) for d in canon.compare(want, got)]
+    finally:
+        con.close()
     return diffs
 
 
@@ -196,15 +250,15 @@ def cases(data):
 
 def main(out, data):
     con = connect()
-    others = [(order, connect(order)) for order in ROW_ORDERS]
     for rel in cases(data):
         with open(os.path.join(data, rel), encoding="utf-8") as f:
             sql = f.read()
         try:
             policy, not_null = oracle_case.read_header(sql)
+            sql_discipline.check_order_policy(con, sql, policy.order, policy.keys)
             table = run_query(con, sql)
             text = render.render_table(table, policy, [generated_line(rel)], not_null)
-            diffs = row_order_diffs(others, sql, policy, not_null, text)
+            diffs = row_order_diffs(case_orders(con, sql), sql, policy, not_null, text)
             if diffs:
                 raise oracle_case.CaseError("the answer depends on the order of the tables' rows, not only on "
                                             "their contents: " + "; ".join(diffs))
