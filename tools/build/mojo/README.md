@@ -18,6 +18,7 @@ the compiler sees. Worked uses of each rule are in
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
+| `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
 
@@ -785,6 +786,12 @@ tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake
 ([`../examples/s2n_tls`](../examples/s2n_tls)) from Mojo. The aarch64
 assembly lists are generated but not built yet.
 
+aws-lc, s2n-tls and snappy are built with their global symbols renamed:
+`komira_awslc_*`, `komira_s2n_*` and `komira_snappy_*` (snappy's C API), so
+Mojo code calls `external_call["komira_awslc_SHA256", ...]`. The renaming is a
+generated header each library force-includes, and a symbol check gates
+every build that links the library; see [`../native`](../native/README.md).
+
 ## Coverage builds
 
 `-c komira.coverage=true` (default `false`) gives every `mojo_library`, per
@@ -936,6 +943,13 @@ one, waits for its runs and that gate. It may also pass
 records (test 46's `covfull_unread`). Anywhere else passing any of them is
 refused.
 
+## API JSON: mojo_doc_json
+
+`mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) writes the
+`mojo doc` JSON of a `mojo_library`, optionally checked against a golden file
+and for named declarations. [`doc.md`](doc.md) has its use, what the JSON
+holds (no source locations), its two checks and test 52.
+
 ## Errors
 
 | message | from | meaning |
@@ -964,6 +978,8 @@ refused.
 | `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`mem_cap.sh`](mem_cap.sh) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
+| `mojo_doc_json: <target>: the JSON differs from its golden <file>` | [`doc.bzl`](doc.bzl) | the library's `mojo doc` JSON changed; if on purpose, replace the golden with `[raw]` |
+| ``mojo_doc_json: <target>: the JSON declares no `<path>` `` | [`doc.bzl`](doc.bzl) | a `symbols` entry names no declaration of the JSON (or a private one, which `mojo doc` leaves out) |
 | `unable to locate module '<pkg>'` | the compiler | the importing target does not list that package in `deps` |
 
 ## Not yet supported
