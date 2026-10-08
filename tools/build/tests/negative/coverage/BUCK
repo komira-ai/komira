@@ -710,6 +710,24 @@ cov_branch_dir(
     exec_compatible_with = LINUX_X86_64,
 )
 
+# A cov_branch_annotate.sh copy whose section-name pipeline carries about
+# 1 MB more after each name: the reader that cuts the name must read all of
+# it, or its writer dies of SIGPIPE (exit 141 under pipefail; a race at 16
+# bytes, as seen in remote runs with `head -n 1`, certain here). GREEN:
+# tests//negative/coverage:branchwide[coverage][branch_ir][test_one].
+cov_plant(
+    name = "branchwide_annotate_sh",
+    expr = "s#count=16 2>/dev/null |#count=16 2>/dev/null | { cat; awk 'BEGIN { while (n++ < 40000) print \"padding padding padding\" }'; } |#",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchwide_branch",
+    annotate_script = ":branchwide_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
+)
+
 # A cov_branch_annotate.sh copy that first applies the profile and writes
 # the module back as bitcode (lld's emit-llvm), then reads that: a bitcode
 # that holds branch weights before the profile is applied, which
@@ -742,7 +760,7 @@ cov_branch_dir(
         import_name = "noop",
         test_srcs = ["tests/test_one.mojo"],
     )
-    for name in ("branchinternal", "branchmissing", "branchweights")
+    for name in ("branchinternal", "branchmissing", "branchweights", "branchwide")
 ]
 
 # A helper declared @always_inline("nodebug"): its `while` carries the

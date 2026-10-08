@@ -45,7 +45,9 @@
 #      without the test's main: a function the binary links that the
 #      profile lacks, refused), branchinternal[...][branch_ir] red (a copy
 #      internalizing the bitcode before the profile is applied: a function
-#      of the profile the bitcode does not hold, refused),
+#      of the profile the bitcode does not hold, refused), branchwide's
+#      [branch_ir] green (a copy padding the section-name pipeline with
+#      1 MB: its reader takes all of it, so no writer dies of SIGPIPE),
 #      branchweights[...][branch_ir] red (a copy annotating a bitcode that
 #      already holds branch weights), branchnodebug[...][branch_info] red
 #      (a nodebug helper's decision at its call), branchretor[...]
@@ -64,7 +66,8 @@ expect_green coverage_branch tests//functional/coverage:branch_counts tests//fun
     tests//negative/coverage:branchfail tests//negative/coverage:branchannotate \
     tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion \
     tests//negative/coverage:branchmissing tests//negative/coverage:branchweights \
-    tests//negative/coverage:branchinternal \
+    tests//negative/coverage:branchinternal tests//negative/coverage:branchwide \
+    'tests//negative/coverage:branchwide[coverage][branch_ir][test_one]' \
     tests//negative/coverage:branchnodebug tests//negative/coverage:branchretor
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'

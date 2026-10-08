@@ -123,7 +123,10 @@ data_off="" data_size="" cnts_size=""
 i=0
 while [ "$i" -lt "$shnum" ]; do
     h=$((shoff + i * 64))
-    name=$(dd if="$BIN" bs=1 skip=$((strtab + $(u "$h" 4))) count=16 2>/dev/null | tr '\0' '\n' | head -n 1)
+    # sed, not head: every reader takes all of its input, so no writer is
+    # killed by SIGPIPE (exit 141 under pipefail, seen in remote runs; test
+    # 47's branchwide pads this pipeline with 1 MB).
+    name=$(dd if="$BIN" bs=1 skip=$((strtab + $(u "$h" 4))) count=16 2>/dev/null | tr '\0' '\n' | sed -n 1p)
     case "$name" in
         __llvm_prf_data)
             [ -z "$data_off" ] || red "$4 has two __llvm_prf_data sections"
