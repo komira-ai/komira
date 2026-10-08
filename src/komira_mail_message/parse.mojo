@@ -12,9 +12,11 @@
 # as bytes.
 #
 # RFC 2045 section 5.2: a missing or unreadable `Content-Type` is
-# `text/plain`. A multipart needs a `boundary` parameter of 1 to 70 RFC 2046
-# `bchars`, not ending in a space. A delimiter line is `--boundary` (the close
-# delimiter `--boundary--`) at the start of a line, then only white space;
+# `text/plain` (inside a `multipart/digest` too, where RFC 2046 section
+# 5.1.5 would make it `message/rfc822`). A multipart needs a `boundary`
+# parameter of 1 to 70 RFC 2046 `bchars`, not ending in a space. A
+# delimiter line is `--boundary` (the close delimiter `--boundary--`) at
+# the start of a line, then only white space;
 # the line break before it belongs to it. The preamble and the epilogue are
 # dropped. A multipart with no delimiter line is refused as `Syntax`; one
 # whose close delimiter is missing ends its last part at the end of its body.
@@ -381,10 +383,11 @@ struct Message(Copyable, Movable):
 
     def _first_body(self, media: StaticString) -> Optional[Int]:
         for i in range(len(self._parts)):
-            var p = self._parts[i].copy()
-            if p.is_multipart() or p.disposition() == "attachment":
+            if self._parts[i].is_multipart():
                 continue
-            if p.media_type() == media:
+            if self._parts[i].disposition() == "attachment":
+                continue
+            if self._parts[i].media_type() == media:
                 return i
         return None
 

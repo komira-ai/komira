@@ -92,7 +92,9 @@ assert_equal(msg, "komira_mail_message.ForbiddenByte: MessageBuilder.set_subject
   2231 values are read in UTF-8, US-ASCII and ISO-8859-1 (and the ASCII
   bytes of other ISO-8859 and windows-125x charsets), any other word is kept
   as written.
-- `message/rfc822` parts are leaves (not opened). Encoded words are decoded
+- `message/rfc822` parts are leaves (not opened), and a part of a
+  `multipart/digest` without a `Content-Type` is read as `text/plain`, not
+  as RFC 2046 section 5.1.5's `message/rfc822`. Encoded words are decoded
   only where `decode_header_text` is called: on unstructured fields
   (`Subject`), on a display name read by `komira_mail_address`, and on an
   attachment's plain `filename`.
