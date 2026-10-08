@@ -24,6 +24,7 @@ gate's JSON entry for a package equal to the report's.
 | `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
+| `branch_gate.bxl` | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a library: a row naming none is read by nothing (test 46) |
 
 ## What line coverage means here
 
