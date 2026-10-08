@@ -10,9 +10,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   tests/test_firestore_mock.mojo  FirestoreDatabase over MockFirestore, the
 #                                   store's composite index declared.
 #
-# The checks live here, not in komira_contacts' test_srcs: a welded test sees
-# only its library's `deps`, so running them there would put both drivers in
-# the closure of every consumer of the store. Nothing depends on this package.
+# The checks live here, written once for both backends: a welded test is
+# built from its one file, so two tests in komira_contacts could not share
+# them. (komira_contacts' own test_store_sqlite is one pass through the store
+# on SQLite, so that package measures the store's lines.) Nothing depends on
+# this package.
 # Postgres is not claimed: no Postgres server runs in a build action.
 mojo_library(
     name = "komira_contacts_store_conformance",
