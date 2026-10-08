@@ -3,7 +3,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The pooled HTTP/1.1 and HTTP/2 client over the komira_async reactor: HttpClient
 # and H2Client, the pools, the retry, redirect and timeout layers, the TLS
-# connector, and an object-store HTTP adapter. It depends on komira_http_core
+# connector, SchemeConnector (plaintext or TLS, fixed when it is made; its
+# branches are proven by komira_objectstore_s3's test_s3_endpoint_scheme and
+# komira_azure_blob's test_azure_fs_scheme_read, which read through it), and
+# an object-store HTTP adapter. It depends on komira_http_core
 # and not on komira_http_server.
 #
 # The TLS tests read the certificates of komira_http_core (exported there); the

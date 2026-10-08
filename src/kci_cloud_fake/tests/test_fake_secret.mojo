@@ -102,7 +102,7 @@ def _graph(
     return (
         String('{"resource":[')
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":') + port
-        + String(',"internal":{},"secretEnv":{')
+        + String(',"internal":{},"scale":{"min":1,"max":2},"secretEnv":{')
         + String('"DB":{"secret":{"resource":"db"},"version":"') + version + String('"},')
         + String('"LEGACY":{"name":"legacy"}}},')
         + String('"uses":[') + uses + String("]},")

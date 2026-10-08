@@ -1,0 +1,92 @@
+{
+  "trace_id": "00000000-0000-0000-0000-000000000000",
+  "success": false,
+  "results": {
+    "tests//negative/coverage:covlow": {
+      "success": "FAIL",
+      "outputs": {
+        "coverage|tests": [
+          "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__covlow__/cov/tests/test_word.xml"
+        ]
+      },
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be": {
+          "errors": [
+            {
+              "message_content": "1183348990231421852",
+              "action_error": {
+                "name": {
+                  "category": "mojo_cov_gate",
+                  "identifier": ""
+                },
+                "key": {
+                  "owner": "tests//negative/coverage:covlow (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)"
+                },
+                "digest": "8b8e064df0191ea59c5c59fe4734499847592c6918af319fd7fc89702c7fdd8d:141",
+                "error_content": "2497671795098395193",
+                "stderr_content": "118032422841056305",
+                "stdout_content": "3476900567878811119",
+                "error_diagnostics": null
+              },
+              "error_tags": [
+                "ACTION_COMMAND_FAILURE",
+                "ANY_ACTION_EXECUTION"
+              ],
+              "cause_index": 0,
+              "error_category": "USER"
+            }
+          ],
+          "success": "FAIL",
+          "outputs": {
+            "coverage|tests": [
+              "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__covlow__/cov/tests/test_word.xml"
+            ]
+          },
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    },
+    "tests//negative/coverage:covlow_census": {
+      "success": "SUCCESS",
+      "outputs": {
+        "coverage|tests": [
+          "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__covlow_census__/cov/tests/test_word.xml",
+          "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__covlow_census__/cov/gate/result.json",
+          "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__covlow_census__/cov/gate/summary.md"
+        ]
+      },
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be": {
+          "errors": [],
+          "success": "SUCCESS",
+          "outputs": {
+            "coverage|tests": [
+              "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__covlow_census__/cov/tests/test_word.xml",
+              "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__covlow_census__/cov/gate/result.json",
+              "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__covlow_census__/cov/gate/summary.md"
+            ]
+          },
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    }
+  },
+  "failures": {},
+  "project_root": "/repo",
+  "truncated": false,
+  "strings": {
+    "118032422841056305": "(left out)",
+    "1183348990231421852": "(left out)",
+    "2497671795098395193": "(left out)",
+    "3476900567878811119": "(left out)"
+  },
+  "error_category": "USER"
+}

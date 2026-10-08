@@ -17,6 +17,9 @@
 #
 # Higher-level surfaces: HttpClient, request_writer, response_parser,
 # state_machine, Service/Layer.
+#
+# Connectors: TlsConnector, and SchemeConnector (plaintext or TLS, fixed
+# when it is made) with its production form KernelSchemeConnector.
 # =============================================================================
 
 from .auth import (
@@ -66,6 +69,13 @@ from .session_cache import (
     SessionCache,
 )
 from .tls_connector import TlsClientStream, TlsConnector
+from .scheme_connector import (
+    KernelSchemeConnector,
+    SchemeConnector,
+    SchemeStream,
+    kernel_plain_scheme_connector,
+    kernel_tls_scheme_connector,
+)
 from .error import (
     HTTP_ERROR_BODY_TOO_LARGE,
     HTTP_ERROR_CANCELLED,

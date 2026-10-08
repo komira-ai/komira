@@ -6,8 +6,9 @@
 #     executable specification of a complete cloud and the offline test
 #     double for everything above the cloud module.
 #   * `FakeLimitedCloud` ("fake-limited")   is DELIBERATELY PARTIAL: it does
-#     not host `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a
-#     catalog that marks `job` CLOUD_BOUND), `table`, `bucket`,
+#     not host `container_job` (NOT_YET by default; ABSENT_BY_DESIGN when
+#     built for a catalog that marks it CLOUD_BOUND), `worker`, `table`,
+#     `bucket`,
 #     `service_account`, `grant`, `queue`, `topic`, `subscription`,
 #     `secret`, `dns_zone`, `dns_record` nor `certificate` (NOT_YET), and it
 #     has no public ingress,
@@ -20,15 +21,15 @@
 # set of roles of each type (the closed world). On the generic shape:
 #   service -> `<id>/identity` (wanted iff no `run_as`), `<id>/run`,
 #              `<id>/public` (wanted iff `public {}`), and one grant per edge
-#   job     -> `<id>/identity`, `<id>/run`, `<id>/schedule` (wanted iff
-#              scheduled), and the same grants
+#   container job, worker -> `<id>/identity`, `<id>/run`, and the same
+#              grants (workloads.mojo lowers a workload's run)
 #   table   -> `<id>/table` (data.mojo; it holds no identity, so no grants)
 #   bucket  -> `<id>/bucket` (it holds no identity, so no grants)
 #   queue, topic, subscription -> `<id>/queue`, `<id>/topic`, `<id>/sub`
 #              (messaging.mojo, from kci's feeds; no identity, no grants)
 #   secret  -> `<id>/secret` (secrets.mojo; the container, no value, no
-#              identity, no grants); a service or job's `secret_env` entry
-#              that names it is an input on its NAME
+#              identity, no grants); a workload's `secret_env` entry that
+#              names it is an input on its NAME
 #   DNS zone, DNS record, certificate -> `<id>/zone`, `<id>/record`,
 #              `<id>/cert` (dns.mojo; no identity, no grants); a record
 #              reads its zone's NAME, and a CNAME its producer's HOST, as
@@ -43,14 +44,14 @@
 # cell) and access. A dependency or a value on another resource is written
 # as that resource's id alone: kci resolves it to the resource's primary
 # node (`run`, `bucket`, `identity`), so this lowering never reads another
-# resource. A service or a job with `run_as` turns its private identity off,
-# its run depends on the account, and its run has the field `run_as`.
+# resource. A workload with `run_as` turns its private identity off, its run
+# depends on the account, and its run has the field `run_as`.
 # `FakeCloud` built with a provider shape (`shapes.mojo`: `aws`, `gcp`,
 # `azure`, `onprem`) lowers to THAT shape's fixed roles and provider kinds
-# instead: on the azure shape a public ingress and a schedule folded into the
-# run node; on the onprem shape a `<id>/vault` beside each identity, a
-# service's `<id>/endpoint` (always wanted; the public role depends on it), a
-# schedule folded into the run node, a grant's helper `r-<h>` (the
+# instead: on the azure shape a public ingress folded into the run node; on
+# the aws shape a worker's `<id>/task`; on the onprem shape a `<id>/vault`
+# beside each identity, a service's `<id>/endpoint` (always wanted; the
+# public role depends on it), a grant's helper `r-<h>` (the
 # Kubernetes Role a RoleBinding binds) where its row names one, and a cell
 # edge folded into the identity as the field `cell.<NAME>`; on the gcp shape
 # a table's indexes and TTL policy as nodes of their own, and a queue as a
@@ -65,7 +66,7 @@
 # A run node's desired fields are EVERY field the catalog models, with the
 # catalog's default filled in where the author wrote none (kci owns every
 # modelled field: writing a default out is not a change, a console edit of
-# one is drift). `env` and `secret_env` of a job included; a bucket's expiry
+# one is drift; workloads.mojo lists a workload's); a bucket's expiry
 # (`never` when unset), versioning and tier (`STANDARD` when unset); a
 # table's key, indexes and TTL (`none` when unset).
 # Provenance is never a field, and neither is retention: kci sets it on the
@@ -118,7 +119,7 @@ from kci_cloud import (
     FIELD_DNS_RECORD,
     FIELD_DNS_ZONE,
     FIELD_GRANT,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
     FIELD_QUEUE,
     FIELD_SECRET,
     FIELD_SERVICE,
@@ -126,6 +127,7 @@ from kci_cloud import (
     FIELD_SUBSCRIPTION,
     FIELD_TABLE,
     FIELD_TOPIC,
+    FIELD_WORKER,
     FINDING_CELL,
     FINDING_LIMIT,
     NOT_YET,
@@ -141,7 +143,7 @@ from kci_cloud import (
     standard_label_rule,
     validation_run_of,
 )
-from kci_resource_proto.resource import Image, Resource, Size, Value
+from kci_resource_proto.resource import Resource
 
 from kci_cloud_fake.data import lower_bucket, lower_table
 from kci_cloud_fake.dns import dns_limits, lower_certificate, lower_record, lower_zone
@@ -154,87 +156,14 @@ from kci_cloud_fake.limits import (
     index_limits,
 )
 from kci_cloud_fake.nodes import FakeNode, live_key
-from kci_cloud_fake.secrets import lower_secret, secret_env_fields
+from kci_cloud_fake.secrets import lower_secret
 from kci_cloud_fake.shapes import (
     ProviderShape,
-    ROLE_BUCKET,
-    ROLE_ENDPOINT,
     ROLE_IDENTITY,
-    ROLE_PUBLIC,
-    ROLE_RUN,
-    ROLE_SCHEDULE,
     ROLE_VAULT,
     helper_role,
 )
-
-
-
-# The catalog's defaults, rendered (a default written out is not a change).
-comptime DEFAULT_PORT = "8080"
-comptime DEFAULT_SIZE = "1000m/512MB"
-comptime DEFAULT_SCALE = "0..10"
-comptime DEFAULT_REQUEST_TIMEOUT = "60s0n"
-comptime DEFAULT_JOB_TIMEOUT = "600s0n"
-comptime DEFAULT_RETRIES = "0"
-comptime DEFAULT_TIMEZONE = "UTC"
-
-
-def _image(img: Optional[Image]) -> String:
-    """The digest and the platform (OS + CPU; empty is the default, so it
-    renders as that default and writing it out is not a change)."""
-    if not img:
-        return String("")
-    var d = String("")
-    if img.value()._oneof0_case == 2:
-        d = img.value().digest.value().copy()
-    var p = img.value().platform.copy()
-    if p.byte_length() == 0:
-        p = String(V1_IMAGE_PLATFORM)
-    return d + String("@") + p
-
-
-def _size(s: Optional[Size]) -> String:
-    if not s:
-        return String(DEFAULT_SIZE)
-    return String(Int(s.value().cpu_millis)) + String("m/") + String(Int(s.value().memory_mb)) + String("MB")
-
-
-def _sorted(var keys: List[String]) -> List[String]:
-    for i in range(1, len(keys)):
-        var k = i
-        while k > 0 and keys[k] < keys[k - 1]:
-            var t = keys[k].copy()
-            keys[k] = keys[k - 1].copy()
-            keys[k - 1] = t^
-            k -= 1
-    return keys^
-
-
-def _env(
-    kind: String,
-    env: Dict[String, Value],
-    mut fields: List[Setting],
-    mut refs: List[InputRef],
-) raises:
-    """`env` in key order: literals as fields, references appended to `refs`
-    (their values are bound at apply time, never rendered here)."""
-    var keys = List[String]()
-    for entry in env.items():
-        keys.append(entry.key.copy())
-    var sorted = _sorted(keys^)
-    for i in range(len(sorted)):
-        ref v = env[sorted[i]]
-        var field = kind + String(".env.") + sorted[i]
-        if v._oneof0_case == 3:
-            ref rf = v.ref_.value()
-            # The producer by its resource id: kci resolves its primary node.
-            refs.append(InputRef(rf.resource.copy(), rf.standard.value().json_name(), field))
-        else:
-            fields.append(Setting(field, v.literal.value()))
-
-
-def _duration(seconds: Int, nanos: Int) -> String:
-    return String(seconds) + String("s") + String(nanos) + String("n")
+from kci_cloud_fake.workloads import lower_run, workload_limits
 
 
 def _identity(r: Resource, field: Int, shape: ProviderShape, own: Bool) raises -> List[LoweredNode]:
@@ -371,138 +300,7 @@ def _lower(
     if field == FIELD_SERVICE_ACCOUNT:
         _lower_edges(r, edges, shape, out)
         return out^
-    var run = r.id + String("/run")
-    var run_deps = List[String]()
-    var account = run_as_of(r)
-    if own:
-        run_deps.append(r.id + String("/") + String(ROLE_IDENTITY))
-    else:
-        # The account by its resource id: kci resolves it to its identity.
-        run_deps.append(account.copy())
-    var run_kind = shape.kind_of(field, String(ROLE_RUN))
-    var fields = List[Setting]()
-    var refs = List[InputRef]()
-    if r._oneof0_case == 1:
-        ref svc = r.service.value()
-        fields.append(Setting(String("img"), _image(svc.image)))
-        var port = String(Int(svc.port)) if svc.port != 0 else String(DEFAULT_PORT)
-        fields.append(Setting(String("port"), port.copy()))
-        for i in range(len(svc.args)):
-            fields.append(Setting(String("arg"), svc.args[i].copy()))
-        _env(String("service"), svc.env, fields, refs)
-        secret_env_fields(String("service"), svc.secret_env, fields, refs)
-        fields.append(Setting(String("size"), _size(svc.size)))
-        var scale = String(DEFAULT_SCALE)
-        if svc.scale:
-            var lo = String("0")
-            if svc.scale.value().min:
-                lo = String(Int(svc.scale.value().min.value()))
-            scale = lo + String("..") + String(Int(svc.scale.value().max))
-        fields.append(Setting(String("scale"), scale^))
-        fields.append(Setting(String("health"), svc.health_path.copy()))
-        var timeout = String(DEFAULT_REQUEST_TIMEOUT)
-        if svc.request_timeout:
-            timeout = _duration(
-                Int(svc.request_timeout.value().seconds), Int(svc.request_timeout.value().nanos)
-            )
-        fields.append(Setting(String("timeout"), timeout^))
-        fields.append(Setting(String("concurrency"), String(Int(svc.max_concurrency))))
-        var public = svc._oneof0_case == 1
-        var has_public = shape.has(FIELD_SERVICE, String(ROLE_PUBLIC))
-        if not has_public:
-            # Folded: the ingress is a setting of the run object.
-            fields.append(
-                Setting(String("ingress"), mechanism.copy() if public else String("none"))
-            )
-        if not own:
-            fields.append(Setting(String("run_as"), account.copy()))
-        fields.append(Setting(String("serves"), String("true")))
-        out.append(LoweredNode(run, r.id, run_kind, run_deps^, refs^, fields^))
-        # What the public role fronts: the run, or the endpoint in front of it.
-        var front = run.copy()
-        if shape.has(FIELD_SERVICE, String(ROLE_ENDPOINT)):
-            var ep = List[Setting]()
-            ep.append(Setting(String("port"), port.copy()))
-            var ep_deps = List[String]()
-            ep_deps.append(run.copy())
-            front = r.id + String("/") + String(ROLE_ENDPOINT)
-            out.append(
-                LoweredNode(
-                    front.copy(),
-                    r.id,
-                    shape.kind_of(FIELD_SERVICE, String(ROLE_ENDPOINT)),
-                    ep_deps^,
-                    List[InputRef](),
-                    ep^,
-                )
-            )
-        if has_public:
-            var pub = List[Setting]()
-            pub.append(Setting(String("mechanism"), mechanism.copy()))
-            var deps = List[String]()
-            deps.append(front.copy())
-            out.append(
-                LoweredNode(
-                    r.id + String("/") + String(ROLE_PUBLIC),
-                    r.id,
-                    shape.kind_of(FIELD_SERVICE, String(ROLE_PUBLIC)),
-                    deps^,
-                    List[InputRef](),
-                    pub^,
-                    public,
-                )
-            )
-    else:
-        ref job = r.job.value()
-        fields.append(Setting(String("img"), _image(job.image)))
-        for i in range(len(job.args)):
-            fields.append(Setting(String("arg"), job.args[i].copy()))
-        _env(String("job"), job.env, fields, refs)
-        secret_env_fields(String("job"), job.secret_env, fields, refs)
-        fields.append(Setting(String("size"), _size(job.size)))
-        var retries = String(DEFAULT_RETRIES)
-        if job.max_retries:
-            retries = String(Int(job.max_retries.value()))
-        fields.append(Setting(String("retries"), retries^))
-        var timeout = String(DEFAULT_JOB_TIMEOUT)
-        if job.timeout:
-            timeout = _duration(Int(job.timeout.value().seconds), Int(job.timeout.value().nanos))
-        fields.append(Setting(String("timeout"), timeout^))
-        var sch = List[Setting]()
-        var scheduled = job._oneof0_case == 2
-        if scheduled:
-            ref s = job.schedule.value()
-            sch.append(Setting(String("cron"), s.cron.copy()))
-            var tz = s.timezone.copy()
-            if tz.byte_length() == 0:
-                tz = String(DEFAULT_TIMEZONE)
-            sch.append(Setting(String("tz"), tz^))
-        var has_schedule = shape.has(FIELD_JOB, String(ROLE_SCHEDULE))
-        if not has_schedule:
-            # Folded: the schedule is the run object's own trigger.
-            fields.append(
-                Setting(String("trigger"), String("schedule") if scheduled else String("on-demand"))
-            )
-            for i in range(len(sch)):
-                fields.append(Setting(String("trigger.") + sch[i].key, sch[i].value.copy()))
-        if not own:
-            fields.append(Setting(String("run_as"), account.copy()))
-        fields.append(Setting(String("serves"), String("false")))
-        out.append(LoweredNode(run, r.id, run_kind, run_deps^, refs^, fields^))
-        if has_schedule:
-            var deps = List[String]()
-            deps.append(run.copy())
-            out.append(
-                LoweredNode(
-                    r.id + String("/") + String(ROLE_SCHEDULE),
-                    r.id,
-                    shape.kind_of(FIELD_JOB, String(ROLE_SCHEDULE)),
-                    deps^,
-                    List[InputRef](),
-                    sch^,
-                    scheduled,
-                )
-            )
+    out.extend(lower_run(r, own, mechanism, shape))
     _lower_edges(r, edges, shape, out)
     return out^
 
@@ -626,7 +424,8 @@ struct FakeCloud(ConformanceTarget, Movable):
     def implemented(self) -> List[Int]:
         var all = List[Int]()
         all.append(FIELD_SERVICE)
-        all.append(FIELD_JOB)
+        all.append(FIELD_CONTAINER_JOB)
+        all.append(FIELD_WORKER)
         all.append(FIELD_TABLE)
         all.append(FIELD_BUCKET)
         all.append(FIELD_SERVICE_ACCOUNT)
@@ -681,6 +480,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         index_limits(r, self._shape, self._id, out)
         messaging_limits(r, feeds, self._shape, self._id, out)
         dns_limits(r, self._shape, self._id, out)
+        workload_limits(r, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
@@ -769,13 +569,15 @@ struct FakeCloud(ConformanceTarget, Movable):
 
 
 struct FakeLimitedCloud(ConformanceTarget, Movable):
-    """The deliberately partial fake cloud: no `job`, no `bucket`, no
-    `service_account`, no `grant` (NOT_YET), no public ingress.
+    """The deliberately partial fake cloud: no `container_job`, no
+    `worker`, no `bucket`, no `service_account`, no `grant` (NOT_YET), no
+    public ingress.
 
-    `job_absence` is how it declares the missing `job`: NOT_YET (the default,
-    for the v1 catalog, where `job` is PORTABLE) or ABSENT_BY_DESIGN (for a
-    catalog that marks `job` CLOUD_BOUND, which is how the early refusal of a
-    cloud-bound shape is tested before the catalog has one)."""
+    `job_absence` is how it declares the missing `container_job`: NOT_YET
+    (the default, for the v1 catalog, where it is PORTABLE) or
+    ABSENT_BY_DESIGN (for a catalog that marks it CLOUD_BOUND, which is how
+    the early refusal of a cloud-bound shape is tested before the catalog
+    has one)."""
 
     var _id: String
     var _job_absence: Int
@@ -810,12 +612,13 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
         var l = List[Absence]()
         if self._job_absence == ABSENT_BY_DESIGN:
             l.append(
-                Absence(FIELD_JOB, ABSENT_BY_DESIGN, String("fake-limited will never run jobs"))
+                Absence(FIELD_CONTAINER_JOB, ABSENT_BY_DESIGN, String("fake-limited will never run jobs"))
             )
         else:
             l.append(
-                Absence(FIELD_JOB, NOT_YET, String("fake-limited has no run-to-completion runner"))
+                Absence(FIELD_CONTAINER_JOB, NOT_YET, String("fake-limited has no run-to-completion runner"))
             )
+        l.append(Absence(FIELD_WORKER, NOT_YET, String("fake-limited has no always-on runner")))
         l.append(Absence(FIELD_TABLE, NOT_YET, String("fake-limited has no tables")))
         l.append(Absence(FIELD_BUCKET, NOT_YET, String("fake-limited has no object store")))
         l.append(
