@@ -786,7 +786,8 @@ every build that links the library; see [`../native`](../native/README.md).
 linux-x86_64 a coverage build: each test (its `test_srcs`, its README's
 examples and the `mojo_test` targets it names in `coverage_tests`) built at
 -O0 with line tables and run under kcov, its branch coverage, and the gate
-that its conda package waits for. Every release action stays as it is. The
+that its conda package waits for; and every `mojo_shared_lib` its drivers'
+runs and a reported (never enforced) gate. Every release action stays as it is. The
 rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 
 ## Errors

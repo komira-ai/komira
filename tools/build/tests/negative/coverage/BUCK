@@ -1,7 +1,7 @@
 load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
 load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage/kcov:defs.bzl", "cov_link_dir", "cov_run_dir")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_shared_lib_rule", "mojo_test")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("//functional/coverage:defs.bzl", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "kcov_stub_dir")
@@ -167,6 +167,37 @@ mojo_library(
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     coverage_run = ":lostdir_run",
+    import_name = "lostlib",
+    test_srcs = ["tests/test_lost.mojo"],
+)
+
+# Test 43. cov_run.sh's refusal of a kcov argument too long for kcov (2048
+# bytes or more: kcov reads each as a path and fails "Too long string!"),
+# made to trip with a limit of 64 bytes, which the --include-path argument
+# passes: the run fails before kcov starts, naming the argument. RED:
+# tests//negative/coverage:longarg[coverage][tests][test_lost]
+cov_plant(
+    name = "longarg_run_sh",
+    expr = "s|^KCOV_ARG_MAX=2047$|KCOV_ARG_MAX=64|",
+    out = "cov_run.sh",
+    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+)
+
+cov_run_dir(
+    name = "longarg_run",
+    exec_compatible_with = LINUX_X86_64,
+    script = ":longarg_run_sh",
+)
+
+mojo_library(
+    name = "longarg",
+    srcs = [
+        "lostlib/__init__.mojo",
+        "lostlib/value.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_run = ":longarg_run",
     import_name = "lostlib",
     test_srcs = ["tests/test_lost.mojo"],
 )
@@ -856,4 +887,97 @@ cov_link_line_check(
     lib = ":branchnoprof",
     script = "//functional/coverage:link_line.sh",
     src = "tests/test_one.mojo",
+)
+
+# ---- Shared libraries (mojo_shared_lib) -----------------------------------------
+
+# Test 43. cov_run.sh with kcov told to skip the shared libraries a driver
+# loads (--skip-solibs, as for a library's test): the driver's report would
+# hold the driver alone, and the run must fail instead, since the report must
+# hold the library's first source (--must-contain). RED:
+# tests//negative/coverage:covso_skip[coverage][tests][covso_one_driver]
+cov_plant(
+    name = "covso_skip_run_sh",
+    expr = 's#^\\[ -n "\\$SOLIB" \\] || set -- "\\$@" --arg --skip-solibs$#set -- "$@" --arg --skip-solibs#',
+    out = "cov_run.sh",
+    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+)
+
+cov_run_dir(
+    name = "covso_skip_run",
+    exec_compatible_with = LINUX_X86_64,
+    script = ":covso_skip_run_sh",
+)
+
+mojo_shared_lib(
+    name = "covso_skip",
+    srcs = ["covso/covso_one.mojo"],
+    coverage_debug = _LINK,
+    coverage_run = ":covso_skip_run",
+    exports = ["covso_one"],
+    gate_srcs = ["tests/covso_one_driver.mojo"],
+    out_name = "covso_one",
+)
+
+# Test 46. A shared library whose driver passes in its gate and fails under
+# kcov (it checks TracerPid), coverage from the switch. With
+# -c komira.coverage=true, :covso_traced (the published file) is GREEN:
+# nothing of a shared library waits for its coverage runs or gate, and it
+# ships no conda package; its [coverage][tests][covso_traced_driver] is RED
+# ("COVERAGE RUN FAILED").
+mojo_shared_lib(
+    name = "covso_traced",
+    srcs = ["covso/covso_one.mojo"],
+    exports = ["covso_one"],
+    gate_srcs = ["tests/covso_traced_driver.mojo"],
+)
+
+# Test 46. The rule called without the macro, its gate in enforce mode: the
+# analysis refuses it, in every cell (a shared library's coverage is
+# reported, never enforced). RED: tests//negative/coverage:covso_enforce
+mojo_shared_lib_rule(
+    name = "covso_enforce",
+    srcs = ["covso/covso_one.mojo"],
+    coverage_debug = _LINK,
+    coverage_gate = _GATE,
+    coverage_mode = "enforce",
+    coverage_run = "komira//tools/build/coverage/kcov:cov_run",
+    exports = ["covso_one"],
+)
+
+# Test 43. A shared library whose one source is generated (a build output):
+# no source of it is measured, so its driver's run could not show that kcov
+# measured the library, and is refused, saying so. RED:
+# tests//negative/coverage:covso_gen[coverage][tests][covso_one_driver]
+cov_plant(
+    name = "covso_gen_src",
+    expr = "s/var one: Int32 = 1/var one: Int32 = 2 - 1/",
+    out = "covso/covso_gen.mojo",
+    src = "covso/covso_one.mojo",
+)
+
+mojo_shared_lib(
+    name = "covso_gen",
+    srcs = [":covso_gen_src"],
+    coverage_debug = _LINK,
+    exports = ["covso_one"],
+    gate_srcs = ["tests/covso_one_driver.mojo"],
+    out_name = "covso_one",
+)
+
+# Test 46. A welded test at the path of one of the library's sources: the
+# gate stages both at that repository path, so the analysis refuses it,
+# naming the test. RED: tests//negative/coverage:testpath
+mojo_library(
+    name = "testpath",
+    srcs = [
+        "lostlib/__init__.mojo",
+        "lostlib/value.mojo",
+    ],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = _GATE,
+    coverage_mode = "census",
+    import_name = "lostlib",
+    test_srcs = ["lostlib/value.mojo"],
 )
