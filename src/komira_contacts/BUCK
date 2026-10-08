@@ -10,7 +10,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_access and test_validate need no database: the access rules and the
 # validation are pure. test_store_sqlite runs one pass through every store
 # call on SQLite, a `test_deps` package (it reaches the tests only, never a
-# consumer), so this package measures the store's lines. The store's full
+# consumer), so this package measures the store's lines; test_store_races
+# plays a peer that writes between the store's read and its guarded write
+# (the conflict paths one SQLite connection never reaches). The store's full
 # contract, on SQLite and Firestore (MockFirestore), is
 # //src/tests/conformance/komira_contacts_store_conformance.
 mojo_library(
@@ -27,6 +29,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_access.mojo",
+        "tests/test_store_races.mojo",
         "tests/test_store_sqlite.mojo",
         "tests/test_validate.mojo",
     ],
@@ -34,11 +37,14 @@ mojo_library(
 )
 
 # The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps). The lint reads `deps` only, so the test that
-# imports the `test_deps` package (komira_db_sqlite) is left out of it.
+# (tools/build/lint: mojo_deps). The lint reads `deps` only, so the tests that
+# import the `test_deps` package (komira_db_sqlite) are left out of it.
 mojo_deps(
     name = "deps_lint",
     buck = "BUCK",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/test_store_sqlite.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = [
+        "tests/test_store_races.mojo",
+        "tests/test_store_sqlite.mojo",
+    ]),
     visibility = ["komira//:tests_lints"],
 )

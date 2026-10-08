@@ -21,6 +21,10 @@
 #   stale key  a uid key naming no card is taken over by the next create
 #   access     another subject gets the not-found text on a PERSONAL book;
 #              a non-admin cannot write a SHARED book
+#   order      two SHARED books of one name list by id, whatever order the
+#              database returns them in; two live cards list by uid
+#   misses     a book or card id that does not exist is not found; a stale
+#              delete is refused and rolled back (the next write still runs)
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -35,6 +39,7 @@ from komira_proto_codec import decode_json
 from komira_contacts_proto.contacts import BookKind, Card
 
 from komira_contacts import (
+    BOOKS,
     CARD_UIDS,
     Caller,
     ContactsStore,
@@ -50,6 +55,8 @@ comptime Rt = BlockingRuntime[NoopSink]
 comptime Store = ContactsStore[SqliteDatabase]
 comptime OK = "ok"
 comptime NO_SUCH_ID = "00000000-0000-7000-8000-000000000000"
+comptime LOW_ID = "00000000-0000-7000-8000-000000000001"
+comptime HIGH_ID = "00000000-0000-7000-8000-000000000002"
 
 
 def _alice() -> Caller:
@@ -239,8 +246,66 @@ def check_stale_key() raises:
     assert_equal(_err_create(store, reactor, al, b.id, "u-crash"), ERR_UID_TAKEN, "the key holds the uid again")
 
 
+def _book_vals(id: StaticString, name: StaticString) -> List[DbValue]:
+    """A SHARED book's row, in the store's book column order."""
+    var vals = List[DbValue]()
+    vals.append(DbValue.text(String(id)))
+    vals.append(DbValue.text(String("SHARED")))
+    vals.append(DbValue.text(String()))
+    vals.append(DbValue.text(String(name)))
+    vals.append(DbValue.int8(Int64(0)))
+    vals.append(DbValue.int8(Int64(1)))
+    vals.append(DbValue.int8(Int64(0)))
+    return vals^
+
+
+def _book_cols() -> List[String]:
+    var cols = List[String]()
+    cols.append(String("id"))
+    cols.append(String("kind"))
+    cols.append(String("owner"))
+    cols.append(String("name"))
+    cols.append(String("is_default"))
+    cols.append(String("version"))
+    cols.append(String("modseq"))
+    return cols^
+
+
+def check_order_and_misses() raises:
+    var store = _store()
+    var rt = Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var al = _alice()
+    # Two SHARED books of one name, the higher id written first: only the id
+    # key puts the lower one first (SQLite returns them as written).
+    _ = store.database().put[Rt](reactor, String(BOOKS), _book_cols(), _book_vals(HIGH_ID, "Dup"))
+    _ = store.database().put[Rt](reactor, String(BOOKS), _book_cols(), _book_vals(LOW_ID, "Dup"))
+    var books = store.list_books[Rt](reactor, _bob())
+    assert_equal(len(books), 2)
+    assert_equal(books[0].id, LOW_ID, "same kind and name: by id")
+    assert_equal(books[1].id, HIGH_ID, "same kind and name: by id")
+    # Two live cards, "z" written first: only the uid sort puts "a" first.
+    var b = store.create_book[Rt](reactor, al, BookKind.PERSONAL, "B", False)
+    var z = store.create_card[Rt](reactor, al, b.id, _uid_card("z", "Z"))
+    _ = store.create_card[Rt](reactor, al, b.id, _uid_card("a", "A"))
+    assert_equal(_uids(store.list_cards[Rt](reactor, al, b.id)), "a,z", "listed by uid")
+    # Ids that do not exist.
+    assert_equal(_err_create(store, reactor, al, NO_SUCH_ID, "n"), ERR_NOT_FOUND, "no such book")
+    assert_equal(_err_get(store, reactor, al, b.id, NO_SUCH_ID), ERR_NOT_FOUND, "no such card")
+    # A stale delete is refused, changes nothing, and is rolled back: the
+    # transaction is closed, so the next write runs.
+    try:
+        _ = store.delete_card[Rt](reactor, al, b.id, z.id, UInt64(9))
+        raise Error("a stale delete succeeded")
+    except e:
+        assert_equal(String(e), ERR_VERSION_CONFLICT)
+    assert_equal(_uids(store.list_cards[Rt](reactor, al, b.id)), "a,z", "the stale delete changed nothing")
+    assert_equal(store.delete_card[Rt](reactor, al, b.id, z.id, z.version), UInt64(3), "the next write runs")
+
+
 def main() raises:
     check_books()
     check_cards_and_feed()
     check_stale_key()
+    check_order_and_misses()
     print("PASS komira_contacts test_store_sqlite")
