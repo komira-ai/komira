@@ -1,0 +1,10 @@
+# The planted findings of held.mojo and shim.c, each rule counted exactly: a
+# finding the reader misses leaves a row above its count, which fails the build.
+date	src/komira_a/held.mojo	15	planted
+home_path	src/komira_a/held.mojo	4	planted
+ip	src/komira_a/held.mojo	8	planted
+host	src/komira_a/held.mojo	7	planted
+email	src/komira_a/held.mojo	3	planted
+commit_sha	src/komira_a/held.mojo	5	planted
+commit_sha	src/komira_a/shim.c	3	planted
+ip	src/komira_a/near.mojo	1	 

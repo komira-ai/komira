@@ -12,10 +12,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # set of dimensions that signs and sends each call through komira_aws_core
 # over the transport it is given.
 #
-# Hand-written, not generated: the CloudWatch model in the pinned botocore
-# archive (//third_party/botocore:cloudwatch) declares the smithy-rpc-v2-cbor
-# protocol, which the AWS generator refuses by name; the request is the
-# awsJson 1.0 form the service also serves.
+# Hand-written, not generated: generating the CloudWatch client from the
+# pinned botocore model (//third_party/botocore:cloudwatch) into this package
+# is a follow-up. The model declares smithy-rpc-v2-cbor and also lists json
+# and query; the AWS generator chooses json, the first of those it supports.
+# The request is the awsJson 1.0 form.
 #
 # The endpoint is built by komira_aws_core's generic `aws_service_endpoint`
 # (`cloudwatch_endpoint` for the regional one), not resolved through the

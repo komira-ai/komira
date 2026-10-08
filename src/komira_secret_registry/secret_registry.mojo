@@ -5,8 +5,7 @@
 #
 # WHAT THIS IS. `SecretRegistry` is the per-execution side table that binds a
 # query's secret-bearing nodes (`node_id`) to their OPAQUE `secret_ref` handles,
-# and OWNS the capability (`Store`) that resolves those handles. It is the
-# secrets counterpart of `FsRegistry` (`komira_fs_registry`): a per-execution
+# and OWNS the capability (`Store`) that resolves those handles: a per-execution
 # value, constructed at the SDK/engine boundary, threaded by value, consulted per
 # secret-bearing node, dropped at execution exit.
 #
@@ -26,8 +25,7 @@
 #   (a) the registry is not a destroy-recreate struct: it is a per-execution
 #       value constructed at the engine boundary, threaded by value and dropped
 #       at execution exit, so allocator byte reuse across recreate cycles
-#       cannot reinterpret a stale entry (the same reasoning as FsRegistry's
-#       container).
+#       cannot reinterpret a stale entry.
 #   (b) `SecretRegistryEntry` is a FLAT value (an `Int` and two `String`s) with
 #       no `SecretValue` field. The Slab moves elements, never reinterprets
 #       their bytes, and there is no heap-inside-heap to leak. A `SecretValue`
@@ -51,11 +49,11 @@
 # reveal, and since the registry has no `SecretValue` field there is nothing
 # secret left to wipe when it drops.
 #
-# FAIL-FAST ON A MISSING BINDING (deliberately unlike FsRegistry). An unbound
-# `node_id` RAISES: a secret-bearing node with no registry binding is a wiring
-# error, never a silent local fallback. FsRegistry falls back to the LOCAL file
-# system for an unbound node, a benign default; a MISSING SECRET has no benign
-# default, so this raises.
+# FAIL-FAST ON A MISSING BINDING (deliberately unlike komira_plan_expr's
+# `FsBindings`). An unbound `node_id` RAISES: a secret-bearing node with no
+# registry binding is a wiring error, never a silent local fallback. An
+# unbound file-system node resolves to the LOCAL file system, a benign
+# default; a MISSING SECRET has no benign default, so this raises.
 #
 # ENCAPSULATION: the public surface is `register` (an Int and two Strings in)
 # and `reveal_for[Consumer]` (the reveal; a read-only `Span` reaches the
@@ -94,9 +92,9 @@ from .credential_consumer import CredentialConsumer
 struct SecretRegistry[Store: SecretStore](Movable, Deinitable):
     """The per-execution `node_id -> secret_ref` side table that OWNS the
     resolve capability (`Store`) and exposes the connector reveal boundary. A
-    per-execution VALUE (not destroy-recreate; the same reasoning as
-    FsRegistry's container), constructed at the engine boundary, threaded by
-    value, dropped at execution exit. Movable, not Copyable.
+    per-execution VALUE (not destroy-recreate), constructed at the engine
+    boundary, threaded by value, dropped at execution exit. Movable, not
+    Copyable.
 
     `Store` is the capability owned by value, a MONOMORPH (no type erasure).
     The intended shape is a store that authorizes and then audits around an
@@ -166,7 +164,7 @@ struct SecretRegistry[Store: SecretStore](Movable, Deinitable):
     def _index_for(self, node_id: Int) -> Int:
         """Slab index of the entry for `node_id`, or -1 if unbound. Linear scan
         (the table is tiny: one entry per secret-bearing source). Mirrors
-        `FsRegistry._index_for`."""
+        `FsBindings._index_for`."""
         for i in range(len(self._entries)):
             if self._entries[i].secret_node_id == node_id:
                 return i
@@ -185,8 +183,8 @@ struct SecretRegistry[Store: SecretStore](Movable, Deinitable):
         """The connector reveal boundary. For the secret bound to `node_id`:
           1. `_index_for(node_id)` gives the binding's `secret_ref` (an UNBOUND
              node RAISES: fail-closed, never a silent local fallback; a missing
-             secret is a wiring error, unlike FsRegistry's benign local-fs
-             default);
+             secret is a wiring error, unlike an unbound file-system node's
+             benign local-fs default);
           2. `self._store.resolve(secret_ref)` gives a LOCAL `SecretValue`. A
              composed store's authorization check and audit record fire HERE,
              inside this ONE call: a deny RAISES before any value is read (the

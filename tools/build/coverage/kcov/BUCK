@@ -3,7 +3,7 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "cov_link_dir", "kcov_tool", "kcov_tool_cases")
+load(":defs.bzl", "cov_link_dir", "cov_run_dir", "kcov_tool", "kcov_tool_cases")
 
 # debug_relocate: a directory path in a file overwritten by a placeholder of
 # the same length.
@@ -100,10 +100,28 @@ cov_link_dir(
     visibility = ["PUBLIC"],
 )
 
+# The directory every mojo_library's coverage run runs from
+# (tools/build/mojo/coverage.bzl): cov_run.sh, which runs one test's coverage
+# binary under kcov through the release gate's runner and normalizes its
+# report; kcov; cov_normalize.
+cov_run_dir(
+    name = "cov_run",
+    exec_compatible_with = LINUX_X86_64,
+    script = "cov_run.sh",
+    visibility = ["PUBLIC"],
+)
+
+# For planted defects (the tests cell copies it with one fault: test 43).
+export_file(
+    name = "cov_run.sh",
+    visibility = ["PUBLIC"],
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = [
         "cov_normalize_cases.sh",
+        "cov_run.sh",
         "cov_zig_cases.sh",
         "debug_relocate_cases.sh",
     ],
