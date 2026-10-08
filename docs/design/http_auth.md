@@ -2,7 +2,7 @@
 
 Status: partly built. One slice is in review: the bearer-JWT middleware with one RS256 trust anchor (#810, stacked
 on #790). The rest is design, and each section says which. Where this document says "today" it means the code on
-`main` plus #790, #794 and #810; "target" marks what that code does not do yet, with the package that delivers it.
+`main` plus #790 and #810; "target" marks what that code does not do yet, with the package that delivers it.
 
 ## What is it for, and what is out of scope?
 
@@ -31,8 +31,8 @@ code with PKCE), token exchange (RFC 8693), DPoP (RFC 9449), mTLS-bound tokens (
 |---|---|---|
 | `Principal{scheme, subject, claims, presented}`, `PresentedCredential` | `komira_http_server` | #790. On `main` a `Principal` is a subject and claims only. |
 | `AuthzPort`, `AuthzAction`, `AuthzResource{kind, id, attributes}`, the two reference conformers | `komira_authz_api` | #790 replaces `main`'s scope-shaped `AuthzResource` with an opaque `kind` and `id`. |
-| strict JWK and JWK Set parse and render: OKP Ed25519, EC P-256, RSA 2048 to 4096 bits | `komira_jwks` | #794. On `main`: Ed25519 render only. |
-| `komira_json.refuse_duplicate_keys` | `komira_json` | #794 |
+| strict JWK and JWK Set parse and render: OKP Ed25519, EC P-256, RSA 2048 to 4096 bits | `komira_jwks` | on `main` |
+| `komira_json.refuse_duplicate_keys` | `komira_json` | on `main` |
 | RS256 JWS verify against a JWK Set | `komira_crypto/rs256_jwks.mojo` | on `main` |
 | `BearerJwtMiddleware[V]`, `Rs256JwksVerifier`, the JWKS cache, the flags | `komira_http_auth` | #810: one RS256 trust anchor per process |
 | ES256 and EdDSA verify, a strict JOSE header and claims policy shared by every algorithm, signing, a key ring | `komira_jose` | target, not written. The RS256 verifier moves here from `komira_crypto`. |
