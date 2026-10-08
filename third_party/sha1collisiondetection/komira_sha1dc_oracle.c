@@ -3,7 +3,8 @@
  * tests that use it as an oracle (src/tests/conformance/komira_git_conformance).
  * Compiled into the library beside upstream's sha1.c and ubc_check.c.
  *
- * The context size lets a caller allocate a SHA1_CTX it cannot declare; the
+ * The context size lets a caller allocate a SHA1_CTX it cannot declare and
+ * komira_sha1dc_last_recompression reads two of its fields; the
  * disturbance-vector accessors read upstream's sha1_dvs table, which is data
  * a caller outside C cannot address by name.
  */
@@ -43,3 +44,16 @@ int komira_sha1dc_dv_field(int dv, int field) {
 /* Word t (0 <= t < 80) of sha1_dvs[dv].dm, the disturbance vector's
  * expanded message difference. */
 uint32_t komira_sha1dc_dv_word(int dv, int t) { return sha1_dvs[dv].dm[t]; }
+
+/* The last disturbance vector the context's block check recompressed:
+ * ctx->m2, its 80-word expanded message, into m2, and ctx->ihv2, the
+ * chaining value that recompression started from, into ihv2. */
+void komira_sha1dc_last_recompression(const SHA1_CTX *ctx, uint32_t ihv2[5],
+                                      uint32_t m2[80]) {
+  for (int i = 0; i < 5; i++) {
+    ihv2[i] = ctx->ihv2[i];
+  }
+  for (int t = 0; t < 80; t++) {
+    m2[t] = ctx->m2[t];
+  }
+}

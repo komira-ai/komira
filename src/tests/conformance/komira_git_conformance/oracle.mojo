@@ -12,7 +12,8 @@
 #     no pointer to it; the context holds no pointer itself (no callback is
 #     set).
 #   * Every other pointer passed (input bytes, the 20-byte digest, the
-#     80-word block and the 1-word mask of `ubc_check`) is borrowed from the
+#     80-word block and the 1-word mask of `ubc_check`, the 5- and 80-word
+#     outputs of `last_recompression`) is borrowed from the
 #     caller for the one synchronous call; C keeps none of them.
 #   * Nothing C returns is a pointer.
 # =============================================================================
@@ -76,6 +77,21 @@ struct CSha1dc(Movable):
             out.unsafe_ptr(), self._ctx.unsafe_ptr()
         )
         return rc != 0
+
+    def last_recompression(
+        mut self,
+        mut ihv2: InlineArray[UInt32, 5],
+        mut m2: InlineArray[UInt32, 80],
+    ):
+        """The last disturbance vector upstream's block check recompressed:
+        ctx->ihv2 (the chaining value it started from) and ctx->m2 (its
+        expanded message)."""
+        # SAFETY: ihv2 is 5 words and m2 80, both borrowed for the call, and
+        # C writes exactly that many; it reads two fields of the context,
+        # which is as in __init__.
+        external_call["komira_sha1dc_last_recompression", NoneType](
+            self._ctx.unsafe_ptr(), ihv2.unsafe_ptr(), m2.unsafe_ptr()
+        )
 
 
 def c_ubc_check(w: InlineArray[UInt32, 80]) -> UInt32:

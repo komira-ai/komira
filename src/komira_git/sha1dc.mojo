@@ -2,8 +2,8 @@
 # komira_git/sha1dc.mojo -- SHA-1 with collision detection (sha1dc).
 # =============================================================================
 #
-# A port of sha1collisiondetection (Marc Stevens and Dan Shumow, MIT
-# License; lib/sha1.c of release stable-v1.0.3), the SHA-1 git hashes
+# A port of sha1collisiondetection (MIT License, notice at the end of this
+# header; lib/sha1.c of release stable-v1.0.3), the SHA-1 git hashes
 # objects with. It computes SHA-1 and, for every 64-byte block, checks
 # whether the block is one half of a near-collision built from one of 32
 # known disturbance vectors (sha1dc_ubc.mojo): for each vector whose
@@ -25,6 +25,41 @@
 # Upstream unrolls each step with rotating register names; this port keeps
 # one register order (a, b, c, d, e) and unrolls at compile time, so a stored
 # state is (a, b, c, d, e) before the step it is named for.
+#
+# -----------------------------------------------------------------------------
+# Upstream attribution (sha1collisiondetection, LICENSE.txt):
+#
+#   MIT License
+#
+#   Copyright (c) 2017:
+#       Marc Stevens
+#       Cryptology Group
+#       Centrum Wiskunde & Informatica
+#       P.O. Box 94079, 1090 GB Amsterdam, Netherlands
+#       marc@marc-stevens.nl
+#
+#       Dan Shumow
+#       Microsoft Research
+#       danshu@microsoft.com
+#
+#   Permission is hereby granted, free of charge, to any person obtaining a
+#   copy of this software and associated documentation files (the
+#   "Software"), to deal in the Software without restriction, including
+#   without limitation the rights to use, copy, modify, merge, publish,
+#   distribute, sublicense, and/or sell copies of the Software, and to permit
+#   persons to whom the Software is furnished to do so, subject to the
+#   following conditions:
+#
+#   The above copyright notice and this permission notice shall be included
+#   in all copies or substantial portions of the Software.
+#
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+#   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+#   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+#   NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+#   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+#   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+#   USE OR OTHER DEALINGS IN THE SOFTWARE.
 # =============================================================================
 
 from .sha1dc_ubc import _DV_COUNT, _dv_field, _dv_word, _ubc_check
@@ -226,6 +261,13 @@ struct Sha1dc(Copyable, Movable):
     var _use_ubc: Bool
     var _detect: Bool
     var _reduced_round: Bool
+    # The last disturbance vector `_process` recompressed, as upstream's
+    # SHA1_CTX keeps it: its expanded message (the block's words xor the
+    # DV's difference) and the chaining value the recompression started
+    # from. Zero until a DV is recompressed; komira_git_conformance compares
+    # them with upstream's ctx->m2 and ctx->ihv2.
+    var _m2: _Words
+    var _ihv2: _State
 
     def __init__(out self):
         """An empty hash state with upstream's default switches."""
@@ -237,6 +279,8 @@ struct Sha1dc(Copyable, Movable):
         self._use_ubc = True
         self._detect = True
         self._reduced_round = False
+        self._m2 = _Words(fill=0)
+        self._ihv2 = _State(fill=0)
 
     def set_safe_hash(mut self, on: Bool):
         """Whether a detected block is compressed twice more (default on), so
@@ -348,21 +392,19 @@ struct Sha1dc(Copyable, Movable):
             mask = _ubc_check(w)
         if mask == 0:
             return
-        var m2 = _Words(uninitialized=True)
-        var ihv2 = _State(fill=0)
         var ihvtmp = _State(fill=0)
         for dv in range(_DV_COUNT):
             if ((mask >> UInt32(dv)) & 1) == 0:
                 continue
             for t in range(16):
-                m2[t] = w[t] ^ _dv_word(dv, t)
-            _expand(m2)
+                self._m2[t] = w[t] ^ _dv_word(dv, t)
+            _expand(self._m2)
             if _dv_field(dv, 3) == 58:
-                _recompress[58](m2, s58, ihv2, ihvtmp)
+                _recompress[58](self._m2, s58, self._ihv2, ihvtmp)
             else:
-                _recompress[65](m2, s65, ihv2, ihvtmp)
+                _recompress[65](self._m2, s65, self._ihv2, ihvtmp)
             if _same(ihvtmp, self._ihv) or (
-                self._reduced_round and _same(ihv1, ihv2)
+                self._reduced_round and _same(ihv1, self._ihv2)
             ):
                 self._found = True
                 if self._safe_hash:

@@ -82,21 +82,30 @@ the SHA-1/SHA-256 compatibility map) is not here.
 ## Collision detection
 
 A SHA-1 id is computed as git computes it, with sha1collisiondetection
-(Marc Stevens and Dan Shumow): every 64-byte block is checked against the
-32 disturbance vectors of the known SHA-1 collision attacks, and a block
-that is one half of such a near-collision is reported. Both SHAttered PDFs
-are reported; ordinary input hashes to plain SHA-1. With detection on, the
-digest of a reported input is upstream's "safe hash" (the block is
-compressed twice more), not the SHA-1 its colliding twin shares.
-`sha1dc`, `Sha1dc.digest` and `hash_object` raise instead of returning it.
+(see the licence notice in `sha1dc.mojo`): every 64-byte block is checked
+against the 32 disturbance vectors of the known SHA-1 collision attacks,
+and a block that is one half of such a near-collision is reported.
+Ordinary input hashes to plain SHA-1. With detection on, the digest of a
+reported input is upstream's "safe hash" (the block is compressed twice
+more), not the SHA-1 its colliding twin shares. `sha1dc` and
+`Sha1dc.digest` raise instead of returning it, and so does `hash_object`
+for an object whose hash stream (`<kind> <size>\0`, then the payload)
+holds a reported block.
+
+Both SHAttered PDFs, hashed as they are, are reported by `sha1dc` and
+`Sha1dc`. A blob whose content is one of those PDFs is not refused: its
+hash stream starts with the 12-byte `blob 422435\0` header, so the
+collision blocks no longer follow the PDF's own 192-byte prefix at a block
+boundary, nothing is detected, and `hash_object` returns the id git gives
+that blob.
 
 The tests check the port against upstream's own test files (the digests
 its `make test` asserts) and, in `komira_git_conformance`, against the C
-library itself. A git object that holds a collision block cannot be made
-from those files: the SHAttered blocks collide only after the PDF's own
-192-byte prefix, and an object's hash starts with `<kind> <size>\0`. So
-no test feeds `hash_object` a colliding object; the detection it relies on
-is tested through `sha1dc` and `Sha1dc`.
+library itself, including, for each disturbance vector, the message and
+chaining value its recompression uses. A git object that holds a collision
+block cannot be made from those files, so no test feeds `hash_object` a
+colliding object; the detection it relies on is tested through `sha1dc`
+and `Sha1dc`.
 
 ## Examples
 

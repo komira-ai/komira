@@ -3,8 +3,8 @@
 # unavoidable bit conditions.
 # =============================================================================
 #
-# Data and one function of sha1collisiondetection (Marc Stevens and Dan
-# Shumow, MIT License), lib/ubc_check.c of release stable-v1.0.3, carried
+# Data and one function of sha1collisiondetection (MIT License, notice at
+# the end of this header), lib/ubc_check.c of release stable-v1.0.3, carried
 # into Mojo:
 #
 #   * the 32 disturbance vectors (DVs) sha1dc checks, in upstream's
@@ -23,6 +23,41 @@
 #
 # komira_git_conformance checks all three against the C library: the DV
 # fields and all 80 `dm` words of every DV, and the mask of random blocks.
+#
+# -----------------------------------------------------------------------------
+# Upstream attribution (sha1collisiondetection, LICENSE.txt):
+#
+#   MIT License
+#
+#   Copyright (c) 2017:
+#       Marc Stevens
+#       Cryptology Group
+#       Centrum Wiskunde & Informatica
+#       P.O. Box 94079, 1090 GB Amsterdam, Netherlands
+#       marc@marc-stevens.nl
+#
+#       Dan Shumow
+#       Microsoft Research
+#       danshu@microsoft.com
+#
+#   Permission is hereby granted, free of charge, to any person obtaining a
+#   copy of this software and associated documentation files (the
+#   "Software"), to deal in the Software without restriction, including
+#   without limitation the rights to use, copy, modify, merge, publish,
+#   distribute, sublicense, and/or sell copies of the Software, and to permit
+#   persons to whom the Software is furnished to do so, subject to the
+#   following conditions:
+#
+#   The above copyright notice and this permission notice shall be included
+#   in all copies or substantial portions of the Software.
+#
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+#   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+#   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+#   NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+#   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+#   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+#   USE OR OTHER DEALINGS IN THE SOFTWARE.
 # =============================================================================
 
 from std.builtin.globals import global_constant

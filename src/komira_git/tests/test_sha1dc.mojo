@@ -12,6 +12,9 @@
 #     ones upstream's own `make test` asserts (its Makefile): 16e96b70... and
 #     e1761773... for the PDFs (the safe hash), a56374e1... for the reduced
 #     file by default, dd39885a... with reduced-round detection.
+#   * the git blob ids of the two SHAttered PDFs, ba9aaa14... and
+#     b621eecc...: the ids of test/shattered-1.pdf and test/shattered-2.pdf
+#     in the tree of upstream's own repository at stable-v1.0.3.
 #   * a generated corpus (a fixed linear congruential generator), hashed by
 #     komira_crypto's `Sha1` (AWS-LC) as the reference for plain SHA-1.
 #
@@ -32,6 +35,9 @@
 #   * test_reduced_round: reduced-round detection reports only when on.
 #   * test_recompress_inverts: a backward step that does not undo its forward
 #     step, or a state stored at the wrong step (58, 65).
+#   * test_shattered_blob_has_id: hash_object refusing a blob whose
+#     content is a SHAttered PDF (detection run over the bare content
+#     instead of the header-prefixed stream git hashes).
 #   * test_is_object_id_collision: the error test matches only that error.
 # =============================================================================
 
@@ -39,7 +45,15 @@ from std.pathlib import Path
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_crypto import Sha1
-from komira_git import OBJECT_ID_COLLISION, Sha1dc, is_object_id_collision, sha1dc
+from komira_git import (
+    OBJECT_ID_COLLISION,
+    ObjectFormat,
+    ObjectKind,
+    Sha1dc,
+    hash_object,
+    is_object_id_collision,
+    sha1dc,
+)
 from komira_git.sha1dc import _compress_states, _expand, _recompress
 
 comptime _SHATTERED_PLAIN = "38762cf7f55934b34d179ae6a4c80cadccbb7f0a"
@@ -47,6 +61,8 @@ comptime _SHATTERED_1_SAFE = "16e96b70000dd1e7c85b8368ee197754400e58ec"
 comptime _SHATTERED_2_SAFE = "e1761773e6a35916d99f891b77663e6405313587"
 comptime _REDUCED_PLAIN = "a56374e1cf4c3746499bc7c0acb39498ad2ee185"
 comptime _REDUCED_SAFE = "dd39885a2a5d8f59030b451e00cb45da9f9d3828"
+comptime _SHATTERED_1_BLOB = "ba9aaa145ccd24ef760cf31c74d8f7ca1a2e47b0"
+comptime _SHATTERED_2_BLOB = "b621eeccd5c7edac9b7dcba35a8d5afd075e24f2"
 
 
 def _nibble(v: Int) -> String:
@@ -255,6 +271,21 @@ def test_recompress_inverts() raises:
             assert_equal(ihvout[i], ihv[i], "step 65 out, trial " + String(trial))
 
 
+def test_shattered_blob_has_id() raises:
+    # git hashes a blob as "blob 422435\0" then the PDF, so the collision
+    # blocks are not at the chaining value they were built for and nothing
+    # is detected: each blob has the id git gives it.
+    var one = _read("shattered-1.pdf")
+    var two = _read("shattered-2.pdf")
+    var s1 = ObjectFormat.sha1()
+    assert_equal(
+        hash_object(s1, ObjectKind.blob(), Span(one)).to_hex(), _SHATTERED_1_BLOB
+    )
+    assert_equal(
+        hash_object(s1, ObjectKind.blob(), Span(two)).to_hex(), _SHATTERED_2_BLOB
+    )
+
+
 def test_is_object_id_collision() raises:
     var one = _read("shattered-1.pdf")
     var msg = String()
@@ -275,5 +306,6 @@ def main() raises:
     test_shattered_switches()
     test_reduced_round()
     test_recompress_inverts()
+    test_shattered_blob_has_id()
     test_is_object_id_collision()
     print("komira_git sha1dc tests passed")

@@ -14,7 +14,9 @@
 #   * test_collision_files: the verdict and digest on the two SHAttered
 #     PDFs and upstream's reduced-round collision, under all 16 switch
 #     combinations: detection, the safe hash, the bit-condition filter and
-#     reduced-round detection must each act as upstream's do.
+#     reduced-round detection must each act as upstream's do. All three
+#     files are detected through one disturbance vector, DV 27 (II(52,0),
+#     recompressed from step 65); test_recompression pins the other DVs.
 #   * test_near_collisions: the recompression and the comparison that
 #     decides a collision, on near misses: each SHAttered PDF's first 384
 #     bytes (its collision blocks are bytes 192 to 319) with one bit flipped,
