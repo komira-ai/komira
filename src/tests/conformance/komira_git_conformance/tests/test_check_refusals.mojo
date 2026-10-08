@@ -16,6 +16,7 @@
 # A check deleted, or comparing the wrong field, lets its case through (or
 # raises another case's message) and fails here. require_same_bytes and
 # require_same_index are also driven directly (each length order; for
+# require_same_bytes a difference at the first and at the last byte, for
 # require_same_index an id, offset and CRC-32 difference at the first and at
 # the last entry), and every refusal of parse_batch, parse_verify and
 # parse_ids gets input of the wrong shape, with too few and too many fields.
@@ -220,9 +221,11 @@ def _bytes_err(got: List[UInt8], want: List[UInt8]) -> String:
 def test_require_same_bytes() raises:
     var a: List[UInt8] = [1, 2, 3]
     var b: List[UInt8] = [1, 2, 4]
+    var c: List[UInt8] = [9, 2, 3]
     var short: List[UInt8] = [1, 2]
     assert_equal(_bytes_err(a, a.copy()), "OK")
     assert_equal(_bytes_err(a, b), "w: byte 2 is 3, git's is 4")
+    assert_equal(_bytes_err(c, a), "w: byte 0 is 9, git's is 1")
     assert_equal(_bytes_err(short, a), "w: 2 bytes, git's has 3")
     assert_equal(_bytes_err(a, short), "w: 3 bytes, git's has 2")
 
