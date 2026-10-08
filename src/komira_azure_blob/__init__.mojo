@@ -17,6 +17,13 @@ the file system and the service SAS signer.
     `AzureClientSpec`, the endpoint, credential and connector factory a
     client is built from.
   * `AzureFs` — komira_fs's `FileSystem` over one container, read-only.
+  * `azure_url` — `parse_azure_url` (az://, abfs://, abfss://, the Blob
+    service's https:// URL, and an emulator's path-style http:// URL) into
+    an `AzureUrl`; `AzureFsConfig` (account, endpoint, path-style) and
+    `azure_fs_config_for_url`; `azure_config_for`,
+    `azure_endpoint_is_plaintext`, `azure_connector_factory`, `azure_fs_for`
+    and `azure_prod_fs`, which build an AzureFs with its credential and pick
+    the plaintext connector only for an `http://` endpoint.
   * `AzureSasSigner` — komira_objectstore's `ObjectUrlSigner`, as a blob
     service SAS, signed at the instant its `AzureSasClock` reports at each
     mint (`SystemAzureSasClock` in production, `FixedAzureSasClock` in
@@ -51,6 +58,17 @@ from .azure_fs import (
     AzureWriteFile,
 )
 from .azure_sas_query import SasQueryLayer, azure_sas_query_normalize
+from .azure_url import (
+    AzureFsConfig,
+    AzureUrl,
+    azure_config_for,
+    azure_connector_factory,
+    azure_endpoint_is_plaintext,
+    azure_fs_config_for_url,
+    azure_fs_for,
+    azure_prod_fs,
+    parse_azure_url,
+)
 from .azure_signing import (
     SHARED_KEY_EMPTY_ZERO_LENGTH_VERSION,
     AzureSharedKeyProvider,

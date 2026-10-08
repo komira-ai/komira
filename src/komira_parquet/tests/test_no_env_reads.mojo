@@ -46,6 +46,9 @@ comptime _FILES: List[String] = [
     "dictionary_resolve.mojo",
     "file_reader.mojo",
     "footer_header.mojo",
+    "gather_byte_array.mojo",
+    "gather_common.mojo",
+    "gather_dict.mojo",
     "metadata_parser.mojo",
     "nested.mojo",
     "null_expand.mojo",
@@ -58,6 +61,7 @@ comptime _FILES: List[String] = [
     "rle.mojo",
     "rle_bitunpack.mojo",
     "scan_copy_trace.mojo",
+    "selection_vector.mojo",
     "staged_filter_trace.mojo",
     "thrift_compact.mojo",
 ]
