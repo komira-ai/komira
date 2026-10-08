@@ -431,6 +431,106 @@ grep -qx 'BRDA:3,17:br:0/1,0,1' "$W/out.info" || red "or, raising right operand:
 pass
 spend_flag 'icmp eq i64 %0, 3'
 refused "or, not a flag" "src/pkg/c.mojo:3:17: the right operand of this 'or' is not counted (no test in this function reads its result), and a phi at its location is neither its result nor an error flag" "$W/v.ll"
+# The flag's orientation: the call's flag under the or's true target (the
+# right operand skipped) and `false` under the other is no error flag (a
+# skipped call has no flag), and is odd. Kills: the flag exemption taken
+# in either orientation.
+spend_flag 'extractvalue { i1, i1 } %84, 0'
+sed 's/%82 = phi i1 \[ %83, %5 \], \[ false, %4 \]/%82 = phi i1 [ false, %5 ], [ %83, %4 ]/' "$W/v.ll" >"$W/v2.ll"
+! cmp -s "$W/v2.ll" "$W/v.ll" || red "or, flag under the skip target: the edit changed nothing"
+refused "or, flag under the skip target" "src/pkg/c.mojo:3:17: the right operand of this 'or' is not counted (no test in this function reads its result), and a phi at its location is neither its result nor an error flag" "$W/v2.ll"
+# An odd phi with three incoming values (not a forward) at an untested
+# and's token is refused like one with two. Kills: only two-incoming phis
+# marked odd.
+both_untested %80
+awk '{ print } /^  %8 = phi i1 \[ %5, %4 \], \[ false, %6 \], !dbg !117$/ { print "  %81 = phi i1 [ %5, %4 ], [ false, %6 ], [ true, %2 ], !dbg !117" }' "$W/b.ll" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$W/b.ll" || red "odd phi, three incoming: the edit changed nothing"
+refused "odd phi, three incoming" "src/pkg/c.mojo:7:14: the right operand of this 'and' is not counted (no test in this function reads its result), and a phi at its location is neither its result nor an error flag" "$W/v.ll"
+# A phi of two constants at a tested `or`, the deciding `true` under its
+# true target and `false` under the other, is no result (the right
+# operand's value would be a constant): refused, as no candidate is.
+# Kills: a constant under the other target accepted (a right operand
+# derived from a phi that does not carry it).
+variant 's/%8 = phi i1 \[ %6, %5 \], \[ true, %4 \]/%8 = phi i1 [ false, %5 ], [ true, %4 ]/'
+refused "or, two constants" "src/pkg/c.mojo:3:17: IR line" "$W/v.ll"
+grep -qF "the phi at this 'or' is not that of a short-circuit one" "$W/err" || red "or, two constants: not named as such"
+
+# 9k. Three short-circuit and/or on one line (`if (a or b) and (c or e):`,
+# c.mojo 19, a function added to case.ll): each phi is its own and/or's,
+# told by its column, and each right operand is derived (the inner `or`'s
+# through the `and`'s). Kills: a phi matched to an and/or by its line alone
+# (the `and`'s phi taken for the second `or`'s: the `and` refused).
+printf '%s\n' 'def two(a: Bool, b: Bool, c: Bool, e: Bool) -> Int:' '    if (a or b) and (c or e):' '        return 1' '    return 0' >>"$W/$SRC/c.mojo"
+cat >"$W/two.ll" <<'TWO'
+define internal i64 @"pkg::c::two"(i1 %0, i1 %1, i1 %2, i1 %3) #0 !dbg !170 !prof !73 {
+4:
+  br i1 %0, label %5, label %6, !dbg !171, !prof !180
+
+5:                                                ; preds = %4
+  br label %7, !dbg !171
+
+6:                                                ; preds = %4
+  br label %7, !dbg !171
+
+7:                                                ; preds = %5, %6
+  %8 = phi i1 [ true, %5 ], [ %1, %6 ], !dbg !171
+  br i1 %8, label %9, label %15, !dbg !172, !prof !181
+
+9:                                                ; preds = %7
+  br i1 %2, label %10, label %11, !dbg !173, !prof !182
+
+10:                                               ; preds = %9
+  br label %12, !dbg !173
+
+11:                                               ; preds = %9
+  br label %12, !dbg !173
+
+12:                                               ; preds = %10, %11
+  %13 = phi i1 [ true, %10 ], [ %3, %11 ], !dbg !173
+  br label %14, !dbg !172
+
+14:                                               ; preds = %12
+  br label %16, !dbg !172
+
+15:                                               ; preds = %7
+  br label %16, !dbg !172
+
+16:                                               ; preds = %14, %15
+  %17 = phi i1 [ %13, %14 ], [ false, %15 ], !dbg !172
+  br i1 %17, label %18, label %19, !dbg !174, !prof !183
+
+18:                                               ; preds = %16
+  ret i64 1, !dbg !175
+
+19:                                               ; preds = %16
+  ret i64 0, !dbg !176
+}
+
+TWO
+cat >"$W/two.meta" <<'TWO'
+!170 = distinct !DISubprogram(name: "two", linkageName: "pkg::c::two", scope: !8, file: !8, line: 18, type: !9, scopeLine: 18, spFlags: DISPFlagDefinition, unit: !0)
+!171 = !DILocation(line: 19, column: 11, scope: !170)
+!172 = !DILocation(line: 19, column: 17, scope: !170)
+!173 = !DILocation(line: 19, column: 24, scope: !170)
+!174 = !DILocation(line: 19, column: 5, scope: !170)
+!175 = !DILocation(line: 20, column: 9, scope: !170)
+!176 = !DILocation(line: 21, column: 5, scope: !170)
+!180 = !{!"branch_weights", i32 2, i32 4}
+!181 = !{!"branch_weights", i32 3, i32 3}
+!182 = !{!"branch_weights", i32 1, i32 2}
+!183 = !{!"branch_weights", i32 2, i32 4}
+TWO
+awk -v f="$W/two.ll" '/^attributes #0/ { while ((getline l < f) > 0) print l } { print }' "$FX" >"$W/v.ll"
+cat "$W/two.meta" >>"$W/v.ll"
+grep -qF '@"pkg::c::two"' "$W/v.ll" || red "one line: the function was not added"
+run "$TOOL" --ir "$W/v.ll" --out "$W/out.info" $MAP $EXC
+[ "$RC" -eq 0 ] || red "one line: exit $RC, want 0"
+for r in 19,5:br:0/1,0,2 19,5:br:0/1,1,4 19,11:br:0/1,0,2 19,11:rhs:0/1,0,1 19,11:rhs:0/1,1,3 19,17:br:0/1,0,3 19,17:rhs:0/1,0,2 19,17:rhs:0/1,1,1 19,24:br:0/1,0,1 19,24:rhs:0/1,0,1 19,24:rhs:0/1,1,1; do
+    grep -qx "BRDA:$r" "$W/out.info" || red "one line: BRDA:$r is not in the output"
+done
+cp "$DIR/fixtures/c.src" "$W/$SRC/c.mojo"
+pass
+
 
 # 9d. A branch at the call of a function a measured source declares
 # @always_inline("nodebug") is refused (it may be that function's own

@@ -328,7 +328,12 @@ another number of times reads it on some paths only, or elsewhere (`var
 lower = c >= 97 and c <= 122`, then `lower or ...` only when `i != 0`:
 `kci_api`'s `run_identity.mojo` 98, test 47's `values.mojo` 80:29), and
 one that never ran while the left operand did (or the reverse) is not its
-test either. Such a test gives no `rhs` (a later test may), and the and/or
+test either. Matching counts are necessary, not sufficient: a test whose
+counts happen to match is read as the result's (`r = a or g(b)`, then a
+loop testing `r` as many times as the `or` ran, on other values than each
+run's), and the derived right operand is then wrong. A known limit; a
+structural check (the test in the block the result is computed in, or
+one only it reaches) would close it. Such a test gives no `rhs` (a later test may), and the and/or
 is then its two arms alone, as one whose result is returned. Which tests
 count depends on the counts, so one test's run of a function may give an
 `rhs` and another's not: covcheck sums what each gives, and an arm a test
