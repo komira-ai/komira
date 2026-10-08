@@ -136,7 +136,7 @@ program under test, and kcov runs with that environment. That `lib/` holds a
 `LD_LIBRARY_PATH` and a `DT_RUNPATH` after it, so `bin/kcov` needs a
 `DT_RPATH`. zig 0.12 forwards `--disable-new-dtags` to lld only when it links
 a shared library, so every executable it links gets a `DT_RUNPATH`.
-[`elf_rpath.zig`](elf_rpath.zig) (`:elf_rpath`) changes the tag after the link
+[`elf_rpath.rs`](elf_rpath.rs) (`:elf_rpath`, Rust) changes the tag after the link
 (29 to 15). That is the one byte `--disable-new-dtags` would have changed, and
 the tool refuses a file that does not have exactly one `DT_RUNPATH` and no
 `DT_RPATH`.

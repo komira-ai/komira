@@ -25,7 +25,7 @@
 #   bin/kcov finds it through its DT_RPATH $ORIGIN/../lib, which the loader
 #   searches before LD_LIBRARY_PATH (a DT_RUNPATH comes after it, and the
 #   test runner sets LD_LIBRARY_PATH). zig 0.12 gives an executable a
-#   DT_RUNPATH whatever the flags say (elf_rpath.zig), so elf_rpath turns it
+#   DT_RUNPATH whatever the flags say (elf_rpath.rs), so elf_rpath turns it
 #   into a DT_RPATH after the link.
 # Every pipeline fails when any of its stages fails (pipefail): an `od` that
 # cannot read a file never becomes an empty generated array.

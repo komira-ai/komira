@@ -6,6 +6,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_test")
 load(":defs.bzl", "kcov_check", "kcov_check_cases", "kcov_dist", "kcov_identity", "kcov_same", "kcov_tool")
 load(":identity.bzl", "KCOV_BIN_SHA256", "KCOV_USAGE_LINE")
 
@@ -45,13 +46,26 @@ zig_exe(
 )
 
 # DT_RUNPATH -> DT_RPATH, which zig 0.12 cannot link into an executable.
-zig_exe(
+# Published behind its inline #[test]s (:elf_rpath_unit); :kcov_check_cases
+# runs it on real zig-linked files.
+rust_binary(
     name = "elf_rpath",
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
-    src = "elf_rpath.zig",
-    busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    srcs = ["elf_rpath.rs"],
+    crate_root = "elf_rpath.rs",
+    tests = [":elf_rpath_unit"],
+)
+
+# elf_rpath's inline #[test]s, run as a build action: every refusal and its
+# message, on synthetic ELF64 files.
+rust_test(
+    name = "elf_rpath_unit",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    srcs = ["elf_rpath.rs"],
+    crate_root = "elf_rpath.rs",
+    crate_name = "elf_rpath",
 )
 
 _DIST = dict(
