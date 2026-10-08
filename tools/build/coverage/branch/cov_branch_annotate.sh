@@ -19,7 +19,9 @@
 # Steps:
 #   0. The bitcode holds no branch weights of its own (no "branch_weights"
 #      metadata string): `pgo-instr-use` leaves the `!prof` it finds on a
-#      branch whose block never ran, which would then read as counts.
+#      branch whose block never ran, which would then read as counts. Nor
+#      does it hold entry counts (no "function_entry_count"), which step 3
+#      counts as the functions the pass found in the profile.
 #   1. The profile holds exactly the functions <binary> links. Every function
 #      of the bitcode is instrumented (cov_branch_link.sh), but the link
 #      (--gc-sections, as a release test's) drops a function nothing live
@@ -38,10 +40,16 @@
 #      branch, switch and select of an instrumented function that ran its
 #      `!prof !{!"branch_weights", ...}` metadata: the counts of its arms.
 #      Before the dump, LLVM names each function of the bitcode the profile
-#      does not hold (`-pgo-warn-missing-function`). By step 1 such a
-#      function is not in <binary>: it never ran, and its branches, which
-#      carry no weights, read as never run (zero counts), as those of a
-#      function that ran no time do.
+#      does not hold (`-pgo-warn-missing-function`). Such a function is not
+#      in <binary>, by step 1 and step 3 together: step 1 makes the profile
+#      the binary's records, and step 3 matches each of them to a function
+#      of this bitcode (by its profile name and hash), so a function no
+#      record matches is one the binary does not link. Step 1 alone does
+#      not give it: a bitcode function whose profile name is not the one
+#      the run wrote (test 47's branchinternal: `main` internalized) is
+#      named here although it ran. Such a function never ran, and its
+#      branches, which carry no weights, read as never run (zero counts),
+#      as those of a function that ran no time do.
 #   3. Any other line of lld's own fails the action, naming it: a line
 #      starting `lld: ` (after any program name), `warning: ` or `error: `,
 #      or anything before the dump that is not one of those missing-function
@@ -53,7 +61,9 @@
 #      In it, the pass gave an entry count (`!prof` on the `define`) to as
 #      many functions as the profile holds: each function <binary> links is
 #      one of this bitcode, with its control flow. Fewer is a binary made
-#      from other bitcode.
+#      from other bitcode, or a function whose hash does not match that
+#      LLVM does not warn about (a comdat function's mismatch is silent by
+#      default, `-no-pgo-warn-mismatch-comdat-weak`).
 #   4. <ir_out> is the dump, header included, unchanged.
 #
 # Exit status: 1 when a step fails, naming it; 2 for a usage error.
@@ -96,14 +106,24 @@ for f in "$LLD" "$PD" "$BC" "$PROF" "$BIN"; do
 done
 [ "$(od -A n -t x1 -N 4 "$BC" | tr -d ' \n')" = "4243c0de" ] || red "$2 is not LLVM bitcode"
 
-# 0. No branch weights before the profile is applied. Metadata strings are
-# kept as their bytes in the bitcode, one after another (so a substring).
+# 0. No branch weights before the profile is applied, and no entry counts.
+# Metadata strings are kept as their bytes in the bitcode, one after another
+# (so a substring).
 set +e
 grep -q -F branch_weights "$BC"
 rc=$?
 set -e
 case "$rc" in
     0) red "$2 already holds branch weights before the profile is applied (a \"branch_weights\" metadata string): pgo-instr-use keeps them on branches that never ran, where they would read as counts" ;;
+    1) ;;
+    *) red "grep could not read $2 (exit $rc)" ;;
+esac
+set +e
+grep -q -F function_entry_count "$BC"
+rc=$?
+set -e
+case "$rc" in
+    0) red "$2 already holds function entry counts before the profile is applied (a \"function_entry_count\" metadata string): step 3 counts the functions pgo-instr-use found in the profile by their entry counts" ;;
     1) ;;
     *) red "grep could not read $2 (exit $rc)" ;;
 esac
@@ -198,14 +218,16 @@ if ! "$LLD" -flavor gnu -r -m elf_x86_64 "$BC" -o "$K/use.o" --lto-O0 \
     red "lld could not apply the profile $3 to $2 (pgo-instr-use)"
 fi
 
-# 3. Before the header, only the functions the profile does not hold (step
-# 1: not in the binary); no other diagnostic; one dump.
-awk -v H="$HEADER" -v M="$MISSING" -v ir="$K/ir" -v pre="$K/pre" -v miss="$K/missing" '
+# 3. Before the header, only the functions the profile does not hold (not
+# in the binary, by step 1 and the entry-count check below); no other
+# diagnostic; one dump. Those lines are dropped: each such function's
+# branches read as never run.
+awk -v H="$HEADER" -v M="$MISSING" -v ir="$K/ir" -v pre="$K/pre" '
     !in_dump && $0 == H { in_dump = 1 }
     in_dump { print > ir; next }
-    $0 ~ ("^[^ ]*lld: warning: [^ ]*: " M) && $0 ~ / Hash = [0-9]+ up to 0 count discarded$/ { print > miss; next }
+    $0 ~ ("^[^ ]*lld: warning: [^ ]*: " M) && $0 ~ / Hash = [0-9]+ up to 0 count discarded$/ { next }
     { print > pre }' "$K/err"
-touch "$K/ir" "$K/pre" "$K/missing"
+touch "$K/ir" "$K/pre"
 { cat "$K/pre"; grep -E '^([^ ]*lld: |warning: |error: )' "$K/ir" || true; } >"$K/diag"
 if [ -s "$K/diag" ]; then
     red "lld reported $(grep -c . "$K/diag") diagnostic(s) applying the profile: $(head -n 5 "$K/diag" | cut -c1-300 | tr '\n' ' ')"

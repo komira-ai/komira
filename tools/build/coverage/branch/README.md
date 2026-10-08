@@ -127,6 +127,8 @@ that wrote it (`[coverage][pgo_bin][<test>]`).
    `branch_weights` metadata string): `pgo-instr-use` keeps a `!prof` it
    finds on a branch whose block never ran, which would then read as counts.
    Mojo's bitcode at -O0 holds none (`llvm.expect` is not lowered there).
+   Nor may it hold entry counts (`function_entry_count`), which step 3
+   counts.
 1. The profile holds exactly the functions the binary links. Every function
    of the bitcode is instrumented, but the link (`--gc-sections`, as a
    release test's) drops a function nothing live calls, with its counters
@@ -151,9 +153,12 @@ that wrote it (`[coverage][pgo_bin][<test>]`).
    !{!"branch_weights", ...}`, the counts of its arms; one that never ran
    carries none. Before the dump, LLVM names each function of the bitcode
    the profile does not hold (`no profile data available for function`,
-   `-pgo-warn-missing-function`). By step 1 such a function is not in the
-   binary, so it never ran: its branches carry no weights and read as never
-   run, zero counts, as those of a function that ran no time do. A measured
+   `-pgo-warn-missing-function`). Such a function is not in the binary, by
+   step 1 and step 3's entry-count check together (step 1 alone does not
+   give it: `branchinternal`'s `main` ran, yet is named here, because its
+   profile name is not the run's), so it never ran: its branches carry no
+   weights and read as never run, zero counts, as those of a function that
+   ran no time do. A measured
    one is recorded, every arm `-` (test 47's `test_unrun`: `Tag.write_to`).
 3. Any other line of lld's own (`lld: `, `warning: `, `error: `), or
    anything before the dump that is not one of those lines, fails the
@@ -164,7 +169,8 @@ that wrote it (`[coverage][pgo_bin][<test>]`).
    the dump, `pgo-instr-use` must have given an entry count (`!prof` on the
    `define`) to as many functions as the profile holds: each function the
    binary links is one of this bitcode. Fewer is a binary made from other
-   bitcode (branchinternal plants it: the bitcode internalized, so `main`'s
+   bitcode, or a hash mismatch LLVM does not warn about (a comdat
+   function's, by default) (branchinternal plants it: the bitcode internalized, so `main`'s
    profile name is not the run's).
 4. What lld printed is then exactly one dump, starting with `; *** IR Dump After
    PGOInstrumentationUse on [module] ***`; it is `cov/branch/<test>.ll`,

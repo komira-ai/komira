@@ -728,6 +728,25 @@ cov_branch_dir(
     exec_compatible_with = LINUX_X86_64,
 )
 
+# The branchweights copy with its branch-weights check reading for a string
+# no bitcode holds: the bitcode the annotation reads holds entry counts
+# (`function_entry_count`) before the profile is applied, which the
+# entry-count check would count as functions found in the profile. RED:
+# tests//negative/coverage:branchentry[coverage][branch_ir][test_one],
+# "already holds function entry counts".
+cov_plant(
+    name = "branchentry_annotate_sh",
+    expr = "s|^# 0\\. No branch weights before.*$|\"$LLD\" -flavor gnu -r -m elf_x86_64 \"$BC\" -o \"$K/w.bc\" --lto-O0 --plugin-opt=emit-llvm --lto-newpm-passes=pgo-instr-use -mllvm \"-pgo-test-profile-file=$PROF\" \\&\\& BC=\"$K/w.bc\"|; s|grep -q -F branch_weights \"$BC\"|grep -q -F branch_weights_unread \"$BC\"|",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchentry_branch",
+    annotate_script = ":branchentry_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
+)
+
 # A cov_branch_annotate.sh copy that first applies the profile and writes
 # the module back as bitcode (lld's emit-llvm), then reads that: a bitcode
 # that holds branch weights before the profile is applied, which
@@ -760,7 +779,7 @@ cov_branch_dir(
         import_name = "noop",
         test_srcs = ["tests/test_one.mojo"],
     )
-    for name in ("branchinternal", "branchmissing", "branchweights", "branchwide")
+    for name in ("branchentry", "branchinternal", "branchmissing", "branchweights", "branchwide")
 ]
 
 # A helper declared @always_inline("nodebug"): its `while` carries the

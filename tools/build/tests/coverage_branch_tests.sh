@@ -49,7 +49,8 @@
 #      [branch_ir] green (a copy padding the section-name pipeline with
 #      1 MB: its reader takes all of it, so no writer dies of SIGPIPE),
 #      branchweights[...][branch_ir] red (a copy annotating a bitcode that
-#      already holds branch weights), branchnodebug[...][branch_info] red
+#      already holds branch weights), branchentry[...][branch_ir] red (that
+#      copy with the weights check off: the entry counts refused), branchnodebug[...][branch_info] red
 #      (a nodebug helper's decision at its call), branchretor[...]
 #      [branch_info] red (`return a or b`: the right operand not counted),
 #      branchenv red at analysis (a test_env setting
@@ -67,6 +68,7 @@ expect_green coverage_branch tests//functional/coverage:branch_counts tests//fun
     tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion \
     tests//negative/coverage:branchmissing tests//negative/coverage:branchweights \
     tests//negative/coverage:branchinternal tests//negative/coverage:branchwide \
+    tests//negative/coverage:branchentry \
     'tests//negative/coverage:branchwide[coverage][branch_ir][test_one]' \
     tests//negative/coverage:branchnodebug tests//negative/coverage:branchretor
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
@@ -93,6 +95,8 @@ expect_red coverage_branch_other_bitcode "the binary that wrote it was not made 
     'tests//negative/coverage:branchinternal[coverage][branch_ir][test_one]'
 expect_red coverage_branch_static_weights "already holds branch weights" \
     'tests//negative/coverage:branchweights[coverage][branch_ir][test_one]'
+expect_red coverage_branch_static_entry_counts "already holds function entry counts" \
+    'tests//negative/coverage:branchentry[coverage][branch_ir][test_one]'
 expect_red coverage_branch_nodebug "may be a decision of count_down" \
     'tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]'
 expect_red coverage_branch_return_or "the right operand of this 'or' is not counted" \
