@@ -90,7 +90,13 @@ from kci_cloud import (
     FIELD_DNS_ZONE,
     FIELD_DNS_RECORD,
     FIELD_CERTIFICATE,
+    FIELD_SCHEDULE,
+    FIELD_EVENT_TRIGGER,
+    FIELD_NETWORK,
+    FIELD_SUBNET,
+    FIELD_IP_ADDRESS,
     Feed,
+    Firing,
     FIELD_SERVICE,
     FINDING_GRAPH,
     KEY_FIELD,
@@ -236,6 +242,11 @@ struct _Data(CloudAdapter, Movable):
         l.append(FIELD_DNS_ZONE)
         l.append(FIELD_DNS_RECORD)
         l.append(FIELD_CERTIFICATE)
+        l.append(FIELD_SCHEDULE)
+        l.append(FIELD_EVENT_TRIGGER)
+        l.append(FIELD_NETWORK)
+        l.append(FIELD_SUBNET)
+        l.append(FIELD_IP_ADDRESS)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -247,13 +258,13 @@ struct _Data(CloudAdapter, Movable):
     def public_mechanism(self) -> String:
         return String("edge")
 
-    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
         return List[Finding]()
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
         if Bool(r.bucket):
             out.append(LoweredNode(r.id + String("/bucket"), r.id, String("bucket")))

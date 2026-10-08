@@ -58,6 +58,7 @@ from kci_reconciler import (
 )
 from kci_cloud import (
     Feed,
+    Firing,
     FIELD_CONTAINER_JOB,
     FIELD_WORKER,
     NOT_YET,
@@ -447,7 +448,7 @@ def _limit_lines(shape: ProviderShape, json: String) raises -> List[String]:
     var l = _list(json)
     var out = List[String]()
     for i in range(len(l)):
-        var got = cloud.check(l[i], List[Feed]())
+        var got = cloud.check(l[i], List[Feed](), List[Firing]())
         for k in range(len(got)):
             out.append(l[i].id + String("|") + got[k].field_path + String("|") + got[k].reason)
     return out^

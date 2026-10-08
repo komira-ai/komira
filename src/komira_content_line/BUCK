@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The content-line layer vCard (RFC 6350 §3) and iCalendar (RFC 5545 §3.1)
+# share: unfolding with input and line limits and UTF-8 validation, the
+# group/name/parameter/value lexer (RFC 6868 parameter encoding), folding at
+# 75 octets, and TEXT escaping with split-before-unescape. No dependencies.
+mojo_library(
+    name = "komira_content_line",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_fold_escape.mojo",
+        "tests/test_unfold_lexer.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
