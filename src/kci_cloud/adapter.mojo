@@ -644,7 +644,10 @@ trait CloudAdapter(Movable):
     def release(mut self, creds: Creds, record: OwnedRecord) raises:
         """Drop every kci label (the identity, the marks) of the object
         `record` names, and change nothing else: the object stays, and is no
-        longer kci's. Never a delete."""
+        longer kci's. Never a delete. The change is atomic, or the adoption
+        mark (kci_adopted) goes last: a release that fails part-way must not
+        leave the identity stamp without the mark, because the next apply
+        would read that object as kci's own leftover and delete it."""
         ...
 
     def whoami(mut self, creds: Creds) raises -> Principal:
