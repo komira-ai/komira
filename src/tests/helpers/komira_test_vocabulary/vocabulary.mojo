@@ -1,6 +1,7 @@
 # =============================================================================
 # vocabulary.mojo — scan a generic package's sources for product vocabulary and
-# for dates before September 2026.
+# for early year-months: 2024 or 2025 with any month, or 2026 with month 01 to
+# 08. Earlier years are not matched.
 # =============================================================================
 #
 # Two checks per source line:
@@ -53,8 +54,10 @@ def _is_separator(b: UInt8) -> Bool:
 
 
 def early_date_at(line: String) -> Int:
-    """The byte offset of the first date before September 2026 in `line`, or
-    -1 when there is none (see the header for the spellings matched)."""
+    """The byte offset of the first early year-month in `line` (a year 2024 or
+    2025 with any month 01 to 12, or 2026 with month 01 to 08), or -1 when there
+    is none. Years before 2024 are not matched. See the header for the
+    spellings matched."""
     var b = line.as_bytes()
     var n = len(b)
     var first_year = 2000 + 24
@@ -92,7 +95,8 @@ def scan_text(
     path: String, text: String, banned: List[String], mut hits: List[String]
 ):
     """Append one `path:line: <word>` hit per banned word on a line, and one
-    `path:line: a date before September 2026` hit per line holding one."""
+    `path:line: a date before September 2026` hit per line on which
+    `early_date_at` finds an early year-month."""
     var lines = text.split("\n")
     for i in range(len(lines)):
         var line = String(lines[i])
