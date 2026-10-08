@@ -25,7 +25,8 @@
 # `pull_request` is the merge commit's: `measure` checks the head's tree
 # first (the function between the `# head_measured:` markers), and for such a
 # head prints a notice to merge main, writes the summary and skips every
-# later step and the whole `post` job, so the check is skipped, never red.
+# later step and the whole `post` job: `measure` is green with the notice,
+# `post` is skipped and no `coverage` check run is posted; nothing is red.
 # The check reads two paths of the checkout and runs nothing from it.
 # Like pr.yml it runs only for a pull request from a branch of this
 # repository (a fork's run gets no farm credential) whose base is main (a

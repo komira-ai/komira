@@ -175,6 +175,10 @@ mkdir -p "$W/h_old" "$W/h_half/.github/ci" "$W/h_new/.github/ci" "$W/h_new/tools
 measured H1 "$W/h_old" no
 : >"$W/h_half/.github/ci/coverage_measure.sh"
 measured H2 "$W/h_half" no
+# The commonest old head: covcheck's BUCK (much older) without the script.
+mkdir -p "$W/h_buck/tools/build/coverage"
+: >"$W/h_buck/tools/build/coverage/BUCK"
+measured H5 "$W/h_buck" no
 : >"$W/h_new/.github/ci/coverage_measure.sh"
 : >"$W/h_new/tools/build/coverage/BUCK"
 measured H3 "$W/h_new" yes
@@ -184,24 +188,30 @@ pass
 
 # W2. The wiring the function cannot show: it runs on the head's checkout
 # with the step output file, `measure` exports its answer, `post` runs only
-# on yes, and every step of `measure` after it (all but the summary, which
-# says why nothing was measured) is skipped on no.
+# on yes, and in `measure` the order is the checkout, then the check (step
+# id `head`), then every other step skipped on no (all but the summary,
+# which says why nothing was measured).
 wf_once W2 'head_measured --dir . --output "$GITHUB_OUTPUT"'
+wf_once W2 '        id: head'
 wf_once W2 "measured: \${{ steps.head.outputs.measured }}"
 wf_once W2 "    if: github.event.pull_request.head.repo.full_name == github.repository && needs.measure.outputs.measured == 'yes'"
-ungated=$(awk '
+wrong=$(awk '
     /^  measure:$/ { on = 1; next }
     /^  [a-z]/ { on = 0 }
     !on { next }
-    function close_step() { if (after && name != "the summary" && !gated) print name; }
-    /^      - / { close_step(); if (seen) after = 1; name = $0; sub(/^      - (name: )?/, "", name); gated = 0 }
-    /^        id: head$/ { seen = 1 }
+    function close_step() {
+        if (kind == "checkout") { if (seen) print "the checkout comes after the head check"; checked = 1 }
+        else if (kind == "head") { if (!checked) print "the head check comes before the checkout" }
+        else if (kind == "step" && name != "the summary" && !(gated && seen_before)) print name
+    }
+    /^      - / { close_step(); kind = "step"; seen_before = seen; name = $0; sub(/^      - (name: )?/, "", name); gated = 0 }
+    /^      - uses: actions\/checkout@/ { kind = "checkout" }
+    /^        id: head$/ { kind = "head"; seen = 1 }
     /^        name: / { name = substr($0, 15) }
     index($0, "steps.head.outputs.measured == '\''yes'\''") { gated = 1 }
-    END { close_step() }
+    END { close_step(); if (!seen) print "no step with id head" }
 ' "$WF")
-[ -z "$ungated" ] || red "W2: steps of measure that run on a head that cannot be measured: $ungated"
-grep -qF "steps.head.outputs.measured" "$WF" || red "W2: no step reads the head's answer"
+[ -z "$wrong" ] || red "W2: measure's steps are not checkout, head check, then gated steps: $wrong"
 pass
 
 HEAD_SHA=0123456789abcdef0123456789abcdef01234567
