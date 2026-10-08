@@ -48,3 +48,24 @@ from .pkt_line import (
     read_pkt_line,
 )
 from .ref_name import check_ref_format, check_ref_name, is_valid_ref_name, normalize_ref_name
+from .pack_format import (
+    PACK_OBJ_BLOB,
+    PACK_OBJ_COMMIT,
+    PACK_OBJ_OFS_DELTA,
+    PACK_OBJ_REF_DELTA,
+    PACK_OBJ_TAG,
+    PACK_OBJ_TREE,
+    PackLimits,
+    PackObject,
+)
+from .delta import DeltaHeader, apply_delta, read_delta_header
+from .pack_index import PACK_INDEX_DEFAULT_LARGE_OFFSET, PackIndex, parse_pack_index
+from .pack_reader import (
+    ExternalBases,
+    IndexedPack,
+    PackEntryInfo,
+    index_pack,
+    index_thin_pack,
+    read_pack_object,
+    read_thin_pack_object,
+)
