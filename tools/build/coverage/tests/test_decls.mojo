@@ -3,16 +3,17 @@ from std.testing import assert_equal, assert_true
 from komira_json import parse_json_value
 
 from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
-from covcheck.decls import FnDecl, declared_functions, uncompiled_functions
+from covcheck.decls import KIND_ALWAYS_INLINE, KIND_COMPTIME_IF, KIND_PLAIN, FnDecl, declared_functions, unrecorded_functions
 from covcheck.paths import repo_files_of
 from covcheck.ratchet import Ratchet
 from covcheck.result import gate_json, report_json
 from covcheck.annotate import DiffCoverage
 
-# Declaration reachability (decls.mojo, analyze.mojo step 8): which functions
-# a source declares, where each one's body ends, which of its lines are its
-# own, and which functions no report gives a line: those are listed, and no
-# number changes (report only).
+# Declaration reachability (decls.mojo, analyze.mojo step 10): which
+# functions a source declares, where each one's body ends, which of its lines
+# are its own, its class (plain, always_inline, comptime_if), and which
+# functions no report gives a line: those are listed, split by class in the
+# JSON, and no number changes (report only).
 
 
 def _render(fns: List[FnDecl]) -> String:
@@ -161,21 +162,21 @@ comptime THREE = (
 )
 
 
-def test_uncompiled_functions_are_those_with_no_recorded_line() raises:
+def test_unrecorded_functions_are_those_with_no_recorded_line() raises:
     var rec = Dict[Int, Int]()
     rec[1] = 0  # a: its def line has a record (with 0 hits: compiled, not run)
     var none = Dict[Int, Bool]()
-    assert_equal(_render(uncompiled_functions(String(THREE), rec, none)), "b@4-5:4,5;c@7-9:7,8,9")
+    assert_equal(_render(unrecorded_functions(String(THREE), rec, none)), "b@4-5:4,5;c@7-9:7,8,9")
     # One record anywhere in the body makes it compiled.
     rec[9] = 2
-    assert_equal(_render(uncompiled_functions(String(THREE), rec, none)), "b@4-5:4,5")
+    assert_equal(_render(unrecorded_functions(String(THREE), rec, none)), "b@4-5:4,5")
     # A marked line leaves the count; a function with every line marked is
     # not listed.
     var marked = Dict[Int, Bool]()
     marked[5] = True
-    assert_equal(_render(uncompiled_functions(String(THREE), rec, marked)), "b@4-5:4")
+    assert_equal(_render(unrecorded_functions(String(THREE), rec, marked)), "b@4-5:4")
     marked[4] = True
-    assert_equal(_render(uncompiled_functions(String(THREE), rec, marked)), "")
+    assert_equal(_render(unrecorded_functions(String(THREE), rec, marked)), "")
 
 
 def test_a_compiled_closure_does_not_make_its_parent_compiled() raises:
@@ -187,15 +188,15 @@ def test_a_compiled_closure_does_not_make_its_parent_compiled() raises:
     )
     var rec = Dict[Int, Int]()
     rec[3] = 1
-    assert_equal(_render(uncompiled_functions(src, rec, Dict[Int, Bool]())), "outer@1-4:1,4")
+    assert_equal(_render(unrecorded_functions(src, rec, Dict[Int, Bool]())), "outer@1-4:1,4")
 
 
-def test_analyze_lists_uncompiled_functions_and_changes_no_number() raises:
+def test_analyze_lists_unrecorded_functions_and_changes_no_number() raises:
     var files = List[String]()
     files.append("src/p/BUCK")
     files.append("src/p/m.mojo")
     var s = Sources(String(""))
-    s.texts[String("src/p/m.mojo")] = String(THREE + "def d():\n    w()  # cov: unreachable why\n")
+    s.texts[String("src/p/m.mojo")] = String(THREE + "@always_inline\ndef d():\n    w()  # cov: unreachable why\n")
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nDA:2,1\nend_of_record\n")))
     var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
@@ -204,31 +205,42 @@ def test_analyze_lists_uncompiled_functions_and_changes_no_number() raises:
     var only_a = Sources(String(""))
     only_a.texts[String("src/p/m.mojo")] = String("def a():\n    pass\n")
     var base = analyze(r, List[Input](), repo_files_of(files), Ratchet(), only_a, Options())
-    assert_equal(len(base.uncompiled_functions), 0)
+    assert_equal(len(base.unrecorded_functions), 0)
     assert_equal(a.packages[0].line_found, 2)
     assert_equal(a.packages[0].line_hit, 2)
     assert_equal(a.packages[0].line_found, base.packages[0].line_found)
     assert_equal(a.packages[0].line_hit, base.packages[0].line_hit)
     assert_equal(_finding_kinds(a), _finding_kinds(base))
-    assert_equal(len(a.uncompiled_functions), 3)
-    assert_equal(a.uncompiled_functions[0].name, "b")
-    assert_equal(a.uncompiled_functions[0].line, 4)
-    assert_equal(a.uncompiled_functions[0].lines, 2)
-    assert_equal(a.uncompiled_functions[1].name, "c")
-    assert_equal(a.uncompiled_functions[1].lines, 3)
+    assert_equal(len(a.unrecorded_functions), 3)
+    assert_equal(a.unrecorded_functions[0].name, "b")
+    assert_equal(a.unrecorded_functions[0].line, 4)
+    assert_equal(a.unrecorded_functions[0].lines, 2)
+    assert_equal(a.unrecorded_functions[1].name, "c")
+    assert_equal(a.unrecorded_functions[1].lines, 3)
     # d's marked line leaves its count.
-    assert_equal(a.uncompiled_functions[2].name, "d")
-    assert_equal(a.uncompiled_functions[2].lines, 1)
-    assert_equal(a.uncompiled_functions[2].package, "src/p")
+    assert_equal(a.unrecorded_functions[2].name, "d")
+    assert_equal(a.unrecorded_functions[2].lines, 1)
+    assert_equal(a.unrecorded_functions[2].package, "src/p")
+    assert_equal(a.unrecorded_functions[0].kind, KIND_PLAIN)
+    assert_equal(a.unrecorded_functions[2].kind, KIND_ALWAYS_INLINE)
+    # The JSON splits them by class: plain ones (the census's), and the
+    # rest.
     var g = parse_json_value(gate_json(a, String("src/p")))
-    var u = g.get(String("uncompiled_functions"))
-    assert_equal(u.array_len(), 3)
+    var u = g.get(String("unrecorded_functions"))
+    assert_equal(u.array_len(), 2)
+    assert_equal(u.element_at(1).get(String("class")).as_string(), "plain")
+    var unrel = g.get(String("unrecorded_functions_unreliable"))
+    assert_equal(unrel.array_len(), 1)
+    assert_equal(unrel.element_at(0).get(String("name")).as_string(), "d")
+    assert_equal(Int(unrel.element_at(0).get(String("line")).as_int64()), 11)
+    assert_equal(unrel.element_at(0).get(String("class")).as_string(), "always_inline")
     assert_equal(u.element_at(1).get(String("path")).as_string(), "src/p/m.mojo")
     assert_equal(Int(u.element_at(1).get(String("line")).as_int64()), 7)
     assert_equal(u.element_at(1).get(String("name")).as_string(), "c")
     assert_equal(Int(u.element_at(1).get(String("lines")).as_int64()), 3)
     var rj = parse_json_value(report_json(a, List[String](), DiffCoverage()))
-    assert_equal(rj.get(String("uncompiled_functions")).array_len(), 3)
+    assert_equal(rj.get(String("unrecorded_functions")).array_len(), 2)
+    assert_equal(rj.get(String("unrecorded_functions_unreliable")).array_len(), 1)
 
 
 def test_a_marker_without_a_reason_leaves_the_count() raises:
@@ -240,8 +252,82 @@ def test_a_marker_without_a_reason_leaves_the_count() raises:
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nend_of_record\n")))
     var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
-    assert_equal(len(a.uncompiled_functions), 1)
-    assert_equal(a.uncompiled_functions[0].lines, 2)
+    assert_equal(len(a.unrecorded_functions), 1)
+    assert_equal(a.unrecorded_functions[0].lines, 2)
+
+
+def test_a_file_with_branch_records_only_lists_no_function() raises:
+    # No line record says which lines held code, so nothing is listed
+    # (analyze.mojo step 10).
+    var files = List[String]()
+    files.append("src/p/BUCK")
+    files.append("src/p/m.mojo")
+    var s = Sources(String(""))
+    s.texts[String("src/p/m.mojo")] = String(THREE)
+    var r = List[Input]()
+    r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nBRDA:5,0,0,1\nBRDA:5,0,1,0\nend_of_record\n")))
+    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    assert_equal(a.packages[0].branch_found, 2)
+    assert_equal(len(a.unrecorded_functions), 0)
+
+
+def test_the_class_of_a_function() raises:
+    var src = String(
+        "@staticmethod\n"                 # 1
+        "@always_inline\n"                # 2
+        "def a():\n"                      # 3
+        "    x()\n"                       # 4
+        "@always_inline(\"nodebug\")\n"   # 5
+        "def b():\n"                      # 6
+        "    x()\n"                       # 7
+        "def c() -> Int:\n"               # 8
+        "    comptime if X:\n"            # 9
+        "        return 1\n"              # 10
+        "    return 2\n"                  # 11
+        "def d():\n"                      # 12
+        "    @parameter\n"                # 13
+        "    if X:\n"                     # 14
+        "        y()\n"                   # 15
+        "@export\n"                       # 16
+        "def e():\n"                      # 17
+        "    \"\"\"@always_inline in a docstring.\"\"\"\n"  # 18
+        "    z()\n"                       # 19
+        "# @always_inline in a comment\n" # 20
+        "def f():\n"                      # 21
+        "    z()\n"                       # 22
+    )
+    var fns = declared_functions(src)
+    var kinds = String("")
+    for i in range(len(fns)):
+        kinds += fns[i].name + "=" + fns[i].kind + ";"
+    assert_equal(
+        kinds,
+        String("a=") + KIND_ALWAYS_INLINE + ";b=" + KIND_ALWAYS_INLINE + ";c=" + KIND_COMPTIME_IF
+        + ";d=" + KIND_COMPTIME_IF + ";e=" + KIND_PLAIN + ";f=" + KIND_PLAIN + ";",
+    )
+    # unrecorded_functions keeps the class.
+    var u = unrecorded_functions(src, Dict[Int, Int](), Dict[Int, Bool]())
+    assert_equal(len(u), 6)
+    assert_equal(u[2].kind, KIND_COMPTIME_IF)
+
+
+def test_scanner_edges() raises:
+    # A nested one-line def on the outer function's last line.
+    assert_equal(
+        _render(declared_functions(String("def outer():\n    def inner(): return 1\nx = 2\n"))),
+        "outer@1-2:1;inner@2-2:2",
+    )
+    # A body line that starts inside a string at column 0 and ends it with
+    # code does not end the body.
+    assert_equal(
+        _render(declared_functions(String("def f():\n    s = \"\"\"\nend\"\"\" + t\n    return s\nx = 1\n"))),
+        "f@1-4:1,2,3,4",
+    )
+    # A `):` inside a default string is not the signature's end: this is a
+    # requirement (`...`), not a one-line body.
+    assert_equal(_render(declared_functions(String("def g(s: String = \"):x\"): ...\n"))), "")
+    # No body at all (the next line is outside it) declares nothing.
+    assert_equal(_render(declared_functions(String("def h():\nx = 1\n"))), "")
 
 
 def test_a_file_no_test_compiled_lists_no_function() raises:
@@ -257,7 +343,7 @@ def test_a_file_no_test_compiled_lists_no_function() raises:
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nend_of_record\n")))
     var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
-    assert_equal(len(a.uncompiled_functions), 0)
+    assert_equal(len(a.unrecorded_functions), 0)
     assert_true(a.packages[0].unmeasured_files == 1)
 
 
@@ -269,9 +355,12 @@ def main() raises:
     test_def_in_a_string_or_a_comment_is_not_a_declaration()
     test_a_generic_signature_over_lines_and_brackets_in_a_string()
     test_a_docstring_at_a_lower_indent_does_not_end_the_body()
-    test_uncompiled_functions_are_those_with_no_recorded_line()
+    test_unrecorded_functions_are_those_with_no_recorded_line()
     test_a_compiled_closure_does_not_make_its_parent_compiled()
-    test_analyze_lists_uncompiled_functions_and_changes_no_number()
+    test_analyze_lists_unrecorded_functions_and_changes_no_number()
     test_a_marker_without_a_reason_leaves_the_count()
+    test_a_file_with_branch_records_only_lists_no_function()
+    test_the_class_of_a_function()
+    test_scanner_edges()
     test_a_file_no_test_compiled_lists_no_function()
     print("test_decls: PASS")

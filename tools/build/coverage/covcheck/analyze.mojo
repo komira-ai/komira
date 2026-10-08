@@ -47,12 +47,17 @@ and the findings: the one computation both `covcheck report` and
    whose line report gives no branch record (its branches were not read,
    and would count as none),
    `ExemptionWithoutReason` and `StaleExemption`.
-8. Report only (no number or finding depends on it yet): each kept file a
-   line report gives a record is read for the functions it declares
+10. Report only (no number or finding depends on it yet; numbered 10
+   because steps 8 and 9 belong to changes that land before this one):
+   each kept file with a line record is read for the functions it declares
    (decls.mojo), and every function with a body none of whose lines has a
-   record is listed in `uncompiled_functions` with the count of its
-   executable lines that carry no exemption marker with a reason: no test binary
-   compiled it, so the line numbers above cannot see it.
+   record is listed in `unrecorded_functions` with its class (decls.mojo:
+   `plain`, `always_inline`, `comptime_if`) and the count of its executable
+   lines that carry no exemption marker with a reason. The line numbers
+   above cannot see such a function, but only a `plain` one is evidence
+   that no test calls it: an inlined or comptime-gated function a test
+   calls can have no record of its own. A file with branch records and no
+   line record lists none: no line record says which lines held code.
 
 The line reports must all be lcov or all Cobertura: the two formats
 identify a line's branches differently, so one file in both would count its
@@ -70,7 +75,7 @@ the files kept in step 3 only: a file left out counts nowhere.
 
 from covcheck.branch_lcov import DecisionShapes, parse_branch_lcov
 from covcheck.cobertura import parse_cobertura
-from covcheck.decls import uncompiled_functions
+from covcheck.decls import unrecorded_functions
 from covcheck.exempt import STATUS_NO_REASON, STATUS_STALE, Exemption, apply_exemptions, scan_markers
 from covcheck.lcov import parse_lcov
 from covcheck.lexer import executable_lines
@@ -157,22 +162,25 @@ struct Sources(Copyable, Movable):
             raise Error(String("cannot read the source ") + path + String(" under --source-root ") + self.root + String(": ") + String(e))
 
 
-struct UncompiledFunction(Copyable, Movable):
-    """A function of a measured file no test binary compiled (step 8):
-    its package, file, `def` line, name, and `lines`, its executable lines
-    that carry no exemption marker with a reason."""
+struct UnrecordedFunction(Copyable, Movable):
+    """A function of a measured file none of whose lines has a record
+    (step 10): its package, file, `def` line, name, `kind` (decls.mojo's
+    class) and `lines`, its executable lines that carry no exemption marker
+    with a reason."""
 
     var package: String
     var path: String
     var line: Int
     var name: String
+    var kind: String
     var lines: Int
 
-    def __init__(out self, package: String, path: String, line: Int, name: String, lines: Int):
+    def __init__(out self, package: String, path: String, line: Int, name: String, kind: String, lines: Int):
         self.package = package
         self.path = path
         self.line = line
         self.name = name
+        self.kind = kind
         self.lines = lines
 
 
@@ -182,7 +190,7 @@ struct Analysis(Copyable, Movable):
     whether each is a file no report named (counted from its source);
     `packages`
     is sorted by package; `exemptions`, `mutants` and
-    `uncompiled_functions` by path then line."""
+    `unrecorded_functions` by path then line."""
 
     var mode: String
     var target_bp: Int
@@ -194,7 +202,7 @@ struct Analysis(Copyable, Movable):
     var mutants: List[Mutant]
     var mutant_packages: List[String]
     var findings: List[Finding]
-    var uncompiled_functions: List[UncompiledFunction]
+    var unrecorded_functions: List[UnrecordedFunction]
     var proposal: Ratchet
     var ignored_files: Int
     var excluded_test_files: Int
@@ -214,7 +222,7 @@ struct Analysis(Copyable, Movable):
         self.mutants = List[Mutant]()
         self.mutant_packages = List[String]()
         self.findings = List[Finding]()
-        self.uncompiled_functions = List[UncompiledFunction]()
+        self.unrecorded_functions = List[UnrecordedFunction]()
         self.proposal = Ratchet()
         self.ignored_files = 0
         self.excluded_test_files = 0
@@ -469,7 +477,7 @@ def analyze(
     var named = Dict[String, Bool]()
     var pending = Dict[String, FileCov]()
     var branch_unmeasured = List[Finding]()
-    var uncompiled = List[UncompiledFunction]()
+    var unrecorded = List[UnrecordedFunction]()
     for i in range(len(merged)):
         var pkg = package_of(merged[i].path, repo)
         var keep = _keep(pkg, merged[i].path, opts)
@@ -511,16 +519,17 @@ def analyze(
             f.absorb(bmerged[branch_of[path]])
         var text = sources.read(f.path)
         var markers = scan_markers(f.path, text)
-        # 8: before the exemptions take any record away.
+        # 10: before the exemptions take any record away; only with line
+        # records (branch records alone say nothing about lines).
         if f.line_found() > 0:
             var marked = Dict[Int, Bool]()
             for e in range(len(markers)):
                 # A marker without a reason exempts nothing (exempt.mojo).
                 if markers[e].reason.byte_length() > 0:
                     marked[markers[e].line] = True
-            var fns = uncompiled_functions(text, f.hits, marked)
+            var fns = unrecorded_functions(text, f.hits, marked)
             for k in range(len(fns)):
-                uncompiled.append(UncompiledFunction(pkg, path, fns[k].line, fns[k].name, len(fns[k].lines)))
+                unrecorded.append(UnrecordedFunction(pkg, path, fns[k].line, fns[k].name, fns[k].kind, len(fns[k].lines)))
         var branches = f.branch_found()
         var removed = apply_exemptions(f, markers)
         var k = _stats_at(a, at, pkg)
@@ -596,11 +605,11 @@ def analyze(
         a.mutants.append(kept_muts[morder[i]].copy())
         a.mutant_packages.append(mut_pkgs[morder[i]])
     var ukeys = List[String]()
-    for i in range(len(uncompiled)):
-        ukeys.append(line_key(uncompiled[i].path, uncompiled[i].line))
+    for i in range(len(unrecorded)):
+        ukeys.append(line_key(unrecorded[i].path, unrecorded[i].line))
     var uorder = sort_by_keys(ukeys)
     for i in range(len(uorder)):
-        a.uncompiled_functions.append(uncompiled[uorder[i]].copy())
+        a.unrecorded_functions.append(unrecorded[uorder[i]].copy())
 
     # 7: findings.
     var findings = List[Finding]()

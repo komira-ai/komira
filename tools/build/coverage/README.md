@@ -39,8 +39,9 @@ tests cannot leave a package reading 100%.
 What is still missing: inside a file some test compiled, a function no test
 reaches emits no lines at all (Mojo compiles a function only when something
 the test reaches calls it, a generic once per instantiation), so it is
-absent from the report rather than uncovered. covcheck lists those
-functions (see "Functions no test compiled") but does not count them yet,
+absent from the report rather than uncovered. covcheck lists the functions
+none of whose lines has a record (see "Functions with no recorded line"),
+which holds those and some a test does call, and counts none of them yet,
 so these numbers are upper bounds.
 
 ## Command line
@@ -257,41 +258,60 @@ the end of a line (CRLF) are not part of the line.
 Everything else counts, declarations included (`def`, `struct`,
 `comptime`, a decorator, a lone `)`).
 
-## Functions no test compiled
+## Functions with no recorded line
 
-Report only: this list changes no number and raises no finding yet.
+Report only: these lists change no number and raise no finding.
 
 A report holds the lines the compiler emitted code for in a test binary:
 kcov lists exactly the DWARF line rows of the measured sources. A function
 no test reaches has no row, so in a file some test compiled it is not
 uncovered but absent. For each kept file with a line record, covcheck reads
 the functions the source declares (`covcheck/decls.mojo`) and lists every
-function none of whose lines has a record in any report, in the result
-JSON's `uncompiled_functions`: package, path, `def` line, name, and
-`lines`, its executable lines (the heuristic above) that carry no exemption
-marker with a reason. A function whose every line is so marked is not
-listed.
+function none of whose lines has a record in any report: package, path,
+`def` line, name, `class`, and `lines`, its executable lines (the heuristic
+above) that carry no exemption marker with a reason. A function whose every
+line is so marked is not listed. A file with branch records and no line
+record lists none.
+
+No record is not the same as no test calling it. Each function has a class,
+and the result JSON splits them:
+
+| class | when | JSON | trust |
+|---|---|---|---|
+| `plain` | neither below | `unrecorded_functions` | evidence no test reaches it; the class a census counts |
+| `always_inline` | a decorator line right above it starts with `@always_inline` | `unrecorded_functions_unreliable` | none: the body is inlined into its callers and what is left may be attributed to the caller's lines or folded away |
+| `comptime_if` | its body holds a `comptime if` or `@parameter` line | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
+
+Known false positives, all seen on real reports: an `@always_inline` body
+whose code the compiler attributed to the caller (a test calls it, its
+caller's lines are hit, its own `return` line has no record); a
+comptime-branched constant folded at the call site; a body that is
+entirely a dropped `comptime if` arm (an instrument compiled in only with a
+build flag); a function only another operating system compiles; and, in
+the `plain` class, a function reached only through such a dropped arm (its
+only caller is never compiled here).
 
 - A declaration is a `def` or `fn` line (code, not in a string). The
   signature runs until its `(` `)` and `[` `]` close; code after its `:` on
   that line is a one-line body; otherwise the body runs until the first
   code line indented no deeper than the `def` (a docstring line further
-  left does not end it).
-- A body of only `...` (a trait's requirement) is no function; `pass` is.
-- A nested function owns its lines, and is compiled or not on its own: a
-  compiled closure does not make the function around it compiled.
+  left, or a line that starts inside a string, does not end it).
+- A body of only `...` (a trait's requirement), or none, is no function;
+  `pass` is.
+- A nested function owns its lines, and is recorded or not on its own: a
+  recorded closure does not make the function around it recorded.
 - A file no test compiled lists no function: its lines are already counted
   ("Files no test compiled").
 
-It cannot see a `comptime if` arm the compiler dropped inside a compiled
+It cannot see a `comptime if` arm the compiler dropped inside a recorded
 function (the unit is the whole function), nor a function the compiler
-emits without line rows (a `nodebug` function may be one; not measured). Why the line records
-and not the DWARF subprograms: in a coverage test binary the library's
-functions (compiled from its precompiled package) have no named
-`DW_TAG_subprogram` at all, only a compile unit named `<unknown>` with a
-line table, and a line-tables-only subprogram carries no `decl_file` or
-`decl_line` anyway; the line rows are the one place a library function
-shows up.
+emits without line rows (a `nodebug` function may be one; not measured).
+Why the line records and not the DWARF subprograms: in a coverage test
+binary the library's functions (compiled from its precompiled package)
+have no named `DW_TAG_subprogram` at all, only a compile unit named
+`<unknown>` with a line table, and a line-tables-only subprogram carries no
+`decl_file` or `decl_line` anyway; the line rows are the one place a
+library function shows up.
 
 ## Exemptions
 
@@ -613,8 +633,9 @@ run at 20 requests (1 POST and 19 PATCHes).
 
 **Result** (`covcheck/result.mojo`): `conclusion`,
 `mode`, `target_bp`, `total`, `diff`, `touched_packages`, `packages`,
-`findings`, `exemptions`, `uncompiled_functions` (report only: see
-"Functions no test compiled") and the set-aside counts; `gate` writes `package`
+`findings`, `exemptions`, `unrecorded_functions` and
+`unrecorded_functions_unreliable` (report only: see "Functions with no
+recorded line") and the set-aside counts; `gate` writes `package`
 in place of `total`, `diff`, `touched_packages` and `packages`. A percentage
 or floor that does not apply is `null`. A package's `files` counts every
 file in its numbers and `unmeasured_files` those that raised

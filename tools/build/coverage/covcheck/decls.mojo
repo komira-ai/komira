@@ -1,13 +1,15 @@
 """Declaration reachability: the functions a source file declares, and
-which of them no test binary compiled.
+which of them have no line with a record in any report.
 
 A coverage report holds a line only when the compiler emitted code for it
 (the DWARF line rows of a test binary; kcov lists exactly those). Mojo emits
-a function only when something the test reaches calls it: a generic is
-compiled per instantiation, and a function nothing calls is not compiled at
-all. Such a function has no line in any report, so line coverage cannot see
-it: a file can read 100% with a public function no test calls. This module
-finds those functions from the source.
+a function only when something the test reaches calls it, so a function no
+test calls has no line in any report and line coverage cannot see it: a
+file can read 100% with a public function no test calls. This module lists
+the functions none of whose lines has a record. That is not the same as
+"no test calls it": a function a test does call can also have no record
+of its own (below), so the list is a candidate list, with a class per
+function saying how far it can be trusted.
 
 **A declaration** is a line holding code, not starting inside a string,
 whose first word (after spaces and tabs) is `def` or `fn` followed by a
@@ -21,46 +23,69 @@ docstring line further left does not end it); `end` is the last line before
 that holding code or string text.
 
 A declaration whose body is only `...` (on the signature line, or as the
-body's only code after a docstring) is a requirement of a trait, not a
-function: nothing can compile it, so it is left out. A body of `pass` is a
-function (its code sits on the `def` line).
+body's only code after a docstring), or that has no body, is a requirement
+of a trait, not a function: nothing can compile it, so it is left out. A
+body of `pass` is a function (its code sits on the `def` line).
 
 A function's **own lines** are the executable lines (lexer.mojo's
 heuristic, so the same lines a file no test compiled counts) from its `def`
 line to `end`, without the lines of the functions nested in it: a closure
-is a function of its own, compiled or not on its own.
+is a function of its own, recorded or not on its own.
 
-A function is **compiled** when any line of its range (`def` line to `end`,
+A function is **recorded** when any line of its range (`def` line to `end`,
 nested functions' ranges left out) has a record. Decorator lines are not
-part of a function. `uncompiled_functions` lists the ones that are not,
-each with its own lines that carry no exemption marker (`exempt`); a function left
-with no line is not listed.
+part of a function. `unrecorded_functions` lists the ones that are not,
+each with its own lines that carry no exemption marker (`exempt`); a
+function left with no line is not listed.
+
+Each listed function has a `kind`:
+
+- `always_inline`: a decorator line right above it starts with
+  `@always_inline`. Its code is inlined into its callers, and the compiler
+  may attribute what is left of it to the caller's lines or fold it away
+  (a constant, a one-instruction body), so a test can call it while none of
+  its lines has a record. Not evidence that no test calls it.
+- `comptime_if`: its body holds a `comptime if` or `@parameter` line. A
+  body whose code is all in a dropped arm (a platform-only or
+  build-flag-only function) emits nothing on this platform, and a body
+  folded to a constant leaves no line either. Not evidence either.
+- `plain`: neither. The class a census can count. Known false positive
+  that remains: a function reached only through a dropped `comptime if`
+  arm of another function (its caller is never compiled on this platform
+  or build).
 
 What it cannot see: a `comptime if` arm the compiler dropped inside a
-compiled function (a whole function is the unit here), and a function
+recorded function (the whole function is the unit here), and a function
 whose code the compiler emits without line rows.
 """
 
 from covcheck.lexer import LexState, SourceLine, executable_lines, lex_line
 from covcheck.text import split_lines, substr, suffix, trim
 
+comptime KIND_PLAIN = "plain"
+comptime KIND_ALWAYS_INLINE = "always_inline"
+comptime KIND_COMPTIME_IF = "comptime_if"
+
 
 struct FnDecl(Copyable, Movable):
     """One function or method with a body. `line` is its `def`/`fn` line,
     `end` the last line of its body (1-based, inclusive), `lines` its own
     executable lines (lexer.mojo's heuristic) from `line` to `end`, those of
-    functions nested in it left out."""
+    functions nested in it left out; `kind` one of the `KIND_` values (see
+    the module header)."""
 
     var name: String
     var line: Int
     var end: Int
     var lines: List[Int]
+    var kind: String
 
     def __init__(out self, name: String, line: Int, end: Int):
         self.name = name
         self.line = line
         self.end = end
         self.lines = List[Int]()
+        self.kind = String(KIND_PLAIN)
 
 
 def _first_word_is_def(text: String) -> Int:
@@ -214,6 +239,21 @@ def declared_functions(text: String) -> List[FnDecl]:
         if only_ellipsis:
             continue
         var f = FnDecl(name, i + 1, end + 1)
+        # Its class: the decorators right above it, then its body.
+        var inline_dec = False
+        var d = i - 1
+        while d >= 0 and ls[d].code and not starts_in_string[d] and _code_of(ls[d]).startswith("@"):
+            if _code_of(ls[d]).startswith("@always_inline"):
+                inline_dec = True
+            d -= 1
+        var gated = False
+        for c in range(len(body_code)):
+            if body_code[c].startswith("comptime if") or body_code[c].startswith("@parameter"):
+                gated = True
+        if inline_dec:
+            f.kind = String(KIND_ALWAYS_INLINE)
+        elif gated:
+            f.kind = String(KIND_COMPTIME_IF)
         out.append(f^)
     # Own lines: the function's range less its nested functions' ranges.
     for k in range(len(out)):
@@ -230,7 +270,7 @@ def declared_functions(text: String) -> List[FnDecl]:
     return out^
 
 
-def uncompiled_functions(text: String, recorded: Dict[Int, Int], exempt: Dict[Int, Bool]) -> List[FnDecl]:
+def unrecorded_functions(text: String, recorded: Dict[Int, Int], exempt: Dict[Int, Bool]) -> List[FnDecl]:
     """The functions of `text` (declared_functions) no line of whose range
     is a key of `recorded` (the lines a report gives a record, whatever
     their hits), each with its own lines less those in `exempt` (lines
@@ -238,7 +278,7 @@ def uncompiled_functions(text: String, recorded: Dict[Int, Int], exempt: Dict[In
     var fns = declared_functions(text)
     var out = List[FnDecl]()
     for k in range(len(fns)):
-        var compiled = False
+        var has_record = False
         for ln in range(fns[k].line, fns[k].end + 1):
             if ln not in recorded:
                 continue
@@ -248,11 +288,12 @@ def uncompiled_functions(text: String, recorded: Dict[Int, Int], exempt: Dict[In
                     nested = True
                     break
             if not nested:
-                compiled = True
+                has_record = True
                 break
-        if compiled:
+        if has_record:
             continue
         var f = FnDecl(fns[k].name, fns[k].line, fns[k].end)
+        f.kind = fns[k].kind
         for i in range(len(fns[k].lines)):
             if fns[k].lines[i] not in exempt:
                 f.lines.append(fns[k].lines[i])
