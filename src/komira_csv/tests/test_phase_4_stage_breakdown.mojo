@@ -55,6 +55,10 @@ from komira_csv import (
 from komira_csv.parallel_reader import _PhaseTiming
 
 
+# The fixture generators below append each row in place (`s += ...`).
+# `s = s + ...` copies the whole buffer for every row, which is quadratic in
+# the fixture size and took minutes per fixture in an unoptimized (coverage)
+# build.
 def _bytes(s: String) -> List[UInt8]:
     var out = List[UInt8]()
     var b = s.as_bytes()
@@ -74,9 +78,8 @@ def _gen_mixed_csv(n_rows: Int) -> List[UInt8]:
     var s = String("id,score,label,count,ratio,total\n")
     var i = 0
     while i < n_rows:
-        s = (
-            s
-            + String(i) + String(",")
+        s += (
+            String(i) + String(",")
             + String(Float64(i) * 1.5) + String(",row_")
             + String(i) + String(",")
             + String(i * 2) + String(",")
@@ -91,9 +94,8 @@ def _gen_string_heavy_csv(n_rows: Int) -> List[UInt8]:
     var s = String("id,name,city,country\n")
     var i = 0
     while i < n_rows:
-        s = (
-            s
-            + String(i) + String(",alice_")
+        s += (
+            String(i) + String(",alice_")
             + String(i) + String(",city_")
             + String(i % 100) + String(",country_")
             + String(i % 10) + String("\n")

@@ -51,6 +51,10 @@ from komira_csv import (
 # =============================================================================
 
 
+# The fixture generators below append each row in place (`s += ...`).
+# `s = s + ...` copies the whole buffer for every row, which is quadratic in
+# the fixture size and took minutes per fixture in an unoptimized (coverage)
+# build.
 def _bytes(s: String) -> List[UInt8]:
     """Convert a String to a List[UInt8] for test fixtures."""
     var out = List[UInt8]()
@@ -159,9 +163,8 @@ def _gen_wide_mixed_csv(n_rows: Int) -> List[UInt8]:
     var s = String("id,score,label,count,ratio,total\n")
     var i = 0
     while i < n_rows:
-        s = (
-            s
-            + String(i)
+        s += (
+            String(i)
             + String(",")
             + String(Float64(i) * 1.5)
             + String(",row_")
@@ -188,9 +191,8 @@ def _gen_pure_int_csv(n_rows: Int) -> List[UInt8]:
     var s = String("a,b,c,d\n")
     var i = 0
     while i < n_rows:
-        s = (
-            s
-            + String(i)
+        s += (
+            String(i)
             + String(",")
             + String(i * 2)
             + String(",")
@@ -213,9 +215,8 @@ def _gen_string_heavy_csv(n_rows: Int) -> List[UInt8]:
     var s = String("id,name,city,country\n")
     var i = 0
     while i < n_rows:
-        s = (
-            s
-            + String(i)
+        s += (
+            String(i)
             + String(",alice_")
             + String(i)
             + String(",city_")
@@ -244,9 +245,8 @@ def _gen_bool_mix_csv(n_rows: Int) -> List[UInt8]:
             b = String("true")
         else:
             b = String("false")
-        s = (
-            s
-            + String(i)
+        s += (
+            String(i)
             + String(",")
             + b
             + String(",")

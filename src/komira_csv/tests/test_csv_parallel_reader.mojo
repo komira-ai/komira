@@ -54,6 +54,10 @@ from komira_csv import (
 )
 
 
+# The fixture generators below append each row in place (`s += ...`).
+# `s = s + ...` copies the whole buffer for every row, which is quadratic in
+# the fixture size and took minutes per fixture in an unoptimized (coverage)
+# build.
 def _bytes(s: String) -> List[UInt8]:
     """Convert a String to a List[UInt8] for test fixtures."""
     var out = List[UInt8]()
@@ -114,7 +118,7 @@ def _gen_int_csv(n_rows: Int) -> List[UInt8]:
     var s = String("id,value\n")
     var i = 0
     while i < n_rows:
-        s = s + String(i) + String(",") + String(i * 10) + String("\n")
+        s += String(i) + String(",") + String(i * 10) + String("\n")
         i = i + 1
     return _bytes(s)
 
@@ -131,7 +135,7 @@ def _gen_int_csv_quoted(n_rows: Int) -> List[UInt8]:
     var s = String("id,name,value\n")
     var i = 0
     while i < n_rows:
-        s = s + String(i) + String(",\"first ") + String(i) + String(", last\",") + String(i * 10) + String("\n")
+        s += String(i) + String(",\"first ") + String(i) + String(", last\",") + String(i * 10) + String("\n")
         i = i + 1
     return _bytes(s)
 
@@ -244,7 +248,7 @@ def test_per_worker_quote_region_carry_independence() raises:
     var s = String("id,note\n")
     var i = 0
     while i < 80_000:
-        s = s + String(i) + String(",\"value of ") + String(i) + String("\"\n")
+        s += String(i) + String(",\"value of ") + String(i) + String("\"\n")
         i = i + 1
     var buf = _bytes(s)
 
