@@ -19,8 +19,8 @@
 #   * test_refusals: each refusal by its exact message, and that a request
 #     with an unadvertised feature (filter, want-ref, sideband-all,
 #     packfile-uris, session-id) is refused rather than ignored.
-#   * test_deepen: `deepen 0`, a sign, a leading zero, a non-digit or
-#     2^31 accepted.
+#   * test_deepen: `deepen 0`, a sign, a leading zero, a byte just outside
+#     '0'-'9' ('/', ':') or a letter after the first digit, or 2^31 accepted.
 #   * test_deepen_since_and_not: `deepen-since` and `deepen-not` dropped
 #     or misread (a ref not passed on as sent, its LF kept); an empty, signed,
 #     zero-led or over-2^63-1 timestamp, a byte just outside '0'-'9' ('/',
@@ -291,7 +291,8 @@ def test_deepen() raises:
     comptime P = "komira_git: upload-pack: Invalid deepen: "
     var bad: List[String] = [
         "deepen 0", "deepen -1", "deepen +1", "deepen 010", "deepen 0x10",
-        "deepen 2147483648", "deepen ", "deepen 1 ",
+        "deepen 2147483648", "deepen ", "deepen 1 ", "deepen 1/",
+        "deepen 1:", "deepen 1a",
     ]
     for i in range(len(bad)):
         var arg = bad[i]
