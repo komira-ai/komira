@@ -1,6 +1,7 @@
 # =============================================================================
-# komira_db/tests/test_sql_render.mojo
-# The shared SQL renderers of sql_neutral_ops.mojo (the ops: test_sql_ops.mojo).
+# komira_db/tests/test_sql_ops_split.mojo
+# query_rows' client-side split with several predicates of one kind (the other
+# ops: test_sql_ops.mojo).
 # =============================================================================
 # `sql_neutral_ops.mojo` is the one place the SQL drivers render the neutral
 # ops. Its contract is the exact SQL text and the bind order: a placeholder the
@@ -58,17 +59,6 @@ from komira_db.sql_neutral_ops import (
     sql_op_create_if_absent,
     sql_op_create_if_absent_composite,
     sql_op_claim_rows,
-    render_get_by_key,
-    render_put,
-    render_delete_by_key,
-    render_query_rows,
-    render_query_rows_locked,
-    render_conditional_update,
-    render_delete_where,
-    render_create_if_absent_composite,
-    render_where,
-    render_order,
-    _n_update_binds,
 )
 
 
@@ -438,282 +428,122 @@ def _no_bump() -> Optional[String]:
     return Optional[String](None)
 
 
+def _row(id: String, col: String, var val: DbValue) -> DbRow:
+    """A candidate row `(id, <col>)`; `val` may be a NULL."""
+    var v = List[DbValue]()
+    v.append(_t(id))
+    v.append(val^)
+    return DbRow.from_values(v, _s2("id", col))
+
+
+def _ids(rows: DbRows) raises -> String:
+    var s = String()
+    for i in range(rows.__len__()):
+        if i > 0:
+            s += ","
+        s += rows.row(i).get_text(0)
+    return s^
+
+
+def _row3(id: String, var config: DbValue, var tags: DbValue) -> DbRow:
+    var v = List[DbValue]()
+    v.append(_t(id))
+    v.append(config^)
+    v.append(tags^)
+    return DbRow.from_values(v, _s3("id", "config", "tags"))
+
+
+def _arr(a: String, b: String) -> DbValue:
+    return DbValue.text_array(_s2(a, b))
+
+
+def _one_arr(a: String) -> DbValue:
+    return DbValue.text_array(_s(a))
+
+
+def _expect_log(db_log: List[String], want: List[String]) raises:
+    assert_equal(len(db_log), len(want), "log length")
+    for i in range(len(want)):
+        assert_equal(db_log[i], want[i])
+
+
 # =============================================================================
-# 1 — render_where: every predicate arm, numbering, joiner, the pg-only refusal
+# The client-side split with SEVERAL predicates of one kind: every one of them
+# must hold (an AND filter). Each case has a row matching only the first
+# predicate and a row matching only the second (both dropped), rows matching
+# both (kept) and a row matching neither.
 # =============================================================================
 
 
-def test_render_where_every_arm_pg_numbering_from_offset() raises:
-    """Each predicate renders its documented SQL and consumes exactly its binds;
-    numbering starts at the caller's `next_bind` (2 here, so the first
-    placeholder is `$3`) and the counter ends past the last bind."""
-    var preds = List[Pred]()
-    preds.append(Pred.eq("a", _t("x")))
-    preds.append(Pred.ne("b", _t("y")))
-    preds.append(Pred.ne("c", DbValue.null(LOGICAL_TEXT)))
-    preds.append(Pred.lt("d", _i(1)))
-    preds.append(Pred.le("e", _i(2)))
-    preds.append(Pred.gte("f", _i(3)))
-    preds.append(Pred.is_null("g"))
-    preds.append(Pred.is_not_null("h"))
-    preds.append(Pred.in_literals("s", _v2(_i(0), _i(1))))
-    preds.append(Pred.in_list("t", _v2(_t("p"), _t("q"))))
-    preds.append(Pred.json_key_eq("config", "k", _t("v")))
-    preds.append(Pred.array_contains("tags", _t("red")))
-    var nb = 2
-    var got = render_where[PgDb](Filter.all_of(preds^), "pg", nb)
-    assert_equal(
-        got,
-        String(
-            "a = $3 AND (b IS NULL OR b <> $4) AND c IS NOT NULL AND d < $5"
-            " AND e <= $6 AND f >= $7 AND g IS NULL AND h IS NOT NULL"
-            " AND s IN (0, 1) AND t IN ($8, $9) AND config ->> $10 = $11"
-            " AND $12 = ANY(tags)"
-        ),
+def _add_two_tag_rows(mut rows: List[DbRow]):
+    rows.append(_row("both1", "tags", _arr("red", "blue")))
+    rows.append(_row("first", "tags", _one_arr("red")))
+    rows.append(_row("second", "tags", _one_arr("blue")))
+    rows.append(_row("both2", "tags", DbValue.text_array(_s3("blue", "green", "red"))))
+    rows.append(_row("neither", "tags", _one_arr("green")))
+
+
+def test_sqlite_two_array_contains_all_must_hold() raises:
+    """sqlite: both array_contains preds are stripped (the EQ stays pushed) and a
+    row is kept only if its array holds `red` AND `blue`."""
+    var rt = _new_rt()
+    ref reactor = rt.reactor()
+    var db = SqliteDb()
+    _add_two_tag_rows(db.rows)
+    db.row_cols = _s2("id", "tags")
+    var preds = _p2(Pred.eq("kind", _t("a")), Pred.array_contains("tags", _t("red")))
+    preds.append(Pred.array_contains("tags", _t("blue")))
+    var got = db.query_rows[RT](
+        reactor, "t", _s2("id", "tags"), Filter.all_of(preds^), _no_order(), _no_limit()
     )
-    assert_equal(nb, 12)
+    assert_equal(_ids(got), String("both1,both2"))
+    _expect_log(db.log, _s("query SELECT id, tags FROM t WHERE kind = ?1 [1=a]"))
 
 
-def test_render_where_sqlite_or_and_json_extract() raises:
-    """sqlite: OR joins the terms, JSON_KEY_EQ binds the key then the value
-    through `json_extract(col, '$.' || ?k) = ?v`, a single-value bound IN binds
-    one placeholder."""
-    var preds = _p2(
-        Pred.json_key_eq("config", "env", _t("prod")),
-        Pred.in_list("x", _v1(_i(7))),
+def test_pgstore_two_array_contains_all_must_hold() raises:
+    """pgstore: with only array preds nothing is left to push (no WHERE), and a
+    row is kept only if its array holds both values."""
+    var rt = _new_rt()
+    ref reactor = rt.reactor()
+    var db = PgstoreDb()
+    _add_two_tag_rows(db.rows)
+    db.row_cols = _s2("id", "tags")
+    var f = Filter.all_of(
+        _p2(Pred.array_contains("tags", _t("red")), Pred.array_contains("tags", _t("blue")))
     )
-    preds.append(Pred.eq("y", _i(8)))
-    var nb = 0
-    var got = render_where[SqliteDb](Filter.any_of(preds^), "sqlite", nb)
-    assert_equal(
-        got,
-        String("json_extract(config, '$.' || ?1) = ?2 OR x IN (?3) OR y = ?4"),
-    )
-    assert_equal(nb, 4)
+    var got = db.query_rows[RT](reactor, "t", _s2("id", "tags"), f, _no_order(), _no_limit())
+    assert_equal(_ids(got), String("both1,both2"))
+    _expect_log(db.log, _s("query SELECT id, tags FROM t []"))
 
 
-def test_render_where_empty_filter_binds_nothing() raises:
-    var nb = 5
-    assert_equal(render_where[PgDb](Filter.none(), "pg", nb), String(""))
-    assert_equal(nb, 5)
-
-
-def test_render_where_array_contains_refused_off_pg() raises:
-    """ARRAY_CONTAINS is pg-only in SQL: any other dialect reaching the renderer
-    is a wiring bug and fails closed, naming the dialect."""
-    var nb = 0
-    var raised = False
-    try:
-        _ = render_where[SqliteDb](
-            Filter.just(Pred.array_contains("tags", _t("a"))), "sqlite", nb
+def test_pgstore_two_json_key_eq_all_must_hold() raises:
+    """pgstore: a row is kept only if its JSON config carries `env` = `prod` AND
+    `tier` = `gold` (key order in the object is irrelevant; a missing second key
+    drops the row)."""
+    var rt = _new_rt()
+    ref reactor = rt.reactor()
+    var db = PgstoreDb()
+    db.rows.append(_row("both1", "config", DbValue.jsonb("{\"env\":\"prod\",\"tier\":\"gold\"}")))
+    db.rows.append(_row("first", "config", DbValue.jsonb("{\"env\":\"prod\",\"tier\":\"free\"}")))
+    db.rows.append(_row("second", "config", DbValue.jsonb("{\"env\":\"dev\",\"tier\":\"gold\"}")))
+    db.rows.append(_row("nokey", "config", DbValue.jsonb("{\"env\":\"prod\"}")))
+    db.rows.append(_row("both2", "config", DbValue.jsonb("{\"tier\":\"gold\",\"env\":\"prod\"}")))
+    db.rows.append(_row("neither", "config", DbValue.jsonb("{\"env\":\"dev\"}")))
+    db.row_cols = _s2("id", "config")
+    var f = Filter.all_of(
+        _p2(
+            Pred.json_key_eq("config", "env", _t("prod")),
+            Pred.json_key_eq("config", "tier", _t("gold")),
         )
-    except e:
-        raised = True
-        assert_equal(
-            String(e),
-            String(
-                "render_where: PRED_ARRAY_CONTAINS is pg-only in SQL; the"
-                " query-rows op must strip it for dialect \"sqlite\" and"
-                " filter client-side"
-            ),
-        )
-    assert_true(raised, "sqlite array_contains must raise")
-
-
-def test_render_order() raises:
-    var o = List[Order]()
-    o.append(Order.descending("created_at"))
-    o.append(Order.asc("name"))
-    o.append(Order.asc_explicit("id"))
-    assert_equal(render_order(o), String("created_at DESC, name, id ASC"))
-    assert_equal(render_order(_no_order()), String(""))
-
-
-# =============================================================================
-# 2 — the statement renderers
-# =============================================================================
-
-
-def test_render_key_statements_per_dialect() raises:
-    var cols = _s3("id", "name", "n")
-    assert_equal(
-        render_get_by_key[PgDb]("jobs", cols, "id"),
-        String("SELECT id, name, n FROM jobs WHERE id = $1"),
     )
-    assert_equal(
-        render_put[PgDb]("jobs", cols),
-        String("INSERT INTO jobs (id, name, n) VALUES ($1, $2, $3)"),
-    )
-    assert_equal(
-        render_put[SqliteDb]("jobs", cols),
-        String("INSERT INTO jobs (id, name, n) VALUES (?1, ?2, ?3)"),
-    )
-    assert_equal(
-        render_delete_by_key[SqliteDb]("jobs", "id"),
-        String("DELETE FROM jobs WHERE id = ?1"),
-    )
-
-
-def test_render_query_rows_shapes() raises:
-    """Bare SELECT with no clause; then WHERE, ORDER BY and a LIMIT numbered
-    after the filter's binds."""
-    var nb = 0
-    assert_equal(
-        render_query_rows[PgDb]("t", _s("a"), Filter.none(), _no_order(), False, nb),
-        String("SELECT a FROM t"),
-    )
-    assert_equal(nb, 0)
-    var o = List[Order]()
-    o.append(Order.descending("b"))
-    assert_equal(
-        render_query_rows[PgDb](
-            "t", _s2("a", "b"), Filter.just(Pred.eq("a", _i(1))), o, True, nb
-        ),
-        String("SELECT a, b FROM t WHERE a = $1 ORDER BY b DESC LIMIT $2"),
-    )
-    assert_equal(nb, 2)
-
-
-def test_render_query_rows_locked_per_dialect() raises:
-    """`FOR UPDATE SKIP LOCKED` on full Postgres only, after the ORDER BY."""
-    var o = List[Order]()
-    o.append(Order.asc("due"))
-    var nb = 0
-    assert_equal(
-        render_query_rows_locked[PgDb](
-            "q", _s("id"), Filter.just(Pred.lt("due", _i(9))), o, nb
-        ),
-        String("SELECT id FROM q WHERE due < $1 ORDER BY due FOR UPDATE SKIP LOCKED"),
-    )
-    assert_equal(nb, 1)
-    nb = 0
-    assert_equal(
-        render_query_rows_locked[PgDb]("q", _s("id"), Filter.none(), _no_order(), nb),
-        String("SELECT id FROM q FOR UPDATE SKIP LOCKED"),
-    )
-    nb = 0
-    assert_equal(
-        render_query_rows_locked[SqliteDb](
-            "q", _s("id"), Filter.just(Pred.lt("due", _i(9))), o, nb
-        ),
-        String("SELECT id FROM q WHERE due < ?1 ORDER BY due"),
-    )
-    nb = 0
-    assert_equal(
-        render_query_rows_locked[PgstoreDb]("q", _s("id"), Filter.none(), o, nb),
-        String("SELECT id FROM q ORDER BY due"),
-    )
-
-
-def test_render_conditional_update_mixed_set() raises:
-    """The transition_job shape: plain, raw, COALESCE and plain terms keep their
-    order, raw binds nothing, the now-stamp follows, and the guard numbers on
-    from the SET's last bind."""
-    var u = List[DbColVal]()
-    u.append(DbColVal.bind("phase", _t("RUNNING")))
-    u.append(DbColVal.raw_expr("version", "version + 1"))
-    u.append(DbColVal.coalesce("progress", _i(5)))
-    u.append(DbColVal.bind("msg", _t("m")))
-    var guard = Filter.all_of(
-        _p2(Pred.eq("id", _t("j1")), Pred.eq("phase", _t("PENDING")))
-    )
-    assert_equal(
-        render_conditional_update[PgDb](
-            "jobs", guard, u, False, _no_bump(), _s("updated_at")
-        ),
-        String(
-            "UPDATE jobs SET phase = $1, version = version + 1, progress ="
-            " COALESCE($2, progress), msg = $3, updated_at = NOW() WHERE id ="
-            " $4 AND phase = $5"
-        ),
-    )
-
-
-def test_render_conditional_update_coalesce_default_and_lead_terms() raises:
-    """`coalesce=True` upgrades a plain bind to COALESCE; the version bump and a
-    now-stamp each render correctly as the FIRST term (no leading comma), and
-    an empty guard renders no WHERE."""
-    var u = List[DbColVal]()
-    u.append(DbColVal.bind("a", _i(1)))
-    assert_equal(
-        render_conditional_update[SqliteDb](
-            "t", Filter.none(), u, True, Optional[String]("version"), List[String]()
-        ),
-        String("UPDATE t SET a = COALESCE(?1, a), version = version + 1"),
-    )
-    assert_equal(
-        render_conditional_update[SqliteDb](
-            "t",
-            Filter.none(),
-            List[DbColVal](),
-            False,
-            Optional[String]("version"),
-            _s("updated_at"),
-        ),
-        String("UPDATE t SET version = version + 1, updated_at = ") + SQLITE_NOW,
-    )
-    assert_equal(
-        render_conditional_update[PgDb](
-            "t",
-            Filter.just(Pred.eq("id", _i(4))),
-            List[DbColVal](),
-            False,
-            _no_bump(),
-            _s2("a_at", "b_at"),
-        ),
-        String("UPDATE t SET a_at = NOW(), b_at = NOW() WHERE id = $1"),
-    )
-
-
-def test_render_delete_where_and_composite_insert() raises:
-    var nb = 0
-    assert_equal(
-        render_delete_where[PgDb](
-            "idempotency_keys", Filter.just(Pred.lt("created_at", _i(100))), nb
-        ),
-        String("DELETE FROM idempotency_keys WHERE created_at < $1"),
-    )
-    assert_equal(nb, 1)
-    nb = 0
-    assert_equal(
-        render_delete_where[PgDb]("t", Filter.none(), nb), String("DELETE FROM t")
-    )
-    assert_equal(
-        render_create_if_absent_composite[PgDb](
-            "m", _s2("mailbox_id", "content_hash"), _s3("mailbox_id", "content_hash", "body")
-        ),
-        String(
-            "INSERT INTO m (mailbox_id, content_hash, body) VALUES ($1, $2, $3)"
-            " ON CONFLICT (mailbox_id, content_hash) DO NOTHING RETURNING"
-            " mailbox_id"
-        ),
-    )
-
-
-def test_n_update_binds() raises:
-    """BIND and COALESCE terms bind one param each; RAW_EXPR binds none.
-    `_n_update_binds` has no caller in the library: this test only covers the
-    uncalled helper and goes away with it (komira#954, item 5)."""
-    var u = List[DbColVal]()
-    u.append(DbColVal.bind("a", _i(1)))
-    u.append(DbColVal.raw_expr("v", "v + 1"))
-    u.append(DbColVal.coalesce("c", _i(2)))
-    assert_equal(_n_update_binds(u), 2)
-    assert_equal(_n_update_binds(List[DbColVal]()), 0)
+    var got = db.query_rows[RT](reactor, "t", _s2("id", "config"), f, _no_order(), _no_limit())
+    assert_equal(_ids(got), String("both1,both2"))
+    _expect_log(db.log, _s("query SELECT id, config FROM t []"))
 
 
 def main() raises:
-    print("== komira_db sql_neutral_ops ==")
-    test_render_where_every_arm_pg_numbering_from_offset()
-    test_render_where_sqlite_or_and_json_extract()
-    test_render_where_empty_filter_binds_nothing()
-    test_render_where_array_contains_refused_off_pg()
-    test_render_order()
-    test_render_key_statements_per_dialect()
-    test_render_query_rows_shapes()
-    test_render_query_rows_locked_per_dialect()
-    test_render_conditional_update_mixed_set()
-    test_render_conditional_update_coalesce_default_and_lead_terms()
-    test_render_delete_where_and_composite_insert()
-    test_n_update_binds()
-    print("PASS test_sql_neutral_ops (renderers)")
+    print("== komira_db sql_neutral_ops: multi-predicate client-side split ==")
+    test_sqlite_two_array_contains_all_must_hold()
+    test_pgstore_two_array_contains_all_must_hold()
+    test_pgstore_two_json_key_eq_all_must_hold()
+    print("PASS test_sql_ops_split")

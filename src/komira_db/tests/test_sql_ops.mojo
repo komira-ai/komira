@@ -21,10 +21,10 @@
 # `MAX(version)` read and `SELECT *` (the ledger, a live table's columns) from
 # their own scripts, and `fail_on` makes one statement fail.
 #
-# `_RecDb` is the same in test_sql_render.mojo, test_sql_ops.mojo and
-# test_migration.mojo: a test-support package implementing `SqlDatabase` would
-# depend on komira_db, which its tests cannot depend on (a cycle), and each
-# welded test is built from its one file.
+# `_RecDb` is the same in test_sql_render.mojo, test_sql_ops.mojo,
+# test_sql_ops_split.mojo and test_migration.mojo: a test-support package
+# implementing `SqlDatabase` would depend on komira_db, which its tests cannot
+# depend on (a cycle), and each welded test is built from its one file.
 #
 # A param is logged as `<logical type>=<text>` (`~` instead of `=` for a NULL):
 # logical type 1 is TEXT, 3 is INT8, 10 is TEXT[] (db_value.mojo).
