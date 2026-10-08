@@ -39,10 +39,12 @@ Handles, the version a resolve reads, and what the grammar refuses:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_raises, assert_true -->
 ```mojo
-from komira_gcp_secret_store import crc32c, parse_gcp_secret_ref
+from komira_gcp_secret_store import GCP_VERSION_LATEST, GcpSecretRef, crc32c, parse_gcp_secret_ref
 
-var secret = parse_gcp_secret_ref("projects/demo-project/secrets/smtp")
-assert_equal(secret.version_name(), "projects/demo-project/secrets/smtp/versions/latest")
+var secret: GcpSecretRef = parse_gcp_secret_ref("projects/demo-project/secrets/smtp")
+assert_true(not secret.names_version())
+assert_equal(secret.secret_name(), "projects/demo-project/secrets/smtp")
+assert_equal(secret.version_name(), "projects/demo-project/secrets/smtp/versions/" + GCP_VERSION_LATEST)
 
 var regional = parse_gcp_secret_ref("projects/demo-project/locations/us-central1/secrets/smtp/versions/3")
 assert_true(regional.is_regional())
@@ -54,39 +56,62 @@ with assert_raises(contains="neither 'latest' nor a version number"):
 assert_equal(Int(crc32c("123456789".as_bytes())), 0xE3069283)
 ```
 
-A store resolving a handle. The client here answers from a scripted
-connector; an application passes a `TlsConnector` and a token source such
-as `komira_gcp_core`'s Application Default Credentials:
+A store and a writer. The clients here answer from scripted connectors,
+one canned answer per client; an application passes a `TlsConnector` and a
+token source such as `komira_gcp_core`'s Application Default Credentials,
+and the store and the writer each own their client:
 
-<!-- mojo-hidden from std.testing import assert_equal -->
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_raises, assert_true -->
 ```mojo
 from komira_gcp_core import StaticTokenSource
-from komira_gcp_secret_store import GcpSecretManagerStore
+from komira_gcp_secret_store import GCP_ENABLED_FILTER, GcpSecretManagerStore, GcpSecretManagerWriter
 from komira_gcp_secretmanager.service import SecretManagerServiceClient
 from komira_http_client.client import HttpClient
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_secret_store import SecretValue
 
-var body = String(
+comptime Client = SecretManagerServiceClient[ScriptedConnector, StaticTokenSource]
+
+def _answering(status: String, body: String) raises -> Client:
+    var http = (
+        "HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: "
+        + String(body.byte_length()) + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var raw = List[UInt8]()
+    raw.extend(Span(http.as_bytes()))
+    var client = Client(
+        HttpClient[ScriptedConnector].with_defaults(
+            ScriptedConnector.with_stream_tls(ScriptedStream.from_read_script(raw^))
+        ),
+        StaticTokenSource("an-access-token"),
+    )
+    client.set_rest_host("localhost")
+    return client^
+
+var store = GcpSecretManagerStore(_answering(
+    "200 OK",
     '{"name":"projects/000000000000/secrets/smtp/versions/3",'
-    + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}'
-)
-var http = (
-    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
-    + String(body.byte_length()) + "\r\nConnection: close\r\n\r\n" + body
-)
-var raw = List[UInt8]()
-raw.extend(Span(http.as_bytes()))
-var client = SecretManagerServiceClient[ScriptedConnector, StaticTokenSource](
-    HttpClient[ScriptedConnector].with_defaults(
-        ScriptedConnector.with_stream_tls(ScriptedStream.from_read_script(raw^))
-    ),
-    StaticTokenSource("an-access-token"),
-)
-client.set_rest_host("localhost")
-var store = GcpSecretManagerStore(client^)
+    + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}',
+))
 var value = store.resolve("projects/demo-project/secrets/smtp")
 assert_equal(value.len(), 7)
 assert_equal(String(value), "SecretValue(<redacted:7B>)")
+
+var writer = GcpSecretManagerWriter(_answering(
+    "200 OK", '{"name":"projects/000000000000/secrets/smtp/versions/4","state":"ENABLED"}'
+))
+writer.write("projects/demo-project/secrets/smtp", SecretValue.from_string("rotated"), "")
+with assert_raises(contains="the handle names a version"):
+    writer.write("projects/demo-project/secrets/smtp/versions/4", SecretValue.from_string("x"), "")
+
+var existing = GcpSecretManagerWriter(_answering(
+    "409 Conflict", '{"error":{"code":409,"message":"exists","status":"ALREADY_EXISTS"}}'
+))
+existing.define_container("projects/demo-project/secrets/smtp", "")  # already there: no-op
+
+var empty = GcpSecretManagerWriter(_answering("200 OK", "{}"))
+assert_false(empty.has_version("projects/demo-project/secrets/smtp", ""))  # no enabled version
+assert_equal(GCP_ENABLED_FILTER, "state:ENABLED")
 ```
 
 ## Tests

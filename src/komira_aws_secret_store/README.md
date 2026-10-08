@@ -34,10 +34,14 @@ Handles, and what the grammar refuses:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_raises, assert_true -->
 ```mojo
-from komira_aws_secret_store import parse_aws_secret_ref
+from komira_aws_secret_store import AWS_SELECTOR_VERSION_ID, AWS_SELECTOR_VERSION_STAGE, AwsSecretRef, parse_aws_secret_ref
 
-var current = parse_aws_secret_ref("app/db")
+var current: AwsSecretRef = parse_aws_secret_ref("app/db")
 assert_true(current.is_plain())
+
+var pinned = parse_aws_secret_ref(String("app/db?") + AWS_SELECTOR_VERSION_ID + "=a1b2c3d4-5678-90ab-cdef-EXAMPLE11111")
+assert_equal(pinned.version_id.value(), "a1b2c3d4-5678-90ab-cdef-EXAMPLE11111")
+assert_equal(AWS_SELECTOR_VERSION_STAGE, "versionStage")
 
 var previous = parse_aws_secret_ref("app/db?versionStage=AWSPREVIOUS")
 assert_equal(previous.secret_id, "app/db")
@@ -48,20 +52,22 @@ with assert_raises(contains="neither versionId nor versionStage"):
     _ = parse_aws_secret_ref("app/db?label=AWSPREVIOUS")
 ```
 
-A store resolving a handle. The client here answers from a scripted
-connector; an application passes `KernelTcpConnector` behind TLS and its
-own credential source:
+A store and a writer. The clients here answer from scripted connectors,
+one canned answer per client; an application passes `KernelTcpConnector`
+behind TLS and its own credential source, and the store and the writer each
+own their client:
 
-<!-- mojo-hidden from std.testing import assert_equal -->
+<!-- mojo-hidden from std.testing import assert_equal, assert_raises, assert_true -->
 ```mojo
 from komira_aws_core import AwsCredential, StaticCredsSource
-from komira_aws_secret_store import AwsSecretsManagerStore
+from komira_aws_secret_store import AWS_STAGE_CURRENT, AwsSecretsManagerStore, AwsSecretsManagerWriter
 from komira_aws_secretsmanager.komira_aws_secretsmanager import SecretsManagerClient, SecretsManagerEndpointConfig
 from komira_http_client.client import HttpClientConfig
+from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_secret_store import SecretValue
 
-def _answer() raises -> ScriptedConnector:
-    var body = String('{"Name":"app/db","SecretString":"hunter2"}')
+def _ok(body: String) raises -> ScriptedConnector:
     var http = (
         "HTTP/1.1 200 OK\r\nContent-Type: application/x-amz-json-1.1\r\n"
         + "Content-Length: " + String(body.byte_length())
@@ -71,19 +77,39 @@ def _answer() raises -> ScriptedConnector:
     raw.extend(Span(http.as_bytes()))
     return ScriptedConnector.with_stream(ScriptedStream.from_read_script(raw^))
 
-var config = SecretsManagerEndpointConfig()
-config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-var client = SecretsManagerClient[ScriptedConnector, StaticCredsSource](
-    _answer,
-    HttpClientConfig.defaults(),
-    StaticCredsSource(AwsCredential("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "")),
-    "us-east-1",
-    config^,
-)
-var store = AwsSecretsManagerStore(client^)
+def _value() raises -> ScriptedConnector:
+    return _ok('{"Name":"app/db","SecretString":"hunter2"}')
+
+def _put() raises -> ScriptedConnector:
+    return _ok('{"Name":"app/db","VersionId":"a1b2c3d4-5678-90ab-cdef-EXAMPLE11111"}')
+
+def _described() raises -> ScriptedConnector:
+    return _ok('{"Name":"app/db","VersionIdsToStages":{"a1b2c3d4-5678-90ab-cdef-EXAMPLE11111":["AWSCURRENT"]}}')
+
+def _client[C: Connector](mk: def () raises thin -> C) raises -> SecretsManagerClient[C, StaticCredsSource]:
+    var config = SecretsManagerEndpointConfig()
+    config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
+    return SecretsManagerClient[C, StaticCredsSource](
+        mk,
+        HttpClientConfig.defaults(),
+        StaticCredsSource(AwsCredential("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "")),
+        "us-east-1",
+        config^,
+    )
+
+var store = AwsSecretsManagerStore(_client(_value))
 var value = store.resolve("app/db")
 assert_equal(value.len(), 7)
 assert_equal(String(value), "SecretValue(<redacted:7B>)")
+
+var writer = AwsSecretsManagerWriter(_client(_put))
+writer.write("app/db", SecretValue.from_string("rotated"), "")
+with assert_raises(contains="a deploy token was given"):
+    writer.define_container("app/db", "a-bearer-token")
+
+var probe = AwsSecretsManagerWriter(_client(_described))
+assert_true(probe.has_version("app/db", ""))  # a version holds AWS_STAGE_CURRENT
+assert_equal(AWS_STAGE_CURRENT, "AWSCURRENT")
 ```
 
 ## Tests
