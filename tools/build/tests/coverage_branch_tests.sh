@@ -26,7 +26,10 @@
 #      test_score_arms are its golden file: the `if` and both `elif`s, which
 #      Mojo puts on one location, three records; the `or` and `and` with
 #      their right operands derived; shapes.mojo's while, range( loop,
-#      ternary, or chain and plain @always_inline helper; loops.mojo's
+#      ternary, or chain and plain @always_inline helper; values.mojo's
+#      and/or whose result is returned, stored or passed on, each its own
+#      two arms, and those whose result a branch tests, with their right
+#      operands; loops.mojo's
 #      loops over a List and a list literal, arm 0 the end; lookup.mojo's
 #      Dict subscript, compiler-made; mask.mojo's two user masks, decisions);
 #      tests//negative/coverage: branchfail, branchannotate,
@@ -43,8 +46,7 @@
 #      without the test's main: a function the profile lacks, refused),
 #      branchweights[...][branch_ir] red (a copy annotating a bitcode that
 #      already holds branch weights), branchnodebug[...][branch_info] red
-#      (a nodebug helper's decision at its call), branchretor[...]
-#      [branch_info] red (`return a or b`: the right operand not counted),
+#      (a nodebug helper's decision at its call),
 #      branchenv red at analysis (a test_env setting
 #      LLVM_PROFILE_FILE), branchlinkline red (a cov_branch_link.sh copy
 #      without -lm: not the release link). The actions exist only with the
@@ -59,7 +61,7 @@ expect_green coverage_branch tests//functional/coverage:branch_counts tests//fun
     tests//negative/coverage:branchfail tests//negative/coverage:branchannotate \
     tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion \
     tests//negative/coverage:branchmissing tests//negative/coverage:branchweights \
-    tests//negative/coverage:branchnodebug tests//negative/coverage:branchretor
+    tests//negative/coverage:branchnodebug
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'
 # The failing run's message is a branch coverage run's: not gate_runner's
@@ -84,8 +86,6 @@ expect_red coverage_branch_static_weights "already holds branch weights" \
     'tests//negative/coverage:branchweights[coverage][branch_ir][test_one]'
 expect_red coverage_branch_nodebug "may be a decision of count_down" \
     'tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]'
-expect_red coverage_branch_return_or "the right operand of this 'or' is not counted" \
-    'tests//negative/coverage:branchretor[coverage][branch_info][test_either]'
 expect_red coverage_branch_test_env "test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself" \
     tests//negative/coverage:branchenv
 expect_red coverage_branch_link_line "the branch coverage link is not the release link plus the profile runtime" \
