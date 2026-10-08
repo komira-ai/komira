@@ -8,7 +8,9 @@
 # check that is dropped lets its row through ("accepted"). The writer is
 # checked by reading what it writes.
 #
-# The first day is 2030-09-02, a Monday (2030-09-05 a Thursday).
+# The first day is 2030-09-02, a Monday (2030-09-05 a Thursday), except
+# where a row names another: every accepted rule picks its first day, and
+# test_start_not_an_occurrence refuses the rules that do not.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -47,6 +49,7 @@ comptime BAD = "RRULE_MALFORMED"
 
 def test_accepted() raises:
     var mon = _day(2030, 9, 2)
+    var tue = _day(2030, 9, 3)
     var thu = _day(2030, 9, 5)
     _ok("FREQ=DAILY", mon, '{"freq":"DAILY","interval":1}')
     _ok("freq=daily;interval=3;count=10", mon, '{"freq":"DAILY","interval":3,"count":10}')
@@ -54,7 +57,7 @@ def test_accepted() raises:
     _ok("FREQ=WEEKLY", mon, '{"freq":"WEEKLY","interval":1}')
     _ok(
         "FREQ=WEEKLY;BYDAY=TU,TH,TU;WKST=SU",
-        mon,
+        tue,
         '{"freq":"WEEKLY","interval":1,"weekdays":["TUESDAY","THURSDAY"]}',
     )
     _ok(
@@ -64,30 +67,30 @@ def test_accepted() raises:
     )
     _ok(
         "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU;WKST=MO",
-        mon,
+        tue,
         '{"freq":"WEEKLY","interval":2,"weekdays":["TUESDAY","SUNDAY"]}',
     )
     _ok("FREQ=WEEKLY;INTERVAL=2;WKST=SU", thu, '{"freq":"WEEKLY","interval":2}')
     _ok("FREQ=MONTHLY", thu, '{"freq":"MONTHLY","interval":1,"monthDay":5}')
-    _ok("FREQ=MONTHLY;BYMONTHDAY=31", mon, '{"freq":"MONTHLY","interval":1,"monthDay":31}')
+    _ok("FREQ=MONTHLY;BYMONTHDAY=31", _day(2030, 10, 31), '{"freq":"MONTHLY","interval":1,"monthDay":31}')
     _ok(
         "FREQ=MONTHLY;COUNT=10;BYDAY=1FR",
-        mon,
+        _day(2030, 9, 6),
         '{"freq":"MONTHLY","interval":1,"ordinal":1,"ordinalWeekday":"FRIDAY","count":10}',
     )
     _ok(
         "FREQ=MONTHLY;BYDAY=-1FR",
-        mon,
+        _day(2030, 9, 27),
         '{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"FRIDAY"}',
     )
     _ok(
         "FREQ=MONTHLY;BYDAY=+4SA",
-        mon,
+        _day(2030, 9, 28),
         '{"freq":"MONTHLY","interval":1,"ordinal":4,"ordinalWeekday":"SATURDAY"}',
     )
     _ok(
         "FREQ=MONTHLY;BYDAY=TU;BYSETPOS=2",
-        mon,
+        _day(2030, 9, 10),
         '{"freq":"MONTHLY","interval":1,"ordinal":2,"ordinalWeekday":"TUESDAY"}',
     )
     _ok("FREQ=YEARLY", mon, '{"freq":"YEARLY","interval":1}')
@@ -137,6 +140,12 @@ def test_out_of_subset() raises:
         OUT,
         "RRULE BYSETPOS on a MONTHLY rule is one position for one plain weekday in the subset",
     )
+    _no(
+        "FREQ=MONTHLY;BYDAY=TU;BYSETPOS=1,-1",
+        _day(2030, 9, 3),
+        OUT,
+        "RRULE BYSETPOS on a MONTHLY rule is one position for one plain weekday in the subset",
+    )
     _no("FREQ=MONTHLY;BYSETPOS=1", mon, OUT, "RRULE BYSETPOS without BYDAY is outside the subset")
     _no("FREQ=YEARLY;BYDAY=20MO", mon, OUT, "RRULE BYDAY on a YEARLY rule is outside the subset")
     _no("FREQ=YEARLY;BYMONTH=6,7", mon, OUT, "RRULE BYMONTH on a YEARLY rule is the start's month in the subset")
@@ -155,6 +164,35 @@ def test_out_of_subset() raises:
     )
     _no("FREQ=YEARLY;BYSETPOS=1", mon, OUT, "RRULE BYSETPOS on a YEARLY rule is outside the subset")
     print("  test_out_of_subset PASS")
+
+
+comptime NOT_OCCURRENCE = "DTSTART is not an occurrence of its RRULE; RFC 5545 leaves such a recurrence set undefined"
+
+
+def test_start_not_an_occurrence() raises:
+    # RFC 5545 §3.8.5.3: a DTSTART the rule does not pick gives an undefined
+    # set. Each row's start is one the rule skips; the rows above with the
+    # same rules and a start the rule picks are accepted.
+    var mon = _day(2030, 9, 2)
+    _no("FREQ=WEEKLY;BYDAY=TU,TH", mon, OUT, NOT_OCCURRENCE)
+    _no("FREQ=MONTHLY;COUNT=10;BYDAY=1FR", mon, OUT, NOT_OCCURRENCE)
+    _no("FREQ=MONTHLY;BYDAY=-1FR", _day(2030, 9, 20), OUT, NOT_OCCURRENCE)
+    _no("FREQ=MONTHLY;BYDAY=+4SA", _day(2030, 9, 21), OUT, NOT_OCCURRENCE)
+    _no("FREQ=MONTHLY;BYDAY=TU;BYSETPOS=2", _day(2030, 9, 3), OUT, NOT_OCCURRENCE)
+    _no("FREQ=MONTHLY;BYMONTHDAY=31", mon, OUT, NOT_OCCURRENCE)
+    # Sunday 2030-09-01 with WKST=SU: the RFC's first week is 1-7 September
+    # (DTSTART, then Monday the 2nd); the model's Monday weeks would give
+    # the 9th and the 23rd. The start's weekday is one of the days WKST
+    # groups, so the rule is refused for its WKST.
+    _no(
+        "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;WKST=SU",
+        _day(2030, 9, 1),
+        OUT,
+        "RRULE WKST=SU groups this rule's days into other weeks than a week starting on Monday",
+    )
+    # INTERVAL 1: WKST changes nothing, and the start is not a Monday.
+    _no("FREQ=WEEKLY;BYDAY=MO;WKST=SU", _day(2030, 9, 1), OUT, NOT_OCCURRENCE)
+    print("  test_start_not_an_occurrence PASS")
 
 
 def test_malformed() raises:
@@ -190,6 +228,7 @@ def main() raises:
     print("test_rrule")
     test_accepted()
     test_out_of_subset()
+    test_start_not_an_occurrence()
     test_malformed()
     test_weekday_names()
     print("ALL TESTS PASS")

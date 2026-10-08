@@ -22,10 +22,19 @@
 # An edit is one more VEVENT of the same UID with RECURRENCE-ID (the original
 # start, in the DTSTART form). A cancelled occurrence has STATUS:CANCELLED
 # and DTSTART at the original start; a kept one has every field the
-# occurrence shows: the replacement where the edit has one, else the
+# occurrence shows: the replacement where the edit has one (an empty
+# SUMMARY, LOCATION or DESCRIPTION when the edit clears it), else the
 # series' value.
+# A recurring event whose start is not an occurrence of its rule refuses
+# the export: RFC 5545 §3.8.5.3 leaves such a recurrence set undefined.
 # Every TEXT value is escaped and every line folded at 75 octets
-# (komira_content_line), so reading the file back gives the same events.
+# (komira_content_line). Reading the file back gives the same events and a
+# clean report, with three exceptions: a CR or CRLF in a TEXT value comes
+# back as LF (TEXT has one escape, `\n`, for a line break); an event with no
+# uid comes back with its id as the uid; and an edit's replacement equal to
+# the series' value is not kept (the occurrence shows the same), so an edit
+# whose every replacement is such a value is reported as one that changes
+# nothing.
 # =============================================================================
 
 from komira_calendar import check_event, check_override, parse_local_date, parse_local_datetime
@@ -33,8 +42,8 @@ from komira_calendar_proto.calendar import Event, EventStatus, OccurrenceOverrid
 from komira_content_line import ContentLine, Param, escape_text, fold_line, format_content_line
 from komira_datetime import FoldPolicy, GapPolicy
 
-from .read_event import IcsEvent
-from .rrule import format_rrule
+from .read_event import UNTITLED_REMINDER, IcsEvent
+from .rrule import format_rrule, start_is_occurrence
 from .values import (
     SECONDS_PER_DAY,
     format_ics_date,
@@ -120,6 +129,17 @@ def _texts(title: String, location: String, description: String) raises -> Strin
     return out^
 
 
+def _edit_text(name: String, replacement: Optional[String], series: String) raises -> String:
+    """One TEXT property of a kept edit: the replacement when the edit has
+    one, written even when empty (an edit that clears the field), else the
+    series' value when it is not empty."""
+    if replacement:
+        return _text(name, replacement.value())
+    if series.byte_length() > 0:
+        return _text(name, series)
+    return String()
+
+
 def _series(event: Event, uid: String, stamp: String, form: _Form) raises -> String:
     var start = event.start_date.copy() if event.show_without_time else event.start.copy()
     var out = prop_line("BEGIN", "VEVENT")
@@ -137,7 +157,7 @@ def _series(event: Event, uid: String, stamp: String, form: _Form) raises -> Str
     for r in event.reminders:
         out += prop_line("BEGIN", "VALARM")
         out += prop_line("ACTION", "DISPLAY")
-        out += _text("DESCRIPTION", event.title if event.title.byte_length() > 0 else String("Reminder"))
+        out += _text("DESCRIPTION", event.title if event.title.byte_length() > 0 else String(UNTITLED_REMINDER))
         out += prop_line("TRIGGER", "-PT" + String(r.minutes_before) + "M")
         out += prop_line("END", "VALARM")
     out += prop_line("END", "VEVENT")
@@ -159,11 +179,9 @@ def _edit(event: Event, edit: OccurrenceOverride, uid: String, stamp: String, fo
     var days = Int(edit.days.value()) if edit.days else Int(event.days)
     var seconds = Int(edit.duration_seconds.value()) if edit.duration_seconds else Int(event.duration_seconds)
     out += _ending(form, start, days, seconds)
-    out += _texts(
-        edit.title.value() if edit.title else event.title,
-        edit.location.value() if edit.location else event.location,
-        edit.description.value() if edit.description else event.description,
-    )
+    out += _edit_text("SUMMARY", edit.title, event.title)
+    out += _edit_text("LOCATION", edit.location, event.location)
+    out += _edit_text("DESCRIPTION", edit.description, event.description)
     out += prop_line("END", "VEVENT")
     return out^
 
@@ -184,6 +202,13 @@ def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) r
         var r = check_event(e)
         if r:
             raise Error('ics export: event "' + uid + '": ' + String(r.value()))
+        if e.recurrence:
+            var day = parse_local_date(e.start_date) if e.show_without_time else parse_local_datetime(e.start).days
+            if not start_is_occurrence(e.recurrence.value(), day):
+                raise Error(
+                    'ics export: event "' + uid + '": its start is not an occurrence of its recurrence,'
+                    + " and RFC 5545 leaves such a recurrence set undefined"
+                )
         for ref o in ie.overrides:
             var ro = check_override(o, e)
             if ro:

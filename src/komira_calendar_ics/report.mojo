@@ -9,9 +9,22 @@
 #     of its BEGIN, its UID when it has one, and a sentence;
 #   - `dropped`: a property, parameter or value that was not kept on an
 #     imported event, counted per (component, name, detail) with the first
-#     line it was seen on.
+#     line it was seen on. Past `MAX_DROPPED_KINDS` distinct kinds, every
+#     further kind is counted in one more entry, `* *` with the detail
+#     `OVERFLOW_DETAIL`, so a file of many distinct property names cannot
+#     make the report as large as the file.
 # A refused event's own properties are not reported as dropped.
+# Recording a drop is one dictionary lookup, and merging adds counts, so a
+# report costs time in proportion to what is recorded.
 # =============================================================================
+
+from std.collections import Dict
+
+comptime MAX_DROPPED_KINDS = 256
+"""The distinct (component, name, detail) entries a report itemises."""
+
+comptime OVERFLOW_DETAIL = "past the first 256 kinds of dropped item, not itemised"
+"""The detail of the entry that counts every kind past `MAX_DROPPED_KINDS`."""
 
 
 struct IcsCode:
@@ -75,10 +88,12 @@ struct IcsReport(Copyable, Movable):
 
     var refused: List[IcsRefusal]
     var dropped: List[IcsDropped]
+    var _index: Dict[String, Int]
 
     def __init__(out self):
         self.refused = List[IcsRefusal]()
         self.dropped = List[IcsDropped]()
+        self._index = Dict[String, Int]()
 
     def refuse(mut self, code: String, line: Int, uid: String, message: String):
         """Records a refused component."""
@@ -86,25 +101,45 @@ struct IcsReport(Copyable, Movable):
 
     def drop(mut self, component: String, name: String, detail: String, line: Int):
         """Records one dropped item, counted with the earlier ones of the same
-        component, name and detail."""
-        for i in range(len(self.dropped)):
-            ref d = self.dropped[i]
-            if d.component == component and d.name == name and d.detail == detail:
-                d.count += 1
-                if line < d.first_line:
-                    d.first_line = line
+        component, name and detail (module header)."""
+        self._add(component, name, detail, 1, line)
+
+    def _add(mut self, component: String, name: String, detail: String, count: Int, line: Int):
+        var key = _key(component, name, detail)
+        var at = self._index.get(key)
+        if not at and len(self.dropped) >= MAX_DROPPED_KINDS:
+            key = _key("*", "*", OVERFLOW_DETAIL)
+            at = self._index.get(key)
+            if not at:
+                self._index[key] = len(self.dropped)
+                self.dropped.append(IcsDropped("*", "*", OVERFLOW_DETAIL, count, line))
                 return
-        self.dropped.append(IcsDropped(component.copy(), name.copy(), detail.copy(), 1, line))
+        if at:
+            ref d = self.dropped[at.value()]
+            d.count += count
+            if line < d.first_line:
+                d.first_line = line
+            return
+        self._index[key] = len(self.dropped)
+        self.dropped.append(IcsDropped(component.copy(), name.copy(), detail.copy(), count, line))
 
     def merge(mut self, other: IcsReport):
-        """Adds `other`'s items to this report."""
+        """Adds `other`'s items to this report, each dropped entry's count at
+        once."""
         for i in range(len(other.refused)):
             self.refused.append(other.refused[i].copy())
         for i in range(len(other.dropped)):
             ref d = other.dropped[i]
-            for _ in range(d.count):
-                self.drop(d.component, d.name, d.detail, d.first_line)
+            self._add(d.component, d.name, d.detail, d.count, d.first_line)
 
     def is_clean(self) -> Bool:
         """True when nothing was refused or dropped."""
         return len(self.refused) == 0 and len(self.dropped) == 0
+
+
+def _key(component: String, name: String, detail: String) -> String:
+    """One dictionary key for (component, name, detail): each part with its
+    length first, so no two triples share a key."""
+    return (
+        String(component.byte_length()) + ":" + component + String(name.byte_length()) + ":" + name + detail
+    )

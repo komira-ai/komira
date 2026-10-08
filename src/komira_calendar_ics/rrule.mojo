@@ -18,15 +18,23 @@
 #   YEARLY      nothing, or BYMONTH of the start's month, optionally with
 #               BYMONTHDAY of the start's day (the same rule spelled out)
 #   WKST        any weekday; read only where it changes the rule: a WEEKLY
-#               rule with INTERVAL above 1 whose days a week starting on
-#               WKST groups differently from a week starting on Monday (the
-#               model's weeks start on Monday) is out of subset
+#               rule with INTERVAL above 1 whose days, the start's weekday
+#               among them, a week starting on WKST groups differently from
+#               a week starting on Monday (the model's weeks start on
+#               Monday) is out of subset
+# A rule that does not pick the event's first day is out of subset: RFC
+# 5545 §3.8.5.3 leaves the recurrence set of a DTSTART "not synchronized
+# with the recurrence rule" undefined (§3.3.10 counts DTSTART as the first
+# occurrence; the model counts the first day only when the rule picks it).
+# The check runs after every other one, so a rule refused for its shape
+# carries that reason. `start_is_occurrence` is the same test on the model's
+# rule, for the export.
 # UNTIL is returned as written: its reading needs the event's time zone.
 # =============================================================================
 
 from komira_calendar import MAX_COUNT, MAX_INTERVAL
 from komira_calendar_proto.calendar import Frequency, Recurrence, Weekday
-from komira_datetime import civil_from_days, weekday_from_days
+from komira_datetime import civil_from_days, days_in_month, weekday_from_days
 
 from .report import IcsCode
 
@@ -277,8 +285,9 @@ def parse_rrule(text: String, start_day: Int) -> RuleRead:
                 return _bad("RRULE BYDAY on a WEEKLY rule has an ordinal")
             if d.weekday not in days:
                 days.append(d.weekday)
-        if len(days) == 0:
-            days.append((weekday_from_days(start_day) + 6) % 7 + 1)
+        var start_weekday = _model_weekday(start_day)
+        if start_weekday not in days:
+            days.append(start_weekday)
         if interval > 1 and _wkst_regroups(days, wkst):
             return _out(
                 "RRULE WKST=" + weekday_name(wkst)
@@ -328,7 +337,45 @@ def parse_rrule(text: String, start_day: Int) -> RuleRead:
             return _out("RRULE BYMONTH on a YEARLY rule is the start's month in the subset")
         if len(bymonthday) > 1 or (len(bymonthday) == 1 and (bymonthday[0] != start.day or len(bymonth) == 0)):
             return _out("RRULE BYMONTHDAY on a YEARLY rule is the start's day, with BYMONTH, in the subset")
+    if not start_is_occurrence(rule, start_day):
+        return _out(NOT_AN_OCCURRENCE)
     return RuleRead(rule^, until^)
+
+
+comptime NOT_AN_OCCURRENCE = "DTSTART is not an occurrence of its RRULE; RFC 5545 leaves such a recurrence set undefined"
+"""The refusal of a rule that does not pick its event's first day."""
+
+
+def _model_weekday(day: Int) -> Int:
+    """The weekday of `day` (days since 1970-01-01) as 1..7, Monday first."""
+    return (weekday_from_days(day) + 6) % 7 + 1
+
+
+def start_is_occurrence(rule: Recurrence, start_day: Int) -> Bool:
+    """True when the model's `rule` picks `start_day`, the event's first
+    local date (days since 1970-01-01): every DAILY and YEARLY rule (a
+    YEARLY rule is the start's month and day); a WEEKLY rule naming the
+    start's weekday, or naming none; a MONTHLY rule on the start's day of
+    the month, or on the ordinal weekday the start is."""
+    var weekday = _model_weekday(start_day)
+    var f = rule.freq.value
+    if f == Frequency.WEEKLY:
+        if len(rule.weekdays) == 0:
+            return True
+        for w in rule.weekdays:
+            if Int(w.value) == weekday:
+                return True
+        return False
+    if f != Frequency.MONTHLY:
+        return True
+    var c = civil_from_days(start_day)
+    if rule.ordinal == 0:
+        return rule.month_day == 0 or Int(rule.month_day) == c.day
+    if Int(rule.ordinal_weekday.value) != weekday:
+        return False
+    if rule.ordinal < 0:
+        return c.day + 7 * Int(-rule.ordinal) > days_in_month(c.year, c.month) and c.day + 7 * (Int(-rule.ordinal) - 1) <= days_in_month(c.year, c.month)
+    return (c.day - 1) // 7 + 1 == Int(rule.ordinal)
 
 
 def format_rrule(rule: Recurrence, until: String) -> String:

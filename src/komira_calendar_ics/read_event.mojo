@@ -32,17 +32,23 @@
 # up to the model's bound, becomes a reminder (`minutes_before`; a day in the
 # TRIGGER counts 1440 minutes). An alarm's
 # ACTION other than DISPLAY, its DESCRIPTION unless it is the event's title
-# (what the reminder shows), and every other alarm property are reported
+# (what the reminder shows) or, for an event with no title, the word
+# `UNTITLED_REMINDER` an export writes there, and every other alarm property
+# are reported
 # dropped; so is an alarm whose trigger cannot be a reminder, one repeating
 # an earlier reminder, and one past the model's count.
 #
 # An edit (a VEVENT with RECURRENCE-ID) keeps what differs from its series:
 # a replacement title, location, description, start, or length; a property
 # it leaves out keeps the series' value. STATUS:CANCELLED cancels the
-# occurrence, and the edit's other properties are then not read. RANGE (this and later occurrences) is refused. The edit's
-# RRULE, EXDATE and VALARM are reported dropped: an occurrence has none of
-# its own.
+# occurrence; its other properties (but a DTSTART at the original start)
+# and its VALARMs are then reported dropped "on a cancelled occurrence", and
+# any other child is refused. RANGE (this and later occurrences) is refused.
+# The edit's RRULE, EXDATE and VALARM are reported dropped: an occurrence has
+# none of its own.
 # =============================================================================
+
+from std.collections import Dict
 
 from komira_calendar import (
     MAX_DURATION_SECONDS,
@@ -81,6 +87,11 @@ from .values import (
     parse_ics_time,
 )
 from .zones import ResolvedZone, ZoneResolver, ZoneSource
+
+
+comptime UNTITLED_REMINDER = "Reminder"
+"""The DESCRIPTION an export writes on the VALARM of an event with no title
+(RFC 5545 §3.6.6 requires one on a DISPLAY alarm)."""
 
 
 struct IcsEvent(Copyable, Movable):
@@ -258,6 +269,7 @@ def _exdates[Z: ZoneSource](
     comp: IcsComponent, props: EventProps, timing: Timing, mut zr: ZoneResolver, zones: Z
 ) raises -> List[String]:
     var out = List[String]()
+    var seen = Dict[String, Int]()
     for i in props.exdates:
         ref p = comp.properties[i]
         for item in p.line.value.split(","):
@@ -271,11 +283,8 @@ def _exdates[Z: ZoneSource](
                 text = format_iso_date(t.day())
             else:
                 text = format_local(_wall(t, timing.zone.value(), zr, zones))
-            var seen = False
-            for x in out:
-                if x == text:
-                    seen = True
-            if not seen:
+            if text not in seen:
+                seen[text] = 1
                 out.append(text^)
     return out^
 
@@ -308,7 +317,8 @@ def _alarm_minutes(alarm: IcsComponent, title: String, mut rep: IcsReport) -> In
             if v != "DISPLAY":
                 rep.drop("VALARM", "ACTION", v + ", read as a reminder to the owner", p.line_number)
         elif name == "DESCRIPTION":
-            if unescape_text(p.line.value) != title:
+            var shown = unescape_text(p.line.value)
+            if shown != title and not (title.byte_length() == 0 and shown == UNTITLED_REMINDER):
                 rep.drop("VALARM", "DESCRIPTION", String(), p.line_number)
         else:
             rep.drop("VALARM", name, String(), p.line_number)
@@ -377,6 +387,48 @@ def _children(
         else:
             out.append(Reminder(UInt32(m)))
     return out^
+
+
+def _report_cancelled[Z: ZoneSource](
+    comps: List[IcsComponent], comp: IcsComponent, props: EventProps, all_day: Bool,
+    original_local: Int, home: Optional[ResolvedZone], mut zr: ZoneResolver, zones: Z, mut rep: IcsReport,
+):
+    """Reports what a cancelled occurrence edit carries besides UID,
+    DTSTAMP, RECURRENCE-ID, STATUS and a DTSTART at the original start: each
+    such property and VALARM is dropped "on a cancelled occurrence"; any
+    other child is refused as in a series."""
+    comptime CANCELLED = "on a cancelled occurrence"
+    var none = List[String]()
+    report_params(comp, props.uid, none, comp.name, rep)
+    report_params(comp, props.recurrence_id, _rid_params(), comp.name, rep)
+    report_params(comp, props.status, none, comp.name, rep)
+    for i in range(len(comp.properties)):
+        ref p = comp.properties[i]
+        ref name = p.line.name
+        if i == props.uid or i == props.recurrence_id or i == props.status or name == "DTSTAMP":
+            continue
+        if i == props.dtstart:
+            var same = False
+            try:
+                var t = time_of(p)
+                if t.is_date == all_day:
+                    var local = t.local if all_day else _wall(t, home.value(), zr, zones)
+                    same = local == original_local
+            except:
+                same = False
+            if same:
+                report_params(comp, i, _time_params(), comp.name, rep)
+                continue
+        rep.drop(comp.name, name, CANCELLED, p.line_number)
+    for c in comp.children:
+        ref child = comps[c]
+        if child.name == "VALARM":
+            rep.drop(comp.name, "VALARM", CANCELLED, child.begin_line)
+        else:
+            rep.refuse(
+                IcsCode.COMPONENT_OUT_OF_SUBSET, child.begin_line, String(),
+                child.name + " inside a VEVENT is outside the subset (only VALARM is read there)",
+            )
 
 
 def _time_params() -> List[String]:
@@ -485,6 +537,7 @@ def read_edit[Z: ZoneSource](
         edit.original_start = format_local(original_local)
     if _status(comp, props, rep):
         edit.cancelled = True
+        _report_cancelled(comps, comp, props, all_day, original_local, home, zr, zones, rep)
         return edit^
     var start_local = original_local
     if props.dtstart >= 0:

@@ -19,7 +19,8 @@
 #     the rules come from the `ZoneSource`, never from the file.
 #   - VEVENT without RECURRENCE-ID is a series (read_event.mojo). A series
 #     is refused when it has no UID or the UID of an earlier series, when a
-#     value is malformed or out of the subset, and when the event breaks the
+#     value is malformed or out of the subset (an RRULE that does not pick
+#     its DTSTART among them), and when the event breaks the
 #     calendar model (`komira_calendar.check_event`, whose code it carries).
 #   - VEVENT with RECURRENCE-ID is an edit of the imported series of its
 #     UID, read after every series. It is refused without such a recurring
@@ -29,6 +30,8 @@
 #   - Any other component (VTODO, VJOURNAL, VFREEBUSY, ...) is refused as
 #     out of subset.
 # =============================================================================
+
+from std.collections import Dict
 
 from komira_calendar import check_event, check_override
 
@@ -121,7 +124,8 @@ def read_ics[Z: ZoneSource](
                 zr.add_location(tzid, location)
 
     var events = List[IcsEvent]()
-    var uids = List[String]()
+    var uids = Dict[String, Int]()  # the UID of each imported series: its index in `events`
+    var edited = Dict[String, Int]()  # series index, a space, original start: each kept edit
     for c in comps[0].children:
         ref comp = comps[c]
         if comp.name == "VTIMEZONE":
@@ -138,14 +142,13 @@ def read_ics[Z: ZoneSource](
         var local = IcsReport()
         var uid = _uid_of(comp)
         try:
-            for u in uids:
-                if u == uid and uid.byte_length() > 0:
-                    raise refusal(IcsCode.UID_DUPLICATE, 'an earlier VEVENT has UID "' + uid + '"')
+            if uid.byte_length() > 0 and uid in uids:
+                raise refusal(IcsCode.UID_DUPLICATE, 'an earlier VEVENT has UID "' + uid + '"')
             var event = read_series(comps, c, zr, zones, local)
             var r = check_event(event)
             if r:
                 raise _model_refusal(r.value().field, r.value().code, r.value().message)
-            uids.append(uid.copy())
+            uids[uid] = len(events)
             events.append(IcsEvent(event^))
             rep.merge(local)
         except e:
@@ -159,10 +162,7 @@ def read_ics[Z: ZoneSource](
         try:
             if uid.byte_length() == 0:
                 raise refusal(IcsCode.UID_MISSING, "the VEVENT has no UID")
-            var at = -1
-            for k in range(len(uids)):
-                if uids[k] == uid:
-                    at = k
+            var at = uids.get(uid).or_else(-1)
             if at < 0 or not events[at].event.recurrence:
                 raise refusal(
                     IcsCode.OVERRIDE_WITHOUT_SERIES,
@@ -173,15 +173,16 @@ def read_ics[Z: ZoneSource](
             if not edit:
                 local.drop("VEVENT", "RECURRENCE-ID", "an occurrence edit that changes nothing", comp.begin_line)
             else:
-                for o in events[at].overrides:
-                    if o.original_start == edit.value().original_start:
-                        raise refusal(
-                            IcsCode.OVERRIDE_DUPLICATE,
-                            "the occurrence " + o.original_start + " is edited twice",
-                        )
+                var key = String(at) + " " + edit.value().original_start
+                if key in edited:
+                    raise refusal(
+                        IcsCode.OVERRIDE_DUPLICATE,
+                        "the occurrence " + edit.value().original_start + " is edited twice",
+                    )
                 var r = check_override(edit.value(), events[at].event)
                 if r:
                     raise _model_refusal(r.value().field, r.value().code, r.value().message)
+                edited[key] = 1
                 events[at].overrides.append(edit.take())
             rep.merge(local)
         except e:
