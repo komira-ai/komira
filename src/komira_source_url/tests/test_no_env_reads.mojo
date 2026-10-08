@@ -1,5 +1,5 @@
-# The package reads no environment: every file system arrives built, with its
-# settings as constructor parameters. The package's sources are staged as this
+# The package reads no environment: the mapping is a function of the URL
+# alone. The package's sources are staged as this
 # test's data, at src/<file>; the test reads each one and fails if any names a
 # way to read the environment or the FFI a read would go through, and checks
 # that the files it read are every staged one.
@@ -23,9 +23,7 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
-    "fs_handle.mojo",
-    "azure_arm.mojo",
-    "s3_connector.mojo",
+    "source_url.mojo",
 ]
 
 
@@ -64,10 +62,10 @@ def test_the_scan_saw_the_package() raises:
                 known = True
         assert_true(known, "src/" + staged[i] + " is staged but not scanned")
     # Not vacuous: each file is the package's, whole.
-    var handle = _read("fs_handle.mojo")
-    assert_equal(_count(handle, "\nstruct FsHandleOver["), 1)
-    assert_equal(_count(handle, "\ndef fs_handle_from_typed_fs["), 1)
-    assert_equal(_count(_read("__init__.mojo"), "from .fs_handle import"), 1)
+    var mapping = _read("source_url.mojo")
+    assert_equal(_count(mapping, "\ndef source_scheme_for_url("), 1)
+    assert_equal(_count(mapping, "\ndef check_source_scheme("), 1)
+    assert_equal(_count(_read("__init__.mojo"), "from .source_url import"), 1)
 
 
 def main() raises:

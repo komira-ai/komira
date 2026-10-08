@@ -1,4 +1,5 @@
-# The Azure arm's URLs and endpoints, as values: nothing is dialed.
+# An AzureFs's URLs and endpoints (azure_url.mojo), as values: nothing is
+# dialed.
 #
 # Rows:
 #  * parse_azure_url, accepted: az://, abfs:// and abfss:// with the
@@ -13,7 +14,8 @@
 #  * parse_azure_url, refused by exact message: another scheme, no scheme,
 #    no container, a container or account name Azure does not allow, an abfs
 #    host that is not an Azure storage host, an https host that is not a
-#    blob host, plaintext http:// to Azure's own host (in any letter case,
+#    blob host, the bare service host with no account label (blob. or dfs.,
+#    on https:// and abfs[s]:// and az://), plaintext http:// to Azure's own host (in any letter case,
 #    with or without a port), an http:// URL that is
 #    not path-style, and a query (a SAS token pasted into the URL), whose
 #    refusal does not echo the token.
@@ -30,7 +32,7 @@
 #    90..BF after F0, 80..8F after F4; continuation 80..BF at the second,
 #    third and fourth position) a sequence just outside is refused by exact
 #    message and one exactly on the edge decodes to its bytes.
-#  * azure_arm_config_for_url: a URL naming no account or endpoint takes the
+#  * azure_fs_config_for_url: a URL naming no account or endpoint takes the
 #    configuration's; one naming the configured endpoint (scheme and host
 #    case-insensitive, a trailing / ignored) uses it; a different account,
 #    an endpoint other than the configured one ("" is Azure's own, so a URL
@@ -44,10 +46,10 @@
 #    are refused by exact message.
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
-from komira_fs_registry import (
-    AzureArmConfig,
+from komira_azure_blob import (
+    AzureFsConfig,
     AzureUrl,
-    azure_arm_config_for_url,
+    azure_fs_config_for_url,
     azure_config_for,
     azure_endpoint_is_plaintext,
     parse_azure_url,
@@ -125,24 +127,24 @@ def test_encoded_paths() raises:
         "myacct", "lake", "year%3D2024", True, "", False,
     )
     with assert_raises(
-        contains="fs_registry: an Azure URL's path has a '%' not followed by two hex digits, got 'https://myacct.blob.core.windows.net/lake/a%2'"
+        contains="azure_url: an Azure URL's path has a '%' not followed by two hex digits, got 'https://myacct.blob.core.windows.net/lake/a%2'"
     ):
         _ = parse_azure_url("https://myacct.blob.core.windows.net/lake/a%2")
     with assert_raises(
-        contains="fs_registry: an Azure URL's path has a '%' not followed by two hex digits, got 'abfs://lake@myacct.blob.core.windows.net/a%2zb'"
+        contains="azure_url: an Azure URL's path has a '%' not followed by two hex digits, got 'abfs://lake@myacct.blob.core.windows.net/a%2zb'"
     ):
         _ = parse_azure_url("abfs://lake@myacct.blob.core.windows.net/a%2zb")
     with assert_raises(
-        contains="fs_registry: an Azure URL's decoded path is not UTF-8, got 'https://myacct.blob.core.windows.net/lake/a%FF'"
+        contains="azure_url: an Azure URL's decoded path is not UTF-8, got 'https://myacct.blob.core.windows.net/lake/a%FF'"
     ):
         _ = parse_azure_url("https://myacct.blob.core.windows.net/lake/a%FF")
     with assert_raises(
-        contains="fs_registry: an Azure URL's path has a '%' not followed by two hex digits, got 'http://127.0.0.1:10000/devstoreaccount1/lake/a%G0'"
+        contains="azure_url: an Azure URL's path has a '%' not followed by two hex digits, got 'http://127.0.0.1:10000/devstoreaccount1/lake/a%G0'"
     ):
         _ = parse_azure_url("http://127.0.0.1:10000/devstoreaccount1/lake/a%G0")
 
 
-comptime _UTF8_MSG = "fs_registry: an Azure URL's decoded path is not UTF-8, got '"
+comptime _UTF8_MSG = "azure_url: an Azure URL's decoded path is not UTF-8, got '"
 comptime _BLOB = "https://myacct.blob.core.windows.net/lake/"
 
 
@@ -257,7 +259,7 @@ def test_utf8_bounds() raises:
 
 
 comptime _SCHEME_MSG = (
-    "fs_registry: an Azure URL must start with az://, abfs://, abfss://,"
+    "azure_url: an Azure URL must start with az://, abfs://, abfss://,"
     " https:// or http://, got '"
 )
 comptime _CONTAINER_RULE = (
@@ -272,52 +274,66 @@ def test_refused_urls() raises:
         _ = parse_azure_url("s3://lake/x")
     with assert_raises(contains=_SCHEME_MSG + "lake/x'"):
         _ = parse_azure_url("lake/x")
-    with assert_raises(contains="fs_registry: an Azure URL must name a container, got 'az:///x'"):
+    with assert_raises(contains="azure_url: an Azure URL must name a container, got 'az:///x'"):
         _ = parse_azure_url("az:///x")
     with assert_raises(
-        contains="fs_registry: an Azure URL must name a container, got 'https://myacct.blob.core.windows.net/'"
+        contains="azure_url: an Azure URL must name a container, got 'https://myacct.blob.core.windows.net/'"
     ):
         _ = parse_azure_url("https://myacct.blob.core.windows.net/")
-    with assert_raises(contains="fs_registry: 'Lake" + _CONTAINER_RULE):
+    with assert_raises(contains="azure_url: 'Lake" + _CONTAINER_RULE):
         _ = parse_azure_url("az://Lake/x")
-    with assert_raises(contains="fs_registry: 'a--b" + _CONTAINER_RULE):
+    with assert_raises(contains="azure_url: 'a--b" + _CONTAINER_RULE):
         _ = parse_azure_url("az://a--b/x")
-    with assert_raises(contains="fs_registry: 'ab" + _CONTAINER_RULE):
+    with assert_raises(contains="azure_url: 'ab" + _CONTAINER_RULE):
         _ = parse_azure_url("abfs://ab/x")
     with assert_raises(
-        contains="fs_registry: an Azure URL's host must be <account>.blob.core.windows.net or <account>.dfs.core.windows.net, got 'myacct.example.com'"
+        contains="azure_url: an Azure URL's host must be <account>.blob.core.windows.net or <account>.dfs.core.windows.net, got 'myacct.example.com'"
     ):
         _ = parse_azure_url("abfss://lake@myacct.example.com/x")
     with assert_raises(
-        contains="fs_registry: an https:// Azure URL's host must be <account>.blob.core.windows.net, got 'myacct.dfs.core.windows.net'"
+        contains="azure_url: an https:// Azure URL's host must be <account>.blob.core.windows.net, got 'myacct.dfs.core.windows.net'"
     ):
         _ = parse_azure_url("https://myacct.dfs.core.windows.net/lake/x")
     with assert_raises(
-        contains="fs_registry: an https:// Azure URL's host must be <account>.blob.core.windows.net, got 'example.com'"
+        contains="azure_url: an https:// Azure URL's host must be <account>.blob.core.windows.net, got 'example.com'"
     ):
         _ = parse_azure_url("https://example.com/lake/x")
+    # The bare service host, with no account label before it: refused, not
+    # sliced past its end.
     with assert_raises(
-        contains="fs_registry: 'my_acct' is not an Azure storage account name (3 to 24 lowercase letters and digits)"
+        contains="azure_url: an https:// Azure URL's host must be <account>.blob.core.windows.net, got 'blob.core.windows.net'"
+    ):
+        _ = parse_azure_url("https://blob.core.windows.net/lake/x")
+    with assert_raises(
+        contains="azure_url: an Azure URL's host must be <account>.blob.core.windows.net or <account>.dfs.core.windows.net, got 'dfs.core.windows.net'"
+    ):
+        _ = parse_azure_url("abfss://lake@dfs.core.windows.net/x")
+    with assert_raises(
+        contains="azure_url: an Azure URL's host must be <account>.blob.core.windows.net or <account>.dfs.core.windows.net, got 'Blob.core.windows.net'"
+    ):
+        _ = parse_azure_url("az://Blob.core.windows.net/lake/x")
+    with assert_raises(
+        contains="azure_url: 'my_acct' is not an Azure storage account name (3 to 24 lowercase letters and digits)"
     ):
         _ = parse_azure_url("https://My_Acct.blob.core.windows.net/lake/x")
     with assert_raises(
-        contains="fs_registry: an http:// Azure URL names Azure's own endpoint 'myacct.blob.core.windows.net'; plaintext is only for an emulator endpoint, use https://"
+        contains="azure_url: an http:// Azure URL names Azure's own endpoint 'myacct.blob.core.windows.net'; plaintext is only for an emulator endpoint, use https://"
     ):
         _ = parse_azure_url("http://myacct.blob.core.windows.net/lake/x")
     with assert_raises(
-        contains="fs_registry: an http:// Azure URL names Azure's own endpoint 'MyAcct.Blob.Core.Windows.Net'; plaintext is only for an emulator endpoint, use https://"
+        contains="azure_url: an http:// Azure URL names Azure's own endpoint 'MyAcct.Blob.Core.Windows.Net'; plaintext is only for an emulator endpoint, use https://"
     ):
         _ = parse_azure_url("http://MyAcct.Blob.Core.Windows.Net/lake/x")
     with assert_raises(
-        contains="fs_registry: an http:// Azure URL names Azure's own endpoint 'myacct.blob.core.windows.net'; plaintext is only for an emulator endpoint, use https://"
+        contains="azure_url: an http:// Azure URL names Azure's own endpoint 'myacct.blob.core.windows.net'; plaintext is only for an emulator endpoint, use https://"
     ):
         _ = parse_azure_url("http://myacct.blob.core.windows.net:80/lake/x")
     with assert_raises(
-        contains="fs_registry: an http:// Azure URL is path-style, http://<host>[:<port>]/<account>/<container>/<path>, got 'http://127.0.0.1:10000/devstoreaccount1'"
+        contains="azure_url: an http:// Azure URL is path-style, http://<host>[:<port>]/<account>/<container>/<path>, got 'http://127.0.0.1:10000/devstoreaccount1'"
     ):
         _ = parse_azure_url("http://127.0.0.1:10000/devstoreaccount1")
     comptime query_msg = (
-        "fs_registry: an Azure URL must not carry a query or fragment (a SAS"
+        "azure_url: an Azure URL must not carry a query or fragment (a SAS"
         " token is a credential, not part of the URL)"
     )
     with assert_raises(contains=query_msg):
@@ -330,25 +346,25 @@ def test_refused_urls() raises:
         assert_false(String(e).find("SECRETVALUE") >= 0, String(e))
 
 
-def test_arm_config_for_url() raises:
-    var emu = AzureArmConfig(
+def test_fs_config_for_url() raises:
+    var emu = AzureFsConfig(
         account=String("devstoreaccount1"), endpoint=String("http://127.0.0.1:10000"), path_style=True
     )
-    var c = azure_arm_config_for_url(parse_azure_url("az://lake/x"), emu)
+    var c = azure_fs_config_for_url(parse_azure_url("az://lake/x"), emu)
     assert_equal(c.account, "devstoreaccount1")
     assert_equal(c.endpoint, "http://127.0.0.1:10000")
     assert_true(c.path_style)
 
-    var own = azure_arm_config_for_url(
-        parse_azure_url("https://myacct.blob.core.windows.net/lake/x"), AzureArmConfig.azure("myacct")
+    var own = azure_fs_config_for_url(
+        parse_azure_url("https://myacct.blob.core.windows.net/lake/x"), AzureFsConfig.azure("myacct")
     )
     assert_equal(own.account, "myacct")
     assert_equal(own.endpoint, "")
     assert_false(own.path_style)
 
-    var from_url = azure_arm_config_for_url(
+    var from_url = azure_fs_config_for_url(
         parse_azure_url("http://127.0.0.1:10000/devstoreaccount1/lake/k"),
-        AzureArmConfig(account=String(""), endpoint=String("HTTP://127.0.0.1:10000/"), path_style=True),
+        AzureFsConfig(account=String(""), endpoint=String("HTTP://127.0.0.1:10000/"), path_style=True),
     )
     assert_equal(from_url.account, "devstoreaccount1")
     assert_equal(from_url.endpoint, "HTTP://127.0.0.1:10000/")
@@ -358,43 +374,43 @@ def test_arm_config_for_url() raises:
     # endpoint (here plaintext) does not override it, configured account or
     # not, so the credential never follows the URL to that host.
     with assert_raises(
-        contains="fs_registry: the Azure URL names endpoint 'http://evil.example:80' and the configured endpoint is 'Azure's own'"
+        contains="azure_url: the Azure URL names endpoint 'http://evil.example:80' and the configured endpoint is 'Azure's own'"
     ):
-        _ = azure_arm_config_for_url(
-            parse_azure_url("http://evil.example:80/myacct/lake/x"), AzureArmConfig.azure("myacct")
+        _ = azure_fs_config_for_url(
+            parse_azure_url("http://evil.example:80/myacct/lake/x"), AzureFsConfig.azure("myacct")
         )
     with assert_raises(
-        contains="fs_registry: the Azure URL names endpoint 'http://127.0.0.1:10000' and the configured endpoint is 'Azure's own'"
+        contains="azure_url: the Azure URL names endpoint 'http://127.0.0.1:10000' and the configured endpoint is 'Azure's own'"
     ):
-        _ = azure_arm_config_for_url(
+        _ = azure_fs_config_for_url(
             parse_azure_url("http://127.0.0.1:10000/devstoreaccount1/lake/k"),
-            AzureArmConfig(account=String(""), endpoint=String(""), path_style=False),
+            AzureFsConfig(account=String(""), endpoint=String(""), path_style=False),
         )
     with assert_raises(
-        contains="fs_registry: the Azure URL names endpoint 'http://127.0.0.1:10001' and the configured endpoint is 'http://127.0.0.1:10000'"
+        contains="azure_url: the Azure URL names endpoint 'http://127.0.0.1:10001' and the configured endpoint is 'http://127.0.0.1:10000'"
     ):
-        _ = azure_arm_config_for_url(
+        _ = azure_fs_config_for_url(
             parse_azure_url("http://127.0.0.1:10001/devstoreaccount1/lake/k"), emu
         )
 
     with assert_raises(
-        contains="fs_registry: the Azure URL names account 'myacct' and the configured account is 'otheracct'"
+        contains="azure_url: the Azure URL names account 'myacct' and the configured account is 'otheracct'"
     ):
-        _ = azure_arm_config_for_url(
+        _ = azure_fs_config_for_url(
             parse_azure_url("https://myacct.blob.core.windows.net/lake/x"),
-            AzureArmConfig.azure("otheracct"),
+            AzureFsConfig.azure("otheracct"),
         )
     with assert_raises(
-        contains="fs_registry: the Azure URL names no account and none is configured"
+        contains="azure_url: the Azure URL names no account and none is configured"
     ):
-        _ = azure_arm_config_for_url(
+        _ = azure_fs_config_for_url(
             parse_azure_url("az://lake/x"),
-            AzureArmConfig(account=String(""), endpoint=String(""), path_style=False),
+            AzureFsConfig(account=String(""), endpoint=String(""), path_style=False),
         )
     with assert_raises(
-        contains="fs_registry: the Azure URL names endpoint 'Azure's own' and the configured endpoint is 'http://127.0.0.1:10000'"
+        contains="azure_url: the Azure URL names endpoint 'Azure's own' and the configured endpoint is 'http://127.0.0.1:10000'"
     ):
-        _ = azure_arm_config_for_url(
+        _ = azure_fs_config_for_url(
             parse_azure_url("https://devstoreaccount1.blob.core.windows.net/lake/x"), emu
         )
 
@@ -406,21 +422,21 @@ def test_endpoint_scheme() raises:
     assert_true(azure_endpoint_is_plaintext("http://127.0.0.1:10000"))
     assert_true(azure_endpoint_is_plaintext("Http://127.0.0.1:10000"))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'ftp://x.test'"
+        contains="azure_url: an Azure endpoint must start with http:// or https://, got 'ftp://x.test'"
     ):
         _ = azure_endpoint_is_plaintext("ftp://x.test")
     with assert_raises(
-        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'HTTPX://x'"
+        contains="azure_url: an Azure endpoint must start with http:// or https://, got 'HTTPX://x'"
     ):
         _ = azure_endpoint_is_plaintext("HTTPX://x")
 
 
-def _cfg(account: String, endpoint: String, path_style: Bool) -> AzureArmConfig:
-    return AzureArmConfig(account=account, endpoint=endpoint, path_style=path_style)
+def _cfg(account: String, endpoint: String, path_style: Bool) -> AzureFsConfig:
+    return AzureFsConfig(account=account, endpoint=endpoint, path_style=path_style)
 
 
 def test_azure_config_for() raises:
-    var own = azure_config_for(AzureArmConfig.azure("myacct"))
+    var own = azure_config_for(AzureFsConfig.azure("myacct"))
     assert_equal(own.account, "myacct")
     assert_equal(own.endpoint_scheme, "https")
     assert_equal(own.endpoint_host, "myacct.blob.core.windows.net")
@@ -440,35 +456,35 @@ def test_azure_config_for() raises:
     assert_false(tls.path_style)
 
     with assert_raises(
-        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'ftp://h.test'"
+        contains="azure_url: an Azure endpoint must start with http:// or https://, got 'ftp://h.test'"
     ):
         _ = azure_config_for(_cfg("myacct", "ftp://h.test", True))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:0'"
+        contains="azure_url: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:0'"
     ):
         _ = azure_config_for(_cfg("myacct", "http://h.test:0", True))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:70000'"
+        contains="azure_url: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:70000'"
     ):
         _ = azure_config_for(_cfg("myacct", "http://h.test:70000", True))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:1x'"
+        contains="azure_url: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:1x'"
     ):
         _ = azure_config_for(_cfg("myacct", "http://h.test:1x", True))
-    with assert_raises(contains="fs_registry: an Azure endpoint names no host, got 'http://:10'"):
+    with assert_raises(contains="azure_url: an Azure endpoint names no host, got 'http://:10'"):
         _ = azure_config_for(_cfg("myacct", "http://:10", True))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint is scheme://host[:port] with no path, got 'http://h.test/p'"
+        contains="azure_url: an Azure endpoint is scheme://host[:port] with no path, got 'http://h.test/p'"
     ):
         _ = azure_config_for(_cfg("myacct", "http://h.test/p", True))
-    with assert_raises(contains="fs_registry: an Azure arm needs an account name"):
+    with assert_raises(contains="azure_url: an AzureFs needs an account name"):
         _ = azure_config_for(_cfg("", "", False))
     with assert_raises(
-        contains="fs_registry: 'My-Acct' is not an Azure storage account name (3 to 24 lowercase letters and digits)"
+        contains="azure_url: 'My-Acct' is not an Azure storage account name (3 to 24 lowercase letters and digits)"
     ):
         _ = azure_config_for(_cfg("My-Acct", "", False))
     with assert_raises(
-        contains="fs_registry: Azure's own endpoint is virtual-hosted; path-style addressing needs an endpoint"
+        contains="azure_url: Azure's own endpoint is virtual-hosted; path-style addressing needs an endpoint"
     ):
         _ = azure_config_for(_cfg("myacct", "", True))
 
@@ -479,7 +495,7 @@ def main() raises:
     test_decoder_rules()
     test_utf8_bounds()
     test_refused_urls()
-    test_arm_config_for_url()
+    test_fs_config_for_url()
     test_endpoint_scheme()
     test_azure_config_for()
     print("OK")

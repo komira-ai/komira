@@ -1,23 +1,23 @@
 # =============================================================================
-# komira_fs_registry/azure_arm.mojo -- the Azure arm: URLs, endpoint and
-# connector
+# komira_azure_blob/azure_url.mojo -- Azure URLs, the endpoint, and the
+# connector an AzureFs dials
 # =============================================================================
 #
-# The Azure arm is komira_azure_blob's `AzureFs` over one container, the
-# role S3 gives a bucket. Like the S3 arm it is built from values: an
-# `AzureArmConfig` (the account, the endpoint, path-style or not) and an
-# `AzureCredential` (a Shared Key, a SAS token, or anonymous), both handed
-# in by the caller from its own flags; nothing here reads the environment.
+# An `AzureFs` reads one container, the role S3 gives a bucket. Here it is
+# built from values: an `AzureFsConfig` (the account, the endpoint,
+# path-style or not) and an `AzureCredential` (a Shared Key, a SAS token, or
+# anonymous), both handed in by the caller from its own flags; nothing here
+# reads the environment.
 #
 # THE ENDPOINT. "" is Azure's own, `https://<account>.blob.core.windows.net`
 # with the account as the host's first label. Any other endpoint is
 # `http://host[:port]` or `https://host[:port]` with no path, and the scheme
-# picks the connector the way the S3 arm's does: plaintext only when the
-# endpoint says `http` (an emulator such as Azurite), TLS otherwise; any
-# other scheme is refused. `path_style` puts the account in the first path
+# picks the connector the way komira_objectstore_s3's `s3_prod_fs` does:
+# plaintext only when the endpoint says `http` (an emulator such as
+# Azurite), TLS otherwise; any other scheme is refused. `path_style` puts the account in the first path
 # segment instead of the host, as Azurite addresses it. The endpoint is
 # configuration only: a URL that names an endpoint must name the configured
-# one (`azure_arm_config_for_url`; "" is Azure's own, never "unset"), so a
+# one (`azure_fs_config_for_url`; "" is Azure's own, never "unset"), so a
 # URL cannot send the caller's credential to a host the configuration does
 # not name.
 #
@@ -61,27 +61,24 @@
 # No UnsafePointer, no wildcard origin.
 # =============================================================================
 
-from komira_azure_blob import (
-    AzureClientSpec,
-    AzureConfig,
-    AzureCredential,
-    AzureFs,
+from komira_http_client.scheme_connector import (
+    KernelSchemeConnector,
+    kernel_plain_scheme_connector,
+    kernel_tls_scheme_connector,
 )
 from komira_http_core.transport.io_stream import Connector
 
-from .s3_connector import (
-    S3ProdConnector,
-    s3_prod_plain_connector,
-    s3_prod_tls_connector,
-)
+from .azure import AzureConfig
+from .azure_client_spec import AzureClientSpec, AzureCredential
+from .azure_fs import AzureFs
 
 
 comptime _AZURE_SUFFIX = ".core.windows.net"
 
 
 @fieldwise_init
-struct AzureArmConfig(Copyable, Movable, Deinitable):
-    """The Azure arm's endpoint (module header): the storage account,
+struct AzureFsConfig(Copyable, Movable, Deinitable):
+    """The endpoint an AzureFs dials (module header): the storage account,
     `endpoint` ("" for Azure's own) and whether the account is the first
     path segment (`path_style`, an emulator) rather than the host's first
     label."""
@@ -91,9 +88,9 @@ struct AzureArmConfig(Copyable, Movable, Deinitable):
     var path_style: Bool
 
     @staticmethod
-    def azure(account: String) -> AzureArmConfig:
+    def azure(account: String) -> AzureFsConfig:
         """Azure's own endpoint for `account`."""
-        return AzureArmConfig(account=account, endpoint=String(""), path_style=False)
+        return AzureFsConfig(account=account, endpoint=String(""), path_style=False)
 
 
 @fieldwise_init
@@ -141,7 +138,7 @@ def _check_account(account: String) raises:
             ok = False
     if not ok:
         raise Error(
-            "fs_registry: '"
+            "azure_url: '"
             + account
             + "' is not an Azure storage account name (3 to 24 lowercase"
             " letters and digits)"
@@ -166,7 +163,7 @@ def _check_container(container: String) raises:
             ok = False
     if not ok:
         raise Error(
-            "fs_registry: '"
+            "azure_url: '"
             + container
             + "' is not an Azure container name (3 to 63 lowercase letters,"
             " digits and single hyphens, starting and ending with a letter or"
@@ -181,22 +178,26 @@ def _account_of_host(host: String, allow_dfs: Bool) raises -> String:
     var h = _ascii_lower(host)
     var dot = h.find(".")
     var svc = String("")
-    if dot > 0 and h.endswith(_AZURE_SUFFIX):
-        svc = _slice(h, dot + 1, h.byte_length() - _AZURE_SUFFIX.byte_length())
+    # The first dot must come before the suffix: on the bare service host
+    # (`blob.core.windows.net`) it is the suffix's own, and there is no
+    # account label.
+    var svc_end = h.byte_length() - _AZURE_SUFFIX.byte_length()
+    if dot > 0 and dot < svc_end and h.endswith(_AZURE_SUFFIX):
+        svc = _slice(h, dot + 1, svc_end)
     if svc == "blob" or (allow_dfs and svc == "dfs"):
         var account = _slice(h, 0, dot)
         _check_account(account)
         return account^
     if allow_dfs:
         raise Error(
-            "fs_registry: an Azure URL's host must be"
+            "azure_url: an Azure URL's host must be"
             " <account>.blob.core.windows.net or"
             " <account>.dfs.core.windows.net, got '"
             + host
             + "'"
         )
     raise Error(
-        "fs_registry: an https:// Azure URL's host must be"
+        "azure_url: an https:// Azure URL's host must be"
         " <account>.blob.core.windows.net, got '"
         + host
         + "'"
@@ -275,7 +276,7 @@ def _percent_decode_path(path: String, url: String) raises -> String:
                 l = _hex_value(bs[i + 2])
             if h < 0 or l < 0:
                 raise Error(
-                    "fs_registry: an Azure URL's path has a '%' not followed by"
+                    "azure_url: an Azure URL's path has a '%' not followed by"
                     " two hex digits, got '"
                     + url
                     + "'"
@@ -287,7 +288,7 @@ def _percent_decode_path(path: String, url: String) raises -> String:
         i += 1
     if not _is_valid_utf8(Span(out)):
         raise Error(
-            "fs_registry: an Azure URL's decoded path is not UTF-8, got '"
+            "azure_url: an Azure URL's decoded path is not UTF-8, got '"
             + url
             + "'"
         )
@@ -304,11 +305,11 @@ def _split_first(s: String) -> Tuple[String, String]:
 
 def parse_azure_url(url: String) raises -> AzureUrl:
     """The account, container, path and endpoint `url` names (module
-    header for the accepted forms). Raises `fs_registry: ...` naming the
+    header for the accepted forms). Raises `azure_url: ...` naming the
     form expected for anything else; see the header for each refusal."""
     if url.find("?") >= 0 or url.find("#") >= 0:
         raise Error(
-            "fs_registry: an Azure URL must not carry a query or fragment"
+            "azure_url: an Azure URL must not carry a query or fragment"
             " (a SAS token is a credential, not part of the URL)"
         )
     var sep = url.find("://")
@@ -360,14 +361,14 @@ def parse_azure_url(url: String) raises -> AzureUrl:
             host = _slice(authority, 0, colon)
         if _ascii_lower(host).endswith(_AZURE_SUFFIX):
             raise Error(
-                "fs_registry: an http:// Azure URL names Azure's own endpoint '"
+                "azure_url: an http:// Azure URL names Azure's own endpoint '"
                 + host
                 + "'; plaintext is only for an emulator endpoint, use https://"
             )
         var p = _split_first(tail)
         if host.byte_length() == 0 or p[0].byte_length() == 0 or p[1].byte_length() == 0:
             raise Error(
-                "fs_registry: an http:// Azure URL is path-style,"
+                "azure_url: an http:// Azure URL is path-style,"
                 " http://<host>[:<port>]/<account>/<container>/<path>, got '"
                 + url
                 + "'"
@@ -382,14 +383,14 @@ def parse_azure_url(url: String) raises -> AzureUrl:
         path_style = True
     else:
         raise Error(
-            "fs_registry: an Azure URL must start with az://, abfs://,"
+            "azure_url: an Azure URL must start with az://, abfs://,"
             " abfss://, https:// or http://, got '"
             + url
             + "'"
         )
     if container.byte_length() == 0:
         raise Error(
-            "fs_registry: an Azure URL must name a container, got '" + url + "'"
+            "azure_url: an Azure URL must name a container, got '" + url + "'"
         )
     _check_container(container)
     return AzureUrl(
@@ -418,8 +419,8 @@ def _endpoint_name(endpoint: String) -> String:
     return endpoint
 
 
-def azure_arm_config_for_url(url: AzureUrl, base: AzureArmConfig) raises -> AzureArmConfig:
-    """The arm configuration that serves `url`: its account, else `base`'s;
+def azure_fs_config_for_url(url: AzureUrl, base: AzureFsConfig) raises -> AzureFsConfig:
+    """The configuration that serves `url`: its account, else `base`'s;
     always `base`'s endpoint; the path style the URL's form implies when it
     names an endpoint, else `base`'s. `base.endpoint` "" is Azure's
     own endpoint, not an unset one: a URL may name an endpoint only to agree
@@ -431,7 +432,7 @@ def azure_arm_config_for_url(url: AzureUrl, base: AzureArmConfig) raises -> Azur
         account = base.account
     elif base.account.byte_length() > 0 and base.account != url.account:
         raise Error(
-            "fs_registry: the Azure URL names account '"
+            "azure_url: the Azure URL names account '"
             + url.account
             + "' and the configured account is '"
             + base.account
@@ -439,13 +440,13 @@ def azure_arm_config_for_url(url: AzureUrl, base: AzureArmConfig) raises -> Azur
         )
     if account.byte_length() == 0:
         raise Error(
-            "fs_registry: the Azure URL names no account and none is configured"
+            "azure_url: the Azure URL names no account and none is configured"
         )
     if url.names_endpoint and _endpoint_key(url.endpoint) != _endpoint_key(
         base.endpoint
     ):
         raise Error(
-            "fs_registry: the Azure URL names endpoint '"
+            "azure_url: the Azure URL names endpoint '"
             + _endpoint_name(url.endpoint)
             + "' and the configured endpoint is '"
             + _endpoint_name(base.endpoint)
@@ -454,7 +455,7 @@ def azure_arm_config_for_url(url: AzureUrl, base: AzureArmConfig) raises -> Azur
     var path_style = base.path_style
     if url.names_endpoint:
         path_style = url.path_style
-    return AzureArmConfig(
+    return AzureFsConfig(
         account=account^, endpoint=base.endpoint, path_style=path_style
     )
 
@@ -462,7 +463,7 @@ def azure_arm_config_for_url(url: AzureUrl, base: AzureArmConfig) raises -> Azur
 def azure_endpoint_is_plaintext(endpoint: String) raises -> Bool:
     """True for an `http://` endpoint, False for an `https://` one or ""
     (Azure's own, https). The scheme is compared ASCII case-insensitively.
-    Raises `fs_registry: an Azure endpoint must start with http:// or
+    Raises `azure_url: an Azure endpoint must start with http:// or
     https://, got '<endpoint>'` for anything else."""
     if endpoint.byte_length() == 0:
         return False
@@ -472,25 +473,25 @@ def azure_endpoint_is_plaintext(endpoint: String) raises -> Bool:
     if lower.startswith("http://"):
         return True
     raise Error(
-        "fs_registry: an Azure endpoint must start with http:// or https://, got '"
+        "azure_url: an Azure endpoint must start with http:// or https://, got '"
         + endpoint
         + "'"
     )
 
 
-def azure_config_for(config: AzureArmConfig) raises -> AzureConfig:
+def azure_config_for(config: AzureFsConfig) raises -> AzureConfig:
     """komira_azure_blob's `AzureConfig` for `config`: Azure's own
     virtual-hosted endpoint for "", else the endpoint's scheme, host and
     port. Raises for an empty or invalid account, a scheme other than http
     or https, an endpoint with a path or no host, a port outside 1 to
     65535, or path-style addressing without an endpoint."""
     if config.account.byte_length() == 0:
-        raise Error("fs_registry: an Azure arm needs an account name")
+        raise Error("azure_url: an AzureFs needs an account name")
     _check_account(config.account)
     if config.endpoint.byte_length() == 0:
         if config.path_style:
             raise Error(
-                "fs_registry: Azure's own endpoint is virtual-hosted;"
+                "azure_url: Azure's own endpoint is virtual-hosted;"
                 " path-style addressing needs an endpoint"
             )
         return AzureConfig.azure(config.account)
@@ -503,7 +504,7 @@ def azure_config_for(config: AzureArmConfig) raises -> AzureConfig:
         authority = _slice(authority, 0, authority.byte_length() - 1)
     if authority.find("/") >= 0:
         raise Error(
-            "fs_registry: an Azure endpoint is scheme://host[:port] with no"
+            "azure_url: an Azure endpoint is scheme://host[:port] with no"
             " path, got '"
             + config.endpoint
             + "'"
@@ -523,13 +524,13 @@ def azure_config_for(config: AzureArmConfig) raises -> AzureConfig:
                 port = port * 10 + Int(ds[i]) - ord("0")
         if not ok or port < 1 or port > 65535:
             raise Error(
-                "fs_registry: an Azure endpoint's port must be 1 to 65535, got '"
+                "azure_url: an Azure endpoint's port must be 1 to 65535, got '"
                 + config.endpoint
                 + "'"
             )
     if host.byte_length() == 0:
         raise Error(
-            "fs_registry: an Azure endpoint names no host, got '"
+            "azure_url: an Azure endpoint names no host, got '"
             + config.endpoint
             + "'"
         )
@@ -552,16 +553,16 @@ def azure_connector_factory[
     return mk_tls
 
 
-def azure_arm[
+def azure_fs_for[
     C: Connector
 ](
     var container: String,
-    config: AzureArmConfig,
+    config: AzureFsConfig,
     credential: AzureCredential,
     mk_plain: def () raises thin -> C,
     mk_tls: def () raises thin -> C,
 ) raises -> AzureFs[C]:
-    """The Azure arm on `container` over connector `C`: `mk_plain` makes its
+    """The AzureFs on `container` over connector `C`: `mk_plain` makes its
     connectors when `config.endpoint` is `http://`, `mk_tls` otherwise.
     Builds no client and dials nothing here (AzureFs builds its client on
     the first verb)."""
@@ -574,14 +575,18 @@ def azure_arm[
     return AzureFs[C](container^, spec^)
 
 
-def azure_prod_arm(
+def azure_prod_fs(
     var container: String,
-    config: AzureArmConfig,
+    config: AzureFsConfig,
     credential: AzureCredential,
-) raises -> AzureFs[S3ProdConnector]:
-    """The production Azure arm on `container`, over the registry's
-    production connector: plaintext for an `http://` endpoint, TLS with
+) raises -> AzureFs[KernelSchemeConnector]:
+    """The production AzureFs on `container`, over komira_http_client's
+    `KernelSchemeConnector`: plaintext for an `http://` endpoint, TLS with
     public CA roots otherwise. Dials nothing here."""
-    return azure_arm[S3ProdConnector](
-        container^, config, credential, s3_prod_plain_connector, s3_prod_tls_connector
+    return azure_fs_for[KernelSchemeConnector](
+        container^,
+        config,
+        credential,
+        kernel_plain_scheme_connector,
+        kernel_tls_scheme_connector,
     )
