@@ -22,7 +22,8 @@
 # equal to the maximum) or in `set_max_size`; a wrong integer prefix boundary
 # (`<=` for `<`) in the encoder or the decoder; the sixth continuation octet
 # accepted; the Huffman padding check skipped or widened to 8 bits; the 19-bit
-# code length cut to 18; the dynamic-index offset off by one; a size update
+# code length cut to 18; the dynamic-index offset off by one; index 61 sent
+# to the dynamic table (`<` for `<=` at the static boundary); a size update
 # equal to the ceiling refused. Every decode error is matched by its exact
 # message, so renaming one or merging two fails too.
 #
@@ -31,8 +32,8 @@
 # outside 0x20..0x7e (Appendix B codes all 256), raw octets of 0x80 and above
 # (decoded one code point per octet, so `c3 a9` reads back as 4 bytes), and a
 # size update that grows the table again after an earlier block shrank it
-# (refused: the ceiling checked is the current size, not the
-# SETTINGS_HEADER_TABLE_SIZE of §4.2).
+# (refused: the ceiling checked is the table's maximum size as it stood at
+# the start of the block, not the SETTINGS_HEADER_TABLE_SIZE of §4.2).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -375,11 +376,25 @@ def test_appendix_a_static_table_all_rows() raises:
 
 def test_index_bounds() raises:
     """§6.1: "The index value of 0 is not used. It MUST be treated as a
-    decoding error" (80). §2.3.3: an index past both tables is an error:
+    decoding error" (80). §2.3.3: indices 1..61 are the static table and
+    62 is the first dynamic entry, so 61 is the last static row: indexed
+    (bd) it is Appendix A's `www-authenticate` with an empty value, and a
+    §6.2.1 literal naming it (7d 01 78) yields `www-authenticate: x` and
+    indexes that field as 62 (be). An index past both tables is an error:
     62 (be) with an empty dynamic table, 63 (bf) with one entry, while 62
     then names that entry."""
     _assert_refused("80", "hpack: invalid index")
     _assert_refused("be", "hpack: invalid index")
+    var d61 = HpackDecoder()
+    assert_equal(_decode(d61, "bd"), "www-authenticate: \n")
+    assert_equal(_decode(d61, "7d01 78"), "www-authenticate: x\n")
+    assert_equal(
+        _render_table(d61.table),
+        "[1] (s = 49) www-authenticate: x\nTable size: 49\n",
+    )
+    assert_equal(
+        _decode(d61, "bd be"), "www-authenticate: \nwww-authenticate: x\n"
+    )
     var dec = HpackDecoder()
     assert_equal(_decode(dec, "4003 6162 6301 78"), "abc: x\n")
     assert_equal(_decode(dec, "be"), "abc: x\n")
@@ -728,12 +743,12 @@ def test_decoder_set_max_table_size_evicts() raises:
 
 
 def test_size_update_bounds() raises:
-    """§4.2: the new maximum "MUST be lower than or equal to the limit";
+    """§6.3: the new maximum "MUST be lower than or equal to the limit";
     4096 (3f e1 1f) is accepted, 4097 (3f e2 1f) is a decoding error. A
     size update "MUST occur at the beginning of the first header block
-    following the change": after a field (82 20) it is an error. Two at the
-    start (0 then 4096, the encoder's min/final pair) are accepted, and the
-    first empties the table."""
+    following the change" (§4.2): after a field (82 20) it is an error.
+    Two at the start (0 then 4096, the encoder's min/final pair) are
+    accepted, and the first empties the table."""
     var dec = HpackDecoder()
     assert_equal(_decode(dec, "3fe1 1f82"), ":method: GET\n")
     assert_equal(dec.table.max_size, 4096)
