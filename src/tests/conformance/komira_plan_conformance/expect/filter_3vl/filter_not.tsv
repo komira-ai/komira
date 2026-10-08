@@ -1,0 +1,9 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.1: NOT a is TRUE exactly when a is FALSE (ids 4, 5, 6); NOT
+# NULL is NULL, so ids 7, 8, 9 are dropped by §1.2 with ids 1, 2, 3.
+id:int64	a:bool?	b:bool?
+4	false	true
+5	false	false
+6	false	\N

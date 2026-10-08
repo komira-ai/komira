@@ -64,14 +64,16 @@ mojo_library(
         "tests/test_ratchet.mojo",
         # the shared computation: merged reports, test sources both ways,
         # exemptions, mutants, the target, conclusions per mode, rounding, and
-        # the gate's numbers equal to the report's
+        # the gate's numbers equal to the report's, test-only packages'
+        # findings as information
         "tests/test_analyze.mojo",
         # check-run batching, annotation scope/order/ranges/levels, changed-line
         # coverage, the summary's size limit, JSON escaping
         "tests/test_report.mojo",
         # the command line end to end: the summary golden, check-run files,
         # result JSON, proposed ratchet, gate == report, the annotation cap
-        # and the full annotations file, every exit code
+        # and the full annotations file, every exit code, --info-package
+        # (information, notices, a gate passing in enforce mode)
         "tests/test_cli.mojo",
     ],
     test_data = {

@@ -6,7 +6,8 @@ linux-x86_64), per `test_srcs` entry that is a source file:
 
 - `[coverage][bc][<test>]` (category `mojo_emit_cov_bc`): the test compiled
   by mojo_wrapper.sh as its coverage binary is (`[coverage][bin]`: -O0, line
-  tables, the same closure, `test_deps` included, and source root), but
+  tables, the same `-D` assert level and `test_defines`, the same closure,
+  `test_deps` included, and source root), but
   emitted as LLVM bitcode, `cov/branch/<test>.bc`;
 - `[coverage][pgo_bin][<test>]` (category `mojo_cov_pgo_link`): that
   bitcode instrumented with IR profile counters by Mojo's lld and linked as a
@@ -17,7 +18,8 @@ linux-x86_64), per `test_srcs` entry that is a source file:
   `cov/branch/<test>.profdata`;
 - `[coverage][branch_ir][<test>]` (category `mojo_cov_branch_annotate`): the
   bitcode with that profile applied by Mojo's lld, as IR text whose branches
-  carry their counts (cov_branch_annotate.sh), `cov/branch/<test>.ll`;
+  carry their counts (cov_branch_annotate.sh, which also reads the binary:
+  the profile must hold exactly the functions it links), `cov/branch/<test>.ll`;
 - `[coverage][branch_info][<test>]` (category `mojo_cov_branch_classify`):
   the branches of the library's measured sources in that IR, each a source
   decision or a known compiler-made branch, as lcov `BRDA` records in
@@ -35,7 +37,7 @@ waits for no coverage action), and `[coverage]` does not include them.
 load(":providers.bzl", "MojoPkgTSet")
 load(":test_runtime.bzl", "test_root")
 
-def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, src_repo, gen):
+def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, src_repo, gen, defines):
     """Declares the five branch coverage actions of test source `t` (module
     docstring) and returns their outputs (bc, binary, profdata, ir, info).
     `closure_tsets` are the MojoPkgTSets the test compiles against (defs.bzl's
@@ -45,8 +47,10 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     `env_args` its runner's --env arguments, `src_dir` the library's [src]
     (the directory its package is compiled from, so the name its sources have
     in the IR), `src_repo` the repository directory of those sources (ending
-    in `/`) and `gen` the paths in `src_dir` of its generated sources, which
-    are not measured."""
+    in `/`), `gen` the paths in `src_dir` of its generated sources, which
+    are not measured, and `defines` the `-D` arguments of the test's builds
+    (defs.bzl's test_defines: its assert level and `test_defines`), so the
+    bitcode is the program the gate ran, compiled as its coverage binary is."""
     where = "{}: branch coverage of {}".format(ctx.label.raw_target(), t.short_path)
     if "LLVM_PROFILE_FILE" in ctx.attrs.test_env:
         fail("{}: test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself (where the test's profile is written)".format(where))
@@ -67,6 +71,7 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             "0",
             "--target-cpu",
             tc.target_cpu,
+            defines,
             "--debug-level",
             "line-tables",
             closure.project_as_args("include"),
@@ -126,6 +131,7 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             tc.busybox,
             bc,
             profdata,
+            exe,
             ir.as_output(),
             hidden = annotate_dir,
         ),
