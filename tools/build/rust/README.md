@@ -10,7 +10,7 @@ The rules are in [`defs.bzl`](defs.bzl). Worked uses are in
 
 | rule | produces |
 |---|---|
-| `rust_library(srcs, crate_root, deps, edition, features, cfgs, proc_macro, tests)` | `lib<crate>.rlib`, or `lib<crate>.so` for a proc-macro |
+| `rust_library(srcs, crate_root, deps, edition, features, cfgs, proc_macro, tests, test_srcs)` | `lib<crate>.rlib`, or `lib<crate>.so` for a proc-macro |
 | `rust_binary(srcs, crate_root, deps, expected_stdout, tests)` | an executable, and `RunInfo`. With `expected_stdout`, `[run_check]` runs it remotely and compares its stdout exactly. |
 | `crates_io_library(name, version, sha256, size, ...)` | a crates.io crate, downloaded by the sha256 and size in bytes of its `.crate` file, unpacked remotely, and compiled with `rust_library` |
 | `rust_test(srcs, crate_root, deps, ..., test_timeout_s)` | the crate compiled with `rustc --test`, RUN as a build action; its output is a `.passed` marker. `[bin]` is the test executable. |
@@ -28,6 +28,37 @@ in parallel; without `tests` nothing changes.
 A crate's inline `#[test]`s are its unit tests: a `rust_test` over the same
 `srcs` and `crate_root` (it does not depend on the library, so it can gate
 it). See `//tools/build/proto-codegen:komira_proto_codegen_unit`.
+
+A library's external tests (Cargo's `tests/*.rs`) cannot be a `rust_test`
+in its `tests`: that test would depend on the library it gates, a cycle
+buck2 refuses. They are the library's `test_srcs` instead, as a
+`mojo_library`'s are:
+
+```python
+rust_library(
+    name = "ext",
+    srcs = ["src/lib.rs"],
+    crate_root = "src/lib.rs",
+    test_srcs = ["tests/adds.rs", "tests/common/mod.rs"],
+)
+```
+
+Each `test_srcs` file at `tests/<name>.rs` is a test crate named `<name>`
+(a `-` becomes `_`), compiled with `rustc --test` inside the library rule
+against the UNGATED library (`--extern <crate>=ungated/...`), and run by the
+same runner; its `.passed` marker joins the gate with those of `tests`, and
+`[tests]` lists them all. A test crate sees the library and the library's
+`deps`, as a Cargo integration test does, and is compiled with the library's
+`edition`, `features`, `cfgs` and `rustc_flags`; there are no
+dev-dependencies (`test_deps`) yet. Any other `test_srcs` file is a module
+the test crates reach with `mod` (`tests/common/mod.rs`). A file outside
+`tests/`, a file directly under `tests/` that is not `.rs`, a
+`tests/<name>.rs` whose name is not a Rust identifier, and `test_srcs` with
+no test crate are refused at analysis. Each run has the
+default 600 s timeout. A failure names the file:
+`GATED TEST FAILED: <label> tests/<name>.rs`. `buck2 test` of the library
+runs the `rust_test`s in its `tests`, not its `test_srcs`; building the
+library runs both.
 
 The weld runs the tests when the ARTIFACT IS BUILT: `buck2 build` of the
 library, of anything linking it, or of the binary runs each welded test as

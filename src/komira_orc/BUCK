@@ -41,6 +41,8 @@ mojo_library(
         "tests/test_orc_codec_matrix.mojo",
         "tests/test_orc_codec_owner_equivalence.mojo",
         "tests/test_orc_column_decode.mojo",
+        "tests/test_orc_column_decoder_nullable.mojo",
+        "tests/test_orc_column_decoder_refusals.mojo",
         "tests/test_orc_footer_decode.mojo",
         "tests/test_orc_large_string_write_roundtrip.mojo",
         "tests/test_orc_lineitem_decode_roundtrip.mojo",
