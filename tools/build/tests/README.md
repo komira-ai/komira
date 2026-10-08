@@ -1002,6 +1002,8 @@ output are in
 ./buck2 build tests//negative/python_oracle:komira_data   # must fail: is built by komira//src/komira_encoding:komira_encoding, which is not under third_party/
 ```
 
+## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
