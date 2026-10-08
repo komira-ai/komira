@@ -4,10 +4,12 @@
 #
 # Each test builds one expression over a fixed schema and checks the Field's
 # name, Arrow type, nullability and (for DECIMAL128) precision and scale. The
-# expected values are worked out from the rules the function's comments state
-# (DuckDB-shaped types; the decimal rules of `decimal_arith`: `+ -` give
-# scale max(s1, s2) and precision min(max(p1-s1, p2-s2) + scale + 1, 38),
-# `*` gives scale s1+s2 and precision min(p1+p2+1, 38)).
+# expected values are worked out from komira's own documented rules (the
+# function's comments and `decimal_arith`: `+ -` give scale max(s1, s2) and
+# precision min(max(p1-s1, p2-s2) + scale + 1, 38), `*` gives scale s1+s2 and
+# precision min(p1+p2+1, 38), `%` keeps the left operand's (p, s)). These
+# tests pin komira's rules; for `*` and `%` they differ from DuckDB, which
+# gives DECIMAL(22,6) and DECIMAL(14,4) for the D(12,2), D(10,4) pair here.
 # =============================================================================
 
 from std.collections import Optional
@@ -161,14 +163,27 @@ def test_missing_column_both_policies_first_miss_wins() raises:
 
 
 def test_alias_renames_and_keeps_metadata() raises:
-    """An alias renames the child's Field and keeps its decimal (p, s) and
-    timezone."""
+    """An alias renames the child's Field and keeps the rest of it: decimal
+    (p, s), timezone, key-value field metadata (execution policy, which
+    carries it) and STRUCT children."""
     var d = _x(Expr.alias(_c("d1"), "price"))
     _is(d, "price", ArrowType.DECIMAL128, True)
     _dec(d, 12, 2)
     var t = _p(Expr.alias(_c("ts"), "when_utc"))
     _is(t, "when_utc", ArrowType.TIMESTAMP_US, True)
     assert_equal(t.timezone(), "UTC")
+    var m = _x(Expr.alias(_c("meta"), "tagged"))
+    _is(m, "tagged", ArrowType.INT64, True)
+    assert_equal(m.metadata_count(), 1)
+    assert_equal(m.get_metadata("origin").value(), "sensor")
+    var st = _p(Expr.alias(_c("st"), "point"))
+    _is(st, "point", ArrowType.STRUCT, True)
+    assert_equal(st.num_children(), 2)
+    assert_equal(st.child_name(0), "x")
+    assert_true(st.child_arrow_type(0) == ArrowType.INT32)
+    assert_false(st.child_nullable(0))
+    assert_equal(st.child_name(1), "y")
+    assert_true(st.child_nullable(1))
 
 
 def test_literals() raises:
@@ -200,8 +215,11 @@ def test_comparisons_and_logic_are_bool() raises:
 
 
 def test_interval_arithmetic() raises:
-    """INTERVAL +/- INTERVAL is INTERVAL_MONTH_DAY_NANO; any other op, and an
-    interval with a non-interval, take the generic rule (the left type)."""
+    """INTERVAL +/- INTERVAL is INTERVAL_MONTH_DAY_NANO. The last two rows
+    (INTERVAL * INTERVAL, INTERVAL + INT64) only pin the generic fall-through
+    (the left operand's type): evaluation raises for both, so the declared
+    type is not a contract, and a change that declared something else for
+    them would be legitimate."""
     _is(_x(_bin(BIN_ADD, _c("iv"), _c("iv"))), "expr", ArrowType.INTERVAL_MONTH_DAY_NANO, True)
     _is(_x(_bin(BIN_SUB, _c("iv"), _c("iv"))), "expr", ArrowType.INTERVAL_MONTH_DAY_NANO, True)
     _is(_x(_bin(BIN_MUL, _c("iv"), _c("iv"))), "expr", ArrowType.INTERVAL_MONTH_DAY_NANO, True)

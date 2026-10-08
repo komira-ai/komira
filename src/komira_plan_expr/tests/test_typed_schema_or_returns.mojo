@@ -90,9 +90,14 @@ def test_agg_output_type_counts_are_int64() raises:
 
 
 def test_agg_output_type_sum_promotion() raises:
-    """The SUM promotion table of the header (and of the runtime rule it
-    mirrors): floats to FLOAT64, DECIMAL128 stays, every unsigned width to
-    UINT64, signed integers, BOOL and the date-as-int tags to INT64."""
+    """The SUM promotion table of `agg_output_type`'s header, for the rows
+    where it agrees with the runtime `_infer_agg_field` (read, not called:
+    that function lives in komira_plan_ir, which depends on this package, so
+    a test here cannot reach it without a cycle): floats to FLOAT64,
+    DECIMAL128 stays, every unsigned width to UINT64, signed integers and BOOL
+    to INT64. SUM over the DATE32 / DATE64 / TIMESTAMP and STRING tags is
+    left out: the mirror says INT64 there and the runtime keeps the input
+    type, a drift tracked separately."""
     assert_equal(agg_output_type(AGG_SUM, TYPE_FLOAT32), TYPE_FLOAT64)
     assert_equal(agg_output_type(AGG_SUM, TYPE_FLOAT64), TYPE_FLOAT64)
     assert_equal(agg_output_type(AGG_SUM, TYPE_DECIMAL128), TYPE_DECIMAL128)
@@ -105,8 +110,6 @@ def test_agg_output_type_sum_promotion() raises:
     assert_equal(agg_output_type(AGG_SUM, TYPE_INT32), TYPE_INT64)
     assert_equal(agg_output_type(AGG_SUM, TYPE_INT64), TYPE_INT64)
     assert_equal(agg_output_type(AGG_SUM, TYPE_BOOL), TYPE_INT64)
-    assert_equal(agg_output_type(AGG_SUM, TYPE_DATE32), TYPE_INT64)
-    assert_equal(agg_output_type(AGG_SUM, TYPE_TIMESTAMP), TYPE_INT64)
 
 
 def test_agg_output_type_finalized_statistics_are_float64() raises:
