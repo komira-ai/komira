@@ -13,8 +13,12 @@
 #     record, and a delimiter of 3; accepted: 257 records at rs 18 (record
 #     256 needs the second sequence-number byte in its nonce).
 #   aes128gcm_encrypt: a 15-byte salt, a 256-byte keyid, rs 17 and 2^32,
-#     a plaintext one byte over one record; accepted: rs 18 and 2^32 - 1,
-#     a 255-byte keyid.
+#     a plaintext one byte over one record; accepted: rs 18, and rs
+#     2^32 - 1, a 255-byte keyid and rs 0x01020304 with a 200-byte keyid,
+#     each checked on the header bytes written, the header read back by
+#     aes128gcm_parse_header and the decryption.
+#   aes128gcm_parse_header: rs 2^32 - 1 and rs 0x01020304 with a 130-byte
+#     keyid (idlen above 127) in bodies the test writes itself.
 #   webpush_encrypt: 3994 bytes of plaintext, a 15-byte auth secret, a
 #     64-byte and an off-curve user agent key, and a sender key source that
 #     returns the group order n.
@@ -36,6 +40,7 @@ from komira_webpush import (
     aes128gcm_decrypt,
     aes128gcm_encrypt,
     aes128gcm_keys,
+    aes128gcm_parse_header,
     p256_public_key,
     webpush_decrypt,
     webpush_encrypt,
@@ -123,7 +128,7 @@ def _sealed(ikm: List[UInt8], var body: List[UInt8], seq: Int, record: List[UInt
     var buf = record.copy()
     for _ in range(16):
         buf.append(UInt8(0))
-    var cipher = AesGcm128(keys.cek.copy())
+    var cipher = AesGcm128(keys.cek)
     var empty = List[UInt8]()
     cipher.seal_in_place(nonce, Span[UInt8](empty), Span[UInt8](buf))
     for i in range(len(buf)):
@@ -289,11 +294,120 @@ def test_content_coding_encrypt_refusals() raises:
         " (at most 1)",
     )
     assert_equal(_encrypt_outcome(salt, none, 18, one), "OK 39")
-    # The accepting side of each limit: rs 2^32 - 1 and a 255-byte keyid.
-    # 21-byte header + keyid + 1 data byte + delimiter + 16-byte tag.
-    assert_equal(_encrypt_outcome(salt, none, 4294967295, one), "OK 39")
+
+
+def _distinct(n: Int) -> List[UInt8]:
+    """n bytes counting up from 0x80 (0xff is followed by 0x00)."""
+    var out = List[UInt8](capacity=n)
+    for i in range(n):
+        out.append(UInt8((0x80 + i) & 0xFF))
+    return out^
+
+
+def _encrypt_round_trip(
+    keyid: List[UInt8], rs: Int, plaintext: List[UInt8]
+) -> String:
+    """Encrypts, then reports the header bytes rs and idlen as written, the
+    rs and keyid `aes128gcm_parse_header` reads back, and the decryption."""
+    try:
+        var ikm = _b(_IKM_1)
+        var salt = _filled(16, 9)
+        var out = aes128gcm_encrypt(
+            Span[UInt8](ikm),
+            Span[UInt8](salt),
+            Span[UInt8](keyid),
+            rs,
+            Span[UInt8](plaintext),
+        )
+        var raw = List[UInt8]()
+        for i in range(16, 21):
+            raw.append(out[i])
+        var h = aes128gcm_parse_header(Span[UInt8](out))
+        var same = len(h.keyid) == len(keyid)
+        if same:
+            for i in range(len(keyid)):
+                if h.keyid[i] != keyid[i]:
+                    same = False
+        var data = aes128gcm_decrypt(Span[UInt8](ikm), Span[UInt8](out))
+        return (
+            String("OK len ")
+            + String(len(out))
+            + " rs|idlen "
+            + hex_lower(Span[UInt8](raw))
+            + " rs "
+            + String(h.rs)
+            + " keyid "
+            + String(len(h.keyid))
+            + (" same" if same else " differs")
+            + " data "
+            + hex_lower(Span[UInt8](data))
+        )
+    except e:
+        return String(e)
+
+
+def test_content_coding_encrypt_limits_accepted() raises:
+    """The accepting side of each encrypt limit, checked on the header bytes
+    written, on the header read back and on the decryption (not only on
+    the output length). 21-byte header + keyid + 1 data byte + delimiter +
+    16-byte tag."""
+    var none = List[UInt8]()
+    var one = _filled(1, 0x41)
+    # rs 2^32 - 1: all four rs bytes are 0xff.
     assert_equal(
-        _encrypt_outcome(salt, _filled(255, 0x61), 4096, one), "OK 294"
+        _encrypt_round_trip(none, 4294967295, one),
+        "OK len 39 rs|idlen ffffffff00 rs 4294967295 keyid 0 same data 41",
+    )
+    # A 255-byte keyid: idlen 0xff, the top bit set.
+    assert_equal(
+        _encrypt_round_trip(_distinct(255), 4096, one),
+        "OK len 294 rs|idlen 00001000ff rs 4096 keyid 255 same data 41",
+    )
+    # rs 0x01020304: each rs byte differs, so a swapped or dropped shift
+    # changes the header; a 200-byte keyid (idlen 0xc8).
+    assert_equal(
+        _encrypt_round_trip(_distinct(200), 0x01020304, one),
+        "OK len 239 rs|idlen 01020304c8 rs 16909060 keyid 200 same data 41",
+    )
+
+
+def _parsed(body: List[UInt8]) -> String:
+    """`aes128gcm_parse_header`'s rs, keyid and records offset, then the
+    decryption with _IKM_1."""
+    try:
+        var h = aes128gcm_parse_header(Span[UInt8](body))
+        var ikm = _b(_IKM_1)
+        var data = aes128gcm_decrypt(Span[UInt8](ikm), Span[UInt8](body))
+        return (
+            String("rs ")
+            + String(h.rs)
+            + " keyid "
+            + hex_lower(Span[UInt8](h.keyid))
+            + " offset "
+            + String(h.records_offset)
+            + " data "
+            + hex_lower(Span[UInt8](data))
+        )
+    except e:
+        return String(e)
+
+
+def test_content_coding_parse_wide_fields() raises:
+    """Bodies the test writes itself (`_header`, `_sealed`) with an rs above
+    2^24 and an idlen above 127: the parser reads all four rs bytes and
+    the whole idlen byte."""
+    var ikm = _b(_IKM_1)
+    var record = _filled(1, 0x41)
+    record.append(UInt8(2))
+    var none = List[UInt8]()
+    var top = _sealed(ikm, _header(7, 4294967295, none), 0, record)
+    assert_equal(_parsed(top), "rs 4294967295 keyid  offset 21 data 41")
+    var wide = _sealed(ikm, _header(7, 0x01020304, _distinct(130)), 0, record)
+    assert_equal(
+        _parsed(wide),
+        "rs 16909060 keyid "
+        + hex_lower(Span[UInt8](_distinct(130)))
+        + " offset 151 data 41",
     )
 
 
@@ -524,6 +638,10 @@ def main() raises:
     print("PASS aes128gcm_decrypt 257 records")
     test_content_coding_encrypt_refusals()
     print("PASS aes128gcm_encrypt refusals")
+    test_content_coding_encrypt_limits_accepted()
+    print("PASS aes128gcm_encrypt limits accepted")
+    test_content_coding_parse_wide_fields()
+    print("PASS aes128gcm_parse_header wide rs and idlen")
     test_webpush_encrypt_refusals()
     print("PASS webpush_encrypt refusals")
     test_webpush_decrypt_refusals()

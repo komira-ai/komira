@@ -25,6 +25,12 @@
 # header, an rs below 18, a body with no record, a record shorter than 17
 # bytes, a record that fails authentication, a record with no non-zero
 # byte, and a delimiter that does not match the record's position.
+#
+# The PRK, the CEK, the base nonce and each record's nonce are overwritten
+# with zeros after their last use and before any raise that follows their
+# creation (CEK and base nonce by `Aes128GcmKeys.__deinit__`). One AES-GCM
+# context per call is built from the CEK, which it borrows. No test observes
+# the wipe.
 # =============================================================================
 
 from komira_crypto import AesGcm128, Hkdf, Sha256, zeroize_inline_array
@@ -83,10 +89,18 @@ def aes128gcm_keys(ikm: Span[UInt8, _], salt: Span[UInt8, _]) raises -> Aes128Gc
     var nonce = Array[UInt8, 12](fill=UInt8(0))
     var cek_info = _ascii_with_nul("Content-Encoding: aes128gcm")
     var nonce_info = _ascii_with_nul("Content-Encoding: nonce")
-    Hkdf[Sha256].expand(Span[UInt8](prk), Span[UInt8](cek_info), Span[UInt8](cek))
-    Hkdf[Sha256].expand(
-        Span[UInt8](prk), Span[UInt8](nonce_info), Span[UInt8](nonce)
-    )
+    try:
+        Hkdf[Sha256].expand(
+            Span[UInt8](prk), Span[UInt8](cek_info), Span[UInt8](cek)
+        )
+        Hkdf[Sha256].expand(
+            Span[UInt8](prk), Span[UInt8](nonce_info), Span[UInt8](nonce)
+        )
+    except e:
+        zeroize_inline_array(prk)
+        zeroize_inline_array(cek)
+        zeroize_inline_array(nonce)
+        raise e^
     zeroize_inline_array(prk)
     return Aes128GcmKeys(cek^, nonce^)
 
@@ -167,11 +181,15 @@ def aes128gcm_encrypt(
     record.append(DELIMITER_LAST)
     for _ in range(TAG_SIZE):
         record.append(UInt8(0))
-    var cipher = AesGcm128(keys.cek.copy())
+    var cipher = AesGcm128(keys.cek)
     var empty = List[UInt8]()
-    cipher.seal_in_place(
-        _record_nonce(keys.nonce, 0), Span[UInt8](empty), Span[UInt8](record)
-    )
+    var nonce = _record_nonce(keys.nonce, 0)
+    try:
+        cipher.seal_in_place(nonce, Span[UInt8](empty), Span[UInt8](record))
+    except e:
+        zeroize_inline_array(nonce)
+        raise e^
+    zeroize_inline_array(nonce)
     for i in range(len(record)):
         out.append(record[i])
     return out^
@@ -250,6 +268,7 @@ def aes128gcm_decrypt(ikm: Span[UInt8, _], body: Span[UInt8, _]) raises -> List[
     if start == total:
         raise Error("aes128gcm: body holds no record")
     var keys = aes128gcm_keys(ikm, Span[UInt8](header.salt))
+    var cipher = AesGcm128(keys.cek)
     var out = List[UInt8]()
     var empty = List[UInt8]()
     var seq = 0
@@ -270,14 +289,14 @@ def aes128gcm_decrypt(ikm: Span[UInt8, _], body: Span[UInt8, _]) raises -> List[
         var record = List[UInt8](capacity=n)
         for i in range(start, end):
             record.append(body[i])
-        var cipher = AesGcm128(keys.cek.copy())
+        var nonce = _record_nonce(keys.nonce, seq)
         try:
             cipher.open_in_place(
-                _record_nonce(keys.nonce, seq),
-                Span[UInt8](empty),
-                Span[UInt8](record),
+                nonce, Span[UInt8](empty), Span[UInt8](record)
             )
+            zeroize_inline_array(nonce)
         except:
+            zeroize_inline_array(nonce)
             raise Error(
                 "aes128gcm: record " + String(seq) + " failed authentication"
             )

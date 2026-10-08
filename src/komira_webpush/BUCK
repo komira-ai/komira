@@ -19,7 +19,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                            exact messages (header, record, delimiter, key
 #                            sizes, off-curve points, scalar range, record
 #                            count) and the accepting side of each limit
-#                            (rs, keyid length, scalar 1 and n - 1, 257
+#                            (rs and keyid length checked on the header and
+#                            the decryption, scalar 1 and n - 1, 257
 #                            records).
 mojo_library(
     name = "komira_webpush",

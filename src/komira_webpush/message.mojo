@@ -21,6 +21,10 @@
 #
 # `webpush_decrypt` is the user agent's side: it accepts only a body with a
 # 65-byte keyid and exactly one record (RFC 8291 section 4).
+#
+# The sender private key, the ECDH secret, the PRK and the IKM this file
+# holds are overwritten with zeros after their last use and before any
+# raise that follows their creation. No test observes the wipe.
 # =============================================================================
 
 from komira_crypto import (
@@ -86,7 +90,11 @@ struct SystemWebPushRandomness(WebPushRandomness):
         # `p256_public_key` refuses such a scalar and the loop draws again.
         for _ in range(8):
             var k = Array[UInt8, 32](fill=UInt8(0))
-            system_entropy(Span[UInt8](k))
+            try:
+                system_entropy(Span[UInt8](k))
+            except e:
+                zeroize_inline_array(k)
+                raise e^
             try:
                 _ = p256_public_key(Span[UInt8](k))
                 return k^
@@ -191,7 +199,14 @@ def webpush_ikm(
         key_info.append(as_public[i])
     var prk = Hkdf[Sha256].extract(auth_secret, ecdh_secret)
     var ikm = Array[UInt8, 32](fill=UInt8(0))
-    Hkdf[Sha256].expand(Span[UInt8](prk), Span[UInt8](key_info), Span[UInt8](ikm))
+    try:
+        Hkdf[Sha256].expand(
+            Span[UInt8](prk), Span[UInt8](key_info), Span[UInt8](ikm)
+        )
+    except e:
+        zeroize_inline_array(prk)
+        zeroize_inline_array(ikm)
+        raise e^
     zeroize_inline_array(prk)
     return ikm^
 
@@ -226,24 +241,43 @@ def webpush_encrypt_with[R: WebPushRandomness](
             "webpush: auth secret must be 16 bytes, got "
             + String(len(auth_secret))
         )
+    # Each secret is wiped on the raise path as well as after its last use.
     var as_private = randomness.sender_private_key()
-    var as_public = p256_public_key(Span[UInt8](as_private))
-    var ecdh_secret = p256_ecdh(Span[UInt8](as_private), ua_public)
+    var as_public = Array[UInt8, 65](fill=UInt8(0))
+    var ecdh_secret = Array[UInt8, 32](fill=UInt8(0))
+    try:
+        as_public = p256_public_key(Span[UInt8](as_private))
+        ecdh_secret = p256_ecdh(Span[UInt8](as_private), ua_public)
+    except e:
+        zeroize_inline_array(as_private)
+        raise e^
     zeroize_inline_array(as_private)
-    var ikm = webpush_ikm(
-        Span[UInt8](ecdh_secret), auth_secret, ua_public, Span[UInt8](as_public)
-    )
+    var ikm = Array[UInt8, 32](fill=UInt8(0))
+    try:
+        ikm = webpush_ikm(
+            Span[UInt8](ecdh_secret),
+            auth_secret,
+            ua_public,
+            Span[UInt8](as_public),
+        )
+    except e:
+        zeroize_inline_array(ecdh_secret)
+        raise e^
     zeroize_inline_array(ecdh_secret)
-    var salt = randomness.salt()
-    var body = aes128gcm_encrypt(
-        Span[UInt8](ikm),
-        Span[UInt8](salt),
-        Span[UInt8](as_public),
-        RECORD_SIZE,
-        plaintext,
-    )
-    zeroize_inline_array(ikm)
-    return body^
+    try:
+        var salt = randomness.salt()
+        var body = aes128gcm_encrypt(
+            Span[UInt8](ikm),
+            Span[UInt8](salt),
+            Span[UInt8](as_public),
+            RECORD_SIZE,
+            plaintext,
+        )
+        zeroize_inline_array(ikm)
+        return body^
+    except e:
+        zeroize_inline_array(ikm)
+        raise e^
 
 
 def webpush_encrypt(
@@ -295,12 +329,17 @@ def webpush_decrypt(
     if len(body) - header.records_offset > header.rs:
         raise Error("webpush: body holds more than one record")
     var ecdh_secret = p256_ecdh(ua_private, Span[UInt8](header.keyid))
-    var ikm = webpush_ikm(
-        Span[UInt8](ecdh_secret),
-        auth_secret,
-        ua_public,
-        Span[UInt8](header.keyid),
-    )
+    var ikm = Array[UInt8, 32](fill=UInt8(0))
+    try:
+        ikm = webpush_ikm(
+            Span[UInt8](ecdh_secret),
+            auth_secret,
+            ua_public,
+            Span[UInt8](header.keyid),
+        )
+    except e:
+        zeroize_inline_array(ecdh_secret)
+        raise e^
     zeroize_inline_array(ecdh_secret)
     try:
         var plaintext = aes128gcm_decrypt(Span[UInt8](ikm), body)
