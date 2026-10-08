@@ -69,8 +69,8 @@ comptime _C_DICT_FUSED = _Global[
 comptime _C_DICT_LEGACY = _Global[
     "komira_parquet_decode_arm_dict_legacy", _init_decode_arm_slot
 ]
-# The SUB-RG CURSOR route's own dictionary gather, a DIFFERENT symbol from
-# `dictionary::resolve_*`. Counted separately so a null on one route cannot
+# The sub-row-group cursor route's own dictionary gather, a DIFFERENT symbol
+# from `dictionary::resolve_*`. Counted separately so a null on one route cannot
 # be read as a null on the other.
 comptime _C_FLAT_FUSED = _Global[
     "komira_parquet_decode_arm_flat_fused", _init_decode_arm_slot
@@ -78,7 +78,7 @@ comptime _C_FLAT_FUSED = _Global[
 comptime _C_FLAT_LEGACY = _Global[
     "komira_parquet_decode_arm_flat_legacy", _init_decode_arm_slot
 ]
-# DICT-STRING-SHARE: the densified RLE_DICTIONARY STRING chunk
+# The dictionary-string share arm: the densified RLE_DICTIONARY STRING chunk
 # handed to its Column by Arc share vs by `Column.from_string` memcpy.
 comptime _C_DSTR_SHARE = _Global[
     "komira_parquet_decode_arm_dict_string_share", _init_decode_arm_slot
@@ -145,14 +145,14 @@ def incr_dict_resolve_legacy() raises:
 
 @always_inline
 def incr_flat_gather_fused() raises:
-    """Record one SUB-RG dictionary column resolved by the FUSED arm."""
+    """Record one sub-row-group dictionary column resolved by the FUSED arm."""
     # SAFETY: see `incr_delta_page_memcpy`.
     _ = _C_FLAT_FUSED.get_or_create_ptr()[][].fetch_add(Int64(1))
 
 
 @always_inline
 def incr_flat_gather_legacy() raises:
-    """Record one SUB-RG dictionary column resolved by the LEGACY arm."""
+    """Record one sub-row-group dictionary column resolved by the LEGACY arm."""
     # SAFETY: see `incr_delta_page_memcpy`.
     _ = _C_FLAT_LEGACY.get_or_create_ptr()[][].fetch_add(Int64(1))
 
@@ -196,7 +196,7 @@ def dict_resolve_legacy_count() raises -> Int:
 @always_inline
 def incr_dict_string_share() raises:
     """Record one densified RLE_DICTIONARY STRING chunk whose fresh
-    `StringArray` was Arc-SHARED into its Column (DICT-STRING-SHARE armed)."""
+    `StringArray` was Arc-SHARED into its Column (the string-share gate ON)."""
     # SAFETY: see `incr_delta_page_memcpy`.
     _ = _C_DSTR_SHARE.get_or_create_ptr()[][].fetch_add(Int64(1))
 
@@ -210,7 +210,7 @@ def incr_dict_string_copy() raises:
 
 
 def dict_string_share_count() raises -> Int:
-    """Process-wide `dict-string-share` fire count (chunks Arc-shared)."""
+    """Process-wide fire count of the string-share arm (chunks Arc-shared)."""
     # SAFETY: see `incr_delta_page_memcpy`.
     return Int(_C_DSTR_SHARE.get_or_create_ptr()[][].load())
 
@@ -262,7 +262,7 @@ def dict_resolve_fused_enabled() raises -> Bool:
 
 @always_inline
 def dict_string_share_enabled() raises -> Bool:
-    """The DICT-STRING-SHARE gate, DEFAULT ON (see
+    """The dictionary-string share gate, DEFAULT ON (see
     `set_dict_string_share_enabled`).
 
     THE SITE. A dictionary decoder that densifies an RLE_DICTIONARY STRING
@@ -277,7 +277,7 @@ def dict_string_share_enabled() raises -> Bool:
 
 
 def string_dict_column_move_enabled() raises -> Bool:
-    """The DICT-CODES-MOVE gate, DEFAULT ON (see
+    """The dictionary-codes move gate, DEFAULT ON (see
     `set_string_dict_column_move_enabled`).
 
     THE SITE. A dictionary-preserving decode of a NON-NULL RLE_DICTIONARY
@@ -291,7 +291,7 @@ def string_dict_column_move_enabled() raises -> Bool:
 
 
 def set_dict_string_share_enabled(on: Bool) raises:
-    """Turn the DICT-STRING-SHARE arm on (Arc share) or off (copy).
+    """Turn the dictionary-string share arm on (Arc share) or off (copy).
 
     A byte-equivalence test decodes the SAME bytes twice in ONE process with
     the arm flipped in between."""
@@ -325,7 +325,8 @@ def set_dict_resolve_fused_enabled(on: Bool) raises:
 
 
 def set_string_dict_column_move_enabled(on: Bool) raises:
-    """Turn the DICT-CODES-MOVE arm on (share the codes) or off (copy them)."""
+    """Turn the dictionary-codes move arm on (share the codes) or off (copy
+    them)."""
     # SAFETY: see `incr_delta_page_memcpy`.
     _G_DCODES_MOVE.get_or_create_ptr()[][].store(_GATE_ON if on else _GATE_OFF)
 

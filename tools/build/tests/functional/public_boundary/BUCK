@@ -3,8 +3,7 @@ load(":fixture.bzl", "PB_HOLDS", "PB_HOSTS", "PB_TREE", "PB_WINDOW")
 
 # Test 44 (the public boundary lint), the half that must build: the planted
 # tree of fixture.bzl, every finding of held.mojo and shim.c held at its exact
-# count, nothing in the near misses found, upstream bytes and binary data not
-# read. negative/public_boundary plants one defect each in the same tree.
+# count, nothing in the near misses found, binary data not read. negative/public_boundary plants one defect each in the same tree.
 [
     export_file(
         name = f,
@@ -19,8 +18,8 @@ load(":fixture.bzl", "PB_HOLDS", "PB_HOSTS", "PB_TREE", "PB_WINDOW")
         "near_c.txt",
         "near_md.txt",
         "near_mojo.txt",
+        "third_party_h.txt",
         "upstream_buck.txt",
-        "upstream_c.txt",
     ]
 ]
 

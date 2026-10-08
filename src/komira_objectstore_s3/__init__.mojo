@@ -25,6 +25,10 @@ komira_objectstore store, built on the generated `komira_aws_s3` client.
   (not re-exported): the concurrent requests S3Fs runs.
 - `inflight.mojo`: `run_bounded_inflight`, N jobs on at most K threads
   (komira_fork_join), each over a store of its own, and `inflight_workers`.
+- `s3_endpoint.mojo`: `s3_endpoint_is_plaintext`, `s3_connector_factory`
+  and `s3_prod_fs`, which pick the plaintext connector only for an
+  `http://` endpoint and TLS otherwise, over komira_http_client's
+  `KernelSchemeConnector`.
 - `presign.mojo`: `S3PresignSigner[T, K]`, presigned GET and PUT URLs as an
   `ObjectUrlSigner`, over komira_aws_core's `sigv4_presign`, signing only
   `host`.
@@ -68,6 +72,7 @@ from .conditional_store import S3ConditionalStore
 from .presign import S3PresignSigner, S3_UNSIGNED_PAYLOAD
 from .inflight import InflightJobs, inflight_workers, run_bounded_inflight
 from .s3_fs import S3FileHandle, S3Fs, S3WriteFile
+from .s3_endpoint import s3_connector_factory, s3_endpoint_is_plaintext, s3_prod_fs
 from .s3_fs_options import (
     S3FsOptions,
     S3_FS_ALL_RANGES,
