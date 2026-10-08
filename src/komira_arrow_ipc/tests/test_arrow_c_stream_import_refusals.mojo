@@ -4,6 +4,10 @@
 # with `alloc`, read by the importer (which copies, and frees nothing of a
 # foreign struct), and left allocated for the life of the test process: each
 # case's struct must outlive the importer's read, and none carries a release.
+# Every hand-built struct has `release == NULL`, which a real producer's live
+# struct never has. That is harmless here: `_import_column`,
+# `_read_root_schema` and `_import_record_batch` never read `release`, and no
+# hand-built struct is passed to anything that does.
 # The two schemas the export cases at the end build are released through
 # `release_c_schema` and their boxes freed.
 #
@@ -186,6 +190,9 @@ def test_import_reads_a_null_buffers_array_as_null_buffers() raises:
 
 
 def test_import_clears_the_padding_bits_of_the_validity_bitmap() raises:
+    # Tolerance, not a refusal: the spec leaves the contents of padding bits
+    # unspecified, so a producer may leave them set and the import must accept
+    # the bitmap and mask them.
     # Three rows, row 1 null; the producer left the five padding bits set.
     # Unmasked, a whole-byte popcount reads 7 valid of 3 rows.
     var a = _arr(3, 2, null_count=-1)
@@ -199,6 +206,9 @@ def test_import_clears_the_padding_bits_of_the_validity_bitmap() raises:
 
 
 def test_import_of_an_empty_column_with_a_bitmap() raises:
+    # Tolerance, not a refusal: a length-0 column's bitmap byte is all
+    # padding, whose contents the spec leaves unspecified, so 0xFF imports
+    # as zero rows and zero nulls.
     var a = _arr(0, 2)
     (a.buffers + 0).unsafe_write(_bytes([0xFF]))
     var c = _import_column(a, ArrowType.INT32)
@@ -673,6 +683,11 @@ def _dec_array(width: Int) -> CArrowArray:
 def test_import_decimal_precision_and_scale_defaults() raises:
     # (precision, scale) handed in by the caller; out of range they fall back
     # to the bit width's default precision and scale 0.
+    # The last two rows pin a KNOWN CORRUPTION, not expected behaviour: Arrow
+    # allows a negative scale and a scale greater than the precision, yet
+    # `scale -1 -> 0` and `scale 11 > precision 10 -> 0` silently rewrite the
+    # value's meaning (komira-ai/komira#904 item 5). A fix for #904 flips
+    # these two asserts on purpose; update them with that fix.
     for w in [16, 32]:
         var t = ArrowType.DECIMAL128 if w == 16 else ArrowType.DECIMAL256
         var dflt = 38 if w == 16 else 76
