@@ -10,8 +10,8 @@
 #     built for a catalog that marks it CLOUD_BOUND), `worker`, `table`,
 #     `bucket`,
 #     `service_account`, `grant`, `queue`, `topic`, `subscription`,
-#     `secret`, `dns_zone`, `dns_record` nor `certificate` (NOT_YET), and it
-#     has no public ingress,
+#     `secret`, `dns_zone`, `dns_record`, `certificate`, `schedule` nor
+#     `event_trigger` (NOT_YET), and it has no public ingress,
 #     so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
@@ -36,6 +36,11 @@
 #              inputs
 #   service account -> `<id>/identity` (it exposes NAME), and its grants
 #   grant   -> `<id>/grant`
+#   schedule, event trigger -> `<id>/identity`, `<id>/schedule` or
+#              `<id>/trigger`, and the one edge, CALL on the target
+#              (triggers.mojo; on a shape that folds a schedule into the
+#              container job it starts, all three turned off and the job's
+#              run carries the schedule, from kci's firings)
 # The grants are kci's EDGES (`kci_cloud.grants`), handed to `lower` with
 # each target's type: a `uses` line, the implicit `cell LOGS WRITE` of an
 # identity the resource holds itself, or a grant resource. An edge lowers to
@@ -59,7 +64,7 @@
 # aws shape a queue's policy; on the gcp shape a certificate's DNS
 # authorization and its record. A shape's NOT_YET types (onprem: `table`,
 # `queue`, `topic`, `subscription`, `dns_zone`, `dns_record`,
-# `certificate`) are the cloud's absences, and such a cloud is not complete. `list_owned` reports a table object's stored key
+# `certificate`, `event_trigger`) are the cloud's absences, and such a cloud is not complete. `list_owned` reports a table object's stored key
 # (`OwnedRecord.key`) and the validation run that created the object (its
 # `kci-run-id` label, `OwnedRecord.validation_run_id`), both read back from
 # the object.
@@ -118,9 +123,11 @@ from kci_cloud import (
     FIELD_CERTIFICATE,
     FIELD_DNS_RECORD,
     FIELD_DNS_ZONE,
+    FIELD_EVENT_TRIGGER,
     FIELD_GRANT,
     FIELD_CONTAINER_JOB,
     FIELD_QUEUE,
+    FIELD_SCHEDULE,
     FIELD_SECRET,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
@@ -133,6 +140,7 @@ from kci_cloud import (
     NOT_YET,
     V1_IMAGE_PLATFORM,
     Feed,
+    Firing,
     GrantEdge,
     body_field,
     holds_own_identity,
@@ -163,6 +171,7 @@ from kci_cloud_fake.shapes import (
     ROLE_VAULT,
     helper_role,
 )
+from kci_cloud_fake.triggers import folds, lower_trigger, trigger_limits
 from kci_cloud_fake.workloads import lower_run, workload_limits
 
 
@@ -216,11 +225,12 @@ def _edge_fields(e: GrantEdge, with_principal: Bool) -> List[Setting]:
 
 
 def _lower_edges(
-    r: Resource, edges: List[GrantEdge], shape: ProviderShape, mut out: List[LoweredNode]
+    r: Resource, edges: List[GrantEdge], shape: ProviderShape, mut out: List[LoweredNode], wanted: Bool = True
 ) raises:
     """One grant per edge, by the shape's row for the target's type: the
     binding (and its helper, where the row names one), or FOLDED into the
-    identity it is for when the shape has no row."""
+    identity it is for when the shape has no row. `wanted` False lowers
+    every edge turned off (a schedule folded into its job)."""
     for i in range(len(edges)):
         ref e = edges[i]
         var row = shape.grant_row(e.target_field)
@@ -252,7 +262,7 @@ def _lower_edges(
                 hdeps.append(e.target.copy())
             out.append(
                 LoweredNode(
-                    hid.copy(), r.id, row.value().helper.copy(), hdeps^, List[InputRef](), _edge_fields(e, False)
+                    hid.copy(), r.id, row.value().helper.copy(), hdeps^, List[InputRef](), _edge_fields(e, False), wanted
                 )
             )
             deps.append(hid^)
@@ -264,12 +274,18 @@ def _lower_edges(
                 deps^,
                 List[InputRef](),
                 _edge_fields(e, True),
+                wanted,
             )
         )
 
 
 def _lower(
-    r: Resource, edges: List[GrantEdge], feeds: List[Feed], mechanism: String, shape: ProviderShape
+    r: Resource,
+    edges: List[GrantEdge],
+    feeds: List[Feed],
+    firings: List[Firing],
+    mechanism: String,
+    shape: ProviderShape,
 ) raises -> List[LoweredNode]:
     """The complete fixed set of roles of `r` on `shape`, as data."""
     var field = body_field(r)
@@ -295,12 +311,18 @@ def _lower(
     if field == FIELD_GRANT:
         _lower_edges(r, edges, shape, out)
         return out^
+    if field == FIELD_SCHEDULE or field == FIELD_EVENT_TRIGGER:
+        var on = not folds(r, edges, shape)
+        out.extend(_identity(r, field, shape, on))
+        out.extend(lower_trigger(r, edges, shape, on))
+        _lower_edges(r, edges, shape, out, on)
+        return out^
     var own = holds_own_identity(r)
     out.extend(_identity(r, field, shape, own))
     if field == FIELD_SERVICE_ACCOUNT:
         _lower_edges(r, edges, shape, out)
         return out^
-    out.extend(lower_run(r, own, mechanism, shape))
+    out.extend(lower_run(r, own, mechanism, shape, firings))
     _lower_edges(r, edges, shape, out)
     return out^
 
@@ -437,6 +459,8 @@ struct FakeCloud(ConformanceTarget, Movable):
         all.append(FIELD_DNS_ZONE)
         all.append(FIELD_DNS_RECORD)
         all.append(FIELD_CERTIFICATE)
+        all.append(FIELD_SCHEDULE)
+        all.append(FIELD_EVENT_TRIGGER)
         var l = List[Int]()
         for i in range(len(all)):
             if self._shape.hosts(all[i]):
@@ -473,7 +497,7 @@ struct FakeCloud(ConformanceTarget, Movable):
     def public_mechanism(self) -> String:
         return self._mechanism.copy()
 
-    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
         var out = List[Finding]()
         common_limits(r, out)
         fold_limits(r, self._shape, self._id, out)
@@ -481,13 +505,16 @@ struct FakeCloud(ConformanceTarget, Movable):
         messaging_limits(r, feeds, self._shape, self._id, out)
         dns_limits(r, self._shape, self._id, out)
         workload_limits(r, self._shape, self._id, out)
+        trigger_limits(r, firings, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
 
-    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
-        return _lower(r, edges, feeds, self._mechanism, self._shape)
+    def lower(
+        self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
+    ) raises -> List[LoweredNode]:
+        return _lower(r, edges, feeds, firings, self._mechanism, self._shape)
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))
@@ -570,8 +597,8 @@ struct FakeCloud(ConformanceTarget, Movable):
 
 struct FakeLimitedCloud(ConformanceTarget, Movable):
     """The deliberately partial fake cloud: no `container_job`, no
-    `worker`, no `bucket`, no `service_account`, no `grant` (NOT_YET), no
-    public ingress.
+    `worker`, no `bucket`, no `service_account`, no `grant`, no trigger
+    (NOT_YET), no public ingress.
 
     `job_absence` is how it declares the missing `container_job`: NOT_YET
     (the default, for the v1 catalog, where it is PORTABLE) or
@@ -631,6 +658,8 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
         for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD]:
             l.append(Absence(f, NOT_YET, String("fake-limited has no DNS")))
         l.append(Absence(FIELD_CERTIFICATE, NOT_YET, String("fake-limited issues no certificates")))
+        l.append(Absence(FIELD_SCHEDULE, NOT_YET, String("fake-limited has no scheduler")))
+        l.append(Absence(FIELD_EVENT_TRIGGER, NOT_YET, String("fake-limited delivers no events")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -651,7 +680,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def public_mechanism(self) -> String:
         return String("")
 
-    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
         var out = List[Finding]()
         common_limits(r, out)
         if r._oneof0_case == 1 and r.service.value()._oneof0_case == 1:
@@ -669,8 +698,10 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
 
-    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
-        return _lower(r, edges, feeds, String(""), ProviderShape.generic())
+    def lower(
+        self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
+    ) raises -> List[LoweredNode]:
+        return _lower(r, edges, feeds, firings, String(""), ProviderShape.generic())
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))

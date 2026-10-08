@@ -6,7 +6,7 @@ pinned prebuilt binary, which a git hook then runs; the build and its tooling
 use no Python.
 
 Its source of a library's declarations is in place: the build rule
-[`mojo_doc_json`](../tools/build/mojo/README.md#api-json-mojo_doc_json) runs
+[`mojo_doc_json`](../tools/build/mojo/doc.md) runs
 the pinned compiler's `mojo doc` on a library and makes the JSON a build
 output. That JSON holds no source locations.
 

@@ -26,7 +26,7 @@
 # 7. THE MESSAGING ROWS: a queue (field 15, the sixth arm) and a topic (21,
 #    the tenth) are PORTABLE, expose NAME and ADDRESS, take retention with
 #    the default DELETE, and land on `queue` / `topic`; a queue accepts SEND
-#    and RECEIVE, a topic SEND only. A subscription (28, the fourteenth) exposes
+#    and RECEIVE, a topic SEND only. A subscription (28, the fifteenth) exposes
 #    and accepts nothing, takes no retention, and lands on `sub` (a role
 #    word is 8 bytes at most).
 #    SEND and RECEIVE are values of the generated `Access`.
@@ -99,15 +99,15 @@ def test_catalog_arms_match_the_wire() raises:
     var c = Catalog.v1()
     assert_equal(
         len(c.types),
-        14,
+        16,
         "v1 declares service, container_job, worker, table, bucket, queue, secret, dns_zone, service_account,"
-        + " topic, grant, dns_record, certificate and subscription",
+        + " topic, schedule, grant, dns_record, certificate, subscription and event_trigger",
     )
     for i in range(len(c.types)):
         var field = c.types[i].field
         var r = decode_proto[Resource](_resource_with_body(field))
         assert_equal(body_field(r), field, c.types[i].name + " maps back to its field")
-    var none = decode_proto[Resource](_resource_with_body(22))
+    var none = decode_proto[Resource](_resource_with_body(23))
     var raised = False
     try:
         _ = body_field(none)
@@ -192,9 +192,9 @@ def _ints(
 ) -> List[Int]:
     """The fields given, then the messaging fields (15 queue, 21 topic, 28
     subscription), 16 secret, the name fields (18 DNS zone, 26 DNS record,
-    27 certificate) and 12 worker, which every entry in these tests
-    implements."""
-    var l: List[Int] = [15, 21, 28, 16, 18, 26, 27, 12]
+    27 certificate), 12 worker and the triggers (22 schedule, 31 event
+    trigger), which every entry in these tests implements."""
+    var l: List[Int] = [15, 21, 28, 16, 18, 26, 27, 12, 22, 31]
     l.append(a)
     if b >= 0:
         l.append(b)
@@ -448,7 +448,7 @@ def test_the_messaging_rows() raises:
     var arms = body_arms()
     var fields = [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]
     var names = ["queue", "topic", "subscription"]
-    var positions = [5, 9, 13]
+    var positions = [5, 9, 14]
     for i in range(3):
         ref t = c.types[c.index_of(fields[i])]
         assert_equal(t.name, String(names[i]))

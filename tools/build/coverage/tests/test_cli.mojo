@@ -384,6 +384,46 @@ def test_report_file_names() raises:
     assert_equal(p.reports[4].file, "c.xml")
 
 
+def _branches(dir: String) raises -> String:
+    """`<branch_hit>/<branch_found>` of the gate's package in `dir`."""
+    var p = parse_json_value(read_text(dir + "/result.json")).get(String("package"))
+    return p.get(String("branch_hit")).serialize() + String("/") + p.get(String("branch_found")).serialize()
+
+
+def test_branch_lcov_flag() raises:
+    # `--branch-lcov [PKGDIR=]F`, repeatable, on both commands, read with
+    # Cobertura reports (no usage error): two tests' records for z.mojo
+    # (which no line report names) add its branches to src/alpha's, summed
+    # by id. A DA in such a file, records for a.mojo (whose Cobertura
+    # report gives condition-coverage) and two files disagreeing on a
+    # location's decisions are input errors; `report` still needs a line
+    # report.
+    var dir = _tmp(String("branch_lcov"))
+    var one = dir + "/one.info"
+    var two = dir + "/two.info"
+    write_text(one, String("SF:src/alpha/z.mojo\nBRDA:5,5:br:0/1,0,-\nBRDA:5,5:br:0/1,1,3\nend_of_record\n"))
+    write_text(two, String("SF:src/alpha/z.mojo\nBRDA:5,5:br:0/1,0,-\nBRDA:5,5:br:0/1,1,-\nend_of_record\n"))
+    var plain = _tmp(String("branch_lcov_plain"))
+    assert_equal(run(_gate(plain, String("census"))), EXIT_OK)
+    assert_equal(_branches(plain), "1/2")
+    var with_b = _tmp(String("branch_lcov_gate"))
+    assert_equal(run(_with(_with(_gate(with_b, String("census")), String("--branch-lcov"), one), String("--branch-lcov"), String("src/alpha=") + two)), EXIT_OK)
+    assert_equal(_branches(with_b), "2/4")
+    var rdir = _tmp(String("branch_lcov_report"))
+    assert_equal(run(_with(_report(rdir), String("--branch-lcov"), one)), EXIT_OK)
+    var only = _with(_without(_without(_report(_tmp(String("branch_lcov_only"))), String("--cobertura")), String("--cobertura")), String("--branch-lcov"), one)
+    assert_equal(run(only), EXIT_USAGE)
+    var da = dir + "/da.info"
+    write_text(da, String("SF:src/alpha/z.mojo\nDA:5,1\nend_of_record\n"))
+    assert_equal(run(_with(_gate(_tmp(String("branch_lcov_da")), String("census")), String("--branch-lcov"), da)), EXIT_INPUT)
+    var a = dir + "/a.info"
+    write_text(a, String("SF:src/alpha/a.mojo\nBRDA:5,9:br:0/1,0,1\nBRDA:5,9:br:0/1,1,1\nend_of_record\n"))
+    assert_equal(run(_with(_gate(_tmp(String("branch_lcov_a")), String("census")), String("--branch-lcov"), a)), EXIT_INPUT)
+    var n2 = dir + "/n2.info"
+    write_text(n2, String("SF:src/alpha/z.mojo\nBRDA:5,5:br:0/2,0,1\nBRDA:5,5:br:0/2,1,1\nBRDA:5,5:br:1/2,0,1\nBRDA:5,5:br:1/2,1,1\nend_of_record\n"))
+    assert_equal(run(_with(_with(_gate(_tmp(String("branch_lcov_n")), String("census")), String("--branch-lcov"), one), String("--branch-lcov"), n2)), EXIT_INPUT)
+
+
 def main() raises:
     test_report_end_to_end()
     test_gate_entry_is_the_report_entry()
@@ -394,4 +434,5 @@ def main() raises:
     test_gate_with_no_report()
     test_gate_test_sources()
     test_report_file_names()
+    test_branch_lcov_flag()
     print("test_cli: PASS")

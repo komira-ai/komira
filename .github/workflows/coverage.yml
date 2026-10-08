@@ -1,4 +1,5 @@
-# The line coverage of a pull request (docs/ci.md, "coverage.yml";
+# The line coverage of a pull request, and the branch coverage of the
+# libraries whose coverage gate reads branch records (docs/ci.md, "coverage.yml";
 # tools/build/coverage/README.md, "The coverage workflow"), shown as the check
 # run `coverage`: a summary and annotations on the lines of the "Files
 # changed" view. INFORMATIONAL: it is not `pr / check`, it is not a required
@@ -12,10 +13,12 @@
 #   measure  contents: read and id-token: write (the farm connection), no
 #            write token: checks out the pull request's HEAD commit and runs
 #            .github/ci/coverage_measure.sh, which builds the coverage reports
-#            of the mojo_library targets the change touches on the farm and
+#            of the mojo_library targets the change touches on the farm
+#            (and the branch records of those whose gate reads them) and
 #            runs `covcheck report`; uploads the check run's request bodies
 #            and the summary as an artifact. A library whose coverage build
-#            fails is listed as not measured, and the job stays green.
+#            fails is listed as not measured, one whose branch records fail
+#            as branch not measured, and the job stays green.
 #   post     checks: write, nothing else: no checkout, no farm, no buck2;
 #            downloads the artifact and sends the bodies (POST, then PATCHes
 #            in file order); a run it created and did not complete (a failed

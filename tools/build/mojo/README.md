@@ -18,7 +18,7 @@ the compiler sees. Worked uses of each rule are in
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
-| `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](#api-json-mojo_doc_json)). | [`hellopkg_doc`](../examples/BUCK) |
+| `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
 
@@ -795,13 +795,32 @@ assembly lists are generated but not built yet.
   killed and the action fails, saying the test left processes running or
   did not finish. komira's kcov exits with the test's status (128+N for
   signal N), so a test that fails at `-O0` or traced fails this action,
-  whatever its gated run did.
+  whatever its gated run did;
+- its branch coverage, which the gate reads when the library's
+  `coverage_branch_gate` is set (a library of `COVERAGE_BRANCH_GATE` in
+  [`policy.bzl`](../coverage/policy.bzl), or a fixture of the tests cell
+  that does not pass `coverage_branch_gate = False`), and nothing waits
+  for otherwise: the test emitted as
+  LLVM bitcode at `-O0` with line tables (`[coverage][bc][<test>]`,
+  `mojo_emit_cov_bc`, through the same `mojo_wrapper.sh`), instrumented
+  with IR profile counters by the Mojo package's lld and linked with the
+  LLVM profile runtime (`[coverage][pgo_bin][<test>]`, `mojo_cov_pgo_link`),
+  and run through the same `gate_runner.sh` with `LLVM_PROFILE_FILE` set,
+  whose merged profile is `[coverage][branch][<test>]` (`cov/branch/<test>.profdata`,
+  `mojo_cov_branch_run`), that profile applied to the bitcode by the same
+  lld as IR text (`[coverage][branch_ir][<test>]`, `mojo_cov_branch_annotate`),
+  and its branches in the library's sources, each a source decision or a
+  known compiler-made branch, as lcov `BRDA` records
+  (`[coverage][branch_info][<test>]`, `cov/branch/<test>.info`,
+  `mojo_cov_branch_classify`; [branch coverage runs](../coverage/branch/README.md)).
+  A `test_env` setting `LLVM_PROFILE_FILE` is refused.
 
 and, per library, with tests or without:
 
-- the gate: `covcheck gate` over those reports and the library's sources
-  (each non-generated `srcs` file, recorded or not; every welded test set
-  aside, under the package's `tests/` or not: `--test-source`), in
+- the gate: `covcheck gate` over those reports (and, as above, the branch
+  records: `--branch-lcov`) and the library's sources (each non-generated
+  `srcs` file, recorded or not; every welded test set aside, under the
+  package's `tests/` or not: `--test-source`), in
   the mode and against the target of
   [`policy.bzl`](../coverage/policy.bzl) (census, 100%), whose `result.json`
   and `summary.md` are `[coverage][gate]` (`cov/gate/`, action category
@@ -822,7 +841,8 @@ the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
 gate of their own (the library would depend on the gate's tool, which
 depends on it), and their gate is `<name>_cov_gate`, which their conda
 package waits for too. `[coverage]` is the binaries, the reports and the
-gate's outputs.
+gate's outputs; the branch coverage files are only its sub-targets `[bc]`,
+`[pgo_bin]`, `[branch]`, `[branch_ir]` and `[branch_info]`.
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
@@ -833,7 +853,9 @@ The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
 and does one thing: it sets the attributes `coverage_debug` to
 `komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
 `komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and
-cov_normalize), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
+cov_normalize), `coverage_branch` to
+`komira//tools/build/coverage/branch:cov_branch` (the branch coverage
+scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
 (cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
 (for a library of the ledger: no gate). A buckconfig
 value is not part of the configuration, so no output path moves; with the
@@ -886,74 +908,29 @@ Scope, for now:
 - A test's data may not be staged at its own source's path or under
   `buck-out/`: a coverage run stages the sources there (analysis fails,
   naming the destination).
-- Line coverage only: kcov gives no branch data, so the gate's branch is
-  `not measured` and never passes in enforce mode (`BranchNotMeasured`).
+- Branch coverage only where the gate reads the branch records
+  (`coverage_branch_gate`, above): kcov gives no branch data, so for any
+  other library the gate's branch is `not measured` and never passes in
+  enforce mode (`BranchNotMeasured`).
 
 A library in the `tests` cell may pass `coverage_debug` itself (a
 `cov_link_dir`), and with it `coverage_run` (a `cov_run_dir`; the default one
 when not given) and `coverage_gate` (a `cov_gate_dir`) with `coverage_mode`
 (the policy's when not given): it then has coverage binaries and runs, and
 with `coverage_gate` the gate, whatever the switch says, which
-is how tests 41, 43 and 46 build them, plant a defective relocator or run
+is how tests 41, 43, 46 and 47 build them, plant a defective relocator or run
 script, and gate in enforce mode, without `-c`. Its conda package, if it has
-one, waits for its runs and that gate. Anywhere else passing any of them is
+one, waits for its runs and that gate. It may also pass
+`coverage_branch_gate = False`, so its gate does not read its branch
+records (test 46's `covfull_unread`). Anywhere else passing any of them is
 refused.
 
 ## API JSON: mojo_doc_json
 
-```python
-load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
-
-mojo_doc_json(
-    name = "hellopkg_doc",
-    lib = ":hellopkg",
-    golden = "hellopkg_doc.json",      # optional
-    symbols = ["greet.greeting"],      # optional
-)
-```
-
-- **What runs.** The pinned compiler's `mojo doc`, through
-  [`mojo_wrapper.sh`](mojo_wrapper.sh) like every compile (the same
-  environment, the watchdog, and the refusal of an empty output or one
-  holding the action's working directory), on the library's staged sources
-  (its `[src]`), with the packages of its `deps` on `-I`. The library's own
-  package is not an input, so the JSON does not wait for its welded tests. A
-  source that does not compile fails the target: `mojo doc` exits 1 with
-  `could not generate documentation` after the compiler's error.
-- **What the JSON holds** (mojo 1.0.0): the package, its modules (a
-  package's `__init__.mojo` is the module `__init__`) and subpackages, and
-  per module its functions, structs, traits and aliases, with signatures,
-  parameters, argument lists and doc strings. It holds **no source
-  location**, and no declaration whose name starts with `_` (a struct's
-  dunder methods excepted). [`hellopkg_doc.json`](../examples/hellopkg_doc.json)
-  is a whole one.
-- **`golden`**: the JSON must equal this file byte for byte, else
-  `mojo_doc_json: <target>: the JSON differs from its golden <file>` and the
-  first differences. The golden pins the bytes: an output that varied by
-  worker or run would differ from it whenever the action runs again. A
-  compiler bump that changes the JSON changes the golden in the same commit.
-- **`symbols`**: each entry is a declaration's dotted path inside the
-  package: `<module>.<name>`, `<module>.<struct or trait>.<method>`, a
-  subpackage's name first (`sub.leaf.leaf_value`). The check reads the JSON
-  with [`//tools/build/inspect`](../inspect/BUCK) (`inspect json`), not by
-  matching text; a missing one fails with
-  ``mojo_doc_json: <target>: the JSON declares no `<path>` ``, one line per
-  path.
-- With either check, `[raw]` is the unchecked JSON.
-
-Test 52 ([`tests/README.md`](../tests/README.md#52-api-json-mojo_doc_json))
-covers both checks and a source that does not compile:
-[`functional/mojo_doc_json`](../tests/functional/mojo_doc_json/BUCK) must build
-and each target of [`negative/mojo_doc_json`](../tests/negative/mojo_doc_json/BUCK)
-must fail naming its defect. Test 1 builds `hellopkg_doc`, so the example's JSON
-equals its golden.
-
-```sh
-./buck2 build tests//functional/mojo_doc_json:docpkg_doc
-./buck2 build tests//negative/mojo_doc_json:compile_error    # must fail: could not generate documentation
-./buck2 build tests//negative/mojo_doc_json:golden_differs   # must fail: the JSON differs from its golden
-./buck2 build tests//negative/mojo_doc_json:missing_symbol   # must fail: the JSON declares no `shout`
-```
+`mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) writes the
+`mojo doc` JSON of a `mojo_library`, optionally checked against a golden file
+and for named declarations. [`doc.md`](doc.md) has its use, what the JSON
+holds (no source locations), its two checks and test 52.
 
 ## Errors
 

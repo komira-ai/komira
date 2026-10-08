@@ -5,7 +5,7 @@ load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
-load(":defs.bzl", "llvm_branch_check", "llvm_branch_tool", "llvm_branch_unpack")
+load(":defs.bzl", "RAW_PROFILE_VERSION", "llvm_branch_check", "llvm_branch_tool", "llvm_branch_unpack")
 
 _ROW = "linux-x86_64"
 
@@ -133,6 +133,7 @@ llvm_branch_check(
     want = {
         "counts": "classify:2,3",
         "functions": "3",
+        "raw": str(RAW_PROFILE_VERSION),
         "triple": row(_ROW)["zig_triple"],
     },
 )
