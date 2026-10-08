@@ -610,13 +610,19 @@ def _same_strings(a: List[String], b: List[String]) -> Bool:
 
 
 def _field_heads(batch: RecordBatch) raises -> List[String]:
-    """Per column, the name, top-level type and nullability of its Field:
-    what a zero-row chunk must agree on (its dictionary and children may be
-    absent, so the rest of its type is not compared)."""
+    """Per column, the name, top-level type, the Field's own type parameters
+    (decimal precision and scale, timestamp time zone) and nullability of
+    its Field: what a zero-row chunk must agree on (its dictionary and
+    children may be absent, so the rest of its type is not compared)."""
     var heads = List[String]()
     for c in range(batch.schema.num_columns()):
         var f = batch.schema.field_at(c)
-        var h = escape_name(f.name) + ":" + arrow_type_name(f.arrow_type)
+        var t = f.arrow_type
+        var h = escape_name(f.name) + ":" + arrow_type_name(t)
+        if t == ArrowType.DECIMAL128 or t == ArrowType.DECIMAL256:
+            h += "(" + String(f.decimal_precision) + "," + String(f.decimal_scale) + ")"
+        elif t.is_timestamp():
+            h += "(" + escape_name(f.timezone()) + ")"
         if f.nullable:
             h += "?"
         heads.append(h^)
@@ -629,7 +635,8 @@ def render_table(table: Table, var policy: CanonPolicy) raises -> CanonText:
     when none does, from the Fields alone when there is no chunk), and every
     chunk that holds rows must spell the same. A zero-row chunk (an engine's
     empty morsel) is not rendered, and only its Fields' names, top-level
-    types and nullability are compared with the reference chunk's: a
+    types, decimal precision and scale, time zones and nullability are
+    compared with the reference chunk's: a
     zero-row nested or dictionary column may have no children or dictionary
     to spell its full type or read its cells from."""
     var res = CanonText(policy^)

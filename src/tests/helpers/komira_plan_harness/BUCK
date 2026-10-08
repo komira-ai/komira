@@ -21,7 +21,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 #                     every type; the string `\N` against NULL; a type canon
 #                     cannot render refused by name; a table's zero-row
 #                     chunks not read and only their Fields' names, top
-#                     types and nullability checked.
+#                     types, decimal parameters, time zones and
+#                     nullability checked.
 #   test_float        decimal-only floats accepted only when exact; a decimal
 #                     that disagrees with its bits refused (ties to even);
 #                     NaN and -0.0

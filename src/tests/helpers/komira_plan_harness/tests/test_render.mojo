@@ -11,6 +11,12 @@
 # and test_zero_row_chunk_with_another_nullability_is_refused: a renderer that
 # skips a zero-row chunk's Fields entirely passes an empty morsel whose
 # column is renamed or changes nullability; both must be refused.
+# test_zero_row_chunk_with_another_type_is_refused: a renderer that compares
+# a zero-row chunk's names and nullability but not its top-level type passes
+# an empty date32 morsel among int32 chunks. The decimal and time zone tests:
+# one that compares only the top-level type passes an empty decimal128 of
+# another precision or scale, or an empty timestamp in another time zone,
+# though a chunk with rows and those Fields would be refused.
 
 from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
@@ -35,9 +41,11 @@ from komira_plan_harness import (
 from komira_plan_harness.fixtures import (
     BatchBuilder,
     all_valid,
+    decimal_column,
     fixed_column,
     ints,
     list_column,
+    small_decimal,
     string_column,
     varlen_column,
 )
@@ -417,6 +425,86 @@ def test_zero_row_chunk_with_another_nullability_is_refused() raises:
     var es = empties[0].schema.copy()
     with assert_raises(contains="(zero rows) has another column name"):
         _ = render_table(Table.from_chunks(empties^, es^), CanonPolicy.total())
+
+
+def _one_field_batch(f: Field, rows: Int) raises -> RecordBatch:
+    """One column of `rows` rows for an int32, date32, timestamp or
+    decimal128 Field."""
+    var bb = BatchBuilder()
+    var t = f.arrow_type
+    if t == ArrowType.DECIMAL128:
+        var limbs = List[List[UInt64]]()
+        for r in range(rows):
+            limbs.append(small_decimal(r, 2))
+        bb.add(f, decimal_column(t, limbs, f.decimal_scale, all_valid(rows)))
+        return bb.build()
+    var vals = List[Int]()
+    for r in range(rows):
+        vals.append(r)
+    var width = 4 if (t == ArrowType.INT32 or t == ArrowType.DATE32) else 8
+    bb.add(f, fixed_column(t, width, ints(vals), all_valid(rows)))
+    return bb.build()
+
+
+def _zero_row_second(full: Field, empty: Field) raises -> Table:
+    """A chunk of two rows with Field `full`, then a zero-row chunk with
+    Field `empty`."""
+    var chunks = List[RecordBatch]()
+    chunks.append(_one_field_batch(full, 2))
+    chunks.append(_one_field_batch(empty, 0))
+    var schema = chunks[0].schema.copy()
+    return Table.from_chunks(chunks^, schema^)
+
+
+def test_zero_row_chunk_with_another_type_is_refused() raises:
+    """A zero-row chunk whose column has the others' name and nullability
+    but another top-level type (date32 where they hold int32) is refused,
+    before or after the chunk that holds rows. The pair shares one buffer
+    layout, so Table.from_chunks admits it (a pair it refuses, such as int64
+    under int32, never reaches canon) and the refusal must be canon's."""
+    var date = Field("a", ArrowType.DATE32, False)
+    var narrow = Field("a", ArrowType.INT32, False)
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(narrow, date), CanonPolicy.total())
+    var chunks = List[RecordBatch]()
+    chunks.append(_one_field_batch(date, 0))
+    chunks.append(_one_field_batch(narrow, 2))
+    var schema = chunks[1].schema.copy()
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(Table.from_chunks(chunks^, schema^), CanonPolicy.total())
+    # The same type passes.
+    var same = render_table(_zero_row_second(narrow, narrow), CanonPolicy.total())
+    assert_equal(same.num_rows(), 2)
+
+
+def test_zero_row_chunk_with_another_decimal_is_refused() raises:
+    """A zero-row decimal128 chunk whose Field has another scale, or another
+    precision, than the reference's is refused; the same pair passes."""
+    var ref_f = Field.decimal128("d", 38, 2, True)
+    var other_scale = Field.decimal128("d", 38, 3, True)
+    var other_precision = Field.decimal128("d", 20, 2, True)
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(ref_f, other_scale), CanonPolicy.total())
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(ref_f, other_precision), CanonPolicy.total())
+    var same = render_table(_zero_row_second(ref_f, ref_f), CanonPolicy.total())
+    assert_equal(same.num_rows(), 2)
+    assert_equal(same.schema[0], "d:decimal128(38,2)?")
+
+
+def test_zero_row_chunk_with_another_time_zone_is_refused() raises:
+    """A zero-row timestamp chunk whose Field names another time zone, or
+    none, where the reference names UTC is refused; the same zone passes."""
+    var utc = Field.timestamp("t", ArrowType.TIMESTAMP_US, "UTC", False)
+    var other = Field.timestamp("t", ArrowType.TIMESTAMP_US, "Europe/Paris", False)
+    var naive = Field.timestamp("t", ArrowType.TIMESTAMP_US, "", False)
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(utc, other), CanonPolicy.total())
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(utc, naive), CanonPolicy.total())
+    var same = render_table(_zero_row_second(utc, utc), CanonPolicy.total())
+    assert_equal(same.num_rows(), 2)
+    assert_equal(same.schema[0], "t:timestamp_us(UTC)")
 
 
 def main() raises:
