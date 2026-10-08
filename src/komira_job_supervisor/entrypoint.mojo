@@ -47,7 +47,7 @@
 # ORDER AT START: parse and check every flag; resolve the job binary; build
 # the credential (the env form is read and removed here, before any spawn);
 # build the heartbeat reporter (refuses a credential over plaintext); build
-# the log store (resolves the storage credential, so a cell with none refuses
+# the log store (resolves the storage credential, so a host with none refuses
 # to start); then `run_job_supervisor`. Each refusal raises naming the flag,
 # never a credential, and nothing has been beaten or spawned.
 #

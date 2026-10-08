@@ -111,8 +111,6 @@ def test_the_file_is_read_for_every_beat() raises:
     var path = _tmp(String("credential-rotating"))
     _write(path, String("tok-first-AAAA"))
     var auth = BearerHeartbeatAuth.from_file(path)
-    assert_true(auth.attaches_credential(), "a bearer attaches a credential")
-    assert_true(auth.reads_file_per_beat(), "the file form re-reads")
     assert_equal(
         _only_header(auth),
         String("Authorization: Bearer tok-first-AAAA"),
@@ -125,6 +123,8 @@ def test_the_file_is_read_for_every_beat() raises:
         String("Authorization: Bearer tok-second-BBBB"),
         "beat 2 carries the ROTATED token: the file is read per beat",
     )
+    assert_true(auth.attaches_credential(), "a bearer attaches a credential")
+    assert_true(auth.reads_file_per_beat(), "the file form re-reads")
 
     # The token reaches the serialized request.
     var hs = auth.headers(String("POST"), String(_URL), List[UInt8]())
@@ -227,16 +227,6 @@ def test_the_env_credential_is_read_once_and_removed() raises:
         String("Authorization: Bearer ") + _ENV_CREDENTIAL_VALUE,
         "the beat carries the variable's token",
     )
-    assert_equal(
-        _read_env(_ENV_CREDENTIAL),
-        String(""),
-        "the variable is gone from this process's environment",
-    )
-    assert_equal(
-        _only_header(auth),
-        String("Authorization: Bearer ") + _ENV_CREDENTIAL_VALUE,
-        "and the held token still serves later beats",
-    )
 
     # The job, which inherits the environment, does not see it.
     var cmd = (
@@ -270,6 +260,16 @@ def test_the_env_credential_is_read_once_and_removed() raises:
         "the job sees no credential (CONTROL: it does see the other variable)",
     )
     _ = js^
+    assert_equal(
+        _read_env(_ENV_CREDENTIAL),
+        String(""),
+        "the variable is gone from this process's environment",
+    )
+    assert_equal(
+        _only_header(auth),
+        String("Authorization: Bearer ") + _ENV_CREDENTIAL_VALUE,
+        "and the held token still serves later beats",
+    )
 
     # Read once: a second read of the same variable now refuses.
     var again = _refusal_from_env(String(_ENV_CREDENTIAL))
