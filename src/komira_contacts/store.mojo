@@ -13,7 +13,9 @@
 # refusal rolls back:
 #
 #   create  read the book (access) -> claim (book, uid) in contact_card_uids
-#           -> insert the card at the book's modseq + 1 -> advance the book
+#           (a key that names no card, or a tombstone, is stale and is moved
+#           to the new card) -> insert the card at the book's modseq + 1
+#           -> advance the book
 #   update  read the book (access) and the live card -> CAS the card on
 #           (id, book, live, version) -> advance the book
 #   delete  read the book (access) and the live card -> CAS the card to a
@@ -30,11 +32,19 @@
 # What a document backend gives: each `Database` write there is its own
 # atomic write, and `rollback` deletes the documents created since `begin`
 # (komira_gcp_firestore_db). A refused write is refused before it writes, so
-# it changes nothing on either backend. A crash between the card write and the
-# book's advance is not undone on a document backend; with more than one
-# concurrent writer per book there, two writers can read the same book modseq
-# and the second advance is refused after its card was written. The store
-# claims a single writer per book on a document backend.
+# it changes nothing on either backend. A write that stops part way (a crash,
+# or a lost connection that also stops the rollback) is not undone on a
+# document backend, and leaves one of these:
+#   - a uid key naming no card (create stopped after its key) or a tombstone
+#     (delete stopped after its tombstone): the next create of that uid in the
+#     book moves the key to its own card, so the uid is not lost;
+#   - a card write whose book modseq did not advance: the change feed does
+#     not list it until the next write in the book, which takes the same
+#     modseq.
+# With more than one concurrent writer per book there, two writers can read
+# the same book modseq and the second advance is refused after its card was
+# written, and a create can move a key whose card another writer is still
+# writing. The store claims a single writer per book on a document backend.
 # =============================================================================
 
 from komira_async.reactor.reactor import Reactor
@@ -414,7 +424,7 @@ struct ContactsStore[DB: Database](Movable):
                 claim^,
             )
             if not won:
-                raise Error(String(ERR_UID_TAKEN))
+                self._take_stale_uid[RT](reactor, book_id, out.uid, out.id)
             out.modseq = book.modseq + 1
             _ = self._db.put[RT](reactor, String(CARDS), card_cols(), _card_row(out, False))
             self._advance_book[RT](reactor, book_id, book.modseq)
@@ -423,6 +433,48 @@ struct ContactsStore[DB: Database](Movable):
         except e:
             self._db.rollback[RT](reactor)
             raise e^
+
+    def _take_stale_uid[
+        RT: Runtime
+    ](mut self, mut reactor: Reactor[RT.Sink], book_id: String, uid: String, card_id: String) raises:
+        """`uid` is already keyed in the book. Refuse with ERR_UID_TAKEN when
+        the key names a live card of the book; otherwise the key is stale (a
+        create stopped between its key and its card, or a delete stopped
+        between its tombstone and the key's removal) and is moved to
+        `card_id`, guarded on the card it named."""
+        var key = List[Pred]()
+        key.append(Pred.eq(String("address_book_id"), _text(book_id)))
+        key.append(Pred.eq(String("uid"), _text(uid)))
+        var rows = self._db.query_rows[RT](
+            reactor, String(CARD_UIDS), _strs("card_id"), Filter.all_of(key^), List[Order](), _no_limit()
+        )
+        if rows.__len__() != 1:
+            raise Error(String(ERR_UID_TAKEN))
+        var holder = rows.row(0).get_text(0)
+        var held = self._db.get_by_key[RT](
+            reactor, String(CARDS), card_cols(), String("id"), _text(holder)
+        )
+        if held:
+            var row = held.take()
+            if row.get_text(1) == book_id and row.get_int8(4) == 0:
+                raise Error(String(ERR_UID_TAKEN))
+        var guard = List[Pred]()
+        guard.append(Pred.eq(String("address_book_id"), _text(book_id)))
+        guard.append(Pred.eq(String("uid"), _text(uid)))
+        guard.append(Pred.eq(String("card_id"), _text(holder)))
+        var updates = List[DbColVal]()
+        updates.append(DbColVal.bind(String("card_id"), _text(card_id)))
+        var n = self._db.conditional_update[RT](
+            reactor,
+            String(CARD_UIDS),
+            Filter.all_of(guard^),
+            updates^,
+            False,
+            Optional[String](),
+            List[String](),
+        )
+        if n != 1:
+            raise Error(String(ERR_UID_TAKEN))
 
     def update_card[
         RT: Runtime

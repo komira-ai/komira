@@ -17,7 +17,8 @@
 #     card's proto3 JSON without the server-written fields)
 #   contact_card_uids      the live uids of each book: (address_book_id, uid)
 #     is the key, so a uid is unique within one book and free in another.
-#     card_id TEXT names the card holding it. A delete releases the uid.
+#     card_id TEXT names the card holding it. A delete releases the uid; a
+#     key naming no card or a tombstone is stale and a create takes it over.
 #   contact_default_books  owner TEXT key, book_id TEXT: at most one default
 #     PERSONAL book per owner
 #
