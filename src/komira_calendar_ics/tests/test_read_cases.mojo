@@ -1,8 +1,10 @@
 # =============================================================================
 # test_read_cases.mojo -- read_ics on what a cancelled occurrence edit
 # carries, enumerated values in any case (RFC 5545 §2.1), a series whose
-# DTSTART its RRULE does not pick, and a report kept small when a file names
-# many distinct properties.
+# DTSTART its RRULE does not pick, a report kept small when a file names
+# many distinct properties (and its overflow entry made by a merge), two
+# series edited at the same start, and an alarm's `Reminder` text on a
+# titled event.
 #
 # Every refusal and report line is asserted as exact text. Each test runs
 # even when an earlier one fails, and the failures are listed together.
@@ -172,6 +174,67 @@ def test_merge_adds_counts() raises:
     assert_equal(len(c.dropped), 2)
 
 
+def test_overflow_entry_made_by_merge() raises:
+    # Nothing dropped on the VCALENDAR; one event drops 300 distinct X- names,
+    # twice each. The event's own report counts 44 kinds twice in its `* *`
+    # entry, and merging it into the file's report makes that entry there
+    # with all 88.
+    var text = String("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART;VALUE=DATE:20301104\r\n")
+    for i in range(300):
+        text += "X-EV-" + String(i) + ":a\r\nX-EV-" + String(i) + ":b\r\n"  # lines 6 + 2i, 7 + 2i
+    text += "END:VEVENT\r\nEND:VCALENDAR\r\n"
+    var got = read_ics(text.as_bytes(), ZoneTable())
+    assert_equal(len(got.events), 1)
+    assert_equal(len(got.report.dropped), MAX_DROPPED_KINDS + 1)
+    assert_equal(String(got.report.dropped[0]), "VEVENT X-EV-0 x2 from line 6")
+    assert_equal(String(got.report.dropped[255]), "VEVENT X-EV-255 x2 from line 516")
+    assert_equal(String(got.report.dropped[256]), "* * (" + OVERFLOW_DETAIL + ") x88 from line 518")
+
+
+comptime TWO_SERIES = (
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+    + "BEGIN:VEVENT\r\nUID:a\r\nDTSTART:20300902T090000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\n"  # 3
+    + "BEGIN:VEVENT\r\nUID:b\r\nDTSTART:20300902T090000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\n"  # 9
+    + "BEGIN:VEVENT\r\nUID:a\r\nRECURRENCE-ID:20300903T090000Z\r\nSUMMARY:A\r\nEND:VEVENT\r\n"  # 15
+    + "BEGIN:VEVENT\r\nUID:b\r\nRECURRENCE-ID:20300903T090000Z\r\nSUMMARY:B\r\nEND:VEVENT\r\n"  # 20
+    + "END:VCALENDAR\r\n"
+)
+
+
+def test_two_series_edited_at_the_same_start() raises:
+    # An occurrence is edited twice only within one series: two series each
+    # edited at 2030-09-03 09:00 keep both edits.
+    var got = read_ics(TWO_SERIES.as_bytes(), ZoneTable())
+    assert_equal(_report(got.report), "")
+    assert_equal(len(got.events), 2)
+    assert_equal(len(got.events[0].overrides), 1)
+    assert_equal(len(got.events[1].overrides), 1)
+    assert_equal(encode_json(got.events[0].overrides[0]), '{"originalStart":"2030-09-03T09:00:00","title":"A"}')
+    assert_equal(encode_json(got.events[1].overrides[0]), '{"originalStart":"2030-09-03T09:00:00","title":"B"}')
+
+
+comptime TITLED_REMINDER = (
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+    + "BEGIN:VEVENT\r\nUID:t\r\nDTSTART:20300902T090000Z\r\nDURATION:PT1H\r\nSUMMARY:Sync\r\n"  # 3-7
+    + "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n"  # 8-12
+    + "END:VEVENT\r\n"
+    + "BEGIN:VEVENT\r\nUID:u\r\nDTSTART:20300902T090000Z\r\nDURATION:PT1H\r\n"  # 14-17
+    + "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n"  # 18-22
+    + "END:VEVENT\r\n"
+    + "END:VCALENDAR\r\n"
+)
+
+
+def test_reminder_text_on_a_titled_event() raises:
+    # `Reminder` is the text an export gives the alarm of an event with no
+    # title; on an event titled "Sync" it is text the model does not keep.
+    var got = read_ics(TITLED_REMINDER.as_bytes(), ZoneTable())
+    assert_equal(_report(got.report), "VALARM DESCRIPTION x1 from line 10\n")
+    assert_equal(len(got.events), 2)
+    assert_equal(len(got.events[0].event.reminders), 1)
+    assert_equal(len(got.events[1].event.reminders), 1)
+
+
 def main() raises:
     print("test_read_cases")
     var failed = List[String]()
@@ -205,6 +268,21 @@ def main() raises:
         print("  test_merge_adds_counts PASS")
     except e:
         failed.append("test_merge_adds_counts: " + String(e))
+    try:
+        test_overflow_entry_made_by_merge()
+        print("  test_overflow_entry_made_by_merge PASS")
+    except e:
+        failed.append("test_overflow_entry_made_by_merge: " + String(e))
+    try:
+        test_two_series_edited_at_the_same_start()
+        print("  test_two_series_edited_at_the_same_start PASS")
+    except e:
+        failed.append("test_two_series_edited_at_the_same_start: " + String(e))
+    try:
+        test_reminder_text_on_a_titled_event()
+        print("  test_reminder_text_on_a_titled_event PASS")
+    except e:
+        failed.append("test_reminder_text_on_a_titled_event: " + String(e))
     for f in failed:
         print("  FAIL " + f)
     assert_true(len(failed) == 0, String(len(failed)) + " tests failed")

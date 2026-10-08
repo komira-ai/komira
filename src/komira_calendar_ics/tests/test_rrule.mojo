@@ -11,13 +11,16 @@
 # The first day is 2030-09-02, a Monday (2030-09-05 a Thursday), except
 # where a row names another: every accepted rule picks its first day, and
 # test_start_not_an_occurrence refuses the rules that do not.
+# test_first_occurrence pins the first day the model's rule picks from a
+# start, which the export writes as DTSTART.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
 
 from komira_datetime import days_from_civil
-from komira_proto_codec import encode_json
-from komira_calendar_ics.rrule import format_rrule, parse_rrule, weekday_name
+from komira_proto_codec import decode_json, encode_json
+from komira_calendar_proto.calendar import Recurrence
+from komira_calendar_ics.rrule import first_occurrence, format_rrule, parse_rrule, weekday_name
 
 
 def _day(y: Int, m: Int, d: Int) -> Int:
@@ -82,6 +85,13 @@ def test_accepted() raises:
         "FREQ=MONTHLY;BYDAY=-1FR",
         _day(2030, 9, 27),
         '{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"FRIDAY"}',
+    )
+    # The last Tuesday of September 2030 is the 24th: 24 + 7 runs past the
+    # 30th.
+    _ok(
+        "FREQ=MONTHLY;BYDAY=-1TU",
+        _day(2030, 9, 24),
+        '{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"TUESDAY"}',
     )
     _ok(
         "FREQ=MONTHLY;BYDAY=+4SA",
@@ -177,6 +187,9 @@ def test_start_not_an_occurrence() raises:
     _no("FREQ=WEEKLY;BYDAY=TU,TH", mon, OUT, NOT_OCCURRENCE)
     _no("FREQ=MONTHLY;COUNT=10;BYDAY=1FR", mon, OUT, NOT_OCCURRENCE)
     _no("FREQ=MONTHLY;BYDAY=-1FR", _day(2030, 9, 20), OUT, NOT_OCCURRENCE)
+    # Monday the 23rd is one week before the last Monday, the 30th: 23 + 7
+    # is the month's last day, not past it.
+    _no("FREQ=MONTHLY;BYDAY=-1MO", _day(2030, 9, 23), OUT, NOT_OCCURRENCE)
     _no("FREQ=MONTHLY;BYDAY=+4SA", _day(2030, 9, 21), OUT, NOT_OCCURRENCE)
     _no("FREQ=MONTHLY;BYDAY=TU;BYSETPOS=2", _day(2030, 9, 3), OUT, NOT_OCCURRENCE)
     _no("FREQ=MONTHLY;BYMONTHDAY=31", mon, OUT, NOT_OCCURRENCE)
@@ -193,6 +206,54 @@ def test_start_not_an_occurrence() raises:
     # INTERVAL 1: WKST changes nothing, and the start is not a Monday.
     _no("FREQ=WEEKLY;BYDAY=MO;WKST=SU", _day(2030, 9, 1), OUT, NOT_OCCURRENCE)
     print("  test_start_not_an_occurrence PASS")
+
+
+def _first(rule_json: String, start: Int, until: Int) raises -> Int:
+    return first_occurrence(decode_json[Recurrence](rule_json), start, until)
+
+
+def test_first_occurrence() raises:
+    # The first day the model's rule picks from a start: the start itself
+    # when picked; else a later day of the start's Monday week, or the first
+    # named day `interval` weeks on; else the first month `interval` months
+    # apart that has the day. -1 when that day is after the until.
+    var mon = _day(2030, 9, 2)
+    var end = _day(9999, 12, 31)
+    assert_equal(_first('{"freq":"DAILY","interval":3}', mon, end), mon)
+    assert_equal(_first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', mon, end), mon)
+    assert_equal(_first('{"freq":"WEEKLY","interval":2,"weekdays":["THURSDAY","TUESDAY"]}', mon, end), _day(2030, 9, 3))
+    assert_equal(
+        _first('{"freq":"WEEKLY","interval":2,"weekdays":["SUNDAY","MONDAY"]}', _day(2030, 9, 3), end),
+        _day(2030, 9, 8),
+    )
+    assert_equal(_first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', _day(2030, 9, 3), end), _day(2030, 9, 16))
+    assert_equal(_first('{"freq":"WEEKLY","interval":1,"weekdays":["MONDAY"]}', _day(2030, 9, 3), end), _day(2030, 9, 9))
+    assert_equal(_first('{"freq":"WEEKLY","interval":2,"weekdays":["MONDAY"]}', _day(2030, 9, 3), _day(2030, 9, 15)), -1)
+    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":2}', mon, end), mon)
+    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":1}', mon, end), _day(2030, 10, 1))
+    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, end), _day(2030, 10, 31))
+    # September and November have no 31st; January 2031, four months on, does.
+    assert_equal(_first('{"freq":"MONTHLY","interval":2,"monthDay":31}', mon, end), _day(2031, 1, 31))
+    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, _day(2030, 10, 30)), -1)
+    assert_equal(_first('{"freq":"MONTHLY","interval":1,"monthDay":31}', mon, _day(2030, 9, 30)), -1)
+    assert_equal(
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":1,"ordinalWeekday":"FRIDAY"}', mon, end), _day(2030, 9, 6)
+    )
+    # The first Monday of September 2030 is the 2nd, before a start on the 3rd.
+    assert_equal(
+        _first('{"freq":"MONTHLY","interval":2,"ordinal":1,"ordinalWeekday":"MONDAY"}', _day(2030, 9, 3), end),
+        _day(2030, 11, 4),
+    )
+    assert_equal(
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":4,"ordinalWeekday":"SATURDAY"}', mon, end), _day(2030, 9, 28)
+    )
+    assert_equal(
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"MONDAY"}', mon, end), _day(2030, 9, 30)
+    )
+    assert_equal(
+        _first('{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"TUESDAY"}', mon, end), _day(2030, 9, 24)
+    )
+    assert_equal(_first('{"freq":"YEARLY","interval":4}', _day(2032, 2, 29), end), _day(2032, 2, 29))
 
 
 def test_malformed() raises:
@@ -225,10 +286,36 @@ def test_weekday_names() raises:
 
 
 def main() raises:
+    # Each test runs even when an earlier one fails; the failures are listed
+    # together.
     print("test_rrule")
-    test_accepted()
-    test_out_of_subset()
-    test_start_not_an_occurrence()
-    test_malformed()
-    test_weekday_names()
+    var failed = List[String]()
+    try:
+        test_accepted()
+    except e:
+        failed.append("test_accepted: " + String(e))
+    try:
+        test_out_of_subset()
+    except e:
+        failed.append("test_out_of_subset: " + String(e))
+    try:
+        test_start_not_an_occurrence()
+    except e:
+        failed.append("test_start_not_an_occurrence: " + String(e))
+    try:
+        test_first_occurrence()
+        print("  test_first_occurrence PASS")
+    except e:
+        failed.append("test_first_occurrence: " + String(e))
+    try:
+        test_malformed()
+    except e:
+        failed.append("test_malformed: " + String(e))
+    try:
+        test_weekday_names()
+    except e:
+        failed.append("test_weekday_names: " + String(e))
+    for f in failed:
+        print("  FAIL " + f)
+    assert_true(len(failed) == 0, String(len(failed)) + " tests failed")
     print("ALL TESTS PASS")

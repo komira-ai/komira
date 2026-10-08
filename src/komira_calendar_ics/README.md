@@ -8,12 +8,14 @@ The `.ics` edge of a simple calendar. `read_ics` reads an iCalendar file
 model (`komira_calendar_proto`'s `Event` and `OccurrenceOverride`) and
 reports everything the model does not hold; `write_ics` writes the model
 back as iCalendar. Reading what `write_ics` wrote gives the same events and
-an empty report, with three exceptions: a CR or CRLF in a title, location
+an empty report, with four exceptions: a CR or CRLF in a title, location
 or description comes back as LF (iCalendar TEXT has one escape for a line
-break); an event with no uid comes back with its id as the uid; and an
-edit's replacement equal to the series' value is not kept (the occurrence
-shows the same), so an edit whose every replacement is such a value is
-reported as one that changes nothing.
+break); an event with no uid comes back with its id as the uid; an edit's
+replacement equal to the series' value is not kept (the occurrence shows
+the same), so an edit whose every replacement is such a value is reported
+as one that changes nothing; and a recurring event whose start its rule
+does not pick comes back starting on the first day the rule picks (the
+same occurrences).
 
 It is not a full iCalendar implementation. It reads a declared subset and
 refuses or reports the rest, so nothing is lost without a line in the
@@ -48,15 +50,18 @@ listed change), and one VEVENT per event and per edit. A timed event's
 length is written as DURATION, an all-day one's as DTEND; UNTIL is written
 in UTC for a timed event, as RFC 5545 requires next to a zoned DTSTART. An
 edit that clears a title, location or description is written with that
-property empty. A recurring event whose start its rule does not pick
-refuses the export.
+property empty. A recurring event whose start its rule does not pick is
+written starting on the first day the rule picks, so DTSTART is an
+occurrence (RFC 5545 §3.8.5.3 leaves the set undefined otherwise) and the
+occurrences are the ones the model gives; a series whose rule picks no day
+from its start to its until refuses the export.
 
 ## API
 
 | name | file | what it is |
 |---|---|---|
 | `read_ics`, `IcsImport` | [read.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/read.mojo) | a file to events and a report; raises when the input as a whole is refused |
-| `write_ics`, `PRODID` | [write.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/write.mojo) | events to a file; raises for an event that breaks the model or names an unknown zone |
+| `write_ics`, `PRODID` | [write.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/write.mojo) | events to a file; raises for an event that breaks the model, names an unknown zone, or recurs on no day |
 | `IcsEvent` | [read_event.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/read_event.mojo) | an event and its one-occurrence edits |
 | `IcsReport`, `IcsRefusal`, `IcsDropped`, `IcsCode`, `MAX_DROPPED_KINDS`, `OVERFLOW_DETAIL` | [report.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/report.mojo) | the report: `refused` and `dropped`, `refuse`, `drop`, `merge`, `is_clean`; the refusal codes; the cap on itemised kinds and the detail of the entry past it |
 | `ZoneSource`, `ZoneinfoDirectory`, `ZoneTable` | [zones.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/zones.mojo) | where zone rules come from; `ZoneTable.add`, `zone` |

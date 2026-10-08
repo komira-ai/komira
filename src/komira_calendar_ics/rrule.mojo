@@ -28,13 +28,14 @@
 # occurrence; the model counts the first day only when the rule picks it).
 # The check runs after every other one, so a rule refused for its shape
 # carries that reason. `start_is_occurrence` is the same test on the model's
-# rule, for the export.
+# rule, and `first_occurrence` the first day the model's rule picks, both
+# for the export.
 # UNTIL is returned as written: its reading needs the event's time zone.
 # =============================================================================
 
 from komira_calendar import MAX_COUNT, MAX_INTERVAL
 from komira_calendar_proto.calendar import Frequency, Recurrence, Weekday
-from komira_datetime import civil_from_days, days_in_month, weekday_from_days
+from komira_datetime import civil_from_days, days_from_civil, days_in_month, weekday_from_days
 
 from .report import IcsCode
 
@@ -376,6 +377,62 @@ def start_is_occurrence(rule: Recurrence, start_day: Int) -> Bool:
     if rule.ordinal < 0:
         return c.day + 7 * Int(-rule.ordinal) > days_in_month(c.year, c.month) and c.day + 7 * (Int(-rule.ordinal) - 1) <= days_in_month(c.year, c.month)
     return (c.day - 1) // 7 + 1 == Int(rule.ordinal)
+
+
+def _monthly_pick(rule: Recurrence, year: Int, month: Int) -> Int:
+    """The day (days since 1970-01-01) a MONTHLY `rule` picks in `month` of
+    `year`, or -1 when the month is shorter than its day of the month."""
+    var dim = days_in_month(year, month)
+    if rule.ordinal == 0:
+        if Int(rule.month_day) > dim:
+            return -1
+        return days_from_civil(year, month, Int(rule.month_day))
+    var w = Int(rule.ordinal_weekday.value)
+    if rule.ordinal < 0:
+        var last = days_from_civil(year, month, dim)
+        return last - (_model_weekday(last) - w + 7) % 7
+    var first = days_from_civil(year, month, 1)
+    return first + (w - _model_weekday(first) + 7) % 7 + 7 * (Int(rule.ordinal) - 1)
+
+
+def first_occurrence(rule: Recurrence, start_day: Int, until_day: Int) -> Int:
+    """The first day on or after `start_day` and on or before `until_day`
+    that the model's `rule` picks, or -1 when there is none. The model
+    (komira_calendar) cuts a series into Monday weeks or months, counts
+    every `interval`-th one from the one holding `start_day`, and never
+    picks a day before `start_day`; so a series started on the day this
+    returns has the same occurrences as one started on `start_day`."""
+    if start_is_occurrence(rule, start_day):
+        return start_day if start_day <= until_day else -1
+    var f = rule.freq.value
+    var step = Int(rule.interval)
+    if f == Frequency.WEEKLY:
+        var weekday = _model_weekday(start_day)
+        var later = 8
+        var earliest = 8
+        for w in rule.weekdays:
+            var d = Int(w.value)
+            if d < earliest:
+                earliest = d
+            if d > weekday and d < later:
+                later = d
+        var monday = start_day - (weekday - 1)
+        var day = monday + later - 1 if later < 8 else monday + 7 * step + earliest - 1
+        return day if day <= until_day else -1
+    # MONTHLY: start_is_occurrence holds for every DAILY and YEARLY rule.
+    var c = civil_from_days(start_day)
+    var month = c.year * 12 + c.month - 1
+    while True:
+        var y = month // 12
+        var m = month % 12 + 1
+        if days_from_civil(y, m, 1) > until_day:
+            return -1
+        var day = _monthly_pick(rule, y, m)
+        if day > until_day:
+            return -1
+        if day >= start_day:
+            return day
+        month += step
 
 
 def format_rrule(rule: Recurrence, until: String) -> String:

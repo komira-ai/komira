@@ -7,14 +7,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # zones come from komira_datetime through a ZoneSource.
 #
 # test_values pins the DATE, DATE-TIME, DURATION and UTC offset forms;
-# test_rrule the RRULE subset, accepted and refused rule by rule;
+# test_rrule the RRULE subset, accepted and refused rule by rule, and the
+# first day a rule picks;
 # test_read the file-level refusals, the event mapping and every report
 # entry; test_read_edges the rarer refusals and all-day edits;
 # test_read_cases cancelled edits, enumerated values in any case, a start
-# its rule skips and the report's cap; test_write the export line by line
+# its rule skips, the report's cap, two series edited at one start and a
+# titled event's alarm text; test_write the export line by line
 # and its VTIMEZONEs; test_round_trip_edges the values a round trip can
-# lose. The RFC 5545 examples and
-# client-shaped files are in
+# lose, a start the export moves and a series it refuses. The RFC 5545
+# examples and client-shaped files are in
 # //src/tests/conformance/komira_calendar_ics_conformance. README.md's
 # examples run as one more welded test.
 mojo_library(

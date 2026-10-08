@@ -25,16 +25,21 @@
 # occurrence shows: the replacement where the edit has one (an empty
 # SUMMARY, LOCATION or DESCRIPTION when the edit clears it), else the
 # series' value.
-# A recurring event whose start is not an occurrence of its rule refuses
-# the export: RFC 5545 §3.8.5.3 leaves such a recurrence set undefined.
+# A recurring event whose start its rule does not pick is written with
+# DTSTART (and an all-day DTEND) moved to the first day the rule picks
+# (`first_occurrence`): RFC 5545 §3.8.5.3 leaves the set of an
+# unsynchronized DTSTART undefined, and the model's series started there has
+# the same occurrences. A series whose rule picks no day from its start to
+# its until refuses the export.
 # Every TEXT value is escaped and every line folded at 75 octets
 # (komira_content_line). Reading the file back gives the same events and a
-# clean report, with three exceptions: a CR or CRLF in a TEXT value comes
+# clean report, with four exceptions: a CR or CRLF in a TEXT value comes
 # back as LF (TEXT has one escape, `\n`, for a line break); an event with no
-# uid comes back with its id as the uid; and an edit's replacement equal to
+# uid comes back with its id as the uid; an edit's replacement equal to
 # the series' value is not kept (the occurrence shows the same), so an edit
 # whose every replacement is such a value is reported as one that changes
-# nothing.
+# nothing; and a start its rule does not pick comes back as the first day
+# the rule picks.
 # =============================================================================
 
 from komira_calendar import check_event, check_override, parse_local_date, parse_local_datetime
@@ -43,7 +48,7 @@ from komira_content_line import ContentLine, Param, escape_text, fold_line, form
 from komira_datetime import FoldPolicy, GapPolicy
 
 from .read_event import UNTITLED_REMINDER, IcsEvent
-from .rrule import format_rrule, start_is_occurrence
+from .rrule import first_occurrence, format_rrule
 from .values import (
     SECONDS_PER_DAY,
     format_ics_date,
@@ -52,6 +57,10 @@ from .values import (
 )
 from .vtimezone import prop_line, write_vtimezone
 from .zones import ResolvedZone, ZoneResolver, ZoneSource
+
+comptime LAST_DAY = 2932896
+"""9999-12-31 in days since 1970-01-01: the last day of a series with no
+until (a local date has four year digits)."""
 
 comptime PRODID = "-//komira//komira_calendar_ics//EN"
 
@@ -82,13 +91,14 @@ struct _Form(Copyable, Movable):
         self.all_day = all_day
         self.zone = zone^
 
-    def time(self, name: String, text: String) raises -> String:
-        """Property `name` holding the model's local start text `text`."""
+    def time(self, name: String, text: String, shift: Int = 0) raises -> String:
+        """Property `name` holding the model's local start text `text`,
+        `shift` days later."""
         if self.all_day:
-            return _line(name, _one("VALUE", "DATE"), format_ics_date(parse_local_date(text)))
+            return _line(name, _one("VALUE", "DATE"), format_ics_date(parse_local_date(text) + shift))
         ref z = self.zone.value()
         var t = parse_local_datetime(text)
-        var local = t.days * SECONDS_PER_DAY + t.second_of_day
+        var local = (t.days + shift) * SECONDS_PER_DAY + t.second_of_day
         if z.name == "UTC":
             return _line(name, List[Param](), format_ics_datetime(local, True))
         return _line(name, _one("TZID", z.name), format_ics_datetime(local, False))
@@ -100,9 +110,9 @@ struct _Form(Copyable, Movable):
         )
 
 
-def _ending(form: _Form, start: String, days: Int, seconds: Int) raises -> String:
+def _ending(form: _Form, start: String, days: Int, seconds: Int, shift: Int = 0) raises -> String:
     if form.all_day:
-        return _line("DTEND", _one("VALUE", "DATE"), format_ics_date(parse_local_date(start) + days))
+        return _line("DTEND", _one("VALUE", "DATE"), format_ics_date(parse_local_date(start) + shift + days))
     return _line("DURATION", List[Param](), format_ics_seconds(seconds))
 
 
@@ -140,13 +150,15 @@ def _edit_text(name: String, replacement: Optional[String], series: String) rais
     return String()
 
 
-def _series(event: Event, uid: String, stamp: String, form: _Form) raises -> String:
+def _series(event: Event, uid: String, stamp: String, form: _Form, shift: Int) raises -> String:
+    """The series' VEVENT, its DTSTART `shift` days after the event's start
+    (module header)."""
     var start = event.start_date.copy() if event.show_without_time else event.start.copy()
     var out = prop_line("BEGIN", "VEVENT")
     out += _text("UID", uid)
     out += prop_line("DTSTAMP", stamp)
-    out += form.time("DTSTART", start)
-    out += _ending(form, start, Int(event.days), Int(event.duration_seconds))
+    out += form.time("DTSTART", start, shift)
+    out += _ending(form, start, Int(event.days), Int(event.duration_seconds), shift)
     out += _texts(event.title, event.location, event.description)
     if event.status.value == EventStatus.CANCELLED:
         out += prop_line("STATUS", "CANCELLED")
@@ -194,6 +206,7 @@ def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) r
     var names = List[String]()
     var firsts = List[Int]()
     var forms = List[_Form]()
+    var shifts = List[Int]()
     for ref ie in events:
         ref e = ie.event
         var uid = e.uid.copy() if e.uid.byte_length() > 0 else e.id.copy()
@@ -202,13 +215,19 @@ def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) r
         var r = check_event(e)
         if r:
             raise Error('ics export: event "' + uid + '": ' + String(r.value()))
+        var shift = 0
         if e.recurrence:
+            ref rule = e.recurrence.value()
             var day = parse_local_date(e.start_date) if e.show_without_time else parse_local_datetime(e.start).days
-            if not start_is_occurrence(e.recurrence.value(), day):
+            var until_day = parse_local_date(rule.until) if rule.until.byte_length() > 0 else LAST_DAY
+            var first = first_occurrence(rule, day, until_day)
+            if first < 0:
                 raise Error(
-                    'ics export: event "' + uid + '": its start is not an occurrence of its recurrence,'
-                    + " and RFC 5545 leaves such a recurrence set undefined"
+                    'ics export: event "' + uid + '": its recurrence picks no day from its start to its until,'
+                    + " and an iCalendar series always holds its DTSTART"
                 )
+            shift = first - day
+        shifts.append(shift)
         for ref o in ie.overrides:
             var ro = check_override(o, e)
             if ro:
@@ -250,7 +269,7 @@ def write_ics[Z: ZoneSource](events: List[IcsEvent], zones: Z, stamp_utc: Int) r
         ref ie = events[i]
         ref e = ie.event
         var uid = e.uid.copy() if e.uid.byte_length() > 0 else e.id.copy()
-        out += _series(e, uid, stamp, forms[i])
+        out += _series(e, uid, stamp, forms[i], shifts[i])
         for ref o in ie.overrides:
             out += _edit(e, o, uid, stamp, forms[i])
     out += prop_line("END", "VCALENDAR")
