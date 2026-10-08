@@ -75,6 +75,11 @@ struct _SharedMap(Movable, Deinitable):
     access, so the count is linearizable with the verb itself."""
 
     var entries: List[_SharedEntry]
+    # key -> its position in `entries`, kept in step with every insert and
+    # delete. Every verb looks its key up; a linear scan cost a key compare
+    # per stored object on each lookup, which dominated tests that replay a
+    # long manifest lineage.
+    var index: Dict[String, Int]
     var etag_counter: Int64
     var lock: OwnedPointer[AtomicI32]  # 0 = free, 1 = held
     var n_get: Int64
@@ -110,6 +115,7 @@ struct _SharedMap(Movable, Deinitable):
 
     def __init__(out self):
         self.entries = List[_SharedEntry]()
+        self.index = Dict[String, Int]()
         self.etag_counter = Int64(0)
         var raw = alloc[AtomicI32](1)
         raw[] = AtomicI32(Int32(0))
@@ -176,10 +182,9 @@ struct SharedInMemoryConditionalStore(
         )
 
     def _find(self, key: String) -> Int:
-        ref m = self._map[]
-        for i in range(len(m.entries)):
-            if m.entries[i].key == key:
-                return i
+        var hit = self._map[].index.get(key)
+        if hit:
+            return hit.value()
         return -1
 
     def _next_etag(self) -> String:
@@ -361,6 +366,7 @@ struct SharedInMemoryConditionalStore(
             m.entries[idx].bytes = bytes.copy()
             m.entries[idx].etag = new_etag
         else:
+            m.index[key] = len(m.entries)
             m.entries.append(_SharedEntry(key, bytes.copy(), new_etag))
         var out = ObjectMeta(
             key, Int64(len(bytes)), new_etag^, Int64(-1), String("")
@@ -432,6 +438,9 @@ struct SharedInMemoryConditionalStore(
             if m.entries[i].key != key:
                 keep.append(m.entries[i].copy())
         m.entries = keep^
+        m.index = Dict[String, Int]()
+        for i in range(len(m.entries)):
+            m.index[m.entries[i].key] = i
         self._release()
 
 
