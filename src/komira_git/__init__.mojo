@@ -12,6 +12,11 @@ Packs: `index_pack` and `index_thin_pack` (an `IndexedPack` of a
 read as an index v2 file (`serialize`, `parse_pack_index`), `apply_delta`,
 and the `PackLimits` every reader enforces.
 
+SHA-1 with collision detection (sha1collisiondetection, as git uses):
+`Sha1dc`, the one-shot `sha1dc`, and `is_object_id_collision` for the error
+(`OBJECT_ID_COLLISION`) that `hash_object` and `read_loose` raise for an
+object holding a block of a detected collision.
+
 Wire: pkt-line framing (`append_pkt_*`, `read_pkt_line`) and the ref name
 rules of `git check-ref-format` (`check_ref_format`, `normalize_ref_name`).
 
@@ -74,3 +79,4 @@ from .pack_reader import (
     read_pack_object,
     read_thin_pack_object,
 )
+from .sha1dc import OBJECT_ID_COLLISION, Sha1dc, is_object_id_collision, sha1dc
