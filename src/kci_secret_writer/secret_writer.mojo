@@ -200,7 +200,7 @@ trait SecretWriter(Movable, Deinitable):
 # =============================================================================
 struct _StaticWriterState(Movable):
     """The static writer's interior: a `secret_ref -> written-plaintext-bytes`
-    map + a running `write_count` + the `last_token` the last write carried (so a
+    map + a running `write_count` + the `last_token` the last verb call carried (so a
     test asserts the threaded deploy token reached the write), behind an ArcPointer
     so all persist through `share()`. No stale-pointer hazard (a Dict of flat
     `List[UInt8]` value PODs + an Int + a String; no wildcard, no byte-slab)."""
@@ -353,7 +353,8 @@ struct StaticSecretWriter(SecretWriter, Movable):
         return self._p[].write_count
 
     def last_token(self) -> String:
-        """The `deploy_token` the LAST `write` carried. The double only
+        """The `deploy_token` the last call of any verb (`write`,
+        `define_container` or `has_version`) carried. The double only
         records it: a test asserts the token a caller threaded reached the
         seam. It proves nothing about which principal a live write runs as
         (the live conformers take that from their client)."""

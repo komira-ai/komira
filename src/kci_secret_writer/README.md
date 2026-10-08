@@ -9,8 +9,8 @@ the one a bare handle (naming the secret, not a version) resolves to: GCP's
 `latest` must be ENABLED, and AWS must have an `AWSCURRENT` version.
 `StaticSecretWriter` counts any version it holds.
 
-Every verb also takes a per-call `deploy_token`, a plain `String` that is
-never stored. The live writers (`kci_aws_secret_writer`'s
+Every verb also takes a per-call `deploy_token`, a plain `String` that a
+live writer never stores. The live writers (`kci_aws_secret_writer`'s
 `AwsSecretsManagerWriter` and `kci_gcp_secret_writer`'s
 `GcpSecretManagerWriter`) take the deploy principal's credentials from the
 client they are built over and refuse a non-empty `deploy_token` before
