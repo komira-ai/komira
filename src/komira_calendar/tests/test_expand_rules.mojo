@@ -424,6 +424,16 @@ def test_series_span_period_edges() raises:
     _span_matches_expand(one_week, "2026-11-02T09:00:00", "2026-11-06T10:00:00")
     var start_only = _timed("2026-11-02T09:00:00", 3600, '{"freq":"DAILY","interval":1,"until":"2026-11-02"}')
     _span_matches_expand(start_only, "2026-11-02T09:00:00", "2026-11-02T10:00:00")
+    # A count the calendar cannot hold, one pick per period: yearly from
+    # 9995 asks for ten, five fit by 9999-12-31, and the count search runs
+    # out of periods (the year 10000) instead of reaching the count. The
+    # last occurrence is 9999-06-01. Catches that exit giving any day but
+    # the last pick (the end of the calendar, or none: no span).
+    var to_the_end = _all_day("9995-06-01", 1, '{"freq":"YEARLY","interval":1,"count":10}')
+    assert_true(_span(to_the_end) == SeriesSpan(_at("9995-06-01T00:00:00"), _at("9999-06-02T00:00:00")))
+    assert_equal(
+        len(expand(to_the_end, _at("9995-01-01T00:00:00"), parse_local_date("9999-12-31") * 86400 + 86400)), 5
+    )
 
 
 def _refuses(e: Event, window_start: Int, window_end: Int, message: String) raises:

@@ -156,7 +156,10 @@ def expand(event: Event, window_start: Int, window_end: Int) raises -> List[Occu
 
 
 def _last_day(r: ResolvedRule) -> Optional[Int]:
-    """The last day the rule picks, given it ends by `count` or `until`."""
+    """The last day the rule picks, given it ends by `count` or `until` and
+    picks a day on or before `until_day` (series_span finds that day first).
+    The count search gives None only when it picks no such day, which
+    series_span rules out before it calls this."""
     var days = List[Int]()
     if r.count != 0:
         var produced = 0
@@ -173,8 +176,12 @@ def _last_day(r: ResolvedRule) -> Optional[Int]:
                     return last
             k += 1
         return last
+    # Back from the period holding until_day. The search stops at the latest
+    # in the period of series_span's first day: that period picks a day on
+    # or before until_day, so it starts on or before it, so it is not after
+    # period_at's (the last period that does). k never goes below it.
     var k = period_at(r, r.until_day)
-    while k >= 0:
+    while True:
         period_days(r, k, days)
         var i = len(days) - 1
         while i >= 0:
@@ -182,7 +189,6 @@ def _last_day(r: ResolvedRule) -> Optional[Int]:
                 return days[i]
             i -= 1
         k -= 1
-    return None
 
 
 def series_span(event: Event) raises -> Optional[SeriesSpan]:
