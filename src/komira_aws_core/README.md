@@ -17,7 +17,8 @@ clients. It holds:
 - The wire runtime a generated client calls: `AwsRequest` / `AwsResponse`,
   the awsJson, awsQuery / ec2Query, restJson1 and restXml codecs, and the
   error readers (`aws_json_error_info`, `aws_query_error`,
-  `aws_xml_error_info`).
+  `aws_xml_error_info`); `aws_client_error_code` reads the error code back
+  out of the text a generated client raises.
 - Endpoint resolution: `EndpointRuleSet`, an interpreter of a service's
   Smithy endpoint ruleset over the partitions table, and
   `aws_signing_target`.
@@ -141,4 +142,18 @@ var e = aws_query_error(
 assert_equal(e.status, 404)
 assert_equal(e.code, "NoSuchEntity")
 assert_equal(e.request_id, "req-2")
+```
+
+A generated client raises a non-2xx answer as text,
+`<Service>.<Op> failed: HTTP <status> <code> <message>`; a caller that
+treats one code as an outcome reads it with `aws_client_error_code`, which
+answers "" for any other text (a transport failure, another operation):
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_aws_core import aws_client_error_code
+
+var raised = String("SecretsManager.DescribeSecret failed: HTTP 400 ResourceNotFoundException Secrets Manager can't find the specified secret.")
+assert_equal(aws_client_error_code("SecretsManager.DescribeSecret", raised), "ResourceNotFoundException")
+assert_equal(aws_client_error_code("SecretsManager.GetSecretValue", raised), "")
 ```

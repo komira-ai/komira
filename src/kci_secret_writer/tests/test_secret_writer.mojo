@@ -54,9 +54,9 @@ def _secret_value(s: String) raises -> SecretValue:
 def _write_via[W: SecretWriter](
     mut w: W, secret_ref: String, var value: SecretValue
 ) raises:
-    # The deploy-context bearer token — a plain-String token the applier
-    # threads so a LIVE conformer PUTs the version AS the assumed customer role.
-    # The StaticSecretWriter test double records it; the write-verb type firewall is
+    # The deploy-context bearer token, a plain-String token a caller may
+    # thread per call. The StaticSecretWriter test double records it (the live
+    # conformers refuse a non-empty one); the write-verb type firewall is
     # unchanged.
     w.write(secret_ref, value^, String("test-deploy-token"))
 

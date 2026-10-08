@@ -9,8 +9,10 @@
 #     created without one); the two are different resources even when their
 #     ids are equal;
 #   * a version is numbered from 1 within its secret, holds the payload's
-#     bytes and their CRC32C (computed here when the client sent none), and
-#     `latest` names the highest-numbered one;
+#     bytes and their CRC32C (computed here when the client sent none) and a
+#     state (ENABLED when added; a test may set DISABLED or DESTROYED on the
+#     store directly, as the fake serves no state change), and `latest`
+#     names the highest-numbered one, whatever its state;
 #   * every name the fake answers spells the project by its number, as the
 #     service does, and a request may name the project by id or number.
 #
@@ -65,6 +67,8 @@ struct GcpVersion(Copyable, Movable):
     # Whether the AddSecretVersion that made it carried a dataCrc32c.
     var client_checksum: Bool
     var created: Int
+    # "ENABLED", "DISABLED" or "DESTROYED".
+    var state: String
 
     def __init__(
         out self, number: Int, var data: List[UInt8], client_checksum: Bool, created: Int
@@ -74,6 +78,7 @@ struct GcpVersion(Copyable, Movable):
         self.data = data^
         self.client_checksum = client_checksum
         self.created = created
+        self.state = String("ENABLED")
 
 
 struct GcpSecret(Copyable, Movable):
@@ -138,7 +143,7 @@ def version_json(s: GcpSecret, v: GcpVersion) raises -> JsonValue:
         JsonValue.from_string(s.name() + "/versions/" + String(v.number)),
     )
     o.set_member(String("createTime"), JsonValue.from_string(rfc3339(v.created)))
-    o.set_member(String("state"), JsonValue.from_string(String("ENABLED")))
+    o.set_member(String("state"), JsonValue.from_string(v.state))
     if s.location.byte_length() == 0:
         var st = JsonValue.empty_object()
         st.set_member(String("automatic"), JsonValue.empty_object())

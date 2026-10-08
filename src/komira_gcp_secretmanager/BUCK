@@ -11,8 +11,9 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #
 # `methods` is what komira's callers use: a secret's value is read
 # (AccessSecretVersion), a secret is created (CreateSecret) and given a new
-# value (AddSecretVersion), its versions are listed to tell whether it holds
-# one (ListSecretVersions), and secrets are listed and deleted when an
+# value (AddSecretVersion), a version's metadata is read to tell whether it
+# is enabled (GetSecretVersion, never a payload), its versions are listed
+# (ListSecretVersions), and secrets are listed and deleted when an
 # environment is torn down (ListSecrets, DeleteSecret). The service's other
 # methods are not generated. A method joins the list with its own rows in
 # the tests below. None of these requests has a request-id field; a retry
@@ -59,6 +60,7 @@ mojo_gcp_client(
         "SecretManagerService.AddSecretVersion",
         "SecretManagerService.CreateSecret",
         "SecretManagerService.DeleteSecret",
+        "SecretManagerService.GetSecretVersion",
         "SecretManagerService.ListSecretVersions",
         "SecretManagerService.ListSecrets",
     ],

@@ -3,9 +3,19 @@
 The write-only secret seam. `SecretWriter` is a trait with three verbs:
 `write` (move a zeroizing `SecretValue` into a secret reference as a new
 version), `define_container` (create an empty secret slot, no value) and
-`has_version` (does the reference hold at least one version; a reference that
-does not exist answers `False`). Every verb also takes a per-call bearer token
-that a live writer uses for the call and never stores.
+`has_version` (does the reference already hold a usable version; a reference
+that does not exist answers `False`). For a live writer a usable version is
+the one a bare handle (naming the secret, not a version) resolves to: GCP's
+`latest` must be ENABLED, and AWS must have an `AWSCURRENT` version.
+`StaticSecretWriter` counts any version it holds.
+
+Every verb also takes a per-call `deploy_token`, a plain `String` that a
+live writer never stores. The live writers (`kci_aws_secret_writer`'s
+`AwsSecretsManagerWriter` and `kci_gcp_secret_writer`'s
+`GcpSecretManagerWriter`) take the deploy principal's credentials from the
+client they are built over and refuse a non-empty `deploy_token` before
+sending anything. `StaticSecretWriter` records the token it is given
+(`last_token`) and uses it for nothing.
 
 `SecretWriter` is a separate type from `komira_secret_store`'s resolve-only
 `SecretStore`, so code that holds only a `SecretStore` cannot write. Nothing

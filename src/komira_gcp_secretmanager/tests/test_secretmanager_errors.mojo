@@ -7,8 +7,8 @@
 #
 # One envelope per method, each the error a caller of that method meets
 # (an absent version, an existing secret, a disabled secret, a stale etag,
-# a missing permission, an absent secret), hand-written in the form the
-# Cloud APIs error model documents. The connector is komira_http_core's
+# a missing permission, an absent secret, an absent `latest`), hand-written
+# in the form the Cloud APIs error model documents. The connector is komira_http_core's
 # ScriptedConnector; no socket is used.
 from std.testing import assert_equal, assert_false
 
@@ -20,6 +20,7 @@ from komira_gcp_secretmanager.service import (
     AddSecretVersionRequest,
     CreateSecretRequest,
     DeleteSecretRequest,
+    GetSecretVersionRequest,
     ListSecretVersionsRequest,
     ListSecretsRequest,
     SecretManagerServiceClient,
@@ -235,6 +236,32 @@ def test_list_secret_versions_not_found() raises:
     assert_false("gone" in got)
 
 
+def test_get_secret_version_not_found() raises:
+    var message = String(
+        "Secret Version [projects/123456789012/secrets/smtp-password/versions/latest]"
+        + " not found or has no versions."
+    )
+    var body = _envelope(404, "NOT_FOUND", message)
+    var c = _client("404 Not Found", body)
+    var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var got = String("")
+    try:
+        _ = c.get_secret_version[_RT](
+            decode_json[GetSecretVersionRequest](
+                '{"name":"projects/private-project/secrets/smtp-password/versions/latest"}'
+            ),
+            reactor,
+        )
+    except e:
+        got = String(e)
+    assert_equal(
+        got,
+        _expected("GET GetSecretVersion: HTTP 404, NOT_FOUND (code 5)", message, body),
+    )
+    assert_false("smtp-password" in got)
+
+
 def main() raises:
     test_access_secret_version_not_found()
     test_create_secret_already_exists()
@@ -242,4 +269,5 @@ def main() raises:
     test_delete_secret_stale_etag()
     test_list_secrets_permission_denied()
     test_list_secret_versions_not_found()
+    test_get_secret_version_not_found()
     print("OK")

@@ -8,6 +8,7 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_aws_core import (
+    aws_client_error_code,
     AWS_REQUEST_ID_MAX_BYTES,
     AwsErrorInfo,
     AwsRequest,
@@ -241,6 +242,39 @@ def test_credential_response_of_bytes() raises:
         assert_true(String(e).find("not well-formed UTF-8") >= 0, String(e))
 
 
+def test_client_error_code() raises:
+    # The generated client's raised form: `<Service>.<Op> failed: HTTP
+    # <status> <code> <message>`. Catches a code read with the message
+    # glued on, a match on another operation's error, and a transport
+    # failure or a code-less answer read as a code.
+    var op = String("SecretsManager.PutSecretValue")
+    assert_equal(
+        aws_client_error_code(
+            op,
+            String(
+                "SecretsManager.PutSecretValue failed: HTTP 400"
+                " ResourceNotFoundException Secrets Manager can't find the"
+                " specified secret."
+            ),
+        ),
+        "ResourceNotFoundException",
+    )
+    assert_equal(
+        aws_client_error_code(op, String("SecretsManager.PutSecretValue failed: HTTP 400 ResourceExistsException ")),
+        "ResourceExistsException",
+    )
+    var not_codes: List[String] = [
+        "SecretsManager.CreateSecret failed: HTTP 400 ResourceExistsException x",
+        "SecretsManager.PutSecretValue failed: HTTP  ResourceExistsException x",
+        "SecretsManager.PutSecretValue failed: HTTP 400",
+        "SecretsManager.PutSecretValue failed: HTTP 400  a message only",
+        "SecretsManager.PutSecretValue: connection refused",
+        "HttpError[CONNECT_FAILED] errno 111",
+    ]
+    for i in range(len(not_codes)):
+        assert_equal(aws_client_error_code(op, not_codes[i]), "", not_codes[i])
+
+
 def main() raises:
     test_request_body()
     test_response_headers()
@@ -249,4 +283,5 @@ def main() raises:
     test_error_readers_on_bytes()
     test_json_error_info()
     test_credential_response_of_bytes()
+    test_client_error_code()
     print("OK")
