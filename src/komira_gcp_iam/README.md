@@ -30,8 +30,11 @@ requests in `.iam_policy`, `Policy` in `.policy`.
 
 The examples send over komira_http_core's `ScriptedConnector`, which answers
 from a script and records what was written: no socket is opened and
-`localhost` needs no name lookup. Creating a service account: the parent
-is in the path, the account id and account in the body:
+`localhost` needs no name lookup. Their service accounts are under the
+reserved `example.com` domain (a real one is
+`<account id>@<project>.iam.gserviceaccount.com`; the client sends the
+address as written and checks no shape). Creating a service account: the
+parent is in the path, the account id and account in the body:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
 ```mojo
@@ -69,8 +72,8 @@ var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(
     http_answer(
         "200 OK",
-        '{"name":"projects/demo/serviceAccounts/runner@demo.iam.gserviceaccount.com",'
-        + '"projectId":"demo","email":"runner@demo.iam.gserviceaccount.com","displayName":"Runner"}',
+        '{"name":"projects/demo/serviceAccounts/runner@example.com",'
+        + '"projectId":"demo","email":"runner@example.com","displayName":"Runner"}',
     ),
     sent,
 )
@@ -87,7 +90,7 @@ assert_true("\r\nauthorization: Bearer test-access-token\r\n" in wire)
 assert_true(wire.endswith(
     '\r\n\r\n{"accountId":"runner","serviceAccount":{"displayName":"Runner"}}'
 ))
-assert_equal(created.email, "runner@demo.iam.gserviceaccount.com")
+assert_equal(created.email, "runner@example.com")
 ```
 
 The account's email is one path segment, so its `@` is escaped:
@@ -95,16 +98,16 @@ The account's email is one path segment, so its `@` is escaped:
 <!-- mojo-hidden from std.testing import assert_true -->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
-var c = scripted_client(http_answer("200 OK", '{"email":"runner@demo.iam.gserviceaccount.com"}'), sent)
+var c = scripted_client(http_answer("200 OK", '{"email":"runner@example.com"}'), sent)
 var rt = Runtime.new(NoopSink(_placeholder=UInt8(0)))
 ref reactor = rt.reactor()
 _ = c.get_service_account[Runtime](
-    GetServiceAccountRequest(String("projects/demo/serviceAccounts/runner@demo.iam.gserviceaccount.com")),
+    GetServiceAccountRequest(String("projects/demo/serviceAccounts/runner@example.com")),
     reactor,
 )
 var wire = String(unsafe_from_utf8=Span(sent[]))
 assert_true(wire.startswith(
-    "GET /v1/projects/demo/serviceAccounts/runner%40demo.iam.gserviceaccount.com HTTP/1.1\r\n"
+    "GET /v1/projects/demo/serviceAccounts/runner%40example.com HTTP/1.1\r\n"
 ))
 ```
 
@@ -164,7 +167,7 @@ ref reactor = rt.reactor()
 var raised = String()
 try:
     _ = c.get_service_account[Runtime](
-        GetServiceAccountRequest(String("projects/demo/serviceAccounts/secret-sa@demo.iam.gserviceaccount.com")),
+        GetServiceAccountRequest(String("projects/demo/serviceAccounts/secret-sa@example.com")),
         reactor,
     )
 except e:

@@ -66,7 +66,7 @@ def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -
 def policy_json() -> String:
     return (
         String('{"version":1,"etag":"BwXhqDuVJ8g=","bindings":[')
-        + '{"role":"roles/run.invoker","members":["serviceAccount:caller@demo.iam.gserviceaccount.com"]},'
+        + '{"role":"roles/run.invoker","members":["serviceAccount:caller@example.com"]},'
         + '{"role":"roles/viewer","members":["group:readers@example.com"]}]}'
     )
 
