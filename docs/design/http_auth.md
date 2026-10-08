@@ -88,7 +88,7 @@ Header, before any key work or signature check:
 - `jwk`, `jku`, `x5u` and `x5c` are refused: the key always comes from the anchor's configured key set, never from
   the token;
 - `crit` is refused whatever it lists: the verifier understands no extension;
-- `typ` is the anchor's accepted type (one value today; see Trust anchors);
+- `typ` equals the one type pinned for the trust anchor (see Trust anchors);
 - `kid` is present and printable ASCII.
 
 Key and signature: the key whose `kid` matches, from the anchor's key set. An unknown `kid` triggers at most one
@@ -110,17 +110,17 @@ member name, RFC 7519 section 4):
 ### Trust anchors
 
 A trust anchor answers "whose signature do we accept, for whom": one issuer, one audience (ours), one JWK Set URL,
-one `alg`, the accepted `typ`, one longest lifetime. An anchor never accepts a second algorithm or a second issuer. RS256 is
+one `alg`, one `typ`, one longest lifetime. An anchor never accepts a second algorithm, a second type or a second issuer. RS256 is
 not widened into a verifier that accepts ES256, or the reverse: an issuer that will sign an RS256 token for anyone
 (a cloud's service-account ID tokens, for example) must never reach a verifier that trusts another issuer's keys.
 
 Today a process accepts exactly one anchor, and it must be RS256 with `typ` `JWT` (the case built first: a cloud's
 service-account ID tokens). Target, in `komira_http_auth` after `komira_jose`:
 
-- `alg` per anchor is one of `ES256`, `EdDSA` or `RS256`; `typ` per anchor is `at+jwt` (RFC 9068) or `JWT`.
-  Whether one anchor may accept a set of `typ` values (both, for an issuer moving from `JWT` to `at+jwt` without a
-  flag day) is open; because two anchors cannot share an `issuer`, that migration needs either such a set or a
-  coordinated switch;
+- `alg` per anchor is one of `ES256`, `EdDSA` or `RS256`; `typ` per anchor is exactly one of `at+jwt` (RFC 9068) or
+  `JWT`, a property of the issuer's token format. An issuer's own access tokens are `at+jwt`; `JWT` is for an issuer
+  whose format is fixed elsewhere (a cloud's service-account ID tokens). An anchor never accepts a set of `typ`
+  values: there is no allowance for an issuer moving between token types;
 - several anchors per process. A token goes to the one anchor whose `issuer` equals its `iss` exactly, and is then
   checked only against that anchor's key set and pinned `alg`. There is no fall-through to a second anchor. The `iss`
   that chooses is unauthenticated until the signature verifies; that is safe only because each anchor pins its own
@@ -176,7 +176,7 @@ what a running deployment accepts.
 | `--audience=STRING` | our audience: `aud` must equal it or be an array that contains it |
 | `--jwks-url=URL` | the anchor's JWK Set: `https://<host>/...`, no userinfo, no fragment |
 | `--jwks-alg=ALG` | the one `alg` accepted. Today `RS256` only; target `ES256`, `EdDSA` or `RS256` |
-| `--accept-typ=TYP` | the header `typ` accepted. Today `JWT` only; target `at+jwt` or `JWT`, and whether the flag may name a set is open |
+| `--accept-typ=TYP` | the one header `typ` accepted. Today `JWT` only; target `at+jwt` or `JWT`, never a set |
 | `--max-ttl=SECONDS` | the longest `exp - iat` accepted, 1 to 86400. An issuer's own access tokens are typically minutes; cloud ID tokens and many identity providers issue tokens of an hour |
 | `--trust-anchor=name=N,issuer=I,audience=A,jwks_url=U,alg=ALG,typ=TYP,max_ttl=S` | the general form of the six flags above, every member required; an unknown, repeated or empty member is refused, and a value cannot hold a comma. It cannot be combined with the six flags. Today a second `--trust-anchor` is refused; target, it is repeated, one per anchor |
 | `--copy-claim=NAME` | repeated: a payload claim copied into `Principal.claims`. An empty name, a repeated name, or `sub`, `iss` or `aud` (which the principal sets itself) is refused at startup; target, `scope` and `client_id` too, once the middleware sets them |
