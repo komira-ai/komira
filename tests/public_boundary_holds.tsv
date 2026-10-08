@@ -54,6 +54,8 @@ email	src/komira_gcp_run/tests/test_run_jobs.mojo	2	a made-up service account or
 email	src/komira_gcp_run/tests/test_run_services.mojo	4	a made-up service account or address (test data)
 email	src/komira_gcp_storage/tests/test_storage_client.mojo	3	a made-up service account or address (test data)
 email	src/komira_gcp_wif/tests/test_wif_mint.mojo	1	a made-up service account or address (test data)
+email	src/komira_git/sha1dc.mojo	2	the authors' addresses in sha1collisiondetection's MIT copyright notice, which the licence requires in every copy
+email	src/komira_git/sha1dc_ubc.mojo	2	the authors' addresses in sha1collisiondetection's MIT copyright notice, which the licence requires in every copy
 email	src/komira_http_client/tests/test_url.mojo	1	userinfo of a URL (test input)
 email	src/komira_log/structured_log.mojo	1	the example address of the redaction rule's docstring
 email	src/komira_source_url/tests/test_source_url.mojo	1	a URL's user information as test input: the refusal must not repeat it
