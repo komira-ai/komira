@@ -292,6 +292,42 @@ def test_coverage_r4_refuses_a_short_rendered_list_for_one_kind() raises:
     )
 
 
+def test_coverage_r4_refuses_more_rendered_lists_than_corpora() raises:
+    """An extra list is refused too: the shape check is `!=`, not `<`."""
+    var corpora = _good_pair()
+    var rendered = _rendered(corpora)
+    rendered.append(_texts(corpora[0]))
+    var err = _cov_err(_registry([String(ALPHA), String(BETA)]), corpora, rendered)
+    assert_equal(
+        err,
+        String(
+            "ScanIdentity AUDIT R4 (REACH): the rendered-text list has 3"
+            " corpus entr(y/ies) but 2 corpora were supplied. Build it with"
+            " `render_corpora_plan_text(corpora)` from"
+            " `komira_plan_ir.scan_identity_render_audit`, or call"
+            " `audit_scan_identity(registry, corpora)` there, which does it"
+            " for you."
+        ),
+    )
+
+
+def test_coverage_r4_refuses_a_long_rendered_list_for_one_kind() raises:
+    """The first corpus has an extra text: `!=`, not `<`, and from index 0."""
+    var corpora = _good_pair()
+    var rendered = _rendered(corpora)
+    var extra = rendered[0][0]
+    rendered[0].append(extra^)
+    var err = _cov_err(_registry([String(ALPHA), String(BETA)]), corpora, rendered)
+    assert_equal(
+        err,
+        String(
+            "ScanIdentity AUDIT R4 (REACH): kind 'k.beta' has 2 corpus"
+            " entries but 3 rendered plan texts. Every entry must be rendered"
+            " or R4 checks a subset while reporting a whole."
+        ),
+    )
+
+
 def test_coverage_r0_refuses_an_empty_registry() raises:
     var corpora = List[ScanIdentityCorpus]()
     var err = _cov_err(ScanKindRegistry(), corpora, List[List[String]]())
@@ -725,6 +761,8 @@ def main() raises:
     # R4 shape, R0, R1, validate
     suite.test[test_coverage_r4_refuses_fewer_rendered_lists_than_corpora]()
     suite.test[test_coverage_r4_refuses_a_short_rendered_list_for_one_kind]()
+    suite.test[test_coverage_r4_refuses_more_rendered_lists_than_corpora]()
+    suite.test[test_coverage_r4_refuses_a_long_rendered_list_for_one_kind]()
     suite.test[test_coverage_r0_refuses_an_empty_registry]()
     suite.test[test_coverage_r0_refuses_an_unregistered_corpus_kind]()
     suite.test[test_coverage_r0_refuses_a_registered_kind_without_corpus]()
