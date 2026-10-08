@@ -329,6 +329,10 @@ struct FetchV2Client(Movable):
                 "komira_git: fetch: deepen-since "
                 + String(args.deepen_since.value()) + " is before the epoch"
             )
+        # Refused before anything is written to `out`.
+        if args.asks_shallow() or args.deepen_relative:
+            if not self.capabilities.supports_feature("fetch", "shallow"):
+                raise Error("komira_git: fetch: Server does not support shallow requests")
         var names_format = self._server_names_format()
         _text_pkt(out, "command=fetch")
         self._append_agent(out)
@@ -347,8 +351,6 @@ struct FetchV2Client(Movable):
         if args.wait_for_done:
             _text_pkt(out, "wait-for-done")
         if args.asks_shallow() or args.deepen_relative:
-            if not self.capabilities.supports_feature("fetch", "shallow"):
-                raise Error("komira_git: fetch: Server does not support shallow requests")
             for i in range(len(args.shallows)):
                 _text_pkt(out, "shallow " + args.shallows[i].to_hex())
             if args.deepen > 0:

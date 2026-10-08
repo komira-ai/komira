@@ -18,8 +18,9 @@
 #     push); the response's symref-target, peeled and unborn HEAD lines.
 #   * test_fetch_request: the order of the arguments, `deepen`,
 #     `deepen-since` and `deepen-not` without LF and `deepen-relative` with
-#     one, `done`; refusals for a deepen-since before the epoch, shallow
-#     requests to a server without `shallow`, server options it does not
+#     one, `done`; refusals for a deepen-since before the epoch, a deepen,
+#     deepen-since or deepen-not each sent alone to a server without
+#     `shallow` (nothing written), server options it does not
 #     take, and a format it does not use.
 #   * test_fetch_events: each event of a round without `ready`, of one
 #     with acknowledgments, shallow-info and a packfile, and of a `done`
@@ -229,13 +230,22 @@ def test_fetch_request() raises:
         + "0011wait-for-done0032have " + A + "\\x0a0000",
     )
     var plain = _client("000eversion 2\n0011fetch=filter\n0000")
-    var deep = FetchArgs()
-    deep.deepen = 2
-    try:
-        plain.append_fetch_request(out, deep)
-        assert_true(False)
-    except e:
-        assert_equal(String(e), "komira_git: fetch: Server does not support shallow requests")
+    # Each of deepen, deepen-since and deepen-not alone needs `shallow`.
+    for k in range(3):
+        var deep = FetchArgs()
+        if k == 0:
+            deep.deepen = 2
+        elif k == 1:
+            deep.deepen_since = 1790000150
+        else:
+            deep.deepen_not.append("v1")
+        out.clear()
+        try:
+            plain.append_fetch_request(out, deep)
+            assert_true(False)
+        except e:
+            assert_equal(String(e), "komira_git: fetch: Server does not support shallow requests")
+        assert_equal(len(out), 0)
     try:
         plain.append_fetch_request(out, FetchArgs(), server_options=opts)
         assert_true(False)

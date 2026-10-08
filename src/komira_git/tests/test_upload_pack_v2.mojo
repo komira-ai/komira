@@ -23,8 +23,10 @@
 #     2^31 accepted.
 #   * test_deepen_since_and_not: `deepen-since` and `deepen-not` dropped
 #     or misread (a ref not passed on as sent, its LF kept); an empty, signed,
-#     zero-led, hex or over-2^63-1 timestamp or an empty ref accepted;
-#     `deepen` with either accepted.
+#     zero-led or over-2^63-1 timestamp, a byte just outside '0'-'9' ('/',
+#     ':') or a letter after the first digit, or an empty ref accepted;
+#     `deepen-since 0` not asking for shallow-info; `deepen` with either
+#     accepted.
 #   * test_too_many_prefixes: 65536 prefixes kept as a filter (git drops
 #     the filter at that count).
 #   * test_ls_refs_response: refs not sorted by name, HEAD not first, a
@@ -334,13 +336,17 @@ def test_deepen_since_and_not() raises:
         var s2 = _server()
         var w2 = _wire(lines^)
         s2.feed(Span(w2))
-        var since = s2.next_request().fetch.deepen_since
+        var r2 = s2.next_request()
+        var since = r2.fetch.deepen_since
         assert_true(Bool(since))
         assert_equal(since.value(), want[i])
+        # git sets deepen_rev_list for any accepted deepen-since, 0 included.
+        assert_true(r2.fetch.asks_shallow())
     var bad: List[String] = [
         "deepen-since ", "deepen-since -1", "deepen-since +1", "deepen-since 01",
         "deepen-since 0x10", "deepen-since 9223372036854775808",
         "deepen-since 10000000000000000000", "deepen-since 1 ",
+        "deepen-since 1/", "deepen-since 1:", "deepen-since 1a",
     ]
     for i in range(len(bad)):
         var arg = bad[i]
