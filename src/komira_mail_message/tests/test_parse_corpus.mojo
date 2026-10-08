@@ -1,6 +1,7 @@
 # The parser over a corpus: RFC 5322 Appendix A.1.1 and A.5 (white space,
 # comments and folding; its fields then read by komira_mail_address), the
-# RFC 2047 section 8 sample header, LF-only mail, 8-bit and non-UTF-8 bodies
+# RFC 2047 section 8 sample header (addresses replaced by reserved example
+# names), LF-only mail, 8-bit and non-UTF-8 bodies
 # and headers kept as bytes, transfer encodings undone, and the malformed
 # inputs refused with their exact messages: a line without ':', a fold before
 # the first field, a multipart without or with an invalid boundary or with no
@@ -102,9 +103,9 @@ def test_rfc5322_a_5_folding_and_comments() raises:
 
 def test_rfc2047_section_8_message() raises:
     var data = _b(
-        String("From: =?US-ASCII?Q?Keith_Moore?= <moore@cs.utk.edu>\r\n")
-        + "To: =?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@dkuug.dk>\r\n"
-        + "CC: =?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>\r\n"
+        String("From: =?US-ASCII?Q?Keith_Moore?= <moore@example.org>\r\n")
+        + "To: =?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@example.org>\r\n"
+        + "CC: =?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@example.org>\r\n"
         + "Subject: =?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=\r\n"
         + "    =?ISO-8859-2?B?dSB1bmRlcnN0YW5kIHRoZSBleGFtcGxlLg==?=\r\n"
         + "\r\n"

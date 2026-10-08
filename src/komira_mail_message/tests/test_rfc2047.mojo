@@ -3,6 +3,8 @@
 # the RFC 2231 section 5 language suffix, and the words a decoder must keep
 # as written (section 6.3): unknown charset, malformed, not white-space
 # delimited, decoded bytes that are not UTF-8 or that hold CR, LF or NUL.
+# The addresses of the section 8 examples are replaced by reserved example
+# names (RFC 2606); the encoded words are the RFC's bytes.
 # Encoding: exact output for a Q and a B case, every word at most 75
 # characters with no UTF-8 sequence split, and decode(encode(x)) == x.
 
@@ -27,16 +29,16 @@ def test_rfc2047_section_8_comment_examples() raises:
 
 def test_rfc2047_section_8_header_examples() raises:
     assert_equal(
-        decode_header_text("=?US-ASCII?Q?Keith_Moore?= <moore@cs.utk.edu>"),
-        "Keith Moore <moore@cs.utk.edu>",
+        decode_header_text("=?US-ASCII?Q?Keith_Moore?= <moore@example.org>"),
+        "Keith Moore <moore@example.org>",
     )
     assert_equal(
-        decode_header_text("=?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@dkuug.dk>"),
-        "Keld Jørn Simonsen <keld@dkuug.dk>",
+        decode_header_text("=?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@example.org>"),
+        "Keld Jørn Simonsen <keld@example.org>",
     )
     assert_equal(
-        decode_header_text("=?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>"),
-        "André Pirard <PIRARD@vm1.ulg.ac.be>",
+        decode_header_text("=?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@example.org>"),
+        "André Pirard <PIRARD@example.org>",
     )
     assert_equal(
         decode_header_text(

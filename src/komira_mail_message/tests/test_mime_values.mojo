@@ -1,7 +1,8 @@
 # MIME values: quoted-printable (RFC 2045 section 6.7, its own examples and
 # the line rules), parameters (the RFC 2231 section 3 and 4 examples, the
 # RFC 2045 section 5.1 equivalent forms, the RFC 2183 example), and the
-# `Date` and `Message-ID` values (dates checked against GNU `date -R`).
+# `Date` and `Message-ID` values (dates checked against GNU `date -R`). The
+# host of the RFC 2231 section 3 URL is replaced by a reserved example name.
 
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -84,14 +85,14 @@ def test_rfc2231_examples() raises:
     var h = parse_media_header(
         String(
             'message/external-body; access-type=URL; URL*0="ftp://"; '
-            + 'URL*1="cs.utk.edu/pub/moore/bulk-mailer/bulk-mailer.tar"'
+            + 'URL*1="ftp.example.org/pub/bulk-mailer/bulk-mailer.tar"'
         ).as_bytes()
     )
     assert_equal(h.value(), "message/external-body")
     assert_equal(h.param("access-type").value(), "URL")
     assert_equal(
         h.param("url").value(),
-        "ftp://cs.utk.edu/pub/moore/bulk-mailer/bulk-mailer.tar",
+        "ftp://ftp.example.org/pub/bulk-mailer/bulk-mailer.tar",
     )
     h = parse_media_header(
         String(
