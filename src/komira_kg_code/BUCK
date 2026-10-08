@@ -26,6 +26,7 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_derive_edges.mojo",
         "tests/test_derive_errors.mojo",
         "tests/test_derive_fixture.mojo",
         "tests/test_derive_real_library.mojo",

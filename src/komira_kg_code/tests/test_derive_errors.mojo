@@ -78,12 +78,103 @@ def test_governs_naming_nothing() raises:
     )
 
 
+def test_uquery_that_is_not_an_object() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json("[]")
+    assert_equal(_error_of(b), "komira_kg_code: the uquery JSON is not an object of targets")
+
+
+def test_attributes_that_are_not_an_object() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": 3}')
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is not an object of attributes")
+
+
+def test_a_member_that_is_not_a_string() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": {"buck.type": 3}}')
+    assert_equal(_error_of(b), "komira_kg_code: c//p:lib: `buck.type` is not a string")
+
+
+def test_a_member_that_is_not_a_list() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "srcs": "c//p/lib/__init__.mojo"}}')
+    assert_equal(_error_of(b), "komira_kg_code: c//p:lib: `srcs` is not a list")
+
+
+def test_a_list_holding_a_value_that_is_not_a_string() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": ["c//q:q", 3]}}')
+    assert_equal(_error_of(b), "komira_kg_code: c//p:lib: `deps` holds a value that is not a string")
+
+
+def test_a_function_with_no_overloads() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_mojo_doc_json(
+        "c//p:lib",
+        '{"decl": {"kind": "package", "name": "lib", "modules": [{"kind": "module", "name": "a", "functions":'
+        ' [{"kind": "function", "name": "f"}]}]}}',
+    )
+    assert_equal(_error_of(b), "komira_kg_code: lib.a.f: a function with no `overloads`")
+
+
+def test_srcs_with_no_package_init() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "srcs": ["c//p/lib/a.mojo"]}}')
+    b.add_mojo_doc_json("c//p:lib", '{"decl": {"kind": "package", "name": "lib", "modules": [{"kind": "module", "name": "a"}]}}')
+    assert_equal(_error_of(b), "komira_kg_code: c//p:lib: the target's srcs hold no __init__.mojo")
+
+
+def test_governs_naming_two_targets() raises:
+    # Two cells hold a target at p:lib (the second imports as dlib, so the
+    # import names do not collide); `//p:lib` names both.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_uquery_json('{"d//p:lib": {"buck.type": "mojo_library_rule", "import_name": "dlib", "srcs": ["d//p/lib/__init__.mojo"]}}')
+    b.add_markdown("docs/x.md", "---\ngoverns:\n  - //p:lib\n---\n")
+    assert_equal(
+        _error_of(b),
+        "komira_kg_code: docs/x.md: governs `//p:lib`, which names 2 targets or files; give the cell",
+    )
+
+
+def test_two_nodes_of_different_kinds_with_one_id() raises:
+    # A document whose path is a source's id would replace the file node.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_markdown("c//p/lib/a.mojo", "# A\n")
+    assert_equal(_error_of(b), "komira_kg_code: two nodes have the id c//p/lib/a.mojo: a file and a doc")
+
+
+def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
+    """Runs one case; a failure is printed, not fatal, so one build names
+    every case a planted defect breaks."""
+    try:
+        f()
+    except e:
+        print("FAIL", name, ":", e)
+        failed.append(name)
+
+
 def main() raises:
-    test_a_source_no_target_lists()
-    test_doc_json_for_a_label_that_is_no_library()
-    test_a_module_with_no_source()
-    test_json_that_is_not_mojo_doc_output()
-    test_uquery_without_attributes()
-    test_two_libraries_with_one_import_name()
-    test_governs_naming_nothing()
+    var failed = List[String]()
+    _run("source_no_target_lists", test_a_source_no_target_lists, failed)
+    _run("doc_json_no_library", test_doc_json_for_a_label_that_is_no_library, failed)
+    _run("module_with_no_source", test_a_module_with_no_source, failed)
+    _run("not_mojo_doc_output", test_json_that_is_not_mojo_doc_output, failed)
+    _run("uquery_without_attributes", test_uquery_without_attributes, failed)
+    _run("one_import_name", test_two_libraries_with_one_import_name, failed)
+    _run("governs_nothing", test_governs_naming_nothing, failed)
+    _run("uquery_not_object", test_uquery_that_is_not_an_object, failed)
+    _run("attributes_not_object", test_attributes_that_are_not_an_object, failed)
+    _run("member_not_string", test_a_member_that_is_not_a_string, failed)
+    _run("member_not_list", test_a_member_that_is_not_a_list, failed)
+    _run("list_non_string", test_a_list_holding_a_value_that_is_not_a_string, failed)
+    _run("no_overloads", test_a_function_with_no_overloads, failed)
+    _run("no_package_init", test_srcs_with_no_package_init, failed)
+    _run("governs_two_targets", test_governs_naming_two_targets, failed)
+    _run("one_id_two_kinds", test_two_nodes_of_different_kinds_with_one_id, failed)
+    if len(failed) > 0:
+        raise Error(String(len(failed)) + " case(s) failed")
     print("OK")

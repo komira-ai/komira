@@ -10,7 +10,8 @@ they were added in. What each input contributes:
   `mojo_library_rule`, `mojo_binary_rule` and `mojo_test_rule` (other rule
   kinds are skipped), a `file` node per `srcs` and `test_srcs` entry, and
   the `deps`, `srcs` and `tests` edges. A label named only in `deps` gets a
-  target node too, imported as its name. A test target is a `tests` edge
+  target node too, imported as its name when no library and no other
+  such label has that name. A test target is a `tests` edge
   from each library it lists in `deps`, so a library's tests are its welded
   `test_srcs` and its standalone test targets together.
 - **`mojo doc` JSON** of a library (the `mojo_doc_json` rule's output): a
@@ -33,7 +34,8 @@ they were added in. What each input contributes:
 Every input the deriver cannot place raises an error naming it, rather
 than dropping it: a JSON document that is not uquery or `mojo doc` output,
 a doc JSON for a label that is no library, a module with no source file, a
-source that no target lists, a `governs` entry that names nothing.
+source that no target lists, a `governs` entry that names nothing or
+several targets or files, two nodes of different kinds with one id.
 """
 
 from std.collections import Dict
@@ -183,10 +185,13 @@ struct _Graph(Movable):
         return self.index[id]
 
     def put(mut self, var node: KgNode) raises -> Int:
-        """Adds `node`, or replaces the node with its id when that one is a
-        stub (a target named only in `deps`). Returns its index."""
+        """Adds `node`, or replaces the node of the same id and kind (the
+        same target in two uquery outputs, a doc JSON added twice). A node
+        of the same id and another kind is refused. Returns its index."""
         if node.id in self.index:
             var i = self.index[node.id]
+            if self.nodes[i].kind != node.kind:
+                raise _err("two nodes have the id " + node.id + ": a " + self.nodes[i].kind + " and a " + node.kind)
             self.nodes[i] = node^
             return i
         var i = len(self.nodes)
@@ -251,12 +256,22 @@ struct CodeGraphBuilder(Movable):
         for i in range(len(test_targets)):
             if test_targets[i].src in lib_srcs:
                 g.link(test_targets[i].src, EDGE_TESTS, test_targets[i].dst)
+        # A stub imports as its target name, unless a library has that
+        # import name or two stubs share it (then neither has one, so the
+        # graph does not depend on which uquery output came first).
+        var stub_names = Dict[String, String]()
+        var shared = Dict[String, Bool]()
         for s in range(len(stubs)):
             if not g.has(stubs[s]):
                 _ = g.put(KgNode(stubs[s], NODE_TARGET, _target_name(stubs[s]), _cell_path(stubs[s]), 0, String("")))
                 var name = _target_name(stubs[s])
-                if name not in import_names:
-                    import_names[name] = stubs[s]
+                if name in stub_names:
+                    shared[name] = True
+                else:
+                    stub_names[name] = stubs[s]
+        for entry in stub_names.items():
+            if entry.key not in shared and entry.key not in import_names:
+                import_names[entry.key] = entry.value
 
         var source_lines = Dict[String, List[String]]()
         for i in range(len(self._sources)):
