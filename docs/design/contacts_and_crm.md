@@ -237,10 +237,14 @@ What a crash or a slow writer leaves behind, and why uniqueness still holds:
   lands first wins. If B wins, A's create loses, A reports a conflict, and its rollback deletes X; if A's process dies
   first, X is an orphan as above. In neither case do two rows with one tuple become live, and no create that was
   acknowledged becomes unreadable. On SQLite this race cannot occur at all: A's `begin` is `BEGIN IMMEDIATE`, so B's
-  `begin` waits on the busy handler (or reports busy) until A commits or rolls back. On Postgres it cannot occur
-  either: two creates of one tuple are in one book, so they bump one counter row, and A's bump, which comes before
-  its row write (see [allocation](#how-does-the-change-feed-work)), holds that row's lock until A commits or rolls
-  back, so B waits at its bump.
+  `begin` waits on the busy handler (or reports busy) until A commits or rolls back. On Postgres it cannot occur for
+  a tuple whose two creates bump one counter row: a card's `(book_id, uid)` and a directory subject (the book's
+  counter, or `crm_feed` for a card in the CRM book), and an `external_id` or a custom-field key (`crm_feed`). A's
+  bump, which comes before its row write (see [allocation](#how-does-the-change-feed-work)), holds that row's lock
+  until A commits or rolls back, so B waits at its bump. Two creates of a role book share no counter row (a new book
+  row is its own counter, and the CRM book's is never bumped), so on Postgres B can win `contacts_book_roles`, commit
+  and be acknowledged while A is paused between its book row and its key; A then loses the key and rolls back, as on
+  Firestore except that its row and key never commit apart.
 - Rejected: write the key first and let a loser that finds the key's target absent delete or retarget the key. A
   loser cannot tell a crashed writer from one between its two writes. B takes over A's key K and writes its own row;
   A then writes its row and reports success, but K names B's row, so rule 3 hides A's row: a create that was
@@ -402,9 +406,9 @@ Each rule names the test the implementing change must carry and the mutant that 
 - **One live row per unique tuple, and no acknowledged create is lost, with a writer paused or killed between the row
   and its key.** The cases use a `Database` wrapper that can pause or kill a writer immediately before or immediately
   after a named operation of the `Database` trait (`begin`, `put`, `create_if_absent_composite`, `commit`, ...). They
-  run on the Firestore mock only, the one backend where the two writes commit apart. On SQLite and Postgres the row
-  and its key commit in one transaction and B waits for a paused A (the slow-writer paragraph in
-  [write order](#how-is-uniqueness-enforced) says why), so B is never acknowledged while A is paused and neither
+  run on the Firestore mock only, the one backend where the two writes commit apart. On SQLite and Postgres a card's
+  row and its key commit in one transaction, and for a card's `uid` B waits for a paused A (the slow-writer paragraph
+  in [write order](#how-is-uniqueness-enforced) says why), so B is never acknowledged while A is paused and neither
   mutant can go red there; SQLite has its own case below. Writer A creates card X with `uid` U and is paused
   immediately after its first write (the first of its `put` on `contacts_cards` and its `create_if_absent_composite`
   on `contacts_card_uids`), before its second; writer B creates a card with `uid` U and is acknowledged; A resumes.
