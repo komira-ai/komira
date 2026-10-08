@@ -64,9 +64,10 @@ coverage markers (for a library of the ledger, the marker of its
 target platform other than linux-x86_64 the attributes are None (the
 `select` below), so the library builds as with the switch off.
 
-Scope: a library's `test_srcs`. A README's examples, `mojo_test`,
-`mojo_shared_lib` drivers and generated test sources get no coverage binary,
-and generated library sources are not measured (nor staged for the gate): a
+Scope: a library's `test_srcs`, written or generated (a generated test is
+named by its output path in the package, in its report and to the gate). A
+README's examples, `mojo_test` and `mojo_shared_lib` drivers get no coverage
+binary, and generated library sources are not measured (nor staged for the gate): a
 library every source of which is generated (a mojo_aws_client or
 mojo_gcp_client, whose hand-written sources pass through its generator too)
 is NotMeasured in its gate.
@@ -378,11 +379,13 @@ def _gate_inputs(ctx, runs, branch, markers):
             files[_dir_prefix(pkg) + s.short_path] = s
     # Every welded test is named to covcheck (`--test-source`), which sets
     # it aside wherever it is in the package: a test outside tests/
-    # (`wire/tests/`, the package's top) is not the library's source.
+    # (`wire/tests/`, the package's top) is not the library's source. A
+    # generated test is named by its output path in the package, as its
+    # report names it (coverage_run).
     tests = []
     for t in ctx.attrs.test_srcs:
-        if not t.is_source:
-            continue
+        if _dir_prefix(pkg) + t.short_path in files:
+            fail("{}: the test {} has the path of a source of the library".format(where, t.short_path))
         files[_dir_prefix(pkg) + t.short_path] = t
         tests.append(_dir_prefix(pkg) + t.short_path)
     for path in files:

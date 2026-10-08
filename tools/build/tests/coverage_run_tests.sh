@@ -11,7 +11,9 @@
 #      covlib_forced equals its golden file: a covered function, an arm no
 #      test takes, a `# cov: unreachable` line, all under
 #      tools/build/tests/functional/coverage/; and covgen's, whose generated
-#      source is not measured); :census (covcheck's gate in
+#      source is not measured); :covgentest_report and :covgentest_result (a
+#      generated test has its coverage run, and its gate counts what it
+#      runs and sets it aside); :census (covcheck's gate in
 #      census mode reads them: 7 of 9 lines, 1 exempt, the tests set aside);
 #      :aggregates_tests and :aggregates_all ([coverage][tests] and
 #      [coverage]); covenv[coverage] (test_env, data, PATH, HOME, TMPDIR, no
@@ -42,6 +44,7 @@
 #      The release actions with the switch on: coverage_keys.sh (test 41).
 
 expect_green coverage_runs tests//functional/coverage:numbers tests//functional/coverage:census \
+    tests//functional/coverage:covgentest_report tests//functional/coverage:covgentest_result \
     tests//functional/coverage:aggregates_tests tests//functional/coverage:aggregates_all \
     tests//functional/coverage:covenv 'tests//functional/coverage:covenv[coverage]' \
     tests//functional/coverage:covgen 'tests//functional/coverage:branchlib[coverage][tests][test_gate_env]' \

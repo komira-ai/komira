@@ -338,8 +338,9 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
 
 1. The library's sources are staged at their repository paths: every
    `srcs` file that is a source (a generated one is not measured), every
-   test source, and a BUCK file at the package's directory, so covcheck's
-   nearest-BUCK rule names the package. A tests-cell package is under
+   test source (a generated one at its output path in the package), and a
+   BUCK file at the package's directory, so covcheck's nearest-BUCK rule
+   names the package. A tests-cell package is under
    `tools/build/tests/`. Each test source is also named to covcheck
    (`--test-source`), so a welded test outside the package's `tests/`
    (`wire/tests/test_x.mojo`, a test at the package's top) is set aside as

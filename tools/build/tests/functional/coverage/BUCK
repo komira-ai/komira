@@ -161,6 +161,52 @@ mojo_library(
     test_srcs = ["tests/test_gen.mojo"],
 )
 
+# Test 43: a library whose one test is generated (a `test_srcs` entry that is
+# a build output: tests/test_gen_triple.mojo, made from its .in by cov_plant
+# used as a generator). It has its coverage binary and run as a written test
+# has ([coverage][tests][test_gen_triple] is its golden report, naming the
+# test by its output path in the package), and its gate (census) counts the
+# line it runs of covgentest/triple.mojo and sets the test aside.
+cov_plant(
+    name = "covgentest_test",
+    expr = "s/@ARG@/4/",
+    out = "tests/test_gen_triple.mojo",
+    src = "tests/test_gen_triple.mojo.in",
+)
+
+mojo_library(
+    name = "covgentest",
+    srcs = [
+        "covgentest/__init__.mojo",
+        "covgentest/triple.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    test_srcs = [":covgentest_test"],
+)
+
+cov_report_check(
+    name = "covgentest_report",
+    goldens = ["golden/test_gen_triple.xml"],
+    mode = "golden",
+    reports = [":covgentest[coverage][tests][test_gen_triple]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covgentest_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,',
+        '"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covgentest[coverage][gate][result]"],
+    script = "report.sh",
+)
+
 # Test 43: a test of the gate's runtime contract (test_env, declared data
 # reached from the working directory, the runner's PATH, LD_LIBRARY_PATH,
 # HOME and TMPDIR, no LD_PRELOAD), green in the release gate and, with

@@ -900,10 +900,12 @@ Scope, for now:
   not an empty result. Whatever collects coverage asks only on linux-x86_64,
   as the pull request's `coverage` workflow does
   ([The coverage workflow](../coverage/README.md#the-coverage-workflow)).
-- A library's `test_srcs` that are source files. A README's examples,
-  `mojo_test`, the drivers of `mojo_shared_lib` and generated test sources
-  (a `test_srcs` entry that is a build output) get no coverage binary, and
-  the library's generated sources are not measured.
+- A library's `test_srcs`, written or generated: a generated test (an
+  entry that is a build output) has its coverage binary and run as a written
+  one has, and is named by its output path in the package (its report, the
+  gate's `--test-source`). A README's examples, `mojo_test` and the drivers
+  of `mojo_shared_lib` get no coverage binary, and the library's generated
+  sources are not measured.
 - A test's data may not be staged at its own source's path or under
   `buck-out/`: a coverage run stages the sources there (analysis fails,
   naming the destination).

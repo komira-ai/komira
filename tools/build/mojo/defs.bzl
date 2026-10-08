@@ -360,7 +360,7 @@ def _library_impl(ctx):
     # The gate: one build + one run per test, against the UNGATED package.
     markers = []
     test_subtargets = {}
-    # A coverage build (coverage.bzl): per test that is a source file, a
+    # A coverage build (coverage.bzl): per test, written or generated, a
     # second binary at -O0 with line tables and its run under kcov, under
     # cov/. None when coverage is off.
     cov_link = coverage_link_dir(ctx)
@@ -404,7 +404,7 @@ def _library_impl(ctx):
         )
         test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [test_dir])]
         markers.append(marker)
-        if cov_link and t.is_source:
+        if cov_link:
             cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link, defines = test_defines)
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, root, test_data.get(key, {}), env_args)
             cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root))
