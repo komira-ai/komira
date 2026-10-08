@@ -177,15 +177,12 @@ struct SqlCatalog(Copyable, Movable):
     def table_of(self, name: String) raises -> CatalogTable:
         """The registered (name, schema, source) triple for `name`.
 
-        SQL resolves a table name through `_find` and builds its leaf from
-        this triple; another frontend reads the table through here rather than
-        growing a second catalog with the same three fields, so one
-        `cat.add_parquet("ord", path, schema)` registration serves every
-        frontend and their scan leaves are the same
-        `LogicalPlan.scan_from_source` by construction.
+        Looks `name` up through `_find`, the same lookup `build_scan` and
+        `schema_of` use, and raises `SQL bind error: unknown table '<name>'`
+        when no table is registered under it.
 
         Returns a COPY: `CatalogTable` is Copyable and the catalog keeps its
-        own, exactly as `build_scan` / `schema_of` already do."""
+        own, as `build_scan` and `schema_of` do."""
         var idx = self._find(name)
         if idx < 0:
             raise Error("SQL bind error: unknown table '" + name + "'")
