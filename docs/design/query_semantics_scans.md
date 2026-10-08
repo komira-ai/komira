@@ -1,6 +1,6 @@
 # Query semantics: scans
 
-This is section 13 of [query semantics](query_semantics.md): what a SCAN node returns from a file. The conventions, the oracle settings, "Rulings needed" and the counts are in the main document. The DuckDB references are its readers: `read_parquet`, `read_json` (with an explicit `columns` list), `read_avro` and, where relevant, `read_csv`. How each reader decodes its format is in the [text and row formats](text_and_row_formats.md) design doc; this section states only what a plan's result must be.
+This is section 13 of [query semantics](query_semantics.md): what a SCAN node returns from a file. The conventions, the oracle settings and the counts are in the main document; "Rulings needed" and "Code that does not follow" are in [rulings and code status](query_semantics_rulings.md). The DuckDB references are its readers: `read_parquet`, `read_json` (with an explicit `columns` list), `read_avro` and, where relevant, `read_csv`. How each reader decodes its format is in the [text and row formats](text_and_row_formats.md) design doc; this section states only what a plan's result must be.
 
 ## 13. Scans
 
@@ -50,19 +50,17 @@ This is section 13 of [query semantics](query_semantics.md): what a SCAN node re
 ### 13.5 Avro logical and complex types
 
 - **Rule (proposed).**
-  - `timestamp-millis` and `timestamp-micros` are instants: a zoned timestamp in UTC (§6.9).
-  - `local-timestamp-*` are unzoned.
-  - `time-*` map to the matching time type.
-  - `enum` reads as STRING.
-  - `uuid` and `duration` are refused by name until the plan has types for them.
-  - A union of two or more non-null types, records, arrays and maps are refused by name.
-- **DuckDB.** Not tabulated in its documentation; the oracle measures each type.
+  - `timestamp-millis`, `timestamp-micros` and `local-timestamp-*` read as an unzoned timestamp, as DuckDB does by default; the ticks are UTC either way, so no value changes.
+  - `time-*` read as the matching time type.
+  - `enum` reads as STRING (the plan has no ENUM type; DuckDB's ENUM compares and renders as its string).
+  - `uuid`, `duration`, `timestamp-nanos`, multi-type unions, records, arrays and maps are refused by name until the plan and the decoder carry them.
+- **DuckDB.** The duckdb-avro extension maps `timestamp-millis` / `timestamp-micros` to TIMESTAMP, and to TIMESTAMP_TZ only when the adjust-to-UTC flag is set; `local-timestamp-*` to TIMESTAMP; `timestamp-nanos` to TIMESTAMP_NS; `time-*` to TIME; `enum` to ENUM; `uuid` to UUID; a multi-type union to UNION; record to STRUCT, array to LIST, map to MAP (read from the extension's source by the reviewer; the oracle confirms).
 - **Current behaviour.**
-  - Both `timestamp-*` and `local-timestamp-*` map to an unzoned timestamp (`src/komira_avro/avro_schema.mojo:1009-1020`), losing the instant/local distinction the Avro specification draws.
+  - Both `timestamp-*` and `local-timestamp-*` map to an unzoned timestamp (`src/komira_avro/avro_schema.mojo:1009-1020`), which agrees with DuckDB's default.
   - `enum` maps to DICTIONARY (`:1054`) and `uuid` to BINARY (`:1024-1028`).
   - The decoder raises on other unions, records, arrays, maps and enums (the [formats doc](text_and_row_formats.md), "Decoding takes one of two paths").
-- **Options.** (a) As proposed. (b) Keep the current mapping and record each difference.
-- **Recommendation.** (a), after the oracle has measured DuckDB on each logical type.
+- **Options.** (a) As proposed: DuckDB's default timestamp mapping, `enum` as STRING, the rest refused. (b) Read `timestamp-*` as UTC-zoned instants, following the Avro specification's meaning; that DEPARTS from DuckDB's plain TIMESTAMP default and needs the oracle to request TIMESTAMP_TZ.
+- **Recommendation.** (a). The refusals are narrowings and never wrong values; `enum` as STRING and the adjust-to-UTC case are the two points the oracle must measure first.
 - **Mark.** UNDECIDED.
 
 ### 13.6 JSON values into a column of the matching type
@@ -79,7 +77,7 @@ This is section 13 of [query semantics](query_semantics.md): what a SCAN node re
 ### 13.7 JSON values of another type than the column's
 
 - **Rule (proposed).** A value whose JSON type does not fit the column is an error naming the column and the line: a JSON string into a numeric or BOOL column, a fractional number into INT64, an integer out of INT64's range, a number or object into a STRING column. DATE and DECIMAL columns accept their string form.
-- **DuckDB.** Not documented for `read_json` with `columns`; `ignore_errors` exists, and COPY has `convert_strings_to_integers` ([loading JSON](https://duckdb.org/docs/current/data/json/loading_json.html)). The oracle measures each case.
+- **DuckDB.** `read_json` casts a JSON string into a numeric column through the normal string cast (§6.6), so `"12"` reads as 12; a failed cast is an error or NULL depending on `strict_cast` (`extension/json/json_functions/json_transform.cpp` at v1.5.6). That supports option (b) for numeric strings. The other mismatches are measured by the oracle.
 - **Current behaviour.** A JSON string into a non-string column is refused (`src/komira_jsonl/columnar_materializer.mojo:1280-1285`); the other cases are not established here.
 - **Options.** (a) Refuse, as proposed. (b) Match DuckDB's conversions once measured.
 - **Recommendation.** (b) where DuckDB converts without loss (a numeric string into a number), (a) otherwise.
@@ -87,20 +85,20 @@ This is section 13 of [query semantics](query_semantics.md): what a SCAN node re
 
 ### 13.8 JSON members: missing, extra, order
 
-- **Rule.** Members bind to columns by name, whatever their order in the object.
+- **Rule.** Members bind to columns by name, whatever their order in the object. Names match case-sensitively, byte for byte: `"ID"` does not bind to a column `id`.
   - A member missing from an object is NULL in a nullable column and an error in a non-nullable one (§13.10).
   - A member the schema does not declare is ignored.
-- **DuckDB.** With `columns`, "missing keys become NULL" and keys not listed are excluded ([loading JSON](https://duckdb.org/docs/current/data/json/loading_json.html)).
-- **Current behaviour.** Keys not in the schema are skipped and binding is by key lookup (`src/komira_jsonl/columnar_materializer.mojo:1010-1016`); a missing key reads as NULL, or raises for a NOT NULL field (`:1021-1022`).
+- **DuckDB.** With `columns`, "missing keys become NULL" and keys not listed are excluded ([loading JSON](https://duckdb.org/docs/current/data/json/loading_json.html)); keys are matched case-sensitively (`key_map.find`, `extension/json/json_functions/json_transform.cpp:440` at v1.5.6).
+- **Current behaviour.** Keys not in the schema are skipped and binding is by key lookup, with "no case-folding" (`src/komira_jsonl/key_dispatch.mojo:187-188`; `src/komira_jsonl/columnar_materializer.mojo:1010-1016`); a missing key reads as NULL, or raises for a NOT NULL field (`:1021-1022`).
 - **Mark.** MATCHES.
 
 ### 13.9 A repeated JSON key
 
-- **Rule (proposed).** An object that repeats a key the schema reads is an error naming the key. A repeated key the schema does not read is ignored with the rest of the undeclared members.
-- **DuckDB.** Not documented; the oracle measures it.
+- **Rule (proposed).** An object that repeats a key the schema reads follows `read_json`'s default, once the oracle has measured it: the first occurrence wins, or an error naming the key. A repeated key the schema does not read is ignored with the rest of the undeclared members.
+- **DuckDB.** In `json_transform.cpp` (`:436-455` at v1.5.6) the FIRST occurrence wins when `error_duplicate_key` is off; when it is on, the read fails with "Object %s has duplicate key". The default of that option for `read_json` is what the oracle measures.
 - **Current behaviour.** Refused (`src/komira_jsonl/columnar_materializer.mojo:1211-1222`): "neither value is the record's".
 - **Options.** (a) Refuse, as proposed. (b) Last value wins. (c) First value wins.
-- **Recommendation.** (a) unless DuckDB answers (b) or (c) without an error, in which case match it.
+- **Recommendation.** Match `read_json`'s default: (c), first wins, if `error_duplicate_key` is off by default; (a) if it is on.
 - **Mark.** UNDECIDED.
 
 ### 13.10 Declared nullability against the file

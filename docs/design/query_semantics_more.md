@@ -1,6 +1,6 @@
 # Query semantics: further items
 
-These items belong to [query semantics](query_semantics.md) and keep its numbering: §7.16 and §7.17 extend section 7 (strings) and §11.7 extends section 11 (set operations). The conventions, the oracle settings, "Rulings needed" and the counts are in the main document. They live here only to keep each file under 1000 lines.
+These items belong to [query semantics](query_semantics.md) and keep its numbering: §7.16 and §7.17 extend section 7 (strings) and §11.7 extends section 11 (set operations). The conventions, the oracle settings, and the counts are in the main document; "Rulings needed" and "Code that does not follow" are in [rulings and code status](query_semantics_rulings.md). They live here only to keep each file under 1000 lines.
 
 ### 7.16 SUBSTRING
 
