@@ -45,6 +45,10 @@ build actions:
       - the metapackage's metadata.json requires each member by name at that
         version and build string (conda-check checks the same requirements,
         but reports a missing one as a count, not by name);
+      - release order: no member's metadata.json requires, at that version
+        and build string, a member that `release_set` lists after it (the
+        native package komira_native, which libraries require and which is
+        listed after every library, is the one exception);
   * after the stamp check, `komira_pack conda-check --kind metapackage
     --require-stamped true` over the metapackage, with every member's manifest and the compiler pin: the
     `members` rows, the requirements, and that index, metadata and members
@@ -131,13 +135,32 @@ stamped() { # <what> <name> <dir>
         has "$kv" "$T/top.json" || no "$1 $2: metadata.json does not carry $kv of the test stamp at its top level: $(cat "$3/metadata.json")"
     done
 }
-names=""
+names=""; dirs=""
 while [ "$#" -gt 0 ]; do
     stamped member "$1" "$2"
     names="$names $1"
+    dirs="$dirs $2"
     shift 2
 done
 [ "$names" = "$want" ] || no "libs are [$names ], $SET's members are [$want ]: the two lists of the release set differ"
+# Release order: no member requires a member listed after it. A release
+# builds the members in this order, each after the members it requires.
+# `later` is the members after `m`; a requirement is `"<name> ==<V> <B>"`
+# in metadata.json's `depends` (komira_pack). The one exception is the
+# native package komira_native: libraries require it and it is listed after
+# every library.
+later="$names"
+set -- $dirs
+for m in $names; do
+    d="$1"; shift
+    later="${later# $m}"
+    for r in $later; do
+        [ "$r" != komira_native ] || continue
+        if grep -qF "\"$r ==$V $B\"" "$d/metadata.json"; then
+            no "member $m requires $r, which $SET lists after it: list each member after the members it requires (here, in release/artifacts.textproto and in libs)"
+        fi
+    done
+done
 stamped metapackage "$META" "$MDIR"
 for m in $names; do
     grep -qF "\\"$m ==$V $B\\"" "$MDIR/metadata.json" ||

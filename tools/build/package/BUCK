@@ -90,7 +90,8 @@ config_setting(
 # manifests given to `komira_pack conda-meta`, and the metapackage read back.
 # Red if a member's [release_check] fails, if a member or the metapackage does
 # not carry the test stamp, if the metapackage does not require a member at
-# that version and build string, if conda-check refuses it, or if `libs` and
+# that version and build string, if a member requires a member listed after
+# it, if conda-check refuses it, or if `libs` and
 # `metapackage` are not release_set.txt's (which kci_artifact's welded test
 # holds equal to release/artifacts.textproto's metapackage).
 conda_release_set_check(
