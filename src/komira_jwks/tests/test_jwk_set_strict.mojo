@@ -168,6 +168,14 @@ def test_duplicate_kid_refused() raises:
         _err_of_set(_set(_okp("same") + "," + _okp("other") + "," + _okp("same"))),
         "JwksError: kid \"same\" names two keys",
     )
+    # A key with no kid ahead of the pair must not end the comparison: the
+    # check skips that key and still compares every later pair.
+    assert_equal(
+        _err_of_set(
+            _set(_ec("P-256", 32) + "," + _okp("same") + "," + _okp("same"))
+        ),
+        "JwksError: kid \"same\" names two keys",
+    )
     # Keys of different types under one kid are just as ambiguous: the
     # check compares kids across the whole set, not within one key type.
     var ec_k = (
