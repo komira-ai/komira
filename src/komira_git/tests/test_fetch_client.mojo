@@ -46,6 +46,7 @@ from komira_git import (
     append_pkt_data,
     append_pkt_delim,
     append_pkt_flush,
+    append_pkt_response_end,
     append_pkt_text,
 )
 
@@ -309,6 +310,8 @@ def _response_error(done: Bool, var lines: List[String]) raises -> String:
     for i in range(len(lines)):
         if lines[i] == "0000":
             append_pkt_flush(r)
+        elif lines[i] == "0002":
+            append_pkt_response_end(r)
         elif lines[i] == "0001":
             append_pkt_delim(r)
         elif lines[i].startswith("band"):
@@ -365,10 +368,95 @@ def test_fetch_refusals() raises:
     )
 
 
+
+
+def _raises_on_advertisement(adv: String) raises -> String:
+    var c = FetchV2Client("x", ObjectFormat.sha1())
+    var b = List[UInt8](adv.as_bytes())
+    c.feed(Span(b))
+    try:
+        _ = c.read_advertisement()
+        return "accepted"
+    except e:
+        return String(e)
+
+
+def _raises_on_ls_refs(var resp: List[UInt8]) raises -> String:
+    var c = _client(GIT_ADV)
+    var out = List[UInt8]()
+    c.append_ls_refs_request(out, List[String]())
+    c.feed(Span(resp))
+    try:
+        _ = c.read_ls_refs()
+        return "accepted"
+    except e:
+        return String(e)
+
+
+def test_more_refusals() raises:
+    comptime P = "komira_git: fetch: "
+    assert_equal(_raises_on_advertisement("0000"), P + "bad capability advertisement")
+    # The server's object format against the client's.
+    var md5 = _client("000eversion 2\n0012fetch=shallow\n0016object-format=md5\n0000")
+    var out = List[UInt8]()
+    try:
+        md5.append_fetch_request(out, FetchArgs())
+        assert_true(False)
+    except e:
+        assert_equal(String(e), P + "unknown object format 'md5' specified by server")
+    var c256 = FetchV2Client("x", ObjectFormat.sha256())
+    var adv = List[UInt8](String("000eversion 2\n0012fetch=shallow\n0000").as_bytes())
+    c256.feed(Span(adv))
+    assert_true(c256.read_advertisement())
+    try:
+        c256.append_fetch_request(out, FetchArgs())
+        assert_true(False)
+    except e:
+        assert_equal(String(e), P + "the server does not support algorithm 'sha256'")
+    var unread = FetchV2Client("x", ObjectFormat.sha1())
+    try:
+        unread.append_ls_refs_request(out, List[String]())
+        assert_true(False)
+    except e:
+        assert_equal(String(e), P + "the advertisement has not been read")
+    try:
+        _ = unread.next_event()
+        assert_true(False)
+    except e:
+        assert_equal(String(e), P + "no fetch response is expected")
+    # ls-refs responses.
+    var delim = List[UInt8]()
+    append_pkt_delim(delim)
+    assert_equal(_raises_on_ls_refs(delim^), P + "expected flush after ref listing")
+    var one = List[UInt8]()
+    append_pkt_text(one, "abc\n")
+    assert_equal(_raises_on_ls_refs(one^), P + "invalid ls-refs response: abc")
+    var peeled = List[UInt8]()
+    append_pkt_text(peeled, A + " refs/tags/x peeled:zz\n")
+    assert_equal(
+        _raises_on_ls_refs(peeled^), P + "invalid ls-refs response: " + A + " refs/tags/x peeled:zz"
+    )
+    # Fetch responses.
+    assert_equal(_response_error(False, ["0000"]), P + "expected 'acknowledgments'")
+    assert_equal(
+        _response_error(False, ["acknowledgments\n", "0002"]), P + "bad acknowledgments section"
+    )
+    assert_equal(_response_error(True, ["0000"]), P + "expected 'packfile'")
+    assert_equal(_response_error(True, ["shallow-info\n", "0000"]), P + "expected 'packfile'")
+    assert_equal(
+        _response_error(True, ["shallow-info\n", "unshallow zz"]),
+        P + "invalid unshallow line: unshallow zz",
+    )
+    assert_equal(
+        _response_error(True, ["packfile\n", ""]), P + "protocol error: no band designator"
+    )
+
+
 def main() raises:
     test_advertisement()
     test_ls_refs()
     test_fetch_request()
     test_fetch_events()
     test_fetch_refusals()
+    test_more_refusals()
     print("komira_git fetch v2 client tests passed")

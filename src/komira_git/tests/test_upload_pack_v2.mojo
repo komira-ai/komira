@@ -378,6 +378,55 @@ def test_ls_refs_response() raises:
         assert_equal(String(e), "komira_git: ls-refs: ref 'HEAD' is not under refs/")
 
 
+def test_more() raises:
+    # A fetch request fed one byte at a time, with wait-for-done.
+    var w = _wire(["command=fetch", "0001", "wait-for-done", "have " + A + "\n", "0000"])
+    var s = _server()
+    for i in range(len(w) - 1):
+        s.feed(Span(w)[i : i + 1])
+        assert_equal(s.next_request().command, V2_NEED_MORE)
+    s.feed(Span(w)[len(w) - 1 : len(w)])
+    var r = s.next_request()
+    assert_equal(r.command, V2_FETCH)
+    assert_true(r.fetch.wait_for_done)
+    # A line that is not UTF-8.
+    var bad = List[UInt8]()
+    bad.append(0x30)
+    bad.append(0x30)
+    bad.append(0x30)
+    bad.append(0x35)
+    bad.append(0xFF)
+    var s2 = _server()
+    s2.feed(Span(bad))
+    try:
+        _ = s2.next_request()
+        assert_true(False)
+    except e:
+        assert_equal(String(e), "komira_git: upload-pack: line is not UTF-8")
+    # Names sort byte by byte, a prefix first.
+    var refs = List[AdvertisedRef]()
+    refs.append(AdvertisedRef("refs/heads/ab", _id(B)))
+    refs.append(AdvertisedRef("refs/heads/a", _id(A)))
+    var out = List[UInt8]()
+    append_ls_refs_response(out, LsRefsArgs(), None, refs)
+    assert_equal(
+        _show(out), "003a" + A + " refs/heads/a\\x0a003b" + B + " refs/heads/ab\\x0a0000"
+    )
+    try:
+        append_ls_refs_response(out, LsRefsArgs(), AdvertisedRef("refs/heads/a", _id(A)), refs)
+        assert_true(False)
+    except e:
+        assert_equal(
+            String(e), "komira_git: ls-refs: the head ref is named 'refs/heads/a', not 'HEAD'"
+        )
+    refs.append(AdvertisedRef("refs/heads/c", ObjectId.zero(ObjectFormat.sha1())))
+    try:
+        append_ls_refs_response(out, LsRefsArgs(), None, refs)
+        assert_true(False)
+    except e:
+        assert_equal(String(e), "komira_git: ls-refs: ref 'refs/heads/c' names no object")
+
+
 def main() raises:
     test_advertisement()
     test_agent()
@@ -388,4 +437,5 @@ def main() raises:
     test_deepen()
     test_too_many_prefixes()
     test_ls_refs_response()
+    test_more()
     print("komira_git upload-pack v2 tests passed")

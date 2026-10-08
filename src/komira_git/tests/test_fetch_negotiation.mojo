@@ -11,7 +11,8 @@
 #
 #     c1 <- c2 <- c3 <- c5        tag t1 -> c1, blob b1
 #            ^
-#            +--- c4                 r1 (an unrelated root commit)
+#            +--- c4                 r1 (unrelated; its parent m9 is not in the
+#                                    repository, as in a shallow one)
 #
 # WHAT EACH TEST CATCHES:
 #   * test_acks: a have acknowledged although an earlier have's parent made
@@ -85,6 +86,9 @@ struct Toy(CommitGraph):
             out.append(_id(C1 if d == C2 else C2))
         elif d == C3:
             out.append(_id(C2))
+        elif d == R1:
+            # A parent the repository does not hold (a shallow repository).
+            out.append(_id(MISSING))
         elif d == C5:
             out.append(_id(C3))
         return out^

@@ -37,6 +37,7 @@ from komira_git import (
     ReceivePackConfig,
     ReceivePackServer,
     append_pkt_data,
+    append_pkt_delim,
     append_pkt_flush,
     append_pkt_text,
     append_push_message,
@@ -302,10 +303,60 @@ def test_funny_refnames() raises:
     assert_equal(reasons[5], "")
 
 
+def test_more_refusals() raises:
+    comptime P = "komira_git: receive-pack: "
+    var out = List[UInt8]()
+    var unborn = List[AdvertisedRef]()
+    unborn.append(AdvertisedRef("refs/heads/x", ObjectId.zero(ObjectFormat.sha1())))
+    try:
+        append_receive_pack_advertisement(out, _config(True, False), unborn)
+        assert_true(False)
+    except e:
+        assert_equal(String(e), P + "ref 'refs/heads/x' names no object")
+    var w = List[UInt8]()
+    append_pkt_delim(w)
+    var s = ReceivePackServer(_config(True, False))
+    s.feed(Span(w))
+    try:
+        _ = s.read_request()
+        assert_true(False)
+    except e:
+        assert_equal(String(e), P + "protocol error: expected old/new/ref")
+    # A shallow line, then a delete-only push: no pack follows.
+    var w2 = List[UInt8]()
+    append_pkt_text(w2, "shallow " + A)
+    append_pkt_data(w2, Span(_with_caps(B + " " + Z + " refs/heads/old", " report-status")))
+    append_pkt_flush(w2)
+    var s2 = ReceivePackServer(_config(True, False))
+    s2.feed(Span(w2))
+    var r2 = s2.read_request()
+    assert_equal(len(r2.shallows), 1)
+    assert_true(r2.shallows[0] == _id(A))
+    assert_false(r2.needs_pack())
+    var rep = PushReport(r2)
+    try:
+        rep.reject(0, "")
+        assert_true(False)
+    except e:
+        assert_equal(String(e), "komira_git: push report: a refusal needs a reason")
+    # A report for a request with no commands is nothing; one for another
+    # request is refused.
+    var none = PushRequest()
+    out.clear()
+    append_push_report(out, none, PushReport(none))
+    assert_equal(len(out), 0)
+    try:
+        append_push_report(out, r2, PushReport(none))
+        assert_true(False)
+    except e:
+        assert_equal(String(e), "komira_git: push report: the report is for another request")
+
+
 def main() raises:
     test_advertisement()
     test_read_request()
     test_request_refusals()
     test_report()
     test_funny_refnames()
+    test_more_refusals()
     print("komira_git receive-pack tests passed")

@@ -30,6 +30,7 @@ from komira_git import (
     PushCommand,
     SendPackClient,
     append_pkt_data,
+    append_pkt_delim,
     append_pkt_flush,
     append_pkt_text,
     append_sideband,
@@ -234,8 +235,160 @@ def test_status() raises:
         assert_equal(String(e), "komira_git: push: unable to parse remote unpack status: status ok")
 
 
+def _digits(n: Int) -> String:
+    var s = String()
+    for _ in range(n):
+        s += "3"
+    return s^
+
+
+def _adv_error(var w: List[UInt8]) raises -> String:
+    var c = SendPackClient("komira-git/1", ObjectFormat.sha1())
+    c.feed(Span(w))
+    try:
+        _ = c.read_advertisement()
+        return "accepted"
+    except e:
+        return String(e)
+
+
+def _status_error(side_band: Bool, var body: List[UInt8], var extra: List[UInt8]) raises -> String:
+    """Feed `body` (inside band 1 when `side_band`, then `extra` and the
+    closing flush) as the report and read it."""
+    var c = _client(GIT_CAPS if side_band else "report-status delete-refs")
+    var out = List[UInt8]()
+    c.append_push_request(out, _commands())
+    var w = List[UInt8]()
+    if side_band:
+        append_sideband(w, 1, Span(body))
+        for i in range(len(extra)):
+            w.append(extra[i])
+        append_pkt_flush(w)
+    else:
+        w = body^
+    c.feed(Span(w))
+    try:
+        var st = c.read_status()
+        if not st.complete:
+            return "incomplete"
+        return "ok " + st.reasons[1]
+    except e:
+        return String(e)
+
+
+def test_more_refusals() raises:
+    comptime P = "komira_git: push: "
+    var d = List[UInt8]()
+    append_pkt_delim(d)
+    assert_equal(_adv_error(d^), P + "bad ref advertisement")
+    var sh = List[UInt8]()
+    append_pkt_text(sh, "shallow zz\n")
+    assert_equal(_adv_error(sh^), P + "protocol error: bad shallow line: shallow zz")
+    var short = List[UInt8]()
+    append_pkt_text(short, "abc\n")
+    assert_equal(_adv_error(short^), P + "protocol error: bad ref line: abc")
+    var badhex = List[UInt8]()
+    append_pkt_text(badhex, "z" + String(A[byte=1:40]) + " refs/heads/x\n")
+    assert_equal(
+        _adv_error(badhex^),
+        P + "protocol error: bad ref line: z" + String(A[byte=1:40]) + " refs/heads/x",
+    )
+    var unread = SendPackClient("komira-git/1", ObjectFormat.sha1())
+    var out = List[UInt8]()
+    try:
+        unread.append_push_request(out, _commands())
+        assert_true(False)
+    except e:
+        assert_equal(String(e), P + "the advertisement has not been read")
+    var w = List[UInt8]()
+    append_pkt_data(w, Span(_first(A + " refs/heads/main", "report-status delete-refs")))
+    append_pkt_flush(w)
+    var c256 = SendPackClient("komira-git/1", ObjectFormat.sha256())
+    c256.feed(Span(w))
+    try:
+        _ = c256.read_advertisement()
+        assert_true(False)
+    except e:
+        # A sha1 id is not a sha256 one: the ref line is refused first.
+        assert_equal(String(e), P + "protocol error: bad ref line: " + A + " refs/heads/main")
+    var w2 = List[UInt8]()
+    append_pkt_data(w2, Span(_first(_digits(64) + " refs/heads/main", "report-status delete-refs")))
+    append_pkt_flush(w2)
+    var c2 = SendPackClient("komira-git/1", ObjectFormat.sha256())
+    c2.feed(Span(w2))
+    assert_true(c2.read_advertisement())
+    try:
+        c2.append_push_request(out, List[PushCommand]())
+        assert_true(False)
+    except e:
+        assert_equal(
+            String(e),
+            P + "the receiving end does not support this repository's hash algorithm",
+        )
+    # Reports.
+    var ok = _report()
+    assert_equal(_status_error(True, ok^, List[UInt8]()), "ok non-fast-forward")
+    var plain = _report()
+    var half = List[UInt8]()
+    for i in range(len(plain) - 2):
+        half.append(plain[i])
+    assert_equal(_status_error(False, half^, List[UInt8]()), "incomplete")
+    var empty_band = List[UInt8]()
+    append_pkt_text(empty_band, "")
+    var c3 = _client(GIT_CAPS)
+    c3.append_push_request(out, _commands())
+    c3.feed(Span(empty_band))
+    try:
+        _ = c3.read_status()
+        assert_true(False)
+    except e:
+        assert_equal(String(e), P + "protocol error: no band designator")
+    for band in range(3, 5):
+        var bw = List[UInt8]()
+        var msg = List[UInt8](String("disk full").as_bytes())
+        if band == 3:
+            append_sideband(bw, 3, Span(msg))
+        else:
+            append_pkt_text(bw, "\x07x")
+        var cb = _client(GIT_CAPS)
+        cb.append_push_request(out, _commands())
+        cb.feed(Span(bw))
+        try:
+            _ = cb.read_status()
+            assert_true(False)
+        except e:
+            if band == 3:
+                assert_equal(String(e), P + "remote error: disk full")
+            else:
+                assert_equal(String(e), P + "protocol error: bad band #7")
+    var truncated = List[UInt8]()
+    append_pkt_text(truncated, "unpack ok\n")
+    assert_equal(_status_error(True, truncated^, List[UInt8]()), P + "the report-status ends early")
+    var flush_first = List[UInt8]()
+    append_pkt_flush(flush_first)
+    assert_equal(
+        _status_error(True, flush_first^, List[UInt8]()),
+        P + "unexpected flush packet while reading remote unpack status",
+    )
+    var delim_body = List[UInt8]()
+    append_pkt_text(delim_body, "unpack ok\n")
+    append_pkt_delim(delim_body)
+    assert_equal(_status_error(True, delim_body^, List[UInt8]()), P + "bad report-status")
+    var no_reason = List[UInt8]()
+    append_pkt_text(no_reason, "unpack ok\n")
+    append_pkt_text(no_reason, "option refname refs/heads/x\n")
+    append_pkt_text(no_reason, "ok refs/heads/main\n")
+    append_pkt_text(no_reason, "ng refs/heads/topic\n")
+    append_pkt_flush(no_reason)
+    assert_equal(_status_error(True, no_reason^, List[UInt8]()), "ok failed")
+    var after = _report()
+    append_pkt_text(after, "x")
+    assert_equal(_status_error(True, after^, List[UInt8]()), P + "bytes after the report-status")
+
+
 def main() raises:
     test_advertisement()
     test_request()
     test_status()
+    test_more_refusals()
     print("komira_git send-pack tests passed")
