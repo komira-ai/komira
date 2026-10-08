@@ -185,15 +185,27 @@ def check_sidecars(out):
         (pa.field("#a{b}(c)#", pa.int8(), nullable=False), "\\#a\\{b\\}\\(c\\)#:int8"),
         (pa.field("x", pa.timestamp("ms", tz="#z{1}(2)"), nullable=True), "x:timestamp_ms(\\#z\\{1\\}\\(2\\))?"),
         (pa.field("d", pa.decimal128(5, 0), nullable=True), "d:decimal128(5,0)?"),
+        # The flat types no dataset holds and render.py spells (ORACLE results).
+        (pa.field("h", pa.float16(), nullable=True), "h:float16?"),
+        (pa.field("ls", pa.large_string(), nullable=True), "ls:large_string?"),
+        (pa.field("lb", pa.large_binary(), nullable=True), "lb:large_binary?"),
+        (pa.field("d64", pa.date64(), nullable=True), "d64:date64?"),
+        (pa.field("t", pa.time32("s"), nullable=True), "t:time32_s?"),
+        (pa.field("t", pa.time64("ns"), nullable=True), "t:time64_ns?"),
+        (pa.field("du", pa.duration("us"), nullable=True), "du:duration_us?"),
+        (pa.field("d", pa.decimal256(40, 3), nullable=True), "d:decimal256(40,3)?"),
+        (pa.field("f", pa.binary(3), nullable=True), "f:fixed_size_binary(3)?"),
+        (pa.field("n", pa.null(), nullable=True), "n:null?"),
     ]
     for field, entry in cases:
         got = schema_text.schema_line(pa.schema([field]))
         if got != entry + "\n":
             fail("schema_text: %r, want %r" % (got, entry + "\n"))
-    for t in (pa.list_(pa.int8()), pa.large_string(), pa.float16(), pa.time32("s")):
+    for t in (pa.list_(pa.int8()), pa.struct([("a", pa.int8())]), pa.dictionary(pa.int32(), pa.string()),
+              pa.month_day_nano_interval(), pa.string_view()):
         try:
             schema_text.schema_line(pa.schema([pa.field("x", t)]))
-            fail("schema_text: %s was spelt, but O1 spells flat types only" % t)
+            fail("schema_text: %s was spelt, but only flat types are spelt" % t)
         except ValueError:
             pass
 
