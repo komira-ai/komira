@@ -393,6 +393,16 @@ them. Bundles and OCI images (`tools/build/package/defs.bzl`) do not wait
 for the gates of the libraries their program is built from: a program's
 libraries are not packages it ships.
 
+**Platforms.** Coverage is measured on linux-x86_64 and never on another
+platform (decided: `coverage-linux-x86-64` in
+`tools/build/platforms/limits.tsv`; kcov and the LLVM pieces of
+branch coverage are pinned for linux-x86_64 only). On another target
+platform `-c komira.coverage=true` is a no-op, not an error: the coverage
+attributes are None (a `select` in `tools/build/mojo/coverage.bzl`), so a
+library and a shared library have the actions they have with the switch
+off, and no `[coverage]` (test 41's `coverage_platforms.sh`, on
+darwin-arm64).
+
 **Shared libraries.** A `mojo_shared_lib` has a gate too, over its
 drivers' reports (each driver run under kcov measuring the library it
 loads; `tools/build/mojo/README.md`, "Coverage builds") and its own

@@ -62,7 +62,9 @@ package's joins (`conda_join`, `conda_release_join`), whose inputs gain the
 coverage markers (for a library of the ledger, the marker of its
 `<name>_cov_gate` too), without changing their command or their bytes. On a
 target platform other than linux-x86_64 the attributes are None (the
-`select` below), so the library builds as with the switch off.
+`select` below), so the library builds as with the switch off: coverage is
+measured on linux-x86_64 only, never on another platform
+(tools/build/platforms/limits.tsv, `coverage-linux-x86-64`).
 
 Scope: a library's `test_srcs`, written or generated (a generated test is
 named by its output path in the package, in its report and to the gate), and

@@ -894,8 +894,12 @@ happen fails there ([test 41](../tests/README.md#41-coverage-builds)).
 
 Scope, for now:
 
-- linux-x86_64. On another target platform the attributes are None (a
-  `select`) and the library builds as with the switch off: it has no
+- linux-x86_64, and never another platform (decided:
+  `coverage-linux-x86-64` in [`limits.tsv`](../platforms/limits.tsv); kcov
+  and branch coverage's LLVM pieces are pinned for linux-x86_64 only). On
+  another target platform the switch is a no-op: the attributes are None (a
+  `select`) and a library or shared library builds as with the switch off,
+  the same actions (test 41's `coverage_platforms.sh`): it has no
   `[coverage]` sub-target, so asking for one is an "unknown subtarget" error,
   not an empty result. Whatever collects coverage asks only on linux-x86_64,
   as the pull request's `coverage` workflow does
