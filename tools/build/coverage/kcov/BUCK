@@ -1,18 +1,20 @@
-# The path tools of a kcov coverage run (README.md): static executables built
-# with the pinned zig, each gated by its cases, which run as build actions.
+# The path tools of a kcov coverage run (README.md): executables built with
+# the Rust rules, or with the pinned zig where the tool is a stand-in for zig
+# itself (cov_zig), each gated by its cases, which run as build actions.
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/rust:defs.bzl", "rust_binary")
 load(":defs.bzl", "cov_link_dir", "cov_run_dir", "kcov_tool", "kcov_tool_cases")
 
 # debug_relocate: a directory path in a file overwritten by a placeholder of
 # the same length.
-zig_exe(
+rust_binary(
     name = "debug_relocate_exe",
+    srcs = ["debug_relocate.rs"],
+    crate_name = "debug_relocate",
+    crate_root = "debug_relocate.rs",
     exec_compatible_with = LINUX_X86_64,
-    src = "debug_relocate.zig",
-    busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
 )
 
 kcov_tool_cases(

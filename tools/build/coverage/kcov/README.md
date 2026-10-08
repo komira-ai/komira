@@ -1,10 +1,12 @@
 # kcov path tools
 
-Static executables for building a test with debug info and running it
+Executables for building a test with debug info and running it
 under kcov in a build action, with a coverage report whose bytes depend only
-on the sources and the tests. Each is built from one Zig file with the pinned
-zig (`zig_exe`, `tools/build/mojo/toolchain.bzl`), and runs with no shell,
-PATH or network. [`cov_run.sh`](#cov_run), a busybox script, runs one test
+on the sources and the tests. `debug_relocate` is built from one Rust file
+with the Rust rules (`rust_binary`, [`../../rust/README.md`](../../rust/README.md);
+it links against glibc 2.34 or newer); the others are static executables, each
+built from one Zig file with the pinned zig (`zig_exe`,
+`tools/build/mojo/toolchain.bzl`). Each runs with no shell, PATH or network. [`cov_run.sh`](#cov_run), a busybox script, runs one test
 under kcov with them.
 
 | target | what it does |
