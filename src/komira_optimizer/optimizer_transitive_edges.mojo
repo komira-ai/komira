@@ -271,7 +271,7 @@ def derive_transitive_edges(mut chain: JoinChain) -> Int:
                 var root_b = _uf_find(parent, kb)
                 var existing = class_rels.get(root_b)
                 if not existing:
-                    var rl = List[Int]()  # cov: unreachable ka shares the root of kb and was recorded on this edge just above, so the class exists
+                    var rl = List[Int]()  # cov: unreachable ka shares the root of kb and was recorded on this edge or an earlier one, so the class exists
                     rl.append(e.right_relation)  # cov: unreachable see the line above
                     class_rels[root_b] = rl^  # cov: unreachable see the line above
                     var cl = List[String]()  # cov: unreachable see the line above
