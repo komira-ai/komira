@@ -64,8 +64,9 @@
   # Downloads of pinned files (busybox, zig, compiler and runtime packages).
   # Every pin states its sha256 and size, so buck2 sends no HEAD request and
   # fetches a pin only when the remote CAS lacks it or it is written to local
-  # disk. buck2's default for both timeouts is 5 s, and a slow upstream
-  # (busybox's host, answering a hosted runner) exceeded it on every retry.
+  # disk. buck2's defaults are 5 s to connect and 10 s per read, and a slow
+  # upstream (busybox's host, answering a hosted runner) exceeded the 5 s
+  # connect default on every retry.
   # Neither value caps a whole download: connect_timeout_ms bounds opening the
   # connection, and read_timeout_ms bounds one wait for the next bytes,
   # restarting whenever bytes arrive. So a cold CAS miss on a pin of any size
