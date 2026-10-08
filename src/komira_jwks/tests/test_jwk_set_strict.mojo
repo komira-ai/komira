@@ -168,11 +168,24 @@ def test_duplicate_kid_refused() raises:
         _err_of_set(_set(_okp("same") + "," + _okp("other") + "," + _okp("same"))),
         "JwksError: kid \"same\" names two keys",
     )
-    # A key with no kid ahead of the pair must not end the comparison: the
-    # check skips that key and still compares every later pair.
+    # A key with no kid anywhere in the set must not end either comparison:
+    # ahead of the pair (the outer loop), between the pair (the inner loop)
+    # or after it. Kid-less keys sit in every one of those positions here.
+    var nokid = _ec("P-256", 32)
+    assert_equal(
+        _err_of_set(_set(nokid + "," + _okp("same") + "," + _okp("same"))),
+        "JwksError: kid \"same\" names two keys",
+    )
+    assert_equal(
+        _err_of_set(_set(_okp("same") + "," + nokid + "," + _okp("same"))),
+        "JwksError: kid \"same\" names two keys",
+    )
     assert_equal(
         _err_of_set(
-            _set(_ec("P-256", 32) + "," + _okp("same") + "," + _okp("same"))
+            _set(
+                nokid + "," + _okp("same") + "," + nokid + "," + _okp("same")
+                + "," + nokid
+            )
         ),
         "JwksError: kid \"same\" names two keys",
     )

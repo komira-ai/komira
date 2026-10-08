@@ -11,8 +11,8 @@ fetches to learn which keys sign tokens.
 - `parse_jwk_set(doc)` reads a JWK Set strictly, on `komira_json`. It refuses
   the whole document (`JwksError: ...`) above `JWKS_MAX_DOCUMENT_BYTES` or
   `JWKS_MAX_KEYS`, for a member name repeated in any object, for any private
-  member (`d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k`) and for two keys with
-  one `kid`. A key it does not support (another `kty` or curve, a missing or
+  member (`d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k`) and for two accepted
+  keys with one `kid` (a skipped key does not count). A key it does not support (another `kty` or curve, a missing or
   malformed member, an RSA size out of range) is left out and named in
   `JwkSet.skipped`, so it cannot hide the others (RFC 7517 section 5).
   `parse_jwk(doc)` reads one key and raises for either kind of problem.
