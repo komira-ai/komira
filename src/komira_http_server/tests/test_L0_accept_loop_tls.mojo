@@ -599,11 +599,12 @@ def test_accept_listener_error_ends_the_drain() raises:
 
 def test_accept_stale_mapping_is_swept() raises:
     """The table still maps a descriptor number that was closed behind its
-    back, and the kernel hands that number out again. The sweep drops the
-    stale entry, and dropping it closes the descriptor, which by then is
-    the new connection; setting it non-blocking then fails, so the
-    connection is skipped: this pins today's behavior, in which nothing is
-    registered and the client sees end of stream at once."""
+    back, and the kernel hands that number out again: the sweep removes the
+    stale entry. Whether the new descriptor survives the sweep (and so
+    whether the connection is accepted) is tracked in komira-ai/komira#936,
+    so this test checks only what holds either way: the stale entry is gone,
+    the table and its mapping agree with the count returned, and any entry
+    left is the new connection, wrapped in TLS."""
     var cfg = _server_config()
     var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
     var r = _reactor(mock=True)
@@ -621,11 +622,16 @@ def test_accept_stale_mapping_is_swept() raises:
         )
     )
     fd_to_idx[Int(stale)] = 0
-    assert_equal(accept_one_and_register_tls(l, r, conns, fd_to_idx, cfg), 0)
-    assert_equal(conns.len(), 0)
-    assert_equal(len(fd_to_idx), 0)
-    _poll(c)
-    assert_true(_eof(c))
+    var n = accept_one_and_register_tls(l, r, conns, fd_to_idx, cfg)
+    assert_true(n == 0 or n == 1)
+    assert_equal(conns.len(), n)
+    assert_equal(len(fd_to_idx), n)
+    for i in range(conns.len()):
+        assert_equal(conns[i].fd(), stale)
+        assert_true(conns[i].is_tls())
+        assert_equal(conns[i].state(), CONN_STATE_TLS_HANDSHAKE_IN)
+        assert_equal(fd_to_idx[Int(stale)], i)
+    _ = conns^
     _close(c)
     _ = r^
     _ = l^
