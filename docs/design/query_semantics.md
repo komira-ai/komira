@@ -271,7 +271,7 @@ The table of every DEPARTS and UNDECIDED item with its recommendation, and the l
 
 ### 3.8 ASOF tolerance, and strict inequalities
 
-- **Rule.** An ASOF join may carry a tolerance (an INT64 or FLOAT64 bound on `|left - right|`); a candidate outside it is no match, so in a LEFT ASOF join the right columns are NULL. The plan has no strict form (`<`, `>`): a frontend refuses one by name.
+- **Rule.** An ASOF join may carry a tolerance (an INT64 or FLOAT64 bound on `|left - right|`); the bound is inclusive, so a candidate at exactly the tolerance matches (`src/komira_plan_ir/logical_plan.mojo:520`); a candidate outside it is no match, so in a LEFT ASOF join the right columns are NULL. The plan has no strict form (`<`, `>`): a frontend refuses one by name.
 - **DuckDB.** No tolerance clause, and it accepts `>`, `<` as well as `>=`, `<=` ([FROM and JOIN](https://duckdb.org/docs/current/sql/query_syntax/from.html)). A tolerance case is still checkable: the oracle runs a LEFT ASOF join and sets the right columns to NULL where `|left - right|` exceeds the bound.
 - **Current behaviour.** `AsofTolerance` with NONE / INT64 / FLOAT64 (`src/komira_plan_ir/logical_plan.mojo:513-520`).
 - **Mark.** DEPARTS: the tolerance is a komira extension, and the missing strict forms are a narrowing refused by name.
@@ -331,6 +331,29 @@ The table of every DEPARTS and UNDECIDED item with its recommendation, and the l
 - **DuckDB.** Evaluates these positions with a MARK join, giving a non-nullable BOOLEAN.
 - **Current behaviour.** The plan's correlated-subquery kinds lower to SEMI and ANTI joins only (`src/komira_plan_expr/corr_subquery_data.mojo:66-69`).
 - **Mark.** DEPARTS: a narrowing, refused by name until the plan has a MARK join.
+
+### 3.17 ASOF equality keys and NULL
+
+- **Rule.** An ASOF join's equality keys are equi-join keys: a left row whose equality key holds a NULL matches nothing (§3.1), and so does a NULL ASOF key (§3.6). In a LEFT ASOF join such a row appears once with the right columns NULL.
+- **DuckDB.** The conditions other than the inequality "must be equalities (or NOT DISTINCT)"; an equality with NULL is not TRUE (§1.2), so it does not match ([FROM and JOIN](https://duckdb.org/docs/current/sql/query_syntax/from.html)).
+- **Current behaviour.** The IR carries `left_keys` / `right_keys` as equi-keys (`src/komira_plan_ir/logical_plan.mojo:1472-1474`); no ASOF operator is in this repository.
+- **Mark.** MATCHES.
+
+### 3.18 ASOF without equality keys
+
+- **Rule.** An ASOF join with no equality keys treats all right rows as one group: each left row is matched against every right row by the ASOF key alone.
+- **DuckDB.** An ASOF join whose only condition is the inequality matches across the whole right table ([FROM and JOIN](https://duckdb.org/docs/current/sql/query_syntax/from.html)).
+- **Current behaviour.** "`by=[]` → single-group semantics" (`src/komira_plan_ir/logical_plan.mojo:499`).
+- **Mark.** MATCHES.
+
+### 3.19 Right rows tied on the ASOF key
+
+- **Rule (proposed).** When two or more right rows in one group have the same ASOF key and that key is the best match, the result must not depend on input order or worker count. Which row is returned is to be settled by measuring DuckDB.
+- **DuckDB.** "ASOF joins each left side row with at most one right side row"; which of several tied rows is not documented.
+- **Current behaviour.** BACKWARD is described as "last right row with right.ts <= left.ts" (`src/komira_plan_ir/logical_plan.mojo:502`), which does not say which of two tied rows is last.
+- **Options.** (a) Match DuckDB's tie behaviour once measured, if it is deterministic. (b) Declare the choice unspecified and have tests compare such rows as either answer.
+- **Recommendation.** Measure first; until then oracle cases keep ASOF keys unique within each equality group.
+- **Mark.** UNDECIDED.
 
 ## 4. Sort order and floating-point order
 
@@ -739,7 +762,7 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 ### 9.5 IGNORE NULLS
 
-- **Rule.** LAG and LEAD count every row, NULL or not. `IGNORE NULLS` is not in the plan vocabulary and a frontend refuses it by name.
+- **Rule.** LAG, LEAD, FIRST_VALUE, LAST_VALUE and NTH_VALUE count every row, NULL or not (§9.10). `IGNORE NULLS` is not in the plan vocabulary and a frontend refuses it by name.
 - **DuckDB.** Supports `IGNORE NULLS` for lag and lead ([window functions](https://duckdb.org/docs/current/sql/functions/window_functions.html)).
 - **Current behaviour.** No such field on `PartitionExpr` (`src/komira_plan_expr/partition_expr.mojo:110-150`).
 - **Mark.** DEPARTS: a narrowing, refused by name.
@@ -772,6 +795,13 @@ The type of every result column is in [the result-type table](query_semantics_ty
 - **Rule.** For PARTITION BY (windows and PARTITION_TOPN), NULL equals NULL: all rows whose partition key is NULL form one partition, as in grouping (§2.4). Multi-column keys compare column by column under the same rule, and float keys follow §2.6.
 - **DuckDB.** PARTITION BY groups rows like GROUP BY, NULLs together ([window functions](https://duckdb.org/docs/current/sql/functions/window_functions.html); the oracle confirms).
 - **Current behaviour.** No window operator here.
+- **Mark.** MATCHES.
+
+### 9.10 FIRST_VALUE, LAST_VALUE and NTH_VALUE over NULLs
+
+- **Rule.** These functions respect NULLs: FIRST_VALUE is the value of the frame's first row and LAST_VALUE of its last row, NULL if that row's value is NULL. NTH_VALUE(x, n) is the value of the n-th row of the frame, counting from 1 and counting rows whose value is NULL; it is NULL when the frame has fewer than n rows. All three are NULL over an empty frame. Skipping NULLs (`IGNORE NULLS`) is §9.5.
+- **DuckDB.** RESPECT NULLS is the default, with IGNORE NULLS as an option; `nth_value` evaluates "at the nth row (counting from 1) of the window frame" ([window functions](https://duckdb.org/docs/current/sql/functions/window_functions.html)).
+- **Current behaviour.** `PartitionExpr` carries no IGNORE NULLS field, and the value functions read their frame (`src/komira_plan_expr/partition_expr.mojo:51-54`, `:226-255`); no window operator is in this repository.
 - **Mark.** MATCHES.
 
 ## 10. Reserved
@@ -856,7 +886,7 @@ Excel semantics are not part of the plan; they belong to the Excel surface, whic
 
 ## Counts
 
-MATCHES 108, DEPARTS 18, UNDECIDED 19: 145 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 37 rows of "Rulings needed" ([rulings and code status](query_semantics_rulings.md)) are the 18 DEPARTS and 19 UNDECIDED items.
+MATCHES 111, DEPARTS 18, UNDECIDED 20: 149 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 38 rows of "Rulings needed" ([rulings and code status](query_semantics_rulings.md)) are the 18 DEPARTS and 20 UNDECIDED items.
 
 ## What are its limits and open questions?
 
