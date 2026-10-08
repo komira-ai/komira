@@ -39,6 +39,7 @@ from std.ffi import external_call
 from std.memory import ArcPointer
 from std.pathlib import Path
 
+from komira_async.reactor.socket_setup import set_so_sndbuf, so_sndbuf
 from komira_http_core.tls import (
     PeerKeyUpdate,
     TLS_OUTCOME_BLOCKED_ON_READ,
@@ -71,6 +72,11 @@ from komira_http_core.tls.s2n_shim import (
 comptime _AF_UNIX: Int32 = 1
 comptime _SOCK_STREAM: Int32 = 1
 comptime _FIXTURES = "src/komira_http_core/tests/fixtures/tls/"
+# The client's send buffer for the blocked-send case. The fill below sends at
+# most 1 MiB, so it must block well before that whatever the worker's
+# net.core.wmem_default; Linux doubles the request (read back below).
+comptime _SMALL_SNDBUF: Int32 = 16384
+comptime _MAX_EFFECTIVE_SNDBUF: Int32 = 65536
 
 
 # -----------------------------------------------------------------------------
@@ -469,7 +475,16 @@ def test_tls13_blocked_send_and_reset() raises:
             _expect_raise_has(e, "TlsConnection.request_key_update: invalid argument", "REQUESTED")
         client.request_key_update(PeerKeyUpdate.NOT_REQUESTED)
 
-        # Fill the socket: the server reads nothing until a send blocks.
+        # Fill the socket: the server reads nothing until a send blocks. A
+        # small client send buffer makes the block independent of the
+        # worker's default: an AF_UNIX stream send on Linux is charged to the
+        # sender's SO_SNDBUF until the peer reads it, and never consults the
+        # peer's SO_RCVBUF (net/unix/af_unix.c, unix_stream_sendmsg), so the
+        # client side is the only one to set.
+        set_so_sndbuf(fds[1], _SMALL_SNDBUF)
+        var granted = so_sndbuf(fds[1])
+        if granted > _MAX_EFFECTIVE_SNDBUF:
+            raise Error("SO_SNDBUF " + String(Int(granted)) + " after asking for " + String(Int(_SMALL_SNDBUF)))
         var total = 1024 * 1024
         var payload = _payload(total, 3)
         var off = 0
@@ -519,6 +534,10 @@ def test_tls13_blocked_send_and_reset() raises:
         _expect_eq(server.key_update_counts().received, 1, "server key updates received")
 
         # The server closes with a record unread: ECONNRESET on the client.
+        # That holds only while the unread record exists: Linux resets the
+        # peer when an AF_UNIX stream socket closes with data in its receive
+        # queue; with the queue empty the client sees EOF instead
+        # (test_abrupt_close_is_eof).
         _expect_pair(client.send(Span[UInt8](payload)[0:100].as_imm()), TLS_OUTCOME_DONE, 100, "send left unread")
         _close_fd(server_fd)
         server_fd = Int32(-1)
