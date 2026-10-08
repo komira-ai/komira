@@ -1,0 +1,15 @@
+"""covgenmany: a library with many generated sources (test 43)."""
+
+from .plain import half
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_00 import add_00
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_01 import add_01
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_02 import add_02
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_03 import add_03
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_04 import add_04
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_05 import add_05
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_06 import add_06
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_07 import add_07
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_08 import add_08
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_09 import add_09
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_10 import add_10
+from .generated_source_with_a_name_long_enough_to_fill_kcov_argv_11 import add_11

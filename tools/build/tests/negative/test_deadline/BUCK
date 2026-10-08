@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
 
 # A planted defect for the time limit of a mojo_test under `buck2 test` (test
-# 45; tools/build/mojo/test_deadline.sh). tools/build/tests/assert_level_tests.sh
+# 49; tools/build/mojo/test_deadline.sh). tools/build/tests/assert_level_tests.sh
 # runs it with `-c komira.test_timeout_s=90 ... -- --timeout 90` and requires
 # it to fail with `TEST TIME LIMIT: killed ... after 30 s` and the runner's
 # report of the kill (`GATED TEST FAILED: ... (exit 137)`), not with the test
