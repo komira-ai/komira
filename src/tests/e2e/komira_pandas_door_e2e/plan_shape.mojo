@@ -37,10 +37,10 @@ What it compares:
   ids, children; the field's metadata by count only (`Field` publishes no
   key list).
 - Expressions: column references (name and side); literals (the int, float,
-  string and bool payloads, the kind predicates, the dtype, the null dtype,
-  the time unit and the error code); binary operators (op, division intent,
-  both operands); unary operators; aliases; CASE (each case's condition and
-  result, in order, and the ELSE).
+  string and bool payloads, the kind predicates, the dtype, the null dtype
+  and the time unit); binary operators (op, division intent, both operands);
+  unary operators; aliases; CASE (each case's condition and result, in order,
+  and the ELSE).
 
 What it does not compare, and why:
 - A literal's decimal, date, timestamp, interval and 256-bit slots: no door
@@ -166,8 +166,7 @@ def literal_shape(v: ScalarValue) -> String:
         + " null=" + _b(v.is_null())
         + " dtype=" + String(v.dtype)
         + " null_dtype=" + String(v.null_dtype)
-        + " time_unit=" + String(Int(v.time_unit))
-        + " error=" + String(Int(v.error_code)) + ")"
+        + " time_unit=" + String(Int(v.time_unit)) + ")"
     )
 
 
