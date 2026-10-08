@@ -380,7 +380,7 @@ The table of every DEPARTS and UNDECIDED item with its recommendation, and the l
 
 ### 4.4 Negative zero
 
-- **Rule.** `-0.0` and `+0.0` tie in a sort and are equal as keys (§2.6). Their relative order after a sort is not promised.
+- **Rule.** `-0.0` and `+0.0` tie in a sort and are equal as keys (§2.6). Their relative order after a sort is not promised. The values themselves are not changed by the sort: a `-0.0` stays `-0.0` (§4.9).
 - **DuckDB.** Not documented. Measured on 1.5.3 (`src/komira_udf/float_quotient_order.mojo:32-35`): `0.0 = -0.0` is TRUE and the two tie in ORDER BY.
 - **Current behaviour.** As §2.6.
 - **Mark.** MATCHES.
@@ -414,6 +414,13 @@ The table of every DEPARTS and UNDECIDED item with its recommendation, and the l
 - **DuckDB.** Preserves order for some operators (a single-table scan, WHERE, LIMIT, UNION ALL) under `preserve_insertion_order`, and not for GROUP BY, joins, UNION or aggregates ([order preservation](https://duckdb.org/docs/current/sql/dialect/order_preservation.html)). The oracle's `threads = 1` and `preserve_insertion_order = true` make its own output repeatable; they do not make order part of the plan's contract.
 - **Current behaviour.** Nothing in the plan IR claims an order for an unsorted plan.
 - **Mark.** MATCHES.
+
+### 4.9 A sort leaves its values unchanged
+
+- **Rule.** SORT, TOPN, PARTITION_TOPN and a window's ORDER BY reorder rows and never alter a value, including a value of a sort key: `-0.0` comes back as `-0.0`, and a NaN keeps its payload.
+- **DuckDB.** In v1.5.6, when a float column is itself an ORDER BY key, a `-0.0` in it comes back as `0.0`; where the same column is carried but not sorted on, `-0.0` survives (measured by the oracle work with the pinned 1.5.6 wheel). The oracle therefore sorts on `f + CAST(0.0 AS DOUBLE)` instead of `f`: that key orders exactly as `f` does under §4.4 and leaves the output column `f` untouched.
+- **Current behaviour.** `canonicalize_f32` / `canonicalize_f64` produce the image used for hashing and equality (`src/komira_udf/float_quotient_order.mojo:121-140`), and the file states that the engine keeps a value's first-seen bit pattern (`:46-49`); the sort operators are not in this repository, so the rule is not yet shown end to end.
+- **Mark.** DEPARTS: DuckDB normalizes the sign of a sorted zero; the plan's sort does not rewrite values, and §4.4's tie rule, which both share, is unaffected.
 
 ## 5. Arithmetic
 
@@ -886,7 +893,7 @@ Excel semantics are not part of the plan; they belong to the Excel surface, whic
 
 ## Counts
 
-MATCHES 111, DEPARTS 18, UNDECIDED 20: 149 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 38 rows of "Rulings needed" ([rulings and code status](query_semantics_rulings.md)) are the 18 DEPARTS and 20 UNDECIDED items.
+MATCHES 111, DEPARTS 19, UNDECIDED 20: 150 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 39 rows of "Rulings needed" ([rulings and code status](query_semantics_rulings.md)) are the 19 DEPARTS and 20 UNDECIDED items.
 
 ## What are its limits and open questions?
 

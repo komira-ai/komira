@@ -16,6 +16,7 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §3.16 | EXISTS outside a filter conjunct | DEPARTS | Accept for now: frontends refuse it by name until the plan has a MARK join; then EXISTS as a value is a non-nullable BOOLEAN. |
 | §3.19 | Two right rows tied on the ASOF key in one group | UNDECIDED | Measure DuckDB; until then oracle cases keep ASOF keys unique within each equality group. |
 | §4.5 | NaN in comparison predicates | UNDECIDED | Match DuckDB: `NaN = NaN` is TRUE, `NaN > x` is TRUE for every non-NaN `x`; one float model for comparisons, sorting and grouping. |
+| §4.9 | A sort leaves its values unchanged | DEPARTS | Accept: a sort never rewrites a value; the oracle sorts on `f + CAST(0.0 AS DOUBLE)` so DuckDB's `-0.0` normalization does not reach the expected output. |
 | §5.1 | `BIN_DIV` on two integers truncates and keeps the integer type | DEPARTS | Accept: the plan has one division operator, and it is DuckDB's `//`; a frontend's true division (`/`) casts an operand to DOUBLE first. |
 | §6.6 | String-to-integer grammar | UNDECIDED | (a): accept all of DuckDB's extensions (`'1.5'` is 2, `'1e2'` is 100, `'1_000'` is 1000, `'0x1F'`, `'0b101'`), each measured by the oracle. |
 | §6.7 | String-to-double out of range | UNDECIDED | Match DuckDB (likely a Conversion Error, to be measured); the code saturates to ±inf today. |
