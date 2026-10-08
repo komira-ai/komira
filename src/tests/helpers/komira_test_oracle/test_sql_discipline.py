@@ -18,9 +18,21 @@ What it proves, and the defect it catches:
 - literals: an uncast literal is refused; a literal that is the LIMIT or
   OFFSET count is not; a literal inside a subquery computing the count is.
   Catches an exemption inherited by everything below the LIMIT.
-- randomness and clocks: random(), now() and a sample (`USING SAMPLE`,
-  `TABLESAMPLE`, at the SELECT and at the table reference) are refused.
-  Catches a random rule that looks only at function calls.
+  The count `(SELECT a FROM t WHERE a = 2)` reaches its literal through
+  dicts only, so it catches an exemption inherited below the LIMIT even
+  when every list still resets it.
+- randomness and clocks: random(), now(), ICU's current_localtime() and
+  current_localtimestamp() and a sample (`USING SAMPLE`, `TABLESAMPLE`, at
+  the SELECT and at the table reference) are refused. Catches a random rule
+  that looks only at function calls.
+- SQL value keywords: each of the eleven names DuckDB's binder maps to a
+  call (`current_timestamp`, `localtime`, `user`...), lowercase and
+  uppercase, quoted, qualified by `alias`, in a WHERE and inside a table
+  function's argument, is refused; the same names qualified by a table
+  (`t.current_date`, `t."current_timestamp"`) and names that only begin or
+  end like one are accepted. Catches a clock rule that reads FUNCTION nodes
+  only (the keywords are COLUMN_REFs in the parse), a missing name, and a
+  rule that refuses every column so named.
 - one SELECT: two statements and a DELETE are refused (the DELETE by
   `json_serialize_sql` itself, which serializes only SELECTs).
 """
@@ -31,7 +43,24 @@ import sql_discipline
 
 FAILURES = []
 
-# (query, a fragment the refusal must contain)
+# Every name DuckDB v1.5.6's GetSQLValueFunctionName maps, and the call it
+# makes, in DuckDB's lowercase and in the SQL standard's uppercase.
+_MAP = [
+    ("current_catalog", "current_catalog"),
+    ("current_date", "current_date"),
+    ("current_role", "current_role"),
+    ("current_schema", "current_schema"),
+    ("current_time", "get_current_time"),
+    ("current_timestamp", "get_current_timestamp"),
+    ("current_user", "current_user"),
+    ("localtime", "current_localtime"),
+    ("localtimestamp", "current_localtimestamp"),
+    ("session_user", "session_user"),
+    ("user", "user"),
+]
+KEYWORDS = _MAP + [(name.upper(), target) for name, target in _MAP]
+
+# (query, a fragment, or a tuple of fragments, the refusal must contain)
 REFUSED = [
     # ORDER BY of the query.
     ("SELECT a FROM t ORDER BY a ASC", "orders[0]: an ORDER BY key without NULLS FIRST or NULLS LAST"),
@@ -53,12 +82,38 @@ REFUSED = [
     ("SELECT a FROM t WHERE a = 2", "where_clause.right: a literal that is not the operand of a CAST"),
     ("SELECT a FROM t LIMIT (SELECT 2)", ".limit."),
     ("SELECT a FROM t LIMIT CAST(2 AS BIGINT) OFFSET (SELECT 1)", ".offset."),
+    # Reached through dicts only (no list resets the exemption on the way):
+    # the `limit`/`offset` key test alone keeps it from the subquery.
+    ("SELECT a FROM t LIMIT (SELECT a FROM t WHERE a = 2)",
+     (".limit.", "where_clause.right: a literal that is not the operand of a CAST")),
     # Clocks and randomness.
     ("SELECT random() FROM t", "random() depends on when the query runs"),
     ("SELECT now() FROM t", "now() depends on when the query runs"),
+    # ICU's spellings of LOCALTIME and LOCALTIMESTAMP, called by name.
+    ("SELECT current_localtime() FROM t", "current_localtime() depends on when the query runs"),
+    ("SELECT current_localtimestamp() FROM t", "current_localtimestamp() depends on when the query runs"),
     ("SELECT a FROM t USING SAMPLE 10%", ".sample: USING SAMPLE or TABLESAMPLE"),
     ("SELECT a FROM t TABLESAMPLE 10%", ".sample: USING SAMPLE or TABLESAMPLE"),
     ("SELECT a FROM t USING SAMPLE reservoir(10%) REPEATABLE (7)", ".sample: USING SAMPLE or TABLESAMPLE"),
+] + [
+    # SQL value keywords: a COLUMN_REF in the parse, a call after binding.
+    ("SELECT %s FROM t" % spelling,
+     "select_list[0]: %s is a SQL value keyword; DuckDB binds it to %s()" % (spelling, target))
+    for spelling, target in KEYWORDS
+] + [
+    # Quoted: the same COLUMN_REF, so still the function when no column is
+    # named so.
+    ('SELECT "current_date" FROM t', "select_list[0]: current_date is a SQL value keyword"),
+    ('SELECT "LocalTimestamp" FROM t', "select_list[0]: LocalTimestamp is a SQL value keyword"),
+    # Qualified by `alias`: IsPotentialAlias, so the binder still tries the map.
+    ("SELECT alias.current_timestamp FROM t", "select_list[0]: alias.current_timestamp is a SQL value keyword"),
+    # Outside the select list.
+    ("SELECT a FROM t WHERE b < current_date",
+     "where_clause.right: current_date is a SQL value keyword"),
+    # A table function's argument: TableFunctionBinder maps the last part
+    # of a qualified name too.
+    ("SELECT * FROM range(x.current_timestamp)",
+     (".from_table.function.", "x.current_timestamp is a SQL value keyword")),
     # One SELECT.
     ("SELECT a FROM t; SELECT b FROM t", "2 statements, not one"),
     # DuckDB's serializer refuses it before check() reads a node type.
@@ -76,6 +131,13 @@ ACCEPTED = [
     "SELECT a FROM t ORDER BY a ASC NULLS LAST LIMIT 2 OFFSET 1",
     "SELECT a FROM t LIMIT (SELECT CAST(2 AS BIGINT))",
     "SELECT a FROM t",
+    # A column named like a value keyword, qualified by its table: the
+    # binder resolves it as a column (or refuses it), never as the call.
+    "SELECT t.current_date FROM t",
+    'SELECT t."current_timestamp", t.user FROM t',
+    "SELECT a FROM t WHERE t.localtime IS NULL",
+    # Names that only begin or end like a keyword.
+    "SELECT current_dates, my_user, localtime_x FROM t",
 ]
 
 
@@ -90,7 +152,8 @@ def main():
         try:
             sql_discipline.check(con, sql)
         except sql_discipline.DisciplineError as e:
-            if want not in str(e):
+            wants = want if isinstance(want, tuple) else (want,)
+            if not all(w in str(e) for w in wants):
                 FAILURES.append("refused %r for %s, want a refusal containing %r" % (sql, e, want))
             continue
         tree = con.execute("SELECT json_serialize_sql(CAST(? AS VARCHAR))", [sql]).fetchone()[0]
