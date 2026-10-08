@@ -90,6 +90,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 10. **The float-to-integer window for an unsigned target is empty (§6.3).** `eval_cast_float_to_int` (`src/komira_column_kernels/cast_null.mojo`, around line 277) builds its window as `[MIN, -MIN)`, which is `[0, 0)` for an unsigned target and would refuse every value; the rule's window is `[0, MAX + 1)`. Latent today: every caller instantiates a signed target.
 11. **A NULL literal is declared non-nullable (§8.19).** `walk_expr_field` returns `Field("literal", <type>, False)` for every literal, the NULL literal included (`src/komira_plan_expr/expr_walk.mojo:814-817`), so a projected `NULL` is a column declared non-nullable whose every row is NULL.
 12. **Join output schema (§3.13, §3.14).** `LogicalPlan.join` (`src/komira_plan_ir/logical_plan.mojo:1255-1273`) keeps each side's input nullability for the padded side of LEFT, RIGHT and FULL joins, so a padded NULL lands in a column declared non-nullable; and it checks a right column's name only against left names before appending `_right`, so `a`, `a_right` on the left with `a` on the right, or `a` on the left with `a`, `a_right` on the right, yields two columns named `a_right`. The comparison is case-sensitive, so `A` and `a` do not collide.
+13. **Window function nullability and SUM types (§8.25 to §8.27).** `partition_expr_output_field` (`src/komira_plan_expr/partition_expr.mojo:404-505`) declares windowed SUM and AVG non-nullable (`:471-488`), though a frame holding only NULLs, or no rows, gives NULL; types a windowed SUM of DECIMAL or of an unsigned integer as FLOAT64 (`:471-480`), where §8.2 and §8.4 give UINT64 and DECIMAL(38, s); and gives windowed MIN/MAX and FIRST_VALUE/LAST_VALUE the input's nullability (`:463`, `:489-496`), which is sound only for frames that always contain the current row.
 
 ## 1. Three-valued logic
 
@@ -161,6 +162,13 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 - **Rule.** A `WHEN` whose condition is NULL is not taken; evaluation moves to the next `WHEN`, then to `ELSE`, and a missing `ELSE` answers NULL.
 - **DuckDB.** Standard SQL `CASE`; the oracle confirms.
 - **Current behaviour.** No CASE evaluator here. COALESCE is built as a CASE over `IS NOT NULL` conditions (`src/komira_plan_expr/scalar_desugar.mojo:84-111`).
+- **Mark.** MATCHES.
+
+### 1.8 NULLIF
+
+- **Rule.** `NULLIF(a, b)` is `CASE WHEN a = b THEN NULL ELSE a END`: NULL when `a` equals `b`, otherwise `a`. Because a comparison with NULL is NULL (§1.2) and a NULL condition is not taken (§1.7), a NULL `a` gives NULL (that is, `a`) and a NULL `b` gives `a`. The result has `a`'s type and is nullable. The plan has no NULLIF node; a frontend builds this CASE with `BIN_EQ`.
+- **DuckDB.** "Return NULL if a = b, else return a. Equivalent to CASE WHEN a = b THEN NULL ELSE a END" ([utility functions](https://duckdb.org/docs/current/sql/functions/utility.html)).
+- **Current behaviour.** The SQL function table records the same desugaring (`src/komira_sql/sql_fn_table.mojo:2948`); the binder that applies it is not in this repository.
 - **Mark.** MATCHES.
 
 ## 2. NULLs in aggregates
@@ -740,7 +748,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ## 8. Result types
 
-The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.21. It is part of this document: its items are counted below and its open items are in "Rulings needed".
+The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.27. It is part of this document: its items are counted below and its open items are in "Rulings needed".
 
 ## 9. Window functions
 
@@ -803,6 +811,13 @@ The type of every result column is in [the result-type table](query_semantics_ty
 - **Options.** (a) As proposed, with fractional offsets refused. (b) Add FLOAT64 offsets to the plan and the wire.
 - **Recommendation.** (a), and measure DuckDB's NULL and NaN frames before a case relies on them.
 - **Mark.** UNDECIDED.
+
+### 9.9 NULL partition keys
+
+- **Rule.** For PARTITION BY (windows and PARTITION_TOPN), NULL equals NULL: all rows whose partition key is NULL form one partition, as in grouping (§2.4). Multi-column keys compare column by column under the same rule, and float keys follow §2.6.
+- **DuckDB.** PARTITION BY groups rows like GROUP BY, NULLs together ([window functions](https://duckdb.org/docs/current/sql/functions/window_functions.html); the oracle confirms).
+- **Current behaviour.** No window operator here.
+- **Mark.** MATCHES.
 
 ## 10. Excel error values
 
@@ -919,7 +934,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 86, DEPARTS 18, UNDECIDED 17: 121 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 35 rows of "Rulings needed" are the 18 DEPARTS and 17 UNDECIDED items.
+MATCHES 94, DEPARTS 18, UNDECIDED 17: 129 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 35 rows of "Rulings needed" are the 18 DEPARTS and 17 UNDECIDED items.
 
 ## What are its limits and open questions?
 
