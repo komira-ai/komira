@@ -359,6 +359,45 @@ def test_a_source_added_twice_with_other_text() raises:
     assert_equal(_error_of(b), "komira_kg_code: source c//p/lib/a.mojo is added twice with different text")
 
 
+def test_a_label_listed_with_two_rules_of_one_length() raises:
+    # The two rules have the same byte length (11), so a check that
+    # compares lengths instead of text lets them through.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:x": {"buck.type": "python_test"}}')
+    b.add_uquery_json('{"c//p:x": {"buck.type": "cxx_library"}}')
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:x is listed twice with different rules")
+
+
+def test_a_library_listed_twice_with_import_names_of_one_length() raises:
+    # `liba` and `libb` have one length: only a text compare refuses them.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "import_name": "liba", "srcs": ["c//p/lib/__init__.mojo"]}}')
+    b.add_uquery_json('{"c//p:lib": {"buck.type": "mojo_library_rule", "import_name": "libb", "srcs": ["c//p/lib/__init__.mojo"]}}')
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different import names")
+
+
+def _foo_doc_summary(summary: String) -> String:
+    return (
+        '{"decl": {"kind": "package", "name": "foo", "modules": [{"kind": "module", "name": "__init__",'
+        ' "functions": [{"kind": "function", "name": "f", "overloads": [{"signature": "def f()", "summary": "'
+        + summary
+        + '"}]}]}]}}'
+    )
+
+
+def test_one_symbol_id_from_one_file_with_two_texts() raises:
+    # Two libraries list one file; their doc JSONs give foo.f at the same
+    # path with summaries A and B. Only the node text tells them apart.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(
+        '{"c//p:a": {"buck.type": "mojo_library_rule", "srcs": ["c//p/foo/__init__.mojo"]},'
+        ' "c//p:b": {"buck.type": "mojo_library_rule", "srcs": ["c//p/foo/__init__.mojo"]}}'
+    )
+    b.add_mojo_doc_json("c//p:a", _foo_doc_summary("A"))
+    b.add_mojo_doc_json("c//p:b", _foo_doc_summary("B"))
+    assert_equal(_error_of(b), "komira_kg_code: two different function nodes have the id foo.f")
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Runs one case; a failure is printed, not fatal, so one build names
     every case a planted defect breaks."""
@@ -407,6 +446,9 @@ def main() raises:
     _run("two_skipped_rules", test_two_skipped_rules_for_one_label, failed)
     _run("library_twice_import", test_a_library_listed_twice_with_other_import_names, failed)
     _run("source_twice", test_a_source_added_twice_with_other_text, failed)
+    _run("rules_one_length", test_a_label_listed_with_two_rules_of_one_length, failed)
+    _run("import_names_one_length", test_a_library_listed_twice_with_import_names_of_one_length, failed)
+    _run("symbol_one_file_two_texts", test_one_symbol_id_from_one_file_with_two_texts, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
     print("OK")
