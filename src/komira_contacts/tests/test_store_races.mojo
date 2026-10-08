@@ -22,6 +22,14 @@
 #                  and the stale key is still there for the next create.
 #                  Catches a takeover whose guard miss is ignored (two cards
 #                  holding one uid).
+#   delete_book_written  a peer advances the book's modseq after
+#                  delete_card wrote its tombstone and released the uid key:
+#                  refused with the version-conflict text, the card is still
+#                  listed and its uid key still held. Catches a failed delete
+#                  that commits instead of rolling back.
+#   update_book_written  the same peer after update_card's card write: refused,
+#                  and the card keeps its version and modseq. Catches the
+#                  same defect in update_card.
 # =============================================================================
 
 from std.testing import assert_equal
@@ -320,8 +328,47 @@ def check_key_taken() raises:
     assert_equal(_create(store, reactor, b.id, "s"), OK, "the stale key is still stale")
 
 
+def check_delete_book_written() raises:
+    var store = _store()
+    var rt = Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var b = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "B", False)
+    var c = store.create_card[Rt](reactor, _alice(), b.id, _uid_card("d"))
+    store.database().arm(BOOK_WRITTEN, b.id, "d")
+    var got = String(OK)
+    try:
+        _ = store.delete_card[Rt](reactor, _alice(), b.id, c.id, c.version)
+    except e:
+        got = String(e)
+    assert_equal(got, ERR_VERSION_CONFLICT, "the book moved under the delete")
+    assert_equal(store.database().race, NO_RACE, "the peer wrote")
+    assert_equal(_uids(store, reactor, b.id), "d", "the rollback undid the tombstone")
+    assert_equal(_create(store, reactor, b.id, "d"), ERR_UID_TAKEN, "the rollback kept the uid key")
+
+
+def check_update_book_written() raises:
+    var store = _store()
+    var rt = Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var b = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "B", False)
+    var c = store.create_card[Rt](reactor, _alice(), b.id, _uid_card("p"))
+    store.database().arm(BOOK_WRITTEN, b.id, "p")
+    var got = String(OK)
+    try:
+        _ = store.update_card[Rt](reactor, _alice(), b.id, c.id, c.version, _uid_card("p"))
+    except e:
+        got = String(e)
+    assert_equal(got, ERR_VERSION_CONFLICT, "the book moved under the update")
+    assert_equal(store.database().race, NO_RACE, "the peer wrote")
+    var now = store.get_card[Rt](reactor, _alice(), b.id, c.id)
+    assert_equal(now.version, c.version, "the rollback undid the card write")
+    assert_equal(now.modseq, c.modseq, "and its modseq")
+
+
 def main() raises:
     check_book_written()
     check_key_released()
     check_key_taken()
+    check_delete_book_written()
+    check_update_book_written()
     print("PASS komira_contacts test_store_races")
