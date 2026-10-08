@@ -8,7 +8,7 @@ module runs against them unchanged.
     cloud and the offline test double.
   * `FakeLimitedCloud` ("fake-limited"): deliberately partial (no
     `container_job`, no `worker`, no `table`, no `bucket`, no messaging, no secret, no DNS, no
-    certificate, no public ingress); the offline proof that a graph a cloud cannot
+    certificate, no schedule, no event trigger, no network type, no public ingress); the offline proof that a graph a cloud cannot
     host is refused before anything is created.
 
 `FakeCloud` takes a provider shape (`ProviderShape`: generic by default;
@@ -56,6 +56,13 @@ from kci_cloud_fake.shapes import (
     ONPREM_DNS_REASON,
     ONPREM_MESSAGING_REASON,
     ONPREM_TABLE_REASON,
+    ONPREM_EVENT_TRIGGER_REASON,
+    ONPREM_NETWORK_REASON,
+    ONPREM_SCHEDULE_CALL_REASON,
+    SCHEDULE_DAY_REASON_AWS,
+    SCHEDULE_UTC_REASON_AZURE,
+    SERVICE_NETWORK_REASON_AZURE,
+    SUBNET_ZONE_REASON_AWS,
     ProviderShape,
     ShapeRow,
     TARGET_ANY,
@@ -65,7 +72,18 @@ from kci_cloud_fake.shapes import (
 )
 from kci_cloud_fake.messaging import pull_shape
 from kci_cloud_fake.workloads import lower_run, workload_limits
+from kci_cloud_fake.triggers import folded_fields, folds, lower_trigger, trigger_limits
 from kci_cloud_fake.secrets import SECRET_NAMED, lower_secret, secret_env_fields
+from kci_cloud_fake.network import (
+    fake_ip_address,
+    fake_network_name,
+    fake_subnet_name,
+    lower_address,
+    lower_network,
+    lower_subnet,
+    network_input,
+    network_limits,
+)
 from kci_cloud_fake.dns import (
     dns_limits,
     fake_certificate_name,
