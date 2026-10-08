@@ -1,7 +1,8 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
+load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
 # Coverage builds and runs (tools/build/mojo/README.md, "Coverage builds";
 # tests 41 and 43 of tools/build/tests/run_tests.sh).
@@ -60,6 +61,59 @@ mojo_library(
         "tests/test_describe.mojo",
         "tests/test_value.mojo",
     ],
+)
+
+# The coverage gate of what ships, in a build without the switch: a library
+# with coverage and a gate whatever the switch says, and WITH a conda package
+# (the macro's covconda_conda), as a library of komira has with
+# `-c komira.coverage=true`. Its gate is komira's, in census mode (findings
+# never fatal), and does not read branch records, so its markers are its one
+# coverage run's and its gate's.
+mojo_library(
+    name = "covconda",
+    srcs = [
+        "covlib/__init__.mojo",
+        "covlib/value.mojo",
+    ],
+    conda_name = "covconda",
+    coverage_branch_gate = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    import_name = "covlib",
+    test_srcs = ["tests/test_value.mojo"],
+)
+
+# The package of a library of the ledger COVERAGE_NO_GATE
+# (tools/build/coverage/policy.bzl) is given its `<name>_cov_gate` as
+# `coverage_gate`; this one is given the gate summary of covconda, an output
+# that is none of its markers.
+conda_package(
+    name = "covconda_ledger_conda",
+    coverage_gate = ":covconda[coverage][gate][summary]",
+    lib = ":covconda",
+    summary = "A fixture of tests//functional/coverage:conda_gate_ledger.",
+)
+
+# Both joins of covconda_conda (what [default] and [release] are copies of)
+# wait for covconda's two coverage markers, and those of
+# covconda_ledger_conda for its coverage_gate too: checked at analysis
+# (CondaJoinInfo, tools/build/package/conda.bzl), so `pr / check`, which
+# builds tests//functional/... without the switch, fails when conda.bzl stops
+# passing `gate` to either copy.
+cov_conda_gate_check(
+    name = "conda_gate",
+    conda = ":covconda_conda",
+    lib = ":covconda",
+    markers = 2,
+)
+
+cov_conda_gate_check(
+    name = "conda_gate_ledger",
+    conda = ":covconda_ledger_conda",
+    coverage_gate = ":covconda[coverage][gate][summary]",
+    lib = ":covconda",
+    markers = 2,
 )
 
 # Each coverage binary has line tables naming the library source its test
@@ -371,7 +425,8 @@ cov_debug_check(
 # Test 47: branch coverage. A library whose function has every kind of
 # source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
 # its arms, never the first (and a String destroyed at an `if`, loops over
-# collections, a Dict subscript, user masks): with
+# collections, a Dict subscript, user masks, raising calls in `try:`
+# bodies): with
 # coverage (forced here, as for covlib_forced) it has [coverage][bc],
 # [coverage][pgo_bin] and [coverage][branch].
 mojo_library(
@@ -384,6 +439,7 @@ mojo_library(
         "branchlib/score.mojo",
         "branchlib/shapes.mojo",
         "branchlib/strings.mojo",
+        "branchlib/trial.mojo",
     ],
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
@@ -478,6 +534,20 @@ cov_branch_check(
 # test in shape, the `and` and `icmp ne` at the `&`; it stays a decision
 # because the test is not at the `if`'s location (`!= 0`, 9,5, is an
 # `icmp eq` and a `xor`, no String shape).
+# trial.mojo: each raising call in a `try:` body is a `try` decision, arm 0
+# the call returned, arm 1 it raised into the handler: `both` (15,23: 1,1),
+# `normal_only` (23,20: 1,0, its raise never taken), a nested `try` (35,24
+# outer, 37,25 inner, 39,25 a call in the inner `except` body, still in the
+# outer `try:` body: 1,0), a `try`/`finally` (57,20), a `try`/`else` (66,20;
+# the call in the `else` body, 70, is the compiler's), a Dict subscript
+# (76,17, at the `[`), and in `calls` a call returning only its flag (110),
+# an inlined raising callee (111,16: its `if` is 88,5 at its own line), the
+# two calls of `checked(checked(x))` (112,29 inner, 112,21 outer: 4,0), a
+# raising constructor (113), a method (114) and `Int(s)` (115); one in a
+# loop (125,25). `outside`'s call (30), whose error goes to its caller, and
+# `raise` (48) give no record. A classifier without the `try` rule loses
+# every try record; one ignoring the `try:` scope records 70 (and
+# lookup.mojo's 7,13); one keeping LLVM's arm order gives 23,20 as 0,1.
 # test_gate_env calls none of branchlib: its record file is empty.
 cov_report_check(
     name = "branch_info",

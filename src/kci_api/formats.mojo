@@ -35,6 +35,9 @@ comptime KIND_PRODUCED: String = "PRODUCED"
 
 comptime FORMAT_ARTIFACTS: String = "kci.artifacts"
 """The artifacts file (textproto, written by people)."""
+comptime FORMAT_CELLS: String = "kci.cells"
+"""The cells file: the cells a DEPLOY step deploys into (textproto, written
+by people)."""
 comptime FORMAT_CHANNELS: String = "kci.channels"
 """The release channels file (textproto, written by people)."""
 comptime FORMAT_MACHINE: String = "kci.machine"
@@ -73,6 +76,7 @@ def format_table() -> List[FormatRow]:
     """Every document, authored files first."""
     var t = List[FormatRow]()
     t.append(FormatRow(String(FORMAT_ARTIFACTS), String(KIND_AUTHORED), 1, 1))
+    t.append(FormatRow(String(FORMAT_CELLS), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_CHANNELS), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_MACHINE), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_ARTIFACT_MANIFEST), String(KIND_PRODUCED), 1, 1))

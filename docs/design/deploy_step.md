@@ -315,8 +315,8 @@ generated async client on a blocking runtime and waits on the long-running opera
 | `read_existing` | A get **by the cloud name** (`physical_name`) and the node's kind, never by node id. It reports present, stamped (`identity_of` on its labels or description), the kind in `LoweredNode.kind`'s vocabulary, the name, and each field of the shape it can read under the name `lower` writes. A field it cannot read is not reported (and so not compared). G4. |
 | `release` | One label update (or, on a description carrier, one description patch) that drops every kci label or line (`kci_*`, `kci-*`, and the `kci:v<scheme>` identity line) and nothing else. Never a delete. It is atomic, or drops the adoption mark last (the trait's contract). G4. |
 | `adopt_owned` (each descriptor's, not a trait method) | Writes the identity, the retention mark and `kci_adopted=true`, never a run id. G4. |
-| `whoami` | The token's principal. This needs a token-info read, which no client has today (G1). |
-| `trust_render` / `trust_check` | Render, and then read back, the workload-identity provider and the binding of the cell's deploy identity. This needs a WIF provider `get` (G1). A trust check that cannot fail is not a check. |
+| `whoami` | The token's principal. This needs a token-info read, which no client has. No googleapis proto declares one, so G1 could not generate it: it is a hand-written read in `komira_gcp_core` or `komira_gcp_wif`, owed before G4. |
+| `trust_render` / `trust_check` | Render, and then read back, the workload-identity provider and the binding of the cell's deploy identity. This needs a WIF provider `get`, which G1 generated in `komira_gcp_iam` at IAM **v1beta**: the pinned googleapis declares the workload identity pools only there. IAM also serves the resource at v1, and the v1beta file may not declare a newer provider field, so a field `trust_check` compares must be one that file declares. A trust check that cannot fail is not a check. |
 | `bootstrap_resources` | The state store and the image registry, matching the fake. |
 | `image_registry(ctx)` **(new, G3)** | The pull and push address of the cell's bootstrap registry. It is pure, computed from settings, machine and cell. |
 | `registry_login(creds)` **(new, G3)** | The basic-auth user and secret a registry client presents. The user is the access-token convention. Plain strings, so `kci_cloud` does not depend on `komira_oci`. |
@@ -325,7 +325,7 @@ generated async client on a blocking runtime and waits on the long-running opera
 
 | catalog type | roles (shared shape) | GCP object | stamp carrier | client methods missing today |
 |---|---|---|---|---|
-| `service_account` | identity | IAM service account | **description** (no labels; 256 bytes) | `PatchServiceAccount` (a binding on an account uses IAM `Get/SetIamPolicy`, which exist) |
+| `service_account` | identity | IAM service account | **description** (no labels; 256 bytes) | `PatchServiceAccount`, not generated: its binding puts a field of the body in the path (`{service_account.name=...}`) with the whole request as the body (`body: "*"`), which the generator refuses; G4 needs that generator change first (a binding on an account uses IAM `Get/SetIamPolicy`, which exist) |
 | `service` | identity, run, public | service account, Run Service, invoker member binding | labels on the Service; the binding is derived | Services `Get/SetIamPolicy` |
 | `worker` | identity, run | service account, Run worker pool | labels | WorkerPools create/get/list/update/delete (question Q8) |
 | `container_job` | identity, run | service account, Run Job | labels | Jobs `Get/SetIamPolicy` (needed for the schedule's invoke grant) |

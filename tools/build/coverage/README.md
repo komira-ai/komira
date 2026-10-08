@@ -4,7 +4,8 @@
 tracefiles too, and the branch records of `branch/`), maps every file in them to a file of the repository and its
 package, and measures each package's line and branch coverage of its whole
 source. It holds the numbers to the policy (a target, per-package floors that
-may only rise, no surviving mutant) and lists every exemption for a
+may only rise, and no surviving mutant among the mutation results it is
+given: no build action gives it any today) and lists every exemption for a
 reviewer's approval (it does not check approval itself), and writes:
 
 - `covcheck report`: a Markdown summary, the request bodies of a GitHub check
@@ -303,6 +304,14 @@ counted apart and are neither killed nor survived. The mutation score is
 `MutantSurvived` finding and an annotation. Refused, naming `<file>:<line>`:
 a carriage return, an empty line, another number of fields, a malformed line
 number, an unknown status, an empty path or operator.
+
+The decision (`policy.bzl`, `COVERAGE_BRANCH_GATE`): once a package's
+branch coverage is enforced, mutation testing is not its enforced gate;
+its branch arms are. Today no build action passes `--mutants`, so
+mutation never gates a package. covcheck itself does not treat mutants
+apart: given `--mutants`, a surviving mutant is a `MutantSurvived`
+finding, and in enforce mode any finding fails `gate` (exit 3).
+Making mutation results report-only there is future work.
 
 ## Numbers and findings
 
