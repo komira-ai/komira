@@ -101,6 +101,18 @@
 # Every verb runs the engine's OWNED forms (the cell scope): the store keyed
 # by (machine, cell, resource), the stamp born with each object, and a
 # foreign or conflicting object refused before any change.
+#
+# THE TYPED REFUSAL (refusal.mojo). `plan_report` and `apply_resources`,
+# given a `refusal` argument, set it to a `Refusal` exactly when the run is
+# refused before any change: any finding above (kci_cloud's own, raised with
+# the one refusal text) or the engine's ownership refusal (by_engine). A plan
+# raises either; an apply raises kci_cloud's and returns the engine's in
+# `ApplyOutcome.refusal`. Anything else the verbs raise (a read that failed,
+# a broken lowering contract, a `realize` that raised, an engine error) leaves
+# it None, so a caller tells REFUSED from FAILED without reading text. An
+# apply whose engine run finished and whose release then failed is typed
+# apart too (`ApplyOutcome.failed_release`). A plan's report also carries the
+# `leftover` and `left_behind` the apply would report.
 # =============================================================================
 
 from kci_reconciler import (
@@ -109,7 +121,6 @@ from kci_reconciler import (
     ChangeAction,
     Creds,
     InputRef,
-    REFUSED_TOKEN,
     RETAIN_DELETE,
     RETAIN_KEEP,
     ResourceGraph,
@@ -146,6 +157,7 @@ from kci_cloud.catalog import (
     effective_retention,
     primary_node,
 )
+from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
 from kci_cloud.data import key_change_findings
 from kci_cloud.feed import feeds_of
@@ -162,7 +174,9 @@ from kci_cloud.metadata import (
 )
 from kci_cloud.compose import expand
 from kci_cloud.compose_refs import owner_of_node
-from kci_cloud.validate import refusal_text, validate_expanded
+from kci_cloud.outcome import ApplyOutcome
+from kci_cloud.refusal import Refusal, engine_refusal, graph_refusal
+from kci_cloud.validate import validate_expanded
 
 
 def refuse_unless_valid[
@@ -199,11 +213,37 @@ def valid_expansion[
     writes no run-id label, and a cleanup must not be blocked by a mark it
     never writes. An expansion finding is reported beside the cell's
     findings, and the expanded graph is not judged."""
+    var refusal = Optional[Refusal](None)
+    return _valid_expansion(clouds, cloud, ctx, resources, check_validation_run, definitions, refusal)
+
+
+def _refuse(cloud: CloudId, findings: List[Finding], mut refusal: Optional[Refusal]) raises:
+    """Set `refusal` to kci_cloud's refusal of `findings`, and raise its
+    text."""
+    var r = graph_refusal(cloud, findings)
+    var text = r.text.copy()
+    refusal = r^
+    raise Error(text)
+
+
+def _valid_expansion[
+    S: CloudAdapter
+](
+    clouds: Clouds,
+    mut cloud: S,
+    ctx: CellContext,
+    resources: List[Resource],
+    check_validation_run: Bool,
+    definitions: List[CompositeDefinition],
+    mut refusal: Optional[Refusal],
+) raises -> List[Resource]:
+    """`valid_expansion`, setting `refusal` when it refuses."""
     if not ctx.scope.owned():
-        raise Error(
-            String("kci deploys only into a cell: the context names no")
-            + String(" machine and cell")
-        )
+        var text = String("kci deploys only into a cell: the context names no") + String(" machine and cell")
+        var why = List[Finding]()
+        why.append(Finding(FINDING_CELL, String("(cell)"), String("scope"), text))
+        refusal = Refusal(False, why^, text)
+        raise Error(text)
     var findings = List[Finding]()
     var run_problem = String("")
     if check_validation_run:
@@ -222,7 +262,7 @@ def valid_expansion[
     for i in range(len(more)):
         findings.append(more[i].copy())
     if len(findings) > 0:
-        raise Error(refusal_text(cloud.cloud_id(), findings))
+        _refuse(cloud.cloud_id(), findings, refusal)
     return x.resources.copy()
 
 
@@ -509,35 +549,44 @@ struct _Prepared(Movable):
 
 def _prepare[
     S: CloudAdapter
-](mut cloud: S, ctx: CellContext, resources: List[Resource], creds: Creds, destroy: Bool = False) raises -> _Prepared:
+](
+    mut cloud: S,
+    ctx: CellContext,
+    resources: List[Resource],
+    creds: Creds,
+    mut refusal: Optional[Refusal],
+    destroy: Bool = False,
+) raises -> _Prepared:
     """Lowering + the roles `list_owned` says to remove. Called after
     validate, which has refused a role over the label budget. Refused after
     `list_owned` and before realize: a changed cloud name; a changed table
     key (not on a destroy); on plan and apply, an object carrying the
     adoption mark whose resource does not write `adopt`, and an adopted
     object missing or not the one declared; and a delete of an object carrying the adoption
-    mark that its resource does not allow."""
+    mark that its resource does not allow. Each refusal sets `refusal`; a
+    read that raises (`list_owned`, `read_existing`) and a broken lowering
+    contract do not."""
     var out = _Prepared()
     out.nodes = lower_data(cloud, resources)
     var rem = removals(cloud, ctx, out.nodes, resources, creds)
     if len(rem.name_changes) > 0:
-        raise Error(refusal_text(cloud.cloud_id(), rem.name_changes))
+        _refuse(cloud.cloud_id(), rem.name_changes, refusal)
     if not destroy and len(rem.key_changes) > 0:
-        raise Error(refusal_text(cloud.cloud_id(), rem.key_changes))
+        _refuse(cloud.cloud_id(), rem.key_changes, refusal)
     var taking = List[String]()
     if not destroy:
         var marked = unadopted_findings(out.nodes, rem.owned, resources)
         if len(marked) > 0:
-            raise Error(refusal_text(cloud.cloud_id(), marked))
+            _refuse(cloud.cloud_id(), marked, refusal)
         var check = adoption_check(cloud, creds, out.nodes)
         if len(check.findings) > 0:
-            raise Error(refusal_text(cloud.cloud_id(), check.findings))
+            _refuse(cloud.cloud_id(), check.findings, refusal)
         taking = check.taking.copy()
     for i in range(len(rem.roles)):
         out.nodes.append(rem.roles[i].copy())
     var deletes = delete_findings(out.nodes, rem.owned, resources, destroy)
     if len(deletes) > 0:
-        raise Error(refusal_text(cloud.cloud_id(), deletes))
+        _refuse(cloud.cloud_id(), deletes, refusal)
     out.adopted = adopted_nodes_of(rem.owned, taking)
     out.leftover = rem.leftover.copy()
     out.left_behind = rem.left_behind.copy()
@@ -597,91 +646,46 @@ def plan_report[
     mut store: St,
     definitions: List[CompositeDefinition] = List[CompositeDefinition](),
 ) raises -> PlanReport:
+    """`plan_report` with no refusal argument (the next form)."""
+    var refusal = Optional[Refusal](None)
+    return plan_report(clouds, cloud, ctx, resources, creds, store, definitions, refusal)
+
+
+def plan_report[
+    S: CloudAdapter, St: StateStore
+](
+    clouds: Clouds,
+    mut cloud: S,
+    ctx: CellContext,
+    resources: List[Resource],
+    creds: Creds,
+    mut store: St,
+    definitions: List[CompositeDefinition],
+    mut refusal: Optional[Refusal],
+) raises -> PlanReport:
     """The dry run: configure, expand, validate, lower, check the adoptions,
-    `plan_graph_owned`, then refuse a replace of any adopted node. Creates nothing and writes nothing to the
-    store. The report names the adopted nodes and the releases an apply
-    would make."""
-    var expanded = valid_expansion(clouds, cloud, ctx, resources, True, definitions)
-    var p = _prepare(cloud, ctx, expanded, creds)
+    `plan_graph_owned`, then refuse a replace of any adopted node. Creates
+    nothing and writes nothing to the store. The report names the adopted
+    nodes, the releases an apply would make, and the leftover and left
+    behind it would report. A refusal (kci_cloud's or the engine's) raises
+    with `refusal` set; any other raise leaves it None."""
+    refusal = None
+    var expanded = _valid_expansion(clouds, cloud, ctx, resources, True, definitions, refusal)
+    var p = _prepare(cloud, ctx, expanded, creds, refusal)
     var graph = realize_graph(cloud, p.nodes)
-    var actions = plan_graph_owned(graph, creds, with_adopted(ctx, expanded).scope, store)
+    var scope = with_adopted(ctx, expanded).scope.copy()
+    var actions = List[ChangeAction]()
+    try:
+        actions = plan_graph_owned(graph, creds, scope, store)
+    except e:
+        refusal = engine_refusal(scope, String("plan"), String(e))
+        raise e^
     var bad = replace_findings(actions, p.adopted)
     if len(bad) > 0:
-        raise Error(refusal_text(cloud.cloud_id(), bad))
-    return PlanReport(actions^, p.adopted.copy(), _released_ids(p.releases))
-
-
-struct ApplyOutcome(Movable, Deinitable):
-    """What an apply did, whether or not it finished.
-
-      * `error`    — None when every node converged; else the engine's error
-                     (it names the node, the verb and the fault domain). An
-                     error starting `kci: REFUSED` is an ownership refusal
-                     made before any change (`refused()`).
-      * `applied`  — every node, in apply order, when `error` is None; empty
-                     otherwise (use `landed`).
-      * `landed`   — the nodes this apply acted on before it stopped, in
-                     apply order, each with the verb it issued. On success it
-                     equals `applied`. These mutations are LIVE in the cell.
-      * `pending`  — the nodes it never reached, in the order they would have
-                     run; the failing node is the first. Empty on success.
-      * `leftover` — nodes of resources the file no longer names that the
-                     cloud says this cell owns; reported, never deleted here.
-      * `left_behind` — RETAINED objects (`kci-retention=retain`) of resources
-                     still in the file that the file no longer lowers;
-                     reported, never deleted.
-      * `released` — objects kci adopted whose resource left the list, that
-                     this apply released (their kci labels and state record
-                     dropped, the object left standing), in order. A release
-                     runs only after the engine's apply succeeded. When one
-                     fails, `error` says which (`release of <node> failed:
-                     ...`), `released` lists those released before it,
-                     `landed` holds every node the engine applied, `pending`
-                     is empty (the engine finished) and `applied` is empty;
-                     the next apply releases the rest.
-
-    A caller that only got a bool (or only the error) could not tell "nothing
-    happened" from "half the graph is live": that is the PARTIAL outcome a
-    driver must not retry blindly, and these lists are how it is reported.
-    """
-
-    var applied: List[AppliedNode]
-    var landed: List[AppliedNode]
-    var pending: List[String]
-    var error: Optional[String]
-    var leftover: List[String]
-    var left_behind: List[String]
-    var released: List[String]
-
-    def __init__(
-        out self,
-        var applied: List[AppliedNode],
-        var landed: List[AppliedNode],
-        var pending: List[String],
-        var error: Optional[String],
-        var leftover: List[String] = List[String](),
-        var left_behind: List[String] = List[String](),
-        var released: List[String] = List[String](),
-    ):
-        self.applied = applied^
-        self.landed = landed^
-        self.pending = pending^
-        self.error = error^
-        self.leftover = leftover^
-        self.left_behind = left_behind^
-        self.released = released^
-
-    def ok(self) -> Bool:
-        return not self.error
-
-    def partial(self) -> Bool:
-        """True iff the apply failed AFTER at least one node landed."""
-        return Bool(self.error) and len(self.landed) > 0
-
-    def refused(self) -> Bool:
-        """True iff the engine refused the run before any change (a node it
-        may not act on: foreign, conflict, or one that cannot stamp)."""
-        return Bool(self.error) and self.error.value().startswith(REFUSED_TOKEN)
+        _refuse(cloud.cloud_id(), bad, refusal)
+    return PlanReport(
+        actions^, p.adopted.copy(), _released_ids(p.releases), p.leftover.copy(), p.left_behind.copy()
+    )
 
 
 def apply_resources[
@@ -715,8 +719,28 @@ def apply_resources[
     at that node, after the nodes before it landed). After the engine's
     apply succeeds, each release is made (its record retired, then
     `CloudAdapter.release`)."""
-    var expanded = valid_expansion(clouds, cloud, ctx, resources, True, definitions)
-    var p = _prepare(cloud, ctx, expanded, creds)
+    var refusal = Optional[Refusal](None)
+    return apply_resources(clouds, cloud, ctx, resources, creds, store, definitions, refusal)
+
+
+def apply_resources[
+    S: CloudAdapter, St: StateStore
+](
+    clouds: Clouds,
+    mut cloud: S,
+    ctx: CellContext,
+    resources: List[Resource],
+    creds: Creds,
+    mut store: St,
+    definitions: List[CompositeDefinition],
+    mut refusal: Optional[Refusal],
+) raises -> ApplyOutcome:
+    """`apply_resources` (the form above), with `refusal` set exactly when
+    the run is refused before any change: raised (kci_cloud's refusal) or
+    returned (the engine's, also in `ApplyOutcome.refusal`)."""
+    refusal = None
+    var expanded = _valid_expansion(clouds, cloud, ctx, resources, True, definitions, refusal)
+    var p = _prepare(cloud, ctx, expanded, creds, refusal)
     var scope = with_adopted(ctx, expanded).scope.copy()
     if len(p.adopted) > 0:
         var pre = realize_graph(cloud, p.nodes)
@@ -724,14 +748,15 @@ def apply_resources[
         try:
             actions = plan_graph_owned(pre, creds, scope, store)
         except e:
-            # Only the ownership refusal steps aside: the apply below makes
-            # it the same way, before any change, and returns it. Any other
-            # error (a cloud read included) is raised here, before any change.
-            if not String(e).startswith(REFUSED_TOKEN):
+            # Only the engine's ownership refusal (typed) steps aside: the
+            # apply below makes it the same way, before any change, and
+            # returns it. Any other error (a cloud read included) is raised
+            # here, before any change.
+            if not engine_refusal(scope, String("plan"), String(e)):
                 raise e^
         var bad = replace_findings(actions, p.adopted)
         if len(bad) > 0:
-            raise Error(refusal_text(cloud.cloud_id(), bad))
+            _refuse(cloud.cloud_id(), bad, refusal)
     var graph = realize_graph(cloud, p.nodes)
     var landed = List[AppliedNode]()
     var pending = List[String]()
@@ -742,15 +767,30 @@ def apply_resources[
     except e:
         error = String(e)
     if error:
+        refusal = engine_refusal(scope, String("apply"), error.value())
         return ApplyOutcome(
-            List[AppliedNode](), landed^, pending^, error^, p.leftover.copy(), p.left_behind.copy()
+            List[AppliedNode](),
+            landed^,
+            pending^,
+            error^,
+            p.leftover.copy(),
+            p.left_behind.copy(),
+            refusal=refusal.copy(),
         )
-    var released = _release(cloud, creds, scope, store, p.releases, error)
+    var failed = String("")
+    var released = _release(cloud, creds, scope, store, p.releases, error, failed)
     if error:
         # A failed release: the engine finished, so every node landed and
         # none is pending.
         return ApplyOutcome(
-            List[AppliedNode](), applied^, pending^, error^, p.leftover.copy(), p.left_behind.copy(), released^
+            List[AppliedNode](),
+            applied^,
+            pending^,
+            error^,
+            p.leftover.copy(),
+            p.left_behind.copy(),
+            released^,
+            failed_release=failed^,
         )
     return ApplyOutcome(applied^, landed^, pending^, None, p.leftover.copy(), p.left_behind.copy(), released^)
 
@@ -764,10 +804,12 @@ def _release[
     mut store: St,
     releases: List[OwnedRecord],
     mut error: Optional[String],
+    mut failed: String,
 ) -> List[String]:
     """Release each object of `releases` in order (adoption.mojo, rule 4):
     its state record is retired, then the cloud drops its kci labels. The
-    first failure stops the run and is set in `error`; the ids released
+    first failure stops the run and is set in `error`, its node in
+    `failed`; the ids released
     before it are returned. Either failure leaves the object carrying its
     stamp and the adoption mark, so the next apply's `list_owned` reports it
     and releases it again (retiring a retired record is a no-op in
@@ -782,6 +824,7 @@ def _release[
             cloud.release(creds, rec)
         except e:
             error = String("release of ") + rec.owner_node + String(" failed: ") + String(e)
+            failed = rec.owner_node.copy()
             return done^
         done.append(rec.owner_node.copy())
     return done^
@@ -806,7 +849,8 @@ def destroy_resources[
     half-lowered. The scope's validation run id is not checked: destroy
     writes no run-id label, so a malformed one does not block a cleanup."""
     var expanded = valid_expansion(clouds, cloud, ctx, resources, False, definitions)
-    var p = _prepare(cloud, ctx, expanded, creds, destroy=True)
+    var refusal = Optional[Refusal](None)
+    var p = _prepare(cloud, ctx, expanded, creds, refusal, destroy=True)
     var graph = realize_graph(cloud, p.nodes)
     return destroy_graph_owned(graph, creds, ctx.scope, store)
 
