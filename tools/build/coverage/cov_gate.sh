@@ -23,7 +23,8 @@
 #   --info-package <package>  the library's package is test-only
 #                (COVERAGE_INFO_ONLY_DIRS, policy.bzl): covcheck reports its
 #                findings as information, so it has none and the gate
-#                passes in every mode (covcheck --info-package)
+#                never fails on a finding (covcheck --info-package; exits
+#                1 and 2 still fail it)
 #   <report>     a test's Cobertura report, in repository paths (cov_run.sh)
 #   <branch_info> after the argument `--branch-lcov` (given at most once:
 #                every argument after it is a branch record file): a

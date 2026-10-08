@@ -31,13 +31,18 @@ COVERAGE_TARGET_BP = 10000
 
 # The directories of test-only packages, relative to a cell's root (the
 # layout of src/: test-only packages are under src/tests/<kind>/). A
-# package in one of them or under it is measured and shown as every package
-# is, but held to no target: what covcheck finds in it is information
-# (covcheck --info-package), never a finding, so its coverage gate passes
-# in every mode and a check run neither fails on it nor annotates it above
-# `notice`. Every finding of the package is information, BelowTarget and
-# the ratchet's included. Read by the gate (tools/build/mojo/coverage.bzl)
-# and, as written on this one line, by .github/ci/coverage_measure.sh.
+# package in one of them or under it, at a path-segment boundary, is
+# measured and shown as every package is, but held to no target: what
+# covcheck finds in it is information (covcheck --info-package), never a
+# finding, so its coverage gate never fails on a finding, in any mode, and
+# a check run neither fails on it nor annotates it above `notice`. An input
+# covcheck refuses (its exit 1 or 2) still fails the gate. Every finding
+# of the package is information, BelowTarget and the ratchet's (a
+# Regression below a row it has) included, and covcheck proposes no
+# ratchet row for it: a test-only package has no floor. An entry must be
+# a relative directory with no empty, `.` or `..` segment and no trailing
+# `/` (tools/build/mojo/coverage.bzl fails at load otherwise). Read by the
+# gate and, as written on this one line, by .github/ci/coverage_measure.sh.
 COVERAGE_INFO_ONLY_DIRS = ["src/tests"]
 
 # The ledger of libraries that cannot have a coverage gate of their own, by

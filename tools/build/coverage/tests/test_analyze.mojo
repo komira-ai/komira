@@ -434,6 +434,35 @@ def test_info_packages() raises:
     assert_equal(len(b.findings), 0)
     assert_equal(len(b.info_findings), 6)
     assert_equal(b.conclusion, "success")
+    # A row a test-only package has: its Regression is information too,
+    # and the proposal raises no floor and adds no row for it.
+    var r = parse_ratchet(String("src/beta\t9000\t-\n"), String("r.tsv"))
+    var o2 = Options()
+    o2.mode = String("enforce")
+    o2.info_packages.append("src/beta")
+    var c = analyze(t, _none(), _repo(), r, _sources(), o2)
+    var info = String("")
+    for i in range(len(c.info_findings)):
+        info += c.info_findings[i].kind + String(" ")
+    assert_true(info.find("Regression") >= 0, info)
+    for i in range(len(c.findings)):
+        assert_true(c.findings[i].package != "src/beta")
+    # alpha gets its proposed row; beta keeps its row as it was, not
+    # lowered to the 0% measured nor raised.
+    assert_equal(len(c.proposal.rows), 2)
+    assert_equal(c.proposal.rows[0].package, "src/alpha")
+    assert_equal(c.proposal.rows[1].package, "src/beta")
+    assert_equal(c.proposal.rows[1].line_floor, 9000)
+    # With no row: a test-only package gets none proposed.
+    var e = analyze(t, _none(), _repo(), Ratchet(), _sources(), o2)
+    assert_equal(len(e.proposal.rows), 1)
+    assert_equal(e.proposal.rows[0].package, "src/alpha")
+    o2.info_packages = List[String]()
+    var d = analyze(t, _none(), _repo(), r, _sources(), o2)
+    var kinds = String("")
+    for i in range(len(d.findings)):
+        kinds += d.findings[i].package + String(":") + d.findings[i].kind + String(" ")
+    assert_true(kinds.find("src/beta:Regression") >= 0, kinds)
 
 
 def main() raises:

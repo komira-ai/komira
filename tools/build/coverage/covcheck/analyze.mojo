@@ -52,7 +52,9 @@ and the findings: the one computation both `covcheck report` and
    COVERAGE_INFO_ONLY_DIRS) or under one are moved to `info_findings`. Such
    a package is measured and reported as any other, but held to no target:
    its findings are information, never counted (the conclusion, a gate's
-   exit and the annotation level read `findings` alone).
+   exit and the annotation level read `findings` alone): a `Regression`
+   below a row it has included. The proposed ratchet gives it no row, so
+   a test-only package has no floor.
 
 The line reports must all be lcov or all Cobertura: the two formats
 identify a line's branches differently, so one file in both would count its
@@ -660,6 +662,11 @@ def analyze(
         a.total.survived += p.survived
         a.total.timeout += p.timeout
         a.total.error += p.error
-    a.proposal = propose(ratchet, a.packages, repo)
+    # A test-only package gets no proposed row (step 8): it has no floor.
+    var floored = List[PackageStats]()
+    for i in range(len(a.packages)):
+        if not is_info_package(a.packages[i].package, opts.info_packages):
+            floored.append(a.packages[i].copy())
+    a.proposal = propose(ratchet, floored, repo)
     a.conclusion = conclusion_of(opts.mode, len(a.findings))
     return a^

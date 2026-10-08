@@ -335,10 +335,14 @@ A package that is an `--info-package DIR` or under one (`src/tests` covers
 `src/tests/e2e/x`, not `src/testsuite`) is measured, counted in the totals
 and shown as every package is, but held to no target: whatever the policy
 would find in it (every kind above, `BelowTarget` and the ratchet's
-included) is information. Those findings move from `findings` to
-`info_findings` in the result (which also lists the measured test-only
-packages, `info_packages`), so they count for no conclusion and no `gate`
-exit: a test-only package's gate passes in every mode. The summary's status
+included, so a `Regression` below a row the package has) is information.
+Those findings move from `findings` to `info_findings` in the result
+(which also lists the measured test-only packages, `info_packages`), so
+they count for no conclusion and no `gate` exit 3: a test-only package's
+gate never fails on a finding, in any mode. An input covcheck refuses
+(exit 1 or 2) still fails it. `--ratchet-out` proposes no row for a
+test-only package (a row it has is kept as it was), so test-only packages
+have no floor. The summary's status
 column says `info` (with the kinds, `info: BelowTarget, MissingRow`), its
 findings are listed under `### Info: test-only packages (N)`, the target
 line names the directories, the title counts them (`N info`), and the
@@ -420,10 +424,15 @@ is one of these or under one is held to no target: the rule passes its
 package to covcheck as `--info-package`, so it is measured and shown (the
 gate's summary and result, and the pull request's check run) and what
 covcheck finds is information, never a finding (Test-only packages): its
-gate passes in every mode and its conda package is never held back by
-coverage. The rule is a path prefix, not a list of packages: a new
+gate never fails on a finding, in any mode, so its conda package is never
+held back by a finding (a test failing at -O0 or under kcov, or an input
+covcheck refuses, still holds it back), and it gets no ratchet floor. An
+entry must be a relative directory (no empty, `.` or `..` segment, no
+trailing `/`): `tools/build/mojo/coverage.bzl` fails at load otherwise,
+and `coverage_measure.sh` refuses the line. The rule is a path prefix, not a list of packages: a new
 package under `src/tests/` is test-only with no edit here, and one
-anywhere else is held to the target. Test 46 builds a library of
+anywhere else is held to the target (`src/testsuite` included: the match
+is at a path-segment boundary). Test 46 builds a library of
 `tests//src/tests/coverage` (the tests cell's `src/tests`) below the target
 green in enforce mode, beside the same library red elsewhere. A fixture of the `tests` cell may name another mode
 (`coverage_mode`), and with it its own gate directory (`coverage_gate`, a
