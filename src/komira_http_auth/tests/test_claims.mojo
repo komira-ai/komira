@@ -338,6 +338,8 @@ def test_nbf_in_the_future_is_refused() raises:
         NOW + 600
     )
     _expect(_timed(base + String(',"nbf":') + String(NOW + 31)), REASON_NBF)
+    # Exactly at the 30 s leeway is still accepted (refused only past it).
+    _expect(_timed(base + String(',"nbf":') + String(NOW + 30)), REASON_OK)
     _expect(_timed(base + String(',"nbf":') + String(NOW + 29)), REASON_OK)
     _expect(_timed(base + String(',"nbf":"soon"')), REASON_NBF)
 
@@ -345,6 +347,8 @@ def test_nbf_in_the_future_is_refused() raises:
 def test_iat_missing_or_in_the_future_is_refused() raises:
     _expect(_timed(String(',"exp":') + String(NOW + 600)), REASON_IAT)
     _expect(_iat_exp(NOW + 31, NOW + 600), REASON_IAT)
+    # Exactly at the 30 s leeway is still accepted (refused only past it).
+    _expect(_iat_exp(NOW + 30, NOW + 600), REASON_OK)
     _expect(_iat_exp(NOW + 29, NOW + 600), REASON_OK)
 
 

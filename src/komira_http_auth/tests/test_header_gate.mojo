@@ -45,6 +45,7 @@ from komira_http_auth.reasons import (
     REASON_TYP,
     REASON_UNKNOWN_KID,
 )
+from komira_http_auth.token import split_compact_jws
 from komira_http_auth.testing import (
     rsa_jwk_json,
     rsa_jwks_json,
@@ -308,6 +309,29 @@ def test_malformed_compact_shapes_are_refused_before_any_fetch() raises:
     for i in range(len(bad)):
         var out = rig.verifier.verify(bad[i])
         assert_equal(out.reason, String(REASON_MALFORMED_TOKEN), "case " + String(i))
+    assert_equal(rig.fetcher.fetch_count(), 0)
+
+
+def _shaped_of_length(n: Int) -> String:
+    """A three-segment base64url run of exactly `n` bytes ("a..a.b.c")."""
+    var s = String("")
+    for _ in range(n - 4):
+        s += "a"
+    return s + String(".b.c")
+
+
+def test_split_compact_jws_caps_at_max_token_bytes() raises:
+    # MAX_TOKEN_BYTES is 8192: a well-shaped token of exactly 8192 bytes
+    # splits; one byte more is refused before any segment is read.
+    var at = split_compact_jws(_shaped_of_length(8192))
+    assert_true(Bool(at), "8192 bytes splits")
+    assert_equal(at.value().payload_seg, String("b"))
+    assert_equal(at.value().signature_seg, String("c"))
+    assert_equal(at.value().header_seg.byte_length(), 8188)
+    assert_false(Bool(split_compact_jws(_shaped_of_length(8193))), "8193 bytes")
+    var rig = _Rig(_config())
+    var out = rig.verifier.verify(_shaped_of_length(8193))
+    assert_equal(out.reason, String(REASON_MALFORMED_TOKEN))
     assert_equal(rig.fetcher.fetch_count(), 0)
 
 

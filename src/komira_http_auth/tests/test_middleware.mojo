@@ -3,8 +3,9 @@
 # =============================================================================
 #
 # invalid_request for a missing or malformed Authorization header (including
-# two comma-folded headers), invalid_token for every verification failure,
-# the RFC 6750 WWW-Authenticate values, no token text in any response, and
+# two comma-folded headers and a token over MAX_TOKEN_BYTES), invalid_token
+# for every verification failure, the RFC 6750 WWW-Authenticate values, no
+# token text in any response, and
 # ctx.principal REPLACED on success and cleared on every refusal.
 # =============================================================================
 
@@ -280,6 +281,46 @@ def test_non_ascii_authorization_is_invalid_request() raises:
         assert_equal(rig.mw.last_reason(), String(REASON_MALFORMED_HEADER))
         assert_false(Bool(ctx.principal))
         assert_equal(rig.fetcher.fetch_count(), 0)
+
+
+def _run_of(c: String, n: Int) -> String:
+    var s = String("")
+    for _ in range(n):
+        s += c
+    return s^
+
+
+def test_token_over_max_token_bytes_is_invalid_request() raises:
+    # MAX_TOKEN_BYTES is 8192: a token68 one byte over it is a malformed
+    # header (invalid_request), refused before the verifier runs.
+    var key = _key()
+    var rig = _MwRig(key)
+    var req = _req(Optional[String](String("Bearer ") + _run_of("a", 8193)))
+    var ctx = RequestContext.new()
+    ctx.principal = _preset_principal()
+    var r = rig.mw.before(req, ctx)
+    assert_true(Bool(r))
+    _assert_401(r.value(), WWW_AUTHENTICATE_INVALID_REQUEST, "8193")
+    assert_equal(rig.mw.last_reason(), String(REASON_MALFORMED_HEADER))
+    assert_false(Bool(ctx.principal))
+    assert_equal(rig.fetcher.fetch_count(), 0)
+
+
+def test_token_of_exactly_max_token_bytes_reaches_the_verifier() raises:
+    # At exactly 8192 bytes the header is well formed and the token goes to
+    # the verifier, which refuses the dotless run as a malformed token
+    # (invalid_token), not as a malformed header.
+    var key = _key()
+    var rig = _MwRig(key)
+    var req = _req(Optional[String](String("Bearer ") + _run_of("a", 8192)))
+    var ctx = RequestContext.new()
+    ctx.principal = _preset_principal()
+    var r = rig.mw.before(req, ctx)
+    assert_true(Bool(r))
+    _assert_401(r.value(), WWW_AUTHENTICATE_INVALID_TOKEN, "8192")
+    assert_equal(rig.mw.last_reason(), String(REASON_MALFORMED_TOKEN))
+    assert_false(Bool(ctx.principal))
+    assert_equal(rig.fetcher.fetch_count(), 0)
 
 
 def test_bad_token_is_invalid_token_and_not_echoed() raises:
