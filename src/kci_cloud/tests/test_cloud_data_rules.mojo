@@ -95,6 +95,7 @@ from kci_cloud import (
     FIELD_NETWORK,
     FIELD_SUBNET,
     FIELD_IP_ADDRESS,
+    FIELD_REGISTRY,
     Feed,
     Firing,
     FIELD_SERVICE,
@@ -247,6 +248,7 @@ struct _Data(CloudAdapter, Movable):
         l.append(FIELD_NETWORK)
         l.append(FIELD_SUBNET)
         l.append(FIELD_IP_ADDRESS)
+        l.append(FIELD_REGISTRY)
         return l^
 
     def absences(self) -> List[Absence]:
