@@ -9,9 +9,12 @@
 # Every call takes the `Caller` and applies the per-object rules of
 # access.mojo before it reads or writes a row.
 #
-# THE WRITE PROTOCOL. Every card write runs inside begin/commit, and any
-# refusal rolls back:
+# THE WRITE PROTOCOL. Every write runs inside begin/commit, and any refusal
+# rolls back:
 #
+#   book    a default book: claim the owner in contact_default_books (a
+#           claim that names no book is stale and is moved to the new book)
+#           -> put the book
 #   create  read the book (access) -> claim (book, uid) in contact_card_uids
 #           (a key that names no card, or a tombstone, is stale and is moved
 #           to the new card) -> insert the card at the book's modseq + 1
@@ -38,13 +41,18 @@
 #   - a uid key naming no card (create stopped after its key) or a tombstone
 #     (delete stopped after its tombstone): the next create of that uid in the
 #     book moves the key to its own card, so the uid is not lost;
+#   - a default claim naming no book (create_book stopped after its claim):
+#     the owner's next default create moves the claim to its own book;
 #   - a card write whose book modseq did not advance: the change feed does
 #     not list it until the next write in the book, which takes the same
 #     modseq.
 # With more than one concurrent writer per book there, two writers can read
 # the same book modseq and the second advance is refused after its card was
-# written, and a create can move a key whose card another writer is still
-# writing. The store claims a single writer per book on a document backend.
+# written, a create can move a key whose card another writer is still
+# writing, and a default create can move a claim whose book another default
+# create of the same owner is still writing (two books then say they are the
+# default). The store claims a single writer per book, and one default
+# create per owner at a time, on a document backend.
 # =============================================================================
 
 from komira_async.reactor.reactor import Reactor
@@ -274,13 +282,49 @@ struct ContactsStore[DB: Database](Movable):
                     vals^,
                 )
                 if not won:
-                    raise Error(String(ERR_DEFAULT_TAKEN))
+                    self._take_stale_default[RT](reactor, book.owner, book.id)
             _ = self._db.put[RT](reactor, String(BOOKS), book_cols(), _book_row(book))
             self._db.commit[RT](reactor)
             return book^
         except e:
             self._db.rollback[RT](reactor)
             raise e^
+
+    def _take_stale_default[
+        RT: Runtime
+    ](mut self, mut reactor: Reactor[RT.Sink], owner: String, book_id: String) raises:
+        """`owner` already has a default claim. Refuse with ERR_DEFAULT_TAKEN
+        when the claim names a book; otherwise the claim is stale (a
+        create_book stopped between its claim and its book) and is moved to
+        `book_id`, guarded on the book it named."""
+        var got = self._db.get_by_key[RT](
+            reactor, String(DEFAULT_BOOKS), default_book_cols(), String("owner"), _text(owner)
+        )
+        if not got:
+            raise Error(String(ERR_DEFAULT_TAKEN))
+        var claim = got.take()
+        var holder = claim.get_text(1)
+        var held = self._db.get_by_key[RT](
+            reactor, String(BOOKS), book_cols(), String("id"), _text(holder)
+        )
+        if held:
+            raise Error(String(ERR_DEFAULT_TAKEN))
+        var guard = List[Pred]()
+        guard.append(Pred.eq(String("owner"), _text(owner)))
+        guard.append(Pred.eq(String("book_id"), _text(holder)))
+        var updates = List[DbColVal]()
+        updates.append(DbColVal.bind(String("book_id"), _text(book_id)))
+        var n = self._db.conditional_update[RT](
+            reactor,
+            String(DEFAULT_BOOKS),
+            Filter.all_of(guard^),
+            updates^,
+            False,
+            Optional[String](),
+            List[String](),
+        )
+        if n != 1:
+            raise Error(String(ERR_DEFAULT_TAKEN))
 
     def get_book[
         RT: Runtime

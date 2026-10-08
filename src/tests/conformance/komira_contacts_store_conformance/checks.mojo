@@ -52,6 +52,13 @@
 #                         the key then holds it again. The rows are planted
 #                         through the database directly. Catches a stale key
 #                         that refuses its uid in that book for good.
+#   stale_default_claim   a default claim naming no book (a create_book
+#                         stopped between its claim and its book) does not
+#                         hold the default: the owner's next default create
+#                         succeeds, the claim then names its book, and a
+#                         further default is refused. The claim is planted
+#                         through the database directly. Catches a stale claim
+#                         that refuses the owner a default book for good.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -65,6 +72,7 @@ from komira_contacts import (
     CARD_UIDS,
     Caller,
     ContactsStore,
+    DEFAULT_BOOKS,
     ERR_DEFAULT_TAKEN,
     ERR_FORBIDDEN,
     ERR_NOT_FOUND,
@@ -594,3 +602,52 @@ def _err_create_uid[
         return String(OK)
     except e:
         return String(e)
+
+
+# ---- stale_default_claim -----------------------------------------------------
+
+
+def _default_claim[
+    T: ContactsTarget
+](mut store: ContactsStore[T.DB], mut reactor: Reactor[Rt.Sink], owner: StaticString) raises -> String:
+    """The book id the owner's default claim names; empty when there is none."""
+    var cols = List[String]()
+    cols.append(String("owner"))
+    cols.append(String("book_id"))
+    var got = store.database().get_by_key[Rt](
+        reactor, String(DEFAULT_BOOKS), cols^, String("owner"), DbValue.text(String(owner))
+    )
+    if not got:
+        return String()
+    var row = got.take()
+    return row.get_text(1)
+
+
+def check_stale_default_claim[T: ContactsTarget](mut t: T) raises:
+    var store = _store[T](t)
+    var rt = new_rt()
+    ref reactor = rt.reactor()
+    # A create_book that claimed alice's default and stopped before its book
+    # was written.
+    var cols = List[String]()
+    cols.append(String("owner"))
+    cols.append(String("book_id"))
+    var vals = List[DbValue]()
+    vals.append(DbValue.text(String("alice")))
+    vals.append(DbValue.text(String(NO_SUCH_ID)))
+    var won = store.database().create_if_absent[Rt](
+        reactor, String(DEFAULT_BOOKS), String("owner"), DbValue.text(String("alice")), cols^, vals^
+    )
+    assert_true(won, "the planted claim is new")
+    var home = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Main", True)
+    assert_true(home.is_default, "a claim naming no book does not hold the default")
+    assert_equal(_default_claim[T](store, reactor, "alice"), home.id, "the claim moved to the new book")
+    var got = String(OK)
+    try:
+        _ = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Second", True)
+    except e:
+        got = String(e)
+    assert_equal(got, ERR_DEFAULT_TAKEN, "the claim holds the default again")
+    var books = store.list_books[Rt](reactor, _alice())
+    assert_equal(len(books), 1, "one book, the default")
+    assert_equal(books[0].id, home.id)

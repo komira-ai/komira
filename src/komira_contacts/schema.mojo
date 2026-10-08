@@ -20,7 +20,8 @@
 #     card_id TEXT names the card holding it. A delete releases the uid; a
 #     key naming no card or a tombstone is stale and a create takes it over.
 #   contact_default_books  owner TEXT key, book_id TEXT: at most one default
-#     PERSONAL book per owner
+#     PERSONAL book per owner. A claim naming no book is stale and the
+#     owner's next default create takes it over.
 #
 # The tables carry no column scoping a row to a customer: one deployment
 # holds one dataset.

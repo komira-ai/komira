@@ -5,7 +5,7 @@
 #
 # The other tests show the suite passing on a working backend; this one shows
 # it can fail. `BrokenTarget.fresh()` raises, so every check fails at its
-# first step: the suite must still run all nine, raise, and name each one as
+# first step: the suite must still run all ten, raise, and name each one as
 # `FAIL <check> on <target>: <error>`. Catches a check whose failure is
 # dropped (a missing `_fail`), a check name copied from its neighbour, and a
 # suite that passes with failures recorded.
@@ -46,6 +46,7 @@ def main() raises:
     want += _line("default_book")
     want += _line("card_round_trip")
     want += _line("stale_uid_key")
+    want += _line("stale_default_claim")
     var got = String("the suite passed")
     var target = BrokenTarget()
     try:

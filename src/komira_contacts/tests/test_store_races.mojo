@@ -34,7 +34,18 @@
 #                  book write fails: the error propagates, no book is listed,
 #                  and the next default create for the owner succeeds.
 #                  Catches a failed create_book that commits (the claim kept,
-#                  naming no book) or skips the rollback.
+#                  naming no book) or skips the rollback. No claim row may be
+#                  left: it is read back directly, since the next create
+#                  would also take over a claim naming no book.
+#   default_released  create_book's default claim loses, then the peer
+#                  removes the claim before the store reads it: refused with
+#                  the default-taken text, and the claim is still held.
+#                  Catches reading a claim row that is not there.
+#   default_moved  a default claim names no book (stale); the peer takes it
+#                  over before the store does: refused with the default-taken
+#                  text, no book written, and the next default create takes
+#                  the claim. Catches a takeover whose guard miss is ignored
+#                  (two books holding one owner's default).
 # =============================================================================
 
 from std.testing import assert_equal
@@ -54,6 +65,8 @@ from komira_contacts import (
     CARD_UIDS,
     Caller,
     ContactsStore,
+    DEFAULT_BOOKS,
+    ERR_DEFAULT_TAKEN,
     ERR_UID_TAKEN,
     ERR_VERSION_CONFLICT,
     sqlite_schema,
@@ -68,6 +81,8 @@ comptime BOOK_WRITTEN = 1
 comptime KEY_RELEASED = 2
 comptime KEY_TAKEN = 3
 comptime BOOK_PUT_FAILS = 4
+comptime DEFAULT_RELEASED = 5
+comptime DEFAULT_MOVED = 6
 comptime PUT_FAILED = "racing db: book write failed"
 
 
@@ -76,6 +91,10 @@ def _key(book_id: String, uid: String) -> Filter:
     key.append(Pred.eq(String("address_book_id"), DbValue.text(String(book_id))))
     key.append(Pred.eq(String("uid"), DbValue.text(String(uid))))
     return Filter.all_of(key^)
+
+
+def _owner(owner: String) -> Filter:
+    return Filter.just(Pred.eq(String("owner"), DbValue.text(String(owner))))
 
 
 struct RacingDb(Database, Movable, Deinitable):
@@ -182,6 +201,14 @@ struct RacingDb(Database, Movable, Deinitable):
             _ = self.inner.conditional_update[RT](
                 reactor, table, _key(self.book_id, self.uid), peer^, False, Optional[String](), List[String]()
             )
+        elif self.race == DEFAULT_MOVED and table == String(DEFAULT_BOOKS):
+            # The peer's default create took the stale claim first.
+            self.race = NO_RACE
+            var peer = List[DbColVal]()
+            peer.append(DbColVal.bind(String("book_id"), DbValue.text(String("peer-book"))))
+            _ = self.inner.conditional_update[RT](
+                reactor, table, _owner(self.uid), peer^, False, Optional[String](), List[String]()
+            )
         return self.inner.conditional_update[RT](
             reactor, table, guard, updates, coalesce, bump_version_col, now_cols
         )
@@ -202,7 +229,12 @@ struct RacingDb(Database, Movable, Deinitable):
         cols: List[String],
         vals: List[DbValue],
     ) raises -> Bool:
-        return self.inner.create_if_absent[RT](reactor, table, unique_col, unique_val, cols, vals)
+        var won = self.inner.create_if_absent[RT](reactor, table, unique_col, unique_val, cols, vals)
+        if self.race == DEFAULT_RELEASED and table == String(DEFAULT_BOOKS) and not won:
+            # The peer removed the claim the default create just lost to.
+            self.race = NO_RACE
+            _ = self.inner.delete_where[RT](reactor, table, _owner(self.uid))
+        return won
 
     def create_if_absent_composite[
         RT: Runtime,
@@ -389,8 +421,69 @@ def check_book_put_fails() raises:
     assert_equal(got, PUT_FAILED, "the book write failed after the default claim")
     assert_equal(store.database().race, NO_RACE, "the failing write ran")
     assert_equal(len(store.list_books[Rt](reactor, _alice())), 0, "the failed create left no book")
+    assert_equal(_claim(store, reactor, "alice"), "", "the rollback removed the default claim")
     var home = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Main", True)
     assert_equal(home.is_default, True, "the rollback freed the default claim")
+
+
+def _claim(mut store: Store, mut reactor: Reactor[Rt.Sink], owner: StaticString) raises -> String:
+    """The book id the owner's default claim names; empty when there is none."""
+    var cols = List[String]()
+    cols.append(String("owner"))
+    cols.append(String("book_id"))
+    var got = store.database().get_by_key[Rt](
+        reactor, String(DEFAULT_BOOKS), cols^, String("owner"), DbValue.text(String(owner))
+    )
+    if not got:
+        return String()
+    var row = got.take()
+    return row.get_text(1)
+
+
+def _plant_claim(mut store: Store, mut reactor: Reactor[Rt.Sink], owner: StaticString, book_id: StaticString) raises:
+    """A default claim written directly, as a create_book that stopped after
+    its claim leaves it."""
+    var cols = List[String]()
+    cols.append(String("owner"))
+    cols.append(String("book_id"))
+    var vals = List[DbValue]()
+    vals.append(DbValue.text(String(owner)))
+    vals.append(DbValue.text(String(book_id)))
+    _ = store.database().put[Rt](reactor, String(DEFAULT_BOOKS), cols^, vals^)
+
+
+def _err_default(mut store: Store, mut reactor: Reactor[Rt.Sink]) -> String:
+    try:
+        _ = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Main", True)
+        return String(OK)
+    except e:
+        return String(e)
+
+
+def check_default_released() raises:
+    var store = _store()
+    var rt = Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var home = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Main", True)
+    store.database().arm(DEFAULT_RELEASED, "", "alice")
+    assert_equal(_err_default(store, reactor), ERR_DEFAULT_TAKEN, "the claim went away under the create")
+    assert_equal(store.database().race, NO_RACE, "the peer wrote")
+    assert_equal(_claim(store, reactor, "alice"), home.id, "the rollback kept the claim")
+    assert_equal(len(store.list_books[Rt](reactor, _alice())), 1, "the refused create left no book")
+
+
+def check_default_moved() raises:
+    var store = _store()
+    var rt = Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    _plant_claim(store, reactor, "alice", NO_SUCH_ID)
+    store.database().arm(DEFAULT_MOVED, "", "alice")
+    assert_equal(_err_default(store, reactor), ERR_DEFAULT_TAKEN, "the peer took the stale claim first")
+    assert_equal(store.database().race, NO_RACE, "the peer wrote")
+    assert_equal(len(store.list_books[Rt](reactor, _alice())), 0, "the refused create left no book")
+    assert_equal(_claim(store, reactor, "alice"), NO_SUCH_ID, "the rollback undid the peer's move")
+    var home = store.create_book[Rt](reactor, _alice(), BookKind.PERSONAL, "Main", True)
+    assert_equal(_claim(store, reactor, "alice"), home.id, "the stale claim is still stale: the next default takes it")
 
 
 def main() raises:
@@ -400,4 +493,6 @@ def main() raises:
     check_delete_book_written()
     check_update_book_written()
     check_book_put_fails()
+    check_default_released()
+    check_default_moved()
     print("PASS komira_contacts test_store_races")

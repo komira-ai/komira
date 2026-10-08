@@ -33,9 +33,11 @@ On a document backend each write is its own atomic write, and a rollback
 deletes only the documents created since `begin`. A refused write is refused
 before it writes, so it changes nothing there either. A write that stops part
 way there is not undone: a uid key left naming no card or a tombstone is moved
-to the next card created with that uid, and a card whose book did not advance
-is listed in the change feed from the next write in the book. The store claims
-a single writer per book on such a backend. Postgres is not tested.
+to the next card created with that uid, a default-book claim left naming no
+book is moved to the owner's next default book, and a card whose book did not
+advance is listed in the change feed from the next write in the book. The
+store claims a single writer per book, and one default-book create per owner
+at a time, on such a backend. Postgres is not tested.
 
 The store's contract is checked against SQLite and Firestore (over
 `MockFirestore`) by
