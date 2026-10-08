@@ -8,11 +8,14 @@
 # code and message are read through komira_aws_core's
 # `aws_rest_json_error`.
 from komira_aws_sesv2.komira_aws_sesv2 import (
+    parse_create_configuration_set_event_destination_response,
     parse_create_configuration_set_response,
     parse_create_email_identity_response,
+    parse_delete_configuration_set_response,
     parse_delete_email_identity_response,
     parse_get_email_identity_response,
     parse_put_email_identity_configuration_set_attributes_response,
+    parse_put_email_identity_mail_from_attributes_response,
     parse_send_email_response,
 )
 from komira_aws_core import AwsResponse, aws_is_error_status, aws_rest_json_error
@@ -96,6 +99,9 @@ def test_empty_results() raises:
     _ = parse_create_configuration_set_response(_ok(String("{}")))
     _ = parse_delete_email_identity_response(_ok(String("{}")))
     _ = parse_put_email_identity_configuration_set_attributes_response(_ok(String("{}")))
+    _ = parse_put_email_identity_mail_from_attributes_response(_ok(String("{}")))
+    _ = parse_create_configuration_set_event_destination_response(_ok(String("{}")))
+    _ = parse_delete_configuration_set_response(_ok(String("{}")))
 
 
 def test_send_email() raises:
@@ -143,6 +149,17 @@ def test_message_rejected() raises:
     assert_true(info.message.startswith("Email address is not verified."))
 
 
+def test_configuration_set_not_found() raises:
+    # DeleteConfigurationSet and CreateConfigurationSetEventDestination of a
+    # set that does not exist.
+    var info = aws_rest_json_error(
+        _error(404, String("NotFoundException"), String("Configuration set <mail-example-com> does not exist."))
+    )
+    assert_equal(info.status, 404)
+    assert_equal(info.code, "NotFoundException")
+    assert_equal(info.message, "Configuration set <mail-example-com> does not exist.")
+
+
 def main() raises:
     test_create_email_identity()
     test_get_email_identity()
@@ -152,4 +169,5 @@ def main() raises:
     test_not_found()
     test_already_exists()
     test_message_rejected()
+    test_configuration_set_not_found()
     print("OK")

@@ -1,5 +1,5 @@
-# komira_jwks: the deterministic kid, the OKP/Ed25519 JWK Set renderer, the
-# publish-only seed -> JWKS derivation, and the well-known path.
+# komira_jwks: the deterministic kid, the OKP/Ed25519 JWK Set renderer and the
+# publish-only seed -> JWKS derivation.
 #
 # Vectors: the Ed25519 key of RFC 8037 Appendix A.1 (which is also RFC 8032
 # section 7.1 TEST 1) and RFC 8032 section 7.1 TEST 2. The expected `x` members
@@ -9,7 +9,6 @@
 # the raw key, not a canonical JWK, and a test pinning it to A.3 would be wrong.
 
 from komira_jwks import jwks_json_from_seed, kid_for_pubkey, render_jwks_json
-from komira_jwks.well_known import IDENTITY_JWKS_PATH
 from komira_secret_store import SecretValue
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -120,6 +119,19 @@ def test_render_empty_set() raises:
     assert_equal(render_jwks_json(keys), String('{"keys":[]}'))
 
 
+def test_render_refuses_empty_kid() raises:
+    # Defect: an empty kid rendered as `"kid":""` publishes a document this
+    # package's own parser refuses, and builds a `Jwk` whose `kid()` is empty.
+    var keys = List[Tuple[String, Array[UInt8, 32]]]()
+    keys.append((String(""), Array[UInt8, 32](fill=7)))
+    var got = String("")
+    try:
+        _ = render_jwks_json(keys)
+    except e:
+        got = String(e)
+    assert_equal(got, "JwksError: member \"kid\" is empty")
+
+
 def test_render_one_key_rfc8037_x() raises:
     var keys = List[Tuple[String, Array[UInt8, 32]]]()
     keys.append((String(KID_1), _key(PUB_1)))
@@ -204,20 +216,16 @@ def test_from_seed_refuses_short_seeds() raises:
         assert_true(raised, String("a ") + String(n) + " byte seed was accepted")
 
 
-def test_identity_jwks_path() raises:
-    assert_equal(IDENTITY_JWKS_PATH, String("/.well-known/identity-jwks.json"))
-
-
 def main() raises:
     test_kid_vectors()
     test_kid_is_full_unpadded_base64url()
     test_kid_deterministic_and_bit_sensitive()
     test_render_empty_set()
+    test_render_refuses_empty_kid()
     test_render_one_key_rfc8037_x()
     test_render_two_keys_in_order()
     test_from_seed_rfc8037_vector()
     test_from_seed_matches_public_derivation()
     test_from_seed_never_publishes_the_seed()
     test_from_seed_refuses_short_seeds()
-    test_identity_jwks_path()
     print("test_jwks: OK")

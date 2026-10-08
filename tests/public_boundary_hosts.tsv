@@ -53,3 +53,6 @@ lemire.me	a cited paper's author page
 semanticscholar.org	a cited paper
 isthe.com	the FNV hash specification
 dotslash-cli.com	the DotSlash launcher's documentation
+kernel.org	git release archives (third_party/git)
+curl.se	curl release archives (third_party/git)
+gnu.org	GNU make release archives (third_party/git)

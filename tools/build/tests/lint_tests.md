@@ -217,12 +217,17 @@ must name exactly one finding); the planted targets they name are a
 test-less library, an alias of a test outside `src/tests/e2e`, a
 subpackage and a longer-named package of the pandas package, and a macOS-only
 test, which
-[`negative/surface_capability_matrix/incompatible`](negative/surface_capability_matrix/incompatible/BUCK)
-names and which is built by its package pattern. The lint only analyses the
+[`negative/surface_capability_matrix/incompatible.BUCK`](negative/surface_capability_matrix/incompatible.BUCK)
+names and which is built by its package pattern. That file and
+[`dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) (a row
+naming a target that does not exist) are no BUCK files: either, loadable,
+fails every cquery over `tests//...`, so run_tests.sh copies each into its
+directory for its one build and deletes it. The lint only analyses the
 e2e targets; `tests//functional/...` builds them.
 
 ```sh
 ./buck2 build //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
 ./buck2 build tests//negative/surface_capability_matrix:alias           # must fail: ... stands for a target of tests//functional/surface_capability_matrix
+# after run_tests.sh's copy of incompatible.BUCK to incompatible/BUCK:
 ./buck2 build tests//negative/surface_capability_matrix/incompatible:   # must fail: ... because its transitive dep .../pandas_e2e:test_mac
 ```
