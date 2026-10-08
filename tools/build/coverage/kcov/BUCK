@@ -1,8 +1,10 @@
-# The path tools of a kcov coverage run (README.md): static executables built
-# with the pinned zig, each gated by its cases, which run as build actions.
+# The path tools of a kcov coverage run (README.md): executables built with
+# the pinned zig (static) or the pinned rustc (cov_normalize), each gated by
+# its cases, which run as build actions.
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_test")
 load(":defs.bzl", "cov_link_dir", "cov_run_dir", "kcov_tool", "kcov_tool_cases")
 
 # debug_relocate: a directory path in a file overwritten by a placeholder of
@@ -31,13 +33,23 @@ kcov_tool(
 )
 
 # cov_normalize: a kcov Cobertura report rewritten to repository paths, with
-# bytes that do not depend on the run.
-zig_exe(
+# bytes that do not depend on the run. A Rust binary (zig is kept for the
+# C compiler and linker shims), published behind its inline #[test]s.
+rust_binary(
     name = "cov_normalize_exe",
+    srcs = ["cov_normalize.rs"],
+    crate_root = "cov_normalize.rs",
+    crate_name = "cov_normalize",
     exec_compatible_with = LINUX_X86_64,
-    src = "cov_normalize.zig",
-    busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    tests = [":cov_normalize_unit"],
+)
+
+rust_test(
+    name = "cov_normalize_unit",
+    srcs = ["cov_normalize.rs"],
+    crate_root = "cov_normalize.rs",
+    crate_name = "cov_normalize",
+    exec_compatible_with = LINUX_X86_64,
 )
 
 kcov_tool_cases(

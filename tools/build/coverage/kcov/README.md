@@ -1,10 +1,14 @@
 # kcov path tools
 
-Static executables for building a test with debug info and running it
-under kcov in a build action, with a coverage report whose bytes depend only
-on the sources and the tests. Each is built from one Zig file with the pinned
-zig (`zig_exe`, `tools/build/mojo/toolchain.bzl`), and runs with no shell,
-PATH or network. [`cov_run.sh`](#cov_run), a busybox script, runs one test
+Executables for building a test with debug info and running it under kcov
+in a build action, with a coverage report whose bytes depend only on the
+sources and the tests. `debug_relocate` and `cov_zig` are each built from one
+Zig file with the pinned zig (`zig_exe`, `tools/build/mojo/toolchain.bzl`) as
+static executables; `cov_normalize` is a Rust binary (`rust_binary`,
+[`tools/build/rust`](../../rust/README.md)), which needs glibc 2.34 or newer
+and nothing else, published behind its inline `#[test]`s
+(`:cov_normalize_unit`). Each runs with no shell, PATH or network.
+[`cov_run.sh`](#cov_run), a busybox script, runs one test
 under kcov with them.
 
 | target | what it does |
@@ -459,3 +463,9 @@ report with absolute paths, in both the sandbox and the placeholder form):
 | malformed | unknown entity, line 0, mismatched tag, branch without condition: exit 1 naming the line | |
 | usage | no `--must-contain`, a map without `=` or without a trailing `/`, an unknown flag, a map ABS, `--in` or `--out` given twice: exit 2 | |
 | failed write | exit 1 and the output's directory empty | a partial `--out` left behind |
+
+`:cov_normalize_unit` (the inline `#[test]`s of `cov_normalize.rs`, welded to
+`:cov_normalize_exe`, so the binary the cases run cannot be built unless they
+pass) checks the pieces the cases reach only through whole reports: the
+longest `--map` wins whatever the order, branch merging in every order, the
+output path split into directory and file, and the temporary file's name.
