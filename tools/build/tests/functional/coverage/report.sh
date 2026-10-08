@@ -4,6 +4,7 @@
 #   sh report.sh <busybox> <out> golden (--golden <golden> <report>)...
 #   sh report.sh <busybox> <out> census --covcheck <covcheck...> --package <dir>
 #       (--file <repo path> <source>)... (--expect <s>)... (--cobertura <report>)...
+#   sh report.sh <busybox> <out> result (--expect <s>)... --json <result.json>
 #
 # golden: each report is its golden file, byte for byte.
 # census: covcheck's build gate (`covcheck gate --mode census`) reads the
@@ -12,6 +13,8 @@
 #   repository's files and an empty ratchet. It must exit 0, and its result
 #   JSON must hold each --expect string (the package's numbers): the reports
 #   cov_run.sh writes are what covcheck reads, end to end.
+# result (test 46): the result JSON of a library's coverage gate holds each
+#   --expect string.
 # Writes what it checked to <out>; exits 1 naming the first failure.
 set -euf
 # shellcheck disable=SC3040 # busybox sh (ash) has pipefail
@@ -92,6 +95,20 @@ $(diff "$g" "$r" || true)"
             echo "ok result holds $e" >>"$OUT"
         done <"$EXPECT"
         [ -s "$EXPECT" ] || red "census: no --expect; the result JSON: $(cat "$T/result.json")"
+        ;;
+    result)
+        n=0
+        while [ "$#" -ge 2 ] && [ "$1" = --expect ]; do
+            printf '%s\n' "$2" >>"$T/expect"
+            n=$((n + 1))
+            shift 2
+        done
+        [ "$#" = 2 ] && [ "$1" = --json ] && [ "$n" -gt 0 ] || { echo "report.sh: result needs --expect <s>... --json <file>" >&2; exit 2; }
+        J=$2
+        while IFS= read -r e; do
+            grep -F -- "$e" "$J" >/dev/null || red "the gate's result JSON does not hold '$e': $(cat "$J")"
+            echo "ok result holds $e" >>"$OUT"
+        done <"$T/expect"
         ;;
     *) echo "report.sh: unknown mode $MODE" >&2; exit 2 ;;
 esac
