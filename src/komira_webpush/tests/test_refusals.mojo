@@ -440,6 +440,22 @@ struct _OrderKey(WebPushRandomness):
         return out^
 
 
+struct _FailingSalt(WebPushRandomness):
+    """A valid sender key (1) and a salt source that raises: the error
+    must reach the caller of `webpush_encrypt_with` unchanged."""
+
+    def __init__(out self):
+        pass
+
+    def salt(mut self) raises -> Array[UInt8, 16]:
+        raise Error("test: salt source failed")
+
+    def sender_private_key(mut self) raises -> Array[UInt8, 32]:
+        var out = Array[UInt8, 32](fill=UInt8(0))
+        out[31] = UInt8(1)
+        return out^
+
+
 def test_webpush_encrypt_refusals() raises:
     var ua = _b(_UA_PUBLIC)
     var auth = _b(_AUTH_SECRET)
@@ -476,6 +492,18 @@ def test_webpush_encrypt_refusals() raises:
     except e:
         outcome = String(e)
     assert_equal(outcome, "webpush: private key is not in [1, n-1]")
+    # A salt-source error is raised after the IKM is derived, through the
+    # arm that wipes the IKM; it must not turn into an empty body.
+    var failing = _FailingSalt()
+    var salt_outcome: String
+    try:
+        var body = webpush_encrypt_with(
+            failing, Span[UInt8](ua), Span[UInt8](auth), Span[UInt8](one)
+        )
+        salt_outcome = "OK " + String(len(body))
+    except e:
+        salt_outcome = String(e)
+    assert_equal(salt_outcome, "test: salt source failed")
 
 
 def _ua_outcome(

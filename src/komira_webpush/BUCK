@@ -21,7 +21,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                            count) and the accepting side of each limit
 #                            (rs and keyid length checked on the header and
 #                            the decryption, scalar 1 and n - 1, 257
-#                            records).
+#                            records); a salt-source error re-raised by
+#                            webpush_encrypt_with, not an empty body.
 mojo_library(
     name = "komira_webpush",
     srcs = glob(["*.mojo"]),
