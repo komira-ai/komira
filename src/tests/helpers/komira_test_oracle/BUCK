@@ -1,0 +1,56 @@
+load("@komira//tools/build/python:defs.bzl", "py_test", "python_oracle")
+
+# The plan conformance oracle's shared Python (README.md). `:datasets` is a
+# python_oracle: gen_datasets.py builds seeded tables and writes each in every
+# format the suite scans, twice, and the output exists only if both runs wrote
+# the same bytes; nothing komira builds is among its inputs (the rule refuses
+# that at analysis). `:test_datasets` decodes every file with pyarrow and
+# holds it to the tables; its output exists only if it passed. The mutants
+# each was seen red against are in the pull request that added it.
+
+_MODULES = [
+    "datasets.py",
+    "formats.py",
+    "schema_text.py",
+]
+
+# datasets.NAMES and formats.SUFFIX, spelt again so each file is a sub-target
+# (`:datasets[types.parquet]`); a drift between the two fails the oracle
+# (`wrote <path>, which outs does not declare` or `did not write <path>`).
+_DATASETS = [
+    "join_left",
+    "join_right",
+    "nulls",
+    "types",
+]
+
+_SUFFIXES = [
+    "schema",
+    "parquet",
+    "orc",
+    "csv",
+    "jsonl",
+    "arrow",
+    "lz4.arrow",
+    "zstd.arrow",
+    "arrows",
+    "lz4.arrows",
+    "zstd.arrows",
+]
+
+python_oracle(
+    name = "datasets",
+    src = "gen_datasets.py",
+    srcs = _MODULES,
+    outs = ["index.tsv"] + [d + "." + s for d in _DATASETS for s in _SUFFIXES],
+    deps = ["//third_party/python:pyarrow"],
+    visibility = ["//src/tests/..."],
+)
+
+py_test(
+    name = "test_datasets",
+    src = "test_datasets.py",
+    srcs = _MODULES,
+    args = ["$(location :datasets)"],
+    deps = ["//third_party/python:pyarrow"],
+)
