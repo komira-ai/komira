@@ -1,8 +1,9 @@
 # komira_git
 
-Git's object model and wire primitives in pure Mojo, with no I/O: every
-function maps bytes to values or values to bytes. It is the base the pack,
-protocol and storage layers of a git server or client build on.
+Git's object model, wire primitives and protocol state machines in pure
+Mojo, with no I/O: every function maps bytes to values or values to bytes.
+It is the base the pack and storage layers and the transports (smart HTTP)
+of a git server or client build on.
 
 - **Object formats and ids.** `ObjectFormat.sha1()` and
   `ObjectFormat.sha256()` (`from_name`, `raw_size`, `hex_size`, `name`).
@@ -38,6 +39,75 @@ protocol and storage layers of a git server or client build on.
   (and `check_ref_name` over bytes), `is_valid_ref_name` and
   `normalize_ref_name`: the rules of `git check-ref-format`, checked in
   git's order, each refusal naming its rule.
+- **Input in pieces and side-band.** `PktReader` (`feed`, `read`, `mark`,
+  `rewind`, `buffered`, `take_buffered`) buffers what arrives and hands
+  out pkt-lines; `append_sideband(out, band, data)` frames data on band
+  `SIDEBAND_DATA`, `SIDEBAND_PROGRESS` or `SIDEBAND_ERROR`, at most
+  `SIDEBAND_MAX_CHUNK` bytes a line.
+- **Fetch, server side (protocol v2).** `UploadPackV2Server(agent, format)`:
+  `append_advertisement`, `feed`, and `next_request`, which returns a
+  `V2Request` whose `command` is `V2_LS_REFS` or `V2_FETCH` (with
+  `ls_refs: LsRefsArgs` or `fetch: FetchArgs`), `V2_END` when the client
+  ends the session, or `V2_NEED_MORE`. `append_ls_refs_response(out,
+  args, head, refs)` lists `AdvertisedRef`s (`name`, `id`,
+  `symref_target`, `peeled`; `is_unborn`, `is_symref`, `has_peeled`).
+  `negotiate(args, graph)` reads the repository through a `CommitGraph`
+  (`has_object`, `is_commit`, `parents`, `peel`) and returns the
+  `Negotiation` (the haves to acknowledge, and `ready`);
+  `FetchResponder(args)` writes the response sections in their one order:
+  `append_acknowledgments`, `append_shallow_info`,
+  `append_packfile_header`, then `append_pack_data`, `append_progress`,
+  `append_fatal_error` and `finish`.
+- **Fetch, client side.** `FetchV2Client(agent, format)`: `feed`,
+  `read_advertisement` (into `capabilities`, a `ServerCapabilities` with
+  `supports`, `value`, `supports_feature`), `append_ls_refs_request` and
+  `read_ls_refs` (an `LsRefsResult`), `append_fetch_request` and
+  `next_event`, which returns `FetchEvent`s: `FETCH_ACK`, `FETCH_NAK`,
+  `FETCH_READY`, `FETCH_ROUND_END` (send the next round),
+  `FETCH_SHALLOW`, `FETCH_UNSHALLOW`, `FETCH_PACK_DATA`,
+  `FETCH_PROGRESS`, `FETCH_END`, or `FETCH_NEED_MORE`.
+- **Push, server side (receive-pack).** `ReceivePackServer(config)` with a
+  `ReceivePackConfig(agent, format, atomic, push_options)`
+  (`capability_list`): `append_advertisement` (or
+  `append_receive_pack_advertisement`), `feed`, `read_request` (a
+  `PushRequest` of `PushCommand`s, `is_create`, `is_delete`,
+  `needs_pack`) and `take_buffered` (the start of the pack). The caller
+  decides each command in a `PushReport` (`reject`, `set_unpack_error`,
+  `refuse_funny_refnames`, `final_reasons`, `accepted`), and
+  `append_push_message` and `append_push_report` write the messages and
+  the report-status. git's rules hold: an unpack failure fails every
+  command with `UNPACKER_ERROR`, one refusal in an atomic push fails every
+  other command with `ATOMIC_PUSH_FAILURE`, and `FUNNY_REFNAME` is the
+  reason for a ref receive-pack will not update.
+- **Push, client side (send-pack).** `SendPackClient(agent, format)`:
+  `feed`, `read_advertisement` (into `advertisement`, a
+  `PushAdvertisement` with `supports` and `value`), `append_push_request`
+  and `read_status` (a `PushStatus`).
+
+## The protocol
+
+What the servers advertise is what is implemented, and it is git's own
+default advertisement: `agent`, `ls-refs=unborn`, `fetch=shallow
+wait-for-done`, `server-option` and `object-format` for fetch;
+`report-status report-status-v2 delete-refs side-band-64k quiet atomic
+ofs-delta [push-options] object-format agent` for push. A request using
+anything else (`filter`, `want-ref`, `sideband-all`, `packfile-uris`,
+`deepen-since`, `deepen-not`, a push certificate) is refused with git's
+words for it. Push is protocol v0 even for a v2 client, as in git:
+protocol v2 has no push command.
+
+The repository is the caller's: which haves a server holds and whether
+every want reaches one come from its `CommitGraph`; which commits a depth
+cuts (the shallow and unshallow lines), the pack, and each push command's
+verdict are computed by the caller and written by these state machines.
+`negotiate` differs from git in one way: git stops its walk at commits
+older than the oldest acknowledged have, and this walk does not, so it can
+say `ready` a round sooner. `deepen <n>` must be plain decimal (git's
+strtol would also read `0x10` and octal).
+
+The requests the clients write and the responses the servers write are
+byte for byte git's: `src/tests/conformance/komira_git_conformance`
+compares them with transcripts of the pinned git on both ends.
 
 ## What the parsers accept
 
@@ -164,4 +234,81 @@ try:
     assert_true(False)
 except e:
     assert_equal(String(e), "komira_git: bad ref name: contains '..'")
+```
+
+A protocol v2 ls-refs exchange, client and server in one process (the
+transport only carries the bytes):
+
+```mojo
+from komira_git import V2_LS_REFS, AdvertisedRef, FetchV2Client, ObjectFormat, ObjectId
+from komira_git import UploadPackV2Server, append_ls_refs_response
+
+var sha1 = ObjectFormat.sha1()
+var server = UploadPackV2Server("komira-git/1", sha1)
+var client = FetchV2Client("komira-git/1", sha1)
+var wire = List[UInt8]()
+server.append_advertisement(wire)
+client.feed(Span(wire))
+assert_true(client.read_advertisement())
+assert_true(client.capabilities.supports_feature("fetch", "shallow"))
+
+var prefixes: List[String] = ["refs/heads/"]
+var request = List[UInt8]()
+client.append_ls_refs_request(request, prefixes)
+server.feed(Span(request))
+var r = server.next_request()
+assert_equal(r.command, V2_LS_REFS)
+
+var tip = ObjectId.parse_hex(sha1, "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")
+var refs = List[AdvertisedRef]()
+refs.append(AdvertisedRef("refs/heads/main", tip))
+refs.append(AdvertisedRef("refs/tags/v1", tip))
+var head = AdvertisedRef("HEAD", tip, "refs/heads/main")
+var response = List[UInt8]()
+append_ls_refs_response(response, r.ls_refs, head^, refs)
+client.feed(Span(response))
+var listed = client.read_ls_refs()
+assert_true(listed.complete)
+assert_equal(len(listed.refs), 1)  # only refs/heads/ was asked for
+assert_equal(listed.refs[0].name, "refs/heads/main")
+```
+
+An atomic push of two deletes, one refused by the server, so the other
+fails too:
+
+```mojo
+from komira_git import AdvertisedRef, ObjectFormat, ObjectId, PushCommand, PushReport
+from komira_git import ReceivePackConfig, ReceivePackServer, SendPackClient, append_push_report
+
+var sha1 = ObjectFormat.sha1()
+var tip = ObjectId.parse_hex(sha1, "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")
+var server = ReceivePackServer(ReceivePackConfig("komira-git/1", sha1))
+var client = SendPackClient("komira-git/1", sha1)
+var refs = List[AdvertisedRef]()
+refs.append(AdvertisedRef("refs/heads/a", tip))
+refs.append(AdvertisedRef("refs/heads/b", tip))
+var wire = List[UInt8]()
+server.append_advertisement(wire, refs)
+client.feed(Span(wire))
+assert_true(client.read_advertisement())
+
+var commands = List[PushCommand]()
+commands.append(PushCommand(tip, ObjectId.zero(sha1), "refs/heads/a"))
+commands.append(PushCommand(tip, ObjectId.zero(sha1), "refs/heads/b"))
+var request = List[UInt8]()
+client.append_push_request(request, commands, atomic=True)
+server.feed(Span(request))
+var push = server.read_request()
+assert_true(push.complete and push.atomic)
+assert_false(push.needs_pack())  # deletes only: no pack follows
+
+var report = PushReport(push)
+report.reject(1, "protected branch")
+var response = List[UInt8]()
+append_push_report(response, push, report)
+client.feed(Span(response))
+var status = client.read_status()
+assert_equal(status.unpack_status, "ok")
+assert_equal(status.reasons[0], "atomic push failure")
+assert_equal(status.reasons[1], "protected branch")
 ```

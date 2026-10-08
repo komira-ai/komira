@@ -18,11 +18,17 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_commits_tags.mojo",
+        "tests/test_fetch_client.mojo",
+        "tests/test_fetch_negotiation.mojo",
         "tests/test_loose_objects.mojo",
         "tests/test_object_ids.mojo",
         "tests/test_pkt_line.mojo",
+        "tests/test_pkt_stream.mojo",
+        "tests/test_receive_pack.mojo",
         "tests/test_ref_names.mojo",
+        "tests/test_send_pack.mojo",
         "tests/test_trees.mojo",
+        "tests/test_upload_pack_v2.mojo",
     ],
     visibility = ["PUBLIC"],
 )
