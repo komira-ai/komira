@@ -1,10 +1,11 @@
 # =============================================================================
-# komira_aws_secret_store/aws_writer.mojo: `AwsSecretsManagerWriter`, a
+# kci_aws_secret_writer/aws_writer.mojo: `AwsSecretsManagerWriter`, a
 #   `SecretWriter` over the generated Secrets Manager client.
 # =============================================================================
 #
 # The three verbs, each on a bare handle (a SecretId: a name or an ARN; a
-# handle with a selector is refused, aws_secret_ref.mojo):
+# handle with a selector is refused; the grammar is komira_aws_secret_store's
+# `parse_aws_secret_ref`):
 #
 #   write             PutSecretValue with the value as SecretString: a new
 #                     version, labelled AWSCURRENT, the one before it
@@ -46,7 +47,7 @@
 # body; the `SecretValue` itself is wiped when `write` returns.
 # =============================================================================
 
-from komira_aws_core import AwsCredsSource
+from komira_aws_core import AwsCredsSource, aws_client_error_code
 from komira_aws_secretsmanager.komira_aws_secretsmanager import (
     SecretsManagerClient,
     SecretsManagerCreateSecretRequest,
@@ -58,9 +59,15 @@ from komira_http_core.transport.io_stream import Connector
 from kci_secret_writer import SecretWriter
 from komira_secret_store import SecretValue
 
-from .aws_secret_ref import AWS_STAGE_CURRENT, _error_code, parse_aws_secret_ref
+from komira_aws_secret_store import AWS_STAGE_CURRENT, parse_aws_secret_ref
 
 comptime _WRITER = "AwsSecretsManagerWriter: "
+
+
+def _code(operation: StaticString, cause: String) -> String:
+    """The error code of `cause`, the generated client's error for
+    `operation`; "" for any other error (komira_aws_core)."""
+    return aws_client_error_code(String("SecretsManager.") + operation, cause)
 
 
 def _failed(verb: String, secret_ref: String, cause: String) -> Error:
@@ -139,8 +146,7 @@ struct AwsSecretsManagerWriter[C: Connector, T: AwsCredsSource](
         except e:
             var cause = String(e)
             if (
-                _error_code(String("PutSecretValue"), cause)
-                != "ResourceNotFoundException"
+                _code("PutSecretValue", cause) != "ResourceNotFoundException"
                 or secret_id.startswith("arn:")
             ):
                 raise _failed(String("write"), secret_ref, cause)
@@ -151,7 +157,7 @@ struct AwsSecretsManagerWriter[C: Connector, T: AwsCredsSource](
             return
         except e:
             var cause = String(e)
-            if _error_code(String("CreateSecret"), cause) != "ResourceExistsException":
+            if _code("CreateSecret", cause) != "ResourceExistsException":
                 raise _failed(String("write"), secret_ref, cause)
         try:
             self._put(secret_id, text)
@@ -180,7 +186,7 @@ struct AwsSecretsManagerWriter[C: Connector, T: AwsCredsSource](
             )
         except e:
             var cause = String(e)
-            if _error_code(String("CreateSecret"), cause) != "ResourceExistsException":
+            if _code("CreateSecret", cause) != "ResourceExistsException":
                 raise _failed(String("define_container"), secret_ref, cause)
 
     def has_version(
@@ -200,7 +206,7 @@ struct AwsSecretsManagerWriter[C: Connector, T: AwsCredsSource](
             )
         except e:
             var cause = String(e)
-            if _error_code(String("DescribeSecret"), cause) == "ResourceNotFoundException":
+            if _code("DescribeSecret", cause) == "ResourceNotFoundException":
                 return False
             raise _failed(String("has_version"), secret_ref, cause)
         if described.deleted_date:

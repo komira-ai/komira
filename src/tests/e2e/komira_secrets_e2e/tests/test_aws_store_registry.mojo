@@ -4,9 +4,9 @@
 # against the fake over a real socket
 # =============================================================================
 #
-# komira_aws_secret_store's `AwsSecretsManagerWriter` and
-# `AwsSecretsManagerStore`, each over the generated client pointed at the
-# fake (client.mojo), drive it through:
+# kci_aws_secret_writer's `AwsSecretsManagerWriter` and
+# komira_aws_secret_store's `AwsSecretsManagerStore`, each over the
+# generated client pointed at the fake (client.mojo), drive it through:
 #
 #   the writer: has_version of a secret that does not exist (False),
 #   define_container twice (created, then the no-op), has_version of the
@@ -20,8 +20,10 @@
 #   recording `CredentialConsumer`;
 #   then a secret scheduled for deletion, which has_version and write both
 #   refuse; a write carrying a deploy token, refused before anything is
-#   sent; and a writer signing with a wrong key, whose has_version raises
-#   rather than answering False.
+#   sent; a writer signing with a wrong key, whose has_version raises
+#   rather than answering False; and a secret whose one version holds only
+#   AWSPENDING (put with the generated client's VersionStages), which
+#   has_version answers False: the bare handle reads AWSCURRENT.
 #
 # What each assertion catches:
 #   * the bytes each node's reveal handed the consumer: a handle mapped to
@@ -29,15 +31,17 @@
 #     (the AWSPREVIOUS and versionId nodes would see the current value), a
 #     SecretString read from the wrong member, a write that did not make the
 #     new version current;
-#   * has_version's answers: a probe that reads a missing secret or an empty
-#     container as holding a version, or a held one as empty;
+#   * has_version's answers: a probe that reads a missing secret, an empty
+#     container or an AWSPENDING-only secret as holding a version, or a held
+#     one as empty;
 #   * the fake's request log, exactly: a create-if-absent that creates
 #     before trying the put, a define that is not idempotent, a deleted
 #     secret's write turned into a create, a refused write that still sent,
 #     a probe that reads the value (GetSecretValue) instead of metadata;
-#   * the raised texts: a provider error swallowed (the wrongly keyed probe
-#     answering False, the missing node resolving to an empty value), or a
-#     refusal without the handle;
+#   * the raised texts, exactly: a provider error swallowed (the wrongly
+#     keyed probe answering False, the missing node resolving to an empty
+#     value), a refusal without the handle, or anything added to the
+#     service's code and message;
 #   * custody: no raised text holds any written value, while the fake's error
 #     body for the put to the missing secret carried one (the positive
 #     control).
@@ -46,10 +50,12 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_aws_core import StaticCredsSource
-from komira_aws_secret_store import AwsSecretsManagerStore, AwsSecretsManagerWriter
+from kci_aws_secret_writer import AwsSecretsManagerWriter
+from komira_aws_secret_store import AwsSecretsManagerStore
 from komira_aws_secretsmanager.komira_aws_secretsmanager import (
     SecretsManagerDeleteSecretRequest,
     SecretsManagerGetSecretValueRequest,
+    SecretsManagerPutSecretValueRequest,
 )
 from komira_aws_secretsmanager.secretsmanager_overrides import delete_secret
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
@@ -75,6 +81,7 @@ comptime _V1 = "aws-adapter-canary-one-3c81"
 comptime _V2 = "aws-adapter-canary-fresh-9d07"
 comptime _V3 = "aws-adapter-canary-three-e5a2"
 comptime _V4 = "aws-adapter-canary-late-41fb"
+comptime _V5 = "aws-adapter-canary-pending-6e2d"
 
 
 struct _Recorder(CredentialConsumer, Movable):
@@ -171,6 +178,16 @@ struct _Flow(ClientLeg):
         except e:
             self.errors.append(String(e))
 
+        # A secret whose one version holds only AWSPENDING: no AWSCURRENT.
+        w.define_container(String("app/pending"), String(""))
+        var pending = SecretsManagerPutSecretValueRequest(String("app/pending"))
+        pending.secret_string = Optional[String](String(_V5))
+        var stages = List[String]()
+        stages.append(String("AWSPENDING"))
+        pending.set_version_stages(stages^)
+        _ = raw.put_secret_value(pending)
+        self.probes.append(w.has_version(String("app/pending"), String("")))
+
 
 def test_aws_write_then_resolve_through_registry() raises:
     var server = FakeServer(FakeSecretsManager(fake_credentials(), String(FAKE_REGION)))
@@ -178,10 +195,11 @@ def test_aws_write_then_resolve_through_registry() raises:
     serve_while(server, leg)
     ref fake = server.fake
 
-    assert_equal(len(leg.probes), 3)
+    assert_equal(len(leg.probes), 4)
     assert_false(leg.probes[0], "a secret that does not exist holds no version")
     assert_false(leg.probes[1], "an empty container holds no version")
     assert_true(leg.probes[2], "a written secret holds a version")
+    assert_false(leg.probes[3], "an AWSPENDING-only secret holds no AWSCURRENT version")
 
     var want_seen: List[String] = [_V3, _V1, _V1, _V2, _V3]
     assert_equal(len(leg.seen), len(want_seen))
@@ -209,30 +227,41 @@ def test_aws_write_then_resolve_through_registry() raises:
         "DescribeSecret 200",
         "PutSecretValue 400 InvalidRequestException",
         "DescribeSecret 400 InvalidSignatureException",
+        "CreateSecret 200",
+        "PutSecretValue 200",
+        "DescribeSecret 200",
     ]
     assert_equal(len(fake.log), len(want_log), "requests the fake answered")
     for i in range(len(want_log)):
         assert_equal(fake.log[i], String("secretsmanager ") + want_log[i])
-    # Two creates (the container; the fresh secret with its value), two puts
-    # and one deletion; nothing replayed.
-    assert_equal(fake.applied_writes, 5)
+    # Three creates (two containers; the fresh secret with its value), three
+    # puts and one deletion; nothing replayed.
+    assert_equal(fake.applied_writes, 7)
     assert_equal(fake.replayed_writes, 0)
 
-    var heads: List[String] = [
+    var want_errors: List[String] = [
         "AwsSecretsManagerStore: resolve of secret_ref app/missing failed:"
-        + " SecretsManager.GetSecretValue failed: HTTP 400 ResourceNotFoundException",
+        + " SecretsManager.GetSecretValue failed: HTTP 400 ResourceNotFoundException"
+        + " Secrets Manager can't find the specified secret.",
         "AwsSecretsManagerWriter: has_version of secret_ref app/fresh failed:"
-        + " the secret is scheduled for deletion",
+        + " the secret is scheduled for deletion: restore it (RestoreSecret) or"
+        + " wait for the deletion before writing",
         "AwsSecretsManagerWriter: write of secret_ref app/fresh failed:"
-        + " SecretsManager.PutSecretValue failed: HTTP 400 InvalidRequestException",
-        "AwsSecretsManagerWriter: write refused: a deploy token was given",
+        + " SecretsManager.PutSecretValue failed: HTTP 400 InvalidRequestException"
+        + " You can't perform this operation on the secret because it was marked"
+        + " for deletion.",
+        "AwsSecretsManagerWriter: write refused: a deploy token was given, and"
+        + " Secrets Manager signs each request with the client's credential"
+        + " source; build the client over the deploy principal's credentials and"
+        + " pass an empty token",
         "AwsSecretsManagerWriter: has_version of secret_ref app/smtp failed:"
-        + " SecretsManager.DescribeSecret failed: HTTP 400 InvalidSignatureException",
+        + " SecretsManager.DescribeSecret failed: HTTP 400 InvalidSignatureException"
+        + " The request signature we calculated does not match the signature you"
+        + " provided. Check your AWS Secret Access Key and signing method.",
     ]
-    assert_equal(len(leg.errors), len(heads))
-    for i in range(len(heads)):
-        assert_true(leg.errors[i].startswith(heads[i]), leg.errors[i])
-        assert_false(leg.errors[i].find("a-deploy-bearer-token") >= 0, leg.errors[i])
+    assert_equal(len(leg.errors), len(want_errors))
+    for i in range(len(want_errors)):
+        assert_equal(leg.errors[i], want_errors[i])
 
     # Custody. The positive control: the put to the missing secret was
     # answered with an error body repeating its value.
@@ -241,7 +270,7 @@ def test_aws_write_then_resolve_through_registry() raises:
         if leaks(fake.error_bodies[i], String(_V2)):
             on_wire = True
     assert_true(on_wire, "the fake's error body carries the put's value")
-    var values: List[String] = [_V1, _V2, _V3, _V4]
+    var values: List[String] = [_V1, _V2, _V3, _V4, _V5]
     for i in range(len(leg.errors)):
         for k in range(len(values)):
             assert_false(leaks(leg.errors[i], values[k]), leg.errors[i])

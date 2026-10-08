@@ -5,17 +5,20 @@
 #
 # `resolve(secret_ref)` parses the handle (gcp_secret_ref.mojo) and sends one
 # AccessSecretVersion for the version it names, `latest` when it names the
-# secret. The payload's bytes become the `SecretValue`. When the answer
-# carries a `dataCrc32c` (the service sends one for every version written
-# with one), the bytes' CRC32C must equal it, or the resolve raises: a value
-# damaged on the way is never handed to a connector. An answer with no
-# payload raises.
+# secret. The payload's bytes become the `SecretValue`. The answer must
+# carry the payload's `dataCrc32c`, and the bytes' CRC32C must equal it, or
+# the resolve raises: a value damaged on the way is never handed to a
+# connector. The service keeps a checksum for every version (the one the
+# writer sent, or one it computes when AddSecretVersion carried none, per
+# the SecretPayload reference) and returns it with each access, so an
+# answer without one is not the service's and is refused rather than read
+# unchecked. An answer with no payload raises.
 #
 # Every failure raises: a handle outside the grammar (not quoted), an error
 # answer (NOT_FOUND for a missing secret or version, PERMISSION_DENIED,
 # UNAUTHENTICATED, ...), a transport failure, a value over
-# `MAX_SECRET_LEN`, a checksum mismatch. The text names the handle and
-# carries the generated client's error (komira_gcp_core's
+# `MAX_SECRET_LEN`, a missing checksum or a mismatched one. The text names
+# the handle and carries the generated client's error (komira_gcp_core's
 # `gcp_status_error`: the verb, the method, the status and its code, never
 # the body); no text holds the value.
 #
@@ -92,17 +95,24 @@ struct GcpSecretManagerStore[C: Connector, T: GcpTokenSource](
                 + " failed: the answer has no payload"
             )
         ref payload = got.payload.value()
-        if payload.data_crc32c:
-            var want = payload.data_crc32c.value()
-            if Int64(Int(crc32c(Span(payload.data)))) != want:
-                zeroize_list(payload.data)
-                raise Error(
-                    String(_STORE)
-                    + "resolve of secret_ref "
-                    + secret_ref
-                    + " failed: the payload's CRC32C is not the dataCrc32c the"
-                    " answer carries"
-                )
+        if not payload.data_crc32c:
+            zeroize_list(payload.data)
+            raise Error(
+                String(_STORE)
+                + "resolve of secret_ref "
+                + secret_ref
+                + " failed: the answer carries no dataCrc32c to check the"
+                " payload against"
+            )
+        if Int64(Int(crc32c(Span(payload.data)))) != payload.data_crc32c.value():
+            zeroize_list(payload.data)
+            raise Error(
+                String(_STORE)
+                + "resolve of secret_ref "
+                + secret_ref
+                + " failed: the payload's CRC32C is not the dataCrc32c the"
+                " answer carries"
+            )
         try:
             var value = SecretValue(Span(payload.data))
             zeroize_list(payload.data)

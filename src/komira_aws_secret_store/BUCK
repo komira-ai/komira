@@ -1,30 +1,29 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The secret seams over AWS Secrets Manager: `AwsSecretsManagerStore`, a
-# komira_secret_store `SecretStore` (GetSecretValue), and
-# `AwsSecretsManagerWriter`, a kci_secret_writer `SecretWriter`
-# (PutSecretValue, CreateSecret, DescribeSecret), each over the generated
-# komira_aws_secretsmanager `SecretsManagerClient` it is given. Hand-written;
-# it reads no environment.
+# The resolve seam over AWS Secrets Manager: `AwsSecretsManagerStore`, a
+# komira_secret_store `SecretStore` (GetSecretValue) over the generated
+# komira_aws_secretsmanager `SecretsManagerClient` it is given, and the
+# handle grammar (`parse_aws_secret_ref`). Hand-written; it reads no
+# environment. It has no write verb and does not depend on
+# kci_secret_writer: the writer is kci_aws_secret_writer's, which depends on
+# this package for the grammar, so a resolve-only closure holds no writer.
 #
 # The welded test, test_aws_secret_store, sends over komira_http_core's
 # ScriptedConnector or a connector factory that raises if dialled: the
-# handle grammar and its refusals (never quoting the handle), a resolve of a
-# SecretString, of a SecretBinary and of an answer with neither, an error
-# answer raised naming the handle without the body's canary value, and every
-# writer refusal (a deploy token, a selector, an ARN to define, a non-UTF-8
-# value) made before anything is sent. The service's behaviour (versions,
-# staging labels, create-if-absent, deletion) is tested against a stateful
-# fake over a real socket in src/tests/e2e/komira_secrets_e2e
-# (test_aws_store_registry), through komira_secret_registry to a
-# CredentialConsumer.
+# handle grammar (a name's character set and length, a full ARN's shape,
+# the selectors' sets) and its refusals, never quoting the handle; a resolve
+# of a SecretString, of a SecretBinary and of an answer with neither; an
+# error answer raised naming the handle without the body's canary value;
+# and a handle outside the grammar refused before anything is sent. The
+# service's behaviour is tested against a stateful fake over a real socket
+# in src/tests/e2e/komira_secrets_e2e (test_aws_store_registry), through
+# komira_secret_registry to a CredentialConsumer.
 #
 # No test here talks to the service.
 mojo_library(
     name = "komira_aws_secret_store",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_secret_writer:kci_secret_writer",
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_aws_secretsmanager:komira_aws_secretsmanager",
         "//src/komira_crypto:komira_crypto",

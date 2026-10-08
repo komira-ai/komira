@@ -1,50 +1,45 @@
 # =============================================================================
 # tests/test_gcp_secret_store.mojo: the handle grammar, CRC32C, and the
-# store and writer over scripted answers, with the bytes each request put on
-# the wire.
+# store over scripted answers, with the bytes each request put on the wire.
 # =============================================================================
 #
 # No socket: the generated client sends over komira_http_core's
 # ScriptedConnector with a shared write capture, so a test reads the request
 # as written, or sees that nothing was written. The service itself (versions,
-# `latest`, create-if-absent, a regional secret at its own host, the
+# `latest`, a disabled version, a regional secret at its own host, the
 # checksum the fake verifies) is the subject of komira_secrets_e2e's
 # test_gcp_store_registry, over a stateful fake behind TLS on a real socket.
+# The writer's tests are kci_gcp_secret_writer's.
 #
 # What each test catches:
 #   * test_handle_grammar: a version dropped or `latest` not defaulted, a
 #     regional parent spelled as a global one, a malformed name accepted, a
 #     refusal that quotes the handle.
+#   * test_handle_shapes: a secret id outside `[A-Za-z0-9_-]{1,255}`, a
+#     project that is neither a number nor a project id, a location that is
+#     not a location id accepted (a pasted value among them), a refusal that
+#     quotes the handle; and the edges that must pass (255 bytes, a
+#     domain-scoped project, a project number).
 #   * test_crc32c_published_values: a checksum that is not CRC-32C (the
 #     writer's dataCrc32c and the store's check both rest on it).
 #   * test_resolve_reads_and_checks: the wrong version name on the wire, the
 #     payload not decoded, a checksum mismatch accepted, an answer with no
-#     payload returned as an empty value; the store conforms to `SecretStore`.
+#     dataCrc32c read unchecked, an answer with no payload returned as an
+#     empty value; the store conforms to `SecretStore`.
 #   * test_resolve_error_names_the_handle: an error answer swallowed, or its
 #     body (a canary in error.message) put into the raised text.
-#   * test_writer_wire: the payload or its dataCrc32c not sent, a filter or
-#     page size dropped from the probe, an empty list answered True; the
-#     writer conforms to `SecretWriter`.
-#   * test_writer_refusals_send_nothing: a deploy token ignored, a version
-#     handle written: each refused with nothing on the wire.
 # =============================================================================
 
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
-from kci_secret_writer import SecretWriter
 from komira_gcp_core import StaticTokenSource
 from komira_gcp_secretmanager.service import SecretManagerServiceClient
 from komira_http_client.client import HttpClient
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_secret_store import SecretStore, SecretValue
 
-from komira_gcp_secret_store import (
-    GcpSecretManagerStore,
-    GcpSecretManagerWriter,
-    crc32c,
-    parse_gcp_secret_ref,
-)
+from komira_gcp_secret_store import GcpSecretManagerStore, crc32c, parse_gcp_secret_ref
 
 comptime _Client = SecretManagerServiceClient[ScriptedConnector, StaticTokenSource]
 
@@ -119,7 +114,7 @@ def test_handle_grammar() raises:
         "projects/000000000000/locations/us-central1/secrets/smtp/versions/latest",
     )
     var rv = parse_gcp_secret_ref(
-        String("projects/p/locations/us-central1/secrets/smtp/versions/latest")
+        String("projects/demo-project/locations/us-central1/secrets/smtp/versions/latest")
     )
     assert_equal(rv.version, "latest")
     assert_equal(rv.secret_id, "smtp")
@@ -186,7 +181,7 @@ def test_resolve_reads_and_checks() raises:
     var by_number = GcpSecretManagerStore(
         _client(
             pinned,
-            _http(200, "OK", '{"name":"projects/000000000000/secrets/smtp/versions/2","payload":{"data":"aHVudGVyMg=="}}'),
+            _http(200, "OK", '{"name":"projects/000000000000/secrets/smtp/versions/2","payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}'),
         )
     )
     assert_equal(_text(by_number.resolve(String("projects/demo-project/secrets/smtp/versions/2"))), "hunter2")
@@ -201,6 +196,16 @@ def test_resolve_reads_and_checks() raises:
     )
     with assert_raises(contains="resolve of secret_ref projects/demo-project/secrets/smtp failed: the payload's CRC32C is not the dataCrc32c"):
         _ = damaged.resolve(String("projects/demo-project/secrets/smtp"))
+
+    var unsummed = ArcPointer[List[UInt8]](List[UInt8]())
+    var no_checksum = GcpSecretManagerStore(
+        _client(
+            unsummed,
+            _http(200, "OK", '{"name":"projects/0/secrets/smtp/versions/3","payload":{"data":"aHVudGVyMg=="}}'),
+        )
+    )
+    with assert_raises(contains="resolve of secret_ref projects/demo-project/secrets/smtp failed: the answer carries no dataCrc32c"):
+        _ = no_checksum.resolve(String("projects/demo-project/secrets/smtp"))
 
     var none = ArcPointer[List[UInt8]](List[UInt8]())
     var empty = GcpSecretManagerStore(
@@ -239,70 +244,70 @@ def test_resolve_error_names_the_handle() raises:
     print("  test_resolve_error_names_the_handle PASS")
 
 
-def _write[W: SecretWriter](mut w: W, secret_ref: String, value: String, token: String) raises:
-    w.write(secret_ref, SecretValue.from_string(value), token)
-
-
-def test_writer_wire() raises:
-    var capture = ArcPointer[List[UInt8]](List[UInt8]())
-    var w = GcpSecretManagerWriter(
-        _client(
-            capture,
-            _http(200, "OK", '{"name":"projects/000000000000/secrets/smtp/versions/4","state":"ENABLED"}'),
-        )
-    )
-    _write(w, String("projects/demo-project/secrets/smtp"), String("hunter2"), String(""))
-    var wire = _wire(capture)
-    assert_true(wire.startswith("POST /v1/projects/demo-project/secrets/smtp:addVersion HTTP/1.1\r\n"), wire)
-    assert_true(
-        wire.endswith('\r\n\r\n{"payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}'),
-        wire,
-    )
-
-    var listed = ArcPointer[List[UInt8]](List[UInt8]())
-    var probe = GcpSecretManagerWriter(
-        _client(
-            listed,
-            _http(200, "OK", '{"versions":[{"name":"projects/0/secrets/smtp/versions/4","state":"ENABLED"}],"nextPageToken":"t","totalSize":4}'),
-        )
-    )
-    assert_true(probe.has_version(String("projects/demo-project/secrets/smtp"), String("")))
-    assert_equal(
-        _line(listed),
-        "GET /v1/projects/demo-project/secrets/smtp/versions?pageSize=1&filter=state%3AENABLED",
-    )
-    var nothing = ArcPointer[List[UInt8]](List[UInt8]())
-    var empty = GcpSecretManagerWriter(_client(nothing, _http(200, "OK", "{}")))
-    assert_false(empty.has_version(String("projects/demo-project/secrets/smtp"), String("")))
-    print("  test_writer_wire PASS")
-
-
-def test_writer_refusals_send_nothing() raises:
-    var capture = ArcPointer[List[UInt8]](List[UInt8]())
-    var w = GcpSecretManagerWriter(_client(capture, _http(200, "OK", "{}")))
-    var texts = List[String]()
+def _refusal(secret_ref: String) -> String:
     try:
-        _write(w, String("projects/p/secrets/s"), String("v"), String("deploy-bearer-canary"))
+        _ = parse_gcp_secret_ref(secret_ref)
     except e:
-        texts.append(String(e))
-    try:
-        _ = w.has_version(String("projects/p/secrets/s"), String("deploy-bearer-canary"))
-    except e:
-        texts.append(String(e))
-    try:
-        w.define_container(String("projects/p/secrets/s"), String("deploy-bearer-canary"))
-    except e:
-        texts.append(String(e))
-    assert_equal(len(texts), 3)
-    for i in range(len(texts)):
-        assert_true(texts[i].find("refused: a deploy token was given") >= 0, texts[i])
-        assert_false(texts[i].find("deploy-bearer-canary") >= 0, texts[i])
-    with assert_raises(contains="write refused: the handle names a version"):
-        _write(w, String("projects/p/secrets/s/versions/latest"), String("v"), String(""))
-    with assert_raises(contains="define_container refused: secret_ref is not a Secret Manager name"):
-        w.define_container(String("p/s"), String(""))
-    assert_equal(len(capture[]), 0, "a refusal wrote to the wire")
-    print("  test_writer_refusals_send_nothing PASS")
+        return String(e)
+    return String("accepted")
+
+
+def test_handle_shapes() raises:
+    var long_id = String("")
+    for _ in range(255):
+        long_id += "A"
+    var accepted: List[String] = [
+        "projects/demo-project/secrets/" + long_id,
+        "projects/demo-project/secrets/Smtp_pass-2",
+        "projects/000000000000/secrets/s",
+        "projects/example.com:demo-project/secrets/s",
+        "projects/a23456/locations/europe-west4/secrets/s/versions/7",
+    ]
+    for i in range(len(accepted)):
+        assert_equal(String(parse_gcp_secret_ref(accepted[i])), accepted[i])
+
+    var refused: List[String] = [
+        # Secret ids: a pasted value, a dot, a space, over-long.
+        'projects/demo-project/secrets/{"password":"canary-zz9"}',
+        "projects/demo-project/secrets/canary.zz9",
+        "projects/demo-project/secrets/canary zz9",
+        "projects/demo-project/secrets/" + long_id + "canary",
+        # Projects: too short, upper case, a digit first, a hyphen last,
+        # a bad domain, `.` and `..`.
+        "projects/canar/secrets/s",
+        "projects/Canary-zz9/secrets/s",
+        "projects/9canary-zz9/secrets/s",
+        "projects/canary-zz9-/secrets/s",
+        "projects/.canary:demo-project/secrets/s",
+        "projects/./secrets/canary",
+        "projects/../secrets/canary",
+        # Locations: upper case, a digit first, a dot.
+        "projects/demo-project/locations/US-canary/secrets/s",
+        "projects/demo-project/locations/1canary/secrets/s",
+        "projects/demo-project/locations/canary.zz9/secrets/s",
+    ]
+    var why: List[String] = [
+        "secret id is not 1 to 255",
+        "secret id is not 1 to 255",
+        "secret id is not 1 to 255",
+        "secret id is not 1 to 255",
+        "project is neither",
+        "project is neither",
+        "project is neither",
+        "project is neither",
+        "project is neither",
+        "project is neither",
+        "project is neither",
+        "location is not a location id",
+        "location is not a location id",
+        "location is not a location id",
+    ]
+    assert_equal(len(refused), len(why))
+    for i in range(len(refused)):
+        var text = _refusal(refused[i])
+        assert_true(text.find(why[i]) >= 0, String(i) + ": " + text)
+        assert_false(text.find("canary") >= 0, text)
+    print("  test_handle_shapes PASS")
 
 
 def main() raises:
@@ -310,6 +315,5 @@ def main() raises:
     test_crc32c_published_values()
     test_resolve_reads_and_checks()
     test_resolve_error_names_the_handle()
-    test_writer_wire()
-    test_writer_refusals_send_nothing()
+    test_handle_shapes()
     print("PASS komira_gcp_secret_store")

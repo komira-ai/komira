@@ -25,7 +25,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # fixture root. The fake keeps global and regional secrets and their
 # versions with CRC32C checksums, checks the bearer token and which
 # endpoint (Host) each resource arrives at, and answers google.rpc.Status
-# envelopes.
+# envelopes. The GCP fake also answers GetSecretVersion, and refuses the
+# access of a version that is not ENABLED (a test sets a version's state
+# on the fake's store before the run).
 #
 # The tests, each run as a build action:
 #   test_secret_lifecycle -- CreateSecret (token filled by the client),
@@ -57,31 +59,35 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     name at the global host refused 400: each raised text exactly, the
 #     request log exactly, and no raised text holds a payload although the
 #     fake's error bodies carried three.
-#   test_aws_store_registry -- komira_aws_secret_store's writer and store
-#     over the AWS fake: has_version of a missing secret and of an empty
-#     container (False) and of a written one (True); define_container
-#     twice (the second a no-op); a write into the container, a write that
-#     creates its secret, a second value over the first; then a
-#     SecretRegistry owning the store, each node revealed into a
-#     CredentialConsumer: the bare name (AWSCURRENT), ?versionStage=
+#   test_aws_store_registry -- kci_aws_secret_writer's writer and
+#     komira_aws_secret_store's store over the AWS fake: has_version of a
+#     missing secret and of an empty container (False) and of a written one
+#     (True); define_container twice (the second a no-op); a write into the
+#     container, a write that creates its secret, a second value over the
+#     first; then a SecretRegistry owning the store, each node revealed into
+#     a CredentialConsumer: the bare name (AWSCURRENT), ?versionStage=
 #     AWSPREVIOUS, ?versionId= the first version, the created secret, the
 #     ARN, and a missing secret (raised); a secret scheduled for deletion
 #     refused by has_version and write (no create); a deploy token refused
-#     with nothing sent; a wrongly keyed probe raising. The values each
-#     consumer saw, the fake's request log and the raised texts exactly, and
-#     no raised text holding a value although an error body carried one.
-#   test_gcp_store_registry -- komira_gcp_secret_store's writer and store
-#     over the GCP fake behind TLS: the same probes and defines; two values
-#     added (each with its CRC32C, which the fake verifies), a write that
-#     creates its secret, a regional write that creates its secret at the
-#     regional host with no replication policy; then a SecretRegistry over
+#     with nothing sent; a wrongly keyed probe raising; a secret whose one
+#     version holds only AWSPENDING (False). The values each consumer saw,
+#     the fake's request log and the raised texts exactly, and no raised
+#     text holding a value although an error body carried one.
+#   test_gcp_store_registry -- kci_gcp_secret_writer's writer and
+#     komira_gcp_secret_store's store over the GCP fake behind TLS: the
+#     same probes and defines; two values added (each with its CRC32C, which
+#     the fake verifies), a write that creates its secret, a regional write
+#     that creates its secret at the regional host with no replication
+#     policy; a secret seeded with an enabled version 1 and a disabled
+#     `latest`, which has_version answers False; then a SecretRegistry over
 #     the global store (the secret, its version 1, versions/latest, the
-#     created secret, a missing one) and one over a regional store; a deploy
-#     token refused with nothing sent; a probe with a token the fake does not
-#     accept raising. The values, the request log (the probe's pageSize=1
-#     and state:ENABLED filter included) and the raised texts exactly, and
-#     no raised text holding a payload although two error bodies carried
-#     them.
+#     created secret, a missing one, the seeded secret bare (refused
+#     FAILED_PRECONDITION) and at version 1 (read)) and one over a regional
+#     store; a deploy token refused with nothing sent; a probe with a token
+#     the fake does not accept raising. The values, the request log (the
+#     probe's GET of versions/latest included) and the raised texts
+#     exactly, and no raised text holding a payload although two error
+#     bodies carried them.
 #
 # `deps` lists the Mojo packages of the full transitive closure of what the
 # library and its tests import.
@@ -96,6 +102,8 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
     deps = [
+        "//src/kci_aws_secret_writer:kci_aws_secret_writer",
+        "//src/kci_gcp_secret_writer:kci_gcp_secret_writer",
         "//src/kci_secret_writer:kci_secret_writer",
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",

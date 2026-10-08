@@ -1,0 +1,42 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The write seam over GCP Secret Manager: `GcpSecretManagerWriter`, a
+# kci_secret_writer `SecretWriter` (AddSecretVersion with the payload's
+# CRC32C, CreateSecret, GetSecretVersion of `latest`) over the generated
+# komira_gcp_secretmanager `SecretManagerServiceClient` it is given.
+# Hand-written; it reads no environment. The handle grammar and CRC32C are
+# komira_gcp_secret_store's; that package, the resolve seam, does not depend
+# on this one, so a resolve-only closure holds no writer.
+#
+# The welded test, test_gcp_secret_writer, sends over komira_http_core's
+# ScriptedConnector with a shared write capture, one scripted answer per
+# dial: the write's request (payload and dataCrc32c) as written; the
+# create-if-absent race (AddSecretVersion not found, CreateSecret finding
+# the id taken, AddSecretVersion again) and a create refused otherwise; the
+# probe's request line (GET <secret>/versions/latest, never :access) and
+# its reading of the version's state (ENABLED, DISABLED, DESTROYED), of
+# NOT_FOUND and of another error; and the writer's refusals (a deploy token,
+# a version handle, a handle outside the grammar) with nothing on the wire.
+# The service's behaviour is tested against a stateful fake behind TLS over
+# a real socket in src/tests/e2e/komira_secrets_e2e (test_gcp_store_registry).
+#
+# No test here talks to the service.
+mojo_library(
+    name = "kci_gcp_secret_writer",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_secret_writer:kci_secret_writer",
+        "//src/komira_async:komira_async",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_gcp_secret_store:komira_gcp_secret_store",
+        "//src/komira_gcp_secretmanager:komira_gcp_secretmanager",
+        # For the test's HttpClient; the library imports nothing of it.
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = ["tests/test_gcp_secret_writer.mojo"],
+    visibility = ["PUBLIC"],
+)

@@ -10,13 +10,22 @@
 #   projects/<p>/locations/<l>/secrets/<s>               a regional secret
 #   ...followed by /versions/<v>                         one of its versions
 #
-# <v> is `latest` (the highest-numbered version) or a version number (a
-# decimal without a leading zero). A handle that names a secret resolves to
-# its `latest` version; a writer's handle names the secret (a write adds a
-# version; a version number is the service's to assign). <p> may be the
-# project id or its number. Each of <p>, <l> and <s> is non-empty and is
-# neither `.` nor `..`. Which endpoint a regional secret is served at is
-# the client's (`set_rest_endpoint`), not the handle's.
+# <v> is `latest` (an alias of the most recently created version) or a
+# version number (a decimal without a leading zero). A handle that names a
+# secret resolves to its `latest` version; a writer's handle names the
+# secret (a write adds a version; a version number is the service's to
+# assign). Which endpoint a regional secret is served at is the client's
+# (`set_rest_host`), not the handle's. Each part has its shape:
+#
+#   <s>  1 to 255 of `[A-Za-z0-9_-]`, the characters CreateSecret's
+#        `secretId` allows;
+#   <p>  a project number (1 to 19 digits), or a project id: 6 to 30 bytes
+#        of `[a-z0-9-]`, starting with a letter and not ending with a
+#        hyphen, optionally after a `<domain>:` (a domain-scoped project:
+#        1 to 253 bytes of `[a-z0-9.-]`, starting and ending with a letter or
+#        digit);
+#   <l>  1 to 63 bytes of `[a-z0-9-]`, starting with a letter (a location
+#        id such as `us-central1`).
 #
 # A refusal never quotes the handle: a handle outside the grammar may be a
 # value pasted into the wrong field.
@@ -72,8 +81,88 @@ struct GcpSecretRef(Copyable, Movable, Writable):
             writer.write("/versions/", self.version)
 
 
-def _segment_ok(s: String) -> Bool:
-    return s.byte_length() > 0 and s != "." and s != ".."
+def _lower(c: UInt8) -> Bool:
+    return c >= UInt8(ord("a")) and c <= UInt8(ord("z"))
+
+
+def _digit(c: UInt8) -> Bool:
+    return c >= UInt8(ord("0")) and c <= UInt8(ord("9"))
+
+
+def _secret_id_ok(s: String) -> Bool:
+    """1 to 255 of `[A-Za-z0-9_-]`."""
+    var b = s.as_bytes()
+    if len(b) == 0 or len(b) > 255:
+        return False
+    for i in range(len(b)):
+        var c = b[i]
+        if not (
+            _lower(c)
+            or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+            or _digit(c)
+            or c == UInt8(ord("_"))
+            or c == UInt8(ord("-"))
+        ):
+            return False
+    return True
+
+
+def _project_id_ok(s: String) -> Bool:
+    """6 to 30 of `[a-z0-9-]`, a letter first, no hyphen last."""
+    var b = s.as_bytes()
+    if len(b) < 6 or len(b) > 30 or not _lower(b[0]) or b[len(b) - 1] == UInt8(ord("-")):
+        return False
+    for i in range(len(b)):
+        if not (_lower(b[i]) or _digit(b[i]) or b[i] == UInt8(ord("-"))):
+            return False
+    return True
+
+
+def _domain_ok(s: String) -> Bool:
+    """1 to 253 of `[a-z0-9.-]`, a letter or digit first and last."""
+    var b = s.as_bytes()
+    if len(b) == 0 or len(b) > 253:
+        return False
+    if not (_lower(b[0]) or _digit(b[0])) or not (
+        _lower(b[len(b) - 1]) or _digit(b[len(b) - 1])
+    ):
+        return False
+    for i in range(len(b)):
+        if not (
+            _lower(b[i]) or _digit(b[i]) or b[i] == UInt8(ord("-")) or b[i] == UInt8(ord("."))
+        ):
+            return False
+    return True
+
+
+def _project_ok(s: String) -> Bool:
+    """A project number or a (possibly domain-scoped) project id."""
+    var b = s.as_bytes()
+    if len(b) == 0:
+        return False
+    var all_digits = len(b) <= 19
+    for i in range(len(b)):
+        if not _digit(b[i]):
+            all_digits = False
+    if all_digits:
+        return True
+    var colon = s.find(":")
+    if colon < 0:
+        return _project_id_ok(s)
+    return _domain_ok(String(s[byte=0:colon])) and _project_id_ok(
+        String(s[byte = colon + 1 : s.byte_length()])
+    )
+
+
+def _location_ok(s: String) -> Bool:
+    """1 to 63 of `[a-z0-9-]`, a letter first."""
+    var b = s.as_bytes()
+    if len(b) == 0 or len(b) > 63 or not _lower(b[0]):
+        return False
+    for i in range(len(b)):
+        if not (_lower(b[i]) or _digit(b[i]) or b[i] == UInt8(ord("-"))):
+            return False
+    return True
 
 
 def _version_ok(v: String) -> Bool:
@@ -114,10 +203,17 @@ def parse_gcp_secret_ref(secret_ref: String) raises -> GcpSecretRef:
     var project = parts[1].copy()
     var secret_id = parts[at + 1].copy()
     var version = parts[at + 3].copy() if n == at + 4 else String("")
-    if not _segment_ok(project) or not _segment_ok(secret_id) or (
-        at == 4 and not _segment_ok(location)
-    ):
-        raise Error("secret_ref has an empty, '.' or '..' project, location or secret id")
+    if not _project_ok(project):
+        raise Error(
+            "secret_ref's project is neither a project number nor a project id"
+        )
+    if at == 4 and not _location_ok(location):
+        raise Error("secret_ref's location is not a location id")
+    if not _secret_id_ok(secret_id):
+        raise Error(
+            "secret_ref's secret id is not 1 to 255 of the characters"
+            " A-Z a-z 0-9 _ -"
+        )
     if n == at + 4 and not _version_ok(version):
         raise Error("secret_ref's version is neither 'latest' nor a version number")
     return GcpSecretRef(project^, location^, secret_id^, version^)

@@ -1,35 +1,37 @@
 # =============================================================================
-# tests/test_aws_secret_store.mojo: the handle grammar, the store over a
-# scripted answer, and the writer's refusals before anything is sent.
+# tests/test_aws_secret_store.mojo: the handle grammar and the store over a
+# scripted answer.
 # =============================================================================
 #
 # No socket: the generated client sends over komira_http_core's
 # ScriptedConnector, whose one canned answer each test chooses, or over a
 # connector factory that raises "dialled" (`_no_dial`), so a refusal that
 # leaked a send would raise that instead. The service itself (versions,
-# staging labels, create-if-absent, a secret scheduled for deletion) is the
-# subject of komira_secrets_e2e's test_aws_store_registry, over a stateful
-# fake on a real socket.
+# staging labels, a secret scheduled for deletion) is the subject of
+# komira_secrets_e2e's test_aws_store_registry, over a stateful fake on a
+# real socket. The writer's tests are kci_aws_secret_writer's.
 #
 # What each test catches:
 #   * test_handle_grammar: a selector mapped to the wrong field, a second
 #     selector or an unknown one accepted, an empty SecretId or value
 #     accepted, a refusal that quotes the handle.
+#   * test_handle_shapes: a name outside `[A-Za-z0-9/_+=.@-]{1,512}` (a
+#     pasted value, a space, an over-long name) accepted, a partial or
+#     malformed ARN accepted, a versionId or label outside its set
+#     accepted, a refusal that quotes the handle; and the edges that must
+#     pass (512 bytes, every allowed character, a GovCloud ARN).
 #   * test_resolve_secret_string / _secret_binary: the value taken from the
 #     wrong member, or SecretBinary ignored; the store conforms to
 #     `SecretStore` (called through a generic).
 #   * test_resolve_neither_member: an answer with no value returned as an
 #     empty value instead of raising.
 #   * test_resolve_error_names_the_handle: an error answer swallowed, or
-#     its body (which carries a canary value) put into the raised text.
-#   * test_writer_refusals_send_nothing: a deploy token ignored, a handle
-#     with a selector written, an ARN defined, a non-UTF-8 value sent; the
-#     writer conforms to `SecretWriter` (called through a generic).
+#     its body (which carries a canary value) put into the raised text; a
+#     handle outside the grammar sent.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
-from kci_secret_writer import SecretWriter
 from komira_aws_core import AwsCredential, StaticCredsSource
 from komira_aws_secretsmanager.komira_aws_secretsmanager import (
     SecretsManagerClient,
@@ -40,11 +42,7 @@ from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_secret_store import SecretStore, SecretValue
 
-from komira_aws_secret_store import (
-    AwsSecretsManagerStore,
-    AwsSecretsManagerWriter,
-    parse_aws_secret_ref,
-)
+from komira_aws_secret_store import AwsSecretsManagerStore, parse_aws_secret_ref
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -245,49 +243,79 @@ def test_resolve_error_names_the_handle() raises:
     print("  test_resolve_error_names_the_handle PASS")
 
 
-def _write[W: SecretWriter](
-    mut w: W, secret_ref: String, value: String, token: String
-) raises:
-    w.write(secret_ref, SecretValue.from_string(value), token)
+def _refusal(secret_ref: String) -> String:
+    try:
+        _ = parse_aws_secret_ref(secret_ref)
+    except e:
+        return String(e)
+    return String("accepted")
 
 
-def test_writer_refusals_send_nothing() raises:
-    var w = AwsSecretsManagerWriter(_client(_no_dial))
-    var texts = List[String]()
-    try:
-        _write(w, String("app/db"), String("v"), String("deploy-bearer-canary"))
-    except e:
-        texts.append(String(e))
-    try:
-        _ = w.has_version(String("app/db"), String("deploy-bearer-canary"))
-    except e:
-        texts.append(String(e))
-    try:
-        w.define_container(String("app/db"), String("deploy-bearer-canary"))
-    except e:
-        texts.append(String(e))
-    for i in range(len(texts)):
-        assert_true(texts[i].find("refused: a deploy token was given") >= 0, texts[i])
-        assert_false(texts[i].find("deploy-bearer-canary") >= 0, texts[i])
-    assert_equal(len(texts), 3)
+def test_handle_shapes() raises:
+    var long_name = String("")
+    for _ in range(512):
+        long_name += "a"
+    assert_equal(parse_aws_secret_ref(long_name).secret_id, long_name)
+    assert_equal(
+        parse_aws_secret_ref(String("a/b_c+d=e.f@g-h0Z")).secret_id, "a/b_c+d=e.f@g-h0Z"
+    )
+    var gov = String("arn:aws-us-gov:secretsmanager:us-gov-west-1:123456789012:secret:app/db-a1B2c3")
+    assert_equal(parse_aws_secret_ref(gov).secret_id, gov)
+    assert_equal(
+        parse_aws_secret_ref(gov + "?versionStage=AWSPENDING").version_stage.value(),
+        "AWSPENDING",
+    )
 
-    with assert_raises(contains="write refused: the handle pins a version"):
-        _write(w, String("app/db?versionStage=AWSPREVIOUS"), String("v"), String(""))
-    with assert_raises(contains="has_version refused: the handle pins a version"):
-        _ = w.has_version(String("app/db?versionId=a1b2c3d4-5678-90ab-cdef-EXAMPLE11111"), String(""))
-    with assert_raises(contains="define_container refused: the handle is an ARN"):
-        w.define_container(
-            String("arn:aws:secretsmanager:us-east-1:000000000000:secret:app/db-AbCdEf"), String("")
-        )
-    var not_utf8 = List[UInt8]()
-    not_utf8.append(UInt8(0xFF))
-    not_utf8.append(UInt8(0xFE))
-    with assert_raises(contains="refused: the value is not UTF-8"):
-        w.write(String("app/db"), SecretValue(Span(not_utf8)), String(""))
-    # Every refusal above came before a send: the factory was never called.
-    with assert_raises(contains="dialled"):
-        _ = w.has_version(String("app/db"), String(""))
-    print("  test_writer_refusals_send_nothing PASS")
+    var refused: List[String] = [
+        # A pasted value: JSON, a space, a quote, a newline, a non-ASCII byte.
+        '{"password":"canary-zz9"}',
+        "canary-zz9 x",
+        "canary-zz9'",
+        "canary-zz9\n",
+        "canary-zz9é",
+        "canary-zz9#",
+        long_name + "canary-zz9",
+        # ARNs: partial (no suffix), wrong service, account, partition,
+        # region, resource type, suffix; a name outside the set.
+        "arn:aws:secretsmanager:us-east-1:000000000000:secret:canary-zz9",
+        "arn:aws:s3:us-east-1:000000000000:secret:canary-zz9-AbCdEf",
+        "arn:aws:secretsmanager:us-east-1:00000000000:secret:canary-zz9-AbCdEf",
+        "arn:AWS:secretsmanager:us-east-1:000000000000:secret:canary-zz9-AbCdEf",
+        "arn:aws:secretsmanager:US-EAST-1:000000000000:secret:canary-zz9-AbCdEf",
+        "arn:aws:secretsmanager:us-east-1:000000000000:key:canary-zz9-AbCdEf",
+        "arn:aws:secretsmanager:us-east-1:000000000000:secret:canary-zz9-AbC#ef",
+        "arn:aws:secretsmanager:us-east-1:000000000000:secret:canary zz9-AbCdEf",
+        # Selector values outside their sets.
+        "app/db?versionId=canary-zz9",
+        "app/db?versionId=canary-zz9_000000000000000000000000000",
+        "app/db?versionStage=canary zz9",
+    ]
+    var why: List[String] = [
+        "is not a secret name",
+        "is not a secret name",
+        "is not a secret name",
+        "is not a secret name",
+        "is not a secret name",
+        "is not a secret name",
+        "is not a secret name",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "versionId is not 32 to 64",
+        "versionId is not 32 to 64",
+        "versionStage is not 1 to 256",
+    ]
+    assert_equal(len(refused), len(why))
+    for i in range(len(refused)):
+        var text = _refusal(refused[i])
+        assert_true(text.find(why[i]) >= 0, String(i) + ": " + text)
+        assert_false(text.find("canary") >= 0, text)
+    print("  test_handle_shapes PASS")
 
 
 def main() raises:
@@ -296,5 +324,5 @@ def main() raises:
     test_resolve_secret_binary()
     test_resolve_neither_member()
     test_resolve_error_names_the_handle()
-    test_writer_refusals_send_nothing()
+    test_handle_shapes()
     print("PASS komira_aws_secret_store")

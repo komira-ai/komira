@@ -3,13 +3,14 @@
 # =============================================================================
 #
 # `FakeSecretManager` is a komira_http_server `RequestDispatcher` answering
-# the six methods the generated client sends, at their REST paths
+# the seven methods the generated client sends, at their REST paths
 # (google/cloud/secretmanager/v1/service.proto, global and regional
 # bindings), against the state in gcp_store.mojo:
 #
 #   POST   /v1/{parent}/secrets?secretId=...       CreateSecret
 #   POST   /v1/{name}:addVersion                   AddSecretVersion
 #   GET    /v1/{name}/versions                     ListSecretVersions
+#   GET    /v1/{name}/versions/{v}                 GetSecretVersion
 #   GET    /v1/{name}/versions/{v}:access          AccessSecretVersion
 #   GET    /v1/{parent}/secrets                    ListSecrets
 #   DELETE /v1/{name}                              DeleteSecret
@@ -31,7 +32,10 @@
 #      ALREADY_EXISTS for a secret id taken in that location, 400
 #      INVALID_ARGUMENT for a global create without `replication`, a
 #      regional one with it, a payload that is not base64, or a
-#      `dataCrc32c` that is not the payload's CRC32C. Lists page by
+#      `dataCrc32c` that is not the payload's CRC32C, 400
+#      FAILED_PRECONDITION for an AccessSecretVersion of a version that is
+#      not ENABLED (`latest` included: it names the newest version whatever
+#      its state). Lists page by
 #      `pageSize` and an opaque `pageToken`; ListSecretVersions answers the
 #      newest version first.
 #
@@ -347,6 +351,8 @@ struct FakeSecretManager(RequestDispatcher):
                     return self._list_versions(r, req.query_string)
             elif r.verb == "access" and m == HttpMethod.get():
                 return self._access(r)
+            elif r.verb.byte_length() == 0 and m == HttpMethod.get():
+                return self._get_version(r)
         except:
             return _error(400, String("INVALID_ARGUMENT"), String("Invalid JSON payload received."))
         return _error(
@@ -429,19 +435,43 @@ struct FakeSecretManager(RequestDispatcher):
         o.set_member(String("totalSize"), JsonValue.from_i64(Int64(total)))
         return _ok(o)
 
-    def _access(self, r: _Route) raises -> _Answer:
-        var at = self.store.find(r.location, r.secret_id)
-        var v = -1
-        if at >= 0:
-            v = self.store.secrets[at].version_index(r.version)
+    def _version_at(self, r: _Route, mut at: Int) -> Int:
+        """The index of the version `r` names, -1 when the secret or the
+        version does not exist; `at` is set to the secret's index."""
+        at = self.store.find(r.location, r.secret_id)
+        if at < 0:
+            return -1
+        return self.store.secrets[at].version_index(r.version)
+
+    def _version_missing(self, r: _Route) raises -> _Answer:
+        return _error(
+            404,
+            String("NOT_FOUND"),
+            String("Secret Version [") + secret_name(r.location, r.secret_id)
+            + "/versions/" + r.version + "] not found.",
+        )
+
+    def _get_version(self, r: _Route) raises -> _Answer:
+        var at = -1
+        var v = self._version_at(r, at)
         if v < 0:
+            return self._version_missing(r)
+        return _ok(version_json(self.store.secrets[at], self.store.secrets[at].versions[v]))
+
+    def _access(self, r: _Route) raises -> _Answer:
+        var at = -1
+        var v = self._version_at(r, at)
+        if v < 0:
+            return self._version_missing(r)
+        ref ver = self.store.secrets[at].versions[v]
+        if ver.state != "ENABLED":
             return _error(
-                404,
-                String("NOT_FOUND"),
+                400,
+                String("FAILED_PRECONDITION"),
                 String("Secret Version [") + secret_name(r.location, r.secret_id)
-                + "/versions/" + r.version + "] not found.",
+                + "/versions/" + String(ver.number) + "] is in " + ver.state + " state.",
             )
-        return _ok(access_json(self.store.secrets[at], self.store.secrets[at].versions[v]))
+        return _ok(access_json(self.store.secrets[at], ver))
 
     def _list_secrets(self, r: _Route, query: String) raises -> _Answer:
         var mine = List[Int]()

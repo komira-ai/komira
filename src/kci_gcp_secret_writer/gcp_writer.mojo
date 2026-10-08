@@ -1,10 +1,11 @@
 # =============================================================================
-# komira_gcp_secret_store/gcp_writer.mojo: `GcpSecretManagerWriter`, a
+# kci_gcp_secret_writer/gcp_writer.mojo: `GcpSecretManagerWriter`, a
 #   `SecretWriter` over the generated Secret Manager client.
 # =============================================================================
 #
 # The three verbs, each on a handle that names a secret (a handle naming a
-# version is refused, gcp_secret_ref.mojo):
+# version is refused; the grammar is komira_gcp_secret_store's
+# `parse_gcp_secret_ref`):
 #
 #   write             AddSecretVersion with the value as the payload and its
 #                     CRC32C as `dataCrc32c` (the service refuses a payload
@@ -20,12 +21,25 @@
 #                     writer sends each one once.
 #   define_container  CreateSecret: a secret with no version. ALREADY_EXISTS
 #                     is the no-op.
-#   has_version       ListSecretVersions, filtered to `state:ENABLED`, one
-#                     per page: metadata only (a SecretVersion has no
-#                     payload), so the probe needs `versions.list` and never
-#                     `versions.access`. True when an enabled version exists,
-#                     False when none does or the secret does not exist
-#                     (NOT_FOUND).
+#   has_version       GetSecretVersion of `<secret>/versions/latest`:
+#                     metadata only (a SecretVersion has no payload), so
+#                     the probe needs `versions.get` and never
+#                     `versions.access`. True when that version's state is
+#                     ENABLED; False when it is DISABLED or DESTROYED, or
+#                     when the secret or `latest` does not exist
+#                     (NOT_FOUND: a secret with no version has no
+#                     `latest`). Any other error raises.
+#
+# WHY `latest` AND NOT "ANY ENABLED VERSION". The probe answers whether a
+# resolve of the bare handle would find a value, and that resolve reads
+# `latest`, the most recently created version, whatever its state
+# (gcp_store.mojo). A secret whose newest version is disabled while an
+# older one is enabled answers False: the bare handle cannot be read, so
+# a write (a new, enabled `latest`) is what makes it readable again, and
+# the enabled older version is left as it is. A list filtered to
+# `state:ENABLED` would answer True there, and could also answer False
+# from an empty page that is not the last (AIP-158), which would rotate a
+# live value; one GetSecretVersion has neither problem.
 #
 # Every other failure raises, naming the verb and the handle, with the
 # generated client's error (the verb, the method, the status and its code,
@@ -53,12 +67,16 @@ from komira_gcp_core import (
     GcpTokenSource,
     gcp_status_error_code,
 )
-from komira_gcp_secretmanager.resources import Secret, SecretPayload
+from komira_gcp_secretmanager.resources import (
+    Secret,
+    SecretPayload,
+    SecretVersion,
+    SecretVersion_State,
+)
 from komira_gcp_secretmanager.service import (
     AddSecretVersionRequest,
     CreateSecretRequest,
-    ListSecretVersionsRequest,
-    ListSecretVersionsResponse,
+    GetSecretVersionRequest,
     SecretManagerServiceClient,
 )
 from komira_http_core.transport.io_stream import Connector
@@ -66,12 +84,10 @@ from komira_proto_codec.codec import decode_json
 from kci_secret_writer import SecretWriter
 from komira_secret_store import SecretValue
 
-from .gcp_secret_ref import GcpSecretRef, crc32c, parse_gcp_secret_ref
+from komira_gcp_secret_store import GcpSecretRef, crc32c, parse_gcp_secret_ref
 
 comptime _WRITER = "GcpSecretManagerWriter: "
 comptime _RT = BlockingRuntime[NoopSink]
-# The filter has_version lists with (the Secret Manager list filter syntax).
-comptime GCP_ENABLED_FILTER = "state:ENABLED"
 
 
 def _failed(verb: String, secret_ref: String, cause: String) -> Error:
@@ -207,27 +223,22 @@ struct GcpSecretManagerWriter[C: Connector, T: GcpTokenSource](
         secret_ref: String,
         deploy_token: String,
     ) raises -> Bool:
-        """Whether the secret `secret_ref` names has an enabled version, read
-        from ListSecretVersions (module header)."""
+        """Whether the `latest` version of the secret `secret_ref` names is
+        enabled, read from GetSecretVersion (module header)."""
         var secret = self._secret(String("has_version"), secret_ref, deploy_token)
-        var listed: ListSecretVersionsResponse
+        var got: SecretVersion
         try:
             ref reactor = self._rt.reactor()
-            listed = self._client.list_secret_versions[_RT](
-                ListSecretVersionsRequest(
-                    secret.secret_name(),
-                    Int32(1),
-                    String(""),
-                    String(GCP_ENABLED_FILTER),
-                ),
+            got = self._client.get_secret_version[_RT](
+                GetSecretVersionRequest(secret.version_name()),
                 reactor,
             )
         except e:
             var cause = String(e)
             if (
-                gcp_status_error_code(String("GET"), String("ListSecretVersions"), cause)
+                gcp_status_error_code(String("GET"), String("GetSecretVersion"), cause)
                 == CODE_NOT_FOUND
             ):
                 return False
             raise _failed(String("has_version"), secret_ref, cause)
-        return len(listed.versions) > 0
+        return got.state == SecretVersion_State(SecretVersion_State.ENABLED)

@@ -1,0 +1,40 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The write seam over AWS Secrets Manager: `AwsSecretsManagerWriter`, a
+# kci_secret_writer `SecretWriter` (PutSecretValue, CreateSecret,
+# DescribeSecret) over the generated komira_aws_secretsmanager
+# `SecretsManagerClient` it is given. Hand-written; it reads no environment.
+# The handle grammar is komira_aws_secret_store's; that package, the resolve
+# seam, does not depend on this one, so a resolve-only closure holds no
+# writer.
+#
+# The welded test, test_aws_secret_writer, sends over komira_http_core's
+# ScriptedConnector, one connector per operation from a factory that counts
+# its calls in a komira_counters GlobalCounter (a test dependency): every
+# refusal (a deploy token, a selector, an ARN to define, a handle outside
+# the grammar, a non-UTF-8 value) made before anything is sent; the
+# create-if-absent race (PutSecretValue not found, CreateSecret finding the
+# name taken, PutSecretValue again) and a create refused otherwise; and the
+# probe's reading of DescribeSecret (AWSCURRENT on some version, or not;
+# not found; refused; scheduled for deletion). The service's behaviour is
+# tested against a stateful fake over a real socket in
+# src/tests/e2e/komira_secrets_e2e (test_aws_store_registry).
+#
+# No test here talks to the service.
+mojo_library(
+    name = "kci_aws_secret_writer",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_secret_writer:kci_secret_writer",
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_aws_secret_store:komira_aws_secret_store",
+        "//src/komira_aws_secretsmanager:komira_aws_secretsmanager",
+        # For the test's HttpClientConfig; the library imports nothing of it.
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_deps = ["//src/komira_counters:komira_counters"],
+    test_srcs = ["tests/test_aws_secret_writer.mojo"],
+    visibility = ["PUBLIC"],
+)
