@@ -15,8 +15,8 @@ reviewer's approval (it does not check approval itself), and writes:
 Both commands run the same computation (`covcheck/analyze.mojo`),
 so the PR check and the build gate cannot disagree on the same reports; a
 welded test holds the gate's JSON entry for a package equal to the
-report's. (The PR check does not read the runs of a library's
-`coverage_tests`: [The coverage workflow](#the-coverage-workflow), step 4.)
+report's. The PR check reads the same reports, a library's `coverage_tests`
+runs included ([The coverage workflow](#the-coverage-workflow), step 4).
 
 | target | what it is |
 |---|---|
@@ -444,6 +444,14 @@ is not a one-line change today:
   too) stages no source, so its gate is `NotMeasured` and fails in enforce
   mode; its hand-written code is never measured. It needs measuring (by
   its repository path) or a documented exemption.
+- **Open decision: files only a README or a `coverage_tests` run reaches,
+  in a library whose gate reads branch records.** Those runs give line
+  coverage only, so such a file has line records and no branch record:
+  `BranchUnmeasuredFile` (listed in census mode, failing in enforce mode).
+  `komira_scalar_arithmetic` has four such files (its README reaches them,
+  its one test does not). Before enforce, decide between branch records for
+  those runs, a test that reaches the files, or accepting the finding; the
+  gate does not change this today.
 
 **The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
 runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
@@ -659,10 +667,13 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    read gives its entry's `cov/branch/*.info` paths when the entry is
    `SUCCESS` (one per report of a test, the README's `cov/tests/readme.xml`
    left out: its run has no branch records; another count fails the job,
-   as a tool error). The README's report is read like a test's. The runs
-   of the `mojo_test` targets a library names in `coverage_tests` are
-   `<name>_cov_gate[tests]`, which this build does not ask for: for such
-   a library the check run shows less than its gate reads. When its branch coverage actions failed, or its gate did (which
+   as a tool error). The README's report is read like a test's. For a
+   library naming `coverage_tests` (a second query,
+   `attrregexfilter(coverage_tests, '.', ...)`), the same build also asks
+   for `<name>_cov_gate[tests]`, the runs of those tests: that entry must
+   be `SUCCESS` (else the library is not measured) and its
+   `cov/tests/*.xml` are the library's reports too, so the check run reads
+   what its gate reads. When its branch coverage actions failed, or its gate did (which
    reads the same records with covcheck, so `report` could refuse them
    too), none of its records is read and it is listed as `branch not
    measured`, with the reason, in both summaries; the job stays green;

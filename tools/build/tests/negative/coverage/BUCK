@@ -603,6 +603,45 @@ mojo_test(
     deps = [":covmt_args"],
 )
 
+# Test 46. Two more refusals of `coverage_tests`, each RED at analysis of
+# the library's gate: :covmt_gen_cov_gate names a mojo_test whose main is
+# generated (`cannot run under kcov: its main source ... is generated`), and
+# :covmt_nocov_cov_gate one with no coverage build (no coverage_debug, and
+# no switch: `is not a mojo_test with a coverage build`).
+cov_plant(
+    name = "test_gen_main_src",
+    expr = "s/traced, TracerPid/traced (generated copy), TracerPid/",
+    out = "tests/test_gen_main.mojo",
+    src = "tests/test_tracer.mojo",
+)
+
+[
+    mojo_library(
+        name = name,
+        srcs = ["tracer/__init__.mojo"],
+        conda = False,
+        coverage_debug = _LINK,
+        coverage_gate = _GATE,
+        coverage_mode = "census",
+        coverage_tests = [test],
+        import_name = "tracer",
+    )
+    for name, test in (("covmt_gen", ":test_gen_main"), ("covmt_nocov", ":test_nocov"))
+]
+
+mojo_test(
+    name = "test_gen_main",
+    srcs = [":test_gen_main_src"],
+    coverage_debug = _LINK,
+    deps = [":covmt_gen"],
+)
+
+mojo_test(
+    name = "test_nocov",
+    srcs = ["tests/test_tracer.mojo"],
+    deps = [":covmt_nocov"],
+)
+
 # ---- Test 47: branch coverage runs --------------------------------------------
 #
 # Each library below has coverage builds whatever the switch says

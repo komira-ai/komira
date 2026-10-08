@@ -129,10 +129,14 @@ _COVERAGE_BRANCH = "komira//tools/build/coverage/branch:cov_branch"
 # `<name>_cov_gate`, which the conda package names itself). `run` is what a
 # coverage run of another target's binary against these sources needs
 # (_cov_gate_impl): the run directory, [src], its repository directory, the
-# generated sources and the import name. A library returns it whenever it
-# has coverage builds.
+# generated sources and the import name. `external_gate`: its gate is the
+# target `<name>_cov_gate` (a library of the ledger, or one naming
+# `coverage_tests`), so a conda package of it that does not wait for that
+# target is refused (tools/build/package/conda.bzl). A library returns it
+# whenever it has coverage builds.
 MojoCoverageGateInfo = provider(fields = {
     "branch_infos": provider_field(typing.Any),
+    "external_gate": provider_field(bool),
     "files": provider_field(typing.Any),
     "label": provider_field(typing.Any),
     "markers": provider_field(typing.Any),
@@ -577,6 +581,7 @@ def _gate_inputs(ctx, runs, branch, markers, run):
     )
     return MojoCoverageGateInfo(
         branch_infos = [branch[k].info for k in sorted(branch)] if _branch_gated(ctx) else [],
+        external_gate = bool(ctx.attrs.coverage_tests) or str(ctx.label.raw_target()) in COVERAGE_NO_GATE,
         files = files,
         label = ctx.label.raw_target(),
         markers = markers,
@@ -631,8 +636,10 @@ def _check_tools(ctx):
     `<name>_cov_gate`). A BUCK file loading the rule itself cannot give a
     library a lenient gate (its own ratchet, a script that passes a
     failure) or runs with no gate, unless it names `coverage_tests`: the
-    rule cannot see whether `<name>_cov_gate` exists, which the macro
-    always declares with them."""
+    rule cannot see whether `<name>_cov_gate` exists (the macro always
+    declares it with them), so its MojoCoverageGateInfo says
+    `external_gate`, and a conda package of it that waits for no
+    `<name>_cov_gate` is refused (tools/build/package/conda.bzl)."""
     if ctx.label.cell == "tests":
         return
     where = ctx.label.raw_target()
@@ -676,6 +683,7 @@ def coverage_gate(ctx, tc, runs, branch, src_dir, import_name, root):
     gate = _gate_action(ctx.actions, tc.busybox, gate_dir, mode, pre, "cov/gate/")
     return gate, [MojoCoverageGateInfo(
         branch_infos = pre.branch_infos,
+        external_gate = pre.external_gate,
         files = pre.files,
         label = pre.label,
         markers = markers + [gate.marker],
@@ -720,6 +728,7 @@ def _test_runs(ctx, tc, info):
             )
     return runs, MojoCoverageGateInfo(
         branch_infos = info.branch_infos,
+        external_gate = info.external_gate,
         files = files,
         label = info.label,
         markers = info.markers,

@@ -31,10 +31,16 @@
 #     mojo_library sets from COVERAGE_BRANCH_GATE (tools/build/coverage/
 #     policy.bzl) and the gate reads (tools/build/mojo/coverage.bzl), so this
 #     list is the gate's own, not a second reading of the policy's dict.
+#     Then which of them name mojo_test targets in `coverage_tests`
+#     (`buck2 uquery -c komira.coverage=true "attrregexfilter(coverage_tests,
+#     '.', <the same query>)"`): their runs are `<library>_cov_gate[tests]`.
 #  4. One `buck2 build -c komira.coverage=true --keep-going --build-report
 #     <file> '<library>[coverage][tests]'...` of every library, with
 #     `'<library>[coverage][branch_info]'` after it for a library whose
-#     coverage_branch_gate is true (the farm builds them in parallel; the
+#     coverage_branch_gate is true, and `'<library>_cov_gate[tests]'` for
+#     one naming coverage_tests, whose entry must be SUCCESS too (else the
+#     library is NOT MEASURED) and whose `cov/tests/*.xml` paths are its
+#     reports as well (the farm builds them in parallel; the
 #     gate already waits for those records, so they add no action): each
 #     test's kcov report, the library's gate (tools/build/mojo/README.md,
 #     "Coverage builds") and each test's branch records. Each library's
@@ -71,6 +77,7 @@
 # request bodies, sorted file order is send order), summary.md, result.json,
 # annotations.json, libraries.txt (the libraries of step 3),
 # branch_libraries.txt (those of them whose gate reads branch records),
+# coverage_tests_libraries.txt (those naming coverage_tests),
 # not_measured.txt (those whose coverage build failed) and
 # branch_not_measured.txt (those measured whose branch records are not read). <out> also holds the
 # inputs, the build log and the build report; it must be empty or absent.
@@ -223,6 +230,21 @@ if [ -s "$OUT/packages.txt" ]; then
         done <"$OUT/libraries.tsv"
     fi
 fi
+# Which of them name mojo_test targets in `coverage_tests`: their runs are
+# `<library>_cov_gate[tests]` (tools/build/mojo/coverage.bzl).
+: >"$PUB/coverage_tests_libraries.txt"
+if [ -s "$PUB/libraries.txt" ]; then
+    rc=0
+    "$BUCK2" uquery -c komira.coverage=true "attrregexfilter(coverage_tests, '.', $query)" \
+        >"$OUT/coverage_tests.raw" 2>"$OUT/logs/uquery_tests.log" </dev/null || rc=$?
+    [ "$rc" -eq 0 ] || die "buck2 uquery of coverage_tests exited $rc (see $OUT/logs/uquery_tests.log)"
+    while IFS= read -r l; do
+        [ -n "$l" ] || continue
+        grep -qxF -- "$l" "$PUB/libraries.txt" ||
+            die "buck2 uquery of coverage_tests printed '$l', which is not one of the libraries"
+        echo "$l" >>"$PUB/coverage_tests_libraries.txt"
+    done <"$OUT/coverage_tests.raw"
+fi
 
 # 4. One coverage build of every library, with the branch records of those
 # whose gate reads them. BRANCH_CATEGORIES: the categories of the branch
@@ -236,12 +258,14 @@ BRANCH_CATEGORIES="mojo_emit_cov_bc mojo_cov_pgo_link mojo_cov_branch_run mojo_c
 : >"$PUB/branch_not_measured.txt"
 : >"$OUT/branch_not_measured.why"
 reads_branch() { grep -qxF -- "$1" "$PUB/branch_libraries.txt"; }
+names_tests() { grep -qxF -- "$1" "$PUB/coverage_tests_libraries.txt"; }
 if [ -s "$PUB/libraries.txt" ]; then
     br="$OUT/logs/build_report.json"
     set --
     while IFS= read -r lib; do
         set -- "$@" "${lib}[coverage][tests]"
         if reads_branch "$lib"; then set -- "$@" "${lib}[coverage][branch_info]"; fi
+        if names_tests "$lib"; then set -- "$@" "${lib}_cov_gate[tests]"; fi
     done <"$PUB/libraries.txt"
     rc=0
     "$BUCK2" build -c komira.coverage=true --keep-going --build-report "$br" "$@" >"$OUT/logs/build.log" 2>&1 </dev/null || rc=$?
@@ -316,10 +340,20 @@ if [ -s "$PUB/libraries.txt" ]; then
                 continue
                 ;;
         esac
+        if names_tests "$lib"; then
+            # The runs of its coverage_tests: their target must have built.
+            vt=$(awk -v l="${lib}_cov_gate" '$1 == l && $2 != "report" && $2 != "info" { print $2; exit }' "$OUT/verdicts.txt")
+            if [ "$vt" != ok ]; then
+                echo "$lib" >>"$PUB/not_measured.txt"
+                say "$lib: NOT MEASURED (coverage build failed): the runs of its coverage_tests (${lib}_cov_gate) did not build"
+                continue
+            fi
+        fi
         [ "$v" != gate ] || say "$lib: its own coverage gate failed (an enforce finding or a gate error; the log below says which); its runs built, so it is measured"
         [ "$v" != branch ] || say "$lib: its own branch coverage actions failed (the log below says which); its runs built, so it is measured"
         paths "$lib" report >"$OUT/logs/reports.one"
         cat "$OUT/logs/reports.one" >>"$OUT/reports.txt"
+        if names_tests "$lib"; then paths "${lib}_cov_gate" report >>"$OUT/reports.txt"; fi
         echo "$lib" >>"$OUT/measured.txt"
         nr=$(grep -c . "$OUT/logs/reports.one" || true)
         say "$lib: $nr report(s)"
