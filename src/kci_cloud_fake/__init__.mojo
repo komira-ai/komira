@@ -6,8 +6,8 @@ module runs against them unchanged.
 
   * `FakeCloud` ("fake"): complete; the executable specification of a
     cloud and the offline test double.
-  * `FakeLimitedCloud` ("fake-limited"): deliberately partial (no `job`,
-    no `table`, no `bucket`, no messaging, no secret, no DNS, no
+  * `FakeLimitedCloud` ("fake-limited"): deliberately partial (no
+    `container_job`, no `worker`, no `table`, no `bucket`, no messaging, no secret, no DNS, no
     certificate, no public ingress); the offline proof that a graph a cloud cannot
     host is refused before anything is created.
 
@@ -48,7 +48,10 @@ from kci_cloud_fake.nodes import (
 )
 from kci_cloud_fake.clouds import FakeLimitedCloud, FakeCloud
 from kci_cloud_fake.shapes import (
+    GPU_REASON_AWS,
+    GPU_REASON_UNDECIDED,
     GrantRow,
+    ONPREM_SCALE_TO_ZERO_REASON,
     ONPREM_CERTIFICATE_REASON,
     ONPREM_DNS_REASON,
     ONPREM_MESSAGING_REASON,
@@ -61,6 +64,7 @@ from kci_cloud_fake.shapes import (
     shape_named,
 )
 from kci_cloud_fake.messaging import pull_shape
+from kci_cloud_fake.workloads import lower_run, workload_limits
 from kci_cloud_fake.secrets import SECRET_NAMED, lower_secret, secret_env_fields
 from kci_cloud_fake.dns import (
     dns_limits,

@@ -102,7 +102,7 @@ def _graph(
     var j = (
         String('{"resource":[')
         + String('{"id":"api",') + uses
-        + String('"service":{"image":{"digest":"sha256:a1"},"internal":{}}},')
+        + String('"service":{"image":{"digest":"sha256:a1"},"internal":{},"scale":{"min":1,"max":2}}},')
         + String('{"id":"site","retention":"') + zone_retention + String('","dnsZone":{"name":"example.com"}},')
         + String('{"id":"www","dnsRecord":{"name":"www.example.com","zone":{"resource":"site"},"type":"CNAME",')
         + String('"values":[{"ref":{"resource":"api","standard":"HOST"}}],"ttl":"') + ttl + String('s"}},')
