@@ -6,6 +6,8 @@
 # (w = 10 * id). g = 1: id 1 {1, 2}: 10, 20; id 2 {1, 2, 3}: 10, 30; id 3
 # {2, 3, 4}: 20, 40; id 4 {3, 4, 5}: 30, 50; id 5 {4, 5}: 40, 50. g = 2:
 # ids 6, 7 {6, 7}: 60, 70. g = 3: id 8 {8}: 80, 80.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
 # Types: id, g, v, w, u keep their scanned types; FIRST_VALUE and LAST_VALUE
 # have w's type, INT64, non-nullable: w is non-nullable and this frame
 # always holds the current row (§8.25).

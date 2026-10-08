@@ -10,6 +10,8 @@
 # {1, 2}: 2; id 4 {}: 0, 0, behind {2, 3}: 2; id 5 {}: 0, 0, behind {3, 4}:
 # 2. g = 2: id 6 {}: 0, 0, behind {}: 0; id 7 {}: 0, 0, behind {6}: 1.
 # g = 3: id 8: 0, 0, 0.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
 # Types: id, g, v, w, u keep their scanned types; windowed COUNT is INT64,
 # non-nullable (§8.27).
 id:int64	g:int64	v:int64?	w:int64	u:int64?	cnt_ahead:int64	cnt_v_ahead:int64	cnt_behind:int64

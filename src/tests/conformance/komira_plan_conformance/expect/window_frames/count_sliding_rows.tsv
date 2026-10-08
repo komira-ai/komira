@@ -7,6 +7,8 @@
 # (v 3, NULL): 2, 1; id 2 {1, 2, 3}: 3, 2; id 3 {2, 3, 4} (NULL, 5, 1): 3,
 # 2; id 4 {3, 4, 5} (5, 1, 4): 3, 3; id 5 {4, 5}: 2, 2. g = 2: ids 6 and 7
 # each {6, 7}, all v NULL: 2, 0. g = 3: id 8 {8}: 1, 1.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
 # Types: id, g, v, w, u keep their scanned types; windowed COUNT is INT64,
 # non-nullable (§8.27).
 id:int64	g:int64	v:int64?	w:int64	u:int64?	cnt_all:int64	cnt_v:int64

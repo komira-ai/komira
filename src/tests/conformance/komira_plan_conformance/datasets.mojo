@@ -96,13 +96,15 @@
 #   asof_left      lid, lg, lt: lid non-nullable; lg the equality key, lt
 #                  the ordering value. lg = 1 rows with lt = 20 (equal to a
 #                  right rt), 24, 25 (equidistant from rt 20 and 30), 5
-#                  (below every rt), 35 (above every rt); lg = 2 with lt 7;
+#                  (below every rg = 1 rt), 35 (above every rg = 1 rt); lg =
+#                  2 with lt 7;
 #                  a NULL lg (lt 15); a NULL lt (lg 1); lg = 3 (no right
 #                  group).
 #   asof_right     rid, rg, rt, rv: rg = 1 holds rt = 10, 20, 30 and one
 #                  NULL rt; rg = 2 rt 5; a NULL rg with rt 15 (the NULL-lg
 #                  left row's lt). No two rows of one rg share an rt, so
-#                  which of two tied right rows matches is never asked.
+#                  which of two tied right rows matches (§3.19, undecided)
+#                  is never asked.
 #   weather        station, time, temp: NOT hand-written. BUCK stages Apache
 #                  Avro's share/test/data/weather.json here (pinned by
 #                  sha256 in third_party/apache-avro), upstream's own

@@ -4,15 +4,19 @@
 #
 # Windowed aggregates and value functions over explicit ROWS frames, citing
 # query semantics §9.1 (every plan window function carries its frame), §9.7
-# (a ROWS frame's bounds count physical rows), §2.1 and §2.2 (NULL inputs
-# skipped; only NULLs give NULL), with result types from §8.25 to §8.27 and
-# their notes. One dataset, frame_rows: g = 1 ids 1 to 5 (v = 3, NULL, 5, 1,
-# 4), g = 2 ids 6, 7 (v NULL on both), g = 3 id 8 (v = 9); w = 10 * id and
+# (a ROWS frame's bounds count physical rows), §9.10 (FIRST_VALUE,
+# LAST_VALUE and NTH_VALUE respect NULLs; NTH_VALUE counts from 1), §2.1 and
+# §2.2 (NULL inputs skipped; only NULLs give NULL), with result types from
+# §8.25 to §8.27 and their notes. That a frame stays within the current
+# row's partition is standard SQL window semantics; no item states it yet.
+# One dataset, frame_rows: g = 1 ids 1 to 5 (v = 3, NULL, 5, 1, 4), g = 2
+# ids 6, 7 (v NULL on both), g = 3 id 8 (v = 9); w = 10 * id and
 # non-nullable; u = id, nullable with no NULL. Every window orders by id,
 # which has no ties within a partition, so every ROWS frame has one answer
-# (§9.3's caveat about peers does not arise). Three frame shapes:
+# (§9.3's caveat about peers does not arise). Frame shapes:
 #   running   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
 #   sliding   ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+#   whole     ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
 #   empty     frames wholly after (or before) the current row, empty at a
 #             partition's end (or start): ROWS 2 FOLLOWING .. 3 FOLLOWING,
 #             1 FOLLOWING .. 2 FOLLOWING, 2 PRECEDING .. 1 PRECEDING
@@ -20,28 +24,22 @@
 # is not a SORT, so every case compares its rows as a multiset (§4.8).
 #
 # Types. §8.27: windowed COUNT is INT64, non-nullable, 0 over an empty frame.
-# §8.26: windowed MIN and MAX have the input's type and are always nullable;
-# the cases take MIN and MAX of the nullable v, where the plan's declaration
-# (the input's nullability) agrees. §8.25: FIRST_VALUE and LAST_VALUE have
-# the input's type, non-nullable only for a non-nullable input under a frame
-# that always holds the current row: so w under running, sliding and
-# whole-partition frames, and the nullable u under the empty-capable frame.
+# §8.26: windowed SUM, AVG, MIN and MAX have the aggregate's type (§8.1,
+# §8.5, §8.7), nullable unless the input is non-nullable and the frame
+# always holds the current row: so MIN and MAX of the nullable v are
+# nullable, and SUM, AVG, MIN and MAX of w under the sliding frame are not.
+# §8.25: FIRST_VALUE and LAST_VALUE have the input's type, non-nullable only
+# for a non-nullable input under a frame that always holds the current row
+# (w under running, sliding and whole frames; v and u are nullable);
+# NTH_VALUE is always nullable.
 #
 # Not here, each because the plan's declared type contradicts the document
 # ("Code that does not follow", item 13), so the case's schema would differ
-# from the plan's and test_corpus would be red:
-#   - windowed SUM and AVG under any frame: the plan declares them
-#     non-nullable, where §8.26 makes them nullable (an all-NULL frame such
-#     as g = 2's, or an empty one, answers NULL);
-#   - FIRST_VALUE or LAST_VALUE of the non-nullable w under a frame that can
-#     be empty: the plan declares w's non-nullability, where §8.25 makes the
-#     result nullable;
-#   - MIN or MAX of the non-nullable w under any frame: the plan declares it
-#     non-nullable, where §8.26 says always nullable.
-# Also not here: NTH_VALUE (§8.25 gives its type, but no item says how n
-# counts within the frame); RANGE frames with offsets (§9.8, UNDECIDED);
-# value functions over a frame holding a NULL value (no item says whether
-# FIRST_VALUE and LAST_VALUE skip it; §9.5 speaks of LAG and LEAD only).
+# from the plan's and test_corpus would be red: windowed SUM or AVG of the
+# nullable v, or under a frame that can be empty; FIRST_VALUE, LAST_VALUE,
+# MIN or MAX of the non-nullable w under a frame that can be empty (the
+# plan declares each of these non-nullable, §8.25 and §8.26 nullable).
+# Also not here: RANGE frames with offsets (§9.8, UNDECIDED).
 #
 # The defect each case would catch once a plan executes (nothing executes
 # one here yet, so "catch" means the expected rows differ from the rows the
@@ -70,6 +68,16 @@
 #   first_last_value_whole_partition  LAST_VALUE stopping at the current row
 #   first_last_value_empty_frame  an empty frame answering the current row's
 #                                 value, or reading across the partition end
+#   first_last_value_nulls        a NULL first or last row skipped (id 1's
+#                                 LAST_VALUE 3, not NULL; id 3's FIRST_VALUE
+#                                 5, not NULL), as IGNORE NULLS would
+#   nth_value_rows                n counted from 0 (id 3's nth_v 1, not 5);
+#                                 NULL rows skipped in the count (id 2's
+#                                 nth_v 5, not NULL); a frame shorter than n
+#                                 answering its last row (id 8's nth_v 9)
+#   agg_non_nullable_sliding      the frame read as running (id 5's SUM 150,
+#                                 not 90); AVG truncated to an integer is
+#                                 not caught (every AVG here is whole)
 # =============================================================================
 
 from komira_plan_expr.partition_expr import (
@@ -79,9 +87,11 @@ from komira_plan_expr.partition_expr import (
     FRAME_BOUND_UNBOUNDED_FOLLOWING,
     FRAME_BOUND_UNBOUNDED_PRECEDING,
     FRAME_UNITS_ROWS,
+    PF_AVG,
     PF_COUNT,
     PF_MAX,
     PF_MIN,
+    PF_SUM,
     PartitionExpr,
     PartitionFrame,
 )
@@ -229,6 +239,34 @@ def _first_last_value_empty_frame() raises -> LogicalPlan:
     return _first_last(String("u"), _following(1, 2))
 
 
+def _first_last_value_nulls() raises -> LogicalPlan:
+    return _first_last(String("v"), _sliding())
+
+
+def _nth_value_rows() raises -> LogicalPlan:
+    """NTH_VALUE(v, 2) AS nth_v over the sliding frame; NTH_VALUE(w, 3) AS
+    nth_w over the running frame."""
+    return _over_g_by_id(
+        [
+            PartitionExpr.nth_value(String("v"), 2).with_frame(_sliding()).with_alias("nth_v"),
+            PartitionExpr.nth_value(String("w"), 3).with_frame(_running()).with_alias("nth_w"),
+        ]
+    )
+
+
+def _agg_non_nullable_sliding() raises -> LogicalPlan:
+    """SUM, AVG, MIN, MAX of the non-nullable w over ROWS 1 PRECEDING .. 1
+    FOLLOWING, a frame that always holds the current row."""
+    return _over_g_by_id(
+        [
+            _agg(PF_SUM, String("w"), _sliding(), "sum_w"),
+            _agg(PF_AVG, String("w"), _sliding(), "avg_w"),
+            _agg(PF_MIN, String("w"), _sliding(), "min_w"),
+            _agg(PF_MAX, String("w"), _sliding(), "max_w"),
+        ]
+    )
+
+
 def cases() -> List[Case]:
     return [
         Case.hand("count_running_rows", SHARD, _count_running_rows, CanonPolicy.unordered()),
@@ -241,4 +279,7 @@ def cases() -> List[Case]:
         Case.hand("first_last_value_sliding_rows", SHARD, _first_last_value_sliding_rows, CanonPolicy.unordered()),
         Case.hand("first_last_value_whole_partition", SHARD, _first_last_value_whole_partition, CanonPolicy.unordered()),
         Case.hand("first_last_value_empty_frame", SHARD, _first_last_value_empty_frame, CanonPolicy.unordered()),
+        Case.hand("first_last_value_nulls", SHARD, _first_last_value_nulls, CanonPolicy.unordered()),
+        Case.hand("nth_value_rows", SHARD, _nth_value_rows, CanonPolicy.unordered()),
+        Case.hand("agg_non_nullable_sliding", SHARD, _agg_non_nullable_sliding, CanonPolicy.unordered()),
     ]

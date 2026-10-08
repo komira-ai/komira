@@ -7,6 +7,8 @@
 # note). g = 1: id 1 {2, 3}: 2, 3; id 2 {3, 4}: 3, 4; id 3 {4, 5}: 4, 5;
 # id 4 {5}: 5, 5; id 5 {}: NULL, NULL. g = 2: id 6 {7}: 7, 7; id 7 {}: NULL,
 # NULL. g = 3: id 8 {}: NULL, NULL.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
 # Types: id, g, v, w, u keep their scanned types; FIRST_VALUE and LAST_VALUE
 # have u's type, INT64, nullable: u is declared nullable, and this frame
 # can be empty (§8.25).

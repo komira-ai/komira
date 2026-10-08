@@ -3,11 +3,11 @@
 #  float: ulps=0
 # derivation: §3.6's FORWARD candidates (see asof_forward), then §3.8: a
 # candidate with |lt - rt| above the tolerance 5 is no match, and the LEFT
-# ASOF row keeps NULL right columns (§3.4). A distance of exactly 5 is not
-# outside the bound. §3.8 is DEPARTS (a komira extension) pending its
-# ruling. lid 1: rid 2 at 0; lid 2: rid 3 at 6, dropped; lid 3: rid 3 at 5,
-# kept; lid 4: rid 1 at 5, kept; lid 5, lid 6: no candidate; lid 7 (lg
-# NULL, §3.1), lid 8 (lt NULL, §3.6), lid 9 (no group): none.
+# ASOF row keeps NULL right columns (§3.4). The bound is inclusive (§3.8),
+# so a distance of exactly 5 matches. §3.8 is DEPARTS (a komira extension)
+# pending its ruling. lid 1: rid 2 at 0; lid 2: rid 3 at 6, dropped; lid 3:
+# rid 3 at 5, kept; lid 4: rid 1 at 5, kept; lid 5, lid 6: no candidate; lid
+# 7 (lg NULL, §3.17), lid 8 (lt NULL, §3.6, §3.17), lid 9 (no group): none.
 # Types: the left columns then the right, in input order (§3.13); the left
 # side is never padded and keeps its nullability (lid non-nullable); the
 # right side is padded, so every right column is nullable (§3.13).

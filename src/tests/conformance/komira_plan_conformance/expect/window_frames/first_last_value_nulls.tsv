@@ -1,0 +1,22 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.1, §9.7: ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING, by id.
+# §9.10: FIRST_VALUE and LAST_VALUE respect NULLs: the value of the frame's
+# first and last row, NULL when that row's v is NULL. g = 1 (v 3, NULL, 5,
+# 1, 4): id 1 {3, NULL}: 3, NULL; id 2 {3, NULL, 5}: 3, 5; id 3 {NULL, 5,
+# 1}: NULL, 1; id 4 {5, 1, 4}: 5, 4; id 5 {1, 4}: 1, 4. g = 2: ids 6, 7
+# {NULL, NULL}: NULL, NULL. g = 3: id 8 {9}: 9, 9.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
+# Types: id, g, v, w, u keep their scanned types; FIRST_VALUE and LAST_VALUE
+# have v's type, INT64, nullable because v is nullable (§8.25).
+id:int64	g:int64	v:int64?	w:int64	u:int64?	first_x:int64?	last_x:int64?
+1	1	3	10	1	3	\N
+2	1	\N	20	2	3	5
+3	1	5	30	3	\N	1
+4	1	1	40	4	5	4
+5	1	4	50	5	1	4
+6	2	\N	60	6	\N	\N
+7	2	\N	70	7	\N	\N
+8	3	9	80	8	9	9

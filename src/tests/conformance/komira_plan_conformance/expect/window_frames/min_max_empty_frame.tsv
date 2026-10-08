@@ -7,8 +7,10 @@
 # (§2.2, §8.26 note). g = 1: id 1 {NULL, 5}: 5, 5; id 2 {5, 1}: 1, 5; id 3
 # {1, 4}: 1, 4; id 4 {4}: 4, 4; id 5 {}: NULL, NULL. g = 2: id 6 {NULL}:
 # NULL, NULL; id 7 {}: NULL, NULL. g = 3: id 8 {}: NULL, NULL.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
 # Types: id, g, v, w, u keep their scanned types; windowed MIN and MAX have
-# v's type, INT64, always nullable (§8.26).
+# v's type, INT64, nullable because v is nullable (§8.26).
 id:int64	g:int64	v:int64?	w:int64	u:int64?	min_v:int64?	max_v:int64?
 1	1	3	10	1	5	5
 2	1	\N	20	2	1	5

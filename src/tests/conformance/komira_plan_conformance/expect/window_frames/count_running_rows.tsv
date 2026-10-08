@@ -6,6 +6,8 @@
 # counted physically (id orders each g with no ties). §2.1: COUNT(*) counts
 # rows, COUNT(v) skips NULL v. g = 1 (v 3, NULL, 5, 1, 4): cnt_all 1 to 5;
 # cnt_v 1, 1, 2, 3, 4. g = 2 (v NULL, NULL): 1, 2; 0, 0. g = 3: 1; 1.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
 # Types: id, g, v, w, u keep their scanned types; windowed COUNT is INT64,
 # non-nullable (§8.27).
 id:int64	g:int64	v:int64?	w:int64	u:int64?	cnt_all:int64	cnt_v:int64

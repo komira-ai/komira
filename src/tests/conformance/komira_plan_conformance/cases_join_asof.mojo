@@ -3,8 +3,9 @@
 # =============================================================================
 #
 # ASOF joins, citing query semantics §3.6 (BACKWARD and FORWARD), §3.7
-# (NEAREST), §3.8 (tolerance), §3.1 and §1.2 (a NULL key matches nothing),
-# §3.4 and §3.13 (padding and output columns). The plan's ASOF node is a
+# (NEAREST), §3.8 (tolerance, inclusive), §3.17 (the equality keys are
+# equi-keys: a NULL key matches nothing), §3.18 (no equality keys is one
+# group), §3.4 and §3.13 (padding and output columns). The plan's ASOF node is a
 # LEFT ASOF join: every left row appears once, with the right columns NULL
 # where nothing matches (§3.8's "LEFT ASOF join", §3.4). Datasets, joined on
 # lg = rg (the equality group) and ordered by lt against rt:
@@ -13,7 +14,7 @@
 #   asof_right  rg = 1: rt = 10 (rid 1), 20 (rid 2), 30 (rid 3), NULL
 #               (rid 6); rg = 2: rt 5 (rid 4); rg NULL: rt 15 (rid 5).
 # No two right rows of one group share an rt, so no case asks which of two
-# tied right rows matches (§3.6 promises at most one, and names neither).
+# tied right rows matches (§3.19, undecided).
 # Every expectation is HAND, its derivation in the .tsv. No case's root is
 # a SORT, so every case compares its rows as a multiset (§4.8).
 #
@@ -27,12 +28,9 @@
 # "Rulings needed"; the tolerance and NEAREST cases are derived from those
 # items' rules and change if a ruling does.
 #
-# Readings the document does not spell out, stated so a reviewer can refute
-# them: §3.6's "equality group" is an equi-join key, so §3.1's NULL rule
-# applies to it (lid 7 does not join rid 5, whose rg is also NULL); a
-# candidate at exactly the tolerance is inside it (§3.8's "outside" is
-# `|left - right| > tolerance`); with no equality keys every right row is in
-# one group.
+# lid 7 (NULL lg) does not join rid 5, whose rg is also NULL (§3.17); a
+# candidate at exactly the tolerance matches (§3.8); with no equality keys
+# every right row is in one group (§3.18).
 #
 # Not here: a FLOAT64 ordering column (no float item is at stake); a
 # tolerance with NEAREST; strict `<` and `>` forms, which the plan cannot

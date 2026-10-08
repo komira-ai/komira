@@ -5,6 +5,8 @@
 # is the whole partition, the same frame for every row of it. first_x is
 # the partition's first w by id, last_x its last (w = 10 * id). g = 1: 10,
 # 50 on all five rows. g = 2: 60, 70 on both. g = 3: 80, 80.
+# A frame stays within the current row's partition: standard SQL window
+# semantics, which no item states yet.
 # Types: id, g, v, w, u keep their scanned types; FIRST_VALUE and LAST_VALUE
 # have w's type, INT64, non-nullable: w is non-nullable and this frame
 # always holds the current row (§8.25).

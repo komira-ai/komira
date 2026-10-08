@@ -1,13 +1,13 @@
 #! komira-plan-conformance v1
 #  order: none
 #  float: ulps=0
-# derivation: §3.6 with no equality keys: every right row is in the one
-# group. BACKWARD takes the greatest rt <= lt; rid 6's NULL rt matches
-# nothing (§3.6). The rts are 10 (rid 1), 20 (rid 2), 30 (rid 3), 5 (rid
-# 4), 15 (rid 5). lid 1 (20): rid 2; lid 2 (24): rid 2; lid 3 (25): rid 2;
-# lid 4 (5): rid 4; lid 5 (35): rid 3; lid 6 (7): rid 4; lid 7 (15): rid 5,
-# its NULL lg no longer a key; lid 8 (lt NULL): none, NULL right columns
-# (§3.8 LEFT ASOF, §3.4); lid 9 (10): rid 1.
+# derivation: §3.18: with no equality keys every right row is in one group,
+# matched by the ASOF key alone. BACKWARD takes the greatest rt <= lt
+# (§3.6); rid 6's NULL rt matches nothing (§3.6). The rts are 10 (rid 1), 20
+# (rid 2), 30 (rid 3), 5 (rid 4), 15 (rid 5). lid 1 (20): rid 2; lid 2 (24):
+# rid 2; lid 3 (25): rid 2; lid 4 (5): rid 4; lid 5 (35): rid 3; lid 6 (7):
+# rid 4; lid 7 (15): rid 5, its NULL lg no longer a key; lid 8 (lt NULL):
+# none, NULL right columns (§3.8 LEFT ASOF, §3.4); lid 9 (10): rid 1.
 # Types: the left columns then the right, in input order (§3.13); the left
 # side is never padded and keeps its nullability (lid non-nullable); the
 # right side is padded, so every right column is nullable (§3.13).
