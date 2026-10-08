@@ -1,0 +1,4 @@
+# The libz layer.
+from std.sys.info import CompilationTarget
+
+comptime Z = "libz.dylib" if CompilationTarget.is_macos() else "libz.so.1"

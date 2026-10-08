@@ -1,0 +1,2 @@
+# Planted: from_lz4_module
+from komira_lz4.codec import lz4_compress

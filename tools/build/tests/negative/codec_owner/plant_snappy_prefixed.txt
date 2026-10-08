@@ -1,0 +1,2 @@
+# Planted: snappy_prefixed
+_ = external_call["komira_snappy_compress", Int32]()

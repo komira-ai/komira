@@ -1,0 +1,3 @@
+# Planted: import_indented
+def f():
+    from komira_zlib import deflate

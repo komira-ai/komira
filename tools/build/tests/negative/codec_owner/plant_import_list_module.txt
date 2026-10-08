@@ -1,0 +1,2 @@
+# Planted: import_list_module
+import os, komira_zlib.inflate

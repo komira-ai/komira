@@ -1,0 +1,2 @@
+# Planted: from_zlib
+from komira_zlib import deflate

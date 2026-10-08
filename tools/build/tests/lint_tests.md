@@ -2,7 +2,7 @@
 
 The sections of [the tests](README.md) for the lints that hold the
 repository's own tree: test welding, README API coverage, the layout of
-`src/` and the surface capability matrix. Each keeps its number; [`run_tests.sh`](run_tests.sh) runs them with
+`src/`, the codec owner lint and the surface capability matrix. Each keeps its number; [`run_tests.sh`](run_tests.sh) runs them with
 the rest.
 
 ## 39. Test welding
@@ -130,6 +130,47 @@ row for a package that is gone, two rows for one package, a misnamed row.
 ./buck2 build //:src_layout tests//functional/src_layout:ok
 ./buck2 build tests//negative/src_layout:top_e2e   # must fail: //src/komira_foo_e2e: a test-only package directly under src/
 ./buck2 build tests//negative/src_layout:map_missing_row   # must fail: //src/komira_new: no row in ...
+```
+
+## 48. Codec owner lint
+
+[`codec_owner`](../lint/codec_owner.bzl) is a validation over every `.mojo`
+file under `src/` of a tree: outside its owner directories (for
+`//:codec_owner`, `komira_compression` and its implementation layers
+`komira_zlib` and `komira_lz4`) no file names a snappy C symbol as a whole
+string literal (either quote, with or without the `komira_` prefix), starts a
+string literal with a codec library soname (`libz`, `libzstd`, `liblz4`,
+`libbz2`, `liblzma`, `libsnappy`; `.so` or `.dylib`), or imports
+`komira_zlib` or `komira_lz4`. A comment line is not a site; a line with a
+trailing comment is. The owners must hold a snappy declaration and the five
+sonames, so those patterns cannot stop matching unnoticed; this test pins
+the rest. Its action is [`codec_owner.sh`](../lint/codec_owner.sh).
+[`functional/codec_owner:ok`](functional/codec_owner/BUCK) builds a planted
+tree ([`fixture.bzl`](functional/codec_owner/fixture.bzl)) whose owners hold
+every form, beside near misses outside them (comment lines, indented or not,
+a trailing comment, packages whose names only start or end like the layers'
+(`komira_zlibx` in the middle of an import list, `my_komira_lz4`), an import
+list inside a string, a snappy name as
+an identifier or inside a longer string, a codec library name with no soname
+suffix); `:ok_prefixed` builds the same tree with the snappy owner declaring
+`"komira_snappy_uncompress"`. Each target of
+[`negative/codec_owner`](negative/codec_owner/BUCK) plants one site in the
+same tree and must fail naming its file, line and code: a snappy symbol on
+the `external_call[` line, on the next, prefixed, single- and triple-quoted;
+each soname as `.so`, one as `.dylib`, one single-quoted, one with a trailing
+comment; each import shape (`from x import`, `from x.m import`, a
+parenthesised import, `import x.m`, `import x as y`, `import a, x`,
+`import x, a`, `import a,x`, `import x,a`, `import a, x, b`, `import a, b, x`,
+`import a, x.m`, `import a, x as y`, an indented
+`from x import` and an indented `import a, x`); a directory whose name only starts with an owner's. Two
+more drop an owner file (the snappy owner, the libz layer) and must fail
+naming the unmet check; an empty tree fails as checking nothing, and a target
+with no owners, or naming both or neither of `tree` and `files`, is refused
+at analysis.
+
+```sh
+./buck2 build //:codec_owner tests//functional/codec_owner:ok tests//functional/codec_owner:ok_prefixed
+./buck2 build tests//negative/codec_owner:snappy_single   # must fail: plant.mojo:2: _ = external_call['snappy_compress', Int32]() -- codec FFI outside its owners
 ```
 
 ## 53. The surface capability matrix

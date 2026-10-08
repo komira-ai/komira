@@ -10,7 +10,7 @@ Out of scope:
 
 - JSON and JSON lines, which are not described here yet; see [held sections](#what-is-not-here-yet).
 - How a query plan names a file and reaches these readers, and the engine's file-write sinks. They belong to the SDK and the execution engine, which are not in the tree yet.
-- The compression libraries the codecs call (`komira_zlib`, `komira_lz4` and the system libraries for Snappy, Zstandard, bzip2 and xz), and Parquet.
+- The compression libraries the codecs call (`komira_compression`, which owns the snappy C API and the system libraries for zlib, LZ4, Zstandard, bzip2 and xz), and Parquet.
 - The per-format rules (null tokens, Avro type annotations, block checks, ORC skipping) are in the sub-doc [schemas, codecs and skipping](text_and_row_formats/schemas_codecs_and_skipping.md).
 
 ## How does it work?

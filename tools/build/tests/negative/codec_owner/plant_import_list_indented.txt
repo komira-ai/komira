@@ -1,0 +1,3 @@
+# Planted: import_list_indented
+def f():
+    import os, komira_zlib

@@ -1,0 +1,4 @@
+# Planted: from_lz4_paren
+from komira_lz4.frame import (
+    lz4_frame_compress,
+)

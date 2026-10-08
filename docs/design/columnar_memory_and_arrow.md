@@ -84,6 +84,8 @@ A `Table` is a query result: one schema and a `Slab[RecordBatch]` of chunks in o
 
 `compression_codecs.mojo` also defines `Snappy`, `Gzip`, `Lz4Raw`, `Lzo`, `Brotli` and `Zlib` for file formats. `Snappy` calls the snappy C API, linked statically into the binary (`//third_party/snappy:snappy` is a dep of `komira_compression`). `Zstd`, `Gzip`, `Lz4Raw` and `Lz4Frame` call `libzstd`, `libz` and `liblz4`, each loaded with `dlopen` once per process. `Lzo`, `Brotli` and `Zlib` raise.
 
+`komira_compression` is the one owner of the codec libraries: `snappy_block.mojo` holds the only snappy declarations, `codec_libraries.mojo` opens libzstd, libbz2 and liblzma, and its implementation layers `komira_zlib` and `komira_lz4` open libz and liblz4. The file formats (`komira_avro`, `komira_orc`, `komira_parquet_codec`) call its Span API (`snappy_block`, `zstd_frame`, `zlib`, `lz4`, `bzip2_buffer`, `xz_buffer`), and the `codec_owner` lint refuses a codec declaration anywhere else.
+
 ### How do batches cross the Arrow C Data Interface?
 
 `build_record_batch_stream` exports a `Slab[RecordBatch]` through the [C stream interface](https://arrow.apache.org/docs/format/CStreamInterface.html). The exported arrays point into the batches' own buffers: the root array's private state holds a `Column.share()` of each column, so the bytes live until the consumer calls `release`. It checks the schema's column types before it returns.

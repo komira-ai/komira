@@ -1,0 +1,96 @@
+load("@komira//tools/build/lint:codec_owner.bzl", "codec_owner")
+load("//functional/codec_owner:fixture.bzl", "CODEC_OWNERS", "CODEC_TREE")
+
+# Test 48 (the codec owner lint), the half that must go red: one planted
+# defect per target, in the tree of functional/codec_owner (whose `ok`
+# builds). run_tests.sh requires each to fail naming its finding.
+
+# One site of each form, in src/komira_avro/plant.mojo (outside the owners)
+# unless the target names another path.
+[
+    codec_owner(
+        name = name,
+        files = CODEC_TREE | {path: "plant_{}.txt".format(plant or name)},
+        owners = CODEC_OWNERS,
+    )
+    for name, path, plant in [
+        # A snappy symbol external_call declares: on its line, on the next,
+        # with the komira_ prefix, single-quoted and triple-quoted.
+        ("snappy_one", "src/komira_avro/plant.mojo", None),
+        ("snappy_two", "src/komira_avro/plant.mojo", None),
+        ("snappy_prefixed", "src/komira_avro/plant.mojo", None),
+        ("snappy_single", "src/komira_avro/plant.mojo", None),
+        ("snappy_triple", "src/komira_avro/plant.mojo", None),
+        # Each codec library soname as .so, one as .dylib, one single-quoted.
+        ("libz", "src/komira_avro/plant.mojo", None),
+        ("libzstd", "src/komira_avro/plant.mojo", None),
+        ("liblz4", "src/komira_avro/plant.mojo", None),
+        ("libbz2", "src/komira_avro/plant.mojo", None),
+        ("liblzma", "src/komira_avro/plant.mojo", None),
+        ("libsnappy", "src/komira_avro/plant.mojo", None),
+        ("dylib", "src/komira_avro/plant.mojo", None),
+        ("soname_single", "src/komira_avro/plant.mojo", None),
+        # A site with a trailing comment is a site.
+        ("trailing_comment", "src/komira_avro/plant.mojo", None),
+        # Each shape of an import of the owners' layers.
+        ("from_zlib", "src/komira_avro/plant.mojo", None),
+        ("from_lz4_module", "src/komira_avro/plant.mojo", None),
+        ("from_lz4_paren", "src/komira_avro/plant.mojo", None),
+        ("import_lz4", "src/komira_avro/plant.mojo", None),
+        ("import_as", "src/komira_avro/plant.mojo", None),
+        ("import_list", "src/komira_avro/plant.mojo", None),
+        ("import_list_first", "src/komira_avro/plant.mojo", None),
+        ("import_list_nospace", "src/komira_avro/plant.mojo", None),
+        ("import_list_first_nospace", "src/komira_avro/plant.mojo", None),
+        ("import_list_middle", "src/komira_avro/plant.mojo", None),
+        ("import_list_last", "src/komira_avro/plant.mojo", None),
+        ("import_list_module", "src/komira_avro/plant.mojo", None),
+        ("import_list_as", "src/komira_avro/plant.mojo", None),
+        ("import_list_indented", "src/komira_avro/plant.mojo", None),
+        ("import_indented", "src/komira_avro/plant.mojo", None),
+        # A directory whose name only starts with an owner's is not an owner.
+        ("near_owner", "src/komira_compression2/plant.mojo", "libz"),
+    ]
+]
+
+# An owner check unmet: the tree without the snappy owner, or without the
+# libz layer, so that pattern would match nothing.
+[
+    codec_owner(
+        name = name,
+        files = {k: v for k, v in CODEC_TREE.items() if k != gone},
+        owners = CODEC_OWNERS,
+    )
+    for name, gone in [
+        ("no_snappy_owner", "src/komira_compression/snappy_block.mojo"),
+        ("no_libz_owner", "src/komira_zlib/zlib_ffi.mojo"),
+    ]
+]
+
+# No .mojo file in the tree: the lint checks nothing, so it fails.
+codec_owner(
+    name = "empty",
+    files = {"src/komira_avro/notes.txt": "plant_libz.txt"},
+    owners = CODEC_OWNERS,
+)
+
+# No owners: refused at analysis.
+codec_owner(
+    name = "no_owners",
+    files = CODEC_TREE,
+    owners = [],
+)
+
+# Neither `tree` nor `files`: refused at analysis.
+codec_owner(
+    name = "no_tree",
+    owners = CODEC_OWNERS,
+)
+
+# Both `tree` and `files`: refused at analysis.
+codec_owner(
+    name = "both_tree_and_files",
+    files = CODEC_TREE,
+    owners = CODEC_OWNERS,
+    tree = ":doc_tree",
+)

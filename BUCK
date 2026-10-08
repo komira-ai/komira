@@ -6,6 +6,7 @@ load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdow
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("@komira//tools/build/lint:codec_owner.bzl", "codec_owner")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
@@ -185,6 +186,24 @@ _TESTS_LINTS = [
         "Stage" + "Graph",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
+    tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# One owner per codec library (tools/build/lint/codec_owner.bzl): no .mojo
+# file under src/ outside komira_compression and its implementation layers
+# komira_zlib and komira_lz4 names a snappy C symbol (with or without the
+# komira_ prefix) or a codec library soname in a string literal (either
+# quote), or imports komira_zlib / komira_lz4. The other packages call
+# komira_compression's codec API. The tree is every file of the cell
+# (`:doc_tree`). Test 48 (tests//functional/codec_owner,
+# tests//negative/codec_owner) plants each form.
+[codec_owner(
+    name = "codec_owner",
+    owners = [
+        "src/komira_compression",
+        "src/komira_lz4",
+        "src/komira_zlib",
+    ],
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 

@@ -1,0 +1,11 @@
+# The owner that opens libzstd, libbz2 and liblzma, and imports its layers.
+from std.sys.info import CompilationTarget
+from komira_lz4.codec import (
+    lz4_compress,
+)
+from komira_zlib import deflate
+import komira_lz4.frame as frame
+
+comptime ZSTD = "libzstd.dylib" if CompilationTarget.is_macos() else "libzstd.so.1"
+comptime BZ2 = "libbz2.dylib" if CompilationTarget.is_macos() else "libbz2.so.1.0"
+comptime LZMA = "liblzma.dylib" if CompilationTarget.is_macos() else "liblzma.so.5"

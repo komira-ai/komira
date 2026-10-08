@@ -370,6 +370,18 @@
 #      a second row for a package, and a row whose name is not its link's.
 #  46. The coverage gate and what ships waits for it: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
 #  47. Branch coverage runs: tools/build/tests/coverage_branch_tests.sh (sourced by 43's).
+#  48. The codec owner lint (tools/build/lint/codec_owner.bzl):
+#      //:codec_owner (every .mojo file under src/) and
+#      tests//functional/codec_owner:ok (owners holding every codec
+#      declaration, soname and layer import, beside near misses) and
+#      :ok_prefixed (the snappy owner with the komira_snappy_ names) build;
+#      each target of tests//negative/codec_owner fails naming its one
+#      planted site (a snappy symbol on its line, on the next, prefixed,
+#      single- and triple-quoted; each soname, a .dylib, a single-quoted one,
+#      one with a trailing comment; each import shape; a directory whose name
+#      only starts with an owner's) or unmet owner check, an empty tree fails
+#      as checking nothing, and a target naming no owners or no tree is
+#      refused at analysis.
 #  53. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
 #      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
 #      surface and capability of the plan, against tests/surface_capability_matrix.bzl)
@@ -1349,6 +1361,51 @@ for want in \
     "empty|src_layout: checked nothing"; do
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
+
+# 48
+expect_green codec_owner //:codec_owner tests//functional/codec_owner:ok tests//functional/codec_owner:ok_prefixed
+N=tests//negative/codec_owner
+S="$N:src/komira_avro/plant.mojo"
+F=" -- codec FFI outside its owners (src/komira_compression src/komira_lz4 src/komira_zlib): call komira_compression's codec API"
+for want in \
+    "snappy_one|$S:2: _ = external_call[\"snappy_compress\", Int32]()$F" \
+    "snappy_two|$S:3: \"snappy_uncompressed_length\",$F" \
+    "snappy_prefixed|$S:2: _ = external_call[\"komira_snappy_compress\", Int32]()$F" \
+    "snappy_single|$S:2: _ = external_call['snappy_compress', Int32]()$F" \
+    "snappy_triple|$S:2: _ = external_call['''snappy_validate_compressed_buffer''', Int32]()$F" \
+    "libz|$S:2: var h = OwnedDLHandle(\"libz.so.1\")$F" \
+    "libzstd|$S:2: var h = OwnedDLHandle(\"libzstd.so.1\")$F" \
+    "liblz4|$S:2: var h = OwnedDLHandle(\"liblz4.so.1\")$F" \
+    "libbz2|$S:2: var h = OwnedDLHandle(\"libbz2.so.1.0\")$F" \
+    "liblzma|$S:2: var h = OwnedDLHandle(\"liblzma.so.5\")$F" \
+    "libsnappy|$S:2: var h = OwnedDLHandle(\"libsnappy.so.1\")$F" \
+    "dylib|$S:2: var h = OwnedDLHandle(\"libzstd.dylib\")$F" \
+    "soname_single|$S:2: var h = OwnedDLHandle('liblz4.so.1')$F" \
+    "trailing_comment|$S:2: var h = OwnedDLHandle(\"libz.so.1\") # opened here, not in komira_compression$F" \
+    "from_zlib|$S:2: from komira_zlib import deflate$F" \
+    "from_lz4_module|$S:2: from komira_lz4.codec import lz4_compress$F" \
+    "from_lz4_paren|$S:2: from komira_lz4.frame import ($F" \
+    "import_lz4|$S:2: import komira_lz4.codec$F" \
+    "import_as|$S:2: import komira_zlib as z$F" \
+    "import_list|$S:2: import os, komira_zlib$F" \
+    "import_list_first|$S:2: import komira_zlib, os$F" \
+    "import_list_nospace|$S:2: import os,komira_zlib$F" \
+    "import_list_first_nospace|$S:2: import komira_lz4,os$F" \
+    "import_list_middle|$S:2: import os, komira_zlib, sys$F" \
+    "import_list_last|$S:2: import os, sys, komira_zlib$F" \
+    "import_list_module|$S:2: import os, komira_zlib.inflate$F" \
+    "import_list_as|$S:2: import os, komira_lz4 as l$F" \
+    "import_list_indented|$S:3: import os, komira_zlib$F" \
+    "import_indented|$S:3: from komira_zlib import deflate$F" \
+    "near_owner|$N:src/komira_compression2/plant.mojo:2: var h = OwnedDLHandle(\"libz.so.1\")$F" \
+    "no_snappy_owner|codec_owner: no owner file holds the snappy declarations (\"snappy_uncompress\" or \"komira_snappy_uncompress\"), so the patterns match nothing" \
+    "no_libz_owner|codec_owner: no owner file holds the libz soname (\"libz.so), so the patterns match nothing" \
+    "empty|codec_owner: checked nothing (no .mojo file under src)"; do
+    expect_red "codec_owner_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red codec_owner_no_owners "owners is empty, so every codec declaration would be a finding" "$N:no_owners"
+expect_red codec_owner_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
+expect_red codec_owner_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
 # 52
 expect_green mojo_doc_json tests//functional/mojo_doc_json:docpkg_doc
