@@ -587,13 +587,15 @@ def test_webpush_decrypt_refusals() raises:
         _ua_outcome(neg_list, auth, body),
         "webpush: user agent public key is not the key of the private key",
     )
-    # The last byte alone differs: the comparison runs before any curve check.
-    var ua_tail = ua.copy()
-    ua_tail[64] = ua_tail[64] ^ UInt8(0x01)
-    assert_equal(
-        _ua_outcome(ua_tail, auth, body),
-        "webpush: user agent public key is not the key of the private key",
-    )
+    # One byte flipped at every position 0..64, the 0x04 prefix included:
+    # the comparison covers all 65 bytes and runs before any curve check.
+    for i in range(65):
+        var ua_flip = ua.copy()
+        ua_flip[i] = ua_flip[i] ^ UInt8(0x01)
+        assert_equal(
+            _ua_outcome(ua_flip, auth, body),
+            "webpush: user agent public key is not the key of the private key",
+        )
     var bad_point = body.copy()
     bad_point[85] = bad_point[85] ^ UInt8(0x01)
     assert_equal(
