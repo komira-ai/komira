@@ -166,7 +166,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ### 1.8 NULLIF
 
-- **Rule.** `NULLIF(a, b)` is `CASE WHEN a = b THEN NULL ELSE a END`: NULL when `a` equals `b`, otherwise `a`. Because a comparison with NULL is NULL (§1.2) and a NULL condition is not taken (§1.7), a NULL `a` gives NULL (that is, `a`) and a NULL `b` gives `a`. The result has `a`'s type and is nullable. The plan has no NULLIF node; a frontend builds this CASE with `BIN_EQ`.
+- **Rule.** `NULLIF(a, b)` is `CASE WHEN a = b THEN NULL ELSE a END`: NULL when `a` equals `b`, otherwise `a`. Because a comparison with NULL is NULL (§1.2) and a NULL condition is not taken (§1.7), a NULL `a` gives NULL (that is, `a`) and a NULL `b` gives `a`. The result has `a`'s type and is nullable. The plan has no NULLIF node; a frontend builds this CASE with `BIN_EQ`. Over floats, `a = b` follows §4.5 (UNDECIDED): DuckDB answers `NULLIF(NaN, NaN)` with NULL because its NaN equals NaN, while today's IEEE comparison kernels make the condition FALSE and answer NaN; oracle cases avoid NaN here until §4.5 is ruled.
 - **DuckDB.** "Return NULL if a = b, else return a. Equivalent to CASE WHEN a = b THEN NULL ELSE a END" ([utility functions](https://duckdb.org/docs/current/sql/functions/utility.html)).
 - **Current behaviour.** The SQL function table records the same desugaring (`src/komira_sql/sql_fn_table.mojo:2948`); the binder that applies it is not in this repository.
 - **Mark.** MATCHES.
