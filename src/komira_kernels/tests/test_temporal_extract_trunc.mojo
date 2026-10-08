@@ -2,14 +2,14 @@
 # Tests for `temporal_extract`: `date_trunc` over DATE32 and TIMESTAMP_*, and
 # `parse_trunc_unit`.
 #
-# THE ORACLE: each expected period start was worked res from the proleptic
+# THE ORACLE: each expected period start was worked out from the proleptic
 # Gregorian calendar (leap years divisible by 4, centuries only when divisible
 # by 400; year 0 exists and is leap) and ISO 8601 weeks (a week starts on
 # Monday), as a day count from the epoch day 0. AD rows were cross-checked
 # against an established Gregorian implementation; the BC row was moved
 # forward by five 400-year cycles (5 * 146097 days, a whole number of weeks)
 # and checked the same way. Timestamps multiply that day count back into
-# ticks; sub-day truncation is plain floor arithmetic on ticks, written res
+# ticks; sub-day truncation is plain floor arithmetic on ticks, written out
 # per row.
 # =============================================================================
 
@@ -57,6 +57,11 @@ def _table() -> List[_Trunc]:
     t.append(_Trunc(11184, 10957, 11139, 11170, 11183))
     # Day -1, a Wednesday: every start is before the epoch.
     t.append(_Trunc(-1, -365, -92, -31, -3))
+    # The last day of months 1 (a Monday), 3 (a Friday) and 8 (a Thursday):
+    # month and quarter starts must stay in the same month.
+    t.append(_Trunc(10987, 10957, 10957, 10957, 10987))
+    t.append(_Trunc(11047, 10957, 10957, 11017, 11043))
+    t.append(_Trunc(11200, 10957, 11139, 11170, 11197))
     # Day 0 itself, a Thursday: day, year, quarter and month starts are 0.
     t.append(_Trunc(0, 0, 0, 0, -3))
     # BC: day 75 of leap year -44 (month 3 day 15), a Thursday.
@@ -130,6 +135,39 @@ def test_date32_trunc_every_unit() raises:
             )
 
 
+def test_date32_month_and_quarter_trunc_every_day_of_three_years() raises:
+    """Every day of a 400-divisible leap year, a common century year and a
+    BC leap year: month and quarter starts from a walk over the Gregorian
+    month lengths, so every first and last day of a month is a row."""
+    var starts = [10957, -25567, -735599]
+    var leaps = [True, False, True]
+    for k in range(3):
+        var feb = 29 if leaps[k] else 28
+        var lens = [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        var vals = List[Scalar[DType.int32]]()
+        var month_start = List[Int]()
+        var quarter_start = List[Int]()
+        var first = starts[k]
+        var q_first = first
+        for m in range(12):
+            if m % 3 == 0:
+                q_first = first
+            for _ in range(lens[m]):
+                vals.append(Int32(starts[k] + len(month_start)))
+                month_start.append(first)
+                quarter_start.append(q_first)
+            first += lens[m]
+        var arr = PrimitiveArray[DType.int32].from_list(vals)
+        var rm = date_trunc_date32(arr, TRUNC_MONTH)
+        var rq = date_trunc_date32(arr, TRUNC_QUARTER)
+        var ry = date_trunc_date32(arr, TRUNC_YEAR)
+        for i in range(len(month_start)):
+            var what = "day " + String(starts[k] + i)
+            assert_equal(Int(rm.get(i)), month_start[i], what)
+            assert_equal(Int(rq.get(i)), quarter_start[i], what)
+            assert_equal(Int(ry.get(i)), starts[k], what)
+
+
 def test_date32_trunc_non_nullable_has_no_validity() raises:
     var vals = List[Scalar[DType.int32]]()
     vals.append(Int32(11322))
@@ -173,7 +211,7 @@ def test_ts_calendar_trunc_every_unit() raises:
         var tpd = 86400 * tps
         var rows = len(t)
         if unit == ArrowType.TIMESTAMP_NS:
-            rows = 5  # the BC rows are past the nanosecond Int64 range
+            rows = 8  # the BC rows are past the nanosecond Int64 range
         var arr = PrimitiveArray[DType.int64].allocate_nullable(rows + 1)
         for i in range(rows):
             var ticks = t[i].days * tpd + 49530 * tps + (tps - 1) // 3
@@ -263,6 +301,38 @@ def test_ts_trunc_one_tick_before_the_epoch_floors() raises:
     var ns = ArrowType.TIMESTAMP_NS
     assert_equal(_trunc1(-1, ns, TRUNC_MILLISECOND), -1_000_000)
     assert_equal(_trunc1(-1, ns, TRUNC_MICROSECOND), -1_000)
+
+
+def test_ts_trunc_one_tick_before_the_epoch_every_unit() raises:
+    """The same floor at tick -1 for every timestamp unit, the legacy
+    microsecond alias included. Truncating to a unit at or below the
+    column's own resolution leaves -1 unchanged."""
+    var units = [
+        ArrowType.TIMESTAMP_S,
+        ArrowType.TIMESTAMP_MS,
+        ArrowType.TIMESTAMP_US,
+        ArrowType.TIMESTAMP_NS,
+        ArrowType.TIMESTAMP,
+    ]
+    for unit in units:
+        var tps = _tps(unit)
+        var day = 86400 * tps
+        assert_equal(_trunc1(-1, unit, TRUNC_YEAR), -365 * day)
+        assert_equal(_trunc1(-1, unit, TRUNC_QUARTER), -92 * day)
+        assert_equal(_trunc1(-1, unit, TRUNC_MONTH), -31 * day)
+        assert_equal(_trunc1(-1, unit, TRUNC_WEEK), -3 * day)
+        assert_equal(_trunc1(-1, unit, TRUNC_DAY), -day)
+        assert_equal(_trunc1(-1, unit, TRUNC_HOUR), -3600 * tps)
+        assert_equal(_trunc1(-1, unit, TRUNC_MINUTE), -60 * tps)
+        assert_equal(_trunc1(-1, unit, TRUNC_SECOND), -tps)
+        var ms_want = -1
+        if tps > 1_000:
+            ms_want = -(tps // 1_000)
+        assert_equal(_trunc1(-1, unit, TRUNC_MILLISECOND), ms_want)
+        var us_want = -1
+        if tps > 1_000_000:
+            us_want = -(tps // 1_000_000)
+        assert_equal(_trunc1(-1, unit, TRUNC_MICROSECOND), us_want)
 
 
 def test_ts_trunc_refuses_a_non_timestamp_unit() raises:

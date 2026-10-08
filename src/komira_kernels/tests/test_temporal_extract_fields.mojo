@@ -4,7 +4,7 @@
 # sub-second family) over DATE32 and every TIMESTAMP_* unit.
 #
 # THE ORACLE IS THE TABLE BELOW, NOT THE KERNEL'S OWN ARITHMETIC. Every row's
-# fields were worked res from the proleptic Gregorian calendar (a year is leap
+# fields were worked out from the proleptic Gregorian calendar (a year is leap
 # when divisible by 4, except centuries not divisible by 400; year 0 exists
 # and is leap, ISO 8601 astronomical numbering) and the ISO 8601 week rules (a
 # week starts on Monday and belongs to the year holding its Thursday). The AD
@@ -102,6 +102,12 @@ def _table() -> List[_Day]:
     # Day 1 of a year that starts on a Saturday: ISO week 52 of the year
     # before.
     t.append(_Day(10957, 2000, 1, 1, 1, 6, 6, 1, 1999, 52, 199952))
+    # The last day of months 1, 3 and 8 (31 days each): the month proxy
+    # `(5 * doy + 2) // 153` sits one step below the next month here, so a
+    # rounding change moves these rows to day 0 of the following month.
+    t.append(_Day(10987, 2000, 1, 31, 1, 1, 1, 31, 2000, 5, 200005))
+    t.append(_Day(11047, 2000, 3, 31, 1, 5, 5, 91, 2000, 13, 200013))
+    t.append(_Day(11200, 2000, 8, 31, 3, 4, 4, 244, 2000, 35, 200035))
     # BC rows (astronomical numbering). A Sunday on day 1 of year -44,
     # whose Thursday lies in year -45: the week half of yearweek is negated
     # for a non-positive ISO year.
@@ -116,9 +122,9 @@ def _table() -> List[_Day]:
     return t^
 
 
-# The table rows whose tick count fits Int64 in nanoseconds (the first nine;
+# The table rows whose tick count fits Int64 in nanoseconds (the first twelve;
 # the BC rows are past the roughly 292-year nanosecond range).
-comptime _NS_ROWS = 9
+comptime _NS_ROWS = 12
 
 # Every timestamp row is at hour 13, minute 45, second 30 of its day.
 comptime _SOD = 13 * 3600 + 45 * 60 + 30
@@ -200,6 +206,52 @@ def test_date32_year_month_day_quarter() raises:
     _check_date32(extract_month_date32(arr), t, "month")
     _check_date32(extract_day_date32(arr), t, "day")
     _check_date32(extract_quarter_date32(arr), t, "quarter")
+
+
+def _month_lengths(leap: Bool) -> List[Int]:
+    """The Gregorian month lengths; month 2 has 29 days in a leap year."""
+    var feb = 29 if leap else 28
+    return [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+
+def _year_starts() -> List[Tuple[Int, Int, Bool]]:
+    """(day count of day 1, year, leap): a 400-divisible leap year, a
+    common century year, and a BC leap year."""
+    var y = List[Tuple[Int, Int, Bool]]()
+    y.append((10957, 2000, True))
+    y.append((-25567, 1900, False))
+    y.append((-735599, -44, True))
+    return y^
+
+
+def test_date32_every_day_of_three_years() raises:
+    """Every day of three whole years against a walk over the month
+    lengths: each first and last day of every month is a row, so a month
+    boundary that moves by one day anywhere in the year is seen."""
+    for ys in _year_starts():
+        var start = ys[0]
+        var lens = _month_lengths(ys[2])
+        var n = 366 if ys[2] else 365
+        var vals = List[Scalar[DType.int32]]()
+        for i in range(n):
+            vals.append(Int32(start + i))
+        var arr = PrimitiveArray[DType.int32].from_list(vals)
+        var ry = extract_year_date32(arr)
+        var rm = extract_month_date32(arr)
+        var rd = extract_day_date32(arr)
+        var rq = extract_quarter_date32(arr)
+        var rdoy = extract_day_index_date32(arr, EXTRACT_DAYOFYEAR)
+        var i = 0
+        for m in range(1, 13):
+            for d in range(1, lens[m - 1] + 1):
+                var what = "day " + String(start + i)
+                assert_equal(Int(ry.get(i)), ys[1], what)
+                assert_equal(Int(rm.get(i)), m, what)
+                assert_equal(Int(rd.get(i)), d, what)
+                assert_equal(Int(rq.get(i)), (m + 2) // 3, what)
+                assert_equal(Int(rdoy.get(i)), i + 1, what)
+                i += 1
+        assert_equal(i, n)
 
 
 def test_date32_day_index_family() raises:
