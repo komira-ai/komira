@@ -39,11 +39,15 @@ komira//tools/build/examples:test_hellopkg mojo_build_test !, -D,
 '
 
 # With -c komira.coverage=true: a library's coverage build of each test
-# (mojo_build_cov_test) gets the level and the defines its test build gets.
+# (mojo_build_cov_test) and its branch coverage bitcode (mojo_emit_cov_bc)
+# get the level and the defines its test build gets.
 COV_EXPECT='
 tests//functional/assert_level:lib_none mojo_build_cov_test , -D, ASSERT=none,
 tests//functional/assert_level:lib_defines mojo_build_cov_test --target-cpu, [^,]*, -D, KOMIRA_PROBE_DEFINE=on,
 tests//functional/assert_level:lib_default mojo_build_cov_test !, -D,
+tests//functional/assert_level:lib_none mojo_emit_cov_bc , -D, ASSERT=none,
+tests//functional/assert_level:lib_defines mojo_emit_cov_bc --target-cpu, [^,]*, -D, KOMIRA_PROBE_DEFINE=on,
+tests//functional/assert_level:lib_default mojo_emit_cov_bc !, -D,
 '
 
 # label want: the command a mojo_test gives `buck2 test` (its
