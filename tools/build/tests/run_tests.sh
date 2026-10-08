@@ -366,7 +366,8 @@
 #      target of tests//negative/python_oracle fails analysis naming the
 #      input an action built outside third_party/ (a komira library's
 #      package as data, a komira binary in srcs or as src, a wheel installed
-#      outside third_party/, an interpreter unpacked outside third_party/).
+#      outside third_party/ as a dep or as the tzdata wheel, an interpreter
+#      unpacked outside third_party/).
 #      What works is in src/tests/helpers/komira_test_python.
 #  53. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
 #      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
@@ -1353,6 +1354,7 @@ F="which is not under third_party/; an oracle reads checked-in files and third_p
 expect_red python_oracle_komira_data "the oracle's data \"encoding.mojoc\" is built by komira//src/komira_encoding:komira_encoding, $F" "$N:komira_data"
 expect_red python_oracle_komira_srcs "the oracle's srcs entry \"hello\" is built by komira//tools/build/examples:hello, $F" "$N:komira_srcs"
 expect_red python_oracle_local_wheel "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_wheel_dep"
+expect_red python_oracle_local_tzdata "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_tzdata"
 expect_red python_oracle_komira_src "the oracle's src is built by komira//tools/build/examples:hello, $F" "$N:komira_src"
 expect_red python_oracle_local_python "the oracle's python is built by tests//negative/python_oracle:stand_in_python, $F" "$N:local_python"
 

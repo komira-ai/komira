@@ -993,9 +993,10 @@ computes the answer a komira test compares against, so an input an action
 built must be the output of a target under `third_party/`. Each target of
 [`negative/python_oracle`](negative/python_oracle/BUCK) fails analysis naming
 the input: a komira library's gated package as `data`, a komira binary in
-`srcs`, and a wheel installed by a target outside `third_party/`. The oracles
-that work, the runner's verdicts and a welded Mojo test reading an oracle's
-output are in
+`srcs` or as `src`, a wheel installed by a target outside `third_party/` (as
+a dep or as the `tzdata` wheel) and an interpreter unpacked outside it. The
+oracles that work, the runner's verdicts and a welded Mojo test reading an
+oracle's output are in
 [`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md).
 
 ```sh
