@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The chat store: `ChatStore[DB: Database]` over komira_db's backend-neutral
+# ops (users, channels, DMs, members, the numbered timeline, threads,
+# mentions, read cursors, files, erasure), the SQL migration chain, and the
+# document-store keys and indexes.
+#
+# The welded test here checks the pure helpers (ids, the subject key, the DM
+# id). The store's behaviour is checked against SQLite and the Firestore mock
+# by //src/tests/conformance/komira_chat_store_conformance, which depends on
+# this library; the backends stay out of this library's closure.
+mojo_library(
+    name = "komira_chat_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_db:komira_db",
+    ],
+    test_srcs = [
+        "tests/test_chat_store_keys.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
