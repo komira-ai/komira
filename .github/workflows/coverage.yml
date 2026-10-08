@@ -20,6 +20,13 @@
 #            downloads the artifact and sends the bodies (POST, then PATCHes
 #            in file order); a run it created and did not complete (a failed
 #            PATCH, a cancelled job) is completed by its last step.
+# A head commit cut before this workflow existed (it has no
+# .github/ci/coverage_measure.sh) still runs this file, which on
+# `pull_request` is the merge commit's: `measure` checks the head's tree
+# first (the function between the `# head_measured:` markers), and for such a
+# head prints a notice to merge main, writes the summary and skips every
+# later step and the whole `post` job, so the check is skipped, never red.
+# The check reads two paths of the checkout and runs nothing from it.
 # Like pr.yml it runs only for a pull request from a branch of this
 # repository (a fork's run gets no farm credential) whose base is main (a
 # pull request stacked on another branch gets no coverage run until it is
@@ -50,6 +57,8 @@ jobs:
       contents: read
       # for farm-connect only: the token Tailscale trusts
       id-token: write
+    outputs:
+      measured: ${{ steps.head.outputs.measured }}
     steps:
       # The pull request's HEAD commit, not the merge commit pr / check
       # builds: the annotations are for the lines of the "Files changed"
@@ -60,7 +69,46 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: the head can be measured
+        id: head
+        run: |
+          # head_measured: begin
+          # head_measured --dir D --output F
+          # Appends measured=yes to F (the step's output file) when the
+          # checkout D holds what `measure` runs: .github/ci/coverage_measure.sh
+          # and tools/build/coverage/BUCK (covcheck_bin). Otherwise appends
+          # measured=no and prints a notice naming what is missing: the head
+          # predates coverage measurement, and merging main into the branch
+          # measures it. Only tests for the two files; runs nothing of D.
+          # Returns 0 either way; bad usage 2.
+          head_measured() {
+            hm_dir="" hm_out=""
+            while [ $# -gt 0 ]; do
+              [ $# -ge 2 ] || { echo "head_measured: $1 has no value" >&2; return 2; }
+              case "$1" in
+                --dir) hm_dir=$2 ;;
+                --output) hm_out=$2 ;;
+                *) echo "head_measured: unknown argument $1" >&2; return 2 ;;
+              esac
+              shift 2
+            done
+            [ -d "$hm_dir" ] || { echo "head_measured: --dir '$hm_dir' is not a directory" >&2; return 2; }
+            [ -n "$hm_out" ] || { echo "head_measured: --output is required" >&2; return 2; }
+            hm_missing=""
+            for hm_f in .github/ci/coverage_measure.sh tools/build/coverage/BUCK; do
+              [ -f "$hm_dir/$hm_f" ] || hm_missing="$hm_missing $hm_f"
+            done
+            if [ -n "$hm_missing" ]; then
+              echo "::notice title=coverage not measured::The head commit predates coverage measurement (it has no$hm_missing); merge main into the branch to measure it."
+              echo measured=no >>"$hm_out"
+            else
+              echo measured=yes >>"$hm_out"
+            fi
+          }
+          # head_measured: end
+          head_measured --dir . --output "$GITHUB_OUTPUT"
       - uses: ./.github/actions/farm-connect
+        if: steps.head.outputs.measured == 'yes'
         with:
           ts-client-id: ${{ vars.TS_CLIENT_ID }}
           ts-audience: ${{ vars.TS_AUDIENCE }}
@@ -68,6 +116,7 @@ jobs:
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
       - name: the buckconfig names the farm
+        if: steps.head.outputs.measured == 'yes'
         run: |
           for key in linux_x86_64_properties; do
             ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
@@ -77,8 +126,10 @@ jobs:
       # switch (its own libraries' packages would otherwise wait for their
       # coverage runs).
       - name: build covcheck
+        if: steps.head.outputs.measured == 'yes'
         run: ./buck2 build '//tools/build/coverage:covcheck_bin[runnable]' --out "$RUNNER_TEMP/covcheck"
       - name: measure
+        if: steps.head.outputs.measured == 'yes'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -89,8 +140,12 @@ jobs:
       # wrong), so the run's page says where to look.
       - name: the summary
         if: always()
+        env:
+          MEASURED: ${{ steps.head.outputs.measured }}
         run: |
-          if [ -f "$RUNNER_TEMP/coverage/publish/summary.md" ]; then
+          if [ "$MEASURED" = no ]; then
+            echo "## coverage: not measured (the head commit predates coverage measurement; merge main into the branch)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f "$RUNNER_TEMP/coverage/publish/summary.md" ]; then
             cat "$RUNNER_TEMP/coverage/publish/summary.md" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "## coverage: not measured (the measure step did not finish; its log says why)" >> "$GITHUB_STEP_SUMMARY"
@@ -102,6 +157,7 @@ jobs:
       # `post` alone, which then downloads the first attempt's artifact; a
       # re-run of `measure` replaces it (overwrite).
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.head.outputs.measured == 'yes'
         with:
           name: coverage-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/coverage/publish
@@ -109,12 +165,13 @@ jobs:
           overwrite: true
           retention-days: 30
       - name: Stop buck2
-        if: always()
+        if: always() && steps.head.outputs.measured == 'yes'
         run: ./buck2 kill || true
 
   post:
     needs: measure
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Skipped (no artifact to post) when the head cannot be measured.
+    if: github.event.pull_request.head.repo.full_name == github.repository && needs.measure.outputs.measured == 'yes'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # The only write permission of this workflow. The job checks nothing out
