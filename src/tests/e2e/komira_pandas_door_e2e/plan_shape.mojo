@@ -3,14 +3,23 @@
 `plan_shape` renders the plan arms the pandas and polars doors emit (SCAN,
 FILTER, PROJECT, AGGREGATE, JOIN, SORT, LIMIT, PARTITION_BY). It reads the
 `*Data` payloads directly because the plan's own render (`String(plan)`, which
-`structural_hash` folds) leaves fields out: it emits no output schema; it
-omits a sort key's `nulls_first` when it equals the derived placement
-(`derived_nulls_first`, NULLS LAST in both directions), which is pandas'
-`na_position="last"` and polars' `nulls_last=True`; and its PARTITION_BY arm
-prints the keys and a count of functions, never a function's column, frame
-or alias. It raises on a plan arm or an expression arm it does not render, so
-a door plan that grows a new node or expression cannot compare equal by
-omission.
+`structural_hash` folds) leaves fields out. Among them: it emits no output
+schema; and it omits a sort key's `nulls_first` when it equals the derived
+placement (`derived_nulls_first`, NULLS LAST in both directions), which is
+pandas' `na_position="last"` and polars' `nulls_last=True`.
+
+The render's PARTITION_BY arm prints the partition keys, each order key with
+ASC or DESC (for the indices `descending` covers), and every function in full
+through `PartitionExpr.write_to`: its name, column, offset, the default value
+when `has_default` is set, the frame's five fields, and the alias when it is
+non-empty. `plan_shape` adds, per function, `has_default` itself and the
+default value even when `has_default` is false, read through `literal_shape`
+(every slot it compares, where the render prints only the slots the value's
+kind selects); and it prints `descending` whole, including any entry past the
+last order key.
+
+It raises on a plan arm or an expression arm it does not render, so a door
+plan that grows a new node or expression cannot compare equal by omission.
 
 What it compares:
 - FILTER, PROJECT, SORT, LIMIT, JOIN and PARTITION_BY: every payload field,

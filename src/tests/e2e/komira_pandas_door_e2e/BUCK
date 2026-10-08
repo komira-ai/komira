@@ -8,7 +8,8 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode")
 # action (the `<stem>_wire` targets below) and the tests decode protoc's bytes
 # with komira_plan_wire. The library builds the same plans in Mojo with
 # komira_plan_ir (door_plans.mojo, polars_plans.mojo) and renders a plan's
-# every payload field (plan_shape.mojo). Nothing ships, so `conda = False`.
+# payload fields (plan_shape.mojo, whose docstring names the few it leaves
+# out and why). Nothing ships, so `conda = False`.
 # One package holds both doors because the cross-door checks compare the two
 # doors' fixtures and builders, and both compare through one plan_shape.
 #

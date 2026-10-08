@@ -18,6 +18,9 @@ uses. A pandas-shaped frontend emits these shapes:
   `amount`, output `amount`, under the same SORT on the group key when
   `sort=True` (pandas' default) and with no SORT when `sort=False`. These two
   are the pandas half of the cross-door check (`polars_plans` is the other).
+  The `sort=False` plan equals polars' `group_by` only because the key
+  `cust_id` is non-nullable (`orders_schema`): pandas' default `dropna=True`
+  drops a null group that polars keeps.
 - `read_csv(path)`: one SCAN whose source is the `komira.csv` binding the
   engine stamps, with `source_kind` left UNSET: the decoded scan takes ROW
   from the kind's declared orientation.

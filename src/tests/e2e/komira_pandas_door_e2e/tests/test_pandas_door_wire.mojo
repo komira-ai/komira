@@ -291,8 +291,9 @@ def test_read_csv_scan() raises:
 def test_the_comparison_sees_each_key_field() raises:
     """The comparison of step 5 is not blind to the fields the mutants move:
     the Mojo-built plans that differ only in `nulls_first`, `join_type` or the
-    COUNT's input have different shapes. (The render of the two sorts may be
-    equal; the shapes may not.)"""
+    COUNT's input have different shapes. (The render tells the two sorts
+    apart too, by NULLS FIRST; it omits `nulls_first` only at the derived
+    placement.)"""
     assert_true(
         plan_shape(sort_values_plan(True)) != plan_shape(sort_values_plan(False)),
         "plan_shape cannot tell na_position first from last",

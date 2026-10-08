@@ -21,8 +21,10 @@
 #      field by field, and the same `plan_shape`.
 #
 # Step 5's `plan_shape` is what sees the fields the render leaves out: a
-# `nulls_first` equal to the derived NULLS LAST, and everything inside a
-# PARTITION_BY function (column, frame, alias).
+# `nulls_first` equal to the derived NULLS LAST, and the output schema. The
+# render prints every PARTITION_BY function in full (name, column, offset,
+# frame, alias, and the default when `has_default` is set); `plan_shape` adds
+# `has_default` itself and the default value when it is unset.
 #
 # The cross-door checks compare ENCODINGS: protoc's bytes of the pandas
 # `groupby(sort=False)` fixture and of the polars `group_by` fixture (written
@@ -465,7 +467,9 @@ def test_groupby_sort_false_is_byte_identical_to_group_by() raises:
     """pandas `groupby("cust_id", sort=False).agg({"amount": "sum"})` and
     polars `group_by("cust_id").agg(col("amount").sum())` are ONE plan: the
     same protoc bytes from two fixtures written in different field orders,
-    and the same encoding of the two doors' Mojo-built plans."""
+    and the same encoding of the two doors' Mojo-built plans. They are one
+    plan only because the key `cust_id` is non-nullable: pandas' default
+    `dropna=True` drops a null group that polars keeps."""
     var pd_bytes = bytes_hex(_wire(String("pandas_groupby_sum_unsorted")))
     var pl_bytes = bytes_hex(_wire(String("polars_group_by_sum")))
     assert_equal(
