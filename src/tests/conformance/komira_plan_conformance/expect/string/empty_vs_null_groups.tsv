@@ -1,0 +1,18 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: GROUP BY s, COUNT(*) AS n. §7.12: '' and NULL are
+# different grouping keys; §2.4: the two NULL rows (ids 6, 8) form one group.
+# Every other s appears once: "abc", "h" U+00E9 "llo", U+65E5 U+672C, "a"
+# U+1F600 "b", '' (row 5), "Stra" U+00DF "e", U+1F600. 8 groups, counts
+# summing to the 9 rows. The '' group's key cell is empty, not \N.
+# Types: the key keeps its scanned type; COUNT is INT64, never NULL (§8.6).
+s:string?	n:int64
+abc	1
+héllo	1
+日本	1
+a😀b	1
+	1
+\N	2
+Straße	1
+😀	1

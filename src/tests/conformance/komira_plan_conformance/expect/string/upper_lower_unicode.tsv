@@ -1,0 +1,24 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §7.9: upper and lower are the simple (one-to-one)
+# Unicode case mapping per code point; upper(U+00DF) is U+1E9E, not "SS".
+# NULL in, NULL out. us = upper(s): 1 "ABC"; 2 U+00E9 to U+00C9, so "H"
+# U+00C9 "LLO"; 3 U+65E5 U+672C have no case, unchanged; 4 U+1F600 has no
+# case: "A" U+1F600 "B"; 5 ''; 7 "STRA" U+1E9E "E" (U+00DF grows from 2
+# bytes to 3); 9 unchanged. ls = lower(s): ASCII capitals fold (row 7's S),
+# the rest is unchanged. lt = lower(t): row 7 U+00C4 U+00D6 to U+00E4
+# U+00F6; row 9 U+FF21 (fullwidth A) to U+FF41; rows 1, 3, 4, 6 unchanged
+# ("" stays ''); rows 2, 5, 8 NULL.
+# Types: a string (§7.9); §8 has no row for UPPER or LOWER, so nullable by
+# §8's default; id as scanned.
+id:int64	us:string?	ls:string?	lt:string?
+1	ABC	abc	x
+2	HÉLLO	héllo	\N
+3	日本	日本	
+4	A😀B	a😀b	-
+5			\N
+6	\N	\N	y
+7	STRAẞE	straße	äö
+8	\N	\N	\N
+9	😀	😀	ａ

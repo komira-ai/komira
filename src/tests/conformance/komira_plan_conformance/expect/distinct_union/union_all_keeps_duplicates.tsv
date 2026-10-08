@@ -1,0 +1,25 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §11.1: UNION ALL keeps every row of every input. The 9
+# (k, s) rows of set_left, repeats included, then the 6 of set_right: 15
+# rows, (1, "a") three times and (NULL, NULL) three times. Order is not
+# promised (§4.8).
+# Types: DISTINCT and UNION keep their input's columns, here k and s as
+# scanned (§11.1, §11.4: the output names and types are the inputs').
+k:int64?	s:string?
+1	a
+1	a
+\N	a
+\N	a
+\N	\N
+\N	\N
+2	\N
+2	b
+4	é
+1	a
+\N	\N
+3	日
+2	B
+4	é
+5	😀

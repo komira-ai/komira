@@ -1,0 +1,25 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §4.6: strings order by their UTF-8 bytes, a prefix first;
+# §7.14: no padding, 'abc' = 'abc ' is FALSE; §1.2: a NULL operand gives
+# NULL (rows 6 and 8, and s < t where t is NULL: rows 2 and 5). First
+# bytes: "abc" 61, "h" 68, U+65E5 E6, "a" 61, '' none, "S" 53, U+1F600 F0.
+# lt_Z (Z is 5A): TRUE only for '' and "S..." (53); lowercase letters (61,
+# 68) and non-ASCII (E6, F0) sort after Z. lt_hz: "abc" and "a" U+1F600
+# "b" (61 < 68), '' and "S..." TRUE; "h" U+00E9 "llo" ties on h, then C3 >
+# 7A: FALSE. lt_abcd: "abc" is a prefix, TRUE; '' TRUE; "S" 53 < 61 TRUE;
+# "a" U+1F600 "b" ties on a, then F0 > 62: FALSE. s_lt_t: 1 "abc" < "x"
+# TRUE; 3 nothing is below '': FALSE; 4 61 > 2D: FALSE; 7 53 < C3 TRUE;
+# 9 F0 > EF (U+FF21): FALSE, though UTF-16 would put U+1F600 (D83D) first.
+# Types: BOOLEAN, nullable (§8.8); id as scanned.
+id:int64	lt_Z:bool?	lt_hz:bool?	eq_abc_sp:bool?	lt_abcd:bool?	s_lt_t:bool?
+1	false	true	false	true	true
+2	false	false	false	false	\N
+3	false	false	false	false	false
+4	false	true	false	false	false
+5	true	true	false	true	\N
+6	\N	\N	\N	\N	\N
+7	true	true	false	true	true
+8	\N	\N	\N	\N	\N
+9	false	false	false	false	false

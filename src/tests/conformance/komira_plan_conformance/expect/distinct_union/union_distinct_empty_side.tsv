@@ -1,0 +1,17 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: DISTINCT over (empty UNION ALL set_left), the empty input
+# first: set_right WHERE id < 0 has no row (§1.2). §11.2 then §2.4: the
+# result is DISTINCT over set_left's (k, s), the 6 rows of
+# distinct_nulls_equal. §11.4: output names are the first input's, here
+# the same k and s.
+# Types: DISTINCT and UNION keep their input's columns, here k and s as
+# scanned (§11.1, §11.4: the output names and types are the inputs').
+k:int64?	s:string?
+1	a
+\N	a
+\N	\N
+2	\N
+2	b
+4	é

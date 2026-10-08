@@ -1,0 +1,25 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §7.4: concat_ws(sep, a, ...) is NULL when sep is NULL;
+# a NULL argument is skipped together with its separator; '' is a value
+# (§7.12) and is kept with its separator. Row id 8 is filtered out (id <> 8,
+# §1.2): with s and t both NULL every argument is skipped and §7.4 does not
+# say what remains. ws = concat_ws('|', s, t): 1 "abc|x"; 2 t NULL, "h"
+# U+00E9 "llo"; 3 s then "|" then '': s followed by "|"; 4 "a" U+1F600
+# "b|-"; 5 '' with t NULL skipped: ''; 6 s NULL skipped: "y"; 7 s "|"
+# U+00C4 U+00D6; 9 U+1F600 "|" U+FF21. ws_sep = concat_ws(t, s, 'Q'): t is
+# the separator, so rows 2 and 5 (t NULL) are NULL; 1 "abcxQ"; 3 sep '':
+# s then "Q"; 4 "a" U+1F600 "b-Q"; 6 s NULL skipped with its separator:
+# "Q"; 7 s, U+00C4 U+00D6, "Q"; 9 U+1F600 U+FF21 "Q".
+# Types: a string (§7.4); §8 has no row for CONCAT_WS, so nullable by §8's
+# default (ws_sep does hold NULLs); id as scanned.
+id:int64	ws:string?	ws_sep:string?
+1	abc|x	abcxQ
+2	héllo	\N
+3	日本|	日本Q
+4	a😀b|-	a😀b-Q
+5		\N
+6	y	Q
+7	Straße|ÄÖ	StraßeÄÖQ
+9	😀|Ａ	😀ＡQ

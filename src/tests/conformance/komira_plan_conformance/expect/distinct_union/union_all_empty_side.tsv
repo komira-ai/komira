@@ -1,0 +1,19 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: set_right WHERE id < 0 has no row (§1.2: every id is
+# positive, so the predicate is FALSE throughout). §11.1: UNION ALL with it
+# keeps every row of the other input, set_left's 9 (k, s) rows with their
+# repeats; §11.6: an empty input contributes nothing and removes nothing.
+# Types: DISTINCT and UNION keep their input's columns, here k and s as
+# scanned (§11.1, §11.4: the output names and types are the inputs').
+k:int64?	s:string?
+1	a
+1	a
+\N	a
+\N	a
+\N	\N
+\N	\N
+2	\N
+2	b
+4	é

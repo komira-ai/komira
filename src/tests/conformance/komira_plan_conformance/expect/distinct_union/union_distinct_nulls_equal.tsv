@@ -1,0 +1,22 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §11.2: UNION is UNION ALL then DISTINCT over all columns
+# with NULLs equal (§2.4). Of the 15 rows of union_all_keeps_duplicates,
+# set_left's own 3 repeats go, and set_right's (1, "a") and (NULL, NULL)
+# already appear in set_left: 15 - 5 = 10. "b" (0x62) and "B" (0x42) are
+# different strings, and so are the two e-acutes on k = 4 (65 CC 81 from
+# set_left, C3 A9 from set_right): strings compare by bytes (§4.6, §7.14).
+# Types: DISTINCT and UNION keep their input's columns, here k and s as
+# scanned (§11.1, §11.4: the output names and types are the inputs').
+k:int64?	s:string?
+1	a
+\N	a
+\N	\N
+2	\N
+2	b
+4	é
+3	日
+2	B
+4	é
+5	😀

@@ -1,0 +1,21 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §7.2: concat skips NULL arguments and is never NULL;
+# concat(NULL, NULL) is ''. concat(s, t) by row: 1 "abc" + "x"; 2 t NULL,
+# so s alone; 3 s + '' is s ('' is a value, §7.12, and adds no bytes); 4
+# "a" U+1F600 "b" + "-"; 5 '' + NULL is ''; 6 NULL + "y" is "y"; 7 "Stra"
+# U+00DF "e" + U+00C4 U+00D6; 8 NULL + NULL is ''; 9 U+1F600 + U+FF21.
+# Rows 5 and 8 are the empty string, not \N.
+# Types: a string (§7.2); §8 has no row for CONCAT, so nullable by §8's
+# default, which is sound for a result that is never NULL; id as scanned.
+id:int64	c:string?
+1	abcx
+2	héllo
+3	日本
+4	a😀b-
+5	
+6	y
+7	StraßeÄÖ
+8	
+9	😀Ａ

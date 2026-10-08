@@ -1,0 +1,13 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: DISTINCT f over sort_rows, then COUNT(*) AS n and COUNT(f)
+# AS nf with no grouping key. f = 1.5, 0.0, -0.0, -2.5, NULL, 0.0, 0.5.
+# §2.6: as a DISTINCT key -0.0 equals 0.0, so the three zeros are one value;
+# §2.4: the one NULL is one row. Distinct rows: 1.5, a zero, -2.5, NULL, 0.5:
+# n = 5. COUNT(f) skips the NULL (§2.1): nf = 4. Seven rows less the two
+# repeated zeros is 5 again. A scalar aggregate gives one row (§2.3). Which
+# zero represents the group is not part of the result (§2.6), so the case
+# counts rather than lists. Types: INT64, never NULL (§8.6).
+n:int64	nf:int64
+5	4
