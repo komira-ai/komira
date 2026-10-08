@@ -14,7 +14,9 @@ load(":defs.bzl", "git_packs")
 # The welded tests read each pack with komira_git and require: the index it
 # writes byte-equal to git's, entry by entry the offset, size in the pack,
 # type, delta depth and base that verify-pack lists, and every object equal to
-# cat-file's. tests/test_git_packs.mojo says what each check catches. The
+# cat-file's. tests/test_git_packs.mojo says what each check catches;
+# tests/test_check_refusals.mojo shows each check, and each fixture parse
+# refusal, raising on input that breaks it. The
 # fixtures are a build action, so the cache keeps them for exactly these inputs
 # (the pinned git and the script). Nothing depends on this package.
 mojo_library(
@@ -31,10 +33,12 @@ mojo_library(
     # The packs come from the pinned git, built for linux-x86_64 only.
     target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
     test_srcs = [
+        "tests/test_check_refusals.mojo",
         "tests/test_git_packs.mojo",
         "tests/test_git_thin_sha256.mojo",
     ],
     test_data = {
+        "tests/test_check_refusals.mojo": {"packs": ":packs"},
         "tests/test_git_packs.mojo": {"packs": ":packs"},
         "tests/test_git_thin_sha256.mojo": {"packs": ":packs"},
     },

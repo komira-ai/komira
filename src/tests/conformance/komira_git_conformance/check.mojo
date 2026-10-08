@@ -18,7 +18,7 @@ from komira_git import (
     read_pack_object,
 )
 
-from .fixtures import GitObjects, parse_verify, read_fixture
+from .fixtures import GitObjects, VerifyLine, parse_verify, read_fixture
 
 
 struct PackStats(ImplicitlyCopyable, Movable):
@@ -72,19 +72,36 @@ def _same(a: List[UInt8], b: List[UInt8]) -> Bool:
 
 
 def check_git_pack(format: ObjectFormat, name: String, objects: GitObjects) raises -> PackStats:
-    """Read `<name>.pack` and require: our index byte-equal to `<name>.idx`
-    (and git's index, parsed, equal to ours); per entry the offset, size in
-    the pack, kind, depth and base of `<name>.verify`; every object of the
+    """Read `<name>.pack`, `<name>.idx` and `<name>.verify` and check them
+    with `check_pack`."""
+    return check_pack(
+        format,
+        name,
+        read_fixture(name + ".pack"),
+        read_fixture(name + ".idx"),
+        parse_verify(Span(read_fixture(name + ".verify"))),
+        objects,
+    )
+
+
+def check_pack(
+    format: ObjectFormat,
+    name: String,
+    pack: List[UInt8],
+    git_idx: List[UInt8],
+    lines: List[VerifyLine],
+    objects: GitObjects,
+) raises -> PackStats:
+    """Read `pack` and require: our index byte-equal to `git_idx` (and git's
+    index, parsed, equal to ours); per entry the offset, size in the pack,
+    kind, depth and base of verify-pack's `lines`; every object of the
     repository in the pack once, with cat-file's kind and payload. Returns
     what the pack held."""
-    var pack = read_fixture(name + ".pack")
-    var git_idx = read_fixture(name + ".idx")
     var limits = PackLimits()
     var got = index_pack(format, Span(pack), limits)
     require_same_bytes(name + ".idx", got.index.serialize(), git_idx)
     require_same_index(name + ".idx parsed", got.index, parse_pack_index(format, Span(git_idx)))
 
-    var lines = parse_verify(Span(read_fixture(name + ".verify")))
     if len(lines) != len(got.entries):
         raise Error(name + ": verify-pack lists " + String(len(lines)) + " entries, we read " + String(len(got.entries)))
     var by_id = Dict[String, Int]()
