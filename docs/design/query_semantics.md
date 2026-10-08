@@ -25,7 +25,7 @@ Each item has four parts:
   - **DEPARTS**: the rule differs from DuckDB, for the reason given;
   - **UNDECIDED**: the options and a recommendation.
 
-Scope is the plan: the logical-plan IR (`src/komira_plan_ir`, `src/komira_plan_expr`) and its wire form (`src/komira_plan_wire`). A frontend (SQL, a dataframe API, a spreadsheet) maps its own surface onto these rules; where a frontend's spelling differs from the plan operator of the same name (SQL `/` against the plan's `BIN_DIV`), the item says so. Out of scope: collations other than binary, intervals, nested types (struct, list, map), JSON functions, the temporal field extracts beyond time zones and §8.15, and UDF null modes. Each of those needs its own section before a hand expectation may depend on it.
+Scope is the plan: the logical-plan IR (`src/komira_plan_ir`, `src/komira_plan_expr`) and its wire form (`src/komira_plan_wire`). A frontend (SQL, a dataframe API) maps its own surface onto these rules; where a frontend's spelling differs from the plan operator of the same name (SQL `/` against the plan's `BIN_DIV`), the item says so. Out of scope: collations other than binary, intervals, nested types (struct, list, map), JSON functions, the temporal field extracts beyond time zones and §8.15, and UDF null modes. Each of those needs its own section before a hand expectation may depend on it.
 
 Items §7.16, §7.17 and §11.7 are in [further items](query_semantics_more.md) and section 13 (scans) is in [scans](query_semantics_scans.md), numbered as part of this document. Many operators named here have no executor in this repository yet (the engine operators arrive separately). Where that is so, "current behaviour" cites the IR, the wire admission or a kernel, and says that nothing executes the operator end to end.
 
@@ -774,42 +774,9 @@ The type of every result column is in [the result-type table](query_semantics_ty
 - **Current behaviour.** No window operator here.
 - **Mark.** MATCHES.
 
-## 10. Excel error values
+## 10. Reserved
 
-DuckDB has no error values, so nothing in this section has a DuckDB oracle. The authority is Microsoft's documented behaviour, and expectations are hand-derived from this section.
-
-### 10.1 The code space
-
-- **Rule.** The error values are Microsoft's list: `#DIV/0!`, `#N/A`, `#VALUE!`, `#REF!`, `#NAME?`, `#NUM!`, `#NULL!`, `#SPILL!`, `#CALC!`. There is no circular-reference error value: Excel reports a circular reference as a warning, and Microsoft documents no literal for it. An unrecognized `#...` literal is `#NAME?`. An error is a third state of a value, distinct from both a valid value and NULL (a blank cell).
-- **Microsoft.** The error values and their meanings ([detect formula errors](https://support.microsoft.com/en-us/excel/detect-formula-errors-in-excel), [ERROR.TYPE](https://support.microsoft.com/en-us/office/error-type-function-10958677-7c8d-44f7-ae77-b9a9ee6eefaa)).
-- **Current behaviour.** `src/komira_plan_expr/excel_error_code.mojo:28-38` still defines `XL_ERR_CIRCULAR = 10`, and the wire vocabulary has the matching enum member. `komira-ai/komira#662` removes the code and reserves its wire number. The three-state status lane is declared at `src/komira_plan_expr/excel_error_code.mojo:41-46`; it is not yet carried through columns and batches (`:16-20`).
-- **Mark.** DEPARTS: there is no DuckDB counterpart; the list itself is already decided and needs only ratification here.
-
-### 10.2 Propagation through scalar expressions
-
-- **Rule (proposed).**
-  1. An arithmetic operator, comparison or function with an error operand answers that error. With several error operands, the leftmost wins.
-  2. An error dominates NULL: `#N/A + NULL` is `#N/A`.
-  3. AND and OR do not short-circuit past an error: `FALSE AND #N/A` is `#N/A`, unlike §1.1's `FALSE AND NULL`.
-  4. A conditional with an error condition answers the error; an error in an untaken branch has no effect.
-  5. `IFERROR(x, y)` answers `y` for any error in `x`; `IFNA(x, y)` only for `#N/A`; `ISERROR`, `ISERR` and `ISNA` are total.
-  6. In the spreadsheet surface, division by zero is `#DIV/0!`, not §5.3's NULL. That is the frontend's mapping; the plan's `BIN_DIV` keeps §5.3.
-- **Microsoft.** Rule 1 is the documented behaviour for SUM and AVERAGE ("If AVERAGE or SUM refer to cells that contain #VALUE! errors, the formulas will result in a #VALUE! error", [correct a #VALUE! error in AVERAGE or SUM](https://support.microsoft.com/en-us/excel/how-to-correct-a-value-error-in-average-or-sum-functions)). The leftmost-wins rule and rule 3 are not documented and must be measured in Excel.
-- **Current behaviour.** None: the propagation algebra is not implemented (`src/komira_plan_expr/excel_error_code.mojo:16-20`), and the comparison kernels reserve an error-dominant NULL policy that is not implemented (`src/komira_kernels/comparison_kleene.mojo:57-63`).
-- **Options.** (a) The rules above, measured against Excel before ratification. (b) Treat an error as NULL inside the plan and restore it at the surface, which loses which error occurred.
-- **Recommendation.** (a).
-- **Mark.** UNDECIDED.
-
-### 10.3 Errors in aggregates and sorts
-
-- **Rule (proposed).**
-- SUM, AVERAGE, MIN, MAX and the other numeric aggregates over a range containing an error answer the first error in input order.
-- COUNT counts numbers only and skips errors; COUNTA counts non-blank cells, errors included.
-- A sort orders numbers, then text, then logical values (FALSE before TRUE), then errors, all errors equal to one another; blanks (NULL) come last in both directions, which agrees with §4.1.
-- **Microsoft.** The SUM/AVERAGE rule as in §10.2. The sort order: "All error values, such as #NUM! and #REF!, are equal", and "sort always puts blank cells last" in both directions ([sort data](https://support.microsoft.com/en-us/office/sort-data-in-a-workbook-in-the-browser-bf63427c-1b17-4ec5-a909-a5f2d07d924c)).
-- **Current behaviour.** None.
-- **Recommendation.** Adopt, with "first error in input order" measured in Excel before ratification.
-- **Mark.** UNDECIDED.
+Excel semantics are not part of the plan; they belong to the Excel surface, which is built on the TypeScript SDK.
 
 ## 11. Set operations and empty inputs
 
@@ -889,7 +856,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 108, DEPARTS 19, UNDECIDED 21: 148 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 40 rows of "Rulings needed" ([rulings and code status](query_semantics_rulings.md)) are the 19 DEPARTS and 21 UNDECIDED items.
+MATCHES 108, DEPARTS 18, UNDECIDED 19: 145 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 37 rows of "Rulings needed" ([rulings and code status](query_semantics_rulings.md)) are the 18 DEPARTS and 19 UNDECIDED items.
 
 ## What are its limits and open questions?
 
@@ -925,9 +892,3 @@ Apache Arrow documentation:
 - [Compute functions (C++)](https://arrow.apache.org/docs/cpp/compute.html)
 - [pyarrow compute API](https://arrow.apache.org/docs/python/api/compute.html)
 - [SetLookupOptions](https://arrow.apache.org/docs/python/generated/pyarrow.compute.SetLookupOptions.html)
-
-Microsoft documentation:
-- [Detect formula errors in Excel](https://support.microsoft.com/en-us/excel/detect-formula-errors-in-excel)
-- [ERROR.TYPE function](https://support.microsoft.com/en-us/office/error-type-function-10958677-7c8d-44f7-ae77-b9a9ee6eefaa)
-- [How to correct a #VALUE! error in AVERAGE or SUM](https://support.microsoft.com/en-us/excel/how-to-correct-a-value-error-in-average-or-sum-functions)
-- [Sort data in a workbook](https://support.microsoft.com/en-us/office/sort-data-in-a-workbook-in-the-browser-bf63427c-1b17-4ec5-a909-a5f2d07d924c)

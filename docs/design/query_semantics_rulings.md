@@ -38,9 +38,6 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §9.5 | No `IGNORE NULLS` for LAG/LEAD | DEPARTS | Accept for now: refused by name. |
 | §9.6 | Window ORDER BY cannot state its NULL placement | DEPARTS | Accept for now: the window key uses §4.1's default; a frontend refuses an explicit `NULLS FIRST` inside `OVER`. |
 | §9.8 | RANGE frames with offsets | UNDECIDED | INT64 offsets only (fractional offsets refused); measure DuckDB's NULL and NaN frames first. |
-| §10.1 | Excel error-code space | DEPARTS | Ratify: Microsoft's list without a circular-reference code (DuckDB has no error values). |
-| §10.2 | Error propagation through scalar expressions | UNDECIDED | An error dominates NULL; the leftmost error operand wins; AND/OR do not short-circuit past an error. |
-| §10.3 | Errors in aggregates and sorts | UNDECIDED | SUM/AVERAGE/MIN/MAX answer the first error in input order; COUNT skips errors; sort places errors after logical values and before blanks, all errors equal. |
 | §11.3 | INTERSECT and EXCEPT | UNDECIDED | Frontends refuse them by name until a null-safe join key exists; a SEMI/ANTI join on `=` is not a lowering. |
 | §11.4 | Set-operation inputs must have identical types and names | DEPARTS | Accept: the frontend inserts the casts DuckDB inserts implicitly. |
 | §12.3 | No infinite dates or timestamps | DEPARTS | Accept: Arrow cannot represent them; refused by name. |
