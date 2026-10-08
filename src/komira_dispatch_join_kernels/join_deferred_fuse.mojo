@@ -73,11 +73,11 @@
 # streams + 1 index read stream where a single-column task holds 1 + 1 + 1, so
 # at 20 workers ~100 concurrent streams against ~60 -- and a DRAM page-open
 # policy could lose more to that than the removed pass wins back. Measured
-# together with the 4-byte index and the join-key share (toggled TOGETHER,
-# 20 workers, one binary against itself), the bundle cut a high-cardinality
-# join's wall time 6.2% with DISJOINT ranges, and its memory-controller
-# traffic 6.4%. The stream cost, if it exists, is smaller than the pass it
-# removes.
+# together with the 4-byte index and `hbs_key_extract`'s build-key sharing
+# (toggled TOGETHER, 20 workers, one binary against itself), the bundle cut a
+# high-cardinality join's wall time 6.2% with DISJOINT ranges, and its
+# memory-controller traffic 6.4%. The stream cost, if it exists, is smaller
+# than the pass it removes.
 #   ⚠ The BUNDLE is what was measured; there is no per-lever wall attribution.
 #     This lever's own modelled saving there is 0.745 GiB, below the wall
 #     detection floor at any rep count an operator will run.
