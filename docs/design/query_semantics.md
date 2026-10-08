@@ -53,9 +53,9 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §7.7 | No LIKE `ESCAPE`, no ILIKE in the plan | DEPARTS | Accept for now: both are refused by name; add when a frontend needs them. |
 | §7.13 | Readers: empty field vs NULL | UNDECIDED | Match DuckDB's `read_csv` defaults (empty unquoted field NULL, `""` is `''`), measured, and state it in the formats doc. |
 | §7.15 | Invalid UTF-8 in a string column | UNDECIDED | The reader raises by name; string kernels may then assume valid UTF-8. |
+| §7.16 | SUBSTRING with a negative start or length | UNDECIDED | (a) DuckDB's meaning (negative start counts from the end, negative length goes backwards), with the two-argument form encoded without the `length < 0` sentinel. |
 | §8.1 | SUM of a signed integer or BOOLEAN is INT64 and refuses overflow | DEPARTS | Accept: Arrow has no 128-bit integer; a total outside INT64 is an error naming the column, never a wrapped value. |
 | §8.2 | SUM of an unsigned integer is UINT64 | DEPARTS | Accept, with the same overflow error as §8.1. |
-| §7.16 | SUBSTRING with a negative start or length | UNDECIDED | (a) DuckDB's meaning (negative start counts from the end, negative length goes backwards), with the two-argument form encoded without the `length < 0` sentinel. |
 | §8.9 | Result type of integer and mixed arithmetic | UNDECIDED | Adopt the narrowest-common-type table in §8.9 (DuckDB's rule); retire "left operand wins". |
 | §8.11 | Decimal addition and subtraction | DEPARTS | Accept: DECIMAL(min(max(p1 - s1, p2 - s2) + max(s1, s2) + 1, 38), max(s1, s2)) without DuckDB's 18-digit case, for §8.12's reason. |
 | §8.12 | Decimal multiplication | DEPARTS | Accept: DECIMAL(min(p1 + p2, 38), s1 + s2) without DuckDB's 18-digit case; the code drops its `+ 1`. |
@@ -69,7 +69,7 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §10.2 | Error propagation through scalar expressions | UNDECIDED | An error dominates NULL; the leftmost error operand wins; AND/OR do not short-circuit past an error. |
 | §10.3 | Errors in aggregates and sorts | UNDECIDED | SUM/AVERAGE/MIN/MAX answer the first error in input order; COUNT skips errors; sort places errors after logical values and before blanks, all errors equal. |
 | §11.3 | INTERSECT and EXCEPT | UNDECIDED | Frontends refuse them by name until a null-safe join key exists; a SEMI/ANTI join on `=` is not a lowering. |
-| §11.4 | Set-operation inputs must have identical types | DEPARTS | Accept: the frontend inserts the casts DuckDB inserts implicitly. |
+| §11.4 | Set-operation inputs must have identical types and names | DEPARTS | Accept: the frontend inserts the casts DuckDB inserts implicitly. |
 | §12.3 | No infinite dates or timestamps | DEPARTS | Accept: Arrow cannot represent them; refused by name. |
 
 ## Code that does not follow a MATCHES rule today
@@ -764,7 +764,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ## 8. Result types
 
-The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.30. It is part of this document: its items are counted below and its open items are in "Rulings needed".
+The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.31. It is part of this document: its items are counted below and its open items are in "Rulings needed".
 
 ## 9. Window functions
 
@@ -950,7 +950,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 100, DEPARTS 18, UNDECIDED 18: 136 marks, across this file, [the result-type table](query_semantics_types.md) and [further items](query_semantics_more.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 36 rows of "Rulings needed" are the 18 DEPARTS and 18 UNDECIDED items.
+MATCHES 101, DEPARTS 18, UNDECIDED 18: 137 marks, across this file, [the result-type table](query_semantics_types.md) and [further items](query_semantics_more.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 36 rows of "Rulings needed" are the 18 DEPARTS and 18 UNDECIDED items.
 
 ## What are its limits and open questions?
 
