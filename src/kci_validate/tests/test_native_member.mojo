@@ -21,6 +21,16 @@
 #       komira_native is another package, not checked as it
 #     ENV, komira_native alone: no library, so no README runs: a FAIL, never
 #       a pass (and never "not a metapackage")
+#     ENV, a library also requiring the conda-forge system library
+#       `zstd >=1.5.2,<2`: pixi.toml lists the conda-forge extra channel and
+#       names no zstd; its record from conda-forge reads back as a pass, one
+#       from an undeclared channel FAILS
+#     ENV refusals of the native package's link name, before anything runs:
+#       none (no lib/lib<x>.so row), `<x>` in another case, `<x>` holding a
+#       path separator
+#     every README run (ENV) and the program run (SMOKE) links komira_native
+#       from the environment: `-Xlinker -L<env>/lib -Xlinker -lkomira_native`
+#       (tools/build/native/README.md), pinned argv and script text
 #     SMOKE, a library requiring komira_native: pinned, served, read back,
 #       not named in pixi.toml; an environment without it FAILS by name
 #
@@ -58,6 +68,7 @@ from kci_validate import (
     run_install_env,
     run_install_smoke,
     run_program_argv,
+    with_native,
 )
 
 comptime NATIVE: String = "komira_native"
@@ -245,9 +256,26 @@ def _env_install(fx: Fixture, records: List[String], libraries: List[String]) ->
     return step^
 
 
+def _native_link(env: String) -> List[String]:
+    """What tools/build/native/README.md says a consumer of komira_native
+    links, spelled out here rather than taken from kci_validate."""
+    var out = List[String]()
+    out.append(String("-Xlinker"))
+    out.append(String("-L") + env + String("/.pixi/envs/default/lib"))
+    out.append(String("-Xlinker"))
+    out.append(String("-lkomira_native"))
+    return out^
+
+
 def _expect_readme_run(mut runner: ScriptedRunner, fx: Fixture, name: String):
+    # every environment of this file holds komira_native, so every README
+    # run links it (JIT symbols of libkomira_native.so.1 are not found
+    # otherwise)
     runner.expect(
-        ScriptedStep(run_program_argv(fx.work(), String("readme_") + name + String(".mojo")), stdout_text=_count(name))
+        ScriptedStep(
+            run_program_argv(fx.work(), String("readme_") + name + String(".mojo"), _native_link(fx.work())),
+            stdout_text=_count(name),
+        )
     )
 
 
@@ -349,6 +377,123 @@ def test_env_an_environment_without_the_required_native_package_fails() raises:
     var t = _channel(fx, _names(String("komira_alpha"), String(NATIVE)), True)
     var row = _env(runner, t, fx)
     _assert_fails_with(row, String("install: the environment holds no record of komira_native"))
+
+
+def test_env_a_native_package_with_no_link_name_is_refused() raises:
+    # lib_files holds the shared object but not lib/libkomira_native.so: a
+    # README run could not link it, so nothing runs
+    var fx = Fixture(
+        String("nolink"), String(VALIDATION_KIND_CONDA_INSTALL_ENV), _names(String("komira_alpha")),
+        String("komira_alpha"), String(NATIVE), String("lib_files"),
+        String('[{"path":"lib/libkomira_native.so.1","sha256":"') + _sha(String(NATIVE)) + String('"}]'),
+    )
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var row = _env(runner, t, fx)
+    _assert_fails_with(
+        row,
+        String("native package 'komira_native' ships no lib/lib<name>.so in its lib_files: a program cannot link it"),
+    )
+    assert_equal(len(runner.calls), 0)
+    assert_equal(t.call_count(), 0)
+
+
+def _refused_link_name(sub: String, bad: String) raises:
+    """komira_native's lib_files hold the shared object and a file row at
+    `bad`, its only `lib/lib<x>.so` (the metadata parser accepts it: under
+    lib/, bytes in [A-Za-z0-9_.+-/]; a file row, so no link target need
+    resolve): refused naming it, before anything runs."""
+    var fx = Fixture(
+        sub, String(VALIDATION_KIND_CONDA_INSTALL_ENV), _names(String("komira_alpha")),
+        String("komira_alpha"), String(NATIVE), String("lib_files"),
+        String('[{"path":"') + bad + String('","sha256":"') + _sha(bad) + String('"},')
+        + String('{"path":"lib/libkomira_native.so.1","sha256":"') + _sha(String(NATIVE)) + String('"}]'),
+    )
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var row = _env(runner, t, fx)
+    _assert_fails_with(
+        row,
+        String("'komira_native' ships '") + bad
+        + String("', whose link name is not lowercase letters, digits and `_`: kci will not write it into a link line"),
+    )
+    assert_equal(len(runner.calls), 0)
+    assert_equal(t.call_count(), 0)
+
+
+def test_env_a_native_link_name_in_another_case_is_refused() raises:
+    _refused_link_name(String("link_upper"), String("lib/libKomira.so"))
+
+
+def test_env_a_native_link_name_holding_a_path_separator_is_refused() raises:
+    _refused_link_name(String("link_slash"), String("lib/libsub/libx.so"))
+
+
+# ---- ENV: a library requiring a system library from conda-forge ---------------
+
+
+comptime CONDA_FORGE_ZSTD: String = "https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.6-ha6fb4c9_0.conda"
+
+
+def _zstd_record(url: String) -> String:
+    return (
+        String('{"name":"zstd","version":"1.5.6","build":"ha6fb4c9_0","sha256":"')
+        + String("5555555555555555555555555555555555555555555555555555555555555555")
+        + String('","url":"') + url + String('"}')
+    )
+
+
+def _zstd_fixture(sub: String) raises -> Fixture:
+    var depends = (
+        String('["__linux","mojo-compiler ==1.0.0","') + String(NATIVE) + String(" ==1.0.0 ")
+        + ExampleRelease().build() + String('","zstd >=1.5.2,<2"]')
+    )
+    return Fixture(
+        sub, String(VALIDATION_KIND_CONDA_INSTALL_ENV), _names(String("komira_alpha")), String("komira_alpha"),
+        String("komira_alpha"), String("depends"), depends,
+    )
+
+
+def test_env_a_system_library_comes_from_the_conda_forge_extra_channel() raises:
+    # komira_alpha requires `zstd >=1.5.2,<2` (tools/build/package/system_libs.bzl's
+    # row for libzstd.so.1): pixi.toml lists conda-forge (the machine file's
+    # extra_channel) among the channels and names no zstd, so the solver
+    # brings it through the library's requirement; its record, from
+    # conda-forge, reads back as a pass
+    var fx = _zstd_fixture(String("syslib"))
+    var pins = _names(String("komira_alpha"), String(NATIVE))
+    var runner = ScriptedRunner()
+    var step = _env_install(fx, pins, _names(String("komira_alpha")))
+    step.writes(String(ENV_META) + String("zstd.json"), _zstd_record(String(CONDA_FORGE_ZSTD)))
+    runner.expect(step^)
+    _expect_readme_run(runner, fx, String("komira_alpha"))
+    var t = _channel(fx, pins, True)
+    var row = _env(runner, t, fx)
+    assert_equal(_failed(row), String(""))
+    assert_equal(row.outcome, String(OUTCOME_SUCCEEDED))
+    var toml = open(fx.work() + String("/pixi.toml"), "r").read()
+    assert_true(toml.find(String('"conda-forge"]')) >= 0, toml)
+    assert_true(toml.find(String("zstd")) < 0, toml)
+
+
+def test_env_a_system_library_from_an_undeclared_channel_fails() raises:
+    var fx = _zstd_fixture(String("syslib_elsewhere"))
+    var pins = _names(String("komira_alpha"), String(NATIVE))
+    var runner = ScriptedRunner()
+    var step = _env_install(fx, pins, _names(String("komira_alpha")))
+    step.writes(
+        String(ENV_META) + String("zstd.json"),
+        _zstd_record(String("https://conda.example.invalid/other/linux-64/zstd-1.5.6-ha6fb4c9_0.conda")),
+    )
+    runner.expect(step^)
+    _expect_readme_run(runner, fx, String("komira_alpha"))
+    var t = _channel(fx, pins, True)
+    var row = _env(runner, t, fx)
+    _assert_fails_with(
+        row,
+        String("install: zstd came from 'https://conda.example.invalid/other/linux-64/zstd-1.5.6-ha6fb4c9_0.conda'")
+        + String(", which is none of the declared channels"),
+    )
 
 
 # ---- ENV: refused before anything runs ----------------------------------------------
@@ -585,8 +730,17 @@ def test_env_the_native_package_alone_runs_no_readme_so_it_fails() raises:
 def _smoke_container(mut runner: ScriptedRunner, fx: Fixture, records: List[String]) raises:
     runner.expect(ScriptedStep(pull_argv(String(IMAGE))))
     var rel = load_validated_release(fx.req)
-    var pins = install_pins(rel.loaded, fx.req.validation.installs)
-    var step = ScriptedStep(run_argv(String(IMAGE), fx.work(), String(USER), container_script(pins)))
+    var pins = with_native(rel.loaded, install_pins(rel.loaded, fx.req.validation.installs))
+    var script = container_script(pins)
+    # the program run links komira_native from the environment
+    assert_true(
+        script.find(
+            String(" --frozen mojo run -Xlinker -L/work/.pixi/envs/default/lib -Xlinker -lkomira_native /work/smoke.mojo")
+        )
+        >= 0,
+        script,
+    )
+    var step = ScriptedStep(run_argv(String(IMAGE), fx.work(), String(USER), script))
     step.writes(String("work/out/install.exit"), String("0\n"))
     step.writes(String("work/out/install.log"), String("installed\n"))
     step.writes(

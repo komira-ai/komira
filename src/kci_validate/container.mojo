@@ -47,7 +47,13 @@
 # sha256 of each library's installed payload, then `mojo run` of the
 # program. Each phase writes its exit status or output under /work/out, and
 # the script stops after a failed install; it never decides a verdict. kci
-# reads everything back from the mount (readback.mojo). Every value written
+# reads everything back from the mount (readback.mojo). When the pins hold
+# the native package (a library requires it, or the metapackage brings it),
+# `mojo run` links it: `-Xlinker -L<env>/lib` and `-Xlinker -l<x>` for each
+# link name it ships (`native_link_args`; tools/build/native/README.md: a
+# consumer links `-Xlinker -L<env>/lib -Xlinker -lkomira_native`; the JIT
+# does not find its symbols otherwise). kci builds no program, so no run
+# path is given. Every value written
 # into the script was checked to be a plain relative path or version
 # (request.mojo), so nothing in it is interpreted by the shell.
 #
@@ -119,6 +125,24 @@ def install_manifest_text(
     )
 
 
+def native_link_args(env_dir: String, pins: List[InstallPin]) -> List[String]:
+    """The `mojo` arguments that link the native package of `pins` from the
+    environment `env_dir` (file header): `-Xlinker -L<env_dir>/lib`, then
+    `-Xlinker -l<x>` for each of its link names; EMPTY when no pin is the
+    native package."""
+    var out = List[String]()
+    for i in range(len(pins)):
+        if not pins[i].is_native:
+            continue
+        if len(out) == 0:
+            out.append(String("-Xlinker"))
+            out.append(String("-L") + join_path(env_dir, String("lib")))
+        for k in range(len(pins[i].link_names)):
+            out.append(String("-Xlinker"))
+            out.append(String("-l") + pins[i].link_names[k])
+    return out^
+
+
 def payload_record_name(pin: InstallPin) -> String:
     """The file under /work/out the script writes a library's payload sha256
     to."""
@@ -142,7 +166,11 @@ def container_script(pins: List[InstallPin]) -> String:
             + String(" > ") + w + String("/out/") + payload_record_name(pins[i]) + String(" 2>&1\n")
         )
     s += String("pixi run --manifest-path ") + w + String("/") + String(MANIFEST_NAME)
-    s += String(" --frozen mojo run ") + w + String("/") + String(PROGRAM_COPY)
+    s += String(" --frozen mojo run ")
+    var link = native_link_args(w + String("/") + String(ENV_DIR), pins)
+    for i in range(len(link)):
+        s += link[i] + String(" ")
+    s += w + String("/") + String(PROGRAM_COPY)
     s += String(" > ") + w + String("/out/smoke.out 2> ") + w + String("/out/smoke.err\n")
     s += String("echo $? > ") + w + String("/out/smoke.exit\n")
     return s^

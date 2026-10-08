@@ -84,6 +84,7 @@ from kci_validate.container import (
     container_script,
     docker_child_env,
     install_manifest_text,
+    native_link_args,
     payload_record_name,
     pull_argv,
     run_argv,

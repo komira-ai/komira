@@ -100,7 +100,8 @@ def test_run_argv_is_golden() raises:
     ]:
         want.append(String(w))
     assert_equal(
-        _join(run_program_argv(String("/scratch/install-env/work"), String("readme_komira_encoding.mojo"))), _join(want)
+        _join(run_program_argv(String("/scratch/install-env/work"), String("readme_komira_encoding.mojo"), List[String]())),
+        _join(want),
     )
 
 

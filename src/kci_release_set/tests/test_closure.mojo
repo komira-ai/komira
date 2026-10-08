@@ -16,10 +16,17 @@
 #   (5) the native package: a library's pin on it is closed when it is a
 #       member and open when it is not; its own requirements are read (the
 #       guard and the glibc floor are virtual, so closed), and one that
-#       names no member is listed.
+#       names no member is listed;
+#   (6) a system library: a LIBRARY requiring a conda-forge requirement of
+#       system_libs.mojo byte for byte (`zstd >=1.5.2,<2`, and every row) is
+#       closed; another range, no range, a channel prefix, another case, a
+#       second space, a tab and a package the table does not hold are
+#       listed, naming the library; the native package requiring a row is
+#       listed (only a library opens a system library); a row listed more
+#       than once is listed once.
 # =============================================================================
 
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_true
 
 from kci_artifact_manifest import ArtifactManifest
 from kci_release_set import (
@@ -29,6 +36,7 @@ from kci_release_set import (
     CondaMetadata,
     ReleaseMember,
     requirement_name,
+    system_libs,
     undeclared_requirements,
 )
 
@@ -75,6 +83,7 @@ def _line(artifact: String, req: String, name: String) -> String:
     return (
         String("artifact '") + artifact + String("' requires '") + req + String("', and '") + name
         + String("' is not another library of this release set")
+        + String(" (nor, for a library, a system library requirement of tools/build/package/system_libs.bzl)")
     )
 
 
@@ -165,6 +174,51 @@ def test_the_native_package_closes_a_library_that_requires_it() raises:
     print("  test_the_native_package_closes_a_library_that_requires_it: PASS")
 
 
+def test_a_library_may_require_a_system_library_exactly() raises:
+    var s = _closed()
+    s[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    assert_equal(len(undeclared_requirements(s)), 0, "zstd >=1.5.2,<2 is the table's requirement")
+    var rows = system_libs()
+    assert_true(len(rows) > 0, "the table is empty")
+    s = _closed()
+    for i in range(len(rows)):
+        s[1].conda.depends.append(rows[i].requirement.copy())
+    assert_equal(len(undeclared_requirements(s)), 0, "every row of the table is closed")
+    var refused = _l(
+        "zstd >=1.0",
+        "zstd",
+        "conda-forge::zstd >=1.5.2,<2",
+        "ZSTD >=1.5.2,<2",
+        "zstd  >=1.5.2,<2",
+        "zstd\t>=1.5.2,<2",
+        "zstd >=1.5.2,<2 ",
+        "zstd >=1.5.2,<3",
+        "zst* >=1.5.2,<2",
+        "notalib >=1",
+    )
+    for i in range(len(refused)):
+        s = _closed()
+        s[0].conda.depends.append(refused[i].copy())
+        _one(s^, _line(String("komira_alpha"), refused[i], requirement_name(refused[i])))
+    # listed twice (or three times): one line, as PUBLISH refuses it
+    s = _closed()
+    s[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    s[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    _one(s^, String("artifact 'komira_alpha' requires 'zstd >=1.5.2,<2' more than once"))
+    s = _closed()
+    for _ in range(3):
+        s[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    _one(s^, String("artifact 'komira_alpha' requires 'zstd >=1.5.2,<2' more than once"))
+    print("  test_a_library_may_require_a_system_library_exactly: PASS")
+
+
+def test_the_native_package_may_not_require_a_system_library() raises:
+    var s = _with_native()
+    s[3].conda.depends.append(String("zstd >=1.5.2,<2"))
+    _one(s^, _line(String("komira_native"), String("zstd >=1.5.2,<2"), String("zstd")))
+    print("  test_the_native_package_may_not_require_a_system_library: PASS")
+
+
 def main() raises:
     test_a_closed_set_is_empty()
     test_requirement_name()
@@ -172,4 +226,6 @@ def main() raises:
     test_the_guard_and_the_compiler_are_skipped()
     test_a_metapackage_is_not_read()
     test_the_native_package_closes_a_library_that_requires_it()
+    test_a_library_may_require_a_system_library_exactly()
+    test_the_native_package_may_not_require_a_system_library()
     print("test_closure: ALL PASS")
