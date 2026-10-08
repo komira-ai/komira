@@ -33,10 +33,14 @@ report has the shape of bssl's (bssl.mojo), so `parse_report` reads both:
       ALPN protocol: h2
 
 The cipher suite is OpenSSL's name for it, which is also s2n's (komira's
-`negotiated_cipher()`). Every socket operation has a 10 s timeout. Exit 0
-when the exchange completed; 3 when the handshake failed, with
-`Handshake failed: <error>` on stderr; 4 when the exchange after it failed,
-including a peer that closed without close_notify.
+`negotiated_cipher()`). Every socket operation has a 10 s timeout. Both
+sides wrap with `suppress_ragged_eofs=False`, so a peer that closes its
+socket without close_notify makes `recv` raise (ssl.SSLEOFError) rather than
+return b"". Exit 0 when the exchange completed; 3 when the connection (the
+server's accept, the client's connect) or the handshake failed, with
+`Connection failed: <error>` or `Handshake failed: <error>` on stderr; 4
+when the exchange after it failed, including a peer that closed without
+close_notify.
 """
 
 import argparse
@@ -81,7 +85,8 @@ def read_line(tls):
 
 def read_to_close_notify(tls):
     """Everything until the peer's close_notify (recv returns b""). A socket
-    closed without one raises (ssl.SSLEOFError)."""
+    closed without one raises (ssl.SSLEOFError), because the socket was
+    wrapped with suppress_ragged_eofs=False."""
     data = b""
     while True:
         chunk = tls.recv(4096)
@@ -99,11 +104,16 @@ def server(args):
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     print("Listening on port %d" % listener.getsockname()[1], flush=True)
-    conn, _ = listener.accept()
-    listener.close()
+    try:
+        conn, _ = listener.accept()
+    except OSError as e:
+        err("Connection failed: %s" % e)
+        return 3
+    finally:
+        listener.close()
     conn.settimeout(TIMEOUT_S)
     try:
-        tls = ctx.wrap_socket(conn, server_side=True)
+        tls = ctx.wrap_socket(conn, server_side=True, suppress_ragged_eofs=False)
     except (ssl.SSLError, OSError) as e:
         err("Handshake failed: %s" % e)
         return 3
@@ -127,9 +137,15 @@ def server(args):
 def client(args):
     ctx = ssl.create_default_context(cafile=args.ca)
     pin(ctx, args.version, args.alpn)
-    sock = socket.create_connection(("127.0.0.1", args.port), timeout=TIMEOUT_S)
     try:
-        tls = ctx.wrap_socket(sock, server_hostname=args.server_name)
+        sock = socket.create_connection(("127.0.0.1", args.port), timeout=TIMEOUT_S)
+    except OSError as e:
+        err("Connection failed: %s" % e)
+        return 3
+    try:
+        tls = ctx.wrap_socket(
+            sock, server_hostname=args.server_name, suppress_ragged_eofs=False
+        )
     except (ssl.SSLError, OSError) as e:
         err("Handshake failed: %s" % e)
         return 3
