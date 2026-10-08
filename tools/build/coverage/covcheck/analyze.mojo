@@ -9,8 +9,9 @@ and the findings: the one computation both `covcheck report` and
    any test binary reached is covered).
 3. Each file's package is the nearest directory with a BUCK file. With
    `only_package`, the files of every other package are dropped here. Test
-   sources (`<package>/tests/...`) are counted and dropped unless
-   `include_tests`.
+   sources (`<package>/tests/...`, and each path of `test_sources`: a
+   welded test elsewhere in its package, named by the gate) are counted and
+   dropped unless `include_tests`.
 4. Each kept file's source is read for exemption markers (exempt.mojo).
    Then the full source: a package is measured when a report names a kept
    file in it (with or without records), and the gated package
@@ -30,7 +31,11 @@ and the findings: the one computation both `covcheck report` and
    included, with no line record and no exempted line, while `target_bp` is
    above 0: nothing was measured, so it cannot be shown to meet the
    target; a package whose only lines are those of files no test compiled
-   is still not measured), the ratchet's (ratchet.mojo), one
+   is still not measured), `BranchNotMeasured` (a package with a line
+   record and no branch record in any report, before exemptions, while
+   `target_bp` is above 0: line coverage alone is not shown to meet a
+   line-and-branch target, so a report without branch data, such as
+   kcov's, never passes in enforce mode), the ratchet's (ratchet.mojo), one
    `MutantSurvived` per surviving mutant, `UnmeasuredFile` per file no test
    compiled, `ExemptionWithoutReason` and `StaleExemption`.
 
@@ -49,6 +54,7 @@ from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, is_test_source, map_path,
 from covcheck.ratchet import Ratchet, compare, propose
 from covcheck.stats import (
     BELOW_TARGET,
+    BRANCH_NOT_MEASURED,
     NOT_MEASURED,
     EXEMPTION_WITHOUT_REASON,
     MODE_NEUTRAL,
@@ -88,6 +94,9 @@ struct Options(Copyable, Movable):
     var include_tests: Bool
     var only_package: String
     var strip_prefixes: List[String]
+    # Repository paths of test sources outside `<package>/tests/`, set aside
+    # as those are (`gate --test-source`).
+    var test_sources: Dict[String, Bool]
 
     def __init__(out self):
         self.mode = String(MODE_NEUTRAL)
@@ -95,6 +104,7 @@ struct Options(Copyable, Movable):
         self.include_tests = False
         self.only_package = String("")
         self.strip_prefixes = List[String]()
+        self.test_sources = Dict[String, Bool]()
 
 
 struct Sources(Copyable, Movable):
@@ -199,7 +209,7 @@ def _keep(package: String, path: String, opts: Options) -> Int:
     """0 keep, 1 another package (gate), 2 a test source left out."""
     if opts.only_package.byte_length() > 0 and package != opts.only_package:
         return 1
-    if not opts.include_tests and is_test_source(path, package):
+    if not opts.include_tests and (is_test_source(path, package) or path in opts.test_sources):
         return 2
     return 0
 
@@ -351,9 +361,12 @@ def analyze(
         named[merged[i].path] = True
         var f = merged[i].copy()
         var markers = scan_markers(f.path, sources.read(f.path))
+        var branches = f.branch_found()
         var removed = apply_exemptions(f, markers)
         var k = _stats_at(a, at, pkg)
         a.packages[k].files += 1
+        if branches > 0:
+            a.packages[k].has_branch_records = True
         if f.line_found() > 0 or removed > 0:
             a.packages[k].has_records = True
         a.packages[k].exempt_lines += removed
@@ -434,6 +447,12 @@ def analyze(
             findings.append(Finding(
                 String(BELOW_TARGET), p.package, String("line"), lbp, opts.target_bp, String(""), 0,
                 String("line ") + render_bp(lbp) + String(" is below the target ") + render_bp(opts.target_bp),
+            ))
+        if p.has_records and not p.has_branch_records and opts.target_bp > 0:
+            findings.append(Finding(
+                String(BRANCH_NOT_MEASURED), p.package, String("branch"), -1, opts.target_bp, String(""), 0,
+                String("no branch of this package was measured (the reports hold no branch record for it;")
+                + String(" kcov's Cobertura has none): its branch coverage cannot be shown to meet the target"),
             ))
         var bbp = p.branch_bp()
         if bbp >= 0 and bbp < opts.target_bp:
