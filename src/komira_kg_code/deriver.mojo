@@ -3,7 +3,9 @@ Markdown documents in, a `CodeGraph` out.
 
 `CodeGraphBuilder` collects the inputs in any order and `build()` resolves
 them together, so the graph depends on the inputs only, not on the order
-they were added in. What each input contributes:
+they were added in: an input added twice counts once, and two inputs that
+disagree on one id are refused (see the last paragraph). What each input
+contributes:
 
 - **uquery JSON** (`buck2 uquery <targets> --json --output-attribute
   '^(buck\\.type|deps|srcs|test_srcs|import_name)$'`): a `target` node per
@@ -35,7 +37,9 @@ Every input the deriver cannot place raises an error naming it, rather
 than dropping it: a JSON document that is not uquery or `mojo doc` output,
 a doc JSON for a label that is no library, a module with no source file, a
 source that no target lists, a `governs` entry that names nothing or
-several targets or files, two nodes of different kinds with one id.
+several targets or files, two different nodes with one id, a library
+listed twice with different `srcs` or import names, a source added twice
+with different text.
 """
 
 from std.collections import Dict
@@ -185,14 +189,17 @@ struct _Graph(Movable):
         return self.index[id]
 
     def put(mut self, var node: KgNode) raises -> Int:
-        """Adds `node`, or replaces the node of the same id and kind (the
-        same target in two uquery outputs, a doc JSON added twice). A node
-        of the same id and another kind is refused. Returns its index."""
+        """Adds `node` and returns its index. A node equal to one already
+        there (the same target in two uquery outputs, a doc JSON added
+        twice) is kept once; a different node with the same id is refused,
+        so no input added later replaces one added earlier."""
         if node.id in self.index:
             var i = self.index[node.id]
-            if self.nodes[i].kind != node.kind:
-                raise _err("two nodes have the id " + node.id + ": a " + self.nodes[i].kind + " and a " + node.kind)
-            self.nodes[i] = node^
+            ref old = self.nodes[i]
+            if old.kind != node.kind:
+                raise _err("two nodes have the id " + node.id + ": a " + old.kind + " and a " + node.kind)
+            if old.label != node.label or old.path != node.path or old.line != node.line or old.text != node.text:
+                raise _err("two different " + node.kind + " nodes have the id " + node.id)
             return i
         var i = len(self.nodes)
         self.index[node.id] = i
@@ -247,12 +254,14 @@ struct CodeGraphBuilder(Movable):
         var import_names = Dict[String, String]()
         # Library label -> its srcs.
         var lib_srcs = Dict[String, List[String]]()
+        # Library label -> its import name.
+        var lib_imports = Dict[String, String]()
         # File id -> labels listing it in srcs.
         var src_owners = Dict[String, List[String]]()
         var stubs = List[String]()
         var test_targets = List[KgEdge]()
         for q in range(len(self._uquery)):
-            _read_uquery(self._uquery[q], g, import_names, lib_srcs, src_owners, stubs, test_targets)
+            _read_uquery(self._uquery[q], g, import_names, lib_srcs, lib_imports, src_owners, stubs, test_targets)
         for i in range(len(test_targets)):
             if test_targets[i].src in lib_srcs:
                 g.link(test_targets[i].src, EDGE_TESTS, test_targets[i].dst)
@@ -274,10 +283,16 @@ struct CodeGraphBuilder(Movable):
                 import_names[entry.key] = entry.value
 
         var source_lines = Dict[String, List[String]]()
+        var source_texts = Dict[String, String]()
         for i in range(len(self._sources)):
             ref src = self._sources[i]
             if not g.has(src.path) or g.nodes[g.at(src.path)].kind != NODE_FILE:
                 raise _err("source " + src.path + " is in no target's srcs or test_srcs")
+            if src.path in source_texts:
+                if source_texts[src.path] != src.text:
+                    raise _err("source " + src.path + " is added twice with different text")
+                continue
+            source_texts[src.path] = src.text
             source_lines[src.path] = split_lines(src.text)
 
         var conforms = List[KgEdge]()
@@ -339,6 +354,7 @@ def _read_uquery(
     mut g: _Graph,
     mut import_names: Dict[String, String],
     mut lib_srcs: Dict[String, List[String]],
+    mut lib_imports: Dict[String, String],
     mut src_owners: Dict[String, List[String]],
     mut stubs: List[String],
     mut tests: List[KgEdge],
@@ -382,8 +398,25 @@ def _read_uquery(
                 imp = name
             if imp in import_names and import_names[imp] != label:
                 raise _err("uquery JSON: " + label + " and " + import_names[imp] + " both import as `" + imp + "`")
+            if label in lib_srcs:
+                # Listed by an earlier uquery output: it must agree.
+                if lib_imports[label] != imp:
+                    raise _err("uquery JSON: " + label + " is listed twice with different import names")
+                if not _same_strings(lib_srcs[label], srcs):
+                    raise _err("uquery JSON: " + label + " is listed twice with different srcs")
+                continue
             import_names[imp] = label
+            lib_imports[label] = imp
             lib_srcs[label] = srcs^
+
+
+def _same_strings(a: List[String], b: List[String]) -> Bool:
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        if a[i] != b[i]:
+            return False
+    return True
 
 
 def _put_file(mut g: _Graph, id: String) raises:

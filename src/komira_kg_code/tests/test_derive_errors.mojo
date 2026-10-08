@@ -147,6 +147,58 @@ def test_two_nodes_of_different_kinds_with_one_id() raises:
     assert_equal(_error_of(b), "komira_kg_code: two nodes have the id c//p/lib/a.mojo: a file and a doc")
 
 
+def _doc_with_f(summary: String) -> String:
+    return (
+        '{"decl": {"kind": "package", "name": "lib", "modules": [{"kind": "module", "name": "a", "functions":'
+        ' [{"kind": "function", "name": "f", "overloads": [{"signature": "def f()", "summary": "'
+        + summary
+        + '"}]}]}]}}'
+    )
+
+
+def test_a_document_added_twice_with_other_text() raises:
+    # Kept, the title would be the one added last.
+    var b = CodeGraphBuilder()
+    b.add_markdown("docs/d.md", "# A\n")
+    b.add_markdown("docs/d.md", "# B\n")
+    assert_equal(_error_of(b), "komira_kg_code: two different doc nodes have the id docs/d.md")
+
+
+def test_a_doc_json_added_twice_with_other_text() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_mojo_doc_json("c//p:lib", _doc_with_f("A"))
+    b.add_mojo_doc_json("c//p:lib", _doc_with_f("B"))
+    assert_equal(_error_of(b), "komira_kg_code: two different function nodes have the id lib.a.f")
+
+
+def test_a_library_listed_twice_with_other_srcs() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "srcs": ["c//p/lib/__init__.mojo"]}}'
+    )
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different srcs")
+
+
+def test_a_library_listed_twice_with_other_import_names() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "import_name": "libx",'
+        ' "srcs": ["c//p/lib/__init__.mojo", "c//p/lib/a.mojo"]}}'
+    )
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different import names")
+
+
+def test_a_source_added_twice_with_other_text() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_source("c//p/lib/a.mojo", "def f(): pass\n")
+    b.add_source("c//p/lib/a.mojo", "\ndef f(): pass\n")
+    assert_equal(_error_of(b), "komira_kg_code: source c//p/lib/a.mojo is added twice with different text")
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Runs one case; a failure is printed, not fatal, so one build names
     every case a planted defect breaks."""
@@ -175,6 +227,11 @@ def main() raises:
     _run("no_package_init", test_srcs_with_no_package_init, failed)
     _run("governs_two_targets", test_governs_naming_two_targets, failed)
     _run("one_id_two_kinds", test_two_nodes_of_different_kinds_with_one_id, failed)
+    _run("document_twice", test_a_document_added_twice_with_other_text, failed)
+    _run("doc_json_twice", test_a_doc_json_added_twice_with_other_text, failed)
+    _run("library_twice_srcs", test_a_library_listed_twice_with_other_srcs, failed)
+    _run("library_twice_import", test_a_library_listed_twice_with_other_import_names, failed)
+    _run("source_twice", test_a_source_added_twice_with_other_text, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
     print("OK")

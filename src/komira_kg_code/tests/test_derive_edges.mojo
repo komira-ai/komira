@@ -6,12 +6,15 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_kg_code import CodeGraph, CodeGraphBuilder, EDGE_IMPORTS, EDGE_TESTS
 
 # lib imports as libx. tool is a binary on lib; lib_test is a test target on
-# lib and on c//q:helper, which no uquery output defines (a stub).
+# c//q:helper, which no uquery output defines (a stub), and on the libraries
+# lib and other. The stub is listed first, so a tests edge from the first dep
+# alone gives neither library a test.
 comptime _UQ = (
     '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "import_name": "libx",'
     ' "srcs": ["c//p/lib/__init__.mojo"], "test_srcs": []},'
     ' "c//p:tool": {"buck.type": "mojo_binary_rule", "deps": ["c//p:lib"], "srcs": ["c//p/tool.mojo"]},'
-    ' "c//p:lib_test": {"buck.type": "mojo_test_rule", "deps": ["c//p:lib", "c//q:helper"],'
+    ' "c//p:other": {"buck.type": "mojo_library_rule", "deps": [], "srcs": ["c//p/other/__init__.mojo"]},'
+    ' "c//p:lib_test": {"buck.type": "mojo_test_rule", "deps": ["c//q:helper", "c//p:lib", "c//p:other"],'
     ' "srcs": ["c//p/lib_test.mojo"]}}'
 )
 
@@ -33,6 +36,10 @@ def test_only_a_test_target_on_a_library_is_a_tests_edge() raises:
     assert_equal(t[0], "c//p:lib_test")
     assert_false(g.has_edge("c//p:lib", EDGE_TESTS, "c//p:tool"))
     assert_equal(len(g.targets_of("c//q:helper", EDGE_TESTS)), 0)
+    # Every library the test target lists has it as a test, not the first only.
+    var o = g.targets_of("c//p:other", EDGE_TESTS)
+    assert_equal(len(o), 1)
+    assert_equal(o[0], "c//p:lib_test")
 
 
 def test_a_library_imports_under_its_import_name() raises:
@@ -77,6 +84,23 @@ def test_a_stub_alone_imports_under_its_name() raises:
     assert_true(b.build().has_edge("c//x/one/__init__.mojo", EDGE_IMPORTS, "c//a:util"))
 
 
+# A library c//p:lib (import name lib) and a stub c//q:lib that t depends on:
+# the name lib is the library's, so the stub takes no import name.
+comptime _UQ_LIB_AND_STUB = (
+    '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "srcs": ["c//p/lib/__init__.mojo"]},'
+    ' "c//p:t": {"buck.type": "mojo_binary_rule", "deps": ["c//q:lib"], "srcs": ["c//p/t.mojo"]}}'
+)
+
+
+def test_a_stub_never_takes_a_library_import_name() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_UQ_LIB_AND_STUB)
+    b.add_source("c//p/t.mojo", "import lib\n")
+    var i = b.build().targets_of("c//p/t.mojo", EDGE_IMPORTS)
+    assert_equal(len(i), 1)
+    assert_equal(i[0], "c//p:lib")
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Runs one case; a failure is printed, not fatal, so one build names
     every case a planted defect breaks."""
@@ -93,6 +117,7 @@ def main() raises:
     _run("import_name", test_a_library_imports_under_its_import_name, failed)
     _run("stub_order", test_stubs_sharing_a_name_give_the_same_graph_in_either_order, failed)
     _run("stub_alone", test_a_stub_alone_imports_under_its_name, failed)
+    _run("stub_vs_library", test_a_stub_never_takes_a_library_import_name, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
     print("OK")

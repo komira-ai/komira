@@ -26,6 +26,9 @@ a `CodeGraph`:
 
 The graph holds each node once and each edge once, nodes sorted by id and
 edges by source, kind and destination, so equal inputs give equal bytes.
+An input added twice counts once; two inputs that disagree on one id (a
+document or doc JSON added again with other text, a library listed again
+with other `srcs`) are refused, so the order of adding never decides.
 `dump()` writes it as text, one line per node and edge; `node_batch()` and
 `edge_batch()` give it as Arrow record batches (`node_schema()`,
 `edge_schema()`). An input the deriver cannot place raises an error that

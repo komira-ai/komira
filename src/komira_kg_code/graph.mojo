@@ -5,8 +5,9 @@ A node is a build target, a source file, a Markdown document or a declared
 symbol. An edge is a directed, typed relation between two nodes. A
 `CodeGraph` holds each node once (by id) and each edge once (by source,
 kind and destination), nodes sorted by id and edges by (source, kind,
-destination), comparing bytes. The same inputs therefore give the same graph
-in the same order, whatever order they were added in.
+destination), comparing bytes. As the deriver refuses two inputs that
+disagree on one id, the same inputs give the same graph in the same order,
+whatever order they were added in.
 """
 
 from komira_arrow.arrow_types import ArrowType

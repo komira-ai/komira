@@ -60,6 +60,20 @@ def _derive(reverse: Bool) raises -> CodeGraph:
     return b.build()
 
 
+def _derive_twice() raises -> CodeGraph:
+    """The fixture graph with every input added twice."""
+    var b = CodeGraphBuilder()
+    var srcs = _sources()
+    var doc_path = String(_DIR) + "repo/docs/kgfix.md"
+    for _ in range(2):
+        b.add_uquery_json(_read(String(_DIR) + "kgfix_uquery.json"))
+        b.add_mojo_doc_json(String("komira//src/komira_kg_code/tests/fixtures/repo:kgfix"), _read("kgfix_doc.json"))
+        for i in range(len(srcs)):
+            b.add_source(String(_P) + srcs[i], _read(String(_DIR) + "repo/" + srcs[i]))
+        b.add_markdown(doc_path, _read(doc_path))
+    return b.build()
+
+
 def _first_difference(want: String, got: String) -> String:
     var w = want.split("\n")
     var g = got.split("\n")
@@ -79,6 +93,12 @@ def test_graph_equals_the_golden() raises:
 
 def test_input_order_does_not_change_the_graph() raises:
     assert_equal(_derive(True).dump(), _derive(False).dump())
+
+
+def test_inputs_added_twice_give_the_graph_of_once() raises:
+    # The same target, doc JSON, source and document again are the same
+    # nodes and edges: neither refused nor counted twice.
+    assert_equal(_derive_twice().dump(), _derive(False).dump())
 
 
 def test_both_conformers_of_shaped_including_the_multi_line_header() raises:
@@ -128,6 +148,7 @@ def test_batches_hold_the_graph_in_order() raises:
 def main() raises:
     test_graph_equals_the_golden()
     test_input_order_does_not_change_the_graph()
+    test_inputs_added_twice_give_the_graph_of_once()
     test_both_conformers_of_shaped_including_the_multi_line_header()
     test_tests_are_the_welded_file_and_the_standalone_target()
     test_batches_hold_the_graph_in_order()
