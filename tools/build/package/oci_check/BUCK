@@ -1,0 +1,68 @@
+load("@komira//tools/build/package:defs.bzl", "oci_image", "oci_tree")
+load("@komira//tools/build/package:oci_check.bzl", "oci_image_check")
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_test")
+
+# The OCI image checker (README.md): oci_image runs `oci_check layers`,
+# oci_image_check runs `oci_check check`.
+
+_SRCS = glob(["src/*.rs"])
+
+# The crate's inline #[test]s, the whiteout fixtures among them: the same
+# sources compiled with `rustc --test`, run as a build action.
+rust_test(
+    name = "oci_check_unit",
+    srcs = _SRCS,
+    crate_root = "src/main.rs",
+    crate_name = "oci_check",
+)
+
+# Published behind its unit tests: no image builds unless they pass.
+rust_binary(
+    name = "oci_check",
+    srcs = _SRCS,
+    crate_root = "src/main.rs",
+    tests = [":oci_check_unit"],
+    visibility = ["PUBLIC"],
+)
+
+# The checker on the pinned distroless base: the control, a layer adding only
+# /bin/sh, is green; the same layer plus a whiteout that hides the CA
+# certificates is red, naming them. A checker that ignored either whiteout
+# kind, or applied it to one path only, would build a red case.
+
+_CERTS = "etc/ssl/certs/ca-certificates.crt"
+
+_SH = {"bin/sh": "//tools/build/toolchains:busybox"}
+
+# (whiteout path in the added layer, or None for the control)
+_CASES = {
+    "control": None,
+    # `.wh.ssl` in etc/: etc/ssl and everything under it is gone.
+    "dir_whiteout": "etc/.wh.ssl",
+    # an opaque etc/ssl/certs: the base's files in it are gone.
+    "opaque_whiteout": "etc/ssl/certs/.wh..wh..opq",
+}
+
+[
+    (
+        oci_tree(
+            name = name + "_tree",
+            files = _SH | ({wh: "whiteout"} if wh else {}),
+            version = "0.1.0",
+        ),
+        oci_image(
+            name = name + "_image",
+            tree = ":{}_tree".format(name),
+            entrypoint = "/bin/sh",
+            repository = "komira/oci-check-" + name.replace("_", "-"),
+        ),
+        oci_image_check(
+            name = name,
+            image = ":{}_image".format(name),
+            entrypoint = "/bin/sh",
+            files = [_CERTS],
+            expect_red = "file {}: not in the image".format(_CERTS) if wh else None,
+        ),
+    )
+    for name, wh in _CASES.items()
+]
