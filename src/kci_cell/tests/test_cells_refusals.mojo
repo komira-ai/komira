@@ -183,6 +183,55 @@ def test_duplicate_setting_key_with_another_value() raises:
     )
 
 
+def test_duplicate_cell_name_matching_a_later_earlier_cell() raises:
+    # prod (lines 2..7), staging (8..13, name on 9), staging again (14..19,
+    # name on 15): the earlier match is NOT the first cell, so a check that
+    # compares only with the first cell lets this through
+    assert_equal(
+        _refusal(_file(_named_cell(String("prod")) + _named_cell(String("staging")) + _named_cell(String("staging")))),
+        String("cells file: line 15: cell 'staging' is declared twice (first on line 9)"),
+    )
+
+
+def test_duplicate_setting_key_matching_a_later_earlier_setting() raises:
+    # region (line 5), project (6), project again (7): the earlier match is
+    # NOT the cell's first setting
+    assert_equal(
+        _refusal(_file(_cell(
+            String(_NAME) + String(_CLOUD)
+            + String("  setting { key: \"region\" value: \"europe-west1\" }\n")
+            + String(_PROJECT) + String(_PROJECT) + String(_LEVEL)
+        ))),
+        String("cells file: line 7: setting 'project' is set twice in cell 'staging' (first on line 6)"),
+    )
+
+
+def test_duplicate_multi_line_setting_names_the_key_line() raises:
+    # project (line 5), then a setting written over lines 6..9 whose `{` is
+    # on line 6 and whose `key` is on line 7: the refusal names the key line
+    assert_equal(
+        _refusal(_file(_cell(
+            String(_NAME) + String(_CLOUD) + String(_PROJECT)
+            + String("  setting {\n    key: \"project\"\n    value: \"other\"\n  }\n")
+            + String(_LEVEL)
+        ))),
+        String("cells file: line 7: setting 'project' is set twice in cell 'staging' (first on line 5)"),
+    )
+
+
+def test_duplicate_of_a_multi_line_setting_names_its_key_line_first() raises:
+    # a setting over lines 5..8 (`{` on 5, `key` on 6), then project on line
+    # 9: "first on line" names the earlier setting's key line, not its `{`
+    assert_equal(
+        _refusal(_file(_cell(
+            String(_NAME) + String(_CLOUD)
+            + String("  setting {\n    key: \"project\"\n    value: \"other\"\n  }\n")
+            + String(_PROJECT) + String(_LEVEL)
+        ))),
+        String("cells file: line 9: setting 'project' is set twice in cell 'staging' (first on line 6)"),
+    )
+
+
 def test_setting_keys_differing_by_case_are_two_keys() raises:
     # kci does not interpret settings: `Project` and `project` are distinct
     var cells = parse_cells_file(_file(_cell(
