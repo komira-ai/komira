@@ -24,6 +24,7 @@ gate's JSON entry for a package equal to the report's.
 | `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
+| `branch_gate.bxl` | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a library: a row naming none is read by nothing (test 46) |
 
 ## What line coverage means here
 
@@ -484,8 +485,11 @@ rdep of the library in its own package), which wait for every gate,
 
 **Branch coverage**: kcov reports none; the branch records of `branch/`
 are the source, read by the gate of a library of `COVERAGE_BRANCH_GATE`
-(`policy.bzl`, each row with its evidence: today `komira_retry`, whose
-census gate reads 73 of 74 arms) and of every fixture of the tests cell
+(`policy.bzl`, each row with its evidence: every library whose tests'
+branches all classify and hold an arm, as the sweep of every library found
+them, among them `komira_retry`, whose census gate reads 73 of 74 arms,
+and `komira_json`, whose `komira_json_cov_gate` reads them) and of every
+fixture of the tests cell
 but those passing `coverage_branch_gate = False` (test 46's
 `covfull_unread`).
 Every other measured package has `BranchNotMeasured`; in census mode it is
