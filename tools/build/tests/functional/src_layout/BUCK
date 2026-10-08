@@ -1,0 +1,19 @@
+load("@komira//tools/build/lint:defs.bzl", "src_layout")
+load(":fixture.bzl", "SRC_LAYOUT_PACKAGES", "SRC_LAYOUT_SHIPPED")
+
+# Test 45 (src_layout), the half that must build: a planted list of packages
+# (fixture.bzl) laid out as the rule requires, and its module map (map.txt:
+# one row per package under src/, in each link form the map uses, beside
+# lines that are not rows). negative/src_layout plants one defect each in the
+# same list or map.
+src_layout(
+    name = "ok",
+    map = "map.txt",
+    packages = SRC_LAYOUT_PACKAGES,
+    shipped = SRC_LAYOUT_SHIPPED,
+)
+
+export_file(
+    name = "map.txt",
+    visibility = ["//negative/src_layout:"],
+)

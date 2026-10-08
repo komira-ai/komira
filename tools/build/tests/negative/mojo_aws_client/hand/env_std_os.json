@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "env_read_std_os.env_std_os",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override: a hand-written module of the package that reads HOME through the os module's home-directory expansion, imported from the std package; the generated environment scan refuses the read by its name."
+    }
+  ]
+}

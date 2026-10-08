@@ -265,12 +265,12 @@ struct ParquetSourceData(Movable):
             `Some(empty())` is the un-filtered Hive read (surfaces partition
             cols, prunes nothing).
         fs_descriptor: the per-source FS IDENTITY POD (scheme +
-            bucket/container + node_id). Defaulted to `FsDescriptorPod.local()`
-            (scheme=FILE, node_id=-1) — the local default. When
-            `has_binding()` is True (a non-negative node_id) the engine
-            resolver looks up the live `FsHandle` in the `komira_fs_registry`
-            side table by node_id; otherwise the local default resolver is
-            used. Core names NO FS type here — only the identity POD. See
+            bucket/container + node_id): the exact source the scan reads,
+            its scheme the code komira_source_url maps the source URL's
+            prefix to. Defaulted to `FsDescriptorPod.local()` (scheme=FILE,
+            node_id=-1) — the local default. Core names NO FS type here —
+            only the identity POD; the file system that reads the source is
+            the one whose `SCHEME` is this scheme. See
             `komira_plan_expr/fs_descriptor_pod.mojo`.
     """
     var file_path: String
@@ -279,9 +279,8 @@ struct ParquetSourceData(Movable):
     # --- Hive dir-scan fields — both defaulted (List[Field]() / None). ---
     var hive_partition_cols: List[Field]
     var hive_predicate: Optional[PartitionPredicatePod]
-    # --- Defaulted to FsDescriptorPod.local() (local default). The live
-    #     FsHandle is paired to this POD's node_id in the komira_fs_registry
-    #     side table at materialize time. ---
+    # --- Defaulted to FsDescriptorPod.local() (local default). Names the
+    #     source; the plan carries no live file system. ---
     var fs_descriptor: FsDescriptorPod
     # --- Defaulted False. ONLY the col-untyped agg-source
     #     path (`_source_parquet_scan_batches`) sets it True, which

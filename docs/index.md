@@ -11,6 +11,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | The Mojo rules | [tools/build/mojo/README.md](../tools/build/mojo/README.md) |
 | The end-to-end tests | [tools/build/tests/README.md](../tools/build/tests/README.md) |
 | README API coverage: which public symbols the README examples use, its ledger, and the census | [readme_api_coverage.md](readme_api_coverage.md) |
+| Product coverage: which plan capability each surface's end-to-end tests exercise, the matrix ledger, and the census | [surface_capability_matrix.md](surface_capability_matrix.md) |
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
 | The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |
 | Columnar memory: Arrow buffers, columns, batches, IPC and the C Data Interface | [design/columnar_memory_and_arrow.md](design/columnar_memory_and_arrow.md) |
@@ -27,6 +28,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Why the build is shaped this way: pinned tools as action inputs, the compiler wrapper and its watchdog, the fixed target CPU, whole-closure deps, vendored C and C++ libraries, one execution platform per OS | [design/mojo_rules_and_toolchain.md](design/mojo_rules_and_toolchain.md) |
 | Why the build is the gate: a library's test_srcs gate its published package, the staged test environment, and the build lints as validations (shell, workflows, action pins, endpoints, doc links) | [design/gates_test_welding_and_lints.md](design/gates_test_welding_and_lints.md) |
 | Release machines: bundles, tarballs and OCI images of a program, the CPU-level launcher, reproducible outputs, komira's release stages and validations | [design/release_machine.md](design/release_machine.md) |
+| kci resource-model decision notes: an encryption key as a resource; importing and changing a network on any cloud; overrides, the escape hatch for what is cloud-specific | [design/kci_encryption_keys.md](design/kci_encryption_keys.md), [design/kci_networks_import_and_change.md](design/kci_networks_import_and_change.md), [design/kci_overrides.md](design/kci_overrides.md) |
 
 ## Design docs
 
@@ -44,10 +46,10 @@ and its limits. A family's doc lands together with the libraries it describes;
 | storage | [text and row formats](design/text_and_row_formats.md) (CSV, Avro, ORC, XML); compression codecs, Parquet, Iceberg, an MVCC table store: no design doc yet; CDC: coming with its library |
 | execution and operators | [shuffle through an object store](design/shuffle.md); pipelines and morsel dispatch, aggregation, joins, top-N and the kernels: no design doc yet; sort and window: coming with the engine libraries |
 | plan and optimizer | logical plans and expressions, physical planning, the plan wire format: no design doc yet; the query optimizer: coming with `komira_optimizer` |
-| SDK and SQL | UDFs: no design doc yet; the plan-carrier surface, the Python package, the SQL front ends: coming with `komira_sdk` |
+| SDK and SQL | UDFs, the SQL lexer and syntax tree (`komira_sql`): no design doc yet; the plan-carrier surface, the Python package: coming with `komira_sdk`; the SQL parser and binder: coming with `komira_sql` |
 | runtime | [the async runtime](design/async_runtime.md); the job supervisor and its job report wire: no design doc yet |
 | observability | [logging and telemetry](design/logging_and_telemetry.md) |
 | agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |
 | cloud | the AWS, GCP and Azure clients and their credentials and secrets: no design doc yet; deploy marks: coming with the cloud SDK libraries |
-| CI and deploy | the `kci` command line, the resource model and its cloud providers, apply, validate and rollout: no design doc yet ([release machines](design/release_machine.md) covers komira's own release stages) |
+| CI and deploy | the resource model's open decisions: [encryption keys](design/kci_encryption_keys.md), [importing and changing networks](design/kci_networks_import_and_change.md), [overrides](design/kci_overrides.md); the `kci` command line, the resource model and its cloud providers, apply, validate and rollout: no design doc yet ([release machines](design/release_machine.md) covers komira's own release stages) |
 | packaging | [release machines: bundles, tarballs and OCI images](design/release_machine.md); the shared-library ABI: coming with `komira_so` |
