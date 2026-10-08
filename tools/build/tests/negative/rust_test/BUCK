@@ -73,3 +73,48 @@ rust_test(
     crate_root = "src/hang.rs",
     test_timeout_s = 3,
 )
+
+# External tests (`test_srcs`, Cargo's tests/*.rs) gate the library itself:
+# each is compiled against the UNGATED rlib and run (rust_tests.sh, test 35).
+
+# green: the external test passes, so the library builds, and so does a binary
+# linking it.
+rust_library(
+    name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    test_srcs = ["tests/ext_pass.rs", "tests/common/mod.rs"],
+)
+
+rust_binary(
+    name = "ext_consumer",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    deps = [":ext"],
+)
+
+# must fail: one external test fails, so the library cannot be built, nor a
+# binary that links it, though the library and each test crate compile.
+rust_library(
+    name = "ext_red",
+    crate_name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    test_srcs = ["tests/ext_pass.rs", "tests/ext_fail.rs", "tests/common/mod.rs"],
+)
+
+rust_binary(
+    name = "ext_red_consumer",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    deps = [":ext_red"],
+)
+
+# must fail at analysis: test_srcs with no test crate (tests/<name>.rs).
+rust_library(
+    name = "ext_no_crate",
+    crate_name = "ext",
+    srcs = ["src/ext_lib.rs"],
+    crate_root = "src/ext_lib.rs",
+    test_srcs = ["tests/common/mod.rs"],
+)

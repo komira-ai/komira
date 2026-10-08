@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# rust_tests.sh -- test 22, the Rust rules. Sourced by run_tests.sh,
+# rust_tests.sh -- test 22 (Rust rules), 35 (external tests). Sourced by run_tests.sh,
 # whose pass/fail/expect_* helpers and $BUCK2, $LOG, $ROOT it uses.
 
 # 22. The example binary uses prost's derive macro, so it compiles registry
@@ -53,3 +53,17 @@ else
         pass "rust host floor: $needs NEEDED entries of $objects sysroot objects resolve to glibc or the sysroot"
     fi
 fi
+
+# 35, external tests. A rust_library's `test_srcs` (tests/*.rs) are compiled
+#     against its ungated rlib and run; their markers gate the library. In
+#     tests//negative/rust_test, `ext` (its test passes, using a module under
+#     tests/) and a binary linking it build; `ext_red` (one external test
+#     fails) and a binary linking it cannot be built, the harness reporting
+#     `1 passed; 1 failed`; and `test_srcs` with no tests/<name>.rs crate is
+#     refused at analysis.
+RX=tests//negative/rust_test
+expect_green rust_ext_green "$RX:ext" "$RX:ext_consumer"
+expect_red rust_ext_red "GATED TEST FAILED: $RX:ext_red tests/ext_fail.rs" "$RX:ext_red"
+expect_red rust_ext_red_count "1 passed; 1 failed" "$RX:ext_red"
+expect_red rust_ext_red_consumer "GATED TEST FAILED: $RX:ext_red tests/ext_fail.rs" "$RX:ext_red_consumer"
+expect_red rust_ext_no_crate "test_srcs has no test crate" "$RX:ext_no_crate"
