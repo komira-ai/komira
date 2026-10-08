@@ -773,6 +773,12 @@ tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake
 ([`../examples/s2n_tls`](../examples/s2n_tls)) from Mojo. The aarch64
 assembly lists are generated but not built yet.
 
+aws-lc, s2n-tls and snappy are built with their global symbols renamed:
+`komira_awslc_*`, `komira_s2n_*` and `komira_snappy_*` (snappy's C API), so
+Mojo code calls `external_call["komira_awslc_SHA256", ...]`. The renaming is a
+generated header each library force-includes, and a symbol check gates
+every build that links the library; see [`../native`](../native/README.md).
+
 ## Coverage builds
 
 `-c komira.coverage=true` (default `false`) gives every `mojo_library`, per
