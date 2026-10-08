@@ -4,7 +4,9 @@
 # CRLF added, a text line over 998 octets sent quoted-printable instead of
 # 7bit, a boundary changed when a part holds it, a long non-ASCII file name
 # split into RFC 2231 sections that fold, an ASCII file name quoted with its
-# escapes, and an ASCII display name holding `=?` sent as an encoded word.
+# escapes, an ASCII display name holding `=?` sent as an encoded word, an
+# ASCII file name holding `=?` sent in RFC 2231 form so it reads back as
+# written, and a forwarded message/rfc822 attachment written 7bit.
 
 from std.testing import assert_equal, assert_true
 
@@ -162,6 +164,48 @@ def test_display_name_that_looks_encoded_is_encoded() raises:
     assert_true(text.find("To: =?UTF-8?B?PT94P3E/eT89?= <t@example.com>\r\n") > 0, text)
 
 
+def test_file_name_that_looks_encoded_round_trips() raises:
+    # Written as a quoted string, `=?UTF-8?Q?x?=` would be read back as the
+    # encoded word for "x"; RFC 2231 form keeps it a file name.
+    var data = List[UInt8]()
+    data.append(120)
+    var b = _builder()
+    b.add_attachment("=?UTF-8?Q?x?=", "text/plain", Span(data))
+    var built = b.build()
+    var text = _s(built)
+    assert_true(
+        text.find(" filename*=utf-8''%3D%3FUTF-8%3FQ%3Fx%3F%3D\r\n") > 0, text
+    )
+    var m = parse_message(Span(built))
+    assert_equal(m.part(m.attachments()[0]).filename().value(), "=?UTF-8?Q?x?=")
+
+
+def test_forwarded_message_is_7bit() raises:
+    # RFC 2046 section 5.2.1: message/rfc822 is 7bit, 8bit or binary, never
+    # base64. Its line breaks are made CRLF.
+    var inner = String("From: a@example.com\nSubject: hi\n\nbody\n")
+    var b = _builder()
+    b.set_text("see below")
+    b.add_attachment("fwd.eml", "message/rfc822", inner.as_bytes())
+    var built = b.build()
+    var text = _s(built)
+    assert_true(
+        text.find(
+            "Content-Disposition: attachment; filename=fwd.eml\r\n"
+            + "Content-Transfer-Encoding: 7bit\r\n\r\nFrom: a@example.com\r\n"
+        )
+        > 0,
+        text,
+    )
+    var m = parse_message(Span(built))
+    var k = m.attachments()[0]
+    assert_equal(m.part(k).media_type(), "message/rfc822")
+    assert_equal(m.part(k).transfer_encoding(), "7bit")
+    assert_equal(
+        _s(m.decoded_body(k)), "From: a@example.com\r\nSubject: hi\r\n\r\nbody\r\n"
+    )
+
+
 def test_empty_field_name_is_refused() raises:
     var b = _builder()
     var msg = String("")
@@ -185,4 +229,6 @@ def main() raises:
     test_ascii_file_names()
     test_display_name_that_looks_encoded_is_encoded()
     test_empty_field_name_is_refused()
+    test_file_name_that_looks_encoded_round_trips()
+    test_forwarded_message_is_7bit()
     print("test_build_paths: OK")

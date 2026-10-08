@@ -14,10 +14,13 @@
 # as U+FFFD), the language is dropped, and an RFC 2231 form wins over a plain
 # `name=` of the same name. Parsing never fails: a part that does not follow
 # the grammar ends the parameters, and a value that is not a media type
-# leaves `value()` empty.
+# leaves `value()` empty. At most `MAX_PARAMS` parameters are read from one
+# field and the rest are dropped, so the grouping of RFC 2231 sections by
+# name (quadratic in the count) stays bounded on untrusted input.
 #
 # Formatting (`append_param`) writes a token as itself, other printable
-# ASCII of at most 60 octets as a quoted string, and anything else as RFC
+# ASCII of at most 60 octets without `=?` as a quoted string (a reader may
+# take a plain `=?...?=` for an RFC 2047 encoded word), and anything else as RFC
 # 2231 `name*=utf-8''...` percent-encoded, split into `name*0*`, `name*1*`,
 # ... sections of at most 60 characters that end on a character boundary,
 # each after `; ` so a header folds between them.
@@ -29,6 +32,7 @@ from .chars import (
     EQ,
     LPAREN,
     PERCENT,
+    QMARK,
     RPAREN,
     SEMI,
     SLASH,
@@ -54,20 +58,25 @@ from .encoded_word import charset_kind
 comptime PARAM_SECTION_MAX = 60
 """The longest value written as one quoted string or one RFC 2231 section."""
 
+comptime MAX_PARAMS = 128
+"""The most parameters `parse_media_header` reads from one field."""
+
 comptime _MAX_SECTIONS = 1000
 """RFC 2231 sections above this number are ignored."""
 
 
 struct Param(Copyable, Movable):
-    """One parameter: its name in lower case (no RFC 2231 `*` suffix) and its
-    decoded value."""
+    """One parameter: its name in lower case (no RFC 2231 `*` suffix), its
+    decoded value, and whether that value was read from an RFC 2231 form."""
 
     var name: String
     var value: String
+    var extended: Bool
 
-    def __init__(out self, name: String, value: String):
+    def __init__(out self, name: String, value: String, extended: Bool = False):
         self.name = name
         self.value = value
+        self.extended = extended
 
 
 struct MediaHeader(Copyable, Movable):
@@ -94,6 +103,14 @@ struct MediaHeader(Copyable, Movable):
             if self._params[i].name == name:
                 return Optional[String](self._params[i].value)
         return None
+
+    def param_is_extended(self, name: String) -> Bool:
+        """Whether the parameter `name` was read from an RFC 2231 form
+        (`name*` or `name*N`); False when it is plain or absent."""
+        for i in range(len(self._params)):
+            if self._params[i].name == name:
+                return self._params[i].extended
+        return False
 
 
 def _skip_cfws(data: Span[UInt8, _], mut i: Int):
@@ -129,12 +146,27 @@ def _read_token(data: Span[UInt8, _], mut i: Int) -> Int:
     return start
 
 
+comptime _PLAIN = -3
+"""`_RawParam.section` of a name without `*`."""
+
+
 struct _RawParam(Copyable, Movable):
-    var name: List[UInt8]
+    """One `attribute=value` as written: the attribute's base name (before
+    any `*`), its RFC 2231 section (`_PLAIN`; -1 for `base*`; -2 for a
+    suffix that is not RFC 2231; N for `base*N` and `base*N*`), whether it
+    ends in `*` (a percent-encoded value), and the value."""
+
+    var base: String
+    var section: Int
+    var extended: Bool
     var value: List[UInt8]
 
-    def __init__(out self, var name: List[UInt8], var value: List[UInt8]):
-        self.name = name^
+    def __init__(
+        out self, base: String, section: Int, extended: Bool, var value: List[UInt8]
+    ):
+        self.base = base
+        self.section = section
+        self.extended = extended
         self.value = value^
 
 
@@ -212,31 +244,22 @@ def _bytes_in_charset(raw: List[UInt8], kind: Int) raises -> String:
     return lossy_string(Span(raw))
 
 
-def _join_sections(raws: List[_RawParam], base: List[UInt8]) raises -> Optional[String]:
-    """The RFC 2231 value of parameter `base`, or None when it has no
-    starred form."""
+def _join_sections(
+    raws: List[_RawParam], group: List[Int], g: Int
+) raises -> Optional[String]:
+    """The RFC 2231 value of the parameters in group `g` (one base name), or
+    None when it has no starred form that reads."""
     var single = -1
     var found_any = False
     for r in range(len(raws)):
-        var name = raws[r].name.copy()
-        var star = len(base)
-        if len(name) <= star or name[star] != STAR:
+        if group[r] != g:
             continue
-        var same = True
-        for k in range(star):
-            if name[k] != base[k]:
-                same = False
-                break
-        if not same:
-            continue
-        var section = _section_suffix(name, star)
-        if section == -1 and single < 0:
+        if raws[r].section == -1 and single < 0:
             single = r
-        if section >= 0:
+        if raws[r].section >= 0:
             found_any = True
     if single >= 0:
-        var value = raws[single].value.copy()
-        return _decode_extended(value)
+        return _decode_extended(raws[single].value)
     if not found_any:
         return None
     var joined = List[UInt8]()
@@ -244,34 +267,22 @@ def _join_sections(raws: List[_RawParam], base: List[UInt8]) raises -> Optional[
     var index = 0
     while index <= _MAX_SECTIONS:
         var hit = -1
-        var extended = False
         for r in range(len(raws)):
-            var name = raws[r].name.copy()
-            var star = len(base)
-            if len(name) <= star or name[star] != STAR:
-                continue
-            var same = True
-            for k in range(star):
-                if name[k] != base[k]:
-                    same = False
-                    break
-            if same and _section_suffix(name, star) == index:
+            if group[r] == g and raws[r].section == index:
                 hit = r
-                extended = name[len(name) - 1] == STAR
                 break
         if hit < 0:
             break
-        var value = raws[hit].value.copy()
-        if not extended:
-            append_bytes(joined, Span(value))
+        if not raws[hit].extended:
+            append_bytes(joined, Span(raws[hit].value))
         elif index == 0:
-            var start = _after_language(value)
+            var start = _after_language(raws[hit].value)
             if start < 0:
                 return None
-            kind = _charset_of(value)
-            _percent_decode(joined, Span(value), start)
+            kind = _charset_of(raws[hit].value)
+            _percent_decode(joined, Span(raws[hit].value), start)
         else:
-            _percent_decode(joined, Span(value), 0)
+            _percent_decode(joined, Span(raws[hit].value), 0)
         index += 1
     return _bytes_in_charset(joined, kind)
 
@@ -322,7 +333,7 @@ def parse_media_header(data: Span[UInt8, _]) raises -> MediaHeader:
         value_end = i
     var value = lower_ascii_string(data, start, value_end)
     var raws = List[_RawParam]()
-    while True:
+    while len(raws) < MAX_PARAMS:
         _skip_cfws(data, i)
         if i >= n or data[i] != SEMI:
             break
@@ -344,32 +355,54 @@ def parse_media_header(data: Span[UInt8, _]) raises -> MediaHeader:
         var v = _read_value(data, i)
         if not v:
             break
-        raws.append(_RawParam(name^, v.value().copy()))
-    var params = List[Param]()
-    for r in range(len(raws)):
-        var name = raws[r].name.copy()
         var star = -1
         for k in range(len(name)):
             if name[k] == STAR:
                 star = k
                 break
         var base_end = star if star >= 0 else len(name)
+        var section = _PLAIN if star < 0 else _section_suffix(name, star)
+        var extended = star >= 0 and name[len(name) - 1] == STAR
         var base = range_bytes(Span(name), 0, base_end)
-        var base_name = lossy_string(Span(base))
-        var seen = False
-        for p in range(len(params)):
-            if params[p].name == base_name:
-                seen = True
+        raws.append(
+            _RawParam(
+                lossy_string(Span(base)),
+                section,
+                extended,
+                v.value().copy(),
+            )
+        )
+    # Each parameter's group is the first one with its base name; a group's
+    # RFC 2231 value is computed once.
+    var n_raw = len(raws)
+    var group = List[Int](capacity=n_raw)
+    var emitted = List[Bool](capacity=n_raw)
+    var no_rfc2231 = List[Bool](capacity=n_raw)
+    for r in range(n_raw):
+        var g = r
+        for q in range(r):
+            if group[q] == q and raws[q].base == raws[r].base:
+                g = q
                 break
-        if seen or base_end == 0:
+        group.append(g)
+        emitted.append(False)
+        no_rfc2231.append(False)
+    var params = List[Param]()
+    for r in range(n_raw):
+        var g = group[r]
+        if emitted[g] or raws[r].base.byte_length() == 0:
             continue
-        var joined = _join_sections(raws, base)
-        if joined:
-            params.append(Param(base_name, joined.value()))
+        if not no_rfc2231[g]:
+            var joined = _join_sections(raws, group, g)
+            if joined:
+                params.append(Param(raws[r].base, joined.value(), True))
+                emitted[g] = True
+                continue
+            no_rfc2231[g] = True
+        if raws[r].section != _PLAIN:
             continue
-        if star >= 0:
-            continue
-        params.append(Param(base_name, lossy_string(Span(raws[r].value))))
+        params.append(Param(raws[r].base, lossy_string(Span(raws[r].value))))
+        emitted[g] = True
     return MediaHeader(value, params^)
 
 
@@ -402,6 +435,8 @@ def append_param(mut out: List[UInt8], name: StaticString, value: Span[UInt8, _]
         if not is_token_char(c):
             token = False
         if c < 32 or c > 126:
+            printable = False
+        if c == EQ and i + 1 < n and value[i + 1] == QMARK:
             printable = False
     if token:
         append_bytes(out, name.as_bytes())

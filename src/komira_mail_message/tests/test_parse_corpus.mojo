@@ -6,7 +6,8 @@
 # inputs refused with their exact messages: a line without ':', a fold before
 # the first field, a multipart without or with an invalid boundary or with no
 # delimiter line, and the depth and part limits. A missing close delimiter
-# and a boundary that only prefixes a line are read as RFC 2046 says.
+# and a boundary that only prefixes a line are read as RFC 2046 says. A text
+# leaf with disposition attachment is an attachment, not the text part.
 
 from std.testing import assert_equal, assert_true
 
@@ -117,6 +118,41 @@ def test_rfc2047_section_8_message() raises:
     var to = parse_mailbox(Span(m.header("TO").value().value()))
     assert_equal(decode_header_text(to.display_name()), "Keld Jørn Simonsen")
     assert_equal(len(m.decoded_body(0)), 0)
+
+
+def test_text_attachment_is_not_the_body() raises:
+    # A text/plain leaf with `Content-Disposition: attachment` before the
+    # body: text_part is the body, the attachment is in attachments.
+    var m = parse_message(
+        Span(
+            _b(
+                String("Content-Type: multipart/mixed; boundary=b\r\n\r\n")
+                + "--b\r\nContent-Type: text/plain\r\n"
+                + "Content-Disposition: attachment; filename=notes.txt\r\n\r\nnotes\r\n"
+                + "--b\r\nContent-Type: text/plain\r\n\r\nbody\r\n"
+                + "--b--\r\n"
+            )
+        )
+    )
+    assert_equal(m.part_count(), 3)
+    assert_equal(m.text_part().value(), 2)
+    assert_equal(_s(m.decoded_body(2)), "body")
+    var att = m.attachments()
+    assert_equal(len(att), 1)
+    assert_equal(att[0], 1)
+    # Only a text attachment: no text part.
+    var only = parse_message(
+        Span(
+            _b(
+                String("Content-Type: multipart/mixed; boundary=b\r\n\r\n")
+                + "--b\r\nContent-Type: text/plain\r\n"
+                + "Content-Disposition: ATTACHMENT\r\n\r\nnotes\r\n--b--\r\n"
+            )
+        )
+    )
+    assert_true(not only.text_part())
+    assert_equal(len(only.attachments()), 1)
+    assert_equal(only.attachments()[0], 1)
 
 
 def test_lf_only_and_no_body() raises:
@@ -322,6 +358,7 @@ def main() raises:
     test_rfc5322_a_1_1()
     test_rfc5322_a_5_folding_and_comments()
     test_rfc2047_section_8_message()
+    test_text_attachment_is_not_the_body()
     test_lf_only_and_no_body()
     test_8bit_and_non_utf8_kept_as_bytes()
     test_transfer_encodings()

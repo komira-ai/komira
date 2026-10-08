@@ -20,11 +20,13 @@ injection)."""
 
 comptime INVALID_HEADER: StaticString = "InvalidHeader"
 """A header field name that is not RFC 5322 `ftext` (printable ASCII except
-`:`), or a header the builder writes itself given through `add_header`."""
+`:`), or one `add_header` refuses: a field the builder writes itself, `Bcc`
+or `Sender`."""
 
 comptime INVALID_VALUE: StaticString = "InvalidValue"
 """A builder argument that cannot be written: a media type that is not
-`type/subtype` tokens, a message id that is not `dot-atom-text@dot-atom-text`,
+`type/subtype` tokens or is `multipart/*`, a `message/*` attachment that is
+not 7bit text, a message id that is not `dot-atom-text@dot-atom-text`,
 a date outside the range RFC 5322 can write."""
 
 comptime MISSING_FIELD: StaticString = "MissingField"

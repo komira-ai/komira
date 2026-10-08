@@ -1,9 +1,13 @@
 # What the builder refuses, each with its exact message: CR, LF or NUL in any
 # value written into a header (header injection: a subject carrying
 # "\r\nBcc: ..." must never become a second field), field names that are not
-# ftext or that the builder writes itself (Bcc, Content-Type, ...), media
-# types that are not type/subtype, message ids that are not msg-id, and a
-# message without From or Date. Errors hold no input byte.
+# ftext (a colon included: it would start a second field) or that the
+# builder writes itself, each of them plus Bcc and Sender, media types that
+# are not type/subtype tokens (a parameter or CRLF in one included), a
+# multipart attachment, a message/* attachment that is not 7bit text,
+# message ids that are not msg-id, and a message without From or Date.
+# Errors hold no input byte. Every case starts from a fresh value, so a call
+# that does not raise fails.
 
 from std.testing import assert_equal, assert_false
 
@@ -41,25 +45,47 @@ def test_crlf_in_subject_is_refused() raises:
     assert_false("secret" in msg, msg)
 
 
+comptime NOT_SET = "not raised"
+
+
 def test_crlf_in_other_values_is_refused() raises:
+    # Each case starts from NOT_SET, so a call that does not raise fails the
+    # assertion instead of passing on the previous case's message.
     var b = _builder()
-    var msg = String("")
+    var msg = String(NOT_SET)
     try:
         b.add_to("Jane\r\nBcc: x@example.com", AddrSpec("j", "example.com"))
     except e:
         msg = String(e)
     assert_equal(msg, String(FORBIDDEN) + "MessageBuilder.add_to: CR, LF or NUL")
+    msg = String(NOT_SET)
+    try:
+        b.add_cc("Jane\r\nBcc: x@example.com", AddrSpec("j", "example.com"))
+    except e:
+        msg = String(e)
+    assert_equal(msg, String(FORBIDDEN) + "MessageBuilder.add_cc: CR, LF or NUL")
+    msg = String(NOT_SET)
+    try:
+        b.add_reply_to("Help\rBcc: x@example.com", AddrSpec("h", "example.com"))
+    except e:
+        msg = String(e)
+    assert_equal(
+        msg, String(FORBIDDEN) + "MessageBuilder.add_reply_to: CR, LF or NUL"
+    )
+    msg = String(NOT_SET)
     try:
         b.set_from("A\nB", AddrSpec("a", "example.com"))
     except e:
         msg = String(e)
     assert_equal(msg, String(FORBIDDEN) + "MessageBuilder.set_from: CR, LF or NUL")
+    msg = String(NOT_SET)
     try:
         b.add_header("X-Note", "a\r\nb")
     except e:
         msg = String(e)
     assert_equal(msg, String(FORBIDDEN) + "MessageBuilder.add_header: CR, LF or NUL")
     var data = List[UInt8]()
+    msg = String(NOT_SET)
     try:
         b.add_attachment("a\nb.txt", "text/plain", Span(data))
     except e:
@@ -69,62 +95,100 @@ def test_crlf_in_other_values_is_refused() raises:
     )
 
 
-def test_field_names() raises:
+def _header_error(name: String) raises -> String:
     var b = _builder()
+    try:
+        b.add_header(name, "x")
+    except e:
+        return String(e)
+    return String("OK")
+
+
+comptime OWNED_ERROR = "komira_mail_message.InvalidHeader: MessageBuilder.add_header: a field the builder writes itself"
+comptime NAME_BYTE = "komira_mail_message.InvalidHeader: MessageBuilder.add_header: a byte not allowed in a field name at position "
+
+
+def test_field_names() raises:
+    # Every field `build()` writes, plus Bcc and Sender, in mixed case.
     var owned = List[String]()
+    owned.append("Date")
+    owned.append("FROM")
+    owned.append("sender")
+    owned.append("Reply-To")
+    owned.append("to")
+    owned.append("CC")
     owned.append("Bcc")
-    owned.append("content-type")
+    owned.append("Message-Id")
+    owned.append("in-reply-to")
+    owned.append("References")
     owned.append("SUBJECT")
     owned.append("MIME-Version")
-    owned.append("From")
+    owned.append("content-type")
+    owned.append("Content-Transfer-Encoding")
+    owned.append("Content-Disposition")
     for i in range(len(owned)):
-        var msg = String("")
-        try:
-            b.add_header(owned[i], "x")
-        except e:
-            msg = String(e)
-        assert_equal(
-            msg,
-            "komira_mail_message.InvalidHeader: MessageBuilder.add_header: a field the builder writes itself",
-        )
-    var msg = String("")
+        assert_equal(_header_error(owned[i]), OWNED_ERROR, owned[i])
+    assert_equal(_header_error("X Bad"), String(NAME_BYTE) + "1")
+    assert_equal(_header_error("X:Bad"), String(NAME_BYTE) + "1")
+    # A colon in the name would write a second field: `Bcc:victim...: x`
+    # parses as a Bcc field.
+    assert_equal(_header_error("Bcc:victim@example.com"), String(NAME_BYTE) + "3")
+    var b = _builder()
     try:
         b.add_header("X Bad", "x")
     except e:
-        msg = String(e)
         assert_equal(error_kind(e), "InvalidHeader")
-    assert_equal(
-        msg,
-        "komira_mail_message.InvalidHeader: MessageBuilder.add_header: a byte not allowed in a field name at position 1",
-    )
+    assert_equal(_header_error("X-Mailer"), "OK")
+    assert_equal(_header_error("Sender-X"), "OK")
+
+
+def _attachment_error(media_type: String, data: String = "") raises -> String:
+    var b = _builder()
     try:
-        b.add_header("X:Bad", "x")
+        b.add_attachment("f", media_type, data.as_bytes())
     except e:
-        msg = String(e)
-    assert_equal(
-        msg,
-        "komira_mail_message.InvalidHeader: MessageBuilder.add_header: a byte not allowed in a field name at position 1",
-    )
-    b.add_header("X-Mailer", "ok")
+        return String(e)
+    return String("OK")
+
+
+comptime NOT_A_MEDIA_TYPE = "komira_mail_message.InvalidValue: MessageBuilder.add_attachment: a media type that is not type/subtype tokens"
 
 
 def test_values() raises:
-    var b = _builder()
-    var data = List[UInt8]()
-    var msg = String("")
-    try:
-        b.add_attachment("f", "text", Span(data))
-    except e:
-        msg = String(e)
+    assert_equal(_attachment_error("text"), NOT_A_MEDIA_TYPE)
+    assert_equal(_attachment_error("text/"), NOT_A_MEDIA_TYPE)
+    assert_equal(_attachment_error("/plain"), NOT_A_MEDIA_TYPE)
+    # The media type goes into the part header: a parameter or a line break
+    # in it is refused, not written.
+    assert_equal(_attachment_error("text/plain; x=1"), NOT_A_MEDIA_TYPE)
     assert_equal(
-        msg,
-        "komira_mail_message.InvalidValue: MessageBuilder.add_attachment: a media type that is not type/subtype tokens",
+        _attachment_error("text/plain\r\nBcc: x@example.com"), NOT_A_MEDIA_TYPE
     )
-    try:
-        b.add_attachment("f", "text/plain; x=1", Span(data))
-    except e:
-        msg = String(e)
-    assert_equal(error_kind(Error(msg)), "InvalidValue")
+    assert_equal(_attachment_error("text/plain"), "OK")
+    # RFC 2046 section 5.1: a multipart needs a boundary and 7bit, 8bit or
+    # binary; the builder writes neither for an attachment.
+    assert_equal(
+        _attachment_error("Multipart/Mixed"),
+        "komira_mail_message.InvalidValue: MessageBuilder.add_attachment: a multipart media type",
+    )
+    # RFC 2046 section 5.2: a message/* attachment is written 7bit, so its
+    # text must be 7bit.
+    var not_7bit = "komira_mail_message.InvalidValue: MessageBuilder.add_attachment: a message/* attachment that is not 7bit text"
+    assert_equal(
+        _attachment_error("message/rfc822", String("Subject: caf") + chr(0xE9) + "\r\n\r\n"),
+        not_7bit,
+    )
+    assert_equal(
+        _attachment_error("message/rfc822", String("Subject: a") + chr(0) + "\r\n\r\n"),
+        not_7bit,
+    )
+    var long_line = String("Subject: ")
+    for _ in range(990):
+        long_line += "x"
+    assert_equal(_attachment_error("message/rfc822", long_line), not_7bit)
+    assert_equal(_attachment_error("message/rfc822", "Subject: a\n\nb\n"), "OK")
+    var b = _builder()
+    var msg = String(NOT_SET)
     try:
         b.set_in_reply_to("abc@example.com")
     except e:
@@ -133,6 +197,7 @@ def test_values() raises:
         msg,
         "komira_mail_message.InvalidValue: MessageBuilder.set_in_reply_to: not a message id",
     )
+    msg = String(NOT_SET)
     try:
         b.add_reference("<a@b> <c@d>")
     except e:
@@ -147,13 +212,14 @@ def test_values() raises:
 
 def test_required_fields() raises:
     var b = MessageBuilder()
-    var msg = String("")
+    var msg = String(NOT_SET)
     try:
         _ = b.build()
     except e:
         msg = String(e)
     assert_equal(msg, "komira_mail_message.MissingField: MessageBuilder.build: no From")
     b.set_from("", AddrSpec("a", "acme.example"))
+    msg = String(NOT_SET)
     try:
         _ = b.build()
     except e:

@@ -149,12 +149,17 @@ struct Part(Copyable, Movable):
     def filename(self) raises -> Optional[String]:
         """The `Content-Disposition` `filename`, else the `Content-Type`
         `name`; RFC 2231 forms decoded, and RFC 2047 encoded words in a plain
-        value decoded too (written by some mailers, RFC 2231 section 1)."""
+        (not RFC 2231) value decoded too (written by some mailers, RFC 2231
+        section 1)."""
         var f = self._disposition.param(String("filename"))
+        var extended = self._disposition.param_is_extended(String("filename"))
         if not f:
             f = self._content_type.param(String("name"))
+            extended = self._content_type.param_is_extended(String("name"))
         if not f:
             return None
+        if extended:
+            return f
         return Optional[String](decode_header_text(f.value()))
 
     def transfer_encoding(self) -> String:

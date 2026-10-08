@@ -3,10 +3,12 @@
 # RFC 2045 section 5.1 equivalent forms, the RFC 2183 example), and the
 # `Date` and `Message-ID` values (dates checked against GNU `date -R`). The
 # host of the RFC 2231 section 3 URL is replaced by a reserved example name.
+# At most MAX_PARAMS parameters are read from one field.
 
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_mail_message import (
+    MAX_PARAMS,
     error_kind,
     format_date,
     format_message_id,
@@ -154,6 +156,27 @@ def test_rfc2045_and_rfc2183_forms() raises:
     assert_equal(parse_media_header(String("text/").as_bytes()).value(), "")
 
 
+def test_parameter_count_is_capped() raises:
+    # Grouping RFC 2231 sections by name is quadratic in the parameter
+    # count, so one field holds at most MAX_PARAMS; the rest are dropped.
+    var field = String("a/b")
+    for i in range(200):
+        field += String("; p") + String(i) + "=" + String(i)
+    var h = parse_media_header(field.as_bytes())
+    assert_equal(MAX_PARAMS, 128)
+    assert_equal(len(h.params()), 128)
+    assert_equal(h.param("p127").value(), "127")
+    assert_true(not h.param("p128"))
+    # Whether a value came from an RFC 2231 form.
+    var d = parse_media_header(
+        String("attachment; filename*=utf-8''a%20b; name=c").as_bytes()
+    )
+    assert_equal(d.param("filename").value(), "a b")
+    assert_true(d.param_is_extended("filename"))
+    assert_false(d.param_is_extended("name"))
+    assert_false(d.param_is_extended("absent"))
+
+
 def test_format_date() raises:
     assert_equal(format_date(0), "Thu, 01 Jan 1970 00:00:00 +0000")
     assert_equal(format_date(951782400), "Tue, 29 Feb 2000 00:00:00 +0000")
@@ -199,6 +222,7 @@ def main() raises:
     test_qp_decode_rfc2045_examples()
     test_rfc2231_examples()
     test_rfc2045_and_rfc2183_forms()
+    test_parameter_count_is_capped()
     test_format_date()
     test_format_message_id()
     print("test_mime_values: OK")

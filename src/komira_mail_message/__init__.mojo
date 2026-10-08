@@ -8,7 +8,7 @@
 | `split_header_fields` | the header fields of a message as written and unfolded (`header.mojo`) |
 | `encode_header_text`, `decode_header_text` | RFC 2047 encoded words (`encoded_word.mojo`) |
 | `quoted_printable_encode`, `quoted_printable_decode` | RFC 2045 section 6.7 |
-| `parse_media_header` | a `Content-Type` / `Content-Disposition` value with RFC 2231 parameters |
+| `parse_media_header` | a `Content-Type` / `Content-Disposition` value with RFC 2231 parameters (at most `MAX_PARAMS`) |
 | `format_date`, `format_message_id` | the `Date` and `Message-ID` values |
 
 The builder writes CRLF line breaks only, folds every header line to at most
@@ -26,6 +26,6 @@ from .date import format_date, format_message_id
 from .encoded_word import decode_header_text, encode_header_text
 from .errors import error_kind
 from .header import HeaderBlock, HeaderField, split_header_fields
-from .params import MediaHeader, Param, parse_media_header
+from .params import MAX_PARAMS, MediaHeader, Param, parse_media_header
 from .parse import MAX_DEPTH, MAX_PARTS, Message, Part, parse_message
 from .quoted_printable import quoted_printable_decode, quoted_printable_encode

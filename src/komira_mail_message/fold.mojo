@@ -9,8 +9,9 @@
 # characters (the RFC 2047 section 2 limit for a line holding an encoded word,
 # under RFC 5322's recommended 78). A piece that does not fit starts a new
 # line; a piece longer than the line stays whole, and a line that would then
-# exceed RFC 5322's 998-octet limit is refused as `LineTooLong`. The caller
-# has refused CR, LF and NUL in the value.
+# exceed RFC 5322's 998-octet limit is refused as `LineTooLong` (so is a
+# `Name: ` prefix over 998 octets, whatever the value). The caller has
+# refused CR, LF and NUL in the value.
 # =============================================================================
 
 from .chars import COLON, SP, append_bytes, append_crlf, append_range, is_wsp
@@ -21,6 +22,14 @@ comptime FOLD_AT = 76
 
 comptime LINE_MAX = 998
 """RFC 5322 section 2.1.1: a line is at most 998 octets without its CRLF."""
+
+
+def _too_long(function: StaticString) -> Error:
+    return message_error(
+        LINE_TOO_LONG,
+        function,
+        "a header line longer than 998 octets with no white space to fold at",
+    )
 
 
 def append_field(
@@ -35,6 +44,8 @@ def append_field(
     out.append(COLON)
     out.append(SP)
     var line = len(name) + 2
+    if line > LINE_MAX:
+        raise _too_long(function)
     var n = len(value)
     var on_line = 0
     var start = 0
@@ -52,11 +63,7 @@ def append_field(
             line = 0
             on_line = 0
         if line + width > LINE_MAX:
-            raise message_error(
-                LINE_TOO_LONG,
-                function,
-                "a header line longer than 998 octets with no white space to fold at",
-            )
+            raise _too_long(function)
         append_range(out, value, start, end)
         line += width
         on_line += 1

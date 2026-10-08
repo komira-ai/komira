@@ -3,8 +3,9 @@
 # white space to fold at, a field longer than 998 octets is folded rather
 # than written as one line, unfolding gives back the exact value, a folded
 # line is never white space only, and a line that cannot be folded under 998
-# octets is refused. A value with no white space (or non-ASCII) becomes
-# encoded words, which fold.
+# octets is refused, at exactly 998 octets accepted and 999 refused, with an
+# empty value too (the `Name: ` prefix alone). A value with no white space
+# (or non-ASCII) becomes encoded words, which fold.
 
 from std.testing import assert_equal, assert_true
 
@@ -127,22 +128,56 @@ def test_long_address_lists_fold_between_addresses() raises:
     assert_true(_header_lines(built, "To") > 1)
 
 
-def test_unfoldable_line_is_refused() raises:
-    # A field name of 1,000 octets leaves no place to fold.
+comptime TOO_LONG = "komira_mail_message.LineTooLong: MessageBuilder.build: a header line longer than 998 octets with no white space to fold at"
+
+
+def _name(length: Int) -> String:
+    """A field name of `length` octets."""
     var name = String("X-")
-    for _ in range(998):
+    for _ in range(length - 2):
         name += "n"
+    return name^
+
+
+def _build_error(name: String, value: String) raises -> String:
     var b = _builder()
-    b.add_header(name, "v")
-    var msg = String("")
+    b.add_header(name, value)
     try:
         _ = b.build()
     except e:
-        msg = String(e)
-    assert_equal(
-        msg,
-        "komira_mail_message.LineTooLong: MessageBuilder.build: a header line longer than 998 octets with no white space to fold at",
-    )
+        return String(e)
+    return String("OK")
+
+
+def _longest_line(built: List[UInt8]) -> Int:
+    var longest = 0
+    var start = 0
+    for i in range(len(built)):
+        if built[i] == 10:
+            longest = max(longest, i - 1 - start)
+            start = i + 1
+    return longest
+
+
+def test_998_octet_boundary() raises:
+    # RFC 5322 section 2.1.1: 998 octets is the longest line. `Name: ` with
+    # an empty value takes len(name) + 2 octets.
+    assert_equal(_build_error(_name(996), ""), "OK")
+    assert_equal(_build_error(_name(997), ""), TOO_LONG)
+    # A value with no white space to cut at: 994 + 2 + 2 = 998 is written,
+    # one octet more is refused.
+    assert_equal(_build_error(_name(994), "vv"), "OK")
+    assert_equal(_build_error(_name(994), "vvv"), TOO_LONG)
+    var b = _builder()
+    b.add_header(_name(994), "vv")
+    var built = b.build()
+    assert_equal(_longest_line(built), 998)
+    var m = parse_message(Span(built))
+    assert_equal(_s(m.header(_name(994)).value().value()), "vv")
+    var e = _builder()
+    e.add_header(_name(996), "")
+    built = e.build()
+    assert_equal(_longest_line(built), 998)
 
 
 def main() raises:
@@ -151,5 +186,5 @@ def main() raises:
     test_runs_of_white_space_survive_folding()
     test_word_without_white_space_is_encoded()
     test_long_address_lists_fold_between_addresses()
-    test_unfoldable_line_is_refused()
+    test_998_octet_boundary()
     print("test_folding: OK")

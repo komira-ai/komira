@@ -18,7 +18,14 @@
 # when it is ASCII without NUL and no line is over 998 octets, else
 # `quoted-printable`. An attachment is `base64` in lines of 76, with RFC 2183
 # `Content-Disposition: attachment` and its file name as `filename` and as
-# the `Content-Type` `name` (RFC 2231 when it is not short printable ASCII).
+# the `Content-Type` `name` (RFC 2231 when it is not short printable ASCII
+# or holds `=?`, which a reader would take for an encoded word). RFC 2046
+# sections 5.1 and 5.2 allow only 7bit, 8bit or binary for `multipart/*` and
+# `message/*`: a `multipart/*` attachment is refused as `InvalidValue` (it
+# would need a boundary the builder does not write), and a `message/*` one
+# (a forwarded `message/rfc822`) is written `7bit` with its line breaks made
+# CRLF, and refused as `InvalidValue` when it holds a byte over 127, a NUL or
+# a line over 998 octets (8bit would need an 8BITMIME transport).
 # A boundary is `=_komira_<depth>` (made unique if a part holds it); `=_`
 # cannot occur in quoted-printable or base64 text. A single-part message's
 # body is ended with CRLF if it was not.
@@ -73,8 +80,10 @@ comptime _LONG_WORD = 900
 be folded under 998 octets."""
 
 comptime _OWNED: StaticString = "date from sender reply-to to cc bcc message-id in-reply-to references subject mime-version content-type content-transfer-encoding content-disposition"
-"""The fields `build()` writes itself (and `Bcc`), refused by
-`add_header`."""
+"""Refused by `add_header`: the fields `build()` writes itself, and `Bcc` and
+`Sender`, which it never writes. All of them are address, date, id or MIME
+fields; `add_header` writes unstructured text without their checks, and a
+second `Bcc` would leak blind copies."""
 
 
 def _refuse_forbidden(value: Span[UInt8, _], function: StaticString) raises:
@@ -182,9 +191,8 @@ def _field(mut out: List[UInt8], name: StaticString, value: Span[UInt8, _]) rais
     append_field(out, name.as_bytes(), value, "MessageBuilder.build")
 
 
-def _crlf_text(text: String) -> List[UInt8]:
-    """`text` with every CRLF, bare CR and bare LF made CRLF."""
-    var b = text.as_bytes()
+def _crlf_text(b: Span[UInt8, _]) -> List[UInt8]:
+    """`b` with every CRLF, bare CR and bare LF made CRLF."""
     var n = len(b)
     var out = List[UInt8](capacity=n + n // 32 + 2)
     var i = 0
@@ -219,7 +227,7 @@ def _is_seven_bit(body: List[UInt8]) -> Bool:
 
 
 def _text_entity(text: String, subtype: StaticString) raises -> _Entity:
-    var body = _crlf_text(text)
+    var body = _crlf_text(text.as_bytes())
     var headers = List[UInt8]()
     var ct = bytes_of(String("text/") + String(subtype))
     append_param(ct, "charset", "utf-8".as_bytes())
@@ -240,6 +248,9 @@ def _attachment_entity(a: _Attachment) raises -> _Entity:
         append_param(cd, "filename", a.filename.as_bytes())
     _field(headers, "Content-Type", Span(ct))
     _field(headers, "Content-Disposition", Span(cd))
+    if a.media_type.startswith("message/"):
+        _field(headers, "Content-Transfer-Encoding", "7bit".as_bytes())
+        return _Entity(headers^, a.data.copy())
     _field(headers, "Content-Transfer-Encoding", "base64".as_bytes())
     var encoded = base64_encode(Span(a.data))
     var e = encoded.as_bytes()
@@ -309,7 +320,14 @@ def _check_media_type(media_type: String) raises -> String:
             "MessageBuilder.add_attachment",
             "a media type that is not type/subtype tokens",
         )
-    return media_type.lower()
+    var lowered = media_type.lower()
+    if lowered.startswith("multipart/"):
+        raise message_error(
+            INVALID_VALUE,
+            "MessageBuilder.add_attachment",
+            "a multipart media type",
+        )
+    return lowered
 
 
 struct MessageBuilder(Copyable, Movable):
@@ -442,10 +460,21 @@ struct MessageBuilder(Copyable, Movable):
     def add_attachment(
         mut self, filename: String, media_type: String, data: Span[UInt8, _]
     ) raises:
-        """An attachment of `media_type` (`type/subtype`), named `filename`
-        (any UTF-8, or empty for none)."""
+        """An attachment of `media_type` (`type/subtype`, not `multipart/*`),
+        named `filename` (any UTF-8, or empty for none). A `message/*`
+        attachment must be 7bit text; see the module header."""
         _refuse_forbidden(filename.as_bytes(), "MessageBuilder.add_attachment")
         var mt = _check_media_type(media_type)
+        if mt.startswith("message/"):
+            var lines = _crlf_text(data)
+            if not _is_seven_bit(lines):
+                raise message_error(
+                    INVALID_VALUE,
+                    "MessageBuilder.add_attachment",
+                    "a message/* attachment that is not 7bit text",
+                )
+            self._attachments.append(_Attachment(filename, mt, lines^))
+            return
         var copy = List[UInt8](capacity=len(data))
         append_bytes(copy, data)
         self._attachments.append(_Attachment(filename, mt, copy^))

@@ -1,5 +1,6 @@
 # RFC 2047 encoded words. Decoding: every example of RFC 2047 section 8 (the
-# comment examples are read as unstructured text, without the parentheses),
+# comment examples are read as unstructured text, without the parentheses;
+# the iso-8859-8 one is kept as written, that charset is not transcoded),
 # the RFC 2231 section 5 language suffix, and the words a decoder must keep
 # as written (section 6.3): unknown charset, malformed, not white-space
 # delimited, decoded bytes that are not UTF-8 or that hold CR, LF or NUL.
@@ -25,6 +26,18 @@ def test_rfc2047_section_8_comment_examples() raises:
     )
     assert_equal(decode_header_text("=?ISO-8859-1?Q?a_b?="), "a b")
     assert_equal(decode_header_text("=?ISO-8859-1?Q?a?= =?ISO-8859-2?Q?_b?="), "a b")
+
+
+def test_rfc2047_section_8_from_examples() raises:
+    # The two `From:` lines of the section 8 sample messages.
+    assert_equal(
+        decode_header_text("=?ISO-8859-1?Q?Olle_J=E4rnefors?= <ojarnef@example.org>"),
+        "Olle Järnefors <ojarnef@example.org>",
+    )
+    assert_equal(
+        decode_header_text("=?ISO-8859-1?Q?Patrik_F=E4ltstr=F6m?= <paf@example.org>"),
+        "Patrik Fältström <paf@example.org>",
+    )
 
 
 def test_rfc2047_section_8_header_examples() raises:
@@ -135,6 +148,7 @@ def test_encode_round_trip() raises:
 
 
 def main() raises:
+    test_rfc2047_section_8_from_examples()
     test_rfc2047_section_8_comment_examples()
     test_rfc2047_section_8_header_examples()
     test_rfc2231_language_suffix_is_ignored()

@@ -64,8 +64,10 @@ assert_equal(String(StringSlice(from_utf8=Span(body))), String("Espresso: 2 ") +
 
 CR, LF and NUL in any value the builder writes into a header (header
 injection), a field name that is not RFC 5322 `ftext` or that the builder
-writes itself (`Bcc` included: blind copies are envelope recipients only), a
-header line that cannot be folded under 998 octets, and when parsing: a
+writes itself (`Bcc` and `Sender` too: blind copies are envelope recipients
+only, and both are address fields), a `multipart/*` attachment or a
+`message/*` one that is not 7bit text, a header line that cannot be folded
+under 998 octets, and when parsing: a
 header line without `:`, a multipart without a valid `boundary` or without a
 delimiter line, and a message nested deeper than `MAX_DEPTH` (8) multiparts
 or holding more than `MAX_PARTS` (128) parts (both can be lowered per call).
@@ -95,8 +97,14 @@ assert_equal(msg, "komira_mail_message.ForbiddenByte: MessageBuilder.set_subject
 - `message/rfc822` parts are leaves (not opened), and a part of a
   `multipart/digest` without a `Content-Type` is read as `text/plain`, not
   as RFC 2046 section 5.1.5's `message/rfc822`. Encoded words are decoded
-  only where `decode_header_text` is called: on unstructured fields
-  (`Subject`), on a display name read by `komira_mail_address`, and on an
-  attachment's plain `filename`.
+  on unstructured fields (`Subject`) and on an attachment's plain (not RFC
+  2231) `filename`. `komira_mail_address` leaves a display name as written;
+  the caller can pass it to `decode_header_text`.
+- An attachment cannot be `multipart/*`. A `message/*` attachment (a
+  forwarded message) is written `7bit` with CRLF line breaks, so it must be
+  ASCII without NUL and no line over 998 octets; attach other messages as
+  `application/octet-stream`.
+- At most `MAX_PARAMS` (128) parameters are read from one `Content-Type` or
+  `Content-Disposition`; the rest are dropped.
 - No SMTPUTF8 (RFC 6531): header values are written in ASCII, non-ASCII text
   as encoded words.
