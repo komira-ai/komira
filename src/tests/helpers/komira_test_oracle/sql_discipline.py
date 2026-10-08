@@ -29,6 +29,41 @@ a function on the lists below):
   `_WINDOW_ORDERED` (`row_number`, `lead`, `first_value`...) needs an ORDER
   BY in its OVER clause or of its own. Neither rule sees ties: an ORDER BY
   whose keys tie leaves the tied rows in DuckDB's order;
+- a window whose frame has a ROWS bound (`ROWS BETWEEN UNBOUNDED PRECEDING
+  AND CURRENT ROW`, `ROWS 1 PRECEDING`; DuckDB's `start` or `end` is
+  CURRENT_ROW_ROWS, EXPR_PRECEDING_ROWS or EXPR_FOLLOWING_ROWS) has an
+  ORDER BY in its OVER clause, whatever the function: a ROWS frame counts
+  rows in the order they reach the window, and a function's own ORDER BY
+  (`arg_orders`) orders the rows inside the frame, not the frame. A frame
+  unbounded on both sides is the whole partition. A RANGE or GROUPS frame
+  needs none: with no ORDER BY every row of a partition is a peer of every
+  other (WindowBoundariesState::PeerBegin and PeerEnd,
+  window_boundaries_state.cpp), so its frame is the partition or empty,
+  and a RANGE offset needs exactly one ORDER BY anyway (the binder,
+  bind_window_expression.cpp);
+- a LIMIT or an OFFSET (LIMIT_MODIFIER, LIMIT_PERCENT_MODIFIER) has an
+  ORDER BY in the same query node's modifiers: the rows it keeps are
+  otherwise the first DuckDB reaches. An ORDER BY of a subquery below it
+  does not count (SQL keeps no subquery's order). `DISTINCT ON (...)` (a
+  DISTINCT_MODIFIER with `distinct_on_targets`) has one too: it keeps the
+  first row of each key, first by that ORDER BY. A plain DISTINCT keeps
+  values, not rows, and needs none. Ties among the ORDER BY's keys at the
+  cut, or within a DISTINCT ON key, are not seen here (the tie gap
+  above);
+- `histogram` with one argument takes it as a CAST to a type that is not
+  FLOAT or DOUBLE (nor a type name the parse leaves unbound): DuckDB keeps
+  a FLOAT or DOUBLE histogram in a `std::map` ordered by `<`
+  (GetHistogramFunction, histogram.cpp), under which NaN is equivalent to
+  every key and -0.0 to 0.0, so a NaN joins whichever key the map compares
+  it with first and a zero keeps the sign of the first zero to arrive: the
+  answer follows the rows' order. Any other type is keyed by an integer, a
+  string, or (a nested type, a DECIMAL wider than 18 digits...) DuckDB's
+  sort key, under which equal values are equal bytes. `histogram` with
+  bins and `histogram_exact` take their bins (the second argument) with no
+  column in them, at any depth (one in a subquery may be the outer row's,
+  which the parse does not tell): DuckDB fixes a group's bins from the
+  first row that reaches it (HistogramBinState::InitializeBins,
+  binned_histogram.cpp);
 - `list_sort` and its aliases and `list_grade_up` and its aliases name
   their direction and NULL placement as their second and third arguments,
   each a cast string literal DuckDB reads as one (`ASC`/`DESC`, `NULLS
@@ -134,15 +169,23 @@ summarize by an order-dependent sketch (`approx_quantile`'s t-digest,
 `reservoir_quantile`'s reservoir). DuckDB's own flag
 (AggregateOrderDependent) is no guide: every aggregate but count, min, max,
 bool_and/bool_or, the integer sums, mad and quantile keeps the default
-ORDER_DEPENDENT, `avg` and `bitstring_agg` included. Not listed: `histogram`
-(an ordered map keyed by value), `histogram_exact` and `bitstring_agg`
-(counts and bits over fixed bins), the float aggregates whose order changes
-only rounding (`sum`, `avg`, `var_*`, `corr`... which the case's `float`
-policy is for), and the rest, which commute. DuckDB v1.5.6's
+ORDER_DEPENDENT, `avg` and `bitstring_agg` included. Not listed:
+`histogram` and `histogram_exact`, which are `_HISTOGRAMS`, order-free only
+under the rule above; `bitstring_agg` (bits over fixed bins); the float
+aggregates whose order changes only rounding (`sum`, `avg`, `var_*`,
+`corr`... which the case's `float` policy is for), and the rest, which
+commute, but for the sign of a zero: -0.0 equals 0.0, and `min` and
+`max` keep the first of equal values to arrive, the quantiles (`median`,
+`quantile_disc`...) whichever their selection lands on, and so does a
+GROUP BY or DISTINCT key; over a column holding both zeros which one they
+answer is a tie this module does not see (gen_expected.py's row-order
+check sees it when reversing or shuffling the oracle's tables changes it).
+DuckDB v1.5.6's
 `duckdb_functions()` also lists its window functions as aggregates; those
 are `_WINDOW_ORDERED` or, the rank family, order-free. test_sql_discipline.py
 holds the lists to the running DuckDB: every aggregate it has must be on
-one of these lists or on the test's own list of order-free aggregates, and
+one of these lists (`_HISTOGRAMS` included) or on the test's own list of
+order-free aggregates, and
 `_ORDER_MACROS` must
 be exactly the built-in macros reaching a listed aggregate with no ORDER BY.
 
@@ -294,6 +337,19 @@ _WINDOW_ORDERED = frozenset([
     "row_number",
 ])
 
+# Frame bounds that count rows (WindowBoundary): a frame with one of them
+# and no OVER clause ORDER BY counts rows in the order they arrive.
+_ROWS_BOUNDS = frozenset(["CURRENT_ROW_ROWS", "EXPR_FOLLOWING_ROWS", "EXPR_PRECEDING_ROWS"])
+
+# Aggregates order-free only under a rule of their own (_check_histogram):
+# `histogram(x)` over a FLOAT or DOUBLE is a std::map under `<`; with bins,
+# each group's bins are its first row's.
+_HISTOGRAMS = frozenset(["histogram", "histogram_exact"])
+# The cast types a one-argument histogram may not take (LogicalTypeId, as
+# the parse spells REAL, FLOAT4 and FLOAT8 too), and UNBOUND: a name the
+# parse does not resolve, which may bind to either.
+_HISTOGRAM_UNSAFE_KEYS = frozenset(["DOUBLE", "FLOAT", "UNBOUND"])
+
 # Built-in scalar macros over an _ORDER_SENSITIVE aggregate with no ORDER
 # BY (the JSON extension's: string_agg(...)); an ORDER BY on the call does
 # not reach it. test_sql_discipline.py requires this set to be exactly the
@@ -414,6 +470,12 @@ def _check_order_reads(node, cls, path, problems):
     if cls == "WINDOW" and fname in _WINDOW_ORDERED and not node.get("orders") and not node.get("arg_orders"):
         problems.append("%s: %s() with no ORDER BY in its OVER clause or of its own depends on the order rows reach it"
                         % (path, node["function_name"]))
+    if cls == "WINDOW" and not node.get("orders") and (
+            node.get("start") in _ROWS_BOUNDS or node.get("end") in _ROWS_BOUNDS):
+        problems.append("%s: %s() over a ROWS frame (%s to %s) with no ORDER BY in its OVER clause depends on "
+                        "the order rows reach it" % (path, node["function_name"], node.get("start"), node.get("end")))
+    if fname in _HISTOGRAMS:
+        _check_histogram(node, fname, path, problems)
     if cls != "FUNCTION":
         return
     if fname in _ORDER_MACROS:
@@ -427,6 +489,52 @@ def _check_order_reads(node, cls, path, problems):
                 or _string_literal(args[2]) not in _NULL_ORDERS):
             problems.append("%s: %s() without a direction and a NULL placement as cast literals reads the "
                             "session's default_order and default_null_order" % (path, node["function_name"]))
+
+
+def _reads_rows(node):
+    """Whether expression `node` names a column, at any depth (a column in
+    a subquery may be the outer row's: the parse does not say)."""
+    if isinstance(node, list):
+        return any(_reads_rows(item) for item in node)
+    if not isinstance(node, dict):
+        return False
+    if node.get("class") == "COLUMN_REF":
+        return True
+    return any(_reads_rows(value) for value in node.values())
+
+
+def _check_histogram(node, fname, path, problems):
+    """Hold a histogram call (FUNCTION or WINDOW) to its rule."""
+    args = node.get("children") or []
+    if len(args) == 1:
+        arg = args[0]
+        key = ((arg.get("cast_type") or {}).get("id") if isinstance(arg, dict) and arg.get("class") == "CAST" else None)
+        if key is None or key in _HISTOGRAM_UNSAFE_KEYS:
+            problems.append("%s: %s() of an argument that is not a CAST to a type other than FLOAT or DOUBLE (%s); "
+                            "a FLOAT or DOUBLE histogram merges NaN and -0.0 by the order rows reach it"
+                            % (path, node["function_name"], key or "no CAST"))
+    elif len(args) >= 2 and _reads_rows(args[1]):
+        problems.append("%s: %s() with bins that read a column takes each group's bins from the "
+                        "first row that reaches it" % (path, node["function_name"]))
+
+
+def _check_modifiers(node, path, problems):
+    """Hold a query node's LIMIT, OFFSET and DISTINCT ON to the ORDER BY rule."""
+    mods = node.get("modifiers")
+    if not isinstance(mods, list):
+        return
+    ordered = any(isinstance(m, dict) and m.get("type") == "ORDER_MODIFIER" for m in mods)
+    if ordered:
+        return
+    for i, mod in enumerate(mods):
+        if not isinstance(mod, dict):
+            continue
+        if mod.get("type") in _LIMIT_MODIFIERS:
+            problems.append("%s.modifiers[%d]: a LIMIT or OFFSET with no ORDER BY in the same query keeps the "
+                            "rows DuckDB reaches first" % (path, i))
+        elif mod.get("type") == "DISTINCT_MODIFIER" and mod.get("distinct_on_targets"):
+            problems.append("%s.modifiers[%d]: DISTINCT ON with no ORDER BY in the same query keeps the row of "
+                            "each key DuckDB reaches first" % (path, i))
 
 
 def _ctes(node):
@@ -505,6 +613,7 @@ def _walk(node, path, in_cast, is_count, in_table_fn, is_ref, scope, ctx):
         if target is not None:
             problems.append("%s: %s is a SQL value keyword; DuckDB binds it to %s() unless a column of that name is in scope"
                             % (path, ".".join(node["column_names"]), target))
+    _check_modifiers(node, path, problems)
     if node.get("sample") is not None:
         problems.append("%s.sample: USING SAMPLE or TABLESAMPLE draws rows at random" % path)
     for key in _ORDER_KEYS:

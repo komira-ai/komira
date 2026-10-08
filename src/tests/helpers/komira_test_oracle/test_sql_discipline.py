@@ -102,9 +102,10 @@ What it proves, and the defect it catches:
   Catches the rule off, a list missing a name, a check that reads
   `order_bys` but not a window's `arg_orders`, and one that refuses the
   aggregate even ordered. The list is the running DuckDB's: every
-  aggregate `duckdb_functions()` holds must be on `_ORDER_SENSITIVE` or on
-  `_ORDER_FREE` here (each group with the reason its answer is the same in
-  any order), never both, and every name on either must be an aggregate;
+  aggregate `duckdb_functions()` holds must be on `_ORDER_SENSITIVE`, on
+  `sql_discipline._HISTOGRAMS` or on `_ORDER_FREE` here (each group with
+  the reason its answer is the same in any order), never two, and every
+  name on any must be an aggregate;
   `_ORDER_MACROS` must be exactly the built-in macros that reach a listed
   aggregate with no ORDER BY, directly or through another macro. Catches a
   name dropped, misspelt or renamed, and a DuckDB upgrade that adds an
@@ -115,6 +116,33 @@ What it proves, and the defect it catches:
   in its OVER clause or of its own; the rank family, order-free, is
   accepted with an empty OVER clause. Catches a window rule that reads
   only `arg_orders` or only `orders`.
+- row-order frames and modifiers: a window over a ROWS frame not
+  unbounded on both sides with no ORDER BY in its OVER clause is refused,
+  bounded at its start, at its end, at both, in a PARTITION BY, through a
+  named window, in a subquery, and with an ORDER BY of the function's own
+  (which orders inside the frame, not the frame); accepted with an OVER
+  ORDER BY, unbounded on both sides (with EXCLUDE CURRENT ROW too), and as
+  a RANGE or GROUPS frame (every row a peer). A LIMIT, an OFFSET alone and
+  a LIMIT percent with no ORDER BY in the same query are refused, at the
+  top, after a UNION ALL, in a FROM subquery under an outer ORDER BY and in
+  a WHERE subquery; accepted with the ORDER BY. DISTINCT ON with no ORDER
+  BY is refused; with one, and plain DISTINCT, accepted. Catches each rule
+  off, a frame rule that reads only `start` or only `end`, takes
+  `arg_orders` for the OVER clause's ORDER BY or refuses RANGE and GROUPS
+  frames, a LIMIT rule that forgets LIMIT percent or OFFSET or takes an
+  ORDER BY of another query node, and a DISTINCT rule that refuses plain
+  DISTINCT.
+- histograms: one-argument `histogram` is refused with no CAST, with a
+  CAST to DOUBLE, FLOAT8, REAL or a type name the parse leaves unbound,
+  with TRY_CAST, and as a window function; accepted with a CAST to BIGINT,
+  VARCHAR, a list or a struct of DOUBLE. `histogram` with bins and
+  `histogram_exact` are refused when the bins read a column, also inside
+  a subquery, and accepted with constant bins, over a DOUBLE too, and with
+  a subquery that reads no column. Both names are
+  `sql_discipline._HISTOGRAMS`, on neither row-order list. Catches the
+  rule off, a key list missing DOUBLE, FLOAT or an unbound name, a rule
+  that takes any CAST, a bins rule off, blind inside a subquery or
+  refusing every subquery, and a rule that refuses a safe key type.
 - list sorts: `list_sort` (`array_sort`) and `list_grade_up`
   (`array_grade_up`, `grade_up`) are refused with no direction, with a
   direction but no NULL placement, with `DEFAULT` or `ORDER_DEFAULT` for
@@ -176,11 +204,11 @@ REFUSED = [
      "orders[0]: an ORDER BY key without NULLS FIRST or NULLS LAST"),
     # Literals.
     ("SELECT a FROM t WHERE a = 2", "where_clause.right: a literal that is not the operand of a CAST"),
-    ("SELECT a FROM t LIMIT (SELECT 2)", ".limit."),
-    ("SELECT a FROM t LIMIT CAST(2 AS BIGINT) OFFSET (SELECT 1)", ".offset."),
+    ("SELECT a FROM t ORDER BY a ASC NULLS LAST LIMIT (SELECT 2)", ".limit."),
+    ("SELECT a FROM t ORDER BY a ASC NULLS LAST LIMIT CAST(2 AS BIGINT) OFFSET (SELECT 1)", ".offset."),
     # Reached through dicts only (no list resets the exemption on the way):
     # the `limit`/`offset` key test alone keeps it from the subquery.
-    ("SELECT a FROM t LIMIT (SELECT a FROM t WHERE a = 2)",
+    ("SELECT a FROM t ORDER BY a ASC NULLS LAST LIMIT (SELECT a FROM t WHERE a = 2)",
      (".limit.", "where_clause.right: a literal that is not the operand of a CAST")),
     # Clocks and randomness.
     ("SELECT random() FROM t", "random() depends on when, where or in which session the query runs"),
@@ -365,6 +393,62 @@ REFUSED += [
      "select_list[0]: array_reverse_sort() sorts against the session's default_order"),
 ]
 
+# Frames, LIMIT, OFFSET and DISTINCT ON that keep rows by the order they
+# arrive; histograms whose answer follows it.
+_ROWS = "over a ROWS frame (%s to %s) with no ORDER BY in its OVER clause"
+_LIMIT = "a LIMIT or OFFSET with no ORDER BY in the same query"
+_HIST = "of an argument that is not a CAST to a type other than FLOAT or DOUBLE (%s)"
+_BINS = "with bins that read a column"
+REFUSED += [
+    ("SELECT count(v) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM groups",
+     "select_list[0]: count() " + _ROWS % ("UNBOUNDED_PRECEDING", "CURRENT_ROW_ROWS")),
+    ("SELECT sum(v) OVER (PARTITION BY k ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM groups",
+     "select_list[0]: sum() " + _ROWS % ("UNBOUNDED_PRECEDING", "CURRENT_ROW_ROWS")),
+    # Bounded at the start only, at the end only.
+    ("SELECT sum(v) OVER (ROWS BETWEEN CAST(1 AS BIGINT) PRECEDING AND UNBOUNDED FOLLOWING) FROM groups",
+     "select_list[0]: sum() " + _ROWS % ("EXPR_PRECEDING_ROWS", "UNBOUNDED_FOLLOWING")),
+    ("SELECT sum(v) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CAST(1 AS BIGINT) FOLLOWING) FROM groups",
+     "select_list[0]: sum() " + _ROWS % ("UNBOUNDED_PRECEDING", "EXPR_FOLLOWING_ROWS")),
+    # The function's own ORDER BY orders inside the frame, not the frame.
+    ("SELECT sum(v ORDER BY id ASC NULLS LAST) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM groups",
+     "select_list[0]: sum() " + _ROWS % ("UNBOUNDED_PRECEDING", "CURRENT_ROW_ROWS")),
+    ("SELECT first_value(v ORDER BY id ASC NULLS LAST) OVER (ROWS CAST(1 AS BIGINT) PRECEDING) FROM groups",
+     "select_list[0]: first_value() " + _ROWS % ("EXPR_PRECEDING_ROWS", "CURRENT_ROW_ROWS")),
+    # A named window: the parse copies it into the call.
+    ("SELECT count(v) OVER w FROM groups WINDOW w AS (ROWS CAST(1 AS BIGINT) PRECEDING)",
+     "select_list[0]: count() " + _ROWS % ("EXPR_PRECEDING_ROWS", "CURRENT_ROW_ROWS")),
+    ("SELECT s FROM (SELECT sum(v) OVER (ROWS BETWEEN CURRENT ROW AND CURRENT ROW) AS s FROM groups) AS q",
+     "from_table.subquery.node.select_list[0]: sum() " + _ROWS % ("CURRENT_ROW_ROWS", "CURRENT_ROW_ROWS")),
+    # LIMIT, OFFSET alone, LIMIT percent; after a UNION ALL; in a FROM
+    # subquery whose outer query has the ORDER BY; in a WHERE subquery.
+    ("SELECT id FROM groups LIMIT 1", "statement.node.modifiers[0]: " + _LIMIT),
+    ("SELECT id FROM groups OFFSET 1", "statement.node.modifiers[0]: " + _LIMIT),
+    ("SELECT id FROM groups LIMIT 50%", "statement.node.modifiers[0]: " + _LIMIT),
+    ("SELECT id FROM groups UNION ALL SELECT k FROM groups LIMIT 1", "statement.node.modifiers[0]: " + _LIMIT),
+    ("SELECT id FROM (SELECT id FROM groups LIMIT 1) AS s ORDER BY id ASC NULLS LAST",
+     "from_table.subquery.node.modifiers[0]: " + _LIMIT),
+    ("SELECT id FROM groups WHERE k IN (SELECT k FROM groups LIMIT 1) ORDER BY id ASC NULLS LAST",
+     "subquery.node.modifiers[0]: " + _LIMIT),
+    ("SELECT DISTINCT ON (k) k, id FROM groups",
+     "statement.node.modifiers[0]: DISTINCT ON with no ORDER BY in the same query"),
+    # One-argument histogram: no CAST, DOUBLE and its spellings, an unbound
+    # name, TRY_CAST, a window function.
+    ("SELECT histogram(f64_special) AS h FROM t", "select_list[0]: histogram() " + _HIST % "no CAST"),
+    ("SELECT histogram(CAST(f AS DOUBLE)) FROM t", "select_list[0]: histogram() " + _HIST % "DOUBLE"),
+    ("SELECT histogram(CAST(f AS FLOAT8)) FROM t", "select_list[0]: histogram() " + _HIST % "DOUBLE"),
+    ("SELECT histogram(CAST(f AS REAL)) FROM t", "select_list[0]: histogram() " + _HIST % "FLOAT"),
+    ("SELECT histogram(CAST(f AS main.f8)) FROM t", "select_list[0]: histogram() " + _HIST % "UNBOUND"),
+    ("SELECT histogram(TRY_CAST(s AS DOUBLE)) FROM t", "select_list[0]: histogram() " + _HIST % "DOUBLE"),
+    # Upper case: the parse keeps a window function's name lowercased.
+    ("SELECT HISTOGRAM(f) OVER () FROM t", "select_list[0]: histogram() " + _HIST % "no CAST"),
+    # Bins from a column, from a column inside a subquery.
+    ("SELECT histogram(id, CASE WHEN id < CAST(3 AS BIGINT) THEN [CAST(1 AS BIGINT)] ELSE [CAST(5 AS BIGINT)] END) FROM groups",
+     "select_list[0]: histogram() " + _BINS),
+    ("SELECT histogram_exact(id, [k]) FROM groups", "select_list[0]: histogram_exact() " + _BINS),
+    ("SELECT histogram(id, (SELECT [max(k)] FROM groups)) FROM groups",
+     "select_list[0]: histogram() " + _BINS),
+]
+
 # The ORDER BY and literal queries above, their rule kept.
 ACCEPTED = [
     "SELECT a FROM t ORDER BY a ASC NULLS LAST",
@@ -374,7 +458,7 @@ ACCEPTED = [
     "SELECT string_agg(s ORDER BY s DESC NULLS FIRST) FROM t",
     "SELECT a FROM t WHERE a = CAST(2 AS BIGINT)",
     "SELECT a FROM t ORDER BY a ASC NULLS LAST LIMIT 2 OFFSET 1",
-    "SELECT a FROM t LIMIT (SELECT CAST(2 AS BIGINT))",
+    "SELECT a FROM t ORDER BY a ASC NULLS LAST LIMIT (SELECT CAST(2 AS BIGINT))",
     "SELECT a FROM t",
     # A column named like a value keyword, qualified by its table: the
     # binder resolves it as a column (or refuses it), never as the call.
@@ -427,11 +511,35 @@ ACCEPTED += [
 ] + [
     "SELECT lead(a ORDER BY b ASC NULLS LAST) OVER () FROM t",
     "SELECT rank() OVER (), dense_rank() OVER (), percent_rank() OVER (), cume_dist() OVER () FROM t",
-    "SELECT count(a), sum(a), min(a), max(a), histogram(a), bitstring_agg(a), avg(a) FROM t",
+    "SELECT count(a), sum(a), min(a), max(a), histogram(CAST(a AS BIGINT)), bitstring_agg(a), avg(a) FROM t",
     "SELECT list_sort(l, CAST('ASC' AS VARCHAR), CAST('NULLS LAST' AS VARCHAR)) FROM t",
     "SELECT array_sort(l, CAST('DESCENDING' AS VARCHAR), CAST('NULLS_FIRST' AS VARCHAR)) FROM t",
     "SELECT array_grade_up(l, CAST('desc' AS VARCHAR), CAST('nulls first' AS VARCHAR)) FROM t",
     "SELECT list_sort(list(a ORDER BY b ASC NULLS LAST), CAST('ASC' AS VARCHAR), CAST('NULLS LAST' AS VARCHAR)) FROM t",
+]
+
+# Frames, LIMIT, OFFSET, DISTINCT ON and histograms with the rule kept; RANGE
+# and GROUPS frames, whose rows are all peers with no ORDER BY.
+ACCEPTED += [
+    "SELECT count(v) OVER (ORDER BY id ASC NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM groups",
+    "SELECT sum(v) OVER (PARTITION BY k ORDER BY id DESC NULLS FIRST ROWS CAST(1 AS BIGINT) PRECEDING) FROM groups",
+    "SELECT count(v) OVER w FROM groups WINDOW w AS (ORDER BY id ASC NULLS LAST ROWS CAST(1 AS BIGINT) PRECEDING)",
+    "SELECT count(v) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) FROM groups",
+    "SELECT count(v) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE CURRENT ROW) FROM groups",
+    "SELECT count(v) OVER (RANGE BETWEEN CURRENT ROW AND CURRENT ROW) FROM groups",
+    "SELECT count(v) OVER (GROUPS BETWEEN CAST(1 AS BIGINT) PRECEDING AND CURRENT ROW) FROM groups",
+    "SELECT sum(v) OVER (PARTITION BY k) FROM groups",
+    "SELECT id FROM groups ORDER BY id ASC NULLS LAST OFFSET 1",
+    "SELECT id FROM groups ORDER BY id ASC NULLS LAST LIMIT 50%",
+    "SELECT id FROM groups UNION ALL SELECT k FROM groups ORDER BY id ASC NULLS LAST LIMIT 1",
+    "SELECT id FROM (SELECT id FROM groups ORDER BY id DESC NULLS LAST LIMIT 1) AS s",
+    "SELECT DISTINCT ON (k) k, id FROM groups ORDER BY k ASC NULLS LAST, id ASC NULLS LAST",
+    "SELECT DISTINCT k FROM groups",
+    "SELECT histogram(CAST(f AS VARCHAR)), histogram(CAST(a AS BIGINT)) FROM t",
+    "SELECT histogram(CAST(f AS DOUBLE[])), histogram(TRY_CAST(f AS STRUCT(x DOUBLE))) FROM t",
+    "SELECT histogram(CAST(k AS BIGINT)) OVER (PARTITION BY k) FROM groups",
+    "SELECT histogram(f, [CAST(0 AS DOUBLE), CAST(1 AS DOUBLE)]), histogram_exact(a, [CAST(1 AS BIGINT)]) FROM t",
+    "SELECT histogram(id, (SELECT [CAST(count(*) AS BIGINT)] FROM groups)) FROM groups",
 ]
 
 # The tables the queries above may name, as gen_expected.py passes its own.
@@ -602,9 +710,9 @@ _ORDER_FREE = frozenset([
     # Order statistics of the multiset; a HyperLogLog's registers are
     # maxima; counts per value.
     "approx_count_distinct", "entropy", "mad", "median", "quantile", "quantile_cont", "quantile_disc",
-    # A map ordered by key (histogram), counts over fixed bins
-    # (histogram_exact), bits set by value (bitstring_agg).
-    "bitstring_agg", "histogram", "histogram_exact",
+    # Bits set by value (bitstring_agg). histogram and histogram_exact are
+    # sql_discipline._HISTOGRAMS: order-free only under its rule.
+    "bitstring_agg",
     # Window functions DuckDB lists as aggregates: with no ORDER BY every
     # row is a peer, so each row ranks 1 (percent_rank 0, cume_dist 1).
     "cume_dist", "dense_rank", "percent_rank", "rank", "rank_dense",
@@ -638,7 +746,7 @@ def _unordered_calls(con, body):
 
 
 def check_order_lists(con):
-    """_ORDER_SENSITIVE, _WINDOW_ORDERED and _ORDER_FREE split the running
+    """_ORDER_SENSITIVE, _WINDOW_ORDERED, _HISTOGRAMS and _ORDER_FREE split the running
     DuckDB's aggregates (window functions included) between them, and _ORDER_MACROS is exactly the built-in
     macros that reach an order-sensitive aggregate with no ORDER BY."""
     rows = con.execute(
@@ -647,12 +755,15 @@ def check_order_lists(con):
     sensitive = sql_discipline._ORDER_SENSITIVE | sql_discipline._WINDOW_ORDERED
     for name in sorted(sql_discipline._ORDER_SENSITIVE & sql_discipline._WINDOW_ORDERED):
         FAILURES.append("%s is on both _ORDER_SENSITIVE and _WINDOW_ORDERED" % name)
+    for name in sorted(sql_discipline._HISTOGRAMS & (sensitive | _ORDER_FREE)):
+        FAILURES.append("%s is on _HISTOGRAMS and on another row-order list" % name)
+    listed = sensitive | sql_discipline._HISTOGRAMS
     for name in sorted(sensitive & _ORDER_FREE):
         FAILURES.append("aggregate %s is on both _ORDER_SENSITIVE and _ORDER_FREE" % name)
-    for name in sorted((sensitive | _ORDER_FREE) - aggregates):
+    for name in sorted((listed | _ORDER_FREE) - aggregates):
         FAILURES.append("%s is listed as an aggregate, which this DuckDB does not have" % name)
-    for name in sorted(aggregates - sensitive - _ORDER_FREE):
-        FAILURES.append("aggregate %s is on neither _ORDER_SENSITIVE nor _ORDER_FREE" % name)
+    for name in sorted(aggregates - listed - _ORDER_FREE):
+        FAILURES.append("aggregate %s is on neither _ORDER_SENSITIVE, _HISTOGRAMS nor _ORDER_FREE" % name)
     macros = []
     for name, ftype, body in rows:
         if ftype == "macro" and body is not None:

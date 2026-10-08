@@ -33,9 +33,23 @@ every literal is CAST, no function on its list of those reading more than
 their arguments (a clock, a random draw, the session, SQL text, the running
 DuckDB), no aggregate whose answer depends on the order rows reach it
 (`list`, `string_agg`, `first`...) without an ORDER BY of its own, no
+window ROWS frame without an OVER ORDER BY, no LIMIT, OFFSET or DISTINCT
+ON without an ORDER BY in its query, no FLOAT or DOUBLE histogram, no
 `list_sort` that leaves its direction or NULL placement to the session,
 and FROM names only the tables registered here, with no AT clause, its own
-CTEs and the allowed table functions), on the exact text that is then run. The result is rendered by render.py to
+CTEs and the allowed table functions), on the exact text that is then run.
+
+Then the row-order check (row_order_diffs): the case runs again on a
+connection per ROW_ORDERS, which registers the same tables with each
+table's rows reversed, and shuffled by `random.Random(SHUFFLE_SEED)`, and
+each answer must equal the first under the case's policy (canon.compare:
+a multiset under `order: none`, row for row under `total`, key order with
+runs of equal keys as multisets under `keys`; floats within the
+tolerance). It sees what either order changes on these tables, ties among
+ORDER BY keys and the sign of a zero that min, max, a quantile or a
+GROUP BY key keeps included; not what neither changes.
+
+The result is rendered by render.py to
 
     <output directory>/expect/<shard>/<case>.tsv
 
@@ -44,11 +58,13 @@ with, after the policy lines, the line
 """
 
 import os
+import random
 import sys
 
 import duckdb
 import pyarrow as pa
 
+import canon
 import datasets
 import oracle_case
 import render
@@ -76,7 +92,42 @@ CONFIG = {
 }
 
 
-def connect():
+# The orders, besides the tables' own, in which the row-order check
+# registers every table again (row_order_diffs): each table's rows reversed,
+# and each table's rows shuffled by `random.Random(SHUFFLE_SEED)`.
+ROW_ORDERS = ("reversed", "shuffled")
+SHUFFLE_SEED = 839
+
+_BUILT = {}
+
+
+def tables():
+    """Every table connect() registers, by name, each built once per process."""
+    if not _BUILT:
+        for name in datasets.NAMES:
+            _BUILT[name] = datasets.build(name).table
+        for name in twin_inputs.NAMES:
+            if name in _BUILT:
+                raise oracle_case.CaseError("table %s is both a dataset and a twin input" % name)
+            _BUILT[name] = twin_inputs.build(name)
+    return _BUILT
+
+
+def permutation(n, order):
+    """The row indices of a table of `n` rows in row order `order`."""
+    idx = list(range(n))
+    if order == "reversed":
+        idx.reverse()
+    elif order == "shuffled":
+        random.Random(SHUFFLE_SEED).shuffle(idx)
+    else:
+        raise ValueError("row order %r is not one of %s" % (order, ROW_ORDERS))
+    return idx
+
+
+def connect(order=None):
+    """The oracle's connection, every table registered; with `order` (one
+    of ROW_ORDERS), each table holds the same rows in that order."""
     con = duckdb.connect(config=CONFIG)
     con.execute("SET threads = 1")
     # ICU (in the wheel) takes its default TimeZone from the process's TZ
@@ -88,18 +139,15 @@ def connect():
     # were not recognized").
     con.execute("SET TimeZone = 'UTC'")
     con.execute("SET Calendar = 'gregorian'")
-    for name in datasets.NAMES:
-        con.register(name, datasets.build(name).table)
-    for name in twin_inputs.NAMES:
-        if name in datasets.NAMES:
-            raise oracle_case.CaseError("table %s is both a dataset and a twin input" % name)
-        con.register(name, twin_inputs.build(name))
+    for name, table in tables().items():
+        if order is not None:
+            table = table.take(pa.array(permutation(table.num_rows, order), type=pa.int64()))
+        con.register(name, table)
     return con
 
 
-def run_query(con, sql):
-    """Check `sql` and run that same text; the result as a pyarrow Table."""
-    sql_discipline.check(con, sql, TABLES)
+def execute(con, sql):
+    """Run `sql` as it is, unchecked; the result as a pyarrow Table."""
     res = con.execute(sql)
     if hasattr(res, "to_arrow_table"):
         table = res.to_arrow_table()
@@ -108,6 +156,28 @@ def run_query(con, sql):
     if isinstance(table, pa.RecordBatchReader):
         table = table.read_all()
     return table
+
+
+def run_query(con, sql):
+    """Check `sql` and run that same text; the result as a pyarrow Table."""
+    sql_discipline.check(con, sql, TABLES)
+    return execute(con, sql)
+
+
+def row_order_diffs(others, sql, policy, not_null, text):
+    """Every difference between `text` (the case's answer, rendered) and
+    the answer of the same `sql` on each connection of `others` ((order,
+    connection) pairs from connect(order)), compared as canon.compare
+    compares a result with its expectation under the case's `policy`:
+    as a multiset (`none`), row for row (`total`), or in key order with
+    each run of equal keys as a multiset (`keys`), floats within the
+    policy's tolerance. [] when every order gives the same answer."""
+    want = canon.parse(text)
+    diffs = []
+    for order, con in others:
+        got = canon.parse(render.render_table(execute(con, sql), policy, (), not_null))
+        diffs += ["rows %s: %s" % (order, d) for d in canon.compare(want, got)]
+    return diffs
 
 
 def generated_line(rel):
@@ -126,6 +196,7 @@ def cases(data):
 
 def main(out, data):
     con = connect()
+    others = [(order, connect(order)) for order in ROW_ORDERS]
     for rel in cases(data):
         with open(os.path.join(data, rel), encoding="utf-8") as f:
             sql = f.read()
@@ -133,6 +204,10 @@ def main(out, data):
             policy, not_null = oracle_case.read_header(sql)
             table = run_query(con, sql)
             text = render.render_table(table, policy, [generated_line(rel)], not_null)
+            diffs = row_order_diffs(others, sql, policy, not_null, text)
+            if diffs:
+                raise oracle_case.CaseError("the answer depends on the order of the tables' rows, not only on "
+                                            "their contents: " + "; ".join(diffs))
         except Exception as e:
             raise oracle_case.CaseError("oracle/%s: %s" % (rel, e)) from e
         dest = os.path.join(out, "expect", rel[: -len(".sql")] + ".tsv")
