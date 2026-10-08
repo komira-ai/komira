@@ -54,6 +54,7 @@ mojo_library(
         "tests/test_L2_response_framing_precedence.mojo",
         "tests/test_L2_special_status_framing.mojo",
         "tests/test_L2_tls_connector_construction.mojo",
+        "tests/test_L2_tls_starttls_upgrade.mojo",
         "tests/test_body.mojo",
         "tests/test_body_drain_deadline.mojo",
         "tests/test_body_drain_deadline_survives_byte_dribble.mojo",
@@ -197,6 +198,10 @@ mojo_library(
             "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
             "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
             "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
+        "tests/test_L2_tls_starttls_upgrade.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
         },
         "tests/test_dial_resolve_is_lazy.mojo": [
             "client.mojo",
