@@ -10,16 +10,19 @@
 #      grammar `[a-z][a-z0-9-]{0,23}` with no trailing or doubled `-`, so
 #      never the node-id separator `/`), a type set, every `Ref` naming a
 #      resource of the list, an output the producer's type exposes, an access
-#      verb the target's type accepts, values that are resolved (a build
-#      output or a release parameter must have been substituted by the deploy
-#      facade before a cloud ever sees the resource) in `env` of a service
-#      AND of a job, and an image platform written as `<os>/<cpu>` (empty
-#      means `linux/amd64`). And the secret rules (secrets.mojo): no `uses`
-#      on a secret; each `secret_env` entry set by it and not also by
-#      `env`, naming one of a `name` and a `secret`, its `secret` a secret
-#      resource read by the identity that receives it. And the data rules:
-#      `retention` only on a type that takes one (a service or a job is
-#      deleted with its resource) and only DELETE or KEEP; and the rules of
+#      verb the target's type accepts. And the workload rules (compute.mojo,
+#      for a service, a container job and a worker): an image that is a
+#      content digest by now (a build output must have been substituted by
+#      the deploy facade before a cloud ever sees the resource), its
+#      platform written as `<os>/<cpu>` (empty means `linux/amd64`); `run_as`
+#      a service account; `env` values resolved; a written `command` whose
+#      first entry is not empty; a worker's `replicas` never an explicit 0.
+#      And the secret rules (secrets.mojo): no `uses` on a secret; each
+#      `secret_env` entry of a workload set by it and not also by `env`,
+#      naming one of a `name` and a `secret`, its `secret` a secret resource
+#      read by the identity that receives it. And the data rules:
+#      `retention` only on a type that takes one (a workload is deleted with
+#      its resource) and only DELETE or KEEP; and the rules of
 #      the data types (data.mojo): no `uses` on a table or a bucket (it runs
 #      as no identity, so it can be granted to, never grant); a bucket's
 #      `object_expiry_days` never an explicit 0; a table's key, access paths
@@ -31,12 +34,16 @@
 #      (dns.mojo): no `uses` on a DNS zone, a DNS record or a certificate;
 #      DNS names of the name grammar, each in its zone; one zone per domain
 #      and one record set per name and type; a record's values of its type;
-#      a certificate's domains from 1 to 10, none twice.
-#      And the identity rules (grants.mojo): `run_as` names a
-#      `service_account`; no `uses` on a grant; a `uses` line or a grant
-#      names exactly one of a target and a cell resource, with a verb that
-#      target accepts; a grant's principal is an identity (a service
-#      account, or a service or job with no `run_as`); ONE edge per
+#      a certificate's domains from 1 to 10, none twice. And the trigger
+#      rules (triggers.mojo): no `uses` on a schedule or an event trigger; a
+#      cron of the portable form, a time zone of an IANA name's shape, a
+#      schedule's target a container job or a service; an event trigger's
+#      source a bucket, its event known, its target a service, each
+#      (source, event, target) once.
+#      And the identity rules (grants.mojo): no `uses` on a grant; a `uses`
+#      line or a grant names exactly one of a target and a cell resource,
+#      with a verb that target accepts; a grant's principal is an identity
+#      (a service account, or a workload with no `run_as`); ONE edge per
 #      (principal, target) pair in the whole list, counting `uses` lines,
 #      grants and the implicit `cell LOGS WRITE` alike; and no two edges of
 #      one resource whose `u-<h>` roles collide.
@@ -64,7 +71,7 @@
 # deploy.
 # =============================================================================
 
-from kci_resource_proto.resource import Resource, Ref, Value
+from kci_resource_proto.resource import Resource, Ref
 
 from kci_cloud.adapter import (
     CloudAdapter,
@@ -82,11 +89,11 @@ from kci_cloud.catalog import (
     FIELD_CERTIFICATE,
     FIELD_DNS_RECORD,
     FIELD_DNS_ZONE,
+    FIELD_EVENT_TRIGGER,
     FIELD_GRANT,
-    FIELD_JOB,
     FIELD_QUEUE,
+    FIELD_SCHEDULE,
     FIELD_SECRET,
-    FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_SUBSCRIPTION,
     FIELD_TABLE,
@@ -99,12 +106,15 @@ from kci_cloud.catalog import (
 )
 from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
+from kci_cloud.compute import V1_IMAGE_PLATFORM, image_platform, workload_findings
 from kci_cloud.data import data_findings
 from kci_cloud.feed import feeds_of
 from kci_cloud.messaging import messaging_findings
 from kci_cloud.secrets import secret_env_findings, secret_findings
 from kci_cloud.dns import dns_findings
-from kci_cloud.values import check_value
+from kci_cloud.firing import firings_of
+from kci_cloud.triggers import trigger_findings
+from kci_cloud.workload import is_workload, workload_of
 from kci_cloud.grants import (
     GrantEdge,
     cell_accepted,
@@ -125,10 +135,6 @@ def _index_of_id(resources: List[Resource], id: String) -> Int:
 
 comptime ID_MAX_BYTES = 24
 """The longest resource id. Narrowing later breaks authors; widening is free."""
-
-comptime V1_IMAGE_PLATFORM = "linux/amd64"
-"""What an empty `Image.platform` means (OS + CPU)."""
-
 
 def id_problem(id: String) -> String:
     """Why `id` is not a legal resource id, or empty if it is. The grammar is
@@ -162,124 +168,11 @@ def id_problem(id: String) -> String:
     return String("")
 
 
-def image_platform(r: Resource) -> String:
-    """The image platform of a service or a job, with the empty default
-    filled in; empty when the resource has no image."""
-    var p = String("")
-    var has = False
-    if r._oneof0_case == 1 and Bool(r.service.value().image):
-        has = True
-        p = r.service.value().image.value().platform.copy()
-    elif r._oneof0_case == 2 and Bool(r.job.value().image):
-        has = True
-        p = r.job.value().image.value().platform.copy()
-    if not has:
-        return String("")
-    if p.byte_length() == 0:
-        return String(V1_IMAGE_PLATFORM)
-    return p^
-
-
-def _check_image(owner: String, path: String, r: Resource, mut out: List[Finding]):
-    """Shared by the two v1 types: an image must be a content digest by now,
-    and its platform written `<os>/<cpu>`. Whether a cloud runs that
-    platform is the cloud's question (`required_artifact`, in
-    `validate_for`)."""
-    var has = False
-    var arm = 0
-    var platform = String("")
-    if r._oneof0_case == 1 and Bool(r.service.value().image):
-        has = True
-        arm = r.service.value().image.value()._oneof0_case
-        platform = r.service.value().image.value().platform.copy()
-    elif r._oneof0_case == 2 and Bool(r.job.value().image):
-        has = True
-        arm = r.job.value().image.value()._oneof0_case
-        platform = r.job.value().image.value().platform.copy()
-    if has and platform.byte_length() > 0:
-        var parts = platform.split("/")
-        if (
-            len(parts) != 2
-            or parts[0].byte_length() == 0
-            or parts[1].byte_length() == 0
-        ):
-            out.append(
-                Finding(
-                    FINDING_GRAPH,
-                    owner,
-                    path + String(".platform"),
-                    String("platform \"")
-                    + platform
-                    + String("\" is not <os>/<cpu> (for example ")
-                    + String(V1_IMAGE_PLATFORM)
-                    + String(")"),
-                )
-            )
-    if not has or arm == 0:
-        out.append(Finding(FINDING_GRAPH, owner, path, String("no image")))
-    elif arm == 1:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String(
-                    "the image is a build output that was not resolved to a digest"
-                    " before deploy"
-                ),
-            )
-        )
-
-
 def _type_of(catalog: Catalog, r: Resource) -> String:
     try:
         return catalog.name_of(body_field(r))
     except:
         return String("resource with no type")
-
-
-def _check_run_as(
-    catalog: Catalog,
-    resources: List[Resource],
-    owner: String,
-    path: String,
-    r: Ref,
-    mut out: List[Finding],
-):
-    """`run_as` names a service account of the list, and no output."""
-    var p = _index_of_id(resources, r.resource)
-    if p < 0:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("ref to missing resource \"") + r.resource + String("\""),
-            )
-        )
-        return
-    if r._oneof0_case != 0:
-        out.append(
-            Finding(FINDING_GRAPH, owner, path, String("run_as names an identity, not one of its outputs"))
-        )
-        return
-    var field: Int
-    try:
-        field = body_field(resources[p])
-    except:
-        return  # the account's own missing type is reported on it
-    if field != FIELD_SERVICE_ACCOUNT:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("run_as must name a service_account; \"")
-                + r.resource
-                + String("\" is a ")
-                + catalog.name_of(field),
-            )
-        )
 
 
 def _check_principal(
@@ -289,8 +182,8 @@ def _check_principal(
     r: Ref,
     mut out: List[Finding],
 ):
-    """A grant's principal is an identity: a service account, or a service or
-    a job with no `run_as` (its private identity)."""
+    """A grant's principal is an identity: a service account, or a workload
+    with no `run_as` (its private identity)."""
     var path = String("grant.principal")
     var p = _index_of_id(resources, r.resource)
     if p < 0:
@@ -316,7 +209,7 @@ def _check_principal(
         return
     if field == FIELD_SERVICE_ACCOUNT:
         return
-    if field == FIELD_SERVICE or field == FIELD_JOB:
+    if is_workload(field):
         var acct = run_as_of(pr)
         if acct.byte_length() > 0:
             out.append(
@@ -339,8 +232,8 @@ def _check_principal(
             FINDING_GRAPH,
             owner,
             path,
-            String("the principal must be a service_account, or a service or job with")
-            + String(" no run_as; \"")
+            String("the principal must be a service_account, or a workload (a service, a")
+            + String(" container_job or a worker) with no run_as; \"")
             + r.resource
             + String("\" is a ")
             + catalog.name_of(field),
@@ -449,8 +342,10 @@ def _check_edge_target(
 
 def _edge_where(e: GrantEdge, owner: String, index: Int) -> String:
     """Where an edge came from, for a refusal text."""
-    if e.implicit:
+    if e.implicit and e.on_cell():
         return String("the implicit cell LOGS WRITE edge of \"") + owner + String("\"")
+    if e.implicit:
+        return String("the implicit CALL edge of trigger \"") + owner + String("\"")
     if e.role == "grant":
         return String("grant \"") + owner + String("\"")
     return String("uses[") + String(index) + String("] of \"") + owner + String("\"")
@@ -599,8 +494,6 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                         + String(" is not DELETE or KEEP"),
                     )
                 )
-        if field == FIELD_SERVICE or field == FIELD_JOB:
-            _check_image(id, tname + String(".image"), r, out)
         if field == FIELD_BUCKET or field == FIELD_TABLE:
             out.extend(data_findings(field, r))
             continue
@@ -612,6 +505,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             continue
         if field == FIELD_DNS_ZONE or field == FIELD_DNS_RECORD or field == FIELD_CERTIFICATE:
             out.extend(dns_findings(catalog, resources, field, r))
+            continue
+        if field == FIELD_SCHEDULE or field == FIELD_EVENT_TRIGGER:
+            out.extend(trigger_findings(resources, field, r))
             continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
@@ -644,32 +540,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                 out,
             )
             continue
-        if field == FIELD_SERVICE:
-            ref svc = r.service.value()
-            if svc.run_as:
-                _check_run_as(catalog, resources, id, String("service.run_as"), svc.run_as.value(), out)
-            for entry in svc.env.items():
-                check_value(
-                    catalog,
-                    resources,
-                    id,
-                    String("service.env.") + entry.key,
-                    entry.value,
-                    out,
-                )
-        if field == FIELD_JOB:
-            ref job = r.job.value()
-            if job.run_as:
-                _check_run_as(catalog, resources, id, String("job.run_as"), job.run_as.value(), out)
-            for entry in job.env.items():
-                check_value(
-                    catalog,
-                    resources,
-                    id,
-                    String("job.env.") + entry.key,
-                    entry.value,
-                    out,
-                )
+        out.extend(workload_findings(catalog, resources, r))
         out.extend(secret_env_findings(resources, r))
         for u in range(len(r.uses)):
             ref use = r.uses[u]
@@ -700,7 +571,7 @@ def _check_platform[
         return
     var need = cloud.required_artifact(r)
     if need.platform != have:
-        var kind = String("service") if r._oneof0_case == 1 else String("job")
+        var kind = workload_of(r).value().kind.copy()
         out.append(
             Finding(
                 FINDING_LIMIT,
@@ -736,6 +607,7 @@ def validate_for[
     ref entry = clouds.entries[e]
     var out = graph_findings(clouds.catalog, resources)
     var feeds = feeds_of(resources)
+    var firings = firings_of(resources)
     for i in range(len(resources)):
         ref r = resources[i]
         var field: Int
@@ -747,7 +619,7 @@ def validate_for[
         if t < 0:
             continue
         if entry.implements(field):
-            var limits = cloud.check(r, feeds)
+            var limits = cloud.check(r, feeds, firings)
             var public_refused = False
             for k in range(len(limits)):
                 if limits[k].field_path == "service.public":

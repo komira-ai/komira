@@ -20,9 +20,16 @@ interface. This package names no cloud:
                        bootstrap resources, the label rule, `list_owned`,
                        `whoami`, `trust_render` / `trust_check`; typed
                        absences (ABSENT_BY_DESIGN / NOT_YET) and `Finding`.
+  * workload.mojo    — the three workload types (service, container job,
+                       worker) as one view of their shared container fields
+                       and identity.
+  * compute.mojo     — the rules of the workloads: their graph findings
+                       (image, run_as, env, command, a worker's replicas)
+                       and a worker's versioned replicas default.
   * grants.mojo      — who a resource runs as (its identity owner), and
                        every grant edge it lowers (`uses` lines, a grant
-                       resource, the implicit `cell LOGS WRITE`), each
+                       resource, the implicit `cell LOGS WRITE`, a
+                       trigger's implicit CALL on its target), each
                        with its role `u-<h>` (or `grant`) decided by kci.
   * data.mojo        — the rules of the data types (table, bucket): their
                        graph findings, a table's key as text, the index
@@ -30,6 +37,13 @@ interface. This package names no cloud:
   * feed.mojo        — the FEEDS: the list's subscriptions as (subscription,
                        topic, queue), handed to every adapter's `check` and
                        `lower`.
+  * firing.mojo      — the FIRINGS: the list's schedules as (schedule,
+                       target, target type, cron, time zone), handed to
+                       every adapter's `check` and `lower`; and the
+                       schedule's versioned time zone.
+  * triggers.mojo    — the rules of the trigger types (schedule, event
+                       trigger): their graph findings, the portable cron
+                       form and a time zone name's shape.
   * messaging.mojo   — the rules of the messaging types (queue, topic,
                        subscription): their graph findings and the queue's
                        versioned ack deadline.
@@ -79,7 +93,8 @@ from kci_cloud.catalog import (
     PORTABLE,
     CLOUD_BOUND,
     FIELD_SERVICE,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
+    FIELD_WORKER,
     FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
@@ -91,6 +106,8 @@ from kci_cloud.catalog import (
     FIELD_DNS_RECORD,
     FIELD_CERTIFICATE,
     FIELD_SUBSCRIPTION,
+    FIELD_SCHEDULE,
+    FIELD_EVENT_TRIGGER,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -117,6 +134,8 @@ from kci_cloud.catalog import (
     ROLE_ZONE,
     ROLE_RECORD,
     ROLE_CERT,
+    ROLE_SCHEDULE,
+    ROLE_TRIGGER,
     BodyArm,
     body_arms,
     body_field,
@@ -142,6 +161,8 @@ from kci_cloud.grants import (
     role_hash,
     holds_own_identity,
     identity_owner,
+    is_trigger,
+    trigger_target,
     principal_node,
     run_as_of,
     uses_role,
@@ -179,6 +200,23 @@ from kci_cloud.data import (
     table_key_text,
 )
 from kci_cloud.feed import Feed, feeds_into, feeds_of, field_of_id
+from kci_cloud.firing import TIMEZONE_DEFAULT, Firing, firing_of, firings_into, firings_of, schedule_timezone
+from kci_cloud.triggers import (
+    EVENT_OBJECT_CREATED,
+    EVENT_OBJECT_DELETED,
+    cron_fields,
+    cron_problem,
+    timezone_problem,
+    trigger_findings,
+)
+from kci_cloud.workload import Workload, is_workload, workload_of
+from kci_cloud.compute import (
+    V1_IMAGE_PLATFORM,
+    WORKER_REPLICAS_DEFAULT,
+    image_platform,
+    worker_replicas,
+    workload_findings,
+)
 from kci_cloud.secrets import secret_env_findings, secret_findings, secret_of
 from kci_cloud.values import check_value, check_value_ref
 from kci_cloud.dns import (
@@ -234,11 +272,9 @@ from kci_cloud.validate import (
     validate_for,
     refusal_text,
     id_problem,
-    image_platform,
     node_role,
     role_budget_findings,
     ID_MAX_BYTES,
-    V1_IMAGE_PLATFORM,
 )
 from kci_cloud.deploy import (
     ApplyOutcome,

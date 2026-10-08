@@ -19,11 +19,12 @@
 # place; a new default is a new catalog version.
 #
 # THE PRIMARY ROLE is the role a reference to the resource lands on, on every
-# cloud: `run` for a service or a job, `table` for a table, `bucket` for a
+# cloud: `run` for a workload (a service, a container job, a worker), `table`
+# for a table, `bucket` for a
 # bucket, `queue` for a queue, `secret` for a secret, `topic` for a topic,
 # `sub` for a subscription, `identity` for a service account, `grant` for a
 # grant, `zone` for a DNS zone, `record` for a DNS record, `cert` for a
-# certificate. A
+# certificate, `schedule` for a schedule, `trigger` for an event trigger. A
 # cloud adapter
 # writes a dependency or an input on ANOTHER resource as that resource's id
 # alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
@@ -54,8 +55,10 @@ comptime CLOUD_BOUND: Int = 2
 
 comptime FIELD_SERVICE: Int = 10
 """`Resource.body` field number of `service`."""
-comptime FIELD_JOB: Int = 11
-"""`Resource.body` field number of `job`."""
+comptime FIELD_CONTAINER_JOB: Int = 11
+"""`Resource.body` field number of `container_job` (was `job`)."""
+comptime FIELD_WORKER: Int = 12
+"""`Resource.body` field number of `worker`."""
 comptime FIELD_TABLE: Int = 13
 """`Resource.body` field number of `table`."""
 comptime FIELD_BUCKET: Int = 14
@@ -70,6 +73,8 @@ comptime FIELD_SERVICE_ACCOUNT: Int = 20
 """`Resource.body` field number of `service_account`."""
 comptime FIELD_TOPIC: Int = 21
 """`Resource.body` field number of `topic`."""
+comptime FIELD_SCHEDULE: Int = 22
+"""`Resource.body` field number of `schedule`."""
 comptime FIELD_GRANT: Int = 25
 """`Resource.body` field number of `grant`."""
 comptime FIELD_DNS_RECORD: Int = 26
@@ -78,6 +83,8 @@ comptime FIELD_CERTIFICATE: Int = 27
 """`Resource.body` field number of `certificate`."""
 comptime FIELD_SUBSCRIPTION: Int = 28
 """`Resource.body` field number of `subscription`."""
+comptime FIELD_EVENT_TRIGGER: Int = 31
+"""`Resource.body` field number of `event_trigger`."""
 
 comptime OUTPUT_URL = "URL"
 comptime OUTPUT_HOST = "HOST"
@@ -116,9 +123,14 @@ comptime ROLE_CERT = "cert"
 """A certificate's primary role: the certificate object."""
 comptime ROLE_IDENTITY = "identity"
 """The identity role: a service account's one object, and the PRIVATE
-identity every service and job lowers (turned off under `run_as`)."""
+identity every workload lowers (turned off under `run_as`)."""
 comptime ROLE_GRANT = "grant"
 """A grant resource's edge."""
+comptime ROLE_SCHEDULE = "schedule"
+"""A schedule's primary role: the scheduler's object."""
+comptime ROLE_TRIGGER = "trigger"
+"""An event trigger's primary role: the rule or subscription that delivers
+the events."""
 
 
 def retention_word(r: Int) -> String:
@@ -234,9 +246,10 @@ struct Catalog(Copyable, Movable, Deinitable):
 
     @staticmethod
     def v1() raises -> Catalog:
-        """`kci.resource.v1` as declared today: `service`, `job`, `table`,
-        `bucket`, `queue`, `secret`, `dns_zone`, `service_account`, `topic`,
-        `grant`, `dns_record`, `certificate` and `subscription`."""
+        """`kci.resource.v1` as declared today: `service`, `container_job`,
+        `worker`, `table`, `bucket`, `queue`, `secret`, `dns_zone`,
+        `service_account`, `topic`, `schedule`, `grant`, `dns_record`,
+        `certificate`, `subscription` and `event_trigger`."""
         var c = Catalog()
         var svc_out = List[String]()
         svc_out.append(String(OUTPUT_URL))
@@ -246,8 +259,12 @@ struct Catalog(Copyable, Movable, Deinitable):
         c.add(
             CatalogType(FIELD_SERVICE, String("service"), PORTABLE, svc_out^, call.copy())
         )
-        # A job exposes nothing; CALL on a job is "may start a run of it".
-        c.add(CatalogType(FIELD_JOB, String("job"), PORTABLE, List[String](), call^))
+        # A container job exposes nothing; CALL on it is "may start a run of
+        # it". A worker exposes nothing and accepts no verb: it answers no
+        # request and is started by nobody (it runs always). Both are deleted
+        # with their resource, as a service is.
+        c.add(CatalogType(FIELD_CONTAINER_JOB, String("container_job"), PORTABLE, List[String](), call^))
+        c.add(CatalogType(FIELD_WORKER, String("worker"), PORTABLE, List[String](), List[String]()))
         # A table exposes its cloud name; its items are read and written, its
         # definition DESCRIBEd. Kept by default, as a bucket.
         var table_out = List[String]()
@@ -422,6 +439,30 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_CERT),
             )
         )
+        # Triggers. A schedule and an event trigger start or call their
+        # target through a private identity of their own (grants.mojo): they
+        # expose nothing, accept no verb (nothing is granted on a trigger),
+        # and are deleted with their resource.
+        c.add(
+            CatalogType(
+                FIELD_SCHEDULE,
+                String("schedule"),
+                PORTABLE,
+                List[String](),
+                List[String](),
+                primary_role=String(ROLE_SCHEDULE),
+            )
+        )
+        c.add(
+            CatalogType(
+                FIELD_EVENT_TRIGGER,
+                String("event_trigger"),
+                PORTABLE,
+                List[String](),
+                List[String](),
+                primary_role=String(ROLE_TRIGGER),
+            )
+        )
         return c^
 
 
@@ -440,7 +481,8 @@ def body_arms() -> List[BodyArm]:
     against wire bytes by `test_catalog_arms_match_the_wire`."""
     var l = List[BodyArm]()
     l.append(BodyArm(FIELD_SERVICE, String("service")))
-    l.append(BodyArm(FIELD_JOB, String("job")))
+    l.append(BodyArm(FIELD_CONTAINER_JOB, String("container_job")))
+    l.append(BodyArm(FIELD_WORKER, String("worker")))
     l.append(BodyArm(FIELD_TABLE, String("table")))
     l.append(BodyArm(FIELD_BUCKET, String("bucket")))
     l.append(BodyArm(FIELD_QUEUE, String("queue")))
@@ -448,10 +490,12 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_DNS_ZONE, String("dns_zone")))
     l.append(BodyArm(FIELD_SERVICE_ACCOUNT, String("service_account")))
     l.append(BodyArm(FIELD_TOPIC, String("topic")))
+    l.append(BodyArm(FIELD_SCHEDULE, String("schedule")))
     l.append(BodyArm(FIELD_GRANT, String("grant")))
     l.append(BodyArm(FIELD_DNS_RECORD, String("dns_record")))
     l.append(BodyArm(FIELD_CERTIFICATE, String("certificate")))
     l.append(BodyArm(FIELD_SUBSCRIPTION, String("subscription")))
+    l.append(BodyArm(FIELD_EVENT_TRIGGER, String("event_trigger")))
     return l^
 
 
