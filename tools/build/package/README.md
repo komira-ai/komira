@@ -262,7 +262,8 @@ komira_native fails the analysis, naming it. `:release_set_native_check`
 (`komira_encoding`, `komira_crypto`, which requires komira_native, and
 `komira_native`; [`release_set_native.txt`](release_set_native.txt)) builds that
 path, and `:release_set_native_kci` reads its metapackage with kci's parser. The
-release set itself does not hold komira_native yet.
+release set itself holds komira_native too: `:release_set_check` gives `native`,
+and `komira_native` is the last member of `release_set.txt`.
 
 The welded test `test_release_artifacts_file` of `src/kci_artifact` holds
 `release_set.txt` equal to `release/artifacts.textproto`'s metapackage, so a
