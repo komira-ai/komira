@@ -249,6 +249,13 @@ def test_counted_series_is_counted_from_its_start() raises:
     # 2027-03-15 first.
     var monthly = _timed("2026-11-15T09:00:00", 600, '{"freq":"MONTHLY","interval":1,"monthDay":15,"count":2}')
     assert_equal(len(expand(monthly, _at("2027-03-10T00:00:00"), _at("2027-03-20T00:00:00"))), 0)
+    # The 15th, once: only 2026-11-15. A jump would count 2027-03-15. This
+    # row catches the jump running for a count of exactly 1. A daily or
+    # Monday-weekly count-1 row cannot: the search day is 2 days before the
+    # window, so the jumped-to period's first pick falls before the window
+    # and uses up the single count there.
+    var monthly_once = _timed("2026-11-15T09:00:00", 600, '{"freq":"MONTHLY","interval":1,"monthDay":15,"count":1}')
+    assert_equal(len(expand(monthly_once, _at("2027-03-10T00:00:00"), _at("2027-03-20T00:00:00"))), 0)
     # The last occurrence itself, with the window past the first day.
     assert_equal(
         _starts(expand(daily, _at("2026-11-04T00:00:00"), _at("2026-11-21T00:00:00"))), "2026-11-04T09:00:00"
