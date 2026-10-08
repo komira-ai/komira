@@ -1,10 +1,12 @@
 # komira_aws_sesv2
 
-An Amazon SES API v2 client for a sending domain's onboarding and its sends,
-generated at build time from botocore's pinned `sesv2` model (restJson1). The
-module `komira_aws_sesv2.komira_aws_sesv2` holds, for CreateEmailIdentity,
-GetEmailIdentity, DeleteEmailIdentity, CreateConfigurationSet,
-PutEmailIdentityConfigurationSetAttributes and SendEmail:
+An Amazon SES API v2 client for a sending domain's onboarding, its sends and
+its removal, generated at build time from botocore's pinned `sesv2` model
+(restJson1). The module `komira_aws_sesv2.komira_aws_sesv2` holds, for
+CreateEmailIdentity, GetEmailIdentity, PutEmailIdentityMailFromAttributes,
+PutEmailIdentityConfigurationSetAttributes, DeleteEmailIdentity,
+CreateConfigurationSet, CreateConfigurationSetEventDestination,
+DeleteConfigurationSet and SendEmail:
 
 - a request struct (`SESv2<Operation>Request`) and its builder
   `build_<operation>_request`, which returns a komira_aws_core `AwsRequest`
@@ -21,8 +23,8 @@ PutEmailIdentityConfigurationSetAttributes and SendEmail:
 
 A SendEmail with `EndpointId` goes to a multi-region endpoint that needs
 SigV4a, which komira_aws_core does not sign: the client refuses such a call
-before sending it. Other SES operations are not generated. The package reads
-no environment.
+before sending it. Other SES v2 operations are not generated; the classic SES
+receipt rules are `komira_aws_ses`. The package reads no environment.
 
 ## Examples
 
