@@ -118,6 +118,14 @@ def test_a_duplicate_member_is_refused() raises:
         _err_payload(String('{"id":"i","id":"j"}')),
         String("komira_push: the wake payload member id appears twice"),
     )
+    assert_equal(
+        _err_payload(String('{"kind":"a","kind":"b"}')),
+        String("komira_push: the wake payload member kind appears twice"),
+    )
+    assert_equal(
+        _err_payload(String('{"source":"a","source":"b"}')),
+        String("komira_push: the wake payload member source appears twice"),
+    )
 
 
 def test_a_non_object_is_refused() raises:

@@ -14,8 +14,10 @@
 # cannot raise (the trait declares them without `raises`), so a caller's
 # business path never sees an exception from a wake.
 #
-# A raising transport and a raising token source are failures too; a request
-# that fails its shape check and a missing token each send nothing.
+# A raising transport and a raising token source are failures too; a notify
+# request or a registration that fails its shape check, and a missing token,
+# each send nothing. The balance check sums in 64 bits: a result that
+# balances only after a 32-bit wrap is a failure.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -114,6 +116,7 @@ def test_notify_sends_the_golden_request() raises:
     assert_equal(spy.call_count(), 1)
     assert_equal(spy.method_at(0), PM_METHOD_POST)
     assert_equal(spy.url_at(0), String("https://notify.example/v1/notify"))
+    assert_equal(spy.header_name_at(0), String("Authorization"))
     assert_equal(spy.header_value_at(0), String("Bearer client-token"))
     assert_equal(spy.body_at(0), String(NOTIFY_BODY))
 
@@ -134,6 +137,7 @@ def test_register_sends_the_golden_request() raises:
     )
     assert_equal(spy.method_at(0), PM_METHOD_PUT)
     assert_equal(spy.url_at(0), String("https://notify.example/v1/devices"))
+    assert_equal(spy.header_name_at(0), String("Authorization"))
     assert_equal(spy.header_value_at(0), String("Bearer client-token"))
     assert_equal(spy.body_at(0), String(REGISTER_BODY))
 
@@ -172,6 +176,24 @@ def test_every_other_register_status_is_a_failure() raises:
 def test_an_unbalanced_result_is_a_failure() raises:
     var spy = SharedScriptedTransport()
     var port = _port(202, String('{"sent":3,"accepted":1}'), spy)
+    var out = port.notify(_notify_request(String("user-1")))
+    assert_false(out.ok)
+    assert_equal(out.status, 202)
+    assert_equal(
+        out.reason,
+        String(
+            "komira_push: the notify result does not balance"
+            " (accepted + dead + transient != sent)"
+        ),
+    )
+
+
+def test_a_result_that_balances_only_in_32_bits_is_a_failure() raises:
+    # 4294967295 + 1 wraps to 0 in UInt32; the sum is taken in UInt64.
+    var spy = SharedScriptedTransport()
+    var port = _port(
+        202, String('{"sent":0,"accepted":4294967295,"dead":1}'), spy
+    )
     var out = port.notify(_notify_request(String("user-1")))
     assert_false(out.ok)
     assert_equal(out.status, 202)
@@ -250,6 +272,29 @@ def test_a_refused_request_sends_nothing() raises:
     assert_equal(spy.call_count(), 0)
 
 
+def test_a_refused_registration_sends_nothing() raises:
+    var spy = SharedScriptedTransport()
+    var port = _port(
+        200,
+        String('{"deviceId":"dev-9","transport":"DEVICE_TRANSPORT_WEB_PUSH"}'),
+        spy,
+    )
+    var request = _register_request()
+    request.on_behalf_of = Optional[PrincipalRef](
+        PrincipalRef(
+            String("https://issuer.example"),
+            String("00000000-0000-0000-0000-000000000000"),
+        )
+    )
+    var out = port.register_device(request)
+    assert_false(out.ok)
+    assert_equal(out.status, 0)
+    assert_equal(
+        out.reason, String("komira_push: the on_behalf_of sub is the nil UUID")
+    )
+    assert_equal(spy.call_count(), 0)
+
+
 def _url_err(url: String) -> String:
     try:
         return String("ok ") + check_notify_base_url(url)
@@ -294,11 +339,13 @@ def main() raises:
     test_every_other_notify_status_is_a_failure()
     test_every_other_register_status_is_a_failure()
     test_an_unbalanced_result_is_a_failure()
+    test_a_result_that_balances_only_in_32_bits_is_a_failure()
     test_an_unreadable_result_is_a_failure()
     test_a_newer_result_member_is_skipped()
     test_an_empty_device_id_is_a_failure()
     test_a_raising_transport_is_a_failure()
     test_a_missing_token_sends_nothing()
     test_a_refused_request_sends_nothing()
+    test_a_refused_registration_sends_nothing()
     test_the_base_url_rules()
     print("PASS komira_push remote notify")

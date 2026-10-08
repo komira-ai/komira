@@ -189,6 +189,15 @@ def test_the_device_rules() raises:
         _dev_err(_web("https://push.example/1", "k", "a", "tok")),
         String("komira_push: a web push device carries an FCM token"),
     )
+    var bare_web = DeviceSubscription(
+        DeviceTransport(DeviceTransport.DEVICE_TRANSPORT_WEB_PUSH),
+        Optional[WebPushSubscription](None),
+        String(""),
+    )
+    assert_equal(
+        _dev_err(bare_web),
+        String("komira_push: a web push device has no subscription"),
+    )
     assert_equal(
         _dev_err(_fcm("", False)),
         String("komira_push: an FCM device has no token"),
@@ -239,6 +248,18 @@ def test_parse_register_device() raises:
     except e:
         msg = String(e)
     assert_equal(msg, String("komira_push: the device is missing"))
+    msg = String("<accepted>")
+    try:
+        _ = parse_register_device(
+            String(
+                '{"onBehalfOf":{"iss":"https://issuer.example","sub":"u"},'
+                '"device":{"transport":"DEVICE_TRANSPORT_FCM","fcmToken":"t"},'
+                '"source":"someone-else"}'
+            )
+        )
+    except e:
+        msg = String(e)
+    assert_true(msg.startswith('JsonError: unknown field "source" at $'), msg)
 
 
 def main() raises:

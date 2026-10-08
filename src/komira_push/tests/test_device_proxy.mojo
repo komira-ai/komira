@@ -112,6 +112,23 @@ def test_a_bad_shape_is_400_with_the_rule() raises:
     assert_equal(spy.register_count(), 0)
 
 
+def test_a_web_push_device_without_a_subscription_is_400() raises:
+    var port = RecordingNotify()
+    var spy = port.share()
+    var reply = register_device_for(
+        port, _user(), String('{"transport":"DEVICE_TRANSPORT_WEB_PUSH"}')
+    )
+    assert_equal(reply.status, 400)
+    assert_equal(
+        reply.body,
+        String(
+            '{"error":{"code":"invalid_request",'
+            '"message":"komira_push: a web push device has no subscription"}}'
+        ),
+    )
+    assert_equal(spy.register_count(), 0)
+
+
 def test_no_subject_or_issuer_is_401() raises:
     var port = RecordingNotify()
     var spy = port.share()
@@ -180,6 +197,7 @@ def main() raises:
     test_the_principal_comes_from_the_token()
     test_a_body_naming_a_principal_is_refused()
     test_a_bad_shape_is_400_with_the_rule()
+    test_a_web_push_device_without_a_subscription_is_400()
     test_no_subject_or_issuer_is_401()
     test_the_status_table()
     test_noop_is_503()
