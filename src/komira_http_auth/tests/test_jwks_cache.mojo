@@ -410,6 +410,19 @@ def test_parse_cache_max_age() raises:
         parse_cache_max_age(Optional[String](String("max-age=60, no-cache")), d),
         Int64(0),
     )
+    # The winning directive FIRST: a last-wins parser returns the later one.
+    assert_equal(
+        parse_cache_max_age(Optional[String](String("max-age=5, max-age=10")), d),
+        Int64(5),
+    )
+    assert_equal(
+        parse_cache_max_age(Optional[String](String("no-store, max-age=3600")), d),
+        Int64(0),
+    )
+    assert_equal(
+        parse_cache_max_age(Optional[String](String("no-cache, max-age=60")), d),
+        Int64(0),
+    )
     assert_equal(parse_cache_max_age(Optional[String](String("max-age=abc")), d), d)
     assert_equal(parse_cache_max_age(Optional[String](String("max-age=-5")), d), d)
     assert_equal(parse_cache_max_age(Optional[String](String("public")), d), d)

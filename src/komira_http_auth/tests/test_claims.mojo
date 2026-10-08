@@ -5,8 +5,9 @@
 # The positive case (a valid RS256 token yields Principal{scheme jwt, sub,
 # iss, aud, copied claims, presented credential}) and every claim refusal:
 # iss, aud (missing, other, array without ours), sub, exp (missing, not an
-# integer, expired past the 30 s leeway), iat, nbf, lifetime over max TTL,
-# duplicate payload keys, and a spliced payload failing the signature.
+# integer, expired past the 30 s leeway), iat, nbf, negative or past-9999
+# times, lifetime over max TTL, duplicate payload keys, and a spliced payload
+# failing the signature.
 # =============================================================================
 
 from std.pathlib import Path
@@ -350,6 +351,20 @@ def test_iat_missing_or_in_the_future_is_refused() raises:
     # Exactly at the 30 s leeway is still accepted (refused only past it).
     _expect(_iat_exp(NOW + 30, NOW + 600), REASON_OK)
     _expect(_iat_exp(NOW + 29, NOW + 600), REASON_OK)
+
+
+def test_time_claims_outside_the_valid_range_are_refused() raises:
+    # A negative time is not a time: each claim is refused with its own
+    # reason, not read as long expired / long valid.
+    _expect(_iat_exp(NOW, -1), REASON_EXP)
+    _expect(_iat_exp(-1, NOW + 600), REASON_IAT)
+    var base = String(',"iat":') + String(NOW) + String(',"exp":') + String(
+        NOW + 600
+    )
+    _expect(_timed(base + String(',"nbf":-1')), REASON_NBF)
+    # One past _MAX_TIME_S (9999-12-31T23:59:59Z) is refused as a bad exp,
+    # not as an over-long lifetime.
+    _expect(_iat_exp(NOW, 253402300800), REASON_EXP)
 
 
 def test_lifetime_over_max_ttl_is_refused() raises:
