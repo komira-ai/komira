@@ -372,6 +372,8 @@ def test_tinyint_nullable_sign_extends() raises:
     # -1. These pin the output values; the decoder's `b >= 128` adjustment
     # and the int8 store's truncation agree on them, so moving that boundary
     # to `> 128` changes no output (an equivalent mutant).
+    # Deleting the whole `b -= 256` is equivalent too: the int8 store
+    # truncates, so these values pin the RLE decode, not the sign adjustment.
     var acc = make_accumulator(ORC_KIND_BYTE, ArrowType.INT8)
     var data = _spec_byte_rle_44_45()
     data.extend(_bytes(0xFD, 0x7F, 0x80, 0xFF))

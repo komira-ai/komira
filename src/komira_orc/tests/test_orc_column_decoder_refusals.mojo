@@ -403,9 +403,8 @@ def test_negative_length_before_valid_one_refused() raises:
     # LENGTH [-2^63, 1]: the negative value comes first and a valid one
     # follows. Kills `sign_acc |= lens[i]` -> `sign_acc = lens[i]` in
     # `_check_lengths_non_negative` (only the last value would be checked;
-    # the one-value stream above cannot tell them apart). Every LENGTH
-    # decoder, on the no-PRESENT and the PRESENT path: direct STRING, BINARY,
-    # and the dictionary's own LENGTH decode.
+    # the one-value stream above cannot tell them apart). The direct LENGTH
+    # decoders, STRING and BINARY, on the no-PRESENT and the PRESENT path.
     var e = ORC_ENCODING_DIRECT_V2
     for p in range(2):
         for kind in [ORC_KIND_STRING, ORC_KIND_BINARY]:
@@ -417,6 +416,14 @@ def test_negative_length_before_valid_one_refused() raises:
                 StreamSpan(ORC_STREAM_LENGTH, _rlev2_two_u64_sign_bit_first())
             )
             _expect_missing(kind, e, streams^, 2, _NEG_LEN_MSG)
+
+
+def test_dict_negative_length_before_valid_one_refused() raises:
+    # The same LENGTH [-2^63, 1] through the dictionary's own LENGTH decode,
+    # on the no-PRESENT and the PRESENT path. Its own test, run before the
+    # direct one in `main`, so the `sign_acc` mutant above fails here first
+    # and the failure names the dictionary path.
+    for p in range(2):
         var d = List[StreamSpan]()
         if p == 1:
             d.append(StreamSpan(ORC_STREAM_PRESENT, _present("v")))
@@ -527,6 +534,7 @@ def main() raises:
     test_float_double_truncated_every_arm()
     test_lengths_overrun_data_spec_delta()
     test_negative_length_refused()
+    test_dict_negative_length_before_valid_one_refused()
     test_negative_length_before_valid_one_refused()
     test_dictionary_length_overrun()
     test_dictionary_data_over_int32_offsets()
