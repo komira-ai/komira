@@ -64,12 +64,17 @@ struct LsRefsArgs(Copyable, Movable):
 struct FetchArgs(Copyable, Movable):
     """The arguments of a fetch command (gitprotocol-v2, "fetch"), as a
     server reads them and as a client writes them. `deepen` is 0 when the
-    request has no `deepen <n>` line."""
+    request has no `deepen <n>` line; `deepen_since` is None when it has no
+    `deepen-since <timestamp>` line; `deepen_not` holds the <ref> of each
+    `deepen-not <ref>` line as sent (the repository resolves it, as git's
+    upload-pack expands it to one ref)."""
 
     var wants: List[ObjectId]
     var haves: List[ObjectId]
     var shallows: List[ObjectId]
     var deepen: Int
+    var deepen_since: Optional[Int]
+    var deepen_not: List[String]
     var deepen_relative: Bool
     var thin_pack: Bool
     var no_progress: Bool
@@ -83,6 +88,8 @@ struct FetchArgs(Copyable, Movable):
         self.haves = List[ObjectId]()
         self.shallows = List[ObjectId]()
         self.deepen = 0
+        self.deepen_since = None
+        self.deepen_not = List[String]()
         self.deepen_relative = False
         self.thin_pack = False
         self.no_progress = False
@@ -90,6 +97,17 @@ struct FetchArgs(Copyable, Movable):
         self.ofs_delta = False
         self.wait_for_done = False
         self.done = False
+
+    def asks_shallow(self) -> Bool:
+        """The request names a shallow boundary (`shallow`) or asks for a
+        new one (`deepen`, `deepen-since`, `deepen-not`): the response has
+        a shallow-info section."""
+        return (
+            len(self.shallows) > 0
+            or self.deepen > 0
+            or Bool(self.deepen_since)
+            or len(self.deepen_not) > 0
+        )
 
 
 def _bytes_less(a: String, b: String) -> Bool:

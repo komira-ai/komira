@@ -10,11 +10,21 @@
 # are all in hands back the input that follows them, which is the packfile
 # when any command creates or updates a ref. The caller unpacks it and
 # decides each command; `PushReport` collects those verdicts and writes the
-# report-status git's client reads, with git's rules:
-#   - an unpack failure fails every command with `unpacker error`;
+# report-status git's client reads. `reject` takes the verdicts git's
+# update() makes (non-fast-forward, funny refname, an update hook's
+# refusal), and for those git's rules hold:
+#   - an unpack failure fails every command with `unpacker error` (git
+#     reports it before any update runs, atomic or not);
 #   - in an atomic push, the first refused command (in command order)
 #     keeps its reason and every other command, refused or not, reports
 #     `atomic push failure` (git stops at the first update() that fails).
+# One difference from git: git makes some refusals before update() runs
+# (a hidden ref, missing objects, a pre-receive hook's decline,
+# inconsistent push options). For those, git keeps each refused command's
+# own reason and, in an atomic push, still applies the other commands.
+# Given to `reject`, such a refusal fails the whole atomic push here: the
+# first refused command keeps its reason and every other one reports
+# `atomic push failure`.
 # `refuse_funny_refnames` applies the one verdict that needs no repository:
 # a ref outside `refs/`, or one `git check-ref-format` refuses (one level
 # allowed for a delete), is `funny refname`.
@@ -32,9 +42,9 @@
 # with this module's own message; git's receive-pack would read an
 # unsolicited one.
 #
-# Each command, shallow and push-option line loses one trailing LF before it
-# is read, as git reads them with PACKET_READ_CHOMP_NEWLINE (git's send-pack
-# writes none; libgit2 ends every command line with one).
+# Each command, shallow and push-option line loses one trailing LF (only
+# one) before it is read, as git reads them with PACKET_READ_CHOMP_NEWLINE
+# (git's send-pack writes none; libgit2 ends each command line with one).
 # =============================================================================
 
 from .bytes_util import _append_str
@@ -366,7 +376,9 @@ struct PushReport(Movable):
 
     def reject(mut self, index: Int, reason: String) raises:
         """Refuse command `index` with `reason` (no LF; the first reason
-        given for a command stands)."""
+        given for a command stands). The atomic rule of `final_reasons` is
+        git's for the refusals git's update() makes; see the module header
+        for refusals git makes before update()."""
         if index < 0 or index >= len(self.reasons):
             raise Error("komira_git: push report: no command " + String(index))
         if reason.byte_length() == 0:
@@ -399,11 +411,14 @@ struct PushReport(Movable):
                 self.reject(i, String(FUNNY_REFNAME))
 
     def final_reasons(self, request: PushRequest) -> List[String]:
-        """Each command's reason after git's rules: all `unpacker error`
-        when the pack failed; in an atomic push with any refusal, the first
-        refused command keeps its reason and every other one gets `atomic
-        push failure`, as git's execute_commands_atomic stops at the first
-        update() that fails."""
+        """Each command's reason: all `unpacker error` when the pack failed
+        (this wins over the atomic rule, as in git); in an atomic push with
+        any refusal, the first refused command keeps its reason and every
+        other one gets `atomic push failure`, as git's
+        execute_commands_atomic stops at the first update() that fails. For
+        a refusal git makes before update() (hidden ref, missing objects,
+        pre-receive), git keeps every refused command's own reason and still
+        applies the others; this fails the whole push instead."""
         var out = List[String]()
         var first_refused = -1
         for i in range(len(self.reasons)):

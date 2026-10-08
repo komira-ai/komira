@@ -18,9 +18,13 @@
 #   * test_end: a lone flush not taken as the end of the session.
 #   * test_refusals: each refusal by its exact message, and that a request
 #     with an unadvertised feature (filter, want-ref, sideband-all,
-#     deepen-since, session-id) is refused rather than ignored.
+#     packfile-uris, session-id) is refused rather than ignored.
 #   * test_deepen: `deepen 0`, a sign, a leading zero, a non-digit or
 #     2^31 accepted.
+#   * test_deepen_since_and_not: `deepen-since` and `deepen-not` dropped
+#     or misread (a ref not passed on as sent, its LF kept); an empty, signed,
+#     zero-led, hex or over-2^63-1 timestamp or an empty ref accepted;
+#     `deepen` with either accepted.
 #   * test_too_many_prefixes: 65536 prefixes kept as a filter (git drops
 #     the filter at that count).
 #   * test_ls_refs_response: refs not sorted by name, HEAD not first, a
@@ -262,8 +266,6 @@ def test_refusals() raises:
         "want-ref refs/heads/main",
         "sideband-all",
         "packfile-uris https",
-        "deepen-since 1790000000",
-        "deepen-not refs/heads/main",
     ]
     for i in range(len(unadvertised)):
         var arg = unadvertised[i]
@@ -297,6 +299,66 @@ def test_deepen() raises:
     var s = _server()
     s.feed(Span(w))
     assert_equal(s.next_request().fetch.deepen, 2147483647)
+
+
+def test_deepen_since_and_not() raises:
+    comptime P = "komira_git: upload-pack: "
+    var w = _wire(
+        [
+            "command=fetch",
+            "0001",
+            "shallow " + C,
+            "deepen-since 1790000150",
+            "deepen-not v1",
+            "deepen-not refs/heads/topic\n",
+            "want " + A + "\n",
+            "done\n",
+            "0000",
+        ]
+    )
+    var s = _server()
+    s.feed(Span(w))
+    var r = s.next_request()
+    ref f = r.fetch
+    assert_true(Bool(f.deepen_since))
+    assert_equal(f.deepen_since.value(), 1790000150)
+    assert_equal(f.deepen, 0)
+    assert_equal(len(f.deepen_not), 2)
+    assert_equal(f.deepen_not[0], "v1")
+    assert_equal(f.deepen_not[1], "refs/heads/topic")
+    assert_true(f.asks_shallow() and f.done)
+    var edges: List[String] = ["0", "9223372036854775807"]
+    var want: List[Int] = [0, 9223372036854775807]
+    for i in range(len(edges)):
+        var lines: List[String] = ["command=fetch", "0001", "deepen-since " + edges[i], "0000"]
+        var s2 = _server()
+        var w2 = _wire(lines^)
+        s2.feed(Span(w2))
+        var since = s2.next_request().fetch.deepen_since
+        assert_true(Bool(since))
+        assert_equal(since.value(), want[i])
+    var bad: List[String] = [
+        "deepen-since ", "deepen-since -1", "deepen-since +1", "deepen-since 01",
+        "deepen-since 0x10", "deepen-since 9223372036854775808",
+        "deepen-since 10000000000000000000", "deepen-since 1 ",
+    ]
+    for i in range(len(bad)):
+        var arg = bad[i]
+        var lines: List[String] = ["command=fetch", "0001", arg, "0000"]
+        assert_equal(_refusal(lines^), P + "Invalid deepen-since: " + arg)
+    assert_equal(
+        _refusal(["command=fetch", "0001", "deepen-not ", "0000"]),
+        P + "deepen-not is not a ref: deepen-not ",
+    )
+    comptime BOTH = "deepen and deepen-since (or deepen-not) cannot be used together"
+    assert_equal(
+        _refusal(["command=fetch", "0001", "deepen 1", "deepen-since 5", "0000"]),
+        P + BOTH,
+    )
+    assert_equal(
+        _refusal(["command=fetch", "0001", "deepen-not v1", "deepen 2", "0000"]),
+        P + BOTH,
+    )
 
 
 def test_too_many_prefixes() raises:
@@ -435,6 +497,7 @@ def main() raises:
     test_end()
     test_refusals()
     test_deepen()
+    test_deepen_since_and_not()
     test_too_many_prefixes()
     test_ls_refs_response()
     test_more()

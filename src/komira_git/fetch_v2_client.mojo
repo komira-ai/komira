@@ -12,7 +12,8 @@
 #
 # The requests are byte for byte what git's own client writes for the same
 # arguments, including where git ends a line with LF and where it does not
-# (`command=ls-refs` has one, `command=fetch` and `deepen <n>` do not).
+# (`command=ls-refs` has one; `command=fetch`, `deepen <n>`,
+# `deepen-since <timestamp>` and `deepen-not <ref>` do not).
 #
 # The client asks only for what komira_git reads: no `filter`, `want-ref`,
 # `sideband-all` or `packfile-uris`, and a response holding a
@@ -323,6 +324,11 @@ struct FetchV2Client(Movable):
         """A fetch request for `args`, in fetch-pack.c's order; the client
         then reads the response with `next_event`."""
         self._require("fetch")
+        if Bool(args.deepen_since) and args.deepen_since.value() < 0:
+            raise Error(
+                "komira_git: fetch: deepen-since "
+                + String(args.deepen_since.value()) + " is before the epoch"
+            )
         var names_format = self._server_names_format()
         _text_pkt(out, "command=fetch")
         self._append_agent(out)
@@ -340,13 +346,17 @@ struct FetchV2Client(Movable):
             _text_pkt(out, "ofs-delta")
         if args.wait_for_done:
             _text_pkt(out, "wait-for-done")
-        if len(args.shallows) > 0 or args.deepen > 0 or args.deepen_relative:
+        if args.asks_shallow() or args.deepen_relative:
             if not self.capabilities.supports_feature("fetch", "shallow"):
                 raise Error("komira_git: fetch: Server does not support shallow requests")
             for i in range(len(args.shallows)):
                 _text_pkt(out, "shallow " + args.shallows[i].to_hex())
             if args.deepen > 0:
                 _text_pkt(out, "deepen " + String(args.deepen))
+            if args.deepen_since:
+                _text_pkt(out, "deepen-since " + String(args.deepen_since.value()))
+            for i in range(len(args.deepen_not)):
+                _text_pkt(out, "deepen-not " + args.deepen_not[i])
             if args.deepen_relative:
                 _line_pkt(out, "deepen-relative")
         for i in range(len(args.wants)):

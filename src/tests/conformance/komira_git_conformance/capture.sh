@@ -25,6 +25,8 @@
 #   v2_fetch      fetch of one new commit, with haves and a server option
 #   v2_shallow    clone --depth 1
 #   v2_deepen     fetch --deepen 1 in that shallow clone
+#   v2_since      clone --single-branch of main with --shallow-since and
+#                 --shallow-exclude (deepen-since, deepen-not)
 #   v2_unborn     clone of an empty repository (ls-refs unborn)
 #   v2_negotiate  fetch --negotiate-only (wait-for-done)
 #   push_atomic   push --atomic with push options: an update, a create, a delete
@@ -161,6 +163,16 @@ shallow_of "$T/shallow" >"$KGC_CAPTURE/shallow_before.txt"
 "$GIT" -C "$T/shallow" -c protocol.version=2 fetch -q --deepen 1 origin >"$T/log" 2>&1 || red "v2_deepen: git fetch --deepen 1"
 shallow_of "$T/shallow" >"$KGC_CAPTURE/shallow_after.txt"
 finish v2_deepen
+
+scenario v2_since
+state "$SRC" "$KGC_CAPTURE"
+"$GIT" -c protocol.version=2 clone -q --no-local --single-branch --branch main \
+    --shallow-since="@1790000150 +0000" --shallow-exclude=v1 \
+    --upload-pack="$UP" "file://$SRC" "$T/since" >"$T/log" 2>&1 ||
+    red "v2_since: git clone --shallow-since --shallow-exclude"
+: >"$KGC_CAPTURE/shallow_before.txt"
+shallow_of "$T/since" >"$KGC_CAPTURE/shallow_after.txt"
+finish v2_since
 
 scenario v2_unborn
 "$GIT" init -q --bare -b main "$T/empty.git" >"$T/log" 2>&1 || red "git init --bare empty"

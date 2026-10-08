@@ -8,7 +8,8 @@
 # its value (`ls-refs=unborn`, `fetch=shallow wait-for-done`), must be used
 # by some request of the fetch scenarios: the command itself; `agent=`,
 # `object-format=` and `server-option=` sent with a command; ls-refs'
-# `unborn` argument; fetch's `shallow`/`deepen` lines for `shallow`; and
+# `unborn` argument; fetch's `shallow`, `deepen`, `deepen-since` or
+# `deepen-not` lines for `shallow`; and
 # `wait-for-done`.
 #
 # receive-pack (ReceivePackConfig with atomic and push-options): each
@@ -46,7 +47,8 @@ def _fetch_uses() raises -> List[String]:
     """Every v2 capability the git client used, as `key` or `key:word`."""
     var used = List[String]()
     var names: List[String] = [
-        "v2_clone", "v2_fetch", "v2_shallow", "v2_deepen", "v2_unborn", "v2_negotiate",
+        "v2_clone", "v2_fetch", "v2_shallow", "v2_deepen", "v2_since", "v2_unborn",
+        "v2_negotiate",
     ]
     for s in range(len(names)):
         var sc = Scenario(names[s])
@@ -69,7 +71,7 @@ def _fetch_uses() raises -> List[String]:
                         used.append("ls-refs:unborn")
                 if r.command == V2_FETCH:
                     used.append("fetch")
-                    if r.fetch.deepen > 0 or len(r.fetch.shallows) > 0:
+                    if r.fetch.asks_shallow():
                         used.append("fetch:shallow")
                     if r.fetch.wait_for_done:
                         used.append("fetch:wait-for-done")

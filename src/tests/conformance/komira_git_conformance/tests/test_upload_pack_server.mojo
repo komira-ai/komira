@@ -19,6 +19,8 @@
 # and a server option (ACK, ready), `deepen 1` (shallow-info), `deepen 1`
 # with `deepen-relative` (shallow and unshallow) and a tag-following second
 # connection that sends `shallow` with no deepen (an empty shallow-info),
+# `deepen-since` with `deepen-not` (shallow-info for a date and an excluded
+# ref),
 # an empty repository (unborn HEAD) and `wait-for-done` (acknowledgments,
 # never ready).
 #
@@ -98,7 +100,8 @@ def _serve(name: String) raises -> Int:
                 continue
             var shallow = List[ObjectId]()
             var unshallow = List[ObjectId]()
-            if r.fetch.deepen > 0:
+            var cuts = r.fetch.deepen > 0 or Bool(r.fetch.deepen_since)
+            if cuts or len(r.fetch.deepen_not) > 0:
                 shallow = ids(minus(sc.shallow_after, sc.shallow_before))
                 unshallow = ids(minus(sc.shallow_before, sc.shallow_after))
             responder.append_shallow_info(out, shallow, unshallow)
@@ -130,6 +133,22 @@ def test_deepen() raises:
     assert_equal(_serve("v2_deepen"), 4)
 
 
+def test_since() raises:
+    assert_equal(_serve("v2_since"), 2)
+    # git's client sent both arguments, and the clone is cut at one commit.
+    var sc = Scenario("v2_since")
+    var parser = UploadPackV2Server(AGENT, ObjectFormat.sha1())
+    parser.feed(Span(sc.connections[0].request))
+    var r = parser.next_request()
+    while r.command == V2_LS_REFS:
+        r = parser.next_request()
+    assert_equal(r.fetch.deepen_since.value(), 1790000150)
+    assert_equal(len(r.fetch.deepen_not), 1)
+    assert_equal(r.fetch.deepen_not[0], "v1")
+    assert_equal(r.fetch.deepen, 0)
+    assert_equal(len(sc.shallow_after), 1)
+
+
 def test_unborn() raises:
     assert_equal(_serve("v2_unborn"), 1)
 
@@ -143,6 +162,7 @@ def main() raises:
     test_fetch()
     test_shallow()
     test_deepen()
+    test_since()
     test_unborn()
     test_negotiate_only()
     print("komira_git conformance: upload-pack v2 server passed")

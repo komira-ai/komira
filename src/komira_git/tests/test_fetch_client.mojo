@@ -16,10 +16,11 @@
 #   * test_ls_refs: the request's bytes (LF after `command=ls-refs`, none
 #     after `agent=`; `unborn` only when offered; `peel` dropped for a
 #     push); the response's symref-target, peeled and unborn HEAD lines.
-#   * test_fetch_request: the order of the arguments, `deepen` without LF
-#     and `deepen-relative` with one, `done`; refusals for shallow requests
-#     to a server without `shallow`, server options it does not take, and
-#     a format it does not use.
+#   * test_fetch_request: the order of the arguments, `deepen`,
+#     `deepen-since` and `deepen-not` without LF and `deepen-relative` with
+#     one, `done`; refusals for a deepen-since before the epoch, shallow
+#     requests to a server without `shallow`, server options it does not
+#     take, and a format it does not use.
 #   * test_fetch_events: each event of a round without `ready`, of one
 #     with acknowledgments, shallow-info and a packfile, and of a `done`
 #     request (no acknowledgments section).
@@ -193,6 +194,30 @@ def test_fetch_request() raises:
         + "000dofs-delta0034shallow " + B + "000cdeepen 10014deepen-relative\\x0a"
         + "0032want " + A + "\\x0a0032have " + B + "\\x0a0009done\\x0a0000",
     )
+    # fetch-pack.c's add_shallow_requests order; no LF on either line.
+    var since = FetchArgs()
+    since.deepen_since = 1790000150
+    since.deepen_not.append("v1")
+    since.deepen_not.append("refs/heads/topic")
+    since.deepen_relative = True
+    since.wants.append(_id(A))
+    out.clear()
+    c.append_fetch_request(out, since)
+    assert_equal(
+        _show(out),
+        "0011command=fetch001aagent=git/2.56.0-Linux0016object-format=sha10001"
+        + "001bdeepen-since 17900001500011deepen-not v1001fdeepen-not refs/heads/topic"
+        + "0014deepen-relative\\x0a0032want " + A + "\\x0a0000",
+    )
+    var before_epoch = FetchArgs()
+    before_epoch.deepen_since = -1
+    out.clear()
+    try:
+        c.append_fetch_request(out, before_epoch)
+        assert_true(False)
+    except e:
+        assert_equal(String(e), "komira_git: fetch: deepen-since -1 is before the epoch")
+    assert_equal(len(out), 0)
     var negotiate_only = FetchArgs()
     negotiate_only.wait_for_done = True
     negotiate_only.haves.append(_id(A))

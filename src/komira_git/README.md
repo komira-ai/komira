@@ -75,12 +75,14 @@ of a git server or client build on.
   decides each command in a `PushReport` (`reject`, `set_unpack_error`,
   `refuse_funny_refnames`, `final_reasons`, `accepted`), and
   `append_push_message` and `append_push_report` write the messages and
-  the report-status. git's rules hold: an unpack failure fails every
-  command with `UNPACKER_ERROR`; in an atomic push the first refused
+  the report-status. `reject` takes the verdicts git's update() makes
+  (non-fast-forward, `FUNNY_REFNAME`, an update hook's refusal), and for
+  those git's rules hold: an unpack failure fails every command with
+  `UNPACKER_ERROR`, atomic or not; in an atomic push the first refused
   command keeps its reason and every other one reports
-  `ATOMIC_PUSH_FAILURE`; and `FUNNY_REFNAME` is the reason for a ref
-  receive-pack will not update. Command, shallow and push-option lines
-  lose one trailing LF, as in git (libgit2 sends one).
+  `ATOMIC_PUSH_FAILURE`. git chomps one LF from each command, shallow and
+  push-option line, and so does this server; libgit2 ends each command
+  line with one.
 - **Push, client side (send-pack).** `SendPackClient(agent, format)`:
   `feed`, `read_advertisement` (into `advertisement`, a
   `PushAdvertisement` with `supports` and `value`), `append_push_request`
@@ -97,15 +99,24 @@ for push. A request using a feature not advertised (`filter`, `want-ref`,
 is protocol v0 even for a v2 client, as in git: protocol v2 has no push
 command.
 
-Three refusals differ from git:
-- `deepen-since` and `deepen-not` are part of the advertised `shallow`
-  feature, and git accepts them; this server refuses them as "unexpected
-  line", so `git clone --shallow-since` and `--shallow-exclude` fail
-  against it.
+The `shallow` feature's arguments (`shallow`, `deepen`, `deepen-relative`,
+`deepen-since`, `deepen-not`) are all read and written; a `deepen-not`
+ref is passed on as sent, for the repository to resolve.
+
+Four behaviours differ from git:
 - A push certificate (`push-cert`) is refused with this package's own
   message; git's receive-pack reads an unsolicited one.
-- `deepen <n>` must be plain decimal (git's strtol would also read `0x10`
-  and octal).
+- `deepen <n>` and `deepen-since <timestamp>` must be plain decimal (git's
+  strtol and strtoumax would also read `0x10`, octal and an empty
+  timestamp).
+- `deepen` with `deepen-since` or `deepen-not` is refused when the request
+  is read; git refuses it only when it would send the shallow-info.
+- An atomic push with a refusal git makes before update() (a hidden ref,
+  missing objects, a pre-receive hook's decline, inconsistent push
+  options): git keeps each refused command's own reason and still applies
+  the other commands; given to `reject`, such a refusal fails the whole
+  push here (the first refused command keeps its reason, every other one
+  reports `ATOMIC_PUSH_FAILURE`, none is accepted).
 
 The repository is the caller's: which haves a server holds and whether
 every want reaches one come from its `CommitGraph`; which commits a depth

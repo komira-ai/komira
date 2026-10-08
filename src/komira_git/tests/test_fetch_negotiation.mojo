@@ -23,7 +23,9 @@
 #     object; a want missing from the repository not refused.
 #   * test_responder_bytes: the exact sections for NAK, ACK+ready, a done
 #     request and an empty request; shallow lines with an LF; the
-#     packfile's band bytes; progress written despite `no-progress`.
+#     packfile's band bytes; progress written despite `no-progress`;
+#     shallow lines refused for a request holding only `deepen-since` or
+#     only `deepen-not`.
 #   * test_responder_order: a section written out of order or twice.
 # =============================================================================
 
@@ -217,6 +219,26 @@ def test_responder_bytes() raises:
     out.clear()
     assert_false(r5.append_acknowledgments(out, negotiate(a5, g)))
     assert_equal(_show(out), "0014acknowledgments\\x0a0031ACK " + _hex(C5) + "\\x0a0000")
+    # `deepen-since` alone, and `deepen-not` alone, ask for shallow-info
+    # (git's deepen_rev_list): the caller's cut is written.
+    for k in range(2):
+        var a6 = _args([C5], List[Int]())
+        a6.done = True
+        if k == 0:
+            a6.deepen_since = 1790000150
+        else:
+            a6.deepen_not.append("v1")
+        assert_true(a6.asks_shallow())
+        var r6 = FetchResponder(a6)
+        out.clear()
+        assert_true(r6.append_acknowledgments(out, negotiate(a6, g)))
+        var cut = List[ObjectId]()
+        cut.append(_id(C3))
+        r6.append_shallow_info(out, cut, List[ObjectId]())
+        assert_equal(
+            _show(out), "0011shallow-info\\x0a0034shallow " + _hex(C3) + "0001"
+        )
+    assert_false(_args([C5], [C3]).asks_shallow())
 
 
 def _order_error(step: Int) raises -> String:

@@ -20,13 +20,21 @@
 # `session-id`, `object-info`, `bundle-uri` and `promisor-remote`
 # capabilities are unknown.
 #
+# `shallow` promises the shallow arguments `shallow`, `deepen`,
+# `deepen-relative`, `deepen-since` and `deepen-not`, and all are read into
+# `FetchArgs`; which commits they cut is the caller's to compute (a
+# `deepen-not` ref is passed on as sent, for the repository to resolve).
+#
 # Two deliberate differences from git:
-#   - advertising `shallow` promises `deepen-since` and `deepen-not`, and
-#     git accepts both; this server refuses them as "unexpected line", so
-#     git's `--shallow-since` and `--shallow-exclude` fail against it;
-#   - `deepen <n>` takes a plain decimal (no sign, no leading zero, at most
-#     2147483647). git reads it with strtol(.., 0), so it would also take
-#     `0x10` or octal `010`; git's own client writes `%d`.
+#   - `deepen <n>` and `deepen-since <timestamp>` take a plain decimal (no
+#     sign, no leading zero; at most 2147483647 and 2^63-1). git reads them
+#     with strtol and strtoumax, so it would also take `0x10`, octal `010`
+#     or an empty `deepen-since `; git's own client writes `%d` and a
+#     decimal timestamp;
+#   - `deepen` with `deepen-since` or `deepen-not` is refused with git's
+#     words when the request is read; git refuses it only when it would
+#     send the shallow-info, so a negotiation round without `done` is
+#     answered first.
 # =============================================================================
 
 from .object_id import ObjectFormat, ObjectId
@@ -297,12 +305,25 @@ struct UploadPackV2Server(Movable):
                 args.shallows.append(id.value())
             elif arg.startswith("deepen "):
                 args.deepen = _parse_deepen(arg)
+            elif arg.startswith("deepen-since "):
+                args.deepen_since = _parse_deepen_since(arg)
+            elif arg.startswith("deepen-not "):
+                if arg.byte_length() == 11:
+                    raise Error(
+                        "komira_git: upload-pack: deepen-not is not a ref: " + arg
+                    )
+                args.deepen_not.append(String(arg[byte=11 : arg.byte_length()]))
             elif arg == "deepen-relative":
                 args.deepen_relative = True
             else:
                 raise Error(
                     "komira_git: upload-pack: unexpected line: '" + arg + "'"
                 )
+        if args.deepen > 0 and (Bool(args.deepen_since) or len(args.deepen_not) > 0):
+            raise Error(
+                "komira_git: upload-pack: deepen and deepen-since (or deepen-not)"
+                + " cannot be used together"
+            )
         return True
 
 
@@ -320,6 +341,29 @@ def _parse_deepen(arg: String) raises -> Int:
             n = n * 10 + Int(b[i]) - 48
     if not ok or n > _MAX_DEEPEN:
         raise Error("komira_git: upload-pack: Invalid deepen: " + arg)
+    return n
+
+
+def _parse_deepen_since(arg: String) raises -> Int:
+    """The <timestamp> of `deepen-since <timestamp>`: 0 to 2^63-1 seconds,
+    plain decimal (no sign, no leading zero)."""
+    comptime _MAX = "9223372036854775807"
+    var b = arg.as_bytes()
+    var digits = len(b) - 13
+    var ok = digits >= 1 and digits <= 19 and (b[13] != 48 or digits == 1)
+    var n = 0
+    if ok:
+        for i in range(13, len(b)):
+            if b[i] < 48 or b[i] > 57:
+                ok = False
+                break
+        if ok and digits == 19:
+            ok = String(arg[byte=13 : len(b)]) <= String(_MAX)
+    if ok:
+        for i in range(13, len(b)):
+            n = n * 10 + Int(b[i]) - 48
+    else:
+        raise Error("komira_git: upload-pack: Invalid deepen-since: " + arg)
     return n
 
 

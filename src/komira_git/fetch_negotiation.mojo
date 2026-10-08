@@ -22,12 +22,13 @@
 # `FetchResponder` writes the sections in the one order the protocol
 # allows and refuses any other:
 #   acknowledgments  (when the client sent haves and not `done`)
-#   shallow-info     (when the client sent `shallow` or `deepen`, or the
-#                     repository is shallow)
+#   shallow-info     (when the client sent `shallow`, `deepen`,
+#                     `deepen-since` or `deepen-not`, or the repository
+#                     is shallow)
 #   packfile         (side-band: pack data on band 1, progress on band 2,
 #                     a fatal error on band 3), then a flush.
 # The shallow and unshallow lines are the caller's to compute (which commits
-# a depth cuts); they are written as git writes them, without an LF.
+# a depth, a date or an excluded ref cuts); they are written as git writes them, without an LF.
 # =============================================================================
 
 from std.collections import Set
@@ -164,7 +165,7 @@ struct FetchResponder(Movable):
         self._has_wants = len(args.wants) > 0
         self._wait_for_done = args.wait_for_done
         self._no_progress = args.no_progress
-        self._shallow_asked = args.deepen > 0 or len(args.shallows) > 0
+        self._shallow_asked = args.asks_shallow()
 
     def append_acknowledgments(
         mut self, mut out: List[UInt8], negotiation: Negotiation
@@ -212,9 +213,9 @@ struct FetchResponder(Movable):
         unshallow: List[ObjectId],
         repository_is_shallow: Bool = False,
     ) raises:
-        """The shallow-info section: written when the client sent `shallow`
-        or `deepen` lines or the repository is itself shallow, and refused
-        lines otherwise."""
+        """The shallow-info section: written when the client sent `shallow`,
+        `deepen`, `deepen-since` or `deepen-not` lines or the repository is
+        itself shallow, and refused lines otherwise."""
         if self._state != _FR_PACK_NEXT:
             raise Error(
                 "komira_git: fetch response: shallow-info comes after the acknowledgments, before the packfile"

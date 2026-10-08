@@ -20,8 +20,9 @@
 # client ending the session) or nothing.
 #
 # A defect this catches: a request git's server would read differently (an
-# LF on `command=fetch`, `deepen` before `shallow`, an argument git does not
-# send), a response line or section the client misreads, or pack bytes
+# LF on `command=fetch` or `deepen-since`, `deepen` before `shallow`,
+# `deepen-not` before `deepen-since`, an argument git does not send), a
+# response line or section the client misreads, or pack bytes
 # lost across pkt-lines.
 # =============================================================================
 
@@ -118,7 +119,8 @@ def _client_run(name: String) raises -> Int:
                     break
                 elif ev.kind == FETCH_END:
                     check_pack(pack, what + " pack")
-                    if r.fetch.deepen > 0:
+                    var cuts = r.fetch.deepen > 0 or Bool(r.fetch.deepen_since)
+                    if cuts or len(r.fetch.deepen_not) > 0:
                         _same(shallow, minus(sc.shallow_after, sc.shallow_before), what)
                         _same(unshallow, minus(sc.shallow_before, sc.shallow_after), what)
                     else:
@@ -199,6 +201,10 @@ def test_deepen() raises:
     assert_equal(_client_run("v2_deepen"), 4)
 
 
+def test_since() raises:
+    assert_equal(_client_run("v2_since"), 2)
+
+
 def test_unborn() raises:
     assert_equal(_client_run("v2_unborn"), 1)
 
@@ -212,6 +218,7 @@ def main() raises:
     test_fetch()
     test_shallow()
     test_deepen()
+    test_since()
     test_unborn()
     test_negotiate_only()
     print("komira_git conformance: fetch v2 client passed")

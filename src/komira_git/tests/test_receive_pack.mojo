@@ -19,16 +19,19 @@
 #     not advertised.
 #   * test_request_refusals: each malformed request by its exact message.
 #   * test_report: ok/ng lines; an atomic push not failing every other
-#     command; an unpack error not failing all; band-1 framing and the
-#     closing flush for side-band; nothing written without report-status
-#     or without commands.
+#     command; an unpack error not failing all, in an atomic push with a
+#     refusal too; band-1 framing and the closing flush for side-band;
+#     nothing written without report-status or without commands.
 #   * test_funny_refnames: a ref outside refs/ or failing check-ref-format
 #     accepted; a one-level delete refused; in an atomic push with two
 #     funny refs, the second keeping its own reason (git reports `atomic
 #     push failure` for every command after the first failed update()).
-#   * test_lf_terminated_request: libgit2's form (an LF after the
-#     capabilities and after each command, shallow and push option) not
-#     chomped, so side-band-64k is missed and ref names carry the LF.
+#   * test_lf_terminated_request: git chomps one LF from each command,
+#     shallow and push-option line; libgit2 ends each command line with
+#     one; the test puts an LF on every kind. Catches the LF not chomped
+#     (side-band-64k missed, ref names carrying the LF) and more than one
+#     LF chomped (a ref `refs/heads/x` plus two LFs read as `refs/heads/x`
+#     rather than a funny refname; a push option losing both).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -261,6 +264,14 @@ def test_report() raises:
         "0024unpack index-pack abnormal exit\\x0a0026ng refs/heads/main unpacker error\\x0a"
         + "0025ng refs/heads/new unpacker error\\x0a0025ng refs/heads/old unpacker error\\x0a0000",
     )
+    # Atomic with a refusal and an unpack error: the unpack error wins, as
+    # git reports `unpacker error` before it runs any update.
+    var aurep = PushReport(atomic)
+    aurep.reject(1, "non-fast-forward")
+    aurep.set_unpack_error("index-pack abnormal exit")
+    var aureasons = aurep.final_reasons(atomic)
+    for i in range(3):
+        assert_equal(aureasons[i], "unpacker error")
     # No report-status asked: only side-band's closing flush.
     var quiet = _request(False, True, False)
     out.clear()
@@ -354,6 +365,27 @@ def test_lf_terminated_request() raises:
         "0044\\x01000eunpack ok\\x0a0017ok refs/heads/main\\x0a0016ok refs/heads/new\\x0a0000"
         + "0000",
     )
+    # Two LFs: one is chomped, the other stays part of the line, so the ref
+    # name holds an LF (a funny refname) and so does the push option.
+    var w2 = List[UInt8]()
+    append_pkt_data(
+        w2, Span(_with_caps(A + " " + B + " refs/heads/ok", " report-status push-options"))
+    )
+    append_pkt_text(w2, A + " " + B + " refs/heads/x\n\n")
+    append_pkt_flush(w2)
+    append_pkt_text(w2, "note=two\n\n")
+    append_pkt_flush(w2)
+    var s2 = ReceivePackServer(_config(True, True))
+    s2.feed(Span(w2))
+    var r2 = s2.read_request()
+    assert_true(r2.complete and r2.use_push_options)
+    assert_equal(r2.commands[1].ref_name, "refs/heads/x\n")
+    assert_equal(r2.push_options[0], "note=two\n")
+    var rep2 = PushReport(r2)
+    rep2.refuse_funny_refnames(r2)
+    var reasons2 = rep2.final_reasons(r2)
+    assert_equal(reasons2[0], "")
+    assert_equal(reasons2[1], "funny refname")
 
 
 def test_more_refusals() raises:
