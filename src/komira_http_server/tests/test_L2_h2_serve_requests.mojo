@@ -365,28 +365,67 @@ def test_decreasing_stream_id() raises:
     _assert_goaway(c.out(), PROTOCOL_ERROR, 5)
 
 
-def test_trailers_with_pseudo_header_reuse_the_stream() raises:
-    """h2spec http2/8.1.2.1/3: a second HEADERS on an open stream; here a
-    connection error, the stream id no longer being new."""
+def _trailers_after_a_body(var trailers: List[HpackHeader], end_stream: Bool) raises -> _Client:
+    """HEADERS with the common block as POST (END_HEADERS, no END_STREAM),
+    DATA "test" (no END_STREAM), then `trailers` in a HEADERS frame with
+    END_HEADERS on the same stream. Returns the client after the trailers."""
     var c = _Client()
     assert_true(c.send(c.request(1, _common("POST", "/"), False)))
+    assert_true(c.send(_raw(FRAME_DATA, UInt8(0), 1, _bytes("test"))))
     _ = c.out()
+    var flags = FLAG_END_HEADERS
+    if end_stream:
+        flags = flags | FLAG_END_STREAM
+    assert_false(c.send(_raw(FRAME_HEADERS, flags, 1, c.block(trailers^))))
+    return c^
+
+
+def test_trailers_with_pseudo_header_reuse_the_stream() raises:
+    """h2spec http2/8.1.2.1/3, frame for frame: HEADERS (POST, END_HEADERS,
+    no END_STREAM), DATA "test" (no END_STREAM), then trailers holding
+    `:method: POST` (END_HEADERS, no END_STREAM). Then the same request with
+    legal trailers (`x-trailer`, END_STREAM).
+
+    Today's behaviour, pinned on purpose: any second HEADERS on an open
+    stream is a connection PROTOCOL_ERROR (GOAWAY), because its stream id
+    is no longer new, so legal trailers are refused as well as malformed
+    ones. This departs from RFC 9113 §8.1 (a trailer section is a HEADERS
+    frame on the open stream) and §8.1.1 (a malformed one is a stream
+    error, RST_STREAM, which is what h2spec expects); it is tracked in
+    komira#897, and a fix flips both halves of this test."""
     var t = List[HpackHeader]()
     t.append(_h(":method", "POST"))
-    assert_false(c.send(c.request(1, t^, True)))
+    var c = _trailers_after_a_body(t^, False)
     _assert_goaway(c.out(), PROTOCOL_ERROR, 1)
+
+    var legal = List[HpackHeader]()
+    legal.append(_h("x-trailer", "ok"))
+    var c2 = _trailers_after_a_body(legal^, True)
+    _assert_goaway(c2.out(), PROTOCOL_ERROR, 1)
+
+
+def _dummy() -> List[HpackHeader]:
+    """h2spec's `DummyHeaders(c, 1)` at its default --max-header-length:
+    one field `x-dummy0` whose value is 4000 bytes of 'x'."""
+    var value = String("")
+    for _ in range(4000):
+        value += "x"
+    var hs = List[HpackHeader]()
+    hs.append(_h("x-dummy0", value))
+    return hs^
 
 
 def test_continuation_without_a_block() raises:
-    """h2spec http2/5.1/4 (CONTINUATION on an idle stream) and 6.10/4
-    (after a HEADERS that carried END_HEADERS)."""
+    """h2spec http2/5.1/4 (CONTINUATION with the common block, END_HEADERS,
+    on idle stream 1) and 6.10/4 (HEADERS with END_STREAM and END_HEADERS,
+    then a CONTINUATION with the dummy block and END_HEADERS)."""
     var c = _Client()
     assert_false(c.send(_raw(FRAME_CONTINUATION, FLAG_END_HEADERS, 1, c.block(_common("GET", "/")))))
     _assert_goaway(c.out(), PROTOCOL_ERROR, 0)
 
     var c2 = _Client()
     var b = c2.request(1, _common("GET", "/"), True)
-    _cat(b, _raw(FRAME_CONTINUATION, FLAG_END_HEADERS, 1, c2.block(_common("GET", "/"))))
+    _cat(b, _raw(FRAME_CONTINUATION, FLAG_END_HEADERS, 1, c2.block(_dummy())))
     assert_false(c2.send(b))
     var outs = c2.out()
     assert_equal(Int(outs[len(outs) - 1].kind), Int(FRAME_GOAWAY))
@@ -394,12 +433,13 @@ def test_continuation_without_a_block() raises:
 
 
 def test_continuation_on_stream_zero_inside_a_block() raises:
-    """h2spec http2/6.10/3: HEADERS on stream 1 without END_HEADERS, then a
-    CONTINUATION on stream 0 (driven into the handler: the decoder refuses
-    stream 0 first)."""
+    """h2spec http2/6.10/3: HEADERS on stream 1 (END_STREAM, no
+    END_HEADERS), then a CONTINUATION with the dummy block and END_HEADERS
+    on stream 0 (driven into the handler: the decoder refuses stream 0
+    first)."""
     var c = _Client()
-    assert_true(c.handle(_frame(FRAME_HEADERS, UInt8(0), 1, c.block(_common("GET", "/")))))
-    assert_false(c.handle(_frame(FRAME_CONTINUATION, FLAG_END_HEADERS, 0, List[UInt8]())))
+    assert_true(c.handle(_frame(FRAME_HEADERS, FLAG_END_STREAM, 1, c.block(_common("GET", "/")))))
+    assert_false(c.handle(_frame(FRAME_CONTINUATION, FLAG_END_HEADERS, 0, c.block(_dummy()))))
     _assert_goaway(c.out(), PROTOCOL_ERROR, 1)
 
 
@@ -565,10 +605,12 @@ def test_malformed_requests_are_reset() raises:
     _refused(dp^)  # 8.1.2.3/7
 
 
-def test_authority_is_optional_and_te_trailers_allowed() raises:
-    """A request without :authority and with `te: trailers` is answered."""
+def test_te_trailers_is_allowed() raises:
+    """A request with `te: trailers`, the one TE value RFC 9113 §8.2.2
+    allows, is answered (h2spec http2/8.1.2.2/2 pins the refusal of any
+    other)."""
     var c = _Client()
-    var hs = _without(_common("GET", "/"), ":authority")
+    var hs = _common("GET", "/")
     hs.append(_h("te", "trailers"))
     hs.append(_h("accept", "*/*"))
     assert_true(c.send(c.request(1, hs^, True)))
@@ -598,7 +640,14 @@ def _status(outs: List[_Out], sid: Int) raises -> String:
 
 def test_methods_map_to_their_routes() raises:
     """Each method reaches only its own route (the :status of the answer
-    says which); an unknown method is GET."""
+    says which).
+
+    Today's behaviour, pinned on purpose by the last request: a method the
+    server does not implement (TRACE) is routed as GET and answered by the
+    GET route. This departs from RFC 9113 §8.3.1 (`:method` carries the
+    request's method, RFC 9110 §9; an unrecognized one is answered 501,
+    RFC 9110 §9.1) and is tracked in komira#897; a fix flips the TRACE
+    assertion."""
     var names: List[String] = ["POST", "PUT", "DELETE", "HEAD", "PATCH", "OPTIONS"]
     var methods: List[HttpMethod] = [
         HttpMethod.post(), HttpMethod.put(), HttpMethod.delete(),

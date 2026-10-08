@@ -497,10 +497,11 @@ def _assert_pings_in_order(outs: List[_Out], first: Int) raises -> Int:
 
 
 def test_one_round_reads_at_most_32_chunks() raises:
-    """Nine ignored frames of an unknown type (h2spec http2/5.5/1's frame,
-    16384 bytes each) and then a PING: 147546 bytes, more than 32 reads of
-    4096 can reach, all in the socket before the round. The first round does
-    not reach the PING; the second answers it."""
+    """After h2spec http2/5.5/1: nine ignored frames of its unknown type
+    0x16, but 16384 bytes long each rather than its 8, and then a PING:
+    147554 bytes, more than 32 reads of 4096 can reach, all in the socket
+    before the round. The first round does not reach the PING; the second
+    answers it."""
     var link = _Link()
     link.opened()
     var big = List[UInt8]()
@@ -508,7 +509,7 @@ def test_one_round_reads_at_most_32_chunks() raises:
         big.append(UInt8(0))
     var b = List[UInt8]()
     for _ in range(9):
-        _cat(b, _frame(UInt8(0xFF), UInt8(0), 0, big))
+        _cat(b, _frame(UInt8(0x16), UInt8(0), 0, big))
     _cat(b, _ping(77))
     link.write(b)
     assert_true(link.round())

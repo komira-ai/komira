@@ -16,8 +16,9 @@
 #
 # Groups (and the defect each would catch):
 #   E  `_emit_response`: an empty body not closed on HEADERS, the frame size
-#      taken from a constant rather than the peer (or no fallback when it is
-#      0), END_STREAM on a frame that is not the last, a window not charged,
+#      taken from a constant rather than the peer (or no defensive fallback
+#      when it is 0, a state set directly: no traffic can produce it),
+#      END_STREAM on a frame that is not the last, a window not charged,
 #      the residual lost or misplaced, the request counted before the body
 #      is out.
 #   P  `_pump_deferred_responses`: a residual not sent when the window
@@ -206,6 +207,11 @@ def test_frame_size_comes_from_the_peer() raises:
 
 
 def test_unset_peer_frame_size_falls_back_to_16384() raises:
+    """The peer frame size set to 0 directly. No traffic reaches this
+    state: the connection starts at 16384 and SETTINGS refuses any
+    MAX_FRAME_SIZE below 16384 (h2spec http2/6.5.2/3). The test exercises
+    `_emit_response`'s defensive fallback for a non-positive size: frames
+    of 16384."""
     var h2 = H2ConnectionState()
     var dec = HpackDecoder()
     _ = _open_stream(h2, 1)
@@ -296,6 +302,11 @@ def test_pump_sends_the_rest_when_the_window_opens() raises:
 
 
 def test_pump_frame_size_fallback_and_peer_value() raises:
+    """The first half sets the peer frame size to 0 directly, a state no
+    traffic reaches (the connection starts at 16384 and SETTINGS refuses
+    any MAX_FRAME_SIZE below 16384, h2spec http2/6.5.2/3); it exercises the
+    pump's defensive fallback to 16384. The second half uses a value
+    SETTINGS can set, 20000: one frame of 20000."""
     var h2 = H2ConnectionState()
     var dec = HpackDecoder()
     _ = _open_stream(h2, 1)

@@ -248,8 +248,12 @@ struct _Client(Movable):
 
     def get_block(mut self) -> List[UInt8]:
         """h2spec's common request headers: GET / over https."""
+        return self.block("GET")
+
+    def block(mut self, method: String) -> List[UInt8]:
+        """h2spec's common request headers with `method`."""
         var hs = List[HpackHeader]()
-        hs.append(HpackHeader(String(":method"), String("GET")))
+        hs.append(HpackHeader(String(":method"), method))
         hs.append(HpackHeader(String(":scheme"), String("https")))
         hs.append(HpackHeader(String(":path"), String("/")))
         hs.append(HpackHeader(String(":authority"), String("localhost")))
@@ -404,10 +408,11 @@ def test_decode_error_goaway_carries_decoder_code() raises:
 
 
 def test_push_promise_is_refused() raises:
-    """h2spec http2/8.2/1: a client PUSH_PROMISE is a connection
+    """h2spec http2/8.2/1: a client PUSH_PROMISE on stream 1 promising
+    stream 3, END_HEADERS, the common request block. A connection
     PROTOCOL_ERROR."""
     var c = _Client()
-    var p = _u32(UInt32(2))
+    var p = _u32(UInt32(3))
     var block = c.get_block()
     for i in range(len(block)):
         p.append(block[i])
@@ -415,15 +420,28 @@ def test_push_promise_is_refused() raises:
     _assert_goaway(c.out(), PROTOCOL_ERROR)
 
 
-def test_unknown_frame_is_ignored() raises:
-    """h2spec http2/5.5/1: an unknown frame type (0xFF) is dropped and the
-    PING after it is answered."""
-    var c = _Client()
+comptime UNKNOWN_FRAME_TYPE: UInt8 = 0x16  # h2spec http2/5.5's extension type
+
+
+def _unknown_frame() -> List[UInt8]:
+    """h2spec http2/5.5's frame: type 0x16, flags 0, stream 0, eight zero
+    bytes."""
     var eight = List[UInt8]()
     for _ in range(8):
         eight.append(UInt8(0))
-    var b = _raw(UInt8(0xFF), UInt8(0), 0, eight)
-    var ping = _ping(UInt8(0), UInt8(0x10))
+    return _raw(UNKNOWN_FRAME_TYPE, UInt8(0), 0, eight)
+
+
+def test_unknown_frame_is_ignored() raises:
+    """h2spec http2/5.5/1: the unknown frame, then a PING of eight zero
+    bytes: the frame is dropped and the PING is answered with ACK and the
+    same bytes."""
+    var c = _Client()
+    var b = _unknown_frame()
+    var zeros = List[UInt8]()
+    for _ in range(8):
+        zeros.append(UInt8(0))
+    var ping = _raw(FRAME_PING, UInt8(0), 0, zeros)
     for i in range(len(ping)):
         b.append(ping[i])
     assert_true(c.send(b))
@@ -431,6 +449,8 @@ def test_unknown_frame_is_ignored() raises:
     assert_equal(len(outs), 1)
     assert_equal(Int(outs[0].kind), Int(FRAME_PING))
     assert_equal(Int(outs[0].flags), Int(FLAG_ACK))
+    for i in range(8):
+        assert_equal(Int(outs[0].ping[i]), 0)
 
 
 # -----------------------------------------------------------------------------
@@ -439,13 +459,11 @@ def test_unknown_frame_is_ignored() raises:
 
 
 def test_unknown_frame_inside_header_block_is_refused() raises:
-    """h2spec http2/5.5/2."""
+    """h2spec http2/5.5/2: HEADERS on stream 1 (END_STREAM, no
+    END_HEADERS), then the unknown frame: a connection PROTOCOL_ERROR."""
     var c = _Client()
     var b = c.headers(1, FLAG_END_STREAM)
-    var eight = List[UInt8]()
-    for _ in range(8):
-        eight.append(UInt8(0))
-    var u = _raw(UInt8(0xFF), UInt8(0), 0, eight)
+    var u = _unknown_frame()
     for i in range(len(u)):
         b.append(u[i])
     assert_false(c.send(b))
@@ -464,20 +482,24 @@ def test_priority_inside_header_block_is_refused() raises:
     _assert_goaway(c.out(), PROTOCOL_ERROR, last_sid=1)
 
 
+def _dummy_block(mut c: _Client) -> List[UInt8]:
+    """h2spec's `DummyHeaders(c, 1)` at its default --max-header-length:
+    one field `x-dummy0` whose value is 4000 bytes of 'x'."""
+    var value = String("")
+    for _ in range(4000):
+        value += "x"
+    var hs = List[HpackHeader]()
+    hs.append(HpackHeader(String("x-dummy0"), value))
+    return c.enc.encode_block(hs^)
+
+
 def test_data_after_continuation_is_refused() raises:
-    """h2spec http2/6.10/2: HEADERS, CONTINUATION (no END_HEADERS), DATA."""
+    """h2spec http2/6.10/2: HEADERS with the common block as POST (no
+    END_STREAM, no END_HEADERS), a CONTINUATION with the dummy header block
+    (no END_HEADERS), then DATA "test" with END_STREAM."""
     var c = _Client()
-    var block = c.get_block()
-    var half = len(block) // 2
-    var first = List[UInt8]()
-    var second = List[UInt8]()
-    for i in range(len(block)):
-        if i < half:
-            first.append(block[i])
-        else:
-            second.append(block[i])
-    var b = _raw(FRAME_HEADERS, UInt8(0), 1, first)
-    var cont = _raw(FRAME_CONTINUATION, UInt8(0), 1, second)
+    var b = _raw(FRAME_HEADERS, UInt8(0), 1, c.block("POST"))
+    var cont = _raw(FRAME_CONTINUATION, UInt8(0), 1, _dummy_block(c))
     for i in range(len(cont)):
         b.append(cont[i])
     var d = _data(1, "test", True)
@@ -488,18 +510,14 @@ def test_data_after_continuation_is_refused() raises:
 
 
 def test_continuation_frames_complete_the_block() raises:
-    """h2spec http2/6.10/1: HEADERS (END_STREAM, no END_HEADERS) and two
-    CONTINUATIONs; the request is answered 200 with the route's body."""
+    """h2spec http2/6.10/1: HEADERS with the whole common block (END_STREAM,
+    no END_HEADERS), then two CONTINUATIONs each carrying the dummy header
+    block, the second with END_HEADERS. The request is answered 200 with the
+    route's body."""
     var c = _Client()
-    var block = c.get_block()
-    var parts = List[List[UInt8]]()
-    for _ in range(3):
-        parts.append(List[UInt8]())
-    for i in range(len(block)):
-        parts[i * 3 // len(block)].append(block[i])
-    var b = _raw(FRAME_HEADERS, FLAG_END_STREAM, 1, parts[0])
-    var c1 = _raw(FRAME_CONTINUATION, UInt8(0), 1, parts[1])
-    var c2 = _raw(FRAME_CONTINUATION, FLAG_END_HEADERS, 1, parts[2])
+    var b = _raw(FRAME_HEADERS, FLAG_END_STREAM, 1, c.get_block())
+    var c1 = _raw(FRAME_CONTINUATION, UInt8(0), 1, _dummy_block(c))
+    var c2 = _raw(FRAME_CONTINUATION, FLAG_END_HEADERS, 1, _dummy_block(c))
     for i in range(len(c1)):
         b.append(c1[i])
     for i in range(len(c2)):
@@ -767,8 +785,15 @@ def test_connection_window_update_releases_a_deferred_body() raises:
 
 
 def test_stream_window_overflow_resets_the_stream() raises:
-    """h2spec http2/6.9.1/3: RST_STREAM(FLOW_CONTROL_ERROR); the connection
-    stays open."""
+    """h2spec http2/6.9.1/3: HEADERS without END_STREAM, then two stream
+    WINDOW_UPDATEs of 2^31-1. RST_STREAM(FLOW_CONTROL_ERROR) for each; the
+    connection stays open.
+
+    Today's behaviour, pinned on purpose: the stream stays half-closed
+    (local) after the server's RST_STREAM, so the second update is reset
+    again. This departs from RFC 9113 §5.1 (sending RST_STREAM moves the
+    stream to closed) and is tracked in komira#897; a fix flips the state
+    assertion and the second RST_STREAM here."""
     var c = _Client()
     assert_true(c.send(c.get(1, False)))
     _ = c.out()
@@ -782,6 +807,12 @@ def test_stream_window_overflow_resets_the_stream() raises:
     _assert_rst(outs[0], 1, FLOW_CONTROL_ERROR)
     _assert_rst(outs[1], 1, FLOW_CONTROL_ERROR)
     assert_false(c.h2.is_goaway_sent())
+    var idx = c.h2.find_stream_idx(UInt32(1))
+    assert_equal(
+        Int(c.h2.streams[idx].state),
+        Int(STREAM_STATE_HALF_CLOSED_LOCAL),
+        "komira#897: the reset stream is left half-closed (local)",
+    )
 
 
 def test_window_update_on_idle_stream() raises:
@@ -839,9 +870,10 @@ def test_data_after_rst_stream_is_stream_closed() raises:
 
 
 def test_data_on_idle_stream() raises:
-    """h2spec http2/5.1/1: a connection PROTOCOL_ERROR here."""
+    """h2spec http2/5.1/1: DATA "test" with END_STREAM on idle stream 1, a
+    connection PROTOCOL_ERROR."""
     var c = _Client()
-    assert_false(c.send(_data(1, "test", False)))
+    assert_false(c.send(_data(1, "test", True)))
     _assert_goaway(c.out(), PROTOCOL_ERROR)
 
 
