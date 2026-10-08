@@ -1,0 +1,752 @@
+"""The oracle's rules for an ORACLE case's SQL, checked on DuckDB's own parse.
+
+An expected answer is only as good as the query that computed it, so
+gen_expected.py refuses, before it runs a query, one that leaves its
+semantics to DuckDB's defaults or to the moment it runs, or that reaches
+past the tables the oracle registers by a way the rules below name (in
+FROM, any table, table function, view or file not allowed there; anywhere,
+a function on the lists below):
+
+- every `ORDER BY` key (of the query, a subquery or a window) states its
+  direction (ASC or DESC) and its NULL placement (NULLS FIRST or NULLS
+  LAST). DuckDB's `default_null_order` is NULLS LAST, the same as the plan's
+  default (query semantics §4.1), so a key that relies on it computes the
+  same rows today: nothing but this check notices the placement was never
+  stated. A window function's own ORDER BY (`first_value(x ORDER BY y)
+  OVER (...)`) is held to the same rule: DuckDB keeps it in the window's
+  `arg_orders`, beside the OVER clause's `orders`;
+- an aggregate in `_ORDER_SENSITIVE` (below: `list`, `string_agg`,
+  `first`, `arg_max`, `mode`...) has an ORDER BY of its own, which the rule
+  above holds like any other: as a plain aggregate (`list(v ORDER BY k ASC
+  NULLS LAST)`, DuckDB's `order_bys`) and as a window function
+  (`list(v ORDER BY k ASC NULLS LAST) OVER (...)`, its `arg_orders`; the
+  OVER clause's ORDER BY is not taken for it, more than DuckDB needs for
+  some frames). Without one its answer is the order the rows reach it,
+  which is DuckDB's physical order: a plan computes the same aggregate in
+  its own. A built-in macro in `_ORDER_MACROS` (JSON's `json_group_array`
+  and its kin, over `string_agg` with no ORDER BY) is refused outright: no
+  ORDER BY reaches the aggregate inside it. A window function in
+  `_WINDOW_ORDERED` (`row_number`, `lead`, `first_value`...) needs an ORDER
+  BY in its OVER clause or of its own. Neither rule sees ties: an ORDER BY
+  whose keys tie leaves the tied rows in DuckDB's order;
+- a window whose frame has a ROWS bound (`ROWS BETWEEN UNBOUNDED PRECEDING
+  AND CURRENT ROW`, `ROWS 1 PRECEDING`; DuckDB's `start` or `end` is
+  CURRENT_ROW_ROWS, EXPR_PRECEDING_ROWS or EXPR_FOLLOWING_ROWS) has an
+  ORDER BY in its OVER clause, whatever the function: a ROWS frame counts
+  rows in the order they reach the window, and a function's own ORDER BY
+  (`arg_orders`) orders the rows inside the frame, not the frame. A frame
+  unbounded on both sides is the whole partition. A RANGE or GROUPS frame
+  needs none: with no ORDER BY every row of a partition is a peer of every
+  other (WindowBoundariesState::PeerBegin and PeerEnd,
+  window_boundaries_state.cpp), so its frame is the partition or empty,
+  and a RANGE offset needs exactly one ORDER BY anyway (the binder,
+  bind_window_expression.cpp);
+- a LIMIT or an OFFSET (LIMIT_MODIFIER, LIMIT_PERCENT_MODIFIER) has an
+  ORDER BY in the same query node's modifiers: the rows it keeps are
+  otherwise the first DuckDB reaches. An ORDER BY of a subquery below it
+  does not count (SQL keeps no subquery's order). `DISTINCT ON (...)` (a
+  DISTINCT_MODIFIER with `distinct_on_targets`) has one too: it keeps the
+  first row of each key, first by that ORDER BY. A plain DISTINCT keeps
+  values, not rows, and needs none. Ties among the ORDER BY's keys at the
+  cut, or within a DISTINCT ON key, are not seen here (the tie gap
+  above);
+- `histogram` with one argument takes it as a CAST to a type that is not
+  FLOAT or DOUBLE (nor a type name the parse leaves unbound): DuckDB keeps
+  a FLOAT or DOUBLE histogram in a `std::map` ordered by `<`
+  (GetHistogramFunction, histogram.cpp), under which NaN is equivalent to
+  every key and -0.0 to 0.0, so a NaN joins whichever key the map compares
+  it with first and a zero keeps the sign of the first zero to arrive: the
+  answer follows the rows' order. Any other type is keyed by an integer, a
+  string, or (a nested type, a DECIMAL wider than 18 digits...) DuckDB's
+  sort key, under which equal values are equal bytes. `histogram` with
+  bins and `histogram_exact` take their bins (the second argument) with no
+  column in them, at any depth (one in a subquery may be the outer row's,
+  which the parse does not tell): DuckDB fixes a group's bins from the
+  first row that reaches it (HistogramBinState::InitializeBins,
+  binned_histogram.cpp);
+- `list_sort` and its aliases and `list_grade_up` and its aliases name
+  their direction and NULL placement as their second and third arguments,
+  each a cast string literal DuckDB reads as one (`ASC`/`DESC`, `NULLS
+  FIRST`/`NULLS LAST`, either spelling DuckDB's EnumUtil knows): with fewer
+  arguments, or `DEFAULT`, DuckDB takes the session's `default_order` and
+  `default_null_order` (ListNormalSortBind, ListGradeUpBind, list_sort.cpp).
+  `list_reverse_sort` (`array_reverse_sort`) is refused: it always reads
+  `default_order` and sorts the other way (ListReverseSortBind);
+- every literal is the operand of a CAST (query semantics, preamble: the
+  oracle casts every literal to the plan literal's type), except a literal
+  that is itself the count of a LIMIT or an OFFSET, which is a plan
+  constant and not a typed value (a literal inside a subquery that computes
+  the count is not exempt). An
+  uncast `2` beside a BIGINT column computes the same answer, so again only
+  this check notices;
+- FROM reads only what the oracle hands DuckDB, by allowlist (below): a
+  table the caller registered or a CTE in scope, with no `AT (...)` clause,
+  a subquery, a join, a VALUES list, no FROM at all, or a table function in
+  `_TABLE_FUNCTIONS`;
+- no call to a function in `_UNSTABLE` (below), to a function whose
+  name begins `duckdb_` or `pragma_` (each reads the session's catalog,
+  settings, logs or storage), or to `age` with one argument (it subtracts
+  from today's midnight; `age(a, b)` reads no clock); no SQL value keyword
+  that DuckDB's binder may turn into a call (below); and no `USING SAMPLE`
+  or `TABLESAMPLE` (a sample is not a function call: DuckDB keeps it in a
+  `sample` key of the SELECT or the table reference);
+- no `COLLATE` expression (DuckDB's class COLLATE, at any depth): a
+  collation (`nocase`,
+  `noaccent`, ICU's) makes strings that differ compare equal, so a sort, a
+  GROUP BY, a DISTINCT, a join or a comparison under it ties rows that
+  differ and keeps whichever DuckDB reaches first, and gen_expected.py's
+  tie check, whose keys sort under the column's collation, cannot tell
+  them apart (`SELECT s COLLATE nocase AS s ... ORDER BY s` writes `a, A,
+  a` in DuckDB's order). The plan compares strings by their bytes. DuckDB
+  1.5.6's grammar has no collation in a type name (`CAST(s AS VARCHAR
+  COLLATE nocase)` does not parse), the tables the oracle registers carry
+  none, and the oracle never sets `default_collation`;
+- exactly one statement, a SELECT.
+
+FROM. Every table reference (a SELECT's `from_table` and each side of a
+join, at any depth) is one of six kinds; any other (PIVOT, UNPIVOT, a
+`DESCRIBE` or `SUMMARIZE` in FROM) is refused. A table named in FROM (a
+BASE_TABLE in the parse, which is also how a catalog view such as
+`duckdb_tables` or `pg_catalog.pg_settings` parses) must be bare, with no
+schema or catalog: the oracle registers its tables unqualified. Its name
+must not be a file path (`.`, `/`, `\\` or `:` in it: `FROM 'x.parquet'`
+is a BASE_TABLE that DuckDB reads by a replacement scan). It must have no
+`at_clause` (`FROM t AT (VERSION => ...)`, time travel, which reads a
+version of the table other than the one registered). And it must be a
+CTE in scope or one of the names the caller passes to `check()`, compared
+without case as DuckDB's catalog compares them. A CTE is in scope in the
+query that defines it (its FROM, its subqueries at any depth, the CTEs
+after it in the same WITH) and nowhere else; a CTE's own body does not see
+it, except the recursive half (`right`) of a `WITH RECURSIVE` union. A CTE
+name is compared with its case: a reference spelt otherwise is held to the
+registered names, which can only refuse more than DuckDB would. A table
+function (`FROM f(...)`) must be unqualified and in `_TABLE_FUNCTIONS`;
+DuckDB's others run SQL text (`query`, `query_table`,
+`json_execute_serialized_sql`), read the worker's files (`read_text`,
+`read_blob`, `glob`, `read_csv`...) or its catalog.
+
+SQL value keywords. DuckDB's grammar has no CURRENT_DATE keyword: `SELECT
+current_timestamp FROM t` parses to a COLUMN_REF named `current_timestamp`,
+and only the binder, finding no column of that name, calls the function the
+name maps to (`GetSQLValueFunctionName`, bind_columnref_expression.cpp).
+Quoting changes nothing: `"current_date"` parses to the same COLUMN_REF, so
+it is the function unless a table in scope has such a column. The parse
+alone cannot tell which, so a COLUMN_REF whose last name is one of
+`_VALUE_KEYWORDS` (all eleven names the map knows: the five clock keywords
+and the six that read the session's user, role, catalog or schema) is
+refused in each of the four places the binder would try the map: a
+one-part name; a two-part name qualified by `alias`, in any case
+(`IsPotentialAlias`); any name inside a table function's arguments; and any
+name inside the expression of a `COLUMNS(...)` star. The last two are bound
+by TableFunctionBinder, which tries the map on the last part of a qualified
+name too, so `COLUMNS(x.current_date)` is the clock (a subquery there is
+held to this rule as well, more than DuckDB needs). A column of that name is
+read qualified by its table, `t.current_date`, which the binder resolves to
+the column or refuses.
+
+`_UNSTABLE` holds every scalar or aggregate function DuckDB v1.5.6 itself
+marks VOLATILE or CONSISTENT_WITHIN_QUERY (`duckdb_functions().stability`),
+except `error` (VOLATILE only so that it is never folded; its answer is its
+argument); ICU's current_localtime and current_localtimestamp, which read
+the clock but keep the default CONSISTENT; `current_setting` and
+`getvariable`, which read the session's settings and variables; the
+functions whose argument is SQL text or the name of something DuckDB looks
+up (a type, a log type, a coordinate system), and those that answer with
+the running DuckDB rather than a value: `json_serialize_plan`,
+`json_serialize_sql`, `json_deserialize_sql`, `make_type`,
+`parse_duckdb_log_message`, `st_setcrs`, `version` and `vector_type`
+(each with its reason in the list; these are listed by hand:
+`duckdb_functions()` does not mark them unstable, and the test requires
+each to be a function of the running DuckDB); and
+`_MACROS`, every built-in scalar macro whose body reaches any of these, a
+`duckdb_`/`pragma_` function, a table or a table function outside
+`_TABLE_FUNCTIONS`, directly or through another macro (`ago` is
+`current_timestamp - i::interval`). test_sql_discipline.py derives the
+unstable functions and `_MACROS` from the running DuckDB's
+`duckdb_functions()` and fails if a function is missing here or `_MACROS`
+differs from the macros it derives. Table functions and table macros are
+outside that derivation: the FROM allowlist refuses every one not named.
+
+`_ORDER_SENSITIVE` holds every aggregate of DuckDB v1.5.6 (its
+functions.json files under src/function/aggregate and
+extension/core_functions/aggregate, with their aliases) whose answer,
+beyond floating-point rounding, can differ between two orders of the same
+rows: those that keep a row's value by its position (`first`/`arbitrary`,
+`last`, `any_value`), collect values in arrival order (`list`/`array_agg`,
+`string_agg`/`group_concat`/`listagg`), break a tie by arrival (the
+`arg_min`/`arg_max` family and `min_by`/`max_by`, which keep the first row
+of an equal key; `mode`, the lowest insert position; `approx_top_k`), or
+summarize by an order-dependent sketch (`approx_quantile`'s t-digest,
+`reservoir_quantile`'s reservoir). DuckDB's own flag
+(AggregateOrderDependent) is no guide: every aggregate but count, min, max,
+bool_and/bool_or, the integer sums, mad and quantile keeps the default
+ORDER_DEPENDENT, `avg` and `bitstring_agg` included. Not listed:
+`histogram` and `histogram_exact`, which are `_HISTOGRAMS`, order-free only
+under the rule above; `bitstring_agg` (bits over fixed bins); the float
+aggregates whose order changes only rounding (`sum`, `avg`, `var_*`,
+`corr`... which the case's `float` policy is for), and the rest, which
+commute, but for the sign of a zero: -0.0 equals 0.0, and `min` and
+`max` keep the first of equal values to arrive, the quantiles (`median`,
+`quantile_disc`...) whichever their selection lands on, and so does a
+GROUP BY or DISTINCT key; over a column holding both zeros which one they
+answer is a tie this module does not see (gen_expected.py's row-order
+check sees it: in its orders every row of a table arrives first and last).
+DuckDB v1.5.6's
+`duckdb_functions()` also lists its window functions as aggregates; those
+are `_WINDOW_ORDERED` or, the rank family, order-free. test_sql_discipline.py
+holds the lists to the running DuckDB: every aggregate it has must be on
+one of these lists (`_HISTOGRAMS` included) or on the test's own list of
+order-free aggregates, and
+`_ORDER_MACROS` must
+be exactly the built-in macros reaching a listed aggregate with no ORDER BY.
+
+The check walks the JSON DuckDB's `json_serialize_sql` makes of the
+statement, not the text, so a comment, a string literal or a line break
+cannot hide or fake a keyword.
+
+`check_order_policy()` holds the outermost query node (the statement's
+`node`: a SELECT_NODE, or a SET_OPERATION_NODE whose modifiers are those
+of the whole UNION) to the case's `-- order:` policy, since the expected
+file freezes the rows in the order DuckDB writes them. Under `total` that
+node has an ORDER_MODIFIER; under `keys=<c1>,<c2>` its ORDER_MODIFIER's
+leading keys are exactly those columns, in that order, each a bare
+one-part column name (`ORDER BY a`, not `t.a` nor an expression), which
+DuckDB binds to the output column so named before a table's. Without it
+the file holds an order no ORDER BY asked for: a window's partition
+order, a subquery's ORDER BY (SQL keeps no subquery's order), a hash
+table's. An ORDER BY whose keys tie is not seen here: gen_expected.py's
+tie check refuses a case whose answer shows the order a tie of any
+ORDER BY in it leaves (the outermost's, an inner query's, a window's or
+an aggregate's, an inner sort's order behind a tied or constant key
+included), and its row-order check a tie the tables' order decides.
+"""
+
+import json
+
+# Built-in scalar macros that reach an unstable function, a duckdb_/pragma_
+# function, a table or a table function not allowed below
+# (default_functions.cpp); test_sql_discipline.py requires this set to be
+# exactly the one it derives.
+_MACROS = frozenset([
+    "ago",
+    "current_catalog",
+    "format_type",
+    "get_block_size",
+    "pg_conf_load_time",
+    "pg_get_constraintdef",
+    "pg_get_viewdef",
+    "pg_postmaster_start_time",
+    "pg_sleep",
+])
+
+# Functions whose answer depends on when, where or in which session the
+# query runs (the module docstring says how the list is derived).
+_UNSTABLE = frozenset([
+    # DuckDB marks these CONSISTENT_WITHIN_QUERY: a clock or the session.
+    "current_database",
+    "current_date",
+    "current_schema",
+    "current_schemas",
+    "get_current_time",
+    "get_current_timestamp",
+    "in_search_path",
+    "now",
+    "today",
+    "transaction_timestamp",
+    "txid_current",
+    # DuckDB marks these VOLATILE.
+    "current_connection_id",
+    "current_query",
+    "current_query_id",
+    "current_transaction_id",
+    "currval",
+    "gen_random_uuid",
+    "nextval",
+    "random",
+    "setseed",
+    "sleep_ms",
+    "stats",
+    "uuid",
+    "uuidv4",
+    "uuidv7",
+    "write_log",
+    # ICU's clock readers that DuckDB leaves CONSISTENT; the session's
+    # settings and variables.
+    "current_localtime",
+    "current_localtimestamp",
+    "current_setting",
+    "getvariable",
+    # DuckDB leaves these CONSISTENT, but each answers with more than its
+    # arguments' values (DuckDB v1.5.6 sources; the test requires each to
+    # be a function of the running DuckDB).
+    # Binds and plans its SQL text on the session: with `optimize` it folds
+    # the clock and settings into its answer, and its errors read the
+    # catalog and the worker's files.
+    "json_serialize_plan",
+    # Parses its SQL text; its JSON is the running DuckDB's parse-tree
+    # format, written per the session's `serialization_compatibility`.
+    "json_serialize_sql",
+    # Renders a DuckDB parse-tree JSON back to SQL: the running DuckDB's
+    # format, the inverse of the one above.
+    "json_deserialize_sql",
+    # Resolves its type name, which may name a catalog and schema, in the
+    # session's catalog.
+    "make_type",
+    # Looks its log type up in the database's log manager, whose types are
+    # those of the extensions loaded.
+    "parse_duckdb_log_message",
+    # Looks its coordinate system up in the system catalog, whose entries
+    # are those of the extensions loaded.
+    "st_setcrs",
+    # The running DuckDB's version.
+    "version",
+    # How DuckDB holds its argument in memory (FLAT, CONSTANT,
+    # DICTIONARY...), which depends on the plan DuckDB ran.
+    "vector_type",
+    # Not functions in v1.5.6, kept so a parse that calls them by these
+    # names (`current_time()`, `localtime()`) is refused too.
+    "current_time",
+    "current_timestamp",
+    "localtime",
+    "localtimestamp",
+]) | _MACROS
+
+# Function names that read the session's catalog, settings, logs or storage.
+_SESSION_PREFIXES = ("duckdb_", "pragma_")
+
+# Aggregates whose answer depends on the order rows reach them (the module
+# docstring says how the list is derived); each needs an ORDER BY of its own.
+_ORDER_SENSITIVE = frozenset([
+    # Keep a row's value by its position.
+    "any_value",
+    "arbitrary",
+    "first",
+    "last",
+    # Collect values in arrival order.
+    "array_agg",
+    "group_concat",
+    "list",
+    "listagg",
+    "string_agg",
+    # Break a tie by arrival: the first row of an equal key wins.
+    "arg_max",
+    "arg_max_null",
+    "arg_max_nulls_last",
+    "arg_min",
+    "arg_min_null",
+    "arg_min_nulls_last",
+    "argmax",
+    "argmin",
+    "max_by",
+    "min_by",
+    # The most frequent value, a tie to the lowest insert position; the top
+    # k by count, ties in arrival order.
+    "approx_top_k",
+    "mode",
+    # Order-dependent sketches: a t-digest, a reservoir.
+    "approx_quantile",
+    "reservoir_quantile",
+])
+
+# Window functions whose answer is a row's position among the others:
+# with neither an OVER clause ORDER BY nor one of their own, that position
+# is DuckDB's physical order. (rank, dense_rank, rank_dense, percent_rank
+# and cume_dist are not here: with no ORDER BY every row is a peer of every
+# other, and each answers the same for all.)
+_WINDOW_ORDERED = frozenset([
+    "fill",
+    "first_value",
+    "lag",
+    "last_value",
+    "lead",
+    "nth_value",
+    "ntile",
+    "row_number",
+])
+
+# Frame bounds that count rows (WindowBoundary): a frame with one of them
+# and no OVER clause ORDER BY counts rows in the order they arrive.
+_ROWS_BOUNDS = frozenset(["CURRENT_ROW_ROWS", "EXPR_FOLLOWING_ROWS", "EXPR_PRECEDING_ROWS"])
+
+# Aggregates order-free only under a rule of their own (_check_histogram):
+# `histogram(x)` over a FLOAT or DOUBLE is a std::map under `<`; with bins,
+# each group's bins are its first row's.
+_HISTOGRAMS = frozenset(["histogram", "histogram_exact"])
+# The cast types a one-argument histogram may not take (LogicalTypeId, as
+# the parse spells REAL, FLOAT4 and FLOAT8 too), and UNBOUND: a name the
+# parse does not resolve, which may bind to either.
+_HISTOGRAM_UNSAFE_KEYS = frozenset(["DOUBLE", "FLOAT", "UNBOUND"])
+
+# Built-in scalar macros over an _ORDER_SENSITIVE aggregate with no ORDER
+# BY (the JSON extension's: string_agg(...)); an ORDER BY on the call does
+# not reach it. test_sql_discipline.py requires this set to be exactly the
+# one it derives.
+_ORDER_MACROS = frozenset([
+    "json_group_array",
+    "json_group_object",
+    "json_group_structure",
+])
+
+# List sorts whose direction and NULL placement default to the session's
+# settings unless their 2nd and 3rd arguments name them.
+_LIST_SORTS = frozenset(["array_grade_up", "array_sort", "grade_up", "list_grade_up", "list_sort"])
+# A list sort whose direction is always the session's default_order, flipped.
+_REVERSE_SORTS = frozenset(["array_reverse_sort", "list_reverse_sort"])
+# What DuckDB's EnumUtil reads as a direction and a NULL placement, upper
+# case (list_sort upper-cases its argument); `DEFAULT` and `ORDER_DEFAULT`
+# are not here: they read the session.
+_DIRECTIONS = frozenset(["ASC", "ASCENDING", "DESC", "DESCENDING"])
+_NULL_ORDERS = frozenset(["NULLS FIRST", "NULLS LAST", "NULLS_FIRST", "NULLS_LAST"])
+
+# The table functions a query may call in FROM. Each computes its rows from
+# its arguments alone, and the arguments are held to every rule here. No
+# ORACLE case calls one today; these are the row sources a plan case needs
+# that no dataset holds.
+_TABLE_FUNCTIONS = frozenset([
+    # The integers (or instants) from a start to a stop by a step, the stop
+    # included.
+    "generate_series",
+    # As generate_series, the stop excluded.
+    "range",
+    # The elements of a list (or the fields of a struct) given as argument.
+    "unnest",
+])
+
+# The kinds of table reference FROM may hold (TableReferenceType). Not
+# PIVOT (`IN <enum>` reads a type from the catalog; PIVOT and UNPIVOT are
+# no plan's), SHOW_REF (`DESCRIBE`, `SUMMARIZE`), or a kind DuckDB adds.
+_FROM_KINDS = frozenset([
+    "BASE_TABLE",
+    "EMPTY",
+    "EXPRESSION_LIST",
+    "JOIN",
+    "SUBQUERY",
+    "TABLE_FUNCTION",
+])
+
+# A table name holding one of these is a path DuckDB's replacement scans
+# read (`FROM 'x.parquet'`, `FROM '/dir/*.csv'`); no registered name does.
+_PATH_CHARS = "./\\:"
+
+
+# GetSQLValueFunctionName's map in DuckDB v1.5.6: a column name the binder
+# cannot resolve, lowercased, and the function it calls instead.
+_VALUE_KEYWORDS = {
+    "current_catalog": "current_catalog",
+    "current_date": "current_date",
+    "current_role": "current_role",
+    "current_schema": "current_schema",
+    "current_time": "get_current_time",
+    "current_timestamp": "get_current_timestamp",
+    "current_user": "current_user",
+    "localtime": "current_localtime",
+    "localtimestamp": "current_localtimestamp",
+    "session_user": "session_user",
+    "user": "user",
+}
+
+
+class DisciplineError(ValueError):
+    pass
+
+
+_ORDER_KEYS = ("orders", "arg_orders")
+_LIMIT_MODIFIERS = ("LIMIT_MODIFIER", "LIMIT_PERCENT_MODIFIER")
+
+
+def _value_keyword(node, in_table_fn):
+    """The function a COLUMN_REF `node` may bind to, or None."""
+    names = node.get("column_names") or []
+    if not names:
+        return None
+    target = _VALUE_KEYWORDS.get(str(names[-1]).lower())
+    if target is None:
+        return None
+    if len(names) == 1 or in_table_fn:
+        return target
+    if len(names) == 2 and str(names[0]).lower() == "alias":
+        return target
+    return None
+
+
+def _string_literal(node):
+    """The upper-cased text of a string literal, cast or not, or None."""
+    if isinstance(node, dict) and node.get("class") == "CAST":
+        node = node.get("child")
+    if not isinstance(node, dict) or node.get("class") != "CONSTANT":
+        return None
+    value = node.get("value") or {}
+    if value.get("is_null") or not isinstance(value.get("value"), str):
+        return None
+    return value["value"].upper()
+
+
+def _own_orders(node, cls):
+    """The ORDER BY keys a call carries for its own arguments."""
+    if cls == "WINDOW":
+        return node.get("arg_orders") or []
+    return (node.get("order_bys") or {}).get("orders") or []
+
+
+def _check_order_reads(node, cls, path, problems):
+    """Hold a FUNCTION or WINDOW node to the row-order and list-sort rules."""
+    fname = str(node.get("function_name", "")).lower()
+    if fname in _ORDER_SENSITIVE and not _own_orders(node, cls):
+        problems.append("%s: %s() with no ORDER BY of its own depends on the order rows reach it"
+                        % (path, node["function_name"]))
+    if cls == "WINDOW" and fname in _WINDOW_ORDERED and not node.get("orders") and not node.get("arg_orders"):
+        problems.append("%s: %s() with no ORDER BY in its OVER clause or of its own depends on the order rows reach it"
+                        % (path, node["function_name"]))
+    if cls == "WINDOW" and not node.get("orders") and (
+            node.get("start") in _ROWS_BOUNDS or node.get("end") in _ROWS_BOUNDS):
+        problems.append("%s: %s() over a ROWS frame (%s to %s) with no ORDER BY in its OVER clause depends on "
+                        "the order rows reach it" % (path, node["function_name"], node.get("start"), node.get("end")))
+    if fname in _HISTOGRAMS:
+        _check_histogram(node, fname, path, problems)
+    if cls != "FUNCTION":
+        return
+    if fname in _ORDER_MACROS:
+        problems.append("%s: %s() is a macro over an aggregate with no ORDER BY; no ORDER BY reaches it"
+                        % (path, node["function_name"]))
+    elif fname in _REVERSE_SORTS:
+        problems.append("%s: %s() sorts against the session's default_order" % (path, node["function_name"]))
+    elif fname in _LIST_SORTS:
+        args = node.get("children") or []
+        if (len(args) != 3 or _string_literal(args[1]) not in _DIRECTIONS
+                or _string_literal(args[2]) not in _NULL_ORDERS):
+            problems.append("%s: %s() without a direction and a NULL placement as cast literals reads the "
+                            "session's default_order and default_null_order" % (path, node["function_name"]))
+
+
+def _reads_rows(node):
+    """Whether expression `node` names a column, at any depth (a column in
+    a subquery may be the outer row's: the parse does not say)."""
+    if isinstance(node, list):
+        return any(_reads_rows(item) for item in node)
+    if not isinstance(node, dict):
+        return False
+    if node.get("class") == "COLUMN_REF":
+        return True
+    return any(_reads_rows(value) for value in node.values())
+
+
+def _check_histogram(node, fname, path, problems):
+    """Hold a histogram call (FUNCTION or WINDOW) to its rule."""
+    args = node.get("children") or []
+    if len(args) == 1:
+        arg = args[0]
+        key = ((arg.get("cast_type") or {}).get("id") if isinstance(arg, dict) and arg.get("class") == "CAST" else None)
+        if key is None or key in _HISTOGRAM_UNSAFE_KEYS:
+            problems.append("%s: %s() of an argument that is not a CAST to a type other than FLOAT or DOUBLE (%s); "
+                            "a FLOAT or DOUBLE histogram merges NaN and -0.0 by the order rows reach it"
+                            % (path, node["function_name"], key or "no CAST"))
+    elif len(args) >= 2 and _reads_rows(args[1]):
+        problems.append("%s: %s() with bins that read a column takes each group's bins from the "
+                        "first row that reaches it" % (path, node["function_name"]))
+
+
+def _check_modifiers(node, path, problems):
+    """Hold a query node's LIMIT, OFFSET and DISTINCT ON to the ORDER BY rule."""
+    mods = node.get("modifiers")
+    if not isinstance(mods, list):
+        return
+    ordered = any(isinstance(m, dict) and m.get("type") == "ORDER_MODIFIER" for m in mods)
+    if ordered:
+        return
+    for i, mod in enumerate(mods):
+        if not isinstance(mod, dict):
+            continue
+        if mod.get("type") in _LIMIT_MODIFIERS:
+            problems.append("%s.modifiers[%d]: a LIMIT or OFFSET with no ORDER BY in the same query keeps the "
+                            "rows DuckDB reaches first" % (path, i))
+        elif mod.get("type") == "DISTINCT_MODIFIER" and mod.get("distinct_on_targets"):
+            problems.append("%s.modifiers[%d]: DISTINCT ON with no ORDER BY in the same query keeps the row of "
+                            "each key DuckDB reaches first" % (path, i))
+
+
+def _ctes(node):
+    """The (name, info) pairs of the WITH of query node `node`, in order."""
+    cte_map = node.get("cte_map")
+    if not isinstance(cte_map, dict):
+        return []
+    return [(str(e.get("key")), e.get("value")) for e in cte_map.get("map") or []]
+
+
+def _check_ref(node, path, scope, tables, problems):
+    """Hold the table reference `node` to the FROM allowlist; `scope` is
+    the CTE names in scope, `tables` the registered names (lowercase)."""
+    kind = node.get("type")
+    if kind not in _FROM_KINDS:
+        problems.append("%s: a %s in FROM; it may hold a table, a CTE, a subquery, a join, VALUES or %s()"
+                        % (path, kind, "(), ".join(sorted(_TABLE_FUNCTIONS))))
+    elif kind == "BASE_TABLE":
+        name = str(node.get("table_name", ""))
+        qualifier = [str(node.get(k)) for k in ("catalog_name", "schema_name") if node.get(k)]
+        if qualifier:
+            problems.append("%s: %s names a schema or catalog; the oracle's tables are named bare"
+                            % (path, ".".join(qualifier + [name])))
+        elif any(c in name for c in _PATH_CHARS):
+            problems.append("%s: %s is a file path, which DuckDB reads by a replacement scan" % (path, name))
+        elif node.get("at_clause") is not None:
+            problems.append("%s.at_clause: %s AT (...) reads another version of the table (time travel)" % (path, name))
+        elif name not in scope and name.lower() not in tables:
+            problems.append("%s: %s is neither a table the oracle registers nor a CTE in scope" % (path, name))
+    elif kind == "TABLE_FUNCTION":
+        fn = node.get("function") or {}
+        fname = str(fn.get("function_name", ""))
+        if fn.get("catalog") or fn.get("schema") or fname.lower() not in _TABLE_FUNCTIONS:
+            problems.append("%s: %s() is not a table function the oracle allows (%s())"
+                            % (path, fname, "(), ".join(sorted(_TABLE_FUNCTIONS))))
+
+
+class _Ctx:
+    def __init__(self, tables):
+        self.tables = tables
+        self.problems = []
+
+
+def _walk(node, path, in_cast, is_count, in_table_fn, is_ref, scope, ctx):
+    """`in_cast`: `node` is a CAST's operand; `is_count`: `node` is the
+    count of a LIMIT or an OFFSET; `is_ref`: `node` is a table reference.
+    None of the three is inherited below `node`.
+    `in_table_fn`: `node` is inside a table function's arguments or a
+    COLUMNS star's expression (both bound by TableFunctionBinder); it is
+    inherited by everything below. `scope`: the CTE names in scope."""
+    problems = ctx.problems
+    if isinstance(node, list):
+        for i, item in enumerate(node):
+            _walk(item, "%s[%d]" % (path, i), False, False, in_table_fn, False, scope, ctx)
+        return
+    if not isinstance(node, dict):
+        return
+    cls = node.get("class")
+    if is_ref:
+        _check_ref(node, path, scope, ctx.tables, problems)
+    if cls == "CONSTANT" and not in_cast and not is_count:
+        problems.append("%s: a literal that is not the operand of a CAST: %s" % (path, json.dumps(node.get("value"))))
+    if cls == "FUNCTION":
+        fname = str(node.get("function_name", "")).lower()
+        if fname in _UNSTABLE:
+            problems.append("%s: %s() depends on when, where or in which session the query runs"
+                            % (path, node["function_name"]))
+        elif fname.startswith(_SESSION_PREFIXES):
+            problems.append("%s: %s() reads the session's catalog, settings or storage" % (path, node["function_name"]))
+        elif fname == "age" and len(node.get("children") or []) == 1:
+            problems.append("%s: age() with one argument subtracts from today's midnight" % path)
+    if cls in ("FUNCTION", "WINDOW"):
+        _check_order_reads(node, cls, path, problems)
+    if cls == "COLUMN_REF":
+        target = _value_keyword(node, in_table_fn)
+        if target is not None:
+            problems.append("%s: %s is a SQL value keyword; DuckDB binds it to %s() unless a column of that name is in scope"
+                            % (path, ".".join(node["column_names"]), target))
+    _check_modifiers(node, path, problems)
+    if node.get("sample") is not None:
+        problems.append("%s.sample: USING SAMPLE or TABLESAMPLE draws rows at random" % path)
+    if cls == "COLLATE":
+        problems.append("%s: COLLATE %s compares strings that differ as equal; the plan compares bytes"
+                        % (path, node.get("collation")))
+    for key in _ORDER_KEYS:
+        for i, order in enumerate(node.get(key) or []):
+            where = "%s.%s[%d]" % (path, key, i)
+            if order.get("type") not in ("ASCENDING", "DESCENDING"):
+                problems.append("%s: an ORDER BY key without ASC or DESC (%s)" % (where, order.get("type")))
+            if order.get("null_order") not in ("NULLS FIRST", "NULLS LAST"):
+                problems.append("%s: an ORDER BY key without NULLS FIRST or NULLS LAST (%s)" % (where, order.get("null_order")))
+    # A WITH: each CTE's body sees the CTEs before it, the rest of the node
+    # all of them.
+    for i, (name, info) in enumerate(_ctes(node)):
+        _walk(info, "%s.cte_map.map[%d].value" % (path, i), False, False, in_table_fn, False, scope, ctx)
+        scope = scope | {name}
+    limit = node.get("type") in _LIMIT_MODIFIERS
+    table_fn = node.get("type") == "TABLE_FUNCTION"
+    join = is_ref and node.get("type") == "JOIN"
+    recursive = node.get("type") == "RECURSIVE_CTE_NODE"
+    for key in sorted(node):
+        if key == "cte_map":
+            continue
+        # A CTE's recursive half reads the CTE itself.
+        inner = scope | {str(node.get("cte_name"))} if recursive and key == "right" else scope
+        # A CAST's operand is its `child`, a limit modifier's counts its
+        # `limit` and `offset`; anything deeper is neither. A table
+        # function's arguments are under its `function`, a COLUMNS star's
+        # expression under its `expr`. A SELECT's table reference is its
+        # `from_table`, a join's its `left` and `right`.
+        _walk(node[key], path + "." + key, cls == "CAST" and key == "child",
+              limit and key in ("limit", "offset"),
+              in_table_fn or (table_fn and key == "function") or (cls == "STAR" and key == "expr"),
+              key == "from_table" or (join and key in ("left", "right")),
+              inner, ctx)
+
+
+def _statement(con, sql):
+    """The one SELECT statement of `sql`, as DuckDB's parse serializes it."""
+    text = con.execute("SELECT json_serialize_sql(CAST(? AS VARCHAR))", [sql]).fetchone()[0]
+    tree = json.loads(text)
+    if tree.get("error"):
+        raise DisciplineError("DuckDB does not parse the query: %s" % tree.get("error_message"))
+    statements = tree.get("statements") or []
+    if len(statements) != 1:
+        raise DisciplineError("%d statements, not one" % len(statements))
+    node = statements[0].get("node") or {}
+    if node.get("type") not in ("SELECT_NODE", "SET_OPERATION_NODE"):
+        raise DisciplineError("the statement is a %s, not a SELECT" % node.get("type"))
+    return statements[0]
+
+
+def check(con, sql, tables):
+    """Raise DisciplineError listing every rule `sql` breaks; `con` is a
+    DuckDB connection (its parser serializes the statement), `tables` the
+    names of the tables the caller registered on the connection that runs
+    `sql`, the only tables its FROM may name besides its CTEs."""
+    statement = _statement(con, sql)
+    ctx = _Ctx(frozenset(str(t).lower() for t in tables))
+    _walk(statement, "statement", False, False, False, False, frozenset(), ctx)
+    if ctx.problems:
+        raise DisciplineError("; ".join(ctx.problems))
+
+
+def check_order_policy(con, sql, order, keys=()):
+    """Raise DisciplineError unless the outermost query node of `sql`
+    orders its rows as the case's policy (`order` "total", "none" or
+    "keys" with the column names `keys`) compares them: under "total" an
+    ORDER BY of that node; under "keys" an ORDER BY of that node whose
+    leading keys are exactly `keys`, in order, each a bare column name."""
+    node = _statement(con, sql)["node"]
+    orders = None
+    for mod in node.get("modifiers") or []:
+        if isinstance(mod, dict) and mod.get("type") == "ORDER_MODIFIER":
+            orders = mod.get("orders") or []
+    if order == "total" and orders is None:
+        raise DisciplineError("order: total with no ORDER BY on the outermost query: the expected file would hold "
+                              "the order DuckDB writes the rows in (an ORDER BY in a subquery or a window does not "
+                              "order the result)")
+    if order == "keys":
+        lead = []
+        for o in (orders or [])[: len(keys)]:
+            expr = o.get("expression") or {}
+            names = expr.get("column_names") if expr.get("class") == "COLUMN_REF" else None
+            lead.append(names[0] if isinstance(names, list) and len(names) == 1 else None)
+        if lead != list(keys):
+            raise DisciplineError("order: keys=%s needs the outermost query's ORDER BY to lead with exactly those "
+                                  "columns, in order, each a bare column name; it leads with %s"
+                                  % (",".join(keys), "nothing" if orders is None else lead))
+
+
+def tables_read(con, sql):
+    """The lowercase names of every table `sql`'s FROM names (each
+    BASE_TABLE of its parse, at any depth; a CTE so named included)."""
+    found = set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            if node.get("type") == "BASE_TABLE":
+                found.add(str(node.get("table_name", "")).lower())
+            for value in node.values():
+                walk(value)
+
+    walk(_statement(con, sql))
+    return found

@@ -1,0 +1,16 @@
+#! komira-plan-conformance v1
+#  order: keys=a
+#  float: ulps=0
+# derivation: §4.2: a key that states NULLS FIRST sorts its NULLs first,
+# whatever its direction. a by id: 3, NULL, 1, 3, NULL, 2, 3. NULLs (id 2,
+# 5), then 1 (id 3), 2 (id 6), 3 (id 1, 4, 7). Rows tying on a come in no
+# promised order (§4.7), so each tie group compares as a multiset.
+# Types: a sort keeps its input columns, as scanned.
+id:int64	a:int64?	b:int64?	f:float64?
+2	\N	2	0.0
+5	\N	1	\N
+3	1	2	-0.0
+6	2	1	0.0
+1	3	1	1.5
+4	3	\N	-2.5
+7	3	1	0.5

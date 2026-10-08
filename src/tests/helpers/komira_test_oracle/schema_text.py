@@ -6,7 +6,10 @@ The line is one entry per column, separated by TAB and ended by LF:
 `<name>:<type>`, then `?` when the column is nullable. `<type>` is
 plan_vocabulary's ArrowType name without `ARROW_TYPE_`, in lower case, with
 the parameters a flat type carries: `decimal128(<precision>,<scale>)`,
-`timestamp_<unit>` and, with a time zone, `timestamp_<unit>(<zone>)`. Names
+`decimal256(<precision>,<scale>)`, `fixed_size_binary(<width>)`,
+`timestamp_<unit>` and, with a time zone, `timestamp_<unit>(<zone>)`; the
+units of `time32_<unit>`, `time64_<unit>` and `duration_<unit>` are in the
+name. Names
 and zones are escaped as the harness's `escape_name` escapes them: a
 backslash is `\\\\`, TAB `\\t`, LF `\\n`, CR `\\r`, any other control byte
 and DEL `\\xHH`, each of `: , < > [ ] { } ( )` gets a backslash, and so does
@@ -14,8 +17,10 @@ a `#` that is the first character (so a schema line never reads as a comment
 line).
 
 Flat types only. The harness spells the whole nested type tree, but no
-dataset here has a nested column, so a nested (or any other unlisted) type
-is refused rather than spelt by code no dataset exercises. This module is
+dataset or rendered result here has a nested column, so a nested (or any
+other unlisted) type is refused rather than spelt by code nothing exercises.
+The datasets use the first flat types listed; render.py (the oracle's
+results) and its test use the rest. This module is
 the only place the spelling lives: following a revision of the harness is an
 edit to this file alone.
 """
@@ -33,11 +38,16 @@ _PLAIN = [
     (pa.types.is_uint16, "uint16"),
     (pa.types.is_uint32, "uint32"),
     (pa.types.is_uint64, "uint64"),
+    (pa.types.is_float16, "float16"),
     (pa.types.is_float32, "float32"),
     (pa.types.is_float64, "float64"),
     (pa.types.is_string, "string"),
+    (pa.types.is_large_string, "large_string"),
     (pa.types.is_binary, "binary"),
+    (pa.types.is_large_binary, "large_binary"),
     (pa.types.is_date32, "date32"),
+    (pa.types.is_date64, "date64"),
+    (pa.types.is_null, "null"),
 ]
 
 _NAME_SPECIAL = {ord(c) for c in ":,<>[]{}()"}
@@ -73,6 +83,14 @@ def type_spelling(t):
             return spelt
     if pa.types.is_decimal128(t):
         return "decimal128(%d,%d)" % (t.precision, t.scale)
+    if pa.types.is_decimal256(t):
+        return "decimal256(%d,%d)" % (t.precision, t.scale)
+    if pa.types.is_fixed_size_binary(t):
+        return "fixed_size_binary(%d)" % t.byte_width
+    if pa.types.is_time32(t) or pa.types.is_time64(t):
+        return "time%d_%s" % (t.bit_width, t.unit)
+    if pa.types.is_duration(t):
+        return "duration_" + t.unit
     if pa.types.is_timestamp(t):
         spelt = "timestamp_" + t.unit
         if t.tz:

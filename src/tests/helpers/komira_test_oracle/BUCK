@@ -54,3 +54,140 @@ py_test(
     args = ["$(location :datasets)"],
     deps = ["//third_party/python:pyarrow"],
 )
+
+# The ORACLE cases (README.md, Expected answers): `oracle/<shard>/<case>.sql`,
+# each run by DuckDB in the python_oracle `:expected` and rendered by
+# render.py to `expect/<shard>/<case>.tsv` (a sub-target,
+# `:expected[expect/filter_3vl/filter_not_and.tsv]`). Both runs of the action
+# must write the same bytes, each case must answer the same with the rows of
+# every table it reads rotated to each position and each rotation reversed,
+# every combination of the tables' orders when there are at most 5000
+# (compared under the case's policy), its `-- order:` policy must be held
+# by its outermost ORDER BY (`total`: one; `keys=<cols>`: led by exactly
+# those columns), every ORDER BY in it must fix the order its answer shows
+# (the tie check: each run again with tiebreak keys ascending and
+# descending), and gen_expected.py refuses a query that uses COLLATE or
+# leaves NULL placement, an aggregate's
+# row order, a window frame's, a LIMIT's or a DISTINCT ON's row order, a
+# list sort's direction or a literal's type to DuckDB, calls a function on
+# its list
+# of those reading more than their arguments (a clock, a random draw, the
+# session, SQL text, the running DuckDB), or reads in FROM anything but the
+# tables it registers (with no AT clause), the query's own CTEs and the
+# allowed table functions (sql_discipline.py).
+_CASES = [p[len("oracle/"):-len(".sql")] for p in glob(["oracle/*/*.sql"])]
+
+_EXPECTED_MODULES = _MODULES + [
+    "canon.py",
+    "oracle_case.py",
+    "render.py",
+    "sql_discipline.py",
+    "twin_inputs.py",
+]
+
+python_oracle(
+    name = "expected",
+    src = "gen_expected.py",
+    srcs = _EXPECTED_MODULES,
+    data = {c + ".sql": "oracle/" + c + ".sql" for c in _CASES},
+    outs = ["expect/" + c + ".tsv" for c in _CASES],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+    visibility = ["//src/tests/..."],
+)
+
+# sql_discipline.py against queries that each break one rule (refused,
+# naming where the parse keeps the offence) and the same queries with the
+# ORDER BY and literal rules kept, value keywords qualified by a table, and
+# FROM naming the registered tables, CTEs in scope and the allowed table
+# functions (accepted). DuckDB only parses them; the list of unstable
+# functions and macros, and the allowed table functions, are also held to
+# the running DuckDB's duckdb_functions().
+py_test(
+    name = "test_sql_discipline",
+    src = "test_sql_discipline.py",
+    srcs = ["sql_discipline.py"],
+    deps = ["//third_party/python:duckdb"],
+)
+
+# render.py and canon.py against hand-spelt cells, Mojo's float32 and float64
+# formatting vectors and the datasets; no DuckDB.
+py_test(
+    name = "test_render",
+    src = "test_render.py",
+    srcs = _EXPECTED_MODULES,
+    deps = ["//third_party/python:pyarrow"],
+)
+
+# gen_expected.connect()'s connection: the Gregorian calendar and UTC under
+# a Thai locale and a +05:45 TZ (date_part's year and hour), no extension
+# autoloaded or
+# autoinstalled (a function of inet, which DuckDB would autoload, is a
+# catalog error and the loaded and installed lists stay as they were), no
+# file read, external access not re-enabled, and every registered table
+# still readable.
+py_test(
+    name = "test_connect",
+    src = "test_connect.py",
+    srcs = _EXPECTED_MODULES + ["gen_expected.py"],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+)
+
+# :expected's files parse and are canonical, and each equals its HAND twin
+# (twins/hand, copies of komira_plan_conformance's expectations); the twins'
+# inputs equal the corpus's datasets (twins/inputs).
+py_test(
+    name = "test_expected",
+    src = "test_expected.py",
+    srcs = _EXPECTED_MODULES + glob(["oracle/**", "twins/**"]),
+    args = ["$(location :expected)"],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+)
+
+# gen_expected.py's row-order check (row_order_diffs, run by main() on every
+# case): every row of every table comes first and last in some order of the
+# set, a case on two or more tables runs every combination of their orders
+# within the budget (the shared scheme and a note above it), and each
+# reordered connection holds the rows in its order; queries
+# DuckDB answers by the rows' order are reported (the ones sql_discipline.py
+# refuses and the ties it cannot see, among them the zeros of sort_rows
+# that the plain reversal keeps in place, and a min over a join that only
+# two tables' orders together change), under the case's policy;
+# order-free ones are not; main() refuses a case the check reports.
+py_test(
+    name = "test_row_order",
+    src = "test_row_order.py",
+    srcs = _EXPECTED_MODULES + ["gen_expected.py"],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+)
+
+# sql_discipline.check_order_policy(), which main() runs on every case:
+# `order: total` needs an ORDER BY on the outermost query, `keys=<cols>`
+# one led by exactly those bare columns in order; a window's partition
+# order or a subquery's ORDER BY is refused under either, and main()
+# refuses such a case before writing it; main()'s tie check refuses a
+# case whose answer shows a tie of any ORDER BY in it (the outermost's
+# under `total`; an inner LIMIT's, a position-reading window's or an
+# ordered aggregate's, behind an inner sort, under `total` and `none`),
+# keeps ties the policy does not compare or the answer does not show,
+# and main() refuses a COLLATE.
+py_test(
+    name = "test_order_policy",
+    src = "test_order_policy.py",
+    srcs = _EXPECTED_MODULES + ["gen_expected.py"],
+    deps = [
+        "//third_party/python:duckdb",
+        "//third_party/python:pyarrow",
+    ],
+)

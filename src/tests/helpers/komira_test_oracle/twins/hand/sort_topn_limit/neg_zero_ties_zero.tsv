@@ -1,0 +1,16 @@
+#! komira-plan-conformance v1
+#  order: total
+#  float: ulps=0
+# derivation: SORT BY f ASC, id ASC, no placement stated, so NULLs last
+# (§4.1). §4.4: -0.0 and 0.0 tie, so id breaks the tie among id 2 (0.0),
+# id 3 (-0.0) and id 6 (0.0): 2, 3, 6. Order: -2.5 (id 4), the zeros, 0.5
+# (id 7), 1.5 (id 1), NULL (id 5). (f, id) is total, so the order is.
+# Types: a sort keeps its input columns, as scanned.
+id:int64	a:int64?	b:int64?	f:float64?
+4	3	\N	-2.5
+2	\N	2	0.0
+3	1	2	-0.0
+6	2	1	0.0
+7	3	1	0.5
+1	3	1	1.5
+5	\N	1	\N
