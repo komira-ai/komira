@@ -30,6 +30,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Release machines: bundles, tarballs and OCI images of a program, the CPU-level launcher, reproducible outputs, komira's release stages and validations | [design/release_machine.md](design/release_machine.md) |
 | kci resource-model decision notes: an encryption key as a resource; importing and changing a network on any cloud; overrides, the escape hatch for what is cloud-specific | [design/kci_encryption_keys.md](design/kci_encryption_keys.md), [design/kci_networks_import_and_change.md](design/kci_networks_import_and_change.md), [design/kci_overrides.md](design/kci_overrides.md) |
 | The DEPLOY step (design, not built): cells, plan and apply from `kci run`, the GCP adapter, images published into a cell and promoted by digest, the `DEPLOY_PROBE` validation, one run at a time per cell | [design/deploy_step.md](design/deploy_step.md) |
+| The notify wire: the HTTP contract between a notify service and its callers (wake a principal's devices, register a device on a user's behalf, erase), its authentication, statuses and the content-blind wake | [design/notify_wire.md](design/notify_wire.md) |
 
 ## Design docs
 
