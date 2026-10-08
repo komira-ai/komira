@@ -27,7 +27,7 @@ Each item has four parts:
 
 Scope is the plan: the logical-plan IR (`src/komira_plan_ir`, `src/komira_plan_expr`) and its wire form (`src/komira_plan_wire`). A frontend (SQL, a dataframe API, a spreadsheet) maps its own surface onto these rules; where a frontend's spelling differs from the plan operator of the same name (SQL `/` against the plan's `BIN_DIV`), the item says so. Out of scope: collations other than binary, intervals, nested types (struct, list, map), JSON functions, the temporal field extracts beyond time zones and §8.15, and UDF null modes. Each of those needs its own section before a hand expectation may depend on it.
 
-Many operators named here have no executor in this repository yet (the engine operators arrive separately). Where that is so, "current behaviour" cites the IR, the wire admission or a kernel, and says that nothing executes the operator end to end.
+Items §7.16 and §11.7 are in [further items](query_semantics_more.md), numbered as part of this document. Many operators named here have no executor in this repository yet (the engine operators arrive separately). Where that is so, "current behaviour" cites the IR, the wire admission or a kernel, and says that nothing executes the operator end to end.
 
 ## Rulings needed
 
@@ -55,6 +55,7 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §7.15 | Invalid UTF-8 in a string column | UNDECIDED | The reader raises by name; string kernels may then assume valid UTF-8. |
 | §8.1 | SUM of a signed integer or BOOLEAN is INT64 and refuses overflow | DEPARTS | Accept: Arrow has no 128-bit integer; a total outside INT64 is an error naming the column, never a wrapped value. |
 | §8.2 | SUM of an unsigned integer is UINT64 | DEPARTS | Accept, with the same overflow error as §8.1. |
+| §7.16 | SUBSTRING with a negative start or length | UNDECIDED | (a) DuckDB's meaning (negative start counts from the end, negative length goes backwards), with the two-argument form encoded without the `length < 0` sentinel. |
 | §8.9 | Result type of integer and mixed arithmetic | UNDECIDED | Adopt the narrowest-common-type table in §8.9 (DuckDB's rule); retire "left operand wins". |
 | §8.11 | Decimal addition and subtraction | DEPARTS | Accept: DECIMAL(min(max(p1 - s1, p2 - s2) + max(s1, s2) + 1, 38), max(s1, s2)) without DuckDB's 18-digit case, for §8.12's reason. |
 | §8.12 | Decimal multiplication | DEPARTS | Accept: DECIMAL(min(p1 + p2, 38), s1 + s2) without DuckDB's 18-digit case; the code drops its `+ 1`. |
@@ -91,6 +92,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 11. **A NULL literal is declared non-nullable (§8.19).** `walk_expr_field` returns `Field("literal", <type>, False)` for every literal, the NULL literal included (`src/komira_plan_expr/expr_walk.mojo:814-817`), so a projected `NULL` is a column declared non-nullable whose every row is NULL.
 12. **Join output schema (§3.13, §3.14).** `LogicalPlan.join` (`src/komira_plan_ir/logical_plan.mojo:1255-1273`) keeps each side's input nullability for the padded side of LEFT, RIGHT and FULL joins, so a padded NULL lands in a column declared non-nullable; and it checks a right column's name only against left names before appending `_right`, so `a`, `a_right` on the left with `a` on the right, or `a` on the left with `a`, `a_right` on the right, yields two columns named `a_right`. The comparison is case-sensitive, so `A` and `a` do not collide.
 13. **Window function nullability and SUM types (§8.25 to §8.27).** `partition_expr_output_field` (`src/komira_plan_expr/partition_expr.mojo:404-505`) declares windowed SUM and AVG non-nullable (`:471-488`), though a frame holding only NULLs, or no rows, gives NULL; types a windowed SUM of DECIMAL or of an unsigned integer as FLOAT64 (`:471-480`), where §8.2 and §8.4 give UINT64 and DECIMAL(38, s); and gives windowed MIN/MAX and FIRST_VALUE/LAST_VALUE the input's nullability (`:463`, `:489-496`), which is sound only for frames that always contain the current row.
+14. **UNION refuses branches that differ only in nullability (§11.7).** The wire's check compares name, type and nullability (`src/komira_plan_wire/plan_wire_codec.mojo:3540-3556`), and `LogicalPlan.union` requires every child to advertise the output schema exactly.
 
 ## 1. Three-valued logic
 
@@ -663,7 +665,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ### 7.4 CONCAT_WS
 
-- **Rule.** `concat_ws(sep, a, b, ...)`: a NULL separator makes the result NULL; a NULL argument is skipped together with its separator, so `concat_ws('-', 'a', NULL, 'c')` is `'a-c'` and `concat_ws('-', NULL, 'a')` is `'a'`.
+- **Rule.** `concat_ws(sep, a, b, ...)`: a NULL separator makes the result NULL; a NULL argument is skipped together with its separator, so `concat_ws('-', 'a', NULL, 'c')` is `'a-c'` and `concat_ws('-', NULL, 'a')` is `'a'`. With every value argument NULL and a non-NULL separator, the result is `''`, not NULL.
 - **DuckDB.** "NULL inputs are skipped" ([text functions](https://duckdb.org/docs/current/sql/functions/text.html)); the NULL-separator rule is measured on 1.5.3 (`src/komira_plan_expr/expr.mojo:1123-1137`).
 - **Current behaviour.** `STRFNN_CONCAT_WS` (`src/komira_plan_expr/expr.mojo:1123-1137`).
 - **Mark.** MATCHES.
@@ -762,7 +764,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ## 8. Result types
 
-The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.27. It is part of this document: its items are counted below and its open items are in "Rulings needed".
+The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.30. It is part of this document: its items are counted below and its open items are in "Rulings needed".
 
 ## 9. Window functions
 
@@ -897,7 +899,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ### 11.4 Column types across set-operation inputs
 
-- **Rule.** Inputs of a set operation must already have identical column types. A frontend casts each input to the common type of §8.9 / §8.14 before building the node; the plan refuses a mismatch by name. Output column names are the first input's.
+- **Rule.** Inputs of a set operation must already have identical column types. A frontend casts each input to the common type of §8.9 / §8.14 before building the node; the plan refuses a mismatch by name. Column names must also be identical in every input (§11.1), so the output's names are every input's; a frontend that follows DuckDB's "names from the first query" renames the later inputs by projection first. Nullability may differ (§11.7).
 - **DuckDB.** "Implicit casting to one of the returned types is performed", and the result takes "the column names from the first query" ([set operations](https://duckdb.org/docs/current/sql/query_syntax/setops.html)).
 - **Current behaviour.** As §11.1: no coercion in the plan.
 - **Mark.** DEPARTS: a narrowing; the frontend inserts the casts DuckDB inserts implicitly.
@@ -948,7 +950,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 96, DEPARTS 18, UNDECIDED 17: 131 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 35 rows of "Rulings needed" are the 18 DEPARTS and 17 UNDECIDED items.
+MATCHES 100, DEPARTS 18, UNDECIDED 18: 136 marks, across this file, [the result-type table](query_semantics_types.md) and [further items](query_semantics_more.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 36 rows of "Rulings needed" are the 18 DEPARTS and 18 UNDECIDED items.
 
 ## What are its limits and open questions?
 
