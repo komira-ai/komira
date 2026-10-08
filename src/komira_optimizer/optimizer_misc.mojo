@@ -514,7 +514,7 @@ def _build_topn_below_project(imm plan: LogicalPlan) raises -> Optional[LogicalP
         # (Step (0) already required `_row_local_shape` of every computed entry;
         # restated here because the column walk below is only complete for it.)
         if not _row_local_shape(e):
-            return None
+            return None  # cov: unreachable step (0) already returned None for every computed entry that is not _row_local_shape
         var cols = Set[String]()
         _collect_expr_columns(e, cols)
         for c in cols:
