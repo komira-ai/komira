@@ -237,7 +237,10 @@ What a crash or a slow writer leaves behind, and why uniqueness still holds:
   lands first wins. If B wins, A's create loses, A reports a conflict, and its rollback deletes X; if A's process dies
   first, X is an orphan as above. In neither case do two rows with one tuple become live, and no create that was
   acknowledged becomes unreadable. On SQLite this race cannot occur at all: A's `begin` is `BEGIN IMMEDIATE`, so B's
-  `begin` waits on the busy handler (or reports busy) until A commits or rolls back.
+  `begin` waits on the busy handler (or reports busy) until A commits or rolls back. On Postgres it cannot occur
+  either: two creates of one tuple are in one book, so they bump one counter row, and A's bump, which comes before
+  its row write (see [allocation](#how-does-the-change-feed-work)), holds that row's lock until A commits or rolls
+  back, so B waits at its bump.
 - Rejected: write the key first and let a loser that finds the key's target absent delete or retarget the key. A
   loser cannot tell a crashed writer from one between its two writes. B takes over A's key K and writes its own row;
   A then writes its row and reports success, but K names B's row, so rule 3 hides A's row: a create that was
@@ -260,9 +263,10 @@ the data pulls this feed.
   its values have holes where other CRM rows took theirs, which the cursor rule below allows.
 - **Allocation.** For **each row** a write changes, it bumps that row's counter row (the book row, or the `crm_feed`
   row) with `conditional_update` and `bump_version_col = modseq`, reads the new value back, and stamps it on that row,
-  all in the write's transaction. No two rows share a `modseq`: a stage change stamps `n` on the deal and `n + 1` on its
-  `stage_changed` activity, and an erasure stamps a value of its own on every row it rewrites. A page can therefore end
-  between any two rows without the next call (`since` = the last row's `modseq`) skipping the rest of a transaction.
+  all in the write's transaction. The bump comes before the row's write, because the write carries the value. No two
+  rows share a `modseq`: a stage change stamps `n` on the deal and `n + 1` on its `stage_changed` activity, and an
+  erasure stamps a value of its own on every row it rewrites. A page can therefore end between any two rows without
+  the next call (`since` = the last row's `modseq`) skipping the rest of a transaction.
 - **Why that gives a feed with no gaps a reader can miss:** on Postgres the bumped counter row stays locked until the
   transaction commits, and SQLite serializes writers (`BEGIN IMMEDIATE`). Changes therefore commit in `modseq` order, so
   a reader that has seen `modseq = n` will never later find a committed change below `n`.
@@ -396,28 +400,33 @@ Each rule names the test the implementing change must carry and the mutant that 
   the feed.** Mutants: stamp `modseq` outside the write transaction; skip the bump on delete; apply the back-pointer
   check to tombstones after removing their key.
 - **One live row per unique tuple, and no acknowledged create is lost, with a writer paused or killed between the row
-  and its key.** Over a `Database` wrapper that can pause or kill a writer after a named operation, on the Firestore
-  mock, the one backend where the two writes commit apart (and Postgres when a test target for it exists): writer A
-  creates card X with `uid` U and is paused after its first write (a put or create on `contacts_cards` or
-  `contacts_card_uids`) and before its second; writer B creates a card with `uid` U and is acknowledged; A resumes.
+  and its key.** The cases use a `Database` wrapper that can pause or kill a writer immediately before or immediately
+  after a named operation of the `Database` trait (`begin`, `put`, `create_if_absent_composite`, `commit`, ...). They
+  run on the Firestore mock only, the one backend where the two writes commit apart. On SQLite and Postgres the row
+  and its key commit in one transaction and B waits for a paused A (the slow-writer paragraph in
+  [write order](#how-is-uniqueness-enforced) says why), so B is never acknowledged while A is paused and neither
+  mutant can go red there; SQLite has its own case below. Writer A creates card X with `uid` U and is paused
+  immediately after its first write (the first of its `put` on `contacts_cards` and its `create_if_absent_composite`
+  on `contacts_card_uids`), before its second; writer B creates a card with `uid` U and is acknowledged; A resumes.
   The book lists exactly one card with U, `get` by `uid` returns one card, and every id the test was given as
   created is readable. Under the correct order A's first write is the row, so A gets a conflict and its rollback
   deletes X. A second case kills A at the same point and then lets B create U: X is returned by no read and B's
   create is acknowledged. Mutants: a read that skips the back-pointer check (the kill case lists two cards with U);
   key-first order with a loser that deletes or retargets a key whose target is absent (A's first write is then its
   key, B takes the key over, A writes X and is acknowledged, and X is never readable).
-- **On SQLite a create's row is invisible until its key commits.** A is paused after its row write and before its key
-  create. A `get_by_key` of X's id on `contacts_cards` through a second connection, directly on the `Database` and not
-  through the store (whose back-pointer check would hide X anyway), returns nothing. B's `begin` on its own
-  connection reports busy once a short busy timeout runs out; after A commits, B's create gets a conflict and the book
-  lists one card with U. Mutant: commit the row and the key in two transactions (X is committed at the pause, so the
-  raw read returns it; the busy assertion alone would stay green, because A's second transaction holds
-  `BEGIN IMMEDIATE` too).
-- **A row has at most one guarding key.** On the Firestore mock, an account create with `external_id` E1 for org
-  card C is killed after the first key create the store makes; a new account for C with `external_id` E2 is then
-  created and acknowledged. Mutant: guard accounts with a second key table on `org_card_id`, created before the
-  `external_id` key (the kill then leaves a key on C naming the killed create's row, which rule 4 never removes, so
-  the second create loses that key and is refused).
+- **On SQLite a create's row is invisible until its key commits.** A is paused immediately before its
+  `create_if_absent_composite` on `contacts_card_uids` runs: a hook before that call, not one after the row's `put`,
+  because under the mutant below the first transaction's `commit` and the second's `begin` run between those two
+  points, and a pause after the `put` would come before X commits. A `get_by_key` of X's id on `contacts_cards`
+  through a second connection, directly on the `Database` and not through the store (whose back-pointer check would
+  hide X anyway), returns nothing. B's `begin` on its own connection reports busy once a short busy timeout runs out;
+  after A commits, B's create gets a conflict and the book lists one card with U. Mutant: commit the row and the key
+  in two transactions (X is committed at the pause, so the raw read returns it; the busy assertion alone would stay
+  green, because A's second transaction holds `BEGIN IMMEDIATE` too).
+- **`org_card_id` is not a unique tuple.** On SQLite and on the Firestore mock, create two accounts for org card C,
+  with `external_id` E1 and E2: both creates are acknowledged, and both accounts are readable by id. Mutant: guard
+  accounts with a second key table on `org_card_id`, created before or after the `external_id` key (either way the
+  second create finds that key held by the first account, a live row, so rule 4 makes it a conflict).
 - **The feed cursor never passes an unseen change.** A writer commits between the reader's row query and the building
   of its response; the next call with the returned cursor returns that change. Mutant: return the book's counter read
   after the row query.
