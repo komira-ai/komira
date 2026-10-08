@@ -3,9 +3,10 @@ Markdown documents in, a `CodeGraph` out.
 
 `CodeGraphBuilder` collects the inputs in any order and `build()` resolves
 them together, so the graph depends on the inputs only, not on the order
-they were added in: an input added twice counts once, and two inputs that
-disagree on one id are refused (see the last paragraph). What each input
-contributes:
+they were added in. An input added twice with the same content counts
+once; one added again with other content is refused (see the last
+paragraph). Inputs that each hold one node do not replace it: the edges
+they give are all kept. What each input contributes:
 
 - **uquery JSON** (`buck2 uquery <targets> --json --output-attribute
   '^(buck\\.type|deps|srcs|test_srcs|import_name)$'`): a `target` node per
@@ -37,9 +38,11 @@ Every input the deriver cannot place raises an error naming it, rather
 than dropping it: a JSON document that is not uquery or `mojo doc` output,
 a doc JSON for a label that is no library, a module with no source file, a
 source that no target lists, a `governs` entry that names nothing or
-several targets or files, two different nodes with one id, a library
-listed twice with different `srcs` or import names, a source added twice
-with different text.
+several targets or files, two nodes with one id and another kind, file
+or text (a symbol two libraries declare in two files), a target listed
+twice with a different rule, `srcs`, `test_srcs`, `deps` or import name,
+and a source, a document or a label's doc JSON added twice with different
+text (compared byte for byte).
 """
 
 from std.collections import Dict
@@ -156,6 +159,17 @@ struct _Text(Copyable, Movable):
 
 
 @fieldwise_init
+struct _Listing(Copyable, Movable):
+    """The attributes a target was first listed with, which every later
+    listing of it must repeat."""
+
+    var srcs: List[String]
+    var test_srcs: List[String]
+    var deps: List[String]
+    var import_name: String
+
+
+@fieldwise_init
 struct _Decl(Copyable, Movable):
     """A symbol waiting for its line: its node index, the keyword and
     indent of its header, and the node index of its struct or trait (-1 at
@@ -190,15 +204,18 @@ struct _Graph(Movable):
 
     def put(mut self, var node: KgNode) raises -> Int:
         """Adds `node` and returns its index. A node equal to one already
-        there (the same target in two uquery outputs, a doc JSON added
-        twice) is kept once; a different node with the same id is refused,
-        so no input added later replaces one added earlier."""
+        there (a target in two uquery outputs, a symbol two libraries
+        declare in one file both list) is kept once; one with the same id
+        and another kind, path or text is refused, so no input added
+        later replaces one added earlier. The label is not compared: every
+        caller derives it from the id and kind. Nor is the line: every node
+        is put with line 0 (lines are set after the last symbol is put)."""
         if node.id in self.index:
             var i = self.index[node.id]
             ref old = self.nodes[i]
             if old.kind != node.kind:
                 raise _err("two nodes have the id " + node.id + ": a " + old.kind + " and a " + node.kind)
-            if old.label != node.label or old.path != node.path or old.line != node.line or old.text != node.text:
+            if old.path != node.path or old.text != node.text:
                 raise _err("two different " + node.kind + " nodes have the id " + node.id)
             return i
         var i = len(self.nodes)
@@ -254,14 +271,14 @@ struct CodeGraphBuilder(Movable):
         var import_names = Dict[String, String]()
         # Library label -> its srcs.
         var lib_srcs = Dict[String, List[String]]()
-        # Library label -> its import name.
-        var lib_imports = Dict[String, String]()
+        # Target label -> the attributes it was first listed with.
+        var listed = Dict[String, _Listing]()
         # File id -> labels listing it in srcs.
         var src_owners = Dict[String, List[String]]()
         var stubs = List[String]()
         var test_targets = List[KgEdge]()
         for q in range(len(self._uquery)):
-            _read_uquery(self._uquery[q], g, import_names, lib_srcs, lib_imports, src_owners, stubs, test_targets)
+            _read_uquery(self._uquery[q], g, import_names, lib_srcs, listed, src_owners, stubs, test_targets)
         for i in range(len(test_targets)):
             if test_targets[i].src in lib_srcs:
                 g.link(test_targets[i].src, EDGE_TESTS, test_targets[i].dst)
@@ -297,10 +314,16 @@ struct CodeGraphBuilder(Movable):
 
         var conforms = List[KgEdge]()
         var decls = Dict[String, List[_Decl]]()
+        var doc_texts = Dict[String, String]()
         for d in range(len(self._docs)):
             ref doc = self._docs[d]
             if doc.label not in lib_srcs:
                 raise _err("mojo doc JSON for " + doc.label + ", which the uquery output has no mojo_library for")
+            if doc.label in doc_texts:
+                if doc_texts[doc.label] != doc.json:
+                    raise _err("mojo doc JSON for " + doc.label + " is added twice with different text")
+                continue
+            doc_texts[doc.label] = doc.json
             _read_doc(doc.label, doc.json, lib_srcs[doc.label], g, conforms, decls)
         for i in range(len(conforms)):
             if g.has(conforms[i].dst):
@@ -339,8 +362,15 @@ struct CodeGraphBuilder(Movable):
                 if not own:
                     g.link(src.path, EDGE_IMPORTS, lib)
 
+        var markdown_texts = Dict[String, String]()
         for i in range(len(self._markdown)):
-            _read_markdown(self._markdown[i].path, self._markdown[i].text, g)
+            ref md = self._markdown[i]
+            if md.path in markdown_texts:
+                if markdown_texts[md.path] != md.text:
+                    raise _err("document " + md.path + " is added twice with different text")
+                continue
+            markdown_texts[md.path] = md.text
+            _read_markdown(md.path, md.text, g)
 
         var nodes = List[KgNode]()
         var edges = List[KgEdge]()
@@ -354,7 +384,7 @@ def _read_uquery(
     mut g: _Graph,
     mut import_names: Dict[String, String],
     mut lib_srcs: Dict[String, List[String]],
-    mut lib_imports: Dict[String, String],
+    mut listed: Dict[String, _Listing],
     mut src_owners: Dict[String, List[String]],
     mut stubs: List[String],
     mut tests: List[KgEdge],
@@ -374,39 +404,48 @@ def _read_uquery(
             continue
         var short = String(rule[byte = 0 : rule.byte_length() - 5])
         var name = _target_name(label)
+        # Another rule kind for the same label is refused here (the text
+        # names the rule).
         _ = g.put(KgNode(label, NODE_TARGET, name, _cell_path(label), 0, short + " " + name))
         var srcs = _string_list(attrs, "srcs", label)
+        var test_srcs = _string_list(attrs, "test_srcs", label)
+        var deps = _string_list(attrs, "deps", label)
+        var imp = _string_member(attrs, "import_name", label)
+        if rule == _LIBRARY and imp.byte_length() == 0:
+            imp = name
+        if label in listed:
+            # Listed by an earlier uquery output: it must agree. Lists
+            # compare in order, as uquery prints them in the order the
+            # target lists them.
+            ref first = listed[label]
+            if first.import_name != imp:
+                raise _err("uquery JSON: " + label + " is listed twice with different import names")
+            if not _same_strings(first.srcs, srcs):
+                raise _err("uquery JSON: " + label + " is listed twice with different srcs")
+            if not _same_strings(first.test_srcs, test_srcs):
+                raise _err("uquery JSON: " + label + " is listed twice with different test_srcs")
+            if not _same_strings(first.deps, deps):
+                raise _err("uquery JSON: " + label + " is listed twice with different deps")
+            continue
+        listed[label] = _Listing(srcs.copy(), test_srcs.copy(), deps.copy(), imp)
         for s in range(len(srcs)):
             _put_file(g, srcs[s])
             g.link(label, EDGE_SRCS, srcs[s])
             if srcs[s] not in src_owners:
                 src_owners[srcs[s]] = List[String]()
             src_owners[srcs[s]].append(label)
-        var test_srcs = _string_list(attrs, "test_srcs", label)
         for s in range(len(test_srcs)):
             _put_file(g, test_srcs[s])
             g.link(label, EDGE_TESTS, test_srcs[s])
-        var deps = _string_list(attrs, "deps", label)
         for s in range(len(deps)):
             g.link(label, EDGE_DEPS, deps[s])
             stubs.append(deps[s])
             if rule == _TEST:
                 tests.append(KgEdge(deps[s], EDGE_TESTS, label))
         if rule == _LIBRARY:
-            var imp = _string_member(attrs, "import_name", label)
-            if imp.byte_length() == 0:
-                imp = name
-            if imp in import_names and import_names[imp] != label:
+            if imp in import_names:
                 raise _err("uquery JSON: " + label + " and " + import_names[imp] + " both import as `" + imp + "`")
-            if label in lib_srcs:
-                # Listed by an earlier uquery output: it must agree.
-                if lib_imports[label] != imp:
-                    raise _err("uquery JSON: " + label + " is listed twice with different import names")
-                if not _same_strings(lib_srcs[label], srcs):
-                    raise _err("uquery JSON: " + label + " is listed twice with different srcs")
-                continue
             import_names[imp] = label
-            lib_imports[label] = imp
             lib_srcs[label] = srcs^
 
 

@@ -156,12 +156,33 @@ def _doc_with_f(summary: String) -> String:
     )
 
 
+comptime _DOC_TWICE = "komira_kg_code: document docs/d.md is added twice with different text"
+comptime _DOC_JSON_TWICE = "komira_kg_code: mojo doc JSON for c//p:lib is added twice with different text"
+
+
 def test_a_document_added_twice_with_other_text() raises:
     # Kept, the title would be the one added last.
     var b = CodeGraphBuilder()
     b.add_markdown("docs/d.md", "# A\n")
     b.add_markdown("docs/d.md", "# B\n")
-    assert_equal(_error_of(b), "komira_kg_code: two different doc nodes have the id docs/d.md")
+    assert_equal(_error_of(b), _DOC_TWICE)
+
+
+def test_a_document_added_twice_with_one_title_and_other_body() raises:
+    # Both copies give the same doc node; only the text differs.
+    var b = CodeGraphBuilder()
+    b.add_markdown("docs/d.md", "# A\n")
+    b.add_markdown("docs/d.md", "# A\nother body\n")
+    assert_equal(_error_of(b), _DOC_TWICE)
+
+
+def test_a_document_added_twice_with_one_title_and_other_governs() raises:
+    # Merged, the second copy's governs edge would be added to the first's.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_markdown("docs/d.md", "# A\n")
+    b.add_markdown("docs/d.md", "---\ngoverns: [//p:lib]\n---\n# A\n")
+    assert_equal(_error_of(b), _DOC_TWICE)
 
 
 def test_a_doc_json_added_twice_with_other_text() raises:
@@ -169,7 +190,43 @@ def test_a_doc_json_added_twice_with_other_text() raises:
     b.add_uquery_json(_LIB)
     b.add_mojo_doc_json("c//p:lib", _doc_with_f("A"))
     b.add_mojo_doc_json("c//p:lib", _doc_with_f("B"))
-    assert_equal(_error_of(b), "komira_kg_code: two different function nodes have the id lib.a.f")
+    assert_equal(_error_of(b), _DOC_JSON_TWICE)
+
+
+def test_a_doc_json_added_twice_with_an_extra_function() raises:
+    # Every node of the first copy is in the second, equal; merged, g
+    # would be added.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_mojo_doc_json("c//p:lib", _doc_with_f("A"))
+    b.add_mojo_doc_json(
+        "c//p:lib",
+        '{"decl": {"kind": "package", "name": "lib", "modules": [{"kind": "module", "name": "a", "functions":'
+        ' [{"kind": "function", "name": "f", "overloads": [{"signature": "def f()", "summary": "A"}]},'
+        ' {"kind": "function", "name": "g", "overloads": [{"signature": "def g()", "summary": ""}]}]}]}}',
+    )
+    assert_equal(_error_of(b), _DOC_JSON_TWICE)
+
+
+def _foo_doc() -> String:
+    return (
+        '{"decl": {"kind": "package", "name": "foo", "modules": [{"kind": "module", "name": "__init__",'
+        ' "functions": [{"kind": "function", "name": "f", "overloads": [{"signature": "def f()", "summary":'
+        ' ""}]}]}]}}'
+    )
+
+
+def test_one_symbol_id_from_two_files() raises:
+    # Two libraries whose packages are both named foo give the symbol
+    # foo.f, equal but for its file: only the path tells them apart.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(
+        '{"c//p:foo": {"buck.type": "mojo_library_rule", "srcs": ["c//p/foo/__init__.mojo"]},'
+        ' "c//q:bar": {"buck.type": "mojo_library_rule", "srcs": ["c//q/foo/__init__.mojo"]}}'
+    )
+    b.add_mojo_doc_json("c//p:foo", _foo_doc())
+    b.add_mojo_doc_json("c//q:bar", _foo_doc())
+    assert_equal(_error_of(b), "komira_kg_code: two different function nodes have the id foo.f")
 
 
 def test_a_library_listed_twice_with_other_srcs() raises:
@@ -179,6 +236,66 @@ def test_a_library_listed_twice_with_other_srcs() raises:
         '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "srcs": ["c//p/lib/__init__.mojo"]}}'
     )
     assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different srcs")
+
+
+def test_a_library_listed_twice_with_one_other_source() raises:
+    # As many srcs as the first listing, one of them another file.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "import_name": null,'
+        ' "srcs": ["c//p/lib/__init__.mojo", "c//p/lib/b.mojo"], "test_srcs": []}}'
+    )
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different srcs")
+
+
+def test_a_library_listed_twice_with_srcs_in_other_order() raises:
+    # srcs compare as an ordered list: uquery prints them in the order
+    # the target lists them.
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "import_name": null,'
+        ' "srcs": ["c//p/lib/a.mojo", "c//p/lib/__init__.mojo"], "test_srcs": []}}'
+    )
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different srcs")
+
+
+def test_a_library_listed_twice_with_other_deps() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": ["c//z:dep"], "import_name": null,'
+        ' "srcs": ["c//p/lib/__init__.mojo", "c//p/lib/a.mojo"], "test_srcs": []}}'
+    )
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different deps")
+
+
+def test_a_library_listed_twice_with_other_test_srcs() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_library_rule", "deps": [], "import_name": null,'
+        ' "srcs": ["c//p/lib/__init__.mojo", "c//p/lib/a.mojo"], "test_srcs": ["c//p/lib/t.mojo"]}}'
+    )
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:lib is listed twice with different test_srcs")
+
+
+def test_a_binary_listed_twice_with_other_srcs() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json('{"c//p:app": {"buck.type": "mojo_binary_rule", "srcs": ["c//p/main.mojo"]}}')
+    b.add_uquery_json('{"c//p:app": {"buck.type": "mojo_binary_rule", "srcs": ["c//p/main.mojo", "c//p/b.mojo"]}}')
+    assert_equal(_error_of(b), "komira_kg_code: uquery JSON: c//p:app is listed twice with different srcs")
+
+
+def test_a_target_listed_twice_with_another_rule() raises:
+    var b = CodeGraphBuilder()
+    b.add_uquery_json(_LIB)
+    b.add_uquery_json(
+        '{"c//p:lib": {"buck.type": "mojo_binary_rule", "deps": [], "import_name": null,'
+        ' "srcs": ["c//p/lib/__init__.mojo", "c//p/lib/a.mojo"], "test_srcs": []}}'
+    )
+    assert_equal(_error_of(b), "komira_kg_code: two different target nodes have the id c//p:lib")
 
 
 def test_a_library_listed_twice_with_other_import_names() raises:
@@ -229,7 +346,17 @@ def main() raises:
     _run("one_id_two_kinds", test_two_nodes_of_different_kinds_with_one_id, failed)
     _run("document_twice", test_a_document_added_twice_with_other_text, failed)
     _run("doc_json_twice", test_a_doc_json_added_twice_with_other_text, failed)
+    _run("document_twice_body", test_a_document_added_twice_with_one_title_and_other_body, failed)
+    _run("document_twice_governs", test_a_document_added_twice_with_one_title_and_other_governs, failed)
+    _run("doc_json_twice_extra_function", test_a_doc_json_added_twice_with_an_extra_function, failed)
+    _run("symbol_two_files", test_one_symbol_id_from_two_files, failed)
     _run("library_twice_srcs", test_a_library_listed_twice_with_other_srcs, failed)
+    _run("library_twice_one_other_src", test_a_library_listed_twice_with_one_other_source, failed)
+    _run("library_twice_srcs_order", test_a_library_listed_twice_with_srcs_in_other_order, failed)
+    _run("library_twice_deps", test_a_library_listed_twice_with_other_deps, failed)
+    _run("library_twice_test_srcs", test_a_library_listed_twice_with_other_test_srcs, failed)
+    _run("binary_twice_srcs", test_a_binary_listed_twice_with_other_srcs, failed)
+    _run("target_twice_rule", test_a_target_listed_twice_with_another_rule, failed)
     _run("library_twice_import", test_a_library_listed_twice_with_other_import_names, failed)
     _run("source_twice", test_a_source_added_twice_with_other_text, failed)
     if len(failed) > 0:
