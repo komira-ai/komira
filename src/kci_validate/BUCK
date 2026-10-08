@@ -1,4 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/toolchains:preflight.bzl", "busybox_nc_exit_contract")
 
 # The validations of a stage's steps (`kci run --stage S`; the machine file
 # declares them on a step, kci_release_machine parses them). Two kinds. The
@@ -20,6 +22,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # reports WOULD_VALIDATE. Before publishing, an ENV validation can read and
 # install from a LOCAL channel instead (`file:///<dir>`, what `komira_pack
 # conda-index` writes; kci run --channel), through FileChannelTransport.
+# The DEPLOY kind, DEPLOY_PROBE: after a DEPLOY step, a pre-flight container
+# from the digest-pinned helper image (--preflight-image) checks that the
+# link-local metadata address does not answer (only `nc -z`'s exit 1 lets the
+# probe run; anything else is INDETERMINATE), then the operator's
+# digest-pinned image runs, named kci-probe-<validation run id> and removed
+# by name at its timeout, and writes one result per case; kci decides the
+# verdict from the cases it expects. The expiry sweep removes only probe
+# containers past their own labelled maximum, aged by the docker daemon's
+# clock.
 #
 # The welded tests drive kci_build's ScriptedRunner as a fake docker (it
 # writes what the container would leave in the mount, and the exact argv is
@@ -39,6 +50,7 @@ mojo_library(
         "//src/kci_release_set:kci_release_set",
         "//src/kci_release_machine:kci_release_machine",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_datetime:komira_datetime",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
@@ -65,6 +77,31 @@ mojo_library(
         # the child's whole environment, the pixi argv, the manifest, and
         # the installed README's program byte-equal to SOURCE mode's, golden
         "tests/test_install_env_golden.mojo",
+        # DEPLOY_PROBE over the scripted docker: every row of the verdict
+        # table, the pre-flight before the probe (only its exit 1 lets the
+        # probe run), `docker rm -f kci-probe-<id>` after a timeout
+        "tests/test_deploy_probe.mojo",
+        # the probe's and the pre-flight's docker argv, the removal, the
+        # sweep's reads and the validation run id, golden
+        "tests/test_probe_argv_golden.mojo",
+        # the expiry sweep: aged by the daemon's SystemTime, its offset
+        # applied, never by this machine's clock or a name prefix
+        "tests/test_probe_sweep.mojo",
+    ],
+    # the sweep test's own clock, to put the daemon's an hour behind it; the
+    # validation run id's bound
+    test_deps = [
+        "//src/komira_clock:komira_clock",
+        "//src/komira_validation_run:komira_validation_run",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The exit contract the pre-flight reads (deploy_probe.mojo): the pinned
+# busybox binary's `nc -z -w 1` exits 0 against a loopback listener and 1
+# against a closed port. A remote linux action; the helper image's own `nc`
+# is the same upstream applet.
+busybox_nc_exit_contract(
+    name = "preflight_exit_contract",
+    exec_compatible_with = LINUX_X86_64,
 )
