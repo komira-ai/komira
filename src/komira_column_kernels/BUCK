@@ -25,6 +25,8 @@ mojo_library(
         "tests/test_column_view_elim_oracle.mojo",
         "tests/test_copy_column_validity.mojo",
         "tests/test_copy_share_table.mojo",
+        "tests/test_digest_functions.mojo",
+        "tests/test_fused_predicate.mojo",
         "tests/test_g4_bool_carried_batch_slice.mojo",
         "tests/test_g4_bool_union_hash_silent_overread.mojo",
         "tests/test_g4_bool_union_take_silent_overread.mojo",
@@ -43,6 +45,7 @@ mojo_library(
         "tests/test_simd_scalar_tail_lengths.mojo",
         "tests/test_string_eq_arm_counter.mojo",
         "tests/test_unary_math_domain_guard.mojo",
+        "tests/test_unicode_case.mojo",
     ],
     visibility = ["PUBLIC"],
 )
