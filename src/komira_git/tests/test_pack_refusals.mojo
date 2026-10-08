@@ -22,13 +22,20 @@
 #   * test_limits: a chain one deeper than `max_delta_depth`; a bomb: blobs
 #     of zeros, each a few hundred bytes in the pack and 100000 inflated,
 #     refused once their sum passes the budget (`max_inflate_ratio *
-#     len(pack) + max_object_size`), naming the entry that crossed it; and a
-#     delta whose result passes the budget, refused before it is applied.
+#     len(pack) + max_object_size`), naming the entry that crossed it; a
+#     delta whose result passes the budget, refused before it is applied;
+#     and a delta result over `max_object_size`, which `index_pack` and
+#     `read_pack_object` both leave to `apply_delta`'s own refusal (a read
+#     path that charges it first refuses by the budget message instead).
 #   * test_budget_exact: the budget is charged exactly: `index_pack` at the
 #     count of bytes it produces passes and one byte under is refused,
 #     including the second inflation of a root that has deltas;
 #     `read_pack_object` the same with its own count. Catches any one
 #     charge dropped or counted twice.
+#   * test_budget_exact_chain: `read_pack_object` on a chain of depth two
+#     charges every delta entry it walks and every result it applies,
+#     the intermediate one included: a reader that charges only the first
+#     entry, or only the final result, reads past the exact count.
 #   * test_budget_result_at_limit: `read_pack_object` charges a delta result
 #     of exactly `max_object_size` bytes; a reader that skips the result
 #     charge at that size reads the object past its budget.
@@ -412,6 +419,35 @@ def test_limits() raises:
         + String(200000) + " bytes",
     )
 
+    # The same refusal on the read path: a 50000-byte root of zeros and a
+    # delta copying it four times. `read_pack_object` leaves the
+    # 200000-byte result uncharged (it is over `max_object_size`) so that
+    # `apply_delta` refuses it by its own message.
+    var zeros = List[UInt8](length=50000, fill=UInt8(0))
+    var four = List[UInt8]()
+    _varint(four, 50000)
+    _varint(four, 200000)
+    for _ in range(4):
+        four.append(0x80 | 0x10 | 0x20)  # copy: offset 0, two size bytes
+        four.append(UInt8(50000 & 255))
+        four.append(UInt8(50000 >> 8))
+    var r_body = _obj(PACK_OBJ_BLOB, zeros)
+    var r_at = 12 + len(r_body)
+    r_body.extend(Span(_ofs_delta(r_at - 12, four)))
+    var r_pack = _pack_with(2, r_body)
+    var r_got = index_pack(ObjectFormat.sha1(), Span(r_pack), PackLimits())
+    var r_id = hash_object(
+        ObjectFormat.sha1(), ObjectKind.blob(), Span(List[UInt8](length=200000, fill=UInt8(0)))
+    )
+    assert_equal(
+        _read_err(r_pack, r_got.index, r_id, PackLimits(max_object_size=150000, max_inflate_ratio=1)),
+        "komira_git: delta: result of 200000 bytes is over the limit 150000",
+    )
+    assert_equal(
+        _read_err(r_pack, r_got.index, r_id, PackLimits(max_object_size=200000, max_inflate_ratio=1000)),
+        "OK",
+    )
+
 
 def _read_err(pack: List[UInt8], index: PackIndex, id: ObjectId, limits: PackLimits) -> String:
     try:
@@ -465,6 +501,45 @@ def test_budget_exact() raises:
     )
 
 
+def test_budget_exact_chain() raises:
+    # A chain of depth two: root, d1 (a delta of root) and d2 (a delta of
+    # d1's result r1). Reading d2 charges d2, d1 and the root as it walks,
+    # then r1 and r2 as it applies; under `max_inflate_ratio=0` each limit
+    # is that exact count, or short of it by one byte.
+    var f = ObjectFormat.sha1()
+    var root = _noise(1000, 13)
+    var d1 = _delta(root, 900, "+a")
+    var r1 = _rebuilt(root, 900, "+a")
+    var d2 = _delta(r1, 800, "+b")
+    var r2 = _rebuilt(r1, 800, "+b")
+    var s = len(root)
+    var n = len(d1) + len(d2)
+    var body = _obj(PACK_OBJ_BLOB, root)
+    var d1_at = 12 + len(body)
+    body.extend(Span(_ofs_delta(d1_at - 12, d1)))
+    var d2_at = 12 + len(body)
+    body.extend(Span(_ofs_delta(d2_at - d1_at, d2)))
+    var pack = _pack_with(3, body)
+    var got = index_pack(f, Span(pack), PackLimits())
+    var id2 = hash_object(f, ObjectKind.blob(), Span(r2))
+    var total = s + n + len(r1) + len(r2)
+    assert_equal(_read_err(pack, got.index, id2, PackLimits(max_object_size=total, max_inflate_ratio=0)), "OK")
+    # One byte short: the last charge, r2, crosses and names d2.
+    assert_equal(
+        _read_err(pack, got.index, id2, PackLimits(max_object_size=total - 1, max_inflate_ratio=0)),
+        _P + "entry at offset " + String(d2_at) + ": the pack inflates past its budget of "
+        + String(total - 1) + " bytes",
+    )
+    # Room for the walk but not for r1: the intermediate result crosses and
+    # names d1.
+    var walk_r1 = s + n + len(r1)
+    assert_equal(
+        _read_err(pack, got.index, id2, PackLimits(max_object_size=walk_r1 - 1, max_inflate_ratio=0)),
+        _P + "entry at offset " + String(d1_at) + ": the pack inflates past its budget of "
+        + String(walk_r1 - 1) + " bytes",
+    )
+
+
 def test_budget_result_at_limit() raises:
     # A delta whose result is exactly `max_object_size` bytes: the 1000-byte
     # root copied four times. Under `max_inflate_ratio=0` the budget is
@@ -510,5 +585,6 @@ def main() raises:
     test_entry_refusals()
     test_limits()
     test_budget_exact()
+    test_budget_exact_chain()
     test_budget_result_at_limit()
     print("komira_git pack refusal tests passed")
