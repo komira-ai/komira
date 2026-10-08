@@ -12,5 +12,7 @@ Until then, the build graph itself answers what the graph would:
 ./buck2 uquery 'owner(tools/build/examples/hello.mojo)'          # which target lists a file
 ```
 
-The changes the graph will need from the search index format are proposed in
+The code graph described above needs no change to the search index format. A
+graph over data (nodes, edges and episodes stored as `komira_search` splits)
+does; those changes are proposed in
 [design/search_index_format.md](design/search_index_format.md).

@@ -8,10 +8,9 @@ format. Each decision gives the options, a recommendation, and the proof its cha
 
 ## What is it for, and what is out of scope?
 
-A knowledge graph is coming to komira (see [knowledge_graph.md](../knowledge_graph.md)): a labelled
-property graph of nodes, edges and episodes, kept as `komira_search` splits, queried by typed
-primitives (`search`, `knn`, `neighbors`, `k_hop`, `as_of`, and rank fusion of their results). This
-document says what the split format and its catalog must hold for that, measured against the code
+A graph over data is planned for komira: a labelled property graph of nodes, edges and episodes,
+kept as `komira_search` splits, queried by typed primitives (`search`, `knn`, `neighbors`, `k_hop`,
+`as_of`, and rank fusion of their results). This document says what the split format and its catalog must hold for that, measured against the code
 as it is.
 
 What the graph stores, per document kind:
@@ -39,7 +38,8 @@ Out of scope:
 - Phrase queries, positions and a query language.
 - Where splits are stored and who runs ingest and compaction.
 
-A graph over code needs none of this: one text field (name plus docstring) with kind, label, path and
+A graph over code (the one [knowledge_graph.md](../knowledge_graph.md) describes) needs none of
+this: one text field (name plus docstring) with kind, label, path and
 line as fast fields fits today's format, and its edges can be read with a keyword fast-field filter.
 It does not wait on these decisions.
 
@@ -70,6 +70,11 @@ read as the `komira.search.index` scan kind).
 - **The footer grows by an additive chain.** A writer may append footer slots; a reader takes a slot
   if bytes remain and ignores anything after the slots it knows. A later slot is readable only if
   every earlier slot is present, so the writer fills absent earlier slots with 0/0.
+- **One slot on that chain already changes answers.** The total token count and the block-max pair
+  change speed only. The L0-postings pair does not: a split with a non-empty L0 region has an empty
+  term dictionary and keeps its postings in that region (`SplitView.has_l0_posting`). No reader in
+  komira checks it. The scan kind parses a split and builds a `SearchCore` from it directly, so a
+  query over an L0 split returns zero hits, without an error.
 - **Document ids are split-local.** The sink numbers each split from 0; the result merge breaks ties
   on (score, doc id, split publish order) because ids collide across splits (`merge.mojo`).
 - **Scores are per split.** BM25 takes the document count and document frequency from the split
@@ -104,11 +109,13 @@ document; fast fields as today.
 - (a) An additive footer slot pointing at a field directory, keeping `SPLIT_VERSION` 1.
 - (b) `SPLIT_VERSION` 2 with a field directory.
 
-**Recommendation: (b).** The additive chain is sound for what a reader may ignore: the total token
-count and the block-max region change speed, never answers. A field directory changes answers. A
-reader that predates it would ignore the directory and, since it never compares the query's field
-with the split's, would answer a query on the second field from the first field's dictionary,
-without an error. Under (b) that reader refuses the split by name ("unsupported version 2").
+**Recommendation: (b).** The additive chain is sound only for what a reader may ignore, such as the
+total token count and the block-max region, which change speed and never answers. The chain already
+breaks that rule once: the L0-postings slot changes answers and today's reader ignores it (above).
+A field directory would be a second such slot. A reader that predates it would ignore the directory
+and, since it never compares the query's field with the split's, would answer a query on the second
+field from the first field's dictionary, without an error. Under (b) that reader refuses the split
+by name ("unsupported version 2").
 
 The version 2 layout:
 
@@ -122,7 +129,10 @@ The version 2 layout:
   `required_features` bit set. A reader refuses a split with a bit it does not know. Later changes
   that alter answers set a bit; later changes a reader may ignore stay on the additive chain. Then
   the next such change needs no version bump.
-- The L0-postings slot is kept.
+- The L0-postings region moves under a `required_features` bit in version 2, so a reader without an
+  L0 reader refuses such a split by name. Version 1 cannot carry the bit, so a separate first change
+  makes `SearchCore` (and through it the scan kind's split open) refuse a version 1 split for which
+  `has_l0_posting()` is true, by name, until a reader for that region exists in komira.
 
 A version 2 reader reads a version 1 split as a split with one text field, so no stored index needs
 rewriting. The writer keeps writing version 1 when it is given exactly one text field and nothing
@@ -141,7 +151,9 @@ has postings only.
 afterwards the version 2 reader must read it byte for byte as before, and a new golden pins the
 version 2 bytes. Mutant: swap two field ordinals in the directory writer; the version 2 golden and a
 per-field query test go red. A version 1 reader given a version 2 split must refuse it with the
-exact "unsupported version" message.
+exact "unsupported version" message. The L0 refusal is written to fail first: a version 1 split with
+a non-empty L0 region and an empty term dictionary, opened through the scan kind, must raise the
+exact refusal message; on today's code it returns zero hits, so the test is red.
 
 ## Decision 2: per-document deletes and compaction
 
@@ -185,11 +197,49 @@ The rules for (a):
 - **The scan seam.** `SearchIndexCatalog.split_at` returns split bytes only; it must also return the
   split's deleted set at the generation.
 
-**Compaction.** A compactor merges live splits into one new split without their deleted documents,
-publishes it as a merged split (the existing `merge_input_uuids` mechanism hides the inputs at once),
-then retires the inputs' chunks and their delete sets, which are reaped after the grace period. It
-fits `komira_objectstore`'s compaction envelope (`compact_once` over a `CompactionSource`). For
-erasure the merge must drop, not just skip:
+**Compaction.** The split merger and compactor are a port of an existing search compactor (it is not
+in komira yet), not a new design. One run: snapshot the live splits with their chunk sequence
+numbers (`list_live_splits_with_seq`), select a set to merge under a merge policy, merge them into
+one split without their deleted documents, publish it as a merged split (the existing
+`merge_input_uuids` mechanism hides the inputs at once), retire exactly the snapshot sequence
+numbers merged, each in its own shard, and reap after the grace period. **One compactor runs per
+index**; the caller's scheduler guarantees it, and the compactor takes no lock. Retiring exact
+sequence numbers is what makes a concurrent publish safe: a split published after the snapshot is
+outside the retired set.
+
+`komira_objectstore`'s `compact_once` envelope is not used. It folds a contiguous range of chunks
+and advances a watermark past it, and it treats the output of a pass that loses the watermark race
+as a harmless redundant object. A search merge picks a subset of live splits, so advancing the log
+start past it would drop unmerged splits and delete sets from replay; and its output is a visible
+split, so two published outputs of one merge would count their documents twice.
+
+**Deletes that race a merge.** A delete set can commit after the compactor's snapshot and before its
+merged split is published. It targets an input UUID that the merged split then hides, so without a
+rule the deleted document reappears in the merged split. The rule: a delete set always applies
+through the merge that hid its target.
+
+- The merged split carries an input map: for each input UUID, the merged doc id of its first
+  surviving document, and the input doc ids the merge dropped. A merge is order-preserving per
+  input, so a surviving input doc id maps to one merged doc id.
+- A reader resolving a delete set whose target is hidden by a live merged split maps each doc id
+  through that split's input map (a dropped doc id needs nothing) and applies the result to the
+  merged split. The deleted document is hidden from the generation the delete set commits, whatever
+  the order of that commit and the publish.
+- The compactor retires only the delete sets in its snapshot that target its inputs. A delete set
+  committed later stays live, still applied through the map, and the next merge of the merged split
+  folds it in. When a merged split is itself merged, its input map is composed into the new one for
+  every input whose delete sets might still arrive; a delete writer commits within the grace period
+  of the live-split read it looked its keys up in, or reads again, which bounds that window.
+- Two other ways were weighed. Conditioning the publish on no new delete set since the snapshot
+  needs one compare-and-swap over several shard lineages, which the catalog does not have.
+  Applying deletes only to splits that will not be merged again (Quickwit's rule) does not hide a
+  delete at once.
+
+**Reaping must respect delete sets.** A writer shard is drained today when it has no live splits
+and no pending tombstones. A shard can hold only delete sets, so the drained test gains a third
+condition: no live delete set.
+
+For erasure the merge must drop, not just skip:
 
 - dictionary terms left with no live posting (a term can be a name);
 - keyword fast-field dictionary values no live document uses;
@@ -202,8 +252,13 @@ caller that must keep a subject out has to stop writing it.
 
 **Proof.** The test written to fail first: index documents naming subject X among others, delete by
 X, assert no query returns them, compact, reap, then read every object left in the store and assert
-none contains X's bytes. Mutants: skip the deleted set in one query path (each path has a test that
-goes red); keep an empty term in the merged dictionary (the byte scan goes red).
+none contains X's bytes. A second test fails first on the race: take the compactor's snapshot,
+commit a delete set for one of its inputs, then publish the merged split; the deleted document must
+stay hidden while the merged split is live, and stay gone after the next compaction. A third: a
+writer shard that holds only a live delete set is not reaped. Mutants: skip the deleted set in one
+query path (each path has a test that goes red); keep an empty term in the merged dictionary (the
+byte scan goes red); skip the input-map lookup for a hidden target (the race test goes red); drop
+the delete-set condition from the drained test (the reaping test goes red).
 
 ## Decision 3: a vector region
 
@@ -280,7 +335,8 @@ them before the run. If (a) misses a row, (b) is built and measured against the 
 - A reader refuses what it cannot answer correctly: an unknown split version, an unknown required
   feature bit, an unknown summary version, a field the split lacks, an analyzer or embedder mismatch.
   Each refusal has a test asserting its exact message.
-- Ignorable additions stay on the additive footer chain, with no holes.
+- Only ignorable additions go on the additive footer chain, with no holes. The L0-postings slot is
+  the one exception today, and it is refused until it has a reader (decision 1).
 - A deleted document never contributes to any result from the generation its delete set commits.
 - After compaction and reaping, no object holds a deleted document's bytes.
 - `generation()` moves on every catalog change, delete sets included, and never goes down.
@@ -290,8 +346,8 @@ them before the run. If (a) misses a row, (b) is built and measured against the 
 
 | decision | libraries |
 |---|---|
-| 1 | `komira_search` (directory, builders, writer, reader, `SearchCore`), `komira_search_scan` (field binding) |
-| 2 | `komira_search_catalog` (version check first, then the delete-set chunk), `komira_search` (the deleted set in `SearchCore`; the split merger), `komira_search_scan` (`split_at`) |
+| 1 | `komira_search` (the L0 refusal first; directory, builders, writer, reader, `SearchCore`), `komira_search_scan` (field binding) |
+| 2 | `komira_search_catalog` (version check first, then the delete-set chunk, delete sets resolved through a merged split's input map, a live delete set keeps a shard from being drained), `komira_search` (the deleted set in `SearchCore`; the split merger and its input map), the ported compactor, `komira_search_scan` (`split_at`) |
 | 3 | `komira_search` (region, kernel, `knn`, sink), `komira_search_scan` (ranged region reads) |
 | 4 | none for (a) beyond decision 1; a benchmark target |
 
@@ -301,9 +357,10 @@ concern before it grows.
 ## Order of work
 
 1. This document, accepted or changed.
-2. The summary version check (decision 2's prerequisite), and the version 1 byte golden.
+2. The summary version check (decision 2's prerequisite), the L0 refusal (decision 1's), and the
+   version 1 byte golden.
 3. Several fields per document (decision 1).
-4. Delete sets, then the split merger and compaction (decision 2).
+4. Delete sets, then the ported split merger and compactor (decision 2).
 5. The vector region and `knn` (decision 3), with ranged reads.
 6. The adjacency benchmark against the budget (decision 4).
 
@@ -319,9 +376,15 @@ concern before it grows.
 4. Delete sets as a new chunk kind with union semantics, inline bitmap up to a size, object above it?
    Recommend yes, inline up to 64 KiB.
 5. Does `delete_gen_ref` stay reserved, or is it removed? Recommend it stays reserved and unused.
-6. Who builds the split merger and compactor on `compact_once`, and with which merge policy?
+6. Port the existing search compactor or rebuild it, and with which merge policy? Recommend the
+   port: snapshot with sequence numbers, retire exact sequence numbers, one compactor per index.
 7. Ranged region reads in the scan reader, or a sibling vector object per split? Recommend ranged
    reads: a sibling object doubles the catalog, reap and erasure bookkeeping.
 8. The adjacency budget table: confirm or change the numbers before the benchmark runs.
 9. The unchecked query field: fix it now for version 1 with a failing test first, or with decision 1?
    Recommend now; it is a wrong answer, not a missing feature.
+10. A delete that races a merge: resolve it through the merged split's input map (recommended), or
+    another rule? And how long must a composed input map keep an input whose delete sets might
+    still arrive? Recommend one grace period after the input is retired.
+11. The L0-postings region: refuse it by name now and put it under a `required_features` bit in
+    version 2 (recommended), or bring its reader into komira first?
