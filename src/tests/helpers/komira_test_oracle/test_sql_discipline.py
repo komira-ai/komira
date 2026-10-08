@@ -149,8 +149,8 @@ REFUSED = [
     ("SELECT * FROM pragma_database_size()", "pragma_database_size() reads the session's catalog"),
     # age with one argument subtracts from today's midnight; also as a
     # method call, which parses to the same one-child FUNCTION.
-    ("SELECT age(CAST('2001-01-01' AS TIMESTAMP)) FROM t", "age() with one argument"),
-    ("SELECT CAST('2001-01-01' AS TIMESTAMP).age() FROM t", "age() with one argument"),
+    ("SELECT age(CAST('2026-10-01' AS TIMESTAMP)) FROM t", "age() with one argument"),
+    ("SELECT CAST('2026-10-01' AS TIMESTAMP).age() FROM t", "age() with one argument"),
     # One SELECT.
     ("SELECT a FROM t; SELECT b FROM t", "2 statements, not one"),
     # DuckDB's serializer refuses it before check() reads a node type.
@@ -183,7 +183,7 @@ ACCEPTED = [
     # TableFunctionBinder: a table-qualified name there is the column.
     "SELECT * REPLACE (t.current_date AS a) FROM t",
     # age of two timestamps reads no clock.
-    "SELECT age(CAST('2001-01-01' AS TIMESTAMP), CAST('2000-01-01' AS TIMESTAMP)) FROM t",
+    "SELECT age(CAST('2026-10-01' AS TIMESTAMP), CAST('2026-09-15' AS TIMESTAMP)) FROM t",
 ]
 
 # DuckDB marks `error` VOLATILE so the optimizer never folds it; its answer
