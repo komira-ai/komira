@@ -22,10 +22,11 @@
 #   webpush_encrypt: 3994 bytes of plaintext, a 15-byte auth secret, a
 #     64-byte and an off-curve user agent key, and a sender key source that
 #     returns the group order n.
-#   webpush_decrypt: a 64-byte keyid, two records, three public keys that
-#     are not the private key's (-G; -P, the same x with y negated; the
-#     key with only its last byte flipped), an off-curve keyid, the wrong
-#     auth secret, a 64-byte user agent key, a 15-byte auth secret.
+#   webpush_decrypt: a 64-byte keyid, two records, public keys that are
+#     not the private key's (-G; -P, the same x with y negated; the RFC
+#     key with one byte flipped at each of the 65 positions, the 0x04
+#     prefix included), an off-curve keyid, the wrong auth secret, a
+#     64-byte user agent key, a 15-byte auth secret.
 #   webpush_ikm: a 15-byte auth secret, a 64-byte user agent key, a 64-byte
 #     application server key.
 #   p256_public_key: zero, n and a 31-byte key; 1 (point G) and n - 1
