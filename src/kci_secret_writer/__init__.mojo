@@ -22,9 +22,10 @@
 #   * `StaticSecretWriter`  — the in-memory test double (records writes; bridges
 #                             to a paired `StaticSecretStore` for the
 #                             write-then-resolve round-trip proof).
-# Production writers (a cloud secret manager's create-secret-version PUT, a
-# Vault KV put) live with their cloud clients, under the SAME type firewall,
-# following the resolve conformers' shape.
+# Production writers live in packages of their own (kci_aws_secret_writer,
+# kci_gcp_secret_writer), under the SAME type firewall: each depends on its
+# cloud's resolve package for the handle grammar, and no resolve package
+# depends on a writer.
 #
 # Dependency direction (cycle-free; a leaf on the secrets foundation):
 #   kci_secret_writer -> komira_secret_store  (SecretValue — the zeroizing

@@ -96,15 +96,25 @@ trait SecretWriter(Movable, Deinitable):
     contract. No UnsafePointer crosses the boundary; the value never appears in an
     error / log (the `SecretValue` redaction).
 
-    THE DEPLOY-CONTEXT BEARER TOKEN. `write` takes a `deploy_token` — a
-    plain-`String` bearer token the deploy applier threads so a LIVE conformer can
-    PUT the version INTO the CUSTOMER's secret store AS the assumed customer role
-    (the deploy principal). A plain `String` (NOT a typed credential): this
-    package deliberately depends ONLY on `komira_secret_store`, not on whatever
-    application layer mints typed credentials — the write firewall carries no
-    application-layer dependency. The token is NEVER a field (custody) — it is a
-    per-call param, used within the PUT, and dropped when `write` returns. A local
-    conformer (the test double, the self/local path) ignores it."""
+    THE DEPLOY-CONTEXT BEARER TOKEN. Every verb takes a `deploy_token`, a
+    plain-`String` bearer token a caller may thread per call. A plain `String`
+    (NOT a typed credential): this package deliberately depends ONLY on
+    `komira_secret_store`, not on whatever application layer mints typed
+    credentials, so the write firewall carries no application-layer
+    dependency. The token is never a field (custody): it is a per-call
+    parameter, dropped when the verb returns.
+
+    What the conformers do with it. The live conformers
+    (kci_aws_secret_writer's `AwsSecretsManagerWriter`,
+    kci_gcp_secret_writer's `GcpSecretManagerWriter`) take the deploy
+    principal's credentials from the client they are built over (its
+    credential source or token source) and REFUSE a non-empty `deploy_token`
+    before sending anything, rather than ignore it: a caller that expected
+    the call to run as the principal a token names would otherwise run as
+    the client's. Running a single call as a per-call token's principal would
+    need the generated clients to accept a per-call credential, which they do
+    not. The test double, `StaticSecretWriter`, records the token it is given
+    (`last_token`) and uses it for nothing."""
 
     def write(
         mut self,
@@ -123,9 +133,9 @@ trait SecretWriter(Movable, Deinitable):
         written. A bootstrap-time deploy admin PRE-DEFINES a secret SLOT so a
         runtime service account can later ADD a version with only
         `secretmanager.versions.add` (never project-wide create). A container that
-        already exists is an idempotent no-op. `deploy_token` is the assumed-role
-        bearer (per-call, never a field); a local/test conformer ignores it. Distinct
-        from `write` (which create-if-absents AND puts a version) — this defines the
+        already exists is an idempotent no-op. `deploy_token` is as for `write`
+        (per-call, never a field; the live conformers refuse a non-empty one).
+        Distinct from `write` (which create-if-absents AND puts a version) — this defines the
         slot WITHOUT ever holding a value, so no plaintext exists at define time."""
         ...
 
@@ -142,10 +152,11 @@ trait SecretWriter(Movable, Deinitable):
         The obvious probe is AccessSecretVersion, and it is the wrong one: it
         returns the PLAINTEXT, so a `SecretWriter` holding it could read every
         secret it can write — collapsing the firewall this trait exists to BE.
-        The live conformer drives ListSecretVersions instead: METADATA only, gated
-        by `secretmanager.versions.list` (strictly weaker than `.access`), over a
-        response type that has no payload field at all. The answer is one bit and
-        the firewall survives by construction rather than by discipline.
+        The live conformers read metadata instead: GetSecretVersion of
+        `latest` (gated by `secretmanager.versions.get`, strictly weaker than
+        `.access`) and DescribeSecret, over response types that have no
+        payload field at all. The answer is one bit and the firewall survives
+        by construction rather than by discipline.
 
         A container that does NOT EXIST answers False (there is nothing to adopt)
         rather than raising — the create-if-absent flow legitimately probes before
@@ -155,8 +166,8 @@ trait SecretWriter(Movable, Deinitable):
         silent-rotation outage this probe exists to prevent. Fail loud, never fail
         open.
 
-        `deploy_token` is the assumed-role bearer — per-call, never a field (the
-        same custody rule as `write`). A local/test conformer ignores it."""
+        `deploy_token` is as for `write` (per-call, never a field; the live
+        conformers refuse a non-empty one)."""
         ...
 
 
@@ -187,7 +198,7 @@ trait SecretWriter(Movable, Deinitable):
 struct _StaticWriterState(Movable):
     """The static writer's interior: a `secret_ref -> written-plaintext-bytes`
     map + a running `write_count` + the `last_token` the last write carried (so a
-    test asserts the assumed deploy token reached the write), behind an ArcPointer
+    test asserts the threaded deploy token reached the write), behind an ArcPointer
     so all persist through `share()`. No stale-pointer hazard (a Dict of flat
     `List[UInt8]` value PODs + an Int + a String; no wildcard, no byte-slab)."""
 
@@ -260,7 +271,7 @@ struct StaticSecretWriter(SecretWriter, Movable):
         wins). The moved-in `value` drops at the end of this method, securely zeroing
         its buffer (the write path never leaks a plaintext copy — the double copies
         only into its own at-rest bytes, which a live conformer would not do). The
-        `deploy_token` is recorded (a test asserts the assumed token reached the
+        `deploy_token` is recorded (a test asserts the threaded token reached the
         write) but the double does no cloud call with it."""
         self._p[].write_count += 1
         self._p[].last_token = deploy_token
@@ -339,10 +350,10 @@ struct StaticSecretWriter(SecretWriter, Movable):
         return self._p[].write_count
 
     def last_token(self) -> String:
-        """The `deploy_token` the LAST `write` carried (the assumed customer-role
-        bearer token when the applier deploys into a customer environment). A test
-        asserts it matches the assumed token — NOT the deployer's own token — proving
-        the secret write acted AS the assumed role."""
+        """The `deploy_token` the LAST `write` carried. The double only
+        records it: a test asserts the token a caller threaded reached the
+        seam. It proves nothing about which principal a live write runs as
+        (the live conformers take that from their client)."""
         return self._p[].last_token
 
     def was_written(self, secret_ref: String) -> Bool:
