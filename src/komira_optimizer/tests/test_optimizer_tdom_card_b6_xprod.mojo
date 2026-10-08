@@ -289,9 +289,10 @@ def test_b6_q9_psn_card_clamped_to_max_base() raises:
 
     # Same NDVs without Tier-1 backing: the FK-PK gate rejects, so the
     # cross-product clamp (Step 5b) alone must cap the estimate. The
-    # traced sibling omits Step 5b, so its final card is the unclamped
-    # 800K * 10K * 25 / 25 = 8e9.
-    # Catches: Step 5b removed, or its cross-product test inverted.
+    # traced sibling applies Step 5b too: its raw card is the unclamped
+    # 800K * 10K * 25 / 25 = 8e9 and its final card the 800K estimate.
+    # Catches: Step 5b removed, or its cross-product test inverted, in
+    # either the estimate or the traced sibling.
     var provider2 = SyntheticColumnStatsProvider()
     provider2.inject(R_LINEITEM, "l_orderkey",  SF1_ORDERS, False)
     provider2.inject(R_LINEITEM, "l_partkey",   200_000, False)
@@ -309,7 +310,8 @@ def test_b6_q9_psn_card_clamped_to_max_base() raises:
     )
     assert_false(trace2.clamp_fired,
                  "no Tier-1 backing: the FK-PK gate must reject")
-    assert_equal(trace2.final_card, 8_000_000_000)
+    assert_equal(trace2.raw_card, 8_000_000_000)
+    assert_equal(trace2.final_card, SF1_PARTSUPP)
     var cache2 = Dict[UInt64, Int]()
     var card2 = estimate_cardinality_with_set(
         tdom2, chain, psn_bits, provider2, cache2,

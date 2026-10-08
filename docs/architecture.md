@@ -113,6 +113,7 @@ runs a whole plan yet ([Layers still to come](#layers-still-to-come)).
 | [`komira_protobuf`](../src/komira_protobuf/) | a general-purpose Protocol Buffers wire codec (reader, writer, wire types), not tied to any one message set. |
 | [`komira_xml`](../src/komira_xml/) | a general XML codec: reader, tree, writer and escaping. |
 | [`komira_encoding`](../src/komira_encoding/) | binary-to-text encodings, base64, base64url, base32 and hex, and RFC 7468 PEM armor, in pure Mojo with no dependencies; decoding is strict and names the byte position of what it rejects. |
+| [`komira_mail_address`](../src/komira_mail_address/) | email addresses: one grammar for RFC 5322 header fields (addr-spec, name-addr, groups, comments) and RFC 5321 SMTP paths, with validating constructors and minimum-quoting formatting; refuses CR, LF and NUL anywhere and non-ASCII (no SMTPUTF8 or IDNA). No dependencies. |
 | [`komira_json`](../src/komira_json/) | a small dependency-free JSON library (RFC 8259): a tagged `JsonValue`, a strict non-recursive parser with a nesting-depth limit, and direct-byte writers. |
 | [`komira_textproto`](../src/komira_textproto/) | a zero-dependency textproto lexer: typed tokens (so a quoted brace never equals a brace) and a cursor for hand-written parsers. |
 | [`komira_json_index`](../src/komira_json_index/) | the JSON structural index (the SIMD stage-1 primitives, the structural-token indexer, input limits, the string unescaper, a UTF-8 check) and the `json_extract` kernel over a string column. |
