@@ -121,9 +121,11 @@ interface. This package names no cloud:
                        error, leftover, left behind, released); and the
                        plan grouped by authored resource, adopted nodes and
                        releases marked (`render_plan`).
-  * conformance.mojo — the conformance kit every cloud runs (twelve steps,
-                       from label stamping to two interleaved applies and
-                       the validation-run tag under the kit's own run id).
+  * conformance.mojo — the conformance kit every cloud runs (thirteen
+                       steps, from label stamping to two interleaved
+                       applies, the validation-run tag under the kit's own
+                       run id, and an adoption through `Resource.adopt`:
+                       the mark kept on update, then the release).
 
 The fake clouds (working in-memory clouds, not mocks) that exercise all of it live in
 `kci_cloud_fake`.
