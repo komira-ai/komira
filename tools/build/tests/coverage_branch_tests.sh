@@ -26,7 +26,9 @@
 #      test_score_arms are its golden file: the `if` and both `elif`s, which
 #      Mojo puts on one location, three records; the `or` and `and` with
 #      their right operands derived; shapes.mojo's while, range( loop,
-#      ternary, or chain and plain @always_inline helper);
+#      ternary, or chain and plain @always_inline helper; loops.mojo's
+#      loops over a List and a list literal, arm 0 the end; lookup.mojo's
+#      Dict subscript, compiler-made; mask.mojo's two user masks, decisions);
 #      tests//negative/coverage: branchfail, branchannotate,
 #      branchnoprof and branchversion build green (their release gates),
 #      and branchfail[coverage][branch][test_profile_env] is red (a test

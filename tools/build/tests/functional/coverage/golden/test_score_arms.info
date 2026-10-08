@@ -1,3 +1,17 @@
+SF:tools/build/tests/functional/coverage/branchlib/lookup.mojo
+end_of_record
+SF:tools/build/tests/functional/coverage/branchlib/loops.mojo
+BRDA:9,14:br:0/1,0,2
+BRDA:9,14:br:0/1,1,3
+BRDA:16,14:br:0/1,0,1
+BRDA:16,14:br:0/1,1,2
+end_of_record
+SF:tools/build/tests/functional/coverage/branchlib/mask.mojo
+BRDA:9,5:select:0/1,0,0
+BRDA:9,5:select:0/1,1,1
+BRDA:11,5:select:0/1,0,0
+BRDA:11,5:select:0/1,1,1
+end_of_record
 SF:tools/build/tests/functional/coverage/branchlib/score.mojo
 BRDA:4,5:br:0/3,0,0
 BRDA:4,5:br:0/3,1,4
@@ -33,4 +47,8 @@ BRDA:25,19:br:0/1,0,2
 BRDA:25,19:br:0/1,1,3
 BRDA:27,15:select:0/1,0,1
 BRDA:27,15:select:0/1,1,1
+end_of_record
+SF:tools/build/tests/functional/coverage/branchlib/strings.mojo
+BRDA:8,5:br:0/1,0,1
+BRDA:8,5:br:0/1,1,1
 end_of_record
