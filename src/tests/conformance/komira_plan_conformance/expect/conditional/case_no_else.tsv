@@ -1,0 +1,18 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.7: a missing ELSE answers NULL, and a NULL condition is not
+# taken. r = CASE WHEN a THEN 1 WHEN b THEN 2 END: a TRUE (ids 1 to 3) gives
+# 1; a FALSE or NULL with b TRUE (ids 4, 7) gives 2; every other row (ids 5,
+# 6, 8, 9) takes no WHEN and answers NULL. The plan spells the missing ELSE
+# as an INT64 NULL literal. Types: §8.19, every branch INT64; nullable (§8).
+id:int64	r:int64?
+1	1
+2	1
+3	1
+4	2
+5	\N
+6	\N
+7	2
+8	\N
+9	\N

@@ -27,6 +27,8 @@ expect/<shard>/<id>.err   expected refusal
 | `agg_grouping` | NULL grouping keys form one group; COUNT(*) against COUNT(col); SUM, MIN and MAX of an all-NULL group are NULL; empty input with and without keys | §2.1 to §2.4, §8.1, §8.6, §8.7 |
 | `join_residual_nullkeys` | NULL keys match nothing in INNER, LEFT, RIGHT, FULL and SEMI joins, on the AUTO and SORT_MERGE kernels; outer joins pad with NULL; ANTI returns NULL-key rows and ignores right NULLs; duplicate keys multiply; a NULL residual is no match; -0.0 and 0.0 match as float keys; a CROSS, LEFT and ANTI join with an empty right side | §1.2, §3.1, §3.2, §3.4, §3.5, §3.9 to §3.13, §11.6 |
 | `sort_topn_limit` | explicit NULLS FIRST and NULLS LAST in both directions; the default (NULLS LAST in both); two keys of mixed direction and placement; -0.0 tying with 0.0; TOPN; LIMIT 0, above the row count, and over a sort. No NaN or infinity: JSON cannot spell them | §4.1, §4.2, §4.4, §4.7, §4.8 |
+| `window_rank` | LAG and LEAD within partitions: the partition edge, a NULL value at an existing offset row (not the default), an explicit default, an explicit NULL default, an offset of 2, a descending order key. No ranking function, RANGE aggregate or NULL partition key yet: the document's §8 has no row for ROW_NUMBER, RANK, DENSE_RANK or a windowed SUM, and no rule for a NULL partition key | §4.8, §8.19, §9.4, §9.5 |
+| `conditional` | CASE with a NULL condition and with no ELSE; COALESCE over NULLs; NULLIF built as its CASE; IN and NOT IN with a NULL member, as values and filters. Every CASE branch has one type: mixed types are §8.14, undecided | §1.1 to §1.5, §1.7, §8.8, §8.19 |
 
 ## Adding a case
 

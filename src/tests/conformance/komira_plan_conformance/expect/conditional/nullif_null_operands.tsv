@@ -1,0 +1,16 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: NULLIF(x, y) is built as CASE WHEN x = y THEN NULL ELSE x.
+# §1.2: x = y is NULL when either side is NULL; §1.7: a NULL condition is not
+# taken, so the ELSE (x) answers. nullif_xy over (x, y) = (1, 10), (NULL,
+# 20), (3, NULL), (NULL, NULL), (5, 5): FALSE gives 1; NULL gives x = NULL;
+# NULL gives x = 3; NULL gives NULL; TRUE gives NULL. nullif_x3 (y = 3): x =
+# 1, NULL, 3, NULL, 5 gives 1, NULL (condition NULL, x NULL), NULL (TRUE),
+# NULL, 5. Types: every branch INT64 (§8.19); nullable (§8).
+id:int64	nullif_xy:int64?	nullif_x3:int64?
+1	1	1
+2	\N	\N
+3	3	\N
+4	\N	\N
+5	\N	5

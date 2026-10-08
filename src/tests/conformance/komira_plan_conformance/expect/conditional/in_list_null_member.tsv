@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.4: x IN (v1, ..., vn) is TRUE if a non-NULL member equals x,
+# otherwise NULL if x or a member is NULL, otherwise FALSE. Over x = 1, NULL,
+# 3, NULL, 5: x IN (1, NULL) is TRUE, NULL, NULL (3 matches nothing and the
+# list holds NULL), NULL, NULL. x IN (1, 3) is TRUE, NULL (x NULL), TRUE,
+# NULL, FALSE. Types: §8.8.
+id:int64	in_1_null:bool?	in_1_3:bool?
+1	true	true
+2	\N	\N
+3	\N	true
+4	\N	\N
+5	\N	false

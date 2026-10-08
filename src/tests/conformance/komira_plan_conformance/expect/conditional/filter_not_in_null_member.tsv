@@ -1,0 +1,8 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.5: x NOT IN (1, NULL) over x = 1, NULL, 3, NULL, 5 is FALSE,
+# NULL, NULL, NULL, NULL: a list holding NULL makes every non-matching row
+# NULL, so the predicate is never TRUE and §1.2's filter keeps no row.
+# Types: a filter keeps its input columns, as scanned.
+id:int64	x:int64?	y:int64?

@@ -1,0 +1,18 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.4: LAG(v, 2, 0) reads the row 2 before, the default 0 where
+# none exists in the partition; LEAD(v, 2) the row 2 after, NULL where none
+# exists. g = 1 (ids 1, 2, 3; v 10, NULL, 30): LAG 0, 0, 10 (id 1's v);
+# LEAD 30 (id 3's v), NULL, NULL. g = 2 (two rows): LAG 0, 0; LEAD NULL,
+# NULL. g = 3: LAG 0, LEAD NULL.
+# Types: id, g, v keep their scanned types; each LAG/LEAD column is INT64
+# (its values are cells of v, a default that is an INT64 literal (§8.19), or
+# NULL) and nullable (§8: no row exempts it).
+id:int64	g:int64	v:int64?	lag2_v:int64?	lead2_v:int64?
+1	1	10	0	30
+2	1	\N	0	\N
+3	1	30	10	\N
+4	2	40	0	\N
+5	2	50	0	\N
+6	3	60	0	\N

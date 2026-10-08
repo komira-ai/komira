@@ -1,0 +1,21 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.7: a WHEN whose condition is NULL is not taken; evaluation
+# moves to the next WHEN, then to ELSE. r = CASE WHEN a THEN 1 WHEN b THEN 2
+# ELSE 3: a TRUE (ids 1 to 3) gives 1; a FALSE or NULL with b TRUE (ids 4, 7)
+# gives 2; otherwise 3 (ids 5, 6, 8, 9: b FALSE or NULL). r_not = CASE WHEN
+# NOT a THEN 10 ELSE 20: NOT a is FALSE, TRUE, NULL for a TRUE, FALSE, NULL
+# (§1.1), so a FALSE (ids 4 to 6) gives 10 and a TRUE or NULL gives 20.
+# Types: every branch is an INT64 literal (§8.19), so the CASE is INT64;
+# nullable: §8 declares nullable every result its table does not exempt.
+id:int64	r:int64?	r_not:int64?
+1	1	20
+2	1	20
+3	1	20
+4	2	10
+5	3	10
+6	3	10
+7	2	20
+8	3	20
+9	3	20

@@ -1,0 +1,18 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §9.4 over PARTITION BY g ORDER BY id DESC (no NULL id, so §4.1
+# and §9.6's placement do not arise): the partition orders are 3, 2, 1;
+# 5, 4; 6. LAG(v, 1, 0) reads the row before in that order: id 3 is first
+# (0), id 2 reads id 3 (30), id 1 reads id 2 (NULL, §9.5); id 5 is first (0),
+# id 4 reads id 5 (50); id 6 is alone (0).
+# Types: id, g, v keep their scanned types; the LAG column is INT64 (its
+# values are cells of v, the INT64 literal 0 (§8.19), or NULL) and nullable
+# (§8: no row exempts it).
+id:int64	g:int64	v:int64?	lag_v:int64?
+1	1	10	\N
+2	1	\N	30
+3	1	30	0
+4	2	40	50
+5	2	50	0
+6	3	60	0
