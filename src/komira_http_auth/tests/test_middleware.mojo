@@ -6,9 +6,11 @@
 # RFC 6750 section 3: a missing Authorization header or another scheme is a
 # 401 with a bare `Bearer` challenge (no error code); a malformed header
 # (including non-ASCII bytes and a token over MAX_TOKEN_BYTES) is a 400
-# invalid_request; two Authorization fields (comma-folded by the HTTP/1
-# parser), or a list naming Bearer, are a 400 invalid_request with their own
-# reason; every verification failure is a 401 invalid_token; no usable key
+# invalid_request; two Authorization fields of any schemes (comma-folded by
+# the HTTP/1 parser, which one test runs on a raw request), an empty field
+# folded in, or a list holding a Bearer credential, are a 400 invalid_request
+# with their own reason, while one credential whose auth-params hold commas
+# (quoted or not) stays one credential of another scheme; every verification failure is a 401 invalid_token; no usable key
 # set (past max-stale) is a 503 with Retry-After and no challenge, and the
 # middleware recovers once a refresh succeeds. `cache-control: no-store` on
 # every refusal, no token text in any response, and ctx.principal REPLACED on
@@ -119,6 +121,7 @@ struct _Rig(Movable):
         self.verifier = v^
 
 
+from komira_http_core.codec import ParseLimits, parse_request_head
 from komira_http_core.codec.types import HttpMethod, HttpRequest, HttpResponse
 from komira_http_server.middleware import Principal, RequestContext
 from komira_http_auth import (
@@ -285,15 +288,29 @@ def test_missing_authorization_is_a_bare_challenge() raises:
 def test_another_scheme_is_a_bare_challenge() raises:
     # RFC 6750 section 3: a client that "attempted using an unsupported
     # authentication method" lacks authentication information too: 401, no
-    # error code. A comma list naming no Bearer element is another scheme
-    # (Digest credentials hold commas; two Basic fields fold into one).
+    # error code. ONE credential of another scheme whose own auth-params
+    # hold commas, in or out of quoted-strings, is one credential, not two
+    # (RFC 9110 section 11.4: `auth-scheme [ 1*SP ( token68 / #auth-param )
+    # ]`).
     var key = _key()
     var good = _good_token(key)
     var cases = List[String]()
     cases.append(String("Basic dXNlcjpwYXNz"))
     cases.append(String("Token ") + good)
     cases.append(String('Digest username="u", realm="r", nonce="n"'))
-    cases.append(String("Basic dXNlcjpwYXNz, Basic dXNlcjpwYXNz"))
+    cases.append(String("Digest a=b, c=d"))
+    # BWS around `=` is still an auth-param.
+    cases.append(String('Digest realm = "r" ,\tnonce\t="n"'))
+    # Commas inside quoted-strings do not split, even before something that
+    # looks like a second credential.
+    cases.append(String('Digest username="a, Bearer b", realm="r"'))
+    cases.append(String('Digest uri="/x?a=1,2", qop=auth, nc=00000001'))
+    # An escaped quote does not close the quoted-string.
+    cases.append(String('Digest username="a \\", Bearer b", realm="r"'))
+    # A second field that is only an auth-param reads as one of the first
+    # credential's params (the documented limit of the list rule): one
+    # credential of another scheme, still refused.
+    cases.append(String("Basic dXNlcjpwYXNz, a=b"))
     cases.append(String("Bearerx ") + good)
     cases.append(String("Basic"))
     # Schemes holding RFC 9110 tchar specials ("-" and the rest of the set
@@ -319,26 +336,45 @@ def test_another_scheme_is_a_bare_challenge() raises:
 def test_two_authorization_fields_are_invalid_request() raises:
     # RFC 6750 section 3.1: a request that "uses more than one method" or
     # "repeats the same parameter" is invalid_request, 400. The HTTP/1
-    # parser comma-folds a repeated Authorization field (the folds below are
-    # the values it builds, the last from an empty first field); a Bearer
-    # token68 never holds a comma, so any comma list naming Bearer is a
-    # second credential.
+    # parser comma-folds a repeated Authorization field into `a, b`
+    # (test_two_authorization_lines_through_the_http1_parser below runs the
+    # real parser); these are the values it builds. Two credentials of ANY
+    # schemes are refused, as are an empty field folded in and a list
+    # holding a Bearer credential (middleware.mojo, the list rule).
     var key = _key()
     var good = _good_token(key)
     var cases = List[String]()
+    # (a) two credentials.
     cases.append(String("Bearer ") + good + String(", Bearer ") + good)
     cases.append(String("Basic dXNlcjpwYXNz, Bearer ") + good)
     cases.append(String("Bearer ") + good + String(", Basic dXNlcjpwYXNz"))
-    cases.append(String(", Bearer ") + good)
     cases.append(String("Bearer ") + good + String(",") + good)
     cases.append(String("bearer ") + good + String(",\tBEARER ") + good)
     # The ONLY Bearer element follows a comma and a horizontal tab: the
     # whitespace before an element's scheme is spaces and tabs alike.
     cases.append(String("Basic dXNlcjpwYXNz,\tBearer ") + good)
-    # A comma inside another scheme's quoted parameter is not parsed as
-    # quoting: the element after it names Bearer, so this is classified as
-    # repeated. Fail-closed by design (module header, step 2).
-    cases.append(String('Digest username="a, Bearer b"'))
+    # No Bearer anywhere: two Basic fields, Basic and Digest, two Digest
+    # fields with their own params, two bare schemes.
+    cases.append(String("Basic dXNlcjpwYXNz, Basic dXNlcjpwYXNz"))
+    cases.append(String('Basic dXNlcjpwYXNz, Digest username="a", realm="b"'))
+    cases.append(
+        String('Digest username="a", realm="b", Digest username="c", realm="d"')
+    )
+    cases.append(String("Basic, Basic"))
+    # The first element always starts a credential, whatever its shape.
+    cases.append(String("a=b, Basic dXNlcjpwYXNz"))
+    # A quoted comma does not split, but the credential after it does.
+    cases.append(String('Digest username="a, b", Bearer ') + good)
+    # A `"` not after `=` opens no quoted-string, so it cannot swallow the
+    # fold.
+    cases.append(String('Basic ab"c, Basic d"'))
+    # (b) an empty field folded in, first or last.
+    cases.append(String(", Bearer ") + good)
+    cases.append(String(", Basic dXNlcjpwYXNz"))
+    cases.append(String("Basic dXNlcjpwYXNz, "))
+    # (c) a Bearer credential with anything after a comma: a token68 never
+    # holds one.
+    cases.append(String("Bearer ") + good + String(', realm="x"'))
     for i in range(len(cases)):
         var rig = _MwRig(key)
         var req = _req(Optional[String](cases[i]))
@@ -348,9 +384,82 @@ def test_two_authorization_fields_are_invalid_request() raises:
         assert_true(Bool(r), "case " + String(i))
         _assert_400(r.value(), "case " + String(i))
         _assert_no_echo(r.value(), good)
-        assert_equal(rig.mw.last_reason(), String(REASON_REPEATED_HEADER))
+        assert_equal(
+            rig.mw.last_reason(), String(REASON_REPEATED_HEADER), "case " + String(i)
+        )
         assert_false(Bool(ctx.principal))
         assert_equal(rig.fetcher.fetch_count(), 0)
+
+
+def _bytes(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    out.extend(Span(s.as_bytes()))
+    return out^
+
+
+def _authorization_lines(first: String, second: String) -> String:
+    """A raw HTTP/1.1 request head with two Authorization lines."""
+    return (
+        String("GET /v1/things HTTP/1.1\r\nHost: api.example.com\r\n")
+        + String("Authorization: ")
+        + first
+        + String("\r\nAccept: */*\r\nAuthorization: ")
+        + second
+        + String("\r\n\r\n")
+    )
+
+
+def test_two_authorization_lines_through_the_http1_parser() raises:
+    # The defence above holds only while komira_http_core's HTTP/1 parser
+    # FOLDS a repeated field. Here the raw request goes through that parser
+    # and the request it builds goes to the middleware. If the parser kept
+    # only the last (or first) field, the two-Bearer case would carry one
+    # valid token and be accepted, and this test would fail.
+    var key = _key()
+    var good = _good_token(key)
+    var firsts = List[String]()
+    var seconds = List[String]()
+    firsts.append(String("Bearer ") + good)
+    seconds.append(String("Bearer ") + good)
+    firsts.append(String("Basic dXNlcjpwYXNz"))
+    seconds.append(String("Bearer ") + good)
+    firsts.append(String("Bearer ") + good)
+    seconds.append(String("Basic dXNlcjpwYXNz"))
+    firsts.append(String("Basic dXNlcjpwYXNz"))
+    seconds.append(String("Basic dXNlcjpwYXNz"))
+    firsts.append(String('Digest username="a", realm="b"'))
+    seconds.append(String("Basic dXNlcjpwYXNz"))
+    for i in range(len(firsts)):
+        var raw = _bytes(_authorization_lines(firsts[i], seconds[i]))
+        var parsed = parse_request_head(Span[UInt8](raw), ParseLimits.defaults())
+        assert_true(parsed.err.is_ok(), "case " + String(i))
+        var rig = _MwRig(key)
+        var ctx = RequestContext.new()
+        ctx.principal = _preset_principal()
+        var r = rig.mw.before(parsed.request, ctx)
+        assert_true(Bool(r), "case " + String(i))
+        _assert_400(r.value(), "case " + String(i))
+        _assert_no_echo(r.value(), good)
+        assert_equal(
+            rig.mw.last_reason(), String(REASON_REPEATED_HEADER), "case " + String(i)
+        )
+        assert_false(Bool(ctx.principal))
+        assert_equal(rig.fetcher.fetch_count(), 0)
+    # Control: ONE Authorization line through the same parser is accepted,
+    # so the refusals above are the second line's doing.
+    var one = _bytes(
+        String("GET /v1/things HTTP/1.1\r\nHost: api.example.com\r\n")
+        + String("Authorization: Bearer ")
+        + good
+        + String("\r\n\r\n")
+    )
+    var parsed = parse_request_head(Span[UInt8](one), ParseLimits.defaults())
+    assert_true(parsed.err.is_ok())
+    var rig = _MwRig(key)
+    var ctx = RequestContext.new()
+    assert_false(Bool(rig.mw.before(parsed.request, ctx)), "one line accepted")
+    assert_equal(rig.mw.last_reason(), String(REASON_OK))
+    assert_true(Bool(ctx.principal))
 
 
 def test_malformed_authorization_is_invalid_request() raises:
@@ -369,6 +478,9 @@ def test_malformed_authorization_is_invalid_request() raises:
     # ':' is not a token68 byte (RFC 7235 2.1), so a Basic-style pair is
     # refused as a malformed header, not passed on to the verifier.
     cases.append(String("Bearer a:b"))
+    # An unterminated quoted-string, also one whose last quote is escaped.
+    cases.append(String('Digest username="a'))
+    cases.append(String('Digest username="a\\"'))
     for i in range(len(cases)):
         var rig = _MwRig(key)
         var req = _req(Optional[String](cases[i]))

@@ -14,17 +14,24 @@
 #          rest not examined): the request "lacks any
 #          authentication information", so 401 with a bare
 #          `WWW-Authenticate: Bearer` and no error code;
-#        * more than one credential naming Bearer: a comma list one of whose
-#          elements has the scheme `Bearer`. The HTTP/1 parser folds a
-#          repeated header into `a, b`, and a Bearer credential (token68)
-#          never holds a comma, so this is a second Authorization field or a
-#          list; it "uses more than one method" or "repeats the same
-#          parameter": 400 with `WWW-Authenticate: Bearer
-#          error="invalid_request"`;
-#        * a scheme that is not an RFC 9110 token, or the `Bearer` scheme not
-#          followed by exactly one space and a token68 (RFC 7235: the
-#          base64url and base64 alphabets, `.`, `~`, `+`, `/`, trailing `=`)
-#          of at most 8 KiB: malformed, so 400 invalid_request as above;
+#        * two or more credentials: the HTTP/1 parser folds a repeated
+#          header into `a, b`, so two Authorization fields, of any schemes,
+#          reach this layer as one comma list. The list is split at commas
+#          outside quoted-strings; it is refused when two of its elements
+#          start a credential (an element after the first starts one unless
+#          it is empty or an auth-param, `token BWS "="`), when an element
+#          is empty (an empty field folded in), or when it holds a Bearer
+#          credential (a Bearer token68 never holds a comma). The request
+#          "uses more than one method" or "repeats the same parameter": 400
+#          with `WWW-Authenticate: Bearer error="invalid_request"`, reason
+#          `repeated_authorization`. One credential whose own auth-params
+#          hold commas (`Digest username="a", realm="b"`) is ONE credential
+#          and is answered as another scheme, 401;
+#        * an unterminated quoted-string, a scheme that is not an RFC 9110
+#          token, or the `Bearer` scheme not followed by exactly one space
+#          and a token68 (RFC 7235: the base64url and base64 alphabets,
+#          `.`, `~`, `+`, `/`, trailing `=`) of at most 8 KiB: malformed,
+#          so 400 invalid_request as above;
 #   3. hands the token to the verifier. A refusal because the verifier has
 #      no usable keys (`VerifyOutcome.keys_unavailable()`: never fetched, or
 #      past freshness plus max-stale with every refresh failing) is answered
@@ -33,11 +40,14 @@
 #      401 with `WWW-Authenticate: Bearer error="invalid_token"`;
 #   4. on success sets `ctx.principal` and lets the request through.
 #
-# The scheme name is compared case-insensitively. A comma list with no Bearer
-# element (`Digest a=b, c=d`, or two Basic fields folded) is another scheme,
-# 401. The list is split at every comma, quoted or not, so a comma inside
-# another scheme's quoted parameter (`Digest username="a, Bearer b"`) is read
-# as a Bearer element and answered 400: fail-closed by design.
+# The scheme name is compared case-insensitively. `_classify_authorization`
+# states the list rule exactly. Two fields are refused as repeated whenever
+# the second is a well-formed credential and the first leaves no
+# quoted-string open. A fold hides only when the second field is a bare
+# auth-param (`a=b`) or the first leaves a quoted-string open (it swallows
+# the comma); the value is then refused as one malformed or other-scheme
+# credential. Nothing in the list rule can move a value toward acceptance,
+# which needs exactly `Bearer <token68>`.
 #
 # HTTP/2: komira_http_server's chained (middleware) serving path closes h2
 # connections and its h2 path runs no middleware, so no h2 request reaches
@@ -106,84 +116,177 @@ def _is_token68_byte(c: UInt8) -> Bool:
     )
 
 
+# Bytes the Authorization classifier compares against, as constants so no
+# String is built per byte or per element.
+comptime _SP: UInt8 = 0x20
+comptime _HTAB: UInt8 = 0x09
+comptime _COMMA: UInt8 = 0x2C
+comptime _EQUALS: UInt8 = 0x3D
+comptime _DQUOTE: UInt8 = 0x22
+comptime _BACKSLASH: UInt8 = 0x5C
+
+
 def _is_tchar(c: UInt8) -> Bool:
-    """RFC 9110 section 5.6.2 tchar."""
-    if (
-        (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
-        or (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
-        or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
-    ):
-        return True
-    var extra = String("!#$%&'*+-.^_`|~")
-    var e = extra.as_bytes()
-    for k in range(len(e)):
-        if c == e[k]:
-            return True
-    return False
+    """RFC 9110 section 5.6.2 tchar: ALPHA, DIGIT and
+    `! # $ % & ' * + - . ^ _ ` | ~`."""
+    return (
+        (c >= 0x41 and c <= 0x5A)  # A-Z
+        or (c >= 0x61 and c <= 0x7A)  # a-z
+        or (c >= 0x30 and c <= 0x39)  # 0-9
+        or c == 0x21  # !
+        or c == 0x23  # #
+        or c == 0x24  # $
+        or c == 0x25  # %
+        or c == 0x26  # &
+        or c == 0x27  # '
+        or c == 0x2A  # *
+        or c == 0x2B  # +
+        or c == 0x2D  # -
+        or c == 0x2E  # .
+        or c == 0x5E  # ^
+        or c == 0x5F  # _
+        or c == 0x60  # `
+        or c == 0x7C  # |
+        or c == 0x7E  # ~
+    )
 
 
-def _is_bearer_word(value: String, start: Int, end: Int) -> Bool:
-    """Whether bytes [start, end) of `value` are `bearer`, ASCII
+@always_inline
+def _is_ows(c: UInt8) -> Bool:
+    return c == _SP or c == _HTAB
+
+
+@always_inline
+def _lower(c: UInt8) -> UInt8:
+    return c + 0x20 if (c >= 0x41 and c <= 0x5A) else c
+
+
+def _is_bearer_word(b: Span[UInt8, _], start: Int, end: Int) -> Bool:
+    """Whether bytes [start, end) of `b` are `bearer`, ASCII
     case-insensitively."""
     if end - start != 6:
         return False
-    var b = value.as_bytes()
-    var bearer = String("bearer")
-    var want = bearer.as_bytes()
-    for k in range(6):
-        var c = b[start + k]
-        if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
-            c = c + UInt8(0x20)
-        if c != want[k]:
-            return False
-    return True
+    return (
+        _lower(b[start]) == 0x62  # b
+        and _lower(b[start + 1]) == 0x65  # e
+        and _lower(b[start + 2]) == 0x61  # a
+        and _lower(b[start + 3]) == 0x72  # r
+        and _lower(b[start + 4]) == 0x65  # e
+        and _lower(b[start + 5]) == 0x72  # r
+    )
 
 
 def _classify_authorization(value: String) -> Int:
     """Which case of the module header (step 2) `value` is: `_AUTH_BEARER`
     (scheme Bearer, which `bearer_token_from_header` then parses),
-    `_AUTH_OTHER_SCHEME`, `_AUTH_MALFORMED` (scheme not a token) or
-    `_AUTH_REPEATED`. Byte by byte: the HTTP/1 parser maps an obs-text byte
-    to a two-byte UTF-8 character, so a String slice could split one.
+    `_AUTH_OTHER_SCHEME`, `_AUTH_MALFORMED` or `_AUTH_REPEATED`. Byte by
+    byte: the HTTP/1 parser maps an obs-text byte to a two-byte UTF-8
+    character, so a String slice could split one.
 
-    The comma list is split at EVERY comma; quoted strings are not parsed.
-    So a comma inside another scheme's quoted parameter (`Digest
-    username="a, Bearer b"`) makes an element whose scheme is Bearer, and
-    the value is `_AUTH_REPEATED` (400). Fail-closed by design: reading
-    quotes would put a quoted-string parser in front of the gate."""
+    THE LIST. `value` is split into elements at every comma that is not
+    inside a quoted-string. A quoted-string opens only at a `"` whose
+    previous non-blank byte in the element is `=` (the value of an
+    auth-param, `token BWS "=" BWS quoted-string`), and inside it a
+    backslash escapes the next byte. One pass, no allocation, linear in the value.
+
+    THE ELEMENTS. After leading spaces and tabs, an element is
+      * EMPTY when nothing is left;
+      * an AUTH-PARAM when it is not the first element and it is a token
+        (1*tchar), optional spaces or tabs, then `=`;
+      * otherwise the START OF A CREDENTIAL. The first element always is
+        (a value starts with its scheme); a later one is when it begins with
+        a token followed by a space, a tab or its end (`Basic xyz`, `Basic`),
+        and, failing closed, whenever it is neither empty nor an auth-param.
+      A credential start is a BEARER credential when its token is `bearer`
+      (any case) followed by a space, a tab or the element's end.
+
+    THE RULE. A value of two or more elements is `_AUTH_REPEATED` when
+      (a) two or more elements start a credential, or
+      (b) an element is empty (an empty field folded in), or
+      (c) a Bearer credential is in it (a Bearer credential is one token68
+          and never holds a comma).
+    Otherwise an unterminated quoted-string is `_AUTH_MALFORMED`, and the
+    value is one credential: its scheme runs to the first space.
+
+    A well-formed credential (RFC 9110 section 11.4: `auth-scheme [ 1*SP (
+    token68 / #auth-param ) ]`) never starts an element after its first,
+    so the HTTP/1 fold of two fields, `A, B`, is caught by (a) whenever B is
+    a well-formed credential and A leaves no quoted-string open; by (b) when
+    either is empty. A quoted-string left open by A swallows the fold, and a
+    B that is only an auth-param (`a=b`) is read as one of A's; the value is
+    then read as one credential, malformed or of another scheme, and refused
+    either way: no rule here moves a value toward acceptance, which needs
+    exactly `Bearer <token68>`."""
     var b = value.as_bytes()
     var n = len(b)
-    # A comma list with an element whose scheme is Bearer.
-    var has_comma = False
-    var bearer_elements = 0
+    var elements = 0
+    var credentials = 0
+    var empty_elements = 0
+    var bearer_credentials = 0
+    var unterminated = False
     var i = 0
     while i <= n:
-        # One element: [i, j) up to the next comma or the end.
+        # One element: [i, j) up to the next comma outside a quoted-string,
+        # or the end.
         var j = i
-        while j < n and b[j] != UInt8(ord(",")):
+        var in_quote = False
+        var prev = UInt8(0)  # the last non-blank byte outside a quote
+        while j < n:
+            var c = b[j]
+            if in_quote:
+                if c == _BACKSLASH:
+                    j += 2
+                    continue
+                if c == _DQUOTE:
+                    in_quote = False
+                    prev = c
+                j += 1
+                continue
+            if c == _COMMA:
+                break
+            if c == _DQUOTE and prev == _EQUALS:
+                in_quote = True
+            elif not _is_ows(c):
+                prev = c
             j += 1
-        if j < n:
-            has_comma = True
+        if in_quote:
+            unterminated = True
+        if j > n:
+            j = n  # a trailing backslash inside a quote
+        elements += 1
         var s = i
-        while s < j and (b[s] == UInt8(ord(" ")) or b[s] == UInt8(0x09)):
+        while s < j and _is_ows(b[s]):
             s += 1
-        var e = s
-        while e < j and b[e] != UInt8(ord(" ")) and b[e] != UInt8(0x09):
-            e += 1
-        if _is_bearer_word(value, s, e):
-            bearer_elements += 1
+        if s == j:
+            empty_elements += 1
+        else:
+            var e = s
+            while e < j and _is_tchar(b[e]):
+                e += 1
+            var t = e
+            while t < j and _is_ows(b[t]):
+                t += 1
+            var is_param = elements > 1 and e > s and t < j and b[t] == _EQUALS
+            if not is_param:
+                credentials += 1
+                if (e == j or _is_ows(b[e])) and _is_bearer_word(b, s, e):
+                    bearer_credentials += 1
         i = j + 1
-    if has_comma and bearer_elements > 0:
+    if elements > 1 and (
+        credentials > 1 or empty_elements > 0 or bearer_credentials > 0
+    ):
         return _AUTH_REPEATED
+    if unterminated:
+        return _AUTH_MALFORMED
     # One credential: the scheme runs to the first space.
     var k = 0
-    while k < n and b[k] != UInt8(ord(" ")):
+    while k < n and b[k] != _SP:
         if not _is_tchar(b[k]):
             return _AUTH_MALFORMED
         k += 1
     if k == 0:
         return _AUTH_MALFORMED
-    if _is_bearer_word(value, 0, k):
+    if _is_bearer_word(b, 0, k):
         return _AUTH_BEARER
     return _AUTH_OTHER_SCHEME
 
@@ -197,15 +300,9 @@ def bearer_token_from_header(value: String) -> Optional[String]:
     # The scheme is compared byte by byte, never by slicing the String: the
     # HTTP/1 parser maps an obs-text byte to a two-byte UTF-8 character, so
     # byte 6 of a hostile value can fall inside a character.
-    var bearer = String("bearer")
-    var want = bearer.as_bytes()
-    for k in range(6):
-        var c = b[k]
-        if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
-            c = c + UInt8(0x20)
-        if c != want[k]:
-            return Optional[String]()
-    if b[6] != UInt8(ord(" ")):
+    if not _is_bearer_word(b, 0, 6):
+        return Optional[String]()
+    if b[6] != _SP:
         return Optional[String]()
     var i = 7
     while i < len(b) and _is_token68_byte(b[i]):
