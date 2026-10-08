@@ -14,7 +14,7 @@ the compiler sees. Worked uses of each rule are in
 
 | rule | produces | example |
 |---|---|---|
-| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
+| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level, readme)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
@@ -117,6 +117,16 @@ fence reader, so the link check and the examples agree on what is code).
   README's examples do not count as the tests a conda package needs.
 - The tool's own package, `tools/build/readme_examples`, may hold no README:
   the tool would depend on itself.
+- **Which library**: a BUCK file of one library says nothing. Every library
+  of a BUCK file takes the directory's `README.md` unless it says otherwise,
+  so a BUCK file of several libraries names the one the README is about with
+  `readme` ([`readme.bzl`](readme.bzl)): `readme = False` takes no README
+  (no `[tests][readme]`, none in its conda package); `readme = True` takes
+  `README.md` and is refused if there is none. Left on a library that does
+  not reach what the README imports, the README fails that library's
+  `[tests][readme]` compile; left on several, it ships in each of their
+  packages. `mojo_gcp_client`, `mojo_aws_client` and the welded
+  `mojo_proto_library` pass `readme` through.
 - **A README that ships** (the library has a conda package the build can
   make, which installs it at `share/doc/<conda name>/README.md`; see
   [Conda packages](../../../packaging/conda/README.md#the-readme-in-the-package))
@@ -125,7 +135,9 @@ fence reader, so the link check and the examples agree on what is code).
 
 Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
 a README that uses every form, and requires a raising example, a compile
-error and a `mojo skip` fence each to fail naming its README line.
+error and a `mojo skip` fence each to fail naming its README line; it also
+builds a two-library package whose README is one library's, and requires
+the same package without `readme = False` to fail.
 
 ### The compile watchdog
 
