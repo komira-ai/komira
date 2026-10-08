@@ -15,7 +15,7 @@
 #    catalog types with strings longer than the inline capacity.
 #
 # 2. The proto3 JSON form round-trips a whole list, under the camelCase names
-#    an author's tooling sees (`healthPath`, `schedule`, `timezone`,
+#    an author's tooling sees (`healthPath`, `containerJob`, `command`,
 #    `secretEnv`, `platform`, `store`, `version`), and re-encodes to the same
 #    binary bytes.
 # =============================================================================
@@ -106,9 +106,6 @@ def _service_resource(i: Int) -> List[UInt8]:
 
 
 def _job_resource(i: Int) -> List[UInt8]:
-    var sched = List[UInt8]()
-    _str(sched, 1, _long("cron", i))
-    _str(sched, 2, _long("tz", i))
     var digest = List[UInt8]()
     _str(digest, 2, _long("sha256", i))
     _str(digest, 3, String("linux/amd64"))
@@ -126,7 +123,8 @@ def _job_resource(i: Int) -> List[UInt8]:
         7,
         _secret_entry(_long("JOBSECRET", i), _long("job_secret", i), pinned=True),
     )
-    _msg(job, 11, sched)
+    _str(job, 9, _long("/bin/command", i))
+    _str(job, 9, _long("--flag", i))
     var r = List[UInt8]()
     _str(r, 1, _long("job", i))
     _msg(r, 11, job)
@@ -177,7 +175,7 @@ def _check_originals(lst: List[Resource], what: String) raises:
         )
         ref j = lst[2 * i + 1]
         assert_equal(j.id, _long("job", i), what + ": job id")
-        ref job = j.job.value()
+        ref job = j.container_job.value()
         assert_equal(
             job.image.value().digest.value(), _long("sha256", i), what + ": image"
         )
@@ -202,10 +200,9 @@ def _check_originals(lst: List[Resource], what: String) raises:
             not Bool(svc.secret_env[_long("SECRET", i)].version),
             what + ": an unpinned secret has no version",
         )
-        assert_equal(job.schedule.value().cron, _long("cron", i), what + ": cron")
-        assert_equal(
-            job.schedule.value().timezone, _long("tz", i), what + ": timezone"
-        )
+        assert_equal(len(job.command), 2, what + ": command")
+        assert_equal(job.command[0], _long("/bin/command", i), what + ": command[0]")
+        assert_equal(job.command[1], _long("--flag", i), what + ": command[1]")
 
 
 def test_list_copy_does_not_alias_the_original() raises:
@@ -239,8 +236,8 @@ def test_json_round_trip_of_a_list() raises:
     var text = encode_json(lst)
     for key in [
         '"healthPath"',
-        '"schedule"',
-        '"timezone"',
+        '"containerJob"',
+        '"command"',
         '"uses"',
         '"secretEnv"',
         '"platform":"linux/amd64"',

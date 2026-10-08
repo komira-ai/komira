@@ -1,0 +1,16 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Email addresses: RFC 5322 section 3.4 (addr-spec, name-addr, groups) and the
+# RFC 5321 path, parsed by one grammar and formatted with minimum quoting. No
+# dependencies beyond the standard library. See __init__.mojo.
+mojo_library(
+    name = "komira_mail_address",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_rfc5322_examples.mojo",
+        "tests/test_rfc5321_path.mojo",
+        "tests/test_refusals.mojo",
+        "tests/test_normalization.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

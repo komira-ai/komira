@@ -16,8 +16,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     numerics bit-exact; and the bytes against the Arrow spec (ARROW1 magic
 #     and padding, footer size, continuation markers, 8-byte alignment, EOS,
 #     Footer Blocks, schema, FieldNodes, LSB-first validity, value bytes,
-#     Utf8 offsets and slots). komira ships no Parquet writer or reader, so
-#     there is no Parquet leg.
+#     Utf8 offsets and slots). The Parquet leg is pending the komira_parquet
+#     reader and writer port; it lands as soon as that port does.
 #   test_formats_hive_discovery -- EagerGlobDiscovery (directory and glob,
 #     including a glob whose static prefix is the non-ASCII directory) and
 #     PrunedHiveDiscovery (inferred partition schema, byte-exact partition

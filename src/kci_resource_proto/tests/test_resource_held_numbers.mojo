@@ -52,8 +52,8 @@ from kci_resource_proto.resource import (
     DnsRecord,
     DnsZone,
     Grant,
+    ContainerJob,
     Image,
-    Job,
     Output,
     Queue,
     Resource,
@@ -65,6 +65,7 @@ from kci_resource_proto.resource import (
     Topic,
     Uses,
     Value,
+    Worker,
 )
 
 
@@ -86,7 +87,6 @@ def _held() -> List[Held]:
     l.append(Held("Resource", 4, 4, "reserved: the retired stage filter"))
     l.append(Held("Resource", 5, 5, "a typed per-cloud settings map"))
     l.append(Held("Resource", 6, 6, "physical_name"))
-    l.append(Held("Resource", 12, 12, "worker"))
     l.append(Held("Resource", 17, 17, "unused"))
     l.append(Held("Resource", 19, 19, "unused"))
     l.append(Held("Resource", 22, 24, "schedule, network, registry"))
@@ -111,8 +111,13 @@ def _held() -> List[Held]:
     # The primitives: per-cloud extensions 50 to 53 on each, and their own.
     l.append(Held("Service", 13, 13, "a source that may be a non-image artifact"))
     l.append(Held("Service", 50, 53, "per-cloud extensions"))
-    l.append(Held("Job", 8, 8, "a source that may be a non-image artifact"))
-    l.append(Held("Job", 50, 53, "per-cloud extensions"))
+    l.append(Held("ContainerJob", 8, 8, "a source that may be a non-image artifact"))
+    l.append(Held("ContainerJob", 10, 11, "reserved: the trigger, which moved out"))
+    l.append(Held("ContainerJob", 50, 53, "per-cloud extensions"))
+    l.append(Held("Worker", 3, 3, "reserved: a draft's scale"))
+    l.append(Held("Worker", 10, 11, "reserved: a draft's source"))
+    l.append(Held("Worker", 12, 12, "a source that may be a non-image artifact"))
+    l.append(Held("Worker", 50, 53, "per-cloud extensions"))
     l.append(Held("Table", 4, 4, "an analytics replica"))
     l.append(Held("Table", 50, 53, "per-cloud extensions"))
     l.append(Held("Bucket", 50, 53, "per-cloud extensions"))
@@ -194,11 +199,16 @@ def _undeclared_in(message: String, n: Int) raises -> Bool:
         head.append(0x10)  # 2: port
         head.append(80)
         return _undeclared[Service](head, n)
-    if message == "Job":
+    if message == "ContainerJob":
         head.append(0x12)  # 2: args
         head.append(1)
         head.append(UInt8(ord("a")))
-        return _undeclared[Job](head, n)
+        return _undeclared[ContainerJob](head, n)
+    if message == "Worker":
+        head.append(0x22)  # 4: args
+        head.append(1)
+        head.append(UInt8(ord("a")))
+        return _undeclared[Worker](head, n)
     if message == "Table":
         head.append(0x1A)  # 3: ttl_field
         head.append(1)
@@ -306,8 +316,23 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("Service")
     nums.append(2)
     what.append("port (a number)")
-    names.append("Job")
+    names.append("ContainerJob")
     nums.append(13)
+    what.append("run_as (a message)")
+    names.append("ContainerJob")
+    nums.append(9)
+    what.append("command (a repeated string)")
+    names.append("Resource")
+    nums.append(12)
+    what.append("the worker arm (a message in a oneof)")
+    names.append("Worker")
+    nums.append(8)
+    what.append("replicas (an optional number)")
+    names.append("Worker")
+    nums.append(5)
+    what.append("command (a repeated string)")
+    names.append("Worker")
+    nums.append(9)
     what.append("run_as (a message)")
     names.append("Table")
     nums.append(2)
