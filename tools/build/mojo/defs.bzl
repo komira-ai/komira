@@ -25,7 +25,7 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "creat
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo", "welded_tests_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
-load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_branch_of", "coverage_sub_targets")
+load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(
     ":test_runtime.bzl",
@@ -932,7 +932,7 @@ def _shared_lib_impl(ctx):
             "gate": [DefaultInfo(default_outputs = markers, sub_targets = gate_subtargets)],
             # Files only: the library before its gate ran.
             "ungated": [DefaultInfo(default_output = ungated)],
-        },
+        } | coverage_shared_lib(ctx, tc, _build_executable, srcs, main, _dep_closure(ctx), _c_link(ctx), link_extra, so_file),
     )]
 
 mojo_shared_lib_rule = rule(
@@ -948,7 +948,7 @@ mojo_shared_lib_rule = rule(
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         "out_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
-    } | _TOOLCHAIN_ATTR,
+    } | _TOOLCHAIN_ATTR | COVERAGE_SHARED_LIB_ATTRS,
 )
 
 _README_TOOL_PACKAGE = "tools/build/readme_examples"
@@ -989,5 +989,5 @@ def _mojo_library(**kwargs):
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 mojo_binary = declares_docs(mojo_binary_rule)
 mojo_library = declares_docs(_mojo_library)
-mojo_shared_lib = declares_docs(mojo_shared_lib_rule)
+mojo_shared_lib = declares_docs(coverage_shared_lib_macro(mojo_shared_lib_rule))
 mojo_test = declares_docs(mojo_test_rule)

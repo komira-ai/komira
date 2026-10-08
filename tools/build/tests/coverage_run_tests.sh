@@ -40,7 +40,10 @@
 #      lostdir[coverage] red (a binary naming the sources by another
 #      directory than the run stages is refused before kcov runs); clash and
 #      clash_buckout red at analysis (data where a run stages sources);
-#      refused[coverage] red (kcov refused by the executor is said so).
+#      refused[coverage] red (kcov refused by the executor is said so);
+#      shared libraries: covso's driver report and census gate, covso_skip
+#      red with kcov skipping the loaded library, the examples' [coverage]
+#      with the switch, and coverage_shared_lib.sh (no release action moves).
 #      The release actions with the switch on: coverage_keys.sh (test 41).
 
 expect_green coverage_runs tests//functional/coverage:numbers tests//functional/coverage:census \
@@ -81,6 +84,28 @@ else
     pass coverage_run_lingers_group
 fi
 expect_red coverage_run_proc "/proc is not readable as this run's own" 'tests//negative/coverage:lingerproc[coverage][tests][test_lingers]'
+
+# Shared libraries (mojo_shared_lib): each driver of gate_srcs runs under
+# kcov with the library's coverage build, which kcov measures as the driver
+# loads it. covso's report and census gate (tests//functional/coverage);
+# covso_skip's published file is green and its run red with kcov told to skip
+# the libraries a driver loads (the report must hold the library's source);
+# the example shared libraries, coverage from the switch (drivers at the
+# package's top, a force-loaded C library, a version script); and
+# coverage_shared_lib.sh: the switch moves no release action of a shared
+# library, and its published file waits for no coverage action.
+expect_green coverage_run_shared_lib tests//functional/coverage:covso_report tests//functional/coverage:covso_result \
+    tests//negative/coverage:covso_skip
+expect_red coverage_run_shared_lib_skip "no class for tools/build/tests/negative/coverage/covso/covso_one.mojo (--must-contain)" \
+    'tests//negative/coverage:covso_skip[coverage][tests][covso_one_driver]'
+expect_green coverage_run_shared_lib_switch 'komira//tools/build/examples/shared_lib:spike[coverage]' \
+    'komira//tools/build/examples/shared_lib:plain[coverage]' 'komira//tools/build/examples/shared_lib:spike_exact[coverage]' \
+    -c komira.coverage=true
+if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/coverage_shared_lib.sh" "$LOG" > "$LOG/coverage_shared_lib.log" 2>&1; then
+    pass "$(grep -o 'PASS  coverage shared lib: .*' "$LOG/coverage_shared_lib.log" | cut -c 7-)"
+else
+    fail "$(grep -o 'FAIL  coverage shared lib: .*' "$LOG/coverage_shared_lib.log" | cut -c 7- | cut -c 1-400) (see $LOG/coverage_shared_lib.log)"
+fi
 
 # 46
 # shellcheck source=tools/build/tests/coverage_gate_tests.sh

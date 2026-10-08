@@ -29,6 +29,20 @@ COVERAGE_MODE = "census"
 # Basis points of line (and branch) coverage per package: 10000 is 100%.
 COVERAGE_TARGET_BP = 10000
 
+# The mode of every mojo_shared_lib's coverage gate (tools/build/mojo/coverage.bzl,
+# coverage_shared_lib): a shared library's drivers are measured and their
+# reports and the gate's result are its `[coverage]`, but it has no coverage
+# target. Decided: a shared library is the C ABI of code whose own
+# libraries are measured and gated by their tests (a library's gate reads its
+# own tests' reports only), and one loaded by a program's end-to-end tests
+# exists for those tests, so its line coverage is reported, never enforced.
+# This is its own constant, not COVERAGE_MODE: moving the libraries to enforce
+# moves no shared library. coverage.bzl refuses `enforce` here, and for any
+# mojo_shared_lib, a tests-cell fixture included (in analysis); and nothing
+# waits for a shared library's coverage runs or gate (it ships no conda
+# package), so its published file builds whatever they find.
+COVERAGE_SHARED_LIB_MODE = "census"
+
 # The ledger of libraries that cannot have a coverage gate of their own, by
 # label, each with why and where it is gated instead.
 # tools/build/coverage/no_gate.bxl holds this list equal to the Mojo

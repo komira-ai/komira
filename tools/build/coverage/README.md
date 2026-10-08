@@ -393,6 +393,17 @@ them. Bundles and OCI images (`tools/build/package/defs.bzl`) do not wait
 for the gates of the libraries their program is built from: a program's
 libraries are not packages it ships.
 
+**Shared libraries.** A `mojo_shared_lib` has a gate too, over its
+drivers' reports (each driver run under kcov measuring the library it
+loads; `tools/build/mojo/README.md`, "Coverage builds") and its own
+sources, in `COVERAGE_SHARED_LIB_MODE` (`policy.bzl`), census: its line
+coverage is reported, never enforced. That is its own constant, so moving
+`COVERAGE_MODE` to enforce moves no shared library; `enforce` there, or as
+any `mojo_shared_lib`'s `coverage_mode` (a fixture of the tests cell
+included), is refused in analysis (test 46). Nothing waits for
+a shared library's coverage runs or gate: it ships no conda package, and
+its published file waits for its release gate alone.
+
 **Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
 `COVERAGE_TARGET_BP = 10000`. A fixture of the `tests` cell may name another mode
 (`coverage_mode`), and with it its own gate directory (`coverage_gate`, a

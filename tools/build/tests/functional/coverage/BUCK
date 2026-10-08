@@ -1,5 +1,5 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
@@ -204,6 +204,45 @@ cov_report_check(
     ],
     mode = "result",
     reports = [":covgentest[coverage][gate][result]"],
+    script = "report.sh",
+)
+
+# Test 43: a shared library with coverage builds (forced here, as for
+# covlib_forced). Its driver, tests/covso_driver.mojo, loads the library's
+# coverage build and calls covso_scale only: its report
+# ([coverage][tests][covso_driver]) holds the driver and covso_abi.mojo's
+# lines, those of covso_scale run and those of covso_unused not, and its gate
+# (census) counts them with the driver set aside.
+mojo_shared_lib(
+    name = "covso",
+    srcs = ["covso/covso_abi.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    exports = [
+        "covso_scale",
+        "covso_unused",
+    ],
+    gate_srcs = ["tests/covso_driver.mojo"],
+)
+
+cov_report_check(
+    name = "covso_report",
+    goldens = ["golden/covso_driver.xml"],
+    mode = "golden",
+    reports = [":covso[coverage][tests][covso_driver]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covso_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":3,"line_found":5,"line_bp":6000,',
+        '"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covso[coverage][gate][result]"],
     script = "report.sh",
 )
 
