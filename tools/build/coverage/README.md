@@ -599,7 +599,11 @@ pull request from a branch of this repository, and only for one whose base
 is `main` (`pull_request: branches: [main]` filters on the base): a pull
 request stacked on another branch gets no coverage run until it is
 retargeted to `main` and then pushed to (a retarget alone is an `edited`
-event, which the workflow does not listen for).
+event, which the workflow does not listen for). A pull request whose head
+commit predates the workflow (it has no `.github/ci/coverage_measure.sh`)
+is not measured: `measure` prints a notice to merge `main` into the branch
+and skips its later steps and the `post` job: `measure` is green with the
+notice, `post` is skipped, and no `coverage` check run is posted.
 
 Job `measure` (`contents: read`, and `id-token: write` for the farm
 connection) checks out the pull request's head commit with its history and

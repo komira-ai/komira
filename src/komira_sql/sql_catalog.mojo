@@ -177,23 +177,12 @@ struct SqlCatalog(Copyable, Movable):
     def table_of(self, name: String) raises -> CatalogTable:
         """The registered (name, schema, source) triple for `name`.
 
-        ★ THE CONVERGENCE POINT. SQL resolves a table name through `_find` and builds its leaf
-        from this triple; the EXCEL binder has the same arm, and it
-        reads the table through here rather than growing a second catalog with
-        the same three fields. So one `cat.add_parquet("ord", path, schema)`
-        registration serves both frontends and their scan leaves are the same
-        `LogicalPlan.scan_from_source` by construction — which is what makes a
-        cross-facade PLAN comparison a comparison of LOWERINGS.
-
-        ⚠ THE CONVERGENCE IS BY VALUE, NOT BY TYPE. The Excel binder stores the
-        triple in its own table type, field-for-field identical to
-        `CatalogTable` and deliberately a separate declaration: importing THIS
-        module into the module the SCALAR Excel evaluator imports reproduces an
-        AsyncRT compile wedge. Importing `CatalogTable` there to "clean that
-        up" brings the wedge back.
+        Looks `name` up through `_find`, the same lookup `build_scan` and
+        `schema_of` use, and raises `SQL bind error: unknown table '<name>'`
+        when no table is registered under it.
 
         Returns a COPY: `CatalogTable` is Copyable and the catalog keeps its
-        own, exactly as `build_scan` / `schema_of` already do."""
+        own, as `build_scan` and `schema_of` do."""
         var idx = self._find(name)
         if idx < 0:
             raise Error("SQL bind error: unknown table '" + name + "'")

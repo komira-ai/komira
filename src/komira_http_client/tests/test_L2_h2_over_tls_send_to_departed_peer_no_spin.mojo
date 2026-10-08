@@ -514,10 +514,10 @@ def test_s2n_send_answers_departed_peer_with_blocked_on_write() raises:
             # shim uses, over the live connection this frame owns; the payload
             # List and the stack Int32 out-param are both alive across it and
             # neither pointer escapes.
-            var rc = external_call["s2n_send", Int64](
+            var rc = external_call["komira_s2n_send", Int64](
                 raw, buf_ptr, Int64(_PROBE_PAYLOAD), blocked_ptr,
             )
-            var errtype = external_call["s2n_error_get_type", Int32](
+            var errtype = external_call["komira_s2n_error_get_type", Int32](
                 last_s2n_errno()
             )
             if p == 0:

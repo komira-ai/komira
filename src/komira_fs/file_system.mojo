@@ -304,17 +304,14 @@ trait FileSystem(Movable, Deinitable):
 
     # ---- Capability flag: SCHEME ----
     # The FS scheme code, BYTE-IDENTICAL to `komira_plan_expr.fs_descriptor_pod`
-    # `FS_SCHEME_*` and to the fs registry's `FsHandle.FS_*`:
+    # `FS_SCHEME_*` (this package cannot import it, so the default is a
+    # literal):
     #   FILE = 0, S3 = 1, GCS = 2, AZURE = 3.
     # Defaulted to FILE (local). Cloud conformers (S3Fs / GcsFs / AzureFs)
-    # override. This is the comptime discriminant the SDK's cloud
-    # `read_parquet[FS]` seam uses to pick the matching `FsHandle.from_<scheme>`
-    # arm (via `@parameter if FS.SCHEME == ...` + `rebind` to the FIXED-C arm
-    # type) when wrapping the live `fs` into the per-execution `FsRegistry`. The
-    # `FileSystem` trait cannot name `FsHandle` (it lives far above async), so
-    # the scheme is advertised here as a plain comptime tag and the wrap happens
-    # at the SDK seam where `FsHandle` is reachable. Resolves at comptime per
-    # monomorphized [FS]; no runtime cost.
+    # override. A plan names its source by this code (komira_source_url maps
+    # a URL's prefix to it before the plan is built); komira_source_url's
+    # test_source_scheme_agrees holds every conformer's SCHEME to that
+    # mapping. Resolves at comptime per monomorphized [FS]; no runtime cost.
     comptime SCHEME: UInt8 = 0
 
     # -----α — clone() for multi-file factory loops ----

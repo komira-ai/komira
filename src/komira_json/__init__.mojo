@@ -8,6 +8,9 @@ Modules:
   - parse.mojo : `parse_json_value` / `parse_json_bytes`, a strict
                  non-recursive parser with a nesting-depth limit
                  (`JSON_DEFAULT_MAX_DEPTH`, capped at `JSON_MAX_DEPTH`).
+  - duplicates.mojo : `refuse_duplicate_keys`, which raises if any object
+                 in a parsed value names a member twice (for formats such as
+                 JWS, JWT and JWK that require duplicates to be refused).
   - write.mojo : direct-byte writers into a `List[UInt8]`:
                  `write_json_string`, `write_json_null`, `write_json_bool`,
                  `write_i64_dec`, `write_u64_dec`, `write_f64_dtoa`.
@@ -29,7 +32,8 @@ choices (see parse.mojo for the full list):
     explicit stack rather than recursing, but destroying, copying and
     serializing a `JsonValue` recurse once per nesting level; the cap keeps
     a parsed tree shallow enough for those;
-  - duplicate object keys are kept in order; `get` returns the first.
+  - duplicate object keys are kept in order; `get` returns the first
+    (`refuse_duplicate_keys` refuses them after the parse).
 
 Every error raised by this package starts with `JsonError:`; a parse error
 ends with the 1-based line and byte column where it was found.
@@ -55,6 +59,7 @@ from .parse import (
     parse_json_value,
     parse_json_bytes,
 )
+from .duplicates import refuse_duplicate_keys
 from .write import (
     write_json_string,
     write_json_null,

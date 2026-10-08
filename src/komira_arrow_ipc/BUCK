@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
 
 # Arrow IPC framing, encoders and decoders, the C data and stream interfaces, tensor columns, file chunk reads.
 mojo_library(
@@ -18,8 +18,11 @@ mojo_library(
         "tests/test_arrow_c_data_phase_c.mojo",
         "tests/test_arrow_c_data_phase_e.mojo",
         "tests/test_arrow_c_data_stream.mojo",
+        "tests/test_arrow_c_stream_export_arms.mojo",
         "tests/test_arrow_c_stream_export_independence.mojo",
         "tests/test_arrow_c_stream_import_foreign_release.mojo",
+        "tests/test_arrow_c_stream_import_refusals.mojo",
+        "tests/test_arrow_c_stream_nested_round_trip.mojo",
         "tests/test_arrow_coverage_d_large_string_binary.mojo",
         "tests/test_arrow_ipc_field_dictionary_encoding.mojo",
         "tests/test_arrow_ipc_flatbuf_absent_field_defaults.mojo",
@@ -123,6 +126,41 @@ mojo_binary(
     srcs = ["tests/test_large_writes.mojo"],
     deps = [
         ":komira_arrow_ipc",
+        "//src/komira_libc:komira_libc",
+    ],
+)
+
+# The Arrow C Stream Interface across a real dynamic-library boundary. The
+# library exports a stream of six column types (int64, float64, nullable utf8,
+# large utf8, dictionary, decimal128) and imports a caller's stream; its gate,
+# tests/c_abi/arrow_c_abi_driver.mojo, has no dependency and shares no type
+# with this package: it dlopens the library, reads the exported chunks after
+# releasing their stream, checks every buffer against values written out by
+# hand, and counts the release calls on a stream it produces itself. A second
+# gate, tests/c_abi/arrow_c_abi_error_driver.mojo, drives the error paths:
+# get_schema/get_next failing in each direction, with the error text read
+# through get_last_error.
+mojo_shared_lib(
+    name = "arrow_c_abi_probe",
+    srcs = ["tests/c_abi/arrow_c_abi_probe.mojo"],
+    exports = [
+        "probe_export_failing_stream",
+        "probe_export_stream",
+        "probe_import_stream",
+    ],
+    exports_exact = True,
+    gate_srcs = [
+        "tests/c_abi/arrow_c_abi_driver.mojo",
+        "tests/c_abi/arrow_c_abi_error_driver.mojo",
+    ],
+    deps = [
+        ":komira_arrow_ipc",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_counters:komira_counters",
         "//src/komira_libc:komira_libc",
     ],
 )
