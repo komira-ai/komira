@@ -20,8 +20,17 @@
 #      hosts; source headers the client writes itself; an STS refusal never
 #      reaching IAM Credentials.
 #   §4 what the file carries reaches the wire: its subject_token_type (one
-#      that is not jwt) and its token_lifetime_seconds; a JSON subject's
-#      refusal quotes neither the source's bytes nor the field's name.
+#      that is not jwt), its token_lifetime_seconds, and its token_url and
+#      impersonation URL (host and path each other than the default); a JSON
+#      subject's refusal quotes neither the source's bytes nor the field's
+#      name.
+#
+# The URL test pins the HOST as well as the path without needing DNS: the
+# file names IP literals (127.0.0.1 for STS, 127.0.0.2 for IAM Credentials),
+# which the client parses instead of resolving, so the Host header and the
+# request line are both the file's. A Google host other than the default
+# would have to resolve on the farm, which this file does not depend on for
+# that claim.
 #
 # ⛔ EVERY ABSENCE HAS A POSITIVE CONTROL. "IAM Credentials was not dialed"
 # (no impersonation URL) is paired with the impersonation case of the same
@@ -581,6 +590,32 @@ def _with_header(name: String) -> String:
     )
 
 
+def _with_header_value(json_value: String) -> String:
+    """A url source with one header `X-A` whose value is `json_value`, as
+    JSON string text (escapes intact)."""
+    return _file_json(
+        String('{"url":"https://token.example.com/","headers":{"X-A":"')
+        + json_value + '"}}',
+        False,
+    )
+
+
+def test_header_values_accept_a_tab_and_refuse_del() raises:
+    """A value may hold a tab (RFC 9110 field content allows HTAB) and the
+    value read is the file's, tab included; DEL (0x7f) is a control byte and
+    is refused without quoting the value. Both sides of the one check."""
+    var ok = parse_external_account(_with_header_value(String("a\\tb")))
+    assert_equal(len(ok.source_header_values), 1)
+    assert_equal(ok.source_header_values[0], "a\tb")
+    var msg = _refusal(_with_header_value(String("DEL-VALUE\\u007f")))
+    assert_equal(
+        msg,
+        String(_P_TEXT) + "names a credential_source header whose value holds"
+        " a control byte",
+    )
+    assert_false("DEL-VALUE" in msg, msg)
+
+
 def test_headers_the_client_writes_itself_are_refused() raises:
     """A file cannot set Host, Content-Length, Transfer-Encoding or
     Connection, in any case. The control: a name that only contains one of
@@ -662,6 +697,37 @@ def test_token_lifetime_outside_the_api_range_is_refused() raises:
     )
 
 
+comptime PINNED_STS_URL = "https://127.0.0.1/v1beta/token"
+comptime PINNED_IMP_URL = (
+    "https://127.0.0.2/v1/projects/-/serviceAccounts/"
+    "deployer@demo-project.example:generateAccessToken"
+)
+
+
+def test_the_files_token_url_and_impersonation_url_reach_the_wire() raises:
+    """The exchange goes to the FILE's token_url and the impersonation to
+    the FILE's URL, host and path each: neither is the default (sts uses
+    /v1beta/token, not /v1/token; both hosts are IP literals, see the
+    header). A fetcher that used the default host or path for either leg
+    writes a different request line or Host header."""
+    var text = _file_json(_file_source(), True).replace(
+        "https://sts.googleapis.com/v1/token", PINNED_STS_URL
+    ).replace(String(IMP_URL), String(PINNED_IMP_URL))
+    assert_true(String(PINNED_STS_URL) in text, text)
+    assert_true(String(PINNED_IMP_URL) in text, text)
+    var caps = Caps()
+    var f = _fetcher(text, caps, List[UInt8]())
+    var tok = f.fetch(Int64(NOW_MS))
+    var sts = _text(caps.sts)
+    assert_true(sts.startswith("POST /v1beta/token HTTP/1.1\r\n"), sts)
+    assert_equal(_header_value(sts, String("host")), "127.0.0.1")
+    assert_equal(_body_of(sts), _sts_form(String(CLOUD_FORM)))
+    var iam = _text(caps.iam)
+    assert_true(iam.startswith(String("POST ") + IMP_PATH + " HTTP/1.1\r\n"), iam)
+    assert_equal(_header_value(iam, String("host")), "127.0.0.2")
+    assert_equal(tok.token, IMPERSONATED)
+
+
 def _bytes(s: String) -> List[UInt8]:
     var out = List[UInt8]()
     out.extend(Span(s.as_bytes()))
@@ -706,9 +772,11 @@ def main() raises:
     test_a_refused_exchange_never_dials_iam_credentials()
     test_required_fields_empty_or_not_strings_are_refused_by_name()
     test_an_http_impersonation_url_is_refused()
+    test_header_values_accept_a_tab_and_refuse_del()
     test_headers_the_client_writes_itself_are_refused()
     test_the_files_subject_token_type_reaches_sts()
     test_the_files_token_lifetime_reaches_generate_access_token()
+    test_the_files_token_url_and_impersonation_url_reach_the_wire()
     test_token_lifetime_outside_the_api_range_is_refused()
     test_a_json_subject_refusal_quotes_no_field_name()
     print("OK")

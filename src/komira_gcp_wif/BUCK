@@ -36,7 +36,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # token and no body byte. test_external_account runs the external_account
 # flow over ScriptedConnector: a file-sourced and a URL-sourced subject, each
 # with and without impersonation, the whole STS and generateAccessToken bodies
-# against hand-written text, and each refused file naming its field.
+# against hand-written text, the file's own token_url and impersonation URL
+# on the wire (IP-literal hosts and a non-default path, so no DNS), and each
+# refused file naming its field.
 # test_env_source_only scans the package's own
 # sources, staged as its data, for any environment read.
 mojo_library(
