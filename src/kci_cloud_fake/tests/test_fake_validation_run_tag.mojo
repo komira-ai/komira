@@ -184,8 +184,9 @@ def _full(
     names: Bool = False,
 ) -> String:
     """A public service with a `uses` grant, an internal service reading its
-    URL, a scheduled job running as an account, an account, a grant
-    resource and a DELETE bucket. `kept` adds a bucket with the default
+    URL (each keeping one instance, as onprem requires until Q21), a
+    container job running as an account, an account, a grant resource, a
+    worker with its own identity and a DELETE bucket. `kept` adds a bucket with the default
     retention (KEEP); `table` adds `_TABLE`; `messaging` adds `_MESSAGING`;
     `secret` adds a secret with the default retention (KEEP); `names` adds
     `_NAMES`.
@@ -199,19 +200,20 @@ def _full(
     return (
         String('{"resource":[')
         + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"port":8080,"internal":{},')
-        + String('"env":{"API_URL":{"ref":{"resource":"api","standard":"URL"}}}},')
+        + String('"scale":{"min":1,"max":2},"env":{"API_URL":{"ref":{"resource":"api","standard":"URL"}}}},')
         + web_uses
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":')
         + api_port
         + String(",")
         + exposure
-        + String("},")
+        + String(',"scale":{"min":1,"max":3}},')
         + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},')
-        + String('{"id":"nightly","job":{"image":{"digest":"sha256:b2"},')
-        + String('"schedule":{"cron":"0 3 * * *","timezone":"UTC"},"runAs":{"resource":"runner"}}},')
+        + String('{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"},')
+        + String('"runAs":{"resource":"runner"}}},')
         + String('{"id":"runner","serviceAccount":{}},')
         + String('{"id":"see","grant":{"principal":{"resource":"web"},')
         + String('"target":{"resource":"runner"},"access":"DESCRIBE"}},')
+        + String('{"id":"relay","worker":{"image":{"digest":"sha256:d4"},"command":["/bin/relay"],"replicas":2}},')
         + String('{"id":"store","retention":"DELETE","bucket":{"versioning":true}}')
         + (String(',{"id":"vault","bucket":{}}') if kept else String(""))
         + ((String(",") + String(_TABLE)) if table else String(""))

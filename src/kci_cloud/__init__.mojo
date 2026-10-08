@@ -20,6 +20,12 @@ interface. This package names no cloud:
                        bootstrap resources, the label rule, `list_owned`,
                        `whoami`, `trust_render` / `trust_check`; typed
                        absences (ABSENT_BY_DESIGN / NOT_YET) and `Finding`.
+  * workload.mojo    — the three workload types (service, container job,
+                       worker) as one view of their shared container fields
+                       and identity.
+  * compute.mojo     — the rules of the workloads: their graph findings
+                       (image, run_as, env, command, a worker's replicas)
+                       and a worker's versioned replicas default.
   * grants.mojo      — who a resource runs as (its identity owner), and
                        every grant edge it lowers (`uses` lines, a grant
                        resource, the implicit `cell LOGS WRITE`), each
@@ -79,7 +85,8 @@ from kci_cloud.catalog import (
     PORTABLE,
     CLOUD_BOUND,
     FIELD_SERVICE,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
+    FIELD_WORKER,
     FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
@@ -179,6 +186,14 @@ from kci_cloud.data import (
     table_key_text,
 )
 from kci_cloud.feed import Feed, feeds_into, feeds_of, field_of_id
+from kci_cloud.workload import Workload, is_workload, workload_of
+from kci_cloud.compute import (
+    V1_IMAGE_PLATFORM,
+    WORKER_REPLICAS_DEFAULT,
+    image_platform,
+    worker_replicas,
+    workload_findings,
+)
 from kci_cloud.secrets import secret_env_findings, secret_findings, secret_of
 from kci_cloud.values import check_value, check_value_ref
 from kci_cloud.dns import (
@@ -234,11 +249,9 @@ from kci_cloud.validate import (
     validate_for,
     refusal_text,
     id_problem,
-    image_platform,
     node_role,
     role_budget_findings,
     ID_MAX_BYTES,
-    V1_IMAGE_PLATFORM,
 )
 from kci_cloud.deploy import (
     ApplyOutcome,

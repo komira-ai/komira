@@ -43,9 +43,11 @@
 #     (feed.mojo, the list's subscriptions as (subscription, topic, queue)):
 #     `check` and `lower` are handed them with every resource, so a cloud
 #     whose queue IS its subscription to a topic lowers the queue from its
-#     feed, and refuses as a limit what it cannot host. A service, a job
-#     and a service account lower the role `<id>/identity` (turned off for a
-#     service or a job with `run_as`): a grant's principal is that node. `realize` turns one lowered node into the engine node,
+#     feed, and refuses as a limit what it cannot host. A workload (a
+#     service, a container job, a worker) and a service account lower the
+#     role `<id>/identity` (turned off for a workload with `run_as`): a
+#     grant's principal is that node. `realize` turns one lowered node into
+#     the engine node,
 #     and must keep its id, owner, wanted and retention.
 #   * Every object carries the non-identity retention mark
 #     `kci-retention=<retain|delete>` (komira_validation_run's, written by

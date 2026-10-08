@@ -10,6 +10,8 @@ export_file(name = "retired_names.sh", visibility = ["PUBLIC"])
 
 export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
+export_file(name = "surface_capability_matrix.sh", visibility = ["PUBLIC"])
+
 export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
 
 # The reader of lint kind pointer_lint (lint.sh; the rule is pointer_lint in defs.bzl).
@@ -39,6 +41,6 @@ tar_member(
 # The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "test_weld.sh"],
+    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "surface_capability_matrix.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
 )
