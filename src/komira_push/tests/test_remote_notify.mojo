@@ -206,6 +206,32 @@ def test_a_result_that_balances_only_in_32_bits_is_a_failure() raises:
     )
 
 
+def test_a_result_that_balances_after_any_32_bit_pairing_is_a_failure() raises:
+    # Every count is 2^31. Any two of accepted, dead, transient wrap to 0 in
+    # UInt32, and the full UInt32 sum (3 * 2^31 mod 2^32) is 2^31 = sent, so
+    # a sum that adds any pair, or all three, before widening balances. The
+    # UInt64 sum is 6442450944, which is not sent.
+    var spy = SharedScriptedTransport()
+    var port = _port(
+        202,
+        String(
+            '{"sent":2147483648,"accepted":2147483648,"dead":2147483648,'
+            '"transient":2147483648}'
+        ),
+        spy,
+    )
+    var out = port.notify(_notify_request(String("user-1")))
+    assert_false(out.ok)
+    assert_equal(out.status, 202)
+    assert_equal(
+        out.reason,
+        String(
+            "komira_push: the notify result does not balance"
+            " (accepted + dead + transient != sent)"
+        ),
+    )
+
+
 def test_an_unreadable_result_is_a_failure() raises:
     var spy = SharedScriptedTransport()
     var port = _port(202, String(SECRET_BODY), spy)
@@ -295,6 +321,30 @@ def test_a_refused_registration_sends_nothing() raises:
     assert_equal(spy.call_count(), 0)
 
 
+def test_a_registration_with_a_bad_device_sends_nothing() raises:
+    # A valid on_behalf_of and an FCM device with no token: the refusal must
+    # come from the device half of the shape check.
+    var spy = SharedScriptedTransport()
+    var port = _port(
+        200,
+        String('{"deviceId":"dev-9","transport":"DEVICE_TRANSPORT_FCM"}'),
+        spy,
+    )
+    var request = _register_request()
+    request.device = Optional[DeviceSubscription](
+        DeviceSubscription(
+            DeviceTransport(DeviceTransport.DEVICE_TRANSPORT_FCM),
+            Optional[WebPushSubscription](None),
+            String(""),
+        )
+    )
+    var out = port.register_device(request)
+    assert_false(out.ok)
+    assert_equal(out.status, 0)
+    assert_equal(out.reason, String("komira_push: an FCM device has no token"))
+    assert_equal(spy.call_count(), 0)
+
+
 def _url_err(url: String) -> String:
     try:
         return String("ok ") + check_notify_base_url(url)
@@ -340,6 +390,7 @@ def main() raises:
     test_every_other_register_status_is_a_failure()
     test_an_unbalanced_result_is_a_failure()
     test_a_result_that_balances_only_in_32_bits_is_a_failure()
+    test_a_result_that_balances_after_any_32_bit_pairing_is_a_failure()
     test_an_unreadable_result_is_a_failure()
     test_a_newer_result_member_is_skipped()
     test_an_empty_device_id_is_a_failure()
@@ -347,5 +398,6 @@ def main() raises:
     test_a_missing_token_sends_nothing()
     test_a_refused_request_sends_nothing()
     test_a_refused_registration_sends_nothing()
+    test_a_registration_with_a_bad_device_sends_nothing()
     test_the_base_url_rules()
     print("PASS komira_push remote notify")
