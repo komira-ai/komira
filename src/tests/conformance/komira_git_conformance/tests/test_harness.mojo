@@ -18,13 +18,15 @@
 #     empty line read as data, band 3 accepted.
 #   * test_graph: an unknown object called a commit, parents of an unknown
 #     object raising instead of being none, a tag of a tag peeled one step
-#     only, descends_from not walking parents or not reflexive.
+#     only, descends_from not walking parents or not reflexive, a merge
+#     walked through its first parent only or its last parent only (a push
+#     of a merge whose second parent is the old tip is a fast-forward).
 #   * test_expect_bytes: the offset or either side of the refusal wrong, the
 #     60-byte window off by one, a `got` longer than git's bytes read past
 #     them or a start past their end not clamped, show() escaping a
 #     printable byte or not escaping 0x7f / 0x1f.
 #   * test_scenario_files: a scenario with no connection loaded, a refs.txt
-#     line without three fields accepted, HEAD invented when head.txt is
+#     line with two or with four fields accepted, HEAD invented when head.txt is
 #     absent. The scenarios are fixtures/ (BUCK maps them under
 #     transcripts/), not capture.sh output.
 # =============================================================================
@@ -158,14 +160,24 @@ def test_graph() raises:
     var t2 = _id("b")
     var blob = _id("c")
     var unknown = _id("d")
+    # c4 is a root on a side branch; c3 merges c4 (first parent) and c2.
+    var c3 = _id("3")
+    var c4 = _id("4")
     var objects: List[String] = [
         c1.to_hex() + " commit",
         c2.to_hex() + " commit",
+        c3.to_hex() + " commit",
+        c4.to_hex() + " commit",
         t1.to_hex() + " tag",
         t2.to_hex() + " tag",
         blob.to_hex() + " blob",
     ]
-    var parents: List[String] = [c2.to_hex() + " " + c1.to_hex(), c1.to_hex()]
+    var parents: List[String] = [
+        c2.to_hex() + " " + c1.to_hex(),
+        c1.to_hex(),
+        c3.to_hex() + " " + c4.to_hex() + " " + c2.to_hex(),
+        c4.to_hex(),
+    ]
     # t2 tags t1, which tags c2.
     var tags: List[String] = [t2.to_hex() + " " + t1.to_hex(), t1.to_hex() + " " + c2.to_hex()]
     var g = TranscriptGraph(objects, parents, tags)
@@ -187,6 +199,14 @@ def test_graph() raises:
     assert_true(g.descends_from(c2, c2))
     assert_false(g.descends_from(c1, c2))
     assert_false(g.descends_from(unknown, c1))
+    # A merge: both parents, in order; each line of history reached.
+    var mps = g.parents(c3)
+    assert_equal(len(mps), 2)
+    assert_true(mps[0] == c4)
+    assert_true(mps[1] == c2)
+    assert_true(g.descends_from(c3, c4))
+    assert_true(g.descends_from(c3, c1))
+    assert_false(g.descends_from(c4, c1))
 
 
 def _bytes_refusal(
@@ -257,6 +277,16 @@ def test_scenario_files() raises:
         assert_equal(
             String(e),
             "transcripts: bad refs.txt line: 1111111111111111111111111111111111111111 refs/heads/main",
+        )
+    assert_true(refused)
+    refused = False
+    try:
+        _ = Scenario("bad_refs_four")
+    except e:
+        refused = True
+        assert_equal(
+            String(e),
+            "transcripts: bad refs.txt line: 1111111111111111111111111111111111111111 refs/heads/main - extra",
         )
     assert_true(refused)
     var sc = Scenario("no_head")
