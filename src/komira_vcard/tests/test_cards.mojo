@@ -26,6 +26,15 @@
 #                            a leading SPACE is data, not a fold (unfolding
 #                            first joined "abc=" and " 2Bx" into "abc=2Bx"
 #                            and decoded "+", and refused "Long=" + " note").
+#   qp_param_fold            a fold inside the parameters of a QP line is
+#                            not a soft break of the value: right after a
+#                            parameter's "=" and mid-name before a "=3D"
+#                            value (the "rebuild folds before the value
+#                            start" mutant aborts or splices parameter text).
+#   qp_blank_after_soft_break  a blank line after a soft break ends the
+#                            value: NOTE is "abc" and the next TEL survives
+#                            (joining the next logical line read the TEL
+#                            into NOTE as "abcTEL:123" and lost it).
 #   qp_join_limit            a value joined over soft breaks is refused at
 #                            max_line_octets though each physical line is
 #                            under it (the "no cap on the join" mutant).
@@ -238,6 +247,38 @@ def test_qp_soft_break_space() raises:
     print("  test_qp_soft_break_space PASS")
 
 
+def test_qp_param_fold() raises:
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:3.0\r\n"
+            "NOTE;ENCODING=\r\n QUOTED-PRINTABLE:abc\r\nEND:VCARD\r\n"
+        ),
+        "value=[abc]",
+    )
+    assert_equal(
+        _value_or_error(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;ENC\r\n ODING=QUOTED-PRINTABLE:abc=3Dx\r\nEND:VCARD\r\n"
+        ),
+        "value=[abc=x]",
+    )
+    print("  test_qp_param_fold PASS")
+
+
+def test_qp_blank_after_soft_break() raises:
+    var cards = parse_vcards(
+        String(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;QUOTED-PRINTABLE:abc=\r\n\r\nTEL:123\r\nEND:VCARD\r\n"
+        ).as_bytes()
+    )
+    assert_equal(len(cards[0].lines), 2)
+    assert_equal(cards[0].lines[0].text, "NOTE:abc")
+    assert_equal(cards[0].lines[1].text, "TEL:123")
+    assert_equal(cards[0].lines[1].line_number, 5)
+    print("  test_qp_blank_after_soft_break PASS")
+
+
 def test_qp_join_limit() raises:
     # Each physical line is under 30 octets; the joined value is 36.
     assert_equal(
@@ -262,5 +303,7 @@ def main() raises:
     test_invalid_utf8()
     test_quoted_printable()
     test_qp_soft_break_space()
+    test_qp_blank_after_soft_break()
+    test_qp_param_fold()
     test_qp_join_limit()
     print("ALL TESTS PASS")

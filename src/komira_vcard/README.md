@@ -9,7 +9,8 @@ and 2.1, and writes vCard 4.0.
   than 2.1, 3.0 or 4.0, and card `max_cards + 1` (10000 by default).
   vCard 2.1 quoted-printable values (with soft line breaks, in UTF-8,
   US-ASCII or ISO-8859-1) are decoded; the line after a soft break is read
-  as written, a leading SPACE or HTAB included.
+  as written, a leading SPACE or HTAB included, and a blank line after a
+  soft break ends the value.
 - `parse_contacts(bytes, limits)` maps each card to a `Contact`: KIND, UID,
   FN, N, NICKNAME, ORG, TITLE, EMAIL, TEL, ADR, URL, BDAY, NOTE, MEMBER and
   Apple's X-ABLabel, guided by RFC 9555's conversion rules for those

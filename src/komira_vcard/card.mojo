@@ -21,8 +21,11 @@
 #   back unfolded as `text`. CHARSET is removed from every line: the input is
 #   UTF-8 by then (unfold refused anything else).
 #   The line after a soft break is read as written: if it starts with SPACE
-#   or HTAB, that octet is data, as vCard 2.1 readers take it, and not a
-#   fold (unfold's record of the fold puts it back). The joined value is
+#   or HTAB, that octet is data, not a fold (unfold's record of the fold puts
+#   it back). Android's vCard 2.1 reader keeps it; vinnie (ez-vcard) drops
+#   it; this follows Android. A soft break is joined only to the physical
+#   line right after it: a blank line (or the end of input) ends the value
+#   and the "=" is dropped. The joined value is
 #   bounded by `max_line_octets`, checked before each line is appended.
 #
 # A card keeps every other line in order, lexed (`line`) and as written
@@ -299,12 +302,19 @@ def parse_vcards(
                 n,
                 limits.max_line_octets,
             )
-            while (
-                len(value) > 0
-                and value[len(value) - 1] == 61
-                and i < len(logical)
-            ):
+            # A trailing "=" is a soft break: the next logical line is joined
+            # only if it starts on the physical line right after this one
+            # ends. A skipped blank line (or the end of input) ends the
+            # value, and the "=" is dropped as a break with nothing after it.
+            while len(value) > 0 and value[len(value) - 1] == 61:
                 _ = value.pop()
+                ref prev = logical[i - 1]
+                if (
+                    i >= len(logical)
+                    or logical[i].line_number
+                    != prev.line_number + len(prev.folds) + 1
+                ):
+                    break
                 _append_physical(
                     value, logical[i], 0, n, limits.max_line_octets
                 )
