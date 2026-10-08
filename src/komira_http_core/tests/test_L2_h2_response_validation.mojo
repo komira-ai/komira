@@ -13,13 +13,18 @@
 #                      256 octets against a literal oracle.
 #   * field name       RFC 9113 §8.2.1: non-empty lowercase token.
 #   * field value      RFC 9113 §8.2.1: no NUL, LF, CR; every other octet of
-#                      0..127 accepted (the leading/trailing SP/HTAB clause is
-#                      out of scope by the module's own statement).
+#                      0..127 accepted, and obs-text (octets >= 0x80) too (the
+#                      leading/trailing SP/HTAB clause is out of scope by the
+#                      module's own statement).
 #   * pseudo name      RFC 9113 §8.3: a name whose first octet is ':'.
-#   * te               RFC 9113 §8.2.2: exactly the token "trailers", folded
-#                      for case (RFC 9110 §10.1.4 tokens are case-insensitive).
+#   * te               RFC 9113 §8.2.2: in a request, exactly the token
+#                      "trailers", folded for case (the ABNF quoted literal
+#                      "trailers" is case-insensitive, RFC 5234 §2.3). In a
+#                      response the code accepts te: trailers, a deviation
+#                      from §8.2.2 (request-only) pinned on purpose (#873).
 #   * conn-specific    RFC 9113 §8.2.2's five names, and nothing else.
-#   * :status          RFC 9113 §8.3.2: exactly three ASCII digits.
+#   * :status          RFC 9113 §8.3.2 requires it; RFC 9110 §15 gives the
+#                      three-digit form.
 #   * content-length   RFC 9110 §8.6: 1*DIGIT, at most 18 digits (no Int64
 #                      overflow).
 #   * no-content       RFC 9113 §8.1.1 -> RFC 9110 §6.4.1: 1xx, 204, 304, and
@@ -265,6 +270,16 @@ def test_field_value_rules() raises:
     # The module states it does not enforce §8.2.1's leading/trailing
     # SP/HTAB clause; pin that scope so a change to it is deliberate.
     assert_true(h2_field_value_is_valid(String(" padded\t")), "OWS kept")
+    # obs-text (RFC 9110 §5.5): octets 0x80..0xFF are not among the three, so
+    # they are accepted. chr(0xE9) is U+00E9, which String stores as the UTF-8
+    # octets C3 A9; pin that both octets are >= 0x80 so the case tests what it
+    # claims (a refusal of c > 0x7F goes red here).
+    var obs = String("caf") + chr(0xE9)
+    var ob = obs.as_bytes()
+    assert_equal(len(ob), 5, "caf + C3 A9")
+    assert_equal(Int(ob[3]), 0xC3)
+    assert_equal(Int(ob[4]), 0xA9)
+    assert_true(h2_field_value_is_valid(obs), "obs-text accepted")
 
 
 def test_pseudo_name() raises:
@@ -277,8 +292,10 @@ def test_pseudo_name() raises:
 
 
 def test_te_value() raises:
-    # RFC 9113 §8.2.2: te MUST NOT carry any value other than "trailers";
-    # RFC 9110 §10.1.4 makes the token case-insensitive.
+    # RFC 9113 §8.2.2: te is allowed only in a request, and there MUST NOT
+    # carry any value other than "trailers". The case fold comes from the
+    # ABNF quoted literal "trailers", which is case-insensitive (RFC 5234
+    # §2.3).
     assert_true(h2_te_value_is_trailers(String("trailers")))
     assert_true(h2_te_value_is_trailers(String("TRAILERS")))
     assert_true(h2_te_value_is_trailers(String("Trailers")))
@@ -321,8 +338,8 @@ def test_connection_specific_names() raises:
 
 
 def test_status_code_of() raises:
-    # RFC 9113 §8.3.2: :status is exactly three ASCII digits; anything else
-    # is -1, never a partial value.
+    # RFC 9110 §15: a status code is three digits (RFC 9113 §8.3.2 carries it
+    # in :status); anything else is -1, never a partial value.
     assert_equal(h2_status_code_of(String("200")), 200)
     assert_equal(h2_status_code_of(String("103")), 103)
     assert_equal(h2_status_code_of(String("451")), 451)
@@ -403,11 +420,12 @@ def test_head_well_formed() raises:
     assert_equal(v.status, 200)
     assert_equal(Int(v.content_length), -1, "absent content-length")
 
-    # Pseudo first, then regular fields, te: trailers, a content-length.
+    # Pseudo first, then a regular field with an obs-text value, then a
+    # content-length.
     var w = h2_validate_response_head(
         _block3(
             _h(":status", "404"),
-            _h("te", "Trailers"),
+            _h("x-name", String("caf") + chr(0xE9)),
             _h("content-length", "17"),
         )
     )
@@ -423,8 +441,24 @@ def test_head_well_formed() raises:
     assert_equal(x.status, 103)
 
 
+def test_head_te_trailers_accepted_deviation() raises:
+    # DEVIATION, pinned on purpose: RFC 9113 §8.2.2 allows te only in a
+    # request, so a response carrying te is malformed. The code applies only
+    # the request-side value rule and accepts te: trailers in a response
+    # (komira-ai/komira#873). A fix flips this test to a refusal on purpose.
+    var v = h2_validate_response_head(
+        _block2(_h(":status", "200"), _h("te", "trailers"))
+    )
+    assert_equal(Int(v.reason_code), Int(H2_MALFORMED_OK), "te in a response")
+    assert_equal(v.status, 200)
+    var w = h2_validate_response_head(
+        _block2(_h(":status", "200"), _h("te", "Trailers"))
+    )
+    assert_equal(Int(w.reason_code), Int(H2_MALFORMED_OK), "te folded")
+
+
 def test_head_status_required_and_exact() raises:
-    # RFC 9113 §8.3.2: :status is REQUIRED and is exactly three digits.
+    # RFC 9113 §8.3.2: :status is REQUIRED; RFC 9110 §15: three digits.
     _assert_head(List[HpackHeader](), H2_MALFORMED_NO_STATUS, "empty block")
     _assert_head(
         _block1(_h("content-type", "text/plain")),
@@ -673,6 +707,8 @@ def main() raises:
     print(" informational_range PASS")
     test_head_well_formed()
     print(" head_well_formed PASS")
+    test_head_te_trailers_accepted_deviation()
+    print(" head_te_trailers_accepted_deviation PASS")
     test_head_status_required_and_exact()
     print(" head_status_required_and_exact PASS")
     test_head_pseudo_rules()
@@ -685,4 +721,4 @@ def main() raises:
     print(" head_content_length PASS")
     test_trailers()
     print(" trailers PASS")
-    print("test_L2_h2_response_validation: ALL 20 TESTS PASS")
+    print("test_L2_h2_response_validation: ALL 21 TESTS PASS")
