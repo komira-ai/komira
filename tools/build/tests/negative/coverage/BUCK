@@ -735,10 +735,11 @@ cov_branch_dir(
 ]
 
 # A cov_branch_run.sh copy whose merge leaves out the test's `main`: the
-# profile does not hold a function of the bitcode, as a profile of other
-# bitcode would not, and applying it would read that function as never run.
-# RED: tests//negative/coverage:branchmissing[coverage][branch_ir][test_one],
-# "no profile data available for function".
+# profile holds no record of a function the instrumented binary links (a run
+# writes one for each, ran or not), as a profile of another binary would
+# not, and applying it would read that function as never run. RED:
+# tests//negative/coverage:branchmissing[coverage][branch_ir][test_one],
+# "a run writes the record of every function its binary links".
 cov_plant(
     name = "branchmissing_run_sh",
     expr = "s|\"$PD\" merge -o|\"$PD\" merge --no-function=main -o|",
@@ -750,6 +751,63 @@ cov_branch_dir(
     name = "branchmissing_branch",
     exec_compatible_with = LINUX_X86_64,
     run_script = ":branchmissing_run_sh",
+)
+
+# A cov_branch_annotate.sh copy that internalizes the bitcode before applying
+# the profile: `main` becomes a local function, whose profile name is not
+# the one the binary's run wrote, so the bitcode the profile is applied to
+# is not the one the binary was made from (as other bitcode would be), and
+# LLVM finds one function of the profile fewer in it. RED:
+# tests//negative/coverage:branchinternal[coverage][branch_ir][test_one],
+# "the binary that wrote it was not made from this bitcode".
+cov_plant(
+    name = "branchinternal_annotate_sh",
+    expr = "s|\"--lto-newpm-passes=pgo-instr-use\"|\"--lto-newpm-passes=internalize,pgo-instr-use\"|",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchinternal_branch",
+    annotate_script = ":branchinternal_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
+)
+
+# A cov_branch_annotate.sh copy whose section-name pipeline carries about
+# 1 MB more after each name: the reader that cuts the name must read all of
+# it, or its writer dies of SIGPIPE (exit 141 under pipefail; a race at 16
+# bytes, as seen in remote runs with `head -n 1`, certain here). GREEN:
+# tests//negative/coverage:branchwide[coverage][branch_ir][test_one].
+cov_plant(
+    name = "branchwide_annotate_sh",
+    expr = "s#count=16 2>/dev/null |#count=16 2>/dev/null | { cat; awk 'BEGIN { while (n++ < 40000) print \"padding padding padding\" }'; } |#",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchwide_branch",
+    annotate_script = ":branchwide_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
+)
+
+# The branchweights copy with its branch-weights check reading for a string
+# no bitcode holds: the bitcode the annotation reads holds entry counts
+# (`function_entry_count`) before the profile is applied, which the
+# entry-count check would count as functions found in the profile. RED:
+# tests//negative/coverage:branchentry[coverage][branch_ir][test_one],
+# "already holds function entry counts".
+cov_plant(
+    name = "branchentry_annotate_sh",
+    expr = "s|^# 0\\. No branch weights before.*$|\"$LLD\" -flavor gnu -r -m elf_x86_64 \"$BC\" -o \"$K/w.bc\" --lto-O0 --plugin-opt=emit-llvm --lto-newpm-passes=pgo-instr-use -mllvm \"-pgo-test-profile-file=$PROF\" \\&\\& BC=\"$K/w.bc\"|; s|grep -q -F branch_weights \"$BC\"|grep -q -F branch_weights_unread \"$BC\"|",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchentry_branch",
+    annotate_script = ":branchentry_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
 )
 
 # A cov_branch_annotate.sh copy that first applies the profile and writes
@@ -784,7 +842,7 @@ cov_branch_dir(
         import_name = "noop",
         test_srcs = ["tests/test_one.mojo"],
     )
-    for name in ("branchmissing", "branchweights")
+    for name in ("branchentry", "branchinternal", "branchmissing", "branchweights", "branchwide")
 ]
 
 # A helper declared @always_inline("nodebug"): its `while` carries the

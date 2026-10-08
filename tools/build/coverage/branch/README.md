@@ -33,7 +33,7 @@ and they are built when asked for:
 
 | target | what |
 |---|---|
-| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, [`cov_branch_run.sh`](cov_branch_run.sh) with `llvm/` (`llvm-profdata`) and `raw_version`, the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/`; `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
+| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, [`cov_branch_run.sh`](cov_branch_run.sh) with `llvm/` (`llvm-profdata`) and `raw_version`, the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
 | `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_andor.zig`](cov_branch_andor.zig), [`cov_branch_source.zig`](cov_branch_source.zig), [`cov_branch_ir.zig`](cov_branch_ir.zig) and [`cov_branch_records.zig`](cov_branch_records.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by `:cov_branch_classify_cases` ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh) over [`fixtures/`](fixtures)), which run as a build action: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
 | `:cov_branch_link.sh`, `:cov_branch_run.sh`, `:cov_branch_annotate.sh` | the scripts, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
 
@@ -43,7 +43,7 @@ sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
 
 | sub-target | action category | output | what it does |
 |---|---|---|---|
-| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables` against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
+| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables`, with the same `-D` arguments (the library's `test_assert_level` and `test_defines`), against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
 | `[coverage][pgo_bin][<test>]` | `mojo_cov_pgo_link` | `cov/branch/<test>` | [cov_branch_link](#cov_branch_link) |
 | `[coverage][branch][<test>]` | `mojo_cov_branch_run` | `cov/branch/<test>.profdata` | [cov_branch_run](#cov_branch_run) |
 | `[coverage][branch_ir][<test>]` | `mojo_cov_branch_annotate` | `cov/branch/<test>.ll` | [cov_branch_annotate](#cov_branch_annotate) |
@@ -120,29 +120,59 @@ until the executor's timeout.
 
 ## cov_branch_annotate
 
+It reads the test's bitcode, the merged profile and the instrumented binary
+that wrote it (`[coverage][pgo_bin][<test>]`).
+
 0. The bitcode must hold no branch weights of its own (the bytes of a
    `branch_weights` metadata string): `pgo-instr-use` keeps a `!prof` it
    finds on a branch whose block never ran, which would then read as counts.
    Mojo's bitcode at -O0 holds none (`llvm.expect` is not lowered there).
-1. `lld/bin/lld` reads the test's bitcode as `cov_branch_link.sh` does (`-r`,
+   Nor may it hold entry counts (`function_entry_count`), which step 3
+   counts.
+1. The profile holds exactly the functions the binary links. Every function
+   of the bitcode is instrumented, but the link (`--gc-sections`, as a
+   release test's) drops a function nothing live calls, with its counters
+   and its profile data record. Mojo leaves such calls in the bitcode: an
+   `assert_equal` of two values it knows are equal compiles to `br i1
+   false` into the failure path, which calls the standard library's
+   `_assert_cmp_error`, `String(...)` of both values and their `write_to`;
+   LLVM's code generation (CodeGenPrepare) folds that branch and deletes the
+   path, so nothing calls those functions and the link drops them. A run
+   writes the record of every function its binary links, zeros included,
+   and of no other. So the (name MD5, hash) pairs of the binary's
+   `__llvm_prf_data` records (72 bytes each, whose counter counts must add
+   up to `__llvm_prf_cnts`) and of the profile's functions (`llvm-profdata
+   show`) must be one set. A record the profile lacks is a profile of
+   another binary, or a merge that lost records (tests//negative/coverage:branchmissing
+   plants one); one it holds besides, a profile of another binary.
+2. `lld/bin/lld` reads the test's bitcode as `cov_branch_link.sh` does (`-r`,
    `--lto-O0`) with the one pass `pgo-instr-use`, given the merged profile
    (`-pgo-test-profile-file`), and prints the module after it
    (`-print-after=pgo-instr-use -print-module-scope`, on stderr): every
    `br i1`, `select i1` and `switch` of a function that ran carries `!prof
    !{!"branch_weights", ...}`, the counts of its arms; one that never ran
-   carries none.
-2. Any line of lld's own (`lld: `, `warning: `, `error: `) fails the
+   carries none. Before the dump, LLVM names each function of the bitcode
+   the profile does not hold (`no profile data available for function`,
+   `-pgo-warn-missing-function`). Such a function is not in the binary, by
+   step 1 and step 3's entry-count check together (step 1 alone does not
+   give it: `branchinternal`'s `main` ran, yet is named here, because its
+   profile name is not the run's), so it never ran: its branches carry no
+   weights and read as never run, zero counts, as those of a function that
+   ran no time do. A measured
+   one is recorded, every arm `-` (test 47's `test_unrun`: `Tag.write_to`).
+3. Any other line of lld's own (`lld: `, `warning: `, `error: `), or
+   anything before the dump that is not one of those lines, fails the
    action. The one LLVM prints when the profile does not fit the control
    flow, `function control flow change detected (hash mismatch)`, means that
    function's counts were dropped, and passing it on would read as branches
-   that never ran (tests//negative/coverage:branchannotate plants it). So
-   does `no profile data available for function` (`-pgo-warn-missing-function`):
-   a run writes the counters of every instrumented function it links, zeros
-   included, so a function of the bitcode the profile does not hold is a
-   profile of other bitcode, not a function that never ran (branchmissing).
-   The six tests of `komira_retry` and the two of test 47's `branchlib` give
-   neither.
-3. What lld printed is exactly one dump, starting with `; *** IR Dump After
+   that never ran (tests//negative/coverage:branchannotate plants it). In
+   the dump, `pgo-instr-use` must have given an entry count (`!prof` on the
+   `define`) to as many functions as the profile holds: each function the
+   binary links is one of this bitcode. Fewer is a binary made from other
+   bitcode, or a hash mismatch LLVM does not warn about (a comdat
+   function's, by default) (branchinternal plants it: the bitcode internalized, so `main`'s
+   profile name is not the run's).
+4. What lld printed is then exactly one dump, starting with `; *** IR Dump After
    PGOInstrumentationUse on [module] ***`; it is `cov/branch/<test>.ll`,
    unchanged. `-print-after` output is LLVM's debug text, not an interface:
    the classifier parses it strictly and fails on what it does not expect.
