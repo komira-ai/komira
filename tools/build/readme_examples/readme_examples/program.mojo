@@ -1,12 +1,14 @@
 """The program that runs a README's examples, and its line map. Pure: no I/O.
 
 An example is a FRAGMENT, the shape of Rust's doctests. Its column-0
-`from`/`import` lines are hoisted to module level (deduplicated across the
-README), and so are its column-0 declarations (`def`, `struct`, `trait`,
-`comptime`, a decorator), each running to the next column-0 line. The other
-lines are the body of `def _example_<line>() raises:`, `<line>` being the
-README line of the example's opening fence. Lines inside a triple-quoted
-string are copied as they are (not re-indented).
+`from`/`import` statements are hoisted to module level, deduplicated across
+the README; a statement runs on while a `(` it opened is unclosed or its
+line ends with a backslash, and is hoisted and compared whole. So are its
+column-0 declarations (`def`, `struct`, `trait`, `comptime`, a decorator),
+each running to the next column-0 line. The other lines are the body of
+`def _example_<line>() raises:`, `<line>` being the README line of the
+example's opening fence. Lines inside a triple-quoted string are copied as
+they are (not re-indented).
 
 `main` calls every `_example_<line>()` in README order inside `try`; a
 failure prints `<readme>:<line>: FAILED: <error>` and the run continues.
@@ -35,6 +37,21 @@ def program_name(package: String) -> String:
 
 def _is_import(line: String) -> Bool:
     return line.startswith("from ") or line.startswith("import ")
+
+
+def _paren_depth(line: String) -> Int:
+    """The `(` minus the `)` of an import line, up to a `#` comment. An
+    import holds no string literal, so a `#` always starts a comment."""
+    var d = 0
+    for i in range(line.byte_length()):
+        var c = byte_at(line, i)
+        if c == 35:
+            break
+        if c == 40:
+            d += 1
+        elif c == 41:
+            d -= 1
+    return d
 
 
 def _is_declaration(line: String) -> Bool:
@@ -69,9 +86,40 @@ def generate_program(examples: List[Example], package: String, display: String) 
         var body = List[String]()
         var in_decl = False
         var in_string = False
+        # The import statement being read: its lines (tagged), its text (the
+        # deduplication key), its open parentheses, whether it goes on.
+        var in_import = False
+        var import_lines = List[String]()
+        var import_key = String()
+        var import_depth = 0
         for k in range(len(ex.code)):
             var line = ex.code[k]
             var n = ex.code_lines[k]
+            var col0 = not is_blank(line) and byte_at(line, 0) != 32 and byte_at(line, 0) != 9
+            if not in_string and not in_import and col0 and _is_import(line):
+                in_import = True
+                in_decl = False
+                import_lines = List[String]()
+                import_key = String()
+                import_depth = 0
+            if in_import:
+                import_depth += _paren_depth(line)
+                import_lines.append(_tagged(line, n, False))
+                if import_key.byte_length() > 0:
+                    import_key += "\n"
+                import_key += line
+                if import_depth > 0 or line.endswith("\\"):
+                    continue
+                in_import = False
+                var seen = False
+                for i in range(len(import_keys)):
+                    if import_keys[i] == import_key:
+                        seen = True
+                if not seen:
+                    import_keys.append(import_key)
+                    for i in range(len(import_lines)):
+                        imports.append(import_lines[i])
+                continue
             var continuation = in_string
             if count_of(line, "\"\"\"") % 2 == 1:
                 in_string = not in_string
@@ -83,18 +131,6 @@ def generate_program(examples: List[Example], package: String, display: String) 
                 else:
                     body.append(t)
                 continue
-            var col0 = not is_blank(line) and byte_at(line, 0) != 32 and byte_at(line, 0) != 9
-            if col0 and _is_import(line):
-                in_decl = False
-                var key = line
-                var seen = False
-                for i in range(len(import_keys)):
-                    if import_keys[i] == key:
-                        seen = True
-                if not seen:
-                    import_keys.append(key)
-                    imports.append(_tagged(line, n, in_string))
-                continue
             if col0:
                 in_decl = _is_declaration(line)
             if in_decl:
@@ -105,6 +141,8 @@ def generate_program(examples: List[Example], package: String, display: String) 
                 body.append("    " + _tagged(line, n, in_string))
         if in_string:
             raise Error(display + ":" + String(ex.line) + ": the example ends inside a triple-quoted string")
+        if in_import:
+            raise Error(display + ":" + String(ex.line) + ": the example ends inside an import statement")
         var fn_text = "def _example_" + String(ex.line) + "() raises:\n"
         var any_stmt = False
         for i in range(len(body)):

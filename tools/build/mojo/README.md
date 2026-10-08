@@ -93,9 +93,10 @@ fence reader, so the link check and the examples agree on what is code).
   runs: there is no skip word. A sketch that cannot run is fenced ```` ```text ````.
   Any word after `mojo` (`mojo skip`) and any near miss (`Mojo`, `mojo,`,
   `.mojo`) is refused, naming `README.md:<line>`.
-- **A fragment**, as a Rust doctest: its column-0 `from`/`import` lines are
-  hoisted (deduplicated) and so are its column-0 declarations (`def`,
-  `struct`, `trait`, `comptime`, a decorator); the rest becomes
+- **A fragment**, as a Rust doctest: its column-0 `from`/`import` statements
+  are hoisted (deduplicated; one written over several lines, in parentheses
+  or after a backslash, is hoisted whole) and so are its column-0
+  declarations (`def`, `struct`, `trait`, `comptime`, a decorator); the rest becomes
   `def _example_<line>() raises:`. Assertions are visible `std.testing`
   calls. Examples share one module, so two declaring the same name collide.
 - **Hidden lines**: an HTML comment `<!-- mojo-hidden ... -->` ending on the

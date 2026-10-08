@@ -42,6 +42,19 @@ assert_equal(Pair("x", "y").both(), "hello, x; hello, y")
   print(greet("item"))
   ```
 
+An import may run over several lines, in parentheses or after a backslash;
+it is hoisted whole:
+
+```mojo
+from ok import (
+    greet,
+)
+from ok import \
+    greet as hello
+
+assert_equal(hello("x"), greet("x"))
+```
+
 A `~~~~` fence may quote a ``` line; the example is all of it:
 
 ~~~~mojo

@@ -848,7 +848,8 @@ A library's `README.md` examples are a welded test, `[tests][readme]`
 ([README examples](../mojo/README.md#readme-examples)).
 [`functional/readme_examples/ok`](functional/readme_examples/ok/BUCK) builds a
 README using every form (hidden lines before and after, a hoisted decorated
-struct, a triple-quoted string, an example in a list item, a `~~~~` fence
+struct, a triple-quoted string, an example in a list item, an import over
+several lines in parentheses and after a backslash, a `~~~~` fence
 quoting ```` ``` ````) and its marker is a PASS line;
 [`functional/readme_examples/none`](functional/readme_examples/none/BUCK), a
 README with no example, builds and its marker reads `NO EXAMPLE`, so nothing
