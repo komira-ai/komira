@@ -291,6 +291,46 @@ def test_malformed_headers() raises:
     assert_equal(m.headers()[0].name(), "Subject")
 
 
+def test_header_and_part_edges() raises:
+    # White space ending a field body is trimmed.
+    var m = parse_message(Span(_b("Subject: hi \t\r\n\r\nbody")))
+    assert_equal(_s(m.headers()[0].value()), "hi")
+    # An empty field name, at the start and after a field.
+    assert_equal(
+        _error(": x\r\n\r\n"),
+        "komira_mail_message.Syntax: parse_message: an empty header field name at position 0",
+    )
+    assert_equal(
+        _error("Subject: a\r\n: x\r\n\r\n"),
+        "komira_mail_message.Syntax: parse_message: an empty header field name at position 12",
+    )
+    # Absent values: a header, the charset, the Subject.
+    m = parse_message(Span(_b("Content-Type: text/plain\r\n\r\nx")))
+    assert_true(Bool(m.part(0).header("content-type")))
+    assert_true(not m.part(0).header("X-Absent"))
+    assert_equal(m.part(0).charset(), "")
+    assert_true(not m.subject())
+    m = parse_message(Span(_b("Content-Type: text/plain; charset=UTF-8\r\n\r\nx")))
+    assert_equal(m.part(0).charset(), "utf-8")
+    # A boundary byte outside bcharsnospace.
+    assert_equal(
+        _error('Content-Type: multipart/mixed; boundary="a<b"\r\n\r\n--a<b\r\n\r\nx\r\n--a<b--\r\n'),
+        "komira_mail_message.Syntax: parse_message: an invalid multipart boundary at position 0",
+    )
+    # base64 whose alphabet characters are not a multiple of four.
+    m = parse_message(
+        Span(_b("Content-Transfer-Encoding: base64\r\n\r\nQUJD\r\nR\r\n"))
+    )
+    var msg = String("not raised")
+    try:
+        _ = m.decoded_body(0)
+    except e:
+        msg = String(e)
+    assert_equal(
+        msg, "komira_mail_message.Encoding: decoded_body: base64 that does not decode"
+    )
+
+
 def test_malformed_multipart() raises:
     assert_equal(
         _error("Content-Type: multipart/mixed\r\n\r\n--b\r\n\r\nx\r\n--b--\r\n"),
@@ -401,6 +441,7 @@ def main() raises:
     test_content_type_name_fallback()
     test_disposition_filename_wins_over_name()
     test_malformed_headers()
+    test_header_and_part_edges()
     test_malformed_multipart()
     test_lenient_multipart_reading()
     test_depth_limit()

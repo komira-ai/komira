@@ -9,6 +9,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_mail_message import (
     MAX_PARAMS,
+    MediaHeader,
     error_kind,
     format_date,
     format_message_id,
@@ -156,6 +157,39 @@ def test_rfc2045_and_rfc2183_forms() raises:
     assert_equal(parse_media_header(String("text/").as_bytes()).value(), "")
 
 
+def _h(field: String) raises -> MediaHeader:
+    return parse_media_header(field.as_bytes())
+
+
+def test_parameter_grammar_edges() raises:
+    # A quoted pair inside a comment: `\)` does not close it.
+    assert_equal(_h("text/plain (a \\) b); charset=x").param("charset").value(), "x")
+    # A quoted string without its closing quote ends the list (a=1 kept).
+    var h = _h('text/plain; a=1; b="x')
+    assert_equal(len(h.params()), 1)
+    assert_equal(h.param("a").value(), "1")
+    # An empty value and an empty name each end the list.
+    assert_equal(len(_h("text/plain; a=; b=2").params()), 0)
+    assert_equal(len(_h("text/plain; =x; a=b").params()), 0)
+
+
+def test_rfc2231_suffixes_that_are_not_sections() raises:
+    # `a**`, `a*01` (a leading zero), `a*-` (not a digit; `-` would read as
+    # the plain marker -3 if the digit check were skipped) and `a*1001`
+    # (over the 1000-section cap) are not RFC 2231 names: dropped.
+    assert_true(not _h("text/plain; a**=utf-8''x").param("a"))
+    assert_equal(_h("text/plain; a*0=x; a*01=y").param("a").value(), "x")
+    assert_true(not _h("text/plain; a*-=v").param("a"))
+    assert_true(not _h("text/plain; a*1001=y").param("a"))
+    # An extended value without `charset'language'` does not read, and a
+    # starred form that does not read is never taken as a plain value.
+    assert_true(not _h("text/plain; a*=nolang").param("a"))
+    assert_true(not _h("text/plain; a*0*=nolang").param("a"))
+    assert_equal(_h("text/plain; a=p; a*=nolang").param("a").value(), "p")
+    # An empty charset reads the bytes as they are: not ISO-8859-1.
+    assert_equal(_h("text/plain; a*=''caf%E9").param("a").value(), "caf�")
+
+
 def test_parameter_count_is_capped() raises:
     # Grouping RFC 2231 sections by name is quadratic in the parameter
     # count, so one field holds at most MAX_PARAMS; the rest are dropped.
@@ -217,12 +251,68 @@ def test_format_message_id() raises:
     )
 
 
+def test_date_and_message_id_edges() raises:
+    # A zone offset that puts the local time before 1970 is refused; one
+    # minute later it is written.
+    var msg = String("not raised")
+    try:
+        _ = format_date(0, -1)
+    except e:
+        msg = String(e)
+    assert_equal(
+        msg, "komira_mail_message.InvalidValue: format_date: a local time before 1970"
+    )
+    assert_equal(format_date(60, -1), "Thu, 01 Jan 1970 00:00:00 -0001")
+    # dot-atom-text: not empty, no leading, trailing or doubled dot.
+    var bad = List[String]()
+    bad.append("")
+    bad.append(".a")
+    bad.append("a.")
+    bad.append("a..b")
+    for i in range(len(bad)):
+        msg = String("not raised")
+        try:
+            _ = format_message_id(bad[i], "acme.example")
+        except e:
+            msg = String(e)
+        assert_equal(
+            msg,
+            "komira_mail_message.InvalidValue: format_message_id: a message id part that is not dot-atom-text",
+        )
+    # At most 250 octets with `<`, `@` and `>`.
+    var left = String("")
+    for _ in range(200):
+        left += "a"
+    var right = String("")
+    for _ in range(47):
+        right += "b"
+    assert_equal(format_message_id(left, right).byte_length(), 250)
+    msg = String("not raised")
+    try:
+        _ = format_message_id(left, right + "b")
+    except e:
+        msg = String(e)
+    assert_equal(
+        msg, "komira_mail_message.InvalidValue: format_message_id: a message id over 250 octets"
+    )
+
+
+def test_error_kind_of_other_errors() raises:
+    assert_equal(error_kind(Error("komira_mail_message.Syntax: f: d")), "Syntax")
+    assert_equal(error_kind(Error("some_other_library.Kind: f: detail")), "")
+    assert_equal(error_kind(Error("komira_mail_message.Syntax")), "")
+
+
 def main() raises:
     test_qp_encode_rules()
     test_qp_decode_rfc2045_examples()
     test_rfc2231_examples()
     test_rfc2045_and_rfc2183_forms()
+    test_parameter_grammar_edges()
+    test_rfc2231_suffixes_that_are_not_sections()
     test_parameter_count_is_capped()
     test_format_date()
     test_format_message_id()
+    test_date_and_message_id_edges()
+    test_error_kind_of_other_errors()
     print("test_mime_values: OK")

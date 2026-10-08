@@ -180,6 +180,19 @@ def test_998_octet_boundary() raises:
     assert_equal(_longest_line(built), 998)
 
 
+def test_long_name_first_word_holds_one_whole_character() raises:
+    # After a 58-octet name the first encoded word's limit is clamped to 16
+    # characters: 4 for the text, less than the 8 of one 4-byte character in
+    # B form. That character still goes whole into the first word, never
+    # split into bytes that are not UTF-8 on their own.
+    var b = _builder()
+    b.add_header(_name(58), "😀")
+    var built = b.build()
+    assert_true(_s(built).find("=?UTF-8?B?8J+YgA==?=") >= 0, _s(built))
+    var m = parse_message(Span(built))
+    assert_equal(m.header(_name(58)).value().text(), "😀")
+
+
 def main() raises:
     test_long_subject_folds_at_76()
     test_field_over_998_octets_is_folded()
@@ -187,4 +200,5 @@ def main() raises:
     test_word_without_white_space_is_encoded()
     test_long_address_lists_fold_between_addresses()
     test_998_octet_boundary()
+    test_long_name_first_word_holds_one_whole_character()
     print("test_folding: OK")

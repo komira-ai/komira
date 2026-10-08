@@ -358,6 +358,21 @@ def test_values() raises:
         msg,
         "komira_mail_message.InvalidValue: MessageBuilder.add_reference: not a message id",
     )
+    # No `@`, an empty left part, and two `@`.
+    var not_ids = List[String]()
+    not_ids.append("<abcd>")
+    not_ids.append("<@b.c>")
+    not_ids.append("<a@b@c>")
+    for i in range(len(not_ids)):
+        msg = String(NOT_SET)
+        try:
+            b.set_in_reply_to(not_ids[i])
+        except e:
+            msg = String(e)
+        assert_equal(
+            msg,
+            "komira_mail_message.InvalidValue: MessageBuilder.set_in_reply_to: not a message id",
+        )
     b.set_in_reply_to("<a.1@example.com>")
     b.add_reference("<a.1@example.com>")
 

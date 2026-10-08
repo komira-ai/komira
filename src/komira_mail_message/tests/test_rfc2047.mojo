@@ -92,6 +92,42 @@ def test_words_kept_as_written() raises:
     )
 
 
+def test_malformed_words_each_rule() raises:
+    # One word per refusal in decode_encoded_word and _decode_q; each would
+    # decode if that one rule were skipped.
+    var kept = List[String]()
+    kept.append("=?utf-8?Q?a=4?=")  # an escape cut short by the word's end
+    kept.append(String("=?utf-8?Q?a") + chr(127) + "b?=")  # DEL in Q text
+    kept.append("=?utf-8*e(n?Q?a?=")  # a non-token byte in the language
+    kept.append("=?utf-8?QXab?=")  # no `?` after the encoding letter
+    kept.append("=?utf-8?Q?a?b?=")  # a `?` inside the encoded text
+    for i in range(len(kept)):
+        assert_equal(decode_header_text(kept[i]), kept[i])
+    # windows-125* is read for its ASCII bytes, like iso-8859-*.
+    assert_equal(decode_header_text("=?windows-1252?Q?abc?="), "abc")
+    assert_equal(
+        decode_header_text("=?windows-1252?Q?caf=E9?="), "=?windows-1252?Q?caf=E9?="
+    )
+
+
+def _lossy(a: UInt8, b: UInt8, c: UInt8) raises -> String:
+    var bytes = List[UInt8]()
+    bytes.append(a)
+    bytes.append(b)
+    bytes.append(c)
+    return decode_header_text(Span(bytes))
+
+
+def test_ill_formed_utf8_outside_words_is_replaced() raises:
+    # RFC 3629: a second byte outside its lead byte's range (C3 41; the
+    # overlong E0 80 80) and a bad third byte (E2 82 41) are each U+FFFD per
+    # octet that does not start a sequence.
+    assert_equal(_lossy(0x61, 0xC3, 0x41), "a�A")
+    assert_equal(_lossy(0xE0, 0x80, 0x80), "���")
+    assert_equal(_lossy(0xE2, 0x82, 0x41), "��A")
+    assert_equal(_lossy(0xE2, 0x82, 0xAC), "€")
+
+
 def test_plain_text_and_white_space_are_kept() raises:
     assert_equal(decode_header_text("  Hello\tworld  "), "  Hello\tworld  ")
     assert_equal(decode_header_text("=?UTF-8?Q?a?= b =?UTF-8?Q?c?="), "a b c")
@@ -153,6 +189,8 @@ def main() raises:
     test_rfc2047_section_8_header_examples()
     test_rfc2231_language_suffix_is_ignored()
     test_words_kept_as_written()
+    test_malformed_words_each_rule()
+    test_ill_formed_utf8_outside_words_is_replaced()
     test_plain_text_and_white_space_are_kept()
     test_encode_exact()
     test_encode_round_trip()
