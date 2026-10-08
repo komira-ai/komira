@@ -21,7 +21,9 @@ building it by name runs anything.
    memory cap, the library's `test_memory_cap_mib` or 4096 MiB
    (`mutation_run_test`). Each of those steps runs through mut_step.sh, which
    never fails the action and records `ok`, `fail <n>`, `timeout <s>` or
-   `skipped`; `[komira] mutation_timeout_secs` (default 300) bounds each.
+   `skipped`; `[komira] mutation_compile_timeout_secs` (default 900) bounds
+   each compile and `[komira] mutation_run_timeout_secs` (default 120)
+   each test run.
    Every input of a mutant's actions is the library's sources, its deps, its
    tests and the mutant's id, and every output path is named by the id, so a
    mutant's actions are the same actions whatever else was sampled, and the
@@ -54,7 +56,8 @@ MUTATION_ATTRS = {
     "mutation_dir": attrs.option(attrs.exec_dep(), default = None),
     "mutation_sample": attrs.int(default = 0),
     "mutation_seed": attrs.string(default = ""),
-    "mutation_timeout_secs": attrs.int(default = 0),
+    "mutation_compile_timeout_secs": attrs.int(default = 0),
+    "mutation_run_timeout_secs": attrs.int(default = 0),
 }
 
 def _config_count(key, default):
@@ -75,16 +78,18 @@ def mutation_kwargs(kwargs):
     pkg = package_name()
     if v == "false" or pkg == _MUTATE_PACKAGE or pkg.startswith(_MUTATE_PACKAGE + "/"):
         return
-    timeout = _config_count("mutation_timeout_secs", 300)
-    if timeout < 1:
-        fail("[komira] mutation_timeout_secs must be at least 1")
+    compile_limit = _config_count("mutation_compile_timeout_secs", 900)
+    run_limit = _config_count("mutation_run_timeout_secs", 120)
+    if compile_limit < 1 or run_limit < 1:
+        fail("[komira] mutation_compile_timeout_secs and mutation_run_timeout_secs must be at least 1")
     kwargs["mutation_dir"] = select({
         "komira//tools/build/package:is_linux_x86_64": _MUTATION_DIR,
         "DEFAULT": None,
     })
     kwargs["mutation_sample"] = _config_count("mutation_sample", 30)
     kwargs["mutation_seed"] = read_config("komira", "mutation_seed", "0").strip()
-    kwargs["mutation_timeout_secs"] = timeout
+    kwargs["mutation_compile_timeout_secs"] = compile_limit
+    kwargs["mutation_run_timeout_secs"] = run_limit
 
 def _stem(src):
     b = src.basename
@@ -169,14 +174,15 @@ def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, 
             cap = cap or _DEFAULT_CAP_MIB,
             mem_cap = mem_cap,
             env_args = env_args,
-            limit = str(ctx.attrs.mutation_timeout_secs),
+            compile_limit = str(ctx.attrs.mutation_compile_timeout_secs),
+            run_limit = str(ctx.attrs.mutation_run_timeout_secs),
             src_repo = src_repo,
             import_name = import_name,
         ),
     ))
     return {"mutation": [DefaultInfo(default_outputs = [tsv, md], sub_targets = {"list": [DefaultInfo(default_output = lst)]})]}
 
-def _step(v, status, after, command):
+def _step(v, status, limit, after, command):
     # One mutant step through mut_step.sh (never fails; records the outcome).
     return cmd_args(
         v.tc.busybox,
@@ -184,7 +190,7 @@ def _step(v, status, after, command):
         v.step,
         v.tc.busybox,
         status.as_output(),
-        v.limit,
+        limit,
         [["--after", a] for a in after],
         "--",
         command,
@@ -217,7 +223,7 @@ def _mutants_impl(actions, list_value, list_file, tsv, md, ctx_values):
         pre = actions.declare_output(base + "/precompile.status")
         dep_closure = actions.tset(MojoPkgTSet, children = v.deps)
         actions.run(
-            _step(v, pre, [], v.mojo_cmd(tc, ["precompile", dep_closure.project_as_args("include"), src, "-o", mojoc.as_output()])),
+            _step(v, pre, v.compile_limit, [], v.mojo_cmd(tc, ["precompile", dep_closure.project_as_args("include"), src, "-o", mojoc.as_output()])),
             category = "mutation_precompile",
             identifier = mid,
         )
@@ -227,7 +233,7 @@ def _mutants_impl(actions, list_value, list_file, tsv, md, ctx_values):
             exe = actions.declare_output("{}/tests/{}/{}".format(base, t.stem, t.stem))
             built = actions.declare_output("{}/tests/{}.build.status".format(base, t.stem))
             actions.run(
-                _step(v, built, [pre], v.mojo_cmd(tc, [
+                _step(v, built, v.compile_limit, [pre], v.mojo_cmd(tc, [
                     "build",
                     "--optimization-level",
                     v.opt_level,
@@ -245,7 +251,7 @@ def _mutants_impl(actions, list_value, list_file, tsv, md, ctx_values):
             root_dir, binary = test_root(shim, "{}/tests/{}/root".format(base, t.stem), exe, t.data)
             ran = actions.declare_output("{}/tests/{}.run.status".format(base, t.stem))
             actions.run(
-                _step(v, ran, [built], cmd_args(
+                _step(v, ran, v.run_limit, [built], cmd_args(
                     capped_prefix(tc, v.mem_cap, t.label, v.cap),
                     tc.busybox,
                     "sh",

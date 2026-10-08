@@ -24,18 +24,13 @@ def test_survived_when_every_test_passes() raises:
     assert_equal(v.status, "survived")
 
 
-def test_killed_by_a_failing_run_or_build() raises:
+def test_killed_by_a_failing_run() raises:
     var ts = List[TestSteps]()
     ts.append(_t("test_a", "ok", "ok"))
     ts.append(_t("test_b", "ok", "fail 1"))
     var v = _v("ok", ts^)
     assert_equal(v.status, "killed")
     assert_equal(v.why, "test_b: failed (exit 1)")
-    var bs = List[TestSteps]()
-    bs.append(_t("test_a", "fail 1", "skipped"))
-    var w = _v("ok", bs^)
-    assert_equal(w.status, "killed")
-    assert_equal(w.why, "test_a: the test does not compile (exit 1)")
 
 
 def test_killed_beats_timeout_and_first_kill_named() raises:
@@ -63,6 +58,29 @@ def test_error_when_the_library_does_not_compile() raises:
     var us = List[TestSteps]()
     var w = _v("timeout 600", us^)
     assert_equal(w.status, "error")
+
+
+def test_a_test_that_does_not_compile_is_error() raises:
+    # the compiler's rejection, not a test's kill; its log is kept
+    var bs = List[TestSteps]()
+    bs.append(_t("test_a", "ok", "ok"))
+    bs.append(_t("test_b", "fail 1\npem.mojo:219:43: error: index out of bounds\n", "skipped"))
+    var w = _v("ok", bs^)
+    assert_equal(w.status, "error")
+    assert_equal(w.why, "test_b: does not compile against the mutated library (exit 1)")
+    assert_equal(w.log, "pem.mojo:219:43: error: index out of bounds\n")
+    var slow = List[TestSteps]()
+    slow.append(_t("test_a", "timeout 900", "skipped"))
+    assert_equal(_v("ok", slow^).status, "error")
+    # a run that fails or times out still decides
+    var ks = List[TestSteps]()
+    ks.append(_t("test_a", "fail 1", "skipped"))
+    ks.append(_t("test_b", "ok", "fail 1"))
+    assert_equal(_v("ok", ks^).status, "killed")
+    var ts = List[TestSteps]()
+    ts.append(_t("test_a", "fail 1", "skipped"))
+    ts.append(_t("test_b", "ok", "timeout 120"))
+    assert_equal(_v("ok", ts^).status, "timeout")
 
 
 def test_inconsistent_statuses_refused() raises:
@@ -158,7 +176,8 @@ def test_basis_points() raises:
 
 def main() raises:
     test_survived_when_every_test_passes()
-    test_killed_by_a_failing_run_or_build()
+    test_killed_by_a_failing_run()
+    test_a_test_that_does_not_compile_is_error()
     test_killed_beats_timeout_and_first_kill_named()
     test_error_when_the_library_does_not_compile()
     test_inconsistent_statuses_refused()

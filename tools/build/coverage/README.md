@@ -730,7 +730,7 @@ are `mut/mutants.tsv`, the mutants file above (paths from the repository
 root, `col <c>: <change>; <why>` as the description), and `mut/summary.md`:
 the score, every survivor as `<file>:<line>:<col> <operator>: <change>`,
 timeouts and errors with their reason, the compiler's last lines for each
-mutant that did not compile, and the mutants a marker suppressed. Nothing
+`error`, and the mutants a marker suppressed. Nothing
 depends on it, so only building it by name runs anything; with the switch
 off the attributes are absent and every other action keeps its key.
 
@@ -739,7 +739,8 @@ off the attributes are absent and every other action keeps its key.
 | `mutation` | `false` | the switch |
 | `mutation_sample` | `30` | mutants built per library; `0` is every one |
 | `mutation_seed` | `0` | which ones (below) |
-| `mutation_timeout_secs` | `300` | the limit of each compile and each test run of a mutant |
+| `mutation_compile_timeout_secs` | `900` | the limit of each compile of a mutant (its library, each test) |
+| `mutation_run_timeout_secs` | `120` | the limit of each test run of a mutant |
 
 ### The mutants
 
@@ -806,7 +807,7 @@ unchanged):
 
 Each step runs through `mutate/mut_step.sh`, which never fails its action:
 it records `ok`, `fail <status>`, `timeout <secs>` (the step was killed at
-`mutation_timeout_secs`) or `skipped` (a step it waits for was not `ok`),
+its limit) or `skipped` (a step it waits for was not `ok`),
 then the last lines of the output. A README's examples are not run against
 a mutant. `mutation_score` (`mutate score`) reads every status and decides,
 first rule that holds:
@@ -814,9 +815,15 @@ first rule that holds:
 | status | when |
 |---|---|
 | `error` | the precompile is not `ok`: the mutated library does not compile |
-| `killed` | a test does not compile against it, or a test run fails (an assertion, a crash, the memory cap) |
-| `timeout` | a test's compile or run timed out |
+| `killed` | a test run fails (an assertion, a crash, the memory cap) |
+| `timeout` | a test run timed out |
+| `error` | a test does not compile against it (or its compile timed out) |
 | `survived` | every test compiled and passed |
+
+A test that does not compile is not a kill: `mojo precompile` does not
+instantiate generic code, so a mutant the compiler rejects is often first
+rejected when a test is built against it, and that is the compiler's
+verdict on a stillborn mutant, not a test's.
 
 The score is covcheck's: `killed * 10000 / total` basis points over every
 sampled mutant; the summary also gives the detected share

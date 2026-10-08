@@ -13,10 +13,18 @@ build and its run. Its verdict, first rule that holds:
 
 | status | when |
 |---|---|
-| `error` | the precompile is not `ok`: the mutated library does not compile (a stillborn mutant, not a test's kill) |
-| `killed` | some test's build is `fail` (a test does not compile against it) or its run is `fail` (an assertion, a crash, the memory cap) |
-| `timeout` | some test's build or run is `timeout` |
+| `error` | the precompile is not `ok`: the mutated library does not compile |
+| `killed` | some test's run is `fail` (an assertion, a crash, the memory cap) |
+| `timeout` | some test's run is `timeout` |
+| `error` | some test's build is not `ok`: the mutated library does not compile where that test instantiates it |
 | `survived` | every build and run is `ok` |
+
+A test that does not compile is not a kill: `mojo precompile` does not
+instantiate generic code, so a mutant the compiler rejects (a tuple index
+out of range, a type that no longer conforms) is often first rejected when
+a test is built against it. That is the compiler's verdict on a stillborn
+mutant, not a test's: the mutant is `error`, outside the score's
+numerator, unless another test's run killed it or timed out.
 
 A `skipped` step whose prerequisites were `ok`, or any other first line,
 is refused: the statuses disagree with how the steps were declared.
@@ -43,9 +51,8 @@ struct TestSteps(Copyable, Movable):
 
 
 struct Verdict(Copyable, Movable):
-    """`log` is the output of the step that decided an `error`, or a kill by
-    a test that does not compile (the status text after its first line);
-    empty otherwise."""
+    """`log` is the output of the compile that decided an `error` (the
+    status text after its first line); empty otherwise."""
 
     var status: String
     var why: String
@@ -103,8 +110,9 @@ def verdict(precompile: String, tests: List[TestSteps]) raises -> Verdict:
             return Verdict(String(ERROR), String("the mutated library's compile timed out after ") + _detail(precompile) + " s")
         return Verdict(String(ERROR), String("the mutated library does not compile (exit ") + _detail(precompile) + ")", after_first_line(precompile))
     var killed = String("")
-    var killed_log = String("")
     var timed_out = String("")
+    var stillborn = String("")
+    var stillborn_log = String("")
     for t in tests:
         var bk = _kind(t.build, t.name + " build")
         var rk = _kind(t.run, t.name + " run")
@@ -114,21 +122,21 @@ def verdict(precompile: String, tests: List[TestSteps]) raises -> Verdict:
             raise Error(t.name + " run: ran although its build was " + bk)
         if bk == "ok" and rk == "skipped":
             raise Error(t.name + " run: skipped, but its build was ok")
-        if killed == "":
-            if bk == "fail":
-                killed = t.name + ": the test does not compile (exit " + _detail(t.build) + ")"
-                killed_log = after_first_line(t.build)
-            elif rk == "fail":
-                killed = t.name + ": failed (exit " + _detail(t.run) + ")"
-        if timed_out == "":
-            if bk == "timeout":
-                timed_out = t.name + ": the test's compile timed out after " + _detail(t.build) + " s"
-            elif rk == "timeout":
-                timed_out = t.name + ": timed out after " + _detail(t.run) + " s"
+        if killed == "" and rk == "fail":
+            killed = t.name + ": failed (exit " + _detail(t.run) + ")"
+        if timed_out == "" and rk == "timeout":
+            timed_out = t.name + ": timed out after " + _detail(t.run) + " s"
+        if stillborn == "" and bk == "fail":
+            stillborn = t.name + ": does not compile against the mutated library (exit " + _detail(t.build) + ")"
+            stillborn_log = after_first_line(t.build)
+        if stillborn == "" and bk == "timeout":
+            stillborn = t.name + ": its compile against the mutated library timed out after " + _detail(t.build) + " s"
     if killed != "":
-        return Verdict(String(KILLED), killed, killed_log)
+        return Verdict(String(KILLED), killed)
     if timed_out != "":
         return Verdict(String(TIMEOUT), timed_out)
+    if stillborn != "":
+        return Verdict(String(ERROR), stillborn, stillborn_log)
     return Verdict(String(SURVIVED), String("every test passed"))
 
 
@@ -246,7 +254,7 @@ def render_summary(label: String, header: String, rows: List[Scored], src_repo: 
             any = True
     if not any:
         out += String("None.\n")
-    out += String("\n## Compiler output\n\nOf each `error` and each kill by a test that does not compile: the last lines of the compile.\n\n")
+    out += String("\n## Compiler output\n\nOf each `error`: the last lines of the compile that failed.\n\n")
     any = False
     for r in rows:
         if r.verdict.log.byte_length() > 0:
