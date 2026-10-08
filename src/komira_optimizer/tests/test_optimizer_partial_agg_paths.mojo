@@ -433,6 +433,24 @@ def test_force_walk_through_a_join_keeps_residual_and_hint() raises:
     assert_false(out2._join.value()[].has_residual())
 
 
+def test_gated_walk_through_a_join_keeps_residual_and_hint() raises:
+    """The production entry's Join arm rebuilds the join after recursing into
+    both children. Catches a rebuild that drops the residual predicate (a lost
+    join condition, wrong rows) or resets the algorithm hint to the default."""
+    var resid: Optional[OwnedPointer[Expr]] = OwnedPointer(
+        Expr.binary(BIN_GT, Expr.col_ref("x"), Expr.col_ref("y"))
+    )
+    var j = LogicalPlan.join(
+        _scan("a.parquet", _l2("k", "x")), _scan("b.parquet", _l2("k", "y")),
+        _l1("k"), _l1("k"), JOIN_INNER, JOIN_ALGO_HASH, resid^,
+    )
+    var out = push_aggregate_below_join(j^)
+    assert_equal(Int(out.tag), Int(PLAN_JOIN))
+    ref jd = out._join.value()[]
+    assert_true(jd.has_residual(), "gated walk keeps the join residual")
+    assert_equal(Int(jd.algo_hint), Int(JOIN_ALGO_HASH), "gated walk keeps the algo hint")
+
+
 def test_gated_walk_keeps_every_wrapper_and_does_not_push() raises:
     """The production entry walks the same kinds while the gate is off.
     Catches a wrapper arm that loses its fields, and any push below a join."""
