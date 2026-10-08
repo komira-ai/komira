@@ -191,18 +191,22 @@ git_() {
     mkdir -p "$OUT/share/licenses/git"
     cp "$g/COPYING" "$g/LGPL-2.1" "$OUT/share/licenses/git/"
     cp -a "$D/share/licenses/." "$OUT/share/licenses/"
-    # The NOTICE says which file says each licence; the build refuses the
-    # NOTICE if that file does not hold the sentence (with runs of blanks
-    # and newlines read as one space; grep without -q reads all its input,
-    # so tr is never cut off by SIGPIPE under pipefail).
+    # The NOTICE says which file of git's source says each licence. Each row
+    # of `cites` is <file>|<sentence the file holds>|<what the NOTICE says
+    # where it cites the file>. After writing the NOTICE the build refuses it
+    # unless (1) each file holds its sentence (runs of blanks and newlines read
+    # as one space; grep without -q reads all its input, so tr is never cut off
+    # by SIGPIPE under pipefail) and (2) the NOTICE, read as sentences, names
+    # each file, and every sentence naming a file says that row's claim and no
+    # other row's.
     says() {
         tr -s ' \t\n' '   ' <"$g/$1" | grep -F "$2" >/dev/null || {
             echo "git_build: git's $1 does not say: $2" >&2
             exit 2
         }
     }
-    says README.md "some parts of it are under different licenses, compatible with the GPLv2"
-    says compat/regex/regex.c "under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version."
+    cites='README.md|some parts of it are under different licenses, compatible with the GPLv2|compatible with GPLv2
+compat/regex/regex.c|under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.|LGPL-2.1-or-later'
     cat >"$OUT/share/licenses/NOTICE" <<'EOF'
 This directory is git, built from its release source archive. git is
 GPL-2.0-only (git/COPYING); git's README.md says some parts of it are
@@ -216,6 +220,31 @@ bin/git and the programs of libexec/git-core also hold, linked statically:
              git-remote-https, git-remote-ftp, git-remote-ftps) and
              git-http-fetch only
 EOF
+    printf '%s\n' "$cites" >"$T/cites"
+    tr -s ' \t\n' '   ' <"$OUT/share/licenses/NOTICE" | sed 's/\. /.\n/g' >"$T/notice_sentences"
+    while IFS='|' read -r file sentence claim; do
+        says "$file" "$sentence"
+        named=0
+        while IFS= read -r s; do
+            case "$s" in *"$file"*) ;; *) continue ;; esac
+            named=1
+            case "$s" in
+                *"$claim"*) ;;
+                *) echo "git_build: the NOTICE cites git's $file in a sentence that does not say \"$claim\": $s" >&2; exit 2 ;;
+            esac
+            while IFS='|' read -r other _ other_claim; do
+                if [ "$other" != "$file" ]; then
+                    case "$s" in
+                        *"$other_claim"*) echo "git_build: the NOTICE cites git's $file for \"$other_claim\", which $other says: $s" >&2; exit 2 ;;
+                    esac
+                fi
+            done <"$T/cites"
+        done <"$T/notice_sentences"
+        if [ "$named" = 0 ]; then
+            echo "git_build: the NOTICE does not cite git's $file" >&2
+            exit 2
+        fi
+    done <"$T/cites"
 }
 
 case "$MODE" in
