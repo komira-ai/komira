@@ -763,7 +763,7 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 ### 9.2 Ranking and ties
 
-- **Rule.** ROW_NUMBER numbers the rows of a partition 1 to n. RANK gives peers (rows tying on every order key) the row number of the first peer, leaving gaps. DENSE_RANK numbers peer groups 1, 2, 3 without gaps. Ranking functions ignore the frame.
+- **Rule.** ROW_NUMBER numbers the rows of a partition 1 to n. Peers are rows whose order keys compare equal on every key, with NULL equal to NULL (§9.7) and floats under §2.6. RANK gives peers the row number of the first peer, leaving gaps. DENSE_RANK numbers peer groups 1, 2, 3 without gaps; PERCENT_RANK and CUME_DIST are computed over the same peer groups. Ranking functions ignore the frame, so this peer definition applies to them whatever the frame says.
 - **DuckDB.** rank is "same as row_number of its first peer"; dense_rank "counts peer groups" ([window functions](https://duckdb.org/docs/current/sql/functions/window_functions.html)).
 - **Current behaviour.** Declared at `src/komira_plan_expr/partition_expr.mojo:44-46`; the window operator is not here.
 - **Mark.** MATCHES.
@@ -798,8 +798,8 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 ### 9.7 NULL order keys are peers
 
-- **Rule.** Under a RANGE frame, rows whose order key is NULL are peers of one another: they form one peer group, placed by §4.1, and get the same running value.
-- **DuckDB.** The same (NULLs compare equal for peer detection; the oracle confirms).
+- **Rule.** Rows whose order key is NULL are peers of one another: they form one peer group, placed by §4.1. This holds for the ranking functions whatever the frame (§9.2), so NULL-keyed rows tie in RANK, DENSE_RANK, PERCENT_RANK and CUME_DIST; and under a RANGE frame they also get the same running value. Under a ROWS frame, frame bounds count physical rows, but ranking still treats them as peers.
+- **DuckDB.** The same: NULLs compare equal for peer detection, so NULL-keyed rows tie in the ranking functions and share a RANGE frame (the oracle confirms).
 - **Current behaviour.** No window operator here.
 - **Mark.** MATCHES.
 
