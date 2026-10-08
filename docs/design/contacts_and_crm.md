@@ -2,8 +2,9 @@
 
 Status: design, no code. It decides the data model that `komira_contacts_proto`, `komira_contacts`, `komira_crm_proto`
 and `komira_crm` will implement; none of them is in the tree yet. It builds on `komira_vcard` and `komira_content_line`
-(the vCard reader and writer, open in #799), on the `Database` trait of `komira_db` ([databases](databases.md)) and on
-`AuthzPort` and `AuthzResource` in `komira_authz_api` (the `{kind, id, attributes}` resource shape is open in #790).
+(the vCard reader and writer, in the tree: `parse_contacts` and the `Contact` type), on the `Database` trait of
+`komira_db` ([databases](databases.md)) and on `AuthzPort` and `AuthzResource` in `komira_authz_api` (the
+`{kind, id, attributes}` resource shape is open in #790).
 Related: #828 (the `unique_together` emitter).
 
 ## What is it for, and what is out of scope?
@@ -73,7 +74,8 @@ What the model takes from this:
     added with the directory projection, after the first release of the library.
 - `owner` is the pair `(issuer, subject)` of the principal, never the subject alone: a service that trusts two
   issuers must not let two different principals with the same `sub` share a book. It is empty for SHARED and DIRECTORY.
-- `modseq` is the book's change counter (see [the change feed](#how-does-the-change-feed-work)).
+- `modseq` is the book's change counter (see [the change feed](#how-does-the-change-feed-work)). The CRM book's own
+  `modseq` is never bumped and stays 0: its cards take their `modseq` from the CRM's `crm_feed` counter.
 - `is_default` is not stored on the book row: it is read from the owner's `contacts_default_books` row, so "at most one
   default book" is one key row and not a flag that two rows could both carry.
 
@@ -96,7 +98,8 @@ notes, members, vcard_extra, version, modseq, deleted, created_at, updated_at}`
   shown as unresolved; the store does not enforce it, because a vCard `MEMBER` may name a card that was not imported.
 - `vcard_extra` keeps every vCard property the mapping does not read, verbatim, so an export does not lose what an
   import carried (RFC 9555 §2.15.1 keeps such properties in `vCardProps` for the same reason).
-- `version` is the compare-and-swap counter for updates; `modseq` is the book's counter at the card's last change;
+- `version` is the compare-and-swap counter for updates; `modseq` is the value of the card's counter at its last
+  change: the book's counter, except for a card in the CRM book, whose counter is `crm_feed`;
   `deleted` marks a tombstone, which keeps only `id`, `book_id`, `uid`, `modseq` and `version`; every other column,
   `subject_iss` and `subject_sub` included, is cleared.
 
@@ -206,15 +209,18 @@ created. The store uses the same order on every backend, the order that driver i
    just written.
 3. **A live row (`deleted = false`) whose table has a guarding key is live only while its key row points back at it.**
    Every read that returns such a row (by id, by `uid`, in a list, in the change feed) checks the key row and skips a
-   row the key does not name. A tombstone (`deleted = true`) is not checked: it is created only by deleting a row that
-   was live, so it is never an orphan of a failed create. On SQLite and Postgres a create's row and key
-   commit together, so the check skips only the cards of an erasure a crash interrupted (their keys are gone and the
-   next erase call removes them); the store runs it on every backend so that one store source serves
-   them all.
+   row the key does not name. A tombstone (`deleted = true`) is not checked: it carries no content, and it is created
+   by deleting a live row or by erasing a directory card, whose filter can also match an orphan row of a crashed
+   create (a tombstone then appears in the feed for an id no reader was given, which a consumer ignores). On SQLite
+   and Postgres a create's row and key commit together, so the check skips only the cards of an erasure a crash
+   interrupted (their keys are gone and the next erase call removes them); the store runs it on every backend so that
+   one store source serves them all.
 4. A key row is never deleted to make room for a create. A writer that loses a key reads the holder: a create reports
    a conflict, an import updates the holder, and when the holder is a tombstone both revive it (a `conditional_update`
    of the tombstone guarded on its `version`, which sets `deleted = false`, writes the new content and takes a new
-   `modseq`; the revived card keeps its `id`).
+   `modseq`; the revived card keeps its `id`). The loser first rolls back its own transaction and then revives in a
+   new one: a revive inside the losing transaction would be undone by the rollback on SQLite and Postgres but kept on
+   Firestore, whose journal holds only creates.
 5. **Deleting a card writes a tombstone and keeps its key row**, which keeps naming the tombstone. A deleted `uid` can
    therefore be created again in its book (rule 4 revives it), and the tombstone stays in the change feed. A row is
    removed for good only by erasure, which removes the key row before the row (see [erasure](#how-is-a-subject-erased)).
@@ -247,9 +253,14 @@ included, and a cursor for the next call. The CRM has one feed for the dataset (
 activities, pipelines and the CRM book's cards. Nothing is pushed: a search index, a knowledge graph or a UI that wants
 the data pulls this feed.
 
-- **Allocation.** For **each row** a write changes, it bumps the counter row (the book row, or the `crm_feed` row)
-  with `conditional_update` and `bump_version_col = modseq`, reads the new value back, and stamps it on that row, all
-  in the write's transaction. No two rows share a `modseq`: a stage change stamps `n` on the deal and `n + 1` on its
+- **Which counter.** A contacts card takes its book's counter. Every CRM row (account, deal, activity, pipeline,
+  custom-field definition) and every card in the CRM book (the book `contacts_book_roles` names under role `crm`),
+  tombstones and revivals included, takes the single `crm_feed` counter; the CRM book row's `modseq` is never bumped.
+  So the CRM feed is ordered by one sequence. A per-book read of the CRM book returns its cards in the same order:
+  its values have holes where other CRM rows took theirs, which the cursor rule below allows.
+- **Allocation.** For **each row** a write changes, it bumps that row's counter row (the book row, or the `crm_feed`
+  row) with `conditional_update` and `bump_version_col = modseq`, reads the new value back, and stamps it on that row,
+  all in the write's transaction. No two rows share a `modseq`: a stage change stamps `n` on the deal and `n + 1` on its
   `stage_changed` activity, and an erasure stamps a value of its own on every row it rewrites. A page can therefore end
   between any two rows without the next call (`since` = the last row's `modseq`) skipping the rest of a transaction.
 - **Why that gives a feed with no gaps a reader can miss:** on Postgres the bumped counter row stays locked until the
@@ -387,26 +398,37 @@ Each rule names the test the implementing change must carry and the mutant that 
 - **One live row per unique tuple, and no acknowledged create is lost, with a writer paused or killed between the row
   and its key.** Over a `Database` wrapper that can pause or kill a writer after a named operation, on the Firestore
   mock, the one backend where the two writes commit apart (and Postgres when a test target for it exists): writer A
-  writes card X with `uid` U and is paused before its key create; writer B creates a card with `uid` U and is
-  acknowledged; A resumes and gets a conflict, and its rollback deletes X. The book lists exactly one card with U,
-  `get` by `uid` returns B's, and every id the test was given as created is readable. A second case kills A at the
-  pause and then lets B create U: X is returned by no read and B's create is acknowledged. Mutants: a read that skips
-  the back-pointer check (the kill case lists two cards with U); key-first order with a loser that deletes or
-  retargets a key whose target is absent (A is acknowledged and its card is never readable).
-- **On SQLite the race cannot start.** With A paused after its row write inside `BEGIN IMMEDIATE`, B's `begin` on its
-  own connection reports busy once a short busy timeout runs out; after A commits, B's create gets a conflict and the
-  book lists one card with U. Mutant: commit the row and the key in two transactions (B's `begin` then succeeds while
-  A is paused).
-- **A row has at most one guarding key.** On the Firestore mock, an account create with an `external_id` is killed
-  after its row write; a new account for the same org card with another `external_id` is then created and
-  acknowledged. Mutant: guard accounts with a second key table on `org_card_id`, written after the `external_id` key,
-  with the kill after the first key create (the org card is refused for good).
+  creates card X with `uid` U and is paused after its first write (a put or create on `contacts_cards` or
+  `contacts_card_uids`) and before its second; writer B creates a card with `uid` U and is acknowledged; A resumes.
+  The book lists exactly one card with U, `get` by `uid` returns one card, and every id the test was given as
+  created is readable. Under the correct order A's first write is the row, so A gets a conflict and its rollback
+  deletes X. A second case kills A at the same point and then lets B create U: X is returned by no read and B's
+  create is acknowledged. Mutants: a read that skips the back-pointer check (the kill case lists two cards with U);
+  key-first order with a loser that deletes or retargets a key whose target is absent (A's first write is then its
+  key, B takes the key over, A writes X and is acknowledged, and X is never readable).
+- **On SQLite a create's row is invisible until its key commits.** A is paused after its row write and before its key
+  create. A `get_by_key` of X's id on `contacts_cards` through a second connection, directly on the `Database` and not
+  through the store (whose back-pointer check would hide X anyway), returns nothing. B's `begin` on its own
+  connection reports busy once a short busy timeout runs out; after A commits, B's create gets a conflict and the book
+  lists one card with U. Mutant: commit the row and the key in two transactions (X is committed at the pause, so the
+  raw read returns it; the busy assertion alone would stay green, because A's second transaction holds
+  `BEGIN IMMEDIATE` too).
+- **A row has at most one guarding key.** On the Firestore mock, an account create with `external_id` E1 for org
+  card C is killed after the first key create the store makes; a new account for C with `external_id` E2 is then
+  created and acknowledged. Mutant: guard accounts with a second key table on `org_card_id`, created before the
+  `external_id` key (the kill then leaves a key on C naming the killed create's row, which rule 4 never removes, so
+  the second create loses that key and is refused).
 - **The feed cursor never passes an unseen change.** A writer commits between the reader's row query and the building
   of its response; the next call with the returned cursor returns that change. Mutant: return the book's counter read
   after the row query.
 - **A page never splits a transaction's changes away.** With a page limit of 1, reading the CRM feed across a stage
   change returns the deal and then, on the next call, its `stage_changed` activity. Mutant: one counter bump per
   transaction stamped on every row it changes (the second call skips the activity).
+- **CRM-book cards are in the CRM feed's one sequence.** In a CRM dataset, create two deals, read the CRM feed with a
+  page limit of 1 from 0 and then from each returned cursor until a call returns no row; then write a card in the CRM
+  book and call again with the last cursor: it returns the card, and no two rows the feed returned share a `modseq`.
+  Mutant: stamp CRM-book cards from the CRM book row's counter (the card takes 1, below the cursor, and the last call
+  returns nothing).
 - **A stage change and its `stage_changed` activity commit together.** A fault injected between them leaves neither.
   Mutant: write them in two transactions.
 - **An `external_id` is unique per entity kind.** An account and a deal with one `external_id` both insert; two accounts
