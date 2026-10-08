@@ -22,8 +22,10 @@ configured only by a `.buckconfig.local` you write.
 | `docs/` | the repository's documentation |
 | `third_party/` | C and C++ libraries built from pinned source archives |
 
-A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`;
-the Markdown link check reads its files with nothing more ([step 2](#2-build-linux-x86_64)).
+A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`
+and a row in the [module map](docs/architecture.md#the-module-map), which
+`//:src_layout` requires; the Markdown link check reads its files with
+nothing more ([step 2](#2-build-linux-x86_64)).
 A library kci owns is named `kci_<x>`.
 
 ## 1. Get buck2
