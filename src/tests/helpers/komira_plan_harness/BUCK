@@ -5,10 +5,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 # suites that run plans and compare results (canon_text.mojo states the
 # format). render.mojo turns a komira_arrow RecordBatch or Table into the
 # text, reading the Arrow buffers itself; parse.mojo reads an expected file
-# (a hand-written one may give a float as an exactly representable decimal);
-# compare.mojo compares the two under the expected file's order and float
-# policy and reports every mismatch. fixtures.mojo builds columns of every
-# type from raw buffers for the tests here and for suites that use canon.
+# (a hand-written one may give a float as an exactly representable decimal),
+# and nested_floats.mojo walks a nested cell along its type to refuse a
+# float leaf canon would not write; compare.mojo compares the two under the
+# expected file's order and float policy and reports every mismatch.
+# fixtures.mojo builds columns of every type from raw buffers for the tests
+# here and for suites that use canon.
 # door.mojo dlopens a plan-door library (its path a `--plan-door=` flag),
 # checks its ABI version and runs plan bytes through Door A (an Arrow C
 # stream) and Door B (Arrow IPC bytes, probe then fill), returning a Table
@@ -17,21 +19,26 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 # The welded tests, and the defect each one catches:
 #   test_render       a cell spelling per type; NULL taken from validity for
 #                     every type; the string `\N` against NULL; a type canon
-#                     cannot render refused by name.
+#                     cannot render refused by name; a table's zero-row
+#                     chunks not read and only their Fields' names, top
+#                     types, decimal parameters, time zones and
+#                     nullability checked.
 #   test_float        decimal-only floats accepted only when exact; a decimal
 #                     that disagrees with its bits refused (ties to even);
 #                     NaN and -0.0
 #                     compared by bits; ulps and rel tolerances.
 #   test_compare      order total / keys / none; every mismatch reported, not
 #                     only the first; schema and row-count mismatches; the
-#                     escapes and nested cells a parser refuses.
+#                     escapes, nested cells and nested float bits a parser
+#                     refuses; no first-fit search when the walk is exact.
 #   test_round_trip   render -> text -> parse -> compare is equal, and the
 #                     text is a fixed point, for a batch of every type.
 #   test_types_and_slices
 #                     the full type tree (cells that read alike never share a
 #                     schema line); floats in nested values as bits and in
 #                     dictionaries as floats; a leading `#` in a name; slice
-#                     offsets on every layout; a dense union by type code.
+#                     offsets on every layout, dictionaries included; a dense
+#                     union by type code.
 #   test_door_stub    both doors against :plan_door_stub: the table matches
 #                     its canonical text, Door A's stream is released exactly
 #                     once, the stub's async runtime ran the work; each

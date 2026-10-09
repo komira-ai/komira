@@ -1,13 +1,15 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
-from covcheck.lexer import declaration_only, executable_lines
+from covcheck.decls import declaration_only
+from covcheck.lexer import executable_lines
 from covcheck.paths import repo_files_of
 from covcheck.ratchet import parse_ratchet
 from covcheck.stats import Finding
 from covcheck.text import join, read_text
 
-# Declaration-only files: a file no test compiled whose executable lines
+# Declaration-only files (decls.declaration_only): a file no test compiled
+# whose executable lines
 # (the heuristic's) are all declarations the compiler emits no code for
 # (traits whose methods have no body, comptime values, imports) counts no
 # line and raises the information DeclarationOnlyFile, where it was charged
@@ -42,6 +44,7 @@ def test_declaration_only_shapes() raises:
     yes.append("comptime N = 3\ncomptime M: Int = N + 1\n")
     yes.append("from x import y\n\ntrait T:\n    def f(self) -> Int: ...\n")
     yes.append("trait T:\n    def f(self) -> Int:  # why\n        \"\"\"Doc.\n\n        return 1\n        \"\"\"\n        ...  # required\n")
+    yes.append("comptime D = {\n    \"a\": 1,\n}\n")
     yes.append("trait T:\n    comptime S: Dict[\n        String, Int\n    ]\n    def f(self, m: Dict[String,\n            Int]) -> Int:\n        ...\n")
     var wrong = List[String]()
     for i in range(len(yes)):
@@ -83,6 +86,19 @@ def test_near_misses_keep_counting() raises:
     no.append("comptime N = 1\n    def f(self): ...\n")
     # code after a docstring closes on its line
     no.append("trait T:\n    def f(self):\n        \"\"\"Doc.\n        \"\"\" + g()\n")
+    # a statement still open at the end of the file: ( [ {, and a struct
+    # with code inside an open ( or {
+    no.append("trait T:\n    ...\ncomptime X = (\n    1\n")
+    no.append("trait T:\n    ...\ncomptime X = [\n")
+    no.append("comptime X = {\n    1: 2,\n")
+    no.append("comptime X = (\n    1,\nstruct S:\n    def f(self) -> Int:\n        return 1\n")
+    no.append("comptime X = {\n    1: 2,\nstruct S:\n    def f(self) -> Int:\n        return 1\n")
+    # a one-line body that opens a bracket and ends in `: ...`
+    no.append("trait T:\n    def f(self) -> Int: y[1: ...\n")
+    # a carriage return with no line feed: one line to the lexer
+    no.append("comptime N = 1\rdef f() -> Int:\r    return 1\r")
+    # the lexer ends inside a string: r"""C:\""" never closes, hiding code
+    no.append("trait T:\n    ...\ncomptime P = r\"\"\"C:\\\"\"\"\ndef f() -> Int:\n    return 1\n")
     # nothing executable: nothing to leave out
     no.append("\"\"\"Doc.\"\"\"\nfrom x import y\n")
     var wrong = List[String]()

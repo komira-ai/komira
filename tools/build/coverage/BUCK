@@ -56,6 +56,15 @@ mojo_library(
         # in a string, a docstring or another comment's text), CRLF, and the
         # executable-line heuristic over every kind of line
         "tests/test_lexer.mojo",
+        # declaration reachability (report only): the functions a source
+        # declares (methods, multi-line and generic signatures, one-line
+        # bodies, nested functions, trait requirements left out, `def` in a
+        # string or comment ignored, scanner edges), each one's class
+        # (plain, always_inline, comptime_if), which ones no report gives a
+        # line, markers leaving their count, a branch-only file listing
+        # none, and analyze listing them, split by class, in both JSON
+        # results without changing any number or finding
+        "tests/test_decls.mojo",
         # the full-source denominator: a measured package's source file no
         # report names counts uncovered and raises UnmeasuredFile
         "tests/test_full_source.mojo",

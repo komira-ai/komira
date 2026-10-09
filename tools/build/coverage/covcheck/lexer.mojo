@@ -39,17 +39,12 @@ holds nothing but the string), or part of an import (`import x`,
 `from x import y`, a parenthesised list over several lines). Every other
 line is counted, declarations (`def`, `struct`, `comptime`, a decorator)
 and lone brackets included: this is a heuristic, which declaration
-reachability will replace with what the compiler emits.
-
-A file is **declaration-only** (`declaration_only`) when it has executable
-lines and every one is a declaration the compiler emits no code for:
-`trait` headers and `comptime` declarations at the top level, and in a
-trait's block `comptime` declarations, decorators and methods whose body is
-`...` alone. analyze.mojo counts none of such a file's lines. The test is
-conservative: whatever it does not recognise keeps the file counted.
+reachability will replace with what the compiler emits. A file no test
+compiled whose executable lines are all declarations the compiler emits no
+code for counts none of them: decls.declaration_only decides that.
 """
 
-from covcheck.text import split_lines, substr, suffix, trim
+from covcheck.text import split_lines, substr, suffix
 
 comptime _BACKSLASH: Int = 92
 comptime _HASH: Int = 35
@@ -74,18 +69,22 @@ struct LexState(Copyable, Movable):
 struct SourceLine(Copyable, Movable):
     """One line as the lexer read it. `text` is the line without a trailing
     carriage return; `comment` the byte offset of its comment's `#`, or -1;
-    `opens`/`closes` count `(` and `)` in its code; `semi` is the offset of
-    its first `;` in code, or -1; `brackets` is the `[` and `{` in its code
-    less the `]` and `}`; `tail_code` is set on an import line when a
-    statement that is not an import follows a `;`."""
+    `opens`/`closes` count `(` and `)` in its code, `brackets` is the
+    number of `[` less the number of `]` in it (decls.mojo reads both to
+    find where a signature ends), `braces` the number of `{` less the number
+    of `}` (decls.declaration_only reads all three to find where a
+    statement ends); `semi` is the offset of its first `;` in
+    code, or -1; `tail_code` is set on an import line when
+    a statement that is not an import follows a `;`."""
 
     var text: String
     var comment: Int
     var code: Bool
     var opens: Int
     var closes: Int
-    var semi: Int
     var brackets: Int
+    var braces: Int
+    var semi: Int
     var continued: Bool
     var is_import: Bool
     var tail_code: Bool
@@ -96,8 +95,9 @@ struct SourceLine(Copyable, Movable):
         self.code = False
         self.opens = 0
         self.closes = 0
-        self.semi = -1
         self.brackets = 0
+        self.braces = 0
+        self.semi = -1
         self.continued = False
         self.is_import = False
         self.tail_code = False
@@ -144,8 +144,9 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
     var code = False
     var opens = 0
     var closes = 0
-    var semi = -1
     var brackets = 0
+    var braces = 0
+    var semi = -1
     var continued = False
     var string_continues = False
     var i = 0
@@ -189,10 +190,14 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
             opens += 1
         elif c == 41:
             closes += 1
-        elif c == 91 or c == 123:
+        elif c == 91:
             brackets += 1
-        elif c == 93 or c == 125:
+        elif c == 93:
             brackets -= 1
+        elif c == 123:
+            braces += 1
+        elif c == 125:
+            braces -= 1
         elif c == 59 and semi < 0:
             semi = i
         elif c == _BACKSLASH and i == n - 1:
@@ -206,8 +211,9 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
     out.code = code
     out.opens = opens
     out.closes = closes
-    out.semi = semi
     out.brackets = brackets
+    out.braces = braces
+    out.semi = semi
     out.continued = continued
     return out^
 
@@ -306,128 +312,3 @@ def executable_lines(text: String) -> List[Int]:
         if ls[i].code and (not ls[i].is_import or ls[i].tail_code):
             out.append(i + 1)
     return out^
-
-
-def _indent(text: String) -> Int:
-    """The spaces before `text`'s first other byte; -1 when a tab or a
-    form feed is among them (the classifier then gives up)."""
-    var b = text.as_bytes()
-    var i = 0
-    while i < len(b):
-        var c = Int(b[i])
-        if c == 9 or c == 12:
-            return -1
-        if c != 32:
-            break
-        i += 1
-    return i
-
-
-def _code_of(l: SourceLine) -> String:
-    """`l`'s text before its comment, without the blanks around it."""
-    if l.comment >= 0:
-        return trim(substr(l.text, 0, l.comment))
-    return trim(l.text)
-
-
-def _block_follows(code: String) -> Bool:
-    """A header's last line opens an indented block: it ends with `:`."""
-    return code.endswith(":")
-
-
-def _ellipsis_block(code: String) -> Bool:
-    """A header's last line ends with `: ...`, a body of `...` alone."""
-    if not code.endswith("..."):
-        return False
-    return trim(substr(code, 0, code.byte_length() - 3)).endswith(":")
-
-
-comptime _TRAIT: Int = 1
-comptime _METHOD: Int = 2
-comptime _COMPTIME: Int = 3
-comptime _OTHER: Int = 4
-
-
-def declaration_only(text: String) -> Bool:
-    """Whether every executable line of `text` (see the module header) is a
-    declaration the compiler emits no code for, and there is at least one:
-    the file's statements outside imports are, at the top level, `trait`
-    headers and `comptime` declarations only, and in a trait's block
-    `comptime` declarations, decorators, `...`, and methods (`def`, `fn`)
-    whose body is `...` alone (docstrings and comments aside). Anything
-    else, or anything the classifier does not follow (a tab or form feed in
-    the indentation, a `;` outside an import, an import with code after its
-    `;`, a `comptime` statement opening a block, a header that ends neither
-    with `:` nor with `: ...`), makes it False: a file it is unsure of keeps
-    its lines counted. A trait method with any other body (a default
-    implementation, even `pass`) has code."""
-    var ls = lex_source(text)
-    var any = False
-    var in_trait = False
-    # The indentation of the method whose `...` body is being read, else -1.
-    var body_indent = -1
-    var depth = 0
-    var cont = False
-    var kind = 0
-    for i in range(len(ls)):
-        if not ls[i].code:
-            continue
-        if ls[i].is_import:
-            if ls[i].tail_code:
-                return False
-            continue
-        if ls[i].semi >= 0:
-            return False
-        any = True
-        var code = _code_of(ls[i])
-        var net = ls[i].opens - ls[i].closes + ls[i].brackets
-        if cont:
-            depth += net
-        else:
-            var ind = _indent(ls[i].text)
-            if ind < 0:
-                return False
-            if body_indent >= 0 and ind > body_indent:
-                if code != String("..."):
-                    return False
-                continue
-            if ind == 0:
-                in_trait = False
-                if _keyword_then_blank(code, String("trait")):
-                    kind = _TRAIT
-                elif _keyword_then_blank(code, String("comptime")):
-                    kind = _COMPTIME
-                else:
-                    return False
-            elif not in_trait:
-                return False
-            elif _keyword_then_blank(code, String("def")) or _keyword_then_blank(code, String("fn")):
-                kind = _METHOD
-            elif _keyword_then_blank(code, String("comptime")):
-                kind = _COMPTIME
-            elif code == String("...") or code.startswith("@"):
-                kind = _OTHER
-            else:
-                return False
-            body_indent = ind if kind == _METHOD else -1
-            depth = net
-        cont = depth > 0 or ls[i].continued
-        if cont:
-            continue
-        if depth < 0:
-            return False
-        # The statement ends on this line.
-        if kind == _TRAIT:
-            if _block_follows(code):
-                in_trait = True
-            elif not _ellipsis_block(code):
-                return False
-        elif kind == _METHOD:
-            if not _block_follows(code):
-                body_indent = -1
-                if not _ellipsis_block(code):
-                    return False
-        elif kind == _COMPTIME:
-            if _block_follows(code):
-                return False
-    return any
