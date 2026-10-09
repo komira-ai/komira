@@ -8,9 +8,11 @@
 #     (job_model.mojo) and every label a create writes (the identity, the
 #     run id under a validation run, the retention mark) plus the author's:
 #     the job is born stamped.
-#   * update: ONE UpdateJob of the whole job; its labels are the job's own
-#     (every label kci was not handed is kept, the adoption mark and a run id
-#     included) with the retention mark rewritten and the author's set.
+#   * update: ONE UpdateJob of the job as it stands with only kci's modelled
+#     places replaced (`overlay_job`: every field kci does not model is
+#     kept); its labels are the job's own (every label kci was not handed is
+#     kept, the adoption mark and a run id included) with the retention mark
+#     rewritten and the author's set.
 #   * adopt (`adopt_owned`): ONE UpdateJob of the job as it stands, with
 #     kci's labels replaced by the identity, the retention mark and, on a
 #     node kci marked adopted, the adoption mark. Never a run id.
@@ -59,6 +61,7 @@ from kci_cloud_gcp.job_model import (
     job_labels,
     live_model,
     model_digest,
+    overlay_job,
     parse_job,
 )
 from kci_cloud_gcp.names import account_email, derived_name, last_segment
@@ -222,8 +225,10 @@ struct GcpJobNode[C: Connector, TS: GcpTokenSource, S: Sleeper](EngineResource, 
         if not found:
             raise Error(String("kci_cloud_gcp: ") + self._node.id + String(": the job to update is gone"))
         var model = self._model()
-        var labels = merged_labels(job_labels(parse_job(encode_json(found.value()))), self._node.retention, author_labels(model))
-        self._s[].update_job(decode_json[Job](job_json(model, labels, self._name)))
+        var live = encode_json(found.value())
+        var labels = merged_labels(job_labels(parse_job(live)), self._node.retention, author_labels(model))
+        # Only kci's modelled places change: every other field stays.
+        self._s[].update_job(decode_json[Job](overlay_job(live, job_json(model, labels, self._name))))
 
     def adopt_owned(mut self, stamp: OwnerStamp, physical_id: String, creds: Creds) raises:
         var found = self._s[].get_job(physical_id)

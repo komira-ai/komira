@@ -25,7 +25,12 @@
 #   ready       `true` unless the terminal condition is CONDITION_FAILED
 # `job_json` writes a job from the model and the labels to write (kci's and
 # the author's, merged by the caller); the service's own fields are never
-# written.
+# written. An UPDATE writes `overlay_job`: the job as it stands with only
+# those places replaced (the labels, the first container's image, command,
+# args, env and resource limits, the task's maxRetries, timeout and service
+# account), so every field kci does not model (a working directory, a
+# volume, a parallelism, a second container) is kept, on an adopted job as
+# on any other.
 # =============================================================================
 
 from kci_cloud import LoweredNode, V1_IMAGE_PLATFORM, retention_label_key, retention_label_value
@@ -325,3 +330,68 @@ def job_json(model: List[ModelField], labels: List[Label], name: String = String
 
 def parse_job(text: String) raises -> JsonValue:
     return parse_json_value(text)
+
+
+def _with(obj: JsonValue, key: String, var value: JsonValue) raises -> JsonValue:
+    """`obj` (an object, or anything else read as `{}`) with member `key`
+    set to `value`, in place where it was, else appended."""
+    var out = JsonValue.empty_object()
+    var done = False
+    if obj.is_object():
+        for i in range(obj.num_members()):
+            var k = obj.key_at(i)
+            if k == key:
+                if not done:
+                    out.set_member(k^, value.copy())
+                    done = True
+                continue
+            out.set_member(k^, obj.value_at(i))
+    if not done:
+        out.set_member(key.copy(), value^)
+    return out^
+
+
+def _container_fields() -> List[String]:
+    return [String("image"), String("command"), String("args"), String("env")]
+
+
+def _task_fields() -> List[String]:
+    return [String("maxRetries"), String("timeout"), String("serviceAccount")]
+
+
+def overlay_job(live_json: String, desired_json: String) raises -> String:
+    """The job `live_json` holds with only kci's modelled places replaced by
+    `desired_json`'s (the file header); every other field is kept."""
+    var live = parse_json_value(live_json)
+    var want = parse_json_value(desired_json)
+    var out = _with(live, String("labels"), _member(want, String("labels")))
+    if want.has("name"):
+        out = _with(out, String("name"), want.get("name"))
+    var want_task = _member(_member(want, String("template")), String("template"))
+    var want_c = _member(want_task, String("containers")).element_at(0)
+    var lt = _member(out, String("template"))
+    var task = _member(lt, String("template"))
+    var containers = _member(task, String("containers"))
+    var first = JsonValue.empty_object()
+    if containers.array_len() > 0:
+        first = containers.element_at(0)
+    var cfields = _container_fields()
+    for i in range(len(cfields)):
+        ref k = cfields[i]
+        if want_c.has(k):
+            first = _with(first, k, want_c.get(k))
+    var resources = _with(_member(first, String("resources")), String("limits"), _member(_member(want_c, String("resources")), String("limits")))
+    first = _with(first, String("resources"), resources^)
+    var arr = JsonValue.empty_array()
+    arr.push(first^)
+    for i in range(1, containers.array_len()):
+        arr.push(containers.element_at(i))
+    task = _with(task, String("containers"), arr^)
+    var tfields = _task_fields()
+    for i in range(len(tfields)):
+        ref k = tfields[i]
+        if want_task.has(k):
+            task = _with(task, k, want_task.get(k))
+    lt = _with(lt, String("template"), task^)
+    out = _with(out, String("template"), lt^)
+    return out.serialize()
