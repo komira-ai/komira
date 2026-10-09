@@ -1,12 +1,21 @@
 load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# JSON Web Signature and JSON Web Token verification (RFC 7515, 7519) with
-# one pinned algorithm per verifier: ES256, EdDSA (Ed25519) or RS256. The
-# header gate refuses `none`, `HS*`, any other algorithm, `jwk`, `jku`,
+# The RS256 signing tests read komira_http_core's 2048-bit RSA test key
+# (PKCS#8 PEM, exported there).
+_RSA_KEY = {
+    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+}
+
+# JSON Web Signature and JSON Web Token signing and verification (RFC 7515,
+# 7519) with one algorithm per signer or verifier: ES256, EdDSA (Ed25519) or
+# RS256. The header gate refuses `none`, `HS*`, any other algorithm, `jwk`, `jku`,
 # `x5u`, `x5c` and `crit` before any key work; keys come from a
 # komira_jwks JWK Set and are selected by `kid`; `ClaimPolicy` pins one
-# issuer, one audience, one `typ`, the leeway and the longest lifetime.
+# issuer, one audience, one `typ`, the leeway and the longest lifetime. A
+# `JwsSigner` signs with one private key whose RFC 7638 thumbprint is the
+# `kid`; a `Keyring` publishes a key before it signs and retires a former key
+# only after the max token TTL; RFC 7523 assertions carry a random `jti`.
 #
 # The welded tests:
 # - test_rfc_vectors: RFC 7515 appendix A.2 (RS256) and A.3 (ES256), RFC 8037
@@ -22,6 +31,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   key_ops, length).
 # - test_claims: the policy's own checks and every claim refusal at its
 #   boundaries.
+# - test_signer: RFC 7638 and RFC 8037 thumbprint vectors, each key form's
+#   refusals, the exact header and token bytes, and every algorithm's tokens
+#   through the verify half with near-miss kid, alg, iss, aud and typ.
+# - test_keyring: publish before sign, retire after the max token TTL plus
+#   the leeway, the lifetime bound on what it signs, and its refusals.
+# - test_assertion: RFC 7523 assertions minted and verified for each
+#   algorithm; the jti is random, required, and never omitted.
 # - test_no_product_vocabulary: the sources name no product concept and hold
 #   no early date (komira_test_vocabulary).
 mojo_library(
@@ -35,15 +51,20 @@ mojo_library(
         "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
+        "tests/test_assertion.mojo",
         "tests/test_claims.mojo",
         "tests/test_header_gate.mojo",
         "tests/test_key_selection.mojo",
+        "tests/test_keyring.mojo",
         "tests/test_no_product_vocabulary.mojo",
         "tests/test_rfc_vectors.mojo",
+        "tests/test_signer.mojo",
         "tests/test_wycheproof_jws.mojo",
     ],
     test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
     test_data = {
+        "tests/test_assertion.mojo": _RSA_KEY,
+        "tests/test_signer.mojo": _RSA_KEY,
         # The vocabulary test reads the library's own sources, staged at their
         # repository paths.
         "tests/test_no_product_vocabulary.mojo": glob(

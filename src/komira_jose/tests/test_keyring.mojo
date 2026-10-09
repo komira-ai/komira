@@ -1,0 +1,546 @@
+# =============================================================================
+# test_keyring.mojo: `Keyring` (keyring.mojo): publish before sign, retire
+#   after the max token TTL plus the leeway, the lifetime bound on what it
+#   signs, time that only moves forward, and every refusal at its boundary.
+# =============================================================================
+#
+# Keys are Ed25519 seeds of 32 equal bytes (seed 1, 2, ...) and, for the
+# ES256 ring, the scalars 1, 2, ... A ring has max token TTL 300 s, leeway
+# 30 s and publish lead 600 s, starting at T0 = 1000000. Every token is
+# checked the way a relying party would: the document the ring rendered is
+# parsed with komira_jwks and a `JwsVerifier` pinned to the ring's algorithm
+# is built from it.
+#
+# main runs every test and reports every failure.
+# =============================================================================
+
+from std.testing import assert_equal, assert_true
+
+from komira_jose import (
+    JOSE_KEYRING_MAX_RETIRING,
+    JOSE_MAX_LEEWAY_S,
+    JOSE_MAX_PUBLISH_LEAD_S,
+    JOSE_MAX_TTL_S,
+    ClaimPolicy,
+    JwsSigner,
+    JwsVerifier,
+    Keyring,
+    verify_jwt,
+)
+from komira_jwks import parse_jwk_set
+from komira_secret_store import SecretValue
+
+
+comptime T0: Int64 = 1000000
+comptime TTL: Int64 = 300
+comptime LEEWAY: Int64 = 30
+comptime LEAD: Int64 = 600
+comptime ISS = "https://issuer.example/a"
+comptime AUD = "service-a"
+
+
+def _key(i: Int, alg: String = "EdDSA") raises -> JwsSigner:
+    if alg == "ES256":
+        var d = List[UInt8](length=32, fill=UInt8(0))
+        d[31] = UInt8(i)
+        return JwsSigner.es256(SecretValue(Span(d)))
+    var seed = List[UInt8](length=32, fill=UInt8(i))
+    return JwsSigner.eddsa(SecretValue(Span(seed)))
+
+
+def _kid(i: Int, alg: String = "EdDSA") raises -> String:
+    return _key(i, alg).kid()
+
+
+def _ring(alg: String = "EdDSA", now: Int64 = T0) raises -> Keyring:
+    return Keyring(
+        alg=alg, max_token_ttl_s=TTL, leeway_s=LEEWAY, publish_lead_s=LEAD, now=now
+    )
+
+
+def _ring_err(
+    alg: String = "EdDSA",
+    ttl: Int64 = TTL,
+    leeway: Int64 = LEEWAY,
+    lead: Int64 = LEAD,
+    now: Int64 = T0,
+) -> String:
+    try:
+        _ = Keyring(
+            alg=alg, max_token_ttl_s=ttl, leeway_s=leeway, publish_lead_s=lead, now=now
+        )
+    except e:
+        return String(e)
+    return String("")
+
+
+def _payload(now: Int64, life: Int64 = TTL) -> String:
+    return (
+        String('{"iss":"')
+        + ISS
+        + '","aud":"'
+        + AUD
+        + '","sub":"user-1","iat":'
+        + String(now)
+        + ',"exp":'
+        + String(now + life)
+        + "}"
+    )
+
+
+def _sign(mut ring: Keyring, now: Int64) raises -> String:
+    return ring.sign(_payload(now), String("at+jwt"), now)
+
+
+def _sign_err(mut ring: Keyring, payload: String, now: Int64) -> String:
+    try:
+        _ = ring.sign(payload, String("at+jwt"), now)
+    except e:
+        return String(e)
+    return String("")
+
+
+def _promote_err(mut ring: Keyring, kid: String, now: Int64) -> String:
+    try:
+        ring.promote(kid, now)
+    except e:
+        return String(e)
+    return String("")
+
+
+def _retire_err(mut ring: Keyring, kid: String, now: Int64) -> String:
+    try:
+        ring.retire(kid, now)
+    except e:
+        return String(e)
+    return String("")
+
+
+def _rotate_err(mut ring: Keyring, var key: JwsSigner, now: Int64) -> String:
+    try:
+        ring.rotate(key^, now)
+    except e:
+        return String(e)
+    return String("")
+
+
+def _check(doc: String, token: String, alg: String, now: Int64) -> String:
+    """How a relying party holding `doc` answers `token` at `now`: "" when
+    it accepts it, else the refusal."""
+    try:
+        var v = JwsVerifier(alg, parse_jwk_set(doc))
+        var p = ClaimPolicy(
+            issuer=ISS,
+            audience=AUD,
+            accept_typ="at+jwt",
+            now=now,
+            leeway_s=LEEWAY,
+            max_ttl_s=TTL,
+        )
+        _ = verify_jwt(token, v, p)
+    except e:
+        return String(e)
+    return String("")
+
+
+def _kids(doc: String) raises -> String:
+    """The kids of a rendered document, in order, joined by spaces."""
+    var set = parse_jwk_set(doc)
+    var out = String("")
+    for i in range(len(set.keys)):
+        if i > 0:
+            out += " "
+        out += set.keys[i].kid().value()
+    return out
+
+
+def _active_ring(i: Int, alg: String = "EdDSA") raises -> Keyring:
+    """A ring at T0 + LEAD whose signing key is key `i`."""
+    var r = _ring(alg)
+    r.rotate(_key(i, alg), T0)
+    _ = r.render_jwks(T0)
+    r.promote(_kid(i, alg), T0 + LEAD)
+    return r^
+
+
+def test_bounds() raises:
+    # Catches: each bound of the ring moved by one or not checked, and an
+    # algorithm compared loosely.
+    assert_equal(_ring_err(), "")
+    comptime TTL_E = "JoseError: the keyring max token TTL must be 1 to 86400 seconds"
+    assert_equal(_ring_err(ttl=0), TTL_E)
+    assert_equal(_ring_err(ttl=1), "")
+    assert_equal(_ring_err(ttl=JOSE_MAX_TTL_S), "")
+    assert_equal(_ring_err(ttl=JOSE_MAX_TTL_S + 1), TTL_E)
+    comptime LW = "JoseError: the keyring leeway must be 0 to 60 seconds"
+    assert_equal(_ring_err(leeway=-1), LW)
+    assert_equal(_ring_err(leeway=0), "")
+    assert_equal(_ring_err(leeway=JOSE_MAX_LEEWAY_S), "")
+    assert_equal(_ring_err(leeway=JOSE_MAX_LEEWAY_S + 1), LW)
+    comptime LD = "JoseError: the keyring publish lead must be 0 to 86400 seconds"
+    assert_equal(_ring_err(lead=-1), LD)
+    assert_equal(_ring_err(lead=0), "")
+    assert_equal(_ring_err(lead=JOSE_MAX_PUBLISH_LEAD_S), "")
+    assert_equal(_ring_err(lead=JOSE_MAX_PUBLISH_LEAD_S + 1), LD)
+    assert_equal(_ring_err(now=-1), "JoseError: the keyring time is negative")
+    assert_equal(_ring_err(now=0), "")
+    assert_equal(_ring_err(alg="ES256"), "")
+    assert_equal(_ring_err(alg="RS256"), "")
+    comptime ALG = "JoseError: the keyring algorithm must be ES256, EdDSA or RS256"
+    # The near-miss tables of the three names, and two refused names.
+    var misses = String("")
+    for a in [
+        "ES25", "ES256x", "xES256", "S256", "es256", "zS256", "ES25z",
+        "EdDS", "EdDSAx", "xEdDSA", "dDSA", "eDdsa", "zdDSA", "EdDSz",
+        "RS25", "RS256x", "xRS256", "S256", "rs256", "zS256", "RS25z",
+        "HS256", "none", "",
+    ]:
+        var got = _ring_err(alg=String(a))
+        if got != ALG:
+            misses += String(a) + " -> " + got + "; "
+    assert_equal(misses, "")
+    var r = _ring("ES256")
+    assert_equal(r.alg(), "ES256")
+
+
+def test_publish_before_sign() raises:
+    # Catches: a staged key that signs before any document held it, or
+    # before the publish lead passed; the lead counted from a later
+    # document; a promote of another key than the one named; and a promoted
+    # key left out of the documents its tokens are checked against.
+    var r = _ring()
+    assert_equal(
+        _sign_err(r, _payload(T0), T0), "JoseError: the keyring has no signing key"
+    )
+    assert_equal(_promote_err(r, _kid(1), T0), "JoseError: no key is staged")
+    r.rotate(_key(1), T0)
+    assert_equal(r.staged_kid().value(), _kid(1))
+    assert_true(not r.signing_kid())
+    comptime UNPUBLISHED = "JoseError: the staged key has not been in a rendered key set"
+    assert_equal(_promote_err(r, _kid(1), T0 + 5), UNPUBLISHED)
+    var first = r.render_jwks(T0 + 10)
+    assert_equal(_kids(first), _kid(1))
+    # A second document does not restart the lead.
+    _ = r.render_jwks(T0 + 500)
+    comptime EARLY = "JoseError: the staged key has not been published for the publish lead"
+    assert_equal(_promote_err(r, _kid(1), T0 + 10 + LEAD - 1), EARLY)
+    # Only the staged key's exact kid promotes it.
+    comptime OTHER = "JoseError: kid does not name the staged key"
+    var k1 = _kid(1)
+    var misses = String("")
+    var b = k1.as_bytes()
+    var n = len(b)
+    var near = List[String]()
+    near.append(String(k1[byte = 0 : n - 1]))
+    near.append(k1 + "x")
+    near.append(String("x") + k1)
+    near.append(String(k1[byte = 1 : n]))
+    near.append(k1.upper())
+    near.append(String("z") + String(k1[byte = 1 : n]))
+    near.append(String(k1[byte = 0 : n - 1]) + "z")
+    near.append(String(""))
+    near.append(_kid(2))
+    for k in near:
+        var got = _promote_err(r, k.copy(), T0 + 10 + LEAD)
+        if got != OTHER:
+            misses += k + " -> " + got + "; "
+    assert_equal(misses, "")
+    assert_equal(_promote_err(r, _kid(1), T0 + 10 + LEAD), "")
+    assert_equal(r.signing_kid().value(), _kid(1))
+    assert_true(not r.staged_kid())
+    # Every token verifies under the document rendered before it was
+    # signed, and under the first document that held the key.
+    var now = T0 + 10 + LEAD + 1
+    var doc = r.render_jwks(now)
+    assert_equal(_kids(doc), _kid(1))
+    var t = _sign(r, now)
+    assert_equal(_check(doc, t, "EdDSA", now), "")
+    assert_equal(_check(first, t, "EdDSA", now), "")
+
+
+def test_publication_is_per_staged_key() raises:
+    # Catches: a publication record that survives the key it was made for,
+    # so a newly staged key signs without ever being published.
+    var r = _ring()
+    r.rotate(_key(1), T0)
+    _ = r.render_jwks(T0)
+    r.retire(_kid(1), T0 + 1)
+    assert_true(not r.staged_kid())
+    assert_equal(_kids(r.render_jwks(T0 + 2)), "")
+    r.rotate(_key(2), T0 + 2)
+    assert_equal(
+        _promote_err(r, _kid(2), T0 + 2 * LEAD),
+        "JoseError: the staged key has not been in a rendered key set",
+    )
+    # The same after a promote: the next key starts unpublished.
+    var a = _active_ring(1)
+    a.rotate(_key(2), T0 + LEAD)
+    assert_equal(
+        _promote_err(a, _kid(2), T0 + 3 * LEAD),
+        "JoseError: the staged key has not been in a rendered key set",
+    )
+    # A lead of 0 still needs the key in a document first.
+    var z = Keyring(
+        alg="EdDSA", max_token_ttl_s=TTL, leeway_s=LEEWAY, publish_lead_s=0, now=T0
+    )
+    z.rotate(_key(1), T0)
+    assert_equal(
+        _promote_err(z, _kid(1), T0),
+        "JoseError: the staged key has not been in a rendered key set",
+    )
+    _ = z.render_jwks(T0)
+    assert_equal(_promote_err(z, _kid(1), T0), "")
+
+
+def test_rotation_and_retirement() raises:
+    # Catches: a former key that still signs after promote; a former key
+    # dropped from the document before every token it signed has expired
+    # (leeway included), or kept after; the signing key retired; and the
+    # document's order.
+    var r = _active_ring(1)
+    var t1_at = T0 + LEAD + 5
+    var t1 = _sign(r, t1_at)
+    r.rotate(_key(2), t1_at)
+    var staged_doc = r.render_jwks(t1_at)
+    assert_equal(_kids(staged_doc), _kid(1) + " " + _kid(2))
+    var p = t1_at + LEAD
+    r.promote(_kid(2), p)
+    assert_equal(r.signing_kid().value(), _kid(2))
+    assert_equal(len(r.retiring_kids()), 1)
+    assert_equal(r.retiring_kids()[0], _kid(1))
+    # The former key never signs again.
+    var t2 = _sign(r, p)
+    var doc = r.render_jwks(p)
+    assert_equal(_kids(doc), _kid(2) + " " + _kid(1))
+    assert_equal(_check(doc, t2, "EdDSA", p), "")
+    # t2 names key 2: a document holding only key 1 refuses it.
+    var r1 = _active_ring(1)
+    var doc1 = r1.render_jwks(p)
+    assert_equal(_check(doc1, t2, "EdDSA", p), "JoseError: kid names no key in the set")
+    # The signing key cannot be retired.
+    assert_equal(
+        _retire_err(r, _kid(2), p),
+        "JoseError: the signing key cannot be retired: promote a successor first",
+    )
+    # Key 1 stays published until its last token has expired with leeway.
+    comptime EARLY = "JoseError: a retiring key stays published for the max token TTL plus the leeway"
+    assert_equal(_retire_err(r, _kid(1), p + TTL + LEEWAY - 1), EARLY)
+    assert_equal(_check(r.render_jwks(p + TTL + LEEWAY - 1), t1, "EdDSA", t1_at + TTL + LEEWAY - 1), "")
+    assert_equal(_retire_err(r, _kid(1), p + TTL + LEEWAY), "")
+    assert_equal(_kids(r.render_jwks(p + TTL + LEEWAY)), _kid(2))
+    assert_equal(len(r.retiring_kids()), 0)
+    assert_equal(
+        _retire_err(r, _kid(1), p + TTL + LEEWAY),
+        "JoseError: kid names no key in the keyring",
+    )
+    # A staged key has signed nothing: it is removed at once.
+    var q = p + TTL + LEEWAY
+    r.rotate(_key(3), q)
+    assert_equal(_kids(r.render_jwks(q)), _kid(2) + " " + _kid(3))
+    assert_equal(_retire_err(r, _kid(3), q), "")
+    assert_true(not r.staged_kid())
+    assert_equal(_kids(r.render_jwks(q)), _kid(2))
+
+
+def test_retire_names_one_key() raises:
+    # Catches: a retiring key found by a loose compare, or only the first
+    # retiring key looked at; the grace measured from another key.
+    var r = _active_ring(1)
+    var now = T0 + LEAD
+    for i in range(2, 5):
+        r.rotate(_key(i), now)
+        _ = r.render_jwks(now)
+        now += LEAD
+        r.promote(_kid(i), now)
+    # Retiring: 1 (since T0+2*LEAD), 2 (T0+3*LEAD), 3 (T0+4*LEAD); 4 signs.
+    var kids = r.retiring_kids()
+    assert_equal(len(kids), 3)
+    assert_equal(kids[0], _kid(1))
+    assert_equal(kids[2], _kid(3))
+    comptime EARLY = "JoseError: a retiring key stays published for the max token TTL plus the leeway"
+    # The last retiring key is still in its grace when the first is out.
+    var t = now + TTL + LEEWAY - 1
+    assert_equal(_retire_err(r, _kid(3), t), EARLY)
+    assert_equal(_retire_err(r, _kid(1), t), "")
+    var k3 = _kid(3)
+    var n = k3.byte_length()
+    var misses = String("")
+    for k in [String(k3[byte = 0 : n - 1]), k3 + "x", String("x") + k3, String(k3[byte = 1 : n]), k3.upper(), String("")]:
+        var got = _retire_err(r, k.copy(), now + TTL + LEEWAY)
+        if got != "JoseError: kid names no key in the keyring":
+            misses += k + " -> " + got + "; "
+    assert_equal(misses, "")
+    assert_equal(_retire_err(r, _kid(3), now + TTL + LEEWAY), "")
+    assert_equal(r.retiring_kids()[0], _kid(2))
+
+
+def test_retiring_cap() raises:
+    # Catches: the cap moved by one, or checked after the old key is
+    # dropped (the ring then has no signing key).
+    var r = _active_ring(1)
+    var now = T0 + LEAD
+    for i in range(2, 2 + JOSE_KEYRING_MAX_RETIRING):
+        r.rotate(_key(i), now)
+        _ = r.render_jwks(now)
+        now += LEAD
+        r.promote(_kid(i), now)
+    assert_equal(len(r.retiring_kids()), JOSE_KEYRING_MAX_RETIRING)
+    var last = 2 + JOSE_KEYRING_MAX_RETIRING
+    r.rotate(_key(last), now)
+    _ = r.render_jwks(now)
+    now += LEAD
+    assert_equal(
+        _promote_err(r, _kid(last), now),
+        "JoseError: the keyring holds the most retiring keys: retire one first",
+    )
+    assert_equal(r.signing_kid().value(), _kid(last - 1))
+    assert_equal(_sign_err(r, _payload(now), now), "")
+    r.retire(_kid(1), now)
+    assert_equal(_promote_err(r, _kid(last), now), "")
+
+
+def test_rotate_refusals() raises:
+    # Catches: a key of another algorithm staged, a second staged key, and
+    # a kid the ring holds (the signing key, or the LAST retiring key)
+    # staged again.
+    comptime ALG = "JoseError: the key's algorithm is not the keyring's"
+    var e = _ring()
+    assert_equal(_rotate_err(e, _key(1, "ES256"), T0), ALG)
+    var s = _ring("ES256")
+    assert_equal(_rotate_err(s, _key(1), T0), ALG)
+    assert_equal(_rotate_err(s, _key(1, "ES256"), T0), "")
+    assert_equal(
+        _rotate_err(s, _key(2, "ES256"), T0),
+        "JoseError: a staged key is waiting: promote or retire it first",
+    )
+    comptime HELD = "JoseError: the key is already in the keyring"
+    var r = _active_ring(1)
+    assert_equal(_rotate_err(r, _key(1), T0 + LEAD), HELD)
+    var now = T0 + LEAD
+    for i in range(2, 4):
+        r.rotate(_key(i), now)
+        _ = r.render_jwks(now)
+        now += LEAD
+        r.promote(_kid(i), now)
+    # Retiring 1, 2; key 3 signs. Key 2 is the last retiring key.
+    assert_equal(_rotate_err(r, _key(2), now), HELD)
+    assert_equal(_rotate_err(r, _key(4), now), "")
+
+
+def test_sign_bounds_the_lifetime() raises:
+    # Catches: a token that outlives the max token TTL signed (so a former
+    # key's last token outlives its publication), the bound moved by one,
+    # and a payload that is not a claims object signed.
+    var r = _active_ring(1)
+    var now = T0 + LEAD
+    assert_equal(_sign_err(r, _payload(now, TTL), now), "")
+    assert_equal(
+        _sign_err(r, _payload(now, TTL + 1), now),
+        "JoseError: the token would outlive the keyring's max token TTL",
+    )
+    assert_equal(_sign_err(r, _payload(now, 1), now), "")
+    assert_equal(_sign_err(r, '{"exp":1}', now), "")
+    assert_equal(_sign_err(r, "{", now), "JoseError: the payload is not JSON")
+    assert_equal(_sign_err(r, "", now), "JoseError: the payload is not JSON")
+    assert_equal(_sign_err(r, "[]", now), "JoseError: the payload is not a JSON object")
+    assert_equal(
+        _sign_err(r, '{"exp":1,"exp":2}', now),
+        "JoseError: the payload names a member twice",
+    )
+    assert_equal(_sign_err(r, '{"iat":1}', now), "JoseError: claim exp is missing")
+    assert_equal(
+        _sign_err(r, '{"exp":"1"}', now),
+        "JoseError: claim exp is not a non-negative integer",
+    )
+    # The token a ring signs is the payload it was given.
+    var t = r.sign(_payload(now), String("at+jwt"), now)
+    assert_equal(_check(r.render_jwks(now), t, "EdDSA", now), "")
+
+
+def test_time_only_moves_forward() raises:
+    # Catches: a call that does not read the time, or accepts an earlier
+    # one (a clock step back would shorten a retirement).
+    comptime BACK = "JoseError: the keyring time went backwards"
+    var now = T0 + LEAD
+    var r = _active_ring(1)
+    assert_equal(_sign_err(r, _payload(now), now - 1), BACK)
+    var r2 = _active_ring(1)
+    assert_equal(_rotate_err(r2, _key(2), now - 1), BACK)
+    var r3 = _active_ring(1)
+    var got = String("")
+    try:
+        _ = r3.render_jwks(now - 1)
+    except e:
+        got = String(e)
+    assert_equal(got, BACK)
+    var r4 = _active_ring(1)
+    r4.rotate(_key(2), now)
+    _ = r4.render_jwks(now)
+    assert_equal(_promote_err(r4, _kid(2), now + LEAD), "")
+    assert_equal(_retire_err(r4, _kid(1), now + LEAD - 1), BACK)
+    var r5 = _active_ring(1)
+    r5.rotate(_key(2), now + LEAD)
+    assert_equal(_promote_err(r5, _kid(2), now + LEAD - 1), BACK)
+    # Each call moves the ring's time: an equal time is accepted, and a
+    # call at a later time sets the floor for the next.
+    var r6 = _active_ring(1)
+    assert_equal(_sign_err(r6, _payload(now), now), "")
+    assert_equal(_sign_err(r6, _payload(now + 5), now + 5), "")
+    assert_equal(_sign_err(r6, _payload(now + 4), now + 4), BACK)
+
+
+def test_es256_ring() raises:
+    # Catches: a ring that only works for one algorithm.
+    var r = _active_ring(1, "ES256")
+    var now = T0 + LEAD
+    var t = _sign(r, now)
+    assert_equal(_check(r.render_jwks(now), t, "ES256", now), "")
+    assert_equal(r.signing_kid().value(), _kid(1, "ES256"))
+
+
+def main() raises:
+    var failures = String("")
+    try:
+        test_bounds()
+    except e:
+        failures += String("test_bounds: ") + String(e) + "\n"
+    try:
+        test_publish_before_sign()
+    except e:
+        failures += String("test_publish_before_sign: ") + String(e) + "\n"
+    try:
+        test_publication_is_per_staged_key()
+    except e:
+        failures += String("test_publication_is_per_staged_key: ") + String(e) + "\n"
+    try:
+        test_rotation_and_retirement()
+    except e:
+        failures += String("test_rotation_and_retirement: ") + String(e) + "\n"
+    try:
+        test_retire_names_one_key()
+    except e:
+        failures += String("test_retire_names_one_key: ") + String(e) + "\n"
+    try:
+        test_retiring_cap()
+    except e:
+        failures += String("test_retiring_cap: ") + String(e) + "\n"
+    try:
+        test_rotate_refusals()
+    except e:
+        failures += String("test_rotate_refusals: ") + String(e) + "\n"
+    try:
+        test_sign_bounds_the_lifetime()
+    except e:
+        failures += String("test_sign_bounds_the_lifetime: ") + String(e) + "\n"
+    try:
+        test_time_only_moves_forward()
+    except e:
+        failures += String("test_time_only_moves_forward: ") + String(e) + "\n"
+    try:
+        test_es256_ring()
+    except e:
+        failures += String("test_es256_ring: ") + String(e) + "\n"
+    if failures != "":
+        print(failures)
+        raise Error("test_keyring: FAILED\n" + failures)
+    print("test_keyring: OK")
