@@ -7,7 +7,8 @@
 # What each test proves, and the defect it catches:
 #   * test_outside_subset_sends_nothing: `PUT .../environments/prod`, a
 #     workflow_dispatch POST, an installation route sent as the App and an
-#     App route sent with an installation token are refused NOT_ALLOWED with
+#     App route sent with an installation token, and a query with an
+#     unescaped `/`, are refused NOT_ALLOWED with
 #     ZERO requests reaching the fake (no token is even minted). Catches a
 #     CALL OUTSIDE THE ALLOWLIST (a row added, or the check skipped).
 #   * test_pagination_reads_last_page: five runs at two per page are read in
@@ -16,6 +17,9 @@
 #     the LAST page holds is in the result, in order. Four runs (an exactly
 #     full last page) take two requests; none take one. Catches a walk that
 #     stops before the last page, follows the Link's URL, or loops.
+#   * test_link_that_does_not_advance: a page whose next link names the same
+#     page raises BAD_RESPONSE after one request. Catches `<=` weakened to
+#     `<` (the walk would read the first page again and again).
 #   * test_page_bound: `max_pages` 2 over three pages raises rather than
 #     returning a partial list.
 #   * test_secondary_limit_not_hot_looped: after a secondary-limit 403 with
@@ -44,6 +48,7 @@ from komira_github import (
     CheckRunFields,
     GitHubAppClient,
     GitHubRequest,
+    GitHubResponse,
     ManualUnixClock,
     create_check_run,
     get_artifact,
@@ -150,12 +155,15 @@ def test_outside_subset_sends_nothing() raises:
         s.client, s.inst, GitHubRequest(String("POST"), String("/repos/alice/app/actions/workflows/7/dispatches"))
     ) + " "
     kinds += _kind_of_send(s.client, s.inst, get_authenticated_app()) + " "
+    kinds += _kind_of_send(
+        s.client, s.inst, GitHubRequest(String("GET"), String("/repos/alice/app"), String("per_page=1&ref=a/b"))
+    ) + " "
     try:
         _ = s.client.app_send(get_repository("alice", "app"))
         kinds += "SENT"
     except e:
         kinds += github_error_kind(String(e))
-    assert_equal(kinds, String("NOT_ALLOWED NOT_ALLOWED NOT_ALLOWED NOT_ALLOWED"))
+    assert_equal(kinds, String("NOT_ALLOWED NOT_ALLOWED NOT_ALLOWED NOT_ALLOWED NOT_ALLOWED"))
     assert_equal(s.client.transport().request_count(), 0, "nothing reached GitHub")
     print("  test_outside_subset_sends_nothing PASS")
 
@@ -201,6 +209,25 @@ def test_page_bound() raises:
     assert_equal(github_error_kind(why), String("BAD_RESPONSE"), why)
     assert_equal(s.client.transport().count_route(String("actions/list-workflow-runs-for-repo")), 2)
     print("  test_page_bound PASS")
+
+
+def test_link_that_does_not_advance() raises:
+    var s = _setup(5)
+    assert_equal(s.client.send(s.inst, get_repository("alice", "app")).status, 200)
+    var body = String('{"total_count":5,"workflow_runs":[{"id":1}]}')
+    var page = GitHubResponse(200, _bytes(body))
+    page.add_header(String("Link"), String('<https://api.github.com/repositories/1/actions/runs?per_page=2&page=1>; rel="next"'))
+    s.client.transport().arm(page^)
+    var before = s.client.transport().request_count()
+    var why = String("")
+    try:
+        _ = s.client.list_all(s.inst, list_workflow_runs("alice", "app", String(""), 2))
+    except e:
+        why = String(e)
+    assert_equal(github_error_kind(why), String("BAD_RESPONSE"), why)
+    assert_true(why.find("does not come after") >= 0, why)
+    assert_equal(s.client.transport().request_count(), before + 1, "one page read, no loop")
+    print("  test_link_that_does_not_advance PASS")
 
 
 def test_secondary_limit_not_hot_looped() raises:
@@ -337,6 +364,7 @@ def main() raises:
     test_outside_subset_sends_nothing()
     test_pagination_reads_last_page()
     test_page_bound()
+    test_link_that_does_not_advance()
     test_secondary_limit_not_hot_looped()
     test_primary_limit_per_installation()
     test_reads_and_writes()

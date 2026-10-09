@@ -26,6 +26,10 @@
 #     last one; 404 on the repository and its contents) nor any route
 #     needing another permission (403 on a check run). Catches a token
 #     request WITHOUT repository_ids (it would cover both repositories).
+#   * test_token_expiry_edges: the fake accepts an installation token 1 s
+#     before `expires_at` and refuses it at `expires_at`; the client sends a
+#     caller-held token with 301 s left and refuses (AUTH, nothing sent)
+#     with 300 s left.
 #   * test_401_drops_tokens: when GitHub stops accepting a cached token the
 #     call raises AUTH, and the next call mints a fresh token and succeeds.
 #   * test_suspended_installation: a suspended installation's token mint is
@@ -243,6 +247,30 @@ def test_one_repo_token() raises:
     print("  test_one_repo_token PASS")
 
 
+def test_token_expiry_edges() raises:
+    var s = _setup()
+    var tok = s.client.repo_contents_read_token(s.inst, s.app1)
+    var exp = tok.expires_at
+    var raw = GitHubHttpRequest(String("GET"), String("/repos/alice/app1"))
+    raw.add_header(String("Authorization"), String("Bearer ") + tok.token)
+    s.client.transport().set_now(exp - 1)
+    assert_equal(s.client.transport().send(raw).status, 200, "the fake accepts a token 1 s before expiry")
+    s.client.transport().set_now(exp)
+    assert_equal(s.client.transport().send(raw).status, 401, "and refuses it at expiry")
+    _at(s.client, exp - 301)
+    assert_equal(s.client.send_with_token(tok, get_repository("alice", "app1")).status, 200, "301 s left")
+    _at(s.client, exp - 300)
+    var before = s.client.transport().request_count()
+    var why = String("")
+    try:
+        _ = s.client.send_with_token(tok, get_repository("alice", "app1"))
+    except e:
+        why = String(e)
+    assert_equal(github_error_kind(why), String("AUTH"), why)
+    assert_equal(s.client.transport().request_count(), before, "a stale caller-held token is not sent")
+    print("  test_token_expiry_edges PASS")
+
+
 def test_401_drops_tokens() raises:
     var s = _setup()
     assert_equal(s.client.send(s.inst, get_repository("alice", "app1")).status, 200)
@@ -277,6 +305,7 @@ def main() raises:
     test_client_remints_before_expiry()
     test_token_refresh_margin()
     test_one_repo_token()
+    test_token_expiry_edges()
     test_401_drops_tokens()
     test_suspended_installation()
     print("PASS komira_github_fake client auth")
