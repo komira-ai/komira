@@ -190,6 +190,32 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
   skip itself green, whether gated or run by `buck2 test`
   ([`tests//negative/test_data:skip_77`](../tests/negative/test_data/BUCK)).
 
+### Time limits
+
+- **`buck2 test`** runs a test through buck2's test runner, which gives it
+  a timeout: the runner's `--timeout`, 600 s unless
+  `buck2 test <targets> -- --timeout <s>` sets another. (`[test]
+  timeout_default_s` does not reach these tests; it is the timeout of the
+  other kind of test provider.) A remote executor stops the action there, and
+  buck2 reports a plain `Fail` with `Timeout 0`: no word of the timeout, and
+  a `mojo_test`'s output, which its runner holds until the test exits, is
+  lost. So a `mojo_test` runs under [`test_deadline.sh`](test_deadline.sh),
+  which kills the test 60 s earlier ([`test_limit.bzl`](test_limit.bzl)),
+  lets the runner report it (`GATED TEST FAILED: <label> (exit 137)` with its
+  output), and prints `TEST TIME LIMIT: killed <label> after <n> s, under the
+  test runner's timeout of <m> s (komira.test_timeout_s)`. No rule can read
+  the runner's command line, so the root `.buckconfig` states its timeout as
+  `[komira] test_timeout_s` (komira's [`.buckconfig`](../../../.buckconfig)
+  and [`consumer.buckconfig`](../consumer.buckconfig) set 600, the
+  default): with `-- --timeout <s>`, pass `-c komira.test_timeout_s=<s>`
+  too. The `mojo_test` macro reads the key when the BUCK file loads; a value
+  that is not a whole number, or not over 60, is refused.
+- **A library's `test_srcs`** run as build actions, and buck2 gives a build
+  action no timeout: neither the runner's timeout nor the limit above
+  applies, only the executor's own default for an action that names none. A
+  gated test that hangs holds its worker until then, and fails as the
+  executor reports it.
+
 ### Outputs and the runnable directory
 
 Every compile targets the toolchain's `target_cpu` (`x86-64-v3`), not the CPU
@@ -983,6 +1009,8 @@ holds (no source locations), its two checks and test 52.
 | `<target>: defines entry "<e>" is not NAME or NAME=VALUE with NAME an identifier`, `... sets <NAME> twice` | [`defines.bzl`](defines.bzl) | a define the compiler would misread, or two values for one name |
 | `<target>: test_memory_cap_mib is <n>; it must be a number of MiB, or 0 for no cap` | [`defines.bzl`](defines.bzl) | a negative cap |
 | `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`mem_cap.sh`](mem_cap.sh) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
+| `TEST TIME LIMIT: killed <label> after <n> s, under the test runner's timeout of <m> s (komira.test_timeout_s)` | [`test_deadline.sh`](test_deadline.sh) | `buck2 test` of a `mojo_test` ran to 60 s short of the test runner's timeout and was killed (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
+| `[komira] test_timeout_s = <v> is not a whole number of seconds` / `must be over 60 s` | [`test_limit.bzl`](test_limit.bzl) | the root `.buckconfig` (or `-c`) states a test timeout a `mojo_test` cannot be limited under |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
 | `mojo_doc_json: <target>: the JSON differs from its golden <file>` | [`doc.bzl`](doc.bzl) | the library's `mojo doc` JSON changed; if on purpose, replace the golden with `[raw]` |

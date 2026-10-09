@@ -11,13 +11,15 @@
 # docstring states; those expectations were folded by hand with the same
 # step (offset, then `(h ^ byte) * prime mod 2^64` per byte).
 #
-# Float64: the docstring says "the 8 bytes of the IEEE-754 bit pattern", the
-# body converts the value to Int64 (`cast[DType.int64]`), which truncates
-# (1.5 and 1.0 fold the same bytes). The two readings agree only at +0.0, so
-# that is the one Float64 hash pinned exactly; elsewhere this file asserts
-# only what both readings give. The disagreement is reported, not pinned.
+# Float64 components hash the eight little-endian bytes of the IEEE-754 bit
+# pattern of the canonical representative (`canonical_bits_f64`): -0.0 folds
+# as +0.0 and every NaN as 0x7FF8000000000000. The expectations are FNV-1a
+# over those bytes, computed off-line with Python's `struct.pack('<d', x)`.
+# Equality on Float64 is `float_quotient_eq_f64`: +0.0 equals -0.0 and every
+# NaN equals every NaN, so equal keys hash equal (the hash-table contract).
 # =============================================================================
 
+from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from komira_expr.composite_key import (
@@ -137,13 +139,91 @@ def test_hash_bool_one_byte() raises:
 
 
 def test_hash_float64_zero_and_consistency() raises:
-    """+0.0 is eight zero bytes under both readings (bit pattern and value
-    conversion); 2.0 and 3.0 differ under both; equal values hash equal."""
+    """+0.0 is eight zero bytes; 2.0 and 3.0 differ; equal values hash
+    equal."""
     assert_equal(hash_key_value1(KeyValue1(_f(0.0))), UInt64(0xA8C7F832281A39C5))
     var h2 = hash_key_value1(KeyValue1(_f(2.0)))
     assert_equal(h2, hash_key_value1(KeyValue1(_f(2.0))))
     assert_true(h2 != hash_key_value1(KeyValue1(_f(3.0))))
     assert_true(h2 != hash_key_value1(KeyValue1(_f(0.0))))
+
+
+def _f_bits(bits: UInt64) -> ColumnValue:
+    """A Float64 component with an exact bit pattern (NaN payloads, -0.0)."""
+    return ColumnValue(bitcast[DType.float64](bits))
+
+
+def test_hash_float64_folds_the_bit_pattern() raises:
+    """The hash folds the IEEE-754 bits, not a value conversion to Int64.
+
+    A conversion truncates 1.5 to 1 and 1.0 to 1, so both would hash as
+    Int64 1 (0x89CD31291D2AEFA4). The pinned values are FNV-1a over
+    `struct.pack('<d', x)`: 1.5 = 0x3FF8000000000000,
+    1.0 = 0x3FF0000000000000, -2.5 = 0xC004000000000000."""
+    var h15 = hash_key_value1(KeyValue1(_f(1.5)))
+    var h10 = hash_key_value1(KeyValue1(_f(1.0)))
+    assert_equal(h15, UInt64(0xAA95E93229A27C80))
+    assert_equal(h10, UInt64(0xAAB1693229BA1DB8))
+    assert_equal(hash_key_value1(KeyValue1(_f(-2.5))), UInt64(0xA8B9A032280D66E1))
+    assert_true(h15 != h10)
+    assert_true(h10 != hash_key_value1(KeyValue1(_i(1))))
+
+
+def test_hash_float64_out_of_int64_range_is_its_bits() raises:
+    """1e19 is past 2^63, where a conversion to Int64 has no defined
+    result. The hash is FNV-1a over its bits, 0x43E158E460913D00."""
+    assert_equal(
+        hash_key_value1(KeyValue1(_f(1e19))), UInt64(0x0E3C2F98EEFF7A07)
+    )
+
+
+def test_hash_float64_every_nan_is_the_canonical_nan() raises:
+    """Every NaN hashes as the canonical quiet NaN 0x7FF8000000000000,
+    whatever its sign or payload, because every NaN is one key."""
+    comptime NAN_HASH = UInt64(0xAA96293229A2E940)
+    assert_equal(hash_key_value1(KeyValue1(_f_bits(0x7FF8000000000000))), NAN_HASH)
+    assert_equal(hash_key_value1(KeyValue1(_f_bits(0x7FF8000000000001))), NAN_HASH)
+    assert_equal(hash_key_value1(KeyValue1(_f_bits(0xFFF8000000000000))), NAN_HASH)
+    assert_equal(hash_key_value1(KeyValue1(_f_bits(0x7FF0000000000001))), NAN_HASH)
+
+
+def test_hash_float64_negative_zero_is_positive_zero() raises:
+    """-0.0 equals +0.0, so it must hash as +0.0 (eight zero bytes), not as
+    its own bit pattern 0x8000000000000000."""
+    assert_equal(
+        hash_key_value1(KeyValue1(_f_bits(0x8000000000000000))),
+        UInt64(0xA8C7F832281A39C5),
+    )
+
+
+def test_eq_float64_quotient_model() raises:
+    """Float64 equality is the GROUP BY model: +0.0 == -0.0, NaN == NaN for
+    any two NaNs, NaN != every number, and plain IEEE elsewhere. Each equal
+    pair also hashes equal."""
+    var pz = KeyValue1(_f(0.0))
+    var nz = KeyValue1(_f_bits(0x8000000000000000))
+    assert_true(eq_key_value1(pz, nz))
+    assert_equal(hash_key_value1(pz), hash_key_value1(nz))
+
+    var nan_a = KeyValue1(_f_bits(0x7FF8000000000000))
+    var nan_b = KeyValue1(_f_bits(0xFFF8000000000001))
+    assert_true(eq_key_value1(nan_a, nan_a))
+    assert_true(eq_key_value1(nan_a, nan_b))
+    assert_equal(hash_key_value1(nan_a), hash_key_value1(nan_b))
+
+    var one = KeyValue1(_f(1.0))
+    assert_false(eq_key_value1(nan_a, one))
+    assert_false(eq_key_value1(one, nan_a))
+    assert_false(eq_key_value1(pz, one))
+
+
+def test_eq_float64_nan_in_a_wider_key() raises:
+    """A NaN component does not stop two otherwise-equal 2-tuples from being
+    one key, and they hash alike."""
+    var a = KeyValue2(_s("g"), _f_bits(0x7FF8000000000000))
+    var b = KeyValue2(_s("g"), _f_bits(0x7FF8000000000002))
+    assert_true(eq_key_value2(a, b))
+    assert_equal(hash_key_value2(a), hash_key_value2(b))
 
 
 def test_hash_unknown_tag_folds_nothing() raises:

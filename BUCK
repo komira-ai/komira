@@ -119,6 +119,7 @@ _TESTS_LINTS = [
     "tests//functional/mem_cap:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
+    "tests//functional/test_deadline:shell_lint",
     "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
@@ -126,6 +127,7 @@ _TESTS_LINTS = [
     "//src/komira_authz_api:deps_lint",
     "//src/komira_aws_lambda_http:deps_lint",
     "//src/komira_contacts:deps_lint",
+    "//src/komira_http_auth:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
