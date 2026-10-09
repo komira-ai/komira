@@ -267,7 +267,7 @@ def _encode_posting_list(
             + ")"
         )
     if n < 0:
-        raise Error("_encode_posting_list: negative doc_count")
+        raise Error("_encode_posting_list: negative doc_count")  # cov: unreachable n is a len()
     write_uleb128(n, out)
     var pos = 0
     while pos < n:
@@ -373,7 +373,7 @@ def _encode_posting_list_with_blockmeta(
             + ")"
         )
     if n < 0:
-        raise Error("_encode_posting_list_with_blockmeta: negative doc_count")
+        raise Error("_encode_posting_list_with_blockmeta: negative doc_count")  # cov: unreachable n is a len()
     write_uleb128(n, out)
     # Block byte offsets are RELATIVE to the start of the per-block run (the byte
     # just AFTER the doc_count ULEB), matching how the BMW cursor seeks: it reads
@@ -728,7 +728,7 @@ struct DocStoreBuilder(Movable, Deinitable):
         enabled) is deferred to serialize."""
         var ln = len(source_bytes)
         if ln < 0:
-            raise Error("DocStoreBuilder.append: negative source length")
+            raise Error("DocStoreBuilder.append: negative source length")  # cov: unreachable ln is a len()
         for i in range(ln):
             self._blob_area.append(source_bytes[i])
         self._blob_offset.append(len(self._blob_area))
@@ -936,7 +936,7 @@ def serialize_split(
         var len_rel = len(postings_region) - off_rel
         # Recorded (off_rel, len_rel) are non-negative by construction.
         if off_rel < 0 or len_rel < 0:
-            raise Error("serialize_split: negative posting (offset, len)")
+            raise Error("serialize_split: negative posting (offset, len)")  # cov: unreachable both are len() differences of a growing list
         term_dict.set_posting_location(o, off_rel, len_rel)
 
     # ---- Step 2: serialize the term-dict region EXACTLY ONCE ----
@@ -1074,7 +1074,7 @@ def serialize_split(
     # "total + 8 trailing bytes" otherwise). `want_blockmax` already requires
     # total_token_count >= 0, so this is naturally satisfied; asserted here.
     if want_blockmax and total_token_count < 0:
-        raise Error(
+        raise Error(  # cov: unreachable want_blockmax already requires total_token_count >= 0
             "serialize_split: BLOCKMAX present but total_token_count absent"
             " (additive-chain hole)"
         )
@@ -1680,7 +1680,7 @@ struct SplitView(Movable, Deinitable):
                 )
             prev_end = l0_posting_offset + l0_posting_len
         if prev_end > footer_start:
-            raise Error("SplitView.parse: regions overlap / out of order")
+            raise Error("SplitView.parse: regions overlap / out of order")  # cov: unreachable each present region was validated to end by footer_start
 
         return SplitView(
             bytes=bytes^,
