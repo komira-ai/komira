@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/data.mojo: how the fake clouds lower the DATA types.
+# kci_cloud/shape/data.mojo: how the shared shapes lower the DATA types.
 # =============================================================================
 #
 # A data resource runs as no identity: it holds no `identity` role and no
@@ -22,19 +22,17 @@
 # =============================================================================
 
 from kci_reconciler import InputRef
-from kci_cloud import (
-    FIELD_BUCKET,
-    FIELD_TABLE,
+from kci_cloud.adapter import LoweredNode, Setting
+from kci_cloud.catalog import FIELD_BUCKET, FIELD_TABLE
+from kci_cloud.data import (
     KEY_FIELD,
-    LoweredNode,
-    Setting,
     index_role,
     path_text,
     table_key_text,
 )
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.shapes import ProviderShape, ROLE_BUCKET, ROLE_INDEX, ROLE_TABLE, ROLE_TTL
+from kci_cloud.shape.shapes import ProviderShape, ROLE_BUCKET, ROLE_INDEX, ROLE_TABLE, ROLE_TTL
 
 
 comptime DEFAULT_EXPIRY = "never"

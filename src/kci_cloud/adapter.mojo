@@ -138,6 +138,14 @@
 #   * `trust_render(scope)` and `trust_check(creds, scope)` are the cloud side
 #     of trust: what the cell's deploy identity must look like, and whether
 #     the live one does.
+#   * `image_registry(ctx)` is the pull and push address of the cell's
+#     bootstrap image registry (the `registry` item `bootstrap_resources`
+#     lists), computed from the cell's settings, machine and cell alone: pure,
+#     no read. Two cells never share one.
+#   * `registry_login(creds)` is the basic-auth user and secret a registry
+#     client presents to that registry, as plain strings (`RegistryLogin`), so
+#     this package needs no registry client. The secret is held in memory only,
+#     never printed, logged or put in argv.
 # =============================================================================
 
 from kci_reconciler import (
@@ -443,6 +451,23 @@ struct ExistingObject(Copyable, Movable, Deinitable):
         self.fields = copy.fields.copy()
 
 
+struct RegistryLogin(Copyable, Movable, Deinitable):
+    """What a registry client presents to the cell's image registry: the
+    basic-auth `user` and `secret`. The secret is a credential: it is never
+    printed, logged or put in argv (`__str__` is not defined on purpose)."""
+
+    var user: String
+    var secret: String
+
+    def __init__(out self, user: String, secret: String):
+        self.user = user
+        self.secret = secret
+
+    def __init__(out self, *, copy: Self):
+        self.user = copy.user.copy()
+        self.secret = copy.secret.copy()
+
+
 @fieldwise_init
 struct Principal(Copyable, Movable, Deinitable):
     """Who a set of credentials is: the principal, and the account or project
@@ -669,4 +694,14 @@ trait CloudAdapter(Movable):
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
         """Whether the live deploy identity is what `trust_render` says
         (FINDING_CELL findings; empty when it is)."""
+        ...
+
+    def image_registry(self, ctx: CellContext) -> String:
+        """The pull and push address of the cell's bootstrap image registry,
+        computed from `ctx`'s settings, machine and cell alone (pure)."""
+        ...
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        """The basic-auth user and secret a registry client presents to
+        `image_registry`'s registry with `creds`."""
         ...

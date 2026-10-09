@@ -10,7 +10,11 @@
 # the service account `runner`, a KEEP bucket `media` (`api` uses it
 # READ_WRITE), a table `orders` (retention DELETE) and a grant resource
 # `reads` (runner READ media). Every assertion below runs on the aws, gcp and
-# azure shapes of `FakeCloud` through ONE loop: clouds are values.
+# azure shapes of `FakeCloud` through ONE loop: clouds are values. A shape
+# whose grants are DERIVED (gcp) refuses a grant resource, so it reads the
+# second fixture, `test_data/deploy_lifecycle_graph_derived.json`: the same
+# graph with `reads` written as the `uses` line it is equivalent to, `uses
+# media READ` on its principal `runner` (same target, same access).
 #
 # 1. LIFECYCLE (`test_lifecycle_on_every_shape`), per shape:
 #    a. validate: the graph has no finding on the shape; a copy whose
@@ -134,9 +138,10 @@ from kci_cloud import (
 )
 from kci_resource_proto.resource import Resource, ResourceList
 
-from kci_cloud_fake import FakeCloud, ProviderShape, fake_host, fake_url
+from kci_cloud_fake import FakeCloud, ProviderShape, fake_host, fake_url, shape_named
 
 comptime _FIXTURE = "src/kci_cloud_fake/tests/test_data/deploy_lifecycle_graph.json"
+comptime _DERIVED_FIXTURE = "src/kci_cloud_fake/tests/test_data/deploy_lifecycle_graph_derived.json"
 comptime _MACHINE = "shop"
 comptime _CELL = "blue"
 comptime _OTHER_CELL = "green"
@@ -161,10 +166,14 @@ def _has(haystack: String, needle: String) -> Bool:
     return haystack.find(needle) >= 0
 
 
-def _fixture() raises -> String:
+def _fixture(shape: ProviderShape) raises -> String:
+    """The authored graph `shape` reads: the fixture, or on a shape whose
+    grants are DERIVED, its rewrite (the file header)."""
     var text = String("")
-    with open(String(_FIXTURE), "r") as f:
+    var path = String(_DERIVED_FIXTURE) if shape.grants_derived() else String(_FIXTURE)
+    with open(path, "r") as f:
         text = f.read()
+    assert_equal(_has(text, '"id": "reads"'), not shape.grants_derived(), "the grant reads, or its uses line")
     assert_true(_has(text, '"id": "api"'), "the fixture is the authored graph")
     return text^
 
@@ -185,6 +194,13 @@ def _reg(id: String, shape: ProviderShape) raises -> Clouds:
     var reg = Clouds(Catalog.v1())
     reg.add(describe(FakeCloud(id, shape=shape.copy())))
     return reg^
+
+
+def _is_derived(shape: String) raises -> Bool:
+    """Whether the built-in cloud called `shape` derives its grants' stamp,
+    read from the shape (never from the name alone). An unknown name
+    raises: it never reads as "not derived"."""
+    return shape_named(shape).grants_derived()
 
 
 def _shapes() -> List[ProviderShape]:
@@ -454,13 +470,20 @@ def _apply_and_check(
         assert_equal(store.count_confirmed(scope.key(n.id)), 1, tag + ": one confirmed record: " + n.id)
 
     # The provider kinds, pinned per shape.
+    # On a DERIVED shape `reads` is runner's own `uses` line: its edge node
+    # is runner's, `runner/u-<h>`.
+    var reads_owner = String("runner") if _is_derived(shape) else String("reads")
+    var reads = _grant_of(nodes, reads_owner, String("media"), String("READ"))
     var pins = _pins(
         shape,
         _grant_of(nodes, String("web"), String("api"), String("CALL")),
         _grant_of(nodes, String("api"), String("media"), String("READ_WRITE")),
-        _grant_of(nodes, String("reads"), String("media"), String("READ")),
+        reads,
     )
-    assert_equal(_grant_of(nodes, String("reads"), String("media"), String("READ")), "reads/grant")
+    if _is_derived(shape):
+        assert_true(reads.startswith("runner/u-"), tag + ": reads is runner's edge node: " + reads)
+    else:
+        assert_equal(reads, "reads/grant")
     for p in range(len(pins)):
         if pins[p].kind.byte_length() == 0:
             assert_true(fake.store[].find(pins[p].node) < 0, tag + ": folded, no node: " + pins[p].node)
@@ -651,10 +674,10 @@ def _destroy_and_check(
 
 
 def test_lifecycle_on_every_shape() raises:
-    var json = _fixture()
     var shapes = _shapes()
     for s in range(len(shapes)):
         var shape = shapes[s].copy()
+        var json = _fixture(shape)
         var tag = shape.name.copy()
         var id = String("p-e2e-") + shape.name
         var reg = _reg(id, shape)
@@ -708,10 +731,10 @@ def _converged(
 
 
 def test_a_fault_at_call_k_converges_without_a_double_create() raises:
-    var json = _fixture()
     var shapes = _shapes()
     for s in range(len(shapes)):
         var shape = shapes[s].copy()
+        var json = _fixture(shape)
         var id = String("p-k-") + shape.name
         var reg = _reg(id, shape)
         var nodes = lower_data(FakeCloud(id, shape=shape.copy()), _list(json))
@@ -801,7 +824,7 @@ def _intruder_is_refused(shape: ProviderShape, by_other_cell: Bool) raises:
     var id = String("p-own-") + shape.name
     var reg = _reg(id, shape)
     var fake = FakeCloud(id, shape=shape.copy())
-    var json = _fixture()
+    var json = _fixture(shape)
     var rest = _without_orders(json)
     var store = InMemoryStateStore()
     _ = _done(apply_resources(reg, fake, _blue(), _list(rest), Creds.none(), store), tag)

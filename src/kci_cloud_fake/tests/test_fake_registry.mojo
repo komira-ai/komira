@@ -95,10 +95,18 @@ def _graph(
     push: String = String("WRITE"),
     metrics: Bool = True,
     arg: String = String("--push"),
+    derived: Bool = False,
 ) -> String:
     """The graph of the file header. `retention` is the registry's written
     retention (empty: unset, KEEP); `push` the builder's verb on it;
-    `metrics` keeps the builder's METRICS line; `arg` is its one arg."""
+    `metrics` keeps the builder's METRICS line; `arg` is its one arg.
+    `derived`: the graph a shape whose grants are DERIVED reads: the grant
+    `pull-images` written as `uses images READ` on its principal `puller`."""
+    var puller = String('{"id":"puller","serviceAccount":{}},')
+    puller += String('{"id":"pull-images","grant":{"principal":{"resource":"puller"},"target":{"resource":"images"},')
+    puller += String('"access":"READ"}}')
+    if derived:
+        puller = String('{"id":"puller","serviceAccount":{},"uses":[{"target":{"resource":"images"},"access":"READ"}]}')
     var ret = String('"retention":"') + retention + String('",') if retention.byte_length() > 0 else String("")
     var uses = String('"uses":[{"target":{"resource":"images"},"access":"') + push + String('"}')
     if metrics:
@@ -110,9 +118,7 @@ def _graph(
         + String('{"id":"builder",') + uses
         + String('"containerJob":{"image":{"digest":"sha256:b1"},"args":["') + arg + String('"],')
         + String('"env":{"REGISTRY":{"ref":{"resource":"images","standard":"ADDRESS"}}}}},')
-        + String('{"id":"puller","serviceAccount":{}},')
-        + String('{"id":"pull-images","grant":{"principal":{"resource":"puller"},"target":{"resource":"images"},')
-        + String('"access":"READ"}}')
+        + puller
         + String("]}")
     )
 
@@ -240,13 +246,14 @@ def test_the_kit_on_every_hosting_shape() raises:
             # The kit destroys what it applied and expects nothing left, so
             # `images` is written DELETE here (its KEEP default is test 3's).
             var d = String("DELETE")
+            var dv = shape.grants_derived()
             run_conformance(
                 reg,
                 cloud,
                 _ctx(),
-                _list(_graph(retention=d)),
-                _list(_graph(retention=d, arg=String("--push-all"))),
-                _list(_graph(retention=d, metrics=False, arg=String("--push-all"))),
+                _list(_graph(retention=d, derived=dv)),
+                _list(_graph(retention=d, arg=String("--push-all"), derived=dv)),
+                _list(_graph(retention=d, metrics=False, arg=String("--push-all"), derived=dv)),
                 String("images/registry"),
             )
         except e:
