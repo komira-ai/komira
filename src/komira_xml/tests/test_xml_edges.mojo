@@ -153,6 +153,20 @@ def test_xml_declaration_shapes() raises -> Int:
         "XML declaration",
         "encoding after standalone",
     )
+    # Each pseudo-attribute at most once ([23] XMLDecl). Byte offsets:
+    # '<?xml version="1.0" ' ends at 20; '... encoding="UTF-8" ' at 37;
+    # '... standalone="no" ' at 36.
+    f += _refused('<?xml version="1.0" version="1.0"?><a/>', "XML declaration at byte 20", "version twice")
+    f += _refused(
+        '<?xml version="1.0" encoding="UTF-8" encoding="UTF-8"?><a/>',
+        "XML declaration at byte 37",
+        "encoding twice",
+    )
+    f += _refused(
+        '<?xml version="1.0" standalone="no" standalone="no"?><a/>',
+        "XML declaration at byte 36",
+        "standalone twice",
+    )
     f += _refused("<?xml?><a/>", "must start with the version", "empty XML declaration")
     f += _refused("<?xml ?><a/>", "must start with the version", "XML declaration of spaces")
     return f
