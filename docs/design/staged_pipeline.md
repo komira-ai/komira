@@ -4,7 +4,8 @@ Status: design, not built. **EXISTS** names code on `main`; everything else is P
 (all absent from `main`): the stage `beta`, the jobs `beta` and `beta_install`, the step kind `TEST`,
 the step field `checks`, the outcome `SUPERSEDED` (as a successful stop), the job output `superseded`,
 the step name `superseded`, the `main_red` decision `stalled`, rules R23 and R24. Related: continuous
-publish (`docs/design/continuous_publish.md`, open in #1168), [ci.md](../ci.md),
+publish (`docs/design/continuous_publish.md`, #1168; a path, not a link, until both docs are on
+`main`, since the doc links lint refuses a dead link; P4 makes it a link), [ci.md](../ci.md),
 [release machines](release_machine.md), [gamma validation](gamma_validation.md).
 
 ## The ruling, and what changes
@@ -25,9 +26,11 @@ doc must answer (`auto_promotion.mojo`, R16): "a job-level group's pending repla
 prod job". Rules 1 and 4 already hold (the set hash, R19); rules 2 and 3 hold for the pipeline as a
 whole, not per stage: a fast `build` waits for a slow `prod`, and pausing prod stalls gamma too.
 
-**Relation to continuous publish (#1168).** #1168 stays as written. This doc **supersedes** three
-parts of it: "Trigger: per merge, coalesced" (one run per push, coalesced as a whole), the "within one
-release duration" arithmetic, and the **placement** of its two gates in "The gate between gamma and
+**Relation to continuous publish (#1168).** #1168 stays as written, except for its two pointers to
+this doc, at its trigger section and its rollback time. This doc **supersedes** three parts of it:
+"Trigger: per merge, coalesced" (one run per push, coalesced as a whole), the "within one release
+duration" arithmetic and the rollback time resting on it (restated at the end of b), and the
+**placement** of its two gates in "The gate between gamma and
 prod": S10c's release checks move from `build` into beta's `checks`, and S12's installed-bytes checks
 from gamma's `validate` to `beta_install`, so both run **before** anything is published. Everything
 else in #1168 stands. Merge order: **#1168 first, then this doc**; the two do not conflict, and the
@@ -93,8 +96,10 @@ release the cancelled commit. **Groups alone cannot hold rule 3.** Four parts do
    `build` proceeds even when `main` has moved: by 1 it is the newest that reached that stage, and
    stopping it there would starve a stage whenever pushes come faster than the pipeline. The check
    at `build` costs one fetch; a revision is stopped there only if a newer releasable commit landed
-   before its first kci action, and that commit's own push run is then pending or cancelled (and
-   so repaired).
+   before its first kci action. That commit's own push run is then pending, cancelled (and so
+   repaired, 4) or already ahead. **Or it has none:** GitHub creates no push run for a head commit
+   whose message carries a skip marker (`[skip ci]` and its variants), and occasionally fails to
+   create one. Then nothing carries the tip until the next push; `stalled` reports it (4).
 3. **The line on every stage.** `the prod line`'s "main is at `<tip>`, past `<revision>`" moves into
    every release job's last step (R20), success or failure, so each stage's summary names a newer
    commit it did not carry.
@@ -119,11 +124,22 @@ release the cancelled commit. **Groups alone cannot hold rule 3.** Four parts do
    within **30 days** of the run and at most **50 re-runs** of one run; `stalled` re-runs once, and
    past 30 days it opens the issue instead. A second loss, or no `actions: write` (question 6),
    opens an issue naming the run and the endpoint. A human cancel of the tip is therefore undone:
-   the way to hold a release is prod's required reviewer, not a cancel.
+   the way to hold a release is prod's required reviewer, not a cancel. **No push run of the tip:**
+   when a push run whose `build` job ran its `superseded` step completes, and main's releasable tip
+   has no kci push run in any state, there is nothing to re-run; `stalled` opens an issue naming the
+   tip, which the next push to `main` releases. Before revision 3 the stopped older commit would
+   have released instead; the admission check costs this delay, never a wrong release (question 8).
 
-With 1 to 4 a dropped tip is re-queued without a human, an older revision never starts `build`
-after a newer one and a re-run of an old run never promotes, and every stage says when main moved
-past it. Pausing prod should hold only the prod group (P0 proves it).
+With 1 to 4 a dropped tip that has a push run is re-queued without a human (one without opens an
+issue), an older revision never starts `build` after a newer one and a re-run of an old run never
+promotes, and every stage says when main moved past it. Pausing prod should hold only the prod group
+(P0 proves it).
+
+**The arithmetic, restated (superseding #1168's).** A push to `main` that touches code reaches prod,
+or is carried there by a newer commit, within one pass through the four stages plus at most one wait
+per stage for the run already in it: at most two release durations, as before, and nearer one as the
+stages overlap. A dropped tip adds the time until `stalled` runs; a tip with no push run waits for the
+next push. The time to roll back is one PR check plus that bound.
 
 **Rejected: separate workflows chained by `workflow_run`.** It fires only from the default branch
 (no break-glass), allows three levels (`main-red` would be a fourth and never run), sets
@@ -200,31 +216,41 @@ re-run; tip cancelled and only `docs/**` or `**.md` commits after it → re-run 
 the raw tip" red); tip cancelled with a queued push run of the tip → nothing; tip cancelled with
 only a manual run of the tip active → re-run (mutant "count every event" red); cancelled non-tip →
 nothing; `run_attempt` 2 → issue, no re-run (mutant "drop the attempt cap" red); run older than 30
-days → issue, no re-run; (e) the re-run's request, on a fake runs API where attempt 1's `build`
+days → issue, no re-run; a run stopped at `build` and a releasable tip with no push run in any state
+→ issue naming the tip, no re-run call (mutant "no run means nothing to do" red), and the same with
+a push run of the tip in progress → nothing; (e) the re-run's request, on a fake runs API where attempt 1's `build`
 succeeded and `gamma` was cancelled: exactly one call, to `.../runs/{id}/rerun-failed-jobs` (or the
 per-job form P0 (e) selects), and no call to `.../runs/{id}/rerun` (mutant "full re-run" red).
 
 ## e. Beta's checks: the end-to-end suites, and the built files installed
 
-**On the farm (the `beta` job):** a `TEST` step runs **`buck2 test`** over `checks:
-"//src/tests/e2e/..."`, a pattern, so a new suite joins with no edit. **Claimed, proven in P3:**
-`buck2 test` builds the matched targets first, so welded tests run too, and it runs the standalone
-`mojo_test`s a build never runs (`broker_e2e` holds
-only one; `komira_shuffle_e2e` and `komira_tls_interop_e2e` hold some). Today the pattern covers 11
+**On the farm (the `beta` job):** a `TEST` step runs two commands over `checks:
+"//src/tests/e2e/..."`, a pattern, so a new suite joins with no edit: **`buck2 build <pattern>`,
+then `buck2 test <pattern>`**, the order the PR check uses (ci.md), the second only if the first
+passed. Both are needed. The build README says "`buck2 test` on a `mojo_library` therefore runs
+nothing; its tests run when the library (or anything depending on it) is built"
+([tools/build/mojo/README.md](../../tools/build/mojo/README.md), "`test_srcs`, not `tests`"), and 8
+of the e2e packages hold no `mojo_test` at all (only `broker_e2e`, `komira_shuffle_e2e` and
+`komira_tls_interop_e2e` hold one or more). The build runs the welded tests; the test runs the
+standalone `mojo_test`s a build never runs. Today the pattern covers 11
 test-only packages, none in `release/artifacts.textproto`, none run by a release today. The
 MinIO-backed `komira_job_supervisor/tests/e2e` exits 77 without its flag, a skip that cannot fail,
 so it stays out until it cannot skip.
 
-**The suite can go red, under beta's command alone (P3).** A kci test pins the step's command: verb
-`test`, the `checks` pattern (mutant `build` red). The PR check cannot prove the rest: it runs
-`./buck2 build` before `./buck2 test` (ci.md), so a failing welded test goes red at the build step
-whether or not `buck2 test` alone runs it. So P3 runs a farm task (a scratch branch, never pushed
-for review, no workflow run) that executes **exactly** beta's command, `./buck2 test
-//src/tests/e2e/...`, with no build before it, on two trees, each with **one** plant: (1) a
-failing assertion in a welded `test_srcs` test of one e2e package; (2) on a tree without (1), a
-failing standalone `mojo_test`. Each must exit non-zero and name the planted test; the unplanted
-tree must pass. The record quotes each command, its exit status and its `Commands:` line with
-`local: 0`. Two trees, so one red cannot hide the other.
+**The suite can go red, under beta's commands alone (P3).** A kci test pins the step's commands:
+`build` then `test`, both over the `checks` pattern (mutants "drops the build" and "drops the test",
+each red). The PR check cannot prove the rest: it runs the two verbs over the whole cell, not over
+beta's pattern. So P3 runs a farm task (a scratch branch, never pushed for review, no workflow run)
+that executes **exactly** beta's two commands, `./buck2 build //src/tests/e2e/...` then `./buck2
+test //src/tests/e2e/...`, on two trees, each with **one** plant: (1) a failing assertion in a
+welded `test_srcs` test of an e2e package with no `mojo_test`: the build must exit non-zero and name
+it; (2) on a tree without (1), a failing standalone `mojo_test`: the build passes and the test must
+exit non-zero and name it. The unplanted tree must pass both. Each tree also runs the command a
+mutant keeps: tree (1) `./buck2 test` alone, tree (2) `./buck2 build` alone. Each is expected to
+pass, which shows the dropped command is the one that catches that plant; if tree (1) goes red under
+`test` alone instead, the README is wrong, the build is redundant but harmless, and the record says
+so. The record quotes each command, its exit status and its `Commands:` line with `local: 0`. Two
+trees, so one red cannot hide the other.
 
 **Zero spend** rests on what can be enforced: `beta`'s environment holds no secret and no cloud
 credential, so a suite that reached a cloud would be unauthenticated. "No suite opens a socket off
@@ -256,7 +282,7 @@ stage {
   break_glass: true
   step {
     name: "e2e"
-    kind: TEST                       # NEW: `buck2 test` over `checks`; writes no release directory
+    kind: TEST                       # NEW: `buck2 build`, then `buck2 test`, over `checks`; no release directory
     platform: "linux-x86_64"
     artifacts: "release/artifacts.textproto"
     checks: "//src/tests/e2e/..."    # NEW field (#1168 S10c's, on a TEST step)
@@ -299,9 +325,9 @@ Each slice: the check that is red before it. **Go** marks a project-owner action
 |---|---|---|---|
 | P0 | **Probe** on a `probe/*` branch: a workflow of hosted jobs that only `sleep` and `echo`, `permissions: {}` (one job `actions: write` on its own run), no secret, no farm, no cloud, no upload, plus a `probe-wait` environment with a required reviewer. It records, from the runs API: (a) the run conclusion when a job is replaced in its group; (b) a job waiting on a reviewer holds only its group, and whether a newer arrival replaces it; (c) a job skipped by `if:` takes no group slot; (d) a re-run attempt joins the same group and downloads attempt 1's artifact; (e) on a run whose first job succeeded and whose second was cancelled while pending, a token-requested `rerun-failed-jobs` starts, and records: whether cancelled jobs count as failed (if not, the per-job `.../jobs/{job_id}/rerun` is tested instead), that the succeeded first job is **not** re-run, and that attempt 2 reads attempt 1's `needs` outputs and downloads its artifact. Plus a read of the farm's trust policy for a `beta` subject. Existing runs cannot show (a) to (e): today's `kci.yml` has only the workflow-level group (line 203). | each fact written here with the run's URL, or P2 and P4 stop | **Go**: it starts workflow runs and creates an environment |
 | P1 | kci: `never_backward` per run; main-line filter; the descendant read and `SUPERSEDED` (exit 0, output `superseded`); R24's admission check; gamma's "carried" list | c's table, rows 1, 3 to 9; rows 2 and 10 guard | none |
-| P2 | `main_red.py`: `classify` from jobs and the `superseded` step; `last_green` filtered; `stalled` and its re-run | d's tests (a) to (e) | the re-run needs question 6 |
-| P3 | Tasks: the loopback audit; the payload digests on a real tree (e); beta's command on the two planted trees (e). kci: `TEST`, `checks` (`buck2 test`), beta's read of gamma's listing, step 4b for TEST, the payload comparison, validations from the handed local channel; `build` writes the local index | machine fixtures (TEST with neither; `checks` on PUBLISH) refused; c row 4; a TEST run with a mismatched `--release-set-hash` refused exit 3 with zero runner calls, and without the flag under Actions exit 2 (mutant: 4b without TEST), copying the prod case at `test_kci_ref_check.mojo:542-554` for beta, gamma and validate; a planted payload mismatch refused; the command pinned to `test`; beta's command alone red on each of the two planted trees (e). Regression (green before, mutant named): a local-channel record with another sha256 refused (mutant: skip the compare in `conda_install_env.mojo`) | none |
-| P4 | The switch, one PR: `release/machine.textproto` with beta; `kci.yml` with job groups, `beta`, `beta_install`, the `superseded` steps, R23/R24 guards and the line on every job; R16, R23, R24 in `kci_workflow_check`; ci.md's "Queued runs" and "Never backward" rewritten for every stage | fixtures refused: a workflow-level group, a job without a group, `queue: max`, a job missing R23's conjunct or step, gamma reading `beta`'s unvalidated `set_hash` (R19), a job without R24; today's `kci.yml` fails the new R16 | **Go**: changes the release; the first push creates `beta` and spends farm time |
+| P2 | `main_red.py`: `classify` from jobs and the `superseded` step; `last_green` filtered; `stalled`, its re-run, and its issue when the tip has no push run | d's tests (a) to (e) | the re-run needs question 6 |
+| P3 | Tasks: the loopback audit; the payload digests on a real tree (e); beta's command on the two planted trees (e). kci: `TEST`, `checks` (`buck2 build`, then `buck2 test`), beta's read of gamma's listing, step 4b for TEST, the payload comparison, validations from the handed local channel; `build` writes the local index | machine fixtures (TEST with neither; `checks` on PUBLISH) refused; c row 4; a TEST run with a mismatched `--release-set-hash` refused exit 3 with zero runner calls, and without the flag under Actions exit 2 (mutant: 4b without TEST), copying the prod case at `test_kci_ref_check.mojo:542-554` for beta, gamma and validate; a planted payload mismatch refused; the commands pinned to `build` then `test` (mutants: drops the build, drops the test); beta's two commands alone red on each of the two planted trees, and each tree green under the command its mutant keeps (e). Regression (green before, mutant named): a local-channel record with another sha256 refused (mutant: skip the compare in `conda_install_env.mojo`) | none |
+| P4 | The switch, one PR: `release/machine.textproto` with beta; `kci.yml` with job groups, `beta`, `beta_install`, the `superseded` steps, R23/R24 guards and the line on every job; R16, R23, R24 in `kci_workflow_check`; ci.md's "Queued runs" and "Never backward" rewritten for every stage; the paths between this doc and continuous publish become links | fixtures refused: a workflow-level group, a job without a group, `queue: max`, a job missing R23's conjunct or step, gamma reading `beta`'s unvalidated `set_hash` (R19), a job without R24; today's `kci.yml` fails the new R16 | **Go**: changes the release; the first push creates `beta` and spends farm time |
 | P5 | Retention of `kci-release-*` to the ruled value | none (a setting) | **Go** with question 3 |
 | P6 | #1168 S10c's derived checks join beta's `checks`; S12's join `beta_install` | as #1168 states them | as #1168 |
 
@@ -340,3 +366,8 @@ P4 depends on P0 to P3.
    the issue `stalled` opens. *Recommendation:* grant it to `main_red`'s job only, used for one
    `rerun-failed-jobs` of a run whose head is main's releasable tip; it runs no pull-request code.
 7. **P0's probe.** *Recommendation:* go; it spends only hosted minutes and touches no cloud.
+8. **A tip with no push run (b.2, b.4).** A commit merged with a skip marker in its message gets no
+   push run; if an older run reaches `build` after it landed, that run stops `SUPERSEDED` and nothing
+   releases until the next push, where before revision 3 the older commit would have released.
+   *Recommendation:* accept, with `stalled`'s issue. Refusing skip markers in the PR check would not
+   close it: the merge commit's message is written at merge time, after the check ran.
