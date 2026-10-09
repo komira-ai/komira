@@ -12,7 +12,8 @@
 #   S2  `json_scan_string` decodes `\n` `\r` `\t` to their control bytes and
 #       passes any other escaped byte through (`\"` `\\` `\/`).
 #   S3  `json_scan_string` refuses (-1) a backslash that is the LAST byte, an
-#       unterminated string, and a value that does not start with a quote.
+#       unterminated string, and a value that does not start with a quote;
+#       each refusal leaves `out` empty (no stale or partial value).
 #   S4  `json_scan_number` reads a signed integer and stops at the first
 #       non-digit; a sign with no digit, or no digit at all, is -1.
 #   S5  `json_skip_value` skips a string, a nested object/array (a brace
@@ -60,6 +61,8 @@ def test_scan_string_decodes_escapes() raises:
 
 
 def test_scan_string_refusals() raises:
+    # Each refusal starts from a stale `out` and must leave it empty: neither
+    # the old value nor the partly decoded prefix survives a -1.
     var out = String("stale")
     var trailing = _b('"ab\\')
     assert_equal(
@@ -67,11 +70,15 @@ def test_scan_string_refusals() raises:
         -1,
         "a backslash with nothing after it is unterminated",
     )
+    assert_equal(out, String(""), "trailing backslash: no partial value")
+    out = String("stale")
     var open = _b('"abc')
     assert_equal(json_scan_string(Span(open), 0, out), -1, "no closing quote")
+    assert_equal(out, String(""), "unterminated: no partial value")
+    out = String("stale")
     var bare = _b("abc")
     assert_equal(json_scan_string(Span(bare), 0, out), -1, "not a string")
-    assert_equal(out, String(""), "a refusal leaves no stale value behind")
+    assert_equal(out, String(""), "not a string: no stale value")
 
 
 def test_scan_number_signed_and_refused() raises:
