@@ -559,7 +559,7 @@ def replace_agg_subtree_with_source(
 # LITERAL / BINARY_OP / UNARY_OP / ALIAS and answers **False for everything
 # else**. ⛔ It deliberately does NOT reuse `plan_helpers._expr_fingerprint`:
 # that function's fallback arm fingerprints an unhandled tag by its text
-# rendering (`"?:<tag>:" + String(expr)`), so equality for those tags would
+# rendering (`"?:<tag>:" + _fp_str(String(expr))`), so equality for those tags would
 # rest on how an expression prints. Collapsing one aggregate into another
 # needs every equal answer to come from an arm that compares the tag's
 # fields; any other tag declines.
