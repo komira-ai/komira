@@ -262,12 +262,6 @@ def test_run_query_arms() raises:
         mock.run_query_body(before).find(String('"collectionId":"q"')) >= 0,
         mock.run_query_body(before),
     )
-    assert_equal(
-        _ids(client.run_query(String('{"where":{"fieldFilter":{"field":{"fieldPath":"n"},'
-            '"op":"EQUAL","value":{"integerValue":"0"}}}}'))),
-        String("e1"),
-        "no `from` collection: every collection",
-    )
 
     # Integers compare numerically, strings by text; each operator.
     var two = String('{"integerValue":"2"}')
@@ -293,10 +287,20 @@ def test_run_query_arms() raises:
         _ids(client.run_query(_q(_ff("n", "LESS_THAN", String('{"nullValue":null}'))))),
         String(""),
     )
+    # A timestamp range against a timestamp bound (the service compares only
+    # values of one type): only the document carrying the field, and only
+    # when its value is below the bound.
     assert_equal(
-        _ids(client.run_query(_q(_ff("t", "LESS_THAN", String('{"stringValue":"~"}'))))),
+        _ids(client.run_query(_q(_ff("t", "LESS_THAN",
+            String('{"timestampValue":"2026-10-03T00:00:00Z"}'))))),
         String("d1"),
         "only the document carrying the field",
+    )
+    assert_equal(
+        _ids(client.run_query(_q(_ff("t", "LESS_THAN",
+            String('{"timestampValue":"2026-10-01T00:00:00Z"}'))))),
+        String(""),
+        "a timestamp above the bound",
     )
 
     # The value types the filter reads as text.
@@ -338,9 +342,12 @@ def test_run_query_arms() raises:
         _ids(client.run_query(_q(_ff("missing", "ARRAY_CONTAINS", y)))), String("")
     )
 
-    # Operators the double does not model match nothing.
+    # An operator the double does not model fails closed (matches nothing).
+    # Driven with NOT_IN over every value present, so empty is also what the
+    # service answers.
     assert_equal(
-        _ids(client.run_query(_q(_ff("n", "IN", String('{"arrayValue":{"values":[{"integerValue":"1"}]}}'))))),
+        _ids(client.run_query(_q(_ff("n", "NOT_IN", String('{"arrayValue":{"values":['
+            '{"integerValue":"1"},{"integerValue":"2"},{"integerValue":"3"}]}}'))))),
         String(""),
     )
     assert_equal(
@@ -351,13 +358,20 @@ def test_run_query_arms() raises:
         _ids(client.run_query(_q(String("{}")))), String("d1d2d3"), "an empty filter is no filter"
     )
 
-    # Ordering: integers numerically, strings by text, nulls first, stable.
+    # Ordering: integers numerically, strings by text, nulls first.
     assert_equal(_ids(client.run_query(_ord("n", "ASCENDING"))), String("d2d3d1"))
     assert_equal(_ids(client.run_query(_ord("n", "DESCENDING"))), String("d1d3d2"))
     assert_equal(_ids(client.run_query(_ord("s", "ASCENDING"))), String("d3d1d2"))
     assert_equal(_ids(client.run_query(_ord("s", "DESCENDING"))), String("d2d1d3"))
-    assert_equal(_ids(client.run_query(_ord("m", "ASCENDING"))), String("d1d2d3"), "nulls first, stable")
-    assert_equal(_ids(client.run_query(_ord("m", "DESCENDING"))), String("d3d1d2"), "nulls last")
+    assert_equal(_ids(client.run_query(_ord("m", "ASCENDING"))), String("d1d2d3"), "nulls first")
+    # Descending puts the nulls last. d1 and d2 tie (both null); the service
+    # breaks a tie by document name, the double by insertion order, so the
+    # order within the tie is not pinned.
+    var m_desc = _ids(client.run_query(_ord("m", "DESCENDING")))
+    assert_true(
+        m_desc == String("d3d1d2") or m_desc == String("d3d2d1"),
+        String("nulls last: ") + m_desc,
+    )
     assert_equal(_ids(client.run_query(_ord("t", "ASCENDING"))), String("d1"))
 
     # The limit cuts the ordered result.

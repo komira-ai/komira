@@ -225,7 +225,14 @@ def test_delete_where_in() raises:
     var left = db.query_rows[_Rt](
         reactor, _TABLE, _cols(), Filter(), List[Order](), Optional[UInt32](),
     )
-    assert_equal(_ids(left), String("job-c,job-b"), "the non-members are kept")
+    # Only the set is pinned: with no orderBy the service answers in document
+    # name order and the mock in insertion order, and this test is not about
+    # either.
+    var kept = _ids(left)
+    assert_true(
+        kept == String("job-b,job-c") or kept == String("job-c,job-b"),
+        String("the non-members are kept: ") + kept,
+    )
     _ = db^
     print("    [PASS] delete_where evaluates IN client-side")
 
