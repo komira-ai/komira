@@ -15,7 +15,8 @@
 #     refused (the derived stamp's refusal, shared with the gcp fake);
 #   * image_registry is pure and differs for two cells; registry_login
 #     presents the access-token user;
-#   * trust_check refuses every cell (it cannot read the provider yet).
+#   * trust_check refuses every cell, saying trust checking is not
+#     configured yet (its inputs are an open design question).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -147,12 +148,13 @@ def test_the_image_registry_is_pure_and_per_cell() raises:
     assert_equal(login.secret, "unit-token")
 
 
-def test_trust_check_refuses_until_it_can_read() raises:
+def test_trust_check_refuses_until_it_is_configured() raises:
     var cloud = _cloud()
     _ = cloud.configure(_ctx(String("shop"), String("staging"), _settings()))
     var f = cloud.trust_check(Creds.none(), CellScope(String("shop"), String("staging")))
     assert_equal(len(f), 1)
-    assert_true(f[0].reason.find("refuses every cell") >= 0)
+    assert_true(f[0].reason.find("trust checking is not configured yet") >= 0, f[0].reason)
+    assert_true(f[0].reason.find("every cell is refused") >= 0, f[0].reason)
 
 
 def main() raises:
@@ -166,6 +168,6 @@ def main() raises:
     test_a_grant_resource_is_refused()
     print("test_the_image_registry_is_pure_and_per_cell")
     test_the_image_registry_is_pure_and_per_cell()
-    print("test_trust_check_refuses_until_it_can_read")
-    test_trust_check_refuses_until_it_can_read()
+    print("test_trust_check_refuses_until_it_is_configured")
+    test_trust_check_refuses_until_it_is_configured()
     print("OK")

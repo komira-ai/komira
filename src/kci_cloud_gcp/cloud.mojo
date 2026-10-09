@@ -32,10 +32,12 @@
 #                    changes, and nothing is deleted.
 #   whoami           the token's principal (komira_gcp_core's token
 #                    information read).
-#   trust_check      REFUSES every cell for now: reading the workload
-#                    identity provider needs the IAM v1beta client method
-#                    this branch does not carry yet, so a deploy cannot pass
-#                    a trust check that does not exist.
+#   trust_check      REFUSES every cell: trust checking is not configured
+#                    yet. What it must compare (the workload identity
+#                    provider's name and the repository condition it holds,
+#                    deploy_step.md question Q14) is an open design
+#                    question, and a cell's settings name neither, so no
+#                    cell can pass a check that has nothing to compare.
 #   image_registry   `<region>-docker.pkg.dev/<project>/<machine>-<cell>-images`,
 #                    from the settings, machine and cell alone.
 #   registry_login   the access-token user and a fresh access token.
@@ -370,10 +372,15 @@ struct GcpCloud[C: Connector, TS: GcpTokenSource](CloudAdapter, Movable):
         return (
             String("cloud \"") + self._id + String("\": cell ") + scope.cell + String(" of ") + scope.machine
             + String(" is deployed into project ") + self._s[].project
-            + String(" by an identity a workload identity provider admits; trust_check does not read it yet")
+            + String(" by an identity a workload identity provider admits; trust checking is not configured yet")
         )
 
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
+        # OPEN QUESTION (docs/design/deploy_step.md, the trust_check row and
+        # question Q14): which workload identity provider a cell trusts, and
+        # the repository condition it must hold byte for byte, are not
+        # decided, and `configure` takes no setting for them. Until they are,
+        # every cell is refused here; no setting is invented.
         var out = List[Finding]()
         out.append(
             Finding(
@@ -381,8 +388,8 @@ struct GcpCloud[C: Connector, TS: GcpTokenSource](CloudAdapter, Movable):
                 String("(cell)"),
                 String("trust"),
                 String("cloud \"") + self._id
-                + String("\" cannot check the cell's trust yet (the workload identity provider read is not in this build),")
-                + String(" so it refuses every cell rather than pass one it did not check"),
+                + String("\": trust checking is not configured yet (which workload identity provider a cell trusts,")
+                + String(" and the repository it admits, are not decided), so every cell is refused"),
             )
         )
         return out^
