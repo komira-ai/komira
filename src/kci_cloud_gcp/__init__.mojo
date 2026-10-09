@@ -61,6 +61,7 @@ from kci_cloud_gcp.job_model import (
     lowered_timeout,
     size_limits,
     lowered_size,
+    with_kci_labels,
 )
 from kci_cloud_gcp.names import (
     KIND_ACCOUNT,

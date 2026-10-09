@@ -28,7 +28,8 @@
 #                    the shape it can read under the lowering's names.
 #   release          one patch: an account's description loses kci's lines
 #                    (leaving it empty, the description being kci's whole),
-#                    a job's labels lose every kci label; nothing else
+#                    a job's labels and its execution template's lose
+#                    every kci label; nothing else
 #                    changes, and nothing is deleted.
 #   whoami           the token's principal (komira_gcp_core's token
 #                    information read).
@@ -92,9 +93,11 @@ from kci_resource_proto.resource import Resource
 from komira_gcp_core import GcpTokenSource
 from komira_retry import Sleeper
 from komira_http_core.transport.io_stream import Connector
+from komira_gcp_run.job import Job
+from komira_proto_codec import decode_json
 from komira_proto_codec.codec import encode_json
 
-from kci_cloud_gcp.job_model import ModelField, job_labels, live_model, parse_job
+from kci_cloud_gcp.job_model import ModelField, job_labels, live_model, parse_job, with_kci_labels
 from kci_cloud_gcp.names import (
     KIND_ACCOUNT,
     KIND_BINDING,
@@ -106,7 +109,7 @@ from kci_cloud_gcp.names import (
 )
 from kci_cloud_gcp.node_account import GcpAccountNode
 from kci_cloud_gcp.node_binding import GcpBindingNode
-from kci_cloud_gcp.node_job import GcpJobNode, labels_dict, without_kci
+from kci_cloud_gcp.node_job import GcpJobNode
 from kci_cloud_gcp.owned import owned_records
 from kci_cloud_gcp.session import GcpConnectors, GcpEndpoints, GcpSession
 
@@ -362,9 +365,8 @@ struct GcpCloud[C: Connector, TS: GcpTokenSource, S: Sleeper](CloudAdapter, Mova
             var job = self._s[].get_job(record.id)
             if not job:
                 raise Error(String("kci_cloud_gcp: the job to release is gone: ") + record.owner_node)
-            var j = job.value().copy()
-            j.labels = labels_dict(without_kci(j))
-            self._s[].update_job(j^)
+            # kci's labels go from the job and from its execution template.
+            self._s[].update_job(decode_json[Job](with_kci_labels(encode_json(job.value()), List[Label]())))
             return
         raise Error(String("kci_cloud_gcp: ") + record.owner_node + String(" is a ") + record.kind + String(", which is never adopted"))
 

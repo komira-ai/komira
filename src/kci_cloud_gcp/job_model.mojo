@@ -25,7 +25,12 @@
 #   ready       `true` unless the terminal condition is CONDITION_FAILED
 # `job_json` writes a job from the model and the labels to write (kci's and
 # the author's, merged by the caller); the service's own fields are never
-# written. An UPDATE writes `overlay_job`: the job as it stands with only
+# written. kci's labels and the author's go to the job's `labels` AND to its
+# execution template's (`template.labels`): Cloud Run copies only the
+# template's labels onto each execution, which is what is billed and
+# logged, so every execution carries the identity, the run id and the
+# retention mark too. `with_kci_labels` sets (an adoption) or drops (a
+# release) kci's labels in both places and keeps every other label. An UPDATE writes `overlay_job`: the job as it stands with only
 # those places replaced (the labels, the first container's image, command,
 # args, env and resource limits, the task's maxRetries, timeout and service
 # account), so every field kci does not model (a working directory, a
@@ -33,7 +38,7 @@
 # on any other.
 # =============================================================================
 
-from kci_cloud import LoweredNode, V1_IMAGE_PLATFORM, retention_label_key, retention_label_value
+from kci_cloud import LoweredNode, V1_IMAGE_PLATFORM, is_kci_label_key, retention_label_key, retention_label_value
 from kci_reconciler import Label, ModelledDigest
 from komira_json import JsonValue, parse_json_value
 
@@ -283,6 +288,22 @@ def author_labels(model: List[ModelField]) -> List[Label]:
     return out^
 
 
+def _labels_object(labels: List[Label]) -> String:
+    var out = String("{")
+    for i in range(len(labels)):
+        if i > 0:
+            out += String(",")
+        out += json_text(labels[i].key) + String(":") + json_text(labels[i].value)
+    return out + String("}")
+
+
+def _has_key(labels: List[Label], key: String) -> Bool:
+    for i in range(len(labels)):
+        if labels[i].key == key:
+            return True
+    return False
+
+
 def job_json(model: List[ModelField], labels: List[Label], name: String = String("")) raises -> String:
     """A job's JSON from `model` (the file header), carrying `labels`, and
     named `name` when it is given (an update names the job it replaces)."""
@@ -290,12 +311,16 @@ def job_json(model: List[ModelField], labels: List[Label], name: String = String
     var out = String("{")
     if name.byte_length() > 0:
         out += String("\"name\":") + json_text(name) + String(",")
-    out += String("\"labels\":{")
+    out += String("\"labels\":") + _labels_object(labels)
+    # The execution template carries kci's labels and the author's (not a
+    # label the job holds that kci was not handed).
+    var carried = List[Label]()
+    var authors = author_labels(model)
     for i in range(len(labels)):
-        if i > 0:
-            out += String(",")
-        out += json_text(labels[i].key) + String(":") + json_text(labels[i].value)
-    out += String("},\"template\":{\"template\":{\"containers\":[{\"image\":")
+        if is_kci_label_key(labels[i].key) or _has_key(authors, labels[i].key):
+            carried.append(labels[i].copy())
+    out += String(",\"template\":{\"labels\":") + _labels_object(carried)
+    out += String(",\"template\":{\"containers\":[{\"image\":")
     out += json_text(image_of(model_value(model, String("img"))))
     out += String(",\"command\":[")
     var cmds = model_values(model, String("cmd"))
@@ -370,6 +395,21 @@ def overlay_job(live_json: String, desired_json: String) raises -> String:
     var want_task = _member(_member(want, String("template")), String("template"))
     var want_c = _member(want_task, String("containers")).element_at(0)
     var lt = _member(out, String("template"))
+    # The template's labels: every live one kci was not handed, then kci's
+    # and the author's as the desired job writes them.
+    var want_labels = _member(_member(want, String("template")), String("labels"))
+    var kept = JsonValue.empty_object()
+    var live_labels = _member(lt, String("labels"))
+    if live_labels.is_object():
+        for i in range(live_labels.num_members()):
+            var k = live_labels.key_at(i)
+            if is_kci_label_key(k) or (want_labels.is_object() and want_labels.has(k)):
+                continue
+            kept.set_member(k^, live_labels.value_at(i))
+    if want_labels.is_object():
+        for i in range(want_labels.num_members()):
+            kept.set_member(want_labels.key_at(i), want_labels.value_at(i))
+    lt = _with(lt, String("labels"), kept^)
     var task = _member(lt, String("template"))
     var containers = _member(task, String("containers"))
     var first = JsonValue.empty_object()
@@ -394,4 +434,30 @@ def overlay_job(live_json: String, desired_json: String) raises -> String:
             task = _with(task, k, want_task.get(k))
     lt = _with(lt, String("template"), task^)
     out = _with(out, String("template"), lt^)
+    return out.serialize()
+
+
+def _kci_free(labels: JsonValue, var kci: List[Label]) raises -> JsonValue:
+    """`labels` (an object, or anything else read as none) without kci's
+    labels, then with `kci`."""
+    var out = JsonValue.empty_object()
+    if labels.is_object():
+        for i in range(labels.num_members()):
+            var k = labels.key_at(i)
+            if not is_kci_label_key(k):
+                out.set_member(k^, labels.value_at(i))
+    for i in range(len(kci)):
+        out.set_member(kci[i].key.copy(), JsonValue.from_string(kci[i].value.copy()))
+    return out^
+
+
+def with_kci_labels(job_json_text: String, kci: List[Label]) raises -> String:
+    """The job with kci's labels replaced by `kci` (empty: dropped) in its
+    `labels` and its execution template's, every other label and field
+    kept: an adoption's and a release's one write."""
+    var doc = parse_json_value(job_json_text)
+    var out = _with(doc, String("labels"), _kci_free(_member(doc, String("labels")), kci.copy()))
+    var t = _member(out, String("template"))
+    t = _with(t, String("labels"), _kci_free(_member(t, String("labels")), kci.copy()))
+    out = _with(out, String("template"), t^)
     return out.serialize()

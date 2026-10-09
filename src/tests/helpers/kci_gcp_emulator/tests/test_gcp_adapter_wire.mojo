@@ -20,6 +20,9 @@
 #     wait of the bounded backoff until it is, and one that never ends
 #     stops the apply after twelve reads;
 #   * a job's adoption and release keep the fields kci does not model;
+#   * a job's execution template carries kci's labels (the identity, the
+#     run id, the retention mark) as the job does, since Run copies only
+#     those onto an execution, and a release strips them from both places;
 #   * another cell's account holding a mapped role on the project is never
 #     listed, nor reported leftover;
 #   * whoami names the emulator's principal;
@@ -152,6 +155,14 @@ def test_an_apply_writes_what_g4_says() raises:
     assert_equal(labels.get("kci_role").as_string(), "run")
     assert_equal(labels.get("kci-run-id").as_string(), _RUN)
     assert_equal(labels.get("kci-retention").as_string(), "delete")
+    # Run copies only the execution template's labels onto each execution
+    # (what is billed and logged): they carry the same stamp.
+    var tl = body.get("template").get("labels")
+    assert_equal(tl.get("kci_managed_by").as_string(), "kci")
+    assert_equal(tl.get("kci_resource").as_string(), "nightly")
+    assert_equal(tl.get("kci_role").as_string(), "run")
+    assert_equal(tl.get("kci-run-id").as_string(), _RUN, "an execution carries the run id")
+    assert_equal(tl.get("kci-retention").as_string(), "delete", "an execution carries the retention mark")
     var peer_resource = String("projects/") + _PROJECT + String("/serviceAccounts/") + _email(String("peer/identity"))
     assert_equal(_members(emu, peer_resource, String(ROLE_ACCOUNT_VIEWER)), account_member(_email(String("runner/identity"))))
     var writers = _members(emu, String("projects/") + _PROJECT, String(ROLE_LOG_WRITER))
@@ -194,7 +205,7 @@ def test_a_job_adoption_and_release_keep_a_human_label() raises:
     var emu = ArcPointer[GcpEmulator](GcpEmulator())
     var name = job_resource(String(_PROJECT), String("europe-west1"), String("jobadopt"))
     var body = parse_object(
-        String('{"name":"') + name + String('","labels":{"owner-team":"data"},"template":{"parallelism":3,"template":{"containers":[')
+        String('{"name":"') + name + String('","labels":{"owner-team":"data"},"template":{"parallelism":3,"labels":{"cost-centre":"ops"},"template":{"containers":[')
         + String('{"image":"sha256:a1","workingDir":"/srv","resources":{"limits":{"cpu":"1000m","memory":"512Mi"}}}],')
         + String('"maxRetries":0,"timeout":"600s"}}}')
     )
@@ -210,6 +221,11 @@ def test_a_job_adoption_and_release_keep_a_human_label() raises:
     assert_equal(labels.get("kci_resource").as_string(), "jobadopt")
     assert_equal(labels.get("owner-team").as_string(), "data", "an adoption keeps the labels it was not handed")
     assert_false(labels.has("kci-run-id"))
+    var tl = emu[].jobs[j].body.get("template").get("labels")
+    assert_equal(tl.get("kci_adopted").as_string(), "true", "the execution template carries the adoption too")
+    assert_equal(tl.get("kci_resource").as_string(), "jobadopt")
+    assert_equal(tl.get("cost-centre").as_string(), "ops", "a template label kci was not handed is kept")
+    assert_false(tl.has("owner-team"), "a job label kci was not handed is not copied into the template")
     assert_equal(emu[].creates_of(name), 0, "adopted, not created")
     _unmodelled_kept(emu, name, "after the adoption's update")
     # Its resource leaves the list: the job is released, not deleted.
@@ -219,6 +235,9 @@ def test_a_job_adoption_and_release_keep_a_human_label() raises:
     var left = emu[].jobs[j].body.get("labels")
     assert_equal(left.num_members(), 1, left.serialize())
     assert_equal(left.get("owner-team").as_string(), "data")
+    var tleft = emu[].jobs[j].body.get("template").get("labels")
+    assert_equal(tleft.num_members(), 1, String("a release strips the template's kci labels too: ") + tleft.serialize())
+    assert_equal(tleft.get("cost-centre").as_string(), "ops")
     _unmodelled_kept(emu, name, "after the release")
 
 

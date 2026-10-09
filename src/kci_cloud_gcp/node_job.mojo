@@ -15,7 +15,10 @@
 #     rewritten and the author's set.
 #   * adopt (`adopt_owned`): ONE UpdateJob of the job as it stands, with
 #     kci's labels replaced by the identity, the retention mark and, on a
-#     node kci marked adopted, the adoption mark. Never a run id.
+#     node kci marked adopted, the adoption mark, in the job's labels and
+#     its execution template's. Never a run id.
+# Every write puts kci's labels in the execution template too, because Cloud
+# Run copies only those onto an execution (what is billed and logged).
 #   * delete: DeleteJob; a job already gone is a no-op.
 # A label kci did not write and the file does not name is an unmanaged
 # difference: reported, never changed.
@@ -63,6 +66,7 @@ from kci_cloud_gcp.job_model import (
     model_digest,
     overlay_job,
     parse_job,
+    with_kci_labels,
 )
 from kci_cloud_gcp.names import account_email, derived_name, last_segment
 from kci_cloud_gcp.node_account import plan_verb
@@ -103,22 +107,6 @@ def unmanaged_labels(have: List[Label], authors: List[Label]) -> String:
         if out.byte_length() > 0:
             out += String("; ")
         out += String("label ") + have[i].key + String("=") + have[i].value + String(" (not modelled; left as it is)")
-    return out^
-
-
-def labels_dict(labels: List[Label]) -> Dict[String, String]:
-    var d = Dict[String, String]()
-    for i in range(len(labels)):
-        d[labels[i].key] = labels[i].value.copy()
-    return d^
-
-
-def without_kci(job: Job) -> List[Label]:
-    """A typed job's labels that are not kci's."""
-    var out = List[Label]()
-    for entry in job.labels.items():
-        if not is_kci_label_key(entry.key):
-            out.append(Label(entry.key.copy(), entry.value.copy()))
     return out^
 
 
@@ -234,14 +222,12 @@ struct GcpJobNode[C: Connector, TS: GcpTokenSource, S: Sleeper](EngineResource, 
         var found = self._s[].get_job(physical_id)
         if not found:
             raise Error(String("kci_cloud_gcp: ") + self._node.id + String(": the job to adopt is gone"))
-        var job = found.value().copy()
-        # No run id: this run did not create the job.
-        var labels = without_kci(job)
-        labels.extend(standard_label_rule(stamp))
-        labels.extend(retain_labels(self._node.retention))
-        labels.extend(adoption_labels(self._node.adopted))
-        job.labels = labels_dict(labels)
-        self._s[].update_job(job^)
+        # No run id: this run did not create the job. kci's labels go to the
+        # job and to its execution template (job_model.mojo).
+        var kci = standard_label_rule(stamp)
+        kci.extend(retain_labels(self._node.retention))
+        kci.extend(adoption_labels(self._node.adopted))
+        self._s[].update_job(decode_json[Job](with_kci_labels(encode_json(found.value()), kci)))
 
     def delete(mut self, physical_id: String, creds: Creds) raises:
         self._s[].delete_job(physical_id)

@@ -30,6 +30,7 @@ from kci_cloud_gcp import (
     model_value,
     size_limits,
     timeout_duration,
+    with_kci_labels,
 )
 
 
@@ -67,6 +68,7 @@ def _labels() -> List[Label]:
     l.append(Label(String("kci_managed_by"), String("kci")))
     l.append(Label(String("kci-retention"), String("delete")))
     l.append(Label(String("team"), String("data")))
+    l.append(Label(String("owner-team"), String("data")))
     return l^
 
 
@@ -103,6 +105,14 @@ def test_each_field_lands_in_its_place() raises:
     var labels = job.get("labels")
     assert_equal(labels.get("kci-retention").as_string(), "delete")
     assert_equal(labels.get("team").as_string(), "data")
+    assert_equal(labels.get("owner-team").as_string(), "data")
+    # The execution template carries kci's labels and the author's, not one
+    # the job holds that kci was not handed.
+    var tl = job.get("template").get("labels")
+    assert_equal(tl.get("kci_managed_by").as_string(), "kci")
+    assert_equal(tl.get("kci-retention").as_string(), "delete")
+    assert_equal(tl.get("team").as_string(), "data")
+    assert_true(not tl.has("owner-team"))
     assert_true(not job.has("terminalCondition"), "kci never writes the service's fields")
 
 
@@ -129,6 +139,19 @@ def test_a_failed_job_reads_not_ready() raises:
     assert_equal(model_value(live_model(parse_json_value(failed), model), String("ready")), "false")
 
 
+def test_kci_labels_are_set_and_dropped_in_both_places() raises:
+    var text = String('{"labels":{"kci_role":"run","a":"1"},"template":{"labels":{"kci_role":"run","b":"2"},"parallelism":3}}')
+    var none = parse_json_value(with_kci_labels(text, List[Label]()))
+    assert_equal(none.get("labels").serialize(), '{"a":"1"}')
+    assert_equal(none.get("template").get("labels").serialize(), '{"b":"2"}')
+    assert_equal(none.get("template").get("parallelism").text, "3")
+    var mark = List[Label]()
+    mark.append(Label(String("kci_adopted"), String("true")))
+    var with_mark = parse_json_value(with_kci_labels(text, mark))
+    assert_equal(with_mark.get("labels").serialize(), '{"a":"1","kci_adopted":"true"}')
+    assert_equal(with_mark.get("template").get("labels").serialize(), '{"b":"2","kci_adopted":"true"}')
+
+
 def test_conversions() raises:
     assert_equal(timeout_duration(String("600s0n")), "600s")
     assert_equal(timeout_duration(String("1s5n")), "1.000000005s")
@@ -148,6 +171,8 @@ def main() raises:
     test_the_model_of_the_written_job_is_the_model()
     print("test_a_failed_job_reads_not_ready")
     test_a_failed_job_reads_not_ready()
+    print("test_kci_labels_are_set_and_dropped_in_both_places")
+    test_kci_labels_are_set_and_dropped_in_both_places()
     print("test_conversions")
     test_conversions()
     print("OK")

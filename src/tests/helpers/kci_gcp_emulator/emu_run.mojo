@@ -13,7 +13,9 @@
 # The body of a create or an update is the job's JSON. The service sets
 # `name`, `uid`, `generation`, `etag` and the terminal condition (`Ready`,
 # CONDITION_SUCCEEDED, or CONDITION_FAILED for a job put in the failed
-# state, until its next update), and refuses labels outside GCP's rule
+# state, until its next update), keeps the execution template's labels
+# (`template.labels`, what Run copies onto each execution) as sent and
+# serves them back, and refuses labels, in either place, outside GCP's rule
 # (a key of [a-z0-9_-] starting with a letter, a value of [a-z0-9_-], each
 # at most 63 bytes, at most 64 labels). A mutating call answers a
 # long-running operation: done at once, or after `op_polls` reads
@@ -67,7 +69,19 @@ def _label_text_ok(s: String, key: Bool) -> Bool:
 
 
 def label_problem(job: JsonValue) raises -> String:
-    """Why the job's labels break GCP's rule, or empty."""
+    """Why the job's labels, or its execution template's
+    (`template.labels`, which Run copies onto each execution), break GCP's
+    rule, or empty."""
+    var why = _labels_problem(job)
+    if why.byte_length() > 0 or not job.has("template"):
+        return why
+    var t = job.get("template")
+    if not t.is_object():
+        return String("template is not an object")
+    return _labels_problem(t)
+
+
+def _labels_problem(job: JsonValue) raises -> String:
     if not job.has("labels"):
         return String("")
     var labels = job.get("labels")
