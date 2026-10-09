@@ -139,7 +139,7 @@ job.report()   # per artifact: done, awaiting the table's maintainer, or outside
 
 The report separates three things:
 
-- **What komira erased:** rows, rewritten files, rewritten manifests, expired snapshots, purged index generations, rewritten tail segments, rewritten or dropped graph delta objects.
+- **What komira erased:** rows, rewritten files, rewritten manifests, expired snapshots, purged index generations, rewritten tail segments, rewritten or dropped graph delta objects, rewritten or dropped row-store log chunks.
 - **What waits on someone else:** steps on a table that another tool maintains (see [Erasure](#erasure)).
 - **What komira cannot reach:** copies that other tools made.
 
@@ -491,6 +491,7 @@ komira's own artifacts follow within the same deadline:
 - Every derived index generation that covered a removed file is rebuilt or purged (see [L4](#l4-derived-indexes)), and cached embeddings of the erased values are purged.
 - The topic's tail segments that hold the subject: compacted on the key when the subject is the message key; otherwise the affected segments are rewritten without the matching records, leaving offset gaps as key compaction does.
 - The graph's delta objects that hold the subject and have not rolled into the graph's Iceberg tables yet, superseded fact versions included: each affected delta object is rewritten without the matching facts, or dropped when no other fact remains in it, within the same deadline and before the roll or at the roll at the latest, so the roll never carries the subject into the tables. A delta that rolled before the erasure is already rows in the graph's tables and goes through the five steps above.
+- The row store's log above its base watermark, which has not rolled into the row store's Iceberg base yet: each commit chunk that holds the subject's `WriteOp`s is rewritten without them, or dropped when no other op remains in it, within the same deadline and before the roll or at the roll at the latest, so the roll never carries the subject into the base. Rows that rolled before the erasure are already in the base table and go through the five steps above.
 
 Who does what depends on who maintains the table:
 
@@ -651,6 +652,7 @@ A roll transfers ownership; it does not derive.
 | fold manifest | komira lineages | always | reap (`SubLineageBaseFold`, "ZERO byte copy") |
 | fold deletes (key compaction), erasure rewrite | topic tails | always | reap |
 | erasure rewrite or drop | graph delta tails | always, before or at the roll | reap |
+| erasure rewrite or drop | row-store log chunks above the base watermark | always, before or at the roll | reap |
 | re-partition | topic tails | on request; renumbers offsets into child lineages, so indexes over the parent are rebuilt | reap |
 | merge index | index generations | always | a visible new generation, then reap of its inputs |
 
