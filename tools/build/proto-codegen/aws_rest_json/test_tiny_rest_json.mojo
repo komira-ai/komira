@@ -1,7 +1,8 @@
 # The caller's test of a generated pure-mode restJson1 client
 # (tiny_rest_json.json): the requests it builds (method, target, headers and
-# body) and the responses it reads (headers, prefix headers, status, a JSON
-# body, a streaming blob payload), each compared exactly.
+# body) and the responses it reads (headers, prefix headers present and
+# absent, status, a JSON body, a streaming blob payload), each compared
+# exactly.
 from komira_aws_tiny_rest.komira_aws_tiny_rest import (
     TinyRestConfig,
     TinyRestGetThingRequest,
@@ -110,6 +111,16 @@ def test_get_thing_head_reads_no_body() raises:
     assert_false(Bool(out.body))
 
 
+def test_no_prefix_header_reads_as_an_empty_map() raises:
+    # botocore sets a prefix-header map whether or not a header carries the
+    # prefix: an empty map, not an unset member.
+    var resp = AwsResponse.of_text(200, String(""))
+    resp.add_header(String("Content-Length"), String("0"))
+    var out = parse_get_thing_head(resp)
+    assert_true(Bool(out.meta))
+    assert_equal(len(out.meta.value()), 0)
+
+
 def test_get_thing_response() raises:
     var out = parse_get_thing_response(_get_thing_response())
     assert_equal(out.length.value(), Int64(10))
@@ -150,6 +161,7 @@ def main() raises:
     test_an_empty_label_is_refused()
     test_structure_payload()
     test_get_thing_head_reads_no_body()
+    test_no_prefix_header_reads_as_an_empty_map()
     test_get_thing_response()
     test_put_thing_response()
     test_a_bad_header_value_is_refused()

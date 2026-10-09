@@ -35,6 +35,8 @@
 # embedder side (EngineContext holds `Optional[OwnedPointer[Tracer]]`).
 # =============================================================================
 
+from std.collections import Dict
+
 from komira_atomic_alias import AtomicU64
 
 from komira_collections.slab import Slab
@@ -405,9 +407,14 @@ struct Tracer(Deinitable):
         """Drain every per-worker ring of packets and join OPEN+CLOSE
         pairs by span_id into reconstructed SpanRecords.
 
-        Off the hot path. Returns one `SpanRecord` per OPEN packet
-        observed; if a matching CLOSE was observed, `end_ns` is set,
-        otherwise it stays 0 (still-open span at drain time).
+        Off the hot path, but it runs on every drain (`drain_into_jsonl`
+        in production), so it is O(packets): the OPEN pass records each
+        span_id's record index in a `Dict`, and each CLOSE is one lookup.
+
+        Returns one `SpanRecord` per OPEN packet observed; if a matching
+        CLOSE was observed in the same drain, `end_ns` is set, otherwise
+        it stays 0 (still-open span at drain time). A CLOSE whose OPEN is
+        not in this drain matches nothing and is dropped (no record).
         """
         var records = List[SpanRecord]()
         # First pass: collect all packets across all workers.
@@ -421,9 +428,15 @@ struct Tracer(Deinitable):
                 packets.append(maybe.value().copy())
 
         # Index OPEN packets first; then walk CLOSE packets and patch
-        # end_ns into the matching SpanRecord. The per-process span_id
-        # space is monotonic so a linear scan is correct (the analyzer
-        # window is small — typically at most ~1k spans).
+        # end_ns into the matching SpanRecord.
+        # PERF-CRITICAL: the CLOSE pass is one Dict lookup per packet. It
+        # was a linear scan over `records` per CLOSE, O(n^2) per drain:
+        # 10,000 spans cost 5e7 comparisons, which is what the drain
+        # throughput test measured. Do not reintroduce a scan.
+        # `index` keeps the FIRST record per span_id (the old scan's
+        # first-match rule); span ids come from one atomic counter, so a
+        # duplicate needs `install_mock_ids` to re-seed mid-window.
+        var index = Dict[UInt64, Int]()
         for i in range(len(packets)):
             var p = packets[i].copy()
             if p.kind == PACKET_OPEN:
@@ -443,17 +456,18 @@ struct Tracer(Deinitable):
                 rec.worker_id = UInt32(p.worker_id)
                 rec.flags = UInt32(p.flags)
                 rec.status = SPAN_STATUS_OPEN
+                if p.span_id not in index:
+                    index[p.span_id] = len(records)
                 records.append(rec^)
 
         for i in range(len(packets)):
-            var p = packets[i].copy()
+            ref p = packets[i]
             if p.kind == PACKET_CLOSE:
-                # Linear scan to patch the matching record.
-                for j in range(len(records)):
-                    if records[j].span_id == p.span_id:
-                        records[j].end_ns = p.ts_ns
-                        records[j].status = SPAN_STATUS_CLOSED
-                        break
+                var hit = index.get(p.span_id)
+                if hit:
+                    var j = hit.value()
+                    records[j].end_ns = p.ts_ns
+                    records[j].status = SPAN_STATUS_CLOSED
 
         return records^
 

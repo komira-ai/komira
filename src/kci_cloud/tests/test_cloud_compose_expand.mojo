@@ -214,8 +214,8 @@ def test_an_unbound_optional_input_removes_what_names_it() raises:
 comptime _ALL = (
     '{"name":"acme.all","version":"1","component":['
     + '{"id":"b","bucket":{}},{"id":"sa","serviceAccount":{}},{"id":"sec","secret":{}},'
-    + '{"id":"net","network":{"ipv4Cidr":"10.0.0.0/16"}},'
-    + '{"id":"sn","subnet":{"network":{"local":"net"},"ipv4Cidr":"10.0.1.0/24"}},'
+    + '{"id":"net","network":{"ipv4Cidr":"198.51.100.0/24"}},'
+    + '{"id":"sn","subnet":{"network":{"local":"net"},"ipv4Cidr":"198.51.100.0/26"}},'
     + '{"id":"s","uses":[{"target":{"local":"b"},"access":"READ"}],"service":{"image":{"digest":"sha256:a1"},"internal":{},'
     + '"env":{"V":{"ref":{"local":"b","standard":"NAME"}}},"secretEnv":{"S":{"secret":{"local":"sec"}}},'
     + '"runAs":{"local":"sa"},"network":{"local":"sn"}}},'

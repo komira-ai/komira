@@ -2,3 +2,9 @@
 /.buckconfig.local
 # zig's cache of a local C/C++ compile (tools/build/mojo/tools/zig_cc_launcher.zig).
 /.zig-cache/
+# A private list of words the public boundary lint refuses (root BUCK,
+# public_boundary): kept by the repository that passes it, never here.
+/.public_boundary_deny
+# Written and deleted by tools/build/tests/run_tests.sh (test 53) around one build each.
+/tools/build/tests/negative/surface_capability_matrix/dangling/
+/tools/build/tests/negative/surface_capability_matrix/incompatible/
