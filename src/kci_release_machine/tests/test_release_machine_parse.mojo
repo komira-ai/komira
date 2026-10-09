@@ -386,7 +386,8 @@ def test_validation_belongs_to_a_publish_step() raises:
     )
     assert_equal(
         _refusal(text),
-        String("machine file: line 6: validation 'v' of step 's' of stage 'b': a validation belongs to a PUBLISH step")
+        String("machine file: line 6: validation 'v' of step 's' of stage 'b': a CONDA_INSTALL_SMOKE validation belongs")
+        + String(" to a PUBLISH step")
         + String(" (it checks what the step published)"),
     )
 
@@ -402,11 +403,11 @@ def test_validation_fields() raises:
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" install: \"a\" program: \"release/s.mojo\""))),
-        String("validation 'v' of step 'publish' of stage 'p' has no kind (CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV)"),
+        String("validation 'v' of step 'publish' of stage 'p' has no kind (CONDA_INSTALL_SMOKE, CONDA_INSTALL_ENV or DEPLOY_PROBE)"),
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" kind: PYTEST install: \"a\" program: \"release/s.mojo\""))),
-        String("validation kind 'PYTEST' is not CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV"),
+        String("validation kind 'PYTEST' is not CONDA_INSTALL_SMOKE, CONDA_INSTALL_ENV or DEPLOY_PROBE"),
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" kind: CONDA_INSTALL_SMOKE program: \"release/s.mojo\""))),
@@ -427,7 +428,7 @@ def test_validation_fields() raises:
     _assert_refused(
         _with_validation(String(_V_OK) + String(" tool: pixi")),
         String("unknown field 'tool' in validation 'v' (expected name, kind, image, install, compiler_channel,")
-        + String(" extra_channel, program, smoke, wait_for_index_seconds)"),
+        + String(" extra_channel, program, smoke, wait_for_index_seconds, args, target, timeout_seconds, expect)"),
     )
     _assert_refused(
         _with_validation(String(_V_OK) + String(" program: \"release/t.mojo\"")),
