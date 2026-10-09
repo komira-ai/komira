@@ -1937,8 +1937,8 @@ struct _CoalescedTask[C: ArrowIpcCompression](Segment):
             # wins; the driver re-raises the lowest-index error after
             # dispatch.
             if sp[].errors.value()[ri]:
-                ri = ri + n_workers  # cov: unreachable errors[ri] is written only while frame ri is processed, by its one task
-                continue  # cov: unreachable errors[ri] is written only while frame ri is processed, by its one task
+                ri = ri + n_workers  # cov: unreachable errors[ri] is written only by the task that processes frame ri, and ParallelDispatch.run_with_state runs each task id once
+                continue  # cov: unreachable errors[ri] is written only by the task that processes frame ri, and ParallelDispatch.run_with_state runs each task id once
             # Bind a mutable ref to the RB context. Slab's __getitem__
             # returns a ref into the slab's internal storage; touching
             # different ri values from different workers is safe per

@@ -408,7 +408,7 @@ struct FlatbufWriter(Movable):
         -1 if none is cached. `offsets[i]` is the table-relative
         field_offset (0 = absent field)."""
         if field_count > MAX_VTABLE_FIELDS:
-            return -1  # cov: unreachable add_field_* ignore field ids >= MAX_VTABLE_FIELDS
+            return -1
         for k in range(self._vt_count):
             if Int(self._vt_field_count[k]) != field_count:
                 continue
@@ -439,7 +439,7 @@ struct FlatbufWriter(Movable):
         MAX_VTABLE_FIELDS — in that case later identical tables simply
         emit their own vtable (correct, just not deduped)."""
         if field_count > MAX_VTABLE_FIELDS:
-            return  # cov: unreachable add_field_* ignore field ids >= MAX_VTABLE_FIELDS
+            return
         if self._vt_count >= MAX_VTABLES:
             return
         var k = self._vt_count

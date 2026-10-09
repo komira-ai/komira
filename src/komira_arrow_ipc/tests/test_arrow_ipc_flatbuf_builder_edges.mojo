@@ -14,7 +14,10 @@
 #     vtable before the buffer start, and return an empty Buffer for an
 #     absent inline-struct field;
 #   * each table reader refuses a table without its required offset field;
-#   * write_ipc_message zero-pads a payload that is not a multiple of 8.
+#   * write_ipc_message zero-pads a payload that is not a multiple of 8;
+#   * the vtable cache neither records nor finds a shape of more than 16
+#     fields (add_field_* cannot build one, so the private helpers are
+#     called directly), and does record and find a 16-field shape.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -25,6 +28,7 @@ from komira_arrow_ipc.ipc_flatbuf import (
     BufferDescriptor,
     FlatbufReader,
     FlatbufWriter,
+    MAX_VTABLE_FIELDS,
     add_field_bool,
     add_field_i64,
     add_field_inline_struct,
@@ -394,6 +398,29 @@ def test_write_ipc_message_pads_the_payload_to_8() raises:
         assert_equal(frame.read_u8_at(13 + i), UInt8(0))
     assert_equal(frame.read_u8_at(16), UInt8(0x11))
     assert_equal(frame.read_u8_at(17), UInt8(0x22))
+
+
+# ---------------------------------------------------------------------------
+# Vtable cache: shapes wider than MAX_VTABLE_FIELDS
+# ---------------------------------------------------------------------------
+
+
+def test_the_cache_skips_a_shape_wider_than_16_fields() raises:
+    """_vtable_record does not record a shape of 17 fields and
+    _vtable_lookup answers -1 for one, even with a cached shape of the
+    same inline size; a shape of exactly 16 fields is recorded and found.
+    add_field_* ignore ids >= 16, so only a direct call builds such a
+    shape."""
+    var w = FlatbufWriter(256)
+    var offs = Array[Int32, MAX_VTABLE_FIELDS](fill=Int32(0))
+    offs[0] = Int32(4)
+    w._vtable_record(MAX_VTABLE_FIELDS + 1, 8, offs, 40)
+    assert_equal(w._vt_count, 0)
+    assert_equal(w._vtable_lookup(MAX_VTABLE_FIELDS + 1, 8, offs), -1)
+    w._vtable_record(MAX_VTABLE_FIELDS, 8, offs, 40)
+    assert_equal(w._vt_count, 1)
+    assert_equal(w._vtable_lookup(MAX_VTABLE_FIELDS, 8, offs), 40)
+    assert_equal(w._vtable_lookup(MAX_VTABLE_FIELDS + 1, 8, offs), -1)
 
 
 def main() raises:

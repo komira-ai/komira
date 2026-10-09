@@ -62,7 +62,9 @@ def _check_table(fixed: Bool, rows: List[Tuple[ArrowType, Int]]) raises:
 
 def test_fixed_width_bytes_of_every_type() raises:
     """Every fixed-width type's element size, and 0 for the types that are
-    not a dense native run (bit-packed, variable-length, coded, nested)."""
+    not a dense native run (bit-packed, variable-length, dictionary-coded,
+    nested), and 0 for DECIMAL128: its values are a dense 16-byte run, but
+    ipc_fixed_width_bytes does not size it."""
     var rows = List[Tuple[ArrowType, Int]]()
     rows.append((ArrowType.INT8, 1))
     rows.append((ArrowType.UINT8, 1))
