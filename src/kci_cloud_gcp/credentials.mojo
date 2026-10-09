@@ -12,7 +12,10 @@
 #                        (`service_account_token_source`);
 #   * `external_account` komira_gcp_wif's reader (a CI's OIDC token
 #                        exchanged at STS, optionally impersonating the
-#                        deploy identity);
+#                        deploy identity): its text goes to
+#                        `parse_external_account`, and the token source is
+#                        wif's `ExternalAccountFetcher` in komira_gcp_core's
+#                        cache (`external_account_token_source`);
 #   * anything else, `authorized_user` included: REFUSED. Only bootstrap runs
 #     with a person's own credentials.
 # The variable is read through komira_gcp_core's `EnvSource` seam and the
@@ -34,7 +37,8 @@ from komira_gcp_core import (
     credentials_type,
     parse_credentials_json,
 )
-from komira_http_client.client import HttpClientConfig
+from komira_gcp_wif import ExternalAccountFetcher, parse_external_account
+from komira_http_client.client import HttpClient, HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_retry import MonotonicClock
 
@@ -101,4 +105,37 @@ def service_account_token_source[
     scopes.append(String(CLOUD_PLATFORM_SCOPE))
     return application_default_token_source_from(
         env, files, http_config, mk_plain, mk_tls, clock^, monotonic^, AdcOptions(scopes^)
+    )
+
+
+def external_account_token_source[
+    E: EnvSource, F: FileSource & Movable & Deinitable, CS: Connector, C: Connector, W: WallClock, K: MonotonicClock
+](
+    mut env: E,
+    var files: F,
+    var subject_client: HttpClient[CS],
+    var sts: HttpClient[C],
+    var iam: HttpClient[C],
+    var wall: W,
+    var monotonic: K,
+) raises -> CachingTokenSource[ExternalAccountFetcher[CS, C, F, W], K]:
+    """The token source of an `external_account` file: its text read
+    through `files` and handed to komira_gcp_wif (`parse_external_account`,
+    which refuses a file missing a field it needs, naming the field), and
+    wif's fetcher in komira_gcp_core's cache. `subject_client` fetches a
+    URL-sourced subject token, `sts` the exchange, `iam` the impersonation;
+    `files` also serves a file-sourced subject token, read on each fetch.
+    Refuses any file `deploy_credentials_type` does not call an
+    external_account file before wif reads it (a service_account file goes
+    to komira_gcp_core instead)."""
+    var t = deploy_credentials_type(env, files)
+    if t != CREDENTIALS_EXTERNAL_ACCOUNT:
+        raise Error(
+            String("kci: the credentials file named by GOOGLE_APPLICATION_CREDENTIALS is a ") + t
+            + String(" file, which komira_gcp_core reads, not komira_gcp_wif")
+        )
+    var text = files.read(env.get(ENV_GOOGLE_APPLICATION_CREDENTIALS))
+    var config = parse_external_account(text)
+    return CachingTokenSource[ExternalAccountFetcher[CS, C, F, W], K](
+        ExternalAccountFetcher[CS, C, F, W](config^, subject_client^, sts^, iam^, files^, wall^), monotonic^
     )

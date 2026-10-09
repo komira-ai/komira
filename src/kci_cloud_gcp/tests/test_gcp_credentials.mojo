@@ -15,17 +15,24 @@
 #     the core's service-account reader writes;
 #   * an authorized_user file never reaches the core: with an https token
 #     URI the core would accept it, so its refusal can only be the chooser's;
-#   * an external_account file is not handed to the core either.
+#   * an external_account file is not handed to the core either: it REACHES
+#     komira_gcp_wif's reader. One missing its audience is refused in wif's
+#     own words, and a whole one fetches its token on the wire: the
+#     file-sourced subject token is exchanged at the file's token URL (an IP
+#     literal here, served by a ScriptedConnector), and the source answers
+#     the federated token STS returned;
+#   * a service_account file never reaches wif.
 # =============================================================================
 
+from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
 from komira_gcp_core import FixedWallClock, MapEnv, MapFiles
-from komira_http_client.client import HttpClientConfig
-from komira_http_core.transport.scripted import ScriptedConnector
+from komira_http_client.client import HttpClient, HttpClientConfig
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_retry import ManualClock
 
-from kci_cloud_gcp import deploy_credentials_type, service_account_token_source
+from kci_cloud_gcp import deploy_credentials_type, external_account_token_source, service_account_token_source
 
 
 comptime _VAR = "GOOGLE_APPLICATION_CREDENTIALS"
@@ -116,6 +123,77 @@ def test_an_external_account_file_is_not_the_core_s() raises:
     assert_true(text.find("komira_gcp_wif reads") >= 0, text)
 
 
+comptime _OIDC_FILE = "/run/ci/oidc"
+comptime _OIDC = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJjaSJ9.OIDC-FAKE"
+comptime _FEDERATED = "ya29.FEDERATED-FAKE"
+
+
+def _external(with_audience: Bool) -> String:
+    var out = String('{"type":"external_account",')
+    if with_audience:
+        out += String('"audience":"//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/q",')
+    out += String('"subject_token_type":"urn:ietf:params:oauth:token-type:jwt",')
+    out += String('"token_url":"https://127.0.0.1/v1/token",')
+    out += String('"credential_source":{"file":"') + _OIDC_FILE + String('"}}')
+    return out^
+
+
+def _sts_answer() -> List[UInt8]:
+    var body = (
+        String('{"access_token":"') + _FEDERATED
+        + '","issued_token_type":"urn:ietf:params:oauth:token-type:access_token","token_type":"Bearer","expires_in":3599}'
+    )
+    var http = String("HTTP/1.1 200 OK\r\nContent-Length: ") + String(body.byte_length()) + "\r\nConnection: close\r\n\r\n" + body
+    var out = List[UInt8]()
+    out.extend(Span(http.as_bytes()))
+    return out^
+
+
+def _external_source(text: String, capture: ArcPointer[List[UInt8]]) raises -> String:
+    """The token an external_account source over `text` answers."""
+    var env = _env(String(_PATH))
+    var files = _files(text)
+    files.put(String(_OIDC_FILE), String(_OIDC))
+    var source = external_account_token_source(
+        env,
+        files^,
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector()),
+        HttpClient[ScriptedConnector].with_defaults(
+            ScriptedConnector.with_stream_tls(ScriptedStream.from_read_script_with_capture(_sts_answer(), capture))
+        ),
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector()),
+        FixedWallClock(1_790_000_000),
+        ManualClock(),
+    )
+    return source.access_token()
+
+
+def test_an_external_account_file_reaches_wif_s_reader() raises:
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var refused = String("")
+    try:
+        _ = _external_source(_external(False), capture)
+    except e:
+        refused = String(e)
+    assert_true(refused.startswith("komira_gcp_wif: the external_account file") and refused.find("audience") >= 0, refused)
+    var token = _external_source(_external(True), capture)
+    assert_equal(token, _FEDERATED, "the token STS returned")
+    var wire = String(unsafe_from_utf8=Span(capture[]))
+    assert_true(wire.startswith("POST /v1/token HTTP/1.1"), wire)
+    assert_true(wire.find(String("subject_token=") + _OIDC) >= 0, "the file-sourced subject token went to STS")
+
+
+def test_a_service_account_file_never_reaches_wif() raises:
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var refused = String("")
+    try:
+        _ = _external_source(String(_SA), capture)
+    except e:
+        refused = String(e)
+    assert_true(refused.find("komira_gcp_core reads, not komira_gcp_wif") >= 0, refused)
+    assert_equal(len(capture[]), 0, "nothing was sent")
+
+
 def main() raises:
     print("test_the_variable_is_required")
     test_the_variable_is_required()
@@ -129,4 +207,8 @@ def main() raises:
     test_an_authorized_user_file_never_reaches_the_core()
     print("test_an_external_account_file_is_not_the_core_s")
     test_an_external_account_file_is_not_the_core_s()
+    print("test_an_external_account_file_reaches_wif_s_reader")
+    test_an_external_account_file_reaches_wif_s_reader()
+    print("test_a_service_account_file_never_reaches_wif")
+    test_a_service_account_file_never_reaches_wif()
     print("OK")

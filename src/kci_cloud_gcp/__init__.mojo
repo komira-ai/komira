@@ -29,7 +29,8 @@ Modules:
   * owned.mojo         — `list_owned`.
   * credentials.mojo   — the reader a deploy's GOOGLE_APPLICATION_CREDENTIALS
                          goes to (`deploy_credentials_type`,
-                         `service_account_token_source`).
+                         `service_account_token_source`,
+                         `external_account_token_source`).
 
 No public function takes or returns a pointer; the session is shared between
 the adapter and its nodes through an `ArcPointer` inside the package.
@@ -47,6 +48,7 @@ from kci_cloud_gcp.credentials import (
     CREDENTIALS_EXTERNAL_ACCOUNT,
     CREDENTIALS_SERVICE_ACCOUNT,
     deploy_credentials_type,
+    external_account_token_source,
     service_account_token_source,
 )
 from kci_cloud_gcp.job_model import (
