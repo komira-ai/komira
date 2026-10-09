@@ -1,0 +1,43 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
+
+# The code graph deriver: buck2 uquery JSON, the `mojo doc` JSON of each
+# library (the mojo_doc_json rule), the import lines of the sources and the
+# `governs:` front matter of documents in; graph nodes and edges out, in a
+# canonical order, as text or as two Arrow record batches.
+mojo_library(
+    name = "komira_kg_code",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_json:komira_json",
+    ],
+    test_data = {
+        "tests/test_derive_fixture.mojo": {
+            "kgfix_doc.json": "//src/komira_kg_code/tests/fixtures/repo:kgfix_doc",
+            "src/komira_kg_code/tests/fixtures/kgfix_graph.golden": "tests/fixtures/kgfix_graph.golden",
+            "src/komira_kg_code/tests/fixtures/kgfix_uquery.json": "tests/fixtures/kgfix_uquery.json",
+            "src/komira_kg_code/tests/fixtures/repo": "//src/komira_kg_code/tests/fixtures/repo:files",
+        },
+        "tests/test_derive_real_library.mojo": {
+            "mcp_server_doc.json": ":mcp_server_doc",
+            "mcp_src": "//src/komira_mcp_server:komira_mcp_server[src]",
+        },
+    },
+    test_srcs = [
+        "tests/test_derive_edges.mojo",
+        "tests/test_derive_errors.mojo",
+        "tests/test_derive_fixture.mojo",
+        "tests/test_derive_real_library.mojo",
+        "tests/test_text_scan.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The doc JSON of a real library, komira_mcp_server, the real-library
+# test's input.
+mojo_doc_json(
+    name = "mcp_server_doc",
+    lib = "//src/komira_mcp_server:komira_mcp_server",
+)

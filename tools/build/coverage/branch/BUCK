@@ -24,6 +24,7 @@ zig_exe(
     name = "cov_branch_classify_exe",
     exec_compatible_with = LINUX_X86_64,
     imports = [
+        "cov_branch_andor.zig",
         "cov_branch_ir.zig",
         "cov_branch_records.zig",
         "cov_branch_source.zig",
@@ -46,6 +47,9 @@ kcov_tool_cases(
         "fixtures/gen.src",
         "fixtures/rules.golden.info",
         "fixtures/rules.ll",
+        "fixtures/t.src",
+        "fixtures/try.golden.info",
+        "fixtures/try.ll",
     ],
     script = "cov_branch_classify_cases.sh",
     tool = ":cov_branch_classify_exe",
