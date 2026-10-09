@@ -4,8 +4,9 @@ Status: design, not built. **EXISTS** names code on `main`; everything else is P
 (all absent from `main`): the stage `beta`, the jobs `beta` and `beta_install`, the step kind `TEST`,
 the step field `checks`, the outcome `SUPERSEDED` (as a successful stop), the job output `superseded`,
 the step name `superseded`, the `main_red` decision `stalled`, rules R23, R24 and R25, the validation
-kind `EXTERNAL_STATUS`, gamma's validation `real-cloud`, the dispatch event type `kci-gamma-validate`
-and the status context `kci-real-cloud/<set hash>`. Related: continuous
+kind `BUCK2_TARGET` and its fields `target`, `cloud`, `identity`, `region`, `timeout_seconds` and
+`attempts`, the directory `src/tests/real_cloud/`, gamma's validations `real-cloud-<cloud>` and the
+slice G0, and prod passing `--release-set-hash` twice. Related: continuous
 publish (`docs/design/continuous_publish.md`, #1168; a path, not a link, until both docs are on
 `main`, since the doc links lint refuses a dead link; P4 makes it a link), [ci.md](../ci.md),
 [release machines](release_machine.md), [gamma validation](gamma_validation.md).
@@ -27,16 +28,20 @@ The project owner's ruling: publishing is continuous, through three stages, **be
   ([Future: gamma bake](#future-gamma-bake), #1183).
 - **(B) Gamma is single-flight:** one run at a time, the latest candidate wins (b). **Departure,
   for the project owner's ruling:** gamma is two slots, the `gamma` job (publish, then the
-  real-cloud wait, e2) and the `validate` job (the two installs), and `validate` runs after
+  real-cloud validations, e2) and the `validate` job (the two installs), and `validate` runs after
   `gamma` releases `kci-gamma-main`. So candidate N's installs can run while candidate N+1
-  publishes and dispatches: two candidates are in gamma at once, for the length of one install.
-  *Recommendation:* accept. Each job is pinned to its own set's digests, and prod refuses unless
-  `gamma`'s `real_cloud_set_hash` equals `validate`'s `validated_set_hash` (R19 amended, e2), so
+  publishes and runs its real-cloud validations: two candidates are in gamma at once, for the
+  length of one install. *Recommendation:* accept. Each job is pinned to its own set's digests,
+  and prod refuses unless `gamma`'s `validated_set_hash` equals `validate`'s (R19 amended, e2), so
   the overlap can never promote a set that one of the two did not vouch for. Holding both jobs in
   one group is what question 1 rules out; questions 1 and 11 give the detail.
 - **(C) Prod is promoted when every gamma validation has passed**, with no wait after it.
-- **(D) Gamma's validations include an external real-cloud validation**, run privately by the
-  operator, outside this repository ([e2](#e2-gamma-the-external-real-cloud-validation)).
+- **(D) Gamma's validations include real-cloud tests**, as ordinary kci validations of the gamma
+  stage: Buck2 targets that kci runs with the `gamma` environment's federated (OIDC) cloud
+  credential. A red one fails gamma. There is no override without the project owner's explicit
+  go ([e2](#e2-gamma-real-cloud-tests-as-ordinary-validations)). **Prerequisite:** the `gamma`
+  environment has no deployment-branch policy today, so gamma is locked to `main` (slice G0, a
+  go) **before** any cloud trusts it.
 
 **Today (EXISTS).** One run per push carries the whole chain `build → gamma → validate → prod`
 (`.github/workflows/kci.yml`). The **workflow-level** group `kci-release-main` serialises whole runs:
@@ -54,8 +59,9 @@ duration" arithmetic and the rollback time resting on it (restated at the end of
 prod": S10c's release checks move from `build` into beta's `checks`, and S12's installed-bytes checks
 from gamma's `validate` to `beta_install`, so both run **before** anything is published. Everything
 else in #1168 stands. #1168 leaves real cloud accounts out of its own scope and holds no cloud
-credential; e2's validation keeps that true for this repository (the cloud credential is the
-operator's, outside it), and #1168 points here for it. Merge order: this doc's first version
+credential; e2 adds one, a federated trust of the `gamma` environment with no stored key, so
+#1168's slice S0 (lock `gamma` to `main`) becomes this doc's first slice, G0, and must land
+before that trust exists. #1168 points here for real clouds. Merge order: this doc's first version
 (#1173) merged first, and #1168 is still open; the two do not conflict, so #1168 can merge before
 or after this amendment, and the index row below says which sections this doc overrides. P4 rewrites ci.md's "Queued runs" and "Never
 backward", which today describe prod only.
@@ -163,10 +169,10 @@ or is carried there by a newer commit, within one pass through the four stages p
 per stage for the run already in it: at most two release durations, as before, and nearer one as the
 stages overlap. A dropped tip adds the time until `stalled` runs; a tip with no push run waits for the
 next push. The time to roll back is one PR check plus that bound. **Gamma is now the slowest stage:**
-its job holds `kci-gamma-main` through the external validation's wait (e2), up to 90 minutes per
-dispatch and two dispatches at most, so gamma takes at most one candidate per pass and every commit
-that lands meanwhile coalesces into the next (rule 3). A release duration therefore includes up to
-three and a half hours in gamma (e2, "Fits a hosted job").
+its job holds `kci-gamma-main` through its real-cloud validations (e2), so gamma takes at most one
+candidate per pass and every commit that lands meanwhile coalesces into the next (rule 3). A
+release duration therefore includes up to the gamma job's `timeout-minutes`, which the machine file
+bounds at 330 minutes (e2, "Fits a hosted job").
 
 **Rejected: separate workflows chained by `workflow_run`.** It fires only from the default branch
 (no break-glass), allows three levels (`main-red` would be a fourth and never run), sets
@@ -299,157 +305,187 @@ validations install from beta's local channel with the pinned pixi and run every
 Split from `beta` as `validate` is from `gamma`: an install runs third-party code, `beta` holds the
 farm's identity token. #1168's S12 checks land here.
 
-## e2. Gamma: the external real-cloud validation
+## e2. Gamma: real-cloud tests as ordinary validations
 
-Gamma's validations become three: the two installs `validate` runs (EXISTS) and **`real-cloud`**, an
-operator-run validation against real clouds. This repository runs no part of it and holds no cloud
-credential for it: it **asks** for the validation and **reads** its result. The interface, agreed
-with the validation's owner:
+The project owner's ruling: the real-cloud tests are **ordinary kci validations of the gamma
+stage**. They are Buck2 targets that kci runs with the `gamma` environment's federated (OIDC) cloud
+credential; the gamma stage lists them as validations like its two installs, and a red one fails
+gamma. Nothing outside this repository is asked or waited on. Gamma's validations become the two
+installs `validate` runs (EXISTS) and one `real-cloud-<cloud>` validation per cloud.
 
-| | |
-|---|---|
-| ask | `POST /repos/{receiver}/dispatches` (a `repository_dispatch`), `event_type: kci-gamma-validate`, `client_payload: {set_hash, commit, deadline_utc}` |
-| receiver refuses | a `commit` not on `main`, or a `set_hash` other than the one that commit's gamma run published |
-| answer | a commit **status** on `commit` in this repository, context exactly `kci-real-cloud/<set_hash>`, state `success`, `failure` or `error` |
-| passes | `success` only |
-| fails closed | `failure`; `error` (an infrastructure fault on the operator's side); no status by the deadline; a status whose context is not byte-for-byte `kci-real-cloud/<set_hash>` (another set hash, a prefix, a suffix, another case) is never counted, so the attempt fails at the deadline unless the exact `success` arrives in time (it does not fail at once) |
-| deadline | 90 minutes after the dispatch (the operator's run is capped at 75); in practice a few seconds less, see step 3 |
-| after a red | gamma fails and nothing promotes; re-run once (#1168's flake policy); no override without the project owner's explicit go |
-| flakes | #1168's other half applies: once `real-cloud` needs its re-run twice in ten releases, it gets an issue with an owner, as #1168 requires of every check; the run summary names each attempt and its result, which is what that count reads |
+**Prerequisite, first and a go: lock `gamma` to `main` (slice G0).** Today the `gamma` environment
+has **no** deployment-branch policy and no protection rule (#1168, "How does a release run today?", and its
+slice S0): any branch whose workflow names `environment: gamma` runs with gamma's identity. A cloud
+trust keyed on the `gamma` environment would hand that branch the cloud. So G0, #1168's S0
+unchanged (`gamma`'s deployment branches set to `main`, `gamma-breakglass` behind a required
+reviewer with administrator bypass off, and the drift check in `build` that fails the release if
+`gamma`'s policy is not `main` only), lands and its drift check is green **before** any cloud's
+trust is created (G3's go). G0 is the project owner's go: it changes repository settings.
 
-**Where it runs: in the `gamma` job, after the publish.** `kci run --stage gamma --only step:publish
---only validation:real-cloud` (one `kci run`, R5). The job keeps its job-level group
-`kci-gamma-main` (b) for the whole wait, so the `gamma` job is single-flight through its
-validation (B):
-while it waits, a newer commit's gamma job is pending, a still newer one replaces it, and the
-running one is never cancelled. The `validate` job runs after it, in its own slot, so one
-candidate's installs can overlap the next candidate's publish; that is the departure stated
-under (B). It cannot be a part job like `validate`: a part job holds no
-environment (R9), and the dispatch credential is an environment secret; and a job of its own in
-the same group would let the stage cancel its own pending newer run (question 1).
+**What exists, and what is new.** No validation kind on `main` runs a Buck2 target:
+`src/kci_api/verbs.mojo` names three, `CONDA_INSTALL_SMOKE`, `CONDA_INSTALL_ENV` and
+`DEPLOY_PROBE`. release_machine.md describes those three and no other; ci.md's "Each validation
+is a target" is the other direction, a `buck2 run //release/validations:<name>` target that wraps
+`kci run --only validation:<name>` for a developer. So e2 adds a fourth kind, **`BUCK2_TARGET`**
+(P7). It reuses what exists: `CONDA_INSTALL_ENV`'s child environment built from nothing
+(`src/kci_validate/env.mojo`), the secret store `--secret-store env`, kci's own exchange of the
+job's ID token (as it does for the channel's trusted publishing, ci.md), and the AWS SDK's web
+identity source (`src/komira_aws_core/credential_chain.mojo`, step 3: `AWS_WEB_IDENTITY_TOKEN_FILE`,
+`AWS_ROLE_ARN`, `AWS_ROLE_SESSION_NAME`).
 
-**The steps kci takes (P7):**
+**Where the targets live.** `src/tests/real_cloud/<suite>/`, one test-only package per suite, a
+sibling of `src/tests/e2e/`, each a **`mojo_binary`**, never a `mojo_test` or a library with
+`test_srcs`. That keeps them out of every run that holds no cloud credential: the pull request's
+check builds them (so a suite that stops compiling is red on its PR) but `buck2 test` runs no
+binary and a build runs no binary; beta's `checks` pattern is `//src/tests/e2e/...`, which does not
+reach them. A lint (P8) refuses a `mojo_test`, or a target with `test_srcs`, under
+`src/tests/real_cloud/`, since the pull request's check would run it with no credential, and
+`kci_release_machine` refuses a `checks` pattern that reaches the directory.
 
-1. **Before any effect,** with the run's other start checks: the run is a push to `main`, all
-   three secret names resolve (`--secret-store env`, kci's existing store for secret material), and
-   `REVISION` is a full commit id. Otherwise `REFUSED`, exit 2, and nothing is published (a
-   publish that cannot be validated never starts).
+**Built once, on the farm; run in gamma.** The `gamma` job runs on a hosted runner with no farm
+and no Buck2 (R11: farm and tokens apart), so it builds nothing. `build` builds every
+`BUCK2_TARGET` validation's `target` for `linux-x86_64`, as it builds kci itself, and puts each
+executable and its sha256 in `kci-release-<revision>` (`validations/<name>/`). They are not
+released artifacts: the set hash does not cover them, and they are never uploaded. The `gamma` job
+refuses an executable whose sha256 is not the one `build` recorded. What the suites test is this
+revision's **source**, as `build` built it; `validate`'s installs check the published bytes.
+
+**How kci runs one (P7).** The `gamma` job's one `kci run` (R5) selects the publish step and every
+validation of gamma's publish step that runs there: `kci run --stage gamma --only step:publish
+--only validation:real-cloud-aws`. Then, for each `BUCK2_TARGET` validation:
+
+1. **Start checks, before any effect,** with the run's other start checks: the run is a push to
+   `main`; each `identity` and `region` secret name resolves to a non-empty value; the job can
+   request an ID token (GitHub's request variables are present); each executable is present with
+   `build`'s sha256. Any one missing is `REFUSED`, exit 2, and **nothing is published**: a set
+   that cannot be validated is never put in gamma.
 2. **Publish** (EXISTS).
-3. **The clock is GitHub's.** kci reads this repository's statuses of `commit` once and takes
-   `T0` from the response's `Date` header. `deadline_utc = T0 + 90 min`. Every later "now" is a
-   later response's `Date`, never the runner's wall clock. **The window opens a few seconds
-   early:** `T0` comes from the read just before the dispatch, not from the dispatch's own
-   response, because the dispatch's payload must already carry `deadline_utc`. The deadline is
-   therefore dispatch + 90 min less the seconds between that read and the dispatch: stricter
-   than the ruling, never looser, and it fails closed. If this read fails or its response has no
-   `Date`, the attempt is FAILED with no dispatch (kci does not ask without a deadline).
-4. **Dispatch** with `{set_hash, commit, deadline_utc}`. Any answer but `204` is a failed attempt;
-   kci does not wait on an ask that was not accepted.
-5. **Wait.** Every 60 seconds, list `GET /repos/{this repo}/commits/{commit}/statuses?per_page=100`
-   (newest first, as GitHub documents), reading pages until a status is older than `T0`. Keep only
-   statuses whose context equals `kci-real-cloud/<set_hash>` **byte for byte** and whose
-   `created_at` lies in `[T0, deadline_utc]`; the newest of them decides. `success` → VALIDATED;
-   `failure` → FAILED; `error` → FAILED, reported as an operator-side fault; `pending` or none yet
-   → keep waiting. At the deadline with no decision → FAILED, "no status by the deadline". A
-   status for another set hash is listed in the summary and never counted. GitHub documents
-   `context` as case-insensitive; kci does not: a case variant of the context is not counted and
-   fails closed, and the interface fixes the context in lower case (a hex set hash is lower case).
-   **A failed read** (a non-`200` answer, a transport error, or a response with no `Date`) is
-   retried at the next 60-second tick and moves no "now" forward. So that failed reads cannot hold
-   an attempt open, kci also measures the runner's **monotonic** time elapsed since `T0`'s read; it
-   is only an upper bound: the attempt ends at the **earlier** of a response's `Date` reaching
-   `deadline_utc` and 90 minutes of elapsed time, so elapsed time can end an attempt early and
-   never extends one. An attempt therefore makes at most 91 ticks after its dispatch (a tick reads as many pages as
-   it needs), and ends
-   FAILED, "no status by the deadline (reads failed)", when none succeeded in time.
-6. **Re-run once.** After a FAILED attempt kci dispatches once more with a fresh `T0`; a second
-   FAILED fails the validation. Each attempt stands alone: a status written before its own `T0`,
-   the first attempt's red included, never decides the second.
-7. **Result.** kci writes the validated set hash only when this validation VALIDATED (as it does
-   for every validation), and the job hands it on as `real_cloud_set_hash`.
+3. **Exchange.** kci requests the job's ID token with the cloud's audience (`sts.amazonaws.com`
+   for AWS), writes it to `<scratch>/<validation>/oidc/token`, mode 0600, and builds the child's
+   environment **from nothing**, as `CONDA_INSTALL_ENV` does: `PATH`, `HOME`, `TMPDIR`, `LANG`,
+   and the provider-standard variables the cloud's SDK reads (for AWS, `AWS_ROLE_ARN` from the
+   `identity` secret, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_SESSION_NAME` = `kci-<validation run
+   id>`, `AWS_REGION` from the `region` secret). **Nothing else of the job's environment reaches
+   the child:** in particular not GitHub's ID-token request variables, which could mint a token for
+   any audience, the channel's publisher among them, and not `GITHUB_TOKEN`. The cloud credential
+   is the only one the suite holds, it is short-lived and minted for this attempt, and no
+   long-lived key exists anywhere.
+4. **Run** the executable with flags, not variables, for what is not a credential:
+   `--validation-run-id <id>` (stamped on every billable resource the suite creates, as kci's
+   vocabulary requires of a validation), `--results <scratch>/<validation>/results.txt`. The
+   suite's process group is killed at `timeout_seconds`.
+5. **Verdict.** VALIDATED only when the process exits 0 **and** its results file lists every case
+   as `PASS`. Any other exit status (77, the skip status of the e2e suites, included: a real-cloud
+   suite cannot skip), a kill at the timeout, a missing or unreadable results file, or a case not
+   `PASS` is FAILED. A credential that expires mid-suite fails the suite red, never green;
+   `timeout_seconds` is capped at 3600 so a suite fits AWS's default one-hour role session.
+6. **Re-run once** (#1168's flake policy). After a FAILED attempt kci runs the suite once more
+   with a fresh token and a fresh validation run id; a second FAILED fails the validation. The
+   re-run is kci's, inside the job, because a re-run of the `gamma` job would publish again. Once
+   a suite needs its re-run twice in ten releases it gets an issue with an owner, as #1168 requires
+   of every check; the run summary names each attempt and its result, which is what that count
+   reads.
+7. **Result.** kci writes `validated_set_hash` only when every selected validation VALIDATED (as it
+   does today), and the `gamma` job hands it on as its output.
 
-A late answer to the first attempt that lands after the second `T0` is counted: it is a status for
-the same commit and the same set hash, so it judges the same bytes (row 23).
+**Identifiers stay out of this repository.** The machine file names the role and region by
+**secret name** (`identity: "KCI_GAMMA_AWS_ROLE"`), resolved by `--secret-store env` from secrets of
+the `gamma` environment only, which the workflow passes on the `kci` step alone (R25). They are
+secrets, not configuration variables, because this repository's job logs are public and GitHub
+masks secret values in them, not variables. Masking covers only the exact value, and a resource
+name a suite prints can carry an account number, so **kci never copies the suite's output to the
+job log**: it keeps stdout and stderr in the scratch directory, deletes them with it, and prints
+only the validation's name, each attempt's exit status and the results file's case names and
+verdicts, whose names are fixed in the suite's source. A suite's owner debugs a red run by running
+the target with their own credential. No account, project or subscription identifier, role name or
+endpoint appears in the machine file, the workflow, a suite's source or a log.
+
+**Which clouds.** AWS first: komira's AWS client already reads a web identity. GCP and Azure join
+when their keyless identity lands (`external_account` in `komira_gcp_core`, a federated credential
+in `komira_azure_core`; gamma validation decisions, item 4); until then the machine file holds no
+`real-cloud-gcp` or `real-cloud-azure`, and `kci_release_machine` refuses a `cloud` kci cannot
+exchange for.
+
+**The cloud's trust, scoped to `gamma`.** Each cloud trusts this repository's OIDC issuer for the
+subject `repo:<owner>/<repo>:environment:gamma` exactly, and the cloud's audience. After G0 only a
+job of a `main` run can hold that subject. `gamma-breakglass`, `beta`, `build`, `prod` and the pull
+request's check carry other subjects (or no environment, and no ID token), so no trust accepts
+them. The trust is created by the project owner, outside this repository, as a bootstrap (kci never
+holds standing access). The `gamma` job also holds the channel's trusted-publisher token: the two
+share one job because both need the `gamma` environment's subject. That departs from gamma
+validation decisions item 4's recommendation of a separate `gamma-cloud` environment; the ruling
+names gamma's own credential, and step 3's environment from nothing is what keeps the suite from
+reaching the publisher's token (question 9).
+
+**Cost.** Zero-spend guards (e) do not apply: by the ruling this stage spends real money. kci
+bounds only time (`timeout_seconds`, `attempts`, the job's `timeout-minutes`) and, by single
+flight, runs at most one candidate's suites at a time. The spend itself is bounded by **each
+suite's own teardown** (it deletes what it created, every resource stamped with the validation run
+id so a sweep can find a leak) and by **budget alerts on the test accounts**, both owned by the
+**suites' owner**, who is named in each suite's README; question 10 asks who that is.
+
+**Where it runs: in the `gamma` job, after the publish.** The job keeps its job-level group
+`kci-gamma-main` (b) for the whole run of its validations, so the `gamma` job is single-flight
+through them (B): while they run, a newer commit's gamma job is pending, a still newer one
+replaces it, and the running one is never cancelled. The `validate` job runs after it, in its own
+slot, so one candidate's installs can overlap the next candidate's publish; that is the departure
+stated under (B). The suites cannot run in `validate`: a part job holds no environment and no ID
+token (R9), and `validate` runs the installs' third-party code, which must never sit beside a cloud
+credential. A third job in the same group would let the stage cancel its own pending newer run
+(question 1).
 
 **Prod (C).** `prod` already `needs: [gamma, validate]`, so a red `gamma` job skips prod. That is
-not enough on its own: R19 is amended so that prod's job also reads `needs.gamma.outputs.real_cloud_set_hash`
-and kci refuses (`KCI-E-SET-HASH`, exit 3, before any effect) unless it equals `validate`'s
-`validated_set_hash`. Prod publishes when, and only when, every gamma validation has vouched for
-the same set. Nothing waits after that (A).
+not enough on its own: R19 is amended so that prod passes **two** `--release-set-hash` values,
+`needs.gamma.outputs.validated_set_hash` and `needs.validate.outputs.validated_set_hash`, and kci
+refuses before any effect unless each equals the release directory's recomputed set hash (an empty
+value exit 2, as today; a different one `KCI-E-SET-HASH`, exit 3). Prod publishes when, and only
+when, every gamma validation has vouched for the same set. Nothing waits after that (A).
 
 **Fits a hosted job.** GitHub's documented limit: "Each job in a workflow can run for up to 6 hours
-of execution time" on a GitHub-hosted runner (GitHub Actions limits). The `gamma` job's worst case is
-its publish (today's `timeout-minutes: 30`) plus two waits of 90 minutes: 210 minutes.
-`timeout-minutes` becomes **240**, under the 360 the platform allows; R25 pins it (f).
+of execution time" on a GitHub-hosted runner (GitHub Actions limits). The `gamma` job's worst case
+is its publish (today's `timeout-minutes: 30`) plus, for each `BUCK2_TARGET` validation,
+`attempts` × `timeout_seconds`. `kci_release_machine` refuses a gamma stage whose sum passes 300
+minutes, so the job's `timeout-minutes`, which R25 pins to exactly 30 plus that sum, is at most
+330, under the 360 the platform allows.
 
-**Break-glass and dry runs.** Break-glass never reaches prod (EXISTS), so a break-glass gamma run
-does not select `real-cloud`; `gamma-breakglass` holds none of the secrets, and the receiver would
-refuse a commit off `main` anyway. A dry run (`--plan`) prints the dispatch it would send and sends
-nothing.
+**Break-glass, pull requests, beta and dry runs.** Break-glass never reaches prod (EXISTS). A
+break-glass gamma run does not select a `BUCK2_TARGET` validation, and kci refuses one named by
+`--only` on it (exit 2): its environment, `gamma-breakglass`, holds none of the secrets and its
+subject matches no trust, so the suite could only fail, and a break-glass build is judged by its
+operator, not promoted. The pull request's check and beta never select one (the kind is refused on
+a stage without an environment or with `farm_connected`, and the targets are binaries no `buck2
+test` runs). A dry run (`--plan`) prints `WOULD_VALIDATE`, requests no token and runs nothing.
 
-**The credentials.**
+**After a red.** Gamma fails and nothing promotes. There is no flag, input or reviewer that lets
+prod pass a red, absent or stale validation; a release past one is the project owner's explicit
+go, carried out as a revert or fix on `main` (question 12).
 
-- **The dispatch credential** (a **go** item, question 9). Sending a `repository_dispatch` to
-  another repository needs a credential of that repository: this repository's job token cannot.
-  GitHub lists `POST /repos/{owner}/{repo}/dispatches` under the repository permission **Contents:
-  write**, and accepts nothing narrower. **Type: a GitHub App installation token** (the
-  recommendation; question 9). A GitHub App owned by the project owner is installed on the **one**
-  receiving repository with the repository permission Contents: write alone. Its App id and private
-  key are secrets of the **`gamma` environment only** (deployment branches: `main`), so only the
-  `gamma` job of a push to `main` can read them; no repository-level or other environment's secret
-  holds them. Before each dispatch kci signs the App's JWT (RS256, `komira_crypto`'s
-  `rsa_sha256_sign`) and requests an installation token restricted to that repository and to
-  `contents: write`; GitHub expires such a token after one hour, and kci mints a fresh one for the
-  re-run's dispatch, so no token outlives the attempt that used it. An App token belongs to no
-  person, which is why it is preferred over a fine-grained personal token (tied to the person who
-  made it, with a lifetime of up to a year). **Rotation owner: the project owner**, who owns the
-  App, rotates its private key (question 9 recommends a period) and revokes it if the `gamma`
-  environment is ever exposed. The receiver's `owner/name` is a third secret of the same
-  environment, so it appears in no file and no log. Contents write could also push to the
-  receiving repository; the receiver's branch protection is what keeps that from changing its
-  code, and that is the operator's side to hold.
-- **Reading the answer** needs `statuses: read` on the `gamma` job's own token (R4 amended for that
-  job alone); an anonymous read shares a hosted runner's address and its rate limit.
-- **Writing the answer** is the operator side's credential, with `statuses: write` on this
-  repository. Anyone with push access can also write a status with any context; question 10
-  proposes pinning the writer, and is ruled **before P8** (g).
-
-**Planted tests (`src/kci_validate/tests/`, a fake GitHub API in process: a dispatch endpoint that
-records requests, a statuses list the test scripts, and a **fake clock**).** The fake clock drives
-all three of kci's time sources: the `Date` header on each response, the 60-second sleep between
-reads, and the monotonic elapsed time of step 5. kci's wait takes its sleep and its clocks as
-injected values, so no row waits on the wall clock: a row's 90 to 180 fake minutes run in
-milliseconds. The fake fails the test if it is asked to advance past 6 hours of fake time, so a
-version with no deadline goes red instead of hanging the build. Rows run with `attempts: 2` unless
-they say otherwise.
+**Planted tests (`src/kci_validate/tests/` and `src/kci_cli/tests/`, with fake suites: small
+`mojo_binary` fixtures that exit with a scripted status, write a scripted results file, sleep, or
+print their environment; a fake ID-token endpoint; no cloud).** Each names the mutant it catches.
 
 | # | case | expect | mutant caught |
 |---|---|---|---|
-| 1 | no status at all; the fake clock passes the deadline | FAILED, "no status by the deadline", after two dispatches | absent counts as a pass; no deadline |
-| 2 | `failure` for the exact context | FAILED (both attempts red) | any final state passes |
-| 3 | `error` for the exact context | FAILED, reported as an operator-side fault | `error` treated as success, or waited on |
-| 4 | `success` only for `kci-real-cloud/<another hash>`, a hash that differs in its first character | FAILED at the deadline; the other hash listed | prefix match on `kci-real-cloud/` |
-| 5 | `success` for the exact context, `created_at` before `T0` (a stale answer) | FAILED at the deadline | drop the `T0` floor |
-| 6 | `success` for the exact context, `created_at` after the deadline, listed first on the read whose `Date` is the first past the deadline | FAILED | compare with the runner's clock or the job's end |
-| 7 | `attempts: 1`; the runner's wall clock runs 30 minutes ahead of the fake's `Date`; from the first read on, the fake lists a `success` for the exact context whose `created_at` is GitHub's deadline + 15 min, which lies inside a window taken from the runner's clock (deadline 30 minutes later) | FAILED at GitHub's deadline, one dispatch | trust the runner clock (it returns VALIDATED) |
-| 8 | `pending`, then nothing until the deadline | FAILED | `pending` counts as a pass |
-| 9 | dispatch answered `404` | that attempt FAILED with no wait; second attempt made | ignore the dispatch status |
-| 10 | first attempt `failure`, second attempt `success` | VALIDATED, exactly two dispatches | no re-run |
-| 11 | both attempts red | FAILED, exactly two dispatches | unbounded re-runs |
-| 12 | older `success` and newer `failure`, both in the window | FAILED (the newest decides) | first match wins, or any success wins |
-| 13 | `success` for the exact context in the window | VALIDATED, `real_cloud_set_hash` written | guard (green before and after) |
-| 14 | the dispatch's bytes | `event_type` `kci-gamma-validate`; payload keys exactly `set_hash`, `commit`, `deadline_utc`; deadline `T0` + 90 min | payload drift |
-| 15 | a push run whose secrets do not resolve | `REFUSED` exit 2, zero publish and dispatch calls | check after publish |
-| 16 | prod with `real_cloud_set_hash` absent or unequal to `validate`'s | `KCI-E-SET-HASH`, exit 3, zero uploads | prod reads `validate`'s hash only |
-| 17 | `success` only for `kci-real-cloud/<h'>`, where `h'` is the set hash with only its **last** character changed | FAILED at the deadline | compare only the first N characters of the hash; "contains the first N" |
-| 18 | `success` only for the exact context with a **suffix** added (`kci-real-cloud/<set_hash>-x`) | FAILED at the deadline | "starts with the expected context" |
-| 19 | `success` only for the exact context with a **prefix** added (`x/kci-real-cloud/<set_hash>`) | FAILED at the deadline | "contains the set hash"; "ends with the expected context" |
-| 20 | `success` only for the context in upper case (`KCI-REAL-CLOUD/<SET_HASH>`) | FAILED at the deadline, not counted | case-insensitive compare |
-| 21 | the dispatch is answered `204`; every statuses read after it fails: a `502` that carries a `Date`, then transport errors with no `Date` | FAILED, "no status by the deadline (reads failed)", in each attempt after at most 91 ticks and 90 fake minutes; two dispatches | "now" only from `Date` (never ends: the fake's 6-hour stop goes red); elapsed time extends the deadline |
-| 22 | the `T0` read fails (transport error, no `Date`) in both attempts | FAILED, zero dispatches | dispatch with no deadline, or with one from the runner's clock |
-| 23 | first attempt: no status; after the second `T0`, a `success` for the exact context, written for the first attempt (a late answer) | VALIDATED, exactly two dispatches | late answers dropped; the second attempt keeps the first's window |
-| 24 | the exact `success` in the window sits behind 150 newer statuses of other contexts (page 2) | VALIDATED | read only the first page (fails falsely: a liveness bug) |
-| 25 | only if question 10 adopts the `creator` check: the exact `success` in the window, written by another account | FAILED at the deadline, not counted | skip the `creator` check |
+| 1 | the suite exits 1 | FAILED after two attempts; no `validated_set_hash`; the job red | exit status ignored |
+| 2 | the suite exits 0, its results file lists one case `FAIL` | FAILED | exit status alone decides |
+| 3 | the suite exits 0 and writes no results file | FAILED | absent results count as a pass |
+| 4 | the suite exits 77 | FAILED, not skipped | 77 treated as a skip |
+| 5 | the suite sleeps past `timeout_seconds` | killed, FAILED, its process group gone | no timeout; kill the parent only |
+| 6 | first attempt red, second green | VALIDATED, exactly two runs, two token requests, two run ids | no re-run; the token reused |
+| 7 | both attempts red | FAILED, exactly two runs | unbounded re-runs |
+| 8 | every case `PASS`, exit 0 | VALIDATED, `validated_set_hash` written | guard (green before and after) |
+| 9 | a push run whose `identity` secret does not resolve, or is empty | `REFUSED` exit 2, zero uploads, zero suite runs | check after publish |
+| 10 | a push run with no ID-token request variables | `REFUSED` exit 2, zero uploads | check the secrets only |
+| 11 | the executable's sha256 differs from `build`'s | refused before publish, zero suite runs | skip the compare |
+| 12 | the suite prints its environment | only the named variables; no ID-token request variable, no `GITHUB_TOKEN`, no other secret | inherit the job's environment |
+| 13 | the suite prints the `identity` value and an account-shaped number to stdout and stderr | neither appears in the job log or the summary; case names and verdicts do | copy the suite's output to the log |
+| 14 | the token file | mode 0600, audience the cloud's; requested after the publish, never before | mint at start; world-readable file |
+| 15 | prod with gamma's hash absent | exit 2, zero uploads | prod reads `validate`'s hash only |
+| 16 | prod with gamma's hash unequal to the set | `KCI-E-SET-HASH`, exit 3, zero uploads | compare one of the two hashes |
+| 17 | a break-glass gamma run | the suite not selected; with `--only validation:real-cloud-aws`, exit 2 | select on every run |
+| 18 | `--plan` on a push run | `WOULD_VALIDATE`, zero token requests, zero suite runs | run under `--plan` |
+| 19 | machine fixtures: `BUCK2_TARGET` on beta (`farm_connected`), on a stage without an environment, in a part job's validations, with `timeout_seconds` 3601, `attempts` 0 or 3, a `cloud` with no exchange, a gamma sum of 301 minutes; a `checks` pattern reaching `src/tests/real_cloud/` | each refused | one refusal per mutant |
+| 20 | lint fixture: a `mojo_test` under `src/tests/real_cloud/` | refused, as is a library with `test_srcs` there | the lint checks one of the two forms |
 
 ## f. The machine file, the environments, the workflow rules
 
@@ -474,32 +510,33 @@ stage {
 `gamma`'s `after` becomes `"beta"`; prod is unchanged. `kci_release_machine` refuses a `TEST` step
 with neither `checks` nor validations, and `checks` on any other kind.
 
-Gamma's publish step gains a third validation (e2); the two installs are unchanged:
+Gamma's publish step gains one validation per cloud (e2); the two installs are unchanged:
 
 ```text
 validation {
-  name: "real-cloud"
-  kind: EXTERNAL_STATUS               # NEW: dispatch, then wait for a commit status (e2)
-  event_type: "kci-gamma-validate"
-  status_context: "kci-real-cloud/"   # kci appends the set hash; matched exactly
-  deadline_s: 5400                    # 90 min after the dispatch
+  name: "real-cloud-aws"
+  kind: BUCK2_TARGET                  # NEW: run an executable `build` built (e2)
+  target: "//src/tests/real_cloud/<suite>:<suite>"   # a mojo_binary under src/tests/real_cloud/
+  cloud: AWS                          # which federated exchange kci makes
+  identity: "KCI_GAMMA_AWS_ROLE"      # secret NAMES, resolved by --secret-store env from
+  region: "KCI_GAMMA_AWS_REGION"      # the gamma environment; never a value in this file
+  timeout_seconds: 3600               # the suite's process group is killed at this
   attempts: 2                         # one re-run
-  app_id: "KCI_REAL_CLOUD_APP_ID"     # secret NAMES, resolved by --secret-store env
-  app_key: "KCI_REAL_CLOUD_APP_KEY"   # the GitHub App's private key (e2, the credentials)
-  receiver: "KCI_REAL_CLOUD_RECEIVER"
 }
 ```
 
-`kci_release_machine` refuses `EXTERNAL_STATUS` on any stage without an environment, on a part
-job's validations (R9: no environment there), a `deadline_s` above 5400 or below 4500 (the
-operator's run is capped at 75 minutes, so a shorter deadline could only fail), and `attempts`
-above 2 or below 1.
+`kci_release_machine` refuses `BUCK2_TARGET` on a stage without an environment, on a stage with
+`farm_connected`, in a part job's validations (R9: no environment there), on any step but a
+PUBLISH step; a `target` outside `//src/tests/real_cloud/`; a `cloud` kci cannot exchange for
+(AWS only, until GCP and Azure have keyless identity); `timeout_seconds` above 3600 or below 1;
+`attempts` above 2 or below 1; a gamma stage whose sum of `attempts` x `timeout_seconds` passes 300
+minutes; and a `checks` pattern that reaches `src/tests/real_cloud/`.
 
 | stage | job(s) | environment | token | runs on |
 |---|---|---|---|---|
 | build | `build` | `build` | farm | farm |
 | beta | `beta` (`--only step:e2e`), `beta_install` | `beta`; none | farm; none | farm; hosted |
-| gamma | `gamma` (publish, then `real-cloud` on a push), `validate` | `gamma` (holds the dispatch secrets) / `gamma-breakglass` (holds neither); none | OIDC and `statuses: read`; none | hosted |
+| gamma | `gamma` (publish, then the `real-cloud-<cloud>` validations on a push), `validate` | `gamma` (its subject alone is trusted by the clouds; holds the identity secrets) / `gamma-breakglass` (holds neither, trusted by no cloud); none | OIDC (channel and clouds); none | hosted |
 | prod | `prod` | `prod` | OIDC | hosted |
 
 `beta` is a new environment; whether a `beta` subject joins the farm is read from the farm's trust
@@ -516,16 +553,18 @@ policy (P0, a read).
 - **R19** for beta: gamma's hash is `needs.beta_install.outputs.validated_set_hash`, never
   `needs.beta.outputs.set_hash`. **R20**'s last step carries the "main is at" line on every job.
   R9, R11 and R14 need no change.
-- **R19, amended for prod (e2):** prod's job also reads `needs.gamma.outputs.real_cloud_set_hash`
-  and passes it to kci, which refuses it unequal to `validate`'s.
-- **R4, amended:** the `gamma` job alone may add `statuses: read`; every other release job keeps
-  `contents: read` and R4's `id-token` only.
-- **R25, new:** the `gamma` job's `timeout-minutes` is exactly 240; on a push it selects
-  `validation:real-cloud`; the `secrets` context appears in no release job but `gamma`, and there
-  only as the two names the machine file gives, on the step that runs `kci`. R9 ("together the
-  stage's jobs run every validation exactly once") counts `real-cloud` as run by `gamma`; its
-  push-only selection is R9's one stated exception, and is safe because a break-glass run never
-  reaches prod.
+- **R19, amended for prod (e2):** prod's `kci run` passes `--release-set-hash` twice, exactly
+  `needs.gamma.outputs.validated_set_hash` and `needs.validate.outputs.validated_set_hash`; kci
+  refuses either one unequal to the recomputed set hash. The `gamma` job declares the output.
+- **R4** needs no change: the `gamma` job already holds `id-token: write`, and no release job gains
+  another permission.
+- **R25, new:** the `gamma` job's `timeout-minutes` is exactly 30 plus the machine file's sum of
+  `attempts` x `timeout_seconds` over gamma's `BUCK2_TARGET` validations (at most 330); on a push
+  its `kci run` selects every one of them; the `secrets` context appears in no release job but
+  `gamma`, and there only as the names the machine file gives, on the step that runs `kci`, never
+  on a `gamma-breakglass` path. R9 ("together the stage's jobs run every validation exactly once")
+  counts them as run by `gamma`; their push-only selection is R9's one stated exception, and is
+  safe because a break-glass run never reaches prod.
 
 ## g. Slices
 
@@ -533,6 +572,7 @@ Each slice: the check that is red before it. **Go** marks a project-owner action
 
 | # | slice | red before | go |
 |---|---|---|---|
+| G0 | **Lock `gamma` to `main`, first** (#1168's S0, unchanged): `gamma`'s deployment branches set to `main`; `gamma-breakglass` with a required reviewer and administrator bypass off; the drift check in `build` that reads `gamma`'s environment and fails the release unless its policy is `main` only. Until G0 is applied, any branch can run with gamma's identity, so **no cloud trust may name `gamma` before it** | the drift check fails on today's settings; a canned environment answer with no policy turns it red; after the settings change it passes | **Go** (repository settings) |
 | P0 | **Probe** on a `probe/*` branch: a workflow of hosted jobs that only `sleep` and `echo`, `permissions: {}` (one job `actions: write` on its own run), no secret, no farm, no cloud, no upload, plus a `probe-wait` environment with a required reviewer. It records, from the runs API: (a) the run conclusion when a job is replaced in its group; (b) a job waiting on a reviewer holds only its group, and whether a newer arrival replaces it; (c) a job skipped by `if:` takes no group slot; (d) a re-run attempt joins the same group and downloads attempt 1's artifact; (e) on a run whose first job succeeded and whose second was cancelled while pending, a token-requested `rerun-failed-jobs` starts, and records: whether cancelled jobs count as failed (if not, the per-job `.../jobs/{job_id}/rerun` is tested instead), that the succeeded first job is **not** re-run, and that attempt 2 reads attempt 1's `needs` outputs and downloads its artifact. Plus a read of the farm's trust policy for a `beta` subject. Existing runs cannot show (a) to (e): today's `kci.yml` has only the workflow-level group (line 203). | each fact written here with the run's URL, or P2 and P4 stop | **Go**: it starts workflow runs and creates an environment |
 | P1 | kci: `never_backward` per run; main-line filter; the descendant read and `SUPERSEDED` (exit 0, output `superseded`); R24's admission check; gamma's "carried" list | c's table, rows 1, 3 to 9; rows 2 and 10 guard | none |
 | P2 | `main_red.py`: `classify` from jobs and the `superseded` step; `last_green` filtered; `stalled`, its re-run, and its issue when the tip has no push run | d's tests (a) to (e) | the re-run needs question 6 |
@@ -540,14 +580,17 @@ Each slice: the check that is red before it. **Go** marks a project-owner action
 | P4 | The switch, one PR: `release/machine.textproto` with beta; `kci.yml` with job groups, `beta`, `beta_install`, the `superseded` steps, R23/R24 guards and the line on every job; R16, R23, R24 in `kci_workflow_check`; ci.md's "Queued runs" and "Never backward" rewritten for every stage; the paths between this doc and continuous publish become links | fixtures refused: a workflow-level group, a job without a group, `queue: max`, a job missing R23's conjunct or step, gamma reading `beta`'s unvalidated `set_hash` (R19), a job without R24; today's `kci.yml` fails the new R16 | **Go**: changes the release; the first push creates `beta` and spends farm time |
 | P5 | Retention of `kci-release-*` to the ruled value | none (a setting) | **Go** with question 3 |
 | P6 | #1168 S10c's derived checks join beta's `checks`; S12's join `beta_install` | as #1168 states them | as #1168 |
-| P7 | kci: the `EXTERNAL_STATUS` validation kind and its machine-file refusals; the App token mint, the dispatch, GitHub's clock (injected, with the monotonic upper bound), the wait, the exact-context read and the one re-run (e2); prod's second hash (R19 amended); a fake GitHub API for tests | e2's table, rows 1 to 12 and 14 to 24 (13 guards; row 25 joins if question 10 adopts the `creator` check); machine fixtures refused: `EXTERNAL_STATUS` on a stage without an environment, `EXTERNAL_STATUS` on a part job's validations (R9), `deadline_s` 5401 and 4499, `attempts` 3 and 0 | none: it sends nothing until P8 wires it |
-| P8 | The wiring, one PR: `real-cloud` in gamma's step in `release/machine.textproto`; `kci.yml`'s `gamma` job with `--secret-store env`, the three secrets on its `kci` step, `statuses: read`, `timeout-minutes: 240`, `real_cloud_set_hash` handed to prod; R4 and R19 amended, R25 and R9's exception in `kci_workflow_check` | fixtures refused: `statuses: read` on any other job, a secret named in any other job or in `gamma-breakglass`'s path, `timeout-minutes` other than 240, prod without the second hash; today's `kci.yml` fails R25 | **Go**: the dispatch credential (question 9; the App, its installation and its key). Question 10 is ruled **before P8 opens**, not with it: if it adopts the `creator` check, that check and row 25 land in P7 first and the expected writer is a fourth `gamma` secret here. The first push dispatches to the operator's side |
+| P7 | kci: the `BUCK2_TARGET` validation kind and its machine-file refusals; the start checks before publish; the token exchange (AWS web identity), the child environment from nothing, the flags, the timeout, the verdict from exit status and results file, the output kept off the log, the one re-run (e2); prod's two hashes (R19 amended); fake suites and a fake ID-token endpoint for tests | e2's table, rows 1 to 7 and 9 to 19 (8 guards) | none: no machine file uses the kind until P9 |
+| P8 | `build` builds every `BUCK2_TARGET` target and ships each executable and its sha256 in `kci-release-<revision>`; the lint on `src/tests/real_cloud/`; the first AWS suite there, from its owner, with its README naming the owner, its teardown and its budget alert | e2's rows 11 and 20; a planted tree whose suite package holds a `mojo_test` refused by the lint; the suite builds on the farm (`local: 0`) and `buck2 test` over its directory runs nothing | none: it runs no suite |
+| P9 | The wiring, one PR: `real-cloud-aws` in gamma's step in `release/machine.textproto`; `kci.yml`'s `gamma` job with `--secret-store env`, the two identity secrets on its `kci` step, `timeout-minutes` per R25, `validated_set_hash` handed to prod; R19 amended, R25 and R9's exception in `kci_workflow_check` | fixtures refused: a secret named in any other job or on `gamma-breakglass`'s path, a `timeout-minutes` other than R25's, prod without gamma's hash; today's `kci.yml` fails R25 | **Go**: the cloud trust for subject `environment:gamma` (question 9), created only after G0 is applied and its drift check is green. The first push spends real money |
 
-P1, P2, P3 and P7 merge on their own and change nothing that runs (P1 changes only what a push to
-gamma may do when the channel is ahead; P2's `stalled` reads only push runs, which are unchanged
-until P4; P7 adds a kind no machine file uses). P4 depends on P0 to P3; P8 depends on P7, and on
-P4 only for gamma's job-level group: until P4, gamma's wait holds the workflow-level
-`kci-release-main`, which serialises whole runs and is single-flight already.
+**G0 comes first, before everything that grants a cloud anything.** P1 to P3, P7 and P8 merge on
+their own and change nothing that runs (P1 changes only what a push to gamma may do when the
+channel is ahead; P2's `stalled` reads only push runs, which are unchanged until P4; P7 adds a kind
+no machine file uses; P8 ships executables nobody runs). P4 depends on P0 to P3. P9 depends on
+**G0 applied and green**, P7 and P8, and on P4 only for gamma's job-level group: until P4, gamma's
+validations hold the workflow-level `kci-release-main`, which serialises whole runs and is
+single-flight already.
 
 ## h. Questions for the project owner
 
@@ -556,8 +599,8 @@ P4 only for gamma's job-level group: until P4, gamma's wait holds the workflow-l
    the farm or publish token, and two jobs sharing one group would let one stage's second job cancel
    its own first job's pending newer run. So beta can test C while installing B. *Recommendation:*
    accept; each job is pinned to its own set's digests, so an overlap cannot check the wrong files.
-   Under ruling (B) this is the one overlap gamma keeps: its `gamma` job, which publishes and holds
-   the real-cloud wait (e2), is one slot, and prod needs both jobs to vouch for one set hash.
+   Under ruling (B) this is the one overlap gamma keeps: its `gamma` job, which publishes and runs
+   the real-cloud validations (e2), is one slot, and prod needs both jobs to vouch for one set hash.
 2. **Break-glass runs and the push groups (a departure from rule 2).** Manual runs keep per-ref
    groups, so a break-glass run's build and beta can overlap a push run's, and its gamma publish can
    overlap main's: two writers to one channel, each checking the listing before it uploads.
@@ -587,35 +630,30 @@ P4 only for gamma's job-level group: until P4, gamma's wait holds the workflow-l
    releases until the next push, where before revision 3 the older commit would have released.
    *Recommendation:* accept, with `stalled`'s issue. Refusing skip markers in the PR check would not
    close it: the merge commit's message is written at merge time, after the check ran.
-9. **The dispatch credential (a go).** e2's dispatch needs a credential of the receiving
-   repository, stored as a secret here. *Recommendation:* go, as a **GitHub App installation
-   token**: an App the project owner owns, installed on that one repository only, with the
-   permission **Contents: write** alone (the only one GitHub accepts for a dispatch); kci mints a
-   token per dispatch, restricted to that repository and permission, which GitHub expires after
-   one hour. The App id and private key are secrets of the `gamma` environment only, never of the
-   repository or of `gamma-breakglass`, beside a third secret naming the receiver. The project
-   owner is the rotation owner and rotates the private key every 90 days and on any suspected
-   exposure. The alternative, a fine-grained personal token, is tied to the person who made it and
-   lives up to a year; it fits "minimum" worse.
-10. **Who may write the answer (rule before P8).** The answer is a commit status, and anyone with
-    push access, or any workflow here granted `statuses: write`, can write one with any context.
-    R4 already keeps `statuses: write` off every release job, but not off people with push access.
-    Without a pinned writer, a hand-written `success` would promote. *Recommendation:* rule this
-    **before P8 opens**, not as part of P8's go: go for the operator side's writer to hold
-    `statuses: write` on this repository and nothing else, and, agreed with the validation's owner
-    as an addition to the interface, kci also checks each counted status's `creator` against an
-    expected writer held as a fourth `gamma` environment secret (so no account is named in this
-    repository). If adopted, the check and e2's row 25 land in P7, before P8 wires anything.
-11. **The order inside gamma.** The real-cloud validation runs in the `gamma` job, after the
+9. **The cloud credential (a go, after G0).** *Recommendation:* go for AWS first, as a role whose
+   trust accepts only this repository's OIDC issuer, the audience `sts.amazonaws.com` and the
+   subject `repo:<owner>/<repo>:environment:gamma` exactly; no access key is created. The role's
+   permissions are the suites' and nothing more, in accounts used only for these tests, and the
+   role ARN and region are secrets of the `gamma` environment only. The trust is created **only
+   after G0 is applied and its drift check is green**. It names `gamma` itself, not a separate
+   `gamma-cloud` environment (gamma validation decisions, item 4, recommended one), because the
+   ruling names the gamma stage's credential; the publish token and the cloud token then share
+   one job, and e2's child environment from nothing (row 12) is what keeps a suite from minting a
+   publisher token. GCP and Azure follow the same shape once their keyless identity lands.
+10. **Who owns the suites and their cost.** By the ruling this stage spends real money, and kci
+    bounds only time. *Recommendation:* each suite's README names an owner who owns its teardown,
+    its leak sweep (by validation run id) and a budget alert on its test accounts, and who answers
+    the flake issue #1168's rule opens; no suite joins gamma's validations without one.
+11. **The order inside gamma.** The real-cloud validations run in the `gamma` job, after the
     publish and **before** `validate`'s installs, which run in their own slot after it: putting the
-    installs' third-party code in the job that holds the publish token and the dispatch secret is
-    what the split prevents (question 1). The cost: a set whose README install would fail is still
-    validated against real clouds first, on the operator's side. *Recommendation:* accept; beta's
+    installs' third-party code in the job that holds the publish token and the cloud credential is
+    what the split prevents (question 1). The cost: a set whose README install would fail still
+    spends a real-cloud run first. *Recommendation:* accept; beta's
     `beta_install` has already installed the same bytes from the local channel (e), so an install
     failure in `validate` is rare. The alternative, one more job between `validate` and the wait,
     cannot hold gamma's group (b).
 12. **An override after a red.** e2 builds none: no flag, input or reviewer lets prod pass a red,
-    absent or stale answer. *Recommendation:* keep it so; a release past a red real-cloud result is
+    absent or stale validation. *Recommendation:* keep it so; a release past a red real-cloud result is
     the project owner's explicit go, carried out as a revert or fix on `main`, not a switch.
 
 ## Future: gamma bake
@@ -629,8 +667,8 @@ here, and no slice above builds any of it. It is designed and built when every p
    that stops promotion, owned by the deployment's observability owner.
 2. **The real-cloud tests' own safety nets**: their sweeper's leak reports and budget alerts on
    their test project, so a day-long bake cannot leak resources or spend unnoticed.
-3. **Lock-through-bake mechanics.** Today one hosted job holds `kci-gamma-main` through the
-   validation's wait (e2). A GitHub-hosted job runs for at most 6 hours, so no job can hold the
+3. **Lock-through-bake mechanics.** In e2 one hosted job holds `kci-gamma-main` through gamma's
+   real-cloud validations. A GitHub-hosted job runs for at most 6 hours, so no job can hold the
    group for 24. The bake needs a lock that is not a running job, for example a bake record that
    prod's admission reads and gamma's next run respects, with its own planted tests (a red canary
    mid-bake, the window not yet elapsed, a newer candidate arriving mid-bake).

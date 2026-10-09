@@ -140,12 +140,16 @@ Each is a question with a recommendation; none is decided by this document.
    by package hash, after a probe shows that a corrupted signature turns a
    run red with authentication enabled; until then it proves the protocol,
    not the signature.
-4. **Real gamma cloud projects (AWS, GCP, Azure).** *Overtaken in part:* the
-   project owner ruled that gamma's gate includes an operator-run real-cloud
-   validation outside this repository, and that it **blocks** prod rather
-   than advising: [the staged pipeline, e2](staged_pipeline.md#e2-gamma-the-external-real-cloud-validation).
-   This repository still holds no cloud credential. The in-repository route
-   below (kci holding a federated identity) stays open. Approve the spend and the
+4. **Real gamma cloud projects (AWS, GCP, Azure).** *Superseded:* the
+   project owner ruled that the real-cloud tests are ordinary kci validations
+   of the gamma stage, run with the `gamma` environment's federated (OIDC)
+   credential, and that a red one **blocks** prod rather than advising:
+   [the staged pipeline, e2](staged_pipeline.md#e2-gamma-real-cloud-tests-as-ordinary-validations).
+   The spend is ruled, the trust names `gamma` itself rather than the
+   separate environment proposed below, and locking `gamma` to `main` comes
+   first. The keyless-identity prerequisites below still decide when GCP and
+   Azure join (AWS first). The text below is the earlier recommendation, kept
+   for its reasoning. Approve the spend and the
    one-time bootstrap? *Recommendation:* not yet. First land keyless identity
    (`external_account` in `komira_gcp_core`, a federated credential in
    `komira_azure_core`), the verb that sets the validation run id, and the
