@@ -63,10 +63,12 @@
 # node of every resource that writes `adopt` in the scope's adopt list
 # (`with_adopted`); destroy does not need it (the engine ignores it there).
 #
-# THE ROLE LABEL BUDGET. After lowering and before anything else, every
-# node's role must fit the 63-byte label value (`role_budget_findings`); one
-# that does not refuses the graph with the one refusal text. The owner of a
-# node is its first segment at any depth (`owner_of_node`).
+# THE ROLE LABEL BUDGET. Every node's role must fit the 63-byte label value;
+# validate reports a role that does not (`lowered_budget_findings`, item 4
+# of validate.mojo), so plan, apply and destroy, which validate first,
+# refuse it with the one refusal text before anything is listed, realized
+# or created. The owner of a node is its first segment at any depth
+# (`owner_of_node`).
 #
 # Every verb runs the engine's OWNED forms (the cell scope): the store keyed
 # by (machine, cell, resource), the stamp born with each object, and a
@@ -117,7 +119,7 @@ from kci_cloud.metadata import (
     label_fields,
     name_change_findings,
 )
-from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
+from kci_cloud.validate import refusal_text, validate_for
 
 
 def refuse_unless_valid[
@@ -414,15 +416,12 @@ def _graph_for[
     mut left_behind: List[String],
     refuse_key_change: Bool = True,
 ) raises -> ResourceGraph:
-    """Lowering + the roles `list_owned` says to remove, realized. A role
-    over the label budget refuses the graph here: after lowering (data),
-    before `list_owned`, realize or any create. A changed table key refuses
-    it after `list_owned` and before realize (unless `refuse_key_change` is
-    False: a destroy)."""
+    """Lowering + the roles `list_owned` says to remove, realized. Called
+    after validate, which has refused a role over the label budget. A
+    changed cloud name refuses the graph after `list_owned` and before
+    realize; so does a changed table key, unless `refuse_key_change` is
+    False (a destroy)."""
     var nodes = lower_data(cloud, resources)
-    var over = role_budget_findings(nodes)
-    if len(over) > 0:
-        raise Error(refusal_text(cloud.cloud_id(), over))
     var rem = removals(cloud, ctx, nodes, resources, creds)
     if len(rem.name_changes) > 0:
         raise Error(refusal_text(cloud.cloud_id(), rem.name_changes))

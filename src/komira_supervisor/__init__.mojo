@@ -14,7 +14,12 @@ Public surface:
     monitor (darwin EVFILT_PROC/NOTE_EXIT, Linux pidfd_open+epoll).
   * proc_probe_children / ChildProbe — "is there any child of this
     process?", asked without reaping one (waitid WNOWAIT).
-  * SIGTERM / SIGKILL — the shared signal numbers.
+  * SIGTERM / SIGKILL / SIGINT — the shared signal numbers.
+  * install_stop_signal_handler / take_stop_signal / adopt_orphans — what a
+    PID 1 needs: catch the platform's SIGTERM/SIGINT into a latch, and
+    receive the orphans of the tree it spawned (Supervisor.reap_orphans
+    collects them). ChildSpec.set_own_process_group makes terminate signal
+    the child's whole process group.
 
 Scope: ONE child per Supervisor, no restart, no timeout, inherited env/cwd
 by default. rlimits are accepted but not applied yet. The reactor exit monitor
@@ -40,7 +45,13 @@ from .proc_ffi import (
     ReapStatus,
     SIGTERM,
     SIGKILL,
+    SIGINT,
     proc_probe_children,
+)
+from .pid1 import (
+    install_stop_signal_handler,
+    take_stop_signal,
+    adopt_orphans,
 )
 from .exit_monitor import (
     ProcExitWatch,

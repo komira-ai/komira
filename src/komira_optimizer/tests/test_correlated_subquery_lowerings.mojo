@@ -1,9 +1,9 @@
 """7 lowering-shape tests covering
-the Q4/Q17/Q20/Q21 SDK call-site shapes that use
+the Q4/Q17/Q20/Q21 query shapes built with
 `Expr.correlated_subquery(...)`.
 
 These tests sit BETWEEN the factory-only tests
-(`tests/test_expr_correlated_subquery.mojo`, 8 cases) and the compiler-
+(`komira_plan_ir/tests/test_expr_correlated_subquery.mojo`) and the compiler-
 pass unit tests (`tests/test_flatten_dependent_joins.mojo`, 8 cases): they
 exercise the FULL chain — factory build → `flatten_dependent_joins` pass →
 structural assert on the lowered shape, with the inputs shaped exactly
@@ -18,23 +18,24 @@ Test matrix (7 cases):
   3. SCALAR (Q17-shape)   — Filter(rewritten_pred, LeftJoin(lineitem,
                             Aggregate-by-partkey-with-AVG-quantity)) — the
                             full structural lowering for the Q17 SCALAR
-                            shape with a 0.2× threshold.
-  4. EXISTS multi-key (Q20-shape) — supplier ⋈SEMI partsupp on
-                            (s_suppkey, ...secondary...). Multi-key hoist.
-  5. EXISTS empty inner   — outer plan unchanged structurally, but the
-                            lowered SEMI-join has an empty right input;
-                            verify lowering doesn't choke on the empty
-                            inner case (it shouldn't — the empty-ness is
-                            a runtime property, not a compile-time one).
-  6. NOT_EXISTS non-empty inner — symmetric to (5), the ANTI-join with a
-                            non-empty inner. Same structural assertion.
-  7. SCALAR with non-default agg alias — exercise the "inner plan already
-                            has an Aggregate at root" branch of
-                            `_lower_scalar_correlated`, ensuring the
-                            re-alias path runs.
+                            shape (the 0.2× multiplier left out), through
+                            the "inner plan already has an Aggregate at
+                            root" re-alias branch of `_lower_scalar_correlated`.
+  4. EXISTS multi-key (Q20-shape) — partsupp ⋈SEMI lineitem on
+                            (ps_partkey, ps_suppkey). Multi-key hoist.
+  5. EXISTS bare inner scan — no inner Filter, so the keys fall back to the
+                            same-name default (left_on = right_on =
+                            outer_ref) and the SEMI join's right child is
+                            the bare scan.
+  6. NOT_EXISTS bare inner scan — symmetric to (5) through the ANTI
+                            lowering.
+  7. SCALAR with no inner Aggregate — `_lower_scalar_correlated`
+                            synthesizes a default MEAN Aggregate over the
+                            inner plan (the fallback branch).
 
-A Q-shape that hits a primitive not yet in the SDK (correlated NOT IN,
-correlated INTERSECT, ...) is out of scope and has no case here.
+A Q-shape that needs a kind `Expr.correlated_subquery` does not have
+(correlated NOT IN, correlated INTERSECT, ...) is out of scope and has no
+case here.
 
 Reference — DuckDB plan shapes via EXPLAIN <SQL>:
   - Q4: `EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey=o_orderkey AND
@@ -154,10 +155,9 @@ def _lineitem_schema_q17_inner() -> LogicalPlan:
 
 
 def _supplier_schema_q20() -> LogicalPlan:
-    """Q20 outer: supplier(s_suppkey, s_name, s_nationkey) — but we test the
-    multi-key shape against a synthetic outer with (k1, k2) so the hoist
-    can pair them up. Q20's canonical multi-key is partsupp ⋈ aggregated_li
-    on (ps_partkey, ps_suppkey)=(l_partkey, l_suppkey)."""
+    """Q20 multi-key outer: partsupp(ps_partkey, ps_suppkey, ps_availqty),
+    so the hoist can pair both keys. Q20's canonical multi-key is partsupp ⋈
+    aggregated_li on (ps_partkey, ps_suppkey)=(l_partkey, l_suppkey)."""
     var b = SchemaBuilder()
     b.add_field(Field(String("ps_partkey"), ArrowType.INT64, False))
     b.add_field(Field(String("ps_suppkey"), ArrowType.INT64, False))
@@ -276,10 +276,11 @@ def test_q17_scalar_lowering() raises:
     FROM lineitem WHERE l_partkey=outer.l_partkey).
 
     Inner: Aggregate-by-partkey emitting AVG(l_quantity).
-    Outer: lineitem with Filter(l_quantity < 0.2 * correlated).
+    Outer: lineitem with Filter(l_quantity < correlated); the 0.2
+    multiplier is left out (see below).
 
     Lowered shape:
-      Filter(BIN_LT(l_quantity, BIN_MUL(lit(0.2), col("__corr_scalar_0"))),
+      Filter(BIN_LT(l_quantity, col("__corr_scalar_0")),
              LeftJoin(outer_scan, Aggregate(group_by=[l_partkey],
                                             aggs=[AVG(l_quantity)
                                                   AS __corr_scalar_0],
@@ -319,8 +320,9 @@ def test_q17_scalar_lowering() raises:
     var corr = Expr.correlated_subquery(inner_filtered^, refs^, CORR_KIND_SCALAR)
 
     # Outer predicate: l_quantity < corr (we model 0.2 * AVG by directly
-    # comparing against the correlated; the multiplier is a constant fold
-    # the optimizer handles separately — out of scope for this test).
+    # comparing against the correlated; `_maybe_lower_filter` lowers a
+    # comparison only when one operand IS the subquery, so `0.2 * corr`
+    # would be refused as an unsupported parent-shape).
     var outer_pred = Expr.binary(
         BIN_LT,
         Expr.col_ref(String("l_quantity")),
@@ -490,7 +492,7 @@ def test_not_exists_bare_inner_scan_lowering() raises:
 def test_scalar_synthesizes_default_mean_when_inner_has_no_aggregate() raises:
     """SCALAR lowering when the inner plan does NOT have a PLAN_AGGREGATE
     at the root (post-hoist) — `_lower_scalar_correlated` synthesizes a
-    default MEAN over the first numeric column.
+    default MEAN over the first output column.
 
     This is the fallback branch for ad-hoc scalar subqueries that don't
     map to an explicit aggregation (e.g. a user-written `(SELECT col
