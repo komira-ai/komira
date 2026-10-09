@@ -4,7 +4,8 @@
 OCI image layout back. It is a Rust program with no third-party crate:
 [`src/json.rs`](src/json.rs) reads and writes JSON, [`src/tar.rs`](src/tar.rs)
 reads tar (ustar, GNU long names, pax headers, every header checksum
-verified) and writes it, [`src/sha256.rs`](src/sha256.rs) computes digests,
+verified) and writes it (ustar, a path over 100 bytes in a pax header, a
+size past eleven octal digits in base-256), [`src/sha256.rs`](src/sha256.rs) computes digests,
 [`src/tree.rs`](src/tree.rs) lays out a tree, [`src/pack.rs`](src/pack.rs)
 assembles an image, and [`src/image.rs`](src/image.rs) applies an image's
 layers. Gzip goes through the pinned busybox (`busybox gzip -dc` to read a
@@ -50,10 +51,15 @@ inline tests, so no tree or image builds unless they pass. They cover:
   that only share a prefix are accepted. `tree::lay` takes only a `Plan`,
   which only `tree::plan` makes, so nothing is laid without the refusals;
 - the writers: SHA-256 known answers (FIPS 180-4, the padding boundary);
-  tar written, read back and identical for the same items; JSON written
+  tar written, read back and identical for the same items, and every
+  header byte equal to a header laid out from the ustar field table; every
+  field read at its width (names, links and prefixes at 99, 100 and the
+  whole field), every type flag, and a pax size kept off the long-name,
+  long-link, global and second pax headers; JSON written
   compact with sorted keys and read back; the config (Entrypoint, no Cmd,
   label, diff_id, history), a base that is not exactly the pinned blobs
-  refused, and repository names normalized;
+  refused, and repository names normalized; the manifest, index.json, the
+  layout's files and the archive's paths and modes spelled out in full;
 - the check: the Entrypoint must be exactly the one named (another program,
   another spelling of the same path, two elements, none are red); every
   `--exec` and `--file` item is read, not only the first;

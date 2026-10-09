@@ -573,6 +573,65 @@ mod tests {
         assert_eq!(image(&base(), b"layer tar", b"layer gz", &named()).unwrap().manifest_digest, img.manifest_digest);
     }
 
+    /// Every name, media type and mode spelled out here, not taken from the
+    /// constants the code uses: a constant changed in the code is caught.
+    #[test]
+    fn the_layout_and_archive_name_these_files_with_these_bytes() {
+        let img = image(&base(), b"layer tar", b"layer gz", &named()).unwrap();
+        let (hex, digest) = (|b: &[u8]| sha256::hex(b), |b: &[u8]| sha256::digest(b));
+        let (layer0, config, manifest) = (base().layers[0].clone(), img.blobs[2].clone(), img.blobs[3].clone());
+        assert_eq!(digest(b"x"), format!("sha256:{}", hex(b"x")));
+        assert_eq!(
+            String::from_utf8(manifest.clone()).unwrap(),
+            format!(
+                concat!(
+                    r#"{{"config":{{"digest":"{}","mediaType":"application/vnd.oci.image.config.v1+json","size":{}}},"#,
+                    r#""layers":[{{"digest":"{}","mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","size":{}}},"#,
+                    r#"{{"digest":"{}","mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","size":8}}],"#,
+                    r#""mediaType":"application/vnd.oci.image.manifest.v1+json","schemaVersion":2}}"#
+                ),
+                digest(&config),
+                config.len(),
+                digest(&layer0),
+                layer0.len(),
+                digest(b"layer gz")
+            )
+        );
+        assert_eq!(
+            String::from_utf8(img.index.clone()).unwrap(),
+            format!(
+                concat!(
+                    r#"{{"manifests":[{{"annotations":{{"io.containerd.image.name":"docker.io/komira/base:0.1.0","org.opencontainers.image.ref.name":"0.1.0"}},"#,
+                    r#""digest":"{}","mediaType":"application/vnd.oci.image.manifest.v1+json","platform":{{"architecture":"amd64","os":"linux"}},"size":{}}}],"#,
+                    r#""mediaType":"application/vnd.oci.image.index.v1+json","schemaVersion":2}}"#
+                ),
+                digest(&manifest),
+                manifest.len()
+            )
+        );
+        let (layout, items) = files(&img);
+        let blob = |b: &[u8]| format!("blobs/sha256/{}", hex(b));
+        let want: Vec<(String, Vec<u8>)> = vec![
+            (blob(&layer0), layer0.clone()),
+            (blob(b"layer gz"), b"layer gz".to_vec()),
+            (blob(&config), config.clone()),
+            (blob(&manifest), manifest.clone()),
+            ("oci-layout".into(), br#"{"imageLayoutVersion":"1.0.0"}"#.to_vec()),
+            ("index.json".into(), img.index.clone()),
+        ];
+        assert_eq!(layout, want);
+        // The archive: the layout, its two directories and Docker's manifest.json,
+        // each with its own mode.
+        let mut got: Vec<(String, u32, Vec<u8>)> = items.into_iter().map(|i| (i.path, i.mode, i.data)).collect();
+        got.sort();
+        let mut want: Vec<(String, u32, Vec<u8>)> = want.into_iter().map(|(p, d)| (p, 0o644, d)).collect();
+        want.push(("blobs/".into(), 0o755, vec![]));
+        want.push(("blobs/sha256/".into(), 0o755, vec![]));
+        want.push(("manifest.json".into(), 0o644, img.docker_manifest.clone()));
+        want.sort();
+        assert_eq!(got, want);
+    }
+
     #[test]
     fn write_lays_every_file_and_names_what_it_cannot_write() {
         let img = image(&base(), b"layer tar", b"layer gz", &named()).unwrap();
