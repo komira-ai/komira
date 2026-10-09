@@ -22,8 +22,8 @@
 # WHY THIS IS IN `komira_scan_source` AND NOT IN A NEW TOP PACKAGE
 # =============================================================================
 #
-# A TOP package whose deps name every package that owns a scan kind (mirroring
-# `komira_fs_registry`) is the correct answer for TIER 2 — a resolver that
+# A TOP package whose deps name every package that owns a scan kind is the
+# correct answer for TIER 2 — a resolver that
 # hands back a `MorselSourceImpl` cannot live in core, because
 # `MorselSourceImpl` lives in `komira_morsel`, which depends on core (see
 # `fs_resolver.mojo`).

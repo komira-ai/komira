@@ -52,6 +52,8 @@ mojo_gcp_client(
     proto_deps = ["//tools/vendor/googleapis:firestore_v1"],
     protocol = "rest",
     protos = [],
+    # A README.md here is komira_gcp_firestore's (below), not this client's.
+    readme = False,
     test_data = {
         "tests/v1/test_firestore_v1_no_env_reads.mojo": {"gen": ":komira_gcp_firestore_v1_gen"},
     },
@@ -100,6 +102,8 @@ mojo_gcp_client(
     proto_deps = ["//tools/vendor/googleapis:firestore_v1"],
     protocol = "grpc",
     protos = [],
+    # A README.md here is komira_gcp_firestore's (below), not this client's.
+    readme = False,
     test_data = {
         "tests/listen/test_firestore_listen_no_env_reads.mojo": {"gen": ":komira_gcp_firestore_listen_gen"},
     },

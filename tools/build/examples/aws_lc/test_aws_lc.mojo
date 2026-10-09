@@ -15,14 +15,14 @@ def same(a: List[UInt8], b: List[UInt8]) -> Bool:
 def main() raises:
     """Known-answer tests of aws-lc's libcrypto, called through its C API."""
     # aws-lc's own known-answer self tests (all of them, FIPS or not).
-    expect(external_call["BORINGSSL_self_test", Int32]() == 1, "BORINGSSL_self_test failed")
+    expect(external_call["komira_awslc_BORINGSSL_self_test", Int32]() == 1, "BORINGSSL_self_test failed")
     print("BORINGSSL_self_test: ok")
 
     # SHA-256("abc"), FIPS 180-2 appendix B.1.
     var abc: List[UInt8] = [0x61, 0x62, 0x63]
     var digest = List[UInt8](length=32, fill=0)
     # SHA256 returns its output pointer; read as an address and ignored.
-    _ = external_call["SHA256", Int](abc.unsafe_ptr(), UInt64(3), digest.unsafe_ptr())
+    _ = external_call["komira_awslc_SHA256", Int](abc.unsafe_ptr(), UInt64(3), digest.unsafe_ptr())
     var want_sha: List[UInt8] = [
         0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde,
         0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
@@ -38,10 +38,10 @@ def main() raises:
         key.append(UInt8(i))
         block.append(UInt8(i * 0x11))
     var aes_key = List[UInt8](length=512, fill=0)  # AES_KEY is 244 bytes
-    expect(external_call["AES_set_encrypt_key", Int32](key.unsafe_ptr(), UInt32(128), aes_key.unsafe_ptr()) == 0,
+    expect(external_call["komira_awslc_AES_set_encrypt_key", Int32](key.unsafe_ptr(), UInt32(128), aes_key.unsafe_ptr()) == 0,
         "AES_set_encrypt_key failed")
     var out = List[UInt8](length=16, fill=0)
-    external_call["AES_encrypt", NoneType](block.unsafe_ptr(), out.unsafe_ptr(), aes_key.unsafe_ptr())
+    external_call["komira_awslc_AES_encrypt", NoneType](block.unsafe_ptr(), out.unsafe_ptr(), aes_key.unsafe_ptr())
     var want_aes: List[UInt8] = [
         0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04, 0x30, 0xd8, 0xcd, 0xb7, 0x80,
         0x70, 0xb4, 0xc5, 0x5a,
@@ -57,7 +57,7 @@ def main() raises:
         chacha_key.append(UInt8(i))
     var nonce: List[UInt8] = [0, 0, 0, 0, 0, 0, 0, 0x4A, 0, 0, 0, 0]
     var ct = List[UInt8](length=n, fill=0)
-    external_call["CRYPTO_chacha_20", NoneType](
+    external_call["komira_awslc_CRYPTO_chacha_20", NoneType](
         ct.unsafe_ptr(), text.unsafe_ptr(), UInt64(n), chacha_key.unsafe_ptr(), nonce.unsafe_ptr(), UInt32(1)
     )
     var want_chacha: List[UInt8] = [

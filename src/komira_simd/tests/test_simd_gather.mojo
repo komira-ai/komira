@@ -44,7 +44,8 @@ def _ref_gather_u32[W: Int](
     indices: SIMD[DType.uint32, W],
 ) -> SIMD[DType.uint32, W]:
     """Scalar reference: walks lanes in order, emits `base[indices[k]]`.
-    Independent implementation from `_stdlib_gather_u32` so the AVX-512
+    Independent implementation from `_scalar_gather` (a List subscript, not
+    a raw-pointer load in a comptime-unrolled loop) so the AVX-512
     path can be cross-checked against an independent oracle.
     """
     var out = SIMD[DType.uint32, W](0)
@@ -198,8 +199,8 @@ def _make_random_indices_x2() -> SIMD[DType.uint32, 2]:
 # Round-trip vs scalar reference (10K random inputs per primitive × width).
 #
 # We test BOTH the AVX-512-native widths (W=16 u32, W=8 u64/i64/f64) AND the
-# NEON-native widths (W=4 u32, W=2 u64/i64/f64). On NEON both fall through to
-# the stdlib gather; on AVX-512 the wider widths fire the explicit intrinsic
+# NEON-native widths (W=4 u32, W=2 u64/i64/f64). On NEON and AVX2 both fall through to
+# `_scalar_gather`; on AVX-512 the wider widths fire the explicit intrinsic
 # and the narrower widths fall through. Either way the result is verified
 # against an INDEPENDENT scalar oracle (`_ref_gather_*`).
 # =============================================================================
@@ -493,7 +494,7 @@ def test_gather_f64x8_fractional_preserved() raises:
 
 
 # =============================================================================
-# NEON-width edge cases — confirm W=4 u32 / W=2 u64/i64/f64 stdlib-fallback
+# NEON-width edge cases — confirm W=4 u32 / W=2 u64/i64/f64 scalar-fallback
 # path behaves identically to the wider widths.
 # =============================================================================
 

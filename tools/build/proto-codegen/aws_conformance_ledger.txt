@@ -27,13 +27,13 @@
 # Checked by //tools/build/proto-codegen:aws_conformance_test, which
 # aws-client-gen is published behind.
 
-ec2 input 29 20 8 refused[host-prefix=1]
+ec2 input 29 21 8 refused[]
 ec2 output 29 27 2 refused[]
-json input 76 64 7 refused[document=1,host-prefix=4]
+json input 76 68 7 refused[document=1]
 json output 92 78 12 refused[aws-query-compatible=1,document=1]
-query input 38 30 6 refused[host-prefix=2]
+query input 38 32 6 refused[]
 query output 38 36 2 refused[]
-rest-json input 113 93 12 refused[document=6,host-prefix=2]
+rest-json input 113 95 12 refused[document=6]
 rest-json output 91 74 9 refused[document=8]
-rest-xml input 94 61 12 refused[host-prefix=3,union=5,xml-attribute=2,xml-map=11]
+rest-xml input 94 64 12 refused[union=5,xml-attribute=2,xml-map=11]
 rest-xml output 78 52 6 refused[union=5,xml-attribute=2,xml-map=13]
