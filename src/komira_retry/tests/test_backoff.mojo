@@ -81,6 +81,25 @@ def test_band_jitter_fixed_rng() raises:
     assert_equal(tiny.delay_ms(1, any), 3)
 
 
+def test_band_wider_than_cap_clamps_at_zero() raises:
+    # Jitter.band refuses pct > 100, but the keyword constructor does not:
+    # BAND(150) at cap 100 has band 150, so cap + roll - band reaches -50.
+    # delay_ms clamps it to 0 (the header's "clamped to [0, max]") rather
+    # than return a negative wait.
+    var b = Backoff(initial_ms=100, multiplier=2.0, max_ms=1000, jitter=Jitter(_band_pct=150))
+    # Retry 1: cap 100, band 150, roll = draw % 301, d = roll - 50.
+    var lo = ConstRng(0)
+    var below = ConstRng(49)
+    var zero = ConstRng(50)
+    var above = ConstRng(51)
+    var top = ConstRng(300)
+    assert_equal(b.delay_ms(1, lo), 0)
+    assert_equal(b.delay_ms(1, below), 0)
+    assert_equal(b.delay_ms(1, zero), 0)
+    assert_equal(b.delay_ms(1, above), 1)
+    assert_equal(b.delay_ms(1, top), 250)
+
+
 def test_bounds_over_many_draws() raises:
     var full = Backoff(initial_ms=100, multiplier=2.0, max_ms=1000, jitter=Jitter.full())
     var band = Backoff(initial_ms=100, multiplier=2.0, max_ms=1000, jitter=Jitter.band(25))
@@ -133,6 +152,7 @@ def main() raises:
     test_caps()
     test_full_jitter_fixed_rng()
     test_band_jitter_fixed_rng()
+    test_band_wider_than_cap_clamps_at_zero()
     test_bounds_over_many_draws()
     test_seeded_rng_is_reproducible()
     test_splitmix64_known_answers()

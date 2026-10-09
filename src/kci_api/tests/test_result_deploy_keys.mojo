@@ -278,5 +278,37 @@ def test_plan_hash_is_sha256_hex() raises:
     )
 
 
+def test_a_deploy_value_of_the_wrong_json_type_is_refused() raises:
+    var t = render_result(_stage(_deploy_step(String(OUTCOME_PARTIAL), _full_deploy())).finish_record(String(OUTCOME_PARTIAL), 20))
+    assert_equal(_refusal(t), String("<parsed>"))
+    # each list of node ids, at its second element
+    var ids = List[String]()
+    ids.append(String('"pending":["api/svc","api/public"]|"pending":["api/svc",1]|pending[1]'))
+    ids.append(String('"leftover":["old/svc"]|"leftover":["old/svc",true]|leftover[1]'))
+    ids.append(String('"left_behind":["logs/bucket"]|"left_behind":["logs/bucket",{}]|left_behind[1]'))
+    ids.append(String('"released":["legacy/account"]|"released":["legacy/account",null]|released[1]'))
+    for i in range(len(ids)):
+        var parts = ids[i].split(String("|"))
+        var old = String(parts[0])
+        assert_equal(t.count(old), 1, old)
+        assert_equal(
+            _refusal(t.replace(old, String(parts[1]))),
+            String("result 'r.json': steps[0]: ") + String(parts[2]) + String(" is not a string"),
+        )
+    # each list of objects, at its second element
+    var landed = String('"landed":[{"node":"runner/account","verb":"CREATE"},')
+    assert_equal(t.count(landed), 1)
+    assert_equal(
+        _refusal(t.replace(landed, landed + String('"x",'))),
+        String("result 'r.json': steps[0]: landed[1]: not an object"),
+    )
+    var outputs = String('"outputs":[')
+    assert_equal(t.count(outputs), 1)
+    assert_equal(
+        _refusal(t.replace(outputs, outputs + String('{"output":"A","resource":"r","value":"v"},2,'))),
+        String("result 'r.json': steps[0]: outputs[1]: not an object"),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
