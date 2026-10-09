@@ -15,9 +15,10 @@
 #      offset-less column uncounted). Now: exact nulls, everything else
 #      Absent, no sketch, no bloom; one unscanned value is enough. FLOAT16
 #      and DATE64 widths are 2 and 8.
-#   8. Floats. NaN: min over the other values, max and sum Absent, one
-#      distinct NaN. All NaN: no min/max. All +inf / all -inf: the infinity,
-#      not the largest finite value. -0.0 and +0.0: one distinct value.
+#   8. Floats. NaN (one or several): min over the other values, max and
+#      sum Absent, one distinct NaN. All NaN: no min/max. All +inf / all
+#      -inf: the infinity, not the largest finite value. -0.0 and +0.0:
+#      one distinct value.
 #   9. Integers. A sum that wraps Int64 (in one SIMD lane, in the lane fold,
 #      on the scalar path, downwards) is Absent; one that ends in range
 #      without wrapping is Exact. A UINT64 value above Int64.MAX: no
@@ -263,6 +264,33 @@ def test_nan_leaves_min_and_drops_max_and_sum() raises:
     assert_true(s.sum.is_absent(), "a NaN sum is not reported")
     assert_true(s.distinct_count.is_exact())
     assert_equal(_ndv(s), Int64(3), "1.0, -2.0 and one NaN")
+
+
+def test_one_nan_drops_max() raises:
+    # Exactly one NaN: a max over the other values would let `x > c` prune
+    # the NaN row.
+    var vals = List[Float64]()
+    vals.append(1.0)
+    vals.append(_nan())
+    vals.append(-2.0)
+    var s = _stats1(_f64_col(vals), ArrowType.FLOAT64)
+    assert_true(s.max.is_absent(), "one NaN orders above 1.0: no max")
+    assert_true(s.min.is_exact(), "min over the non-NaN values")
+    assert_equal(s.min.value.value().float_val, -2.0)
+    assert_true(s.sum.is_absent(), "a NaN sum is not reported")
+    assert_equal(_ndv(s), Int64(3), "1.0, -2.0 and one NaN")
+
+
+def test_one_value_beside_nans_is_the_min() raises:
+    var vals = List[Float64]()
+    vals.append(_nan())
+    vals.append(5.0)
+    vals.append(_nan())
+    var s = _stats1(_f64_col(vals), ArrowType.FLOAT64)
+    assert_true(s.min.is_exact(), "the one non-NaN value is the min")
+    assert_equal(s.min.value.value().float_val, 5.0)
+    assert_true(s.max.is_absent(), "NaN orders above 5.0: no max")
+    assert_equal(_ndv(s), Int64(2), "5.0 and one NaN")
 
 
 def test_all_nan_has_no_min_or_max() raises:
