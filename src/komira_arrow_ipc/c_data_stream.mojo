@@ -48,16 +48,24 @@
 #   - Binary (i32 offsets + raw bytes)                           — 3 buffers
 #   - LargeString / LargeUtf8 (i64 offsets + utf8 bytes)         — 3 buffers
 #   - LargeBinary (i64 offsets + raw bytes)                      — 3 buffers
-#   - Dictionary (parent: i32 indices; child via .dictionary)    — 2 buffers
+#   - Dictionary of STRING values (parent: indices; values via
+#     .dictionary)                                               — 2 buffers
+#     A Column stores dictionary indices as INT32 or INT64. Import reads the
+#     index width the parent format declares (`c s i l C S I L`) and stores
+#     it as INT32 (8-, 16-, 32-bit) or INT64 (64-bit), refusing a valid
+#     index that does not fit; export requires the Field's index type and
+#     the Column's index byte width to agree. Only top-level columns may be
+#     dictionary-encoded.
 # The type system also recognizes Decimal256, Time32/Time64, Duration,
 # Interval (3 sub-variants), Union (sparse/dense) and the nested types
 # (List<T> / Struct / Map); `_arrow_type_n_buffers` and the build/import arms
 # below are the authority on which of them cross the C ABI, and anything else
 # raises `UnsupportedArrowCABIType`. LargeString / LargeBinary / Binary share
 # the 3-buffer var-len shape (offset width i32 for STRING/BINARY, i64 for
-# LARGE_STRING/LARGE_BINARY). Columns with a non-zero logical `offset`
-# (sliced columns) are not handled on the *export* side — materialized
-# batches always start at offset 0, so this is not a hot path.
+# LARGE_STRING/LARGE_BINARY). On export, a fixed-width column with a
+# non-zero logical `offset` (a sliced column) is exported with that offset
+# in `ArrowArray.offset`; a sliced variable-length, nested or union column is
+# refused. Import refuses a non-zero `ArrowArray.offset`.
 #
 # SAFETY: every `UnsafePointer[..., MutExternalOrigin]` here is at the C ABI
 #   boundary; lifetime is mediated by the C Data Interface release-callback
@@ -77,13 +85,20 @@ from komira_arrow.arrow_types import (
     decimal_format_string,
     decimal256_format_string,
     parse_format_string,
-    extract_decimal_params,
     extract_timestamp_timezone,
     extract_union_type_ids,
     union_format_string,
 )
 from komira_buffer.heap_region import HeapRegion
 from komira_arrow.bitmap import Bitmap
+from komira_arrow_ipc.c_data_params import (
+    _check_decimal_params,
+    _dict_index_width,
+    _dict_indices_to_storage,
+    _dict_storage_index_type,
+    _dict_storage_width,
+    _parse_decimal_format,
+)
 from komira_arrow_ipc.c_data_interface import (
     CArrowSchema,
     CArrowArray,
@@ -428,17 +443,6 @@ def _copy_string_to_c_int8(s: String) -> UnsafePointer[Int8, MutUntrackedOrigin]
         unsafe_memcpy(dest=buf, src=src, count=n)
     (buf + n).unsafe_write(Int8(0))
     return buf
-
-
-@always_inline
-def _c_str_len(p: UnsafePointer[Int8, MutUntrackedOrigin]) -> Int:
-    """`strlen` for a null-terminated C string. Returns 0 for NULL."""
-    if _is_null(p):
-        return 0
-    var n = 0
-    while p[n] != Int8(0):
-        n += 1
-    return n
 
 
 @always_inline
@@ -1002,19 +1006,169 @@ def consumer_release_c_stream(
 # =============================================================================
 # Export: build a CArrowSchema for a Column / Schema.
 # =============================================================================
+#
+# ⚠ A BUILDER THAT RAISES MUST FREE WHAT IT BUILT. Nothing outside a builder
+# can reach a child it allocated before a later child is refused, and a
+# consumer that retries `get_schema` / `get_next` would leak again on every
+# call. So every builder installs the release callback on its struct FIRST and
+# attaches each allocation to the struct the moment it exists (a children
+# array of NULL slots, filled one child at a time, `n_children` already set);
+# on a raise it releases the struct, which frees exactly what was attached
+# (`_release_schema` / `_release_array` skip a NULL slot). Falsifier:
+# `tests/test_arrow_c_data_export_unwind.mojo`.
 
-def _build_column_schema(col: Column[HeapRegion], name: String, nullable: Bool) raises -> CArrowSchema:
-    """Build a primitive/string CArrowSchema for a single Column."""
-    # Validate type coverage early (raises UnsupportedArrowCABIType).
-    _ = _arrow_type_n_buffers(col.arrow_type)
-    var s = CArrowSchema()
-    s.format = _copy_string_to_c_int8(_column_format_string(col))
-    s.name = _copy_string_to_c_int8(name)
-    s.flags = ARROW_FLAG_NULLABLE if nullable else 0
-    s.n_children = 0
-    _set_schema_release(s)
-    return s^
 
+def _release_unexported_schema(mut s: CArrowSchema):
+    """Release a schema this module built and has not handed to anyone,
+    from a builder's error path.
+
+    # SAFETY: `s` is the caller's live local; `_release_schema` reads and
+    # writes it through this pointer only for the duration of the call.
+    """
+    _release_schema(UnsafePointer(to=s).unsafe_origin_cast[MutUntrackedOrigin]())
+
+
+def _release_unexported_array(mut a: CArrowArray):
+    """Release an array this module built and has not handed to anyone,
+    from a builder's error path. See `_release_unexported_schema`.
+
+    # SAFETY: as `_release_unexported_schema`. `a.private_data` is NULL on
+    # every array this is called on (only a delivered root carries state).
+    """
+    _release_array(UnsafePointer(to=a).unsafe_origin_cast[MutUntrackedOrigin]())
+
+
+def _box_schema(var s: CArrowSchema) -> _SchemaPtr:
+    """Move `s` into a heap slot, freed by the parent's release."""
+    var p = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
+    p.unsafe_write(s^)
+    return p
+
+
+def _box_array(var a: CArrowArray) -> _ArrayPtr:
+    """Move `a` into a heap slot, freed by the parent's release."""
+    var p = alloc[CArrowArray](1).unsafe_origin_cast[MutUntrackedOrigin]()
+    p.unsafe_write(a^)
+    return p
+
+
+def _reserve_schema_children(
+    mut s: CArrowSchema, n: Int
+) -> UnsafePointer[_SchemaPtr, MutUntrackedOrigin]:
+    """Attach a children array of `n` NULL slots to `s` (none for `n == 0`)
+    and return it for the caller to fill."""
+    var kids = _alloc_schema_ptr_array(n)
+    s.n_children = Int64(n)
+    if n > 0:
+        s.children = kids.bitcast[UnsafePointer[CArrowSchema, MutUntrackedOrigin]]()
+    return kids
+
+
+def _nested_dictionary(name: String) -> Error:
+    return Error(
+        "UnsupportedArrowCABIType: child '" + name + "' is dictionary-encoded;"
+        + " only top-level columns may be dictionary-encoded"
+    )
+
+
+def _check_dictionary_export(field: Field, ref col: Column[HeapRegion]) raises:
+    """Refuse a column whose dictionary encoding the exported schema would
+    misdescribe. The parent format string is the Field's index type and the
+    value schema is STRING ('u'), while the indices and values come from the
+    Column, so the two must agree: a DICTIONARY Field over a dictionary
+    Column (and the reverse), STRING values, and the index type's width equal
+    to the Column's index byte width (INT32 with 4, INT64 with 8; a Column
+    stores no other width)."""
+    var field_dict = field.arrow_type == ArrowType.DICTIONARY
+    var col_dict = col.arrow_type == ArrowType.DICTIONARY
+    if field_dict and not col_dict:
+        raise Error(
+            "ArrowCStream(export): dictionary column '" + field.name
+            + "' holds a " + String(col.arrow_type) + " column"
+        )
+    if col_dict and not field_dict:
+        raise Error(
+            "ArrowCStream(export): column '" + field.name + "' is"
+            + " dictionary-encoded but its field is " + String(field.arrow_type)
+        )
+    if not field_dict:
+        return
+    if col.is_numeric_dict():
+        raise Error(
+            "ArrowCStream(export): dictionary column '" + field.name
+            + "' has numeric values; only STRING dictionary values are exported"
+        )
+    var idx_t = field.dict_index_type()
+    if _dict_storage_width(idx_t) != col.dict_index_byte_width():
+        raise Error(
+            "ArrowCStream(export): dictionary column '" + field.name
+            + "' declares " + String(idx_t).upper() + " indices but holds "
+            + String(col.dict_index_byte_width()) + "-byte indices"
+        )
+
+
+def _attach_nested_child_schemas(
+    mut s: CArrowSchema, ref col: Column[HeapRegion], t: ArrowType
+) raises:
+    """Build and attach the child schemas of a LIST / STRUCT / MAP / UNION
+    column `col` exported as type `t` (nothing for other types), each child
+    from the Column alone (`_build_column_schema_from_column`).
+
+    Each child is attached as soon as it is built, so when one raises `s`
+    holds exactly the children built before it, for the caller's
+    `_release_unexported_schema(s)`.
+    """
+    if t == ArrowType.LIST:
+        if col.num_children() != 1:
+            raise Error(
+                "ArrowCStream(export): LIST column must have 1 child, got "
+                + String(col.num_children())
+            )
+        # Arrow spec: the list child is named "item" by default (PyArrow's
+        # convention); a name the Column carries wins.
+        var item_name = String("item")
+        if len(col._field_names) >= 1 and col._field_names[0] != "":
+            item_name = col._field_names[0]
+        var kids = _reserve_schema_children(s, 1)
+        (kids + 0).unsafe_write(
+            _box_schema(_build_column_schema_from_column(col.child_at(0), item_name, True))
+        )
+    elif t == ArrowType.MAP:
+        # MAP child = entries Struct<key, value>, named "entries" by spec
+        # convention.
+        if col.num_children() != 1:
+            raise Error(
+                "ArrowCStream(export): MAP column must have 1 entries"
+                " child, got " + String(col.num_children())
+            )
+        ref kid = col.child_at(0)
+        if kid.arrow_type != ArrowType.STRUCT:
+            raise Error(
+                "ArrowCStream(export): MAP entries child must be STRUCT,"
+                " got " + String(kid.arrow_type)
+            )
+        var kids = _reserve_schema_children(s, 1)
+        (kids + 0).unsafe_write(
+            _box_schema(_build_column_schema_from_column(kid, String("entries"), False))
+        )
+        if col.keys_sorted():
+            s.flags = s.flags | ARROW_FLAG_MAP_KEYS_SORTED
+    elif (
+        t == ArrowType.STRUCT
+        or t == ArrowType.UNION_SPARSE
+        or t == ArrowType.UNION_DENSE
+    ):
+        # N child schemas named from `col._field_names` (parallel to the
+        # children), "f<i>" where a name is missing or empty.
+        var nchild = col.num_children()
+        var kids = _reserve_schema_children(s, nchild)
+        for i in range(nchild):
+            var cname = String("f") + String(i)
+            if i < len(col._field_names) and col._field_names[i] != "":
+                cname = col._field_names[i]
+            (kids + i).unsafe_write(
+                _box_schema(_build_column_schema_from_column(col.child_at(i), cname, True))
+            )
 
 def _build_record_batch_schema_no_data(schema: Schema) raises -> CArrowSchema:
     """Build the root struct CArrowSchema (`+s` format) WITHOUT a sample
@@ -1027,21 +1181,17 @@ def _build_record_batch_schema_no_data(schema: Schema) raises -> CArrowSchema:
     root.format = _copy_string_to_c_int8(String("+s"))
     root.name = _copy_string_to_c_int8(String(""))
     root.flags = 0
-    root.n_children = Int64(ncols)
-    if ncols > 0:
-        var child_arr = _alloc_schema_ptr_array(ncols)
-        for i in range(ncols):
-            var arrow_t = schema.field_arrow_type(i)
-            _ = _arrow_type_n_buffers(arrow_t)
-            var cs = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-            var field = schema.field_at(i)
-            var built = _build_column_schema_from_field(field)
-            cs.unsafe_write(built^)
-            (child_arr + i).unsafe_write(cs)
-        root.children = child_arr.bitcast[
-            UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-        ]()
     _set_schema_release(root)
+    try:
+        var kids = _reserve_schema_children(root, ncols)
+        for i in range(ncols):
+            _ = _arrow_type_n_buffers(schema.field_arrow_type(i))
+            (kids + i).unsafe_write(
+                _box_schema(_build_column_schema_from_field(schema.field_at(i)))
+            )
+    except e:
+        _release_unexported_schema(root)
+        raise e^
     return root^
 
 
@@ -1059,27 +1209,26 @@ def _build_record_batch_schema(schema: Schema, ref batch: RecordBatch) raises ->
     root.format = _copy_string_to_c_int8(String("+s"))
     root.name = _copy_string_to_c_int8(String(""))
     root.flags = 0
-    root.n_children = Int64(ncols)
-    if ncols > 0:
-        var child_arr = _alloc_schema_ptr_array(ncols)
-        for i in range(ncols):
-            var arrow_t = schema.field_arrow_type(i)
-            # Validate per-column coverage; raises before we leak anything.
-            _ = _arrow_type_n_buffers(arrow_t)
-            var cs = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-            # Field-driven export.  The Field
-            # carries everything the format string + flags + metadata +
-            # dictionary slot need; `Field.format_string()` is the source of
-            # truth for the parent format string.
-            var field = schema.field_at(i)
-            ref col = batch.column_at(i)
-            var built = _build_column_schema_from_field_and_column(field, col)
-            cs.unsafe_write(built^)
-            (child_arr + i).unsafe_write(cs)
-        root.children = child_arr.bitcast[
-            UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-        ]()
     _set_schema_release(root)
+    try:
+        var kids = _reserve_schema_children(root, ncols)
+        for i in range(ncols):
+            # Validate per-column coverage before building the column.
+            _ = _arrow_type_n_buffers(schema.field_arrow_type(i))
+            # Field-driven export. The Field carries everything the format
+            # string + flags + metadata + dictionary slot need;
+            # `Field.format_string()` is the source of truth for the parent
+            # format string.
+            (kids + i).unsafe_write(
+                _box_schema(
+                    _build_column_schema_from_field_and_column(
+                        schema.field_at(i), batch.column_at(i)
+                    )
+                )
+            )
+    except e:
+        _release_unexported_schema(root)
+        raise e^
     return root^
 
 
@@ -1123,10 +1272,7 @@ def _build_column_schema_from_field(field: Field) raises -> CArrowSchema:
         s.metadata = encode_metadata(keys^, values^)
     # Dictionary value-type child schema.
     if field.arrow_type == ArrowType.DICTIONARY:
-        var dict_s = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-        var built_value = _build_dictionary_value_schema(field)
-        dict_s.unsafe_write(built_value^)
-        s.dictionary = dict_s
+        s.dictionary = _box_schema(_build_dictionary_value_schema(field))
     _set_schema_release(s)
     return s^
 
@@ -1134,111 +1280,32 @@ def _build_column_schema_from_field(field: Field) raises -> CArrowSchema:
 def _build_column_schema_from_column(ref col: Column[HeapRegion], name: String, nullable: Bool) raises -> CArrowSchema:
     """Build a CArrowSchema purely from a Column[HeapRegion] (no Field). Used to emit
     CHILD schemas for nested types (LIST item / STRUCT field / MAP entries
-    + key/value), where Field's flat `_child_types` would lose
+    + key/value / UNION member), where Field's flat `_child_types` would lose
     parameterization.
 
     For each child Column, we drive the format string from
     `_column_format_string(col)` (which handles Decimal128 (p,s),
-    Decimal256 (p,s), and all primitive/string/binary/dict format
-    strings) and recurse into nested children for LIST/STRUCT/MAP.
+    Decimal256 (p,s), union type ids and the primitive/string/binary format
+    strings) and recurse into nested children. A dictionary-encoded child is
+    refused: its parent format would have to be the index type and carry a
+    value schema, which only the Field-driven top level writes.
     """
     var t = col.arrow_type
     _ = _arrow_type_n_buffers(t)  # validate coverage
-    var s = CArrowSchema()
+    if t == ArrowType.DICTIONARY:
+        raise _nested_dictionary(name)
     var fmt = _column_format_string(col)
+    var s = CArrowSchema()
     s.format = _copy_string_to_c_int8(fmt)
     s.name = _copy_string_to_c_int8(name)
     s.flags = ARROW_FLAG_NULLABLE if nullable else 0
     s.n_children = 0
-    # Recurse into children for nested types.
-    if t == ArrowType.LIST:
-        if col.num_children() != 1:
-            raise Error(
-                "ArrowCStream(export): LIST column must have 1 child, got "
-                + String(col.num_children())
-            )
-        var child_arr = _alloc_schema_ptr_array(1)
-        var cs = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-        # Arrow spec: list child is named "item" by default (PyArrow's
-        # convention).  This uses the default; custom child names could be
-        # plumbed via Column._field_names[0] if set.
-        var item_name = String("item")
-        if col.num_children() == 1 and len(col._field_names) >= 1 and col._field_names[0] != "":
-            item_name = col._field_names[0]
-        ref kid = col.child_at(0)
-        var built = _build_column_schema_from_column(kid, item_name, True)
-        cs.unsafe_write(built^)
-        (child_arr + 0).unsafe_write(cs)
-        s.n_children = 1
-        s.children = child_arr.bitcast[
-            UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-        ]()
-    elif t == ArrowType.STRUCT:
-        var nchild = col.num_children()
-        s.n_children = Int64(nchild)
-        if nchild > 0:
-            var child_arr = _alloc_schema_ptr_array(nchild)
-            for i in range(nchild):
-                ref kid = col.child_at(i)
-                var cname = String("f") + String(i)
-                if i < len(col._field_names) and col._field_names[i] != "":
-                    cname = col._field_names[i]
-                var cs = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-                var built = _build_column_schema_from_column(kid, cname, True)
-                cs.unsafe_write(built^)
-                (child_arr + i).unsafe_write(cs)
-            s.children = child_arr.bitcast[
-                UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-            ]()
-    elif t == ArrowType.MAP:
-        # MAP child = entries Struct<key, value>. The struct child is named
-        # "entries" by spec convention; the inner struct fields are
-        # "key" and "value".
-        if col.num_children() != 1:
-            raise Error(
-                "ArrowCStream(export): MAP column must have 1 entries"
-                " child, got " + String(col.num_children())
-            )
-        var child_arr = _alloc_schema_ptr_array(1)
-        var cs = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-        ref kid = col.child_at(0)
-        if kid.arrow_type != ArrowType.STRUCT:
-            raise Error(
-                "ArrowCStream(export): MAP entries child must be STRUCT,"
-                " got " + String(kid.arrow_type)
-            )
-        var entries_name = String("entries")
-        var built = _build_column_schema_from_column(kid, entries_name, False)
-        cs.unsafe_write(built^)
-        (child_arr + 0).unsafe_write(cs)
-        s.n_children = 1
-        s.children = child_arr.bitcast[
-            UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-        ]()
-        # Honor keys_sorted on MAP.
-        if col.keys_sorted():
-            s.flags = s.flags | ARROW_FLAG_MAP_KEYS_SORTED
-    elif t == ArrowType.UNION_SPARSE or t == ArrowType.UNION_DENSE:
-        # Union with N child schemas.  Child
-        # names default to "f0", "f1", ...; `col._field_names` is consulted
-        # if present (parallel to `_children`).
-        var nchild = col.num_children()
-        s.n_children = Int64(nchild)
-        if nchild > 0:
-            var u_child_arr = _alloc_schema_ptr_array(nchild)
-            for i in range(nchild):
-                ref kid_u = col.child_at(i)
-                var cname_u = String("f") + String(i)
-                if i < len(col._field_names) and col._field_names[i] != "":
-                    cname_u = col._field_names[i]
-                var cs_u = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-                var built_u = _build_column_schema_from_column(kid_u, cname_u, True)
-                cs_u.unsafe_write(built_u^)
-                (u_child_arr + i).unsafe_write(cs_u)
-            s.children = u_child_arr.bitcast[
-                UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-            ]()
     _set_schema_release(s)
+    try:
+        _attach_nested_child_schemas(s, col, t)
+    except e:
+        _release_unexported_schema(s)
+        raise e^
     return s^
 
 
@@ -1248,15 +1315,17 @@ def _build_column_schema_from_field_and_column(field: Field, ref col: Column[Hea
     child recursion).
 
     For non-nested types, behaves identically to
-    `_build_column_schema_from_field`.  For nested LIST/STRUCT/MAP,
-    recurses into the Column's children to emit child CArrowSchemas
-    that preserve Decimal128 (p,s), Timestamp tz, and other
-    parameterized child type info.
+    `_build_column_schema_from_field`, after `_check_dictionary_export` has
+    refused a dictionary column the Field would misdescribe. For nested
+    LIST/STRUCT/MAP/UNION, recurses into the Column's children to emit child
+    CArrowSchemas that preserve Decimal128 (p,s), Timestamp tz, union type
+    ids and other parameterized child type info.
     """
-    var s = CArrowSchema()
     var fmt = field.format_string()
     if fmt == "n" and field.arrow_type != ArrowType.NULL:
         raise _unsupported(field.arrow_type, "export")
+    _check_dictionary_export(field, col)
+    var s = CArrowSchema()
     s.format = _copy_string_to_c_int8(fmt)
     s.name = _copy_string_to_c_int8(field.name)
     var bits = field._flags
@@ -1276,95 +1345,16 @@ def _build_column_schema_from_field_and_column(field: Field, ref col: Column[Hea
             keys.append(field._metadata_keys[i])
             values.append(field._metadata_values[i])
         s.metadata = encode_metadata(keys^, values^)
-    if field.arrow_type == ArrowType.DICTIONARY:
-        var dict_s = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-        var built_value = _build_dictionary_value_schema(field)
-        dict_s.unsafe_write(built_value^)
-        s.dictionary = dict_s
-    # Nested child recursion.
-    if field.arrow_type == ArrowType.LIST:
-        if col.num_children() != 1:
-            raise Error(
-                "ArrowCStream(export): LIST column must have 1 child, got "
-                + String(col.num_children())
-            )
-        var child_arr = _alloc_schema_ptr_array(1)
-        var cs = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-        ref kid = col.child_at(0)
-        var item_name = String("item")
-        if len(col._field_names) >= 1 and col._field_names[0] != "":
-            item_name = col._field_names[0]
-        var built = _build_column_schema_from_column(kid, item_name, True)
-        cs.unsafe_write(built^)
-        (child_arr + 0).unsafe_write(cs)
-        s.n_children = 1
-        s.children = child_arr.bitcast[
-            UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-        ]()
-    elif field.arrow_type == ArrowType.STRUCT:
-        var nchild = col.num_children()
-        s.n_children = Int64(nchild)
-        if nchild > 0:
-            var child_arr = _alloc_schema_ptr_array(nchild)
-            for i in range(nchild):
-                ref kid = col.child_at(i)
-                var cname = String("f") + String(i)
-                if i < len(col._field_names) and col._field_names[i] != "":
-                    cname = col._field_names[i]
-                var cs = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-                var built = _build_column_schema_from_column(kid, cname, True)
-                cs.unsafe_write(built^)
-                (child_arr + i).unsafe_write(cs)
-            s.children = child_arr.bitcast[
-                UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-            ]()
-    elif field.arrow_type == ArrowType.MAP:
-        if col.num_children() != 1:
-            raise Error(
-                "ArrowCStream(export): MAP column must have 1 entries"
-                " child, got " + String(col.num_children())
-            )
-        var child_arr = _alloc_schema_ptr_array(1)
-        var cs = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-        ref kid = col.child_at(0)
-        if kid.arrow_type != ArrowType.STRUCT:
-            raise Error(
-                "ArrowCStream(export): MAP entries child must be STRUCT,"
-                " got " + String(kid.arrow_type)
-            )
-        var built = _build_column_schema_from_column(kid, String("entries"), False)
-        cs.unsafe_write(built^)
-        (child_arr + 0).unsafe_write(cs)
-        s.n_children = 1
-        s.children = child_arr.bitcast[
-            UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-        ]()
-    elif (
-        field.arrow_type == ArrowType.UNION_SPARSE
-        or field.arrow_type == ArrowType.UNION_DENSE
-    ):
-        # Union with N child schemas, driven
-        # by the Field (for the parent format string + names) and the
-        # Column (for child type recursion).  The Field's format_string()
-        # already encodes `+us:I,J,...` / `+ud:I,J,...` via the
-        # `_union_type_ids` slot.
-        var nchild = col.num_children()
-        s.n_children = Int64(nchild)
-        if nchild > 0:
-            var u_child_arr = _alloc_schema_ptr_array(nchild)
-            for i in range(nchild):
-                ref kid_u = col.child_at(i)
-                var cname_u = String("f") + String(i)
-                if i < len(col._field_names) and col._field_names[i] != "":
-                    cname_u = col._field_names[i]
-                var cs_u = alloc[CArrowSchema](1).unsafe_origin_cast[MutUntrackedOrigin]()
-                var built_u = _build_column_schema_from_column(kid_u, cname_u, True)
-                cs_u.unsafe_write(built_u^)
-                (u_child_arr + i).unsafe_write(cs_u)
-            s.children = u_child_arr.bitcast[
-                UnsafePointer[CArrowSchema, MutUntrackedOrigin]
-            ]()
     _set_schema_release(s)
+    try:
+        if field.arrow_type == ArrowType.DICTIONARY:
+            s.dictionary = _box_schema(_build_dictionary_value_schema(field))
+        # Nested child recursion. The Field's format_string() already encodes
+        # `+us:I,J,...` / `+ud:I,J,...` from its `_union_type_ids`.
+        _attach_nested_child_schemas(s, col, field.arrow_type)
+    except e:
+        _release_unexported_schema(s)
+        raise e^
     return s^
 
 
@@ -1551,33 +1541,38 @@ def _build_column_array(ref col: Column[HeapRegion]) raises -> CArrowArray:
         ]().unsafe_mut_cast[True]()
         (bufs + 1).unsafe_write(data_ptr.unsafe_origin_cast[MutUntrackedOrigin]())
     a.buffers = bufs
-    # Build the dictionary value-type child
-    # CArrowArray (STRING with the dict offsets + bytes).  Attached to
-    # `a.dictionary` so the consumer can reach the values array.
-    if t == ArrowType.DICTIONARY:
-        var dict_a = alloc[CArrowArray](1).unsafe_origin_cast[MutUntrackedOrigin]()
-        var built_values = _build_dictionary_values_array(col)
-        dict_a.unsafe_write(built_values^)
-        a.dictionary = dict_a
-    # Recurse on children for LIST / STRUCT /
-    # MAP. Each child Column gets its own CArrowArray (heap-allocated) in
-    # the parent's `children` slot. `_release_array` walks + frees them.
-    # Unions also recurse on N children.
-    if is_nested or is_union:
-        var nchild = col.num_children()
-        a.n_children = Int64(nchild)
-        if nchild > 0:
+    # From here `a` owns what is attached to it; a raise below releases it
+    # (see "A BUILDER THAT RAISES MUST FREE WHAT IT BUILT").
+    _set_array_release(a)
+    try:
+        # Build the dictionary value-type child CArrowArray (STRING with the
+        # dict offsets + bytes). Attached to `a.dictionary` so the consumer
+        # can reach the values array.
+        if t == ArrowType.DICTIONARY:
+            a.dictionary = _box_array(_build_dictionary_values_array(col))
+        # Recurse on children for LIST / STRUCT / MAP / UNION. Each child
+        # Column gets its own CArrowArray (heap-allocated) in the parent's
+        # `children` slot. `_release_array` walks + frees them, skipping a
+        # slot not yet filled.
+        if is_nested or is_union:
+            var nchild = col.num_children()
             var child_arr = _alloc_array_ptr_array(nchild)
+            a.n_children = Int64(nchild)
+            if nchild > 0:
+                a.children = child_arr.bitcast[
+                    UnsafePointer[CArrowArray, MutUntrackedOrigin]
+                ]()
             for i in range(nchild):
                 ref kid = col.child_at(i)
-                var ca = alloc[CArrowArray](1).unsafe_origin_cast[MutUntrackedOrigin]()
-                var built = _build_column_array(kid)
-                ca.unsafe_write(built^)
-                (child_arr + i).unsafe_write(ca)
-            a.children = child_arr.bitcast[
-                UnsafePointer[CArrowArray, MutUntrackedOrigin]
-            ]()
-    _set_array_release(a)
+                if kid.arrow_type == ArrowType.DICTIONARY:
+                    var cname = String("f") + String(i)
+                    if i < len(col._field_names) and col._field_names[i] != "":
+                        cname = col._field_names[i]
+                    raise _nested_dictionary(cname)
+                (child_arr + i).unsafe_write(_box_array(_build_column_array(kid)))
+    except e:
+        _release_unexported_array(a)
+        raise e^
     return a^
 
 
@@ -1617,7 +1612,7 @@ def _build_dictionary_values_array(ref col: Column[HeapRegion]) raises -> CArrow
     return a^
 
 
-def _build_record_batch_array(ref batch: RecordBatch) raises -> CArrowArray:
+def _build_record_batch_array(ref batch: RecordBatch, schema: Schema) raises -> CArrowArray:
     """Build the root struct CArrowArray with one child CArrowArray per
     Column. The root struct array itself carries only a (NULL) validity
     buffer slot (n_buffers == 1, the struct-layout convention).
@@ -1635,8 +1630,14 @@ def _build_record_batch_array(ref batch: RecordBatch) raises -> CArrowArray:
 
     Cost per delivered chunk: one Slab of N `Column` structs plus one refcount
     increment per buffer. No `memcpy` of column data, at any width.
+
+    `schema` is the stream's schema, the one `get_schema` exported: each
+    column's dictionary encoding is checked against its Field
+    (`_check_dictionary_export`), chunk by chunk, before anything is built.
     """
     var ncols = batch.num_columns()
+    for i in range(min(ncols, schema.num_columns())):
+        _check_dictionary_export(schema.field_at(i), batch.column_at(i))
 
     # STEP 1 — take the shares BEFORE any pointer is read out of a column, so
     # there is no window in which the export points at bytes it does not hold a
@@ -1786,21 +1787,27 @@ def _import_column(
     precision: Int = 0,
     scale: Int = 0,
     sch_ptr: _SchemaPtr = _null_ptr[CArrowSchema, MutUntrackedOrigin](),
-    keys_sorted: Bool = False,
-    union_type_ids: List[Int] = List[Int](),
+    dict_index_type: ArrowType = ArrowType.INT32,
 ) raises -> Column[HeapRegion]:
     """Reconstruct a Mojo Column[HeapRegion] from a child CArrowArray. Copies all
     buffer bytes (we do not retain pointers into foreign memory). Raises
     `UnsupportedArrowCABIType` for types outside the supported subset.
 
-    For DECIMAL128, `(precision, scale)` come from the schema's `d:P,S`
-    format string and are stamped onto the resulting Column.
+    For DECIMAL128 / DECIMAL256, `(precision, scale)` come from the schema's
+    `d:P,S[,W]` format string and are stamped onto the resulting Column; a
+    precision of 0 means none was handed in and takes the width's default,
+    and anything `_check_decimal_params` refuses is refused.
 
-    When `sch_ptr` is non-NULL AND `arrow_t`
-    is LIST/STRUCT/MAP, the function recursively imports child Columns
-    using the matching child CArrowSchemas from `sch_ptr[].children`.
-    `keys_sorted` is honored for MAP (mirrors
-    ARROW_FLAG_MAP_KEYS_SORTED on the parent CArrowSchema).
+    `sch_ptr` is this column's own CArrowSchema. It is required for
+    LIST/STRUCT/MAP/UNION, which recursively import child Columns using the
+    matching child CArrowSchemas from `sch_ptr[].children`
+    (`_import_child_column`), and it is where a MAP's
+    ARROW_FLAG_MAP_KEYS_SORTED and a union's type ids (`+us:I,J,...`) are
+    read, at every depth.
+
+    For DICTIONARY, `dict_index_type` is the index type the parent format
+    declares; the indices are read at its width and stored as INT32 or INT64
+    (`_dict_indices_to_storage`).
     """
     var nb = _arrow_type_n_buffers(arrow_t)
     if Int(carray.n_buffers) != nb:
@@ -1813,6 +1820,14 @@ def _import_column(
         raise Error(
             "from_arrow_c_stream: child array with non-zero offset ("
             + String(Int(carray.offset)) + ") — not supported"
+        )
+    # `buffers` is Mandatory in the spec, whatever the length; every type in
+    # the import subset has at least one buffer.
+    if _is_null(carray.buffers):
+        raise Error(
+            "from_arrow_c_stream: array of type '" + String(arrow_t)
+            + "' has a NULL buffers array; the Arrow C Data Interface makes"
+            + " it mandatory"
         )
     var length = Int(carray.length)
     var declared_null_count = Int(carray.null_count)
@@ -2023,21 +2038,30 @@ def _import_column(
         # value table.
         if _is_null(carray.dictionary):
             raise Error("from_arrow_c_stream: dictionary column missing dictionary slot")
-        # Indices buffer (parent buffers[1]).  Supports INT32 indices.
-        var idx_bytes = length * 4
-        var idx_buf = OwnedAlignedBuffer(max(idx_bytes, 1))
+        # Indices buffer (parent buffers[1]): `length` values at the width
+        # the parent format declares. Copy exactly that many bytes, then
+        # widen to the Column's INT32 / INT64 storage.
+        var idx_w = _dict_index_width(dict_index_type)
+        if idx_w == 0:
+            raise Error(
+                "from_arrow_c_stream: dictionary index type '"
+                + String(dict_index_type) + "' is not an integer"
+            )
+        var idx_bytes = length * idx_w
+        var raw_idx = OwnedAlignedBuffer(max(idx_bytes, 1))
         var idx_p = _c_buffer_at(bufs, 1)
         _require_c_buffer(idx_p, idx_bytes, "dictionary indices", arrow_t)
         if idx_bytes > 0 and _non_null(idx_p):
             var idx_src = idx_p.bitcast[UInt8]()
             # Memcpy dest via view_mut + _unsafe_ptr.
-            var idx_view_mut = idx_buf.view_mut()
+            var idx_view_mut = raw_idx.view_mut()
             unsafe_memcpy(
                 dest=idx_view_mut._unsafe_ptr(),
                 src=idx_src.unsafe_origin_cast[MutUntrackedOrigin](),
                 count=idx_bytes,
             )
-        idx_buf.set_length(Int64(idx_bytes))
+        raw_idx.set_length(Int64(idx_bytes))
+        var idx_buf = _dict_indices_to_storage(raw_idx^, length, dict_index_type, validity)
 
         # Dictionary value-type child array.
         ref dict_carray = carray.dictionary[]
@@ -2045,6 +2069,11 @@ def _import_column(
         var dict_bufs = dict_carray.buffers
         if _is_null(dict_bufs):
             raise Error("from_arrow_c_stream: dictionary value-array missing buffers")
+        if Int(dict_carray.n_buffers) != 3:
+            raise Error(
+                "from_arrow_c_stream: dictionary value array has "
+                + String(Int(dict_carray.n_buffers)) + " buffers, expected 3"
+            )
         # dict_bufs[1] = i32 offsets (dict_len + 1 entries).
         var d_off_bytes = (dict_len + 1) * 4
         var d_off_buf = OwnedAlignedBuffer(max(d_off_bytes, 1))
@@ -2102,6 +2131,8 @@ def _import_column(
         )
         dict_col._set_dict_data_from_oab(d_data_buf^)
         dict_col._dict_size = dict_len
+        if _dict_storage_index_type(dict_index_type) == ArrowType.INT64:
+            dict_col._dict_index_byte_width = 8
         return dict_col^
 
     # --- Nested types (LIST/STRUCT/MAP). ---
@@ -2153,15 +2184,7 @@ def _import_column(
         if _is_null(child_cs_ptr):
             raise Error("from_arrow_c_stream: LIST child schema is NULL")
         ref child_cs = child_cs_ptr[]
-        var child_fmt = _c_str_to_mojo(child_cs.format) if _non_null(child_cs.format) else String("")
-        var child_t = _format_string_to_arrow_type(child_fmt)
-        var child_p = 0
-        var child_s = 0
-        if child_t == ArrowType.DECIMAL128 or child_t == ArrowType.DECIMAL256:
-            var ps = _parse_decimal_format(child_fmt)
-            child_p = ps[0]
-            child_s = ps[1]
-        var child_col = _import_column(child_ca[], child_t, child_p, child_s, child_cs_ptr, False)
+        var child_col = _import_child_column(child_ca[], child_cs_ptr)
         # zero-length data buffer for LIST.
         var data_buf = OwnedAlignedBuffer(1)
         data_buf.set_length(0)
@@ -2223,15 +2246,7 @@ def _import_column(
                         + " has NULL schema or array"
                     )
                 ref child_cs = child_cs_ptr[]
-                var child_fmt = _c_str_to_mojo(child_cs.format) if _non_null(child_cs.format) else String("")
-                var child_t = _format_string_to_arrow_type(child_fmt)
-                var child_p = 0
-                var child_s = 0
-                if child_t == ArrowType.DECIMAL128 or child_t == ArrowType.DECIMAL256:
-                    var ps = _parse_decimal_format(child_fmt)
-                    child_p = ps[0]
-                    child_s = ps[1]
-                var child_col = _import_column(child_ca[], child_t, child_p, child_s, child_cs_ptr, False)
+                var child_col = _import_child_column(child_ca[], child_cs_ptr)
                 col._children.append(child_col^)
                 var cname = _c_str_to_mojo(child_cs.name) if _non_null(child_cs.name) else String("f") + String(i)
                 col._field_names.append(cname)
@@ -2287,7 +2302,7 @@ def _import_column(
                 "from_arrow_c_stream: MAP entries child must be STRUCT, got"
                 " format '" + child_fmt + "'"
             )
-        var entries_col = _import_column(child_ca[], ArrowType.STRUCT, 0, 0, child_cs_ptr, False)
+        var entries_col = _import_column(child_ca[], ArrowType.STRUCT, 0, 0, child_cs_ptr)
         var data_buf = OwnedAlignedBuffer(1)
         data_buf.set_length(0)
 
@@ -2302,7 +2317,7 @@ def _import_column(
         )
         col._children.append(entries_col^)
         col._field_names.append(String("entries"))
-        col._keys_sorted = keys_sorted
+        col._keys_sorted = (pschema.flags & ARROW_FLAG_MAP_KEYS_SORTED) != 0
         return col^
 
     # --- Union types (sparse + dense). ---
@@ -2366,6 +2381,16 @@ def _import_column(
                 "from_arrow_c_stream: UNION schema/array children mismatch: "
                 + String(Int(pschema.n_children)) + " vs " + String(nchild)
             )
+        # The type ids are the column's own format's (`+us:I,J,...`), one per
+        # child: the types buffer holds them, not child positions.
+        var own_fmt = _c_str_to_mojo(pschema.format)
+        var type_ids = extract_union_type_ids(own_fmt)
+        if len(type_ids) != nchild:
+            raise Error(
+                "from_arrow_c_stream: union format '" + own_fmt + "' declares "
+                + String(len(type_ids)) + " type ids for " + String(nchild)
+                + " children"
+            )
         var col = Column[HeapRegion](
             arrow_type=arrow_t,
             data=types_buf_local^,
@@ -2391,30 +2416,25 @@ def _import_column(
                         + " has NULL schema or array"
                     )
                 ref child_cs = child_cs_ptr[]
-                var child_fmt = _c_str_to_mojo(child_cs.format) if _non_null(child_cs.format) else String("")
-                var child_t = _format_string_to_arrow_type(child_fmt)
-                var child_p = 0
-                var child_s = 0
-                if child_t == ArrowType.DECIMAL128 or child_t == ArrowType.DECIMAL256:
-                    var ps = _parse_decimal_format(child_fmt)
-                    child_p = ps[0]
-                    child_s = ps[1]
-                var child_col = _import_column(child_ca[], child_t, child_p, child_s, child_cs_ptr, False)
+                var child_col = _import_child_column(child_ca[], child_cs_ptr)
                 col._children.append(child_col^)
                 var cname = _c_str_to_mojo(child_cs.name) if _non_null(child_cs.name) else String("f") + String(i)
                 col._field_names.append(cname)
-        # Carry the declared type-ids (from the parent format string,
-        # passed in by the caller).  Pad / truncate to match nchild for
-        # safety; an empty `union_type_ids` falls back to 0..nchild-1.
-        if len(union_type_ids) == nchild:
-            for i in range(nchild):
-                col._type_ids.append(union_type_ids[i])
-        else:
-            for i in range(nchild):
-                col._type_ids.append(i)
+        col._type_ids = type_ids^
         return col^
 
     # --- fixed-width / boolean ---
+    var dec_p = precision
+    if arrow_t == ArrowType.DECIMAL128 or arrow_t == ArrowType.DECIMAL256:
+        var bit_width = 256 if arrow_t == ArrowType.DECIMAL256 else 128
+        if dec_p == 0:
+            # No precision handed in: the width's maximum.
+            dec_p = 76 if bit_width == 256 else 38
+        var dec_fmt = (
+            decimal256_format_string(dec_p, scale) if bit_width == 256
+            else decimal_format_string(dec_p, scale)
+        )
+        _check_decimal_params(dec_fmt, dec_p, scale, bit_width)
     var elem_bytes: Int
     if arrow_t == ArrowType.BOOL:
         elem_bytes = -1  # packed bits
@@ -2456,19 +2476,34 @@ def _import_column(
         null_count=null_count,
         offset=0,
     )
-    if arrow_t == ArrowType.DECIMAL128:
-        var p = precision if precision >= 1 else 38
-        var s = scale if (scale >= 0 and scale <= p) else 0
-        col._decimal_p = p
-        col._decimal_s = s
-    elif arrow_t == ArrowType.DECIMAL256:
-        # Stamp 256-bit decimal (p, s).
-        # The 256-bit precision bound is 76 (Arrow spec).
-        var p = precision if precision >= 1 else 76
-        var s = scale if (scale >= 0 and scale <= p) else 0
-        col._decimal_p = p
-        col._decimal_s = s
+    if arrow_t == ArrowType.DECIMAL128 or arrow_t == ArrowType.DECIMAL256:
+        col._decimal_p = dec_p
+        col._decimal_s = scale
     return col^
+
+
+def _import_child_column(ref child_ca: CArrowArray, child_cs_ptr: _SchemaPtr) raises -> Column[HeapRegion]:
+    """Import one child of a LIST / STRUCT / MAP / UNION column with every
+    parameter its own CArrowSchema declares: the type and decimal
+    (precision, scale) from its format; union type ids and MAP keys-sorted
+    are read by `_import_column` from the same schema. The same reads as the
+    top level (`_read_root_schema`), so a parameter is not lost below it.
+
+    A dictionary-encoded child is refused: its format is the index type and
+    importing it as such would drop the values.
+    """
+    ref child_cs = child_cs_ptr[]
+    if _non_null(child_cs.dictionary):
+        raise _nested_dictionary(_c_str_to_mojo(child_cs.name))
+    var child_fmt = _c_str_to_mojo(child_cs.format) if _non_null(child_cs.format) else String("")
+    var child_t = _format_string_to_arrow_type(child_fmt)
+    var child_p = 0
+    var child_s = 0
+    if child_t == ArrowType.DECIMAL128 or child_t == ArrowType.DECIMAL256:
+        var ps = _parse_decimal_format(child_fmt)
+        child_p = ps[0]
+        child_s = ps[1]
+    return _import_column(child_ca, child_t, child_p, child_s, child_cs_ptr)
 
 
 def _arrow_fixed_width_bytes(arrow_t: ArrowType) raises -> Int:
@@ -2518,63 +2553,6 @@ def _arrow_fixed_width_bytes(arrow_t: ArrowType) raises -> Int:
 
 # --- Parse a C ABI format string back to an ArrowType. ---
 
-def _parse_small_uint(s: String) -> Int:
-    """Parse a small non-negative decimal integer from a (possibly
-    whitespace-padded) string; returns -1 if it contains a non-digit
-    (after trimming) or is empty."""
-    var bytes = s.as_bytes()
-    var n = len(bytes)
-    var i = 0
-    # Trim leading whitespace.
-    while i < n and (bytes[i] == 0x20 or bytes[i] == 0x09):
-        i += 1
-    var j = n
-    # Trim trailing whitespace.
-    while j > i and (bytes[j - 1] == 0x20 or bytes[j - 1] == 0x09):
-        j -= 1
-    if i >= j:
-        return -1
-    var v = 0
-    while i < j:
-        var c = Int(bytes[i])
-        if c < 0x30 or c > 0x39:
-            return -1
-        v = v * 10 + (c - 0x30)
-        i += 1
-    return v
-
-
-def _parse_decimal_format(fmt: String) raises -> Tuple[Int, Int]:
-    """Parse `d:precision,scale[,bitwidth]` into (precision, scale).
-
-    Delegates to the public
-    `extract_decimal_params` in `arrow_types.mojo` for the parse work.
-    Accepted bitwidths are 128 AND 256. The (p, s) bound depends on the bitwidth:
-    Decimal128 allows precision up to 38; Decimal256 allows up to 76.
-    """
-    var ps_w = extract_decimal_params(fmt)
-    var p = ps_w[0]
-    var s = ps_w[1]
-    var w = ps_w[2]
-    if w != 0 and w != 128 and w != 256:
-        raise Error(
-            "UnsupportedArrowCABIType: decimal bitwidth '" + String(w)
-            + "' (only 128 and 256 supported)"
-        )
-    # Per-bitwidth precision bound. 0 (no width specified) -> Decimal128.
-    var max_prec = 76 if w == 256 else 38
-    var default_p = 76 if w == 256 else 38
-    var default_s = 0 if w == 256 else 18
-    # Defensive defaults for (p, s) when the parser returned zeros.
-    if p < 1 or p > max_prec:
-        p = default_p
-    if s < 0:
-        s = default_s
-    if s > p:
-        s = p
-    return (p, s)
-
-
 def _format_string_to_arrow_type(fmt: String) raises -> ArrowType:
     """Parse a CArrowSchema format string into an ArrowType, restricted to
     the supported C-Data import subset.
@@ -2593,12 +2571,18 @@ def _format_string_to_arrow_type(fmt: String) raises -> ArrowType:
             "UnsupportedArrowCABIType: Arrow C ABI format string '" + fmt
             + "' is not recognized."
         )
+    # The Null type has no buffers for `_import_column` to read; refused here,
+    # at the gate, with the import's own message.
+    if t == ArrowType.NULL:
+        raise Error(
+            "UnsupportedArrowCABIType: the Null type ('n') is not in the"
+            " supported drain subset"
+        )
     # The import subset includes BINARY + LARGE_STRING + LARGE_BINARY (the
     # 3-buffer var-len family with i32 vs i64 offsets) and Decimal256,
     # Float16, Time*, Duration*, Interval* (the primitive-passthrough types).
     if (
-        t == ArrowType.NULL
-        or t == ArrowType.BOOL
+        t == ArrowType.BOOL
         or t.is_integer()
         or t.is_floating()
         or t == ArrowType.STRING
@@ -2643,6 +2627,9 @@ struct _ImportedSchemaInfo(Movable):
     var dec_scales: List[Int]
     # parameter slots, populated on import:
     var tzs: List[String]
+    # The index type each dictionary column's parent format declares (INT32
+    # for other columns); the Field and Column store it as
+    # `_dict_storage_index_type` of it.
     var dict_index_types: List[ArrowType]
     var union_type_ids_per_field: List[List[Int]]
     # Raw CArrowSchema.flags per field +
@@ -2701,21 +2688,16 @@ def _read_root_schema(sch_ptr: _SchemaPtr) raises -> _ImportedSchemaInfo:
             var arrow_t: ArrowType
             var dict_idx_type = ArrowType.INT32
             if _non_null(cs.dictionary):
-                # Parent format encodes the index type (INT8/16/32/64).
+                # Parent format encodes the index type: "an integer type,
+                # preferably signed", so any of `c s i l C S I L`.
                 arrow_t = ArrowType.DICTIONARY
-                var parent_t = _format_string_to_arrow_type(fmt)
-                if (
-                    parent_t == ArrowType.INT8
-                    or parent_t == ArrowType.INT16
-                    or parent_t == ArrowType.INT32
-                    or parent_t == ArrowType.INT64
-                ):
-                    dict_idx_type = parent_t
-                else:
+                var parent_t = parse_format_string(fmt)
+                if _dict_index_width(parent_t) == 0:
                     raise Error(
                         "from_arrow_c_stream: dictionary index type must be"
-                        " signed int (INT8/16/32/64), got '" + fmt + "'"
+                        " an integer (c s i l C S I L), got '" + fmt + "'"
                     )
+                dict_idx_type = parent_t
                 # Validate the child value-type format (STRING only).
                 ref dict_cs = cs.dictionary[]
                 var dict_fmt = _c_str_to_mojo(dict_cs.format) if _non_null(dict_cs.format) else String("")
@@ -2789,7 +2771,9 @@ def _build_schema_from_info(info: _ImportedSchemaInfo) raises -> Schema:
         var nullable = info.nullables[i]
         var field: Field
         if arrow_t == ArrowType.DICTIONARY and have_dict_info:
-            field = Field.dictionary(name, info.dict_index_types[i], nullable)
+            field = Field.dictionary(
+                name, _dict_storage_index_type(info.dict_index_types[i]), nullable
+            )
         elif arrow_t.is_timestamp() and have_tz_info:
             field = Field.timestamp(name, arrow_t, info.tzs[i], nullable)
         elif (arrow_t == ArrowType.UNION_SPARSE or arrow_t == ArrowType.UNION_DENSE) and have_union_info:
@@ -2812,55 +2796,6 @@ def _build_schema_from_info(info: _ImportedSchemaInfo) raises -> Schema:
                 field.set_metadata(info.metadata_keys[i][j], info.metadata_values[i][j])
         sb.add_field(field^)
     return sb.build()
-
-
-def _arrow_type_to_dtype(t: ArrowType) -> DType:
-    if t == ArrowType.BOOL:
-        return DType.bool
-    elif t == ArrowType.INT8:
-        return DType.int8
-    elif t == ArrowType.INT16:
-        return DType.int16
-    elif (
-        t == ArrowType.INT32
-        or t == ArrowType.DATE32
-        # Time32 / IntervalYearMonth = Int32.
-        or t == ArrowType.TIME32_S
-        or t == ArrowType.TIME32_MS
-        or t == ArrowType.INTERVAL_YEAR_MONTH
-    ):
-        return DType.int32
-    elif (
-        t == ArrowType.INT64
-        or t == ArrowType.DATE64
-        or t.is_timestamp()
-        # Time64 / Duration / IntervalDayTime = Int64.
-        or t == ArrowType.TIME64_US
-        or t == ArrowType.TIME64_NS
-        or t.is_duration()
-        or t == ArrowType.INTERVAL_DAY_TIME
-    ):
-        return DType.int64
-    elif t == ArrowType.UINT8:
-        return DType.uint8
-    elif t == ArrowType.UINT16:
-        return DType.uint16
-    elif t == ArrowType.UINT32:
-        return DType.uint32
-    elif t == ArrowType.UINT64:
-        return DType.uint64
-    elif t == ArrowType.FLOAT16:
-        # Float16 first-class storage.
-        return DType.float16
-    elif t == ArrowType.FLOAT32:
-        return DType.float32
-    elif t == ArrowType.FLOAT64:
-        return DType.float64
-    else:
-        # STRING / DECIMAL128 / DECIMAL256 / INTERVAL_MONTH_DAY_NANO / NULL —
-        # Column carries the ArrowType tag; the DType field is only meaningful
-        # for fixed-width numerics that map to a Mojo DType.
-        return DType.int64
 
 
 # =============================================================================
@@ -2914,27 +2849,14 @@ def _import_record_batch(
             var child_sch_ptr = _null_ptr[CArrowSchema, MutUntrackedOrigin]()
             if _non_null(schema_child_arr):
                 child_sch_ptr = (schema_child_arr + i)[]
-            # Read MAP keys_sorted from the child schema's flags.
-            var child_keys_sorted = False
-            if (
-                info.arrow_types[i] == ArrowType.MAP
-                and _non_null(child_sch_ptr)
-            ):
-                ref ccs = child_sch_ptr[]
-                child_keys_sorted = (ccs.flags & ARROW_FLAG_MAP_KEYS_SORTED) != 0
-            # Thread the union type-ids from the format-string
-            # parse done in `_read_root_schema`.  Empty for non-union.
-            var col_union_ids = List[Int]()
-            if (
-                info.arrow_types[i] == ArrowType.UNION_SPARSE
-                or info.arrow_types[i] == ArrowType.UNION_DENSE
-            ):
-                if len(info.union_type_ids_per_field) == ncols:
-                    col_union_ids = info.union_type_ids_per_field[i].copy()
+            # MAP keys-sorted and union type ids are read by `_import_column`
+            # from the column's own schema, as at every depth.
+            var idx_t = ArrowType.INT32
+            if len(info.dict_index_types) == ncols:
+                idx_t = info.dict_index_types[i]
             columns.append(
                 _import_column(
-                    cref, info.arrow_types[i], col_p, col_s,
-                    child_sch_ptr, child_keys_sorted, col_union_ids^,
+                    cref, info.arrow_types[i], col_p, col_s, child_sch_ptr, idx_t,
                 )
             )
     var batch = RecordBatch()
@@ -3014,7 +2936,7 @@ def _exported_get_next(stream: OpaquePtr, out_array: _ArrayPtr) abi("C") -> Int3
         return Int32(0)
     try:
         ref batch = state.batches[state.next_idx]
-        var built = _build_record_batch_array(batch)
+        var built = _build_record_batch_array(batch, state.schema)
         out_array.unsafe_write(built^)
         state.next_idx += 1
     except e:
