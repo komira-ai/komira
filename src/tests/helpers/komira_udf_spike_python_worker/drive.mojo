@@ -3,14 +3,16 @@
 # =============================================================================
 # Driver opens a UDF runtime library and keeps it until close(); run() takes
 # one workload as `key=value` lines and returns the loop's JSON report, which
-# Report parses.
+# Report parses. probe_boundary and probe_calls run one group of the cases of
+# native/probe_boundary.c and native/probe_calls.c and return their report.
 #
 # Who owns and frees each pointer:
 #   - the engine handle (struct engine): native/drive.c's, created by
 #     kpw_open, freed by kpw_close in Driver.close (or __del__), which shuts
 #     the runtime down first. Held as a Word only this file reads through.
-#   - a report string: created by kpw_run, copied here by read_cstr and
-#     freed by kpw_free before run() returns.
+#   - a report string: created by kpw_run (or kpw_probe_boundary,
+#     kpw_probe_calls), copied here by read_cstr and freed by kpw_free
+#     before the function returns.
 #   - C strings passed in (the library path, the configuration): zeroed
 #     blocks freed right after the call; the C side copies what it keeps.
 # =============================================================================
@@ -41,6 +43,35 @@ def _cstr(s: String) -> Void:
     for k in range(len(b)):
         d[k] = b[k]
     return p
+
+
+def _report(r: Void) raises -> JsonValue:
+    """A C report string, parsed, then freed."""
+    var text = read_cstr(r, _REPORT_LIMIT)
+    external_call["kpw_free", NoneType](r)
+    return parse_json_value(text)
+
+
+def probe_boundary(group: String, arg: String) raises -> JsonValue:
+    """native/probe_boundary.c: "codec", "hello" (`arg`: the runtime
+    directory) or "faults"; one member per case."""
+    var g = _cstr(group)
+    var a = _cstr(arg)
+    var r = external_call["kpw_probe_boundary", Void](g, a)
+    free_zeroed(g)
+    free_zeroed(a)
+    return _report(r)
+
+
+def probe_calls(library: String, group: String) raises -> JsonValue:
+    """native/probe_calls.c: "two_args", "late_load", "refusals" or "kills"
+    through the runtime library at `library`; one member per case."""
+    var l = _cstr(library)
+    var g = _cstr(group)
+    var r = external_call["kpw_probe_calls", Void](l, g)
+    free_zeroed(l)
+    free_zeroed(g)
+    return _report(r)
 
 
 def pid_alive(pid: Int) -> Bool:
@@ -75,9 +106,7 @@ struct Driver(Movable):
         var c = _cstr(config)
         var r = external_call["kpw_run", Void](self._e.p, c)
         free_zeroed(c)
-        var text = read_cstr(r, _REPORT_LIMIT)
-        external_call["kpw_free", NoneType](r)
-        return parse_json_value(text)
+        return _report(r)
 
     def close(mut self):
         """Shuts the runtime down: every worker it started is gone after."""

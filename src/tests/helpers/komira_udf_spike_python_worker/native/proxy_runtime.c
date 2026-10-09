@@ -72,7 +72,7 @@ struct komira_udf_rt {
 struct komira_udf_udf {
   struct komira_udf_rt* rt;
   uint64_t remote;  /* its id in the control worker */
-  uint64_t seq;     /* rt->loads when it was loaded */
+  uint64_t seq;     /* rt->loads when it was loaded: unique per load */
   struct pyw_buf body; /* the LOAD body, sent again to a worker that lacks it */
   int n_args;
   int arg_width[MAX_ARGS];
@@ -86,7 +86,7 @@ struct komira_udf_context {
   uint64_t forked_at; /* rt->loads at the fork; UINT64_MAX: not forked */
   int lost;
   struct {
-    const komira_udf_udf* udf;
+    uint64_t seq; /* the UDF's load (not its address: a freed one's is reused) */
     uint64_t remote;
   } loaded[MAX_LOADED];
   int n_loaded;
@@ -385,14 +385,14 @@ static int32_t remote_udf(komira_udf_context* c, const komira_udf_udf* u, uint64
     return KOMIRA_UDF_OK;
   }
   for (int i = 0; i < c->n_loaded; i++)
-    if (c->loaded[i].udf == u) {
+    if (c->loaded[i].seq == u->seq) {
       *id = c->loaded[i].remote;
       return KOMIRA_UDF_OK;
     }
   if (c->n_loaded == MAX_LOADED) return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "open_instance: over 16 UDFs in one context (spike)", NULL, -1);
   int32_t rc = request_id(&c->ch, KOMIRA_UDF_OP_LOAD, &u->body, id, e);
   if (rc == KOMIRA_UDF_OK) {
-    c->loaded[c->n_loaded].udf = u;
+    c->loaded[c->n_loaded].seq = u->seq;
     c->loaded[c->n_loaded].remote = *id;
     c->n_loaded++;
   }
@@ -444,7 +444,8 @@ static const char* args_layout_error(const struct ArrowArray* in, const komira_u
   for (int64_t i = 0; i < in->n_children; i++) {
     const struct ArrowArray* c = in->children[i];
     if (c == NULL || c->n_buffers != 2 || u->arg_width[i] == 0) return "an argument is not a fixed-width primitive";
-    if (c->offset < 0 || c->length < in->length) return "an argument is shorter than the batch";
+    if (c->offset < 0) return "an argument has a negative offset";
+    if (c->length < in->length) return "an argument is shorter than the batch";
     if (in->length > 0 && c->buffers[1] == NULL) return "an argument has no values buffer";
   }
   return NULL;
@@ -495,8 +496,14 @@ static int32_t pw_call_batch(komira_udf_instance* inst, const komira_udf_call* c
   int killed = 0;
   if (pyw_chan_call(&c->ch, head, sizeof(head), in.length, cols, u->arg_width, u->n_args, &in, call, host, &r,
                     &killed) != 0) {
+    /* A kill answers the call with its reason (a retry of a cancelled or
+     * late batch would be wrong); the context is lost, and every later call
+     * on it returns ERR_INSTANCE_LOST. */
     c->lost = 1;
-    return fail(e, killed ? KOMIRA_UDF_ERR_DEADLINE : KOMIRA_UDF_ERR_INSTANCE_LOST, c->ch.why, NULL, -1);
+    int32_t code = killed == PYW_KILLED_DEADLINE ? KOMIRA_UDF_ERR_DEADLINE
+                   : killed == PYW_KILLED_CANCEL ? KOMIRA_UDF_ERR_CANCELLED
+                                                 : KOMIRA_UDF_ERR_INSTANCE_LOST;
+    return fail(e, code, c->ch.why, NULL, -1);
   }
   if (r.op == KOMIRA_UDF_OP_ERROR) {
     int32_t rc = fail_reply(e, &r);

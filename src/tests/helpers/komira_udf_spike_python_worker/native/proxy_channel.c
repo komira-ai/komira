@@ -52,6 +52,7 @@
 #include "pyw.h"
 
 #define DEADLINE_GRACE_NS 2000000000LL
+#define CANCEL_GRACE_NS 2000000000LL
 #define REAP_WAIT_MS 2000
 
 static int64_t mono_ns(void) {
@@ -294,9 +295,30 @@ static int hello(struct pyw_chan* c, int use_shm, char* why, size_t n) {
     snprintf(why, n, "HELLO: %s", c->why);
     return -1;
   }
-  int ok = r.op == KOMIRA_UDF_OP_OK;
-  if (!ok) snprintf(why, n, "HELLO refused by the worker (protocol or ABI version)");
+  /* OK: the worker's wire version, ABI major and ABI minor, then its pid.
+   * ERROR: its refusal. Both sides come from one image, so any difference
+   * is refused (section 5.2), on either side. */
+  struct pyw_rd d = {r.payload, r.len, 0, 0};
+  int ok = 0;
+  if (r.op == KOMIRA_UDF_OP_OK) {
+    uint32_t wire = pyw_rd_u32(&d), major = pyw_rd_u32(&d), minor = pyw_rd_u32(&d);
+    (void)pyw_rd_i32(&d);
+    ok = !d.bad && wire == KOMIRA_UDF_WIRE_VERSION && major == KOMIRA_UDF_ABI_MAJOR && minor == KOMIRA_UDF_ABI_MINOR;
+    if (d.bad)
+      snprintf(why, n, "HELLO: a malformed OK from the worker");
+    else if (!ok)
+      snprintf(why, n, "HELLO: the worker speaks wire %u ABI %u.%u, this engine wire %u ABI %u.%u; any difference is refused",
+               wire, major, minor, KOMIRA_UDF_WIRE_VERSION, KOMIRA_UDF_ABI_MAJOR, KOMIRA_UDF_ABI_MINOR);
+  } else {
+    (void)pyw_rd_i32(&d);
+    (void)pyw_rd_i64(&d);
+    (void)pyw_rd_i64(&d);
+    char* m = pyw_rd_str(&d);
+    snprintf(why, n, "HELLO refused by the worker: %s", m ? m : "(a malformed ERROR)");
+    free(m);
+  }
   pyw_reply_free(&r);
+  if (!ok) die(c, why);
   return ok ? 0 : -1;
 }
 
@@ -306,7 +328,7 @@ static void chan_init(struct pyw_chan* c) {
   c->memfd = -1;
 }
 
-int pyw_chan_spawn(struct pyw_chan* c, const struct pyw_launch* l, int use_shm, char* why, size_t n) {
+int pyw_chan_start(struct pyw_chan* c, const struct pyw_launch* l, char* why, size_t n) {
   chan_init(c);
   int sv[2];
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0) {
@@ -340,6 +362,11 @@ int pyw_chan_spawn(struct pyw_chan* c, const struct pyw_launch* l, int use_shm, 
   c->fd = sv[0];
   c->pid = pid;
   c->our_child = 1;
+  return 0;
+}
+
+int pyw_chan_spawn(struct pyw_chan* c, const struct pyw_launch* l, int use_shm, char* why, size_t n) {
+  if (pyw_chan_start(c, l, why, n) != 0) return -1;
   return hello(c, use_shm, why, n);
 }
 
@@ -357,10 +384,15 @@ static int call_once(struct pyw_chan* c, const uint8_t* head, size_t head_len, i
                      const struct ArrowArray* const* cols, const int* widths, int ncols, struct ArrowArray* args,
                      const komira_udf_call* call, const komira_udf_host* host, struct pyw_reply* rep, int* killed);
 
-/* Waits for the call's reply, forwarding clock reads and the cancel flag. */
+/* Waits for the call's reply, forwarding clock reads and the cancel flag.
+ * A worker that has not answered CANCEL_GRACE_NS after the cancel reached
+ * it, or DEADLINE_GRACE_NS past the call's deadline, is killed (section
+ * 5.2): user code in a long C loop or a blocking call never reads the
+ * flag. */
 static int await_reply(struct pyw_chan* c, uint64_t id, const komira_udf_call* call, const komira_udf_host* host,
                        struct pyw_reply* rep, int* killed) {
   int cancel_sent = 0;
+  int64_t cancel_at = 0;
   for (;;) {
     struct pollfd p = {c->fd, POLLIN, 0};
     int pr = poll(&p, 1, 1);
@@ -385,10 +417,17 @@ static int await_reply(struct pyw_chan* c, uint64_t id, const komira_udf_call* c
         kill(c->pid, SIGUSR1);
       if (send_header(c, KOMIRA_UDF_OP_CANCEL, id, 0, 0, 0, 0, NULL, NULL, 0) != 0) return -1;
       cancel_sent = 1;
+      cancel_at = mono_ns();
+    }
+    if (cancel_sent && mono_ns() - cancel_at > CANCEL_GRACE_NS) {
+      kill(c->pid, SIGKILL);
+      *killed = PYW_KILLED_CANCEL;
+      die(c, "cancelled: the worker did not answer within 2 s of CANCEL and was killed");
+      return -1;
     }
     if (call->deadline_ns != 0 && host->now_ns(host->host_data) > call->deadline_ns + DEADLINE_GRACE_NS) {
       kill(c->pid, SIGKILL);
-      *killed = 1;
+      *killed = PYW_KILLED_DEADLINE;
       die(c, "UDF_DEADLINE_EXCEEDED: the worker was killed 2 s past the call's deadline");
       return -1;
     }

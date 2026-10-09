@@ -158,8 +158,14 @@ struct pyw_launch {
   int limit_threads; /* OPENBLAS/OMP/MKL thread pools of one thread */
 };
 
-/* Starts a worker with posix_spawn and says HELLO; 0, or -1 with `why`. */
+/* Starts a worker with posix_spawn and says HELLO; 0, or -1 with `why`.
+ * HELLO sends the wire version and the ABI major and minor, and the worker
+ * answers with its own; a difference either side sees is refused. */
 int pyw_chan_spawn(struct pyw_chan* c, const struct pyw_launch* l, int use_shm, char* why, size_t n);
+
+/* Starts a worker with posix_spawn and says nothing: the caller sends its
+ * HELLO (pyw_chan_spawn is this, then HELLO). 0, or -1 with `why`. */
+int pyw_chan_start(struct pyw_chan* c, const struct pyw_launch* l, char* why, size_t n);
 
 /* Adopts a worker the zygote forked on `fd` (the engine end) and says HELLO. */
 int pyw_chan_adopt(struct pyw_chan* c, int fd, pid_t pid, int use_shm, char* why, size_t n);
@@ -170,13 +176,17 @@ int pyw_chan_adopt(struct pyw_chan* c, int fd, pid_t pid, int use_shm, char* why
 int pyw_chan_request(struct pyw_chan* c, uint32_t op, const struct pyw_buf* body, const int* fds, int nfds,
                      struct pyw_reply* rep);
 
+/* Why pyw_chan_call killed the worker (its `killed`). */
+#define PYW_KILLED_DEADLINE 1 /* 2 s past the call's deadline */
+#define PYW_KILLED_CANCEL 2   /* no answer 2 s after the cancel was forwarded */
+
 /* A CALL_BATCH: `head` (the call's control block, written first) and the
  * IPC batch of `cols`, in a slot of the engine-to-worker heap or inline
  * when none fits. `args` is released as soon as it is written. While it
  * waits, the engine forwards the worker's clock reads to host->now_ns and
  * the host's cancel flag to the worker, and kills the worker once a
- * deadline is 2 s past. Returns 0 or -1 as pyw_chan_request; `killed` is set
- * when the deadline kill fired. */
+ * deadline is 2 s past or 2 s after the cancel reached it with no answer.
+ * Returns 0 or -1 as pyw_chan_request; `killed` is 0 or why it killed. */
 int pyw_chan_call(struct pyw_chan* c, const uint8_t* head, size_t head_len, int64_t length,
                   const struct ArrowArray* const* cols, const int* widths, int ncols, struct ArrowArray* args,
                   const komira_udf_call* call, const komira_udf_host* host, struct pyw_reply* rep, int* killed);

@@ -21,8 +21,10 @@
 # transports WORKER, and the runner requires IN_PROCESS ("the in-process
 # path is what this suite drives"). The test pins that reason.
 #
-# Defects caught: the engine's IPC writer ignoring a column's offset
-# (sliced_input_offset), a validity bitmap re-based wrongly, a null count
+# Defects caught: the engine's IPC writer ignoring the offset of a
+# one-argument batch (sliced_input_offset; two arguments at different
+# offsets are test_worker_calls' two_args), a validity bitmap re-based
+# wrongly, a null count
 # lost on the wire, an error's row or message lost, cancel not forwarded.
 #
 # Mutant planted: ipc_codec.c copy_bits reading from bit 0 instead of the

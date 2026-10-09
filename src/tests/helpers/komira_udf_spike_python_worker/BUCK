@@ -18,6 +18,11 @@ load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyr
 #                           forwards clock reads and cancel
 #   native/ipc_codec.c      the Arrow IPC subset the engine side writes
 #                           (schemas, batches) and reads (one-column batches)
+#   native/probe_boundary.c, native/probe_calls.c
+#                           single cases the engine loop does not reach: the
+#                           checks at the worker boundary, and calls through a
+#                           library's table (two arguments, a late load,
+#                           refusals, kills)
 #   pyworker/               the worker (komira_udf_pyworker.py), its IPC codec
 #                           (kudf_ipc.py) and the fixtures only these tests load;
 #                           user code runs through the in-process runtime's
@@ -46,6 +51,14 @@ load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyr
 #                         payload by value, a digest mismatch refused, the
 #                         model's pages shared by forked workers and not by
 #                         spawned ones, and the fork's thread facts.
+#   test_worker_boundary  the engine's decode of a reply against each defect
+#                         a worker could write, the writer's re-basing at
+#                         every bit shift, HELLO refused on any version
+#                         difference by a real worker and by the engine, and
+#                         malformed replies from a fake worker.
+#   test_worker_calls     two arguments at different offsets, a UDF loaded
+#                         after a context, call_batch's refusals, and the
+#                         kill of a worker deaf to cancel or past a deadline.
 
 _CASES = {"src/tests/helpers/komira_udf_spike_abi": "//src/tests/helpers/komira_udf_spike_abi:cases"}
 
@@ -55,6 +68,7 @@ mojo_library(
     conda = False,
     deps = [
         ":komira_udf_pyworker_drive",
+        ":komira_udf_pyworker_probe",
         "//src/komira_json:komira_json",
         "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
         "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python",
@@ -62,6 +76,8 @@ mojo_library(
     test_srcs = [
         "tests/test_closure.mojo",
         "tests/test_conform_worker.mojo",
+        "tests/test_worker_boundary.mojo",
+        "tests/test_worker_calls.mojo",
         "tests/test_worker_processes.mojo",
     ],
     test_data = {
@@ -71,6 +87,8 @@ mojo_library(
             site = ":site_bc_pyarrow",
             extra = _CASES,
         ),
+        "tests/test_worker_boundary.mojo": runtime_dir([]),
+        "tests/test_worker_calls.mojo": runtime_dir(["pipe", "pyarrow", "spawn", "zygote"], site = ":site_bc_pyarrow"),
         "tests/test_worker_processes.mojo": runtime_dir(["spawn", "zygote"]),
     },
     visibility = ["PUBLIC"],
@@ -85,6 +103,9 @@ staged_files(
         "native/drive.c",
         "native/ipc_codec.c",
         "native/proxy_channel.c",
+        "native/probe_boundary.c",
+        "native/probe_calls.c",
+        "native/probe_json.h",
         "native/proxy_runtime.c",
         "native/pyw.h",
     ],
@@ -111,6 +132,28 @@ cxx_library(
     srcs = [":c_files[native/drive.c]"],
     compiler_flags = ["-O2"],
     deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The probes (native/probe_*.c), linked into the tests; they reach the
+# proxy's channel and codec directly, and a runtime library through its
+# table.
+cxx_library(
+    name = "komira_udf_pyworker_probe",
+    srcs = [
+        ":c_files[native/probe_boundary.c]",
+        ":c_files[native/probe_calls.c]",
+    ],
+    headers = {
+        "probe_json.h": ":c_files[native/probe_json.h]",
+        "pyw.h": ":c_files[native/pyw.h]",
+    },
+    header_namespace = "",
+    compiler_flags = ["-O2"],
+    deps = [
+        ":komira_udf_pyworker_proxy",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c",
+    ],
     visibility = ["PUBLIC"],
 )
 

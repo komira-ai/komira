@@ -41,6 +41,7 @@ SRC_C_LIBRARIES = [
     "//src/tests/helpers/komira_udf_spike_python:komira_udf_python_rt",
     "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python_engine",
     "//src/tests/helpers/komira_udf_spike_python_worker:komira_udf_pyworker_drive",
+    "//src/tests/helpers/komira_udf_spike_python_worker:komira_udf_pyworker_probe",
     "//src/tests/helpers/komira_udf_spike_python_worker:komira_udf_pyworker_proxy",
 ]
 

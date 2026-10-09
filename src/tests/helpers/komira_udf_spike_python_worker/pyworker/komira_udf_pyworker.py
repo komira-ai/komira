@@ -42,6 +42,7 @@ import warnings
 HEADER = struct.Struct("<IIQIIQQ")
 MAGIC = 0x4644554B
 WIRE_VERSION = 1
+ABI_MAJOR, ABI_MINOR = 1, 0  # komira_udf_runtime.h
 INLINE = 1
 OP = dict(HELLO=1, DESCRIBE=2, VALIDATE=3, LOAD=4, UNLOAD=5, OPEN_CONTEXT=6, CLOSE_CONTEXT=7, OPEN_INSTANCE=8,
           CLOSE_INSTANCE=9, CALL_BATCH=10, CANCEL=21, SHUTDOWN=22, OK=128, ERROR=129, FORK=64, CLOCK=65)
@@ -230,9 +231,14 @@ class Worker:
 
     def hello(self, body, fds):
         b = _Body(body)
-        version, major, _minor, flags, shm_bytes, heap_bytes = b.take("<IIIIQQ")
-        if version != WIRE_VERSION or major != 1:
-            raise Refused(ERR_ABI, "HELLO: wire {} ABI {}; this worker speaks wire 1, ABI 1".format(version, major))
+        version, major, minor, flags, shm_bytes, heap_bytes = b.take("<IIIIQQ")
+        if (version, major, minor) != (WIRE_VERSION, ABI_MAJOR, ABI_MINOR):
+            # Both sides come from one image: any difference is refused.
+            raise Refused(
+                ERR_ABI,
+                "HELLO: the engine speaks wire {} ABI {}.{}, this worker wire {} ABI {}.{}; any difference is "
+                "refused".format(version, major, minor, WIRE_VERSION, ABI_MAJOR, ABI_MINOR),
+            )
         if self.mm is not None:
             self.mm.close()
             self.mm = self.ctrl = None
@@ -252,7 +258,7 @@ class Worker:
             self.cancel_view = self.local_cancel
             self.now = self.now_pipe
             signal.signal(signal.SIGUSR1, self.on_cancel_signal)
-        return struct.pack("<Ii", WIRE_VERSION, os.getpid())
+        return struct.pack("<IIIi", WIRE_VERSION, ABI_MAJOR, ABI_MINOR, os.getpid())
 
     def describe(self):
         return _s(CAPS[0]) + _s(CAPS[1]) + struct.pack("<10I", *CAPS[2])
