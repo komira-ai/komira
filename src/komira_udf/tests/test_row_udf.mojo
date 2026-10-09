@@ -21,8 +21,8 @@
 # What each test proves (and the defect it catches):
 #   - test_fnv1a_vectors / test_row_udf_id_of: the hash on the published
 #     vectors, and the id formula on a string whose hash is ABOVE the modulus
-#     ("k477322", hash 4294959721 -> id 12426): dropping the modulo wraps to
-#     2754, below the reserved floor.
+#     ("k477322", hash 4294959721 -> id 12426): dropping the modulo wraps
+#     (10000 + 4294959721) mod 2^32 to 2425, below the reserved floor.
 #   - test_signatures: the rendered identity strings, field by field, and that
 #     an id is appended only when non-empty.
 #   - test_row_projection / test_row_field_dtype: declared field order; each
@@ -415,8 +415,12 @@ def test_row_filter_eval_blocks() raises:
     # The kept row (j = 5) is set in its block, and nothing else among the
     # valid rows.
     var m = f.eval[4](view, 4)
+    # Lane 0 is row 4 (base row 6: valid, even, so not kept); lane 2 is row
+    # 6 (base row 8, even); lane 3 is row 7, the NULL base row 9 (not
+    # asserted: the row builders do not consult validity).
+    assert_false(m[0])
     assert_true(m[1])
-    assert_false(m[2])  # lanes 0 and 3 are the NULL rows 4 and 7
+    assert_false(m[2])
 
 
 # -----------------------------------------------------------------------------

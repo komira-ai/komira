@@ -146,7 +146,10 @@ def test_dtag_to_arrow_type_id() raises:
     assert_equal(dtag_to_arrow_type_id(DT_F64), ArrowType.FLOAT64.type_id)
     assert_equal(dtag_to_arrow_type_id(DT_BOOL), ArrowType.BOOL.type_id)
     assert_equal(dtag_to_arrow_type_id(DT_STRING), ArrowType.STRING.type_id)
-    # The docstring: DATE32 -> INT32 days, DATE64 / TIMESTAMP -> INT64.
+    # These pin the CURRENT physical mapping (DATE32 -> INT32 days, DATE64 /
+    # TIMESTAMP -> INT64), not a missing Arrow type: Arrow DATE32 exists and
+    # the CSV reader emits it. komira#974 would map these tags to Arrow's own
+    # date / timestamp ids and change these three rows.
     assert_equal(dtag_to_arrow_type_id(DT_DATE32), ArrowType.INT32.type_id)
     assert_equal(dtag_to_arrow_type_id(DT_DATE64), ArrowType.INT64.type_id)
     assert_equal(dtag_to_arrow_type_id(DT_TIMESTAMP), ArrowType.INT64.type_id)

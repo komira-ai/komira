@@ -26,8 +26,10 @@
 #     (init returns a non-zero marker); enter_row / leave_row leave the state
 #     unchanged; emit is compute_frame over the frame (value and call count);
 #     the comptime defaults invertible = False and ORDER_KEY_DT = int64.
-#   - test_partition_local_map_fn: the state is reset per partition by
-#     init_partition, and run_partition_row threads it forward row by row.
+#   - test_partition_local_map_fn: state is reset per partition by the test's
+#     own driver (it calls init_partition at each boundary), and the state
+#     threading is the test struct's own run_partition_row; the product code
+#     it proves is PartitionRowView.get reading the right row.
 #   - test_predicate_default_eval_raises: an error raised by eval_scalar for
 #     one lane reaches the caller of the default eval[W] body.
 # =============================================================================

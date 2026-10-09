@@ -149,8 +149,8 @@ def dtag_to_arrow_type_id(t: Int) -> UInt8:
     (`input_columns` / `output_columns` are `(name, ArrowType-code)`).
 
     Mirrors `typed_schema.mojo`'s `arrow_type_of`: DATE32->INT32 days,
-    DATE64/TIMESTAMP->INT64 (the engine has no distinct DATE arrow type
-    wired).
+    DATE64/TIMESTAMP->INT64: the physical storage id, not Arrow's own
+    date / timestamp ids (komira#974).
     """
     if t == DT_I8: return ArrowType.INT8.type_id
     if t == DT_I16: return ArrowType.INT16.type_id
