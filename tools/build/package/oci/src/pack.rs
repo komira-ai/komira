@@ -495,9 +495,21 @@ mod tests {
         fs::set_permissions(d.join("bin/r"), fs::Permissions::from_mode(0o600)).unwrap();
         fs::write(d.join("top"), b"t").unwrap();
         fs::set_permissions(d.join("top"), fs::Permissions::from_mode(0o640)).unwrap();
+        // Any one exec bit makes 0755: the group's alone, the others' alone.
+        for (f, m) in [("bin/g", 0o610), ("bin/o", 0o601)] {
+            fs::write(d.join(f), b"").unwrap();
+            fs::set_permissions(d.join(f), fs::Permissions::from_mode(m)).unwrap();
+        }
         let mut got: Vec<(String, u32, Vec<u8>)> = tree_items(&d).unwrap().into_iter().map(|i| (i.path, i.mode, i.data)).collect();
         got.sort();
-        let want: Vec<(String, u32, Vec<u8>)> = vec![("bin/".to_string(), 0o755, vec![]), ("bin/r".to_string(), 0o644, vec![]), ("bin/x".to_string(), 0o755, b"exe".to_vec()), ("top".to_string(), 0o644, b"t".to_vec())];
+        let want: Vec<(String, u32, Vec<u8>)> = vec![
+            ("bin/".to_string(), 0o755, vec![]),
+            ("bin/g".to_string(), 0o755, vec![]),
+            ("bin/o".to_string(), 0o755, vec![]),
+            ("bin/r".to_string(), 0o644, vec![]),
+            ("bin/x".to_string(), 0o755, b"exe".to_vec()),
+            ("top".to_string(), 0o644, b"t".to_vec()),
+        ];
         assert_eq!(got, want);
         std::os::unix::fs::symlink("top", d.join("bin/link")).unwrap();
         assert_eq!(tree_items(&d).err().unwrap(), "bin/link: not a regular file or directory");
@@ -533,6 +545,30 @@ mod tests {
         assert_eq!(names.len(), 6);
         assert_eq!(&names[4..], ["oci-layout", "index.json"]);
         assert_eq!(items.len(), 9);
+        // index.json and Docker's manifest.json, whole.
+        assert_eq!(
+            String::from_utf8(img.index.clone()).unwrap(),
+            format!(
+                concat!(
+                    r#"{{"manifests":[{{"annotations":{{"io.containerd.image.name":"docker.io/komira/base:0.1.0","org.opencontainers.image.ref.name":"0.1.0"}},"#,
+                    r#""digest":"{}","mediaType":"{}","platform":{{"architecture":"amd64","os":"linux"}},"size":{}}}],"mediaType":"{}","schemaVersion":2}}"#
+                ),
+                img.manifest_digest,
+                MANIFEST_TYPE,
+                img.blobs[3].len(),
+                INDEX_TYPE
+            )
+        );
+        let hex = |b: &[u8]| sha256::hex(b);
+        assert_eq!(
+            String::from_utf8(img.docker_manifest.clone()).unwrap(),
+            format!(
+                r#"[{{"Config":"blobs/sha256/{}","Layers":["blobs/sha256/{}","blobs/sha256/{}"],"RepoTags":["komira/base:0.1.0"]}}]"#,
+                hex(&img.blobs[2]),
+                hex(&base().layers[0]),
+                hex(b"layer gz")
+            )
+        );
         // Same inputs, same bytes.
         assert_eq!(image(&base(), b"layer tar", b"layer gz", &named()).unwrap().manifest_digest, img.manifest_digest);
     }

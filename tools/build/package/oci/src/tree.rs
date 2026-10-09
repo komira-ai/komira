@@ -209,14 +209,14 @@ mod tests {
         let d = scratch("lay");
         let src = d.join("src");
         fs::create_dir_all(src.join("b/sub")).unwrap();
-        for (f, m) in [("exe", 0o700), ("ro", 0o400), ("b/sub/f", 0o600)] {
+        for (f, m) in [("exe", 0o700), ("ro", 0o400), ("b/sub/f", 0o600), ("b/g", 0o610), ("b/o", 0o601)] {
             fs::write(src.join(f), f).unwrap();
             fs::set_permissions(src.join(f), fs::Permissions::from_mode(m)).unwrap();
         }
         let p = plan(vec![at("bin/exe", &src.join("exe"), false), at("bin/ro", &src.join("ro"), false), at("opt/b/", &src.join("b"), true)]).unwrap();
         let out = d.join("out");
         lay(&out, &p).unwrap();
-        for (f, m) in [("", 0o755), ("bin", 0o755), ("bin/exe", 0o755), ("bin/ro", 0o644), ("opt", 0o755), ("opt/b", 0o755), ("opt/b/sub", 0o755), ("opt/b/sub/f", 0o644)] {
+        for (f, m) in [("", 0o755), ("bin", 0o755), ("bin/exe", 0o755), ("bin/ro", 0o644), ("opt", 0o755), ("opt/b", 0o755), ("opt/b/sub", 0o755), ("opt/b/sub/f", 0o644), ("opt/b/g", 0o755), ("opt/b/o", 0o755)] {
             assert_eq!(mode(&out.join(f)), m, "{}", f);
         }
         assert_eq!(fs::read(out.join("opt/b/sub/f")).unwrap(), b"b/sub/f");
@@ -241,6 +241,13 @@ mod tests {
         assert_eq!(mkdirs(&d, "x/y"), Err(format!("{}: not a directory", d.join("x").display())));
         assert_eq!(mkdirs(&d, "empty/sub/new"), Ok(()));
         assert_eq!(mode(&d.join("empty/sub/new")), 0o755);
+        // Names are read in sorted order, so of many it cannot copy the
+        // first by name is the one named.
+        fs::create_dir(d.join("links")).unwrap();
+        for i in (0..50).rev() {
+            std::os::unix::fs::symlink("x", d.join(format!("links/{:02}", i))).unwrap();
+        }
+        assert_eq!(laid("o5", at("k/", &d.join("links"), true)), Err(format!("{}: not a regular file or directory", d.join("links/00").display())));
     }
 
     #[test]

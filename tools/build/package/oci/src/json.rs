@@ -397,6 +397,8 @@ mod tests {
         assert!(v.to_json().starts_with("{\"M\":\"y\",\"a\":"), "{}", v.to_json());
         assert!(v.to_json().ends_with("},\"new\":2}"), "{}", v.to_json());
         assert!(s("x").set("k", Value::Null).is_err());
+        // One spelling: lower-case hex below 0x20, DEL as it is.
+        assert_eq!(s("\x1f\x7f").to_json(), "\"\\u001f\x7f\"");
     }
 
     #[test]
