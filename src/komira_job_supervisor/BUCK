@@ -40,7 +40,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # variable read once and removed before the spawn (test_bearer_heartbeat_auth,
 # whose two variables test_env sets), and the maximum runtime and the gs://
 # log store over komira_objectstore_gcs's in-memory backend
-# (test_max_runtime_and_gcs_logs).
+# (test_max_runtime_and_gcs_logs). Its behaviour as a container's PID 1 (a
+# SIGTERM or SIGINT sent to it reaches the job's process group and ends
+# CANCELLED, orphans are collected, the job starts with default signal
+# dispositions, the terminal beat is retried) is test_pid1_stop_and_reap's.
 mojo_library(
     name = "komira_job_supervisor",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
@@ -74,6 +77,7 @@ mojo_library(
         "tests/test_heartbeat_auth_seam.mojo",
         "tests/test_heartbeat_no_credential_in_clear.mojo",
         "tests/test_heartbeat_proto_roundtrip.mojo",
+        "tests/test_pid1_stop_and_reap.mojo",
     ],
     test_env = {
         "KOMIRA_JOB_SUPERVISOR_TEST_CREDENTIAL": "tok-env-0123456789",

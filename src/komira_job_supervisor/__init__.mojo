@@ -32,7 +32,8 @@ PUBLIC SURFACE:
   SupervisorHeartbeat, HeartbeatOutcome, HeartbeatReporter,
     HttpHeartbeatReporter, encode_heartbeat, decode_cancel,
     build_heartbeat_request, parse_heartbeat_url,
-    HEARTBEAT_STATUS_AUTH_UNAVAILABLE, HEARTBEAT_STATUS_AUTH_REFUSED
+    HEARTBEAT_STATUS_AUTH_UNAVAILABLE, HEARTBEAT_STATUS_AUTH_REFUSED,
+    terminal_beat_retryable
   HeartbeatAuth, NoHeartbeatAuth, credential_rides_in_clear
   BearerHeartbeatAuth, bearer_token_length
   EntrypointConfig, LogLocation, parse_log_location, resolve_job_binary,
@@ -73,6 +74,7 @@ from .heartbeat_client import (
     HttpHeartbeatReporter,
     HEARTBEAT_STATUS_AUTH_UNAVAILABLE,
     HEARTBEAT_STATUS_AUTH_REFUSED,
+    terminal_beat_retryable,
     encode_heartbeat,
     decode_cancel,
     build_heartbeat_request,

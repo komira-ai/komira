@@ -7,14 +7,28 @@ environment overlaid on this process's own, and a working directory) with
 `drain_pipe` reads one to end of file, `wait_exit` reaps the child into an
 `ExitInfo` (exit code, signal, and the shell's `128 + signal` code), and
 `terminate(grace_ms)` sends SIGTERM, waits up to the grace period, then
-sends SIGKILL. Signals go to the child's pid, not to a process group, so a
-grandchild the child spawned itself is not signalled (with a shell command,
-`exec` the last command to make it the signalled process). A reaped child leaves no zombie, and a second `terminate`
-returns the cached result. `watch_process_exit` makes a child's exit a
+sends SIGKILL. By default signals go to the child's pid, so a grandchild the
+child spawned itself is not signalled (with a shell command, `exec` the last
+command to make it the signalled process). A spec with
+`set_own_process_group()` makes the child lead its own process group, and
+`terminate` / `terminate_with(sig, grace_ms, reap_orphans)` then signal the
+whole group and wait for it to empty; `set_default_signals()` starts the
+child with every signal at its default action instead of inheriting this
+process's ignored ones. A reaped child leaves no zombie, and a second
+`terminate` returns the cached result. `watch_process_exit` makes a child's exit a
 reactor event (`pidfd` on Linux, `EVFILT_PROC` on macOS) instead of a SIGCHLD
 handler; `spawn_detached` starts a long-lived child that
 inherits this process's stdin, stdout and stderr (no pipes); `proc_probe_children`
 asks whether this process has any child, without reaping one.
+
+For a process that runs as a container's PID 1 (or supervises a job tree):
+`install_stop_signal_handler` catches SIGTERM and SIGINT into a latch that
+`take_stop_signal` reads and clears (without a handler the kernel drops both
+for a namespace's init); `adopt_orphans` makes the orphans of the tree come
+to this process (PID 1 already receives them; on Linux it becomes a child
+subreaper); `Supervisor.reap_orphans` collects the exited ones, leaving the
+Supervisor's own child to `wait_exit`. Use it only in a process that owns
+every child it has.
 
 One child per `Supervisor`. It does not restart a child, does not time one out
 by itself, and accepts resource limits (`RLimit`) without applying them yet.

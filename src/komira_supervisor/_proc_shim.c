@@ -119,12 +119,64 @@ static char **_split_blob(const char *blob, int count) {
 //     *out_pid        = child pid
 //   On failure returns -errno and leaves no fds open (best-effort cleanup).
 //
+//   `flags` is a bitmask of the KOMIRA_SPAWN_* values below (0 = neither, the
+//   behaviour every caller had before the flags existed):
+//     KOMIRA_SPAWN_OWN_PGROUP     the child leads a new process group whose id
+//                                 is its pid (POSIX_SPAWN_SETPGROUP, pgroup 0),
+//                                 so komira_proc_kill_group(pid, sig) reaches
+//                                 it and every descendant that stays in it.
+//     KOMIRA_SPAWN_DEFAULT_SIGNALS every signal starts at SIG_DFL in the child
+//                                 and none is blocked (POSIX_SPAWN_SETSIGDEF
+//                                 over a full set, POSIX_SPAWN_SETSIGMASK with
+//                                 an empty one). exec(2) resets CAUGHT signals
+//                                 by itself but keeps IGNORED ones and the
+//                                 mask; without this flag a child inherits,
+//                                 for example, the SIGPIPE=SIG_IGN that the
+//                                 TLS layer sets process-wide.
+//   The two values are this file's ABI with proc_ffi.mojo (SPAWN_OWN_PGROUP,
+//   SPAWN_DEFAULT_SIGNALS there), not platform constants.
+//
 //   Fixed arity, all scalar / pointer-to-bytes -> Mojo-FFI friendly.
 // -----------------------------------------------------------------------------
+#define KOMIRA_SPAWN_OWN_PGROUP 1
+#define KOMIRA_SPAWN_DEFAULT_SIGNALS 2
+
+// Fill `attr` for `flags`. Returns 0 or an errno value (posix_spawnattr_*
+// return the error number, they do not set errno). On failure `attr` has been
+// destroyed already.
+static int _spawn_attr_for(posix_spawnattr_t *attr, int flags) {
+    int rc = posix_spawnattr_init(attr);
+    if (rc != 0) return rc;
+    short sflags = 0;
+    if (flags & KOMIRA_SPAWN_OWN_PGROUP) {
+        sflags |= POSIX_SPAWN_SETPGROUP;
+        rc = posix_spawnattr_setpgroup(attr, 0);  // 0: a new group, id = pid
+        if (rc != 0) goto fail;
+    }
+    if (flags & KOMIRA_SPAWN_DEFAULT_SIGNALS) {
+        sigset_t all;
+        sigset_t none;
+        sigfillset(&all);
+        sigemptyset(&none);
+        sflags |= POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK;
+        rc = posix_spawnattr_setsigdefault(attr, &all);
+        if (rc != 0) goto fail;
+        rc = posix_spawnattr_setsigmask(attr, &none);
+        if (rc != 0) goto fail;
+    }
+    rc = posix_spawnattr_setflags(attr, sflags);
+    if (rc != 0) goto fail;
+    return 0;
+fail:
+    posix_spawnattr_destroy(attr);
+    return rc;
+}
+
 int komira_proc_spawn(const char *path,
                        const char *argv_blob, int argc,
                        const char *env_blob, int envc,
                        const char *cwd, int has_cwd,
+                       int flags,
                        int *out_stdout_fd,
                        int *out_stderr_fd,
                        int *out_pid) {
@@ -214,10 +266,25 @@ int komira_proc_spawn(const char *path,
     char *const *argv_c = (char *const *)argv;
     char *const *envp_c = (envp != NULL) ? (char *const *)envp : environ;
 
+    posix_spawnattr_t attr;
+    posix_spawnattr_t *attrp = NULL;
+    if (flags != 0) {
+        int arc = _spawn_attr_for(&attr, flags);
+        if (arc != 0) {
+            posix_spawn_file_actions_destroy(&fa);
+            close(out_pipe[0]); close(out_pipe[1]);
+            close(err_pipe[0]); close(err_pipe[1]);
+            free(argv); free(envp);
+            return -arc;
+        }
+        attrp = &attr;
+    }
+
     pid_t pid = 0;
     // posix_spawnp, NOT posix_spawn -- see the "WHY posix_spawnp" block above.
-    int rc = posix_spawnp(&pid, path, &fa, NULL, argv_c, envp_c);
+    int rc = posix_spawnp(&pid, path, &fa, attrp, argv_c, envp_c);
     posix_spawn_file_actions_destroy(&fa);
+    if (attrp != NULL) posix_spawnattr_destroy(attrp);
 
     // posix_spawn copies argv/envp string bytes into the child synchronously
     // before returning, so the split vectors (which only point INTO the
@@ -418,6 +485,150 @@ long komira_proc_read_avail(int fd, uint8_t *buf, long cap) {
 int komira_proc_kill(int pid, int sig) {
     if (kill((pid_t)pid, sig) != 0) return -errno;
     return 0;
+}
+
+// -----------------------------------------------------------------------------
+// komira_proc_kill_group  --  send `sig` to the process group `pgid`
+//   (kill(-pgid, sig)). Returns 0 / -errno.
+//
+//   REFUSES pgid <= 1 with -EINVAL and sends nothing: kill(-1, sig) signals
+//   every process this one may signal, and kill(0, sig) signals the CALLER's
+//   own group. Neither is ever "the job's group", and a pid of 0 or 1 here is
+//   a caller bug (an unset pid, or PID 1 itself).
+// -----------------------------------------------------------------------------
+int komira_proc_kill_group(int pgid, int sig) {
+    if (pgid <= 1) return -EINVAL;
+    if (kill(-(pid_t)pgid, sig) != 0) return -errno;
+    return 0;
+}
+
+// -----------------------------------------------------------------------------
+// The stop-signal latch: SIGTERM and SIGINT, as a platform sends them to a
+// container's PID 1 to stop it.
+//
+// The handler does one async-signal-safe thing: it records the signal number
+// in a lock-free atomic int, if none is recorded yet (the first stop signal wins).
+// The run loop takes it with komira_proc_take_stop_signal, which reads and
+// clears it in one atomic exchange, so a signal that lands between a read and
+// a clear cannot be lost. No pointer crosses; the latch is a TU-internal
+// process-wide scalar.
+//
+// Installing a handler is what makes these signals reach PID 1 at all: the
+// kernel drops a signal sent to a namespace's init whose disposition is
+// SIG_DFL. A caught signal is reset to SIG_DFL in a child by execve(2), so
+// the job never inherits the handler.
+//
+// No SA_RESTART: a blocking usleep/poll in the run loop returns early on the
+// signal, so the loop sees it within one pass instead of after its sleep.
+// The loop's syscalls retry EINTR themselves (the reap and read wrappers here
+// do).
+// -----------------------------------------------------------------------------
+// Touched only through __atomic builtins, which are lock-free on an int on
+// every target this builds for, and so async-signal-safe.
+static int _stop_signal = 0;
+
+static void _stop_signal_handler(int signo) {
+    int none = 0;
+    (void)__atomic_compare_exchange_n(&_stop_signal, &none, signo, 0,
+                                      __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+}
+
+// Install the latch handler for SIGTERM and SIGINT. Idempotent. Returns 0, or
+// -errno of the first sigaction that failed.
+int komira_proc_install_stop_handler(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = _stop_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGTERM, &sa, NULL) != 0) return -errno;
+    if (sigaction(SIGINT, &sa, NULL) != 0) return -errno;
+    return 0;
+}
+
+// The recorded stop signal (SIGTERM or SIGINT), cleared by the read; 0 when
+// none arrived since the last take.
+int komira_proc_take_stop_signal(void) {
+    return __atomic_exchange_n(&_stop_signal, 0, __ATOMIC_SEQ_CST);
+}
+
+// -----------------------------------------------------------------------------
+// komira_proc_adopt_orphans  --  make this process the reaper of its orphaned
+//   descendants.
+//
+//   A process orphaned by its parent's exit is re-parented to the nearest
+//   ancestor that is a "child subreaper", else to its namespace's init. So:
+//     PID 1                       -> nothing to set; orphans come here already.
+//                                    Returns 1.
+//     Linux, not PID 1            -> prctl(PR_SET_CHILD_SUBREAPER, 1).
+//                                    Returns 0, or -errno.
+//     no subreaper on this OS     -> -ENOSYS (orphans go to init, which reaps
+//                                    them; this process just does not see them).
+//   Either way a re-parented orphan becomes a zombie of THIS process when it
+//   exits, and komira_proc_reap_orphans collects it.
+// -----------------------------------------------------------------------------
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+
+int komira_proc_adopt_orphans(void) {
+    if (getpid() == 1) return 1;
+#if defined(__linux__) && defined(PR_SET_CHILD_SUBREAPER)
+    if (prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0) return -errno;
+    return 0;
+#else
+    return -ENOSYS;
+#endif
+}
+
+// -----------------------------------------------------------------------------
+// komira_proc_reap_orphans  --  collect every EXITED child of this process
+//   except `keep_pid`, without blocking. Returns how many were collected
+//   (>= 0), or -errno on a waitid failure other than ECHILD.
+//
+//   `keep_pid` is the job's own child: its status belongs to the Supervisor
+//   that spawned it (Supervisor.wait_exit / try_wait waitpid it by pid), so
+//   it is never collected here. waitid(WNOWAIT) names one exited child
+//   without collecting it; anything but `keep_pid` is then collected by pid.
+//   When waitid names `keep_pid` the pass stops (waitid cannot be asked for
+//   "the next one"); the zombies behind it are collected on a later pass,
+//   once the Supervisor has reaped its child.
+//
+//   At most `max` are collected per call, so a fork storm cannot hold the
+//   caller's loop here.
+//
+//   ONLY a process that owns every child it has may call this: in a process
+//   running several Supervisors it would collect a sibling Supervisor's
+//   child and that Supervisor's waitpid would then fail with ECHILD.
+// -----------------------------------------------------------------------------
+int komira_proc_reap_orphans(int keep_pid, int max) {
+    int n = 0;
+    while (n < max) {
+        siginfo_t info;
+        int r;
+        for (;;) {
+            memset(&info, 0, sizeof(info));
+            r = waitid(P_ALL, 0, &info, WEXITED | WNOHANG | WNOWAIT);
+            if (r < 0 && errno == EINTR) continue;
+            break;
+        }
+        if (r < 0) {
+            if (errno == ECHILD) break;
+            return -errno;
+        }
+        pid_t pid = info.si_pid;
+        if (pid == 0 || pid == (pid_t)keep_pid) break;
+        int status = 0;
+        pid_t w;
+        for (;;) {
+            w = waitpid(pid, &status, WNOHANG);
+            if (w < 0 && errno == EINTR) continue;
+            break;
+        }
+        if (w != pid) break;
+        n++;
+    }
+    return n;
 }
 
 // -----------------------------------------------------------------------------
