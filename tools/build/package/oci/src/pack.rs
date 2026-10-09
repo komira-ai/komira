@@ -504,6 +504,16 @@ mod tests {
     }
 
     #[test]
+    fn a_tree_name_that_is_not_utf8_is_refused() {
+        use std::os::unix::ffi::OsStrExt;
+        let d = scratch("not_utf8");
+        fs::create_dir(d.join("sub")).unwrap();
+        let name = std::ffi::OsStr::from_bytes(b"a\xff");
+        fs::write(d.join("sub").join(name), b"x").unwrap();
+        assert_eq!(tree_items(&d).err().unwrap(), format!("{}: a name that is not UTF-8: {:?}", d.join("sub").display(), name));
+    }
+
+    #[test]
     fn the_image_adds_one_layer_and_tags_the_version() {
         let img = image(&base(), b"layer tar", b"layer gz", &named()).unwrap();
         let m = json::parse(img.blobs.last().unwrap()).unwrap();
