@@ -618,6 +618,36 @@ def test_pg_and_sqlite_json_key_eq_render_unchanged() raises:
     assert_equal(ns, 2)
 
 
+def test_sqlite_query_rows_pushes_json_key_eq_whole() raises:
+    """sqlite pushes json_key_eq (`json_extract`), so query_rows sends it in the
+    WHERE: under AND beside `kind = ?1`, and under OR the whole filter is pushed
+    rather than refused. A dialect check that sent sqlite's json_key_eq to the
+    client-side split would log no json_extract for the AND and refuse the OR.
+    The recording db answers no rows, so the log alone decides."""
+    var rt = _new_rt()
+    ref reactor = rt.reactor()
+    var db = SqliteDb()
+    var fa = Filter.all_of(
+        _p2(Pred.eq("kind", _t("b")), Pred.json_key_eq("config", "env", _t("prod")))
+    )
+    _ = db.query_rows[RT](reactor, "t", _s("id"), fa, _no_order(), _no_limit())
+    _expect_log(
+        db.log,
+        _s("query SELECT id FROM t WHERE kind = ?1 AND json_extract(config, '$.' || ?2) = ?3 [1=b,1=env,1=prod]"),
+    )
+    var fo = Filter.any_of(
+        _p2(Pred.eq("kind", _t("a")), Pred.json_key_eq("config", "env", _t("prod")))
+    )
+    _ = db.query_rows[RT](reactor, "t", _s("id"), fo, _no_order(), _no_limit())
+    _expect_log(
+        db.log,
+        _s2(
+            "query SELECT id FROM t WHERE kind = ?1 AND json_extract(config, '$.' || ?2) = ?3 [1=b,1=env,1=prod]",
+            "query SELECT id FROM t WHERE kind = ?1 OR json_extract(config, '$.' || ?2) = ?3 [1=a,1=env,1=prod]",
+        ),
+    )
+
+
 def main() raises:
     print("== komira_db sql_neutral_ops: split, kinds, empty IN, pgstore JSON ==")
     test_sqlite_or_mixing_pushed_and_array_contains_is_refused()
@@ -633,4 +663,5 @@ def main() raises:
     test_empty_in_renders_false_and_keeps_bind_numbering()
     test_pgstore_json_key_eq_is_refused_outside_query_rows()
     test_pg_and_sqlite_json_key_eq_render_unchanged()
+    test_sqlite_query_rows_pushes_json_key_eq_whole()
     print("PASS test_sql_split_and_binds")
