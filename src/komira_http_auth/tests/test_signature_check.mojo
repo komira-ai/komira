@@ -304,8 +304,9 @@ def _with_key_ops(key: List[UInt8], kid: String, ops: String) raises -> String:
 def test_only_rsa_signing_keys_are_held() raises:
     # Catches: a filter that lets a key of another type, alg or use into the
     # set (the parser's key list then differs from the expected kids and the
-    # whole document is refused, so KID would not verify; two alg values and
-    # two use values other than RS256 and sig, so a filter that excludes only
+    # whole document is refused, so KID would not verify; two kty values, two
+    # alg values and two use values other than RSA, RS256 and sig (EC and OKP,
+    # RS384 and PS256, enc and tls), so a filter that excludes only
     # one of them is caught too), and one that drops
     # an RSA key with no alg or use ("bare" would be unknown).
     var key = _key()
@@ -320,6 +321,9 @@ def test_only_rsa_signing_keys_are_held() raises:
             String('{"kty":"EC","crv":"P-256","kid":"ec","x":"')
             + _EC_XY
             + '","y":"'
+            + _EC_XY
+            + '"},'
+            + '{"kty":"OKP","crv":"Ed25519","kid":"okp","x":"'
             + _EC_XY
             + '"},'
             + rsa_jwk_json(key, String("rs384")).replace(
@@ -350,7 +354,7 @@ def test_only_rsa_signing_keys_are_held() raises:
     )
     # A kid naming a key that is not held is unknown, as it was before
     # komira_jose: never handed to the signature check.
-    for kid in ["ec", "rs384", "ps256", "enc", "tls"]:
+    for kid in ["ec", "okp", "rs384", "ps256", "enc", "tls"]:
         assert_equal(
             rig.verifier.verify(_tok(key, String(kid))).reason,
             String(REASON_UNKNOWN_KID),
@@ -382,8 +386,9 @@ def test_a_key_the_parser_skips_refuses_the_document() raises:
 
 
 def test_an_escaped_kid_reads_the_same_in_both_readers() raises:
-    # `"kid":"x"` is "x" to komira_json and to komira_jwks alike, so the
-    # document is whole and replaces the set.
+    # `"kid":"\u0078"` (the JSON escape backslash, u, 0078) is "x" to
+    # komira_json and to komira_jwks alike, so the document is whole and
+    # replaces the set.
     var key = _key()
     var rig = _Rig()
     rig.fetcher.add(
