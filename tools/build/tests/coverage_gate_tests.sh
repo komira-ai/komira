@@ -11,7 +11,8 @@
 #      tests//negative/coverage (tools/build/coverage/README.md, "The build
 #      gate"; tools/build/tests/coverage_runs.md, test 46):
 #      the [coverage][gate] of covlow, covnotests, covun, covfull_unread,
-#      covbranch and covtry in enforce mode is red, each naming its finding:
+#      covbranch, covtry and covandor in enforce mode is red, each naming its
+#      finding:
 #      BelowTarget (a test covering 3 of 6 lines, and 1 of the 4 arms of its
 #      two `if`s), NotMeasured (a library with no test still has a gate),
 #      UnmeasuredFile (a source no test compiles), BranchNotMeasured alone
@@ -19,8 +20,10 @@
 #      record: coverage_branch_gate = False), BelowTarget on branch alone
 #      (every line covered, one arm of its `if` never taken: the branch
 #      records reach the gate), BelowTarget on branch alone again (every
-#      line covered, a raising call in a `try:` body never raising);
-#      covbranch_both and covtry_both (every arm taken) and covfull
+#      line covered, a raising call in a `try:` body never raising), and
+#      again (every line covered, `return a or b` never skipping its right
+#      operand: an and/or whose result no branch tests is a decision);
+#      covbranch_both, covtry_both and covandor_both (every arm taken) and covfull
 #      (the library of covfull_unread, no decision, its records naming its
 #      file with no arm) are green in enforce mode, gate included; the
 #      census twins are green and their result.json says so
@@ -53,13 +56,18 @@
 #      release action of a library, its join included: coverage_keys.sh
 #      (test 41). The refusals of the coverage attributes outside the tests
 #      cell are test 7's (umbrella_cache.sh, in a consumer's cell).
+#      A shared library's gate (COVERAGE_SHARED_LIB_MODE): covso_traced is
+#      green with the switch on and its driver's coverage run red (nothing
+#      waits for it); enforce is refused in analysis (covso_enforce). A
+#      welded test at a library source's path is refused (testpath).
 
 N=tests//negative/coverage
 P=tools/build/tests/negative/coverage
 expect_green coverage_gate_census "$N:covlow_census_result" "$N:covnotests_census_result" \
     "$N:covun_census_result" "$N:covfull_census_result" "$N:covfull_unread_census_result" \
     "$N:covtop_census_result" "$N:covbranch_census_result" "$N:covtry_census_result" \
-    "$N:covbranch_both[coverage][gate]" "$N:covtry_both[coverage][gate]" "$N:covfull[coverage][gate]"
+    "$N:covandor_census_result" "$N:covbranch_both[coverage][gate]" "$N:covtry_both[coverage][gate]" \
+    "$N:covandor_both[coverage][gate]" "$N:covfull[coverage][gate]"
 # A test-only package below the target: its gate is green in enforce mode,
 # what it found information (covlow, the same library elsewhere, is red
 # below).
@@ -73,10 +81,12 @@ expect_red coverage_gate_unmeasured "- **UnmeasuredFile** \`$P\` \`$P/covun/unus
 expect_red coverage_gate_branch "- **BranchNotMeasured** \`$P\`: no branch of this package was measured" "$N:covfull_unread[coverage][gate]"
 expect_red coverage_gate_branch_arm "COVERAGE GATE FAILED (enforce): $P ($N:covbranch [coverage gate]): covcheck gate exited 3" "$N:covbranch[coverage][gate]"
 expect_red coverage_gate_branch_try "COVERAGE GATE FAILED (enforce): $P ($N:covtry [coverage gate]): covcheck gate exited 3" "$N:covtry[coverage][gate]"
+expect_red coverage_gate_branch_andor "COVERAGE GATE FAILED (enforce): $P ($N:covandor [coverage gate]): covcheck gate exited 3" "$N:covandor[coverage][gate]"
 # Each red is its own finding: covlow's is BelowTarget, covfull_unread's
 # only finding is BranchNotMeasured (line 100%, a ratchet row), and covbranch's
 # only finding is BelowTarget on branch (line 100%, a ratchet row, its
-# branch records read), and so is covtry's (a `try` decision's raise arm).
+# branch records read), and so is covtry's (a `try` decision's raise arm)
+# and covandor's (an `or`'s arm skipping its right operand).
 # The enforce banner names what a red gate blocks:
 # the conda package only.
 for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is below the target 100.00%" \
@@ -85,7 +95,9 @@ for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is belo
     "coverage_gate_branch_arm|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
     "coverage_gate_branch_arm|### Findings (1)" \
     "coverage_gate_branch_try|- **BelowTarget** \`$P\`: branch 83.33% is below the target 100.00%" \
-    "coverage_gate_branch_try|### Findings (1)"; do
+    "coverage_gate_branch_try|### Findings (1)" \
+    "coverage_gate_branch_andor|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
+    "coverage_gate_branch_andor|### Findings (1)"; do
     if grep -qF -- "${want#*|}" "$LOG/${want%%|*}.log"; then
         pass "${want%%|*}_finding"
     else
@@ -97,7 +109,7 @@ done
 # and runs its test). A library with no test has a REFUSED conda package,
 # which waits for its gate all the same.
 expect_green coverage_gate_library "$N:covlow" "$N:covnotests" "$N:covun" "$N:covfull" "$N:covfull_unread" \
-    "$N:covbranch" "$N:covtry" "$N:covbad" "$N:covlow_user"
+    "$N:covbranch" "$N:covtry" "$N:covandor" "$N:covbad" "$N:covlow_user"
 expect_red coverage_gate_conda "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow_conda"
 expect_red coverage_gate_conda_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests_conda"
 # A generated client whose welded tests are at its package's top analyzes
@@ -161,3 +173,19 @@ for lib in "$N:tracer_shipped" //tools/build/readme_examples:readme_examples; do
         fail "$n: an aquery of $lib with -c komira.coverage=true failed (see $LOG/${n}_*.err)"
     fi
 done
+
+# A shared library's gate is reported, never enforced, and nothing of it
+# waits for its coverage: covso_traced (the published file) builds with the
+# switch on while its driver's coverage run is red; enforce is refused in
+# analysis (covso_enforce: the rule called without the macro, so a BUCK
+# file cannot bypass it; the macro passes the mode through to the same check).
+expect_green coverage_shared_lib_published "$N:covso_traced" -c komira.coverage=true
+if "$BUCK2" build "$N:covso_traced[coverage][tests][covso_traced_driver]" -c komira.coverage=true > "$LOG/coverage_shared_lib_run.log" 2>&1; then
+    fail "coverage_shared_lib_run: $N:covso_traced[coverage][tests][covso_traced_driver] built, but its driver fails under kcov"
+elif grep -qF "COVERAGE RUN FAILED: $N:covso_traced:tests/covso_traced_driver.mojo [coverage]" "$LOG/coverage_shared_lib_run.log"; then
+    pass coverage_shared_lib_run
+else
+    fail "coverage_shared_lib_run: failed without the coverage run's message (see $LOG/coverage_shared_lib_run.log)"
+fi
+expect_red coverage_gate_test_path "$N:testpath: coverage gate: the test lostlib/value.mojo has the path of a source of the library" "$N:testpath"
+expect_red coverage_shared_lib_enforce "$N:covso_enforce: a mojo_shared_lib's coverage gate is reported, never enforced" "$N:covso_enforce"

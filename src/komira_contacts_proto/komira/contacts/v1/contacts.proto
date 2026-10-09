@@ -1,0 +1,161 @@
+syntax = "proto3";
+package komira.contacts.v1;
+
+// The resources of a simple contacts service's JSON API: address books, the
+// cards in them, the change feed of a book, the vCard import summary and the
+// error envelope. The API is the proto3 JSON mapping of these messages.
+//
+// A card is a subset derived from JSContact (RFC 9553) and vCard 4.0
+// (RFC 6350); it is not JSContact on the wire. Property names are reused where
+// the meaning is the same, but `name` is a flat message, `nickname`,
+// `organization` and `title` are singular, and the multi-valued properties are
+// arrays, not Id-keyed maps.
+//
+// Generated into the Mojo package `komira_contacts_proto` as
+// `komira_contacts_proto.contacts`; `komira_contacts` stores them.
+
+// What an address book is.
+enum BookKind {
+  BOOK_KIND_UNSPECIFIED = 0;
+  PERSONAL = 1;   // owned by one subject; only that subject reads or writes it
+  SHARED = 2;     // read by every caller; written only by an admin
+  DIRECTORY = 3;  // projected from a user directory; read-only
+}
+
+// What a card describes (vCard `KIND`, RFC 6350 §6.1.4). A card written
+// without one is an individual.
+enum CardKind {
+  INDIVIDUAL = 0;
+  ORG = 1;
+  GROUP = 2;      // a contact group: `members` holds the member cards' uids
+}
+
+// An address book. Every field but `name` is written by the service; a client
+// creating a book names its `kind` and may ask for `is_default`.
+message AddressBook {
+  string id = 1;              // a UUID
+  BookKind kind = 2;
+  string owner = 3;           // PERSONAL: the owner's authenticated subject; else empty
+  string name = 4;            // one line
+  bool is_default = 5;        // PERSONAL only; at most one per owner
+  uint64 version = 6;         // the ETag of the book's own fields
+  uint64 modseq = 7;          // the book's change number: the modseq of its latest card write
+}
+
+// A person's or organization's name (vCard `FN` and `N`).
+message Name {
+  string full = 1;            // the formatted name (vCard `FN`)
+  string given = 2;
+  string surname = 3;
+  string middle = 4;
+  string prefix = 5;
+  string suffix = 6;
+}
+
+// An organization and its unit path (vCard `ORG`).
+message Organization {
+  string name = 1;
+  repeated string units = 2;  // outermost first
+}
+
+message Email {
+  string address = 1;
+  string label = 2;           // free text, for example "work"
+  uint32 pref = 3;            // 1 (most preferred) to 100; 0 is none
+}
+
+message Phone {
+  string number = 1;
+  string label = 2;
+  uint32 pref = 3;
+}
+
+// A postal address (the vCard `ADR` components, RFC 6350 §6.3.1, without the
+// post-office box and extended address, which RFC 6350 says should be empty).
+message PostalAddress {
+  string street = 1;
+  string locality = 2;
+  string region = 3;
+  string postcode = 4;
+  string country = 5;
+  string label = 6;
+  uint32 pref = 7;
+}
+
+// A card. `id`, `address_book_id`, `version` and `modseq` are written by the
+// service. `uid` is stable across systems and unique within one address book;
+// a card written without one is given `urn:uuid:<id>`.
+message Card {
+  string id = 1;                       // a UUID
+  string address_book_id = 2;
+  string uid = 3;                      // vCard `UID`; cannot change once written
+  CardKind kind = 4;
+  Name name = 5;
+  string nickname = 6;
+  Organization organization = 7;
+  string title = 8;
+  repeated Email emails = 9;
+  repeated Phone phones = 10;
+  repeated PostalAddress addresses = 11;
+  repeated string urls = 12;
+  string birthday = 13;                // vCard `BDAY` text as written
+  string notes = 14;
+  repeated string members = 15;        // GROUP only: the member cards' uids
+  repeated string vcard_extra = 16;    // unmapped vCard lines, kept verbatim for re-export
+  uint64 version = 17;                 // the ETag; a conditional write names it
+  uint64 modseq = 18;                  // the book's change number at this card's last write
+}
+
+message ListAddressBooksResponse {
+  repeated AddressBook address_books = 1;
+}
+
+message ListCardsResponse {
+  repeated Card cards = 1;
+}
+
+// One card's latest state in a change feed: written, or deleted.
+message CardChange {
+  string card_id = 1;
+  string uid = 2;
+  uint64 modseq = 3;
+  bool deleted = 4;
+}
+
+// The cards of one book written or deleted after a client's `since` change
+// number, in change-number order. `modseq` is the cursor for the next call.
+message ChangesResponse {
+  repeated CardChange changes = 1;
+  uint64 modseq = 2;
+}
+
+// A vCard import into one book: the body is `text/vcard`.
+message ImportCardsRequest {
+  string address_book_id = 1;
+  string vcard = 2;
+}
+
+// Why one card of an import was not stored. `index` counts the cards of the
+// input from 0.
+message ImportRefusal {
+  uint32 index = 1;
+  string code = 2;
+  string message = 3;
+}
+
+message ImportCardsResponse {
+  uint32 created = 1;
+  uint32 updated = 2;
+  repeated ImportRefusal refused = 3;
+}
+
+// The body of every refusal: `{"error":{"code":...,"message":...}}`.
+message ApiError {
+  string code = 1;
+  string message = 2;
+  string field = 3;           // the JSON path of the refused field, when there is one
+}
+
+message ErrorResponse {
+  ApiError error = 1;
+}
