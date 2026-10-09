@@ -227,7 +227,7 @@ def test_06_metric_over_absent_field() raises:
     var core = _core()
     var aggs = List[AggSpec]()
     aggs.append(AggSpec(String("a"), AGG_KIND_AVG, String("nope")))
-    with assert_raises(contains="no fast-field named 'nope'"):
+    with assert_raises(contains="SearchCore: no fast-field named 'nope'"):
         _ = core.search(_q("alpha", aggs=aggs^))
 
 
