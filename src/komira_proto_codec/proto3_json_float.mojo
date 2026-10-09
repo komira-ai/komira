@@ -245,7 +245,7 @@ def _shortest_digits(
         digits[0] = UInt8(1)  # cov: unreachable see line 241
         k += 1  # cov: unreachable see line 241
     while n > 1 and digits[n - 1] == UInt8(0):
-        n -= 1  # cov: unreachable the last digit is never 0: low_ok after a 0 would have held one digit earlier, and float32 needs at most 9 of the 20 digits
+        n -= 1  # cov: unreachable from the float32 writer: a float32 (24-bit mantissa) ends within 9 digits on a nonzero digit (low_ok after a 0 would have held one digit earlier); only a direct call with a wider mantissa can hit the 20-digit cap on a 0, and that truncated output is not a value to pin
     return n
 
 

@@ -7,8 +7,9 @@
 # the encoder agreeing with the decoder.
 #
 #   B1  a field whose WIRE TYPE does not match the reader is refused, naming
-#       the wire type the reader expected — for every scalar reader, `bytes`,
-#       an enum, a nested message and a map entry. Catches: a reader that
+#       the wire type the reader expected — for every scalar reader (the
+#       sint, fixed and sfixed readers included), `bytes`, an enum, a nested
+#       message and a map entry. Catches: a reader that
 #       drops its wire-type check (a LEN field read as a varint reads its
 #       length as the value; a VARINT field read as LEN reads its value as a
 #       length), and a refusal naming the wrong wire type.
@@ -146,6 +147,18 @@ struct WireProbe(Serializable, Copyable, Movable):
                 dec.read_into_string_string_map(names)
             elif f == 13:
                 dec.read_into_string_i64_map(totals)
+            elif f == 14:
+                _ = dec.read_sint64()
+            elif f == 15:
+                _ = dec.read_sint32()
+            elif f == 16:
+                _ = dec.read_fixed64()
+            elif f == 17:
+                _ = dec.read_fixed32()
+            elif f == 18:
+                _ = dec.read_sfixed64()
+            elif f == 19:
+                _ = dec.read_sfixed32()
             else:
                 dec.skip()
         return WireProbe(s^, count, names^, totals^)
@@ -158,7 +171,7 @@ def _tag(field: Int, wire: Int) -> UInt8:
 def _field_of_wire(field: Int, wire: Int) -> List[UInt8]:
     """Field `field` with wire type `wire` and a well-formed zero payload."""
     var b = List[UInt8]()
-    b.append(_tag(field, wire))
+    _append_varint(b, field * 8 + wire)  # fields 16 and up need 2 tag bytes
     var payload = 1  # VARINT 0, or LEN 0
     if wire == FIXED64:
         payload = 8
@@ -209,12 +222,24 @@ def test_b1_a_wire_type_mismatch_is_refused_per_reader() raises:
     _expect_refusal(11, VARINT, String(M) + "LEN (message)")
     _expect_refusal(12, VARINT, String(M) + "LEN (map entry)")
     _expect_refusal(13, FIXED32, String(M) + "LEN (map entry)")
+    _expect_refusal(14, LEN, String(M) + "VARINT (sint64)")
+    _expect_refusal(15, FIXED32, String(M) + "VARINT (sint32)")
+    _expect_refusal(16, FIXED32, String(M) + "FIXED64 (fixed64)")
+    _expect_refusal(17, FIXED64, String(M) + "FIXED32 (fixed32)")
+    _expect_refusal(18, VARINT, String(M) + "FIXED64 (sfixed64)")
+    _expect_refusal(19, LEN, String(M) + "FIXED32 (sfixed32)")
     # The inversion: the matching wire type is read without a refusal.
     var ok = _field_of_wire(3, VARINT)
     ok.extend(_field_of_wire(1, LEN))
     ok.extend(_field_of_wire(8, FIXED32))
+    ok.extend(_field_of_wire(14, VARINT))
+    ok.extend(_field_of_wire(15, VARINT))
+    ok.extend(_field_of_wire(16, FIXED64))
+    ok.extend(_field_of_wire(17, FIXED32))
+    ok.extend(_field_of_wire(18, FIXED64))
+    ok.extend(_field_of_wire(19, FIXED32))
     var probe = decode_proto[WireProbe](ok^)
-    assert_equal(probe.count, 3, "three well-typed fields decode")
+    assert_equal(probe.count, 9, "nine well-typed fields decode")
     print("  test_b1_a_wire_type_mismatch_is_refused_per_reader: PASS")
 
 

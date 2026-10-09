@@ -23,8 +23,9 @@
 #   J6  an int32, uint32 and bool map KEY is written as a JSON string while
 #       the same scalar as a map VALUE is not. Catches: a key written bare
 #       (an invalid JSON object) or a value quoted.
-#   J7  `_vocab_group_text` returns the group asked for, and the empty string
-#       for a group past the end of the vocabulary.
+#   J7  `_vocab_group_text` returns the group asked for (first, middle and
+#       last), and the empty string for a group past the end of the
+#       vocabulary.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -336,6 +337,7 @@ def test_j6_non_string_map_keys_are_quoted() raises:
 def test_j7_vocab_group_text() raises:
     var vocab = "a|b,c,dd|e"
     assert_equal(_vocab_group_text(vocab, 0), String("a|b"), "group 0")
+    assert_equal(_vocab_group_text(vocab, 1), String("c"), "a middle group")
     assert_equal(_vocab_group_text(vocab, 2), String("dd|e"), "the last group")
     assert_equal(_vocab_group_text(vocab, 3), String(""), "one past the end")
     assert_equal(_vocab_group_text("", 1), String(""), "an empty vocabulary")
