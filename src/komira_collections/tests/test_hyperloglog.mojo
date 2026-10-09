@@ -10,6 +10,10 @@
 #     3. the register update: top 12 bits pick the register, rho of the
 #        52-bit tail (leading 1 at bit 51 -> 1, tail 1 -> 52, tail 0 -> 53),
 #        and a register keeps its maximum
+#    3a. rho of a tail with only bits above the 52 tail bits set is bounded
+#        and reads those bits as zero (rho 53); bit 0 alone is 52, bits 0 and
+#        60 are 52 (mutants caught: the loop bound's break returning another
+#        value, the bound firing one probe early)
 #     4. the estimator (Ertl's improved raw estimator) on fixed register
 #        states: 100 registers at 1 and the rest empty is 101; every
 #        register at 1 is 5909; one register empty and the rest at 3 is
@@ -57,6 +61,7 @@ from komira_collections.hyperloglog import (
     hll_hash_bytes,
     hll_hash_string,
     _ertl_tau,
+    _leading_zero_count_plus_one_in_tail as _rho,
 )
 
 
@@ -141,6 +146,18 @@ def test_register_update() raises:
         if hll.register(i) != UInt8(0):
             touched += 1
     assert_equal(touched, 3)
+
+
+def test_rho_ignores_bits_above_the_tail() raises:
+    # The caller masks the top 12 bits off; a tail holding only bits above
+    # bit 51 reaches the loop's bound and reads as the zero tail.
+    assert_equal(_rho(UInt64(1) << UInt64(60)), HLL_HASH_REM_BITS + 1)
+    assert_equal(_rho(~UInt64(0) << UInt64(52)), HLL_HASH_REM_BITS + 1)
+    assert_equal(_rho(UInt64(0)), HLL_HASH_REM_BITS + 1)
+    # The last probe is bit 0, with or without a bit above the tail.
+    assert_equal(_rho(UInt64(1)), HLL_HASH_REM_BITS)
+    assert_equal(_rho((UInt64(1) << UInt64(60)) | UInt64(1)), HLL_HASH_REM_BITS)
+    assert_equal(_rho((UInt64(1) << UInt64(63)) | (UInt64(1) << UInt64(51))), 1)
 
 
 # The known answers below are Ertl's estimator (arXiv:1702.01284,

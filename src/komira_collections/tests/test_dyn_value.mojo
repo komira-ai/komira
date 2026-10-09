@@ -18,6 +18,9 @@
 #   T7: get[T] on an empty DynValue is refused with the "empty" message, and
 #       is_occupied() is False; T1 asserts it True on an occupied value
 #       (mutants caught: the empty branch removed, is_occupied() constant)
+#   T8: the empty slot's destructor `_noop_destroy` leaves the bytes it is
+#       given untouched. __deinit__ calls the destructor only when occupied,
+#       so only a direct call reaches it (mutant caught: it writes a byte)
 #
 # Compile-time only, so no runtime test can observe them: get's return origin
 # (`ref [self._storage]`), refusal of a mutable get on an immutable DynValue,
@@ -30,7 +33,7 @@
 from std.memory import Pointer
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
-from komira_collections.dyn_value import DynValue
+from komira_collections.dyn_value import DynValue, _noop_destroy
 
 
 # --- Test helpers ---
@@ -265,6 +268,17 @@ def test_empty_is_refused() raises:
     print("    PASS test_empty_is_refused")
 
 
+def test_noop_destroy_touches_nothing() raises:
+    """T8: _noop_destroy leaves every byte of its argument as it was."""
+    var bytes = List[UInt8](length=16, fill=UInt8(0xAB))
+    _noop_destroy(
+        bytes.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+    )
+    for i in range(16):
+        assert_equal(bytes[i], UInt8(0xAB))
+    print("    PASS test_noop_destroy_touches_nothing")
+
+
 def main() raises:
     print("Running DynValue tests...")
     test_create_and_get()
@@ -275,4 +289,5 @@ def main() raises:
     test_wrong_type_is_refused()
     test_function_types_with_one_reflect_name()
     test_empty_is_refused()
-    print("All DynValue tests passed (8/8)")
+    test_noop_destroy_touches_nothing()
+    print("All DynValue tests passed (9/9)")
