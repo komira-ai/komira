@@ -4,8 +4,8 @@ Status: proposed, not built. This is §10 of [`optimized_plan.md`](optimized_pla
 file stays under 1,000 lines. Section numbers continue that document's: `§10.x` is here, and every other `§n` is
 there.
 
-Citations are to komira `origin/main` at `8bfba390` unless marked otherwise; `git diff` from the branch point of
-`optimized_plan.md` to `8bfba390` is empty for every source file cited here. Statements marked *(inferred)* are my
+Citations are to komira `main` as merged by komira-ai/komira#977 unless marked otherwise; from the branch point of
+`optimized_plan.md` to that state, no source file cited here changed. Statements marked *(inferred)* are my
 reading, not facts taken from the code. Nothing was built or run to write this document.
 
 The runtime interface a UDF runs through, and what a language implements, is

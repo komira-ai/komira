@@ -5,11 +5,12 @@ plans (UDF nodes and the environment image, §10, specified in [`optimized_plan_
 and sources, index access paths and graph operators (§15, specified in
 [`optimized_plan_sources.md`](optimized_plan_sources.md)).
 
-Pinned commit: komira `origin/main` at `af1d841f`. Paths are cited as `path:line`; the line numbers were read at
-`547e9849`, and `git diff 547e9849 af1d841f` (and onward to `8bfba390`) is empty for `src/komira_plan_proto`,
-`komira_plan_wire`, `komira_plan_ir`, `komira_optimizer`, `komira_plan_stats`, `komira_join_assembly`,
-`komira_shuffle`, `komira_shuffle_streaming` and `src/komira_morsel/streaming_source.mojo`. Statements marked
-*(inferred)* are my reading, not facts taken from the code. Nothing was built or run to write this document.
+Pinned state: komira `main` as merged by komira-ai/komira#967. Paths are cited as `path:line`; the line numbers were
+read at `main` as merged by komira-ai/komira#931, and nothing changed from there through komira-ai/komira#977 in
+`src/komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_optimizer`, `komira_plan_stats`,
+`komira_join_assembly`, `komira_shuffle`, `komira_shuffle_streaming` and `src/komira_morsel/streaming_source.mojo`.
+Statements marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run to write this
+document.
 
 ---
 
