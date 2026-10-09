@@ -5,6 +5,11 @@
 #   handed.
 # =============================================================================
 #
+# At the run's end, 4b again: the set is handed on only by a run that passed
+# (`keep_set_hash_only_if_passed`: every exit path, a run that ends neither
+# SUCCEEDED nor NOOP empties `set_hash`) and, when it selects validations,
+# validated them all (`keep_set_hash_only_if_validated`).
+#
 # Each check returns a `StartVerdict`: `outcome` "" when the run may go on,
 # else the outcome, error id and message the run stops with (nothing run).
 # Everything outside this process goes through the `StageSteps` seam
@@ -27,6 +32,7 @@ from kci_api import (
     ERROR_USAGE,
     ERROR_WORKFLOW_MISMATCH,
     OUTCOME_INDETERMINATE,
+    OUTCOME_NOOP,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
     VALIDATION_VALIDATED,
@@ -383,6 +389,17 @@ def keep_set_hash_only_if_validated(sel: Selection, mut result: KciRunResult):
         if v.effect == String(VALIDATION_VALIDATED) and v.outcome == String(OUTCOME_SUCCEEDED):
             passed += 1
     if passed != len(sel.validations) or len(result.validations) != len(sel.validations):
+        result.set_hash = String("")
+
+
+def keep_set_hash_only_if_passed(outcome: String, mut result: KciRunResult):
+    """File header, 4b, at the run's end: a run whose `outcome` is neither
+    SUCCEEDED nor NOOP hands on no set, so its `set_hash` is "". A failed
+    DEPLOY step (FAILED or PARTIAL) stops the run, and the next stage, which
+    refuses an empty hash, does not start from a cell nobody finished
+    (deploy_step.md, "After a failed deploy"). Without this, a failed run
+    that selects no validation would keep the hash its start checks set."""
+    if outcome != OUTCOME_SUCCEEDED and outcome != OUTCOME_NOOP:
         result.set_hash = String("")
 
 

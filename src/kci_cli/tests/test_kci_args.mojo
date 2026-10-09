@@ -2,19 +2,22 @@
 # src/kci_cli/tests/test_kci_args.mojo -- the one parser and kci's one
 #   command, `kci run`: every usage refusal (`ci check`, `--workflow`,
 #   `--claim-new-name` and `--expect-set-hash` are gone), `--summary-file`,
-#   the `--only` grammar, `--plan` on any stage, and the flags the selected
-#   steps' kinds take (`require_stage_flags`).
+#   the `--only` grammar, `--plan` on any stage, the flags the selected
+#   steps' kinds take (`require_stage_flags`), and `--rollback-on-failure`
+#   parsed as a boolean and refused (`refuse_rollback_on_failure`).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_cli import (
     KCI_USAGE,
+    ROLLBACK_ON_FAILURE_REFUSED,
     CLI_VERB_HELP,
     CLI_VERB_RUN,
     find_result_file,
     find_summary_file,
     parse_kci_args,
+    refuse_rollback_on_failure,
     require_stage_flags,
     selectors_of,
 )
@@ -353,6 +356,40 @@ def test_affected_by() raises:
     )
     # the BUILD step's flags are still needed
     _stage_refused(_pr("--log-dir", "/l"), String("build"), String("kci run needs --work-dir"))
+
+
+comptime _ROLLBACK_REFUSAL: String = (
+    "--rollback-on-failure needs the per-cell deployed-revision record, which this kci does not have:"
+    " without the flag a failed DEPLOY step stops the run and leaves its cell as the failed apply left it"
+)
+"""The refusal, spelled out here so a changed message goes red."""
+
+
+def test_rollback_on_failure_is_a_boolean_and_refused() raises:
+    """Catches: the flag unknown to the parser, parsed as taking a value
+    (it would swallow the next flag), allowed twice, not recorded, or
+    refused with another message (or not refused at all)."""
+    var given = parse_kci_args(_run("--rollback-on-failure"))
+    assert_true(given.rollback_on_failure)
+    assert_false(parse_kci_args(_run()).rollback_on_failure)
+    # a boolean: it takes no value, and the next flag is not swallowed
+    _refused(_run("--rollback-on-failure=yes"), String("--rollback-on-failure takes no value"))
+    var then_plan = parse_kci_args(_run("--rollback-on-failure", "--plan"))
+    assert_true(then_plan.rollback_on_failure)
+    assert_true(then_plan.plan, "--plan after the flag is a flag, not its value")
+    _refused(
+        _run("--rollback-on-failure", "--rollback-on-failure"), String("--rollback-on-failure is given twice")
+    )
+    # refused, exactly; and nothing is refused without it
+    assert_equal(String(ROLLBACK_ON_FAILURE_REFUSED), String(_ROLLBACK_REFUSAL))
+    var refused = String("<accepted>")
+    try:
+        refuse_rollback_on_failure(given)
+    except e:
+        refused = String(e)
+    assert_equal(refused, String(_ROLLBACK_REFUSAL))
+    refuse_rollback_on_failure(parse_kci_args(_run("--plan")))
+    assert_true(String(KCI_USAGE).find(String("[--rollback-on-failure]")) >= 0, String(KCI_USAGE))
 
 
 def main() raises:

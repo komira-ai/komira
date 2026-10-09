@@ -11,6 +11,7 @@
 #           [--secret-store <none|env>] [--scratch-dir <dir>]
 #           [--release-set-hash <64 hex>]
 #           [--pixi <file> --pixi-sha256 <hex>] [--channel file:///<dir>]
+#           [--rollback-on-failure]   (refused: see below)
 #   kci --help
 #
 # kci has exactly ONE command: `kci run --stage S` runs every step of stage S
@@ -99,6 +100,15 @@
 # without it always is. It is refused with --affected-by and on a stage
 # whose selection publishes, validates and deploys nothing.
 #
+# `--rollback-on-failure` (a boolean, like `--plan`) would re-apply a failed
+# DEPLOY step's cell at its last known-good revision. That needs a per-cell
+# deployed-revision record, which this kci does not have, so the flag is
+# parsed (it takes no value and is given once) and then REFUSED for every
+# stage, with or without `--plan`, before anything is read
+# (`refuse_rollback_on_failure`, dispatch.mojo's header, 0; KCI-E-USAGE,
+# exit 2). Without it a failed DEPLOY step stops the run and leaves its cell
+# as the failed apply left it (deploy_step.md, "After a failed deploy").
+#
 # Every refusal here is a usage error (kci_api's KCI-E-USAGE, exit 2;
 # a malformed `--only` is KCI-E-SELECTOR, also exit 2).
 # `--run-id`, `--attempt` and `--context` follow kci_api's grammar; kci
@@ -138,6 +148,7 @@ comptime KCI_USAGE: String = (
     "          [--release-set-hash <64 hex>]   (a selected PUBLISH step or validation; required by a DEPLOY step)\n"
     "          --pixi <file> --pixi-sha256 <hex>                  (a selected CONDA_INSTALL_ENV validation)\n"
     "          [--channel file:///<dir>]       (validations only: install from this local channel, not the step's)\n"
+    "          [--rollback-on-failure]         (refused: this kci has no deployed-revision record)\n"
     "  kci --help\n"
     "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
     "--machine defaults to release/machine.textproto.\n"
@@ -150,6 +161,13 @@ comptime KCI_USAGE: String = (
     "--secret-store: how a channel credential's secret NAME is resolved: none (default) refuses;\n"
     "env reads the environment variable of that name."
 )
+
+
+comptime ROLLBACK_ON_FAILURE_REFUSED: String = (
+    "--rollback-on-failure needs the per-cell deployed-revision record, which this kci does not have:"
+    " without the flag a failed DEPLOY step stops the run and leaves its cell as the failed apply left it"
+)
+"""The refusal of `--rollback-on-failure` (file header)."""
 
 
 struct SecretStoreChoice(ImplicitlyCopyable, Movable, Equatable):
@@ -205,6 +223,7 @@ struct KciCommand(Copyable, Movable):
     var only: List[String]
     var affected_by: String
     var release_set_hash: String
+    var rollback_on_failure: Bool
     var seen: List[String]
 
     def __init__(out self):
@@ -232,6 +251,7 @@ struct KciCommand(Copyable, Movable):
         self.only = List[String]()
         self.affected_by = String("")
         self.release_set_hash = String("")
+        self.rollback_on_failure = False
         self.seen = List[String]()
 
     def given(self, flag: String) -> Bool:
@@ -260,6 +280,7 @@ def _run_common_flags() -> List[String]:
     for f in [
         "--machine", "--stage", "--only", "--affected-by", "--plan", "--revision-id", "--run-id", "--attempt",
         "--context", "--release-dir", "--result-file", "--summary-file", "--release-set-hash",
+        "--rollback-on-failure",
     ]:
         l.append(String(f))
     return l^
@@ -323,7 +344,7 @@ def _repeatable(flag: String) -> Bool:
 
 
 def _boolean(flag: String) -> Bool:
-    return flag == String("--plan")
+    return flag == String("--plan") or flag == String("--rollback-on-failure")
 
 
 def _positive_int(flag: String, value: String) raises -> Int:
@@ -402,6 +423,8 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         cmd.build_timeout_s = _positive_int(flag, value)
     elif flag == String("--plan"):
         cmd.plan = True
+    elif flag == String("--rollback-on-failure"):
+        cmd.rollback_on_failure = True
     elif flag == String("--summary-file"):
         cmd.summary_file = value.copy()
     elif flag == String("--release-version"):
@@ -545,6 +568,15 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
     except e:
         raise usage_error(String(e))
     return cmd^
+
+
+def refuse_rollback_on_failure(cmd: KciCommand) raises:
+    """Raises the usage error `ROLLBACK_ON_FAILURE_REFUSED` when the
+    command line gave `--rollback-on-failure` (file header): this kci has
+    no deployed-revision record to roll a cell back to. The caller records
+    it as KCI-E-USAGE (exit 2) before anything is read."""
+    if cmd.rollback_on_failure:
+        raise usage_error(String(ROLLBACK_ON_FAILURE_REFUSED))
 
 
 def selectors_of(cmd: KciCommand) raises -> List[Selector]:
