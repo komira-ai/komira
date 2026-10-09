@@ -866,9 +866,9 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
   passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
   the summary's line is `BUILD step: F of N unit(s) failed: ...`.
 - **The batch times out (or is killed by a signal):** the batch had all that
-  was left of the build budget (the note then says `timed out after N min,
-  all that was left of the build budget (--build-budget-s B)`, N the minutes
-  it was allowed), or without a budget the whole `--build-timeout-s`
+  was left of the build budget (the note then says `timed out after N min[ S
+  s], all that was left of the build budget (--build-budget-s B)`, N min S s
+  the time it was allowed), or without a budget the whole `--build-timeout-s`
   (default 3600 s), not a share per unit. It is not retried and no unit of
   it is attributed: FAILED.
 - **The batch fails but every unit builds alone:** the units interfere or the
@@ -888,7 +888,12 @@ git reads, the derive and affected commands) is charged to it. Every run
 the whole seconds left until the deadline, read just before it starts
 (`--build-timeout-s` is refused beside `--build-budget-s`: no fixed cap
 cuts a wide batch short of the budget); a run that passed, failed or timed out is
-charged alike. A run with less than one second left is not started. A
+charged alike. A build run (a batch, a unit alone, a retry) that times out
+is FAILED, with the `timed out after N min[ S s], ...` note above. A derive
+or affected command that times out is INDETERMINATE (`KCI-E-AFFECTED`), its
+note a plain `timed out`: it gets all the budget left too, so a hung
+affected command can use the whole budget before the step ends
+INDETERMINATE. A run with less than one second left is not started. A
 derive or affected command not started makes the step INDETERMINATE
 (`KCI-E-AFFECTED`: kci cannot tell what the change reaches). A build run not
 started lists its units, and those of every later run, as `BUILD step: U of

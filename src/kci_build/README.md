@@ -60,8 +60,12 @@ runner's monotonic clock (`ProcessRunner.now_ns`, CLOCK_MONOTONIC by
 default). Each run's timeout is all the whole seconds left until the
 deadline (`--build-timeout-s` caps nothing under a budget; `kci run` refuses
 the two together), so one batch of every affected unit may take the whole
-budget left. A run that times out is FAILED, `timed out after N min, all that
-was left of the build budget (--build-budget-s B)`. With less than one second
+budget left. A build run (a batch, a unit alone, a retry) that times out
+under a budget is FAILED, `timed out after N min[ S s], all that was left of
+the build budget (--build-budget-s B)`. A derive or affected command that
+times out is INDETERMINATE (`KCI-E-AFFECTED`), `timed out`: it also gets all
+the budget left, so a hung affected command can use the whole budget before
+the step ends INDETERMINATE. With less than one second
 left the run is not started: a unit is reported as not built (FAILED), a
 derive or affected command as not started (INDETERMINATE). Without a budget
 every run gets `--build-timeout-s`:
