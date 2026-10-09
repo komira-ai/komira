@@ -145,9 +145,12 @@ Each is a question with a recommendation; none is decided by this document.
    of the gamma stage, run with the `gamma` environment's federated (OIDC)
    credential, and that a red one **blocks** prod rather than advising:
    [the staged pipeline, e2](staged_pipeline.md#e2-gamma-real-cloud-tests-as-ordinary-validations).
-   The spend is ruled, the trust names `gamma` itself rather than the
-   separate environment proposed below, and locking `gamma` to `main` comes
-   first. The keyless-identity prerequisites below still decide when GCP and
+   The spend is ruled. Under the vocabulary ruling the conda channel this
+   document calls `gamma` becomes `beta` (the staged pipeline, section e3)
+   and gamma holds only real cloud resources, so the `gamma` environment is
+   trusted by the gamma accounts' roles and by no channel, which is what the
+   separate environment proposed below was for. Locking `gamma` to `main`
+   and retiring the old channel's trust of `gamma` come first. The keyless-identity prerequisites below still decide when GCP and
    Azure join (AWS first). The text below is the earlier recommendation, kept
    for its reasoning. Approve the spend and the
    one-time bootstrap? *Recommendation:* not yet. First land keyless identity
