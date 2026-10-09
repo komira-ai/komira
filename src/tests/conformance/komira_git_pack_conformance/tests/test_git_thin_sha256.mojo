@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_git_conformance/tests/test_git_thin_sha256.mojo -- the thin pack
+# komira_git_pack_conformance/tests/test_git_thin_sha256.mojo -- the thin pack
 # and the sha256 pack git wrote (gen_packs.sh).
 # =============================================================================
 #
@@ -30,7 +30,7 @@ from komira_git import (
     read_thin_pack_object,
 )
 
-from komira_git_conformance import check_git_pack, parse_batch, parse_ids, read_fixture
+from komira_git_pack_conformance import check_git_pack, parse_batch, parse_ids, read_fixture
 
 
 def _same(a: List[UInt8], b: List[UInt8]) -> Bool:
@@ -89,7 +89,7 @@ def test_thin() raises:
                     cur = got.entries[j].copy()
                     break
     assert_equal(refused, "komira_git: pack: " + String(unresolvable) + " deltas have no base in the pack")
-    print("komira_git_conformance: thin pack, " + String(len(want)) + " objects, " + String(outside) + " deltas on outside bases")
+    print("komira_git_pack_conformance: thin pack, " + String(len(want)) + " objects, " + String(outside) + " deltas on outside bases")
 
 
 def test_sha256() raises:
@@ -97,7 +97,7 @@ def test_sha256() raises:
     var objects = parse_batch(f, Span(read_fixture("objects256.batch")))
     var stats = check_git_pack(f, "sha256", objects)
     assert_true(stats.ofs_deltas > 0)
-    print("komira_git_conformance: sha256 pack matches git (" + String(stats.entries) + " objects)")
+    print("komira_git_pack_conformance: sha256 pack matches git (" + String(stats.entries) + " objects)")
 
 
 def main() raises:

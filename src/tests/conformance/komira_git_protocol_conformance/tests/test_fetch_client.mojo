@@ -44,7 +44,7 @@ from komira_git import (
     ObjectFormat,
     UploadPackV2Server,
 )
-from komira_git_conformance import Scenario, check_pack, expect_bytes, minus
+from komira_git_protocol_conformance import Scenario, check_pack, expect_bytes, minus
 
 comptime AGENT = "git/2.56.0-Linux"
 

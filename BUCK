@@ -137,6 +137,8 @@ _TESTS_LINTS = [
     "//src/tests/conformance/komira_contacts_store_conformance:deps_lint",
     "//src/tests/conformance/komira_db_conformance:deps_lint",
     "//src/tests/conformance/komira_git_conformance:deps_lint",
+    "//src/tests/conformance/komira_git_pack_conformance:deps_lint",
+    "//src/tests/conformance/komira_git_protocol_conformance:deps_lint",
     "//src/tests/conformance/komira_http_conformance:deps_lint",
     "//src/tests/conformance/komira_datetime_conformance:deps_lint",
     "//src/tests/conformance/komira_json_conformance:deps_lint",

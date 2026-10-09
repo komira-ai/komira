@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_git_conformance/tests/test_git_packs.mojo -- the sha1 packs git
+# komira_git_pack_conformance/tests/test_git_packs.mojo -- the sha1 packs git
 # wrote (gen_packs.sh), each read by komira_git and checked against git.
 # =============================================================================
 #
@@ -30,7 +30,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_git import ObjectFormat, PackLimits, index_pack, parse_pack_index
 
-from komira_git_conformance import (
+from komira_git_pack_conformance import (
     check_git_pack,
     parse_batch,
     read_fixture,
@@ -72,7 +72,7 @@ def main() raises:
     require_same_bytes("ofs_large.idx", got.index.serialize(0x40), large)
     require_same_index("ofs_large.idx parsed", got.index, parse_pack_index(f, Span(large)))
     print(
-        "komira_git_conformance: sha1 packs match git (" + String(objects.count())
+        "komira_git_pack_conformance: sha1 packs match git (" + String(objects.count())
         + " objects; ofs depth " + String(ofs.max_depth) + ", deep depth "
         + String(deep.max_depth) + ")"
     )

@@ -41,7 +41,7 @@ from komira_git import (
     append_pkt_delim,
     append_pkt_flush,
 )
-from komira_git_conformance import (
+from komira_git_protocol_conformance import (
     Scenario,
     TranscriptGraph,
     check_pack,

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Writes the packs komira_git_conformance reads, with the pinned git
+# Writes the packs komira_git_pack_conformance reads, with the pinned git
 # (//third_party/git), in one build action of the `git_packs` rule (defs.bzl):
 #   sh gen_packs.sh <busybox> <out_dir> <git_dist>
 #

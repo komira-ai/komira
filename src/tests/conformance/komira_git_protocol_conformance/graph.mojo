@@ -1,6 +1,6 @@
 # =============================================================================
-# komira_git_conformance/graph.mojo -- a scenario's server repository as a
-# komira_git CommitGraph, from what git listed (objects.txt, parents.txt,
+# komira_git_protocol_conformance/graph.mojo -- a scenario's server repository
+# as a komira_git CommitGraph, from what git listed (objects.txt, parents.txt,
 # tags.txt).
 # =============================================================================
 

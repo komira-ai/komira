@@ -46,7 +46,7 @@ from komira_git import (
     append_ls_refs_response,
     negotiate,
 )
-from komira_git_conformance import (
+from komira_git_protocol_conformance import (
     Scenario,
     TranscriptGraph,
     expect_bytes,

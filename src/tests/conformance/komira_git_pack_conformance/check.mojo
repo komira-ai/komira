@@ -1,7 +1,7 @@
 # =============================================================================
-# komira_git_conformance/check.mojo -- one pack git wrote, read by komira_git
-# and checked against git's index, git's verify-pack listing and git's
-# cat-file dump.
+# komira_git_pack_conformance/check.mojo -- one pack git wrote, read by
+# komira_git and checked against git's index, git's verify-pack listing and
+# git's cat-file dump.
 # =============================================================================
 
 from std.collections import Dict

@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_git_conformance/fixtures.mojo -- reading what gen_packs.sh wrote:
+# komira_git_pack_conformance/fixtures.mojo -- reading what gen_packs.sh wrote:
 # the files of the `packs` directory, `git cat-file --batch` dumps, and the
 # normalized `git verify-pack -v` listings.
 # =============================================================================

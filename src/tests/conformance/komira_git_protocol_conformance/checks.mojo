@@ -1,6 +1,6 @@
 # =============================================================================
-# komira_git_conformance/checks.mojo -- what the conformance tests share:
-# reading git's packfile section, checking a pack's trailer, and the
+# komira_git_protocol_conformance/checks.mojo -- what the conformance tests
+# share: reading git's packfile section, checking a pack's trailer, and the
 # verdicts a scenario's server gave each push command.
 # =============================================================================
 
