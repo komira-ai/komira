@@ -29,6 +29,8 @@ from komira_kernels.runtime_expr import (
     make_add_i64,
     make_and,
     make_atan2_f64,
+    make_date_trunc_i64,
+    make_extract_i64,
     make_case_i64,
     make_ge_f64,
     make_ge_i64,
@@ -46,7 +48,11 @@ from komira_kernels.runtime_expr import (
     make_or,
     make_pow_f64,
 )
-from komira_kernels.runtime_expr import EXPR_DIV_I64
+from komira_kernels.runtime_expr import (
+    EXPR_DIV_I64,
+    RT_EXTRACT_DAY,
+    RT_TRUNC_MONTH,
+)
 from komira_row_format.cell_source import (
     CELL_DT_DECIMAL128,
     CELL_DT_I64,
@@ -289,6 +295,27 @@ def test_cast_case_and_null_operands() raises:
     )
 
 
+def test_extract_and_date_trunc_over_a_null_column() raises:
+    """y read as Date32 days (ticks per day 1); NULL at rows 0, 1, stored 0
+    (1970-01-01). Row 2 is day 3, 1970-01-04.
+    `EXTRACT(day FROM y) >= 1`: the stored day is 1, which would pass.
+    SQL: [2].
+    `date_trunc('month', y) >= 0`: the stored day truncates to 0, which would
+    pass. SQL: [2]."""
+    var p = List[RuntimeExpr]()
+    p.append(make_col(Y))                                # 0
+    p.append(make_extract_i64(0, RT_EXTRACT_DAY, 1))     # 1
+    p.append(make_lit_i64(1))                            # 2
+    p.append(make_ge_i64(1, 2))
+    _expect(_filter(_exec(p^)), [2], "EXTRACT(day FROM y) >= 1")
+    var q = List[RuntimeExpr]()
+    q.append(make_col(Y))                                # 0
+    q.append(make_date_trunc_i64(0, RT_TRUNC_MONTH, 1))  # 1
+    q.append(make_lit_i64(0))                            # 2
+    q.append(make_ge_i64(1, 2))
+    _expect(_filter(_exec(q^)), [2], "date_trunc('month', y) >= 0")
+
+
 def test_case_condition_over_a_null_operand_is_not_true() raises:
     """CASE WHEN y < 1 THEN 1 ELSE 0: y < 1 = N, N, F -> [0, 0, 0].
     The NULL rows store 0, and 0 < 1 would take the THEN branch."""
@@ -365,6 +392,7 @@ def main() raises:
     suite.test[test_arithmetic_operand_over_a_null_column]()
     suite.test[test_null_operand_on_the_right]()
     suite.test[test_cast_case_and_null_operands]()
+    suite.test[test_extract_and_date_trunc_over_a_null_column]()
     suite.test[test_case_condition_over_a_null_operand_is_not_true]()
     suite.test[test_non_nullable_source_keeps_two_valued_answers]()
     suite^.run()

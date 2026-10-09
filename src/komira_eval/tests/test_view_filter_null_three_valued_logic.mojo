@@ -11,21 +11,21 @@
 # under test if the walker read it, so a walker that ignores validity keeps
 # the NULL row and the survivor list differs.
 #
-# | row | n (i64) | m (i64) | s     | b (bool) | d (dec 10,2) | f (f64) | k (i64) |
-# |-----|---------|---------|-------|----------|--------------|---------|---------|
-# | 0   | 5       | 1       | bob   | true     | 1.00         | 2.5     | 2       |
-# | 1   | N/0     | 2       | NULL  | N/true   | N/0.00       | N/0.0   | 1       |
-# | 2   | 3       | N/0     | alice | false    | -1.00        | -1.0    | 5       |
-# | 3   | 1       | 0       | bob   | true     | 2.00         | 0.5     | 3       |
-# | 4   | 4       | 7       | carol | false    | 0.00         | 4.0     | 8       |
+# | row | n (i64) | m (i64) | s     | b (bool) | d (dec 10,2) | f (f64) | k (i64) | e (dec 10,2) |
+# |-----|---------|---------|-------|----------|--------------|---------|---------|--------------|
+# | 0   | 5       | 1       | bob   | true     | 1.00         | 2.5     | 2       | 2.00         |
+# | 1   | N/0     | 2       | NULL  | N/true   | N/0.00       | N/0.0   | 1       | 5.00         |
+# | 2   | 3       | N/0     | alice | false    | -1.00        | -1.0    | 5       | 0.00         |
+# | 3   | 1       | 0       | bob   | true     | 2.00         | 0.5     | 3       | 1.00         |
+# | 4   | 4       | 7       | carol | false    | 0.00         | 4.0     | 8       | 0.00         |
 #
-# k holds no NULL, so a compare with k on the left leaves the NULL check to
-# the right operand alone.
+# k and e hold no NULL, so a compare with k or e on the left leaves the NULL
+# check to the right operand alone.
 #
 # Refs komira-ai/komira#932.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal
+from std.testing import TestSuite, assert_equal, assert_raises
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.batch_view import batch_view_over
@@ -44,7 +44,9 @@ from komira_eval.filter_state import FilterState
 from komira_kernels.runtime_expr import (
     EXPR_EQ_F64_MIXED,
     EXPR_GE_F64_MIXED,
+    EXPR_REGEXP,
     RuntimeExpr,
+    make_add_i32,
     make_add_i64,
     make_and,
     make_case_f64,
@@ -64,6 +66,7 @@ from komira_kernels.runtime_expr import (
     make_lit_bool,
     make_lit_decimal128,
     make_lit_f64,
+    make_lit_i32,
     make_lit_i64,
     make_lit_string,
     make_lt_decimal128,
@@ -83,10 +86,11 @@ comptime B = 3
 comptime D = 4
 comptime F = 5
 comptime K = 6
+comptime E = 7
 
 
 def _names() -> List[String]:
-    var names: List[String] = ["n", "m", "s", "b", "d", "f", "k"]
+    var names: List[String] = ["n", "m", "s", "b", "d", "f", "k", "e"]
     return names^
 
 
@@ -98,12 +102,14 @@ def _batch() raises -> RecordBatch:
     var kc = PrimitiveArray[DType.int64].allocate_nullable(5)
     var b = BooleanArray.allocate_nullable(5)
     var d = Decimal128Array.allocate_nullable(5, 10, 2)
+    var e = Decimal128Array.allocate_nullable(5, 10, 2)
     var vn: List[Int] = [5, 0, 3, 1, 4]
     var vm: List[Int] = [1, 2, 0, 0, 7]
     var vf: List[Float64] = [2.5, 0.0, -1.0, 0.5, 4.0]
     var vb: List[Bool] = [True, True, False, True, False]
     var vd: List[Int] = [100, 0, -100, 200, 0]
     var vk: List[Int] = [2, 1, 5, 3, 8]
+    var ve: List[Int] = [200, 500, 0, 100, 0]
     for r in range(5):
         n.set(r, Scalar[DType.int64](Int64(vn[r])))
         m.set(r, Scalar[DType.int64](Int64(vm[r])))
@@ -111,6 +117,7 @@ def _batch() raises -> RecordBatch:
         b.set(r, vb[r])
         d.set_i128(r, SIMD[DType.int128, 1](vd[r]))
         kc.set(r, Scalar[DType.int64](Int64(vk[r])))
+        e.set_i128(r, SIMD[DType.int128, 1](ve[r]))
     n._set_null(1)
     m._set_null(2)
     f._set_null(1)
@@ -126,6 +133,7 @@ def _batch() raises -> RecordBatch:
     fields.append(Field.decimal128("d", 10, 2, True))
     fields.append(Field("f", DType.float64, True))
     fields.append(Field("k", DType.int64, True))
+    fields.append(Field.decimal128("e", 10, 2, True))
     var cols = Slab[Column[HeapRegion]]()
     cols.append(Column.from_primitive[DType.int64](n^))
     cols.append(Column.from_primitive[DType.int64](m^))
@@ -134,6 +142,7 @@ def _batch() raises -> RecordBatch:
     cols.append(Column.from_decimal128(d^))
     cols.append(Column.from_primitive[DType.float64](f^))
     cols.append(Column.from_primitive[DType.int64](kc^))
+    cols.append(Column.from_decimal128(e^))
     var sb = SchemaBuilder()
     for i in range(len(fields)):
         sb.add_field(fields[i])
@@ -213,6 +222,9 @@ def test_bool_column_drops_a_null_cell_stored_true() raises:
 def test_decimal_compare_drops_a_null_cell() raises:
     """Row 1 is NULL, stored 0.00, which passes all three predicates if read.
     `d >= 0.00`: [0, 3, 4]. `0.00 >= d`: [2, 4]. `d >= d`: [0, 2, 3, 4].
+    `e >= d`, column against column with the NULL in the right column only:
+    2.00 >= 1.00, NULL, 0.00 >= -1.00, 1.00 >= 2.00, 0.00 >= 0.00.
+    SQL: [0, 2, 4]; row 1 stores 5.00 >= 0.00, so it would pass.
     (#932 item 3)"""
     var batch = _batch()
     var p = List[RuntimeExpr]()
@@ -230,6 +242,11 @@ def test_decimal_compare_drops_a_null_cell() raises:
     r.append(make_col_decimal128(D))
     r.append(make_ge_decimal128(0, 1))
     _expect(_run(_exec(r^), batch), [0, 2, 3, 4], "d >= d")
+    var t = List[RuntimeExpr]()
+    t.append(make_col_decimal128(E))
+    t.append(make_col_decimal128(D))
+    t.append(make_ge_decimal128(0, 1))
+    _expect(_run(_exec(t^), batch), [0, 2, 4], "e >= d")
 
 
 def test_mixed_compare_drops_a_null_operand() raises:
@@ -297,6 +314,31 @@ def test_mixed_compare_over_computed_operands() raises:
     when.append(slots^)
     var exec = ExpressionExecutor(q^, 7, _names(), when_pool=when^)
     _expect(_run(exec, batch), [0, 4], "CASE ... ELSE NULL >= 0")
+
+
+def test_case_null_follows_the_first_true_when() raises:
+    """`(CASE WHEN n > 2 THEN f WHEN n > 0 THEN NULL ELSE f END) >= 0`.
+    Rows 0, 2, 4 satisfy both WHENs; the first one decides, so they take f
+    (2.5, -1.0, 4.0), not NULL. Row 1 (n NULL) takes the ELSE, f = NULL;
+    row 3 takes the second WHEN, NULL. SQL: [0, 4].
+    A NULL mark that lets a later TRUE WHEN override the first one marks
+    rows 0, 2 and 4 NULL and keeps nothing."""
+    var q = List[RuntimeExpr]()
+    q.append(make_col(N))            # 0
+    q.append(make_lit_i64(2))        # 1
+    q.append(make_gt_i64(0, 1))      # 2: n > 2
+    q.append(make_col(F))            # 3
+    q.append(make_lit_i64(0))        # 4
+    q.append(make_gt_i64(0, 4))      # 5: n > 0
+    q.append(make_null())            # 6
+    q.append(make_case_f64(0))       # 7
+    q.append(make_lit_i64(0))        # 8
+    q.append(_node(EXPR_GE_F64_MIXED, 7, 8))
+    var slots: List[Int] = [2, 3, 5, 6, 3]
+    var when = List[List[Int]]()
+    when.append(slots^)
+    var exec = ExpressionExecutor(q^, 9, _names(), when_pool=when^)
+    _expect(_run(exec, _batch()), [0, 4], "CASE two WHENs >= 0")
 
 
 # -----------------------------------------------------------------------------
@@ -419,7 +461,9 @@ def _not_in_exec(var values: List[ScalarValue]) -> ExpressionExecutor:
 def test_not_in_list_with_a_null_entry_is_unknown() raises:
     """`n IN (5, NULL)` is TRUE at row 0 and UNKNOWN everywhere else (a
     non-matching value against a list holding NULL is UNKNOWN), so its
-    negation keeps nothing. `NOT (n IN (5, 4))` keeps [2, 3]: row 1 is NULL."""
+    negation keeps nothing. `NOT (n IN (5, 4))` keeps [2, 3]: row 1 is NULL.
+    `NOT NOT (n IN (5, NULL))` keeps [0]: row 0 is TRUE although the list
+    holds a NULL, so TRUE must win over the NULL mark."""
     var batch = _batch()
 
     var with_null = List[ScalarValue]()
@@ -430,6 +474,79 @@ def test_not_in_list_with_a_null_entry_is_unknown() raises:
     plain.append(ScalarValue.from_int(5))
     plain.append(ScalarValue.from_int(4))
     _expect(_run(_not_in_exec(plain^), batch), [2, 3], "NOT (n IN (5, 4))")
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(N))
+    pool.append(make_in_list(0, 0))
+    pool.append(make_not_bool(1))
+    pool.append(make_not_bool(2))
+    var again = List[ScalarValue]()
+    again.append(ScalarValue.from_int(5))
+    again.append(ScalarValue.null(DType.int64))
+    var lists = List[List[ScalarValue]]()
+    lists.append(again^)
+    var nn = ExpressionExecutor(pool^, 3, _names(), in_list_pool=lists^)
+    _expect(_run(nn, batch), [0], "NOT NOT (n IN (5, NULL))")
+
+
+# -----------------------------------------------------------------------------
+# The NULL markers called directly, for the arms no filter reaches today.
+# -----------------------------------------------------------------------------
+
+
+def _all_rows() -> RowSelectionVector:
+    var sel = RowSelectionVector(5)
+    for r in range(5):
+        sel.append(UInt32(r))
+    return sel^
+
+
+def _marker_exec() -> ExpressionExecutor:
+    """Slots: 0 n, 1 I32 literal 1, 2 I32 `n + 1`, 3 a REGEXP node (no
+    view-walker or marker arm serves it)."""
+    var p = List[RuntimeExpr]()
+    p.append(make_col(N))
+    p.append(make_lit_i32(1))
+    p.append(make_add_i32(0, 1))
+    p.append(_node(EXPR_REGEXP, 0, 0))
+    return _exec(p^)
+
+
+def test_value_marker_i32_arithmetic() raises:
+    """`n + 1` as I32 arithmetic is NULL where n is (row 1); the marker reads
+    validity only, so the column's Int64 type does not matter."""
+    var batch = _batch()
+    var sel = _all_rows()
+    var null_at = List[Bool](length=5, fill=False)
+    _marker_exec()._mark_value_nulls_from_view(batch, 2, sel, null_at)
+    for r in range(5):
+        assert_equal(null_at[r], r == 1, "I32 n + 1 null at row " + String(r))
+
+
+def test_value_marker_refuses_an_unsupported_kind() raises:
+    """A value kind outside the marker's list raises rather than answer
+    "not NULL"."""
+    var batch = _batch()
+    var sel = _all_rows()
+    var null_at = List[Bool](length=5, fill=False)
+    with assert_raises(
+        contains="_mark_value_nulls_from_view: unsupported node kind 86 at pool slot 3"
+    ):
+        _marker_exec()._mark_value_nulls_from_view(batch, 3, sel, null_at)
+
+
+def test_bool_leaf_marker_refuses_an_unsupported_kind() raises:
+    """A Bool kind outside the leaf marker's list raises rather than answer
+    "not UNKNOWN"."""
+    var batch = _batch()
+    var exec = _marker_exec()
+    var sel = _all_rows()
+    var null_at = List[Bool](length=5, fill=False)
+    with assert_raises(
+        contains="_mark_bool_leaf_nulls_from_view: unsupported node kind 86 at pool slot 3"
+    ):
+        exec._mark_bool_leaf_nulls_from_view(
+            batch, exec.expression_pool[3], 3, sel, null_at
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -473,8 +590,12 @@ def main() raises:
     suite.test[test_decimal_compare_drops_a_null_cell]()
     suite.test[test_mixed_compare_drops_a_null_operand]()
     suite.test[test_mixed_compare_over_computed_operands]()
+    suite.test[test_case_null_follows_the_first_true_when]()
     suite.test[test_not_over_each_leaf_drops_the_null_row]()
     suite.test[test_not_follows_kleene_over_and_or]()
     suite.test[test_not_in_list_with_a_null_entry_is_unknown]()
+    suite.test[test_value_marker_i32_arithmetic]()
+    suite.test[test_value_marker_refuses_an_unsupported_kind]()
+    suite.test[test_bool_leaf_marker_refuses_an_unsupported_kind]()
     suite.test[test_case_condition_not_over_a_non_ascending_selection]()
     suite^.run()
