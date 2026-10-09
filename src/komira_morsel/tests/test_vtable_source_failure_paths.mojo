@@ -1,4 +1,9 @@
 # =============================================================================
+# FFI-BOUNDARY: a stand-in C connector of the scan vtable. The test owns the
+# connector state (`_Script`, allocated by `_make`, freed by `_free` after the
+# source is dropped) and its scratch buffers; the engine borrows them through
+# the `abi("C")` thunks below, so they are reached through MutUntrackedOrigin
+# pointers, as a foreign connector's would be.
 # VTableMorselSource: the refusal and failure paths of the C seam, driven by a
 # scripted connector.
 # =============================================================================
