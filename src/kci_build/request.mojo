@@ -64,6 +64,11 @@ comptime NO_BUILD_BUDGET: Int = 0
 `--build-budget-s`: the per-change check's runs are bounded by
 `--build-timeout-s` each, and by nothing in total."""
 
+comptime MAX_BUILD_BUDGET_S: Int = 7 * 24 * 3600
+"""The largest `--build-budget-s` kci takes (a week, longer than any CI
+job runs): a larger one is refused, so `budget * 10^9` added to a
+monotonic reading never comes near overflowing an Int."""
+
 
 struct BuildRequest(Copyable, Movable):
     """The inputs of one BUILD step. `step_name` is the step's name in the
@@ -74,9 +79,11 @@ struct BuildRequest(Copyable, Movable):
     `affected_by` is `kci run --affected-by` (the change's base, a full
     commit id) or "": when set, the step is the per-change check
     (affected.mojo) and `release_dir` is not used. `build_budget_s` is
-    `kci run --build-budget-s` or NO_BUILD_BUDGET: the seconds the
-    per-change check's build of the units may take in all
-    (affected_batch.mojo).
+    `kci run --build-budget-s` or NO_BUILD_BUDGET; with a budget,
+    `build_deadline_ns` is when it ends on the runner's monotonic clock
+    (`ProcessRunner.now_ns`): kci's start plus the budget, so everything
+    kci did before the step is charged to it (affected_batch.mojo, THE
+    BUDGET).
 
     Layout: owned values only. No pointer field."""
 
@@ -90,6 +97,7 @@ struct BuildRequest(Copyable, Movable):
     var run: RunIdentity
     var build_timeout_s: Int
     var build_budget_s: Int
+    var build_deadline_ns: Int
     var plan: Bool
     var affected_by: String
 
@@ -104,6 +112,7 @@ struct BuildRequest(Copyable, Movable):
         self.run = run^
         self.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
         self.build_budget_s = NO_BUILD_BUDGET
+        self.build_deadline_ns = 0
         self.plan = False
         self.affected_by = String("")
 

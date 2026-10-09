@@ -2,10 +2,13 @@
 # src/kci_build/tests/test_affected_budget.mojo
 #   The per-change check's build budget (`--build-budget-s`,
 #   affected_batch.mojo THE BUDGET) over ScriptedRunner, whose steps say how
-#   long each run "took" (`elapsed_s`), so every number here is exact:
+#   long each run "takes" (`elapsed_s` advances the runner's clock, whatever
+#   the run's result), so every number here is exact. The deadline is the
+#   budget after clock 0 (dispatch sets kci's start plus the budget):
 #   `run_timeout_s` itself; no budget leaves every run its
-#   --build-timeout-s; with one, each run gets what the earlier runs left
-#   (at most --build-timeout-s); a run with nothing left is not started and
+#   --build-timeout-s; with one, each run gets what is left until the
+#   deadline (at most --build-timeout-s), after a run that passed, failed or
+#   timed out alike; a run with nothing left is not started and
 #   its units are named as not built (FAILED, never a pass) while the units
 #   an earlier run built keep their BUILT lines; a batch the budget cut short
 #   says so when it times out; retries share the same budget and a batch
@@ -116,6 +119,7 @@ def _request(tag: String, budget_s: Int) raises -> BuildRequest:
     r.log_dir = root + String("/logs")
     r.build_timeout_s = 77
     r.build_budget_s = budget_s
+    r.build_deadline_ns = budget_s * _NS
     return r^
 
 
@@ -136,12 +140,14 @@ def _build(
     return ScriptedStep(a^, exit_code=exit_code, timed_out=timed_out, elapsed_s=took_s)
 
 
-def _keep(var argv: List[String], took_s: Int, timed_out: Bool = False) -> ScriptedStep:
+def _keep(
+    var argv: List[String], took_s: Int, exit_code: Int32 = Int32(0), timed_out: Bool = False
+) -> ScriptedStep:
     """A `buck2 build --keep-going` run (build system `other`)."""
     var a = _argv("--keep-going")
     for i in range(len(argv)):
         a.append(argv[i].copy())
-    return _build(a^, took_s, timed_out=timed_out)
+    return _build(a^, took_s, exit_code=exit_code, timed_out=timed_out)
 
 
 def _go(req: BuildRequest, units: List[String], mut runner: ScriptedRunner) raises -> BuildOutcome:
@@ -164,22 +170,39 @@ def _first_line(text: String) -> String:
 
 
 def test_b1_run_timeout_s() raises:
-    # no budget: --build-timeout-s, however long the earlier runs took
+    # run_timeout_s(--build-timeout-s, --build-budget-s, deadline, now);
+    # the deadline 1000 s after a clock reading of 900 s
+    comptime D = 1000 * _NS
+    # no budget: --build-timeout-s, whatever the clock says
     assert_equal(NO_BUILD_BUDGET, 0)
-    assert_equal(run_timeout_s(77, NO_BUILD_BUDGET, 0), 77)
-    assert_equal(run_timeout_s(77, NO_BUILD_BUDGET, 10_000 * _NS), 77)
-    # a budget larger than what is left: --build-timeout-s caps the run
-    assert_equal(run_timeout_s(77, 100, 0), 77)
-    assert_equal(run_timeout_s(77, 100, 23 * _NS), 77)
+    assert_equal(run_timeout_s(77, NO_BUILD_BUDGET, 0, 0), 77)
+    assert_equal(run_timeout_s(77, NO_BUILD_BUDGET, D, 10_000 * _NS), 77)
+    # more left than --build-timeout-s: it caps the run
+    assert_equal(run_timeout_s(77, 100, D, 900 * _NS), 77)
+    assert_equal(run_timeout_s(77, 100, D, 923 * _NS), 77)
     # otherwise the whole seconds left, rounded down
-    assert_equal(run_timeout_s(77, 100, 24 * _NS), 76)
-    assert_equal(run_timeout_s(77, 100, 30 * _NS), 70)
-    assert_equal(run_timeout_s(77, 100, 30 * _NS + 1), 69)
-    assert_equal(run_timeout_s(77, 100, 99 * _NS), 1)
-    # less than one second left, none, or overspent: not started
-    assert_equal(run_timeout_s(77, 100, 99 * _NS + 1), 0)
-    assert_equal(run_timeout_s(77, 100, 100 * _NS), 0)
-    assert_equal(run_timeout_s(77, 100, 130 * _NS), 0)
+    assert_equal(run_timeout_s(77, 100, D, 924 * _NS), 76)
+    assert_equal(run_timeout_s(77, 100, D, 930 * _NS), 70)
+    assert_equal(run_timeout_s(77, 100, D, 930 * _NS + 1), 69)
+    assert_equal(run_timeout_s(77, 100, D, 999 * _NS), 1)
+    # less than one second left, none, or past the deadline: not started
+    assert_equal(run_timeout_s(77, 100, D, 999 * _NS + 1), 0)
+    assert_equal(run_timeout_s(77, 100, D, D), 0)
+    assert_equal(run_timeout_s(77, 100, D, 1030 * _NS), 0)
+
+
+def test_b1_time_before_the_step_is_charged() raises:
+    # the deadline counts from kci's start: with 70 of the 100 s already
+    # gone before the step (the clock at 30 s left), the first run gets 30
+    var req = _request(String("b1b"), 100)
+    req.build_deadline_ns = 30 * _NS
+    var runner = ScriptedRunner()
+    runner.expect(_build(_argv(_A, _B, _DOCS), took_s=5))
+    var o = _go(req, _argv("lib_a", "lib_b", "lints"), runner)
+    assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
+    assert_equal(len(runner.calls), 1)
+    assert_equal(runner.remaining(), 0)
+    assert_equal(runner.calls[0].timeout_s, 30)
 
 
 def test_b2_without_a_budget_every_run_has_its_build_timeout() raises:
@@ -261,6 +284,43 @@ def test_b5_a_batch_the_budget_cut_short_says_so() raises:
     )
     assert_true(o.message.find(String("no unit of it was attributed")) >= 0, o.message)
     assert_equal(_list(o.lines), String("[BUILT lib_c]"))
+
+
+def test_b5_a_timed_out_batch_is_charged_before_the_next_group() raises:
+    # batch 1 times out after its 77 s; batch 2 (another command) gets the
+    # 23 s left, not 77 nor 100: a timed-out run's time counts like any other
+    var req = _request(String("b5c"), 100)
+    var runner = ScriptedRunner()
+    runner.expect(_build(_argv(_A, _B, _DOCS), took_s=77, timed_out=True))
+    runner.expect(_keep(_argv(_C, _D), took_s=23))
+    var o = _go(req, _argv("lib_a", "lib_b", "lints", "lib_c", "lib_d"), runner)
+    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
+    assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(len(runner.calls), 2)
+    assert_equal(runner.remaining(), 0)
+    assert_equal(runner.calls[0].timeout_s, 77)
+    assert_equal(runner.calls[1].timeout_s, 23)
+    assert_true(o.message.find(String("no unit of it was attributed")) >= 0, o.message)
+    # the later group still reports
+    assert_equal(_list(o.lines), String("[BUILT lib_c][BUILT lib_d]"))
+
+
+def test_b5_a_failed_unit_is_charged_before_the_next_run() raises:
+    # lib_c alone fails (exit 1) after 30 s; the batch after it gets the 70
+    # left: a failed run's time counts like any other
+    var req = _request(String("b5d"), 100)
+    var runner = ScriptedRunner()
+    runner.expect(_keep(_argv(_C), took_s=30, exit_code=Int32(1)))
+    runner.expect(_build(_argv(_A, _B, _DOCS), took_s=10))
+    var o = _go(req, _argv("lib_c", "lib_a", "lib_b", "lints"), runner)
+    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
+    assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(len(runner.calls), 2)
+    assert_equal(runner.remaining(), 0)
+    assert_equal(runner.calls[0].timeout_s, 77)
+    assert_equal(runner.calls[1].timeout_s, 70)
+    assert_equal(_first_line(o.message), String("BUILD step: 1 of 4 unit(s) failed: lib_c"))
+    assert_equal(_list(o.lines), String("[BUILT lib_a][BUILT lib_b][BUILT lints]"))
 
 
 def test_b5_a_timeout_the_budget_did_not_shorten_reads_as_before() raises:

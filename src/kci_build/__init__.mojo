@@ -33,7 +33,13 @@
 from kci_build.affected import run_affected
 from kci_build.affected_batch import MAX_FAILED_UNITS, build_affected_units, run_timeout_s
 from kci_build.build import check_log_dir, check_platform_dir, resolved_path, run_build
-from kci_build.request import DEFAULT_BUILD_TIMEOUT_S, NO_BUILD_BUDGET, BuildOutcome, BuildRequest
+from kci_build.request import (
+    DEFAULT_BUILD_TIMEOUT_S,
+    MAX_BUILD_BUDGET_S,
+    NO_BUILD_BUDGET,
+    BuildOutcome,
+    BuildRequest,
+)
 from kci_build.revision import (
     CHANGED_FILES_NAME,
     GIT_PROGRAM,

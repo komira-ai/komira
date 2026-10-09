@@ -41,8 +41,10 @@
 #             `--build-budget-s <n>` (with --affected-by only, refused
 #             without it) is the seconds the per-change check's build of
 #             the units may take in all, every run of it included
-#             (kci_build affected_batch.mojo, THE BUDGET); pr.yml passes
-#             what is left of its job's time limit.
+#             (kci_build affected_batch.mojo, THE BUDGET), counted from
+#             kci's own start (`started_ns`, set by dispatch.mojo
+#             `kci_main_with`), at most MAX_BUILD_BUDGET_S (a week); pr.yml
+#             passes what is left of its job's time limit.
 #             It is refused with --only, with --release-dir (nothing is
 #             released, so there is no release directory; without
 #             --affected-by the flag is required), and for a stage holding a
@@ -124,6 +126,7 @@ from kci_api import (
     parse_selectors,
     require_full_commit_id,
 )
+from kci_build import MAX_BUILD_BUDGET_S
 from kci_release_machine import Selection, Stage
 from kci_validate import ChannelUrl
 
@@ -198,6 +201,7 @@ struct KciCommand(Copyable, Movable):
     var log_dir: String
     var build_timeout_s: Int
     var build_budget_s: Int
+    var started_ns: Int
     var plan: Bool
     var summary_file: String
     var release_version: String
@@ -226,6 +230,7 @@ struct KciCommand(Copyable, Movable):
         self.log_dir = String("")
         self.build_timeout_s = 0
         self.build_budget_s = 0
+        self.started_ns = 0
         self.plan = False
         self.summary_file = String("")
         self.release_version = String("")
@@ -408,6 +413,11 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         cmd.build_timeout_s = _positive_int(flag, value)
     elif flag == String("--build-budget-s"):
         cmd.build_budget_s = _positive_int(flag, value)
+        if cmd.build_budget_s > MAX_BUILD_BUDGET_S:
+            raise usage_error(
+                flag + String(" '") + value + String("' is more than ") + String(MAX_BUILD_BUDGET_S)
+                + String(" (a week)")
+            )
     elif flag == String("--plan"):
         cmd.plan = True
     elif flag == String("--summary-file"):

@@ -49,11 +49,14 @@
 #
 # THE BUDGET (`req.build_budget_s`, `kci run --build-budget-s`). Without
 # one, every run (a group of one, a batch, a retry) may take
-# --build-timeout-s. With one, the runs of this step share it: each run's
-# timeout is `run_timeout_s`, the smaller of --build-timeout-s and the whole
-# seconds the budget has left after the runs before it (their RunResult
-# `elapsed_ns`, summed). A run with less than one second left is NOT
-# STARTED: its units are "not built: the build budget was spent", which is
+# --build-timeout-s. With one, it ends at `req.build_deadline_ns`: kci's
+# own start plus the budget, on the runner's monotonic clock
+# (`ProcessRunner.now_ns`), so all of kci's work before this step (the
+# workflow check, the git reads, the derive and affected commands of
+# affected.mojo) is charged to it. Each run's timeout is `run_timeout_s`,
+# read just before the run: the smaller of --build-timeout-s and the whole
+# seconds left until the deadline. A run with less than one second left is
+# NOT STARTED: its units are "not built: the build budget was spent", which is
 # FAILED (KCI-E-BUILD-FAILED) like an unattributed batch, never a pass, and
 # every later run is not started either, so the message lists every unit
 # left. A run the budget cut short and that timed out says so, with the
@@ -84,26 +87,32 @@ comptime _SHOWN_TARGETS: Int = 4
 comptime _STDERR: FileDescriptor = FileDescriptor(2)
 
 
-def affected_spec(argv: List[String], req: BuildRequest, base: String) -> RunSpec:
-    """`argv` run from --work-dir with --build-timeout-s, stdout and stderr
-    at `<base>.stdout` and `<base>.stderr`."""
-    return _spec_within(argv, req, base, req.build_timeout_s)
-
-
-def run_timeout_s(build_timeout_s: Int, build_budget_s: Int, spent_ns: Int) -> Int:
-    """The timeout of the next run (file header, THE BUDGET): `build_timeout_s`
-    without a budget (`build_budget_s` <= 0); else the smaller of it and the
-    whole seconds left of `build_budget_s` after `spent_ns`. Less than 1
-    means the run is not started."""
+def run_timeout_s(build_timeout_s: Int, build_budget_s: Int, deadline_ns: Int, now_ns: Int) -> Int:
+    """The timeout of a run starting at `now_ns` (file header, THE BUDGET):
+    `build_timeout_s` without a budget (`build_budget_s` <= 0); else the
+    smaller of it and the whole seconds left until `deadline_ns`. Less than
+    1 means the run is not started."""
     if build_budget_s <= 0:
         return build_timeout_s
-    var left_ns = build_budget_s * 1_000_000_000 - spent_ns
+    var left_ns = deadline_ns - now_ns
     if left_ns <= 0:
         return 0
     return min(build_timeout_s, left_ns // 1_000_000_000)
 
 
-def _spec_within(argv: List[String], req: BuildRequest, base: String, timeout_s: Int) -> RunSpec:
+def budget_timeout_s[R: ProcessRunner](req: BuildRequest, runner: R) -> Int:
+    """`run_timeout_s` for a run `runner` starts now."""
+    return run_timeout_s(req.build_timeout_s, req.build_budget_s, req.build_deadline_ns, runner.now_ns())
+
+
+def budget_spent_text(req: BuildRequest) -> String:
+    """Why a run was not started (file header, THE BUDGET)."""
+    return String("the build budget (--build-budget-s ") + String(req.build_budget_s) + String(") was spent")
+
+
+def affected_spec(argv: List[String], req: BuildRequest, base: String, timeout_s: Int) -> RunSpec:
+    """`argv` run from --work-dir with `timeout_s`, stdout and stderr at
+    `<base>.stdout` and `<base>.stderr`."""
     var rest = List[String]()
     for k in range(1, len(argv)):
         rest.append(argv[k].copy())
@@ -130,7 +139,6 @@ struct _Tally(Movable):
     var unattributed: List[String]
     var interference: List[String]
     var over_budget: List[String]
-    var spent_ns: Int
     var cannot: String
 
     def __init__(out self):
@@ -142,7 +150,6 @@ struct _Tally(Movable):
         self.unattributed = List[String]()
         self.interference = List[String]()
         self.over_budget = List[String]()
-        self.spent_ns = 0
         self.cannot = String("")
 
 
@@ -192,10 +199,6 @@ def _shown(argv: List[String], command_len: Int) -> String:
     return s^
 
 
-def _next_timeout(req: BuildRequest, t: _Tally) -> Int:
-    return run_timeout_s(req.build_timeout_s, req.build_budget_s, t.spent_ns)
-
-
 def _budget_clause(req: BuildRequest, timeout_s: Int, r: RunResult) -> String:
     """For a run that timed out with less than --build-timeout-s because
     the budget had no more: what it had (file header, THE BUDGET)."""
@@ -219,11 +222,11 @@ def _run_unit[R: ProcessRunner](
     """One unit alone, as a group of one: proven, or a failed unit with
     its paragraph, or `t.cannot` set when it could not be started. False
     (and the unit over budget) when the budget left no time to start it."""
-    var timeout_s = _next_timeout(req, t)
+    var timeout_s = budget_timeout_s(req, runner)
     if timeout_s < 1:
         t.over_budget.append(name.copy())
         return False
-    var spec = _spec_within(render_targets_argv(arts, name), req, req.log_dir + String("/") + name, timeout_s)
+    var spec = affected_spec(render_targets_argv(arts, name), req, req.log_dir + String("/") + name, timeout_s)
     print(String("BUILD step: building unit ") + name + String(": ") + spec.command_line(), file=_STDERR)
     var r: RunResult
     try:
@@ -231,7 +234,6 @@ def _run_unit[R: ProcessRunner](
     except e:
         t.cannot = String("unit '") + name + String("': the build could not be started: ") + String(e)
         return True
-    t.spent_ns += r.elapsed_ns
     if r.ok():
         t.proven.append(name.copy())
         return True
@@ -251,7 +253,7 @@ def _run_batch[R: ProcessRunner](
     req: BuildRequest, arts: Artifacts, group: List[String], k: Int, mut runner: R, mut t: _Tally
 ) raises:
     """Batch `k` over `group` (file header, steps 2 and 3)."""
-    var timeout_s = _next_timeout(req, t)
+    var timeout_s = budget_timeout_s(req, runner)
     if timeout_s < 1:
         for i in range(len(group)):
             t.over_budget.append(group[i].copy())
@@ -260,7 +262,7 @@ def _run_batch[R: ProcessRunner](
     var base = req.log_dir + String("/_batch_") + String(k)
     var argv_path = base + String(".argv")
     _write_argv(argv_path, argv)
-    var spec = _spec_within(argv, req, base, timeout_s)
+    var spec = affected_spec(argv, req, base, timeout_s)
     var command_len = _command_len(arts, group[0])
     var shown = _shown(argv, command_len)
     var more = len(argv) - command_len - _SHOWN_TARGETS
@@ -280,7 +282,6 @@ def _run_batch[R: ProcessRunner](
     except e:
         t.cannot = tag + String(" (") + n + String(": ") + _names(group) + String("): the build could not be started: ") + String(e)
         return
-    t.spent_ns += r.elapsed_ns
     if r.ok():
         for i in range(len(group)):
             t.proven.append(group[i].copy())

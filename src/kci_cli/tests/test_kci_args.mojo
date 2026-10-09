@@ -367,6 +367,10 @@ def test_build_budget_is_the_per_change_check_s() raises:
     _refused(_pr("--build-budget-s", "0"), String("--build-budget-s '0' is not a positive decimal integer"))
     _refused(_pr("--build-budget-s", "-12"), String("--build-budget-s '-12' is not a positive decimal integer"))
     _refused(_pr("--build-budget-s", "60", "--build-budget-s", "61"), String("--build-budget-s is given twice"))
+    # at most a week, so the deadline arithmetic stays far inside an Int
+    assert_equal(parse_kci_args(_pr("--build-budget-s", "604800")).build_budget_s, 604800)
+    _refused(_pr("--build-budget-s", "604801"), String("--build-budget-s '604801' is more than 604800 (a week)"))
+    _refused(_pr("--build-budget-s", "999999999"), String("is more than 604800"))
     # a release build has no budget to share: refused, never silently ignored
     _refused(
         _run("--work-dir", "/w", "--log-dir", "/l", "--build-budget-s", "60"),

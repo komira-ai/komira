@@ -293,8 +293,15 @@ def test_pr_yml_agrees_with_the_machine_file() raises:
         var r = doc.child(steps[i], String("run"))
         if r >= 0 and doc.kind(r) == NODE_SCALAR and len(kci_run_calls(doc.text(r))) > 0:
             var t = doc.text(r)
+            # a missing deadline file stops the step before the arithmetic
+            # (which would read it as 0: a huge negative budget)
             assert_true(
-                t.startswith(String('budget_s=$(( $(cat "$RUNNER_TEMP/job_deadline_s") - $(date +%s) ))\n')), t
+                t.startswith(
+                    String('[ -s "$RUNNER_TEMP/job_deadline_s" ] || { echo "::error::no job deadline in ')
+                    + String("\\$RUNNER_TEMP/job_deadline_s: the job's first step did not write it\"; exit 1; }\n")
+                    + String('budget_s=$(( $(cat "$RUNNER_TEMP/job_deadline_s") - $(date +%s) ))\n')
+                ),
+                t,
             )
             assert_true(t.find(String(' --build-budget-s "$budget_s" ')) >= 0, t)
             budgeted += 1

@@ -878,29 +878,35 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
   (`KCI-E-CANNOT-TELL`) even when a unit has already failed.
 
 **The build budget** (`--build-budget-s <n>`, accepted only with
-`--affected-by`): the seconds the build of the units may take in all. Every
-run of it (a batch, a unit alone, a retry) gets the smaller of
-`--build-timeout-s` and the whole seconds the earlier runs left, measured
-from each run's start to its exit. A run with less than one second left is
-not started: its units, and those of every later run, are listed as
-`BUILD step: U of N unit(s) not built: the build budget (--build-budget-s
-B) was spent before their run could start: ...`, which is FAILED
-(`KCI-E-BUILD-FAILED`), never a pass, and the units earlier runs built keep
-their `BUILT` lines. A batch whose retries ran out of budget is not called
-interference. The affected commands asked before the build are not charged
-to the budget; each has its own `--build-timeout-s`. Without the flag, each
-run has its `--build-timeout-s` and there is no total.
+`--affected-by`, at most 604800, a week): the seconds the per-change check
+may take, counted from kci's own start on the monotonic clock
+(`CLOCK_MONOTONIC`), so everything kci does first (the workflow check, the
+git reads, the derive and affected commands) is charged to it. Every run
+(each derive and affected command, a batch, a unit alone, a retry) gets the
+smaller of `--build-timeout-s` and the whole seconds left until the deadline,
+read just before it starts; a run that passed, failed or timed out is
+charged alike. A run with less than one second left is not started. A
+derive or affected command not started makes the step INDETERMINATE
+(`KCI-E-AFFECTED`: kci cannot tell what the change reaches). A build run not
+started lists its units, and those of every later run, as `BUILD step: U of
+N unit(s) not built: the build budget (--build-budget-s B) was spent before
+their run could start: ...`, which is FAILED (`KCI-E-BUILD-FAILED`), never
+a pass; the units earlier runs built keep their `BUILT` lines. A batch whose
+retries ran out of budget is not called interference. Without the flag,
+each run has its `--build-timeout-s` and there is no total.
 
 `pr.yml` passes the time its job has left: its first step writes the job's
 deadline, 115 of the job's 120 minutes (`timeout-minutes`), and the
-`kci run` step passes the seconds left until it. The time `build kci` took is
-therefore not taken from a wide change's build, and kci still reports which
-units it did not build about 5 minutes before GitHub would cancel the job
-(the steps after kci take seconds). `build kci` itself takes from seconds
-(a cached kci) to most of an hour (a change to kci or to what it depends on),
-so a fixed per-batch number either wasted the job's time or overran it.
-The welded test `src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds
-`pr.yml` to these steps and numbers.
+`kci run` step stops with an error if that file is missing, then passes the
+seconds left until it. The time `build kci` took is therefore not taken from
+a wide change's build, and kci reports which units it did not build about 5
+minutes before GitHub would cancel the job (kci's own last seconds of
+writing its result, and the steps after kci, which take seconds, fall in
+those 5 minutes). `build kci` itself takes from seconds (a cached kci) to most
+of an hour (a change to kci or to what it depends on), so a fixed per-batch
+number either wasted the job's time or overran it. The welded test
+`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds `pr.yml` to these
+steps and numbers.
 
 Whatever the outcome, a `BUILT <unit>` line names exactly the units a
 successful run covered. The result document's `affected_by.units` is the set
