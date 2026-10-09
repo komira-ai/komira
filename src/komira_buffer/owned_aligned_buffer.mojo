@@ -849,7 +849,7 @@ struct OwnedAlignedBuffer(
         if keep > 0:
             unsafe_memcpy(dest=aligned, src=self._ptr, count=keep)
         # Zero tail padding (deterministic SIMD over-read)
-        if padded_size > keep:  # cov: unreachable keep is _length <= the old _capacity < min_size <= padded_size, so the comparison is never False
+        if padded_size > keep:  # cov: unreachable keep is _length, which the set_length precondition (length <= capacity) holds <= the old _capacity < min_size <= padded_size, so the comparison is never False
             unsafe_memset(aligned + keep, 0, padded_size - keep)
 
         # ★★ THIS LINE IS LOAD-BEARING. IT IS NOT DEAD CODE. DO NOT DELETE IT.

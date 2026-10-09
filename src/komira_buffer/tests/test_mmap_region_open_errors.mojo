@@ -10,6 +10,7 @@ from std.os.path import exists
 from std.tempfile import mkdtemp
 from std.testing import TestSuite, assert_equal, assert_true
 
+from komira_buffer.file_identity import FileIdentity
 from komira_buffer.mmap_region import MmapRegion
 
 
@@ -48,7 +49,8 @@ def test_zero_length_file_is_refused() raises:
 
 def test_directory_fails_at_mmap() raises:
     """A directory opens read-only and has a non-zero size (it holds an
-    entry), but cannot be mapped: the refusal is the mmap one, naming the
+    entry; checked first, since that depends on the filesystem), but cannot
+    be mapped: the refusal is the mmap one, naming the
     path, and nothing is counted."""
     var dir = mkdtemp()
     var sub = dir + "/d"
@@ -56,6 +58,19 @@ def test_directory_fails_at_mmap() raises:
     try:
         mkdir(sub)
         _write(inner, "x")
+        # The test reaches the mmap refusal only if the directory's st_size
+        # is non-zero (ext4, xfs, btrfs and tmpfs report one for a directory
+        # with an entry). A filesystem reporting 0 would take the zero-length
+        # refusal instead; say so here rather than fail on the message below.
+        var dir_size = FileIdentity.stat_path(sub).size
+        assert_true(
+            dir_size > 0,
+            "precondition: this filesystem reports st_size "
+            + String(dir_size)
+            + " for a directory with an entry, so open_readonly refuses it"
+            " as zero-length before mmap; run the test on a filesystem that"
+            " reports a directory size",
+        )
         var before = MmapRegion.whole_file_map_count()
         var msg = _open_error(sub)
         assert_true("mmap() failed" in msg, msg)
