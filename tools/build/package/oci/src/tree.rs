@@ -107,24 +107,25 @@ fn copy_file(src: &Path, dest: &Path) -> Result<(), String> {
     chmod(dest, mode_for(&m))
 }
 
-fn copy_dir(src: &Path, dest: &Path) -> Result<usize, String> {
+/// Whether it copied any file.
+fn copy_dir(src: &Path, dest: &Path) -> Result<bool, String> {
     mkdir(dest)?;
     let mut names: Vec<_> = fs::read_dir(src).map_err(|e| format!("cannot read {}: {}", src.display(), e))?.map(|e| e.map(|e| e.file_name())).collect::<Result<_, _>>().map_err(|e| format!("cannot read {}: {}", src.display(), e))?;
     names.sort();
-    let mut files = 0;
+    let mut any = false;
     for n in names {
         let (s, d) = (src.join(&n), dest.join(&n));
         let m = fs::symlink_metadata(&s).map_err(|e| format!("cannot read {}: {}", s.display(), e))?;
         if m.is_dir() {
-            files += copy_dir(&s, &d)?;
+            any |= copy_dir(&s, &d)?;
         } else if m.is_file() {
             copy_file(&s, &d)?;
-            files += 1;
+            any = true;
         } else {
             return Err(format!("{}: not a regular file or directory", s.display()));
         }
     }
-    Ok(files)
+    Ok(any)
 }
 
 /// Lays the plan's places under `out`, a directory not yet there.
@@ -135,7 +136,7 @@ pub fn lay(out: &Path, plan: &Plan) -> Result<(), String> {
         mkdirs(out, rel.rsplit_once('/').map_or("", |(d, _)| d))?;
         let dest = out.join(rel);
         if p.bundle {
-            if copy_dir(Path::new(&p.src), &dest)? == 0 {
+            if !copy_dir(Path::new(&p.src), &dest)? {
                 return Err(format!("bundle {} holds no files", p.src));
             }
         } else {
@@ -221,6 +222,14 @@ mod tests {
         }
         assert_eq!(fs::read(out.join("opt/b/sub/f")).unwrap(), b"b/sub/f");
         assert!(lay(&out, &p).unwrap_err().starts_with(&format!("cannot create {}: ", out.display())));
+        // A bundle whose one file is in its first directory, an empty one
+        // after it: it holds a file all the same.
+        let src = d.join("nested");
+        fs::create_dir_all(src.join("a")).unwrap();
+        fs::create_dir_all(src.join("b")).unwrap();
+        fs::write(src.join("a/f"), b"f").unwrap();
+        lay(&d.join("out2"), &plan(vec![at("n/", &src, true)]).unwrap()).unwrap();
+        assert_eq!(fs::read(d.join("out2/n/a/f")).unwrap(), b"f");
     }
 
     #[test]
