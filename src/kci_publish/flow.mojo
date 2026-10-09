@@ -228,10 +228,10 @@ def _step0(req: PublishRequest) -> _Step0:
                 + String(": a release is published from the commit it was built from"),
             )
         if recorded.platform != req.platform:
-            return _Step0(
-                String(ERROR_PLATFORM_MISMATCH),
-                String("the release in '") + dir + String("' is for platform ") + recorded.platform
-                + String(", not this step's ") + req.platform,
+            return _Step0(  # cov: unreachable read_release_manifest refuses a platform kci does not release; only one is
+                String(ERROR_PLATFORM_MISMATCH),  # cov: unreachable read_release_manifest refuses a platform kci does not release; only one is
+                String("the release in '") + dir + String("' is for platform ") + recorded.platform  # cov: unreachable read_release_manifest refuses a platform kci does not release; only one is
+                + String(", not this step's ") + req.platform,  # cov: unreachable read_release_manifest refuses a platform kci does not release; only one is
             )
     var loaded: LoadedRelease
     try:
@@ -294,10 +294,10 @@ def _step0(req: PublishRequest) -> _Step0:
             + String(" runs in exactly that environment"),
         )
     if not credential and not (req.plan and channel.is_public()):
-        return _Step0(
-            String(ERROR_CREDENTIAL),
-            String("channel '") + channel.name
-            + String("' declares no credential for its CONDA repository, so it cannot be published to"),
+        return _Step0(  # cov: unreachable parse_channels_file refuses a repository with no credential
+            String(ERROR_CREDENTIAL),  # cov: unreachable parse_channels_file refuses a repository with no credential
+            String("channel '") + channel.name  # cov: unreachable parse_channels_file refuses a repository with no credential
+            + String("' declares no credential for its CONDA repository, so it cannot be published to"),  # cov: unreachable parse_channels_file refuses a repository with no credential
         )
     if req.plan and is_oidc and not channel.is_public():
         return _Step0(
@@ -333,7 +333,7 @@ def _base_report(p: PreparedRelease, req: PublishRequest) -> PublishReport:
     try:
         r.channel_path = prefix_dev_channel(p.targets[0].coordinate.repo)
     except:
-        r.channel_path = p.channel.name.copy()
+        r.channel_path = p.channel.name.copy()  # cov: unreachable step 0 resolved this repo through prefix_dev_channel already
     r.set_hash = p.loaded.set_hash()
     r.release_commit = p.release_version.commit.copy()
     r.plan = req.plan
@@ -416,8 +416,8 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
     try:
         host = repo_host(p.targets[0].coordinate.repo)
     except e:
-        base.stop(String(REASON_FAILED), String(ERROR_CHANNEL), String("PUBLISH step: ") + String(e))
-        return base^
+        base.stop(String(REASON_FAILED), String(ERROR_CHANNEL), String("PUBLISH step: ") + String(e))  # cov: unreachable step 0 read this repo_host already
+        return base^  # cov: unreachable step 0 read this repo_host already
     var public = p.channel.is_public()
     var is_oidc = Bool(p.credential) and p.credential.value().is_oidc_trusted_publishing()
     try:
@@ -485,7 +485,7 @@ def publish_flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: Worker
     try:
         record_publish_result(r, req.step_name, req.stage, req.revision_id, req.platform, result)
     except e:
-        r.lines.append(String("RESULT not recorded in the result document: ") + String(e))
+        r.lines.append(String("RESULT not recorded in the result document: ") + String(e))  # cov: unreachable step 0 holds every file to the release platform's subdir; every error id is kci_api's
     return r^
 
 
