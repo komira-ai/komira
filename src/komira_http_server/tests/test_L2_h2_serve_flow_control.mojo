@@ -15,11 +15,13 @@
 #   S  stream scope: a stream-window overrun, a PRIORITY of the wrong length
 #      (§6.3) or a zero WINDOW_UPDATE increment on a stream (§6.9) answered
 #      with GOAWAY instead of RST_STREAM; the connection-scoped exceptions
-#      (stream 0, inside a header block, an idle stream) answered with
-#      RST_STREAM; a reset stream left open or still sending its body.
+#      (stream 0, inside a header block, an idle stream, a WINDOW_UPDATE of
+#      the wrong length) answered with RST_STREAM; a reset stream left open
+#      or still sending its body.
 #   B  the buffered-body ceiling: a deferred request body allowed to grow
 #      without bound once the windows are credited back, or refused at the
-#      ceiling itself.
+#      ceiling itself; a ceiling per stream, which lets 50 concurrent
+#      streams buffer 50 times as much on one connection.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -409,15 +411,27 @@ def test_zero_increment_on_an_idle_stream_closes() raises:
     _assert_goaway_only(c.out(), PROTOCOL_ERROR)
 
 
-def test_priority_of_the_wrong_length_on_an_idle_stream_is_reset() raises:
-    """A 4-byte PRIORITY on idle stream 5: PRIORITY may name an idle stream,
-    so it is RST_STREAM(5, FRAME_SIZE_ERROR) and no stream is made."""
+def test_priority_of_the_wrong_length_on_an_idle_stream_closes() raises:
+    """A 4-byte PRIORITY on idle stream 5. RST_STREAM must not name an idle
+    stream (§6.4), and a PRIORITY leaves the stream idle (§5.1), so the
+    stream error is answered as a connection error (§5.4):
+    GOAWAY(FRAME_SIZE_ERROR), and no stream is made."""
     var c = _Client()
-    assert_true(c.send(_raw(FRAME_PRIORITY, UInt8(0), 5, _u32(UInt32(0)))))
-    var outs = c.out()
-    assert_equal(len(outs), 1)
-    _assert_rst(outs[0], 5, FRAME_SIZE_ERROR)
+    assert_false(c.send(_raw(FRAME_PRIORITY, UInt8(0), 5, _u32(UInt32(0)))))
+    _assert_goaway_only(c.out(), FRAME_SIZE_ERROR)
     assert_equal(c.h2.find_stream_idx(UInt32(5)), -1)
+
+
+def test_window_update_of_the_wrong_length_on_a_stream_closes() raises:
+    """A 5-byte WINDOW_UPDATE on open stream 1: a WINDOW_UPDATE whose length
+    is not 4 is a connection FRAME_SIZE_ERROR on any stream (§6.9), whatever
+    scope the frame decoder reports, so GOAWAY and no RST_STREAM."""
+    var c = _Client()
+    c.open(1)
+    var p = _u32(UInt32(1))
+    p.append(UInt8(0))
+    assert_false(c.send(_raw(FRAME_WINDOW_UPDATE, UInt8(0), 1, p)))
+    _assert_goaway_only(c.out(), FRAME_SIZE_ERROR)
 
 
 def test_zero_increment_on_a_finished_stream_is_reset() raises:
@@ -513,6 +527,33 @@ def test_buffered_body_over_the_ceiling_is_answered_413() raises:
     assert_equal(c.state(1), Int(STREAM_STATE_CLOSED))
     assert_false(c.h2.streams[idx].has_pending_request)
     assert_equal(c.h2.find_pending_request_idx(UInt32(1)), -1)
+    assert_false(c.h2.is_goaway_sent())
+
+
+def test_buffered_bodies_share_one_connection_ceiling() raises:
+    """The ceiling bounds the request bodies buffered on the whole
+    connection, not each stream. Stream 1 holds the ceiling less 10 bytes;
+    4 more on stream 1 are kept, then 7 on stream 3 take the connection one
+    byte over: stream 3 is answered 413 + RST_STREAM(NO_ERROR) and stream 1
+    keeps its request."""
+    var c = _Client()
+    assert_true(c.send(c.request(1, "POST", "/up", "20000000")))
+    assert_true(c.send(c.request(3, "POST", "/up", "20000000")))
+    _ = c.out()
+    var idx1 = c.h2.find_stream_idx(UInt32(1))
+    c.h2.streams[idx1].recv_data_bytes = Int64(
+        H2_MAX_BUFFERED_REQUEST_BODY - 10
+    )
+    assert_true(c.send(_data(1, 4)))
+    assert_true(c.send(_data(3, 7)))
+    var outs = c.out()
+    assert_equal(len(outs), 2, "a 413 and an RST_STREAM on stream 3")
+    assert_equal(Int(outs[0].kind), Int(FRAME_HEADERS))
+    assert_equal(Int(outs[0].sid), 3)
+    _assert_rst(outs[1], 3, NO_ERROR)
+    assert_equal(c.h2.find_pending_request_idx(UInt32(3)), -1)
+    assert_true(c.h2.streams[idx1].has_pending_request)
+    assert_true(c.h2.find_pending_request_idx(UInt32(1)) >= 0)
     assert_false(c.h2.is_goaway_sent())
 
 

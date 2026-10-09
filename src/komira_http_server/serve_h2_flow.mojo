@@ -14,6 +14,8 @@
 #   * `_answer_stream_decode_error`: a decode error the frame decoder scoped
 #     to one stream (a PRIORITY of the wrong length, §6.3; a zero WINDOW_UPDATE
 #     increment on a stream, §6.9) is a stream error, not a GOAWAY.
+#   * `_buffered_request_body_bytes`: the request body bytes buffered on the
+#     connection, which `H2_MAX_BUFFERED_REQUEST_BODY` bounds.
 #   * `_emit_goaway`: a connection error (§5.4.1).
 #
 # No pointer in any signature. No wildcard origin.
@@ -21,7 +23,9 @@
 
 from komira_http_core.codec.h2.connection_state import H2ConnectionState
 from komira_http_core.codec.h2.frame import (
+    FRAME_PRIORITY,
     FRAME_WINDOW_UPDATE,
+    H2_ERR_FRAME_SIZE_ERROR,
     H2_ERR_PROTOCOL_ERROR,
     encode_goaway_frame,
     encode_rst_stream_frame,
@@ -35,11 +39,29 @@ from komira_http_core.codec.h2.stream import (
 
 
 comptime H2_MAX_BUFFERED_REQUEST_BODY: Int = 10 * 1024 * 1024
-"""Ceiling on the request body the server buffers for one deferred request
-(one whose dispatch waits for END_STREAM: a declared content-length or a gRPC
-call). The same 10 MiB as the h1 codec's default `max_body_bytes`. Crediting
-the receive windows back (`_credit_recv_windows`) removes the accidental
-65,535-byte bound the windows used to impose, so this is now the bound."""
+"""Ceiling on the request body bytes the server buffers on one connection,
+summed over every deferred request (one whose dispatch waits for END_STREAM:
+a declared content-length or a gRPC call). The same 10 MiB as the h1 codec's
+default `max_body_bytes`, which an h1 connection buffers at most once.
+Crediting the receive windows back (`_credit_recv_windows`) removes the
+accidental 65,535-byte bound the connection window used to impose, so this
+is now the bound. It is per connection, not per stream: per stream it would
+allow MAX_CONCURRENT_STREAMS times as much on one connection. The DATA frame
+that would take the total over it is refused on its own stream (413, then
+RST_STREAM(NO_ERROR)); the other streams keep their bodies."""
+
+
+def _buffered_request_body_bytes(h2: H2ConnectionState) -> Int64:
+    """The request body bytes buffered on the connection: the DATA payload
+    received so far on every stream that still holds a deferred request
+    (`recv_data_bytes`, which the serve loop appends to that request's body
+    as it counts it). Streams number at most the advertised
+    MAX_CONCURRENT_STREAMS, so the scan is short."""
+    var total = Int64(0)
+    for i in range(len(h2.streams)):
+        if h2.streams[i].has_pending_request:
+            total += h2.streams[i].recv_data_bytes
+    return total
 
 
 def _emit_goaway(
@@ -146,25 +168,43 @@ def _answer_stream_decode_error(
     already skipped the frame's bytes). Returns False when the connection
     must close (a GOAWAY is queued).
 
-    It is a stream error (RFC 9113 §5.4.2): RST_STREAM(`error_code`) and the
-    connection carries on, except in three cases that are connection errors:
+    Only two faults are stream errors (RFC 9113 §5.4.2), answered with
+    RST_STREAM(`error_code`) while the connection carries on: a PRIORITY of
+    the wrong length (FRAME_SIZE_ERROR, §6.3) and a zero WINDOW_UPDATE
+    increment (PROTOCOL_ERROR, §6.9). Everything else is a connection error,
+    a GOAWAY:
       * stream 0: there is no stream to reset, so the decoder's code goes in
         a GOAWAY;
       * inside a header block: only CONTINUATION may follow HEADERS without
         END_HEADERS (§6.10), so PROTOCOL_ERROR;
-      * a WINDOW_UPDATE on an idle stream: PROTOCOL_ERROR (§5.1), the same
-        answer a well-formed WINDOW_UPDATE on an idle stream gets."""
+      * any other fault the decoder scoped to a stream, with the decoder's
+        code. A WINDOW_UPDATE whose length is not 4 is the case in point: it
+        is a connection FRAME_SIZE_ERROR on any stream (§6.9). This server
+        keeps that answer whatever scope the decoder reports for it;
+      * an idle stream (never opened: absent and at or above
+        `next_expected_stream_id`), with the decoder's code. RST_STREAM must
+        not name an idle stream (§6.4), and neither PRIORITY nor a refused
+        WINDOW_UPDATE opens it (§5.1), so the stream error is treated as a
+        connection error, which §5.4 allows. For a zero increment the code is
+        PROTOCOL_ERROR, the answer any WINDOW_UPDATE on an idle stream gets
+        (§5.1)."""
     if stream_id == UInt32(0):
         _emit_goaway(h2, error_code)
         return False
     if h2.cont_reasm_stream_id != UInt32(0):
         _emit_goaway(h2, H2_ERR_PROTOCOL_ERROR)
         return False
-    if kind == FRAME_WINDOW_UPDATE and (
+    var stream_fault = (
+        kind == FRAME_PRIORITY and error_code == H2_ERR_FRAME_SIZE_ERROR
+    ) or (kind == FRAME_WINDOW_UPDATE and error_code == H2_ERR_PROTOCOL_ERROR)
+    if not stream_fault:
+        _emit_goaway(h2, error_code)
+        return False
+    if (
         h2.find_stream_idx(stream_id) < 0
         and stream_id >= h2.next_expected_stream_id
     ):
-        _emit_goaway(h2, H2_ERR_PROTOCOL_ERROR)
+        _emit_goaway(h2, error_code)
         return False
     _reset_stream(h2, stream_id, error_code)
     return True

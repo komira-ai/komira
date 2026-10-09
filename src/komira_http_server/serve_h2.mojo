@@ -137,6 +137,7 @@ from komira_http_server.connection import (
 from komira_http_server.serve_h2_flow import (
     H2_MAX_BUFFERED_REQUEST_BODY,
     _answer_stream_decode_error,
+    _buffered_request_body_bytes,
     _credit_recv_windows,
     _emit_goaway,
     _reset_stream,
@@ -573,10 +574,11 @@ def _dispatch_h2_frames[
                     + Int64(data_payload_len)
                 )
                 if h2.streams[idx_post].has_pending_request and (
-                    h2.streams[idx_post].recv_data_bytes
+                    _buffered_request_body_bytes(h2)
                     > Int64(H2_MAX_BUFFERED_REQUEST_BODY)
                 ):
-                    # The body outgrew what the server buffers. Answer
+                    # The connection's buffered bodies outgrew what the
+                    # server buffers; this frame's stream gives way. Answer
                     # 413 and end the upload with RST_STREAM(NO_ERROR),
                     # which RFC 9113 §8.1 provides for a response sent
                     # before the request is complete.
