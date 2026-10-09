@@ -25,4 +25,7 @@ def f() -> String:
     '''
     var a = "from komira_plan_ir.physical_plan import SegmentDescPod"
     var b = String("import komira_plan_ir.physical_plan")
-    return a + b
+    var c = 'komira_plan_ir.physical_plan.X # "'
+    var d = komira_plan_ir.physical_planner.f()  # komira_plan_ir.physical_plan.X
+    var e = x.komira_plan_ir.physical_plan
+    return a + b + c

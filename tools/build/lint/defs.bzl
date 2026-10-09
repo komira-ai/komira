@@ -162,7 +162,7 @@ def _dotted_komira_module(m):
 
 mojo_deps_rule = rule(
     impl = _mojo_deps_impl,
-    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed. `refused_imports` names dotted modules (`komira_x.y`) that no file in `srcs` may import, nor any module under them: a layering rule finer than a target's deps.",
+    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed. `refused_imports` names dotted modules (`komira_x.y`) that no file in `srcs` may import, nor any module under them, nor name by their dotted path outside an import: a layering rule finer than a target's deps.",
     attrs = _COMMON | {
         "buck": attrs.source(),
         "refused_imports": attrs.list(attrs.string(), default = []),

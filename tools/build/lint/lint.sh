@@ -49,9 +49,10 @@
 #       a library source importing a test_deps package passes here and fails
 #       its compile. <refused> is `-` or a comma-separated list of dotted
 #       module names (`komira_x.y`) that no .mojo file may import, nor any
-#       module under one; refused_imports.awk, the reader, says which import
-#       forms it reads and which text it misreads. A module of a dep can be
-#       refused while the dep itself stays declared.
+#       module under one, nor name by its dotted path outside an import;
+#       refused_imports.awk, the reader, says which forms it reads and what
+#       it misreads. A module of a dep can be refused while the dep itself
+#       stays declared.
 #   kind "retired_names", args <tree> <prefix of tree> <name>... -- <file>...
 #       No file under <tree> (the cell's doc_tree, findings named <prefix of
 #       tree><path>) and no <file> holds a <name> (a fixed string) on a line

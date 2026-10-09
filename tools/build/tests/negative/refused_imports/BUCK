@@ -1,7 +1,8 @@
 load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 
 # Test 54 (refused imports, mojo_deps), the half that must go red: one import
-# form per target, each in its own file (<name>.mojo). run_tests.sh requires
+# form per target, each in its own file (<name>.mojo); `qualified` is a
+# dotted reference without an import of the module. run_tests.sh requires
 # each to fail naming exactly its one finding.
 _REFUSED = [
     "komira_plan_ir.physical_plan",
@@ -28,9 +29,12 @@ _REFUSED = [
         "indented",
         "paren_comment_close",
         "paren_comment_open",
+        "mixed_triple_quotes",
         "parenthesised",
+        "qualified",
         "semicolon",
         "semicolon_imports",
+        "triple_quote_in_string",
     ]
 ]
 

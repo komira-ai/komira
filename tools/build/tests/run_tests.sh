@@ -409,8 +409,10 @@
 #      (from M, from M.sub, from P import N, parentheses over lines with a
 #      parenthesis in a comment, import M, M as p, M.sub, an import list,
 #      `;` statements, a `\` continuation, an indented import, an import
-#      after a docstring), and an entry that is not a dotted komira_*
-#      module name is refused at analysis.
+#      after a docstring, after a docstring holding the other triple quote,
+#      after a triple quote inside a one-line string, a dotted reference
+#      with no import of the module), and an entry that is not a dotted
+#      komira_* module name is refused at analysis.
 set -uo pipefail
 
 umbrella=1
@@ -1483,9 +1485,12 @@ for want in \
     "indented|3: imports $P, a module this package refuses ($P)" \
     "paren_comment_close|4: imports $P, a module this package refuses ($P)" \
     "paren_comment_open|3: imports $P, a module this package refuses ($P)" \
+    "mixed_triple_quotes|5: imports $P, a module this package refuses ($P)" \
     "parenthesised|4: imports $P, a module this package refuses ($P)" \
+    "qualified|4: names $P, a module this package refuses ($P)" \
     "semicolon|2: imports $P, a module this package refuses ($P)" \
-    "semicolon_imports|2: imports $G, a module this package refuses ($G)"; do
+    "semicolon_imports|2: imports $G, a module this package refuses ($G)" \
+    "triple_quote_in_string|3: imports $P, a module this package refuses ($P)"; do
     t=${want%%|*}
     expect_red "refused_imports_$t" "$N/$t.mojo:${want#*|}" "$N:$t"
     n=$(grep -o "mojo_deps: [0-9]* finding line(s)" "$LOG/refused_imports_$t.log" | head -1)

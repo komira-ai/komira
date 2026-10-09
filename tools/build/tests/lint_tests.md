@@ -199,20 +199,22 @@ may import, nor any module under them, while the package that holds them
 stays a dep (komira_optimizer refuses the physical-plan modules of
 komira_plan_ir). The reader is
 [`refused_imports.awk`](../lint/refused_imports.awk), which says the import
-forms it reads and the text it misreads (it reads lines, not Mojo tokens).
+forms it reads and what it misreads (it reads characters, not Mojo tokens).
 [`functional/refused_imports:ok`](functional/refused_imports/BUCK) builds over
 [`near.mojo`](functional/refused_imports/near.mojo), which spells each refused
 module where it is not an import of it: in comments (one with a parenthesis
 inside an open import list), docstrings, string literals, longer module names
-(`physical_planner`, `physical_plan_x`) and a name imported from another
-module. Each target of
+(`physical_planner`, `physical_plan_x`, `x.<module>`) and a name imported
+from another module. Each target of
 [`negative/refused_imports`](negative/refused_imports/BUCK) holds one import
 form and must fail naming exactly its one finding: `from M`, `from M.sub`,
 `from P import N`, an import list over lines in parentheses (plain, with a
 parenthesis in the comment of its first line, with one in a name's comment),
 `import M`, `import M as p`, `import M.sub`, `import a, M`, statements split by
-`;`, a `\` continuation, an indented import and an import after a docstring
-that spells one. `bad_entry` names an entry that is not a dotted komira_*
+`;`, a `\` continuation, an indented import, an import after a docstring
+that spells one, after a `"""` docstring holding `'''`, after `'"""'` (a triple
+quote inside a one-line string), and a dotted reference
+(`komira_x.y.Z()`) with no import of the module. `bad_entry` names an entry that is not a dotted komira_*
 module name and is refused at analysis.
 
 ```sh

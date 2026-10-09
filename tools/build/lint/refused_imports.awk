@@ -9,18 +9,23 @@
 # `M_x`): `import M` (with `as p` or not, in a comma list or not),
 # `from M import ...`, and `from P import N` where P.N is refused, the names
 # on the line or inside parentheses over any number of lines. A from-import
-# of a refused module is one finding, whatever it names.
+# of a refused module is one finding, whatever it names. A statement that
+# is no import and names a refused module by its dotted path
+# (`komira_x.y.Z()` after `import komira_x`) is a finding too:
+# "<F>:<line>: names <name>, a module this package refuses (<name>)".
 #
-# Per line, in order: a line inside a triple-quoted string (""" or ''') is
-# skipped, and so is the line that opens one; the comment (`#` to the end)
-# is dropped; a line ending in `\` is joined with the next; the rest splits
-# on `;` into statements. A finding names the line where its statement
-# starts, or, inside parentheses, the line of the name.
+# Each line is first reduced to its code: string literals (one-line '...'
+# and "...", with backslash escapes, and triple-quoted strings over any
+# lines, closed only by the delimiter that opened them) and the comment
+# (`#` outside a string, to the end of the line) are removed. Then a code
+# line ending in `\` is joined with the next and the rest splits on `;`
+# into statements. A finding names the line where its statement starts,
+# or, inside parentheses, the line of the name.
 #
-# It reads text, not Mojo tokens. Misread, and not covered: a `#`, `;` or
-# triple quote inside a one-line string literal on a line that also imports,
-# and an import after a docstring that closes on the same line. A Mojo
-# tokenizer in a Zig tool is to replace this reader (#1175).
+# It reads characters, not Mojo tokens: a string prefix is an ordinary
+# character before the quote, and a one-line string left open at the end
+# of its line ends there. A Mojo tokenizer in a Zig tool is to replace
+# this reader (#1175).
 
 BEGIN { n = split(R, r, ",") }
 
@@ -31,6 +36,23 @@ function check(m, l,   i, hit) {
             hit = 1
         }
     return hit
+}
+
+# A dotted path of a refused module in the code of a statement that is no
+# import: not inside a longer name on either side (`x.M`, `M_x` are not it).
+function qualified(s, l,   i, t, p, b, a) {
+    for (i = 1; i <= n; i++) {
+        t = s
+        while ((p = index(t, r[i])) > 0) {
+            b = p > 1 ? substr(t, p - 1, 1) : ""
+            a = substr(t, p + length(r[i]), 1)
+            if (b !~ /[A-Za-z0-9_.]/ && a !~ /[A-Za-z0-9_]/) {
+                print F ":" l ": names " r[i] ", a module this package refuses (" r[i] ")"
+                break
+            }
+            t = substr(t, p + length(r[i]))
+        }
+    }
 }
 
 # The names of an import list (`a, b as c, (d)`), each prefixed with base.
@@ -60,21 +82,56 @@ function stmt(s, l,   m, rest) {
         rest = s
         sub(/^[ \t]*import[ \t]+/, "", rest)
         names(rest, "", l)
+    } else {
+        qualified(s, l)
     }
 }
 
+# The code of line s: strings become "" and the comment is dropped. tq
+# holds the delimiter of a triple-quoted string still open at the end of
+# the line before.
+function code(s,   out, i, len, c) {
+    out = ""
+    i = 1
+    len = length(s)
+    while (i <= len) {
+        if (tq != "") {
+            if (substr(s, i, 3) == tq) {
+                tq = ""
+                out = out "\"\""
+                i += 3
+            } else if (substr(s, i, 1) == "\\") {
+                i += 2
+            } else {
+                i++
+            }
+            continue
+        }
+        c = substr(s, i, 1)
+        if (c == "#") break
+        if (c == "\"" || c == "'") {
+            if (substr(s, i, 3) == c c c) {
+                tq = c c c
+                i += 3
+                continue
+            }
+            i++
+            while (i <= len && substr(s, i, 1) != c) {
+                if (substr(s, i, 1) == "\\") i++
+                i++
+            }
+            i++
+            out = out "\"\""
+            continue
+        }
+        out = out c
+        i++
+    }
+    return out
+}
+
 {
-    s = $0
-    q = gsub(/"""/, "&", s) + gsub(/'''/, "&", s)
-    if (doc) {
-        if (q % 2) doc = 0
-        next
-    }
-    if (q % 2) {
-        doc = 1
-        next
-    }
-    sub(/#.*$/, "", s)
+    s = code($0)
     l = NR
     if (cont) {
         s = held " " s
