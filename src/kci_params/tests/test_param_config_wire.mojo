@@ -222,6 +222,17 @@ def test_collect_refuses_lists_of_different_lengths() raises:
         contains="config key/value lists differ in length (2 vs 1)"
     ):
         _ = collect_app_params_from_config(keys, raws)
+    # The reverse direction: more values than keys must also refuse, not drop
+    # the extra value silently.
+    var one_key = List[String]()
+    one_key.append(app_param_config_key("a"))
+    var two_raws = List[String]()
+    two_raws.append("0|x")
+    two_raws.append("0|y")
+    with assert_raises(
+        contains="config key/value lists differ in length (1 vs 2)"
+    ):
+        _ = collect_app_params_from_config(one_key, two_raws)
 
 
 def test_collect_refuses_a_name_carried_twice() raises:
