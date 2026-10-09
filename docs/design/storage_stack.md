@@ -2,7 +2,7 @@
 
 Status: proposed, second revision. Nothing in this document is built, and no prototype of it has been run. The first revision proposed komira's own table layer (L3), with Iceberg metadata exported on request. This revision reverses that: **a durable komira table is a native Iceberg table, committed through the user's catalog.** komira keeps its own formats only where Iceberg cannot serve: sub-second hot tails, derived indexes, and a default catalog for users who have none. [Decisions](#decisions-for-the-maintainers-recommendation-first) lists what is withdrawn.
 
-Code citations are to `origin/main` at `2745b3096d`. Citations to PR #833 (`docs/design/data_graph_storage.md`, `docs/design/search_index_format.md`) are to branch `docs/search-format-kg` at `8f3e266b42`. Statements marked *(inferred)* are reasoning, not something read in code or documentation. Statements marked *(to confirm)* are vendor behaviour this document has not verified. Reader and catalog behaviour comes from vendor documentation, linked inline; it changes quickly, so re-check a row before relying on it.
+Code citations are to `main` as this pull request (#1134) was written. Citations to PR #833 (`docs/design/data_graph_storage.md`, `docs/design/search_index_format.md`) are to its branch `docs/search-format-kg` at the same time. Statements marked *(inferred)* are reasoning, not something read in code or documentation. Statements marked *(to confirm)* are vendor behaviour this document has not verified. Reader and catalog behaviour comes from vendor documentation, linked inline; it changes quickly, so re-check a row before relying on it.
 
 "Iceberg v4" below means the v4 draft: the spec says version 4 "is under active development and has not been formally adopted".
 
