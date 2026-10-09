@@ -36,8 +36,8 @@ comptime WEB_BODY = (
 )
 
 
-def _user() -> Principal:
-    return Principal(String("user-1")).with_claim(
+def _user() raises -> Principal:
+    return Principal(scheme=String("jwt"), subject=String("user-1")).with_claim(
         String("iss"), String("https://issuer.example")
     )
 
@@ -136,7 +136,9 @@ def test_no_subject_or_issuer_is_401() raises:
     var spy = port.share()
     var r1 = register_device_for(
         port,
-        Principal(String("")).with_claim(String("iss"), String("https://issuer.example")),
+        Principal(scheme=String("jwt"), subject=String("")).with_claim(
+            String("iss"), String("https://issuer.example")
+        ),
         String(WEB_BODY),
     )
     assert_equal(r1.status, 401)
@@ -146,7 +148,11 @@ def test_no_subject_or_issuer_is_401() raises:
             '{"error":{"code":"unauthenticated","message":"no verified subject"}}'
         ),
     )
-    var r2 = register_device_for(port, Principal(String("user-1")), String(WEB_BODY))
+    var r2 = register_device_for(
+        port,
+        Principal(scheme=String("jwt"), subject=String("user-1")),
+        String(WEB_BODY),
+    )
     assert_equal(r2.status, 401)
     assert_equal(
         r2.body,
