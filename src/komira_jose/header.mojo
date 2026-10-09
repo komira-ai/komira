@@ -138,14 +138,14 @@ def split_compact(token: String) raises -> JwsCompact:
     try:
         header_raw = base64_url_decode_nopad(_segment(token, 0, d1))
     except:
-        _refuse("the header segment is not base64url without padding")
-        return _unreachable()
+        raise Error(
+            "JoseError: the header segment is not base64url without padding"
+        )
     var header: JsonValue
     try:
         header = parse_json_bytes(header_raw, _JOSE_MAX_DEPTH)
     except:
-        _refuse("the header is not JSON")
-        return _unreachable()
+        raise Error("JoseError: the header is not JSON")
     if header.kind != JSON_OBJECT:
         _refuse("the header is not a JSON object")
     try:
@@ -161,10 +161,6 @@ def split_compact(token: String) raises -> JwsCompact:
         _segment(token, d2 + 1, n),
         header^,
     )
-
-
-def _unreachable() raises -> JwsCompact:
-    raise Error("JoseError: unreachable")
 
 
 def check_header(

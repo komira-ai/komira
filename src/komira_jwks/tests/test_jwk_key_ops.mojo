@@ -110,10 +110,15 @@ def test_key_ops_in_equality() raises:
     var b = Jwk.ed25519(Span(raw), key_ops=_ops("sign", "verify"))
     var c = Jwk.ed25519(Span(raw))
     var d = Jwk.ed25519(Span(raw), key_ops=_ops("verify", "sign"))
+    var one = List[String]()
+    one.append("verify")
+    var shorter = Jwk.ed25519(Span(raw), key_ops=one^)
     assert_true(a != b, "key_ops order ignored by ==")
     assert_true(a != c, "a present key_ops equal to an absent one")
     assert_true(c != a, "an absent key_ops equal to a present one")
     assert_true(a == d)
+    assert_true(a != shorter, "a key_ops prefix compared equal")
+    assert_true(shorter != a, "a key_ops prefix compared equal")
 
 
 def main() raises:

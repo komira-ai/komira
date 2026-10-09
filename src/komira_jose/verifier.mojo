@@ -280,8 +280,9 @@ struct JwsVerifier(Copyable, Movable):
         try:
             sig = base64_url_decode_nopad(c.signature_b64)
         except:
-            _refuse("the signature segment is not base64url without padding")
-            return _unreachable()
+            raise Error(
+                "JoseError: the signature segment is not base64url without padding"
+            )
         if len(sig) != _signature_length(self._alg, key):
             _refuse("the signature has the wrong length")
         if not _signature_verifies(self._alg, key, c.signing_input, sig):
@@ -290,12 +291,9 @@ struct JwsVerifier(Copyable, Movable):
         try:
             payload = base64_url_decode_nopad(c.payload_b64)
         except:
-            _refuse("the payload segment is not base64url without padding")
-            return _unreachable()
+            raise Error(
+                "JoseError: the payload segment is not base64url without padding"
+            )
         return VerifiedJws(
             self._alg.copy(), kid^, header_string(c.header, "typ"), payload^
         )
-
-
-def _unreachable() raises -> VerifiedJws:
-    raise Error("JoseError: unreachable")

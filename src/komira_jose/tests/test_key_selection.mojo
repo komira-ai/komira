@@ -18,6 +18,7 @@ from komira_encoding import base64_url_decode_nopad, base64_url_encode_nopad
 from komira_jose import JwsVerifier
 from komira_jwks import Jwk, JwkSet, parse_jwk_set
 from komira_jwks.jwk import _JwkParts
+from komira_jose.verifier import _signature_verifies, key_refusal
 
 
 comptime SEED = "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"
@@ -296,6 +297,19 @@ def test_rs256_signature_length_is_the_modulus_length() raises:
     )
 
 
+def test_internal_arms_refuse_an_unknown_algorithm() raises:
+    # Catches: a signature or key check that answers yes for an algorithm
+    # outside the three. The constructors admit only the three, so these
+    # arms are reached only directly.
+    var x = base64_url_decode_nopad(X)
+    var key = Jwk.ed25519(Span(x))
+    var si = List[UInt8]()
+    si.append(46)
+    assert_equal(_signature_verifies("HS256", key, si, _bytes(64, 0)), False)
+    assert_equal(_signature_verifies("", key, si, _bytes(64, 0)), False)
+    assert_equal(key_refusal(key, "HS256"), "the key does not suit the pinned algorithm")
+
+
 def main() raises:
     var failures = String("")
     try:
@@ -338,6 +352,10 @@ def main() raises:
         test_rs256_signature_length_is_the_modulus_length()
     except e:
         failures += String("test_rs256_signature_length_is_the_modulus_length: ") + String(e) + "\n"
+    try:
+        test_internal_arms_refuse_an_unknown_algorithm()
+    except e:
+        failures += String("test_internal_arms_refuse_an_unknown_algorithm: ") + String(e) + "\n"
     if failures != "":
         print(failures)
         raise Error("test_key_selection: FAILED\n" + failures)

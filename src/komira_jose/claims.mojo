@@ -194,8 +194,9 @@ def _int_claim(obj: JsonValue, name: String) raises -> Optional[Int64]:
             return Optional[Int64](parse_int64_text(v.text))
         except:
             pass
-    _refuse(String("claim ") + name + " is not a non-negative integer")
-    return Optional[Int64]()
+    raise Error(
+        String("JoseError: claim ") + name + " is not a non-negative integer"
+    )
 
 
 def _required_int(obj: JsonValue, name: String) raises -> Int64:
@@ -236,8 +237,7 @@ def verify_jwt(
     try:
         claims = parse_json_bytes(jws.payload(), _JOSE_PAYLOAD_MAX_DEPTH)
     except:
-        _refuse("the payload is not JSON")
-        return _unreachable()
+        raise Error("JoseError: the payload is not JSON")
     if claims.kind != JSON_OBJECT:
         _refuse("the payload is not a JSON object")
     try:
@@ -277,7 +277,3 @@ def verify_jwt(
         nbf=nbf,
         claims=claims^,
     )
-
-
-def _unreachable() raises -> VerifiedJwt:
-    raise Error("JoseError: unreachable")
