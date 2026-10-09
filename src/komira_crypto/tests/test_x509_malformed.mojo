@@ -269,8 +269,8 @@ def test_directory_string_refusals() raises:
         "DirectoryString: non-universal class", "context-class value",
     )
     _refused(
-        _wrap(_default_tbs_with_subject(_name_with(_str(0x1E, "xx")))),
-        "DirectoryString: unsupported string type", "BMPString value",
+        _wrap(_default_tbs_with_subject(_name_with(_str(0x04, "x")))),
+        "DirectoryString: unsupported string type", "OCTET STRING value (not a DirectoryString type)",
     )
 
 

@@ -221,7 +221,7 @@ def _rfc6979_generate_k_bytes(
         if _is_in_range_1_to_n_minus_1(v):
             return v^
         # Retry: K = HMAC_K(V || 0x00); V = HMAC_K(V)
-        var msg_retry = Array[UInt8, 33](fill=UInt8(0))  # cov: unreachable a candidate k of 0 or >= n has probability below 2^-32 for P-256; no input is known to give one
+        var msg_retry = Array[UInt8, 33](fill=UInt8(0))  # cov: unreachable a candidate k of 0 or >= n has probability about 2^-32 for P-256; reachable only through an offline search over about 2^32 digests, which has not been done
         for i in range(32):  # cov: unreachable see the line above
             msg_retry[i] = v[i]  # cov: unreachable see the line above
         msg_retry[32] = UInt8(0x00)  # cov: unreachable see the line above

@@ -274,7 +274,7 @@ def _evp_md_for_kind(
             "komira_awslc_EVP_sha512",
             _FfiHandle,
         ]()
-    return _ffi_null()  # cov: unreachable both callers pass a kind rsa_pss_verify_ffi checked at entry
+    return _ffi_null()  # cov: unreachable the only caller, rsa_pss_verify_ffi, checks md_kind at entry
 
 
 # -----------------------------------------------------------------------------

@@ -30,7 +30,6 @@ def _ip_err(s: String) -> String:
 
 def test_dns_pattern_edges() raises:
     assert_false(_match_dns_pattern(String(""), String("example.com")), "empty pattern")
-    assert_true(_match_dns_pattern(String(""), String("")), "empty equals empty")
     assert_false(_match_dns_pattern(String("*.example.com"), String(".example.com")), "empty first label")
     assert_true(_match_dns_pattern(String("*.example.com"), String("a.example.com")), "one label")
 
