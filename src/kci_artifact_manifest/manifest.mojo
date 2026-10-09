@@ -5,7 +5,7 @@
 #
 #   {"format": "kci.artifact_manifest",  the format (kci_api's table)
 #    "schema_version": 1,                 its major (an integer)
-#    "artifact_type": "CONDA",            CONDA or PYTHON
+#    "artifact_type": "CONDA",            CONDA, PYTHON or OCI
 #    "name": "example-pkg",               the package name
 #    "version": "1.2.3",
 #    "platform": "linux-x86_64",          kci_api's platform table
@@ -15,6 +15,13 @@
 #    "sha256": "<64 hex>",                the file's sha256, as built
 #    "metadata": "METADATA"}              PYTHON: the wheel's METADATA
 #                                         CONDA: the build's metadata.json
+#
+# An OCI artifact is an image: `file` is its OCI image layout DIRECTORY and
+# `sha256` is the hex of its image manifest digest (the `sha256:<hex>` the
+# layout's index.json names), not a hash of a file. It has no `metadata` and
+# no `subdir`: the layout describes itself. `OCI` is the one word for an
+# image (kci_release_channel's `ARTIFACT_TYPE_OCI`); the older spellings
+# `OCI_IMAGE` and `oci-image` are refused like any other unknown type.
 #
 # `format` and `schema_version` are read first (kci_api's
 # `produced_header`): another format, or a major this kci does not read, is
@@ -26,7 +33,7 @@
 # the package build writes it inside a cached build action, and a per-run
 # value would make every run a cache miss and the bytes differ per run.
 #
-# `metadata` is required for both artifact types. `file` and `metadata` are
+# `metadata` is required for CONDA and PYTHON. `file` and `metadata` are
 # paths; a relative one is relative to the directory holding the manifest.
 # A CONDA `metadata` is a bare file name: the file sits next to the
 # manifest, so copying the manifest's directory (as the BUILD step does)
@@ -52,7 +59,7 @@ from kci_api import (
     produced_header,
     require_artifact_platform,
 )
-from kci_release_channel import ARTIFACT_TYPE_CONDA, ARTIFACT_TYPE_PYTHON
+from kci_release_channel import ARTIFACT_TYPE_CONDA, ARTIFACT_TYPE_OCI, ARTIFACT_TYPE_PYTHON
 
 
 struct ArtifactManifest(Copyable, Movable, Deinitable):
@@ -60,7 +67,10 @@ struct ArtifactManifest(Copyable, Movable, Deinitable):
 
     `file` and `metadata` are the paths as written in the manifest;
     `file_path` and `metadata_path` are the same paths resolved against the
-    manifest's directory. `source` names the manifest in every refusal.
+    manifest's directory. `source` names the manifest in every refusal. For
+    an OCI artifact `file_path` is the image layout directory, `sha256_hex`
+    the image manifest digest's hex, and `metadata`, `metadata_path` and
+    `subdir` are empty.
 
     Layout: owned Strings. No pointer field."""
 
@@ -258,6 +268,15 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
             _refuse(source, String("'subdir' belongs to a CONDA artifact"))
         m.metadata = _string_member(doc, String("metadata"), source)
         m.metadata_path = _resolve(base, m.metadata)
+    elif m.artifact_type == ARTIFACT_TYPE_OCI:
+        if doc.has(String("subdir")):
+            _refuse(source, String("'subdir' belongs to a CONDA artifact"))
+        if doc.has(String("metadata")):
+            _refuse(
+                source,
+                String("an OCI artifact has no 'metadata': its image layout")
+                + String(" describes itself"),
+            )
     else:
         _refuse(
             source,
@@ -265,7 +284,7 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
             + m.artifact_type
             # Names the PUBLISH step: `kci run --stage S` is the one verb
             # for stages.
-            + String("' is not published by the PUBLISH step (CONDA or PYTHON)"),
+            + String("' is not published by the PUBLISH step (CONDA, PYTHON or OCI)"),
         )
     return m^
 
@@ -287,8 +306,9 @@ def read_artifact_manifest(path: String) raises -> ArtifactManifest:
 
 def render_artifact_manifest(m: ArtifactManifest) raises -> String:
     """`m` as manifest text: compact JSON, keys in the header's order, with
-    `file` and `metadata` as written (not resolved), at this kci's major.
-    Parsing the result at the same path gives back `m`."""
+    `file` and `metadata` as written (not resolved), at this kci's major. An
+    OCI manifest has no `metadata` key (file header). Parsing the result at
+    the same path gives back `m`."""
     var doc = JsonValue.empty_object()
     doc.set_member(String("format"), JsonValue.from_string(String(FORMAT_ARTIFACT_MANIFEST)))
     doc.set_member(
@@ -303,7 +323,8 @@ def render_artifact_manifest(m: ArtifactManifest) raises -> String:
         doc.set_member(String("subdir"), JsonValue.from_string(m.subdir.copy()))
     doc.set_member(String("file"), JsonValue.from_string(m.file.copy()))
     doc.set_member(String("sha256"), JsonValue.from_string(m.sha256_hex.copy()))
-    doc.set_member(String("metadata"), JsonValue.from_string(m.metadata.copy()))
+    if m.artifact_type != ARTIFACT_TYPE_OCI:
+        doc.set_member(String("metadata"), JsonValue.from_string(m.metadata.copy()))
     var text = doc.serialize() + String("\n")
     # The renderer checks its own output: a value the parser would refuse
     # (an empty name, a bad hash) is refused here, before anything is written.

@@ -97,6 +97,16 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   docker run --rm komira/hello:0.1.0
   ```
 
+  `[release]` is the image as a release set holds it: a directory with the
+  layout (`hello_image.oci/`) and kci's artifact manifest, `manifest.json`
+  (type `OCI`, name the bundle's program, `file` the layout directory,
+  `sha256` the hex of `[digest]`). A BUILD step copies it into the release
+  directory (`--out <release_dir>/<name>`), and kci's `verify_member` hashes
+  every blob of the layout and requires its manifest digest to be the
+  manifest's `sha256` (`src/kci_release_set`, which reads the real
+  `hello_image[release]` in a welded test). The program's name must be a kci
+  artifact name (`[a-z][a-z0-9_]*`), or building `[release]` fails naming it.
+
 The base image is `komira//tools/build/toolchains:distroless_base` (distroless base-debian12,
 which has glibc, CA certificates and no shell), declared with `oci_base`: the
 digest of its linux/amd64 manifest, that manifest's bytes checked in, and one

@@ -29,11 +29,14 @@ bundle_tarball(
 )
 
 # An OCI image: distroless base plus the bundle at /opt/hello/, entrypoint
-# /opt/hello/bin/hello. `[docker_archive]` is for `docker load`.
+# /opt/hello/bin/hello. `[docker_archive]` is for `docker load`. kci_release_set's
+# welded test reads `[release]` (the layout and its artifact manifest) with
+# `verify_member`, and `[digest]` to check the set hash carries that digest.
 oci_image(
     name = "hello_image",
     bundle = ":hello_bundle",
     repository = "komira/hello",
+    visibility = ["//src/kci_release_set:"],
 )
 
 # A package: `buck2 build` produces hellopkg.mojoc.

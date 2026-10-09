@@ -385,13 +385,64 @@ def _oci_image_impl(ctx):
         ),
         category = "komira_pack_oci",
     )
+
+    # [release]: the layout plus kci's artifact manifest, the directory a
+    # BUILD step copies into the release set (`--out <release_dir>/<name>`).
+    # The manifest is written from the digest komira_pack wrote, in the bytes
+    # kci's `render_artifact_manifest` writes (src/kci_artifact_manifest):
+    # type OCI, the bundle's program as the name, `file` the layout
+    # directory, `sha256` the image manifest digest's hex. kci's
+    # `verify_member` reads it back over the real hello_image
+    # (src/kci_release_set/tests/test_oci_member.mojo).
+    manifest = ctx.actions.declare_output(ctx.label.name + ".release_manifest.json")
+    ctx.actions.run(
+        busybox_sh(
+            ctx.attrs._busybox[DefaultInfo].default_outputs[0],
+            _OCI_RELEASE_MANIFEST,
+            manifest.as_output(),
+            digest,
+            b.name,
+            b.version,
+            b.platform,
+            layout.basename,
+        ),
+        category = "oci_release_manifest",
+    )
+    release = ctx.actions.copied_dir(ctx.label.name + ".release", {
+        "manifest.json": manifest,
+        layout.basename: layout,
+    })
     return [DefaultInfo(
         default_output = layout,
         sub_targets = {
             "digest": [DefaultInfo(default_output = digest)],
             "docker_archive": [DefaultInfo(default_output = archive)],
+            "release": [DefaultInfo(
+                default_output = release,
+                sub_targets = {"manifest": [DefaultInfo(default_output = manifest)]},
+            )],
         },
     )]
+
+# The artifact manifest of an image (`oci_image[release]`): compact JSON in the
+# key order of kci's `render_artifact_manifest`, one trailing newline. Refuses,
+# naming the reason, a digest that is not `sha256:<64 lowercase hex>` and a
+# program name that is not a kci artifact name ([a-z][a-z0-9_]*: the release
+# set keys members by it). The version and the layout's name are plain
+# (mojo_bundle and buck2 refuse anything else), so nothing needs escaping.
+_OCI_RELEASE_MANIFEST = """
+BB="$1"; OUT="$2"; DIGEST="$3"; NAME="$4"; VERSION="$5"; PLATFORM="$6"; FILE="$7"
+case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
+no() { echo "oci_image[release]: $*" >&2; exit 1; }
+d=$("$BB" cat "$DIGEST")
+hex="${d#sha256:}"
+[ "$d" = "sha256:$hex" ] && [ "${#hex}" = 64 ] || no "$DIGEST holds '$d', not sha256:<64 hex>"
+case "$hex" in *[!0-9a-f]*) no "$DIGEST holds '$d', not sha256:<64 lowercase hex>" ;; esac
+case "$NAME" in [a-z]*) ;; *) no "program '$NAME' is not a kci artifact name ([a-z][a-z0-9_]*)" ;; esac
+case "$NAME" in *[!a-z0-9_]*) no "program '$NAME' is not a kci artifact name ([a-z][a-z0-9_]*)" ;; esac
+printf '{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"OCI","name":"%s","version":"%s","platform":"%s","file":"%s","sha256":"%s"}\n' \
+    "$NAME" "$VERSION" "$PLATFORM" "$FILE" "$hex" > "$OUT"
+"""
 
 _oci_image = rule(
     impl = _oci_image_impl,
@@ -399,6 +450,7 @@ _oci_image = rule(
         "base": attrs.dep(providers = [OciBaseInfo], default = "komira//tools/build/toolchains:distroless_base"),
         "bundle": attrs.dep(providers = [BundleInfo]),
         "repository": attrs.string(),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
     },
 )
@@ -409,7 +461,11 @@ def oci_image(**kwargs):
     The default output is an OCI image layout directory (`index.json` names
     it `<repository>:<version>`). `[docker_archive]` is the same as one tar
     plus a Docker `manifest.json`, which `docker load` reads; `[digest]`
-    holds the manifest digest. Nothing is pushed.
+    holds the manifest digest. `[release]` is what a release set holds: the
+    layout and kci's artifact manifest (`manifest.json`: type OCI, name the
+    bundle's program, `file` the layout directory, `sha256` the hex of
+    `[digest]`); `[release][manifest]` is that manifest alone. Nothing is
+    pushed.
     """
     _oci_image(exec_compatible_with = LINUX_X86_64, **kwargs)
 

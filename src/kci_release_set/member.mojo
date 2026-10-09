@@ -26,10 +26,32 @@
 #     `metadata` (the release directory is exactly what will ship), or `file`
 #     or `metadata` is missing or is not a regular file (a symlink was
 #     already refused above, so "regular file" holds for links too);
-#   - `file` is EMPTY, or its sha256 is not the manifest's;
+#   - `file` is a directory (only an OCI member's file is one), is EMPTY,
+#     or its sha256 is not the manifest's;
 #   - CONDA: `metadata` does not parse (`read_conda_metadata`), or disagrees
 #     with the manifest (`name`, `version`, `subdir`, `file_name` = `file`), or
 #     its `size` is not the file's, or it is not `stamped`.
+#
+# AN OCI MEMBER (an image) is the one type whose `file` is a DIRECTORY: its
+# OCI image layout. Its manifest names no `metadata` (kci_artifact_manifest),
+# so the top level holds exactly `manifest.json` and the layout. After the
+# checks above that apply (the directory, the links, the one manifest, the
+# name, `file` a bare name and not `manifest.json`, nothing else at the top
+# level), it is refused when:
+#
+#   - `file` is missing, or is not a directory;
+#   - the layout does not verify: komira_oci's `read_oci_layout`, which reads
+#     `index.json` and the manifest and HASHES EVERY BLOB (config and layers)
+#     against the digest that names it; one flipped byte of a layer refuses;
+#   - the layout's image manifest digest is not `sha256:` + the manifest's
+#     `sha256`. That ties the bytes on disk to the release set: the set hash
+#     carries the manifest's `sha256` (set_hash.mojo), so a member that
+#     verifies holds exactly the image the set names.
+#
+# Inside the layout, `read_oci_layout` follows links: every byte it reads is
+# checked against a digest, so a link can only fail the check. An OCI
+# member's `size` is the sum of the image manifest's, the config's and the
+# layers' byte lengths.
 #
 # PYTHON is accepted as the manifest parser accepts it; the PUBLISH step refuses
 # to publish it.
@@ -38,7 +60,7 @@
 # =============================================================================
 
 from std.os import listdir
-from std.os.path import isdir, isfile, islink
+from std.os.path import exists, isdir, isfile, islink
 from std.pathlib import Path
 
 from komira_crypto import hex_lower_array_32, sha256
@@ -50,7 +72,8 @@ from kci_artifact import (
 )
 from kci_artifact_manifest import ArtifactManifest, read_artifact_manifest
 from kci_api import require_member_platform
-from kci_release_channel import ARTIFACT_TYPE_CONDA
+from kci_release_channel import ARTIFACT_TYPE_CONDA, ARTIFACT_TYPE_OCI
+from komira_oci import OciLayout, read_oci_layout
 
 from kci_release_set.conda_metadata import CondaMetadata, read_conda_metadata
 
@@ -58,7 +81,8 @@ from kci_release_set.conda_metadata import CondaMetadata, read_conda_metadata
 struct ReleaseMember(Copyable, Movable):
     """One verified artifact directory. `dir_name` is the directory's last
     path segment (the artifact's name); `conda` is meaningful only when
-    `has_conda` (a CONDA artifact); `size` is the file's size in bytes.
+    `has_conda` (a CONDA artifact); `size` is the file's size in bytes (for
+    an OCI member, the image's: manifest, config and layers).
 
     Layout: owned values only. No pointer field."""
 
@@ -170,6 +194,8 @@ def verify_member(artifact: String, dir: String) raises -> ReleaseMember:
     var m = read_artifact_manifest(base + String(KCI_MANIFEST_NAME))
     require_manifest_name(artifact, m.name)
     _bare(artifact, String("file"), m.file)
+    if m.artifact_type == ARTIFACT_TYPE_OCI:
+        return _verify_image(artifact, dir, base, listing, m)
     _bare(artifact, String("metadata"), m.metadata)
     if m.file == m.metadata:
         _refuse(
@@ -193,6 +219,14 @@ def verify_member(artifact: String, dir: String) raises -> ReleaseMember:
     var metadata_path = base + m.metadata
     # Every top-level entry was refused above if it was a symlink, so
     # `isfile` (which follows links) here means a regular file.
+    if isdir(file_path):
+        _refuse(
+            artifact,
+            String("its file '")
+            + m.file
+            + String("' is a directory: only an OCI member's file is a directory")
+            + String(" (its image layout)"),
+        )
     if not isfile(file_path):
         _refuse(artifact, String("its file '") + m.file + String("' is not in the directory"))
     if not isfile(metadata_path):
@@ -246,6 +280,58 @@ def verify_member(artifact: String, dir: String) raises -> ReleaseMember:
         member.has_conda = True
         member.conda = md^
     return member^
+
+
+def _verify_image(
+    artifact: String, dir: String, base: String, listing: List[String], m: ArtifactManifest
+) raises -> ReleaseMember:
+    """The OCI arm of `verify_member` (file header): `listing` is the
+    directory's top level, every entry already checked not to be a link."""
+    for i in range(len(listing)):
+        ref entry = listing[i]
+        if entry != KCI_MANIFEST_NAME and entry != m.file:
+            _refuse(
+                artifact,
+                String("the directory holds '")
+                + entry
+                + String("', which its manifest does not name; an OCI member holds exactly ")
+                + String(KCI_MANIFEST_NAME)
+                + String(" and the image layout"),
+            )
+    var layout_dir = base + m.file
+    if not exists(layout_dir):
+        _refuse(artifact, String("its file '") + m.file + String("' is not in the directory"))
+    if not isdir(layout_dir):
+        _refuse(
+            artifact,
+            String("its file '")
+            + m.file
+            + String("' is not a directory: an OCI member's file is its image layout"),
+        )
+    var layout: OciLayout
+    try:
+        layout = read_oci_layout(layout_dir)
+    except e:
+        _refuse(
+            artifact,
+            String("its image layout '") + m.file + String("' does not verify: ") + String(e),
+        )
+        return ReleaseMember(artifact.copy(), dir.copy(), m.copy(), 0)
+    var named = String("sha256:") + m.sha256_hex
+    if layout.manifest_digest != named:
+        _refuse(
+            artifact,
+            String("the image manifest digest of '")
+            + m.file
+            + String("' is ")
+            + layout.manifest_digest
+            + String(" but its manifest says ")
+            + named,
+        )
+    var size = len(layout.manifest_raw) + layout.config.size
+    for i in range(len(layout.layers)):
+        size += layout.layers[i].size
+    return ReleaseMember(artifact.copy(), dir.copy(), m.copy(), size)
 
 
 def member_platform(member: ReleaseMember, release_platform: String) raises -> String:
