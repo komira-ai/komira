@@ -25,8 +25,9 @@
 #            the same way (fewer actions in flight when the cap stops one, so
 #            less work is lost), and then all of them in one invocation, which
 #            finds the groups' actions in the cache and writes the report
-#            collect reads. A library of the
-#            ledger COVERAGE_NO_GATE has its gate at `<name>_cov_gate`.
+#            collect reads. A library with a `<name>_cov_gate` target
+#            (one of the ledger COVERAGE_NO_GATE, or one naming mojo_test
+#            targets in `coverage_tests`) has its gate there.
 #            --skip names libraries not to build, one `<label><TAB><why>` per
 #            line: one whose failing run outlasts the cap (a failed action is
 #            not cached, so it runs again in every invocation and no
@@ -359,15 +360,14 @@ done
 mkdir -p "$OUT"
 BB=$(./buck2 build komira//tools/build/toolchains:busybox --show-full-simple-output 2>/dev/null | tail -1)
 [ -x "$BB" ] || { echo "census.sh: cannot build the pinned busybox" >&2; exit 1; }
-NO_GATE=$("$BB" awk '/^COVERAGE_NO_GATE = \{/ { on = 1; next } on && /^\}/ { on = 0 } on && match($0, /"komira\/\/[^"]+"/) { print substr($0, RSTART + 1, RLENGTH - 2) }' tools/build/coverage/policy.bzl)
-
 target_of() { # label -> the target whose output is its gate's result
-    for g in $NO_GATE; do [ "$g" = "$1" ] && { echo "${1}_cov_gate"; return; }; done
+    "$BB" grep -qxF -- "${1}_cov_gate" "$OUT/cov_gates.txt" && { echo "${1}_cov_gate"; return; }
     echo "$1[coverage][gate][result]"
 }
 
 if [ "$CMD" = run ]; then
     [ -s "$OUT/libraries.txt" ] || ./buck2 uquery 'kind(mojo_library_rule, //src/...)' > "$OUT/libraries.txt"
+    ./buck2 uquery -c komira.coverage=true 'filter("_cov_gate$", //src/...)' > "$OUT/cov_gates.txt"
     : > "$OUT/targets.txt"
     while IFS= read -r l; do
         "$BB" cut -f1 "$SKIP" | "$BB" grep -qxF -- "$l" || target_of "$l" >> "$OUT/targets.txt"
