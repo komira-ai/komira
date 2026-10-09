@@ -18,7 +18,7 @@
 # moment it is sent; it refuses an expired JWT, one whose `exp` is more
 # than 600 seconds ahead or more than 600 seconds after its `iat`, and one
 # issued in the future. The client checks every JWT against it before
-# sending, and re-mints one with fewer than `APP_JWT_REMINT_MARGIN_S`
+# sending, and re-mints one with `APP_JWT_REMINT_MARGIN_S` or fewer
 # seconds left (`app_jwt_needs_remint`), so a JWT that would expire in
 # flight is never sent. komira_github_fake refuses a JWT by the same rule.
 #
@@ -167,9 +167,9 @@ def check_app_jwt_window(iat: Int64, exp: Int64, now_unix_s: Int64) raises:
 
 
 def app_jwt_needs_remint(jwt: AppJwt, now_unix_s: Int64) -> Bool:
-    """True when a cached JWT must be replaced before it is sent: fewer than
-    `APP_JWT_REMINT_MARGIN_S` seconds left, or issued after `now` (the clock
-    went back)."""
+    """True when a cached JWT must be replaced before it is sent:
+    `APP_JWT_REMINT_MARGIN_S` (60) seconds or fewer left, or issued after
+    `now` (the clock went back)."""
     if jwt.iat > now_unix_s:
         return True
     return now_unix_s >= jwt.exp - APP_JWT_REMINT_MARGIN_S

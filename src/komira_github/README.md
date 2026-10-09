@@ -21,7 +21,7 @@ outside the subset raises `GitHubError[NOT_ALLOWED]` with nothing sent.
 What the client does for you:
 
 - **The App JWT**: `iat` 60 s in the past, `exp` 540 s ahead (GitHub allows
-  at most 10 minutes), re-minted when fewer than 60 s remain, and checked
+  at most 10 minutes), re-minted when 60 s or fewer remain, and checked
   against GitHub's window before every send.
 - **Installation tokens**: cached per installation and per scope, and
   replaced once 300 s or less of the hour remain. `repo_contents_read_token`

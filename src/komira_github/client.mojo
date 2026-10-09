@@ -10,7 +10,7 @@
 #      else `GitHubError[NOT_ALLOWED]`;
 #   2. the rate-limit latch must not be holding the credential's quota or
 #      the whole client: else `GitHubError[RATE_LIMITED]`;
-#   3. the credential: the App JWT, re-minted when fewer than 60 s of it
+#   3. the credential: the App JWT, re-minted when 60 s or fewer of it
 #      remain and checked against GitHub's window (app_jwt.mojo); or an
 #      installation token from the cache, minted through the App JWT when
 #      there is no fresh one (token_cache.mojo);
