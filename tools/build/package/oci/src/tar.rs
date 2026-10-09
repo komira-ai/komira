@@ -2,7 +2,9 @@
 //! extended headers; and the writer of the layer and archive `image` adds.
 //!
 //! Every header's checksum is verified. A layer must end with a zero block,
-//! so a truncated layer is refused rather than read short.
+//! so a truncated layer is refused rather than read short. A long name, long
+//! link or pax header is for the next entry only; one given twice before an
+//! entry, or with no entry after it, is refused.
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Kind {
@@ -79,10 +81,13 @@ pub fn read(data: &[u8]) -> Result<Vec<Entry>, String> {
     let mut at = 0;
     let mut long_name: Option<String> = None;
     let mut long_link: Option<String> = None;
-    let mut pax_kv: Vec<(String, String)> = Vec::new();
+    let mut pax_kv: Option<Vec<(String, String)>> = None;
     loop {
         let h = data.get(at..at + BLOCK).ok_or("tar: the archive ends without a zero block")?;
         if h.iter().all(|&b| b == 0) {
+            if long_name.is_some() || long_link.is_some() || pax_kv.is_some() {
+                return Err("tar: the archive ends after a header for no entry".into());
+            }
             return Ok(out);
         }
         let sum: u64 = h.iter().enumerate().map(|(i, &b)| if (148..156).contains(&i) { b' ' as u64 } else { b as u64 }).sum();
@@ -92,7 +97,7 @@ pub fn read(data: &[u8]) -> Result<Vec<Entry>, String> {
         let flag = h[156];
         let mut size = number(h, 124, 12, "size")?;
         if !matches!(flag, b'L' | b'K' | b'x' | b'g') {
-            if let Some((_, v)) = pax_kv.iter().find(|(k, _)| k == "size") {
+            if let Some((_, v)) = pax_kv.iter().flatten().find(|(k, _)| k == "size") {
                 size = v.parse().map_err(|_| "tar: a pax size is not a number")?;
             }
         }
@@ -100,14 +105,18 @@ pub fn read(data: &[u8]) -> Result<Vec<Entry>, String> {
         let end = body.checked_add(size as usize).filter(|&e| e <= data.len()).ok_or("tar: an entry runs past the end")?;
         let next = body + (size as usize).div_ceil(BLOCK) * BLOCK;
         match flag {
+            b'L' if long_name.is_some() => return Err("tar: two long names for one entry".into()),
+            b'K' if long_link.is_some() => return Err("tar: two long links for one entry".into()),
+            b'x' if pax_kv.is_some() => return Err("tar: two pax headers for one entry".into()),
             b'L' => long_name = Some(text(field(&data[body..end], 0, end - body), "a long name")?),
             b'K' => long_link = Some(text(field(&data[body..end], 0, end - body), "a long link")?),
-            b'x' => pax_kv = pax(&data[body..end])?,
+            b'x' => pax_kv = Some(pax(&data[body..end])?),
             // A global header changes no path of this layer that we read.
             b'g' => {}
             _ => {
                 let mut path = text(field(h, 0, 100), "a name")?;
-                if &h[257..262] == b"ustar" {
+                // POSIX ustar only: GNU's `ustar  \0` keeps its atime there.
+                if &h[257..263] == b"ustar\0" {
                     let prefix = text(field(h, 345, 155), "a name prefix")?;
                     if !prefix.is_empty() {
                         path = format!("{}/{}", prefix, path);
@@ -120,7 +129,7 @@ pub fn read(data: &[u8]) -> Result<Vec<Entry>, String> {
                 if let Some(l) = long_link.take() {
                     link = l;
                 }
-                for (k, v) in pax_kv.drain(..) {
+                for (k, v) in pax_kv.take().unwrap_or_default() {
                     match k.as_str() {
                         "path" => path = v,
                         "linkpath" => link = v,
@@ -313,6 +322,9 @@ mod tests {
         assert_eq!(t, write(vec![item("a/", 0o755, b""), item(&long, 0o755, b"x"), item("b", 0o644, b"bee")]).unwrap());
         assert_eq!(&t[136..148], b"00000000000\0");
         assert!(write(vec![item("a", 0o644, b""), item("a", 0o755, b"")]).unwrap_err().contains("a given twice"));
+        // Two zero blocks end it, after the last entry's data block.
+        assert!(t[t.len() - 1024..].iter().all(|&b| b == 0));
+        assert_eq!(t[t.len() - 1536], b'x');
     }
 
     /// The header's checksum written again after an edit, as `%07o\0`
@@ -394,7 +406,19 @@ mod tests {
             h[124] = 0x80;
             h[135] = 3;
         }).unwrap()[0].size, 3);
+        // Every byte counts, at its place.
+        assert_eq!(one(&|h| {
+            h[124..136].fill(0);
+            h[124] = 0x80;
+            h[134] = 1;
+            h[135] = 2;
+        }).unwrap()[0].size, 258);
         assert_eq!(one(&|h| h[124..136].fill(0xff)), Err("tar: size overflows".into()));
+        // The first byte's low bits are the top of the number: 2^88 overflows.
+        assert_eq!(one(&|h| {
+            h[124..136].fill(0);
+            h[124] = 0x81;
+        }), Err("tar: size overflows".into()));
         assert_eq!(one(&|h| h[124..136].copy_from_slice(b"00000000z0\0\0")), Err("tar: size `00000000z0` is not octal".into()));
         assert_eq!(one(&|h| h[124..136].copy_from_slice(b"0000000000\xff\0")), Err("tar: size is not octal".into()));
         // NULs and spaces around the digits; an empty field is 0.
@@ -442,6 +466,83 @@ mod tests {
         .map(|(p, k, l)| (p.to_string(), *k, l.to_string()))
         .collect();
         assert_eq!(got, want);
+    }
+
+    /// A pax record `<len> <key>=<value>\n`, its length counting itself.
+    fn rec(k: &str, v: &str) -> String {
+        let body = format!(" {}={}\n", k, v);
+        let mut n = body.len() + 1;
+        while body.len() + n.to_string().len() != n {
+            n = body.len() + n.to_string().len();
+        }
+        format!("{}{}", n, body)
+    }
+
+    #[test]
+    fn a_long_name_long_link_or_pax_header_is_for_the_next_entry_only() {
+        let (long, long2) = ("n".repeat(120), "m/".repeat(60) + "x");
+        let (target, target2) = ("t/".repeat(60) + "x", "u".repeat(150));
+        let mut t = Vec::new();
+        entry(&mut t, "././@LongLink", b'L', 0o644, long.as_bytes(), "");
+        entry(&mut t, "a", b'0', 0o644, b"", "");
+        entry(&mut t, "b", b'0', 0o644, b"", "");
+        entry(&mut t, "././@LongLink", b'K', 0o644, target.as_bytes(), "");
+        entry(&mut t, "l1", b'2', 0o777, b"", "s1");
+        entry(&mut t, "l2", b'2', 0o777, b"", "s2");
+        entry(&mut t, "PaxHeader", b'x', 0o644, (rec("path", &long2) + &rec("linkpath", &target2)).as_bytes(), "");
+        entry(&mut t, "l3", b'2', 0o777, b"", "s3");
+        entry(&mut t, "l4", b'2', 0o777, b"", "s4");
+        let got: Vec<(String, String)> = read(&end(t)).unwrap().into_iter().map(|e| (e.path, e.link)).collect();
+        let want: Vec<(String, String)> = [(long.as_str(), ""), ("b", ""), ("l1", target.as_str()), ("l2", "s2"), (long2.as_str(), target2.as_str()), ("l4", "s4")]
+            .iter()
+            .map(|(p, l)| (p.to_string(), l.to_string()))
+            .collect();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn a_header_for_the_next_entry_comes_once_and_is_followed_by_one() {
+        let long = |flag: u8| -> Vec<u8> {
+            let mut t = Vec::new();
+            entry(&mut t, "././@LongLink", flag, 0o644, b"long", "");
+            t
+        };
+        let pax = || {
+            let mut t = Vec::new();
+            entry(&mut t, "PaxHeader", b'x', 0o644, b"", "");
+            t
+        };
+        let then = |mut t: Vec<u8>, more: Vec<u8>| {
+            t.extend(more);
+            entry(&mut t, "f", b'2', 0o777, b"", "x");
+            read(&end(t))
+        };
+        assert_eq!(then(long(b'L'), long(b'L')), Err("tar: two long names for one entry".into()));
+        assert_eq!(then(long(b'K'), long(b'K')), Err("tar: two long links for one entry".into()));
+        // An empty pax header is a header all the same.
+        assert_eq!(then(pax(), pax()), Err("tar: two pax headers for one entry".into()));
+        // One of each kind is fine; a global header is none of them.
+        let mut g = Vec::new();
+        entry(&mut g, "global", b'g', 0o644, b"", "");
+        let mut all = long(b'K');
+        all.extend(pax());
+        all.extend(g);
+        let e = then(long(b'L'), all).unwrap();
+        assert_eq!((e[0].path.as_str(), e[0].link.as_str()), ("long", "long"));
+        // A header with no entry after it: the archive was cut short.
+        for t in [long(b'L'), long(b'K'), pax()] {
+            assert_eq!(read(&end(t)), Err("tar: the archive ends after a header for no entry".into()));
+        }
+    }
+
+    #[test]
+    fn a_gnu_header_has_no_name_prefix() {
+        // GNU's magic is `ustar  \0`; bytes 345.. hold its atime, not a prefix.
+        let mut h = header("c", b'0', 0o644, 0, "");
+        h[257..265].copy_from_slice(b"ustar  \0");
+        h[345..357].copy_from_slice(b"15000000000\0");
+        resum(&mut h);
+        assert_eq!(read(&end(h)).unwrap()[0].path, "c");
     }
 
     #[test]
