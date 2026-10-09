@@ -4,7 +4,9 @@
 # =============================================================================
 #
 # `GcpSession` holds the generated clients (IAM, Cloud Resource Manager,
-# Cloud Run jobs), each over its own connector of the caller's type, one
+# Cloud Run jobs and Run's long-running operations), each over its own
+# connector of the caller's type, the sleeper an operation's poll waits
+# through (komira_retry's `Sleeper`: the system's, or a test's), one
 # token source shared by all of them (`SharedTokenSource`: the adapter
 # holds one caching source, and an apply that outlives one access token
 # keeps working), the cell (project, region, machine, cell), and what the
@@ -74,6 +76,7 @@ from komira_gcp_iam.iam_policy import (
 )
 from komira_gcp_iam.options import GetPolicyOptions as IamPolicyOptions
 from komira_gcp_iam.policy import Binding as IamBinding, Policy as IamPolicy
+from komira_gcp_run.operations import GetOperationRequest, Operation, OperationsClient
 from komira_gcp_run.job import (
     CreateJobRequest,
     DeleteJobRequest,
@@ -91,12 +94,18 @@ from komira_http_core.codec.types import HttpMethod
 from komira_http_core.transport.io_stream import Connector
 from komira_json import JsonValue
 from komira_proto_codec import decode_json
+from komira_retry import Sleeper
 
 from kci_cloud_gcp.names import account_resource, job_parent, project_resource
 
 
 comptime _RT = BlockingRuntime[NoopSink]
 comptime _IAM_DEFAULT_HOST = "iam.googleapis.com"
+comptime OP_POLLS_MAX = 12
+"""How many times a long-running operation not yet done is read again
+before the verb gives up."""
+comptime OP_FIRST_DELAY_MS: Int64 = 500
+comptime OP_MAX_DELAY_MS: Int64 = 8000
 comptime POLICY_VERSION = 3
 """The policy version every read asks for and every write sends: a
 conditional binding is read and written whole."""
@@ -109,6 +118,20 @@ def _rt() raises -> _RT:
 def json_text(s: String) -> String:
     """`s` as a JSON string literal."""
     return JsonValue.from_string(s.copy()).serialize()
+
+
+def operation_poll_delays() -> List[Int64]:
+    """The wait before each read of a long-running operation not yet done:
+    500 ms, doubling, at most 8 s each, `OP_POLLS_MAX` of them (about 75 s
+    in all). A verb whose operation is not done after the last raises."""
+    var out = List[Int64]()
+    var d = OP_FIRST_DELAY_MS
+    for _ in range(OP_POLLS_MAX):
+        out.append(d)
+        d = d * 2
+        if d > OP_MAX_DELAY_MS:
+            d = OP_MAX_DELAY_MS
+    return out^
 
 
 def _is_not_found(e: String, verb: String, rpc: String) -> Bool:
@@ -164,13 +187,23 @@ struct GcpConnectors[C: Connector](Movable):
     var iam: Optional[Self.C]
     var crm: Optional[Self.C]
     var run: Optional[Self.C]
+    var operations: Optional[Self.C]
     var patch: Optional[Self.C]
     var token_info: Optional[Self.C]
 
-    def __init__(out self, var iam: Self.C, var crm: Self.C, var run: Self.C, var patch: Self.C, var token_info: Self.C):
+    def __init__(
+        out self,
+        var iam: Self.C,
+        var crm: Self.C,
+        var run: Self.C,
+        var operations: Self.C,
+        var patch: Self.C,
+        var token_info: Self.C,
+    ):
         self.iam = Optional[Self.C](iam^)
         self.crm = Optional[Self.C](crm^)
         self.run = Optional[Self.C](run^)
+        self.operations = Optional[Self.C](operations^)
         self.patch = Optional[Self.C](patch^)
         self.token_info = Optional[Self.C](token_info^)
 
@@ -311,12 +344,14 @@ def _percent_path(s: String) -> String:
     return s.replace("@", "%40")
 
 
-struct GcpSession[C: Connector, TS: GcpTokenSource](Movable):
+struct GcpSession[C: Connector, TS: GcpTokenSource, S: Sleeper](Movable):
     """The adapter's session (the file header)."""
 
     var iam: IAMClient[Self.C, SharedTokenSource[Self.TS]]
     var crm: ProjectsClient[Self.C, SharedTokenSource[Self.TS]]
     var jobs: JobsClient[Self.C, SharedTokenSource[Self.TS]]
+    var ops: OperationsClient[Self.C, SharedTokenSource[Self.TS]]
+    var sleeper: Self.S
     var patch_http: HttpClient[Self.C]
     var info: GcpConnectorTransport[Self.C]
     var token: SharedTokenSource[Self.TS]
@@ -332,7 +367,11 @@ struct GcpSession[C: Connector, TS: GcpTokenSource](Movable):
     var owned_ids: List[String]
 
     def __init__(
-        out self, var connectors: GcpConnectors[Self.C], var token_source: Self.TS, endpoints: GcpEndpoints
+        out self,
+        var connectors: GcpConnectors[Self.C],
+        var token_source: Self.TS,
+        var sleeper: Self.S,
+        endpoints: GcpEndpoints,
     ) raises:
         var shared = ArcPointer[Self.TS](token_source^)
         self.iam = IAMClient[Self.C, SharedTokenSource[Self.TS]](
@@ -344,6 +383,10 @@ struct GcpSession[C: Connector, TS: GcpTokenSource](Movable):
         self.jobs = JobsClient[Self.C, SharedTokenSource[Self.TS]](
             HttpClient[Self.C].with_defaults(connectors.run.take()), SharedTokenSource[Self.TS](shared)
         )
+        self.ops = OperationsClient[Self.C, SharedTokenSource[Self.TS]](
+            HttpClient[Self.C].with_defaults(connectors.operations.take()), SharedTokenSource[Self.TS](shared)
+        )
+        self.sleeper = sleeper^
         self.patch_http = HttpClient[Self.C].with_defaults(connectors.patch.take())
         self.info = GcpConnectorTransport[Self.C](HttpClientConfig.defaults(), connectors.token_info.take())
         self.token = SharedTokenSource[Self.TS](shared)
@@ -363,6 +406,7 @@ struct GcpSession[C: Connector, TS: GcpTokenSource](Movable):
             self.crm.set_rest_endpoint(endpoints.crm.host.copy(), endpoints.crm.port, endpoints.crm.plaintext)
         if endpoints.run.host.byte_length() > 0:
             self.jobs.set_rest_endpoint(endpoints.run.host.copy(), endpoints.run.port, endpoints.run.plaintext)
+            self.ops.set_rest_endpoint(endpoints.run.host.copy(), endpoints.run.port, endpoints.run.plaintext)
 
     # --- what the adapter learned ------------------------------------------
 
@@ -580,18 +624,33 @@ struct GcpSession[C: Connector, TS: GcpTokenSource](Movable):
             token = page.next_page_token.copy()
         raise Error(String("kci_cloud_gcp: the job list did not end"))
 
-    def _settle(mut self, op_done: Bool, op_error: String, name: String, what: String) raises:
-        """A long-running operation's end: its error raised; one not yet
-        done is waited on by reading the job until it stops reconciling."""
-        if op_error.byte_length() > 0:
-            raise Error(String("kci_cloud_gcp: ") + what + String(" of ") + name + String(" failed: ") + op_error)
-        if op_done:
-            return
-        for _ in range(600):
-            var j = self.get_job(name)
-            if not j or not j.value().reconciling:
+    def _settle(mut self, var op: Operation, name: String, what: String) raises:
+        """Wait for a long-running operation to end: an operation that ended
+        in error raises; one not yet done is read again (GetOperation),
+        after each of `operation_poll_delays()` in turn, through the
+        session's sleeper; one still not done after the last raises. Only
+        the operation says the change is done: the job itself is never read
+        in its place, so a job that is gone never passes for one that
+        settled."""
+        var delays = operation_poll_delays()
+        for attempt in range(len(delays) + 1):
+            if op.error:
+                raise Error(
+                    String("kci_cloud_gcp: ") + what + String(" of ") + name + String(" failed: ")
+                    + op.error.value().message
+                )
+            if op.done:
                 return
-        raise Error(String("kci_cloud_gcp: ") + what + String(" of ") + name + String(" did not settle"))
+            if attempt == len(delays):
+                break
+            self.sleeper.sleep_ms(delays[attempt])
+            var rt = _rt()
+            ref reactor = rt.reactor()
+            op = self.ops.get_operation[_RT](GetOperationRequest(op.name.copy()), reactor)
+        raise Error(
+            String("kci_cloud_gcp: ") + what + String(" of ") + name + String(" did not finish after ")
+            + String(len(delays)) + String(" reads of its operation")
+        )
 
     def create_job(mut self, job_id: String, job_json: String) raises:
         """One CreateJob carrying the whole job, its labels included: a job
@@ -601,10 +660,7 @@ struct GcpSession[C: Connector, TS: GcpTokenSource](Movable):
         var op = self.jobs.create_job[_RT](
             CreateJobRequest(job_parent(self.project, self.region), decode_json[Job](job_json), job_id, False), reactor
         )
-        var err = String("")
-        if op.error:
-            err = op.error.value().message.copy()
-        self._settle(op.done, err, job_parent(self.project, self.region) + String("/jobs/") + job_id, String("the create"))
+        self._settle(op^, job_parent(self.project, self.region) + String("/jobs/") + job_id, String("the create"))
 
     def update_job(mut self, var job: Job) raises:
         """One UpdateJob with the whole job (its name says which)."""
@@ -612,10 +668,7 @@ struct GcpSession[C: Connector, TS: GcpTokenSource](Movable):
         var rt = _rt()
         ref reactor = rt.reactor()
         var op = self.jobs.update_job[_RT](UpdateJobRequest(job^, False, False), reactor)
-        var err = String("")
-        if op.error:
-            err = op.error.value().message.copy()
-        self._settle(op.done, err, name, String("the update"))
+        self._settle(op^, name, String("the update"))
 
     def delete_job(mut self, name: String) raises:
         """DeleteJob; a job already gone is a no-op."""
@@ -623,8 +676,7 @@ struct GcpSession[C: Connector, TS: GcpTokenSource](Movable):
         ref reactor = rt.reactor()
         try:
             var op = self.jobs.delete_job[_RT](DeleteJobRequest(name, False, String("")), reactor)
-            if op.error:
-                raise Error(String("kci_cloud_gcp: the delete of ") + name + String(" failed: ") + op.error.value().message)
+            self._settle(op^, name, String("the delete"))
         except e:
             if not _is_not_found(String(e), String("DELETE"), String("DeleteJob")):
                 raise e^

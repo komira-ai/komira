@@ -33,4 +33,4 @@ from kci_gcp_emulator.emu_state import (
     GcpEmulator,
 )
 from kci_gcp_emulator.emu_stream import EmulatorConnector, EmulatorStream
-from kci_gcp_emulator.target import EmulatedGcpCloud, emulated_adapter, emulator_endpoints
+from kci_gcp_emulator.target import EmulatedAdapter, EmulatedGcpCloud, SharedSleeper, emulated_adapter, emulator_endpoints

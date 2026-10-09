@@ -82,6 +82,7 @@ from kci_reconciler import CellScope, Creds, ErasedResource, LABEL_CELL, Label, 
 from kci_resource_proto.resource import Resource
 from komira_gcp_core import StaticTokenSource
 from komira_json import JsonValue
+from komira_retry import Sleeper
 
 from kci_gcp_emulator.emu_http import parse_object, str_member, with_member
 from kci_gcp_emulator.emu_state import (
@@ -114,10 +115,28 @@ def emulator_endpoints() -> GcpEndpoints:
     )
 
 
-def emulated_adapter(emu: ArcPointer[GcpEmulator]) raises -> GcpCloud[EmulatorConnector, StaticTokenSource]:
-    """kci_cloud_gcp's adapter over the emulator (the file header)."""
-    return GcpCloud[EmulatorConnector, StaticTokenSource](
+struct SharedSleeper(Sleeper, Movable, Deinitable):
+    """A sleeper that never sleeps and records each wait it is asked for,
+    in a list the test holds too."""
+
+    var waits: ArcPointer[List[Int64]]
+
+    def __init__(out self, waits: ArcPointer[List[Int64]]):
+        self.waits = waits.copy()
+
+    def sleep_ms(mut self, ms: Int64) raises:
+        self.waits[].append(ms)
+
+
+comptime EmulatedAdapter = GcpCloud[EmulatorConnector, StaticTokenSource, SharedSleeper]
+
+
+def emulated_adapter(emu: ArcPointer[GcpEmulator], waits: ArcPointer[List[Int64]]) raises -> EmulatedAdapter:
+    """kci_cloud_gcp's adapter over the emulator (the file header); its
+    operation polls wait through a `SharedSleeper` over `waits`."""
+    return EmulatedAdapter(
         GcpConnectors[EmulatorConnector](
+            EmulatorConnector(emu),
             EmulatorConnector(emu),
             EmulatorConnector(emu),
             EmulatorConnector(emu),
@@ -125,6 +144,7 @@ def emulated_adapter(emu: ArcPointer[GcpEmulator]) raises -> GcpCloud[EmulatorCo
             EmulatorConnector(emu),
         ),
         StaticTokenSource(String(EMU_TOKEN)),
+        SharedSleeper(waits),
         emulator_endpoints(),
     )
 
@@ -133,20 +153,28 @@ struct EmulatedGcpCloud(ConformanceTarget, Movable):
     """The adapter, over the emulator, with the kit's hooks (the file
     header)."""
 
-    var cloud: GcpCloud[EmulatorConnector, StaticTokenSource]
+    var cloud: EmulatedAdapter
     var emu: ArcPointer[GcpEmulator]
+    var waits: ArcPointer[List[Int64]]
     var nodes: List[LoweredNode]
     var machine: String
     var cell: String
     var armed: String
 
     def __init__(out self, emu: ArcPointer[GcpEmulator]) raises:
-        self.cloud = emulated_adapter(emu)
+        var waits = ArcPointer[List[Int64]](List[Int64]())
+        self.cloud = emulated_adapter(emu, waits)
+        self.waits = waits^
         self.emu = emu.copy()
         self.nodes = List[LoweredNode]()
         self.machine = String("")
         self.cell = String("")
         self.armed = String("")
+
+    def sleeps(self) -> List[Int64]:
+        """Every wait the adapter's operation polls asked for, in order (the
+        sleeper never sleeps)."""
+        return self.waits[].copy()
 
     # --- what a node's object is called -----------------------------------
 

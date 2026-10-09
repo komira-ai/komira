@@ -44,6 +44,7 @@ from kci_reconciler import (
     unbound_error,
 )
 from komira_gcp_core import GcpTokenSource
+from komira_retry import Sleeper
 from komira_gcp_run.job import Job
 from komira_http_core.transport.io_stream import Connector
 from komira_proto_codec import decode_json
@@ -118,16 +119,16 @@ def without_kci(job: Job) -> List[Label]:
     return out^
 
 
-struct GcpJobNode[C: Connector, TS: GcpTokenSource](EngineResource, Movable, Deinitable):
+struct GcpJobNode[C: Connector, TS: GcpTokenSource, S: Sleeper](EngineResource, Movable, Deinitable):
     """A container job's run node (the file header)."""
 
-    var _s: ArcPointer[GcpSession[Self.C, Self.TS]]
+    var _s: ArcPointer[GcpSession[Self.C, Self.TS, Self.S]]
     var _node: LoweredNode
     var _name: String
     var _bound: List[String]
     var _is_bound: Bool
 
-    def __init__(out self, s: ArcPointer[GcpSession[Self.C, Self.TS]], node: LoweredNode, name: String):
+    def __init__(out self, s: ArcPointer[GcpSession[Self.C, Self.TS, Self.S]], node: LoweredNode, name: String):
         self._s = s.copy()
         self._node = node.copy()
         self._name = name

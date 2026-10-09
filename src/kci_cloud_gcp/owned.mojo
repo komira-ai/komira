@@ -32,6 +32,7 @@ from kci_cloud import (
 )
 from kci_reconciler import CellScope, LABEL_CELL, LABEL_MACHINE, LABEL_RESOURCE, LABEL_ROLE, Label
 from komira_gcp_core import GcpTokenSource
+from komira_retry import Sleeper
 from komira_http_core.transport.io_stream import Connector
 from komira_proto_codec.codec import encode_json
 
@@ -126,8 +127,8 @@ def _bindings(
 
 
 def owned_records[
-    C: Connector, TS: GcpTokenSource
-](mut s: GcpSession[C, TS], scope: CellScope) raises -> List[OwnedRecord]:
+    C: Connector, TS: GcpTokenSource, S: Sleeper
+](mut s: GcpSession[C, TS, S], scope: CellScope) raises -> List[OwnedRecord]:
     """`list_owned` (the file header)."""
     var out = List[OwnedRecord]()
     var nodes = List[String]()

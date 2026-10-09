@@ -9,14 +9,15 @@
 #   PATCH  /v2/projects/<p>/locations/<r>/jobs/<id>         update: the body
 #          is the whole job, which replaces what the job holds
 #   DELETE /v2/projects/<p>/locations/<r>/jobs/<id>         delete
+#   GET    /v2/projects/<p>/locations/<r>/operations/<id>   GetOperation
 # The body of a create or an update is the job's JSON. The service sets
 # `name`, `uid`, `generation`, `etag` and the terminal condition (`Ready`,
 # CONDITION_SUCCEEDED, or CONDITION_FAILED for a job put in the failed
 # state, until its next update), and refuses labels outside GCP's rule
 # (a key of [a-z0-9_-] starting with a letter, a value of [a-z0-9_-], each
 # at most 63 bytes, at most 64 labels). A mutating call answers a
-# long-running operation that is already done: the emulator applies every
-# change before it answers.
+# long-running operation: done at once, or after `op_polls` reads
+# (emu_state.mojo); the emulator applies the change before it answers.
 # =============================================================================
 
 from komira_json import JsonValue
@@ -97,12 +98,30 @@ def job_json(j: EmuJob) raises -> String:
     return body.serialize()
 
 
+def _op_json(name: String, done: Bool) -> String:
+    return String("{\"name\":\"") + name + String("\",\"done\":") + (String("true") if done else String("false")) + String("}")
+
+
 def _operation(mut emu: GcpEmulator) -> String:
+    """A new operation: done at once, or after `op_polls` reads."""
     var name = (
         String("projects/") + emu.project + String("/locations/") + emu.region + String("/operations/op-")
         + emu.fresh_id()
     )
-    return String("{\"name\":\"") + name + String("\",\"done\":true}")
+    emu.op_names.append(name)
+    emu.op_left.append(emu.op_polls)
+    return _op_json(name, emu.op_polls == 0)
+
+
+def _read_operation(mut emu: GcpEmulator, name: String) -> EmuResponse:
+    """GetOperation: one read; done when its reads left reach 0."""
+    for i in range(len(emu.op_names)):
+        if emu.op_names[i] == name:
+            emu.op_reads += 1
+            if emu.op_left[i] > 0:
+                emu.op_left[i] -= 1
+            return ok(_op_json(name, emu.op_left[i] == 0))
+    return failure(404, String("Operation '") + name + String("' was not found"))
 
 
 def _stored(name: String, var body: JsonValue, generation: Int) raises -> JsonValue:
@@ -181,6 +200,9 @@ def _update(mut emu: GcpEmulator, i: Int, req: EmuRequest) raises -> EmuResponse
 
 
 def serve_run(mut emu: GcpEmulator, req: EmuRequest) raises -> EmuResponse:
+    var ops = String("/v2/projects/") + emu.project + String("/locations/") + emu.region + String("/operations/")
+    if req.method == "GET" and req.path.startswith(ops):
+        return _read_operation(emu, String(req.path[byte = 4 : req.path.byte_length()]))
     var base = String("/v2/projects/") + emu.project + String("/locations/") + emu.region + String("/jobs")
     if not req.path.startswith(base):
         return failure(404, String("no Run path ") + req.path)

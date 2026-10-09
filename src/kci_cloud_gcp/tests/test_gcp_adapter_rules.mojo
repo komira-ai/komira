@@ -15,6 +15,8 @@
 #     refused (the derived stamp's refusal, shared with the gcp fake);
 #   * image_registry is pure and differs for two cells; registry_login
 #     presents the access-token user;
+#   * a long-running operation's reads wait 500 ms, doubling, at most 8 s,
+#     twelve times;
 #   * trust_check refuses every cell, saying trust checking is not
 #     configured yet (its inputs are an open design question).
 # =============================================================================
@@ -35,19 +37,22 @@ from kci_resource_proto.resource import Resource
 from komira_gcp_core import StaticTokenSource
 from komira_http_core.transport.scripted import ScriptedConnector
 from komira_proto_codec import decode_json
+from komira_retry import RecordingSleeper
 
-from kci_cloud_gcp import GcpCloud, GcpConnectors
+from kci_cloud_gcp import GcpCloud, GcpConnectors, operation_poll_delays
 
 
-comptime Cloud = GcpCloud[ScriptedConnector, StaticTokenSource]
+comptime Cloud = GcpCloud[ScriptedConnector, StaticTokenSource, RecordingSleeper]
 
 
 def _cloud() raises -> Cloud:
     return Cloud(
         GcpConnectors[ScriptedConnector](
-            ScriptedConnector(), ScriptedConnector(), ScriptedConnector(), ScriptedConnector(), ScriptedConnector()
+            ScriptedConnector(), ScriptedConnector(), ScriptedConnector(), ScriptedConnector(), ScriptedConnector(),
+            ScriptedConnector(),
         ),
         StaticTokenSource(String("unit-token")),
+        RecordingSleeper(),
     )
 
 
@@ -157,6 +162,24 @@ def test_trust_check_refuses_until_it_is_configured() raises:
     assert_true(f[0].reason.find("every cell is refused") >= 0, f[0].reason)
 
 
+def test_an_operation_is_polled_with_a_bounded_backoff() raises:
+    # 500 ms, doubling, at most 8 s, twelve reads: about 75 s in all.
+    var d = operation_poll_delays()
+    assert_equal(len(d), 12)
+    var want = List[Int64]()
+    want.append(500)
+    want.append(1000)
+    want.append(2000)
+    want.append(4000)
+    for _ in range(8):
+        want.append(8000)
+    var total: Int64 = 0
+    for i in range(len(d)):
+        assert_equal(d[i], want[i])
+        total += d[i]
+    assert_equal(total, 71500)
+
+
 def main() raises:
     print("test_coverage_names_every_type_once")
     test_coverage_names_every_type_once()
@@ -170,4 +193,6 @@ def main() raises:
     test_the_image_registry_is_pure_and_per_cell()
     print("test_trust_check_refuses_until_it_is_configured")
     test_trust_check_refuses_until_it_is_configured()
+    print("test_an_operation_is_polled_with_a_bounded_backoff")
+    test_an_operation_is_polled_with_a_bounded_backoff()
     print("OK")

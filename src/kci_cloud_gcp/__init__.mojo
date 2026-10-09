@@ -78,4 +78,4 @@ from kci_cloud_gcp.names import (
     object_name,
     project_resource,
 )
-from kci_cloud_gcp.session import GcpConnectors, GcpEndpoint, GcpEndpoints, SharedTokenSource
+from kci_cloud_gcp.session import GcpConnectors, GcpEndpoint, GcpEndpoints, SharedTokenSource, operation_poll_delays

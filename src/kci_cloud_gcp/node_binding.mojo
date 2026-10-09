@@ -56,6 +56,7 @@ from kci_reconciler import (
     ResourceStatus,
 )
 from komira_gcp_core import GcpTokenSource
+from komira_retry import Sleeper
 from komira_http_core.transport.io_stream import Connector
 
 from kci_cloud_gcp.names import (
@@ -226,13 +227,13 @@ def derived_identity(
         return String("")
 
 
-struct GcpBindingNode[C: Connector, TS: GcpTokenSource](EngineResource, Movable, Deinitable):
+struct GcpBindingNode[C: Connector, TS: GcpTokenSource, S: Sleeper](EngineResource, Movable, Deinitable):
     """A grant edge's node (the file header)."""
 
-    var _s: ArcPointer[GcpSession[Self.C, Self.TS]]
+    var _s: ArcPointer[GcpSession[Self.C, Self.TS, Self.S]]
     var _node: LoweredNode
 
-    def __init__(out self, s: ArcPointer[GcpSession[Self.C, Self.TS]], node: LoweredNode):
+    def __init__(out self, s: ArcPointer[GcpSession[Self.C, Self.TS, Self.S]], node: LoweredNode):
         self._s = s.copy()
         self._node = node.copy()
 

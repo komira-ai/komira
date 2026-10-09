@@ -14,6 +14,11 @@
 #     every write; a write carrying a stale etag is refused ABORTED). The
 #     project policy starts with one owner, a human user, as a real
 #     project's does.
+#   * Cloud Run's LONG-RUNNING OPERATIONS: every create, update and delete of
+#     a job answers one, done at once by default; with `op_polls` set to N it
+#     is done only at its Nth read (GetOperation), so a client must poll, and
+#     `op_reads` counts the reads served. The change itself is applied when
+#     the call is answered.
 #   * Cloud Run JOBS (`EmuJob`): the job's JSON as the create carried it,
 #     with the fields the service sets (name, uid, generation, etag, the
 #     terminal condition); a job put in the failed state reports
@@ -182,6 +187,10 @@ struct GcpEmulator(Movable):
     var planted_keys: List[String]
     var requests: Int
     var next_id: Int
+    var op_polls: Int
+    var op_names: List[String]
+    var op_left: List[Int]
+    var op_reads: Int
 
     def __init__(out self, project: String = String("demo-project"), region: String = String("europe-west1")):
         self.project = project
@@ -203,6 +212,10 @@ struct GcpEmulator(Movable):
         self.planted_keys = List[String]()
         self.requests = 0
         self.next_id = 1000
+        self.op_polls = 0
+        self.op_names = List[String]()
+        self.op_left = List[Int]()
+        self.op_reads = 0
 
     # --- names --------------------------------------------------------------
 

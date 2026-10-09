@@ -53,6 +53,7 @@ from kci_reconciler import (
     VERB_UPDATE,
 )
 from komira_gcp_core import GcpTokenSource
+from komira_retry import Sleeper
 from komira_http_core.transport.io_stream import Connector
 
 from kci_cloud_gcp.names import display_name_of, last_segment
@@ -89,10 +90,10 @@ def with_retention(labels: List[Label], retention: Int) raises -> List[Label]:
     return out^
 
 
-struct GcpAccountNode[C: Connector, TS: GcpTokenSource](EngineResource, Movable, Deinitable):
+struct GcpAccountNode[C: Connector, TS: GcpTokenSource, S: Sleeper](EngineResource, Movable, Deinitable):
     """An identity node (the file header)."""
 
-    var _s: ArcPointer[GcpSession[Self.C, Self.TS]]
+    var _s: ArcPointer[GcpSession[Self.C, Self.TS, Self.S]]
     var _id: String
     var _owner: String
     var _kind: String
@@ -102,7 +103,7 @@ struct GcpAccountNode[C: Connector, TS: GcpTokenSource](EngineResource, Movable,
     var _retention: Int
     var _email: String
 
-    def __init__(out self, s: ArcPointer[GcpSession[Self.C, Self.TS]], node: LoweredNode, email: String):
+    def __init__(out self, s: ArcPointer[GcpSession[Self.C, Self.TS, Self.S]], node: LoweredNode, email: String):
         self._s = s.copy()
         self._id = node.id.copy()
         self._owner = node.owner.copy()

@@ -90,6 +90,7 @@ from kci_cloud.metadata import adopts
 from kci_reconciler import CellScope, Creds, ErasedResource, Label, OwnerStamp, RETAIN_DELETE
 from kci_resource_proto.resource import Resource
 from komira_gcp_core import GcpTokenSource
+from komira_retry import Sleeper
 from komira_http_core.transport.io_stream import Connector
 from komira_proto_codec.codec import encode_json
 
@@ -131,13 +132,15 @@ def _setting_finding(key: String, why: String) -> Finding:
     return Finding(FINDING_CELL, String("(cell)"), String("settings.") + key, why)
 
 
-struct GcpCloud[C: Connector, TS: GcpTokenSource](CloudAdapter, Movable):
+struct GcpCloud[C: Connector, TS: GcpTokenSource, S: Sleeper](CloudAdapter, Movable):
     """The GCP adapter (the file header). Built over one connector per
-    client (`GcpConnectors`), one token source, and where each service is
-    (`GcpEndpoints`: the public endpoints by default)."""
+    client (`GcpConnectors`), one token source, the sleeper a long-running
+    operation's poll waits through (komira_retry's `SystemSleeper`, or a
+    test's), and where each service is (`GcpEndpoints`: the public
+    endpoints by default)."""
 
     var _id: String
-    var _s: ArcPointer[GcpSession[Self.C, Self.TS]]
+    var _s: ArcPointer[GcpSession[Self.C, Self.TS, Self.S]]
     var _shape: ProviderShape
     var _run: Optional[String]
 
@@ -145,12 +148,13 @@ struct GcpCloud[C: Connector, TS: GcpTokenSource](CloudAdapter, Movable):
         out self,
         var connectors: GcpConnectors[Self.C],
         var token_source: Self.TS,
+        var sleeper: Self.S,
         endpoints: GcpEndpoints = GcpEndpoints(),
         id: String = String(GCP_CLOUD_ID),
     ) raises:
         self._id = id
-        self._s = ArcPointer[GcpSession[Self.C, Self.TS]](
-            GcpSession[Self.C, Self.TS](connectors^, token_source^, endpoints)
+        self._s = ArcPointer[GcpSession[Self.C, Self.TS, Self.S]](
+            GcpSession[Self.C, Self.TS, Self.S](connectors^, token_source^, sleeper^, endpoints)
         )
         self._shape = ProviderShape.gcp()
         self._run = None
@@ -285,17 +289,17 @@ struct GcpCloud[C: Connector, TS: GcpTokenSource](CloudAdapter, Movable):
             var id = self._name_of(node)
             self._s[].remember_node(node.id, node.kind, id)
             return ErasedResource.erase(
-                GcpAccountNode[Self.C, Self.TS](self._s, node, account_email(id, self._s[].project))
+                GcpAccountNode[Self.C, Self.TS, Self.S](self._s, node, account_email(id, self._s[].project))
             )
         if node.kind == KIND_JOB:
             var id = self._name_of(node)
             self._s[].remember_node(node.id, node.kind, id)
             return ErasedResource.erase(
-                GcpJobNode[Self.C, Self.TS](self._s, node, job_resource(self._s[].project, self._s[].region, id))
+                GcpJobNode[Self.C, Self.TS, Self.S](self._s, node, job_resource(self._s[].project, self._s[].region, id))
             )
         if node.kind == KIND_BINDING:
             self._s[].remember_node(node.id, node.kind, String(""))
-            return ErasedResource.erase(GcpBindingNode[Self.C, Self.TS](self._s, node))
+            return ErasedResource.erase(GcpBindingNode[Self.C, Self.TS, Self.S](self._s, node))
         raise Error(
             String("kci_cloud_gcp: node ") + node.id + String(" is of kind ") + node.kind
             + String(", which this adapter does not create")
