@@ -1,6 +1,5 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_test")
-load("@komira//tools/build/package:conda.bzl", "conda_package")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
@@ -84,22 +83,11 @@ mojo_library(
     test_srcs = ["tests/test_value.mojo"],
 )
 
-# The package of a library of the ledger COVERAGE_NO_GATE
-# (tools/build/coverage/policy.bzl) is given its `<name>_cov_gate` as
-# `coverage_gate`; this one is given the gate summary of covconda, an output
-# that is none of its markers.
-conda_package(
-    name = "covconda_ledger_conda",
-    coverage_gate = ":covconda[coverage][gate][summary]",
-    lib = ":covconda",
-    summary = "A fixture of tests//functional/coverage:conda_gate_ledger.",
-)
-
 # Both joins of covconda_conda (what [default] and [release] are copies of)
-# wait for covconda's two coverage markers, and those of
-# covconda_ledger_conda for its coverage_gate too: checked at analysis
-# (CondaJoinInfo, tools/build/package/conda.bzl), so `pr / check`, which
-# builds tests//functional/... without the switch, fails when conda.bzl stops
+# wait for covconda's two coverage markers, and those of covmt_conda for
+# covmt's gate: checked at analysis (CondaJoinInfo,
+# tools/build/package/conda.bzl), so `pr / check`, which builds
+# tests//functional/... without the switch, fails when conda.bzl stops
 # passing `gate` to either copy.
 cov_conda_gate_check(
     name = "conda_gate",
@@ -108,12 +96,19 @@ cov_conda_gate_check(
     markers = 2,
 )
 
+# The package of a library whose gate is the target `<name>_cov_gate` (one of
+# the ledger COVERAGE_NO_GATE, tools/build/coverage/policy.bzl, or one naming
+# `coverage_tests`) is given that target as `coverage_gate`, and conda.bzl
+# refuses any other: covmt_conda, which mojo_library declares with
+# `coverage_gate = ":covmt_cov_gate"`. Its joins wait for covmt's one
+# coverage marker and for the outputs of covmt_cov_gate (its gate's marker
+# and the runs of the three tests covmt names), none of which is covmt's.
 cov_conda_gate_check(
     name = "conda_gate_ledger",
-    conda = ":covconda_ledger_conda",
-    coverage_gate = ":covconda[coverage][gate][summary]",
-    lib = ":covconda",
-    markers = 2,
+    conda = ":covmt_conda",
+    coverage_gate = ":covmt_cov_gate",
+    lib = ":covmt",
+    markers = 1,
 )
 
 # Each coverage binary has line tables naming the library source its test
@@ -401,7 +396,6 @@ mojo_library(
         "covmt/__init__.mojo",
         "covmt/half.mojo",
     ],
-    conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     coverage_gate = "komira//tools/build/coverage:cov_gate",
     coverage_mode = "census",
