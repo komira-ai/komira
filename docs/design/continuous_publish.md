@@ -115,8 +115,9 @@ the doc), as tracked in #779. Slice S1 fixes `releases.md`.
 
 ### Trigger: per merge, coalesced
 
-**Superseded in part:** this trigger, and the placement of the two gates in "The gate between gamma and
-prod", are superseded by [the staged pipeline](staged_pipeline.md) (#1173).
+**Superseded in part:** this trigger, the "within one release duration" arithmetic below (and the
+rollback time in "Rollback and yank" that rests on it), and the placement of the two gates in "The gate
+between gamma and prod" are superseded by the staged pipeline, `docs/design/staged_pipeline.md` (#1173).
 
 **PROPOSED: keep the trigger as it is.** Every push to `main` is a release, and pushes made during a
 release coalesce into the next one. That *is* the per-batch trigger. The batch is whatever landed while
@@ -189,7 +190,8 @@ of the normal path.
 consumer that solves for the latest version gets the revert. A consumer pinned to the bad build keeps
 it. The revert passes the same pull-request check and the same release, so the time to roll back is
 one PR check plus one release duration. The rule "Fix forward or revert within the hour" ([ci.md](../ci.md))
-already covers it.
+already covers it. (**Superseded in part:** the time to roll back is restated per stage in the staged
+pipeline, `docs/design/staged_pipeline.md` (#1173), section b.)
 
 **Yank** (PROPOSED, slice S11, and **every use needs the project owner's go**). A yank is for a
 published build that is unsafe for anyone to keep solving to: a security defect, or corrupt bytes.
