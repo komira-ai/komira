@@ -16,6 +16,8 @@
 #   * SLICES. A sliced nullable column's lane carries the slice start as
 #     both the value offset and the bit offset: values and NULLs are those of
 #     the window, not of the parent's first rows.
+#     A second slice starts past the first bitmap byte (rows [11, 16) of 20),
+#     so a bit offset reduced to `start & 7` or dropped reads the wrong bits.
 #   * ValidityLanes on its own: a negative index is an absent lane, index 0
 #     is a real column, LSB-first bit order across a byte boundary.
 #   * The no-capacity constructor plus `classify_none`.
@@ -205,6 +207,43 @@ def test_validity_lanes_bit_order_across_bytes() raises:
     var w = ValidityLanes[origin_of(batch)].from_batch_columns(batch, none)
     assert_false(w.any_nullable())
     assert_false(w.lane_is_nullable(0))
+    _ = batch^
+
+
+def test_validity_bit_offset_past_first_byte() raises:
+    # Rows [11, 16) of a 20-row parent; the slice start crosses a whole byte
+    # of the bitmap. NULLs at parent rows 3 (outside the window, in byte 0),
+    # 13 (window row 2) and 16 (just past the window's end). A bit offset that
+    # keeps only `start & 7` (3) reads parent rows 3..7 and reports window row
+    # 0 NULL and row 2 non-NULL; one that drops the offset reads rows 0..4.
+    # Checked through ValidityLanes directly and through the TypedColumnPtrs
+    # lane that rides on it.
+    var a = PrimitiveArray[DType.int64].allocate_nullable(20)
+    for i in range(20):
+        a.set(i, Int64(500 + i))
+        if i == 3 or i == 13 or i == 16:
+            a._set_null(i)
+    var col = Column.from_primitive[DType.int64](a^).slice(11, 5)
+    var rbb = RecordBatchBuilder.with_capacity(1)
+    var sb = SchemaBuilder()
+    rbb.add_column(col^)
+    sb.add_field(Field(String("x"), ArrowType.INT64, True))
+    var batch = rbb.build(sb.build())
+    assert_equal(batch.num_rows(), 5)
+
+    var idx: List[Int] = [0]
+    var v = ValidityLanes[origin_of(batch)].from_batch_columns(batch, idx)
+    for r in range(5):
+        assert_equal(v.is_null_at(0, r), r == 2, "lanes row " + String(r))
+
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_SUM, Optional[Expr](Expr.col_ref("x")), Optional[String](None)))
+    var p = TypedColumnPtrs[origin_of(batch)].from_batch_padded(batch, aggs, 1)
+    assert_equal(p.offset_at(0), 11)
+    assert_equal((p._i64_ptr(0) + p.offset_at(0) + 2)[], Int64(513))
+    for r in range(5):
+        assert_equal(p.is_null_at(0, r), r == 2, "ptrs row " + String(r))
+    _ = aggs^
     _ = batch^
 
 

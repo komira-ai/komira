@@ -41,7 +41,7 @@ from komira_collections.slab import Slab
 from komira_buffer.heap_region import HeapRegion
 
 
-trait Accumulator(Movable, Deinitable):  # cov: unreachable a trait declaration holds no code
+trait Accumulator(Movable, Deinitable):
     """Contract for a columnar (SoA) accumulator over dense group IDs.
 
     Implementations extract their own value type from Column internally.
@@ -79,18 +79,18 @@ trait Accumulator(Movable, Deinitable):  # cov: unreachable a trait declaration 
     # Once the JIT corruption is fixed this can become
     # `ref [origin] Column`; until then UnsafePointer is the only shape
     # that works.
-    def update_batch(  # cov: unreachable a trait declaration holds no code
-        mut self,  # cov: unreachable a trait declaration holds no code
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],  # cov: unreachable a trait declaration holds no code
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],  # cov: unreachable a trait declaration holds no code
-        col_offset: Int,  # cov: unreachable a trait declaration holds no code
-        n: Int,  # cov: unreachable a trait declaration holds no code
-    ) raises: ...  # cov: unreachable a trait declaration holds no code
+    def update_batch(
+        mut self,
+        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
+        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        col_offset: Int,
+        n: Int,
+    ) raises: ...
 
-    def finalize_to_column(mut self) raises -> Column[HeapRegion]: ...  # cov: unreachable a trait declaration holds no code
+    def finalize_to_column(mut self) raises -> Column[HeapRegion]: ...
 
-    def flush_partial_to_column(mut self) raises -> Column[HeapRegion]: ...  # cov: unreachable a trait declaration holds no code
+    def flush_partial_to_column(mut self) raises -> Column[HeapRegion]: ...
 
-    def ensure_capacity(mut self, n_groups: Int) raises: ...  # cov: unreachable a trait declaration holds no code
+    def ensure_capacity(mut self, n_groups: Int) raises: ...
 
-    def num_groups(self) -> Int: ...  # cov: unreachable a trait declaration holds no code
+    def num_groups(self) -> Int: ...
