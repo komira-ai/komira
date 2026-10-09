@@ -36,6 +36,7 @@ prefix.dev	the conda package host the toolchain pins download from
 anaconda.org	the conda package index
 crates.io	the Rust package index
 rust-lang.org	the Rust toolchain's distribution and documentation
+docs.rs	Rust crate documentation (DataFusion's GroupsAccumulator) cited by docs/design/udf_runtime_interface.md
 ziglang.org	the zig toolchain's distribution
 sqlite.org	SQLite documentation
 postgresql.org	PostgreSQL documentation

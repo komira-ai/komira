@@ -1,6 +1,6 @@
 # Design: one UDF runtime interface for every language
 
-Status: proposed, not built. Nothing was built or run to write this document. Citations are to komira `origin/main` at `091b0ae450` unless marked **[#1094]**. That mark means the branch `docs/optimized-plan` at `fd50cc05ce` (komira-ai/komira#1094, unmerged; this branch is stacked on it), and covers two files: `docs/design/optimized_plan.md` and `docs/design/optimized_plan_udfs.md`.
+Status: proposed, not built. Nothing was built or run to write this document. Citations are to komira `origin/main` at `091b0ae450` unless marked **[#1094]**. That mark means the branch `docs/optimized-plan` at `578fef413a` (komira-ai/komira#1094, unmerged; this branch is stacked on it), and covers two files: `docs/design/optimized_plan.md` and `docs/design/optimized_plan_udfs.md`.
 
 Section numbers:
 - `§10.x` refers to `optimized_plan_udfs.md`.
@@ -51,7 +51,7 @@ The plan system supports three modes of UDF (§10.1). The mode decides how a run
 | Contexts (§3.3) | One per engine thread | One per engine thread: an interpreter or isolate (Python: a sub-interpreter where the UDF's packages allow it, otherwise one worker process per engine thread; Node: one `worker_threads` isolate). Never one interpreter shared by several engine threads | One per engine thread: the engine thread attached to the one virtual machine as its own thread, with its own instances and UDF state |
 | Global lock | None in the runtime | One per interpreter at most, so it serializes only the engine thread that owns that interpreter | **None.** A runtime with a global lock may not declare this mode (§4.2) |
 | Capabilities (§4.2) | `udf_class` `NATIVE`; `threading` `CONTEXT_PER_THREAD`, fixed by `komira/native` | `udf_class` `MANAGED`; `threading` `CONTEXT_PER_THREAD`, or `SINGLE_THREAD` for a runtime that holds one interpreter per process (one worker process per engine thread) | `udf_class` `MANAGED`; `threading` `THREAD_SAFE`; `global_lock` 0 |
-| Transports (§5.3) | Both. In-process is the native path; the worker transport adds crash isolation and privilege separation. Which transport is the default for native code is open; until it is settled, the recommendation below holds | Both, as the runtime's capabilities allow | Both, as the runtime's capabilities allow; workers first for runtimes that are not yet proven in-process |
+| Transports (§5.3) | Both. In-process in the engine is the default; the worker transport is opt-in, for crash isolation (below) | Both, as the runtime's capabilities allow | Both, as the runtime's capabilities allow; workers first for runtimes that are not yet proven in-process |
 | Conformance (§6.3) | The shared corpus on both transports, plus the native cases | The shared corpus on both transports, plus the managed and per-thread interpreter cases | The shared corpus on both transports, plus the managed and shared virtual-machine cases |
 
 **The mode is a runtime capability, not a plan property.** A runtime does not report the mode as a field; the host derives it from two capabilities (§4.2): `udf_class` `NATIVE` is mode 1; `MANAGED` with `threading` `CONTEXT_PER_THREAD` or `SINGLE_THREAD` is mode 2; `MANAGED` with `THREAD_SAFE` is mode 3. **`THREAD_SAFE` requires a runtime with no global lock.** A runtime reports `global_lock` beside `threading`, and the host refuses a runtime that reports `THREAD_SAFE` with a global lock, so a Python build with a GIL that declares mode 3 is refused (§4.2). A runtime that falsely reports `global_lock` 0 fails a conformance case that measures parallelism (§6.3).
@@ -73,10 +73,10 @@ The plan system supports three modes of UDF (§10.1). The mode decides how a run
 - **ABI tag.** The `runtime_abi` of `komira/native` in `needs.runtimes` is the C ABI major its libraries target (`abi1`).
 - **One id for every native language.** Every native language speaks the same C ABI, so the language is not part of dispatch. A new native language adds an SDK: helpers that export the table from a function's signature (an `extern "C"` Rust function, a `noexcept` C++ function, an exported Mojo function), a typed view of Arrow C Data in that language, and capture of the library into the code layer. It adds no runtime id and no change to the base.
 
-**Native code and the transport.** In-process, a native UDF is machine code inside the engine's address space, with the engine's privileges. In-process has the lowest cost per batch (no copy, no interpreter, no process boundary), but a fault in the library ends the engine, and the library can read whatever the engine process can read. Hence the defaults:
-- On a host whose engine process can reach privileged credentials (a cloud identity, a supervisor channel, another tenant's data), the worker transport is the recommended default for native code. It stays the default until that host can show that in-process native code cannot reach those credentials.
-- On the producer's own machine, and on a host that has shown it, in-process is the default.
-- Either way, the choice is host policy (§5.3) and the plan does not change.
+**Native UDFs ship at the first release, in-process by default.** In-process, a native UDF is machine code inside the engine's address space, with the engine's privileges. It has the lowest cost per batch (no copy, no interpreter, no process boundary), and a fault in the library ends the engine and fails the run.
+- **What in-process code could reach.** The engine holds only what the run itself may use, which is the user's own. The one secret a run must not reach is the supervisor's heartbeat token. The supervisor holds no long-lived credential and none that meters usage: it holds a run-scoped id and token used only to authenticate its heartbeats, and the party that receives the heartbeats meters the run's usage by accumulating them (`optimized_plan_udfs.md` §10.10 [#1094]).
+- **The default rests on one rule: the heartbeat token stays in the supervisor.** The supervisor runs as its own process under its own user id, distinct from the engine's, and never passes the token to the engine: not in its arguments, its environment, a file the engine's user id can read, or an inherited descriptor. So native code in the engine cannot read the token, forge or suppress a heartbeat, or trace or signal the supervisor (§7). A host that cannot meet this rule runs native UDFs in workers.
+- **The worker transport is opt-in, for crash isolation:** a fault ends a worker, not the engine (§5.1). A host enables it by policy, or a run by an option outside the plan; the transport is never in the plan (§10.13), so the plan does not change.
 
 ## 2. What exists today, and why the shape must change now
 
@@ -267,7 +267,7 @@ message RuntimeNeed {            // in DeclaredNeeds (optimized_plan.md §6.1)
 
 - **`needs.runtimes`** lists one entry for each distinct runtime id that `needs.udfs` uses.
   - It is sorted by runtime id.
-  - It has at most one entry per runtime id (`OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`): a base ships one ABI of each runtime (§10.11), so a plan naming two could never be admitted.
+  - It has at most one entry per runtime id (`OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`): each base ships one ABI of each runtime it carries (§10.11), so a plan naming two could never be admitted. A release ships several bases, one per supported CPython minor and one per supported Node major, and a remote run uses the base of the client's version.
   - It has no missing and no unused runtime (`OPTIMIZED_UDF_RUNTIME_UNDECLARED`, `OPTIMIZED_NEEDS_RUNTIME_UNUSED`).
   - It is part of the `DigestTrailer` (§7.1).
   - A scheduler can place a plan using this list from the header alone.
@@ -301,7 +301,7 @@ The physical plan is the host's lowering of the optimized plan. It is not a wire
 At lowering, the host binds the following for each runtime. None of it is recorded in the plan.
 
 - **The runtime handle**, taken from the image's runtime registry (§8.3), together with the runtime's capabilities (§4.2).
-- **The transport**: in-process or worker (§5). It is the host's policy intersected with the runtime's capabilities.
+- **The transport**: in-process or worker (§5). It is the host's policy intersected with the runtime's capabilities. For `komira/native` it is in-process unless the host or the run opts into the worker transport (§1.2, §5.3).
 - **Contexts and instances**, by the runtime's mode (§1.2) and threading model (§4.2). A *context* is what one engine thread calls: an interpreter, an isolate, a thread attached to a shared virtual machine, or a native library's per-thread state. An *instance* is one loaded UDF inside one context. In every mode, each engine thread that runs a UDF operator has its own context, holding an instance of each UDF that thread runs, and no context is called by two engine threads at once.
   - `CONTEXT_PER_THREAD` (modes 1 and 2): independent contexts in one process, one per engine thread.
   - `SINGLE_THREAD` (mode 2): one context per process. On the worker transport the host runs one worker process per engine thread, as many as the pool size. In-process (the host interpreter, §5.3) the host runs every UDF operator of that runtime on one engine thread, a pool of one, so the interpreter is never shared by several engine threads. A `SINGLE_THREAD` runtime run in-process is therefore a pool of one that serializes every UDF operator of that runtime, so hosts run `SINGLE_THREAD` runtimes on the worker transport (one worker per engine thread) unless they accept that serialization.
@@ -557,7 +557,7 @@ Every entry returns a `komira_udf_status` and on failure fills the host's `komir
 | `ERR_RAISED` | `UDF_RAISED`, with `user_trace` and the row (per §10.7, the host bisects a batch that is not `VOLATILE`) |
 | `ERR_RETURN_TYPE`, `ERR_LENGTH` | `UDF_RETURN_TYPE_MISMATCH`, `UDF_BATCH_LENGTH_MISMATCH` |
 | `ERR_FIELD_NOT_DECLARED` | `UDF_FIELD_NOT_DECLARED`, naming the field, the read set and the row, with the fix-it "add it to `columns=[...]`". Never retried: the same batch fails the same way |
-| `ERR_STATE_TOO_LARGE`, `ERR_GROUP_TOO_LARGE` | `UDF_STATE_TOO_LARGE`, `UDF_GROUP_TOO_LARGE` (the host names the key from `group`) |
+| `ERR_STATE_TOO_LARGE`, `ERR_GROUP_TOO_LARGE` | `UDF_STATE_TOO_LARGE`, `UDF_GROUP_TOO_LARGE` (the host names the key from `group`; `UDF_STATE_TOO_LARGE` also names the cap, a fixed 64 MiB of Arrow state per group at the first release, §10.2) |
 | `ERR_LOAD`, `ERR_CODE_DIGEST`, `ERR_DESCRIPTOR` | `OPTIMIZED_UDF_CODE_UNLOADABLE`, `OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`, `OPTIMIZED_UDF_DESCRIPTOR_INVALID` |
 | `ERR_CANCELLED`, `ERR_DEADLINE` | The run's cancel, or `UDF_DEADLINE_EXCEEDED` (`UDF_STEP_TIMED_OUT` for a step) |
 | `ERR_INSTANCE_LOST` | Not an error by itself: the host closes the context, opens a new one, and retries the batch under the delivery rule (§3.4) |
@@ -585,7 +585,7 @@ The same library holds compaction and scatter (§3.4 rules 1-2) and the error ta
   - Node: Node-API has no call that stops running JavaScript in an isolate; the stable mechanism is `worker.terminate()`, which destroys the isolate.
   - When interrupting leaves the context unusable, the runtime returns `ERR_INSTANCE_LOST` and the host reopens the context.
 - **Deadlines** arrive with each call, in `deadline_ns`. A runtime that notices one has passed returns `ERR_DEADLINE`. This is cooperative.
-- **Hard limits** (`max_runtime_ms` for a step, a host's limit per batch) are enforced only in the worker transport, by killing the worker. In-process, there is no safe way to stop code that ignores the flag. That is one reason the host prefers workers for untrusted code (§7).
+- **Hard limits** (`max_runtime_ms` for a step, a host's limit per batch) are enforced only in the worker transport, by killing the worker. In-process, there is no safe way to stop code that ignores the flag. That is one reason a shared host runs managed runtimes in workers (§7), and why a native UDF that must be stoppable opts into the worker transport.
 
 ### 4.8 Memory accounting
 
@@ -601,7 +601,7 @@ The same library holds compaction and scatter (§3.4 rules 1-2) and the error ta
 Workers give four things:
 
 - **Crash containment.** A segfault in a user's native extension ends a worker, not the engine.
-- **Isolation.** A separate user id, and no access to the supervisor's credentials or channels (§10.10).
+- **Isolation.** A separate user id, so a worker cannot trace or signal the engine, and no access to the supervisor's heartbeat token or channel (§10.10).
 - **Hard limits.** The worker is killed on a deadline, and each process has its own memory limit.
 - **Scaling per core** for a runtime whose contexts cannot run in parallel in one process, such as CPython with a global interpreter lock.
 
@@ -647,7 +647,7 @@ The host chooses: `transport = host policy ∩ runtime.transports`. This is the 
 | `komira/python` (CPython with a GIL) | 2 | `SINGLE_THREAD`, `thread_affine`, `global_lock` 1; `IN_PROCESS` (`HOST_INTERPRETER`), `WORKER` (`EMBEDDED`). Later, `CONTEXT_PER_THREAD` with one sub-interpreter per engine thread where the UDF's packages allow it | Worker processes, one per engine thread | In-process on one engine thread for a quick preview (§3.3); workers for a full local run (§10.10's "same path") |
 | `komira/python` on the free-threaded ABI (`cp313t`), later | 3 | `THREAD_SAFE`, `global_lock` 0 (refused if the GIL is enabled, below) | Workers (for crash containment), with one context per engine thread inside each | In-process |
 | `komira/node` | 2 | `CONTEXT_PER_THREAD`, `global_lock` 0; `IN_PROCESS` (Node-API: one `worker_threads` isolate per context, Arrow buffers as external `ArrayBuffer`s), `WORKER` (launcher: `node`) | Worker processes, or in-process isolates where host policy allows | In-process isolates (the engine runs as a Node addon) |
-| `komira/native` (Mojo, Rust, C, C++, Zig; stage S3b) | 1 | `CONTEXT_PER_THREAD`, `global_lock` 0, fixed; each library must allow it (§1.2); both | Worker, until the host shows that in-process native code cannot reach its privileged credentials (§1.2); then in-process | In-process |
+| `komira/native` (Mojo, Rust, C, C++, Zig; first release; stages S3b, S3c) | 1 | `CONTEXT_PER_THREAD`, `global_lock` 0, fixed; each library must allow it (§1.2); both | In-process, when the heartbeat token stays in the supervisor (§1.2); the worker transport by opt-in, for crash isolation; workers on a host that cannot keep the token out of the engine | In-process |
 | Future: JVM, .NET | 3 | `THREAD_SAFE`, `global_lock` 0; `WORKER` first | Worker | Worker |
 | Future: Go (a Go shared library carries the Go runtime, one per process; §1.2) | 3 | `THREAD_SAFE`, `global_lock` 0; `WORKER` first | Worker | Worker |
 | Future: `komira/wasm` (any language compiled to a WASM component, with a WIT world that mirrors §4.3, run by Wasmtime) | 2 | `CONTEXT_PER_THREAD`, `global_lock` 0; both | In-process (a memory-safe sandbox, with fuel or epoch deadlines) | In-process |
@@ -705,7 +705,10 @@ Notes:
    - captures that are too large (`UDF_CAPTURE_TOO_LARGE`).
 
    §10.6 is the Python and TypeScript instance.
-4. **The code layer.** Code objects go under the image's code prefix, named by hex sha256. That prefix is the `code_root` a runtime receives in `komira_udf_spec`.
+4. **The code layer and the dependencies.** Code objects go under the image's code prefix, `/komira-code/`, named by hex sha256. That prefix is the `code_root` a runtime receives in `komira_udf_spec`. Dependencies live in the image, never in the plan (§10.11):
+   - each runtime's installed dependencies go in its environment directory, `/opt/env/<runtime>/` (for `komira/python`, a virtual environment at `/opt/env/komira/python/`; earlier revisions named it `/opt/venv/`, which maps to that path and is never shipped);
+   - a JavaScript bundle includes its pure-JavaScript dependencies and goes in the code layer under `/komira-code/`;
+   - a JavaScript package with a native addon stays outside the bundle; the SDK records its name and exact version, and the image builder installs it for the host's platform into `/opt/env/komira/node/`, where the runtime resolves the bundle's external imports (§10.6).
 5. **A local run through the same runtime and transport** (§10.10's "same path"), so that a capture error or a type error fails on the user's machine first.
 6. **The read set of each `ROW` UDF** (§3.1), before the plan is optimized: `columns=[...]`, else the union of the recording proxy's reads during the local run and the SDK's static analysis, else every input column. The recording proxy treats whole-row operations (iteration, length, conversion to a dict or tuple, unpacking) as "undetermined".
 
@@ -781,7 +784,7 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
 
 - **Reference runtimes ship with the harness.**
   - `komira-test/echo`, written in C, implements every entry trivially, with no user code and no code objects. It proves the harness and the transports independently of any language, and it is the template a new managed runtime copies: the C table it implements is the part every managed runtime writes around its interpreter. A test-only setting makes it report any `threading` and `global_lock`, or take one process-wide mutex around every call, so the mode cases below can plant their mutants without a language.
-  - `komira/native` with two fixture libraries next to echo: one in C (`komira-test/native-c`) and one in Mojo (`komira-test/native-mojo`). Each implements the corpus fixtures as exported native UDFs. The C library is the template a new native language's SDK copies; the Mojo library proves that a Mojo package can export the table. It builds with the existing `mojo_shared_lib` rule, which emits a C-ABI shared library from `@export` functions and can check that the library exports exactly the named symbols (`tools/build/mojo/README.md:20`, `:704-722`).
+  - `komira/native` with fixture libraries next to echo, one per native language at the first release: C (`komira-test/native-c`), Mojo (`komira-test/native-mojo`), Rust (`komira-test/native-rust`), C++ (`komira-test/native-cpp`) and Zig (`komira-test/native-zig`). Each implements the corpus fixtures as exported native UDFs. The C library is the template a new native language's SDK copies; the Mojo library proves that a Mojo package can export the table. It builds with the existing `mojo_shared_lib` rule, which emits a C-ABI shared library from `@export` functions and can check that the library exports exactly the named symbols (`tools/build/mojo/README.md:20`, `:704-722`).
 - **Cases per mode.** The harness derives the mode from `describe` (§1.2) and runs these in addition to the shared corpus, on both transports. A "managed" case runs for modes 2 and 3.
 
 | Mode | Case | Defect caught | Planted mutant |
@@ -790,10 +793,12 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
 | 1 (native) | A spec with libraries only for another platform | A wrong-platform library is loaded, or the refusal comes mid-run | `validate` accepts any platform and `load` picks the first library |
 | 1 (native) | Two fixture libraries that both define the same internal symbol | One library's symbol resolves into the other | Load with `RTLD_GLOBAL` |
 | 1 (native) | A library that exports `komira_udf_runtime_init_v1` instead of `komira_udf_native_init_v1`, or a second symbol | A runtime and a user library are confused | Resolve either symbol |
-| 1 (native) | A fixture that raises on row 3: a Mojo function declared `raises`, behind the Mojo export helper (S3b); later a C++ fixture that throws and a Rust fixture that panics, behind their helpers | An error escaping the export helper: unwinding across the ABI, or a Mojo error with no `ERR_RAISED` | An export helper without the catch |
+| 1 (native) | A fixture that raises on row 3: a Mojo function declared `raises`, behind the Mojo export helper (S3b); a C++ fixture that throws and a Rust fixture that panics, behind their helpers (S3c) | An error escaping the export helper: unwinding across the ABI, or a Mojo error with no `ERR_RAISED` | An export helper without the catch |
 | 1 (native) | A library whose `describe` reports `SINGLE_THREAD`, `thread_affine`, no `IN_PROCESS`, or another `runtime_id` | The host binds a library to concurrency it cannot take | `load` forwards without checking the library's capabilities |
 | 1 (native) | Two Mojo fixture libraries loaded in one process, called from several engine threads | The Mojo runtime library cannot be shared in one process | None: it tests an assumption (§1.2), not host code. Red means Mojo libraries run on workers only |
-| 1 (native) | A fixture that dereferences NULL, on the worker transport | The engine dies with the library | Run the native default in-process on a host whose policy says worker |
+| 1 (native) | A fixture that dereferences NULL, with the worker transport opted into | The engine dies with the library | Ignore the opt-in and run the library in-process |
+| 1 (native) | In-process, a fixture that looks for the heartbeat token: its environment and arguments, `/proc/<supervisor pid>/environ` and `mem`, files the engine's user id can read, every inherited descriptor; then `ptrace` and a signal to the supervisor | The token, or the supervisor, is reachable from the engine, so in-process native code could forge or suppress heartbeats | The supervisor passes the token to the engine in an environment variable; the supervisor and the engine share one user id |
+| plan case | A mergeable aggregate whose state for one group grows to 64 MiB, then one byte past it | The fixed cap is not enforced, is off by one, or is read from the plan | Accept a state equal to the cap plus one byte; take the cap from `max_state_bytes`. The case asserts `UDF_STATE_TOO_LARGE` naming the group key and the 64 MiB cap, and success at exactly 64 MiB |
 | managed | Two contexts in parallel, each with a cached model | State shared across interpreters, isolates or per-thread UDF state | One interpreter, or one UDF state, shared by all contexts |
 | all, except `SINGLE_THREAD` in-process (a pool of one) | Parallelism: N engine threads (N ≥ 4, each on a reserved core) each call a fixture that spins on the CPU for 200 ms in user code; the harness compares the process's CPU time with the wall time | A lock shared across engine threads: a global interpreter lock in a `THREAD_SAFE` runtime, or one interpreter or library lock serving every engine thread. The case requires CPU time ≥ 0.75 × N × wall time; under one lock it is about 1 × wall time | Echo with the process-wide mutex, reporting `THREAD_SAFE` and `global_lock` 0; on a GIL build, `komira/python` hard-coded to report `THREAD_SAFE` and `global_lock` 0 |
 | 3 | A runtime that reports `THREAD_SAFE` with `global_lock` 1 (echo's test setting; a GIL build of `komira/python` patched to declare `THREAD_SAFE`) | A runtime with a global lock is bound as a shared parallel virtual machine | The host binds contexts from `threading` without reading `global_lock` |
@@ -802,34 +807,35 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
 | managed | A context used from a thread other than the one that opened it (`thread_affine`) | A thread state or env used off its thread | The host calls from any engine thread |
 | managed | Runtime shutdown with arrays still held by the host | A release that needs the interpreter after it is gone | Finalize the interpreter before draining the release queues |
 
-- **The coverage assertion** covers every value of `UdfKind`, `CodeForm`, `UdfStability`, `UdfNullMode`, each capability bit, each of the three modes, both values of `global_lock` with `THREAD_SAFE` (bound and refused), and each `komira_udf_status`, on both transports.
+- **The coverage assertion** covers each native language's fixture library, every value of `UdfKind`, `CodeForm`, `UdfStability`, `UdfNullMode`, each capability bit, each of the three modes, both values of `global_lock` with `THREAD_SAFE` (bound and refused), and each `komira_udf_status`, on both transports.
 
 ## 7. Security, isolation, resource limits, crash containment
 
 - **The engine treats user code as untrusted.**
-  - In-process execution puts user code inside the engine's address space, with the engine's credentials and memory.
-  - So a host runs user code in workers by default, and permits in-process execution only by policy, in three cases:
+  - In-process execution puts user code inside the engine's address space, with the engine's privileges and memory. Those are the run's own: the engine holds only what the run itself may use.
+  - **The heartbeat token stays in the supervisor.** The supervisor holds no long-lived credential and none that meters usage, only a run-scoped id and token that authenticate its heartbeats; usage is metered from the accumulated heartbeats. It runs as its own process under its own user id, and the token never reaches the engine: not in its arguments, its environment, a readable file or an inherited descriptor (`optimized_plan_udfs.md` §10.10 [#1094]). So no user code, in the engine or in a worker, can read the token, forge or suppress a heartbeat, or trace or signal the supervisor. A conformance case holds the host to this (§6.3).
+  - **Managed runtimes run in workers by default on a shared host,** for crash containment, hard limits and per-worker memory. A host permits them in-process only by policy, in three cases:
     - on the producer's own machine;
     - on a single-tenant host, where a crash that fails the run is acceptable;
     - for runtimes whose sandbox is the boundary (WASM).
-  - Native code (mode 1, §1.2) follows the same rule: in-process only where the host can show that in-process native code cannot reach its privileged credentials, and workers otherwise.
+  - **Native code (mode 1, §1.2) runs in-process by default,** on every host that keeps the heartbeat token in the supervisor; a host that cannot runs it in workers. The worker transport is opt-in for crash isolation, by host policy or a run option outside the plan.
 - **Workers are isolated.**
-  - They run as a separate user id.
-  - They cannot read the supervisor's credentials or heartbeat channel, and cannot trace or signal the engine or the supervisor (§10.10).
+  - They run as a further user id of their own, distinct from the engine's and the supervisor's.
+  - They cannot read the supervisor's heartbeat token or channel, and cannot trace or signal the engine or the supervisor (§10.10).
   - The shared-memory region is created per worker and passed only to that worker.
   - The engine copies every worker-to-engine payload out of shared memory before it validates it (§5.2), so a worker cannot change bytes the engine has already checked.
   - Each worker has its own memory and CPU limit.
-- **Only base runtimes run in-process.** A runtime library supplied by an added image layer (§8.3) runs only in workers. It is never loaded into the engine or the supervisor, so an added layer cannot place code in the engine. `komira/native` is a base runtime; the libraries it loads are user code from the code layer and follow the native default above.
+- **Only base runtimes run in-process.** A runtime library supplied by an added image layer (§8.3) runs only in workers. It is never loaded into the engine or the supervisor, so an added layer cannot place code in the engine. `komira/native` is a base runtime; the libraries it loads are user code from the code layer and follow the native default above (in-process, with the worker transport opt-in).
 - **Code integrity.** On both transports, `load` verifies every code object against its sha256 before use (`OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`). Admission already checks that the code is present (§10.11 check 4).
 - **Resource limits.**
   - Memory per worker, from `worker_mem_bytes` or the observed footprint.
   - Native thread pools set to each worker's share of the CPUs (§10.10).
-  - State per group capped by `max_state_bytes`.
+  - State per group capped at a fixed 64 MiB at the first release, the same on every host and not settable by a plan; a group over it fails the run with `UDF_STATE_TOO_LARGE`, naming the group key (§10.2). Making the cap tunable is tracked in komira-ai/komira#1148, and `max_state_bytes` (§10.8) is reserved for it.
   - Hard deadlines only in workers (§4.7).
 - **Crash containment.**
   - A worker crash is `UDF_WORKER_CRASHED`; the batch is retried if the UDF is not `VOLATILE`, and the engine survives.
   - An in-process crash kills the engine process and fails the run. The supervisor reports it as a UDF fault when the runtime library is on the faulting stack *(inferred: this needs the supervisor's crash reporter)*.
-  - This asymmetry is why workers are the default on remote hosts.
+  - This asymmetry is why managed runtimes default to workers on remote hosts, and why a native UDF that must not fail the run on a fault opts into the worker transport.
 - **Captured data is data** (§10.6). Whoever can pull the image can read it, so the producer lists large captures before upload.
 
 ## 8. Versioning
@@ -888,11 +894,12 @@ Each stage lands with its tests welded and its testing plan stated: what each te
 | S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `komira_arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case in-process; the leak, double-release and skip-validation mutants go red |
 | S2 | The conformance corpus package (ABI cases), the harness and the coverage assertion; the runtime-swap invariance test for the optimizer (§3.2) | tests, optimizer | The corpus runs against echo; the invariance mutant goes red |
 | S3 | The worker transport: `komira_udf_worker` and `komira-udf-worker`, slot heaps, worker-to-engine copy-out, IPC framing, frame credits, `HELLO`, cancel, crash mapping; supervisor integration (user id, limits, `posix_spawn`) | engine, supervisor | Echo passes the corpus on both transports; the worker-abort, held-views and cancel cases pass |
-| S3b | The `komira/native` runtime (§1.2): digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo; the native cases (§6.3) | engine, Mojo | Both fixture libraries pass the corpus and the native cases on both transports; the digest-after-`dlopen`, `RTLD_GLOBAL`, unchecked-capabilities and missing-catch mutants go red (the catch case uses the Mojo fixture's raising function; C cannot raise) |
+| S3b | The `komira/native` runtime (§1.2): digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo; the native cases (§6.3) | engine, Mojo | Both fixture libraries pass the corpus and the native cases on both transports; the digest-after-`dlopen`, `RTLD_GLOBAL`, unchecked-capabilities and missing-catch mutants go red (the catch case uses the Mojo fixture's raising function; C cannot raise); the heartbeat-token case passes in-process |
+| S3c | Native SDKs for Rust, C++ and Zig, at the first release with C and Mojo: export helpers (Rust catches panics, C++ is `noexcept`, §5.3), typed views of Arrow C Data, capture of the library into the code layer; fixture libraries `komira-test/native-rust`, `komira-test/native-cpp`, `komira-test/native-zig` | engine, SDKs | Each fixture library passes the corpus and the native cases on both transports; the C++ throw and Rust panic cases go red without the catch |
 | S4 | The `komira/python` runtime: in-process on the host interpreter, and worker (CPython embedded in the worker); batch formats in the descriptor; the requirements of §5.3; the `ROW` proxy, and the producer's recording proxy and read set (§6.1) | Python | Python fixtures pass the corpus, `ROW` cases included, on both transports |
 | S5 | The `komira/node` runtime: Node-API in-process, with one `worker_threads` isolate per context and external `ArrayBuffer`s with a copy fallback; worker processes launched by `node` | Node | Node fixtures pass the corpus on both transports |
 | S6 | Physical operators (`UdfProject`, `UdfFrame`, `UdfAggregate`, the groups accumulator, `UdfStep`) in lowering, linking `komira_udf_host`; the plan cases. They replace the SDK-side walk that works around the package cycle (`expr_udf_sites.mojo:1-30`) | engine | UDF plan cases run through lowering, not through the SDK |
-| Later | ABI 1.1 candidates (§8.1); third-party runtime layers (§8.3); native SDKs for Rust, C++ and Zig (each adds fixtures, no runtime id); managed runtimes for JVM, .NET, Go and WASM; free-threaded Python; GPU devices; remote transport | — | Each native SDK adds corpus fixtures; each managed runtime adds a runtime id and fixtures; neither changes the format |
+| Later | ABI 1.1 candidates (§8.1); third-party runtime layers (§8.3); further native languages (each adds an SDK and fixtures, no runtime id); a tunable per-group state cap (komira-ai/komira#1148); managed runtimes for JVM, .NET, Go and WASM; free-threaded Python; GPU devices; remote transport | — | Each native SDK adds corpus fixtures; each managed runtime adds a runtime id and fixtures; neither changes the format |
 
 **Validating the design with prototypes.** Five prototypes exercise the cells this design depends on. Each should implement the §4.3 table, or the subset it exercises, so its numbers measure this interface and not a one-off bridge.
 
@@ -902,9 +909,9 @@ Each stage lands with its tests welded and its testing plan stated: what each te
 | P2: Python worker, over Arrow IPC on shared memory | The framing of §5.2, in-place decode engine-to-worker, slot heaps, crash mapping; embedding with `libpython` loaded globally | Round-trip cost per batch compared with P1, the cost of the worker-to-engine copy, and the batch size at which the difference stops mattering. If the slot cannot be decoded in place, §5.2 is wrong and must say so |
 | P3: Node in-process, through Node-API | Wrapping external `ArrayBuffer`s with the release queued from the finalizer; the handoff to an isolate; the `node` launcher | Handoff latency per batch; how long `args` stay pinned when user code keeps no view, which feeds §4.8 |
 | P4: per-thread contexts (a pool of Python workers, Node isolates) | Mode 2: `CONTEXT_PER_THREAD`, `SINGLE_THREAD` workers and the pool binding (§3.3) | The scaling curve from 1 to N cores; memory per context with a loaded model, which feeds the pool-size rule |
-| P5: one native library, in-process and in a worker | The `komira/native` loader and forwarding (§1.2); the same library bytes on both transports | Cost per batch on each transport at several batch sizes. This sets how much the native worker default costs, and the batch size at which a host that keeps the worker default stops paying for it |
+| P5: one native library, in-process and in a worker | The `komira/native` loader and forwarding (§1.2); the same library bytes on both transports | Cost per batch on each transport at several batch sizes. This sets how much opting a native UDF into the worker transport costs, and the batch size at which the opt-in stops costing more than the crash isolation is worth |
 
-Whatever the prototypes measure, the results do not change the plan format. They choose host defaults and capability values. Keeping the transport out of the plan is what makes this true.
+Every prototype and benchmark here runs on the build farm's existing benchmark support, not a harness of its own. Whatever the prototypes measure, the results do not change the plan format. They choose host defaults and capability values. Keeping the transport out of the plan is what makes this true.
 
 ## 10. Options considered
 
@@ -931,7 +938,9 @@ Whatever the prototypes measure, the results do not change the plan format. They
 | `THREAD_SAFE` as one context shared by all engine threads (an earlier draft of this document) | Rejected. Each engine thread keeps its own UDF state in every mode, so a UDF's cached objects are never contended; mode 3 shares only the virtual machine, which has no global lock (§1.2). |
 | One in-process GIL interpreter serving every engine thread | Rejected. The GIL would be a lock shared across engine threads. A GIL runtime reaches parallelism through one interpreter per engine thread (mode 2). |
 | One runtime id per native language (`komira/rust`, `komira/mojo`) | Rejected. Native languages share one ABI, so one loader serves all; the language is in the descriptor for diagnostics. A new native language adds an SDK, not a runtime. |
-| Native UDFs in-process by default on every host | Rejected until a host can show that in-process native code cannot reach its privileged credentials. Workers are the recommended default for native code until then (§1.2). |
+| Native UDFs in workers by default, until a host shows in-process native code cannot reach privileged credentials (an earlier draft) | Rejected. The supervisor holds no credential that meters usage, only a run-scoped heartbeat token, kept in its own process and user id and never passed to the engine, so in-process native code reaches only the run's own privileges. Native UDFs run in-process by default, and the worker transport is opt-in for crash isolation (§1.2, §7). |
+| A per-group state cap set per host or per plan at the first release | Not chosen. A fixed 64 MiB cap is the same on every host, so a plan that runs on one runs on all; tuning it is komira-ai/komira#1148, with `max_state_bytes` reserved. |
+| One base carrying several CPython minors or Node majors | Rejected. A release ships one base per CPython minor and one per Node major, and a remote run follows the client's version (§3.2). |
 | Go as a native language (mode 1), or in mode 2 | Rejected. A Go shared library carries the Go runtime (scheduler, collector, signal handlers, one per process), so it is managed; that runtime runs cgo calls from several threads in parallel with no global lock, so it is mode 3 (§1.2). |
 | One generic worker executable for every runtime | Rejected. Node-API is exported by `node`, and embedding Node is not ABI-stable. Each manifest names its launcher; the protocol library is shared. |
 | No ABI promise at all (internal to the image only) | Rejected. Third-party runtimes would need a rebuild for every base release. The promise costs only a header and a version check. |
