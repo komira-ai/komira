@@ -73,7 +73,7 @@ from komira_objectstore.sublineage_base_fold import (
     SubLineageBaseFold,
 )
 
-from .chunk_walk import is_not_found_msg, restart_point_after_failed_read
+from .chunk_walk import restart_point_after_failed_read
 from .manifest_body import ManifestBody, chunk_has_segment
 from .partition_assignment import sublineage_prefix
 
@@ -470,11 +470,15 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         appears here. O(live `_base` chunks) — retention-bounded (the existing
         log-start advance reaps below the folded watermark), NOT N x rounds.
 
-        Reaped-mid-walk chunks (404) are skipped (a benign race; the next call
-        re-derives from the surviving set + the source `_LOG_START` covers any
-        reaped folded prefix). An ABSENT `_base` (no fold yet) yields an empty
-        set -> every shard's `_base`-derived prefix is 0 (the source `_LOG_START`
-        then carries the watermark); an error reading the head raises."""
+        A chunk that cannot be read restarts the walk from a `_LOG_START` that
+        moved past it (reaped mid-walk; the set restarts too, so it is the set
+        the resolver's `_base` capture restarts to), or raises when the chunk
+        is missing at or above `_LOG_START` (a torn `_base`: dropping its key
+        would lower the folded prefix and the fold would re-append chunks
+        already in `_base`) (chunk_walk.mojo). An ABSENT `_base` (no fold yet)
+        yields an empty set -> every shard's `_base`-derived prefix is 0 (the
+        source `_LOG_START` then carries the watermark); an error reading the
+        head raises."""
         var keys = List[String]()
         var base = self.base_manifest()
         var head = base.read_head_authoritative()  # no `_base`: chunk_seq -1
@@ -488,10 +492,11 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
                     keys.append(String(body.object_key))
                 seq += Int64(1)
             except e:
-                if is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue  # reaped mid-walk (benign) — skip
-                raise e^
+                ls = restart_point_after_failed_read(
+                    base, seq, e^, "SegmentBaseInputs._base_object_keys"
+                )
+                keys = List[String]()
+                seq = ls.log_start_seq
         _ = base^
         return keys^
 

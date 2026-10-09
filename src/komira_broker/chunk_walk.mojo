@@ -20,6 +20,10 @@
 # pass); otherwise the chunk is missing from the live range (a torn lineage)
 # and the walk raises. Any other read error is re-raised unchanged.
 #
+# The `_base` key walk the fold's watermark reads keeps no offsets, but goes
+# through the same helper: its key set must be the one the resolver's `_base`
+# capture restarts to, and a torn `_base` must not silently lose a key.
+#
 # Each restart moves the walk's start strictly forward, and a walk ends at
 # the head it read first, so a walk restarts at most once per chunk.
 # =============================================================================

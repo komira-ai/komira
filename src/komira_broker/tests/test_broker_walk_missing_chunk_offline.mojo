@@ -20,14 +20,18 @@
 #     returns renumbered offsets with no error.
 #
 # A restart keeps nothing from the pass before it: a chunk read before the
-# reap may sit below the new `_LOG_START` too.
+# reap may sit below the new `_LOG_START` too (the `*_drop_first_pass` legs,
+# plain and tagged). A restart starts at the new `_LOG_START`'s seq, not at
+# the chunk after the failed one: a reap may move `_LOG_START` past chunks
+# the reaper has not deleted yet (the `*_far_reap` legs).
 #
 # Walks covered: ConsumeCore.resolve_index; the sub-lineage resolver's `_base`
 # walks (plain, tagged, and the un-cached one) and block walks (plain and
 # tagged); SegmentBaseInputs.walk_shard_chunks (the capture the cached replay
-# reads) and _base_folded_prefix; SegmentBaseFold's materialize walk and the
-# migration's materialize walk, which write as they go and so raise on any
-# missing chunk, reaped or not.
+# reads), _base_folded_prefix and the `_base` key walk the fold's watermark
+# reads; SegmentBaseFold's materialize walk and the migration's materialize
+# walk, which write as they go and so raise on any missing chunk, reaped or
+# not.
 #
 # Each test runs on its own; main reports every failure, then fails.
 # =============================================================================
@@ -35,8 +39,9 @@
 from std.testing import assert_equal, assert_raises
 
 from komira_broker.consume_core import ConsumeCore, SegmentRef
-from komira_broker.manifest_body import encode_manifest_body
+from komira_broker.manifest_body import MARKER_NONE, encode_manifest_body
 from komira_broker.partition_assignment import sublineage_prefix
+from komira_broker.read_committed import ChunkTxnTag
 from komira_broker.sublineage_base_inputs import SegmentBaseInputs
 from komira_broker.sublineage_consume import (
     SubLineageConsumeResolver,
@@ -255,6 +260,19 @@ def _arm_reap_chunk1(fs: _FaultStore, prefix: String, skip: Int) raises:
     fs.arm(
         "get", _chunk(prefix, 1), skip, 1,
         "@reap:stage/ls2|" + log_start_key(prefix).raw(),
+    )
+
+
+def _arm_far_reap_chunk0(fs: _FaultStore, prefix: String, skip: Int) raises:
+    """The GET of chunk 0 after `skip` earlier ones finds it reaped, but the
+    reap moved `_LOG_START` two chunks on, to (seq 2, offset 7), and the
+    reaper has not deleted chunk 1 yet: chunk 1 still reads, and sits below
+    the new `_LOG_START`."""
+    var staged = encode_log_start(LogStart(Int64(7), Int64(2), String("")))
+    _ = fs.inner.put(Path.parse("stage/ls3"), staged)
+    fs.arm(
+        "get", _chunk(prefix, 0), skip, 1,
+        "@reap:stage/ls3|" + log_start_key(prefix).raw(),
     )
 
 
@@ -522,6 +540,179 @@ def test_shard_capture_restart_drops_first_pass() raises:
     assert_equal(cap.chunks[0].object_key, "k3")
 
 
+def test_base_walk_tagged_restart_drops_first_pass() raises:
+    # The tagged twin: its index and its `_base` key capture both restart.
+    var fs = _FaultStore()
+    _folded_base(fs)
+    _arm_reap_chunk1(fs, _base(), 1)
+    var r = SubLineageConsumeResolver[_FaultStore](fs.clone(), _PART)
+    var keys = List[String]()
+    keys.append("earlier")
+    var tagged = r._resolve_base_index_tagged_capturing(keys)
+    _assert_only_k3(_segs(tagged), Int64(7))
+    assert_equal(len(keys), 2)
+    assert_equal(keys[0], "earlier")
+    assert_equal(keys[1], "k3")
+
+
+def test_block_walk_tagged_restart_drops_first_pass() raises:
+    var fs = _FaultStore()
+    _three_chunks(fs, _shard())
+    var r = SubLineageConsumeResolver[_FaultStore](fs.clone(), _PART)
+    _arm_reap_chunk1(fs, _shard(), 1)
+    # Entries another block appended before this walk stay.
+    var tidx = List[SubLineageTaggedSegment]()
+    tidx.append(
+        SubLineageTaggedSegment(
+            seg=SegmentRef(
+                chunk_seq=Int64(9), base_offset=Int64(90),
+                last_offset=Int64(99), record_count=Int64(10),
+                object_key=String("other"), crc32=UInt32(0),
+            ),
+            tag=ChunkTxnTag(MARKER_NONE, String(""), Int64(0)),
+        )
+    )
+    r._append_block_segments_tagged(tidx, _block())
+    var segs = _segs(tidx)
+    assert_equal(len(segs), 2)
+    assert_equal(segs[0].object_key, "other")
+    assert_equal(segs[1].object_key, "k3")
+    assert_equal(segs[1].base_offset, Int64(107))
+
+
+def test_folded_prefix_restart_resets_folded() raises:
+    # Only k1 is in `_base`. The walk counts k1 (folded 3), then chunk 1 is
+    # reaped and `_LOG_START` moves to (seq 2, offset 7): the restart seeds
+    # folded at 7, and k3 is not in `_base`, so the prefix is 7.
+    var fs = _FaultStore()
+    _three_chunks(fs, _shard())
+    var inputs = SegmentBaseInputs[_FaultStore](fs.clone(), _PART)
+    var sh = _m(fs, _shard())
+    _arm_reap_chunk1(fs, _shard(), 1)
+    var keys = List[String]()
+    keys.append("k1")
+    assert_equal(inputs._base_folded_prefix(sh, keys), Int64(7))
+
+
+# =============================================================================
+# A restart starts at the new `_LOG_START`'s seq (the reap moved it past a
+# chunk the reaper has not deleted yet)
+# =============================================================================
+
+
+def test_consume_core_far_reap() raises:
+    var fs = _FaultStore()
+    _three_chunks(fs, _PART)
+    _arm_far_reap_chunk0(fs, _PART, 1)
+    var c = _core(fs)
+    _assert_only_k3(c.resolve_index(), Int64(7))
+
+
+def test_shard_capture_far_reap() raises:
+    var fs = _FaultStore()
+    _three_chunks(fs, _shard())
+    var inputs = SegmentBaseInputs[_FaultStore](fs.clone(), _PART)
+    _arm_far_reap_chunk0(fs, _shard(), 1)
+    var cap = inputs.walk_shard_chunks("w0")
+    assert_equal(cap.log_start_offset, Int64(7))
+    assert_equal(cap.log_start_seq, Int64(2))
+    assert_equal(len(cap.chunks), 1)
+    assert_equal(cap.chunks[0].object_key, "k3")
+    assert_equal(cap.chunks[0].chunk_seq, Int64(2))
+
+
+def test_base_walks_far_reap() raises:
+    var fs = _FaultStore()
+    _folded_base(fs)
+    _arm_far_reap_chunk0(fs, _base(), 1)
+    var r = SubLineageConsumeResolver[_FaultStore](fs.clone(), _PART)
+    var keys = List[String]()
+    _assert_only_k3(r._resolve_base_index_capturing(keys), Int64(7))
+    var ft = _FaultStore()
+    _folded_base(ft)
+    _arm_far_reap_chunk0(ft, _base(), 1)
+    var rt = SubLineageConsumeResolver[_FaultStore](ft.clone(), _PART)
+    var tkeys = List[String]()
+    _assert_only_k3(_segs(rt._resolve_base_index_tagged_capturing(tkeys)), Int64(7))
+
+
+def test_block_walks_far_reap() raises:
+    var fs = _FaultStore()
+    _three_chunks(fs, _shard())
+    var r = SubLineageConsumeResolver[_FaultStore](fs.clone(), _PART)
+    _arm_far_reap_chunk0(fs, _shard(), 1)
+    var idx = List[SegmentRef]()
+    r._append_block_segments(idx, _block())
+    _assert_only_k3(idx, Int64(107))
+    var ft = _FaultStore()
+    _three_chunks(ft, _shard())
+    var rt = SubLineageConsumeResolver[_FaultStore](ft.clone(), _PART)
+    _arm_far_reap_chunk0(ft, _shard(), 1)
+    var tidx = List[SubLineageTaggedSegment]()
+    rt._append_block_segments_tagged(tidx, _block())
+    _assert_only_k3(_segs(tidx), Int64(107))
+
+
+def test_folded_prefix_far_reap() raises:
+    # Every chunk is in `_base`: the walk restarts at seq 2 (offset 7) and
+    # counts k3 only, ending at 12. A restart at seq 1 would count k2 from 7
+    # as well and end at 16.
+    var fs = _FaultStore()
+    _three_chunks(fs, _shard())
+    var inputs = SegmentBaseInputs[_FaultStore](fs.clone(), _PART)
+    var sh = _m(fs, _shard())
+    _arm_far_reap_chunk0(fs, _shard(), 1)
+    assert_equal(inputs._base_folded_prefix(sh, _all_keys()), Int64(12))
+
+
+# =============================================================================
+# SegmentBaseInputs' `_base` key walk (the fold's watermark reads it)
+# =============================================================================
+
+
+def test_base_keys_restart_after_reap() raises:
+    # Chunk 1 is reaped after chunk 0 was read; `_LOG_START` is now (seq 2,
+    # offset 7). The key set is the one a walk from there reads, k3 alone,
+    # the same set the resolver's `_base` capture restarts to.
+    var fs = _FaultStore()
+    _folded_base(fs)
+    var inputs = SegmentBaseInputs[_FaultStore](fs.clone(), _PART)
+    _arm_reap_chunk1(fs, _base(), 1)
+    var keys = inputs.walk_base_object_keys()
+    assert_equal(len(keys), 1)
+    assert_equal(keys[0], "k3")
+
+
+def test_base_keys_far_reap() raises:
+    # Chunk 0 is reaped and `_LOG_START` moved to (seq 2, offset 7) while
+    # chunk 1 still reads: the walk restarts at seq 2, so k2 is not a key.
+    var fs = _FaultStore()
+    _folded_base(fs)
+    var inputs = SegmentBaseInputs[_FaultStore](fs.clone(), _PART)
+    _arm_far_reap_chunk0(fs, _base(), 1)
+    var keys = inputs.walk_base_object_keys()
+    assert_equal(len(keys), 1)
+    assert_equal(keys[0], "k3")
+
+
+def test_base_keys_missing_chunk_raises() raises:
+    # A `_base` chunk missing at or above `_base`'s `_LOG_START` is a torn
+    # `_base`. Skipping it would drop its key, lower the shard's folded
+    # prefix, and make the fold re-append chunks already in `_base`.
+    var fs = _FaultStore()
+    _folded_base(fs)
+    var inputs = SegmentBaseInputs[_FaultStore](fs.clone(), _PART)
+    var snap = inputs.snapshot()
+    fs.arm("get", _chunk(_base(), 1), 1, 1, _MISSING)
+    with assert_raises(contains=_TORN):
+        _ = inputs.walk_base_object_keys()
+    fs.arm("get", _chunk(_base(), 1), 1, 1, _MISSING)
+    with assert_raises(contains=_TORN):
+        _ = inputs.folded_counts(snap)
+    # The chunk reads again: the key set is whole.
+    assert_equal(len(inputs.walk_base_object_keys()), 3)
+
+
 # =============================================================================
 # The writing walks: the segment fold and the migration
 # =============================================================================
@@ -648,6 +839,61 @@ def main() raises:
     except e:
         failed += 1
         print("[FAIL] test_shard_capture_restart_drops_first_pass: " + String(e))
+    try:
+        test_base_walk_tagged_restart_drops_first_pass()
+    except e:
+        failed += 1
+        print("[FAIL] test_base_walk_tagged_restart_drops_first_pass: " + String(e))
+    try:
+        test_block_walk_tagged_restart_drops_first_pass()
+    except e:
+        failed += 1
+        print("[FAIL] test_block_walk_tagged_restart_drops_first_pass: " + String(e))
+    try:
+        test_folded_prefix_restart_resets_folded()
+    except e:
+        failed += 1
+        print("[FAIL] test_folded_prefix_restart_resets_folded: " + String(e))
+    try:
+        test_consume_core_far_reap()
+    except e:
+        failed += 1
+        print("[FAIL] test_consume_core_far_reap: " + String(e))
+    try:
+        test_shard_capture_far_reap()
+    except e:
+        failed += 1
+        print("[FAIL] test_shard_capture_far_reap: " + String(e))
+    try:
+        test_base_walks_far_reap()
+    except e:
+        failed += 1
+        print("[FAIL] test_base_walks_far_reap: " + String(e))
+    try:
+        test_block_walks_far_reap()
+    except e:
+        failed += 1
+        print("[FAIL] test_block_walks_far_reap: " + String(e))
+    try:
+        test_folded_prefix_far_reap()
+    except e:
+        failed += 1
+        print("[FAIL] test_folded_prefix_far_reap: " + String(e))
+    try:
+        test_base_keys_restart_after_reap()
+    except e:
+        failed += 1
+        print("[FAIL] test_base_keys_restart_after_reap: " + String(e))
+    try:
+        test_base_keys_far_reap()
+    except e:
+        failed += 1
+        print("[FAIL] test_base_keys_far_reap: " + String(e))
+    try:
+        test_base_keys_missing_chunk_raises()
+    except e:
+        failed += 1
+        print("[FAIL] test_base_keys_missing_chunk_raises: " + String(e))
     try:
         test_fold_materialize_missing_chunk_raises()
     except e:
