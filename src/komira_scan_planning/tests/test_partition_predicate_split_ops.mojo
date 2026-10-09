@@ -9,8 +9,10 @@
 #   * BOOL literals render as `true` / `false`;
 #   * narrow and unsigned integer literals (int8 .. uint32, outside
 #     `is_int`) render as their decimal value.
-# Each case pins the column, the op code, the single value and that nothing
-# is left on the residual (a clean comparison is consumed by Tier-1).
+# Each case pins the column, the op code, the single value, the column's
+# type (yr INT64, flag STRING: flag is the second partition column, so a
+# lookup of the wrong index is caught) and that nothing is left on the
+# residual (a clean comparison is consumed by Tier-1).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -54,7 +56,11 @@ def _ptypes() -> List[ArrowType]:
 
 
 def _check_one(
-    filter: Expr, col: String, op: Int, value: String
+    filter: Expr,
+    col: String,
+    op: Int,
+    value: String,
+    atype: ArrowType = ArrowType.INT64,
 ) raises:
     var split = split_partition_predicate(filter, _pcols(), _ptypes())
     assert_equal(split.partition_predicate.num_constraints(), 1)
@@ -63,6 +69,9 @@ def _check_one(
     assert_equal(c.op, op)
     assert_equal(len(c.values), 1)
     assert_equal(c.values[0], value)
+    # The type is the column's own: a wrong type turns the fold's numeric
+    # compare into a lexical one (`yr < 10` typed STRING would prune yr=9).
+    assert_true(c.arrow_type == atype)
     assert_false(Bool(split.residual))
 
 
@@ -107,6 +116,7 @@ def test_bool_literals_render_true_false() raises:
         String("flag"),
         _OP_EQ,
         String("true"),
+        ArrowType.STRING,
     )
     _check_one(
         Expr.binary(
@@ -117,6 +127,23 @@ def test_bool_literals_render_true_false() raises:
         String("flag"),
         _OP_NE,
         String("false"),
+        ArrowType.STRING,
+    )
+
+
+def test_literal_left_on_second_col_takes_its_type() raises:
+    # `'x' < flag` reads as `flag > 'x'` and carries flag's STRING type, not
+    # the first column's INT64.
+    _check_one(
+        Expr.binary(
+            BIN_LT,
+            Expr.literal(ScalarValue.from_string(String("x"))),
+            Expr.col_ref(String("flag")),
+        ),
+        String("flag"),
+        _OP_GT,
+        String("x"),
+        ArrowType.STRING,
     )
 
 
@@ -153,5 +180,6 @@ def main() raises:
     suite.test[test_col_left_each_op_maps_to_its_code]()
     suite.test[test_literal_left_flips_each_op]()
     suite.test[test_bool_literals_render_true_false]()
+    suite.test[test_literal_left_on_second_col_takes_its_type]()
     suite.test[test_narrow_and_unsigned_ints_render_decimal]()
     suite^.run()

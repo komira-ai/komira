@@ -12,7 +12,8 @@
 #   * OR-chains that are not a uniform single-column EQ disjunction: a
 #     range leaf on the left or on the right, a column-to-column leaf,
 #     literal-on-the-left EQ leaves, EQs over a data column, and EQs over a
-#     column whose name is empty;
+#     column whose name is empty; and an OR-chain over the second partition
+#     column, which must carry that column's type;
 #   * comparisons whose both sides are columns, or whose literal is on the
 #     left of a data column.
 # Every case checks the Tier-1 constraint list AND whether the conjunct
@@ -232,6 +233,28 @@ def test_or_chain_literal_on_left_reconstructs() raises:
     assert_equal(len(c.values), 2)
     assert_equal(c.values[0], String("a"))
     assert_equal(c.values[1], String("b"))
+    assert_true(c.arrow_type == ArrowType.STRING)
+    assert_false(Bool(split.residual))
+
+
+def test_or_chain_takes_the_type_of_its_column() raises:
+    # (yr = 2020) OR (yr = 2021) over the SECOND partition column: the IN
+    # carries yr's INT64 type, not dt's STRING (a STRING type would make the
+    # fold compare the values lexically).
+    var filter = _bin(
+        BIN_OR,
+        _bin(BIN_EQ, _col(String("yr")), _lit_int(2020)),
+        _bin(BIN_EQ, _col(String("yr")), _lit_int(2021)),
+    )
+    var split = split_partition_predicate(filter, _pcols(), _ptypes())
+    assert_equal(split.partition_predicate.num_constraints(), 1)
+    ref c = split.partition_predicate.constraints[0]
+    assert_equal(c.op, _OP_IN)
+    assert_equal(c.col, String("yr"))
+    assert_equal(len(c.values), 2)
+    assert_equal(c.values[0], String("2020"))
+    assert_equal(c.values[1], String("2021"))
+    assert_true(c.arrow_type == ArrowType.INT64)
     assert_false(Bool(split.residual))
 
 
@@ -339,6 +362,7 @@ def main() raises:
     suite.test[test_in_list_node_over_partition_expression_is_conservative]()
     suite.test[test_in_list_node_over_data_expression_is_residual]()
     suite.test[test_or_chain_literal_on_left_reconstructs]()
+    suite.test[test_or_chain_takes_the_type_of_its_column]()
     suite.test[test_or_chain_range_leaf_left_is_conservative]()
     suite.test[test_or_chain_range_leaf_right_is_conservative]()
     suite.test[test_or_chain_col_col_leaf_is_conservative]()
