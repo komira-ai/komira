@@ -64,6 +64,15 @@ fn the_writer_emits_these_bytes_exactly() {
     for (i, (g, w)) in got.chunks(512).zip(want.chunks(512)).enumerate() {
         assert_eq!(g, w, "block {}", i);
     }
+    // A path of exactly 100 bytes fills the name field: no pax header.
+    let p = "p".repeat(100);
+    let mut want = ustar(p.as_bytes(), b"0000644\0", b"00000000000\0", b'0');
+    want.extend(zeros(1024));
+    let got = write(vec![item(&p, 0o644, b"")]).unwrap();
+    assert_eq!(got.len(), want.len());
+    for (i, (g, w)) in got.chunks(512).zip(want.chunks(512)).enumerate() {
+        assert_eq!(g, w, "block {}", i);
+    }
 }
 
 #[test]
@@ -183,10 +192,13 @@ fn a_pax_size_is_never_the_size_of_a_header_for_the_next_entry() {
     // A pax size of 2 then a header of each kind whose own size is not 2:
     // read at 2, its body would be cut and the next header misplaced.
     let long = "k".repeat(120);
+    let g = rec("comment", &"c".repeat(600));
+    let g = g.as_bytes();
     for (flag, body, path, link) in [
         (b'K', long.as_bytes(), "e", long.as_str()),
         (b'L', long.as_bytes(), long.as_str(), "t"),
-        (b'g', &b"11 path=zz\n"[..], "e", "t"),
+        // A global header of two blocks: read at 2 bytes, one block too few.
+        (b'g', &g[..], "e", "t"),
     ] {
         let mut t = Vec::new();
         entry(&mut t, "PaxHeader", b'x', 0o644, b"10 size=2\n", "");
@@ -205,4 +217,43 @@ fn a_pax_size_is_never_the_size_of_a_header_for_the_next_entry() {
     entry(&mut t, "e", b'0', 0o644, b"", "");
     t.resize(t.len() + 1024, 0);
     assert_eq!(read(&t), Err("tar: two pax headers for one entry".into()));
+}
+
+/// A pax record `<len> <key>=<value>\n`, its length counting itself.
+fn rec(k: &str, v: &str) -> String {
+    let body = format!(" {}={}\n", k, v);
+    let n = body.len() + 3;
+    assert_eq!(n.to_string().len(), 3);
+    format!("{}{}", n, body)
+}
+
+#[test]
+fn a_field_may_be_filled_to_its_last_byte() {
+    // Digits in every byte of the mode, mtime and checksum fields, no NUL;
+    // a 155-byte prefix; a byte in the padding after the prefix. Each field
+    // is read at its own offset and width, no further.
+    let mut h = ustar(b"f", b"00000640", b"00000000000\0", b'0');
+    h[136..148].copy_from_slice(b"777777777777");
+    h[345..500].fill(b'q');
+    h[500] = b'X';
+    h[148..156].copy_from_slice(b"        ");
+    let sum: u32 = h.iter().map(|&b| b as u32).sum();
+    h[148..156].copy_from_slice(format!("{:08o}", sum).as_bytes());
+    h.extend(zeros(1024));
+    let e = read(&h).unwrap();
+    assert_eq!((e[0].path.clone(), e[0].mode, e[0].size), (format!("{}/f", "q".repeat(155)), 0o640, 0));
+    // The mode keeps its low twelve bits, not thirteen.
+    let mut h = ustar(b"f", b"0014755\0", b"00000000000\0", b'0');
+    h.extend(zeros(1024));
+    assert_eq!(read(&h).unwrap()[0].mode, 0o4755);
+}
+
+#[test]
+fn a_pax_record_with_no_key_says_so() {
+    // `3 \n`: a length, a space and the newline, and nothing between.
+    let mut t = Vec::new();
+    entry(&mut t, "PaxHeader", b'x', 0o644, b"3 \n", "");
+    entry(&mut t, "f", b'0', 0o644, b"", "");
+    t.resize(t.len() + 1024, 0);
+    assert_eq!(read(&t), Err("tar: a pax record without `=`".into()));
 }
