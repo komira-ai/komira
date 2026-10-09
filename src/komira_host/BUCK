@@ -6,8 +6,13 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = [
         "tests/test_engine_placement.mojo",
+        "tests/test_proc_probe.mojo",
+        "tests/test_thp_frozen.mojo",
+        "tests/test_thp_parse.mojo",
+        "tests/test_thp_process_disabled.mojo",
         "tests/test_topology_derive.mojo",
         "tests/test_topology_numa.mojo",
+        "tests/test_topology_probe.mojo",
     ],
     visibility = ["PUBLIC"],
 )

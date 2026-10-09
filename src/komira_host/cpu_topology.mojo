@@ -1123,7 +1123,7 @@ def derive_numa_locality(
 
     var node = numa_preferred_node(topo._compute, node_cpulists)
     if node < 0 or node >= len(node_cpulists):
-        return topo^
+        return topo^  # cov: unreachable spanned >= 2 means some node holds a compute CPU, so the preferred ordinal is in range
 
     var members = node_cpulists[node].copy()
     var new_compute = _intersect_preserving_order(topo._compute, members)
@@ -1131,7 +1131,7 @@ def derive_numa_locality(
         # Cannot happen given `spanned >= 2` (the preferred node holds at least
         # one compute CPU), but a zero-worker pool is catastrophic enough that
         # the guard is cheaper than the reasoning.
-        return topo^
+        return topo^  # cov: unreachable the preferred node holds at least one compute CPU when spanned >= 2
 
     var new_allowed = _intersect_preserving_order(topo._allowed, members)
     var new_io = _intersect_preserving_order(topo._io, members)
@@ -1817,7 +1817,7 @@ def _process_physical_core_count() -> Int:
         var n = gp[][].fallback_cores
         if n > 0:
             return n
-    except:
+    except:  # cov: unreachable _Global.get_or_create_ptr raises only when given on_error_msg, and this one is not
         pass
     return num_physical_cores()
 
@@ -1967,7 +1967,7 @@ def _frozen_detected_topology() -> CpuTopology:
         var gp = _DETECTED_TOPOLOGY.get_or_create_ptr()
         return gp[][].to_topology()
     except:
-        return CpuTopology.detect_uncached()
+        return CpuTopology.detect_uncached()  # cov: unreachable _Global.get_or_create_ptr raises only when given on_error_msg, and this one is not
 
 
 # =============================================================================
@@ -2094,7 +2094,7 @@ def _frozen_numa_local_topology() -> CpuTopology:
         var gp = _NUMA_LOCAL_SNAPSHOT.get_or_create_ptr()
         return gp[][].topo.to_topology()
     except:
-        return CpuTopology.detect()
+        return CpuTopology.detect()  # cov: unreachable _Global.get_or_create_ptr raises only when given on_error_msg, and this one is not
 
 
 def _frozen_numa_snapshot_spanned() -> Int:
@@ -2114,7 +2114,7 @@ def _frozen_numa_snapshot_node_id() -> Int:
         var gp = _NUMA_LOCAL_SNAPSHOT.get_or_create_ptr()
         return gp[][].node_id
     except:
-        return -1
+        return -1  # cov: unreachable _Global.get_or_create_ptr raises only when given on_error_msg, and this one is not
 
 
 def _read_allowed_cpus() -> List[Int]:
@@ -2183,7 +2183,7 @@ def _read_allowed_cpus() -> List[Int]:
             var snap = gp[][].to_list()
             if len(snap) > 0:
                 return snap^
-        except:
+        except:  # cov: unreachable _Global.get_or_create_ptr raises only when given on_error_msg, and this one is not
             pass
         # Snapshot unavailable, or the one-shot probe failed at snapshot time
         # (hardened kernel, non-Linux emulation). Degrade to a live probe
