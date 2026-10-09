@@ -29,7 +29,11 @@
 #        of main, main's tip, then the first-parent commits after the
 #        revision that touch anything but docs/** and *.md: none -> "";
 #        one -> the tip; the tip itself -> "" without the count; a shallow
-#        clone or a failed fetch raises;
+#        clone or a failed fetch raises; main's tip that cannot be read
+#        (rev-parse exits 1, or prints no commit id) raises and never
+#        reads as "the releasable tip" (mutant: "an unread tip answers
+#        \"\""); a commit count git cannot give (rev-list exits 1 or
+#        128) raises (mutant: "a failed count answers \"\"");
 #   (g2) `git_commit_of` (the split's rev-parse --verify): one id; an
 #        unknown or ambiguous prefix (git exits 1) or a shallow clone
 #        raises (design row c6, git half); `git_main_line`: the fetch, then
@@ -547,6 +551,47 @@ def test_g1_main_tip_past_counts_only_what_a_push_releases() raises:
         except e:
             why2 = String(e)
         assert_true(why2 != String("<answered>"), String("a failed fetch answered"))
+    # main's tip unreadable after the fetch: rev-parse exits 1 (nothing
+    # printed), or prints something that is not a full commit id
+    for k in range(3):
+        var badtip = ScriptedRunner()
+        badtip.expect(_shallow(String("false\n")))
+        badtip.expect(_fetch(0))
+        var ask = _argv("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}")
+        if k == 0:
+            badtip.expect(ScriptedStep(ask^, exit_code=Int32(1)))
+        elif k == 1:
+            badtip.expect(ScriptedStep(ask^, stdout_text=String("fedcba98\n")))
+        else:
+            badtip.expect(ScriptedStep(ask^, stdout_text=String("fatal: not a commit\n")))
+        var why3 = String("<answered>")
+        try:
+            _ = git_main_tip_past(badtip, d, String(_REV))
+        except e:
+            why3 = String(e)
+        assert_true(why3.find(String("cannot be read after the fetch")) >= 0, String(k) + String(": ") + why3)
+    # the count of commits after the revision cannot be read: git exits 1
+    # (git_main_tip_past's own check) or 128 (the runner's)
+    for c in [1, 128]:
+        var nocount = ScriptedRunner()
+        nocount.expect(_shallow(String("false\n")))
+        nocount.expect(_fetch(0))
+        nocount.expect(_tip(String(_HEAD)))
+        nocount.expect(
+            ScriptedStep(
+                _argv(
+                    "rev-list", "--first-parent", "--max-count=1", String(_REV) + String("..") + String(_HEAD), "--",
+                    ".", ":(exclude)docs", ":(exclude)*.md",
+                ),
+                exit_code=Int32(c),
+            )
+        )
+        var why4 = String("<answered>")
+        try:
+            _ = git_main_tip_past(nocount, d, String(_REV))
+        except e:
+            why4 = String(e)
+        assert_true(why4.find(String("rev-list")) >= 0 and why4.find(String(c)) >= 0, why4)
 
 
 def test_g2_commit_of_and_main_line() raises:

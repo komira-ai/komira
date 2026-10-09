@@ -135,8 +135,9 @@
 #      version (plan-only or validation-only run)`, not an error about an
 #      empty path;
 #   8. the run's outcome is its worst step's (kci_api's `worst_outcome`),
-#      and PARTIAL when a step fails after an earlier PUBLISH step changed
-#      the channel; the FINISHED record, then the exit number
+#      and PARTIAL when a step ends FAILED, REFUSED or SUPERSEDED after an
+#      earlier PUBLISH step changed the channel (a superseded run is exit 0
+#      only when nothing of it landed); the FINISHED record, then the exit number
 #      (kci_api's exit table), which is the return value;
 #   9. `--summary-file`: a markdown block APPENDED to that file on every exit
 #      path after the command line parsed (summary.mojo; a break-glass run's
@@ -685,7 +686,12 @@ def _run_stage[S: StageSteps](
             if end.retry.byte_length() > 0:
                 retry = end.retry.copy()
             if not end.ok():
-                if changed_outside and (end.outcome == OUTCOME_REFUSED or end.outcome == OUTCOME_FAILED):
+                # SUPERSEDED too: an upload an earlier step landed stands,
+                # so the stage did part of its work (PARTIAL, exit 6)
+                if changed_outside and (
+                    end.outcome == OUTCOME_REFUSED or end.outcome == OUTCOME_FAILED
+                    or end.outcome == OUTCOME_SUPERSEDED
+                ):
                     outcome = String(OUTCOME_PARTIAL)
                     retry = String("")
                 stopped = True

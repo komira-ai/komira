@@ -33,6 +33,7 @@ from kci_api import (
     OUTCOME_NOOP,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
+    OUTCOME_SUPERSEDED,
     OUTCOME_VALIDATION_FAILED,
     VALIDATION_VALIDATED,
     VALIDATION_WOULD_VALIDATE,
@@ -256,7 +257,10 @@ def _machine(dir: String) raises -> String:
         + String("stage { name: \"all\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }")
         + String(" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
         + String("stage { name: \"pub-then-build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"")
-        + String(" channels: \"c.textproto\" channel: \"komira\" } step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" } }\n"),
+        + String(" channels: \"c.textproto\" channel: \"komira\" } step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" } }\n")
+        + String("stage { name: \"pub-twice\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"")
+        + String(" channels: \"c.textproto\" channel: \"komira\" } step { name: \"p2\" kind: PUBLISH platform: \"linux-x86_64\"")
+        + String(" artifacts: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n"),
     )
     return p^
 
@@ -388,6 +392,36 @@ def test_a_failure_after_a_publish_changed_the_channel_is_partial() raises:
     assert_equal(r.retry, String("UNSAFE"))
 
 
+def test_superseded_after_a_publish_changed_the_channel_is_partial() raises:
+    # the first PUBLISH step landed an upload; the second ends SUPERSEDED
+    # (its channel already holds a descendant): the upload stands, so the
+    # stage is PARTIAL, exit 6, never SUPERSEDED exit 0. Mutant: "drop
+    # SUPERSEDED from the PARTIAL guard"
+    var m = _machine(_root(String("suppartial")))
+    var steps = FakeSteps()
+    var landed = StepEnd(String(OUTCOME_SUCCEEDED), String(""), String(""))
+    landed.changed_outside = True
+    steps.ends.append(landed^)
+    steps.ends.append(StepEnd(String(OUTCOME_SUPERSEDED), String(""), String("")))
+    var rec = CliRecorder.memory(String(""))
+    var a = _run(m, String("pub-twice"))
+    a.extend(_publish_flags())
+    assert_equal(kci_main_with(a, steps, rec), 6)
+    assert_equal(len(steps.calls), 2)
+    var r = _last(rec)
+    assert_equal(r.outcome, String("PARTIAL"))
+    assert_equal(r.retry, String("UNSAFE"))
+    # nothing landed before it: SUPERSEDED, exit 0
+    var none = FakeSteps()
+    none.ends.append(StepEnd(String(OUTCOME_SUPERSEDED), String(""), String("")))
+    var rec2 = CliRecorder.memory(String(""))
+    var a2 = _run(m, String("pub-twice"))
+    a2.extend(_publish_flags())
+    assert_equal(kci_main_with(a2, none, rec2), 0)
+    assert_equal(len(none.calls), 1)
+    assert_equal(_last(rec2).outcome, String("SUPERSEDED"))
+
+
 def test_unknown_stage_is_refused_listing_the_stages() raises:
     var m = _machine(_root(String("unknown")))
     var steps = FakeSteps()
@@ -397,7 +431,7 @@ def test_unknown_stage_is_refused_listing_the_stages() raises:
     assert_equal(len(rec.statuses), 1)
     var r = _last(rec)
     assert_equal(r.error.id, String("KCI-E-STAGE-UNKNOWN"))
-    assert_true(r.error.message.find(String("its stages: build, prod, all, pub-then-build")) >= 0, r.error.message)
+    assert_true(r.error.message.find(String("its stages: build, prod, all, pub-then-build, pub-twice")) >= 0, r.error.message)
 
 
 def test_the_stage_s_flags() raises:

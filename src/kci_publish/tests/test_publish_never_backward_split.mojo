@@ -13,6 +13,15 @@
 #        REFUSED, KCI-E-SUPERSEDED, exit 3, no upload; with the main-line
 #        filter (gamma) and without it (prod). Mutant: "split by number
 #        only" (a higher number alone answers SUPERSEDED);
+#   (c3n) the newest build's name holds no commit (`..._x0_5`): it cannot
+#        be shown to descend, so REFUSED, exit 3, git never asked; alone,
+#        and beside a descending build of the same number. Mutant: "a
+#        commit-less newest build does not set UNRELATED" (it answered
+#        SUPERSEDED, exit 0);
+#   (c4) two newest builds share the top build number: one descends and
+#        one does not (in both iteration orders) -> REFUSED, exit 3; both
+#        descend -> SUPERSEDED, exit 0, git asked about each. Mutant: "the
+#        first descending build decides";
 #   (c2) a higher-numbered build of a commit OFF main's history (a branch's
 #        break-glass build) is not counted: the release publishes, and the
 #        file is reported OFF MAIN. Mutant: "count every build";
@@ -215,6 +224,86 @@ def test_c3_unrelated_history_is_refused_at_gamma_and_prod() raises:
         assert_equal(rep.exit_code(), EXIT_REFUSED, all)
         assert_true(rep.has_line_containing(String("UNRELATED")), all)
         assert_equal(_uploads(reg, t), 0, all)
+
+
+def _refused(rep: PublishReport, reg: RegistrySet[ScriptedChannel, PublishCredential], t: List[PublishTarget]) raises:
+    var all = String("\n").join(rep.lines)
+    assert_equal(rep.reason, String(REASON_REFUSED), all)
+    assert_equal(rep.error_id, String("KCI-E-SUPERSEDED"), all)
+    assert_equal(rep.exit_code(), EXIT_REFUSED, all)
+    assert_false(rep.has_line_containing(String("WOULD UPLOAD")), all)
+    assert_equal(_uploads(reg, t), 0, all)
+
+
+def test_c3n_a_newest_build_naming_no_commit_is_refused() raises:
+    var t = _targets(String("c3n"))
+    for gamma in [True, False]:
+        # alone: build 5 names no commit (the main-line filter counts it)
+        var reg = _registry(_channel(_one(String("komira_alpha-1.0.0-x0_5.conda"))))
+        var g = _reader(True)
+        var rep = _run(t, reg, gamma, g)
+        _refused(rep, reg, t)
+        assert_true(rep.has_line_containing(String("names no commit")), String("\n").join(rep.lines))
+        assert_equal(len(g.asked), 0, String("\n").join(g.asked))
+        # beside a descending main build of the same number
+        var listed = List[String]()
+        listed.append(String("komira_alpha-1.0.0-h89abcdef_5.conda"))
+        listed.append(String("komira_alpha-1.0.0-x0_5.conda"))
+        var reg2 = _registry(_channel(listed))
+        var g2 = _reader(True)
+        var rep2 = _run(t, reg2, gamma, g2)
+        _refused(rep2, reg2, t)
+        assert_true(rep2.has_line_containing(String("DESCENDS")), String("\n").join(rep2.lines))
+        assert_true(rep2.has_line_containing(String("names no commit")), String("\n").join(rep2.lines))
+
+
+def _two_newest() -> List[String]:
+    """Two main builds of the top number 4, of two commits."""
+    var l = List[String]()
+    l.append(String("komira_alpha-1.0.0-h89abcdef_4.conda"))
+    l.append(String("komira_alpha-1.0.0-h00000000_4.conda"))
+    return l^
+
+
+def _reader_of(descend: List[String]) -> ScriptedHistory:
+    """git over `_two_newest`: both prefixes resolve; the release revision
+    is on the history of each commit `descend` names."""
+    var g = ScriptedHistory()
+    for p in ["89abcdef", "00000000"]:
+        g.put_commit(String(p), _id(String(p)))
+    for i in range(len(descend)):
+        g.put_ancestor(_id(String(_REV_PREFIX)), _id(descend[i]))
+    return g^
+
+
+def test_c4_two_newest_builds_of_one_number() raises:
+    var t = _targets(String("c4"))
+    for gamma in [True, False]:
+        # one descends, one does not: whichever git is asked about first
+        for d in ["89abcdef", "00000000"]:
+            var reg = _registry(_channel(_two_newest()))
+            var g = _reader_of(_one(String(d)))
+            var rep = _run(t, reg, gamma, g)
+            _refused(rep, reg, t)
+            var all = String("\n").join(rep.lines)
+            assert_true(rep.has_line_containing(String("DESCENDS")), all)
+            assert_true(rep.has_line_containing(String("UNRELATED")), all)
+            assert_equal(len(g.asked), 4, String("\n").join(g.asked))
+        # every one descends: SUPERSEDED, exit 0
+        var both = List[String]()
+        both.append(String("89abcdef"))
+        both.append(String("00000000"))
+        var reg2 = _registry(_channel(_two_newest()))
+        var g2 = _reader_of(both)
+        var rep2 = _run(t, reg2, gamma, g2)
+        var all2 = String("\n").join(rep2.lines)
+        assert_equal(rep2.reason, String(REASON_SUPERSEDED), all2)
+        assert_equal(rep2.outcome(), String(OUTCOME_SUPERSEDED), all2)
+        assert_equal(rep2.exit_code(), EXIT_OK, all2)
+        assert_equal(rep2.error_id, String(""), all2)
+        assert_false(rep2.has_line_containing(String("UNRELATED")), all2)
+        assert_equal(len(g2.asked), 4, String("\n").join(g2.asked))
+        assert_equal(_uploads(reg2, t), 0, all2)
 
 
 def test_c2_an_off_main_build_ahead_is_not_counted() raises:

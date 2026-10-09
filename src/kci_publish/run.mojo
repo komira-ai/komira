@@ -196,7 +196,13 @@ def _split_by_history[H: HistoryReader](
     for i in range(len(prefixes)):
         ref p = prefixes[i]
         if p.byte_length() == 0:
+            # a newest build whose name holds no commit cannot be shown to
+            # descend: REFUSED, never SUPERSEDED
             unrelated = True
+            lines.append(
+                String("UNRELATED: a newest build of the channel names no commit, so it cannot be shown to descend")
+                + String(" from this release's revision ") + revision
+            )
             continue
         var commit: String
         try:
