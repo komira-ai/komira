@@ -360,8 +360,8 @@ validation of gamma's publish step that runs there: `kci run --stage gamma --onl
    `build`'s sha256. Any one missing is `REFUSED`, exit 2, and **nothing is published**: a set
    that cannot be validated is never put in gamma.
 2. **Publish** (EXISTS).
-3. **Exchange.** kci requests the job's ID token with the cloud's audience (`sts.amazonaws.com`
-   for AWS), writes it to `<scratch>/<validation>/oidc/token`, mode 0600, and builds the child's
+3. **Exchange.** kci requests the job's ID token with the cloud's audience (AWS STS's own
+   audience for AWS), writes it to `<scratch>/<validation>/oidc/token`, mode 0600, and builds the child's
    environment **from nothing**, as `CONDA_INSTALL_ENV` does: `PATH`, `HOME`, `TMPDIR`, `LANG`,
    and the provider-standard variables the cloud's SDK reads (for AWS, `AWS_ROLE_ARN` from the
    `identity` secret, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_SESSION_NAME` = `kci-<validation run
@@ -631,7 +631,7 @@ single-flight already.
    *Recommendation:* accept, with `stalled`'s issue. Refusing skip markers in the PR check would not
    close it: the merge commit's message is written at merge time, after the check ran.
 9. **The cloud credential (a go, after G0).** *Recommendation:* go for AWS first, as a role whose
-   trust accepts only this repository's OIDC issuer, the audience `sts.amazonaws.com` and the
+   trust accepts only this repository's OIDC issuer, AWS STS's audience and the
    subject `repo:<owner>/<repo>:environment:gamma` exactly; no access key is created. The role's
    permissions are the suites' and nothing more, in accounts used only for these tests, and the
    role ARN and region are secrets of the `gamma` environment only. The trust is created **only
