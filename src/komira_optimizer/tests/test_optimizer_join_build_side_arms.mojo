@@ -1,14 +1,21 @@
 # =============================================================================
-# Rule 17, `select_join_build_side`: every swap decision, the STRING-payload
-# override, the HAVING selectivity heuristic and the restoring projection.
+# Rule 17, `select_join_build_side`: every build-side decision, the
+# STRING-payload override and the HAVING selectivity heuristic.
 # =============================================================================
 #
-# The build side is the RIGHT child. The rule swaps an INNER join whose left
-# (probe) side is cheaper, a SEMI whose left side is an aggressive HAVING, and a
-# RIGHT join into a LEFT one; it never swaps a residual-carrying join. An INNER
-# or outer swap adds a Project that restores the user's column names and
-# order: without it, the bare name `val` would denote the other relation's
-# column after the exchange. Each test names the defect it catches.
+# The rule RECORDS its decision in `JoinData.build_side` and changes nothing
+# else: it builds LEFT on an INNER join whose left side is cheaper, a SEMI
+# whose left side is an aggressive HAVING, and a RIGHT join whose left side is
+# cheaper; every other join it reaches builds RIGHT. The operands, join type,
+# keys and output schema stay as they came in.
+#
+# THE NO-REWRITE PIN. `_assert_only_build_side_changed` clears `build_side`
+# on the rule's output and requires the result to hash exactly like the
+# input, so any operand exchange, added Project or join-type flip goes red.
+# Mutant: restore the old exchange (swap the operands and re-project) in
+# `select_join_build_side_inplace` — every test that records LEFT fails, on the
+# tag (a Project), the left scan path, or the hash pin. Each test names the
+# defect it catches.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -41,6 +48,9 @@ from komira_plan_ir.logical_plan import (
     JOIN_SEMI,
     JOIN_ANTI,
     JOIN_ALGO_AUTO,
+    JOIN_BUILD_SIDE_LEFT,
+    JOIN_BUILD_SIDE_RIGHT,
+    JOIN_BUILD_SIDE_UNSET,
 )
 from komira_optimizer.optimizer_join import (
     select_join_build_side,
@@ -110,6 +120,34 @@ def _names(p: LogicalPlan) -> List[String]:
     return out^
 
 
+def _side(p: LogicalPlan) -> Int:
+    return Int(p._join.value()[].build_side)
+
+
+def _assert_only_build_side_changed(
+    var out: LogicalPlan, before: UInt64, want_side: UInt8
+) raises:
+    """`out` is a join carrying `want_side`, and with every join's build side
+    cleared it hashes exactly like the input did (`before`). Catches the rule
+    exchanging operands, adding a Project, flipping a join type or rebuilding
+    a child in any way the render can see."""
+    assert_equal(Int(out.tag), Int(PLAN_JOIN))
+    assert_equal(_side(out), Int(want_side))
+    _clear_build_sides(out)
+    assert_equal(out.structural_hash(), before)
+
+
+def _clear_build_sides(mut p: LogicalPlan):
+    if p.tag == PLAN_JOIN:
+        p._join.value()[].build_side = JOIN_BUILD_SIDE_UNSET
+        _clear_build_sides(p._join.value()[].left[])
+        _clear_build_sides(p._join.value()[].right[])
+    elif p.tag == PLAN_FILTER:
+        _clear_build_sides(p._filter.value()[].child[])
+    elif p.tag == PLAN_PROJECT:
+        _clear_build_sides(p._project.value()[].child[])
+
+
 def _render(e: Expr) -> String:
     var s = String("")
     e.write_to(s)
@@ -131,66 +169,59 @@ def _having(op: UInt8) -> LogicalPlan:
 # -----------------------------------------------------------------------------
 
 
-def test_inner_swaps_when_the_probe_side_is_cheaper() raises:
-    """L (10 rows) on the probe side and R (1000) on build: swap so R probes.
-    The result is a restoring Project over INNER(R, L) and the user-visible
-    names are unchanged. Catches the cost comparison inverted and the INNER
-    swap losing its restoring projection."""
-    var out = select_join_build_side(_small_left_inner())
-    assert_equal(Int(out.tag), Int(PLAN_PROJECT))
-    ref j = out._project.value()[].child[]
-    assert_equal(Int(j.tag), Int(PLAN_JOIN))
-    assert_equal(Int(j._join.value()[].join_type), Int(JOIN_INNER))
-    assert_equal(_scan_path(j._join.value()[].left[]), "r")
-    assert_equal(_scan_path(j._join.value()[].right[]), "l")
-    assert_equal(j._join.value()[].left_on[0], "b")
-    assert_equal(j._join.value()[].right_on[0], "a")
+def test_inner_builds_left_when_the_left_side_is_cheaper() raises:
+    """L (10 rows) and R (1000): build on L. The join is left in place: L is
+    still the left child, the keys and the output names are unchanged, and no
+    Project is added. Catches the cost comparison inverted and the old operand
+    exchange restored."""
+    var j = _small_left_inner()
+    var before = j.structural_hash()
+    var out = select_join_build_side(j^)
+    assert_equal(_scan_path(out._join.value()[].left[]), "l")
+    assert_equal(_scan_path(out._join.value()[].right[]), "r")
+    assert_equal(out._join.value()[].left_on[0], "a")
+    assert_equal(out._join.value()[].right_on[0], "b")
     var got = _names(out)
     assert_equal(len(got), 4)
     assert_equal(got[0], "a")
     assert_equal(got[1], "lv")
     assert_equal(got[2], "b")
     assert_equal(got[3], "rv")
-    # No name collision: every restoring expression is a bare col-ref.
-    for i in range(4):
-        assert_true(out._project.value()[].exprs[i].is_col_ref())
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
 
 
-def test_inner_swap_with_colliding_names_restores_by_position() raises:
-    """Both sides have `k` and `val`. After the exchange the bare `k` is the
-    OTHER relation's column, so the projection must alias `k_right` back to
-    `k` (and `k` to `k_right`). Catches a by-name restore, which returns the
-    right relation's values under the left relation's names."""
+def test_inner_with_colliding_names_keeps_every_name_on_its_relation() raises:
+    """Both sides have `k` and `val`. Recording the build side moves no
+    column: `k` and `val` stay the left relation's, `k_right` and `val_right`
+    the right one's, with no aliasing Project. Catches an exchange, which
+    migrates the `_right` suffix to the other relation."""
     var n: List[String] = ["k", "val"]
     var j = _join(_ints("l", n, 10), _ints("r", n, 1000), "k", "k", JOIN_INNER)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_PROJECT))
     var got = _names(out)
     assert_equal(got[0], "k")
     assert_equal(got[1], "val")
     assert_equal(got[2], "k_right")
     assert_equal(got[3], "val_right")
-    ref ex = out._project.value()[].exprs
-    assert_true(ex[0].is_alias())
-    assert_equal(ex[0].alias_child_ref().col_ref_name(), "k_right")
-    assert_true(ex[2].is_alias())
-    assert_equal(ex[2].alias_child_ref().col_ref_name(), "k")
+    assert_equal(_scan_path(out._join.value()[].left[]), "l")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
 
 
-def test_inner_keeps_the_order_when_the_build_side_is_cheaper() raises:
-    """L (1000) probes, R (10) builds: no swap, no added node. Catches a swap
-    on the wrong side of the comparison."""
+def test_inner_builds_right_when_the_right_side_is_cheaper() raises:
+    """L (1000) and R (10): build on R, recorded. Catches a decision on the
+    wrong side of the comparison and an undecided (UNSET) join left behind."""
     var ln: List[String] = ["a", "lv"]
     var rn: List[String] = ["b", "rv"]
     var j = _join(_ints("l", ln, 1000), _ints("r", rn, 10), "a", "b", JOIN_INNER)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    assert_equal(_scan_path(out._join.value()[].left[]), "l")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
-def test_a_residual_join_is_never_swapped() raises:
-    """The residual's col-refs are named against the joined layout; a swap
-    would re-point them. Catches the residual guard dropped."""
+def test_a_residual_join_builds_right() raises:
+    """The residual guard keeps the convention even where the cost would say
+    LEFT. Catches the residual guard dropped."""
     var ln: List[String] = ["a", "lv"]
     var rn: List[String] = ["b", "rv"]
     var lo: List[String] = ["a"]
@@ -202,9 +233,9 @@ def test_a_residual_join_is_never_swapped() raises:
         _ints("l", ln, 10), _ints("r", rn, 1000), lo^, ro^, JOIN_INNER,
         JOIN_ALGO_AUTO, res^,
     )
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    assert_equal(_scan_path(out._join.value()[].left[]), "l")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
 # -----------------------------------------------------------------------------
@@ -232,39 +263,40 @@ def test_wide_string_payload_predicate() raises:
     assert_false(_side_has_wide_string_build_payload(_ints("i", n, 1), keys))
 
 
-def test_wide_string_build_side_is_moved_to_probe_against_the_cost() raises:
+def test_wide_string_right_side_does_not_build_against_the_cost() raises:
     """R (10 rows) is cheaper and would build, but carries a wide STRING
-    payload: the rule swaps anyway. Catches the override arm dropped."""
+    payload: build LEFT anyway. Catches the override arm dropped."""
     var ln: List[String] = ["a", "lv"]
     var j = _join(_ints("l", ln, 1000), _wide_string("r", "b", 10), "a", "b", JOIN_INNER)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_PROJECT))
-    assert_equal(_scan_path(out._project.value()[].child[]._join.value()[].right[]), "l")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
 
 
-def test_wide_string_probe_side_stays_on_probe_against_the_cost() raises:
-    """L (10 rows) is cheaper so the cost says swap, but L carries a wide
-    STRING payload and would become the build side: no swap. Catches the
-    keep arm dropped."""
+def test_wide_string_left_side_does_not_build_against_the_cost() raises:
+    """L (10 rows) is cheaper so the cost says LEFT, but L carries a wide
+    STRING payload: build RIGHT. Catches the keep arm dropped."""
     var rn: List[String] = ["b", "rv"]
     var j = _join(_wide_string("l", "a", 10), _ints("r", rn, 1000), "a", "b", JOIN_INNER)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    assert_equal(_scan_path(out._join.value()[].left[]), "l")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
 def test_both_sides_wide_string_leaves_the_cost_decision() raises:
-    """Swapping cannot help when both sides are wide-STRING: the cost decides
-    (L is cheaper, so swap). Catches either override firing when both are wide."""
+    """The override cannot help when both sides are wide-STRING: the cost
+    decides (L is cheaper: LEFT). Catches either override firing when both
+    are wide."""
     var j = _join(_wide_string("l", "a", 10), _wide_string("r", "b", 1000), "a", "b", JOIN_INNER)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_PROJECT))
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
 
 
 def test_multi_key_join_skips_the_string_override() raises:
     """The STRING override is single-key only, so a two-key join keeps the
-    cost decision (L is costlier: no swap) even with a wide STRING build
-    side. Catches the `len(left_on) == 1` guard dropped."""
+    cost decision (L is costlier: RIGHT) even with a wide STRING right side.
+    Catches the `len(left_on) == 1` guard dropped."""
     var ln: List[String] = ["a", "a2", "lv"]
     var sb = SchemaBuilder()
     sb.add_field(Field("b", ArrowType.INT64, True))
@@ -278,9 +310,9 @@ def test_multi_key_join_skips_the_string_override() raises:
     var j = LogicalPlan.join(
         _ints("l", ln, 1000), _scan_rows("r", sb.build(), 10), lo^, ro^, JOIN_INNER
     )
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    assert_equal(_scan_path(out._join.value()[].left[]), "l")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
 # -----------------------------------------------------------------------------
@@ -288,76 +320,79 @@ def test_multi_key_join_skips_the_string_override() raises:
 # -----------------------------------------------------------------------------
 
 
-def test_semi_with_an_aggressive_having_on_the_left_swaps() raises:
-    """A HAVING on the left (5%) and none on the right: the HAVING side builds.
-    The SEMI swap is a bare rebuild with the keys exchanged (no projection: a
-    SEMI's output is not `left ++ right`). Catches the SEMI arm dropped and a
-    restoring Project added over a SEMI."""
+def test_semi_with_an_aggressive_having_on_the_left_builds_left() raises:
+    """A HAVING on the left (5%) and none on the right: the HAVING side
+    builds. The node stays SEMI(having, r) and still emits the having side's
+    columns. Catches the SEMI arm dropped, and the old exchange, which turned
+    SEMI(A, B) into SEMI(B, A) and so emitted B's columns instead of A's."""
     var rn: List[String] = ["b", "rv"]
     var j = _join(_having(BIN_GT), _ints("r", rn, 10), "g", "b", JOIN_SEMI)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
     assert_equal(Int(out._join.value()[].join_type), Int(JOIN_SEMI))
-    assert_equal(_scan_path(out._join.value()[].left[]), "r")
-    assert_equal(Int(out._join.value()[].right[].tag), Int(PLAN_FILTER))
-    assert_equal(out._join.value()[].left_on[0], "b")
-    assert_equal(out._join.value()[].right_on[0], "g")
+    assert_equal(Int(out._join.value()[].left[].tag), Int(PLAN_FILTER))
+    assert_equal(_scan_path(out._join.value()[].right[]), "r")
+    assert_equal(_names(out)[0], "g")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
 
 
-def test_semi_with_having_on_both_sides_does_not_swap() raises:
-    """Both sides at 5%: the right side is not `>= 0.10`, so no swap. Catches
+def test_semi_with_having_on_both_sides_builds_right() raises:
+    """Both sides at 5%: the right side is not `>= 0.10`, so RIGHT. Catches
     the second half of the SEMI condition dropped."""
     var j = _join(_having(BIN_GT), _having(BIN_LT), "g", "g", JOIN_SEMI)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    assert_equal(Int(out._join.value()[].left[].tag), Int(PLAN_FILTER))
-    assert_equal(Int(out._join.value()[].right[].tag), Int(PLAN_FILTER))
-    assert_equal(Int(out._join.value()[].left[]._filter.value()[].predicate._binary.value().op), Int(BIN_GT))
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
-def test_right_join_with_a_cheaper_probe_becomes_a_left_join() raises:
-    """RIGHT(L 10, R 1000) becomes Project(LEFT(R, L)) with the names restored.
-    Catches the RIGHT->LEFT canonical swap dropped."""
+def test_right_join_with_a_cheaper_left_side_builds_left() raises:
+    """RIGHT(L 10, R 1000) stays a RIGHT join over (L, R) and builds on L,
+    the NULL-supplying side. Catches the RIGHT arm dropped and the old
+    RIGHT->LEFT flip (a LEFT join over (R, L) under a restoring Project)."""
     var ln: List[String] = ["a", "lv"]
     var rn: List[String] = ["b", "rv"]
     var j = _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", JOIN_RIGHT)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_PROJECT))
-    ref inner = out._project.value()[].child[]
-    assert_equal(Int(inner._join.value()[].join_type), Int(JOIN_LEFT))
-    assert_equal(_scan_path(inner._join.value()[].left[]), "r")
-    var got = _names(out)
-    assert_equal(got[0], "a")
-    assert_equal(got[3], "rv")
+    assert_equal(Int(out._join.value()[].join_type), Int(JOIN_RIGHT))
+    assert_equal(_scan_path(out._join.value()[].left[]), "l")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
 
 
-def test_left_join_is_never_turned_into_a_right_join() raises:
-    """LEFT(L 10, R 1000): the cost says swap, but the rule emits no RIGHT
-    join, so the LEFT join stays. Catches the LEFT->RIGHT gate
-    dropped."""
+def test_left_join_never_builds_its_preserved_side() raises:
+    """LEFT(L 10, R 1000): the cost favours L, but the rule never builds a
+    LEFT join's preserved side, so RIGHT. Catches the RIGHT-only gate
+    widened to LEFT joins."""
     var ln: List[String] = ["a", "lv"]
     var rn: List[String] = ["b", "rv"]
     var j = _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", JOIN_LEFT)
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    assert_equal(Int(out._join.value()[].join_type), Int(JOIN_LEFT))
-    assert_equal(_scan_path(out._join.value()[].left[]), "l")
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
-def test_right_join_with_a_cheaper_build_and_anti_join_are_untouched() raises:
-    """RIGHT(L 1000, R 10): no cost reason to swap. ANTI(L 10, R 1000): ANTI is
-    asymmetric and never swapped. Catches the outer cost test inverted and
-    ANTI admitted to a swap arm."""
+def test_right_join_with_a_cheaper_right_side_and_anti_join_build_right() raises:
+    """RIGHT(L 1000, R 10): no cost reason to build left. ANTI(L 10, R 1000):
+    ANTI always builds right. Catches the outer cost test inverted and ANTI
+    admitted to a LEFT arm."""
     var ln: List[String] = ["a", "lv"]
     var rn: List[String] = ["b", "rv"]
     var rj = _join(_ints("l", ln, 1000), _ints("r", rn, 10), "a", "b", JOIN_RIGHT)
-    var out = select_join_build_side(rj^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    assert_equal(Int(out._join.value()[].join_type), Int(JOIN_RIGHT))
+    var rb = rj.structural_hash()
+    _assert_only_build_side_changed(select_join_build_side(rj^), rb, JOIN_BUILD_SIDE_RIGHT)
     var aj = _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", JOIN_ANTI)
-    var out2 = select_join_build_side(aj^)
-    assert_equal(Int(out2.tag), Int(PLAN_JOIN))
-    assert_equal(_scan_path(out2._join.value()[].left[]), "l")
+    var ab = aj.structural_hash()
+    _assert_only_build_side_changed(select_join_build_side(aj^), ab, JOIN_BUILD_SIDE_RIGHT)
+
+
+def test_the_rule_is_idempotent() raises:
+    """A second run records the same sides and changes nothing. Catches a rule
+    that reads its own previous decision as a reason to flip."""
+    var once = select_join_build_side(_small_left_inner())
+    var h = once.structural_hash()
+    var twice = select_join_build_side(once^)
+    assert_equal(twice.structural_hash(), h)
+    assert_equal(_side(twice), Int(JOIN_BUILD_SIDE_LEFT))
 
 
 # -----------------------------------------------------------------------------
@@ -365,43 +400,44 @@ def test_right_join_with_a_cheaper_build_and_anti_join_are_untouched() raises:
 # -----------------------------------------------------------------------------
 
 
-def test_every_wrapper_reaches_a_swappable_join_below_it() raises:
+def test_every_wrapper_reaches_a_join_below_it() raises:
     """Filter, Project, Aggregate, Sort, Limit, Distinct and TopN each recurse
-    into their child. Catches a recursion arm dropped."""
+    into their child, whose join gets LEFT recorded and stays a join. Catches
+    a recursion arm dropped."""
     var f = select_join_build_side(LogicalPlan.filter(Expr.col_ref("a"), _small_left_inner()))
-    assert_equal(Int(f._filter.value()[].child[].tag), Int(PLAN_PROJECT))
+    assert_equal(_side(f._filter.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
 
     var pe = ExprArray()
     pe.append(Expr.col_ref("a"))
     var p = select_join_build_side(LogicalPlan.project(pe^, _small_left_inner()))
-    assert_equal(Int(p._project.value()[].child[].tag), Int(PLAN_PROJECT))
+    assert_equal(_side(p._project.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
 
     var keys = ExprArray()
     keys.append(Expr.col_ref("a"))
     var a = select_join_build_side(LogicalPlan.aggregate(keys^, AggExprArray(), _small_left_inner()))
-    assert_equal(Int(a._aggregate.value()[].child[].tag), Int(PLAN_PROJECT))
+    assert_equal(_side(a._aggregate.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
 
     var sk: List[String] = ["a"]
     var sd: List[Bool] = [False]
     var s = select_join_build_side(LogicalPlan.sort(sk^, sd^, _small_left_inner()))
-    assert_equal(Int(s._sort.value()[].child[].tag), Int(PLAN_PROJECT))
+    assert_equal(_side(s._sort.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
 
     var l = select_join_build_side(LogicalPlan.limit(4, _small_left_inner()))
-    assert_equal(Int(l._limit.value()[].child[].tag), Int(PLAN_PROJECT))
+    assert_equal(_side(l._limit.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
 
     var d = select_join_build_side(LogicalPlan.distinct(None, _small_left_inner()))
-    assert_equal(Int(d._distinct.value()[].child[].tag), Int(PLAN_PROJECT))
+    assert_equal(_side(d._distinct.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
 
     var tk: List[String] = ["a"]
     var td: List[Bool] = [False]
     var t = select_join_build_side(LogicalPlan.topn(tk^, td^, 2, _small_left_inner()))
-    assert_equal(Int(t._topn.value()[].child[].tag), Int(PLAN_PROJECT))
+    assert_equal(_side(t._topn.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
 
 
-def test_join_children_are_rewritten_before_the_parent_decides() raises:
-    """A residual parent (never swapped itself) still has both swappable
-    children rewritten. Catches the child recursion moved below the residual
-    early return."""
+def test_join_children_are_decided_as_well_as_the_parent() raises:
+    """A residual parent (RIGHT) still has both child joins decided (LEFT
+    each), and nothing moves. Catches the child recursion moved below the
+    parent's decision or dropped."""
     var lo: List[String] = ["a"]
     var ro: List[String] = ["a"]
     var res = Optional[OwnedPointer[Expr]](OwnedPointer(Expr.col_ref("lv")))
@@ -409,10 +445,11 @@ def test_join_children_are_rewritten_before_the_parent_decides() raises:
         _small_left_inner(), _small_left_inner(), lo^, ro^, JOIN_INNER,
         JOIN_ALGO_AUTO, res^,
     )
+    var before = j.structural_hash()
     var out = select_join_build_side(j^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    assert_equal(Int(out._join.value()[].left[].tag), Int(PLAN_PROJECT))
-    assert_equal(Int(out._join.value()[].right[].tag), Int(PLAN_PROJECT))
+    assert_equal(_side(out._join.value()[].left[]), Int(JOIN_BUILD_SIDE_LEFT))
+    assert_equal(_side(out._join.value()[].right[]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
 def test_a_scan_root_is_returned_unchanged() raises:

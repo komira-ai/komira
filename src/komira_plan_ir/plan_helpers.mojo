@@ -99,7 +99,11 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
     PLAN_TAG_COUNT,
+    join_build_side_is_valid,
+    agg_mode_is_valid,
+    scan_boundedness_is_valid,
     PartitionByData,
     PartitionTopNData,
     SOURCE_PARQUET,
@@ -401,13 +405,15 @@ def _plan_payload_present(plan: LogicalPlan) -> Bool:
         return Bool(plan._cse_ref)
     elif plan.tag == PLAN_CAST_TO_VARCHAR:
         return Bool(plan._cast_to_varchar)
+    elif plan.tag == PLAN_EXCHANGE:
+        return Bool(plan._exchange)
     return False
 
 
 def _tag_carries_a_variant_payload(tag: UInt8) -> Bool:
     """Does `tag` name a `LogicalPlan` variant field at all?
 
-    THE 16 TAGS. Tags 0..15 are declared in
+    THE 17 TAGS. Tags 0..15 and 18 are declared in
     `komira_plan_ir/logical_plan.mojo` and each owns a variant Optional on
     `LogicalPlan`. Tag values 16/17 are retired and must not be reused.
 
@@ -432,6 +438,7 @@ def _tag_carries_a_variant_payload(tag: UInt8) -> Bool:
         or tag == PLAN_VIEW_REF
         or tag == PLAN_CSE_REF
         or tag == PLAN_CAST_TO_VARCHAR
+        or tag == PLAN_EXCHANGE
     )
 
 
@@ -560,6 +567,7 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
             rc_copy^,
             ts_copy^,
             plan._scan.value()[].source_kind,
+            plan._scan.value()[].boundedness,
         )
 
     elif plan.tag == PLAN_FILTER:
@@ -617,6 +625,9 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
         var child = _copy_plan(plan._aggregate.value()[].child[])
         var gb = _copy_expr_array(plan._aggregate.value()[].group_by)
         var aggs = _copy_agg_expr_array(plan._aggregate.value()[].agg_exprs)
+        # The recorded mode is a decision, not a derivable fact: a copy that
+        # dropped it would turn a PARTIAL into an UNSET (SINGLE) aggregate.
+        var agg_mode = plan._aggregate.value()[].mode
         # ★★ THE UDF SNAPSHOT IS PRESERVED. See the FILTER arm above.
         if plan._aggregate.value()[].has_udf():
             return LogicalPlan.aggregate_with_udf(
@@ -626,8 +637,9 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
                 OwnedPointer[UdfData](
                     plan._aggregate.value()[].udf.value()[].copy()
                 ),
+                agg_mode,
             )
-        return LogicalPlan.aggregate(gb^, aggs^, child^)
+        return LogicalPlan.aggregate(gb^, aggs^, child^, agg_mode)
 
     elif plan.tag == PLAN_JOIN:
         var left = _copy_plan(plan._join.value()[].left[])
@@ -639,9 +651,14 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
         # Also preserve `residual` (non-equi / range `predicate=`
         # condition) across plan copies — dropping it silently loses the
         # join condition.
+        # And preserve the recorded `build_side` and `adaptive_allowed`: a
+        # copy that dropped them would silently hand the build back to the
+        # right input.
         var join_resid: Optional[OwnedPointer[Expr]] = None
         if plan._join.value()[].has_residual():
             join_resid = OwnedPointer(plan._join.value()[].residual.value()[].copy())
+        var build_side = plan._join.value()[].build_side
+        var adaptive = plan._join.value()[].adaptive_allowed
         return LogicalPlan.join(
             left^,
             right^,
@@ -650,6 +667,8 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
             plan._join.value()[].join_type,
             plan._join.value()[].algo_hint,
             join_resid^,
+            build_side,
+            adaptive,
         )
 
     elif plan.tag == PLAN_SORT:
@@ -762,8 +781,9 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
             aj.right_sort_desc.copy(),
         )
 
-    # PLAN_CSE_REF / PLAN_UNION / PLAN_VIEW_REF / PLAN_CAST_TO_VARCHAR:
-    # delegate to `LogicalPlan.copy()`, which has an arm for every tag. Without
+    # PLAN_CSE_REF / PLAN_UNION / PLAN_VIEW_REF / PLAN_CAST_TO_VARCHAR /
+    # PLAN_EXCHANGE: delegate to `LogicalPlan.copy()`, which has an arm for
+    # every tag. Without
     # these arms the tag would fall through, and a SHELL LogicalPlan with only
     # `tag` + `output_schema` would lose `_cse_ref` / `_union` / `_view_ref` /
     # `_cast_to_varchar` — which breaks plan-level CSE (the canonical's
@@ -776,6 +796,7 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
         or plan.tag == PLAN_UNION
         or plan.tag == PLAN_VIEW_REF
         or plan.tag == PLAN_CAST_TO_VARCHAR
+        or plan.tag == PLAN_EXCHANGE
     ):
         return plan.copy()
 
@@ -1633,6 +1654,13 @@ def validate_plan_integrity(plan: LogicalPlan) -> Bool:
         if not plan._scan:
             print("INTEGRITY VIOLATION: PLAN_SCAN but _scan is None")
             return False
+        if not scan_boundedness_is_valid(plan._scan.value()[].boundedness):
+            print(
+                "INTEGRITY VIOLATION: PLAN_SCAN boundedness",
+                Int(plan._scan.value()[].boundedness),
+                "is neither BOUNDED nor UNBOUNDED",
+            )
+            return False
         return True
 
     elif plan.tag == PLAN_FILTER:
@@ -1707,11 +1735,25 @@ def validate_plan_integrity(plan: LogicalPlan) -> Bool:
         if not plan._aggregate:
             print("INTEGRITY VIOLATION: PLAN_AGGREGATE but _aggregate is None")
             return False
+        if not agg_mode_is_valid(plan._aggregate.value()[].mode):
+            print(
+                "INTEGRITY VIOLATION: PLAN_AGGREGATE mode",
+                Int(plan._aggregate.value()[].mode),
+                "is not an AGG_MODE_* value",
+            )
+            return False
         return validate_plan_integrity(plan._aggregate.value()[].child[])
 
     elif plan.tag == PLAN_JOIN:
         if not plan._join:
             print("INTEGRITY VIOLATION: PLAN_JOIN but _join is None")
+            return False
+        if not join_build_side_is_valid(plan._join.value()[].build_side):
+            print(
+                "INTEGRITY VIOLATION: PLAN_JOIN build_side",
+                Int(plan._join.value()[].build_side),
+                "is not a JOIN_BUILD_SIDE_* value",
+            )
             return False
         var left_ok = validate_plan_integrity(plan._join.value()[].left[])
         var right_ok = validate_plan_integrity(plan._join.value()[].right[])
@@ -1811,6 +1853,12 @@ def validate_plan_integrity(plan: LogicalPlan) -> Bool:
         return validate_plan_integrity(
             plan._cast_to_varchar.value()[].child[]
         )
+
+    elif plan.tag == PLAN_EXCHANGE:
+        if not plan._exchange:
+            print("INTEGRITY VIOLATION: PLAN_EXCHANGE but _exchange is None")
+            return False
+        return validate_plan_integrity(plan._exchange.value()[].child[])
 
     print("INTEGRITY VIOLATION: unknown tag", Int(plan.tag))
     return False

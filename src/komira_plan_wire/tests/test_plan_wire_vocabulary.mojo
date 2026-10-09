@@ -40,7 +40,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_plan_ir.logical_plan import PLAN_TAG_COUNT
+from komira_plan_ir.logical_plan import PLAN_TAG_COUNT, plan_tag_is_retired
 from komira_plan_expr.expr import EXPR_TAG_COUNT
 from komira_plan_wire.plan_wire_vocabulary import (
     PLAN_WIRE_SPACE_COUNT,
@@ -90,11 +90,28 @@ def test_plan_tag_vocabulary_is_complete_against_engine_count() raises:
 
     If someone adds a plan tag and does not regenerate, this goes RED even
     if the text drift check were bypassed entirely.
+
+    The plan space has a hole: ids 16 and 17 are retired and lie below the
+    count, so the vocabulary publishes the count minus the retired ids. The
+    retired ids are counted with the engine's own `plan_tag_is_retired`, and
+    each must be undeclared on the wire.
     """
+    var retired = 0
+    for t in range(PLAN_TAG_COUNT):
+        if plan_tag_is_retired(UInt8(t)):
+            retired += 1
+            assert_true(
+                not plan_wire_is_declared(PLAN_WIRE_SPACE_PLAN_TAG, UInt8(t)),
+                "retired plan tag " + String(t) + " is declared on the wire",
+            )
+    assert_equal(retired, 2, "ids 16 and 17 are the retired plan tags")
     assert_equal(
         PLAN_TAG_WIRE_MEMBERS,
-        PLAN_TAG_COUNT,
-        "the wire vocabulary must publish exactly PLAN_TAG_COUNT plan tags",
+        PLAN_TAG_COUNT - retired,
+        (
+            "the wire vocabulary must publish every live plan tag below"
+            " PLAN_TAG_COUNT"
+        ),
     )
     assert_equal(
         Int(PLAN_TAG_ENGINE_MAX),
@@ -159,7 +176,7 @@ def test_countless_space_totals_are_pinned() raises:
     # or this library's build goes red. If this line collides in a merge,
     # ⛔ DO NOT PICK A SIDE — both sides' numbers are wrong; re-run the
     # generator over the MERGED sources and read the constant.
-    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 352, "total published members")
+    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 353, "total published members")
     assert_equal(AGG_FN_WIRE_MEMBERS, 37, "AGG_* has no engine count constant")
     assert_equal(PLAN_WIRE_SPACE_COUNT, 32, "enumerated tag spaces")
     # ArrowType has no engine count constant either, and it is the space LEG 2
@@ -184,10 +201,13 @@ def test_countless_space_totals_are_pinned() raises:
 
 
 def _reserved_on_wire(space: Int, engine_tag: Int) -> Bool:
-    """The engine tags plan_vocabulary.proto reserves: ExprTag (space 1)
-    EXPR_BETWEEN and EXPR_SORT_KEY, SourceVariantTag (space 13)
-    SOURCE_VARIANT_PARQUET and SOURCE_VARIANT_IN_MEMORY. Declared by the
-    engine, refused in both directions."""
+    """The engine tags plan_vocabulary.proto reserves: PlanTag (space 0)
+    PLAN_EXCHANGE, ExprTag (space 1) EXPR_BETWEEN and EXPR_SORT_KEY,
+    SourceVariantTag (space 13) SOURCE_VARIANT_PARQUET and
+    SOURCE_VARIANT_IN_MEMORY. Declared by the engine, refused in both
+    directions."""
+    if space == 0:
+        return engine_tag == 18
     if space == 1:
         return engine_tag == 10 or engine_tag == 11
     if space == 13:
@@ -271,7 +291,7 @@ def test_every_space_round_trips_every_declared_tag() raises:
         PLAN_WIRE_VOCABULARY_MEMBERS,
         "the drive must cover every published member of every space",
     )
-    assert_equal(total_reserved, 4, "four reserved engine tags")
+    assert_equal(total_reserved, 5, "five reserved engine tags")
 
 
 def test_every_space_refuses_the_four_bad_wire_values() raises:

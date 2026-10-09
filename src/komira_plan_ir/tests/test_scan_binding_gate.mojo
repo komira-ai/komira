@@ -66,6 +66,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_SCAN,
     PLAN_TAG_COUNT,
     PLAN_VIEW_REF,
+    plan_tag_is_retired,
     PLAN_CSE_REF,
     SOURCE_PARQUET,
 )
@@ -468,8 +469,11 @@ def test_a_deep_tree_is_walked_end_to_end() raises:
 
 def test_every_payloadless_plan_node_is_answered_zero() raises:
     """A node whose tag has an arm but whose payload is absent is answered 0,
-    not dereferenced. Every tag below `PLAN_TAG_COUNT`."""
+    not dereferenced. Every live tag below `PLAN_TAG_COUNT` (the retired ids
+    16 and 17 are refused, below)."""
     for t in range(PLAN_TAG_COUNT):
+        if plan_tag_is_retired(UInt8(t)):
+            continue
         var plan = LogicalPlan(UInt8(t), _schema())
         assert_equal(check_plan_scan_bindings(_clean(), plan), 0, String(t))
 
@@ -489,6 +493,11 @@ def test_a_plan_tag_with_no_arm_is_refused_by_name() raises:
     var far = LogicalPlan(UInt8(255), _schema())
     with assert_raises(contains="plan tag 255 (tag#255). A tag with no arm"):
         _ = check_plan_scan_bindings(_clean(), far)
+    # A RETIRED id lies below the count and is refused like any unmodelled
+    # one: no node may carry it.
+    var retired = LogicalPlan(UInt8(17), _schema())
+    with assert_raises(contains="plan tag 17 (tag#17)."):
+        _ = check_plan_scan_bindings(_clean(), retired)
     # Under a filter, the refusal reaches the caller of the outer walk.
     var under = LogicalPlan.filter(_col(), LogicalPlan(UInt8(200), _schema()))
     with assert_raises(contains="plan tag 200 (tag#200)."):

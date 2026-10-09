@@ -27,6 +27,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
     ASOF_BACKWARD,
     ASOF_FORWARD,
     ASOF_NEAREST,
@@ -54,6 +55,15 @@ from komira_plan_ir.logical_plan import (
     JOIN_ALGO_AUTO,
     JOIN_ALGO_HASH,
     JOIN_ALGO_SORT_MERGE,
+)
+from komira_plan_ir.plan_decisions import (
+    JOIN_BUILD_SIDE_UNSET,
+    AGG_MODE_UNSET,
+    SCAN_BOUNDED,
+    write_join_build_side,
+    write_agg_mode,
+    write_scan_boundedness,
+    write_exchange_kind,
 )
 
 
@@ -435,6 +445,13 @@ def _write_plan_node[
         if plan._scan.value()[].filter:
             writer.write(", filter=")
             plan._scan.value()[].filter.value().write_to(writer)
+        # ⛔ PLAN IDENTITY: an UNBOUNDED scan runs under the streaming driver,
+        # so it must not share a compiled plan with the bounded read of the
+        # same source. Emitted only when not BOUNDED, so every bounded scan
+        # renders (and hashes) as it did before the field existed.
+        if plan._scan.value()[].boundedness != SCAN_BOUNDED:
+            writer.write(", boundedness=")
+            write_scan_boundedness(writer, plan._scan.value()[].boundedness)
         writer.write(")\n")
 
     elif plan.tag == PLAN_FILTER:
@@ -489,6 +506,13 @@ def _write_plan_node[
         if plan._aggregate.value()[].udf:
             writer.write(", ")
             plan._aggregate.value()[].udf.value()[].write_to(writer)
+        # ⛔ PLAN IDENTITY: a PARTIAL aggregate emits states, a FINAL one merges
+        # them; neither may share a compiled plan with the other or with
+        # SINGLE. Emitted only when recorded, so an UNSET aggregate renders as
+        # before.
+        if plan._aggregate.value()[].mode != AGG_MODE_UNSET:
+            writer.write(", mode=")
+            write_agg_mode(writer, plan._aggregate.value()[].mode)
         writer.write(")\n")
         _write_plan_node(
             writer, plan._aggregate.value()[].child[], indent + 1, placeholder_inmem_id
@@ -514,6 +538,14 @@ def _write_plan_node[
             # col-refs over the joined-row schema after decomposition.
             writer.write(", residual=")
             plan._join.value()[].residual.value()[].write_to(writer)
+        # ⛔ PLAN IDENTITY: the recorded build side picks which input the host
+        # materializes. Emitted only when recorded (and `adaptive` only when
+        # set), so a join with neither renders as before.
+        if plan._join.value()[].build_side != JOIN_BUILD_SIDE_UNSET:
+            writer.write(", build=")
+            write_join_build_side(writer, plan._join.value()[].build_side)
+        if plan._join.value()[].adaptive_allowed:
+            writer.write(", adaptive")
         writer.write(")\n")
         _write_plan_node(
             writer, plan._join.value()[].left[], indent + 1, placeholder_inmem_id
@@ -756,6 +788,31 @@ def _write_plan_node[
         _write_plan_node(
             writer, plan._cast_to_varchar.value()[].child[], indent + 1, placeholder_inmem_id
         )
+
+    elif plan.tag == PLAN_EXCHANGE:
+        # A new node, so every field is emitted, including the defaults: there
+        # is no earlier render of it to stay byte-identical with. Keys are
+        # QUOTED for the reason `_write_sort_hint` gives.
+        ref ex = plan._exchange.value()[]
+        writer.write("Exchange(kind=")
+        write_exchange_kind(writer, ex.kind)
+        writer.write(", keys=[")
+        for i in range(len(ex.keys)):
+            if i > 0:
+                writer.write(", ")
+            write_quoted(writer, ex.keys[i])
+        writer.write("], key_encoding=", Int(ex.key_encoding), ", order=")
+        _write_sort_hint(writer, ex.order_keys, ex.descending)
+        writer.write("/[")
+        for i in range(len(ex.nulls_first)):
+            if i > 0:
+                writer.write(", ")
+            writer.write("T" if ex.nulls_first[i] else "F")
+        writer.write("], partitions=", ex.partitions)
+        if ex.adaptive_allowed:
+            writer.write(", adaptive")
+        writer.write(")\n")
+        _write_plan_node(writer, ex.child[], indent + 1, placeholder_inmem_id)
 
     else:
         writer.write("Unknown(tag=", Int(plan.tag), ")\n")

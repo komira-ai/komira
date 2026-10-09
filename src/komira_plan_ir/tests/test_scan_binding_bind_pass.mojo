@@ -69,6 +69,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_SCAN,
     PLAN_TAG_COUNT,
     PLAN_VIEW_REF,
+    plan_tag_is_retired,
     PLAN_CSE_REF,
     SOURCE_PARQUET,
 )
@@ -447,8 +448,11 @@ def test_a_deep_tree_is_walked_end_to_end() raises:
 
 def test_every_payloadless_plan_node_binds_nothing() raises:
     """A node whose tag has an arm but whose payload is absent is answered 0,
-    not dereferenced. Every tag below `PLAN_TAG_COUNT`."""
+    not dereferenced. Every live tag below `PLAN_TAG_COUNT` (the retired ids
+    16 and 17 are refused, below)."""
     for t in range(PLAN_TAG_COUNT):
+        if plan_tag_is_retired(UInt8(t)):
+            continue
         var reg = ScanRegistry()
         var plan = LogicalPlan(UInt8(t), _schema())
         assert_equal(bind_plan_inmem_payloads(reg, plan), 0, String(t))
@@ -460,9 +464,18 @@ def test_a_plan_tag_with_no_arm_is_refused_by_name() raises:
     var plan = LogicalPlan(UInt8(PLAN_TAG_COUNT), _schema())
     with assert_raises(
         contains=String(SCAN_BIND_PASS_UNMODELLED_TAG)
-        + ": the in-memory bind walk has no arm for plan tag 16 (tag#16)."
+        + ": the in-memory bind walk has no arm for plan tag "
+        + String(PLAN_TAG_COUNT)
+        + " (tag#"
+        + String(PLAN_TAG_COUNT)
+        + ")."
     ):
         _ = bind_plan_inmem_payloads(reg, plan)
+    # A RETIRED id lies below the count and is refused like any unmodelled
+    # one: no node may carry it.
+    var retired = LogicalPlan(UInt8(16), _schema())
+    with assert_raises(contains="plan tag 16 (tag#16)."):
+        _ = bind_plan_inmem_payloads(reg, retired)
     var far = LogicalPlan(UInt8(255), _schema())
     with assert_raises(contains="plan tag 255 (tag#255). A tag with no arm"):
         _ = bind_plan_inmem_payloads(reg, far)
