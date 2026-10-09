@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Bearer-JWT authentication for komira_http_server: BearerJwtMiddleware[V] in
 # the server's auth slot, and Rs256JwksVerifier, which checks RS256 tokens of
 # one issuer against that issuer's JWK Set (fetched over HTTPS, cached) with
-# komira_crypto's RS256 verifier. Configured by flags (flags.mojo).
+# komira_jose's JwsVerifier pinned to RS256. Configured by flags (flags.mojo).
 #
 # The tests that sign tokens read komira_http_core's RSA test key (exported
 # there); the vocabulary test reads the library's own sources.
@@ -24,7 +24,10 @@ mojo_library(
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_http_server:komira_http_server",
+        "//src/komira_jose:komira_jose",
         "//src/komira_json:komira_json",
+        "//src/komira_jwks:komira_jwks",
+        "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
         "tests/test_claims.mojo",
@@ -34,6 +37,7 @@ mojo_library(
         "tests/test_jwks_cache.mojo",
         "tests/test_middleware.mojo",
         "tests/test_no_product_vocabulary.mojo",
+        "tests/test_signature_check.mojo",
     ],
     test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
     test_data = {
@@ -42,6 +46,7 @@ mojo_library(
         "tests/test_header_gate.mojo": _KEY,
         "tests/test_jwks_cache.mojo": _KEY,
         "tests/test_middleware.mojo": _KEY,
+        "tests/test_signature_check.mojo": _KEY,
         "tests/test_no_product_vocabulary.mojo": glob(
             ["**/*.mojo"],
             exclude = ["tests/**/*.mojo"],

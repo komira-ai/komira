@@ -124,22 +124,6 @@ from .rsa import rsa_sha256_sign, rsa_pkcs1_sha256_verify
 # PrivateKeyInfo envelope. The RSAPrivateKey inside is left to AWS-LC.
 from .rsa_pem_key import rsa_pkcs8_der_from_pem
 
-# RSASSA-PKCS1-v1_5-SHA-256 VERIFY (RFC 7518 §3.3 `RS256`) + the third-party
-# JWS/JWKS verifier built on it, e.g. for checking a cloud metadata server's
-# platform attestation.
-#
-# ⛔ `rs256_jwks` IS NOT AN EXTENSION OF ANY SERVICE'S OWN TOKEN VERIFIER. A
-# service that issues its own ES256 tokens keeps its own ES256-only verifier.
-# Two issuers, two trust anchors, two verifiers — see `rs256_jwks.mojo`'s
-# header for why fusing them is how a third-party-signed token gets accepted
-# where a first-party-signed one is required.
-from .rs256_jwks import (
-    RsaJwk,
-    parse_rsa_jwks,
-    verify_rs256_jws,
-    verify_rs256_jws_against_jwks,
-)
-
 # RSA-PSS verify-only (RFC 4055 / RFC 8017 §8.1.2 + §9.1.2), for certificate
 # chain validation where an intermediate or root CA uses RSA-PSS. There is no
 # RSA-PSS sign. Comptime-parametric on N_LIMBS (32 for 2048-bit; extends to

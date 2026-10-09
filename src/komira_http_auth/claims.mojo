@@ -3,9 +3,9 @@
 #   produce.
 # =============================================================================
 #
-# These run only on a payload whose signature has verified. komira_crypto's
-# RS256 verifier deliberately checks no claim ("the return value is a payload,
-# not a decision"); this file is where the decision is made:
+# These run only on a payload whose signature has verified. The signature
+# check (komira_jose's `JwsVerifier`) checks no claim; this file is where the
+# decision is made:
 #
 #   iss   a string equal to the anchor's issuer, exactly.
 #   aud   a string equal to our audience, or a non-empty array of strings
@@ -30,11 +30,9 @@
 # payload is not set. The token itself rides along as the principal's
 # `presented` credential (redacted; never printable).
 #
-# THE PAYLOAD IS RE-DECODED HERE from its segment, not taken from
-# komira_crypto's returned String: that String is built one byte per
-# character, which garbles any non-ASCII text (a `name` claim, say). The
-# signature covers the segment's bytes, so decoding them again is as
-# authentic as the returned copy.
+# THE PAYLOAD IS DECODED HERE from its segment, after the signature over
+# that segment verified, so it is as authentic as the payload komira_jose
+# returns.
 # =============================================================================
 
 from komira_encoding import base64_url_decode_nopad

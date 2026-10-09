@@ -18,18 +18,19 @@
 #      refresh failing) refuses the token as REASON_KEYS_UNAVAILABLE, an
 #      outcome that is no verdict on the token (`keys_unavailable()`, with
 #      `retry_after_s`); a kid still missing is refused here;
-#   4. the signature: komira_crypto's `verify_rs256_jws`, the one RS256 JWS
-#      verifier in the repository. It repeats the alg/typ/crit/kid checks over
-#      its own reader, so a token passes only if both readers agree;
+#   4. the signature: komira_jose's `JwsVerifier`, pinned to RS256 over the
+#      cached RSA signing keys, with `typ` pinned to JWT and `kid` required
+#      (jwks_cache.mojo, `verify_signature`). It repeats the alg/typ/crit/kid
+#      checks over its own header gate, so a token passes only if both gates
+#      agree; any komira_jose refusal is REASON_SIGNATURE;
 #   5. the payload, re-decoded from its (now authentic) segment, then the
 #      claims (claims.mojo);
 #   6. the principal.
 #
-# One verifier is one trust anchor: see komira_crypto's rs256_jwks header for
-# why a verifier is never widened to a second issuer or algorithm.
+# One verifier is one trust anchor: a verifier is never widened to a second
+# issuer or algorithm (komira_jose's verifier.mojo header says why).
 # =============================================================================
 
-from komira_crypto.rs256_jwks import verify_rs256_jws
 from komira_json import JsonValue
 
 from komira_http_server.middleware import Principal
@@ -161,8 +162,9 @@ struct Rs256JwksVerifier[F: JwksFetcher, C: AuthClock](
         if not self._cache.has_kid(hv.kid):
             return VerifyOutcome(refused=REASON_UNKNOWN_KID)
 
-        var authentic = verify_rs256_jws(token, self._cache.key_set())
-        if not authentic:
+        try:
+            _ = self._cache.verify_signature(token)
+        except:
             return VerifyOutcome(refused=REASON_SIGNATURE)
 
         var payload: JsonValue

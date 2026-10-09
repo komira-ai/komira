@@ -263,21 +263,23 @@ def _bad_document_keeps_current_set(bad_status: Int, bad_body: String) raises:
 
 
 def test_truncated_parse_keeps_the_current_set() raises:
-    # komira_crypto's reader stops at the second entry (it refuses any
-    # backslash escape) and returns the first: a PARTIAL set of one key that
-    # is not KID. Valid JSON, so only the whole-document count catches it.
+    # komira_jwks skips the second entry (its key_ops is not an array) and
+    # returns the first: a PARTIAL set of one key that is not KID. Valid
+    # JSON, so only the whole-document kid comparison catches it. (Before
+    # komira_jose this case was an escaped kid, which the old reader refused;
+    # komira_jwks reads it as komira_json does: test_signature_check.)
     var key = _key()
     var other = rsa_jwk_json(key, String("other"))
-    var escaped = rsa_jwk_json(key, String("x")).replace(
-        String('"kid":"x"'), String('"kid":"\\u0078"')
+    var skipped = rsa_jwk_json(key, String("x")).replace(
+        String('"use":"sig"'), String('"use":"sig","key_ops":"verify"')
     )
     _bad_document_keeps_current_set(
-        200, String('{"keys":[') + other + String(",") + escaped + String("]}")
+        200, String('{"keys":[') + other + String(",") + skipped + String("]}")
     )
 
 
 def test_unusable_rsa_entry_keeps_the_current_set() raises:
-    # The second RSA entry has a too-short modulus: parse_rsa_jwks drops it
+    # The second RSA entry has a too-short modulus: parse_jwk_set skips it
     # and returns one key where the document has two RSA entries.
     var key = _key()
     var other = rsa_jwk_json(key, String("other"))
@@ -311,7 +313,7 @@ def test_duplicate_keys_document_keeps_the_current_set() raises:
 
 def test_repeated_kid_keeps_the_current_set() raises:
     # Two keys under one kid: every token with that kid would be refused by
-    # komira_crypto as ambiguous, and no refetch would fire because the kid
+    # komira_jose as ambiguous, and no refetch would fire because the kid
     # is "known". Such a document must not replace a working set.
     var key = _key()
     var other = rsa_jwk_json(key, String("other"))
@@ -321,10 +323,10 @@ def test_repeated_kid_keeps_the_current_set() raises:
 
 
 def test_readers_disagreeing_with_equal_counts_keeps_the_current_set() raises:
-    # Entry "a" labels alg with a number: komira_crypto treats it as absent
-    # and lifts the key; entry "b" has a too-short modulus, so komira_crypto
-    # drops it. Each reader sees ONE key, but not the same one. The document
-    # is refused: an RSA entry with a non-string alg or use is unreadable.
+    # Entry "a" labels alg with a number; entry "b" has a too-short modulus,
+    # so komira_jwks skips both. The document is refused at the first: an RSA
+    # entry with a non-string alg or use cannot be classified as a signing
+    # key or not.
     var key = _key()
     var a = rsa_jwk_json(key, String("a")).replace(
         String('"alg":"RS256"'), String('"alg":5')
@@ -342,8 +344,8 @@ def test_readers_disagreeing_with_equal_counts_keeps_the_current_set() raises:
 
 
 def test_non_ascii_kid_keeps_the_current_set() raises:
-    # komira_crypto builds a kid one byte per character, so a non-ASCII kid
-    # reads differently in the two readers; the document is refused.
+    # The header gate accepts only a printable-ASCII kid, so a key under
+    # any other kid could never be selected; the document is refused.
     var key = _key()
     var k = rsa_jwk_json(key, String("k") + chr(0xE9) + String("y"))
     _bad_document_keeps_current_set(
@@ -377,10 +379,10 @@ def _rsa_entries(key: List[UInt8], prefix: String, count: Int) raises -> String:
 
 def test_more_than_64_entries_keeps_the_current_set() raises:
     # 65 entries: one EC entry (skipped by both readers) then 64 RSA keys
-    # under kids that are not KID. Every check but the entry count passes:
-    # komira_crypto lifts exactly the 64 RSA kids this reader expects. Only
-    # `n > RS256_MAX_JWKS_KEYS` (entries, not RSA keys) refuses it; were the
-    # limit raised, the set would be replaced and KID become unknown.
+    # under kids that are not KID. Only the entry count refuses it: here
+    # `n > JWKS_MAX_KEYS` (entries, not RSA keys), and komira_jwks applies the
+    # same limit; were both raised, the set would be replaced and KID become
+    # unknown.
     var key = _key()
     _bad_document_keeps_current_set(
         200,

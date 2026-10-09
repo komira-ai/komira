@@ -40,7 +40,7 @@ date	src/komira_mcp_server/protocol.mojo	2	the MCP protocol revision identifiers
 date	src/komira_mcp_server/tests/test_mcp_spec_examples.mojo	3	the MCP specification examples: a revision identifier and an example tool error text (test data)
 date	src/komira_plan_ir/tests/test_scan_binding_substrate.mojo	1	a partition key literal (test data)
 date	tools/build/tests/functional/darwin/check.sh	1	the build line a stubbed linker prints (test data)
-email	src/komira_crypto/tests/test_rs256_jwks_verify.mojo	1	a made-up service account or address (test data)
+email	src/komira_jose/tests/test_rs256_third_party.mojo	1	a made-up service account or address (test data)
 email	src/komira_gcp_apigateway/tests/test_apigateway_requests.mojo	2	a made-up service account or address (test data)
 email	src/komira_gcp_cloudresourcemanager/tests/test_crm_projects.mojo	1	a made-up service account or address (test data)
 email	src/komira_gcp_cloudscheduler/tests/test_cloudscheduler_methods.mojo	3	a made-up service account or address (test data)
@@ -92,7 +92,7 @@ host	src/komira_column_kernels/tests/test_regexp_bitstate_differential.mojo	5	UR
 host	src/komira_column_kernels/tests/test_regexp_dotstar_eos_tail.mojo	14	URLs as regular-expression test input
 host	src/komira_column_kernels/tests/test_regexp_replace_memo_duplicates.mojo	16	URLs as regular-expression test input
 host	src/komira_column_kernels/tests/test_regexp_scratch_reuse_and_span_subject.mojo	6	URLs as regular-expression test input
-host	src/komira_crypto/tests/test_rs256_jwks_verify.mojo	1	a made-up registry host (test data)
+host	src/komira_jose/tests/test_rs256_third_party.mojo	1	a made-up registry host (test data)
 host	src/komira_gcp_cloudscheduler/tests/test_cloudscheduler_methods.mojo	5	made-up Cloud Run service URLs and single-label hosts (test data)
 host	src/komira_gcp_core/tests/test_gcp_pagination.mojo	6	single-label or made-up hosts as test input
 host	src/komira_gcp_core/tests/test_token_wire.mojo	3	single-label or made-up hosts as test input

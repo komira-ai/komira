@@ -71,7 +71,6 @@ mojo_library(
         "tests/test_rng_system_entropy_smoke.mojo",
         "tests/test_root_store.mojo",
         "tests/test_root_store_data_bytes.mojo",
-        "tests/test_rs256_jwks_verify.mojo",
         "tests/test_rsa_pem_key.mojo",
         "tests/test_rsa_pkcs1_verify.mojo",
         "tests/test_rsa_pss_verify.mojo",

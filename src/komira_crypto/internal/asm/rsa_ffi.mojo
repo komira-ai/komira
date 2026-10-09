@@ -421,9 +421,9 @@ def rsa_pss_verify_ffi(
 # functions, each naming its scheme, cannot be dispatched into by accident.
 #
 # WHAT THIS IS FOR: verifying a THIRD-PARTY platform attestation (a Google
-# metadata-server ID token is RS256 per RFC 7518 §3.3). It is deliberately NOT
-# reachable from the control plane's own ES256 identity-token verifier — see
-# `komira_crypto/rs256_jwks.mojo` for that separation and its reasoning.
+# metadata-server ID token is RS256 per RFC 7518 §3.3). It is called by
+# komira_jose's RS256 `JwsVerifier`, which is pinned to that one algorithm, so
+# a verifier pinned to another algorithm never reaches it.
 #
 # SYMBOL (BoringSSL / AWS-LC v1.39.0 `rsa.h`):
 #   int RSA_verify(int hash_nid, const uint8_t *digest, size_t digest_len,
