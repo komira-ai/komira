@@ -655,7 +655,7 @@ struct GithubOidcCredential[T: PkgTransport, S: Sleeper](RegistryCredential, Dei
                 self._mint_pypi()
             return pypi_upload_authorization(_secret_string(self._pypi_token))
         refuse_surface(String("GithubOidcCredential"), surface)
-        return String("")
+        return String("")  # cov: unreachable refuse_surface above always raises
 
 
 def _value_of_id_token_answer(resp: PkgResponse) raises -> SecretValue:
