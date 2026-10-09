@@ -128,6 +128,8 @@ _TESTS_LINTS = [
     "//src/komira_aws_lambda_http:deps_lint",
     "//src/komira_calendar_ics:deps_lint",
     "//src/komira_contacts:deps_lint",
+    "//src/komira_github:deps_lint",
+    "//src/komira_github_fake:deps_lint",
     "//src/komira_http_auth:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
