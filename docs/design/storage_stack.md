@@ -516,7 +516,7 @@ A tail exists where data must be visible faster than Iceberg can commit. There a
 |---|---|---|
 | topic partition | Arrow IPC stream `.seg` with a `TSG1` footer (`src/komira_broker/broker_core.mojo:66-90`); one PUT plus one append per acknowledgement | the topic's Iceberg table |
 | row store | commit chunks of `WriteOp[]` PUT and TOMBSTONE (`src/komira_table_store/table_store_codec.mojo:153-166`) | the row store's Iceberg base table |
-| graph deltas | IPC delta objects (PR #833, `data_graph_storage.md:118-124`) | the graph's Iceberg tables |
+| graph deltas | IPC delta objects (PR #833, `data_graph_storage.md`, "What changed from the first revision") | the graph's Iceberg tables |
 
 ### The roll
 
@@ -849,7 +849,7 @@ Decisions 2, 3, 7, 8 and 9 are kept, revised as noted below.
     - **Recommend yes.**
 12. **komira-lineage maintenance on the `compact_once` envelope, with a visible-output mode; Iceberg maintenance on Iceberg's procedures; one service runs both.** *Old 7, revised.*
     - **Recommend yes.**
-13. **Run the interop prototype above before PR #833 is accepted.** *Old 9, re-aimed.* PR #833's graph tables become Iceberg tables with an IPC delta tail, and its budgets are "proposals, not measurements" (`data_graph_storage.md:95`).
+13. **Run the interop prototype above before PR #833 is accepted.** *Old 9, re-aimed.* PR #833's graph tables become Iceberg tables with an IPC delta tail, and its budgets are "proposals, not measurements" (`data_graph_storage.md`, "How the options compared").
     - **Recommend yes.**
 14. **The journeys are written against a Python SDK.** *New; a product question.* komira's SDK today is Mojo and builds plans only. dbt and Airflow users will also ask how to call komira.
     - **Recommend** that the maintainers confirm the Python surface, and whether a dbt adapter is in scope, before step 2's API is fixed.
