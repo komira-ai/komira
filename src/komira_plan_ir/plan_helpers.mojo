@@ -58,6 +58,7 @@ from komira_plan_expr.expr import (
     EXPR_STRUCT_FIELD,
     EXPR_STRUCT_FIELD_IDX,
     EXPR_MAP_GET,
+    COL_SIDE_NONE,
     WhenCaseData,
     BIN_AND,
     BIN_OR,
@@ -868,10 +869,47 @@ def _collect_expr_columns(expr: Expr, mut cols: Set[String]):
 # Expression fingerprinting (for CSE detection)
 # =============================================================================
 
+# ⛔ THE FINGERPRINT IS AN IDENTITY, SO IT MUST BE INJECTIVE. Two expressions
+# that fingerprint equal are treated as ONE value by CSE Phase A (the second
+# project column becomes an alias of the first), by OR-factoring, and by
+# `udf_call_column_key` (one scratch column). The encoding is unambiguous by
+# construction, EXCEPT the `?:` fallback for an un-armed tag (end of
+# `_expr_fingerprint`): it keys on the render, so it is only as injective as
+# the render is (komira#1004). Everywhere else:
+#
+#   * every string taken from the query (column, alias and struct-field names,
+#     string and binary literals, patterns, regexp fields, JSON path segments,
+#     UDF names, the fallback's render) is written LENGTH-PREFIXED by
+#     `_fp_str` (`<byte length>:<bytes>`), so its bytes can contain `,` `(`
+#     `)` `]` or a whole other key without moving a boundary. Before this,
+#     `x IN ('a,L:sb')` and `x IN ('a', 'b')` keyed alike (komira#960);
+#   * every other token is a tag, a decimal number or a dtype name, none of
+#     which contains a structural character (`,` `(` `)` `[` `]` `;` `=` `>`);
+#   * a literal's key carries its TYPE as well as its value (see
+#     `_write_scalar_fingerprint`): `int32(7)` and `int64(7)` are different
+#     output column types.
+#
+# Changing the bytes of a key only moves CSE synthetic names and UDF scratch
+# column names, both derived and consumed within one process; nothing persists
+# a fingerprint. Falsifier: `test_cse_fingerprint_literal_identity.mojo`.
+
+
+@always_inline
+def _fp_str(s: String) -> String:
+    """A length-prefixed string token for a fingerprint: `<byte length>:<s>`.
+    The prefix is what lets `s` contain any byte without moving a boundary."""
+    return String(s.byte_length()) + ":" + s
+
+
 def _expr_fingerprint(expr: Expr) -> String:
     """Compute a canonical string fingerprint of an expression tree."""
     if expr.tag == EXPR_COL_REF:
-        return "C:" + expr.col_ref_name()
+        # A side-qualified reference (`Expr.left("x")` in a join predicate) is
+        # a different column from the plain `x`; the side is part of the key.
+        var side = expr.col_ref_side()
+        if side == COL_SIDE_NONE:
+            return "C:" + _fp_str(expr.col_ref_name())
+        return "C" + String(Int(side)) + ":" + _fp_str(expr.col_ref_name())
     elif expr.tag == EXPR_BINARY_OP:
         var left_fp = _expr_fingerprint(expr.binary_left_ref())
         var right_fp = _expr_fingerprint(expr.binary_right_ref())
@@ -890,93 +928,9 @@ def _expr_fingerprint(expr: Expr) -> String:
         var child_fp = _expr_fingerprint(expr.unary_child_ref())
         return "U:" + String(Int(expr.unary_op())) + "(" + child_fp + ")"
     elif expr.tag == EXPR_LITERAL:
-        var sv = expr.literal_value()
-        if sv.is_int():
-            return "L:i" + String(Int(sv.int_val))
-        elif sv.is_float():
-            return "L:f" + String(sv.float_val)
-        elif sv.is_bool():
-            if sv.bool_val:
-                return "L:b1"
-            else:
-                return "L:b0"
-        elif sv.is_string():
-            return "L:s" + sv.string_val
-        # TEMPORAL LOGICAL-vs-PHYSICAL: a temporal literal
-        # carries its value in a dedicated field (date32_val / ts_micros), NOT
-        # a field any arm above reads — without this arm it falls to the
-        # value-LESS "L:?" so `DATE 'a'` and `DATE 'b'` fingerprint IDENTICALLY
-        # and Phase A whole-expr dedup could collapse two DISTINCT date predicates. Same
-        # collision class the CAST arm below already guards.
-        elif sv.is_date32():
-            return "L:d" + String(Int(sv.date32_val))
-        elif sv.is_timestamp():
-            return "L:ts" + String(Int(sv.ts_micros))
-        # ★★ CSE-FINGERPRINT — EVERY REMAINING VALUE-BEARING `ScalarValue`
-        # KIND.
-        #
-        # MEASURED with a small probe: without these arms two DISTINCT
-        # DECIMAL128 literals — 30.75 and 40.00, both (12,2) —
-        # BOTH fingerprint `L:?`, so Phase A whole-expr dedup
-        # (`_cse_rewrite_project_axis1`, which does NOT consult
-        # `_is_cse_eligible`) would rewrite the second top-level Project column
-        # to an alias of the first: `SELECT <dec 30.75> a, <dec 40.00> b`
-        # answers 30.75 twice. The SAME collision class the date32 / timestamp
-        # arms above guard; this is a second ladder INSIDE one arm of the TAG
-        # ladder, so a completeness check of the tag ladder alone misses it.
-        #
-        # ⭐ ADDING AN ARM CAN ONLY EVER MAKE TWO EXPRESSIONS **MORE**
-        # DISTINGUISHABLE, so this direction cannot introduce a collapse that
-        # was not already happening. That is why all of these land together
-        # rather than one per producer.
-        #
-        # ⛔ `is_null()` DELIBERATELY GETS NO ARM. Two NULL literals SHOULD
-        # dedup — they are the same value — and NULL literals are common (an
-        # ELSE-less CASE binds one), so an arm keyed on `null_dtype` would
-        # change the fingerprint of a large number of existing plans to
-        # prevent a collapse that is correct.
-        #
-        # ⚠ THE NARROW / UNSIGNED INTEGER ARM IS NOT REDUNDANT WITH `L:i`:
-        # `is_int()` is int64-only (`is_signed_int_narrow` and `is_uint` are
-        # separate predicates), so an INT8 or a UINT64 literal reached `L:?`
-        # too. They are keyed WITH their dtype, because collapsing an int8(5)
-        # onto an int64(5) would change the output column's TYPE.
-        elif sv.is_decimal128():
-            return (
-                "L:dec128:" + String(Int(sv.dec128_high)) + ":"
-                + String(Int(sv.dec128_low)) + ":"
-                + String(sv.dec128_precision) + ":" + String(sv.dec128_scale)
-            )
-        elif sv.is_decimal256():
-            return (
-                "L:dec256:" + String(Int(sv.dec256_high_hi)) + ":"
-                + String(Int(sv.dec256_high_lo)) + ":"
-                + String(Int(sv.dec128_high)) + ":"
-                + String(Int(sv.dec128_low)) + ":"
-                + String(sv.dec128_precision) + ":" + String(sv.dec128_scale)
-            )
-        elif sv.is_interval():
-            return (
-                "L:iv:" + String(Int(sv.iv_months)) + ":"
-                + String(Int(sv.iv_days)) + ":" + String(Int(sv.iv_nanos))
-            )
-        elif sv.is_time():
-            return (
-                "L:tod:" + String(Int(sv.time_unit)) + ":"
-                + String(Int(sv.int_val))
-            )
-        elif sv.is_duration():
-            return (
-                "L:dur:" + String(Int(sv.time_unit)) + ":"
-                + String(Int(sv.int_val))
-            )
-        elif sv.is_binary():
-            return "L:bin:" + sv.string_val
-        elif sv.is_signed_int_narrow() or sv.is_uint():
-            return (
-                "L:in:" + String(sv.dtype) + ":" + String(Int(sv.int_val))
-            )
-        return "L:?"
+        # ONE ladder for a literal's key, shared with the IN-list values below
+        # (`_write_scalar_fingerprint`), so the two cannot drift apart.
+        return _scalar_fingerprint(expr.literal_value())
     elif expr.tag == EXPR_CAST:
         # The original arm keyed
         # ONLY on the back-compat numeric `cast_target()` DType. For
@@ -987,14 +941,15 @@ def _expr_fingerprint(expr: Expr) -> String:
         # `CAST(x AS DECIMAL(10,2))` and `CAST(x AS DECIMAL(18,4))` (or
         # `CAST(x AS DATE32)` vs `CAST(x AS TIMESTAMP)`) fingerprint EQUAL and
         # Phase A whole-expr dedup silently collapses the 2nd to the 1st.
-        # Append the full cast-target identity. (Mirrors the lesson that
-        # `Expr.cast_preserving_arrow` learned for rewrite sites.)
+        # Append the full cast-target identity, and `:t1` for TRY_CAST only:
+        # a strict CAST raises where TRY_CAST yields NULL.
         var child_fp = _expr_fingerprint(expr.cast_child_ref())
         return (
             "T:" + String(expr.cast_target())
             + ":a" + String(Int(expr.cast_target_arrow().type_id))
             + ":p" + String(expr.cast_decimal_precision())
             + ":s" + String(expr.cast_decimal_scale())
+            + (String(":t1") if expr.cast_is_try() else String(""))
             + "(" + child_fp + ")"
         )
     elif expr.tag == EXPR_ALIAS:
@@ -1034,7 +989,7 @@ def _expr_fingerprint(expr: Expr) -> String:
                 val_fps[j - 1] = val_fps[j]
                 val_fps[j] = tmp
                 j -= 1
-        var s = String("I:") + child_fp + String("[")
+        var s = String("I:") + child_fp + String("[") + String(n) + String(":")
         for i in range(n):
             if i > 0:
                 s += ","
@@ -1074,7 +1029,7 @@ def _expr_fingerprint(expr: Expr) -> String:
         var child_fp = _expr_fingerprint(expr.string_op_child_ref())
         return (
             "S:" + String(Int(expr.string_op_type())) + ":"
-            + expr.string_op_pattern() + "(" + child_fp + ")"
+            + _fp_str(expr.string_op_pattern()) + "(" + child_fp + ")"
         )
     elif expr.tag == EXPR_EXTRACT:
         # CSE-FINGERPRINT-COMPLETENESS ★R2: the temporal
@@ -1092,9 +1047,12 @@ def _expr_fingerprint(expr: Expr) -> String:
         # (Utf8) would collide -> a Bool column silently returns a Utf8 value.
         var child_fp = _expr_fingerprint(expr.regexp_child_ref())
         return (
-            "R:" + String(Int(expr.regexp_op())) + ":" + expr.regexp_pattern()
-            + ":" + expr.regexp_replacement() + ":" + expr.regexp_flags()
-            + ":" + String(expr.regexp_group()) + ":" + expr.regexp_group_name()
+            "R:" + String(Int(expr.regexp_op())) + ":"
+            + _fp_str(expr.regexp_pattern())
+            + ":" + _fp_str(expr.regexp_replacement())
+            + ":" + _fp_str(expr.regexp_flags())
+            + ":" + String(expr.regexp_group())
+            + ":" + _fp_str(expr.regexp_group_name())
             + "(" + child_fp + ")"
         )
     elif expr.tag == EXPR_SUBSTRING:
@@ -1145,7 +1103,7 @@ def _expr_fingerprint(expr: Expr) -> String:
         #
         # The `else` at the bottom of this function is why. It is not a
         # tag-only fallback — the structural class-killer makes it
-        # `"?:" + tag + ":" + String(expr)`, the expression's FULL Writable
+        # `"?:" + tag + ":" + _fp_str(String(expr))`, the expression's FULL Writable
         # rendering, precisely so a missing arm degrades to "never deduped"
         # (safe) instead of "always deduped" (wrong). `Expr.write_to`'s UDF arm
         # renders the name, the handle and both types, so the fallback still
@@ -1170,7 +1128,7 @@ def _expr_fingerprint(expr: Expr) -> String:
         if udf_h:
             udf_h_s = String(udf_h.value())
         return (
-            "UDF:" + expr.udf_call_name() + ":" + udf_h_s + ":"
+            "UDF:" + _fp_str(expr.udf_call_name()) + ":" + udf_h_s + ":"
             + String(Int(expr.udf_call_out_type().type_id))
             + "(" + udf_child_fp + ")"
         )
@@ -1181,11 +1139,12 @@ def _expr_fingerprint(expr: Expr) -> String:
         # would both fingerprint `"?:19"` and collapse.
         var parent_fp = _expr_fingerprint(expr.json_extract_parent_ref())
         var segs = expr.json_extract_path_segments()
-        var path_fp = String("")
+        # Count, then each segment length-prefixed: the ONE key `a.b`
+        # (`$."a.b"`) and the TWO keys `a`, `b` (`$.a.b`) must not collide.
+        var path_fp = String(len(segs))
         for i in range(len(segs)):
-            if i > 0:
-                path_fp += "."
-            path_fp += segs[i]
+            path_fp += "."
+            path_fp += _fp_str(segs[i])
         var meta = "1" if expr.json_extract_preserve_extension_metadata() else "0"
         return (
             "J:" + path_fp + ":"
@@ -1197,7 +1156,7 @@ def _expr_fingerprint(expr: Expr) -> String:
         # the discriminator. Without this arm `addr.field("city")` and
         # `addr.field("zip")` would both fingerprint `"?:16"` and collapse.
         var parent_fp = _expr_fingerprint(expr.struct_field_parent_ref())
-        return "SF:" + expr.struct_field_name() + "(" + parent_fp + ")"
+        return "SF:" + _fp_str(expr.struct_field_name()) + "(" + parent_fp + ")"
     elif expr.tag == EXPR_MAP_GET:
         # CSE-FINGERPRINT-COMPLETENESS ★R6: the key is a full
         # Expr — fingerprint it recursively. Without this arm
@@ -1231,7 +1190,7 @@ def _expr_fingerprint(expr: Expr) -> String:
         # allocates, but the fallback only fires for un-armed tags (now just
         # the dormant/rare ones) and is computed once per top-level expr in
         # Phase A, not per row.
-        return "?:" + String(Int(expr.tag)) + ":" + String(expr)
+        return "?:" + String(Int(expr.tag)) + ":" + _fp_str(String(expr))
 
 
 @always_inline
@@ -1243,12 +1202,35 @@ def _write_scalar_fingerprint[W: Writer](mut writer: W, sv: ScalarValue):
     (pointer, length) constant arrays whose two call-site references
     an `--emit shared-lib` link binds INDEPENDENTLY, so a
     shared library can bind such a pair CROSSED and crash the host
-    interpreter."""
-    if sv.is_int():
+    interpreter.
+
+    This is the ONE literal-key ladder: `_expr_fingerprint`'s EXPR_LITERAL
+    arm and the IN-list values both come here."""
+    # ⛔ THE KEY CARRIES THE TYPE, NOT ONLY THE VALUE. `is_int()` is true for
+    # int32 AND int64 and `is_float()` for float32 AND float64, so an arm that
+    # keyed only on the value collapsed `from_int32(7)` onto `from_int64(7)`
+    # and CSE Phase A turned an int32 column into an int64 one (komira#960).
+    # int64 and float64 keep their historical short forms; every other width
+    # is keyed with its dtype name, like the narrow / unsigned arm below.
+    if sv.is_int() and sv.dtype == DType.int64:
         writer.write(String("L:i") + String(Int(sv.int_val)))
         return
-    elif sv.is_float():
+    elif sv.is_any_integer():
+        # int8 / int16 / int32 and uint8..uint64 (uint64 as its two's-
+        # complement bit pattern, which is one-to-one).
+        writer.write(
+            String("L:in:") + String(sv.dtype) + String(":")
+            + String(Int(sv.int_val))
+        )
+        return
+    elif sv.is_float() and sv.dtype == DType.float64:
         writer.write(String("L:f") + String(sv.float_val))
+        return
+    elif sv.is_float():
+        writer.write(
+            String("L:fn:") + String(sv.dtype) + String(":")
+            + String(sv.float_val)
+        )
         return
     elif sv.is_bool():
         if sv.bool_val:
@@ -1257,21 +1239,33 @@ def _write_scalar_fingerprint[W: Writer](mut writer: W, sv: ScalarValue):
         writer.write(String("L:b0"))
         return
     elif sv.is_string():
-        writer.write(String("L:s") + sv.string_val)
+        writer.write(String("L:s") + _fp_str(sv.string_val))
         return
-    # TEMPORAL LOGICAL-vs-PHYSICAL: keep the temporal-literal
-    # arms byte-identical to `_expr_fingerprint`'s so a date32 literal's value is
-    # in the key (a value-LESS "L:?" would collide distinct dates under dedup).
+    # TEMPORAL LOGICAL-vs-PHYSICAL: a temporal literal carries its value in a
+    # dedicated field (date32_val / ts_micros), NOT a field any arm above
+    # reads -- without these arms it falls to the value-LESS "L:?" so
+    # `DATE 'a'` and `DATE 'b'` fingerprint IDENTICALLY and Phase A whole-expr
+    # dedup could collapse two DISTINCT date predicates. Same collision class
+    # the CAST arm of `_expr_fingerprint` guards.
     elif sv.is_date32():
         writer.write(String("L:d") + String(Int(sv.date32_val)))
         return
     elif sv.is_timestamp():
         writer.write(String("L:ts") + String(Int(sv.ts_micros)))
         return
-    # ★★ The same eight arms as the returning ladder in `_expr_fingerprint`,
-    # and they MUST stay byte-identical to it — see the argument there.
-    # ⚠ Written with `writer.write(String(...) + ...)` rather than returned,
-    # per this function's own docstring.
+    # ★★ CSE-FINGERPRINT — EVERY REMAINING VALUE-BEARING `ScalarValue` KIND.
+    #
+    # MEASURED with a small probe: without these arms two DISTINCT DECIMAL128
+    # literals — 30.75 and 40.00, both (12,2) — BOTH fingerprint `L:?`, so
+    # Phase A whole-expr dedup (`_cse_rewrite_project_axis1`, which does NOT
+    # consult `_is_cse_eligible`) would rewrite the second top-level Project
+    # column to an alias of the first: `SELECT <dec 30.75> a, <dec 40.00> b`
+    # answers 30.75 twice. This is a second ladder INSIDE one arm of the TAG
+    # ladder, so a completeness check of the tag ladder alone misses it.
+    #
+    # ⭐ ADDING AN ARM CAN ONLY EVER MAKE TWO EXPRESSIONS **MORE**
+    # DISTINGUISHABLE, so this direction cannot introduce a collapse that was
+    # not already happening.
     elif sv.is_decimal128():
         writer.write(
             String("L:dec128:") + String(Int(sv.dec128_high)) + String(":")
@@ -1309,13 +1303,14 @@ def _write_scalar_fingerprint[W: Writer](mut writer: W, sv: ScalarValue):
         )
         return
     elif sv.is_binary():
-        writer.write(String("L:bin:") + sv.string_val)
+        writer.write(String("L:bin:") + _fp_str(sv.string_val))
         return
-    elif sv.is_signed_int_narrow() or sv.is_uint():
-        writer.write(
-            String("L:in:") + String(sv.dtype) + String(":")
-            + String(Int(sv.int_val))
-        )
+    # A NULL is keyed by its declared type. Two NULLs of ONE type still share
+    # a key (they are the same value, and an ELSE-less CASE binds one, so CSE
+    # on them matters); `null(int64)` and `null(utf8)` are different output
+    # column types and must not.
+    elif sv.is_null():
+        writer.write(String("L:n:") + String(sv.null_type()))
         return
     writer.write(String("L:?"))
     return

@@ -33,25 +33,41 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # That package depends on this one, so the per-change check, which builds the
 # reverse dependencies of what a change touches, builds it for every change
 # here; this package's own build no longer runs the loop over HTTP.
+#
+# The entrypoint (entrypoint.mojo, the job_supervisor_main binary below) is
+# tested here too: its flags and every refusal (test_entrypoint_flags), the
+# bearer credential from a file re-read per beat and from an environment
+# variable read once and removed before the spawn (test_bearer_heartbeat_auth,
+# whose two variables test_env sets), and the maximum runtime and the gs://
+# log store over komira_objectstore_gcs's in-memory backend
+# (test_max_runtime_and_gcs_logs).
 mojo_library(
     name = "komira_job_supervisor",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_clock:komira_clock",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_gcp_core:komira_gcp_core",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_job_report_proto:komira_job_report_proto",
         "//src/komira_libc:komira_libc",
         "//src/komira_log:komira_log",
         "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore_gcs:komira_objectstore_gcs",
         "//src/komira_objectstore_s3:komira_objectstore_s3",
         "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_retry:komira_retry",
+        "//src/komira_secret_env:komira_secret_env",
+        "//src/komira_secret_store:komira_secret_store",
         "//src/komira_supervisor:komira_supervisor",
     ],
     test_srcs = [
+        "tests/test_bearer_heartbeat_auth.mojo",
+        "tests/test_entrypoint_flags.mojo",
+        "tests/test_max_runtime_and_gcs_logs.mojo",
         "tests/test_job_supervisor_chatty_child.mojo",
         "tests/test_job_supervisor_config_flags.mojo",
         "tests/test_job_supervisor_object_store.mojo",
@@ -59,6 +75,21 @@ mojo_library(
         "tests/test_heartbeat_no_credential_in_clear.mojo",
         "tests/test_heartbeat_proto_roundtrip.mojo",
     ],
+    test_env = {
+        "KOMIRA_JOB_SUPERVISOR_TEST_CREDENTIAL": "tok-env-0123456789",
+        "KOMIRA_JOB_SUPERVISOR_TEST_PASSTHROUGH": "visible-to-the-job",
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The job supervisor as a container entrypoint: `run_entrypoint`
+# (entrypoint.mojo, whose header lists its flags and exit status) over this
+# process's arguments.
+mojo_binary(
+    name = "job_supervisor_main",
+    srcs = ["main/job_supervisor_main.mojo"],
+    main = "main/job_supervisor_main.mojo",
+    deps = [":komira_job_supervisor"],
     visibility = ["PUBLIC"],
 )
 
@@ -88,6 +119,7 @@ _E2E_DEPS = [
     ":komira_job_supervisor",
     "//src/komira_crypto:komira_crypto",
     "//src/komira_http_core:komira_http_core",
+    "//src/komira_libc:komira_libc",
     "//src/komira_supervisor:komira_supervisor",
     "//src/tests/helpers/komira_test_s3_adapter:komira_test_s3_adapter",
 ]

@@ -13,6 +13,7 @@ load(":pins.bzl", "PYTHON", "WHEELS")
 # hands its dependents nothing but its pass marker (README.md, Never shipped).
 # A new consumer is a new line here.
 _TEST_ONLY = [
+    "komira//src/tests/e2e/komira_tls_interop_e2e/...",
     "komira//src/tests/helpers/komira_test_python/...",
     # The tests of the CI scripts under release/ci (a py_test alone).
     "komira//release/ci/tests:",

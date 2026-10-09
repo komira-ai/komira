@@ -786,14 +786,11 @@ def test_connection_window_update_releases_a_deferred_body() raises:
 
 def test_stream_window_overflow_resets_the_stream() raises:
     """h2spec http2/6.9.1/3: HEADERS without END_STREAM, then two stream
-    WINDOW_UPDATEs of 2^31-1. RST_STREAM(FLOW_CONTROL_ERROR) for each; the
-    connection stays open.
-
-    Today's behaviour, pinned on purpose: the stream stays half-closed
-    (local) after the server's RST_STREAM, so the second update is reset
-    again. This departs from RFC 9113 §5.1 (sending RST_STREAM moves the
-    stream to closed) and is tracked in komira#897; a fix flips the state
-    assertion and the second RST_STREAM here."""
+    WINDOW_UPDATEs of 2^31-1. The first overflows: RST_STREAM(
+    FLOW_CONTROL_ERROR), and sending it closes the stream (RFC 9113 §5.1).
+    The second arrives on a closed stream after our RST_STREAM and is
+    ignored (§5.1), so there is exactly one RST_STREAM; the connection stays
+    open."""
     var c = _Client()
     assert_true(c.send(c.get(1, False)))
     _ = c.out()
@@ -803,15 +800,14 @@ def test_stream_window_overflow_resets_the_stream() raises:
         b.append(b2[i])
     assert_true(c.send(b))
     var outs = c.out()
-    assert_equal(len(outs), 2, "one RST_STREAM per overflowing update")
+    assert_equal(len(outs), 1, "one RST_STREAM; the second update is ignored")
     _assert_rst(outs[0], 1, FLOW_CONTROL_ERROR)
-    _assert_rst(outs[1], 1, FLOW_CONTROL_ERROR)
     assert_false(c.h2.is_goaway_sent())
     var idx = c.h2.find_stream_idx(UInt32(1))
     assert_equal(
         Int(c.h2.streams[idx].state),
-        Int(STREAM_STATE_HALF_CLOSED_LOCAL),
-        "komira#897: the reset stream is left half-closed (local)",
+        Int(STREAM_STATE_CLOSED),
+        "the reset stream is closed",
     )
 
 

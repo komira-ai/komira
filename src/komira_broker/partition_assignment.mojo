@@ -1416,10 +1416,10 @@ def assign_partitions(
             fill_cursor += 1
         if fill_cursor >= n:
             # Defensive: capacity must always cover the unassigned count.
-            raise Error(
-                "assign_partitions: ran out of node capacity at pid "
-                + String(pid)
-                + " (invariant violated — capacity should equal P)"
+            raise Error(  # cov: unreachable the quotas sum to P and each pid takes one slot, so a slot is always left
+                "assign_partitions: ran out of node capacity at pid "  # cov: unreachable see the line above
+                + String(pid)  # cov: unreachable see the line above
+                + " (invariant violated — capacity should equal P)"  # cov: unreachable see the line above
             )
         owners[pid] = node_ids[fill_cursor]
         remaining[fill_cursor] = remaining[fill_cursor] - 1

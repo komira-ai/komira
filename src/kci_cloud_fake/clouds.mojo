@@ -48,6 +48,11 @@
 #              `network` subnet's NAME, as inputs
 #   registry -> `<id>/registry` (registry.mojo; no identity, no grants of
 #              its own: it is only granted to, WRITE to push, READ to pull)
+# kci writes the METADATA on the lowered nodes (`label.<key>` on every
+# node, `physical_name` on the primary one); the fake's outputs of a named
+# primary object follow its name (nodes.mojo), `list_owned` reports the name
+# each object was created or adopted under (`FakeStore.names`), and `check`
+# refuses what the shape's `MetadataLimits` refuse (metadata.mojo).
 # The grants are kci's EDGES (`kci_cloud.grants`), handed to `lower` with
 # each target's type: a `uses` line, the implicit `cell LOGS WRITE` of an
 # identity the resource holds itself, or a grant resource. An edge lowers to
@@ -176,6 +181,7 @@ from kci_cloud_fake.limits import (
     index_limits,
 )
 from kci_cloud_fake.network import lower_address, lower_network, lower_subnet, network_limits
+from kci_cloud_fake.metadata import metadata_limits
 from kci_cloud_fake.nodes import FakeNode, live_key
 from kci_cloud_fake.registry import lower_registry
 from kci_cloud_fake.secrets import lower_secret
@@ -388,6 +394,7 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) raises -> List[OwnedR
                 retained_by(labels),
                 live_key(s.digests[i]),
                 validation_run_of(labels),
+                s.names[i].copy(),
             )
         )
     return out^
@@ -533,6 +540,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         workload_limits(r, self._shape, self._id, out)
         trigger_limits(r, firings, self._shape, self._id, out)
         network_limits(r, self._shape, self._id, out)
+        metadata_limits(r, firings, self._shape.metadata, self._shape.schedule_folds, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
