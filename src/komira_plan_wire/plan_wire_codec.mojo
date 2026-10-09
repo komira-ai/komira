@@ -239,12 +239,14 @@
 #   the same root tag apart, nor two different ref-name lists of equal length.
 #   The IR-equality leg is the only thing that compares either.
 #
-#   ⚠ CAST CARRIES SIX PARTS AND THE RENDER EMITS TWO. `Expr.write_to` prints
-#   `Cast(<child>, <target>)`; `target_arrow`, `decimal_precision`,
-#   `decimal_scale` and `try_cast` reach NO render at ANY value, so LEG 1 and
-#   `structural_hash` are blind to all four and the IR-equality leg is the only
-#   thing that can see one dropped. Each therefore gets its own wire slot —
-#   re-deriving `target_arrow` from `target` at decode would be exactly the bug
+#   ⚠ CAST CARRIES SIX PARTS AND THE RENDER EMITS THE OTHER FOUR ONLY WHEN THEY
+#   DEVIATE. `Expr.write_to` prints `Cast(<child>, <target>` then
+#   `, arrow=<type>` when `target_arrow` is not `ArrowType.from_dtype(target)`,
+#   `, p=<p>, s=<s>` when either is non-zero, and `, try` for TRY_CAST. So
+#   LEG 1 sees a dropped part only when its value deviates; at the default it
+#   prints nothing, and the IR-equality leg is the only thing that compares
+#   it. Each part therefore gets its own wire slot — re-deriving
+#   `target_arrow` from `target` at decode would be exactly the bug
 #   `Expr.cast_preserving_arrow` exists to fix, re-committed one layer down.
 #
 #   ⚠ REGEXP RENDERS FOUR OF ITS SEVEN FIELDS *CONDITIONALLY*, WHICH IS A THIRD
