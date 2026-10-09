@@ -12,6 +12,7 @@ comptime MODE_ENFORCE = "enforce"
 
 comptime BELOW_TARGET = "BelowTarget"
 comptime NOT_MEASURED = "NotMeasured"
+comptime BRANCH_NOT_MEASURED = "BranchNotMeasured"
 comptime REGRESSION = "Regression"
 comptime MISSING_ROW = "MissingRow"
 comptime EXTRA_ROW = "ExtraRow"
@@ -20,6 +21,7 @@ comptime MUTANT_SURVIVED = "MutantSurvived"
 comptime EXEMPTION_WITHOUT_REASON = "ExemptionWithoutReason"
 comptime STALE_EXEMPTION = "StaleExemption"
 comptime UNMEASURED_FILE = "UnmeasuredFile"
+comptime BRANCH_UNMEASURED_FILE = "BranchUnmeasuredFile"
 
 comptime NO_FLOOR: Int = -1
 
@@ -29,12 +31,14 @@ struct PackageStats(Copyable, Movable):
     and exemptions applied, and the package's ratchet row. `files` counts
     every file in the numbers, the files no report gave a record included;
     `unmeasured_files` those of them that raised `UnmeasuredFile`; `has_records` is whether a report had a line record (or an
-    exempted line) in the package at all."""
+    exempted line) in the package at all; `has_branch_records` whether a
+    report had a branch record in it (before exemptions)."""
 
     var package: String
     var files: Int
     var unmeasured_files: Int
     var has_records: Bool
+    var has_branch_records: Bool
     var line_found: Int
     var line_hit: Int
     var branch_found: Int
@@ -54,6 +58,7 @@ struct PackageStats(Copyable, Movable):
         self.files = 0
         self.unmeasured_files = 0
         self.has_records = False
+        self.has_branch_records = False
         self.line_found = 0
         self.line_hit = 0
         self.branch_found = 0
@@ -122,6 +127,16 @@ struct Finding(Copyable, Movable):
         self.line = line
         self.message = message
         self.count = count
+
+
+def is_info_package(package: String, dirs: List[String]) -> Bool:
+    """Whether `package` is one of `dirs` (`--info-package`, a test-only
+    package's directory) or under one, at a path-segment boundary: `src/tests`
+    covers `src/tests/e2e/x`, not `src/testsuite`."""
+    for i in range(len(dirs)):
+        if package == dirs[i] or package.startswith(dirs[i] + String("/")):
+            return True
+    return False
 
 
 def valid_mode(mode: String) -> Bool:

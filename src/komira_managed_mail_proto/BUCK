@@ -1,0 +1,77 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library", "proto_srcs")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode")
+
+# The managed mail API (`komira/managed_mail/v1/mail.proto`, package
+# `komira.managed_mail.v1`): the request, response and resource messages of a
+# simple mail app, the inbound-delivery envelope and the HTTP submission
+# request a submission service serves, carried as proto3 canonical JSON over
+# HTTP, generated into the Mojo package `komira_managed_mail_proto`:
+#
+#   from komira_managed_mail_proto.mail import SendEmailRequest, Email, ...
+#
+# `mail_service.proto` lists the methods and their HTTP routes; no code is
+# generated from it (see `:mail_service`). Nothing here imports another
+# `.proto`.
+#
+# The welded tests check every message against its proto3-JSON golden
+# (tests/goldens/mail_v1.golden) and against protoc's encoding of the same
+# values (tests/fixtures/corpus.canonical.hex), check that protoc still
+# encodes corpus.txtpb to exactly those committed bytes (`:corpus_canonical`,
+# staged), and pin every enum value's number and name. README.md's examples
+# run as one more welded test.
+mojo_proto_library(
+    name = "komira_managed_mail_proto",
+    srcs = ["mail.proto"],
+    import_prefix = "komira/managed_mail/v1",
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    test_srcs = [
+        "tests/test_mail_enum_numbers.mojo",
+        "tests/test_mail_goldens.mojo",
+    ],
+    # Staged at these paths under the test's working directory. protoc's
+    # encoding of corpus.txtpb is made in this build (`:corpus_canonical`), so
+    # the test compares the committed bytes with what protoc writes for the
+    # schema being built. mail.proto is staged so the test can hold the golden
+    # file to the messages it declares.
+    test_data = {
+        "tests/test_mail_goldens.mojo": {
+            "src/komira_managed_mail_proto/mail.proto": "mail.proto",
+            "src/komira_managed_mail_proto/tests/fixtures/corpus.canonical.hex": "tests/fixtures/corpus.canonical.hex",
+            "src/komira_managed_mail_proto/tests/fixtures/corpus.protoc.hex": ":corpus_canonical",
+            "src/komira_managed_mail_proto/tests/goldens/mail_v1.golden": "tests/goldens/mail_v1.golden",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The service: `komira/managed_mail/v1/mail_service.proto`, the methods and
+# their HTTP routes. A `service` in a generated file brings a gRPC client and
+# its runtime into the package, and the app speaks plain JSON over HTTP, so
+# this file is published as `.proto` source only. protoc reads it in
+# `:corpus_canonical` below, so each method must name messages mail.proto
+# declares.
+proto_srcs(
+    name = "mail_service",
+    srcs = ["mail_service.proto"],
+    import_prefix = "komira/managed_mail/v1",
+    proto_deps = [":komira_managed_mail_proto_gen"],
+    visibility = ["PUBLIC"],
+)
+
+# protoc, the reference implementation, encoding the corpus: one value of every
+# message as fields of the test-only `MailCorpus` (tests/mail_corpus.proto).
+# `corpus.txtpb` is that value as protoc text. The committed
+# `tests/fixtures/corpus.canonical.hex` is this target's output, written with
+#   ./buck2 build //src/komira_managed_mail_proto:corpus_canonical \
+#       --out src/komira_managed_mail_proto/tests/fixtures/corpus.canonical.hex
+# and tests/test_mail_goldens.mojo requires the two to be the same bytes.
+proto_encode(
+    name = "corpus_canonical",
+    srcs = ["tests/mail_corpus.proto"],
+    proto_deps = [
+        ":komira_managed_mail_proto_gen",
+        ":mail_service",
+    ],
+    root = "komira.managed_mail.v1.corpus.MailCorpus",
+    txtpb = "tests/fixtures/corpus.txtpb",
+)

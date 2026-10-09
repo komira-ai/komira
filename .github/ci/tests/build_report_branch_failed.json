@@ -1,0 +1,64 @@
+{
+  "trace_id": "00000000-0000-0000-0000-000000000000",
+  "success": false,
+  "results": {
+    "tests//negative/coverage:branchretor": {
+      "success": "FAIL",
+      "outputs": {
+        "coverage|tests": [
+          "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__branchretor__/cov/tests/test_either.xml"
+        ]
+      },
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be": {
+          "errors": [
+            {
+              "message_content": "15674996167720532812",
+              "action_error": {
+                "name": {
+                  "category": "mojo_cov_branch_classify",
+                  "identifier": "test_either"
+                },
+                "key": {
+                  "owner": "tests//negative/coverage:branchretor (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)"
+                },
+                "digest": "3a119204c0d0de1fe6d8f33386365fee09f7e30e392241c5c2b2f702e578ba34:141",
+                "error_content": "2497671795098395193",
+                "stderr_content": "7437938752609968680",
+                "stdout_content": "3476900567878811119",
+                "error_diagnostics": null
+              },
+              "error_tags": [
+                "ACTION_COMMAND_FAILURE",
+                "ANY_ACTION_EXECUTION"
+              ],
+              "cause_index": 0,
+              "error_category": "USER"
+            }
+          ],
+          "success": "FAIL",
+          "outputs": {
+            "coverage|tests": [
+              "buck-out/v2/art/tests/03cc1a891c89e4be/negative/coverage/__branchretor__/cov/tests/test_either.xml"
+            ]
+          },
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    }
+  },
+  "failures": {},
+  "project_root": "/repo",
+  "truncated": false,
+  "strings": {
+    "15674996167720532812": "(left out)",
+    "2497671795098395193": "(left out)",
+    "3476900567878811119": "(left out)",
+    "7437938752609968680": "(left out)"
+  },
+  "error_category": "USER"
+}

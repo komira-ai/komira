@@ -19,13 +19,13 @@ file at the pinned commit.
 | `:logging_v2` | the Cloud Logging v2 protos (roots `google/logging/v2/{logging,log_entry}.proto`, for `ListLogEntries`), checked to be exactly their import closure |
 | `:storage_v2` | the Cloud Storage v2 protos (root `google/storage/v2/storage.proto`, the gRPC storage API), checked the same way |
 | `:firestore_v1` | the Cloud Firestore v1 protos (root `google/firestore/v1/firestore.proto`: the document methods and `Listen`), checked the same way |
-| `:iam_admin_v1` | the IAM v1 protos (root `google/iam/admin/v1/iam.proto`: service accounts, roles, service-account IAM policies), checked the same way |
+| `:iam_admin_v1` | the IAM protos (roots `google/iam/admin/v1/iam.proto`: service accounts, roles, service-account IAM policies; and `google/iam/v1beta/workload_identity_pool.proto`: workload identity pool providers, which the pin has at v1beta only), checked the same way |
 | `:resourcemanager_v3` | the Resource Manager v3 Projects protos (root `google/cloud/resourcemanager/v3/projects.proto`), checked the same way |
 | `:serviceusage_v1` | the Service Usage v1 protos (root `google/api/serviceusage/v1/serviceusage.proto`), checked the same way |
 | `:compute_v1` | the Compute Engine v1 protos (root `google/cloud/compute/v1/compute.proto`, the REST compute API), checked the same way |
 | `:artifactregistry_v1` | the Artifact Registry v1 protos (root `google/devtools/artifactregistry/v1/service.proto`), checked the same way |
 | `:apigateway_v1` | the API Gateway v1 protos (root `google/cloud/apigateway/v1/apigateway_service.proto`), checked the same way |
-| `:run_v2` | the Cloud Run Admin v2 protos (roots `google/cloud/run/v2/{execution,job,revision,service}.proto`), checked the same way |
+| `:run_v2` | the Cloud Run Admin v2 protos (roots `google/cloud/run/v2/{execution,job,revision,service,worker_pool}.proto`), checked the same way |
 | `:cloudscheduler_v1` | the Cloud Scheduler v1 protos (root `google/cloud/scheduler/v1/cloudscheduler.proto`), checked the same way |
 | `:secretmanager_v1` | the Secret Manager v1 protos (root `google/cloud/secretmanager/v1/service.proto`), checked the same way |
 | `:monitoring_v3` | the Cloud Monitoring v3 protos (root `google/monitoring/v3/metric_service.proto`, for `ListTimeSeries`), checked the same way |
@@ -69,9 +69,9 @@ build on its own.
    `_RESOURCEMANAGER_V3_CLOSURE`, `_SERVICEUSAGE_V1_CLOSURE`, `_COMPUTE_V1_CLOSURE`,
    `_ARTIFACTREGISTRY_V1_CLOSURE`, `_APIGATEWAY_V1_CLOSURE`, `_RUN_V2_CLOSURE`,
    `_CLOUDSCHEDULER_V1_CLOSURE`, `_SECRETMANAGER_V1_CLOSURE`). Then build the
-   generated clients (`//src/komira_gcp_*:`): komira_gcp_run's
-   test_run_operations_mixin fails if run_v2.yaml moved the operations paths
-   its client was generated with.
+   generated clients (`//src/komira_gcp_*:`): komira_gcp_run generates its
+   operations client from run_v2.yaml's `http.rules`, and its
+   test_run_operations_rules fails until its golden follows a moved path.
 
 ## Adding a client
 
