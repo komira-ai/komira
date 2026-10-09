@@ -65,22 +65,25 @@ A name cannot identify a lambda or a notebook function, and a registry lookup ca
 captured. This section identifies code by **content digest**. The code bytes travel in an **environment image**
 beside the plan, never in the plan.
 
-### 10.2 Five UDF kinds
+### 10.2 Six UDF kinds
 
 | Kind | Where it appears in the plan | The function receives | It returns |
 |---|---|---|---|
 | `SCALAR` | An expression, `WireUdfApply` (§10.4), anywhere a `WireExpr` may appear except a scan's pushed `filter`, including inside an aggregate's arguments | One value per argument, per row; the host calls it in a loop over each batch | One value per row |
+| `ROW` | An expression, `WireUdfApply`, where a `SCALAR` may appear | One row object per input row, built from the declared read set only (below) | One value per row |
 | `MAP_BATCHES_COLUMN` | An expression, `WireUdfApply` | One whole batch per argument (a column) | A column of the **same length** |
 | `MAP_BATCHES_FRAME` | A plan node, `WireMapBatchesNode` (§10.4) | One whole batch of the input table, or one whole group when `group_by` is set | A table with any number of rows |
 | `AGGREGATE` | An aggregate measure: a `WireAggExpr` with `func = AGG_UDF` whose argument is a `WireUdfApply` (§10.4) | Plain form: every row of one group, as one batch per argument. Mergeable form: the group's rows in batches, through an accumulator (below) | One value per group |
 | `STEP` | A source node, `WireStepNode` (§10.4) | The node's literal arguments | A table, or nothing (an empty table with no columns) |
 
 Every kind is runtime-neutral. Whether a runtime supports a kind is a runtime capability, checked at admission
-(`OPTIMIZED_UDF_KIND_UNSUPPORTED`); at the first release `komira/python` supports all kinds and `komira/node` all but
-`STEP`.
+(`OPTIMIZED_UDF_KIND_UNSUPPORTED`; the capability bit is `ROW` in `shapes`, `udf_runtime_interface.md` §4.2). At the
+first release `komira/python` supports all kinds and `komira/node` all but `STEP`. *(Not yet decided: whether
+`komira/node` ships `ROW` at the first release; the row proxy is staged in the Python runtime,
+`udf_runtime_interface.md` §9 S4.)*
 
-- **The kind records the call shape.** A `WireUdfApply` targets `SCALAR`, `MAP_BATCHES_COLUMN` or (inside `AGG_UDF`)
-  `AGGREGATE`; a `WireMapBatchesNode` targets `MAP_BATCHES_FRAME`; a `WireStepNode` targets `STEP`. Any other pairing
+- **The kind records the call shape.** A `WireUdfApply` targets `SCALAR`, `ROW`, `MAP_BATCHES_COLUMN` or (inside
+  `AGG_UDF`) `AGGREGATE`; a `WireMapBatchesNode` targets `MAP_BATCHES_FRAME`; a `WireStepNode` targets `STEP`. Any other pairing
   is refused (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`). A runtime binds one argument schema per `UdfRef`, so one `UdfRef`
   cannot serve two shapes.
 - **A grouped frame call** (`group_by` set) is pandas' `groupby(...).apply(f)` and polars' `group_by(...).map_groups(f)`.
@@ -114,6 +117,33 @@ form, set for the mergeable form.
 `MAP_BATCHES_FRAME`, which may be a generator, or a grouped one. A per-row table function is a `SCALAR` UDF that returns a
 list, followed by an explode.
 
+**A `ROW` UDF stays columnar.** A row-shaped function (`df.map_rows(f)`, pandas `DataFrame.apply(f, axis=1)`) reads
+the fields of one row object by name. Handed the whole row, it would make every column of its input live and defeat
+projection pushdown, so the `ROW` `UdfRef` declares the fields it reads, and nothing else reaches it
+(`udf_runtime_interface.md` §3.1):
+
+- **The read set is `arg_types`** (§10.3): one entry per field, whose `WireField.name` is the name user code reads and
+  whose type is that column's explicit Arrow type. The call site's `WireUdfApply` passes one argument per entry, in
+  the same order, usually a column reference; the argument binds the name by position, so a rename below the call
+  does not change the `UdfRef`.
+- **The producer determines it when the plan is built, never a host.** It takes the first of: `columns=[...]` on the
+  verb; otherwise the union of a *recording row proxy* during the local run (§10.10), which records each field read,
+  and static analysis of the function's field accesses where the SDK has one (an earlier engine recorded reads this
+  way, `Row.accessed_column_names()`); otherwise every input column. A function that iterates the row, converts it to
+  a dict or tuple, unpacks it or passes it whole to other code marks the read set as undetermined, and so does a local
+  run that saw no rows with no static result: the producer then declares every input column, which is correct and
+  slower, and says so in its local diagnostics. `columns=[...]` naming a column the input lacks is refused on the
+  user's machine (`UDF_ROW_COLUMN_UNKNOWN`).
+- **The runtime builds rows from those columns only**, per batch, inside the runtime: a lazy row view over the
+  argument struct's children. A read of any other field fails the batch with `UDF_FIELD_NOT_DECLARED`, naming the
+  field, the read set and the row, with the fix-it "add it to `columns=[...]`". It never yields a null, and it fails
+  even if user code catches the language's exception. It is never retried: the same batch fails the same way. A field
+  read only on a branch the local run did not take is the case this catches.
+- **A `ROW` UDF is `MANUAL`** (§10.7). Under `PROPAGATE`, a null in a field read only on some branches would drop
+  rows the function would have computed.
+- **Output.** One value of `return_type` per row, as for `SCALAR`. A function that returns several values per row (a
+  tuple from `map_rows`) declares a struct, which the producer unpacks into columns with ordinary field access.
+
 **GPU UDFs come later.** At the first release a UDF runs on CPUs only. The accelerator fields of `UdfResources`
 (§10.3) are not in the first `format_version`, and the SDK refuses a request for a GPU by name
 (`UDF_ACCELERATOR_UNSUPPORTED`). GPU UDFs are added under a later `format_version` (§9.2).
@@ -122,7 +152,8 @@ How SDK verbs map to these kinds *(informative, for the SDKs)*:
 
 | Kind | polars-style API (Python) | pandas-style API (Python) | TypeScript API |
 |---|---|---|---|
-| `SCALAR` | `col.map_elements(f)` | `Series.map(f)`, `Series.apply(f)`, `DataFrame.apply(f, axis=1)` | `col.mapElements(f, dtype)` |
+| `SCALAR` | `col.map_elements(f)` | `Series.map(f)`, `Series.apply(f)` | `col.mapElements(f, dtype)` |
+| `ROW` | `df.map_rows(f)` | `DataFrame.apply(f, axis=1)` | not yet decided |
 | `MAP_BATCHES_COLUMN` | `col.map_batches(f)` | — | `col.mapBatches(f, dtype)` |
 | `MAP_BATCHES_FRAME` | `LazyFrame.map_batches(f)`, `group_by(...).map_groups(f)` | `DataFrame.pipe(f)` on a lazy frame, `groupby(...).apply(f)` | `df.mapBatches(f, {schema})`, `groupBy(...).mapGroups(f, {schema})` |
 | `AGGREGATE` | `group_by(...).agg(col.agg_udf(f))` | `groupby(...).agg(f)` | `groupBy(...).agg(col.aggUdf(f, dtype))` |
@@ -132,7 +163,7 @@ If a user calls a function directly on a column expression (`f(col("x"))`), the 
 names the verb to use instead. NumPy ufuncs applied to an expression (`np.log1p(col("x"))`) stay legal where the
 dataframe library already supports them, because they are native expressions, not UDFs.
 
-A function defined with `async def`, or a TypeScript function that returns a `Promise`, is a `SCALAR`,
+A function defined with `async def`, or a TypeScript function that returns a `Promise`, is a `SCALAR`, `ROW`,
 `MAP_BATCHES_COLUMN` or `MAP_BATCHES_FRAME` UDF like any other. The host awaits its calls with bounded concurrency (`max_concurrent_calls`, §10.8),
 which is the usual shape for per-row calls to an external API.
 
@@ -146,7 +177,7 @@ plan body refers to it by its **index** in that list, the same way `WireScanNode
 message UdfRef {
   UdfKind      kind         = 2;   // a call shape, never a language (§10.2)
   UdfCode      code         = 16;  // which runtime, which entry, which code objects (below)
-  repeated WireField arg_types = 17;  // declared argument types, in call order (§10.4)
+  repeated WireField arg_types = 17;  // declared argument types, in call order (§10.4); for ROW, the read set
   repeated bytes data_blobs = 6;   // sha256 of each captured value stored apart from the code (§10.6)
   WireField    return_type  = 8;   // required: full Arrow type, nested to any depth (§10.5); a table is a struct
   reserved 9; reserved "resolution";  // a draft's type-resolution mark; types are always explicit (§10.5)
@@ -165,6 +196,7 @@ enum UdfKind {
   AGGREGATE            = 3;   // plain or mergeable, decided by state_type
   STEP                 = 4;   // source node, runs once per run
   MAP_BATCHES_FRAME    = 5;   // target of a WireMapBatchesNode; any number of output rows
+  ROW                  = 6;   // target of a WireUdfApply; one row object per input row, built from arg_types only
 }
 
 message UdfCode {
@@ -203,6 +235,11 @@ message UdfResources {
 
 These are the messages of `udf_runtime_interface.md` §3.1. Nothing here has shipped in a `format_version`, so the
 draft's fields are reserved by the rule for fields removed before any release (§9.2).
+
+**`ROW` adds an enum value and no field.** `ROW = 6` is a new `UdfKind` value whose number no release has carried;
+under §9.2 it is added, never renumbered, and ships with the other UDF arms (§10.12, *Format version*). The read set
+needs no field number of its own: it is the bound argument schema, which `arg_types` (field 17, itself never released)
+already carries. A separate `read_set` field would state that schema twice (§10.13).
 
 **The runtime is a string the format never enumerates.** `code.runtime` is an open, namespaced string
 (`udf_runtime_interface.md` §3.1); the format never enumerates runtimes. Plan validation checks its grammar
@@ -270,7 +307,7 @@ OPTIMIZED, it comes from `needs.udfs`.
 message WireUdfApply {
   uint32            udf_index = 1;  // index into needs.udfs (OPTIMIZED) or WirePlanEnvelope.udfs (RAW)
   repeated WireExpr args      = 2;  // n-ary; each argument is any expression, including another WireUdfApply
-}                                   // the UdfRef has kind SCALAR, MAP_BATCHES_COLUMN, or AGGREGATE inside AGG_UDF
+}                                   // the UdfRef has kind SCALAR, ROW, MAP_BATCHES_COLUMN, or AGGREGATE inside AGG_UDF
 
 // WirePlan, new arm 21. Engine tag PLAN_MAP_BATCHES = 19; PlanTag wire value 20.
 message WireMapBatchesNode {
@@ -311,7 +348,10 @@ Rules for these arms:
 - **Argument types are exact.** Each argument's type equals `arg_types[i]` exactly; the producer inserts any cast
   (`OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH`). For a `MAP_BATCHES_FRAME` node, and for an `AGGREGATE` over several
   columns, each input column is one entry, in input order; for a `STEP`, `arg_types` lists the types of its literal
-  arguments.
+  arguments; for a `ROW`, `arg_types` is the read set and the call passes exactly one argument per entry.
+- **A `ROW` UdfRef is checked at plan validation.** Every `arg_types` name is non-empty and no name repeats
+  (`OPTIMIZED_UDF_ROW_READ_SET_INVALID`), and `null_mode` is `MANUAL` (`OPTIMIZED_UDF_ROW_NULL_MODE`). At host
+  admission (§10.11 check 7) its runtime must declare `ROW` in `shapes` (`OPTIMIZED_UDF_KIND_UNSUPPORTED`).
 - **An `AGGREGATE` UdfRef is admitted only as an aggregate measure**, as `child0` of a `WireAggExpr` with
   `func = AGG_UDF`, and that measure names only an `AGGREGATE` UdfRef. Anything else is refused
   (`OPTIMIZED_UDF_AGGREGATE_OUTSIDE_AGGREGATE`).
@@ -345,6 +385,9 @@ to carry it.
    `state()` gives a mergeable aggregate's `state_type`. A row type (a `TypedDict` or a dataclass) in
    `-> Iterator[Row]` can stand in for `schema=`.
 3. **Otherwise the producer refuses** (below). A lambda cannot carry hints, so a lambda always takes `return_dtype=`.
+
+For a `ROW` verb the return type comes the same way; the read set's types are the input columns' types, which the
+producer knows when the plan is built, so `columns=[...]` takes names only.
 
 ```python
 def score(x: float) -> float: ...
@@ -511,7 +554,7 @@ part of its API, not of the format:
 | Stability | Meaning to the optimizer and the host | SDK default for *(informative)* |
 |---|---|---|
 | `IMMUTABLE` | Same arguments, same result, in every run | A function the user marks as such |
-| `STABLE` | Same arguments, same result, within one run. Calls may be merged, skipped for rows no later node reads, or repeated on a retried batch | The polars-style API's and the TypeScript API's `SCALAR`, `MAP_BATCHES_COLUMN`, `MAP_BATCHES_FRAME` and `AGGREGATE` |
+| `STABLE` | Same arguments, same result, within one run. Calls may be merged, skipped for rows no later node reads, or repeated on a retried batch | The polars-style API's and the TypeScript API's `SCALAR`, `ROW`, `MAP_BATCHES_COLUMN`, `MAP_BATCHES_FRAME` and `AGGREGATE` |
 | `VOLATILE` | Every call counts. Calls are never merged, duplicated, retried, or moved across a node that changes which rows reach them | `STEP` (always: a plan rule, below); the pandas-style API, whose eager semantics call the function on every row; or when the user declares it |
 
 A `STEP` `UdfRef` that is not `VOLATILE` is refused (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`).
@@ -524,6 +567,8 @@ not use it.
 - **`MANUAL`.** The function is called for null inputs, and receives them in the batch format's own representation.
   This is the pandas-style default; the pandas batch format delivers what pandas' `Series.map` would (`NaN` in a float
   column, `None` or `pd.NA` in an object or nullable column). In the Node runtime's values format a null is `null`.
+- **A `ROW` UDF is always `MANUAL`** (§10.2; `OPTIMIZED_UDF_ROW_NULL_MODE`). Each field it reads arrives null as the
+  row object's language represents it.
 - **For an `AGGREGATE` UDF**, `PROPAGATE` drops rows whose arguments are null before the call, as a SQL aggregate
   ignores nulls, and `MANUAL` passes them.
 
@@ -543,7 +588,7 @@ the run fails naming the batch.
 - `max_batch_rows` is a ceiling. A model that takes at most 256 rows per call gets at most 256; the host may pass
   fewer, and adapts batch size to the observed call latency below that ceiling (§10.10).
 - A `MAP_BATCHES_FRAME` function must not depend on batch boundaries, unless the node is grouped.
-- The result of a `SCALAR` or `MAP_BATCHES_COLUMN` call on a row does not depend on which instance serves it or on
+- The result of a `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN` call on a row does not depend on which instance serves it or on
   where batches were split. A function may cache; a function whose per-row result depends on earlier calls is not
   expressible at this format version.
 
@@ -557,9 +602,9 @@ and gets a typed kernel like any other.
 branch (`CASE`, `coalesce`, the right-hand side of `AND`/`OR`), and only on rows that survive earlier conjuncts; the
 host compacts the selected rows before the call and scatters after. The conjunct-order row below relies on it.
 
-| Rewrite | `SCALAR` / `MAP_BATCHES_COLUMN` | `MAP_BATCHES_FRAME` | `STEP` |
+| Rewrite | `SCALAR` / `ROW` / `MAP_BATCHES_COLUMN` | `MAP_BATCHES_FRAME` | `STEP` |
 |---|---|---|---|
-| Projection pushdown | Reads only its arguments | Reads every input column; pushdown stops at the node | Not applicable (source) |
+| Projection pushdown | Reads only its arguments; for a `ROW`, the read set | Reads every input column; pushdown stops at the node | Not applicable (source) |
 | Predicate pushdown | A predicate that does not read the UDF's output may move below it, unless the UDF is `VOLATILE`. A predicate that reads the output stays above it | Stops at the node: the output rows are not the input rows | Not applicable |
 | Limit pushdown | Through, unless `VOLATILE` | Stops | Not applicable |
 | Conjunct order in a filter | A conjunct with a UDF goes after the conjuncts without one | — | — |
@@ -568,6 +613,11 @@ host compacts the selected rows before the call and scatters after. The conjunct
 | Cardinality | Row-preserving | Unknown: `advice` estimate with source `UNKNOWN` | Unknown |
 | Partitioning and ordering | Preserved | Lost, except the grouping keys of a grouped node | None |
 | Join and aggregate reordering around it | As for any projection | It is a barrier | — |
+
+**Projection pushdown through a `ROW` UDF needs no rule of its own.** The call's arguments are ordinary expressions,
+one per read-set entry, so only the read set's columns stay live, down to the scan's `projection`, as for any
+`SCALAR` call. The optimizer never reads `code` and never widens or narrows the read set; no host re-derives it. A
+`ROW` UDF that reads 2 fields of a 100-column table keeps 2 columns live (§9.4 holds a plan case for it).
 
 **An `AGGREGATE` UDF is treated as an aggregate measure.** A predicate on the group keys may move below the
 aggregate, as for any aggregate; one that reads the UDF's output stays above it. The plain form keeps the node
@@ -622,6 +672,8 @@ holds for each.
   Standard error goes to the run log.
 - **A crashed worker** (signal or exit) is `UDF_WORKER_CRASHED`. The host may retry the batch on a new worker only if
   the UDF is not `VOLATILE`.
+- **A `ROW` read outside the read set** fails the batch with `UDF_FIELD_NOT_DECLARED` (§10.2), whatever the stability:
+  the host never retries it, because the same batch fails the same way.
 - **Each call's output is checked.** A `MAP_BATCHES_COLUMN` call that returns a different length is
   `UDF_BATCH_LENGTH_MISMATCH`; a returned type outside `return_type` is `UDF_RETURN_TYPE_MISMATCH` (§10.5).
 - **The `STEP` runtime limit is enforced.** A step that runs past `max_runtime_ms` is stopped with
@@ -636,7 +688,9 @@ function that depends on notebook state it did not capture, fails locally first.
 between a laptop and a host, so the local workers also run with an empty working directory and only the environment
 variables a host provides, and report by name a function that opens a file outside its bundle or blobs. Two
 differences remain: a UDF that assigns to a global changes the worker's copy, not the user's; and the network the
-function can reach differs.
+function can reach differs. The local run is also where a `ROW` UDF's recording row proxy records the fields read
+(§10.2), before the plan is optimized; whole-row operations (iteration, length, conversion to a dict or tuple,
+unpacking) mark the read set undetermined.
 
 **In a streaming plan** (a plan with an `UNBOUNDED` scan, §5.2), the same workers serve the streaming driver, with
 three additions:
@@ -827,6 +881,8 @@ them needs a contract bump.
 | A closed runtime enum and a `oneof` arm per language code form (an earlier draft; Spark Connect's `CommonInlineUserDefinedFunction`) | Rejected: each language would be a format change forever; SPARK-55278 proposes moving Spark away from it. |
 | Transport (in-process or worker) in the plan | Rejected: host-local, chosen from host policy and runtime capabilities. |
 | `MAP_BATCHES` form derived from the arm | Rejected: one UdfRef could be bound with two schemas. |
+| A row-shaped UDF as a `SCALAR` over the whole row, or a host that infers the fields read | Rejected. The whole row keeps every column live; a host cannot re-derive what the producer knew, and two hosts could disagree. `ROW` declares the read set in `arg_types` (§10.2). |
+| A separate `read_set` field beside `arg_types` in a `ROW` | Rejected. It would state the bound argument schema twice. |
 
 ### 10.14 Comparison
 

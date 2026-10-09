@@ -385,8 +385,8 @@ The host checks against the decoded body:
 - every `udf_index` in the plan, in `shared` and in every segment is in range (`OPTIMIZED_UDF_UNDECLARED`);
 - on the uncut plan only, every `udfs` entry is referenced (`OPTIMIZED_UDF_UNREFERENCED`); a segment keeps the
   parent's whole list (§8.1) and may use only part of it;
-- each reference matches the entry's kind: `WireUdfApply` names `SCALAR` or `MAP_BATCHES_COLUMN`, or `AGGREGATE` as
-  the argument of an `AGG_UDF` measure; `WireMapBatchesNode` names `MAP_BATCHES_FRAME`; and `WireStepNode` names
+- each reference matches the entry's kind: `WireUdfApply` names `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN`, or
+  `AGGREGATE` as the argument of an `AGG_UDF` measure; `WireMapBatchesNode` names `MAP_BATCHES_FRAME`; and `WireStepNode` names
   `STEP` (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`);
 - `runtimes` has exactly one entry per runtime id used by `udfs`, sorted by id (`OPTIMIZED_UDF_RUNTIME_UNDECLARED`,
   `OPTIMIZED_NEEDS_RUNTIME_UNUSED`, `OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`);
@@ -526,6 +526,7 @@ The host, or the coordinator before a cut, runs steps 1-12:
    - `OPTIMIZED_UDF_RETURN_TYPE_MISSING`, `OPTIMIZED_UDF_STATE_TYPE_MISSING`, `OPTIMIZED_UDF_SCHEMA_DISAGREES`
    - `OPTIMIZED_UDF_AGGREGATE_OUTSIDE_AGGREGATE`, `OPTIMIZED_UDF_AGGREGATE_NOT_DECOMPOSABLE`,
      `OPTIMIZED_UDF_AGGREGATE_UNBOUNDED_GROUP`
+   - `OPTIMIZED_UDF_ROW_READ_SET_INVALID`, `OPTIMIZED_UDF_ROW_NULL_MODE`
    - `OPTIMIZED_FIELD_UNSUPPORTED` (a statistics field on a node, §5.2)
    - on a segment only: `OPTIMIZED_EXCHANGE_PARTITIONS_UNSET`
 9. **Pins and environment.** Resolve and verify every pin (`OPTIMIZED_PLAN_SNAPSHOT_STALE`). Repeat §10.11 checks 1-3
@@ -730,10 +731,17 @@ forms has at least one corpus plan:
 - A streaming corpus plan reads an `UNBOUNDED` fixture source that delivers a fixed sequence and then reports
   `Closed`, so the runner can compare the output emitted once the fixture is drained.
 
-The coverage assertion covers every `UdfKind` value (`MAP_BATCHES_COLUMN` and `MAP_BATCHES_FRAME` included),
+The coverage assertion covers every `UdfKind` value (`ROW`, `MAP_BATCHES_COLUMN` and `MAP_BATCHES_FRAME` included),
 every `CodeForm`, `UdfStability`, `UdfNullMode` and `Boundedness` value, and each shipped runtime id. Mutants: a
 lowering that treats `PROPAGATE` as `MANUAL` for the first contract version; a corpus runner that executes a UDF plan
 on the newest base regardless of its runtime ABI (the payload fails to load).
+
+**`ROW` cases** (`udf_runtime_interface.md` §6.3). A plan case reads 2 fields of a 100-column scan through a `ROW`
+UDF and asserts that the scan's `projection` and the call's arguments equal the read set (mutant: lowering passes
+the whole input row). Run cases: `f(r) = r.a if r.flag else r.b` with read set `{flag, a}`, over a batch where some
+row has `flag` false, fails with `UDF_FIELD_NOT_DECLARED` naming `b` and never returns null (mutant: the row proxy
+returns null for an unknown name); the same function with read set `{flag, a, b}` passes; one that catches the
+exception around the undeclared read still fails.
 
 **Runtime-swap invariance** (`udf_runtime_interface.md` §3.2). Every query in the UDF corpus is planned twice; the
 second time every `UdfRef.code` is replaced by `{runtime: "komira-test/null"}` with its other fields empty, and every
@@ -864,7 +872,7 @@ Each stage is independently reviewable and leaves `main` green. Every stage ship
 | 8 | `komira_optimized_plan`, `komira_shuffle` | `WireSinkBinding`, the shuffle-partition scan source, and the cutter (§8) with its "no decision changed" assertion. | Mutants: a cutter that reorders a join; one that flips a build side. |
 | 9 | the host lowering target | The post-condition (§7.3) and the closure lint excluding `komira_optimizer`. | A planted dependency goes red; each §7.3 mutant is refused. |
 | 10 | `komira_optimized_plan`, the host lowering target, the release machine | The golden corpus (§9.4): emitted at each release that ships this type, append-only, welded into the header, admission and lowering targets, with the coverage assertion and the stored-cut key test (§9.6). | Each §9.4 mutant goes red; editing or deleting a corpus file is refused by the CI check. |
-| 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef`, `UdfCode`, `CodeDigest`, `UdfKind`, `CodeForm`, `RuntimeNeed`; `WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. | Every §10.4 refusal by name. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate. |
+| 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef`, `UdfCode`, `CodeDigest`, `UdfKind` (with `ROW`), `CodeForm`, `RuntimeNeed`; `WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. | Every §10.4 refusal by name. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate; one that accepts a `ROW` under `PROPAGATE` or with a repeated read-set name. |
 | 12 | `komira_optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-7 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. |
 | 13 | the host lowering target, new Python and Node UDF worker packages | Worker processes under their own user id, Arrow over shared memory, load-once caching, thread limits, the §10.10 errors, the per-batch return-type check, both aggregate forms, and the §10.9 optimizer rules in the portable profile. | Mutants: a worker that reloads the payload per batch (a load counter goes red); a host that retries a `VOLATILE` batch; a float batch accepted into an int64 return type; a Node worker that accepts an unsafe integer into int64; a mergeable aggregate whose partial state is dropped at the exchange; a worker that can read the supervisor's credentials. |
 | 14 | the host lowering target, `komira_shuffle_streaming` | The streaming driver: a plan with an `UNBOUNDED` scan runs over `StreamingMorselSource`, with the §5.2 boundedness checks and the §10.10 streaming rules for UDFs. | Mutants: a host that runs an `UNBOUNDED` plan under the batch driver (an `Idle` fixture is taken for end of input and the output is short); an admission that takes the mode from `needs.unbounded` instead of the body; a plain aggregate admitted over an unbounded input. |
