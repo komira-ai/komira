@@ -104,14 +104,21 @@ def test_classify_every_table_token_by_its_class() raises:
         )
 
 
+def _table_class_name(token: StaticString) -> String:
+    """The class the shared table gives `token`, or "NONE" if it names no
+    row."""
+    var cls = token_class(token)
+    if not cls:
+        return String("NONE")
+    return cls.value().name()
+
+
 def test_table_strings_equal_the_raisers_constants() raises:
     """Catches a table row that drifts from the constant its raiser uses: the
     raiser's refusal would no longer be classified."""
-    assert_true(token_class(SCAN_BINDING_EPOCH_MISMATCH).value() == RefusalClass.SCAN_BINDING)
-    assert_true(token_class(SCAN_BINDING_HANDLE_NOT_BOUND).value() == RefusalClass.SCAN_BINDING)
-    assert_true(
-        token_class(OPTIMIZE_REFUSAL_UNRESOLVED_DEPS).value() == RefusalClass.UNRESOLVED_DEPS
-    )
+    assert_equal(_table_class_name(SCAN_BINDING_EPOCH_MISMATCH), String("SCAN_BINDING"))
+    assert_equal(_table_class_name(SCAN_BINDING_HANDLE_NOT_BOUND), String("SCAN_BINDING"))
+    assert_equal(_table_class_name(OPTIMIZE_REFUSAL_UNRESOLVED_DEPS), String("UNRESOLVED_DEPS"))
 
 
 def test_classify_two_tokens_answers_as_the_former_arms_did() raises:

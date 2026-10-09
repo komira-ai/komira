@@ -37,6 +37,14 @@ def _expected() -> List[RefusalToken]:
     return t^
 
 
+def _name(cls: Optional[RefusalClass]) -> String:
+    """The class's name, or "NONE" for no class: a lookup that misses fails
+    an assertion instead of aborting on `.value()`."""
+    if not cls:
+        return String("NONE")
+    return cls.value().name()
+
+
 def test_table_is_the_pinned_rows_in_order() raises:
     """Catches a dropped, added, renamed or reordered token and a token mapped
     to the wrong class."""
@@ -70,9 +78,7 @@ def test_every_token_has_exactly_one_known_class() raises:
     var t = plan_refusal_tokens()
     for i in range(len(t)):
         assert_true(t[i].refusal_class.is_known(), String(t[i].token))
-        var cls = token_class(t[i].token)
-        assert_true(Bool(cls), String(t[i].token))
-        assert_equal(cls.value().name(), t[i].refusal_class.name(), String(t[i].token))
+        assert_equal(_name(token_class(t[i].token)), t[i].refusal_class.name(), String(t[i].token))
 
 
 def test_no_token_contains_another() raises:
@@ -110,21 +116,25 @@ def test_token_class_is_exact() raises:
     assert_false(Bool(token_class("SCAN_BINDING_EPOCH")))
     assert_false(Bool(token_class("scan_binding_epoch_mismatch")))
     assert_false(Bool(token_class("")))
-    var cls = token_class(String("OPTIMIZER_UNRESOLVED_SCALAR_DEPS"))
-    assert_true(Bool(cls))
-    assert_true(cls.value() == RefusalClass.UNRESOLVED_DEPS)
+    assert_equal(_name(token_class(String("OPTIMIZER_UNRESOLVED_SCALAR_DEPS"))), String("UNRESOLVED_DEPS"))
 
 
 def test_message_class_finds_a_token_anywhere() raises:
     """Catches a search that misses a token at the start (a `> 0` for
     `>= 0`), in the middle or at the end of a message."""
-    var at_start = message_class("PHYSICAL_PLAN_CARRIES_LOGICAL_PLAN: node 3")
-    assert_true(Bool(at_start), "a token at offset 0")
-    assert_true(at_start.value() == RefusalClass.PRODUCER_BUG)
-    var middle = message_class(String("bind: SCAN_BINDING_HANDLE_NOT_BOUND (slot 4)"))
-    assert_true(middle.value() == RefusalClass.SCAN_BINDING)
-    var at_end = message_class("round cap hit: OPTIMIZER_UNRESOLVED_SCALAR_DEPS")
-    assert_true(at_end.value() == RefusalClass.UNRESOLVED_DEPS)
+    assert_equal(
+        _name(message_class("PHYSICAL_PLAN_CARRIES_LOGICAL_PLAN: node 3")),
+        String("PRODUCER_BUG"),
+        "a token at offset 0",
+    )
+    assert_equal(
+        _name(message_class(String("bind: SCAN_BINDING_HANDLE_NOT_BOUND (slot 4)"))),
+        String("SCAN_BINDING"),
+    )
+    assert_equal(
+        _name(message_class("round cap hit: OPTIMIZER_UNRESOLVED_SCALAR_DEPS")),
+        String("UNRESOLVED_DEPS"),
+    )
 
 
 def test_message_class_of_unnamed_text_is_none() raises:
@@ -139,10 +149,10 @@ def test_message_class_of_two_tokens_is_the_earlier_row() raises:
     """Catches a search that answers with the later row: the optimizer's
     classification of a message holding a scan-binding token and a
     physical-plan token depends on it."""
-    var both = message_class(
-        "PHYSICAL_PLAN_PURITY_UNCHECKABLE after SCAN_BINDING_EPOCH_MISMATCH"
+    assert_equal(
+        _name(message_class("PHYSICAL_PLAN_PURITY_UNCHECKABLE after SCAN_BINDING_EPOCH_MISMATCH")),
+        String("SCAN_BINDING"),
     )
-    assert_true(both.value() == RefusalClass.SCAN_BINDING)
 
 
 def test_class_names_and_known_range() raises:
@@ -164,6 +174,7 @@ def test_class_equality() raises:
     assert_true(RefusalClass.SCAN_BINDING == RefusalClass(2))
     assert_false(RefusalClass.SCAN_BINDING == RefusalClass.PRODUCER_BUG)
     assert_true(RefusalClass.SCAN_BINDING != RefusalClass.PRODUCER_BUG)
+    assert_true(RefusalClass.PRODUCER_BUG != RefusalClass.SCAN_BINDING)
     assert_false(RefusalClass.PASS_REFUSAL != RefusalClass(0))
 
 
