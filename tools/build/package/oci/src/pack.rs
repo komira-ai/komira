@@ -331,6 +331,22 @@ mod tests {
         let mut b = base();
         b.layers.push(Vec::new());
         assert_eq!(check_base(&b).unwrap_err(), "base manifest names 1 layers, 2 given");
+        // A size off by one under a correct digest, with the pin recomputed, so
+        // only the size check can refuse it.
+        let resized = |from: String, to: String| {
+            let mut b = base();
+            let m = String::from_utf8(b.manifest.clone()).unwrap();
+            assert_eq!(m.matches(&from).count(), 1, "{}", from);
+            b.manifest = m.replace(&from, &to).into_bytes();
+            b.pin = sha256::digest(&b.manifest);
+            b
+        };
+        let n = BASE_CONFIG.len();
+        let b = resized(format!(r#""size":{}}},"layers""#, n), format!(r#""size":{}}},"layers""#, n + 1));
+        assert_eq!(check_base(&b).unwrap_err(), "base config: size differs");
+        let n = base().layers[0].len();
+        let b = resized(format!(r#""size":{}}}]"#, n), format!(r#""size":{}}}]"#, n - 1));
+        assert_eq!(check_base(&b).unwrap_err(), "base layer 0: size differs");
     }
 
     #[test]
