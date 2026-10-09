@@ -481,6 +481,37 @@ mod tests {
     }
 
     #[test]
+    fn every_escape_literal_and_digit_both_ways() {
+        // Every character below 0x20, then the two after it and the ones
+        // next to each short escape: each spelled once, and read back.
+        let text: String = (0u8..0x20).map(|b| b as char).chain(" !\"#\\]/".chars()).collect();
+        let json = concat!(
+            r#""\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f"#,
+            r##"\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#\\]/""##
+        );
+        assert_eq!(s(&text).to_json(), json);
+        assert_eq!(parse(json.as_bytes()).unwrap(), s(&text));
+        // Each short escape read on its own; `\/` too.
+        for (e, c) in [("\\\"", "\""), ("\\\\", "\\"), ("\\/", "/"), ("\\b", "\x08"), ("\\f", "\x0c"), ("\\n", "\n"), ("\\r", "\r"), ("\\t", "\t")] {
+            assert_eq!(parse(format!("\"{}\"", e).as_bytes()).unwrap(), s(c), "{}", e);
+        }
+        for e in ["\\a", "\\c", "\\e", "\\g", "\\m", "\\o", "\\q", "\\s", "\\v", "\\0"] {
+            assert!(parse(format!("\"{}\"", e).as_bytes()).unwrap_err().contains("an unknown escape"), "{}", e);
+        }
+        let lits = Value::Arr(vec![Value::Bool(true), Value::Bool(false), Value::Null]);
+        assert_eq!(lits.to_json(), "[true,false,null]");
+        assert_eq!(parse(b"[true,false,null]").unwrap(), lits);
+        // Every digit, in every place a digit may stand.
+        for n in ["1234567890", "9", "-90", "0.0123456789", "1e0", "1E19", "9.9e-09"] {
+            assert_eq!(parse(n.as_bytes()).unwrap(), Value::Num(n.into()), "{}", n);
+        }
+        // Only space, tab, CR and LF are whitespace.
+        for ws in ["\x0b", "\x0c", "\u{a0}"] {
+            assert!(parse(format!("{}1", ws).as_bytes()).is_err(), "{:?}", ws);
+        }
+    }
+
+    #[test]
     fn depth_counts_nesting_not_containers() {
         // 65 siblings of each shape in one array are nested two deep; each
         // closing bracket, of an empty container too, gives its level back.
