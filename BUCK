@@ -156,6 +156,7 @@ _TESTS_LINTS = [
     "//src/tests/helpers/komira_plan_harness:deps_lint",
     "//src/tests/helpers/komira_udf_spike_abi:deps_lint",
     "//src/tests/helpers/komira_udf_spike_python:deps_lint",
+    "//src/tests/helpers/komira_udf_spike_rowudf:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
