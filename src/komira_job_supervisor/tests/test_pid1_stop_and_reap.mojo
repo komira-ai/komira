@@ -27,6 +27,10 @@
 #       saying the job was not started, and returns long before the job's
 #       30 s. Mutant: no stop check before the spawn -> the job is spawned
 #       and stopped on the first loop pass ("the job was stopped").
+#       It also asserts that this process has no child when the run returns,
+#       so a job that is spawned and left running fails here, on every
+#       platform. Mutant: the stop check's guard removed (spawn always)
+#       -> "a job was spawned and left running".
 #   test_a_stop_signal_reaches_the_grandchild
 #       Stepping: the job starts `sleep 60` in the background, prints its pid,
 #       SIGTERMs this process and waits. act_on_stop_signal forwards SIGTERM
@@ -229,6 +233,17 @@ def test_a_stop_before_the_spawn_starts_no_job() raises:
         "the job was never spawned",
     )
     assert_true(took_ms < 4000, "no grace was waited: " + String(took_ms))
+    # The heartbeats alone cannot tell "never spawned" from "spawned and left
+    # running": check that this process has no child at all. waitid(P_ALL) is
+    # POSIX, so this runs on every platform. The test before this one reaps
+    # its own job, and nothing here adopts orphans yet.
+    var p = proc_probe_children()
+    assert_false(
+        p.any_child,
+        "pre-spawn stop: a job was spawned and left running (exited pid "
+        + String(p.exited_pid)
+        + ")",
+    )
     print("  test_a_stop_before_the_spawn_starts_no_job: PASS")
 
 
