@@ -60,11 +60,11 @@ whose code the compiler emits without line rows.
 
 **Declaration-only files** (`declaration_only`, read by analyze.mojo for a
 file no test compiled). This module's declaration and body reader is the
-one authority on which lines are a function with a body; a file is
-declaration-only when that reader finds no function in it, every
-declaration it finds is a requirement whose body is `...` alone, inside a
-trait's block, and every other executable line belongs to a statement that
-emits no code:
+one authority on which lines are a requirement (a body of `...` alone) and
+where its body ends; a file is declaration-only when every declaration in
+it is such a requirement, inside a trait's block, and every other
+executable line belongs to a statement that emits no code (so a function,
+whose `def` line is neither, makes it False):
 
 - at the top level, a `trait` header (ending in `:`, or `: ...`) or a
   `comptime` declaration (not one opening a block, as `comptime if` does);
@@ -393,9 +393,11 @@ def declaration_only(text: String) -> Bool:
     unsure."""
     if _bare_cr(text) or _ends_in_string(text):
         return False
+    # decls' reader decides which `def` lines are requirements and where
+    # their bodies end; every other `def` line, a function, falls to the
+    # walk below, which refuses it.
     var requirements = List[FnDecl]()
-    if len(_declarations(text, requirements)) > 0:
-        return False
+    _ = _declarations(text, requirements)
     # The last line of the requirement each `def` line starts.
     var req_end = Dict[Int, Int]()
     for k in range(len(requirements)):

@@ -261,9 +261,9 @@ Everything else counts, declarations included (`def`, `struct`,
 
 Except in a **declaration-only** file (`declaration_only` in
 `covcheck/decls.mojo`, whose declaration reader is the one authority on
-which lines are a function with a body): one in which that reader finds no
-function, each declaration it finds is a requirement with a body of `...`
-alone inside a trait's block, and every other statement outside the
+which declarations are requirements, with a body of `...` alone, and where
+that body ends): one whose every declaration is such a requirement inside a
+trait's block, and every other statement outside the
 imports is, at the top level, a `trait` header or a `comptime`
 declaration, and in a trait's block a `comptime` declaration, a decorator
 or `...`. Such a file, if it has no exemption marker and no branch record,
