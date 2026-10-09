@@ -111,6 +111,7 @@ from kci_publish import (
 )
 
 from .args import SecretStoreChoice
+from .deploy_step import NoCloudBuilt
 from .dispatch import kci_main_with, recorder_for
 from .seam import StageSteps, StepEnd
 from .recorder import CliRecorder
@@ -415,7 +416,10 @@ struct LibrarySteps(StageSteps, Movable):
 
 
 def kci_main(args: List[String]) -> Int:
-    """The kci binary: `args` is argv without the program name."""
+    """The kci binary: `args` is argv without the program name. It is built
+    with no cloud adapter, so every DEPLOY step it runs is REFUSED, "this
+    kci was not built with that cloud" (deploy_step.mojo `NoCloudBuilt`)."""
     var steps = LibrarySteps()
+    var deploys = NoCloudBuilt()
     var recorder = recorder_for(args)
-    return kci_main_with(args, steps, recorder)
+    return kci_main_with(args, steps, deploys, recorder)

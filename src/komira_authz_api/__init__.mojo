@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # The leaf package that declares the authorization seam: `AuthzPort` (can
-# `principal` do `action` on `resource`?) + the POD `AuthzAction` /
+# `principal` do `action` on `resource`?) + the `AuthzAction` /
 # `AuthzResource` value types it is expressed over. It carries no
 # permission-model vocabulary, so a host depends on it without dragging in an
 # RBAC engine; a host with a membership store binds its own conformer.
