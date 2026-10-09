@@ -46,6 +46,7 @@ comptime _FILES: List[String] = [
     "dictionary_resolve.mojo",
     "file_reader.mojo",
     "footer_header.mojo",
+    "gather.mojo",
     "gather_byte_array.mojo",
     "gather_common.mojo",
     "gather_dict.mojo",
@@ -203,6 +204,7 @@ def test_imports_only_its_deps() raises:
         "komira_fs",
         "komira_parquet",
         "komira_parquet_api",
+        "komira_parquet_codec",
         "komira_plan_expr",
         "komira_simd",
     ]

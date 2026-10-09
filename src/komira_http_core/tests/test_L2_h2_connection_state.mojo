@@ -12,7 +12,8 @@
 #     64 frames and 65536 bytes are accepted, one more is refused and the
 #     buffer is left as it was; reset clears the block and its counter;
 #   * the inbound and outbound byte queues: order, the consume edge cases
-#     (n <= 0, n == len, n > len), prepend overtaking queued frames;
+#     (n <= 0, n == len, n > len), prepend overtaking queued frames but
+#     not the pinned prefix;
 #   * the stream list: lookup, create-once, the windows a new stream takes
 #     from the flow controllers, the GOAWAY last-stream-id high-water mark;
 #   * the deferred-response and pending-request side tables: absent-entry
@@ -306,6 +307,27 @@ def test_out_bytes_append_prepend_take() raises:
     _assert_bytes(h2.pending_out, "B", "append after take")
     h2.prepend_out_bytes(List[UInt8]())
     _assert_bytes(h2.pending_out, "B", "empty prepend")
+
+
+def test_prepend_goes_behind_the_pinned_prefix() raises:
+    """A pinned prefix (the server preface, an unwritten tail) is never
+    overtaken: prepends go in right behind it, the last one first. Bytes
+    appended after the pin are overtaken as before. Take clears the pin."""
+    var h2 = H2ConnectionState()
+    assert_equal(h2.out_pinned, 0)
+    h2.append_out_bytes(_bytes("SET"))
+    h2.pin_out_bytes()
+    assert_equal(h2.out_pinned, 3)
+    h2.append_out_bytes(_bytes("A1"))
+    h2.prepend_out_bytes(_bytes("RST"))
+    h2.prepend_out_bytes(_bytes("GO"))
+    _assert_bytes(h2.pending_out, "SETGORSTA1", "prepends go behind the pin")
+    var out = h2.take_out_bytes()
+    _assert_bytes(out, "SETGORSTA1", "take returns the whole queue")
+    assert_equal(h2.out_pinned, 0, "take clears the pin")
+    h2.append_out_bytes(_bytes("B"))
+    h2.prepend_out_bytes(_bytes("P"))
+    _assert_bytes(h2.pending_out, "PB", "no pin after take")
 
 
 # =============================================================================
@@ -603,6 +625,7 @@ def main() raises:
     test_recv_bytes_append_and_consume()
     test_recv_bytes_consume_more_than_buffered()
     test_out_bytes_append_prepend_take()
+    test_prepend_goes_behind_the_pinned_prefix()
     test_stream_lookup_and_create_once()
     test_new_stream_windows_come_from_flow_controllers()
     test_last_processed_stream_id_is_high_water_mark()
@@ -613,4 +636,4 @@ def main() raises:
     test_pending_push_defaults_and_explicit()
     test_pending_body_appends_in_order()
     test_take_pending_request_present_and_absent()
-    print("test_L2_h2_connection_state: PASS (25 tests)")
+    print("test_L2_h2_connection_state: PASS (26 tests)")

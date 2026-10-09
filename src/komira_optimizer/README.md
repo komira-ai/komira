@@ -2,8 +2,9 @@
 
 Logical-plan rewrite rules, plus the cardinality and cost estimates the
 join-reorder and aggregate rules read. Each rule takes a `LogicalPlan` and
-returns the rewritten plan (most also have an `_inplace` form); nothing here
-executes a plan.
+returns the rewritten plan (most also have an `_inplace` form;
+`plan_scan_shares` returns a `ScanSharePlan` descriptor instead); nothing
+here executes a plan.
 
 | module | what it holds |
 |---|---|
@@ -12,6 +13,7 @@ executes a plan.
 | `optimizer_or_factoring` | hoisting conjuncts common to every branch of an OR above the OR |
 | `optimizer_symmetric_or` | inferring single-column IN predicates from a symmetric swap OR (`(A=x AND B=y) OR (A=y AND B=x)`) |
 | `optimizer_project_merge_guard` | substituting an outer expression through an inner Project, and whether that is safe; the predicate that means the same below a Project |
+| `optimizer_join` | inner-to-semi conversion, join build-side selection, the SEMI/ANTI reducer pushdown (`OptimizerConfig.semi_pushdown`), the join-reorder output-order guard and absorbing a projection into an aggregate |
 | `optimizer_misc` | limit pushdown, sort + limit fusion into TopN, TopN below a Project, row-count estimate |
 | `topn_tiebreak_policy` | the deterministic TopN tie-break list as the optimizer reads it |
 | `optimizer_expr` | constant folding, predicate simplification, common subexpression elimination, OR-of-equalities to IN-list rewrite |
@@ -38,6 +40,7 @@ executes a plan.
 | `optimizer_partial_agg` | same-side partial aggregate pushdown below an inner join (off by default, behind `ENABLE_AGG_PUSHDOWN_BELOW_JOIN`) |
 | `optimizer_sum_rewrite` | `SUM(x + C)` to `SUM(x) + C * COUNT(x)` |
 | `optimizer_agg_cse` | finding a duplicated grouped aggregate subtree and replacing it with one shared in-memory source, and collapsing identical aggregate expressions within one Aggregate |
+| `optimizer_scan_share` | deciding which Parquet scans share one read (`plan_scan_shares`), the dynamic-filter slot, and which scans stay Parquet sources |
 | `optimizer_config` | `OptimizerConfig`: the optimizer's options and their defaults, as one value |
 | `optimizer_payload_narrow` | stamping narrow integer payload widths on an equi-join's scans from column min/max stats |
 | `optimizer_partition_topn` | fusing a row_number / rank, a `<= K` filter and the column drop into one PartitionTopN |
