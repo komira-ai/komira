@@ -164,6 +164,25 @@ def test_date_trunc_refuses_an_unknown_unit() raises:
             assert_equal(same.get(i), Int32(_jan1(i)), "hour trunc on DATE32 row " + String(i))
 
 
+def test_date_trunc_accepts_the_last_unit_TRUNC_MICROSECOND() raises:
+    """The refusal's accept edge: TRUNC_MICROSECOND (9), the largest valid
+    unit, runs in both kernels. A refusal written as `>=` raises here.
+    TIMESTAMP_NS rounds down to the microsecond (floor, so -1 ns is -1000);
+    DATE32 keeps every day unchanged and keeps its NULL rows."""
+    var ns = PrimitiveArray[DType.int64].from_list(
+        [Int64(1_234_567_891), Int64(-1), Int64(5_000)]
+    )
+    var t = date_trunc_ts(ns, ArrowType.TIMESTAMP_NS, TRUNC_MICROSECOND)
+    assert_equal(t.get(0), Int64(1_234_567_000))
+    assert_equal(t.get(1), Int64(-1_000))
+    assert_equal(t.get(2), Int64(5_000))
+    var d = date_trunc_date32(_date32_parent(), TRUNC_MICROSECOND)
+    assert_equal(d.null_count, 2)
+    for i in range(10):
+        if i != 0 and i != 5:
+            assert_equal(d.get(i), Int32(_jan1(i)), "us trunc on DATE32 row " + String(i))
+
+
 def test_day_index_kernel_unit_codes_mirror_the_plan_IR() raises:
     """Every unit the kernels restate (`_K_*`) is passed AS the plan IR's
     `EXTRACT_*` constant and answers its own field. A drifted local copy

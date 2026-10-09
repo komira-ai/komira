@@ -78,13 +78,14 @@ def _assert_mask(
 
 def test_lt_lv_reads_the_lhs_window_validity() raises:
     """LHS = 1 everywhere, RHS = 2: every non-null row matches. LHS nulls at
-    absolute rows 0, 4, 13 of a window at offset 1 are logical rows 3, 12.
-    An offset-blind read clears logical rows 0, 4, 13 instead."""
-    var lhs = _i64_slice(1, [0, 4, 13], 1)
+    absolute rows 0, 4, 13, 19 of a window at offset 1 are logical rows 3,
+    12, 18 (row 18 is in the scalar tail). An offset-blind read clears
+    logical rows 0, 4, 13, 19 instead."""
+    var lhs = _i64_slice(1, [0, 4, 13, 19], 1)
     var rhs = _i64_slice(2, List[Int](), 0)
     var out = Bitmap.create(N)
     var c = LtI64_LV().eval_chunk(lhs, rhs, out)
-    _assert_mask(out, c, N, [3, 12], "LtI64_LV offset 1")
+    _assert_mask(out, c, N, [3, 12, 18], "LtI64_LV offset 1")
 
 
 def test_lt_rv_reads_the_rhs_window_validity() raises:
