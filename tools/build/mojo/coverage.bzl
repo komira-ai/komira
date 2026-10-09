@@ -274,7 +274,9 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     binary `cov_bin` run under kcov by cov_run.sh, through the release gate's
     runner with the gate's environment (`env_args`) and data (`data`, staged
     as the gate stages it). `src_dir` is the library's [src] (it ends in
-    `src/<import_name>`) and `root` the package directory it stages
+    `src/<import_name>`; the run stages it at `<import_name>/`, the directory
+    the binary's line tables name its sources by) and `root` the package
+    directory it stages
     (_package_root). Returns (report, marker):
     `cov/tests/<stem>.xml`, the test's Cobertura report in repository paths,
     and `cov/tests/<stem>.passed`."""
@@ -283,8 +285,8 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     for dest in data:
         if dest == name or dest.startswith(name + "/") or name.startswith(dest + "/"):
             fail("{}: the test's data destination {} collides with its source, which a coverage run stages at {}".format(where, repr(dest), repr(name)))
-        if dest == "buck-out" or dest.startswith("buck-out/"):
-            fail("{}: the data destination {} is under buck-out/, where a coverage run stages the library's sources".format(where, repr(dest)))
+        if dest == import_name or dest.startswith(import_name + "/"):
+            fail("{}: the data destination {} is under {}/, where a coverage run stages the library's sources".format(where, repr(dest), import_name))
     share = ctx.actions.copied_dir("cov/tests/{}/share".format(stem), dict(data) | {name: t})
     pkg_dir = _pkg_dir(ctx.label)
     src_repo, gens = coverage_sources(ctx, root)

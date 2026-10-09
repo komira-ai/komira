@@ -15,28 +15,35 @@
 #   <share>        the test's declared data at their destinations, and its
 #                  source at <test>, its path in the package (what the line
 #                  tables name it by: `tests/test_x.mojo`)
-#   <src_dir>      the library's staged sources ([src]); its path from the
-#                  action's directory is the directory the line tables name
-#                  them by (`buck-out/v2/art/<cell>/<package>/__<t>__/<hash>/src/<import>`)
+#   <src_dir>      the library's staged sources ([src]), a directory
+#                  ending in src/<import>: the package is compiled from its
+#                  parent, so the line tables name them `<import>/<file>`
 #   <src_repo>     the repository directory <src_dir> stages, with a trailing
 #                  `/` (empty for the repository's root)
 #   <test_repo>    the repository path of the test source
-#   <import>       the library's import name: <src_dir> ends in src/<import>
+#   <import>       the library's import name: <src_dir> ends in src/<import>,
+#                  and the run stages the sources at <import>/ (the directory
+#                  the line tables name them by)
 #   --gen <file>   a generated source in <src_dir> (its path there): not measured
 #   --env          passed to gate_runner.sh as given
 #
 # Steps:
-#   0. Every directory the binary names a source of the library by (a string
-#      holding `buck-out/` and, inside an artifact, the path component
-#      src/<import>) must be
-#      <src_dir>: the run stages the sources there, and kcov drops a file it
-#      cannot open without an error, so a binary that names them elsewhere
-#      (another [src], an absolute compilation directory) is refused here.
+#   0. The binary must name the library's sources by <import>/, where the
+#      run stages them: kcov drops a file it cannot open without an error,
+#      so a binary that names them elsewhere is refused here. It is refused
+#      when it names a [src] of the library (a string holding `buck-out/`
+#      and, inside an artifact, the path component src/<import>: the
+#      name a package compiled from [src] itself would have), and when it
+#      holds the library's code (a string with `<import>::`, the start of
+#      the name of a function or type of it) but no whole string `<import>`
+#      or `<import>/...` (the line tables' directory, or a file named with
+#      it). A test that calls none of the library holds neither, and has
+#      nothing of it to measure.
 #   1. A root is built from COPIES (never links: kcov resolves every source
 #      name with realpath, which would leave a linked tree): bin/kcov and
 #      lib/ (kcov's own libgcc_s, found through its DT_RPATH $ORIGIN/../lib),
 #      bin/<test>, and share/ holding the test's data, its source at <test>
-#      and the library's sources at <src_dir>. The pinned Mojo names every
+#      and the library's sources at <import>/. The pinned Mojo names every
 #      source by a relative path and records no compilation directory, so
 #      kcov, started in share/, resolves each name to the copy. A second
 #      copy of the sources, lost/, is where a name that does NOT resolve
@@ -46,7 +53,7 @@
 #      LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR and HOME are the gate's, each
 #      --env is exported to kcov and so reaches the test. kcov's arguments:
 #      --cobertura-only --skip-solibs --configure=cobertura-full-paths=1;
-#      --include-path of exactly <src_dir> and this test, under share/ and
+#      --include-path of exactly <import>/ and this test, under share/ and
 #      under lost/ (an --exclude-path per generated source);
 #      --replace-src-path='^(?!/):<lost>/'; the output directory and
 #      bin/<test>. komira's kcov exits with the test's status (128+N when a
@@ -69,7 +76,7 @@
 #      the test started, so without the bound a test leaving a child running
 #      would hold the action open.
 #   3. kcov writes exactly one report (<out>/cov.xml); anything else fails.
-#   4. cov_normalize maps <share>/<src_dir>/ to <src_repo> and the test's
+#   4. cov_normalize maps <share>/<import>/ to <src_repo> and the test's
 #      directory under share/ to the repository's, requires the test's own
 #      source in the report and refuses the action's directories in the
 #      output. Its output is <xml_out>; then `PASS <label>` goes to
@@ -78,7 +85,7 @@
 # What differs from the release gate: the test is traced (TracerPid is
 # kcov's), runs without address randomization (kcov sets ADDR_NO_RANDOMIZE),
 # its working directory share/ also holds its own source at <test> and the
-# library's at <src_dir>, kcov shares its TMPDIR, its environment also holds
+# library's at <import>/, kcov shares its TMPDIR, its environment also holds
 # KCOV_SOLIB_PATH, which kcov always sets (with --skip-solibs, no
 # LD_PRELOAD), but nothing of this script's own (its LC_ALL=C, below), and
 # the run ends when every process the test started has exited (kcov follows
@@ -94,7 +101,7 @@
 # keeps it and the report names it under lost/. No --map covers lost/, so
 # cov_normalize refuses it as unmapped, naming the file. A name that did
 # resolve is absolute and the expression (a relative name) leaves it alone.
-# lost/ only catches a name under <src_dir> or <test>; a name elsewhere is
+# lost/ only catches a name under <import>/ or <test>; a name elsewhere is
 # step 0's.
 # The other names the binary holds (the Mojo standard library's
 # `oss/modular/...`, zig's C runtime's `/___.../buck-out/...`) are outside the
@@ -138,6 +145,8 @@ case "$SRC_REPO" in /* | ?*[!/]) echo "cov_run: <src_repo> $SRC_REPO must be emp
 case "$IMPORT" in "" | *[!A-Za-z0-9_]*) echo "cov_run: <import> $IMPORT is not an import name" >&2; exit 2 ;; esac
 case "$SRC_REL" in */src/"$IMPORT") ;; *) echo "cov_run: <src_dir> $SRC_REL does not end in src/$IMPORT" >&2; exit 2 ;; esac
 SRC=$(abs "$SRC_REL")
+# Where the run stages the library's sources, under share/ and lost/.
+STAGE=$IMPORT
 LIMIT=$(cat "$HERE/limit")
 case "$LIMIT" in "" | 0* | *[!0-9]*) echo "cov_run: $HERE/limit holds '$LIMIT', not a number of seconds" >&2; exit 2 ;; esac
 case "$TEST" in */*) TEST_DIR=${TEST%/*}/ ;; *) TEST_DIR="" ;; esac
@@ -192,17 +201,21 @@ group_left() {
         }'
 }
 
-# 0. Where the binary names the library's sources. Each string is on a line
-# of its own (tr), so the expression sees one name at a time. Only a
-# src/<import> component inside an artifact (after buck2's __<target>__/
-# directory) counts, and a name is cut after the last one: a komira
-# library's package path is itself src/<import>
+# 0. Where the binary names the library's sources. Strings are cut at every
+# byte that is not printable (strings), so a line is one whole name.
+# A [src] of the library: only a src/<import> component inside an artifact
+# (after buck2's __<target>__/ directory) counts, and a name is cut after
+# the last one: a komira library's package path is itself src/<import>
 # (buck-out/v2/art/komira/src/<import>/__<import>__/<hash>/src/<import>).
-LC_ALL=C tr '\000' '\n' <"$BIN" | LC_ALL=C grep -a -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*' >"$K/names" || true
-LC_ALL=C grep -E "/__[^/]+__/.*/src/$IMPORT(/|\$)" "$K/names" | LC_ALL=C sed -E "s|^(.*/src/$IMPORT)(/.*)?\$|\1|" | LC_ALL=C sort -u >"$K/dirs" || true
-LC_ALL=C grep -v -x -F -e "$SRC_REL" "$K/dirs" >"$K/elsewhere" || true
+LC_ALL=C strings -n 1 "$BIN" >"$K/strings"
+LC_ALL=C grep -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*' "$K/strings" >"$K/names" || true
+LC_ALL=C grep -E "/__[^/]+__/.*/src/$IMPORT(/|\$)" "$K/names" | LC_ALL=C sed -E "s|^(.*/src/$IMPORT)(/.*)?\$|\1|" | LC_ALL=C sort -u >"$K/elsewhere" || true
 if [ -s "$K/elsewhere" ]; then
-    red "the test binary names the library's sources by $(tr '\n' ' ' <"$K/elsewhere")but this run stages them at $SRC_REL: kcov would drop them without an error (README.md, \"cov_run\")."
+    red "the test binary names the library's sources by $(tr '\n' ' ' <"$K/elsewhere")but this run stages them at $STAGE/: kcov would drop them without an error (README.md, \"cov_run\")."
+fi
+if LC_ALL=C grep -q -E "(^|[^A-Za-z0-9_])$IMPORT::" "$K/strings" &&
+    ! LC_ALL=C grep -q -x -E "$STAGE(/.*)?" "$K/strings"; then
+    red "the test binary holds code of the library ($(LC_ALL=C grep -o -E "$IMPORT::[A-Za-z0-9_:]*" "$K/strings" | head -n 1)) but names none of its sources by $STAGE/, where this run stages them: kcov would drop them without an error (README.md, \"cov_run\")."
 fi
 
 # 1. The root and lost/, all copies.
@@ -215,23 +228,23 @@ cp -RL "$HERE/kcov/lib/." "$R/lib/"
 cp -L "$BIN" "$R/bin/$NAME"
 cp -RL "$SHARE/." "$R/share/"
 [ -f "$R/share/$TEST" ] || red "the test's source $TEST is not in its share directory"
-[ ! -e "$R/share/$SRC_REL" ] || red "the share directory already holds $SRC_REL (a data file under it?)"
-mkdir -p "$R/share/$SRC_REL"
-cp -RL "$SRC/." "$R/share/$SRC_REL/"
-mkdir -p "$L/$SRC_REL" "$L/$TEST_DIR"
-cp -RL "$SRC/." "$L/$SRC_REL/"
+[ ! -e "$R/share/$STAGE" ] || red "the share directory already holds $STAGE (a data file under it?)"
+mkdir -p "$R/share/$STAGE"
+cp -RL "$SRC/." "$R/share/$STAGE/"
+mkdir -p "$L/$STAGE" "$L/$TEST_DIR"
+cp -RL "$SRC/." "$L/$STAGE/"
 cp -L "$SHARE/$TEST" "$L/$TEST"
 R=$(realpath "$R")
 L=$(realpath "$L")
 S="$R/share"
-for p in "$S" "$L" "$SRC_REL" "$TEST"; do
+for p in "$S" "$L" "$STAGE" "$TEST"; do
     case "$p" in *[,:]*) echo "cov_run: $p holds a , or :, which kcov's options split on" >&2; exit 2 ;; esac
 done
 OUT="$K/kout"
 
 EXCL=""
 for g in $GEN; do
-    EXCL="${EXCL:+$EXCL,}$S/$SRC_REL/$g,$L/$SRC_REL/$g"
+    EXCL="${EXCL:+$EXCL,}$S/$STAGE/$g,$L/$STAGE/$g"
 done
 
 # 2. kcov under the gate's runner.
@@ -239,7 +252,7 @@ set -- "$@" \
     --arg --cobertura-only \
     --arg --skip-solibs \
     --arg --configure=cobertura-full-paths=1 \
-    --arg "--include-path=$S/$SRC_REL,$S/$TEST,$L/$SRC_REL,$L/$TEST"
+    --arg "--include-path=$S/$STAGE,$S/$TEST,$L/$STAGE,$L/$TEST"
 [ -z "$EXCL" ] || set -- "$@" --arg "--exclude-path=$EXCL"
 set -- "$@" \
     --arg "--replace-src-path=^(?!/):$L/" \
@@ -340,14 +353,14 @@ find "$OUT" -type f -name '*.xml' >"$K/xmls"
 IN=$(cat "$K/xmls")
 
 # 4. Repository paths.
-set -- --map "$S/$SRC_REL/=$SRC_REPO" --map "$S/$TEST_DIR=$TEST_REPO_DIR" \
+set -- --map "$S/$STAGE/=$SRC_REPO" --map "$S/$TEST_DIR=$TEST_REPO_DIR" \
     --must-contain "$TEST_REPO" --forbid "$PWD" --forbid "$R" --forbid "$L"
 P=$(realpath "$PWD")
 [ "$P" = "$PWD" ] || set -- "$@" --forbid "$P"
 "$HERE/cov_normalize" --in "$IN" --out "$XML" "$@" >"$K/norm.log" 2>&1 || {
     cat "$K/norm.log" >&2
     if grep -F "'$L/" "$K/norm.log" >/dev/null; then
-        red "cov_normalize refused kcov's report (above): kcov could not resolve these sources from its working directory $S, so they were not staged where the line tables name them ($SRC_REL/ and $TEST); their names fell through to $L/."
+        red "cov_normalize refused kcov's report (above): kcov could not resolve these sources from its working directory $S, so they were not staged where the line tables name them ($STAGE/ and $TEST); their names fell through to $L/."
     fi
     red "cov_normalize refused kcov's report (above)."
 }
