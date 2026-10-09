@@ -12,7 +12,8 @@
 #   Filter   -> same schema as child (preserves columns)
 #   Project  -> new schema from expression output types
 #   Aggregate -> group_by columns + aggregate output columns
-#   Join     -> merged schemas from both sides (semi/anti: left only)
+#   Join     -> merged schemas from both sides (semi/anti: left only); the
+#               NULL-supplying side of LEFT/RIGHT/FULL is nullable
 #   Sort     -> same schema as child
 #   Limit    -> same schema as child
 #   Distinct -> same schema as child
@@ -41,6 +42,9 @@ from komira_plan_ir.logical_plan import (
     PLAN_CAST_TO_VARCHAR,
     JOIN_SEMI,
     JOIN_ANTI,
+    JOIN_LEFT,
+    JOIN_RIGHT,
+    JOIN_FULL,
 )
 from komira_plan_expr.expr import Expr, EXPR_COL_REF, EXPR_ALIAS
 from komira_plan_ir.logical_plan import ExprArray
@@ -308,12 +312,19 @@ def _infer_join_schema(plan: LogicalPlan) raises -> Schema:
     engine-side `join_probe._build_join_output_schema`.
     """
     var jt = plan.join_data_ref().join_type
+    # The NULL-supplying side of an outer join is nullable — the same rule as
+    # `LogicalPlan.join` (see the note there).
+    var left_nulls = jt == JOIN_RIGHT or jt == JOIN_FULL
+    var right_nulls = jt == JOIN_LEFT or jt == JOIN_FULL
     var builder = SchemaBuilder()
 
     # Always include left-side columns (access schema by ref inline).
     # field_at_unchecked: in-range by construction; non-raising.
     for i in range(plan.join_data_ref().left[].output_schema.num_columns()):
-        builder.add_field(plan.join_data_ref().left[].output_schema.field_at_unchecked(i))
+        var lf = plan.join_data_ref().left[].output_schema.field_at_unchecked(i)
+        if left_nulls:
+            lf.nullable = True
+        builder.add_field(lf^)
 
     # For non-semi/anti joins, also include right-side columns
     if jt != JOIN_SEMI and jt != JOIN_ANTI:
@@ -327,6 +338,8 @@ def _infer_join_schema(plan: LogicalPlan) raises -> Schema:
             var rf = plan.join_data_ref().right[].output_schema.field_at_unchecked(i)
             if has_collision:
                 rf.name = rname + "_right"
+            if right_nulls:
+                rf.nullable = True
             builder.add_field(rf^)
 
     return builder.build()

@@ -1,0 +1,13 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.1: NOT (a AND b) is TRUE exactly when a AND b is FALSE: ids
+# 2, 4, 5, 6 and 8 (a FALSE side). (TRUE, NULL), (NULL, TRUE) and (NULL,
+# NULL) give NULL, so NOT gives NULL and §1.2 drops ids 3, 7, 9; id 1 is
+# FALSE.
+id:int64	a:bool?	b:bool?
+2	true	false
+4	false	true
+5	false	false
+6	false	\N
+8	\N	false

@@ -460,7 +460,6 @@ def test_scalar(mut L: _Ledger) raises:
     _u(L, b, "WireScalar.time_unit", 2)
     _i(L, b, "WireScalar.dec256_high_lo", 180)
     _i(L, b, "WireScalar.dec256_high_hi", 190)
-    _u(L, b, "WireScalar.error_code", 4)
     var neg = List[UInt8]()
     _raw_u(neg, 1, UInt64(Int64(-7)))
     assert_equal(len(neg), 1 + 10, "a negative int64 is a 10-byte varint")
@@ -484,7 +483,6 @@ def test_scalar(mut L: _Ledger) raises:
     assert_equal(m.time_unit.number(), 2, "WireScalar: m.time_unit.number()")
     assert_equal(m.dec256_high_lo, Int64(180), "WireScalar: m.dec256_high_lo")
     assert_equal(m.dec256_high_hi, Int64(190), "WireScalar: m.dec256_high_hi")
-    assert_equal(m.error_code.number(), 4, "WireScalar: m.error_code.number()")
     _same(encode_proto(m), b, "WireScalar")
 
 
@@ -820,7 +818,6 @@ WireScalar.iv_nanos 16
 WireScalar.time_unit 17
 WireScalar.dec256_high_lo 18
 WireScalar.dec256_high_hi 19
-WireScalar.error_code 20
 WireParam.key 1
 WireParam.tag 2
 WireParam.s 3

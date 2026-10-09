@@ -1,0 +1,8 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.1 gives a AND b TRUE only for (TRUE, TRUE), id 1; §1.2: a
+# filter keeps a row only when its predicate is TRUE, so the FALSE and NULL
+# rows are dropped. A filter keeps the columns of its input.
+id:int64	a:bool?	b:bool?
+1	true	true

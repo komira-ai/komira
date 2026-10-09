@@ -5,8 +5,8 @@
 # policy's mode (tools/build/coverage/policy.bzl). README.md, "The build gate".
 #
 # usage: busybox sh <gate_dir>/cov_gate.sh <busybox> <label> <package> <mode> <target_bp>
-#            <root> <tests> <result_out> <summary_out> <marker_out> [<report>...]
-#            [--branch-lcov <branch_info>...]
+#            <root> <tests> <result_out> <summary_out> <marker_out>
+#            [--info-package <package>] [<report>...] [--branch-lcov <branch_info>...]
 #
 #   <gate_dir>   the cov_gate_dir: this script, covcheck/ (the covcheck binary
 #                and the runtime libraries it loads) and ratchet.tsv
@@ -20,6 +20,11 @@
 #   <tests>      a file naming the repository path of each test source the
 #                library welds, one per line: each is covcheck's
 #                --test-source, set aside wherever it is in the package
+#   --info-package <package>  the library's package is test-only
+#                (COVERAGE_INFO_ONLY_DIRS, policy.bzl): covcheck reports its
+#                findings as information, so it has none and the gate
+#                never fails on a finding (covcheck --info-package; exits
+#                1 and 2 still fail it)
 #   <report>     a test's Cobertura report, in repository paths (cov_run.sh)
 #   <branch_info> after the argument `--branch-lcov` (given at most once:
 #                every argument after it is a branch record file): a
@@ -59,6 +64,12 @@ RESULT=$(abs "$8")
 SUMMARY=$(abs "${9}")
 MARKER=$(abs "${10}")
 shift 10
+INFO=""
+if [ "${1:-}" = --info-package ]; then
+    [ "$#" -ge 2 ] && [ "$2" = "$PACKAGE" ] || { echo "cov_gate: --info-package must name the package $PACKAGE" >&2; exit 2; }
+    INFO=$2
+    shift 2
+fi
 case "$MODE" in census | neutral | enforce) ;; *) echo "cov_gate: mode '$MODE' is not census, neutral or enforce" >&2; exit 2 ;; esac
 case "$TARGET" in "" | *[!0-9]*) echo "cov_gate: target '$TARGET' is not a number of basis points" >&2; exit 2 ;; esac
 case "$PACKAGE" in "" | /* | */ | *//*) echo "cov_gate: package '$PACKAGE' is not a repository directory" >&2; exit 2 ;; esac
@@ -105,6 +116,7 @@ done
 while IFS= read -r t; do
     set -- "$@" --test-source "$t"
 done <"$TESTS"
+if [ -n "$INFO" ]; then set -- "$@" --info-package "$INFO"; fi
 
 rc=0
 "$HERE/covcheck/covcheck" gate --package "$PACKAGE" --repo-files "$K/repo_files" --source-root "$ROOT" \

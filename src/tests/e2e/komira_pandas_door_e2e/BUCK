@@ -2,15 +2,18 @@ load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode")
 
-# Test-only: the pandas door's wire contract, without Python. Each fixture in
-# fixtures/ is a komira.plan.v1 plan as protobuf text, in the shape a
-# pandas-shaped frontend emits; protoc encodes it in a build action (the
-# `<stem>_wire` targets below) and the test decodes protoc's bytes with
-# komira_plan_wire. The library builds the same plans in Mojo with
-# komira_plan_ir (door_plans.mojo) and renders a plan's every payload field
-# (plan_shape.mojo). Nothing ships, so `conda = False`.
+# Test-only: the pandas and polars doors' wire contract, without Python. Each
+# fixture in fixtures/ is a komira.plan.v1 plan as protobuf text, in the shape
+# a pandas- or polars-shaped frontend emits; protoc encodes it in a build
+# action (the `<stem>_wire` targets below) and the tests decode protoc's bytes
+# with komira_plan_wire. The library builds the same plans in Mojo with
+# komira_plan_ir (door_plans.mojo, polars_plans.mojo) and renders a plan's
+# payload fields (plan_shape.mojo, whose docstring names the few it leaves
+# out and why). Nothing ships, so `conda = False`.
+# One package holds both doors because the cross-door checks compare the two
+# doors' fixtures and builders, and both compare through one plan_shape.
 #
-# The test, run as a build action:
+# The tests, run as build actions:
 #   test_pandas_door_wire -- for sort_values (na_position first, last), merge
 #     (how left, inner), groupby (size() = count(*), agg count = count(col))
 #     and read_csv: the bytes pass plan_wire_admit and plan_wire_check_values
@@ -18,11 +21,18 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode")
 #     COUNT's input, the CSV binding) is asserted by name; the decoded plan
 #     equals the Mojo-built one in render, structural_hash, output schema and
 #     plan_shape.
+#   test_polars_door_wire -- the same steps for the polars 1.44.2 shapes:
+#     scan, filter, with_columns, group_by.agg, sort and limit in one plan;
+#     is_in; an aggregate .over(); sum_horizontal; the four null-order cells;
+#     select(col.sum()) (the aggregate is kept). Then the two doors against each other:
+#     pandas groupby(sort=False) and polars group_by are the same protoc bytes
+#     and the same encoding of the Mojo-built plans; pandas' default sort=True
+#     differs from them by a SORT on the group key alone.
 #
 # `deps` lists the Mojo packages of the full transitive closure of
-# komira_plan_wire, which closes over everything the library and test import.
+# komira_plan_wire, which closes over everything the library and tests import.
 
-_STEMS = [
+_PANDAS_STEMS = [
     "groupby_count_col",
     "groupby_size",
     "merge_inner",
@@ -31,6 +41,22 @@ _STEMS = [
     "sort_values_na_first",
     "sort_values_na_last",
 ]
+
+# The polars test's fixtures, the pandas half of the cross-door pair included.
+_POLARS_STEMS = [
+    "pandas_groupby_sum_sorted",
+    "pandas_groupby_sum_unsorted",
+    "polars_agg_over",
+    "polars_group_by_sum",
+    "polars_is_in",
+    "polars_pipeline",
+    "polars_select_sum",
+    "polars_sort_nulls_first",
+    "polars_sort_nulls_last",
+    "polars_sum_horizontal",
+]
+
+_STEMS = _PANDAS_STEMS + _POLARS_STEMS
 
 [
     proto_encode(
@@ -75,13 +101,18 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_pandas_door_wire.mojo",
+        "tests/test_polars_door_wire.mojo",
     ],
     # Each encoding is staged as wire/<stem>.hex; the test opens it by that
     # path (it runs with the staged data as its current directory).
     test_data = {
         "tests/test_pandas_door_wire.mojo": {
             "wire/{}.hex".format(s): ":{}_wire".format(s)
-            for s in _STEMS
+            for s in _PANDAS_STEMS
+        },
+        "tests/test_polars_door_wire.mojo": {
+            "wire/{}.hex".format(s): ":{}_wire".format(s)
+            for s in _POLARS_STEMS
         },
     },
     visibility = ["PUBLIC"],

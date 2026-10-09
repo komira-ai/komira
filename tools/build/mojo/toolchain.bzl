@@ -73,6 +73,10 @@ rm -rf "$T"
         # Files `src` imports by a relative name: inputs at their paths, so
         # beside it, and not on the command line.
         cmd = cmd_args(cmd, hidden = ctx.attrs.imports)
+    if ctx.attrs.unit_tests:
+        # Each `zig_test`'s output is an input: the executable is not built
+        # unless they passed.
+        cmd = cmd_args(cmd, hidden = [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.unit_tests])
     ctx.actions.run(
         cmd,
         category = "zig_build_exe",
@@ -81,6 +85,41 @@ rm -rf "$T"
 
 zig_exe_rule = rule(
     impl = _zig_exe_impl,
+    attrs = {
+        "busybox": attrs.dep(),
+        "imports": attrs.list(attrs.source(), default = []),
+        "src": attrs.source(),
+        # `zig_test` targets the executable waits for.
+        "unit_tests": attrs.list(attrs.dep(), default = []),
+        "zig": attrs.dep(),
+    },
+)
+
+def _zig_test_impl(ctx):
+    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output(ctx.label.name + ".passed")
+    # The tests run with the busybox applets as their PATH and a TMPDIR of
+    # their own, inside the action's scratch directory.
+    script = _PRELUDE + """
+ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"; TMPDIR="$T/tmp"
+export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME TMPDIR
+mkdir -p "$TMPDIR"
+"$1/zig" test -target x86_64-linux-musl "$2"
+echo passed > "$3"
+rm -rf "$T"
+"""
+    ctx.actions.run(
+        cmd_args(busybox_sh(bb, script, zig, ctx.attrs.src, out.as_output()), hidden = ctx.attrs.imports),
+        category = "zig_test",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# `zig test` of `src` (and the `test` blocks of the files it imports, the
+# `imports`), run as a build action: the target exists only if every test
+# passed. A `zig_exe` names it in `unit_tests` to be built behind it.
+zig_test_rule = rule(
+    impl = _zig_test_impl,
     attrs = {
         "busybox": attrs.dep(),
         "imports": attrs.list(attrs.source(), default = []),
@@ -242,3 +281,4 @@ mojo_runtime = declares_docs(mojo_runtime_rule)
 mojo_toolchain = declares_docs(mojo_toolchain_rule)
 zig_dist = declares_docs(zig_dist_rule)
 zig_exe = declares_docs(zig_exe_rule)
+zig_test = declares_docs(zig_test_rule)
