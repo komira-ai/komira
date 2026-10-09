@@ -29,7 +29,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # parsers (metadata_parser, footer_header), the page header parser
 # (page_header_parser), bloom filters and the row-group bloom pruner
 # (bloom_reader, bloom_pruner), a row-count cache (num_rows_cache) and the
-# partition-predicate mapping (partition_pred_bridge).
+# partition-predicate mapping (partition_pred_bridge). The column chunk page
+# walk in front of the selection gathers (gather) joins the two: it parses
+# page headers, decompresses the selected pages (komira_parquet_codec) and
+# gathers their selected rows.
 #
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
@@ -69,6 +72,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_gather_byte_array: the PLAIN BYTE_ARRAY selection gathers against a
 #   positional reference (empty, short and long values, several pages, many
 #   selections, nullable), and malformed pages refused on both walk legs.
+# - test_gather_fixed_width_direct: the PLAIN fixed-width gathers, non-null
+#   and nullable, every type and walk shape against a positional reference,
+#   and their refusals.
+# - test_gather_fixed_width_non_null: the non-null fixed-width gather on
+#   hand-built pages (one page, several, page edges, no interval).
+# - test_gather_column_direct: the column chunk page walk on chunks it
+#   gathers (PLAIN and dictionary, every type, codec, page kind, mask and
+#   annotation), with page headers written from parquet.thrift.
+# - test_gather_column_fallbacks_direct: the chunks it hands back (None) and
+#   the refusals it raises.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -88,6 +101,7 @@ mojo_library(
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fs:komira_fs",
         "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_simd:komira_simd",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
@@ -125,9 +139,13 @@ mojo_library(
         "tests/test_footer_header_direct.mojo",
         "tests/test_gather_byte_array.mojo",
         "tests/test_gather_byte_array_direct.mojo",
+        "tests/test_gather_column_direct.mojo",
+        "tests/test_gather_column_fallbacks_direct.mojo",
         "tests/test_gather_common_direct.mojo",
         "tests/test_gather_dict_direct.mojo",
         "tests/test_gather_dict_refusals_direct.mojo",
+        "tests/test_gather_fixed_width_direct.mojo",
+        "tests/test_gather_fixed_width_non_null.mojo",
         "tests/test_int96_decode.mojo",
         "tests/test_metadata_parser_direct.mojo",
         "tests/test_neon_bss_decode.mojo",

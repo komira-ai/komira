@@ -64,9 +64,12 @@
 # `channel`, `cells`, `cell`, `resources`, each at most once, and
 # `definitions` and `validation` (a block), each repeated. A
 # validation: `name`, `kind`, `image`, `compiler_channel`, `program`,
-# `wait_for_index_seconds` (an integer), each at most once, and `install` and
-# `extra_channel` (each repeated). A `:` before a `{` is optional; a scalar may
-# be quoted or bare.
+# `smoke`, `wait_for_index_seconds` and `timeout_seconds` (each a whole
+# number of seconds), and `target` (a block of `resource` and `output`, each
+# at most once), each at most once, and `install`, `extra_channel`, `args`
+# and `expect` (each repeated). `secret_env` is refused by name: no validation passes a secret
+# in its environment. A `:` before a `{` is optional; a scalar may be quoted
+# or bare.
 #
 # Every refusal starts `<source>: line N:`. The parser refuses an unknown
 # field at any level, a scalar set twice, a block never closed, and a
@@ -130,6 +133,12 @@ def machine_field_names() -> List[String]:
     out.append(String("validation.program"))
     out.append(String("validation.smoke"))
     out.append(String("validation.wait_for_index_seconds"))
+    out.append(String("validation.args"))
+    out.append(String("validation.target"))
+    out.append(String("validation.timeout_seconds"))
+    out.append(String("validation.expect"))
+    out.append(String("target.resource"))
+    out.append(String("target.output"))
     return out^
 
 
@@ -179,6 +188,36 @@ def _twice(source: String, line: Int, field: String, where: String) raises:
     raise Error(_at(source, line) + String("field '") + field + String("' is set twice in ") + where)
 
 
+def _parse_target(mut c: TokenCursor, source: String, where: String, open_line: Int, mut v: StageValidation) raises:
+    """A probe's `target { resource, output }`, each at most once (the
+    rules are probe.mojo's)."""
+    var seen_resource = False
+    var seen_output = False
+    var of = String("the target of ") + where
+    while True:
+        if c.at_end():
+            raise Error(_at(source, open_line) + of + String(" is not closed (expected '}')"))
+        if c.is_kind(TOKEN_RBRACE):
+            _ = c.expect(TOKEN_RBRACE)
+            return
+        var f = c.expect(TOKEN_WORD)
+        if f.text == "resource":
+            if seen_resource:
+                _twice(source, f.line, f.text, of)
+            v.target_resource = _scalar(c, f.text, source)
+            seen_resource = True
+        elif f.text == "output":
+            if seen_output:
+                _twice(source, f.line, f.text, of)
+            v.target_output = _scalar(c, f.text, source)
+            seen_output = True
+        else:
+            raise Error(
+                _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + of
+                + String(" (expected resource, output)")
+            )
+
+
 def _parse_validation(mut c: TokenCursor, source: String, step_where: String, open_line: Int) raises -> StageValidation:
     var v = StageValidation(open_line)
     var seen = List[String]()
@@ -194,10 +233,13 @@ def _parse_validation(mut c: TokenCursor, source: String, step_where: String, op
             _ = c.expect(TOKEN_RBRACE)
             break
         var f = c.expect(TOKEN_WORD)
-        if f.text != "extra_channel" and f.text != "install":
-            for i in range(len(seen)):
-                if seen[i] == f.text:
-                    _twice(source, f.line, f.text, where)
+        var repeated = f.text == "extra_channel" or f.text == "install" or f.text == "args" or f.text == "expect"
+        var again = False
+        for i in range(len(seen)):
+            if seen[i] == f.text:
+                again = True
+        if again and not repeated:
+            _twice(source, f.line, f.text, where)
         if f.text == "name":
             v.name = _scalar(c, f.text, source)
         elif f.text == "kind":
@@ -216,13 +258,29 @@ def _parse_validation(mut c: TokenCursor, source: String, step_where: String, op
             v.smoke = _scalar(c, f.text, source)
         elif f.text == "wait_for_index_seconds":
             v.wait_for_index_seconds = _seconds(c, f.text, source, where)
+        elif f.text == "args":
+            v.args.append(_scalar(c, f.text, source))
+        elif f.text == "target":
+            var line = _open_block(c)
+            _parse_target(c, source, where, line, v)
+        elif f.text == "timeout_seconds":
+            v.timeout_seconds = _seconds(c, f.text, source, where)
+        elif f.text == "expect":
+            v.expects.append(_scalar(c, f.text, source))
+        elif f.text == "secret_env":
+            raise Error(
+                _at(source, f.line) + where + String(" has secret_env: a validation passes no secret in its")
+                + String(" environment (kci never holds a secret's value; configuration goes in args)")
+            )
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
                 + String(" (expected name, kind, image, install, compiler_channel, extra_channel, program,")
-                + String(" smoke, wait_for_index_seconds)")
+                + String(" smoke, wait_for_index_seconds, args, target, timeout_seconds, expect)")
             )
-        seen.append(f.text.copy())
+        if not again:
+            seen.append(f.text.copy())
+    v.written = seen^
     return v^
 
 

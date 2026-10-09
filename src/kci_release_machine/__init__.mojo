@@ -9,6 +9,8 @@
 #   deploy.mojo the rules of a step that writes into a cell (a DEPLOY
 #               step, or a PUBLISH step into a cell): `validate_cell_steps`,
 #               `require_cells_declared`, `cells_files_named`
+#   probe.mojo  the fields of a DEPLOY_PROBE validation: `check_probe`,
+#               `has_probe`, `is_probe_case_id`
 #   parse.mojo  `parse_machine_file`, `machine_schema_version`,
 #               `machine_field_names`
 #
@@ -36,6 +38,7 @@ from kci_release_machine.graph import (
     is_digest_pinned_image,
     is_stage_or_step_name,
     joined_names,
+    probe_only_fields,
     resolve_selection,
     validate_release_machine,
 )
@@ -45,5 +48,13 @@ from kci_release_machine.deploy import (
     is_relative_data_path,
     require_cells_declared,
     validate_cell_steps,
+)
+from kci_release_machine.probe import (
+    PROBE_ARG_RUN_ID,
+    PROBE_ARG_TARGET_URL,
+    PROBE_TIMEOUT_MAX_SECONDS,
+    check_probe,
+    has_probe,
+    is_probe_case_id,
 )
 from kci_release_machine.parse import machine_field_names, machine_schema_version, parse_machine_file
