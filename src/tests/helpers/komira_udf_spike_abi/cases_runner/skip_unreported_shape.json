@@ -1,0 +1,13 @@
+{
+ "name": "skip_unreported_shape",
+ "defect": "a case of a shape the runtime does not report is run instead of skipped",
+ "run": "frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME_GROUPED",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}],
+ "expect": {"status": "OK"},
+ "runner_fails_with": "SKIP"
+}

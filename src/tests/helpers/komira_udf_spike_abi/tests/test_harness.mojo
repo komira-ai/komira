@@ -17,17 +17,35 @@
 #     runtime with a global lock bound as a parallel virtual machine);
 #   - a handle passed to an entry of another kind is refused before the
 #     runtime sees it; a run the reader does not know is refused;
-#   - memory_report reaches the optional entry (echo reports 0).
+#   - memory_report reaches the optional entry (echo reports 0);
+#   - every entry refuses a handle of another kind (a check dropped from one
+#     entry lets a runtime read one handle as another);
+#   - through echo_variant.so (echo with one thing wrong or at an edge,
+#     refrt/echo_variants.inc): UdfRuntime.open refuses a table of another
+#     major, a table short of a required entry, a describe that fails, and a
+#     runtime the variant library cannot name; it opens a table that stops
+#     before the optional entry (and reads that entry as absent) and a
+#     CONTEXT_PER_THREAD runtime with global_lock 1; init_refusal reports an
+#     init that accepts another major; and the capability check fails each
+#     describe answer that breaks one of its rules, for that rule, and passes
+#     each legal edge (SINGLE_THREAD, NATIVE with hosting 0,
+#     HOST_INTERPRETER, no MEMORY_REPORT with no entry).
 # Mutants planted: runtime_id_ok accepting upper-case letters (A to Z among
 # the alphanumerics): red ("upper case"). UdfRuntime.open not reading
-# global_lock: red (echo_global_lock.so opens).
+# global_lock: red (echo_global_lock.so opens). The mutants of the variant
+# and handle checks are listed with this file in the pull request's sweep
+# table.
 
+from std.os import setenv
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_udf_spike_abi.cases import parse_case
-from komira_udf_spike_abi.conform import run_case, runtime_id_ok
+from komira_udf_spike_abi.cases import Case, parse_case
+from komira_udf_spike_abi.conform import run_case, run_suite, runtime_id_ok
 from komira_udf_spike_abi.contract import *
-from komira_udf_spike_abi.runtime import UdfRuntime
+from komira_udf_spike_abi.runtime import CallOptions, UdfRuntime
+from komira_udf_spike_abi.values import Batch, Column, TYPE_INT32
+
+comptime VARIANT = "./echo_variant.so"
 
 
 def _raises_with(text: String, name: String) raises:
@@ -182,10 +200,174 @@ def _handles_and_runs() raises:
     rt.shutdown()
 
 
+def _kind(e: Error) -> Int:
+    """1 when `e` is the harness's handle-kind refusal."""
+    return 1 if String(e).startswith("UDF_HARNESS_HANDLE_KIND") else 0
+
+
+def _handle_kinds() raises:
+    """Each entry of UdfRuntime given a handle of another kind."""
+    var rt = UdfRuntime.open("./echo.so")
+    var c = parse_case(
+        '{"name": "n", "defect": "d", "run": "call_batch", "entry": "identity", "shape": "MAP_BATCHES_COLUMN",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "expect": {}}'
+    )
+    var udf = rt.load(c.spec)
+    assert_true(udf.outcome.is_ok(), String(udf.outcome))
+    var ctx = rt.open_context(0)
+    var inst = rt.open_instance(ctx.handle, udf.handle)
+    assert_true(inst.outcome.is_ok(), String(inst.outcome))
+    var u = udf.handle.copy()
+    var x = ctx.handle.copy()
+    var i = inst.handle.copy()
+    var none = CallOptions.plain()
+    var gids = List[Int32]()
+    var refused = 0
+    try:
+        rt.unload(x)
+    except e:
+        refused += _kind(e)
+    try:
+        rt.close_context(u)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.open_instance(u, u)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.open_instance(x, x)
+    except e:
+        refused += _kind(e)
+    try:
+        rt.close_instance(x)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.memory_report(u)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.call_batch(x, c.spec, Batch(0), none)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.run_frame(x, c.spec, List[Batch](), none)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.agg_open(x)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.agg_update(i, Batch(0), gids, 0, none)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.agg_merge(i, Column(TYPE_INT32), gids, 0, none)
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.agg_state(i, 0, c.spec.result[0])
+    except e:
+        refused += _kind(e)
+    try:
+        _ = rt.agg_finish(i, 0, c.spec.result[0])
+    except e:
+        refused += _kind(e)
+    try:
+        rt.agg_close(i)
+    except e:
+        refused += _kind(e)
+    assert_equal(refused, 14, "entries that refused a handle of another kind")
+    rt.close_instance(i)
+    rt.close_context(x)
+    rt.unload(u)
+    rt.shutdown()
+
+
+def _open_variant(name: String) raises -> UdfRuntime:
+    _ = setenv("KOMIRA_UDF_ECHO_VARIANT", name)
+    return UdfRuntime.open(VARIANT)
+
+
+def _open_error(name: String) -> String:
+    """UdfRuntime.open's error on variant `name`, or "" when it opens."""
+    try:
+        var rt = _open_variant(name)
+        rt.shutdown()
+    except e:
+        return String(e)
+    return ""
+
+
+def _variants() raises:
+    var msg = _open_error("no_such_variant")
+    assert_true(msg.startswith("UDF_RUNTIME_INIT") and "names no variant" in msg, msg)
+    msg = _open_error("table_major_2")
+    assert_true(msg.startswith("UDF_RUNTIME_ABI") and "table major 2" in msg, msg)
+    msg = _open_error("table_short")
+    assert_true(msg.startswith("UDF_RUNTIME_ABI"), msg)
+    msg = _open_error("describe_fails")
+    assert_true(msg.startswith("UDF_RUNTIME_FAULT: describe returned"), msg)
+    var rt = _open_variant("table_without_optional")
+    assert_false(rt.describe().has_memory_report, "an entry past struct_size read as present")
+    var ctx = rt.open_context(0)
+    assert_equal(rt.memory_report(ctx.handle), -2, "memory_report called past struct_size")
+    rt.close_context(ctx.handle)
+    rt.shutdown()
+    rt = _open_variant("per_thread_global_lock")
+    var caps = rt.describe()
+    assert_equal(caps.threading, CONTEXT_PER_THREAD)
+    assert_equal(caps.global_lock, 1)
+    rt.shutdown()
+    rt = _open_variant("any_major")
+    var o = rt.init_refusal(ABI_MAJOR + 1)
+    assert_true(o.fault.startswith("UDF_RUNTIME_FAULT: init accepted ABI major"), String(o))
+    rt.shutdown()
+    var echo = UdfRuntime.open("./echo.so")
+    o = echo.init_refusal(ABI_MAJOR + 1)
+    assert_equal(o.fault, "", String(o))
+    assert_equal(o.status, ERR_ABI)
+    echo.shutdown()
+    # name|PASS, or name|a fragment of the capability check's reason
+    var want: List[String] = [
+        "table_without_optional|PASS",
+        "per_thread_global_lock|PASS",
+        "single_thread|PASS",
+        "native|PASS",
+        "host_interpreter|PASS",
+        "bad_id|runtime id 'Komira-test/echo'",
+        "no_cpu|devices lacks CPU",
+        "worker_only|transports lacks IN_PROCESS",
+        "threading_0|threading 0 is none",
+        "threading_4|threading 4 is none",
+        "native_embedded|a NATIVE runtime reports hosting 0",
+        "managed_hosting_0|a MANAGED runtime reports hosting EMBEDDED or HOST_INTERPRETER",
+        "class_0|udf_class 0 is neither",
+        "class_3|udf_class 3 is neither",
+        "feature_without_entry|the MEMORY_REPORT feature bit and the memory_report entry disagree",
+        "entry_without_feature|the MEMORY_REPORT feature bit and the memory_report entry disagree",
+    ]
+    for k in range(len(want)):
+        var parts = want[k].split("|")
+        var name = String(parts[0])
+        var why = String(parts[1])
+        _ = setenv("KOMIRA_UDF_ECHO_VARIANT", name)
+        var r = run_suite(VARIANT, List[Case]()).result("capabilities")
+        if why == "PASS":
+            assert_equal(r.verdict, "PASS", name + ": " + r.reason)
+        else:
+            assert_equal(r.verdict, "FAIL", name + " passed the capability check")
+            assert_true(why in r.reason, name + " failed for another reason: " + r.reason)
+
+
 def main() raises:
     _statuses()
     _runtime_ids()
     _case_refusals()
     _open_refusals()
     _handles_and_runs()
+    _handle_kinds()
+    _variants()
     print("test_harness: ok")

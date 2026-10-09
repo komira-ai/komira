@@ -21,14 +21,19 @@
 # The length post-condition weakened to `len(col) < rows`: column_long_by_one
 # goes red. _moved_check not releasing an input the runtime kept: the ledger
 # of fault_agg_args_not_moved goes red. run_frame recording no fault when its
-# bound is reached: fault_frame_never_ends goes red.
+# bound is reached: fault_frame_never_ends goes red. The mutants of the
+# review fixes that added the cases after those (an output's offset ignored,
+# the PROPAGATE scatter's validity forced, the agg_state and agg_finish
+# lengths not checked, each import and ownership check weakened) are listed
+# with the case each one turned red in the pull request's sweep table; each
+# case's "defect" names what it catches.
 
 from std.testing import assert_equal
 
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 38
+comptime CASE_COUNT = 76
 """The JSON files under cases/: an empty or partial staging cannot pass."""
 
 

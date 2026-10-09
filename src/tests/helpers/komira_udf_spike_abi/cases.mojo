@@ -15,13 +15,20 @@
 #    "partials": [{"input": batch, "group_ids": [...], "n_groups": n}], "n_groups": n,
 #    "expect": {"status": "OK", "run_error": ..., "row": n, "row_at_least": n,
 #               "message": "nonempty",
-#               "column": column, "batches": [batch], "max_pulls_before_first_output": n}}
+#               "column": column, "batches": [batch], "max_pulls_before_first_output": n},
+#    "runner_fails_with": text}
 #
 # A batch is {"length": n, "columns": [column]}; a column is
 # {"type": "int64", "values": [1, null, ...], "repeat": r, "offset": k}: the
 # values r times over (default once), placed at Arrow offset k. An argument's
 # "name" is its field name (for ROW, a read-set field); unnamed fields are
 # c0, c1, ...
+#
+# "runner_fails_with" marks a case of cases_runner/: an expectation the
+# runtime does not meet on purpose, or a fixture with an ownership bug, so
+# the runner must fail it with a reason containing that text ("SKIP": must
+# skip it). test_conform_runner holds each one to it; the cases of cases/
+# have none.
 
 from komira_json import JsonValue, parse_json_value
 
@@ -85,6 +92,7 @@ struct Case(Copyable, Movable):
     var partials: List[Partial]
     var n_groups: UInt32
     var expect: Expect
+    var runner_fails_with: String
 
     def __init__(out self, var name: String, var spec: UdfSpec):
         self.name = name^
@@ -98,6 +106,7 @@ struct Case(Copyable, Movable):
         self.partials = List[Partial]()
         self.n_groups = 0
         self.expect = Expect()
+        self.runner_fails_with = ""
 
 
 def _str(v: JsonValue, key: String, default: String) raises -> String:
@@ -247,4 +256,5 @@ def parse_case(text: String) raises -> Case:
                 gids.append(Int32(g.element_at(k).as_int64()))
             c.partials.append(Partial(parse_batch(p.get("input")), gids^, UInt32(p.get("n_groups").as_int64())))
     c.expect = _expect(v.get("expect"))
+    c.runner_fails_with = _str(v, "runner_fails_with", "")
     return c^

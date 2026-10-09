@@ -46,7 +46,7 @@ def _expected() -> List[String]:
 
 def main() raises:
     var cases = load_cases(CASES)
-    assert_equal(len(cases), 38, "cases loaded from " + CASES)
+    assert_equal(len(cases), 76, "cases loaded from " + CASES)
     var report = run_suite("./echo_broken.so", cases)
     print(report)
     assert_equal(report.runtime_id, "komira-test/echo-broken")

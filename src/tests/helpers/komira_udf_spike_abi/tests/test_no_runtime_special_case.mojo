@@ -3,9 +3,9 @@
 # a runtime comes from describe.
 #
 # The check reads every library source of this package (the .mojo files
-# outside tests/, both headers) and every case under cases/, staged as test
-# data at their repository paths, and fails naming the file and line of each
-# hit of:
+# outside tests/, both headers) and every case under cases/ and
+# cases_runner/, staged as test data at their repository paths, and fails
+# naming the file and line of each hit of:
 #   - a runtime id of the namespaces komira ships (`komira/...`,
 #     `komira-test/...`), which only a special case would name;
 #   - the name of a language, a language runtime or its data library, as a
@@ -140,6 +140,6 @@ def main() raises:
                     hits += files[i] + ":" + String(n + 1) + ": '" + w + "'\n"
     print("scanned", len(files), "files:", mojo, "Mojo,", json, "cases")
     assert_true(mojo >= 10, "the library's sources are staged")
-    assert_true(json >= 34, "the cases are staged")
+    assert_true(json >= 98, "the cases are staged")
     assert_equal(hits, "", "a runtime or language named in the harness or the suite:\n" + hits)
     print("test_no_runtime_special_case: ok")

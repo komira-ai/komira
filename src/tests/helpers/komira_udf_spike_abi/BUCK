@@ -12,8 +12,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 #   komira_udf_runtime.h  the C ABI (section 4.3), Arrow structs embedded
 #   komira_udf_wire.h     the worker message header and ops (section 5.2)
 #   native/               the layout probe the tests compare the mirror with,
-#                         and the cancel timer (a C thread that sets a call's
-#                         cancel flag while the call runs)
+#                         and the cancel store (the host's release store of a
+#                         call's cancel flag)
 #   _cabi.mojo            the Mojo mirror of both headers
 #   _host.mojo            host side: exported arrays, streams and schemas with
 #                         counted releases; import validation of every output
@@ -22,6 +22,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 #   wire.mojo             the message header codec and the op table
 #   cases.mojo, conform.mojo, cases/*.json
 #                         the conformance cases and their runner
+#   cases_runner/*.json   cases the runner must fail (or skip), one per check
+#                         of its own
 #   refrt/                the reference runtimes, in C (below)
 #
 # The welded tests, and the defect each one catches (each file's header
@@ -33,7 +35,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 #                    exactly one request op and the reverse (an op or entry
 #                    added on one side only).
 #   test_harness     the status and error tables, the runtime id grammar,
-#                    the case reader's and UdfRuntime.open's refusals by name.
+#                    the case reader's and UdfRuntime.open's refusals by name,
+#                    the handle-kind refusal of every entry, and every check
+#                    of a runtime's table and describe answer, each against
+#                    an echo_variant.so variant that breaks it or sits at
+#                    its edge.
 #   test_conform_echo
 #                    every case passes on the reference runtime echo.so, none
 #                    skipped (a harness that breaks the contract itself).
@@ -41,11 +47,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 #                    the same suite fails on echo_broken.so on exactly the
 #                    cases that name its planted defects, for those reasons
 #                    (a suite that cannot fail).
+#   test_conform_runner
+#                    every case under cases_runner/ fails on echo.so for the
+#                    reason it names (a runner check deleted or weakened).
 #   test_no_runtime_special_case
 #                    no runtime id or language name in the headers, the
 #                    harness or the cases (a special case per runtime).
 # The cases, staged at their repository paths, where load_cases reads them.
 _CASES = {"src/tests/helpers/komira_udf_spike_abi/" + f: f for f in glob(["cases/*.json"])}
+
+_RUNNER_CASES = {"src/tests/helpers/komira_udf_spike_abi/" + f: f for f in glob(["cases_runner/*.json"])}
 
 mojo_library(
     name = "komira_udf_spike_abi",
@@ -58,6 +69,7 @@ mojo_library(
     test_srcs = [
         "tests/test_conform_broken.mojo",
         "tests/test_conform_echo.mojo",
+        "tests/test_conform_runner.mojo",
         "tests/test_harness.mojo",
         "tests/test_layout.mojo",
         "tests/test_no_runtime_special_case.mojo",
@@ -66,11 +78,16 @@ mojo_library(
     test_data = {
         "tests/test_conform_broken.mojo": _CASES | {"echo_broken.so": ":echo_broken"},
         "tests/test_conform_echo.mojo": _CASES | {"echo.so": ":echo"},
-        "tests/test_harness.mojo": {"echo.so": ":echo", "echo_global_lock.so": ":echo_global_lock"},
+        "tests/test_conform_runner.mojo": _RUNNER_CASES | {"echo.so": ":echo"},
+        "tests/test_harness.mojo": {
+            "echo.so": ":echo",
+            "echo_global_lock.so": ":echo_global_lock",
+            "echo_variant.so": ":echo_variant",
+        },
         # The scan reads the harness's sources, both headers and the cases:
         # not the reference runtimes, which a runtime id names by design.
         "tests/test_no_runtime_special_case.mojo": glob(
-            ["**/*.mojo", "*.h", "cases/*.json"],
+            ["**/*.mojo", "*.h", "cases/*.json", "cases_runner/*.json"],
             exclude = ["refrt/**", "tests/**"],
         ),
     },
@@ -84,18 +101,21 @@ staged_files(
     srcs = [
         "komira_udf_runtime.h",
         "komira_udf_wire.h",
-        "native/cancel_timer.c",
+        "native/cancel_flag.c",
         "native/layout_probe.c",
+        "refrt/echo_calls.inc",
+        "refrt/echo_frames.inc",
         "refrt/echo_runtime.c",
+        "refrt/echo_variants.inc",
     ],
 )
 
 # The two headers, for the reference runtimes; the layout probe the Mojo
-# tests compare the mirror with; the cancel timer the harness starts.
+# tests compare the mirror with; the cancel store the host's clock calls.
 cxx_library(
     name = "komira_udf_spike_c",
     srcs = [
-        ":c_files[native/cancel_timer.c]",
+        ":c_files[native/cancel_flag.c]",
         ":c_files[native/layout_probe.c]",
     ],
     exported_headers = {
@@ -119,16 +139,30 @@ cxx_library(
 #                   echo through its second init: it reports global_lock 1
 #                   beside THREAD_SAFE, which UdfRuntime.open must refuse
 #                   (test_harness).
-# Each C build defines an init of its own name (the one-definition gate links
-# every C library under src/ whole, so the two cannot share one), and a
-# one-function Mojo file forwards the ABI's export to it. Each library's gate
-# dlopens it and checks it exports exactly that symbol.
+#   echo_variant.so echo through its variant init (refrt/echo_variants.inc):
+#                   one thing wrong or at an edge in its table or describe
+#                   answer, named by KOMIRA_UDF_ECHO_VARIANT (test_harness).
+# Each C build defines inits of its own names (the one-definition gate links
+# every C library under src/ whole, so two cannot share one), and a
+# one-function Mojo file forwards the ABI's export to one. Each library's gate
+# dlopens it and checks it exports exactly that symbol. echo_runtime.c
+# includes its other three parts (refrt/*.inc): one translation unit, every
+# symbol but the inits static.
+_ECHO_PARTS = {
+    "echo_calls.inc": ":c_files[refrt/echo_calls.inc]",
+    "echo_frames.inc": ":c_files[refrt/echo_frames.inc]",
+    "echo_variants.inc": ":c_files[refrt/echo_variants.inc]",
+}
+
 cxx_library(
     name = "komira_udf_echo",
     srcs = [":c_files[refrt/echo_runtime.c]"],
+    headers = _ECHO_PARTS,
+    header_namespace = "",
     preprocessor_flags = [
         "-DECHO_INIT=komira_udf_echo_init_v1",
         "-DECHO_INIT_GLOBAL_LOCK=komira_udf_echo_global_lock_init_v1",
+        "-DECHO_INIT_VARIANT=komira_udf_echo_variant_init_v1",
     ],
     deps = [":komira_udf_spike_c"],
     visibility = ["PUBLIC"],
@@ -137,6 +171,8 @@ cxx_library(
 cxx_library(
     name = "komira_udf_echo_broken",
     srcs = [":c_files[refrt/echo_runtime.c]"],
+    headers = _ECHO_PARTS,
+    header_namespace = "",
     preprocessor_flags = [
         "-DECHO_INIT=komira_udf_echo_broken_init_v1",
         "-DKOMIRA_UDF_ECHO_BROKEN=1",
@@ -157,6 +193,15 @@ mojo_shared_lib(
 mojo_shared_lib(
     name = "echo_global_lock",
     srcs = ["refrt/echo_global_lock_so.mojo"],
+    exports = ["komira_udf_runtime_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_echo"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "echo_variant",
+    srcs = ["refrt/echo_variant_so.mojo"],
     exports = ["komira_udf_runtime_init_v1"],
     exports_exact = True,
     deps = [":komira_udf_echo"],

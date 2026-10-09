@@ -11,9 +11,22 @@
  * interpreter would, and has none, so of the two hosting values it reports
  * EMBEDDED (it needs nothing from the process that loads it).
  *
- * Built twice (BUCK). With KOMIRA_UDF_ECHO_BROKEN defined it is
+ * Memory accounting (design section 4.8): every output array and every
+ * error's strings are reserved through host->mem_reserve when built and
+ * returned through host->mem_release when released. So a host that never
+ * releases an output or an error leaves its reservation count above zero,
+ * which the conformance runner's ledger reports.
+ *
+ * One translation unit in four files: this one (fixtures, handles, errors,
+ * inputs and outputs, validate and load, the table and the inits) includes
+ * echo_calls.inc (call_batch), echo_frames.inc (aggregates and frames) and,
+ * when ECHO_INIT_VARIANT is defined, echo_variants.inc. Every symbol but the
+ * inits is static, so the builds link into one process (the one-definition
+ * gate links every C library whole).
+ *
+ * Built three ways (BUCK). With KOMIRA_UDF_ECHO_BROKEN defined it is
  * komira-test/echo-broken, the same code with seven planted defects the
- * suite must catch (each marked BROKEN below):
+ * suite must catch (each marked BROKEN):
  *   1. it does not release `args` when a fixture raises (a leak);
  *   2. `fahrenheit` writes int64 values into its float64 result;
  *   3. it never reads the cancel flag;
@@ -25,10 +38,10 @@
  *
  * With ECHO_INIT_GLOBAL_LOCK defined, the build also defines that init:
  * the same runtime reporting global_lock 1 beside THREAD_SAFE, the test
- * setting of design section 6.3, which a host must refuse at init.
- *
- * Every symbol but the inits is static, so the builds link into one process
- * (the one-definition gate links every C library whole).
+ * setting of design section 6.3, which a host must refuse at init. With
+ * ECHO_INIT_VARIANT defined, it defines one more init whose table and
+ * describe answer break one rule of the contract, chosen when it runs
+ * (echo_variants.inc).
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -51,7 +64,7 @@
 
 #define FMT_I64 'l'
 #define SLOW_ROW_NS 100000000 /* slow_loop: at most 100 ms of the host's clock per row */
-#define FMT_F64 'g'
+#define PAD_VALUE 0x5EAD5EAD  /* the rows before a sliced output's offset */
 
 /* ---- fixtures ------------------------------------------------------------ */
 
@@ -81,7 +94,59 @@ enum fixture_id {
   F_ADD_STRICT,
   F_LONG_BY_ONE,
   F_SUM_ARGS_KEPT,
-  F_ENDLESS
+  F_ENDLESS,
+  F_NULL_ON_ZERO,
+  F_NARROW,
+  F_LEAF,         /* identity, then the output reshaped by `variant` (enum leaf_shape) */
+  F_TABLE,        /* a frame of identity tables, reshaped by `variant` (enum table_shape) */
+  F_SUM_STATE_LONG,
+  F_SUM_FINISH_SHORT,
+  F_SUM_GIDS_KEPT,
+  F_SUM_MERGE_KEPT,
+  F_FRAME_IN_KEPT,
+  F_STREAM_KEPT,
+  F_RELEASE_ARGS_TWICE,
+  F_RELEASE_SCHEMA,
+  F_LEAK_RESERVATION,
+  F_RAISE_NO_MESSAGE
+};
+
+/* F_LEAF: what is done to the identity's output column. The first three are
+ * legal Arrow the host must read; the rest break one rule each. */
+enum leaf_shape {
+  LS_SLICED = 1,          /* offset 11, the rows before it padding with null bits */
+  LS_NULL_COUNT_UNKNOWN,  /* null_count -1: "not computed", legal */
+  LS_EMPTY_DATA_NULL,     /* zero rows, no data buffer: legal */
+  LS_N_BUFFERS_3,
+  LS_N_CHILDREN_1,
+  LS_DICTIONARY,
+  LS_NEGATIVE_LENGTH,
+  LS_NEGATIVE_OFFSET,
+  LS_NULL_COUNT_BELOW,    /* null_count -2 */
+  LS_BUFFERS_NULL,
+  LS_DATA_NULL,
+  LS_RELEASE_KEEPS_SLOT,  /* its release frees the column but leaves `release` set */
+  LS_DEVICE_ID,           /* device CPU with device_id 0 */
+  LS_SYNC_EVENT           /* device CPU with a sync event */
+};
+
+/* F_TABLE: what is done to each output table. */
+enum table_shape {
+  TS_SLICED = 1,  /* struct offset 2 over a child at offset 3: legal */
+  TS_N_BUFFERS_0,
+  TS_N_BUFFERS_2,
+  TS_N_CHILDREN_0,
+  TS_N_CHILDREN_2,
+  TS_NEGATIVE_LENGTH,
+  TS_NEGATIVE_OFFSET,
+  TS_BUFFERS_NULL,
+  TS_NULL_ROWS,       /* a validity bitmap with row 0 null, null_count 1 */
+  TS_NULL_COUNT_LIES, /* null_count 1 with no validity bitmap */
+  TS_CHILD_NULL,
+  TS_CHILD_RELEASED,
+  TS_CHILD_SHORT,  /* the child has one row fewer than the struct */
+  TS_DEVICE,
+  TS_OUT_ON_ERROR  /* frame_next returns ERR_RAISED with the table still in `out` */
 };
 
 /* args: one format per argument ('*' for ROW: any number of int64 fields,
@@ -94,47 +159,104 @@ struct fixture {
   const char* args;
   const char* result;
   const char* state;
+  int variant;
 };
 
+#define SC KOMIRA_UDF_SHAPE_SCALAR
+#define MC KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN
+#define MF KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME
+#define AM KOMIRA_UDF_SHAPE_AGG_MERGEABLE
+
 static const struct fixture FIXTURES[] = {
-    {"double", F_DOUBLE, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"double_strict", F_DOUBLE_STRICT, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"fahrenheit", F_FAHRENHEIT, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "g", "g", ""},
-    {"identity", F_IDENTITY, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "l", "l", ""},
-    {"short_by_one", F_SHORT_BY_ONE, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "l", "l", ""},
-    {"bad_layout", F_BAD_LAYOUT, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"null_out", F_NULL_OUT, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"const7", F_CONST7, KOMIRA_UDF_SHAPE_SCALAR, "", "l", ""},
-    {"raise_on_row_3", F_RAISE_ON_ROW_3, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"slow_loop", F_SLOW_LOOP, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"sum", F_SUM, KOMIRA_UDF_SHAPE_AGG_MERGEABLE, "l", "l", "l"},
-    {"running_sum", F_RUNNING_SUM, KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME, "l", "tl", ""},
-    {"group_max", F_GROUP_MAX, KOMIRA_UDF_SHAPE_AGG_PLAIN, "l", "l", ""},
-    {"empty_table", F_EMPTY_TABLE, KOMIRA_UDF_SHAPE_STEP, "l", "t", ""},
+    {"double", F_DOUBLE, SC, "l", "l", "", 0},
+    {"double_strict", F_DOUBLE_STRICT, SC, "l", "l", "", 0},
+    {"fahrenheit", F_FAHRENHEIT, MC, "g", "g", "", 0},
+    {"identity", F_IDENTITY, MC, "l", "l", "", 0},
+    {"short_by_one", F_SHORT_BY_ONE, MC, "l", "l", "", 0},
+    {"bad_layout", F_BAD_LAYOUT, SC, "l", "l", "", 0},
+    {"null_out", F_NULL_OUT, SC, "l", "l", "", 0},
+    {"const7", F_CONST7, SC, "", "l", "", 0},
+    {"raise_on_row_3", F_RAISE_ON_ROW_3, SC, "l", "l", "", 0},
+    {"slow_loop", F_SLOW_LOOP, SC, "l", "l", "", 0},
+    {"sum", F_SUM, AM, "l", "l", "l", 0},
+    {"running_sum", F_RUNNING_SUM, MF, "l", "tl", "", 0},
+    {"group_max", F_GROUP_MAX, KOMIRA_UDF_SHAPE_AGG_PLAIN, "l", "l", "", 0},
+    {"empty_table", F_EMPTY_TABLE, KOMIRA_UDF_SHAPE_STEP, "l", "t", "", 0},
     /* ROW: f(r) = r.a if r.flag else r.b, reading fields by name. */
-    {"pick", F_PICK, KOMIRA_UDF_SHAPE_ROW, "*", "l", ""},
+    {"pick", F_PICK, KOMIRA_UDF_SHAPE_ROW, "*", "l", "", 0},
     /* The same, where user code catches the undeclared-field error and
      * returns 0 for the row. */
-    {"pick_caught", F_PICK_CAUGHT, KOMIRA_UDF_SHAPE_ROW, "*", "l", ""},
+    {"pick_caught", F_PICK_CAUGHT, KOMIRA_UDF_SHAPE_ROW, "*", "l", "", 0},
     /* Runtime bugs the host must catch, each with the identity's values:
      * an error with `out` left set; OK with no output; an output on another
      * device; a null_count the validity bitmap contradicts; `args` read in
      * place and never moved or released. */
-    {"out_set_on_error", F_OUT_SET_ON_ERROR, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"ok_without_output", F_OK_WITHOUT_OUTPUT, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"device_not_cpu", F_DEVICE_NOT_CPU, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"null_count_lies", F_NULL_COUNT_LIES, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
-    {"args_kept", F_ARGS_KEPT, KOMIRA_UDF_SHAPE_SCALAR, "l", "l", ""},
+    {"out_set_on_error", F_OUT_SET_ON_ERROR, SC, "l", "l", "", 0},
+    {"ok_without_output", F_OK_WITHOUT_OUTPUT, SC, "l", "l", "", 0},
+    {"device_not_cpu", F_DEVICE_NOT_CPU, SC, "l", "l", "", 0},
+    {"null_count_lies", F_NULL_COUNT_LIES, SC, "l", "l", "", 0},
+    {"args_kept", F_ARGS_KEPT, SC, "l", "l", "", 0},
     /* A frame that yields its first two input batches unchanged, then
      * raises, leaving the rest of its input unread. */
-    {"yield_two_then_raise", F_YIELD_TWO_THEN_RAISE, KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME, "l", "tl", ""},
+    {"yield_two_then_raise", F_YIELD_TWO_THEN_RAISE, MF, "l", "tl", "", 0},
     /* a + b, raising on a null in either argument. */
-    {"add_strict", F_ADD_STRICT, KOMIRA_UDF_SHAPE_SCALAR, "ll", "l", ""},
+    {"add_strict", F_ADD_STRICT, SC, "ll", "l", "", 0},
     /* More runtime bugs: one row too many; sum whose agg_update reads `args`
      * in place and never moves it; a frame that never ends. */
-    {"long_by_one", F_LONG_BY_ONE, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "l", "l", ""},
-    {"sum_args_kept", F_SUM_ARGS_KEPT, KOMIRA_UDF_SHAPE_AGG_MERGEABLE, "l", "l", "l"},
-    {"endless", F_ENDLESS, KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME, "l", "tl", ""},
+    {"long_by_one", F_LONG_BY_ONE, MC, "l", "l", "", 0},
+    {"sum_args_kept", F_SUM_ARGS_KEPT, AM, "l", "l", "l", 0},
+    {"endless", F_ENDLESS, MF, "l", "tl", "", 0},
+    /* 2x, and a null for 0: a null the runtime returns for valid inputs. */
+    {"null_on_zero", F_NULL_ON_ZERO, SC, "l", "l", "", 0},
+    /* int64 in, the same values as int32 out. */
+    {"narrow", F_NARROW, MC, "l", "i", "", 0},
+    {"leaf_sliced", F_LEAF, MC, "l", "l", "", LS_SLICED},
+    {"leaf_null_count_unknown", F_LEAF, MC, "l", "l", "", LS_NULL_COUNT_UNKNOWN},
+    {"leaf_empty_data_null", F_LEAF, MC, "l", "l", "", LS_EMPTY_DATA_NULL},
+    {"leaf_n_buffers_3", F_LEAF, MC, "l", "l", "", LS_N_BUFFERS_3},
+    {"leaf_n_children_1", F_LEAF, MC, "l", "l", "", LS_N_CHILDREN_1},
+    {"leaf_dictionary", F_LEAF, MC, "l", "l", "", LS_DICTIONARY},
+    {"leaf_negative_length", F_LEAF, MC, "l", "l", "", LS_NEGATIVE_LENGTH},
+    {"leaf_negative_offset", F_LEAF, MC, "l", "l", "", LS_NEGATIVE_OFFSET},
+    {"leaf_null_count_below", F_LEAF, MC, "l", "l", "", LS_NULL_COUNT_BELOW},
+    {"leaf_buffers_null", F_LEAF, MC, "l", "l", "", LS_BUFFERS_NULL},
+    {"leaf_data_null", F_LEAF, MC, "l", "l", "", LS_DATA_NULL},
+    {"leaf_release_keeps_slot", F_LEAF, MC, "l", "l", "", LS_RELEASE_KEEPS_SLOT},
+    {"leaf_device_id", F_LEAF, MC, "l", "l", "", LS_DEVICE_ID},
+    {"leaf_sync_event", F_LEAF, MC, "l", "l", "", LS_SYNC_EVENT},
+    {"table_sliced", F_TABLE, MF, "l", "tl", "", TS_SLICED},
+    {"table_n_buffers_0", F_TABLE, MF, "l", "tl", "", TS_N_BUFFERS_0},
+    {"table_n_buffers_2", F_TABLE, MF, "l", "tl", "", TS_N_BUFFERS_2},
+    {"table_n_children_0", F_TABLE, MF, "l", "tl", "", TS_N_CHILDREN_0},
+    {"table_n_children_2", F_TABLE, MF, "l", "tl", "", TS_N_CHILDREN_2},
+    {"table_negative_length", F_TABLE, MF, "l", "tl", "", TS_NEGATIVE_LENGTH},
+    {"table_negative_offset", F_TABLE, MF, "l", "tl", "", TS_NEGATIVE_OFFSET},
+    {"table_buffers_null", F_TABLE, MF, "l", "tl", "", TS_BUFFERS_NULL},
+    {"table_null_rows", F_TABLE, MF, "l", "tl", "", TS_NULL_ROWS},
+    {"table_null_count_lies", F_TABLE, MF, "l", "tl", "", TS_NULL_COUNT_LIES},
+    {"table_child_null", F_TABLE, MF, "l", "tl", "", TS_CHILD_NULL},
+    {"table_child_released", F_TABLE, MF, "l", "tl", "", TS_CHILD_RELEASED},
+    {"table_child_short", F_TABLE, MF, "l", "tl", "", TS_CHILD_SHORT},
+    {"table_device", F_TABLE, MF, "l", "tl", "", TS_DEVICE},
+    {"table_out_on_error", F_TABLE, MF, "l", "tl", "", TS_OUT_ON_ERROR},
+    /* sum, with a state column one row too long; with a result one row
+     * short; with agg_update not moving group_ids; with agg_merge not moving
+     * the states. */
+    {"sum_state_long", F_SUM_STATE_LONG, AM, "l", "l", "l", 0},
+    {"sum_finish_short", F_SUM_FINISH_SHORT, AM, "l", "l", "l", 0},
+    {"sum_gids_kept", F_SUM_GIDS_KEPT, AM, "l", "l", "l", 0},
+    {"sum_merge_kept", F_SUM_MERGE_KEPT, AM, "l", "l", "l", 0},
+    /* running_sum whose frame_open reads `in` in place and never moves it;
+     * running_sum whose frame_close never releases `in`. */
+    {"frame_in_kept", F_FRAME_IN_KEPT, MF, "l", "tl", "", 0},
+    {"stream_kept", F_STREAM_KEPT, MF, "l", "tl", "", 0},
+    /* identity, with one more ownership bug each: the moved `args` released
+     * twice; the borrowed argument schema released at load; 64 bytes
+     * reserved and never returned; an error with no message. */
+    {"release_args_twice", F_RELEASE_ARGS_TWICE, MC, "l", "l", "", 0},
+    {"release_schema", F_RELEASE_SCHEMA, MC, "l", "l", "", 0},
+    {"leak_reservation", F_LEAK_RESERVATION, MC, "l", "l", "", 0},
+    {"raise_no_message", F_RAISE_NO_MESSAGE, MC, "l", "l", "", 0},
 };
 
 #define N_FIXTURES (sizeof(FIXTURES) / sizeof(FIXTURES[0]))
@@ -144,6 +266,7 @@ static const struct fixture FIXTURES[] = {
 struct komira_udf_rt {
   const komira_udf_host* host;
   uint32_t global_lock;
+  int variant; /* echo_variants.inc; 0 in every other init */
 };
 #define ROW_FIELDS_MAX 8
 
@@ -166,6 +289,7 @@ struct komira_udf_instance {
 };
 struct komira_udf_groups {
   const struct fixture* fx;
+  const komira_udf_host* host;
   int64_t* st;
   uint32_t n;
   uint32_t cap;
@@ -179,13 +303,26 @@ struct komira_udf_frame {
   int64_t max;
 };
 
+static const komira_udf_host* host_of(const komira_udf_instance* i) { return i->ctx->rt->host; }
+
 /* ---- errors -------------------------------------------------------------- */
 
+/* The bytes an error's strings hold, as reserved with the host. */
+static int64_t error_bytes(const komira_udf_error* e) {
+  int64_t n = 0;
+  if (e->message) n += (int64_t)strlen(e->message) + 1;
+  if (e->user_trace) n += (int64_t)strlen(e->user_trace) + 1;
+  return n;
+}
+
 static void free_error(komira_udf_error* e) {
+  const komira_udf_host* h = (const komira_udf_host*)e->private_data;
+  if (h != NULL) h->mem_release(h->host_data, error_bytes(e));
   free((void*)e->message);
   free((void*)e->user_trace);
   e->message = NULL;
   e->user_trace = NULL;
+  e->private_data = NULL;
   e->release = NULL;
 }
 
@@ -196,14 +333,18 @@ static char* dup(const char* s) {
   return d;
 }
 
-static int32_t fail(komira_udf_error* e, int32_t code, const char* msg, int64_t row) {
+/* Fill the host's error; its strings are reserved with host `h` (NULL: a
+ * host too old to account to) until the host releases the error. */
+static int32_t fail(const komira_udf_host* h, komira_udf_error* e, int32_t code, const char* msg, int64_t row) {
   if (e == NULL || e->struct_size < sizeof(komira_udf_error)) return code;
   e->code = code;
   e->message = dup(msg);
   e->user_trace = code == KOMIRA_UDF_ERR_RAISED ? dup("echo_runtime.c: the fixture raised") : NULL;
   e->row = row;
   e->group = -1;
+  e->private_data = (void*)h;
   e->release = free_error;
+  if (h != NULL) h->mem_reserve(h->host_data, error_bytes(e));
   return code;
 }
 
@@ -229,6 +370,36 @@ static int32_t i32_at(const struct ArrowArray* a, int64_t r) {
   return ((const int32_t*)a->buffers[1])[off_of(a) + r];
 }
 
+/* The host's half of the C Data rules and of design 3.4 rule 5, checked on
+ * every input: an argument struct at offset 0 with one buffer and no
+ * validity bitmap; each column's null_count, when known, what its bitmap
+ * says over its rows from its own offset. A host that breaks one gets
+ * ERR_INTERNAL (the true offset here, BROKEN or not). */
+static int64_t count_nulls(const struct ArrowArray* a) {
+  const uint8_t* v = (const uint8_t*)a->buffers[0];
+  int64_t n = 0;
+  for (int64_t r = 0; v != NULL && r < a->length; r++) {
+    int64_t at = a->offset + r;
+    if (!((v[at >> 3] >> (at & 7)) & 1)) n++;
+  }
+  return n;
+}
+
+static int column_ok(const struct ArrowArray* a) { return a->null_count < 0 || a->null_count == count_nulls(a); }
+
+static int args_ok(const struct ArrowArray* s) {
+  if (s->offset != 0 || s->n_buffers != 1 || s->buffers[0] != NULL) return 0;
+  for (int64_t i = 0; i < s->n_children; i++)
+    if (!column_ok(s->children[i])) return 0;
+  return 1;
+}
+
+static int32_t check_args(const komira_udf_host* h, const struct ArrowArray* s, komira_udf_error* e) {
+  if (args_ok(s)) return KOMIRA_UDF_OK;
+  return fail(h, e, KOMIRA_UDF_ERR_INTERNAL,
+              "the argument struct is not at offset 0 without a bitmap, or a null_count contradicts its bitmap", -1);
+}
+
 static void release_array(struct ArrowArray* a) {
   if (a->release != NULL) a->release(a);
 }
@@ -244,14 +415,26 @@ static int past_deadline(const komira_udf_rt* rt, const komira_udf_call* c) {
 
 /* ---- building outputs ---------------------------------------------------- */
 
-/* One malloc block per primitive array: its two-entry buffer list, the
- * validity bitmap, the values. The release frees the block. */
+/* One malloc block per primitive array: its two-entry buffer list, the host
+ * its bytes are reserved with, then the validity bitmap and the values. */
 struct col_block {
   const void* bufs[2];
+  const komira_udf_host* host;
+  int64_t bytes;
 };
 
+/* Free a column's block and return its reservation, once: NULLs
+ * private_data, whatever the array's other fields say. */
+static void free_col(struct ArrowArray* a) {
+  struct col_block* b = (struct col_block*)a->private_data;
+  if (b == NULL) return;
+  b->host->mem_release(b->host->host_data, b->bytes);
+  free(b);
+  a->private_data = NULL;
+}
+
 static void release_col(struct ArrowArray* a) {
-  free(a->private_data);
+  free_col(a);
   a->release = NULL;
 }
 
@@ -262,12 +445,20 @@ static void set_cpu(struct ArrowDeviceArray* d) {
   d->reserved[0] = d->reserved[1] = d->reserved[2] = 0;
 }
 
-/* A primitive array of `n` rows of 8-byte values, every row valid; the
- * caller writes *data and clears validity bits for nulls. */
-static int make_col(struct ArrowArray* a, int64_t n, uint8_t** validity, void** data) {
+/* A primitive array of `n` rows of 8-byte values (room for 8 bytes each
+ * whatever the type), every row valid; the caller writes *data and clears
+ * validity bits for nulls. */
+static int make_col(const komira_udf_host* h, struct ArrowArray* a, int64_t n, uint8_t** validity, void** data) {
   size_t vbytes = (size_t)((n + 7) / 8);
-  struct col_block* b = malloc(sizeof(struct col_block) + vbytes + (size_t)n * 8 + 8);
-  if (b == NULL) return 0;
+  size_t bytes = sizeof(struct col_block) + vbytes + (size_t)n * 8 + 8;
+  if (h->mem_reserve(h->host_data, (int64_t)bytes) != KOMIRA_UDF_OK) return 0;
+  struct col_block* b = malloc(bytes);
+  if (b == NULL) {
+    h->mem_release(h->host_data, (int64_t)bytes);
+    return 0;
+  }
+  b->host = h;
+  b->bytes = (int64_t)bytes;
   uint8_t* v = (uint8_t*)(b + 1);
   memset(v, 0xFF, vbytes);
   void* d = (void*)(((uintptr_t)(v + vbytes) + 7) & ~(uintptr_t)7);
@@ -293,31 +484,45 @@ static void set_null(struct ArrowArray* a, uint8_t* v, int64_t r) {
   a->null_count++;
 }
 
+/* A struct array's block: its buffer list, the children it owns (`kids`,
+ * which its release frees whatever `children` and the kids' own release
+ * slots were changed to), and `view`, what `children` points at. */
+struct table_block {
+  const void* bufs[2];
+  uint8_t validity[8]; /* a bitmap for table_null_rows and table_sliced */
+  int64_t k;
+  struct ArrowArray** view;
+  struct ArrowArray* kids[];
+};
+
 static void release_struct(struct ArrowArray* a) {
-  for (int64_t i = 0; i < a->n_children; i++) {
-    release_array(a->children[i]);
-    free(a->children[i]);
+  struct table_block* b = (struct table_block*)a->private_data;
+  for (int64_t i = 0; i < b->k; i++) {
+    free_col(b->kids[i]);
+    free(b->kids[i]);
   }
-  free(a->private_data);
+  free(b);
   a->release = NULL;
 }
 
-/* A struct array of `n` rows whose `k` children the caller fills. */
+/* A struct array of `n` rows whose `k` children the caller fills with
+ * make_col (one spare view slot, for a reshaped table). */
 static int make_struct(struct ArrowArray* a, int64_t n, int64_t k) {
-  size_t bytes = sizeof(void*) + (size_t)k * sizeof(struct ArrowArray*);
-  void** b = calloc(1, bytes);
+  struct table_block* b = calloc(1, sizeof(struct table_block) + (size_t)(2 * k + 1) * sizeof(void*));
   if (b == NULL) return 0;
-  struct ArrowArray** kids = (struct ArrowArray**)(b + 1);
+  b->k = k;
+  b->view = b->kids + k;
   for (int64_t i = 0; i < k; i++) {
-    kids[i] = calloc(1, sizeof(struct ArrowArray));
+    b->kids[i] = calloc(1, sizeof(struct ArrowArray));
+    b->view[i] = b->kids[i];
   }
   a->length = n;
   a->null_count = 0;
   a->offset = 0;
   a->n_buffers = 1;
   a->n_children = k;
-  a->buffers = (const void**)b; /* b[0] == NULL: no validity */
-  a->children = k > 0 ? kids : NULL;
+  a->buffers = b->bufs; /* bufs[0] == NULL: no validity */
+  a->children = k > 0 ? b->view : NULL;
   a->dictionary = NULL;
   a->release = release_struct;
   a->private_data = b;
@@ -359,27 +564,30 @@ static int row_args_ok(const struct ArrowSchema* s) {
   return 1;
 }
 
-static int32_t check_spec(const komira_udf_spec* s, komira_udf_error* e, const struct fixture** out) {
+static int32_t check_spec(const komira_udf_host* h, const komira_udf_spec* s, komira_udf_error* e,
+                          const struct fixture** out) {
   if (s == NULL || s->struct_size < sizeof(komira_udf_spec))
-    return fail(e, KOMIRA_UDF_ERR_ABI, "spec struct_size is below this runtime's", -1);
+    return fail(h, e, KOMIRA_UDF_ERR_ABI, "spec struct_size is below this runtime's", -1);
   const struct fixture* fx = find(s->entry);
-  if (fx == NULL) return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "no fixture has this entry", -1);
+  if (fx == NULL) return fail(h, e, KOMIRA_UDF_ERR_DESCRIPTOR, "no fixture has this entry", -1);
   if (s->form < KOMIRA_UDF_FORM_PACKAGE || s->form > KOMIRA_UDF_FORM_VALUE)
-    return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "code form is not PACKAGE, BUNDLE or VALUE", -1);
+    return fail(h, e, KOMIRA_UDF_ERR_DESCRIPTOR, "code form is not PACKAGE, BUNDLE or VALUE", -1);
   if (s->descriptor_version > 0)
-    return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "descriptor_version is newer than 0, the newest read here", -1);
+    return fail(h, e, KOMIRA_UDF_ERR_DESCRIPTOR, "descriptor_version is newer than 0, the newest read here", -1);
   if (s->descriptor_len != 0)
-    return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "descriptor version 0 is empty; these bytes are not canonical", -1);
+    return fail(h, e, KOMIRA_UDF_ERR_DESCRIPTOR, "descriptor version 0 is empty; these bytes are not canonical", -1);
   if ((uint32_t)s->shape != fx->shape)
-    return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "the fixture does not have this shape", -1);
+    return fail(h, e, KOMIRA_UDF_ERR_UNSUPPORTED, "the fixture does not have this shape", -1);
   int result_ok = fx->result[0] == 't' ? struct_is(s->result, fx->result + 1) : leaf_is(s->result, fx->result[0]);
   int state_ok = fx->state[0] == 0 ? s->state == NULL : leaf_is(s->state, fx->state[0]);
   int args_ok = fx->args[0] == '*' ? row_args_ok(s->args) : struct_is(s->args, fx->args);
   if (!args_ok || !result_ok || !state_ok)
-    return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "the declared types are not the fixture's signature", -1);
+    return fail(h, e, KOMIRA_UDF_ERR_UNSUPPORTED, "the declared types are not the fixture's signature", -1);
   *out = fx;
   return KOMIRA_UDF_OK;
 }
+
+static int32_t describe_variant(const komira_udf_rt* rt, komira_udf_capabilities* c);
 
 static int32_t echo_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   if (c == NULL || c->struct_size < sizeof(komira_udf_capabilities)) return KOMIRA_UDF_ERR_ABI;
@@ -397,23 +605,22 @@ static int32_t echo_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   c->features = KOMIRA_UDF_FEATURE_MEMORY_REPORT;
   c->udf_class = KOMIRA_UDF_CLASS_MANAGED;
   c->global_lock = rt->global_lock;
+  if (rt->variant != 0) return describe_variant(rt, c);
   return KOMIRA_UDF_OK;
 }
 
 static int32_t echo_validate(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_error* e) {
-  (void)rt;
   const struct fixture* fx = NULL;
-  return check_spec(s, e, &fx);
+  return check_spec(rt->host, s, e, &fx);
 }
 
 static int32_t echo_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_udf** out,
                          komira_udf_error* e) {
-  (void)rt;
   const struct fixture* fx = NULL;
-  int32_t rc = check_spec(s, e, &fx);
+  int32_t rc = check_spec(rt->host, s, e, &fx);
   if (rc != KOMIRA_UDF_OK) return rc;
   komira_udf_udf* u = calloc(1, sizeof(*u));
-  if (u == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory", -1);
+  if (u == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory", -1);
   u->fx = fx;
   if (fx->shape == KOMIRA_UDF_SHAPE_ROW) {
     for (int64_t i = 0; i < s->args->n_children; i++) {
@@ -422,6 +629,8 @@ static int32_t echo_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf
       if (u->fields[i] == NULL) break;
     }
   }
+  /* the bug: a schema the host only lends, released */
+  if (fx->id == F_RELEASE_SCHEMA && s->args->release != NULL) s->args->release((struct ArrowSchema*)s->args);
   *out = u;
   return KOMIRA_UDF_OK;
 }
@@ -434,7 +643,7 @@ static void echo_unload(komira_udf_udf* u) {
 static int32_t echo_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_context** out,
                                  komira_udf_error* e) {
   komira_udf_context* c = malloc(sizeof(*c));
-  if (c == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_context: out of memory", -1);
+  if (c == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_context: out of memory", -1);
   c->rt = rt;
   c->slot = slot;
   *out = c;
@@ -446,7 +655,7 @@ static void echo_close_context(komira_udf_context* c) { free(c); }
 static int32_t echo_open_instance(komira_udf_context* c, komira_udf_udf* u, komira_udf_instance** out,
                                   komira_udf_error* e) {
   komira_udf_instance* i = malloc(sizeof(*i));
-  if (i == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_instance: out of memory", -1);
+  if (i == NULL) return fail(c->rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_instance: out of memory", -1);
   i->ctx = c;
   i->udf = u;
   i->fx = u->fx;
@@ -464,530 +673,74 @@ static int64_t echo_memory_report(komira_udf_context* c) {
 
 static void echo_shutdown(komira_udf_rt* rt) { free(rt); }
 
-/* ---- call_batch ---------------------------------------------------------- */
-
 static int32_t start_call(const komira_udf_rt* rt, const komira_udf_call* c, komira_udf_error* e) {
   if (c == NULL || c->struct_size < sizeof(komira_udf_call))
-    return fail(e, KOMIRA_UDF_ERR_ABI, "call struct_size is below this runtime's", -1);
-  if (cancelled(c)) return fail(e, KOMIRA_UDF_ERR_CANCELLED, "cancelled before the batch", -1);
-  if (past_deadline(rt, c)) return fail(e, KOMIRA_UDF_ERR_DEADLINE, "the deadline passed before the batch", -1);
+    return fail(rt->host, e, KOMIRA_UDF_ERR_ABI, "call struct_size is below this runtime's", -1);
+  if (cancelled(c)) return fail(rt->host, e, KOMIRA_UDF_ERR_CANCELLED, "cancelled before the batch", -1);
+  if (past_deadline(rt, c))
+    return fail(rt->host, e, KOMIRA_UDF_ERR_DEADLINE, "the deadline passed before the batch", -1);
   return KOMIRA_UDF_OK;
 }
 
-/* ---- ROW: a row view over the read set ---------------------------------- */
+#include "echo_calls.inc"
+#include "echo_frames.inc"
 
-/* One row's view: reads a field by name from the argument struct's children,
- * which are the read set in order. A name outside the read set records the
- * violation (the first one) and reads as 0; call_batch checks the record
- * before it returns, so user code that catches the error still fails the
- * batch. */
-struct row_view {
-  const struct komira_udf_udf* udf;
-  const struct ArrowArray* args;
-  int64_t row;
-  const char* violation; /* the first undeclared name read, or NULL */
-  int64_t violation_row;
-};
-
-static int64_t row_get(struct row_view* v, const char* name) {
-  for (int64_t i = 0; i < v->udf->n_fields; i++)
-    if (strcmp(v->udf->fields[i], name) == 0) return i64_at(v->args->children[i], v->row);
-  if (v->violation == NULL) {
-    v->violation = name;
-    v->violation_row = v->row;
-  }
-  return 0;
-}
-
-static int32_t row_violation(const struct row_view* v, komira_udf_error* e) {
-  char msg[256];
-  size_t at = (size_t)snprintf(msg, sizeof(msg), "field '%s' is not in the read set {", v->violation);
-  for (int64_t i = 0; i < v->udf->n_fields && at < sizeof(msg); i++)
-    at += (size_t)snprintf(msg + at, sizeof(msg) - at, "%s%s", i ? ", " : "", v->udf->fields[i]);
-  if (at < sizeof(msg)) snprintf(msg + at, sizeof(msg) - at, "}; add it to columns=[...]");
-  return fail(e, KOMIRA_UDF_ERR_FIELD_NOT_DECLARED, msg, v->violation_row);
-}
-
-/* pick and pick_caught over every row: `o` gets one int64 per row. */
-static int32_t row_call(komira_udf_instance* inst, const struct ArrowArray* in, struct ArrowArray* o,
-                        komira_udf_error* e) {
-  uint8_t* valid;
-  void* d;
-  if (!make_col(o, in->length, &valid, &d))
-    return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
-  struct row_view v = {inst->udf, in, 0, NULL, -1};
-  for (int64_t r = 0; r < in->length; r++) {
-    v.row = r;
-    const char* violation_before = v.violation;
-    int64_t y = row_get(&v, "flag") ? row_get(&v, "a") : row_get(&v, "b");
-    if (v.violation != violation_before && inst->fx->id == F_PICK) {
-      /* The fixture lets the error propagate: the batch fails here. */
-      release_array(o);
-      return row_violation(&v, e);
-    }
-    ((int64_t*)d)[r] = y; /* pick_caught: the caught error leaves 0 */
-  }
-  if (v.violation != NULL && !BROKEN) { /* BROKEN (7) */
-    release_array(o);
-    return row_violation(&v, e);
-  }
-  return KOMIRA_UDF_OK;
-}
-
-/* The column fixtures. `in` is the argument struct; `o` the result. */
-static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, const struct ArrowArray* in,
-                      struct ArrowArray* o, komira_udf_error* e) {
-  const struct fixture* fx = inst->fx;
-  const komira_udf_rt* rt = inst->ctx->rt;
-  int64_t n = in->length;
-  const struct ArrowArray* x = in->n_children > 0 ? in->children[0] : NULL;
-  const struct ArrowArray* y = in->n_children > 1 ? in->children[1] : NULL;
-  int64_t rows = (fx->id == F_SHORT_BY_ONE && n > 0) ? n - 1 : fx->id == F_LONG_BY_ONE ? n + 1 : n;
-  if (fx->id == F_DOUBLE_STRICT || fx->id == F_ADD_STRICT)
-    for (int64_t r = 0; r < n; r++)
-      if (!is_valid(x, r) || (y != NULL && !is_valid(y, r)))
-        return fail(e, KOMIRA_UDF_ERR_RAISED, "a strict fixture got a null argument", r);
-  if (fx->id == F_RAISE_ON_ROW_3 && n > 3) return fail(e, KOMIRA_UDF_ERR_RAISED, "raise_on_row_3: row 3", 3);
-  uint8_t* v;
-  void* d;
-  if (!make_col(o, rows, &v, &d)) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
-  int64_t* di = (int64_t*)d;
-  for (int64_t r = 0; r < rows; r++) {
-    if (fx->id == F_SLOW_LOOP) {
-      if (cancelled(call)) {
-        release_array(o);
-        return fail(e, KOMIRA_UDF_ERR_CANCELLED, "slow_loop: cancelled", r);
-      }
-      if (past_deadline(rt, call)) {
-        release_array(o);
-        return fail(e, KOMIRA_UDF_ERR_DEADLINE, "slow_loop: deadline passed", r);
-      }
-      /* Each row waits SLOW_ROW_NS of the host's clock, or until the flag
-       * is set; a cancel set during the call is seen at the next row. */
-      int64_t until = rt->host->now_ns(rt->host->host_data) + SLOW_ROW_NS;
-      while (rt->host->now_ns(rt->host->host_data) < until && !cancelled(call)) {
-      }
-    }
-    di[r] = 0;
-    if (r >= n) continue; /* long_by_one's extra row */
-    if (fx->id == F_CONST7) {
-      di[r] = 7;
-      continue;
-    }
-    if (fx->id == F_NULL_OUT || !is_valid(x, r)) {
-      set_null(o, v, r);
-      continue;
-    }
-    switch (fx->id) {
-      case F_FAHRENHEIT: {
-        double y = f64_at(x, r) * 1.8 + 32.0;
-        if (BROKEN)
-          di[r] = (int64_t)y; /* BROKEN (2) */
-        else
-          ((double*)d)[r] = y;
-        break;
-      }
-      case F_DOUBLE:
-        di[r] = 2 * i64_at(x, r) + (BROKEN ? inst->calls : 0); /* BROKEN (6) */
-        break;
-      case F_DOUBLE_STRICT:
-        di[r] = 2 * i64_at(x, r);
-        break;
-      case F_ADD_STRICT:
-        di[r] = i64_at(x, r) + i64_at(y, r);
-        break;
-      default: /* identity, short_by_one, bad_layout, raise_on_row_3 below row 4, slow_loop */
-        di[r] = i64_at(x, r);
-    }
-  }
-  if (fx->id == F_BAD_LAYOUT) o->n_buffers = 1;
-  inst->calls++;
-  return KOMIRA_UDF_OK;
-}
-
-static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call* call, struct ArrowDeviceArray* args,
-                               struct ArrowDeviceArray* out, komira_udf_error* e) {
-  if (inst->fx->id == F_ARGS_KEPT) { /* the bug: args read in place, never moved */
-    out->array.release = NULL;
-    int32_t kept = scalar(inst, call, &args->array, &out->array, e);
-    if (kept == KOMIRA_UDF_OK) set_cpu(out);
-    return kept;
-  }
-  struct ArrowDeviceArray mine = *args; /* moved in, whatever the status */
-  args->array.release = NULL;
-  out->array.release = NULL;
-  int32_t rc = start_call(inst->ctx->rt, call, e);
-  if (rc == KOMIRA_UDF_OK && mine.device_type != ARROW_DEVICE_CPU)
-    rc = fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "only CPU arrays are read here", -1);
-  if (rc == KOMIRA_UDF_OK &&
-      (inst->fx->shape & (KOMIRA_UDF_SHAPE_SCALAR | KOMIRA_UDF_SHAPE_ROW | KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN)) == 0)
-    rc = fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "call_batch on a fixture of another shape", -1);
-  if (rc == KOMIRA_UDF_OK && inst->fx->shape == KOMIRA_UDF_SHAPE_ROW)
-    rc = row_call(inst, &mine.array, &out->array, e);
-  else if (rc == KOMIRA_UDF_OK)
-    rc = scalar(inst, call, &mine.array, &out->array, e);
-  if (rc == KOMIRA_UDF_OK) set_cpu(out);
-  if (rc == KOMIRA_UDF_OK) {
-    switch (inst->fx->id) { /* the runtime bugs of the fixtures above */
-      case F_OUT_SET_ON_ERROR:
-        rc = fail(e, KOMIRA_UDF_ERR_RAISED, "out_set_on_error: raised with out still set", -1);
-        break;
-      case F_OK_WITHOUT_OUTPUT:
-        release_array(&out->array);
-        break;
-      case F_DEVICE_NOT_CPU:
-        out->device_type = ARROW_DEVICE_CUDA;
-        break;
-      case F_NULL_COUNT_LIES:
-        out->array.null_count += 1;
-        break;
-      default:
-        break;
-    }
-  }
-  if (!(BROKEN && rc == KOMIRA_UDF_ERR_RAISED)) release_array(&mine.array); /* BROKEN (1) */
-  return rc;
-}
-
-/* ---- mergeable aggregate: sum ------------------------------------------ */
-
-static int32_t echo_agg_open(komira_udf_instance* inst, komira_udf_groups** out, komira_udf_error* e) {
-  if (inst->fx->shape != KOMIRA_UDF_SHAPE_AGG_MERGEABLE)
-    return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "agg_open on a fixture of another shape", -1);
-  komira_udf_groups* g = calloc(1, sizeof(*g));
-  if (g == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "agg_open: out of memory", -1);
-  g->fx = inst->fx;
-  *out = g;
-  return KOMIRA_UDF_OK;
-}
-
-static int grow(komira_udf_groups* g, uint32_t n) {
-  if (n > g->cap) {
-    uint32_t cap = g->cap ? g->cap : 16;
-    while (cap < n) cap *= 2;
-    int64_t* st = realloc(g->st, (size_t)cap * sizeof(int64_t));
-    if (st == NULL) return 0;
-    memset(st + g->cap, 0, (size_t)(cap - g->cap) * sizeof(int64_t));
-    g->st = st;
-    g->cap = cap;
-  }
-  if (n > g->n) g->n = n;
-  return 1;
-}
-
-/* agg_update (`merge` 0: values are the argument struct's first child) and
- * agg_merge (`merge` 1: values are the state column). */
-static int32_t fold(komira_udf_groups* g, const komira_udf_call* call, struct ArrowDeviceArray* values,
-                    struct ArrowDeviceArray* gids, uint32_t n_groups, komira_udf_error* e, int merge) {
-  struct ArrowDeviceArray v = *values; /* both moved in */
-  values->array.release = NULL;
-  struct ArrowDeviceArray ids = *gids;
-  gids->array.release = NULL;
-  int32_t rc = KOMIRA_UDF_OK;
-  const struct ArrowArray* x = merge ? &v.array : (v.array.n_children > 0 ? v.array.children[0] : NULL);
-  if (cancelled(call))
-    rc = fail(e, KOMIRA_UDF_ERR_CANCELLED, "cancelled before the batch", -1);
-  else if (x == NULL || ids.array.length != v.array.length)
-    rc = fail(e, KOMIRA_UDF_ERR_INTERNAL, "group ids and values differ in length", -1);
-  else if (!grow(g, n_groups))
-    rc = fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "agg: out of memory", -1);
-  for (int64_t r = 0; rc == KOMIRA_UDF_OK && r < v.array.length; r++) {
-    int32_t gid = i32_at(&ids.array, r);
-    if (gid < 0 || (uint32_t)gid >= n_groups) {
-      rc = fail(e, KOMIRA_UDF_ERR_INTERNAL, "a group id is not below n_groups", r);
-      break;
-    }
-    if (!is_valid(x, r)) continue;
-    if (merge && BROKEN)
-      g->st[gid] = i64_at(x, r); /* BROKEN (4) */
-    else
-      g->st[gid] += i64_at(x, r);
-  }
-  release_array(&v.array);
-  release_array(&ids.array);
-  return rc;
-}
-
-static int32_t echo_agg_update(komira_udf_groups* g, const komira_udf_call* c, struct ArrowDeviceArray* args,
-                               struct ArrowDeviceArray* gids, uint32_t n, komira_udf_error* e) {
-  if (g->fx->id == F_SUM_ARGS_KEPT) { /* the bug: args read in place, never moved */
-    struct ArrowDeviceArray view = *args;
-    view.array.release = NULL; /* fold's release of its copy is then a no-op */
-    return fold(g, c, &view, gids, n, e, 0);
-  }
-  return fold(g, c, args, gids, n, e, 0);
-}
-
-static int32_t echo_agg_merge(komira_udf_groups* g, const komira_udf_call* c, struct ArrowDeviceArray* states,
-                              struct ArrowDeviceArray* gids, uint32_t n, komira_udf_error* e) {
-  return fold(g, c, states, gids, n, e, 1);
-}
-
-/* Emit the first `n` groups' sums and forget them: the groups after them
- * move down by `n` (the design does not say whether ids shift; here they do). */
-static int32_t emit(komira_udf_groups* g, uint32_t n, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  out->array.release = NULL;
-  if (n > g->n) return fail(e, KOMIRA_UDF_ERR_INTERNAL, "emit_first_n is above the group count", -1);
-  uint8_t* v;
-  void* d;
-  if (!make_col(&out->array, n, &v, &d)) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "agg: out of memory", -1);
-  if (n > 0) memcpy(d, g->st, (size_t)n * sizeof(int64_t));
-  memmove(g->st, g->st + n, (size_t)(g->n - n) * sizeof(int64_t));
-  g->n -= n;
-  set_cpu(out);
-  return KOMIRA_UDF_OK;
-}
-
-static int32_t echo_agg_state(komira_udf_groups* g, uint32_t n, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  return emit(g, n, out, e);
-}
-
-static int32_t echo_agg_finish(komira_udf_groups* g, uint32_t n, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  return emit(g, n, out, e);
-}
-
-static void echo_agg_close(komira_udf_groups* g) {
-  free(g->st);
-  free(g);
-}
-
-/* ---- frames: running_sum, group_max (plain aggregate), empty_table (step) */
-
-static int32_t echo_frame_open(komira_udf_instance* inst, const komira_udf_call* call,
-                               struct ArrowDeviceArrayStream* in, komira_udf_frame** out, komira_udf_error* e) {
-  struct ArrowDeviceArrayStream mine = *in; /* moved in, whatever the status */
-  in->release = NULL;
-  int32_t rc = KOMIRA_UDF_OK;
-  if ((inst->fx->shape & (KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME | KOMIRA_UDF_SHAPE_AGG_PLAIN | KOMIRA_UDF_SHAPE_STEP)) == 0)
-    rc = fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "frame_open on a fixture of another shape", -1);
-  if (rc == KOMIRA_UDF_OK) rc = start_call(inst->ctx->rt, call, e);
-  komira_udf_frame* fr = NULL;
-  if (rc == KOMIRA_UDF_OK && (fr = calloc(1, sizeof(*fr))) == NULL)
-    rc = fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "frame_open: out of memory", -1);
-  if (rc != KOMIRA_UDF_OK) {
-    if (mine.release != NULL) mine.release(&mine);
-    return rc;
-  }
-  fr->inst = inst;
-  fr->in = mine;
-  fr->group = -1;
-  *out = fr;
-  return KOMIRA_UDF_OK;
-}
-
-/* The next input batch into *b; 0 with b->array.release == NULL at the end. */
-static int pull(komira_udf_frame* fr, struct ArrowDeviceArray* b) {
-  memset(b, 0, sizeof(*b));
-  return fr->in.get_next(&fr->in, b);
-}
-
-static int32_t next_running_sum(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  struct ArrowDeviceArray b;
-  if (pull(fr, &b) != 0) return fail(e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
-  if (b.array.release == NULL) {
-    fr->done = 1;
-    return KOMIRA_UDF_OK;
-  }
-  int64_t n = b.array.length;
-  const struct ArrowArray* x = b.array.n_children > 0 ? b.array.children[0] : NULL;
-  uint8_t* v;
-  void* d;
-  if (x == NULL || !make_struct(&out->array, n, 1) || !make_col(out->array.children[0], n, &v, &d)) {
-    release_array(&out->array);
-    release_array(&b.array);
-    return fail(e, KOMIRA_UDF_ERR_INTERNAL, "running_sum: no input column, or out of memory", -1);
-  }
-  for (int64_t r = 0; r < n; r++) {
-    if (!is_valid(x, r)) {
-      ((int64_t*)d)[r] = 0;
-      set_null(out->array.children[0], v, r);
-      continue;
-    }
-    fr->running += i64_at(x, r);
-    ((int64_t*)d)[r] = fr->running;
-  }
-  release_array(&b.array);
-  set_cpu(out);
-  return KOMIRA_UDF_OK;
-}
-
-/* Pulls until at least one group is complete (or the input ends), and
- * returns the completed groups' maxima, one row each, in ordinal order. */
-static int32_t next_group_max(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  int64_t* done = NULL;
-  int64_t k = 0, cap = 0;
-  while (k == 0 && !fr->done) {
-    struct ArrowDeviceArray b;
-    if (pull(fr, &b) != 0) {
-      free(done);
-      return fail(e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
-    }
-    int64_t n = b.array.release == NULL ? 0 : b.array.length;
-    if (b.array.release == NULL) fr->done = 1;
-    if (n > 0 && b.array.n_children < 2) {
-      release_array(&b.array);
-      free(done);
-      return fail(e, KOMIRA_UDF_ERR_INTERNAL, "group_max: a batch without its group and value columns", -1);
-    }
-    for (int64_t r = 0; r <= n; r++) {
-      int at_end = r == n;
-      if (at_end && !fr->done) break;
-      int64_t gid = at_end ? -1 : i64_at(b.array.children[0], r);
-      if (!at_end && gid == fr->group) {
-        int64_t val = i64_at(b.array.children[1], r);
-        if (val > fr->max) fr->max = val;
-        continue;
-      }
-      if (fr->group >= 0) {
-        if (k == cap) {
-          cap = cap ? cap * 2 : 16;
-          int64_t* grown = realloc(done, (size_t)cap * sizeof(int64_t));
-          if (grown == NULL) {
-            free(done);
-            release_array(&b.array);
-            return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "group_max: out of memory", -1);
-          }
-          done = grown;
-        }
-        done[k++] = fr->max;
-      }
-      fr->group = gid;
-      if (!at_end) fr->max = i64_at(b.array.children[1], r);
-    }
-    release_array(&b.array);
-  }
-  if (k == 0) {
-    free(done);
-    return KOMIRA_UDF_OK; /* the end */
-  }
-  uint8_t* v;
-  void* d;
-  if (!make_col(&out->array, k, &v, &d)) {
-    free(done);
-    return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "group_max: out of memory", -1);
-  }
-  memcpy(d, done, (size_t)k * sizeof(int64_t));
-  free(done);
-  set_cpu(out);
-  return KOMIRA_UDF_OK;
-}
-
-/* A step: one length-1 batch of literal arguments in; a table with no
- * columns and as many rows as the first literal says, out. */
-static int32_t next_step(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  struct ArrowDeviceArray b;
-  if (pull(fr, &b) != 0) return fail(e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
-  fr->done = 1;
-  if (b.array.release == NULL) return fail(e, KOMIRA_UDF_ERR_INTERNAL, "a step got no literal batch", -1);
-  int64_t rows = b.array.length == 1 && b.array.n_children == 1 ? i64_at(b.array.children[0], 0) : -1;
-  release_array(&b.array);
-  if (rows < 0) return fail(e, KOMIRA_UDF_ERR_INTERNAL, "a step's literal batch is not one int64 row", -1);
-  if (!make_struct(&out->array, rows, 0)) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "step: out of memory", -1);
-  set_cpu(out);
-  return KOMIRA_UDF_OK;
-}
-
-/* yield_two_then_raise: the input batch is the output (a runtime may return
- * its input buffers), twice; then an error, with the rest unread. */
-static int32_t next_yield_two(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  if (fr->running == 2) {
-    fr->done = 1;
-    return fail(e, KOMIRA_UDF_ERR_RAISED, "yield_two_then_raise: raised after two outputs", -1);
-  }
-  if (pull(fr, out) != 0) return fail(e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
-  if (out->array.release == NULL) fr->done = 1;
-  fr->running++;
-  set_cpu(out);
-  return KOMIRA_UDF_OK;
-}
-
-/* endless: a one-row table on every call; it never ends. */
-static int32_t next_endless(struct ArrowDeviceArray* out, komira_udf_error* e) {
-  uint8_t* v;
-  void* d;
-  if (!make_struct(&out->array, 1, 1) || !make_col(out->array.children[0], 1, &v, &d)) {
-    release_array(&out->array);
-    return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "endless: out of memory", -1);
-  }
-  ((int64_t*)d)[0] = 0;
-  set_cpu(out);
-  return KOMIRA_UDF_OK;
-}
-
-static int32_t echo_frame_next(komira_udf_frame* fr, const komira_udf_call* call, struct ArrowDeviceArray* out,
-                               komira_udf_error* e) {
-  out->array.release = NULL;
-  if (cancelled(call)) return fail(e, KOMIRA_UDF_ERR_CANCELLED, "cancelled between batches", -1);
-  if (fr->done) return KOMIRA_UDF_OK; /* the end: out->array.release stays NULL */
-  switch (fr->inst->fx->id) {
-    case F_RUNNING_SUM:
-      return next_running_sum(fr, out, e);
-    case F_GROUP_MAX:
-      return next_group_max(fr, out, e);
-    case F_YIELD_TWO_THEN_RAISE:
-      return next_yield_two(fr, out, e);
-    case F_ENDLESS:
-      return next_endless(out, e);
-    default:
-      return next_step(fr, out, e);
-  }
-}
-
-static void echo_frame_close(komira_udf_frame* fr) {
-  if (fr->in.release != NULL) fr->in.release(&fr->in);
-  free(fr);
-}
+/* Every entry after abi_minor, in the header's order, but memory_report. */
+#define ECHO_ENTRIES                                                                                     \
+  echo_describe, echo_validate, echo_load, echo_unload, echo_open_context, echo_close_context,         \
+      echo_open_instance, echo_close_instance, echo_call_batch, echo_frame_open, echo_frame_next,      \
+      echo_frame_close, echo_agg_open, echo_agg_update, echo_agg_merge, echo_agg_state, echo_agg_finish, \
+      echo_agg_close, echo_shutdown
 
 static const komira_udf_runtime TABLE = {
-    sizeof(komira_udf_runtime),
-    KOMIRA_UDF_ABI_MAJOR,
-    KOMIRA_UDF_ABI_MINOR,
-    echo_describe,
-    echo_validate,
-    echo_load,
-    echo_unload,
-    echo_open_context,
-    echo_close_context,
-    echo_open_instance,
-    echo_close_instance,
-    echo_call_batch,
-    echo_frame_open,
-    echo_frame_next,
-    echo_frame_close,
-    echo_agg_open,
-    echo_agg_update,
-    echo_agg_merge,
-    echo_agg_state,
-    echo_agg_finish,
-    echo_agg_close,
-    echo_shutdown,
-    echo_memory_report,
+    sizeof(komira_udf_runtime), KOMIRA_UDF_ABI_MAJOR, KOMIRA_UDF_ABI_MINOR, ECHO_ENTRIES, echo_memory_report,
 };
 
-static const komira_udf_runtime* init_rt(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e,
-                                         uint32_t global_lock) {
-  if (host == NULL || host->struct_size < sizeof(komira_udf_host) || host->abi_major != KOMIRA_UDF_ABI_MAJOR) {
-    fail(e, KOMIRA_UDF_ERR_ABI, "this runtime speaks ABI major 1", -1);
+/* A runtime on `host`, or NULL with *e filled. `any_major`: accept a host of
+ * any ABI major (a variant's bug). */
+static komira_udf_rt* new_rt(const komira_udf_host* host, komira_udf_error* e, uint32_t global_lock,
+                             int any_major) {
+  if (host == NULL || host->struct_size < sizeof(komira_udf_host)) {
+    fail(NULL, e, KOMIRA_UDF_ERR_ABI, "this runtime needs a komira_udf_host of ABI 1.0", -1);
     return NULL;
   }
-  komira_udf_rt* r = malloc(sizeof(*r));
+  if (host->abi_major != KOMIRA_UDF_ABI_MAJOR && !any_major) {
+    fail(host, e, KOMIRA_UDF_ERR_ABI, "this runtime speaks ABI major 1", -1);
+    return NULL;
+  }
+  komira_udf_rt* r = calloc(1, sizeof(*r));
   if (r == NULL) {
-    fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "init: out of memory", -1);
+    fail(host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "init: out of memory", -1);
     return NULL;
   }
   r->host = host;
   r->global_lock = global_lock;
-  *rt = r;
-  return &TABLE;
+  return r;
 }
 
 const komira_udf_runtime* ECHO_INIT(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e) {
-  return init_rt(host, rt, e, 0);
+  komira_udf_rt* r = new_rt(host, e, 0, 0);
+  if (r == NULL) return NULL;
+  *rt = r;
+  return &TABLE;
 }
 
 #ifdef ECHO_INIT_GLOBAL_LOCK
 const komira_udf_runtime* ECHO_INIT_GLOBAL_LOCK(const komira_udf_host* host, komira_udf_rt** rt,
                                                 komira_udf_error* e) {
-  return init_rt(host, rt, e, 1);
+  komira_udf_rt* r = new_rt(host, e, 1, 0);
+  if (r == NULL) return NULL;
+  *rt = r;
+  return &TABLE;
+}
+#endif
+
+#ifdef ECHO_INIT_VARIANT
+#include "echo_variants.inc"
+#else
+static int32_t describe_variant(const komira_udf_rt* rt, komira_udf_capabilities* c) {
+  (void)rt;
+  (void)c;
+  return KOMIRA_UDF_OK;
 }
 #endif

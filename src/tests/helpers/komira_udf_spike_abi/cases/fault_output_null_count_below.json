@@ -1,0 +1,11 @@
+{
+ "name": "fault_output_null_count_below",
+ "defect": "an output with a null_count below -1 is read (no import validation, design 4.4)",
+ "run": "call_batch",
+ "entry": "leaf_null_count_below",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, null, 3]}]},
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT"}
+}

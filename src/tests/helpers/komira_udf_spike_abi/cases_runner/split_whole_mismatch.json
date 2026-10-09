@@ -1,0 +1,13 @@
+{
+ "name": "split_whole_mismatch",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "split",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 4, "columns": [{"type": "int64", "values": [1, 2, 3, 4]}]},
+ "split_at": 2,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1, 2, 3, 5]}},
+ "runner_fails_with": "one instance, one batch"
+}

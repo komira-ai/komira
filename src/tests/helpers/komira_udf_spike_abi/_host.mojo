@@ -23,7 +23,10 @@
 #     load; a runtime must not release them, and _release_schema counts one
 #     that does.
 #   - the `in` stream of frame_open: moved to the runtime; _release_stream
-#     counts its release.
+#     counts its release. One frame_open did not move is still the host's,
+#     and runtime.mojo releases it once (release_stream).
+#   - _HostData.cancel_on_clock: the in-flight call's cancel flag, an arena
+#     block, armed only between _begin and _end of that call.
 #   - a runtime's `out` arrays: the runtime's until import_* has validated and
 #     copied them, then released here once through their own callback.
 #   - komira_udf_error: allocated per call here; its strings are the
@@ -73,9 +76,9 @@ struct _HostData:
     var streams_released: Int
     var reserved_bytes: Int
     var log_lines: Int
-    var clock_reads: Int
-    """now_ns calls, counted in C atomically (native/cancel_timer.c): the
-    cancel timer's thread reads it. Never read or written here."""
+    var cancel_on_clock: Void
+    """The cancel flag of the call in flight when it was started with
+    cancel_during_call, else NULL: now_ns sets it (arm_cancel_on_clock)."""
 
 
 struct _ArrRec:
@@ -151,14 +154,23 @@ def _host_mem_release(host_data: Void, bytes: Int64) abi("C"):
     _hd(host_data)[].reserved_bytes -= Int(bytes)
 
 
-def clock_reads_of(hd: Word) -> Word:
-    """The address of `hd`'s now_ns call count, for the cancel timer."""
-    # SAFETY: `hd` is a _HostData block make_host allocated, alive with the arena.
-    return Word(UnsafePointer(to=_hd(hd.p)[].clock_reads).bitcast[NoneType]())
+def arm_cancel_on_clock(hd: Word, flag: Word):
+    """From now until disarm_cancel_on_clock, the host's now_ns sets `flag`
+    (a call's cancel flag, an arena block) each time a runtime reads the
+    clock: a cancel set from inside the call, at a point the runtime's own
+    clock read fixes."""
+    _hd(hd.p)[].cancel_on_clock = flag.p
+
+
+def disarm_cancel_on_clock(hd: Word):
+    _hd(hd.p)[].cancel_on_clock = null_void()
 
 
 def _host_now_ns(host_data: Void) abi("C") -> Int64:
-    external_call["komira_udf_spike_clock_read", NoneType](clock_reads_of(Word(host_data)).p)
+    var flag = _hd(host_data)[].cancel_on_clock
+    if not is_null(flag):
+        # SAFETY: the armed flag is the in-flight call's arena block.
+        external_call["komira_udf_spike_cancel_store", NoneType](flag)
     return Int64(perf_counter_ns())
 
 
@@ -198,13 +210,15 @@ struct Counts(Copyable, Movable):
     var schemas_released: Int
     var streams_exported: Int
     var streams_released: Int
+    var reserved_bytes: Int
+    """Bytes a runtime holds through mem_reserve, net of mem_release."""
 
 
 def counts(hd: Word) -> Counts:
     var d = _hd(hd.p)
     return Counts(
         d[].exported, d[].released, d[].double_released, d[].schemas_released,
-        d[].streams_exported, d[].streams_released,
+        d[].streams_exported, d[].streams_released, d[].reserved_bytes,
     )
 
 
@@ -457,6 +471,14 @@ def stream_moved(s: Word) -> Bool:
     return is_null(s.p.bitcast[CArrowDeviceArrayStream]()[].release)
 
 
+def release_stream(s: Word):
+    """Release stream `s` through its own callback, if it is still set (a
+    stream frame_open did not move is still the host's)."""
+    var st = s.p.bitcast[CArrowDeviceArrayStream]()
+    if not is_null(st[].release):
+        as_release(st[].release)(s.p)
+
+
 def pulls_of(rec: Word) -> Int:
     """get_next calls so far on the stream of `rec` (from stream_record)."""
     return rec.p.bitcast[_StreamRec]()[].pulls
@@ -500,7 +522,7 @@ def _import_leaf(arr: Void, want: ColumnType, what: String) raises -> Column:
     var n = Int(a[].length)
     var off = Int(a[].offset)
     var nc = Int(a[].null_count)
-    if n < 0 or off < 0 or nc < -1 or nc > n:
+    if n < 0 or off < 0 or nc < -1:
         raise _fault(what + ": length " + String(n) + ", offset " + String(off) + ", null_count " + String(nc))
     if is_null(a[].buffers):
         raise _fault(what + ": buffers is NULL")
@@ -509,8 +531,6 @@ def _import_leaf(arr: Void, want: ColumnType, what: String) raises -> Column:
     var data = bufs[1]
     if n > 0 and is_null(data):
         raise _fault(what + ": data buffer is NULL")
-    if is_null(validity) and nc > 0:
-        raise _fault(what + ": null_count " + String(nc) + " without a validity buffer")
     var col = Column(want.type_id)
     var w = type_width(want.type_id)
     for i in range(n):
@@ -522,6 +542,8 @@ def _import_leaf(arr: Void, want: ColumnType, what: String) raises -> Column:
         else:
             col.bits.append((data.bitcast[Int64]() + at)[])
             col.valid.append(True)
+    # Also refuses a null_count above the length, and one above 0 with no
+    # validity buffer: the bitmap counts at most `n` nulls, and none without one.
     if nc >= 0 and col.null_count() != nc:
         raise _fault(what + ": null_count " + String(nc) + ", validity says " + String(col.null_count()))
     return col^
@@ -534,27 +556,51 @@ def import_column(d: Word, want: ColumnType) raises -> Column:
 
 
 def import_struct(d: Word, want: List[ColumnType]) raises -> Batch:
-    """Validate and copy the struct batch a runtime returned in `d`."""
+    """Validate and copy the struct batch a runtime returned in `d` (run_frame
+    checked it is not released: that is the end of a frame). The struct may
+    sit at an offset into its children (Arrow: struct row i is child row
+    offset + i, each child longer by at least that much); a table has no null
+    rows."""
     check_device(d.p)
     var a = d.p.bitcast[CArrowArray]()
-    if is_null(a[].release):
-        raise _fault("result is released")
-    if a[].n_buffers != 1 or Int(a[].n_children) != len(want) or a[].offset != 0:
+    if a[].n_buffers != 1 or Int(a[].n_children) != len(want):
         raise _fault(
             "struct layout: n_buffers " + String(a[].n_buffers) + ", n_children "
-            + String(a[].n_children) + " (want " + String(len(want)) + "), offset " + String(a[].offset)
+            + String(a[].n_children) + " (want " + String(len(want)) + ")"
         )
-    if a[].null_count > 0:
-        raise _fault("struct result has null rows")
-    var out = Batch(Int(a[].length))
+    var n = Int(a[].length)
+    var off = Int(a[].offset)
+    if n < 0 or off < 0:
+        raise _fault("struct: length " + String(n) + ", offset " + String(off))
+    if is_null(a[].buffers):
+        raise _fault("struct: buffers is NULL")
+    var validity = a[].buffers.bitcast[Void]()[0]
+    var nulls = 0
+    if not is_null(validity):
+        for i in range(n):
+            var at = off + i
+            if (validity.bitcast[UInt8]()[at >> 3] >> UInt8(at & 7)) & 1 == 0:
+                nulls += 1
+    if a[].null_count >= 0 and Int(a[].null_count) != nulls:
+        raise _fault("struct: null_count " + String(a[].null_count) + ", validity says " + String(nulls))
+    if nulls > 0:
+        raise _fault("struct result has " + String(nulls) + " null rows")
+    var out = Batch(n)
     for i in range(len(want)):
         var c = (a[].children.bitcast[Void]() + i)[]
         if is_null(c):
             raise _fault("struct child " + String(i) + " is NULL")
         var col = _import_leaf(c, want[i], "child " + String(i))
-        if len(col) != out.length:
-            raise _fault("child " + String(i) + " has " + String(len(col)) + " rows, the struct " + String(out.length))
-        out.columns.append(col^)
+        if len(col) < off + n:
+            raise _fault(
+                "child " + String(i) + " has " + String(len(col)) + " rows, the struct needs "
+                + String(off + n)
+            )
+        var rows = Column(col.type_id)
+        for r in range(off, off + n):
+            rows.bits.append(col.bits[r])
+            rows.valid.append(col.valid[r])
+        out.columns.append(rows^)
     return out^
 
 

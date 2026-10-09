@@ -18,12 +18,13 @@ from ._cabi import Word
 from ._host import (
     Counts,
     _Arena,
+    arm_cancel_on_clock,
     array_released,
-    clock_reads_of,
     counts,
     device_column,
     device_stream,
     device_struct,
+    disarm_cancel_on_clock,
     host_data_of,
     import_column,
     import_struct,
@@ -31,14 +32,15 @@ from ._host import (
     new_error,
     pulls_of,
     release_out,
+    release_stream,
     schema_of,
     stream_moved,
     stream_record,
     take_error,
 )
 from ._table import (
+    cancel_flag_of,
     init_runtime,
-    join_cancel_timer,
     memory_report_present,
     new_call,
     new_caps,
@@ -47,7 +49,6 @@ from ._table import (
     read_caps,
     required_size,
     slot_value,
-    start_cancel_timer,
     t_agg_close,
     t_agg_finish,
     t_agg_merge,
@@ -218,9 +219,11 @@ struct FrameResult(Copyable, Movable):
 @fieldwise_init
 struct CallOptions(Copyable, Movable):
     """`cancel`: the cancel flag is set before the call. `cancel_during_call`:
-    a C thread sets the flag while the call runs, once the runtime has read
-    the host's clock inside it (native/cancel_timer.c), so the call has
-    started; no wall-clock delay decides when. `deadline_passed`: the deadline is one nanosecond after the host
+    the host's now_ns callback sets the flag (a release store,
+    native/cancel_flag.c) each time the runtime reads the host's clock during
+    the call, so the flag goes up inside the call at the runtime's first
+    clock read, never before the call starts, and no clock or thread decides
+    when. `deadline_passed`: the deadline is one nanosecond after the host
     clock's zero, long past."""
 
     var cancel: Bool
@@ -238,15 +241,15 @@ def _need(h: Handle, kind: Int) raises:
 
 
 struct _Call(Copyable, Movable):
-    """One komira_udf_call and, when the options ask for one, the timer that
-    cancels it while it runs."""
+    """One komira_udf_call, and whether its cancel flag is armed on the
+    host's clock."""
 
     var call: Word
-    var timer: Word
+    var armed: Bool
 
-    def __init__(out self, call: Word, timer: Word):
+    def __init__(out self, call: Word, armed: Bool):
         self.call = call
-        self.timer = timer
+        self.armed = armed
 
 
 struct UdfRuntime(Movable):
@@ -404,13 +407,13 @@ struct UdfRuntime(Movable):
     def _begin(mut self, opts: CallOptions) -> _Call:
         self._calls += 1
         var call = new_call(self._arena, Int64(1) if opts.deadline_passed else Int64(0), self._calls, opts.cancel)
-        var timer = Word.null()
         if opts.cancel_during_call:
-            timer = start_cancel_timer(call, clock_reads_of(host_data_of(self._host)))
-        return _Call(call, timer)
+            arm_cancel_on_clock(host_data_of(self._host), cancel_flag_of(call))
+        return _Call(call, opts.cancel_during_call)
 
     def _end(mut self, c: _Call):
-        join_cancel_timer(c.timer)
+        if c.armed:
+            disarm_cancel_on_clock(host_data_of(self._host))
 
     def call_batch(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) raises -> CallResult:
         """One call_batch. Under PROPAGATE the host drops every row with a null
@@ -466,15 +469,13 @@ struct UdfRuntime(Movable):
 
     def _finish_column(mut self, rc: Int32, err: Word, d_out: Word, want: ColumnType, rows: Int) -> CallResult:
         """Import a column a runtime returned, with the post-conditions: the
-        layout, `rows` rows (-1: any), no null in a non-nullable type."""
+        layout (an OK with no output is a released array, which import
+        refuses), `rows` rows, no null in a non-nullable type."""
         var out = self._outcome(rc, err)
         if rc != OK:
             if not array_released(d_out):
                 _ = release_out(d_out)
                 out.fault = "UDF_RUNTIME_FAULT: out set on failure"
-            return CallResult(out^, Column(want.type_id))
-        if array_released(d_out):
-            out.fault = "UDF_RUNTIME_FAULT: OK without an output"
             return CallResult(out^, Column(want.type_id))
         var col = Column(want.type_id)
         try:
@@ -483,7 +484,7 @@ struct UdfRuntime(Movable):
             out.fault = String(e)
         if not release_out(d_out) and out.fault == "":
             out.fault = "UDF_RUNTIME_FAULT: release left its slot set"
-        if out.fault == "" and rows >= 0 and len(col) != rows:
+        if out.fault == "" and len(col) != rows:
             out.fault = "UDF_BATCH_LENGTH_MISMATCH: " + String(len(col)) + " rows for " + String(rows)
         if out.fault == "" and not want.nullable and col.null_count() > 0:
             out.fault = "UDF_RETURN_TYPE_MISMATCH: a null in a non-nullable result"
@@ -502,50 +503,54 @@ struct UdfRuntime(Movable):
         var c = self._begin(opts)
         var rc = t_frame_open(self._table, inst._w, c.call, s, slot, err)
         var out = self._outcome(rc, err)
-        if not stream_moved(s) and out.fault == "":
-            out.fault = "UDF_RUNTIME_FAULT: the input stream was not moved by frame_open"
+        # A stream frame_open did not move is still the host's. The runtime
+        # may read it in place until frame_close, so it is released after
+        # that, once, and the call is a fault.
+        var kept = not stream_moved(s)
         var outputs = List[Batch]()
         var first = -1
-        if rc != OK:
-            self._end(c)
-            return FrameResult(out^, outputs^, first, pulls_of(rec))
-        var frame = slot_value(slot)
-        var ended = False
-        for _ in range(_MAX_FRAME_OUTPUTS + 1):
-            var d_out = self._arena.word(128)
-            var e2 = new_error(self._arena)
-            var rc2 = t_frame_next(self._table, frame, c.call, d_out, e2)
-            if rc2 != OK:
-                ended = True
-                out = self._outcome(rc2, e2)
-                if not array_released(d_out):
-                    _ = release_out(d_out)
-                    out.fault = "UDF_RUNTIME_FAULT: out set on failure"
-                break
-            if array_released(d_out):
-                ended = True
-                break
-            if first < 0:
-                first = pulls_of(rec)
-            try:
-                if spec.result_is_table:
-                    outputs.append(import_struct(d_out, spec.result))
-                else:
-                    var col = import_column(d_out, spec.result[0])
-                    var b = Batch(len(col))
-                    b.columns.append(col^)
-                    outputs.append(b^)
-            except e:
-                out.fault = String(e)
-            _ = release_out(d_out)
-            if out.fault != "":
-                ended = True
-                break
-        if not ended:
-            out.fault = (
-                "UDF_RUNTIME_FAULT: frame_next did not end after " + String(len(outputs)) + " outputs"
-            )
-        t_frame_close(self._table, frame)
+        if rc == OK:
+            var frame = slot_value(slot)
+            var ended = False
+            for _ in range(_MAX_FRAME_OUTPUTS + 1):
+                var d_out = self._arena.word(128)
+                var e2 = new_error(self._arena)
+                var rc2 = t_frame_next(self._table, frame, c.call, d_out, e2)
+                if rc2 != OK:
+                    ended = True
+                    out = self._outcome(rc2, e2)
+                    if not array_released(d_out):
+                        _ = release_out(d_out)
+                        out.fault = "UDF_RUNTIME_FAULT: out set on failure"
+                    break
+                if array_released(d_out):
+                    ended = True
+                    break
+                if first < 0:
+                    first = pulls_of(rec)
+                try:
+                    if spec.result_is_table:
+                        outputs.append(import_struct(d_out, spec.result))
+                    else:
+                        var col = import_column(d_out, spec.result[0])
+                        var b = Batch(len(col))
+                        b.columns.append(col^)
+                        outputs.append(b^)
+                except e:
+                    out.fault = String(e)
+                _ = release_out(d_out)
+                if out.fault != "":
+                    ended = True
+                    break
+            if not ended:
+                out.fault = (
+                    "UDF_RUNTIME_FAULT: frame_next did not end after " + String(len(outputs)) + " outputs"
+                )
+            t_frame_close(self._table, frame)
+        if kept:
+            release_stream(s)
+            if out.fault == "":
+                out.fault = "UDF_RUNTIME_FAULT: the input stream was not moved by frame_open"
         self._end(c)
         return FrameResult(out^, outputs^, first, pulls_of(rec))
 
