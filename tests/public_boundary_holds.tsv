@@ -123,7 +123,7 @@ ip	src/kci_cloud_fake/tests/test_fake_network.mojo	9	a private range as data: a 
 ip	src/kci_cloud_fake/tests/test_fake_validation_run_tag.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_reconciler/tests/test_resource_outputs.mojo	2	a private address as test input
 ip	src/kci_resource_proto/README.md	2	the private range of the README's network example
-ip	src/kci_resource_proto/resource.proto	2	the private ranges the network comment names (RFC 1918)
+ip	src/kci_resource_proto/networks.proto	2	the private ranges the network comment names (RFC 1918)
 ip	src/kci_resource_proto/tests/fixtures/graph/network_graph.txtpb	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_resource_proto/tests/test_resource_graph_golden_bytes.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_resource_proto/tests/test_resource_network_numbers.mojo	6	a private range as data: a network's range must be private, so documentation ranges are refused
