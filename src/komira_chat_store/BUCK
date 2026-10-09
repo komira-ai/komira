@@ -1,0 +1,35 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The chat store: `ChatStore[DB: Database]` over komira_db's backend-neutral
+# ops (users, channels, DMs, members, the numbered timeline, threads,
+# mentions, read cursors, files, erasure), the SQL migration chain, and the
+# document-store keys and indexes.
+#
+# test_chat_store_keys checks the pure helpers (ids, the subject key, the DM
+# id) with no database. The test_store_* tests run every store call on
+# SQLite, a `test_deps` package (it reaches the tests only, never a
+# consumer), so this package measures its own lines; test_store_races plays
+# a peer that writes between the store's read and its write (the paths one
+# connection never reaches). The store's full contract, on SQLite and the
+# Firestore mock, is //src/tests/conformance/komira_chat_store_conformance,
+# which depends on this library.
+mojo_library(
+    name = "komira_chat_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_db:komira_db",
+    ],
+    test_deps = [
+        "//src/komira_db_sqlite:komira_db_sqlite",
+    ],
+    test_srcs = [
+        "tests/test_chat_store_keys.mojo",
+        "tests/test_store_directory.mojo",
+        "tests/test_store_erasure.mojo",
+        "tests/test_store_messages.mojo",
+        "tests/test_store_races.mojo",
+        "tests/test_store_reading.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

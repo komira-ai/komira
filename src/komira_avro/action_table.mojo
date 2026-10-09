@@ -993,16 +993,16 @@ struct _StringAcc(Copyable, Movable):
         # been written into the List by this point but no StringArray has been
         # constructed from them, so nothing downstream can observe them.
         if total_bytes > _INT32_OFFSET_MAX:
-            raise Error(
-                String(
+            raise Error(  # cov: unreachable needs a decoded string column over 2 GiB
+                String(  # cov: unreachable needs a decoded string column over 2 GiB
                     "AvroDecodeError.STRING_COLUMN_TOO_LARGE: decoded string"
                     " column holds "
                 )
-                + String(total_bytes)
-                + " bytes, which overflows Arrow's 32-bit offset encoding"
-                + " (limit "
-                + String(_INT32_OFFSET_MAX)
-                + "); this column needs LARGE_STRING"
+                + String(total_bytes)  # cov: unreachable needs a decoded string column over 2 GiB
+                + " bytes, which overflows Arrow's 32-bit offset encoding"  # cov: unreachable needs a decoded string column over 2 GiB
+                + " (limit "  # cov: unreachable needs a decoded string column over 2 GiB
+                + String(_INT32_OFFSET_MAX)  # cov: unreachable needs a decoded string column over 2 GiB
+                + "); this column needs LARGE_STRING"  # cov: unreachable needs a decoded string column over 2 GiB
             )
 
         var offsets_buf = OwnedAlignedBuffer((num_strings + 1) * int32_size)
@@ -1857,7 +1857,7 @@ struct ActionTableInterpreter(Movable):
             elif self.accs[oi].tag == ACC_F64:
                 self.accs[oi].push_f64(Float64(Int(sd.default.int_val)))
             else:
-                self.accs[oi].push_i64(sd.default.int_val)
+                self.accs[oi].push_i64(sd.default.int_val)  # cov: unreachable _check_default_fits admits an int default only for i32/i64/f32/f64
         elif dk == AVRO_DEFAULT_DOUBLE:
             if self.accs[oi].tag == ACC_F32:
                 self.accs[oi].push_f32(Float32(sd.default.double_val))

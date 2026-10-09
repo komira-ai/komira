@@ -18,6 +18,7 @@
 from std.ffi import external_call
 from std.os import makedirs
 from std.pathlib import Path
+from std.time import perf_counter_ns
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_libc.posix import _read_env
@@ -74,6 +75,8 @@ struct FakeSteps(StageSteps, Movable):
     var pixis: List[String]
     var channels: List[String]
     var bases: List[String]
+    var budgets: List[Int]
+    var deadlines: List[Int]
 
     def __init__(out self):
         self.calls = List[String]()
@@ -93,6 +96,8 @@ struct FakeSteps(StageSteps, Movable):
         self.pixis = List[String]()
         self.channels = List[String]()
         self.bases = List[String]()
+        self.budgets = List[Int]()
+        self.deadlines = List[Int]()
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
         self.order.append(String("validate ") + req.validation.name)
@@ -199,6 +204,8 @@ struct FakeSteps(StageSteps, Movable):
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         self.order.append(String("build ") + req.step_name)
         self.bases.append(req.affected_by.copy())
+        self.budgets.append(req.build_budget_s)
+        self.deadlines.append(req.build_deadline_ns)
         self.calls.append(
             String("build ") + req.platform + String(" ") + req.artifacts_file + String(" ") + req.revision_id
             + String(" ") + req.work_dir + String(" ") + req.run.run_id + String(" step=") + req.step_name
@@ -411,9 +418,20 @@ def test_the_machine_file() raises:
     assert_equal(kci_main_with(_run(newer, String("build")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT-VERSION"))
     var bad = d + String("/bad.textproto")
-    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
+    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: VALIDATE platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
     assert_equal(kci_main_with(_run(bad, String("x")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
+    # a valid DEPLOY step, and a valid PUBLISH into a cell: parsed, never run
+    var cell_steps = List[String]()
+    cell_steps.append(String("kind: DEPLOY cells: \"c\" cell: \"s\" resources: \"r.json\""))
+    cell_steps.append(String("kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"a\" cells: \"c\" cell: \"s\""))
+    for i in range(len(cell_steps)):
+        write_whole_file(bad, String("schema_version: 1\nname: \"m\"\nstage { name: \"x\" step { name: \"d\" ") + cell_steps[i] + String(" } }\n"))
+        var a = _run(bad, String("x"))
+        a.extend(_publish_flags())
+        assert_equal(kci_main_with(a, steps, rec), 3)
+        assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
+        assert_true(_last(rec).error.message.find(String("writes into cell 's': that needs a newer kci")) >= 0)
     assert_equal(len(steps.calls), 0)
 
 
@@ -563,6 +581,32 @@ def test_affected_by_reaches_the_build_step_and_is_selective() raises:
         text.find(String("SELECTIVE run (affected-by ") + String(_BASE) + String("): not a full run.")) >= 0, text
     )
     assert_true(text.find(String("- affected: no answer")) >= 0, text)
+
+
+def test_the_build_budget_reaches_the_per_change_check() raises:
+    # --build-budget-s is handed to the BUILD step as is; without it the
+    # step has no budget (kci_build NO_BUILD_BUDGET, 0)
+    var m = _machine(_root(String("budget")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var a = _pr_run(m, String("build"), "--build-budget-s", "6543")
+    a.extend(_build_flags())
+    var t0 = Int(perf_counter_ns())
+    assert_equal(kci_main_with(a, steps, rec), 0)
+    var t1 = Int(perf_counter_ns())
+    assert_equal(len(steps.budgets), 1)
+    assert_equal(steps.budgets[0], 6543)
+    # the deadline is kci's start (inside the call) plus the budget, on the
+    # monotonic clock the runner reads
+    var start = steps.deadlines[0] - 6543 * 1_000_000_000
+    assert_true(start >= t0 and start <= t1, String(t0) + String(" ") + String(start) + String(" ") + String(t1))
+    var none = FakeSteps()
+    var rec2 = CliRecorder.memory(String(""))
+    var b = _pr_run(m, String("build"))
+    b.extend(_build_flags())
+    assert_equal(kci_main_with(b, none, rec2), 0)
+    assert_equal(none.budgets[0], 0)
+    assert_equal(none.deadlines[0], 0)
 
 
 def test_a_release_build_carries_no_base() raises:
