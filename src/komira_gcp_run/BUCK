@@ -3,8 +3,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # Cloud Run Admin v2: REST/JSON clients generated at build time from the
 # googleapis protos //tools/vendor/googleapis:run_v2 extracts from its
 # pinned archive (nothing of them is copied here). Each of
-# `ServicesClient`, `RevisionsClient`, `JobsClient`, `ExecutionsClient` and
-# `OperationsClient` sends through komira_http_client's `HttpClient` over
+# `ServicesClient`, `RevisionsClient`, `JobsClient`, `ExecutionsClient`,
+# `WorkerPoolsClient` and `OperationsClient` sends through komira_http_client's `HttpClient` over
 # the komira_http_core `Connector` it is given, takes each request's bearer
 # token from a komira_gcp_core `GcpTokenSource`, and raises a non-2xx answer
 # through komira_gcp_core's `gcp_status_error`. They read no environment.
@@ -12,11 +12,17 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # `methods` is what komira's callers use:
 #   * a deployed service: create, read, list (every location, `-`), replace
 #     in place, delete (Services.*), and the keep-last-N revision prune
-#     (Revisions.ListRevisions, Revisions.DeleteRevision);
+#     (Revisions.ListRevisions, Revisions.DeleteRevision), and the
+#     service's IAM policy, read and written back (Services.GetIamPolicy,
+#     Services.SetIamPolicy: who may invoke it);
 #   * a run-to-completion job: create, read, list, replace, delete, run
 #     with per-run argument and environment overrides (Jobs.*), and the
 #     execution a run started: read its outcome, cancel it
-#     (Executions.GetExecution, Executions.CancelExecution);
+#     (Executions.GetExecution, Executions.CancelExecution), and the job's
+#     IAM policy (Jobs.GetIamPolicy, Jobs.SetIamPolicy: who may run it);
+#   * a background worker: create, read, list, replace in place, delete
+#     (WorkerPools.CreateWorkerPool, GetWorkerPool, ListWorkerPools,
+#     UpdateWorkerPool, DeleteWorkerPool);
 #   * the long-running operation every mutating method above returns:
 #     read it, or wait on it server-side (GetOperation, WaitOperation).
 # The services' other methods are not generated. A method joins the list
@@ -41,7 +47,7 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # google/rpc/status.proto (an operation's error) in the one flat package.
 #
 # The clients start at run.googleapis.com, Run Admin v2's one endpoint; a
-# resource's region is part of its name. Run's four services declare it as
+# resource's region is part of its name. Run's five services declare it as
 # their `google.api.default_host`; the operations client starts at
 # run_v2.yaml's `name`, the same host (test_run_endpoint).
 #
@@ -49,14 +55,17 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # against the Cloud Run Admin v2 REST reference (no upstream test body is
 # copied), each sending through a generated client over komira_http_core's
 # ScriptedConnector (no socket, no DNS: the wire tests send to localhost):
-# test_run_services and test_run_jobs (each method's request line with its
-# resource-name captures and query, headers and JSON body byte for byte, an
-# Update with no resource refused before the token is asked, and each
-# response decoded), test_run_operations (the operation polls on the wire,
+# test_run_services, test_run_jobs and test_run_worker_pools (each method's
+# request line with its resource-name captures and query, headers and JSON
+# body byte for byte, and each response decoded; in services and worker
+# pools, an Update with no resource refused before the token is asked), test_run_iam_policy (each Services and
+# Jobs IAM policy method's request line and body, the policy decoded),
+# test_run_operations (the operation polls on the wire,
 # a done operation's response decoded as its type, a failed one's status,
 # a name outside Run's binding refused), test_run_errors (one
-# google.rpc.Status envelope per method mapped to its code, the body never
-# quoted), test_run_endpoint (every client's default host read without
+# google.rpc.Status envelope per Services, Revisions, Jobs CRUD and run,
+# Executions and Operations method mapped to its code, the body never
+# quoted; the mapping is generator code every method shares), test_run_endpoint (every client's default host read without
 # sending, an override dialled), test_run_operations_rules (the operations
 # client is its golden, with run_v2.yaml's bindings) and test_no_env_reads (no generated module
 # reads the environment, and only the methods above are generated).
@@ -69,6 +78,7 @@ mojo_gcp_client(
         "google/cloud/run/v2/condition.proto",
         "google/cloud/run/v2/execution.proto",
         "google/cloud/run/v2/execution_template.proto",
+        "google/cloud/run/v2/instance_split.proto",
         "google/cloud/run/v2/job.proto",
         "google/cloud/run/v2/k8s.min.proto",
         "google/cloud/run/v2/revision.proto",
@@ -78,8 +88,14 @@ mojo_gcp_client(
         "google/cloud/run/v2/task_template.proto",
         "google/cloud/run/v2/traffic_target.proto",
         "google/cloud/run/v2/vendor_settings.proto",
+        "google/cloud/run/v2/worker_pool.proto",
+        "google/cloud/run/v2/worker_pool_revision_template.proto",
+        "google/iam/v1/iam_policy.proto",
+        "google/iam/v1/options.proto",
+        "google/iam/v1/policy.proto",
         "google/longrunning/operations.proto",
         "google/rpc/status.proto",
+        "google/type/expr.proto",
     ],
     bundle_proto_deps = True,
     methods = [
@@ -87,9 +103,11 @@ mojo_gcp_client(
         "Executions.GetExecution",
         "Jobs.CreateJob",
         "Jobs.DeleteJob",
+        "Jobs.GetIamPolicy",
         "Jobs.GetJob",
         "Jobs.ListJobs",
         "Jobs.RunJob",
+        "Jobs.SetIamPolicy",
         "Jobs.UpdateJob",
         # Qualified: the mixin, bound by run_v2.yaml's http.rules.
         ".google.longrunning.Operations.GetOperation",
@@ -98,9 +116,16 @@ mojo_gcp_client(
         "Revisions.ListRevisions",
         "Services.CreateService",
         "Services.DeleteService",
+        "Services.GetIamPolicy",
         "Services.GetService",
         "Services.ListServices",
+        "Services.SetIamPolicy",
         "Services.UpdateService",
+        "WorkerPools.CreateWorkerPool",
+        "WorkerPools.DeleteWorkerPool",
+        "WorkerPools.GetWorkerPool",
+        "WorkerPools.ListWorkerPools",
+        "WorkerPools.UpdateWorkerPool",
     ],
     module_names = {
         "google/cloud/run/v2/k8s.min.proto": "k8s_min",
@@ -126,8 +151,10 @@ mojo_gcp_client(
         "tests/test_run_errors.mojo",
         "tests/test_run_jobs.mojo",
         "tests/test_run_operations.mojo",
+        "tests/test_run_iam_policy.mojo",
         "tests/test_run_operations_rules.mojo",
         "tests/test_run_services.mojo",
+        "tests/test_run_worker_pools.mojo",
     ],
     visibility = ["PUBLIC"],
     deps = [

@@ -33,7 +33,7 @@ and they are built when asked for:
 
 | target | what |
 |---|---|
-| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, [`cov_branch_run.sh`](cov_branch_run.sh) with `llvm/` (`llvm-profdata`) and `raw_version`, the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/`; `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
+| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, [`cov_branch_run.sh`](cov_branch_run.sh) with `llvm/` (`llvm-profdata`) and `raw_version`, the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
 | `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_source.zig`](cov_branch_source.zig), [`cov_branch_ir.zig`](cov_branch_ir.zig) and [`cov_branch_records.zig`](cov_branch_records.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by `:cov_branch_classify_cases` ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh) over [`fixtures/`](fixtures)), which run as a build action: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
 | `:cov_branch_link.sh`, `:cov_branch_run.sh`, `:cov_branch_annotate.sh` | the scripts, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
 
@@ -43,7 +43,7 @@ sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
 
 | sub-target | action category | output | what it does |
 |---|---|---|---|
-| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables` against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
+| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables`, with the same `-D` arguments (the library's `test_assert_level` and `test_defines`), against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
 | `[coverage][pgo_bin][<test>]` | `mojo_cov_pgo_link` | `cov/branch/<test>` | [cov_branch_link](#cov_branch_link) |
 | `[coverage][branch][<test>]` | `mojo_cov_branch_run` | `cov/branch/<test>.profdata` | [cov_branch_run](#cov_branch_run) |
 | `[coverage][branch_ir][<test>]` | `mojo_cov_branch_annotate` | `cov/branch/<test>.ll` | [cov_branch_annotate](#cov_branch_annotate) |
@@ -120,29 +120,59 @@ until the executor's timeout.
 
 ## cov_branch_annotate
 
+It reads the test's bitcode, the merged profile and the instrumented binary
+that wrote it (`[coverage][pgo_bin][<test>]`).
+
 0. The bitcode must hold no branch weights of its own (the bytes of a
    `branch_weights` metadata string): `pgo-instr-use` keeps a `!prof` it
    finds on a branch whose block never ran, which would then read as counts.
    Mojo's bitcode at -O0 holds none (`llvm.expect` is not lowered there).
-1. `lld/bin/lld` reads the test's bitcode as `cov_branch_link.sh` does (`-r`,
+   Nor may it hold entry counts (`function_entry_count`), which step 3
+   counts.
+1. The profile holds exactly the functions the binary links. Every function
+   of the bitcode is instrumented, but the link (`--gc-sections`, as a
+   release test's) drops a function nothing live calls, with its counters
+   and its profile data record. Mojo leaves such calls in the bitcode: an
+   `assert_equal` of two values it knows are equal compiles to `br i1
+   false` into the failure path, which calls the standard library's
+   `_assert_cmp_error`, `String(...)` of both values and their `write_to`;
+   LLVM's code generation (CodeGenPrepare) folds that branch and deletes the
+   path, so nothing calls those functions and the link drops them. A run
+   writes the record of every function its binary links, zeros included,
+   and of no other. So the (name MD5, hash) pairs of the binary's
+   `__llvm_prf_data` records (72 bytes each, whose counter counts must add
+   up to `__llvm_prf_cnts`) and of the profile's functions (`llvm-profdata
+   show`) must be one set. A record the profile lacks is a profile of
+   another binary, or a merge that lost records (tests//negative/coverage:branchmissing
+   plants one); one it holds besides, a profile of another binary.
+2. `lld/bin/lld` reads the test's bitcode as `cov_branch_link.sh` does (`-r`,
    `--lto-O0`) with the one pass `pgo-instr-use`, given the merged profile
    (`-pgo-test-profile-file`), and prints the module after it
    (`-print-after=pgo-instr-use -print-module-scope`, on stderr): every
    `br i1`, `select i1` and `switch` of a function that ran carries `!prof
    !{!"branch_weights", ...}`, the counts of its arms; one that never ran
-   carries none.
-2. Any line of lld's own (`lld: `, `warning: `, `error: `) fails the
+   carries none. Before the dump, LLVM names each function of the bitcode
+   the profile does not hold (`no profile data available for function`,
+   `-pgo-warn-missing-function`). Such a function is not in the binary, by
+   step 1 and step 3's entry-count check together (step 1 alone does not
+   give it: `branchinternal`'s `main` ran, yet is named here, because its
+   profile name is not the run's), so it never ran: its branches carry no
+   weights and read as never run, zero counts, as those of a function that
+   ran no time do. A measured
+   one is recorded, every arm `-` (test 47's `test_unrun`: `Tag.write_to`).
+3. Any other line of lld's own (`lld: `, `warning: `, `error: `), or
+   anything before the dump that is not one of those lines, fails the
    action. The one LLVM prints when the profile does not fit the control
    flow, `function control flow change detected (hash mismatch)`, means that
    function's counts were dropped, and passing it on would read as branches
-   that never ran (tests//negative/coverage:branchannotate plants it). So
-   does `no profile data available for function` (`-pgo-warn-missing-function`):
-   a run writes the counters of every instrumented function it links, zeros
-   included, so a function of the bitcode the profile does not hold is a
-   profile of other bitcode, not a function that never ran (branchmissing).
-   The six tests of `komira_retry` and the two of test 47's `branchlib` give
-   neither.
-3. What lld printed is exactly one dump, starting with `; *** IR Dump After
+   that never ran (tests//negative/coverage:branchannotate plants it). In
+   the dump, `pgo-instr-use` must have given an entry count (`!prof` on the
+   `define`) to as many functions as the profile holds: each function the
+   binary links is one of this bitcode. Fewer is a binary made from other
+   bitcode, or a hash mismatch LLVM does not warn about (a comdat
+   function's, by default) (branchinternal plants it: the bitcode internalized, so `main`'s
+   profile name is not the run's).
+4. What lld printed is then exactly one dump, starting with `; *** IR Dump After
    PGOInstrumentationUse on [module] ***`; it is `cov/branch/<test>.ll`,
    unchanged. `-print-after` output is LLVM's debug text, not an interface:
    the classifier parses it strictly and fails on what it does not expect.
@@ -242,8 +272,8 @@ as a record, not as a branch missing from the count:
 | source decision | the head of a `for <targets> in <iterable>:` line's iterable: a call's `(` when it ends in `)` (`range(`, `reversed(`, `x.items(`, `f[T](`), an attribute's last `.` (`self.cases`, `p.data().keys`), a name's first character, a list literal's `[` (one running over lines too); a chain may start at a string literal (`"ab".as_bytes()`). Any other iterable (a subscript, an operator, a tuple) has no head | br | `policy.mojo` 121:23, `shapes.mojo`'s `for _ in range(n)`: two branches on one value per loop (one decision, below); arm 0 is the iterator's end (the loop exits), arm 1 an iteration. The sweep's `for` lines: the iteration branch at the head in every one (`clouds.mojo` 207:27 `env.items(`, `float32_parse.mojo` 178:24 `reversed(`, `split.mojo` 976:14 a name, `expr.mojo` 1983:22 `self.cases`, `auto_promotion.mojo` 336:16 a list literal, `plan_validator.mojo` 463:36 `plan.join_data_ref().left_on`, `workflow_reader.mojo` 235:14 `[` over lines, `split.mojo` 967:32 `"THSPLIT".as_bytes(`). Iterator shapes: `icmp eq i8 (extractvalue {T, i8} next, 1), 0` (arm 0 the end, as for `range(`) or `call i1 @...__next__` (a list literal's, `_ArrayIterOwned::__next__`: the `i1` is its raising flag, true when it raises StopIteration, so arm 0 is the end too). Test 47's `branchlib/loops.mojo` pins both: `for x in xs:` 9,14 is 2,3 (a three-element and an empty List), `for s in [String("a"), String("bcd")]:` 16,14 is 1,2. A raising call's error check at the head is a decision too (no rule drops it there: `__next__`'s bare `i1` would match one), so a raise never taken reads as an arm not covered, never as a pass. A select at the head is refused |
 | compiler-made | `+` | br | a String temporary's destructor before the String-lifetime rule read it: every `+` row of `policy.mojo` (216 in `test_decide` alone), `loop.mojo` 96:66, 96:83 |
 | compiler-made | `//`, `//=`, `%` | select | the selects of floor division and modulo: `policy.mojo` 137:56 (`// 100`), 140:35 (`% UInt64(...)`), `seams.mojo` 51:44; `timestamp.mojo` 161:15 (`v //= 10`: `sdiv`, `mul`, `icmp eq`, `select`, the `//` family). `%=` has shown none and is refused |
-| compiler-made | a subscript's `[` (after a name, `]` or `)`) | br on a raising call's error flag: the `i1` a `[tail] call i1 @...` at the branch's location returns, or field 0 of the `{ i1, ... }` one returns | `clouds.mojo` 211:20 (`env[sorted[i]]`, `Dict.__getitem__`'s KeyError: `extractvalue { i1, ptr } (call), 0`); 18 such in the sample; test 47's `branchlib/lookup.mojo` 7:13 (`d[key]`). Any other branch at `[` is refused (no user decision sits there) |
-| compiler-made | the `(` of a call off a `for` line's head: `name(`, or `name[...](` (the name before the `[`, which may be lines above: a call whose parameters run over lines; brackets in one-line string literals and comments are skipped; a `"""` or `'''` between the `[` and `]`, which can open a string running over lines, refuses the branch) | br; select on a raising call's error flag (field 0 of a `{ i1, ... }`) or on a value a br at the same location with the same weights tests | code that carries the call's location: a raising call's error check (`loop.mojo` 100:31, `sleep_ms(`: `br i1` on the call's own `i1` result; `ipc_decoder_dispatch.mojo` 3401:56 at `_decode_column_nested_zerocopy[...](`; `parallel_fork_join.mojo` 239:14, `](` under a `run_with_state[` two lines up) and the code of standard-library functions declared `@always_inline("nodebug")` (no location of their own). A select on the error flag keeps the old value when the call raised (`ipc_encoder_dispatch.mojo` 223:59: `select i1 %err, i64 %old, i64 %new`); one on the value the call's error check branches on (`decimal256_arith.mojo` 179:31, an inlined raising callee's flag; `name_matcher.mojo` 379:39, a call's `i1`; `byte_hash_agg_table.mojo` 382:50) is that check's. Any other select at a call is refused (a `nodebug` `min(` would need evidence first). A `try`'s error check is one (the design's open question 1: the `except` body is held by line coverage) |
+| compiler-made | a subscript's `[` (after a name, `]` or `)`) | br on a raising call's error flag: the `i1` a `[tail] call i1 @...` at the branch's location returns, or field 0 of the `{ i1, ... }` one returns | `clouds.mojo` 211:20 (`env[sorted[i]]`, `Dict.__getitem__`'s KeyError: `extractvalue { i1, ptr } (call), 0`); 18 such in the sample; test 47's `branchlib/lookup.mojo` 7:13 (`d[key]`). Any other branch at `[` is refused (no user decision sits there). In a `try:` body the error check is a decision ([try](#try)) |
+| compiler-made | the `(` of a call off a `for` line's head: `name(`, or `name[...](` (the name before the `[`, which may be lines above: a call whose parameters run over lines; brackets in one-line string literals and comments are skipped; a `"""` or `'''` between the `[` and `]`, which can open a string running over lines, refuses the branch) | br; select on a raising call's error flag (field 0 of a `{ i1, ... }`) or on a value a br at the same location with the same weights tests | code that carries the call's location: a raising call's error check (`loop.mojo` 100:31, `sleep_ms(`: `br i1` on the call's own `i1` result; `ipc_decoder_dispatch.mojo` 3401:56 at `_decode_column_nested_zerocopy[...](`; `parallel_fork_join.mojo` 239:14, `](` under a `run_with_state[` two lines up) and the code of standard-library functions declared `@always_inline("nodebug")` (no location of their own). A select on the error flag keeps the old value when the call raised (`ipc_encoder_dispatch.mojo` 223:59: `select i1 %err, i64 %old, i64 %new`); one on the value the call's error check branches on (`decimal256_arith.mojo` 179:31, an inlined raising callee's flag; `name_matcher.mojo` 379:39, a call's `i1`; `byte_hash_agg_table.mojo` 382:50) is that check's. Any other select at a call is refused (a `nodebug` `min(` would need evidence first). The error check of a call whose error goes to its caller (outside a `try:` body) is one; in a `try:` body it is a decision ([try](#try)), and any other br at the call is refused there |
 
 A branch at the `(` of a call to a function the library's own sources
 declare `@always_inline("nodebug")` is refused, whatever its shape: that
@@ -259,19 +289,21 @@ Anything else fails the action naming `file:line:col`, the instruction and
 the token: another word or operator, `%=`, a `(` not after a name or a
 `name[...]`, a `(` on a `for` line off the head (another iteration), a
 column outside the line, a class with a kind or shape it has not shown (a
-select at `+`, a br at `[` on a comparison). The list grows only with
+select at `+`, a br at `[` on a comparison, a br at a call in a `try:` body
+on anything but the call's error flag). The list grows only with
 evidence. A branch with no `!dbg` fails too, and so does an `indirectbr`,
 `callbr` or `invoke` in a measured file (Mojo emits none).
 
 **Records.** Compiler-made branches are counted on stderr, not written. Each
 source decision gives one `BRDA:<line>,<col>:<kind>:<n>/<N>,<arm>,<count>`
-per arm: `<kind>` is `br`, `select`, `switch` or `rhs`; `<N>` is how many
+per arm: `<kind>` is `br`, `select`, `switch`, `try` or `rhs`; `<N>` is how many
 decisions of that kind one copy of a function (one LLVM function, or one
 inlined copy of it) holds at that location, and `<n>` which one, in IR
 order: Mojo puts `if` and `elif` on one location (`branchlib`'s
 `4,5:br:0/3`, `1/3`, `2/3`). Arms are numbered 0, 1, ... in the order of
 LLVM's weights (true first for `br` and `select`, the default first for a
-`switch`), not named true and false. The `<n>`-th of every copy (generic
+`switch`), not named true and false; a `try` decision's are returned (0)
+and raised (1). The `<n>`-th of every copy (generic
 instances, inlined copies) is summed arm by arm; every copy must hold as
 many, and where both are known, compute the condition of its `<n>`-th at
 the same line and column, or, for a decision at an `if`, `elif` or `while`
@@ -423,6 +455,98 @@ BRDA:63,21:rhs:0/1,1,26
 end_of_record
 ```
 
+### try
+
+A raising call lexically in the body of a `try:` of its own function is a
+source decision of two arms, of kind `try`: arm 0, the call returned; arm
+1, it raised into the handler (an `except`, or the `finally` before the
+error goes on). A test must take both: a call in a `try:` body that never
+raises leaves its handler path untested for that call, even when the
+`except` body runs (another call raising) and line coverage is full
+(tests//negative/coverage's `covtry`: 9 of 9 lines, 5 of 6 arms). The
+arms are not LLVM's order (true, the call raised, comes first there).
+
+What Mojo 1.0 emits is the same at a call in a `try:` body and outside
+one: a `br i1` at the call's `(` (a subscript's `[`), on the call's error
+flag, its raised target the handler or the propagation to the caller. So
+the scope is read from the source, and the shape from the IR:
+
+- Scope. From the call's line back, over the lines indented less than the
+  last one met (blank, comment and triple-quoted-string lines skipped, and
+  continuation lines, which start inside an open bracket: the `) raises:`
+  closing a nested `def`'s signature over lines has the `def`'s
+  indentation, and read as a statement it would hide the `def`; a file
+  whose brackets do not balance, outside strings and comments, is refused
+  at its first such branch, naming the line that opens the last bracket
+  never closed or closes one never opened: no line's statement can be
+  told there), a
+  `try` line met before a `def`, `fn`, `struct`, `trait` or `class` line
+  (another function: a `def` nested in a `try:` body is one), or the
+  call's own line `try: <statement>`. An `except`, `else` or `finally`
+  clause has its `try`'s indentation, so a call in its body is in that
+  `try`'s body only if the whole `try` is in another's: a call in an
+  `except` body of an inner `try` counts for the outer one (test 47's
+  `nested`, 39:25); one in an `else` or `finally` body, or after the
+  `try`, does not (its error goes to the caller), nor does one in a
+  `with` body outside a `try:` body.
+- Shape, at a call, a subscript or a `+` in the scope: the br must test
+  the call's flag at its own location (the `i1` of `call i1`: `touch(x)`,
+  a raising constructor `Box(x)`; field 0 of the `{ i1, ... }` one
+  returns: `checked(x)`, a method `b.get(x)`, `d[key]`), or a `phi i1`
+  of such flags, of `true`/`false` and of the code of a callee inlined at
+  the call (whose `inlinedAt` chain holds the br's location: a plain
+  `@always_inline` raising callee, the `phi i1` of its `if`'s condition,
+  test 47's `inl(x)`; `Int(s)`, a phi of `String.__int__`'s flag; the
+  raising right operand of an `and`, a phi of its flag and `false` at
+  the `and`), with one such value at least, or one constant arriving from
+  a block of the inlined callee's code (`komira_parquet`'s `rle.mojo`
+  226:54, `read_uleb128` inlined: `phi i1 [ false, <its return> ], [
+  true, <its raise> ]`). A phi of constants alone says which arm is which
+  by its constants only, so each one from the callee's code must match its
+  block: `true` from the raise path (the block calling
+  `__mojo_debugger_raise_hook`, which Mojo emits at every `raise`: both
+  shapes seen), `false` from any other; a phi saying `true` from the
+  return (with `false` or `true` from the raise path) would swap or blur
+  the arms, and is refused. Any other br there is refused: whether it is the call's
+  error check is not known. A String's destructor at the call (the
+  handler destroying the error's String) is the String's, as anywhere; a
+  select on the flag stays compiler-made (the br is the decision).
+- A `try` decision is no test of an `and`/`or` result: a raising right
+  operand's flag beside the result (above) is tested by the call's error
+  check, and the `if` is the and/or's test (the cases' 49,16).
+
+Not decisions: a `raise` statement (a jump to the handler, no branch: test
+47's `raise_in_try`, whose `if` is the decision); a call outside a `try:`
+body, whose error goes to the caller (`outside`: Mojo returns the callee's
+`{ i1, ... }` as its own, no branch at all; `with_else`'s `else` body: a
+br the classifier drops); a `for` loop's end (`__next__`'s StopIteration
+flag at the head is the loop's decision, `for-in`, in a `try:` body or
+not). A `with` block keeps its own branches at the `with` keyword (the
+`__exit__(err)` result that suppresses the error, and the context
+manager's state), which no rule reads: a library with a `with` in
+measured code is refused there, so no `with` body has been classified
+(a call in one inside a `try:` body is a `try` decision as any other).
+A branch at the `try`, `except`, `else` or `finally` keyword is refused
+(none has been seen: a `finally` body's code carries the standard
+library's locations, inlined at the `try`).
+
+Refused in a `try:` body, by the shape rule: the destructor of an inlined
+callee's error String whose flags word reaches the call through a `select`
+(not a phi web the String rule reads): `komira_parquet`'s
+`def_level_bitmap.mojo` 99:40 (`read_byte(`) and `footer_header.mojo`
+325:31 (`byte_at(`), two branches per call beside the accepted error
+check; outside a `try:` body they were dropped as the call's, and the
+select there was already refused. The census of `COVERAGE_BRANCH_GATE`
+with the rule: 11 of its libraries hold `try` arms (`policy.bzl`).
+
+Evidence: test 47's `branchlib/trial.mojo`, every shape above, read from
+its IR (`both`, `normal_only`, `nested`, `with_finally`, `with_else`,
+`keyed`, `calls`, `looped`), and the classifier's cases (12, 12a:
+`fixtures/try.ll`). A `with` was read once in a scratch copy of
+`trial.mojo`: at the `with`, a `br i1` on `__exit__(err)`'s `i1` and two
+on phis of the context manager's state (beside four of a String's
+destructor), three refusals.
+
 ## Cost
 
 Remote worker time (`buck2 log show`,
@@ -437,9 +561,11 @@ LLVM pieces are unpacked and checked once, by `toolchains/llvm_branch`.
 [Test 47](../../tests/coverage_runs.md#test-47-branch-coverage-runs) of
 the tests cell: a fixture library whose test takes some arms of an
 `if`/`elif`/`or`/`and` function and of a `while`, a `range(` loop, a
-ternary, an `or` chain and a plain `@always_inline` helper, whose profile
-must hold that function's counters, and whose branch records must be their
-golden file; the link line check; a test that the run gives no `LC_ALL`; a
+ternary, an `or` chain, a plain `@always_inline` helper and raising calls
+in `try:` bodies (some never raising), whose profile must hold that
+function's counters, and whose branch records must be their golden file;
+test 46's `covtry`, whose gate is red on a `try` decision's raise arm alone
+(and `covtry_both`, green); the link line check; a test that the run gives no `LC_ALL`; a
 library with a C library in its closure; one whose test needs a `test_deps`
 package with a C library; and the planted defects that must go red, among
 them an annotation whose profile does not fit the bitcode or lacks a

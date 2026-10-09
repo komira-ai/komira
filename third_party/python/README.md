@@ -86,8 +86,9 @@ The hermetic Python is for tests. What keeps it out of every published
 package:
 
 - **Visibility.** `:cpython` and every wheel are visible only to the
-  packages `_TEST_ONLY` in [`BUCK`](BUCK) lists, all test-only packages under
-  `src/tests` (`//:src_layout` holds that directory to test-only packages). A
+  packages `_TEST_ONLY` in [`BUCK`](BUCK) lists, all test-only: packages under
+  `src/tests` (`//:src_layout` holds that directory to test-only packages),
+  and `release/ci/tests`, which holds only the `py_test` of the CI scripts. A
   `mojo_bundle`, `conda_package` or any other target elsewhere that names one
   fails analysis with a visibility error.
 - **What a test hands on.** A `py_test`'s only output is its pass marker:
