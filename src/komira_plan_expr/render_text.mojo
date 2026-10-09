@@ -58,13 +58,17 @@ def write_quoted[W: Writer](mut writer: W, s: String):
 
 def write_hex[W: Writer](mut writer: W, s: String):
     """Write the bytes of `s` as `0x` + lowercase hex (`0x` alone when empty).
-    A binary literal's VALUE, which its render must carry."""
-    var digit_text = String("0123456789abcdef")
-    var digits = digit_text.as_bytes()
+    A binary literal's VALUE, which its render must carry.
+
+    One buffer reserved at its final size and filled from a nibble table, then
+    one write: no allocation per byte."""
+    comptime HEX = "0123456789abcdef"
     var bytes = s.as_bytes()
-    var out = String("0x")
-    for i in range(len(bytes)):
+    var n = len(bytes)
+    var out = String(capacity=2 + 2 * n)
+    out += "0x"
+    for i in range(n):
         var b = Int(bytes[i])
-        out += chr(Int(digits[b >> 4]))
-        out += chr(Int(digits[b & 15]))
+        out += HEX[byte = b >> 4]
+        out += HEX[byte = b & 15]
     writer.write(out)

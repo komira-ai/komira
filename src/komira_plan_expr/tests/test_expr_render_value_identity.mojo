@@ -21,6 +21,8 @@
 #     aggregate), a string-op pattern and the regexp fields.
 #   * JSON path segments were joined with `.`, so the ONE key `a.b`
 #     (`$."a.b"`) rendered like the TWO keys `a`, `b` (`$.a.b`).
+#   * an escape that skips the escape character `\` is not one-to-one: the
+#     JSON segments [`a\`, `b`] and [`a.b`] would both render `$.a\.b`.
 #
 # Controls: an ordinary value renders as before (EXPLAIN text and existing
 # goldens do not move), and equal expressions render equal.
@@ -32,6 +34,7 @@
 
 from std.testing import TestSuite, assert_true, assert_equal, assert_false
 
+from komira_arrow.arrow_types import ArrowType
 from komira_plan_expr.expr import Expr, BIN_EQ
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.agg_expr import AggExpr, sum as agg_sum
@@ -72,6 +75,18 @@ def test_binary_literals_render_their_bytes() raises:
     )
 
 
+def test_a_binary_literal_renders_exact_hex() raises:
+    # High nibble first, lowercase, two digits per byte; empty is `0x`.
+    assert_equal(
+        _r(_lit(ScalarValue.from_binary(String("\x0f\x10\x7f")))),
+        String("Literal(ScalarValue(binary, 3 bytes, 0x0f107f))"),
+    )
+    assert_equal(
+        _r(_lit(ScalarValue.from_binary(String("")))),
+        String("Literal(ScalarValue(binary, 0 bytes, 0x))"),
+    )
+
+
 def test_typed_nulls_render_their_type() raises:
     _differ(
         _lit(ScalarValue.null(DType.int64)),
@@ -90,14 +105,25 @@ def test_an_in_list_value_cannot_close_its_own_quote() raises:
 
 
 def test_a_backslash_cannot_hide_a_quote() raises:
-    # Escaping `"` as `\"` but leaving `\` raw renders the string `a\` and
-    # the string `a"` both as `"a\"`: the escape must cover
-    # the escape character itself. (Green before the fix too -- a raw render
-    # does not escape at all; this pins the half-done escape.)
+    # The escape must cover the escape character itself. A JSON path escapes
+    # `.` as well, and an escape that skipped `\` rendered the two segments
+    # [`a\`, `b`] and the one segment [`a.b`] both as `$.a\.b`. With `\`
+    # escaped they render `$.a\\.b` and `$.a\.b`.
+    var two: List[String] = ["a\\", "b"]
+    var one: List[String] = ["a.b"]
     _differ(
-        _lit(ScalarValue.from_string("a\\")),
-        _lit(ScalarValue.from_string('a"')),
-        "a\\ vs a\"",
+        Expr.json_extract_from_parts(Expr.col_ref("j"), two^, ArrowType.STRING, False),
+        Expr.json_extract_from_parts(Expr.col_ref("j"), one^, ArrowType.STRING, False),
+        "JSON path [a\\, b] vs [a.b]",
+    )
+    # And the exact bytes: `a\` renders `"a\\"`, `a"` renders `"a\""`.
+    assert_equal(
+        _r(_lit(ScalarValue.from_string("a\\"))),
+        String('Literal(ScalarValue(utf8, "a\\\\"))'),
+    )
+    assert_equal(
+        _r(_lit(ScalarValue.from_string('a"'))),
+        String('Literal(ScalarValue(utf8, "a\\""))'),
     )
 
 
