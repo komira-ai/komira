@@ -344,7 +344,7 @@ def _types() -> List[ArrowType]:
 def test_pruned_open_pruned_no_match_raises() raises:
     var fs = _StubFs(_hive_keys(), List[String](), False)
     var cs = List[PartitionConstraint]()
-    cs.append(PartitionConstraint.eq("year", "1999", ArrowType.INT64))
+    cs.append(PartitionConstraint.eq("year", "2030", ArrowType.INT64))
     var pred = PartitionPredicate(constraints=cs^)
     var raised = False
     try:
@@ -358,7 +358,7 @@ def test_pruned_open_pruned_no_match_raises() raises:
     assert_true(raised)
     # Allowed: an empty discovery, not an error.
     var cs2 = List[PartitionConstraint]()
-    cs2.append(PartitionConstraint.eq("year", "1999", ArrowType.INT64))
+    cs2.append(PartitionConstraint.eq("year", "2030", ArrowType.INT64))
     var disc = PrunedHiveDiscovery.open_pruned(
         fs,
         "t",

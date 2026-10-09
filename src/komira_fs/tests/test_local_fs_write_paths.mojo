@@ -4,6 +4,9 @@
 # The LocalFs write-side methods the parallel-write and error paths use:
 #
 #   * `open_write` refuses a `WriteMode` discriminant it does not know.
+#   * `open_write(CREATE_EXCLUSIVE)` on a path that does not exist creates
+#     it; the bytes written read back, and a second exclusive open of the
+#     now-existing path raises.
 #   * `write_at` / `pwrite_at` of an empty payload write nothing and return 0.
 #   * `seek_write_to_end`: after a `pwrite_at` past the cursor, the next
 #     `write_at` lands at the new end of file, not at the stale cursor.
@@ -74,6 +77,29 @@ def test_open_write_unknown_mode_raises() raises:
     assert_true(raised)
     # Nothing was created.
     assert_false(_exists(fs, path))
+
+
+def test_open_write_create_exclusive_new_path() raises:
+    var fs = LocalFs[NoopSink].new()
+    var path = _path("exclusive_new.bin")
+    assert_false(_exists(fs, path))
+    var wf = fs.open_write(path, WriteMode.create_exclusive())
+    var b = _bytes("exclusive")
+    assert_equal(fs.write_at(wf, Span(b)), 9)
+    fs.close_write(wf^)
+    var got = _read_file_bytes(path)
+    assert_equal(len(got), 9)
+    for i in range(9):
+        assert_equal(got[i], b[i])
+    # The path exists now, so a second exclusive open must refuse it.
+    var raised = False
+    try:
+        var wf2 = fs.open_write(path, WriteMode.create_exclusive())
+        fs.close_write(wf2^)
+    except:
+        raised = True
+    assert_true(raised)
+    assert_equal(fs.file_size(path), 9)
 
 
 def test_write_at_empty_is_noop() raises:
@@ -254,6 +280,7 @@ def test_abort_write_removes_partial_file() raises:
 def main() raises:
     var suite = TestSuite()
     suite.test[test_open_write_unknown_mode_raises]()
+    suite.test[test_open_write_create_exclusive_new_path]()
     suite.test[test_write_at_empty_is_noop]()
     suite.test[test_pwrite_at_empty_is_noop]()
     suite.test[test_seek_write_to_end_resyncs_cursor]()

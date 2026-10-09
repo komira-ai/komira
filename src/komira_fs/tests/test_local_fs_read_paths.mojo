@@ -16,6 +16,7 @@
 # =============================================================================
 
 from std.ffi import external_call
+from std.os.path import exists
 from std.memory import alloc
 from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -169,11 +170,18 @@ def test_read_footer_unseekable_raises() raises:
 def test_read_footer_short_read_raises() raises:
     """A sysfs attribute reports a page-sized file but reads back a few
     bytes: the read comes up short of the size and must raise. Linux only
-    (no sysfs elsewhere); the skip says so."""
+    (no sysfs elsewhere), and only where sysfs is mounted; each skip says
+    why."""
     comptime if not CompilationTarget.is_linux():
         print("SKIP test_read_footer_short_read_raises: needs Linux sysfs")
         return
     var path = String("/sys/devices/system/cpu/online")
+    if not exists(path):
+        print(
+            "SKIP test_read_footer_short_read_raises: " + path
+            + " is absent (sysfs not mounted in this sandbox)"
+        )
+        return
     var fs = LocalFs[NoopSink].new()
     var size = fs.file_size(path)
     assert_true(size > 64)  # the reported size, not the content length
