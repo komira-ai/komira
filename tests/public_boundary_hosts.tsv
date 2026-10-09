@@ -39,6 +39,11 @@ rust-lang.org	the Rust toolchain's distribution and documentation
 ziglang.org	the zig toolchain's distribution
 sqlite.org	SQLite documentation
 postgresql.org	PostgreSQL documentation
+duckdb.org	DuckDB documentation cited by docs/design/optimized_plan_udfs.md
+snowflake.com	Snowflake documentation cited by docs/design/optimized_plan_udfs.md
+daft.ai	Daft documentation cited by docs/design/optimized_plan_udfs.md
+pulumi.com	Pulumi documentation of closure serialization cited by docs/design/optimized_plan_udfs.md
+idl.uw.edu	the Arquero documentation (a University of Washington lab site) cited by docs/design/optimized_plan_udfs.md
 grpc.io	gRPC specifications
 connectrpc.com	the Connect protocol specification
 flatbuffers.dev	FlatBuffers documentation

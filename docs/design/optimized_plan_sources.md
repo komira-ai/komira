@@ -5,7 +5,7 @@ file stays under 1,000 lines. Section numbers continue that document's: `§15.x`
 [`optimized_plan_udfs.md`](optimized_plan_udfs.md), and every other `§n` is in `optimized_plan.md`.
 
 Citations are to komira `origin/main` at `43569cea24` unless marked otherwise. The storage rules cited as
-"storage stack" are [`storage_stack.md`](storage_stack.md) revision 2 (komira-ai/komira#1134, at `8bbb5e3646`); the
+"storage stack" are [`storage_stack.md`](storage_stack.md) revision 2 (komira-ai/komira#1134, at `c13a878c82`); the
 graph rules cited as "graph storage" are [`data_graph_storage.md`](data_graph_storage.md) (komira-ai/komira#833, at
 `8f3e266b42`). Statements marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run
 to write this document.
@@ -172,7 +172,8 @@ because their remedies differ (re-plan; re-bind; re-plan with a table; re-plan l
   applied to a moving source. RAW keeps today's LIVE meaning, and `index_pinned.txtpb` and `topic_live.txtpb` stay
   valid.
 - **Recurring work re-optimizes:** a `komira/server` producer optimizes the stored bound plan each run (§2). A stored
-  `OptimizedPlan` reads the same data forever, or is refused by name once that data is gone.
+  `OptimizedPlan` reads the same data forever, or is refused by name once that data is gone. Erasure is the one
+  exception (§15.3.5).
 
 ### 15.3.4 Pin groups: one consistent set across tables
 
@@ -189,6 +190,43 @@ The storage stack forbids designing on multi-table atomicity; "komira's reader p
 A pin group is that set. The host reads record `commit_seq` from `lineage` and requires each member's
 `(table_uuid, snapshot_id)` to equal it (`OPTIMIZED_PIN_GROUP_INCONSISTENT`); a member must name its group and appear
 once (`OPTIMIZED_PIN_GROUP_MALFORMED`). Any multi-table write that records its snapshot set can be read this way.
+
+**The members' tails are cut at one position.** The graph's three tables share one delta tail: one lineage, where a
+write is one delta holding its rows for every table, and the record at `commit_seq` names the tail position the roll
+covered as well as the snapshot set (graph storage, "The write path"). A pin group therefore holds the tails
+consistent the same way it holds the snapshots: in a group whose lineage carries a tail, every member is a
+`table_tail` pin whose `tail_lineage` equals the group's `lineage`, and every member's `spans` is the same single
+span, from the record's covered position plus one to the tail end the producer pinned. Because a delta is
+all-or-nothing across the tables, cutting every member at the same delta gives each table the same writes: no edge
+is read without its endpoints' delta, and no supersession in one table is read without its counterpart in another. A
+member whose lineage or span differs, or whose span does not start right after the record's covered position, is
+`OPTIMIZED_PIN_GROUP_INCONSISTENT`. The producer resolves in graph storage's order: it pins the tail first (the
+latest record and the deltas above it), then loads each table at the snapshot the record names. The roll-after-pin
+rule of §15.4.3 applies to the group as a whole: a newer record may serve reaped deltas only if every member
+qualifies under it, and otherwise the run is refused (`OPTIMIZED_PIN_TAIL_GAP`). A roll that carries a supersession
+or a tombstone is an upsert, which writes position deletes, so in practice only a roll of added rows alone qualifies
+*(inferred from graph storage's roll)*.
+
+### 15.3.5 Erasure and pins
+
+Erasure is the one change a pin does not hold off: the storage stack erases a subject from tables, tails and
+indexes within a deadline, and a pinned plan never returns an erased subject.
+
+- **Tables.** Erasure expires every snapshot that still holds the subject, so a pin to one of them is refused
+  (`OPTIMIZED_PIN_SNAPSHOT_EXPIRED`) and the producer plans again.
+- **Tails** (topic segments, graph delta objects, and the row store's log above its base watermark). Erasure rewrites
+  each affected object without the subject, or drops it when nothing else remains, before the roll or at it. The
+  host reads a pinned span through the tail lineage's current record of its objects, never through object keys
+  remembered from the pin, so it reads the rewritten objects. The run then returns the pinned data less the erased
+  subject. A dropped graph delta or row-store chunk reads as empty, and offsets erased from a topic segment read as
+  the gaps key compaction leaves; neither is `OPTIMIZED_PIN_OFFSETS_RETIRED` or `OPTIMIZED_PIN_TAIL_GAP`, which
+  stay for spans the roll reaped. A graph delta is rewritten as one object, so the members of a pin group lose the
+  subject together.
+- **Indexes.** Every generation that covered a rewritten or deleted file is rebuilt and the old one reaped, so a pin
+  to it is refused once it is gone (`OPTIMIZED_INDEX_GENERATION_MISSING`, §15.8.1).
+
+So a replay of a pinned plan after an erasure is either refused by name (an expired snapshot or a reaped generation)
+or returns the original result less the erased subject (a rewritten tail); it never returns the subject.
 
 ## 15.4 Source kinds
 
@@ -432,11 +470,14 @@ message WireIndexLookupNode {
 
 ### 15.7.1 The graph is tables
 
-The graph is the tables `episodes`, `entities` and `edges` (later `communities`): graph storage chose tables as the
-source of truth, and the storage stack makes them Iceberg tables with a graph delta tail. A graph read is three
-`komira.iceberg.table` scans (with `tail`) in one **pin group** (§15.3.4): one recorded snapshot set.
-Text search over entities and episodes, and similarity over their embeddings, are §15.5 access paths on those scans.
-The CSR adjacency is an index over `edges` (`IndexPin.kind = CSR`), and the read rule applies to it unchanged.
+The graph's facts are the tables `episodes`, `entities` and `edges` (later `communities`): graph storage chose tables
+as the source of truth, and the storage stack makes them Iceberg tables at L3 with a graph delta tail. The graph
+itself is a layer above L4, not an index and not a store of its own (storage stack, "The stack, revised"): it
+consumes the text, vector and adjacency indexes built over those tables. A graph read is three
+`komira.iceberg.table` scans (with `tail`) in one **pin group** (§15.3.4): one recorded snapshot set, with every
+tail cut at one position. Text search over entities and episodes, and similarity over their embeddings, are §15.5
+access paths on those scans. The CSR adjacency is an index over `edges` (`IndexPin.kind = CSR`), and the read rule
+applies to it unchanged.
 
 ### 15.7.2 `WireExpandNode`
 
@@ -660,7 +701,9 @@ Named mutants, each of which must turn a test red: the hit check skips position 
 S is accepted; a host falls back from a reaped generation to a full scan in `INDEX` mode; the tail is pinned after the
 table is loaded, with a roll in between (duplicated offsets); table and tail read as a union (a missing range);
 `POST` lowered as `PRE`; a distance accumulated in FLOAT32; `NEIGHBORS` reporting the last rather than the least hop
-count; a pin-group member read at the table's current snapshot instead of the recorded one.
+count; a pin-group member read at the table's current snapshot instead of the recorded one; a pin-group member
+whose tail span ends one delta later than the others; a host that reads a tail object erasure rewrote by the key
+remembered at pin time.
 
 ## 15.11 Compatibility
 

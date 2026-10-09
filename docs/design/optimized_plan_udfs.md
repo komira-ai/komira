@@ -38,8 +38,9 @@ no engine thread ever waits on another engine thread's UDF call.
 
 1. **Native.** Languages that compile to native code and speak the C ABI directly: Mojo, Rust, C, C++, Zig. A native
    UDF is a shared library compiled for the host platform, loaded and called through the UDF runtime C ABI over Arrow
-   C Data, with no interpreter. It runs in-process or, for isolation, behind the worker transport (§10.10); which
-   transport is the default for native code is an open question.
+   C Data, with no interpreter, by the one `komira/native` runtime (`udf_runtime_interface.md` §1.2). Native UDFs
+   ship at the first release. They run in-process in the engine by default; the worker transport is opt-in, for
+   crash isolation (§10.10).
 2. **Managed, one interpreter per engine thread.** Runtimes with a global interpreter lock or a single-threaded virtual
    machine: Python on builds with a GIL, and TypeScript on Node. Each engine thread that runs a UDF operator gets its
    own interpreter or isolate: for Python, one worker process per engine thread, or a subinterpreter where the UDF's
@@ -67,8 +68,9 @@ that has one.
 All three modes are the same `UdfRef` (§10.3): an open runtime id, explicit Arrow types and a kind. All three run
 through the same runtime contract and the same transports: the C ABI, called in-process or served by a worker process.
 The logical, optimized and physical plans carry them identically, and nothing in this format tells the modes apart.
-Crash isolation and privilege separation come from the worker transport (§10.10). Workers are the recommended default
-for native code until a host can show that in-process native code cannot reach privileged credentials.
+Crash isolation comes from the worker transport (§10.10). Privilege separation does not need it: the engine holds
+only what the run itself may use, which is the user's own, and the one secret a run must not reach, the supervisor's
+heartbeat token, lives in a separate process under a separate user id and never reaches the engine (§10.10).
 
 **Every return type is explicit in the plan.** The optimizer decides predicate placement, typed kernels and every
 node's output schema when the plan is built, so a type learned while the plan runs would leave those decisions open.
@@ -132,8 +134,10 @@ form, set for the mergeable form.
   and calls `update` with the group's rows in batches. The optimizer may split the aggregate into `PARTIAL` and
   `FINAL` (§5.2 `mode`): the partial step emits `state()` as an Arrow value of type `state_type`, which crosses the
   exchange as an ordinary column with no pickle in the shuffle, and the final step `merge`s the partial states and
-  calls `finish()`. A state larger than `max_state_bytes` (§10.3) fails the run with `UDF_STATE_TOO_LARGE`, carrying
-  the group key.
+  calls `finish()`. At the first release one group's state is capped at a fixed 64 MiB (67,108,864 bytes of Arrow
+  state), the same on every host and not settable by a plan. A group whose state exceeds it fails the run with
+  `UDF_STATE_TOO_LARGE`, carrying the group key and the cap. Making the cap tunable is tracked in komira-ai/komira#1148;
+  `UdfResources.max_state_bytes` (§10.3) is reserved for it.
 
 **Table functions need no kind of their own.** A function that returns a table of any length is
 `MAP_BATCHES_FRAME`, which may be a generator, or a grouped one. A per-row table function is a `SCALAR` UDF that returns a
@@ -250,8 +254,8 @@ message UdfResources {
   uint32  max_batch_rows       = 5;  // 0 = the host chooses; otherwise a ceiling on rows per call
   uint64  max_runtime_ms       = 6;  // STEP only; 0 = the host's default
   uint32  max_concurrent_calls = 7;  // async functions only; 0 = the host's default
-  uint64  max_state_bytes      = 8;  // AGGREGATE mergeable form only: a ceiling per group's state;
-                                     // 0 = the host's default (64 MiB proposed; not yet decided)
+  uint64  max_state_bytes      = 8;  // not in the first format_version: the per-group state cap is fixed
+                                     // at 64 MiB (§10.2); tuning it is komira-ai/komira#1148
 }
 ```
 
@@ -531,11 +535,18 @@ function in one of two forms:
 | A module-level exported function | `BUNDLE` | The bundle (code role `"bundle"`) |
 | A closure or an arrow function whose captured variables are plain data or module bindings | `VALUE` | Its source, its captures, and the bundle its module bindings resolve into |
 
-- **The bundle.** The SDK bundles the function's module and everything it imports, its npm dependencies included, into
-  one JavaScript bundle (esbuild, *informative*), named by its sha256. A dependency that loads a native addon is
-  refused at capture by name (`UDF_CAPTURE_NATIVE_ADDON`) at the first release: an addon built on the user's machine
-  is built for that machine's platform, and rebuilding addons for the host's platform, as Python wheels are resolved
-  for Linux, comes later.
+- **The bundle and the dependencies.** JavaScript dependencies live in the environment image, never in the plan, in
+  one of two places by what they contain:
+  - **Pure JavaScript.** The SDK bundles the function's module and everything it imports, its pure-JavaScript npm
+    dependencies included, into one JavaScript bundle (esbuild, *informative*), named by its sha256, in the code
+    layer under `/komira-code/`.
+  - **A package with a native addon** stays outside the bundle (marked external), because an addon built on the
+    user's machine is built for that machine's platform. The SDK records its name and exact version from the
+    project's lockfile, and the image builder installs it for the host's platform into `komira/node`'s environment
+    directory, `/opt/env/komira/node/` (§10.11), as Python wheels are resolved for Linux. The runtime resolves the
+    bundle's external imports there. A package with no build for the host's platform is refused by name when the
+    image is built (`ENV_BUILD_NATIVE_ADDON_UNAVAILABLE`), and an image that lacks it fails the load check
+    (`OPTIMIZED_UDF_CODE_UNLOADABLE`, §10.11).
 - **Closures.** JavaScript gives a program no access to a closure's variables, and a function's source text alone
   cannot recover them ([Arquero](https://idl.uw.edu/arquero/api/expressions) refuses closures for that reason). The
   SDK reads them through the V8 inspector, the way Pulumi's `serializeFunction` does
@@ -663,13 +674,21 @@ worker processes started from the same image by the runtime's launcher; the host
 policy and the runtime's declared capabilities (§5.3 there). A plan may use several runtimes, and every rule below
 holds for each.
 
-- **Workers by default on a shared host.** On a shared host user code runs in workers by default, because a crash in
-  a user's native extension then cannot take the engine down, a GIL does not serialize workers, and memory is
-  attributed per worker. Native UDFs (§10.1) run in workers by default for the same reasons, and because a worker
-  cannot reach the engine's credentials. Runtimes from added image layers run only in workers.
-- **Workers are isolated from the supervisor.** They run as a separate user id, cannot read the supervisor's
-  credentials or its heartbeat channel, and cannot trace or signal the engine or the supervisor. User code is the
-  customer's own, but the supervisor's reports must stay the supervisor's.
+- **Managed runtimes run in workers by default on a shared host,** because a crash in a user's native extension then
+  cannot take the engine down, a GIL does not serialize workers, and memory is attributed per worker. Runtimes from
+  added image layers run only in workers.
+- **Native UDFs run in-process by default** (`komira/native`, §10.1): no copy, no interpreter and no process per
+  batch. The worker transport is opt-in, for crash isolation, by host policy or a run option outside the plan (the
+  transport is never in the plan, §10.13); a crash in an in-process native UDF fails the run. This default rests on
+  the next rule, and a host that cannot meet that rule runs native UDFs in workers.
+- **The heartbeat token stays in the supervisor.** The supervisor holds no long-lived credential and none
+  that meters usage: it holds a run-scoped id and token used only to authenticate its heartbeats, and the party that
+  receives the heartbeats meters the run's usage by accumulating them. The supervisor runs as its own process
+  under its own user id, distinct from the engine's. The token is never passed to the engine: not in its arguments,
+  its environment, a file its user id can read, or an inherited descriptor. So user code, whether in the engine or in
+  a worker, cannot read the token, forge or suppress a heartbeat, or trace or signal the supervisor. Workers run under
+  a further user id of their own, so a worker cannot trace or signal the engine either. User code is the customer's
+  own, but the supervisor's reports must stay the supervisor's.
 - **Code loads before data is read.**
   - The runtime verifies the sha256 of every code object and data blob it loads, on either transport; a mismatch is
     `OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`.
@@ -744,35 +763,42 @@ A plan with no `UdfRef` runs on an unmodified released base image. A plan whose 
 example separate CPU and GPU pools) is a later, additive field; today a plan has one environment.
 
 **What the image is.** An environment image is **built FROM a released komira base image**, so its layer list
-begins with that base's layers. The base contains:
+begins with that base's layers. A release ships **several bases**: one per supported CPython minor and one per
+supported Node major. Remote runs follow the client's version: a Python producer's environment is built FROM the base
+of its CPython minor, and a TypeScript producer's FROM the base of its Node major. Each base contains:
 
 - the engine and the producer library;
 - the job supervisor (`src/komira_job_supervisor`);
-- the runtime registry: each shipped runtime (`komira/python` with one CPython minor, `komira/node` with one Node
-  major), its library and its worker launcher, with the serializers and capture formats each accepts. *(Not yet decided:
-  which Node majors a base carries, one or several, and whether remote runs follow the client's Node major as they
-  follow its Python minor. This document assumes one major per base and runs that follow the client's major.)*
+- the runtime registry: `komira/native`, and the one managed runtime the base is for (`komira/python` with its one
+  CPython minor, or `komira/node` with its one Node major), each with its library and its worker launcher, and the
+  serializers and capture formats each accepts.
+
+A plan that needs both `komira/python` and `komira/node` has no base at the first release and is refused at
+admission check 3 (`OPTIMIZED_ENV_RUNTIME_MISSING`); each SDK captures only its own language, so only an assembled
+plan can need both *(inferred)*.
 
 The base image's `[layers]` output lets this prefix be checked: "An image whose layers begin with these is built
 FROM this one" (`packaging/images/base/README.md` in komira-ai/komira#1070, not yet on `main`). The layers the
 user's side adds may contain:
 
-- dependency layers, in the prefix each runtime names (`/opt/venv/` for `komira/python`), or one layer per
-  distribution;
-- a code layer with the source bundles, JavaScript bundles and payloads. *(Not yet decided: where JavaScript
-  bundles and any `node_modules` live within the prefixes below; this document assumes the code layer.)*
+- dependency layers, in the runtime's environment directory `/opt/env/<runtime>/` (one layer, or one per
+  distribution or package): `/opt/env/komira/python/` is a virtual environment created at that path, and
+  `/opt/env/komira/node/` holds the packages with native addons (§10.6). Earlier revisions named Python's directory
+  `/opt/venv/`; it is mapped to `/opt/env/komira/python/` and never shipped;
+- a code layer under `/komira-code/` with the source bundles, the JavaScript bundles (pure-JavaScript dependencies
+  included, §10.6) and the payloads;
 - data-blob layers. A large blob may be its own layer, so an unchanged blob is pulled once per host;
 - third-party runtime layers, each under `/komira-runtimes/<namespace>/<name>/` with the runtime's library, its
   manifest and its launcher (`udf_runtime_interface.md` §8.3). Such a runtime is never loaded into the engine or the
   supervisor; it runs only in workers.
 
-**Added layers write only their prefixes.** An added layer may contain paths only under a runtime's dependency prefix
-(`/opt/venv/` for `komira/python`), `/komira-code/` (code and data) and `/komira-runtimes/<namespace>/<name>/`
-(third-party runtimes), and no whiteout. Everything else belongs to the base: its program prefixes
+**Added layers write only their prefixes.** An added layer may contain paths only under a runtime's environment
+directory `/opt/env/<runtime>/` (dependencies), `/komira-code/` (code and data) and
+`/komira-runtimes/<namespace>/<name>/` (third-party runtimes), and no whiteout. Everything else belongs to the base: its program prefixes
 (`/komira/`, `/opt/kci/`), and also its C library, loader configuration and CA certificates
 (`packaging/images/base/README.md` in komira-ai/komira#1070), any of which an added layer could otherwise use to run
-code inside the supervisor. System libraries a dependency needs are a builder concern and land under `/opt/venv/`
-too *(inferred: a relocatable install prefix; see question 8 in §14)*.
+code inside the supervisor. System libraries a dependency needs are a builder concern and land in the same
+runtime's environment directory *(inferred: a relocatable install prefix; see question 8 in §14)*.
 
 **Command and configuration are always ours.** The runner names `/komira/bin/supervisor` as the command. It ignores
 the image configuration's `Entrypoint`, `Cmd`, `Env`, `User` and `WorkingDir`, which a derived image can set (same
@@ -796,15 +822,14 @@ needs only the manifest bytes, so a scheduler never pulls a layer:
      tag, `cp313t`), and patch releases within a minor may differ. *(Inferred: this relies on CPython keeping the
      bytecode magic number fixed within a released minor, which it has broken once, in 3.5.3. Each base release
      compares `importlib.util.MAGIC_NUMBER` across the patches of each minor it ships.)*
-   - For `komira/node` the ABI tag is the Node major (for example `node22`). *(This follows the assumption above that
-     runs follow the client's Node major; it changes with that decision.)*
+   - For `komira/node` the ABI tag is the Node major (for example `node22`), and runs follow the client's major.
 
 The host runs these again, and then, with the layers in hand:
 
 4. **Code present.** Every `code.code[i].sha256` and every `data_blobs` digest is in the image's code or data
    layers. Otherwise: `OPTIMIZED_ENV_CODE_MISSING`, naming the digest and the UDF.
-5. **Packages present.** Every `PACKAGE` reference resolves in its runtime's dependency prefix (for `komira/python`,
-   the distribution is importable). Otherwise: `OPTIMIZED_ENV_PACKAGE_MISSING`.
+5. **Packages present.** Every `PACKAGE` reference resolves in its runtime's environment directory (for
+   `komira/python`, the distribution is importable from `/opt/env/komira/python/`). Otherwise: `OPTIMIZED_ENV_PACKAGE_MISSING`.
 6. **Added layers stay in their prefixes.** Otherwise: `OPTIMIZED_ENV_RESERVED_PATH`, naming the layer and the path.
 7. **Descriptors valid and shapes supported.** Each runtime's `validate` accepts its descriptors and its capabilities
    cover each shape. Otherwise: `OPTIMIZED_UDF_DESCRIPTOR_INVALID` or `OPTIMIZED_UDF_KIND_UNSUPPORTED`.
