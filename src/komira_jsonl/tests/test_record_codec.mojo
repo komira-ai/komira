@@ -10,7 +10,10 @@
 #   * test_split_lines_chunks -- `decode.split_lines` on inputs shorter
 #     than one 16-byte chunk, with LFs inside the first chunk (one or
 #     several, and an LF as its last byte), lines spanning chunks, empty
-#     lines and a last line with no LF. Each expected list is written out.
+#     lines and a last line with no LF. Each expected list is written out;
+#     LF-only input (shorter than a chunk, and 17 LFs) returns no lines,
+#     asserted by count (`parse_jsonl` relies on it: no empty line reaches
+#     its skip).
 #   * test_parse_record_and_parse_jsonl -- `parse_record` hands the text to
 #     `T.from_json`; `parse_jsonl` decodes one record per non-empty line in
 #     file order, and a bad line raises from `from_json`.
@@ -128,7 +131,12 @@ def test_split_lines_chunks() raises:
     # Shorter than a chunk: the scalar tail only.
     assert_equal(_split("a\n\nbb\n"), "a|bb")
     assert_equal(_split("abc"), "abc")
-    assert_equal(_split("\n\n"), "")
+    # LF-only input returns no lines at all, not one empty line (the
+    # joined form cannot tell the two apart): scalar tail, and a full
+    # 16-byte chunk of LFs plus a tail.
+    assert_equal(len(split_lines(String("\n").as_bytes())), 0)
+    assert_equal(len(split_lines(String("\n\n").as_bytes())), 0)
+    assert_equal(len(split_lines(String("\n" * 17).as_bytes())), 0)
     # LFs inside the first 16 bytes: two lines and an empty one in the
     # chunk, then a last line spanning into the tail with no LF.
     assert_equal(_split("ab\ncd\n\nefghijklmnopqrstu"), "ab|cd|efghijklmnopqrstu")

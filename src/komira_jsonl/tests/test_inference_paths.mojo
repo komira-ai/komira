@@ -12,7 +12,9 @@
 #   * test_scalar_whitespace_and_classify -- a scalar with blanks before and
 #     after it infers its type; `_classify_scalar` refuses an empty range.
 #   * test_merge_partials -- `_merge_partial_into` keeps first-seen order,
-#     promotes Int64 + Float64 to Float64, and refuses Int64 vs Bool and
+#     promotes Int64 + Float64 to Float64 (existing Int64 and existing
+#     Float64: the promoted type is stored, not the incoming one), keeps an
+#     existing Bool against an incoming Null, and refuses Int64 vs Bool and
 #     Float64 vs String naming both types; `_inferred_tag_name` of every tag.
 #   * test_inferred_to_arrow_every_tag -- the lattice tag to Arrow type map,
 #     MIXED included (STRING).
@@ -199,6 +201,26 @@ def test_merge_partials() raises:
     assert_equal(Int(di[0]), Int(INF_FLOAT64))
     assert_equal(Int(di[1]), Int(INF_STRING))
     assert_equal(Int(di[2]), Int(INF_BOOL))
+    # The existing type is the wider one: it must stay, whatever the
+    # incoming partial observed (FLOAT64 absorbs INT64; NULL is bottom).
+    var wn = List[String]()
+    var wi = List[UInt8]()
+    wn.append("f")
+    wi.append(INF_FLOAT64)
+    wn.append("b")
+    wi.append(INF_BOOL)
+    var on = List[String]()
+    var oi = List[UInt8]()
+    on.append("f")
+    oi.append(INF_INT64)
+    on.append("b")
+    oi.append(INF_NULL)
+    _merge_partial_into(wn, wi, on, oi)
+    assert_equal(len(wn), 2)
+    assert_equal(wn[0], "f")
+    assert_equal(wn[1], "b")
+    assert_equal(Int(wi[0]), Int(INF_FLOAT64))
+    assert_equal(Int(wi[1]), Int(INF_BOOL))
     var tail = String(
         "). Wide-default inference requires uniform types per column."
         " Recovery: pass an explicit schema via ctx.read_json_batch(path,"

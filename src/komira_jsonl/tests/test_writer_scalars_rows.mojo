@@ -29,7 +29,9 @@
 #   * test_row_output_every_supported_tag -- `write_row_output_jsonl` with
 #     INT64, INT32, FLOAT64 and STRING columns and a validity byte: values,
 #     an all-null row, INT32 min and an empty string; a BOOL tag is refused
-#     naming the tag; a layout with no columns writes nothing.
+#     naming the tag. A layout with no columns is not asserted: it writes
+#     nothing for rows that the reader would read back as `{}` records
+#     (komira-ai/komira#1139).
 # =============================================================================
 
 from std.memory import bitcast
@@ -318,11 +320,6 @@ def _row_block() raises -> RowBlock:
     return blk^
 
 
-def _no_fields() -> Schema:
-    var sb = SchemaBuilder()
-    return sb.build()
-
-
 def _tags(third: UInt8) -> List[UInt8]:
     var t = List[UInt8]()
     t.append(DT_I64)
@@ -363,17 +360,6 @@ def test_row_output_every_supported_tag() raises:
         "write_row_output_jsonl: output DType tag " + String(Int(DT_BOOL))
         + " outside the row-streaming supported subset.",
     )
-    # No columns: nothing written.
-    var none_blocks = Slab[RowBlock]()
-    none_blocks.append(_row_block())
-    var none = RowOutput(
-        none_blocks^,
-        RowOutputLayout(List[Int](), List[UInt8](), 0, False),
-        _no_fields(),
-    )
-    var nbuf = List[UInt8]()
-    write_row_output_jsonl(nbuf, none)
-    assert_equal(len(nbuf), 0)
 
 
 def main() raises:

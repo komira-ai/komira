@@ -15,7 +15,8 @@
 #     Int64 max + 1 and min - 1, Int64 min.
 #   * test_decimal_refusals_and_quotes -- precision 0 and 39, scale -1 and
 #     scale > precision, a leading `+`, a quoted value (both quotes, and a
-#     leading quote only), a value starting with `.`.
+#     trailing quote only, the form the columnar materializer passes), a
+#     value starting with `.`.
 #   * test_list_refusals -- tape position past the end, a non-`[` tag, a
 #     `null` element for an unsupported child type, an unquoted element for
 #     a STRING child, a string element for an INT64 child, a `:` inside the
@@ -174,7 +175,6 @@ def test_decimal_refusals_and_quotes() raises:
     assert_equal(_dec_err("1", 5, 6), sc + "6")
     assert_equal(_dec("+1.5", 5, 2), 150)
     assert_equal(_dec('"12.5"', 5, 2), 1250)
-    assert_equal(_dec('"-0.07', 5, 2), -7)
     assert_equal(_dec('7"', 5, 0), 7)
     assert_equal(
         _dec_err(".5", 5, 2),
