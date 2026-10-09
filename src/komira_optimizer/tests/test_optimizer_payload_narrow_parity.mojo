@@ -18,14 +18,17 @@
 # the shapes it does not narrow. It is the parity oracle for moving the rule
 # to host lowering: the host rule must reproduce every row from the same
 # fixtures, after which this optimizer pass can be removed without changing
-# a row. Rows are compared one by one, and the row count is pinned, so a
-# dropped or reordered fixture fails too.
+# a row. Rows are compared one by one and the row count is pinned. Each
+# plan is built from its row's name, in table order, so a dropped row fails
+# the count and a row with no builder fails with `no fixture named`;
+# reordering rows does not fail and is not meant to.
 #
 # Fixture families:
 #   hc4 / ladder_*  the hc4 shape and the width ladder boundaries, as payload
 #                   ranges on the left side, next to a right side that narrows;
 #   multi_* / key_* several payloads on one scan, and key exclusion by THIS
-#                   side's key name only;
+#                   side's key name only; payload_first_column puts the
+#                   payload at schema and stats index 0;
 #   refuse_*        one reason not to narrow, next to a sibling that narrows
 #                   (on the same scan for a column refusal, on another join
 #                   for a join refusal);
@@ -91,7 +94,7 @@ from komira_optimizer.optimizer_payload_narrow import (
 # The table
 # =============================================================================
 
-comptime _ROWS = 68
+comptime _ROWS = 70
 
 
 def _expected_table() -> String:
@@ -113,6 +116,7 @@ ladder_neg_2p62 => scan#0: pv:1:-4611686018427387904 | scan#1: bv:2:1
 ladder_neg_over_2p62 => scan#0: | scan#1: bv:2:1
 multi_payload_widths => scan#0: a:1:0,b:2:0,c:4:0 | scan#1: bv:2:1
 key_names_per_side => scan#0: rk:1:0 | scan#1: x:2:0
+payload_first_column => scan#0: pv:2:1 | scan#1: bv:2:1
 refuse_nullable => scan#0: gv:2:5 | scan#1: bv:2:1
 refuse_stats_entry_missing => scan#0: gv:2:5 | scan#1: bv:2:1
 refuse_no_min => scan#0: gv:2:5 | scan#1: bv:2:1
@@ -137,6 +141,7 @@ side_filter_project_filter => scan#0: pv:2:1 | scan#1: bv:2:1
 side_project_project => scan#0: pv:2:1 | scan#1: bv:2:1
 side_computed_project => scan#0: | scan#1: bv:2:1
 side_computed_project_unaliased => scan#0: | scan#1: bv:2:1
+side_computed_project_first => scan#0: | scan#1: bv:2:1
 side_udf_project => scan#0: | scan#1: bv:2:1
 side_aggregate => scan#0: | scan#1: bv:2:1
 walk_filter => scan#0: pv:2:1 | scan#1: bv:2:1
@@ -422,7 +427,10 @@ def _ladder_fixture(name: String) raises -> Optional[LogicalPlan]:
     if name == "ladder_neg_2p62":
         return _ladder(-p62, -p62)
     if name == "ladder_neg_over_2p62":
-        return _ladder(-p62 - 1, 0)
+        return _ladder(-p62 - 1, -p62 - 1)
+    if name == "payload_first_column":
+        # The payload at schema and stats index 0, ahead of the key.
+        return _join(_scan("p.parquet", _cols2(_c("pv", 1, 999), _key())), _good_right())
     if name == "multi_payload_widths":
         var cols = _cols3(_key(), _c("a", 0, 10), _c("b", 0, 1000))
         cols.append(_c("c", 0, 70000))
@@ -543,6 +551,12 @@ def _side_fixture(name: String) raises -> Optional[LogicalPlan]:
         # a non-nullable INT64 named like the scanned column.
         var e = Expr.alias(Expr.unary(UN_NEGATE, Expr.col_ref("pv")), String("pv"))
         return _join(_project_key_pv(_p(), e^), _good_right())
+    if name == "side_computed_project_first":
+        # The computed expr at Project index 0, ahead of the key.
+        var pe = ExprArray()
+        pe.append(Expr.alias(Expr.unary(UN_NEGATE, Expr.col_ref("pv")), String("pv")))
+        pe.append(Expr.col_ref("key"))
+        return _join(LogicalPlan.project(pe^, _p()), _good_right())
     if name == "side_computed_project_unaliased":
         var e = _pv_plus_1()
         return _join(_project_key_pv(_p(), e^), _good_right())
