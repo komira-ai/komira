@@ -243,6 +243,12 @@ def test_bridge_validity_positions_across_blocks() raises:
     assert_false(Bool(c1.validity))
     assert_false(Bool(c3.validity))
     assert_equal(c1.null_count, 0)
+    # The Column keeps the count the bridge computed (the typed accessors
+    # above recount it from the bitmap).
+    assert_equal(rb.column_at(0).null_count(), 2)
+    assert_equal(rb.column_at(1).null_count(), 0)
+    assert_equal(rb.column_at(2).null_count(), 1)
+    assert_equal(rb.column_at(4).null_count(), 1)
     var null0: List[Int] = [3, 8]
     for r in range(9):
         assert_equal(c0.is_null(r), r in null0, "i64 row " + String(r))

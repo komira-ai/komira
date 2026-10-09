@@ -568,13 +568,17 @@ def test_var_key_hash_cell_alone_and_two_cells() raises:
 def test_var_key_hash_long_payload_chunks() raises:
     """A 300-byte key payload (the cell's payload is 301 bytes with its tag)
     spans two 240-byte chunks: equal payloads at two offsets hash alike; a
-    change at byte 3 (first chunk) or byte 299 (second chunk) changes the
-    hash; 239 and 240 key bytes (240 and 241 payload bytes) differ too."""
+    change in either fixed i64, at byte 3 (first chunk) or at byte 299
+    (second chunk) changes the hash; 239 and 240 key bytes (240 and 241 payload bytes) differ too."""
     var base = List[UInt8]()
     for i in range(300):
         base.append(UInt8(i & 0xFF))
     var h0 = _hash_row_bytes(_key_block(0, 1, base, 2), 0, 24)
     assert_equal(h0, _hash_row_bytes(_key_block(5, 1, base, 2), 0, 24))
+    # The fixed bytes still count when the payload is chunked: every chunk
+    # is chained from the seed the fixed bytes produced.
+    assert_true(h0 != _hash_row_bytes(_key_block(0, 9, base, 2), 0, 24))
+    assert_true(h0 != _hash_row_bytes(_key_block(0, 1, base, 9), 0, 24))
     var early = base.copy()
     early[3] = 0xFF
     assert_true(h0 != _hash_row_bytes(_key_block(0, 1, early, 2), 0, 24))
