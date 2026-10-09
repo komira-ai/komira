@@ -24,7 +24,7 @@
 #                      from §8.2.2 (request-only) pinned on purpose (#873).
 #   * conn-specific    RFC 9113 §8.2.2's five names, and nothing else.
 #   * :status          RFC 9113 §8.3.2 requires it; RFC 9110 §15 gives the
-#                      three-digit form.
+#                      three-digit form and the range 100..599.
 #   * content-length   RFC 9110 §8.6: 1*DIGIT, at most 18 digits (no Int64
 #                      overflow).
 #   * no-content       RFC 9113 §8.1.1 -> RFC 9110 §6.4.1: 1xx, 204, 304, and
@@ -32,7 +32,7 @@
 #   * head block       RFC 9113 §8.1.1, §8.2.1, §8.2.2, §8.3, §8.3.2 and RFC
 #                      9110 §8.6, each malformed shape with its reason code.
 #   * trailer block    RFC 9113 §8.1: no pseudo-header at all; §8.2.1/§8.2.2
-#                      unchanged.
+#                      unchanged, the te value rule included.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -472,6 +472,21 @@ def test_head_status_required_and_exact() raises:
     _assert_head(_block1(_h(":status", "")), H2_MALFORMED_BAD_STATUS, "empty")
 
 
+def test_status_outside_100_to_599_refused() raises:
+    # RFC 9110 §15: status codes are 100..599. Three digits outside that
+    # range were accepted before the fix for #873 item 1. Both edges of both
+    # bounds, and the extremes.
+    assert_equal(h2_status_code_of(String("000")), -1, "000")
+    assert_equal(h2_status_code_of(String("099")), -1, "099")
+    assert_equal(h2_status_code_of(String("100")), 100, "100")
+    assert_equal(h2_status_code_of(String("599")), 599, "599")
+    assert_equal(h2_status_code_of(String("600")), -1, "600")
+    assert_equal(h2_status_code_of(String("999")), -1, "999")
+    _assert_head(_block1(_h(":status", "099")), H2_MALFORMED_BAD_STATUS, "099")
+    _assert_head(_block1(_h(":status", "600")), H2_MALFORMED_BAD_STATUS, "600")
+    _assert_text(H2_MALFORMED_BAD_STATUS, "in 100..599")
+
+
 def test_head_pseudo_rules() raises:
     # RFC 9113 §8.3: pseudo-headers first, once each, and only :status in a
     # response.
@@ -672,6 +687,24 @@ def test_trailers() raises:
     )
 
 
+def test_trailer_te_value_checked() raises:
+    # RFC 9113 §8.2.2's te rule applies to a trailer section as to a head
+    # block: any value but "trailers" is malformed. Accepted before the fix
+    # for #873 item 2. "trailers" itself is treated as in a head block.
+    _assert_trailer(
+        _block2(_h("grpc-status", "0"), _h("te", "gzip")),
+        H2_MALFORMED_BAD_TE,
+        "te gzip in a trailer",
+    )
+    _assert_trailer(
+        _block1(_h("te", "trailers, deflate")),
+        H2_MALFORMED_BAD_TE,
+        "te list in a trailer",
+    )
+    var ok = h2_validate_response_trailers(_block1(_h("te", "trailers")))
+    assert_equal(Int(ok.reason_code), Int(H2_MALFORMED_OK), "te trailers")
+
+
 # =============================================================================
 # main
 # =============================================================================
@@ -711,6 +744,8 @@ def main() raises:
     print(" head_te_trailers_accepted_deviation PASS")
     test_head_status_required_and_exact()
     print(" head_status_required_and_exact PASS")
+    test_status_outside_100_to_599_refused()
+    print(" status_outside_100_to_599_refused PASS")
     test_head_pseudo_rules()
     print(" head_pseudo_rules PASS")
     test_head_field_name_and_value()
@@ -721,4 +756,6 @@ def main() raises:
     print(" head_content_length PASS")
     test_trailers()
     print(" trailers PASS")
-    print("test_L2_h2_response_validation: ALL 21 TESTS PASS")
+    test_trailer_te_value_checked()
+    print(" trailer_te_value_checked PASS")
+    print("test_L2_h2_response_validation: ALL 23 TESTS PASS")

@@ -5,7 +5,8 @@
 #
 # Pure-Mojo HPACK (RFC 7541):
 #   * Integer codec (5/6/7-bit prefix variants)
-#   * String codec (raw + Huffman per RFC 7541 Appendix B)
+#   * String codec (raw + Huffman per RFC 7541 Appendix B; the Huffman
+#     tables and decoder live in hpack_huffman.mojo)
 #   * Static table (61 entries; RFC 7541 Appendix A)
 #   * Dynamic table (size-bounded, FIFO eviction)
 #   * 4 header-field representations (indexed, literal-incremental,
@@ -19,6 +20,8 @@
 # heap-owning fields; lives only in `List[_HpackEntry]` (NOT in any
 # byte-backed slab). Safe per the pointer rules.
 # =============================================================================
+
+from .hpack_huffman import huffman_decode_octets
 
 
 # =============================================================================
@@ -323,12 +326,10 @@ def decode_integer(
 
 
 # =============================================================================
-# §4 — String codec — RAW (non-Huffman) path + Huffman skeleton.
+# §4 — String codec (RFC 7541 §5.2).
 # =============================================================================
-# scope: support BOTH raw + Huffman decode (decoder MUST
-# accept either per RFC 7541 §5.2). Encoder uses RAW by default; the
-# encoder offers an opt-in Huffman path for compact responses but the
-# default is raw because raw avoids the Huffman table build cost.
+# The decoder accepts raw and Huffman-coded literals (RFC 7541 §5.2 lets an
+# encoder pick either); the encoder emits raw literals only.
 
 
 def encode_string(
@@ -367,20 +368,37 @@ struct _StringDecodeResult(Movable, Deinitable):
     var ok: Bool
 
 
+def hpack_octets_to_string(octets: List[UInt8]) -> String:
+    """The String a decoded HPACK string literal's octets become.
+
+    RFC 7541 §5.2: a string literal is a sequence of octets. When those
+    octets are well-formed UTF-8 the String holds exactly them (`c3 a9` is
+    the two octets of "é"). A Mojo String must be UTF-8, so octets that are
+    not (obs-text such as a lone 0x80 or 0xff, or a truncated sequence) are
+    mapped one code point per octet, U+0000..U+00FF, the mapping the h1
+    parser applies to obs-text; such a value reads back longer than its
+    wire form.
+    """
+    try:
+        return String(StringSlice(from_utf8=Span(octets)))
+    except:
+        var s = String()
+        for i in range(len(octets)):
+            s += chr(Int(octets[i]))
+        return s^
+
+
 def decode_string(
     buf: Span[UInt8, _],
     start: Int,
 ) -> _StringDecodeResult:
-    """Decode an HPACK string literal.
+    """Decode an HPACK string literal (RFC 7541 §5.2).
 
-    Reads first-byte H flag (MSB) + 7-bit-prefix length, then `length`
-    octets. If H==1, the bytes are Huffman-encoded; decodes via the
-    Huffman tree (RFC 7541 Appendix B). If H==0, raw.
-
-    for now Huffman: implemented as a per-bit table walk over the 256-entry
-    code table. Bodies that arrive Huffman'd are decoded; bodies sent by
-    the encoder are raw. The Huffman decoder lives in `_huffman_decode`
-    below — keeps the encoder simple.
+    Reads the H flag (MSB of the first octet) and the 7-bit-prefix length,
+    then `length` octets: Huffman-coded (Appendix B, every octet and EOS,
+    see hpack_huffman.mojo) when H is 1, raw when H is 0. The octets become
+    the value through `hpack_octets_to_string`. `ok` is False when the
+    length or the octets run past `buf`, or the Huffman data is invalid.
     """
     var out = _StringDecodeResult(
         value=String(), consumed=0, ok=False,
@@ -397,315 +415,18 @@ def decode_string(
     if data_off + slen > n:
         return out^
     if is_huffman:
-        var decoded = _huffman_decode(buf, data_off, slen)
+        var decoded = huffman_decode_octets(buf, data_off, slen)
         if not decoded[1]:
             return out^
-        out.value = decoded[0]
+        out.value = hpack_octets_to_string(decoded[0])
     else:
-        # Raw: build String from bytes.
-        var s = String()
-        var i = 0
-        while i < slen:
-            s = s + chr(Int(buf[data_off + i]))
-            i = i + 1
-        out.value = s^
+        var raw = List[UInt8](capacity=slen)
+        for i in range(slen):
+            raw.append(buf[data_off + i])
+        out.value = hpack_octets_to_string(raw)
     out.consumed = lenres.consumed + slen
     out.ok = True
     return out^
-
-
-# =============================================================================
-# §5 — Huffman decoder (RFC 7541 Appendix B).
-# =============================================================================
-# Strategy: bit-by-bit traversal of the implicit canonical Huffman tree.
-# The 256-symbol code table is encoded as (code_bits, code_length) pairs.
-# An EOS sentinel (symbol 256) is 30 bits of all 1s; partial-EOS padding
-# (1-7 trailing 1-bits) is valid per RFC 7541 §5.2.
-#
-# For scope: implement a compact bit-stream traversal. Performance
-# optimization (lookup table) is a follow-up.
-
-
-def _huffman_code(symbol: Int) -> Tuple[UInt32, Int]:
-    """RFC 7541 Appendix B — return (code, length_in_bits) for symbol.
-
-    Symbols 0..255 are the byte values; symbol 256 is EOS.
-
-    For brevity, only the printable-ASCII codes used by typical HTTP
-    headers are tabulated. Codes for non-ASCII / control bytes fall back
-    to a sentinel `(0, 0)`; decoder treats unknown codes as decode error.
-    Tests/integration may compile-time-assert no non-ASCII traffic; in
-    practice all real header bodies are printable.
-    """
-    # ASCII space (0x20) = 010100 (6 bits)
-    if symbol == 0x20:
-        return (UInt32(0b010100), 6)
-    # ! 0x21 = 1111111000 (10 bits)
-    if symbol == 0x21:
-        return (UInt32(0b1111111000), 10)
-    if symbol == 0x22:
-        return (UInt32(0b1111111001), 10)
-    if symbol == 0x23:
-        return (UInt32(0b111111111010), 12)
-    if symbol == 0x24:
-        return (UInt32(0b1111111111001), 13)
-    if symbol == 0x25:
-        return (UInt32(0b010101), 6)
-    if symbol == 0x26:
-        return (UInt32(0b11111000), 8)
-    if symbol == 0x27:
-        return (UInt32(0b11111111010), 11)
-    if symbol == 0x28:
-        return (UInt32(0b1111111010), 10)
-    if symbol == 0x29:
-        return (UInt32(0b1111111011), 10)
-    if symbol == 0x2a:
-        return (UInt32(0b11111001), 8)
-    if symbol == 0x2b:
-        return (UInt32(0b11111111011), 11)
-    if symbol == 0x2c:
-        return (UInt32(0b11111010), 8)
-    if symbol == 0x2d:
-        return (UInt32(0b010110), 6)
-    if symbol == 0x2e:
-        return (UInt32(0b010111), 6)
-    if symbol == 0x2f:
-        return (UInt32(0b011000), 6)
-    if symbol == 0x30:
-        return (UInt32(0b00000), 5)
-    if symbol == 0x31:
-        return (UInt32(0b00001), 5)
-    if symbol == 0x32:
-        return (UInt32(0b00010), 5)
-    if symbol == 0x33:
-        return (UInt32(0b011001), 6)
-    if symbol == 0x34:
-        return (UInt32(0b011010), 6)
-    if symbol == 0x35:
-        return (UInt32(0b011011), 6)
-    if symbol == 0x36:
-        return (UInt32(0b011100), 6)
-    if symbol == 0x37:
-        return (UInt32(0b011101), 6)
-    if symbol == 0x38:
-        return (UInt32(0b011110), 6)
-    if symbol == 0x39:
-        return (UInt32(0b011111), 6)
-    if symbol == 0x3a:
-        return (UInt32(0b1011100), 7)
-    if symbol == 0x3b:
-        return (UInt32(0b11111011), 8)
-    if symbol == 0x3c:
-        return (UInt32(0b111111111111100), 15)
-    if symbol == 0x3d:
-        return (UInt32(0b100000), 6)
-    if symbol == 0x3e:
-        return (UInt32(0b111111111011), 12)
-    if symbol == 0x3f:
-        return (UInt32(0b1111111100), 10)
-    if symbol == 0x40:
-        return (UInt32(0b1111111111010), 13)
-    if symbol == 0x41:
-        return (UInt32(0b100001), 6)
-    if symbol == 0x42:
-        return (UInt32(0b1011101), 7)
-    if symbol == 0x43:
-        return (UInt32(0b1011110), 7)
-    if symbol == 0x44:
-        return (UInt32(0b1011111), 7)
-    if symbol == 0x45:
-        return (UInt32(0b1100000), 7)
-    if symbol == 0x46:
-        return (UInt32(0b1100001), 7)
-    if symbol == 0x47:
-        return (UInt32(0b1100010), 7)
-    if symbol == 0x48:
-        return (UInt32(0b1100011), 7)
-    if symbol == 0x49:
-        return (UInt32(0b1100100), 7)
-    if symbol == 0x4a:
-        return (UInt32(0b1100101), 7)
-    if symbol == 0x4b:
-        return (UInt32(0b1100110), 7)
-    if symbol == 0x4c:
-        return (UInt32(0b1100111), 7)
-    if symbol == 0x4d:
-        return (UInt32(0b1101000), 7)
-    if symbol == 0x4e:
-        return (UInt32(0b1101001), 7)
-    if symbol == 0x4f:
-        return (UInt32(0b1101010), 7)
-    if symbol == 0x50:
-        return (UInt32(0b1101011), 7)
-    if symbol == 0x51:
-        return (UInt32(0b1101100), 7)
-    if symbol == 0x52:
-        return (UInt32(0b1101101), 7)
-    if symbol == 0x53:
-        return (UInt32(0b1101110), 7)
-    if symbol == 0x54:
-        return (UInt32(0b1101111), 7)
-    if symbol == 0x55:
-        return (UInt32(0b1110000), 7)
-    if symbol == 0x56:
-        return (UInt32(0b1110001), 7)
-    if symbol == 0x57:
-        return (UInt32(0b1110010), 7)
-    if symbol == 0x58:
-        return (UInt32(0b11111100), 8)
-    if symbol == 0x59:
-        return (UInt32(0b1110011), 7)
-    if symbol == 0x5a:
-        return (UInt32(0b11111101), 8)
-    if symbol == 0x5b:
-        return (UInt32(0b1111111111011), 13)
-    if symbol == 0x5c:
-        return (UInt32(0b1111111111111110000), 19)
-    if symbol == 0x5d:
-        return (UInt32(0b1111111111100), 13)
-    if symbol == 0x5e:
-        return (UInt32(0b11111111111100), 14)
-    if symbol == 0x5f:
-        return (UInt32(0b100010), 6)
-    if symbol == 0x60:
-        return (UInt32(0b111111111111101), 15)
-    if symbol == 0x61:
-        return (UInt32(0b00011), 5)
-    if symbol == 0x62:
-        return (UInt32(0b100011), 6)
-    if symbol == 0x63:
-        return (UInt32(0b00100), 5)
-    if symbol == 0x64:
-        return (UInt32(0b100100), 6)
-    if symbol == 0x65:
-        return (UInt32(0b00101), 5)
-    if symbol == 0x66:
-        return (UInt32(0b100101), 6)
-    if symbol == 0x67:
-        return (UInt32(0b100110), 6)
-    if symbol == 0x68:
-        return (UInt32(0b100111), 6)
-    if symbol == 0x69:
-        return (UInt32(0b00110), 5)
-    if symbol == 0x6a:
-        return (UInt32(0b1110100), 7)
-    if symbol == 0x6b:
-        return (UInt32(0b1110101), 7)
-    if symbol == 0x6c:
-        return (UInt32(0b101000), 6)
-    if symbol == 0x6d:
-        return (UInt32(0b101001), 6)
-    if symbol == 0x6e:
-        return (UInt32(0b101010), 6)
-    if symbol == 0x6f:
-        return (UInt32(0b00111), 5)
-    if symbol == 0x70:
-        return (UInt32(0b101011), 6)
-    if symbol == 0x71:
-        return (UInt32(0b1110110), 7)
-    if symbol == 0x72:
-        return (UInt32(0b101100), 6)
-    if symbol == 0x73:
-        return (UInt32(0b01000), 5)
-    if symbol == 0x74:
-        return (UInt32(0b01001), 5)
-    if symbol == 0x75:
-        return (UInt32(0b101101), 6)
-    if symbol == 0x76:
-        return (UInt32(0b1110111), 7)
-    if symbol == 0x77:
-        return (UInt32(0b1111000), 7)
-    if symbol == 0x78:
-        return (UInt32(0b1111001), 7)
-    if symbol == 0x79:
-        return (UInt32(0b1111010), 7)
-    if symbol == 0x7a:
-        return (UInt32(0b1111011), 7)
-    if symbol == 0x7b:
-        return (UInt32(0b111111111111110), 15)
-    if symbol == 0x7c:
-        return (UInt32(0b11111111100), 11)
-    if symbol == 0x7d:
-        return (UInt32(0b11111111111101), 14)
-    if symbol == 0x7e:
-        return (UInt32(0b1111111111101), 13)
-    return (UInt32(0), 0)
-
-
-def _huffman_decode(
-    buf: Span[UInt8, _],
-    start: Int,
-    length: Int,
-) -> Tuple[String, Bool]:
-    """Decode `length` bytes of Huffman-encoded data into a String.
-
-    Uses linear scan: at each position try all 256 symbols' codes (longest
-    first) and match against the bit stream: simple correctness-first
-    implementation; perf optimization via lookup table is a follow-up.
-
-    Returns (decoded_string, ok). On `ok=False` the caller should signal
-    COMPRESSION_ERROR.
-    """
-    var out = String()
-
-    # Build the bit stream as an in-memory bit cursor.
-    var bit_pos = 0
-    var total_bits = length * 8
-
-    # Helper: peek `nbits` from the bit stream starting at bit_pos.
-    # Returns UInt32 with the bits left-aligned within the low `nbits`
-    # bit positions.
-
-    while bit_pos < total_bits:
-        var remaining = total_bits - bit_pos
-        # Find a matching symbol. Iterate code-lengths 5..19 (ASCII
-        # support range). For each candidate length L, accumulate L bits
-        # from the stream and check against every symbol with code-length L.
-        var matched = False
-
-        # Build value up to 19 bits.
-        var max_l = 19
-        if remaining < max_l:
-            max_l = remaining
-        var L = 5
-        while L <= max_l and not matched:
-            var v: UInt32 = UInt32(0)
-            var k = 0
-            while k < L:
-                var bp = bit_pos + k
-                var byte = buf[start + (bp >> 3)]
-                var bit_in_byte = 7 - (bp & 7)
-                var bit = (Int(byte) >> bit_in_byte) & 1
-                v = (v << 1) | UInt32(bit)
-                k = k + 1
-            # Scan all symbols at this length.
-            var symbol = 0
-            while symbol < 128:
-                var entry = _huffman_code(symbol)
-                if entry[1] == L and entry[0] == v:
-                    out = out + chr(symbol)
-                    bit_pos = bit_pos + L
-                    matched = True
-                    break
-                symbol = symbol + 1
-            L = L + 1
-
-        if not matched:
-            # The remaining bits must be EOS padding (all 1s, ≤7 bits).
-            var pad_ok = (remaining <= 7)
-            if pad_ok:
-                var k = 0
-                while k < remaining:
-                    var bp = bit_pos + k
-                    var byte = buf[start + (bp >> 3)]
-                    var bit_in_byte = 7 - (bp & 7)
-                    var bit = (Int(byte) >> bit_in_byte) & 1
-                    if bit != 1:
-                        return (String(), False)
-                    k = k + 1
-                return (out^, True)
-            return (String(), False)
-    return (out^, True)
 
 
 # =============================================================================
@@ -966,6 +687,11 @@ struct HpackDecoder(Movable, Deinitable):
     """
 
     var table: HpackDynamicTable
+    # The SETTINGS_HEADER_TABLE_SIZE this decoder advertised (RFC 7541 §4.2,
+    # §6.3): the ceiling for every dynamic table size update. It is not the
+    # table's current maximum, which an update may have lowered; a later
+    # update may raise the table back up to this.
+    var settings_table_size: Int
     # UNTRUSTED-INPUT CEILING: the
     # RFC 9113 §6.5.2 header-list-size budget for ONE decoded block. See
     # HPACK_DEFAULT_MAX_HEADER_LIST_SIZE. Settable so a caller with a
@@ -974,19 +700,22 @@ struct HpackDecoder(Movable, Deinitable):
 
     def __init__(out self):
         self.table = HpackDynamicTable()
+        self.settings_table_size = self.table.max_size
         self.max_header_list_size = HPACK_DEFAULT_MAX_HEADER_LIST_SIZE
 
     def __init__(out self, max_table_size: Int):
         self.table = HpackDynamicTable(max_size=max_table_size)
+        self.settings_table_size = max_table_size
         self.max_header_list_size = HPACK_DEFAULT_MAX_HEADER_LIST_SIZE
 
     def set_max_table_size(mut self, new_size: Int):
-        """Set the upper bound on dynamic table size (driven by the local
-        SETTINGS_HEADER_TABLE_SIZE the local decoder advertised to the
-        peer's encoder). Per RFC 7541 §4.2 the decoder MUST NOT shrink
-        beyond this; the on-wire size-update instruction provides the
-        actual size <= this bound.
+        """Record a new SETTINGS_HEADER_TABLE_SIZE advertised to the peer's
+        encoder: `new_size` becomes the ceiling for size updates
+        (`settings_table_size`) and the table's maximum, evicting entries
+        that no longer fit. The on-wire size update may then set any
+        maximum up to this ceiling (RFC 7541 §4.2).
         """
+        self.settings_table_size = new_size
         self.table.set_max_size(new_size)
 
     def _lookup_indexed(self, hpack_index: Int) -> Tuple[String, String, Bool]:
@@ -1014,17 +743,15 @@ struct HpackDecoder(Movable, Deinitable):
         any header fields. After the first non-update instruction, any
         subsequent size update is a COMPRESSION_ERROR.
 
-        RFC 7541 §4.2: size update value MUST be <= the maximum the
-        peer (in our case, the server's SETTINGS_HEADER_TABLE_SIZE)
-        advertises. Decoder's max_size acts as that ceiling.
+        RFC 7541 §4.2 / §6.3: a size update's new maximum MUST be <= the
+        SETTINGS_HEADER_TABLE_SIZE this decoder advertised
+        (`settings_table_size`), whatever an earlier update set the table
+        to, so an update may grow the table back after a shrink.
         """
         var out = List[HpackHeader]()
         var n = len(buf)
         var i = 0
         var seen_header_field = False
-        # Snapshot the upper bound at block-start; the decoder side
-        # treats this as a hard ceiling for any inline size update.
-        var max_allowed = self.table.max_size
         # RFC 9113 §6.5.2 header-list-size budget for THIS block. Charged
         # ONCE per decoded representation at the bottom of the loop (not
         # per byte, not per use) — see the ceiling note at the tail.
@@ -1145,9 +872,10 @@ struct HpackDecoder(Movable, Deinitable):
                     raise Error(
                         "hpack: COMPRESSION_ERROR: size-update truncated"
                     )
-                # Validate against the peer's advertised maximum (our
-                # SETTINGS_HEADER_TABLE_SIZE = 4096).
-                if Int(ir.value) > max_allowed:
+                # RFC 7541 §6.3: "MUST be lower than or equal to the limit
+                # determined by the protocol using HPACK", which RFC 9113
+                # §6.5.2 makes SETTINGS_HEADER_TABLE_SIZE.
+                if Int(ir.value) > self.settings_table_size:
                     raise Error(
                         "hpack: COMPRESSION_ERROR: size update above"
                         " SETTINGS_HEADER_TABLE_SIZE"
