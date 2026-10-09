@@ -22,6 +22,9 @@ mojo_library(
         "tests/test_proto_codec_proto3_json_strictness.mojo",
         "tests/test_proto_codec_null_value.mojo",
         "tests/test_proto_codec_roundtrip.mojo",
+        "tests/test_proto_codec_binary_refusals.mojo",
+        "tests/test_proto_codec_json_decoder_edges.mojo",
+        "tests/test_proto_codec_json_float_edges.mojo",
         # The float32 sweep (S1 of test_proto_codec_json_float32), split
         # over disjoint index ranges so that each shard finishes within a
         # coverage build's time limit; they run as parallel actions.
