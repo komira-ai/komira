@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.2: =, <> and < answer NULL when either operand is NULL; the
+# right operand is a NULL literal, so every row is NULL whatever x is,
+# including the NULL x of id 3. Types: §8.8.
+id:int64	eq_null:bool?	ne_null:bool?	lt_null:bool?
+1	\N	\N	\N
+2	\N	\N	\N
+3	\N	\N	\N
+4	\N	\N	\N

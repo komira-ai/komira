@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "env_read_raw_quote.env_raw_quote",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override: a hand-written module of the package that reads HOME through Path.home, its module named after a raw string holding a backslash and a double quote, then an import after `;`."
+    }
+  ]
+}

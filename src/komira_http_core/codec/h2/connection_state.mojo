@@ -99,6 +99,11 @@ struct H2PendingRequest(Movable, Deinitable):
     # GrpcDispatch seam without re-scanning the headers list.
     var body: List[UInt8]
     var content_type: String
+    # The `GrpcDispatch.grpc_now_ns` reading taken when the HEADERS block
+    # completed (0 for a non-gRPC request). The END_STREAM dispatch computes
+    # the call's grpc-timeout deadline from it and the saved `headers`, so
+    # the time the body took to arrive counts against the deadline.
+    var arrival_ns: UInt64
 
 
 # =============================================================================
@@ -608,6 +613,7 @@ struct H2ConnectionState(Movable, Deinitable):
         var method_str: String,
         var path_str: String,
         var content_type: String = String(""),
+        arrival_ns: UInt64 = UInt64(0),
     ):
         """Stage a deferred request on the pending-requests side table.
         Caller must also set `streams[idx].has_pending_request = True`.
@@ -624,6 +630,7 @@ struct H2ConnectionState(Movable, Deinitable):
                 path_str=path_str^,
                 body=List[UInt8](),
                 content_type=content_type^,
+                arrival_ns=arrival_ns,
             )
         )
 
@@ -662,6 +669,7 @@ struct H2ConnectionState(Movable, Deinitable):
                 path_str=String(""),
                 body=List[UInt8](),
                 content_type=String(""),
+                arrival_ns=UInt64(0),
             )
         var out = self.pending_requests.swap_remove(idx)
         return out^

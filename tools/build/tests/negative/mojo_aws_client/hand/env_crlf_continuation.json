@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "env_read_crlf_continuation.env_crlf_continuation",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override: a hand-written module of the package that reads HOME through Path.home, its import split by a backslash before a carriage return and line feed."
+    }
+  ]
+}
