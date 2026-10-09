@@ -473,7 +473,7 @@ The measured lag is published both as a metric and on the topic.
 
 ### Erasure
 
-Erasing a row from an Iceberg table takes five steps ([deletion vectors and erasure](https://securitydataworks.com/writing/lakehouse/deletion-vectors-gdpr/)):
+Erasing a row from an Iceberg table takes five steps ([Iceberg table maintenance](https://iceberg.apache.org/docs/latest/maintenance/)):
 
 1. **A row delete** (a position-delete file). This is logical: the bytes are still in the data file.
 2. **A rewrite of the affected data files** without the row (the fold). The current snapshot now holds no copy of the row.
