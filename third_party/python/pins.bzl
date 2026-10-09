@@ -2,9 +2,11 @@
 
 Read by this package's BUCK, which declares the downloads and the installed
 targets, and by tests that hold what they import to these pins
-(src/tests/helpers/komira_test_python). Every wheel is a binary wheel for
-CPython 3.13 on manylinux x86_64 (glibc 2.28 or older) or a pure-Python one;
-there is no source distribution. `license` is the SPDX expression of the
+(src/tests/helpers/komira_test_python). Every wheel of WHEELS is a binary
+wheel for CPython 3.13 on manylinux x86_64 (glibc 2.28 or older) or a
+pure-Python one, and every wheel of WHEELS_314 one for CPython 3.14 (`cp314`)
+or free-threaded 3.14 (`cp314t`), or a pure-Python one; there is no source
+distribution. `license` is the SPDX expression of the
 distribution as recorded in README.md (Licences); `deps` are the
 distributions it requires on linux, by `name`.
 """
@@ -17,6 +19,35 @@ PYTHON = {
     "sha256": "4595c5589fff7bf0cb158d9a88a797e0d791fa33830770fcb7bf3f4b104feeae",
     "size": 35076205,
     "license": "PSF-2.0",
+}
+
+# CPython 3.14 from the same python-build-standalone release, with the GIL
+# and free-threaded (`3.14t`, whose interpreter is `bin/python3.14t`), each
+# with a closure of its own (WHEELS_314). Test-only, for measurements of
+# Python user-defined functions; the 3.13 pin above stays every other test's
+# interpreter.
+PYTHON_314 = {
+    "abi": "cp314",
+    "archive": "cpython-3.14.8-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "freethreaded": False,
+    "license": "PSF-2.0",
+    "name": "cpython314",
+    "sha256": "d9ec7a6935ade8b671a57ebaf111083d7314eab8dae5071d167054dadd2b97d6",
+    "size": 36299485,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.14.8%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "version": "3.14.8",
+}
+
+PYTHON_314T = {
+    "abi": "cp314t",
+    "archive": "cpython-3.14.8-20261003-x86_64-unknown-linux-gnu-freethreaded-install_only_stripped.tar.gz",
+    "freethreaded": True,
+    "license": "PSF-2.0",
+    "name": "cpython314t",
+    "sha256": "076b84b988f4dee7ce3a8cb9b230fe5ef8f3c52df43e611edccc649a3433411d",
+    "size": 36459200,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.14.8%2B20261003-x86_64-unknown-linux-gnu-freethreaded-install_only_stripped.tar.gz",
+    "version": "3.14.8",
 }
 
 def _wheel(name, version, url, sha256, size, license, deps = []):
@@ -137,3 +168,82 @@ WHEELS = [
         "Apache-2.0",
     ),
 ]
+
+_PYPI = "https://files.pythonhosted.org/packages/"
+
+# The pure-Python wheels of both 3.14 closures (one file each, installed once
+# per interpreter); six, python-dateutil and tzdata are WHEELS' files.
+_PURE_314 = [
+    _wheel(
+        "cloudpickle",
+        "3.1.2",
+        _PYPI + "88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl",
+        "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a",
+        22228,
+        "BSD-3-Clause",
+    ),
+    _wheel(
+        "joblib",
+        "1.6.0",
+        _PYPI + "18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl",
+        "3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba",
+        306115,
+        "BSD-3-Clause",
+        deps = ["cloudpickle"],
+    ),
+    _wheel(
+        "narwhals",
+        "2.26.0",
+        _PYPI + "40/b5/1b84b2c784db76d69442334bc8b8748c840f13ca53be086f4f250ad4a0bc/narwhals-2.26.0-py3-none-any.whl",
+        "29326d74f107c347fd1009bd58e38d9f7c7c5b51e6de97bc93dbc325d9038b54",
+        474034,
+        "MIT",
+    ),
+    _wheel(
+        "threadpoolctl",
+        "3.7.0",
+        _PYPI + "43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl",
+        "cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be",
+        26362,
+        "BSD-3-Clause",
+    ),
+] + [w for w in WHEELS if w["name"] in ("python-dateutil", "six", "tzdata")]
+
+# The binary wheels of numpy, pandas, pyarrow, scipy and scikit-learn for one
+# ABI tag, each given as (url path, sha256, size).
+def _binary_314(numpy, pandas, pyarrow, scipy, sklearn):
+    return [
+        _wheel("numpy", "2.5.3", _PYPI + numpy[0], numpy[1], numpy[2], "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"),
+        _wheel("pandas", "3.0.6", _PYPI + pandas[0], pandas[1], pandas[2], "BSD-3-Clause", deps = ["numpy", "python-dateutil"]),
+        _wheel("pyarrow", "25.0.1", _PYPI + pyarrow[0], pyarrow[1], pyarrow[2], "Apache-2.0"),
+        _wheel("scipy", "1.18.1", _PYPI + scipy[0], scipy[1], scipy[2], "BSD-3-Clause", deps = ["numpy"]),
+        _wheel(
+            "scikit-learn",
+            "1.9.1",
+            _PYPI + sklearn[0],
+            sklearn[1],
+            sklearn[2],
+            "BSD-3-Clause",
+            deps = ["joblib", "narwhals", "numpy", "scipy", "threadpoolctl"],
+        ),
+    ]
+
+# {abi: the closure of that interpreter}: binary wheels for `cp314-cp314`
+# (with the GIL) or `cp314-cp314t` (free-threaded), manylinux x86_64, and the
+# pure-Python ones. Every distribution pinned for 3.14 has a cp314t wheel.
+WHEELS_314 = {
+    "cp314": _binary_314(
+        ("45/8f/9beacf79ca7c650688ad0baa80931adb988fe6e6e5d5903c23cc3dbd70eb/numpy-2.5.3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "b0521d0f4aebb6e06189451025fa17a913287b13c03d5fe05c017333b654ea5b", 16711928),
+        ("ca/ba/ffdcb19be4ff6bfe7d969e7cef2c567c633df5a3a1cc1053394ad053bca8/pandas-3.0.6-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", "62f51d7f651c8054c5e82a69265c98082e795d1442df7ca6edc3a545d61214b1", 10783244),
+        ("8d/61/1c5d1229fa21da4cff5365e41e57177aaac57c563c727f35419b8513d1c1/pyarrow-25.0.1-cp314-cp314-manylinux_2_28_x86_64.whl", "9171748cdf796972d85a4b60157c279913e242992e350c90c7450182a9838b2a", 50131616),
+        ("6b/89/2a844506d49651e9aa1af6ef95b6bd8031cb1d5a4375edec6155037e04cf/scipy-1.18.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "ac0333bdf38309aa3dcbe7e3fa7ea29e7a2c37c6ea306a757b700ded8e4596ad", 35329183),
+        ("86/4e/0bab75490ca4b85fad8388739c7ebc71d9db553f8c69e39943ee8db0aaae/scikit_learn-1.9.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "993d332ff80e62efae9e39603b7e872297c418d780f01a01855269a3489c950f", 9152030),
+    ) + _PURE_314,
+    "cp314t": _binary_314(
+        ("59/08/9df04103947b95e3b6b1f2ed1a70521f325647a31b82da6a2aae3a485508/numpy-2.5.3-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "93e1f5447e2b1e479d7bd74701e84746b86450cff1fc368b132d195e2b8f8211", 16746748),
+        ("04/f5/001e230a7a7803590d9275a1a3f7e1bb605e3a495cfe5e8d3a532090621b/pandas-3.0.6-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", "db7ec631f26223beee8e5c9e0b8f23c24d8197bbd1d982421d4e3188bea51965", 10655952),
+        ("1b/b9/58612e977d28dc58c878448866838369ee8da2f1e7cc8ed2c84b952aafee/pyarrow-25.0.1-cp314-cp314t-manylinux_2_28_x86_64.whl", "6a1fdfc6659b6b19022f2e50627fb5cf7156a66c46bf4299379955cbe742382a", 50079036),
+        ("87/53/39d046cc7574ed6acacb6bd5723e220107ece80bff12faaf3efc4ddeede4/scipy-1.18.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "a1d33a7836f7ddc1993427966a0823468ec41bcbdb1a9f9942d1d7e57f803ba3", 35380876),
+        ("1a/5a/4cb6c85160af4a639e87a3b7bf8b1c25cfc3b504c5af710ca416a6dcfc5f/scikit_learn-1.9.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "748bcb0a4cc04aec470652c9e5ec68450948e867387e7dfade647107ade68d25", 9131227),
+    ) + _PURE_314,
+}

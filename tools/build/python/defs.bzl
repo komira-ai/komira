@@ -3,7 +3,8 @@
 
 `python_dist` unpacks a sha256-pinned CPython archive (an `install_only`
 archive of python-build-standalone) into a directory and fails unless the
-interpreter in it runs and reports the pinned version. `python_wheel` installs
+interpreter in it runs and reports the pinned version, and is free-threaded
+exactly when the target says so. `python_wheel` installs
 one sha256-pinned wheel into a directory of its own, with that interpreter
 and `wheel_install.py` (no pip): it fails unless the wheel's `.dist-info` names
 the pinned distribution and version. `py_test` runs one Python script with that
@@ -14,7 +15,8 @@ the directory it wrote, which other targets take as test data; it fails
 unless both runs wrote the same tree. `python_proto` runs the pinned protoc
 to generate one `_pb2.py` module.
 
-Every action runs `bin/python3.<minor>` of the unpacked archive with `-I -S`:
+Every action runs `bin/python3.<minor>` (`bin/python3.<minor>t` for a
+free-threaded build) of the unpacked archive with `-I -S`:
 no `PYTHON*` variable, no user or system site directory, no script directory
 is read. The only importable code is the standard library of the archive, the
 script's own directory, and the directories of the wheels in `deps` (and of
@@ -48,9 +50,11 @@ PythonDistInfo = provider(
     doc = "An unpacked CPython: its root directory and the interpreter's path in it.",
     fields = {
         "root": provider_field(Artifact),
-        # `bin/python3.<minor>`, relative to `root`.
+        # `bin/python3.<minor>`, or `bin/python3.<minor>t` for a
+        # free-threaded build, relative to `root`.
         "exe": provider_field(str),
         "version": provider_field(str),
+        "freethreaded": provider_field(bool),
         # A directory of shared libraries the wheels' extension modules link
         # beyond glibc, and the paths in it to load before a script runs, in
         # that order.
@@ -78,15 +82,16 @@ def normalize(name):
         out = out.replace("--", "-")
     return out
 
-def _exe_name(version):
+def _exe_name(version, freethreaded):
     parts = version.split(".")
     if len(parts) != 3:
         fail("python_dist: version must be <major>.<minor>.<micro>, got '{}'".format(version))
-    return "bin/python{}.{}".format(parts[0], parts[1])
+    return "bin/python{}.{}{}".format(parts[0], parts[1], "t" if freethreaded else "")
 
 # Unpacks the archive (its single top directory is `python/`), moves that
 # directory to the output, and runs the interpreter in it, which must print
-# the pinned version.
+# the pinned version, followed by `t` if and only if it is a free-threaded
+# build (`Py_GIL_DISABLED`).
 _DIST_SCRIPT = """
 BB="$1"; shift
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
@@ -108,7 +113,7 @@ mv "$T/x/python" "$OUT"
 # Removes what the archive installed into site-packages (pip): no action
 # installs with it, and -S keeps the directory off sys.path.
 rm -rf "$OUT"/lib/python3.*/site-packages/*
-GOT=$("$OUT/$EXE" -I -S -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])') || {
+GOT=$("$OUT/$EXE" -I -S -c 'import sys, sysconfig; print("%d.%d.%d" % sys.version_info[:3] + ("t" if sysconfig.get_config_var("Py_GIL_DISABLED") else ""))') || {
     echo "python_dist: $OUT/$EXE does not run" >&2
     exit 2
 }
@@ -122,12 +127,13 @@ rm -rf "$T"
 def _python_dist_impl(ctx):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     archive = ctx.attrs.archive[DefaultInfo].default_outputs[0]
-    exe = _exe_name(ctx.attrs.version)
+    exe = _exe_name(ctx.attrs.version, ctx.attrs.freethreaded)
+    want = ctx.attrs.version + ("t" if ctx.attrs.freethreaded else "")
     out = ctx.actions.declare_output("python", dir = True)
     if ctx.attrs.preload and not ctx.attrs.native_libs:
         fail("{}: preload names libraries but native_libs is not set".format(ctx.label))
     ctx.actions.run(
-        busybox_sh(bb, _DIST_SCRIPT, archive, out.as_output(), exe, ctx.attrs.version),
+        busybox_sh(bb, _DIST_SCRIPT, archive, out.as_output(), exe, want),
         category = "python_dist",
     )
     return [
@@ -136,6 +142,7 @@ def _python_dist_impl(ctx):
             root = out,
             exe = exe,
             version = ctx.attrs.version,
+            freethreaded = ctx.attrs.freethreaded,
             native_libs = ctx.attrs.native_libs[DefaultInfo].default_outputs[0] if ctx.attrs.native_libs else None,
             preload = ctx.attrs.preload,
         ),
@@ -143,10 +150,13 @@ def _python_dist_impl(ctx):
 
 _python_dist = rule(
     impl = _python_dist_impl,
-    doc = "A CPython `install_only` archive unpacked into one directory, without the packages of its site-packages (pip); fails unless its `bin/python<major>.<minor>` runs and prints `version`. `py_test` loads the `preload` libraries of `native_libs`, in order, before a script runs.",
+    doc = "A CPython `install_only` archive unpacked into one directory, without the packages of its site-packages (pip); fails unless its `bin/python<major>.<minor>` (`bin/python<major>.<minor>t` with `freethreaded`) runs, prints `version`, and is a free-threaded build if and only if `freethreaded` is set. `py_test` loads the `preload` libraries of `native_libs`, in order, before a script runs.",
     attrs = {
         # A pinned_file holding the `.tar.gz`.
         "archive": attrs.dep(),
+        # A free-threaded build (`Py_GIL_DISABLED`), whose interpreter is
+        # `bin/python<major>.<minor>t`.
+        "freethreaded": attrs.bool(default = False),
         # A directory holding the libraries `preload` names (paths in it).
         "native_libs": attrs.option(attrs.dep(), default = None),
         "preload": attrs.list(attrs.string(), default = []),
