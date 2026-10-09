@@ -19,7 +19,8 @@
 #                  event) appends its DELETE event.
 #   erase_subject  by the subject row; with no subject row, every user row
 #                  holding (iss, sub), each erased, their counts and file ids
-#                  summed (a dropped file id or count of one user).
+#                  summed (a dropped file id, row count or redacted-body
+#                  count of one user).
 #   sql steps      on SQLite, prepare_sql_connection runs `PRAGMA
 #                  secure_delete=ON` and refuses an answer other than one
 #                  row holding 1; finish_sql_erasure runs `PRAGMA
@@ -246,8 +247,15 @@ def test_erase_subject() raises:
         reactor, String("f-d2"), String("c-a"), String("d"), String("t"), Int64(1),
         String("u-dee2"), T0,
     )
+    _ = s.add_member[Rt](reactor, String("c-a"), String("u-dee"), T0)
+    _ = s.add_member[Rt](reactor, String("c-a"), String("u-dee2"), T0)
+    _ = _send(s, "u-dee", "d1", "", List[String]())
+    _ = _send(s, "u-dee2", "d2", "", List[String]())
     var by_rows = s.erase_subject[Rt](reactor, String(ISS), String("sub-d"))
-    assert_equal(by_rows.rows_erased, 4, "two user rows and their two files")
+    assert_equal(
+        by_rows.rows_erased, 6, "two user rows, their two memberships and two files"
+    )
+    assert_equal(by_rows.bodies_redacted, 2, "one message of each user")
     assert_equal(_joined(by_rows.file_ids), String("[f-d,f-d2]"), "both users' files")
     assert_false(Bool(s.user[Rt](reactor, String("u-dee"))))
     assert_false(Bool(s.user[Rt](reactor, String("u-dee2"))))

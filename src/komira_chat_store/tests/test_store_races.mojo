@@ -31,6 +31,11 @@
 #                     keeps the later body and this EDIT event keeps its own.
 #                     Catches a copy that ignores last_edit_seq, and a
 #                     redaction of a live message's edit.
+#   edit_vs_late_del  a peer's EDIT row takes the seq a delete's DELETE event
+#                     is about to take (its editor stops before copying it
+#                     onto the message): the DELETE lands at the next seq
+#                     and the peer's EDIT body is empty. Catches a delete
+#                     that redacts its edits only before appending.
 #   subject_reclaimed while erase_subject erases the users holding (iss,
 #                     sub) (there is no subject row), a peer's first request
 #                     claims the subject: the claim is erased too.
@@ -61,6 +66,8 @@ from komira_chat_store import (
     CHANNEL_PUBLIC,
     CHAT_MIGRATION_LEDGER,
     ChatStore,
+    EVENT_DELETE,
+    EVENT_EDIT,
     SendProbe,
     T_EVENTS,
     T_SUBJECTS,
@@ -83,6 +90,7 @@ comptime SEQ_TAKEN = 3
 comptime DELETED_BEFORE_EDIT = 4
 comptime EDITED_BEFORE_EDIT = 5
 comptime SUBJECT_RECLAIMED = 6
+comptime EDITED_BEFORE_DELETE = 7
 
 
 def _rt() raises -> Rt:
@@ -264,6 +272,21 @@ struct RacingDb(Database, Movable, Deinitable):
                 _ = self.inner.conditional_update[RT](
                     reactor, table, _message(self.key, self.seq), upd,
                     False, Optional[String](), List[String](),
+                )
+            elif (
+                self.race == EDITED_BEFORE_DELETE
+                and vals[2].as_text() == String(EVENT_DELETE)
+            ):
+                # An editor whose EDIT row goes in at the seq the DELETE is
+                # about to take, and who stops before copying it onto the
+                # message: the DELETE retries at the next seq.
+                self.race = NO_RACE
+                var peer = vals.copy()
+                peer[2] = DbValue.int8(Int64(EVENT_EDIT))
+                peer[3] = DbValue.text(String("u-peer"))
+                peer[4] = DbValue.text(String("late"))
+                _ = self.inner.create_if_absent_composite[RT](
+                    reactor, table, conflict_cols, cols, peer
                 )
             elif self.race == EDITED_BEFORE_EDIT:
                 self.race = NO_RACE
@@ -456,6 +479,33 @@ def test_edit_races() raises:
     assert_equal(msg2.value().body, String("later"), "the later edit stays")
 
 
+def test_edit_before_delete() raises:
+    var s = _store()
+    _channel(s)
+    var rt = _rt()
+    ref reactor = rt.reactor()
+    var m = s.send_message[Rt](
+        reactor, String("c-a"), String("u-bob"), String("v1"), Int64(0),
+        String(), List[String](), False, List[String](), T0,
+    )
+    s.db().arm(EDITED_BEFORE_DELETE, String("c-a"), m.seq, 0)
+    var d = s.delete_message[Rt](
+        reactor, String("c-a"), m.seq, String("u-bob"), False, T0 + 1
+    )
+    assert_equal(d.seq, m.seq + 2, "the DELETE retried past the peer's EDIT")
+    var peer = s.event[Rt](reactor, String("c-a"), m.seq + 1)
+    assert_equal(peer.value().kind, EVENT_EDIT)
+    assert_equal(peer.value().sender_user_id, String("u-peer"))
+    assert_equal(peer.value().target_seq, m.seq)
+    assert_equal(peer.value().body, String(""), "the late EDIT is redacted")
+    assert_equal(
+        _count(s, "SELECT COUNT(*) FROM chat_events WHERE body = 'late'"), Int64(0)
+    )
+    var msg = s.event[Rt](reactor, String("c-a"), m.seq)
+    assert_true(msg.value().deleted)
+    assert_equal(msg.value().body, String(""))
+
+
 def test_subject_reclaimed() raises:
     var s = _store()
     var rt = _rt()
@@ -480,5 +530,6 @@ def main() raises:
     test_subject_and_user_vanished()
     test_seq_taken()
     test_edit_races()
+    test_edit_before_delete()
     test_subject_reclaimed()
     print("PASS komira_chat_store races")
