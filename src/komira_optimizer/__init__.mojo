@@ -1,4 +1,4 @@
-"""`komira_optimizer` -- logical-plan rewrite rules.
+"""`komira_optimizer` -- logical-plan rewrite rules and the estimates they use.
 
 Join rules (inner-to-semi conversion, build-side selection, the SEMI/ANTI
 reducer pushdown, the join-reorder output-order guard, absorbing a projection
@@ -17,7 +17,7 @@ scan-share planning; the `OptimizerConfig` options value; and the non-raising
 `OptimizeResult`. Every rule takes a `LogicalPlan` and returns the rewritten
 plan (the duplicate-aggregate collect and find walks return hash counts and a
 subtree copy, and scan-share planning returns a `ScanSharePlan` descriptor);
-none executes anything.
+none executes anything. komira_optimizer has no driver that orders its passes.
 
 It depends on `komira_plan_ir`, `komira_plan_expr`, `komira_plan_stats`,
 `komira_arrow`, `komira_kernels`, `komira_collections`, `komira_exec_types`,

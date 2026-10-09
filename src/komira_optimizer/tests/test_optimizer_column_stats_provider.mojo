@@ -5,8 +5,8 @@
 #
 # Acceptance tests. Verifies the load-bearing
 # behavioral contract: `distinct_count_for` ALWAYS returns a value, with three-tier
-# dispatch in priority order (Parquet metadata → row-count heuristic →
-# sampled).
+# dispatch in priority order (Parquet metadata → row-count heuristic; the
+# sampled Tier 3 is declared but unreachable).
 #
 # Coverage:
 #   * Tier 1 hit  — JoinRelation with table_stats populated returns
@@ -284,13 +284,12 @@ def test_multi_relation_independent_dispatch() raises:
 
 
 def test_synthetic_row_count_stats_treated_as_tier2() raises:
-    """A TableStats tagged STATS_SOURCE_SYNTHETIC_ROW_COUNT is the
-    dpccp row-count fallback (`_synth_row_count_table_stats`).
+    """A TableStats tagged STATS_SOURCE_SYNTHETIC_ROW_COUNT is a
+    row-count fallback (its producer is not in this tree).
     Provider must skip Tier 1 for these — the distinct_count field
     is synthesized from row_count, NOT a real NDV signal.
 
-    This is the load-bearing invariant for the drive-by fix in
-    `optimizer_dpccp.mojo`: ColumnStatsProvider correctly
+    This pins the load-bearing invariant: ColumnStatsProvider
     distinguishes real Parquet stats from synthesized stats."""
     var chain = JoinChain()
     var ts = Optional[TableStats](
