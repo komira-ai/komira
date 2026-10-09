@@ -847,9 +847,9 @@ measure B7
 [ "$(grep -A1 -x -- --branch-lcov "$W/covcheck_argv" | tail -n 1)" = "$IA" ] || red "B7: covcheck's --branch-lcov is not the test's record"
 pass
 
-# T1. A library naming mojo_test targets in coverage_tests (the second
+# C1. A library naming mojo_test targets in coverage_tests (the second
 # query's answer): its `<library>_cov_gate[tests]` is built in the same
-# call, and that entry's reports are read beside its own. T2: when that
+# call, and that entry's reports are read beside its own. C2: when that
 # entry failed (a run of a named test), the library is NOT MEASURED. Red
 # when the runs of coverage_tests are not asked for or not read.
 rm -f "$W/branch_gate"
@@ -859,16 +859,16 @@ XT="buck-out/v2/art/komira/0123/src/alpha/__alpha_cov_gate__/cov/tests/test_far.
 mkdir -p "$M/${XT%/*}"
 cp "$M/$XA" "$M/$XT"
 printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/alpha:alpha_cov_gate SUCCESS - %s\n' "$XA" "$XT" >"$W/build_table"
-measure T1
-[ "$RC" -eq 0 ] || red "T1: exited $RC: $(head -c 300 "$W/err")"
-grep -q "build .*komira//src/alpha:alpha\[coverage\]\[tests\] komira//src/alpha:alpha_cov_gate\[tests\]\$" "$W/buck2_calls" || red "T1: the build did not ask for alpha_cov_gate[tests]"
-[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] && grep -qx "$XT" "$W/covcheck_argv" || red "T1: covcheck did not read the coverage_tests run's report"
-[ "$(cat "$O/publish/coverage_tests_libraries.txt")" = "komira//src/alpha:alpha" ] || red "T1: coverage_tests_libraries.txt is not alpha"
+measure C1
+[ "$RC" -eq 0 ] || red "C1: exited $RC: $(head -c 300 "$W/err")"
+grep -q "build .*komira//src/alpha:alpha\[coverage\]\[tests\] komira//src/alpha:alpha_cov_gate\[tests\]\$" "$W/buck2_calls" || red "C1: the build did not ask for alpha_cov_gate[tests]"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] && grep -qx "$XT" "$W/covcheck_argv" || red "C1: covcheck did not read the coverage_tests run's report"
+[ "$(cat "$O/publish/coverage_tests_libraries.txt")" = "komira//src/alpha:alpha" ] || red "C1: coverage_tests_libraries.txt is not alpha"
 pass
 printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/alpha:alpha_cov_gate FAIL mojo_cov_run@self\n' "$XA" >"$W/build_table"
-measure T2
-[ "$RC" -eq 0 ] || red "T2: exited $RC"
-[ "$(cat "$O/publish/not_measured.txt")" = "komira//src/alpha:alpha" ] || red "T2: a library whose coverage_tests run failed is not listed as not measured"
+measure C2
+[ "$RC" -eq 0 ] || red "C2: exited $RC"
+[ "$(cat "$O/publish/not_measured.txt")" = "komira//src/alpha:alpha" ] || red "C2: a library whose coverage_tests run failed is not listed as not measured"
 pass
 rm "$W/cov_tests_out"
 
