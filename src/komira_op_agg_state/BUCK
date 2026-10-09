@@ -48,6 +48,7 @@ mojo_library(
         "tests/test_columnar_agg_accumulator.mojo",
         "tests/test_columnar_agg_sink_combine_simd.mojo",
         "tests/test_composite_hash_table_grow.mojo",
+        "tests/test_composite_hash_table_int64_keys.mojo",
         "tests/test_dense_hash_agg_table.mojo",
         "tests/test_growable_hash_set_i64.mojo",
         "tests/test_hashset_parametric.mojo",
