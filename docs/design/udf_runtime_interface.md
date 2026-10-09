@@ -106,12 +106,12 @@ The plan system supports two classes of UDF. The class decides how a runtime exe
 
 | Place | Where |
 |---|---|
-| `UdfRuntime`, "PYTHON \| NODE (closed enum; a new runtime is a new value)" | `optimized_plan_udfs.md:121` |
-| `oneof code`, with one arm per language's code form | `:123-129`; messages `:140-170` |
-| `BatchFormat`, mixing the neutral `ARROW` with `PANDAS`, `POLARS`, `NUMPY`, `PY_VALUES` and `JS_VALUES` | `:131` |
-| A kind named after a language, `PYTHON_STEP`, and its arm `WirePythonStepNode` | `:54-56`, `:232-236` |
-| One ABI field per language, `python_abi = 6` and `node_abi = 7`, both in the digest trailer | `optimized_plan.md:364-365`, `:384`, `:467-468` |
-| Admission checks, load checks, path prefixes and error codes written per language | `optimized_plan_udfs.md:613-659` |
+| `UdfRuntime`, "PYTHON \| NODE (closed enum; a new runtime is a new value)" | `optimized_plan_udfs.md` §10.3, the `UdfRef.runtime` field |
+| `oneof code`, with one arm per language's code form | §10.3, `UdfRef`'s `oneof code` and the code messages after it |
+| `BatchFormat`, mixing the neutral `ARROW` with `PANDAS`, `POLARS`, `NUMPY`, `PY_VALUES` and `JS_VALUES` | §10.3, the `UdfRef.batch_format` field |
+| A kind named after a language, `PYTHON_STEP`, and its arm `WirePythonStepNode` | §10.2, the kinds table; §10.4, the step arm |
+| One ABI field per language, `python_abi = 6` and `node_abi = 7`, both in the digest trailer | `optimized_plan.md` §6.1, `DeclaredNeeds` and the host's checks of it; §7.1, the `DigestTrailer` |
+| Admission checks, load checks, path prefixes and error codes written per language | `optimized_plan_udfs.md` §10.11, from "Added layers write only their prefixes" through "Load check" |
 
 Each of these places is part of a format that stays compatible forever. Once the format is released, every new language would cost a `format_version` bump plus new optimizer and validator code, forever. #1094 is unmerged and no `format_version` has shipped yet. Changing the shape now costs only edits to a document, which a follow-up to #1094 makes.
 
@@ -179,7 +179,7 @@ enum CodeForm {
 
 **The runtime's ABI tag is not part of the UDF's identity.** `UdfCode` carries no ABI tag (`cp312`, `node22`). The tag lives only in `needs.runtimes` (§3.2), as `python_abi` did in the draft [#1094]. So a `PACKAGE` or `BUNDLE` reference keeps its digest when it is recaptured under a new interpreter minor. A form whose bytes really are ABI-specific (a pickled payload) records that in its descriptor, and the runtime's `validate` refuses a mismatch.
 
-**The kind is the call shape, fully resolved.** #1094 records one `MAP_BATCHES` kind and derives the column or frame form from the arm that targets it (`optimized_plan_udfs.md:58-60`). Because identical `UdfRef` bytes are one entry, one index could then be the target of both a `WireUdfApply` and a `WireMapBatchesNode`, with two different argument schemas. A runtime binds its schemas once per `UdfRef` at `load` (§4.3), so the shape must be in the `UdfRef`. Plan validation refuses an arm whose target has the wrong kind (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`). Plain versus mergeable `AGGREGATE` is already decided by `state_type`.
+**The kind is the call shape, fully resolved.** #1094 records one `MAP_BATCHES` kind and derives the column or frame form from the arm that targets it (`optimized_plan_udfs.md` §10.2, the bullets after the kinds table). Because identical `UdfRef` bytes are one entry, one index could then be the target of both a `WireUdfApply` and a `WireMapBatchesNode`, with two different argument schemas. A runtime binds its schemas once per `UdfRef` at `load` (§4.3), so the shape must be in the `UdfRef`. Plan validation refuses an arm whose target has the wrong kind (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`). Plain versus mergeable `AGGREGATE` is already decided by `state_type`.
 
 **What each field is for, and who reads it.**
 
@@ -199,7 +199,7 @@ enum CodeForm {
 
 **Determinism is `stability`.** `IMMUTABLE`, `STABLE` and `VOLATILE` already state what the optimizer and the host may assume about repeated calls and retries (§10.7). A separate determinism field would state the same fact twice.
 
-**`STEP`, not `PYTHON_STEP`.** A step is a shape: a source node with literal arguments that runs once per run. Whether a runtime supports steps is a runtime capability (§4.2), checked at admission; it is not a plan rule. The arm is renamed `WireStepNode`. Its field and tag numbers stay the same, because nothing has been released. A `STEP` `UdfRef` must be `VOLATILE` (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`); §10.7 already lists a step as always `VOLATILE` (`optimized_plan_udfs.md:457`), and plan validation now enforces it.
+**`STEP`, not `PYTHON_STEP`.** A step is a shape: a source node with literal arguments that runs once per run. Whether a runtime supports steps is a runtime capability (§4.2), checked at admission; it is not a plan rule. The arm is renamed `WireStepNode`. Its field and tag numbers stay the same, because nothing has been released. A `STEP` `UdfRef` must be `VOLATILE` (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`); §10.7 already lists a step as always `VOLATILE` (`optimized_plan_udfs.md` §10.7, the `VOLATILE` row of the stability table), and plan validation now enforces it.
 
 **`ROW`: a row-shaped UDF with a declared read set.** A row-shaped function receives one row object per input row and reads its fields by name (`df.map_rows(f)`, pandas `DataFrame.apply(f, axis=1)`). Handed the whole row, it would make every column of its input live and defeat projection pushdown. So the `ROW` `UdfRef` carries the fields it reads, and nothing else reaches it.
 - **The read set is `arg_types`.** Each entry names one field and gives its explicit Arrow type. The call site's `WireUdfApply` passes one argument per entry, in the same order, usually a column reference. Names are non-empty and unique (`OPTIMIZED_UDF_ROW_READ_SET_INVALID`). The field name is what user code reads; the argument binds it by position, so a rename below the call does not change the `UdfRef`.
@@ -311,7 +311,7 @@ These are host-local choices (§5.3). Two hosts may bind one plan differently. T
 
 These rules are part of the plan's meaning, so they hold on every host, for every runtime and both transports. Each has a conformance case (§6.3).
 
-1. **Conditional evaluation.** A UDF call is evaluated only on rows for which every enclosing conditional selects its branch (`CASE`, `coalesce`, the right-hand side of `AND`/`OR`), and only on rows that survive earlier conjuncts of the same filter. So `CASE WHEN x > 0 THEN f(x) END` never calls `f` on a row with `x <= 0`. The ordering of UDF conjuncts last (`optimized_plan_udfs.md:498`) depends on this rule.
+1. **Conditional evaluation.** A UDF call is evaluated only on rows for which every enclosing conditional selects its branch (`CASE`, `coalesce`, the right-hand side of `AND`/`OR`), and only on rows that survive earlier conjuncts of the same filter. So `CASE WHEN x > 0 THEN f(x) END` never calls `f` on a row with `x <= 0`. The ordering of UDF conjuncts last (`optimized_plan_udfs.md` §10.9, the conjunct-order row) depends on this rule.
 2. **Compaction.** The host compacts the selected rows (a `take`) before the call and scatters the result after it. Under `PROPAGATE` it also removes rows with a null argument. The arrays a runtime receives contain only rows it must compute.
 3. **Independence from instances and batch boundaries.** The result of a `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN` call on a row does not depend on which instance serves it or on where batches were split. A function may cache (a loaded model, a memo table); a function whose per-row result depends on earlier calls (a row counter) is not expressible at the first format version. This replaces the `SERIAL_ORDERED` parallelism contract, which `UdfRef` does not carry. A frame-form function already sees batch boundaries; #1094 states its rule in §10.8 ("Declared resources"): a `MAP_BATCHES_FRAME` function must not depend on batch boundaries unless the node is grouped.
 4. **Exact argument encoding.** The host hands the runtime arrays in exactly the `arg_types` encoding: no dictionary or view encoding unless the declared type is one; the host casts first. Arrays may have a non-zero `offset`, including bit offsets that are not multiples of 8.
@@ -848,7 +848,7 @@ This follows two precedents: DuckDB's C extension API, whose function struct is 
 - The ABI promise matters only for a runtime built and shipped separately (§8.3). Such a runtime must keep loading into newer bases without a rebuild for every release.
 
 **Candidates for ABI 1.1, not in 1.0.** Entries the format may need later are left out of 1.0 rather than frozen with undefined meaning:
-- **`snapshot` and `restore`** for state a streaming checkpoint keeps (§10.10 lets a stateful callable define them, `optimized_plan_udfs.md:570-572`). Their meaning must be fixed first: per instance, called by the host only between calls at a checkpoint barrier, returning one Arrow value. Until they exist, a restarted context starts with empty state, and mergeable aggregate state is checkpointed through `agg_state`.
+- **`snapshot` and `restore`** for state a streaming checkpoint keeps (§10.10 lets a stateful callable define them, `optimized_plan_udfs.md` §10.10, the bullet on worker state across a restart). Their meaning must be fixed first: per instance, called by the host only between calls at a checkpoint barrier, returning one Arrow value. Until they exist, a restarted context starts with empty state, and mergeable aggregate state is checkpointed through `agg_state`.
 - **Per-row errors** for a TRY form (§4.5).
 
 ### 8.2 Plans stay readable forever
