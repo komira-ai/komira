@@ -8,7 +8,9 @@
 # LIFECYCLE (`run_job_supervisor`):
 #   0. with --binary-key: fetch the binary from the binary store (boot.mojo).
 #   1. an initial RUNNING heartbeat.
-#   2. spawn the job (komira_supervisor's Supervisor + ChildSpec).
+#   2. spawn the job (komira_supervisor's Supervisor + ChildSpec), unless a
+#      stop signal arrived during 0 or 1: then the job is CANCELLED without
+#      being started, and the run goes to 4.
 #   3. loop, every --heartbeat-interval-secs:
 #        a. drain stdout/stderr without blocking (stderr into the forensics
 #           ring, stdout into the logs.txt capture and the live stream);
@@ -92,8 +94,11 @@ def _sleep_ms(ms: Int):
 
 
 # The terminal beat's retry budget (finalize_heartbeat). A platform that stops
-# the container gives PID 1 a fixed window after its SIGTERM before SIGKILL;
-# the job's own grace comes out of that window first, so the budget is short.
+# the container gives PID 1 a fixed window after its SIGTERM before SIGKILL,
+# and the job's own grace (5 s) comes out of that window first. Grace plus
+# budget is 20 s: on a platform whose window is shorter, the later retries are
+# cut off by the platform's SIGKILL (the first send comes right after the
+# grace).
 comptime TERMINAL_BEAT_BUDGET_MS: Int = 15_000
 comptime TERMINAL_BEAT_FIRST_DELAY_MS: Int = 250
 comptime TERMINAL_BEAT_MAX_DELAY_MS: Int = 2_000
@@ -346,9 +351,11 @@ struct JobSupervisor[
         SIGINT caught: forward THAT signal to the job's process group, then
         `grace_ms` and SIGKILL as on a cancel, and the job is CANCELLED with a
         message naming the signal. Returns True iff a stop signal was taken.
-        A signal taken after the child already exited leaves its result as it
-        is (the job finished first) and still returns True, so the loop
-        ends."""
+        A signal taken before the spawn (during the fetch or the first beat)
+        makes the job CANCELLED without starting it; the caller must not
+        spawn it then. A signal taken after the child already exited leaves
+        its result as it is (the job finished first) and still returns True,
+        so the loop ends."""
         var sig = take_stop_signal()
         if sig == Int32(0):
             return False
@@ -358,7 +365,15 @@ struct JobSupervisor[
         log.info["job supervisor: {} received; stopping job {}", "komira_job_supervisor"](
             ArgStr(name), ArgStr(self.config.job_name)
         )
-        if not self.spawned or self.child_exited:
+        if not self.spawned:
+            self.state.phase = JobSupervisorPhase.cancelled()
+            self.state.message = Optional[String](
+                String("the supervisor received ")
+                + name
+                + String("; the job was not started")
+            )
+            return True
+        if self.child_exited:
             return True
         self._incremental_drain()
         self.exit_info = self.supervisor.terminate_with(sig, grace_ms, True)
@@ -713,12 +728,15 @@ def run_job_supervisor[
     # 1. initial RUNNING heartbeat.
     _ = job_supervisor.do_heartbeat()
 
-    # 2. spawn the job.
-    job_supervisor.spawn_child()
+    # 2. spawn the job, unless a stop arrived during the fetch or the first
+    # beat: then it is CANCELLED without being started.
+    var stopped_before_spawn = job_supervisor.act_on_stop_signal(GRACE_MS)
+    if not stopped_before_spawn:
+        job_supervisor.spawn_child()
 
     # 3. poll-then-heartbeat loop.
     var hb_interval = job_supervisor.config.heartbeat_interval_secs
-    while True:
+    while not stopped_before_spawn:
         job_supervisor.poll_and_drain()
         if job_supervisor.child_exited:
             break

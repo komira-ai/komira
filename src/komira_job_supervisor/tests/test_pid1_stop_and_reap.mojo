@@ -16,6 +16,13 @@
 #       before the job's 30 s. Nothing in this file installs the handler
 #       before this test, so with run_job_supervisor's install removed
 #       (mutant: no handler) the SIGTERM kills this process and the build fails.
+#   test_a_stop_before_the_spawn_starts_no_job
+#       The reporter SIGTERMs this process while the first RUNNING beat is
+#       being sent, as a platform may stop a container during the fetch or
+#       the first beat. The run ends CANCELLED with two beats, the second
+#       saying the job was not started, and returns long before the job's
+#       30 s. Mutant: no stop check before the spawn -> the job is spawned
+#       and stopped on the first loop pass ("the job was stopped").
 #   test_a_stop_signal_reaches_the_grandchild
 #       Stepping: the job starts `sleep 60` in the background, prints its pid,
 #       SIGTERMs this process and waits. act_on_stop_signal forwards SIGTERM
@@ -122,6 +129,25 @@ struct Recorder(HeartbeatReporter):
         return HeartbeatOutcome(status >= 200 and status < 300, False, status)
 
 
+struct StopOnFirstBeat(HeartbeatReporter):
+    """Records each beat as `PHASE|message`; on the FIRST one it sends
+    SIGTERM to this process (a stop arriving during the first beat)."""
+
+    var beats: ArcPointer[List[String]]
+
+    def __init__(out self, beats: ArcPointer[List[String]]):
+        self.beats = beats
+
+    def report(mut self, hb: SupervisorHeartbeat) -> HeartbeatOutcome:
+        var line = String(hb.phase.wire_str()) + String("|")
+        if hb.message:
+            line += hb.message.value()
+        self.beats[].append(line^)
+        if len(self.beats[]) == 1:
+            _ = proc_kill(external_call["getpid", Int32](), SIGTERM)
+        return HeartbeatOutcome(True, False, 200)
+
+
 comptime TestJob = JobSupervisor[Recorder, InMemoryConditionalStore]
 comptime _MS: UInt64 = 1_000_000
 
@@ -175,6 +201,30 @@ def test_the_run_loop_turns_a_platform_sigterm_into_cancelled() raises:
     assert_true(beats[][0].startswith(String("RUNNING|")), "RUNNING first")
     assert_true(took_ms < 20_000, "long before the job's 30 s: " + String(took_ms))
     print("  test_the_run_loop_turns_a_platform_sigterm_into_cancelled: PASS")
+
+
+def test_a_stop_before_the_spawn_starts_no_job() raises:
+    var beats = ArcPointer[List[String]](List[String]())
+    var t0 = now_ns()
+    var phase = run_job_supervisor[StopOnFirstBeat, InMemoryConditionalStore](
+        _shell_job(String("exec sleep 30")),
+        StopOnFirstBeat(beats),
+        None,
+        None,
+    )
+    var took_ms = Int((now_ns() - t0) // _MS)
+    assert_true(phase == JobSupervisorPhase.cancelled(), "a stop before the spawn cancels")
+    assert_equal(len(beats[]), 2, "RUNNING, then the terminal beat")
+    assert_true(beats[][0].startswith(String("RUNNING|")), beats[][0])
+    assert_equal(
+        beats[][1],
+        String(
+            "CANCELLED|the supervisor received SIGTERM; the job was not started"
+        ),
+        "the job was never spawned",
+    )
+    assert_true(took_ms < 4000, "no grace was waited: " + String(took_ms))
+    print("  test_a_stop_before_the_spawn_starts_no_job: PASS")
 
 
 def test_a_stop_signal_reaches_the_grandchild() raises:
@@ -396,6 +446,7 @@ def test_the_terminal_beat_is_retried_after_one_503() raises:
 def main() raises:
     # FIRST: nothing before it may install the stop handler (module header).
     test_the_run_loop_turns_a_platform_sigterm_into_cancelled()
+    test_a_stop_before_the_spawn_starts_no_job()
     test_a_stop_signal_reaches_the_grandchild()
     test_sigkill_reaches_a_grandchild_that_ignores_sigterm()
     test_a_forwarded_sigint_stays_sigint()
