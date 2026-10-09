@@ -1,10 +1,14 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The neutral authorization interface (`AuthzPort` + the POD `AuthzAction` /
-# `AuthzResource`) and its two store-free reference conformers. Deps are only
-# the transport primitives the `check[RT]` seam shape needs: komira_async
-# (Reactor / Runtime) and komira_http_server (`Principal`, the caller).
-# The welded tests pin the two reference conformers' decisions.
+# The neutral authorization interface (`AuthzPort` + the `AuthzAction` /
+# `AuthzResource` values) and its two store-free reference conformers. Deps
+# are only the transport primitives the `check[RT]` seam shape needs:
+# komira_async (Reactor / Runtime) and komira_http_server (`Principal`, the
+# caller, and `Claims`, the resource's attribute map).
+# The welded tests pin the two reference conformers' decisions, the resource
+# value, and (test_no_product_vocabulary, over komira_test_vocabulary) that
+# the sources name no product concept and hold no early date.
 mojo_library(
     name = "komira_authz_api",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -14,7 +18,27 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_allow_authenticated_authz.mojo",
+        "tests/test_authz_resource.mojo",
         "tests/test_deny_all_authz.mojo",
+        "tests/test_no_product_vocabulary.mojo",
     ],
+    test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
+    test_data = {
+        # The vocabulary test reads the library's own sources, staged at their
+        # repository paths.
+        "tests/test_no_product_vocabulary.mojo": glob(
+            ["**/*.mojo"],
+            exclude = ["tests/**/*.mojo"],
+        ),
+    },
     visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
 )

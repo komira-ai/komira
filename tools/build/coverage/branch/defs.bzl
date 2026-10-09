@@ -28,6 +28,7 @@ def _branch_dir_impl(ctx):
     annotate = ctx.actions.copied_dir("cov_branch_annotate", {
         "cov_branch_annotate.sh": ctx.attrs.annotate_script,
         "lld": llvm.lld_dir,
+        "llvm": llvm.tools_dir,
     })
     classify = ctx.attrs.classify[DefaultInfo].default_outputs[0]
     return [DefaultInfo(default_outputs = [link, run, annotate, classify], sub_targets = {
@@ -39,7 +40,7 @@ def _branch_dir_impl(ctx):
 
 _cov_branch_dir = rule(
     impl = _branch_dir_impl,
-    doc = "The directories and the classifier a branch coverage build of a mojo_library links, runs, annotates and classifies with (tools/build/mojo/coverage_branch.bzl), its default outputs in this order: `[link]`, `cov_branch_link.sh` (`link_script`) with `lld/` (Mojo's lld, of `llvm`, an llvm_branch_tool) and `llvm/runtime/` (the profile runtime); `[run]`, `cov_branch_run.sh` (`run_script`) with `llvm/` (llvm-profdata and its libraries) and `raw_version`, the raw profile version every run requires (RAW_PROFILE_VERSION of toolchains/llvm_branch/defs.bzl); `[annotate]`, `cov_branch_annotate.sh` (`annotate_script`) with `lld/`; and `[classify]`, the cov_branch_classify executable (`classify`). Each script finds its tools (`lld/`, `llvm/`, `raw_version`) beside itself, in its own directory; the classifier is a static executable of its own.",
+    doc = "The directories and the classifier a branch coverage build of a mojo_library links, runs, annotates and classifies with (tools/build/mojo/coverage_branch.bzl), its default outputs in this order: `[link]`, `cov_branch_link.sh` (`link_script`) with `lld/` (Mojo's lld, of `llvm`, an llvm_branch_tool) and `llvm/runtime/` (the profile runtime); `[run]`, `cov_branch_run.sh` (`run_script`) with `llvm/` (llvm-profdata and its libraries) and `raw_version`, the raw profile version every run requires (RAW_PROFILE_VERSION of toolchains/llvm_branch/defs.bzl); `[annotate]`, `cov_branch_annotate.sh` (`annotate_script`) with `lld/` and `llvm/` (llvm-profdata); and `[classify]`, the cov_branch_classify executable (`classify`). Each script finds its tools (`lld/`, `llvm/`, `raw_version`) beside itself, in its own directory; the classifier is a static executable of its own.",
     attrs = {
         "annotate_script": attrs.source(default = "komira//tools/build/coverage/branch:cov_branch_annotate.sh"),
         "classify": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/branch:cov_branch_classify"),

@@ -17,7 +17,9 @@
 #      that names no file is a usage error (KCI-E-USAGE, exit 2); a file
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
-#      (KCI-E-FORMAT);
+#      (KCI-E-FORMAT), and so is a file holding a step that writes into a
+#      cell (a DEPLOY step, or a PUBLISH step into a cell), which this kci
+#      parses and does not run;
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
 #      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
@@ -318,6 +320,16 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMach
         g = parse_machine_file(text, cmd.machine)
     except e:
         raise Error(String(ERROR_FORMAT) + String("\n") + String(e))
+    for i in range(len(g.stages)):
+        for k in range(len(g.stages[i].steps)):
+            ref step = g.stages[i].steps[k]
+            if step.writes_cell():
+                raise Error(
+                    String(ERROR_FORMAT) + String("\n") + cmd.machine + String(": line ") + String(step.line)
+                    + String(": step '") + step.name + String("' of stage '") + g.stages[i].name
+                    + String("' writes into cell '") + step.cell
+                    + String("': that needs a newer kci (this kci runs BUILD steps and PUBLISH steps to a channel)")
+                )
     result.machine_path = cmd.machine.copy()
     result.machine_sha256 = file_sha256_hex(cmd.machine)
     return g^
