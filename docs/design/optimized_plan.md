@@ -65,7 +65,7 @@ one host, it is cut into **optimized segments**, a second defined type built fro
 
 | Role | What it does |
 |---|---|
-| **Producer** | Parses SQL (or takes a dataframe expression, including the user functions it calls), binds, gathers statistics, optimizes, captures user code (§10.6), and emits an `OptimizedPlan`. It is a program that links the engine and the producer library: the Mojo, TypeScript or Python SDK, or a notebook built on one. A **service that re-optimizes a stored query** on each run (for example a scheduler running a recurring job) is a producer too: it starts from a bound plan that an SDK produced and stored, links the same library, and stamps `kind = SERVER`. When the stored query has an environment image, the service runs the producer library from that image's base (§10.11). It is not a path for clients without an engine; there is none. For identical inputs every producer yields the same `plan_digest` (§7.1). The stamps differ, so the header bytes do not. |
+| **Producer** | Parses SQL (or takes a dataframe expression, including the user functions it calls), binds, gathers statistics, optimizes, captures user code (§10.6), and emits an `OptimizedPlan`. It is a program that links the engine and the producer library: the Mojo, TypeScript or Python SDK, or a notebook built on one. A **service that re-optimizes a stored query** on each run (for example a scheduler running a recurring job) is a producer too: it starts from a bound plan that an SDK produced and stored, links the same library, and stamps `kind = "komira/server"`. When the stored query has an environment image, the service runs the producer library from that image's base (§10.11). It is not a path for clients without an engine; there is none. For identical inputs every producer yields the same `plan_digest` (§7.1). The stamps differ, so the header bytes do not. |
 | **Scheduler** | Any system that places work. It is not part of komira. It accepts plan work only as an `OptimizedPlan`, never as SQL text or a bound plan, so it never runs the optimizer. It reads only the header, through the header-only library (§4.1), and never decodes the body. When the plan travels with an environment image, it checks that pair against the release records it is given, from the image manifest alone (§10.11). |
 | **Coordinator** | Learns the host count once placement is done. It verifies `plan_digest`, then **cuts** the plan into `OptimizedSegment`s (§8). The cut is mechanical and changes no decision. |
 | **Executor host** | Admits a segment or a plan (§7), lowers it, and applies only the named host-local rules (§5.3). It never re-optimizes. It runs user code in worker processes started from the plan's environment image (§10.10). |
@@ -133,8 +133,10 @@ message ProducerStamp {
   bytes        engine_build               = 1;  // digest of the engine build output; provenance and revocation key
   uint32       optimizer_contract_version = 2;  // meaning frozen per version (§9.3)
   bytes        optimizer_config_digest    = 3;  // digest of the OptimizerConfig values used; reproduction only
-  ProducerKind kind                       = 4;  // CLIENT_PYTHON | CLIENT_TYPESCRIPT | CLIENT_MOJO | SERVER
-                                                  // (SERVER: a service re-optimizing a stored query, §2)
+  string       kind                       = 5;  // open, namespaced, same grammar as a UDF runtime id (§10.3):
+                                                  // "komira/python-sdk", "komira/typescript-sdk", "komira/mojo-sdk",
+                                                  // "komira/server" (a service re-optimizing a stored query, §2)
+  reserved 4;                                     // a draft's closed ProducerKind enum
 }
 
 // The type is the "do not re-optimize" mark; §7.3 says how that is enforced.
@@ -170,10 +172,10 @@ fixes the context.
 | # | Field | Invariant | Checked by |
 |---|---|---|---|
 | 1 | `format_version` | In the reader's accepted set, which holds **every released version** and loses none (§9.2); never `>=`. An understated version (a field present that its version does not include) is refused, as `plan.proto:1631` does for `write_target`. | header library, host |
-| 2 | `producer` | Required. `engine_build` not on the revocation set passed in by the caller. `optimizer_contract_version` a released version the host knows; every released version stays known (§9.3). | header library (revocation), host (revocation and contract) |
+| 2 | `producer` | Required. `engine_build` not on the revocation set passed in by the caller. `optimizer_contract_version` a released version the host knows; every released version stays known (§9.3). `kind` is provenance only: neither admission nor the optimizer reads it. | header library (revocation), host (revocation and contract) |
 | 3 | `plan_digest` | Exactly 32 bytes; the host recomputes it (§7.1). | host, coordinator |
 | 4 | `recurring_signature` | 32 bytes or empty. It cannot be verified from the body, so it keys only history and caches, never authorization or limits. | none (advisory) |
-| 5 | `needs` | Required (§6.1). The host cross-checks it against the body. With UDFs, `python_abi` or `node_abi` is set and the pair (plan, environment image) passes §10.11. | header library (caps, environment checks 1-3), host (cross-check, environment checks 1-6) |
+| 5 | `needs` | Required (§6.1). The host cross-checks it against the body. With UDFs, `needs.runtimes` lists every runtime used and the pair (plan, environment image) passes §10.11. | header library (caps, environment checks 1-3), host (cross-check, environment checks 1-7) |
 | 6 | `write_target` | Same rules as in `WirePlanEnvelope`: an empty path is refused. A write-carrying plan declares the format version that includes it. | header library, host |
 | 7 | `advice` | Advisory. No reader refuses a plan for its content; a mismatch between an estimate's `node_tag` and the node at its ordinal is shown as such by diagnostics and otherwise ignored. | none |
 | 8 | `body` | Canonical (§7.1) and decodes as `OptimizedPlanBody` in the OPTIMIZED context. | host |
@@ -227,7 +229,7 @@ Field numbers are the next free numbers at the pinned commit.
 | `WireScanNode` | `Boundedness boundedness = 13` (`BOUNDED`, `UNBOUNDED`) | Required in OPTIMIZED; admitted in RAW too (below). Marks a source with no end, which makes the plan a streaming plan. |
 | `WirePlan` | new arm `WireExchangeNode exchange = 20` | `{child = 1, kind = 2 (GATHER, BROADCAST, HASH, RANGE), keys = 3, key_encoding = 4, ordering = 5, partitions = 6, adaptive_allowed = 7}`. `partitions = 0` means "filled in at the cut" (§8). |
 
-The UDF arms of §10.4 (`WireUdfApply`, `WireMapBatchesNode`, `WirePythonStepNode`, the `AGG_UDF` aggregate function),
+The UDF arms of §10.4 (`WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, the `AGG_UDF` aggregate function),
 the `WireField` addition `children`, and `WireScanNode.boundedness` are an exception to this table's heading: they
 are admitted in both contexts, because a stored bound plan contains UDFs and streaming sources too. OPTIMIZED refuses
 the name-keyed `WireUdfCall` and the node-level `WireUdf` (`OPTIMIZED_UDF_LEGACY_FORM`).
@@ -250,7 +252,7 @@ run-kind field and no image compiled per pipeline; the scan's mark is the only s
   (`src/komira_morsel/streaming_source.mojo:321`), and its read position is an opaque, checkpointable value (`:70`).
 - **Every other node's boundedness is derived:** a node's output is unbounded if any of its inputs is. An operator
   that must read all of an unbounded input before it emits (a sort, an aggregate with no streaming form, the build
-  side of a hash join, a grouped `MAP_BATCHES`) is refused (`OPTIMIZED_UNBOUNDED_INPUT_UNSUPPORTED`) unless the plan's
+  side of a hash join, a grouped `MAP_BATCHES_FRAME`) is refused (`OPTIMIZED_UNBOUNDED_INPUT_UNSUPPORTED`) unless the plan's
   `optimizer_contract_version` admits a streaming form for it. That set is part of the contract version (§9.3) and
   only grows, as the lowerable `(join type, build side)` pairs do. Windows, watermarks and the streaming forms of
   operators are added under new format versions; this document fixes how a plan says it is streaming, and that
@@ -273,7 +275,7 @@ refused would be an unobservable slot.
 **The exchange arm takes plan tag id 18, not 16.** Tag ids 16 and 17 are retired, and the comment says "THE NEXT TAG
 ADDED TAKES 18" (`logical_plan.mojo:170-180`; `plan_vocabulary.proto:56-57` reserves wire numbers 17 and 18). So
 `PLAN_EXCHANGE = 18` and its `PlanTag` wire number is 19. The UDF nodes of §10.4 follow it: engine tags
-`PLAN_MAP_BATCHES = 19` and `PLAN_PYTHON_STEP = 20` (`PlanTag` 20 and 21; WirePlan fields 21 and 22), and
+`PLAN_MAP_BATCHES = 19` and `PLAN_STEP = 20` (`PlanTag` 20 and 21; WirePlan fields 21 and 22), and
 `PLAN_TAG_COUNT` becomes 21. On the expression side, engine tag `EXPR_UDF_APPLY = 27` (`ExprTag` 28; WireExpr field
 27), and `EXPR_TAG_COUNT` becomes 28. Every consumer sized from those constants, the vocabulary census and the
 enum-number tests (`src/komira_plan_proto/tests/test_plan_enum_numbers_nodes.mojo`,
@@ -361,13 +363,18 @@ message DeclaredNeeds {
   reserved 3; reserved "images";     // the environment image travels beside the plan (§10.11)
   repeated Hint    hints       = 4;  // closed enum key + typed value; an unknown key is refused
   repeated string  data_scopes = 5;  // scan binding keys the plan reads
-  string           python_abi  = 6;  // e.g. "cp312"; set iff some UdfRef has runtime PYTHON
-  string           node_abi    = 7;  // e.g. "node22"; set iff some UdfRef has runtime NODE
+  reserved 6, 7; reserved "python_abi", "node_abi";  // a draft's per-language ABI fields; see runtimes
   bool             unbounded   = 8;  // true iff some scan in the body is UNBOUNDED (§5.2)
+  repeated RuntimeNeed runtimes = 9; // one entry per runtime id used by udfs, sorted by id
+}
+
+message RuntimeNeed {               // udf_runtime_interface.md §3.2
+  string runtime     = 1;           // a UdfCode.runtime id (§10.3)
+  string runtime_abi = 2;           // the runtime's own ABI tag: "cp312", "cp313t", "node22"; may be empty
 }
 ```
 
-(`images` was never released, so §9.2 allows reserving it.)
+(`images`, `python_abi` and `node_abi` were never released, so §9.2 allows reserving them.)
 
 `needs` is what a scheduler places by, capped by its own limits. The producer derives it from its estimates; the
 scheduler never sees those estimates as anything but advice. A producer that overstates needs reserves more than it
@@ -378,15 +385,15 @@ The host checks against the decoded body:
 - every `udf_index` in the plan, in `shared` and in every segment is in range (`OPTIMIZED_UDF_UNDECLARED`);
 - on the uncut plan only, every `udfs` entry is referenced (`OPTIMIZED_UDF_UNREFERENCED`); a segment keeps the
   parent's whole list (§8.1) and may use only part of it;
-- each reference matches the entry's kind: `WireUdfApply` names `SCALAR` or `MAP_BATCHES`, or `AGGREGATE` as the
-  argument of an `AGG_UDF` measure; `WireMapBatchesNode` names `MAP_BATCHES`; and `WirePythonStepNode` names
-  `PYTHON_STEP` (`OPTIMIZED_UDF_KIND_MISMATCH`);
-- `python_abi` is set if and only if some entry's runtime is `PYTHON`, and `node_abi` if and only if some entry's is
-  `NODE` (`OPTIMIZED_UDF_ABI_UNDECLARED`);
+- each reference matches the entry's kind: `WireUdfApply` names `SCALAR` or `MAP_BATCHES_COLUMN`, or `AGGREGATE` as
+  the argument of an `AGG_UDF` measure; `WireMapBatchesNode` names `MAP_BATCHES_FRAME`; and `WireStepNode` names
+  `STEP` (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`);
+- `runtimes` has exactly one entry per runtime id used by `udfs`, sorted by id (`OPTIMIZED_UDF_RUNTIME_UNDECLARED`,
+  `OPTIMIZED_NEEDS_RUNTIME_UNUSED`, `OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`);
 - `unbounded` is true if and only if some scan in the plan or in `shared` is `UNBOUNDED`
   (`OPTIMIZED_NEEDS_UNBOUNDED_MISMATCH`);
 - every scan's binding appears in `data_scopes`;
-- closures, notebook functions and lambdas are **admitted** in their `value` or `js_value` form (§10.6), and their
+- closures, notebook functions and lambdas are **admitted** in their `VALUE` form (§10.6), and their
   code must be present in the environment image (§10.11).
 
 ### 6.2 Snapshot pins (binding)
@@ -464,8 +471,8 @@ bytes (`OPTIMIZED_PLAN_NOT_CANONICAL`). Then
 
 ```
 plan_digest = sha256(body ‖ canonical(DigestTrailer))
-DigestTrailer = { format_version, optimizer_contract_version, write_target, needs.udfs, needs.python_abi,
-                  needs.node_abi, needs.data_scopes }
+DigestTrailer = { format_version, optimizer_contract_version, write_target, needs.udfs, needs.runtimes,
+                  needs.data_scopes }
 ```
 
 The trailer binds the plan's effect, the code it runs (by digest; the environment image that holds it is outside the
@@ -488,8 +495,7 @@ The header library runs steps 1-3 on the header only:
 3. **Producer and needs.** `OPTIMIZED_PLAN_PRODUCER_REVOKED`: `engine_build` is in the revocation set the caller
    passes. `OPTIMIZED_PLAN_NEEDS_OVER_LIMIT`: `needs` exceeds the limits the caller passes. When the caller passes an
    environment (image digest and manifest bytes) and the base release records, the header library also runs §10.11
-   checks 1-3: `OPTIMIZED_ENV_BASE_UNRELEASED`, `OPTIMIZED_ENV_ENGINE_TOO_OLD`, `OPTIMIZED_ENV_PYTHON_ABI_MISMATCH`,
-   `OPTIMIZED_ENV_NODE_ABI_MISMATCH`.
+   checks 1-3: `OPTIMIZED_ENV_BASE_UNRELEASED`, `OPTIMIZED_ENV_ENGINE_TOO_OLD`, `OPTIMIZED_ENV_RUNTIME_MISSING`.
 
 The host, or the coordinator before a cut, runs steps 1-12:
 
@@ -511,8 +517,10 @@ The host, or the coordinator before a cut, runs steps 1-12:
    - `OPTIMIZED_SCAN_PIN_MISSING`
    - `OPTIMIZED_SCAN_BOUNDEDNESS_MISSING`, `OPTIMIZED_SCAN_BOUNDEDNESS_UNSUPPORTED`,
      `OPTIMIZED_UNBOUNDED_INPUT_UNSUPPORTED`, `OPTIMIZED_NEEDS_UNBOUNDED_MISMATCH`
-   - `OPTIMIZED_UDF_UNDECLARED`, `OPTIMIZED_UDF_UNREFERENCED` (uncut plan only), `OPTIMIZED_UDF_KIND_MISMATCH`,
-     `OPTIMIZED_UDF_RUNTIME_MISMATCH`, `OPTIMIZED_UDF_ABI_UNDECLARED`, `OPTIMIZED_SCOPE_UNDECLARED`
+   - `OPTIMIZED_UDF_UNDECLARED`, `OPTIMIZED_UDF_UNREFERENCED` (uncut plan only), `OPTIMIZED_UDF_KIND_ARM_MISMATCH`,
+     `OPTIMIZED_UDF_STEP_NOT_VOLATILE`, `OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH`, `OPTIMIZED_SCOPE_UNDECLARED`
+   - `OPTIMIZED_UDF_RUNTIME_MALFORMED`, `OPTIMIZED_UDF_RUNTIME_UNDECLARED`, `OPTIMIZED_NEEDS_RUNTIME_UNUSED`,
+     `OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`
    - `OPTIMIZED_UDF_LEGACY_FORM`, `OPTIMIZED_UDF_IN_SCAN_FILTER`, `OPTIMIZED_UDF_GROUP_EXCHANGE_INCONSISTENT`,
      `OPTIMIZED_UDF_RESOURCES_UNDECLARED`
    - `OPTIMIZED_UDF_RETURN_TYPE_MISSING`, `OPTIMIZED_UDF_STATE_TYPE_MISSING`, `OPTIMIZED_UDF_SCHEMA_DISAGREES`
@@ -521,8 +529,10 @@ The host, or the coordinator before a cut, runs steps 1-12:
    - `OPTIMIZED_FIELD_UNSUPPORTED` (a statistics field on a node, §5.2)
    - on a segment only: `OPTIMIZED_EXCHANGE_PARTITIONS_UNSET`
 9. **Pins and environment.** Resolve and verify every pin (`OPTIMIZED_PLAN_SNAPSHOT_STALE`). Repeat §10.11 checks 1-3
-   and run checks 4-6 against the image this host runs. Start the UDF workers and load every `UdfRef` and data blob
-   before any data is read (`OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`, `OPTIMIZED_UDF_CODE_UNLOADABLE`).
+   and run checks 4-7 against the image this host runs (`OPTIMIZED_ENV_CODE_MISSING`, `OPTIMIZED_ENV_PACKAGE_MISSING`,
+   `OPTIMIZED_ENV_RESERVED_PATH`, `OPTIMIZED_UDF_DESCRIPTOR_INVALID`, `OPTIMIZED_UDF_KIND_UNSUPPORTED`). Bind each
+   runtime and its transport, and load every `UdfRef` and data blob before any data is read
+   (`OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`, `OPTIMIZED_UDF_CODE_UNLOADABLE`).
 10. **Lower**, applying only the §5.3 rules, with footers from the verified open.
 11. **Post-condition.** `OPTIMIZED_LOWERING_DIVERGED` (§7.3).
 12. **Run.**
@@ -712,17 +722,24 @@ re-optimization (§9.1); a test welded into `komira_plan_producer` optimizes eac
 UDF plans and streaming plans are in the corpus too. Each UDF kind, each runtime, each code form and both aggregate
 forms has at least one corpus plan:
 
-- The `installed` and `source` forms reference a pure-Python fixture module committed with the corpus; the
-  `js_module` form references a fixture bundle.
-- Each UDF corpus plan, with its environment, is executed on the newest released base of its Python minor. When new
+- The `komira/python` `PACKAGE` and `BUNDLE` forms reference a pure-Python fixture module committed with the corpus;
+  the `komira/node` `BUNDLE` form references a fixture bundle.
+- Each UDF corpus plan, with its environment, is executed on the newest released base of its runtime ABI. When new
   bases stop shipping a minor, its plans keep running on the last base that shipped it, which stays released
   (§10.12). No corpus test asserts a refusal for age.
 - A streaming corpus plan reads an `UNBOUNDED` fixture source that delivers a fixed sequence and then reports
   `Closed`, so the runner can compare the output emitted once the fixture is drained.
 
-The coverage assertion covers every `UdfKind`, `UdfRuntime`, `BatchFormat`, `UdfStability`, `UdfNullMode` and
-`Boundedness` value. Mutants: a lowering that treats `PROPAGATE` as `MANUAL` for the first contract version; a corpus
-runner that executes a UDF plan on the newest base regardless of its Python minor (the payload fails to load).
+The coverage assertion covers every `UdfKind` value (`MAP_BATCHES_COLUMN` and `MAP_BATCHES_FRAME` included),
+every `CodeForm`, `UdfStability`, `UdfNullMode` and `Boundedness` value, and each shipped runtime id. Mutants: a
+lowering that treats `PROPAGATE` as `MANUAL` for the first contract version; a corpus runner that executes a UDF plan
+on the newest base regardless of its runtime ABI (the payload fails to load).
+
+**Runtime-swap invariance** (`udf_runtime_interface.md` §3.2). Every query in the UDF corpus is planned twice; the
+second time every `UdfRef.code` is replaced by `{runtime: "komira-test/null"}` with its other fields empty, and every
+`needs.runtimes` entry likewise. After the same substitution is applied to the first result, the two optimized plans
+must be equal: the optimizer never reads `code`. Mutant: an optimizer rule that skips CSE when
+`runtime == "komira/python"`; the test must go red.
 
 What it catches, each with a planted mutant that must turn it red:
 
@@ -801,17 +818,20 @@ The remedy for a revoked plan is to produce it again with a good build.
 Specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md), §10.1-§10.14. In brief:
 
 - A plain Python or TypeScript function becomes a `UdfRef` in `needs.udfs`, referenced by index from three new arms
-  (`WireUdfApply`, an n-ary expression; `WireMapBatchesNode`; `WirePythonStepNode`) and from the `AGG_UDF` aggregate
-  function. The kinds are scalar, map-batches, aggregate (a plain function over a group, or a mergeable accumulator)
-  and Python step. GPU UDFs come later.
+  (`WireUdfApply`, an n-ary expression; `WireMapBatchesNode`; `WireStepNode`) and from the `AGG_UDF` aggregate
+  function. The kinds are scalar, map-batches over a column, map-batches over a frame, aggregate (a plain function
+  over a group, or a mergeable accumulator) and step. A `UdfRef` names its runtime by an open string, so native and
+  managed UDFs in any language use the same reference ([`udf_runtime_interface.md`](udf_runtime_interface.md)). GPU
+  UDFs come later.
 - Every return type is explicit in the plan: a Python type hint or a `return_dtype=`/`schema=` argument, or in
   TypeScript a type value on the verb. A function with no type is refused by name on the user's machine.
-- The plan identifies code by content digest only. Installed Python code is referenced by module and name, project
+- The plan identifies code by content digest only, through a neutral `CodeForm` (`PACKAGE`, `BUNDLE`, `VALUE`) and a
+  runtime-owned descriptor. Installed Python code is referenced by module and name, project
   source by bundle digest, notebook functions and closures by the digest of a cloudpickle payload, and TypeScript by a
   bundle digest and export, or by a closure's source and its plain-data captures. The bytes live in an **environment
   image** that travels beside the plan, built FROM a released komira base that holds the engine.
-- Admission checks the pair: the image derives from a released base whose engine accepts the plan's versions, the
-  Python ABI and Node major match, and the code is present and loads.
+- Admission checks the pair: the image derives from a released base whose engine accepts the plan's versions, every
+  runtime and ABI tag in `needs.runtimes` is in the image, and the code is present and loads.
 - The plan format keeps its forever-backward-compatible promise; whether code loads is a property of the image, and a
   UDF plan always runs with the image it was recorded with (§10.12).
 
@@ -844,8 +864,8 @@ Each stage is independently reviewable and leaves `main` green. Every stage ship
 | 8 | `komira_optimized_plan`, `komira_shuffle` | `WireSinkBinding`, the shuffle-partition scan source, and the cutter (§8) with its "no decision changed" assertion. | Mutants: a cutter that reorders a join; one that flips a build side. |
 | 9 | the host lowering target | The post-condition (§7.3) and the closure lint excluding `komira_optimizer`. | A planted dependency goes red; each §7.3 mutant is refused. |
 | 10 | `komira_optimized_plan`, the host lowering target, the release machine | The golden corpus (§9.4): emitted at each release that ships this type, append-only, welded into the header, admission and lowering targets, with the coverage assertion and the stored-cut key test (§9.6). | Each §9.4 mutant goes red; editing or deleting a corpus file is refused by the CI check. |
-| 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef` and its messages, Python and Node forms; `WireUdfApply`, `WireMapBatchesNode`, `WirePythonStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. | Every §10.4 refusal by name. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate. |
-| 12 | `komira_optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-6 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. |
+| 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef`, `UdfCode`, `CodeDigest`, `UdfKind`, `CodeForm`, `RuntimeNeed`; `WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. | Every §10.4 refusal by name. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate. |
+| 12 | `komira_optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-7 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. |
 | 13 | the host lowering target, new Python and Node UDF worker packages | Worker processes under their own user id, Arrow over shared memory, load-once caching, thread limits, the §10.10 errors, the per-batch return-type check, both aggregate forms, and the §10.9 optimizer rules in the portable profile. | Mutants: a worker that reloads the payload per batch (a load counter goes red); a host that retries a `VOLATILE` batch; a float batch accepted into an int64 return type; a Node worker that accepts an unsafe integer into int64; a mergeable aggregate whose partial state is dropped at the exchange; a worker that can read the supervisor's credentials. |
 | 14 | the host lowering target, `komira_shuffle_streaming` | The streaming driver: a plan with an `UNBOUNDED` scan runs over `StreamingMorselSource`, with the §5.2 boundedness checks and the §10.10 streaming rules for UDFs. | Mutants: a host that runs an `UNBOUNDED` plan under the batch driver (an `Idle` fixture is taken for end of input and the output is short); an admission that takes the mode from `needs.unbounded` instead of the body; a plain aggregate admitted over an unbounded input. |
 
