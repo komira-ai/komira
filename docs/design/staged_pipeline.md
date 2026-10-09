@@ -3,7 +3,8 @@
 Status: design, not built. **EXISTS** names code on `main`; everything else is PROPOSED. New names
 (all absent from `main`): the stage `beta`, the jobs `beta` and `beta_install`, the step kind `TEST`,
 the step field `checks`, the outcome `SUPERSEDED` (as a successful stop), the job output `superseded`,
-rule R23. Related: continuous publish (`docs/design/continuous_publish.md`, open in #1168), [ci.md](../ci.md),
+the step name `superseded`, the `main_red` decision `stalled`, rules R23 and R24. Related: continuous
+publish (`docs/design/continuous_publish.md`, open in #1168), [ci.md](../ci.md),
 [release machines](release_machine.md), [gamma validation](gamma_validation.md).
 
 ## The ruling, and what changes
@@ -19,165 +20,196 @@ The project owner's ruling: publishing is continuous, through three stages, **be
 **Today (EXISTS).** One run per push carries the whole chain `build → gamma → validate → prod`
 (`.github/workflows/kci.yml`). The **workflow-level** group `kci-release-main` serialises whole runs:
 the newest pending *run* waits for the previous run to finish **prod**. Rule R16 of
-`src/kci_workflow_check` requires that group and refuses a job-level `concurrency:`. So rules 1 and 4
-already hold (the set hash, R19); rules 2 and 3 hold for the pipeline as a whole, not per stage: a
-fast `build` waits for a slow `prod`, and pausing prod (a required reviewer) stalls gamma too.
+`src/kci_workflow_check` requires that group and refuses a job-level `concurrency:`, for a reason this
+doc must answer (`auto_promotion.mojo`, R16): "a job-level group's pending replacement could drop a
+prod job". Rules 1 and 4 already hold (the set hash, R19); rules 2 and 3 hold for the pipeline as a
+whole, not per stage: a fast `build` waits for a slow `prod`, and pausing prod stalls gamma too.
 
-**What this doc supersedes in continuous publish (#1168):** its section "Trigger:
-per merge, coalesced" (the one-run-per-push, whole-pipeline coalescing), its "continuous means within
-one release duration" arithmetic, and in "The gate between gamma and prod" the **placement** of its two
-gates: S10c's release checks move from `build` into beta's `checks`, and S12's installed-bytes checks
-move from gamma's `validate` to `beta_install`, so both run **before** anything is published.
-**What stays:** S0 (lock gamma), the release ledger (S1, S2), native packaging (S3), the emulator tier
-and its safety rules (S4 to S9), S10a and S10b, yank and its tombstone (S11), and its questions.
+**Relation to continuous publish (#1168).** #1168 stays as written. This doc **supersedes** three
+parts of it: "Trigger: per merge, coalesced" (one run per push, coalesced as a whole), the "within one
+release duration" arithmetic, and the **placement** of its two gates in "The gate between gamma and
+prod": S10c's release checks move from `build` into beta's `checks`, and S12's installed-bytes checks
+from gamma's `validate` to `beta_install`, so both run **before** anything is published. Everything
+else in #1168 stands. Merge order: **#1168 first, then this doc**; the two do not conflict, and the
+index row below says which sections this doc overrides. P4 rewrites ci.md's "Queued runs" and "Never
+backward", which today describe prod only.
 
 ## a. Where the build-once files live, and how each stage proves it has them
 
 **Decision: one workflow run carries all four stages, so the files stay a workflow artifact of that
-run.** `build` already uploads `kci-release-<revision>` (the release directory, the kci binary and the
-build's result) and every later job downloads it by name. GitHub scopes `actions/download-artifact`
-to the current run by default; another run's artifact needs `run-id` and a `github-token` with
-`actions: read`, which R4 grants no release job. Inside one run nothing new is needed. The action's
-`digest-mismatch` defaults to `error` (a corrupted download fails), but that is transport, not the
-proof.
+run.** `build` uploads `kci-release-<revision>` and every later job downloads it by name, scoped to
+the current run (another run's artifact needs `actions: read`, which R4 grants no release job).
 
-**The proof is kci's, at every stage (EXISTS for gamma, validate and prod; extended to beta):**
-`--release-set-hash` makes kci recompute the release directory's set hash (each file's manifest sha256)
-and refuse another one, `KCI-E-SET-HASH`, exit 3, before any check, upload or install
-(`src/kci_cli/dispatch.mojo`, step 4b). The hash is handed job to job and never typed (R19): `build`'s
-`set_hash` → `beta` and `beta_install` → `beta_install`'s `validated_set_hash` → `gamma` and `validate`
-→ `validate`'s `validated_set_hash` → `prod`. kci writes a validated hash only for a real run whose
-selected validations all VALIDATED and SUCCEEDED, so a stage cannot hand on a set it did not check.
-Gamma's and beta's installs are pinned: each install name must resolve to the release's version, build
-string and sha256 (`src/kci_validate/readback.mojo`, check 2), so a newer build in the channel cannot
-stand in.
+**The proof is kci's set hash, at every stage.** `--release-set-hash` makes kci recompute the release
+directory's set hash and refuse another one, `KCI-E-SET-HASH`, exit 3, before any effect
+(`src/kci_cli/dispatch.mojo`, step 4b). **Today step 4b runs only for a run that selects a PUBLISH
+step or a validation** (dispatch.mojo:76-84); `beta` runs `--only step:e2e`, a `TEST` step, so P3
+**extends 4b to a run that selects a TEST step**, with the flag required under Actions as for the
+others. The hash is handed job to job and never typed (R19): `build`'s `set_hash` → `beta` and
+`beta_install` → `beta_install`'s `validated_set_hash` → `gamma` and `validate` → `validate`'s
+`validated_set_hash` → `prod`. kci writes a validated hash only when every selected validation
+VALIDATED and SUCCEEDED. Installs are pinned to the release's version, build string and sha256
+(`src/kci_validate/readback.mojo`, check 2).
 
-**Retention.** `kci-release-*` is kept 14 days (`kci.yml`). A run whose prod waits longer (a pause)
-fails to download and goes red; it never publishes other bytes. Recommendation: 30 days (question 2).
+**Retention.** `kci-release-*` is kept 14 days (`kci.yml`). A run whose prod waits longer fails to
+download and goes red; it never publishes other bytes. Recommendation: 30 days (question 3).
 
-**Rejected: a staging bucket or a private channel.** It needs a cloud credential, a new trust and
-spend, and buys nothing while the stages share a run.
+**Rejected: a staging bucket or a private channel**: a cloud credential, new trust and spend, for
+nothing while the stages share a run.
 
-**Beta's input** is the same artifact. **Beta is not a channel**: nothing is uploaded. `build` also
-writes the local channel index of the release directory (`komira_pack conda-index`, the PRE-PUBLISH
-mode `kci run --channel` reads today), and beta installs from that directory. The local channel's reads
-already check each record's sha256 against the release (`src/kci_validate/conda_install_env.mojo`, "A
-LOCAL CHANNEL"). The flag `--channel` stays refused under GitHub Actions and by R14: beta gets its local
-channel from its step kind (f), not from a flag a workflow could point anywhere.
+**Beta is not a channel**: nothing is uploaded. `build` also writes the local channel index of the
+release directory (`komira_pack conda-index`), and beta installs from it. `--channel` stays refused
+under Actions and by R14: beta gets its local channel from its step kind, not a flag.
 
-## b. One run at a time per stage, latest wins
+## b. One run at a time per stage, and why the latest wins
 
-GitHub's concurrency documentation: in a group, at most one job runs; by default "any existing
-`pending` job or workflow in the same concurrency group will be canceled and the new queued job or
-workflow will take its place"; `cancel-in-progress: true` would cancel the running one too; groups
-compare ignoring case; ordering is FIFO by the time each one started waiting, "not guaranteed"; the
-optional `queue: max` keeps up to 100 pending. With `cancel-in-progress: false` and no `queue`, a group
-is exactly rules 2 and 3: one running, one pending, the newest arrival replaces the pending one.
+GitHub's concurrency documentation: in a group at most one job runs; a newer arrival cancels the
+**pending** one and takes its place; groups ignore case; FIFO by the time each started waiting, "not
+guaranteed"; `queue: max` keeps up to 100 pending.
 
-**Decision: one workflow (`kci.yml`), no workflow-level group, a job-level group on every release
-job.** On a push to `main` the group is `kci-<job id>-main`; a manual dry run `kci-<job id>-plan-<run
-id>`; any other manual run `kci-<job id>-ref-<ref name>` (today's three-way split, per job). `queue` is
-refused: `queue: max` would run every commit, against rule 3.
+**Exclusion (rule 2): one workflow, no workflow-level group, a job-level group on every release
+job**, `cancel-in-progress: false`, no `queue` key (`queue: max` would run every commit). A push to
+`main`: `kci-<job id>-main`; a manual dry run: `kci-<job id>-plan-<run id>`; any other manual run:
+`kci-<job id>-ref-<ref name>`, except as question 2 proposes for gamma's publish.
 
-**Rejected: separate workflows chained by `workflow_run`.** From GitHub's event reference and this
-repository:
+**The hazard R16 names, stated.** GitHub keeps the newest **arrival**, not the newest **commit**. An
+older arrival cancels a newer pending job, and nothing brings the newer one back. Three paths deliver
+an older arrival: (i) a re-run of any job of an old push run, which joins `kci-<job>-main`; (ii) two
+pushes close together reaching `build` in reverse order (FIFO "not guaranteed"); (iii) a human
+cancel. With a group per stage nearly every stage has a pending job, so the window is wider than
+today's one workflow-level slot. Never-backward (c) stops the channel going backwards; it does not
+release the cancelled commit. **Groups alone cannot hold rule 3.** Four parts do:
 
-- `workflow_run` "will only trigger a workflow run if the workflow file exists on the default branch":
-  a break-glass run of a branch could not chain at all.
-- At most three levels: `build → beta → gamma → prod` uses all three, and `main-red`, itself a
-  `workflow_run` of the release, would be a fourth level and never run.
-- In a `workflow_run` run `GITHUB_SHA` is the default branch's last commit, not the revision; R21's
-  check (`REVISION` is `GITHUB_SHA`) and kci's start-up check would have nothing to hold, and the
-  inputs `revision`, `reason` and `dry_run` are not carried.
-- The artifact crosses runs (`actions: read`, refused by R4), and each channel's trusted publisher
-  names the workflow file `kci.yml` (ci.md): moving gamma or prod to another file means re-registering
-  both publishers.
-- kci holds one workflow file to one machine file at start-up; four files would need four.
+1. **Order for live runs.** `build` is a single slot, each later stage is a single slot fed by the
+   previous stage's completions, so after `build` arrivals follow push order and the pending slot
+   holds the newest. A running job is never cancelled: throughput is the slowest stage's.
+2. **Admission (R24, new).** Every release job's first kci action fetches `main` (anonymous) and
+   counts the commits after `REVISION` a push would release (the count `the prod line` uses today,
+   excluding `docs/**` and `**.md`). On a **re-run** (`github.run_attempt` > 1) of a push run, a
+   revision that is not main's releasable tip stops `SUPERSEDED` before any effect. So a re-run of
+   an old run never promotes anything, at any stage; a first attempt proceeds (it is the newest that
+   reached this stage).
+3. **The line on every stage.** `the prod line`'s "main is at `<tip>`, past `<revision>`" moves into
+   every release job's last step (R20), success or failure, so each stage's summary names a newer
+   commit it did not carry.
+4. **Repair (P2).** `release/ci/main_red.py` runs on every completed kci run (`workflow_run`,
+   `completed`). New decision `stalled`: a push run that concluded `cancelled`, with
+   `run_attempt == 1`, whose `head_sha` is main's releasable tip **now**, and no other kci run of
+   that `head_sha` queued, waiting or in progress (the runs list; `main_red` holds `actions: read`).
+   That is exactly the case (i) to (iii) leave: the tip dropped and nothing carrying it. `main_red`
+   then **re-runs that run** (it becomes attempt 2, the tip, so R24 admits it), once; a second loss,
+   or no `actions: write` (question 6), opens an issue naming the run to re-run. A human cancel of
+   the tip is therefore undone: the way to hold a release is prod's required reviewer, not a cancel.
 
-**Why ordering holds for live runs.** `build` is itself a single slot, so builds finish in push order,
-and each later stage receives arrivals in that order; the pending slot always holds the newest. A
-running job is never cancelled, so every stage makes progress: throughput is the slowest stage's, not
-the sum. Pausing prod (a required reviewer) should then hold only the prod group, so beta and gamma
-keep running (P0 confirms).
+With 1 to 4 a dropped tip is re-queued without a human, an old run never promotes, and every stage
+says when main moved past it. Pausing prod should hold only the prod group (P0 proves it).
+
+**Rejected: separate workflows chained by `workflow_run`.** It fires only from the default branch
+(no break-glass), allows three levels (`main-red` would be a fourth and never run), sets
+`GITHUB_SHA` to the default branch's last commit (R21's check has nothing to hold), moves the
+artifact across runs (`actions: read`, refused by R4), and would re-register both trusted
+publishers, which name `kci.yml` (ci.md).
 
 ## c. Ordering safety: nothing older after something newer
 
-Live runs keep order (b), but three paths break it: a re-run of an old run, GitHub's FIFO that is "not
-guaranteed", and a failed job re-run later. Example: beta for B finishes late, after C reached gamma.
-**Rule: a stage refuses to promote a revision older than what it already promoted.**
-
-**Mechanism: extend "Never backward" (ci.md; `superseding_files` and `backward_files` in
-`src/kci_publish/plan.mojo`) from prod to every push stage.** Today it is per *stage*:
-`req.never_backward = not stage.break_glass` (`src/kci_cli/dispatch.mojo`), so gamma, a break-glass
-stage, has neither refusal. Proposed:
+**Rule: a stage refuses to promote a revision older than what it already promoted.** Mechanism:
+extend "Never backward" (ci.md; `superseding_files` and `backward_files` in
+`src/kci_publish/plan.mojo`) from prod to every push stage. Today it is per stage:
+`req.never_backward = not stage.break_glass` (`src/kci_cli/dispatch.mojo:418`), so gamma has neither
+refusal. Proposed:
 
 - **gamma and prod:** `never_backward` is a property of the **run**: true on a push to `main`, false
-  on a break-glass run. At gamma, the listing is read over **main-line builds** only: files whose
-  `h<8 hex>` names a commit on `origin/main`'s history (an ambiguous prefix counts as main-line). A
-  break-glass build of a branch, which may carry a higher number or a commit off `main`, is reported
+  on break-glass. At gamma the listing is read over **main-line builds** only: files whose
+  `h<8 hex>` resolves to a commit on `origin/main`'s history (an ambiguous prefix counts as
+  main-line, the side that refuses rather than ignores). A break-glass build of a branch is reported
   and does not stall `main`.
-- **beta** has no channel to read, so it asks **the next stage's**: it reads gamma's listing
-  anonymously (the same read and functions) and stops if gamma already holds a main-line build that
-  supersedes this revision. Beta never hands gamma a set gamma would refuse, and spends no farm time.
+- **beta** reads gamma's listing anonymously and stops if gamma already holds a main-line build that
+  supersedes this revision, before any index, install or farm action.
 - **Two outcomes, split by history.** The channel's newest main-line build **descends from** the
-  revision (the revision is on that build's history): `SUPERSEDED`, exit 0, nothing uploaded or run,
-  the job's output `superseded=true`, and the later jobs skip (R23). History **unrelated** either
-  way: `REFUSED`, `KCI-E-SUPERSEDED`, exit 3, red, as today. A late re-run is routine, not an incident;
-  an unrelated history is.
+  revision: `SUPERSEDED`, exit 0, nothing uploaded or run, output `superseded=true`, later jobs skip
+  (R23). History **unrelated**: `REFUSED`, `KCI-E-SUPERSEDED`, exit 3, red, as today.
+- **This is a new history read, not reuse.** Today kci reads only `git rev-list <revision>` (is the
+  channel's newest **on** this revision's history; `backward_files`). `SUPERSEDED` asks the inverse:
+  resolve the newest build's `h<8 hex>` to one commit (`git rev-parse --verify`), then ask whether the
+  revision is on **its** history (`git merge-base --is-ancestor`). A prefix that is unknown or
+  ambiguous, or a shallow history, is INDETERMINATE, `KCI-E-CANNOT-TELL`, exit 5 (the existing path),
+  never a pass. P1 builds it.
 
-**Planted tests (`src/kci_publish/tests/test_publish_never_backward.mojo`, kci_cli dispatch tests):**
-(1) a push run at gamma (a `break_glass` stage) against a fake listing whose newest build names a
-descendant commit: expect `SUPERSEDED`, exit 0, zero uploads. Red today; the mutant that restores
-`not stage.break_glass` uploads and turns it red. (2) the listing also holds a higher-numbered build of
-an off-`main` commit: the push still publishes; counting every build turns it red. (3) unrelated
-history: `REFUSED`, exit 3, still. (4) beta against a fake gamma listing that is ahead: `SUPERSEDED`
-before any index, install or farm action; a beta that skips the read turns it red.
+**Planted tests (`src/kci_publish/tests/test_publish_never_backward.mojo`, kci_cli dispatch tests).**
+Each names the mutant that turns it red.
 
-## d. What "superseded" looks like
+| # | case | expect | today | mutant caught |
+|---|---|---|---|---|
+| 1 | push run at gamma, newest listed build names a descendant | `SUPERSEDED`, exit 0, zero uploads | red (gamma uploads) | restore `not stage.break_glass` |
+| 2 | gamma listing also holds a higher-numbered off-`main` build | publishes | green; guards the filter | count every build |
+| 3 | gamma, unrelated history | `REFUSED`, exit 3 | red at gamma; regression at prod | split by number only |
+| 4 | beta, fake gamma listing ahead | `SUPERSEDED` before any index, install or farm call | red | skip the read |
+| 5 | gamma, newest build's prefix ambiguous between a main and an off-main commit | counted main-line: refused or superseded, never published | red | treat ambiguous as off-main |
+| 6 | descendant check on an unknown prefix or shallow clone | exit 5 | red | default to SUPERSEDED |
+| 7 | push re-run (`run_attempt` 2) of a non-tip revision, every stage | `SUPERSEDED` before any effect | red | drop R24's check |
+| 8 | the same re-run of the releasable tip (only docs after it) | proceeds | red | compare to the raw tip |
 
-- **Replaced while pending** (the common case: GitHub's "Canceling since a higher priority waiting
-  request ... exists"). The job is cancelled; its `needs` dependants skip. `release/ci/main_red.py`
-  classifies a run by its conclusion: `failure`, `timed_out`, `startup_failure` are red, `success` is
-  green, **anything else, `cancelled` included, is ignored** (`classify`, `RED`). So it never alerts.
-  The run's conclusion when one *job* is cancelled by its group is expected to be `cancelled`; slice
-  P0 confirms it from the first run's API record before anything relies on it.
-- **Stopped as `SUPERSEDED`** (c): a successful job whose summary says `superseded at <stage> by
-  <build>`, and skipped later jobs. The run concludes `success`. Today `main_red.py` would read that as
-  green; **proposed:** a push run is green only when its `prod` job concluded `success` and its prod
-  result is not `SUPERSEDED`; otherwise it is ignored.
-- **The record of a superseded commit** is the run that carries it: prod's summary already lists the
-  commits between the channel's previous build and this one (`previous_build_number`, "carried");
-  gamma's summary gets the same list. No job lists replaced runs (that needs `actions: read`).
+## d. What "superseded" looks like, and what `main_red.py` reads
+
+- **Replaced while pending:** the job is cancelled ("Canceling since a higher priority waiting
+  request ... exists"), its dependants skip. The run's conclusion is expected to be `cancelled`, which
+  `classify` ignores (`main_red.py:77`, `RED`; 282-289). P0 proves the conclusion before P2 relies on
+  it.
+- **Stopped as `SUPERSEDED`:** exit 0, so the job concludes `success`; job **outputs are not in the
+  REST API**, so the signal is a **step**: every release job carries a step named exactly
+  `superseded`, run only when kci's output says so (`if: steps.<run>.outputs.superseded == 'true'`).
+  The jobs list `main_red.py` already reads (`/attempts/N/jobs`, :366) carries each job's `steps[]`
+  with name and conclusion. R23 pins the step's name and condition.
+- **Every place `main_red.py` reads success**, changed in P2: `classify` (:282, called at :458) takes
+  the run's jobs: green only when job `prod` concluded `success` and its step `superseded` did not
+  run; `last_green` (:176), fed from the `status=success` runs list (:344), keeps only candidates
+  `classify` calls green (one jobs read per candidate, within the existing 30); `decide_green` (:300)
+  and the close path use the same `classify`, so a superseded run never closes an issue as "Fixed".
+  `stalled` (b.4) is the fourth decision.
+- **The record of a superseded commit** is the run that carries it: each publishing stage's summary
+  lists the commits between the channel's previous build and this one ("carried").
+
+**Planted tests (`release/ci/main_red` tests):** (a) a `success` run whose `prod` skipped: ignore;
+(b) `prod` `success` with step `superseded` `success`: ignore (mutant "green iff prod succeeded"
+turns it red); (c) a newer superseded success run ahead of the true last green: `last_green` returns
+the older (mutant "trust the success list" red); (d) `stalled`: tip cancelled, nothing active →
+re-run; tip cancelled with a queued run of the tip → nothing; cancelled non-tip → nothing;
+`run_attempt` 2 → issue, no re-run (mutant "drop the attempt cap" red).
 
 ## e. Beta's checks: the end-to-end suites, and the built files installed
 
-**On the farm (the `beta` job):** a `TEST` step builds and runs `checks: "//src/tests/e2e/..."`, a
-pattern, so a new suite joins with no edit. Today that is 11 test-only packages: `broker_e2e`,
-`komira_azure_blob_e2e`, `komira_formats_e2e`, `komira_http_tls_e2e`,
-`komira_job_supervisor_loopback`, `komira_pandas_door_e2e`, `komira_search_e2e`, `komira_secrets_e2e`,
-`komira_shuffle_e2e`, `komira_tls_interop_e2e`, `komira_udf_e2e`. None is in
-`release/artifacts.textproto`. Ten are test-only libraries whose welded tests a `buck2 build` runs;
-`broker_e2e` is a standalone `mojo_test` only, and `komira_shuffle_e2e` and `komira_tls_interop_e2e`
-also hold standalone `mojo_test`s, which only `buck2 test` runs. The release `build` builds only
-`<lib>_conda[release]`, so none of these runs on a release today. The `*_e2e` test files inside
-released libraries are welded and already run in `build`. Zero spend: no suite holds a cloud
-credential; the two cloud suites run over loopback against in-process fakes (the secrets suite's fake
-AWS and GCP services verify signatures themselves; Azure against a loopback blob fake), and P3's first
-task confirms that no other suite opens a socket off loopback. The
-MinIO-backed `komira_job_supervisor/tests/e2e` exits 77 without its flag, a skip that cannot fail, so
-it stays out until it cannot skip. `beta`'s environment holds no secret and no cloud credential.
+**On the farm (the `beta` job):** a `TEST` step runs **`buck2 test`** over `checks:
+"//src/tests/e2e/..."`, a pattern, so a new suite joins with no edit. `buck2 test` builds first, so
+welded tests run too, and it runs the standalone `mojo_test`s a build never runs (`broker_e2e` holds
+only one; `komira_shuffle_e2e` and `komira_tls_interop_e2e` hold some). Today the pattern covers 11
+test-only packages, none in `release/artifacts.textproto`, none run by a release today. The
+MinIO-backed `komira_job_supervisor/tests/e2e` exits 77 without its flag, a skip that cannot fail,
+so it stays out until it cannot skip.
 
-**Tying the source suites to the built files.** These suites link the libraries built from source at
-the revision; the packages carry those libraries' payload. The `TEST` step compares, for every released
-library the suites build, the sha256 of buck2's payload output with `payload_sha256` in the release's
-`metadata.json` (`tools/build/package/conda.bzl`), and refuses a mismatch before running anything. So
-"the suites passed" is about the bytes beta hands on, or beta fails.
+**The suite can go red (P3).** A kci test pins the step's command: verb `test`, the `checks` pattern
+(mutant `build` red). A planted-red draft PR, never merged, adds a failing welded test and a failing
+standalone `mojo_test` under `src/tests/e2e`, and the PR check
+(it runs `./buck2 test`, ci.md) must go red on each; that proves the suites fail under the verb beta uses.
 
-**On a hosted runner (the `beta_install` job, no environment, no token):** the existing
-`CONDA_INSTALL_ENV` validations, `install-komira-encoding` then `install-set`, install from beta's
-local channel with the pinned pixi and run every installed README. Split from `beta` for the reason
-`validate` is split from `gamma`: an install runs third-party package code, and `beta` holds the
-identity token that joins the farm. #1168's S12 checks land here.
+**Zero spend** rests on what can be enforced: `beta`'s environment holds no secret and no cloud
+credential, so a suite that reached a cloud would be unauthenticated. "No suite opens a socket off
+loopback" is an **audit** (P3's first task), not a check; a grep today finds only signature-test
+strings.
+
+**Tying the source suites to the built files.** The `TEST` step compares, for every released library
+the suites build, buck2's payload sha256 with `payload_sha256` in the release's `metadata.json`
+(`tools/build/package/conda.bzl`), and refuses a mismatch before running anything. **Risk:** the
+suites build libraries in their own configuration, the release builds `<lib>_conda[release]`; if
+those payloads differ, beta is red forever (safe, but it blocks every release). **P3's second task**
+builds both on the farm on a real tree (a build, no run, nothing uploaded) and records the digests.
+If they differ, the `TEST` step builds the suites in the release's configuration; if that cannot be
+done, P3 stops, the comparison is withdrawn, and the claim narrows to "the suites passed on this
+revision's source; `beta_install` checked the built bytes", which returns to the project owner.
+
+**On a hosted runner (`beta_install`, no environment, no token):** the existing `CONDA_INSTALL_ENV`
+validations install from beta's local channel with the pinned pixi and run every installed README.
+Split from `beta` as `validate` is from `gamma`: an install runs third-party code, `beta` holds the
+farm's identity token. #1168's S12 checks land here.
 
 ## f. The machine file, the environments, the workflow rules
 
@@ -189,7 +221,7 @@ stage {
   break_glass: true
   step {
     name: "e2e"
-    kind: TEST                       # NEW: runs `checks` at the revision; writes no release directory
+    kind: TEST                       # NEW: `buck2 test` over `checks`; writes no release directory
     platform: "linux-x86_64"
     artifacts: "release/artifacts.textproto"
     checks: "//src/tests/e2e/..."    # NEW field (#1168 S10c's, on a TEST step)
@@ -199,31 +231,30 @@ stage {
 }
 ```
 
-`gamma`'s `after` becomes `"beta"`; prod is unchanged. A `TEST` step's validations read the handed
-release's local channel (no `wait_for_index_seconds`); `kci_release_machine` refuses a `TEST` step
+`gamma`'s `after` becomes `"beta"`; prod is unchanged. `kci_release_machine` refuses a `TEST` step
 with neither `checks` nor validations, and `checks` on any other kind.
 
 | stage | job(s) | environment | token | runs on |
 |---|---|---|---|---|
 | build | `build` | `build` | farm | farm |
-| beta | `beta` (`--only step:e2e`), `beta_install` (its two validations) | `beta`; part job none | farm; none | farm; hosted |
+| beta | `beta` (`--only step:e2e`), `beta_install` | `beta`; none | farm; none | farm; hosted |
 | gamma | `gamma` (publish), `validate` | `gamma` / `gamma-breakglass`; none | OIDC; none | hosted |
 | prod | `prod` | `prod` | OIDC | hosted |
 
-`beta` is a new environment. The farm's credential trusts tokens whose subject is this repository
-(ci.md, "farm-connect"), so a `beta` subject should join; P0 checks it.
+`beta` is a new environment; whether a `beta` subject joins the farm is read from the farm's trust
+policy (P0, a read).
 
 **Workflow rules (`src/kci_workflow_check`):**
 
-- **R16, rewritten:** no workflow-level `concurrency:`; every release job has a job-level one, exactly
-  `group: kci-<job id>-<canonical suffix>` and `cancel-in-progress: false`, and no `queue` key. A
-  stage's part job is its own group: `validate` for B may overlap `gamma`'s publish of C (question 1).
-- **R23, new:** every job of a stage with an `after` carries the top-level conjunct
-  `needs.<J>.outputs.superseded != 'true'`, J being the job R19 reads its hash from, and that job
-  declares the output; a stage stopped as `SUPERSEDED` hands on no hash and nothing runs after it.
-- **R9 and R19** apply to beta as they do to gamma: the split runs every step and validation once;
-  gamma's hash is `needs.beta_install.outputs.validated_set_hash`.
-- **R11** needs no change (the farm-connect action follows `farm_connected`). R14 stays.
+- **R16, rewritten:** no workflow-level `concurrency:`; every release job a job-level one, exactly
+  `group: kci-<job id>-<canonical suffix>`, `cancel-in-progress: false`, no `queue`.
+- **R23, new:** every job of a stage with an `after` carries the conjunct
+  `needs.<J>.outputs.superseded != 'true'` (J: the job R19 reads its hash from), J declares the
+  output, and every release job has the step `superseded` with R23's exact `if:`.
+- **R24, new:** every release job's first `kci` invocation runs with the admission check (b.2).
+- **R19** for beta: gamma's hash is `needs.beta_install.outputs.validated_set_hash`, never
+  `needs.beta.outputs.set_hash`. **R20**'s last step carries the "main is at" line on every job.
+  R9, R11 and R14 need no change.
 
 ## g. Slices
 
@@ -231,27 +262,40 @@ Each slice: the check that is red before it. **Go** marks a project-owner action
 
 | # | slice | red before | go |
 |---|---|---|---|
-| P0 | Confirm three facts before P4: the run conclusion when a job is cancelled by its group; a `beta` subject joins the farm; a job waiting on an environment reviewer holds only its job group. From the API record of existing runs and the trust policy; nothing started for it. | each written here with its evidence, or P4 stops | none |
-| P1 | kci: `never_backward` per run; main-line builds at gamma; `SUPERSEDED` as exit 0 with output `superseded`; gamma's "carried" list | tests (1)-(3) of c | none |
-| P2 | `main_red.py`: green only with a successful, non-superseded `prod` | a `success` run whose `prod` was skipped: expected ignore, green today | none |
-| P3 | First task: confirm every `//src/tests/e2e/...` suite opens no socket off loopback. kci: step kind `TEST`, field `checks`, beta's read of gamma's listing, the payload digest comparison, validations from the handed local channel; `build` writes the local index | machine fixtures (TEST with neither, `checks` on PUBLISH) refused; test (4) of c; a planted payload digest mismatch refused; a local-channel record with another sha256 refused | none |
-| P4 | The switch, in one PR (kci checks the workflow against the machine at start-up, and `test_repo_kci_yml` welds them): `release/machine.textproto` with beta, `kci.yml` with job groups, `beta`, `beta_install` and R23 guards, R16 and R23 in `kci_workflow_check`, ci.md and the `kci.yml` header | the rule fixtures: a workflow-level group, a job without a group, `queue: max`, a job missing R23's conjunct, each refused; today's `kci.yml` fails the new R16 | **Go**: changes the release; the first push creates `beta` and spends farm time on the suites |
-| P5 | Artifact retention of `kci-release-*` to the ruled value | none (a setting in `kci.yml`) | **Go** with question 2 |
-| P6 | #1168 S10c's derived release checks join beta's `checks`; S12's installed checks join `beta_install` | as #1168 states them | as #1168 |
+| P0 | **Probe** on a `probe/*` branch: a workflow of hosted jobs that only `sleep` and `echo`, `permissions: {}` (one job `actions: write` on its own run), no secret, no farm, no cloud, no upload, plus a `probe-wait` environment with a required reviewer. It records, from the runs API: (a) the run conclusion when a job is replaced in its group; (b) a job waiting on a reviewer holds only its group, and whether a newer arrival replaces it; (c) a job skipped by `if:` takes no group slot; (d) a re-run attempt joins the same group and downloads attempt 1's artifact; (e) a token-requested re-run of a cancelled run starts. Plus a read of the farm's trust policy for a `beta` subject. Existing runs cannot show (a) to (e): today's `kci.yml` has only the workflow-level group (line 202). | each fact written here with the run's URL, or P2 and P4 stop | **Go**: it starts workflow runs and creates an environment |
+| P1 | kci: `never_backward` per run; main-line filter; the descendant read and `SUPERSEDED` (exit 0, output `superseded`); R24's admission check; gamma's "carried" list | c's table, rows 1 and 3 to 8; row 2 guards | none |
+| P2 | `main_red.py`: `classify` from jobs and the `superseded` step; `last_green` filtered; `stalled` and its re-run | d's tests (a) to (d) | the re-run needs question 6 |
+| P3 | Tasks: the loopback audit; the payload digests on a real tree (e). kci: `TEST`, `checks` (`buck2 test`), beta's read of gamma's listing, step 4b for TEST, the payload comparison, validations from the handed local channel; `build` writes the local index | machine fixtures (TEST with neither; `checks` on PUBLISH) refused; c row 4; a TEST run with a mismatched `--release-set-hash` refused exit 3 with zero runner calls, and without the flag under Actions exit 2 (mutant: 4b without TEST), copying the prod case at `test_kci_ref_check.mojo:542-554` for beta, gamma and validate; a planted payload mismatch refused; the command pinned to `test`; the planted-red draft PR. Regression (green before, mutant named): a local-channel record with another sha256 refused (mutant: skip the compare in `conda_install_env.mojo`) | none |
+| P4 | The switch, one PR: `release/machine.textproto` with beta; `kci.yml` with job groups, `beta`, `beta_install`, the `superseded` steps, R23/R24 guards and the line on every job; R16, R23, R24 in `kci_workflow_check`; ci.md's "Queued runs" and "Never backward" rewritten for every stage | fixtures refused: a workflow-level group, a job without a group, `queue: max`, a job missing R23's conjunct or step, gamma reading `beta`'s unvalidated `set_hash` (R19), a job without R24; today's `kci.yml` fails the new R16 | **Go**: changes the release; the first push creates `beta` and spends farm time |
+| P5 | Retention of `kci-release-*` to the ruled value | none (a setting) | **Go** with question 3 |
+| P6 | #1168 S10c's derived checks join beta's `checks`; S12's join `beta_install` | as #1168 states them | as #1168 |
 
 P1, P2 and P3 merge on their own and change nothing that runs (P1 changes only what a push to gamma
-may do when the channel is ahead). P4 depends on all three and on P0.
+may do when the channel is ahead; P2's `stalled` reads only push runs, which are unchanged until P4).
+P4 depends on P0 to P3.
 
 ## h. Questions for the project owner
 
-1. **Gamma's two jobs.** Rule 2 read strictly makes `gamma` and `validate` one slot, but job-level
-   groups lock one job each, and one job would put the install's third-party code next to the publish
-   token. *Recommendation:* two slots, publish and validate, each one at a time; the install is pinned
-   to its own set's digests, so an overlap cannot validate the wrong files.
-2. **Retention.** *Recommendation:* 30 days for `kci-release-*`; a pause longer than that makes the
-   held run fail red, and the next push carries its commits.
-3. **Break-glass builds in gamma.** They share the channel and can out-number `main`. *Recommendation:*
-   accept the main-line filter (c) now; consider a separate break-glass channel later (an upload
-   setting).
-4. **The suites as a release gate.** One flaky suite blocks gamma and prod. *Recommendation:* gate,
+1. **Two jobs per stage (a departure from rule 2).** Beta (`beta`, `beta_install`) and gamma
+   (`gamma`, `validate`) are two slots each: one job would put an install's third-party code next to
+   the farm or publish token, and two jobs sharing one group would let one stage's second job cancel
+   its own first job's pending newer run. So beta can test C while installing B. *Recommendation:*
+   accept; each job is pinned to its own set's digests, so an overlap cannot check the wrong files.
+2. **Break-glass runs and the push groups (a departure from rule 2).** Manual runs keep per-ref
+   groups, so a break-glass run's build and beta can overlap a push run's, and its gamma publish can
+   overlap main's: two writers to one channel, each checking the listing before it uploads.
+   *Recommendation:* gamma's **publish** job joins `kci-gamma-main` in every non-dry run, one writer
+   per channel; build and beta stay per ref (they write nothing shared). A break-glass arrival can
+   then replace main's pending gamma; `stalled` (b.4) re-runs it.
+3. **Retention.** *Recommendation:* 30 days; a longer pause fails the held run red, the next push
+   carries its commits.
+4. **Break-glass builds in gamma.** They share the channel and can out-number `main`; the main-line
+   filter keeps them from stalling `main`, but a consumer installing "latest" from gamma gets the
+   highest-numbered build, which may be a branch's. *Recommendation:* accept now; a separate
+   break-glass channel later (an upload setting).
+5. **The suites as a release gate.** One flaky suite blocks gamma and prod. *Recommendation:* gate,
    with #1168's re-run-once and quarantine-by-PR policy.
+6. **`actions: write` for `main_red`'s repair.** Without it a dropped tip waits for a human click on
+   the issue `stalled` opens. *Recommendation:* grant it to `main_red`'s job only, used for one
+   re-run of a run whose head is main's releasable tip; it runs no pull-request code.
+7. **P0's probe.** *Recommendation:* go; it spends only hosted minutes and touches no cloud.
