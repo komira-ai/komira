@@ -9,7 +9,9 @@
 #    object this cell owns is the node `<P>/u-<h>`, read as the labels
 #    `create_labels` writes for it, with the member's retention and run id;
 #    everyone on the public role is `<T>/public`; a cell-scope binding hashes
-#    `cell/<NAME>`; a composite's identity keeps its path and its owner.
+#    `cell/<NAME>`; a composite's identity keeps its path and its owner; a
+#    composite TARGET hashes its component path (`site/store`), never its
+#    top resource, and a composite's public binding is `<component>/public`.
 # 2. NOT OURS: an identity of another cell, or of another machine with the
 #    same cell name (THE MEMBER CHECK, each coordinate alone), a role the
 #    table does not map (or maps twice), a member that is not an identity, a
@@ -131,6 +133,29 @@ def test_a_composite_identity_keeps_its_path_and_owner() raises:
     assert_equal(d.value().node, node)
     assert_equal(standard_identity_of(d.value().labels), s.stamp(String("web"), node).identity(), "owned by the top")
     print("  test_a_composite_identity_keeps_its_path_and_owner: PASS")
+
+
+def test_a_composite_target_hashes_its_component_path() raises:
+    """Lowering hashes a `uses` target's expanded id (grants.mojo:
+    `uses_role(owner, "site/store")` for a sibling component). Catches: the
+    target path taken as the target's top resource (`site`) or the public
+    node put on it (`site/public`): the derived node would then differ from
+    the wanted one, and every apply would delete and re-create the grant."""
+    var s = _scope()
+    var member = _object(s, String("runner"), String("runner/identity"), String(_SA))
+    var target = _object(s, String("site"), String("site/store/bucket"), String(_BUCKET))
+    var d = attribute(False, target, False, member, String("roles/storage.objectViewer"), _rows())
+    assert_true(Bool(d), "attributed")
+    assert_equal(d.value().node, String("runner/") + uses_role(String("runner"), String("site/store")))
+    var run = _object(s, String("site"), String("site/web/run"), String(_RUN))
+    var p = attribute(False, run, True, BindingEnd(), String("roles/run.invoker"), _rows())
+    assert_true(Bool(p), "attributed")
+    assert_equal(p.value().node, "site/web/public")
+    assert_equal(
+        standard_identity_of(p.value().labels), s.stamp(String("site"), String("site/web/public")).identity(),
+        "owned by the top",
+    )
+    print("  test_a_composite_target_hashes_its_component_path: PASS")
 
 
 # ---- 2. not ours --------------------------------------------------------------------
@@ -261,6 +286,10 @@ comptime _RUN_AS_USES = (
     + '"uses":[{"target":{"resource":"store"},"access":"READ"}]}'
 )
 comptime _RUN_AS = '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"runAs":{"resource":"runner"}}}'
+comptime _RUN_AS_CELL_USES = (
+    '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"runAs":{"resource":"runner"}},'
+    + '"uses":[{"cell":"LOGS","access":"WRITE"}]}'
+)
 comptime _OWN_USES = (
     '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{}},'
     + '"uses":[{"target":{"resource":"store"},"access":"READ"}]}'
@@ -281,11 +310,14 @@ def test_a_derived_shape_refuses_a_grant_resource() raises:
 def test_a_derived_shape_refuses_uses_on_a_run_as_workload() raises:
     """Catches: a `uses` line on a workload with `run_as` accepted on a
     DERIVED shape (its node belongs to the workload, its member is the
-    account)."""
+    account), including a line on a cell resource, which has no target."""
     var f = _derived_findings(_limits(ProviderShape.gcp(), String(_RUN_AS_USES)))
     assert_equal(len(f), 1, "one refusal")
     assert_equal(f[0].field_path, "uses")
     assert_true(f[0].reason.find('write the uses line on "runner" itself') >= 0, f[0].reason)
+    var c = _derived_findings(_limits(ProviderShape.gcp(), String(_RUN_AS_CELL_USES)))
+    assert_equal(len(c), 1, "a cell uses line on a run_as workload: one refusal too")
+    assert_equal(c[0].field_path, "uses")
     assert_equal(len(_derived_findings(_limits(ProviderShape.gcp(), String(_RUN_AS)))), 0, "run_as alone is fine")
     assert_equal(len(_derived_findings(_limits(ProviderShape.gcp(), String(_OWN_USES)))), 0, "own identity is fine")
     assert_equal(len(_derived_findings(_limits(ProviderShape.aws(), String(_RUN_AS_USES)))), 0, "aws")
@@ -298,6 +330,7 @@ def main() raises:
     test_everyone_on_the_public_role_is_the_public_node()
     test_a_cell_scope_binding_hashes_the_cell_path()
     test_a_composite_identity_keeps_its_path_and_owner()
+    test_a_composite_target_hashes_its_component_path()
     test_an_identity_of_another_cell_is_never_this_cells()
     test_an_identity_of_another_machine_is_never_this_cells()
     test_what_the_table_does_not_map_is_not_ours()

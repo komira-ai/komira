@@ -196,13 +196,11 @@ def _reg(id: String, shape: ProviderShape) raises -> Clouds:
     return reg^
 
 
-def _is_derived(shape: String) -> Bool:
+def _is_derived(shape: String) raises -> Bool:
     """Whether the built-in cloud called `shape` derives its grants' stamp,
-    read from the shape (never from the name alone)."""
-    try:
-        return shape_named(shape).grants_derived()
-    except:
-        return False
+    read from the shape (never from the name alone). An unknown name
+    raises: it never reads as "not derived"."""
+    return shape_named(shape).grants_derived()
 
 
 def _shapes() -> List[ProviderShape]:
