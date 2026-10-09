@@ -180,7 +180,7 @@ struct PgReadFrame(Movable, Deinitable):
         """Drop the consumed prefix [0:_rpos), resetting _rpos to 0. Mirrors
         connection.mojo's `_compact`."""
         if self._rpos == 0:
-            return  # cov: unreachable the only caller compacts at _rpos > 65536
+            return
         var tail = List[UInt8]()
         for i in range(self._rpos, len(self._rbuf)):
             tail.append(self._rbuf[i])

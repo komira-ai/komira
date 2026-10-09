@@ -2,8 +2,9 @@
 messages.
 
 NO NETWORK. `drain_complete` folds buffered messages in a loop bounded at
-1,000,000 messages per call, so one call over a huge buffer returns to the
-caller (which re-polls) instead of running unbounded. The buffer holds 999,999
+1,000,000 messages per call, so one call over a huge buffer returns False to
+the caller instead of running unbounded (the caller then recvs; this test
+only pins the bound of one call). The buffer holds 999,999
 NoticeResponses, then one DataRow (the 1,000,000th message), then
 ReadyForQuery. The first drain must fold exactly 1,000,000 messages: it
 returns False (still pending, the terminal not reached) with the DataRow

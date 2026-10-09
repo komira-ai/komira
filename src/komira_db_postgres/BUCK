@@ -36,6 +36,7 @@ mojo_library(
         "wire/tests/test_pgrow_accumulation.mojo",
         "wire/tests/test_read_frame_guard.mojo",
         "wire/tests/test_scram_and_pgwire.mojo",
+        "wire/tests/test_server_free_helpers.mojo",
         "wire/tests/test_wire_decode_edges.mojo",
     ],
     visibility = ["PUBLIC"],

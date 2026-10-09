@@ -281,10 +281,12 @@ def test_text_row_getters() raises:
     with assert_raises(contains="PgRow: integer text had no digits"):
         _ = _one_text_row(String("+")).get_int4(0)
 
-    # Text-format bool: pg sends 't'/'f'; "true" and "1" are also true.
+    # Text-format bool: pg sends 't'/'f'; "true" and "1" are also true, and
+    # "f", "false", "0" are false. Other text (e.g. "T", or an empty non-NULL
+    # cell) is left unpinned: see komira#1113.
     for t in ["t", "true", "1"]:
         assert_true(_one_text_row(String(t)).get_bool(0), String(t))
-    for f in ["f", "false", "0", "T", ""]:
+    for f in ["f", "false", "0"]:
         assert_false(_one_text_row(String(f)).get_bool(0), String(f))
 
     # PgRows.row bounds.
