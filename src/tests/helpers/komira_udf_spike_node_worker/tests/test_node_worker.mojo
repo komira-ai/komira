@@ -28,27 +28,51 @@
 #     three tables come back in order;
 #   - replies a worker in its --corrupt-output mode sends
 #     (node_worker_corrupt.so, worker/corrupt.mjs), each refused with its
-#     own reason: one RecordBatch layout per refusal of the proxy's IPC
-#     validation (ipc.c, kudfw_ipc_decode), before any pointer is formed,
-#     including a row count whose byte size wraps int64; malformed ERROR
-#     replies and ERROR codes that are not errors (the worker stays usable);
-#     and each break of the framing (magic, request id, op, INLINE flag,
-#     payload limit), after which the worker is killed (a validator that
-#     lets a layout through hands the host a pointer past the reply);
+#     own reason: one RecordBatch layout per condition of each refusal of the
+#     proxy's IPC validation (ipc.c, kudfw_ipc_decode), so each of the six
+#     conditions of the buffer check (an offset or a length below 0, a
+#     validity bitmap or a values buffer past the body) is refused alone,
+#     including a row count whose byte size wraps int64; a values buffer and
+#     a validity bitmap that each end exactly at the body's end are accepted
+#     (a bound check off by one); malformed ERROR replies and ERROR codes
+#     that are not errors (the worker stays usable); five malformed DESCRIBE
+#     replies, one per length check, each failing the runtime's open (a
+#     runtime id or ABI copied past its buffer); and each break of the
+#     framing (magic, request id, op, INLINE flag, payload limit), after
+#     which the worker is killed (a validator that lets a layout through
+#     hands the host a pointer outside the reply);
 #   - every array and stream the host exported is released once.
 #
-# Mutants planted, each red on the farm: channel.c mapping end of file on
-# the channel to ERR_INTERNAL instead of ERR_INSTANCE_LOST ("exit
-# mid-batch"); ipc.c without the "a buffer lies outside the body" check
-# (corrupt case 1 accepted); ipc.c without the column length check (case
-# 5); ipc.c without the validity bitmap check (case 6); ipc.c with the
-# values check back to `dl < nlen * w` (case 8, the wrapping row count);
-# ipc.c without the compressed check (case 9); ipc.c without the buffer
-# vector's half of the past-the-metadata check (case 17); channel.c without
-# the request id check of the framing (case 102); channel.c without the
-# payload limit (case 105); channel.c keeping an ERROR code of 0 (case
-# 113); wire.mjs honouring any nonzero cancel word (the call after a
-# cancel).
+# Mutants planted, each alone, each red on the farm (the corrupt case it
+# failed at in brackets): channel.c mapping end of file on the channel to
+# ERR_INTERNAL ("exit mid-batch"); ipc.c, kudfw_ipc_decode, without each
+# condition of the buffer check: the validity offset past the body (18, a
+# SIGSEGV in the host's read), a negative validity offset (19) or length
+# (20), a negative values offset (21) or length (22), and the values past
+# the body (1); the validity bound as >= (24) and the values bound as >=
+# (6, before 23 is reached);
+# without the column length check (5), the validity bitmap check (6), the
+# compressed check (9), the short-payload half of the marker check (25), the
+# header-present check (26), the malformed check after the vectors (27),
+# either half of the columns-or-buffers check (28, 29), the negative null
+# count check (31), field_at's negative vtable check (32), its short-vtable
+# check (33, and every reply apache-arrow writes) or its field-past-the-
+# metadata check (34), and the buffer vector's half of the past-the-metadata
+# check (17); the values check back to `dl < nlen * w` (8, the wrapping row
+# count); channel.c without the request id check of the framing (102), the
+# payload limit (105), the bound of an ERROR string's length (115), the
+# trace's read (116), or keeping an ERROR code of 0 (113); proxy.c's
+# t_describe accepting a runtime id of 128 bytes (DESCRIBE 1), a runtime ABI
+# of 64 bytes (DESCRIBE 3), or an ABI 4 bytes past the reply (DESCRIBE 4);
+# wire.mjs honouring any nonzero cancel word (the call after a cancel).
+#
+# Planted and green, each equivalent: ipc.c without `body_len < 0` (a
+# negative body length cast to size_t is past every payload, so the next
+# condition refuses case 30 with the same reason); proxy.c t_describe
+# without its first length check, or with its second one 4 bytes short
+# (DESCRIBE 0 and 2 are then refused by the next check, whose bound is past
+# the reply whatever the over-read length holds; the up-to-4-byte read past
+# the payload it lets through is visible only to a memory checker).
 
 from std.testing import assert_equal, assert_true
 
@@ -244,11 +268,31 @@ def _frames(mut rt: UdfRuntime) raises:
     _unbind(rt, sb)
 
 
+def _corrupt_describes() raises:
+    # The corrupt runtime's first five DESCRIBE replies are malformed, one
+    # length check each (worker/corrupt.mjs, describeCorrupt); open asks
+    # describe, so the first five opens fail and the sixth gets the right
+    # reply.
+    for i in range(5):
+        var why = String("")
+        try:
+            var bad = UdfRuntime.open(CORRUPT_LIB)
+            bad.shutdown()
+            why = "accepted"
+        except e:
+            why = String(e)
+        assert_true("describe returned ERR_INTERNAL" in why, "corrupt DESCRIBE " + String(i) + ": " + why)
+
+
 def _corrupt_outputs() raises:
+    _corrupt_describes()
     var rt = UdfRuntime.open(CORRUPT_LIB)
+    assert_equal(rt.describe().runtime_id, "komira-test/node", "the DESCRIBE after the malformed ones")
     var s = _spec(SHAPE_SCALAR, "fixtures.mjs#double", TYPE_INT64)
     var b = _bind(rt, s, 0)
-    # The RecordBatch cases 1 to 17 of worker/corrupt.mjs, by number.
+    # The refused RecordBatch cases of worker/corrupt.mjs, by number, each
+    # with its reason: one layout per condition of each refusal (the buffer
+    # check's six conditions are cases 1 and 18 to 22).
     var layouts: List[String] = [
         "a buffer lies outside the body",
         "a values buffer is shorter than the column",
@@ -267,17 +311,50 @@ def _corrupt_outputs() raises:
         "the RecordBatch metadata is malformed",
         "a node or buffer vector runs past the metadata",
         "a node or buffer vector runs past the metadata",
+        "a buffer lies outside the body",
+        "a buffer lies outside the body",
+        "a buffer lies outside the body",
+        "a buffer lies outside the body",
+        "a buffer lies outside the body",
+        "",
+        "",
+        "the reply is not an IPC message (no continuation marker)",
+        "the IPC message is not a RecordBatch",
+        "the RecordBatch metadata is malformed",
+        "the RecordBatch's columns or buffers differ from the bound schema",
+        "the RecordBatch's columns or buffers differ from the bound schema",
+        "the RecordBatch body is longer than the payload",
+        "a column's null count is out of range",
+        "the RecordBatch metadata is malformed",
+        "",
+        "the IPC message is not a RecordBatch",
     ]
     for i in range(len(layouts)):
-        var r = rt.call_batch(b.inst, s, _ints([i + 1]), CallOptions.plain())
-        _expect(r.outcome, ERR_INTERNAL, "failed validation: " + layouts[i], "corrupt case " + String(i + 1))
-    # Malformed ERROR replies (cases 111 to 114): the framing holds, so the
-    # worker stays usable.
+        var k = i + 1
+        var r = rt.call_batch(b.inst, s, _ints([k]), CallOptions.plain())
+        if layouts[i] != "":
+            _expect(r.outcome, ERR_INTERNAL, "failed validation: " + layouts[i], "corrupt case " + String(k))
+            continue
+        # Cases 23, 24 and 33 are valid, so the proxy must accept them: a
+        # buffer that ends exactly at the end of the body is inside it (a
+        # bound check off by one refuses 23 or 24), and a vtable shorter than
+        # a slot leaves that field absent. 24's one row is null; 23's and
+        # 33's is 0.
+        assert_true(r.outcome.is_ok(), "corrupt case " + String(k) + " is valid: " + String(r.outcome))
+        assert_equal(len(r.column), 1, "corrupt case " + String(k))
+        assert_equal(r.column.valid[0], k != 24, "corrupt case " + String(k) + ": null")
+        assert_equal(r.column.bits[0], 0, "corrupt case " + String(k))
+    # Malformed ERROR replies and ERROR codes that are not errors (cases 111
+    # to 116: too short, a message longer than the payload, codes 0 and -5,
+    # no message length, a trace longer than the payload): the framing
+    # holds, so the worker stays usable.
     var errors: List[String] = [
         "a malformed ERROR reply (10 bytes)",
         "a malformed ERROR reply",
         "an ERROR reply with code 0",
         "an ERROR reply with code -5",
+        "a malformed ERROR reply",
+        "a malformed ERROR reply",
     ]
     for i in range(len(errors)):
         var r = rt.call_batch(b.inst, s, _ints([111 + i]), CallOptions.plain())

@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import { batchParts, readBatch, readMessages, readSchema } from './arrow_io.mjs';
 import { ST, UdfError, column, raised, row, rowShape, scalar } from './calls.mjs';
-import { replyCorrupt } from './corrupt.mjs';
+import { describeCorrupt, replyCorrupt } from './corrupt.mjs';
 import { Frame, Groups } from './frames.mjs';
 import { OP, WIRE_VERSION, reply, replyError, replyU64 } from './wire.mjs';
 
@@ -232,7 +232,8 @@ export class Runtime {
           len.writeUInt32LE(bytes.length, 0);
           return [len, bytes];
         });
-        reply(req.id, 0, [fixed, ...strs]);
+        if (this.corrupt) describeCorrupt(req.id, fixed, [fixed, ...strs]);
+        else reply(req.id, 0, [fixed, ...strs]);
         return;
       }
       case OP.VALIDATE:

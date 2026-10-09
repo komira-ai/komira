@@ -5,8 +5,9 @@
 // starts one worker per engine thread, so one isolate runs one thread's UDF
 // calls and no lock is shared across engine threads. --corrupt-output makes
 // call_batch answer the case batches of corrupt.mjs with replies that break
-// the IPC layout or the framing, for the test of the engine's validation of
-// what a worker sends.
+// the IPC layout, the framing or the ERROR encoding, and the first DESCRIBEs
+// with malformed replies, for the test of the engine's validation of what a
+// worker sends.
 
 import { Runtime } from './runtime.mjs';
 import { nextRequest } from './wire.mjs';

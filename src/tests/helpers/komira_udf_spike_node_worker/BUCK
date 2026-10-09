@@ -46,6 +46,10 @@ load(":defs.bzl", "udf_bench")
 #                 steps, and replies that break the IPC layout, the framing
 #                 or the ERROR encoding, each refused by the proxy with its
 #                 reason (node_worker_corrupt.so).
+#   test_no_node  the runtime library with nothing beside it: init fails
+#                 with posix_spawn's reason. Its own test: a second copy
+#                 staged in test_node_worker opened as the library that
+#                 process had already loaded, beside its node.
 #   test_threads  4 engine threads, 4 workers: values, calls == batches,
 #                 releases, and the CPU/wall parallelism case.
 
@@ -89,12 +93,16 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_conform_node_worker.mojo",
+        "tests/test_no_node.mojo",
         "tests/test_node_worker.mojo",
         "tests/test_threads.mojo",
     ],
     test_data = {
         "tests/test_conform_node_worker.mojo": _RUNTIME | _CASES,
         "tests/test_node_worker.mojo": _RUNTIME | {"node_worker_corrupt.so": ":node_worker_corrupt"},
+        # the runtime library alone, without the node_worker/ it starts
+        # workers from
+        "tests/test_no_node.mojo": {"node_worker.so": ":node_worker"},
         "tests/test_threads.mojo": _RUNTIME | {
             # read by its check that the engine names no runtime or language
             "engine.mojo": "engine.mojo",
