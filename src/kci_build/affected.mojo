@@ -56,7 +56,12 @@
 #    A library's welded tests run inside its build. A batch that exits
 #    non-zero is retried unit by unit to name the failing units, up to
 #    MAX_FAILED_UNITS failures; a timed-out or killed batch is not retried.
-#    Any failed unit or unattributed batch is FAILED (KCI-E-BUILD-FAILED); a
+#    With --build-budget-s, the runs of this step 5 (not the affected
+#    commands of step 3) share that budget: each may take what is left of
+#    it, at most --build-timeout-s, and a run with nothing left is not
+#    started (its units are not built).
+#    Any failed unit, unattributed batch or unit not built for want of
+#    budget is FAILED (KCI-E-BUILD-FAILED); a
 #    build that cannot be started is INDETERMINATE (KCI-E-CANNOT-TELL), and
 #    so is a batch that failed while each of its units built alone (never a
 #    pass). `BUILT <unit>` lines name exactly the units an exit-0 run

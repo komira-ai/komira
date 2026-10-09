@@ -52,6 +52,23 @@ assert_equal(RunResult(Int32(2)).describe(), "exit 2")
 assert_equal(RunResult(Int32(0), timed_out=True).describe(), "timed out")
 ```
 
+The per-change check's runs (a batch, a unit alone, a retry) can share a
+budget, `BuildRequest.build_budget_s` (`kci run --build-budget-s`): each
+run's timeout is the smaller of `--build-timeout-s` and the whole seconds the
+earlier runs left (their `RunResult.elapsed_ns`, summed). With less than one
+second left the run is not started and its units are reported as not built
+(FAILED). Without a budget every run gets `--build-timeout-s`:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from kci_build import NO_BUILD_BUDGET, run_timeout_s
+
+assert_equal(run_timeout_s(3600, NO_BUILD_BUDGET, 9_000_000_000_000), 3600)
+assert_equal(run_timeout_s(3600, 6000, 0), 3600)
+assert_equal(run_timeout_s(3600, 6000, 4_000_000_000_000), 2000)
+assert_equal(run_timeout_s(3600, 6000, 6_000_000_000_000), 0)  # not started
+```
+
 The release stamp comes from six git commands run through the
 `ProcessRunner`. Here a `ScriptedRunner` stands in for git (each step must
 match the argv kci runs exactly, and writes the step's stdout to the run's

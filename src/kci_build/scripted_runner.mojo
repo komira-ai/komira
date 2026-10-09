@@ -3,7 +3,9 @@
 #   script: the test double for buck2.
 # =============================================================================
 #
-# Each `ScriptedStep` expects one argv and answers with a `RunResult`. Before
+# Each `ScriptedStep` expects one argv and answers with a `RunResult` (its
+# `elapsed_s` becomes the result's `elapsed_ns`: the time the run "took",
+# which no clock measures, so a budget test is exact). Before
 # answering it writes the step's stdout and stderr text to the spec's files
 # and writes each of its `files` (relative paths resolve against the spec's
 # cwd, parent directories are created), which is how a test stands in for
@@ -70,12 +72,14 @@ struct ScriptedStep(Copyable, Movable):
         var stdout_text: String = String(""),
         var stderr_text: String = String(""),
         timed_out: Bool = False,
+        elapsed_s: Int = 0,
     ):
         self.argv = argv^
         self.result = RunResult(
             exit_code,
             timed_out=timed_out,
             stderr_tail=tail_text(stderr_text, STDERR_TAIL_BYTES),
+            elapsed_ns=elapsed_s * 1_000_000_000,
         )
         self.stdout_text = stdout_text^
         self.stderr_text = stderr_text^

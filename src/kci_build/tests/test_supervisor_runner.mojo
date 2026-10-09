@@ -4,7 +4,8 @@
 #   files byte for byte, every exit status comes back as itself (each bit of
 #   the 0..255 range, so a decode that drops or clamps bits fails), the cwd
 #   is applied, a run past its timeout is stopped and reported as timed out,
-#   and an explicit environment is exactly what the child sees (None
+#   the result says how long the run took (`elapsed_ns`), and an explicit
+#   environment is exactly what the child sees (None
 #   inherits).
 # =============================================================================
 
@@ -134,6 +135,20 @@ def test_a_run_past_its_timeout_is_stopped() raises:
     assert_false(r.ok())
     assert_equal(r.describe(), String("timed out"))
     assert_true(waited_ms < 10000)
+
+
+def test_the_result_says_how_long_the_run_took() raises:
+    # elapsed_ns is what the per-change check charges to its build budget:
+    # a run that sleeps 1 s took at least 1 s and no more than the whole
+    # call around it
+    var d = _dir(String("elapsed"))
+    var runner = SupervisorRunner()
+    var t0 = perf_counter_ns()
+    var r = runner.run(_sh(d, String("sleep 1")))
+    var around_ns = Int(perf_counter_ns() - t0)
+    assert_true(r.ok())
+    assert_true(r.elapsed_ns >= 1_000_000_000, String(r.elapsed_ns))
+    assert_true(r.elapsed_ns <= around_ns, String(r.elapsed_ns) + String(" > ") + String(around_ns))
 
 
 def test_a_missing_binary_raises() raises:

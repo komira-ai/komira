@@ -122,7 +122,10 @@ struct RunSpec(Copyable, Movable):
 struct RunResult(Copyable, Movable):
     """How a run ended. `exit_code` is meaningful only when neither
     `signaled` nor `timed_out`; `stderr_tail` is at most
-    `STDERR_TAIL_BYTES` from the end of stderr.
+    `STDERR_TAIL_BYTES` from the end of stderr. `elapsed_ns` is how long
+    the run took, start to exit (0 when the runner does not measure it):
+    the per-change check charges it to its build budget
+    (affected_batch.mojo).
 
     Layout: owned values only. No pointer field."""
 
@@ -130,6 +133,7 @@ struct RunResult(Copyable, Movable):
     var signaled: Bool
     var timed_out: Bool
     var stderr_tail: String
+    var elapsed_ns: Int
 
     def __init__(
         out self,
@@ -137,11 +141,13 @@ struct RunResult(Copyable, Movable):
         signaled: Bool = False,
         timed_out: Bool = False,
         var stderr_tail: String = String(""),
+        elapsed_ns: Int = 0,
     ):
         self.exit_code = exit_code
         self.signaled = signaled
         self.timed_out = timed_out
         self.stderr_tail = stderr_tail^
+        self.elapsed_ns = elapsed_ns
 
     def ok(self) -> Bool:
         return self.exit_code == Int32(0) and not self.signaled and not self.timed_out

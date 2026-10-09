@@ -383,6 +383,7 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
     req.platform = step.platform.copy()
     if cmd.build_timeout_s > 0:
         req.build_timeout_s = cmd.build_timeout_s
+    req.build_budget_s = cmd.build_budget_s
     req.affected_by = cmd.affected_by.copy()
     return req^
 

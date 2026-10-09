@@ -59,6 +59,11 @@ comptime DEFAULT_BUILD_TIMEOUT_S: Int = 3600
 `--build-timeout-s`: one artifact on the release path; one unit or one
 whole batch of units in the per-change check."""
 
+comptime NO_BUILD_BUDGET: Int = 0
+"""`BuildRequest.build_budget_s` when the command line gives no
+`--build-budget-s`: the per-change check's runs are bounded by
+`--build-timeout-s` each, and by nothing in total."""
+
 
 struct BuildRequest(Copyable, Movable):
     """The inputs of one BUILD step. `step_name` is the step's name in the
@@ -68,7 +73,10 @@ struct BuildRequest(Copyable, Movable):
     --plan`: resolve and render, build nothing (build.mojo).
     `affected_by` is `kci run --affected-by` (the change's base, a full
     commit id) or "": when set, the step is the per-change check
-    (affected.mojo) and `release_dir` is not used.
+    (affected.mojo) and `release_dir` is not used. `build_budget_s` is
+    `kci run --build-budget-s` or NO_BUILD_BUDGET: the seconds the
+    per-change check's build of the units may take in all
+    (affected_batch.mojo).
 
     Layout: owned values only. No pointer field."""
 
@@ -81,6 +89,7 @@ struct BuildRequest(Copyable, Movable):
     var platform: String
     var run: RunIdentity
     var build_timeout_s: Int
+    var build_budget_s: Int
     var plan: Bool
     var affected_by: String
 
@@ -94,6 +103,7 @@ struct BuildRequest(Copyable, Movable):
         self.platform = String("")
         self.run = run^
         self.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
+        self.build_budget_s = NO_BUILD_BUDGET
         self.plan = False
         self.affected_by = String("")
 

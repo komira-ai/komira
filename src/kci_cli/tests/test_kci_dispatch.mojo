@@ -74,6 +74,7 @@ struct FakeSteps(StageSteps, Movable):
     var pixis: List[String]
     var channels: List[String]
     var bases: List[String]
+    var budgets: List[Int]
 
     def __init__(out self):
         self.calls = List[String]()
@@ -93,6 +94,7 @@ struct FakeSteps(StageSteps, Movable):
         self.pixis = List[String]()
         self.channels = List[String]()
         self.bases = List[String]()
+        self.budgets = List[Int]()
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
         self.order.append(String("validate ") + req.validation.name)
@@ -199,6 +201,7 @@ struct FakeSteps(StageSteps, Movable):
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         self.order.append(String("build ") + req.step_name)
         self.bases.append(req.affected_by.copy())
+        self.budgets.append(req.build_budget_s)
         self.calls.append(
             String("build ") + req.platform + String(" ") + req.artifacts_file + String(" ") + req.revision_id
             + String(" ") + req.work_dir + String(" ") + req.run.run_id + String(" step=") + req.step_name
@@ -574,6 +577,25 @@ def test_affected_by_reaches_the_build_step_and_is_selective() raises:
         text.find(String("SELECTIVE run (affected-by ") + String(_BASE) + String("): not a full run.")) >= 0, text
     )
     assert_true(text.find(String("- affected: no answer")) >= 0, text)
+
+
+def test_the_build_budget_reaches_the_per_change_check() raises:
+    # --build-budget-s is handed to the BUILD step as is; without it the
+    # step has no budget (kci_build NO_BUILD_BUDGET, 0)
+    var m = _machine(_root(String("budget")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var a = _pr_run(m, String("build"), "--build-budget-s", "6543")
+    a.extend(_build_flags())
+    assert_equal(kci_main_with(a, steps, rec), 0)
+    assert_equal(len(steps.budgets), 1)
+    assert_equal(steps.budgets[0], 6543)
+    var none = FakeSteps()
+    var rec2 = CliRecorder.memory(String(""))
+    var b = _pr_run(m, String("build"))
+    b.extend(_build_flags())
+    assert_equal(kci_main_with(b, none, rec2), 0)
+    assert_equal(none.budgets[0], 0)
 
 
 def test_a_release_build_carries_no_base() raises:

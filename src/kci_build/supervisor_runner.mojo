@@ -10,7 +10,8 @@
 # supervisor reads an empty envp as "inherit". Its stdout and stderr are drained concurrently
 # into the two files named by the spec, so neither pipe can fill and stall
 # it. Past `timeout_s` it is stopped (SIGTERM, then SIGKILL after
-# `grace_ms`) and the result says `timed_out`.
+# `grace_ms`) and the result says `timed_out`. The result's `elapsed_ns` is
+# the time from just before the spawn to the child's collected exit.
 #
 # After the child exits, the pipes are read until both reach EOF, or until
 # nothing has arrived for `_LINGER_TICKS` ticks: a grandchild that inherited a
@@ -80,6 +81,7 @@ struct SupervisorRunner(ProcessRunner):
         var out = _Sink(spec.stdout_path, Int32(0))
         var err = _Sink(spec.stderr_path, Int32(0))
         var sup = Supervisor()
+        var started_ns = Int(perf_counter_ns())
         var pid = sup.spawn(child)
         if pid < Int32(0):
             out.file.close()
@@ -140,6 +142,7 @@ struct SupervisorRunner(ProcessRunner):
             if not progressed:
                 _pause_ms(_TICK_MS)
         var info = sup.wait_exit()
+        var elapsed_ns = Int(perf_counter_ns()) - started_ns
         sup.close()
         out.file.close()
         err.file.close()
@@ -148,4 +151,5 @@ struct SupervisorRunner(ProcessRunner):
             signaled=info.signal != Int32(-1),
             timed_out=timed_out,
             stderr_tail=tail_text(tail, STDERR_TAIL_BYTES),
+            elapsed_ns=elapsed_ns,
         )
