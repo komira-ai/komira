@@ -1,5 +1,7 @@
 load("@komira//tools/build/package:defs.bzl", "oci_image", "oci_tree")
 load("@komira//tools/build/package:oci_check.bzl", "oci_image_check")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_test")
 
 # The image tool (README.md): oci_tree runs `komira_oci tree`, oci_image of a
@@ -24,6 +26,30 @@ rust_binary(
     srcs = _SRCS,
     crate_root = "src/main.rs",
     tests = [":komira_oci_unit"],
+    visibility = ["PUBLIC"],
+)
+
+# The same tool in Zig (tools/build/README.md, "Languages for build tools"),
+# beside the Rust one until every image is built by it.
+_ZIG_SRCS = glob(["src/*.zig"])
+
+zig_test(
+    name = "komira_oci_zig_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _ZIG_SRCS,
+    src = "src/main.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "komira_oci_zig",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _ZIG_SRCS,
+    src = "src/main.zig",
+    unit_tests = [":komira_oci_zig_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
