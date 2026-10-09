@@ -12,9 +12,14 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_column_resolver.mojo",
+        "tests/test_float_quotient_order.mojo",
         "tests/test_map_fn_rt.mojo",
+        "tests/test_row_udf.mojo",
+        "tests/test_row_views.mojo",
         "tests/test_schema_auto.mojo",
+        "tests/test_schema_descriptor.mojo",
         "tests/test_typed_udf_raises_variance.mojo",
+        "tests/test_udf_markers.mojo",
     ],
     visibility = ["PUBLIC"],
 )
