@@ -20,7 +20,7 @@
 #      IN list's value sort, and the fallback for a tag with no arm.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal
+from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.dtype_sentinel import DTYPE_NONE
@@ -67,12 +67,22 @@ def _lit(sv: ScalarValue, expected: String) raises:
     assert_equal(_expr_fingerprint(Expr.literal(sv.copy())), expected)
 
 
+def _lit_kind(sv: ScalarValue) raises:
+    """Both ladders give one literal key for `sv`: non-empty, `L:`-prefixed,
+    and equal to each other."""
+    var a = _scalar_fingerprint(sv)
+    assert_true(a.startswith("L:") and a.byte_length() > 2, a)
+    assert_equal(_expr_fingerprint(Expr.literal(sv.copy())), a)
+
+
 def test_integer_float_bool_and_string_literals() raises:
     _lit(ScalarValue.from_int(-42), "L:i-42")
-    # int32 is `is_int()` too: no dtype in the key.
-    _lit(ScalarValue.from_int32(Int32(7)), "L:i7")
+    # int32 and float32: the key carries no dtype today, so each collides with
+    # the 64-bit literal of the same value (komira-ai/komira#960). Only what
+    # holds with or without a dtype in the key is asserted.
+    _lit_kind(ScalarValue.from_int32(Int32(7)))
     _lit(ScalarValue.from_float(1.5), "L:f1.5")
-    _lit(ScalarValue.from_float32(Float32(0.5)), "L:f0.5")
+    _lit_kind(ScalarValue.from_float32(Float32(0.5)))
     _lit(ScalarValue.from_bool(True), "L:b1")
     _lit(ScalarValue.from_bool(False), "L:b0")
     _lit(ScalarValue.from_string(String("xy")), "L:sxy")

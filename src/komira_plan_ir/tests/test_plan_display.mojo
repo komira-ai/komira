@@ -29,7 +29,7 @@
 # =============================================================================
 
 from std.memory import OwnedPointer
-from std.testing import TestSuite, assert_equal
+from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
@@ -606,13 +606,19 @@ def test_asof_join_strategy_and_tolerance_names() raises:
         _render(_asof(_parquet(), _parquet(), ASOF_BACKWARD, AsofTolerance.none())),
         String("AsofJoin(strategy=BACKWARD, on=ts=ts2, by=[k=k2, m=m2])\n") + tail,
     )
-    assert_equal(
-        _render(_asof(_parquet(), _parquet(), ASOF_FORWARD, AsofTolerance.int64(5))),
-        String("AsofJoin(strategy=FORWARD, on=ts=ts2, by=[k=k2, m=m2], tolerance=INT64)\n") + tail,
+    # A set tolerance names its payload kind. The render does not carry the
+    # tolerance VALUE today, so two as-of joins differing only in it render
+    # alike (komira-ai/komira#960): only the field's presence and kind are
+    # asserted, which hold with or without the value.
+    var fwd = _render(_asof(_parquet(), _parquet(), ASOF_FORWARD, AsofTolerance.int64(5)))
+    assert_true(
+        fwd.startswith("AsofJoin(strategy=FORWARD, on=ts=ts2, by=[k=k2, m=m2], tolerance=INT64"),
+        fwd,
     )
-    assert_equal(
-        _render(_asof(_parquet(), _parquet(), ASOF_NEAREST, AsofTolerance.float64(0.5))),
-        String("AsofJoin(strategy=NEAREST, on=ts=ts2, by=[k=k2, m=m2], tolerance=FLOAT64)\n") + tail,
+    var near = _render(_asof(_parquet(), _parquet(), ASOF_NEAREST, AsofTolerance.float64(0.5)))
+    assert_true(
+        near.startswith("AsofJoin(strategy=NEAREST, on=ts=ts2, by=[k=k2, m=m2], tolerance=FLOAT64"),
+        near,
     )
     var odd = AsofTolerance(tag=UInt8(9), int_val=Int64(0), float_val=Float64(0.0))
     assert_equal(
@@ -664,8 +670,8 @@ def test_cast_to_varchar() raises:
 def test_a_tag_with_no_arm_renders_unknown() raises:
     var plan = LogicalPlan(UInt8(200), _schema())
     assert_equal(_render(plan), String("Unknown(tag=200)\n"))
-    var under = LogicalPlan.limit(1, LogicalPlan(UInt8(16), _schema()))
-    assert_equal(_render(under), String("Limit(n=1)\n  Unknown(tag=16)\n"))
+    var under = LogicalPlan.limit(1, LogicalPlan(UInt8(201), _schema()))
+    assert_equal(_render(under), String("Limit(n=1)\n  Unknown(tag=201)\n"))
 
 
 def test_the_indent_argument_and_depth() raises:

@@ -346,9 +346,11 @@ def test_project_walks_every_expr_and_child() raises:
 
 
 def test_aggregate_walks_group_keys_every_agg_slot_and_child() raises:
-    var group_by = Slab[Expr].create(2)
+    # A subquery in the first and the LAST group key.
+    var group_by = Slab[Expr].create(3)
     group_by.append(_subq(1))
     group_by.append(_col())
+    group_by.append(_subq(8))
     var aggs = Slab[AggExpr].create(3)
     # COUNT(*): no child at all.
     aggs.append(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]()))
@@ -364,7 +366,7 @@ def test_aggregate_walks_group_keys_every_agg_slot_and_child() raises:
     four.child3 = Optional[Expr](_subq(6))
     aggs.append(four^)
     var plan = LogicalPlan.aggregate(group_by^, aggs^, _bscan(7))
-    _gate_plan(plan, 7, _hs(1, 2, 3, 4, 5, 6, 7))
+    _gate_plan(plan, 8, _hs(1, 2, 3, 4, 5, 6, 7, 8))
 
 
 def test_a_sparse_agg_expr_is_walked_past_its_empty_slot() raises:
@@ -476,7 +478,11 @@ def test_a_plan_tag_with_no_arm_is_refused_by_name() raises:
     var plan = LogicalPlan(UInt8(PLAN_TAG_COUNT), _schema())
     with assert_raises(
         contains=String(SCAN_BINDING_GATE_UNMODELLED_TAG)
-        + ": the scan-binding epoch walk has no arm for plan tag 16 (tag#16)."
+        + ": the scan-binding epoch walk has no arm for plan tag "
+        + String(PLAN_TAG_COUNT)
+        + " (tag#"
+        + String(PLAN_TAG_COUNT)
+        + ")."
         + " A tag with no arm here is a HOLE IN A SAFETY CHECK"
     ):
         _ = check_plan_scan_bindings(_clean(), plan)
@@ -583,8 +589,11 @@ def test_an_expression_tag_with_no_arm_is_refused_by_name() raises:
     var e = Expr(UInt8(EXPR_TAG_COUNT))
     with assert_raises(
         contains=String(SCAN_BINDING_GATE_UNMODELLED_EXPR_TAG)
-        + ": the scan-binding epoch walk has no arm for expression tag 27"
-        + " (tag#27). An expression tag with no arm here is a HOLE IN A SAFETY"
+        + ": the scan-binding epoch walk has no arm for expression tag "
+        + String(EXPR_TAG_COUNT)
+        + " (tag#"
+        + String(EXPR_TAG_COUNT)
+        + "). An expression tag with no arm here is a HOLE IN A SAFETY"
         + " CHECK"
     ):
         _ = check_expr_scan_bindings(_clean(), e)
