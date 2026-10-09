@@ -24,10 +24,10 @@
 #   V4  refusals by name: enum index out of range (2 and -1); an enum symbol
 #       absent from the reader with no default; enum and fixed type names
 #       that differ (a reader alias makes the fixed pair resolve); a
-#       non-record writer or reader root; a non-nullable union on either
-#       side; a nested writer-only field (no skip for it); a plain read of
-#       a non-record root, a no-null union, and a field of type "null" (no
-#       column builder). Mutant: the enum index check `widx >= len` ->
+#       non-record writer or reader root; a plain read of a non-record
+#       root. The refusals of spec-valid input (no-null or 3-branch unions,
+#       a nested writer-only field, a "null" field in a plain read) are
+#       komira#1083 and are not pinned. Mutant: the enum index check `widx >= len` ->
 #       `widx > len`: red, an assert abort ("index 2 is out of bounds").
 #   V5  records that occupy zero payload bytes (a writer-only "null" field,
 #       reader fields filled from defaults) decode to `object_count` rows,
@@ -309,34 +309,11 @@ def test_resolution_refusals() raises:
         _resolve_err(_file(lw, 1, pl), '"long"'),
         "AvroResolutionError.NOT_A_RECORD: reader schema root is not a record",
     )
-    comptime _ONLY_NULLABLE = (
-        "AvroResolutionError.UNION_NO_MATCHING_BRANCH: only nullable 2-branch"
-        " unions are resolvable (n>=3 / no-null unions are not supported)"
-    )
-    var uw = _rec('{"name":"v","type":["int","string"]}')
-    var pu: List[UInt8] = [0x00, 0x02]
-    assert_equal(_resolve_err(_file(uw, 1, pu), lw), _ONLY_NULLABLE)
-    # A reader-side no-null union is refused when its output column is
-    # built, before resolution reaches the field.
-    var ur = _rec('{"name":"v","type":["null","int","long"]}')
-    assert_equal(
-        _resolve_err(_file(lw, 1, pl), ur),
-        "AvroDecodeError.UNSUPPORTED_UNION: identity resolution handles only"
-        " union[null, T] / union[T, null] (n>=3 / no-null unions are not"
-        " supported)",
-    )
-    var aw = _rec(
-        '{"name":"arr","type":{"type":"array","items":"int"}},'
-        '{"name":"v","type":"long"}'
-    )
-    var pa: List[UInt8] = [0x00, 0x02]
-    assert_equal(
-        _resolve_err(_file(aw, 1, pa), lw),
-        "AvroDecodeError.UNSUPPORTED_FIELD_KIND: cannot skip kind 10 (nested"
-        " skip is not supported)",
-    )
-    # A plain (identity) read of a non-record root, of a no-null union and
-    # of a field of type "null".
+    # Not pinned here (komira#1083: the spec allows these inputs): a writer
+    # union with no null branch, a reader union with three branches, a
+    # nested writer-only field, a plain read of a no-null union or of a
+    # field of type "null".
+    # A plain (identity) read of a non-record root.
     var got = String("(accepted)")
     try:
         _ = read_avro_bytes(Span(_file('"long"', 1, pl)))
@@ -347,29 +324,6 @@ def test_resolution_refusals() raises:
         "AvroDecodeError.NOT_A_RECORD: the reader requires a record-rooted"
         " Avro schema",
     )
-    got = String("(accepted)")
-    try:
-        _ = read_avro_bytes(Span(_file(uw, 1, pu)))
-    except e:
-        got = String(e)
-    assert_equal(
-        got,
-        "AvroDecodeError.UNSUPPORTED_UNION: identity resolution handles only"
-        " union[null, T] / union[T, null] (n>=3 / no-null unions are not"
-        " supported)",
-    )
-    var nw = _rec('{"name":"n","type":"null"}')
-    var empty = List[UInt8]()
-    got = String("(accepted)")
-    try:
-        _ = read_avro_bytes(Span(_file(nw, 1, empty)))
-    except e:
-        got = String(e)
-    assert_true(
-        got.startswith("AvroDecodeError.UNSUPPORTED_COLUMN_TYPE: Arrow type "),
-        got,
-    )
-    assert_true(got.endswith(" has no column builder"), got)
 
 
 def test_zero_byte_records() raises:
