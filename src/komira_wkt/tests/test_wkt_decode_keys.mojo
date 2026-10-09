@@ -13,7 +13,11 @@
 #
 #   - JSON keys: each declared field read by its JSON name lands in the
 #     right member (a misspelt name in the match would leave it at its
-#     default, or send it to the strict skip, which raises);
+#     default, or send it to the strict skip, which raises). Not for the
+#     repeated and map fields of FieldMask, ListValue and Struct: their
+#     bodies read one element per key, which is not proto3 JSON
+#     (komira-ai/komira#1018), so those name arms are left uncovered
+#     rather than pinned here;
 #   - a strict `JsonDecoder` refuses an undeclared key (the skip arm runs:
 #     dropping `dec.skip()` would accept it silently), a lenient one drops it;
 #   - binary: an undeclared length-delimited field ahead of the declared
@@ -172,17 +176,11 @@ def test_empty_skips_every_field() raises:
 
 
 def test_field_mask_keys() raises:
-    var d = _json('{"paths":"a_b"}')
-    var fm = FieldMask.decode[JsonDecoder](d)
-    assert_equal(len(fm.paths), 1)
-    assert_equal(fm.paths[0], String("a_b"))
     var s = _json('{"zz":"x"}')
     with assert_raises(contains=_UNKNOWN):
         _ = FieldMask.decode[JsonDecoder](s)
-    var l = _lenient('{"zz":"x","paths":"q"}')
-    var lf = FieldMask.decode[JsonDecoder](l)
-    assert_equal(len(lf.paths), 1)
-    assert_equal(lf.paths[0], String("q"))
+    var l = _lenient('{"zz":"x","yy":"w"}')
+    assert_equal(len(FieldMask.decode[JsonDecoder](l).paths), 0)
     var paths = List[String]()
     paths.append(String("p1"))
     var b = decode_proto[FieldMask](
@@ -233,18 +231,11 @@ def test_value_keys_every_arm() raises:
 
 
 def test_struct_and_entry_keys() raises:
-    var d = _json('{"fields":{"key":"a","value":1}}')
-    var st = Struct.decode[JsonDecoder](d)
-    assert_equal(len(st.keys), 1)
-    assert_equal(st.keys[0], String("a"))
-    assert_equal(st.values[0].number_value, Float64(1.0))
     var s = _json('{"zz":1}')
     with assert_raises(contains=_UNKNOWN):
         _ = Struct.decode[JsonDecoder](s)
-    var l = _lenient('{"zz":1,"fields":{"key":"b","value":"x"}}')
-    var ls = Struct.decode[JsonDecoder](l)
-    assert_equal(ls.keys[0], String("b"))
-    assert_equal(ls.values[0].string_value, String("x"))
+    var l = _lenient('{"zz":1,"yy":{"k":2}}')
+    assert_equal(len(Struct.decode[JsonDecoder](l).keys), 0)
     # The entry message itself: both names, a strict refusal, a lenient
     # drop, and a skipped binary field.
     var e = _json('{"key":"k","value":true}')
@@ -276,17 +267,11 @@ def test_struct_and_entry_keys() raises:
 
 
 def test_list_value_keys() raises:
-    var d = _json('{"values":"x"}')
-    var lv = ListValue.decode[JsonDecoder](d)
-    assert_equal(len(lv.values), 1)
-    assert_equal(lv.values[0].string_value, String("x"))
     var s = _json('{"zz":1}')
     with assert_raises(contains=_UNKNOWN):
         _ = ListValue.decode[JsonDecoder](s)
-    var l = _lenient('{"zz":1,"values":3}')
-    var ll = ListValue.decode[JsonDecoder](l)
-    assert_equal(len(ll.values), 1)
-    assert_equal(ll.values[0].number_value, Float64(3.0))
+    var l = _lenient('{"zz":1,"yy":[3]}')
+    assert_equal(len(ListValue.decode[JsonDecoder](l).values), 0)
     var one = ListValue.new()
     one.add(Value.number(Float64(6.0)))
     var b = decode_proto[ListValue](_with_unknown(encode_proto[ListValue](one)))
