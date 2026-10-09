@@ -88,8 +88,12 @@ mojo_library(
         # batch attributed to no unit, interference never a pass, BUILT only
         # for units an exit-0 run covered; one case over SupervisorRunner
         "tests/test_affected_batch.mojo",
+        # the per-change check's build budget (--build-budget-s): each run gets
+        # what the earlier runs left, a run with none left is not started and
+        # its units are named, a timeout the budget caused says so
+        "tests/test_affected_budget.mojo",
         # SupervisorRunner over /bin/sh: output files, exit codes, the timeout,
-        # an explicit child environment and inheritance
+        # how long a run took, an explicit child environment and inheritance
         "tests/test_supervisor_runner.mojo",
         # RunSpec's child environment: inherit by default, every refusal of an
         # explicit one, recorded by ScriptedRunner

@@ -20,11 +20,11 @@
 #      `komira_plan_ir`: the same render and `structural_hash`, the same output
 #      schema field by field, and the same `plan_shape`.
 #
-# Step 5's `plan_shape` matters for the sort fixtures. The plan render omits
-# `nulls_first` when it equals the placement derived from `descending` (`not
-# descending`), so for `na_position="first"` on an ascending key the render,
-# and so `structural_hash`, cannot tell first from last. Step 4 and
-# `plan_shape` can.
+# For the sort fixtures the plan render is a partial witness. It omits
+# `nulls_first` when it equals the derived placement (`derived_nulls_first`:
+# NULLS LAST in both directions), so it prints NULLS FIRST for
+# `na_position="first"` and nothing for `"last"`. Step 4 and `plan_shape`
+# read the field itself.
 #
 # Mutants run against this file (each planted, built red, reverted):
 #   M1 the decoder's SORT arm flips each `nulls_first`;
@@ -137,9 +137,8 @@ def _assert_sort_on_amount(
 
 
 def test_sort_values_na_position_first() raises:
-    """`na_position="first"`: `nulls_first` true. On an ascending key this is
-    the derived placement, so the render cannot see it; the field assert and
-    `plan_shape` can."""
+    """`na_position="first"`: `nulls_first` true, which the render prints as
+    NULLS FIRST (it deviates from the derived NULLS LAST)."""
     var p = _admitted(String("sort_values_na_first"))
     _assert_sort_on_amount(String("sort_values_na_first"), p, True)
     _assert_same_plan(
@@ -148,7 +147,9 @@ def test_sort_values_na_position_first() raises:
 
 
 def test_sort_values_na_position_last() raises:
-    """`na_position="last"`, pandas' default: `nulls_first` false."""
+    """`na_position="last"`, pandas' default: `nulls_first` false. That is
+    the derived placement, which the render omits; the field assert and
+    `plan_shape` read it."""
     var p = _admitted(String("sort_values_na_last"))
     _assert_sort_on_amount(String("sort_values_na_last"), p, False)
     _assert_same_plan(
@@ -290,8 +291,9 @@ def test_read_csv_scan() raises:
 def test_the_comparison_sees_each_key_field() raises:
     """The comparison of step 5 is not blind to the fields the mutants move:
     the Mojo-built plans that differ only in `nulls_first`, `join_type` or the
-    COUNT's input have different shapes. (The render of the two sorts may be
-    equal; the shapes may not.)"""
+    COUNT's input have different shapes. (The render tells the two sorts
+    apart too, by NULLS FIRST; it omits `nulls_first` only at the derived
+    placement.)"""
     assert_true(
         plan_shape(sort_values_plan(True)) != plan_shape(sort_values_plan(False)),
         "plan_shape cannot tell na_position first from last",

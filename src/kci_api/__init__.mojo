@@ -20,6 +20,9 @@
 #                      FULL / SELECTIVE scope of a run
 #   verbs.mojo         the one verb (`run`), step kinds, validation kinds
 #   result.mojo        the result document, RunRecorder, MemoryRecorder
+#   result_rows.mojo   its rows (steps, artifacts, validations, new names)
+#   result_deploy.mojo the deploy keys of a step row (cell, landed, ...)
+#   result_json.mojo   the JSON helpers its renderer and parser share
 #
 # Pure: no file I/O, no clock, no environment, no process.
 # Encapsulation: owned values; no pointer, no wildcard origin.
@@ -81,11 +84,13 @@ from kci_api.exit_codes import (
     default_retry,
     exit_code_of,
     exit_table,
+    promises_no_effect,
     require_retry_for,
 )
 from kci_api.formats import (
     FORMAT_ARTIFACTS,
     FORMAT_ARTIFACT_MANIFEST,
+    FORMAT_CELLS,
     FORMAT_CHANNELS,
     FORMAT_CONDA_METADATA,
     FORMAT_KEY,
@@ -150,6 +155,23 @@ from kci_api.platform import (
     require_release_platform,
 )
 from kci_api.result import (
+    KCI_VERSION,
+    STATUS_FINISHED,
+    STATUS_RUNNING,
+    MemoryRecorder,
+    RunRecorder,
+    RunResult,
+    parse_result,
+    render_result,
+)
+from kci_api.result_deploy import (
+    ResultDeploy,
+    ResultFailedNode,
+    ResultLanded,
+    ResultOutput,
+    deploy_step_keys,
+)
+from kci_api.result_rows import (
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_BUILT,
     ARTIFACT_NOT_REACHED,
@@ -161,9 +183,6 @@ from kci_api.result import (
     CREDENTIAL_PROBE_NOT_UNDER_CI,
     CREDENTIAL_PROBE_NOT_RUN_NOTE,
     credential_probe_note,
-    KCI_VERSION,
-    STATUS_FINISHED,
-    STATUS_RUNNING,
     VALIDATION_ENVIRONMENT_CONTAINER,
     VALIDATION_ENVIRONMENT_ENV,
     VALIDATION_NOT_REACHED,
@@ -171,20 +190,15 @@ from kci_api.result import (
     VALIDATION_WOULD_VALIDATE,
     WORKFLOW_NOT_REACHED,
     WORKFLOW_PATH_PREFIX,
-    MemoryRecorder,
     ResultArtifact,
     ResultError,
     ResultNewName,
     ResultStep,
     ResultValidation,
     ResultValidationCheck,
-    RunRecorder,
-    RunResult,
     all_artifact_effects,
     all_credential_probes,
     all_validation_effects,
-    parse_result,
-    render_result,
     reserved_result_keys,
 )
 from kci_api.revision import ArtifactRef, is_full_commit_id, require_full_commit_id
@@ -224,6 +238,7 @@ from kci_api.verbs import (
     STEP_KIND_PUBLISH,
     VALIDATION_KIND_CONDA_INSTALL_ENV,
     VALIDATION_KIND_CONDA_INSTALL_SMOKE,
+    VALIDATION_KIND_DEPLOY_PROBE,
     VERB_RUN,
     all_step_kinds,
     all_validation_kinds,

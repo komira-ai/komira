@@ -1,0 +1,83 @@
+syntax = "proto3";
+package komira.chat.v1;
+
+import "komira/chat/v1/chat.proto";
+
+// The chat API's methods and their HTTP routes. Every route takes and returns
+// proto3 canonical JSON (`Content-Type: application/json`) and requires a
+// bearer token. A GET takes its request message's fields as query parameters
+// named by their JSON names; a path segment in braces is the request field of
+// that name. Every other method takes the request message as the body. An
+// error reply is an ApiError.
+//
+// Who may call a route scoped to a channel: GetChannel and JoinChannel on a
+// PUBLIC channel answer to any caller (ListChannels with `browse` lists those
+// channels), except that JoinChannel on an archived channel is refused, since
+// an archived channel is read-only. Every other route scoped to a channel, and
+// every route on a PRIVATE channel or a DM, answers 404 to a caller who is not
+// a member of that channel, whether or not the channel exists. EraseSubject
+// requires the `admin` action on the space.
+//
+// No code is generated from this file (a generated client would bring a gRPC
+// runtime the chat server does not use); protoc reads it with chat.proto in
+// the package's wire-fixture check, so each method names messages that exist.
+service ChatService {
+  // GET /v1/me
+  rpc GetMe(GetMeRequest) returns (GetMeResponse);
+  // GET /v1/users/{user_id}
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  // GET /v1/users
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // POST /v1/channels
+  rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse);
+  // GET /v1/channels/{channel_id}
+  rpc GetChannel(GetChannelRequest) returns (GetChannelResponse);
+  // GET /v1/channels
+  rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);
+  // PATCH /v1/channels/{channel_id}
+  rpc UpdateChannel(UpdateChannelRequest) returns (UpdateChannelResponse);
+  // POST /v1/channels/{channel_id}/join
+  rpc JoinChannel(JoinChannelRequest) returns (JoinChannelResponse);
+  // POST /v1/channels/{channel_id}/leave
+  rpc LeaveChannel(LeaveChannelRequest) returns (LeaveChannelResponse);
+  // POST /v1/channels/{channel_id}/members
+  rpc AddMembers(AddMembersRequest) returns (AddMembersResponse);
+  // DELETE /v1/channels/{channel_id}/members/{user_id}
+  rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
+  // GET /v1/channels/{channel_id}/members
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+  // POST /v1/dms
+  rpc OpenDm(OpenDmRequest) returns (OpenDmResponse);
+
+  // POST /v1/channels/{channel_id}/messages
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  // PATCH /v1/channels/{channel_id}/messages/{seq}
+  rpc EditMessage(EditMessageRequest) returns (EditMessageResponse);
+  // DELETE /v1/channels/{channel_id}/messages/{seq}
+  rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+  // GET /v1/channels/{channel_id}/messages
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  // GET /v1/channels/{channel_id}/threads/{thread_root_seq}
+  rpc ListThread(ListThreadRequest) returns (ListThreadResponse);
+  // GET /v1/mentions
+  rpc ListMentions(ListMentionsRequest) returns (ListMentionsResponse);
+
+  // POST /v1/channels/{channel_id}/read
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+  // GET /v1/sync
+  rpc Sync(SyncRequest) returns (SyncResponse);
+
+  // POST /v1/files
+  rpc CreateUpload(CreateUploadRequest) returns (CreateUploadResponse);
+  // POST /v1/files/{file_id}/complete
+  rpc CompleteUpload(CompleteUploadRequest) returns (CompleteUploadResponse);
+  // GET /v1/files/{file_id}/download
+  rpc GetDownloadUrl(GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
+
+  // GET /v1/search
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+
+  // POST /v1/admin/erase
+  rpc EraseSubject(EraseSubjectRequest) returns (EraseSubjectResponse);
+}

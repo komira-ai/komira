@@ -1,0 +1,73 @@
+syntax = "proto3";
+package komira.managed_mail.v1;
+
+import "komira/managed_mail/v1/mail.proto";
+
+// The managed mail API's methods and their HTTP routes, and the HTTP
+// submission route a submission service serves to the app.
+//
+// Every route requires a bearer token. A route takes and returns proto3
+// canonical JSON (`Content-Type: application/json`) unless its comment says
+// it carries raw bytes. A GET takes its request message's fields as query
+// parameters named by their JSON names; a path segment in braces is the
+// request field of that name. Every other method takes the request message
+// as the body. The body of an error reply (4xx or 5xx) is an ErrorResponse,
+// `{"error":{"code":...,"message":...}}`.
+//
+// The probes `GET /livez` (the process is up) and `GET /readyz` (the app can
+// reach its store and its blob store) take no message and need no token.
+//
+// No code is generated from this file (a generated client would bring a gRPC
+// runtime the app does not use); protoc reads it with mail.proto in the
+// package's corpus encoding, so each method names messages that exist.
+service ManagedMailService {
+  // GET /v1/mailboxes
+  rpc ListMailboxes(ListMailboxesRequest) returns (ListMailboxesResponse);
+  // POST /v1/mailboxes
+  rpc CreateMailbox(CreateMailboxRequest) returns (CreateMailboxResponse);
+  // DELETE /v1/mailboxes/{mailbox_id}
+  rpc DeleteMailbox(DeleteMailboxRequest) returns (DeleteMailboxResponse);
+
+  // GET /v1/mailboxes/{mailbox_id}/emails
+  rpc ListEmails(ListEmailsRequest) returns (ListEmailsResponse);
+  // GET /v1/emails/{email_id}
+  rpc GetEmail(GetEmailRequest) returns (GetEmailResponse);
+  // GET /v1/emails/{email_id}/raw
+  // Reply body: the raw message, `Content-Type: message/rfc822`.
+  rpc GetEmailRaw(GetEmailRawRequest) returns (RawBodyReply);
+  // GET /v1/emails/{email_id}/parts/{part_index}
+  // Reply body: the part's decoded bytes with the part's `Content-Type`.
+  rpc GetEmailPart(GetEmailPartRequest) returns (RawBodyReply);
+  // PATCH /v1/emails/{email_id}
+  rpc UpdateEmail(UpdateEmailRequest) returns (UpdateEmailResponse);
+  // GET /v1/threads/{thread_id}
+  rpc GetThread(GetThreadRequest) returns (GetThreadResponse);
+
+  // POST /v1/mailboxes/{mailbox_id}/send
+  // Reply: 202 Accepted.
+  rpc SendEmail(SendEmailRequest) returns (SendEmailResponse);
+  // GET /v1/submissions/{submission_id}
+  rpc GetSubmission(GetSubmissionRequest) returns (GetSubmissionResponse);
+
+  // GET /v1/export?mailboxId={mailbox_id}
+  // Reply body: an RFC 4155 mbox file, `Content-Type: application/mbox`.
+  rpc ExportMailbox(ExportMailboxRequest) returns (RawBodyReply);
+
+  // POST /v1/inbound
+  // Request body: the raw message, `Content-Type: message/rfc822`.
+  // Request header field `Komira-Mail-Envelope`: an InboundEnvelope as proto3
+  // canonical JSON.
+  rpc DeliverInbound(InboundEnvelope) returns (InboundDeliveryResponse);
+
+  // POST /v1/admin/erase
+  // An administrator's route: the caller's authorization must allow erasure.
+  // Idempotent; see EraseSubjectRequest.
+  rpc EraseSubject(EraseSubjectRequest) returns (EraseSubjectResponse);
+}
+
+// Served by a submission service, called by the app to send.
+service RawMessageSubmission {
+  // POST /v1/raw-messages
+  // Optional request header field `Idempotency-Key`.
+  rpc SendRawMessage(RawMessageRequest) returns (RawMessageResponse);
+}

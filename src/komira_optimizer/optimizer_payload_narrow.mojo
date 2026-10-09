@@ -261,7 +261,7 @@ def _narrow_one_side(
     if not _stamp_scan_specs(side, specs^):
         # ⚠ REACHED ONLY IF THE TWO WALKS DISAGREE, which is a bug in THIS file
         # (they are written as a pair).
-        return 0
+        return 0  # cov: unreachable _peel_to_parquet_scan admitted this side and the stamp walk follows every shape it admits to the same Parquet scan
     return n
 
 

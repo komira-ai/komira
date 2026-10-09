@@ -2,7 +2,7 @@ load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load(":defs.bzl", "mojo_mem_cap_cases")
 
-# The memory cap of a test run (test 45; tools/build/mojo/mem_cap.sh). Every
+# The memory cap of a test run (test 49; tools/build/mojo/mem_cap.sh). Every
 # target here builds; the twins that must go red are in
 # tests//negative/mem_cap.
 

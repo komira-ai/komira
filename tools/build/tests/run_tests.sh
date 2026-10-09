@@ -313,6 +313,12 @@
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
+#      Two libraries, one README (`readme`, tools/build/mojo/readme.bzl):
+#      .../owner builds with the README on :owner only (`readme = False` on
+#      :owner_base, which has no [tests][readme]); without the keyword
+#      (tests//negative/readme_examples/unowned) the base library's README
+#      compile fails; `readme = True` with no README.md and a non-bool
+#      `readme` are refused at load (.../readme_keyword, per -c case).
 #  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
 #      its BXL script: //:test_weld (every package under src/) and
 #      tests//functional/test_weld:ok (a planted tree with its ledger) pass;
@@ -334,8 +340,6 @@
 #      root with no package.
 
 #  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
-#  45. Assert level, defines and memory cap: see
-#      tools/build/tests/assert_level_tests.sh.
 #  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
 #      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
 #      file of the cell, against tests/pointer_lint_ffi.tsv and
@@ -370,6 +374,15 @@
 #      a second row for a package, and a row whose name is not its link's.
 #  46. The coverage gate and what ships waits for it: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
 #  47. Branch coverage runs: tools/build/tests/coverage_branch_tests.sh (sourced by 43's).
+#  49. Assert level, defines and memory cap: see
+#      tools/build/tests/assert_level_tests.sh.
+#  51. Python oracles (tools/build/python/defs.bzl, python_oracle): each
+#      target of tests//negative/python_oracle fails analysis naming the
+#      input an action built outside third_party/ (a komira library's
+#      package as data, a komira binary in srcs or as src, a wheel installed
+#      outside third_party/ as a dep or as the tzdata wheel, an interpreter
+#      unpacked outside third_party/).
+#      What works is in src/tests/helpers/komira_test_python.
 #  53. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
 #      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
 #      surface and capability of the plan, against tests/surface_capability_matrix.bzl)
@@ -387,6 +400,12 @@
 #      a repeated capability, fewer filled cells than the floor, no surface,
 #      and (built by package pattern) a test incompatible with the lint's
 #      platform.
+#  54. The hermetic Node.js rules (tools/build/node/defs.bzl): each target of
+#      tests//negative/node and below fails with its planted defect: a failing
+#      script, a wrong expected error or an unexpected pass, a path or package
+#      staged twice, an unresolved import, an empty expect_error or exe, a pin
+#      that differs, a C warning, the test-only runtime named where it is not
+#      visible. See tools/build/tests/node_tests.sh.
 set -uo pipefail
 
 umbrella=1
@@ -560,21 +579,34 @@ expect_red closure_refusal "REFUSING: toolchain member" tests//negative/closure_
 # 5
 # The scan covers the Rust and protobuf actions too (rustc, protoc, the
 # plugin, the generated packages), and aws-lc's and s2n-tls's.
-SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" //tools/build/examples/rust:prost_roundtrip
+SCAN_TARGETS=(//tools/build/examples/rust:prost_roundtrip
     tests//functional/proto:test_person tests//functional/proto:team_proto
     //tools/build/examples/aws_lc:test_aws_lc //tools/build/examples/s2n_tls:test_s2n_handshake)
+SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" "${SCAN_TARGETS[@]}")
 query="deps(set($(printf '"%s" ' "${SCAN[@]}")))"
 abs_path_re="[\"' =:]/[A-Za-z][A-Za-z0-9_.-]*"
+# The closure holds libraries with a README (komira_runtime_paths among
+# them, and komira libraries the examples import). aquery cannot run a
+# README's generate step (a local-only dynamic action) and fails on it unless
+# this daemon has already built it, so the scan builds what it reads first
+# rather than depend on an earlier test having done so. Sub-targets get their
+# own invocation (see RUN_CHECKS). The builds keep going and their failure is
+# not this test's: a target that does not build is reported by the tests that
+# build it, and the scan still reads every action aquery can reach (it fails,
+# and names the build log, only if that leaves a README unbuilt).
+host_paths_built=yes
+"$BUCK2" build --keep-going "${EXAMPLES[@]}" "${SCAN_TARGETS[@]}" > "$LOG/host_paths_build.log" 2>&1 || host_paths_built=no
+"$BUCK2" build --keep-going "${RUN_CHECKS[@]}" >> "$LOG/host_paths_build.log" 2>&1 || host_paths_built=no
 if ! printf '%s\n' "\"cmd\": \"['/bin/sh', 'x']\"" | grep -qE "$abs_path_re"; then
     fail "host paths: the scan pattern does not detect a planted absolute path"
 elif ! "$BUCK2" aquery "$query" --output-attribute cmd --output-attribute env --json > "$LOG/aquery.json" 2> "$LOG/aquery.err"; then
-    fail "host paths: aquery failed (see $LOG/aquery.err)"
+    fail "host paths: aquery failed (see $LOG/aquery.err; building the scanned targets succeeded: $host_paths_built, see $LOG/host_paths_build.log)"
 elif ! grep -q '"cmd"' "$LOG/aquery.json"; then
     fail "host paths: aquery returned no commands"
 elif grep -oE "$abs_path_re" "$LOG/aquery.json" > "$LOG/abs_paths.txt"; then
     fail "host paths: absolute paths in action commands: $(sort -u "$LOG/abs_paths.txt" | tr '\n' ' ')"
 else
-    pass "host paths: no absolute path in $(grep -c '"cmd"' "$LOG/aquery.json") action commands"
+    pass "host paths: no absolute path in $(grep -c '"cmd"' "$LOG/aquery.json") action commands$([ "$host_paths_built" = yes ] || echo " (some scanned targets did not build; see $LOG/host_paths_build.log)")"
 fi
 
 # 6
@@ -1203,6 +1235,20 @@ expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 check
 expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
 expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
+expect_red readme_owner_base_no_readme 'requested sub target named `readme`' 'tests//functional/readme_examples/owner:owner_base[tests][readme]'
+expect_red readme_unowned 'from unowned import top_word  # README.md:7' tests//negative/readme_examples/unowned:unowned_base
+# Load-time refusals: the case is a config value, so not expect_red's one target.
+for want in 'true_without_readme|`readme = True` and //negative/readme_examples/readme_keyword holds no README.md' \
+    'not_bool|`readme` takes True, False or nothing'; do
+    c=${want%%|*}
+    if "$BUCK2" build -c "readme_keyword.case=$c" tests//negative/readme_examples/readme_keyword:kw > "$LOG/readme_keyword_$c.log" 2>&1; then
+        fail "readme_keyword_$c: tests//negative/readme_examples/readme_keyword:kw built, but it must fail"
+    elif grep -qF -- "${want#*|}" "$LOG/readme_keyword_$c.log"; then
+        pass "readme_keyword_$c"
+    else
+        fail "readme_keyword_$c: failed without '${want#*|}' (see $LOG/readme_keyword_$c.log)"
+    fi
+done
 
 # 39
 # A test_weld target only declares its lint; its BXL script checks it
@@ -1271,10 +1317,6 @@ expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enfor
 # 41
 # shellcheck source=tools/build/tests/coverage_tests.sh
 . "$ROOT/tools/build/tests/coverage_tests.sh"
-
-# 45
-# shellcheck source=tools/build/tests/assert_level_tests.sh
-. "$ROOT/tools/build/tests/assert_level_tests.sh"
 
 # 42
 expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
@@ -1350,6 +1392,19 @@ for want in \
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
 
+# 49
+# shellcheck source=tools/build/tests/assert_level_tests.sh
+. "$ROOT/tools/build/tests/assert_level_tests.sh"
+# 51
+N=tests//negative/python_oracle
+F="which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only"
+expect_red python_oracle_komira_data "the oracle's data \"encoding.mojoc\" is built by komira//src/komira_encoding:komira_encoding, $F" "$N:komira_data"
+expect_red python_oracle_komira_srcs "the oracle's srcs entry \"hello\" is built by komira//tools/build/examples:hello, $F" "$N:komira_srcs"
+expect_red python_oracle_local_wheel "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_wheel_dep"
+expect_red python_oracle_local_tzdata "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_tzdata"
+expect_red python_oracle_komira_src "the oracle's src is built by komira//tools/build/examples:hello, $F" "$N:komira_src"
+expect_red python_oracle_local_python "the oracle's python is built by tests//negative/python_oracle:stand_in_python, $F" "$N:local_python"
+
 # 52
 expect_green mojo_doc_json tests//functional/mojo_doc_json:docpkg_doc
 N=tests//negative/mojo_doc_json
@@ -1404,6 +1459,10 @@ done
 # A row naming a test incompatible with the lint's platform fails the build
 # even under a package pattern, so the lint never drops out of //... silently.
 scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
+
+# 54
+# shellcheck source=tools/build/tests/node_tests.sh
+. "$ROOT/tools/build/tests/node_tests.sh"
 
 # 37
 pt_rc=0

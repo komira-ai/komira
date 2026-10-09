@@ -1,0 +1,1 @@
+Fixture data for ext_not_rs: a file directly under tests/ that is not a .rs file.

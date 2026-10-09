@@ -2,8 +2,9 @@
 //! "cov_branch_classify"): which file names are the library's measured
 //! sources, the functions they declare `@always_inline("nodebug")`, the
 //! class of the token at a branch's line and column, the head of a `for`
-//! line's iterable and the span of an `if`/`elif`/`while` header. Imported
-//! by cov_branch_classify.zig; no `main` of its own.
+//! line's iterable, the span of an `if`/`elif`/`while` header and whether a
+//! line is in the body of a `try:` of its function. Imported by
+//! cov_branch_classify.zig; no `main` of its own.
 
 const std = @import("std");
 const Alloc = std.mem.Allocator;
@@ -30,6 +31,13 @@ pub const File = struct {
     lines: [][]const u8 = &.{},
     exec: std.AutoHashMap(u64, void),
     branches: usize = 0,
+    // Per line: no statement's first line (quotedLines; null: not read yet).
+    quoted: ?[]bool = null,
+    // Why the brackets of the file do not balance ("" when they do): no
+    // line's statement can be told, so inTry gives null.
+    unbalanced: []const u8 = "",
+    // Whether the refusal for `unbalanced` has been written.
+    unbalanced_told: bool = false,
 };
 
 pub const Opts = struct {
@@ -157,7 +165,7 @@ pub fn nodebugNames(alloc: Alloc, o: *const Opts) std.StringHashMap([]const u8) 
 
 // ---- tokens ----------------------------------------------------------------
 
-pub const Kind = enum { br, rhs, select, @"switch" };
+pub const Kind = enum { br, rhs, select, @"switch", @"try" };
 
 pub const Class = enum {
     if_,
@@ -172,11 +180,12 @@ pub const Class = enum {
     subscript,
     floordiv,
     mod,
+    try_, // a raising call's error check in a `try:` body (not a token's)
     unknown,
 
     pub fn decision(c: Class) bool {
         return switch (c) {
-            .if_, .elif, .while_, .and_, .or_, .for_in => true,
+            .if_, .elif, .while_, .and_, .or_, .for_in, .try_ => true,
             else => false,
         };
     }
@@ -189,7 +198,7 @@ pub const Class = enum {
         return switch (c) {
             .if_, .elif => k != .rhs,
             .and_, .or_, .string, .call => k == .br or k == .select,
-            .while_, .for_in, .plus, .subscript => k == .br,
+            .while_, .for_in, .plus, .subscript, .try_ => k == .br,
             .floordiv, .mod => k == .select,
             .unknown => false,
         };
@@ -424,6 +433,113 @@ pub fn forHead(alloc: Alloc, lines: []const []const u8, idx: usize) ?u64 {
     const h = headOf(it) orelse return null;
     if (from + lead + h >= line.len) return null; // the head is on a later line
     return from + lead + h + 1;
+}
+
+/// Per line of `lines`: whether it is no statement's first line for inTry:
+/// it starts inside, or holds, a `"""` or `'''` string's quotes, or it
+/// starts inside an open bracket (a continuation: the `) raises:` closing a
+/// signature over lines has the `def`'s indentation).
+fn quotedLines(alloc: Alloc, f: *File) []bool {
+    const lines = f.lines;
+    const out = alloc.alloc(bool, lines.len) catch oom();
+    var open: u8 = 0; // the quote of the triple-quoted string open, or 0
+    var depth: usize = 0; // brackets open outside strings and comments
+    // The 1-based line of each bracket still open, innermost last.
+    var opened = std.ArrayList(usize).init(alloc);
+    for (lines, 0..) |l, n| {
+        out[n] = open != 0 or depth > 0;
+        var i: usize = 0;
+        while (i < l.len) {
+            const c = l[i];
+            const triple = i + 2 < l.len and (c == '"' or c == '\'') and l[i + 1] == c and l[i + 2] == c;
+            if (open != 0) {
+                if (triple and c == open) {
+                    open = 0;
+                    out[n] = true;
+                    i += 3;
+                } else i += if (c == '\\') 2 else 1;
+                continue;
+            }
+            if (c == '#') break;
+            if (triple) {
+                open = c;
+                out[n] = true;
+                i += 3;
+            } else if (c == '"' or c == '\'') {
+                i = skipString(l, i);
+            } else {
+                switch (c) {
+                    '(', '[', '{' => {
+                        depth += 1;
+                        opened.append(n + 1) catch oom();
+                    },
+                    ')', ']', '}' => {
+                        if (depth == 0) {
+                            if (f.unbalanced.len == 0) f.unbalanced = std.fmt.allocPrint(alloc, "line {d} closes a bracket no line opened", .{n + 1}) catch oom();
+                        } else {
+                            depth -= 1;
+                            _ = opened.pop();
+                        }
+                    },
+                    else => {},
+                }
+                i += 1;
+            }
+        }
+    }
+    if (f.unbalanced.len == 0 and opened.items.len > 0)
+        f.unbalanced = std.fmt.allocPrint(alloc, "a bracket line {d} opens is never closed", .{opened.items[opened.items.len - 1]}) catch oom();
+    return out;
+}
+
+fn indentOf(l: []const u8) usize {
+    var i: usize = 0;
+    while (i < l.len and (l[i] == ' ' or l[i] == '\t')) i += 1;
+    return i;
+}
+
+/// Whether 1-based `line` of `f` is in the body of a `try:` of its own
+/// function (README.md, "try"): walking back over the lines indented less
+/// than the one before (blank, comment, triple-quoted and continuation
+/// lines skipped), a
+/// `try` line is met before a `def`, `fn`, `struct`, `trait` or `class`
+/// line, or the line is itself `try: <statement>`. An `except`, `else` or
+/// `finally` clause has its `try`'s indentation, so its body is no body of
+/// that `try` (only of one around it); a `def` nested in a `try:` body is
+/// another function.
+pub fn inTry(alloc: Alloc, f: *File, line: u64) ?bool {
+    const q = f.quoted orelse blk: {
+        const m = quotedLines(alloc, f);
+        f.quoted = m;
+        break :blk m;
+    };
+    // Brackets that do not balance (a misread string, a construct the scan
+    // does not know): which lines are continuations cannot be told, so
+    // whether a line is in a `try:` body cannot either. Fail closed.
+    if (f.unbalanced.len > 0) return null;
+    if (line < 1 or line > f.lines.len) return false;
+    const stops = [_][]const u8{ "def", "fn", "struct", "trait", "class" };
+    var idx: usize = @intCast(line - 1);
+    const own = firstWord(f.lines[idx]);
+    if (std.mem.eql(u8, own, "try")) return true;
+    for (stops) |w| {
+        if (std.mem.eql(u8, own, w)) return false;
+    }
+    var cur = indentOf(f.lines[idx]);
+    while (idx > 0 and cur > 0) {
+        idx -= 1;
+        if (q[idx]) continue;
+        const l = f.lines[idx];
+        const ind = indentOf(l);
+        if (ind == l.len or l[ind] == '#' or l[ind] == '\r' or ind >= cur) continue;
+        cur = ind;
+        const w = firstWord(l);
+        if (std.mem.eql(u8, w, "try")) return true;
+        for (stops) |s| {
+            if (std.mem.eql(u8, w, s)) return false;
+        }
+    }
+    return false;
 }
 
 /// A source span, 1-based lines and columns, both ends inside.

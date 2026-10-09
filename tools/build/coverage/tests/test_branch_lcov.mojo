@@ -69,6 +69,12 @@ def test_reader_keys_counts_and_dash() raises:
     var s = parse_branch_lcov(_rec(String("BRDA:4,5:switch:0/1,0,1\nBRDA:4,5:switch:0/1,1,0\nBRDA:4,5:switch:0/1,2,3\n")), String("s.info"))
     assert_equal(s[0].branch_found(), 3)
     assert_equal(len(parse_branch_lcov(String(""), String("e.info"))), 0)
+    # A raising call in a `try:` body: two arms, returned (0) and raised
+    # into the handler (1), here never raised.
+    var t = parse_branch_lcov(_rec(String("BRDA:5,14:try:0/1,0,5\nBRDA:5,14:try:0/1,1,0\n")), String("t.info"))
+    assert_equal(t[0].branch_found(), 2)
+    assert_equal(t[0].branch_hit(), 1)
+    assert_equal(t[0].branches[String("5,14:try:0/1,1")], 0)
 
 
 def test_reader_refusals() raises:
@@ -90,7 +96,7 @@ def test_reader_refusals() raises:
     _refused(_rec(String("BRDA:2,0,0,1\n")), String("BRDA block '0' is not <col>:<kind>:<n>/<N>"))
     _refused(_rec(String("BRDA:2,9:br:0/1,0\n")), String("(4 fields), not 3"))
     _refused(_rec(String("BRDA:2,9:br:0/1,0,1,2\n")), String("(4 fields), not 5"))
-    _refused(_rec(String("BRDA:2,9:cond:0/1,0,1\n")), String("kind 'cond' is not br, select, switch or rhs"))
+    _refused(_rec(String("BRDA:2,9:cond:0/1,0,1\n")), String("kind 'cond' is not br, select, switch, try or rhs"))
     _refused(_rec(String("BRDA:0,9:br:0/1,0,1\n")), String("BRDA line 0 is below 1"))
     _refused(_rec(String("BRDA:2,0:br:0/1,0,1\n")), String("BRDA column 0 is below 1"))
     _refused(_rec(String("BRDA:2,9:br:1/1,0,1\n")), String("<n> must be below <N>"))
@@ -105,6 +111,7 @@ def test_reader_refusals() raises:
     _refused(_rec(String("BRDA:2,9:br:0/1,0,1\n")), String("2,9:br:0/1 has 1 arms, not 2"))
     _refused(_rec(String("BRDA:2,9:br:0/1,0,1\nBRDA:2,9:br:0/1,1,1\nBRDA:2,9:br:0/1,2,1\n")), String("2,9:br:0/1 has 3 arms, not 2"))
     _refused(_rec(String("BRDA:4,5:switch:0/1,0,1\n")), String("4,5:switch:0/1 has 1 arms, not 2 or more"))
+    _refused(_rec(String("BRDA:5,14:try:0/1,0,1\nBRDA:5,14:try:0/1,1,1\nBRDA:5,14:try:0/1,2,1\n")), String("5,14:try:0/1 has 3 arms, not 2"))
     _refused(_rec(String("BRDA:2,9:br:0/2,0,1\nBRDA:2,9:br:0/2,1,1\n")), String("the location 2,9:br has 1 of its 2 decisions"))
     _refused(_rec(String("BRDA:2,9:br:0/2,0,1\nBRDA:2,9:br:0/2,1,1\nBRDA:2,9:br:1/3,0,1\n")), String("b.info:4: BRDA 2,9:br:1/3,0: the location 2,9:br has 2 decisions"))
 

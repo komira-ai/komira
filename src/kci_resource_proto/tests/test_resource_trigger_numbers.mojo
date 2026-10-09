@@ -18,7 +18,7 @@
 # 3. EVENTTRIGGER. 1 source (a `Ref`), 2 event (a `SourceEvent`), 3 target
 #    (a `Ref`); by name, binary, JSON (`source`, `event` by its value name,
 #    `target`), absent = unset; 4 is not a field; as `Resource.body` 31, the
-#    nineteenth arm, under the JSON name `eventTrigger`.
+#    twentieth arm, under the JSON name `eventTrigger`.
 # 4. SOURCEEVENT. 0 SOURCE_EVENT_UNSET, 1 OBJECT_CREATED, 2 OBJECT_DELETED,
 #    in both directions; 3 is held (a message published to a topic) and
 #    renders as its bare number.
@@ -304,7 +304,7 @@ def test_event_trigger() raises:
 
     var rr = decode_proto[Resource](_resource("on-upload", 31, _event_trigger()))
     assert_true(Bool(rr.event_trigger), "body 31 is `event_trigger`")
-    assert_equal(rr._oneof0_case, 19, "the event trigger is the nineteenth arm")
+    assert_equal(rr._oneof0_case, 20, "the event trigger is the twentieth arm")
     var rt = encode_json(rr)
     assert_true('"eventTrigger":{' in rt, "Resource JSON names the arm eventTrigger: " + rt)
     _bytes_equal(encode_proto(decode_json[Resource](rt)), encode_proto(rr), "Resource with an event trigger: JSON round trip")

@@ -27,6 +27,8 @@
 #               `<id>/authrec` (the record that authorization asks for: an
 #               input on the zone's NAME, the field `for`), and the
 #               certificate depends on both.
+#   A zone or a certificate with the author's cloud name (`physical_name`)
+#   exposes that name as its NAME instead of `<id>-zone` / `<id>-cert`.
 #
 # LIMITS (`dns_limits`, the shapes' own; they cite this package):
 #   * on a shape with a `dnsauth` row, this lowering emits one
@@ -53,6 +55,7 @@ from kci_cloud import (
 from kci_resource_proto.resource import Resource
 
 from kci_cloud_fake.limits import FAKE_CITATION
+from kci_cloud_fake.metadata import fake_physical_name
 from kci_cloud_fake.shapes import (
     ProviderShape,
     RECORD_TYPE_SLOT,
@@ -87,7 +90,8 @@ def lower_zone(r: Resource, shape: ProviderShape) raises -> List[LoweredNode]:
     _no_uses(r, String("dns_zone"))
     var fields = List[Setting]()
     fields.append(Setting(String("domain"), r.dns_zone.value().name.copy()))
-    fields.append(Setting(String("out.NAME"), fake_zone_name(r.id)))
+    var named = fake_physical_name(r)
+    fields.append(Setting(String("out.NAME"), named if named.byte_length() > 0 else fake_zone_name(r.id)))
     var out = List[LoweredNode]()
     out.append(
         LoweredNode(
@@ -200,7 +204,8 @@ def lower_certificate(r: Resource, shape: ProviderShape) raises -> List[LoweredN
     var fields = List[Setting]()
     for i in range(len(c.domains)):
         fields.append(Setting(String("domain.") + String(i), c.domains[i].copy()))
-    fields.append(Setting(String("out.NAME"), fake_certificate_name(r.id)))
+    var named = fake_physical_name(r)
+    fields.append(Setting(String("out.NAME"), named if named.byte_length() > 0 else fake_certificate_name(r.id)))
     out.append(
         LoweredNode(
             r.id + String("/") + String(ROLE_CERT),

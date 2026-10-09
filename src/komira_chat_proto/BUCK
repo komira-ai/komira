@@ -1,0 +1,89 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library", "proto_srcs")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_check")
+
+# The chat API (`komira/chat/v1/chat.proto`, package `komira.chat.v1`): the
+# request, response and resource messages of a small Slack-like chat, carried
+# as proto3 canonical JSON over HTTP, generated into the Mojo package
+# `komira_chat_proto`:
+#
+#   from komira_chat_proto.chat import SendMessageRequest, Message, ...
+#
+# `chat_service.proto` lists the methods and their HTTP routes; no code is
+# generated from it (see `:chat_service`). Nothing here imports another
+# `.proto`.
+#
+# The welded tests check every message against its proto3-JSON golden
+# (tests/goldens/chat_v1.golden) and against protoc's encoding of the same
+# values (tests/fixtures/corpus.canonical.hex), and pin every enum value's
+# number and name. README.md's examples run as one more welded test.
+mojo_proto_library(
+    name = "komira_chat_proto",
+    srcs = ["chat.proto"],
+    import_prefix = "komira/chat/v1",
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    test_srcs = [
+        "tests/test_chat_enum_numbers.mojo",
+        "tests/test_chat_goldens.mojo",
+    ],
+    # Staged at these paths under the test's working directory. The protoc
+    # check's report is staged too, so the library cannot be built unless
+    # protoc agrees with the corpus bytes the test reads. chat.proto is staged
+    # so the test can hold the golden file to the messages it declares.
+    test_data = {
+        "tests/test_chat_goldens.mojo": {
+            "src/komira_chat_proto/chat.proto": "chat.proto",
+            "src/komira_chat_proto/tests/fixtures/corpus.canonical.hex": "tests/fixtures/corpus.canonical.hex",
+            "src/komira_chat_proto/tests/fixtures/corpus_protoc_check.txt": ":chat_corpus_fixture",
+            "src/komira_chat_proto/tests/goldens/chat_v1.golden": "tests/goldens/chat_v1.golden",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The service: `komira/chat/v1/chat_service.proto`, the methods and their HTTP
+# routes. A `service` in a generated file brings a gRPC client and its runtime
+# into the package, and the chat server speaks plain JSON over HTTP, so this
+# file is published as `.proto` source only. protoc reads it in
+# `:chat_corpus_fixture` below, so each method must name messages chat.proto
+# declares.
+proto_srcs(
+    name = "chat_service",
+    srcs = ["chat_service.proto"],
+    import_prefix = "komira/chat/v1",
+    proto_deps = [":komira_chat_proto_gen"],
+    visibility = ["PUBLIC"],
+)
+
+# protoc, the reference implementation, reading the corpus: one value of every
+# message as fields of the test-only `ChatCorpus` (tests/chat_corpus.proto).
+# `corpus.txtpb` is that value as protoc text and `corpus.canonical.hex` is
+# protoc's encoding of it, made by `:corpus_canonical`:
+#   ./buck2 build //src/komira_chat_proto:corpus_canonical \
+#       --out src/komira_chat_proto/tests/fixtures/corpus.canonical.hex
+# The canonical bytes stand in for the producer's `.hex` (`canonical_producer`):
+# that this package's encoder writes the same bytes is checked by
+# tests/test_chat_goldens.mojo.
+_CORPUS_ROOT = "komira.chat.v1.corpus.ChatCorpus"
+
+_CORPUS_PROTO = [
+    ":chat_service",
+    ":komira_chat_proto_gen",
+]
+
+proto_fixture_check(
+    name = "chat_corpus_fixture",
+    srcs = ["tests/chat_corpus.proto"],
+    canonical_producer = ["corpus"],
+    dir = "tests/fixtures",
+    fixtures = {"corpus": _CORPUS_ROOT},
+    hex = {"corpus": "tests/fixtures/corpus.canonical.hex"},
+    proto_deps = _CORPUS_PROTO,
+)
+
+proto_encode(
+    name = "corpus_canonical",
+    srcs = ["tests/chat_corpus.proto"],
+    proto_deps = _CORPUS_PROTO,
+    root = _CORPUS_ROOT,
+    txtpb = "tests/fixtures/corpus.txtpb",
+)

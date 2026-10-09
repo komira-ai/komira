@@ -9,9 +9,10 @@
 # passes.
 #
 # Scope: AccessSecretVersion, AddSecretVersion, CreateSecret, DeleteSecret,
-# ListSecrets and ListSecretVersions. The service's other methods (secret
-# reads and updates, version state changes and destruction, IAM policy,
-# rotation) are not in the generated code.
+# GetIamPolicy, GetSecret, ListSecrets, ListSecretVersions, SetIamPolicy and
+# UpdateSecret. The service's other methods (a version's read, state changes
+# and destruction, TestIamPermissions, rotation) are not in the generated
+# code.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -74,19 +75,13 @@ def test_no_environment_read() raises:
 
 def test_only_the_used_methods_are_generated() raises:
     var absent: List[String] = [
-        "def get_secret[",
-        "def update_secret[",
         "def get_secret_version[",
         "def disable_secret_version[",
         "def enable_secret_version[",
         "def destroy_secret_version[",
-        "def set_iam_policy[",
-        "def get_iam_policy[",
         "def test_iam_permissions[",
         "def enable_managed_rotation[",
         "def rotate_secret[",
-        "struct GetSecretRequest(",
-        "struct UpdateSecretRequest(",
         "struct DestroySecretVersionRequest(",
     ]
     var files = _files()
@@ -116,8 +111,12 @@ def test_the_scan_saw_the_client() raises:
         "    def add_secret_version[RT: Runtime](",
         "    def create_secret[RT: Runtime](",
         "    def delete_secret[RT: Runtime](",
+        "    def get_iam_policy[RT: Runtime](",
+        "    def get_secret[RT: Runtime](",
         "    def list_secrets[RT: Runtime](",
         "    def list_secret_versions[RT: Runtime](",
+        "    def set_iam_policy[RT: Runtime](",
+        "    def update_secret[RT: Runtime](",
     ]
     for j in range(len(present)):
         assert_equal(_count(text, present[j]), 1, present[j])

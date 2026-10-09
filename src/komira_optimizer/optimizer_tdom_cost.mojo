@@ -596,7 +596,7 @@ def estimate_with_tdom[
             bucket_max_tdom.append(tdom_val)
         else:
             if tdom_val > bucket_max_tdom[found]:
-                bucket_max_tdom[found] = tdom_val
+                bucket_max_tdom[found] = tdom_val  # cov: unreachable bridging is sorted by TDOM descending, so the first class in a bucket holds its maximum
 
     var denom: Int = composite_denom
     for j in range(len(bucket_max_tdom)):

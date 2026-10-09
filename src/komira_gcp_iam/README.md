@@ -8,13 +8,22 @@ bearer token from a komira_gcp_core `GcpTokenSource`, and raises a non-2xx
 answer through komira_gcp_core's `gcp_status_error`. It reads no
 environment.
 
-Ten methods are generated: ListServiceAccounts, GetServiceAccount,
-CreateServiceAccount and DeleteServiceAccount; GetIamPolicy and SetIamPolicy
-on a service account; GetRole, CreateRole, UpdateRole and DeleteRole. Not
-generated: service-account keys, SignBlob and SignJwt, account updates,
-enabling, disabling and undeleting, ListRoles, UndeleteRole, the query
-methods, LintPolicy and TestIamPermissions. There is no IAM Credentials
-client here (komira_gcp_core mints tokens itself).
+Ten methods are generated on `IAMClient`: ListServiceAccounts,
+GetServiceAccount, CreateServiceAccount and DeleteServiceAccount;
+GetIamPolicy and SetIamPolicy on a service account; GetRole, CreateRole,
+UpdateRole and DeleteRole. One more is on `WorkloadIdentityPoolsClient`:
+GetWorkloadIdentityPoolProvider (a workload identity provider's issuer,
+audiences and attribute condition). The pinned googleapis declares the
+workload identity pools only at v1beta, so that read is sent to
+`/v1beta/projects/*/locations/*/workloadIdentityPools/*/providers/*` on
+`iam.googleapis.com`, and its `WorkloadIdentityPoolProvider` carries the
+fields the v1beta file declares. Not generated: service-account keys,
+SignBlob and SignJwt, account updates (PatchServiceAccount binds a field of
+the body into its path with the whole request as the body, which the
+generator refuses), enabling, disabling and undeleting, ListRoles,
+UndeleteRole, the query methods, LintPolicy, TestIamPermissions, and every
+other workload identity pool and provider method. There is no IAM
+Credentials client here (komira_gcp_core mints tokens itself).
 
 A role method with more than one path binding (`roles/<id>`,
 `organizations/<org>/roles/<id>`, `projects/<project>/roles/<id>`) is sent
@@ -24,7 +33,9 @@ deleted. A policy change is a read-modify-write that carries the etag it
 read; the client invents none.
 
 The client, accounts and roles are in `komira_gcp_iam.iam`, the policy
-requests in `.iam_policy`, `Policy` in `.policy`.
+requests in `.iam_policy`, `Policy` in `.policy`, and
+`WorkloadIdentityPoolsClient` with the provider and its request in
+`.workload_identity_pool`.
 
 ## Examples
 

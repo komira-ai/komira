@@ -352,7 +352,7 @@ def _build_fd_elided(imm plan: LogicalPlan) raises -> Optional[LogicalPlan]:
     if n_elide == 0:
         return None
     if n_keys - n_elide < 1:
-        return None
+        return None  # cov: unreachable only derived keys are elided and step (3) required a base key, so a key survives
 
     # ── (5) the new OUTER project, folded ───────────────────────────────────
     # Built FIRST because it is the gate most likely to decline: an outer entry
@@ -441,7 +441,7 @@ def _build_fd_elided(imm plan: LogicalPlan) raises -> Optional[LogicalPlan]:
     var n_surv = n_keys - n_elide
     ref new_agg_schema = new_agg.output_schema
     if new_agg_schema.num_columns() != n_surv + n_aggs:
-        return None
+        return None  # cov: unreachable LogicalPlan.aggregate emits one column per group key and one per aggregate
     var s = 0
     for i in range(n_keys):
         if not elide[i]:

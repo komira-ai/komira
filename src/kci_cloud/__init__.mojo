@@ -44,6 +44,8 @@ interface. This package names no cloud:
   * network.mojo     — the rules of the network types (network, subnet, IP
                        address) and of a service's `network`: their graph
                        findings and the IPv4 range form.
+  * registry.mojo    — the rules of the registry type: its graph findings
+                       (no `uses`; a format written and known).
   * triggers.mojo    — the rules of the trigger types (schedule, event
                        trigger): their graph findings, the portable cron
                        form and a time zone name's shape.
@@ -67,6 +69,10 @@ interface. This package names no cloud:
                        label of an object created in a scope with a
                        validation run id (no kci verb sets one yet);
                        `create_labels` is every label a create writes.
+  * metadata.mojo    — the rules of every resource's metadata (`labels`,
+                       `physical_name`, `adopt`): their graph findings, the
+                       label fields kci lowers, the adopted primary nodes,
+                       and the refusal of a changed cloud name.
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
                        `resolve` (with a typo suggestion), and the rule that
                        every cloud declares every catalog type.
@@ -114,6 +120,7 @@ from kci_cloud.catalog import (
     FIELD_NETWORK,
     FIELD_SUBNET,
     FIELD_IP_ADDRESS,
+    FIELD_REGISTRY,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -145,6 +152,7 @@ from kci_cloud.catalog import (
     ROLE_NETWORK,
     ROLE_SUBNET,
     ROLE_ADDRESS,
+    ROLE_REGISTRY,
     BodyArm,
     body_arms,
     body_field,
@@ -232,6 +240,7 @@ from kci_cloud.network import (
     service_network_findings,
     service_subnet,
 )
+from kci_cloud.registry import FORMAT_OCI, format_word, registry_findings, registry_format
 from kci_cloud.workload import Workload, is_workload, workload_of
 from kci_cloud.compute import (
     V1_IMAGE_PLATFORM,
@@ -314,5 +323,22 @@ from kci_cloud.deploy import (
     apply_resources,
     destroy_resources,
     group_plan,
+    with_adopted,
+)
+from kci_cloud.metadata import (
+    KCI_LABELS_MAX,
+    LABEL_FIELD_PREFIX,
+    LABEL_MAX_BYTES,
+    NAME_MAX_BYTES,
+    PHYSICAL_NAME_FIELD,
+    adopted_nodes,
+    label_fields,
+    label_key_problem,
+    label_value_problem,
+    metadata_findings,
+    name_change_findings,
+    physical_name_problem,
+    shared_name_findings,
+    sorted_label_keys,
 )
 from kci_cloud.conformance import ConformanceTarget, run_conformance

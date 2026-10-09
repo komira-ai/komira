@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test 46: the segment boundary of COVERAGE_INFO_ONLY_DIRS
+# (tools/build/coverage/policy.bzl). This package's directory in the tests
+# cell, src/testsuite/coverage, starts with the characters of src/tests but
+# is not under it, so it is held to the target like any other.
+#
+# covnotinfo is covlow (tests//negative/coverage): 3 of 6 lines, below the
+# target. RED: tests//src/testsuite/coverage:covnotinfo[coverage][gate]
+# (enforce), with COVERAGE GATE FAILED and BelowTarget; a rule matching the
+# prefix without the `/` would make it green.
+mojo_library(
+    name = "covnotinfo",
+    srcs = [
+        "covnotinfo/__init__.mojo",
+        "covnotinfo/word.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "enforce",
+    import_name = "covnotinfo",
+    test_srcs = ["tests/test_word.mojo"],
+)

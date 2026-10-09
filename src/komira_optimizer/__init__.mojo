@@ -1,15 +1,27 @@
 """`komira_optimizer` -- logical-plan rewrite rules.
 
-Filter fusion, decomposition and predicate pushdown; cross-join elimination
-and equi-filter folding into joins; pushing a join's single-side ON residual
-to the owning child; the Project-merge substitution and its safety check;
-limit pushdown, sort + limit fusion into TopN, TopN below a Project, and the
-row-count estimate. Every rule takes a `LogicalPlan` and returns the rewritten
-plan; none executes anything.
+Join rules (inner-to-semi conversion, build-side selection, the SEMI/ANTI
+reducer pushdown, the join-reorder output-order guard, absorbing a projection
+into an aggregate); filter, predicate and OR rewrites (fusion, decomposition,
+pushdown, cross-join elimination, OR factoring, symmetric-OR inference);
+expression rules (constant
+folding, predicate simplification, CSE, IN-list rewrite); view resolution and
+partition pruning; subquery decorrelation and scalar-subquery resolution through
+a `ScalarDepTable` of engine-supplied bindings; join-predicate decomposition,
+transitive edges and greedy join reordering with TDOM-based cardinality and
+per-column NDV providers; aggregate rewrites (functionally dependent group keys,
+eager and partial aggregation below joins, the SUM-of-offset rewrite,
+duplicate aggregate folding and common-aggregate dedup); join payload
+narrowing; limit and TopN rules, partition TopN fusion and window rewrites;
+scan-share planning; the `OptimizerConfig` options value; and the non-raising
+`OptimizeResult`. Every rule takes a `LogicalPlan` and returns the rewritten
+plan (the duplicate-aggregate collect and find walks return hash counts and a
+subtree copy, and scan-share planning returns a `ScanSharePlan` descriptor);
+none executes anything.
 
 It depends on `komira_plan_ir`, `komira_plan_expr`, `komira_plan_stats`,
-`komira_arrow` and `komira_kernels` (the join-key envelope) and on no engine
-package.
+`komira_arrow`, `komira_kernels`, `komira_collections`, `komira_exec_types`,
+`komira_scan_source`, `komira_counters` and `komira_libc`.
 
 Public API: import directly from sub-modules. No facade.
 """

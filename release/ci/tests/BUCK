@@ -1,0 +1,14 @@
+load("@komira//tools/build/python:defs.bzl", "py_test")
+
+# The tests of release/ci's scripts, each a py_test: its cases run with the
+# hermetic Python (tools/build/python) as a build action, so building the
+# target is running them. Test-only: nothing here is shipped.
+
+# release/ci/main_red.py, the main-red alert of .github/workflows/main_red.yml
+# (docs/ci.md, "main_red.yml"): what each case proves is in the test's header.
+# fixtures/ holds excerpts of real job logs of kci runs.
+py_test(
+    name = "test_main_red",
+    src = "test_main_red.py",
+    srcs = ["//release:main_red.py"] + glob(["fixtures/*.log"]),
+)

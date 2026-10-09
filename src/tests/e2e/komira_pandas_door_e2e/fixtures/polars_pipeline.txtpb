@@ -1,0 +1,357 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "region"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "revenue"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  limit {
+    n: 3
+    child {
+      output_schema {
+        fields {
+          name: "region"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "revenue"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      sort {
+        keys: "revenue"
+        descending: true
+        nulls_first: true
+        child {
+          output_schema {
+            fields {
+              name: "region"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "revenue"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          aggregate {
+            group_by {
+              col_ref {
+                name: "region"
+                side: COL_SIDE_NONE
+              }
+            }
+            agg_exprs {
+              func: AGG_SUM
+              has_child0: true
+              child0 {
+                col_ref {
+                  name: "revenue"
+                  side: COL_SIDE_NONE
+                }
+              }
+              has_alias_name: true
+              alias_name: "revenue"
+            }
+            child {
+              output_schema {
+                fields {
+                  name: "sale_id"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "region"
+                  arrow_type_id: 13
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "qty"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "price"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "discount"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "revenue"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+              }
+              project {
+                exprs {
+                  col_ref {
+                    name: "sale_id"
+                    side: COL_SIDE_NONE
+                  }
+                }
+                exprs {
+                  col_ref {
+                    name: "region"
+                    side: COL_SIDE_NONE
+                  }
+                }
+                exprs {
+                  col_ref {
+                    name: "qty"
+                    side: COL_SIDE_NONE
+                  }
+                }
+                exprs {
+                  col_ref {
+                    name: "price"
+                    side: COL_SIDE_NONE
+                  }
+                }
+                exprs {
+                  col_ref {
+                    name: "discount"
+                    side: COL_SIDE_NONE
+                  }
+                }
+                exprs {
+                  alias {
+                    child {
+                      binary_op {
+                        op: BIN_MUL
+                        left {
+                          col_ref {
+                            name: "price"
+                            side: COL_SIDE_NONE
+                          }
+                        }
+                        right {
+                          col_ref {
+                            name: "qty"
+                            side: COL_SIDE_NONE
+                          }
+                        }
+                      }
+                    }
+                    name: "revenue"
+                  }
+                }
+                child {
+                  output_schema {
+                    fields {
+                      name: "sale_id"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "region"
+                      arrow_type_id: 13
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "qty"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "price"
+                      arrow_type_id: 12
+                      dtype_code: _DT_FLOAT64
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "discount"
+                      arrow_type_id: 12
+                      dtype_code: _DT_FLOAT64
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                  }
+                  filter {
+                    predicate {
+                      binary_op {
+                        op: BIN_GT
+                        left {
+                          col_ref {
+                            name: "qty"
+                            side: COL_SIDE_NONE
+                          }
+                        }
+                        right {
+                          literal {
+                            dtype_code: _DT_INT64
+                            int_val: 2
+                            kind: SCALAR_KIND_DTYPE
+                            time_unit: SCALAR_TIME_UNIT_MICRO
+                          }
+                        }
+                      }
+                    }
+                    child {
+                      output_schema {
+                        fields {
+                          name: "sale_id"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "region"
+                          arrow_type_id: 13
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "qty"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "price"
+                          arrow_type_id: 12
+                          dtype_code: _DT_FLOAT64
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "discount"
+                          arrow_type_id: 12
+                          dtype_code: _DT_FLOAT64
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                      }
+                      scan {
+                        source {
+                          parquet {
+                            paths: "/data/sales.parquet"
+                            schema {
+                              fields {
+                                name: "sale_id"
+                                arrow_type_id: 5
+                                dtype_code: _DT_INT64
+                                dict_index_type_id: 4
+                              }
+                              fields {
+                                name: "region"
+                                arrow_type_id: 13
+                                nullable: true
+                                dict_index_type_id: 4
+                              }
+                              fields {
+                                name: "qty"
+                                arrow_type_id: 5
+                                dtype_code: _DT_INT64
+                                nullable: true
+                                dict_index_type_id: 4
+                              }
+                              fields {
+                                name: "price"
+                                arrow_type_id: 12
+                                dtype_code: _DT_FLOAT64
+                                nullable: true
+                                dict_index_type_id: 4
+                              }
+                              fields {
+                                name: "discount"
+                                arrow_type_id: 12
+                                dtype_code: _DT_FLOAT64
+                                nullable: true
+                                dict_index_type_id: 4
+                              }
+                            }
+                            mtime_ns: 1234567890
+                            fs_is_local: true
+                          }
+                        }
+                        has_schema: true
+                        schema {
+                          fields {
+                            name: "sale_id"
+                            arrow_type_id: 5
+                            dtype_code: _DT_INT64
+                            dict_index_type_id: 4
+                          }
+                          fields {
+                            name: "region"
+                            arrow_type_id: 13
+                            nullable: true
+                            dict_index_type_id: 4
+                          }
+                          fields {
+                            name: "qty"
+                            arrow_type_id: 5
+                            dtype_code: _DT_INT64
+                            nullable: true
+                            dict_index_type_id: 4
+                          }
+                          fields {
+                            name: "price"
+                            arrow_type_id: 12
+                            dtype_code: _DT_FLOAT64
+                            nullable: true
+                            dict_index_type_id: 4
+                          }
+                          fields {
+                            name: "discount"
+                            arrow_type_id: 12
+                            dtype_code: _DT_FLOAT64
+                            nullable: true
+                            dict_index_type_id: 4
+                          }
+                        }
+                        has_row_count: true
+                        row_count: 6
+                        source_kind: SOURCE_KIND_COLUMNAR
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

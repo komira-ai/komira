@@ -10,7 +10,7 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | the release path of `kci.yml` |
+| push to `main` | the release path of `kci.yml`; when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
@@ -846,7 +846,8 @@ targets, so a `build_targets` command must be correct on such a union.
 `release/ci/build_targets.sh` builds with `--keep-going`, then checks the lints
 and runs the tests among all the targets (a failed build stops before the lints
 and tests). The per-run timeout (`--build-timeout-s`, default 3600 s) bounds the
-whole batch, not each unit in it. The run's output is in
+whole batch, not each unit in it, and the build budget (below) can shorten it.
+The run's output is in
 `<log dir>/_batch_<k>.stdout` and `.stderr`, and its full argv, one argument per
 line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 `<unit>.stdout` and `.stderr`).
@@ -864,8 +865,10 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
   passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
   the summary's line is `BUILD step: F of N unit(s) failed: ...`.
 - **The batch times out (or is killed by a signal):** the batch had the whole
-  `--build-timeout-s` (default 3600 s), not a share per unit. It is not
-  retried and no unit of it is attributed: FAILED.
+  `--build-timeout-s` (default 3600 s), or what was left of the build budget
+  when that was less (the note then says `timed out after N s, what was left
+  of the build budget`), not a share per unit. It is not retried and no unit
+  of it is attributed: FAILED.
 - **The batch fails but every unit builds alone:** the units interfere or the
   build is flaky. That is INDETERMINATE (`KCI-E-CANNOT-TELL`), never a pass.
   FAILED outranks it: if a unit failed or a batch was not attributed anywhere
@@ -873,6 +876,37 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 - **A run cannot be started** (a batch, a unit alone or a retry): the step
   stops at once, nothing after it is started, and the step is INDETERMINATE
   (`KCI-E-CANNOT-TELL`) even when a unit has already failed.
+
+**The build budget** (`--build-budget-s <n>`, accepted only with
+`--affected-by`, at most 604800, a week): the seconds the per-change check
+may take, counted from kci's own start on the monotonic clock
+(`CLOCK_MONOTONIC`), so everything kci does first (the workflow check, the
+git reads, the derive and affected commands) is charged to it. Every run
+(each derive and affected command, a batch, a unit alone, a retry) gets the
+smaller of `--build-timeout-s` and the whole seconds left until the deadline,
+read just before it starts; a run that passed, failed or timed out is
+charged alike. A run with less than one second left is not started. A
+derive or affected command not started makes the step INDETERMINATE
+(`KCI-E-AFFECTED`: kci cannot tell what the change reaches). A build run not
+started lists its units, and those of every later run, as `BUILD step: U of
+N unit(s) not built: the build budget (--build-budget-s B) was spent before
+their run could start: ...`, which is FAILED (`KCI-E-BUILD-FAILED`), never
+a pass; the units earlier runs built keep their `BUILT` lines. A batch whose
+retries ran out of budget is not called interference. Without the flag,
+each run has its `--build-timeout-s` and there is no total.
+
+`pr.yml` passes the time its job has left: its first step writes the job's
+deadline, 115 of the job's 120 minutes (`timeout-minutes`), and the
+`kci run` step stops with an error if that file is missing, then passes the
+seconds left until it. The time `build kci` took is therefore not taken from
+a wide change's build, and kci reports which units it did not build about 5
+minutes before GitHub would cancel the job (kci's own last seconds of
+writing its result, and the steps after kci, which take seconds, fall in
+those 5 minutes). `build kci` itself takes from seconds (a cached kci) to most
+of an hour (a change to kci or to what it depends on), so a fixed per-batch
+number either wasted the job's time or overran it. The welded test
+`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds `pr.yml` to these
+steps and numbers.
 
 Whatever the outcome, a `BUILT <unit>` line names exactly the units a
 successful run covered. The result document's `affected_by.units` is the set
@@ -974,6 +1008,69 @@ run is posted. Making it a required check, or switching coverage on in
 unbuilt: a coverage run or gate blocks only the package it measures from
 shipping, never the library or its dependents) and is the CEO's decision. Details:
 [The coverage workflow](../tools/build/coverage/README.md#the-coverage-workflow).
+
+## main_red.yml: the main red alert
+
+There is no merge queue: pull requests are checked one at a time and merged
+into `main`, and the release run of `kci.yml` builds each push to `main`. Two
+changes that are each green can still break `main` together. The rule is
+**fix forward or revert within the hour**: when the release run of `main`
+fails, the author of a culprit pull request lands a fix, or reverts the
+pull request, within an hour of the alert, before anything else merges on
+top of it.
+
+[`.github/workflows/main_red.yml`](../.github/workflows/main_red.yml) is the
+alert. It runs when a run of `kci.yml` on `main` completes (`workflow_run`)
+and runs [`release/ci/main_red.py`](../release/ci/main_red.py) with
+`issues: write`, `actions: read` and `contents: read`, checking out `main`
+and running no code of any pull request. It acts only on a run started by a
+push to `main`:
+
+- **Red** (`failure`, `timed_out`, `startup_failure`): the last green
+  commit is the newest commit of a successful push run of `kci.yml` on
+  `main` that is an ancestor of the red one; the culprits are the pull
+  requests merged into `main` after it (the first-parent commits of the
+  range, newest first); the failing targets are the `Action failed:`,
+  `GATED TEST FAILED:` and ``Validation for `<target>` failed`` lines of
+  the failed jobs' logs (with none, the failed job and step). If no issue
+  labelled `main-red` is open, it opens one titled `main red: <first
+  failing target>`; otherwise it comments on the open one. A red commit
+  that a later green run already contains (a re-run of an old run) is
+  left alone.
+- **Green** (`success`): every open `main-red` issue is closed with the
+  comment `Fixed: main is green at <commit> (run <url>)`, unless it records
+  a red head the green commit does not contain (a re-run of an older
+  commit went green). The recorded heads are the `Head:` lines of the
+  issue's body and of the workflow's own comments (`github-actions[bot]`);
+  no other comment counts, and a head the API cannot place on `main`'s
+  line is skipped.
+- **Cancelled or skipped**: nothing.
+
+The issue body, and each comment on a later red run, is one `Key: value`
+line per field, in this order, for tools that read it:
+
+```
+Run: <run url>
+Head: <full commit id>
+Last green: <full commit id, or none>
+Culprits: #N, #M            (or: Culprits: unknown)
+Failing: <target>           (one line per failing target)
+Log: <key log line>         (none, one or two lines)
+```
+
+**Nothing hides a red `main`.** `kci.yml`'s push runs share one
+concurrency group with `cancel-in-progress: false` ([Queued
+runs](#continuous-auto-promotion)): a running release is never cancelled,
+and a newer push replaces only a pending run, which never started. The run
+that replaces it builds a later commit of `main`, which carries the
+replaced one's changes, and the culprits come from the whole range since
+the last green commit, so the replaced commit's pull request is still
+named. `main_red.yml` has no concurrency group, so none of its runs is
+replaced or cancelled; if two red runs race to open the issue, the newer
+issue is closed as a duplicate of the older. One delay remains: a push
+that changes only `docs/**` or `*.md` files starts no `kci.yml` run (rule
+R17), so a README example it breaks is found by the next push's run, whose
+range names it. Cases: `//release/ci/tests:test_main_red`.
 
 ## merge-from-live (not yet running)
 

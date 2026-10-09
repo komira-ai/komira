@@ -14,6 +14,13 @@ uses. A pandas-shaped frontend emits these shapes:
   the column `amount`, output `n`. Both are an AGGREGATE under a SORT on the
   group key (ascending, nulls first), since a pandas `groupby` sorts its keys by
   default.
+- `df.groupby("cust_id", sort=...).agg({"amount": "sum"})`: SUM of
+  `amount`, output `amount`, under the same SORT on the group key when
+  `sort=True` (pandas' default) and with no SORT when `sort=False`. These two
+  are the pandas half of the cross-door check (`polars_plans` is the other).
+  The `sort=False` plan equals polars' `group_by` only because the key
+  `cust_id` is non-nullable (`orders_schema`): pandas' default `dropna=True`
+  drops a null group that polars keeps.
 - `read_csv(path)`: one SCAN whose source is the `komira.csv` binding the
   engine stamps, with `source_kind` left UNSET: the decoded scan takes ROW
   from the kind's declared orientation.
@@ -26,7 +33,7 @@ from std.memory import OwnedPointer
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT
+from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM
 from komira_plan_expr.expr import Expr
 from komira_plan_ir.logical_plan import (
     AggExprArray,
@@ -150,6 +157,28 @@ def groupby_count_col_plan() raises -> LogicalPlan:
     """`orders.groupby("cust_id").agg(n=("amount", "count"))`: `count(amount)`,
     output `n`."""
     return _grouped_count(Optional(Expr.col_ref("amount")), String("n"))
+
+
+def groupby_sum_plan(sort: Bool) raises -> LogicalPlan:
+    """`orders.groupby("cust_id", sort=sort).agg({"amount": "sum"})`: the
+    dict form keeps the input column's name as the output's."""
+    var keys = ExprArray()
+    keys.append(Expr.col_ref("cust_id"))
+    var sums = AggExprArray()
+    sums.append(
+        AggExpr(
+            AGG_SUM,
+            Optional(Expr.col_ref("amount")),
+            Optional(String("amount")),
+        )
+    )
+    var agg = LogicalPlan.aggregate(keys^, sums^, orders_scan())
+    if not sort:
+        return agg^
+    var sort_keys: List[String] = [String("cust_id")]
+    var desc: List[Bool] = [False]
+    var nf: List[Bool] = [True]
+    return LogicalPlan.sort(sort_keys^, desc^, agg^, Optional(nf^))
 
 
 def read_csv_plan() raises -> LogicalPlan:

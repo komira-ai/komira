@@ -1,0 +1,73 @@
+syntax = "proto3";
+package komira.chat.v1.corpus;
+
+import "komira/chat/v1/chat.proto";
+
+// Test only: one field per message of chat.proto, numbered in the order the
+// messages are declared there, so a single protoc fixture
+// (fixtures/corpus.txtpb and fixtures/corpus.canonical.hex) carries one value
+// of every message. Field k's bytes are the k-th message's encoding.
+message ChatCorpus {
+  komira.chat.v1.Subject subject = 1;
+  komira.chat.v1.User user = 2;
+  komira.chat.v1.Channel channel = 3;
+  komira.chat.v1.Member member = 4;
+  komira.chat.v1.Message message = 5;
+  komira.chat.v1.FileInfo file_info = 6;
+  komira.chat.v1.ReadState read_state = 7;
+  komira.chat.v1.HttpHeader http_header = 8;
+  komira.chat.v1.ApiError api_error = 9;
+  komira.chat.v1.GetMeRequest get_me_request = 10;
+  komira.chat.v1.GetMeResponse get_me_response = 11;
+  komira.chat.v1.GetUserRequest get_user_request = 12;
+  komira.chat.v1.GetUserResponse get_user_response = 13;
+  komira.chat.v1.ListUsersRequest list_users_request = 14;
+  komira.chat.v1.ListUsersResponse list_users_response = 15;
+  komira.chat.v1.CreateChannelRequest create_channel_request = 16;
+  komira.chat.v1.CreateChannelResponse create_channel_response = 17;
+  komira.chat.v1.GetChannelRequest get_channel_request = 18;
+  komira.chat.v1.GetChannelResponse get_channel_response = 19;
+  komira.chat.v1.ListChannelsRequest list_channels_request = 20;
+  komira.chat.v1.ListChannelsResponse list_channels_response = 21;
+  komira.chat.v1.UpdateChannelRequest update_channel_request = 22;
+  komira.chat.v1.UpdateChannelResponse update_channel_response = 23;
+  komira.chat.v1.JoinChannelRequest join_channel_request = 24;
+  komira.chat.v1.JoinChannelResponse join_channel_response = 25;
+  komira.chat.v1.LeaveChannelRequest leave_channel_request = 26;
+  komira.chat.v1.LeaveChannelResponse leave_channel_response = 27;
+  komira.chat.v1.AddMembersRequest add_members_request = 28;
+  komira.chat.v1.AddMembersResponse add_members_response = 29;
+  komira.chat.v1.RemoveMemberRequest remove_member_request = 30;
+  komira.chat.v1.RemoveMemberResponse remove_member_response = 31;
+  komira.chat.v1.ListMembersRequest list_members_request = 32;
+  komira.chat.v1.ListMembersResponse list_members_response = 33;
+  komira.chat.v1.OpenDmRequest open_dm_request = 34;
+  komira.chat.v1.OpenDmResponse open_dm_response = 35;
+  komira.chat.v1.SendMessageRequest send_message_request = 36;
+  komira.chat.v1.SendMessageResponse send_message_response = 37;
+  komira.chat.v1.EditMessageRequest edit_message_request = 38;
+  komira.chat.v1.EditMessageResponse edit_message_response = 39;
+  komira.chat.v1.DeleteMessageRequest delete_message_request = 40;
+  komira.chat.v1.DeleteMessageResponse delete_message_response = 41;
+  komira.chat.v1.ListMessagesRequest list_messages_request = 42;
+  komira.chat.v1.ListMessagesResponse list_messages_response = 43;
+  komira.chat.v1.ListThreadRequest list_thread_request = 44;
+  komira.chat.v1.ListThreadResponse list_thread_response = 45;
+  komira.chat.v1.ListMentionsRequest list_mentions_request = 46;
+  komira.chat.v1.ListMentionsResponse list_mentions_response = 47;
+  komira.chat.v1.MarkReadRequest mark_read_request = 48;
+  komira.chat.v1.MarkReadResponse mark_read_response = 49;
+  komira.chat.v1.SyncRequest sync_request = 50;
+  komira.chat.v1.ChannelSync channel_sync = 51;
+  komira.chat.v1.SyncResponse sync_response = 52;
+  komira.chat.v1.CreateUploadRequest create_upload_request = 53;
+  komira.chat.v1.CreateUploadResponse create_upload_response = 54;
+  komira.chat.v1.CompleteUploadRequest complete_upload_request = 55;
+  komira.chat.v1.CompleteUploadResponse complete_upload_response = 56;
+  komira.chat.v1.GetDownloadUrlRequest get_download_url_request = 57;
+  komira.chat.v1.GetDownloadUrlResponse get_download_url_response = 58;
+  komira.chat.v1.SearchMessagesRequest search_messages_request = 59;
+  komira.chat.v1.SearchMessagesResponse search_messages_response = 60;
+  komira.chat.v1.EraseSubjectRequest erase_subject_request = 61;
+  komira.chat.v1.EraseSubjectResponse erase_subject_response = 62;
+}

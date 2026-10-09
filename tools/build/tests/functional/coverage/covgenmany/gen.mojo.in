@@ -1,0 +1,5 @@
+# The template of covgenmany's twelve generated sources, which BUCK makes
+# (test 43): generated library sources, which a coverage run does not
+# measure, however many there are.
+def add_@N@(x: Int) -> Int:
+    return x + @V@

@@ -3,7 +3,10 @@
 #   script: the test double for buck2.
 # =============================================================================
 #
-# Each `ScriptedStep` expects one argv and answers with a `RunResult`. Before
+# Each `ScriptedStep` expects one argv and answers with a `RunResult`. Its
+# `elapsed_s` is how long the run "takes": answering it advances the
+# runner's clock (`now_ns`, starting at 0) by that much, whatever the run's
+# result, so a budget test is exact. Before
 # answering it writes the step's stdout and stderr text to the spec's files
 # and writes each of its `files` (relative paths resolve against the spec's
 # cwd, parent directories are created), which is how a test stands in for
@@ -62,6 +65,7 @@ struct ScriptedStep(Copyable, Movable):
     var stderr_text: String
     var file_paths: List[String]
     var file_texts: List[String]
+    var elapsed_ns: Int
 
     def __init__(
         out self,
@@ -70,6 +74,7 @@ struct ScriptedStep(Copyable, Movable):
         var stdout_text: String = String(""),
         var stderr_text: String = String(""),
         timed_out: Bool = False,
+        elapsed_s: Int = 0,
     ):
         self.argv = argv^
         self.result = RunResult(
@@ -77,6 +82,7 @@ struct ScriptedStep(Copyable, Movable):
             timed_out=timed_out,
             stderr_tail=tail_text(stderr_text, STDERR_TAIL_BYTES),
         )
+        self.elapsed_ns = elapsed_s * 1_000_000_000
         self.stdout_text = stdout_text^
         self.stderr_text = stderr_text^
         self.file_paths = List[String]()
@@ -114,11 +120,17 @@ struct ScriptedRunner(ProcessRunner):
     var steps: List[ScriptedStep]
     var next_step: Int
     var calls: List[RunSpec]
+    var clock_ns: Int
 
     def __init__(out self):
         self.steps = List[ScriptedStep]()
         self.next_step = 0
         self.calls = List[RunSpec]()
+        self.clock_ns = 0
+
+    def now_ns(self) -> Int:
+        """The scripted clock: 0, plus every answered step's `elapsed_s`."""
+        return self.clock_ns
 
     def expect(mut self, var step: ScriptedStep):
         self.steps.append(step^)
@@ -143,6 +155,7 @@ struct ScriptedRunner(ProcessRunner):
                 + _argv_text(step.argv)
             )
         self.next_step += 1
+        self.clock_ns += step.elapsed_ns
         for i in range(len(step.file_paths)):
             var p = step.file_paths[i].copy()
             if not p.startswith(String("/")) and spec.cwd.byte_length() > 0:

@@ -1,18 +1,32 @@
 """A plan's shape as text, and the wire bytes a fixture's encoding holds.
 
-`plan_shape` renders the plan arms the pandas door emits (SCAN, SORT, JOIN,
-AGGREGATE). It reads the `*Data` payloads directly because the plan's own
-render (`String(plan)`, which `structural_hash` folds) leaves fields out: it
-emits no output schema, and it omits a sort's `nulls_first` when it equals the
-placement derived from `descending`, which is exactly the
-`na_position="first"` case on an ascending key. It raises on a plan arm or an
-expression arm it does not render, so a door plan that grows a new node or
-expression cannot compare equal by omission.
+`plan_shape` renders the plan arms the pandas and polars doors emit (SCAN,
+FILTER, PROJECT, AGGREGATE, JOIN, SORT, LIMIT, PARTITION_BY). It reads the
+`*Data` payloads directly because the plan's own render (`String(plan)`, which
+`structural_hash` folds) leaves fields out. Among them: it emits no output
+schema; and it omits a sort key's `nulls_first` when it equals the derived
+placement (`derived_nulls_first`, NULLS LAST in both directions), which is
+pandas' `na_position="last"` and polars' `nulls_last=True`.
+
+The render's PARTITION_BY arm prints the partition keys, each order key with
+ASC or DESC (for the indices `descending` covers), and every function in full
+through `PartitionExpr.write_to`: its name, column, offset, the default value
+when `has_default` is set, the frame's five fields, and the alias when it is
+non-empty. `plan_shape` adds, per function, `has_default` itself and the
+default value even when `has_default` is false, read through `literal_shape`
+(every slot it compares, where the render prints only the slots the value's
+kind selects); and it prints `descending` whole, including any entry past the
+last order key.
+
+It raises on a plan arm or an expression arm it does not render, so a door
+plan that grows a new node or expression cannot compare equal by omission.
 
 What it compares:
-- SORT and JOIN: every payload field.
+- FILTER, PROJECT, SORT, LIMIT, JOIN and PARTITION_BY: every payload field,
+  with a FILTER's or a PROJECT's `udf` compared as set or unset only.
 - AGGREGATE: every payload field, with `udf` and `group_topk` compared as
   set or unset only.
+- A partition function: all seven fields, the frame's five included.
 - SCAN: the source, `source_path`, `source_type`, `schema`, `projection`,
   `filter`, `row_count`, whether `table_stats` is set, `source_kind`.
 - A binding-backed source: every carried field of its `ScanBinding`, with
@@ -22,9 +36,15 @@ What it compares:
   precision and scale, time zone, dictionary index type, flags, union type
   ids, children; the field's metadata by count only (`Field` publishes no
   key list).
-- Expressions: column references (name and side).
+- Expressions: column references (name and side); literals (the int, float,
+  string and bool payloads, the kind predicates, the dtype, the null dtype
+  and the time unit); binary operators (op, division intent, both operands);
+  unary operators; aliases; CASE (each case's condition and result, in order,
+  and the ELSE).
 
 What it does not compare, and why:
+- A literal's decimal, date, timestamp, interval and 256-bit slots: no door
+  plan carries a literal of those kinds.
 - A non-binding source (the parquet leaves) is compared only through what
   `SourceVariant` publishes: kind name, fingerprint, structural id and schema.
   `ParquetSource.fingerprint()` folds the paths, the mtime and the partition
@@ -44,11 +64,25 @@ whitespace ignored).
 
 from komira_arrow.schema import Field, Schema
 from komira_plan_expr.agg_expr import AggExpr
-from komira_plan_expr.expr import Expr, EXPR_COL_REF
+from komira_plan_expr.expr import (
+    Expr,
+    EXPR_ALIAS,
+    EXPR_BINARY_OP,
+    EXPR_COL_REF,
+    EXPR_LITERAL,
+    EXPR_UNARY_OP,
+    EXPR_WHEN,
+)
+from komira_plan_expr.partition_expr import PartitionExpr
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_AGGREGATE,
+    PLAN_FILTER,
     PLAN_JOIN,
+    PLAN_LIMIT,
+    PLAN_PARTITION_BY,
+    PLAN_PROJECT,
     PLAN_SCAN,
     PLAN_SORT,
 )
@@ -121,16 +155,60 @@ def schema_shape(s: Schema) raises -> String:
     return out^
 
 
+def literal_shape(v: ScalarValue) -> String:
+    """The payload slots the doors' literals use (int, float, string, bool),
+    each beside its kind predicate, and the slots that type the value."""
+    return (
+        String("lit(int=") + _b(v.is_int()) + ":" + String(v.int_val)
+        + " float=" + _b(v.is_float()) + ":" + String(v.float_val)
+        + " str=" + _b(v.is_string()) + ":" + v.string_val
+        + " bool=" + _b(v.is_bool()) + ":" + _b(v.bool_val)
+        + " null=" + _b(v.is_null())
+        + " dtype=" + String(v.dtype)
+        + " null_dtype=" + String(v.null_dtype)
+        + " time_unit=" + String(Int(v.time_unit)) + ")"
+    )
+
+
 def expr_shape(e: Expr) raises -> String:
-    """The door's expressions are column references; anything else raises."""
+    """The doors' expression arms; anything else raises."""
     if e.tag == EXPR_COL_REF:
         return (
             String("col(") + e.col_ref_name() + ",side="
             + String(Int(e.col_ref_side())) + ")"
         )
+    if e.tag == EXPR_LITERAL:
+        return literal_shape(e.literal_value())
+    if e.tag == EXPR_BINARY_OP:
+        return (
+            String("bin(op=") + String(Int(e.binary_op()))
+            + " intent=" + String(Int(e.binary_division_intent()))
+            + " " + expr_shape(e.binary_left_ref())
+            + " " + expr_shape(e.binary_right_ref()) + ")"
+        )
+    if e.tag == EXPR_UNARY_OP:
+        return (
+            String("un(op=") + String(Int(e.unary_op())) + " "
+            + expr_shape(e.unary_child_ref()) + ")"
+        )
+    if e.tag == EXPR_ALIAS:
+        return (
+            String("alias(") + e.alias_name() + " "
+            + expr_shape(e.alias_child_ref()) + ")"
+        )
+    if e.tag == EXPR_WHEN:
+        var out = String("case(")
+        for i in range(e.when_num_cases()):
+            out += (
+                "when " + expr_shape(e.when_case_condition_ref(i))
+                + " then " + expr_shape(e.when_case_result_ref(i)) + " "
+            )
+        out += "else " + expr_shape(e.when_default_ref()) + ")"
+        return out^
     raise Error(
         "plan_shape: expression tag " + String(Int(e.tag))
-        + " is not one the pandas door emits; render it before comparing"
+        + " is not one the pandas or polars door emits; render it before"
+        + " comparing"
     )
 
 
@@ -152,6 +230,22 @@ def agg_shape(a: AggExpr) raises -> String:
         + " child2=" + _opt_expr_shape(a.child2)
         + " child3=" + _opt_expr_shape(a.child3)
         + " alias=" + alias_txt + ")"
+    )
+
+
+def partition_expr_shape(x: PartitionExpr) -> String:
+    """All seven fields of a partition function, the frame's five included."""
+    ref f = x.frame
+    return (
+        String("PX(func=") + String(Int(x.func))
+        + " column=" + x.column
+        + " offset=" + String(x.offset)
+        + " default=" + literal_shape(x.default_value)
+        + " has_default=" + _b(x.has_default)
+        + " frame=" + String(Int(f.units)) + ","
+        + String(Int(f.start_tag)) + "," + String(f.start_offset) + ","
+        + String(Int(f.end_tag)) + "," + String(f.end_offset)
+        + " alias=" + x.alias_name + ")"
     )
 
 
@@ -240,12 +334,54 @@ def plan_shape(p: LogicalPlan) raises -> String:
             + " table_stats=" + _b(d.table_stats.__bool__())
             + " source_kind=" + String(Int(d.source_kind)) + "]"
         )
+    if p.tag == PLAN_FILTER:
+        ref d = p.filter_data_ref()
+        return (
+            head + "FILTER predicate=" + expr_shape(d.predicate)
+            + " udf=" + _b(d.udf.__bool__())
+            + " child=" + plan_shape(d.child[]) + "]"
+        )
+    if p.tag == PLAN_PROJECT:
+        ref d = p.project_data_ref()
+        var ex = String("[")
+        for i in range(len(d.exprs)):
+            if i > 0:
+                ex += " "
+            ex += expr_shape(d.exprs[i])
+        ex += "]"
+        return (
+            head + "PROJECT exprs=" + ex
+            + " cse=" + _b(d.is_cse_introduced)
+            + " udf=" + _b(d.udf.__bool__())
+            + " child=" + plan_shape(d.child[]) + "]"
+        )
     if p.tag == PLAN_SORT:
         ref d = p.sort_data_ref()
         return (
             head + "SORT keys=" + _strs(d.keys)
             + " descending=" + _bools(d.descending)
             + " nulls_first=" + _bools(d.nulls_first)
+            + " child=" + plan_shape(d.child[]) + "]"
+        )
+    if p.tag == PLAN_LIMIT:
+        ref d = p.limit_data_ref()
+        return (
+            head + "LIMIT n=" + String(d.n) + " offset=" + String(d.offset)
+            + " child=" + plan_shape(d.child[]) + "]"
+        )
+    if p.tag == PLAN_PARTITION_BY:
+        ref d = p.partition_by_data_ref()
+        var px = String("[")
+        for i in range(len(d.partition_exprs)):
+            if i > 0:
+                px += " "
+            px += partition_expr_shape(d.partition_exprs[i])
+        px += "]"
+        return (
+            head + "PARTITION_BY keys=" + _strs(d.partition_keys)
+            + " order=" + _strs(d.order_keys)
+            + " descending=" + _bools(d.descending)
+            + " exprs=" + px
             + " child=" + plan_shape(d.child[]) + "]"
         )
     if p.tag == PLAN_JOIN:
@@ -288,7 +424,8 @@ def plan_shape(p: LogicalPlan) raises -> String:
         )
     raise Error(
         "plan_shape: plan tag " + String(Int(p.tag))
-        + " is not one the pandas door emits; render it before comparing"
+        + " is not one the pandas or polars door emits; render it before"
+        + " comparing"
     )
 
 
@@ -321,4 +458,16 @@ def wire_bytes_from_hex(text: String) raises -> List[UInt8]:
     var out = List[UInt8]()
     for i in range(0, len(nibbles), 2):
         out.append((nibbles[i] << 4) | nibbles[i + 1])
+    return out^
+
+
+def bytes_hex(b: List[UInt8]) -> String:
+    """Lower-case hex of `b`, two digits per byte: an encoding as a string, so
+    two encodings compare with `assert_equal` and a difference is printed."""
+    var digits = String("0123456789abcdef")
+    var d = digits.as_bytes()
+    var out = String("")
+    for i in range(len(b)):
+        out += chr(Int(d[Int(b[i] >> 4)]))
+        out += chr(Int(d[Int(b[i] & 15)]))
     return out^

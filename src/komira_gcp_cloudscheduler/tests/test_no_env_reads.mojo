@@ -8,9 +8,9 @@
 # source, the host); credentials come from the GcpTokenSource a caller
 # passes.
 #
-# Scope: CreateJob, GetJob, UpdateJob and DeleteJob. The service's other
-# methods (ListJobs, PauseJob, ResumeJob, RunJob) are not in the generated
-# code.
+# Scope: CreateJob, GetJob, ListJobs, UpdateJob and DeleteJob. The
+# service's other methods (PauseJob, ResumeJob, RunJob) are not in the
+# generated code.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -73,11 +73,9 @@ def test_no_environment_read() raises:
 
 def test_only_the_used_methods_are_generated() raises:
     var absent: List[String] = [
-        "def list_jobs[",
         "def pause_job[",
         "def resume_job[",
         "def run_job[",
-        "struct ListJobsRequest(",
         "struct PauseJobRequest(",
         "struct ResumeJobRequest(",
         "struct RunJobRequest(",
@@ -104,6 +102,7 @@ def test_the_scan_saw_the_client() raises:
     var present: List[String] = [
         "    def create_job[RT: Runtime](",
         "    def get_job[RT: Runtime](",
+        "    def list_jobs[RT: Runtime](",
         "    def update_job[RT: Runtime](",
         "    def delete_job[RT: Runtime](",
     ]

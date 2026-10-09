@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §2.1 skips NULL inputs: k = 1 sums 10, the NULL-k group 5 + 7 =
+# 12 (§2.4); k = 2 has no non-NULL v, so its SUM is NULL, not 0 (§2.2).
+# Types: SUM of INT64 is INT64 (§8.1), nullable because a group with no
+# non-NULL input answers NULL (§2.2).
+k:int64?	s:int64?
+1	10
+\N	12
+2	\N

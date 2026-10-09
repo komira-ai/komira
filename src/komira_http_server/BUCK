@@ -24,9 +24,16 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_L0_accept_loop_rounds.mojo",
+        "tests/test_L0_accept_loop_tls.mojo",
         "tests/test_L0_transport_basic.mojo",
         "tests/test_L2_codec_header_limits.mojo",
         "tests/test_L2_h2_hostile_frames.mojo",
+        "tests/test_L2_h2_serve_emit.mojo",
+        "tests/test_L2_h2_serve_flow_control.mojo",
+        "tests/test_L2_h2_serve_frames.mojo",
+        "tests/test_L2_h2_serve_read_round.mojo",
+        "tests/test_L2_h2_serve_requests.mojo",
         "tests/test_L2_h2_side_tables_regression.mojo",
         "tests/test_L3_chain_composition.mojo",
         "tests/test_L3_cors.mojo",
@@ -51,10 +58,20 @@ mojo_library(
         "tests/test_gcp_cloud_run_serve_stack.mojo",
         "tests/test_middleware_in_dispatch_path.mojo",
         "tests/test_no_product_vocabulary.mojo",
+        "tests/test_presented_credential.mojo",
         "tests/test_route_pack.mojo",
         "tests/test_serverless_entry.mojo",
     ],
+    test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
     test_data = {
+        "tests/test_L0_accept_loop_tls.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+        },
+        "tests/test_L2_h2_serve_read_round.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+        },
         "tests/test_L3_metrics_sink.mojo": {
             "src/komira_http_server/middleware/metrics.mojo": "middleware/metrics.mojo",
         },

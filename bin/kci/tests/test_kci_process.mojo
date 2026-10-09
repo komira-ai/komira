@@ -27,7 +27,8 @@
 #
 #   (a) an unknown flag: exit 2 (EXIT_USAGE), the usage text, the flag named
 #       and `kci: REFUSED (exit 2)` on stderr; the result file FINISHED
-#       REFUSED KCI-E-USAGE; the summary block of a refused command line.
+#       REFUSED KCI-E-USAGE with the refusal as its message, exactly; the
+#       summary block of a refused command line, byte for byte.
 #   (b) `--plan` of a PUBLISH to a PRIVATE API-token channel, no token
 #       (--secret-store none): exit 4 (EXIT_FAILED); the result file FINISHED
 #       FAILED KCI-E-CREDENTIAL, no artifact row; stderr names the secret.
@@ -258,13 +259,15 @@ def test_a_bad_command_line_is_exit_2() raises:
     assert_equal(res.outcome, String("REFUSED"))
     assert_equal(res.exit_code, EXIT_USAGE)
     assert_equal(res.error.id, String(ERROR_USAGE))
+    # the stored message is the refusal as is: the one `kci: ` is stderr's
+    assert_equal(res.error.message, said)
     _retry_is_default(res)
-    var summary = Path(root + String("/summary.md")).read_text()
-    assert_true(
-        summary.startswith(String("## kci: REFUSED (exit ") + String(EXIT_USAGE) + String(")\n\nThe command line was refused: ")),
-        summary,
+    # the whole block, byte for byte: no `kci: ` before the refusal
+    assert_equal(
+        Path(root + String("/summary.md")).read_text(),
+        String("## kci: REFUSED (exit ") + String(EXIT_USAGE) + String(")\n\nThe command line was refused: ") + said
+        + String("\n\n"),
     )
-    _has(summary, said)
     assert_false(exists(root + String("/git.calls")))
 
 

@@ -204,20 +204,22 @@ def _root(ctx):
     remap = [cmd_args(d, format = "--remap-path-prefix={}=" + ctx.label.cell + "/" + ctx.label.package)]
     return d.project(roots[0].short_path), [d], remap
 
-def _compile(ctx, crate_type, out):
-    tc = ctx.attrs.toolchain[RustToolchainInfo]
-    root, hidden, remap = _root(ctx)
-    crate = _crate_name(ctx)
+def _externs(deps):
+    """(--extern args of `deps`, their library closure without duplicates)."""
     externs = []
     closure = []
     seen = {}
-    for d in ctx.attrs.deps:
+    for d in deps:
         info = d[RustCrateInfo]
         externs.append(cmd_args(info.lib, format = "--extern=" + info.crate_name + "={}"))
         for lib in info.closure:
             if lib not in seen:
                 seen[lib] = True
                 closure.append(lib)
+    return externs, closure
+
+def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metadata, out, identifier):
+    tc = ctx.attrs.toolchain[RustToolchainInfo]
     rustc_args = cmd_args(
         "--crate-name=" + crate,
         # `test`: a libtest harness over the crate's #[test] functions.
@@ -227,7 +229,7 @@ def _compile(ctx, crate_type, out):
         "-Cdebuginfo=0",
         "-Cstrip=debuginfo",
         # Distinguishes symbols of two crates with the same name.
-        "-Cmetadata=" + str(ctx.label.raw_target()).replace(":", "_").replace("/", "_"),
+        "-Cmetadata=" + metadata,
         ["--cfg=feature=\"{}\"".format(f) for f in ctx.attrs.features],
         ["--cfg=" + c for c in ctx.attrs.cfgs],
         ["--cap-lints=allow"] if ctx.attrs.cap_lints else [],
@@ -254,8 +256,18 @@ def _compile(ctx, crate_type, out):
             rustc_args,
         ),
         category = "rustc",
-        identifier = crate,
+        identifier = identifier,
     )
+
+def _metadata(ctx):
+    return str(ctx.label.raw_target()).replace(":", "_").replace("/", "_")
+
+def _compile(ctx, crate_type, out):
+    """Compiles the target's own crate to `out`; returns its deps' closure."""
+    root, hidden, remap = _root(ctx)
+    externs, closure = _externs(ctx.attrs.deps)
+    crate = _crate_name(ctx)
+    _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, _metadata(ctx), out, crate)
     return closure
 
 _COMMON_ATTRS = {
@@ -292,12 +304,20 @@ _COMMON_ATTRS = {
 #
 # A crate's inline #[test]s are its unit tests: a rust_test over the SAME
 # `srcs` and `crate_root`, which does not depend on the library, gates it. A
-# test that depends on the library cannot gate that library (buck2 refuses the
-# cycle); it gates a binary that depends on it.
+# rust_test that depends on the library cannot gate that library (buck2
+# refuses the cycle). A library's external tests (`tests/*.rs`, Cargo's
+# integration tests) are `test_srcs` instead: compiled inside rust_library
+# against the UNGATED rlib, as mojo_library compiles its test_srcs against
+# the ungated package, and run by the same runner; their markers join the
+# gate with those of `tests`.
 
-def _gate(ctx, tc, ungated, public):
-    """Publishes `ungated` as `public` once every marker of `tests` exists."""
-    markers = [t[RustTestInfo].marker for t in ctx.attrs.welded_tests]
+_DEFAULT_TEST_TIMEOUT_S = 600
+
+def _runner(tc, label, exe, marker_arg, timeout_s):
+    return cmd_args(tc.busybox, "sh", tc.test_runner, tc.busybox, label, exe, marker_arg, str(timeout_s))
+
+def _gate(ctx, tc, ungated, public, markers):
+    """Publishes `ungated` as `public` once every marker in `markers` exists."""
     ctx.actions.run(
         cmd_args(tc.busybox, "cp", ungated, public.as_output(), hidden = markers),
         category = "rust_gate_join",
@@ -316,16 +336,7 @@ def _test_impl(ctx):
         fail("{}: test_timeout_s must be at least 1, not {}".format(ctx.label.raw_target(), ctx.attrs.test_timeout_s))
 
     def runner(marker_arg):
-        return cmd_args(
-            tc.busybox,
-            "sh",
-            tc.test_runner,
-            tc.busybox,
-            str(ctx.label.raw_target()),
-            exe,
-            marker_arg,
-            str(ctx.attrs.test_timeout_s),
-        )
+        return _runner(tc, str(ctx.label.raw_target()), exe, marker_arg, ctx.attrs.test_timeout_s)
 
     ctx.actions.run(runner(marker.as_output()), category = "rust_gated_test", identifier = ctx.label.name)
     return [
@@ -346,7 +357,7 @@ rust_test_rule = rule(
         "labels": attrs.list(attrs.string(), default = []),
         # Each harness invocation (the list, then the run) is killed after
         # this many seconds, and the run is NO VERDICT (exit 142).
-        "test_timeout_s": attrs.int(default = 600),
+        "test_timeout_s": attrs.int(default = _DEFAULT_TEST_TIMEOUT_S),
     },
 )
 
@@ -355,6 +366,57 @@ _WELD_ATTRS = {
     "welded_tests": attrs.list(attrs.dep(providers = [RustTestInfo]), default = []),
 }
 
+def _test_src_roots(ctx):
+    """The `test_srcs` that are test crates: `tests/<name>.rs`, as Cargo has it.
+
+    Any other file of `test_srcs` must sit under `tests/` (a module such as
+    `tests/common/mod.rs`, reached by `mod common;`) and is not a crate.
+    """
+    roots = []
+    for s in ctx.attrs.test_srcs:
+        p = s.short_path
+        if not p.startswith("tests/"):
+            fail("{}: test_srcs `{}` is not under tests/".format(ctx.label.raw_target(), p))
+        rest = p[len("tests/"):]
+        if "/" in rest:
+            continue
+        if not rest.endswith(".rs"):
+            fail("{}: test_srcs `{}` is not a .rs file".format(ctx.label.raw_target(), p))
+        name = rest[:-len(".rs")].replace("-", "_")
+        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
+            fail("{}: test_srcs `{}` does not name a Rust identifier".format(ctx.label.raw_target(), p))
+        roots.append((s, name))
+    if not roots:
+        fail("{}: test_srcs has no test crate (a file tests/<name>.rs)".format(ctx.label.raw_target()))
+    return roots
+
+def _external_tests(ctx, tc, crate, ungated, deps_closure):
+    """Compiles and runs each `test_srcs` crate against `ungated`; returns the markers.
+
+    A test crate sees the library and the library's `deps`, as a Cargo
+    integration test does, and the library's features, cfgs and flags.
+    """
+    d = ctx.actions.copied_dir("__test_srcs__", {s.short_path: s for s in ctx.attrs.test_srcs})
+    remap = [cmd_args(d, format = "--remap-path-prefix={}=" + ctx.label.cell + "/" + ctx.label.package)]
+    externs, _ = _externs(ctx.attrs.deps)
+    externs = externs + [cmd_args(ungated, format = "--extern=" + crate + "={}")]
+    closure = [ungated] + deps_closure
+    label = str(ctx.label.raw_target())
+    markers = []
+    for src, name in _test_src_roots(ctx):
+        exe = ctx.actions.declare_output("test_srcs/bin/" + name)
+        ident = "test_srcs/" + name
+        metadata = _metadata(ctx) + "_test_srcs_" + name
+        _rustc(ctx, name, "test", d.project(src.short_path), [d], remap, externs, closure, metadata, exe, ident)
+        marker = ctx.actions.declare_output("test_srcs/" + name + ".passed")
+        ctx.actions.run(
+            _runner(tc, label + " " + src.short_path, exe, marker.as_output(), _DEFAULT_TEST_TIMEOUT_S),
+            category = "rust_gated_test",
+            identifier = ident,
+        )
+        markers.append(marker)
+    return markers
+
 def _library_impl(ctx):
     tc = ctx.attrs.toolchain[RustToolchainInfo]
     crate = _crate_name(ctx)
@@ -362,11 +424,14 @@ def _library_impl(ctx):
     path = "{}/lib{}.{}".format(crate, crate, ext)
     lib = ctx.actions.declare_output(path)
     sub_targets = {}
-    if ctx.attrs.welded_tests:
+    if ctx.attrs.welded_tests or ctx.attrs.test_srcs:
         # Alone in its own directory too: -Ldependency names a library's directory.
         ungated = ctx.actions.declare_output("ungated/" + path)
         deps_closure = _compile(ctx, "proc-macro" if ctx.attrs.proc_macro else "rlib", ungated)
-        sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, lib))
+        markers = [t[RustTestInfo].marker for t in ctx.attrs.welded_tests]
+        if ctx.attrs.test_srcs:
+            markers += _external_tests(ctx, tc, crate, ungated, deps_closure)
+        sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, lib, markers))
     else:
         deps_closure = _compile(ctx, "proc-macro" if ctx.attrs.proc_macro else "rlib", lib)
     return [
@@ -382,6 +447,10 @@ rust_library_rule = rule(
     impl = _library_impl,
     attrs = _COMMON_ATTRS | _WELD_ATTRS | {
         "proc_macro": attrs.bool(default = False),
+        # External tests: each `tests/<name>.rs` is a test crate compiled
+        # against the ungated library and run; the library is published
+        # behind them. Other files under tests/ are modules they use.
+        "test_srcs": attrs.list(attrs.source(), default = []),
     },
 )
 
@@ -392,7 +461,8 @@ def _binary_impl(ctx):
     if ctx.attrs.welded_tests:
         ungated = ctx.actions.declare_output("ungated/" + ctx.label.name)
         _compile(ctx, "bin", ungated)
-        sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, exe))
+        markers = [t[RustTestInfo].marker for t in ctx.attrs.welded_tests]
+        sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, exe, markers))
     else:
         _compile(ctx, "bin", exe)
     if ctx.attrs.expected_stdout != None:

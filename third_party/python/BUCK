@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load("@komira//tools/build/python:defs.bzl", "python_dist", "python_wheel")
-load(":pins.bzl", "PYTHON", "WHEELS")
+load(":pins.bzl", "PYTHON", "PYTHON_314", "PYTHON_314T", "WHEELS", "WHEELS_314")
 
 # The hermetic Python of the tests (README.md): CPython from a
 # python-build-standalone archive and a closure of binary wheels, every file
@@ -12,7 +12,12 @@ load(":pins.bzl", "PYTHON", "WHEELS")
 # visible only to the test-only packages listed in _TEST_ONLY, and a py_test
 # hands its dependents nothing but its pass marker (README.md, Never shipped).
 # A new consumer is a new line here.
-_TEST_ONLY = ["komira//src/tests/helpers/komira_test_python/..."]
+_TEST_ONLY = [
+    "komira//src/tests/e2e/komira_tls_interop_e2e/...",
+    "komira//src/tests/helpers/komira_test_python/...",
+    # The tests of the CI scripts under release/ci (a py_test alone).
+    "komira//release/ci/tests:",
+]
 
 pinned_file(
     name = PYTHON["archive"],
@@ -36,6 +41,8 @@ pinned_file(**pinned_kwargs("linux-x86_64", "libzlib"))
 conda_libs(
     name = "native_libs",
     exec_compatible_with = LINUX_X86_64,
+    # A test that starts a child interpreter loads them in the child too.
+    visibility = _TEST_ONLY,
     libs = {
         "lib/libgcc_s.so.1": ":" + pinned_kwargs("linux-x86_64", "libgcc")["name"],
         "lib/libstdc++.so.6": ":" + pinned_kwargs("linux-x86_64", "libstdcxx")["name"],
@@ -74,3 +81,47 @@ python_dist(
     deps = [":" + d for d in w["deps"]],
     visibility = _TEST_ONLY,
 ) for w in WHEELS]
+
+# CPython 3.14, with the GIL and free-threaded, each with its own closure
+# (pins.bzl, WHEELS_314): `:cpython314` and `:cpython314t`, and one target per
+# distribution and interpreter, named `<distribution>-<abi>` (`:numpy-cp314t`).
+# A pure-Python wheel is downloaded once and installed for each interpreter.
+_WHEEL_FILES = [w["file"] for w in WHEELS]
+
+[pinned_file(
+    name = p["archive"],
+    url = p["url"],
+    sha256 = p["sha256"],
+    size_bytes = p["size"],
+) for p in [PYTHON_314, PYTHON_314T]]
+
+[python_dist(
+    name = p["name"],
+    archive = ":" + p["archive"],
+    freethreaded = p["freethreaded"],
+    native_libs = ":native_libs",
+    preload = [
+        "lib/libgcc_s.so.1",
+        "lib/libstdc++.so.6",
+        "lib/libz.so.1",
+    ],
+    version = p["version"],
+    visibility = _TEST_ONLY,
+) for p in [PYTHON_314, PYTHON_314T]]
+
+[pinned_file(
+    name = f,
+    url = w["url"],
+    sha256 = w["sha256"],
+    size_bytes = w["size"],
+) for f, w in {w["file"]: w for ws in WHEELS_314.values() for w in ws if w["file"] not in _WHEEL_FILES}.items()]
+
+[python_wheel(
+    name = w["name"] + "-" + p["abi"],
+    distribution = w["name"],
+    version = w["version"],
+    wheel = ":" + w["file"],
+    python = ":" + p["name"],
+    deps = [":" + d + "-" + p["abi"] for d in w["deps"]],
+    visibility = _TEST_ONLY,
+) for p in [PYTHON_314, PYTHON_314T] for w in WHEELS_314[p["abi"]]]

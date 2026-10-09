@@ -7,7 +7,8 @@
 #     its --member-manifest libraries in order, and its --license, --summary
 #     and --home are the lines here;
 #   release_set_check's stamp check: its `libs`, its metapackage and the
-#     --license, --summary and --home it gives conda-meta are the lines here.
+#     --license, --summary and --home it gives conda-meta are the lines here,
+#     and no member's package requires a member listed after it.
 # A library added to the release set is added here too, or both are red.
 metapackage komira_all
 member komira_encoding

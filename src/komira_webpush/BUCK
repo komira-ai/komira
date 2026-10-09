@@ -1,0 +1,44 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Web Push message encryption: the "aes128gcm" HTTP content coding (RFC 8188)
+# and Web Push's key derivation on P-256 ECDH (RFC 8291), over komira_crypto's
+# p256_ecdh, HKDF-SHA-256 and AES-128-GCM. Sending a message (RFC 8030, VAPID)
+# is not here.
+#
+# Welded tests:
+#   test_rfc8291_vector      the RFC 8291 section 5 example and its appendix A
+#                            intermediate values byte for byte (fixed salt and
+#                            sender key through a WebPushRandomness conformer),
+#                            and the user agent decrypting the example body.
+#   test_rfc8188_vectors     RFC 8188 section 3.1 (keys, body byte for byte,
+#                            decrypt) and 3.2 (two records, keyid "a1").
+#   test_webpush_round_trip  two encryptions over the system CSPRNG differ in
+#                            salt, sender key and ciphertext and both decrypt;
+#                            header shape; 3993 and 0 bytes of plaintext.
+#   test_refusals            the malformed inputs it lists refused with their
+#                            exact messages (header, record, delimiter, key
+#                            sizes, off-curve points, scalar range, record
+#                            count) and the accepting side of each limit
+#                            (rs and keyid length checked on the header and
+#                            the decryption, scalar 1 and n - 1, 257
+#                            records); a salt-source error re-raised by
+#                            webpush_encrypt_with, not an empty body.
+#   test_key_seams           the sender-key draw skips n and 0, wipes each
+#                            refused candidate and refuses after 8 draws;
+#                            an all-zero derived point is refused.
+mojo_library(
+    name = "komira_webpush",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+    ],
+    test_srcs = [
+        "tests/test_rfc8291_vector.mojo",
+        "tests/test_rfc8188_vectors.mojo",
+        "tests/test_webpush_round_trip.mojo",
+        "tests/test_refusals.mojo",
+        "tests/test_key_seams.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

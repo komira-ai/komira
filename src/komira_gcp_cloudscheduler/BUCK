@@ -12,7 +12,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # with its declaration: read the job (GetJob; NOT_FOUND means absent),
 # create it (CreateJob), converge it in place (UpdateJob, PATCH
 # /v1/{job.name=...} with an update mask naming the fields stated), and
-# delete it (DeleteJob). The service's other methods are not generated. A
+# delete it (DeleteJob); and list a location's jobs (ListJobs), to find the
+# jobs a deployment owns by their description. The service's other methods are not generated. A
 # method joins the list with its own rows in the tests below. None of them
 # returns a long-running operation, and none has a request-id field.
 #
@@ -32,7 +33,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # body byte for byte, the update mask as a query parameter, an UpdateJob
 # with no job refused before the token is asked, and each response
 # decoded), test_cloudscheduler_errors (one google.rpc.Status envelope per
-# method mapped to its code, the body never quoted),
+# create, get, update and delete mapped to its code, the body never quoted;
+# the mapping is generator code every method shares),
 # test_cloudscheduler_endpoint (the default host read without sending, an
 # override dialled) and test_no_env_reads (no generated module reads the
 # environment, and only the methods above are generated).
@@ -51,6 +53,7 @@ mojo_gcp_client(
         "CloudScheduler.CreateJob",
         "CloudScheduler.DeleteJob",
         "CloudScheduler.GetJob",
+        "CloudScheduler.ListJobs",
         "CloudScheduler.UpdateJob",
     ],
     proto_deps = ["//tools/vendor/googleapis:cloudscheduler_v1"],

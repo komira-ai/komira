@@ -7,18 +7,22 @@ through komira_http_client's `HttpClient` over the komira_http_core
 komira_gcp_core `GcpTokenSource`, and raises a non-2xx answer through
 komira_gcp_core's `gcp_status_error`. It reads no environment.
 
-Five methods are generated: CreateRepository, GetRepository,
-DeleteRepository, ListRepositories and GetFile (a file's size and hashes).
-Not generated: the IAM policy methods, Docker images, packages, versions,
-tags, rules, settings, the file listing, and the operation poll:
+Seven methods are generated: CreateRepository, GetRepository,
+DeleteRepository, ListRepositories, GetFile (a file's size and hashes), and
+GetIamPolicy and SetIamPolicy on a repository (a read-modify-write that
+carries the etag it read; GetIamPolicy asks for its policy version in the
+query as `options.requestedPolicyVersion`). Not generated:
+TestIamPermissions, Docker images, packages, versions, tags, rules,
+settings, the file listing, and the operation poll:
 CreateRepository and DeleteRepository answer a google.longrunning
 `Operation`, and this package cannot follow it. The client starts at
 `artifactregistry.googleapis.com`; a regional endpoint is named with
 `set_rest_host`.
 
 The client is in `komira_gcp_artifactregistry.service`, the repository
-messages in `.repository`, the file messages in `.file` and `Operation` in
-`.operations`.
+messages in `.repository`, the file messages in `.file`, `Operation` in
+`.operations`, the policy requests in `.iam_policy` and `Policy` in
+`.policy`.
 
 ## Examples
 

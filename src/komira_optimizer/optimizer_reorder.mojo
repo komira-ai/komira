@@ -759,7 +759,7 @@ def _max_ndv_across_keys(
         if dc > best:
             best = dc
     if best <= 0:
-        return None
+        return None  # cov: unreachable key_names is non-empty and every dc is above 0, so best is above 0
     return Optional[Int](best)
 
 

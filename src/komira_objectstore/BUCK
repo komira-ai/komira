@@ -9,7 +9,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # signing seam. (The distributed shuffle lives in `komira_shuffle`, which depends
 # on this package.) It depends on the core packages, komira_async
 # (the reactor and its C shim, which also carries the CAS-manifest gate lock),
-# komira_atomic_alias and komira_metrics (the escalation metrics sink).
+# komira_atomic_alias, komira_metrics (the escalation metrics sink) and
+# komira_counters (cas_backoff_probe: the CAS append's backoff draws, counted
+# so a contention test can check them).
 # komira_runtime_paths is declared because several tests take their scratch
 # directory from `test_tmpdir()`.
 
@@ -38,6 +40,7 @@ mojo_library(
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
         "//src/komira_fs:komira_fs_posix",
         "//src/komira_libc:komira_libc",
         "//src/komira_metrics:komira_metrics",

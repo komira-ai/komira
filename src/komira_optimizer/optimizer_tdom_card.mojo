@@ -746,7 +746,7 @@ def _is_cross_product_shaped_subset(
     # find(members[0])
     var root0 = members[0]
     while parent[root0] != root0:
-        root0 = parent[root0]
+        root0 = parent[root0]  # cov: unreachable members[0] is the least member id and union keeps the lesser root, so it is a root
     for k in range(1, len(members)):
         var rk = members[k]
         while parent[rk] != rk:

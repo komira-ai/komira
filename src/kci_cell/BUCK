@@ -1,0 +1,38 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Cells. A cell is one closed world a DEPLOY step deploys into: a name, one
+# cloud, the settings that cloud's adapter reads (kci does not interpret
+# them) and the bootstrap level the operator wrote. Every cell is defined
+# once, in one cells file (format `kci.cells`), so one parser sees all of
+# them and can refuse what no single cell can see: two cells with one name.
+#
+# The deps are the textproto lexer and kci_api (the file's `schema_version`,
+# the format table it is checked against, the step-name grammar a cell name
+# follows). Never kci_cloud: whether a cell's cloud is built into this kci is
+# checked where the step runs. The welded tests read a golden file back
+# through the lookups and assert each refusal by its message.
+mojo_library(
+    name = "kci_cell",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_api:kci_api",
+        "//src/komira_textproto:komira_textproto",
+    ],
+    test_srcs = [
+        # a golden cells file parses to exactly its cells; the lookups read them back
+        "tests/test_cells_parse.mojo",
+        # one case per refusal of parse_cells_file, each by its whole message
+        "tests/test_cells_refusals.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

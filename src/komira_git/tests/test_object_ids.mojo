@@ -29,7 +29,7 @@ def _b(s: String) -> List[UInt8]:
     return List[UInt8](s.as_bytes())
 
 
-def _blob_hex(format: ObjectFormat, content: String) -> String:
+def _blob_hex(format: ObjectFormat, content: String) raises -> String:
     var data = _b(content)
     return hash_object(format, ObjectKind.blob(), Span(data)).to_hex()
 

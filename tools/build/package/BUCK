@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
-load(":release_set.bzl", "conda_release_set_check")
+load(":release_set.bzl", "conda_release_set_check", "release_order_test")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
 launcher_level_test(
@@ -17,6 +17,14 @@ zig_exe(
     name = "komira_pack",
     exec_compatible_with = LINUX_X86_64,
     src = "pack/komira_pack.zig",
+    imports = [
+        "pack/common.zig",
+        "pack/conda.zig",
+        "pack/conda_check.zig",
+        "pack/conda_index.zig",
+        "pack/conda_meta.zig",
+        "pack/tar_oci.zig",
+    ],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
@@ -90,7 +98,8 @@ config_setting(
 # manifests given to `komira_pack conda-meta`, and the metapackage read back.
 # Red if a member's [release_check] fails, if a member or the metapackage does
 # not carry the test stamp, if the metapackage does not require a member at
-# that version and build string, if conda-check refuses it, or if `libs` and
+# that version and build string, if a member requires a member listed after
+# it, if conda-check refuses it, or if `libs` and
 # `metapackage` are not release_set.txt's (which kci_artifact's welded test
 # holds equal to release/artifacts.textproto's metapackage).
 conda_release_set_check(
@@ -140,6 +149,64 @@ conda_release_set_check(
         "//src/komira_plan_proto:komira_plan_proto",
     ],
     release_set = "release_set.txt",
+    order_tests = [
+        ":release_order_refuses_a_requirement_listed_later",
+        ":release_order_passes_a_requirement_listed_earlier",
+        ":release_order_passes_another_version_or_build",
+        ":release_order_passes_a_longer_name",
+        ":release_order_exempts_komira_native",
+    ],
+)
+
+# The release order check (release_set.bzl) over the fixtures in
+# release_order/, at version 1.0.0 and build string hb_1. release_set_check
+# exists only after each of these passed (its `order_tests`).
+
+# a requires b at the set's version and build string, b is listed after a.
+release_order_test(
+    name = "release_order_refuses_a_requirement_listed_later",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a", "b"],
+    metadata_files = ["release_order/requires_b.json", "release_order/leaf.json"],
+    refuses = "member a requires b, which release_set lists after it",
+)
+
+# The same requirement with b listed first.
+release_order_test(
+    name = "release_order_passes_a_requirement_listed_earlier",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["b", "a"],
+    metadata_files = ["release_order/leaf.json", "release_order/requires_b.json"],
+)
+
+# a requires b at another build string and at another version: not a
+# requirement of this set, so no order is implied.
+release_order_test(
+    name = "release_order_passes_another_version_or_build",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a", "b"],
+    metadata_files = ["release_order/requires_b_other_pin.json", "release_order/leaf.json"],
+)
+
+# a requires bb, whose name extends b's: not a requirement on b.
+release_order_test(
+    name = "release_order_passes_a_longer_name",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a", "b"],
+    metadata_files = ["release_order/requires_bb.json", "release_order/leaf.json"],
+)
+
+# a requires komira_native, listed after it: the one exemption.
+release_order_test(
+    name = "release_order_exempts_komira_native",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a", "komira_native"],
+    metadata_files = ["release_order/requires_komira_native.json", "release_order/leaf.json"],
 )
 
 # The release set file: kci_artifact's welded test holds it equal to

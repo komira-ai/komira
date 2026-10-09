@@ -1,0 +1,501 @@
+syntax = "proto3";
+package komira.chat.v1;
+
+// The chat API: a small Slack-like chat with channels, direct messages,
+// one-level threads, mentions, file attachments, edit and delete, read
+// cursors, search and erasure.
+//
+// The messages travel as proto3 canonical JSON over HTTP, one request message
+// as the body (or the query, for a GET) and one response message as the reply.
+// The routes are listed in chat_service.proto. No field has a `json_name`
+// option: every JSON key is the proto3 lowerCamel form of the field name.
+//
+// One deployment holds one space: no message carries a space id.
+// A user is identified to the server by the bearer token's issuer and subject;
+// the server assigns each (iss, sub) one `user_id`, and every other message
+// names users by that id. Identity is never taken from a request body.
+//
+// Sequence numbers: every channel has its own timeline numbered 1, 2, 3, ...
+// with no gaps. Every event (a message, an edit, a delete, a join, a leave)
+// takes the next number. A seq of 0 means "none" wherever a field holds one.
+//
+// Times are milliseconds since the Unix epoch (UTC).
+
+// What a channel is.
+enum ChannelKind {
+  // Never sent.
+  CHANNEL_KIND_UNSPECIFIED = 0;
+  // Listed to every user; any user may join.
+  CHANNEL_KIND_PUBLIC = 1;
+  // Listed to its members only; a member adds others.
+  CHANNEL_KIND_PRIVATE = 2;
+  // A direct message between a fixed set of users. Its id is derived from
+  // the sorted set of its users, so one set of users has one DM.
+  CHANNEL_KIND_DM = 3;
+}
+
+// What an event in a channel's timeline is.
+enum EventKind {
+  // Never sent.
+  EVENT_KIND_UNSPECIFIED = 0;
+  // A message a user posted.
+  EVENT_KIND_MESSAGE = 1;
+  // The sender replaced the body of the message at `target_seq`.
+  EVENT_KIND_EDIT = 2;
+  // The message at `target_seq` was deleted; its body and the bodies of its
+  // edits are erased.
+  EVENT_KIND_DELETE = 3;
+  // `sender_user_id` joined or was added to the channel.
+  EVENT_KIND_JOIN = 4;
+  // `sender_user_id` left or was removed from the channel.
+  EVENT_KIND_LEAVE = 5;
+}
+
+// Where an uploaded file is in its life.
+enum FileState {
+  // Never sent.
+  FILE_STATE_UNSPECIFIED = 0;
+  // An upload URL was issued; the object is not checked yet. A pending file
+  // cannot be attached to a message or downloaded.
+  FILE_STATE_PENDING = 1;
+  // The object was found and is within the size limit.
+  FILE_STATE_COMPLETE = 2;
+}
+
+// ---- the resources -----------------------------------------------------------
+
+// The identity a bearer token carries: its `iss` and `sub` claims.
+message Subject {
+  string iss = 1;
+  string sub = 2;
+}
+
+// A user of the deployment.
+message User {
+  // Assigned by the server; stable for the life of the user.
+  string user_id = 1;
+  Subject subject = 2;
+  // From the token's `name` claim at the user's last request.
+  string display_name = 3;
+  // From the token's `email` claim at the user's last request.
+  string email = 4;
+}
+
+// A channel or a DM.
+message Channel {
+  string channel_id = 1;
+  ChannelKind kind = 2;
+  // Empty for a DM.
+  string name = 3;
+  string topic = 4;
+  // An archived channel is read-only.
+  bool archived = 5;
+  // The seq of the newest event in the channel's timeline.
+  int64 head_seq = 6;
+  int64 created_at_ms = 7;
+  string created_by_user_id = 8;
+  // A DM's users; empty for any other kind.
+  repeated string dm_user_ids = 9;
+}
+
+// A user's membership of a channel.
+message Member {
+  string channel_id = 1;
+  string user_id = 2;
+  int64 joined_at_ms = 3;
+}
+
+// One event of a channel's timeline. A MESSAGE event carries the message's
+// current state: after an edit, `body` is the edited text and `edited` is
+// set; after a delete, `body` is empty and `deleted` is set.
+message Message {
+  string channel_id = 1;
+  int64 seq = 2;
+  EventKind kind = 3;
+  string sender_user_id = 4;
+  // Plain text. Empty for JOIN, LEAVE and DELETE, and for a deleted message.
+  string body = 5;
+  // A thread reply: the seq of the message it replies to, in the same
+  // channel. 0 for a message that is not a reply. A reply never starts a
+  // thread of its own.
+  int64 thread_root_seq = 6;
+  // EDIT and DELETE: the seq of the message they change. 0 otherwise.
+  int64 target_seq = 7;
+  // The sender's idempotency key for the send; a retried send with the same
+  // key returns the first send's event.
+  string client_msg_id = 8;
+  // The users `@`-mentioned in the body, as the server parsed it.
+  repeated string mention_user_ids = 9;
+  // The body mentions `@channel`.
+  bool mentions_channel = 10;
+  // Attached files, each COMPLETE when the message was sent.
+  repeated string file_ids = 11;
+  int64 created_at_ms = 12;
+  bool edited = 13;
+  bool deleted = 14;
+}
+
+// An uploaded file.
+message FileInfo {
+  string file_id = 1;
+  // The channel the file was uploaded to; only its members may download it.
+  string channel_id = 2;
+  // The file name the uploader gave.
+  string name = 3;
+  string content_type = 4;
+  // The size the uploader declared, and once COMPLETE the size found.
+  int64 size_bytes = 5;
+  FileState state = 6;
+  string uploader_user_id = 7;
+  int64 created_at_ms = 8;
+}
+
+// A user's read position in one channel.
+message ReadState {
+  string channel_id = 1;
+  // The newest seq the user has read.
+  int64 read_seq = 2;
+  // MESSAGE events after `read_seq` sent by other users.
+  int32 unread_count = 3;
+  // Of those, the ones that mention the user or `@channel`.
+  int32 mention_count = 4;
+}
+
+// One HTTP header a client must send with a presigned request.
+message HttpHeader {
+  string name = 1;
+  string value = 2;
+}
+
+// The body of every error reply (4xx and 5xx).
+message ApiError {
+  // A short machine-readable code, such as `invalid_argument` or
+  // `not_found`.
+  string code = 1;
+  string message = 2;
+  // For a refused request: the JSON name of the field at fault, if one is.
+  string field = 3;
+}
+
+// ---- users ------------------------------------------------------------------
+
+message GetMeRequest {}
+
+message GetMeResponse {
+  User user = 1;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message ListUsersRequest {
+  // At most this many users; 0 means the server's default.
+  int32 page_size = 1;
+  // The `next_page_token` of the previous page; empty for the first.
+  string page_token = 2;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  // Empty on the last page.
+  string next_page_token = 2;
+}
+
+// ---- channels and members ---------------------------------------------------
+
+message CreateChannelRequest {
+  string name = 1;
+  string topic = 2;
+  // PUBLIC or PRIVATE; a DM is opened with OpenDmRequest.
+  ChannelKind kind = 3;
+  // Users added as members beside the creator.
+  repeated string member_user_ids = 4;
+}
+
+message CreateChannelResponse {
+  Channel channel = 1;
+}
+
+message GetChannelRequest {
+  string channel_id = 1;
+}
+
+message GetChannelResponse {
+  Channel channel = 1;
+}
+
+message ListChannelsRequest {
+  // false: the channels the caller is a member of, DMs included.
+  // true: the public channels the caller may join.
+  bool browse = 1;
+  bool include_archived = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListChannelsResponse {
+  repeated Channel channels = 1;
+  string next_page_token = 2;
+}
+
+// Changes only the fields that are present.
+message UpdateChannelRequest {
+  string channel_id = 1;
+  optional string name = 2;
+  optional string topic = 3;
+  optional bool archived = 4;
+}
+
+message UpdateChannelResponse {
+  Channel channel = 1;
+}
+
+message JoinChannelRequest {
+  string channel_id = 1;
+}
+
+message JoinChannelResponse {
+  Channel channel = 1;
+}
+
+message LeaveChannelRequest {
+  string channel_id = 1;
+}
+
+message LeaveChannelResponse {}
+
+message AddMembersRequest {
+  string channel_id = 1;
+  repeated string user_ids = 2;
+}
+
+message AddMembersResponse {
+  repeated Member members = 1;
+}
+
+message RemoveMemberRequest {
+  string channel_id = 1;
+  string user_id = 2;
+}
+
+message RemoveMemberResponse {}
+
+message ListMembersRequest {
+  string channel_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListMembersResponse {
+  repeated Member members = 1;
+  string next_page_token = 2;
+}
+
+// Opens (or returns the existing) DM between the caller and `user_ids`.
+message OpenDmRequest {
+  repeated string user_ids = 1;
+}
+
+message OpenDmResponse {
+  Channel channel = 1;
+}
+
+// ---- messages ---------------------------------------------------------------
+
+message SendMessageRequest {
+  string channel_id = 1;
+  string body = 2;
+  // Reply in the thread of this message; 0 for a top-level message.
+  int64 thread_root_seq = 3;
+  // The idempotency key: a retry with the same key returns the first send's
+  // event and appends nothing.
+  string client_msg_id = 4;
+  // COMPLETE files uploaded to this channel.
+  repeated string file_ids = 5;
+}
+
+message SendMessageResponse {
+  Message message = 1;
+}
+
+// Edits one of the caller's own messages.
+message EditMessageRequest {
+  string channel_id = 1;
+  int64 seq = 2;
+  string body = 3;
+}
+
+// The EDIT event appended.
+message EditMessageResponse {
+  Message message = 1;
+}
+
+// Deletes one of the caller's own messages, or any message for an admin.
+message DeleteMessageRequest {
+  string channel_id = 1;
+  int64 seq = 2;
+}
+
+// The DELETE event appended.
+message DeleteMessageResponse {
+  Message message = 1;
+}
+
+// One page of a channel's timeline, oldest first. With `before_seq` 0 the
+// page is the events after `since_seq`; otherwise it is the newest events
+// before `before_seq` (for scrolling back).
+message ListMessagesRequest {
+  string channel_id = 1;
+  int64 since_seq = 2;
+  int64 before_seq = 3;
+  // At most this many events; 0 means the server's default.
+  int32 limit = 4;
+}
+
+message ListMessagesResponse {
+  repeated Message messages = 1;
+  // The channel's head when the page was read.
+  int64 head_seq = 2;
+  // More events lie in the paging direction.
+  bool has_more = 3;
+}
+
+// A thread: its root message and the replies after `since_seq`.
+message ListThreadRequest {
+  string channel_id = 1;
+  int64 thread_root_seq = 2;
+  int64 since_seq = 3;
+  int32 limit = 4;
+}
+
+message ListThreadResponse {
+  Message root = 1;
+  repeated Message replies = 2;
+  bool has_more = 3;
+}
+
+// Mentions of the caller, newest first, across the channels it belongs to.
+message ListMentionsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListMentionsResponse {
+  repeated Message messages = 1;
+  string next_page_token = 2;
+}
+
+// ---- read state and sync ----------------------------------------------------
+
+// Moves the caller's read cursor forward to `read_seq`; never backward.
+message MarkReadRequest {
+  string channel_id = 1;
+  int64 read_seq = 2;
+}
+
+message MarkReadResponse {
+  ReadState read_state = 1;
+}
+
+// What changed for the caller since a previous sync.
+message SyncRequest {
+  // The `next_since` of the previous sync, opaque to the client. Empty for
+  // the first sync, which returns every channel the caller belongs to.
+  string since = 1;
+  // With nothing changed, wait up to this many seconds for a change before
+  // answering (the server caps it). 0 answers at once.
+  int32 wait_seconds = 2;
+}
+
+// One channel that changed: its head, the caller's read state, or the
+// caller's membership.
+message ChannelSync {
+  Channel channel = 1;
+  ReadState read_state = 2;
+  // The caller is no longer a member; drop the channel.
+  bool removed = 3;
+}
+
+message SyncResponse {
+  repeated ChannelSync channels = 1;
+  string next_since = 2;
+}
+
+// ---- files ------------------------------------------------------------------
+
+// Starts an upload to a channel the caller belongs to.
+message CreateUploadRequest {
+  string channel_id = 1;
+  string name = 2;
+  string content_type = 3;
+  int64 size_bytes = 4;
+}
+
+// The file (PENDING) and where to PUT its bytes.
+message CreateUploadResponse {
+  FileInfo file = 1;
+  string upload_url = 2;
+  // Headers the PUT must carry.
+  repeated HttpHeader upload_headers = 3;
+  int64 expires_at_ms = 4;
+}
+
+// Checks the uploaded object and marks the file COMPLETE. An object over the
+// size limit is deleted and refused.
+message CompleteUploadRequest {
+  string file_id = 1;
+}
+
+message CompleteUploadResponse {
+  FileInfo file = 1;
+}
+
+// A short-lived URL for a COMPLETE file of a channel the caller belongs to.
+message GetDownloadUrlRequest {
+  string file_id = 1;
+}
+
+message GetDownloadUrlResponse {
+  string download_url = 1;
+  int64 expires_at_ms = 2;
+}
+
+// ---- search -----------------------------------------------------------------
+
+// Messages matching `query` in channels the caller belongs to, deleted ones
+// excluded.
+message SearchMessagesRequest {
+  string query = 1;
+  // Only this channel; empty for every channel.
+  string channel_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message SearchMessagesResponse {
+  repeated Message messages = 1;
+  string next_page_token = 2;
+}
+
+// ---- administration ---------------------------------------------------------
+
+// Erases everything the deployment holds about one subject: the user, their
+// memberships, read state and mentions, the bodies of their messages and
+// edits (the events stay, so seqs stay contiguous), their files and the
+// search data built from their messages. Idempotent.
+message EraseSubjectRequest {
+  Subject subject = 1;
+}
+
+// What the erasure removed; all zero when nothing was left.
+message EraseSubjectResponse {
+  int64 rows_erased = 1;
+  int64 bodies_redacted = 2;
+  int64 blobs_deleted = 3;
+  int64 search_splits_rebuilt = 4;
+}

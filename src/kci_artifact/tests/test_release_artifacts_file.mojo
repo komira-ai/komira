@@ -61,8 +61,11 @@ def _flag_values(argv: List[String], flag: String) -> List[String]:
 
 def test_the_declared_names_in_release_order() raises:
     """The names this file declares, in build order: each library after the
-    libraries it depends on, and the metapackage last. A name added or
-    dropped here is a change to what is published, so it changes this list."""
+    libraries it depends on (release_set_check's stamp check refuses a member
+    whose package requires a member listed after it in release_set.txt, which
+    this file's test below holds equal to these names), and the metapackage
+    last. A name added or dropped here is a change to what is published, so
+    it changes this list."""
     assert_equal(read_artifacts(String(_FILE)).schema_version, Int32(1))
     var d = read_artifacts(String(_FILE))
     var want = List[String]()

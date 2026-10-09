@@ -124,10 +124,10 @@ buck2 build tests//negative/closure_refusal:hello_incomplete_toolchain
 
 ## 5. Host paths
 
-No action's argv or environment names an absolute host path, read from
-`buck2 aquery` over the examples and their run checks, the Rust example and
-the protobuf tests (rustc, protoc, the plugin, the generated packages). The
-scan first proves it detects a planted absolute path.
+No action's argv or environment names an absolute host path, read from `buck2 aquery` over the examples and their run checks, the Rust example,
+the protobuf tests (rustc, protoc, the plugin, the generated packages) and the aws-lc and s2n-tls tests. It first builds every scanned target in the same daemon (keeping going past one that fails):
+aquery cannot run a README's generate step (a local-only dynamic action) that the daemon has not built, so the check does not depend on an earlier test.
+The scan first proves it detects a planted absolute path.
 
 ## 6. Outputs
 
@@ -426,7 +426,8 @@ fixtures, one of them a producer's bytes that are not protoc's serialization
 cases' fixtures end to end, one defect per refusal, each a fixture one change
 away from the self-test's, and each must fail naming its leg: `leg0_identical`
 (the `.hex` is protoc's own bytes), `leg0_duplicate` (`id` written twice,
-which the decode shows once), `leg1_value` (the `.txtpb` says `id: 151` where
+which the decode shows once), `leg0_duplicate_message` (the string `name`
+written twice, so the walk must step over a length-delimited value), `leg1_value` (the `.txtpb` says `id: 151` where
 the bytes hold 150; its `.canonical.hex` is protoc's encoding of that text, so
 only leg 1 fires), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
 the top level, field 9 inside `inner`, and an empty group 99, which protoc
@@ -783,9 +784,9 @@ welded to `env_scrubbed`, must build and run (`[run_check]`); `env_scrubbed`
 must build: its test asserts the harness's environment is exactly `HOME`,
 `PATH` and `TMPDIR`. Each of these must fail, naming its cause: no tests
 (`empty`, `EMPTY GATE`), an `#[ignore]`d test (`ignored`), and a test that
-hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). There are
-no holds: a welded test that fails makes its artifact unbuildable until it
-passes.
+hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). `ext` and `ext_consumer` build (its external `test_srcs` test passes);
+`ext_red` and `ext_red_consumer` fail naming `tests/ext_fail.rs` with `1 passed; 1 failed`. Refused at analysis: `ext_no_crate` (no
+`tests/<name>.rs`), `ext_outside` (outside `tests/`), `ext_bad_name` (`tests/1bad.rs`), `ext_not_rs` (`tests/ext_data.txt`) ([`rust_tests.sh`](rust_tests.sh)).
 
 `buck2 test //tools/build/proto-codegen:komira_proto_codegen` must pass and
 print the harness's `komira_proto_codegen_unit: <n> passed`: `rust_test`
@@ -844,31 +845,7 @@ Analysis only.
 
 ## 38. README examples
 
-A library's `README.md` examples are a welded test, `[tests][readme]`
-([README examples](../mojo/README.md#readme-examples)).
-[`functional/readme_examples/ok`](functional/readme_examples/ok/BUCK) builds a
-README using every form (hidden lines before and after, a hoisted decorated
-struct, a triple-quoted string, an example in a list item, a `~~~~` fence
-quoting ```` ``` ````) and its marker is a PASS line;
-[`functional/readme_examples/none`](functional/readme_examples/none/BUCK), a
-README with no example, builds and its marker reads `NO EXAMPLE`, so nothing
-was compiled or run. [`negative/readme_examples`](negative/readme_examples/raises/BUCK)
-plants three defects, each of which must fail naming its README line: an
-example that raises (`README.md:13: FAILED`, while the other example still
-runs), one that does not compile (the compiler quotes the line, ending
-`# README.md:9`) and a `mojo skip` fence (refused at `README.md:3`).
-A README that ships (its library has a conda package, which installs it at
-`share/doc/<name>/README.md`) refuses a relative link:
-[`negative/readme_examples/relative_link`](negative/readme_examples/relative_link/BUCK)
-fails naming `README.md:11`, and
-[`functional/readme_examples/unshipped`](functional/readme_examples/unshipped/BUCK),
-the same README in a library with `conda = False`, builds.
-
-```sh
-./buck2 build tests//functional/readme_examples/...
-./buck2 build tests//negative/readme_examples/raises:raises   # must fail: README.md:13: FAILED
-./buck2 build tests//negative/readme_examples/relative_link:relative_link   # must fail: README.md:11: greet.mojo: a relative link
-```
+A library's `README.md` examples are a welded test, `[tests][readme]` ([README examples](../mojo/README.md#readme-examples)), and a BUCK file of several libraries names the one its README is about; [`run_tests.sh`](run_tests.sh) runs [these checks](readme_examples.md).
 
 ## 39. Test welding
 
@@ -985,15 +962,17 @@ querying its attributes, so narrowing it fails.
 With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
 ## 47. Branch coverage runs
 [`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs [these checks](coverage_runs.md#test-47-branch-coverage-runs).
+## 51. [Python oracles](../python/README.md#test-51-python-oracles)
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
+## 54. [Hermetic Node.js: planted defects](../node/README.md#test-54-planted-defects)
+
+## 49. Assert level, defines and memory cap
+
+[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
 
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
 records what a remote worker provides, the evidence behind the
 [host floor](../toolchains/README.md#host-floor).
-
-## 45. Assert level, defines and memory cap
-
-[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).

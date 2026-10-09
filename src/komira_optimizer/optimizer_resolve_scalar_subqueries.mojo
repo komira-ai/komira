@@ -139,9 +139,9 @@ def resolve_scalar_subqueries_rewrite(
     var rewritten = _rewrite_scalar_subquery_sites(plan^, scalars, next_idx)
     # Lockstep invariant: every collected site was consumed exactly once.
     if next_idx != len(sites):
-        raise Error(
-            "resolve_scalar_subqueries: rewrite consumed " + String(next_idx)
-            + " sites but Phase 1 collected " + String(len(sites))
-            + " -- collect/rewrite walk-coverage drifted"
+        raise Error(  # cov: unreachable the collect and rewrite walks visit the same nodes and exprs, so every site is consumed
+            "resolve_scalar_subqueries: rewrite consumed " + String(next_idx)  # cov: unreachable see the line above
+            + " sites but Phase 1 collected " + String(len(sites))  # cov: unreachable see the line above
+            + " -- collect/rewrite walk-coverage drifted"  # cov: unreachable see the line above
         )
     return rewritten^

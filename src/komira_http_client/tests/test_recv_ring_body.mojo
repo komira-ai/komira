@@ -16,12 +16,18 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
 
+from komira_clock import now_ns as _now_ns
+
 from komira_http_client.body_frame import (
     BODY_FRAME_KIND_DATA,
     BODY_FRAME_KIND_END,
     BodyFrame,
 )
 from komira_http_client.header_map import HeaderMap
+# Module-private, imported on purpose: it is the value the driver stamps
+# (`_effective_deadline_us`), and test_outbound_budget_rule pins it equal to
+# the public `OUTBOUND_BUDGET_DEFAULT_US`.
+from komira_http_client.state_machine import _HEAD_DRIVE_DEFAULT_TIMEOUT_US
 from komira_http_client.response_body import (
     RecvRingBody,
     ResponseBody,
@@ -59,6 +65,27 @@ def _make_reactor() raises -> Reactor[NoopSink]:
         )
     return Reactor[NoopSink](
         NoopSink(_placeholder=UInt8(0)), BACKEND_KQUEUE,
+    )
+
+
+def _stamp_as_the_driver_does(mut body: RecvRingBody[ScriptedStream]):
+    """Stamp `body` with the deadline an `OutboundDriver` with no configured
+    request timeout stamps on every body it builds: now plus the driver's own
+    default, `_HEAD_DRIVE_DEFAULT_TIMEOUT_US` (`_effective_deadline_us`).
+
+    WHY THE LARGE-BODY CASES STAMP. A hand-built body carries no stamp, and
+    `collect_body` bounds an unstamped drain by `_UNSTAMPED_DRAIN_BACKSTOP_US`
+    (400 ms) of WALL time, progress or not: that backstop is a detector for a
+    construction site that forgot to stamp (`response_body.mojo`), and
+    `test_body_drain_deadline` holds it to stopping a peer that keeps
+    delivering bytes. Decoding 256 KiB or 2.5 MB is CPU work whose wall time is
+    the build's: at -O3 it fits in 400 ms; under coverage instrumentation the
+    2.5 MB drain was cut at 163-282 KB. These cases check what the decoder
+    returns at size, not how fast, so they drain the body a real request
+    drains: one the driver stamped. The small cases stay unstamped; they are
+    the hand-built shape the backstop is sized for."""
+    body.set_deadline_us(
+        Int(_now_ns() // UInt64(1000)) + _HEAD_DRIVE_DEFAULT_TIMEOUT_US
     )
 
 
@@ -212,6 +239,7 @@ def test_recv_ring_large_body_streaming() raises:
         stream^, cl_total=total, pre_body_bytes=pre^,
         max_body_bytes=100 * 1024 * 1024,
     )
+    _stamp_as_the_driver_does(body)
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
 
@@ -371,6 +399,7 @@ def test_recv_ring_large_chunked_body_streaming() raises:
     var body = RecvRingBody[ScriptedStream].new_chunked(
         stream^, pre_body_bytes=pre^, max_body_bytes=100 * 1024 * 1024,
     )
+    _stamp_as_the_driver_does(body)
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
 

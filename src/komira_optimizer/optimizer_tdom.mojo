@@ -526,9 +526,9 @@ def build_tdom_graph[
             # 4) also fold in lb/rb (one or both may have been the
             # bridging element; either way they belong in keep now).
             if not classes[keep_idx].contains(lb):
-                classes[keep_idx].bindings.append(lb.copy())
+                classes[keep_idx].bindings.append(lb.copy())  # cov: unreachable classes stay disjoint, so one touched class held lb and the drained one rb; keep now holds both
             if not classes[keep_idx].contains(rb):
-                classes[keep_idx].bindings.append(rb.copy())
+                classes[keep_idx].bindings.append(rb.copy())  # cov: unreachable classes stay disjoint, so one touched class held lb and the drained one rb; keep now holds both
 
             # 5) remap any prior edge_to_class entries that pointed at
             # `drain_idx` to `keep_idx`. After this loop the invariant

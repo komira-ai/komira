@@ -17,7 +17,9 @@
 #      that names no file is a usage error (KCI-E-USAGE, exit 2); a file
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
-#      (KCI-E-FORMAT);
+#      (KCI-E-FORMAT), and so is a file holding a step that writes into a
+#      cell (a DEPLOY step, or a PUBLISH step into a cell), which this kci
+#      parses and does not run;
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
 #      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
@@ -158,6 +160,8 @@
 
 from std.os.path import isfile
 from std.pathlib import Path
+
+from std.time import perf_counter_ns
 
 from komira_clock import now_unix_ms
 
@@ -318,6 +322,16 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMach
         g = parse_machine_file(text, cmd.machine)
     except e:
         raise Error(String(ERROR_FORMAT) + String("\n") + String(e))
+    for i in range(len(g.stages)):
+        for k in range(len(g.stages[i].steps)):
+            ref step = g.stages[i].steps[k]
+            if step.writes_cell():
+                raise Error(
+                    String(ERROR_FORMAT) + String("\n") + cmd.machine + String(": line ") + String(step.line)
+                    + String(": step '") + step.name + String("' of stage '") + g.stages[i].name
+                    + String("' writes into cell '") + step.cell
+                    + String("': that needs a newer kci (this kci runs BUILD steps and PUBLISH steps to a channel)")
+                )
     result.machine_path = cmd.machine.copy()
     result.machine_sha256 = file_sha256_hex(cmd.machine)
     return g^
@@ -371,6 +385,11 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
     req.platform = step.platform.copy()
     if cmd.build_timeout_s > 0:
         req.build_timeout_s = cmd.build_timeout_s
+    req.build_budget_s = cmd.build_budget_s
+    if cmd.build_budget_s > 0:
+        # the budget counts from kci's start (`kci_main_with`), on the
+        # monotonic clock the BUILD step's runner reads (ProcessRunner.now_ns)
+        req.build_deadline_ns = cmd.started_ns + cmd.build_budget_s * 1_000_000_000
     req.affected_by = cmd.affected_by.copy()
     return req^
 
@@ -707,7 +726,9 @@ def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder:
     """`kci <args>`: parse; print the usage; or `kci run`. A refused command
     line is exit 2, recorded in the file `--result-file` names and summarized
     in the file `--summary-file` names, when it names them. Returns the exit
-    number."""
+    number. Its first act reads the monotonic clock: kci's start, from which
+    `--build-budget-s` counts."""
+    var started_ns = Int(perf_counter_ns())
     var cmd: KciCommand
     try:
         cmd = parse_kci_args(args)
@@ -728,6 +749,7 @@ def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder:
     if cmd.verb == String(CLI_VERB_HELP):
         _say(String(KCI_USAGE))
         return EXIT_OK
+    cmd.started_ns = started_ns
     return run_stage_with(cmd, steps, recorder)
 
 

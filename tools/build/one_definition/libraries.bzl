@@ -41,6 +41,7 @@ THIRD_PARTY_C_LIBRARIES = [
     "//third_party/aws-lc:crypto",
     "//third_party/brotli:brotlidec",
     "//third_party/s2n-tls:s2n",
+    "//third_party/sha1collisiondetection:sha1dc",
     "//third_party/snappy:snappy",
     "//third_party/sqlite:sqlite3",
 ]

@@ -36,7 +36,7 @@
 #    `firings_into` and `firing_of` select; `schedule_timezone`.
 # 5. THE CATALOG ROWS: `schedule` (22) and `event_trigger` (31) are
 #    PORTABLE, expose nothing, accept no verb, take no retention, land on
-#    `schedule` and `trigger`, and are the eleventh and nineteenth arms.
+#    `schedule` and `trigger`, and are the eleventh and twentieth arms.
 # Each test names the defect it catches in its docstring.
 # =============================================================================
 
@@ -386,7 +386,7 @@ def test_the_trigger_rows() raises:
     var fields = [FIELD_SCHEDULE, FIELD_EVENT_TRIGGER]
     var names = ["schedule", "event_trigger"]
     var roles = ["schedule", "trigger"]
-    var positions = [10, 18]
+    var positions = [10, 19]
     for i in range(2):
         ref t = c.types[c.index_of(fields[i])]
         assert_equal(t.name, String(names[i]))

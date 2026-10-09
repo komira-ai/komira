@@ -1,0 +1,27 @@
+{
+  "komira//src/komira_kg_code/tests/fixtures/repo:kgfix": {
+    "buck.type": "mojo_library_rule",
+    "deps": [
+      "komira//src/komira_json:komira_json"
+    ],
+    "import_name": null,
+    "srcs": [
+      "komira//src/komira_kg_code/tests/fixtures/repo/kgfix/__init__.mojo",
+      "komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo",
+      "komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/__init__.mojo",
+      "komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo"
+    ],
+    "test_srcs": [
+      "komira//src/komira_kg_code/tests/fixtures/repo/tests/test_grid.mojo"
+    ]
+  },
+  "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test": {
+    "buck.type": "mojo_test_rule",
+    "deps": [
+      "komira//src/komira_kg_code/tests/fixtures/repo:kgfix"
+    ],
+    "srcs": [
+      "komira//src/komira_kg_code/tests/fixtures/repo/tests/test_dot.mojo"
+    ]
+  }
+}

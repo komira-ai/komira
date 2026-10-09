@@ -18,10 +18,10 @@
 # 3. DNSRECORD. 1 `name`, 2 `zone` (a `Ref`), 3 `type` (a `RecordType`), 4
 #    `values` (repeated `Value`), 5 `ttl` (a `Duration`); by name, binary,
 #    JSON (`"type":"CNAME"`, `"ttl":"300s"`), absent = unset; 6 is not a
-#    field; as `Resource.body` 26, the fourteenth arm.
+#    field; as `Resource.body` 26, the fifteenth arm.
 # 4. CERTIFICATE. 1 `domains` (repeated string), 2 `zone` (a `Ref`); by
 #    name, binary, JSON, absent = unset; 3 is not a field; as
-#    `Resource.body` 27, the fifteenth arm.
+#    `Resource.body` 27, the sixteenth arm.
 # 5. RECORDTYPE. Every value by number AND by name: 0 RECORD_TYPE_UNSET, 1
 #    A, 2 AAAA, 3 CNAME, 4 TXT, 5 MX; 6 is no value.
 # The census of every arm's number and oneof position is in
@@ -348,7 +348,7 @@ def test_dns_record() raises:
 
     var rr = decode_proto[Resource](_resource("www", 26, _record()))
     assert_true(Bool(rr.dns_record), "body 26 is `dns_record`")
-    assert_equal(rr._oneof0_case, 14, "the DNS record is the fourteenth arm")
+    assert_equal(rr._oneof0_case, 15, "the DNS record is the fifteenth arm")
     var rt = encode_json(rr)
     assert_true('"dnsRecord":{' in rt, "Resource JSON carries the record: " + rt)
     print("  test_dns_record: PASS")
@@ -385,7 +385,7 @@ def test_certificate() raises:
 
     var rr = decode_proto[Resource](_resource("tls", 27, _certificate()))
     assert_true(Bool(rr.certificate), "body 27 is `certificate`")
-    assert_equal(rr._oneof0_case, 15, "the certificate is the fifteenth arm")
+    assert_equal(rr._oneof0_case, 16, "the certificate is the sixteenth arm")
     var rt = encode_json(rr)
     assert_true('"certificate":{"domains":' in rt, "Resource JSON carries the certificate: " + rt)
     print("  test_certificate: PASS")

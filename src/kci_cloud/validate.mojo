@@ -43,7 +43,9 @@
 #      `uses` on a network, a subnet or an IP address; IPv4 ranges of the
 #      form, a network's private, a subnet's inside its network's and
 #      overlapping no other; a subnet's zone from 1 to 3; a service's
-#      `network` a subnet.
+#      `network` a subnet. And the registry rules (registry.mojo): no `uses`
+#      on a registry; its format written, and one this kci knows. And the
+#      metadata rules of every type (metadata.mojo): labels, cloud names, adopt.
 #      And the identity rules (grants.mojo): no `uses` on a grant; a `uses`
 #      line or a grant names exactly one of a target and a cell resource,
 #      with a verb that target accepts; a grant's principal is an identity
@@ -60,10 +62,12 @@
 #      needs for the type (`CloudAdapter.required_artifact`); or a `public {}`
 #      service in a cell whose settings choose no public mechanism
 #      (`CloudAdapter.public_mechanism`). The mechanism is chosen HERE, from
-#      the cell's settings, and never fallen back on at apply time.
+#      the cell's settings, and never fallen back on at apply time. Last, on
+#      a graph with no other finding, one cloud name per (kind, name) of the
+#      cloud's lowered primary objects (`metadata.shared_name_findings`).
 #
-#   4. The ROLE LABEL BUDGET (`role_budget_findings`), the one check that
-#      needs the lowering: every lowered node's role (the node id after its
+#   4. The ROLE LABEL BUDGET (`role_budget_findings`), the check that needs
+#      the whole lowering: every lowered node's role (the node id after its
 #      owner) must fit the 63-byte label value once encoded. It is a GRAPH
 #      finding naming the node, the byte count and every segment's length,
 #      and it runs after lowering (data, nothing realized) and before
@@ -98,6 +102,7 @@ from kci_cloud.catalog import (
     FIELD_IP_ADDRESS,
     FIELD_NETWORK,
     FIELD_QUEUE,
+    FIELD_REGISTRY,
     FIELD_SCHEDULE,
     FIELD_SECRET,
     FIELD_SERVICE_ACCOUNT,
@@ -122,6 +127,8 @@ from kci_cloud.dns import dns_findings
 from kci_cloud.firing import firings_of
 from kci_cloud.triggers import trigger_findings
 from kci_cloud.network import network_findings, service_network_findings
+from kci_cloud.registry import registry_findings
+from kci_cloud.metadata import metadata_findings, shared_name_findings
 from kci_cloud.workload import is_workload, workload_of
 from kci_cloud.grants import (
     GrantEdge,
@@ -502,6 +509,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                         + String(" is not DELETE or KEEP"),
                     )
                 )
+        out.extend(metadata_findings(catalog, resources, r))
         if field == FIELD_BUCKET or field == FIELD_TABLE:
             out.extend(data_findings(field, r))
             continue
@@ -519,6 +527,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             continue
         if field == FIELD_NETWORK or field == FIELD_SUBNET or field == FIELD_IP_ADDRESS:
             out.extend(network_findings(resources, field, r))
+            continue
+        if field == FIELD_REGISTRY:
+            out.extend(registry_findings(field, r))
             continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
@@ -683,6 +694,8 @@ def validate_for[
                 + listed,
             )
         )
+    if len(out) == 0:  # lower only a graph with no other finding
+        out.extend(shared_name_findings(cloud, clouds.catalog, resources, feeds, firings))
     return out^
 
 

@@ -1,0 +1,88 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# sha1collisiondetection stable-v1.0.3 (cr-marcstevens/sha1collisiondetection),
+# MIT (LICENSE.txt in the archive): SHA-1 with counter-cryptanalysis, the
+# collision detection git hashes with. Test input only: it is the oracle of
+# komira_git's pure-Mojo port (komira_git/sha1dc.mojo), linked into the
+# welded tests of //src/tests/conformance/komira_git_conformance and into
+# nothing that ships. Nothing of it is committed here: the archive is fetched
+# at build time and checked against its sha256.
+pinned_file(
+    name = "sha1collisiondetection-stable-v1.0.3.tar.gz",
+    url = "https://github.com/cr-marcstevens/sha1collisiondetection/archive/refs/tags/stable-v1.0.3.tar.gz",
+    sha256 = "77a1c2b2a4fbe4f78de288fa4831ca63938c3cb84a73a92c79f436238bd9ac07",
+    size_bytes = 780306,
+)
+
+archive_files(
+    name = "src",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":sha1collisiondetection-stable-v1.0.3.tar.gz",
+    files = [
+        "LICENSE.txt",
+        "lib/sha1.c",
+        "lib/sha1.h",
+        "lib/ubc_check.c",
+        "lib/ubc_check.h",
+    ],
+    strip_prefix = "sha1collisiondetection-stable-v1.0.3",
+)
+
+# Test data of //src/komira_git (tests/test_sha1dc.mojo) and of
+# //src/tests/conformance/komira_git_conformance: upstream's own test files,
+# the two SHAttered PDFs (one SHA-1 collision, shattered.io) and a collision
+# of reduced-step SHA-1, staged as test/<name>.
+archive_files(
+    name = "testdata",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":sha1collisiondetection-stable-v1.0.3.tar.gz",
+    one_tree = True,
+    files = [
+        "LICENSE.txt",
+        "test/sha1_reducedsha_coll.bin",
+        "test/shattered-1.pdf",
+        "test/shattered-2.pdf",
+    ],
+    strip_prefix = "sha1collisiondetection-stable-v1.0.3",
+    visibility = [
+        "//src/komira_git/...",
+        "//src/tests/conformance/komira_git_conformance/...",
+    ],
+)
+
+# komira_sha1dc_oracle.c, copied into buck-out so that its compile has one
+# digest wherever komira is mounted (see staged_files).
+staged_files(
+    name = "oracle_files",
+    srcs = ["komira_sha1dc_oracle.c"],
+)
+
+# The library with upstream's C API (sha1.h: SHA1DCInit, SHA1DCUpdate,
+# SHA1DCFinal and the SHA1DCSet* switches; ubc_check.h: ubc_check), plus the
+# read accessors of komira_sha1dc_oracle.c (the SHA1_CTX size and the
+# sha1_dvs table). Upstream's names are not prefixed: only test binaries
+# and the one-definition gate (tools/build/one_definition) link it.
+cxx_library(
+    name = "sha1dc",
+    srcs = [
+        ":oracle_files[komira_sha1dc_oracle.c]",
+        ":src[lib/sha1.c]",
+        ":src[lib/ubc_check.c]",
+    ],
+    headers = {
+        "sha1.h": ":src[lib/sha1.h]",
+        "ubc_check.h": ":src[lib/ubc_check.h]",
+    },
+    compiler_flags = [
+        "-O2",
+        "-DNDEBUG",
+    ],
+    header_namespace = "",
+    visibility = [
+        "//src/tests/conformance/komira_git_conformance/...",
+        "//tools/build/one_definition/...",
+    ],
+)

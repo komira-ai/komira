@@ -1,0 +1,67 @@
+# A made-up library source for cov_branch_classify's cases (README.md), staged as t.mojo.
+def tries(x: Int, d: Dict[String, Int], k: String) raises -> Int:
+    var r = 0
+    try:
+        r = f(x)
+        touch(x)
+        r += d[k]
+        r += inl(x)
+        r += Int(k)
+        try:
+            r += f(x + 1)
+        except:
+            r += f(x + 2)
+        if r > 3:
+            raise Error("big")
+    except:
+        r = g(x)
+    else:
+        r += g(x + 1)
+    finally:
+        r += 1
+    r += f(r)
+    return r
+def nested_def(x: Int) raises -> Int:
+    try:
+        def helper(y: Int) raises -> Int:
+            return f(y)
+        return helper(x)
+    except:
+        return 0
+def guarded(x: Int) raises -> Int:
+    with G(x) as n:
+        return f(n)
+def one(x: Int) -> Int:
+    try: return f(x)
+    except: return -1
+def docs(x: Int) raises -> Int:
+    var s = """
+try:
+    """
+    return f(x)
+@always_inline
+def inl(x: Int) raises -> Int:
+    if x == 7:
+        raise Error("seven")
+    return x + 1
+def ands(p: P, v: Int) -> Int:
+    try:
+        if p.c and p.d(v):
+            return 1
+    except:
+        return 2
+    return 0
+def consts(b: B) -> Int:
+    try:
+        return b.read_uleb128()
+    except:
+        return -1
+def sig(x: Int) -> Int:
+    try:
+        def g(
+            a: Int,
+        ) raises -> Int:
+            return f(a)
+        return g(x)
+    except:
+        return 0

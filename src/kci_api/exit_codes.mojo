@@ -35,6 +35,10 @@
 # advice for one case (a publish whose read-back disagrees is 6 with
 # NEEDS_HUMAN); it may never give SAFE where the default is not.
 #
+# Three numbers promise that no external effect landed (`promises_no_effect`):
+# 2, 3 and 4. A result document whose step row lists a landed node can never
+# carry one of them as that step's outcome (result_deploy.mojo).
+#
 # Pure functions; no pointer.
 # =============================================================================
 
@@ -140,3 +144,10 @@ def require_retry_for(exit_code: Int, retry: String) raises:
         String("retry '") + retry + String("' is weaker than exit ") + String(exit_code)
         + String("'s advice '") + d + String("'")
     )
+
+
+def promises_no_effect(exit_code: Int) -> Bool:
+    """True for the numbers whose meaning says no external effect landed:
+    2 (nothing was read), 3 (nothing external changed) and 4 (no external
+    effect landed) (file header)."""
+    return exit_code == EXIT_USAGE or exit_code == EXIT_REFUSED or exit_code == EXIT_FAILED

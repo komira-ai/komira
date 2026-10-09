@@ -21,6 +21,7 @@ SURFACES = [
     "sql",
     "mojo_polars",
     "ts_polars",
+    # A surface of its own, built on top of the TypeScript SDK.
     "excel",
 ]
 
