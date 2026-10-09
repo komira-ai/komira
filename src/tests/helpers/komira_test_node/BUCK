@@ -40,6 +40,21 @@ node_test(
     src = ":two_module_bundle",
 )
 
+# An ES module bundle (`format = "esm"`): its entry awaits at the top level,
+# which esbuild refuses to write as cjs.
+esbuild_bundle(
+    name = "esm_bundle",
+    entry = "esm/main.mjs",
+    srcs = ["two_module/greet.ts"],
+    format = "esm",
+    out = "esm_bundle.mjs",
+)
+
+node_test(
+    name = "esm",
+    src = ":esm_bundle",
+)
+
 # apache-arrow and its dependencies bundled from the pinned npm packages.
 esbuild_bundle(
     name = "arrow_ipc_bundle",

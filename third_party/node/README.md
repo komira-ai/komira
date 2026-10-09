@@ -76,7 +76,9 @@ package:
   builds from any package. The one exception is the package of test 54's
   planted defects, `tests//negative/node`, which must fail and is in the
   `tests` cell that only komira's own checkout has: it sees `:node`, the
-  packages and their downloads there.
+  packages and their downloads there. Test 54 holds the line: a
+  `node_test` in its subpackage `tests//negative/node/visibility` names
+  `:node` and must fail with "is not visible".
 - **What a test hands on.** A `node_test`'s only output is its pass marker:
   it provides no runtime, package or library to a target depending on it.
 - **What a package holds.** A `conda_package` holds only a `.mojoc` and a

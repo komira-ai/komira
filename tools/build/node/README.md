@@ -84,6 +84,7 @@ fail, and [`node_tests.sh`](../tests/node_tests.sh) (run by
 | `not_node`, `no_bin_node`, `no_header`, `header_is_dir`, `node_not_executable` | `node_dist` refuses an archive that is no Node.js release, one with the Node-API header but no `bin/node`, one with `bin/node` but no header, one whose `node_api.h` is a directory, and one whose `bin/node` is not executable |
 | `node_does_not_run` | `node_dist` refuses a `bin/node` that exits non-zero (busybox under the name `node`) |
 | `warns` | `c_shared_lib` fails on a warning (`-Wall -Werror`) |
+| `visibility:node_not_visible`: a `node_test` in the subpackage [`tests//negative/node/visibility`](../tests/negative/node/visibility/BUCK) naming `komira//third_party/node:node` | the runtime is test-only: it is not visible outside the packages `_TEST_ONLY` lists and the planted defects' own package, so the target fails analysis with "is not visible" (it builds if `_TEST_ONLY` is widened to `PUBLIC`, or `_NEGATIVE` to `tests//negative/node/...`) |
 
 The fixtures name the pinned runtime, packages and downloads, which
 [`third_party/node/BUCK`](../../../third_party/node/BUCK) makes visible to
