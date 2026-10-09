@@ -6,8 +6,9 @@
 # the same line); a nested float whose text depends on a decimal printer (a
 # Python oracle could never match it); a dictionary float compared by its
 # decimal text; a leading `#` read as a comment; a renderer that drops a
-# column's slice offset on any layout; a dense union read by child index
-# instead of type code; a map whose duplicate keys print in input order.
+# column's slice offset on any layout, a dictionary's included; a dense union
+# read by child index instead of type code; a map whose duplicate keys print
+# in input order.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -303,10 +304,25 @@ def test_slice_offsets_on_every_layout() raises:
         sliced(union_column(True, dcodes, doffs, fixed_column(ArrowType.INT64, 8, ints(da), all_valid(1)),
                             bool_column(dbv, all_valid(2)), dids), 1),
     )
+    # Dictionaries: the offset goes through dict_code_at, for 8-byte codes
+    # into strings and 4-byte codes into numbers. Codes read without the
+    # offset give the rows reversed.
+    var dc64: List[Int64] = [1, 0, 1]
+    var dsv: List[String] = ["p", "q"]
+    bb.add(Field.dictionary("ds", ArrowType.INT64, False), sliced(Column.from_int64_dict_indices(dc64^, dsv^), 1))
+    var dc32 = PrimitiveArray[DType.int32].allocate(3)
+    dc32.set(0, 0)
+    dc32.set(1, 1)
+    dc32.set(2, 0)
+    var dnv: List[Int64] = [7, 8]
+    bb.add(
+        Field.dictionary("dn", ArrowType.INT32, False),
+        sliced(Column.from_numeric_dict[DType.int32, DType.int64](dc32^, dnv^), 1),
+    )
     var got = render_batch(bb.build(), CanonPolicy.total())
     var want: List[List[String]] = [
-        ["20", "\\N", "false", "b", "[2,3]", "[3,4]", "ccdd", "2e0", "{a:2,b:y}", "{b:2}", "(7:q)", "(5:100)"],
-        ["30", "3", "true", "c", "[4]", "[5,6]", "eeff", "3e0", "{a:3,b:z}", "{c:3}", "(5:12)", "(9:false)"],
+        ["20", "\\N", "false", "b", "[2,3]", "[3,4]", "ccdd", "2e0", "{a:2,b:y}", "{b:2}", "(7:q)", "(5:100)", "p", "8"],
+        ["30", "3", "true", "c", "[4]", "[5,6]", "eeff", "3e0", "{a:3,b:z}", "{c:3}", "(5:12)", "(9:false)", "q", "7"],
     ]
     var bad = String()
     for r in range(2):

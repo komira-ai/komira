@@ -31,6 +31,7 @@ from kci_api import (
     default_retry,
     exit_code_of,
     exit_table,
+    outcome_rank,
     promises_no_effect,
     require_outcome,
     require_retry_for,
@@ -160,6 +161,36 @@ def test_worst_outcome() raises:
     assert_equal(worst_outcome(String(OUTCOME_PARTIAL), String(OUTCOME_FAILED)), String(OUTCOME_PARTIAL))
     assert_equal(worst_outcome(String(OUTCOME_PARTIAL), String(OUTCOME_INDETERMINATE)), String(OUTCOME_INDETERMINATE))
     assert_false(worst_outcome(String(OUTCOME_NOOP), String(OUTCOME_NOOP)) != String(OUTCOME_NOOP))
+
+
+def test_outcome_rank_orders_every_outcome() raises:
+    # best to worst; each rank pinned, so two outcomes swapping places (or
+    # one falling through to INDETERMINATE's 8) is caught
+    var order = List[String]()
+    order.append(String(OUTCOME_NOOP))
+    order.append(String(OUTCOME_SUCCEEDED))
+    order.append(String(OUTCOME_REFUSED))
+    order.append(String(OUTCOME_FAILED))
+    order.append(String(OUTCOME_VALIDATION_FAILED))
+    order.append(String(OUTCOME_CANCELLED))
+    order.append(String(OUTCOME_INTERRUPTED))
+    order.append(String(OUTCOME_PARTIAL))
+    order.append(String(OUTCOME_INDETERMINATE))
+    assert_equal(len(order), len(all_outcomes()))
+    for i in range(len(order)):
+        assert_equal(outcome_rank(order[i]), i, order[i])
+        for j in range(i):
+            assert_equal(worst_outcome(order[i], order[j]), order[i])
+            assert_equal(worst_outcome(order[j], order[i]), order[i])
+    assert_true(_rank_refused(String("DONE")))
+
+
+def _rank_refused(word: String) -> Bool:
+    try:
+        _ = outcome_rank(word)
+    except e:
+        return String(e).find(String("is not one of")) >= 0
+    return False
 
 
 def main() raises:

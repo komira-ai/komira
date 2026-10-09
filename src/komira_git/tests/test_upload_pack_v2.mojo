@@ -7,7 +7,7 @@
 # "Command Request", "ls-refs") and git's serve.c, ls-refs.c and
 # upload-pack.c at v2.56.0 for the refusals, whose words the messages keep.
 # The byte-for-byte comparison with git itself is in
-# src/tests/conformance/komira_git_conformance.
+# src/tests/conformance/komira_git_protocol_conformance.
 #
 # WHAT EACH TEST CATCHES:
 #   * test_advertisement: a capability advertised that is not implemented

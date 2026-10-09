@@ -4,16 +4,16 @@
 #
 # `AuthzPort` is the neutral authorization seam: "can `principal` do `action`
 # on `resource`?" A host binds SOME `AuthzPort` conformer and gates every
-# mutating verb through it — the port answers True on grant, False on deny. A
-# managed deployment supplies a conformer that maps the port's (action,
-# resource) onto its own RBAC + row-scope service; a single-user host can
-# supply its own (e.g. the allow-all-authenticated default below).
+# mutating verb through it — the port answers True to allow, False to deny. A
+# host with its own permission service supplies a conformer that maps the
+# port's (action, resource) onto that service; a single-user host can supply
+# its own (e.g. the allow-all-authenticated default below).
 #
 # This is a NEUTRAL LEAF package — it names ONLY the transport primitives the
 # seam shape requires (`Reactor` / `Runtime` for the RT-parametric async-park
 # contract + `Principal` for the caller) and carries no permission-model
 # vocabulary (no scopes, capabilities or roles, no database id type). The
-# action + resource are POD value types built from Strings only, so a host can
+# action + resource are value types built from Strings only, so a host can
 # depend on the port without dragging in an RBAC engine.
 #
 # The seam SHAPE mirrors `komira_http`'s `RequestDispatcher.dispatch`:
@@ -22,15 +22,15 @@
 # runtime.
 #
 # Encapsulation: no UnsafePointer crosses any boundary; no wildcard origins; no
-# unsafe_from_address. `AuthzAction` / `AuthzResource` are POD value types
-# (Strings only), with no pointer field and no heap-owning element stored in a
-# byte-backed slab.
+# unsafe_from_address. `AuthzAction` / `AuthzResource` are value types
+# (Strings and a `Claims` map), with no pointer field and no heap-owning
+# element stored in a byte-backed slab.
 # =============================================================================
 
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_http_server.middleware import Principal
+from komira_http_server.middleware import Claims, Principal
 
 
 # =============================================================================
@@ -70,10 +70,10 @@ struct AuthzAction(
         PARTIAL order, not a ladder: a held WRITE does **not** satisfy a DELETE
         requirement, and a held DELETE satisfies neither READ nor WRITE (an
         explicit predicate table, never a numeric `>=`). Destructive actions are
-        granted DELIBERATELY. A conformer that maps `delete` onto its write tier
+        allowed DELIBERATELY. A conformer that maps `delete` onto its write tier
         has silently flattened the lattice; a conformer that does not recognize
         `delete` at all falls into its fail-closed default (strictest tier),
-        which is safe but makes an explicit DELETE grant unusable."""
+        which is safe but makes an explicitly allowed DELETE unusable."""
         return AuthzAction(String("delete"))
 
     @staticmethod
@@ -91,85 +91,36 @@ struct AuthzAction(
 
 
 # =============================================================================
-# AuthzResource — a neutral resource reference (POD, Strings only).
+# AuthzResource — a neutral resource reference (kind, id, attributes).
 # =============================================================================
-struct AuthzResource(
-    Copyable, ImplicitlyCopyable, Movable, Deinitable
-):
-    """A neutral reference to the resource an action applies to. POD value type
-    carrying a `kind` label (e.g. `repo`, `document`) + up to three
-    hyphenated-UUID Strings scoping it: `org_id`, `workspace_id`, `resource_id`
-    (each EMPTY when unset). Strings ONLY — no id type is imported; a
-    conformer parses the hyphenated strings into its own id type at the edge.
-    Construct via the scope factories (`workspace` / `org` / `org_and_workspace`)."""
+struct AuthzResource(Copyable, Movable, Deinitable):
+    """A neutral reference to the resource an action applies to: a `kind` (a
+    label the host declares, e.g. `repo`, `document`), an `id` (opaque to this
+    package; empty when the action applies to the kind as a whole, such as a
+    create), and `attributes`, an ordered string map a conformer may read
+    (empty unless the caller sets one). No id type is imported; a conformer
+    parses `id` into its own type at the edge."""
 
     var kind: String
-    var org_id: String
-    var workspace_id: String
-    var resource_id: String
+    var id: String
+    var attributes: Claims
+
+    def __init__(out self, *, var kind: String, var id: String):
+        self.kind = kind^
+        self.id = id^
+        self.attributes = Claims()
 
     def __init__(
-        out self,
-        var kind: String,
-        var org_id: String,
-        var workspace_id: String,
-        var resource_id: String,
+        out self, *, var kind: String, var id: String, var attributes: Claims
     ):
         self.kind = kind^
-        self.org_id = org_id^
-        self.workspace_id = workspace_id^
-        self.resource_id = resource_id^
+        self.id = id^
+        self.attributes = attributes^
 
-    # ---- scope factories ----
-
-    @staticmethod
-    def workspace(kind: String, workspace_id: String) -> AuthzResource:
-        """A workspace-scoped resource (org + resource id unset)."""
-        return AuthzResource(
-            kind.copy(), String(""), workspace_id.copy(), String("")
-        )
-
-    @staticmethod
-    def workspace_resource(
-        kind: String, workspace_id: String, resource_id: String
-    ) -> AuthzResource:
-        """A workspace-scoped resource carrying the PER-ROW resource id (org unset).
-        By-id verbs (get / delete / update one row) use this so the authz check
-        CARRIES the specific resource, not just the workspace scope — a conformer
-        that gates per-row can then read `resource_id`. A conformer that maps on
-        (workspace, action) alone ignores `resource_id` (the workspace-membership
-        tier); the per-row tenancy bind (the fetched row's workspace == the path
-        workspace) is then the dispatcher's to enforce."""
-        return AuthzResource(
-            kind.copy(), String(""), workspace_id.copy(), resource_id.copy()
-        )
-
-    @staticmethod
-    def org(kind: String, org_id: String) -> AuthzResource:
-        """An org-scoped resource (workspace + resource id unset)."""
-        return AuthzResource(
-            kind.copy(), org_id.copy(), String(""), String("")
-        )
-
-    @staticmethod
-    def org_and_workspace(
-        kind: String, org_id: String, workspace_id: String
-    ) -> AuthzResource:
-        """A resource scoped to a workspace within a named org (resource id
-        unset)."""
-        return AuthzResource(
-            kind.copy(), org_id.copy(), workspace_id.copy(), String("")
-        )
-
-    # ---- scope predicates ----
-
-    def has_org(self) -> Bool:
-        """True iff an org id is set (non-empty)."""
-        return self.org_id.byte_length() > 0
-
-    def has_workspace(self) -> Bool:
-        """True iff a workspace id is set (non-empty)."""
-        return self.workspace_id.byte_length() > 0
+    def with_attribute(var self, key: String, value: String) -> AuthzResource:
+        """Return this resource with `key` set to `value` in its attributes."""
+        self.attributes.set(key, value)
+        return self^
 
 
 # =============================================================================
@@ -177,8 +128,8 @@ struct AuthzResource(
 # =============================================================================
 trait AuthzPort(Movable, Deinitable):
     """The neutral authorization interface. A host binds one conformer and gates
-    its verbs through `check`; a managed deployment supplies a conformer backed
-    by its own RBAC service."""
+    its verbs through `check`; a host with a permission service supplies a
+    conformer backed by it."""
 
     def check[
         RT: Runtime,
@@ -190,7 +141,7 @@ trait AuthzPort(Movable, Deinitable):
         resource: AuthzResource,
     ) raises -> Bool:
         """The authorization interface — can `principal` do `action` on `resource`?
-        True on grant, False on deny. RT-parametric so a conformer reaching an
+        True to allow, False to deny. RT-parametric so a conformer reaching an
         async store parks on the caller's reactor."""
         ...
 
@@ -204,14 +155,14 @@ trait AuthzPort(Movable, Deinitable):
 # store is an object bucket, no database) has a real, reviewable thing to bind
 # instead of a database-backed conformer it cannot build.
 #
-# NEITHER is a substitute for authentication. `AllowAuthenticatedAuthz` grants to
+# NEITHER is a substitute for authentication. `AllowAuthenticatedAuthz` allows
 # any principal that carries a NON-EMPTY subject — which is only meaningful because
 # the identity reaching a dispatcher is the one an upstream verifier STAMPED
 # from a verified credential. Bind it only behind such a verifier, or behind an equivalent
 # ingress-level authentication; bind `DenyAllAuthz` when a surface must be off.
 # =============================================================================
 struct AllowAuthenticatedAuthz(AuthzPort):
-    """An `AuthzPort` that grants any action to any AUTHENTICATED principal — i.e.
+    """An `AuthzPort` that allows any action by any AUTHENTICATED principal — i.e.
     one whose `subject` is non-empty — and denies an unauthenticated one.
 
     The DB-free default: it delegates the whole authorization decision to
@@ -219,7 +170,7 @@ struct AllowAuthenticatedAuthz(AuthzPort):
     caller's credential has nothing left to look up without a membership store).
     A host with a membership store should bind a conformer backed by it
     instead; a host with per-repo ACLs should bind one that reads
-    `resource.resource_id`."""
+    `resource.id`."""
 
     def __init__(out self):
         pass

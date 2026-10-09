@@ -255,5 +255,35 @@ def test_a_failing_or_garbled_derive_tool_is_cannot_tell() raises:
         assert_equal(len(runner.calls), 1)
 
 
+def test_the_derive_command_is_held_to_the_build_budget() raises:
+    # with 40 s left of --build-budget-s the derive command gets 40, not its
+    # --build-timeout-s; with none left it is not started (cannot tell)
+    var root = _fresh(String("budget"))
+    var req = _request(root)
+    req.build_budget_s = 100
+    req.build_deadline_ns = 40 * 1_000_000_000
+    var runner = ScriptedRunner()
+    runner.expect(_derive(req, String(""), exit_code=Int32(3)))
+    var result = KciRunResult(String("run"), String("run"))
+    var o = _run(req, runner, result)
+    assert_equal(len(runner.calls), 1)
+    assert_equal(runner.calls[0].timeout_s, 40)
+    assert_equal(o.error_id, String(ERROR_AFFECTED))
+    var root2 = _fresh(String("nobudget"))
+    var req2 = _request(root2)
+    req2.build_budget_s = 100
+    req2.build_deadline_ns = 0
+    var none = ScriptedRunner()
+    var result2 = KciRunResult(String("run"), String("run"))
+    var o2 = _run(req2, none, result2)
+    assert_equal(o2.outcome, String(OUTCOME_INDETERMINATE), o2.message)
+    assert_equal(o2.error_id, String(ERROR_AFFECTED))
+    assert_equal(len(none.calls), 0)
+    assert_true(
+        o2.message.find(String("was not started: the build budget (--build-budget-s 100) was spent")) >= 0, o2.message
+    )
+    assert_true(o2.message.find(String("kci cannot tell which checks the build graph holds")) >= 0, o2.message)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
