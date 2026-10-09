@@ -17,11 +17,11 @@ cxx_library(
 
 # Cryptographic primitives: SHA-1 / SHA-2 / BLAKE2b-256, HMAC, HKDF, PBKDF2,
 # AES-GCM and ChaCha20-Poly1305, X25519, Ed25519, ECDSA P-256 / P-384, RSA
-# (PKCS#1 v1.5 and PSS verify, RS256 sign from a PKCS#8 DER or PEM key), an
-# RS256 JWS/JWKS verifier, a health-tested system entropy source and a
-# ChaCha20 DRBG, hex encoding, and X.509 chain validation with an embedded
-# root store. The heavy primitives call AWS-LC's libcrypto; base64, base64url,
-# base32 and PEM armor come from komira_encoding.
+# (PKCS#1 v1.5 and PSS verify, RS256 sign from a PKCS#8 DER or PEM key), a
+# health-tested system entropy source and a ChaCha20 DRBG, hex encoding, and
+# X.509 chain validation with an embedded root store. The heavy primitives call
+# AWS-LC's libcrypto; base64, base64url, base32 and PEM armor come from
+# komira_encoding.
 mojo_library(
     name = "komira_crypto",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
