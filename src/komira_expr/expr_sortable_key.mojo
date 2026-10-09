@@ -2,21 +2,17 @@
 # expr_sortable_key.mojo — Sortable composite-key Expr family
 # =============================================================================
 #
-# Consumed by:
-#   - `SortStage[KeyExpr, SortDir, SortAlgo]`
-#   - `TopNStage[N, KeyExpr, SortDir]`
-#   - `WindowStage[PartKey, OrderKey, WindowFn, frame]`
+# Callers: only tests/test_expr_sortable_key.mojo today.
 #
-# The `ExprSortableKey` trait extends the ExprX family by adding a
-# `compare` method that returns a 3-valued ordering (-1/0/1). This
-# avoids an "Expr returning trinary comparison" shape, which is an
-# anti-pattern. The comparator lives on the SortableKey conformer, NOT on
-# the Expr-tree.
+# This module ships the runtime pieces of a composite sort key:
+#   - `SortKeyComponent`, a tagged Int64 / Float64 / String cell with a
+#     null flag, and `SortKeyValue1/2/3`, tuples of them.
+#   - `cmp_sort_key_component` and `cmp_sort_key_value1/2/3`, 3-valued
+#     (-1/0/1) lexicographic comparators taking one SortDir per position.
+#   - The `ExprSortableKey` marker trait (arity + per-position direction).
 #
-# The SortKey1[K0] / SortKey2[K0, K1] / SortKey3[K0, K1, K2]
-# adapters compose ExprXI64 / ExprXF64 / ExprXString components into a
-# lexicographically-comparable composite key. Arities 1, 2, 3 are provided
-# (covers ≥95% of realistic SortStage / TopNStage / WindowStage shapes).
+# No `ExprSortableKey` conformer is declared here or anywhere in the tree;
+# a caller passes the directions to `cmp_sort_key_valueN` itself.
 #
 # Encapsulation invariants:
 #   - NO `UnsafePointer` in any public method signature.
@@ -112,8 +108,8 @@ struct SortKeyComponent(Copyable, Movable, Deinitable):
     Holds one of {Int64, Float64, String} per the `kind` field plus the
     component's `is_null` flag. Mirrors the tag+Optional in-tree pattern.
 
-    Used by SortKeyValueN. Per-component sort direction is held on the
-    SortKey1/2/3 conformer struct, NOT on the value cell.
+    Used by SortKeyValueN. The sort direction is not on the value cell;
+    the caller passes one per position to `cmp_sort_key_valueN`.
     """
 
     var kind: UInt8
@@ -206,10 +202,10 @@ def _cmp_string(a: String, b: String) -> Int8:
 def cmp_sort_key_component(a: SortKeyComponent, b: SortKeyComponent) -> Int8:
     """3-valued comparison on two SortKeyComponents.
 
-    Null handling: nulls sort LAST in ascending order (NULLS LAST per
-    SQL standard default). Per-key NULLS FIRST semantics flip the sign
-    of the comparator output (handled at SortKey* conformer level via
-    `nulls_first` flag).
+    Null handling: a null compares above every non-null and equal to
+    another null, so nulls sort LAST ascending. `cmp_sort_key_valueN`
+    negates the whole result for SORT_DIR_DESC, so under DESC nulls sort
+    FIRST. There is no separate NULLS FIRST / NULLS LAST control.
 
     Tag mismatch: undefined — caller responsible for matching DTypes
     across the two values. SortStage enforces this by storing
@@ -273,9 +269,7 @@ struct SortKeyValue3(Copyable, Movable, Deinitable):
 # =============================================================================
 #
 # Compares two SortKeyValueN values position-wise. Each position has its
-# own per-key SortDir (held on the SortKey1/2/3 conformer struct as
-# comptime params). The conformer's `compare` method calls the appropriate
-# `cmp_sort_key_valueN` helper passing the per-position dir vector.
+# own SortDir, passed by the caller (dir0, dir1, dir2).
 #
 # Returns Int8: -1 if a<b under the dir vector, 0 if equal, +1 if a>b.
 # =============================================================================
@@ -335,29 +329,15 @@ def cmp_sort_key_value3(
 # §6 — ExprSortableKey trait + per-arity conformer scaffolding
 # =============================================================================
 #
-# `ExprSortableKey` is a marker trait — concrete conformers (SortKey1,
-# SortKey2, SortKey3) ship per-arity with their own typed `extract`
-# returning the matching SortKeyValueN, and a per-arity `compare` static
-# method.
-#
-# This module ships the TRAIT SURFACE and a sample conformer per arity for
-# smoke-test coverage. Production SortKey conformers (tightly-typed
-# per-shape) are emitted by the StageFusionPass.
+# `ExprSortableKey` is a marker trait declaring a key's arity and the
+# direction of each position. It declares no `extract` or `compare`; this
+# module ships the trait only, with no conformer.
 # =============================================================================
 
 
 trait ExprSortableKey(Copyable, Movable, ImplicitlyCopyable):
-    """Marker trait for composite sortable-key conformers.
-
-    Each conformer (SortKey1[...], SortKey2[...], SortKey3[...]) ships
-    its own typed `extract` method returning the matching SortKeyValueN
-    and a `compare` static method that lex-compares two extracted values
-    under the per-key sort direction.
-
-    This module ships the trait surface + per-arity scaffolding conformers;
-    production conformers are emitted by the StageFusionPass
-    per the LogicalPlan's ORDER BY clause shape.
-    """
+    """Marker trait for composite sortable keys: the arity and the sort
+    direction of each position. No conformer exists in the tree."""
 
     @staticmethod
     def key_arity() -> Int:
