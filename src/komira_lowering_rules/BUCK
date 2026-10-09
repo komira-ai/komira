@@ -1,0 +1,63 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Host lowering rules: pure functions of an admitted plan and the facts the
+# host verified against the plan's pins (footer statistics), applied while the
+# plan is lowered. The first rule is payload narrowing (payload_narrow.mojo).
+#
+# test_payload_narrow_columns  each per-column condition and each join-level
+#                              condition, as a case that changes the decision,
+#                              against a sibling that still narrows; the width
+#                              ladder through the rule; footers, never the
+#                              plan's statistics, drive it.
+# test_payload_narrow_walk     the side shapes, the walk under every node
+#                              kind, the scan pre-order (unions, as-of joins,
+#                              leaves, tags without a payload) and the two
+#                              refusals.
+# README.md's example runs as one more welded test. The parity test against
+# the optimizer rule this replaces is in
+# //src/tests/conformance/komira_lowering_rules_conformance.
+#
+# NO PRODUCER IN THE CLOSURE. A host never re-optimizes, so a lowering rule
+# may not reach the optimizer, the SQL front end or a plan producer. The
+# comprehension below refuses, when this file loads, a dep whose name starts
+# with one of _REFUSED_DEPS. Checking the direct deps covers the closure: each
+# refused package depends on komira_plan_ir (komira_optimizer and komira_sql
+# do today; a plan producer runs the optimizer), and each dep here is
+# komira_plan_ir or in its closure, so a path from a dep here to a refused
+# package would be a cycle, which buck2 refuses.
+_REFUSED_DEPS = ["komira_optimizer", "komira_plan_producer", "komira_sql"]
+
+deps = [
+    "//src/komira_arrow:komira_arrow",
+    "//src/komira_plan_expr:komira_plan_expr",
+    "//src/komira_plan_ir:komira_plan_ir",
+    "//src/komira_plan_stats:komira_plan_stats",
+]
+
+[
+    fail("komira_lowering_rules: dep {} is refused: a host lowering rule may not depend on a package named {}*".format(d, r))
+    for d in deps
+    for r in _REFUSED_DEPS
+    if d.rpartition(":")[2].startswith(r)
+]
+
+mojo_library(
+    name = "komira_lowering_rules",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = deps,
+    test_srcs = [
+        "tests/test_payload_narrow_columns.mojo",
+        "tests/test_payload_narrow_walk.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
