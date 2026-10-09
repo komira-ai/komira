@@ -6,7 +6,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 mojo_library(
     name = "komira_name_registry",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_name_registry.mojo"],
+    test_srcs = [
+        "tests/test_name_registry.mojo",
+        "tests/test_name_registry_full.mojo",
+    ],
     deps = ["//src/komira_hash:komira_hash"],
     visibility = ["PUBLIC"],
 )
