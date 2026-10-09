@@ -891,7 +891,7 @@ Each stage is independently reviewable and leaves `main` green. Every stage ship
 | 10 | `komira_optimized_plan`, the host lowering target, the release machine | The golden corpus (§9.4): emitted at each release that ships this type, append-only, welded into the header, admission and lowering targets, with the coverage assertion and the stored-cut key test (§9.6). | Each §9.4 mutant goes red; editing or deleting a corpus file is refused by the CI check. |
 | 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef`, `UdfCode`, `CodeDigest`, `UdfKind` (with `ROW`), `CodeForm`, `RuntimeNeed`; `WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. | Every §10.4 refusal by name. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate; one that accepts a `ROW` under `PROPAGATE` or with a repeated read-set name. |
 | 12 | `komira_optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-7 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. |
-| 13 | the host lowering target, new Python and Node UDF worker packages | Worker processes under their own user id, Arrow over shared memory, load-once caching, thread limits, the §10.10 errors, the per-batch return-type check, both aggregate forms, and the §10.9 optimizer rules in the portable profile. | Mutants: a worker that reloads the payload per batch (a load counter goes red); a host that retries a `VOLATILE` batch; a float batch accepted into an int64 return type; a Node worker that accepts an unsafe integer into int64; a mergeable aggregate whose partial state is dropped at the exchange; a worker that can read the supervisor's credentials. |
+| 13 | the host lowering target, new Python and Node UDF worker packages, the `komira/native` loader | Native UDFs in-process by default and in workers on request; the supervisor's heartbeat token kept out of the engine; worker processes under their own user id, Arrow over shared memory, load-once caching, thread limits, the §10.10 errors, the per-batch return-type check, both aggregate forms, and the §10.9 optimizer rules in the portable profile. | Mutants: a worker that reloads the payload per batch (a load counter goes red); a host that retries a `VOLATILE` batch; a float batch accepted into an int64 return type; a Node worker that accepts an unsafe integer into int64; a mergeable aggregate whose partial state is dropped at the exchange; a group state over 64 MiB that does not fail `UDF_STATE_TOO_LARGE`; a supervisor that passes its heartbeat token to the engine (a native fixture that searches its own process's arguments, environment, readable files and descriptors finds it). |
 | 14 | the host lowering target, `komira_shuffle_streaming` | The streaming driver: a plan with an `UNBOUNDED` scan runs over `StreamingMorselSource`, with the §5.2 boundedness checks and the §10.10 streaming rules for UDFs. | Mutants: a host that runs an `UNBOUNDED` plan under the batch driver (an `Idle` fixture is taken for end of input and the output is short); an admission that takes the mode from `needs.unbounded` instead of the body; a plain aggregate admitted over an unbounded input. |
 
 **Critical path.** komira has no optimizer driver at the pinned commit: no `def optimize` exists under `src/`, and
@@ -902,9 +902,10 @@ the driver and stage 9 on the lowering.
 
 UDFs and streaming add three items to the critical path:
 
-- Python and Node worker runtimes and a base image per supported CPython minor, each with a Node runtime. Today the
-  base image has no engine, no Python and no Node (`packaging/images/base/README.md` in komira-ai/komira#1070).
-- The engine's UDF executor, with a worker transport in place of an in-process call.
+- Python and Node worker runtimes, the `komira/native` loader, and the bases: one per supported CPython minor and one
+  per supported Node major (§10.11). Today the base image has no engine, no Python and no Node
+  (`packaging/images/base/README.md` in komira-ai/komira#1070).
+- The engine's UDF executor: an in-process call (native UDFs' default) and a worker transport.
 - The streaming driver. The streaming source contract exists (`src/komira_morsel/streaming_source.mojo`), but
   `git grep -l StreamingMorselSource` finds only the contract, its tests and the streaming shuffle
   (`src/komira_shuffle_streaming`); no driver runs a plan over it.
@@ -952,30 +953,39 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 
 ## 14. Questions, now decided
 
-Each question below was open in an earlier revision of this document. Each is now decided, except the part of
-question 7 marked not yet decided, and the text above states the decision; the list keeps its numbering so
-references to it stay valid.
+Each question below was open in an earlier revision of this document. Each is now decided, and the text above
+states the decision; the list keeps its numbering so references to it stay valid.
 
 1. **`group_topk`.** Keep refusing it until an owner specifies its semantics (§5.2, §5.4).
 2. **Scalar subqueries.** Host-side `SCALAR_FOLD` (§5.3); revisit only if the gap measured on TPC-H Q11, Q15 and Q22 is
-   material.
+   material. That benchmark, like every benchmark in this plan, runs on the build farm's existing benchmark support,
+   not a harness of its own.
 3. **Exchanges at the cut.** The cutter never adds an exchange the producer did not place. A producer that declared
    `host_count_max = 1` gets one host (§8.2).
 4. **Keep the lowering or write an upgrade step** (§9.3). Decided per change, preferring kept lowering; an upgrade step
    only when keeping two lowerings would split an operator's code path.
-5. **Supported CPython minors.** Remote runs follow the producer's minor, 3.12 to 3.14 at the first release, with one
-   base image per minor. A new minor is added soon after its upstream release, and one is dropped from new bases at its
-   upstream end of life. A plan recorded against a dropped minor keeps running on the last base that shipped it
-   (§10.12). Free-threaded builds are distinct ABI tags and are refused by name until a base ships one.
+5. **Supported CPython minors and Node majors.** Remote runs follow the producer's version: its CPython minor, 3.12 to
+   3.14 at the first release, or its Node major. A release ships several bases, one per CPython minor and one per
+   Node major (§10.11). A new minor is added soon after its upstream release, and one is dropped from new bases at its
+   upstream end of life, and Node majors likewise. A plan recorded against a dropped version keeps running on the
+   last base that shipped it (§10.12). Free-threaded builds are distinct ABI tags and are refused by name until a base ships one.
 6. **Return types learned at run time.** Not shipped. Every return type is explicit in the plan (§10.5): a type hint
    or a verb argument in Python, a type value in TypeScript, and a refusal by name otherwise.
 7. **Serializer acceptance across base releases.** Each base accepts its own serializer version and those of the bases
-   it supersedes within one Python minor, proven by one corpus payload per version (§9.4). The rule for the Node
-   capture format is **not yet decided**: it depends on which Node majors a base carries (§10.11).
-8. **System libraries.** A dependency that needs a system library (not a Python wheel) lands inside `/opt/venv/` to
-   stay within §10.11's two prefixes: the image builder installs such libraries into a relocatable prefix there, the
+   it supersedes within one Python minor, proven by one corpus payload per version (§9.4). The Node capture format
+   follows the same rule within one Node major, since each base carries one major.
+8. **System libraries and JavaScript dependencies.** Dependencies live in the image, in the runtime's environment
+   directory `/opt/env/<runtime>/` (Python's virtual environment is `/opt/env/komira/python/`), or, for pure
+   JavaScript, bundled into the code layer under `/komira-code/`; a JavaScript package with a native addon is
+   installed for the host's platform into `/opt/env/komira/node/` (§10.6). A dependency that needs a system library
+   lands in the same environment directory: the image builder installs it into a relocatable prefix there, the
    worker, not the supervisor, gets it on its library path, and a library that cannot be relocated is refused by name
    at build time. *(Inferred: not yet tried against real packages.)*
+9. **Aggregate state.** A fixed 64 MiB cap per group at the first release; a group over it fails by name (§10.2).
+   Tuning the cap is komira-ai/komira#1148.
+10. **Native UDFs** (Mojo, Rust, C, C++ and Zig, through the C ABI) ship at the first release, in-process by
+    default, with the worker transport opt-in for crash isolation. The default holds because the supervisor's
+    run-scoped heartbeat token never reaches the engine's process or user id (§10.10).
 
 ---
 
