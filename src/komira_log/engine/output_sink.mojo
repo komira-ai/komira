@@ -300,7 +300,7 @@ struct LogSink(Movable):
         """Whole-line atomic stderr write under the P1 spin-lock."""
         var out = line + "\n"
         # acquire
-        while True:  # cov: unreachable the loop repeats only while another thread holds the lock, and these tests run on one thread
+        while True:  # cov: unreachable the retry needs another thread to hold the lock at the moment of the CAS; no deterministic test can make that happen
             var expected = UInt8(0)
             if self._lock[].compare_exchange(expected, UInt8(1)):
                 break

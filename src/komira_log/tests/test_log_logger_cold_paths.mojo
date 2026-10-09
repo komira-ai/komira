@@ -31,11 +31,10 @@ from komira_log.engine.log_event_record import LogEventRecord
 from komira_log.engine.rotation import RotationPolicy
 
 
-def _base(tag: String) -> String:
-    try:
-        return test_tmpdir() + String("/komira_log_cold_") + tag
-    except:
-        return String("/tmp/komira_log_cold_") + tag
+def _base(tag: String) raises -> String:
+    """A path under this run's private $TEST_TMPDIR. Raises when it is unset:
+    a fixed /tmp path would be shared by concurrent runs."""
+    return test_tmpdir() + String("/komira_log_cold_") + tag
 
 
 def _rm(path: String):

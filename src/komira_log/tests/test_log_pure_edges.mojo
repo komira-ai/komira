@@ -50,11 +50,10 @@ from komira_log.engine.shared_engine import SharedEngine
 from komira_log.engine.site_dictionary import SiteDictionary, fnv1a_32
 
 
-def _scratch(name: String) -> String:
-    try:
-        return test_tmpdir() + String("/komira_log_pure_") + name
-    except:
-        return String("/tmp/komira_log_pure_") + name
+def _scratch(name: String) raises -> String:
+    """A path under this run's private $TEST_TMPDIR. Raises when it is unset:
+    a fixed /tmp path would be shared by concurrent runs."""
+    return test_tmpdir() + String("/komira_log_pure_") + name
 
 
 def _rm(path: String):

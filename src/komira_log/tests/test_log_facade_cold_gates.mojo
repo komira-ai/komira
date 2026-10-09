@@ -7,9 +7,12 @@
 #   * the P1 config disabled: `log.info` writes nothing to fd 2;
 #   * the installed engine disabled: `log.info` writes nothing to its sink.
 #
-# Each "nothing" is checked against a control line written the same way once
-# the gate is open again, so an empty capture cannot come from a broken
-# capture. fd 2 is pointed at a scratch file for the P1 cases and restored
+# The two disabled-gate cases check their "nothing" against a control line
+# written the same way once the gate is open again, so an empty capture cannot
+# come from a broken capture. The no-engine case has no control line: no
+# engine is installed, so no line can be written; it asserts an empty capture
+# and that the call returns (a dereference of the null engine crashes the
+# test). fd 2 is pointed at a scratch file for the P1 cases and restored
 # before any assertion.
 # =============================================================================
 
@@ -58,11 +61,10 @@ def _o_trunc() -> Int32:
         return Int32(0x0200)
 
 
-def _base(tag: String) -> String:
-    try:
-        return test_tmpdir() + String("/komira_log_facade_") + tag
-    except:
-        return String("/tmp/komira_log_facade_") + tag
+def _base(tag: String) raises -> String:
+    """A path under this run's private $TEST_TMPDIR. Raises when it is unset:
+    a fixed /tmp path would be shared by concurrent runs."""
+    return test_tmpdir() + String("/komira_log_facade_") + tag
 
 
 def _open_fd(path: String) -> Int32:

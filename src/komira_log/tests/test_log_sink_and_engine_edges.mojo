@@ -66,11 +66,10 @@ def _o_trunc() -> Int32:
         return Int32(0x0200)
 
 
-def _base(tag: String) -> String:
-    try:
-        return test_tmpdir() + String("/komira_log_edges_") + tag
-    except:
-        return String("/tmp/komira_log_edges_") + tag
+def _base(tag: String) raises -> String:
+    """A path under this run's private $TEST_TMPDIR. Raises when it is unset:
+    a fixed /tmp path would be shared by concurrent runs."""
+    return test_tmpdir() + String("/komira_log_edges_") + tag
 
 
 def _open_fd(path: String) -> Int32:
@@ -97,7 +96,7 @@ def _rm(path: String):
         pass
 
 
-def _cleanup(tag: String):
+def _cleanup(tag: String) raises:
     _rm(_base(tag) + ".log")
     for c in range(4):
         _rm(_base(tag) + String(".core") + String(c) + ".log")
@@ -151,12 +150,15 @@ def test_an_out_of_range_worker_writes_the_fallback_segment() raises:
     var sink = LogSink.per_core_segments(_base(tag), 2, RotationPolicy.none())
     sink.write_line_core(-1, String("neg"))
     sink.write_line_core(7, String("big"))
+    # num_cores + 1 == the slot count: the first id past the end. A `>` in
+    # place of `>=` in the range check would index one past the last slot.
+    sink.write_line_core(3, String("eq"))
     var fallback = sink.segment_bytes(2)
     var core0 = sink.segment_bytes(0)
     var below = sink.segment_bytes(-1)
     var above = sink.segment_bytes(3)
     _cleanup(tag)
-    assert_equal(fallback, 8, "both lines landed in the last (fallback) slot")
+    assert_equal(fallback, 11, "all three lines landed in the last (fallback) slot")
     assert_equal(core0, 0, "and not in core 0")
     assert_equal(below, 0, "segment_bytes(-1) is 0")
     assert_equal(above, 0, "segment_bytes(num_segments) is 0")

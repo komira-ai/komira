@@ -165,8 +165,11 @@ def test_bool_arm_reads_any_nonzero_byte_as_true() raises:
 
 
 def test_unknown_tag_renders_a_question_mark_and_keeps_going() raises:
-    """An unknown tag consumes no payload, so the arg after it still decodes
-    from the right offset."""
+    """Pins current behaviour: the decoder cannot know an unknown tag's payload
+    length, so it renders `?` and consumes no bytes after the tag. The next
+    arg decodes correctly only when the unknown tag carried no payload, as
+    here; producer and drain ship in one binary, so a tag the drain does not
+    know is not expected in practice."""
     var b = List[UInt8]()
     b.append(UInt8(0x7F))
     b.append(ARG_I64)
