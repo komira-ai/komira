@@ -1,0 +1,128 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode")
+
+# Test-only: the pandas and polars doors' wire contract, without Python. Each
+# fixture in fixtures/ is a komira.plan.v1 plan as protobuf text, in the shape
+# a pandas- or polars-shaped frontend emits; protoc encodes it in a build
+# action (the `<stem>_wire` targets below) and the tests decode protoc's bytes
+# with komira_plan_wire. The library builds the same plans in Mojo with
+# komira_plan_ir (door_plans.mojo, polars_plans.mojo) and renders a plan's
+# payload fields (plan_shape.mojo, whose docstring names the few it leaves
+# out and why). Nothing ships, so `conda = False`.
+# One package holds both doors because the cross-door checks compare the two
+# doors' fixtures and builders, and both compare through one plan_shape.
+#
+# The tests, run as build actions:
+#   test_pandas_door_wire -- for sort_values (na_position first, last), merge
+#     (how left, inner), groupby (size() = count(*), agg count = count(col))
+#     and read_csv: the bytes pass plan_wire_admit and plan_wire_check_values
+#     and decode; the field each fixture is for (nulls_first, join_type, the
+#     COUNT's input, the CSV binding) is asserted by name; the decoded plan
+#     equals the Mojo-built one in render, structural_hash, output schema and
+#     plan_shape.
+#   test_polars_door_wire -- the same steps for the polars 1.44.2 shapes:
+#     scan, filter, with_columns, group_by.agg, sort and limit in one plan;
+#     is_in; an aggregate .over(); sum_horizontal; the four null-order cells;
+#     select(col.sum()) (the aggregate is kept). Then the two doors against each other:
+#     pandas groupby(sort=False) and polars group_by are the same protoc bytes
+#     and the same encoding of the Mojo-built plans; pandas' default sort=True
+#     differs from them by a SORT on the group key alone.
+#
+# `deps` lists the Mojo packages of the full transitive closure of
+# komira_plan_wire, which closes over everything the library and tests import.
+
+_PANDAS_STEMS = [
+    "groupby_count_col",
+    "groupby_size",
+    "merge_inner",
+    "merge_left",
+    "read_csv",
+    "sort_values_na_first",
+    "sort_values_na_last",
+]
+
+# The polars test's fixtures, the pandas half of the cross-door pair included.
+_POLARS_STEMS = [
+    "pandas_groupby_sum_sorted",
+    "pandas_groupby_sum_unsorted",
+    "polars_agg_over",
+    "polars_group_by_sum",
+    "polars_is_in",
+    "polars_pipeline",
+    "polars_select_sum",
+    "polars_sort_nulls_first",
+    "polars_sort_nulls_last",
+    "polars_sum_horizontal",
+]
+
+_STEMS = _PANDAS_STEMS + _POLARS_STEMS
+
+[
+    proto_encode(
+        name = "{}_wire".format(s),
+        proto_deps = ["//src/komira_plan_proto:komira_plan_proto_gen"],
+        root = "komira.plan.v1.WirePlanEnvelope",
+        txtpb = "fixtures/{}.txtpb".format(s),
+    )
+    for s in _STEMS
+]
+
+mojo_library(
+    name = "komira_pandas_door_e2e",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_host:komira_host",
+        "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_proto:komira_plan_proto",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_plan_wire:komira_plan_wire",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_protobuf:komira_protobuf",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_zlib:komira_zlib",
+    ],
+    test_srcs = [
+        "tests/test_pandas_door_wire.mojo",
+        "tests/test_polars_door_wire.mojo",
+    ],
+    # Each encoding is staged as wire/<stem>.hex; the test opens it by that
+    # path (it runs with the staged data as its current directory).
+    test_data = {
+        "tests/test_pandas_door_wire.mojo": {
+            "wire/{}.hex".format(s): ":{}_wire".format(s)
+            for s in _PANDAS_STEMS
+        },
+        "tests/test_polars_door_wire.mojo": {
+            "wire/{}.hex".format(s): ":{}_wire".format(s)
+            for s in _POLARS_STEMS
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

@@ -29,8 +29,9 @@ BOTOCORE_MODELS = {
         sha256 = "fdb831dc9be4cb380b42e21525a1a7e6e379958b7d8a3df7fd71c6c7f50df47c",
     ),
     # Amazon CloudWatch (//src/komira_aws_metrics), whose GetMetricData
-    # reader is hand-written: the model declares smithy-rpc-v2-cbor, which
-    # the AWS generator refuses. Its test_cloudwatch_model checks the
+    # reader is hand-written; generating it from this model is a follow-up
+    # (the AWS generator chooses `json` from the model's `protocols`, whose
+    # first entry is smithy-rpc-v2-cbor). Its test_cloudwatch_model checks the
     # reader's constants against this model and its endpoint against the
     # service's endpoint tests. Its endpoint prefix and signing name are
     # `monitoring`.
@@ -103,6 +104,13 @@ BOTOCORE_MODELS = {
     "secretsmanager": struct(
         api_version = "2017-10-17",
         sha256 = "d568532fb0db48e0ce9c3c30b6f48aae734e1657105043990ef699ec48656671",
+    ),
+    # Amazon SES, the classic API (//src/komira_aws_ses), an awsQuery client
+    # of its receipt rules, which SES API v2 does not have. Its endpoint
+    # prefix is `email` and its signing name `ses`, as v2's.
+    "ses": struct(
+        api_version = "2010-12-01",
+        sha256 = "78f98dc6c5f4b83a60ba84091f5b76dd14b01a8a37be52cad384430b2a08b862",
     ),
     # Amazon SES API v2 (//src/komira_aws_sesv2). Its endpoint prefix is
     # `email` and its signing name `ses`.

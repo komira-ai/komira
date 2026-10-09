@@ -807,8 +807,8 @@ def _resolve_nulls_first(descending: List[Bool], var provided: Optional[List[Boo
     When `provided` is None, fill in the engine's DERIVED default per key —
     `null_order_policy.derived_nulls_first`, which is NULLS LAST in BOTH
     directions and matches DuckDB v1.5.3's `default_null_order`. When `provided`
-    is Some, it is an explicit per-key override (SQL `NULLS FIRST/LAST`, Excel
-    placement) and is used VERBATIM.
+    is Some, it is an explicit per-key override (SQL `NULLS FIRST/LAST`) and is
+    used VERBATIM.
 
     ⭐ THE POLICY IS NOT WRITTEN HERE, AND THAT IS THE POINT. A rule spelled
     inline here and at other sites — some inside specialised kernels that take

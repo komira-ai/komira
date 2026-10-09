@@ -1,0 +1,49 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
+
+# The frozen fixture repo of komira_kg_code's golden test: kgfix, a library
+# with a welded test, a standalone test target, and a document governing
+# it. A package of its own, so kgfix does not run komira_kg_code's
+# README.md examples. Only komira_kg_code's tests read it.
+mojo_library(
+    name = "kgfix",
+    srcs = [
+        "kgfix/__init__.mojo",
+        "kgfix/shapes.mojo",
+        "kgfix/sub/__init__.mojo",
+        "kgfix/sub/leaf.mojo",
+    ],
+    deps = ["//src/komira_json:komira_json"],
+    conda = False,
+    test_srcs = ["tests/test_grid.mojo"],
+)
+
+# kgfix's standalone test, so the fixture graph has a test target that is
+# not welded.
+mojo_test(
+    name = "kgfix_dot_test",
+    srcs = ["tests/test_dot.mojo"],
+    deps = [":kgfix"],
+)
+
+# The compiler's reading of kgfix, the golden test's doc JSON input.
+mojo_doc_json(
+    name = "kgfix_doc",
+    lib = ":kgfix",
+    visibility = ["//src/komira_kg_code:"],
+)
+
+# Every file of the fixture repo, staged whole for the golden test.
+filegroup(
+    name = "files",
+    srcs = [
+        "docs/kgfix.md",
+        "kgfix/__init__.mojo",
+        "kgfix/shapes.mojo",
+        "kgfix/sub/__init__.mojo",
+        "kgfix/sub/leaf.mojo",
+        "tests/test_dot.mojo",
+        "tests/test_grid.mojo",
+    ],
+    visibility = ["//src/komira_kg_code:"],
+)

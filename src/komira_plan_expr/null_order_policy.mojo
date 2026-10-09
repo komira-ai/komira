@@ -61,7 +61,7 @@
 #   about which direction it is asking about.
 #
 # ⛔ THIS IS THE **DEFAULT**, NOT THE ANSWER. An explicit per-key request (SQL
-#   `NULLS FIRST` / `NULLS LAST`, an Excel placement) is carried on
+#   `NULLS FIRST` / `NULLS LAST`) is carried on
 #   `SortData.nulls_first` / `TopNData.nulls_first` and used VERBATIM; this
 #   function is consulted only where nobody asked. `physical_plan.
 #   is_explicit_nulls_first_request` is the predicate that tells the two apart,
