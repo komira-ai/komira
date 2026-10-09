@@ -650,17 +650,10 @@ struct TxnControlStore[Store: ConditionalWriteStore](
                 var out = self.read(transactional_id)
                 if out:
                     return out.value().copy()
-                # Should not happen (we just wrote it) — synthesize.
-                var parts = List[TxnPartition]()
-                return TxnControl(
-                    cur.producer_id,
-                    cur.epoch,
-                    TXN_STATE_ONGOING,
-                    next_ver,
-                    parts^,
-                    List[TxnPendingOffset](),
-                    String(meta.etag),
-                )
+                # Should not happen (we just wrote it): return what was
+                # written (the merged partitions and the carried offsets).
+                updated.etag = String(meta.etag)
+                return updated^
             except e:
                 if not _tc_is_precondition(String(e)):
                     raise e^
