@@ -301,7 +301,7 @@ def test_not_over_is_null() raises:
 def test_unsupported_bool_root_is_refused() raises:
     var pool = List[RuntimeExpr]()
     pool.append(make_lit_i64(1))
-    with assert_raises(contains="_eval_bool_from_source: unsupported node kind 1 at pool slot 0"):
+    with assert_raises(contains="_eval_bool_present_from_source: unsupported node kind 1 at pool slot 0"):
         _ = _filter(_exec(pool^))
 
 
