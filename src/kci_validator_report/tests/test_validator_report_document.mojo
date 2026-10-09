@@ -301,11 +301,14 @@ def _run_doc(
     steps: List[String],
     status: List[String],
     detail: List[String],
+    scoped: Bool = True,
+    exit_code: Int = 0,
 ) raises -> String:
     return render_run_document(
         String("staging"), String("b"), String("w"), String("01JC"),
-        1788220800000000, 1788220860000000, evidence, True,
-        authored, executed, skipped, deselected, steps, status, detail, 0,
+        1788220800000000, 1788220860000000, evidence, scoped,
+        authored, executed, skipped, deselected, steps, status, detail,
+        exit_code,
     )
 
 
@@ -376,6 +379,21 @@ def test_run_document_bytes() raises:
     )
 
 
+def test_run_document_full_run_and_failed_exit_are_rendered() raises:
+    # `scoped` and `exit_code` are passed through, not defaulted: a full
+    # (unscoped) run must not render as scoped, and a failed run must not
+    # be recorded as exit 0. Both lines are asserted whole.
+    var one = _names(String("a"), String(""))
+    var none = List[String]()
+    var doc = _run_doc(
+        String("VALIDATED"), one, one, none, none, none, none, none,
+        scoped=False, exit_code=3,
+    )
+    assert_true(_contains(doc, String("  \"scoped\":false,\n")), doc)
+    assert_true(_contains(doc, String("  \"exit_code\":3\n}\n")), doc)
+    assert_false(_contains(doc, String("\"scoped\":true")), doc)
+
+
 def test_run_document_refuses_empty_evidence_and_ragged_columns() raises:
     var e = String("")
     var one = _names(String("a"), e)
@@ -433,6 +451,7 @@ def main() raises:
     test_latest_key_is_env_target_step_and_refuses_each()
     test_latest_pointer_bytes()
     test_run_document_bytes()
+    test_run_document_full_run_and_failed_exit_are_rendered()
     test_run_document_refuses_empty_evidence_and_ragged_columns()
     test_run_document_refuses_a_census_that_does_not_partition()
     print("test_validator_report_document: ALL PASS")
