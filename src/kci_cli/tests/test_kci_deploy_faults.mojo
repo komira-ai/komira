@@ -23,10 +23,8 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.os import makedirs
+from std.os import getenv, makedirs
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
-
-from komira_libc.posix import _read_env
 
 from kci_build import BuildRequest
 from kci_reconciler import Creds, InMemoryStateStore
@@ -87,9 +85,9 @@ def _chdir(path: String) raises:
 
 
 def _root(tag: String) raises -> String:
-    var base = _read_env("TEST_TMPDIR")
+    var base = getenv("TEST_TMPDIR")
     if base.byte_length() == 0:
-        base = _read_env("TMPDIR")
+        base = getenv("TMPDIR")
     if base.byte_length() == 0:
         raise Error("neither TEST_TMPDIR nor TMPDIR is set")
     var d = base + String("/kci_deploy_fault_") + tag + String("_") + String(Int(external_call["getpid", Int32]()))

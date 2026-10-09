@@ -31,17 +31,29 @@
 #      cloud".
 #  10. A trust finding (the cell's `principal` is not who the credentials
 #      are): REFUSED, exit 3, KCI-E-CLOUD, no call.
+#  11. `plan_hash` is the sha256 of the actions in node-id order: a golden
+#      over actions handed in another order, and the same golden from a
+#      `--plan` of the three buckets (computed outside kci).
+#  12. A second apply of a file that dropped `cache` and turned `media` from
+#      a bucket into a secret: `cache/bucket` is leftover and `media/bucket`
+#      (a KEEP bucket the file no longer lowers) is left behind, in the row
+#      and the summary; nothing is deleted and both objects stand; the
+#      summary states the two v1 limits (no lease, no destroy).
+#  13. A step naming a cell its cells file does not declare: REFUSED at
+#      load (KCI-E-FORMAT), no step run, no call.
+#
+# The step reads `resources` relative to the directory kci runs in (the
+# parser refuses an absolute path, and kci has no working-directory flag),
+# so each case changes into its own directory first.
 # =============================================================================
 
 from std.ffi import external_call
-from std.os import makedirs
+from std.os import getenv, makedirs
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_libc.posix import _read_env
-
 from kci_build import BuildRequest
-from kci_reconciler import CellScope, Creds, InMemoryStateStore, LABEL_MACHINE, Provenance
+from kci_reconciler import ChangeAction, CellScope, Creds, InMemoryStateStore, LABEL_MACHINE, Provenance, VERB_CREATE
 from kci_cloud import decode_label_value
 from kci_cloud_fake import FakeCloud
 from kci_cli import (
@@ -52,6 +64,7 @@ from kci_cli import (
     StageSteps,
     StepEnd,
     kci_main_with,
+    plan_hash_of,
     write_whole_file,
 )
 from kci_api import OUTCOME_SUCCEEDED, ResultValidation, parse_result
@@ -116,9 +129,9 @@ def _chdir(path: String) raises:
 def _root(tag: String) raises -> String:
     """A fresh directory, made the working directory: the step reads its
     resource list relative to it."""
-    var base = _read_env("TEST_TMPDIR")
+    var base = getenv("TEST_TMPDIR")
     if base.byte_length() == 0:
-        base = _read_env("TMPDIR")
+        base = getenv("TMPDIR")
     if base.byte_length() == 0:
         raise Error("neither TEST_TMPDIR nor TMPDIR is set")
     var d = base + String("/kci_deploy_") + tag + String("_") + String(Int(external_call["getpid", Int32]()))
@@ -127,7 +140,9 @@ def _root(tag: String) raises -> String:
     return d^
 
 
-def _machine(dir: String, resources: String, settings: String = String("")) raises -> String:
+def _machine(
+    dir: String, resources: String, settings: String = String(""), cell: String = String("blue")
+) raises -> String:
     """The machine file (file header) in `dir`, its cells file and the
     resource list `resources` (as app.json, relative)."""
     write_whole_file(
@@ -141,7 +156,7 @@ def _machine(dir: String, resources: String, settings: String = String("")) rais
         String("schema_version: 1\nname: \"shop\"\n")
         + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"a.textproto\" } }\n")
         + String("stage { name: \"deploy\" after: \"build\" step { name: \"apply\" kind: DEPLOY cells: \"")
-        + dir + String("/cells.textproto\" cell: \"blue\" resources: \"app.json\" } }\n"),
+        + dir + String("/cells.textproto\" cell: \"") + cell + String("\" resources: \"app.json\" } }\n"),
     )
     return m^
 
@@ -409,6 +424,87 @@ def test_a_trust_finding_is_refused() raises:
     assert_equal(r.outcome, String("REFUSED"))
     assert_equal(r.error.id, String("KCI-E-CLOUD"))
     assert_true(r.error.message.find(String("deployer")) >= 0, r.error.message)
+    assert_equal(deploys.cloud.mutations(), 0)
+
+
+comptime _PLAN_HASH: String = "035885901bad7ddde215dd5bd8c07dec302c280c1260a4ad80df35fb3d86185f"
+"""sha256 of `[{"node":"cache/bucket","owner":"cache","verb":"create"},{"node":"logs/bucket",...},{"node":"media/bucket",...}]`,
+computed outside kci (Python hashlib)."""
+
+
+def test_plan_hash_is_over_the_actions_in_node_id_order() raises:
+    """Catches: the sort by node id turned off (the hash then follows the
+    order the actions came in)."""
+    var unsorted = List[ChangeAction]()
+    for n in ["media", "logs", "cache"]:
+        unsorted.append(ChangeAction(String(n) + String("/bucket"), VERB_CREATE, String(""), 0, String(n)))
+    assert_equal(plan_hash_of(unsorted), String(_PLAN_HASH))
+    var sorted = List[ChangeAction]()
+    for n in ["cache", "logs", "media"]:
+        sorted.append(ChangeAction(String(n) + String("/bucket"), VERB_CREATE, String(""), 0, String(n)))
+    assert_equal(plan_hash_of(sorted), String(_PLAN_HASH))
+    var d = _root(String("hash-golden"))
+    var m = _machine(d, String(_BUCKETS))
+    var steps = Steps()
+    var deploys = _deploys(FakeCloud())
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(m, d + String("/summary.md"), plan=True), steps, deploys, rec), 0)
+    assert_equal(_last(rec).steps[0].deploy.plan_hash, String(_PLAN_HASH))
+
+
+def _deletes(deploys: CloudDeploys[FakeCloud, InMemoryStateStore]) -> Int:
+    var n = 0
+    ref calls = deploys.cloud.store[].calls
+    for i in range(len(calls)):
+        if calls[i].startswith(String("delete ")):
+            n += 1
+    return n
+
+
+def test_leftover_and_left_behind_are_reported_and_never_deleted() raises:
+    """Catches: `leftover` or `left_behind` not set in the step row, not in
+    the summary, or acted on (deleted)."""
+    var d = _root(String("leftover"))
+    var m = _machine(d, String(_BUCKETS))
+    var steps = Steps()
+    var deploys = _deploys(FakeCloud())
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec), 0)
+    write_whole_file(d + String("/app.json"), String('{"resource":[{"id":"media","secret":{}},{"id":"logs","bucket":{}}]}'))
+    var rec2 = CliRecorder.memory(String(""))
+    var rc = kci_main_with(_run(m, d + String("/summary2.md")), steps, deploys, rec2)
+    var r = _last(rec2)
+    assert_equal(rc, 0, r.error.message)
+    ref row = r.steps[0].deploy
+    assert_equal(len(row.leftover), 1)
+    assert_equal(row.leftover[0], String("cache/bucket"))
+    assert_equal(len(row.left_behind), 1)
+    assert_equal(row.left_behind[0], String("media/bucket"))
+    assert_equal(_deletes(deploys), 0, "kci deletes neither")
+    assert_true(len(deploys.cloud.live_labels(String("cache/bucket"))) > 0, "the leftover object stands")
+    assert_true(len(deploys.cloud.live_labels(String("media/bucket"))) > 0, "the left-behind object stands")
+    var summary = Path(d + String("/summary2.md")).read_text()
+    assert_true(summary.find(String("leftover (owned by resources the file no longer names; kci does not delete them): `cache/bucket`")) >= 0, summary)
+    assert_true(summary.find(String("left behind (retained objects the file no longer lowers; kci does not delete them): `media/bucket`")) >= 0, summary)
+    assert_true(summary.find(String("an apply run by hand outside CI is serialized with nothing")) >= 0, summary)
+    assert_true(summary.find(String("v1 has no destroy verb")) >= 0, summary)
+
+
+def test_a_cell_its_cells_file_does_not_declare_is_refused_at_load() raises:
+    """Catches: the cells file not read at load (the step would run and
+    refuse the cell itself, with a step row)."""
+    var d = _root(String("undeclared"))
+    var m = _machine(d, String(_BUCKETS), cell=String("green"))
+    var steps = Steps()
+    var deploys = _deploys(FakeCloud())
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec), 3)
+    var r = _last(rec)
+    assert_equal(r.outcome, String("REFUSED"))
+    assert_equal(r.error.id, String("KCI-E-FORMAT"))
+    assert_true(r.error.message.find(String("names cell 'green'")) >= 0, r.error.message)
+    assert_equal(len(r.steps), 0, "refused at load: no step ran")
+    assert_equal(len(steps.hashed), 0, "refused before the start checks")
     assert_equal(deploys.cloud.mutations(), 0)
 
 

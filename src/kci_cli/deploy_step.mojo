@@ -543,7 +543,8 @@ def _raised[
     if defect.byte_length() > 0:
         return _end(
             row^, result, String(OUTCOME_FAILED), String(ERROR_DEPLOY),
-            String("a defect of kci or the cloud adapter, before anything was written: ") + defect,
+            String("a defect of kci or the cloud adapter, before anything was written: ") + defect
+            + String(" (the verb raised: ") + error + String(")"),
             String(RETRY_NEEDS_HUMAN),
         )
     return _end(

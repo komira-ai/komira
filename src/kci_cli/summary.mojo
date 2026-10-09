@@ -22,7 +22,8 @@
 #   deploy_markdown       a DEPLOY step's block: its cell and cloud, the
 #                         outcome, the plan (or what the apply did) and the
 #                         deploy keys; leftover and left behind are listed,
-#                         never deleted
+#                         never deleted; and the two v1 limits (no cell
+#                         lease, no destroy verb)
 #   append_summary        appends to the file, never truncates
 #
 # Pure functions over owned values (append_summary writes the one file it is
@@ -246,6 +247,19 @@ def carried_markdown(stage: String, previous: Int, ours: Int, first_parent: List
     return s + String("\n")
 
 
+comptime DEPLOY_NO_LEASE_LINE: String = (
+    "- v1 has no cell lease: only pushes to main deploy, one run at a time; an apply run by hand outside CI is"
+    " serialized with nothing"
+)
+"""The first of a DEPLOY block's v1 limits (deploy_step.md, "What v1 does not do")."""
+
+comptime DEPLOY_NO_DESTROY_LINE: String = (
+    "- v1 has no destroy verb: a resource removed from the file is left standing as leftover; teardown is a"
+    " human step"
+)
+"""The second of a DEPLOY block's v1 limits."""
+
+
 def _ids_line(label: String, ids: List[String]) -> String:
     var s = String("- ") + label + String(":")
     for i in range(len(ids)):
@@ -291,4 +305,6 @@ def deploy_markdown(
         s += _ids_line(String("left behind (retained objects the file no longer lowers; kci does not delete them)"), d.left_behind)
     if len(d.released) > 0:
         s += _ids_line(String("would release") if plan else String("released"), d.released)
+    if d.cell.byte_length() > 0:
+        s += String(DEPLOY_NO_LEASE_LINE) + String("\n") + String(DEPLOY_NO_DESTROY_LINE) + String("\n")
     return s + String("\n")
