@@ -161,6 +161,8 @@
 from std.os.path import isfile
 from std.pathlib import Path
 
+from std.time import perf_counter_ns
+
 from komira_clock import now_unix_ms
 
 from kci_build import BuildRequest
@@ -383,6 +385,11 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
     req.platform = step.platform.copy()
     if cmd.build_timeout_s > 0:
         req.build_timeout_s = cmd.build_timeout_s
+    req.build_budget_s = cmd.build_budget_s
+    if cmd.build_budget_s > 0:
+        # the budget counts from kci's start (`kci_main_with`), on the
+        # monotonic clock the BUILD step's runner reads (ProcessRunner.now_ns)
+        req.build_deadline_ns = cmd.started_ns + cmd.build_budget_s * 1_000_000_000
     req.affected_by = cmd.affected_by.copy()
     return req^
 
@@ -719,7 +726,9 @@ def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder:
     """`kci <args>`: parse; print the usage; or `kci run`. A refused command
     line is exit 2, recorded in the file `--result-file` names and summarized
     in the file `--summary-file` names, when it names them. Returns the exit
-    number."""
+    number. Its first act reads the monotonic clock: kci's start, from which
+    `--build-budget-s` counts."""
+    var started_ns = Int(perf_counter_ns())
     var cmd: KciCommand
     try:
         cmd = parse_kci_args(args)
@@ -740,6 +749,7 @@ def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder:
     if cmd.verb == String(CLI_VERB_HELP):
         _say(String(KCI_USAGE))
         return EXIT_OK
+    cmd.started_ns = started_ns
     return run_stage_with(cmd, steps, recorder)
 
 

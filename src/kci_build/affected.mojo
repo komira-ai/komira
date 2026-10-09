@@ -23,10 +23,11 @@
 # 2b. Each build system declaring `derive_checks`, in file order: its
 #    command runs (cwd --work-dir, the affected command's placeholders,
 #    `{units_file}` = `<log>/_declared_units.tsv`, every declared unit's
-#    targets; stdout and stderr to `<log>/_derive_<bs>.stdout|.stderr`), and
-#    the checks it answers are added after the declared ones under the
-#    file's rules (kci_artifact derive.mojo). A tool that fails or answers
-#    outside the grammar is INDETERMINATE (KCI-E-AFFECTED); an UNMATCHED
+#    targets; stdout and stderr to `<log>/_derive_<bs>.stdout|.stderr`;
+#    timeout as in step 3), and the checks it answers are added after the
+#    declared ones under the file's rules (kci_artifact derive.mojo). A tool
+#    that is not started for want of budget, fails or answers outside the
+#    grammar is INDETERMINATE (KCI-E-AFFECTED); an UNMATCHED
 #    artifact target, or a derived check the file's rules refuse, is
 #    REFUSED (KCI-E-ARTIFACT); an UNMATCHED check target is a NOTICE line
 #    (stderr, and the outcome's lines before WOULD_BUILD / BUILT).
@@ -34,7 +35,9 @@
 #    gets its units' targets (kci_artifact `units_file_text`), and its
 #    affected command runs through the ProcessRunner (cwd --work-dir, stdout
 #    and stderr to `<log>/_affected_<bs>.stdout|.stderr`, timeout
-#    --build-timeout-s). A command that cannot be started, exits non-zero,
+#    --build-timeout-s, or less: what is left of --build-budget-s, see
+#    affected_batch.mojo THE BUDGET; with nothing left it is not started).
+#    A command that is not started, cannot be started, exits non-zero,
 #    is killed or times out, or whose stdout breaks the answer grammar
 #    (kci_artifact `parse_affected_answer`) is INDETERMINATE
 #    (KCI-E-AFFECTED): kci cannot tell what the change reaches, and it never
@@ -56,7 +59,12 @@
 #    A library's welded tests run inside its build. A batch that exits
 #    non-zero is retried unit by unit to name the failing units, up to
 #    MAX_FAILED_UNITS failures; a timed-out or killed batch is not retried.
-#    Any failed unit or unattributed batch is FAILED (KCI-E-BUILD-FAILED); a
+#    With --build-budget-s, every run of this step 5 may take what is left
+#    of the budget, which counts from kci's own start (the steps above and
+#    kci's start-up are charged to it), at most --build-timeout-s, and a run
+#    with nothing left is not started (its units are not built).
+#    Any failed unit, unattributed batch or unit not built for want of
+#    budget is FAILED (KCI-E-BUILD-FAILED); a
 #    build that cannot be started is INDETERMINATE (KCI-E-CANNOT-TELL), and
 #    so is a batch that failed while each of its units built alone (never a
 #    pass). `BUILT <unit>` lines name exactly the units an exit-0 run
@@ -117,7 +125,7 @@ from kci_api import (
 )
 from kci_api import RunResult as KciRunResult
 
-from kci_build.affected_batch import affected_spec, build_affected_units
+from kci_build.affected_batch import affected_spec, budget_spent_text, budget_timeout_s, build_affected_units
 from kci_build.request import BuildOutcome, BuildRequest
 from kci_build.revision import changed_files
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
@@ -181,10 +189,16 @@ def _derive[R: ProcessRunner](
                 String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
                 String("--affected-by: build system '") + bs + String("': ") + String(e),
             )
-        var spec = affected_spec(argv, req, req.log_dir + String("/_derive_") + bs)
-        print(String("BUILD step: derive_checks: ") + bs + String(": ") + spec.command_line(), file=_STDERR)
+        var timeout_s = budget_timeout_s(req, runner)
+        var spec = affected_spec(argv, req, req.log_dir + String("/_derive_") + bs, timeout_s)
         var what = String("the derive_checks command of build system '") + bs + String("', `") + spec.command_line() + String("`, ")
         var cannot = String(": kci cannot tell which checks the build graph holds")
+        if timeout_s < 1:
+            return _stop(
+                String(OUTCOME_INDETERMINATE), String(ERROR_AFFECTED),
+                what + String("was not started: ") + budget_spent_text(req) + cannot,
+            )
+        print(String("BUILD step: derive_checks: ") + bs + String(": ") + spec.command_line(), file=_STDERR)
         var r: RunResult
         try:
             r = runner.run(spec)
@@ -268,7 +282,10 @@ def _ask[R: ProcessRunner](
                 String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
                 String("--affected-by: build system '") + bs + String("': ") + String(e),
             )
-        var spec = affected_spec(argv, req, req.log_dir + String("/_affected_") + bs)
+        var timeout_s = budget_timeout_s(req, runner)
+        var spec = affected_spec(argv, req, req.log_dir + String("/_affected_") + bs, timeout_s)
+        if timeout_s < 1:
+            return _tool_failed(bs, spec, String("was not started: ") + budget_spent_text(req))
         print(String("BUILD step: affected: ") + bs + String(": ") + spec.command_line(), file=_STDERR)
         var r: RunResult
         try:

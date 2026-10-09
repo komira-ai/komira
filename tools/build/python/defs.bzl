@@ -1,4 +1,5 @@
-"""Hermetic Python for tests: `python_dist`, `python_wheel` and `py_test`.
+"""Hermetic Python for tests: `python_dist`, `python_wheel`, `py_test`,
+`python_oracle` and `python_proto`.
 
 `python_dist` unpacks a sha256-pinned CPython archive (an `install_only`
 archive of python-build-standalone) into a directory and fails unless the
@@ -8,6 +9,10 @@ and `wheel_install.py` (no pip): it fails unless the wheel's `.dist-info` names
 the pinned distribution and version. `py_test` runs one Python script with that
 interpreter as a build action, through `pyrun.py`; its output exists only if
 the script passed, so building the target is running the test.
+`python_oracle` runs one script twice, through `oracle_run.py`, and outputs
+the directory it wrote, which other targets take as test data; it fails
+unless both runs wrote the same tree. `python_proto` runs the pinned protoc
+to generate one `_pb2.py` module.
 
 Every action runs `bin/python3.<minor>` of the unpacked archive with `-I -S`:
 no `PYTHON*` variable, no user or system site directory, no script directory
@@ -18,17 +23,24 @@ the wheels' extension modules link beyond glibc (the dist's `preload`, from
 its `native_libs` directory) are loaded by path before the script runs, so
 an extension module needing one finds that copy, not the worker's: the
 loader resolves a needed name to an object already loaded under that soname.
-The environment of the `python_wheel` and `py_test` actions is `LC_ALL=C`
-and `TZ=UTC0` (a POSIX rule: local time is UTC and the C library reads no
-zone file for it); a `py_test`'s also has `TZDIR`, the `zoneinfo` directory
-of its `tzdata` wheel, which `pyrun.py` makes Python's only zone path, so no
-zone is read from the worker.
+The environment of the `python_wheel`, `py_test` and `python_oracle` actions
+is `LC_ALL=C` and `TZ=UTC0` (a POSIX rule: local time is UTC and the C
+library reads no zone file for it); a `py_test`'s and a `python_oracle`'s
+also has `TZDIR`, the `zoneinfo` directory of its `tzdata` wheel, which
+`pyrun.py` and `oracle_run.py` make Python's only zone path, so no zone is
+read from the worker. An oracle's script runs in a child interpreter
+`oracle_run.py` starts with `-s -S -P` instead (no user site directory, no
+`site`, no script directory put first by the interpreter) and the
+environment `LC_ALL=C PYTHONHASHSEED=0 TZ=UTC0 TZDIR=<absolute>` and nothing
+else, so that string hashes are the same in every run; `-I` would ignore
+`PYTHONHASHSEED`.
 
 The rules are linux x86_64 only: the macros set `exec_compatible_with` to
 the linux x86_64 execution platform.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
@@ -248,6 +260,137 @@ _py_test = rule(
     },
 )
 
+# ---- python_oracle -----------------------------------------------------------
+#
+# An oracle computes the answer a komira test compares against, so nothing it
+# reads may come from komira: src, each srcs entry, each data source, each
+# wheel of deps and the interpreter's directory, if an action built it (not a
+# checked-in file), must be the output of a target under third_party/. Only
+# direct inputs are checked: a third_party/ target is trusted not to build from
+# komira.
+_ORACLE_INPUT_REFUSED = "{}: the oracle's {} is built by {}, which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only, so that its answer cannot come from komira (tools/build/python/README.md, Oracles)"
+
+def _third_party(label):
+    return label != None and (label.package == "third_party" or label.package.startswith("third_party/"))
+
+def _check_independent(ctx, what, artifact):
+    if artifact.is_source:
+        return
+    owner = artifact.owner
+    if not _third_party(owner):
+        fail(_ORACLE_INPUT_REFUSED.format(
+            ctx.label.raw_target(),
+            what,
+            owner.raw_target() if owner != None else "an action of no rule",
+        ))
+
+def _check_outs(ctx):
+    seen = {}
+    for p in ctx.attrs.outs:
+        if p == "" or p.startswith("/") or p.endswith("/"):
+            fail("{}: outs entry {} must be a relative file path".format(ctx.label.raw_target(), repr(p)))
+        for part in p.split("/"):
+            if part in ("", ".", ".."):
+                fail("{}: outs entry {} holds an empty, `.` or `..` segment".format(ctx.label.raw_target(), repr(p)))
+        if p in seen:
+            fail("{}: outs names {} twice".format(ctx.label.raw_target(), repr(p)))
+        seen[p] = True
+
+def _python_oracle_impl(ctx):
+    dist = ctx.attrs.python[PythonDistInfo]
+    where = str(ctx.label.raw_target())
+    data = data_map(ctx, where + ": data", ctx.attrs.data)
+    for dest in sorted(data.keys()):
+        _check_independent(ctx, "data {}".format(repr(dest)), data[dest])
+    _check_independent(ctx, "src", ctx.attrs.src)
+    srcs = {ctx.attrs.src.short_path: ctx.attrs.src}
+    for s in ctx.attrs.srcs:
+        _check_independent(ctx, "srcs entry {}".format(repr(s.short_path)), s)
+        if s.short_path in srcs:
+            fail("{}: {} is listed twice".format(ctx.label, s.short_path))
+        srcs[s.short_path] = s
+    closure = {}
+    for d in ctx.attrs.deps + [ctx.attrs.tzdata]:
+        for k, v in d[PythonWheelInfo].closure.items():
+            _check_independent(ctx, "wheel {}".format(k), v[1])
+            if k in closure and closure[k][0] != v[0]:
+                fail("{}: {} is pinned at {} and at {} in its deps".format(ctx.label, k, closure[k][0], v[0]))
+            closure[k] = v
+    # The interpreter's directory is built by the python_dist target itself;
+    # its native_libs and preload libraries come with that target, trusted
+    # like any other third_party/ target's inputs.
+    _check_independent(ctx, "python", dist.root)
+    _check_outs(ctx)
+    staged = ctx.actions.copied_dir(ctx.label.name + ".srcs", srcs)
+    data_dir = ctx.actions.copied_dir(ctx.label.name + ".data", data)
+    out = ctx.actions.declare_output(ctx.label.name, dir = True)
+    tmp = ctx.actions.declare_output(ctx.label.name + ".tmp", dir = True)
+    cmd = cmd_args(_python(dist), "-I", "-S", ctx.attrs._runner, "--out", out.as_output(), "--tmpdir", tmp.as_output(), "--data", data_dir)
+    for lib in dist.preload:
+        cmd.add("--preload", cmd_args(dist.native_libs, format = "{}/" + lib))
+    for k in sorted(closure.keys()):
+        cmd.add("--site", closure[k][1])
+    for p in ctx.attrs.outs:
+        cmd.add("--outs", p)
+    cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), ctx.attrs.args)
+    # The zone database, as in a py_test: oracle_run.py passes TZDIR (made
+    # absolute) and TZ=UTC0 to each run and makes TZDIR zoneinfo's only path.
+    tzdata = ctx.attrs.tzdata[PythonWheelInfo].closure[ctx.attrs.tzdata[PythonWheelInfo].name][1]
+    env = dict(_ENV)
+    env["TZDIR"] = cmd_args(tzdata, format = "{}/tzdata/zoneinfo")
+    ctx.actions.run(cmd, env = env, category = "python_oracle")
+    return [DefaultInfo(
+        default_output = out,
+        other_outputs = [tmp],
+        sub_targets = {p: [DefaultInfo(default_output = out.project(p))] for p in ctx.attrs.outs},
+    )]
+
+_python_oracle = rule(
+    impl = _python_oracle_impl,
+    doc = "Runs `src` twice with the hermetic interpreter (`oracle_run.py`) and outputs the directory the first run wrote, only if both runs wrote the same tree; each `outs` path is a sub-target `[<path>]`. The script gets `sys.argv = [src, <output directory>, <data directory>, *args]`; `data` ({dest: source}, or sources staged at their paths) is staged in the data directory, `srcs` next to `src`. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under third_party/. `tzdata` is the wheel whose `tzdata/zoneinfo` directory is each run's `TZDIR` and Python's only zone path; it is in the closure.",
+    attrs = {
+        "args": attrs.list(attrs.string(), default = []),
+        "data": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = {}),
+        "deps": attrs.list(attrs.exec_dep(providers = [PythonWheelInfo]), default = []),
+        "outs": attrs.list(attrs.string(), default = []),
+        "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
+        "src": attrs.source(),
+        "srcs": attrs.list(attrs.source(), default = []),
+        "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
+        "_runner": attrs.source(default = "komira//tools/build/python:oracle_run.py"),
+    },
+)
+
+# ---- python_proto ------------------------------------------------------------
+
+def _python_proto_impl(ctx):
+    src = ctx.attrs.src
+    if not src.basename.endswith(".proto"):
+        fail("{}: src {} is not a .proto file".format(ctx.label.raw_target(), src.basename))
+    stem = src.basename[:-len(".proto")]
+    protoc = ctx.attrs._protoc[DefaultInfo].default_outputs[0]
+    proto_path = ctx.actions.copied_dir(ctx.label.name + ".proto_path", {src.basename: src})
+    out = ctx.actions.declare_output(stem + "_pb2.py")
+    ctx.actions.run(
+        cmd_args(
+            cmd_args(protoc, format = "{}/bin/protoc"),
+            cmd_args(proto_path, format = "--proto_path={}"),
+            cmd_args(out.as_output(), parent = 1, format = "--python_out={}"),
+            cmd_args(proto_path, format = "{}/" + src.basename),
+        ),
+        category = "python_proto",
+    )
+    return [DefaultInfo(default_output = out)]
+
+_python_proto = rule(
+    impl = _python_proto_impl,
+    doc = "The Python module (`<stem>_pb2.py`) the pinned protoc (`komira//tools/build/toolchains/proto:protoc`) generates for one `.proto` with no imports, for a `py_test`'s `srcs`.",
+    attrs = {
+        "src": attrs.source(),
+        "_protoc": attrs.exec_dep(default = "komira//tools/build/toolchains/proto:protoc"),
+    },
+)
+
 def _linux(kwargs):
     if "exec_compatible_with" not in kwargs:
         kwargs["exec_compatible_with"] = LINUX_X86_64
@@ -262,8 +405,16 @@ def _wheel_macro(**kwargs):
 def _py_test_macro(**kwargs):
     _py_test(**_linux(kwargs))
 
+def _oracle_macro(**kwargs):
+    _python_oracle(**_linux(kwargs))
+
+def _proto_macro(**kwargs):
+    _python_proto(**_linux(kwargs))
+
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 python_dist = declares_docs(_dist_macro)
 python_wheel = declares_docs(_wheel_macro)
 py_test = declares_docs(_py_test_macro)
+python_oracle = declares_docs(_oracle_macro)
+python_proto = declares_docs(_proto_macro)

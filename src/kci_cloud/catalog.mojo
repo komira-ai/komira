@@ -6,8 +6,17 @@
 # One row per `Resource.body` arm of `kci.resource.v1`: the arm's field
 # number (the key every cloud adapter reports coverage by), the type's name,
 # its portability marker, the outputs it exposes to a `Ref`, the access
-# verbs a `Uses` line may ask of it, its retention default, and its primary
-# role.
+# verbs a `Uses` line may ask of it, its retention default, its primary
+# role, and whether its primary object has a cloud name an author may write.
+#
+# THE CLOUD NAME (`takes_name`). `Resource.physical_name` names the primary
+# object, and `Resource.adopt` takes over an existing object of that name
+# (metadata.mojo). A `grant` (an edge: its objects are bindings, named by
+# the principal and the target) and a `dns_record` (named by the DNS name
+# and type it already writes) have no name of their own, on any cloud, so
+# both are refused there at validate. A kind that has no name of its own on
+# ONE cloud only (an IP address on one cloud is an allocation id) is that
+# cloud's limit, not a row here.
 #
 # RETENTION. A data primitive has a VERSIONED retention default, used while
 # `Resource.retention` is unset (KEEP for a table, a bucket, a secret and a
@@ -178,6 +187,9 @@ struct CatalogType(Copyable, Movable, Deinitable):
     var accepts: List[String]
     var retention_default: Int
     var primary_role: String
+    var takes_name: Bool
+    """Its primary object has a cloud name an author may write
+    (`Resource.physical_name`, and so `Resource.adopt`)."""
 
     def __init__(
         out self,
@@ -188,6 +200,7 @@ struct CatalogType(Copyable, Movable, Deinitable):
         var accepts: List[String],
         retention_default: Int = RETENTION_NONE,
         primary_role: String = String(ROLE_RUN),
+        takes_name: Bool = True,
     ):
         self.field = field
         self.name = name
@@ -196,6 +209,7 @@ struct CatalogType(Copyable, Movable, Deinitable):
         self.accepts = accepts^
         self.retention_default = retention_default
         self.primary_role = primary_role
+        self.takes_name = takes_name
 
     def __init__(out self, *, copy: Self):
         # Explicit: a struct with String and List fields that lives in a List
@@ -207,6 +221,7 @@ struct CatalogType(Copyable, Movable, Deinitable):
         self.accepts = copy.accepts.copy()
         self.retention_default = copy.retention_default
         self.primary_role = copy.primary_role.copy()
+        self.takes_name = copy.takes_name
 
     def takes_retention(self) -> Bool:
         """True iff `Resource.retention` may be written on this type."""
@@ -337,7 +352,8 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_IDENTITY),
             )
         )
-        # A grant is an edge: it exposes nothing and accepts nothing.
+        # A grant is an edge: it exposes nothing, accepts nothing, and has
+        # no cloud name of its own (its objects are bindings).
         c.add(
             CatalogType(
                 FIELD_GRANT,
@@ -346,6 +362,7 @@ struct Catalog(Copyable, Movable, Deinitable):
                 List[String](),
                 List[String](),
                 primary_role=String(ROLE_GRANT),
+                takes_name=False,
             )
         )
         # Messaging. A queue and a topic expose their cloud name and address
@@ -444,6 +461,8 @@ struct Catalog(Copyable, Movable, Deinitable):
                 List[String](),
                 retention_default=RETENTION_DELETE,
                 primary_role=String(ROLE_RECORD),
+                # A record set is named by its DNS name and type.
+                takes_name=False,
             )
         )
         c.add(

@@ -298,6 +298,10 @@
 #                 question (Q24), so the shape declares it absent rather than
 #                 pick one.
 #
+# METADATA (metadata.mojo): per shape, how many labels an object carries and
+# how each type's primary object may be named (`metadata`, a
+# `MetadataLimits`): generic none, aws, gcp, azure and onprem their own.
+#
 # A shape's ABSENCES (`not_yet`) are the catalog types it does not host yet,
 # each with its reason; the fake cloud built with the shape declares them,
 # and is complete only when there are none. A grant resource has no row: its roles
@@ -330,6 +334,8 @@ from kci_cloud import (
     FIELD_WORKER,
     NOT_YET,
 )
+
+from kci_cloud_fake.metadata import MetadataLimits
 
 
 comptime ROLE_BUCKET = "bucket"
@@ -513,6 +519,9 @@ struct ProviderShape(Copyable, Movable, Deinitable):
     var service_network_limit: String
     """Why a service here cannot be placed in a subnet; empty where it
     can."""
+    var metadata: MetadataLimits
+    """How many labels an object carries here, and how a type's primary
+    object may be named (metadata.mojo)."""
 
     def __init__(
         out self,
@@ -530,6 +539,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         network_ranged: Bool = True,
         subnet_zone_limit: String = String(""),
         service_network_limit: String = String(""),
+        var metadata: MetadataLimits = MetadataLimits(),
     ):
         self.name = name
         self.rows = rows^
@@ -545,6 +555,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         self.network_ranged = network_ranged
         self.subnet_zone_limit = subnet_zone_limit
         self.service_network_limit = service_network_limit
+        self.metadata = metadata^
 
     def __init__(out self, *, copy: Self):
         self.name = copy.name.copy()
@@ -561,6 +572,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         self.network_ranged = copy.network_ranged
         self.subnet_zone_limit = copy.subnet_zone_limit.copy()
         self.service_network_limit = copy.service_network_limit.copy()
+        self.metadata = copy.metadata.copy()
 
     def hosts(self, field: Int) -> Bool:
         """False for a type the shape declares NOT_YET."""
@@ -683,6 +695,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             gpu_limit=String(GPU_REASON_AWS),
             schedule_day_limit=String(SCHEDULE_DAY_REASON_AWS),
             subnet_zone_limit=String(SUBNET_ZONE_REASON_AWS),
+            metadata=MetadataLimits.aws(),
         )
 
     @staticmethod
@@ -726,7 +739,14 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_REGISTRY, String(ROLE_REGISTRY), String("artifactregistry.googleapis.com/Repository")))
         var g = List[GrantRow]()
         g.append(GrantRow(TARGET_ANY, String("setIamPolicy"), String("")))
-        return ProviderShape(String("gcp"), r^, g^, gpu_limit=String(GPU_REASON_UNDECIDED), network_ranged=False)
+        return ProviderShape(
+            String("gcp"),
+            r^,
+            g^,
+            gpu_limit=String(GPU_REASON_UNDECIDED),
+            network_ranged=False,
+            metadata=MetadataLimits.gcp(),
+        )
 
     @staticmethod
     def azure() -> ProviderShape:
@@ -807,6 +827,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             schedule_folds=True,
             schedule_utc_limit=String(SCHEDULE_UTC_REASON_AZURE),
             service_network_limit=String(SERVICE_NETWORK_REASON_AZURE),
+            metadata=MetadataLimits.azure(),
         )
 
     @staticmethod
@@ -858,6 +879,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             scale_to_zero_limit=String(ONPREM_SCALE_TO_ZERO_REASON),
             schedule_folds=True,
             schedule_call_limit=String(ONPREM_SCHEDULE_CALL_REASON),
+            metadata=MetadataLimits.onprem(),
         )
 
 

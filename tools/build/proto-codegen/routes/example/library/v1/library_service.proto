@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package example.library.v1;
+
+import "example/library/v1/library.proto";
+import "google/api/annotations.proto";
+
+// Two services over the messages of library.proto. Between them: path
+// variables of two kinds, two routes on one path told apart by method, a
+// `body: "*"` POST, a DELETE, an additional binding, and a custom verb. The
+// last RPC of each service has a route of its own, so a loop that drops the
+// last RPC leaves a path no request reaches.
+
+service BookService {
+  rpc GetBook(GetBookRequest) returns (Book) {
+    option (google.api.http) = {
+      get: "/v1/shelves/{shelf}/books/{book_id}"
+    };
+  }
+
+  rpc ListBooks(ListBooksRequest) returns (ListBooksResponse) {
+    option (google.api.http) = {
+      get: "/v1/shelves/{shelf}/books"
+    };
+  }
+
+  rpc CreateBook(CreateBookRequest) returns (Book) {
+    option (google.api.http) = {
+      post: "/v1/shelves/{shelf}/books"
+      body: "*"
+    };
+  }
+
+  rpc DeleteBook(DeleteBookRequest) returns (DeleteBookResponse) {
+    option (google.api.http) = {
+      delete: "/v1/shelves/{shelf}/books/{book_id}"
+    };
+  }
+}
+
+service ShelfService {
+  rpc GetShelf(GetShelfRequest) returns (Shelf) {
+    option (google.api.http) = {
+      get: "/v1/shelves/{shelf}"
+      additional_bindings {
+        get: "/v1/shelves/{shelf}/info"
+      }
+    };
+  }
+
+  rpc SearchShelves(SearchShelvesRequest) returns (SearchShelvesResponse) {
+    option (google.api.http) = {
+      post: "/v1/shelves:search"
+      body: "*"
+    };
+  }
+}

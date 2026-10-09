@@ -1,7 +1,10 @@
 """`komira_optimizer` -- logical-plan rewrite rules.
 
-Filter, predicate and OR rewrites (fusion, decomposition, pushdown, cross-join
-elimination, OR factoring, symmetric-OR inference); expression rules (constant
+Join rules (inner-to-semi conversion, build-side selection, the SEMI/ANTI
+reducer pushdown, the join-reorder output-order guard, absorbing a projection
+into an aggregate); filter, predicate and OR rewrites (fusion, decomposition,
+pushdown, cross-join elimination, OR factoring, symmetric-OR inference);
+expression rules (constant
 folding, predicate simplification, CSE, IN-list rewrite); view resolution and
 partition pruning; subquery decorrelation and scalar-subquery resolution through
 a `ScalarDepTable` of engine-supplied bindings; join-predicate decomposition,

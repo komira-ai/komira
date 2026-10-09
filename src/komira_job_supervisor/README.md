@@ -26,6 +26,22 @@ object key that is 64 lowercase hex characters (a content-addressed layout
 such as `<sha256>/binary`). A key with neither is fetched and run
 unverified; pass `--binary-sha256` when the key does not carry the digest.
 
+## The entrypoint binary
+
+`job_supervisor_main` runs the supervisor as a container entrypoint
+(`run_entrypoint`, entrypoint.mojo). It takes exactly these flags and refuses
+any other: `--job-name`, `--instance-name`, `--heartbeat-url` (https only),
+one of `--heartbeat-credential-file` (a bearer token re-read from the file for
+every beat) and `--heartbeat-credential-env` (a bearer token read once from
+the named environment variable, which is then removed so the job never
+inherits it), `--heartbeat-interval-secs`, `--max-runtime-secs` (required;
+past it the job is stopped and reported FAILED with a timeout message),
+`--log-prefix=gs://BUCKET/PREFIX` (the logs go to Google Cloud Storage, with
+Application Default Credentials) and `--job-binary` (a name without a `/` is
+looked up on `PATH`). Everything after the first bare `--` is the job's
+arguments, verbatim. It exits 0 when the job COMPLETED, 1 when it FAILED or
+was CANCELLED, and 2 when the start was refused.
+
 Process handling (pipes, pids, signals) is komira_supervisor's. A job is
 stopped by signalling its pid, not its process group, so a child the job
 spawns itself is not signalled.
@@ -125,4 +141,29 @@ assert_true(phase == JobSupervisorPhase.failed())
 var report = text_of(reader, "logs/failing-job/crash_report.json")
 assert_true('"exit_code":3' in report)
 assert_true("boom" in report)
+```
+
+The entrypoint's flags: the log prefix names the bucket and the key prefix,
+and every word after `--` belongs to the job, one that looks like a flag
+included:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_job_supervisor import EntrypointConfig
+
+var flags: List[String] = [
+    "--job-name=run-1",
+    "--heartbeat-url=https://heartbeat.example.com/beat",
+    "--heartbeat-credential-file=/var/run/creds/token",
+    "--max-runtime-secs=3600",
+    "--log-prefix=gs://job-logs/runs/run-1",
+    "--job-binary=/opt/job/run",
+    "--",
+    "--verbose",
+]
+var entry = EntrypointConfig.from_args(flags)
+assert_equal(entry.log.bucket, "job-logs")
+assert_equal(entry.job.log_prefix, "runs/run-1")
+assert_equal(entry.job.max_runtime_secs, 3600)
+assert_equal(entry.job.job_argv[0], "--verbose")
 ```
