@@ -73,7 +73,9 @@ def library_census(targets = {}, **kwargs):
     A directory's library is the target named after it, or `targets[<dir>]`
     (a library whose target name is not its directory, as when a binary of
     the same package takes that name). A directory with neither fails
-    analysis, as does a `targets` key that is not a directory under src/.
+    analysis, as does a `targets` key that is not a directory under src/,
+    and so does a library this target cannot see (`visibility`): a library
+    is never left out of the census silently.
     """
     if package_name():
         fail("library_census {}: it lists the root package's subpackages, so it belongs in the cell's root BUCK".format(kwargs.get("name", "")))
