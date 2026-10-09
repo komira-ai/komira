@@ -13,7 +13,8 @@
 #    And each of kci_cloud's own refusal sites, one test each: a scope with
 #    no cell, a changed cloud name, a marked object without `adopt`, a
 #    delete of an adopted object, and a replace of one under the plan and
-#    under the apply's plan-first step.
+#    under the apply's plan-first step. A returned outcome's refusal equals
+#    the argument's, finding for finding.
 # 2. NOTHING ELSE IS: an engine fault (a create that failed, a presence read
 #    that raised), a `realize` that raises and a broken lowering contract
 #    leave the refusal None.
@@ -26,8 +27,9 @@
 #    the fake. A cycle among later resources is found too, a 3-cycle is
 #    printed from its smallest id, a cycle closed by a resource's second
 #    reference is found (naming that reference), two references to the same
-#    peer report the cycle once, and two services that only `uses` each
-#    other are no cycle.
+#    peer report the cycle once, the field is the first edge from the
+#    smallest id to the next member, and two services that only `uses`
+#    each other are no cycle. The finding kinds are pairwise distinct.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -57,6 +59,8 @@ from kci_cloud import (
     ExistingObject,
     FINDING_ADOPTION,
     FINDING_CELL,
+    FINDING_COVERAGE,
+    FINDING_LIMIT,
     FINDING_GRAPH,
     FINDING_OWNERSHIP,
     Feed,
@@ -125,21 +129,56 @@ def _plan[S: CloudAdapter](mut cloud: S, json: String, mut st: InMemoryStateStor
     return seen^
 
 
+def _same_refusal(a: Optional[Refusal], b: Optional[Refusal]) -> String:
+    """Empty when `a` and `b` are the same refusal (both None, or equal
+    `by_engine`, `text` and findings: count, and each finding's kind,
+    resource and field), else what differs."""
+    if Bool(a) != Bool(b):
+        return String("one is set and the other is not")
+    if not a:
+        return String("")
+    ref x = a.value()
+    ref y = b.value()
+    if x.by_engine != y.by_engine:
+        return String("by_engine differs")
+    if x.text != y.text:
+        return String("text differs: ") + x.text + String(" | ") + y.text
+    if len(x.findings) != len(y.findings):
+        return String("finding count differs: ") + String(len(x.findings)) + String(" vs ") + String(len(y.findings))
+    for i in range(len(x.findings)):
+        ref f = x.findings[i]
+        ref g = y.findings[i]
+        if f.kind != g.kind or f.resource_id != g.resource_id or f.field_path != g.field_path:
+            return String("finding ") + String(i) + String(" differs")
+    return String("")
+
+
 def _apply[S: CloudAdapter](mut cloud: S, json: String, mut st: InMemoryStateStore, machine: String = String("shop")) raises -> _Seen:
     """An apply's refusal, raised or returned; a returned outcome's own
-    `refusal` must be the one the argument got."""
+    `refusal` must be the one the argument got, finding for finding. The
+    checks run outside the `try`, so a failed one is not taken for the
+    verb's raise."""
     var seen = _Seen()
+    var returned = False
+    var differs = String("")
+    var refused_agrees = True
+    var landed = 0
     try:
         var out = apply_resources(_reg(), cloud, _ctx(machine), _list(json), Creds.none(), st, _no_defs(), seen.refusal)
-        assert_equal(Bool(out.refusal), Bool(seen.refusal), "the outcome and the argument agree")
-        assert_equal(out.refused(), Bool(out.refusal))
+        returned = True
+        differs = _same_refusal(out.refusal, seen.refusal)
+        refused_agrees = out.refused() == Bool(out.refusal)
         if out.error:
             seen.text = out.error.value()
         if out.refusal:
-            assert_equal(len(out.landed), 0, "a refusal lands nothing")
+            landed = len(out.landed)
     except e:
         seen.raised = True
         seen.text = String(e)
+    if returned:
+        assert_equal(differs, "", "the outcome's refusal is the argument's")
+        assert_true(refused_agrees, "refused() is the typed refusal")
+        assert_equal(landed, 0, "a refusal lands nothing")
     return seen^
 
 
@@ -648,6 +687,16 @@ def _cycle_findings(json: String) raises -> List[String]:
     return out^
 
 
+def _cycles(json: String) raises -> List[Finding]:
+    """The reference-cycle findings validate gives for `json`."""
+    var found = validate_for(_reg(), FakeCloud(), _list(json))
+    var out = List[Finding]()
+    for i in range(len(found)):
+        if found[i].reason.find("a reference cycle") >= 0:
+            out.append(found[i].copy())
+    return out^
+
+
 def test_a_three_cycle_is_printed_once_from_its_smallest_id() raises:
     var json = (
         String('{"id":"logs","bucket":{}},')
@@ -660,6 +709,8 @@ def test_a_three_cycle_is_printed_once_from_its_smallest_id() raises:
     var found = _cycle_findings(json)
     assert_equal(len(found), 1, "one cycle, once")
     assert_true(found[0].startswith("aa|a reference cycle: aa -> bb -> cc -> aa"), found[0])
+    var cycles = _cycles(json)
+    assert_equal(cycles[0].field_path, "service.env.PEER", "the field of aa's step to bb, the next member")
     var chain = _svc(String("aa"), String("bb")) + String(",") + _svc(String("bb"), String("cc")) + String(",") + _svc(String("cc"), String(""))
     assert_equal(len(_cycle_findings(chain)), 0, "a chain is no cycle")
     print("  test_a_three_cycle_is_printed_once_from_its_smallest_id: PASS")
@@ -714,6 +765,40 @@ def test_two_edges_to_the_same_peer_report_the_cycle_once() raises:
     print("  test_two_edges_to_the_same_peer_report_the_cycle_once: PASS")
 
 
+def test_the_field_is_the_first_of_two_edges_to_the_next_member() raises:
+    """`api`, the smallest id, reads `web` twice (A_PEER, then B_PEER);
+    `web` reads `api`. The field is the reference position of the first
+    edge `api -> web` (`path_of`). Catches: `path_of` returning the last
+    such edge (mutant: its loop walks backwards)."""
+    var json = (
+        _svc_env(String("api"), _ref(String("A_PEER"), String("web"), String("URL")) + String(",") + _ref(String("B_PEER"), String("web"), String("HOST")))
+        + String(",")
+        + _svc(String("web"), String("api"))
+    )
+    var cycles = _cycles(json)
+    assert_equal(len(cycles), 1, "one cycle, once")
+    assert_equal(cycles[0].resource_id, "api")
+    assert_equal(cycles[0].field_path, "service.env.A_PEER", "the first edge api -> web")
+    print("  test_the_field_is_the_first_of_two_edges_to_the_next_member: PASS")
+
+
+def test_finding_kinds_are_distinct() raises:
+    """A caller branches on a finding's kind, so no two kinds share a value.
+    Catches: FINDING_OWNERSHIP given an existing kind's value (mutant: 5,
+    FINDING_ADOPTION's)."""
+    var kinds = List[Int]()
+    kinds.append(FINDING_GRAPH)
+    kinds.append(FINDING_COVERAGE)
+    kinds.append(FINDING_LIMIT)
+    kinds.append(FINDING_CELL)
+    kinds.append(FINDING_ADOPTION)
+    kinds.append(FINDING_OWNERSHIP)
+    for i in range(len(kinds)):
+        for k in range(i + 1, len(kinds)):
+            assert_true(kinds[i] != kinds[k], String("kinds ") + String(i) + String(" and ") + String(k) + String(" share a value"))
+    print("  test_finding_kinds_are_distinct: PASS")
+
+
 def test_services_that_only_use_each_other_are_no_cycle() raises:
     """An edge of access lowers to a node of its own: two services that call
     each other plan."""
@@ -753,5 +838,7 @@ def main() raises:
     test_a_three_cycle_is_printed_once_from_its_smallest_id()
     test_a_cycle_closed_by_a_later_reference_is_found()
     test_two_edges_to_the_same_peer_report_the_cycle_once()
+    test_the_field_is_the_first_of_two_edges_to_the_next_member()
     test_services_that_only_use_each_other_are_no_cycle()
+    test_finding_kinds_are_distinct()
     print("ALL FAKE TYPED REFUSAL TESTS PASSED")
