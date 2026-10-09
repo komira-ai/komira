@@ -9,8 +9,11 @@
 # carries the new token (a conformer that read the file once and cached it
 # fails here). The token reaches the serialized request. One trailing newline
 # is not part of the token. A file that is empty, missing or holds a space
-# inside the token refuses the start; a file removed after the start fails
-# that beat closed (AUTH_UNAVAILABLE, nothing dialled).
+# inside the token refuses the start, and so does a DEL (0x7F), beside an
+# accepted `~` (0x7E), the top of visible ASCII. A token of MAX_SECRET_LEN
+# (4096) bytes is accepted and one of 4097 refused, from a file and from a
+# variable. A file removed after the start fails that beat closed
+# (AUTH_UNAVAILABLE, nothing dialled).
 #
 # ARM 2, the environment. `from_env` reads the variable (set for this test
 # by the BUCK file's test_env), and afterwards the process environment no
@@ -23,12 +26,13 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.os import remove
+from std.os import remove, setenv
 from std.pathlib import Path as FsPath
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_libc.posix import _read_env
 from komira_objectstore import InMemoryConditionalStore
+from komira_secret_store import MAX_SECRET_LEN
 from komira_supervisor.supervisor import ChildSpec
 
 from komira_job_supervisor import (
@@ -49,6 +53,7 @@ comptime _ENV_CREDENTIAL = "KOMIRA_JOB_SUPERVISOR_TEST_CREDENTIAL"
 comptime _ENV_CREDENTIAL_VALUE = "tok-env-0123456789"
 comptime _ENV_PASSTHROUGH = "KOMIRA_JOB_SUPERVISOR_TEST_PASSTHROUGH"
 comptime _ENV_PASSTHROUGH_VALUE = "visible-to-the-job"
+comptime _ENV_LONG = "KOMIRA_JOB_SUPERVISOR_TEST_LONG_CREDENTIAL"
 comptime _URL = "https://beats.example.com/v1/beat"
 
 
@@ -179,11 +184,70 @@ def test_an_unusable_file_refuses_the_start() raises:
     r = _refusal_from_file(split)
     assert_true(r.find(String("not visible ASCII")) >= 0, "a CRLF inside: " + r)
 
+    # The top of visible ASCII: DEL (0x7F) is refused, `~` (0x7E) accepted.
+    # Nothing downstream checks a header value, so a bound one byte too
+    # high would send a DEL in the Authorization header.
+    var del_file = _tmp(String("credential-del"))
+    _write(del_file, String("tok-del") + chr(0x7F) + String("x"))
+    r = _refusal_from_file(del_file)
+    assert_true(r.find(String("not visible ASCII at offset 7")) >= 0, "a DEL: " + r)
+    var tilde = _tmp(String("credential-tilde"))
+    _write(tilde, String("tok~tilde"))
+    var tilde_auth = BearerHeartbeatAuth.from_file(tilde)
+    assert_equal(
+        _only_header(tilde_auth),
+        String("Authorization: Bearer tok~tilde"),
+        "CONTROL: `~` (0x7E) is visible ASCII and accepted",
+    )
+
     # CONTROL: a usable file is accepted.
     var good = _tmp(String("credential-good"))
     _write(good, String("tok-good"))
     assert_equal(_refusal_from_file(good), String(""), "CONTROL: accepted")
     print("  test_an_unusable_file_refuses_the_start: PASS")
+
+
+def _token_of(n: Int) -> String:
+    """`n` bytes of visible ASCII."""
+    var out = String("")
+    for i in range(n):
+        out += String("k") if i % 2 == 0 else String("9")
+    return out^
+
+
+def test_the_token_length_cap_is_4096_bytes() raises:
+    """MAX_SECRET_LEN (4096) bytes are accepted and one more is refused, in
+    both forms. For the file form nothing else bounds the token."""
+    var at_cap = _token_of(MAX_SECRET_LEN)
+    var over_cap = _token_of(MAX_SECRET_LEN + 1)
+    assert_equal(MAX_SECRET_LEN, 4096, "the documented cap")
+
+    var over_file = _tmp(String("credential-4097"))
+    _write(over_file, over_cap)
+    var r = _refusal_from_file(over_file)
+    assert_true(r.find(String("is longer than 4096 bytes")) >= 0, "file, 4097: " + r)
+    assert_false(r.find(String("k9k9")) >= 0, "the refusal never quotes the token")
+    var at_file = _tmp(String("credential-4096"))
+    _write(at_file, at_cap + String("\n"))
+    var fa = BearerHeartbeatAuth.from_file(at_file)
+    assert_equal(
+        _only_header(fa),
+        String("Authorization: Bearer ") + at_cap,
+        "file, 4096 (and a final newline): accepted whole",
+    )
+
+    assert_true(setenv(String(_ENV_LONG), over_cap), "setenv 4097")
+    r = _refusal_from_env(String(_ENV_LONG))
+    assert_true(r.find(String("4096")) >= 0, "env, 4097: refused naming the cap: " + r)
+    assert_false(r.find(String("k9k9")) >= 0, "the refusal never quotes the token")
+    assert_true(setenv(String(_ENV_LONG), at_cap), "setenv 4096")
+    var ea = BearerHeartbeatAuth.from_env(String(_ENV_LONG))
+    assert_equal(
+        _only_header(ea),
+        String("Authorization: Bearer ") + at_cap,
+        "env, 4096: accepted whole",
+    )
+    print("  test_the_token_length_cap_is_4096_bytes: PASS")
 
 
 def test_a_file_gone_after_the_start_fails_the_beat_closed() raises:
@@ -289,6 +353,7 @@ def main() raises:
     test_the_file_is_read_for_every_beat()
     test_a_trailing_newline_is_not_part_of_the_token()
     test_an_unusable_file_refuses_the_start()
+    test_the_token_length_cap_is_4096_bytes()
     test_a_file_gone_after_the_start_fails_the_beat_closed()
     test_the_env_credential_is_read_once_and_removed()
     test_an_unusable_variable_refuses_the_start()

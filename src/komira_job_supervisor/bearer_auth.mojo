@@ -31,19 +31,17 @@
 # a header line. Every refusal names the file or the variable, never a byte of
 # the token.
 #
-# FFI-BOUNDARY: `_unsetenv` is the one external call here: libc
-# `unsetenv(3)` with a NUL-terminated name the caller's local String owns for
-# the duration of the call; libc keeps no pointer to it. Nothing is allocated
-# across the boundary and nothing needs freeing. The variable's VALUE is read
-# through komira_secret_env (komira_libc's one getenv), never here.
+# No FFI here: the variable's VALUE is read through komira_secret_env
+# (komira_libc's one getenv), and it is removed with komira_libc's
+# `_unset_env` (the one unsetenv declaration), which owns that boundary.
 #
 # No pointer type crosses this file's public surface.
 # =============================================================================
 
-from std.ffi import external_call
 from std.pathlib import Path as FsPath
 
 from komira_http_client.header_map import HeaderEntry
+from komira_libc.posix import _unset_env
 from komira_secret_env import ProcessEnv, check_secret_env_name
 from komira_secret_store import MAX_SECRET_LEN, SecretValue
 
@@ -109,20 +107,6 @@ def _read_token_file(path: String) raises -> List[UInt8]:
         )
 
 
-def _unsetenv(name: String) raises:
-    """Remove `name` from this process's environment (unsetenv(3))."""
-    var n = name
-    # SAFETY: `n` owns the NUL-terminated buffer and outlives the synchronous
-    # call; unsetenv keeps no pointer to it and the pointer does not escape.
-    var rc = external_call["unsetenv", Int32](n.as_c_string_slice().unsafe_ptr())
-    if Int(rc) != 0:
-        raise Error(
-            String("job supervisor: cannot remove ")
-            + name
-            + String(" from the environment")
-        )
-
-
 struct BearerHeartbeatAuth(HeartbeatAuth):
     """`Authorization: Bearer <token>` on every heartbeat, the token from a
     file re-read per beat or from an environment variable read once (module
@@ -166,7 +150,14 @@ struct BearerHeartbeatAuth(HeartbeatAuth):
             value.revealed_bytes(), String("the variable ") + name
         )
         var token = SecretValue(value.revealed_bytes()[:n])
-        _unsetenv(name)
+        try:
+            _unset_env(name)
+        except:
+            raise Error(
+                String("job supervisor: cannot remove ")
+                + name
+                + String(" from the environment")
+            )
         if env.lookup(name):
             raise Error(
                 String("job supervisor: ")

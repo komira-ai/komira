@@ -361,6 +361,8 @@ def start_and_run(args: List[String]) raises -> JobSupervisorPhase:
     states, then run the job to its end. Raises only before the job is
     spawned."""
     var cfg = EntrypointConfig.from_args(args)
+    # PATH is on komira_libc.posix's allow-list for exactly this: exec-path
+    # lookup of a bare --job-binary.
     cfg.job.job_binary_path = resolve_job_binary(
         cfg.job.job_binary_path, _read_env("PATH")
     )

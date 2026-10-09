@@ -25,6 +25,10 @@
 #
 # start_and_run refuses before spawning anything: an http heartbeat URL with
 # a credential (it would ride in the clear), an unset credential variable.
+#
+# The exit status: COMPLETED is 0, FAILED and CANCELLED are each 1, a refused
+# start is 2 (a mapping that sent FAILED to 0 would report a failed job as a
+# success).
 # =============================================================================
 
 from std.os import makedirs
@@ -36,11 +40,13 @@ from komira_libc.posix import _read_env
 from komira_job_supervisor import (
     EntrypointConfig,
     entrypoint_flag_names,
+    exit_status_of,
     parse_log_location,
     resolve_job_binary,
     run_entrypoint,
     start_and_run,
 )
+from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase
 
 
 def _args(*xs: String) -> List[String]:
@@ -90,6 +96,22 @@ def _tmp(name: String) raises -> String:
 
 
 def test_the_full_flag_set_parses() raises:
+    # Names first, so a renamed flag fails here rather than in the parse below.
+    var names = entrypoint_flag_names()
+    var want = _args(
+        "--job-name",
+        "--instance-name",
+        "--heartbeat-url",
+        "--heartbeat-credential-file",
+        "--heartbeat-credential-env",
+        "--heartbeat-interval-secs",
+        "--max-runtime-secs",
+        "--log-prefix",
+        "--job-binary",
+    )
+    assert_equal(len(names), len(want), "exactly the nine flags")
+    for i in range(len(want)):
+        assert_equal(names[i], want[i], "the contract's flag names, in order")
     var c = EntrypointConfig.from_args(_contract(List[String]()))
     assert_equal(c.job.job_name, String("run-7f3a"))
     assert_equal(c.job.instance_name, String("attempt-2b9c"))
@@ -104,7 +126,6 @@ def test_the_full_flag_set_parses() raises:
         c.job.log_prefix, String("runs/run-7f3a"), "the logs go under the key prefix"
     )
     assert_equal(len(c.job.job_argv), 0)
-    assert_equal(len(entrypoint_flag_names()), 9, "exactly the nine flags")
 
     var e = EntrypointConfig.from_args(
         _without(
@@ -300,6 +321,19 @@ def test_the_start_is_refused_before_anything_runs() raises:
     print("  test_the_start_is_refused_before_anything_runs: PASS")
 
 
+def test_the_exit_status_of_each_end() raises:
+    # A failed or cancelled job must not look like a success to whatever
+    # started the container: FAILED and CANCELLED are 1, COMPLETED is 0.
+    assert_equal(exit_status_of(JobSupervisorPhase.failed()), 1, "FAILED: exit 1")
+    assert_equal(
+        exit_status_of(JobSupervisorPhase.cancelled()), 1, "CANCELLED: exit 1"
+    )
+    assert_equal(
+        exit_status_of(JobSupervisorPhase.completed()), 0, "COMPLETED: exit 0"
+    )
+    print("  test_the_exit_status_of_each_end: PASS")
+
+
 def main() raises:
     test_the_full_flag_set_parses()
     test_a_missing_credential_refuses_the_start()
@@ -308,4 +342,5 @@ def main() raises:
     test_everything_after_the_separator_is_the_jobs()
     test_a_bare_job_binary_is_found_on_path()
     test_the_start_is_refused_before_anything_runs()
+    test_the_exit_status_of_each_end()
     print("PASS test_entrypoint_flags")
