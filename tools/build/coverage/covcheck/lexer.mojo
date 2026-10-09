@@ -76,10 +76,10 @@ struct SourceLine(Copyable, Movable):
     """One line as the lexer read it. `text` is the line without a trailing
     carriage return; `comment` the byte offset of its comment's `#`, or -1;
     `opens`/`closes` count `(` and `)` in its code, `sq_opens`/`sq_closes`
-`[` and `]`; `semi` is the offset of
+    `[` and `]`; `semi` is the offset of
     its first `;` in code, or -1; `tail_code` is set on an import line when
     a statement that is not an import follows a `;`; `in_string` is set when
-the line starts inside a string literal."""
+    the line starts inside a string literal."""
 
     var text: String
     var comment: Int
