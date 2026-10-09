@@ -15,8 +15,11 @@ HTTP/2 and TLS. The pieces:
 - `komira_http_server.middleware`: the `Middleware` trait (`before` may answer
   early, `after` sees every response), a `MiddlewareChain`, and built-ins for
   CORS, error mapping, request logging, tracing headers and metrics, plus
-  fault reporting with an incident id. `Principal` and `Claims` carry who a
-  request was authenticated as; the library never interprets them.
+  fault reporting with an incident id. `Principal` carries who a request
+  was authenticated as: its scheme (`jwt` or `session`; the constructor
+  refuses any other), a subject, a `Claims` map the library never
+  interprets, and optionally the `PresentedCredential`, which is not
+  printable (`redacted()` to log, `expose()` to forward).
 - `komira_http_server.serving`: `ServerlessEntry`, the trait for a serving
   driver that runs one router on a platform's runtime (one conformer today,
   `GcpServerlessEntry`, for Google Cloud Run), and `parse_serve_port`.

@@ -2,7 +2,8 @@
 //! "cov_branch_classify") below the branch walk: the metadata nodes, one
 //! function's instructions indexed by the value each defines and by block,
 //! and the instruction shapes the classes are told by: the code of a
-//! String's lifetime, a raising call's error flag, the reload of an `and`'s
+//! String's lifetime, a raising call's error flag (and, in a `try:` body,
+//! the flag of a raising callee inlined at the call), the reload of an `and`'s
 //! left operand, and dominance over the printed predecessors. Imported by
 //! cov_branch_classify.zig; no `main` of its own.
 
@@ -320,6 +321,84 @@ pub const Fn = struct {
         if (!std.mem.startsWith(u8, ty, "{ i1, ")) return false;
         const cb = self.body(c) orelse return false;
         return isCall(cb, ty) and (self.dbgOf(c) orelse return false) == dbg;
+    }
+
+    /// Whether `v` is field 0 of the `{ i1, ... }` a call returns, both at
+    /// one location: a raising call's error flag (an and/or's raising right
+    /// operand's, wherever the call is).
+    pub fn ownFlag(self: *const Fn, v: []const u8) bool {
+        const d = self.dbgOf(v) orelse return false;
+        return self.raisingFlag(v, d, false);
+    }
+
+    /// Whether `cond`, tested by a br at `dbg`, is true exactly when a
+    /// raising call at `dbg` raised (README.md, "try"): the call's own flag
+    /// (raisingFlag), or a `phi i1` whose incoming values are `true`,
+    /// `false`, such flags or phis, or code of a callee inlined at `dbg`
+    /// (its location's inlinedAt chain holds `dbg`: the callee's test of
+    /// its own `raise`), one at least such a value or a constant arriving
+    /// from a block of that callee's code (its branch's location inlined at
+    /// `dbg`: the callee's raise path and its return).
+    pub fn errorFlag(self: *const Fn, cond: []const u8, dbg: u32, ctx: anytype) bool {
+        return self.errorFlagAt(cond, dbg, ctx, 0);
+    }
+
+    fn errorFlagAt(self: *const Fn, v: []const u8, dbg: u32, ctx: anytype, depth: usize) bool {
+        if (depth > 16) return false;
+        if (self.raisingFlag(v, dbg, true)) return true;
+        const r = after(self.body(v) orelse return false, "phi i1 ") orelse return false;
+        var some = false;
+        var value = false; // a non-constant incoming value
+        // Constants-only: each constant from a callee block must say what
+        // that block is, `true` from its raise path (a block calling the
+        // raise hook), `false` from any other, or the arms would swap.
+        var polarity = true;
+        var raised = false;
+        var it = std.mem.splitSequence(u8, r, "], ");
+        while (it.next()) |piece| {
+            const p = std.mem.trim(u8, piece, " ]");
+            const in = after(p, "[ ") orelse return false;
+            const x = operand(in);
+            if (std.mem.eql(u8, x, "true") or std.mem.eql(u8, x, "false")) {
+                const from = std.mem.trim(u8, in[@min(in.len, x.len + 2)..], " ");
+                if (self.calleeBlock(from, dbg, ctx)) {
+                    some = true;
+                    const t = std.mem.eql(u8, x, "true");
+                    const rb = self.raiseBlock(from);
+                    if (t != rb) polarity = false;
+                    if (t and rb) raised = true;
+                }
+                continue;
+            }
+            if (x.len == 0 or x[0] != '%') return false;
+            some = true;
+            value = true;
+            if (self.errorFlagAt(x, dbg, ctx, depth + 1)) continue;
+            const d = self.dbgOf(x) orelse return false;
+            if (!ctx.inlinedAt(d, dbg)) return false;
+        }
+        if (!value) return some and polarity and raised;
+        return some;
+    }
+
+    /// Whether block `b` calls the standard library's raise hook (Mojo's
+    /// code for a `raise`: test 47's trial.mojo, komira_parquet's rle.mojo).
+    fn raiseBlock(self: *const Fn, b: []const u8) bool {
+        const bi = self.by_name.get(b) orelse return false;
+        const blk = self.blocks.items[bi];
+        for (self.insts.items[blk.first..blk.end]) |x| {
+            if (std.mem.indexOf(u8, x.text, "@\"std::builtin::error::__mojo_debugger_raise_hook()\"(") != null) return true;
+        }
+        return false;
+    }
+
+    /// Whether block `b` ends in a branch whose location is inlined at `dbg`.
+    fn calleeBlock(self: *const Fn, b: []const u8, dbg: u32, ctx: anytype) bool {
+        const bi = self.by_name.get(b) orelse return false;
+        const blk = self.blocks.items[bi];
+        if (blk.end == blk.first) return false;
+        const d = metaId(self.insts.items[blk.end - 1].text, "!dbg !") orelse return false;
+        return ctx.inlinedAt(d, dbg);
     }
 
     /// Whether a `br i1` on `cond` at `dbg` with the `!prof` `prof` is in

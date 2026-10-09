@@ -31,6 +31,8 @@ from kci_api import (
     default_retry,
     exit_code_of,
     exit_table,
+    outcome_rank,
+    promises_no_effect,
     require_outcome,
     require_retry_for,
     worst_outcome,
@@ -62,6 +64,18 @@ def test_golden_numbers() raises:
         assert_equal(t[i].code, i)
         assert_equal(t[i].name, names[i])
         assert_true(t[i].meaning.byte_length() > 0)
+
+
+def test_exactly_2_3_and_4_promise_no_effect() raises:
+    # the numbers whose meaning says nothing external landed; a result row
+    # listing a landed node can never carry one (result_deploy.mojo)
+    var t = exit_table()
+    for i in range(len(t)):
+        var want = t[i].code == 2 or t[i].code == 3 or t[i].code == 4
+        assert_equal(promises_no_effect(t[i].code), want, t[i].name)
+    assert_true(promises_no_effect(exit_code_of(String(OUTCOME_FAILED))))
+    assert_true(promises_no_effect(exit_code_of(String(OUTCOME_REFUSED))))
+    assert_false(promises_no_effect(exit_code_of(String(OUTCOME_PARTIAL))))
 
 
 def test_no_two_rows_share_a_number_or_a_name() raises:
@@ -147,6 +161,36 @@ def test_worst_outcome() raises:
     assert_equal(worst_outcome(String(OUTCOME_PARTIAL), String(OUTCOME_FAILED)), String(OUTCOME_PARTIAL))
     assert_equal(worst_outcome(String(OUTCOME_PARTIAL), String(OUTCOME_INDETERMINATE)), String(OUTCOME_INDETERMINATE))
     assert_false(worst_outcome(String(OUTCOME_NOOP), String(OUTCOME_NOOP)) != String(OUTCOME_NOOP))
+
+
+def test_outcome_rank_orders_every_outcome() raises:
+    # best to worst; each rank pinned, so two outcomes swapping places (or
+    # one falling through to INDETERMINATE's 8) is caught
+    var order = List[String]()
+    order.append(String(OUTCOME_NOOP))
+    order.append(String(OUTCOME_SUCCEEDED))
+    order.append(String(OUTCOME_REFUSED))
+    order.append(String(OUTCOME_FAILED))
+    order.append(String(OUTCOME_VALIDATION_FAILED))
+    order.append(String(OUTCOME_CANCELLED))
+    order.append(String(OUTCOME_INTERRUPTED))
+    order.append(String(OUTCOME_PARTIAL))
+    order.append(String(OUTCOME_INDETERMINATE))
+    assert_equal(len(order), len(all_outcomes()))
+    for i in range(len(order)):
+        assert_equal(outcome_rank(order[i]), i, order[i])
+        for j in range(i):
+            assert_equal(worst_outcome(order[i], order[j]), order[i])
+            assert_equal(worst_outcome(order[j], order[i]), order[i])
+    assert_true(_rank_refused(String("DONE")))
+
+
+def _rank_refused(word: String) -> Bool:
+    try:
+        _ = outcome_rank(word)
+    except e:
+        return String(e).find(String("is not one of")) >= 0
+    return False
 
 
 def main() raises:

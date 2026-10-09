@@ -16,6 +16,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 mojo_library(
     name = "kci_validator_rows",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_validator_rows.mojo"],
+    test_srcs = [
+        "tests/test_live_row.mojo",
+        "tests/test_validator_rows.mojo",
+    ],
     visibility = ["PUBLIC"],
 )

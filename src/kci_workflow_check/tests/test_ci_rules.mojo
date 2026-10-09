@@ -7,7 +7,16 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_workflow_check import ChannelsFile, channels_paths, check_running_workflow, check_workflow, id_token_stages, kci_run_calls
+from kci_workflow_check import (
+    ChannelsFile,
+    channels_paths,
+    check_running_workflow,
+    check_workflow,
+    documentation_filter_findings,
+    id_token_stages,
+    kci_run_calls,
+    read_workflow,
+)
 from kci_release_machine import parse_machine_file
 
 
@@ -548,6 +557,163 @@ def test_check_running_workflow() raises:
         raise Error(String("not refused"))
     except e:
         assert_true(String(e).startswith(String("cannot tell: ")))
+
+
+# ---- edges: what is missing, the less common spellings -------------------------
+
+
+def _all(f: List[String]) -> String:
+    var s = String("")
+    for i in range(len(f)):
+        s += f[i] + String(" | ")
+    return s^
+
+
+def _none_in(f: List[String], needle: String) raises:
+    for i in range(len(f)):
+        if f[i].find(needle) >= 0:
+            raise Error(String("unexpected finding: ") + f[i])
+
+
+def _one_in(f: List[String], needle: String) raises:
+    for i in range(len(f)):
+        if f[i].find(needle) >= 0:
+            return
+    raise Error(String("no finding containing '") + needle + String("'; findings: ") + _all(f))
+
+
+def test_no_on_and_no_jobs() raises:
+    _reports(_mutated(String(_ON), String("")), String("R6: the workflow has no `on:` triggers"))
+    var no_jobs = String(_WF)[byte = 0 : String(_WF).find(String("jobs:\n"))]
+    _reports(String(no_jobs), String("R1: the workflow has no `jobs:` mapping"))
+
+
+def test_r8_a_40_byte_id_that_is_not_lowercase_hex() raises:
+    _reports(
+        _mutated(String("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"), String("actions/checkout@3D3C42E5AAC5BA805825DA76410C181273BA90B1")),
+        String("R8: `uses: actions/checkout@3D3C42E5AAC5BA805825DA76410C181273BA90B1` is not pinned"),
+    )
+
+
+def test_r2_an_environment_mapping_is_read_by_its_name() raises:
+    var ok = _findings(_mutated(String("    environment: prod\n"), String("    environment:\n      name: prod\n      url: https://example.invalid\n")))
+    assert_equal(len(ok), 0, _all(ok))
+    _reports(
+        _mutated(String("    environment: prod\n"), String("    environment:\n      name: production\n")),
+        String("job 'publish-prod': R2: runs in environment 'production'; it must run in 'prod'"),
+    )
+
+
+def test_r3_a_first_stage_needs_nothing() raises:
+    _reports(
+        _mutated(String("    environment: build\n"), String("    needs: publish-gamma\n    environment: build\n")),
+        String("job 'build': R3: needs publish-gamma; the stage runs after nothing"),
+    )
+
+
+def test_r5_a_kci_run_without_stage() raises:
+    _reports(_mutated(String("run --stage publish-prod \"$@\""), String("run \"$@\"")), String("R5: `kci run --stage (none)` in job 'publish-prod'"))
+
+
+def test_r18_dispatch_input_types() raises:
+    _reports(
+        _mutated(String("      revision:\n        type: string\n"), String("      revision:\n        type: number\n")),
+        String("R18: workflow_dispatch's inputs: `revision` is `type: string`"),
+    )
+    _reports(
+        _mutated(String("      reason:\n        type: string\n"), String("      reason:\n        type: number\n")),
+        String("R18: workflow_dispatch's inputs: `reason` is `type: string`"),
+    )
+    _reports(
+        _mutated(String("        type: boolean\n"), String("        type: string\n")),
+        String("R18: workflow_dispatch's inputs: `dry_run` is `type: boolean`"),
+    )
+
+
+def test_r18_an_unclosed_expression_runs_to_the_end_of_the_script() raises:
+    _reports(
+        _mutated(String("--run-id \"gh-$GITHUB_RUN_ID\"\n"), String("--run-id \"gh-${{ github.run_id\"\n")),
+        String("job 'build': R18: a `run:` script holds `${{ github.run_id\"\n`"),
+    )
+
+
+def test_r21_the_first_step_is_a_plain_revision_checkout() raises:
+    # a first step that is no mapping
+    _reports(
+        _mutated(String("    steps:\n      - uses: actions/checkout@"), String("    steps:\n      - echo\n      - uses: actions/checkout@")),
+        String("job 'build': R21: its first step is `actions/checkout`"),
+    )
+    # a revision checkout with an `if:`
+    _reports(
+        _mutated(
+            String("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n"),
+            String("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        if: always()\n        with:\n"),
+        ),
+        String("job 'publish-prod': R21: its first step is `actions/checkout`"),
+    )
+
+
+def test_r19_a_publish_stage_after_nothing_takes_no_set_hash() raises:
+    # publish-gamma runs after no stage: nothing hands it a set hash
+    var machine = String(_MACHINE).replace(String(" after: \"build\""), String(""))
+    var g = parse_machine_file(machine, String("machine file"))
+    var f = check_workflow(String(_WF), g, _token_stages(), String("release/machine.textproto"))
+    _none_in(f, String("job 'publish-gamma': R19"))
+    _one_in(f, String("job 'publish-gamma': R3: needs build; the stage runs after nothing"))
+
+
+def test_r19_a_stage_after_no_stage_takes_no_set_hash() raises:
+    # parse_machine_file refuses an `after` naming no stage above; a graph
+    # built or edited in code is held without one
+    var g = parse_machine_file(String(_MACHINE), String("machine file"))
+    g.stages[2].after = String("ghost")
+    var f = check_workflow(String(_WF), g, _token_stages(), String("release/machine.textproto"))
+    _none_in(f, String("R19"))
+    _one_in(f, String("job 'publish-prod': R3: needs publish-gamma; the stage runs after ghost"))
+
+
+def test_r19_the_source_jobs_output_is_r1s_when_the_job_is_gone() raises:
+    var f = _findings(_mutated(String("  publish-gamma:\n"), String("  gamma:\n")))
+    _none_in(f, String("R19: a later job takes the release set's hash from"))
+    _one_in(f, String("R1: stage 'publish-gamma' has no job"))
+
+
+def test_r17_the_documentation_filter() raises:
+    var doc = read_workflow(String(_WF))
+    var same = String("git log -- . ':(exclude)docs' ':(exclude)*.md' ':(exclude).github'\n")
+    assert_equal(len(documentation_filter_findings(same, doc)), 0)
+    # .github is no longer excluded
+    var f = documentation_filter_findings(String("git log -- . ':(exclude)docs' ':(exclude)*.md'\n"), doc)
+    assert_equal(len(f), 1, _all(f))
+    assert_equal(f[0], String("R17: release_version.sh no longer excludes '.github' (expected docs, *.md, .github)"))
+    # a filter of another length, or the same entries in another order
+    var shorter = documentation_filter_findings(String("git log -- . ':(exclude)docs' ':(exclude).github'\n"), doc)
+    assert_equal(len(shorter), 1, _all(shorter))
+    assert_equal(
+        shorter[0],
+        String("R17: the push trigger's paths-ignore (docs/**, **.md) is not release_version.sh's documentation (docs/**)"),
+    )
+    var swapped = documentation_filter_findings(
+        String("git log -- . ':(exclude)*.md' ':(exclude)docs' ':(exclude).github'\n"), doc
+    )
+    assert_equal(len(swapped), 1, _all(swapped))
+    assert_true(swapped[0].find(String("(**.md, docs/**)")) >= 0, swapped[0])
+
+
+def test_kci_run_calls_a_separator_ends_the_call() raises:
+    # a separator word, or a word ending in `;`: what follows is another command
+    var scripts = List[String]()
+    scripts.append(String("kci run --stage build; echo --only x\n"))
+    scripts.append(String("kci run --stage build ; echo --only x\n"))
+    scripts.append(String("kci run --stage build && echo --only x\n"))
+    scripts.append(String("kci run --stage build || echo --only x\n"))
+    scripts.append(String("kci run --stage build | tee --only x\n"))
+    for i in range(len(scripts)):
+        var c = kci_run_calls(scripts[i])
+        assert_equal(len(c), 1, scripts[i])
+        assert_equal(c[0].stage, String("build"), scripts[i])
+        assert_false(c[0].has_only, scripts[i])
+        assert_equal(len(c[0].args), 2, scripts[i])
 
 
 def main() raises:

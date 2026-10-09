@@ -51,6 +51,15 @@ jobs:
       # farm-connected; it publishes nothing)
       id-token: write
     steps:
+      # The job's deadline, taken first: 115 of the job's 120 minutes
+      # (timeout-minutes above). kci gets what is left of it
+      # (--build-budget-s below), so a wide change has all the time a slow
+      # `build kci` did not use, and kci still reports which units it did not
+      # build before GitHub would cancel the job. The 5 minutes
+      # left cover the steps after it (the logs, the upload, buck2's stop).
+      - name: the job's deadline
+        run: |
+          echo "$(( $(date +%s) + 115 * 60 ))" > "$RUNNER_TEMP/job_deadline_s"
       # The merge commit, with the full history: kci reads the change from
       # git (`<base>...<revision>`) and refuses a shallow clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,15 +96,20 @@ jobs:
       # release/artifacts.textproto and the checks its buck2 build system
       # derives from the live graph (release/ci/derive_checks.py), so every
       # target of the graph is in some unit. The base is the pull request's
-      # base commit, a full commit id GitHub sets.
+      # base commit, a full commit id GitHub sets. The build budget is the
+      # seconds left until the job's deadline (kci refuses a value under 1);
+      # kci counts it from its own start, so its work before the build is
+      # charged too. A missing deadline file stops the step here.
       - name: kci run --stage pr
         run: |
+          [ -s "$RUNNER_TEMP/job_deadline_s" ] || { echo "::error::no job deadline in \$RUNNER_TEMP/job_deadline_s: the job's first step did not write it"; exit 1; }
+          budget_s=$(( $(cat "$RUNNER_TEMP/job_deadline_s") - $(date +%s) ))
           "$RUNNER_TEMP/kci/kci" run --stage pr --affected-by ${{ github.event.pull_request.base.sha }} \
             --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
             --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
             --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --work-dir "$GITHUB_WORKSPACE" --log-dir "$RUNNER_TEMP/kci-logs" \
+            --work-dir "$GITHUB_WORKSPACE" --log-dir "$RUNNER_TEMP/kci-logs" --build-budget-s "$budget_s" \
             --result-file "$RUNNER_TEMP/kci-result-pr.json" \
             --summary-file "$GITHUB_STEP_SUMMARY"
       - name: the build logs
