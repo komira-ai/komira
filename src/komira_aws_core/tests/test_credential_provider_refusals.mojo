@@ -70,6 +70,9 @@ def test_container_full_uri() raises:
     _full_refused("http://127..0.1/", plain)
     _full_refused("http://127.0.0.1a/", plain)
     _full_refused("http://127.0.0.1000/", plain)
+    # Four digits whose value is at most 255: refused by the length rule
+    # alone (Python's ipaddress refuses an octet over 3 characters).
+    _full_refused("http://127.0.0.0001/", plain)
     _full_refused("http://127.0.0.256/", plain)
     _full_refused("http://128.0.0.1/", plain)
     # The URL's own shape.
@@ -186,13 +189,13 @@ def test_sts_regions() raises:
             assert_equal(String(e), "the region from S is not a valid AWS region name")
     check_region(max64, "S")
     # aws: ^(us|eu|ap|sa|ca|me|af|il|mx)-\w+-\d+$; aws-us-gov:
-    # ^us-gov-\w+-\d+$ (lower-case words, decimal numbers).
+    # ^us-gov-\w+-\d+$. A digit inside the middle word (us-ea5t-1) is not
+    # asserted: \w admits it, this check does not (komira-ai/komira#1141).
     assert_true(sts_region_in_supported_partition("eu-west-1"))
     assert_true(sts_region_in_supported_partition("mx-central-1"))
     assert_true(sts_region_in_supported_partition("us-gov-west-1"))
     assert_false(sts_region_in_supported_partition("us--1"))
     assert_false(sts_region_in_supported_partition("us-east-"))
-    assert_false(sts_region_in_supported_partition("us-ea5t-1"))
     assert_false(sts_region_in_supported_partition("us-east-1a"))
     assert_false(sts_region_in_supported_partition("zz-east-1"))
     assert_false(sts_region_in_supported_partition("cn-north-1"))

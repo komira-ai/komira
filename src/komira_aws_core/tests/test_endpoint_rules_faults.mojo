@@ -21,9 +21,13 @@
 #     reference, rule and endpoint.
 #
 # Expected URLs and unset results are botocore's (endpoint_provider.py,
-# utils.py remove_dot_segments, and Python's urllib.parse.urlparse); the
-# fault messages are this interpreter's contract (a type error in the data
-# is a fault, never an answer).
+# utils.py remove_dot_segments, and Python's urllib.parse.urlparse), with
+# one deliberate divergence: a URL urlparse raises ValueError on (the two
+# bracket-after-userinfo cases in test_parse_url_cleaning) raises out of
+# botocore's parseURL, and here answers unset, as the Smithy rules
+# language specifies parseURL on a URL it cannot parse. The fault messages
+# are this interpreter's contract (a type error in the data is a fault,
+# never an answer).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -248,7 +252,8 @@ def test_parse_url_cleaning() raises:
     assert_equal(_parse("https://example.com/a;p;q"), "url:https|example.com|/a|/a/")
     assert_equal(_parse("https://example.com/x;y/z"), "url:https|example.com|/x;y/z|/x%3By/z/")
     # A bracket after userinfo that never closes, and text between '@' and
-    # '[': not an IPv6 URL, unset.
+    # '[': not an IPv6 URL, unset (Smithy's parseURL; urlparse raises
+    # ValueError on both, so botocore raises).
     assert_equal(_parse("https://[a]@[b"), "error:none")
     assert_equal(_parse("https://a@b[::1]"), "error:none")
 
