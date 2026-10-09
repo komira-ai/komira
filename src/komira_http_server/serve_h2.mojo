@@ -40,7 +40,10 @@ from komira_http_core.codec.h2.connection_state import (
     H2ConnectionState,
     H2PendingRequest,
 )
-from komira_http_core.codec.h2.flow_control import FLOW_RESULT_OK
+from komira_http_core.codec.h2.flow_control import (
+    FLOW_RESULT_OK,
+    FLOW_RESULT_RST_STREAM,
+)
 from komira_http_core.codec.h2.frame import (
     FLAG_ACK,
     FLAG_END_HEADERS,
@@ -75,7 +78,6 @@ from komira_http_core.codec.h2.frame import (
     SettingsEntry,
     decode_frame,
     encode_data_frame,
-    encode_goaway_frame,
     encode_headers_frame,
     encode_ping_frame,
     encode_rst_stream_frame,
@@ -131,6 +133,13 @@ from komira_http_server.connection import (
     CONN_STATE_H2_PREFACE_WAIT,
     ConnEntry,
     REQ_BUF_BYTES,
+)
+from komira_http_server.serve_h2_flow import (
+    H2_MAX_BUFFERED_REQUEST_BODY,
+    _answer_stream_decode_error,
+    _credit_recv_windows,
+    _emit_goaway,
+    _reset_stream,
 )
 
 
@@ -252,10 +261,20 @@ def _dispatch_h2_frames[
         if res.status == FRAME_DECODE_NEED_MORE:
             return True
         if res.status == FRAME_DECODE_ERROR:
-            # Connection-level error → emit GOAWAY + close.
-            if not h2.is_goaway_sent():
-                _emit_goaway(h2, res.error_code)
-            return False
+            if res.is_connection_error or res.consumed == 0:
+                # Connection error (RFC 9113 §5.4.1) → GOAWAY + close.
+                if not h2.is_goaway_sent():
+                    _emit_goaway(h2, res.error_code)
+                return False
+            # A stream error (§5.4.2): the decoder consumed the whole
+            # frame, so skip it, reset its stream and keep decoding.
+            var bad_kind = h2.recv_buf[3]
+            h2.consume_recv_bytes(res.consumed)
+            if not _answer_stream_decode_error(
+                h2, bad_kind, res.error_stream_id, res.error_code,
+            ):
+                return False
+            continue
         # FRAME_DECODE_OK.
         var consumed = res.consumed
         h2.consume_recv_bytes(consumed)
@@ -408,6 +427,11 @@ def _dispatch_h2_frames[
                 _pump_deferred_responses(h2, bytes_sent, reqs_handled)
             else:
                 var idx = h2.find_stream_idx(frame.header.stream_id)
+                if idx >= 0 and h2.streams[idx].state == STREAM_STATE_CLOSED:
+                    # A closed stream sends nothing more, so its window is
+                    # never used; after our RST_STREAM the frame MUST be
+                    # ignored (RFC 9113 §5.1, §6.9).
+                    continue
                 if idx >= 0:
                     var fr = h2.send_fc.on_window_update(
                         frame.header.stream_id,
@@ -415,12 +439,9 @@ def _dispatch_h2_frames[
                         h2.streams[idx].send_window,
                     )
                     if fr.kind != FLOW_RESULT_OK:
-                        # Per-stream: emit RST_STREAM.
-                        var rst = List[UInt8]()
-                        encode_rst_stream_frame(
-                            frame.header.stream_id, fr.error_code, rst,
-                        )
-                        h2.append_out_bytes(rst^)
+                        # Per-stream overflow: a stream error (§6.9.1),
+                        # which closes the stream.
+                        _reset_stream(h2, frame.header.stream_id, fr.error_code)
                     else:
                         # stream-level WINDOW_UPDATE
                         # may unblock this stream's deferred body.
@@ -500,6 +521,10 @@ def _dispatch_h2_frames[
                 frame.header.flags & FLAG_END_STREAM
             ) != UInt8(0)
             var data_payload_len = len(frame.payload)
+            # RFC 9113 §6.9.1: flow control counts the whole frame payload,
+            # Pad Length and padding included: the length field, not the
+            # decoded data.
+            var data_fc_len = Int(frame.header.length)
             var data_stream_id = frame.header.stream_id
             var action = h2.streams[idx].advance_on_recv_frame(
                 FRAME_DATA, frame.header.flags,
@@ -513,11 +538,27 @@ def _dispatch_h2_frames[
                     data_stream_id, action.error_code, rst,
                 )
                 h2.append_out_bytes(rst^)
+                # The stream is gone, but §6.9.1 still counts the octets
+                # against the connection window: charge them and give
+                # them back, or the peer's window is short for good.
+                var fr_c = h2.recv_fc.on_conn_data_received(data_fc_len)
+                if fr_c.kind != FLOW_RESULT_OK:
+                    _emit_goaway(h2, H2_ERR_FLOW_CONTROL_ERROR)
+                    return False
+                _credit_recv_windows(h2, -1)
                 continue
-            # Action == KEEP: charge recv flow control.
+            # Action == KEEP: charge recv flow control. Which window
+            # overran decides the scope (§6.9): the stream's is a stream
+            # error, the connection's a connection error.
             var fr = h2.recv_fc.on_data_received(
-                data_payload_len, h2.streams[idx].recv_window,
+                data_fc_len, h2.streams[idx].recv_window, data_stream_id,
             )
+            if fr.kind == FLOW_RESULT_RST_STREAM:
+                # The connection window was charged; the stream is over,
+                # so its octets go back on the connection only.
+                _reset_stream(h2, data_stream_id, fr.error_code)
+                _credit_recv_windows(h2, -1)
+                continue
             if fr.kind != FLOW_RESULT_OK:
                 _emit_goaway(h2, H2_ERR_FLOW_CONTROL_ERROR)
                 return False
@@ -531,6 +572,25 @@ def _dispatch_h2_frames[
                     h2.streams[idx_post].recv_data_bytes
                     + Int64(data_payload_len)
                 )
+                if h2.streams[idx_post].has_pending_request and (
+                    h2.streams[idx_post].recv_data_bytes
+                    > Int64(H2_MAX_BUFFERED_REQUEST_BODY)
+                ):
+                    # The body outgrew what the server buffers. Answer
+                    # 413 and end the upload with RST_STREAM(NO_ERROR),
+                    # which RFC 9113 §8.1 provides for a response sent
+                    # before the request is complete.
+                    _ = _emit_response(
+                        h2,
+                        data_stream_id,
+                        HttpResponse(Int32(413)),
+                        reqs_handled,
+                        bytes_sent,
+                    )
+                    _reset_stream(h2, data_stream_id, H2_ERR_NO_ERROR)
+                    _credit_recv_windows(h2, -1)
+                    continue
+                _credit_recv_windows(h2, idx_post)
                 # capture the DATA payload into the pending
                 # request's body (gRPC request argument). No-op for streams
                 # without a pending entry (non-deferred dispatch discards
@@ -721,9 +781,12 @@ def _handle_headers_or_continuation[
             # This puts them ahead of the 100 queued HEADERS-resps on
             # the wire so h2spec sees them on its first WaitEvent
             # regardless of machine load. Wire ordering becomes:
+            #   [pinned] the server's initial SETTINGS if it is still queued
+            #            (RFC 9113 §3.4), and the unwritten tail of a
+            #            partial write; prepends never overtake these
             #   [0] GOAWAY(REFUSED_STREAM)  (prepended LAST → ends up first)
             #   [1] RST_STREAM(REFUSED_STREAM) on stream_id
-            #   [2..] queued 100 HEADERS-resps (drain naturally)
+            #   [2..] queued HEADERS-resps (drain naturally)
             # Either of GOAWAY or RST satisfies h2spec's verifier; both
             # arrive before any HEADERS-resp can shift the inter-frame
             # gap into timeout territory.
@@ -1560,35 +1623,102 @@ def _pump_deferred_responses(mut h2: H2ConnectionState, mut bytes_sent: Int64, m
             return
 
 
-def _emit_goaway(
-    mut h2: H2ConnectionState, error_code: UInt32, priority: Bool = False,
-):
-    """Emit a GOAWAY frame to the outbound queue + mark the conn drained.
-
-    `priority=True` prepends the GOAWAY at the FRONT of `pending_out`
-    so it overtakes any queued normal-path frames on the wire. Used by
-    the §5.1.2 concurrent-stream-limit gate where
-    a backlog of queued HEADERS-resps would otherwise delay the
-    GOAWAY past h2spec's per-frame WaitEvent timeout. Normal-path
-    callers leave `priority=False` (default) preserving FIFO order.
-    """
-    if h2.is_goaway_sent():
-        return
-    var dbg = List[UInt8]()
-    var buf = List[UInt8]()
-    encode_goaway_frame(
-        h2.last_processed_stream_id, error_code, dbg^, buf,
-    )
-    if priority:
-        h2.prepend_out_bytes(buf^)
-    else:
-        h2.append_out_bytes(buf^)
-    h2.mark_goaway_sent(error_code)
-
-
 # =============================================================================
 # §5 — Top-level serve_read_round_h2.
 # =============================================================================
+
+
+comptime _FLUSH_ERROR: Int = -1
+comptime _FLUSH_PARTIAL: Int = 0
+comptime _FLUSH_DRAINED: Int = 1
+
+
+def _discard_input(mut entry: ConnEntry):
+    """Read and drop what the peer has already sent, up to 64 reads of
+    REQ_BUF_BYTES, stopping at the first read that returns nothing.
+
+    Called after a connection error's GOAWAY is written and before the
+    caller closes the socket. h2spec http2/4.2/2 is the case: a DATA frame
+    larger than SETTINGS_MAX_FRAME_SIZE is refused on its 9-byte header, with
+    the rest of the frame unread, and close(2) on a socket with unread bytes
+    sends RST (POSIX), which can reach the peer ahead of the GOAWAY."""
+    ref tls_opt = entry.tls_stream_ref()
+    if not tls_opt:
+        return
+    var reads = 0
+    while reads < 64:
+        var buf = List[UInt8]()
+        buf.reserve(REQ_BUF_BYTES)
+        buf.resize(unsafe_uninit_length=REQ_BUF_BYTES)
+        var r = tls_opt.value().read_app(buf, REQ_BUF_BYTES)
+        if r[0] != TLS_OUTCOME_DONE or r[1] <= 0:
+            return
+        reads = reads + 1
+
+
+def _flush_pending_out(mut entry: ConnEntry, mut bytes_sent: Int64) -> Int:
+    """Write the connection's `pending_out` through TLS until it is drained,
+    the write blocks, or 64 writes have gone out.
+
+    write_app may return partial (n < len) under kernel send-buffer pressure
+    (TLS_OUTCOME_DONE with smaller n) or BLOCKED_ON_WRITE. Either way the
+    unwritten tail goes back at the front of `pending_out`, ahead of anything
+    queued since, and is pinned (`H2ConnectionState.pin_out_bytes`): it may
+    begin mid-frame, and a priority frame prepended in front of it would
+    corrupt the framing.
+
+    64 writes, not 8: h2spec §5.1.2 #1 sends 101 HEADERS at once and the
+    server queues the HEADERS responses plus RST/GOAWAY (~6KB plain, ~10KB
+    after TLS); at 8 the GOAWAY+RST could be stranded in the tail for a later
+    round, racing h2spec's WaitEvent timeout.
+
+    Returns _FLUSH_ERROR on a TLS write error or missing state,
+    _FLUSH_DRAINED when nothing is left, _FLUSH_PARTIAL otherwise."""
+    ref tls_opt = entry.tls_stream_ref()
+    if not tls_opt:
+        return _FLUSH_ERROR
+    var out_bytes: List[UInt8]
+    ref h2_opt = entry.h2_state_ref()
+    if h2_opt:
+        out_bytes = h2_opt.value().take_out_bytes()
+    else:
+        return _FLUSH_ERROR
+    var write_offset = 0
+    var out_len = len(out_bytes)
+    var max_write_iters = 64
+    var write_iter = 0
+    while write_offset < out_len and write_iter < max_write_iters:
+        var remaining = Span(out_bytes)[write_offset:out_len]
+        var write_outcome_and_n = tls_opt.value().write_app(remaining)
+        var write_outcome = write_outcome_and_n[0]
+        var nwrote = write_outcome_and_n[1]
+        if write_outcome == TLS_OUTCOME_ERROR:
+            return _FLUSH_ERROR
+        if nwrote > 0:
+            bytes_sent = bytes_sent + Int64(nwrote)
+            write_offset = write_offset + nwrote
+        if write_outcome == TLS_OUTCOME_BLOCKED_ON_WRITE:
+            # Kernel send buffer full; stash the tail back for next round.
+            break
+        if write_outcome == TLS_OUTCOME_BLOCKED_ON_READ:
+            # TLS rekey wants a read; stash tail + return.
+            break
+        if nwrote == 0 and write_outcome == TLS_OUTCOME_DONE:
+            # No progress this iter and no block signal — bail to avoid
+            # infinite-spin (shouldn't happen with s2n, but defensive).
+            break
+        write_iter = write_iter + 1
+    if write_offset >= out_len:
+        return _FLUSH_DRAINED
+    ref h2_opt3 = entry.h2_state_ref()
+    if h2_opt3:
+        var queued_since = h2_opt3.value().take_out_bytes()
+        var tail = List[UInt8](capacity=out_len - write_offset)
+        tail.extend(Span(out_bytes)[write_offset:out_len])
+        h2_opt3.value().append_out_bytes(tail^)
+        h2_opt3.value().pin_out_bytes()
+        h2_opt3.value().append_out_bytes(queued_since^)
+    return _FLUSH_PARTIAL
 
 
 def serve_read_round_h2[
@@ -1608,15 +1738,17 @@ def serve_read_round_h2[
            b. if CONN_STATE_H2_PREFACE_WAIT: try preface
            c. if CONN_STATE_H2_ACTIVE: dispatch frames
          until read_app returns BLOCKED_ON_READ (no more bytes ready) OR
-         hit a hard stop (peer EOF, error, dispatch hard-fail). This
+         hit a hard stop (peer EOF, error, dispatch hard-fail). Before
+         each further read, what the last one produced is flushed (the
+         next read may process the peer's close_notify). This
          absorbs MULTIPLE TLS records / TCP segments per reactor wakeup
          — critical for h2spec conformance because h2spec batches a
          test frame + a PING-ACK canary into back-to-back TLS records,
          and the single-shot read missed the PING.
-      2. Flush h2.pending_out via TLS write_app — looped until the buffer
-         is drained OR write returns BLOCKED_ON_WRITE / partial-write.
-         the leftover (un-written) bytes stay in pending_out
-         for the next round to drain.
+      2. Flush h2.pending_out via `_flush_pending_out` — looped until the
+         buffer is drained OR write returns BLOCKED_ON_WRITE / partial-write.
+         The leftover (un-written) bytes stay, pinned, at the front of
+         pending_out for the next round to drain.
       3. If GOAWAY sent + queue drained: return False (caller closes).
 
     Pre-condition: entry.is_tls() && entry.is_h2() && TLS handshake DONE.
@@ -1681,6 +1813,10 @@ def serve_read_round_h2[
                     h2_opt.value(),
                 )
                 h2_opt.value().append_out_bytes(settings_bytes^)
+                # The server preface is the first frame on the wire (RFC
+                # 9113 §3.4): a GOAWAY prepended by the dispatch below (the
+                # §5.1.2 gate) goes in behind it, not ahead.
+                h2_opt.value().pin_out_bytes()
                 h2_opt.value().mark_settings_sent()
 
         # 1c. dispatch (only while active)
@@ -1709,93 +1845,36 @@ def serve_read_round_h2[
             break
         if hit_peer_eof:
             break
-        # Otherwise: we got some bytes; loop and try to absorb more.
+        # Otherwise: we got some bytes; loop and try to absorb more. Write
+        # what this read produced first: the next read may process the
+        # peer's close_notify, after which s2n refuses every write, so a
+        # PING ACK or SETTINGS ACK still queued then would be lost.
+        if _flush_pending_out(entry, bytes_sent) == _FLUSH_ERROR:
+            return False
         inner_iters = inner_iters + 1
 
     # ---- step 2: flush h2.pending_out (loop until drained or blocked) ----
     var conn_should_close = dispatch_close or hit_peer_eof
     var h2_was_goaway: Bool
-    var h2_received_goaway: Bool
-    var out_bytes: List[UInt8]
     ref h2_opt2 = entry.h2_state_ref()
     if h2_opt2:
-        out_bytes = h2_opt2.value().take_out_bytes()
         h2_was_goaway = h2_opt2.value().is_goaway_sent()
-        h2_received_goaway = h2_opt2.value().is_goaway_received()
     else:
         return False
-
-    # Drain via write loop. write_app may return partial (n < len) under
-    # kernel send-buffer pressure (TLS_OUTCOME_DONE with smaller n) OR
-    # BLOCKED_ON_WRITE. In either case we stash the un-written tail back
-    # into pending_out for the next round.
-    var write_offset = 0
-    var out_len = len(out_bytes)
-    # bumped from 8 to 64 iters because h2spec
-    # §5.1.2 #1 sends 101 HEADERS at once and our server queues 100
-    # HEADERS responses + RST/GOAWAY (~6KB plain, ~10KB after TLS).
-    # At 8 iters we'd potentially leave the GOAWAY+RST stranded in
-    # the tail buffer for a future round, racing h2spec's WaitEvent
-    # timeout. 64 iters is plenty for any realistic single-round flush.
-    var max_write_iters = 64
-    var write_iter = 0
-    while write_offset < out_len and write_iter < max_write_iters:
-        var remaining = Span(out_bytes)[write_offset:out_len]
-        var write_outcome_and_n = tls_opt.value().write_app(remaining)
-        var write_outcome = write_outcome_and_n[0]
-        var nwrote = write_outcome_and_n[1]
-        if write_outcome == TLS_OUTCOME_ERROR:
-            return False
-        if nwrote > 0:
-            bytes_sent = bytes_sent + Int64(nwrote)
-            write_offset = write_offset + nwrote
-        if write_outcome == TLS_OUTCOME_BLOCKED_ON_WRITE:
-            # Kernel send buffer full; stash the tail back for next round.
-            break
-        if write_outcome == TLS_OUTCOME_BLOCKED_ON_READ:
-            # TLS rekey wants a read; stash tail + return.
-            break
-        if nwrote == 0 and write_outcome == TLS_OUTCOME_DONE:
-            # No progress this iter and no block signal — bail to avoid
-            # infinite-spin (shouldn't happen with s2n, but defensive).
-            break
-        write_iter = write_iter + 1
-
-    # If we didn't write everything, stash the tail back into pending_out
-    # so the next serve_read_round_h2 call picks it up.
-    if write_offset < out_len:
-        ref h2_opt3 = entry.h2_state_ref()
-        if h2_opt3:
-            var tail = List[UInt8]()
-            var k = write_offset
-            while k < out_len:
-                tail.append(out_bytes[k])
-                k = k + 1
-            # Prepend the un-written tail in front of anything newly
-            # queued during step 1c (which we already took into out_bytes
-            # via take_out_bytes; so currently pending_out is empty unless
-            # a later dispatch already re-queued — but dispatch was
-            # before take, so pending_out is empty here. Simply re-append.).
-            var current_pending = h2_opt3.value().take_out_bytes()
-            var combined = List[UInt8]()
-            # tail first (un-written from this round), then anything else.
-            var ti = 0
-            var tn = len(tail)
-            while ti < tn:
-                combined.append(tail[ti])
-                ti = ti + 1
-            var ci = 0
-            var cn = len(current_pending)
-            while ci < cn:
-                combined.append(current_pending[ci])
-                ci = ci + 1
-            h2_opt3.value().append_out_bytes(combined^)
+    var flushed = _flush_pending_out(entry, bytes_sent)
+    if flushed == _FLUSH_ERROR:
+        return False
+    if dispatch_close:
+        # The caller closes the socket on False. Read what the peer already
+        # sent first: close(2) on a socket with unread bytes sends RST, not
+        # FIN, and a peer that reads the RST first never sees the GOAWAY.
+        _discard_input(entry)
 
     if h2_was_goaway:
         # If we drained everything, close the conn. If there's still a
         # tail (rare under GOAWAY because GOAWAY is small), let the next
         # round drain it then close.
-        if write_offset >= out_len:
+        if flushed == _FLUSH_DRAINED:
             conn_should_close = True
 
     # ⛔ THERE IS NO `if h2_received_goaway: conn_should_close = True` HERE,
