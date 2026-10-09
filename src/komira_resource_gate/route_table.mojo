@@ -12,7 +12,8 @@
 #     `{id_capture}`. The id is the segment's bytes as sent (not
 #     percent-decoded);
 #   * `on_kind(method, pattern, kind, action)`: `action` on `kind` as a whole
-#     (empty id), for a create or a listing;
+#     (empty id), for a create or a listing. Only this factory makes a
+#     kind-wide row: it sets `kind_wide`;
 #   * `public_route(method, pattern)`: served without a credential;
 #   * `deny_route(method, pattern, reason)`: a recorded refusal. It answers
 #     exactly what an undeclared route answers; placed before a broader row it
@@ -29,14 +30,22 @@
 # match `/repos/x/settings`. `method` matches the request's method name
 # exactly (`GET`).
 #
-# CANONICAL PATHS ONLY. A path the table could read differently from the
-# handler behind the gate is refused before any row is tried: it must start
-# with `/`, and no segment may be empty (`//`, a trailing `/`) or a dot segment
-# (`.`, `..`, or either spelled with `%2e`). The root `/` has no segments. A
-# pattern that is not canonical matches nothing.
+# RAW BYTES, CANONICAL PATHS ONLY. The table matches the path's bytes as
+# sent; it percent-decodes nothing. Before any row is tried a path is refused
+# unless it starts with `/` and has no empty segment (`//`, a trailing `/`) and
+# no dot segment (`.`, `..`, or either spelled with `%2e`). The root `/` has no
+# segments. A pattern that is not canonical matches nothing. Any other
+# percent-escape is routed as its raw bytes: `/repos/acme/adm%69n` does not
+# match the literal `admin`, and `%2F` does not split a segment. So a
+# `deny_route` carve-out holds only for an inner dispatcher that routes on the
+# same raw bytes; one that percent-decodes before routing can read such a path
+# as the carved-out route.
 #
-# A governed row whose kind is empty, or whose `id_capture` is not captured
-# exactly once by its pattern, is malformed: a match on it yields DENY.
+# A non-kind-wide governed row whose kind is empty, or whose `id_capture` is
+# not captured exactly once by its pattern (an empty `id_capture` never is),
+# is malformed: a match on it yields DENY. A kind-wide row with an empty kind
+# or a non-empty `id_capture` (only a hand-built row can have one) is
+# malformed too.
 #
 # Encapsulation: value types only; no pointer, no wildcard origin.
 # =============================================================================
@@ -55,6 +64,7 @@ struct RouteRule(Copyable, Movable, Deinitable):
     var kind: String
     var id_capture: String
     var action: AuthzAction
+    var kind_wide: Bool
     var public: Bool
     var denied: Bool
     var deny_reason: String
@@ -67,6 +77,7 @@ struct RouteRule(Copyable, Movable, Deinitable):
         var kind: String,
         var id_capture: String,
         var action: AuthzAction,
+        kind_wide: Bool,
         public: Bool,
         denied: Bool,
         var deny_reason: String,
@@ -76,6 +87,7 @@ struct RouteRule(Copyable, Movable, Deinitable):
         self.kind = kind^
         self.id_capture = id_capture^
         self.action = action^
+        self.kind_wide = kind_wide
         self.public = public
         self.denied = denied
         self.deny_reason = deny_reason^
@@ -95,6 +107,7 @@ struct RouteRule(Copyable, Movable, Deinitable):
             kind=kind,
             id_capture=id_capture,
             action=action^,
+            kind_wide=False,
             public=False,
             denied=False,
             deny_reason=String(""),
@@ -111,6 +124,7 @@ struct RouteRule(Copyable, Movable, Deinitable):
             kind=kind,
             id_capture=String(""),
             action=action^,
+            kind_wide=True,
             public=False,
             denied=False,
             deny_reason=String(""),
@@ -126,6 +140,7 @@ struct RouteRule(Copyable, Movable, Deinitable):
             kind=String(""),
             id_capture=String(""),
             action=AuthzAction.read(),
+            kind_wide=False,
             public=True,
             denied=False,
             deny_reason=String(""),
@@ -140,6 +155,7 @@ struct RouteRule(Copyable, Movable, Deinitable):
             kind=String(""),
             id_capture=String(""),
             action=AuthzAction.admin(),
+            kind_wide=False,
             public=False,
             denied=True,
             deny_reason=reason,
@@ -246,10 +262,14 @@ def _decide(rule: RouteRule, names: List[String], values: List[String]) -> Route
         return RouteDecision.public()
     if rule.kind.byte_length() == 0:
         return RouteDecision.deny()
-    if rule.id_capture.byte_length() == 0:
+    if rule.kind_wide:
+        if rule.id_capture.byte_length() != 0:
+            return RouteDecision.deny()
         return RouteDecision.governed(
             rule.action.copy(), AuthzResource(kind=rule.kind, id=String(""))
         )
+    # Not kind-wide: an empty `id_capture` matches no capture name (a name is
+    # never empty), so `found` stays 0 and the row denies.
     var found = 0
     var id = String("")
     for i in range(len(names)):

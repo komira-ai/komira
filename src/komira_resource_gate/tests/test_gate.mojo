@@ -10,8 +10,11 @@
 #   * a missing row is served as public;
 #   * a public route forwards the caller's principal or a forged gate
 #     attribute;
+#   * an anonymous request to an unrouted or refused path is challenged
+#     (401) instead of refused (403);
 #   * a governed route is served, or the port asked, without a principal or
 #     with an empty subject;
+#   * a one-byte subject is refused as if it were empty;
 #   * the port is asked about the wrong subject, action, kind or id;
 #   * a denial is served, or answered as anything but the exact 403;
 #   * a port that raises is served, read as a denial (403), or answered
@@ -254,6 +257,28 @@ def test_refused_row_answers_like_an_unrouted_one() raises:
     _ = rt^
 
 
+def test_anonymous_unrouted_or_refused_is_403_not_401() raises:
+    # The not-governed check comes before authentication: an anonymous
+    # request to an undeclared or refused path gets the 403, never a 401
+    # challenge.
+    var rt = RT(NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
+    ref reactor = rt.reactor()
+    var gate = _gate(MODE_ALLOW)
+    var anon = _anonymous()
+    var req = _req(HttpMethod.get(), "/admin")
+    _assert_forbidden(
+        gate.dispatch_with_ctx[RT](reactor, req, anon), "anonymous, unrouted"
+    )
+    var req2 = _req(HttpMethod.delete(), "/repos/acme")
+    _assert_forbidden(
+        gate.dispatch_with_ctx[RT](reactor, req2, anon), "anonymous, refused"
+    )
+    assert_equal(gate.inner().reached, 0, "the inner dispatcher never ran")
+    assert_equal(gate.authz().calls, 0, "the port was never asked")
+    _ = gate^
+    _ = rt^
+
+
 def test_public_route_runs_without_identity() raises:
     var rt = RT(NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
     ref reactor = rt.reactor()
@@ -333,6 +358,14 @@ def test_allowed_request_reaches_inner_with_what_was_authorized() raises:
     req3.query_string = String("repo=other")
     _ = gate.dispatch_with_ctx[RT](reactor, req3, ctx)
     assert_equal(gate.authz().id, "acme")
+    # A one-byte subject is a subject: the shortest one there is.
+    var one = _ctx("a")
+    var req4 = _req(HttpMethod.get(), "/repos/acme")
+    var resp4 = gate.dispatch_with_ctx[RT](reactor, req4, one)
+    assert_equal(Int(resp4.status), 200, "a one-byte subject")
+    assert_equal(gate.authz().subject, "a")
+    assert_equal(gate.authz().calls, 4)
+    assert_equal(gate.inner().reached, 4)
     _ = gate^
     _ = rt^
 
@@ -385,6 +418,7 @@ def test_dispatch_without_chain_is_anonymous() raises:
 def main() raises:
     test_unrouted_path_is_forbidden_and_reaches_nothing()
     test_refused_row_answers_like_an_unrouted_one()
+    test_anonymous_unrouted_or_refused_is_403_not_401()
     test_public_route_runs_without_identity()
     test_governed_route_without_identity_is_401()
     test_allowed_request_reaches_inner_with_what_was_authorized()

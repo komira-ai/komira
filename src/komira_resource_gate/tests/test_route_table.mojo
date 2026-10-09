@@ -14,8 +14,14 @@
 #     one-letter capture name is read as a literal;
 #   * a `//`, a trailing `/`, a missing leading `/`, or a `.` / `..` segment
 #     (also spelled `%2e`) is routed instead of refused;
+#   * a `{name}<suffix>` capture that does not compare every byte of the
+#     suffix (one wrong byte at each position must miss);
+#   * an escape other than `%2e` (`%3e`, `%2f`) is read as a dot, or an
+#     escape is decoded before matching a literal;
 #   * a malformed governed row (empty kind, a capture its pattern does not
-#     have, a capture named twice) is served instead of refused.
+#     have, a capture named twice, an empty capture name on a row that is not
+#     kind-wide, a kind-wide row naming a capture) is served instead of
+#     refused.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -129,6 +135,16 @@ def _table() -> ResourceRouteTable:
             AuthzAction.read(),
         )
     )
+    # `governed` with an empty `id_capture` is not a kind-wide row.
+    rules.append(
+        RouteRule.governed(
+            String("GET"),
+            String("/bad/empty/{q}"),
+            String("thing"),
+            String(""),
+            AuthzAction.read(),
+        )
+    )
     # `{}` has no name, so it is a literal segment.
     rules.append(
         RouteRule.on_kind(
@@ -203,6 +219,13 @@ def test_governed_rows() raises:
     _expect(t, "GET", "/repos/...", "read", "repo", "...")
     # An incomplete escape is an ordinary segment.
     _expect(t, "GET", "/repos/%2", "read", "repo", "%2")
+    # An escape is a dot only as `%2e`: a different second or third byte is
+    # an ordinary segment.
+    _expect(t, "GET", "/repos/%3e", "read", "repo", "%3e")
+    _expect(t, "GET", "/repos/%2f", "read", "repo", "%2f")
+    # Other escapes are routed as raw bytes, never decoded: `adm%69n` is not
+    # the literal `admin`, so the carve-out row does not refuse it.
+    _expect(t, "GET", "/repos/acme/adm%69n", "read", "repo", "acme")
     # The container named by the row is the resource.
     _expect(t, "GET", "/boards/b1/tasks/t9", "read", "board", "b1")
 
@@ -253,6 +276,11 @@ def test_suffix_capture() raises:
     # The bare suffix would capture an empty id: no match.
     _expect_deny(t, "POST", "/git/.git/upload")
     _expect_deny(t, "POST", "/git/acme.gi/upload")
+    # One wrong byte at each position of the suffix `.git`, first to last.
+    _expect_deny(t, "POST", "/git/acmeXgit/upload")
+    _expect_deny(t, "POST", "/git/acme.Xit/upload")
+    _expect_deny(t, "POST", "/git/acme.gXt/upload")
+    _expect_deny(t, "POST", "/git/acme.gix/upload")
     _expect_deny(t, "POST", "/git/acme/upload")
 
 
@@ -311,6 +339,7 @@ def test_malformed_rows_deny() raises:
     _expect_deny(t, "GET", "/bad/kind/k")
     _expect_deny(t, "GET", "/bad/capture/k")
     _expect_deny(t, "GET", "/bad/twice/k/k")
+    _expect_deny(t, "GET", "/bad/empty/k")
 
 
 def test_denied_flag_wins_over_every_other_field() raises:
@@ -324,6 +353,7 @@ def test_denied_flag_wins_over_every_other_field() raises:
             kind=String("thing"),
             id_capture=String("id"),
             action=AuthzAction.read(),
+            kind_wide=False,
             public=False,
             denied=True,
             deny_reason=String("refused"),
@@ -336,6 +366,7 @@ def test_denied_flag_wins_over_every_other_field() raises:
             kind=String(""),
             id_capture=String(""),
             action=AuthzAction.read(),
+            kind_wide=False,
             public=True,
             denied=True,
             deny_reason=String("refused"),
@@ -344,6 +375,55 @@ def test_denied_flag_wins_over_every_other_field() raises:
     var t = ResourceRouteTable(rules^)
     _expect_deny(t, "GET", "/x/1")
     _expect_deny(t, "GET", "/y")
+
+
+def test_kind_wide_flag_alone_makes_a_kind_wide_row() raises:
+    # The same row with and without `kind_wide`: only the flag gives an empty
+    # id, and a kind-wide row that also names a capture is malformed.
+    var rules = List[RouteRule]()
+    rules.append(
+        RouteRule(
+            method=String("GET"),
+            pattern=String("/kw/{id}"),
+            kind=String("thing"),
+            id_capture=String("id"),
+            action=AuthzAction.read(),
+            kind_wide=True,
+            public=False,
+            denied=False,
+            deny_reason=String(""),
+        )
+    )
+    rules.append(
+        RouteRule(
+            method=String("GET"),
+            pattern=String("/kw0/{id}"),
+            kind=String("thing"),
+            id_capture=String(""),
+            action=AuthzAction.read(),
+            kind_wide=False,
+            public=False,
+            denied=False,
+            deny_reason=String(""),
+        )
+    )
+    rules.append(
+        RouteRule(
+            method=String("GET"),
+            pattern=String("/kw1/{id}"),
+            kind=String("thing"),
+            id_capture=String(""),
+            action=AuthzAction.read(),
+            kind_wide=True,
+            public=False,
+            denied=False,
+            deny_reason=String(""),
+        )
+    )
+    var t = ResourceRouteTable(rules^)
+    _expect_deny(t, "GET", "/kw/1")
+    _expect_deny(t, "GET", "/kw0/1")
+    _expect(t, "GET", "/kw1/1", "read", "thing", "")
 
 
 def main() raises:
@@ -358,4 +438,5 @@ def main() raises:
     test_canonical_segments()
     test_malformed_rows_deny()
     test_denied_flag_wins_over_every_other_field()
+    test_kind_wide_flag_alone_makes_a_kind_wide_row()
     print("PASS komira_resource_gate test_route_table")

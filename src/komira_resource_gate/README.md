@@ -11,13 +11,17 @@ else and asks an `AuthzPort` (from `komira_authz_api`) about the rest.
 - `ResourceRouteTable` is an ordered list of `RouteRule`s; the first row that
   matches the method and path wins, and no match is DENY. Rows:
   `governed(method, pattern, kind, id_capture, action)`,
-  `on_kind(method, pattern, kind, action)` (the kind as a whole, empty id),
+  `on_kind(method, pattern, kind, action)` (the kind as a whole, empty id;
+  the only kind-wide row: `governed` with an empty `id_capture` denies),
   `public_route(method, pattern)` and `deny_route(method, pattern, reason)`.
   Patterns hold literal segments, `{name}` captures, `{name}<suffix>`
   captures (`{repo}.git`) and a final `*` for one or more further segments.
   A path that starts without `/`, or has an empty or dot segment (`.`, `..`,
-  also as `%2e`), is refused before any row is tried. The captured id is the
-  segment as sent, not percent-decoded.
+  also as `%2e`), is refused before any row is tried. Matching is on the raw
+  bytes: nothing is percent-decoded, so the captured id is the segment as
+  sent, `adm%69n` is not the literal `admin`, and `%2F` does not split a
+  segment. A `deny_route` carve-out therefore holds only for an inner
+  dispatcher that routes on the same raw bytes.
 - `ResourceCatalog` is the trait an application implements: one pure static
   `route(method, path) -> RouteDecision`, usually a table's `route`. The query
   string is not an input.
