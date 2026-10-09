@@ -1478,7 +1478,7 @@ struct CoalescingWindow[
         if self._policy.max_ms <= Int64(0):
             return False
         if self._buf.pending_count() == 0:
-            return False
+            return False  # cov: unreachable the only caller, offer, buffers an item first
         if self._timer_op_id != Int64(0):
             return False
         var deadline_ns = self._policy.max_ms * Int64(1_000_000)

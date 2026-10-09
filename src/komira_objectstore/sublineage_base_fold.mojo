@@ -1009,12 +1009,12 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
                 + String(expected_dense)
             )
         if r.last_offset != r.base_offset + count - Int64(1):
-            _ = base^
-            raise Error(
-                "sublineage_base_fold: _base last_offset "
-                + String(r.last_offset)
-                + " != base+count-1 "
-                + String(r.base_offset + count - Int64(1))
+            _ = base^  # cov: unreachable CasManifestStore.append returns last = base + count - 1
+            raise Error(  # cov: unreachable see the line above
+                "sublineage_base_fold: _base last_offset "  # cov: unreachable see the line above
+                + String(r.last_offset)  # cov: unreachable see the line above
+                + " != base+count-1 "  # cov: unreachable see the line above
+                + String(r.base_offset + count - Int64(1))  # cov: unreachable see the line above
             )
         _ = base^
         self._base_chunks.append(
@@ -1387,7 +1387,7 @@ def _first_segment_after(s: String, start: Int) -> String:
 @always_inline
 def _str_starts_with(s: String, prefix: String) -> Bool:
     if prefix.byte_length() == 0:
-        return True
+        return True  # cov: unreachable the enum prefix '<part>/_lineage/' is never empty
     var sb = s.as_bytes()
     var pb = prefix.as_bytes()
     if len(sb) < len(pb):

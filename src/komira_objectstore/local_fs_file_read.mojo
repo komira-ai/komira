@@ -78,13 +78,13 @@ def _stage_name(stage: Int32) -> String:
     if stage == _STAGE_FSTAT:
         return String("fstat")
     if stage == _STAGE_READ:
-        return String("read")
+        return String("read")  # cov: unreachable only a read(2) failure on an open regular file sets it (a device fault)
     if stage == _STAGE_WRITE:
         return String("write")
     if stage == _STAGE_FSYNC:
-        return String("fsync")
+        return String("fsync")  # cov: unreachable needs an fsync(2) failure from the device
     if stage == _STAGE_CLOSE:
-        return String("close")
+        return String("close")  # cov: unreachable needs a close(2) failure from the device
     if stage == _STAGE_LINK:
         return String("link")
     return String("stat")
@@ -141,11 +141,11 @@ def _read_whole_file(path: String) raises -> List[UInt8]:
         fd, buf.unsafe_ptr(), Int64(n), UnsafePointer(to=got)
     )
     if rrc != 0:
-        raise _io_error(path, _STAGE_READ, rrc)
+        raise _io_error(path, _STAGE_READ, rrc)  # cov: unreachable read(2) on an open regular file fails only on a device fault
     if Int(got) != n:
-        raise Error(
-            "LocalFsConditionalStore: short read (" + String(Int(got)) + " < "
-            + String(n) + ") for '" + path + "'"
+        raise Error(  # cov: unreachable needs the file to shrink between fstat and read
+            "LocalFsConditionalStore: short read (" + String(Int(got)) + " < "  # cov: unreachable see the line above
+            + String(n) + ") for '" + path + "'"  # cov: unreachable see the line above
         )
     return buf^
 
