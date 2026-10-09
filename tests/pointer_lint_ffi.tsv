@@ -34,3 +34,10 @@ src/tests/helpers/komira_udf_spike_abi/_table.mojo	the dlopened UDF runtime libr
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_broken_so.mojo	the init export of the echo_broken UDF runtime library, forwarded to its C init
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_global_lock_so.mojo	the init export of the echo_global_lock UDF runtime library, forwarded to its second C init
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_so.mojo	the init export of the echo UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/both_symbols_so.mojo	the two init exports of the both_symbols native UDF library, forwarded to the C native library's init
+src/tests/helpers/komira_udf_spike_native/refrt/echo_as_library_so.mojo	the native library export of the echo_as_library shared library, forwarded to the echo runtime's C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_c_affine_so.mojo	the init export of the native_c_affine UDF library, forwarded to its second C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_c_so.mojo	the init export of the native_c UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_so.mojo	the init export of the native UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native_mojo/_arrow.mojo	the Arrow C Data arrays a native UDF library reads and builds, and the error strings it hands the host
+src/tests/helpers/komira_udf_spike_native_mojo/_table.mojo	the UDF runtime C ABI table of the Mojo native UDF library and its handles

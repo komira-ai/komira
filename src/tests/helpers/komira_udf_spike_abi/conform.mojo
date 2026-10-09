@@ -34,7 +34,7 @@ from .contract import (
     TRANSPORT_IN_PROCESS,
     status_name,
 )
-from .runtime import CallOptions, Handle, Opened, Outcome, UdfRuntime
+from .runtime import CallOptions, CodeSet, Handle, Opened, Outcome, UdfRuntime
 from .values import Batch, Column, TYPE_FLOAT64, TYPE_INT32
 
 
@@ -373,17 +373,22 @@ def _capabilities(mut rt: UdfRuntime) raises -> CaseResult:
     return CaseResult("capabilities", "PASS" if why == "" else "FAIL", why)
 
 
-def run_suite(runtime_path: String, cases: List[Case]) raises -> Report:
+def run_suite(runtime_path: String, cases: List[Case], code: CodeSet = CodeSet.none()) raises -> Report:
     """Open the runtime library at `runtime_path` and run every case on it.
     A case that raises fails with the error as its reason; the suite goes
-    on."""
+    on. A non-empty `code` replaces every case's code root and code objects
+    (the same for every case: how a runtime that executes code objects
+    gets them)."""
     var rt = UdfRuntime.open(runtime_path)
     var report = Report()
     var caps = rt.describe()
     report.runtime_id = caps.runtime_id
     report.results.append(_capabilities(rt))
     for i in range(len(cases)):
-        ref c = cases[i]
+        var c = cases[i].copy()
+        if len(code.objects) > 0:
+            c.spec.code_root = code.root
+            c.spec.code = code.objects.copy()
         var instanceless = c.run == "validate" or c.run == "init_abi"
         if not instanceless and c.spec.shape & caps.shapes == 0:
             report.results.append(CaseResult(c.name, "SKIP", "shape not in capabilities.shapes"))

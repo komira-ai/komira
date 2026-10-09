@@ -11,7 +11,7 @@
  * interpreter would, and has none, so of the two hosting values it reports
  * EMBEDDED (it needs nothing from the process that loads it).
  *
- * Built twice (BUCK). With KOMIRA_UDF_ECHO_BROKEN defined it is
+ * Built three times (BUCK). With KOMIRA_UDF_ECHO_BROKEN defined it is
  * komira-test/echo-broken, the same code with seven planted defects the
  * suite must catch (each marked BROKEN below):
  *   1. it does not release `args` when a fixture raises (a leak);
@@ -27,8 +27,16 @@
  * the same runtime reporting global_lock 1 beside THREAD_SAFE, the test
  * setting of design section 6.3, which a host must refuse at init.
  *
+ * With ECHO_NATIVE defined it is a native UDF library (design section 1.2),
+ * the C fixture library the native runtime loads: the same fixtures, with
+ * describe reporting runtime_id "komira/native", udf_class NATIVE, hosting 0
+ * and CONTEXT_PER_THREAD. With ECHO_INIT_AFFINE also defined, that init is
+ * the same library reporting thread_affine 1, which the native runtime must
+ * refuse to load.
+ *
  * Every symbol but the inits is static, so the builds link into one process
- * (the one-definition gate links every C library whole).
+ * (the one-definition gate links every C library whole). The Arrow C Data
+ * helpers (reading inputs, building outputs) are in echo_arrow.h.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -44,6 +52,9 @@
 #ifdef KOMIRA_UDF_ECHO_BROKEN
 #define BROKEN 1
 #define ECHO_ID "komira-test/echo-broken"
+#elif defined(ECHO_NATIVE)
+#define BROKEN 0
+#define ECHO_ID "komira/native"
 #else
 #define BROKEN 0
 #define ECHO_ID "komira-test/echo"
@@ -141,9 +152,11 @@ static const struct fixture FIXTURES[] = {
 
 /* ---- handles ------------------------------------------------------------- */
 
+enum echo_variant { V_PLAIN, V_GLOBAL_LOCK, V_AFFINE }; /* what describe misreports, by init */
+
 struct komira_udf_rt {
   const komira_udf_host* host;
-  uint32_t global_lock;
+  enum echo_variant variant;
 };
 #define ROW_FIELDS_MAX 8
 
@@ -207,31 +220,9 @@ static int32_t fail(komira_udf_error* e, int32_t code, const char* msg, int64_t 
   return code;
 }
 
-/* ---- reading inputs ------------------------------------------------------ */
+#include "echo_arrow.h"
 
-static int64_t off_of(const struct ArrowArray* a) { return BROKEN ? 0 : a->offset; } /* BROKEN (5) */
-
-static int is_valid(const struct ArrowArray* a, int64_t r) {
-  const uint8_t* v = (const uint8_t*)a->buffers[0];
-  int64_t at = off_of(a) + r;
-  return v == NULL || ((v[at >> 3] >> (at & 7)) & 1);
-}
-
-static int64_t i64_at(const struct ArrowArray* a, int64_t r) {
-  return ((const int64_t*)a->buffers[1])[off_of(a) + r];
-}
-
-static double f64_at(const struct ArrowArray* a, int64_t r) {
-  return ((const double*)a->buffers[1])[off_of(a) + r];
-}
-
-static int32_t i32_at(const struct ArrowArray* a, int64_t r) {
-  return ((const int32_t*)a->buffers[1])[off_of(a) + r];
-}
-
-static void release_array(struct ArrowArray* a) {
-  if (a->release != NULL) a->release(a);
-}
+/* ---- the call ------------------------------------------------------------ */
 
 static int cancelled(const komira_udf_call* c) {
   if (BROKEN) return 0; /* BROKEN (3) */
@@ -240,88 +231,6 @@ static int cancelled(const komira_udf_call* c) {
 
 static int past_deadline(const komira_udf_rt* rt, const komira_udf_call* c) {
   return c != NULL && c->deadline_ns != 0 && rt->host->now_ns(rt->host->host_data) > c->deadline_ns;
-}
-
-/* ---- building outputs ---------------------------------------------------- */
-
-/* One malloc block per primitive array: its two-entry buffer list, the
- * validity bitmap, the values. The release frees the block. */
-struct col_block {
-  const void* bufs[2];
-};
-
-static void release_col(struct ArrowArray* a) {
-  free(a->private_data);
-  a->release = NULL;
-}
-
-static void set_cpu(struct ArrowDeviceArray* d) {
-  d->device_id = -1;
-  d->device_type = ARROW_DEVICE_CPU;
-  d->sync_event = NULL;
-  d->reserved[0] = d->reserved[1] = d->reserved[2] = 0;
-}
-
-/* A primitive array of `n` rows of 8-byte values, every row valid; the
- * caller writes *data and clears validity bits for nulls. */
-static int make_col(struct ArrowArray* a, int64_t n, uint8_t** validity, void** data) {
-  size_t vbytes = (size_t)((n + 7) / 8);
-  struct col_block* b = malloc(sizeof(struct col_block) + vbytes + (size_t)n * 8 + 8);
-  if (b == NULL) return 0;
-  uint8_t* v = (uint8_t*)(b + 1);
-  memset(v, 0xFF, vbytes);
-  void* d = (void*)(((uintptr_t)(v + vbytes) + 7) & ~(uintptr_t)7);
-  b->bufs[0] = v;
-  b->bufs[1] = d;
-  a->length = n;
-  a->null_count = 0;
-  a->offset = 0;
-  a->n_buffers = 2;
-  a->n_children = 0;
-  a->buffers = b->bufs;
-  a->children = NULL;
-  a->dictionary = NULL;
-  a->release = release_col;
-  a->private_data = b;
-  *validity = v;
-  *data = d;
-  return 1;
-}
-
-static void set_null(struct ArrowArray* a, uint8_t* v, int64_t r) {
-  v[r >> 3] &= (uint8_t)~(1u << (r & 7));
-  a->null_count++;
-}
-
-static void release_struct(struct ArrowArray* a) {
-  for (int64_t i = 0; i < a->n_children; i++) {
-    release_array(a->children[i]);
-    free(a->children[i]);
-  }
-  free(a->private_data);
-  a->release = NULL;
-}
-
-/* A struct array of `n` rows whose `k` children the caller fills. */
-static int make_struct(struct ArrowArray* a, int64_t n, int64_t k) {
-  size_t bytes = sizeof(void*) + (size_t)k * sizeof(struct ArrowArray*);
-  void** b = calloc(1, bytes);
-  if (b == NULL) return 0;
-  struct ArrowArray** kids = (struct ArrowArray**)(b + 1);
-  for (int64_t i = 0; i < k; i++) {
-    kids[i] = calloc(1, sizeof(struct ArrowArray));
-  }
-  a->length = n;
-  a->null_count = 0;
-  a->offset = 0;
-  a->n_buffers = 1;
-  a->n_children = k;
-  a->buffers = (const void**)b; /* b[0] == NULL: no validity */
-  a->children = k > 0 ? kids : NULL;
-  a->dictionary = NULL;
-  a->release = release_struct;
-  a->private_data = b;
-  return 1;
 }
 
 /* ---- validate / load ----------------------------------------------------- */
@@ -389,14 +298,20 @@ static int32_t echo_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   c->shapes = KOMIRA_UDF_SHAPE_SCALAR | KOMIRA_UDF_SHAPE_ROW | KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN |
               KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME | KOMIRA_UDF_SHAPE_AGG_PLAIN | KOMIRA_UDF_SHAPE_AGG_MERGEABLE |
               KOMIRA_UDF_SHAPE_STEP;
+#ifdef ECHO_NATIVE
+  c->threading = KOMIRA_UDF_CONTEXT_PER_THREAD;
+  c->hosting = KOMIRA_UDF_HOSTING_NONE;
+  c->udf_class = KOMIRA_UDF_CLASS_NATIVE;
+#else
   c->threading = KOMIRA_UDF_THREAD_SAFE;
-  c->thread_affine = 0;
-  c->transports = KOMIRA_UDF_TRANSPORT_IN_PROCESS;
   c->hosting = KOMIRA_UDF_HOSTING_EMBEDDED;
+  c->udf_class = KOMIRA_UDF_CLASS_MANAGED;
+#endif
+  c->thread_affine = rt->variant == V_AFFINE;
+  c->transports = KOMIRA_UDF_TRANSPORT_IN_PROCESS;
   c->devices = KOMIRA_UDF_DEVICE_CPU;
   c->features = KOMIRA_UDF_FEATURE_MEMORY_REPORT;
-  c->udf_class = KOMIRA_UDF_CLASS_MANAGED;
-  c->global_lock = rt->global_lock;
+  c->global_lock = rt->variant == V_GLOBAL_LOCK;
   return KOMIRA_UDF_OK;
 }
 
@@ -965,7 +880,7 @@ static const komira_udf_runtime TABLE = {
 };
 
 static const komira_udf_runtime* init_rt(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e,
-                                         uint32_t global_lock) {
+                                         enum echo_variant variant) {
   if (host == NULL || host->struct_size < sizeof(komira_udf_host) || host->abi_major != KOMIRA_UDF_ABI_MAJOR) {
     fail(e, KOMIRA_UDF_ERR_ABI, "this runtime speaks ABI major 1", -1);
     return NULL;
@@ -976,18 +891,24 @@ static const komira_udf_runtime* init_rt(const komira_udf_host* host, komira_udf
     return NULL;
   }
   r->host = host;
-  r->global_lock = global_lock;
+  r->variant = variant;
   *rt = r;
   return &TABLE;
 }
 
 const komira_udf_runtime* ECHO_INIT(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e) {
-  return init_rt(host, rt, e, 0);
+  return init_rt(host, rt, e, V_PLAIN);
 }
 
 #ifdef ECHO_INIT_GLOBAL_LOCK
 const komira_udf_runtime* ECHO_INIT_GLOBAL_LOCK(const komira_udf_host* host, komira_udf_rt** rt,
                                                 komira_udf_error* e) {
-  return init_rt(host, rt, e, 1);
+  return init_rt(host, rt, e, V_GLOBAL_LOCK);
+}
+#endif
+
+#ifdef ECHO_INIT_AFFINE
+const komira_udf_runtime* ECHO_INIT_AFFINE(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e) {
+  return init_rt(host, rt, e, V_AFFINE);
 }
 #endif
