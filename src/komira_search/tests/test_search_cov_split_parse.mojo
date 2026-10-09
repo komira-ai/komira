@@ -19,11 +19,11 @@
 #      (termdict, postings, docstore, fast fields, BLOCKMAX) is refused.
 #   5. A region with a negative offset, an offset inside the magic, and a
 #      region running past the footer start are refused.
-#   6. A region whose offset + length wraps past the Int maximum slips under
-#      the footer-start check (the sum is negative) and is refused because its
-#      offset lies past the end of the file. (A wrapped length with an
-#      in-range offset is accepted today: komira-ai/komira#1084; no test pins
-#      that.)
+#   6. A region whose offset lies past the end of the file (with a length that
+#      would wrap `offset + length` past the Int maximum) is refused by name.
+#   7. A wrapped length with an in-range offset (komira-ai/komira#1084) is
+#      refused for the first region and the last one, and the L0 region grown
+#      by one byte past the footer start is refused by its own bound.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -201,14 +201,37 @@ def test_05_region_bounds_refusals() raises:
 
 
 def test_06_wrapped_region_offset_past_eof() raises:
-    # 2^62 + (2^62 + 100) = 2^63 + 100 wraps to a negative Int, so the
-    # `offset + length > footer_start` check passes; the offset alone is past
-    # the end of the file.
+    # 2^62 + (2^62 + 100) would wrap to a negative Int; the offset alone is
+    # past the end of the file and is refused before any length arithmetic.
     var b = _base()
     _put_u64(b, _slot(b, TD_OFF), UInt64(1) << 62)
     _put_u64(b, _slot(b, TD_LEN), (UInt64(1) << 62) + 100)
     with assert_raises(contains="region 'termdict' offset past EOF"):
         _ = SplitView.parse(b^)
+
+
+def test_07_wrapped_length_in_range_offset() raises:
+    # komira-ai/komira#1084: an in-range offset with a length near the Int
+    # maximum. `offset + length` wraps to a negative Int, so a sum-based bound
+    # check (and every later order check built on that sum) passes; the bound
+    # must be `length > footer_start - offset`.
+    comptime HUGE = UInt64(0x7FFF_FFFF_FFFF_FFFF)
+    with assert_raises(contains="region 'termdict' extends past footer start"):
+        _ = SplitView.parse(_with(TD_LEN, HUGE))
+    # The last region: only the final `prev_end > footer_start` check stood
+    # behind it, and that sum wraps too.
+    with assert_raises(contains="region 'l0_posting' extends past footer start"):
+        _ = SplitView.parse(_with(L0_LEN, HUGE))
+    # The boundary: the L0 region ends exactly at the footer start, so one
+    # byte more is refused by the region's own bound, not a later check.
+    var b = _base()
+    assert_equal(
+        _get_u64(b, _slot(b, L0_OFF)) + _get_u64(b, _slot(b, L0_LEN)),
+        _footer_start(b),
+        "7: the L0 region ends at the footer start",
+    )
+    with assert_raises(contains="region 'l0_posting' extends past footer start"):
+        _ = SplitView.parse(_grown(L0_LEN))
 
 
 def main() raises:
