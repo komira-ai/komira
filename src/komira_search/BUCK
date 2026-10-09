@@ -35,6 +35,7 @@ mojo_library(
         "tests/test_search_cov_source_units.mojo",
         "tests/test_search_cov_source_wand.mojo",
         "tests/test_search_fast_fields.mojo",
+        "tests/test_search_field_mismatch.mojo",
         "tests/test_search_ff_preresolve.mojo",
         "tests/test_search_inverted.mojo",
         "tests/test_search_l0_split_refused.mojo",

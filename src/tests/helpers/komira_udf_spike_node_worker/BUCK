@@ -1,0 +1,216 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
+load("@komira//tools/build/node:defs.bzl", "esbuild_bundle")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "udf_bench")
+
+# Test-only: a Node.js UDF runtime on the worker transport of
+# docs/design/udf_runtime_interface.md (sections 4.1 and 5.2), driven through
+# the C ABI of komira_udf_spike_abi, and the engine loop that measures it on
+# N engine threads. Spike code: nothing outside src/tests may depend on it.
+#
+#   proxy/        the engine side, in C: a runtime table whose entries send
+#                 one request per call to a worker process (proxy.c), the
+#                 channel and the worker's life (channel.c), Arrow IPC
+#                 encode and validated decode (ipc.c), and the inits with
+#                 the `node` launcher (node_launcher.c)
+#   refrt/        each runtime library's one export, forwarded to its C init
+#   worker/       the worker, in JavaScript: komira-test/node, one context
+#                 per process, apache-arrow from node_modules
+#   udf/          the user modules, in TypeScript, each bundled alone by
+#                 esbuild (fixtures.ts for the tests, fahrenheit.ts for the
+#                 bench)
+#   native/       the engine loop: one pthread per engine thread
+#   engine.mojo   Workload and run(): the engine loop's value API
+#   node_cases.mojo
+#                 the shared conformance cases this runtime runs
+#   bench/        the bench program; defs.bzl runs it (udf_bench)
+#
+# node_worker.so finds what it needs beside itself, in node_worker/: the
+# pinned node, the C++ runtime it loads (lib/), the worker, apache-arrow and
+# its dependencies (node_modules/), and the bundles (code/). Each test and
+# the bench stage that layout (_RUNTIME).
+#
+# The welded tests (each file's header names the mutant planted to see it go
+# red):
+#   test_conform_node_worker
+#                 the shared conformance cases user code can express,
+#                 through the same runner as echo; two results pinned as
+#                 misfits of the spec.
+#   test_node_worker
+#                 describe, validate's refusals, load and return-type
+#                 refusals, state per context, a worker that exits or is
+#                 killed, a cancel user code ignores (killed after the
+#                 grace period), a cancel scoped to its own call, frames and
+#                 steps, and replies that break the IPC layout, the framing
+#                 or the ERROR encoding, each refused by the proxy with its
+#                 reason (node_worker_corrupt.so).
+#   test_threads  4 engine threads, 4 workers: values, calls == batches,
+#                 releases, and the CPU/wall parallelism case.
+
+_ABI = "//src/tests/helpers/komira_udf_spike_abi"
+
+_CASES = {"src/tests/helpers/komira_udf_spike_abi": _ABI + ":cases"}
+
+_WORKER = {"node_worker/worker/" + f: "worker/" + f for f in [
+    "arrow_io.mjs",
+    "calls.mjs",
+    "corrupt.mjs",
+    "frames.mjs",
+    "runtime.mjs",
+    "wire.mjs",
+    "worker.mjs",
+]}
+
+# The layout node_worker.so reads beside itself (proxy/node_launcher.c). The
+# C++ runtime node links (libstdc++, libgcc_s) is the Mojo runtime's copy:
+# the same conda-forge files node's own native_libs unpacks.
+_RUNTIME = _WORKER | {
+    "node_worker.so": ":node_worker",
+    "node_worker/code/fahrenheit.mjs": ":fahrenheit_bundle",
+    "node_worker/code/fixtures.mjs": ":fixtures_bundle",
+    "node_worker/lib": "//tools/build/toolchains:mojo_runtime",
+    "node_worker/node": "//third_party/node:node",
+    "node_worker/node_modules/apache-arrow": "//third_party/node:apache-arrow",
+    "node_worker/node_modules/flatbuffers": "//third_party/node:flatbuffers",
+    "node_worker/node_modules/json-with-bigint": "//third_party/node:json-with-bigint",
+    "node_worker/node_modules/tslib": "//third_party/node:tslib",
+}
+
+mojo_library(
+    name = "komira_udf_spike_node_worker",
+    srcs = glob(["*.mojo"]),
+    conda = False,
+    deps = [
+        ":komira_udf_spike_node_worker_engine",
+        "//src/komira_json:komira_json",
+        _ABI + ":komira_udf_spike_abi",
+    ],
+    test_srcs = [
+        "tests/test_conform_node_worker.mojo",
+        "tests/test_node_worker.mojo",
+        "tests/test_threads.mojo",
+    ],
+    test_data = {
+        "tests/test_conform_node_worker.mojo": _RUNTIME | _CASES,
+        "tests/test_node_worker.mojo": _RUNTIME | {"node_worker_corrupt.so": ":node_worker_corrupt"},
+        "tests/test_threads.mojo": _RUNTIME | {
+            # read by its check that the engine names no runtime or language
+            "engine.mojo": "engine.mojo",
+            "native/engine_loop.c": "native/engine_loop.c",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The C side, after the library so the deps lint reads the library's name
+# first. Copied into buck-out so the objects' digests do not depend on where
+# komira is mounted (cxx.bzl, staged_files).
+staged_files(
+    name = "c_files",
+    srcs = [
+        "native/engine_loop.c",
+        "proxy/channel.c",
+        "proxy/ipc.c",
+        "proxy/kudfw.h",
+        "proxy/node_launcher.c",
+        "proxy/proxy.c",
+    ],
+)
+
+# The engine loop (native/engine_loop.c), linked into the library's tests and
+# the bench program.
+cxx_library(
+    name = "komira_udf_spike_node_worker_engine",
+    srcs = [":c_files[native/engine_loop.c]"],
+    compiler_flags = ["-O2"],
+    deps = [_ABI + ":komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The worker proxy: the runtime table over the worker transport, and the two
+# inits with the `node` launcher (proxy/node_launcher.c).
+cxx_library(
+    name = "komira_udf_node_worker_proxy",
+    srcs = [
+        ":c_files[proxy/channel.c]",
+        ":c_files[proxy/ipc.c]",
+        ":c_files[proxy/node_launcher.c]",
+        ":c_files[proxy/proxy.c]",
+    ],
+    headers = {"kudfw.h": ":c_files[proxy/kudfw.h]"},
+    header_namespace = "",
+    compiler_flags = ["-O2"],
+    deps = [_ABI + ":komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The runtime libraries the engine loads, each exporting
+# komira_udf_runtime_init_v1 and nothing else:
+#   node_worker.so          komira-test/node on the worker transport.
+#   node_worker_corrupt.so  the same, whose workers answer the case batches
+#                           of worker/corrupt.mjs with replies that break the
+#                           IPC layout or the framing (--corrupt-output): the
+#                           proxy's validation test.
+[mojo_shared_lib(
+    name = v,
+    srcs = ["refrt/{}_so.mojo".format(v)],
+    exports = ["komira_udf_runtime_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_node_worker_proxy"],
+    visibility = ["PUBLIC"],
+) for v in [
+    "node_worker",
+    "node_worker_corrupt",
+]]
+
+# The user modules, each bundled alone: their apache-arrow imports are types
+# only, which esbuild drops, so no Arrow code is in a bundle.
+esbuild_bundle(
+    name = "fixtures_bundle",
+    entry = "udf/fixtures.ts",
+    format = "esm",
+    out = "fixtures.mjs",
+)
+
+esbuild_bundle(
+    name = "fahrenheit_bundle",
+    entry = "udf/fahrenheit.ts",
+    format = "esm",
+    out = "fahrenheit.mjs",
+)
+
+# The bench program and its run. The output is the numbers:
+#   ./buck2 build komira//src/tests/helpers/komira_udf_spike_node_worker:bench --show-output
+mojo_binary(
+    name = "bench_program",
+    srcs = ["bench/bench_main.mojo"],
+    deps = [
+        ":komira_udf_spike_node_worker",
+        ":komira_udf_spike_node_worker_engine",
+        "//src/komira_json:komira_json",
+        _ABI + ":komira_udf_spike_abi",
+    ],
+)
+
+udf_bench(
+    name = "bench",
+    args = [
+        "./node_worker.so",
+        "./echo.so",
+    ],
+    binary = ":bench_program",
+    data = _RUNTIME | {"echo.so": _ABI + ":echo"},
+    exec_compatible_with = LINUX_X86_64,
+    run_id = "bench/run_id",
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

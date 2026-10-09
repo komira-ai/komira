@@ -1,0 +1,86 @@
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
+load("@komira//tools/build/node:defs.bzl", "node_dist", "npm_package")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
+load(":pins.bzl", "NODE", "NPM", "npm_target")
+
+# The hermetic Node.js of the tests (README.md): the Node 24 LTS runtime from
+# its linux-x64 release archive and the npm packages the tests bundle, every
+# file pinned by sha256 and size in pins.bzl and fetched like any other pinned
+# download; each npm tarball's registry integrity is checked again when it is
+# unpacked. Nothing here is shipped: the runtime and the packages are visible
+# only to the test-only packages listed in _TEST_ONLY, and a node_test hands
+# its dependents nothing but its pass marker (README.md, Never shipped). A new
+# consumer is a new line here.
+_TEST_ONLY = [
+    "komira//src/tests/helpers/komira_test_node/...",
+    # The Node.js UDF runtime of the UDF runtime spike (worker transport).
+    "komira//src/tests/helpers/komira_udf_spike_node_worker/...",
+]
+
+# The planted defects of test 54 (tools/build/tests/negative/node), which must
+# fail: the runtime, the packages and the downloads behind them are visible
+# there too. That package is in the `tests` cell, which only komira's own
+# checkout has; a label naming it would fail to load in a repository that
+# uses komira as a cell, so it is named only when the cell exists.
+_NEGATIVE = ["tests//negative/node:"] if read_root_config("cells", "tests") else []
+
+pinned_file(
+    name = NODE["archive"],
+    url = NODE["url"],
+    sha256 = NODE["sha256"],
+    size_bytes = NODE["size"],
+    visibility = _NEGATIVE,
+)
+
+# The C++ runtime `node` links beyond glibc (libstdc++.so.6, libgcc_s.so.1),
+# from the conda-forge packages the platform table pins (the same files the
+# hermetic Python and the toolchains take). Every node action names this
+# directory's lib/ in LD_LIBRARY_PATH; test `isolation` fails if either
+# library is mapped from the worker.
+pinned_file(**pinned_kwargs("linux-x86_64", "libgcc"))
+
+pinned_file(**pinned_kwargs("linux-x86_64", "libstdcxx"))
+
+conda_libs(
+    name = "native_libs",
+    exec_compatible_with = LINUX_X86_64,
+    libs = {
+        "lib/libgcc_s.so.1": ":" + pinned_kwargs("linux-x86_64", "libgcc")["name"],
+        "lib/libstdc++.so.6": ":" + pinned_kwargs("linux-x86_64", "libstdcxx")["name"],
+    },
+    unpacker = "komira//tools/build/toolchains:conda_unpack",
+    visibility = _NEGATIVE,
+)
+
+# `:node`; its sub-target `:node[include]` is the Node-API headers.
+node_dist(
+    name = NODE["name"],
+    archive = ":" + NODE["archive"],
+    native_libs = ":native_libs",
+    top = NODE["top"],
+    version = NODE["version"],
+    visibility = _TEST_ONLY + _NEGATIVE,
+)
+
+[pinned_file(
+    name = p["file"],
+    url = p["url"],
+    sha256 = p["sha256"],
+    size_bytes = p["size"],
+    visibility = _NEGATIVE,
+) for p in NPM]
+
+# One target per package, named by npm_target (`:apache-arrow`,
+# `:esbuild_linux-x64`), with its deps.
+[npm_package(
+    name = npm_target(p["name"]),
+    package = p["name"],
+    version = p["version"],
+    integrity = p["integrity"],
+    tarball = ":" + p["file"],
+    exe = p["exe"],
+    deps = [":" + npm_target(d) for d in p["deps"]],
+    visibility = _TEST_ONLY + _NEGATIVE,
+) for p in NPM]

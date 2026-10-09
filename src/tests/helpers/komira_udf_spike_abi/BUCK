@@ -77,6 +77,15 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
+# The cases as one directory, for the conformance tests of runtimes built in
+# other packages, which stage it at this package's path
+# (src/tests/helpers/komira_udf_spike_abi/cases, where load_cases reads it).
+filegroup(
+    name = "cases",
+    srcs = glob(["cases/*.json"]),
+    visibility = ["PUBLIC"],
+)
+
 # The C side, after the library so the deps lint reads the library's name
 # first.
 staged_files(
