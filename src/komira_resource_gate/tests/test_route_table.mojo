@@ -135,6 +135,15 @@ def _table() -> ResourceRouteTable:
             AuthzAction.read(),
         )
     )
+    # A kind-wide row with an empty kind is malformed too.
+    rules.append(
+        RouteRule.on_kind(
+            String("GET"),
+            String("/bad/kwkind"),
+            String(""),
+            AuthzAction.read(),
+        )
+    )
     # `governed` with an empty `id_capture` is not a kind-wide row.
     rules.append(
         RouteRule.governed(
@@ -223,6 +232,9 @@ def test_governed_rows() raises:
     # an ordinary segment.
     _expect(t, "GET", "/repos/%3e", "read", "repo", "%3e")
     _expect(t, "GET", "/repos/%2f", "read", "repo", "%2f")
+    # Only `%` starts an escape: another byte before `2e` is not a dot.
+    _expect(t, "GET", "/repos/x2e", "read", "repo", "x2e")
+    _expect(t, "GET", "/repos/a2eb2e", "read", "repo", "a2eb2e")
     # Other escapes are routed as raw bytes, never decoded: `adm%69n` is not
     # the literal `admin`, so the carve-out row does not refuse it.
     _expect(t, "GET", "/repos/acme/adm%69n", "read", "repo", "acme")
@@ -340,6 +352,7 @@ def test_malformed_rows_deny() raises:
     _expect_deny(t, "GET", "/bad/capture/k")
     _expect_deny(t, "GET", "/bad/twice/k/k")
     _expect_deny(t, "GET", "/bad/empty/k")
+    _expect_deny(t, "GET", "/bad/kwkind")
 
 
 def test_denied_flag_wins_over_every_other_field() raises:
@@ -420,8 +433,23 @@ def test_kind_wide_flag_alone_makes_a_kind_wide_row() raises:
             deny_reason=String(""),
         )
     )
+    # A one-byte capture name: still a capture, so still malformed.
+    rules.append(
+        RouteRule(
+            method=String("GET"),
+            pattern=String("/kw2/{i}"),
+            kind=String("thing"),
+            id_capture=String("i"),
+            action=AuthzAction.read(),
+            kind_wide=True,
+            public=False,
+            denied=False,
+            deny_reason=String(""),
+        )
+    )
     var t = ResourceRouteTable(rules^)
     _expect_deny(t, "GET", "/kw/1")
+    _expect_deny(t, "GET", "/kw2/1")
     _expect_deny(t, "GET", "/kw0/1")
     _expect(t, "GET", "/kw1/1", "read", "thing", "")
 
