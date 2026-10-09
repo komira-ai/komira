@@ -1,22 +1,41 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # A stateful, in-memory GCP REST emulator behind komira_http_core's Connector
-# (test-only: no shipped library depends on it). No test here opens a
+# (test-only: no shipped library depends on it), and the GCP adapter
+# (kci_cloud_gcp) over it as a conformance kit target. No test here opens a
 # socket, resolves a name or holds a credential: every client is pointed at
 # an IP-literal http endpoint that the emulator's connector serves in
 # memory.
 #
-# The welded test:
+# The welded tests:
 #   test_emulator_wire     the emulator through komira's generated clients:
 #                          each route, its paging, its error envelopes
 #                          (NOT_FOUND, ALREADY_EXISTS, a stale etag's ABORTED,
 #                          INVALID_ARGUMENT, UNAUTHENTICATED) and the
 #                          token-information endpoint.
+#   test_gcp_adapter_wire  what the adapter writes, read from the emulator's
+#                          state: the account's description lines, where a
+#                          job's fields land, the bindings on an account's
+#                          and the project's policy, an adoption writing no
+#                          run id, a job's release keeping a foreign label,
+#                          whoami; and that gcp lowers as the gcp fake does.
+#   test_gcp_kit           kci_cloud's conformance kit, all fifteen steps,
+#                          over the adapter on the emulator (deploy_step.md
+#                          row G4's graph).
+#
+# kci_cloud_fake is here for the lowering comparison only.
 mojo_library(
     name = "kci_gcp_emulator",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/kci_cloud:kci_cloud",
+        "//src/kci_cloud_fake:kci_cloud_fake",
+        "//src/kci_cloud_gcp:kci_cloud_gcp",
+        "//src/kci_composites:kci_composites",
+        "//src/kci_reconciler:kci_reconciler",
+        "//src/kci_resource_proto:kci_resource_proto",
         "//src/komira_async:komira_async",
+        "//src/komira_crypto:komira_crypto",
         "//src/komira_encoding:komira_encoding",
         "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager",
         "//src/komira_gcp_core:komira_gcp_core",
@@ -26,10 +45,14 @@ mojo_library(
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_retry:komira_retry",
+        "//src/komira_validation_run:komira_validation_run",
         "//src/komira_wkt:komira_wkt",
     ],
     test_srcs = [
         "tests/test_emulator_wire.mojo",
+        "tests/test_gcp_adapter_wire.mojo",
+        "tests/test_gcp_kit.mojo",
     ],
     visibility = ["PUBLIC"],
 )
