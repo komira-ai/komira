@@ -1387,7 +1387,7 @@ def _first_segment_after(s: String, start: Int) -> String:
 @always_inline
 def _str_starts_with(s: String, prefix: String) -> Bool:
     if prefix.byte_length() == 0:
-        return True  # cov: unreachable the enum prefix '<part>/_lineage/' is never empty
+        return True
     var sb = s.as_bytes()
     var pb = prefix.as_bytes()
     if len(sb) < len(pb):

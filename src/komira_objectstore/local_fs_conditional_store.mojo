@@ -286,7 +286,7 @@ def _mkdir_one(path: String) raises:
     0755. An already-existing directory is NOT an error (EEXIST tolerated); a real
     failure raises."""
     if path.byte_length() == 0:
-        return  # cov: unreachable _mkdir_p_root calls this only with a non-empty path
+        return
     var p = path
     # SAFETY: `p` holds the path bytes alive across the synchronous syscall; the
     # kernel copies the NUL-terminated path and returns. The pointer does not

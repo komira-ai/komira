@@ -16,7 +16,18 @@
 #     loser must see;
 #   * a temp that cannot be opened (the root is gone) raised as a 412 (a
 #     fake create-loss) instead of an I/O error;
-#   * `%2f` (lowercase) not decoded to `/` in a listing.
+#   * `%2f` (lowercase) not decoded to `/` in a listing;
+#   * a wrong stage name in the I/O error text (read, fsync, close: stages
+#     only a device fault reaches through the store, so they are checked on
+#     the namer directly);
+#   * `_mkdir_one("")` raising instead of being a no-op. (Deleting the
+#     empty-path guard is not observable: mkdir("") fails, and the
+#     existing-directory probe then checks "/." and returns.)
+#   * a short read (fewer bytes than fstat reported) returned as the whole
+#     object. A sysfs attribute reports a size of 4096 and returns fewer
+#     bytes; a key symlinked to one is a deterministic short read on Linux.
+#     Where no such file is visible (no /sys), the case prints why it is
+#     skipped.
 # =============================================================================
 
 from std.ffi import external_call
@@ -25,6 +36,18 @@ from std.time import perf_counter_ns
 
 from komira_objectstore.local_fs_conditional_store import (
     LocalFsConditionalStore,
+    _mkdir_one,
+)
+from komira_objectstore.local_fs_file_read import (
+    _STAGE_CLOSE,
+    _STAGE_FSTAT,
+    _STAGE_FSYNC,
+    _STAGE_LINK,
+    _STAGE_OPEN,
+    _STAGE_READ,
+    _STAGE_STAT,
+    _STAGE_WRITE,
+    _stage_name,
 )
 from komira_objectstore.path import Path
 from komira_objectstore.types import WritePrecondition
@@ -149,10 +172,92 @@ def test_lowercase_escape_decodes() raises:
     assert_equal(lr.objects[0].size, Int64(4))
 
 
+def test_stage_names() raises:
+    assert_equal(_stage_name(_STAGE_OPEN), String("open"))
+    assert_equal(_stage_name(_STAGE_FSTAT), String("fstat"))
+    assert_equal(_stage_name(_STAGE_READ), String("read"))
+    assert_equal(_stage_name(_STAGE_WRITE), String("write"))
+    assert_equal(_stage_name(_STAGE_FSYNC), String("fsync"))
+    assert_equal(_stage_name(_STAGE_CLOSE), String("close"))
+    assert_equal(_stage_name(_STAGE_LINK), String("link"))
+    assert_equal(_stage_name(_STAGE_STAT), String("stat"))
+
+
+def test_mkdir_one_of_empty_path_is_a_noop() raises:
+    # An empty path has nothing to create: no error.
+    _mkdir_one(String(""))
+
+
+def _short_read_size(path: String) -> Int:
+    """Oracle, straight from the C shim (not the Mojo size check under
+    test): the size fstat reports for `path` if a full read returns fewer
+    bytes than that, else -1 (absent, unreadable, or not a short read)."""
+    var p = path
+    var fd = Int32(-1)
+    var size = Int64(0)
+    var stage = Int32(0)
+    # SAFETY: `p` pins the path; `fd`/`size`/`stage` are locals the shim
+    # writes during the synchronous call only.
+    var rc = external_call["komira_objstore_open_for_read", Int32](
+        p.as_c_string_slice().unsafe_ptr(),
+        UnsafePointer(to=fd),
+        UnsafePointer(to=size),
+        UnsafePointer(to=stage),
+    )
+    if rc != 0:
+        return -1
+    var n = Int(size)
+    var buf = List[UInt8]()
+    buf.resize(n + 1, UInt8(0))
+    var got = Int64(0)
+    # SAFETY: `buf` holds n + 1 bytes and the shim writes at most n; it closes
+    # `fd` on every path. `got` is a local out-param.
+    var rrc = external_call["komira_objstore_read_exact_close", Int32](
+        fd, buf.unsafe_ptr(), Int64(n), UnsafePointer(to=got)
+    )
+    if rrc != 0 or Int(got) >= n:
+        return -1
+    return n
+
+
+def test_short_read_is_an_error() raises:
+    var candidates = List[String]()
+    candidates.append(String("/sys/devices/system/cpu/online"))
+    candidates.append(String("/sys/kernel/mm/transparent_hugepage/enabled"))
+    candidates.append(String("/sys/class/net/lo/mtu"))
+    var target = String("")
+    var n = -1
+    for i in range(len(candidates)):
+        n = _short_read_size(candidates[i])
+        if n > 0:
+            target = candidates[i]
+            break
+    if n <= 0:
+        print(
+            "[test_cov_local_fs] SKIP test_short_read_is_an_error: no"
+            " short-reading sysfs attribute is visible here (no /sys mount)"
+        )
+        return
+    var root = _scratch(String("short"))
+    var s = LocalFsConditionalStore(root.copy())
+    assert_equal(_libc_path_call("symlink", target, root + "/k"), Int32(0))
+    var msg = String("")
+    try:
+        _ = s.get(Path.parse(String("k")))
+    except e:
+        msg = String(e)
+    assert_true(msg.find("short read (") >= 0, msg)
+    assert_true(msg.find(" < " + String(n) + ") for '" + root + "/k'") >= 0, msg)
+    assert_false(msg.find("not_found") >= 0, msg)
+
+
 def main() raises:
     test_root_under_a_regular_file_is_refused()
     test_put_over_a_directory_fails_loud()
     test_create_losing_at_link_is_a_412()
     test_create_with_missing_root_is_an_io_error()
     test_lowercase_escape_decodes()
+    test_stage_names()
+    test_mkdir_one_of_empty_path_is_a_noop()
+    test_short_read_is_an_error()
     print("[test_cov_local_fs] PASS")

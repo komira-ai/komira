@@ -24,7 +24,8 @@
 #   * a delimiter-honouring backend's common prefixes ignored, or a malformed
 #     listing entry turned into a shard id;
 #   * a LIST error on the lineage prefix swallowed (only an absent prefix is
-#     "no shards").
+#     "no shards");
+#   * the prefix test refusing the empty prefix.
 # =============================================================================
 
 from std.ffi import external_call
@@ -60,6 +61,7 @@ from komira_objectstore.sublineage_base_fold import (
     ShardSnapshot,
     SubLineageBaseFold,
     _encode_base_chunk,
+    _str_starts_with,
     decode_record_body,
     encode_record_body,
     sublineage_prefix,
@@ -474,6 +476,13 @@ def test_sharded_should_fold() raises:
     # A disabled timer never fires.
     assert_false(sl.should_fold(1, Int64(1000), Int64(0)))
 
+def test_starts_with_empty_prefix() raises:
+    # Every string starts with the empty prefix, the empty string included.
+    assert_true(_str_starts_with(String("p/_lineage/x"), String("")))
+    assert_true(_str_starts_with(String(""), String("")))
+    assert_false(_str_starts_with(String(""), String("p")))
+
+
 def main() raises:
     test_reload_refuses_corrupt_base_blocks()
     test_reload_clamps_negative_base_log_start()
@@ -485,4 +494,5 @@ def main() raises:
     test_sharded_lineage_sorts_and_listing()
     test_listing_errors_and_strays()
     test_sharded_should_fold()
+    test_starts_with_empty_prefix()
     print("[test_cov_sublineage] PASS")

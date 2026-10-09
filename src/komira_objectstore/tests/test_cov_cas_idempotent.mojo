@@ -290,7 +290,7 @@ def test_retry_of_committed_batch_is_duplicate() raises:
     assert_equal(f.n_chunks(), 2)
 
 
-def test_scan_skips_other_batches_and_holes() raises:
+def test_scan_skips_other_batches_and_short_bodies() raises:
     var f = _Fixture(String("i/scan"))
     _ = _append(f.m, Int64(1), Int64(0), Int64(2))  # slot 0: other producer
     # A body too short for the producer trailer (a non-idempotent writer's
@@ -488,7 +488,7 @@ def test_finalize_is_best_effort() raises:
 
 def main() raises:
     test_retry_of_committed_batch_is_duplicate()
-    test_scan_skips_other_batches_and_holes()
+    test_scan_skips_other_batches_and_short_bodies()
     test_staged_claim_without_chunk_is_retryable()
     test_non_idempotent_producer_never_matches()
     test_fences_write_nothing()

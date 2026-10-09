@@ -24,7 +24,8 @@
 # batch) or the REKEY / LOST_SLOT loop not re-reading the head (an append at
 # a stale slot); the attempt bound not enforced (an unbounded 412 loop);
 # loser outcomes dropped; a spine error left as an in-flight flush; the
-# window starting a flush on an empty buffer or a stale timer.
+# window starting a flush on an empty buffer or a stale timer, or arming a
+# linger timer with nothing buffered.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -645,6 +646,14 @@ def test_window_noop_arms() raises:
     assert_equal(len(w.take_outcomes()), 2)
 
 
+def test_empty_window_arms_no_timer() raises:
+    var reactor = _new_reactor()
+    var w = _Win(RamAccumulator[Int](), FlushPolicy.linger_only(Int64(50)), _Factory())
+    # A linger policy but nothing buffered: no deadline to arm.
+    assert_false(w._maybe_arm_timer[NoopSink](reactor))
+    assert_equal(w.timer_op_id(), Int64(0))
+
+
 def test_spine_take_before_done() raises:
     var items = Slab[Int]()
     items.append(1)
@@ -673,5 +682,6 @@ def main() raises:
     test_lost_slot_loop_is_bounded()
     test_losers_are_reported()
     test_window_noop_arms()
+    test_empty_window_arms_no_timer()
     test_spine_take_before_done()
     print("[test_cov_coalescing] PASS")
