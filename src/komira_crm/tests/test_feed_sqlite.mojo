@@ -244,19 +244,19 @@ def check_erasure() raises:
     var store = _store(reactor)
     var pid = _pid(store, reactor)
     var deal_tail = String(',"title":"T","pipelineId":"') + pid + '","stageKey":"discovery"'
-    var a_acct = store.create_account[Rt](reactor, decode_json[Account](_owned(',"orgCardId":"o"', "https://one", "u")), _at(1))
-    var b_acct = store.create_account[Rt](reactor, decode_json[Account](_owned(',"orgCardId":"o"', "https://two", "u")), _at(1))
-    var a_deal = store.create_deal[Rt](reactor, decode_json[Deal](_owned(deal_tail, "https://one", "u")), _at(1))
-    var b_deal = store.create_deal[Rt](reactor, decode_json[Deal](_owned(deal_tail, "https://two", "u")), _at(1))
+    var a_acct = store.create_account[Rt](reactor, decode_json[Account](_owned(',"orgCardId":"o"', "https://one.example", "u")), _at(1))
+    var b_acct = store.create_account[Rt](reactor, decode_json[Account](_owned(',"orgCardId":"o"', "https://two.example", "u")), _at(1))
+    var a_deal = store.create_deal[Rt](reactor, decode_json[Deal](_owned(deal_tail, "https://one.example", "u")), _at(1))
+    var b_deal = store.create_deal[Rt](reactor, decode_json[Deal](_owned(deal_tail, "https://two.example", "u")), _at(1))
     var on_deal = String('{"subjectKind":"DEAL","subjectId":"') + b_deal.id + '","body":"note"}'
-    var a1 = store.create_activity[Rt](reactor, _who("https://one", "u"), decode_json[Activity](on_deal), _at(2))
-    var a2 = store.create_activity[Rt](reactor, _who("https://one", "u"), decode_json[Activity](on_deal), _at(3))
-    var b1 = store.create_activity[Rt](reactor, _who("https://two", "u"), decode_json[Activity](on_deal), _at(4))
+    var a1 = store.create_activity[Rt](reactor, _who("https://one.example", "u"), decode_json[Activity](on_deal), _at(2))
+    var a2 = store.create_activity[Rt](reactor, _who("https://one.example", "u"), decode_json[Activity](on_deal), _at(3))
+    var b1 = store.create_activity[Rt](reactor, _who("https://two.example", "u"), decode_json[Activity](on_deal), _at(4))
     var before = store.changes[Rt](reactor, 0, 1000).modseq
     var b_before = encode_json(store.get_account[Rt](reactor, b_acct.id))
     var bd_before = encode_json(store.get_deal[Rt](reactor, b_deal.id))
     var b1_before = encode_json(store.get_activity[Rt](reactor, b1.id))
-    var counts = store.erase_subject[Rt](reactor, "https://one", "u")
+    var counts = store.erase_subject[Rt](reactor, "https://one.example", "u")
     assert_equal(encode_json(counts), '{"accounts":1,"deals":1,"activities":2}')
     # the erased principal's rows
     var ea = store.get_account[Rt](reactor, a_acct.id)
@@ -289,10 +289,10 @@ def check_erasure() raises:
         cols.append(String("body"))
         var rows = store.database().query_rows[Rt](reactor, String(t), cols^, Filter.none(), List[Order](), Optional[UInt32]())
         for i in range(rows.__len__()):
-            assert_false("https://one" in rows.row(i).get_text(0), String(t))
-            assert_false("https://two" in rows.row(i).get_text(0), "nor of anyone: the owner is never in the body")
+            assert_false("https://one.example" in rows.row(i).get_text(0), String(t))
+            assert_false("https://two.example" in rows.row(i).get_text(0), "nor of anyone: the owner is never in the body")
     # a second call rewrites nothing
-    assert_equal(encode_json(store.erase_subject[Rt](reactor, "https://one", "u")), "{}")
+    assert_equal(encode_json(store.erase_subject[Rt](reactor, "https://one.example", "u")), "{}")
     assert_equal(store.changes[Rt](reactor, 0, 1000).modseq, after.modseq, "and takes no number")
     var err = String(OK)
     try:
@@ -302,7 +302,7 @@ def check_erasure() raises:
     assert_equal(err, "crm: invalid subject: issuer and subject are both required")
     err = String(OK)
     try:
-        _ = store.erase_subject[Rt](reactor, "https://one", "")
+        _ = store.erase_subject[Rt](reactor, "https://one.example", "")
     except e:
         err = String(e)
     assert_equal(err, "crm: invalid subject: issuer and subject are both required")

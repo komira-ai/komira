@@ -379,7 +379,7 @@ def check_deals() raises:
     var base = String('{"title":"T","pipelineId":"') + pid + String('","stageKey":"qualification"')
     var d = store.create_deal[Rt](
         reactor,
-        _deal(base + ',"accountId":"' + acct.id + '","amountMinor":"125000","currency":"EUR","closeDate":"2026-12-31","owner":{"issuer":"i","subject":"s"},"lastActivityAt":"2026-01-01T00:00:00Z"}'),
+        _deal(base + ',"accountId":"' + acct.id + '","amountMinor":"125000","currency":"EUR","closeDate":"2026-12-31","owner":{"issuer":"i","subject":"s"},"lastActivityAt":"2024-01-01T00:00:00Z"}'),
         _at(10),
     )
     assert_false(Bool(d.last_activity_at), "a client cannot set last_activity_at")

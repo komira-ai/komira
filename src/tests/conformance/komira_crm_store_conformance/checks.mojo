@@ -353,7 +353,7 @@ def check_erasure[T: CrmTarget](mut t: T) raises:
     ref reactor = rt.reactor()
     var store = _store(t, reactor)
     var pid = _pid[T](store, reactor)
-    for iss in ["https://one", "https://two"]:
+    for iss in ["https://one.example", "https://two.example"]:
         var owner = String(',"owner":{"issuer":"') + iss + '","subject":"u"}'
         _ = store.create_account[Rt](reactor, decode_json[Account]('{"orgCardId":"o"' + owner + "}"), _at(1))
         var d = store.create_deal[Rt](reactor, decode_json[Deal](_deal_json(pid, "discovery", owner)), _at(1))
@@ -366,7 +366,7 @@ def check_erasure[T: CrmTarget](mut t: T) raises:
     var before_a = _snapshot[T](store, reactor, ACCOUNTS, "owner_iss", "owner_sub")
     var before_d = _snapshot[T](store, reactor, DEALS, "owner_iss", "owner_sub")
     var before_x = _snapshot[T](store, reactor, ACTIVITIES, "actor_iss", "actor_sub")
-    var counts = store.erase_subject[Rt](reactor, "https://one", "u")
+    var counts = store.erase_subject[Rt](reactor, "https://one.example", "u")
     assert_equal(encode_json(counts), '{"accounts":1,"deals":1,"activities":1}')
     var after_a = _snapshot[T](store, reactor, ACCOUNTS, "owner_iss", "owner_sub")
     var after_d = _snapshot[T](store, reactor, DEALS, "owner_iss", "owner_sub")
@@ -374,14 +374,14 @@ def check_erasure[T: CrmTarget](mut t: T) raises:
     _expect_erased(before_a, after_a, "")
     _expect_erased(before_d, after_d, "")
     _expect_erased(before_x, after_x, "erased")
-    assert_equal(encode_json(store.erase_subject[Rt](reactor, "https://one", "u")), "{}", "a second call rewrites nothing")
+    assert_equal(encode_json(store.erase_subject[Rt](reactor, "https://one.example", "u")), "{}", "a second call rewrites nothing")
 
 
 def _expect_erased(before: List[String], after: List[String], new_sub: StaticString) raises:
     assert_equal(len(after), len(before), "no row added or removed")
     var rewritten = 0
     for i in range(len(before)):
-        if "|https://one|u|" in before[i]:
+        if "|https://one.example|u|" in before[i]:
             assert_equal(after[i], _erased(before[i], new_sub), "the erased principal's row")
             rewritten += 1
         else:
