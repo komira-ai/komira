@@ -198,6 +198,10 @@ def test_typ_is_pinned() raises:
     assert_equal(_err(_mint_h('{"alg":"EdDSA","kid":"k1"}', c)), MISSING)
     assert_equal(_err(_mint_h('{"alg":"EdDSA","kid":"k1","typ":1}', c)), MISSING)
     assert_equal(_err(_mint_h('{"alg":"EdDSA","kid":"k1","typ":"JWT"}', c)), OTHER)
+    # A prefix or an extension of the pinned type is another type.
+    assert_equal(_err(_mint_h('{"alg":"EdDSA","kid":"k1","typ":""}', c)), OTHER)
+    assert_equal(_err(_mint_h('{"alg":"EdDSA","kid":"k1","typ":"at+jw"}', c)), OTHER)
+    assert_equal(_err(_mint_h('{"alg":"EdDSA","kid":"k1","typ":"at+jwtx"}', c)), OTHER)
     assert_equal(
         _err(_mint_h('{"alg":"EdDSA","kid":"k1","typ":"application/at+jwt"}', c)),
         OTHER,
@@ -245,11 +249,15 @@ def test_iss() raises:
     assert_equal(_err(_mint(_claims(iss='"https://issuer.example/"'))), OTHER)
     assert_equal(_err(_mint(_claims(iss='"issuer.example"'))), OTHER)
     assert_equal(_err(_mint(_claims(iss='"HTTPS://issuer.example"'))), OTHER)
+    # A prefix of the issuer, down to the empty string, is another issuer.
+    assert_equal(_err(_mint(_claims(iss='"https://issuer.exampl"'))), OTHER)
+    assert_equal(_err(_mint(_claims(iss='""'))), OTHER)
 
 
 def test_aud() raises:
     # Catches: aud missing, an array without ours accepted, an empty or
-    # mixed array accepted, or only the first element looked at.
+    # mixed array accepted, only the first or last element looked at, or a
+    # prefix match either way.
     comptime BAD = "JoseError: claim aud is not a string or a non-empty array of strings"
     comptime NOT_OURS = "JoseError: claim aud does not name the audience"
     assert_equal(_err(_mint(_claims(aud="-"))), "JoseError: claim aud is missing")
@@ -261,6 +269,14 @@ def test_aud() raises:
     assert_equal(_err(_mint(_claims(aud='[1,"service-a"]'))), BAD)
     assert_equal(_err(_mint(_claims(aud='["x","service-a"]'))), "")
     assert_equal(_err(_mint(_claims(aud='["service-a"]'))), "")
+    # Exact match only: a prefix or an extension of the audience is not
+    # ours, as a string or as an array element.
+    assert_equal(_err(_mint(_claims(aud='"service"'))), NOT_OURS)
+    assert_equal(_err(_mint(_claims(aud='"service-ab"'))), NOT_OURS)
+    assert_equal(_err(_mint(_claims(aud='["service"]'))), NOT_OURS)
+    # Ours first and another value after it: every element is looked at,
+    # not only the last.
+    assert_equal(_err(_mint(_claims(aud='["service-a","x"]'))), "")
 
 
 def test_sub() raises:

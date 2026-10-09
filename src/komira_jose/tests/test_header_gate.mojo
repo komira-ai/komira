@@ -188,6 +188,9 @@ def test_alg() raises:
     assert_equal(_err(_mint('{"alg":"eddsa","kid":"k1"}')), NOT_PINNED)
     assert_equal(_err(_mint('{"alg":"EdDSA ","kid":"k1"}')), NOT_PINNED)
     assert_equal(_err(_mint('{"alg":"Ed25519","kid":"k1"}')), NOT_PINNED)
+    # A prefix of the pinned alg, down to the empty string, is not it.
+    assert_equal(_err(_mint('{"alg":"EdDS","kid":"k1"}')), NOT_PINNED)
+    assert_equal(_err(_mint('{"alg":"","kid":"k1"}')), NOT_PINNED)
 
 
 def test_crit_cannot_hide_alg() raises:
