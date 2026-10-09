@@ -564,6 +564,9 @@ These rules hold throughout:
 
 ## The `DEPLOY_PROBE` validation kind
 
+This section is the probe that runs on the machine running `kci run`. Running the same kind inside the
+cell, as a one-shot cloud job under a deny-all identity, is [container validation](container_validation.md).
+
 The kind word is `DEPLOY_PROBE`, not `CONTAINER`: `CONTAINER` is already a value of
 `validations[].environment` (where a validation ran), and a `CONDA_INSTALL_SMOKE` row already reports
 it. A probe's row reports environment `CONTAINER` too.
@@ -761,7 +764,7 @@ with a new commit on its branch (a merge of `main`, never a rebase).
 | Q2 | Teardown: should a `--destroy` flag be added now, never on a release run? | No. Leave teardown to a human step until there is a durable store. A closed-world delete with only stamps as the record is not safe enough. |
 | Q3 | Promotion: re-push the verified layout, or `OciCopier` from the previous cell? | Re-push. One code path, and no cross-cell read grant. Copy only when the release directory is gone. |
 | Q4 | May a resource list adopt the cell's bootstrap registry (P12 `adopt`) so that its grants are declared? | Not in v1. The bootstrap owns it, and the adapter grants the cell's runtime pull. On GCP the rule is held by coverage (`registry` is not a v1 kind). The first adapter that hosts `registry` adds a validate finding for a `registry` whose `physical_name` is the bootstrap registry's derived name. |
-| Q5 | A `DEPLOY_PROBE` image as a `StepOutput` (loaded from the release directory), and `secret_env` for a probe | Both later. Loading needs a docker-loadable form of the release member. `secret_env` needs a design for who holds the value, because the resource model's rule is that kci never holds a secret's value. |
+| Q5 | A `DEPLOY_PROBE` image as a `StepOutput` (loaded from the release directory), and `secret_env` for a probe | Both later. Loading needs a docker-loadable form of the release member; a probe run in the cell takes the image from the cell's registry instead ([container validation](container_validation.md), `image_output`). `secret_env` needs a design for who holds the value, because the resource model's rule is that kci never holds a secret's value. |
 | Q6 | `authorized_user` credentials for an operator running kci by hand | Refuse them. The operator impersonates the deploy identity through an `external_account` or service-account file. Only bootstrap runs with a person's own credentials. |
 | Q7 | `bootstrap_level` has no reader. Keep it at `1`, or drop it? | Keep it, accepting only `1`, so the cells file does not change major when level 2 is defined. |
 | Q8 | `worker` on GCP: wait for worker-pool client methods, or lower a worker as a Service with no ingress? | Use worker pools, as in the fake's shape. Changing the lowering means changing the shared shape first, never only in the adapter. |
