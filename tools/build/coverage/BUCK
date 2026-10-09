@@ -46,6 +46,12 @@ mojo_library(
         # path mapping in its documented order (strip prefix, buck-out hash,
         # PKGDIR, outside vs unmapped) and a file's package
         "tests/test_paths.mojo",
+        # a test's generated main (a client's layout probe, named at its
+        # output path in the package) set aside as a test source, and every
+        # other unmapped path still an error: a missing file in a repository
+        # directory, another file of the output directory, the test's name
+        # in a repository directory, a report that is no test's
+        "tests/test_generated_tests.mojo",
         # every diff block shape: modified, added, deleted, renames, binary,
         # mode-only, omitted and zero counts, C-quoted paths
         "tests/test_diff.mojo",
