@@ -22,13 +22,17 @@
 # Each test pairs an admitted shape with a refused neighbour wherever the arm
 # makes a choice, so a mirror arm that flipped either way is red.
 #
-# NOT COVERED, ON PURPOSE: `_lookup_arrow_type`'s miss (`return ArrowType.NULL`)
-# is reached only by a LEFT/RIGHT-sided column reference OUTSIDE a join
-# residual whose name the input lacks. The leaf arm resolves sided names only
-# in a sided scope, so the gate admits that reference unresolved; whether it
-# should is an open question, and its verdict is not pinned here. Likewise the
-# `_child_pos` fall-through for a binary operator outside every declared range,
-# which only an in-process `Expr.binary` with an undeclared operator reaches.
+# `_lookup_arrow_type`'s miss (`return ArrowType.NULL`) is reached by a
+# LEFT/RIGHT-sided column reference OUTSIDE a join residual whose name the
+# input lacks. The leaf arm resolves sided names only in a sided scope, so the
+# gate admits that reference unresolved. One such shape is correct SQL: a
+# correlated subquery whose inner plan names an OUTER column; it is asserted
+# admitted below. The same miss on a plain filter (no subquery) is open in
+# komira#991 item 2 and its verdict is not pinned here.
+#
+# NOT COVERED, ON PURPOSE: the `_child_pos` fall-through for a binary operator
+# outside every declared range, which only an in-process `Expr.binary` with an
+# undeclared operator reaches (komira#991 item 4).
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -46,10 +50,13 @@ from komira_plan_ir.logical_plan import (
     ExprArray,
     AggExprArray,
     JOIN_INNER,
+    CORR_KIND_EXISTS,
     SOURCE_PARQUET,
 )
 
 from komira_plan_wire import (
+    plan_to_bytes,
+    plan_from_bytes,
     plan_wire_check_values,
     plan_wire_admit,
     plan_wire_apparent_depth,
@@ -229,6 +236,28 @@ def test_a_sided_reference_in_a_join_residual_reads_its_own_side() raises:
     )
 
 
+def test_a_correlated_outer_reference_the_inner_scan_lacks_is_admitted() raises:
+    """`EXISTS (SELECT * FROM i WHERE LEFT.k > 1)`: `LEFT.k` is the CORRELATED
+    OUTER reference, and the inner scan has no `k`. The gate descends into the
+    inner plan, where the sided name is not resolved and the comparison
+    lookup misses (`_lookup_arrow_type` returns NULL), so the comparison is
+    not graded and the plan is admitted. It also crosses the wire: the decoded
+    plan (which `plan_from_bytes` gates again) renders the same. Red: a lookup
+    miss that refuses, or a gate that resolves the outer name against the
+    inner scan."""
+    var isb = SchemaBuilder()
+    isb.add_field(Field("x", ArrowType.INT64, True))
+    var inner = LogicalPlan.filter(
+        Expr.binary(BIN_GT, Expr.left(String("k")), _i(1)),
+        LogicalPlan.scan(String("/d/i.parquet"), SOURCE_PARQUET, isb.build()),
+    )
+    var refs: List[String] = [String("k")]
+    var plan = _where(Expr.correlated_subquery(inner^, refs^, CORR_KIND_EXISTS))
+    _admits(String("EXISTS (... LEFT.k > 1) over an inner scan with no k"), plan)
+    var back = plan_from_bytes(plan_to_bytes(plan))
+    assert_equal(back.structural_hash(), plan.structural_hash())
+
+
 # =============================================================================
 # Literals in a value position (`_literal_is_materializable`)
 # =============================================================================
@@ -289,7 +318,7 @@ def test_an_in_list_over_a_computed_child_is_not_graded_by_column_type() raises:
     """When the IN-list's child is not a column reference (here `k + 1`),
     `_column_arrow_type` answers NULL and both rules decline. Asserted on an
     all-integer list, which is right under any reading; whether the gate should
-    grade a computed child is a finding of the coverage PR, not pinned here."""
+    grade a computed child is open in komira#991, not pinned here."""
     var vals: List[ScalarValue] = [
         ScalarValue.from_int64(Int64(1)), ScalarValue.from_int64(Int64(2))
     ]

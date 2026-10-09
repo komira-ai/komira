@@ -41,7 +41,7 @@ from komira_plan_expr.partition_frame import PartitionFrame
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.udf_data import (
     UdfData,
-    UDF_KIND_MAP,
+    UDF_KIND_AGG,
     UDF_NULL_SKIP_NULL_FAST_PATH,
     UDF_STABILITY_VOLATILE,
     UDF_PAR_PARTITION_LOCAL,
@@ -120,15 +120,17 @@ def _project(var e: Expr) raises -> LogicalPlan:
     return LogicalPlan.project(xs^, _scan())
 
 
-def _map_udf() -> UdfData:
-    """null_mode, stability and parallelism_tag at the TOP of their ranges (2,
-    2, 3): the untampered decode is the boundary control for the range tests."""
+def _top_of_range_udf() -> UdfData:
+    """kind, null_mode, stability and parallelism_tag at the TOP of their
+    ranges (2, 2, 2, 3): the untampered decode is the boundary control for the
+    range tests. kind is AGG on a project node; the codec does not check kind
+    against the node that carries the UDF."""
     var ic = List[Tuple[String, UInt8]]()
     ic.append(("a", UInt8(2)))
     var oc = List[Tuple[String, UInt8]]()
     oc.append(("y", UInt8(2)))
     return UdfData(
-        kind=UDF_KIND_MAP,
+        kind=UDF_KIND_AGG,
         name=String("margin"),
         input_columns=ic^,
         output_columns=oc^,
@@ -144,7 +146,7 @@ def _udf_project() raises -> LogicalPlan:
     var xs = ExprArray()
     xs.append(Expr.col_ref(String("a")))
     return LogicalPlan.project_with_udf(
-        xs^, _scan(), OwnedPointer[UdfData](_map_udf())
+        xs^, _scan(), OwnedPointer[UdfData](_top_of_range_udf())
     )
 
 
@@ -696,8 +698,8 @@ def _udf_tag_refused(field: String, value: UInt32) raises:
 
 def test_every_udf_tag_one_past_its_range_is_refused() raises:
     """Each tag at the first value past its range is refused and named; the
-    untampered plan, whose null_mode, stability and parallelism_tag sit AT the
-    top of their ranges, decodes. Together they hold each bound exactly: a
+    untampered plan, whose kind, null_mode, stability and parallelism_tag sit
+    AT the top of their ranges, decodes. Together they hold each bound exactly: a
     bound moved down refuses the control, a bound moved up admits the tamper."""
     _assert_decodes(String("udf at the top of every range"), _udf_project())
     _udf_tag_refused(String("kind"), UInt32(3))

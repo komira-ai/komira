@@ -431,12 +431,28 @@ def test_an_aggregate_udf_round_trips_unbound() raises:
     )
 
 
+def _decoded_hint(back: LogicalPlan) raises -> Optional[Int]:
+    """The `estimated_groups` the decoded aggregate or distinct node holds."""
+    if back.is_aggregate():
+        return back.aggregate_data_ref().estimated_groups.copy()
+    return back.distinct_data_ref().estimated_groups.copy()
+
+
 def _assert_hint_never_dropped(what: String, plan: LogicalPlan, hint: Int) raises:
-    """An `estimated_groups` hint must not vanish on the way through. Two
-    outcomes keep it: the encoder refuses it, or the bytes carry it and the
-    decoder refuses it by name. Either is accepted, so this holds whichever
-    side ends up owning the refusal; a plan that decodes WITHOUT the hint is
-    red."""
+    """An `estimated_groups` hint must not vanish on the way through. What is
+    asserted holds whichever layer ends up owning the hint:
+
+      * the encoder refuses the plan, by PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS;
+      * or the bytes carry the hint with the value the caller set, and then
+          - the decoder restores it: the decoded node holds the same hint, or
+          - the decoder refuses it, by the same token and nothing else.
+
+    Today the encoder writes the hint and the decoder refuses it, so a plan
+    that encodes never decodes (komira#991, open). The refusal is accepted so
+    this test stays green on today's code; a decoder that restores the hint
+    (the fix) passes the restored-value check instead. Red: an encoder that
+    drops or rewrites the hint, a decoder that decodes the plan WITHOUT the
+    hint or with another value, and a refusal by any other token."""
     var enc = _encode_error(plan)
     if enc != "":
         assert_true(
@@ -457,10 +473,26 @@ def _assert_hint_never_dropped(what: String, plan: LogicalPlan, hint: Int) raise
         value = w.distinct[0].estimated_groups
     assert_true(carried, what + ": the encoder dropped the hint silently")
     assert_equal(Int(value), hint, what + ": the encoder wrote another value")
-    var text = _decode_error(bytes^)
+    var decoded = True
+    var text = String("")
+    var got: Optional[Int] = None
+    try:
+        var back = plan_from_bytes(bytes^)
+        got = _decoded_hint(back)
+    except e:
+        decoded = False
+        text = String(e)
+    if decoded:
+        assert_true(Bool(got), what + ": the plan decoded WITHOUT the hint")
+        assert_equal(
+            got.value(), hint, what + ": the plan decoded with another hint"
+        )
+        return
+    # komira#991 (open): the decoder refuses the hint the encoder wrote.
     assert_true(
         text.startswith(PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS),
-        what + ": the decoder did not refuse the carried hint by name: " + text,
+        what + ": the decoder refused the carried hint by another token: "
+        + text,
     )
 
 
@@ -516,10 +548,15 @@ def test_an_aggregate_with_no_alias_round_trips_with_no_alias() raises:
 
 def test_a_union_of_no_children_does_not_decode() raises:
     """`LogicalPlan.union` documents "children must be non-empty" and does not
-    enforce it. A childless union advertises columns nothing produces, so the
-    decoder refuses it by name."""
+    enforce it. A childless union advertises columns nothing produces, so it
+    must not cross. Today the encoder writes it and the decoder refuses it by
+    name; an encoder that refused it first, by the same token and naming the
+    missing children, is accepted too. Red: the plan decoding, or a refusal by
+    another token at either end."""
     var plan = LogicalPlan.union(List[OwnedPointer[LogicalPlan]](), _schema())
-    var text = _decode_error(plan_to_bytes(plan))
+    var text = _encode_error(plan)
+    if text == "":
+        text = _decode_error(plan_to_bytes(plan))
     assert_true(
         text.startswith(PLAN_WIRE_OUTPUT_SCHEMA_DIVERGED),
         "a childless UNION decoded or was refused by another token: " + text,
@@ -534,8 +571,8 @@ def test_a_bare_ctor_plan_with_no_arm_does_not_encode() raises:
     Only properties that hold whichever layer refuses are asserted: the encode
     raises, and the message names engine tag 16. (Today the vocabulary's
     `plan_tag_to_wire` raises while the codec builds its own message, so the
-    codec's `PLAN_WIRE_UNSUPPORTED_PLAN_TAG` text never appears; see the
-    coverage PR's findings.)"""
+    codec's `PLAN_WIRE_UNSUPPORTED_PLAN_TAG` text never appears; see
+    komira#991.)"""
     var plan = LogicalPlan(UInt8(16), _schema())
     var text = _encode_error(plan)
     assert_true(text != "", "a plan of retired tag 16 encoded to bytes")
