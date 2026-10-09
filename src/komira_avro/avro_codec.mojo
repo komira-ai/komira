@@ -381,7 +381,7 @@ def _decompress_bzip2_avro(
         if got:
             return _trimmed(out^, got.value())
         if cap >= _MAX_OUTPUT_CAP:
-            raise Error("AvroCodecError.BZIP2_OUTPUT_OVERFLOW")
+            raise Error("AvroCodecError.BZIP2_OUTPUT_OVERFLOW")  # cov: unreachable needs a bzip2 block that decodes to over 2 GiB
         cap *= 4
 
 
@@ -532,7 +532,7 @@ def _compress_deflate_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
             Span(out), payload, ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_RAW
         )
     except e:
-        raise Error("AvroCodecError.DEFLATE_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.DEFLATE_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized to the codec's bound; only a library failure raises
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -557,7 +557,7 @@ def _compress_snappy_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
     try:
         written = snappy_compress_into(Span(out)[0:out_cap], payload)
     except e:
-        raise Error("AvroCodecError.SNAPPY_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.SNAPPY_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized to the codec's bound; only a library failure raises
     # BE4 CRC32 of the UNCOMPRESSED payload (the Avro snappy trailer).
     var crc = crc32_ieee(payload)
     out[written + 0] = UInt8((crc >> 24) & UInt32(0xFF))
@@ -581,7 +581,7 @@ def _compress_zstandard_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
     try:
         written = zstd_compress_into(Span(out), payload, ZSTD_DEFAULT_LEVEL)
     except e:
-        raise Error("AvroCodecError.ZSTD_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.ZSTD_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized to the codec's bound; only a library failure raises
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -606,7 +606,7 @@ def _compress_bzip2_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
             BZIP2_DEFAULT_WORK_FACTOR,
         )
     except e:
-        raise Error("AvroCodecError.BZIP2_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.BZIP2_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized to the libbz2 documented worst case plus headroom; only a library failure raises
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -628,6 +628,6 @@ def _compress_xz_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
             Span(out), payload, XZ_PRESET_DEFAULT, XZ_CHECK_CRC64
         )
     except e:
-        raise Error("AvroCodecError.XZ_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.XZ_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized at input + 1/3 + 1024, above the xz worst-case expansion; only a library failure raises
     out.resize(unsafe_uninit_length=written)
     return out^

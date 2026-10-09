@@ -3,21 +3,22 @@
 # =============================================================================
 #
 # Format-agnostic physical-type tag used by `StatsProvider.column_physical_type`.
-# Mirrors the Parquet `Type` enum (parquet/types.mojo `ParquetType`) so a
-# `ParquetStatsProvider` implementation can return the same numeric tag the
-# Parquet footer carries, but lives in `komira_plan_stats`.plan` so that
-# plan-time consumers (compiler, planner, optimizer rules) can inspect a
-# column's physical layout without importing `komira_parquet`.
+# Mirrors the Parquet `Type` enum (`ParquetType` in
+# komira_parquet_api/types.mojo) so a Parquet-backed `StatsProvider`
+# implementation (none is in this tree) can return the same numeric tag the
+# Parquet footer carries, but lives in `komira_plan_stats` so that plan-time
+# consumers can inspect a column's physical layout without importing a Parquet
+# package.
 #
 # Why a separate type rather than re-exporting `ParquetType`:
-#   1. The StatsProvider trait is format-agnostic. A future
-#      `JsonStatsProvider` or `CsvStatsProvider` returns a logical
-#      physical-type tag without any Parquet dependency.
-#   2. `core/plan/*` MUST NOT import from the Parquet package (its file
-#      reader transitively imports `std.io.FileHandle`, which pollutes the
-#      plan compiler's recursive-dispatch monomorphization tree and hangs
-#      the compile). Keeping `PhysicalType`
-#      in `core` preserves the layering.
+#   1. The StatsProvider trait is format-agnostic. A JSON or CSV
+#      implementation would return a logical physical-type tag without any
+#      Parquet dependency.
+#   2. The plan packages (`komira_plan_expr`, `komira_plan_ir`,
+#      `komira_plan_stats`) do not depend on a Parquet package (its file
+#      reader transitively imports `std.io.FileHandle`, which was recorded
+#      to hang the compile of a recursive-dispatch module importing the
+#      plan). Keeping `PhysicalType` here preserves that layering.
 #
 # Tag values are chosen to numerically match `ParquetType` so that an
 # implementation can `.unsafe_get_value()`-style cast at the boundary

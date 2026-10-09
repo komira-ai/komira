@@ -60,12 +60,36 @@
   # .zig-cache: written by local C/C++ compiles, which run in the checkout root.
   ignore = buck-out, .git, .zig-cache
 
+[komira]
+  # The timeout, in seconds, buck2's test runner gives each test `buck2 test`
+  # runs (a mojo_test, a rust_test): it is the runner's `--timeout`, 600 by
+  # default, set only on the command line (`buck2 test <targets> -- --timeout
+  # <s>`), and buck2 sends it to the executor as the action's timeout. (buck2's
+  # `[test] timeout_default_s` does not reach these tests: it is the timeout of
+  # the other kind of test provider, which komira's rules do not give.) A test
+  # an executor stops there is reported as a bare `Fail` (`Timeout 0`, a
+  # mojo_test's output lost), so a mojo_test reads this key and stops itself
+  # 60 s earlier, saying so (`TEST TIME LIMIT: ...`;
+  # tools/build/mojo/test_limit.bzl). Keep it equal to the runner's timeout:
+  # with `-- --timeout <s>`, pass `-c komira.test_timeout_s=<s>` too. 600 is
+  # buck2's default, set here so the limit is written down. A library's
+  # `test_srcs` are build actions, which carry no timeout: the executor's
+  # default applies to them (tools/build/mojo/README.md, "Time limits").
+  test_timeout_s = 600
+
 [http]
-  # Downloads of pinned files (busybox, compiler tarballs). Every pin states
-  # its sha256 and size, so buck2 sends no HEAD request and fetches a pin
-  # only when the remote CAS lacks it or it is written to local disk; these
-  # timeouts bound that GET. The default is 5 s, and a slow mirror (busybox
-  # serves its 1.1 MiB binary in 10-15 s) failed builds that had to download
-  # it. Allow a slow server; a dead one still fails.
+  # Downloads of pinned files (busybox, zig, compiler and runtime packages).
+  # Every pin states its sha256 and size, so buck2 sends no HEAD request and
+  # fetches a pin only when the remote CAS lacks it or it is written to local
+  # disk. buck2's defaults are 5 s to connect and 10 s per read, and a slow
+  # upstream (busybox's host, answering a hosted runner) exceeded the 5 s
+  # connect default on every retry.
+  # Neither value caps a whole download: connect_timeout_ms bounds opening the
+  # connection, and read_timeout_ms bounds one wait for the next bytes,
+  # restarting whenever bytes arrive. So a cold CAS miss on a pin of any size
+  # (the largest are around 100 MiB) succeeds at any rate that never stalls for
+  # 120 s, and a dead host still fails, after buck2's four fixed attempts.
+  # There is no write timeout: a download sends only its request line and
+  # headers.
   connect_timeout_ms = 30000
   read_timeout_ms = 120000

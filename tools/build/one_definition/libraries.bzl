@@ -27,6 +27,7 @@ This module loads nothing, so includes.bzl can load it.
 SRC_C_LIBRARIES = [
     "//src/komira_async:komira_async_posix",
     "//src/komira_async_api:komira_concurrency_pool_depth",
+    "//src/komira_crypto:komira_crypto_sha256_hw",
     "//src/komira_fs:komira_fs_posix",
     "//src/komira_libc:komira_libc_posix",
     "//src/komira_log:komira_log_holder",
@@ -40,6 +41,7 @@ THIRD_PARTY_C_LIBRARIES = [
     "//third_party/aws-lc:crypto",
     "//third_party/brotli:brotlidec",
     "//third_party/s2n-tls:s2n",
+    "//third_party/sha1collisiondetection:sha1dc",
     "//third_party/snappy:snappy",
     "//third_party/sqlite:sqlite3",
 ]

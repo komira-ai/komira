@@ -3,17 +3,22 @@
 #   one command, over a recording fake of the seam, through `kci_main_with`:
 #   which steps run, in which order, with which request; where the run stops;
 #   the run's outcome and exit number; the records the recorder got; `--only`
-#   (a SELECTIVE run, never reported as FULL) and `--plan`; the start-up
-#   workflow check under GitHub Actions (match, mismatch exit 3, unreadable
-#   exit 5, not under CI); a step's validations after it in a FULL run, none
-#   under `--only step:`, one alone under `--only validation:`, a failed one
-#   VALIDATION_FAILED (exit 7) and one after a failed step NOT_REACHED; the
-#   NEW NAMES of the stages after this one; and the `--summary-file` block.
+#   (a SELECTIVE run, never reported as FULL) and `--plan`; `--affected-by`
+#   (a pull request's BUILD: the base reaches the step, the run is SELECTIVE,
+#   a publishing stage refuses it).
+#
+# The same run over the same fake, split by subject (each file is one gated
+# test built from its one file, so each carries its own copy of `FakeSteps`
+# and of the helpers it uses):
+#   test_kci_dispatch_workflow.mojo     the start-up workflow check and the
+#                                       `--channel` refusals
+#   test_kci_dispatch_validations.mojo  validations, NEW NAMES, the summary
 # =============================================================================
 
 from std.ffi import external_call
 from std.os import makedirs
 from std.pathlib import Path
+from std.time import perf_counter_ns
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_libc.posix import _read_env
@@ -40,14 +45,9 @@ from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest
 from kci_validate import ValidateRequest
 
+
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SET_HASH: String = "5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a"
-
-
-comptime _R19: String = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ env.REVISION }}\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          else\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n          fi\n"
-"""R21: the first two steps of every release job (auto_promotion.mojo)."""
-comptime _R19_MAIN: String = "      - name: only a push to main reaches this job\n        run: |\n          [ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n            { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
-"""R21: the third step of a main-only job."""
 
 
 struct FakeSteps(StageSteps, Movable):
@@ -75,6 +75,8 @@ struct FakeSteps(StageSteps, Movable):
     var pixis: List[String]
     var channels: List[String]
     var bases: List[String]
+    var budgets: List[Int]
+    var deadlines: List[Int]
 
     def __init__(out self):
         self.calls = List[String]()
@@ -94,6 +96,8 @@ struct FakeSteps(StageSteps, Movable):
         self.pixis = List[String]()
         self.channels = List[String]()
         self.bases = List[String]()
+        self.budgets = List[Int]()
+        self.deadlines = List[Int]()
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
         self.order.append(String("validate ") + req.validation.name)
@@ -200,6 +204,8 @@ struct FakeSteps(StageSteps, Movable):
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         self.order.append(String("build ") + req.step_name)
         self.bases.append(req.affected_by.copy())
+        self.budgets.append(req.build_budget_s)
+        self.deadlines.append(req.build_deadline_ns)
         self.calls.append(
             String("build ") + req.platform + String(" ") + req.artifacts_file + String(" ") + req.revision_id
             + String(" ") + req.work_dir + String(" ") + req.run.run_id + String(" step=") + req.step_name
@@ -412,9 +418,20 @@ def test_the_machine_file() raises:
     assert_equal(kci_main_with(_run(newer, String("build")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT-VERSION"))
     var bad = d + String("/bad.textproto")
-    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
+    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: VALIDATE platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
     assert_equal(kci_main_with(_run(bad, String("x")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
+    # a valid DEPLOY step, and a valid PUBLISH into a cell: parsed, never run
+    var cell_steps = List[String]()
+    cell_steps.append(String("kind: DEPLOY cells: \"c\" cell: \"s\" resources: \"r.json\""))
+    cell_steps.append(String("kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"a\" cells: \"c\" cell: \"s\""))
+    for i in range(len(cell_steps)):
+        write_whole_file(bad, String("schema_version: 1\nname: \"m\"\nstage { name: \"x\" step { name: \"d\" ") + cell_steps[i] + String(" } }\n"))
+        var a = _run(bad, String("x"))
+        a.extend(_publish_flags())
+        assert_equal(kci_main_with(a, steps, rec), 3)
+        assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
+        assert_true(_last(rec).error.message.find(String("writes into cell 's': that needs a newer kci")) >= 0)
     assert_equal(len(steps.calls), 0)
 
 
@@ -517,650 +534,6 @@ def test_plan_reaches_a_build_step() raises:
     assert_true(_last(rec).plan)
 
 
-comptime _SHA: String = "0123456789abcdef0123456789abcdef01234567"
-
-comptime _CHANNELS: String = (
-    "schema_version: 1\n"
-    "channel { name: \"gamma\" visibility: PUBLIC repository { artifact_type: CONDA"
-    " location: \"https://prefix.dev/komira-ai/gamma\" push_identity: \"repo:komira-ai/komira:environment:gamma\""
-    " credential { kind: OIDC_TRUSTED_PUBLISHING } } }\n"
-    "channel { name: \"prod\" visibility: PUBLIC repository { artifact_type: CONDA"
-    " location: \"https://prefix.dev/komira-ai/prod\" push_identity: \"repo:komira-ai/komira:environment:prod\""
-    " credential { kind: OIDC_TRUSTED_PUBLISHING } } }\n"
-)
-
-
-def _release_machine(dir: String, validation: Bool = False, env_validation: Bool = False) raises -> String:
-    """build -> gamma (environment gamma) -> prod (environment prod), the
-    channels file beside it; `validation` declares one on gamma's step,
-    `env_validation` one of kind CONDA_INSTALL_ENV (`install-env`)."""
-    var c = dir + String("/c.textproto")
-    write_whole_file(c, String(_CHANNELS))
-    var v = String("")
-    if validation:
-        v = String(
-            " validation { name: \"install\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\""
-            " image: \"registry.example.invalid/pixi:1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\""
-            " compiler_channel: \"https://conda.modular.com/max\" program: \"release/smoke/smoke.mojo\" }"
-        )
-    if env_validation:
-        v += String(
-            " validation { name: \"install-env\" kind: CONDA_INSTALL_ENV install: \"komira_encoding\""
-            " compiler_channel: \"https://conda.modular.com/max\" extra_channel: \"conda-forge\" }"
-        )
-    var m = dir + String("/machine.textproto")
-    write_whole_file(
-        m,
-        String("schema_version: 1\n")
-        + String("stage { name: \"build\" break_glass: true step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
-        + String("stage { name: \"gamma\" environment: \"gamma\" after: \"build\" break_glass: true step { name: \"publish\" kind: PUBLISH")
-        + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"gamma\"")
-        + v + String(" } }\n")
-        + String("stage { name: \"prod\" environment: \"prod\" after: \"gamma\" step { name: \"publish\" kind: PUBLISH")
-        + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"prod\" } }\n"),
-    )
-    return m^
-
-
-def _workflow(machine: String) -> String:
-    """A workflow that agrees with `_release_machine` without a validation
-    (R1-R21): build and gamma break-glass, prod main only."""
-    var run = String("kci run --machine ") + machine + String(" --summary-file \"$GITHUB_STEP_SUMMARY\" --stage ")
-    var hash = String(" --release-set-hash \"$RELEASE_SET_HASH\"")
-    var line = String("      - name: the prod line\n        if: always()\n        run: echo prod line\n")
-    return (
-        String("name: kci\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n")
-        + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n")
-        + String("      reason:\n        type: string\n        required: true\n")
-        + String("      dry_run:\n        type: boolean\n        default: false\n")
-        + String("permissions: {}\n")
-        + String("concurrency:\n  group: kci-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n")
-        + String("  cancel-in-progress: false\n")
-        + String("env:\n  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n")
-        + String("jobs:\n")
-        + String("  build:\n    environment: build\n    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
-        + String("    steps:\n") + String(_R19) + String("      - run: ") + run + String("build\n") + line
-        + String("  gamma:\n    needs: build\n    environment: gamma\n    permissions:\n      id-token: write\n")
-        + String("    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
-        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n")
-        + String("    steps:\n") + String(_R19) + String("      - run: ") + run + String("gamma") + hash + String("\n") + line
-        + String("  prod:\n    needs: gamma\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n    environment: prod\n")
-        + String("    permissions:\n      id-token: write\n")
-        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.gamma.outputs.set_hash }}\n")
-        + String("    steps:\n") + String(_R19) + String(_R19_MAIN) + String("      - run: ") + run + String("prod") + hash + String("\n") + line
-    )
-
-
-def _under_actions(mut steps: FakeSteps, workflow: String):
-    steps.set_env(String("GITHUB_ACTIONS"), String("true"))
-    steps.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
-    steps.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/kci.yml@refs/heads/main"))
-    steps.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
-    # a push to main of the revision (the ref check, test_kci_ref_check)
-    steps.set_env(String("GITHUB_REF"), String("refs/heads/main"))
-    steps.set_env(String("GITHUB_EVENT_NAME"), String("push"))
-    steps.set_env(String("GITHUB_SHA"), String(_REV))
-    steps.workflow = workflow.copy()
-
-
-def _gamma(m: String, *extra: String) -> List[String]:
-    var a = _run(m, String("gamma"))
-    for s in ["--release-version", "rv", "--release-set-hash"]:
-        a.append(String(s))
-    a.append(String(_SET_HASH))
-    for s in extra:
-        a.append(String(s))
-    return a^
-
-
-def test_under_actions_a_matching_workflow_runs() raises:
-    var m = _release_machine(_root(String("wf_ok")))
-    var steps = FakeSteps()
-    _under_actions(steps, _workflow(m))
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m), steps, rec), 0)
-    assert_equal(len(steps.calls), 1)
-    # the workflow read is the COMMITTED one, at GITHUB_WORKFLOW_SHA
-    assert_equal(steps.reads[0], String("git show ") + String(_SHA) + String(":.github/workflows/kci.yml"))
-    var r = _last(rec)
-    assert_true(r.workflow_checked)
-    assert_equal(r.workflow_path, String(".github/workflows/kci.yml"))
-    assert_equal(r.workflow_sha, String(_SHA))
-    # the RUNNING record already carries the check
-    assert_true(rec.records[0].find(String('"checked":true')) >= 0, rec.records[0])
-
-
-def test_under_actions_a_mismatching_workflow_is_exit_3_and_runs_nothing() raises:
-    var m = _release_machine(_root(String("wf_drift")))
-    var steps = FakeSteps()
-    # R1 drift: the workflow's job is `publish-gamma`, the machine file's stage `gamma`
-    _under_actions(steps, _workflow(m).replace(String("  gamma:\n"), String("  publish-gamma:\n")))
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m), steps, rec), 3)
-    assert_equal(len(steps.calls), 0)
-    # no RUNNING record: refused before the first effect; the FINISHED one is written
-    assert_equal(len(rec.statuses), 1)
-    assert_equal(rec.statuses[0], String("FINISHED"))
-    var r = _last(rec)
-    assert_equal(r.outcome, String("REFUSED"))
-    assert_equal(r.error.id, String("KCI-E-WORKFLOW-MISMATCH"))
-    assert_true(r.error.message.find(String("R1: job 'publish-gamma' is no stage")) >= 0, r.error.message)
-    assert_false(r.workflow_checked)
-
-
-def test_under_actions_an_unreadable_workflow_is_exit_5() raises:
-    var m = _release_machine(_root(String("wf_unread")))
-    # GITHUB_WORKFLOW_SHA unset
-    var unset = FakeSteps()
-    unset.set_env(String("GITHUB_ACTIONS"), String("true"))
-    unset.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
-    unset.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/kci.yml@refs/heads/main"))
-    unset.workflow = _workflow(m)
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m), unset, rec), 5)
-    assert_equal(len(unset.calls), 0)
-    assert_equal(len(unset.reads), 0)
-    var r = _last(rec)
-    assert_equal(r.outcome, String("INDETERMINATE"))
-    assert_equal(r.error.id, String("KCI-E-CANNOT-TELL"))
-    assert_true(r.error.message.find(String("GITHUB_WORKFLOW_SHA is not set")) >= 0, r.error.message)
-    # `git show` fails
-    var fails = FakeSteps()
-    _under_actions(fails, _workflow(m))
-    fails.workflow_fails = True
-    var rec2 = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m), fails, rec2), 5)
-    assert_equal(len(fails.calls), 0)
-    assert_true(_last(rec2).error.message.find(String("fatal: path does not exist")) >= 0, _last(rec2).error.message)
-    # a workflow the restricted reader cannot read
-    var anchors = FakeSteps()
-    _under_actions(anchors, _workflow(m).replace(String("environment: prod"), String("environment: &p prod")))
-    var rec3 = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m), anchors, rec3), 5)
-    assert_equal(len(anchors.calls), 0)
-    # a workflow ref outside .github/workflows/
-    var rec4 = CliRecorder.memory(String(""))
-    var outside2 = FakeSteps()
-    outside2.set_env(String("GITHUB_ACTIONS"), String("true"))
-    outside2.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
-    outside2.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/ci/kci.yml@refs/heads/main"))
-    outside2.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
-    outside2.workflow = _workflow(m)
-    assert_equal(kci_main_with(_gamma(m), outside2, rec4), 5)
-    assert_equal(len(outside2.reads), 0)
-
-
-def test_not_under_actions_nothing_is_checked_and_the_result_says_so() raises:
-    var m = _release_machine(_root(String("wf_local")))
-    var steps = FakeSteps()
-    steps.workflow = String("not: [a workflow")
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m), steps, rec), 0)
-    assert_equal(len(steps.calls), 1)
-    for i in range(len(steps.reads)):
-        assert_false(steps.reads[i].startswith(String("git show")), steps.reads[i])
-    var r = _last(rec)
-    assert_false(r.workflow_checked)
-    assert_equal(r.workflow_reason, String("not under GitHub Actions"))
-
-
-def test_a_full_run_validates_after_its_step() raises:
-    var m = _release_machine(_root(String("val")), True)
-    for plan in [False, True]:
-        var steps = FakeSteps()
-        var rec = CliRecorder.memory(String(""))
-        var a = _gamma(m, "--scratch-dir", "/s")
-        if plan:
-            a.append(String("--plan"))
-        assert_equal(kci_main_with(a, steps, rec), 0)
-        # the step, then its validation
-        assert_equal(len(steps.order), 2)
-        assert_equal(steps.order[0], String("publish publish"))
-        assert_equal(steps.order[1], String("validate install"))
-        assert_equal(
-            steps.validated[0],
-            String("validate gamma publish install channel=gamma release=/r linux-x86_64 ") + String(_REV)
-            + String(" scratch=/s plan=") + String(plan),
-        )
-        var r = _last(rec)
-        assert_equal(r.scope, String("FULL"))
-        assert_equal(len(r.validations), 1)
-        assert_equal(r.validations[0].name, String("install"))
-        assert_equal(r.validations[0].step, String("publish"))
-        if plan:
-            assert_equal(r.validations[0].effect, String(VALIDATION_WOULD_VALIDATE))
-            assert_equal(r.validations[0].outcome, String(""))
-        else:
-            assert_equal(r.validations[0].effect, String(VALIDATION_VALIDATED))
-            assert_equal(r.validations[0].outcome, String(OUTCOME_SUCCEEDED))
-            assert_equal(r.outcome, String(OUTCOME_SUCCEEDED))
-
-
-def test_a_selected_validation_needs_scratch_dir_and_only_then() raises:
-    var m = _release_machine(_root(String("valflags")), True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    # a FULL run selects the validation: no --scratch-dir is a usage error
-    assert_equal(kci_main_with(_gamma(m), steps, rec), 2)
-    assert_true(_last(rec).error.message.find(String("selects a validation: kci run needs --scratch-dir")) >= 0, _last(rec).error.message)
-    # --only step:publish selects none: --scratch-dir is refused
-    var rec2 = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m, "--only", "step:publish", "--scratch-dir", "/s"), steps, rec2), 2)
-    assert_true(_last(rec2).error.message.find(String("--scratch-dir is a validation's flag")) >= 0, _last(rec2).error.message)
-    # a relative scratch directory is refused as the command line is read
-    var rec3 = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m, "--scratch-dir", "s"), steps, rec3), 2)
-    assert_equal(len(steps.order), 0)
-
-
-def test_only_step_runs_the_step_without_its_validations() raises:
-    var m = _release_machine(_root(String("valstep")), True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m, "--only", "step:publish"), steps, rec), 0)
-    assert_equal(len(steps.order), 1)
-    assert_equal(steps.order[0], String("publish publish"))
-    var r = _last(rec)
-    assert_equal(r.scope, String("SELECTIVE"))
-    assert_equal(len(r.validations), 0)
-
-
-def test_only_validation_checks_what_is_published() raises:
-    var m = _release_machine(_root(String("valonly")), True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    # no step is selected, so no PUBLISH flag is taken
-    assert_equal(
-        kci_main_with(_run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s"), steps, rec), 0
-    )
-    assert_equal(len(steps.order), 1)
-    assert_equal(steps.order[0], String("validate install"))
-    assert_equal(len(steps.calls), 0)
-    var r = _last(rec)
-    assert_equal(r.scope, String("SELECTIVE"))
-    assert_equal(r.only[0], String("validation:install"))
-    assert_equal(len(r.steps), 1)
-    assert_false(r.steps[0].selected)
-    assert_equal(r.validations[0].outcome, String(OUTCOME_SUCCEEDED))
-    assert_equal(r.channel, String("gamma"))
-    # --release-version is still a PUBLISH step's flag
-    var rec2 = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m, "--only", "validation:install", "--scratch-dir", "/s"), steps, rec2), 2)
-
-
-def test_a_passed_validation_summary_states_each_check() raises:
-    # The summary names what a passing validation found, not only what a
-    # failing one did: each check's first row (the channel's says how long
-    # the index was waited for, and over how many polls).
-    var d = _root(String("valpass"))
-    var m = _release_machine(d, True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    var summary = d + String("/summary.md")
-    assert_equal(
-        kci_main_with(_run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--summary-file", summary), steps, rec),
-        0,
-    )
-    var text = Path(summary).read_text()
-    assert_true(text.find(String("| install | publish | SUCCEEDED |")) >= 0, text)
-    assert_true(text.find(String("| | | ok: `channel: answered 200; waited 60 of 1800 s over 5 polls` |")) >= 0, text)
-    assert_true(text.find(String("| | | ok: `program: ran 61 checks, all passed` |")) >= 0, text)
-    # a second row of a check already shown is not repeated
-    assert_equal(text.find(String("a second channel row")), -1, text)
-
-
-def test_a_failed_validation_is_exit_7_and_names_its_finding() raises:
-    var d = _root(String("valfail"))
-    var m = _release_machine(d, True)
-    var steps = FakeSteps()
-    steps.validation_fails = True
-    var rec = CliRecorder.memory(String(""))
-    var summary = d + String("/summary.md")
-    assert_equal(
-        kci_main_with(_run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--summary-file", summary), steps, rec),
-        7,
-    )
-    var r = _last(rec)
-    assert_equal(r.outcome, String(OUTCOME_VALIDATION_FAILED))
-    assert_equal(r.error.id, String("KCI-E-VALIDATION"))
-    assert_true(r.error.message.find(String("validation 'install' of step 'publish' failed:")) >= 0, r.error.message)
-    assert_true(r.error.message.find(String("answered 401")) >= 0, r.error.message)
-    # a failed run reads no later stage's names
-    assert_equal(len(steps.reads), 0)
-    var text = Path(summary).read_text()
-    assert_true(text.find(String("| install | publish | VALIDATION_FAILED |")) >= 0, text)
-    assert_true(text.find(String("answered 401")) >= 0, text)
-
-
-comptime _PIXI_SHA: String = "807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f"
-
-
-def test_an_env_validation_needs_the_pinned_pixi() raises:
-    var m = _release_machine(_root(String("envflags")), False, True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    # without --pixi: a usage error naming the flag, nothing run
-    assert_equal(
-        kci_main_with(_run(m, String("gamma"), "--only", "validation:install-env", "--scratch-dir", "/s"), steps, rec),
-        2,
-    )
-    assert_true(_last(rec).error.message.find(String("selects the CONDA_INSTALL_ENV validation 'install-env': kci run needs --pixi")) >= 0, _last(rec).error.message)
-    assert_equal(len(steps.validated), 0)
-    # with both, the request carries them
-    var ok = FakeSteps()
-    var rec2 = CliRecorder.memory(String(""))
-    assert_equal(
-        kci_main_with(
-            _run(m, String("gamma"), "--only", "validation:install-env", "--scratch-dir", "/s", "--pixi", "/t/pixi", "--pixi-sha256", String(_PIXI_SHA)),
-            ok, rec2,
-        ),
-        0,
-    )
-    assert_equal(len(ok.pixis), 1)
-    assert_equal(ok.pixis[0], String("install-env pixi=/t/pixi sha=") + String(_PIXI_SHA))
-
-
-def test_pixi_flags_are_refused_where_no_env_validation_runs() raises:
-    var m = _release_machine(_root(String("envrefused")), True, True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(
-        kci_main_with(
-            _run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--pixi", "/t/pixi", "--pixi-sha256", String(_PIXI_SHA)),
-            steps, rec,
-        ),
-        2,
-    )
-    assert_true(_last(rec).error.message.find(String("--pixi is a CONDA_INSTALL_ENV validation's flag")) >= 0, _last(rec).error.message)
-    assert_equal(len(steps.validated), 0)
-
-
-def _local(m: String, *extra: String) -> List[String]:
-    """A validation-only gamma run of install-env against a local channel."""
-    var a = _run(m, String("gamma"))
-    for s in ["--scratch-dir", "/s", "--pixi", "/t/pixi", "--pixi-sha256"]:
-        a.append(String(s))
-    a.append(String(_PIXI_SHA))
-    for s in ["--channel", "file:///w/channel"]:
-        a.append(String(s))
-    for s in extra:
-        a.append(String(s))
-    return a^
-
-
-def test_a_local_channel_reaches_the_env_validation_of_a_validation_only_run() raises:
-    var m = _release_machine(_root(String("localok")), False, True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_local(m, "--only", "validation:install-env"), steps, rec), 0)
-    assert_equal(len(steps.channels), 1)
-    assert_equal(steps.channels[0], String("install-env local=file:///w/channel"))
-    assert_equal(len(steps.calls), 0)
-    # without --channel the request names none: the step's channel is read
-    var plain = FakeSteps()
-    var rec2 = CliRecorder.memory(String(""))
-    assert_equal(
-        kci_main_with(
-            _run(m, String("gamma"), "--only", "validation:install-env", "--scratch-dir", "/s", "--pixi", "/t/pixi", "--pixi-sha256", String(_PIXI_SHA)),
-            plain, rec2,
-        ),
-        0,
-    )
-    assert_equal(plain.channels[0], String("install-env local="))
-
-
-def test_a_local_channel_is_refused_when_a_step_is_selected() raises:
-    var m = _release_machine(_root(String("localpub")), False, True)
-    # the PUBLISH step selected, alone or with the validation, or the full stage
-    for which in [0, 1, 2]:
-        var steps = FakeSteps()
-        var rec = CliRecorder.memory(String(""))
-        var a = _local(m, "--release-version", "rv")
-        if which == 0:
-            for s in ["--only", "step:publish"]:
-                a.append(String(s))
-        elif which == 1:
-            for s in ["--only", "step:publish", "--only", "validation:install-env"]:
-                a.append(String(s))
-        assert_equal(kci_main_with(a, steps, rec), 2)
-        assert_true(
-            _last(rec).error.message.find(
-                String("--channel names a local channel, which only a validation-only run reads, and the run selects the PUBLISH step of stage 'gamma'")
-            ) >= 0,
-            _last(rec).error.message,
-        )
-        assert_equal(len(steps.calls), 0)
-        assert_equal(len(steps.validated), 0)
-
-
-def test_a_local_channel_is_refused_for_a_container_validation() raises:
-    var m = _release_machine(_root(String("localcontainer")), True, True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(
-        kci_main_with(_local(m, "--only", "validation:install-env", "--only", "validation:install"), steps, rec), 2
-    )
-    # exactly (args.mojo `usage_error` adds no `kci: `; `_stop` prints one)
-    assert_equal(
-        _last(rec).error.message,
-        String(
-            "--channel names a local channel, which only a validation-only run reads, and the selected validation"
-            " 'install' is CONDA_INSTALL_SMOKE, not CONDA_INSTALL_ENV: a container cannot read this machine's"
-            " directory"
-        ),
-    )
-    assert_equal(len(steps.validated), 0)
-
-
-def test_a_local_channel_is_refused_under_github_actions() raises:
-    var m = _release_machine(_root(String("localgha")), False, True)
-    var steps = FakeSteps()
-    _under_actions(steps, _workflow(m))
-    var rec = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_local(m, "--only", "validation:install-env"), steps, rec), 2)
-    # exactly: `_stop` prints it after its one `kci: `
-    assert_equal(
-        _last(rec).error.message,
-        String(
-            "--channel names a local channel, and GITHUB_ACTIONS is true: a workflow validates only what was"
-            " published, from the step's channel"
-        ),
-    )
-    assert_equal(len(steps.validated), 0)
-    # refused before the workflow is read
-    assert_equal(len(steps.reads), 0)
-
-
-def test_no_network_is_exit_5_never_a_pass() raises:
-    var d = _root(String("envskip"))
-    var m = _release_machine(d, False, True)
-    var steps = FakeSteps()
-    steps.validation_skips = True
-    var rec = CliRecorder.memory(String(""))
-    var summary = d + String("/summary.md")
-    assert_equal(
-        kci_main_with(
-            _run(
-                m, String("gamma"), "--only", "validation:install-env", "--scratch-dir", "/s", "--pixi", "/t/pixi",
-                "--pixi-sha256", String(_PIXI_SHA), "--summary-file", summary,
-            ),
-            steps, rec,
-        ),
-        5,
-    )
-    var r = _last(rec)
-    assert_equal(r.outcome, String(OUTCOME_INDETERMINATE))
-    assert_equal(r.validations[0].outcome, String(OUTCOME_INDETERMINATE))
-    assert_true(r.validations[0].skip_reason.startswith(String("no network")))
-    assert_true(
-        r.error.message.find(String("validation 'install-env' of step 'publish' could not run (INDETERMINATE, never a pass): no network")) >= 0,
-        r.error.message,
-    )
-    # a run that could not tell reads no later stage's names
-    assert_equal(len(steps.reads), 0)
-    var text = Path(summary).read_text()
-    assert_true(text.find(String("| install-env | publish | INDETERMINATE |")) >= 0, text)
-
-
-def test_a_failed_step_leaves_its_validation_not_reached() raises:
-    var m = _release_machine(_root(String("valnotreached")), True)
-    var steps = FakeSteps()
-    steps.ends.append(StepEnd(String(OUTCOME_FAILED), String(ERROR_PUBLISH_DIFFERENT_BYTES), String("other bytes")))
-    var rec = CliRecorder.memory(String(""))
-    var rc = kci_main_with(_gamma(m, "--scratch-dir", "/s"), steps, rec)
-    assert_true(rc != 0)
-    assert_equal(len(steps.validated), 0)
-    var r = _last(rec)
-    assert_equal(r.outcome, String(OUTCOME_FAILED))
-    assert_equal(len(r.validations), 1)
-    assert_equal(r.validations[0].effect, String("NOT_REACHED"))
-    assert_equal(r.validations[0].outcome, String(""))
-
-
-def test_a_stage_without_validations_needs_no_scratch_dir() raises:
-    var m = _release_machine(_root(String("noval")), True)
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    var b = _run(m, String("prod"))
-    for x in ["--release-version", "rv"]:
-        b.append(String(x))
-    assert_equal(kci_main_with(b, steps, rec), 0)
-    assert_equal(len(steps.calls), 1)
-    assert_equal(len(_last(rec).validations), 0)
-
-
-def test_gamma_reports_the_new_names_of_prod() raises:
-    var d = _root(String("ahead"))
-    var m = _release_machine(d)
-    var steps = FakeSteps()
-    steps.ahead_names.append(String("komira_all"))
-    var rec = CliRecorder.memory(String(""))
-    var summary = d + String("/summary.md")
-    write_whole_file(summary, String("earlier step's text\n"))
-    assert_equal(kci_main_with(_gamma(m, "--plan", "--summary-file", summary), steps, rec), 0)
-    # the lookahead read prod's PUBLISH step, as prod's own run would (its environment, a plan)
-    assert_equal(len(steps.reads), 1)
-    assert_equal(steps.reads[0], String("lookahead prod env=prod prod plan=True"))
-    var r = _last(rec)
-    assert_equal(len(r.new_names), 1)
-    assert_equal(r.new_names[0].stage, String("prod"))
-    assert_equal(r.new_names[0].step, String("publish"))
-    assert_equal(r.new_names[0].channel, String("prod"))
-    assert_equal(r.new_names[0].name, String("komira_all"))
-    var text = Path(summary).read_text()
-    # appended, never truncated
-    assert_true(text.startswith(String("earlier step's text\n")), text)
-    assert_true(text.find(String("## kci run --stage gamma: SUCCEEDED (exit 0)")) >= 0, text)
-    assert_true(text.find(String("FULL run. Dry run (--plan)")) >= 0, text)
-    assert_true(text.find(String("| publish | PUBLISH | SUCCEEDED |")) >= 0, text)
-    assert_true(text.find(String("### NEW NAMES on komira-ai/gamma")) >= 0, text)
-    assert_true(text.find(String("### NEW NAMES on komira-ai/prod")) >= 0, text)
-    assert_true(text.find(String("- `komira_all`")) >= 0, text)
-    assert_true(text.find(String("workflow: not checked (not under GitHub Actions)")) >= 0, text)
-
-
-def test_an_unread_later_channel_is_not_none() raises:
-    var d = _root(String("ahead_unread"))
-    var m = _release_machine(d)
-    var steps = FakeSteps()
-    steps.ahead_unread = True
-    var rec = CliRecorder.memory(String(""))
-    var summary = d + String("/summary.md")
-    assert_equal(kci_main_with(_gamma(m, "--summary-file", summary), steps, rec), 0)
-    assert_equal(len(_last(rec).new_names), 0)
-    var text = Path(summary).read_text()
-    var at = text.find(String("### NEW NAMES on komira-ai/prod"))
-    assert_true(at >= 0, text)
-    var tail = String(text[byte = at:])
-    assert_true(tail.find(String("not read: cannot tell")) >= 0, tail)
-    assert_true(tail.find(String("\nnone\n")) < 0, tail)
-
-
-def test_a_run_without_a_release_version_skips_the_lookahead() raises:
-    # the validate job: `--only validation:install`, no --release-version. A
-    # later stage's names cannot be computed without the release version, so
-    # the lookahead is skipped and says so, never "cannot be read" of an
-    # empty path, and never "none"
-    var d = _root(String("ahead_norv"))
-    var m = _release_machine(d, True)
-    var steps = FakeSteps()
-    steps.ahead_names.append(String("komira_all"))
-    var rec = CliRecorder.memory(String(""))
-    var summary = d + String("/summary.md")
-    assert_equal(
-        kci_main_with(_run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--summary-file", summary), steps, rec),
-        0,
-    )
-    for i in range(len(steps.reads)):
-        assert_true(not steps.reads[i].startswith(String("lookahead")), steps.reads[i])
-    assert_equal(len(_last(rec).new_names), 0)
-    var text = Path(summary).read_text()
-    var at = text.find(String("### NEW NAMES on prod"))
-    assert_true(at >= 0, text)
-    var tail = String(text[byte = at:])
-    assert_true(tail.find(String("lookahead skipped: no release version (plan-only or validation-only run)")) >= 0, tail)
-    assert_true(tail.find(String("cannot be read")) < 0, tail)
-    assert_true(tail.find(String("\nnone\n")) < 0, tail)
-    # a plan WITH a release version still reads prod's names
-    var steps2 = FakeSteps()
-    var rec2 = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_gamma(m, "--plan", "--scratch-dir", "/s"), steps2, rec2), 0)
-    assert_equal(len(steps2.reads), 1)
-    assert_equal(steps2.reads[0], String("lookahead prod env=prod prod plan=True"))
-
-
-def test_no_lookahead_after_a_failure_and_the_last_stage_has_none() raises:
-    var d = _root(String("ahead_none"))
-    var m = _release_machine(d)
-    var failed = FakeSteps()
-    failed.ends.append(StepEnd(String(OUTCOME_FAILED), String("KCI-E-CREDENTIAL"), String("mint refused")))
-    var rec = CliRecorder.memory(String(""))
-    var summary = d + String("/failed.md")
-    assert_equal(kci_main_with(_gamma(m, "--summary-file", summary), failed, rec), 4)
-    assert_equal(len(failed.reads), 0)
-    var text = Path(summary).read_text()
-    assert_true(text.find(String("## kci run --stage gamma: FAILED (exit 4)")) >= 0, text)
-    assert_true(text.find(String("- error: `KCI-E-CREDENTIAL`: mint refused")) >= 0, text)
-    # prod is the last stage: no lookahead
-    var last = FakeSteps()
-    var rec2 = CliRecorder.memory(String(""))
-    var b = _run(m, String("prod"))
-    for x in ["--release-version", "rv"]:
-        b.append(String(x))
-    assert_equal(kci_main_with(b, last, rec2), 0)
-    assert_equal(len(last.reads), 0)
-
-
-def test_a_plan_stays_a_plan_whatever_the_step_records() raises:
-    var d = _root(String("plan_kept"))
-    var m = _release_machine(d)
-    var steps = FakeSteps()
-    steps.publish_records_no_plan = True
-    steps.ends.append(StepEnd(String(OUTCOME_REFUSED), String("KCI-E-MEMBER"), String("no release directory")))
-    var rec = CliRecorder.memory(String(""))
-    var summary = d + String("/plan.md")
-    assert_equal(kci_main_with(_gamma(m, "--plan", "--summary-file", summary), steps, rec), 3)
-    assert_true(_last(rec).plan)
-    var text = Path(summary).read_text()
-    assert_true(text.find(String("Dry run (--plan)")) >= 0, text)
-
-
-def test_a_refused_command_line_reaches_the_summary() raises:
-    var d = _root(String("summary_usage"))
-    var summary = d + String("/usage.md")
-    var steps = FakeSteps()
-    var rec = CliRecorder.memory(String(""))
-    var a = List[String]()
-    for s in ["ci", "check", "--summary-file"]:
-        a.append(String(s))
-    a.append(summary)
-    assert_equal(kci_main_with(a, steps, rec), 2)
-    var text = Path(summary).read_text()
-    assert_true(text.find(String("## kci: REFUSED (exit 2)")) >= 0, text)
-    assert_true(text.find(String("there is one command: kci run")) >= 0, text)
-    assert_equal(_last(rec).invoked_as, String("ci"))
-
-
 comptime _BASE: String = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -1208,6 +581,32 @@ def test_affected_by_reaches_the_build_step_and_is_selective() raises:
         text.find(String("SELECTIVE run (affected-by ") + String(_BASE) + String("): not a full run.")) >= 0, text
     )
     assert_true(text.find(String("- affected: no answer")) >= 0, text)
+
+
+def test_the_build_budget_reaches_the_per_change_check() raises:
+    # --build-budget-s is handed to the BUILD step as is; without it the
+    # step has no budget (kci_build NO_BUILD_BUDGET, 0)
+    var m = _machine(_root(String("budget")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var a = _pr_run(m, String("build"), "--build-budget-s", "6543")
+    a.extend(_build_flags())
+    var t0 = Int(perf_counter_ns())
+    assert_equal(kci_main_with(a, steps, rec), 0)
+    var t1 = Int(perf_counter_ns())
+    assert_equal(len(steps.budgets), 1)
+    assert_equal(steps.budgets[0], 6543)
+    # the deadline is kci's start (inside the call) plus the budget, on the
+    # monotonic clock the runner reads
+    var start = steps.deadlines[0] - 6543 * 1_000_000_000
+    assert_true(start >= t0 and start <= t1, String(t0) + String(" ") + String(start) + String(" ") + String(t1))
+    var none = FakeSteps()
+    var rec2 = CliRecorder.memory(String(""))
+    var b = _pr_run(m, String("build"))
+    b.extend(_build_flags())
+    assert_equal(kci_main_with(b, none, rec2), 0)
+    assert_equal(none.budgets[0], 0)
+    assert_equal(none.deadlines[0], 0)
 
 
 def test_a_release_build_carries_no_base() raises:
