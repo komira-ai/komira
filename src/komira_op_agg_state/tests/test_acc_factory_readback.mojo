@@ -252,7 +252,7 @@ def test_sum_f64_readback_and_merges() raises:
     assert_equal(a.finalize_f64(1), Float64(6.0))
     assert_equal(a.finalize_f64(2), Float64(0.0))
     assert_equal(a.finalize_f64(3), Float64(0.0), "out of range gid -> 0.0")
-    assert_false(Bool(a.finalize_f64_optional(0)), "SUM(f64) has no nullable slot")
+    assert_false(Bool(a.finalize_f64_optional(0)), "default vtable wiring: SUM(f64) has no nullable readback")
     _assert_f64_int_utf8_defaults(a)
     var b = _make_f64(ACC_SUM_F64, 10.0, 20.0, 0.5, 0.25)
     a.merge_at(2, b, 0)

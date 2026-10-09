@@ -180,8 +180,9 @@ def _cast_acc[T: Accumulator](
         )
     except e:
         # A box that does not hold a T is a wiring bug (the SAFETY contract
-        # above); the thunks that call this cannot raise, so it aborts.
-        abort(String("_cast_acc: ") + String(e))  # cov: unreachable every vtable thunk is instantiated with its box's own type, so get[T] cannot raise
+        # above): a vtable from another type passed to the public
+        # create_with_vtable lands here. The thunks cannot raise, so it aborts.
+        abort(String("_cast_acc: ") + String(e))  # cov: unreachable reached only by a vtable wired to another type (create_with_vtable is public), which aborts the process; no welded test survives it
 
 
 # =============================================================================

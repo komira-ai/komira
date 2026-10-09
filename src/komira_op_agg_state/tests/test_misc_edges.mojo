@@ -309,7 +309,9 @@ def test_stddev_population_and_sample() raises:
 
 
 def test_stddev_and_covariance_sentinels_on_too_few_rows() raises:
-    # The documented sentinel is 0.0; a caller reads `count` to answer NULL.
+    # Pins what the code returns on too few rows: 0.0 (variance_pop and
+    # covar_pop guard count == 0, variance_sample guards count < 2). No
+    # docstring promises this value; the test records current behaviour.
     var s = StddevAccumulator.create()
     assert_equal(s.variance_pop(), Float64(0.0))
     s.update(3.0)
