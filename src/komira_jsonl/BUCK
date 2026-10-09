@@ -31,6 +31,7 @@ mojo_library(
         "tests/test_jsonl_key_spelling_and_index.mojo",
         "tests/test_jsonl_line_check_branches.mojo",
         "tests/test_jsonl_line_validation.mojo",
+        "tests/test_jsonl_nested_nulls.mojo",
         "tests/test_nested_parsers.mojo",
         "tests/test_not_null_nonfinite.mojo",
         "tests/test_parse_float_exponent.mojo",

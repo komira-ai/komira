@@ -13,6 +13,7 @@ here executes a plan.
 | `optimizer_or_factoring` | hoisting conjuncts common to every branch of an OR above the OR |
 | `optimizer_symmetric_or` | inferring single-column IN predicates from a symmetric swap OR (`(A=x AND B=y) OR (A=y AND B=x)`) |
 | `optimizer_project_merge_guard` | substituting an outer expression through an inner Project, and whether that is safe; the predicate that means the same below a Project |
+| `optimizer_join` | inner-to-semi conversion, join build-side selection, the SEMI/ANTI reducer pushdown (`OptimizerConfig.semi_pushdown`), the join-reorder output-order guard and absorbing a projection into an aggregate |
 | `optimizer_misc` | limit pushdown, sort + limit fusion into TopN, TopN below a Project, row-count estimate |
 | `topn_tiebreak_policy` | the deterministic TopN tie-break list as the optimizer reads it |
 | `optimizer_expr` | constant folding, predicate simplification, common subexpression elimination, OR-of-equalities to IN-list rewrite |

@@ -57,9 +57,38 @@ Each listed function has a `kind`:
 What it cannot see: a `comptime if` arm the compiler dropped inside a
 recorded function (the whole function is the unit here), and a function
 whose code the compiler emits without line rows.
+
+**Declaration-only files** (`declaration_only`, read by analyze.mojo for a
+file no test compiled). This module's declaration and body reader is the
+one authority on which declarations are functions and which are
+requirements (a body of `...` alone), and where a body ends; a file is
+declaration-only when that reader finds no function in it, every
+declaration it finds is a requirement inside a trait's block, and every
+other executable line belongs to a statement that emits no code:
+
+- at the top level, a `trait` header (ending in `:`, or `: ...`) or a
+  `comptime` declaration (not one opening a block, as `comptime if` does);
+- in a trait's block, a `comptime` declaration, a decorator line, or `...`.
+
+A statement runs over the lines its `(` `)`, `[` `]` and `{` `}` keep open
+or a trailing backslash continues. Anything else keeps the file counted: a
+free function, a struct, a default method body with code (even `pass`), a
+statement, a `;` outside an import, an import with code after its `;`, a
+tab or form feed in the indentation, a statement still open at the end of
+the file, a file the lexer ends inside a string (a raw triple-quoted
+string whose last byte before the closing quotes is a backslash hides
+what follows), a carriage return not followed by a line feed (a CR-only
+file is one line to the lexer). It assumes what a `comptime` initialiser or
+a requirement's default-argument expression computes is computed at
+compile time, emitting nothing at run time.
+
+A known limit: the lexer reads a backslash before a quote as an escape in
+a raw string too, so contrived text in which that puts it out of step with
+the compiler and back in step before the end of the file can hide a line
+of code from the heuristic and from this test alike.
 """
 
-from covcheck.lexer import LexState, SourceLine, executable_lines, lex_line
+from covcheck.lexer import LexState, SourceLine, executable_lines, lex_line, lex_source
 from covcheck.text import split_lines, substr, suffix, trim
 
 comptime KIND_PLAIN = "plain"
@@ -176,6 +205,14 @@ def _after_colon(code: String, depth_before: Int) -> String:
 def declared_functions(text: String) -> List[FnDecl]:
     """Every function with a body that `text` declares, in order of their
     `def` lines (see the module header)."""
+    var requirements = List[FnDecl]()
+    return _declarations(text, requirements)
+
+
+def _declarations(text: String, mut requirements: List[FnDecl]) -> List[FnDecl]:
+    """declared_functions, and in `requirements` every declaration whose
+    body is `...` alone (its range `line` to `end`; no own lines, kind
+    plain). A declaration with no body at all is in neither list."""
     var src = text
     var tb = text.as_bytes()
     if len(tb) >= 3 and tb[0] == UInt8(0xEF) and tb[1] == UInt8(0xBB) and tb[2] == UInt8(0xBF):
@@ -237,6 +274,8 @@ def declared_functions(text: String) -> List[FnDecl]:
         if len(body_code) == 1 and body_code[0] == String("..."):
             only_ellipsis = True
         if only_ellipsis:
+            if len(body_code) == 1:
+                requirements.append(FnDecl(name, i + 1, end + 1))
             continue
         var f = FnDecl(name, i + 1, end + 1)
         # Its class: the decorators right above it, then its body.
@@ -300,3 +339,138 @@ def unrecorded_functions(text: String, recorded: Dict[Int, Int], exempt: Dict[In
         if len(f.lines) > 0:
             out.append(f^)
     return out^
+
+
+def _keyword_then_blank(code: String, word: String) -> Bool:
+    var w = word.byte_length()
+    if not code.startswith(word) or code.byte_length() <= w:
+        return False
+    var after = Int(code.as_bytes()[w])
+    return after == 32 or after == 9
+
+
+def _leading_spaces(text: String) -> Int:
+    """The spaces before `text`'s first other byte; -1 when a tab or a form
+    feed is among them."""
+    var b = text.as_bytes()
+    var i = 0
+    while i < len(b):
+        var c = Int(b[i])
+        if c == 9 or c == 12:
+            return -1
+        if c != 32:
+            break
+        i += 1
+    return i
+
+
+def _ellipsis_block(code: String) -> Bool:
+    """A header's last line ends with `: ...`."""
+    if not code.endswith("..."):
+        return False
+    return trim(substr(code, 0, code.byte_length() - 3)).endswith(":")
+
+
+def _bare_cr(text: String) -> Bool:
+    var b = text.as_bytes()
+    for i in range(len(b)):
+        if b[i] == UInt8(13) and (i + 1 >= len(b) or b[i + 1] != UInt8(10)):
+            return True
+    return False
+
+
+def _ends_in_string(text: String) -> Bool:
+    var st = LexState()
+    var lines = split_lines(text)
+    for i in range(len(lines)):
+        _ = lex_line(lines[i], st)
+    return st.quote != 0
+
+
+comptime _TRAIT: Int = 1
+comptime _COMPTIME: Int = 2
+comptime _MEMBER: Int = 3
+
+
+def declaration_only(text: String) -> Bool:
+    """Whether `text` has executable lines and every one is a declaration
+    the compiler emits no code for (see the module header); False whenever
+    unsure."""
+    if _bare_cr(text) or _ends_in_string(text):
+        return False
+    # decls' reader is the authority: any function it finds (even one the
+    # walk below would not reach, inside a statement whose brackets balance
+    # around it) makes the file not declaration-only; the requirements it
+    # finds are the only `def` lines the walk accepts.
+    var requirements = List[FnDecl]()
+    if len(_declarations(text, requirements)) > 0:
+        return False
+    # The last line of the requirement each `def` line starts.
+    var req_end = Dict[Int, Int]()
+    for k in range(len(requirements)):
+        req_end[requirements[k].line] = requirements[k].end
+    var ls = lex_source(text)
+    var any = False
+    var in_trait = False
+    var depth = 0
+    var cont = False
+    var kind = 0
+    var skip_to = 0
+    for i in range(len(ls)):
+        if i + 1 <= skip_to:
+            continue
+        if not ls[i].code:
+            continue
+        if ls[i].is_import:
+            if ls[i].tail_code:
+                return False
+            continue
+        if ls[i].semi >= 0:
+            return False
+        any = True
+        var code = _code_of(ls[i])
+        var net = ls[i].opens - ls[i].closes + ls[i].brackets + ls[i].braces
+        if cont:
+            depth += net
+        else:
+            var ind = _leading_spaces(ls[i].text)
+            if ind < 0:
+                return False
+            var req = req_end.get(i + 1, -1)
+            if req >= 0:
+                # A requirement: only in a trait's block.
+                if ind == 0 or not in_trait:
+                    return False
+                skip_to = req
+                continue
+            if ind == 0:
+                in_trait = False
+                if _keyword_then_blank(code, String("trait")):
+                    kind = _TRAIT
+                elif _keyword_then_blank(code, String("comptime")):
+                    kind = _COMPTIME
+                else:
+                    return False
+            elif not in_trait:
+                return False
+            elif _keyword_then_blank(code, String("comptime")):
+                kind = _COMPTIME
+            elif code == String("...") or code.startswith("@"):
+                kind = _MEMBER
+            else:
+                return False
+            depth = net
+        cont = depth > 0 or ls[i].continued
+        if cont:
+            continue
+        if depth < 0:
+            return False
+        # The statement ends on this line.
+        if kind == _TRAIT:
+            if code.endswith(":"):
+                in_trait = True
+            elif not _ellipsis_block(code):
+                return False
+        elif kind == _COMPTIME and code.endswith(":"):
+            return False
+    return any and not cont

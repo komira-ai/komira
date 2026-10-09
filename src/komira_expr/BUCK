@@ -18,6 +18,7 @@ mojo_library(
         "tests/test_composite_key.mojo",
         "tests/test_expr_sortable_key.mojo",
         "tests/test_runtime_expr_bool.mojo",
+        "tests/test_runtime_expr_bool_child_bounds.mojo",
         "tests/test_runtime_expr_bool_shapes.mojo",
         "tests/test_stage_program.mojo",
         "tests/test_trait_conformance_across_mojoc.mojo",

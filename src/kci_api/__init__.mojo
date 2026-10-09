@@ -238,6 +238,7 @@ from kci_api.verbs import (
     STEP_KIND_PUBLISH,
     VALIDATION_KIND_CONDA_INSTALL_ENV,
     VALIDATION_KIND_CONDA_INSTALL_SMOKE,
+    VALIDATION_KIND_DEPLOY_PROBE,
     VERB_RUN,
     all_step_kinds,
     all_validation_kinds,
