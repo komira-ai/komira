@@ -34,6 +34,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | kci resource-model decision notes: an encryption key as a resource; importing and changing a network on any cloud; overrides, the escape hatch for what is cloud-specific | [design/kci_encryption_keys.md](design/kci_encryption_keys.md), [design/kci_networks_import_and_change.md](design/kci_networks_import_and_change.md), [design/kci_overrides.md](design/kci_overrides.md) |
 | The DEPLOY step (design, not built): cells, plan and apply from `kci run`, the GCP adapter, images published into a cell and promoted by digest, the `DEPLOY_PROBE` validation, one run at a time per cell | [design/deploy_step.md](design/deploy_step.md) |
 | Contacts and CRM (design, not built): address books, cards and contact groups modelled after Outlook and Apple Contacts, the CRM entities, the stored rows, keys and uniqueness, the change feed, erasure, and the authorization resource kinds | [design/contacts_and_crm.md](design/contacts_and_crm.md) |
+| UDF runtimes (design, not built): one interface every language implements to run user-defined functions, the language-neutral UDF reference in the plan, the C ABI over the Arrow C Data Interface, the worker transport over Arrow IPC on shared memory, versioning and the conformance corpus | [design/udf_runtime_interface.md](design/udf_runtime_interface.md) |
 
 ## Design docs
 
