@@ -897,5 +897,15 @@ def test_check_release_only() raises:
     assert_true(f[1].startswith(String("line 7: job 'c': R6: runs stage 'gamma'")), f[1])
 
 
+def test_check_release_only_without_a_job_node() raises:
+    # A caller that holds no node for the job (-1) still gets the R6 finding,
+    # with no `line N:` prefix: the document has no line to name.
+    var doc = read_workflow(String("jobs:\n  a:\n    runs-on: x\n"))
+    var f = List[String]()
+    check_release_only(doc, String("x"), -1, String("gamma"), f)
+    assert_equal(len(f), 1, _all(f))
+    assert_true(f[0].startswith(String("job 'x': R6: runs stage 'gamma', a release stage")), f[0])
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

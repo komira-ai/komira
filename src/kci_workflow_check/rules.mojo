@@ -574,7 +574,7 @@ def _check_job(
         check_no_secret(doc, job, job_id, String("job '") + job_id + String("': "), findings)
     else:
         if pr_trigger:
-            check_release_only(doc, job_id, job, st.name, findings)  # cov: unreachable pr_trigger is False at every call: R6 refuses a pull_request trigger in the release workflow
+            check_release_only(doc, job_id, job, st.name, findings)  # cov: unreachable pr_trigger is the constant False (check_workflow_doc sets it once and never assigns it)
         for i in range(len(calls)):
             if calls[i].has_affected_by:
                 findings.append(
@@ -640,7 +640,7 @@ def _check_part_job(
             break
     # R6: a part of a release stage is release-only too
     if pr_trigger:
-        check_release_only(doc, job_id, job, st.name, findings)  # cov: unreachable pr_trigger is False at every call: R6 refuses a pull_request trigger in the release workflow
+        check_release_only(doc, job_id, job, st.name, findings)  # cov: unreachable pr_trigger is the constant False (check_workflow_doc sets it once and never assigns it)
     var calls = _job_calls(doc, job)
     _check_calls_common(doc, job_id, job, calls, machine_path, findings)
 
