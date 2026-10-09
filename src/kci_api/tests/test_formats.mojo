@@ -11,6 +11,7 @@ from komira_json import parse_json_value
 
 from kci_api import (
     FORMAT_ARTIFACTS,
+    FORMAT_CELLS,
     FORMAT_CHANNELS,
     FORMAT_RELEASE_SET,
     FORMAT_RESULT,
@@ -23,6 +24,7 @@ from kci_api import (
     produced_header,
     unknown_keys,
 )
+from kci_api.formats import FormatRow, _range_refusal
 
 
 def _authored(name: String, present: Bool, found: Int) -> String:
@@ -44,9 +46,10 @@ def _header(text: String, name: String) -> String:
 def test_golden_table() raises:
     var t = format_table()
     # `kci.stages` went with the `stages` verb
-    assert_equal(len(t), 7)
+    assert_equal(len(t), 8)
     var want = List[String]()
     want.append(String("kci.artifacts AUTHORED 1 1"))
+    want.append(String("kci.cells AUTHORED 1 1"))
     want.append(String("kci.channels AUTHORED 1 1"))
     want.append(String("kci.machine AUTHORED 1 1"))
     want.append(String("kci.artifact_manifest PRODUCED 1 1"))
@@ -104,6 +107,10 @@ def test_produced_header() raises:
         String("r.json: 'schema_version' is not an integer"),
     )
     assert_equal(_header(String('[1]'), String(FORMAT_RESULT)), String("r.json: not a JSON object"))
+    assert_equal(
+        _header(String('{"format":1,"schema_version":1}'), String(FORMAT_RESULT)),
+        String("r.json: 'format' is not a string"),
+    )
     var refused = False
     try:
         check_produced_version(String(FORMAT_CHANNELS), String("x"), String(FORMAT_CHANNELS), 1)
@@ -123,9 +130,29 @@ def test_unknown_keys_are_listed_not_refused() raises:
     assert_equal(u[1], String("also"))
 
 
+def _range(row: FormatRow, found: Int) -> String:
+    try:
+        _range_refusal(row, String("s"), found)
+    except e:
+        return String(e)
+    return String("<ok>")
+
+
+def test_a_row_reading_several_majors_names_the_span() raises:
+    # every row of today's table reads one major; the refusal of a row that
+    # reads 2..4 names the span, the bounds themselves are read
+    var row = FormatRow(String("kci.x"), String(KIND_PRODUCED), 4, 2)
+    assert_equal(_range(row, 2), String("<ok>"))
+    assert_equal(_range(row, 4), String("<ok>"))
+    assert_equal(_range(row, 1), String("s: schema_version 1 is no longer read (this kci reads kci.x major 2..4)"))
+    assert_equal(_range(row, 5), String("s: schema_version 5 needs a newer kci (this kci reads kci.x up to major 4)"))
+
+
 def test_rows_by_name() raises:
     assert_equal(format_row(String(FORMAT_RELEASE_SET)).current_major, 2)
     assert_equal(format_row(String(FORMAT_CHANNELS)).kind, String(KIND_AUTHORED))
+    assert_equal(format_row(String(FORMAT_CELLS)).kind, String(KIND_AUTHORED))
+    assert_equal(format_row(String(FORMAT_CELLS)).current_major, 1)
     assert_equal(format_row(String(FORMAT_RESULT)).kind, String(KIND_PRODUCED))
 
 

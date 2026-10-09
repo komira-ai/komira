@@ -1,4 +1,5 @@
-"""`komira_git_conformance` -- test-only: komira_git against external oracles.
+"""`komira_git_conformance` -- test-only: komira_git's SHA-1 collision
+detection against sha1collisiondetection's C library.
 
 `CSha1dc`, `c_ubc_check` and the `c_dv_*` accessors drive
 sha1collisiondetection's C library (//third_party/sha1collisiondetection),

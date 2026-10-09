@@ -1,0 +1,12 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.1 gives a OR b TRUE for ids 1, 2, 3 (a TRUE) and 4, 7 (b
+# TRUE); id 5 is FALSE and ids 6, 8, 9 are NULL, and §1.2 drops every row
+# that is not TRUE.
+id:int64	a:bool?	b:bool?
+1	true	true
+2	true	false
+3	true	\N
+4	false	true
+7	\N	true

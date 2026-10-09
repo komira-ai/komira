@@ -16,8 +16,11 @@ MONTHLY by day of the month or by ordinal weekday, YEARLY; an interval of 1
 to 999; an end by count or by date), never RRULE text; there are no
 attendees.
 
+`expand` lists an event's occurrences in a window and `series_span` bounds
+them all, on the event's wall clock (see Expansion below).
+
 Not here: whether a named time zone exists (only its shape is checked),
-recurrence expansion, storage, and HTTP.
+turning local times into UTC instants, storage, and HTTP.
 
 ## API
 
@@ -25,8 +28,9 @@ recurrence expansion, storage, and HTTP.
 |---|---|---|
 | `check_calendar`, `check_event`, `check_override` | [validate.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/validate.mojo) | the first rule a value breaks, or None |
 | `check_recurrence` | [recurrence.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/recurrence.mojo) | the recurrence rule's checks, given the event's first day |
+| `expand`, `series_span`, `Occurrence`, `SeriesSpan`, `OPEN_END`, `MAX_WINDOW_OCCURRENCES` | [expand.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/expand.mojo) | the occurrences overlapping a window; the first start to the last end |
 | `Refusal`, `RefusalCode`, `error_response` | [refusal.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/refusal.mojo) | a refusal, its codes, the API error body |
-| `parse_local_date`, `parse_local_datetime`, `LocalDateTime`, `is_time_zone_name`, `MAX_TIME_ZONE_BYTES` | [local_time.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/local_time.mojo) | `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`, the shape of an IANA zone name |
+| `parse_local_date`, `parse_local_datetime`, `LocalDateTime` (`seconds()`), `is_time_zone_name`, `MAX_TIME_ZONE_BYTES` | [local_time.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/local_time.mojo) | `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`, the shape of an IANA zone name |
 | `MAX_*` | [limits.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/limits.mojo) | the bounds: 5 reminders, interval 999, count 10000, 1000 exdates, 366 days, text lengths |
 
 ## Rules
@@ -44,6 +48,55 @@ recurrence expansion, storage, and HTTP.
 | `exdates` | on a recurring event only, at most 1000, each in the event's form (a date when all-day), no repeats | `EXDATES_WITHOUT_RECURRENCE`, `TOO_MANY_EXDATES`, `EXDATE_MALFORMED`, `EXDATE_DUPLICATE` |
 | `reminders` | at most 5, each at most 40320 minutes before, no repeats | `TOO_MANY_REMINDERS`, `REMINDER_OUT_OF_RANGE`, `REMINDER_DUPLICATE` |
 | override | of a recurring event; `originalStart` and `start` in the event's form; cancelled with no replacement, or kept with at least one; `days` for an all-day event, `durationSeconds` for a timed one | `OVERRIDE_WITHOUT_RECURRENCE`, `ORIGINAL_START_MALFORMED`, `OVERRIDE_CANCELLED_WITH_CHANGES`, `OVERRIDE_EMPTY`, and the event codes above |
+
+## Expansion
+
+Times are local seconds: seconds since 1970-01-01T00:00:00 on the event's
+wall clock, with no zone applied (`parse_local_datetime(text).seconds()`). An
+occurrence starts on a day the rule picks, at the event's time of day
+(midnight for an all-day event), and lasts `durationSeconds` or `days` whole
+days. Since the rule is expanded on the wall clock, a weekly 09:00 event is at
+09:00 local on every occurrence; the instant that is depends on the zone.
+
+| rule | the days it picks |
+|---|---|
+| DAILY | every `interval`-th day from the first |
+| WEEKLY | the named `weekdays` (else the first day's weekday) of every `interval`-th Monday-to-Sunday week |
+| MONTHLY `monthDay` | that day of every `interval`-th month; a month without it is skipped (the 31st skips November) |
+| MONTHLY `ordinal` | the `ordinal`-th `ordinalWeekday` of every `interval`-th month; -1 is the last |
+| YEARLY | the first day's month and day every `interval`-th year; 29 February skips common years |
+
+A day before the event's first day is never an occurrence, and the first day
+is one only if the rule picks it (a WEEKLY Monday rule written to start on a
+Wednesday begins the next Monday). `count` counts occurrences before
+`exdates` remove any; `until` is inclusive. Nothing after 9999-12-31 is
+picked. `expand` returns the occurrences that overlap the window (start
+before its end, end after its start), at most 10000 per call.
+`series_span` gives the first start and the last end; a series with neither
+`count` nor `until` ends at `OPEN_END` (`Int64.MAX`), so a stored span is a
+plain range and a window query is `first_start < to AND last_end > from`.
+
+The last Friday of each month, for three months:
+
+```mojo
+from komira_calendar import expand, parse_local_datetime, series_span
+from komira_calendar_proto.calendar import Event
+from komira_proto_codec import decode_json
+from std.testing import assert_equal
+
+var review = decode_json[Event](
+    '{"title":"Review","start":"2026-10-30T15:00:00","timeZone":"America/New_York","durationSeconds":3600,'
+    + '"recurrence":{"freq":"MONTHLY","interval":1,"ordinal":-1,"ordinalWeekday":"FRIDAY","count":3}}'
+)
+var all = expand(
+    review,
+    parse_local_datetime("2026-10-01T00:00:00").seconds(),
+    parse_local_datetime("2027-01-01T00:00:00").seconds(),
+)
+assert_equal(len(all), 3)
+assert_equal(all[1].start, parse_local_datetime("2026-11-27T15:00:00").seconds())
+assert_equal(series_span(review).value().last_end, parse_local_datetime("2026-12-25T16:00:00").seconds())
+```
 
 ## Example
 

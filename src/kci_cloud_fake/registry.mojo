@@ -10,7 +10,8 @@
 #
 #   * registry -> `<id>/registry`: the field `format` (`OCI`, the one format
 #                 of this version), and `out.ADDRESS` = `registry.fake/<id>`
-#                 (the name a client pushes and pulls an image as; how the
+#                 (`<id>` is the author's cloud name when one is written;
+#                 the name a client pushes and pulls an image as; how the
 #                 node behaves, not state: never in a digest; nodes.mojo).
 # =============================================================================
 
@@ -18,6 +19,7 @@ from kci_reconciler import InputRef
 from kci_cloud import FIELD_REGISTRY, LoweredNode, Setting, format_word, registry_format
 from kci_resource_proto.resource import Resource
 
+from kci_cloud_fake.metadata import fake_physical_name
 from kci_cloud_fake.shapes import ProviderShape, ROLE_REGISTRY
 
 
@@ -31,7 +33,8 @@ def lower_registry(r: Resource, shape: ProviderShape) raises -> List[LoweredNode
         raise Error(String("fake: registry \"") + r.id + String("\" has uses lines; validate refuses them"))
     var fields = List[Setting]()
     fields.append(Setting(String("format"), format_word(registry_format(r))))
-    fields.append(Setting(String("out.ADDRESS"), fake_registry_address(r.id)))
+    var base = fake_physical_name(r)
+    fields.append(Setting(String("out.ADDRESS"), fake_registry_address(base if base.byte_length() > 0 else r.id)))
     var out = List[LoweredNode]()
     out.append(
         LoweredNode(

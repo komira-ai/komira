@@ -1,13 +1,11 @@
 load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_git against external oracles. Today that is its SHA-1
-# collision detection (komira_git/sha1dc.mojo, a pure-Mojo port) against
-# sha1collisiondetection's C, the library the port follows, pinned in
-# //third_party/sha1collisiondetection and linked into these tests only
-# (oracle.mojo holds the FFI). Nothing depends on this package.
-#
-# The tests, each run as a build action:
+# Test-only: komira_git's SHA-1 collision detection (komira_git/sha1dc.mojo, a
+# pure-Mojo port) against sha1collisiondetection's C, the library the port
+# follows, pinned in //third_party/sha1collisiondetection and linked into
+# these tests only (oracle.mojo holds the FFI). Nothing depends on this
+# package.
 #   test_dv_table_and_ubc -- the 32 disturbance vectors (fields and all 80
 #     message-difference words) against upstream's sha1_dvs, and the
 #     unavoidable-bit-condition mask against upstream's ubc_check over 2^20
@@ -26,6 +24,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     of DVs recompressed against upstream's mask (all 32 with the filter
 #     off); for every DV below 31, blocks where it is set below a higher
 #     DV, sampled from the blocks meeting DV 27 to 31's bit conditions.
+#
+# komira_git's oracles that need the pinned git (//third_party/git, built for
+# linux-x86_64 only) are their own packages, so this one carries no platform
+# limit: the pack reader in komira_git_pack_conformance, the protocol state
+# machines in komira_git_protocol_conformance.
+
+_TESTS = [
+    "tests/test_digests.mojo",
+    "tests/test_dv_table_and_ubc.mojo",
+    "tests/test_recompression.mojo",
+]
+
 mojo_library(
     name = "komira_git_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -37,11 +47,7 @@ mojo_library(
         "//third_party/sha1collisiondetection:sha1dc",
     ],
     conda = False,
-    test_srcs = [
-        "tests/test_digests.mojo",
-        "tests/test_dv_table_and_ubc.mojo",
-        "tests/test_recompression.mojo",
-    ],
+    test_srcs = _TESTS,
     # The SHAttered PDFs and upstream's reduced-round collision, staged at
     # sha1dc/test/.
     test_data = {
