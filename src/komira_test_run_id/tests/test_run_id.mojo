@@ -53,6 +53,34 @@ def test_refuses_a_zero_clock_and_an_exhausted_source() raises:
     assert_true(refused, "minted with no entropy")
 
 
+def test_a_refusal_names_its_cause_and_draws_nothing() raises:
+    # A negative reading is refused like zero (`<= 0`, not `== 0`), the
+    # message carries the reading, and a refused mint draws no entropy.
+    var behind = FixedWallClock(-5)
+    var e1 = ScriptedEntropy([UInt64(7)])
+    var msg = String("")
+    try:
+        _ = mint_run_id(behind, e1)
+    except e:
+        msg = String(e)
+    assert_equal(msg, "mint_run_id: the wall clock read -5; refusing to mint")
+    assert_equal(e1.drawn, 0)
+    # The first positive second is accepted: the boundary is 0, not 1.
+    var first = FixedWallClock(1)
+    var b = mint_run_id(first, e1)
+    assert_equal(b.value, "1-0000000000000007")
+    assert_equal(b.created_unix, 1)
+    # An exhausted source's error reaches the caller unchanged.
+    var clock = FixedWallClock(1790000000)
+    msg = String("")
+    try:
+        _ = mint_run_id(clock, e1)
+    except e:
+        msg = String(e)
+    assert_equal(msg, "ScriptedEntropy: script exhausted after 1 values")
+    assert_equal(e1.drawn, 1)
+
+
 def test_a_thousand_real_mints_are_distinct() raises:
     var clock = SystemClock()
     var entropy = UrandomEntropy()
@@ -68,5 +96,6 @@ def test_a_thousand_real_mints_are_distinct() raises:
 def main() raises:
     test_format_from_scripted_sources()
     test_refuses_a_zero_clock_and_an_exhausted_source()
+    test_a_refusal_names_its_cause_and_draws_nothing()
     test_a_thousand_real_mints_are_distinct()
     print("test_run_id: OK")

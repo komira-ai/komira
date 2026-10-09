@@ -155,8 +155,8 @@ older than the oldest acknowledged have, and this walk does not, so it can
 say `ready` a round sooner.
 
 The requests the clients write and the responses the servers write are
-byte for byte git's: `src/tests/conformance/komira_git_conformance`
-compares them with transcripts of the pinned git on both ends.
+byte for byte git's:
+`src/tests/conformance/komira_git_protocol_conformance` compares them with transcripts of the pinned git on both ends.
 
 ## What the parsers accept
 

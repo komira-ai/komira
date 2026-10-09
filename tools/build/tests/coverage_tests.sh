@@ -25,8 +25,18 @@
 #      actions building one test give the same bytes (:reproducible); a
 #      no-op relocator fails the build
 #      with the wrapper's exit 4 (tests//negative/coverage:noop[coverage]);
-#      and a value other than true or false fails at load.
+#      and a value other than true or false fails at load. Off
+#      linux-x86_64 coverage is a no-op (never measured there): on
+#      darwin-arm64 with the switch, libraries and shared libraries, from
+#      the switch or forced by a tests-cell fixture, have no coverage
+#      attribute and the actions they have with it off
+#      (tools/build/tests/functional/coverage_platforms.sh).
 
+if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/coverage_platforms.sh" "$LOG" > "$LOG/coverage_platforms.log" 2>&1; then
+    pass "$(grep -o 'PASS  coverage platforms: .*' "$LOG/coverage_platforms.log" | cut -c 7-)"
+else
+    fail "$(grep -o 'FAIL  coverage platforms: .*' "$LOG/coverage_platforms.log" | cut -c 7- | cut -c 1-400) (see $LOG/coverage_platforms.log)"
+fi
 if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/coverage_keys.sh" "$LOG" > "$LOG/coverage_keys.log" 2>&1; then
     pass "$(grep -o 'PASS  coverage keys: .*' "$LOG/coverage_keys.log" | cut -c 7-)"
 else

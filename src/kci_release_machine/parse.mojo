@@ -4,6 +4,7 @@
 # =============================================================================
 #
 #   schema_version: 1
+#   name: "shop"
 #   stage {
 #     name: "build"
 #     farm_connected: true
@@ -50,23 +51,31 @@
 # that check alone, so a caller can tell a version refusal from any other.
 #
 # The field names are the contract (`machine_field_names`, pinned by a
-# welded golden test). Top level: `schema_version`, `stage`. A stage: `name`,
+# welded golden test). Top level: `schema_version`, `name` (the machine's
+# name: the step-name grammar, at most once, before the first `stage`; it is
+# required only when a step writes into a cell, deploy.mojo's rule), `stage`.
+# A stage: `name`,
 # `after`, `environment` (default: the stage's name; none on a PULL_REQUEST
 # stage), `farm_connected` (`true` or `false`, default false), `trigger`
 # (`PUSH` or `PULL_REQUEST`, default PUSH; graph.mojo's header),
 # `break_glass` (`true` or `false`, default false: graph.mojo's header),
 # `break_glass_environment` (graph.mojo's header), each
 # at most once, and `step` (repeated). A step: `name`, `kind`, `platform`, `artifacts`, `channels`,
-# `channel`, each at most once, and `validation` (a block, repeated). A
+# `channel`, `cells`, `cell`, `resources`, each at most once, and
+# `definitions` and `validation` (a block), each repeated. A
 # validation: `name`, `kind`, `image`, `compiler_channel`, `program`,
-# `wait_for_index_seconds` (an integer), each at most once, and `install` and
-# `extra_channel` (each repeated). A `:` before a `{` is optional; a scalar may
-# be quoted or bare.
+# `smoke`, `wait_for_index_seconds` and `timeout_seconds` (each a whole
+# number of seconds), and `target` (a block of `resource` and `output`, each
+# at most once), each at most once, and `install`, `extra_channel`, `args`
+# and `expect` (each repeated). `secret_env` is refused by name: no validation passes a secret
+# in its environment. A `:` before a `{` is optional; a scalar may be quoted
+# or bare.
 #
 # Every refusal starts `<source>: line N:`. The parser refuses an unknown
-# field at any level, a scalar set twice, and a block never closed; every
-# other rule is graph.mojo's `validate_release_machine`, run before the graph is
-# returned.
+# field at any level, a scalar set twice, a block never closed, and a
+# machine `name` set twice, after a `stage` or outside the grammar; every
+# other rule is graph.mojo's `validate_release_machine`, then deploy.mojo's
+# `validate_cell_steps`, run before the graph is returned.
 #
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
@@ -82,9 +91,10 @@ from komira_textproto import (
     lex,
 )
 
-from kci_api import FORMAT_MACHINE, authored_schema_version, skip_schema_version
+from kci_api import FORMAT_MACHINE, authored_schema_version, is_step_name, skip_schema_version
 
-from .graph import ReleaseMachine, Stage, StageStep, StageValidation, validate_release_machine
+from .deploy import validate_cell_steps
+from .graph import NAME_MAX_BYTES, ReleaseMachine, Stage, StageStep, StageValidation, validate_release_machine
 
 
 def machine_field_names() -> List[String]:
@@ -93,6 +103,7 @@ def machine_field_names() -> List[String]:
     rename is a visible edit of that test."""
     var out = List[String]()
     out.append(String("schema_version"))
+    out.append(String("name"))
     out.append(String("stage"))
     out.append(String("stage.name"))
     out.append(String("stage.after"))
@@ -108,6 +119,10 @@ def machine_field_names() -> List[String]:
     out.append(String("step.artifacts"))
     out.append(String("step.channels"))
     out.append(String("step.channel"))
+    out.append(String("step.cells"))
+    out.append(String("step.cell"))
+    out.append(String("step.resources"))
+    out.append(String("step.definitions"))
     out.append(String("step.validation"))
     out.append(String("validation.name"))
     out.append(String("validation.kind"))
@@ -118,6 +133,12 @@ def machine_field_names() -> List[String]:
     out.append(String("validation.program"))
     out.append(String("validation.smoke"))
     out.append(String("validation.wait_for_index_seconds"))
+    out.append(String("validation.args"))
+    out.append(String("validation.target"))
+    out.append(String("validation.timeout_seconds"))
+    out.append(String("validation.expect"))
+    out.append(String("target.resource"))
+    out.append(String("target.output"))
     return out^
 
 
@@ -167,6 +188,36 @@ def _twice(source: String, line: Int, field: String, where: String) raises:
     raise Error(_at(source, line) + String("field '") + field + String("' is set twice in ") + where)
 
 
+def _parse_target(mut c: TokenCursor, source: String, where: String, open_line: Int, mut v: StageValidation) raises:
+    """A probe's `target { resource, output }`, each at most once (the
+    rules are probe.mojo's)."""
+    var seen_resource = False
+    var seen_output = False
+    var of = String("the target of ") + where
+    while True:
+        if c.at_end():
+            raise Error(_at(source, open_line) + of + String(" is not closed (expected '}')"))
+        if c.is_kind(TOKEN_RBRACE):
+            _ = c.expect(TOKEN_RBRACE)
+            return
+        var f = c.expect(TOKEN_WORD)
+        if f.text == "resource":
+            if seen_resource:
+                _twice(source, f.line, f.text, of)
+            v.target_resource = _scalar(c, f.text, source)
+            seen_resource = True
+        elif f.text == "output":
+            if seen_output:
+                _twice(source, f.line, f.text, of)
+            v.target_output = _scalar(c, f.text, source)
+            seen_output = True
+        else:
+            raise Error(
+                _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + of
+                + String(" (expected resource, output)")
+            )
+
+
 def _parse_validation(mut c: TokenCursor, source: String, step_where: String, open_line: Int) raises -> StageValidation:
     var v = StageValidation(open_line)
     var seen = List[String]()
@@ -182,10 +233,13 @@ def _parse_validation(mut c: TokenCursor, source: String, step_where: String, op
             _ = c.expect(TOKEN_RBRACE)
             break
         var f = c.expect(TOKEN_WORD)
-        if f.text != "extra_channel" and f.text != "install":
-            for i in range(len(seen)):
-                if seen[i] == f.text:
-                    _twice(source, f.line, f.text, where)
+        var repeated = f.text == "extra_channel" or f.text == "install" or f.text == "args" or f.text == "expect"
+        var again = False
+        for i in range(len(seen)):
+            if seen[i] == f.text:
+                again = True
+        if again and not repeated:
+            _twice(source, f.line, f.text, where)
         if f.text == "name":
             v.name = _scalar(c, f.text, source)
         elif f.text == "kind":
@@ -204,13 +258,29 @@ def _parse_validation(mut c: TokenCursor, source: String, step_where: String, op
             v.smoke = _scalar(c, f.text, source)
         elif f.text == "wait_for_index_seconds":
             v.wait_for_index_seconds = _seconds(c, f.text, source, where)
+        elif f.text == "args":
+            v.args.append(_scalar(c, f.text, source))
+        elif f.text == "target":
+            var line = _open_block(c)
+            _parse_target(c, source, where, line, v)
+        elif f.text == "timeout_seconds":
+            v.timeout_seconds = _seconds(c, f.text, source, where)
+        elif f.text == "expect":
+            v.expects.append(_scalar(c, f.text, source))
+        elif f.text == "secret_env":
+            raise Error(
+                _at(source, f.line) + where + String(" has secret_env: a validation passes no secret in its")
+                + String(" environment (kci never holds a secret's value; configuration goes in args)")
+            )
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
                 + String(" (expected name, kind, image, install, compiler_channel, extra_channel, program,")
-                + String(" smoke, wait_for_index_seconds)")
+                + String(" smoke, wait_for_index_seconds, args, target, timeout_seconds, expect)")
             )
-        seen.append(f.text.copy())
+        if not again:
+            seen.append(f.text.copy())
+    v.written = seen^
     return v^
 
 
@@ -225,7 +295,7 @@ def _parse_step(mut c: TokenCursor, source: String, stage_name: String, open_lin
             _ = c.expect(TOKEN_RBRACE)
             break
         var f = c.expect(TOKEN_WORD)
-        if f.text != "validation":
+        if f.text != "validation" and f.text != "definitions":
             for i in range(len(seen)):
                 if seen[i] == f.text:
                     _twice(source, f.line, f.text, where)
@@ -241,6 +311,14 @@ def _parse_step(mut c: TokenCursor, source: String, stage_name: String, open_lin
             s.channels = _scalar(c, f.text, source)
         elif f.text == "channel":
             s.channel = _scalar(c, f.text, source)
+        elif f.text == "cells":
+            s.cells = _scalar(c, f.text, source)
+        elif f.text == "cell":
+            s.cell = _scalar(c, f.text, source)
+        elif f.text == "resources":
+            s.resources = _scalar(c, f.text, source)
+        elif f.text == "definitions":
+            s.definitions.append(_scalar(c, f.text, source))
         elif f.text == "validation":
             var named = where
             if s.name.byte_length() > 0:
@@ -250,7 +328,8 @@ def _parse_step(mut c: TokenCursor, source: String, stage_name: String, open_lin
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
-                + String(" (expected name, kind, platform, artifacts, channels, channel, validation)")
+                + String(" (expected name, kind, platform, artifacts, channels, channel, cells, cell, resources,")
+                + String(" definitions, validation)")
             )
         seen.append(f.text.copy())
     return s^
@@ -343,6 +422,30 @@ def _parse_stage(mut c: TokenCursor, source: String, ordinal: Int, open_line: In
     return st^
 
 
+def _machine_name(mut c: TokenCursor, source: String, line: Int, mut g: ReleaseMachine) raises:
+    """The top-level `name` (file header): once, before the first stage, in
+    the step-name grammar."""
+    if len(g.stages) > 0:
+        raise Error(
+            _at(source, line) + String("the machine's name comes after a stage; it is written before the first")
+            + String(" stage")
+        )
+    if g.name_line > 0:
+        raise Error(
+            _at(source, line) + String("the machine's name is set twice (first on line ") + String(g.name_line)
+            + String(")")
+        )
+    var name = _scalar(c, String("name"), source)
+    if not is_step_name(name):
+        raise Error(
+            _at(source, line) + String("the machine's name '") + name
+            + String("' is not [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
+            + String(" bytes, not ending in '-' (it is written verbatim as a label value)")
+        )
+    g.name = name^
+    g.name_line = line
+
+
 def machine_schema_version(text: String, source: String) raises -> Int:
     """The checked major of a machine file, and nothing else (file
     header)."""
@@ -362,12 +465,16 @@ def parse_machine_file(text: String, source: String) raises -> ReleaseMachine:
         if f.text == "schema_version":
             skip_schema_version(c)
             continue
+        if f.text == "name":
+            _machine_name(c, source, f.line, g)
+            continue
         if f.text != "stage":
             raise Error(
                 _at(source, f.line) + String("unknown top-level field '") + f.text
-                + String("' (expected schema_version, stage)")
+                + String("' (expected schema_version, name, stage)")
             )
         var line = _open_block(c)
         g.stages.append(_parse_stage(c, source, len(g.stages) + 1, line))
     validate_release_machine(g, source)
+    validate_cell_steps(g, source)
     return g^

@@ -15,8 +15,13 @@
 #        b. poll the child for exit; if it exited, go to 4;
 #        c. a RUNNING heartbeat; if the reply asks to cancel, terminate the
 #           child (SIGTERM, a 5 s grace, SIGKILL) and go to 4.
-#   4. classify the exit (exit 0 -> COMPLETED; a cancel -> CANCELLED;
-#      anything else -> FAILED with a FailureReport), send the terminal
+#      With --max-runtime-secs, every pass of the loop (once a second) also
+#      checks the time since the spawn, on the monotonic clock; past the
+#      limit the child is terminated the same way as on a cancel, and the
+#      job is FAILED with a message naming the limit.
+#   4. classify the exit (exit 0 -> COMPLETED; a cancel -> CANCELLED; past
+#      the maximum runtime -> FAILED with the timeout message; anything
+#      else -> FAILED with a FailureReport), send the terminal
 #      heartbeat, and with a log store write logs.txt (and crash_report.json
 #      on FAILED).
 #
@@ -36,6 +41,7 @@
 
 from std.ffi import external_call
 
+from komira_clock import now_ns
 from komira_supervisor.supervisor import (
     Supervisor,
     ChildSpec,
@@ -145,6 +151,9 @@ struct JobSupervisor[
     var spawned: Bool
     var child_exited: Bool
     var exit_info: ExitInfo
+    # The monotonic instant (komira_clock.now_ns) of the spawn; the maximum
+    # runtime counts from here.
+    var spawned_at_ns: UInt64
 
     # Non-blocking reads arrive in chunks that do not align on lines, so each
     # stream keeps a partial-line accumulator. The stdout byte budget bounds
@@ -182,6 +191,7 @@ struct JobSupervisor[
         self.spawned = False
         self.child_exited = False
         self.exit_info = ExitInfo(Int32(-1), Int32(-1), Int32(-1))
+        self.spawned_at_ns = UInt64(0)
         self.stdout_partial = String("")
         self.stderr_partial = String("")
         self.stdout_bytes = 0
@@ -233,6 +243,7 @@ struct JobSupervisor[
                 + String(")")
             )
         self.spawned = True
+        self.spawned_at_ns = now_ns()
         # Non-blocking capture pipes, so every loop iteration can drain what
         # is ready without parking the loop. Without this a chatty child fills
         # the ~64 KiB pipe buffer, blocks on write() and never exits.
@@ -284,6 +295,39 @@ struct JobSupervisor[
         self.exit_info = self.supervisor.terminate(grace_ms)
         self.child_exited = True
         self.state.phase = JobSupervisorPhase.cancelled()
+
+    # ---- step: enforce the maximum runtime ----
+
+    def enforce_max_runtime(mut self, now: UInt64, grace_ms: Int) -> Bool:
+        """Stop the job if it has run `max_runtime_secs` or longer at the
+        monotonic instant `now` (komira_clock.now_ns; a parameter so a test
+        can step past the limit without waiting). Past the limit: SIGTERM ->
+        `grace_ms` -> SIGKILL, as on a cancel, then FAILED with a message
+        naming the limit and the FailureReport of the stopped child. Returns
+        True iff it stopped the job. A no-op with no limit, before the spawn
+        and after the child exited."""
+        var limit = self.config.max_runtime_secs
+        if limit <= 0 or not self.spawned or self.child_exited:
+            return False
+        if now < self.spawned_at_ns:
+            return False
+        var ran_ns = now - self.spawned_at_ns
+        if ran_ns < UInt64(limit) * UInt64(1_000_000_000):
+            return False
+        # What is ready now is kept; no blocking drain after the stop, as on
+        # a cancel (a process the job left behind may hold the pipes open).
+        self._incremental_drain()
+        self.exit_info = self.supervisor.terminate(grace_ms)
+        self.child_exited = True
+        self._flush_stream_to_eof()
+        self.state.timed_out = True
+        self.state.message = Optional[String](
+            String("max runtime of ")
+            + String(limit)
+            + String(" s exceeded; the job was stopped")
+        )
+        self._record_failure()
+        return True
 
     # ---- step: incremental drain + poll the child for exit ----
 
@@ -436,13 +480,19 @@ struct JobSupervisor[
         if self.state.phase == JobSupervisorPhase.cancelled():
             # act_on_cancel already finalized the phase.
             return
+        if self.state.timed_out:
+            # enforce_max_runtime already finalized the phase and report.
+            return
         if (
             self.exit_info.exit_code == Int32(0)
             and self.exit_info.signal == Int32(-1)
         ):
             self.state.phase = JobSupervisorPhase.completed()
             return
-        # Failed — build the forensic report.
+        self._record_failure()
+
+    def _record_failure(mut self):
+        """Phase FAILED, with the forensic report of the reaped child."""
         self.state.phase = JobSupervisorPhase.failed()
         var exit_code = Optional[Int32]()
         if self.exit_info.exit_code >= Int32(0):
@@ -533,6 +583,8 @@ def run_job_supervisor[
         job_supervisor.poll_and_drain()
         if job_supervisor.child_exited:
             break
+        if job_supervisor.enforce_max_runtime(now_ns(), GRACE_MS):
+            break
         var outcome = job_supervisor.do_heartbeat()
         if outcome.ok and outcome.cancel:
             job_supervisor.act_on_cancel(GRACE_MS)
@@ -545,6 +597,8 @@ def run_job_supervisor[
             # noticed promptly.
             job_supervisor.poll_and_drain()
             if job_supervisor.child_exited:
+                break
+            if job_supervisor.enforce_max_runtime(now_ns(), GRACE_MS):
                 break
             job_supervisor._tick_stream_timer()
         if job_supervisor.child_exited:

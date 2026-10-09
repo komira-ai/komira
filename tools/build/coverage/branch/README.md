@@ -34,7 +34,7 @@ and they are built when asked for:
 | target | what |
 |---|---|
 | `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, [`cov_branch_run.sh`](cov_branch_run.sh) with `llvm/` (`llvm-profdata`) and `raw_version`, the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
-| `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_source.zig`](cov_branch_source.zig), [`cov_branch_ir.zig`](cov_branch_ir.zig) and [`cov_branch_records.zig`](cov_branch_records.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by `:cov_branch_classify_cases` ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh) over [`fixtures/`](fixtures)), which run as a build action: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
+| `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_andor.zig`](cov_branch_andor.zig), [`cov_branch_source.zig`](cov_branch_source.zig), [`cov_branch_ir.zig`](cov_branch_ir.zig) and [`cov_branch_records.zig`](cov_branch_records.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by `:cov_branch_classify_cases` ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh) over [`fixtures/`](fixtures)), which run as a build action: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
 | `:cov_branch_link.sh`, `:cov_branch_run.sh`, `:cov_branch_annotate.sh` | the scripts, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
 
 Per `test_srcs` entry that is a source file, five actions, each a
@@ -180,10 +180,11 @@ that wrote it (`[coverage][pgo_bin][<test>]`).
 ## cov_branch_classify
 
 Reads `cov/branch/<test>.ll` and writes `cov/branch/<test>.info`
-([`cov_branch_classify.zig`](cov_branch_classify.zig), the branch walk and
-the `and`/`or` rules, importing [`cov_branch_source.zig`](cov_branch_source.zig),
-the source side, [`cov_branch_ir.zig`](cov_branch_ir.zig), the metadata,
-one function's index and the instruction shapes, and
+([`cov_branch_classify.zig`](cov_branch_classify.zig), the branch walk,
+importing [`cov_branch_andor.zig`](cov_branch_andor.zig), the `and`/`or`
+rules, [`cov_branch_source.zig`](cov_branch_source.zig), the source side,
+[`cov_branch_ir.zig`](cov_branch_ir.zig), the metadata, one function's
+index and the instruction shapes, and
 [`cov_branch_records.zig`](cov_branch_records.zig), the output).
 
 **Files.** Each branch is attributed to its innermost `!dbg` location (an
@@ -323,21 +324,53 @@ value with the same weights node at the same location (a loop's two at
 its head; `budget.mojo` 63:9's br and the select of its return value), is
 one record: the br is kept.
 
-Every bool `and`/`or` must have its right operand counted, or the action
-fails naming it: `rhs` is the right operand's outcomes when it decides,
-derived from the left operand's counts (the and/or's own select or br) and
-the whole condition's (the first branch or select of a source decision
-that tests the result: the select's result directly, the short-circuit
-form's phi at the token, either through `xor ..., true`, its arms swapped,
-or as the condition of the next select of a chain). For `or`, the whole's
-true count less the left's, and the whole's false count; for `and`, the
-whole's true count, and the left's true count less it. An `and`/`or` that
-is itself the right operand of a short-circuit one (`not st.break_glass
-and not (has_main and has_push)`, `auto_promotion.mojo` 273) and that no
-branch tests takes the outer one's derived right operand as its whole
-condition, swapped through each `xor`: the inner value is computed exactly
-when the outer right operand is. A select LLVM gave no weights never ran;
-with a whole of zero counts, neither did its right operand.
+**And, or.** A bool `and`/`or` is a decision where the user wrote it: its left
+operand's branch or select at its token, two arms, the right operand
+skipped or evaluated (for `or`, arm 0 is the left operand true, the right
+operand skipped; for `and`, arm 0 is the left operand true, the right
+operand evaluated). That holds wherever the result goes: tested by an `if`
+or `while`, returned (`return a or b`), stored (`var r = a and b`) or
+passed on (`f(a or b)`); a test must take both arms, which line coverage
+cannot see (test 46's `covandor`: every line run, one arm of `return a or
+b` never taken).
+
+When a source decision tests the result, the right operand's own outcomes
+are counted as well: `rhs`, derived from the left operand's counts (the
+and/or's own select or br) and the whole condition's (the first branch or
+select of a source decision that tests the result: the select's result
+directly, the short-circuit form's phi at the token, either through `xor
+..., true`, its arms swapped, through a phi forwarding that one value (one
+incoming value, or every incoming value that one), or as the condition of
+the next select of a chain). For `or`, the whole's true count less the
+left's, and the whole's false count; for `and`, the whole's true count,
+and the left's true count less it. An `and`/`or` that is itself the right
+operand of a short-circuit one (`not st.break_glass and not (has_main and
+has_push)`, `auto_promotion.mojo` 273) and that no branch tests takes the
+outer one's derived right operand as its whole condition, swapped through
+each `xor`: the inner value is computed exactly when the outer right
+operand is. A select LLVM gave no weights never ran; with a whole of zero
+counts, neither did its right operand.
+
+A test is the result's only when it ran as many times as the left operand,
+and its counts can be the whole's (an `or` true at least as often as its
+left operand, an `and` at most as often): a test of the value that runs
+another number of times reads it on some paths only, or elsewhere (`var
+lower = c >= 97 and c <= 122`, then `lower or ...` only when `i != 0`:
+`kci_api`'s `run_identity.mojo` 98, test 47's `values.mojo` 80:29), and
+one that never ran while the left operand did (or the reverse) is not its
+test either. Matching counts are necessary, not sufficient: a test whose
+counts happen to match is read as the result's (`r = a or g(b)`, then a
+loop testing `r` as many times as the `or` ran, on other values than each
+run's), and the derived right operand is then wrong. A known limit; a
+structural check (the test in the block the result is computed in, or
+one only it reaches) would close it. Such a test gives no `rhs` (a later test may), and the and/or
+is then its two arms alone, as one whose result is returned. Which tests
+count depends on the counts, so one test's run of a function may give an
+`rhs` and another's not: covcheck sums what each gives, and an arm a test
+did not give is never a pass. A result merged with other values in a phi
+(Mojo folds `if a and b: x = True` into `x = phi [a and b, ...]`,
+`regexp_nfa.mojo` 1879) and tested after the merge is not followed: the
+and/or alone.
 
 The phi of a short-circuit form is at the and/or's token and joins one
 value arriving under the `br`'s target for the deciding left value (its
@@ -357,15 +390,22 @@ fall between (`rules.mojo` 556:26, 669:26, `auto_promotion.mojo` 280:25).
 A constant under the other target is the phi of another expression (`not a
 or b`) and is refused, and so is one arriving straight from the `br`'s own
 block (a correct shape no IR has shown yet: refused rather than read
-without evidence). Several phis may join the targets: a raising right
-operand's error flag beside the result (`expression_executor.mojo`
-4830:15; for an `and` it has the result's shape). Each phi of the shape is
-a candidate, and the result is the one a source decision's branch tests: a
-call's error check testing the flag is no such test. A phi joining the
-targets in another shape is refused only when no candidate is. A result
-that is returned, stored or passed on (`return a or b`, test 47's
-`branchretor`) is never tested, so when the right operand decides cannot
-be counted. A value `and`/`or` (not `i1`) has no right operand that
+without evidence). A short-circuit br with no such phi at its token is
+refused, tested or not: the phi is the evidence that the br is the
+and/or's left operand (`runtime.mojo` 816:27, below). Several phis may join
+the targets: a raising right operand's error flag beside the result
+(`expression_executor.mojo` 4830:15; test 47's `values.mojo` 52:18, `return
+a > 0 and strict(b)`). For an `and` the flag has the result's shape, and
+each phi of that shape is a candidate: the result is the one a source
+decision's branch tests (a call's error check testing the flag is no such
+test, nor is a `try` decision). For an `or` the flag is `false` under the
+deciding target and field 0 of the `{ i1, ... }` the right operand's call
+returns under the other, which is no result. Any other `i1` phi at the
+token (but a forward of one value), joining the targets in another shape
+or not joining them, refuses an and/or whose result no test reads: which
+phi its result is cannot be told, so it is not read as untested (a test of
+a candidate reads it as before, and such a phi is refused only when no
+candidate is). A value `and`/`or` (not `i1`) has no right operand that
 decides. Since an `elif` carries its `if`'s location, its records name the
 `if`'s line.
 
@@ -375,7 +415,7 @@ Known shapes, with what each gives:
   (`ret i1`, seen in a draft of `shapes.mojo`), so the `if` has no branch
   and no record, as the same function written `return c` would have none.
   Accepted. An `and`/`or` in such a condition is then never tested, and is
-  refused as above.
+  its own two arms (above).
 - `<n>/<N>` numbers the decisions of one kind at one location in IR order.
   It cannot tell an `elif` (Mojo gives it the `if`'s location) from a second
   copy of one decision the optimizer made inside one function (loop
@@ -389,23 +429,27 @@ Known shapes, with what each gives:
   above reads only the tested instruction's location there): a false "arm
   not covered" at worst, never a dropped decision.
 
-Refusals that stay, with the sweep's counts after these rules (locations of
-51 libraries): a right operand whose and/or result is returned, stored or
-passed on (209, among them `expr_interpreter.mojo` 368:51, whose reload
-also follows String destructor code); a left operand that ran another
-number of times than the test of the result (22: the value is tested where
-it runs another number of times, `run_identity.mojo` 98); a left operand
-that ran when the test never did, or the reverse (2); copies holding
-different numbers of decisions at a location (12, a `comptime for`'s
-unrolled calls sharing one `inlinedAt`: `primitive_array.mojo` 386:9 in
-`test_batch_view_u3_extensions`, 4 and 8 per copy); copies computing a
-condition in different headers (1, above); a short-circuit and/or with no
-result phi (4: an `if` folded away when both arms return alike,
-`runtime.mojo` 816:27; a `debug_assert` condition, `hyperloglog.mojo`
-285:13; a non-`Bool` `and` whose result goes through memory,
-`pplan_wire_equal.mojo` 189:21); zero branches parsed in a file with code
-on a decision line (`komira_async`'s `wake_primitives.mojo` 236, not
-explained yet).
+Refusals that stay, from a census of the 98 libraries that refused before
+the and/or rule (messages, at most 40 a test; locations; libraries): copies
+holding different numbers of decisions at a location (231, 19, 9, among
+them `regexp_nfa.mojo` 94:9; a `comptime for`'s unrolled calls sharing one `inlinedAt`, `primitive_array.mojo` 386:9
+in `test_batch_view_u3_extensions`, 4 and 8 per copy); a br at a call in a
+`try:` body on something else than the call's flag (179, 32, 5, among them
+`close_and_remove(`); a short-circuit and/or with no result phi (23, 4, 4: an
+`if` folded away when both arms return alike, `runtime.mojo` 816:27; a
+`debug_assert` condition, `hyperloglog.mojo` 285:13; a non-`Bool` `and`
+whose result goes through memory, `pplan_wire_equal.mojo` 189:21); a select
+at a call on something else than a raising call's flag (20, 6, 2); a phi at
+an and/or that is no short-circuit one's (14, 8, 4: a reload of the left
+operand after String destructor code, `expr_interpreter.mojo` 368:51,
+`supervisor_runner.mojo` 111:28); copies computing a condition in different
+headers (8, 2, 2, above); zero branches parsed in a file with code on a
+decision line (6, 1, 1: `komira_async`'s `wake_primitives.mojo` 236, not
+explained yet). 23 of the 98 still refuse; 69 classify every test, and 5
+more every test whose run and annotation pass (a sixth,
+`komira_objectstore_s3`, has an annotation the census did not see finish
+and refused no test it saw). No and/or was refused for an odd phi at its
+token.
 
 Every measured file with code on a line holding a decision word (`if`,
 `elif`, `while`, `for`, `and`, `or`, outside strings and comments) must
@@ -561,15 +605,17 @@ LLVM pieces are unpacked and checked once, by `toolchains/llvm_branch`.
 [Test 47](../../tests/coverage_runs.md#test-47-branch-coverage-runs) of
 the tests cell: a fixture library whose test takes some arms of an
 `if`/`elif`/`or`/`and` function and of a `while`, a `range(` loop, a
-ternary, an `or` chain, a plain `@always_inline` helper and raising calls
-in `try:` bodies (some never raising), whose profile must hold that
+ternary, an `or` chain, a plain `@always_inline` helper, raising calls
+in `try:` bodies (some never raising) and `and`/`or`s whose result is
+returned, stored or passed on, whose profile must hold that
 function's counters, and whose branch records must be their golden file;
 test 46's `covtry`, whose gate is red on a `try` decision's raise arm alone
-(and `covtry_both`, green); the link line check; a test that the run gives no `LC_ALL`; a
+(and `covtry_both`, green), and `covandor`, red on the arm of `return a or
+b` that skips its right operand (and `covandor_both`, green); the link line check; a test that the run gives no `LC_ALL`; a
 library with a C library in its closure; one whose test needs a `test_deps`
 package with a C library; and the planted defects that must go red, among
 them an annotation whose profile does not fit the bitcode or lacks a
-function, a bitcode holding branch weights before the profile, a `nodebug`
-helper's decision at its call, and an `or` whose result is returned. The
+function, a bitcode holding branch weights before the profile, and a
+`nodebug` helper's decision at its call. The
 classifier's cases ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh))
 gate every build that uses it; each names the mutant it kills.

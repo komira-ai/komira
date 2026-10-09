@@ -33,6 +33,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   property.
 # - test_real_launch_series: the advisory CUSUM arm measured on six real
 #   order-preserving known-zero series.
+# - test_names_and_refusals: every decline/reject word, the constructor
+#   refusals on both sides of each boundary, the empty-input answers.
+# - test_downward_and_combined_arms: downward bound and chart, several arms
+#   named in one detail, an UNCALIBRATED series in the sweep census.
 mojo_library(
     name = "komira_anomaly",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -40,8 +44,10 @@ mojo_library(
         "tests/test_bounds.mojo",
         "tests/test_cusum.mojo",
         "tests/test_detector_states.mojo",
+        "tests/test_downward_and_combined_arms.mojo",
         "tests/test_edivisive.mojo",
         "tests/test_known_zero_corpus.mojo",
+        "tests/test_names_and_refusals.mojo",
         "tests/test_online_api.mojo",
         "tests/test_real_launch_series.mojo",
         "tests/test_series_source_seam.mojo",

@@ -69,6 +69,10 @@ interface. This package names no cloud:
                        label of an object created in a scope with a
                        validation run id (no kci verb sets one yet);
                        `create_labels` is every label a create writes.
+  * metadata.mojo    — the rules of every resource's metadata (`labels`,
+                       `physical_name`, `adopt`): their graph findings, the
+                       label fields kci lowers, the adopted primary nodes,
+                       and the refusal of a changed cloud name.
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
                        `resolve` (with a typo suggestion), and the rule that
                        every cloud declares every catalog type.
@@ -319,5 +323,22 @@ from kci_cloud.deploy import (
     apply_resources,
     destroy_resources,
     group_plan,
+    with_adopted,
+)
+from kci_cloud.metadata import (
+    KCI_LABELS_MAX,
+    LABEL_FIELD_PREFIX,
+    LABEL_MAX_BYTES,
+    NAME_MAX_BYTES,
+    PHYSICAL_NAME_FIELD,
+    adopted_nodes,
+    label_fields,
+    label_key_problem,
+    label_value_problem,
+    metadata_findings,
+    name_change_findings,
+    physical_name_problem,
+    shared_name_findings,
+    sorted_label_keys,
 )
 from kci_cloud.conformance import ConformanceTarget, run_conformance

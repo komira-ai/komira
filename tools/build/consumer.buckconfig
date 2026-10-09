@@ -56,5 +56,12 @@
 [buck2_re_client]
   max_total_batch_size = 1048576
 
+[komira]
+  # The timeout of buck2's test runner (`buck2 test ... -- --timeout <s>`, 600
+  # by default), as in komira's .buckconfig, which says why: a mojo_test stops
+  # itself 60 s before it. The rules read it from the root cell, so komira's
+  # own setting does not reach a test run from here.
+  test_timeout_s = 600
+
 [project]
   ignore = buck-out, .git
