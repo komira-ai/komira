@@ -155,6 +155,9 @@ conda_release_set_check(
         ":release_order_passes_another_version_or_build",
         ":release_order_passes_a_longer_name",
         ":release_order_exempts_komira_native",
+        ":release_order_refuses_an_undeclared_requirement",
+        ":release_order_refuses_an_undeclared_komira_native",
+        ":release_order_passes_an_external_requirement",
     ],
 )
 
@@ -191,13 +194,14 @@ release_order_test(
     metadata_files = ["release_order/requires_b_other_pin.json", "release_order/leaf.json"],
 )
 
-# a requires bb, whose name extends b's: not a requirement on b.
+# a requires bb, listed before it, whose name extends b's, listed after it:
+# not a requirement on b.
 release_order_test(
     name = "release_order_passes_a_longer_name",
     version = "1.0.0",
     build = "hb_1",
-    members = ["a", "b"],
-    metadata_files = ["release_order/requires_bb.json", "release_order/leaf.json"],
+    members = ["bb", "a", "b"],
+    metadata_files = ["release_order/leaf.json", "release_order/requires_bb.json", "release_order/leaf.json"],
 )
 
 # a requires komira_native, listed after it: the one exemption.
@@ -207,6 +211,38 @@ release_order_test(
     build = "hb_1",
     members = ["a", "komira_native"],
     metadata_files = ["release_order/requires_komira_native.json", "release_order/leaf.json"],
+)
+
+# a requires b at the set's version and build string, and the set does not
+# list b: a komira package left out of the release set is refused, by name.
+release_order_test(
+    name = "release_order_refuses_an_undeclared_requirement",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a"],
+    metadata_files = ["release_order/requires_b.json"],
+    refuses = "member a requires b, a komira package release_set does not list",
+)
+
+# The same for komira_native: exempt from the order, not from being listed.
+release_order_test(
+    name = "release_order_refuses_an_undeclared_komira_native",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a"],
+    metadata_files = ["release_order/requires_komira_native.json"],
+    refuses = "member a requires komira_native, a komira package release_set does not list",
+)
+
+# a's other requirements (the platform guard, the compiler pin, and packages
+# at another build string or with no exact pin) are not komira packages of
+# this set: allowed though no member is listed for them.
+release_order_test(
+    name = "release_order_passes_an_external_requirement",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a"],
+    metadata_files = ["release_order/requires_external.json"],
 )
 
 # The release set file: kci_artifact's welded test holds it equal to

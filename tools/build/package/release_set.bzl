@@ -45,13 +45,20 @@ build actions:
       - the metapackage's metadata.json requires each member by name at that
         version and build string (conda-check checks the same requirements,
         but reports a missing one as a count, not by name);
-  * a release order check: no member's metadata.json `depends` holds
-    `"<name> ==<version> TEST_BUILD"` for a member `release_set` lists after
-    it (a requirement at another version or build string is not one of this
-    set's). The native package komira_native, which libraries require and
-    which is listed after every library, is the one exception. The target's
-    `order_tests` (release_order_test: this check over fixture
-    metadata.json files) must pass first;
+  * a release order check over each member's metadata.json `depends`. A
+    requirement `"<name> ==<version> TEST_BUILD"`, at the set's version and
+    build string, is one on a komira package: komira_pack writes exactly the
+    library's `--dep`s (its direct mojo_library dependencies, conda.bzl) in
+    that form, and its only other requirements are the platform guard and
+    the compiler pin, which carry no build string (a requirement at another
+    version or build string is not one of this set's). Each such `<name>`
+    must be a member `release_set` lists before the member requiring it: a
+    package it does not list is refused, naming both, and so is a member
+    listed after it. The native package komira_native, which libraries
+    require and which is listed after every library, is exempt from the
+    order, not from being listed. The target's `order_tests`
+    (release_order_test: this check over fixture metadata.json files) must
+    pass first;
   * after the stamp check, `komira_pack conda-check --kind metapackage
     --require-stamped true` over the metapackage, with every member's manifest and the compiler pin: the
     `members` rows, the requirements, and that index, metadata and members
@@ -64,8 +71,9 @@ and no action uses the network.
 A member's `[release]` exists only after its own `[release_check]` passed, so
 that check runs too. What this does NOT cover: the macro conda_package's reading
 of `-c komira.package_*` (these packages are given the test stamp); that a
-member's requirement on another member is at the set's version and build string
-(komira_pack writes it so; the order check reads only requirements that are);
+member's requirement on a komira package is at the set's version and build
+string (komira_pack writes it so; the order check reads only requirements that
+are);
 and agreement across members beyond the stamp.
 """
 
@@ -155,13 +163,15 @@ printf 'stamped %s %s:%s\\n' "$V" "$B" "$names" > "$OUT"
 rm -rf "$T"
 """
 
-# Release order (the module documentation): no member requires a member listed
-# after it. A release builds the members in this order, each after the members
-# it requires. Arguments: the busybox, the output, the release set file (named
-# in the message only), the version, the build string, then `<name>
-# <metadata.json>` per member in order. A requirement is `"<name> ==<V> <B>"`
-# in metadata.json's `depends` (komira_pack). The one exception is the native
-# package komira_native: libraries require it and it is listed after every
+# Release order (the module documentation): every komira package a member
+# requires is a member listed before it. A release builds the members in this
+# order, each after the members it requires. Arguments: the busybox, the
+# output, the release set file (named in the message only), the version, the
+# build string, then `<name> <metadata.json>` per member in order. A
+# requirement on a komira package is a string value `"<name> ==<V> <B>"` of
+# metadata.json (komira_pack writes the `depends` of each `--dep` so, and no
+# other value is of that form). The native package komira_native is exempt
+# from the order only: libraries require it and it is listed after every
 # library. release_order_test runs this script over fixtures.
 _ORDER_CHECK = """
 BB="$1"; OUT="$2"; SET="$3"; V="$4"; B="$5"; shift 5
@@ -182,17 +192,28 @@ while [ "$#" -gt 0 ]; do
     metas="$metas $2"
     shift 2
 done
-later="$names"
 set -- $metas
+earlier=""
 for m in $names; do
     f="$1"; shift
-    later="${later# $m}"
-    for r in $later; do
-        [ "$r" != komira_native ] || continue
-        if grep -qF "\\"$r ==$V $B\\"" "$f"; then
-            no "member $m requires $r, which $SET lists after it: list each member after the members it requires (here, in release/artifacts.textproto and in libs)"
-        fi
-    done
+    # One JSON value per line; a requirement is a whole string value.
+    tr ',[]' '\\n\\n\\n' < "$f" > "$T/reqs"
+    while IFS= read -r l; do
+        case "$l" in
+            \\"*" ==$V $B\\"") ;;
+            *) continue ;;
+        esac
+        r="${l#\\"}"; r="${r% ==$V $B\\"}"
+        case " $earlier " in *" $r "*) continue ;; esac
+        case " $names " in
+            *" $r "*)
+                [ "$r" = komira_native ] ||
+                    no "member $m requires $r, which $SET lists after it: list each member after the members it requires (here, in release/artifacts.textproto and in libs)" ;;
+            *)
+                no "member $m requires $r, a komira package $SET does not list: a package a member requires at the set's version and build string is a member too (add $r before $m, here, in release/artifacts.textproto and in libs)" ;;
+        esac
+    done < "$T/reqs"
+    earlier="$earlier $m"
 done
 printf 'in order:%s\\n' "$names" > "$OUT"
 rm -rf "$T"

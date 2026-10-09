@@ -305,9 +305,11 @@ fails the build in these cases:
   the stamp at the top level of its metadata.json; the message names the package;
 - the metapackage does not require a member at its version and build string; the
   message names the member;
-- a member's metadata.json requires, at the set's version and build string, a
-  member listed after it (the native package `komira_native` excepted); the
-  message names both. The `release_order_*` targets in [`BUCK`](BUCK) run this
+- a member's metadata.json requires, at the set's version and build string (the
+  form komira_pack gives a komira library dependency, and no external
+  requirement), a package the release set does not list, or a member listed
+  after it (the native package `komira_native` is excepted from the order, not
+  from being listed); the message names both. The `release_order_*` targets in [`BUCK`](BUCK) run this
   check over the fixtures in `release_order/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;

@@ -1,0 +1,1 @@
+{"build":"hb_1","depends":["__linux","libzlib ==1.0.0 h4ab18f5_1","mojo-compiler ==1.0.0","python >=1.0.0"],"version":"1.0.0"}
