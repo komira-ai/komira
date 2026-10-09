@@ -44,7 +44,9 @@
 #             (kci_build affected_batch.mojo, THE BUDGET), counted from
 #             kci's own start (`started_ns`, set by dispatch.mojo
 #             `kci_main_with`), at most MAX_BUILD_BUDGET_S (a week); pr.yml
-#             passes what is left of its job's time limit.
+#             passes what is left of its job's time limit. Every build run
+#             may take all the budget left, so --build-timeout-s (the cap of
+#             each run without a budget) is refused beside it.
 #             It is refused with --only, with --release-dir (nothing is
 #             released, so there is no release directory; without
 #             --affected-by the flag is required), and for a stage holding a
@@ -65,8 +67,8 @@
 # the rest once the stage is resolved:
 #
 #   a selected BUILD step    needs --work-dir and --log-dir; --build-timeout-s
-#                            and (with --affected-by) --build-budget-s
-#                            optional
+#                            or (with --affected-by) --build-budget-s
+#                            optional, never both
 #   a selected PUBLISH step  needs --release-version; --concurrency,
 #                            --secret-store optional
 #   a selected validation    needs --scratch-dir, an ABSOLUTE path (the
@@ -555,6 +557,11 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
         if cmd.given(String("--release-set-hash")):
             raise usage_error(
                 String("--release-set-hash is not used with --affected-by: the per-change check releases nothing")
+            )
+        if cmd.given(String("--build-budget-s")) and cmd.given(String("--build-timeout-s")):
+            raise usage_error(
+                String("--build-timeout-s is not used with --build-budget-s: every build run may take all the")
+                + String(" budget left")
             )
     else:
         if cmd.given(String("--build-budget-s")):

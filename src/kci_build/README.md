@@ -57,11 +57,14 @@ batch, a unit alone, a retry) can share a budget,
 `BuildRequest.build_budget_s` (`kci run --build-budget-s`), which ends at
 `BuildRequest.build_deadline_ns`: kci's start plus the budget, on the
 runner's monotonic clock (`ProcessRunner.now_ns`, CLOCK_MONOTONIC by
-default). Each run's timeout is the smaller of `--build-timeout-s` and the
-whole seconds left until the deadline. With less than one second left the run
-is not started: a unit is reported as not built (FAILED), a derive or affected
-command as not started (INDETERMINATE). Without a budget every run gets
-`--build-timeout-s`:
+default). Each run's timeout is all the whole seconds left until the
+deadline (`--build-timeout-s` caps nothing under a budget; `kci run` refuses
+the two together), so one batch of every affected unit may take the whole
+budget left. A run that times out is FAILED, `timed out after N min, all that
+was left of the build budget (--build-budget-s B)`. With less than one second
+left the run is not started: a unit is reported as not built (FAILED), a
+derive or affected command as not started (INDETERMINATE). Without a budget
+every run gets `--build-timeout-s`:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
@@ -69,7 +72,7 @@ from kci_build import NO_BUILD_BUDGET, run_timeout_s
 
 # run_timeout_s(--build-timeout-s, --build-budget-s, deadline_ns, now_ns)
 assert_equal(run_timeout_s(3600, NO_BUILD_BUDGET, 0, 9_000_000_000_000), 3600)
-assert_equal(run_timeout_s(3600, 6000, 6_000_000_000_000, 0), 3600)
+assert_equal(run_timeout_s(3600, 6000, 6_000_000_000_000, 0), 6000)
 assert_equal(run_timeout_s(3600, 6000, 6_000_000_000_000, 4_000_000_000_000), 2000)
 assert_equal(run_timeout_s(3600, 6000, 6_000_000_000_000, 6_000_000_000_000), 0)  # not started
 ```

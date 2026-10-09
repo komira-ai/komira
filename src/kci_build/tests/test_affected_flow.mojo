@@ -252,8 +252,9 @@ def _list(xs: List[String]) -> String:
 
 
 def test_the_affected_commands_are_charged_to_the_budget() raises:
-    # --build-budget-s 100 (deadline at clock 100 s): the buck2 answer takes
-    # 30 s, so the pack command gets min(77, 70) and, after its 40 s, the
+    # --build-budget-s 100 (deadline at clock 100 s): the buck2 answer gets
+    # all 100 (--build-timeout-s 77 caps nothing under a budget) and takes
+    # 30 s, so the pack command gets the 70 left and, after its 40 s, the
     # build gets the 30 s left
     var root = _fresh(String("budget"))
     var req = _request(root)
@@ -269,7 +270,7 @@ def test_the_affected_commands_are_charged_to_the_budget() raises:
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
     assert_equal(len(runner.calls), 3)
     assert_equal(runner.remaining(), 0)
-    assert_equal(runner.calls[0].timeout_s, 77)
+    assert_equal(runner.calls[0].timeout_s, 100)
     assert_equal(runner.calls[1].timeout_s, 70)
     assert_equal(runner.calls[2].timeout_s, 30)
 

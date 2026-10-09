@@ -35,7 +35,7 @@
 #    gets its units' targets (kci_artifact `units_file_text`), and its
 #    affected command runs through the ProcessRunner (cwd --work-dir, stdout
 #    and stderr to `<log>/_affected_<bs>.stdout|.stderr`, timeout
-#    --build-timeout-s, or less: what is left of --build-budget-s, see
+#    --build-timeout-s, or with --build-budget-s what is left of it, see
 #    affected_batch.mojo THE BUDGET; with nothing left it is not started).
 #    A command that is not started, cannot be started, exits non-zero,
 #    is killed or times out, or whose stdout breaks the answer grammar
@@ -59,10 +59,11 @@
 #    A library's welded tests run inside its build. A batch that exits
 #    non-zero is retried unit by unit to name the failing units, up to
 #    MAX_FAILED_UNITS failures; a timed-out or killed batch is not retried.
-#    With --build-budget-s, every run of this step 5 may take what is left
-#    of the budget, which counts from kci's own start (the steps above and
-#    kci's start-up are charged to it), at most --build-timeout-s, and a run
-#    with nothing left is not started (its units are not built).
+#    With --build-budget-s, every run of this step 5 may take all that is
+#    left of the budget, which counts from kci's own start (the steps above
+#    and kci's start-up are charged to it); a run that times out says
+#    `timed out after N min` and names the budget, and a run with nothing
+#    left is not started (its units are not built).
 #    Any failed unit, unattributed batch or unit not built for want of
 #    budget is FAILED (KCI-E-BUILD-FAILED); a
 #    build that cannot be started is INDETERMINATE (KCI-E-CANNOT-TELL), and
