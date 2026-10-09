@@ -21,6 +21,14 @@
 #
 # Each test pairs an admitted shape with a refused neighbour wherever the arm
 # makes a choice, so a mirror arm that flipped either way is red.
+#
+# NOT COVERED, ON PURPOSE: `_lookup_arrow_type`'s miss (`return ArrowType.NULL`)
+# is reached only by a LEFT/RIGHT-sided column reference OUTSIDE a join
+# residual whose name the input lacks. The leaf arm resolves sided names only
+# in a sided scope, so the gate admits that reference unresolved; whether it
+# should is an open question, and its verdict is not pinned here. Likewise the
+# `_child_pos` fall-through for a binary operator outside every declared range,
+# which only an in-process `Expr.binary` with an undeclared operator reaches.
 # =============================================================================
 
 from std.memory import OwnedPointer
