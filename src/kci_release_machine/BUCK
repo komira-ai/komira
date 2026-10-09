@@ -2,8 +2,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The machine file (format `kci.machine`): a release machine's stages, in
 # order, each stage's GitHub environment and whether it is farm-connected,
-# and the steps of each (BUILD, PUBLISH; DEPLOY is reserved and refused) with
-# a PUBLISH step's validations. `kci run --stage S` runs one stage; the
+# the machine's name, and the steps of each (BUILD, PUBLISH to a channel or
+# into a cell, DEPLOY into a cell) with a PUBLISH step's validations. kci run
+# does not run a step that writes into a cell yet. `kci run --stage S` runs one stage; the
 # workflow consistency check (kci_workflow_check) holds a CI workflow to the same
 # graph.
 #
@@ -23,6 +24,9 @@ mojo_library(
     test_srcs = [
         # a valid file read back; every refusal, each naming its line
         "tests/test_release_machine_parse.mojo",
+        # the machine name, DEPLOY steps and PUBLISH into a cell: read back,
+        # and every refusal of deploy.mojo by its message
+        "tests/test_release_machine_cells.mojo",
         # the authored field names, golden
         "tests/test_release_machine_field_names.mojo",
         # `kci run --only` against one stage: steps and validations, match,
