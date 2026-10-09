@@ -10,6 +10,10 @@
 #    findings: a validate finding, an expansion finding, a changed table key,
 #    an adoption finding (FINDING_ADOPTION), a foreign object and a
 #    conflicting one (the engine's, FINDING_OWNERSHIP, one finding per node).
+#    And each of kci_cloud's own refusal sites, one test each: a scope with
+#    no cell, a changed cloud name, a marked object without `adopt`, a
+#    delete of an adopted object, and a replace of one under the plan and
+#    under the apply's plan-first step.
 # 2. NOTHING ELSE IS: an engine fault (a create that failed, a presence read
 #    that raised), a `realize` that raises and a broken lowering contract
 #    leave the refusal None.
@@ -20,7 +24,9 @@
 # 5. A REFERENCE CYCLE (two services each reading the other's URL) is a
 #    validate finding: the typed refusal under both verbs, with no call on
 #    the fake. A cycle among later resources is found too, a 3-cycle is
-#    printed from its smallest id, and two services that only `uses` each
+#    printed from its smallest id, a cycle closed by a resource's second
+#    reference is found (naming that reference), two references to the same
+#    peer report the cycle once, and two services that only `uses` each
 #    other are no cycle.
 # =============================================================================
 
@@ -50,6 +56,7 @@ from kci_cloud import (
     Clouds,
     ExistingObject,
     FINDING_ADOPTION,
+    FINDING_CELL,
     FINDING_GRAPH,
     FINDING_OWNERSHIP,
     Feed,
@@ -271,6 +278,150 @@ def test_a_conflict_is_typed() raises:
     assert_true(af[1].reason.startswith("conflict"), af[1].reason)
     assert_equal(cloud.mutations(), before)
     print("  test_a_conflict_is_typed: PASS")
+
+
+# ---- 1b. each of kci_cloud's own refusal sites, one test each ---------------------------------
+#
+# Each test reaches exactly one `_refuse` call (or the cell check) under the
+# plan and under the apply, so that site raising its text without setting
+# the refusal goes red here alone.
+
+
+def test_a_scope_with_no_cell_is_typed() raises:
+    """Catches: the cell check in `_valid_expansion` raising its text
+    without setting `refusal`."""
+    var cloud = FakeCloud()
+    var st = InMemoryStateStore()
+    var json = String('{"id":"logs","bucket":{}}')
+    var p = _plan(cloud, json, st, String(""))
+    assert_true(p.raised, "the plan raises")
+    var pf = _typed(p, False, FINDING_CELL, String("(cell)"), String("plan"))
+    assert_equal(len(pf), 1)
+    assert_equal(pf[0].field_path, "scope")
+    var a = _apply(cloud, json, st, String(""))
+    assert_true(a.raised, "the apply raises before any effect")
+    _ = _typed(a, False, FINDING_CELL, String("(cell)"), String("apply"))
+    assert_equal(cloud.mutations(), 0)
+    print("  test_a_scope_with_no_cell_is_typed: PASS")
+
+
+def test_a_name_change_is_typed() raises:
+    """`logs` was created as `acme-logs` and the file now names it
+    `acme-logs-2`. Catches: the name-change site in `_prepare` raising its
+    text without setting `refusal`."""
+    var cloud = FakeCloud()
+    var st = InMemoryStateStore()
+    _done(apply_resources(_reg(), cloud, _ctx(), _list(String('{"id":"logs","physicalName":"acme-logs","bucket":{}}')), Creds.none(), st))
+    var before = cloud.mutations()
+    var json = String('{"id":"logs","physicalName":"acme-logs-2","bucket":{}}')
+    var p = _plan(cloud, json, st)
+    assert_true(p.raised, "the plan raises")
+    var pf = _typed(p, False, FINDING_GRAPH, String("logs"), String("plan"))
+    assert_equal(pf[0].field_path, "physical_name")
+    var a = _apply(cloud, json, st)
+    assert_true(a.raised, "the apply raises before any effect")
+    _ = _typed(a, False, FINDING_GRAPH, String("logs"), String("apply"))
+    assert_equal(cloud.mutations(), before, "nothing changed")
+    print("  test_a_name_change_is_typed: PASS")
+
+
+comptime _ADOPTED_LOGS = '{"id":"logs","physicalName":"acme-logs","adopt":"ADOPT","bucket":{}}'
+comptime _READER = '{"id":"reader","serviceAccount":{}}'
+
+
+def _adopt_logs(mut cloud: FakeCloud, mut st: InMemoryStateStore, json: String) raises:
+    """Plant what `json`'s adopted nodes declare, then apply `json`."""
+    var nodes = lower_data(cloud, _list(json))
+    for i in range(len(nodes)):
+        if nodes[i].adopted:
+            cloud.plant_like(nodes[i])
+    _done(apply_resources(_reg(), cloud, _ctx(), _list(json), Creds.none(), st))
+
+
+def test_a_marked_object_without_adopt_is_typed() raises:
+    """A failed release leaves `logs/bucket` stamped and marked; the file
+    names `logs` again without `adopt`. Catches: the marked-unadopted site
+    in `_prepare` raising its text without setting `refusal`."""
+    var cloud = FakeCloud()
+    var st = InMemoryStateStore()
+    _adopt_logs(cloud, st, String(_ADOPTED_LOGS) + String(",") + String(_READER))
+    cloud.store[].fail_at_call = cloud.store[]._attempts + 1
+    var out = apply_resources(_reg(), cloud, _ctx(), _list(String(_READER)), Creds.none(), st)
+    assert_true(out.release_failed(), "the release failed, the mark stays")
+    var before = cloud.mutations()
+    var json = String('{"id":"logs","physicalName":"acme-logs","bucket":{}},') + String(_READER)
+    var p = _plan(cloud, json, st)
+    assert_true(p.raised, "the plan raises")
+    var pf = _typed(p, False, FINDING_ADOPTION, String("logs"), String("plan"))
+    assert_true(pf[0].reason.find("the object carries kci's adoption mark") >= 0, pf[0].reason)
+    var a = _apply(cloud, json, st)
+    assert_true(a.raised, "the apply raises before any effect")
+    _ = _typed(a, False, FINDING_ADOPTION, String("logs"), String("apply"))
+    assert_equal(cloud.mutations(), before, "nothing changed")
+    print("  test_a_marked_object_without_adopt_is_typed: PASS")
+
+
+def test_a_delete_of_an_adopted_object_is_typed() raises:
+    """`logs` (adopted, retention DELETE, not ADOPT_DELETABLE) becomes a
+    secret: the run would delete its bucket. Catches: the `delete_findings`
+    site in `_prepare` raising its text without setting `refusal`."""
+    var cloud = FakeCloud()
+    var st = InMemoryStateStore()
+    _adopt_logs(
+        cloud,
+        st,
+        String('{"id":"logs","physicalName":"acme-logs","retention":"DELETE","adopt":"ADOPT","bucket":{}},')
+        + String(_READER),
+    )
+    var before = cloud.mutations()
+    var json = String('{"id":"logs","secret":{}},') + String(_READER)
+    var p = _plan(cloud, json, st)
+    assert_true(p.raised, "the plan raises")
+    var pf = _typed(p, False, FINDING_ADOPTION, String("logs"), String("plan"))
+    assert_true(pf[0].reason.find("the resource no longer lowers it") >= 0, pf[0].reason)
+    var a = _apply(cloud, json, st)
+    assert_true(a.raised, "the apply raises before any effect")
+    _ = _typed(a, False, FINDING_ADOPTION, String("logs"), String("apply"))
+    assert_equal(cloud.mutations(), before, "nothing changed")
+    print("  test_a_delete_of_an_adopted_object_is_typed: PASS")
+
+
+def _replace_setup(mut cloud: FakeCloud, mut st: InMemoryStateStore) raises -> String:
+    """`logs/bucket` adopted, and the fake can change it only by a replace;
+    returns the file that turns versioning on (a replace)."""
+    _adopt_logs(cloud, st, String(_ADOPTED_LOGS))
+    cloud.store[].replace_only(String("logs/bucket"))
+    return String('{"id":"logs","physicalName":"acme-logs","adopt":"ADOPT","bucket":{"versioning":true}}')
+
+
+def test_a_replace_is_typed_under_the_plan() raises:
+    """Catches: the plan's `replace_findings` site raising its text without
+    setting `refusal`."""
+    var cloud = FakeCloud()
+    var st = InMemoryStateStore()
+    var json = _replace_setup(cloud, st)
+    var before = cloud.mutations()
+    var p = _plan(cloud, json, st)
+    assert_true(p.raised, "the plan raises")
+    var pf = _typed(p, False, FINDING_ADOPTION, String("logs"), String("plan"))
+    assert_true(pf[0].reason.find("this change would replace it") >= 0, pf[0].reason)
+    assert_equal(cloud.mutations(), before, "nothing changed")
+    print("  test_a_replace_is_typed_under_the_plan: PASS")
+
+
+def test_a_replace_is_typed_under_the_apply() raises:
+    """Catches: the apply's plan-first `replace_findings` site raising its
+    text without setting `refusal`."""
+    var cloud = FakeCloud()
+    var st = InMemoryStateStore()
+    var json = _replace_setup(cloud, st)
+    var before = cloud.mutations()
+    var a = _apply(cloud, json, st)
+    assert_true(a.raised, "the apply raises before any effect")
+    var af = _typed(a, False, FINDING_ADOPTION, String("logs"), String("apply"))
+    assert_true(af[0].reason.find("this change would replace it") >= 0, af[0].reason)
+    assert_equal(cloud.mutations(), before, "nothing changed")
+    print("  test_a_replace_is_typed_under_the_apply: PASS")
 
 
 # ---- 2. nothing else is ----------------------------------------------------------------------
@@ -514,6 +665,55 @@ def test_a_three_cycle_is_printed_once_from_its_smallest_id() raises:
     print("  test_a_three_cycle_is_printed_once_from_its_smallest_id: PASS")
 
 
+def _svc_env(id: String, env: String) -> String:
+    """A service whose `env` map is `env` (the JSON members, in order)."""
+    return String('{"id":"') + id + String('","service":{"image":{"digest":"sha256:a1"},"internal":{},"env":{') + env + String("}}}")
+
+
+def _ref(name: String, resource: String, standard: String) -> String:
+    return String('"') + name + String('":{"ref":{"resource":"') + resource + String('","standard":"') + standard + String('"}}')
+
+
+def test_a_cycle_closed_by_a_later_reference_is_found() raises:
+    """`api` reads the bucket first and `web` second; `web` reads `api`.
+    Catches: only a resource's first reference walked (mutant: the sites
+    loop in `_Graph` stops after one; `api`'s only edge would be the
+    bucket), and the field naming the first edge of `api` instead of the
+    edge that closes the cycle."""
+    var json = (
+        String('{"id":"logs","bucket":{}},')
+        + _svc_env(String("api"), _ref(String("A_LOGS"), String("logs"), String("NAME")) + String(",") + _ref(String("B_PEER"), String("web"), String("URL")))
+        + String(",")
+        + _svc(String("web"), String("api"))
+    )
+    var found = validate_for(_reg(), FakeCloud(), _list(json))
+    var cycles = List[Finding]()
+    for i in range(len(found)):
+        if found[i].reason.find("a reference cycle") >= 0:
+            cycles.append(found[i].copy())
+    assert_equal(len(cycles), 1, "the cycle is found")
+    assert_equal(cycles[0].resource_id, "api")
+    assert_equal(cycles[0].field_path, "service.env.B_PEER", "the edge to web, not the first reference")
+    assert_true(cycles[0].reason.startswith("a reference cycle: api -> web -> api"), cycles[0].reason)
+    print("  test_a_cycle_closed_by_a_later_reference_is_found: PASS")
+
+
+def test_two_edges_to_the_same_peer_report_the_cycle_once() raises:
+    """`api` (listed first) reads `web`; `web` reads `api` twice, so the walk
+    meets the back edge `web -> api` twice while `api` is on its stack.
+    Catches: the dedupe of reported cycles dropped (mutant: the `keys`
+    loop in `_report` skipped; the same finding twice)."""
+    var json = (
+        _svc(String("api"), String("web"))
+        + String(",")
+        + _svc_env(String("web"), _ref(String("A_PEER"), String("api"), String("URL")) + String(",") + _ref(String("B_PEER"), String("api"), String("HOST")))
+    )
+    var found = _cycle_findings(json)
+    assert_equal(len(found), 1, "one cycle, reported once")
+    assert_true(found[0].startswith("api|a reference cycle: api -> web -> api"), found[0])
+    print("  test_two_edges_to_the_same_peer_report_the_cycle_once: PASS")
+
+
 def test_services_that_only_use_each_other_are_no_cycle() raises:
     """An edge of access lowers to a node of its own: two services that call
     each other plan."""
@@ -539,11 +739,19 @@ def main() raises:
     test_an_adoption_finding_is_typed()
     test_a_foreign_object_is_typed_one_finding_per_node()
     test_a_conflict_is_typed()
+    test_a_scope_with_no_cell_is_typed()
+    test_a_name_change_is_typed()
+    test_a_marked_object_without_adopt_is_typed()
+    test_a_delete_of_an_adopted_object_is_typed()
+    test_a_replace_is_typed_under_the_plan()
+    test_a_replace_is_typed_under_the_apply()
     test_an_engine_fault_is_not_typed()
     test_a_raising_realize_and_a_broken_contract_are_not_typed()
     test_a_failed_release_is_typed_apart()
     test_the_plan_reports_leftover_and_left_behind()
     test_a_reference_cycle_is_typed_with_no_call()
     test_a_three_cycle_is_printed_once_from_its_smallest_id()
+    test_a_cycle_closed_by_a_later_reference_is_found()
+    test_two_edges_to_the_same_peer_report_the_cycle_once()
     test_services_that_only_use_each_other_are_no_cycle()
     print("ALL FAKE TYPED REFUSAL TESTS PASSED")
