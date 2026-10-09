@@ -21,19 +21,43 @@ surfaces. Nothing built with these rules is shipped
 |---|---|
 | `python_dist(name, archive, version, native_libs, preload)` | a CPython `install_only` archive (python-build-standalone) unpacked into one directory by busybox `tar`, with the packages of its `site-packages` (pip) removed. Fails unless `bin/python<major>.<minor>` runs and prints `version` (`python_dist: the interpreter in <archive> is <got>, the pin says <version>`). `native_libs` is a directory of shared libraries, `preload` the paths in it a `py_test` loads before its script. |
 | `python_wheel(name, distribution, version, wheel, python, deps)` | one wheel installed into a directory of its own by `wheel_install.py`, run with `python`: every member at its path, a `<name>-<version>.data/` directory's `purelib/` and `platlib/` merged in, its `scripts/`, `headers/` and `data/` left out. Fails unless the wheel holds exactly one `.dist-info` and that directory's name and its METADATA `Name` and `Version` are `distribution` and `version`. `deps` are the wheels it imports; a closure holding one distribution at two versions fails analysis. |
-| `py_test(name, src, srcs, deps, args, expect_error, python, tzdata)` | runs `src` with the interpreter as a build action; its output (`<name>.pass`) exists only if the script passed, so building the target is running the test. `srcs` are staged next to `src` and importable from it, `deps` are `python_wheel` targets (each with its deps), `args` the script's arguments (`$(location ...)` expands). With `expect_error`, the script passes only if it raises an exception whose last traceback line (`Type: message`) is exactly that string. `python` defaults to `komira//third_party/python:cpython`; `tzdata` (default `komira//third_party/python:tzdata`) is the wheel whose `tzdata/zoneinfo` directory is the action's time-zone database ([Time zones](#time-zones)), and is in the closure whether or not `deps` names it. |
+| `py_test(name, src, srcs, deps, args, expect_error, python, tzdata, run_id)` | runs `src` with the interpreter as a build action; its output (`<name>.pass`) exists only if the script passed, so building the target is running the test. `srcs` are staged next to `src` and importable from it, `deps` are `python_wheel` targets (each with its deps), `args` the script's arguments (`$(location ...)` expands). With `expect_error`, the script passes only if it raises an exception whose last traceback line (`Type: message`) is exactly that string. `python` defaults to `komira//third_party/python:cpython`; `tzdata` (default `komira//third_party/python:tzdata`) is the wheel whose `tzdata/zoneinfo` directory is the action's time-zone database ([Time zones](#time-zones)), and is in the closure whether or not `deps` names it. With `run_id`, a report test ([Report tests](#report-tests)). |
 | `python_oracle(name, src, srcs, data, deps, args, outs, python, tzdata)` | runs `src` twice ([Oracles](#oracles)) and outputs the directory the first run wrote (`<name>/`), only if both runs wrote the same tree. Other targets take it as test data: the directory as `:<name>`, each `outs` path as the sub-target `:<name>[<path>]` (a Mojo library's `test_data`, a `py_test`'s `args` through `$(location ...)`). `data` is `{dest: source}` (or sources, each staged at its path from the cell root), staged in the data directory; `srcs` are staged next to `src`; `deps` are `python_wheel` targets; `args` are plain strings. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under `third_party/`. `tzdata` is as in `py_test` (in the closure, so its wheel is checked too). |
 | `python_proto(name, src)` | the module `<stem>_pb2.py` that the pinned protoc (`komira//tools/build/toolchains/proto:protoc`, 29.1) generates for one `.proto` with no imports, for a `py_test`'s `srcs` (staged next to its script, so `import <stem>_pb2`). protoc 29.1 writes Python gencode 5.29.1; the test `protobuf_gencode` holds the pinned protobuf runtime to it. |
 
 The macros set `exec_compatible_with` to the linux x86_64 execution
 platform: every action runs the linux interpreter.
 
+## Report tests
+
+A `py_test` with `run_id` (a file holding one run id) is a report test: it
+measures, and its numbers are kept as its `[report]` sub-target.
+
+- Its script writes one JSON object to standard output (file descriptor 1,
+  so a child process or native code writing there counts). The runner
+  captures it and the script passes only if it is one JSON object, without
+  NaN or an infinity, and without the keys `run_id` and `target`, which the
+  runner writes first: the run id file's one line, and the test's label.
+  The schema of a bench report and the table made of reports are
+  [`bench_report`](../bench_report/README.md)'s.
+- A failing report test copies what it captured to standard error and writes
+  no report. A report test does not take `expect_error`.
+- The run id file is an input of the report test's action and of nothing
+  else. A test without `run_id` is unchanged, so it stays a cache hit when a
+  run id changes; bumping a run id re-runs exactly the report tests that name
+  that file. A report whose run id is the one in the file was measured by a
+  run that read that file; a run id that was not bumped can be a replay from
+  the cache, of the same inputs.
+- A run id is one line of at most 128 characters from `A-Z a-z 0-9 . _ : + -`,
+  starting with a letter or a digit (a trailing newline is dropped).
+
 ## What an action runs
 
 ```
 <dist>/bin/python3.13 -I -S pyrun.py --out <name>.pass --tmpdir <name>.tmp \
     --preload <native_libs>/lib/libgcc_s.so.1 --preload ... \
-    --site <wheel dir> ... [--expect-error <line>] -- <script> <args>
+    --site <wheel dir> ... [--expect-error <line>] \
+    [--report <name>.report.json --run-id <file> --target <label>] -- <script> <args>
 ```
 
 - `-I` (isolated mode): no `PYTHON*` environment variable, no user site

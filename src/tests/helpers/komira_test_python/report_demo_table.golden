@@ -1,0 +1,11 @@
+# Parallelism table
+
+| variant | function | N | rows/s | rows/s per thread | efficiency | memory | latency ns (median / p90) | flags | run_id |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| fixture | per_batch | 1 | 2000000 | 2000000 | 1.00 | rss_delta_per_thread 2.0 MiB | 4096000 / 4200000 | - | @RUN_ID@ |
+| fixture | per_batch | 4 | 4000000 | 1000000 | 0.50 | rss_delta_per_thread 1.0 MiB | 4096000 / 4200000 | noisy | @RUN_ID@ |
+| fixture | per_batch | 16 | not measured: 8 cpus | - | - | - | - | - | @RUN_ID@ |
+
+## Reports
+
+- `komira//src/tests/helpers/komira_test_python:report_demo[report]` run_id=@RUN_ID@: 8 cpus (fixture cpu), cpu.max max 100000, nr_throttled +0, throttled_usec +0, loadavg 0.25 0.5 1; opt levels engine=O3 driver=O1; coverage no; versions python 3.13; warmup discarded 3/3

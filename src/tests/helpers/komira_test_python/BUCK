@@ -1,4 +1,5 @@
 load("@komira//third_party/python:pins.bzl", "PYTHON", "WHEELS")
+load("@komira//tools/build/bench_report:defs.bzl", "bench_table")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/python:defs.bzl", "py_test", "python_oracle", "python_proto")
 
@@ -162,4 +163,39 @@ py_test(
         "runtime=" + [w["version"] for w in WHEELS if w["name"] == "protobuf"][0],
     ],
     deps = ["//third_party/python:protobuf"],
+)
+
+# A report test: report_demo.py prints a bench report with fixed numbers
+# (report_fixture.py); the runner keeps it, with the run id and the label,
+# as `[report]`. The run id file is an input of this test alone.
+py_test(
+    name = "report_demo",
+    src = "report_demo.py",
+    srcs = ["report_fixture.py"],
+    run_id = "report_demo.run_id",
+)
+
+# bench_report's table of that report.
+bench_table(
+    name = "report_demo_table",
+    reports = [":report_demo[report]"],
+)
+
+py_test(
+    name = "report_wiring",
+    src = "report_wiring.py",
+    srcs = [
+        "report_demo.run_id",
+        "report_fixture.py",
+    ],
+    args = [
+        "$(location :report_demo[report])",
+        "$(location :report_demo_table)",
+        "$(location :report_demo_table_golden)",
+    ],
+)
+
+export_file(
+    name = "report_demo_table_golden",
+    src = "report_demo_table.golden",
 )

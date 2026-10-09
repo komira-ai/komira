@@ -1,0 +1,28 @@
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_test")
+
+# bench_report checks bench reports (the `[report]` of a py_test with a
+# `run_id`) against their schema and merges them into the parallelism table;
+# `bench_table` (defs.bzl) runs it as a build action. README.md says what
+# each part does.
+
+_SRCS = glob(["src/*.rs"])
+
+# The binary is published behind its inline #[test]s: it cannot build unless
+# they pass.
+rust_binary(
+    name = "bench_report",
+    srcs = _SRCS,
+    crate_root = "src/main.rs",
+    tests = [":bench_report_unit"],
+    visibility = ["PUBLIC"],
+)
+
+# The crate's inline #[test]s (the JSON reader, the schema check, the table
+# and the command line), compiled with `rustc --test` and run as a build
+# action.
+rust_test(
+    name = "bench_report_unit",
+    srcs = _SRCS,
+    crate_root = "src/main.rs",
+    crate_name = "bench_report",
+)

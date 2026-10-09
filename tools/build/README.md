@@ -23,6 +23,7 @@ Everything the build needs besides the project configuration
 | [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
 | [`one_definition/`](one_definition/) | package `komira//tools/build/one_definition` | `one_definition`, the one-definition gate of the C code: a `mojo_shared_lib` that links every `cxx_library` under `src/`, and the vendored C libraries those packages link, with `--whole-archive` (`force_load`), so a C symbol defined twice fails its link with `duplicate symbol` (a Mojo executable links C archives one by one and pulls a member in only for a symbol still undefined, so a second definition is reported only if its object is pulled in for some other symbol; otherwise the first definition wins silently, and two libraries no executable links together are never compared). The list is [`libraries.bzl`](one_definition/libraries.bzl); the BUCK-file global `cxx_library` ([`lint/includes.bzl`](lint/includes.bzl)) refuses to declare a library under `src/` the list does not name. It does not see a library declared another way (a .bzl macro's `native.cxx_library`, or a BUCK file's own `load` of `cxx_library` from the prelude); such a library stays out of the gate. The gate's `exports` are the symbols of [`core_split/c_symbols.tsv`](../core_split/c_symbols.tsv) and one per other library. `tests//negative/shared_lib:duplicate_definition` is its must-fail twin. |
 | [`python/`](python/) | package `komira//tools/build/python` | the hermetic Python of the tests: `python_dist` (a pinned CPython archive unpacked, its version checked), `python_wheel` (one pinned wheel installed without pip), `py_test` (a Python script run by that interpreter as a build action, so the target exists only if it passed), `python_oracle` (a script run twice whose output directory, identical in both runs, is test data for other targets; its inputs may not be komira build outputs) and `python_proto` (the pinned protoc's `_pb2.py` for one `.proto`), with `pyrun.py`, `oracle_run.py` and `wheel_install.py`, the scripts their actions run. Test-only; the pins are [`third_party/python`](../../third_party/python/README.md), the tests `src/tests/helpers/komira_test_python`. [Reference](python/README.md). |
+| [`bench_report/`](bench_report/) | package `komira//tools/build/bench_report` | `bench_report`, which checks bench reports (the `[report]` of a `py_test` with a `run_id`) against their schema and merges them into the parallelism table, and `bench_table`, the rule that runs it as a build action. Test-only. [Reference](bench_report/README.md). |
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
 | `cells/toolchains/` | cell `toolchains` | the Mojo toolchain the rules use, `toolchains//:mojo`, declared by `komira_mojo_toolchains`, the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx` (and its alias `toolchains//:cxx_no_default_deps`, which unconfigured queries reach), declared by `komira_cxx_toolchains`, and the Rust and protobuf toolchains, `toolchains//:rust` and `toolchains//:mojo_proto`, declared by `komira_rust_toolchains` and `komira_proto_toolchains`; one call of `komira_toolchains` declares them all ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
 | [`tests/`](tests/) | cell `tests` | end-to-end tests: `functional/` (behaviour that must work) and `negative/` (planted defects that must go red). A standalone checkout's only, and outside `//...`. [Reference](tests/README.md). |
@@ -51,9 +52,10 @@ another. Every file loads the rules as `@komira//tools/build/mojo:...`, and the
 
 ## Languages for build tools
 
-Every build tool under `tools/build` is written in Zig. Zig is already the
-pinned hermetic C compiler and linker (`zig cc`), so a Zig tool needs no
-extra toolchain, builds to a small static binary and calls C directly.
+Build tools under `tools/build` are written in Zig, with the two exceptions
+below. Zig is already the pinned hermetic C compiler and linker (`zig cc`),
+so a Zig tool needs no extra toolchain, builds to a small static binary and
+calls C directly.
 Rust is for long-running services, not for build tools.
 
 [`mojo/tools/conda_unpack.zig`](mojo/tools/conda_unpack.zig) must be Zig
@@ -62,9 +64,13 @@ regardless: the Rust toolchain's conda libraries are unpacked by it
 `unpacker = "komira//tools/build/toolchains:conda_unpack"`), so a Rust
 version would be a bootstrap cycle.
 
-The one exception is [`proto-codegen/`](proto-codegen/) (`protoc-gen-mojo`
+One exception is [`proto-codegen/`](proto-codegen/) (`protoc-gen-mojo`
 and its sibling generators), which stays in Rust because it is built on
 `prost`, the mature Rust protobuf library; Zig has no equivalent.
+
+The other is [`bench_report/`](bench_report/), Rust for now: its unit tests are welded
+through `rust_test`, and there is no Zig test rule yet. It is a candidate for
+Zig once one exists; it uses no library beyond the standard one.
 
 The Rust sources under [`tests/negative/`](tests/negative/) and
 [`examples/rust/`](examples/rust/) are fixtures and examples that exercise

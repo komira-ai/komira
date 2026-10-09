@@ -12,7 +12,11 @@ the script passed, so building the target is running the test.
 `python_oracle` runs one script twice, through `oracle_run.py`, and outputs
 the directory it wrote, which other targets take as test data; it fails
 unless both runs wrote the same tree. `python_proto` runs the pinned protoc
-to generate one `_pb2.py` module.
+to generate one `_pb2.py` module. A `py_test` with a `run_id` file is a
+report test: what its script writes to standard output must be one JSON
+object, kept as its `[report]` with the run id and the target's label added.
+The run id file is an input of that action only, so bumping it re-runs the
+report tests that name it and no other test.
 
 Every action runs `bin/python3.<minor>` of the unpacked archive with `-I -S`:
 no `PYTHON*` variable, no user or system site directory, no script directory
@@ -236,6 +240,11 @@ def _py_test_impl(ctx):
         cmd.add("--site", closure[k][1])
     if ctx.attrs.expect_error != None:
         cmd.add("--expect-error", ctx.attrs.expect_error)
+    sub_targets = {}
+    if ctx.attrs.run_id != None:
+        report = ctx.actions.declare_output(ctx.label.name + ".report.json")
+        cmd.add("--report", report.as_output(), "--run-id", ctx.attrs.run_id, "--target", str(ctx.label.raw_target()))
+        sub_targets["report"] = [DefaultInfo(default_output = report)]
     cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), ctx.attrs.args)
     # The zone database every reader takes: the C library and ORC read TZDIR,
     # and pyrun.py makes it Python's only zoneinfo path.
@@ -243,16 +252,18 @@ def _py_test_impl(ctx):
     env = dict(_ENV)
     env["TZDIR"] = cmd_args(tzdata, format = "{}/tzdata/zoneinfo")
     ctx.actions.run(cmd, env = env, category = "py_test")
-    return [DefaultInfo(default_output = out, other_outputs = [tmp])]
+    return [DefaultInfo(default_output = out, other_outputs = [tmp], sub_targets = sub_targets)]
 
 _py_test = rule(
     impl = _py_test_impl,
-    doc = "Runs `src` with the hermetic interpreter (`python`) as a build action; the output exists only if it passed (exit 0, or, with `expect_error`, an exception whose last traceback line is exactly that string). `srcs` are staged next to `src` and importable from it; `deps` are wheels (`python_wheel`), each with its own deps; `args` are the script's arguments. `tzdata` is the wheel whose `tzdata/zoneinfo` directory is the action's `TZDIR` and Python's only zone path.",
+    doc = "Runs `src` with the hermetic interpreter (`python`) as a build action; the output exists only if it passed (exit 0, or, with `expect_error`, an exception whose last traceback line is exactly that string). `srcs` are staged next to `src` and importable from it; `deps` are wheels (`python_wheel`), each with its own deps; `args` are the script's arguments. `tzdata` is the wheel whose `tzdata/zoneinfo` directory is the action's `TZDIR` and Python's only zone path. With `run_id` (a file holding one run id), the script's standard output is captured and must be one JSON object; `[report]` is that object with `run_id` and `target` added.",
     attrs = {
         "args": attrs.list(attrs.arg(), default = []),
         "deps": attrs.list(attrs.exec_dep(providers = [PythonWheelInfo]), default = []),
         "expect_error": attrs.option(attrs.string(), default = None),
         "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
+        # A file holding one run id: the test is a report test (`[report]`).
+        "run_id": attrs.option(attrs.source(), default = None),
         "src": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
         "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),

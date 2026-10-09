@@ -6,8 +6,13 @@ script of cases/, and holds the exit status, the last stderr line and
 whether `--out` was written to what is expected. They pin what makes a
 py_test a gate: a script that fails, exits non-zero or fails with another
 error than `expect_error` names is red; only the exact line is green.
+
+The report cases run the runner with `--report`, `--run-id` and `--target`
+(a report test) and also hold the report file's exact bytes and what the
+runner left on its own standard output.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -63,4 +68,137 @@ for name, script, expect, want in CASES_TABLE:
         bad.append("{}: got {!r}, want {!r}".format(name, got, want))
     else:
         print("ok", name)
+
+
+def run_report(script, run_id="run-7\n", flags=("--report", "--run-id", "--target"), expect_error=None):
+    """(exit status, last stderr line, out written, report bytes or None, runner stdout, stderr, run id path)."""
+    work = tempfile.mkdtemp()
+    out = os.path.join(work, "out")
+    report = os.path.join(work, "report.json")
+    run_id_path = os.path.join(work, "run_id")
+    with open(run_id_path, "w", encoding="utf-8") as f:
+        f.write(run_id)
+    values = {"--report": report, "--run-id": run_id_path, "--target": "tests//x:y"}
+    cmd = [sys.executable, "-I", "-S", RUNNER, "--out", out, "--tmpdir", os.path.join(work, "tmp")]
+    for flag in flags:
+        cmd += [flag, values[flag]]
+    if expect_error is not None:
+        cmd += ["--expect-error", expect_error]
+    cmd += ["--", os.path.join(CASES, script)]
+    # errors="replace": a broken runner may pass a script's non-UTF-8 bytes through.
+    p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", env={})
+    last = p.stderr.rstrip("\n").rsplit("\n", 1)[-1] if p.stderr else ""
+    body = None
+    if os.path.exists(report):
+        with open(report, encoding="utf-8") as f:
+            body = f.read()
+    return p.returncode, last, os.path.exists(out), body, p.stdout, p.stderr, run_id_path
+
+
+def report_of(run_id, obj):
+    full = {"run_id": run_id, "target": "tests//x:y"}
+    full.update(obj)
+    return json.dumps(full, indent=2) + "\n"
+
+
+def failed(script, why):
+    return "pyrun: {} failed: ValueError: report: {}".format(script, why)
+
+
+OK = report_of("run-7", {"a": 1, "b": [2]})
+ID_RULE = "not one run id (A-Z a-z 0-9 . _ : + -, at most 128)"
+
+REPORT_CASES = [
+    # (name, script, run id file, want (exit status, last stderr line, out written, report))
+    ("report_ok", "report_ok.py", "run-7\n", (0, "stderr is not captured", True, OK)),
+    ("report_id_without_newline", "report_ok.py", "run-7", (0, "stderr is not captured", True, OK)),
+    ("report_id_128", "report_ok.py", "a" * 128, (0, "stderr is not captured", True, report_of("a" * 128, {"a": 1, "b": [2]}))),
+    ("report_id_charset", "report_ok.py", "Z9._:+-\n", (0, "stderr is not captured", True, report_of("Z9._:+-", {"a": 1, "b": [2]}))),
+    (
+        "report_not_json",
+        "passes.py",
+        "run-7\n",
+        (1, failed("passes.py", "its standard output is not one JSON object (Expecting value: line 1 column 1 (char 0))"), False, None),
+    ),
+    ("report_array", "report_array.py", "run-7\n", (1, failed("report_array.py", "its standard output is a JSON list, not an object"), False, None)),
+    (
+        "report_sets_run_id",
+        "report_sets_run_id.py",
+        "run-7\n",
+        (1, failed("report_sets_run_id.py", "its JSON object sets 'run_id', which the runner writes"), False, None),
+    ),
+    (
+        "report_sets_target",
+        "report_sets_target.py",
+        "run-7\n",
+        (1, failed("report_sets_target.py", "its JSON object sets 'target', which the runner writes"), False, None),
+    ),
+    (
+        "report_nan",
+        "report_nan.py",
+        "run-7\n",
+        (1, failed("report_nan.py", "its standard output is not one JSON object (NaN is not a number JSON allows)"), False, None),
+    ),
+    (
+        "report_not_utf8",
+        "report_not_utf8.py",
+        "run-7\n",
+        (
+            1,
+            failed("report_not_utf8.py", "its standard output is not one JSON object ('utf-8' codec can't decode byte 0xff in position 7: invalid start byte)"),
+            False,
+            None,
+        ),
+    ),
+    (
+        "report_script_fails",
+        "report_then_raise.py",
+        "run-7\n",
+        (1, "pyrun: report_then_raise.py failed: ValueError: planted after the report", False, None),
+    ),
+    ("report_id_empty", "report_ok.py", "", (2, "pyrun: the run id file {} holds '', " + ID_RULE, False, None)),
+    ("report_id_space", "report_ok.py", "a b\n", (2, "pyrun: the run id file {} holds 'a b\\n', " + ID_RULE, False, None)),
+    ("report_id_leading_dash", "report_ok.py", "-a\n", (2, "pyrun: the run id file {} holds '-a\\n', " + ID_RULE, False, None)),
+    ("report_id_two_lines", "report_ok.py", "a\n\n", (2, "pyrun: the run id file {} holds 'a\\n\\n', " + ID_RULE, False, None)),
+    ("report_id_129", "report_ok.py", "a" * 129, (2, "pyrun: the run id file {} holds '" + "a" * 129 + "', " + ID_RULE, False, None)),
+]
+
+for name, script, run_id, want in REPORT_CASES:
+    rc, last, out, body, stdout, stderr, run_id_path = run_report(script, run_id)
+    want = (want[0], want[1].replace("{}", run_id_path), want[2], want[3])
+    got = (rc, last, out, body)
+    if got != want:
+        bad.append("{}: got {!r}, want {!r}".format(name, got, want))
+    elif stdout != "":
+        bad.append("{}: the runner's standard output is {!r}; a report test's is captured".format(name, stdout))
+    else:
+        print("ok", name)
+
+# A failing report test shows what its script wrote, on standard error.
+rc, last, out, body, stdout, stderr, _ = run_report("report_then_raise.py")
+if '{"partial": 1}\n' not in stderr:
+    bad.append("report_script_fails: the captured output is not on standard error: {!r}".format(stderr))
+else:
+    print("ok report_output_shown_on_failure")
+
+# The report flags come together, and not with --expect-error.
+for name, flags, expect, want in [
+    ("report_flags_report_alone", ("--report",), None, "pyrun: --report, --run-id and --target come together"),
+    ("report_flags_no_target", ("--report", "--run-id"), None, "pyrun: --report, --run-id and --target come together"),
+    ("report_flags_target_alone", ("--target",), None, "pyrun: --report, --run-id and --target come together"),
+    ("report_flags_expect_error", ("--report", "--run-id", "--target"), "ValueError: x", "pyrun: --report does not go with --expect-error"),
+]:
+    rc, last, out, body = run_report("report_ok.py", flags=flags, expect_error=expect)[:4]
+    if (rc, last, out, body) != (2, want, False, None):
+        bad.append("{}: got {!r}, want {!r}".format(name, (rc, last, out, body), (2, want, False, None)))
+    else:
+        print("ok", name)
+
+# Without --report the script's standard output is the runner's, as before.
+rc, last, out, body, stdout = run_report("passes.py", flags=())[:5]
+if (rc, out, body, stdout) != (0, True, None, "passes\n"):
+    bad.append("no_report_stdout_passes_through: got {!r}".format((rc, out, body, stdout)))
+else:
+    print("ok no_report_stdout_passes_through")
+
 assert not bad, "\n".join(bad)

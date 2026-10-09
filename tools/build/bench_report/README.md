@@ -1,0 +1,82 @@
+# bench_report
+
+`komira//tools/build/bench_report` checks bench reports against their schema
+and merges them into one parallelism table. A bench report is the `[report]`
+of a report test: a `py_test` with a `run_id`
+([Report tests](../python/README.md#report-tests)).
+
+```
+bench_report --out <table.md> --report <report.json> [--report <report.json>]...
+```
+
+The table is written only if every report passes the check. Exit status 1 is
+a refused report (`bench_report: <file>: <where>: <why>` on standard error),
+2 a usage error.
+
+## The rule
+
+```
+load("@komira//tools/build/bench_report:defs.bzl", "bench_table")
+
+bench_table(
+    name = "udf_table",
+    reports = [":a_bench[report]", ":b_bench[report]"],
+)
+```
+
+`bench_table` runs `bench_report` as a build action over `reports`, in the
+order given, and writes `<name>.md`. A report that fails the check fails the
+action, so the table exists only for good reports.
+
+## The schema, `komira-bench-report-1`
+
+The full list of keys is at the top of [`src/report.rs`](src/report.rs). Every
+key is required, and a key the schema does not name is refused, so a
+misspelt field is an error rather than a dropped number.
+
+- `run_id` and `target`, written by the py_test runner.
+- `host`: the affinity size (`cpus`), the CPU model, the cgroup's `cpu.max`,
+  the load average, and how much the cgroup's `nr_throttled` and
+  `throttled_usec` grew during the run.
+- `build`: the optimization level of each component, whether it was a
+  coverage build, and the versions of interpreters and runtimes.
+- `rows`, one per variant, function and thread count: rows, batches,
+  runtime calls, wall time, user and system CPU time, involuntary context
+  switches, memory (`pss`, `uss`, `rss_delta_per_thread`, `node_external`,
+  `v8_heap`, `memory_report`: at least one), and the latency of a call in
+  nanoseconds (warm-up batches discarded, at least 30 samples, min, median,
+  p90, max, in order).
+- A row's `calls` must equal its `batches`: a runtime is called once per
+  batch, so a runtime called once per row is refused. This replaces a
+  latency ceiling, which would flake.
+- Counts are whole JSON numbers from 0 to 2^53. The JSON reader
+  ([`src/json.rs`](src/json.rs)) refuses a key written twice, NaN and
+  infinities.
+
+## The table
+
+[`src/table.rs`](src/table.rs) makes one line per variant, function and
+thread count N: N = 1, 4 and 16, and every other N a report holds.
+
+| column | value |
+|---|---|
+| rows/s | rows / wall time |
+| rows/s per thread | rows/s / N |
+| efficiency | rows/s(N) / (N x rows/s(1)), with N = 1 of the same variant and function; `-` without one |
+| memory | each memory kind of the row, in MiB |
+| latency ns | median / p90 |
+| flags | `noisy`: user + system CPU time is below 0.8 x wall x N; `throttled`: the cgroup throttled the run |
+
+A row with more threads than its host's CPUs, and a missing N above the CPUs
+of the variant's first report, read `not measured: <cpus> cpus`. Any other
+missing N reads `missing`. The same variant, function and N in two rows is an
+error. Below the table, one line per report gives its host and build facts.
+
+## Tests
+
+`:bench_report` is published behind `:bench_report_unit`, the crate's inline
+tests: the JSON reader, each schema refusal, the table's numbers and flags,
+and the command line. `report_demo` and `report_wiring` in
+[`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md)
+check the whole path: a report test's `[report]`, and the `bench_table` made
+of it against a golden table.
