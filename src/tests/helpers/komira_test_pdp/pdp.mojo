@@ -184,11 +184,6 @@ def _error_reply(
     )
 
 
-@always_inline
-def _lower(c: UInt8) -> UInt8:
-    return c + 0x20 if (c >= 0x41 and c <= 0x5A) else c
-
-
 def _is_token68_byte(c: UInt8) -> Bool:
     return (
         (c >= 0x41 and c <= 0x5A)  # A-Z
@@ -235,10 +230,12 @@ def bearer_token(authorization: Optional[String]) -> BearerCredential:
         sp += 1
     if sp != 6:
         return BearerCredential(BEARER_ABSENT, String(""))
+    # `bearer` in any case: each byte is the lower-case letter or the same
+    # letter 0x20 below it (upper case).
     var want = String("bearer")
     var w = want.as_bytes()
     for i in range(6):
-        if _lower(b[i]) != w[i]:
+        if b[i] != w[i] and b[i] != w[i] - 0x20:
             return BearerCredential(BEARER_ABSENT, String(""))
     if sp == n:  # `Bearer` and nothing after it
         return BearerCredential(BEARER_MALFORMED, String(""))
