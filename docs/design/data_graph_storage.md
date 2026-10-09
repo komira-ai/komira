@@ -87,7 +87,10 @@ maintainer unless an active optimizer is detected, storage_stack.md decision 4):
   builds, and Iceberg manifests record null counts, so pruning still works.
 - **The embedding is a `list<float>` column.** Iceberg has no fixed-size list, so the dimension and
   the embedding model are table properties (`komira.graph.embedding.dim`,
-  `komira.graph.embedding.model`) and the writer refuses a row of another length. Traversal and text
+  `komira.graph.embedding.model`) and the writer refuses a row of another length. A vector read
+  (a VECTOR access path, optimized_plan_sources.md §15.5.1) accepts a `list<float32>`, `list<float16>`
+  or `list<int8>` column only when that property declares its dimension, checks every row's length
+  against it on read, and presents the column as an Arrow `FIXED_SIZE_LIST`. Traversal and text
   reads project the column away, so they never fetch it. Rejected: an opaque binary column (other
   tools cannot compute on it, and the first revision's earlier implementation had to read such bytes
   by length because they contain zeros); embeddings only in the index's content cache (a retired
@@ -413,7 +416,8 @@ instead of the recorded set (step 2, a dangling edge); not apply a tail delta to
    rolled within `target_lag` (60 s default); a supersession rolls as an upsert of the fact's row.
    Recommend yes.
 3. **Embeddings:** a `list<float>` column in each table, with the dimension and model as table
-   properties; the vector index is derived from it. Recommend yes. Rejected: a separate object per
+   properties; the vector index is derived from it, and a vector read validates the length on read
+   and sees an Arrow `FIXED_SIZE_LIST` (optimized_plan_sources.md §15.5.1). Recommend yes. Rejected: a separate object per
    table, an opaque binary column, embeddings only in a cache.
 4. **History:** a superseded fact has its two end bounds closed and is never deleted (kept). The
    bounds are `valid_from`, `valid_to`, `recorded_from`, `recorded_to`, and an open interval is a
