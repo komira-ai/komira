@@ -10,8 +10,10 @@
 #
 # Groups (and the defect each would catch):
 #   C  crediting: received DATA never given back with WINDOW_UPDATE, so a
-#      compliant client stalls after 65,535 bytes (§6.9); padding not charged
-#      (§6.9.1 counts the whole payload).
+#      compliant client stalls after 65,535 bytes (§6.9), including on an
+#      open stream whose request the server has not answered yet (an upload
+#      the handler reads before it responds); padding not charged (§6.9.1
+#      counts the whole payload).
 #   S  stream scope: a stream-window overrun, a PRIORITY of the wrong length
 #      (§6.3) or a zero WINDOW_UPDATE increment on a stream (§6.9) answered
 #      with GOAWAY instead of RST_STREAM; the connection-scoped exceptions
@@ -53,7 +55,10 @@ from komira_http_core.codec.h2.hpack import (
     HpackEncoder,
     HpackHeader,
 )
-from komira_http_core.codec.h2.stream import STREAM_STATE_CLOSED
+from komira_http_core.codec.h2.stream import (
+    STREAM_STATE_CLOSED,
+    STREAM_STATE_OPEN,
+)
 from komira_http_core.codec.types import HttpMethod
 from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
 from komira_http_server.routing import Router
@@ -286,6 +291,54 @@ def test_received_data_is_credited_back() raises:
     _assert_wu(outs2[1], 0, 48000)
     assert_equal(c.recv_window(1), WINDOW - 16000)
     assert_equal(Int(c.h2.recv_fc.conn_recv_window), WINDOW - 16000)
+
+
+def test_upload_on_an_unanswered_stream_is_credited_back() raises:
+    """A POST declaring a 100000-byte body is deferred until its body ends,
+    so stream 1 stays open (not half-closed (local), as after an answered
+    GET) while the body arrives: the state of an upload or a gRPC call in
+    progress. Three 16000-byte frames draw WINDOW_UPDATE(1, 48000) and
+    WINDOW_UPDATE(0, 48000) while the stream is still open; without the
+    stream update the fifth frame would overrun the stream window (a
+    compliant client stalls at 65,535). The upload goes on past 65,535 to
+    all 100000 bytes, a second pair of updates follows, and the
+    END_STREAM frame dispatches the request: the router's 200, which the
+    content-length check only allows once every byte arrived."""
+    var c = _Client()
+    assert_true(c.send(c.request(1, "POST", "/up", "100000")))
+    assert_equal(len(c.out()), 0, "the request waits for its body")
+    assert_equal(c.state(1), Int(STREAM_STATE_OPEN))
+    for _ in range(3):
+        assert_true(c.send(_data(1, 16000)))
+    assert_equal(c.state(1), Int(STREAM_STATE_OPEN))
+    var outs = c.out()
+    assert_equal(len(outs), 2, "a WINDOW_UPDATE for the open stream and one for the connection")
+    _assert_wu(outs[0], 1, 48000)
+    _assert_wu(outs[1], 0, 48000)
+    assert_equal(c.recv_window(1), WINDOW)
+    for _ in range(3):
+        assert_true(c.send(_data(1, 16000)))
+    var outs2 = c.out()
+    assert_equal(len(outs2), 2, "the open stream credited again past 65,535 bytes")
+    _assert_wu(outs2[0], 1, 48000)
+    _assert_wu(outs2[1], 0, 48000)
+    var idx = c.h2.find_stream_idx(UInt32(1))
+    assert_true(c.h2.streams[idx].has_pending_request, "answered before its body ended")
+    assert_equal(Int(c.h2.streams[idx].recv_data_bytes), 96000)
+    assert_true(c.send(_data_end(1, 4000)))
+    assert_false(c.h2.is_goaway_sent())
+    var outs3 = c.out()
+    assert_equal(len(outs3), 2, "the router's answer: HEADERS and DATA")
+    assert_equal(Int(outs3[0].kind), Int(FRAME_HEADERS))
+    assert_equal(Int(outs3[0].sid), 1)
+    var status = String("<absent>")
+    for i in range(len(outs3[0].headers)):
+        if String(outs3[0].headers[i].name) == ":status":
+            status = String(outs3[0].headers[i].value)
+    assert_equal(status, "200")
+    assert_equal(Int(outs3[1].kind), Int(FRAME_DATA))
+    assert_equal(Int(outs3[1].flags), Int(FLAG_END_STREAM))
+    assert_equal(Int(c.h2.streams[idx].recv_data_bytes), 100000)
 
 
 def test_below_the_watermark_nothing_is_credited() raises:
