@@ -1,0 +1,33 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# bench_report checks bench reports (the `[report]` of a py_test with a
+# `run_id`) against their schema and merges them into the parallelism table;
+# `bench_table` (defs.bzl) runs it as a build action. README.md says what
+# each part does.
+
+_SRCS = glob(["src/*.zig"])
+
+# The unit tests (the JSON reader, the schema check, the table and the
+# command line): `zig test` of main.zig, whose test block imports every
+# *_test.zig, run as a build action.
+zig_test(
+    name = "bench_report_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Published behind its unit tests: it cannot build unless they pass.
+zig_exe(
+    name = "bench_report",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":bench_report_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
