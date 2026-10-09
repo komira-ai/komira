@@ -26,6 +26,11 @@
 #                         and the set hash; `workflow_path_of`
 #   * summary.mojo        `run_summary_markdown`, `promotion_line`,
 #                         `break_glass_line`, `append_summary`
+#   * deploy_step.mojo    a DEPLOY step: `deploy_step[S: CloudAdapter, St:
+#                         StateStore]`, the `CellDeploys` seam with
+#                         `CloudDeploys[S, St]` (one built-in cloud) and
+#                         `NoCloudBuilt` (the kci binary: every DEPLOY step
+#                         refused), `check_deploy_set_hash`, `plan_hash_of`
 #   * library_verbs.mojo  `LibrarySteps` (kci_build, kci_publish), the
 #                         composed secret store, `kci_main`
 #
@@ -71,5 +76,23 @@ from kci_cli.dispatch import (
     run_stage_with,
     validation_failure_message,
 )
-from kci_cli.summary import append_summary, break_glass_line, carried_markdown, promotion_line, run_summary_markdown
+from kci_cli.summary import (
+    append_summary,
+    break_glass_line,
+    carried_markdown,
+    deploy_markdown,
+    promotion_line,
+    run_summary_markdown,
+)
+from kci_cli.deploy_step import (
+    NOT_BUILT_WITH,
+    CellDeploys,
+    CloudDeploys,
+    DeployRequest,
+    NoCloudBuilt,
+    check_deploy_set_hash,
+    deploy_request,
+    deploy_step,
+    plan_hash_of,
+)
 from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, git_first_parent, git_history, git_is_ancestor, kci_main
