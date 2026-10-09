@@ -12,6 +12,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 #                            verified bytes, checks the library's describe and
 #                            forwards the C ABI to its table (:native)
 #   native/probe.c           the count of objects the dynamic loader mapped
+#   native/variant_lib.c     the C library with one change per init, for the
+#                            runtime's refusal and context cases
 #   code.mojo                libraries staged as code objects, code sets
 #   refrt/                   the shared libraries' one-function exports
 #
@@ -27,6 +29,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 #   both_symbols.so     the C library exporting both the native library's and
 #                       a runtime's init symbol (refused)
 #   echo.so             a runtime, not a library (refused)
+#   variant_<name>.so   the C library with one field changed
+#                       (native/variant_lib.c): single_thread, worker_only,
+#                       global_lock, managed, no_scalar, abi2 and
+#                       short_table refused, counted accepted
 #
 # The welded tests, and the defect each one catches (each file's header
 # names what it proves):
@@ -36,9 +42,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 #                     breaks the contract; a Mojo library that does).
 #   test_native_loader
 #                     the native runtime's own cases: the digest checked
-#                     before dlopen, the library for this platform, the
-#                     symbols and capabilities refused by name, two
-#                     libraries in one context.
+#                     before dlopen (whole, and with SHA-256 known answers at
+#                     the padding lengths), the library for this platform,
+#                     the symbols, capabilities, table and shapes refused by
+#                     name, each by a library differing in that one field,
+#                     three libraries in one context, each given its own
+#                     library context and each closed with it.
 #   test_threads      both libraries called from four threads at once, on
 #                     threads the Mojo runtime did not create, every output
 #                     read back.
@@ -80,6 +89,14 @@ mojo_library(
             "native_c.so": ":native_c",
             "native_c_affine.so": ":native_c_affine",
             "native_mojo.so": "//src/tests/helpers/komira_udf_spike_native_mojo:native_mojo",
+            "variant_abi2.so": ":variant_abi2",
+            "variant_counted.so": ":variant_counted",
+            "variant_global_lock.so": ":variant_global_lock",
+            "variant_managed.so": ":variant_managed",
+            "variant_no_scalar.so": ":variant_no_scalar",
+            "variant_short_table.so": ":variant_short_table",
+            "variant_single_thread.so": ":variant_single_thread",
+            "variant_worker_only.so": ":variant_worker_only",
         },
         "tests/test_threads.mojo": {
             "native.so": ":native",
@@ -115,6 +132,7 @@ staged_files(
     srcs = [
         "native/native_runtime.c",
         "native/probe.c",
+        "native/variant_lib.c",
     ],
 )
 
@@ -184,6 +202,91 @@ mojo_shared_lib(
     ],
     exports_exact = True,
     deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_native"],
+    visibility = ["PUBLIC"],
+)
+
+# The C library with one change per init (native/variant_lib.c), and one
+# shared library per init, each exporting it as komira_udf_native_init_v1.
+cxx_library(
+    name = "komira_udf_native_variants",
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
+    srcs = [":c_files[native/variant_lib.c]"],
+    deps = [
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_native",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_abi2",
+    srcs = ["refrt/variant_abi2_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_counted",
+    srcs = ["refrt/variant_counted_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_global_lock",
+    srcs = ["refrt/variant_global_lock_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_managed",
+    srcs = ["refrt/variant_managed_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_no_scalar",
+    srcs = ["refrt/variant_no_scalar_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_short_table",
+    srcs = ["refrt/variant_short_table_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_single_thread",
+    srcs = ["refrt/variant_single_thread_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_worker_only",
+    srcs = ["refrt/variant_worker_only_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
     visibility = ["PUBLIC"],
 )
 

@@ -14,9 +14,13 @@
 #     refuse to load);
 #   - validate accepts a fixture's own signature and refuses an unknown entry
 #     (ERR_DESCRIPTOR) and a wrong signature (ERR_UNSUPPORTED), each with a
-#     message (a validate that accepts anything).
-# Mutant planted: native_init not comparing the host's abi_major: red ("init
-# accepted ABI major 2").
+#     message (a validate that accepts anything);
+#   - a ROW read set of two distinct names is accepted and one naming a field
+#     twice is refused with ERR_UNSUPPORTED (a read set whose names cannot
+#     bind one column each).
+# Mutants planted: native_init not comparing the host's abi_major: red ("init
+# accepted ABI major 2"); the read set's duplicate-name check never firing:
+# red ("a read set naming a field twice was accepted").
 
 from std.sys import size_of
 from std.testing import assert_equal, assert_false, assert_true
@@ -42,11 +46,18 @@ from komira_udf_spike_native_mojo import native_init
 
 
 def _validate(mut arena: _Arena, t: Word, rt: Word, host: Word, entry: String, arg_type: Int) raises -> Int32:
+    return _validate_args(arena, t, rt, host, SHAPE_SCALAR, entry, [ColumnType(arg_type, True)], List[String]())
+
+
+def _validate_args(
+    mut arena: _Arena, t: Word, rt: Word, host: Word, shape: UInt32, entry: String,
+    arg_types: List[ColumnType], names: List[String],
+) raises -> Int32:
     var hd = host_data_of(host)
-    var args = schema_of(arena, [ColumnType(arg_type, True)], List[String](), True, hd)
+    var args = schema_of(arena, arg_types, names, True, hd)
     var result = schema_of(arena, [ColumnType(TYPE_INT64, True)], List[String](), False, hd)
     var spec = new_spec(
-        arena, SHAPE_SCALAR, FORM_BUNDLE, entry, 0, List[UInt8](), args, result, Word.null(), NULL_MANUAL,
+        arena, shape, FORM_BUNDLE, entry, 0, List[UInt8](), args, result, Word.null(), NULL_MANUAL,
         IMMUTABLE, "", List[String](), List[List[UInt8]](),
     )
     var err = new_error(arena)
@@ -98,6 +109,13 @@ def main() raises:
     assert_equal(_validate(arena, t, rt, host, "double", TYPE_INT64), OK)
     assert_equal(_validate(arena, t, rt, host, "no_such_function", TYPE_INT64), ERR_DESCRIPTOR)
     assert_equal(_validate(arena, t, rt, host, "double", TYPE_FLOAT64), ERR_UNSUPPORTED)
+    var two: List[ColumnType] = [ColumnType(TYPE_INT64, True), ColumnType(TYPE_INT64, True)]
+    assert_equal(_validate_args(arena, t, rt, host, SHAPE_ROW, "pick", two, ["a", "b"]), OK, "a read set of a and b")
+    assert_equal(
+        _validate_args(arena, t, rt, host, SHAPE_ROW, "pick", two, ["a", "a"]),
+        ERR_UNSUPPORTED,
+        "a read set naming a field twice was accepted",
+    )
 
     t_shutdown(t, rt)
     arena.free_all()

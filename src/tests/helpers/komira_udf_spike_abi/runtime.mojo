@@ -31,6 +31,7 @@ from ._host import (
     new_error,
     pulls_of,
     release_out,
+    reserved_of,
     schema_of,
     stream_moved,
     stream_record,
@@ -718,6 +719,10 @@ struct UdfRuntime(Movable):
     def ledger(self) -> Counts:
         """Arrays and streams the host exported and their release counts."""
         return counts(host_data_of(self._host))
+
+    def reserved_bytes(self) -> Int:
+        """The bytes the runtime has reserved from the host and not released."""
+        return reserved_of(host_data_of(self._host))
 
     def shutdown(mut self):
         """Shut the runtime down (once); no callback may run after this."""

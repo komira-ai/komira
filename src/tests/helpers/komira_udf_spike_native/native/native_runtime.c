@@ -26,7 +26,8 @@
  * The verified bytes are copied into an anonymous memory file and dlopened
  * from it (RTLD_NOW | RTLD_LOCAL), so the bytes loaded are the bytes hashed,
  * whatever happens to the file after it was read. The library is never
- * dlclosed, and its memory file is never closed (open_bytes says why). It must export komira_udf_native_init_v1 and must not export
+ * dlclosed, and its memory file is never closed (open_bytes says why). It
+ * must export komira_udf_native_init_v1 and must not export
  * komira_udf_runtime_init_v1, so a runtime and a user library are never
  * confused. Its init gets this runtime's host struct; its table must be ABI
  * major 1 and cover every required entry; its describe must report
@@ -40,9 +41,12 @@
  * slot, and closed with it. Instances, frames and groups carry the library's
  * table beside the library's handle, so a call costs one more indirect call.
  *
- * The SHA-256 here is FIPS 180-4 written out; the tests compute the
- * expected digests with komira_crypto (AWS-LC), so a wrong hash here fails
- * every load.
+ * The SHA-256 here is FIPS 180-4 written out. The tests compute every
+ * expected digest with komira_crypto (AWS-LC) and stage files of the
+ * lengths where the padding changes (0, 1, 55, 56, 63, 64, 65, 119, 120,
+ * 127, 128 bytes): each must be refused for failing dlopen, never for its
+ * digest, so a hash that disagrees with AWS-LC at any of those lengths
+ * fails test_native_loader.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -379,9 +383,13 @@ static int32_t open_library(komira_udf_rt* rt, const char* root, const uint8_t s
     refuse(l, KOMIRA_UDF_ERR_LOAD, msg);
     return KOMIRA_UDF_OK;
   }
-  if (l->t->abi_major != KOMIRA_UDF_ABI_MAJOR ||
-      l->t->struct_size < offsetof(komira_udf_runtime, memory_report)) {
-    refuse(l, KOMIRA_UDF_ERR_ABI, "the library's table is not ABI major 1 or lacks a required entry");
+  const char* bad_table = NULL;
+  if (l->t->abi_major != KOMIRA_UDF_ABI_MAJOR)
+    bad_table = "the library's table is not ABI major 1";
+  else if (l->t->struct_size < offsetof(komira_udf_runtime, memory_report))
+    bad_table = "the library's table struct_size ends before a required entry";
+  if (bad_table != NULL) {
+    refuse(l, KOMIRA_UDF_ERR_ABI, bad_table);
     l->t->shutdown(l->rt);
     l->t = NULL;
     return KOMIRA_UDF_OK;

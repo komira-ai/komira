@@ -151,6 +151,11 @@ def _host_mem_release(host_data: Void, bytes: Int64) abi("C"):
     _hd(host_data)[].reserved_bytes -= Int(bytes)
 
 
+def reserved_of(hd: Word) -> Int:
+    """The bytes reserved through `hd`'s mem_reserve and not yet released."""
+    return _hd(hd.p)[].reserved_bytes
+
+
 def clock_reads_of(hd: Word) -> Word:
     """The address of `hd`'s now_ns call count, for the cancel timer."""
     # SAFETY: `hd` is a _HostData block make_host allocated, alive with the arena.

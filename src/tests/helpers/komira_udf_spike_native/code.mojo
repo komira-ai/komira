@@ -49,14 +49,23 @@ def _write(path: String, data: List[UInt8]) raises:
         f.write_bytes(Span(data))
 
 
-def digest_of(path: String) raises -> List[UInt8]:
-    """The sha256 of the file at `path`."""
-    var data = _read(path)
+def bytes_of(path: String) raises -> List[UInt8]:
+    """The bytes of the file at `path`."""
+    return _read(path)
+
+
+def sha256_of(data: List[UInt8]) -> List[UInt8]:
+    """The sha256 of `data`, by komira_crypto."""
     var d = sha256(Span(data))
     var out = List[UInt8]()
     for i in range(32):
         out.append(d[i])
     return out^
+
+
+def digest_of(path: String) raises -> List[UInt8]:
+    """The sha256 of the file at `path`."""
+    return sha256_of(_read(path))
 
 
 def stage(path: String, root: String, role: String) raises -> CodeObject:
@@ -73,6 +82,14 @@ def stage_under(path: String, root: String, role: String, digest: List[UInt8]) r
     whose bytes do not match its sha256."""
     makedirs(root, exist_ok=True)
     _write(root + "/" + hex_of(digest), _read(path))
+    return CodeObject(role, digest.copy())
+
+
+def stage_data(data: List[UInt8], root: String, role: String, digest: List[UInt8]) raises -> CodeObject:
+    """Store `data` under `digest`'s name in `root`, whether or not it is
+    the sha256 of `data`, and return it as a code object of `role`."""
+    makedirs(root, exist_ok=True)
+    _write(root + "/" + hex_of(digest), data)
     return CodeObject(role, digest.copy())
 
 
