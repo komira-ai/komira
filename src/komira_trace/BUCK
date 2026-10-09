@@ -25,6 +25,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_drain_throughput.mojo",
+        "tests/test_drain_join_scales.mojo",
         "tests/test_jsonl_exporter.mojo",
         "tests/test_span_microbench.mojo",
         "tests/test_span_record_pod.mojo",

@@ -26,8 +26,11 @@
 # The refresh is synchronous,
 # `refresh_with_service[S: HttpService, RT: Runtime, C: Connector]`, driven
 # by the caller's HttpClient, runtime and reactor. The provider caches the
-# token and its expiry on the wall clock (komira_clock's `now_unix_ms`), and
-# reports when it is within the refresh margin of that expiry.
+# token and its expiry on an injected komira_retry `MonotonicClock`
+# (`SystemClock`, the process's monotonic clock, unless `with_clock` swaps
+# it), and reports when it is within the refresh margin of that expiry. The
+# clock is monotonic because `expires_in` is relative: a step of the wall
+# clock must not make a cached token look fresher or older than it is.
 #
 # Caller-constructed, NO ambient discovery: the caller explicitly builds
 # `AzureImdsProvider.make()` (system-assigned) or `.for_client_id(...)`
@@ -39,7 +42,7 @@
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_clock import now_unix_ms
+from komira_retry import MonotonicClock, SystemClock
 
 from komira_http_client.body import EmptyBody, RequestBody
 from komira_http_client.client import build_get_request
@@ -72,13 +75,15 @@ comptime DEFAULT_AZURE_IMDS_REFRESH_MARGIN_SECONDS: Int64 = 300
 
 
 @fieldwise_init
-struct AzureImdsProvider(Movable, Deinitable):
+struct AzureImdsProvider[K: MonotonicClock = SystemClock](Movable, Deinitable):
     """A provider that fetches OAuth2 access tokens from the Azure
     Instance Metadata Service (IMDS) for a managed identity.
 
-    Refresh contract (mirrors GcpMetadataProvider): synchronous; the
-    caller drives the runtime + reactor + connector; refresh fires when
-    the cached token is within `refresh_margin_seconds` of expiry.
+    Refresh contract: synchronous; the caller drives the runtime + reactor +
+    connector; refresh is due when the clock `K` reads at or past the
+    cached token's expiry minus `refresh_margin_seconds`. The factories
+    build a provider on `SystemClock`; `with_clock` moves it onto another
+    clock (a test's `ManualClock`).
 
     Field layout:
       var endpoint: String              — canonical
@@ -90,7 +95,9 @@ struct AzureImdsProvider(Movable, Deinitable):
                                           empty for system-assigned
       var refresh_margin_seconds: Int64 — proactive-refresh margin (300)
       var _cached_token: AzureBearerToken
-      var _cached_expiry_unix_ms: Int64 — -1 means "no cached token"
+      var _cached_expiry_ms: Int64      — on `_clock`'s timeline; -1 means
+                                          "no cached token"
+      var _clock: K                     — the clock expiry is read against
     """
 
     var endpoint: String
@@ -98,50 +105,75 @@ struct AzureImdsProvider(Movable, Deinitable):
     var client_id: String
     var refresh_margin_seconds: Int64
     var _cached_token: AzureBearerToken
-    var _cached_expiry_unix_ms: Int64
+    var _cached_expiry_ms: Int64
+    var _clock: Self.K
 
     @staticmethod
-    def make() -> AzureImdsProvider:
+    def make() -> AzureImdsProvider[SystemClock]:
         """System-assigned managed identity at the canonical IMDS
         endpoint, requesting a storage-scoped token."""
-        return AzureImdsProvider(
+        return AzureImdsProvider[SystemClock](
             String(AZURE_IMDS_ENDPOINT),
             String(AZURE_STORAGE_RESOURCE),
             String(""),
             DEFAULT_AZURE_IMDS_REFRESH_MARGIN_SECONDS,
             AzureBearerToken(String(""), Int64(-1)),
             Int64(-1),
+            SystemClock(),
         )
 
     @staticmethod
-    def for_client_id(client_id: String) -> AzureImdsProvider:
+    def for_client_id(client_id: String) -> AzureImdsProvider[SystemClock]:
         """User-assigned managed identity — IMDS resolves the token for
         the given identity client_id."""
-        return AzureImdsProvider(
+        return AzureImdsProvider[SystemClock](
             String(AZURE_IMDS_ENDPOINT),
             String(AZURE_STORAGE_RESOURCE),
             client_id,
             DEFAULT_AZURE_IMDS_REFRESH_MARGIN_SECONDS,
             AzureBearerToken(String(""), Int64(-1)),
             Int64(-1),
+            SystemClock(),
         )
 
     @staticmethod
-    def with_endpoint(endpoint: String) -> AzureImdsProvider:
+    def with_endpoint(endpoint: String) -> AzureImdsProvider[SystemClock]:
         """Custom endpoint (an emulator, or a test's scripted connector)."""
-        return AzureImdsProvider(
+        return AzureImdsProvider[SystemClock](
             endpoint,
             String(AZURE_STORAGE_RESOURCE),
             String(""),
             DEFAULT_AZURE_IMDS_REFRESH_MARGIN_SECONDS,
             AzureBearerToken(String(""), Int64(-1)),
             Int64(-1),
+            SystemClock(),
         )
+
+    def with_clock[K2: MonotonicClock](
+        deinit self, var clock: K2
+    ) -> AzureImdsProvider[K2]:
+        """This provider, settings and cached token kept, reading `clock`
+        from now on. A cached token's expiry was read on the old clock, so
+        swap clocks before the first refresh."""
+        return AzureImdsProvider[K2](
+            self.endpoint^,
+            self.resource^,
+            self.client_id^,
+            self.refresh_margin_seconds,
+            self._cached_token^,
+            self._cached_expiry_ms,
+            clock^,
+        )
+
+    def clock(mut self) -> ref [self._clock] Self.K:
+        """The clock this provider reads (a test advances its fake through
+        this)."""
+        return self._clock
 
     def credential(self) raises -> AzureBearerToken:
         """Return the cached token. Raises if no token has been fetched
         yet — callers should fire `refresh_with_service` first."""
-        if self._cached_expiry_unix_ms < Int64(0):
+        if self._cached_expiry_ms < Int64(0):
             raise Error(
                 "AzureImdsProvider.credential: no cached token; call"
                 " refresh_with_service() first"
@@ -150,21 +182,22 @@ struct AzureImdsProvider(Movable, Deinitable):
 
     def has_credential(self) -> Bool:
         """Diagnostic: whether the provider has a non-empty cached token."""
-        return self._cached_expiry_unix_ms >= Int64(0)
+        return self._cached_expiry_ms >= Int64(0)
 
-    def cached_expiry_unix_ms(self) -> Int64:
-        """Diagnostic: cached token expiry, or -1 if none."""
-        return self._cached_expiry_unix_ms
+    def cached_expiry_ms(self) -> Int64:
+        """Diagnostic: cached token expiry on the provider's clock, or -1
+        if none."""
+        return self._cached_expiry_ms
 
-    def is_expired_or_near_expiry(self) -> Bool:
+    def is_expired_or_near_expiry(mut self) -> Bool:
         """Whether the cached token is missing, expired, or within
-        `refresh_margin_seconds` of expiry. Wall clock from
-        komira_clock's `now_unix_ms()`."""
-        if self._cached_expiry_unix_ms < Int64(0):
+        `refresh_margin_seconds` of expiry: due from the instant the clock
+        reads `expiry - margin`, inclusive."""
+        if self._cached_expiry_ms < Int64(0):
             return True
-        var now_ms = now_unix_ms()
+        var now_ms = self._clock.now_ms()
         var margin_ms = self.refresh_margin_seconds * Int64(1000)
-        return now_ms + margin_ms >= self._cached_expiry_unix_ms
+        return now_ms + margin_ms >= self._cached_expiry_ms
 
     def refresh_with_service[S: HttpService, RT: Runtime, C: Connector](
         mut self,
@@ -177,7 +210,8 @@ struct AzureImdsProvider(Movable, Deinitable):
         Single GET against {endpoint}/metadata/identity/oauth2/token with
         the mandatory `Metadata: true` header. On success, the parsed
         access_token is cached and expiry is set to
-        `now + expires_in * 1000` (ms).
+        `now + expires_in * 1000` (ms), `now` read on the provider's clock
+        when the answer has been parsed.
         """
         var path = String(AZURE_IMDS_TOKEN_PATH)
         var query = String("api-version=") + String(AZURE_IMDS_API_VERSION)
@@ -204,19 +238,19 @@ struct AzureImdsProvider(Movable, Deinitable):
             raise Error(String("AzureImdsProvider: ") + String(e))
         var access_token = parsed.access_token.copy()
         var expires_in = parsed.expires_in
-        var now_ms = now_unix_ms()
+        var now_ms = self._clock.now_ms()
         var expiry_ms = now_ms + (expires_in * Int64(1000))
         self._cached_token = AzureBearerToken(access_token^, expiry_ms)
-        self._cached_expiry_unix_ms = expiry_ms
+        self._cached_expiry_ms = expiry_ms
 
     def set_credential_for_test(
-        mut self, var token: AzureBearerToken, expiry_unix_ms: Int64
+        mut self, var token: AzureBearerToken, expiry_ms: Int64
     ):
         """Test-only: bypass refresh_with_service and inject a token
-        directly. Production code calls refresh_with_service() through
-        HTTP."""
+        expiring at `expiry_ms` on the provider's clock. Production code
+        calls refresh_with_service() through HTTP."""
         self._cached_token = token^
-        self._cached_expiry_unix_ms = expiry_unix_ms
+        self._cached_expiry_ms = expiry_ms
 
 
 # -----------------------------------------------------------------------------

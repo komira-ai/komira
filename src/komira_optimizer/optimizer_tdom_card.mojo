@@ -746,7 +746,7 @@ def _is_cross_product_shaped_subset(
     # find(members[0])
     var root0 = members[0]
     while parent[root0] != root0:
-        root0 = parent[root0]
+        root0 = parent[root0]  # cov: unreachable members[0] is the least member id and union keeps the lesser root, so it is a root
     for k in range(1, len(members)):
         var rk = members[k]
         while parent[rk] != rk:
@@ -901,14 +901,12 @@ def estimate_cardinality_with_set[
 #                        Tier-1-backed PK signal.
 #   * `clamp_bound`    — `max(base_card_for_rel)` over `combined`. The
 #                        ceiling the clamp would impose.
-#   * `final_card`     — `min(raw_card, clamp_bound)` if `clamp_fired`,
-#                        else `raw_card`. It omits the Step 5b
-#                        cross-product clamp the production path applies.
+#   * `final_card`     — `min(raw_card, clamp_bound)` if `clamp_fired`
+#                        or (Step 5b) `combined` is cross-product shaped,
+#                        else `raw_card`: the production estimate.
 #
-# Zero production overhead: this function is independent of the
-# `estimate_cardinality_with_set` call path; the production path does NOT
-# invoke this helper. The trace function rebuilds the math from scratch.
-# Test-only use; production cost path is unchanged.
+# The production path does NOT invoke this helper; it rebuilds the math
+# from scratch for test and diagnostic use.
 # =============================================================================
 
 
@@ -971,10 +969,8 @@ def estimate_cardinality_with_set_traced[
     a `CardTrace` capturing raw numerator/denominator + clamp signal +
     pre/post-clamp cardinalities for diagnosis.
 
-    Does NOT touch the production cache. Does NOT mutate provider /
-    chain / tdom. Pure function over the same math the production path
-    uses; emits the trace fields a diagnosis needs to classify Candidate
-    1 vs Candidate 3.
+    Does NOT touch the production cache or mutate provider / chain /
+    tdom; same math as the production path.
     """
     # Step 2: numerator (mirror of `_numerator_for_set`).
     var numerator = _numerator_for_set(chain, combined)
@@ -1006,10 +1002,13 @@ def estimate_cardinality_with_set_traced[
             pk_clamp_fires = True
             break
 
-    # Step 5 (continued): clamp bound + final.
+    # Step 5 (continued) and Step 5b: both clamps share the bound.
     var bound = _max_base_card_in_set(chain, combined)
     var final_card = est
-    if pk_clamp_fires and est > bound:
+    var clamps = pk_clamp_fires or _is_cross_product_shaped_subset(
+        chain, combined
+    )
+    if clamps and est > bound:
         final_card = bound
 
     return CardTrace(

@@ -1,8 +1,9 @@
 # kcov
 
 `komira//tools/build/toolchains/kcov:kcov` is kcov v42, the line coverage
-tool of the Mojo coverage variant. It is built from source on the farm, and
-the target is a directory (`[bin]` is its `bin/kcov`):
+tool of the Mojo coverage variant. It is built from source on the farm, with
+two changes ([Patches](#patches)), and the target is a directory (`[bin]` is
+its `bin/kcov`):
 
 | path | what |
 |---|---|
@@ -148,6 +149,42 @@ directory is the worker's absolute path. Unstripped, that information makes
 every build differ, and with it the key of every action that reads kcov. A
 cache eviction would then re-run all of them.
 
+### Patches
+
+`kcov_build.sh` changes v42's source with `sed` before compiling it. Each
+changed line holds `KOMIRA PATCH`, and the build fails when an expression
+marks another number of lines than expected (a new kcov changed the code
+there), so a patch is never silently lost. Both make a test run under kcov
+as it runs in the release gate (test 43 of the
+[tests README](../../tests/README.md#43-coverage-runs) holds each red on v42
+as released):
+
+1. **No CPU pin.** v42 pins itself and the traced program to the CPU it
+   started on (`tie_process_to_cpu` in `engines/ptrace_linux.cc`:
+   `sched_setaffinity` to one CPU, "Switching CPU while running will cause
+   icache conflicts"), so every test under kcov ran on one CPU while the
+   release gate gives it all the worker's: a test that counts cores, or
+   parallel code, behaved differently and slowly. The function is now
+   empty. On x86-64, the only platform kcov is built for, the instruction
+   cache is coherent with stores, and kcov inserts its breakpoints before
+   the program runs (`--skip-solibs`: no library is patched later; a
+   shared library's driver runs without it, and kcov patches the library it
+   loads when its preload library reports the load); while
+   it runs, kcov only removes a breakpoint once hit, a one-byte write that
+   another thread sees either before (a trap kcov handles, since it keeps
+   the address in its map) or after.
+2. **The test's exit status.** v42 sets its exit status from the exit of
+   every traced process (`collector.cc`, `ev_exit`) and from a signal death
+   of any process once the first has gone (`engines/ptrace.cc`), as the
+   bare signal number. So a child the test left behind decided it: a test
+   that failed and left a child exiting 0 later passed. Now only the first
+   process (the test) sets it, and a death by signal N gives 128+N, as a
+   shell reports it.
+
+kcov still disables address randomization for the program
+(`ADDR_NO_RANDOMIZE` through `personality`), and still waits for every
+process the program started to exit before it writes the report.
+
 ### What kcov writes when it runs
 
 From v42's `src/solib-handler.cc` (`SolibHandler::startup`), on every run
@@ -166,7 +203,11 @@ of an ELF program:
 
 So a run inside a build action's sandbox writes under `<out-dir>` only,
 unless the FIFO cannot be made there; a coverage run should set `TMPDIR` to
-its scratch directory so that the fallback also stays inside it. The other
+its scratch directory so that the fallback also stays inside it.
+[cov_run](../../coverage/kcov/README.md#cov_run) does: it runs kcov through
+`gate_runner.sh`, whose `TMPDIR` is a directory made for that run under the
+action's working directory, and its output directory is in the action's
+scratch directory. The other
 fixed `/tmp` paths of v42 (`/tmp/kcov-system.pipe`, `/tmp/kcov-data/`)
 belong to the system-wide mode (`kcov_system_lib`, `kcov-system-daemon`),
 which the coverage variant does not run. Check 7 requires that the traced

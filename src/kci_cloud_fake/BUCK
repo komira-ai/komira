@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The fake clouds: "fake" (complete) and "fake-limited" (deliberately
-# partial: no job, no public ingress). Fakes, not mocks: working,
+# partial: no container job, no worker, no public ingress). Fakes, not mocks: working,
 # lightweight in-memory clouds that really deploy. The executable
 # specification of a cloud, the offline test double, and the offline proof that a graph a
 # cloud cannot host is refused before anything is created. They honour the
@@ -34,7 +34,14 @@ mojo_library(
         "tests/test_fake_conformance.mojo",
         "tests/test_fake_faulty_variant.mojo",
         "tests/test_fake_limited_refuses_offline.mojo",
+        "tests/test_fake_messaging.mojo",
         "tests/test_fake_provider_shapes.mojo",
+        "tests/test_fake_secret.mojo",
+        "tests/test_fake_dns.mojo",
+        "tests/test_fake_compute.mojo",
+        "tests/test_fake_triggers.mojo",
+        "tests/test_fake_network.mojo",
+        "tests/test_fake_registry.mojo",
         "tests/test_fake_table.mojo",
         "tests/test_fake_validation_run_tag.mojo",
     ],

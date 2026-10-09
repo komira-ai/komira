@@ -20,7 +20,7 @@
 # 7. THE V1.3 GRAPH RULES: the id grammar, the image platform (OS + CPU,
 #    `<os>/<cpu>` in the graph; deployable or not by the cloud's
 #    `required_artifact`),
-#    `env` of a job checked like a service's, `env` and `secret_env` never
+#    `env` of a container job checked like a service's, `env` and `secret_env` never
 #    setting one variable twice, a secret reference with a name.
 # 8. A PARTIAL APPLY IS REPORTED, NOT RAISED: what landed and what is pending
 #    come back with the error.
@@ -99,11 +99,13 @@ from kci_cloud import (
     FINDING_COVERAGE,
     FINDING_LIMIT,
     FIELD_SERVICE,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
+    FIELD_WORKER,
     FIELD_TABLE,
     FIELD_BUCKET,
-    FIELD_SERVICE_ACCOUNT,
-    FIELD_GRANT,
+    FIELD_SERVICE_ACCOUNT, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY,
+    FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SECRET, Feed, Firing,
+    FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER,
     apply_resources,
     body_field,
     describe,
@@ -228,7 +230,7 @@ struct _Node(EngineResource, Movable, Deinitable):
 
 
 struct _Stub(CloudAdapter, Movable):
-    """Hosts `service` (and `job` and `bucket` when `full`); refuses port 1
+    """Hosts `service` (and every other type when `full`); refuses port 1
     as a limit; lowers each resource to `<id>/run` (a bucket to
     `<id>/bucket`) and, for a service, `<id>/edge`;
     with `extra_role` set, also `<id>/<extra_role>` for every resource.
@@ -269,21 +271,30 @@ struct _Stub(CloudAdapter, Movable):
         var l = List[Int]()
         l.append(FIELD_SERVICE)
         if self._full:
-            l.append(FIELD_JOB)
-            l.append(FIELD_TABLE)
-            l.append(FIELD_BUCKET)
-            l.append(FIELD_SERVICE_ACCOUNT)
+            for f in [FIELD_CONTAINER_JOB, FIELD_WORKER, FIELD_TABLE, FIELD_BUCKET, FIELD_QUEUE, FIELD_SERVICE_ACCOUNT]:
+                l.append(f)
+            l.append(FIELD_TOPIC)
             l.append(FIELD_GRANT)
+            l.append(FIELD_SUBSCRIPTION)
+            l.append(FIELD_SECRET)
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY]:
+                l.append(f)
         return l^
 
     def absences(self) -> List[Absence]:
         var l = List[Absence]()
         if not self._full:
-            l.append(Absence(FIELD_JOB, NOT_YET, String("no runner for jobs")))
+            l.append(Absence(FIELD_CONTAINER_JOB, NOT_YET, String("no runner for jobs")))
+            l.append(Absence(FIELD_WORKER, NOT_YET, String("no always-on runner")))
             l.append(Absence(FIELD_TABLE, NOT_YET, String("no tables")))
             l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
             l.append(Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("no identities")))
             l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
+            for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SCHEDULE, FIELD_EVENT_TRIGGER]:
+                l.append(Absence(f, NOT_YET, String("no messaging or triggers")))
+            l.append(Absence(FIELD_SECRET, NOT_YET, String("no secret store")))
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE, FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS, FIELD_REGISTRY]:
+                l.append(Absence(f, NOT_YET, String("no names, networks or registries")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -319,7 +330,7 @@ struct _Stub(CloudAdapter, Movable):
     def public_mechanism(self) -> String:
         return self._mechanism.copy()
 
-    def check(self, r: Resource) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
         var l = List[Finding]()
         if r._oneof0_case == 1 and r.service.value().port == 1:
             l.append(
@@ -337,7 +348,7 @@ struct _Stub(CloudAdapter, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
         if self._bad_owner:
             owner = String("someone-else")
@@ -434,9 +445,9 @@ def _good() -> String:
         + IMG
         + String(',"port":8080,"public":{}},')
         + String('"uses":[{"target":{"resource":"batch"},"access":"CALL"}]},')
-        + String('{"id":"batch","job":{')
+        + String('{"id":"batch","containerJob":{')
         + IMG
-        + String(',"onDemand":{}}}')
+        + String('}}')
         + String("]}")
     )
 
@@ -463,8 +474,8 @@ def test_every_graph_finding_in_one_pass() raises:
         + String('"uses":[{"target":{"resource":"ghost"},"access":"CALL"},')
         + String('{"target":{"resource":"web"}},')
         + String('{"target":{"resource":"web","standard":"URL"},"access":"CALL"}]},')
-        # a job whose image is an unresolved build output
-        + String('{"id":"batch","job":{"image":{"output":{"step":"b","name":"img"}},"onDemand":{}}},')
+        # a container job whose image is an unresolved build output
+        + String('{"id":"batch","containerJob":{"image":{"output":{"step":"b","name":"img"}}}},')
         + String('{"id":"web","service":{') + IMG + String("}},")
         # a duplicate id, a slash id, and no type
         + String('{"id":"web","service":{') + IMG + String("}},")
@@ -476,7 +487,7 @@ def test_every_graph_finding_in_one_pass() raises:
     var t = _all_text(f)
     for want in [
         'api|service.env.A|ref to missing resource "nope"',
-        'api|service.env.B|"batch" (job) does not expose URL',
+        'api|service.env.B|"batch" (container_job) does not expose URL',
         "api|service.env.C|a named output is only for the escape hatch",
         "api|service.env.D|refers to its own resource",
         'api|service.env.E|release parameter "region" is unresolved',
@@ -485,7 +496,7 @@ def test_every_graph_finding_in_one_pass() raises:
         'api|uses[1]|service "web" does not accept access ACCESS_UNSET',
         "api|uses[2]|access is granted to a resource, not to one of its outputs",
         'api|uses[2]|a second edge from the identity of "api" to web; the first is uses[1] of "api"',
-        "batch|job.image|the image is a build output that was not resolved",
+        "batch|container_job.image|the image is a build output that was not resolved",
         "web|id|duplicate id",
         "a/b|id|an id is lowercase letters, digits and '-' only",
         "empty|body|resource 'empty' has no type",
@@ -518,7 +529,7 @@ def test_coverage_and_limits_refuse_before_lowering() raises:
     assert_true(
         _has(
             text,
-            'resource "batch": job (PORTABLE): no adapter in cloud "lite"'
+            'resource "batch": container_job (PORTABLE): no adapter in cloud "lite"'
             " (NOT_YET: no runner for jobs)",
         ),
         text,
@@ -628,16 +639,16 @@ def test_id_grammar_platform_and_secret_rules() raises:
         # cloud runs it is the cloud's question, checked below)
         + String('{"id":"bad-plat","service":{"image":{"digest":"sha256:01","platform":"amd64"}}},')
         + String('{"id":"mac","service":{"image":{"digest":"sha256:01","platform":"darwin/arm64"}}},')
-        + String('{"id":"ok-plat","job":{"image":{"digest":"sha256:02","platform":"linux/amd64"},"onDemand":{}}},')
-        # a service and a job that set one variable by env AND by secret_env,
-        # a secret with no name, and a job env that is unresolved or dangling
+        + String('{"id":"ok-plat","containerJob":{"image":{"digest":"sha256:02","platform":"linux/amd64"}}},')
+        # a service and a container job that set one variable by env AND by secret_env,
+        # a secret with no name, and a container job env that is unresolved or dangling
         + String('{"id":"svc","service":{') + IMG
         + String(',"env":{"DB":{"literal":"x"}},')
         + String('"secretEnv":{"DB":{"name":"db"},"EMPTY":{}}}},')
-        + String('{"id":"cron","job":{') + IMG
+        + String('{"id":"cron","containerJob":{') + IMG
         + String(',"env":{"REGION":{"param":"region"},"API":{"ref":{"resource":"ghost","standard":"URL"}},')
         + String('"TOKEN":{"literal":"t"}},')
-        + String('"secretEnv":{"TOKEN":{"name":"tok"}},"onDemand":{}}}')
+        + String('"secretEnv":{"TOKEN":{"name":"tok"}}}}')
         + String("]}")
     )
     var f = graph_findings(Catalog.v1(), _list(json))
@@ -651,10 +662,10 @@ def test_id_grammar_platform_and_secret_rules() raises:
         "abcdefghijklmnopqrstuvwxy|id|id is 25 bytes; at most 24",
         'bad-plat|service.image.platform|platform "amd64" is not <os>/<cpu> (for example linux/amd64)',
         "svc|service.secret_env.DB|the variable is set by env and by secret_env; set it in one",
-        "svc|service.secret_env.EMPTY|a secret reference with no name",
-        'cron|job.env.REGION|release parameter "region" is unresolved',
-        'cron|job.env.API|ref to missing resource "ghost"',
-        "cron|job.secret_env.TOKEN|the variable is set by env and by secret_env; set it in one",
+        "svc|service.secret_env.EMPTY|a secret reference with no name and no secret",
+        'cron|container_job.env.REGION|release parameter "region" is unresolved',
+        'cron|container_job.env.API|ref to missing resource "ghost"',
+        "cron|container_job.secret_env.TOKEN|the variable is set by env and by secret_env; set it in one",
     ]:
         assert_true(_has(t, String(want)), String("missing: ") + String(want) + "\n" + t)
     assert_equal(len(f), 12, "exactly the findings above, each once:\n" + t)
@@ -669,8 +680,8 @@ def test_id_grammar_platform_and_secret_rules() raises:
     var pj = (
         String('{"resource":[')
         + String('{"id":"mac","service":{"image":{"digest":"sha256:01","platform":"darwin/arm64"}}},')
-        + String('{"id":"ok-plat","job":{"image":{"digest":"sha256:02","platform":"linux/amd64"},"onDemand":{}}},')
-        + String('{"id":"dflt","job":{"image":{"digest":"sha256:03"},"onDemand":{}}}')
+        + String('{"id":"ok-plat","containerJob":{"image":{"digest":"sha256:02","platform":"linux/amd64"}}},')
+        + String('{"id":"dflt","containerJob":{"image":{"digest":"sha256:03"}}}')
         + String("]}")
     )
     var pf = validate_for(reg, full, _list(pj))
@@ -700,7 +711,7 @@ def test_a_partial_apply_reports_landed_and_pending() raises:
     var json = (
         String('{"resource":[')
         + String('{"id":"api","service":{') + IMG + String(',"port":8080}},')
-        + String('{"id":"batch","job":{') + IMG + String(',"onDemand":{}}}')
+        + String('{"id":"batch","containerJob":{') + IMG + String('}}')
         + String("]}")
     )
     var cloud = _Stub(String("full"), True, fail_create=String("batch/run"))

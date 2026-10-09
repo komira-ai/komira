@@ -1,0 +1,53 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Firebase Cloud Messaging HTTP v1: `messages:send` of a content-blind wake
+# (`id`, `kind`, `source`, nothing else) to one registration token, with the
+# answer read as ACCEPTED, DEAD, TRANSIENT or REFUSED.
+#
+# FCM v1 has no googleapis proto (only a discovery document), so the one REST
+# call is written here over komira_http_client, with its bearer token from a
+# komira_gcp_core `GcpTokenSource` (Application Default Credentials with the
+# firebase.messaging scope in production) and its error envelope read by
+# komira_gcp_core's `parse_gcp_status`, which never echoes a body.
+#
+# Welded tests:
+#   test_fcm_message   the request body byte for byte (data-only, the data
+#                      map exactly id/kind/source), escaping, every refusal,
+#                      the path; and the token request ADC sends carrying
+#                      exactly the firebase.messaging scope (over a scripted
+#                      metadata server).
+#   test_fcm_outcome   the answer table: 2xx, 404 and UNREGISTERED (DEAD),
+#                      429 and 5xx (TRANSIENT, Retry-After and RetryInfo),
+#                      400/401/403 (REFUSED), no body text in any detail,
+#                      and a send with no answer: TRANSIENT for every
+#                      failure but HttpError[URL_INVALID], which raises.
+#   test_fcm_loopback  `FcmClient` over a real KernelTcpConnector against a
+#                      fake FCM served by komira_http_server on 127.0.0.1:
+#                      the request as it arrived, each answer's outcome, a
+#                      closed port as TRANSIENT, a token-mint failure that
+#                      raises naming only the status and sends nothing, an
+#                      https endpoint over a plaintext connector that raises,
+#                      and the production ADC entry's metadata request
+#                      carrying exactly the firebase.messaging scope.
+mojo_library(
+    name = "komira_gcp_fcm",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
+        "//src/komira_retry:komira_retry",
+    ],
+    test_srcs = [
+        "tests/test_fcm_message.mojo",
+        "tests/test_fcm_outcome.mojo",
+        "tests/test_fcm_loopback.mojo",
+    ],
+    test_deps = [
+        "//src/komira_http_server:komira_http_server",
+        "//src/tests/e2e/komira_http_tls_e2e:komira_http_tls_e2e",
+    ],
+    visibility = ["PUBLIC"],
+)

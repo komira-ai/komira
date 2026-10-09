@@ -111,7 +111,7 @@ from .split import (
 )
 from .term_dict import TermDictionary, TermInfo
 
-from komira_lz4.codec import lz4_decompress
+from komira_compression.lz4 import lz4_decompress
 
 
 # =============================================================================

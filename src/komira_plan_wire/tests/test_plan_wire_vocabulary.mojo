@@ -159,16 +159,16 @@ def test_countless_space_totals_are_pinned() raises:
     # or this library's build goes red. If this line collides in a merge,
     # ⛔ DO NOT PICK A SIDE — both sides' numbers are wrong; re-run the
     # generator over the MERGED sources and read the constant.
-    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 365, "total published members")
+    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 352, "total published members")
     assert_equal(AGG_FN_WIRE_MEMBERS, 37, "AGG_* has no engine count constant")
-    assert_equal(PLAN_WIRE_SPACE_COUNT, 33, "enumerated tag spaces")
+    assert_equal(PLAN_WIRE_SPACE_COUNT, 32, "enumerated tag spaces")
     # ArrowType has no engine count constant either, and it is the space LEG 2
     # of the round trip compares. Its members are declared in a shape a
     # module-level regex matches zero of — `    comptime NULL = ArrowType(0)`:
     # indented, inside the struct body, no type annotation, a ctor call rather
     # than a literal — so the space is registered explicitly.
     assert_equal(
-        ARROW_TYPE_WIRE_MEMBERS, 51, "ArrowType has no engine count constant"
+        ARROW_TYPE_WIRE_MEMBERS, 50, "ArrowType has no engine count constant"
     )
     assert_equal(JOIN_TYPE_WIRE_MEMBERS, 7, "JOIN_* has no engine count constant")
     assert_equal(

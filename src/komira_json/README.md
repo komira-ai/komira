@@ -67,3 +67,20 @@ for i in range(obj.num_members()):
     keys += obj.key_at(i)
 assert_equal(keys, "ba")
 ```
+
+Refuse a document that names a member twice (the parser keeps both; formats
+such as JWS, JWT and JWK require a reader to refuse them). Names are compared
+after unescaping, at every depth:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_json import parse_json_value, refuse_duplicate_keys
+
+refuse_duplicate_keys(parse_json_value('{"a": {"x": 1}, "b": {"x": 2}}'))
+var message = String()
+try:
+    refuse_duplicate_keys(parse_json_value('{"a": 1,\n "\\u0061": 2}'))
+except e:
+    message = String(e)
+assert_equal(message, "JsonError: duplicate object key 'a' at line 2")
+```

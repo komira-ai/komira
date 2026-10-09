@@ -195,12 +195,15 @@ _API_CLIENT_CLOSURE = _API_CLIENT_ROOTS + [
     "google/api/launch_stage.proto",
 ]
 
-# IAM v1 (the service accounts, custom roles and service-account IAM
-# policies of the generated komira_gcp_iam): the root and its import
-# closure, google/protobuf/* excepted. :iam_admin_v1 refuses this list unless
-# it is exactly that closure.
+# IAM (the service accounts, custom roles and service-account IAM policies
+# of IAM v1, and the workload identity pool providers, for the generated
+# komira_gcp_iam): the roots and their import closure, google/protobuf/*
+# excepted. :iam_admin_v1 refuses this list unless it is exactly that
+# closure. The workload identity pools are in the pin as v1beta only
+# (google/iam/v1beta); there is no google/iam/v1 file for them.
 _IAM_ADMIN_V1_ROOTS = [
     "google/iam/admin/v1/iam.proto",
+    "google/iam/v1beta/workload_identity_pool.proto",
 ]
 
 _IAM_ADMIN_V1_CLOSURE = _IAM_ADMIN_V1_ROOTS + [
@@ -213,6 +216,8 @@ _IAM_ADMIN_V1_CLOSURE = _IAM_ADMIN_V1_ROOTS + [
     "google/iam/v1/iam_policy.proto",
     "google/iam/v1/options.proto",
     "google/iam/v1/policy.proto",
+    "google/longrunning/operations.proto",
+    "google/rpc/status.proto",
     "google/type/expr.proto",
 ]
 
@@ -265,8 +270,8 @@ _SERVICEUSAGE_V1_CLOSURE = _SERVICEUSAGE_V1_ROOTS + [
     "google/rpc/status.proto",
 ]
 
-# Cloud Run Admin v2 (services, revisions, jobs, executions and their
-# long-running operations, for the generated komira_gcp_run): the roots and
+# Cloud Run Admin v2 (services, revisions, jobs, executions, worker pools and
+# their long-running operations, for the generated komira_gcp_run): the roots and
 # their import closure, google/protobuf/* excepted. :run_v2 refuses this list
 # unless it is exactly that closure, so a bump that changes the imports fails
 # the build until the list follows.
@@ -275,6 +280,7 @@ _RUN_V2_ROOTS = [
     "google/cloud/run/v2/job.proto",
     "google/cloud/run/v2/revision.proto",
     "google/cloud/run/v2/service.proto",
+    "google/cloud/run/v2/worker_pool.proto",
 ]
 
 _RUN_V2_CLOSURE = _RUN_V2_ROOTS + [
@@ -287,12 +293,14 @@ _RUN_V2_CLOSURE = _RUN_V2_ROOTS + [
     "google/api/routing.proto",
     "google/cloud/run/v2/condition.proto",
     "google/cloud/run/v2/execution_template.proto",
+    "google/cloud/run/v2/instance_split.proto",
     "google/cloud/run/v2/k8s.min.proto",
     "google/cloud/run/v2/revision_template.proto",
     "google/cloud/run/v2/status.proto",
     "google/cloud/run/v2/task_template.proto",
     "google/cloud/run/v2/traffic_target.proto",
     "google/cloud/run/v2/vendor_settings.proto",
+    "google/cloud/run/v2/worker_pool_revision_template.proto",
     "google/iam/v1/iam_policy.proto",
     "google/iam/v1/options.proto",
     "google/iam/v1/policy.proto",
@@ -304,7 +312,8 @@ _RUN_V2_CLOSURE = _RUN_V2_ROOTS + [
 # Cloud Run Admin v2's service configuration. Its `http.rules` bind the
 # google.longrunning.Operations mixin to Run's own paths
 # (`/v2/{name=projects/*/locations/*/operations/*}`), which no .proto
-# states; komira_gcp_run's tests hold its operations client to them.
+# states; komira_gcp_run generates its operations client from them
+# (mojo_gcp_client's `service_config`).
 _RUN_V2_SERVICE_CONFIG = ["google/cloud/run/v2/run_v2.yaml"]
 
 # Cloud Scheduler v1 (jobs, for the generated komira_gcp_cloudscheduler): the
@@ -486,7 +495,7 @@ proto_check(
     visibility = ["PUBLIC"],
 )
 
-# The IAM v1, Resource Manager v3 and Service Usage v1 protos, for a
+# The IAM, Resource Manager v3 and Service Usage v1 protos, for a
 # consumer, as :logging_v2 above.
 proto_check(
     name = "iam_admin_v1",

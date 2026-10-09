@@ -526,9 +526,9 @@ def build_tdom_graph[
             # 4) also fold in lb/rb (one or both may have been the
             # bridging element; either way they belong in keep now).
             if not classes[keep_idx].contains(lb):
-                classes[keep_idx].bindings.append(lb.copy())
+                classes[keep_idx].bindings.append(lb.copy())  # cov: unreachable classes stay disjoint, so one touched class held lb and the drained one rb; keep now holds both
             if not classes[keep_idx].contains(rb):
-                classes[keep_idx].bindings.append(rb.copy())
+                classes[keep_idx].bindings.append(rb.copy())  # cov: unreachable classes stay disjoint, so one touched class held lb and the drained one rb; keep now holds both
 
             # 5) remap any prior edge_to_class entries that pointed at
             # `drain_idx` to `keep_idx`. After this loop the invariant
@@ -774,7 +774,7 @@ def composite_ndv_for_relation[
             seen_cols.add(col)
             ndv_i = provider.distinct_count_for(rel_id, col).ndv
             ndv_product = saturating_mul(ndv_product, ndv_i)
-        return min(ndv_product, |rel_id|)
+        return min(max(ndv_product, 1), |rel_id|)
 
     Where `|rel_id|` is the relation's post-filter cardinality (from
     `JoinRelation.cardinality`, mirroring DuckDB's
@@ -852,6 +852,10 @@ def composite_ndv_for_relation[
         # Defensive: cost-model identity. A 0-row relation has a
         # composite NDV of 0; but downstream cost paths expect >= 1.
         rel_card = 1
+    if ndv_product < 1:
+        # A provider NDV of 0 (one that bypasses the ColumnStatsValue
+        # clamp) makes the product 0; floor it like `rel_card`.
+        ndv_product = 1
     if ndv_product > rel_card:
         return rel_card
     return ndv_product
@@ -883,9 +887,17 @@ def composite_ndv_pk_side[
                          tie-break (e.g. prefer larger cardinality side
                          as the FK side / smaller as PK).
 
+    A bucket endpoint outside `chain.relations` answers -1 (no FK-PK
+    signal); `build_pair_buckets` never emits one.
+
     It surfaces this as a convenience. It does NOT alter cost
     model behavior; pure read.
     """
+    var n_rel = len(chain.relations)
+    if bucket.rel_a < 0 or bucket.rel_a >= n_rel:
+        return -1
+    if bucket.rel_b < 0 or bucket.rel_b >= n_rel:
+        return -1
     var ndv_a = composite_ndv_for_relation(chain, bucket, bucket.rel_a, provider)
     var ndv_b = composite_ndv_for_relation(chain, bucket, bucket.rel_b, provider)
     var card_a = chain.relations[bucket.rel_a].cardinality

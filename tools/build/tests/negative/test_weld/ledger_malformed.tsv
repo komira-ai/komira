@@ -1,2 +1,3 @@
 functional/test_weld/src/komira_a/tests/test_dead.mojo	planted: the BUCK file names it only in a comment
 functional/test_weld/src/komira_b
+functional/test_weld/src/tests/helpers/komira_e	planted: a test-only package with a source and no test, named by its path under tests/<kind>/
