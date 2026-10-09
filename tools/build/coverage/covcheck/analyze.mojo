@@ -47,8 +47,15 @@ and the findings: the one computation both `covcheck report` and
    whose line report gives no branch record (its branches were not read,
    and would count as none),
    `ExemptionWithoutReason` and `StaleExemption`.
-10. Report only (no number or finding depends on it yet; numbered 10
-   because steps 8 and 9 belong to changes that land before this one):
+8. Test-only packages: the findings of a package that is one of
+   `info_packages` (`--info-package`, the directories of policy.bzl's
+   COVERAGE_INFO_ONLY_DIRS) or under one are moved to `info_findings`. Such
+   a package is measured and reported as any other, but held to no target:
+   its findings are information, never counted (the conclusion, a gate's
+   exit and the annotation level read `findings` alone): a `Regression`
+   below a row it has included. The proposed ratchet gives it no row, so
+   a test-only package has no floor.
+9. Report only (no number or finding depends on it yet):
    each kept file with a line record is read for the functions it declares
    (decls.mojo), and every function with a body none of whose lines has a
    record is listed in `unrecorded_functions` with its class (decls.mojo:
@@ -96,6 +103,7 @@ from covcheck.stats import (
     Finding,
     PackageStats,
     conclusion_of,
+    is_info_package,
 )
 from covcheck.text import join, line_key, read_text, render_bp, sort_by_keys, sort_strings
 
@@ -130,6 +138,8 @@ struct Options(Copyable, Movable):
     # Repository paths of test sources outside `<package>/tests/`, set aside
     # as those are (`gate --test-source`).
     var test_sources: Dict[String, Bool]
+    # The directories of test-only packages (`--info-package`; step 8).
+    var info_packages: List[String]
 
     def __init__(out self):
         self.mode = String(MODE_NEUTRAL)
@@ -138,6 +148,7 @@ struct Options(Copyable, Movable):
         self.only_package = String("")
         self.strip_prefixes = List[String]()
         self.test_sources = Dict[String, Bool]()
+        self.info_packages = List[String]()
 
 
 struct Sources(Copyable, Movable):
@@ -164,7 +175,7 @@ struct Sources(Copyable, Movable):
 
 struct UnrecordedFunction(Copyable, Movable):
     """A function of a measured file none of whose lines has a record
-    (step 10): its package, file, `def` line, name, `kind` (decls.mojo's
+    (step 9): its package, file, `def` line, name, `kind` (decls.mojo's
     class) and `lines`, its executable lines that carry no exemption marker
     with a reason."""
 
@@ -190,7 +201,10 @@ struct Analysis(Copyable, Movable):
     whether each is a file no report named (counted from its source);
     `packages`
     is sorted by package; `exemptions`, `mutants` and
-    `unrecorded_functions` by path then line."""
+    `unrecorded_functions` by path then line.
+    `info_dirs` are the options' `info_packages`, `info_packages` the
+    measured packages they cover (in `packages` order) and `info_findings`
+    those packages' findings, which `findings` does not hold (step 8)."""
 
     var mode: String
     var target_bp: Int
@@ -203,6 +217,9 @@ struct Analysis(Copyable, Movable):
     var mutant_packages: List[String]
     var findings: List[Finding]
     var unrecorded_functions: List[UnrecordedFunction]
+    var info_dirs: List[String]
+    var info_packages: List[String]
+    var info_findings: List[Finding]
     var proposal: Ratchet
     var ignored_files: Int
     var excluded_test_files: Int
@@ -223,6 +240,9 @@ struct Analysis(Copyable, Movable):
         self.mutant_packages = List[String]()
         self.findings = List[Finding]()
         self.unrecorded_functions = List[UnrecordedFunction]()
+        self.info_dirs = List[String]()
+        self.info_packages = List[String]()
+        self.info_findings = List[Finding]()
         self.proposal = Ratchet()
         self.ignored_files = 0
         self.excluded_test_files = 0
@@ -367,6 +387,7 @@ def analyze(
     var a = Analysis()
     a.mode = opts.mode
     a.target_bp = opts.target_bp
+    a.info_dirs = opts.info_packages.copy()
     var errors = List[String]()
     var first_line = -1
     for r in range(len(reports)):
@@ -519,7 +540,7 @@ def analyze(
             f.absorb(bmerged[branch_of[path]])
         var text = sources.read(f.path)
         var markers = scan_markers(f.path, text)
-        # 10: before the exemptions take any record away; only with line
+        # 9: before the exemptions take any record away; only with line
         # records (branch records alone say nothing about lines).
         if f.line_found() > 0:
             var marked = Dict[Int, Bool]()
@@ -673,8 +694,15 @@ def analyze(
             + String("\x00") + findings[i].kind + String("\x00") + findings[i].metric
         )
     var forder = sort_by_keys(fkeys)
+    # 8: a test-only package's findings are information.
     for i in range(len(forder)):
-        a.findings.append(findings[forder[i]].copy())
+        if is_info_package(findings[forder[i]].package, opts.info_packages):
+            a.info_findings.append(findings[forder[i]].copy())
+        else:
+            a.findings.append(findings[forder[i]].copy())
+    for i in range(len(a.packages)):
+        if is_info_package(a.packages[i].package, opts.info_packages):
+            a.info_packages.append(a.packages[i].package)
 
     for i in range(len(a.packages)):
         ref p = a.packages[i]
@@ -689,6 +717,11 @@ def analyze(
         a.total.survived += p.survived
         a.total.timeout += p.timeout
         a.total.error += p.error
-    a.proposal = propose(ratchet, a.packages, repo)
+    # A test-only package gets no proposed row (step 8): it has no floor.
+    var floored = List[PackageStats]()
+    for i in range(len(a.packages)):
+        if not is_info_package(a.packages[i].package, opts.info_packages):
+            floored.append(a.packages[i].copy())
+    a.proposal = propose(ratchet, floored, repo)
     a.conclusion = conclusion_of(opts.mode, len(a.findings))
     return a^
