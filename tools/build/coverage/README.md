@@ -14,8 +14,10 @@ reviewer's approval (it does not check approval itself), and writes:
   ([The build gate](#the-build-gate)).
 
 Both commands run the same computation (`covcheck/analyze.mojo`),
-so the PR check and the build gate cannot disagree; a welded test holds the
-gate's JSON entry for a package equal to the report's.
+so the PR check and the build gate cannot disagree on the same reports; a
+welded test holds the gate's JSON entry for a package equal to the
+report's. The PR check reads the same reports, a library's `coverage_tests`
+runs included ([The coverage workflow](#the-coverage-workflow), step 4).
 
 | target | what it is |
 |---|---|
@@ -453,6 +455,26 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
    `summary.md` are the library's `[coverage][gate]`
    (`[coverage][gate][result]`, `[coverage][gate][summary]`).
 
+**The README's examples and the `mojo_test` targets a library names** are
+its tests too (`tools/build/mojo/README.md`, "Coverage builds"; line
+coverage only). The README's run is one more report, `[coverage][tests][readme]`,
+which names the program it ran under `buck-out/readme/`: not a repository
+file, so covcheck counts it outside the repository and only the library's
+lines it reached count. A library naming `coverage_tests` cannot depend on
+those tests (they depend on it), so its gate is the target
+`<name>_cov_gate` (as a library of the ledger's, below): it runs each
+named test's -O0 binary under kcov against the library's sources
+(`<name>_cov_gate[tests][<test>]`, through the same `cov_run.sh`) and runs
+the same gate over the library's reports and those
+(`<name>_cov_gate[gate]`). A named test's source is staged at its
+repository path: in the library's package it is a `--test-source`; in
+another package it is staged with a BUCK file at that package, so its
+lines are another package's, which the gate does not measure. The
+library's conda package waits for that gate and those runs. A named test
+must depend on the library directly and have a source main and no `args`
+(a coverage run passes none), or `<name>_cov_gate` fails at analysis
+(test 46's `covmt_stray_cov_gate`, `covmt_args_cov_gate`).
+
 Exit 0 writes the gate's marker. Exit 3 (enforce mode, a finding) fails the
 action with `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage
 gate]): covcheck gate exited 3`, `The conda package (<name>_conda) is not
@@ -559,6 +581,14 @@ is not a one-line change today:
   too) stages no source, so its gate is `NotMeasured` and fails in enforce
   mode; its hand-written code is never measured. It needs measuring (by
   its repository path) or a documented exemption.
+- **Open decision: files only a README or a `coverage_tests` run reaches,
+  in a library whose gate reads branch records.** Those runs give line
+  coverage only, so such a file has line records and no branch record:
+  `BranchUnmeasuredFile` (listed in census mode, failing in enforce mode).
+  `komira_scalar_arithmetic` has four such files (its README reaches them,
+  its one test does not). Before enforce, decide between branch records for
+  those runs, a test that reaches the files, or accepting the finding; the
+  gate does not change this today.
 
 **The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
 runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
@@ -774,8 +804,15 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    for coverage, only its conda package does), so a library is measured
    whatever its dependencies' coverage. A measured library whose records are
    read gives its entry's `cov/branch/*.info` paths when the entry is
-   `SUCCESS` (one per report; another count fails the job, as a tool
-   error). When its branch coverage actions failed, or its gate did (which
+   `SUCCESS` (one per report of a test, the README's `cov/tests/readme.xml`
+   left out: its run has no branch records; another count fails the job,
+   as a tool error). The README's report is read like a test's. For a
+   library naming `coverage_tests` (a second query,
+   `attrregexfilter(coverage_tests, '.', ...)`), the same build also asks
+   for `<name>_cov_gate[tests]`, the runs of those tests: that entry must
+   be `SUCCESS` (else the library is not measured) and its
+   `cov/tests/*.xml` are the library's reports too, so the check run reads
+   what its gate reads. When its branch coverage actions failed, or its gate did (which
    reads the same records with covcheck, so `report` could refuse them
    too), none of its records is read and it is listed as `branch not
    measured`, with the reason, in both summaries; the job stays green;

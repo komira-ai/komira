@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+
+# Tests 43 and 46: a mojo_test in another package than the library it
+# covers (//functional/coverage:covmt names it in `coverage_tests`), as an
+# end-to-end test under src/tests/ covers libraries of src/. Its coverage
+# binary is built whatever the switch says (coverage_debug, as a fixture of
+# the tests cell may pass), and covmt_cov_gate runs it against covmt.
+mojo_test(
+    name = "test_covmt_far",
+    srcs = ["tests/test_covmt_far.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    visibility = ["//functional/coverage:"],
+    deps = ["//functional/coverage:covmt"],
+)

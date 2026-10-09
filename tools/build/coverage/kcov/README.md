@@ -253,6 +253,11 @@ busybox sh <cov_run dir>/cov_run.sh <busybox> <gate_runner> <compiler_dir> <labe
 The action `mojo_cov_run` of a coverage build
 ([Coverage builds](../../mojo/README.md#coverage-builds)) runs one test's
 coverage binary under kcov and writes its report in repository paths. The
+same script runs a README's examples (`<test>` is the program's name in its
+line tables, `cov/tests/readme/readme_<import>.mojo`, and `<test_repo>`
+`buck-out/readme/<package>/readme_<import>.mojo`, which is no repository
+file) and, from a library's `<name>_cov_gate`, each `mojo_test` it names in
+`coverage_tests` (`<test>` the test's main as its package names it). The
 header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
 
 0. **Where the binary names the sources.** Every string in the test binary
