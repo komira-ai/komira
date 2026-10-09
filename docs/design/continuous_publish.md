@@ -1,6 +1,6 @@
 # Continuous publish: every package built, published to gamma, tested there, promoted to prod
 
-Status: design, not built (revision 3). Everything marked **EXISTS** names the code that does it on
+Status: design, not built (revision 4). Everything marked **EXISTS** names the code that does it on
 `main`; everything marked **PROPOSED** has no code yet. **Every name this document introduces is
 PROPOSED and absent from `main`:** `komira_test_emulator`, `EmulatorEndpoint`,
 `LoopbackOnlyConnector`, the `release_checks` attribute, the `[conda_status]` sub-target,
@@ -202,9 +202,13 @@ published build that is unsafe for anyone to keep solving to: a security defect,
   `release/yanked.textproto` there (`git show origin/main:release/yanked.textproto`). A re-run of
   an old commit checks out a tree whose own copy predates the yank, so reading the checked-out file
   would let the yanked bytes through. A tombstone that cannot be fetched or parsed fails the
-  publish; there is no fail-open path. The existing lower-build-number refusal does not cover this:
-  a re-run of the same commit produces the same build number, not a lower one, and that refusal
-  exists only at `prod`. Planted defect (S11): a re-run of a commit older than the tombstone commit,
+  publish; there is no fail-open path. The existing refusals ([ci.md](../ci.md), "Never backward")
+  cover part of this, at `prod` only. If a build later than the yanked one is already in `prod`, a
+  re-run of the yanked commit carries a lower number and is refused by number. If the yanked build
+  was the newest, the yank removes it, so the highest number left is the previous build's. A
+  re-run of the yanked commit then carries a higher number, descends from the newest remaining
+  build, and passes both refusals. `gamma` has neither refusal. The tombstone covers both cases at
+  both channels. Planted defect (S11): a re-run of a commit older than the tombstone commit,
   whose own tree does not name the file, is refused in `gamma` before any upload; a variant of kci
   that reads the checked-out file uploads it and turns the test red.
 - **What a yank never does.** It never removes anything from a consumer's lockfile, and it never
@@ -367,7 +371,9 @@ behind a wrapper script, a server's workers).
      needs `CAP_SETUID` in the parent namespace, which a uid-0 P0 has. Where P0 is not uid 0 (a
      developer's machine), the map is the single line `0 <caller uid> 1`, the only map an
      unprivileged writer may set; step 2's drop is skipped, and E runs as the developer's own
-     unprivileged uid outside. P0 then writes the go byte.
+     unprivileged uid outside. P0 then writes the go byte. This "is P0 uid 0" test only chooses
+     the map; the safety of the result is checked by step 3's outer-uid check, which has no
+     condition.
    - P1 makes its mounts private, mounts a fresh `/proc` (so `/proc` lists only the namespace's
      processes, by namespace pid), brings up `lo`, and runs the self-checks of
      [safety rule 3](#the-safety-rules).
@@ -379,17 +385,31 @@ behind a wrapper script, a server's workers).
    step 1's map makes 65534 a mapped uid. The probe's `uid` row proved this drop only in the
    worker's own user namespace ([ci.md](../ci.md#what-a-farm-test-action-can-do)), so it does not carry over;
    the `netns_loopback_only` row repeats it inside the namespace. **If the drop fails, the test
-   FAILS;** E never runs as uid 0, which step 1's map makes the worker's real uid 0. A self-check
-   reads E's `/proc/<pid>/status` from P1 and requires `Uid: 65534` in every field before the
-   readiness poll. Planted defect: a harness that skips the drop starts E as inner uid 0, and the
-   check turns the test red. `nobody` cannot write `TEST_TMPDIR`, so P1 creates the emulator's state
+   FAILS;** E never runs as uid 0, which step 1's map makes the worker's real uid 0 (checked in
+   step 3, from outside). `nobody` cannot write `TEST_TMPDIR`, so P1 creates the emulator's state
    directory under it and hands it to uid 65534 first. The emulator binds `127.0.0.1` on a port taken from the descriptor (in a private
    namespace no other process holds it). Its command line comes from a per-emulator descriptor: the
-   runtime, the entry point, the arguments, the readiness probe and the start-up budget.
+   runtime, the entry point, the arguments, the readiness probe, the start-up budget and the
+   environment keys E needs beyond the harness's fixed set (safety rule 3). E's environment is
+   built from that allowlist, never inherited. P1 starts E with every descriptor above 2 closed
+   except those on an explicit inherit list, empty in normal use.
 3. **Ready.** The harness polls the readiness route until a budget runs out, and requires the
    emulator's process to be alive after the answer. Running out of budget, or an answer from a process
    that has exited, fails the test, naming the emulator and the elapsed time. Each budget is
    measured, written in the descriptor, and kept well under the 600 s test-action timeout.
+   **Then the outer-uid check, by P0, with no condition.** P1 writes `ready` on a status pipe to P0
+   and waits for P0's verdict byte. P0 reads `/proc/<P1>/ns/pid` (P1's outer pid is the one `clone`
+   returned) and scans its own `/proc` for every other process whose `ns/pid` link is the same:
+   E and every G. It requires at least one, and requires each one's `Uid:` line in
+   `/proc/<pid>/status` to be non-zero in all four fields. It reads uids in the worker's user
+   namespace, so the answer does not depend on the map or on which branch chose it. The check runs
+   after the readiness answer, so the process that answered has already exec'd past `setpriv`'s
+   `setresuid`; it cannot catch the moment between fork and drop. The same rule holds on a farm
+   worker (outer uid 65534) and on a developer's machine (the developer's uid). *Planted:* (a) the
+   drop skipped; E is outer uid 0, red. (b) The "is P0 uid 0" test always answers no; on a uid-0
+   worker the map becomes `0 0 1`, the drop is skipped, E is outer uid 0, red. (c) A scan that
+   compares the wrong link and so matches no process would pass vacuously; "at least one" makes
+   it red.
 4. **Hand over.** The test receives an `EmulatorEndpoint`: a loopback IPv4 address and port, a
    `LoopbackOnlyConnector` (see the safety rules), and a static credential. For AWS that is
    `StaticCredsSource` with a fixed dummy key pair. For GCP it is `StaticTokenSource` with the
@@ -490,7 +510,9 @@ in the style of the generated `_no_env_reads` scan): a tier test may not name
 or managed-identity source. **The match is on the whole identifier**, not a substring, so
 `build_gcs_tls_connector` does not refuse `build_gcs_tls_connector_trusting`, which S7b may use. Its
 planted defects: a tier test that calls `process_creds_source` turns it red; a tier test that calls
-`build_gcs_tls_connector_trusting` stays green (a substring matcher would turn it red). The lint covers what a tier test names, not what a library does inside; the namespace of safety
+`build_gcs_tls_connector_trusting` stays green (a substring matcher would turn it red). It also refuses an emulator descriptor whose
+environment keys name a credential variable (the list in safety rule 3); planted: a descriptor
+listing `AWS_ACCESS_KEY_ID` turns it red. The lint covers what a tier test names, not what a library does inside; the namespace of safety
 rule 3 covers that.
 
 ### Which emulator covers which package
@@ -594,7 +616,8 @@ not reach, could show it.
      there and the choice goes to the project owner (question 10); the tier does not gate a release
      without it.
    - **The self-checks**, run by P1 at the start of every test, before the emulator starts (the
-     environment check on E runs right after E starts, before the readiness poll). Each failure
+     environment check on E and the outer-uid check run after E's readiness answer, before the
+     hand-over). Each failure
      fails the test, naming the check. Each one is listed with the defect it exists to catch, the
      planted form of that defect in S4, and why the check sees it. A check that also passes on the
      worker's own network is not a check of the namespace, so none of the network checks is "a
@@ -605,12 +628,21 @@ not reach, could show it.
        requires its own to differ. *Catches:* the clone without `CLONE_NEWNET`, or a re-exec that
        never entered the namespace. *Planted:* the shim with `CLONE_NEWNET` removed; the inodes are
        equal, and the check is red.
-     - **Only `lo`, and up.** `if_nameindex()` lists exactly one interface, `lo`, and its flags
-       include `IFF_UP`. *Catches:* a namespace that is not loopback-only (an interface moved or
-       created in it), and the same missing `CLONE_NEWNET` (a farm worker has outbound network, so
-       it has a second interface). *Planted:* the harness creates a dummy interface in the namespace
-       with an address and a default route; the list has two entries. A second planted defect, `lo`
-       left down, fails the flag check.
+     - **Only `lo` is usable, and it is up.** From `getifaddrs()`: `lo` has `IFF_UP`; every other
+       interface has `IFF_UP` clear and no IPv4 or IPv6 address; and `/proc/net/route` (the fresh
+       `/proc`, so P1's namespace) holds only its header line. It does not require `lo` to be the only interface:
+       a kernel with `ipip`, `sit`, `ip6_tunnel` or `gre` loaded gives every new namespace its
+       fallback tunnel devices (`tunl0`, `sit0`, `ip6tnl0`, `gre0` and others), down and
+       address-less, unless `net.core.fb_tunnels_only_for_init_net` is set, and such a namespace is
+       still loopback-only. The `netns_loopback_only` probe row reports the interface names it sees.
+       *Catches:* a namespace that is not loopback-only (an interface moved or created in it and
+       brought up), and the same missing `CLONE_NEWNET` (a farm worker has outbound network, so a
+       second interface is up with an address and a route). *Planted:* the harness creates a dummy
+       interface in the namespace with an address and a default route; it is up, holds an address,
+       and `/proc/net/route` has a line, so the check is red three ways. A second planted defect,
+       `lo` left down, fails the `lo` flag. *Green-expected row:* the harness creates a dummy
+       interface left down with no address (the shape of a fallback tunnel); the check stays green,
+       which kills the over-strict "exactly one interface" form.
      - **No route, by error code.** A non-blocking connect to a TEST-NET address of RFC 5737 and to
        each link-local metadata address (`IMDS_IPV4_HOST` in `komira_aws_core/imds_credentials.mojo`,
        `METADATA_IP` in `komira_gcp_core/token_wire.mojo`, the Azure IMDS address in
@@ -627,15 +659,24 @@ not reach, could show it.
        harness and empty, so no `~/.aws/credentials`, `~/.aws/config` or gcloud
        `application_default_credentials.json` can be found. *Catches:* the action's `HOME` passed
        through. *Planted:* the harness forwards the action's `HOME`; it is not under `TEST_TMPDIR`.
-     - **No credential variable,** in P1's environment and in E's (`/proc/<E>/environ`):
-       `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
-       `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_*`, `GOOGLE_APPLICATION_CREDENTIALS`,
-       `CLOUDSDK_CONFIG`, `GCE_METADATA_HOST`, `AZURE_*`, `IDENTITY_ENDPOINT`, `MSI_ENDPOINT`.
-       *Catches:* an environment inherited instead of built from the harness's allowlist.
-       *Planted:* the test target sets `AWS_ACCESS_KEY_ID` to a dummy value and the harness passes
-       the environment through; the check names the variable.
-     - **E is not root.** Harness step 2: `Uid: 65534` in every field of `/proc/<E>/status`, where P0
-       is uid 0. *Planted:* the drop skipped.
+     - **E's environment is exactly the allowlist.** Every key in `/proc/<E>/environ` is in the
+       harness's fixed set (`PATH`, `HOME`, `TMPDIR`, `LANG`) or in the keys E's descriptor names;
+       any other key fails the check, which names it. Read after the readiness answer, so E has
+       exec'd. *Catches:* an environment inherited instead of built from the allowlist, whatever
+       variables the action happens to carry. *Planted:* the harness passes the environment
+       through; the test target sets `KOMIRA_TIER_CANARY=1`, which no allowlist names, and the check
+       is red on it (and on every other inherited key). The lint refuses a descriptor whose keys
+       include a credential variable: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+       `AWS_SESSION_TOKEN`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_*`,
+       `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG`, `GCE_METADATA_HOST`, `AZURE_*`,
+       `IDENTITY_ENDPOINT`, `MSI_ENDPOINT`. *Planted:* a descriptor listing `AWS_ACCESS_KEY_ID`; the
+       lint test is red.
+     - **No credential variable in P1's environment.** P1 runs the package's own code under test,
+       which needs the test action's variables, so its environment is not rebuilt; this check is a
+       denylist (the names above) and says only that none of them is set. *Planted:* the test target
+       sets `AWS_ACCESS_KEY_ID` to a dummy value; the check names it.
+     - **No process in the namespace runs as outer uid 0.** Harness step 3, by P0, with no
+       condition. *Planted:* the drop skipped; the "is P0 uid 0" test forced to "no".
    - **The worker assumption, stated.** Farm actions run as uid 0 with outbound network
      ([ci.md](../ci.md#what-a-farm-test-action-can-do), rows `uid` and `egress`). Whether a worker is a
      cloud VM with an attached identity is **not verified here**. The design does not depend on the
@@ -675,7 +716,7 @@ explicit go. Everything else is code that publishes nothing on its own.
 | S2 | **Declare the 21 non-native libraries:** #1136, #1138, then three declare PRs. | Before merge: the PR's ledger check is red until the library leaves `PENDING_DECLARE`, and its `[release]` builds in the pull-request check. **Residual risk:** `install-set` runs only after merge, so the new name reaches `gamma` before any installed check; a failure stops `prod`, and `gamma` keeps the bad name. | **Go per PR:** a merged declare PR publishes permanent names to `gamma` and then `prod` |
 | S3a | **The cloud-check refusal, analysis half:** the `release_checks` label attribute and the `_conda_facts` refusal of an empty list; `NO_CLOUD_CHECK` in the ledger. | Planted: a cloud-family fixture library with `release_checks = []` turns `[release]` red; naming one target turns it green. **Residual risk until S10c:** the named target is not checked to exist, to reach the library or to be unquarantined; no cloud declare PR merges before S10c. | none |
 | S3 | **Native packaging,** #835 and its stack. Then declare the `NATIVE` and `DLOPEN` rows in ledger-sized PRs; each cloud declare PR depends on S3a, S10c and its family's suite. | As S2 (ledger check and `[release]` before merge; `install-set` after). For a cloud library, `[release]` is red without a check (S3a). The installed `.so` check is S12. | **Go:** the #835 decision, then per declare PR as in S2 |
-| S4 | **`komira_test_emulator`:** the namespace and its self-checks, process start as PID 1 with the two-line uid map and the drop to `nobody`, readiness, stop, `LoopbackOnlyConnector`, the tier lint; probe rows `netns_loopback_only` (required) and `ambient_identity` (reported). | Mutants, each turning a named test red. **Range:** the refusal test uses a counting inner connector and asserts zero inner connects for a TEST-NET address; rows for the byte-swapped form of `127.0.0.1` (refused), the addresses just below and just above `127.0.0.0/8` (refused) and its last address (accepted) kill a byte-order mutant and the edge mutants. **Killed harness:** an outer test creates a pipe, starts a harness process P0 whose fake emulator starts a grandchild that calls `setsid`; P0, P1, E and G all inherit the pipe's write end, and the outer test closes its own. The test SIGKILLs P0, the outermost process (as the probe's `pdeathsig` row does), and requires EOF on the pipe within 10 s: EOF arrives only when every holder of the write end is gone, in any namespace, so the oracle does not depend on the mechanism it checks. Two mutants, each red on its own: dropping P1's death signal (`PR_SET_PDEATHSIG`; util-linux's `--kill-child`) leaves P1 alive, so no EOF; dropping `CLONE_NEWPID` with the death signal kept kills P1 but leaves G, which is not P1's child, so no EOF (that mutant is also caught earlier by the PID 1 self-check, so the test runs it with that check disabled and step 6's own `getpid() == 1` guard kept). Neither link masks the other. **Normal stop:** a fake emulator whose G calls `setsid` and writes its namespace pid to the state directory; after stop, `kill(G, 0)` answers `ESRCH` and the fresh `/proc` holds only pid 1. The mutant that stops by signalling E's process group only (no `kill(-1, SIGKILL)` sweep) leaves G alive, and both assertions turn red. **Readiness:** against a fake emulator that never answers, "not ready treated as ready" and "budget ignored" each turn the readiness test red (it expects a failure naming the emulator within the budget); against one that answers once and exits, dropping the alive-after-answer check turns it red. **No skip:** a descriptor pointing at a missing file turns the test red. **Namespace and self-checks:** each self-check of safety rule 3 with its own planted defect, as listed there: `CLONE_NEWNET` removed (red on the namespace inode and the interface list), a dummy interface with a default route (red on the interface list and on `ENETUNREACH`), `lo` left down, `CLONE_NEWPID` removed (red on PID 1), the action's `HOME` forwarded, a credential variable forwarded, the drop to `nobody` skipped. **Lint:** a tier test calling `process_creds_source` turns red; one calling `build_gcs_tls_connector_trusting` stays green (whole-identifier match). | none |
+| S4 | **`komira_test_emulator`:** the namespace and its self-checks, process start as PID 1 with the two-line uid map and the drop to `nobody`, the inherit list and the allowlisted environment, readiness and the outer-uid check, stop, `LoopbackOnlyConnector`, the tier lint; probe rows `netns_loopback_only` (required) and `ambient_identity` (reported). | Mutants, each turning a named test red. **Range:** the refusal test uses a counting inner connector and asserts zero inner connects for a TEST-NET address; rows for the byte-swapped form of `127.0.0.1` (refused), the addresses just below and just above `127.0.0.0/8` (refused) and its last address (accepted) kill a byte-order mutant and the edge mutants. **Killed harness:** an outer test creates a pipe and starts P0 with the pipe's write end W on the harness's inherit list (step 2), so W reaches P1, E and G while every other descriptor is closed; the outer test closes its own copy of W. The fake emulator E starts a grandchild G that calls `setsid`. P1, E and G each write one byte naming themselves (`P`, `E`, `G`) through W, then block in `pause()`; P1 writes after the readiness answer and never reaches step 6, so its body blocks until it is killed. **Armed first:** the outer test reads until it holds all three bytes, within the start-up budget; EOF or the budget before that fails the test as "oracle not armed", never as a pass, and each byte proves its writer was alive and held W. Only then does it SIGKILL P0, the outermost process (as the probe's `pdeathsig` row does), and require EOF within 10 s: EOF arrives only when every holder of W is gone, in any namespace, so the oracle does not depend on the mechanism it checks. On red, the outer test names and SIGKILLs every process whose `/proc/<pid>/fd` links to the pipe's inode, so a mutant run leaves nothing behind. Three mutants, each red as written: (1) P1's death signal dropped (`PR_SET_PDEATHSIG`; util-linux's `--kill-child`): the three bytes arrive, P1 outlives P0 holding W, and it cannot finish its body and stop everything itself because the body blocks, so no EOF. (2) `CLONE_NEWPID` dropped with the death signal kept: without a new PID namespace the fresh-`/proc` mount fails, the PID 1 check fails, and the outer-uid scan matches every process on the worker; each would fail the test before the oracle is armed, so this run bypasses the mount and disables those two checks, keeping step 6's own `getpid() == 1` guard; the three bytes arrive, the kill takes P1 but leaves E and G, re-parented outside, holding W, so no EOF. (3) A harness that ignores the inherit list and closes W before exec: E's and G's bytes never arrive, so the read ends in the budget (P1 still holds W) or in EOF (it lost W too) before all three bytes, and the test is red as not armed. Neither of the first two links masks the other. **Normal stop:** a fake emulator whose G calls `setsid` and writes its namespace pid to the state directory; after stop, `kill(G, 0)` answers `ESRCH` and the fresh `/proc` holds only pid 1. The mutant that stops by signalling E's process group only (no `kill(-1, SIGKILL)` sweep) leaves G alive, and both assertions turn red. **Readiness:** against a fake emulator that never answers, "not ready treated as ready" and "budget ignored" each turn the readiness test red (it expects a failure naming the emulator within the budget); against one that answers once and exits, dropping the alive-after-answer check turns it red. **No skip:** a descriptor pointing at a missing file turns the test red. **Namespace and self-checks:** each self-check of safety rule 3 with its own planted defect, as listed there: `CLONE_NEWNET` removed (red on the namespace inode and the interface list), a dummy interface with a default route (red on the interface list and on `ENETUNREACH`), `lo` left down, a down address-less dummy interface (green-expected: the fallback-tunnel shape), `CLONE_NEWPID` removed (red on PID 1), the action's `HOME` forwarded, the environment passed through (red on `KOMIRA_TIER_CANARY`), a credential variable set in P1's environment, the drop to `nobody` skipped and the "is P0 uid 0" test forced to "no" (each red on the outer-uid check). **Lint:** a tier test calling `process_creds_source` turns red; a descriptor whose environment keys include `AWS_ACCESS_KEY_ID` turns red; one calling `build_gcs_tls_connector_trusting` stays green (whole-identifier match). | none |
 | S5 | **moto, pinned wheels,** with the first AWS suite: STS through the chain, s3, sqs, secretsmanager, `komira_objectstore_s3` | A planted serialization bug (a required parameter dropped from `ReceiveMessage`) turns the round trip red. The corrupted-signature mutant with moto's authentication on decides whether the tier claims SigV4. | **Go (one-time ruling):** moto over LocalStack, and third-party emulator packages as build inputs (decisions 3 and 5) |
 | S6 | **The remaining AWS packages:** round-trip tables for the other client-mode services, the pure-mode shim, and the `komira_aws_metrics` probe | a planted bug per package (for example, a pagination token not echoed in `ListObjectsV2` or `Scan`) | none |
 | S7 | **GCP:** the Firestore emulator (pinned JRE and jar) for the document client and firestore_db; storage-testbench's gRPC plaintext checked, then `komira_gcp_storage`'s unary methods | a planted precondition bug (an ignored `currentDocument.exists`) turns the Firestore suite red; a planted generation-match bug (an ignored `if_generation_match` on DeleteObject) turns the storage suite red | **Go:** the Firestore emulator's redistribution terms checked and accepted |
