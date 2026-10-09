@@ -434,7 +434,7 @@ def scan_csv_phase1[
             continue
 
         # Unreachable
-        pos = pos + 1
+        pos = pos + 1  # cov: unreachable every FSA state arm above ends in continue
 
     # Flush the last in-progress cell + row (if the file doesn't end with
     # a trailing newline).
@@ -752,7 +752,7 @@ def scan_csv_phase2_movemask[
             continue
 
         # Unreachable
-        pos = pos + 1
+        pos = pos + 1  # cov: unreachable every FSA state arm above ends in continue
 
     if state == CSV_STATE_QUOTED or state == CSV_STATE_POSIX_ESCAPE:
         raise Error(
@@ -1128,7 +1128,7 @@ def scan_csv_phase3_pclmulqdq[
             pending_bits = pending_bits & (pending_bits - UInt64(1))
             # Re-check loop invariant before stepping FSA.
             if pos >= n:
-                break
+                break  # cov: unreachable a candidate bit names a byte of a full 64-byte chunk, so pos < n
         elif chunk_valid and pending_bits == UInt64(0) and pos < chunk_base + 64:
             # Fast-forward: no more candidates in this chunk.  Safe to
             # jump to chunk-end ONLY if the FSA state is "stable" (i.e.
@@ -1284,7 +1284,7 @@ def scan_csv_phase3_pclmulqdq[
             continue
 
         # Unreachable
-        pos = pos + 1
+        pos = pos + 1  # cov: unreachable every FSA state arm above ends in continue
 
     if state == CSV_STATE_QUOTED or state == CSV_STATE_POSIX_ESCAPE:
         raise Error(
@@ -1549,7 +1549,7 @@ def scan_csv_phase1_into_cells[
             state = CSV_STATE_STANDARD
             continue
 
-        pos = pos + 1
+        pos = pos + 1  # cov: unreachable every FSA state arm above ends in continue
 
     if state == CSV_STATE_QUOTED or state == CSV_STATE_POSIX_ESCAPE:
         raise Error(
@@ -1778,7 +1778,7 @@ def scan_csv_phase2_movemask_into_cells[
             state = CSV_STATE_STANDARD
             continue
 
-        pos = pos + 1
+        pos = pos + 1  # cov: unreachable every FSA state arm above ends in continue
 
     if state == CSV_STATE_QUOTED or state == CSV_STATE_POSIX_ESCAPE:
         raise Error(
@@ -2094,7 +2094,7 @@ def scan_csv_phase2_movemask_projected[
             state = CSV_STATE_STANDARD
             continue
 
-        pos = pos + 1
+        pos = pos + 1  # cov: unreachable every FSA state arm above ends in continue
 
     if state == CSV_STATE_QUOTED or state == CSV_STATE_POSIX_ESCAPE:
         raise Error(
@@ -2250,7 +2250,7 @@ def scan_csv_phase3_pclmulqdq_into_cells[
                 pos = target
             pending_bits = pending_bits & (pending_bits - UInt64(1))
             if pos >= n:
-                break
+                break  # cov: unreachable a candidate bit names a byte of a full 64-byte chunk, so pos < n
         elif chunk_valid and pending_bits == UInt64(0) and pos < chunk_base + 64:
             if (
                 state == CSV_STATE_STANDARD
@@ -2408,7 +2408,7 @@ def scan_csv_phase3_pclmulqdq_into_cells[
             state = CSV_STATE_STANDARD
             continue
 
-        pos = pos + 1
+        pos = pos + 1  # cov: unreachable every FSA state arm above ends in continue
 
     if state == CSV_STATE_QUOTED or state == CSV_STATE_POSIX_ESCAPE:
         raise Error(

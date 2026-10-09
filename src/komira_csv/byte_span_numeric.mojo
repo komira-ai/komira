@@ -503,7 +503,7 @@ def fast_parse_float64_decimal(cell: Span[UInt8, _]) -> Optional[Float64]:
     # Total mantissa digits must fit in 16 (the n_digits SIMD cap)
     # and frac_len must fit in the _POW10 table.
     if int_len + frac_len > 16 or frac_len >= _POW10_F64_SIZE:
-        return None
+        return None  # cov: unreachable n <= 17 leaves at most 16 digits, and int_len >= 1 caps frac_len at 15
 
     # Concatenated mantissa view: we want to parse digits at
     # positions [start, dot_pos) ++ [frac_start, n) as one UInt64.

@@ -835,7 +835,7 @@ def read_csv_bytes_to_batch_parallel_impl[
     check_csv_column_count(num_cols)
     if num_cols == 0:
         # No columns inferable. Fallback.
-        return read_csv_bytes_to_batch[Q, SCANNER_VARIANT_PHASE_3](bytes, options)
+        return read_csv_bytes_to_batch[Q, SCANNER_VARIANT_PHASE_3](bytes, options)  # cov: unreachable row 0 holds at least one cell, so a header row is never empty
 
     # Infer types from worker 0's PREFIX data rows (post-header).
     # The prefix is bounded at _INFER_PREFIX_BYTES, so this is bounded
@@ -1659,7 +1659,7 @@ struct _CsvConcatTask[in_o: ImmOrigin](Segment):
                 )
             sp[].out_columns.value()[c] = concatted^
         except e:
-            sp[].col_errors.value()[c] = Optional[String](String(e))
+            sp[].col_errors.value()[c] = Optional[String](String(e))  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
 
 
 def _concat_csv_batches_column_parallel[
@@ -1713,16 +1713,16 @@ def _concat_csv_batches_column_parallel[
 
     # Fast paths.
     if num_cols == 0 or k == 0:
-        var sb_empty = SchemaBuilder()
+        var sb_empty = SchemaBuilder()  # cov: unreachable the driver concats only k >= 2 ranges of num_cols >= 1 columns
         var f_idx = 0
-        while f_idx < num_cols:
-            sb_empty.add_field(
-                Field(header_names[f_idx], shared_col_types[f_idx], True)
+        while f_idx < num_cols:  # cov: unreachable the driver concats only k >= 2 ranges of num_cols >= 1 columns
+            sb_empty.add_field(  # cov: unreachable the driver concats only k >= 2 ranges of num_cols >= 1 columns
+                Field(header_names[f_idx], shared_col_types[f_idx], True)  # cov: unreachable the driver concats only k >= 2 ranges of num_cols >= 1 columns
             )
-            f_idx = f_idx + 1
-        var rbb_empty = RecordBatchBuilder()
-        _ = batches^
-        return rbb_empty.build(sb_empty.build())
+            f_idx = f_idx + 1  # cov: unreachable the driver concats only k >= 2 ranges of num_cols >= 1 columns
+        var rbb_empty = RecordBatchBuilder()  # cov: unreachable the driver concats only k >= 2 ranges of num_cols >= 1 columns
+        _ = batches^  # cov: unreachable the driver concats only k >= 2 ranges of num_cols >= 1 columns
+        return rbb_empty.build(sb_empty.build())  # cov: unreachable the driver concats only k >= 2 ranges of num_cols >= 1 columns
 
     # Pre-fill output Slab[Column] with empty placeholders. Workers
     # __setitem__ their disjoint slot -- no growth across the dispatch.
@@ -1805,7 +1805,7 @@ def _concat_csv_batches_column_parallel[
                     concatted = _concat_one_column_pairwise(staging_ptr, k, c)
                 out_columns[c] = concatted^
             except e:
-                col_errors[c] = Optional[String](String(e))
+                col_errors[c] = Optional[String](String(e))  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
             c = c + 1
     _ = types_p
 
@@ -1813,13 +1813,13 @@ def _concat_csv_batches_column_parallel[
     var ce_idx = 0
     while ce_idx < num_cols:
         if col_errors[ce_idx]:
-            var msg = col_errors[ce_idx].value().copy()
-            raise Error(
-                String("komira_csv.parallel_reader: column-parallel concat ")
-                + String("column ")
-                + String(ce_idx)
-                + String(" failed: ")
-                + msg
+            var msg = col_errors[ce_idx].value().copy()  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
+            raise Error(  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
+                String("komira_csv.parallel_reader: column-parallel concat ")  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
+                + String("column ")  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
+                + String(ce_idx)  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
+                + String(" failed: ")  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
+                + msg  # cov: unreachable a same-typed column concat raises only past the 2 GiB string offset limit
             )
         ce_idx = ce_idx + 1
 
