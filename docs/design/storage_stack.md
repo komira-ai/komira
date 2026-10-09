@@ -172,17 +172,25 @@ cat = km.catalog("komira", warehouse="s3://acme-lake/")   # komira's Iceberg RES
 ## The stack, revised
 
 ```
- L5  products        batch table    topic               row store          graph               search / vector index
-                     (Iceberg)      (komira IPC tail    (komira row log    (Iceberg tables      (komira, derived)
-                                     -> Iceberg table)   -> Iceberg base)   + derived indexes)
-                          |               |                   |                  |                     |
- L4  derived indexes      |               |                   |                  |   each bound to (catalog, table uuid,
-     (komira formats)     |               |                   |                  |   snapshot id, covered files); rebuildable
-                          v               v                   v                  v                     v
+ L5  products        batch table    topic               row store          search / vector index     knowledge graph
+                     (Iceberg)      (komira IPC tail    (komira row log    (komira, derived)         (see KG below)
+                                     -> Iceberg table)   -> Iceberg base)          |                       |
+                          |               |                   |                    |                       |
+ KG  graph layer          |               |                   |                    |    data model: entities, edges, episodes,
+     (above L4; consumes  |               |                   |                    |    communities; bi-temporal.
+     search, vector and   |               |                   |                    |    query: entity lookup (search, vector),
+     adjacency)           |               |                   |                    |    neighborhood and path traversal
+                          |               |                   |                    |    (adjacency), retrieval for AI
+                          |               |                   |                    v                       v
+ L4  derived indexes      |               |                   |        full-text search | vector | graph adjacency (CSR)
+     (komira formats)     |               |                   |        statistics; each bound to (catalog, table uuid,
+                          |               |                   |        snapshot id, covered files); rebuildable
+                          v               v                   v                    v
  L3  tables         ICEBERG TABLE (v2 by default), committed through a Catalog:      komira TAIL (sub-second):
                     REST | Glue | Unity | Polaris | Nessie | HMS | S3 Tables |        topic segments, row-store log,
                     BigLake | komira's own REST catalog (default when none)           graph deltas; rolls into Iceberg
                     + read-only: Delta Lake, Hive-style Parquet
+                    includes the graph's own tables: its facts live here, not in an index
                           |                                                                  |
  L2  immutable files     Parquet (Iceberg data and position-delete files) | Avro manifests | Arrow IPC (tails) |
                          search splits | vector files | blobs
@@ -202,6 +210,11 @@ What changed from the first revision:
 - **L1 has two committers.** An Iceberg table commits through its catalog. A komira tail, index or catalog commits by a `CasManifestStore` append, as before.
 - **L4 binds to Iceberg snapshots.** An index over an Iceberg table no longer binds to komira row-id spans.
 - **The tail is the one komira table shape left.** It exists only because Iceberg commits a few times a minute at best (see [Freshness](#freshness)).
+- **The graph is a layer above L4, not an L4 index and not its own store.** It is the graph data model (entities, edges, episodes and communities, bi-temporal) plus graph query semantics: entity lookup through the search and vector indexes, neighborhood and path traversal through the adjacency index, and retrieval for AI. Its facts are rows in its own Iceberg tables at L3, with a delta tail. The indexes it uses are derived from those tables and bound to their snapshots like any other L4 index.
+
+### Why the graph sits on the indexes but stores its facts in tables
+
+As a capability stack, the graph consumes what L4 provides: it finds entities by text and by vector, and walks relationships through the adjacency index. That does not make an index its store. A graph fact is superseded rather than overwritten (bi-temporal: the old version is kept with the times it was valid and recorded). A search index used as the store would have to delete and re-add the document on every superseded fact, and a fact would be erased only when index compaction physically drops it, so erasure would depend on compaction timing. Keeping the facts in tables gives the graph the table's commit, history and erasure rules (see [Erasure](#erasure)); each index over them can be dropped and rebuilt from the tables at any snapshot.
 
 ## L0 and L1: unchanged, now with a narrower scope
 
