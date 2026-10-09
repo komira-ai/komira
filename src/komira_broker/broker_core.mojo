@@ -231,7 +231,7 @@ def _put_i64_le(mut out: List[UInt8], v: Int64):
 @always_inline
 def _get_u32_le(bytes: List[UInt8], off: Int) raises -> UInt32:
     if off + 4 > len(bytes):
-        raise Error("segment footer: truncated u32 at " + String(off))  # cov: unreachable SegmentFooter.decode, the only caller, checks the object holds 40 footer bytes
+        raise Error("segment footer: truncated u32 at " + String(off))
     var u = UInt32(0)
     for i in range(4):
         u |= UInt32(Int(bytes[off + i])) << UInt32(8 * i)
@@ -241,7 +241,7 @@ def _get_u32_le(bytes: List[UInt8], off: Int) raises -> UInt32:
 @always_inline
 def _get_i64_le(bytes: List[UInt8], off: Int) raises -> Int64:
     if off + 8 > len(bytes):
-        raise Error("segment footer: truncated i64 at " + String(off))  # cov: unreachable SegmentFooter.decode, the only caller, checks the object holds 40 footer bytes
+        raise Error("segment footer: truncated i64 at " + String(off))
     var u = UInt64(0)
     for i in range(8):
         u |= UInt64(Int(bytes[off + i])) << UInt64(8 * i)
@@ -1444,7 +1444,7 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
     def _should_flush(self, now_ms: Int64) -> Bool:
         """Produce-path step 3: flush at FLUSH_BYTES OR FLUSH_MS, whichever first."""
         if len(self._buffer) == 0:
-            return False  # cov: unreachable produce appends a batch before its only call
+            return False
         if self._buffer_bytes >= FLUSH_BYTES:
             return True
         if self._oldest_ts_ms >= Int64(0):

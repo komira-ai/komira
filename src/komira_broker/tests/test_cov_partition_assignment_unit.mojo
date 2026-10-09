@@ -8,12 +8,14 @@
 #   1. Assignment(): generations are cut to P, a short high-water list is
 #      padded and raised to the live generation; each accessor refuses an
 #      out-of-range pid.
-#   2. JSON: escaped node ids round-trip; spaces, trailing commas, a
-#      non-number and an unterminated array are each handled as documented;
-#      each missing field is refused.
-#   3. Binary: the u16 caps on node count, owner count and node-id length;
+#   2. JSON: escaped node ids round-trip; spaces before integers parse;
+#      each missing field is refused. Malformed bodies the decoder accepts
+#      are not pinned (komira-ai/komira#1093).
+#   3. Binary: the u16 caps on node count, owner count and node-id length,
+#      each refused at 65536 and accepted at 65535;
 #      a truncated header and node table are refused.
-#   4. View: each truncated block is refused; each accessor refuses an
+#   4. View: each truncated block is refused; the i64 reader refuses a
+#      short span; each accessor refuses an
 #      out-of-range index; a v2 body (no high-water) falls back to the live
 #      generation, and to_owned materializes P entries.
 #   5. Spread: a negative P is refused, a prior "" owner is not sticky,
@@ -30,6 +32,7 @@ from komira_broker.partition_assignment import (
     REBALANCE_NONE,
     REBALANCE_STALE_NODE,
     _abytes_find,
+    _vread_i64,
     assign_partitions,
     live_node_ids,
     mint_shard_id,
@@ -115,7 +118,7 @@ def test_constructor_invariants() raises:
 # ---- 2. JSON form ---------------------------------------------------------------
 
 
-def test_json_escapes_and_lenient_scan() raises:
+def test_json_escapes_and_spaces() raises:
     var a = Assignment(
         num_partitions=2,
         owners=_s('q"t', "b\\s"),
@@ -126,22 +129,21 @@ def test_json_escapes_and_lenient_scan() raises:
     assert_equal(back.owner_of(0), 'q"t')
     assert_equal(back.owner_of(1), "b\\s")
     assert_equal(back.node_ids[1], "b\\s")
-    # Spaces before integers; a trailing comma in both array kinds; a
-    # non-number ends an int array.
+    # Spaces before integers (valid JSON). Malformed bodies (a trailing
+    # comma, a non-number inside an int array, a lone backslash, an
+    # unterminated array) are deliberately not pinned here: the decoder
+    # accepts them although its docstring says it raises (komira-ai/komira#1093).
     var d = Assignment.decode(
-        '{"p": 2,"reason": 5,"nodes":["a", ],"owners":["a","a"],'
-        + '"gens":[ 1, -2,],"maxgens":[3,x,9]}'
+        '{"p": 2,"reason": 5,"nodes":["a"],"owners":["a","a"],'
+        + '"gens":[ 1, -2],"maxgens":[ 3, 9]}'
     )
     assert_equal(d.num_partitions, 2)
     assert_equal(d.reason, 5)
     assert_equal(len(d.node_ids), 1)
+    assert_equal(d.generation_of(0), Int64(1))
     assert_equal(d.generation_of(1), Int64(-2))
     assert_equal(d.max_generation_of(0), Int64(3))
-    # A string array whose last byte before ']' is a lone backslash, and an
-    # owners array with no ']' (runs to the end of the text).
-    var e = Assignment.decode('{"p":1,"nodes":["a\\],"owners":["a"')
-    assert_equal(e.node_ids[0], "a")
-    assert_equal(e.owner_of(0), "a")
+    assert_equal(d.max_generation_of(1), Int64(9))
     with assert_raises(contains="Assignment.decode: missing 'p' field"):
         _ = Assignment.decode('{"nodes":[],"owners":[]}')
     with assert_raises(contains="Assignment.decode: missing 'nodes' field"):
@@ -188,6 +190,24 @@ def test_binary_caps_and_truncation() raises:
         num_partitions=1, owners=_s(at_cap), node_ids=_s(at_cap), reason=0
     )
     assert_equal(Assignment.decode_binary(ok.encode_binary()).owner_of(0), at_cap)
+    # The node and owner counts at exactly 65535 encode (the caps are > 65535,
+    # not >= 65535).
+    var at_cap_list = List[String]()
+    for _ in range(65535):
+        at_cap_list.append(String("n"))
+    var nodes_at_cap = Assignment(
+        num_partitions=0,
+        owners=List[String](),
+        node_ids=at_cap_list.copy(),
+        reason=0,
+    )
+    assert_true(len(nodes_at_cap.encode_binary()) > 0)
+    var owners_at_cap = Assignment(
+        num_partitions=65535, owners=at_cap_list^, node_ids=_s("n"), reason=0
+    )
+    var oac = Assignment.decode_binary(owners_at_cap.encode_binary())
+    assert_equal(oac.num_partitions, 65535)
+    assert_equal(oac.owner_of(65534), "n")
 
     var body = _two().encode_binary()
     with assert_raises(contains="assignment binary decode: truncated u32 at offset 0"):
@@ -225,6 +245,20 @@ def test_view_truncations() raises:
     var b60 = _prefix(body, 60)
     with assert_raises(contains="truncated max-generations array (need 24 bytes at 57)"):
         _ = Assignment.view(Span[UInt8](b60))
+
+
+
+def test_vread_i64_bounds() raises:
+    # The generations accessors read only inside arrays the view constructor
+    # bounds-checked, so the i64 reader's own check is driven directly.
+    var raw = List[UInt8]()
+    for k in range(8):
+        raw.append(UInt8(k + 1))
+    assert_equal(_vread_i64(Span[UInt8](raw), 0), Int64(0x0807060504030201))
+    with assert_raises(contains="assignment binary view: truncated i64 at offset 1"):
+        _ = _vread_i64(Span[UInt8](raw), 1)
+    with assert_raises(contains="assignment binary view: truncated i64 at offset -1"):
+        _ = _vread_i64(Span[UInt8](raw), -1)
 
 
 def test_view_accessor_ranges_and_legacy_bodies() raises:
@@ -313,9 +347,10 @@ def test_spread_corners() raises:
 
 def main() raises:
     test_constructor_invariants()
-    test_json_escapes_and_lenient_scan()
+    test_json_escapes_and_spaces()
     test_binary_caps_and_truncation()
     test_view_truncations()
+    test_vread_i64_bounds()
     test_view_accessor_ranges_and_legacy_bodies()
     test_spread_corners()
     print("[OK] test_cov_partition_assignment_unit")

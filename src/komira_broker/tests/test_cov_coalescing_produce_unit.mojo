@@ -14,6 +14,9 @@
 #      force_shutdown starts a SHUTDOWN flush.
 #   4. The head reader's and stage-blob error classifiers, the elided head
 #      poll, and the singleton appender's poll.
+#   5. A store that defers the create-CAS 412 to cas_put_take: the escalating
+#      appender reports LOST_SLOT and writes no chunk. The spine factory's
+#      flush_ts for an empty buffer is 0.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -25,18 +28,22 @@ from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Schema
+from komira_collections.slab import Slab
 
-from komira_async.ops.waker_sink import NoopSink
+from komira_async.ops.waker_sink import NoopSink, WakerSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
 
 from komira_broker.broker_coalescing_produce import (
     BPO_EOS_FENCED,
     BPO_EOS_LEASE_FENCED,
     BPO_EOS_RETRYABLE,
+    BROKER_APPEND_MODE_ESCALATING,
     BROKER_APPEND_MODE_IDEMPOTENT_SINGLETON,
     BrokerBatchAppender,
     BrokerCoalescingProduce,
     BrokerHeadReader,
+    BrokerProduceItem,
+    BrokerProduceSpineFactory,
     _EosResultCell,
 )
 from komira_broker.manifest_body import MARKER_NONE, ManifestBody
@@ -47,6 +54,8 @@ from komira_objectstore.cas_manifest import (
     encode_dedup_sentinel,
 )
 from komira_objectstore.coalescing_window import (
+    APPEND_LOST_SLOT,
+    APPEND_WON,
     FLUSH_REASON_LINGER,
     FLUSH_REASON_SHUTDOWN,
     READ_ERR_CONFLICT,
@@ -55,11 +64,26 @@ from komira_objectstore.coalescing_window import (
     STAGE_BLOB_ERR_FATAL,
     STAGE_BLOB_ERR_REKEY,
 )
+from komira_objectstore.path import Path
 from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
 from komira_objectstore.shared_in_memory_slow_cas_store import (
     SharedInMemorySlowCasStore,
+)
+from komira_objectstore.store import (
+    AsyncCasStore,
+    CasOpProgress,
+    CasReadResult,
+    CloneableConditionalWriteStore,
+    ConditionalWriteStore,
+    ObjectStore,
+)
+from komira_objectstore.types import (
+    CoalescePolicy,
+    ListResult,
+    ObjectMeta,
+    WritePrecondition,
 )
 
 
@@ -88,6 +112,13 @@ def _batch(base_val: Int64, n: Int) raises -> RecordBatch:
         p.store[width=1](i, base_val + Int64(i))
     var col = Column.from_primitive[DType.int64](arr^)
     return RecordBatch.from_typed_columns_1(schema^, col^)
+
+
+def _batch_body() -> List[UInt8]:
+    var out = List[UInt8]()
+    for i in range(16):
+        out.append(UInt8(i))
+    return out^
 
 
 def _driver(slow: _Slow) raises -> BrokerCoalescingProduce[_Slow]:
@@ -236,9 +267,155 @@ def test_classifiers_and_idle_polls() raises:
     assert_true(app.append_poll[NoopSink](reactor).is_ready())
 
 
+
+# ---- 5. a create-CAS whose 412 surfaces only at take -------------------------------
+
+
+struct _TakeDefers412(
+    AsyncCasStore,
+    CloneableConditionalWriteStore,
+    ConditionalWriteStore,
+    ObjectStore,
+    Movable,
+    Deinitable,
+):
+    """Delegates to the slow store, except that while `defer_412` is set a
+    create-CAS reports READY from `cas_put_start` and raises the 412 from
+    `cas_put_take` (a conformer that defers the lost slot to the take)."""
+
+    var inner: _Slow
+    var defer_412: Bool
+    var _lost: Bool
+
+    def __init__(out self, var inner: _Slow, defer_412: Bool):
+        self.inner = inner^
+        self.defer_412 = defer_412
+        self._lost = False
+
+    def clone(self) -> Self:
+        return Self(self.inner.clone(), self.defer_412)
+
+    def head(self, path: Path) raises -> ObjectMeta:
+        return self.inner.head(path)
+
+    def list_with_delimiter(self, prefix: Path) raises -> ListResult:
+        return self.inner.list_with_delimiter(prefix)
+
+    def coalesce_policy(self) -> CoalescePolicy:
+        return self.inner.coalesce_policy()
+
+    def conditional_put(
+        self, path: Path, bytes: List[UInt8], precond: WritePrecondition
+    ) raises -> ObjectMeta:
+        return self.inner.conditional_put(path, bytes, precond)
+
+    def compare_and_swap(
+        self, path: Path, bytes: List[UInt8], expected_version: String
+    ) raises -> ObjectMeta:
+        return self.inner.compare_and_swap(path, bytes, expected_version)
+
+    def put(self, path: Path, bytes: List[UInt8]) raises -> ObjectMeta:
+        return self.inner.put(path, bytes)
+
+    def get_range(
+        self, path: Path, start: Int64, length: Int64
+    ) raises -> List[UInt8]:
+        return self.inner.get_range(path, start, length)
+
+    def get(self, path: Path) raises -> List[UInt8]:
+        return self.inner.get(path)
+
+    def delete(self, path: Path) raises -> None:
+        self.inner.delete(path)
+
+    def read_start[
+        S: WakerSink & Movable & Deinitable,
+    ](mut self, path: Path, mut reactor: Reactor[S]) raises -> CasOpProgress:
+        return self.inner.read_start[S](path, reactor)
+
+    def read_poll[
+        S: WakerSink & Movable & Deinitable,
+    ](mut self, mut reactor: Reactor[S]) raises -> CasOpProgress:
+        return self.inner.read_poll[S](reactor)
+
+    def read_take(mut self) raises -> CasReadResult:
+        return self.inner.read_take()
+
+    def cas_put_start[
+        S: WakerSink & Movable & Deinitable,
+    ](
+        mut self,
+        path: Path,
+        var bytes: List[UInt8],
+        expected_etag: String,
+        mut reactor: Reactor[S],
+    ) raises -> CasOpProgress:
+        if self.defer_412:
+            self._lost = True
+            return CasOpProgress.ready()
+        return self.inner.cas_put_start[S](path, bytes^, expected_etag, reactor)
+
+    def cas_put_poll[
+        S: WakerSink & Movable & Deinitable,
+    ](mut self, mut reactor: Reactor[S]) raises -> CasOpProgress:
+        return self.inner.cas_put_poll[S](reactor)
+
+    def cas_put_take(mut self) raises -> ObjectMeta:
+        if self._lost:
+            self._lost = False
+            raise Error("conditional create: precondition failed (412)")
+        return self.inner.cas_put_take()
+
+
+def test_deferred_412_is_a_lost_slot() raises:
+    var reactor = _reactor()
+    var slow = _Slow(slow_ticks=0)
+    var app = BrokerBatchAppender[_TakeDefers412](
+        CasManifestStore[_TakeDefers412](
+            _TakeDefers412(slow.clone(), True), String(_PREFIX)
+        ),
+        BROKER_APPEND_MODE_ESCALATING,
+        ArcPointer[_EosResultCell](_EosResultCell()),
+    )
+    var p = app.append_start[NoopSink](
+        _batch_body(), Int64(1), Int64(0), Int64(0), Int64(0), reactor
+    )
+    assert_true(p.is_ready())
+    var lost = app.append_take()
+    assert_equal(Int(lost.kind), Int(APPEND_LOST_SLOT))
+    assert_equal(_chunks(slow), Int64(0))
+    # The re-drive runs on a fresh op and wins slot 0.
+    app._wal.store_mut().defer_412 = False
+    var p2 = app.append_start[NoopSink](
+        _batch_body(), Int64(1), Int64(0), Int64(0), Int64(0), reactor
+    )
+    assert_true(p2.is_ready())
+    var won = app.append_take()
+    assert_equal(Int(won.kind), Int(APPEND_WON))
+    assert_equal(won.result.chunk_seq, Int64(0))
+    assert_equal(_chunks(slow), Int64(1))
+
+
+def test_spine_factory_empty_buffer_flush_ts() raises:
+    var slow = _Slow(slow_ticks=0)
+    var factory = BrokerProduceSpineFactory[_Slow](
+        slow.clone(),
+        String("c"),
+        String("t"),
+        Int64(0),
+        String("b"),
+        ArcPointer[_EosResultCell](_EosResultCell()),
+    )
+    # With no buffered item the segment key's flush_ts falls back to 0.
+    assert_equal(factory._flush_ts_for(Slab[BrokerProduceItem]()), Int64(0))
+    _ = factory.make_spine(Slab[BrokerProduceItem](), FLUSH_REASON_LINGER)
+
+
 def main() raises:
     test_txn_flush_tags_the_chunk()
     test_eos_outcomes_without_commit()
     test_linger_and_shutdown_flushes()
     test_classifiers_and_idle_polls()
+    test_deferred_412_is_a_lost_slot()
+    test_spine_factory_empty_buffer_flush_ts()
     print("[OK] test_cov_coalescing_produce_unit")

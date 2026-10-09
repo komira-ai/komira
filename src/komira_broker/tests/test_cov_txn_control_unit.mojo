@@ -392,14 +392,18 @@ def test_cas_loops_retry_give_up_and_propagate() raises:
 def test_write_then_vanished_read_synthesizes() raises:
     var fs = _FaultStore()
     var s = _store(fs)
-    _ = s.begin("x", Int64(9), Int64(3))
+    _ = s.begin("x", Int64(9), Int64(5))
     _ = s.add_partitions("x", _parts("t", Int64(2)))
     # The first get (the read before the CAS) passes; the read after it
     # finds nothing. (add_partitions' own fallback is left out: it drops the
     # partitions it just wrote, filed upstream.)
     fs.arm("get", "/_meta/txn/x", 1, 1, "not_found (404) injected")
     var so = s.stage_offset("x", "g", "t", Int64(2), Int64(8), "md")
+    # Every field comes from the staged update: producer 9, epoch 5 (distinct
+    # from the producer id and the version), still Ongoing, version 3.
     assert_equal(so.producer_id, Int64(9))
+    assert_equal(so.epoch, Int64(5))
+    assert_equal(so.state, TXN_STATE_ONGOING)
     assert_equal(so.complete_version, Int64(3))
     assert_equal(len(so.partitions), 1)
     assert_equal(len(so.pending_offsets), 1)

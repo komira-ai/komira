@@ -1937,8 +1937,8 @@ def _vread_i64(body: Span[UInt8, _], pos: Int) raises -> Int64:
     # reinterpreted as Int64 (two's-complement bitcast). The check raises before
     # any index access. Used for the generations trailer.
     if pos < 0 or pos + 8 > len(body):
-        raise Error(  # cov: unreachable generation() and max_generation() read only inside the arrays the view constructor bounds-checked
-            "assignment binary view: truncated i64 at offset " + String(pos)  # cov: unreachable see the line above
+        raise Error(
+            "assignment binary view: truncated i64 at offset " + String(pos)
         )
     var u = UInt64(0)
     for k in range(8):

@@ -7,13 +7,13 @@
 # =============================================================================
 #
 #   1. SegmentFooter.decode refuses a short object, a bad magic and an
-#      unknown version; encode_segment / assemble_segment_from_frames refuse
-#      an empty buffer.
+#      unknown version; the u32/i64 readers refuse a short read;
+#      encode_segment / assemble_segment_from_frames refuse an empty buffer.
 #   2. BrokerTopicConfig: quotes and backslashes in names round-trip, two
 #      partition-by keys, copy(), and each malformed document is refused
 #      with its own message.
 #   3. produce: a young buffer below the byte trigger is not flushed; a
-#      buffer at FLUSH_BYTES is.
+#      buffer at FLUSH_BYTES is; an empty buffer never asks for a flush.
 #   4. Every flush verb refuses an empty buffer; the segment PUT gives up
 #      after eight colliding keys.
 #   5. The sequence cache ignores a negative producer, never moves back,
@@ -43,6 +43,8 @@ from komira_broker.broker_core import (
     FLUSH_BYTES,
     SegmentFooter,
     _bytes_find,
+    _get_i64_le,
+    _get_u32_le,
     assemble_segment_from_frames,
     encode_segment,
 )
@@ -272,6 +274,17 @@ def test_segment_footer_refusals() raises:
         _ = assemble_segment_from_frames(
             _schema(), List[List[UInt8]](), Int64(0), Int64(0)
         )
+    # The footer readers' own bounds checks (decode checks the length first,
+    # so they are driven directly): an exact fit reads, one byte short raises.
+    var raw = List[UInt8]()
+    for k in range(8):
+        raw.append(UInt8(k + 1))
+    assert_equal(_get_u32_le(raw, 4), UInt32(0x08070605))
+    assert_equal(_get_i64_le(raw, 0), Int64(0x0807060504030201))
+    with assert_raises(contains="segment footer: truncated u32 at 5"):
+        _ = _get_u32_le(raw, 5)
+    with assert_raises(contains="segment footer: truncated i64 at 1"):
+        _ = _get_i64_le(raw, 1)
 
 
 # ---- 2. topic config ----------------------------------------------------------
@@ -367,6 +380,8 @@ def test_produce_triggers() raises:
     assert_true(r)
     assert_equal(r.value().record_count, Int64(8 + rows))
     assert_equal(core.buffered_batches(), 0)
+    # An empty buffer never asks for a flush, however late the clock.
+    assert_false(core._should_flush(Int64.MAX))
 
 
 # ---- 4. empty-buffer refusals and the re-key budget -------------------------------
