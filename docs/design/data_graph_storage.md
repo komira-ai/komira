@@ -14,8 +14,12 @@ the storage stack of [storage_stack.md](storage_stack.md) (PR #1134, second revi
 - **CSR adjacency, the text index and the vector index are derived,** each bound to pinned snapshots
   of the graph's tables, under that document's read rule.
 - **The graph has no query API of its own.** Its operators are spelled in the same optimized plan as
-  search, topics and vectors ([optimized_plan_sources.md](optimized_plan_sources.md), PR #1094), so
-  every SDK that builds plans can query the graph.
+  search, topics and vectors ([optimized_plan_sources.md](optimized_plan_sources.md) §15, PR #1094):
+  the tables are `komira.iceberg.table` scans in one pin group, text search and similarity are
+  access paths on those scans, and traversal is the plan's Expand node. Every SDK that builds plans
+  can query the graph.
+- **An open interval is a null,** with the bound columns named as that document's time slice names
+  them (`valid_from`, `valid_to`); the first revision's sentinel is withdrawn.
 
 This document does not change [search_index_format.md](search_index_format.md); it says which of
 that document's decisions the graph depends on.
@@ -45,10 +49,11 @@ nearest-neighbour indexes (similarity starts exact).
 | one snapshot is one manifest chunk listing every table | a graph snapshot is a recorded set of Iceberg snapshot ids, one per table, plus a tail position | most catalogs do not commit several tables atomically (storage_stack.md, "do not design on multi-table atomicity") |
 | erasure as a fold plus reaping | the five Iceberg erasure steps, then indexes, tail and content cache, with a per-owner report | [Erasure](storage_stack.md#erasure) |
 | index splits record the snapshot they were built from | every index generation is bound to (catalog, table uuid, Iceberg snapshot id, covered files) and read under the read rule | [L4: derived indexes](storage_stack.md#l4-derived-indexes) |
-| the query API out of scope | the graph's operators are plan nodes in the optimized plan | one logical plan for search, topics, vectors and the graph |
+| the query API out of scope | the graph's operators are scans, access paths and the Expand node of the optimized plan | one logical plan for search, topics, vectors and the graph |
+| bounds `valid_at`, `invalid_at` (and two system-time bounds), an open interval a sentinel timestamp | bounds `valid_from`, `valid_to`, `recorded_from`, `recorded_to`; an open interval is a null | the plan's `as_of` filter (optimized_plan_sources.md §15.7.3) tests `valid_to IS NULL`; a sentinel depends on the readers (see [The tables](#the-tables)) |
 
 Kept from the first revision: the tables are the source of truth, history lives in the rows, a
-superseded fact is closed and never deleted, traversal reads a resident CSR, ranked text is a
+superseded fact is closed and never deleted, traversal can read a resident CSR, ranked text is a
 derived index whose hits are checked against the snapshot, similarity is exact until a graph needs
 an approximate index, and the budgets.
 
@@ -69,9 +74,17 @@ maintainer unless an active optimizer is detected, storage_stack.md decision 4):
 - **Keys are Iceberg `identifier-field-ids`,** so every derived index stores key columns and can
   remap its entries by key after another tool compacts a table (the `replace` row of
   [Detecting new snapshots](storage_stack.md#detecting-new-snapshots)).
-- **The four bounds are timestamps; an open interval is a sentinel** (the largest timestamp every
-  reader in the table's reader set accepts), not a null. `as_of(T)` is then
-  `valid_at <= T and invalid_at > T` with no null handling, in komira and in any other tool's SQL.
+- **The four bounds are timestamps, and an open interval is a null.** Event time is `valid_from`,
+  `valid_to`; system time is `recorded_from`, `recorded_to`. `as_of(t)` is the filter
+  [optimized_plan_sources.md](optimized_plan_sources.md) §15.7.3 builds,
+  `valid_from <= t AND (valid_to IS NULL OR valid_to > t)`, and the same over system time. That
+  section names only the event-time columns; the system-time names are this document's. Rejected:
+  the first revision's sentinel (the largest timestamp every reader accepts). That timestamp is a
+  property of the reader set, not of the data: Iceberg's microsecond timestamps reach far past the
+  nanosecond timestamps some dataframe libraries use, so adding a reader can change the sentinel and
+  rewrite every open row; and another tool's SQL would have to know the sentinel to tell an open
+  fact from one that ends in the distant future. The null costs one `IS NULL` clause, which the plan
+  builds, and Iceberg manifests record null counts, so pruning still works.
 - **The embedding is a `list<float>` column.** Iceberg has no fixed-size list, so the dimension and
   the embedding model are table properties (`komira.graph.embedding.dim`,
   `komira.graph.embedding.model`) and the writer refuses a row of another length. Traversal and text
@@ -90,7 +103,7 @@ A write (one ingest of an episode and the facts extracted from it) is one delta 
 a komira L1 lineage. A delta is an Arrow IPC object holding, per table:
 
 - added rows;
-- narrow supersession rows: the key, the new event-time end and the new system-time end;
+- narrow supersession rows: the key, the new `valid_to` and the new `recorded_to`;
 - tombstones: the key of a row hidden by an erasure request.
 
 A delta is visible to komira readers when its append commits. The roll ([the
@@ -169,10 +182,13 @@ cascade:
 
 1. **Hide at once:** a delta with tombstones for the subject's entities and episodes and for every
    edge with an erased endpoint. Readers filter them, and index hits are checked against them.
-2. **Remove from the tables,** komira being their maintainer: row deletes in the reverse commit
+2. **Remove from the tables,** where komira is their maintainer: row deletes in the reverse commit
    order, the fold (a rewrite of the affected data files, one bucket of `group_id` when the subject
    is a group), the manifest rewrite, expiry of every snapshot that still references the old files
-   or manifests, and deletion of unreferenced files.
+   or manifests, and deletion of unreferenced files. Where another tool maintains the tables (a
+   catalog that forces `external`, such as S3 Tables, or a detected active optimizer), komira
+   commits the row deletes and the report says the rest is awaiting the table's maintainer, as
+   storage_stack.md's erasure report does.
 3. **Remove from komira's artifacts:** every index generation (CSR, text, vector, name-to-id) whose
    coverage includes a rewritten or deleted file is rebuilt and the old one purged; the subject's
    tail deltas are rewritten without its rows; the content cache entries of its values are purged.
@@ -185,21 +201,21 @@ when it next runs; it never returns the erased rows.
 
 ### The query side: one plan for every source
 
-The graph's operators are not a graph API beside the plan. They are spelled with the scan kinds and
-plan nodes that [optimized_plan_sources.md](optimized_plan_sources.md) defines for search, topics,
-vectors and the graph, so the Python, TypeScript and Mojo SDKs build the same plan bytes and a
-query can join graph results with any other relation. That document is the authority; this one
-states what the graph needs from it:
+The graph's operators are not a graph API beside the plan. They are spelled with the source kind,
+access paths and plan nodes that [optimized_plan_sources.md](optimized_plan_sources.md) §15 defines
+(§15.7 for the graph), so the Python, TypeScript and Mojo SDKs build the same plan bytes and a
+query can join graph results with any other relation. That document is the authority; this table
+says how each graph operator maps onto it:
 
 | graph operator | in the plan |
 |---|---|
-| reading a table | a graph scan kind per table, pinned with the other tables of the same graph snapshot record (a set of snapshot ids plus a tail position, not one pin per scan chosen independently) |
-| `search` | the search scan kind over the graph's text index (one row per hit with its key), joined to the table at the same pinned snapshot |
-| `knn` | the vector scan kind over the graph's vector index, with the query vector in the typed encoding that document names |
-| `neighbors`, `k_hop` | a join of the seed relation (often search or `knn` hits) with `edges`, repeated `k` times with a distinct per hop; the CSR is how a host lowers that join. A dedicated index-probe node is the alternative that document decides |
-| `as_of` | a filter on the four bounds, bound into the plan's identity, pushed into the scans |
-| rank fusion | joins on the key, a window rank and arithmetic (reciprocal-rank fusion); no new node |
-| consistency mode, exact-mode budget | part of the plan, not advice: they change the answer |
+| reading a table | a `komira.iceberg.table` scan per table, with its `tail`, all in one pin group (§15.3.4, §15.7.1). The group's `lineage` and `commit_seq` name this document's graph snapshot record, and the host refuses a member whose (table uuid, snapshot id) differs from it. There is no graph scan kind |
+| `search` | a `TEXT` access path (§15.5.1) on the scan of `entities`, `episodes` or `edges`, naming the text index generation among the scan's pinned indexes; the scan returns the table's own rows with a score, so no join back to the table is needed. `komira.search.index` remains the kind for log search only |
+| `knn` | a `VECTOR` access path on the same scans, over the `embedding` column; the literal query is embedded when the plan is optimized (§15.12 decision 3). There is no vector scan kind |
+| `neighbors`, `k_hop` | the Expand node (`WireExpandNode`, §15.7.2) over a seed relation (often `search` or `knn` hits) and a scan of `edges`. Its semantics are those of iterated joins: `NEIGHBORS` with `max_hops = k` equals `k` rounds of an inner join of the frontier with `edges`, a union and a least hop count per node. Its `access` (`CSR`, reading this document's CSR generation pinned on the `edges` scan, or `HASH`, adjacency built from the scan at run time) is chosen by the optimizer, and the host obeys it |
+| `as_of` | the filter of [The tables](#the-tables) on the four bounds, built by the SDK and pushed into each graph scan (§15.7.3); it is part of the plan's digest and is applied to every index hit and every traversed edge (§15.5.4) |
+| rank fusion | `km.rrf`: a row-number window per input, a full join on the key and `sum(1 / (c + rank))`; no new node |
+| consistency mode, exact-mode budget | the `consistency` of each access path and of the Expand node's `CSR` access, and `exact_budget_bytes`: part of the plan, not advice, because they change the answer |
 
 ## How others store knowledge graphs
 
@@ -214,7 +230,7 @@ relying on it.
 | [Apache GraphAr](https://graphar.apache.org/docs/specification/format) (incubating) | a file format, not an engine: vertex and edge chunks in Parquet, ORC, CSV or JSON, with property groups so a read fetches only the columns it needs | edges ordered by source or destination with offset files (CSR or CSC), or unordered (COO) | graph data at rest in a data lake, readable by any engine |
 | [PuppyGraph](https://docs.puppygraph.com/) | no copy: a schema maps existing lake and warehouse tables (Iceberg, Delta, Hudi and others) to vertices and edges | computed by its engine at query time | Cypher and Gremlin over data that already lives in tables |
 | [Microsoft GraphRAG](https://microsoft.github.io/graphrag/index/outputs/) | an indexing pipeline writes Parquet tables: documents, text units, entities, relationships (an edge list with source, target and weight), communities and community reports | none stored: an edge list | offline extraction and summarization for retrieval |
-| [Graphiti](https://github.com/getzep/graphiti) ([Zep paper](https://arxiv.org/abs/2501.13956)) | a bi-temporal model: episodes (the raw input), entities, fact edges with valid and invalid times and created and expired times, and communities; "old facts are invalidated, not deleted"; retrieval combines embeddings, BM25 and traversal. Stored in a graph database: Neo4j, FalkorDB or Neptune | the backend's | incremental agent memory, one episode at a time |
+| [Graphiti](https://github.com/getzep/graphiti) ([Zep paper](https://arxiv.org/abs/2501.13956)) | a bi-temporal model: episodes (the raw input), entities, fact edges with valid and invalid times and created and expired times, and communities; "old facts are invalidated — not deleted"; retrieval combines embeddings, BM25 and traversal. Stored in a graph database: Neo4j, FalkorDB or Neptune | the backend's | incremental agent memory, one episode at a time |
 
 **What komira takes from them.** The model is Graphiti's: episodes, entities, edges and
 communities, four bounds, invalidate rather than delete. The storage is the GraphAr and GraphRAG
@@ -261,8 +277,8 @@ Checked against `src/` on `main` when this revision was written:
 | Arrow IPC | record-batch, schema and footer encoders and decoders, fixed-size lists included (`src/komira_arrow_ipc/`) | the tail's delta format exists |
 | CAS manifest, conditional writes | yes (`src/komira_objectstore/cas_manifest.mojo`, `compact_window.mojo`) | the tail lineage's substrate exists |
 | search splits | one text field per split, keyword fast fields single-valued, no deletes, no vectors (`src/komira_search/`) | enough for the derived text index |
-| scan kinds | `komira.search.index` (`src/komira_search_scan/search_scan_kind.mojo`) and `komira.broker.topic` (`src/komira_broker/broker_scan_binding.mojo`); no graph, vector or Iceberg kind | the graph's kinds are specified in optimized_plan_sources.md |
-| joins and SQL | join kernels and join assembly (`src/komira_dispatch_join_kernels/`, `src/komira_join_assembly/`) and a SQL parser (`src/komira_sql/sql_parser.mojo`); this revision did not check that a whole plan runs end to end | traversal as a join has its kernels; the CSR lowering is new |
+| scan kinds | `komira.search.index` (`src/komira_search_scan/search_scan_kind.mojo`) and `komira.broker.topic` (`src/komira_broker/broker_scan_binding.mojo`); no Iceberg kind, no access paths | the graph needs the `komira.iceberg.table` kind, pin groups and the `TEXT` and `VECTOR` access paths that optimized_plan_sources.md specifies |
+| joins and SQL | join kernels and join assembly (`src/komira_dispatch_join_kernels/`, `src/komira_join_assembly/`) and a SQL parser (`src/komira_sql/sql_parser.mojo`); this revision did not check that a whole plan runs end to end | the Expand node is new; its iterated-join definition is what tests check it against, and its `HASH` access can build on the join kernels |
 
 ## Revision 1: tables on a CAS manifest compared with search splits (rationale)
 
@@ -291,7 +307,8 @@ library header stated the principle: "The KG is *files*, not a database." Its de
   set to the new fact's start and its system-time end to the time of the supersession, so `as_of(T)`
   is the filter `valid_at <= T and invalid_at > T` over one table. Its rule was "never delete, always
   retain"; in its own words, "History is the whole point." An open interval was a sentinel value,
-  not a null, so the filter needed no null handling.
+  not a null, so the filter needed no null handling (this revision uses nulls; see
+  [The tables](#the-tables)).
 - **Whole-table rewrites did not scale, so it moved to a base plus deltas.** Rewriting a changed table
   in full made one small ingest a rewrite of the whole table, and embeddings dominated the bytes
   (1,536 32-bit floats, about 6 KiB, per entity). It moved to a chain on the same manifest: a head
@@ -398,8 +415,10 @@ instead of the recorded set (step 2, a dangling edge); not apply a tail delta to
 3. **Embeddings:** a `list<float>` column in each table, with the dimension and model as table
    properties; the vector index is derived from it. Recommend yes. Rejected: a separate object per
    table, an opaque binary column, embeddings only in a cache.
-4. **History:** a superseded fact has its two end bounds closed and is never deleted; an open
-   interval is a sentinel, not a null. Recommend yes (kept).
+4. **History:** a superseded fact has its two end bounds closed and is never deleted (kept). The
+   bounds are `valid_from`, `valid_to`, `recorded_from`, `recorded_to`, and an open interval is a
+   null, so `as_of` is the filter optimized_plan_sources.md §15.7.3 builds. Recommend yes.
+   Rejected: the first revision's sentinel timestamp, which depends on the reader set.
 5. **Consistency across tables:** commit in the order `episodes`, `entities`, `edges`,
    `communities` (deletes in reverse), or by `commit_transaction` where the catalog advertises it,
    then append a graph snapshot record that komira readers, index generations and plans pin.
@@ -411,12 +430,17 @@ instead of the recorded set (step 2, a dangling edge); not apply a tail delta to
 7. **Indexes:** CSR, text and vector indexes bound to a graph snapshot record, read under
    storage_stack.md's read rule, every hit checked against the snapshot, `as_of` and the tail.
    Recommend yes.
-8. **Traversal:** a resident CSR over the `edges` projection, as the host's lowering of the plan's
-   join; postings adjacency not used. Recommend yes.
-9. **Query side:** no graph API beside the plan; the graph's operators are scan kinds and plan nodes
-   in [optimized_plan_sources.md](optimized_plan_sources.md), built the same way by every SDK, with
-   traversal spelled as repeated joins first and an index-probe node as the alternative that
-   document decides. Recommend yes.
+8. **Traversal:** the plan's Expand node (optimized_plan_sources.md §15.7.2), defined as iterated
+   joins, with its access (`CSR` or `HASH`) chosen by the optimizer and obeyed by the host. The
+   graph supplies the CSR as a derived index over the `edges` projection, pinned on the `edges`
+   scan, which a long-lived reader keeps resident. Recommend yes. Rejected: the CSR as a host's
+   private lowering of a join chain (it cannot express acyclic or shortest paths, and it leaves an
+   access choice worth orders of magnitude to the host); postings adjacency.
+9. **Query side:** no graph API beside the plan. A graph read is `komira.iceberg.table` scans in
+   one pin group named by the graph snapshot record; `search` and `knn` are `TEXT` and `VECTOR`
+   access paths on those scans, not scan kinds; `as_of` is a pushed filter; rank fusion is
+   `km.rrf`. All of it is in [optimized_plan_sources.md](optimized_plan_sources.md) §15, built the
+   same way by every SDK. Recommend yes.
 10. **Search format changes:** the three correctness fixes and the version 1 byte golden now;
     decision 1 when a text index needs several fields; decision 2 for log search; decisions 3 and 4
     not for the graph. Recommend yes.
