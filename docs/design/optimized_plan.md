@@ -1,6 +1,7 @@
 # Design: `OptimizedPlan`, a serializable optimized plan
 
-Status: proposed, not built. Scope: komira's plan wire, optimizer, plan cutter and executor admission.
+Status: proposed, not built. Scope: komira's plan wire, optimizer, plan cutter, executor admission, and user code in
+plans (UDF nodes and the environment image, §10, specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md)).
 
 Pinned commit: komira `origin/main` at `af1d841f`. Paths are cited as `path:line`; the line numbers were read at
 `547e9849`, and `git diff 547e9849 af1d841f` (and onward to `8bfba390`) is empty for `src/komira_plan_proto`,
@@ -39,6 +40,9 @@ one host, it is cut into **optimized segments**, a second defined type built fro
    released producer ever emitted (§9). Producer and host builds may therefore differ without limit in that
    direction.
 6. A physical-plan form is reserved so it can be added later without a format break.
+7. A user's Python function, written as plain Python (a module function, a notebook function, a lambda or a
+   closure), runs as a plan node with no decorator and no packaging step. The plan identifies the code by digest, and
+   the code itself travels in an environment image beside the plan (§10).
 
 ### 1.2 Non-goals
 
@@ -47,7 +51,9 @@ one host, it is cut into **optimized segments**, a second defined type built fro
   physical IR (`src/komira_plan_ir/physical_plan.mojo`) is tied to a single engine build. It has no producer or
   consumer in this tree yet (`physical_plan.mojo:5-6`).
 - Trusting producer statistics for correctness or for resource reservation (§6).
-- Forward compatibility. An older host need not accept a newer plan; the scheduler routes by version (§9.5).
+- Forward compatibility. An older engine need not accept a newer plan. A scheduler routes by version, or, where the
+  engine comes from the environment image, refuses by name and asks for a rebuild (§9.5, §10.11).
+- Code bytes in the plan. A plan carries digests of user code, never the code or its captured data (§10.6).
 - A raw SQL or bound-plan door on the scheduler. Every submission is already optimized (§2).
 
 ---
@@ -56,10 +62,10 @@ one host, it is cut into **optimized segments**, a second defined type built fro
 
 | Role | What it does |
 |---|---|
-| **Producer** | Parses SQL (or takes a dataframe expression), binds, gathers statistics, optimizes, and emits an `OptimizedPlan`. It is a program that links the engine and the producer library: the Mojo, TypeScript or Python SDK, or a notebook built on one. A **service that re-optimizes a stored query** on each run (for example a scheduler running a recurring job) is a producer too: it starts from a bound plan that an SDK produced and stored, links the same library, and stamps `kind = SERVER`. It is not a path for clients without an engine; there is none. For identical inputs every producer yields the same `plan_digest` (§7.1). The stamps differ, so the header bytes do not. |
-| **Scheduler** | Any system that places work. It is not part of komira. It accepts plan work only as an `OptimizedPlan`, never as SQL text or a bound plan, so it never runs the optimizer. It reads only the header, through the header-only library (§4.1), and never decodes the body. |
+| **Producer** | Parses SQL (or takes a dataframe expression, including the user functions it calls), binds, gathers statistics, optimizes, captures user code (§10.6), and emits an `OptimizedPlan`. It is a program that links the engine and the producer library: the Mojo, TypeScript or Python SDK, or a notebook built on one. A **service that re-optimizes a stored query** on each run (for example a scheduler running a recurring job) is a producer too: it starts from a bound plan that an SDK produced and stored, links the same library, and stamps `kind = SERVER`. When the stored query has an environment image, the service runs the producer library from that image's base (§10.11). It is not a path for clients without an engine; there is none. For identical inputs every producer yields the same `plan_digest` (§7.1). The stamps differ, so the header bytes do not. |
+| **Scheduler** | Any system that places work. It is not part of komira. It accepts plan work only as an `OptimizedPlan`, never as SQL text or a bound plan, so it never runs the optimizer. It reads only the header, through the header-only library (§4.1), and never decodes the body. When the plan travels with an environment image, it checks that pair against the release records it is given, from the image manifest alone (§10.11). |
 | **Coordinator** | Learns the host count once placement is done. It verifies `plan_digest`, then **cuts** the plan into `OptimizedSegment`s (§8). The cut is mechanical and changes no decision. |
-| **Executor host** | Admits a segment or a plan (§7), lowers it, and applies only the named host-local rules (§5.3). It never re-optimizes. |
+| **Executor host** | Admits a segment or a plan (§7), lowers it, and applies only the named host-local rules (§5.3). It never re-optimizes. It runs user code in worker processes started from the plan's environment image (§10.10). |
 
 The producer optimizes, the scheduler places, the coordinator cuts and the host lowers. Each step runs once.
 
@@ -138,6 +144,8 @@ message OptimizedPlanBody {
 message PlanAdvice {
   repeated NodeEstimate estimates   = 1;  // {node_ordinal, node_tag, rows, bytes, source}; preorder ordinal
   repeated ScanStats    stats_basis = 2;  // the statistics the optimizer used
+  repeated UdfOrigin    udf_origins = 3;  // {udf_index, display_name, file, line, captured_version}; diagnostics
+                                          // only (§10.3)
 }
 ```
 
@@ -162,7 +170,7 @@ fixes the context.
 | 2 | `producer` | Required. `engine_build` not on the revocation set passed in by the caller. `optimizer_contract_version` a released version the host knows; every released version stays known (§9.3). | header library (revocation), host (revocation and contract) |
 | 3 | `plan_digest` | Exactly 32 bytes; the host recomputes it (§7.1). | host, coordinator |
 | 4 | `recurring_signature` | 32 bytes or empty. It cannot be verified from the body, so it keys only history and caches, never authorization or limits. | none (advisory) |
-| 5 | `needs` | Required (§6.1). The host cross-checks it against the body. | header library (caps), host (cross-check) |
+| 5 | `needs` | Required (§6.1). The host cross-checks it against the body. With UDFs, `python_abi` is set and the pair (plan, environment image) passes §10.11. | header library (caps, environment checks 1-3), host (cross-check, environment checks 1-6) |
 | 6 | `write_target` | Same rules as in `WirePlanEnvelope`: an empty path is refused. A write-carrying plan declares the format version that includes it. | header library, host |
 | 7 | `advice` | Advisory. No reader refuses a plan for its content; a mismatch between an estimate's `node_tag` and the node at its ordinal is shown as such by diagnostics and otherwise ignored. | none |
 | 8 | `body` | Canonical (§7.1) and decodes as `OptimizedPlanBody` in the OPTIMIZED context. | host |
@@ -215,6 +223,11 @@ Field numbers are the next free numbers at the pinned commit.
 | `WireScanNode` | `row_count` (9), `has_table_stats` (11) | **Refused in OPTIMIZED.** Statistics have one home, `advice.stats_basis`, outside the digest; no host decision reads a producer statistic. |
 | `WirePlan` | new arm `WireExchangeNode exchange = 20` | `{child = 1, kind = 2 (GATHER, BROADCAST, HASH, RANGE), keys = 3, key_encoding = 4, ordering = 5, partitions = 6, adaptive_allowed = 7}`. `partitions = 0` means "filled in at the cut" (§8). |
 
+The UDF arms of §10.4 (`WireUdfApply`, `WireMapBatchesNode`, `WirePythonStepNode`) and the `WireField` additions
+(`children`, `type_deferred`) are an exception to this table's heading: they are admitted in both contexts, because a
+stored bound plan contains UDFs too. OPTIMIZED refuses the name-keyed `WireUdfCall` and the node-level `WireUdf`
+(`OPTIMIZED_UDF_LEGACY_FORM`).
+
 **A join's distribution is derived, not recorded.** No exchange below a join means local; a broadcast exchange on
 its build input means broadcast; hash exchanges on both inputs with the same keys and key encoding mean partitioned.
 Any other shape is refused (`OPTIMIZED_JOIN_EXCHANGE_INCONSISTENT`). A separate `distribution` field would be a
@@ -233,9 +246,13 @@ refused would be an unobservable slot.
 
 **The exchange arm takes plan tag id 18, not 16.** Tag ids 16 and 17 are retired, and the comment says "THE NEXT TAG
 ADDED TAKES 18" (`logical_plan.mojo:170-180`; `plan_vocabulary.proto:56-57` reserves wire numbers 17 and 18). So
-`PLAN_EXCHANGE = 18`, its `PlanTag` wire number is 19, and `PLAN_TAG_COUNT` becomes 19. Every consumer sized from
-that constant, the vocabulary census and the enum-number tests
-(`src/komira_plan_proto/tests/test_plan_enum_numbers_nodes.mojo`) change in the same stage.
+`PLAN_EXCHANGE = 18` and its `PlanTag` wire number is 19. The UDF nodes of §10.4 follow it: engine tags
+`PLAN_MAP_BATCHES = 19` and `PLAN_PYTHON_STEP = 20` (`PlanTag` 20 and 21; WirePlan fields 21 and 22), and
+`PLAN_TAG_COUNT` becomes 21. On the expression side, engine tag `EXPR_UDF_APPLY = 27` (`ExprTag` 28; WireExpr field
+27), and `EXPR_TAG_COUNT` becomes 28. Every consumer sized from those constants, the vocabulary census and the
+enum-number tests (`src/komira_plan_proto/tests/test_plan_enum_numbers_nodes.mojo`,
+`test_plan_enum_numbers_functions.mojo` and `test_plan_census_complete.mojo`; `git grep -l ExprTag`) change in the
+same stage.
 
 **Join order, predicate placement and projection placement are expressed by shape.** Shape is binding: the host
 does not link the optimizer (§7.3), so it cannot reorder.
@@ -260,6 +277,8 @@ in-process use keeps that default.
 | Scalar-subquery literal folding (`optimizer_scalar_deps.mojo`, `optimizer_resolve_scalar_subqueries.mojo`) | Keeps the decorrelated broadcast shape (`scalar_subquery_decorrelate.mojo`); does not execute | May fold the scalar to a literal at lowering (`SCALAR_FOLD`) |
 | Payload narrowing (`optimizer_payload_narrow.mojo`) | Off | Derives it from footers it opened after the pin check (§7.2) |
 | Scan sharing and its dynamic-filter slot (`optimizer_scan_share.mojo`) | Off | Derives it at lowering; the filter direction follows the recorded `build_side`; row-count thresholds read the host's own verified footers, never a producer number |
+| Where each UDF is evaluated; conjunct order around UDF predicates; CSE of non-`VOLATILE` UDFs | Decides; expressed as shape (§10.9) | Obeys it |
+| UDF worker count, threads, batch slicing; the run's type lock | Records the bounds (`UdfResources`) and the resolution (§10.5) | Chooses within the bounds; locks a `FIRST_BATCH` or `OBSERVED` type once per run and records it |
 
 All paths in this table are under `src/komira_optimizer/` at the pinned commit.
 
@@ -272,7 +291,9 @@ The **complete list of host-local rules**:
 5. shared-subplan materialization;
 6. choice of morsel size, and of operator variant within a node's recorded algorithm;
 7. spill;
-8. the adaptive changes of §8.3, only where `adaptive_allowed` is set.
+8. the adaptive changes of §8.3, only where `adaptive_allowed` is set;
+9. UDF worker count, thread limits and batch slicing, within `UdfResources` (§10.8, §10.10);
+10. locking a `FIRST_BATCH` or `OBSERVED` return type once per run and binding the operators that read it (§10.5).
 
 A host change that alters a §5.2 field or the shape, other than by these rules, is a defect, and the post-condition
 in §7.3 catches it.
@@ -297,7 +318,7 @@ data carries `group_topk` (`logical_plan_variants.mojo:661`). Neither name appea
 `src/komira_plan_wire/` (`git grep`, 0 matches). *(Inferred)* Both are therefore lost on encode without a refusal.
 
 This defect is independent of this design. In both contexts the encoder must refuse a plan that carries either
-field. It ships first, with a test that fails before the fix (§11, stage 1).
+field. It ships first, with a test that fails before the fix (§12, stage 1).
 
 ---
 
@@ -309,13 +330,16 @@ field. It ships first, with a test that fails before the fix (§11, stage 1).
 message DeclaredNeeds {
   ResourceNeeds    resources   = 1;  // cpu_millis, peak_mem_bytes, scanned_bytes, max_parallelism,
                                      // spill_ok, host_count_max, interruptible, accelerators
-                                     // (closed enum and count)
-  repeated UdfRef  udfs        = 2;  // runtime, module, qualified name, image digest
-  repeated string  images      = 3;  // digests; a superset of udfs[].image_digest
+                                     // (closed enum and count); covers every UdfRef.resources (§10.8)
+  repeated UdfRef  udfs        = 2;  // §10.3; the body references entries by index
+  reserved 3; reserved "images";     // the environment image travels beside the plan (§10.11)
   repeated Hint    hints       = 4;  // closed enum key + typed value; an unknown key is refused
   repeated string  data_scopes = 5;  // scan binding keys the plan reads
+  string           python_abi  = 6;  // e.g. "cp312"; set iff udfs is non-empty
 }
 ```
+
+(`images` was never released, so §9.2 allows reserving it.)
 
 `needs` is what a scheduler places by, capped by its own limits. The producer derives it from its estimates; the
 scheduler never sees those estimates as anything but advice. A producer that overstates needs reserves more than it
@@ -323,10 +347,15 @@ uses; one that understates spills or is refused by the host's memory budget.
 
 The host checks against the decoded body:
 
-- every `udf_call` in the plan, in `shared` and in every segment names a `udfs` entry;
-- every UDF image appears in `images`;
+- every `udf_index` in the plan, in `shared` and in every segment is in range (`OPTIMIZED_UDF_UNDECLARED`);
+- on the uncut plan only, every `udfs` entry is referenced (`OPTIMIZED_UDF_UNREFERENCED`); a segment keeps the
+  parent's whole list (§8.1) and may use only part of it;
+- each reference matches the entry's kind: `WireUdfApply` names `SCALAR` or `MAP_BATCHES`, `WireMapBatchesNode`
+  names `MAP_BATCHES`, and `WirePythonStepNode` names `PYTHON_STEP` (`OPTIMIZED_UDF_KIND_MISMATCH`);
+- `python_abi` is set if and only if `udfs` is non-empty (`OPTIMIZED_UDF_ABI_UNDECLARED`);
 - every scan's binding appears in `data_scopes`;
-- closures are refused.
+- closures, notebook functions and lambdas are **admitted** in their `value` form (§10.6), and their code must be
+  present in the environment image (§10.11).
 
 ### 6.2 Snapshot pins (binding)
 
@@ -399,11 +428,12 @@ bytes (`OPTIMIZED_PLAN_NOT_CANONICAL`). Then
 
 ```
 plan_digest = sha256(body ‖ canonical(DigestTrailer))
-DigestTrailer = { format_version, optimizer_contract_version, write_target, needs.udfs, needs.images,
+DigestTrailer = { format_version, optimizer_contract_version, write_target, needs.udfs, needs.python_abi,
                   needs.data_scopes }
 ```
 
-The trailer binds the plan's effect, the code it runs, the data it may read and the contract version under which its
+The trailer binds the plan's effect, the code it runs (by digest; the environment image that holds it is outside the
+digest, §10.11), the data it may read and the contract version under which its
 fields have their meaning. The check proves integrity and that producer and host agree on canonical form. It does
 **not** prove who wrote the plan; authenticating the submitter is the transport's job.
 
@@ -420,12 +450,14 @@ The header library runs steps 1-3 on the header only:
    released version is in every later reader's set (§9.2), so this refuses only a version newer than the reader, or
    one never released.
 3. **Producer and needs.** `OPTIMIZED_PLAN_PRODUCER_REVOKED`: `engine_build` is in the revocation set the caller
-   passes. `OPTIMIZED_PLAN_NEEDS_OVER_LIMIT`: `needs` exceeds the limits the caller passes.
+   passes. `OPTIMIZED_PLAN_NEEDS_OVER_LIMIT`: `needs` exceeds the limits the caller passes. When the caller passes an
+   environment (image digest and manifest bytes) and the base release records, the header library also runs §10.11
+   checks 1-3: `OPTIMIZED_ENV_BASE_UNRELEASED`, `OPTIMIZED_ENV_ENGINE_TOO_OLD`, `OPTIMIZED_ENV_PYTHON_ABI_MISMATCH`.
 
 The host, or the coordinator before a cut, runs steps 1-12:
 
 4. **Contract.** `OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`: `optimizer_contract_version` newer than the host knows (an
-   older released version is always known, §9.3). The refusal carries the accepted set, so a scheduler can route.
+   older released version is always known, §9.3). The refusal carries the accepted set, so a scheduler can route or ask for a rebuild (§9.5).
 5. **Limits.** `plan_wire_admit`'s limits over the plan and `shared` together: depth 64, nodes 65,536
    (`src/komira_plan_wire/plan_wire_admit.mojo:197`, `:228`). `OPTIMIZED_PLAN_LIMIT_EXCEEDED`.
 6. **Decode** in the OPTIMIZED context; the value checks in `plan_wire_values.mojo` still run.
@@ -440,10 +472,15 @@ The host, or the coordinator before a cut, runs steps 1-12:
      aggregate list, through exchanges only)
    - `OPTIMIZED_CSE_REF_UNRESOLVED`, `OPTIMIZED_SHARED_SUBPLAN_UNREFERENCED`
    - `OPTIMIZED_SCAN_PIN_MISSING`
-   - `OPTIMIZED_UDF_UNDECLARED`, `OPTIMIZED_SCOPE_UNDECLARED`
+   - `OPTIMIZED_UDF_UNDECLARED`, `OPTIMIZED_UDF_UNREFERENCED` (uncut plan only), `OPTIMIZED_UDF_KIND_MISMATCH`,
+     `OPTIMIZED_UDF_ABI_UNDECLARED`, `OPTIMIZED_SCOPE_UNDECLARED`
+   - `OPTIMIZED_UDF_LEGACY_FORM`, `OPTIMIZED_UDF_IN_SCAN_FILTER`, `OPTIMIZED_UDF_GROUP_EXCHANGE_INCONSISTENT`,
+     `OPTIMIZED_UDF_RESOURCES_UNDECLARED`, `OPTIMIZED_SCHEMA_TYPE_DEFERRED_WITHOUT_UDF`
    - `OPTIMIZED_FIELD_UNSUPPORTED` (a statistics field on a node, §5.2)
    - on a segment only: `OPTIMIZED_EXCHANGE_PARTITIONS_UNSET`
-9. **Pins.** Resolve and verify every pin. `OPTIMIZED_PLAN_SNAPSHOT_STALE`.
+9. **Pins and environment.** Resolve and verify every pin (`OPTIMIZED_PLAN_SNAPSHOT_STALE`). Repeat §10.11 checks 1-3
+   and run checks 4-6 against the image this host runs. Start the UDF workers and load every `UdfRef` and data blob
+   before any data is read (`OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`, `OPTIMIZED_UDF_CODE_UNLOADABLE`).
 10. **Lower**, applying only the §5.3 rules, with footers from the verified open.
 11. **Post-condition.** `OPTIMIZED_LOWERING_DIVERGED` (§7.3).
 12. **Run.**
@@ -458,17 +495,19 @@ A flag cannot be checked, so the rule is backed by two checks that can each be m
 1. **Build graph.** The host lowering target's closure must not contain `komira_optimizer`. Three host-local rules
    live in that package today (payload narrowing, scan sharing and the scalar-subquery passes), and it is one
    library (`srcs = glob(["**/*.mojo"])`, `src/komira_optimizer/BUCK`). So those passes move first into a new
-   package, `komira_lowering_rules`, whose closure also must not contain `komira_optimizer` (§11, stage 6). A
+   package, `komira_lowering_rules`, whose closure also must not contain `komira_optimizer` (§12, stage 6). A
    Buck2 closure assertion checks both, proven by planting the dependency and watching the build go red.
-2. **Post-condition** (step 11). The physical plan's join tree, build sides, algorithms, aggregate modes and
-   exchanges must equal the admitted plan **modulo an enumerated rewrite set**, one entry per host-local rule, each
+2. **Post-condition** (step 11). The physical plan's join tree, build sides, algorithms, aggregate modes,
+   exchanges and UDF evaluation sites (each UDF evaluated at the node that carries it, and a non-`VOLATILE` CSE'd call
+   evaluated once) must equal the admitted plan **modulo an enumerated rewrite set**, one entry per host-local rule, each
    a named and checkable difference. For example: `SCALAR_FOLD` removes exactly one CROSS join whose other input is
    a single-row scalar subplan, and replaces the reference with a literal; shared-subplan materialization replaces
    each `cse_ref` with a read of the materialized entry; an adaptive change of §8.3 appears in the run's record.
    Named mutants:
    - a lowering that flips `build_side` is refused;
    - a lowering that re-derives the build side from row counts, as scan sharing does today, is refused;
-   - a `SCALAR_FOLD` that also drops a sibling join is refused.
+   - a `SCALAR_FOLD` that also drops a sibling join is refused;
+   - a lowering that evaluates a `VOLATILE` UDF twice for one row, or moves it below a filter, is refused.
 
 ---
 
@@ -486,13 +525,13 @@ message OptimizedSegment {
   bytes                  segment_digest     = 4;  // sha256 over the canonical segment with this field cleared
   SegmentContract        contract           = 5;  // output schema; partitioning (keys, key_encoding,
                                                   // partitions); ordering; write_target on the final segment
-  DeclaredNeeds          needs              = 6;
+  DeclaredNeeds          needs              = 6;  // udfs is the parent's list, unchanged, so udf_index stays valid
   repeated SharedSubplan shared             = 7;  // the entries this segment references
   repeated ScanPin       scan_pins          = 8;  // the parent's list, unchanged, so pin_ref stays valid
   oneof body {
     WirePlan logical = 10;                        // OPTIMIZED context; exchange leaves replaced (§8.2)
   }
-  reserved 11; reserved "physical";               // §10
+  reserved 11; reserved "physical";               // §11
 }
 
 message OptimizedSegmentDag {
@@ -560,7 +599,9 @@ on each run (§2): every later producer binds and optimizes it.
 
 "Accepts and executes" means the plan passes admission (§7.2) unless it is invalid for a reason unrelated to its age
 (a digest mismatch, a stale snapshot pin, `needs` over a limit), and on the same pinned data it produces the result it
-produced under the build that first ran it. The one exception is revocation of a specific producer build (§9.7).
+produced under the build that first ran it. For a plan with UDFs, the engine that executes it is the one in its
+environment image: the plan executes forever with the image it was recorded with, and with any later image that passes
+§10.11; it is never refused for its age (§10.12). The one exception is revocation of a specific producer build (§9.7).
 
 ### 9.2 `format_version` and how the messages evolve
 
@@ -626,6 +667,17 @@ and enum value that any released version admits appears in at least one corpus p
 ship without one. The corpus also holds bound plans (`WirePlanEnvelope`) as a released producer stores them for
 re-optimization (§9.1); a test welded into `komira_plan_producer` optimizes each one and admits the result.
 
+UDF plans are in the corpus too. Each of the three kinds, and each code form, has at least one corpus plan:
+
+- The `installed` and `source` forms reference a pure-Python fixture module committed with the corpus.
+- Each UDF corpus plan, with its environment, is executed on the newest released base of its Python minor. When new
+  bases stop shipping a minor, its plans keep running on the last base that shipped it, which stays released
+  (§10.12). No corpus test asserts a refusal for age.
+
+The coverage assertion covers every `UdfKind`, `BatchFormat`, `TypeResolution`, `UdfStability` and `UdfNullMode`
+value. Mutants: a lowering that treats `PROPAGATE` as `MANUAL` for the first contract version; a corpus runner that
+executes a UDF plan on the newest base regardless of its Python minor (the payload fails to load).
+
 What it catches, each with a planted mutant that must turn it red:
 
 - a renumbered or reused field, or a changed field type: decoding fails or the digest differs. Mutant: swap two
@@ -644,12 +696,20 @@ The corpus starts with the first release that ships this type; there is nothing 
 
 ### 9.5 Not promised: forward compatibility
 
-An older host need not accept a newer plan. It refuses with `OPTIMIZED_PLAN_VERSION_UNSUPPORTED` or
-`OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`, each carrying its accepted set. A scheduler **routes by version**: it reads
-`format_version` and `optimizer_contract_version` from the header and places the plan only on hosts whose build
-accepts both; the header library exposes each build's accepted sets for that purpose. During a rolling deploy, a plan
-that only new hosts accept goes to new hosts. Because a producer writes the lowest `format_version` its plan needs, a
-newer producer's plans that use no new field still run on older hosts.
+An older engine need not accept a newer plan. It refuses with `OPTIMIZED_PLAN_VERSION_UNSUPPORTED` or
+`OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`, each carrying its accepted set. A scheduler reads `format_version` and
+`optimizer_contract_version` from the header and acts according to its deployment model:
+
+- **Hosts with a fixed engine.** It **routes by version**: it places the plan only on hosts whose build accepts both
+  versions. The header library exposes each build's accepted sets for that purpose. During a rolling deploy, a plan
+  that only new hosts accept goes to new hosts.
+- **The engine comes from the environment image (§10.11).** There is nowhere to route. The scheduler checks the
+  image's base release before any host starts and refuses with `OPTIMIZED_ENV_ENGINE_TOO_OLD`, naming the accepted
+  sets and the oldest released base that accepts the plan. The remedy is to rebuild the environment on a newer base.
+  Every newer base accepts every older plan (§9.1), so a rebuild never has to choose between plans.
+
+Because a producer writes the lowest `format_version` its plan needs, a newer producer's plans that use no new field
+still run on older engines.
 
 ### 9.6 Segments, and a cut that is stored
 
@@ -663,7 +723,7 @@ engine upgrade:
 
 | Option | Verdict |
 |---|---|
-| The new build **re-derives** the cut from the stored `OptimizedPlan`, with the same host count | **Chosen.** The plan already carries the backward-compatibility promise. The cut is mechanical and changes no decision (§8.2), so re-cutting a fixed plan reproduces the same decisions; nothing is re-optimized, so the statistics that would change a re-optimized plan play no part. One format is promised forever instead of two, and the segment format stays free to change; its reserved physical arm (§10) is meaningful only between equal builds and could never carry such a promise. |
+| The new build **re-derives** the cut from the stored `OptimizedPlan`, with the same host count | **Chosen.** The plan already carries the backward-compatibility promise. The cut is mechanical and changes no decision (§8.2), so re-cutting a fixed plan reproduces the same decisions; nothing is re-optimized, so the statistics that would change a re-optimized plan play no part. One format is promised forever instead of two, and the segment format stays free to change; its reserved physical arm (§11) is meaningful only between equal builds and could never carry such a promise. |
 | Give stored segments the same backward-compatibility promise | Rejected: a second permanent format, impossible for the physical arm. |
 
 Anything keyed to the cut, such as per-operator state identifiers, is derived from the plan and not from segment
@@ -690,7 +750,24 @@ The remedy for a revoked plan is to produce it again with a good build.
 
 ---
 
-## 10. The reserved physical arm
+## 10. User code: UDF nodes and the environment image
+
+Specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md), §10.1-§10.14. In brief:
+
+- A plain Python function (module, notebook cell, lambda or closure) becomes a `UdfRef` in `needs.udfs`, referenced by
+  index from three new arms: `WireUdfApply` (an n-ary expression), `WireMapBatchesNode` and `WirePythonStepNode`.
+- The plan identifies code by content digest only. Installed code is referenced by module and name, project source by
+  bundle digest, and notebook functions and closures by the digest of a cloudpickle payload. The bytes live in an
+  **environment image** that travels beside the plan, built FROM a released komira base that holds the engine.
+- Admission checks the pair: the image derives from a released base whose engine accepts the plan's versions, the
+  Python ABI matches, and the code is present and loads. Return types may be declared, hinted, observed locally, or
+  locked once per run from the first batch.
+- The plan format keeps its forever-backward-compatible promise; whether code loads is a property of the image, and a
+  UDF plan always runs with the image it was recorded with (§10.12).
+
+---
+
+## 11. The reserved physical arm
 
 `OptimizedSegment.body` field 11 is reserved, number and name, for a later self-contained physical form: opaque
 bytes with a format tag, or a reference to a compiled image. It belongs on the segment and not on the plan, because
@@ -700,7 +777,7 @@ means adding it later is not a format break. Today a segment that sets field 11 
 
 ---
 
-## 11. Implementation plan
+## 12. Implementation plan
 
 Each stage is independently reviewable and leaves `main` green. Every stage ships its tests welded to the library
 (`test_srcs`), each with a named mutant that must turn a test red.
@@ -717,12 +794,23 @@ Each stage is independently reviewable and leaves `main` green. Every stage ship
 | 8 | `komira_optimized_plan`, `komira_shuffle` | `WireSinkBinding`, the shuffle-partition scan source, and the cutter (§8) with its "no decision changed" assertion. | Mutants: a cutter that reorders a join; one that flips a build side. |
 | 9 | the host lowering target | The post-condition (§7.3) and the closure lint excluding `komira_optimizer`. | A planted dependency goes red; each §7.3 mutant is refused. |
 | 10 | `komira_optimized_plan`, the host lowering target, the release machine | The golden corpus (§9.4): emitted at each release that ships this type, append-only, welded into the header, admission and lowering targets, with the coverage assertion and the stored-cut key test (§9.6). | Each §9.4 mutant goes red; editing or deleting a corpus file is refused by the CI check. |
+| 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef` and its messages; `WireUdfApply`, `WireMapBatchesNode`, `WirePythonStepNode`, `WireField.children` and `type_deferred`, `WirePlanEnvelope.udfs`; engine tags 19, 20 and expression tag 27; the OPTIMIZED refusal of the legacy forms. | Every §10.4 refusal by name. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild. |
+| 12 | `komira_optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-6 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. |
+| 13 | the host lowering target, a new UDF worker package | Worker processes under their own user id, Arrow over shared memory, load-once caching, thread limits, the §10.10 errors, the run-wide type lock, and the §10.9 optimizer rules in the portable profile. | Mutants: a worker that reloads the payload per batch (a load counter goes red); a host that retries a `VOLATILE` batch; drift accepted silently; two hosts that lock different types; a worker that can read the supervisor's credentials. |
 
 **Critical path.** komira has no optimizer driver at the pinned commit: no `def optimize` exists under `src/`, and
 there is no `select_join_build_side` (`git grep`). It also has no lowering target: the physical IR has no producer
 or consumer in this tree (`physical_plan.mojo:5-6`). Neither producer can emit this type until a driver is written,
 and no host can admit it until the lowering exists. Stages 1-6 can proceed in parallel with both; stage 7 depends on
 the driver and stage 9 on the lowering.
+
+UDFs add two items to the critical path:
+
+- A Python worker runtime and a base image per supported CPython minor. Today the base image has no engine and no
+  Python (`packaging/images/base/README.md` in komira-ai/komira#1070).
+- The engine's UDF executor, with a worker transport in place of an in-process call.
+
+Stages 11 and 12 can proceed now. Stage 13 depends on both items.
 
 **Size, inferred from current sizes.** `komira_plan_wire` is 12,861 source lines in five files and `plan.proto` is
 1,646 lines. I expect stages 3-9 to add roughly 5,500-8,000 source lines and 11,000-14,000 test lines across 12-14
@@ -741,7 +829,7 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 
 ---
 
-## 12. Comparison with other systems
+## 13. Comparison with other systems
 
 - **Trino** ([`PlanFragment`](https://github.com/trinodb/trino/blob/master/core/trino-main/src/main/java/io/trino/sql/planner/PlanFragment.java)).
   The coordinator optimizes and fragments; workers only lower (`LocalExecutionPlanner`). That is the same split as
@@ -751,7 +839,8 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
   The logical proto has no slots for optimizer decisions; the norm is to round-trip a logical plan and optimize it
   again. Decisions such as join partition mode exist only in the physical proto, which makes no compatibility
   promise across releases. *(My reading)* The lessons are to make decisions explicit fields and to reference UDFs by
-  identity.
+  identity. Here the identity is a content digest, not a name (§10.3); §10.14 compares the UDF design with Spark
+  Connect, Daft, Ray Data and Polars.
 - **Spark Connect** ([overview](https://spark.apache.org/docs/latest/spark-connect-overview.html)). A thin client
   sends an unresolved plan, and the server analyzes and optimizes it. The opposite trade: version decoupling comes
   cheaply, and every plan is optimized server-side.
@@ -762,7 +851,7 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 
 ---
 
-## 13. Open questions
+## 14. Open questions
 
 1. **`group_topk`**: define its semantics so it can be admitted, or keep refusing it? Recommendation: refuse until an
    owner specifies it.
@@ -774,3 +863,17 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 4. **Keep the lowering or write an upgrade step** (§9.3), when a contract change is not an addition? Recommendation:
    decide per change, preferring kept lowering; an upgrade step only when keeping two lowerings would split an
    operator's code path.
+5. **Supported CPython minors.** Each one is a base image variant to release and maintain. Recommendation: three
+   consecutive minors, including the newest stable release, adding each new minor soon after its upstream release
+   and dropping one from new bases at its upstream end of life. A plan recorded against a dropped minor keeps running
+   on the last base that shipped it (§10.12). Free-threaded builds are distinct ABI tags and are refused by name until
+   a base ships one.
+6. **`FIRST_BATCH` and `OBSERVED` in the first release.** They need operators bound when the run's lock is published
+   (§10.5). Recommendation: ship them. Without them a user who never ran locally must write a type.
+7. **Serializer acceptance across base releases.** Should a base accept payloads from older serializer versions, or
+   only its own? Recommendation: each base accepts its own version and those of the bases it supersedes within one
+   Python minor, proven by one corpus payload per version (§9.4).
+8. **System libraries.** A dependency that needs a system library (not a Python wheel) must land inside `/opt/venv/`
+   to stay within §10.11's two prefixes. Recommendation: the image builder installs such libraries into a relocatable
+   prefix under `/opt/venv/` and the worker, not the supervisor, gets it on its library path; a library that cannot be
+   relocated is refused by name at build time. *(Inferred: not yet tried against real packages.)*
