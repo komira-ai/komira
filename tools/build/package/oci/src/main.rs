@@ -1,9 +1,22 @@
-//! oci_check: reads an OCI image layout back (README.md).
+//! komira_oci: lays out an image's tree, writes the image, and reads an OCI
+//! image layout back (README.md).
 //!
-//!   oci_check layers --layout <dir> --busybox <exe> --out <file>
-//!   oci_check check --layout <dir> --busybox <exe> --layers <file>
+//!   komira_oci tree --out <dir> [--bundle <path/>=<dir>]... [--file <path>=<src>]...
+//!   komira_oci image --tree <dir> --entrypoint </path> --name <n> --version <v>
+//!       --repo <r> --manifest <base manifest> --manifest-digest sha256:<hex>
+//!       --config <base config> [--layer <base layer blob>]... --busybox <exe>
+//!       --out <dir> --archive <file> --digest <file>
+//!   komira_oci layers --layout <dir> --busybox <exe> --out <file>
+//!   komira_oci check --layout <dir> --busybox <exe> --layers <file>
 //!       --entrypoint </path> [--exec <path>]... [--file <path>]...
 //!       --out <file> [--expect-red <text>]
+//!
+//! `tree` lays bundles and files at paths in <out> (tree.rs: refused unless
+//! every path is plain and none is inside another; modes 0755/0644).
+//!
+//! `image` writes an OCI image layout of the base plus one layer, the tree
+//! at /, with Entrypoint [<entrypoint>] (pack.rs), the same as one tar plus
+//! Docker's manifest.json at <archive>, and the manifest digest at <digest>.
 //!
 //! `layers` writes the manifest's layer digests, one per line, in order, and
 //! refuses an image whose Entrypoint is not one absolute path naming a
@@ -19,16 +32,22 @@
 //! found, when green. With `--expect-red <text>` the answer is inverted: it
 //! writes <out> only when the check is red and a failure contains <text>.
 //!
-//! A gzip layer is decompressed by `<busybox> gzip -dc`; nothing else runs.
+//! Gzip goes through the pinned busybox (`<busybox> gzip -dc` to read a
+//! layer, `<busybox> gzip -c` to write one, its header's time then zeroed);
+//! nothing else runs.
 
 mod image;
 mod json;
+mod pack;
+mod sha256;
 mod tar;
+mod tree;
 
 use image::{Fs, Want};
 use json::Value;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 struct Args {
     cmd: String,
@@ -38,7 +57,7 @@ struct Args {
 impl Args {
     fn parse(argv: Vec<String>) -> Result<Args, String> {
         let mut it = argv.into_iter().skip(1);
-        let cmd = it.next().ok_or("no command (layers, check)")?;
+        let cmd = it.next().ok_or("no command (tree, image, layers, check)")?;
         let mut pairs = Vec::new();
         while let Some(flag) = it.next() {
             let v = it.next().ok_or_else(|| format!("{} needs a value", flag))?;
@@ -144,6 +163,76 @@ impl Layout {
     }
 }
 
+/// `<path>=<src>`: the path holds no `=`, so the first one splits.
+fn place(v: &str, bundle: bool) -> Result<tree::Place, String> {
+    let (path, src) = v.split_once('=').ok_or_else(|| format!("`{}` is not <path>=<source>", v))?;
+    Ok(tree::Place { path: path.to_string(), src: src.to_string(), bundle })
+}
+
+fn tree_cmd(a: &Args) -> Result<(), String> {
+    a.allow(&["--out", "--bundle", "--file"])?;
+    let mut places = Vec::new();
+    for (flag, bundle) in [("--bundle", true), ("--file", false)] {
+        for v in a.all(flag) {
+            places.push(place(v, bundle)?);
+        }
+    }
+    let plan = tree::plan(places).map_err(|bad| format!("the tree is refused:\n  {}", bad.join("\n  ")))?;
+    tree::lay(Path::new(a.one("--out")?), &plan)
+}
+
+/// `data` gzipped by `<busybox> gzip -c`, the header's modification time
+/// zeroed so the bytes depend on `data` alone (the header is not in the
+/// stream's CRC, which covers the uncompressed bytes).
+fn gzip(busybox: &str, data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut child = Command::new(busybox).args(["gzip", "-c"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("cannot run {}: {}", busybox, e))?;
+    let mut stdin = child.stdin.take().ok_or("gzip: no stdin")?;
+    let o = std::thread::scope(|s| {
+        let feed = s.spawn(move || stdin.write_all(data));
+        let o = child.wait_with_output();
+        (feed.join(), o)
+    });
+    let o = match o {
+        (Ok(Ok(())), Ok(o)) => o,
+        (_, Err(e)) => return Err(format!("gzip: {}", e)),
+        (fed, _) => return Err(format!("gzip: cannot write its input: {:?}", fed)),
+    };
+    if !o.status.success() {
+        return Err(format!("gzip -c failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+    }
+    let mut gz = o.stdout;
+    // ID1 ID2, deflate, no flags (no name, no comment, no header CRC).
+    if gz.len() < 18 || gz[..4] != [0x1f, 0x8b, 8, 0] {
+        return Err(format!("gzip -c wrote no plain gzip header: {:02x?}", &gz[..gz.len().min(4)]));
+    }
+    gz[4..8].fill(0);
+    Ok(gz)
+}
+
+fn image_cmd(a: &Args) -> Result<(), String> {
+    a.allow(&["--tree", "--entrypoint", "--name", "--version", "--repo", "--manifest", "--manifest-digest", "--config", "--layer", "--busybox", "--out", "--archive", "--digest"])?;
+    let entrypoint = a.one("--entrypoint")?;
+    if entrypoint.len() < 2 || !entrypoint.starts_with('/') {
+        return Err(format!("entrypoint `{}` is not an absolute path", entrypoint));
+    }
+    let n = pack::Named {
+        name: pack::plain(a.one("--name")?, "name", "")?.to_string(),
+        version: pack::plain(a.one("--version")?, "version", "~")?.to_string(),
+        repo: pack::plain(a.one("--repo")?, "repo", "/:")?.to_string(),
+        entrypoint: entrypoint.to_string(),
+    };
+    let base = pack::Base {
+        manifest: read(Path::new(a.one("--manifest")?))?,
+        pin: a.one("--manifest-digest")?.to_string(),
+        config: read(Path::new(a.one("--config")?))?,
+        layers: a.all("--layer").into_iter().map(|p| read(Path::new(p))).collect::<Result<_, _>>()?,
+    };
+    let layer_tar = tar::write(pack::tree_items(Path::new(a.one("--tree")?))?)?;
+    let layer_gz = gzip(a.one("--busybox")?, &layer_tar)?;
+    let img = pack::image(&base, &layer_tar, &layer_gz, &n)?;
+    pack::write(&img, Path::new(a.one("--out")?), Path::new(a.one("--archive")?), Path::new(a.one("--digest")?))
+}
+
 fn layers(a: &Args) -> Result<(), String> {
     a.allow(&["--layout", "--busybox", "--out"])?;
     let l = Layout::open(a.one("--layout")?, a.one("--busybox")?)?;
@@ -159,6 +248,24 @@ fn layers(a: &Args) -> Result<(), String> {
     write(a.one("--out")?, &l.layers.iter().map(|d| format!("{}\n", d)).collect::<String>())
 }
 
+/// Green only when the config's Entrypoint is exactly `[want]`: one
+/// element, spelled the same (another path to the same file is red).
+fn entrypoint_finding(got: Option<&[&str]>, want: &str) -> Result<String, String> {
+    match got {
+        Some([ep]) if *ep == want => Ok(format!("entrypoint {}", want)),
+        other => Err(format!("the config's Entrypoint is not [\"{}\"]: {:?}", want, other)),
+    }
+}
+
+/// Every path the check reads: the entrypoint and each `--exec` as an
+/// executable, each `--file` as a file, in that order.
+fn wants(entrypoint: &str, execs: &[&str], files: &[&str]) -> Vec<(Want, String)> {
+    let mut w = vec![(Want::Exec, entrypoint.to_string())];
+    w.extend(execs.iter().map(|p| (Want::Exec, p.to_string())));
+    w.extend(files.iter().map(|p| (Want::File, p.to_string())));
+    w
+}
+
 /// The check's findings: what was found, and the failures.
 fn findings(a: &Args) -> Result<(Vec<String>, Vec<String>), String> {
     let l = Layout::open(a.one("--layout")?, a.one("--busybox")?)?;
@@ -169,9 +276,9 @@ fn findings(a: &Args) -> Result<(Vec<String>, Vec<String>), String> {
     if listed != l.layers {
         bad.push(format!("the layer list is not the manifest's layers in order: list {} | manifest {}", listed.join(" "), l.layers.join(" ")));
     }
-    match l.entrypoint() {
-        Some(ep) if ep == [want_ep] => ok.push(format!("entrypoint {}", want_ep)),
-        other => bad.push(format!("the config's Entrypoint is not [\"{}\"]: {:?}", want_ep, other)),
+    match entrypoint_finding(l.entrypoint().as_deref(), want_ep) {
+        Ok(f) => ok.push(f),
+        Err(f) => bad.push(f),
     }
     let mut fs = Fs::default();
     for i in 0..l.layers.len() {
@@ -182,10 +289,7 @@ fn findings(a: &Args) -> Result<(Vec<String>, Vec<String>), String> {
         fs.apply(&entries).map_err(|e| format!("layer {}: {}", l.layers[i], e))?;
     }
     ok.push(format!("layers {}", l.layers.len()));
-    let mut wants = vec![(Want::Exec, want_ep.to_string())];
-    wants.extend(a.all("--exec").into_iter().map(|p| (Want::Exec, p.to_string())));
-    wants.extend(a.all("--file").into_iter().map(|p| (Want::File, p.to_string())));
-    let (found, failed) = image::check_paths(&fs, &wants);
+    let (found, failed) = image::check_paths(&fs, &wants(want_ep, &a.all("--exec"), &a.all("--file")));
     ok.extend(found);
     bad.extend(failed);
     Ok((ok, bad))
@@ -213,15 +317,44 @@ fn check(a: &Args) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let r = Args::parse(std::env::args().collect()).and_then(|a| match a.cmd.as_str() {
+        "tree" => tree_cmd(&a),
+        "image" => image_cmd(&a),
         "layers" => layers(&a),
         "check" => check(&a),
-        c => Err(format!("unknown command `{}` (layers, check)", c)),
+        c => Err(format!("unknown command `{}` (tree, image, layers, check)", c)),
     });
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("oci_check: {}", e);
+            eprintln!("komira_oci: {}", e);
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_entrypoint_must_be_exactly_the_one_named() {
+        assert_eq!(entrypoint_finding(Some(&["/bin/sh"]), "/bin/sh"), Ok("entrypoint /bin/sh".into()));
+        for got in [Some(&["/bin/other"][..]), Some(&["/bin/./sh"][..]), Some(&["/bin/sh", "-c"][..]), Some(&[][..]), None] {
+            let e = entrypoint_finding(got, "/bin/sh").unwrap_err();
+            assert!(e.starts_with("the config's Entrypoint is not [\"/bin/sh\"]: "), "{}", e);
+        }
+    }
+
+    #[test]
+    fn every_exec_and_file_is_wanted() {
+        let w = wants("/e", &["a", "b", "c"], &["x", "y"]);
+        let got: Vec<(Want, &str)> = w.iter().map(|(k, p)| (*k, p.as_str())).collect();
+        assert_eq!(got, [(Want::Exec, "/e"), (Want::Exec, "a"), (Want::Exec, "b"), (Want::Exec, "c"), (Want::File, "x"), (Want::File, "y")]);
+    }
+
+    #[test]
+    fn a_place_splits_at_the_first_equals() {
+        assert_eq!(place("bin/sh=out/a=b", false).unwrap(), tree::Place { path: "bin/sh".into(), src: "out/a=b".into(), bundle: false });
+        assert!(place("bin/sh", false).is_err());
     }
 }

@@ -1,5 +1,5 @@
 //! A tar reader, enough for an image layer: ustar, GNU long names and pax
-//! extended headers.
+//! extended headers; and the writer of the layer and archive `image` adds.
 //!
 //! Every header's checksum is verified. A layer must end with a zero block,
 //! so a truncated layer is refused rather than read short.
@@ -145,6 +145,80 @@ pub fn read(data: &[u8]) -> Result<Vec<Entry>, String> {
     }
 }
 
+/// An entry to write: a directory's path ends in /.
+pub struct Item {
+    pub path: String,
+    pub mode: u32,
+    pub data: Vec<u8>,
+}
+
+/// Zero-padded octal filling all but the last byte, which is NUL.
+fn octal(f: &mut [u8], v: u64) -> Result<(), String> {
+    let digits = f.len() - 1;
+    let s = format!("{:0w$o}", v, w = digits);
+    if s.len() > digits {
+        return Err(format!("tar: {} does not fit a {}-byte field", v, f.len()));
+    }
+    f[..digits].copy_from_slice(s.as_bytes());
+    f[digits] = 0;
+    Ok(())
+}
+
+fn put_header(out: &mut Vec<u8>, name: &[u8], flag: u8, mode: u32, size: u64) -> Result<(), String> {
+    let mut h = [0u8; BLOCK];
+    h[..name.len()].copy_from_slice(name);
+    octal(&mut h[100..108], mode as u64)?;
+    octal(&mut h[108..116], 0)?;
+    octal(&mut h[116..124], 0)?;
+    octal(&mut h[124..136], size)?;
+    octal(&mut h[136..148], 0)?;
+    h[156] = flag;
+    h[257..263].copy_from_slice(b"ustar\0");
+    h[263..265].copy_from_slice(b"00");
+    h[148..156].copy_from_slice(b"        ");
+    let sum: u64 = h.iter().map(|&b| b as u64).sum();
+    octal(&mut h[148..155], sum)?;
+    h[155] = b' ';
+    out.extend_from_slice(&h);
+    Ok(())
+}
+
+fn pad(out: &mut Vec<u8>) {
+    out.resize(out.len().div_ceil(BLOCK) * BLOCK, 0);
+}
+
+/// `items` as a tar, sorted by path, uid, gid and mtime 0, a path over 100
+/// bytes in a pax header, ending with two zero blocks. A path given twice
+/// is refused.
+pub fn write(mut items: Vec<Item>) -> Result<Vec<u8>, String> {
+    items.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
+    let mut out = Vec::new();
+    for (i, e) in items.iter().enumerate() {
+        if i > 0 && items[i - 1].path == e.path {
+            return Err(format!("tar: {} given twice", e.path));
+        }
+        let flag = if e.path.ends_with('/') { b'5' } else { b'0' };
+        let p = e.path.as_bytes();
+        if p.len() > 100 {
+            let mut len = " path=\n".len() + p.len();
+            let mut digits = 1;
+            while (len + digits).to_string().len() != digits {
+                digits = (len + digits).to_string().len();
+            }
+            len += digits;
+            let rec = format!("{} path={}\n", len, e.path);
+            put_header(&mut out, b"././@PaxHeader", b'x', 0o644, rec.len() as u64)?;
+            out.extend_from_slice(rec.as_bytes());
+            pad(&mut out);
+        }
+        put_header(&mut out, &p[..p.len().min(100)], flag, e.mode, e.data.len() as u64)?;
+        out.extend_from_slice(&e.data);
+        pad(&mut out);
+    }
+    out.resize(out.len() + 2 * BLOCK, 0);
+    Ok(out)
+}
+
 /// Test fixtures: a tar writer (ustar, and pax for a long name).
 #[cfg(test)]
 pub mod write {
@@ -225,6 +299,20 @@ mod tests {
         assert_eq!(e[0].path, long);
         assert_eq!((e[0].mode, e[0].size), (0o755, 2));
         assert_eq!(e[1].path, long + "2");
+    }
+
+    #[test]
+    fn writes_what_it_reads_back_sorted() {
+        let long = "d/".repeat(60) + "file";
+        let item = |p: &str, m: u32, d: &[u8]| Item { path: p.to_string(), mode: m, data: d.to_vec() };
+        let t = write(vec![item("b", 0o644, b"bee"), item(&long, 0o755, b"x"), item("a/", 0o755, b"")]).unwrap();
+        assert_eq!(t.len() % 512, 0);
+        let got: Vec<_> = read(&t).unwrap().into_iter().map(|e| (e.path, e.kind, e.mode, e.size)).collect();
+        assert_eq!(got, [("a/".to_string(), Kind::Dir, 0o755, 0), ("b".to_string(), Kind::File, 0o644, 3), (long.clone(), Kind::File, 0o755, 1)]);
+        // The same items give the same bytes; uid, gid and mtime are 0.
+        assert_eq!(t, write(vec![item("a/", 0o755, b""), item(&long, 0o755, b"x"), item("b", 0o644, b"bee")]).unwrap());
+        assert_eq!(&t[136..148], b"00000000000\0");
+        assert!(write(vec![item("a", 0o644, b""), item("a", 0o755, b"")]).unwrap_err().contains("a given twice"));
     }
 
     #[test]

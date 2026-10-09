@@ -4,7 +4,6 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
-load(":oci_tree_cases.bzl", "oci_tree_cases")
 load(":release_set.bzl", "conda_release_set_check")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
@@ -35,11 +34,6 @@ shell_lint(
         "release_version.sh",
     ],
 )
-
-# oci_tree's path refusals on known paths, run when this package loads:
-# every image build loads it (its packer is here), so none builds while a
-# case is wrong (oci_tree_cases.bzl).
-oci_tree_cases()
 
 # kcov is GPL-2.0 and build-only: every package format runs this guard over
 # what it packs and refuses a file that is kcov's bin/kcov (by the sha256 in

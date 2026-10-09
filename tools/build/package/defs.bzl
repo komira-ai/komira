@@ -377,76 +377,26 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, config
 # over it; name, version: what the image's history and tag say.
 OciTreeInfo = provider(fields = ["dir", "kcov_guard", "name", "version"])
 
-_TREE_PATH = "^[A-Za-z0-9_.+-]+(/[A-Za-z0-9_.+-]+)*$"
-
-def oci_tree_refusals(bundle_paths, file_paths):
-    """Why `oci_tree` refuses these paths: a list of messages, empty when it accepts them.
-
-    A bundle's path is a plain relative path ending in /, a file's a plain
-    relative path (no empty, `.` or `..` part); and no path is inside
-    another, so no copy overwrites another's file (a file at `app/bin/x`
-    beside a bundle at `app/` would replace the bundle's program). The check
-    `oci_tree` fails on, callable from a load-time case (oci_tree_cases.bzl).
-    """
-    out = []
-    for p in bundle_paths:
-        if not p.endswith("/") or not regex_match(_TREE_PATH, p[:-1]) or "/../" in "/" + p or "/./" in "/" + p:
-            out.append("bundle path `{}` must be a plain relative path ending in /".format(p))
-    for p in file_paths:
-        if not regex_match(_TREE_PATH, p) or "/../" in "/" + p + "/" or "/./" in "/" + p + "/":
-            out.append("file path `{}` must be a plain relative path".format(p))
-    places = sorted(bundle_paths) + sorted(file_paths)
-    for p in places:
-        for q in places:
-            if p != q and q.startswith(p if p.endswith("/") else p + "/"):
-                out.append("`{}` is inside `{}`".format(q, p))
-    return out
-
 def _oci_tree_impl(ctx):
-    refusals = oci_tree_refusals(ctx.attrs.bundles.keys(), ctx.attrs.files.keys())
-    if refusals:
-        fail("{}: {}".format(ctx.label, "; ".join(refusals)))
-    places = []  # [path in the tree, artifact], a bundle's path ending in /
+    args = []
     for prefix, dep in sorted(ctx.attrs.bundles.items()):
         b = dep[BundleInfo]
         # komira-limit:image-linux-x86-64-only
         if b.platform != "linux-x86_64":
             fail("{}: a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
-        places.append([prefix, b.dir])
+        args.extend(["--bundle", cmd_args(prefix, b.dir, delimiter = "=")])
     for path, src in sorted(ctx.attrs.files.items()):
-        places.append([path, src])
+        args.extend(["--file", cmd_args(path, src, delimiter = "=")])
     if not regex_match("^[0-9A-Za-z][0-9A-Za-z.+~-]*$", ctx.attrs.version):
         fail("{}: version `{}` is not a plain version string".format(ctx.label, ctx.attrs.version))
 
+    # The paths are refused by the Rust tool (komira_oci tree: none may be
+    # inside another, each must be plain); a refused tree fails this action.
     out = ctx.actions.declare_output(ctx.label.name, dir = True)
-    script = _PRELUDE + """
-OUT="$1"; shift
-mkdir -p "$OUT"
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        */) mkdir -p "$OUT/$1"; cp -R "$2/." "$OUT/$1" ;;
-        *) mkdir -p "$OUT/$(dirname "$1")"; cp "$2" "$OUT/$1" ;;
-    esac
-    shift 2
-done
-# Modes as every package format writes them: 0755 for a directory and for a
-# file with any exec bit, else 0644.
-find "$OUT" -type d -exec chmod 0755 {} +
-find "$OUT" -type f | while IFS= read -r f; do
-    case "$(stat -c %a "$f")" in
-        *[1357]) chmod 0755 "$f" ;;
-        *[1357]?) chmod 0755 "$f" ;;
-        *[1357]??) chmod 0755 "$f" ;;
-        *) chmod 0644 "$f" ;;
-    esac
-done
-rm -rf "$T"
-"""
-    args = []
-    for p, a in places:
-        args.extend([p, a])
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
-    ctx.actions.run(busybox_sh(bb, script, out.as_output(), args), category = "komira_oci_tree")
+    ctx.actions.run(
+        cmd_args(ctx.attrs._oci[RunInfo], "tree", "--out", out.as_output(), args),
+        category = "komira_oci_tree",
+    )
     # No file of the tree is kcov (kcov_guard.bzl): read by the guard, which
     # oci_image waits for.
     guarded = kcov_guard(ctx, ctx.attrs._kcov_guard, ctx.label.name, [[".", out]])
@@ -463,8 +413,8 @@ _oci_tree = rule(
         # path in the tree -> a file copied there
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "version": attrs.string(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
+        "_oci": attrs.exec_dep(default = "komira//tools/build/package/oci:komira_oci", providers = [RunInfo]),
     },
 )
 
@@ -473,8 +423,10 @@ def oci_tree(**kwargs):
 
     `bundles` maps a path ending in / to a bundle copied there whole;
     `files` maps a path to a file. Modes are 0755 for directories and files
-    with an exec bit, else 0644. The kcov guard reads every file of the tree,
-    and `oci_image(tree = ...)` packs it only after the guard passed.
+    with an exec bit, else 0644. A path that is not plain, or is inside
+    another, fails the build (`komira_oci tree`, oci/README.md). The kcov
+    guard reads every file of the tree, and `oci_image(tree = ...)` packs it
+    only after the guard passed.
     """
     _oci_tree(exec_compatible_with = LINUX_X86_64, **kwargs)
 
@@ -490,11 +442,15 @@ def _oci_image_impl(ctx):
         # komira-limit:image-linux-x86-64-only
         if b.platform != "linux-x86_64":
             fail("{}: an image of a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
-        layer = ["--bundle", b.dir]
+        # komira_pack (zig): the bundle at /opt/<name>/.
+        tool, category = [ctx.attrs._pack[RunInfo], "oci", "--bundle", b.dir], "komira_pack_oci"
         name, version, guard = b.name, b.version, b.kcov_guard
     else:
         t = ctx.attrs.tree[OciTreeInfo]
-        layer = ["--root", t.dir, "--entrypoint", ctx.attrs.entrypoint]
+        # komira_oci (Rust): the tree at /.
+        bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+        tool = [ctx.attrs._oci[RunInfo], "image", "--tree", t.dir, "--entrypoint", ctx.attrs.entrypoint, "--busybox", bb]
+        category = "komira_oci_image"
         name, version, guard = t.name, t.version, t.kcov_guard
     if not regex_match("^[a-z0-9]+([._/-][a-z0-9]+)*$", ctx.attrs.repository):
         fail("{}: repository `{}` is not an image repository name".format(ctx.label, ctx.attrs.repository))
@@ -508,9 +464,7 @@ def _oci_image_impl(ctx):
         layer_args.extend(["--layer", l])
     ctx.actions.run(
         cmd_args(
-            ctx.attrs._pack[RunInfo],
-            "oci",
-            layer,
+            tool,
             "--name",
             name,
             "--version",
@@ -533,14 +487,14 @@ def _oci_image_impl(ctx):
             # Packed only after the kcov guard passed over the bundle or tree.
             hidden = [guard],
         ),
-        category = "komira_pack_oci",
+        category = category,
     )
-    # The layer list, read from the manifest by the Rust tool, which refuses
+    # The layer list, read from the manifest by komira_oci, which refuses
     # an Entrypoint that is not a 0755 regular file of the added layer: on
     # the default output, so no image builds without it.
     ctx.actions.run(
         cmd_args(
-            ctx.attrs._oci_check[RunInfo],
+            ctx.attrs._oci[RunInfo],
             "layers",
             "--layout",
             layout,
@@ -573,7 +527,7 @@ _oci_image = rule(
         "repository": attrs.string(),
         "tree": attrs.option(attrs.dep(providers = [OciTreeInfo]), default = None),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-        "_oci_check": attrs.exec_dep(default = "komira//tools/build/package/oci_check:oci_check", providers = [RunInfo]),
+        "_oci": attrs.exec_dep(default = "komira//tools/build/package/oci:komira_oci", providers = [RunInfo]),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
     },
 )
@@ -582,9 +536,10 @@ def oci_image(**kwargs):
     """An OCI image: the base's layers plus one layer, the bundle at /opt/<name>/ or a tree at /.
 
     `bundle`: the layer holds the bundle at /opt/<name>/, entrypoint
-    /opt/<name>/bin/<name>. `tree` (an `oci_tree`) with `entrypoint`: the
-    layer holds the tree at /, and the entrypoint, an absolute path, must
-    be a regular file of the tree with mode 0755 (refused otherwise).
+    /opt/<name>/bin/<name> (written by `komira_pack oci`). `tree` (an
+    `oci_tree`) with `entrypoint`: the layer holds the tree at /, and the
+    entrypoint, an absolute path, must be a regular file of the tree with
+    mode 0755 (refused otherwise; written by `komira_oci image`).
     The default output is an OCI image layout directory (`index.json` names
     it `<repository>:<version>`). `[docker_archive]` is the same as one tar
     plus a Docker `manifest.json`, which `docker load` reads; `[digest]`

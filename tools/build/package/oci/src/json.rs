@@ -1,8 +1,10 @@
-//! A JSON reader, enough for an OCI image layout (index, manifest, config).
+//! A JSON reader and writer, enough for an OCI image layout (index,
+//! manifest, config).
 //!
 //! RFC 8259 values; a key given twice in one object is refused, so a
-//! document cannot say two things about one field. Numbers are kept as text:
-//! the checker compares none.
+//! document cannot say two things about one field. Numbers are kept as text
+//! and written back as read. The writer is compact, with every object's keys
+//! in sorted order, so a value has one spelling.
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -36,6 +38,87 @@ impl Value {
             _ => None,
         }
     }
+
+    /// Sets the member `key` of an object, replacing one already there.
+    pub fn set(&mut self, key: &str, v: Value) -> Result<(), String> {
+        match self {
+            Value::Obj(m) => {
+                match m.iter_mut().find(|(k, _)| k == key) {
+                    Some(slot) => slot.1 = v,
+                    None => m.push((key.to_string(), v)),
+                }
+                Ok(())
+            }
+            _ => Err(format!("cannot set `{}`: not an object", key)),
+        }
+    }
+
+    /// Removes the member `key` of an object, if there.
+    pub fn remove(&mut self, key: &str) {
+        if let Value::Obj(m) = self {
+            m.retain(|(k, _)| k != key);
+        }
+    }
+
+    /// Compact JSON, every object's keys in sorted order.
+    pub fn to_json(&self) -> String {
+        let mut out = String::new();
+        self.write(&mut out);
+        out
+    }
+
+    fn write(&self, out: &mut String) {
+        match self {
+            Value::Null => out.push_str("null"),
+            Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Value::Num(n) => out.push_str(n),
+            Value::Str(s) => quote(s, out),
+            Value::Arr(a) => {
+                out.push('[');
+                for (i, v) in a.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    v.write(out);
+                }
+                out.push(']');
+            }
+            Value::Obj(m) => {
+                let mut members: Vec<&(String, Value)> = m.iter().collect();
+                members.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+                out.push('{');
+                for (i, (k, v)) in members.into_iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    quote(k, out);
+                    out.push(':');
+                    v.write(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+}
+
+/// `s` as a JSON string: `"` and `\` escaped, control characters as their
+/// short escape or a four-digit one, everything else as is (UTF-8).
+fn quote(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\x08' => out.push_str("\\b"),
+            '\x0c' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }
 
 const MAX_DEPTH: usize = 64;
@@ -291,6 +374,26 @@ mod tests {
     #[test]
     fn decodes_escapes_and_surrogate_pairs() {
         assert_eq!(parse(br#""a\"\\\/\n\u00e9\ud83d\ude00""#).unwrap(), s("a\"\\/\n\u{e9}\u{1F600}"));
+    }
+
+    #[test]
+    fn writes_compact_with_sorted_keys_and_reads_it_back() {
+        let n = |x: &str| Value::Num(x.into());
+        let mut v = Value::Obj(vec![
+            ("z".into(), Value::Arr(vec![n("1"), n("-2.5e3"), Value::Bool(true), Value::Null])),
+            ("a".into(), Value::Obj(vec![("y".into(), s("q\"\\\n\x01/")), ("b".into(), Value::Obj(vec![]))])),
+            ("M".into(), s("x")),
+        ]);
+        let u0001: String = ['\\', 'u', '0', '0', '0', '1'].iter().collect();
+        let want = format!("{{\"M\":\"x\",\"a\":{{\"b\":{{}},\"y\":\"q\\\"\\\\\\n{}/\"}},\"z\":[1,-2.5e3,true,null]}}", u0001);
+        assert_eq!(v.to_json(), want);
+        assert_eq!(parse(want.as_bytes()).unwrap().to_json(), want);
+        v.set("M", s("y")).unwrap();
+        v.set("new", n("2")).unwrap();
+        v.remove("z");
+        assert!(v.to_json().starts_with("{\"M\":\"y\",\"a\":"), "{}", v.to_json());
+        assert!(v.to_json().ends_with("},\"new\":2}"), "{}", v.to_json());
+        assert!(s("x").set("k", Value::Null).is_err());
     }
 
     #[test]

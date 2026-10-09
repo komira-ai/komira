@@ -36,15 +36,15 @@ sub-targets fails if one fails.
 
 | check | where | catches |
 |---|---|---|
-| the config's Entrypoint is exactly `["/komira/bin/supervisor"]` | `oci_image_check` ([`oci_check`](../../../tools/build/package/oci_check/README.md)) | an image whose entrypoint was dropped or changed |
+| the config's Entrypoint is exactly `["/komira/bin/supervisor"]` | `oci_image_check` ([`komira_oci check`](../../../tools/build/package/oci/README.md)) | an image whose entrypoint was dropped or changed |
 | `/komira/bin/supervisor`, `/bin/sh` and `/opt/kci/bin/kci` are regular files with mode 0755 in the image's filesystem (layers applied in order; a whiteout hides its path and everything under it, an opaque one its directory's children below; symlinks followed) | the same | a program missing, or packed without its exec bit |
 | `/etc/ssl/certs/ca-certificates.crt` is a non-empty regular file there | the same | CA certificates removed or hidden by a later layer |
 | `[layers]` is the manifest's layers, in order | the same | a layer list that does not describe the image (reordered, short) |
 | the added layer changes the type of no base entry | the same | a directory over a base symlink, hiding what the link reaches |
-| no path of the added tree is inside another (a file at `komira/bin/supervisor` would replace the supervisor) | `oci_tree_refusals`, run on known paths by [`oci_tree_cases.bzl`](../../../tools/build/package/oci_tree_cases.bzl) when the packaging package loads | a file silently replacing a bundle's program |
+| no path of the added tree is inside another (a file at `komira/bin/supervisor` would replace the supervisor) | `komira_oci tree` ([README](../../../tools/build/package/oci/README.md)), which lays out the tree; its welded unit tests hold the refusals to known paths | a file silently replacing a bundle's program |
 | the base is pinned by digest: `oci_base_refusals` refuses a tag, a tagged reference, a short or upper-case digest, and accepts the pinned base | [`pin_cases.bzl`](pin_cases.bzl), at load time | a base named by tag, which could change under the same name |
 
-Before any of these, `oci_check layers` refuses an entrypoint that is not a
-regular file with mode 0755 in the added layer, and `komira_pack` a base whose
-manifest does not hash to its pinned digest or does not name exactly the
-downloaded blobs.
+Before any of these, `komira_oci layers` refuses an entrypoint that is not a
+regular file with mode 0755 in the added layer, and `komira_oci image` a base
+whose manifest does not hash to its pinned digest or does not name exactly
+the downloaded blobs.

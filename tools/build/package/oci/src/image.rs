@@ -328,6 +328,14 @@ mod tests {
         ]);
         assert_eq!(certs_ok(&fs), Ok(()));
         assert_eq!(fs.nodes[CERT].size, 3);
+        // The same whiteout in a layer that adds nothing back: `cert` names
+        // no entry, and `certs/`, what is under it and `cert.pem` (names
+        // starting with `cert`) all stay.
+        let (_, fs, _) = image(&[("etc/ssl/.wh.cert", b'0', 0o644, b"", "")]);
+        assert_eq!(certs_ok(&fs), Ok(()));
+        assert_eq!(fs.nodes[CERT].size, 3);
+        assert_eq!(fs.nodes.get("etc/ssl/certs").map(|n| n.ty), Some(Type::Dir));
+        assert_eq!(fs.nodes.get("etc/ssl/cert.pem").map(|n| n.ty), Some(Type::Symlink));
         // A file whiteout: that one file goes.
         let (_, fs, _) = image(&[("etc/ssl/certs/.wh.ca-certificates.crt", b'0', 0o644, b"", "")]);
         assert!(certs_ok(&fs).is_err());

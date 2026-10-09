@@ -99,7 +99,7 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
 
 `[layers]` is the digest of each layer of the image manifest, one per line,
 in order: the base's layers, then the one the build adds. It is read from the
-manifest by [`oci_check layers`](oci_check/README.md), which also refuses an
+manifest by [`komira_oci layers`](oci/README.md), which also refuses an
 image whose Entrypoint is not a regular file with mode 0755 in the added
 layer; it is part of every image's default output.
 
@@ -131,11 +131,13 @@ oci_image_check(
 No path of an `oci_tree` may be inside another (a file at `app/bin/tool`
 would replace the bundle's program), and modes are 0755 for directories and
 files with an exec bit, else 0644; the kcov guard reads the whole tree before
-it is packed. The path refusals are `oci_tree_refusals`, a function that
-[`oci_tree_cases.bzl`](oci_tree_cases.bzl) runs on known paths when this
-package loads, which every image build does. `oci_image_check`
-([`oci_check.bzl`](oci_check.bzl), running the Rust tool
-[`oci_check`](oci_check/README.md)) reads the
+it is packed. The tree is laid out by the Rust tool
+[`komira_oci tree`](oci/README.md), which refuses the paths (naming each
+reason) and so fails the build; its unit tests, welded to it, hold the
+refusals to known paths. The image of a tree is written by `komira_oci
+image`. `oci_image_check`
+([`oci_check.bzl`](oci_check.bzl), running
+[`komira_oci check`](oci/README.md)) reads the
 built image back in a build action and is that image with the check's output
 added to its default output and each sub-target, so the image cannot be built
 through it unless: the config's Entrypoint is exactly the one named; it and
@@ -148,7 +150,7 @@ manifest's layers in order; and the added layer changes the type of no base
 entry (a directory over a base symlink such as `bin -> usr/bin` would hide
 what the link reaches). With `expect_red = "<text>"` an `oci_image_check` is
 a negative case of the check, which builds only while the check is red naming
-`<text>` (the whiteout cases in [`oci_check/BUCK`](oci_check/BUCK)). The
+`<text>` (the cases in [`oci/BUCK`](oci/BUCK)). The
 komira base image is built this way:
 [`packaging/images/base`](../../../packaging/images/base/README.md).
 
@@ -162,7 +164,7 @@ load-time case can call). The packing action does not use the network: it
 takes no URLs, reads only those files and refuses unless the manifest hashes to its
 digest and names exactly the downloaded blobs.
 
-Both formats are written by `komira_pack` ([`komira_pack.zig`](pack/komira_pack.zig)), a
+Both formats of a bundle are written by `komira_pack` ([`komira_pack.zig`](pack/komira_pack.zig)), a
 static executable built by the pinned zig and run with no shell. It holds
 its output in memory until it exits, up to about three times the bundle's
 size at peak, which sets the size of bundle a worker can pack. The
@@ -201,7 +203,7 @@ refuses kcov by its usage line alone.
 | format | what the guard reads | what waits for it |
 |---|---|---|
 | `mojo_bundle` | every file of the bundle | the bundle target (`[kcov_guard]` is built with it) |
-| `bundle_tarball`, `oci_image` | the bundle, through the bundle's guard | the `komira_pack tar` and `komira_pack oci` actions |
+| `bundle_tarball`, `oci_image` | the bundle, through the bundle's guard; a tree (`oci_tree`), through the tree's guard | the `komira_pack tar`, `komira_pack oci` and `komira_oci image` actions |
 | `conda_package` | every file `komira_pack conda` copies in: the `.mojoc`, the README, the licence files | the copies behind `[default]` and `[release]` (`[kcov_guard]` is the marker) |
 
 The image's base layers (the pinned distroless blobs) and the files the
