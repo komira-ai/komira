@@ -100,12 +100,14 @@ def test_lt_rv_reads_the_rhs_window_validity() raises:
 
 def test_lt_lrv_reads_each_side_at_its_own_offset() raises:
     """LHS at offset 1 (null logical 3, 17), RHS at offset 6 (null logical 0,
-    9): the result clears the union."""
+    9, 18): the result clears the union. RHS row 18 is in the scalar tail,
+    so a tail that reads the RHS bit at the LHS offset (absolute 19, valid)
+    leaves it set."""
     var lhs = _i64_slice(1, [4, 18], 1)
-    var rhs = _i64_slice(2, [6, 15], 6)
+    var rhs = _i64_slice(2, [6, 15, 24], 6)
     var out = Bitmap.create(N)
     var c = LtI64_LRV().eval_chunk(lhs, rhs, out)
-    _assert_mask(out, c, N, [0, 3, 9, 17], "LtI64_LRV offsets 1/6")
+    _assert_mask(out, c, N, [0, 3, 9, 17, 18], "LtI64_LRV offsets 1/6")
 
 
 def test_is_null_reads_the_window_validity() raises:

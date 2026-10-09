@@ -464,7 +464,8 @@ def _apply_validity[
     are False, the body is comptime-deleted — returns cmp_bits unchanged.
 
     When either is True, reads the corresponding validity bitmap bits at
-    `offset + start_idx` (a sliced array's bitmap is indexed absolutely), casts the W-lane validity mask to UInt8, and ANDs into
+    `offset + start_idx` (a sliced array's bitmap is indexed absolutely),
+    casts the W-lane validity mask to UInt8, and ANDs into
     `cmp_bits` lane-by-lane (W lanes, scalar fallback for correctness on
     the validity-bit-extract; the compiler vectorizes the AND step).
     """
