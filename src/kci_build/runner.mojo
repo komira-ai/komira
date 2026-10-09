@@ -24,6 +24,8 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
+from std.time import perf_counter_ns
+
 comptime STDERR_TAIL_BYTES: Int = 4096
 """How much of the end of stderr a `RunResult` keeps for a refusal message."""
 
@@ -173,3 +175,15 @@ trait ProcessRunner(Movable):
 
     def run(mut self, spec: RunSpec) raises -> RunResult:
         ...
+
+    def now_ns(self) -> Int:
+        """A MONOTONIC clock, in nanoseconds: what the per-change check's
+        build budget is read against (affected_batch.mojo, THE BUDGET). Only
+        differences between two readings mean anything. The default is
+        `std.time.perf_counter_ns`, which on Linux reads
+        `clock_gettime(CLOCK_MONOTONIC)` (the standard library's
+        std/time/time.mojo: `perf_counter_ns` returns
+        `_monotonic_nanoseconds()`, which reads `_CLOCK_MONOTONIC`, clock id
+        1 on Linux), so a wall-clock step never moves it. ScriptedRunner
+        overrides it with a clock its steps advance."""
+        return Int(perf_counter_ns())

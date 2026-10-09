@@ -6,7 +6,8 @@
 #           [--affected-by <commit>] [--plan] --revision-id <commit>
 #           --run-id <id> --attempt <n> [--context <key=value>]...
 #           --release-dir <dir> [--result-file <file>] [--summary-file <file>]
-#           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]
+#           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]
+#            [--build-budget-s <n>]]
 #           [--release-version <file>] [--concurrency <n>]
 #           [--secret-store <none|env>] [--scratch-dir <dir>]
 #           [--release-set-hash <64 hex>]
@@ -37,6 +38,13 @@
 #             and nothing ships (kci_build affected.mojo). <commit> is a
 #             FULL commit id, like --revision-id (a CI job passes the pull
 #             request's base sha, not a branch name). The run is SELECTIVE.
+#             `--build-budget-s <n>` (with --affected-by only, refused
+#             without it) is the seconds the per-change check's build of
+#             the units may take in all, every run of it included
+#             (kci_build affected_batch.mojo, THE BUDGET), counted from
+#             kci's own start (`started_ns`, set by dispatch.mojo
+#             `kci_main_with`), at most MAX_BUILD_BUDGET_S (a week); pr.yml
+#             passes what is left of its job's time limit.
 #             It is refused with --only, with --release-dir (nothing is
 #             released, so there is no release directory; without
 #             --affected-by the flag is required), and for a stage holding a
@@ -57,6 +65,7 @@
 # the rest once the stage is resolved:
 #
 #   a selected BUILD step    needs --work-dir and --log-dir; --build-timeout-s
+#                            and (with --affected-by) --build-budget-s
 #                            optional
 #   a selected PUBLISH step  needs --release-version; --concurrency,
 #                            --secret-store optional
@@ -117,6 +126,7 @@ from kci_api import (
     parse_selectors,
     require_full_commit_id,
 )
+from kci_build import MAX_BUILD_BUDGET_S
 from kci_release_machine import Selection, Stage
 from kci_validate import ChannelUrl
 
@@ -129,6 +139,7 @@ comptime KCI_USAGE: String = (
     "          [--affected-by <commit>] --revision-id <commit> --run-id <id> --attempt <n>\n"
     "          [--context <key=value>]... --release-dir <dir> [--result-file <file>] [--summary-file <file>]\n"
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
+    "          [--build-budget-s <n>]       (with --affected-by: the seconds the whole build of the units may take)\n"
     "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
     "          --scratch-dir <dir>                                          (a selected validation)\n"
     "          [--release-set-hash <64 hex>]                  (a selected PUBLISH step or validation)\n"
@@ -189,6 +200,8 @@ struct KciCommand(Copyable, Movable):
     var work_dir: String
     var log_dir: String
     var build_timeout_s: Int
+    var build_budget_s: Int
+    var started_ns: Int
     var plan: Bool
     var summary_file: String
     var release_version: String
@@ -216,6 +229,8 @@ struct KciCommand(Copyable, Movable):
         self.work_dir = String("")
         self.log_dir = String("")
         self.build_timeout_s = 0
+        self.build_budget_s = 0
+        self.started_ns = 0
         self.plan = False
         self.summary_file = String("")
         self.release_version = String("")
@@ -263,7 +278,7 @@ def _run_common_flags() -> List[String]:
 
 def build_flags() -> List[String]:
     var l = List[String]()
-    for f in ["--work-dir", "--log-dir", "--build-timeout-s"]:
+    for f in ["--work-dir", "--log-dir", "--build-timeout-s", "--build-budget-s"]:
         l.append(String(f))
     return l^
 
@@ -396,6 +411,13 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         cmd.log_dir = value.copy()
     elif flag == String("--build-timeout-s"):
         cmd.build_timeout_s = _positive_int(flag, value)
+    elif flag == String("--build-budget-s"):
+        cmd.build_budget_s = _positive_int(flag, value)
+        if cmd.build_budget_s > MAX_BUILD_BUDGET_S:
+            raise usage_error(
+                flag + String(" '") + value + String("' is more than ") + String(MAX_BUILD_BUDGET_S)
+                + String(" (a week)")
+            )
     elif flag == String("--plan"):
         cmd.plan = True
     elif flag == String("--summary-file"):
@@ -534,8 +556,14 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
             raise usage_error(
                 String("--release-set-hash is not used with --affected-by: the per-change check releases nothing")
             )
-    elif not cmd.given(String("--release-dir")):
-        raise usage_error(String("kci run needs --release-dir"))
+    else:
+        if cmd.given(String("--build-budget-s")):
+            raise usage_error(
+                String("--build-budget-s bounds the per-change check's build of the units: it is used only")
+                + String(" with --affected-by")
+            )
+        if not cmd.given(String("--release-dir")):
+            raise usage_error(String("kci run needs --release-dir"))
     try:
         _ = cmd.run_identity()
     except e:

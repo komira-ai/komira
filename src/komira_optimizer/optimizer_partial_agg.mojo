@@ -5,7 +5,7 @@
 # SHIP-DISABLED-BY-DEFAULT — see ENABLE_AGG_PUSHDOWN_BELOW_JOIN below.
 #
 # v0.3 has the equivalent rule but it is dead code
-# in production: the v0.3 optimize() pipeline never calls it (only tests do)
+# in v0.3: nothing in v0.3 that orders its passes calls it (only tests do)
 # because v0.3 lacks the uniqueness metadata required to fire safely on
 # arbitrary plans. v0.4 mirrors that dormancy: the rule is present and tested
 # but gated behind a comptime flag set to False. Flipping the flag to True
@@ -52,9 +52,9 @@
 #   partial SUM(input) + partial COUNT(input), then exposes those as two
 #   merge SUMs aliased "__partial_avg_sum_{out}" and
 #   "__partial_avg_count_{out}". The downstream consumer is responsible
-#   for the final division (today: leave the AVG above the join unchanged
-#   if any AVG is present, since v0.4 has no rewriter that consumes the
-#   exposed sum+count pair). The whitelist permits AVG to keep parity with
+#   for the final division. No rewriter in this tree consumes the exposed
+#   sum+count pair, so a fired rewrite over an AVG would leave the plan
+#   without the AVG's output column. The whitelist permits AVG to keep parity with
 #   v0.3 BUT the rule never fires in practice while the gate is False, so
 #   the AVG arm is reachable only from explicit gate-bypassing tests.
 #
@@ -89,10 +89,10 @@
 #     MAX   -> partial MAX,   merge MAX
 #
 # This port intentionally stops at the v0.3 whitelist:
-# SUM / COUNT / MIN / MAX only. AVG, COUNT_DISTINCT, and statistical
-# accumulators are NOT ported yet -- they require two-phase decomposition
-# (AVG) or merge-aware sketches (HLL, digest) that this rule skips to keep
-# the surface area small. If ANY aggregate in the spec list falls outside
+# SUM / COUNT / MIN / MAX, plus AVG through the SUM+COUNT decomposition
+# described above. COUNT_DISTINCT and statistical accumulators are NOT
+# ported -- they require merge-aware sketches (HLL, digest) that this rule
+# skips to keep the surface area small. If ANY aggregate in the spec list falls outside
 # the whitelist, the rule skips the entire Aggregate (partial-pushing some
 # aggs and leaving others above the join would produce wrong results).
 #
@@ -105,7 +105,8 @@
 # output schema and the join would dangle (or, worse, silently produce
 # wrong answers if a synthesised column happens to match). We enforce
 # this explicitly -- v0.3 relied on the implicit rule that callers only
-# build plans where this holds, which is fragile. See _join_keys_in_group_by.
+# build plans where this holds, which is fragile. See step 4 of
+# _classify_push_inner.
 #
 # We also avoid name collisions between the partial-agg output and the
 # opposite join side: if any group-by column name already exists on the
@@ -117,10 +118,10 @@
 # Pipeline placement
 # ==================
 #
-# The rule runs AFTER predicate pushdown (so pushed filters shrink the
+# komira_optimizer has no driver that orders its passes. The rule is
+# designed to run AFTER predicate pushdown (so pushed filters shrink the
 # partial agg input) and BEFORE inner->semi conversion and join
 # reordering (so downstream cost models see the reduced cardinality).
-# This matches v0.3's pipeline ordering.
 #
 # Interaction with the existing (naive) push_aggregate_below_join rule:
 # the v0.4 optimizer previously contained a simplified version in
@@ -128,7 +129,7 @@
 # on the left side. That version was unsound for non-trivial joins
 # (it dropped the join key and skipped the merge step), so we delete it
 # in favour of this partial/merge rule. The public entry-point name
-# `push_aggregate_below_join` is preserved for the optimizer pipeline.
+# `push_aggregate_below_join` is kept.
 # =============================================================================
 
 from std.collections import Set
@@ -228,8 +229,9 @@ def push_aggregate_below_join(var plan: LogicalPlan) raises -> LogicalPlan:
     aggregate is in the SUM/COUNT/MIN/MAX whitelist.
 
     Recurses into every plan variant so nested patterns (e.g. Filter above
-    Aggregate above Join) are rewritten in place. Non-rewriteable plans
-    are reconstructed unchanged.
+    Aggregate above Join) are rewritten in place. Other nodes are rebuilt
+    with their children recursed; the JOIN arm rebuilds with the default
+    algo_hint and no residual (push_aggregate_below_join_force keeps both).
     """
     if plan.tag == PLAN_AGGREGATE:
         # Bottom-up: rewrite children first, then try to rewrite this node.
@@ -371,10 +373,10 @@ def _classify_push(
     the gate is disabled OR any clause-level check fails.
     """
     # --- 0. Soundness gate (ship-disabled by default) ---------------
-    # See file header for the 3-clause soundness predicate. The gate's
-    # comptime branch makes this a literal `if False: return` in the
-    # default build, so the entire classification body below is dead code
-    # at the call site (matching v0.3's dormancy pattern).
+    # See file header for the 3-clause soundness predicate. In the default
+    # build the comptime branch always returns _PUSH_NONE, so the
+    # classification call below is dead code at the call site (matching
+    # v0.3's dormancy pattern).
     comptime if not ENABLE_AGG_PUSHDOWN_BELOW_JOIN:
         return _PushDecision(_PUSH_NONE)
     return _classify_push_inner(agg_plan, join_plan)
@@ -769,8 +771,8 @@ def _is_whitelisted_agg(func: UInt8) -> Bool:
 def _all_cols_in_schema(cols: Set[String], schema: Schema) -> Bool:
     """Return True if every column name in the set exists in the schema.
 
-    This is equivalent to optimizer_helpers._all_columns_in_schema but
-    we re-implement locally to keep the partial-agg module self-contained.
+    This is equivalent to komira_plan_ir.plan_helpers._all_columns_in_schema
+    but we re-implement locally to keep the partial-agg module self-contained.
     """
     for col_name in cols:
         var found = False
@@ -922,10 +924,10 @@ def _write_agg_output_name[W: Writer](mut writer: W, agg: AggExpr):
     The arms live here so no string constant is ever SELECTED and
     returned. A literal-returning ladder lowers to two parallel
     (pointer, length) constant arrays whose two call-site references
-    an `--emit shared-lib` link binds INDEPENDENTLY; once a
-    shipped `_komira` bound such a pair CROSSED and took the
-    interpreter with it. See
-    `scripts/lint_literal_return_ladder.py`."""
+    an `--emit shared-lib` link binds INDEPENDENTLY; a shared library
+    that binds such a pair CROSSED crashes the process that loaded it.
+    (The lint for this shape, `scripts/lint_literal_return_ladder.py`,
+    is not in this tree.)"""
     if agg.alias_name:
         writer.write(agg.alias_name.value())
         return
@@ -976,9 +978,9 @@ def _partial_alias(func: UInt8, orig_name: String) -> String:
         op_tag = "max"
     elif func == AGG_MEAN:
         # AVG decomposition uses dedicated sum/count aliases assembled
-        # in _emit_avg_decomposition; this branch only exists for the
-        # rare callers that ask for a single-tag alias for MEAN
-        # (debugging / explain output).
+        # in _emit_avg_decomposition, so the rewrite never reaches this
+        # branch; it keeps the mapping total (a test calls it with
+        # MEAN).
         op_tag = "mean"
     else:
         op_tag = "agg"

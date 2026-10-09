@@ -23,6 +23,13 @@
 #                         pinned pixi in a scratch directory and a cleared
 #                         environment, and run each installed library's README
 #                         examples against them
+#   DEPLOY_PROBE          run a digest-pinned image against a cell a DEPLOY
+#                         step just deployed into; the image writes one result
+#                         per expected case and kci decides the verdict
+#
+# CONDA_INSTALL_SMOKE and CONDA_INSTALL_ENV belong to a PUBLISH step,
+# DEPLOY_PROBE to a DEPLOY step (kci_release_machine holds the pairing).
+# The machine file reads a DEPLOY_PROBE; no kci runs one yet.
 #
 # The spellings are spelled here only.
 # Pure functions over owned values; no pointer.
@@ -36,6 +43,7 @@ comptime STEP_KIND_DEPLOY: String = "DEPLOY"
 
 comptime VALIDATION_KIND_CONDA_INSTALL_SMOKE: String = "CONDA_INSTALL_SMOKE"
 comptime VALIDATION_KIND_CONDA_INSTALL_ENV: String = "CONDA_INSTALL_ENV"
+comptime VALIDATION_KIND_DEPLOY_PROBE: String = "DEPLOY_PROBE"
 
 
 def all_verbs() -> List[String]:
@@ -72,6 +80,7 @@ def all_validation_kinds() -> List[String]:
     var out = List[String]()
     out.append(String(VALIDATION_KIND_CONDA_INSTALL_SMOKE))
     out.append(String(VALIDATION_KIND_CONDA_INSTALL_ENV))
+    out.append(String(VALIDATION_KIND_DEPLOY_PROBE))
     return out^
 
 
@@ -80,4 +89,6 @@ def require_validation_kind(word: String) raises:
     for i in range(len(v)):
         if v[i] == word:
             return
-    raise Error(String("validation kind '") + word + String("' is not CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV"))
+    raise Error(
+        String("validation kind '") + word + String("' is not CONDA_INSTALL_SMOKE, CONDA_INSTALL_ENV or DEPLOY_PROBE")
+    )

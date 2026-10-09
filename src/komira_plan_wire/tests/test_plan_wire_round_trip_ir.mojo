@@ -1277,16 +1277,10 @@ def _plan_ir(p: LogicalPlan) raises -> String:
             + " child=" + _plan_ir(d.child[]) + "]"
         )
     if p.tag == PLAN_ASOF_JOIN:
-        # ★ FOUR OF THESE TWELVE REACH NO OTHER LEG AT ANY VALUE. `plan_display`
-        # prints strategy, the on-pair, the by-pairs and a tolerance KIND that
-        # it SUPPRESSES at NONE; it prints none of `left_sort_keys`,
-        # `left_sort_desc`, `right_sort_keys`, `right_sort_desc`, empty or not.
-        # The output schema (left cols + right cols forced nullable) does not
-        # read them either. This line is the only comparison they have.
-        #
-        # And `tolerance` is printed as three parts, because the render prints
-        # one: `tolerance=INT64` is the same text for 5 and for 5000, and the
-        # off-kind slot is not in the text on any kind.
+        # `plan_display` prints strategy, the on-pair, the by-pairs, the
+        # tolerance kind with its SELECTED slot (nothing at NONE) and each
+        # non-empty pre-sort hint. The tolerance's off-kind slot reaches no
+        # other leg, so `tolerance` is printed here as all three parts.
         ref d = p.asof_join_data_ref()
         return (
             head + "ASOFJOIN left_keys=" + _strs(d.left_keys)
@@ -3239,9 +3233,10 @@ def test_the_json_extract_field_no_render_reads_deviates_and_round_trips() raise
     and which a re-deriving decoder turns back into STRING.
 
     THE PATH IS ALSO CARRIED AS SEGMENTS AND NOT AS THE JOINED STRING, and
-    this test pins why: `["a", "b"]` and `["a.b"]` render to the SAME `$.a.b`,
-    and `parse_json_path` cannot produce the second at all, so a decoder that
-    re-parsed would silently split it in two."""
+    this test pins why: `["a", "b"]` and `["a.b"]` are different paths, and a
+    decoder that re-parsed a joined `$.a.b` would silently split the second in
+    two. The render escapes a `.` inside a segment (`$.a\\.b`), so LEG 1 tells
+    them apart as well as LEG 3."""
     # ★ LEG 1 SEES `output_type`: the render prints `type=<t>` when the target
     # is not the STRING both query factories pin. This pins the visibility, so
     # a render that drops the field is red here.
@@ -3269,19 +3264,19 @@ def test_the_json_extract_field_no_render_reads_deviates_and_round_trips() raise
         + " means NOTHING here can. `_expr_ir`'s"
         + " EXPR_JSON_EXTRACT arm must print `output_type`.",
     )
-    # The AMBIGUOUS SEGMENT LIST: one segment that CONTAINS the separator. The
-    # render joins it to `$.a.b`, indistinguishable from the two-segment path
-    # above, and `parse_json_path` cannot build it — so this is a plan only
-    # the segment-carrying wire can round-trip.
+    # One segment that CONTAINS the separator. The render escapes it
+    # (`$.user\.id`), so it is distinguishable from the two-segment path
+    # above in the render (the render is plan identity) as well as on the
+    # segment-carrying wire.
     var dotted = Expr.json_extract_from_parts(
         Expr.col_ref("js"), [String("user.id")], ArrowType.STRING, False
     )
     var split = Expr.json_extract_string(Expr.col_ref("js"), String("$.user.id"))
     assert_true(
-        String(dotted) == String(split),
-        "a one-segment path containing a `.` no longer renders identically to"
-        + " the two-segment path it joins to. The render has become"
-        + " unambiguous — good news; restate this test.",
+        String(dotted) != String(split),
+        "a one-segment path containing a `.` renders like the two-segment"
+        + " path it joins to, so the two share a plan-compile cache key: "
+        + String(dotted),
     )
     assert_true(
         _expr_ir(dotted) != _expr_ir(split),
@@ -4245,9 +4240,8 @@ def _deviating_tolerance() -> AsofTolerance:
     `kind=INT64` with a non-zero `float_val` — is one the plan builder can
     construct even though neither named factory produces it. A codec that
     re-derived the inactive slot from `kind` would silently rewrite it, and no
-    other leg would ever say so: the render prints the KIND NAME and neither
-    number, so `tolerance=INT64` is the same six characters for 5, for 5000,
-    and for any `float_val` at all.
+    other leg would ever say so: the render prints the kind and the SELECTED
+    slot (`tolerance=INT64(5000)`), never the off-kind `float_val`.
 
     Both numbers are also far from proto3's zero, which is the other half of
     the point — an encoder that never wrote either field emits byte-identical
@@ -4255,22 +4249,20 @@ def _deviating_tolerance() -> AsofTolerance:
     return AsofTolerance(ASOF_TOL_INT64, Int64(5000), Float64(2.5))
 
 
-def _asof_render_hides(p: LogicalPlan) raises -> Bool:
-    """True when the AsofJoin render mentions NONE of the four pre-sort hint
-    lists and NEITHER tolerance number, while the node carries all six at
-    non-defaults.
+def _asof_render_hides_only_the_off_kind_slot(p: LogicalPlan) raises -> Bool:
+    """True when the AsofJoin render prints both pre-sort hints and the
+    SELECTED tolerance value, and NOT the off-kind tolerance slot, while the
+    node carries all six at non-defaults.
 
     `plan_display` emits `AsofJoin(strategy=<NAME>, on=<l>=<r>, by=[<l>=<r>…]
-    <, tolerance=<KIND>>)`. The four `*_sort_*` lists appear at no value, and
-    the tolerance appears as a KIND — so a codec that dropped a pre-sort hint,
-    or wrote 5 where 5000 was, is invisible to LEG 1 entirely. The output
-    schema (left columns + right columns forced nullable) reads none of them
-    either, so LEG 2 is blind too and LEG 3 is the only comparison they have.
+    <, tolerance=<KIND>(<value>)><, left_sorted=[…]/[…]><, right_sorted=…>)`.
+    The hints and the selected value are therefore LEG 1's to compare; the
+    off-kind slot (`float_val` under kind INT64) is in no render and no output
+    schema, so LEG 3 is the only comparison it has.
 
     ⚠ THE SORT-KEY NAMES ARE DELIBERATELY COLUMNS THE RENDER PRINTS ELSEWHERE,
     so this predicate cannot test for them by substring — `s` and `a` are in
-    the `by=` and `on=` clauses. It tests for the FIELD LABELS instead, which
-    is what a render that started emitting them would have to print."""
+    the `by=` and `on=` clauses. It tests for the FIELD LABELS instead."""
     var txt = String(p)
     ref d = p.asof_join_data_ref()
     return (
@@ -4279,8 +4271,9 @@ def _asof_render_hides(p: LogicalPlan) raises -> Bool:
         and len(d.left_sort_desc) > 0
         and len(d.right_sort_desc) > 0
         and not d.tolerance.is_none()
-        and "sort" not in txt
-        and "5000" not in txt
+        and "left_sorted=" in txt
+        and "right_sorted=" in txt
+        and "5000" in txt
         and "2.5" not in txt
     )
 
@@ -4331,15 +4324,16 @@ def _asof(
 
 
 def test_an_asof_join_round_trips_with_every_render_invisible_part_deviating() raises:
-    """★ FOUR OF TWELVE FIELDS REACH NO LEG BUT LEG 3, AND THEIR FAILURE MODE
-    IS ASYMMETRIC.
+    """★ THE PRE-SORT HINTS' FAILURE MODE IS ASYMMETRIC, AND THE TOLERANCE'S
+    OFF-KIND SLOT REACHES NO LEG BUT LEG 3.
 
     A `*_sort_keys` hint asserts "this side is ALREADY sorted on these columns,
     skip the sort phase". Dropping one costs a sort. INVENTING one — which is
     what a decoder that let the factory's empty defaults stand does in reverse,
     and what a decoder that re-derived them from the equi-keys would do
-    outright — skips a sort that was needed and produces WRONG ROWS. Neither
-    the render nor the output schema can see either mistake.
+    outright — skips a sort that was needed and produces WRONG ROWS. The render
+    prints non-empty hints, so LEG 1 sees either mistake; the off-kind
+    tolerance slot it does not print at all.
 
     `strategy` is NEAREST, not BACKWARD: BACKWARD is engine value 0 and hence
     proto3's absent-field value, so an encoder that never wrote the field would
@@ -4351,10 +4345,9 @@ def test_an_asof_join_round_trips_with_every_render_invisible_part_deviating() r
         _scan(String("r"), String("/right.orc")),
     )
     assert_true(
-        _asof_render_hides(plan),
-        "the AsofJoin render now prints a pre-sort hint list or a tolerance"
-        + " NUMBER. That is GOOD NEWS and this assertion is the red that"
-        + " reports it — rewrite it to name whatever the render still hides."
+        _asof_render_hides_only_the_off_kind_slot(plan),
+        "the AsofJoin render dropped a pre-sort hint or the selected tolerance"
+        + " value (both are plan identity), or now prints the off-kind slot."
         + " Render text: " + String(plan),
     )
     _assert_round_trips(
