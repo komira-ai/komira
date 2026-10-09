@@ -1,5 +1,13 @@
 # Gamma validation: what checks a release before prod, per package family
 
+**Vocabulary.** This document predates the staged pipeline's glossary
+(`docs/design/staged_pipeline.md`, section "Glossary"; a path, not a link,
+until that section is on `main`). Here "gamma" means today's stage that
+publishes to the conda channel `gamma` and installs from it, which the
+glossary calls **beta**; "gamma, installed package" is beta's installs
+(`beta_validate`). The glossary's gamma holds only real cloud resources, and
+the "real gamma cloud project" rows are that gamma's.
+
 ## What is this document for?
 
 `gamma` is the stage of komira's release machine that publishes a release to

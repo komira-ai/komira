@@ -5,7 +5,7 @@ Status: design, not built (revision 5). Everything marked **EXISTS** names the c
 PROPOSED and absent from `main`:** `komira_test_emulator`, `EmulatorEndpoint`,
 `LoopbackOnlyConnector`, the `release_checks` attribute, the `[conda_status]` sub-target,
 `release/unreleased.textproto`, `release_ledger_check`, `release/quarantine.textproto`,
-`release/yanked.textproto`, `KCI-E-YANKED`, `kci yank`, the BUILD step's `checks:` field, the probe
+`release/yanked.textproto`, `KCI-E-YANKED`, `kci yank`, the `TEST` step's `checks` field, the probe
 rows `netns_loopback_only` and `ambient_identity`, the `tests/fixture_tier/` directories and the
 `src/tests/emulator/` tree. It builds on
 [gamma validation](gamma_validation.md) and its
@@ -17,9 +17,10 @@ and on [ci.md](../ci.md), the authority for the workflows. Where this document a
 **Vocabulary.** The words *beta*, *gamma*, *prod*, *beta channel*, *gamma accounts*, the *tiers*
 (fake, emulator, fixture, e2e, real-cloud), *validated hash*, *single flight*, *never backward*,
 *break-glass* and *main red* mean exactly what the glossary of the staged pipeline says
-(`docs/design/staged_pipeline.md`, section "Glossary"; a path, not a link, until both docs are on
-`main`). This document does not define them again. In short: **beta** builds once, runs this
-document's tiers, publishes to the **beta channel** and installs from it; **gamma** holds only real
+(`docs/design/staged_pipeline.md`, section "Glossary"; a path, not a link, until #1184 lands: that
+section exists only from #1184 on, and the doc links lint refuses a link to a missing heading).
+This document does not define them again. In short: **beta** builds once, runs this document's
+tiers, publishes to the **beta channel** and installs from it; **gamma** holds only real
 cloud resources and names no channel; **prod** promotes the same bytes. **Today the beta channel is
 named `gamma`**, and today's jobs `gamma` and `validate` are beta's publish and installs under their
 old names; the staged pipeline's migration (M1 to M4, each a go) renames the channel. Where this
@@ -114,7 +115,7 @@ again for revision 2; unchanged):
 | the docs say | the settings say |
 |---|---|
 | `gamma` deploys from `main` only (`kci.yml` header, BREAK-GLASS) | `gamma` has **no** deployment-branch policy and no protection rule |
-| `gamma-breakglass` has a required reviewer | `gamma-breakglass` **does not exist** |
+| `gamma-breakglass` has a required reviewer | `gamma-breakglass` **does not exist**, and GitHub creates an environment a job names that does not exist with no protection rule, so the first manual run of `kci.yml`, which names it, would publish to the channel `gamma` with no reviewer |
 | `prod` deploys from `main` only | holds: its policy is `main` |
 
 The `kci.yml` header admits it: "until those settings exist, a branch's own workflow can still publish
@@ -172,9 +173,11 @@ Neither one changes what `prod` trusts: `prod` still publishes only the set beta
 for, by its validated hash (and, under the staged pipeline, gamma's as well).
 
 1. **The release checks** (S10c) are Buck2 standalone test targets that the release's `build` step
-   *runs* (`buck2 test`, not `buck2 build`: building a standalone test does not run it) on the release
-   revision. A failure fails `build`, so nothing reaches the beta channel. **The list is derived, not kept by
-   hand**: it is every check `release/ci/derive_checks.py` derives whose targets depend on a declared
+   *runs* on the release revision with the two commands the staged pipeline's section e defines for
+   the `TEST` step, `buck2 build` then `buck2 test` over the same targets: the build runs the welded
+   `test_srcs`, the test runs the standalone tests a build never runs, and dropping either is a
+   planted mutant there (its slice P3). A failure fails `build`, so nothing reaches the beta
+   channel. **The list is derived, not kept by hand**: it is every check `release/ci/derive_checks.py` derives whose targets depend on a declared
    library, the emulator and fixture tiers included. A new standalone test of a released library, or a
    newly declared library, joins the gate with no edit. This is decision item 6 of
    [gamma validation decisions](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)
@@ -739,7 +742,7 @@ explicit go. Everything else is code that publishes nothing on its own.
 
 | # | slice | proof | go |
 |---|---|---|---|
-| S0 | **Lock gamma** (the staged pipeline's G0, the same slice). `gamma`'s deployment branches set to `main`: today that guards the channel `gamma` (beta's under its old name), and later the gamma accounts' trust. `beta` and `beta-breakglass` are created locked by the staged pipeline's M1; `gamma-breakglass` is never created (gamma has no break-glass). These are settings. Plus a drift check: the release's `build` step, which runs from `main`, reads `gamma`'s, `beta`'s and `prod`'s environments through the API and fails the release unless each branch policy is `main` only. | Before: the drift check fails on today's settings. After the settings change: it passes. Planted: the check run against a canned environment answer with no policy turns red. The read needs no token: this repository is public, and an anonymous read of an environment and its branch policies answers (read for revision 5); a failed read fails the release. A drift check detects; it does not lock: only the settings lock. | **Go** (repository settings) |
+| S0 | **Lock gamma** (the staged pipeline's G0, the same slice). `gamma`'s deployment branches set to `main`: today that guards the channel `gamma` (beta's under its old name), and later the gamma accounts' trust. **`gamma-breakglass` is created now with a required reviewer** (administrator bypass off): `kci.yml` names it on every manual run and the channel `gamma` trusts it until the staged pipeline's M3, so leaving it absent lets GitHub create it unprotected; M4 deletes it. `beta` and `beta-breakglass` are created locked by the staged pipeline's M1. These are settings. Plus a drift check: the release's `build` step, which runs from `main`, reads every environment the channels file or a cloud trust names, and `prod`, through the API and fails the release unless each exists, each push environment's branch policy is `main` only and each break-glass environment has a required reviewer (the full list is the staged pipeline's G0). | Before: the drift check fails on today's settings. After the settings change: it passes. Planted, each a canned environment answer that turns the check red: `gamma` with no policy; `gamma-breakglass` absent; `gamma-breakglass` with no reviewer. The read needs no token: this repository is public, and an anonymous read of an environment and its branch policies answers (read for revision 5); a failed read fails the release. A drift check detects; it does not lock: only the settings lock. | **Go** (repository settings) |
 | S1 | **The release ledger** (`release/unreleased.textproto`, a `[conda_status]` sub-target, `release_ledger_check` in `release/BUCK`). Fix `docs/releases.md`'s "Held" list. | A planted library that is in neither file turns the check red. A ledger `NATIVE` row on a library that is not native turns it red. | none |
 | S2 | **Declare the 21 non-native libraries:** #1136, #1138, then three declare PRs. | Before merge: the PR's ledger check is red until the library leaves `PENDING_DECLARE`, and its `[release]` builds in the pull-request check. **Residual risk:** `install-set` runs only after merge, so the new name reaches the beta channel before any installed check; a failure stops gamma and `prod`, and the beta channel keeps the bad name. | **Go per PR:** a merged declare PR publishes permanent names to `beta` and then `prod` |
 | S3a | **The cloud-check refusal, analysis half:** the `release_checks` label attribute and the `_conda_facts` refusal of an empty list; `NO_CLOUD_CHECK` in the ledger. | Planted: a cloud-family fixture library with `release_checks = []` turns `[release]` red; naming one target turns it green. **Residual risk until S10c:** the named target is not checked to exist, to reach the library or to be unquarantined; no cloud declare PR merges before S10c. | none |
@@ -753,7 +756,7 @@ explicit go. Everything else is code that publishes nothing on its own.
 | S9 | **Fixtures:** the provenance, schema, secret, dead-fixture and generator-independence lints; fixtures for the packages that have no emulator | a planted fixture without provenance; a planted unknown field; a planted bearer token; a fixture generator that imports `tools/build/cloud`. Each turns the lint red. | none |
 | S10a | **kci built once per revision** (#1153) | a release whose kci is unchanged spends the cached-build time on "build kci" in every job but the first | none |
 | S10b | **The release build in batches** | a cold full release (every package re-keyed) finishes in batches each under `--build-timeout-s` | none |
-| S10c | **Release checks:** the `TEST` step of stage `build` (the staged pipeline, e) that runs (`buck2 test`) the derived checks reaching a declared library plus every `release_checks` target; the flake re-run and `release/quarantine.textproto`; the reach check of `release_checks` (cquery `rdeps`), at release time and in the pull-request check; the reverse-dependency filter on the derived checks. First task: measure its time and farm cost on a release revision and write them in this document. | a machine-file fixture whose check target fails: `kci run --stage build` fails and `beta` never starts; a check that fails once then passes is re-run once and passes; a `release_checks` naming an unrelated library's test, a label with no target, and a library whose only check is quarantined each fail `build` | none: it adds a gate to an approved pipeline |
+| S10c | **Release checks:** the `TEST` step of stage `build` (the staged pipeline, e, which defines its commands: `buck2 build`, then `buck2 test`) that runs the derived checks reaching a declared library plus every `release_checks` target; the flake re-run and `release/quarantine.textproto`; the reach check of `release_checks` (cquery `rdeps`), at release time and in the pull-request check; the reverse-dependency filter on the derived checks. First task: measure its time and farm cost on a release revision and write them in this document. | a machine-file fixture whose check target fails: `kci run --stage build` fails and `beta` never starts; a check that fails once then passes is re-run once and passes; a `release_checks` naming an unrelated library's test, a label with no target, and a library whose only check is quarantined each fail `build` | none: it adds a gate to an approved pipeline |
 | S11 | **Yank:** verify that the channel host can delete a file or mark it removed; a `kci yank` verb, dry run by default; `release/yanked.textproto` and `KCI-E-YANKED` | a dry run against the fake channel lists exactly one file. A real run is refused without `--channel` and `--file`. A re-run of a commit older than the tombstone, whose own tree does not name the file, is refused before any upload in `beta` (the tombstone is read from `main`'s head); a kci that reads the checked-out copy turns that test red. | **Go per use** |
 | S12 | **Installed-bytes checks** in `beta_validate` (after S3): one emulator round trip per cloud family against the installed package, and the installed `.so` check (decision item 8) | a planted missing `.so` in a fixture package turns it red; a fixture `.so` with a `GLIBC_` version above the floor turns it red | **Go:** decision 1 (a `service` block in that document's gamma, beta's installs here) and the workflow-rule amendment (item 7) |
 
@@ -765,9 +768,10 @@ family's suite: S3a makes that a build failure, not a convention.
 
 Each has a recommendation. None is decided here.
 
-1. **Lock gamma now (S0)?** *Recommendation:* yes, today. It is one setting and a drift check, and
-   until it exists any branch can publish to the channel `gamma` (it cannot reach `prod`; see above),
-   and no cloud may trust the `gamma` environment.
+1. **Lock gamma now (S0)?** *Recommendation:* yes, today. It is two settings (`gamma`'s branch
+   policy and `gamma-breakglass` with a required reviewer) and a drift check, and until they exist
+   any branch, or any manual run, can publish to the channel `gamma` with no review (it cannot reach
+   `prod`; see above), and no cloud may trust the `gamma` environment.
 2. **Is merging a declare PR the go for its new names?** A merged declare PR publishes names to
    the beta channel and then to `prod`, permanently and with no further click. *Recommendation:* yes,
    the merge is the go. The publish job's summary (today's `gamma`, beta's after the rename) already
