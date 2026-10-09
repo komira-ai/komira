@@ -311,7 +311,7 @@ def join_payload_inline_admits(
     if pay_nullable:
         _record_declined()
         return False
-    if join_payload_entry_bytes(True) > JOIN_PAY_MAX_ENTRY_BYTES:  # cov: unreachable the true arm needs an entry over 32 B; the shipped entry is exactly 32 B
+    if join_payload_entry_bytes(True) > JOIN_PAY_MAX_ENTRY_BYTES:
         _record_declined()  # cov: unreachable the shipped entry is exactly 32 B
         return False  # cov: unreachable the shipped entry is exactly 32 B
     return True
@@ -654,7 +654,7 @@ def join_pay_subst_alias(
         return False
     if probe_ncols <= 0:
         return False
-    if build_ncols <= 0:  # cov: unreachable the pay_col refusal above already requires build_ncols >= 1
+    if build_ncols <= 0:
         return False  # cov: unreachable the pay_col refusal above already requires build_ncols >= 1
     # The map is built per BUILD column; one shorter than the build batch
     # cannot answer for the columns past its end, and `alias_of` reports those
