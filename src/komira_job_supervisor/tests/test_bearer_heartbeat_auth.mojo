@@ -10,9 +10,11 @@
 # fails here). The token reaches the serialized request. One trailing newline
 # is not part of the token. A file that is empty, missing or holds a space
 # inside the token refuses the start, and so does a DEL (0x7F), beside an
-# accepted `~` (0x7E), the top of visible ASCII. A token of MAX_SECRET_LEN
-# (4096) bytes is accepted and one of 4097 refused, from a file and from a
-# variable. A file removed after the start fails that beat closed
+# accepted `~` (0x7E), the top of visible ASCII; a DEL or vertical tab as the
+# token's LAST byte is refused too (only trailing space, tab, CR and LF are
+# dropped). A token of MAX_SECRET_LEN (4096) bytes is accepted and one of
+# 4097 refused, from a file and from a variable. A file removed after the
+# start fails that beat closed
 # (AUTH_UNAVAILABLE, nothing dialled).
 #
 # ARM 2, the environment. `from_env` reads the variable (set for this test
@@ -191,6 +193,23 @@ def test_an_unusable_file_refuses_the_start() raises:
     _write(del_file, String("tok-del") + chr(0x7F) + String("x"))
     r = _refusal_from_file(del_file)
     assert_true(r.find(String("not visible ASCII at offset 7")) >= 0, "a DEL: " + r)
+    # The LAST byte is checked too. Only trailing space, tab, CR and LF are
+    # dropped before the check, so a final DEL or vertical tab (0x0B) is
+    # still part of the token; a byte loop that stopped one short would
+    # send it in the header.
+    var del_last = _tmp(String("credential-del-last"))
+    _write(del_last, String("tok-del") + chr(0x7F))
+    r = _refusal_from_file(del_last)
+    assert_true(
+        r.find(String("not visible ASCII at offset 7")) >= 0, "a final DEL: " + r
+    )
+    var vt_last = _tmp(String("credential-vt-last"))
+    _write(vt_last, String("tok-vt") + chr(0x0B) + String("\n"))
+    r = _refusal_from_file(vt_last)
+    assert_true(
+        r.find(String("not visible ASCII at offset 6")) >= 0,
+        "a final vertical tab before the newline: " + r,
+    )
     var tilde = _tmp(String("credential-tilde"))
     _write(tilde, String("tok~tilde"))
     var tilde_auth = BearerHeartbeatAuth.from_file(tilde)
