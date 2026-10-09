@@ -8,28 +8,31 @@
 # The machine file is named `shop`. Its `build` stage holds the BUILD step
 # whose release a DEPLOY step deploys; its `deploy` stage holds a PUBLISH
 # step into cell `a`, then a DEPLOY step into cell `a`, then one into cell
-# `b`, and is run with `--release-set-hash` and no validation. The PUBLISH
-# step is there so the `set_hash` assertions can fail: the start checks set
+# `b`, then one into cell `c`, and is run with `--release-set-hash` and no
+# validation. The PUBLISH step is there so the `set_hash` assertions can fail: the start checks set
 # `set_hash` from it. The test's `Steps` answers it (it runs a PUBLISH step
-# into a cell, `runs_publish_into_cell`) and pushes nothing. `TwoCells`
+# into a cell, `runs_publish_into_cell`) and pushes nothing. `Cells`
 # hands each DEPLOY step to its cell's own fake and records which cells it
 # was asked for.
 #
-#   1. No fault (the control): SUCCEEDED, `set_hash` is the given hash, both
-#      cells applied. A second run, every step a NOOP: NOOP, exit 0, and
+#   1. No fault (the control): SUCCEEDED, `set_hash` is the given hash, all
+#      three cells applied, the record names the machine file. A second run, every step a NOOP: NOOP, exit 0, and
 #      `set_hash` still the given hash.
 #   2. A fault planted mid-graph in `a`: PARTIAL, exit 6; `a`'s fake records
 #      no call after the faulting one and its live objects are exactly
-#      `landed`; `b` is never asked for, its fake records zero calls and it
-#      has no step row; `set_hash` is empty.
+#      `landed`; neither `b` nor `c` (every later step, not only the next)
+#      is asked for, their fakes record zero calls and they have no step row; `set_hash` is empty.
 #   3. The same with the fault in `b`: `a` is SUCCEEDED and its objects
-#      stand as its apply left them; `set_hash` is empty.
+#      stand as its apply left them, `c` never runs; `set_hash` is empty.
 #   4. A DEPLOY step that ends FAILED (a raising `trust_check` in `a`) stops
-#      the run the same way: exit 4, `b` never asked for, `set_hash` empty.
+#      the run the same way: exit 4, `b` and `c` never asked for, `set_hash`
+#      empty.
 #   5. `--rollback-on-failure` given to the faulted run of case 2, with and
-#      without `--plan`, and to a stage with no DEPLOY step: KCI-E-USAGE,
-#      exit 2, the exact message naming the missing deployed-revision
-#      record, zero calls on both fakes and on the steps, no RUNNING record.
+#      without `--plan`, to a stage with no DEPLOY step, and with a
+#      `--machine` that names no file: KCI-E-USAGE, exit 2, the exact message
+#      naming the missing deployed-revision record (never the missing
+#      machine file's), no machine file recorded, zero calls on every fake
+#      and on the steps, no RUNNING record.
 #   6. A run refused at start AFTER the PUBLISH step's check set `set_hash`
 #      (a DEPLOY step with no BUILD step to hold the release to): REFUSED,
 #      exit 3, and `set_hash` empty (the emptying is on every exit path).
@@ -124,21 +127,26 @@ struct Steps(StageSteps, Movable):
         return True
 
 
-struct TwoCells(CellDeploys, Movable):
-    """Cell `a`'s fake cloud and store, cell `b`'s, and the cells each
-    DEPLOY step was handed for, in order. Layout: owned values only."""
+struct Cells(CellDeploys, Movable):
+    """Cell `a`'s fake cloud and store, cell `b`'s, cell `c`'s (always
+    unfaulted), and the cells each DEPLOY step was handed for, in order.
+    Layout: owned values only."""
 
     var a: CloudDeploys[FakeCloud, InMemoryStateStore]
     var b: CloudDeploys[FakeCloud, InMemoryStateStore]
+    var c: CloudDeploys[FakeCloud, InMemoryStateStore]
     var asked: List[String]
 
     def __init__(out self, var a: FakeCloud, var b: FakeCloud) raises:
         self.a = CloudDeploys[FakeCloud, InMemoryStateStore](a^, InMemoryStateStore(), Creds.none())
         self.b = CloudDeploys[FakeCloud, InMemoryStateStore](b^, InMemoryStateStore(), Creds.none())
+        self.c = CloudDeploys[FakeCloud, InMemoryStateStore](FakeCloud(), InMemoryStateStore(), Creds.none())
         self.asked = List[String]()
 
     def deploy(mut self, req: DeployRequest, mut result: KciRunResult) -> StepEnd:
         self.asked.append(req.cell.copy())
+        if req.cell == String("c"):
+            return self.c.deploy(req, result)
         if req.cell == String("b"):
             return self.b.deploy(req, result)
         return self.a.deploy(req, result)
@@ -168,15 +176,16 @@ def _root(tag: String) raises -> String:
 
 
 def _machine(dir: String, build: Bool = True) raises -> String:
-    """The machine file (file header) in `dir`, its cells file (cells `a`
-    and `b`, both on the fake cloud) and the resource list both DEPLOY steps
+    """The machine file (file header) in `dir`, its cells file (cells `a`,
+    `b` and `c`, all on the fake cloud) and the resource list both DEPLOY steps
     apply. `build` False leaves the BUILD stage out."""
     var cells = dir + String("/cells.textproto")
     write_whole_file(
         cells,
         String("schema_version: 1\n")
         + String("cell { name: \"a\" cloud: \"fake\" bootstrap_level: 1 }\n")
-        + String("cell { name: \"b\" cloud: \"fake\" bootstrap_level: 1 }\n"),
+        + String("cell { name: \"b\" cloud: \"fake\" bootstrap_level: 1 }\n")
+        + String("cell { name: \"c\" cloud: \"fake\" bootstrap_level: 1 }\n"),
     )
     write_whole_file(dir + String("/app.json"), String(_BUCKETS))
     var m = dir + String("/machine.textproto")
@@ -190,6 +199,7 @@ def _machine(dir: String, build: Bool = True) raises -> String:
     text += cells + String("\" cell: \"a\" }")
     text += String(" step { name: \"apply-a\" kind: DEPLOY cells: \"") + cells + String("\" cell: \"a\" resources: \"app.json\" }")
     text += String(" step { name: \"apply-b\" kind: DEPLOY cells: \"") + cells + String("\" cell: \"b\" resources: \"app.json\" }")
+    text += String(" step { name: \"apply-c\" kind: DEPLOY cells: \"") + cells + String("\" cell: \"c\" resources: \"app.json\" }")
     text += String(" }\n")
     write_whole_file(m, text)
     return m^
@@ -252,21 +262,25 @@ def test_no_fault_hands_on_the_set() raises:
     var d = _root(String("control"))
     var m = _machine(d)
     var steps = Steps()
-    var deploys = TwoCells(FakeCloud(), FakeCloud())
+    var deploys = Cells(FakeCloud(), FakeCloud())
     var rec = CliRecorder.memory(String(""))
     var rc = kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec)
     var r = _last(rec)
     assert_equal(rc, 0, r.error.message)
     assert_equal(r.outcome, String("SUCCEEDED"))
     assert_equal(r.set_hash, String(_SET_HASH), "a run that passed hands its set on")
-    assert_equal(len(r.steps), 3)
+    assert_equal(len(r.steps), 4)
+    assert_equal(r.machine_path, m, "a run that read the machine file records it")
+    assert_true(r.machine_sha256.byte_length() > 0)
     assert_equal(len(steps.calls), 1)
     assert_equal(steps.calls[0], String("publish push-a channel="))
-    assert_equal(len(deploys.asked), 2)
+    assert_equal(len(deploys.asked), 3)
     assert_equal(deploys.asked[0], String("a"))
     assert_equal(deploys.asked[1], String("b"))
+    assert_equal(deploys.asked[2], String("c"))
     assert_equal(deploys.a.cloud.mutations(), 3)
     assert_equal(deploys.b.cloud.mutations(), 3)
+    assert_equal(deploys.c.cloud.mutations(), 3)
     # every step a NOOP: the run is NOOP and still hands its set on
     steps.outcome = String("NOOP")
     var rec2 = CliRecorder.memory(String(""))
@@ -276,18 +290,20 @@ def test_no_fault_hands_on_the_set() raises:
     assert_equal(r2.outcome, String("NOOP"))
     assert_equal(r2.steps[1].outcome, String("NOOP"))
     assert_equal(r2.steps[2].outcome, String("NOOP"))
+    assert_equal(r2.steps[3].outcome, String("NOOP"))
     assert_equal(r2.set_hash, String(_SET_HASH), "a NOOP run passed: it hands its set on")
 
 
 def test_a_fault_mid_graph_in_a_stops_the_run() raises:
     """Catches: the step loop going on after a failed DEPLOY step (`b` is
-    asked for, its fake records calls, it has a row); the failed run
+    asked for, its fake records calls, it has a row), or resuming after
+    skipping only the next step (`c` is asked for); the failed run
     keeping the set (`set_hash` not emptied); a's apply going on after the
     fault, or unwound (its live objects differ from `landed`)."""
     var d = _root(String("fault-a"))
     var m = _machine(d)
     var steps = Steps()
-    var deploys = TwoCells(FakeCloud(fail_at_call=2), FakeCloud())
+    var deploys = Cells(FakeCloud(fail_at_call=2), FakeCloud())
     var rec = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec), 6)
     var r = _last(rec)
@@ -312,6 +328,10 @@ def test_a_fault_mid_graph_in_a_stops_the_run() raises:
     assert_equal(deploys.b.cloud.mutations(), 0, "b's fake records zero calls")
     assert_equal(deploys.b.cloud.live_count(), 0)
     _no_row(r, String("apply-b"))
+    # nor any step after b: the stop covers every later step, not the next
+    assert_equal(deploys.c.cloud.mutations(), 0, "c's fake records zero calls")
+    assert_equal(deploys.c.cloud.live_count(), 0)
+    _no_row(r, String("apply-c"))
     assert_equal(len(steps.calls), 1)
     var summary = Path(d + String("/summary.md")).read_text()
     assert_true(summary.find(String("- set hash: `")) < 0, summary)
@@ -324,7 +344,7 @@ def test_a_fault_in_b_leaves_a_as_it_was() raises:
     var d = _root(String("fault-b"))
     var m = _machine(d)
     var steps = Steps()
-    var deploys = TwoCells(FakeCloud(), FakeCloud(fail_at_call=2))
+    var deploys = Cells(FakeCloud(), FakeCloud(fail_at_call=2))
     var rec = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec), 6)
     var r = _last(rec)
@@ -342,6 +362,9 @@ def test_a_fault_in_b_leaves_a_as_it_was() raises:
     assert_equal(b.outcome, String("PARTIAL"))
     assert_equal(deploys.b.cloud.mutations(), 1)
     _live_is_landed(deploys.b, b)
+    assert_equal(len(deploys.asked), 2, "c never runs")
+    assert_equal(deploys.c.cloud.mutations(), 0)
+    _no_row(r, String("apply-c"))
 
 
 def test_a_failed_deploy_step_stops_the_run_too() raises:
@@ -350,7 +373,7 @@ def test_a_failed_deploy_step_stops_the_run_too() raises:
     var d = _root(String("failed-a"))
     var m = _machine(d)
     var steps = Steps()
-    var deploys = TwoCells(FakeCloud(trust_check_raises=True), FakeCloud())
+    var deploys = Cells(FakeCloud(trust_check_raises=True), FakeCloud())
     var rec = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec), 4)
     var r = _last(rec)
@@ -361,11 +384,13 @@ def test_a_failed_deploy_step_stops_the_run_too() raises:
     assert_equal(len(deploys.asked), 1)
     assert_equal(deploys.a.cloud.mutations(), 0)
     assert_equal(deploys.b.cloud.mutations(), 0)
+    assert_equal(deploys.c.cloud.mutations(), 0)
     _no_row(r, String("apply-b"))
+    _no_row(r, String("apply-c"))
 
 
 def _refused_before_anything(
-    args: List[String], mut steps: Steps, mut deploys: TwoCells
+    args: List[String], mut steps: Steps, mut deploys: Cells
 ) raises:
     var rec = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(args, steps, deploys, rec), 2)
@@ -373,6 +398,8 @@ def _refused_before_anything(
     assert_equal(r.outcome, String("REFUSED"))
     assert_equal(r.error.id, String("KCI-E-USAGE"))
     assert_equal(r.error.message, String(_ROLLBACK_REFUSAL))
+    assert_equal(r.machine_path, String(""), "refused before the machine file was read")
+    assert_equal(r.machine_sha256, String(""))
     assert_equal(len(rec.statuses), 1, "no RUNNING record")
     assert_equal(rec.statuses[0], String("FINISHED"))
     assert_equal(len(r.steps), 0)
@@ -380,18 +407,26 @@ def _refused_before_anything(
     assert_equal(len(deploys.asked), 0)
     assert_equal(deploys.a.cloud.mutations(), 0)
     assert_equal(deploys.b.cloud.mutations(), 0)
+    assert_equal(deploys.c.cloud.mutations(), 0)
 
 
 def test_rollback_on_failure_is_refused_before_anything() raises:
-    """Catches: the flag accepted and ignored (the faulted run starts and
-    exits 6; with --plan it exits 0; the BUILD stage exits 0), and a
-    refusal that waits for the start checks or the RUNNING record."""
+    """Each case expects exit 2, the rollback refusal's exact message, no
+    machine file recorded, one FINISHED record and no RUNNING one, and no
+    call on the steps or any fake. Catches: the flag accepted and ignored
+    (the faulted run starts and exits 6; with --plan it exits 0; the BUILD
+    stage exits 0); a refusal made only after the machine file is read (a
+    `--machine` naming no file then answers "is not a file", and a readable
+    one is recorded); a refusal made after the RUNNING record."""
     var d = _root(String("rollback"))
     var m = _machine(d)
     var steps = Steps()
-    var deploys = TwoCells(FakeCloud(fail_at_call=2), FakeCloud())
+    var deploys = Cells(FakeCloud(fail_at_call=2), FakeCloud())
     _refused_before_anything(_run(m, d + String("/summary.md"), rollback=True), steps, deploys)
     _refused_before_anything(_run(m, d + String("/summary.md"), plan=True, rollback=True), steps, deploys)
+    # before anything is read: a machine file that does not exist is never
+    # looked at (without the flag that run is refused as "is not a file")
+    _refused_before_anything(_run(d + String("/absent.textproto"), d + String("/summary.md"), rollback=True), steps, deploys)
     # a stage with no DEPLOY step, its command line otherwise accepted
     var build = List[String]()
     for s in ["run", "--machine"]:
@@ -419,7 +454,7 @@ def test_a_run_refused_at_start_hands_on_no_set() raises:
     var d = _root(String("refused"))
     var m = _machine(d, build=False)
     var steps = Steps()
-    var deploys = TwoCells(FakeCloud(), FakeCloud())
+    var deploys = Cells(FakeCloud(), FakeCloud())
     var rec = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec), 3)
     var r = _last(rec)
