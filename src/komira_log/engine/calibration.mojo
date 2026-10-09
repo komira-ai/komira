@@ -72,7 +72,7 @@ def read_raw_ticks() -> UInt64:
 def read_realtime_ns() -> UInt64:
     var ms = now_unix_ms()
     if ms < 0:
-        return UInt64(0)
+        return UInt64(0)  # cov: unreachable the realtime clock reads before 1970 only when the host clock is misset, which no test can do
     return UInt64(ms) * UInt64(1_000_000)
 
 
