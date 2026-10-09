@@ -131,7 +131,7 @@ oci_image_check(
 No path of an `oci_tree` may be inside another (a file at `app/bin/tool`
 would replace the bundle's program), and modes are 0755 for directories and
 files with an exec bit, else 0644; the kcov guard reads the whole tree before
-it is packed. The tree is laid out by the Rust tool
+it is packed. The tree is laid out by the Zig tool
 [`komira_oci tree`](oci/README.md), which refuses the paths (naming each
 reason) and so fails the build; its unit tests, welded to it, hold the
 refusals to known paths. The image of a tree is written by `komira_oci

@@ -2,52 +2,33 @@ load("@komira//tools/build/package:defs.bzl", "oci_image", "oci_tree")
 load("@komira//tools/build/package:oci_check.bzl", "oci_image_check")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_test")
 
 # The image tool (README.md): oci_tree runs `komira_oci tree`, oci_image of a
 # tree `komira_oci image`, every oci_image `komira_oci layers`, and
-# oci_image_check `komira_oci check`.
+# oci_image_check `komira_oci check`. Zig, as every build tool under
+# tools/build is (komira#956).
 
-_SRCS = glob(["src/*.rs"])
+_SRCS = glob(["src/*.zig"])
 
-# The crate's inline #[test]s (the tree refusals, the writers, the whiteout
-# fixtures among them): the same sources compiled with `rustc --test`, run as
-# a build action.
-rust_test(
-    name = "komira_oci_unit",
-    srcs = _SRCS,
-    crate_root = "src/main.rs",
-    crate_name = "komira_oci",
-)
-
-# Published behind its unit tests: no tree or image builds unless they pass.
-rust_binary(
-    name = "komira_oci",
-    srcs = _SRCS,
-    crate_root = "src/main.rs",
-    tests = [":komira_oci_unit"],
-    visibility = ["PUBLIC"],
-)
-
-# The same tool in Zig (tools/build/README.md, "Languages for build tools"),
-# beside the Rust one until every image is built by it.
-_ZIG_SRCS = glob(["src/*.zig"])
-
+# The unit tests (the tree refusals, the writers, the whiteout fixtures among
+# them): `zig test` of main.zig, whose test block imports every *_test.zig,
+# run as a build action.
 zig_test(
-    name = "komira_oci_zig_unit",
+    name = "komira_oci_unit",
     exec_compatible_with = LINUX_X86_64,
-    imports = _ZIG_SRCS,
+    imports = _SRCS,
     src = "src/main.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
 
+# Published behind its unit tests: no tree or image builds unless they pass.
 zig_exe(
-    name = "komira_oci_zig",
+    name = "komira_oci",
     exec_compatible_with = LINUX_X86_64,
-    imports = _ZIG_SRCS,
+    imports = _SRCS,
     src = "src/main.zig",
-    unit_tests = [":komira_oci_zig_unit"],
+    unit_tests = [":komira_oci_unit"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],

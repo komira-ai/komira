@@ -2,7 +2,7 @@
 
     oci_image_check(name, image, entrypoint, executables = [], files = [], expect_red = None)
 
-runs `komira_oci check` ([oci/](oci/README.md), a Rust tool) over
+runs `komira_oci check` ([oci/](oci/README.md), a Zig tool) over
 the OCI layout of `image` (an `oci_image`) in a build action, and is that
 image with the check's output added to its default output and to each
 sub-target (`[digest]`, `[docker_archive]`, `[layers]`), so building any of

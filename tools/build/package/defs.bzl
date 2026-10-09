@@ -390,7 +390,7 @@ def _oci_tree_impl(ctx):
     if not regex_match("^[0-9A-Za-z][0-9A-Za-z.+~-]*$", ctx.attrs.version):
         fail("{}: version `{}` is not a plain version string".format(ctx.label, ctx.attrs.version))
 
-    # The paths are refused by the Rust tool (komira_oci tree: none may be
+    # The paths are refused by the Zig tool (komira_oci tree: none may be
     # inside another, each must be plain); a refused tree fails this action.
     out = ctx.actions.declare_output(ctx.label.name, dir = True)
     ctx.actions.run(
@@ -447,7 +447,7 @@ def _oci_image_impl(ctx):
         name, version, guard = b.name, b.version, b.kcov_guard
     else:
         t = ctx.attrs.tree[OciTreeInfo]
-        # komira_oci (Rust): the tree at /.
+        # komira_oci (zig): the tree at /.
         bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
         tool = [ctx.attrs._oci[RunInfo], "image", "--tree", t.dir, "--entrypoint", ctx.attrs.entrypoint, "--busybox", bb]
         category = "komira_oci_image"

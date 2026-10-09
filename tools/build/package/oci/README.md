@@ -1,16 +1,21 @@
 # komira_oci
 
 `komira_oci` lays out the tree an image adds, writes that image, and reads an
-OCI image layout back. It is a Rust program with no third-party crate:
-[`src/json.rs`](src/json.rs) reads and writes JSON, [`src/tar.rs`](src/tar.rs)
-reads tar (ustar, GNU long names, pax headers, every header checksum
-verified) and writes it (ustar, a path over 100 bytes in a pax header, a
-size past eleven octal digits in base-256), [`src/sha256.rs`](src/sha256.rs) computes digests,
-[`src/tree.rs`](src/tree.rs) lays out a tree, [`src/pack.rs`](src/pack.rs)
-assembles an image, and [`src/image.rs`](src/image.rs) applies an image's
-layers. Gzip goes through the pinned busybox (`busybox gzip -dc` to read a
-layer, `busybox gzip -c` to write one, with the header's time then zeroed);
-nothing else runs, and nothing uses the network.
+OCI image layout back. It is a Zig program, as every build tool under
+`tools/build` is (komira#956), built with the pinned zig and using only Zig's
+standard library:
+[`src/json.zig`](src/json.zig) reads and writes JSON,
+[`src/tar.zig`](src/tar.zig) reads tar (ustar, GNU long names, pax headers,
+every header checksum verified) and writes it (ustar, a path over 100 bytes
+in a pax header, a size past eleven octal digits in base-256),
+[`src/sha256.zig`](src/sha256.zig) computes digests,
+[`src/tree.zig`](src/tree.zig) lays out a tree, [`src/pack.zig`](src/pack.zig)
+assembles an image, [`src/image.zig`](src/image.zig) applies an image's
+layers, and [`src/cli.zig`](src/cli.zig) holds the commands
+([`src/main.zig`](src/main.zig) runs them; [`src/common.zig`](src/common.zig)
+is what they share). Gzip goes through the pinned busybox (`busybox gzip
+-dc` to read a layer, `busybox gzip -c` to write one, with the header's time
+then zeroed); nothing else runs, and nothing uses the network.
 
 | command | run by | what |
 |---|---|---|
@@ -42,14 +47,17 @@ image spec, "Applying changesets"):
 
 ## Tests
 
-[`BUCK`](BUCK) publishes the binary behind `:komira_oci_unit`, the crate's
-inline tests, so no tree or image builds unless they pass. They cover:
+[`BUCK`](BUCK) publishes the binary behind `:komira_oci_unit`, a `zig_test`
+([`../../mojo/toolchain.bzl`](../../mojo/toolchain.bzl)): `zig test` of
+`src/main.zig`, whose test block imports every `src/*_test.zig`, run as a
+build action with the busybox applets as its PATH and a TMPDIR of its own,
+so no tree or image builds unless they pass. They cover:
 
 - the tree refusals: a file inside a bundle, a bundle inside a bundle, a
   file inside a file, a bundle at a file's path, a path given twice, and
   paths that are not plain are refused; the base image's tree and names
-  that only share a prefix are accepted. `tree::lay` takes only a `Plan`,
-  which only `tree::plan` makes, so nothing is laid without the refusals;
+  that only share a prefix are accepted. `tree.lay` takes a `Plan`, which
+  `tree.plan` returns only when nothing is refused;
 - the writers: SHA-256 known answers (FIPS 180-4, the padding boundary);
   tar written, read back and identical for the same items, and every
   header byte equal to a header laid out from the ustar field table; every
