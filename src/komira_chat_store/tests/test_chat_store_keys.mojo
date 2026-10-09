@@ -48,8 +48,8 @@ def test_subject_key_is_injective() raises:
     assert_equal(subject_key(String("a"), String("bc")), String("1:abc"))
     assert_equal(subject_key(String("ab"), String("c")), String("2:abc"))
     assert_equal(
-        subject_key(String("https://issuer.example"), String("7")),
-        String("22:https://issuer.example7"),
+        subject_key(String("https://issuer.example"), String("/7")),
+        String("22:https://issuer.example/7"),
     )
 
 
