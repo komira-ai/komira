@@ -1,0 +1,231 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/python:defs.bzl", "py_test", "python_oracle")
+load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
+
+# Test-only: row-shaped UDFs (`df.map_rows(f)`) with a declared read set, the
+# ROW shape of docs/design/udf_runtime_interface.md (sections 3.1, 4.3, 6.1).
+# Spike code: nothing outside src/tests may depend on it.
+#
+#   producer/   the read-set capture a Python SDK runs when the plan is built
+#               (komira_udf_readset.py) and the step that writes the read
+#               sets of the functions below (capture_main.py, :read_sets)
+#   rowrt/      komira-test/python-row: a runtime embedding CPython, one
+#               sub-interpreter with its own GIL per context, that builds
+#               rows from the read set's columns only (row_runtime.c: life
+#               cycle; row_call.c: call_batch; rowpy.c: the CPython C API
+#               through dlsym)
+#   pyrt/       its Python adapter (komira_udf_rowrt.py) and the row
+#               functions the tests and the bench load (udf_rows.py)
+#   refrt/      the runtime library's one export
+#   native/     the engine loop: one pthread per engine thread, passing only
+#               the read set's columns
+#   engine.mojo, read_sets.mojo
+#               RowEngine and RowWorkload; the producer's read sets as UDF
+#               references
+#   bench/      the bench program, run by :bench (udf_bench)
+#
+# The runtime finds what it needs beside its own library file: python/ (the
+# CPython install) and pyrt/ (the Python modules). Each test and the bench
+# stage that layout, with the producer's read_sets.tsv.
+#
+# The welded tests (each file's header says what it proves and names the
+# mutant planted by hand to see it go red): test_row_calls (values, the
+# undeclared-field error, caught violations, nulls, per-field offsets, result
+# types, kept rows, an argument struct wider than the read set),
+# test_row_objects (row objects, user errors, how long an argument array
+# lives), test_row_shapes (describe, the spec, validate and open_instance),
+# test_row_interp (the sub-interpreter's settings, leaks), test_row_args
+# (argument structs and ABI structs broken in one place, cancel, deadline,
+# threads, through the engine's probe), test_row_init (layouts init
+# refuses), test_row_conform (the shared corpus's ROW cases),
+# test_row_threads (4 engine threads, bytes crossed per read set). And the
+# py_test readset_test (the capture).
+
+_CASES = {"src/tests/helpers/komira_udf_spike_abi": "//src/tests/helpers/komira_udf_spike_abi:cases"}
+
+# The adapter, then the user modules the tests load.
+_PYRT = [
+    "pyrt/komira_udf_rowrt.py",
+    "pyrt/bad_import.py",
+    "pyrt/not_python.py",
+    "pyrt/rowpkg/__init__.py",
+    "pyrt/rowpkg/fns.py",
+    "pyrt/udf_checks.py",
+    "pyrt/udf_rows.py",
+    "pyrt/udf_shapes.py",
+]
+
+_RUNTIME = {f: f for f in _PYRT} | {
+    "python": "//third_party/python:cpython",
+    "python_row.so": ":python_row",
+    "read_sets.tsv": ":read_sets[read_sets.tsv]",
+}
+
+mojo_library(
+    name = "komira_udf_spike_rowudf",
+    srcs = glob(["*.mojo"]),
+    conda = False,
+    deps = [
+        ":komira_udf_spike_rowudf_engine",
+        "//src/komira_json:komira_json",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
+        "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python",
+    ],
+    test_srcs = [
+        "tests/test_row_args.mojo",
+        "tests/test_row_calls.mojo",
+        "tests/test_row_conform.mojo",
+        "tests/test_row_init.mojo",
+        "tests/test_row_interp.mojo",
+        "tests/test_row_objects.mojo",
+        "tests/test_row_shapes.mojo",
+        "tests/test_row_threads.mojo",
+    ],
+    test_data = {
+        "tests/test_row_args.mojo": _RUNTIME,
+        "tests/test_row_calls.mojo": _RUNTIME,
+        # Three layouts init refuses, and the runtime it links long
+        # directories to (tests/test_row_init.mojo).
+        "tests/test_row_init.mojo": _RUNTIME | {
+            "fake/python/lib/libpython3.13.so.1.0": ":python_row",
+            "fake/python_row.so": ":python_row",
+            "lonely/python_row.so": ":python_row",
+            "noadapter/python": "//third_party/python:cpython",
+            "noadapter/python_row.so": ":python_row",
+        },
+        "tests/test_row_interp.mojo": _RUNTIME,
+        "tests/test_row_objects.mojo": _RUNTIME,
+        "tests/test_row_shapes.mojo": _RUNTIME,
+        "tests/test_row_conform.mojo": _RUNTIME | _CASES,
+        "tests/test_row_threads.mojo": _RUNTIME | {
+            # read by its check that the engine names no runtime or language
+            "engine.mojo": "engine.mojo",
+            "native/row_engine.c": "native/row_engine.c",
+            "native/row_engine.h": "native/row_engine.h",
+            "native/row_probe.c": "native/row_probe.c",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The C side, after the library so the deps lint reads the library's name
+# first. Copied into buck-out so the objects' digests do not depend on where
+# komira is mounted (cxx.bzl, staged_files).
+staged_files(
+    name = "c_files",
+    srcs = [
+        "native/row_engine.c",
+        "native/row_engine.h",
+        "native/row_probe.c",
+        "rowrt/row_call.c",
+        "rowrt/row_runtime.c",
+        "rowrt/rowpy.c",
+        "rowrt/rowpy.h",
+        "rowrt/rowrt.h",
+    ],
+)
+
+# The engine loop and its single probing calls, linked into the library's
+# tests and the bench program.
+cxx_library(
+    name = "komira_udf_spike_rowudf_engine",
+    srcs = [
+        ":c_files[native/row_engine.c]",
+        ":c_files[native/row_probe.c]",
+    ],
+    headers = {"row_engine.h": ":c_files[native/row_engine.h]"},
+    header_namespace = "",
+    compiler_flags = ["-O2"],
+    deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The row runtime, compiled against the pinned interpreter's headers (types
+# and layouts only: rowpy.h) and linking no libpython.
+cxx_library(
+    name = "komira_udf_python_row_rt",
+    srcs = [
+        ":c_files[rowrt/row_call.c]",
+        ":c_files[rowrt/row_runtime.c]",
+        ":c_files[rowrt/rowpy.c]",
+    ],
+    headers = {
+        "rowpy.h": ":c_files[rowrt/rowpy.h]",
+        "rowrt.h": ":c_files[rowrt/rowrt.h]",
+    },
+    header_namespace = "",
+    compiler_flags = ["-O2"],
+    preprocessor_flags = ["-I$(location //third_party/python:cpython)/include/python3.13"],
+    deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# python_row.so: komira-test/python-row, exporting komira_udf_runtime_init_v1
+# and nothing else.
+mojo_shared_lib(
+    name = "python_row",
+    srcs = ["refrt/python_row_so.mojo"],
+    exports = ["komira_udf_runtime_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_python_row_rt"],
+    visibility = ["PUBLIC"],
+)
+
+# The producer step: the read set of each row function the tests and the
+# bench load, as the SDK determines it when the plan is built, written to
+# read_sets.tsv (producer/capture_main.py). Run twice; both runs must agree.
+python_oracle(
+    name = "read_sets",
+    src = "producer/capture_main.py",
+    srcs = [
+        "producer/komira_udf_readset.py",
+        "pyrt/udf_rows.py",
+    ],
+    outs = ["read_sets.tsv"],
+)
+
+# The capture's own tests: the scan, the undetermined cases, columns=[...],
+# the refusals and the sample cross-check.
+py_test(
+    name = "readset_test",
+    src = "tests/test_readset.py",
+    srcs = [
+        "producer/komira_udf_readset.py",
+        "pyrt/udf_rows.py",
+    ],
+)
+
+# The bench program and its run. Its output is the numbers:
+#   ./buck2 build komira//src/tests/helpers/komira_udf_spike_rowudf:bench --show-output
+mojo_binary(
+    name = "bench_main",
+    srcs = ["bench/bench_main.mojo"],
+    deps = [
+        ":komira_udf_spike_rowudf",
+        ":komira_udf_spike_rowudf_engine",
+        "//src/komira_json:komira_json",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
+        "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python",
+    ],
+)
+
+udf_bench(
+    name = "bench",
+    args = ["./python_row.so"],
+    binary = ":bench_main",
+    data = _RUNTIME,
+    exec_compatible_with = LINUX_X86_64,
+    run_id = "bench/run_id",
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
