@@ -39,6 +39,20 @@ rust-lang.org	the Rust toolchain's distribution and documentation
 ziglang.org	the zig toolchain's distribution
 sqlite.org	SQLite documentation
 postgresql.org	PostgreSQL documentation
+clickhouse.com	ClickHouse documentation cited by docs/design/storage_stack.md
+confluent.io	Confluent documentation cited by docs/design/storage_stack.md
+databricks.com	Databricks documentation cited by docs/design/storage_stack.md
+dremio.com	Dremio documentation cited by docs/design/storage_stack.md
+duckdb.org	DuckDB documentation cited by docs/design/storage_stack.md
+ducklake.select	the DuckLake specification cited by docs/design/storage_stack.md
+estuary.dev	Estuary documentation cited by docs/design/storage_stack.md
+fivetran.com	Fivetran documentation cited by docs/design/storage_stack.md
+lance.org	the Lance format specification cited by docs/design/storage_stack.md
+redpanda.com	Redpanda documentation cited by docs/design/storage_stack.md
+ryft.io	Ryft documentation cited by docs/design/storage_stack.md
+snowflake.com	Snowflake documentation cited by docs/design/storage_stack.md
+trino.io	Trino documentation cited by docs/design/storage_stack.md
+turbopuffer.com	turbopuffer documentation cited by docs/design/storage_stack.md
 grpc.io	gRPC specifications
 connectrpc.com	the Connect protocol specification
 flatbuffers.dev	FlatBuffers documentation
