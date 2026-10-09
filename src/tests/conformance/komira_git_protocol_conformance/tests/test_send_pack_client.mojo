@@ -27,7 +27,7 @@ from komira_git import (
     ReceivePackServer,
     SendPackClient,
 )
-from komira_git_conformance import Scenario, expect_bytes, push_verdicts
+from komira_git_protocol_conformance import Scenario, expect_bytes, push_verdicts
 
 comptime AGENT = "git/2.56.0-Linux"
 

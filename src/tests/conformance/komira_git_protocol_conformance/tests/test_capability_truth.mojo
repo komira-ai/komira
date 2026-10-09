@@ -38,7 +38,7 @@ from komira_git import (
     ReceivePackServer,
     UploadPackV2Server,
 )
-from komira_git_conformance import Scenario
+from komira_git_protocol_conformance import Scenario
 
 comptime AGENT = "git/2.56.0-Linux"
 

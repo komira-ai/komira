@@ -1,6 +1,6 @@
 # =============================================================================
-# komira_git_conformance/transcript.mojo -- one scenario of the pinned git's
-# transcripts (capture.sh), loaded from the test's share/transcripts/.
+# komira_git_protocol_conformance/transcript.mojo -- one scenario of the pinned
+# git's transcripts (capture.sh), loaded from the test's share/transcripts/.
 # =============================================================================
 #
 # A scenario is what capture.sh recorded: for each connection the bytes the

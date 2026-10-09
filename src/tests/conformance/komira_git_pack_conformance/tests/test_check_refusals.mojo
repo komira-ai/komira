@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_git_conformance/tests/test_check_refusals.mojo -- the oracle can
+# komira_git_pack_conformance/tests/test_check_refusals.mojo -- the oracle can
 # fail: each check of check.mojo and each parse refusal of fixtures.mojo,
 # shown raising its own message on input that breaks exactly that check.
 # =============================================================================
@@ -32,7 +32,7 @@ from std.testing import assert_equal
 
 from komira_git import ObjectFormat, ObjectId, ObjectKind, PackIndex, hash_object
 
-from komira_git_conformance import (
+from komira_git_pack_conformance import (
     GitObjects,
     VerifyLine,
     check_pack_against_git,
