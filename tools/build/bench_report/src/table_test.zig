@@ -305,3 +305,53 @@ test "table: facts_line_per_report" {
     ;
     try eqs(want, got[std.mem.indexOf(u8, got, "\n## Reports\n\n").? + 13 ..]);
 }
+
+/// `F.good` as the report of target `<t>:<t>_bench`, with `rows`.
+fn at(t: []const u8, rows: []const R.Row) !R.Report {
+    const target = C.fmt("{s}:{s}_bench", .{ t, t });
+    return withRows(try F.report(&.{.{ "x:x_bench", target }}), rows);
+}
+
+fn one(variant: []const u8, function: []const u8) !R.Row {
+    return named(try rowAt(1, 1_000_000_000, 1_000_000_000), variant, function);
+}
+
+test "table: groups_and_reports_keep_the_order_given" {
+    // Neither ascending nor descending: variant w before v, per_row before
+    // per_batch in the first report and after it in the second, then u; the
+    // reports' targets y, x, z. Sorted either way, a group or a report line
+    // moves.
+    const got = try rendered(&.{
+        try at("y", &.{ try one("w", "per_row"), try one("w", "per_batch") }),
+        try at("x", &.{ try one("v", "per_batch"), try one("v", "per_row") }),
+        try at("z", &.{try one("u", "per_batch")}),
+    });
+    try eqs("w per_row, w per_batch, v per_batch, v per_row, u per_batch", F.groupOrder(got));
+    const y = std.mem.indexOf(u8, got, "- `komira//src/tests/e2e/y:y_bench[report]`").?;
+    const x = std.mem.indexOf(u8, got, "- `komira//src/tests/e2e/x:x_bench[report]`").?;
+    const z = std.mem.indexOf(u8, got, "- `komira//src/tests/e2e/z:z_bench[report]`").?;
+    try expect(y < x and x < z);
+}
+
+test "table: runs_line_names_each_run_once" {
+    // Two reports of one run (r1): no runs line.
+    const a = try at("x", &.{try one("v", "per_batch")});
+    const b = try at("y", &.{try one("w", "per_batch")});
+    const c = withRows(try F.report(&.{ .{ "\"run_id\": \"r1\"", "\"run_id\": \"r2\"" }, .{ "x:x_bench", "z:z_bench" } }), &.{try one("u", "per_batch")});
+    try expect(std.mem.startsWith(u8, try rendered(&.{ a, b }), "# Parallelism table\n\n| variant |"));
+    // Run ids r1, r1, r2 in any order (the repeat adjacent, apart, or
+    // after r2): two runs, each named once, sorted.
+    const want = "# Parallelism table\n\nThe reports are of 2 runs: r1, r2.\n\n| variant |";
+    try expect(std.mem.startsWith(u8, try rendered(&.{ a, b, c }), want));
+    try expect(std.mem.startsWith(u8, try rendered(&.{ a, c, b }), want));
+    try expect(std.mem.startsWith(u8, try rendered(&.{ c, a, b }), want));
+}
+
+test "table: duplicate_names_the_earlier_target_first" {
+    // u per_row N=4 in the second (y) and third (z) reports, after a first
+    // (x) without it: the message names y, then z.
+    const four = named(try rowAt(4, 1_000_000_000, 4_000_000_000), "u", "per_row");
+    const x = try at("x", &.{try one("v", "per_batch")});
+    if (T.render(&.{ x, try at("y", &.{four}), try at("z", &.{four}) })) |_| return error.TestUnexpectedResult else |_| {}
+    try eqs("u per_row N=4 is in komira//src/tests/e2e/y:y_bench and in komira//src/tests/e2e/z:z_bench", C.msg);
+}

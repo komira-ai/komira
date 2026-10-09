@@ -115,6 +115,14 @@ REPORT_CASES = [
     ("report_id_128", "report_ok.py", "a" * 128, (0, "stderr is not captured", True, report_of("a" * 128, {"a": 1, "b": [2]}))),
     ("report_id_leading_digit", "report_ok.py", "7a\n", (0, "stderr is not captured", True, report_of("7a", {"a": 1, "b": [2]}))),
     ("report_id_charset", "report_ok.py", "Z9._:+-\n", (0, "stderr is not captured", True, report_of("Z9._:+-", {"a": 1, "b": [2]}))),
+    # A child process the script starts writes to the same descriptor.
+    ("report_from_child", "report_child.py", "run-7\n", (0, "", True, OK)),
+    (
+        "report_empty",
+        "report_silent.py",
+        "run-7\n",
+        (1, failed("report_silent.py", "its standard output is not one JSON object (Expecting value: line 1 column 1 (char 0))"), False, None),
+    ),
     (
         "report_not_json",
         "passes.py",

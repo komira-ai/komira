@@ -48,3 +48,19 @@ pub fn report(edits: []const [2][]const u8) !R.Report {
         return error.TestUnexpectedResult;
     };
 }
+
+/// The variant and function of each N=1 line of a rendered table, in table
+/// order: the order of its groups.
+pub fn groupOrder(md: []const u8) []const u8 {
+    var names = C.list([]const u8);
+    const table = md[0 .. std.mem.indexOf(u8, md, "\n## Reports").?];
+    var lines = std.mem.splitScalar(u8, table, '\n');
+    while (lines.next()) |l| {
+        var cells = std.mem.splitSequence(u8, l, " | ");
+        const variant = cells.next() orelse continue;
+        const function = cells.next() orelse continue;
+        const n = cells.next() orelse continue;
+        if (C.eql(n, "1")) C.push([]const u8, &names, C.fmt("{s} {s}", .{ variant[2..], function }));
+    }
+    return C.join(names.items, ", ");
+}

@@ -48,6 +48,9 @@ test "json: values_and_order" {
     try std.testing.expectEqual(@as(f64, 0), (try ok("0")).num);
     try std.testing.expectEqual(@as(f64, 100), (try ok("1E+2")).num);
     try std.testing.expectEqual(@as(f64, 0.015), (try ok("1.5e-2")).num);
+    try std.testing.expectEqual(@as(f64, -0.5), (try ok("-0.5")).num);
+    // Each whitespace byte, before, inside and after a value.
+    try std.testing.expectEqual(@as(usize, 2), (try ok("\t\r\n [\t1,\r2\n]\t\r\n ")).arr.len);
 }
 
 test "json: boundaries_that_pass" {
@@ -129,6 +132,11 @@ test "json: refusals" {
         .{ "\"\\udc00\\udc00\"", "byte 7: unpaired surrogate" },
         .{ "\"\\udfff\"", "byte 7: unpaired surrogate" },
         .{ "\"\x1f\"", "byte 1: control character in a string" },
+        // A leading zero after a minus; form feed and vertical tab, which
+        // are not JSON whitespace, before and after a value.
+        .{ "-01", "byte 3: leading zero" },
+        .{ "\x0c1", "byte 0: not a JSON value" },
+        .{ "[1]\x0b", "byte 3: trailing input after the value" },
     };
     // Every case runs; each one that parses or fails otherwise is named.
     var bad: usize = 0;
@@ -136,9 +144,12 @@ test "json: refusals" {
         bad += 1;
     };
     try std.testing.expectEqual(@as(usize, 0), bad);
-    const deep = "[" ** 66 ++ "]" ** 66;
-    try refused(deep, "byte 65: nesting deeper than 64");
-    _ = try ok("[" ** 65 ++ "]" ** 65);
+    // 64 objects and arrays inside one another pass, with a value in the
+    // innermost; a 65th is refused, an array or an object.
+    _ = try ok("[" ** 64 ++ "1" ++ "]" ** 64);
+    _ = try ok("[" ** 63 ++ "{\"a\": 1}" ++ "]" ** 63);
+    try refused("[" ** 65 ++ "]" ** 65, "byte 64: nesting deeper than 64");
+    try refused("[" ** 64 ++ "{}" ++ "]" ** 64, "byte 64: nesting deeper than 64");
 }
 
 test "json: kinds" {

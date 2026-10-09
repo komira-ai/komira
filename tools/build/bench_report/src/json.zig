@@ -1,7 +1,9 @@
 //! A JSON reader for bench reports (RFC 8259): objects keep their keys in
 //! the order written, and a key written twice is an error, as are NaN,
-//! infinities, numbers out of the range of a double, trailing input and a
-//! nesting deeper than 64. The input must be UTF-8 (cli.zig checks it).
+//! infinities, numbers out of the range of a double, trailing input and
+//! more than 64 objects and arrays inside one another. Whitespace is space,
+//! tab, newline and carriage return. The input must be UTF-8 (cli.zig checks
+//! it).
 
 const std = @import("std");
 const C = @import("common.zig");
@@ -70,11 +72,11 @@ const Parser = struct {
     }
 
     fn value(self: *Parser, depth: usize) Fail!Value {
-        if (depth > max_depth) return self.err("nesting deeper than 64");
         const c = self.peek() orelse return self.err("unexpected end of input");
         return switch (c) {
-            '{' => self.object(depth),
-            '[' => self.array(depth),
+            // `depth` objects and arrays hold this value: a 65th is refused.
+            '{' => if (depth >= max_depth) self.err("nesting deeper than 64") else self.object(depth),
+            '[' => if (depth >= max_depth) self.err("nesting deeper than 64") else self.array(depth),
             '"' => Value{ .str = try self.string() },
             't' => self.lit("true", Value{ .boolean = true }),
             'f' => self.lit("false", Value{ .boolean = false }),

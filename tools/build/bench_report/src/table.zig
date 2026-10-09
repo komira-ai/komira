@@ -13,7 +13,14 @@
 //! the function and the line could have been measured.
 //! Flags: `noisy` when user + system CPU time is below 0.8 x wall x N, and
 //! `throttled` when the cgroup throttled the run (nr_throttled went up).
-//! The same variant, function and N in two rows is an error.
+//! Groups (a variant and a function) keep the order in which the reports,
+//! in the order given, first hold them, and the report lines below the table
+//! keep the order of the reports. When the reports hold more than one run id,
+//! a line above the table names each once, sorted: `The reports are of <n>
+//! runs: <id>, <id>.`
+//! The same variant, function and N in two rows is an error:
+//! `<variant> <function> N=<n> is in <target> and in <target>`, the earlier
+//! report's target first.
 
 const std = @import("std");
 const C = @import("common.zig");

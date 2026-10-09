@@ -9,9 +9,18 @@ of a report test: a `py_test` with a `run_id`
 bench_report --out <table.md> --report <report.json> [--report <report.json>]...
 ```
 
-The table is written only if every report passes the check. Exit status 1 is
-a refused report (`bench_report: <file>: <where>: <why>` on standard error),
-2 a usage error.
+The table is written only if every report passes the check. On a refusal
+nothing is written, and standard error has one of these (the first refusal
+only):
+
+| exit | message |
+|---|---|
+| 2 | `bench_report: <why>`, and the usage line under it |
+| 1 | `bench_report: <file>: cannot read: <error name>`, or `cannot read: not UTF-8` |
+| 1 | `bench_report: <file>: not JSON: byte <offset>: <why>` |
+| 1 | `bench_report: <file>: <where>: <why>`, from the schema check (`<where>` a key path such as `rows[0].latency_ns`) |
+| 1 | `bench_report: <variant> <function> N=<n> is in <target> and in <target>`, the earlier report's target first |
+| 1 | `bench_report: cannot write <file>: <error name>` |
 
 ## The rule
 
@@ -79,8 +88,12 @@ A row with more threads than the CPUs of its own report's host reads
 most CPUs of any report holding that variant and function, with that report's
 CPUs and run id (the first such report, in the order given); any other missing
 N reads `missing`, since a host with enough CPUs ran the function. The same
-variant, function and N in two rows is an error. Below the table, one line
-per report gives its host and build facts.
+variant, function and N in two rows is an error. Groups (a variant and a
+function) keep the order in which the reports, in the order given, first
+hold them; they are not sorted. When the reports hold more than one run id, a
+line above the table names each once, sorted (`The reports are of 2 runs:
+r1, r2.`). Below the table, one line per report, in the order given, gives
+its host and build facts.
 
 ## Tests
 
@@ -88,12 +101,16 @@ per report gives its host and build facts.
 `src/main.zig`, whose test block imports every `src/*_test.zig`: the JSON
 reader, each schema refusal and the reports that must pass (equal latency
 quantiles among them), the table's numbers and flags (a row at N equal to
-the host's CPUs among them), and the command line. Every comparison and
+the host's CPUs among them), its order (reports given in neither ascending
+nor descending order) and its runs line, and the command line, each message
+above among it. Every comparison and
 range has a case that passes at its boundary and one refused just past it,
 and every field the check or the table reads has a case where its value
 differs from the other fields' and between rows and reports, so a value
 read from the wrong field, row or report changes the result.
 `report_demo` and `report_wiring` in
 [`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md)
-check the whole path: a report test's `[report]`, and the `bench_table` made
-of it against a golden table.
+check the whole path: a report test's `[report]`, the `bench_table` made
+of it against a golden table, and a `bench_table` of two report tests (the
+second's variant sorts first) against another, in the order its `reports`
+give.

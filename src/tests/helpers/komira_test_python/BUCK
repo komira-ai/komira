@@ -167,8 +167,9 @@ py_test(
 
 # A report test: report_demo.py prints a bench report with fixed numbers
 # (report_fixture.py); the runner keeps it, with the run id and the label,
-# as `[report]`. Of the py_tests, this one and report_wiring (which stages
-# the file to check the run id) take the run id file.
+# as `[report]`. Of the py_tests, this one, report_demo_alpha and
+# report_wiring (which stages the file to check the run id) take the run id
+# file.
 py_test(
     name = "report_demo",
     src = "report_demo.py",
@@ -176,10 +177,27 @@ py_test(
     run_id = "report_demo.run_id",
 )
 
-# bench_report's table of that report.
+# A second report test of the same run id, for a table of two reports.
+py_test(
+    name = "report_demo_alpha",
+    src = "report_demo_alpha.py",
+    srcs = ["report_fixture.py"],
+    run_id = "report_demo.run_id",
+)
+
+# bench_report's table of that report, and of both reports in the order
+# given (report_demo's variant sorts after report_demo_alpha's).
 bench_table(
     name = "report_demo_table",
     reports = [":report_demo[report]"],
+)
+
+bench_table(
+    name = "report_demo_pair_table",
+    reports = [
+        ":report_demo[report]",
+        ":report_demo_alpha[report]",
+    ],
 )
 
 py_test(
@@ -193,10 +211,17 @@ py_test(
         "$(location :report_demo[report])",
         "$(location :report_demo_table)",
         "$(location :report_demo_table_golden)",
+        "$(location :report_demo_pair_table)",
+        "$(location :report_demo_pair_table_golden)",
     ],
 )
 
 export_file(
     name = "report_demo_table_golden",
     src = "report_demo_table.golden",
+)
+
+export_file(
+    name = "report_demo_pair_table_golden",
+    src = "report_demo_pair_table.golden",
 )
