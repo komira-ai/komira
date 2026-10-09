@@ -241,6 +241,8 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
   const komira_udf_host* h = host_of(inst);
   if (inst->fx->id == F_ARGS_KEPT) { /* the bug: args read in place, never moved */
     out->array.release = NULL;
+    if (inst->fx->variant == KEPT_THEN_RAISE)
+      return fail(h, e, KOMIRA_UDF_ERR_RAISED, "args_kept_raise: raised with args never moved", -1);
     int32_t kept = scalar(inst, call, &args->array, &out->array, e);
     if (kept == KOMIRA_UDF_OK) set_cpu(out);
     return kept;
@@ -279,6 +281,9 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
         break;
       case F_LEAK_RESERVATION:
         h->mem_reserve(h->host_data, 64);
+        break;
+      case F_ERROR_ON_OK: /* an error filled, then OK returned: the host still releases it */
+        fail(h, e, KOMIRA_UDF_ERR_RAISED, "error_on_ok: filled, then OK returned", -1);
         break;
       case F_RAISE_NO_MESSAGE: /* an error code with no message and nothing to release */
         release_array(&out->array);

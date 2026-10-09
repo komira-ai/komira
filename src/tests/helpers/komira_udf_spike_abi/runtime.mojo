@@ -6,9 +6,9 @@
 # Every call returns an Outcome: the runtime's status, message, trace, row
 # and group, and `fault`, a post-condition the host found broken (a layout
 # that fails import validation, a wrong length, a null in a non-nullable
-# result, an input not moved (then released here, once), `out` set on
-# failure, a frame that does not end). run_error() maps either to the run's
-# named error through one table (contract.run_error).
+# result, an input not moved whatever the status (then released here,
+# once), `out` set on failure, a frame that does not end). run_error() maps
+# either to the run's named error through one table (contract.run_error).
 #
 # Handles are opaque: a Handle holds the runtime's pointer as a Word, which
 # this file cannot read through, and its kind; it is passed back only to the
@@ -289,8 +289,8 @@ struct UdfRuntime(Movable):
         var slot = arena.word(8)
         var err = new_error(arena)
         var t = init_runtime(lib, host, slot, err)
+        var e = take_error(err)  # released whatever init returned (design 4.4)
         if t.is_null():
-            var e = take_error(err)
             arena.free_all()
             raise Error("UDF_RUNTIME_INIT: " + path + ": " + status_name(e.code) + " " + e.message)
         if table_abi(t) != ABI_MAJOR or table_size(t) < required_size():
@@ -317,10 +317,10 @@ struct UdfRuntime(Movable):
         var slot = self._arena.word(8)
         var err = new_error(self._arena)
         var t = init_runtime(self._lib, host, slot, err)
+        var e = take_error(err)  # released whatever init returned (design 4.4)
         if not t.is_null():
             t_shutdown(t, slot_value(slot))
             return Outcome(OK, "", "", -1, -1, "UDF_RUNTIME_FAULT: init accepted ABI major " + String(abi_major))
-        var e = take_error(err)
         return Outcome(e.code, e.message, e.trace, e.row, e.group, "")
 
     def describe(mut self) raises -> Capabilities:
@@ -353,9 +353,13 @@ struct UdfRuntime(Movable):
         )
 
     def _outcome(mut self, rc: Int32, err: Word) -> Outcome:
+        """The call's outcome. The error is released whatever the status
+        (design section 4.4, the error row: the host calls `release` once
+        when it is non-NULL), so an error a runtime filled and then returned
+        OK on is released too; its text is dropped."""
+        var e = take_error(err)
         if rc == OK:
             return Outcome.of(OK)
-        var e = take_error(err)
         return Outcome(rc, e.message, e.trace, e.row, e.group, "")
 
     def _opened(mut self, rc: Int32, err: Word, slot: Word, kind: Int) -> Opened:
@@ -418,7 +422,8 @@ struct UdfRuntime(Movable):
     def call_batch(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) raises -> CallResult:
         """One call_batch. Under PROPAGATE the host drops every row with a null
         argument before the call and scatters nulls back after it (design
-        section 3.4 rule 2)."""
+        section 3.4 rule 2); an error's row, a row of the compacted batch the
+        runtime saw, is mapped back to the caller's row."""
         _need(inst, KIND_INSTANCE)
         if spec.null_mode != NULL_PROPAGATE:
             return self._call_batch(inst, spec, args, opts)
@@ -439,6 +444,8 @@ struct UdfRuntime(Movable):
             compact.columns.append(col^)
         var res = self._call_batch(inst, spec, compact, opts)
         if not res.outcome.is_ok():
+            if res.outcome.row >= 0 and Int(res.outcome.row) < len(keep):
+                res.outcome.row = Int64(keep[Int(res.outcome.row)])
             return res^
         var out = Column(res.column.type_id)
         var k = 0
@@ -461,7 +468,9 @@ struct UdfRuntime(Movable):
         self._end(c)
         var res = self._finish_column(rc, err, d_out, spec.result[0], args.length)
         if not array_released(d_args):
-            # Not moved, so still the host's: released here, once.
+            # Not moved, so still the host's: released here, once, and a
+            # fault whatever the status (design section 4.4: moved on entry,
+            # whatever status the runtime returns).
             _ = release_out(d_args)
             if res.outcome.fault == "":
                 res.outcome.fault = "UDF_RUNTIME_FAULT: args not moved by call_batch"
@@ -505,7 +514,7 @@ struct UdfRuntime(Movable):
         var out = self._outcome(rc, err)
         # A stream frame_open did not move is still the host's. The runtime
         # may read it in place until frame_close, so it is released after
-        # that, once, and the call is a fault.
+        # that, once, and the call is a fault, whatever frame_open returned.
         var kept = not stream_moved(s)
         var outputs = List[Batch]()
         var first = -1
@@ -516,9 +525,10 @@ struct UdfRuntime(Movable):
                 var d_out = self._arena.word(128)
                 var e2 = new_error(self._arena)
                 var rc2 = t_frame_next(self._table, frame, c.call, d_out, e2)
+                var got = self._outcome(rc2, e2)
                 if rc2 != OK:
                     ended = True
-                    out = self._outcome(rc2, e2)
+                    out = got^
                     if not array_released(d_out):
                         _ = release_out(d_out)
                         out.fault = "UDF_RUNTIME_FAULT: out set on failure"
@@ -569,7 +579,7 @@ struct UdfRuntime(Movable):
 
     def _moved_check(self, mut got: Outcome, a: Word, b: Word, entry: String):
         """An input the runtime did not move is still the host's: released
-        here, once, and a fault."""
+        here, once, and a fault, whatever status the entry returned."""
         var kept = False
         if not array_released(a):
             _ = release_out(a)

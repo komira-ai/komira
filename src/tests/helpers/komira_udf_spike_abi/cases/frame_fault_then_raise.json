@@ -1,0 +1,12 @@
+{
+ "name": "frame_fault_then_raise",
+ "defect": "a frame is pulled on after an output fails import, so a later frame_next error replaces the fault",
+ "run": "frame",
+ "entry": "yield_two_then_raise",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}, {"type": "int64", "values": [10]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}, {"type": "int64", "values": [20]}]}, {"length": 1, "columns": [{"type": "int64", "values": [3]}, {"type": "int64", "values": [30]}]}],
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT"}
+}

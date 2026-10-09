@@ -108,8 +108,14 @@ enum fixture_id {
   F_RELEASE_ARGS_TWICE,
   F_RELEASE_SCHEMA,
   F_LEAK_RESERVATION,
-  F_RAISE_NO_MESSAGE
+  F_RAISE_NO_MESSAGE,
+  F_ERROR_ON_OK
 };
+
+/* The variant of a fixture that keeps an input (F_ARGS_KEPT, F_FRAME_IN_KEPT,
+ * F_SUM_*_KEPT): the entry then fails. Design 4.4 moves inputs "whatever
+ * status it returns", so the host's check must not depend on an OK. */
+#define KEPT_THEN_RAISE 1
 
 /* F_LEAF: what is done to the identity's output column. The first three are
  * legal Arrow the host must read; the rest break one rule each. */
@@ -146,7 +152,8 @@ enum table_shape {
   TS_CHILD_RELEASED,
   TS_CHILD_SHORT,  /* the child has one row fewer than the struct */
   TS_DEVICE,
-  TS_OUT_ON_ERROR  /* frame_next returns ERR_RAISED with the table still in `out` */
+  TS_OUT_ON_ERROR, /* frame_next returns ERR_RAISED with the table still in `out` */
+  TS_DICTIONARY    /* a dictionary on the struct, whose type has none */
 };
 
 /* args: one format per argument ('*' for ROW: any number of int64 fields,
@@ -239,6 +246,7 @@ static const struct fixture FIXTURES[] = {
     {"table_child_short", F_TABLE, MF, "l", "tl", "", TS_CHILD_SHORT},
     {"table_device", F_TABLE, MF, "l", "tl", "", TS_DEVICE},
     {"table_out_on_error", F_TABLE, MF, "l", "tl", "", TS_OUT_ON_ERROR},
+    {"table_dictionary", F_TABLE, MF, "l", "tl", "", TS_DICTIONARY},
     /* sum, with a state column one row too long; with a result one row
      * short; with agg_update not moving group_ids; with agg_merge not moving
      * the states. */
@@ -246,9 +254,14 @@ static const struct fixture FIXTURES[] = {
     {"sum_finish_short", F_SUM_FINISH_SHORT, AM, "l", "l", "l", 0},
     {"sum_gids_kept", F_SUM_GIDS_KEPT, AM, "l", "l", "l", 0},
     {"sum_merge_kept", F_SUM_MERGE_KEPT, AM, "l", "l", "l", 0},
+    {"sum_args_kept_raise", F_SUM_ARGS_KEPT, AM, "l", "l", "l", KEPT_THEN_RAISE},
+    {"sum_gids_kept_raise", F_SUM_GIDS_KEPT, AM, "l", "l", "l", KEPT_THEN_RAISE},
+    {"sum_merge_kept_raise", F_SUM_MERGE_KEPT, AM, "l", "l", "l", KEPT_THEN_RAISE},
+    {"args_kept_raise", F_ARGS_KEPT, SC, "l", "l", "", KEPT_THEN_RAISE},
     /* running_sum whose frame_open reads `in` in place and never moves it;
      * running_sum whose frame_close never releases `in`. */
     {"frame_in_kept", F_FRAME_IN_KEPT, MF, "l", "tl", "", 0},
+    {"frame_in_kept_raise", F_FRAME_IN_KEPT, MF, "l", "tl", "", KEPT_THEN_RAISE},
     {"stream_kept", F_STREAM_KEPT, MF, "l", "tl", "", 0},
     /* identity, with one more ownership bug each: the moved `args` released
      * twice; the borrowed argument schema released at load; 64 bytes
@@ -257,6 +270,7 @@ static const struct fixture FIXTURES[] = {
     {"release_schema", F_RELEASE_SCHEMA, MC, "l", "l", "", 0},
     {"leak_reservation", F_LEAK_RESERVATION, MC, "l", "l", "", 0},
     {"raise_no_message", F_RAISE_NO_MESSAGE, MC, "l", "l", "", 0},
+    {"error_on_ok", F_ERROR_ON_OK, MC, "l", "l", "", 0},
 };
 
 #define N_FIXTURES (sizeof(FIXTURES) / sizeof(FIXTURES[0]))

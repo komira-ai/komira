@@ -557,7 +557,8 @@ def import_column(d: Word, want: ColumnType) raises -> Column:
 
 def import_struct(d: Word, want: List[ColumnType]) raises -> Batch:
     """Validate and copy the struct batch a runtime returned in `d` (run_frame
-    checked it is not released: that is the end of a frame). The struct may
+    checked it is not released: that is the end of a frame). It has one
+    buffer, one child per wanted column and no dictionary. The struct may
     sit at an offset into its children (Arrow: struct row i is child row
     offset + i, each child longer by at least that much); a table has no null
     rows."""
@@ -568,6 +569,10 @@ def import_struct(d: Word, want: List[ColumnType]) raises -> Batch:
             "struct layout: n_buffers " + String(a[].n_buffers) + ", n_children "
             + String(a[].n_children) + " (want " + String(len(want)) + ")"
         )
+    # A struct type has no dictionary (design 4.4: a dictionary exactly where
+    # the type has one); each child's is checked by _import_leaf.
+    if not is_null(a[].dictionary):
+        raise _fault("struct layout: a dictionary on a struct")
     var n = Int(a[].length)
     var off = Int(a[].offset)
     if n < 0 or off < 0:

@@ -76,15 +76,21 @@ static int32_t fold(komira_udf_groups* g, const komira_udf_call* call, struct Ar
   return rc;
 }
 
+/* After a fixture that kept an input: its KEPT_THEN_RAISE variant fails. */
+static int32_t kept_then(const komira_udf_groups* g, int32_t rc, komira_udf_error* e) {
+  if (rc != KOMIRA_UDF_OK || g->fx->variant != KEPT_THEN_RAISE) return rc;
+  return fail(g->host, e, KOMIRA_UDF_ERR_RAISED, "raised after reading an input in place, never moved", -1);
+}
+
 static int32_t echo_agg_update(komira_udf_groups* g, const komira_udf_call* c, struct ArrowDeviceArray* args,
                                struct ArrowDeviceArray* gids, uint32_t n, komira_udf_error* e) {
   if (g->fx->id == F_SUM_ARGS_KEPT) {
     struct ArrowDeviceArray view = borrowed(args);
-    return fold(g, c, &view, gids, n, e, 0);
+    return kept_then(g, fold(g, c, &view, gids, n, e, 0), e);
   }
   if (g->fx->id == F_SUM_GIDS_KEPT) {
     struct ArrowDeviceArray view = borrowed(gids);
-    return fold(g, c, args, &view, n, e, 0);
+    return kept_then(g, fold(g, c, args, &view, n, e, 0), e);
   }
   return fold(g, c, args, gids, n, e, 0);
 }
@@ -93,7 +99,7 @@ static int32_t echo_agg_merge(komira_udf_groups* g, const komira_udf_call* c, st
                               struct ArrowDeviceArray* gids, uint32_t n, komira_udf_error* e) {
   if (g->fx->id == F_SUM_MERGE_KEPT) {
     struct ArrowDeviceArray view = borrowed(states);
-    return fold(g, c, &view, gids, n, e, 1);
+    return kept_then(g, fold(g, c, &view, gids, n, e, 1), e);
   }
   return fold(g, c, states, gids, n, e, 1);
 }
@@ -144,6 +150,8 @@ static int32_t echo_frame_open(komira_udf_instance* inst, const komira_udf_call*
   if ((inst->fx->shape & (KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME | KOMIRA_UDF_SHAPE_AGG_PLAIN | KOMIRA_UDF_SHAPE_STEP)) == 0)
     rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_UNSUPPORTED, "frame_open on a fixture of another shape", -1);
   if (rc == KOMIRA_UDF_OK) rc = start_call(inst->ctx->rt, call, e);
+  if (rc == KOMIRA_UDF_OK && inst->fx->id == F_FRAME_IN_KEPT && inst->fx->variant == KEPT_THEN_RAISE)
+    rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_RAISED, "frame_in_kept_raise: raised with `in` never moved", -1);
   komira_udf_frame* fr = NULL;
   if (rc == KOMIRA_UDF_OK && (fr = calloc(1, sizeof(*fr))) == NULL)
     rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "frame_open: out of memory", -1);
@@ -404,6 +412,9 @@ static int32_t next_table(komira_udf_frame* fr, struct ArrowDeviceArray* out, ko
       break;
     case TS_DEVICE:
       out->device_type = ARROW_DEVICE_CUDA;
+      break;
+    case TS_DICTIONARY:
+      out->array.dictionary = &NOT_A_DICTIONARY;
       break;
     case TS_OUT_ON_ERROR:
       fr->done = 1;

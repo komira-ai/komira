@@ -5,8 +5,8 @@
 # names, and pass every other case.
 #
 # What it proves: the suite can fail. Each planted defect is caught by a case:
-#   1. args not released when the fixture raises      raise_on_row_3, fault_out_set_on_error
-#                                                      (the release ledger)
+#   1. args not released when the fixture raises      raise_on_row_3, fault_out_set_on_error,
+#                                                      scalar_propagate_error_row (the release ledger)
 #   2. int64 bits in a float64 result                  column_float_result
 #   3. the cancel flag never read                      cancel_set_before_call, cancel_set_during_call,
 #                                                      frame_cancelled_at_open
@@ -39,6 +39,7 @@ def _expected() -> List[String]:
         "frame_cancelled_at_open|expected ERR_CANCELLED",
         "raise_on_row_3|released",
         "row_caught_violation|expected ERR_FIELD_NOT_DECLARED",
+        "scalar_propagate_error_row|released",
         "sliced_input_offset|row 0",
         "split_across_contexts|two batches on a second instance",
     ]
@@ -46,7 +47,7 @@ def _expected() -> List[String]:
 
 def main() raises:
     var cases = load_cases(CASES)
-    assert_equal(len(cases), 76, "cases loaded from " + CASES)
+    assert_equal(len(cases), 85, "cases loaded from " + CASES)
     var report = run_suite("./echo_broken.so", cases)
     print(report)
     assert_equal(report.runtime_id, "komira-test/echo-broken")
