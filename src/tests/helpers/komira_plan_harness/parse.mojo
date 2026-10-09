@@ -16,7 +16,9 @@
 # write (escape.check_scalar_cell); a nested cell that is not well formed or
 # holds such an escape (escape.check_nested_cell; the check is structural, not
 # typed: a nested value's leaves are compared as text, floats in them as bits,
-# see render.mojo); a float cell float_text refuses.
+# see render.mojo); a float leaf of a nested cell that is not canon's bits
+# (nested_floats.mojo walks the cell along its type); a float cell
+# float_text refuses.
 # =============================================================================
 
 from .canon_text import (
@@ -34,6 +36,7 @@ from .escape import (
     split_unescaped,
 )
 from .float_text import FloatTolerance, parse_float_cell
+from .nested_floats import NestedFloatType
 
 
 def _lines(text: String) -> List[String]:
@@ -156,6 +159,7 @@ def parse_canon(text: String) raises -> CanonText:
     var res = CanonText(policy^)
     ref schema_line = lines[i]
     var nested = List[Bool]()
+    var nested_types = List[NestedFloatType]()
     if schema_line.byte_length() > 0:
         for entry in schema_line.split("\t"):
             var e = String(entry)
@@ -167,6 +171,7 @@ def parse_canon(text: String) raises -> CanonText:
             res.names.append(String(e[byte=0:colon]))
             res.float_widths.append(_float_width_of_spelling(type_part))
             nested.append(_is_nested_spelling(type_part))
+            nested_types.append(NestedFloatType(type_part))
     var ncols = len(res.schema)
 
     for k in res.policy.keys:
@@ -211,6 +216,7 @@ def parse_canon(text: String) raises -> CanonText:
                         row[c] = parse_float_cell(row[c], w).canonical(w)
                     elif nested[c]:
                         check_nested_cell(row[c])
+                        nested_types[c].check(row[c])
                     else:
                         check_scalar_cell(row[c])
                 except e:

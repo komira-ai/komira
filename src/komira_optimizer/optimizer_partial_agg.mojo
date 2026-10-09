@@ -243,8 +243,8 @@ def push_aggregate_below_join(var plan: LogicalPlan) raises -> LogicalPlan:
         if new_child.tag == PLAN_JOIN and new_child._join.value()[].join_type == JOIN_INNER and not new_child._join.value()[].has_residual():
             var decision = _classify_push(plan, new_child)
             if decision.kind == _PUSH_LEFT or decision.kind == _PUSH_RIGHT:
-                return _perform_rewrite(
-                    plan, new_child^, decision.kind == _PUSH_LEFT
+                return _perform_rewrite(  # cov: unreachable _classify_push returns _PUSH_NONE while ENABLE_AGG_PUSHDOWN_BELOW_JOIN is False
+                    plan, new_child^, decision.kind == _PUSH_LEFT  # cov: unreachable see the line above
                 )
             # decision.kind == _PUSH_NONE -- fall through unchanged.
 
@@ -492,9 +492,9 @@ def _classify_push_inner(
     if not _other_side_key_unique(join_plan, push_to_left):
         return _PushDecision(_PUSH_NONE)
 
-    if push_to_left:
-        return _PushDecision(_PUSH_LEFT)
-    return _PushDecision(_PUSH_RIGHT)
+    if push_to_left:  # cov: unreachable _other_side_key_unique returns False unconditionally, so the clause (c) check returns first
+        return _PushDecision(_PUSH_LEFT)  # cov: unreachable see the line above
+    return _PushDecision(_PUSH_RIGHT)  # cov: unreachable see the line above
 
 
 def _classify_push_unchecked(
