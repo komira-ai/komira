@@ -74,7 +74,7 @@ The write modes, and how each commits (all under [the commit client](#the-commit
 
 | mode | commits as | conflict check |
 |---|---|---|
-| `append` | `append` snapshot | rebase on a moved ref; never fails validation after a rebase |
+| `append` | `append` snapshot | rebase on a moved ref; never fails validation after a rebase; a streaming sink's append from an older generation is refused instead (the commit client, step 3) |
 | `overwrite` (a filter) | `overwrite` snapshot | no new data files match the filter since the base |
 | `overwrite_partitions` (dynamic) | `overwrite` of the partitions written | no new data files in those partitions since the base |
 | `merge` (upsert on key columns) | position deletes plus new files (merge-on-read) by default; on a table komira does not maintain, the owner's `write.merge.mode` | target files still live; no new files matching the merge keys' partitions |
@@ -296,6 +296,7 @@ Every adapter follows the same rules, taken from the REST spec and from Iceberg 
    - with a partition-spec change, `assert-default-spec-id` and `assert-last-assigned-partition-id`.
 3. **On 409, reload, revalidate, rebuild, then retry.**
    - An append rebuilds its manifest list on the new snapshot and retries. Appends never fail validation after a rebase.
+   - Exception, the generation fence for streaming sinks (`plan_models.md`, "The roll v1 → v2, and its fence"): after the reload, an append from a run whose generation is older than the latest `komira.generation` on the table is refused, never rebased, and that committer stops.
    - An overwrite, merge or row delete revalidates against the snapshots added since it started: there must be no new data files matching its filter, and its target files must still be live.
    - A rewrite (compaction or fold) checks that every source file is still live and has gained no new delete files. If not, it fails cleanly and is replanned.
 4. **On a 5xx or a timeout, treat the state as unknown, not failed.**
