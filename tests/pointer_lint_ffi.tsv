@@ -23,6 +23,7 @@ src/komira_compression/zstd_frame.mojo	libzstd's one-shot frame calls
 src/komira_csv/csv_sink.mojo	pwrite into disjoint ranges of the output file
 src/komira_http_client/tests/test_L2_tls_starttls_upgrade.mojo	the socketpair and pthread FFI of the STARTTLS upgrade test: the server thread argument and the PEM buffers it carries
 src/komira_lz4/frame.mojo	liblz4, loaded once per process
+src/komira_morsel/tests/test_vtable_source_failure_paths.mojo	the scan vtable C ABI of a stand-in connector: the connector state and scratch buffers it hands the engine through abi("C") thunks
 src/komira_objectstore/local_fs_conditional_store.mojo	the filesystem C shim (komira_fs_enoent, komira_fs_errno_name)
 src/tests/helpers/komira_plan_harness/door.mojo	the C ABI of a plan-door shared library it dlopens (the handle slot, the context, last_error, the ArrowArrayStream box, Door B's NULL probe buffer)
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_stub.mojo	the C ABI (session, ArrowArrayStream, Door B buffers) of the plan_door_stub shared library
