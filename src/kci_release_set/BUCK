@@ -13,6 +13,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # verify_member refusal over directories written under TEST_TMPDIR;
 # release.json (major 2: revision, platform, produced_by) rendered
 # byte-exact, round-tripped and refused; the set hash against a golden vector.
+# An OCI member (an image) is the one whose `file` is a directory, its layout,
+# verified with komira_oci's `read_oci_layout` (every blob hashed); its test
+# reads the real //tools/build/examples:hello_image[release].
 mojo_library(
     name = "kci_release_set",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -23,12 +26,17 @@ mojo_library(
         "//src/kci_release_channel:kci_release_channel",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_json:komira_json",
+        "//src/komira_oci:komira_oci",
     ],
     test_srcs = [
         # every metadata.json refusal by its message; the real library and metapackage shapes
         "tests/test_conda_metadata.mojo",
         # every verify_member refusal, one changed thing per case
         "tests/test_verify_member.mojo",
+        # an OCI member: hello_image[release] verifies and its digest is in the
+        # set hash; a flipped layer byte, a digest the layout does not have and
+        # every OCI refusal by its message
+        "tests/test_oci_member.mojo",
         # release.json: byte-exact render, parse(render(x)) == x, every refusal
         "tests/test_release_manifest.mojo",
         # the set hash: a golden vector, order-free, every field counts
@@ -39,6 +47,10 @@ mojo_library(
     test_data = {
         "tests/test_conda_metadata.mojo": glob(["tests/data/*.json", "tests/data/komira/metadata.json"]),
         "tests/test_verify_member.mojo": glob(["tests/data/komira/*"]) + ["tests/data/library.metadata.json"],
+        "tests/test_oci_member.mojo": {
+            "hello": "//tools/build/examples:hello_image[release]",
+            "hello_image.digest": "//tools/build/examples:hello_image[digest]",
+        },
     },
     visibility = ["PUBLIC"],
 )

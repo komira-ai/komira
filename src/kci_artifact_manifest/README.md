@@ -1,8 +1,12 @@
 # kci_artifact_manifest
 
 The artifact manifest: one JSON object per package file, saying what the file
-is (artifact type `CONDA` or `PYTHON`, name, version, platform, and for a CONDA
-artifact its conda subdir), where it is (`file`, `metadata`) and its sha256.
+is (artifact type `CONDA`, `PYTHON` or `OCI`, name, version, platform, and for a
+CONDA artifact its conda subdir), where it is (`file`, `metadata`) and its
+sha256. An `OCI` artifact is an image: its `file` is an OCI image layout
+directory, its `sha256` is the hex of the image manifest digest, and it has no
+`metadata` and no `subdir`. `OCI` is the one word for an image; `OCI_IMAGE` and
+`oci-image` are refused.
 `parse_artifact_manifest` reads `format` and `schema_version` first and refuses
 another format or a major this kci does not read; inside a known major an
 unknown key is ignored and listed in `ignored_keys`. A missing required key, a
@@ -60,6 +64,28 @@ var py_text = (
 var py = parse_artifact_manifest(py_text, String("/abs/dir/m.json"))
 assert_equal(py.file_path, String("/abs/dir/example_pkg-1.2.3-py3-none-any.whl"))
 assert_equal(render_artifact_manifest(py), py_text + String("\n"))
+```
+
+## An image
+
+```mojo
+from kci_artifact_manifest import parse_artifact_manifest, render_artifact_manifest
+from std.testing import assert_equal
+
+var digest_hex = String("89abcdef01234567") * 4
+var oci_text = (
+    String('{"format":"kci.artifact_manifest","schema_version":1,')
+    + String('"artifact_type":"OCI","name":"hello","version":"0.1.0",')
+    + String('"platform":"linux-x86_64","file":"hello_image.oci",')
+    + String('"sha256":"') + digest_hex + String('"}')
+)
+var image = parse_artifact_manifest(oci_text, String("out/m.json"))
+assert_equal(image.artifact_type, String("OCI"))
+# `file` is the layout directory, resolved like any other path
+assert_equal(image.file_path, String("out/hello_image.oci"))
+assert_equal(image.metadata, String(""))
+# no `metadata` key is written back
+assert_equal(render_artifact_manifest(image), oci_text + String("\n"))
 ```
 
 ## Refusals name the manifest

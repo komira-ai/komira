@@ -11,7 +11,8 @@
 #   conda_metadata.mojo    `CondaMetadata`, `read_conda_metadata`
 #   member.mojo            `ReleaseMember`, `verify_member`: the per-artifact
 #                          checks both verbs run, so build's early refusal and
-#                          publish's re-check cannot drift apart
+#                          publish's re-check cannot drift apart; an OCI
+#                          member's layout is verified blob by blob
 #   release_manifest.mojo  `release.json` (kci.release_set major 2): the
 #                          release identity (revision, platform), who
 #                          produced it, render, parse, read

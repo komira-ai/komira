@@ -46,6 +46,18 @@ def _python() -> String:
     )
 
 
+def _oci() -> String:
+    # An image: `file` is its layout directory, `sha256` its manifest digest's
+    # hex; no `metadata`, no `subdir`.
+    return (
+        String('{"format":"kci.artifact_manifest","schema_version":1,')
+        + String('"artifact_type":"OCI","name":"hello","version":"0.1.0",')
+        + String('"platform":"linux-x86_64","file":"hello_image.oci","sha256":"')
+        + String(_HASH)
+        + String('"}')
+    )
+
+
 def _refusal(text: String) -> String:
     try:
         _ = parse_artifact_manifest(text, String("out/m.json"))
@@ -149,11 +161,27 @@ def test_refusals_name_the_manifest_and_the_key() raises:
         _refusal(_python().replace(String('"file"'), String('"subdir":"x","file"'))),
         String("artifact manifest 'out/m.json': 'subdir' belongs to a CONDA artifact"),
     )
+    # `OCI` is read (test_oci_parses_resolves_and_round_trips); the older
+    # spellings of the image type are not, nor is any case variant of OCI.
     assert_equal(
-        _refusal(_conda().replace(String('"CONDA"'), String('"OCI"'))),
+        _refusal(_oci().replace(String('"OCI"'), String('"OCI_IMAGE"'))),
         String(
-            "artifact manifest 'out/m.json': artifact_type 'OCI' is not"
-            " published by the PUBLISH step (CONDA or PYTHON)"
+            "artifact manifest 'out/m.json': artifact_type 'OCI_IMAGE' is not"
+            " published by the PUBLISH step (CONDA, PYTHON or OCI)"
+        ),
+    )
+    assert_equal(
+        _refusal(_oci().replace(String('"OCI"'), String('"oci-image"'))),
+        String(
+            "artifact manifest 'out/m.json': artifact_type 'oci-image' is not"
+            " published by the PUBLISH step (CONDA, PYTHON or OCI)"
+        ),
+    )
+    assert_equal(
+        _refusal(_oci().replace(String('"OCI"'), String('"oci"'))),
+        String(
+            "artifact manifest 'out/m.json': artifact_type 'oci' is not"
+            " published by the PUBLISH step (CONDA, PYTHON or OCI)"
         ),
     )
     assert_equal(
@@ -268,6 +296,54 @@ def test_render_round_trips_python() raises:
     assert_equal(back.metadata, String("METADATA"))
     assert_equal(back.subdir, String(""))
     assert_equal(back.file, m.file)
+
+
+def test_oci_parses_resolves_and_round_trips() raises:
+    var m = parse_artifact_manifest(_oci(), String("out/m.json"))
+    assert_equal(m.artifact_type, String("OCI"))
+    assert_equal(m.name, String("hello"))
+    assert_equal(m.version, String("0.1.0"))
+    assert_equal(m.platform, String("linux-x86_64"))
+    assert_equal(m.file, String("hello_image.oci"))
+    assert_equal(m.file_path, String("out/hello_image.oci"))
+    assert_equal(m.file_name(), String("hello_image.oci"))
+    assert_equal(m.sha256_hex, String(_HASH))
+    assert_equal(m.metadata, String(""))
+    assert_equal(m.metadata_path, String(""))
+    assert_equal(m.subdir, String(""))
+    assert_equal(len(m.ignored_keys), 0)
+    # The renderer writes no `metadata` key for an image, so what the BUILD
+    # step writes is exactly what the PUBLISH step reads.
+    var text = render_artifact_manifest(m)
+    assert_equal(text, _oci() + String("\n"))
+    var back = parse_artifact_manifest(text, String("/abs/dir/m.json"))
+    assert_equal(back.file_path, String("/abs/dir/hello_image.oci"))
+    assert_equal(back.sha256_hex, m.sha256_hex)
+
+
+def test_oci_has_no_metadata_and_no_subdir() raises:
+    assert_equal(
+        _refusal(_oci().replace(String('"file"'), String('"metadata":"METADATA","file"'))),
+        String(
+            "artifact manifest 'out/m.json': an OCI artifact has no 'metadata':"
+            " its image layout describes itself"
+        ),
+    )
+    assert_equal(
+        _refusal(_oci().replace(String('"file"'), String('"subdir":"linux-64","file"'))),
+        String("artifact manifest 'out/m.json': 'subdir' belongs to a CONDA artifact"),
+    )
+    # the required keys stay required for an image
+    assert_equal(
+        _refusal(_oci().replace(String('"file":"hello_image.oci",'), String(""))),
+        String("artifact manifest 'out/m.json': missing 'file'"),
+    )
+    assert_equal(
+        _refusal(_oci().replace(String(_HASH), String("sha256:") + String(_HASH))),
+        String(
+            "artifact manifest 'out/m.json': 'sha256' is not 64 lowercase hex characters"
+        ),
+    )
 
 
 def test_render_refuses_what_the_parser_would() raises:
