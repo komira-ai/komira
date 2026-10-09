@@ -1,0 +1,250 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/python:defs.bzl", "python_oracle")
+load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
+load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyrt_files", "runtime_dir")
+
+# Test-only: the Python UDF runtime of docs/design/udf_runtime_interface.md
+# behind its worker transport (section 5), one worker process per engine
+# thread, reached through the UDF runtime C ABI by a proxy runtime library.
+# Spike code: nothing outside src/tests may depend on it.
+#
+#   native/proxy_runtime.c  the proxy: the C ABI table, each entry one message
+#                           of the worker protocol (komira_udf_wire.h)
+#   native/proxy_channel.c  one worker: posix_spawn, the control socket, the
+#                           shared region and its slot heaps, the wait that
+#                           forwards clock reads and cancel
+#   native/ipc_codec.c      the Arrow IPC subset the engine side writes
+#                           (schemas, batches) and reads (one-column batches)
+#   pyworker/               the worker (komira_udf_pyworker.py), its IPC codec
+#                           (kudf_ipc.py) and the fixtures only these tests load;
+#                           user code runs through the in-process runtime's
+#                           adapter (komira_udf_spike_python/pyrt), staged as pyrt/
+#   producer/make_closure.py  a VALUE UDF's capture: a function of __main__
+#                           closing over a 16 MiB numpy model, cloudpickled
+#                           (:closure_capture, laid out by digest as :closure)
+#   refrt/                  the builds' one export each (below)
+#   native/drive.c, drive.mojo, workloads.mojo
+#                           the engine loop the tests and the bench drive a
+#                           runtime with, and what it measures
+#   bench/                  the bench program; :bench_zygote, :bench_spawn and
+#                           :bench_pipe are its runs
+#
+# The welded tests (each file's header names the mutant planted to see it go
+# red):
+#   test_conform_worker   the shared conformance cases a managed runtime can
+#                         express, through the proxy, on four builds.
+#   test_worker_processes describe through the proxy, one process per context
+#                         and none left after shutdown, the zygote as every
+#                         forked worker's parent, per-context state, the
+#                         proxy's call accounting, numpy on 4 threads, a crash
+#                         mapped to a lost context, kept input views falling
+#                         back to inline payloads.
+#   test_closure          the VALUE closure on both start-ups: values, its
+#                         payload by value, a digest mismatch refused, the
+#                         model's pages shared by forked workers and not by
+#                         spawned ones, and the fork's thread facts.
+
+_CASES = {"src/tests/helpers/komira_udf_spike_abi": "//src/tests/helpers/komira_udf_spike_abi:cases"}
+
+mojo_library(
+    name = "komira_udf_spike_python_worker",
+    srcs = glob(["*.mojo"]),
+    conda = False,
+    deps = [
+        ":komira_udf_pyworker_drive",
+        "//src/komira_json:komira_json",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
+        "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python",
+    ],
+    test_srcs = [
+        "tests/test_closure.mojo",
+        "tests/test_conform_worker.mojo",
+        "tests/test_worker_processes.mojo",
+    ],
+    test_data = {
+        "tests/test_closure.mojo": runtime_dir(["spawn", "zygote", "zygote_threads"], extra = {"closure": ":closure"}),
+        "tests/test_conform_worker.mojo": runtime_dir(
+            ["pipe", "pyarrow", "spawn", "zygote"],
+            site = ":site_bc_pyarrow",
+            extra = _CASES,
+        ),
+        "tests/test_worker_processes.mojo": runtime_dir(["spawn", "zygote"]),
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The C side, after the library so the deps lint reads the library's name
+# first. Copied into buck-out so the objects' digests do not depend on where
+# komira is mounted (cxx.bzl, staged_files).
+staged_files(
+    name = "c_files",
+    srcs = [
+        "native/drive.c",
+        "native/ipc_codec.c",
+        "native/proxy_channel.c",
+        "native/proxy_runtime.c",
+        "native/pyw.h",
+    ],
+)
+
+# The proxy runtime: every init of refrt/ and the code they share.
+cxx_library(
+    name = "komira_udf_pyworker_proxy",
+    srcs = [
+        ":c_files[native/ipc_codec.c]",
+        ":c_files[native/proxy_channel.c]",
+        ":c_files[native/proxy_runtime.c]",
+    ],
+    headers = {"pyw.h": ":c_files[native/pyw.h]"},
+    header_namespace = "",
+    compiler_flags = ["-O2"],
+    deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The engine loop (native/drive.c), linked into the tests and the bench.
+cxx_library(
+    name = "komira_udf_pyworker_drive",
+    srcs = [":c_files[native/drive.c]"],
+    compiler_flags = ["-O2"],
+    deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The proxy's builds, each a shared library exporting
+# komira_udf_runtime_init_v1 and nothing else (native/proxy_runtime.c):
+#   pyworker_spawn.so           a posix_spawned worker per context; shared memory
+#   pyworker_zygote.so          workers forked from a zygote that loaded the
+#                               UDF; shared memory
+#   pyworker_pipe.so            spawned; every payload on the control socket
+#   pyworker_pyarrow.so         spawned; shared memory; the worker's IPC by pyarrow
+#   pyworker_zygote_threads.so  the zygote, native thread pools not limited
+[mojo_shared_lib(
+    name = "pyworker_" + v,
+    srcs = ["refrt/pyworker_{}_so.mojo".format(v)],
+    exports = ["komira_udf_runtime_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_pyworker_proxy"],
+    visibility = ["PUBLIC"],
+) for v in [
+    "pipe",
+    "pyarrow",
+    "spawn",
+    "zygote",
+    "zygote_threads",
+]]
+
+# The runtime directory's parts that are not plain files here.
+pyrt_files(
+    name = "pyrt",
+    files = [
+        "komira_udf_pyrt.py",
+        "udf_fixtures.py",
+        "udf_np.py",
+    ],
+    test = "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python[tests][test_python_shared_gil]",
+)
+
+dist_native_libs(
+    name = "native_libs",
+    python = "//third_party/python:cpython",
+)
+
+# The interpreter, the Python modules and the wheels, compiled to bytecode as
+# a base image ships them (defs.bzl, bytecode).
+bytecode(
+    name = "python_bc",
+    dir = "//third_party/python:cpython",
+)
+
+bytecode(
+    name = "pyrt_bc",
+    dir = ":pyrt",
+)
+
+bytecode(
+    name = "pyworker_bc",
+    srcs = PYWORKER,
+)
+
+bytecode(
+    name = "site_bc",
+    srcs = {
+        "cloudpickle": "//third_party/python:cloudpickle",
+        "numpy": "//third_party/python:numpy",
+    },
+)
+
+bytecode(
+    name = "site_bc_pyarrow",
+    srcs = {
+        "cloudpickle": "//third_party/python:cloudpickle",
+        "numpy": "//third_party/python:numpy",
+        "pyarrow": "//third_party/python:pyarrow",
+    },
+)
+
+# The VALUE UDF the closure cases load (producer/make_closure.py), captured
+# by a python_oracle (two runs must write the same bytes), then laid out as a
+# code layer: good/<sha256>, bad/<sha256>, info.json.
+code_layer(
+    name = "closure",
+    capture = ":closure_capture",
+)
+
+python_oracle(
+    name = "closure_capture",
+    src = "producer/make_closure.py",
+    outs = [
+        "info.json",
+        "payload",
+        "payload_bad",
+    ],
+    deps = [
+        "//third_party/python:cloudpickle",
+        "//third_party/python:numpy",
+    ],
+)
+
+# The bench program and its runs, one per start-up and transport. Their
+# outputs are the numbers:
+#   ./buck2 build komira//src/tests/helpers/komira_udf_spike_python_worker:bench_zygote --show-output
+mojo_binary(
+    name = "bench",
+    srcs = ["bench/bench_main.mojo"],
+    deps = [
+        ":komira_udf_pyworker_drive",
+        ":komira_udf_spike_python_worker",
+        "//src/komira_json:komira_json",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
+        "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python",
+    ],
+)
+
+[udf_bench(
+    name = "bench_" + v,
+    args = [
+        "./pyworker_{}.so".format(v),
+        v,
+    ],
+    binary = ":bench",
+    data = runtime_dir([v], extra = {"closure": ":closure"}),
+    exec_compatible_with = LINUX_X86_64,
+    run_id = "bench/run_id",
+) for v in [
+    "pipe",
+    "spawn",
+    "zygote",
+]]
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
