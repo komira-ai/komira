@@ -1,0 +1,51 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_lowering_rules' payload-narrowing rule against the
+# optimizer rule it replaces. The library holds the fixture set (plans whose
+# scans carry statistics, each also its footer entry), the rendering of a
+# rule's decisions and the reader of golden/payload_narrow.tsv, the expected
+# decision of every fixture.
+#
+#   test_payload_narrow_parity  for every fixture, the host rule, the
+#                               optimizer rule (komira_optimizer, a test_deps
+#                               entry: the oracle) and the golden line agree;
+#                               the golden file names exactly the fixtures and
+#                               holds every width and an empty result; its
+#                               reader refuses a malformed line and a repeated
+#                               case.
+#
+# When the optimizer rule is deleted, the oracle and komira_optimizer leave
+# the test and the golden file is the expectation on its own.
+# Nothing depends on this package.
+mojo_library(
+    name = "komira_lowering_rules_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_lowering_rules:komira_lowering_rules",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+    ],
+    conda = False,
+    test_deps = [
+        "//src/komira_optimizer:komira_optimizer",
+    ],
+    test_srcs = [
+        "tests/test_payload_narrow_parity.mojo",
+    ],
+    test_data = {
+        "tests/test_payload_narrow_parity.mojo": {"golden/payload_narrow.tsv": "golden/payload_narrow.tsv"},
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
