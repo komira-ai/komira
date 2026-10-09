@@ -1,6 +1,6 @@
 # Design: one UDF runtime interface for every language
 
-Status: proposed, not built. Nothing was built or run to write this document. Citations are to komira `origin/main` at `091b0ae450` unless marked **[#1094]**. That mark means the branch `docs/optimized-plan` at `578fef413a` (komira-ai/komira#1094, unmerged; this branch is stacked on it), and covers two files: `docs/design/optimized_plan.md` and `docs/design/optimized_plan_udfs.md`.
+Status: proposed, not built. Nothing was built or run to write this document. Citations are to komira `main` as of 2026-10-09 unless marked **[#1094]**. That mark means the head of branch `docs/optimized-plan` (komira-ai/komira#1094, unmerged; this branch is stacked on it), and covers two files: `docs/design/optimized_plan.md` and `docs/design/optimized_plan_udfs.md`.
 
 Section numbers:
 - `§10.x` refers to `optimized_plan_udfs.md`.
@@ -267,7 +267,7 @@ message RuntimeNeed {            // in DeclaredNeeds (optimized_plan.md §6.1)
 
 - **`needs.runtimes`** lists one entry for each distinct runtime id that `needs.udfs` uses.
   - It is sorted by runtime id.
-  - It has at most one entry per runtime id (`OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`): each base ships one ABI of each runtime it carries (§10.11), so a plan naming two could never be admitted. A release ships several bases, one per supported CPython minor and one per supported Node major, and a remote run uses the base of the client's version.
+  - It has at most one entry per runtime id (`OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`): each base ships one ABI of each runtime it carries (§10.11), so a plan naming two could never be admitted. A release ships several bases, one per supported CPython minor and one per supported Node major, and a remote run uses the base of the client's version. A base carries exactly one managed runtime besides `komira/native`, so a plan that needs two managed runtimes (for example `komira/python` and `komira/node`) has no base and is refused at admission (`OPTIMIZED_ENV_RUNTIME_MISSING`, §10.11 [#1094]).
   - It has no missing and no unused runtime (`OPTIMIZED_UDF_RUNTIME_UNDECLARED`, `OPTIMIZED_NEEDS_RUNTIME_UNUSED`).
   - It is part of the `DigestTrailer` (§7.1).
   - A scheduler can place a plan using this list from the header alone.
@@ -706,7 +706,7 @@ Notes:
 
    §10.6 is the Python and TypeScript instance.
 4. **The code layer and the dependencies.** Code objects go under the image's code prefix, `/komira-code/`, named by hex sha256. That prefix is the `code_root` a runtime receives in `komira_udf_spec`. Dependencies live in the image, never in the plan (§10.11):
-   - each runtime's installed dependencies go in its environment directory, `/opt/env/<runtime>/` (for `komira/python`, a virtual environment at `/opt/env/komira/python/`; earlier revisions named it `/opt/venv/`, which maps to that path and is never shipped);
+   - each runtime's installed dependencies go in its environment directory, `/opt/env/<runtime>/` (for `komira/python`, a virtual environment at `/opt/env/komira/python/`; the older name `/opt/venv/` is retired and no layer uses it);
    - a JavaScript bundle includes its pure-JavaScript dependencies and goes in the code layer under `/komira-code/`;
    - a JavaScript package with a native addon stays outside the bundle; the SDK records its name and exact version, and the image builder installs it for the host's platform into `/opt/env/komira/node/`, where the runtime resolves the bundle's external imports (§10.6).
 5. **A local run through the same runtime and transport** (§10.10's "same path"), so that a capture error or a type error fails on the user's machine first.
@@ -940,7 +940,7 @@ Every prototype and benchmark here runs on the build farm's existing benchmark s
 | One runtime id per native language (`komira/rust`, `komira/mojo`) | Rejected. Native languages share one ABI, so one loader serves all; the language is in the descriptor for diagnostics. A new native language adds an SDK, not a runtime. |
 | Native UDFs in workers by default, until a host shows in-process native code cannot reach privileged credentials (an earlier draft) | Rejected. The supervisor holds no credential that meters usage, only a run-scoped heartbeat token, kept in its own process and user id and never passed to the engine, so in-process native code reaches only the run's own privileges. Native UDFs run in-process by default, and the worker transport is opt-in for crash isolation (§1.2, §7). |
 | A per-group state cap set per host or per plan at the first release | Not chosen. A fixed 64 MiB cap is the same on every host, so a plan that runs on one runs on all; tuning it is komira-ai/komira#1148, with `max_state_bytes` reserved. |
-| One base carrying several CPython minors or Node majors | Rejected. A release ships one base per CPython minor and one per Node major, and a remote run follows the client's version (§3.2). |
+| One base carrying several CPython minors or Node majors, or both a Python and a Node runtime | Rejected. A release ships one base per CPython minor and one per Node major, each with one managed runtime, and a remote run follows the client's version; a plan that needs two managed runtimes is refused with `OPTIMIZED_ENV_RUNTIME_MISSING` (§3.2). |
 | Go as a native language (mode 1), or in mode 2 | Rejected. A Go shared library carries the Go runtime (scheduler, collector, signal handlers, one per process), so it is managed; that runtime runs cgo calls from several threads in parallel with no global lock, so it is mode 3 (§1.2). |
 | One generic worker executable for every runtime | Rejected. Node-API is exported by `node`, and embedding Node is not ABI-stable. Each manifest names its launcher; the protocol library is shared. |
 | No ABI promise at all (internal to the image only) | Rejected. Third-party runtimes would need a rebuild for every base release. The promise costs only a header and a version check. |
