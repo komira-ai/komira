@@ -115,6 +115,9 @@ the doc), as tracked in #779. Slice S1 fixes `releases.md`.
 
 ### Trigger: per merge, coalesced
 
+**Superseded in part:** this trigger, and the placement of the two gates in "The gate between gamma and
+prod", are superseded by [the staged pipeline](staged_pipeline.md) (#1173).
+
 **PROPOSED: keep the trigger as it is.** Every push to `main` is a release, and pushes made during a
 release coalesce into the next one. That *is* the per-batch trigger. The batch is whatever landed while
 the previous release ran, so there is no clock to tune and no second trigger to keep in step with the
