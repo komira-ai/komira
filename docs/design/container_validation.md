@@ -77,7 +77,7 @@ step {
 | field | rule |
 |---|---|
 | `placement` | Optional, `RUNNER` or `CELL`, at most once. Absent is `RUNNER`: V2's docker runner, unchanged. |
-| `image` | As in V1: `<repo>@sha256:<hex>`, a tag refused. Under `CELL` the registry must be one Cloud Run pulls from: Artifact Registry (`<region>-docker.pkg.dev`), Docker Hub (`docker.io`) or GHCR (`ghcr.io`); any other is refused. It must also be pullable anonymously (checked at start, below). |
+| `image` | As in V1: `<repo>@sha256:<hex>`, a tag refused. Under `CELL` the registry must be one Cloud Run pulls from: Artifact Registry (`<region>-docker.pkg.dev`), Docker Hub or GHCR (`ghcr.io`); any other is refused. Docker Hub is the hosts `docker.io` and `index.docker.io`, and a reference with no host (`alpine@sha256:...`), which means `docker.io` (a one-segment name under `library/`), as docker reads it. It must also be pullable anonymously (checked at start, below). |
 | `image_output` | New, `{step, name}`, only under `CELL`. Resolved exactly as a DEPLOY step resolves an `Image{output: StepOutput}` (I4): `step` names a BUILD step of this machine file, `name` an `OCI` artifact that step declares, and the release set holds that member; it runs as `image_registry(ctx)/<name>@<digest>` in this step's cell. |
 | `args`, `target`, `timeout_seconds`, `expect` | As in V1, under both placements. kci appends `--validation-run-id=<id>` and, with `target`, `--target-url=<value>`. |
 
@@ -133,7 +133,8 @@ Code: a `CellJobs` trait in `kci_cloud` (new file `cell_jobs.mojo`), which an ad
 - **Labels**, on the job and on `template.labels` (the execution template, so every execution carries
   them too): `kci-run-id=<id>` (`labels.mojo`'s `validation_run_label_key`), `kci_probe_machine`,
   `kci_probe_cell` and `kci_probe_max_seconds`. The three probe keys are `[a-z_]`, so they fit the
-  standard label rule (`label_problems`), and they are none of the six identity keys. G4's
+  standard label rule (`label_problems`), and they are none of the six identity keys. The machine and
+  cell values go through `labels.mojo`'s value encoding, as every kci label value does. G4's
   `container_job` writes no `template.labels` today, so its executions carry no run id: the same gap,
   for G4 to fix.
 
@@ -265,7 +266,8 @@ Each list is sorted bytewise before comparing, so order on the server never matt
 **The canonical deniable list** is data in `kci_cloud_gcp`, with a version number. It uses permission
 groups (`<service>/*.*`) wherever deny policies accept them, so a new permission inside a service needs
 no change, and names single permissions only for a service that has no group form. Bootstrap writes the
-list of the kci that runs it.
+list of the kci that runs it. **The list is append-only:** an entry is never removed or rewritten, only
+added under a new version, so version N+1 always contains version N (K6c pins it).
 
 **When kci's list moves ahead of a cell.** A cell whose list is a superset of kci's passes; a cell missing
 any entry is INDETERMINATE, and the message names the missing entries and says to rerun bootstrap level 2.
@@ -301,7 +303,8 @@ of a permission no deny can name, is not caught (open question Q-O1).
     execution's completion. A tag-conditioned deny on writes would close this too; versioning needs no
     second policy, so it is the choice.
   - *The audit log.* The create through the URL is recorded in the bucket's data-access audit log (when
-    enabled), attributed to the deploy identity, which signed the URL.
+    enabled), attributed to the deploy identity, which signed the URL. A reader of that log can see the
+    URL, so log readers are among those who can deny a probe (above), never forge one.
 - **The results bucket**, written by bootstrap level 2: uniform bucket-level access, public access
   prevention enforced, soft delete retention 0 (a deleted object is gone, not kept and billed), object
   versioning on, and the one-day lifecycle rule. kci checks the object's size (at most 1 MiB) from its
@@ -322,7 +325,9 @@ of a permission no deny can name, is not caught (open question Q-O1).
 - act as the probe identity, granted on that account only, never project-wide;
 - read the deny policies attached to the project;
 - get, list, create and delete objects in the results bucket only;
-- sign as itself (`signBlob` on its own account), for the URL.
+- sign as itself (`signBlob` on its own account), for the URL;
+- **only if Q-O3 chooses the `testIamPermissions` fallback:** Service Account Token Creator on the probe
+  account only, to call `testIamPermissions` as the probe identity.
 
 Bootstrap level 2 writes these grants, the probe identity, its deny policy and the results bucket. On
 GCP, deny policies exist only for a project inside an organization, and the role that writes them is
@@ -344,9 +349,9 @@ Each row names the planted defect that must turn its test red.
 |---|---|---|---|---|
 | **K6a** the runner port | `kci_validate`: a `ProbeRunner` trait, V2's docker code as `DockerProbeRunner`, one shared `judge_probe` | V2 | V2's argv golden and verdict tests unchanged, byte for byte; the verdict table above driven through a scripted `ProbeRunner` | absent results with exit 0 judged a pass; the timeout check dropped from `judge_probe` |
 | **K6b** grammar | `kci_release_machine`: `parse.mojo` (`_parse_validation`: `placement`, `image_output`), `graph.mojo` (`StageValidation` gains both fields), `probe.mojo` (the refusals); `kci_api/verbs.mojo` (`PROBE_PLACEMENT_RUNNER`, `PROBE_PLACEMENT_CELL`) | V1 | Every V1 file parses unchanged with placement `RUNNER`; a red case for each refusal under "The grammar"; `uses` and `grant` in a validation are refused as unknown fields | `image_output` accepted under `RUNNER`; both `image` and `image_output` accepted; an unknown `placement` read as `RUNNER`; a `quay.io` image accepted under `CELL` |
-| **K6c** port, fake and bootstrap | `kci_cloud` (`cell_jobs.mojo`, bootstrap items at level 2, the canonical-rules comparison), `kci_cell` (accepts level 2), `kci_cloud_fake` (`FakeCellJobs`), `kci_validate` (`CellProbeRunner`) | K6a | On the fake: a pass, with zero jobs and zero objects left, and the job, its execution and the object each carrying `kci-run-id`. The deny: removed, a second principal, an exception, a condition, or a list missing one canonical entry are each INDETERMINATE with zero creates; the same policy with rules reordered, the server fields changed, or one extra entry passes. An allow binding on the probe identity is INDETERMINATE. With the deny present, a scripted probe that reads a bucket granted to its identity is refused by the fake. A probe writing a failing row and exiting 0 is VALIDATION_FAILED. A forger creating the object first gives VALIDATION_FAILED. An overwrite after the probe (a second generation) is VALIDATION_FAILED. An upload over 1 MiB is refused by the fake bucket. No start before the deadline is INDETERMINATE, with a cancel and a delete recorded. A failed delete is INDETERMINATE. The sweep removes an old terminal job, and keeps a young one, a running one and another cell's | the pre-flight skipped; the job created with no account (it runs as the fake's default identity, and the identity case goes red); the delete after the verdict dropped; the create-only header dropped (the forger case passes); the generation count not checked (the overwrite case passes); the rules compared in server order (the reordered case is refused); the subset rule inverted (the extra-entry case is refused); `template.labels` not written (the execution carries no run id); the sweep matching by name prefix (another cell's job removed) |
+| **K6c** port, fake and bootstrap | `kci_cloud` (`cell_jobs.mojo`, bootstrap items at level 2, the canonical-rules comparison), `kci_cell` (accepts level 2), `kci_cloud_fake` (`FakeCellJobs`), `kci_validate` (`CellProbeRunner`) | K6a | On the fake: a pass, with zero jobs and zero objects left, and the job, its execution and the object each carrying `kci-run-id`. The deny: removed, a second principal, an exception, a condition, or a list missing one canonical entry are each INDETERMINATE with zero creates; the same policy with rules reordered, the server fields changed, or one extra entry passes. An allow binding on the probe identity is INDETERMINATE. With the deny present, a scripted probe that reads a bucket granted to its identity is refused by the fake. A probe writing a failing row and exiting 0 is VALIDATION_FAILED. A forger creating the object first gives VALIDATION_FAILED. An overwrite after the probe (a second generation) is VALIDATION_FAILED. An upload over 1 MiB is refused by the fake bucket. No start before the deadline is INDETERMINATE, with a cancel and a delete recorded. A failed delete is INDETERMINATE. The sweep removes an old terminal job, and keeps a young one, a running one and another cell's. Every version of the canonical deniable list contains the version before it | the pre-flight skipped; an entry removed from the newest list version (the append-only test goes red); the job created with no account (it runs as the fake's default identity, and the identity case goes red); the delete after the verdict dropped; the create-only header dropped (the forger case passes); the generation count not checked (the overwrite case passes); the rules compared in server order (the reordered case is refused); the subset rule inverted (the extra-entry case is refused); `template.labels` not written (the execution carries no run id); the sweep matching by name prefix (another cell's job removed) |
 | **K6d** supervisor probe mode | `komira_job_supervisor` (a mode with no heartbeat; `--results-file`, `--results-url`, `--results-header`) | #1050 (the supervisor as PID 1) | Over a scripted connector: one PUT after the child exits, with every given header; zero bytes when the file is absent; the results directory made before the child starts; the child's exit kept when the PUT succeeds; a non-zero exit when the PUT fails, even after a child exit 0; `--max-runtime-secs` stops the child | the PUT before the child exits; the child's exit returned after a failed PUT |
-| **K6e** GCP | `kci_cloud_gcp` (`cell_jobs.mojo`, the job written by G4's `job_json` with `template.labels`; the canonical deniable list); `komira_gcp_run` (Executions `Get` and `Cancel`, Jobs `Run`, all generated today); a new generated IAM v2 client package for deny policies (`Policies.GetPolicy`, `ListPolicies`): `komira_gcp_iam` is the IAM v1 admin API and holds none; IAM Credentials `signBlob` in `komira_gcp_wif` beside its `signJwt` (`sign_jwt.mojo`), since IAM Credentials has no generated client and its callers own their calls (`komira_gcp_iam/BUCK`); `komira_gcp_core` (V4 signing over a sign function, not only a key); the G4 emulator | G4, K6c | K6c's cases rerun on the GCP emulator, with the same assertions; a golden of the job JSON (account, no retries, one task, timeout, both label sets, `args` and no `command`); the signed URL against a published V4 vector, with `signBlob` scripted | the account dropped from the job JSON (the emulator runs it as the default account, and the identity case goes red); retries left at the platform default (a failing probe runs twice, and the execution count goes red); the content-length range left unsigned (the over-size case is accepted) |
+| **K6e** GCP | `kci_cloud_gcp` (`cell_jobs.mojo`, the job written by G4's `job_json` with `template.labels`; the canonical deniable list); `komira_gcp_run` (Executions `Get` and `Cancel`, Jobs `Run`, all generated today); a new generated IAM v2 client package, `src/komira_gcp_iam_v2`, for deny policies (`Policies.GetPolicy`, `ListPolicies`): `komira_gcp_iam` is the IAM v1 admin API and holds none; IAM Credentials `signBlob` in `komira_gcp_wif` beside its `signJwt` (`sign_jwt.mojo`), since IAM Credentials has no generated client and its callers own their calls (`komira_gcp_iam/BUCK`); `komira_gcp_core` (V4 signing over a sign function, not only a key); the G4 emulator | G4, K6c | K6c's cases rerun on the GCP emulator, with the same assertions; a golden of the job JSON (account, no retries, one task, timeout, both label sets, `args` and no `command`); the signed URL against a published V4 vector, with `signBlob` scripted | the account dropped from the job JSON (the emulator runs it as the default account, and the identity case goes red); retries left at the platform default (a failing probe runs twice, and the execution count goes red); the content-length range left unsigned (the over-size case is accepted) |
 | **K6f** wiring | `kci_cli` (start checks; the image config read from the local layout for `image_output`; the `OCI` declaration check; the run after the DEPLOY step), `kci_api/result_rows.mojo` (`placement` on a validation row), `kci_workflow_check` (the R9 rule widened), `docs/ci.md` | K6b, K6c, K6d, V3, D6, I4 | End to end on `FakeCloud` and `FakeCellJobs`, with the cell's fake registry **empty at start**: an `image_output` probe passes its start checks from the local layout, the stage's PUBLISH fills the registry, and the job runs the cell's digest. A failing `CELL` probe empties `set_hash`, exit 7; a pass keeps it; `--plan` makes zero calls. A cell at level 1, a failing identity pre-flight, an image fetch that fails, a config that breaks the supervisor contract, and an `image_output` naming an undeclared artifact each stop the run before the DEPLOY step makes a call. A part job naming a `CELL` probe without a `target` is refused naming R9. The `placement` key round-trips | the `image_output` start check reading the cell registry (the empty-registry case is refused at start); the start checks run after the DEPLOY step (the fake records deploy calls); the R9 arm only for `target`; the row written SUCCEEDED whatever the verdict |
 
 Merge order: K6a, and K6d after #1050, first; then K6b, K6c, K6e, K6f. Before K6e is called done, these
@@ -357,7 +362,8 @@ are shown on a real project and recorded in its PR body, with the operator's go 
 3. The task timeout ends a running task.
 4. Whether reading a deny policy needs `denyReviewer` granted at the organization. If it does, the
    alternative is `testIamPermissions` called as the probe identity through impersonation, which proves
-   the effect rather than reading the policy (Q-O3).
+   the effect rather than reading the policy (Q-O3). It proves the effect only for the resources and
+   permissions it names, never for the rest.
 5. The deny policy's size limits, against the canonical list's length.
 6. That a signed `PUT` honours `x-goog-if-generation-match`, `x-goog-content-length-range` and
    `x-goog-meta-*`.
@@ -365,7 +371,7 @@ are shown on a real project and recorded in its PR body, with the operator's go 
 
 ## Decided
 
-Taken as recommended.
+Decided by the lead.
 
 | # | question | decision |
 |---|---|---|
@@ -386,4 +392,4 @@ Taken as recommended.
 |---|---|---|
 | Q-O1 | Permissions no deny policy can name: accept the residual? | Accept and document it, with the allow-policy check of the pre-flight. Revisit per cloud as the deniable set grows. |
 | Q-O2 | Require `komira_job_supervisor` as the entrypoint of a `CELL` image? | Yes. The image keeps V1's file contract and needs no cloud code; the supervisor is the one uploader, and a test pins its exit on a failed upload. The check is a contract check, not a security boundary. |
-| Q-O3 | A `CELL` probe needs the cell's project to sit in an organization (deny policies exist only there), and reading the deny may need an organization-level grant for each cell's deploy identity. Accept both? And the private-endpoint phase (Direct VPC egress from a cell setting): when? | Accept the organization requirement: without a deny there is no deny-all identity, and a probe without one would hold whatever the project grants by default. Prefer `testIamPermissions` through impersonation if the read needs an organization grant, so a deploy identity holds nothing at the organization. Schedule private endpoints after K6f, with G4's `vpcAccess`. |
+| Q-O3 | A `CELL` probe needs the cell's project to sit in an organization (deny policies exist only there), and reading the deny may need an organization-level grant for each cell's deploy identity. Accept both? And the private-endpoint phase (Direct VPC egress from a cell setting): when? | Accept the organization requirement: without a deny there is no deny-all identity, and a probe without one would hold whatever the project grants by default. Prefer `testIamPermissions` through impersonation if the read needs an organization grant, so a deploy identity holds nothing at the organization; it then holds Token Creator on the probe account only, and the check proves the effect only for the resources and permissions it names. Schedule private endpoints after K6f, with G4's `vpcAccess`. |
