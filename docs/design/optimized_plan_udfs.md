@@ -32,21 +32,43 @@ functions*).
 Further languages are added as runtimes and SDK producers (`udf_runtime_interface.md` §6) with no change to this
 format.
 
-**Two classes of UDF, one plan reference.** The plan system supports two classes of UDF
-([`udf_runtime_interface.md`](udf_runtime_interface.md) §1.2):
+**Three modes of UDF, one plan reference.** The plan system supports three modes of UDF. They differ in how a
+runtime runs user code on several engine threads at once; in every mode, no lock is shared across engine threads, so
+no engine thread ever waits on another engine thread's UDF call.
 
-- **Native UDFs**, in languages that compile to native code and speak the C ABI directly (Mojo, Rust, C, C++, Zig). A
-  native UDF is a shared library compiled for the host platform, loaded and called through the UDF runtime C ABI over
-  Arrow C Data, with no interpreter.
-- **Managed UDFs**, in languages that need a runtime or a virtual machine: Python and TypeScript on Node at first,
-  and later JVM languages, .NET, Go and WASM. The runtime is embedded in the engine or runs as worker processes, as
-  each runtime's threading declaration says, typically one interpreter or isolate per engine thread.
+1. **Native.** Languages that compile to native code and speak the C ABI directly: Mojo, Rust, C, C++, Zig. A native
+   UDF is a shared library compiled for the host platform, loaded and called through the UDF runtime C ABI over Arrow
+   C Data, with no interpreter. It runs in-process or, for isolation, behind the worker transport (§10.10); which
+   transport is the default for native code is an open question.
+2. **Managed, one interpreter per engine thread.** Runtimes with a global interpreter lock or a single-threaded virtual
+   machine: Python on builds with a GIL, and TypeScript on Node. Each engine thread that runs a UDF operator gets its
+   own interpreter or isolate: for Python, one worker process per engine thread, or a subinterpreter where the UDF's
+   packages allow it; for Node, one `worker_threads` isolate per engine thread. One interpreter is never shared by
+   several engine threads, so a GIL serializes only the thread that owns it.
+3. **Managed, one shared parallel virtual machine.** Runtimes that run truly in parallel inside one virtual machine:
+   the JVM, .NET and free-threaded Python, and later other runtimes that qualify. One virtual machine runs per process;
+   each engine thread attaches to it as its own virtual-machine thread and holds its own per-thread UDF state. The
+   virtual machine has no global lock. A runtime may declare this mode only if it has none: a declaration of this mode
+   by a Python build with a GIL is refused.
 
-Both classes are the same `UdfRef` (§10.3): an open runtime id, explicit Arrow types and a kind. Both run through the
-same runtime contract: the C ABI, called in-process or served by a worker process. The logical, optimized and physical
-plans carry them identically, and nothing in this format tells the two classes apart. Crash isolation and privilege
-separation come from the worker transport (§10.10). Workers are the recommended default for native code until a host
-can show that in-process native code cannot reach privileged credentials.
+Go is managed: a Go UDF library is built as a shared library, but it carries the Go runtime, with its garbage
+collector and scheduler. It belongs to mode 3. A process holds one Go runtime (Go does not support two runtimes in one
+process), every cgo call from an engine thread runs on its own operating-system thread inside that runtime, and the
+runtime schedules those threads in parallel with no global lock. Each engine thread keeps its own per-thread UDF state.
+
+The mode is a capability of the runtime, not a property of the plan. In the threading declaration of
+[`udf_runtime_interface.md`](udf_runtime_interface.md) (§4.2), modes 1 and 2 are `CONTEXT_PER_THREAD`: one context per
+engine thread, each called by one thread at a time (a Python build with a GIL that can hold only one interpreter per
+process declares `SINGLE_THREAD` and reaches mode 2 through one worker process per engine thread). Mode 3 is
+`THREAD_SAFE`: one virtual machine shared by the engine threads, each with its own per-thread UDF state.
+**`THREAD_SAFE` requires a runtime with no global lock**; the host refuses a `THREAD_SAFE` declaration from a runtime
+that has one.
+
+All three modes are the same `UdfRef` (§10.3): an open runtime id, explicit Arrow types and a kind. All three run
+through the same runtime contract and the same transports: the C ABI, called in-process or served by a worker process.
+The logical, optimized and physical plans carry them identically, and nothing in this format tells the modes apart.
+Crash isolation and privilege separation come from the worker transport (§10.10). Workers are the recommended default
+for native code until a host can show that in-process native code cannot reach privileged credentials.
 
 **Every return type is explicit in the plan.** The optimizer decides predicate placement, typed kernels and every
 node's output schema when the plan is built, so a type learned while the plan runs would leave those decisions open.
