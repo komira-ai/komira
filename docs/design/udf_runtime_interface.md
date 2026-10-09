@@ -138,6 +138,7 @@ message UdfRef {
   UdfNullMode  null_mode   = 11;  // MANUAL | PROPAGATE
   UdfResources resources   = 12;  // §10.8, unchanged
   repeated bytes data_blobs = 6;  // sha256 of each captured value stored apart from the code (§10.6)
+  bool         preserves_event_time = 18;  // MAP_BATCHES_FRAME only: event time passes through (§10.3)
   reserved 1, 3, 4, 5, 7, 13, 14;  // drafts' runtime enum, per-language code arms, batch_format
   reserved "runtime", "installed", "source", "value", "batch_format", "js_module", "js_value";
   reserved 9; reserved "resolution";
@@ -191,6 +192,7 @@ enum CodeForm {
 |---|---|---|---|
 | `kind`, `arg_types`, `return_type`, `state_type` | yes | yes (arms, schemas) | yes (bound at `load`) |
 | `stability`, `null_mode`, `resources` | yes | yes | `stability`, `null_mode` as facts; the host applies `PROPAGATE` |
+| `preserves_event_time` | yes (the watermark rules of `plan_models.md` §3.2) | false unless `MAP_BATCHES_FRAME` (`optimized_plan_udfs.md` §10.3 [#1094]) | — (not in `komira_udf_spec`) |
 | `code.runtime` | **never** | grammar; declared in `needs.runtimes` (§3.2) | — |
 | `code.form`, `code.code` | never | form set; every digest 32 bytes; `entry` non-empty for `PACKAGE` | yes |
 | `code.entry`, `descriptor_version`, `descriptor` | never | never (opaque) | yes, through `validate` (§4.3) |

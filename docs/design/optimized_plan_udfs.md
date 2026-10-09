@@ -211,6 +211,7 @@ message UdfRef {
   UdfNullMode  null_mode    = 11;  // MANUAL | PROPAGATE (§10.7)
   UdfResources resources    = 12;  // §10.8
   WireField    state_type   = 15;  // AGGREGATE only: set iff the mergeable form (§10.2); explicit Arrow type
+  bool         preserves_event_time = 18;  // MAP_BATCHES_FRAME only: event time passes through (below)
   reserved 1, 3, 4, 5, 7, 13, 14;  // an earlier draft's runtime enum, per-language code arms and batch_format
   reserved "runtime", "installed", "source", "value", "batch_format", "js_module", "js_value";
 }
@@ -266,6 +267,15 @@ draft's fields are reserved by the rule for fields removed before any release (�
 under §9.2 it is added, never renumbered, and ships with the other UDF arms (§10.12, *Format version*). The read set
 needs no field number of its own: it is the bound argument schema, which `arg_types` (field 17, itself never released)
 already carries. A separate `read_set` field would state that schema twice (§10.13).
+
+**`preserves_event_time`: a frame UDF that keeps event time.** In a streaming plan a node's event-time column and
+watermark are derived by fixed rules ([`plan_models.md`](plan_models.md) §3.2). `SCALAR`, `ROW` and
+`MAP_BATCHES_COLUMN` keep their input rows, so event time passes through them unchanged. A `MAP_BATCHES_FRAME` UDF
+may emit any rows, so its output carries no event time unless its `UdfRef` sets `preserves_event_time`: the UDF
+declares that it keeps the event-time column and that the input's watermark holds for its output. The output watermark
+is then the input's wherever the column is kept. On every other kind the field is false, so the canonical form (§7.1)
+has one encoding. It is inside the identity bytes, like every field here. Number 18 is the next free one and was never
+released; the field is added under the `format_version` that adds the streaming forms (§5.2, §9.2).
 
 **The runtime is a string the format never enumerates.** `code.runtime` is an open, namespaced string
 (`udf_runtime_interface.md` §3.1); the format never enumerates runtimes. Plan validation checks its grammar
