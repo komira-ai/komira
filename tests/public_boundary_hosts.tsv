@@ -51,6 +51,10 @@ sourceforge.net	an upstream project's home
 xxhash.com	the xxHash specification
 lemire.me	a cited paper's author page
 semanticscholar.org	a cited paper
+arxiv.org	papers cited by design docs (data_graph_storage.md)
+cidrdb.org	the CIDR paper on Kuzu's storage (data_graph_storage.md)
+neo4j.com	Neo4j's store-format documentation (data_graph_storage.md)
+puppygraph.com	PuppyGraph's documentation (data_graph_storage.md)
 isthe.com	the FNV hash specification
 dotslash-cli.com	the DotSlash launcher's documentation
 kernel.org	git release archives (third_party/git)

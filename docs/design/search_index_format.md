@@ -11,10 +11,10 @@ format. Each decision gives the options, a recommendation, and the proof its cha
 A graph over data is planned for komira: a labelled property graph of nodes, edges and episodes,
 queried by typed primitives (`search`, `knn`, `neighbors`, `k_hop`, `as_of`, and rank fusion of
 their results). This document says what the split format and its catalog must hold if that graph is
-kept as `komira_search` splits, measured against the code as it is. Whether it is kept that way, as
-tables with a snapshot manifest, or as tables with a derived search index, is decided in
-[data_graph_storage.md](data_graph_storage.md), which also says which of the decisions below the
-graph depends on under each choice. The correctness fixes below (the summary version check, the L0
+kept as `komira_search` splits, measured against the code as it is. Whether it is kept that way is
+decided in [data_graph_storage.md](data_graph_storage.md), which recommends Iceberg tables with a
+delta tail and derived indexes instead, and says which of the decisions below the graph then
+depends on. The correctness fixes below (the summary version check, the L0
 refusal, the unchecked query field) are needed whatever is chosen.
 
 What the graph stores, per document kind:
@@ -460,7 +460,7 @@ question 13.
     version 2 (recommended), or bring its reader into komira first?
 12. The erasure deadline: what bound must the merge policy meet when it selects a split that a live
     delete set resolves to? Recommend a per-index setting, checked by the compactor's tests.
-13. Does a graph over data depend on decisions 1 to 4? Recommend not: keep the graph as tables with a
-    snapshot manifest and use search splits as a derived text index
+13. Does a graph over data depend on decisions 1 to 4? Recommend not: keep the graph as Iceberg
+    tables with a delta tail and use search splits as a derived text index
     ([data_graph_storage.md](data_graph_storage.md)); then only the correctness fixes and the version
     1 golden go ahead now, and decisions 1 to 4 wait for a search index that needs them.
