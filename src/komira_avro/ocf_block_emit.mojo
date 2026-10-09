@@ -95,10 +95,10 @@ def generate_sync_marker() raises -> Array[UInt8, OCF_SYNC_LEN]:
             marker.unsafe_ptr(), Int64(OCF_SYNC_LEN), UInt32(0)
         )
         if Int(got) != OCF_SYNC_LEN:
-            raise Error(
-                String("AvroWriteError.ENTROPY_FAILED: getrandom returned ")
-                + String(Int(got))
-                + " (expected " + String(OCF_SYNC_LEN) + ")"
+            raise Error(  # cov: unreachable getrandom does not return short for 16 bytes
+                String("AvroWriteError.ENTROPY_FAILED: getrandom returned ")  # cov: unreachable getrandom does not return short for 16 bytes
+                + String(Int(got))  # cov: unreachable getrandom does not return short for 16 bytes
+                + " (expected " + String(OCF_SYNC_LEN) + ")"  # cov: unreachable getrandom does not return short for 16 bytes
             )
     return marker^
 
@@ -374,7 +374,7 @@ def compress_blocks_parallel[
         if slot:
             out_blocks.append(slot.take())
         else:
-            out_blocks.append(List[UInt8]())
+            out_blocks.append(List[UInt8]())  # cov: unreachable parallel_fork_join fills every slot or raises
         i = i + 1
     _ = fj_out^
     return out_blocks^
