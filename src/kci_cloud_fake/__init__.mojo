@@ -24,7 +24,10 @@ the ownership labels (every object born stamped by the standard label
 rule, read back exactly, listed per cell; every object carries the
 `kci-retention` mark, and an object created in a scope with a validation run
 id also carries `kci-run-id=<id>`, an adopted one never), and pass the
-`kci_cloud` conformance kit. The faulty variant is built from constructor arguments:
+`kci_cloud` conformance kit. Each shape carries its metadata limits as a value
+(`MetadataLimits`: how many labels an object carries, how each type's
+primary object may be named), and a named primary object's outputs follow
+its name. The faulty variant is built from constructor arguments:
 `fail_at_call = k` (the k-th mutating call is refused once), `read_lag = n`
 (reads lag every create and delete by n reads) and `foreign = [names]`
 (objects made outside kci before it ran); the kit's race hook makes the next
@@ -86,6 +89,7 @@ from kci_cloud_fake.network import (
     network_limits,
 )
 from kci_cloud_fake.registry import fake_registry_address, lower_registry
+from kci_cloud_fake.metadata import MetadataLimits, NameRule, fake_physical_name, metadata_limits
 from kci_cloud_fake.dns import (
     dns_limits,
     fake_certificate_name,

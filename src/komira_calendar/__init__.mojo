@@ -13,13 +13,17 @@ attendees.
   local_time.mojo  the local date and local date-time text forms; the shape
                    of an IANA time zone name
   recurrence.mojo  check_recurrence
+  expand.mojo      expand (the occurrences in a window) and series_span (from
+                   the first start to the last end), in local time
+  series.mojo      the rule's periods and the days each picks
   validate.mojo    check_calendar, check_event, check_override
   refusal.mojo     Refusal, RefusalCode, error_response (the API error body)
   limits.mojo      the bounds the checks enforce
 
-Not here: whether a named zone exists, recurrence expansion, storage and HTTP.
+Not here: whether a named zone exists, local time to UTC, storage and HTTP.
 """
 
+from .expand import MAX_WINDOW_OCCURRENCES, OPEN_END, Occurrence, SeriesSpan, expand, series_span
 from .limits import (
     MAX_COUNT,
     MAX_DESCRIPTION_BYTES,

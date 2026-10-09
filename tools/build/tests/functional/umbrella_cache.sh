@@ -169,7 +169,9 @@ RUN_CHECKS=("komira//tools/build/examples:hello[run_check]" "komira//tools/build
 # coverage runs with no gate for a library not in the ledger
 # COVERAGE_NO_GATE, and a gate reading branch records for a library not in
 # COVERAGE_BRANCH_GATE (`coverage_branch_gate`, which a BUCK file passing it
-# to mojo_library is refused for too).
+# to mojo_library is refused for too). A library the rule is given
+# `coverage_tests` (its gate is then `<name>_cov_gate`) passes the rule's
+# checks, and a conda package of it that waits for no such gate is refused.
 CR="$W/umbrella/covrefuse"
 mkdir -p "$CR/macro/lib" "$CR/macro_branch/lib" "$CR/rule/lib"
 printf 'def one() -> Int:\n    return 1\n' > "$CR/macro/lib/__init__.mojo"
@@ -204,6 +206,7 @@ load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
 load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_MODE")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library_rule")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
 
 _GATE = "komira//tools/build/coverage:cov_gate"
 
@@ -234,6 +237,21 @@ cov_branch_dir(
         "runs": {},
     }.items()
 ]
+
+mojo_library_rule(
+    name = "named",
+    srcs = ["lib/__init__.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_run = "komira//tools/build/coverage/kcov:cov_run",
+    coverage_tests = [":no_such_test"],
+    import_name = "lib",
+)
+
+conda_package(
+    name = "named_conda",
+    lib = ":named",
+    summary = "a conda package waiting for no coverage gate",
+)
 BUCKEOF
 # Each expected text is the formatted message (it names the target), not the
 # fail() line of the .bzl file that buck2 also prints. The mode fixture asks
@@ -247,7 +265,8 @@ for c in "macro|uquery|app//covrefuse/macro:lib|fail: lib: \`coverage_debug\`, \
     "macro_branch|uquery|app//covrefuse/macro_branch:lib|fail: lib: \`coverage_branch_gate\` is set by mojo_library from COVERAGE_BRANCH_GATE" \
     "branch|audit providers|app//covrefuse/rule:branch|app//covrefuse/rule:branch: coverage_branch is app//covrefuse/rule:mybranch, not komira//tools/build/coverage/branch:cov_branch" \
     "branch_gate|audit providers|app//covrefuse/rule:branch_gate|app//covrefuse/rule:branch_gate: coverage_branch_gate is True, but the library is not in COVERAGE_BRANCH_GATE" \
-    "runs|audit providers|app//covrefuse/rule:runs|app//covrefuse/rule:runs: coverage builds with no coverage_gate: its conda package would wait for no coverage gate"; do
+    "runs|audit providers|app//covrefuse/rule:runs|app//covrefuse/rule:runs: coverage builds with no coverage_gate: its conda package would wait for no coverage gate" \
+    "named|audit providers|app//covrefuse/rule:named_conda|app//covrefuse/rule:named_conda: the coverage gate of app//covrefuse/rule:named is its target"; do
     IFS='|' read -r n cmd t want <<< "$c"
     # shellcheck disable=SC2086 # `audit providers` is two words
     if (cd "$W/umbrella" && "$BUCK2" $cmd "$t") > "$W/umbrella.covrefuse_$n.log" 2>&1; then
@@ -257,7 +276,7 @@ for c in "macro|uquery|app//covrefuse/macro:lib|fail: lib: \`coverage_debug\`, \
         die "umbrella: $t was refused without '$want' (see $W/umbrella.covrefuse_$n.log)"
 done
 (cd "$W/umbrella" && "$BUCK2" kill > /dev/null 2>&1)
-echo "      coverage attributes: refused in the consumer's cell, passed to mojo_library (any of them, coverage_branch_gate alone included) or to the rule (another mode, another gate, another branch coverage directory, branch records read off COVERAGE_BRANCH_GATE, runs without a gate)"
+echo "      coverage attributes: refused in the consumer's cell, passed to mojo_library (any of them, coverage_branch_gate alone included) or to the rule (another mode, another gate, another branch coverage directory, branch records read off COVERAGE_BRANCH_GATE, runs without a gate, a conda package of a library naming coverage_tests that waits for no gate)"
 
 # Analysis only. The toolchains cell of every checkout declares the expected
 # targets; a planted override in a consumer's toolchains cell reaches hello's

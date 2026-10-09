@@ -13,9 +13,16 @@
 #      the one the failing tid raised.
 #   5. Two raising bodies: the LOWEST tid's error is rethrown with the failure
 #      count appended.
+#   6. A failed thread start (Linux): with the process-wide default thread
+#      stack size set larger than the address space, `pthread_create` fails
+#      on the first thread; `fork_join` raises "pthread_create failed (rc=..),
+#      started 0 of n" with a non-zero rc, runs no body, and once the default
+#      is restored the next `fork_join` runs normally.
 # =============================================================================
 
+from std.ffi import external_call
 from std.memory import Pointer
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, assert_false
 from std.time import sleep
 
@@ -159,6 +166,79 @@ def test_two_raising_bodies_lowest_tid_wins() raises:
     print("  test_two_raising_bodies_lowest_tid_wins PASS")
 
 
+# A `pthread_attr_t` is 56 bytes on x86-64 glibc and 64 on aarch64; the
+# buffer is the larger, so either layout fits.
+comptime _ATTR_BYTES = 64
+# 1 PiB: past any 47- or 48-bit user address space, so the stack mmap fails.
+comptime _HUGE_STACK = 1 << 50
+
+
+def _attr_call(name: StaticString, mut attr: List[UInt8]) -> Int32:
+    # FFI-BOUNDARY: pthread attribute calls take a `pthread_attr_t *`; the
+    # buffer is owned by the caller and outlives the call.
+    if name == "init":
+        return external_call["pthread_attr_init", Int32](attr.unsafe_ptr())
+    if name == "destroy":
+        return external_call["pthread_attr_destroy", Int32](attr.unsafe_ptr())
+    if name == "get_default":
+        return external_call["pthread_getattr_default_np", Int32](
+            attr.unsafe_ptr()
+        )
+    return external_call["pthread_setattr_default_np", Int32](
+        attr.unsafe_ptr()
+    )
+
+
+def test_failed_thread_start_joins_and_raises() raises:
+    comptime if not CompilationTarget.is_linux():
+        # pthread_setattr_default_np is a glibc extension; without it there is
+        # no in-process way to make pthread_create fail on demand.
+        print("  test_failed_thread_start_joins_and_raises SKIP (not Linux)")
+        return
+    var saved = List[UInt8](length=_ATTR_BYTES, fill=UInt8(0))
+    var huge = List[UInt8](length=_ATTR_BYTES, fill=UInt8(0))
+    assert_equal(_attr_call("get_default", saved), Int32(0), "save default")
+    assert_equal(_attr_call("init", huge), Int32(0), "attr init")
+    assert_equal(
+        external_call["pthread_attr_setstacksize", Int32](
+            huge.unsafe_ptr(), _HUGE_STACK
+        ),
+        Int32(0),
+        "huge stack size accepted",
+    )
+    assert_equal(_attr_call("set_default", huge), Int32(0), "set huge default")
+
+    var n = 3
+    var cells = _Cells(n)
+    var body = _Body(Pointer(to=cells))
+    var message = String()
+    try:
+        fork_join(body, n)
+    except e:
+        message = String(e)
+    # Restore before asserting, so a failed assertion cannot leak the huge
+    # default into later tests.
+    var restored = _attr_call("set_default", saved)
+    _ = _attr_call("destroy", huge)
+    _ = _attr_call("destroy", saved)
+    assert_equal(restored, Int32(0), "default restored")
+
+    assert_true(message != "", "a failed thread start raises")
+    assert_true(
+        "fork_join: pthread_create failed (rc=" in message, "names the cause"
+    )
+    assert_false("(rc=0)" in message, "reports the non-zero return code")
+    assert_true(message.endswith("), started 0 of 3"), "started 0 of 3")
+    for t in range(n):
+        assert_equal(cells.runs[t].load(), Int64(0), "no body ran")
+
+    # The default is back: the same call now runs every tid once.
+    fork_join(body, n)
+    for t in range(n):
+        assert_equal(cells.runs[t].load(), Int64(1), "runs after restore")
+    print("  test_failed_thread_start_joins_and_raises PASS")
+
+
 def main() raises:
     print("test_fork_join")
     print("===============")
@@ -167,5 +247,6 @@ def main() raises:
     test_one_raising_body_joins_all_then_raises()
     test_single_failure_has_no_count_suffix()
     test_two_raising_bodies_lowest_tid_wins()
+    test_failed_thread_start_joins_and_raises()
     print()
     print("ALL TESTS PASS")
