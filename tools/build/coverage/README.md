@@ -37,11 +37,12 @@ counts too, uncovered (see "Files no test compiled"), so a file nobody
 tests cannot leave a package reading 100%.
 
 What is still missing: inside a file some test compiled, a function no test
-reaches may emit no lines at all (a generic that is never instantiated is
-never compiled), so it is absent from the report rather than uncovered.
-These numbers are upper bounds until declaration reachability lands; it
-will also replace the executable-line heuristic below with what the
-compiler emits.
+reaches emits no lines at all (Mojo compiles a function only when something
+the test reaches calls it, a generic once per instantiation), so it is
+absent from the report rather than uncovered. covcheck lists the functions
+none of whose lines has a record (see "Functions with no recorded line"),
+which holds those and some a test does call, and counts none of them yet,
+so these numbers are upper bounds.
 
 ## Command line
 
@@ -237,7 +238,8 @@ executable line is exempted) raises no `UnmeasuredFile` and is not in
 `unmeasured_files`; its markers are listed like any other.
 
 The executable lines are a heuristic over a lexed source
-(`covcheck/lexer.mojo`); declaration reachability will refine it. A line
+(`covcheck/lexer.mojo`): no test binary holds any code of such a file,
+so nothing the compiler wrote can say which lines would have code. A line
 is executable unless it is:
 
 - blank (spaces, tabs, form feeds);
@@ -256,6 +258,63 @@ the end of a line (CRLF) are not part of the line.
 
 Everything else counts, declarations included (`def`, `struct`,
 `comptime`, a decorator, a lone `)`).
+
+## Functions with no recorded line
+
+Report only: these lists change no number and raise no finding.
+
+A report holds the lines the compiler emitted code for in a test binary:
+kcov lists exactly the DWARF line rows of the measured sources. A function
+no test reaches has no row, so in a file some test compiled it is not
+uncovered but absent. For each kept file with a line record, covcheck reads
+the functions the source declares (`covcheck/decls.mojo`) and lists every
+function none of whose lines has a record in any report: package, path,
+`def` line, name, `class`, and `lines`, its executable lines (the heuristic
+above) that carry no exemption marker with a reason. A function whose every
+line is so marked is not listed. A file with branch records and no line
+record lists none.
+
+No record is not the same as no test calling it. Each function has a class,
+and the result JSON splits them:
+
+| class | when | JSON | trust |
+|---|---|---|---|
+| `plain` | neither below | `unrecorded_functions` | evidence no test reaches it; the class a census counts |
+| `always_inline` | a decorator line right above it starts with `@always_inline` | `unrecorded_functions_unreliable` | none: the body is inlined into its callers and what is left may be attributed to the caller's lines or folded away |
+| `comptime_if` | its body (a nested function's lines included) holds a `comptime if` or `@parameter` line, wherever: one such line moves the whole function, and a closure holding one moves the function around it | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
+
+Known false positives, all seen on real reports: an `@always_inline` body
+whose code the compiler attributed to the caller (a test calls it, its
+caller's lines are hit, its own `return` line has no record); a
+comptime-branched constant folded at the call site; a body that is
+entirely a dropped `comptime if` arm (an instrument compiled in only with a
+build flag); and, in the `plain` class too, a function only another
+operating system compiles (a macOS-only kqueue backend's functions read as
+unrecorded on linux) and a function reached only through such a dropped
+arm (its only caller is never compiled here). So the `plain` list of a
+library with platform-gated code is not yet a list of untested functions.
+
+- A declaration is a `def` or `fn` line (code, not in a string). The
+  signature runs until its `(` `)` and `[` `]` close; code after its `:` on
+  that line is a one-line body; otherwise the body runs until the first
+  code line indented no deeper than the `def` (a docstring line further
+  left, or a line that starts inside a string, does not end it).
+- A body of only `...` (a trait's requirement), or none, is no function;
+  `pass` is.
+- A nested function owns its lines, and is recorded or not on its own: a
+  recorded closure does not make the function around it recorded.
+- A file no test compiled lists no function: its lines are already counted
+  ("Files no test compiled").
+
+It cannot see a `comptime if` arm the compiler dropped inside a recorded
+function (the unit is the whole function), nor a function the compiler
+emits without line rows (a `nodebug` function may be one; not measured).
+Why the line records and not the DWARF subprograms: in a coverage test
+binary the library's functions (compiled from its precompiled package)
+have no named `DW_TAG_subprogram` at all, only a compile unit named
+`<unknown>` with a line table, and a line-tables-only subprogram carries no
+`decl_file` or `decl_line` anyway; the line rows are the one place a
+library function shows up.
 
 ## Exemptions
 
@@ -370,8 +429,9 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
 
 1. The library's sources are staged at their repository paths: every
    `srcs` file that is a source (a generated one is not measured), every
-   test source, and a BUCK file at the package's directory, so covcheck's
-   nearest-BUCK rule names the package. A tests-cell package is under
+   test source (a generated one at its output path in the package), and a
+   BUCK file at the package's directory, so covcheck's nearest-BUCK rule
+   names the package. A tests-cell package is under
    `tools/build/tests/`. Each test source is also named to covcheck
    (`--test-source`), so a welded test outside the package's `tests/`
    (`wire/tests/test_x.mojo`, a test at the package's top) is set aside as
@@ -424,6 +484,33 @@ against `covlow`, whose gate is red). With the switch off nothing waits for
 them. Bundles and OCI images (`tools/build/package/defs.bzl`) do not wait
 for the gates of the libraries their program is built from: a program's
 libraries are not packages it ships.
+
+**Platforms.** Coverage is measured on linux-x86_64 and never on another
+platform (decided: `coverage-linux-x86-64` in
+`tools/build/platforms/limits.tsv`; kcov and the LLVM pieces of
+branch coverage are pinned for linux-x86_64 only). On another target
+platform `-c komira.coverage=true` is a no-op, not an error: the coverage
+attributes are None (a `select` in `tools/build/mojo/coverage.bzl`), so a
+library and a shared library have the actions they have with the switch
+off, and no `[coverage]` (test 41's `coverage_platforms.sh`, on
+darwin-arm64).
+
+**Shared libraries.** A `mojo_shared_lib` has a gate too, over its
+drivers' reports (each driver run under kcov measuring the library it
+loads; `tools/build/mojo/README.md`, "Coverage builds") and its own
+sources, in `COVERAGE_SHARED_LIB_MODE` (`policy.bzl`), census: its line
+coverage is reported, never enforced. That is its own constant, so moving
+`COVERAGE_MODE` to enforce moves no shared library; `enforce` there, or as
+any `mojo_shared_lib`'s `coverage_mode` (a fixture of the tests cell
+included), is refused in analysis (test 46). Nothing waits for
+a shared library's coverage runs or gate: it ships no conda package, and
+its published file waits for its release gate alone. Its gate is reported
+when its `[coverage]` is built by name: the coverage workflow
+(`.github/ci/coverage_measure.sh`) selects `mojo_library` targets only, so
+no workflow reports a shared library's gate yet. A shared library's report
+counts its own sources (its C ABI layer), not the code compiled into it
+from its Mojo dependencies (an engine's), which their own tests measure in
+their own gates.
 
 **Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
 `COVERAGE_TARGET_BP = 10000`, and `COVERAGE_INFO_ONLY_DIRS = ["src/tests"]`:
@@ -616,7 +703,9 @@ run at 20 requests (1 POST and 19 PATCHes).
 
 **Result** (`covcheck/result.mojo`): `conclusion`,
 `mode`, `target_bp`, `total`, `diff`, `touched_packages`, `packages`,
-`findings`, `exemptions` and the set-aside counts; `gate` writes `package`
+`findings`, `exemptions`, `unrecorded_functions` and
+`unrecorded_functions_unreliable` (report only: see "Functions with no
+recorded line") and the set-aside counts; `gate` writes `package`
 in place of `total`, `diff`, `touched_packages` and `packages`. A percentage
 or floor that does not apply is `null`. A package's `files` counts every
 file in its numbers and `unmeasured_files` those that raised

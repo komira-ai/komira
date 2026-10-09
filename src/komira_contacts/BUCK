@@ -1,0 +1,50 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A simple contacts service's address books and cards: `ContactsStore[DB]`
+# over the backend-neutral komira_db `Database` (books, cards with a per-book
+# unique uid, version CAS, a per-book change number and the change feed), the
+# per-object access rules every store call applies, and validation. The
+# messages are komira_contacts_proto's.
+#
+# test_access and test_validate need no database: the access rules and the
+# validation are pure. test_store_sqlite runs one pass through every store
+# call on SQLite, a `test_deps` package (it reaches the tests only, never a
+# consumer), so this package measures the store's lines; test_store_races
+# plays a peer that writes between the store's read and its guarded write
+# (the conflict paths one SQLite connection never reaches). The store's full
+# contract, on SQLite and Firestore (MockFirestore), is
+# //src/tests/conformance/komira_contacts_store_conformance.
+mojo_library(
+    name = "komira_contacts",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_contacts_proto:komira_contacts_proto",
+        "//src/komira_db:komira_db",
+        "//src/komira_proto_codec:komira_proto_codec",
+    ],
+    test_deps = [
+        "//src/komira_db_sqlite:komira_db_sqlite",
+    ],
+    test_srcs = [
+        "tests/test_access.mojo",
+        "tests/test_store_races.mojo",
+        "tests/test_store_sqlite.mojo",
+        "tests/test_validate.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps). The lint reads `deps` only, so the tests that
+# import the `test_deps` package (komira_db_sqlite) are left out of it.
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"], exclude = [
+        "tests/test_store_races.mojo",
+        "tests/test_store_sqlite.mojo",
+    ]),
+    visibility = ["komira//:tests_lints"],
+)
