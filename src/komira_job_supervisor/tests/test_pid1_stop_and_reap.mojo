@@ -24,6 +24,19 @@
 #       the beat is CANCELLED. Mutant: signal the pid, not the group
 #       (Supervisor._signal_child) -> the grandchild survives the SIGTERM and
 #       the SIGKILL, and the call takes the whole grace.
+#   test_sigkill_reaches_a_grandchild_that_ignores_sigterm
+#       The job starts a grandchild that ignores SIGTERM (`trap '' TERM`,
+#       kept across exec), which prints its pid and then SIGTERMs this
+#       process, so the ignore is in place before any stop is sent. The
+#       stop's SIGTERM kills the shell only; with a 500 ms grace (the
+#       grace_ms argument), act_on_stop_signal must wait the grace out,
+#       SIGKILL the group and return only once the group is empty: the
+#       grandchild is gone and the group signal finds nobody before the
+#       CANCELLED beat is sent. Mutants: the SIGKILL sent to the job's pid
+#       instead of its group (Supervisor.terminate_with) -> the grandchild
+#       survives; the grace loop returning as soon as the job itself is
+#       reaped (group condition dropped) -> no SIGKILL at all, the
+#       grandchild survives.
 #   test_a_forwarded_sigint_stays_sigint
 #       The job sends SIGINT to this process; the job is stopped by SIGINT
 #       (signal 2), not by a SIGTERM substituted for it.
@@ -59,7 +72,13 @@ from komira_supervisor import (
     install_stop_signal_handler,
     proc_probe_children,
 )
-from komira_supervisor.proc_ffi import SIGINT, SIGKILL, SIGTERM, proc_kill
+from komira_supervisor.proc_ffi import (
+    SIGINT,
+    SIGKILL,
+    SIGTERM,
+    proc_kill,
+    proc_kill_group,
+)
 
 from komira_job_supervisor import (
     HeartbeatOutcome,
@@ -191,6 +210,59 @@ def test_a_stop_signal_reaches_the_grandchild() raises:
     )
     _ = js^
     print("  test_a_stop_signal_reaches_the_grandchild: PASS")
+
+
+comptime _TERM_IGNORING_GRANDCHILD = (
+    "p=$PPID; (trap '' TERM; exec sh -c 'echo $$; kill -TERM \"$1\";"
+    " exec sleep 60 >/dev/null 2>&1' grandchild \"$p\") & wait"
+)
+"""The job: a background subshell ignores SIGTERM and execs a shell (the
+ignore is inherited by exec) that prints its own pid, SIGTERMs this process
+(the job's parent, passed as $1) and becomes `sleep 60` with the pipes
+closed. The job itself waits with SIGTERM at its default."""
+
+
+def test_sigkill_reaches_a_grandchild_that_ignores_sigterm() raises:
+    install_stop_signal_handler()
+    assert_true(adopt_orphans(), "this process receives orphans (Linux)")
+    var beats = ArcPointer[List[String]](List[String]())
+    var js = TestJob(_shell_job(String("unused")), Recorder(beats), None)
+    js.spawn_child_spec(ChildSpec.shell(String(_TERM_IGNORING_GRANDCHILD)))
+    var group = js.supervisor.process_group()
+    assert_true(group > Int32(1), "the job leads its own group")
+    var spins = 0
+    while len(js.stdout_ring) == 0 and spins < 500:
+        js.poll_and_drain()
+        _sleep_ms(10)
+        spins += 1
+    assert_equal(len(js.stdout_ring), 1, "the grandchild printed its pid")
+    var grandchild = Int32(atol(js.stdout_ring[0]))
+    assert_equal(proc_kill(grandchild, Int32(0)), Int32(0), "the grandchild runs")
+
+    comptime GRACE_MS = 500
+    var took_ms = _await_stop(js, GRACE_MS)
+    # Read before anything else runs: the stop has returned, the CANCELLED
+    # beat has not been sent yet.
+    var survived = proc_kill(grandchild, Int32(0)) == Int32(0)
+    var group_left = proc_kill_group(group, Int32(0)) == Int32(0)
+    if survived:
+        _ = proc_kill(grandchild, SIGKILL)  # do not leave it to the next test
+    assert_false(survived, "the SIGKILL after the grace reached the grandchild")
+    assert_false(group_left, "the group was empty when the stop returned")
+    assert_true(
+        took_ms >= GRACE_MS - 20,
+        "the grace was waited out for the grandchild: " + String(took_ms),
+    )
+    assert_true(took_ms < 4000, "bounded by grace + settle: " + String(took_ms))
+    assert_equal(js.exit_info.signal, SIGTERM, "the job died of the SIGTERM")
+    js.analyze_exit()
+    _ = js.finalize_heartbeat()
+    var last = beats[][len(beats[]) - 1]
+    assert_true(
+        last.startswith(String("CANCELLED|the supervisor received SIGTERM")), last
+    )
+    _ = js^
+    print("  test_sigkill_reaches_a_grandchild_that_ignores_sigterm: PASS")
 
 
 def test_a_forwarded_sigint_stays_sigint() raises:
@@ -325,6 +397,7 @@ def main() raises:
     # FIRST: nothing before it may install the stop handler (module header).
     test_the_run_loop_turns_a_platform_sigterm_into_cancelled()
     test_a_stop_signal_reaches_the_grandchild()
+    test_sigkill_reaches_a_grandchild_that_ignores_sigterm()
     test_a_forwarded_sigint_stays_sigint()
     test_orphans_are_reaped()
     test_the_job_starts_with_default_signals()
