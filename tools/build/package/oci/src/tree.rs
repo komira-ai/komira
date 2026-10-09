@@ -183,6 +183,15 @@ mod tests {
     }
 
     #[test]
+    fn a_path_given_twice_apart_is_refused() {
+        // The twice check compares neighbours after sorting, so a pair with
+        // another path between them is found only if the paths are sorted.
+        assert_eq!(refusals(&[], &["a", "b", "a"]), ["`a` given twice"]);
+        assert_eq!(refusals(&["a/", "b/", "a/"], &[]), ["`a/` given twice"]);
+        assert_eq!(refusals(&["k/"], &["z", "c", "z"]), ["`z` given twice"]);
+    }
+
+    #[test]
     fn plain_is_letters_digits_and_four_marks() {
         assert_eq!(refusals(&["A_b+c-d.9/"], &["x/A_b+c-d.9"]), Vec::<String>::new());
         for bad in ["a:b", "a*b", "a\\b", "a b", "\u{e9}", "a=b"] {
