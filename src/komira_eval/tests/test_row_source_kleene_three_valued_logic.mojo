@@ -28,6 +28,7 @@ from komira_kernels.runtime_expr import (
     RuntimeExpr,
     make_add_i64,
     make_and,
+    make_atan2_f64,
     make_case_i64,
     make_ge_f64,
     make_ge_i64,
@@ -43,6 +44,7 @@ from komira_kernels.runtime_expr import (
     make_lt_i64,
     make_not_bool,
     make_or,
+    make_pow_f64,
 )
 from komira_kernels.runtime_expr import EXPR_DIV_I64
 from komira_row_format.cell_source import (
@@ -207,6 +209,34 @@ def test_arithmetic_operand_over_a_null_column() raises:
     _expect(_filter(_exec(q^)), [2], "(x / y) > 0")
 
 
+def test_null_operand_on_the_right() raises:
+    """The NULL operand on the right of a compare and of a two-operand
+    math function. y is NULL at rows 0 and 1, stored 0.
+    `0 >= y`: 0 >= 0 would pass; row 2 is 0 >= 3. SQL: [].
+    `pow(x, y) >= 0`: pow(5, 0) = pow(-1, 0) = 1 would pass. SQL: [2].
+    `atan2(y, x) >= 0`, NULL on the left of atan2: atan2(0, 5) = 0 and
+    atan2(0, -1) = pi would pass. SQL: [2]."""
+    var p = List[RuntimeExpr]()
+    p.append(make_lit_i64(0))
+    p.append(make_col(Y))
+    p.append(make_ge_i64(0, 1))      # 2: 0 >= y
+    _expect(_filter(_exec(p^)), List[Int](), "0 >= y")
+    var q = List[RuntimeExpr]()
+    q.append(make_col(X))            # 0
+    q.append(make_col(Y))            # 1
+    q.append(make_pow_f64(0, 1))     # 2: pow(x, y)
+    q.append(make_lit_f64(0.0))      # 3
+    q.append(make_ge_f64(2, 3))
+    _expect(_filter(_exec(q^)), [2], "pow(x, y) >= 0")
+    var r = List[RuntimeExpr]()
+    r.append(make_col(Y))            # 0
+    r.append(make_col(X))            # 1
+    r.append(make_atan2_f64(0, 1))   # 2: atan2(y, x)
+    r.append(make_lit_f64(0.0))      # 3
+    r.append(make_ge_f64(2, 3))
+    _expect(_filter(_exec(r^)), [2], "atan2(y, x) >= 0")
+
+
 def test_cast_case_and_null_operands() raises:
     """Operands NULL through a cast, a CASE branch and the NULL literal.
 
@@ -333,6 +363,7 @@ def main() raises:
     suite.test[test_not_of_false_and_null_is_true]()
     suite.test[test_decimal_operand_null_under_not]()
     suite.test[test_arithmetic_operand_over_a_null_column]()
+    suite.test[test_null_operand_on_the_right]()
     suite.test[test_cast_case_and_null_operands]()
     suite.test[test_case_condition_over_a_null_operand_is_not_true]()
     suite.test[test_non_nullable_source_keeps_two_valued_answers]()

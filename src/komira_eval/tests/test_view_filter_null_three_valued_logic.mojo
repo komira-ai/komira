@@ -11,13 +11,16 @@
 # under test if the walker read it, so a walker that ignores validity keeps
 # the NULL row and the survivor list differs.
 #
-# | row | n (i64) | m (i64) | s     | b (bool) | d (dec 10,2) | f (f64) |
-# |-----|---------|---------|-------|----------|--------------|---------|
-# | 0   | 5       | 1       | bob   | true     | 1.00         | 2.5     |
-# | 1   | N/0     | 2       | NULL  | N/true   | N/0.00       | N/0.0   |
-# | 2   | 3       | N/0     | alice | false    | -1.00        | -1.0    |
-# | 3   | 1       | 0       | bob   | true     | 2.00         | 0.5     |
-# | 4   | 4       | 7       | carol | false    | 0.00         | 4.0     |
+# | row | n (i64) | m (i64) | s     | b (bool) | d (dec 10,2) | f (f64) | k (i64) |
+# |-----|---------|---------|-------|----------|--------------|---------|---------|
+# | 0   | 5       | 1       | bob   | true     | 1.00         | 2.5     | 2       |
+# | 1   | N/0     | 2       | NULL  | N/true   | N/0.00       | N/0.0   | 1       |
+# | 2   | 3       | N/0     | alice | false    | -1.00        | -1.0    | 5       |
+# | 3   | 1       | 0       | bob   | true     | 2.00         | 0.5     | 3       |
+# | 4   | 4       | 7       | carol | false    | 0.00         | 4.0     | 8       |
+#
+# k holds no NULL, so a compare with k on the left leaves the NULL check to
+# the right operand alone.
 #
 # Refs komira-ai/komira#932.
 # =============================================================================
@@ -79,10 +82,11 @@ comptime S = 2
 comptime B = 3
 comptime D = 4
 comptime F = 5
+comptime K = 6
 
 
 def _names() -> List[String]:
-    var names: List[String] = ["n", "m", "s", "b", "d", "f"]
+    var names: List[String] = ["n", "m", "s", "b", "d", "f", "k"]
     return names^
 
 
@@ -91,6 +95,7 @@ def _batch() raises -> RecordBatch:
     var n = PrimitiveArray[DType.int64].allocate_nullable(5)
     var m = PrimitiveArray[DType.int64].allocate_nullable(5)
     var f = PrimitiveArray[DType.float64].allocate_nullable(5)
+    var kc = PrimitiveArray[DType.int64].allocate_nullable(5)
     var b = BooleanArray.allocate_nullable(5)
     var d = Decimal128Array.allocate_nullable(5, 10, 2)
     var vn: List[Int] = [5, 0, 3, 1, 4]
@@ -98,12 +103,14 @@ def _batch() raises -> RecordBatch:
     var vf: List[Float64] = [2.5, 0.0, -1.0, 0.5, 4.0]
     var vb: List[Bool] = [True, True, False, True, False]
     var vd: List[Int] = [100, 0, -100, 200, 0]
+    var vk: List[Int] = [2, 1, 5, 3, 8]
     for r in range(5):
         n.set(r, Scalar[DType.int64](Int64(vn[r])))
         m.set(r, Scalar[DType.int64](Int64(vm[r])))
         f.set(r, Scalar[DType.float64](vf[r]))
         b.set(r, vb[r])
         d.set_i128(r, SIMD[DType.int128, 1](vd[r]))
+        kc.set(r, Scalar[DType.int64](Int64(vk[r])))
     n._set_null(1)
     m._set_null(2)
     f._set_null(1)
@@ -118,6 +125,7 @@ def _batch() raises -> RecordBatch:
     fields.append(Field("b", ArrowType.BOOL, True))
     fields.append(Field.decimal128("d", 10, 2, True))
     fields.append(Field("f", DType.float64, True))
+    fields.append(Field("k", DType.int64, True))
     var cols = Slab[Column[HeapRegion]]()
     cols.append(Column.from_primitive[DType.int64](n^))
     cols.append(Column.from_primitive[DType.int64](m^))
@@ -125,6 +133,7 @@ def _batch() raises -> RecordBatch:
     cols.append(Column.from_boolean(b^))
     cols.append(Column.from_decimal128(d^))
     cols.append(Column.from_primitive[DType.float64](f^))
+    cols.append(Column.from_primitive[DType.int64](kc^))
     var sb = SchemaBuilder()
     for i in range(len(fields)):
         sb.add_field(fields[i])
@@ -173,7 +182,9 @@ def _node(kind: Int, left: Int, right: Int) -> RuntimeExpr:
 def test_numeric_compare_drops_a_null_cell() raises:
     """`n >= 0`: row 1 is NULL, stored 0. SQL: [0, 2, 3, 4].
     `n >= m`, column against column: 5 >= 1, NULL, NULL, 1 >= 0, 4 >= 7.
-    SQL: [0, 3]; the NULL rows store 0 >= 2 and 3 >= 0, so row 2 would pass."""
+    SQL: [0, 3]; the NULL rows store 0 >= 2 and 3 >= 0, so row 2 would pass.
+    `k >= m`, NULL in the right column only: 2 >= 1, 1 >= 2, NULL, 3 >= 0,
+    8 >= 7. SQL: [0, 3, 4]; row 2 stores 5 >= 0, so it would pass."""
     var batch = _batch()
     var p = List[RuntimeExpr]()
     p.append(make_col(N))
@@ -185,6 +196,11 @@ def test_numeric_compare_drops_a_null_cell() raises:
     q.append(make_col(M))
     q.append(make_ge_i64(0, 1))
     _expect(_run(_exec(q^), batch), [0, 3], "n >= m")
+    var r = List[RuntimeExpr]()
+    r.append(make_col(K))
+    r.append(make_col(M))
+    r.append(make_ge_i64(0, 1))
+    _expect(_run(_exec(r^), batch), [0, 3, 4], "k >= m")
 
 
 def test_bool_column_drops_a_null_cell_stored_true() raises:
@@ -220,7 +236,10 @@ def test_mixed_compare_drops_a_null_operand() raises:
     """F64-vs-I64 compares. (#932 item 4)
     `f >= 0` (i64 literal): row 1 NULL stored 0.0. SQL: [0, 3, 4].
     `(n + 1) = 1.0`: row 1 n is NULL, stored 0, so 0 + 1 = 1.0 would pass.
-    SQL: [] (no present n is 0)."""
+    SQL: [] (no present n is 0).
+    The same two with the nullable operand on the right:
+    `0 >= f`: row 1 stores 0.0, so 0 >= 0.0 would pass. SQL: [2].
+    `1.0 = (n + 1)`: SQL: []."""
     var batch = _batch()
     var p = List[RuntimeExpr]()
     p.append(make_col(F))
@@ -234,6 +253,18 @@ def test_mixed_compare_drops_a_null_operand() raises:
     q.append(make_lit_f64(1.0))          # 3
     q.append(_node(EXPR_EQ_F64_MIXED, 2, 3))
     _expect(_run(_exec(q^), batch), List[Int](), "(n + 1) = 1.0")
+    var r = List[RuntimeExpr]()
+    r.append(make_lit_i64(0))
+    r.append(make_col(F))
+    r.append(_node(EXPR_GE_F64_MIXED, 0, 1))
+    _expect(_run(_exec(r^), batch), [2], "0 >= f")
+    var t = List[RuntimeExpr]()
+    t.append(make_lit_f64(1.0))          # 0
+    t.append(make_col(N))                # 1
+    t.append(make_lit_i64(1))            # 2
+    t.append(make_add_i64(1, 2))         # 3: n + 1
+    t.append(_node(EXPR_EQ_F64_MIXED, 0, 3))
+    _expect(_run(_exec(t^), batch), List[Int](), "1.0 = (n + 1)")
 
 
 def test_mixed_compare_over_computed_operands() raises:
