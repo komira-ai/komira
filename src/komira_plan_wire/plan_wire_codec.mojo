@@ -77,25 +77,19 @@
 #   state is constructible, and a codec that silently encoded around it would
 #   write a plan the writer never wrote.
 #
-#   ⚠ ASOF_JOIN'S FOUR PRE-SORT HINT LISTS REACH NO RENDER AT ANY VALUE.
-#   `plan_display` prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…])` plus a
-#   `tolerance=<KIND>` that is SUPPRESSED when the kind is NONE, and stops —
-#   `left_sort_keys`, `left_sort_desc`, `right_sort_keys` and `right_sort_desc`
-#   are absent whether empty or not, and the output schema (left columns +
-#   right columns forced nullable) does not read them either. So four of the
-#   twelve fields are held by the IR-equality leg ALONE. Their failure mode is
-#   asymmetric and that is what makes them worth carrying: a non-empty hint
-#   ASSERTS "this side is already sorted, skip the sort phase", so dropping one
-#   costs time while inventing one produces wrong rows.
-#
-#   ⚠ AND THE TOLERANCE RENDERS AS A KIND, NEVER AS A NUMBER. `INT64` prints
-#   the same for a tolerance of 5 and one of 5000, so LEG 1 cannot see
-#   `int_val` or `float_val` at any value — and at kind NONE it cannot see the
-#   field at all, so a corpus using `AsofTolerance.none()` would be asserting
-#   over a suppressed render. All THREE slots are carried verbatim, including
-#   the one `kind` does not select: `AsofTolerance` is `@fieldwise_init` and
-#   public, so an off-kind payload is constructible and re-deriving it would
-#   silently rewrite the struct.
+#   ⚠ ASOF_JOIN'S TOLERANCE OFF-KIND SLOT REACHES NO RENDER.
+#   `plan_display` prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…])`, then
+#   `tolerance=INT64(<int_val>)` or `tolerance=FLOAT64(<float_val>)` (nothing
+#   at kind NONE), then each NON-EMPTY pre-sort hint as
+#   `left_sorted=[quoted keys]/[dirs]` / `right_sorted=…`. So LEG 1 sees the hints and
+#   the selected tolerance value, but never the slot `kind` does not select,
+#   and at kind NONE it sees no tolerance at all. All THREE slots are carried
+#   verbatim, including the one `kind` does not select: `AsofTolerance` is
+#   `@fieldwise_init` and public, so an off-kind payload is constructible and
+#   re-deriving it would silently rewrite the struct. The hint lists are
+#   carried verbatim too: a non-empty hint ASSERTS "this side is already
+#   sorted, skip the sort phase", so dropping one costs time while inventing
+#   one produces wrong rows.
 #
 #   ★ VIEW_REF AND CSE_REF EACH HOLD TWO SCHEMAS AND THE WIRE CARRIES ONE.
 #   Both payloads declare an `output_schema` BESIDE the node's, and both
@@ -245,12 +239,14 @@
 #   the same root tag apart, nor two different ref-name lists of equal length.
 #   The IR-equality leg is the only thing that compares either.
 #
-#   ⚠ CAST CARRIES SIX PARTS AND THE RENDER EMITS TWO. `Expr.write_to` prints
-#   `Cast(<child>, <target>)`; `target_arrow`, `decimal_precision`,
-#   `decimal_scale` and `try_cast` reach NO render at ANY value, so LEG 1 and
-#   `structural_hash` are blind to all four and the IR-equality leg is the only
-#   thing that can see one dropped. Each therefore gets its own wire slot —
-#   re-deriving `target_arrow` from `target` at decode would be exactly the bug
+#   ⚠ CAST CARRIES SIX PARTS AND THE RENDER EMITS THE OTHER FOUR ONLY WHEN THEY
+#   DEVIATE. `Expr.write_to` prints `Cast(<child>, <target>` then
+#   `, arrow=<type>` when `target_arrow` is not `ArrowType.from_dtype(target)`,
+#   `, p=<p>, s=<s>` when either is non-zero, and `, try` for TRY_CAST. So
+#   LEG 1 sees a dropped part only when its value deviates; at the default it
+#   prints nothing, and the IR-equality leg is the only thing that compares
+#   it. Each part therefore gets its own wire slot — re-deriving
+#   `target_arrow` from `target` at decode would be exactly the bug
 #   `Expr.cast_preserving_arrow` exists to fix, re-committed one layer down.
 #
 #   ⚠ REGEXP RENDERS FOUR OF ITS SEVEN FIELDS *CONDITIONALLY*, WHICH IS A THIRD
@@ -276,15 +272,14 @@
 #   through `Expr.json_extract_from_parts` and not through `json_extract_json` /
 #   `json_extract_string`: same reason, same shape, as `cast_from_parts`.
 #
-#   ⚠ JSON_EXTRACT'S PATH IS CARRIED AS SEGMENTS, NOT AS THE JOINED STRING. The
-#   render rebuilds `$.a.b`, and that form is AMBIGUOUS where the list is not —
-#   `["a.b"]` and `["a", "b"]` print identically. Re-parsing at decode would
-#   also be a re-derivation, and it would silently split a segment in two.
-#   `parse_json_path` does produce the first list — the quoted segment
-#   `$."a.b"` parses to `["a.b"]` — but the render joins on `.` WITHOUT
-#   re-quoting, so the joined string is ambiguous and the wrong thing to decode
-#   from. Carrying segments is what keeps a dot-bearing key intact across the
-#   wire.
+#   ⚠ JSON_EXTRACT'S PATH IS CARRIED AS SEGMENTS, NOT AS A JOINED STRING. A
+#   path joined on `.` is AMBIGUOUS where the list is not — `["a.b"]` and
+#   `["a", "b"]` both join to `$.a.b`. (The render escapes a `.` inside a
+#   segment, `$.a\.b`, so it tells them apart; that is the render's escape,
+#   not `parse_json_path`'s syntax, so it is still not a form to decode from.)
+#   Re-parsing at decode would also be a re-derivation, and it would silently
+#   split a segment in two. Carrying segments is what keeps a dot-bearing key
+#   intact across the wire.
 #
 #   ⚠ MAP_GET IS THE `MathFn2` OPERAND TRAP IN A NEW PLACE. `parent` and `key`
 #   are both `WireExpr` recursion boxes and the pair is not interchangeable, so
@@ -1717,9 +1712,8 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # indistinguishable on those factories' plans and would silently
         # truncate a typed `json_extract[Int64]`.
         #
-        # ⚠ THE PATH IS CARRIED AS SEGMENTS. The render joins them into
-        # `$.a.b`, and that form cannot represent `["a.b"]` distinctly from
-        # `["a", "b"]`.
+        # ⚠ THE PATH IS CARRIED AS SEGMENTS. A path joined on `.` cannot
+        # represent `["a.b"]` distinctly from `["a", "b"]`.
         var jk = List[WireExpr]()
         jk.append(_expr_to_wire(e.json_extract_parent_ref()))
         json_extract.append(
@@ -2356,9 +2350,9 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # derivations are exactly the fail-quiet shape: no other leg reads
         # `output_type` at any value, and re-parsing the JOINED string would
         # silently split a dot-bearing segment in two. ⚠ `parse_json_path`
-        # CAN produce such a segment (`$."a.b"`), and that does NOT rescue the
-        # joined form — the render joins on `.` without re-quoting, so
-        # `["a.b"]` and `["a","b"]` print identically. The narrowing on the
+        # CAN produce such a segment (`$."a.b"`), and that does NOT rescue a
+        # joined form — joined on `.`, `["a.b"]` and `["a","b"]` are the same
+        # string. The narrowing on the
         # type id is CHECKED by membership, the same way
         # `WireCast.target_arrow_type_id` is.
         var segs = List[String]()
@@ -3197,17 +3191,15 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     elif tag == PLAN_ASOF_JOIN:
         # Arm ordinal, not field number — `asof_join` is field 16, arm 13.
         arm = 13
-        # ⚠ FOUR OF THE TWELVE FIELDS REACH NO RENDER AT ANY VALUE. The
-        # `*_sort_keys` / `*_sort_desc` pairs are PRE-SORT HINTS ("this side is
-        # already sorted on these; skip the sort phase") and `plan_display`
-        # emits none of them, empty or not. Neither does the output schema.
-        # LEG 3 is the only thing that compares them, and the asymmetry is why
-        # they must be carried verbatim: dropping a hint costs a sort, and
-        # inventing one on a side that is not sorted produces wrong rows.
+        # The `*_sort_keys` / `*_sort_desc` pairs are PRE-SORT HINTS ("this
+        # side is already sorted on these; skip the sort phase"); `plan_display`
+        # emits them when non-empty. They are carried verbatim: dropping a hint
+        # costs a sort, and inventing one on a side that is not sorted produces
+        # wrong rows.
         #
-        # ⚠ THE TOLERANCE RENDERS AS A KIND AND IS SUPPRESSED AT `NONE`.
-        # `tolerance=INT64` prints identically for 5 and for 5000, so neither
-        # payload number is in the text at any value.
+        # ⚠ THE TOLERANCE RENDERS ITS KIND AND THE SELECTED SLOT ONLY, AND
+        # NOTHING AT `NONE`. The off-kind slot is in the text at no value, so
+        # LEG 3 is the only comparison it has.
         ref d = p.asof_join_data_ref()
         var lk = List[WirePlan]()
         lk.append(_plan_to_wire(d.left[]))
