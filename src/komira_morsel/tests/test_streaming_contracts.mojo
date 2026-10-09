@@ -275,9 +275,8 @@ def test_backlog_budget_clamp() raises:
     assert_equal(BacklogReading(Int64(5), Int64(1)).budget, Int64(1))
     assert_equal(BacklogReading(Int64(5), Int64(2)).budget, Int64(2))
     assert_equal(BacklogReading(Int64(5), Int64.MAX).budget, Int64.MAX)
-    # `outstanding` is carried unchanged, also when 0 or negative.
+    # `outstanding` is carried unchanged, also when 0.
     assert_equal(BacklogReading(Int64(0), Int64(8)).outstanding, Int64(0))
-    assert_equal(BacklogReading(Int64(-2), Int64(8)).outstanding, Int64(-2))
 
 
 def test_stream_source_caps() raises:

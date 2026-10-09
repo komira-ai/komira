@@ -314,12 +314,13 @@ def test_projection_not_pushed_or_refused() raises:
     assert_equal(sch.num_columns(), 2, "a refused projection keeps the schema")
     assert_equal(sch.field_at(0).name, "id")
 
-    # Accepted: indices outside the schema are dropped from the narrowed
-    # schema, the rest keep their order.
+    # Accepted: the schema narrows to the projected columns in the order
+    # asked for. Only in-range indices: what an out-of-range index should do
+    # is not defined yet, so this test does not pin it.
     s[].proj_rc = KOMIRA_SCAN_OK
-    src.set_projection([1, 5, -1, 0])
+    src.set_projection([1, 0])
     assert_equal(s[].proj_calls, 2)
-    assert_equal(s[].proj_n, 4)
+    assert_equal(s[].proj_n, 2)
     var sch1 = src.output_schema()
     assert_equal(sch1.num_columns(), 2)
     assert_equal(sch1.field_at(0).name, "v")
@@ -344,8 +345,11 @@ def test_projection_not_pushed_or_refused() raises:
 
 
 def test_worker_id_outside_the_slot_table() raises:
-    # A worker id below 0 or at/above the slot table size still gets a
-    # morsel (it borrows slot 0); the morsel keeps the id it was asked with.
+    # Serialised connector (no MT-safe bit): calls are serialised, so a
+    # worker id below 0 or at/above the slot table size can borrow slot 0
+    # and still gets a morsel; the morsel keeps the id it was asked with.
+    # Not pinned for an MT-safe connector, where two workers would share
+    # slot 0.
     var s = _make([KOMIRA_SCAN_OK, KOMIRA_SCAN_OK, KOMIRA_SCAN_OK], Int64(0))
     var src = VTableMorselSource(_vt(s), _schema())
     var a = src.next_morsel(-1)
