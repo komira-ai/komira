@@ -45,8 +45,12 @@
 #      INDETERMINATE (KCI-E-CANNOT-TELL, exit 5), never a pass. Not under
 #      GitHub Actions nothing is checked and the result says so
 #      (`workflow.checked` false, reason "not under GitHub Actions");
-#   4a. THE REF CHECK, under GitHub Actions, for a PUSH stage (continuous
-#      auto-promotion; the PULL_REQUEST stage is R6's): the platform-set
+#   4a. THE REF CHECK, under GitHub Actions. For the PULL_REQUEST stage
+#      only the event: the platform-set `GITHUB_EVENT_NAME` is
+#      `pull_request` or `merge_group` (pr.yml's triggers, R6; unset:
+#      INDETERMINATE, exit 5; any other: REFUSED, KCI-E-WORKFLOW-MISMATCH,
+#      exit 3; `check_pull_request_event`). For a PUSH stage (continuous
+#      auto-promotion): the platform-set
 #      `GITHUB_REF`, `GITHUB_SHA` and `GITHUB_EVENT_NAME` are read (unset or
 #      malformed: INDETERMINATE, exit 5). Refs compare BYTE FOR BYTE (GitHub's
 #      expressions and concurrency groups ignore case; kci does not), and a

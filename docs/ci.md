@@ -13,6 +13,7 @@ Nothing is compiled on the runner.
 | push to `main` | the release path of `kci.yml` |
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
+| merge queue (`merge_group`, a pull request queued to merge) | `pr / check` on the merge group's commit ([below](#the-merge-queue)); not `coverage` |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
 
 There is no separate static or lint job, and no other pull request check
@@ -152,7 +153,14 @@ farm's workers. Therefore:
   `tools/` and every `BUCK` and `.bzl` file included, before pushing it to a
   branch: the workflow, the rules and the lint scripts all run from that
   branch's tree, and anyone who can push a branch can run code on the farm.
-- The workflows use `pull_request` only. There is no `pull_request_target`
+- **Queuing a fork's pull request runs its code on the farm**: `pr / check`
+  runs on every merge group (the queue builds its branch in this repository,
+  and a merge group carries no fork to tell apart), with the farm
+  credential. Queue it only after reading it, as for pushing it to a branch;
+  queuing is the decision to merge, after which a push to `main` runs it in
+  `kci.yml` anyway.
+- The workflows use `pull_request` (and `pr.yml` the merge queue's
+  `merge_group`) only. There is no `pull_request_target`
   workflow here, on purpose: it runs with the base repository's token, and
   checking the fork's code out under it, then joining the tailnet, would hand
   the farm to the code.
@@ -936,14 +944,34 @@ to the release workflow's), and the welded test
 
 | | |
 |---|---|
-| trigger | `pull_request` alone: no push, manual run, `pull_request_target`, `workflow_run` or any other event |
-| job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
+| trigger | `pull_request`, and the merge queue's `merge_group` (no value, or exactly `types: [checks_requested]`) alone: no push, manual run, `pull_request_target`, `workflow_run` or any other event. `kci run --stage pr` also refuses, under GitHub Actions, a `GITHUB_EVENT_NAME` other than these two (exit 3; unset, exit 5) |
+| job | the one job `check`, for a pull request only from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here) and on every merge group (`if: github.event_name == 'merge_group' \|\| <that>`: a job skipped on a merge group is a passing required check), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true). R6 evaluates the condition for each trigger (`src/kci_workflow_check/pull_request_events.mojo`) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
+| steps | the pinned full-history checkout of the commit under test (`github.sha`: the pull request's merge commit, or the merge group's commit), `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the event's base commit>` (`${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha \|\| github.event.pull_request.base.sha }}`, evaluated by R6 for each trigger: the pull request's base, or the base branch's commit the merge group was cut from): the units the change reaches, built and tested on the farm in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
+
+### The merge queue
+
+With GitHub's merge queue required on `main` (the ruleset settings below), a
+queued pull request is merged only after `pr / check` passes on its merge group, the commit that would land
+(the base branch with the pull requests queued ahead of it and this one).
+pr.yml runs on `merge_group` for that. On a merge group `github.sha` is the
+merge group's commit, which the job checks out and passes as
+`--revision-id`, and the base is `github.event.merge_group.base_sha`, the
+base branch's commit the group was cut from: the change built is then this
+pull request's and those queued ahead of it, never less than the pull
+request's own. Each merge group is its own concurrency group
+(`merge-group-<its commit>`), so no merge group cancels another or a pull
+request's check (`pr-<number>`). `coverage.yml` stays on `pull_request`
+alone (its case W3 holds that).
+
+The ruleset of `main` that turns it on: **Require merge queue**, merge method
+**merge commit**, build concurrency 5, minimum and maximum group size 1
+(each pull request is checked on its own merge group), status check timeout
+90 minutes, with **`pr / check`** the required check.
 
 ## coverage.yml: the pull request's coverage (not a gate)
 

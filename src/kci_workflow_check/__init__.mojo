@@ -21,6 +21,12 @@
 #                         (`excludes_pull_request`);
 #                         `condition_expression`: the expression GitHub
 #                         evaluates for a job's `if:`
+#   pull_request_events.mojo  R6: the events pr.yml runs on (pull_request,
+#                         merge_group; `is_pull_request_stage_event`, which
+#                         `kci run` holds GITHUB_EVENT_NAME to), and what a
+#                         job's `if:` (`condition_for_event`) and its
+#                         `--affected-by` (`base_for_event`) evaluate to on
+#                         each
 #   auto_promotion.mojo   R15 to R22: continuous auto-promotion (main-only
 #                         stages, one concurrency group, the push filter,
 #                         the manual run's inputs, the set hash handed on,
@@ -48,12 +54,27 @@ from kci_workflow_check.workflow_reader import (
 )
 from kci_workflow_check.pull_request import (
     CHECKOUT_ACTION,
-    PULL_REQUEST_BASE_EXPRESSION,
-    PULL_REQUEST_EVENT,
     PULL_REQUEST_RUNNER,
-    SAME_REPOSITORY_CONDITION,
     condition_expression,
     excludes_pull_request,
+)
+from kci_workflow_check.pull_request_events import (
+    BASE_EXPRESSION,
+    MERGE_GROUP_BASE_EXPRESSION,
+    MERGE_GROUP_CONDITION,
+    MERGE_GROUP_EVENT,
+    PULL_REQUEST_BASE_EXPRESSION,
+    PULL_REQUEST_EVENT,
+    RUNS,
+    SAME_REPOSITORY,
+    SAME_REPOSITORY_CONDITION,
+    SKIPPED,
+    base_context,
+    base_for_event,
+    condition_for_event,
+    is_base_expression,
+    is_pull_request_stage_event,
+    pull_request_stage_events,
 )
 from kci_workflow_check.auto_promotion import (
     CHECKOUT_REF,

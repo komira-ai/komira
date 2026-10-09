@@ -12,9 +12,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the farm-connected stages, one literal `kci run --stage <id>` per job with a
 # `--summary-file`, a pull_request trigger exactly when the machine file
 # declares a PULL_REQUEST stage, whose job is then the only one a pull request
-# runs (same-repository pull requests only, no environment, `contents: read`
-# and the farm connection's token, `--affected-by` the pull request's base
-# commit, the full history) while every other job's `if:` keeps a pull request
+# runs (same-repository pull requests only, and every merge group when the
+# merge queue's merge_group trigger is there; no environment, `contents: read`
+# and the farm connection's token, `--affected-by` the event's base commit,
+# the full history) while every other job's `if:` keeps a pull request
 # out, a `revision` input on workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
 # action excepted), no `--only` on a release job unless the stage is SPLIT
 # (the job named after the stage runs its steps, other jobs run its
@@ -54,9 +55,15 @@ mojo_library(
         # R6 for pr.yml, the pull request's check: the PULL_REQUEST stage as the
         # ONE job `check` of a workflow of its own (no fork, no environment, no
         # secret, minimal permissions, the base commit, the full history,
-        # pinned runner and uses, the pull_request trigger alone); one
+        # pinned runner and uses, the pull_request trigger); one
         # mutation per branch
         "tests/test_ci_pull_request.mojo",
+        # R6 for pr.yml with the merge queue's merge_group trigger: the base
+        # and the job's condition evaluated per event (a merge group runs the
+        # job and passes its own base; a swapped or pull-request-only base, a
+        # condition that skips a merge group or runs a fork, another event next
+        # to merge_group, each refused)
+        "tests/test_ci_merge_group.mojo",
         # R6 for kci.yml: no pull_request trigger and no job for the
         # PULL_REQUEST stage; each file refused when read as the other
         "tests/test_ci_two_workflows.mojo",

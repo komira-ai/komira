@@ -7,8 +7,12 @@
 # declares a PULL_REQUEST stage, the workflow has a `pull_request` trigger,
 # and the job of that stage is the only job that runs on a pull request:
 #
-#   * the PULL_REQUEST stage's job carries the job-level condition
-#     `github.event.pull_request.head.repo.full_name == github.repository`
+#   * the PULL_REQUEST stage's job carries a job-level condition that, for
+#     each event pr.yml is triggered by (pull_request_events.mojo), runs it
+#     for a pull request from a branch of this repository only
+#     (`github.event.pull_request.head.repo.full_name == github.repository`)
+#     and on every merge group (`github.event_name == 'merge_group' || ...`),
+#     and its `kci run --affected-by` passes that event's base commit
 #     (`check_pull_request_job`). A pull request from a fork then runs
 #     nothing, and a push or a manual run (no pull request) skips the job;
 #   * every other job is RELEASE-ONLY (`check_release_only`): its job-level
@@ -38,15 +42,20 @@
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
+from .pull_request_events import (
+    BASE_EXPRESSION,
+    MERGE_GROUP_CONDITION,
+    MERGE_GROUP_EVENT,
+    PULL_REQUEST_EVENT,
+    RUNS,
+    SAME_REPOSITORY,
+    SAME_REPOSITORY_CONDITION,
+    base_context,
+    base_for_event,
+    condition_for_event,
+    triggered_events,
+)
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc
-
-comptime PULL_REQUEST_BASE_EXPRESSION: String = "github.event.pull_request.base.sha"
-"""What a PULL_REQUEST stage's `kci run --affected-by` passes, inside
-`${{ }}` (R6): the pull request's base commit, a full commit id."""
-
-comptime SAME_REPOSITORY_CONDITION: String = "github.event.pull_request.head.repo.full_name == github.repository"
-"""The job-level `if:` of a PULL_REQUEST stage's job (R6): a fork's pull
-request runs nothing, and an event without a pull request skips the job."""
 
 comptime CHECKOUT_ACTION: String = "actions/checkout@"
 """The checkout action's `uses:` prefix; under R6 each such step of a
@@ -57,9 +66,6 @@ comptime PULL_REQUEST_RUNNER: String = "ubuntu-24.04"
 a GitHub-hosted runner. A self-hosted label, a label list, a runner group or
 an expression could put a pull request's code on a machine that keeps state
 between jobs."""
-
-comptime PULL_REQUEST_EVENT: String = "pull_request"
-"""The event name a release job's condition keeps out (R6)."""
 
 comptime RELEASE_BRANCH: String = "main"
 """The one branch a `push` trigger names (R17, which took over R6's push
@@ -84,6 +90,16 @@ def is_expression(text: String, expression: String) -> Bool:
         return False
     var inner = String(String(t[byte = 3 : t.byte_length() - 2]).strip())
     return inner == expression
+
+
+def _expression_inside(text: String, mut expression: String) -> Bool:
+    """`text` is exactly `${{ <expression> }}` (spacing inside the braces
+    aside); `expression` is what is inside, stripped."""
+    var t = String(text.strip())
+    if not t.startswith(String("${{")) or not t.endswith(String("}}")) or t.byte_length() < 5:
+        return False
+    expression = String(String(t[byte = 3 : t.byte_length() - 2]).strip())
+    return True
 
 
 def _expression_of(text: String, mut expression: String) -> Bool:
@@ -292,18 +308,35 @@ def check_pull_request_job(
     base commit (each `kci run`'s `--affected-by`, given as two parallel
     lists), the full history, the fork condition and the permissions."""
     var where = _at(doc, job) + String("job '") + job_id + String("': R6: stage '") + stage + String("' is a PULL_REQUEST stage")
-    var want = String("${{ ") + String(PULL_REQUEST_BASE_EXPRESSION) + String(" }}")
+    # the events the job runs on (pr.yml's triggers among pull_request and
+    # merge_group), and what its base and condition evaluate to under each
+    var events = triggered_events(doc)
+    if len(events) == 0:
+        events.append(String(PULL_REQUEST_EVENT))  # no trigger read: held as a pull request's job
+    var merge_group = False
+    for e in range(len(events)):
+        if events[e] == String(MERGE_GROUP_EVENT):
+            merge_group = True
+    var base_text = String(BASE_EXPRESSION) if merge_group else base_context(String(PULL_REQUEST_EVENT))
+    var want = String("${{ ") + base_text + String(" }}")
     for i in range(len(affected_by)):
         if not has_affected_by[i]:
             findings.append(
                 where + String(", so its `kci run` carries --affected-by ") + want
                 + String(" (the per-change check of the pull request)")
             )
-        elif not is_expression(affected_by[i], String(PULL_REQUEST_BASE_EXPRESSION)):
-            findings.append(
-                where + String(": `--affected-by ") + affected_by[i] + String("`; it passes ") + want
-                + String(", written so")
-            )
+            continue
+        var inner = String("")
+        var wrapped = _expression_inside(affected_by[i], inner)
+        for e in range(len(events)):
+            var got = base_for_event(inner, events[e]) if wrapped else String("")
+            if got != base_context(events[e]):
+                findings.append(
+                    where + String(": `--affected-by ") + affected_by[i] + String("`; it passes ") + want
+                    + String(", written so (on a ") + events[e] + String(" run this passes ")
+                    + (got if got.byte_length() > 0 else String("nothing kci reads")) + String(", not ")
+                    + base_context(events[e]) + String(")")
+                )
     var checkouts = 0
     var steps = doc.items(doc.child(job, String("steps")))
     for i in range(len(steps)):
@@ -325,12 +358,20 @@ def check_pull_request_job(
     # the fork condition: every PULL_REQUEST stage's job, farm-connected or not
     var cond = doc.child(job, String("if"))
     var expression = String("")
-    var ok = condition_expression(doc, cond, expression) and expression == String(SAME_REPOSITORY_CONDITION)
-    if not ok:
+    var read = condition_expression(doc, cond, expression)
+    var fork_ok = read and condition_for_event(expression, String(PULL_REQUEST_EVENT)) == String(SAME_REPOSITORY)
+    if not fork_ok:
         findings.append(
             where + String(", so the job carries `if: ") + String(SAME_REPOSITORY_CONDITION)
             + String("`, bare or as exactly `${{ <it> }}` (nothing around it, no block scalar)")
             + String(": a pull request from a fork runs nothing, and an event without a pull request skips the job")
+            + (String(" (with the merge_group trigger, `if: ") + String(MERGE_GROUP_CONDITION) + String("`)") if merge_group else String(""))
+        )
+    if merge_group and not (read and condition_for_event(expression, String(MERGE_GROUP_EVENT)) == String(RUNS)):
+        findings.append(
+            where + String(" and pr.yml is triggered by merge_group, so the job carries `if: ")
+            + String(MERGE_GROUP_CONDITION) + String("`: a merge group (built in this repository) runs the job;")
+            + String(" a job skipped on it is a passing required check, so the queue would merge an untested change")
         )
     # the runner: exactly the plain scalar, nothing else
     if not doc.is_plain(doc.child(job, String("runs-on")), String(PULL_REQUEST_RUNNER)):

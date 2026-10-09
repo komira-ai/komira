@@ -16,7 +16,8 @@
 # (method, path, body file, body md5; `-` for a body on stdin, which it
 # keeps) and answers a POST with an id, over request bodies the REAL
 # covcheck wrote for 0, 1, 51 and 120 annotations. The W cases hold the
-# workflow's text where the functions cannot: the calls, the artifact name.
+# workflow's text where the functions cannot: the calls, the artifact name,
+# the triggers.
 # The measure script (M cases) runs in a fixture repository against
 # stand-ins for git and buck2 that answer from tables and record their
 # arguments, with the real covcheck behind a wrapper that records its argv.
@@ -217,6 +218,19 @@ wrong=$(awk '
     END { close_step(); if (!seen) print "no step with id head" }
 ' "$WF")
 [ -z "$wrong" ] || red "W2: measure's steps are not checkout, head check, then gated steps: $wrong"
+pass
+
+# W3. The triggers: a pull request to main, and nothing else. Not the merge
+# queue's merge_group (pr.yml's alone: coverage is informational, and a
+# merge group has no pull request head to post on), not a push or a
+# manual run. The `on:` block's lines, comments and blank lines aside.
+on_block=$(awk '
+    /^on:/ { on = 1; next }
+    on && /^[^ #]/ { exit }
+    on && NF && $1 !~ /^#/ { print }
+' "$WF")
+want_on=$(printf '  pull_request:\n    branches: [main]')
+[ "$on_block" = "$want_on" ] || red "W3: coverage.yml's triggers are not exactly pull_request to main: $on_block"
 pass
 
 HEAD_SHA=0123456789abcdef0123456789abcdef01234567

@@ -51,8 +51,11 @@
 #       `revision` (type string), `reason` (type string, `required: true`,
 #       no default) and `dry_run` (type boolean, `default: false`). No
 #       `run:` script of any job holds a `${{ }}` expression other than the
-#       pull request's base commit (`${{ github.event.pull_request.base.sha
-#       }}`): an input (the reason above all) or the event payload expanded
+#       base commit, an expression of pull_request_events.mojo's base grammar
+#       (`${{ github.event.pull_request.base.sha }}`, or the two-event form
+#       selecting `github.event.merge_group.base_sha` on a merge group),
+#       whose only names are the two base commits and `github.event_name`
+#       and whose only literal is [a-z_]: an input (the reason above all) or the event payload expanded
 #       into a script is script injection, so a value reaches a script only
 #       through an `env:` value. The same holds for every `with: script:`
 #       (actions/github-script runs it as code), and no step's or job's
@@ -135,7 +138,8 @@
 from kci_release_machine import ReleaseMachine, Stage
 
 from .kci_run_calls import KciRunCall, kci_run_calls
-from .pull_request import PULL_REQUEST_BASE_EXPRESSION, RELEASE_BRANCH, is_expression, top_level_terms
+from .pull_request import RELEASE_BRANCH, is_expression, top_level_terms
+from .pull_request_events import is_base_expression
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc
 
 comptime MAIN_REF_TERM: String = "github.ref == 'refs/heads/main'"
@@ -508,7 +512,7 @@ def _check_script(doc: WorkflowDoc, job_id: String, node: Int, what: String, mut
         return
     var exprs = _expressions(doc.text(node))
     for k in range(len(exprs)):
-        if not is_expression(exprs[k], String(PULL_REQUEST_BASE_EXPRESSION)):
+        if not is_base_expression(exprs[k]):
             findings.append(
                 _at(doc, node) + String("job '") + job_id + String("': R18: ") + what + String(" holds `") + exprs[k]
                 + String("`: an expression expanded into a script is script injection (a manual run's reason")
@@ -533,7 +537,7 @@ def _check_name(doc: WorkflowDoc, job_id: String, node: Int, mut findings: List[
 
 def check_no_expression_in_run(doc: WorkflowDoc, mut findings: List[String]):
     """R18: no `run:` script, and no `with: script:`, holds a `${{ }}`
-    other than the pull request's base commit, and no job's or step's
+    other than the base commit (`is_base_expression`), and no job's or step's
     `name:` names an input or the event payload (file header)."""
     var jobs = doc.child(0, String("jobs"))
     var ids = doc.keys(jobs)

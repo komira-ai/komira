@@ -76,23 +76,33 @@
 #         * `name: pr` and the one job `check`, so the required status check
 #           is `pr / check`; the machine file declares exactly one
 #           PULL_REQUEST stage and the job runs it, `kci run --stage <it>`;
-#         * the `pull_request` trigger ALONE (no push, workflow_dispatch,
+#         * the `pull_request` trigger, and besides it only `merge_group`
+#           (the merge queue; no value, or exactly `types: [checks_requested]`),
+#           each written exactly (no push, workflow_dispatch,
 #           pull_request_target, workflow_run, ...); no other job (no gamma,
 #           prod, validate or build job, no second job holding an
 #           environment, a secret or `id-token: write`);
-#         * the job carries the condition `if: github.event.pull_request.head.
-#           repo.full_name == github.repository` (bare, or exactly `${{ <it>
-#           }}`: nothing before `${{` or after `}}`, no block scalar; GitHub
-#           reads any other `if:` holding `${{` as a format string, which is
-#           always true): a pull request from a fork runs nothing;
+#         * the job's condition (bare, or exactly `${{ <it> }}`: nothing
+#           before `${{` or after `}}`, no block scalar; GitHub reads any
+#           other `if:` holding `${{` as a format string, which is always
+#           true) is evaluated per trigger (pull_request_events.mojo): on a
+#           pull request it is `github.event.pull_request.head.repo.full_name
+#           == github.repository` (a pull request from a fork runs nothing),
+#           and with the merge_group trigger it runs on every merge group
+#           (`github.event_name == 'merge_group' || <that>`; a skipped job is
+#           a passing required check);
 #         * it runs in no environment (R2), waits for nothing (R3), on
 #           `runs-on: ubuntu-24.04` written as that plain scalar (no
 #           self-hosted label, label list, runner group, expression or
 #           quotes), has its own `permissions:` mapping holding `contents:
 #           read` and `id-token: write` only (R4: the farm connection's
-#           token), its one `kci run` carries `--affected-by ${{ github.event.
-#           pull_request.base.sha }}` (the base commit; quotes and the spacing
-#           inside `${{ }}` aside), and each `actions/checkout` step has `with:
+#           token), its one `kci run` carries `--affected-by ${{ <base> }}`
+#           whose value, per trigger, is that event's base commit:
+#           `github.event.pull_request.base.sha` on a pull request,
+#           `github.event.merge_group.base_sha` on a merge group (with that
+#           trigger: `github.event_name == 'merge_group' && github.event.
+#           merge_group.base_sha || github.event.pull_request.base.sha`;
+#           quotes and spacing aside), and each `actions/checkout` step has `with:
 #           fetch-depth: 0` (there is one);
 #         * no stored secret reaches it: no scalar of the job, nor of the
 #           workflow-level `env:`, names the `secrets` context (read ignoring
@@ -176,6 +186,7 @@ from .auto_promotion import (
 )
 from .kci_run_calls import KciRunCall, kci_run_calls
 from .pull_request import check_no_secret, check_pull_request_job, check_release_only
+from .pull_request_events import check_pull_request_triggers
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
 
 comptime FARM_CONNECT_ACTION: String = "./.github/actions/farm-connect"
@@ -759,7 +770,8 @@ def check_pull_request_workflow(
 ) -> List[String]:
     """R6 for pr.yml, the pull request's check (file header): the workflow
     file that runs the machine file's PULL_REQUEST stage and nothing else.
-    The `pull_request` trigger alone; `name: pr`; ONE job, `check`, the
+    The `pull_request` trigger and, optionally, `merge_group`
+    (`check_pull_request_triggers`); `name: pr`; ONE job, `check`, the
     PULL_REQUEST stage whole (R2 no environment, R3 no `needs`, R4 `contents:
     read` and the farm connection's `id-token: write`, R5, R10, R11, R12, R14,
     and `check_pull_request_job`'s same-repository condition, pinned runner,
@@ -777,23 +789,7 @@ def check_pull_request_workflow(
             + String(PULL_REQUEST_JOB_ID) + String("`, the status check the repository requires")
         )
     var on = doc.child(root, String("on"))
-    var triggers = _triggers(doc, on)
-    if len(triggers) == 0:
-        findings.append(String("R6: the workflow has no `on:` triggers"))
-    for i in range(len(triggers)):
-        if triggers[i] == String("pull_request_target"):
-            findings.append(
-                _at(doc, on) + String("R6: trigger 'pull_request_target': it runs a pull request's code with the")
-                + String(" base repository's secrets, and no workflow has it")
-            )
-        elif triggers[i] != String("pull_request"):
-            findings.append(
-                _at(doc, on) + String("R6: trigger '") + triggers[i]
-                + String("': pr.yml is triggered by `pull_request` alone (a push, a manual run, a schedule or a")
-                + String(" workflow_run is no pull request's check)")
-            )
-    if not _member(triggers, String("pull_request")):
-        findings.append(_at(doc, on) + String("R6: pr.yml has no `pull_request` trigger"))
+    check_pull_request_triggers(doc, on, _triggers(doc, on), findings)
     check_pull_request_paths(doc, on, findings)
     # R18: no `${{ }}` in a script but the base commit, no expression in a name
     check_no_expression_in_run(doc, findings)

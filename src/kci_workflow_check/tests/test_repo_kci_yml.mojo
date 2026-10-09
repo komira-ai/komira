@@ -6,7 +6,8 @@
 #   with `pull_request_file` for pr.yml): it finds nothing. A drift between the
 #   two (a renamed job or environment, a stage the workflow does not run, a
 #   `pull_request` trigger in kci.yml, a job in pr.yml that is not the pull
-#   request's check, a pr job a fork reaches, an unpinned
+#   request's check, a pr job a fork reaches, a pr.yml without the merge
+#   queue's trigger or with a base that is not each event's own, an unpinned
 #   action, a split of a stage that does not
 #   run all of it exactly once, a `kci run` without --summary-file or reading
 #   another machine file, farm-connect on the wrong job) fails this test, and with it `./buck2 build //...` on every pull
@@ -39,7 +40,13 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_workflow_check import (
     FARM_CONNECT_ACTION,
+    MERGE_GROUP_BASE_EXPRESSION,
     NODE_SCALAR,
+    PULL_REQUEST_BASE_EXPRESSION,
+    RUNS,
+    SAME_REPOSITORY,
+    base_for_event,
+    condition_for_event,
     KciRunCall,
     ChannelsFile,
     channels_paths,
@@ -256,10 +263,15 @@ def test_pr_yml_agrees_with_the_machine_file() raises:
     var ids = doc.keys(jobs)
     assert_equal(len(ids), 1)
     assert_equal(ids[0], String("check"))
-    # nothing but the pull_request trigger
+    # the pull_request trigger and the merge queue's merge_group, nothing else
     var triggers = doc.keys(doc.child(0, String("on")))
-    assert_equal(len(triggers), 1)
+    assert_equal(len(triggers), 2)
     assert_equal(triggers[0], String("pull_request"))
+    assert_equal(triggers[1], String("merge_group"))
+    # the job runs on a merge group, and on a pull request from this repository only
+    var cond = doc.text(doc.child(doc.items(jobs)[0], String("if")))
+    assert_equal(condition_for_event(cond, String("merge_group")), String(RUNS))
+    assert_equal(condition_for_event(cond, String("pull_request")), String(SAME_REPOSITORY))
     # one `kci run --stage pr --affected-by`, one farm connection, no environment
     var steps = doc.items(doc.child(doc.items(jobs)[0], String("steps")))
     var runs = 0
@@ -275,6 +287,11 @@ def test_pr_yml_agrees_with_the_machine_file() raises:
                 runs += 1
                 assert_equal(calls[k].stage, String("pr"))
                 assert_true(calls[k].has_affected_by)
+                # each event's own base commit
+                var base = String(calls[k].affected_by.strip())
+                var inner = String(String(base[byte = 3 : base.byte_length() - 2]).strip())
+                assert_equal(base_for_event(inner, String("pull_request")), String(PULL_REQUEST_BASE_EXPRESSION))
+                assert_equal(base_for_event(inner, String("merge_group")), String(MERGE_GROUP_BASE_EXPRESSION))
                 assert_true(calls[k].has_summary_file)
     assert_equal(runs, 1)
     assert_equal(farm, 1)

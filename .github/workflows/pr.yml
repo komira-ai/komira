@@ -6,41 +6,56 @@
 #
 # HAND-WRITTEN, and held to the machine file the way kci.yml is: `kci run`
 # itself at start-up under GitHub Actions (it reads this file as committed at
-# GITHUB_WORKFLOW_SHA, for a run of the PULL_REQUEST stage), and the welded test
+# GITHUB_WORKFLOW_SHA, for a run of the PULL_REQUEST stage, on a
+# `pull_request` or `merge_group` event only), and the welded test
 # src/kci_workflow_check/tests/test_repo_kci_yml.mojo, so a drift also fails
 # `./buck2 build //...`. This file may run the PULL_REQUEST stage and NOTHING
-# else (src/kci_workflow_check, rule R6): the `pull_request` trigger alone (no push,
-# no manual run, no `pull_request_target`, no `workflow_run`); one job `check`,
-# only for a pull request from a branch of this repository (a fork's run gets
-# no tailnet credential; a maintainer reads the change and pushes it to a
-# branch here); a GitHub-hosted runner (the literal `ubuntu-24.04`); no
-# environment and no secret; `contents: read` and the `id-token: write` the farm
-# connection exchanges, nothing else; every action pinned; no publish step.
-# `kci run --stage pr --affected-by <the pull request's base commit>` builds the
-# units the change reaches (the artifacts of release/artifacts.textproto and the
-# checks derived from the build graph when it runs) and ships nothing.
+# else (src/kci_workflow_check, rule R6): the `pull_request` trigger and the
+# merge queue's `merge_group` trigger alone (no push, no manual run, no
+# `pull_request_target`, no `workflow_run`); one job `check`, for a pull
+# request only from a branch of this repository (a fork's run gets no
+# tailnet credential; a maintainer reads the change and pushes it to a
+# branch here) and for every merge group (the queue builds its branch in
+# this repository, from pull requests a maintainer queued; the job must run
+# there, since a skipped job passes a required check); a GitHub-hosted
+# runner (the literal `ubuntu-24.04`); no environment and no secret;
+# `contents: read` and the `id-token: write` the farm connection exchanges,
+# nothing else; every action pinned; no publish step.
+# `kci run --stage pr --affected-by <base>` builds the units the change
+# reaches (the artifacts of release/artifacts.textproto and the checks
+# derived from the build graph when it runs) and ships nothing. The base is
+# the event's: the pull request's base commit on `pull_request`, the base
+# branch's commit the merge group was cut from on `merge_group` (R6 evaluates
+# the expression for each event).
 name: pr
 
 on:
   pull_request:
     branches: [main]
+  # The merge queue: the required check `pr / check` runs on each merge
+  # group, the commit that would land.
+  merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
 concurrency:
   # One group per pull request: a newer push to it cancels the older check.
-  group: pr-${{ github.event.pull_request.number }}
+  # One group per merge group (its commit, unique to it): no merge group
+  # cancels another or a pull request's check, which a shared key would do.
+  group: ${{ github.event_name == 'merge_group' && format('merge-group-{0}', github.event.merge_group.head_sha) || format('pr-{0}', github.event.pull_request.number) }}
   cancel-in-progress: true
 
 env:
-  # The pull request's merge commit, which the job checks out.
+  # The commit under test, which the job checks out: the pull request's merge
+  # commit, or the merge group's commit.
   REVISION: ${{ github.sha }}
 
 jobs:
   check:
-    # A pull request from a branch of this repository, and nothing else: a
+    # A merge group, or a pull request from a branch of this repository: a
     # fork's pull request runs nothing (R6).
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     # No environment: no approval, and no environment secret reaches a pull
@@ -51,7 +66,7 @@ jobs:
       # farm-connected; it publishes nothing)
       id-token: write
     steps:
-      # The merge commit, with the full history: kci reads the change from
+      # The commit under test, with the full history: kci reads the change from
       # git (`<base>...<revision>`) and refuses a shallow clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,7 +86,7 @@ jobs:
             ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
               { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
           done
-      # kci as the release's build job builds it, from the pull request's code.
+      # kci as the release's build job builds it, from the code under test.
       - name: build kci
         run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
       # The build systems name the program `buck2`; the repository's is the
@@ -86,11 +101,13 @@ jobs:
       # builds the units the change reaches: the artifacts of
       # release/artifacts.textproto and the checks its buck2 build system
       # derives from the live graph (release/ci/derive_checks.py), so every
-      # target of the graph is in some unit. The base is the pull request's
-      # base commit, a full commit id GitHub sets.
+      # target of the graph is in some unit. The base is the event's, a full
+      # commit id GitHub sets: the pull request's base commit, or the base
+      # branch's commit the merge group was cut from.
       - name: kci run --stage pr
         run: |
-          "$RUNNER_TEMP/kci/kci" run --stage pr --affected-by ${{ github.event.pull_request.base.sha }} \
+          "$RUNNER_TEMP/kci/kci" run --stage pr \
+            --affected-by ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }} \
             --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
             --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \

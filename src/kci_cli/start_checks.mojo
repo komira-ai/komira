@@ -16,7 +16,13 @@
 
 from std.pathlib import Path
 
-from kci_workflow_check import ChannelsFile, channels_paths, check_running_workflow
+from kci_workflow_check import (
+    ChannelsFile,
+    channels_paths,
+    check_running_workflow,
+    is_pull_request_stage_event,
+    pull_request_stage_events,
+)
 from kci_api import (
     ERROR_BREAK_GLASS_REASON,
     ERROR_BREAK_GLASS_REVISION,
@@ -219,8 +225,10 @@ def check_ref_at_start[S: StageSteps](
     """File header, 4a (dispatch.mojo's header). `banner` gets a break-glass
     run's first line and `break_glass` says the run is one."""
     break_glass = False
-    if steps.platform_env(String(GITHUB_ACTIONS)) != String("true") or stage.is_pull_request():
+    if steps.platform_env(String(GITHUB_ACTIONS)) != String("true"):
         return StartVerdict()
+    if stage.is_pull_request():
+        return check_pull_request_event(stage, steps)
     var ref_value = steps.platform_env(String(GITHUB_REF))
     var sha = steps.platform_env(String(GITHUB_SHA))
     var event = steps.platform_env(String(GITHUB_EVENT_NAME))
@@ -324,6 +332,29 @@ def check_ref_at_start[S: StageSteps](
     banner = break_glass_line(ref_value, cmd.revision_id, steps.platform_env(String(GITHUB_ACTOR)), reason)
     _say(String("kci: ") + banner)
     return StartVerdict()
+
+
+def check_pull_request_event[S: StageSteps](stage: Stage, mut steps: S) -> StartVerdict:
+    """File header, 4a, for the PULL_REQUEST stage under GitHub Actions: the
+    platform-set `GITHUB_EVENT_NAME` is one of pr.yml's triggers
+    (kci_workflow_check's `pull_request_stage_events`: pull_request,
+    merge_group), written exactly. Unset: INDETERMINATE; any other event:
+    REFUSED (KCI-E-WORKFLOW-MISMATCH), nothing run."""
+    var event = steps.platform_env(String(GITHUB_EVENT_NAME))
+    if event.byte_length() == 0:
+        return _refuse(
+            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+            String(GITHUB_ACTIONS) + String(" is true and ") + String(GITHUB_EVENT_NAME)
+            + String(" is not set: what this run is cannot be told, so nothing is run"),
+        )
+    if is_pull_request_stage_event(event):
+        return StartVerdict()
+    return _refuse(
+        String(OUTCOME_REFUSED), String(ERROR_WORKFLOW_MISMATCH),
+        String("stage '") + stage.name + String("' is a PULL_REQUEST stage, which runs only on ")
+        + String(" or ").join(pull_request_stage_events()) + String(" (pr.yml's triggers, rule R6), and this run is a ")
+        + event + String(", so nothing is run"),
+    )
 
 
 def check_set_hash_at_start[S: StageSteps](

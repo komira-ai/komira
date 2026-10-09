@@ -5,6 +5,9 @@
 #       runs the machine file's PULL_REQUEST stage on a pull request
 #       (`--affected-by` the pull request's base commit) while its release
 #       job keeps pull requests out, and refuses one that drifts (exit 3);
+#   (1a) the PULL_REQUEST stage runs under GitHub Actions on a pull_request
+#       or merge_group event (pr.yml with the merge queue's trigger), and
+#       any other event is refused (exit 3) or, unset, cannot tell (exit 5);
 #   (2) a dry run whose PUBLISH step recorded the credential probe
 #       NOT_UNDER_CI says `credential probe NOT RUN (not under GitHub
 #       Actions)` next to its outcome, on the evidence line and in the
@@ -164,6 +167,7 @@ def _under_pull_request(mut f: Fake, workflow: String):
     f.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
     f.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/pr.yml@refs/pull/7/merge"))
     f.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
+    f.set_env(String("GITHUB_EVENT_NAME"), String("pull_request"))
     f.workflow = workflow.copy()
 
 
@@ -244,6 +248,73 @@ def test_a_run_is_held_to_the_workflow_file_of_its_stage() raises:
     var rec3 = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(a, h, rec3), 3)
     assert_true(_last(rec3).error.message.find(String("R6: trigger 'pull_request'")) >= 0, _last(rec3).error.message)
+
+
+# ---- (1a) the event a pull request's check runs on -------------------------------
+
+
+def _merge_group_workflow(machine: String) -> String:
+    """pr.yml with the merge queue's trigger: the job runs on every merge
+    group, and the base is each event's own."""
+    return (
+        _pr_workflow(machine)
+        .replace(String("    branches: [main]\n"), String("    branches: [main]\n  merge_group:\n    types: [checks_requested]\n"))
+        .replace(
+            String("    if: github.event.pull_request.head.repo.full_name"),
+            String("    if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name"),
+        )
+        .replace(
+            String("${{ github.event.pull_request.base.sha }}"),
+            String("${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}"),
+        )
+    )
+
+
+def _with_event(workflow: String, event: String) -> Fake:
+    var f = Fake()
+    f.set_env(String("GITHUB_ACTIONS"), String("true"))
+    f.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
+    f.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/pr.yml@refs/heads/gh-readonly-queue/main/pr-7"))
+    f.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
+    if event.byte_length() > 0:
+        f.set_env(String("GITHUB_EVENT_NAME"), event)
+    f.workflow = workflow.copy()
+    return f^
+
+
+def test_a_merge_group_runs_the_pull_request_check() raises:
+    var m = _pr_machine(_root(String("mg_ok")))
+    for event in ["merge_group", "pull_request"]:
+        var f = _with_event(_merge_group_workflow(m), String(event))
+        var rec = CliRecorder.memory(String(""))
+        assert_equal(kci_main_with(_pr_run(m), f, rec), 0, String(event))
+        assert_equal(f.calls[1], String("build check base=") + String(_BASE))
+        assert_true(_last(rec).workflow_checked)
+
+
+def test_the_pull_request_check_refuses_every_other_event() raises:
+    var m = _pr_machine(_root(String("mg_other")))
+    for event in ["push", "workflow_dispatch", "pull_request_target", "workflow_run", "schedule", "Merge_group"]:
+        var f = _with_event(_merge_group_workflow(m), String(event))
+        var rec = CliRecorder.memory(String(""))
+        assert_equal(kci_main_with(_pr_run(m), f, rec), 3, String(event))
+        # the workflow was read, and nothing was built
+        assert_equal(len(f.calls), 1, String(event))
+        var r = _last(rec)
+        assert_equal(r.error.id, String("KCI-E-WORKFLOW-MISMATCH"))
+        assert_true(
+            r.error.message.find(
+                String("stage 'pr' is a PULL_REQUEST stage, which runs only on pull_request or merge_group")
+                + String(" (pr.yml's triggers, rule R6), and this run is a ") + String(event)
+            ) >= 0,
+            r.error.message,
+        )
+    # no event at all: cannot tell
+    var unset = _with_event(_merge_group_workflow(m), String(""))
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_pr_run(m), unset, rec2), 5)
+    assert_equal(len(unset.calls), 1)
+    assert_true(_last(rec2).error.message.find(String("GITHUB_EVENT_NAME is not set")) >= 0, _last(rec2).error.message)
 
 
 # ---- (2) the credential probe that did not run is said -------------------------

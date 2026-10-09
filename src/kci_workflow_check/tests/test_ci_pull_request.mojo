@@ -2,7 +2,8 @@
 # src/kci_workflow_check/tests/test_ci_pull_request.mojo -- R6 for pr.yml, the pull
 #   request's check: the machine file's PULL_REQUEST stage as the ONE job of a
 #   workflow of its own (`check_pull_request_workflow`). It is triggered by
-#   `pull_request` alone, for a same-repository pull request only, in no
+#   `pull_request` (merge_group: test_ci_merge_group.mojo), for a
+#   same-repository pull request only, in no
 #   environment, with `contents: read` and the farm connection's token, the
 #   base commit and the full history. A workflow that agrees, then one mutation
 #   per branch of the rule, each of which must be reported; and the start-up
@@ -157,11 +158,12 @@ def test_pull_request_target_is_never_a_trigger() raises:
 
 
 def _other_triggers() -> List[String]:
-    """Events other than pull_request: each is refused in pr.yml (a push and a
-    manual run included: pr.yml is the pull request's check and nothing else;
-    the others can run a pull request's code in a way this job's same-repository
-    condition does not read: a review or a comment on it, a merge-queue
-    candidate, a calling workflow's event, the code workflow_run follows)."""
+    """Events other than pull_request and merge_group: each is refused in
+    pr.yml (a push and a manual run included: pr.yml is the pull request's
+    check and nothing else; the others can run a pull request's code in a way
+    this job's same-repository condition does not read: a review or a comment
+    on it, a calling workflow's event, the code workflow_run follows). The
+    merge queue's merge_group is test_ci_merge_group.mojo's."""
     var t = List[String]()
     t.append(String("push"))
     t.append(String("workflow_dispatch"))
@@ -169,7 +171,6 @@ def _other_triggers() -> List[String]:
     t.append(String("pull_request_review_comment"))
     t.append(String("issue_comment"))
     t.append(String("workflow_run"))
-    t.append(String("merge_group"))
     t.append(String("workflow_call"))
     t.append(String("schedule"))
     return t^
@@ -181,7 +182,7 @@ def test_an_event_off_the_allow_list_is_refused() raises:
         var name = others[i].copy()
         _reports(
             _wf(String("  pull_request:\n"), String("  pull_request:\n  ") + name + String(":\n")),
-            String("R6: trigger '") + name + String("': pr.yml is triggered by `pull_request` alone"),
+            String("R6: trigger '") + name + String("': pr.yml is triggered by `pull_request` and `merge_group` alone"),
         )
 
 

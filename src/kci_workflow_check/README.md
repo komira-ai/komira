@@ -11,6 +11,8 @@ strict YAML subset: any line outside the subset raises an error starting with
 `CANNOT_TELL` ("cannot tell: "), never a pass. `kci_run_calls` finds every
 `kci run` in a `run:` script and the flags it passes, and
 `excludes_pull_request` says whether a job's `if:` keeps a pull request out.
+`base_for_event` and `condition_for_event` evaluate pr.yml's `--affected-by`
+and its job's `if:` for one event (`pull_request` or `merge_group`).
 The package checks text it is given; it opens no file.
 
 ## Examples
@@ -84,4 +86,18 @@ assert_true(excludes_pull_request("${{ github.event_name != 'pull_request' }}"))
 assert_true(excludes_pull_request("needs.build.outputs.release == 'true' && github.event_name == 'push'"))
 assert_false(excludes_pull_request("always() || github.event_name != 'pull_request'"))
 assert_false(excludes_pull_request("github.event_name == 'pull_request'"))
+```
+
+The base commit pr.yml's `kci run --affected-by` passes on each event it runs
+on (`pull_request`, and the merge queue's `merge_group`), as GitHub evaluates
+the expression; one outside the grammar reads as nothing:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from kci_workflow_check import BASE_EXPRESSION, base_for_event
+
+assert_equal(base_for_event(BASE_EXPRESSION, "pull_request"), "github.event.pull_request.base.sha")
+assert_equal(base_for_event(BASE_EXPRESSION, "merge_group"), "github.event.merge_group.base_sha")
+assert_equal(base_for_event("github.event.pull_request.base.sha", "merge_group"), "github.event.pull_request.base.sha")
+assert_equal(base_for_event("github.event.pull_request.head.sha", "pull_request"), "")
 ```
