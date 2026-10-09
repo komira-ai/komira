@@ -20,15 +20,15 @@ def _decisions(mut reactor: Reactor[NoopSink]) raises -> Int64:
     subject granted (must stay clear)."""
     var authz = AllowAuthenticatedAuthz()
     var action = AuthzAction.delete()
-    var resource = AuthzResource.workspace(String("repo"), String("ws"))
+    var resource = AuthzResource(kind=String("repo"), id=String("r-1"))
     var bits = Int64(0)
-    if authz.check[RT](reactor, Principal(String("a")), action, resource):
+    if authz.check[RT](reactor, Principal(scheme=String("jwt"), subject=String("a")), action, resource):
         bits |= 1
     if authz.check[RT](
-        reactor, Principal(String("a-much-longer-subject")), action, resource
+        reactor, Principal(scheme=String("session"), subject=String("a-much-longer-subject")), action, resource
     ):
         bits |= 2
-    if authz.check[RT](reactor, Principal(String("")), action, resource):
+    if authz.check[RT](reactor, Principal(scheme=String("jwt"), subject=String("")), action, resource):
         bits |= 4
     return bits
 

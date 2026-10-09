@@ -364,6 +364,12 @@ _GATED = {
     # (tools/build/coverage/branch/README.md, "try"), which line coverage
     # cannot see.
     "covtry": (["covtry/__init__.mojo", "covtry/total.mojo"], ["tests/test_total_first.mojo"], ":covbranch_gate"),
+    # Every line covered, but `return a or b` is only ever decided by its
+    # right operand: the one finding is BelowTarget on branch, the `or`'s
+    # arm that skips its right operand (tools/build/coverage/branch/README.md,
+    # "And, or": an and/or whose result no branch tests is a decision of
+    # its own), which line coverage cannot see.
+    "covandor": (["covandor/__init__.mojo", "covandor/either.mojo"], ["tests/test_either_one.mojo"], ":covbranch_gate"),
 }
 
 cov_gate_dir(
@@ -404,6 +410,22 @@ mojo_library(
     test_srcs = ["tests/test_total_both.mojo"],
 )
 
+# GREEN in enforce mode: covandor with a test taking both arms of its
+# `or`: no finding.
+mojo_library(
+    name = "covandor_both",
+    srcs = [
+        "covandor/__init__.mojo",
+        "covandor/either.mojo",
+    ],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = ":covbranch_gate",
+    coverage_mode = "enforce",
+    import_name = "covandor",
+    test_srcs = ["tests/test_either_both.mojo"],
+)
+
 cov_gate_dir(
     name = "covfull_gate",
     exec_compatible_with = LINUX_X86_64,
@@ -433,14 +455,16 @@ cov_gate_dir(
 ]
 
 # RED: tests//negative/coverage:covlow[coverage][gate], :covnotests[...],
-# :covun[...], :covfull_unread[...], :covbranch[...], :covtry[...] (enforce), and
+# :covun[...], :covfull_unread[...], :covbranch[...], :covtry[...],
+# :covandor[...] (enforce), and
 # :covlow_conda, :covnotests_conda (a library with no test: a REFUSED conda
 # package, which waits for its NotMeasured gate all the same). GREEN:
 # :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch,
-# :covtry (the libraries), :covfull[coverage][gate] and
-# :covtry_both[coverage][gate] (enforce), :covlow_census,
+# :covtry, :covandor (the libraries), :covfull[coverage][gate],
+# :covtry_both[coverage][gate] and :covandor_both[coverage][gate]
+# (enforce), :covlow_census,
 # :covnotests_census, :covun_census, :covfull_census, :covbranch_census,
-# :covtry_census and their :<name>_census_result checks.
+# :covtry_census, :covandor_census and their :<name>_census_result checks.
 [
     mojo_library(
         name = name + suffix,
@@ -510,6 +534,14 @@ _RESULTS = {
         '"conclusion":"neutral","mode":"census",',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":9,"line_found":9,"line_bp":10000,"branch_hit":5,"branch_found":6,"branch_bp":8333,',
         '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":8333,"bound_bp":10000,"path":"","line":0,"message":"branch 83.33% is below the target 100.00%","count":null}],"exemptions"',
+    ],
+    # Every line (2 of 2), 1 of 2 arms: the `or` of `return a or b`, whose
+    # left operand is never true (its right operand never skipped).
+    # BelowTarget on branch is the only finding.
+    "covandor": [
+        '"conclusion":"neutral","mode":"census",',
+        _PKG + '"files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,"branch_hit":1,"branch_found":2,"branch_bp":5000,',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"branch 50.00% is below the target 100.00%","count":null}],"exemptions"',
     ],
 }
 
@@ -815,18 +847,6 @@ mojo_library(
     conda = False,
     coverage_debug = _LINK,
     test_srcs = ["tests/test_nodebug.mojo"],
-)
-
-# `return a or b`: the `or`'s result is never branched on, so when its right
-# operand decides cannot be counted. RED:
-# tests//negative/coverage:branchretor[coverage][branch_info][test_either],
-# "the right operand of this 'or' is not counted".
-mojo_library(
-    name = "branchretor",
-    srcs = ["branchretor/__init__.mojo"],
-    conda = False,
-    coverage_debug = _LINK,
-    test_srcs = ["tests/test_either.mojo"],
 )
 
 # A test_env setting LLVM_PROFILE_FILE, which a branch coverage run sets
