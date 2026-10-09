@@ -124,8 +124,8 @@ def test_table_refuses_a_slot_out_of_range() raises:
 
 def test_table_refuses_a_negative_slot_known_only_at_run_time() raises:
     # The slot is computed at run time so the bound check cannot be folded
-    # away: `read` and `reset_slot` must refuse a slot below 0, not address
-    # the word before the table.
+    # away: `read`, `reset_slot` and `add` must refuse a slot below 0, not
+    # address the word before the table.
     comptime T = GlobalCounterTable["komira_counters_test_table_negative", 2]
     T.reset()
     var widths = List[Int]()

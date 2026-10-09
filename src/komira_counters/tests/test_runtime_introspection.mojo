@@ -11,12 +11,15 @@
 # What is pinned:
 #   * each hook's line format: prefix, key names, `=` and separators, and the
 #     value it carries (bytes, label, task_type, op, type);
-#   * `site=` is the CALLER's file and line: two calls on consecutive lines
-#     report consecutive lines of this file;
+#   * `site=` is the CALLER's file and line: the test takes its own location
+#     (`_here()`) on the line before each first call and requires the hook to
+#     report exactly the next line of the same file, so a location off by a
+#     constant fails; two calls on consecutive lines report consecutive lines;
 #   * one line per call, in call order.
 # =============================================================================
 
 from std.ffi import external_call
+from std.reflection import call_location
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_counters.runtime_introspection import (
@@ -90,6 +93,18 @@ def _site_of(line: String, key: String) raises -> Tuple[String, Int]:
     return (String(site[byte=:colon]), Int(String(site[byte=colon + 1 :])))
 
 
+@always_inline("nodebug")
+def _here() -> Tuple[String, Int]:
+    """The file and line of the line that calls `_here()`.
+
+    `call_location()` in an inlined function resolves to its caller, the same
+    mechanism the hooks use, but computed here in the test, independently of
+    the hook under test.
+    """
+    var loc = call_location()
+    return (String(loc.file_name()), loc.line())
+
+
 def test_gates_are_on_in_this_build() raises:
     # The defines reach this test; were they missing, every check below would
     # read an empty capture and fail, but this says why.
@@ -101,6 +116,7 @@ def test_gates_are_on_in_this_build() raises:
 def test_trace_alloc_names_the_caller_site_and_bytes() raises:
     var path = _capture_path("alloc")
     var saved = _begin_capture(path)
+    var here = _here()
     trace_alloc(4096)
     trace_alloc(0)
     var lines = _end_capture(saved, path)
@@ -112,6 +128,9 @@ def test_trace_alloc_names_the_caller_site_and_bytes() raises:
         String("site file is not the caller's: ") + a[0],
     )
     assert_equal(b[0], a[0])
+    # The absolute line: the first call sits on the line after `_here()`.
+    assert_equal(a[0], here[0])
+    assert_equal(a[1], here[1] + 1)
     # Consecutive call lines: the location is the call's, not the hook's.
     assert_equal(b[1], a[1] + 1)
     var site_a = a[0] + String(":") + String(a[1])
@@ -123,6 +142,7 @@ def test_trace_alloc_names_the_caller_site_and_bytes() raises:
 def test_labeled_trace_alloc_puts_the_label_first() raises:
     var path = _capture_path("alloc_labeled")
     var saved = _begin_capture(path)
+    var here = _here()
     trace_alloc["arrow_ipc.driver_enter"](123)
     trace_alloc["x"](7)
     var lines = _end_capture(saved, path)
@@ -133,6 +153,10 @@ def test_labeled_trace_alloc_puts_the_label_first() raises:
         a[0].endswith("test_runtime_introspection.mojo"),
         String("site file is not the caller's: ") + a[0],
     )
+    # The absolute line: the first call sits on the line after `_here()`.
+    assert_equal(a[0], here[0])
+    assert_equal(a[1], here[1] + 1)
+    # Consecutive call lines: the location is the call's, not the hook's.
     assert_equal(b[1], a[1] + 1)
     var site_a = a[0] + String(":") + String(a[1])
     var site_b = b[0] + String(":") + String(b[1])
@@ -151,6 +175,7 @@ def test_labeled_trace_alloc_puts_the_label_first() raises:
 def test_trace_trampoline_names_the_caller_site_and_task_type() raises:
     var path = _capture_path("trampoline")
     var saved = _begin_capture(path)
+    var here = _here()
     trace_trampoline["_state_trampoline_for"]()
     trace_trampoline["_task_trampoline"]()
     var lines = _end_capture(saved, path)
@@ -161,6 +186,10 @@ def test_trace_trampoline_names_the_caller_site_and_task_type() raises:
         a[0].endswith("test_runtime_introspection.mojo"),
         String("site file is not the caller's: ") + a[0],
     )
+    # The absolute line: the first call sits on the line after `_here()`.
+    assert_equal(a[0], here[0])
+    assert_equal(a[1], here[1] + 1)
+    # Consecutive call lines: the location is the call's, not the hook's.
     assert_equal(b[1], a[1] + 1)
     var site_a = a[0] + String(":") + String(a[1])
     var site_b = b[0] + String(":") + String(b[1])
@@ -184,11 +213,14 @@ def test_trace_arc_inc_and_dec_lines() raises:
     trace_arc_inc["AggLayout"]()
     trace_arc_dec["AggLayout"]()
     trace_arc_dec["_VyukovMpmcQueue"]()
+    trace_arc_inc["_VyukovMpmcQueue"]()
     var lines = _end_capture(saved, path)
-    assert_equal(len(lines), 3)
+    assert_equal(len(lines), 4)
     assert_equal(lines[0], "[TRACE_ARC] op=inc type=AggLayout")
     assert_equal(lines[1], "[TRACE_ARC] op=dec type=AggLayout")
     assert_equal(lines[2], "[TRACE_ARC] op=dec type=_VyukovMpmcQueue")
+    # A second type for `inc` too, so a hook printing a fixed name fails.
+    assert_equal(lines[3], "[TRACE_ARC] op=inc type=_VyukovMpmcQueue")
 
 
 def main() raises:
