@@ -59,8 +59,8 @@ tests//functional/assert_level:lib_level_and_defines mojo_emit_cov_bc --target-c
 # ExternalRunnerTestInfo, each artifact written as its short path), as
 # EXPECT's `want`.
 TEST_EXPECT='
-tests//functional/assert_level:test_none ^busybox, "sh", mem_cap\.sh, busybox, "4096", "tests//functional/assert_level:test_none", "--", busybox, "sh", gate_runner\.sh,
-tests//negative/assert_level:test_default !mem_cap
+tests//functional/assert_level:test_none ^busybox, "sh", test_deadline\.sh, busybox, "[0-9]+", "[0-9]+", "tests//functional/assert_level:test_none", "--", busybox, "sh", mem_cap\.sh, busybox, "4096", "tests//functional/assert_level:test_none", "--", busybox, "sh", gate_runner\.sh,
+tests//negative/assert_level:test_default ^busybox, "sh", test_deadline\.sh, busybox, "[0-9]+", "[0-9]+", "tests//negative/assert_level:test_default", "--", busybox, "sh", gate_runner\.sh,
 komira//tools/build/examples:test_hellopkg !mem_cap
 '
 

@@ -292,5 +292,47 @@ def test_a_part_job_of_no_stage_is_r1() raises:
     )
 
 
+def test_a_part_job_holds_no_connect_action_and_needs_something() raises:
+    _reports(
+        _mutated(
+            String("    permissions:\n      contents: read\n    steps:\n"),
+            String("    permissions:\n      contents: read\n    steps:\n      - name: farm\n        uses: ./.github/actions/farm-connect\n"),
+        ),
+        String("job 'validate': R11: runs only validations of stage 'gamma', so it must not use ./.github/actions/farm-connect"),
+    )
+    _reports(
+        _mutated(String("    needs: [build, gamma]\n"), String("")),
+        String("job 'validate': R3: needs nothing; a job that runs validations of stage 'gamma' needs 'gamma'"),
+    )
+
+
+def test_a_split_main_job_with_two_kci_runs_is_r5_alone() raises:
+    # the main job's selection cannot be read, so R9 says nothing of the
+    # split (R5 does), not even that its first, whole-stage call repeats
+    # validate's validations
+    var f = _findings(
+        _mutated(
+            String("      - run: kci run --stage gamma --only step:publish"),
+            String("      - run: kci run --stage gamma --summary-file x --release-set-hash \"$RELEASE_SET_HASH\"\n      - run: kci run --stage gamma --only step:publish"),
+        )
+    )
+    var r5 = False
+    for i in range(len(f)):
+        assert_true(f[i].find(String("R9")) < 0, _all(f))
+        if f[i].find(String("job 'gamma': R5: invokes `kci run` 2 times")) >= 0:
+            r5 = True
+    assert_true(r5, _all(f))
+
+
+def test_an_only_without_a_value() raises:
+    _reports(
+        _mutated(
+            String("--only step:publish --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"),
+            String("--summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\" --only\n"),
+        ),
+        String("R9: job 'gamma': `--only` has no value"),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

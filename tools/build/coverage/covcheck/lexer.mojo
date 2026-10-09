@@ -39,7 +39,9 @@ holds nothing but the string), or part of an import (`import x`,
 `from x import y`, a parenthesised list over several lines). Every other
 line is counted, declarations (`def`, `struct`, `comptime`, a decorator)
 and lone brackets included: this is a heuristic, which declaration
-reachability will replace with what the compiler emits.
+reachability will replace with what the compiler emits. A file no test
+compiled whose executable lines are all declarations the compiler emits no
+code for counts none of them: decls.declaration_only decides that.
 """
 
 from covcheck.text import split_lines, substr, suffix
@@ -69,7 +71,9 @@ struct SourceLine(Copyable, Movable):
     carriage return; `comment` the byte offset of its comment's `#`, or -1;
     `opens`/`closes` count `(` and `)` in its code, `brackets` is the
     number of `[` less the number of `]` in it (decls.mojo reads both to
-    find where a signature ends); `semi` is the offset of its first `;` in
+    find where a signature ends), `braces` the number of `{` less the number
+    of `}` (decls.declaration_only reads all three to find where a
+    statement ends); `semi` is the offset of its first `;` in
     code, or -1; `tail_code` is set on an import line when
     a statement that is not an import follows a `;`."""
 
@@ -79,6 +83,7 @@ struct SourceLine(Copyable, Movable):
     var opens: Int
     var closes: Int
     var brackets: Int
+    var braces: Int
     var semi: Int
     var continued: Bool
     var is_import: Bool
@@ -91,6 +96,7 @@ struct SourceLine(Copyable, Movable):
         self.opens = 0
         self.closes = 0
         self.brackets = 0
+        self.braces = 0
         self.semi = -1
         self.continued = False
         self.is_import = False
@@ -139,6 +145,7 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
     var opens = 0
     var closes = 0
     var brackets = 0
+    var braces = 0
     var semi = -1
     var continued = False
     var string_continues = False
@@ -187,6 +194,10 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
             brackets += 1
         elif c == 93:
             brackets -= 1
+        elif c == 123:
+            braces += 1
+        elif c == 125:
+            braces -= 1
         elif c == 59 and semi < 0:
             semi = i
         elif c == _BACKSLASH and i == n - 1:
@@ -201,6 +212,7 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
     out.opens = opens
     out.closes = closes
     out.brackets = brackets
+    out.braces = braces
     out.semi = semi
     out.continued = continued
     return out^

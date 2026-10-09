@@ -11,12 +11,16 @@
 #      and the instant is a plausible epoch reading, before 2100.
 #   4. thread_cpu_ns() is non-zero, never decreases, and advances while the
 #      thread burns CPU.
+#   5. _read_ns() answers 0 ("no reading") when clock_gettime refuses the
+#      clock id, and a non-zero reading for a clock id it accepts.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
 from std.time import sleep
 
 from komira_clock.clock import (
+    _CLOCK_REALTIME,
+    _read_ns,
     now_ns,
     now_unix_ms,
     now_unix_us,
@@ -76,6 +80,20 @@ def test_thread_cpu_ns_counts_own_cpu() raises:
     print("  test_thread_cpu_ns_counts_own_cpu PASS")
 
 
+def test_read_ns_refused_clock_id_is_zero() raises:
+    # No kernel defines clock id 1_000_000 (Linux accepts ids below 16 and
+    # negative CPU-clock encodings; Darwin a handful below 32), so
+    # clock_gettime fails with EINVAL and _read_ns takes its failure arm.
+    assert_equal(_read_ns(Int32(1_000_000)), UInt64(0), "refused id reads 0")
+    # The same helper on an accepted id gives a real reading, so the 0 above
+    # is the failure answer, not what _read_ns returns for every clock.
+    var real = _read_ns(_CLOCK_REALTIME)
+    assert_true(
+        real > UInt64(1_000_000_000_000_000_000), "accepted id reads epoch ns"
+    )
+    print("  test_read_ns_refused_clock_id_is_zero PASS")
+
+
 def main() raises:
     print("test_clock")
     print("==========")
@@ -83,5 +101,6 @@ def main() raises:
     test_now_ns_advances_over_sleep()
     test_unix_clocks_agree()
     test_thread_cpu_ns_counts_own_cpu()
+    test_read_ns_refused_clock_id_is_zero()
     print()
     print("ALL TESTS PASS")

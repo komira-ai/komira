@@ -180,6 +180,36 @@ def test_full_jitter_sequence_is_seed_determined() raises:
     assert_equal(loop.attempts(), 6)
 
 
+def test_seam_accessors_after_a_call() raises:
+    # rng(): the loop draws from the random source it was given exactly what
+    # decide draws for the same sends, the give-up included, so the next
+    # value it holds is the next value of a fresh source fed the same calls.
+    # sleeper().total_ms(): the sum of every wait the loop asked for.
+    var p = RetryPolicy(
+        Backoff(initial_ms=100, multiplier=2.0, max_ms=1000, jitter=Jitter.full()),
+        max_attempts=5,
+        deadline_ms=100_000,
+    )
+    var loop = RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
+        p.copy(), ManualClock(), RecordingSleeper(), SplitMix64Rng(11)
+    )
+    loop.start()
+    while loop.after_failure(Verdict.transient("x")).retry:
+        pass
+    var fresh = SplitMix64Rng(11)
+    var total = Int64(0)
+    for n in range(1, 6):
+        var d = p.decide(n, 0, Verdict.transient("x"), fresh)
+        if d.retry:
+            total += d.delay_ms
+    assert_equal(loop.rng().next_u64(), fresh.next_u64())
+    assert_equal(len(loop.sleeper().slept), 4)
+    assert_true(total > 0)
+    assert_equal(loop.sleeper().total_ms(), total)
+    # A sleeper that never slept totals 0.
+    assert_equal(RecordingSleeper().total_ms(), 0)
+
+
 def main() raises:
     test_sleep_sequence_and_attempts()
     test_never_sleeps_past_the_deadline()
@@ -187,4 +217,5 @@ def main() raises:
     test_after_outcome_with_a_classifier()
     test_restart_for_the_next_call()
     test_full_jitter_sequence_is_seed_determined()
+    test_seam_accessors_after_a_call()
     print("test_loop: OK")
