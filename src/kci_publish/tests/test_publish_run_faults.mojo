@@ -15,8 +15,8 @@
 #       (a missing member outranks an unreadable one), each named in a
 #       READ-BACK line with its state, the metapackage not attempted;
 #   (4) the settle read after an upload cannot tell, on every poll: that
-#       member is CANNOT TELL ("unconfirmed"), the step INDETERMINATE, the
-#       metapackage not attempted;
+#       member is CANNOT TELL ("unconfirmed"), the step INDETERMINATE at
+#       step 2 (nothing is read back), the metapackage not attempted;
 #   (5) a member's file changed after step 0 verified it: that member is
 #       FAILED naming the new sha256 and is never sent; the other member is
 #       still uploaded;
@@ -287,6 +287,8 @@ def test_a_settle_read_that_cannot_tell_is_unconfirmed() raises:
     assert_true(rep.has_line_containing(String("CANNOT TELL linux-64/") + t[0].coordinate.file_name + String(" -- ")), _lines(rep))
     assert_equal(rep.files[1].effect, String("uploaded"))
     assert_equal(rep.files[2].effect, String("not-attempted"))
+    # the step stopped at step 2: step 3 never read anything back
+    assert_false(rep.has_line_containing(String("READ-BACK ")), _lines(rep))
 
 
 def test_a_file_changed_after_step_0_is_never_sent() raises:
