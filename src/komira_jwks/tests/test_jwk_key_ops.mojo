@@ -117,8 +117,25 @@ def test_key_ops_in_equality() raises:
 
 
 def main() raises:
-    test_key_ops_kept_in_order_and_rendered()
-    test_malformed_key_ops_skips_the_key()
-    test_constructor_checks_key_ops()
-    test_key_ops_in_equality()
+    # Every test runs and every failure is reported.
+    var failures = String("")
+    try:
+        test_key_ops_kept_in_order_and_rendered()
+    except e:
+        failures += String("test_key_ops_kept_in_order_and_rendered: ") + String(e) + "\n"
+    try:
+        test_malformed_key_ops_skips_the_key()
+    except e:
+        failures += String("test_malformed_key_ops_skips_the_key: ") + String(e) + "\n"
+    try:
+        test_constructor_checks_key_ops()
+    except e:
+        failures += String("test_constructor_checks_key_ops: ") + String(e) + "\n"
+    try:
+        test_key_ops_in_equality()
+    except e:
+        failures += String("test_key_ops_in_equality: ") + String(e) + "\n"
+    if failures != "":
+        print(failures)
+        raise Error("test_jwk_key_ops: FAILED\n" + failures)
     print("test_jwk_key_ops: OK")
