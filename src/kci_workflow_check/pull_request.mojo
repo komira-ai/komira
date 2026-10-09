@@ -72,7 +72,7 @@ comptime GITHUB_TOKEN_SECRET: String = "secrets.GITHUB_TOKEN"
 
 def _at(doc: WorkflowDoc, node: Int) -> String:
     if node < 0:
-        return String("")
+        return String("")  # cov: unreachable every caller passes a job, step or value node the document holds
     return String("line ") + String(doc.line(node)) + String(": ")
 
 

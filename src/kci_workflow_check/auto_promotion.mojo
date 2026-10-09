@@ -847,7 +847,7 @@ def check_auto_promotion(
         try:
             st = g.stage(stage_name)
         except:
-            continue
+            continue  # cov: unreachable stage_name passed has_stage (above, or when part_stage was set), so g.stage finds it
         if st.is_pull_request():
             continue  # R6
         var whose = String("job '") + ids[i] + String("': ")
