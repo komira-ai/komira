@@ -17,8 +17,11 @@
 #     case);
 #   * a dictionary whose buffers are present but too short or inconsistent
 #     (short values buffer, short offsets buffer, last offset past the values,
-#     decreasing offsets, negative first offset): refused before any entry is
-#     read. Each refusal is asserted by error name and reason.
+#     decreasing offsets, including at the last entry, negative first
+#     offset): refused before any entry is read. Each refusal is asserted by
+#     error name and reason. Valid layouts those checks must keep accepting
+#     are pinned too: offsets that start above 0, and an all-empty string
+#     dictionary whose values buffer is omitted.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -195,6 +198,7 @@ def test_remap_does_not_look_up_codes_under_null_slots() raises:
     assert_equal(_dict_str_at(out, 0), "x", "row 0")
     assert_equal(_dict_str_at(out, 1), "z", "row 1")
     assert_true(_is_null(out, 2), "row 2 null")
+    assert_equal(_code_at(out, 2), 0, "the code under the NULL slot is 0")
     assert_equal(_dict_str_at(out, 3), "w", "row 3")
 
 
@@ -322,6 +326,57 @@ def test_decreasing_offsets_are_refused() raises:
     )
 
 
+def test_offsets_decreasing_at_the_last_entry_are_refused() raises:
+    """Offsets [0, 1, 3, 2] over "abc": the decrease is at the final offset,
+    the one the loop reads last; the last offset (2) is inside the buffer,
+    so only the decrease check refuses it."""
+    var b = _str_dict_col([0, 2], "abc", [0, 1, 3, 2], _no_nulls(2))
+    _assert_refused(
+        _pair_error(_zw(), b),
+        "ArrowConcatDictMalformed",
+        "offsets decrease at entry 3",
+        "decrease at the last entry",
+    )
+
+
+def _check_strs(
+    col: Column[HeapRegion], want: List[String], label: String
+) raises:
+    assert_equal(col._length, len(want), label + ": length")
+    for r in range(len(want)):
+        assert_equal(_dict_str_at(col, r), want[r], label + ": row " + String(r))
+
+
+def test_string_dictionary_offsets_starting_above_zero_are_accepted() raises:
+    """Offsets [2, 3, 4] over "qqzw" is the dictionary ["z", "w"] (valid
+    Arrow: the first offset need not be 0). Accepted as either input, and
+    decoded through its own offsets."""
+    var offs: List[Int] = [2, 3, 4]
+    var other_offs: List[Int] = [0, 1, 2]
+    var d = _str_dict_col([1, 0], "qqzw", offs.copy(), _no_nulls(2))
+    var other = _str_dict_col([0, 1], "xw", other_offs.copy(), _no_nulls(2))
+    _check_strs(_concat_columns(d, other), ["w", "z", "x", "w"], "based first")
+    var d2 = _str_dict_col([1, 0], "qqzw", offs.copy(), _no_nulls(2))
+    var other2 = _str_dict_col([0, 1], "xw", other_offs.copy(), _no_nulls(2))
+    _check_strs(_concat_columns(other2, d2), ["x", "w", "w", "z"], "based second")
+
+
+def test_all_empty_string_dictionary_without_values_buffer_is_accepted() raises:
+    """Two empty entries, offsets [3, 3, 3], values buffer omitted: the
+    offsets span zero bytes, so the omitted buffer is a legal zero-length
+    one. Accepted as either input; its rows decode as ""."""
+    var offs: List[Int] = [3, 3, 3]
+    var other_offs: List[Int] = [0, 1, 2]
+    var d = _str_dict_col([1, 0], "", offs.copy(), _no_nulls(2))
+    d._dict_data = None
+    var other = _str_dict_col([0, 1], "xy", other_offs.copy(), _no_nulls(2))
+    _check_strs(_concat_columns(d, other), ["", "", "x", "y"], "empty first")
+    var d2 = _str_dict_col([1, 0], "", offs.copy(), _no_nulls(2))
+    d2._dict_data = None
+    var other2 = _str_dict_col([0, 1], "xy", other_offs.copy(), _no_nulls(2))
+    _check_strs(_concat_columns(other2, d2), ["x", "y", "", ""], "empty second")
+
+
 def test_negative_first_offset_is_refused() raises:
     """Offsets [-1, 1, 2]: entry 0 would read the byte before the buffer."""
     var a = _str_dict_col([0, 1], "zw", [-1, 1, 2], _no_nulls(2))
@@ -345,4 +400,7 @@ def main() raises:
     t.test[test_last_offset_past_values_buffer_is_refused]()
     t.test[test_decreasing_offsets_are_refused]()
     t.test[test_negative_first_offset_is_refused]()
+    t.test[test_offsets_decreasing_at_the_last_entry_are_refused]()
+    t.test[test_string_dictionary_offsets_starting_above_zero_are_accepted]()
+    t.test[test_all_empty_string_dictionary_without_values_buffer_is_accepted]()
     t^.run()
