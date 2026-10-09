@@ -53,6 +53,7 @@ mojo_library(
         "tests/test_L2_codec_request_line.mojo",
         "tests/test_L2_conformance_rfc7230_corpus.mojo",
         "tests/test_L2_h1_parser_coverage.mojo",
+        "tests/test_L2_h1_rfc_departures.mojo",
         "tests/test_L2_h2_connection_state.mojo",
         "tests/test_L2_h2_continuation_splitter.mojo",
         "tests/test_L2_h2_e2e_codec.mojo",
