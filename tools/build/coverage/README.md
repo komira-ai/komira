@@ -281,16 +281,18 @@ and the result JSON splits them:
 |---|---|---|---|
 | `plain` | neither below | `unrecorded_functions` | evidence no test reaches it; the class a census counts |
 | `always_inline` | a decorator line right above it starts with `@always_inline` | `unrecorded_functions_unreliable` | none: the body is inlined into its callers and what is left may be attributed to the caller's lines or folded away |
-| `comptime_if` | its body holds a `comptime if` or `@parameter` line | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
+| `comptime_if` | its body (a nested function's lines included) holds a `comptime if` or `@parameter` line, wherever: one such line moves the whole function, and a closure holding one moves the function around it | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
 
 Known false positives, all seen on real reports: an `@always_inline` body
 whose code the compiler attributed to the caller (a test calls it, its
 caller's lines are hit, its own `return` line has no record); a
 comptime-branched constant folded at the call site; a body that is
 entirely a dropped `comptime if` arm (an instrument compiled in only with a
-build flag); a function only another operating system compiles; and, in
-the `plain` class, a function reached only through such a dropped arm (its
-only caller is never compiled here).
+build flag); and, in the `plain` class too, a function only another
+operating system compiles (a macOS-only kqueue backend's functions read as
+unrecorded on linux) and a function reached only through such a dropped
+arm (its only caller is never compiled here). So the `plain` list of a
+library with platform-gated code is not yet a list of untested functions.
 
 - A declaration is a `def` or `fn` line (code, not in a string). The
   signature runs until its `(` `)` and `[` `]` close; code after its `:` on

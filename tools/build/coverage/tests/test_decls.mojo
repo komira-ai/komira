@@ -9,7 +9,7 @@ from covcheck.ratchet import Ratchet
 from covcheck.result import gate_json, report_json
 from covcheck.annotate import DiffCoverage
 
-# Declaration reachability (decls.mojo, analyze.mojo step 10): which
+# Declaration reachability (decls.mojo, analyze.mojo step 9): which
 # functions a source declares, where each one's body ends, which of its lines
 # are its own, its class (plain, always_inline, comptime_if), and which
 # functions no report gives a line: those are listed, split by class in the
@@ -258,7 +258,7 @@ def test_a_marker_without_a_reason_leaves_the_count() raises:
 
 def test_a_file_with_branch_records_only_lists_no_function() raises:
     # No line record says which lines held code, so nothing is listed
-    # (analyze.mojo step 10).
+    # (analyze.mojo step 9).
     var files = List[String]()
     files.append("src/p/BUCK")
     files.append("src/p/m.mojo")
@@ -295,6 +295,12 @@ def test_the_class_of_a_function() raises:
         "# @always_inline in a comment\n" # 20
         "def f():\n"                      # 21
         "    z()\n"                       # 22
+        # A decorator above another one still counts (61 real sites put
+        # @always_inline above @staticmethod).
+        "@always_inline\n"                # 23
+        "@staticmethod\n"                 # 24
+        "def g():\n"                      # 25
+        "    z()\n"                       # 26
     )
     var fns = declared_functions(src)
     var kinds = String("")
@@ -303,11 +309,11 @@ def test_the_class_of_a_function() raises:
     assert_equal(
         kinds,
         String("a=") + KIND_ALWAYS_INLINE + ";b=" + KIND_ALWAYS_INLINE + ";c=" + KIND_COMPTIME_IF
-        + ";d=" + KIND_COMPTIME_IF + ";e=" + KIND_PLAIN + ";f=" + KIND_PLAIN + ";",
+        + ";d=" + KIND_COMPTIME_IF + ";e=" + KIND_PLAIN + ";f=" + KIND_PLAIN + ";g=" + KIND_ALWAYS_INLINE + ";",
     )
     # unrecorded_functions keeps the class.
     var u = unrecorded_functions(src, Dict[Int, Int](), Dict[Int, Bool]())
-    assert_equal(len(u), 6)
+    assert_equal(len(u), 7)
     assert_equal(u[2].kind, KIND_COMPTIME_IF)
 
 
