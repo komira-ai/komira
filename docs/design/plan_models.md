@@ -349,7 +349,7 @@ producer did. The producer refuses a plan in which a stateful node that needs a 
 | Bounded input of a join | none | +infinity |
 
 Two new fields carry the stored facts: `output_time_column` on JOIN and UNION when both inputs carry event time, and
-`bool preserves_event_time` on the UDF reference of `optimized_plan_udfs.md` §10.2 (a new field there; amendment A3).
+`bool preserves_event_time` on `UdfRef` (`optimized_plan_udfs.md` §10.3, "`UdfRef`"; a new field there; amendment A3).
 
 **Early firings are not a watermark source.** An early-fired row has `window_time ≥ W`. A window aggregate whose input
 contains early firings is refused (`UNBOUNDED_WINDOW_OVER_EARLY_FIRING`), so a downstream window never sees one.
@@ -911,7 +911,7 @@ open windows it discards.
 |---|---|---|
 | A1 | `storage_stack.md` | Rename the per-partition "watermark" and the property `komira.tail.<lineage>.watermarks` to "rolled offsets" (`komira.tail.<lineage>.rolled-offsets`) before it lands; `optimized_plan_sources.md` §15.4.3 renames `wm(p)` to match. |
 | A2 | `optimized_plan.md` §8 | `key_groups` on `WireExchangeNode` and `ExchangeEdge`; a keyed stateful node's `HASH` exchange is placed even when `host_count_max = 1`, and the cut elides it. |
-| A3 | `optimized_plan_udfs.md` §10.2 | `preserves_event_time` on the UDF reference. |
+| A3 | `optimized_plan_udfs.md` §10.3 ("`UdfRef`") | `preserves_event_time` on `UdfRef`. |
 
 ---
 
