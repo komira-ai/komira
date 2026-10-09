@@ -25,7 +25,7 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "creat
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo", "welded_tests_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
-load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets")
+load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
 load(
@@ -37,6 +37,7 @@ load(
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 load(":readme.bzl", "readme_kwargs")
+load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -427,10 +428,12 @@ def _library_impl(ctx):
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
         test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]])]
         markers.append(readme_marker[0])
+        if cov_link:
+            coverage_readme(ctx, tc, _build_executable, readme_marker, ungated_tset, _link_tail(c_link), src_dir, import_name, root, env_args, cov_bins, cov_runs)
 
-    # With coverage on, the gate (coverage.bzl); only the conda package waits
-    # for it and the runs, never this package.
-    cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch) if cov_link else (None, [])
+    # With coverage on, the README's run (above) and the gate (coverage.bzl);
+    # only the conda package waits for them and the runs, never this package.
+    cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
     mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
@@ -498,7 +501,7 @@ def _library_impl(ctx):
 # hidden-lines comment) fails `generate`, naming README.md:<line>.
 
 def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
-    """(marker, generated program) of the README's examples, or None
+    """(marker, generated program, count) of the README's examples, or None
     without a README. `ships`: the library's conda package installs the
     README, so a relative link in it is refused."""
     readme = ctx.attrs.readme
@@ -543,7 +546,7 @@ def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
         link_tail = _link_tail(c_link),
         env_args = env_args,
     ))
-    return marker, program
+    return marker, program, count
 
 def _readme_test_impl(actions, label, gate_label, count, program, marker, tc, closure, opt_level, link_tail, env_args):
     n = int(count.read_string().strip())
@@ -724,6 +727,7 @@ def _test_impl(ctx):
     root, staged = _test_root(ctx, ctx.label.name + ".testroot", exe, data)
     cap = memory_cap(where, "memory_cap_mib", ctx.attrs.memory_cap_mib, ctx.attrs.assert_level)
     command = cmd_args(
+        deadline_prefix(ctx, tc.busybox, where),
         capped_prefix(tc, mem_cap_script(ctx), where, cap),
         tc.busybox,
         "sh",
@@ -738,13 +742,14 @@ def _test_impl(ctx):
         hidden = root,
     )
     run_dir, run_command = _runnable(ctx, tc, exe)
+    cov_sub, cov_info = coverage_test(ctx, tc, _build_executable, _main_src(ctx), _dep_closure(ctx), _c_link(ctx), _exe_defines(ctx), data, env_args)
     return [
         DefaultInfo(
             default_output = exe,
             sub_targets = {
                 "runnable": [DefaultInfo(default_output = run_dir), RunInfo(args = run_command)],
                 "testroot": [DefaultInfo(default_output = root)],
-            },
+            } | cov_sub,
         ),
         # `buck2 run` of a test runs its binary directly, from the runnable
         # directory; `buck2 test` runs it through the gate runner on RE.
@@ -756,11 +761,11 @@ def _test_impl(ctx):
             labels = ctx.attrs.labels,
         ),
         welded_tests_info([_main_src(ctx)]),
-    ]
+    ] + cov_info
 
 mojo_test_rule = rule(
     impl = _test_impl,
-    attrs = _EXECUTABLE_ATTRS | TEST_DEFINE_ATTRS | {
+    attrs = _EXECUTABLE_ATTRS | TEST_DEFINE_ATTRS | COVERAGE_TEST_ATTRS | TEST_LIMIT_ATTRS | {
         "optimization_level": attrs.string(default = TEST_OPT_LEVEL),
         # Files staged under the test's share/, its current directory: a list
         # of sources (each at its path from the cell root) or {dest: source}.
@@ -985,4 +990,4 @@ def _mojo_library(**kwargs):
 mojo_binary = declares_docs(mojo_binary_rule)
 mojo_library = declares_docs(_mojo_library)
 mojo_shared_lib = declares_docs(coverage_shared_lib_macro(mojo_shared_lib_rule))
-mojo_test = declares_docs(mojo_test_rule)
+mojo_test = declares_docs(coverage_test_kwargs(with_test_limit(mojo_test_rule)))

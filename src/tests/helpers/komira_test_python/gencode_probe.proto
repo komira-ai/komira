@@ -1,0 +1,11 @@
+// The message protobuf_gencode.py parses: a module protoc generates from
+// this file is what a Python test built on komira's .proto files imports.
+syntax = "proto3";
+
+package komira.test.python;
+
+message Probe {
+  int64 id = 1;
+  string name = 2;
+  repeated int32 values = 3;
+}

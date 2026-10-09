@@ -174,7 +174,7 @@ COVERAGE_BRANCH_GATE = {
     "komira//src/komira_trace:komira_trace": "its eight tests' branches all classify (102 arms of 2 files)",
     "komira//src/komira_udf:komira_udf": "its four tests' branches all classify (36 arms of 1 file)",
     "komira//src/komira_uuid:komira_uuid": "its test's branches all classify (84 arms of 2 files)",
-    "komira//src/komira_wkt:komira_wkt": "its six tests' branches all classify (550 arms of 6 files, 2 of them `try` arms)",
+    "komira//src/komira_wkt:komira_wkt": "its eight tests' branches all classify (556 arms of 6 files, 2 of them `try` arms)",
     "komira//src/komira_zlib:komira_zlib": "its test's branches all classify (76 arms of 1 file, 2 of them `try` arms)",
     "komira//src/tests/e2e/komira_udf_e2e:komira_udf_e2e": "its four tests' branches all classify (16 arms of 1 file)",
     "komira//src/tests/helpers/komira_test_minio:komira_test_minio": "its two tests' branches all classify (110 arms of 4 files, 42 of them `try` arms)",
