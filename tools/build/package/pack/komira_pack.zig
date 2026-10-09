@@ -8,7 +8,7 @@
 //!   komira_pack conda-check ...     (reads a package directory back and refuses what is wrong; both kinds)
 //!   komira_pack conda-index --out-dir <dir> --package-manifest <m.json>...
 //!                                   (a local channel: the packages and each subdir's repodata.json)
-//!   komira_pack oci (--bundle <dir> | --root <dir> --entrypoint </path>) --name <n> --version <v> --repo <r>
+//!   komira_pack oci --bundle <dir> --name <n> --version <v> --repo <r>
 //!       --manifest <base manifest> --manifest-digest sha256:<hex>
 //!       --config <base config>
 //!       [--layer <base layer blob>]...
@@ -16,10 +16,10 @@
 //!
 //! `tar` writes the bundle under <top>/ as a gzip-compressed ustar archive.
 //! `oci` writes an OCI image layout: the base image's layers, then one layer
-//! holding the bundle at /opt/<name>/ (entrypoint /opt/<name>/bin/<name>) or,
-//! with `--root`, that tree at / (entrypoint `--entrypoint`). `--archive` is
-//! the layout as one tar plus a Docker `manifest.json`, which `docker load`
-//! reads; `--digest` holds the image manifest digest.
+//! holding the bundle at /opt/<name>/, with the entrypoint
+//! /opt/<name>/bin/<name>. `--archive` is the same layout as one tar plus a
+//! Docker `manifest.json`, which `docker load` reads; `--digest` holds the
+//! image manifest digest.
 //!
 //! `conda` writes one Mojo package as a conda v2 package (`.conda`) for linux-64:
 //! a zip of three stored members (`metadata.json`, `pkg-*.tar.zst` holding
@@ -144,10 +144,10 @@ fn writeTar(alloc: Alloc, entries: []Entry) ![]u8 {
     return out.toOwnedSlice();
 }
 
-/// Every directory named by `prefix` ("opt/hello/" -> "opt/", "opt/hello/"; "" -> none),
+/// Every directory named by `prefix` (e.g. "opt/hello/" -> "opt/", "opt/hello/"),
 /// then the bundle's files and directories under it.
 fn bundleEntries(alloc: Alloc, bundle: []const u8, prefix: []const u8) ![]Entry {
-    if (prefix.len != 0 and (prefix[prefix.len - 1] != '/' or prefix[0] == '/'))
+    if (prefix.len == 0 or prefix[prefix.len - 1] != '/' or prefix[0] == '/')
         fail("prefix `{s}` must be a relative path ending in /", .{prefix});
     var list = std.ArrayList(Entry).init(alloc);
     var at: usize = 0;
@@ -398,14 +398,13 @@ fn all(alloc: Alloc, a: Args, flag: []const u8) ![][]const u8 {
 
 fn cmdTar(alloc: Alloc, a: Args) !void {
     allow(a, &.{});
-    const entries = try bundleEntries(alloc, need(a.bundle, "--bundle"), plain(need(a.prefix, "--prefix"), "prefix", "/~"));
-    try writeFile(std.fs.cwd(), need(a.out, "--out"), try gzip(alloc, try writeTar(alloc, entries)));
+    const entries = try bundleEntries(alloc, need(a.bundle, "--bundle"), need(a.prefix, "--prefix"));
+    const tar = try writeTar(alloc, entries);
+    try writeFile(std.fs.cwd(), need(a.out, "--out"), try gzip(alloc, tar));
 }
 
 fn cmdOci(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--root", "--entrypoint" });
-    const root = one(a, "--root");
-    if ((root == null) == (a.bundle == null) or (root == null) != (one(a, "--entrypoint") == null)) fail("give --bundle, or --root with --entrypoint", .{});
+    allow(a, &.{});
     const name = plain(need(a.name, "--name"), "name", "");
     const version = plain(need(a.version, "--version"), "version", "~");
     const repo = plain(need(a.repo, "--repo"), "repo", "/:");
@@ -439,8 +438,9 @@ fn cmdOci(alloc: Alloc, a: Args) !void {
         if (!std.mem.eql(u8, memberStr(d, "mediaType", "base layer"), oci_layer_type)) fail("base layer {d}: not {s}", .{ i, oci_layer_type });
     }
 
-    const prefix = if (root == null) try std.fmt.allocPrint(alloc, "opt/{s}/", .{name}) else "";
-    const layer_tar = try writeTar(alloc, try bundleEntries(alloc, root orelse a.bundle.?, prefix));
+    // Our layer: the bundle at /opt/<name>/.
+    const prefix = try std.fmt.allocPrint(alloc, "opt/{s}/", .{name});
+    const layer_tar = try writeTar(alloc, try bundleEntries(alloc, need(a.bundle, "--bundle"), prefix));
     const layer_gz = try gzip(alloc, layer_tar);
 
     // The config: the base's, with our layer, entrypoint and label.
@@ -459,7 +459,7 @@ fn cmdOci(alloc: Alloc, a: Args) !void {
     var cc = config.object.get("config") orelse newObject(alloc);
     if (cc != .object) fail("base config: `config` is not an object", .{});
     var entrypoint = newArray(alloc);
-    try entrypoint.array.append(str(one(a, "--entrypoint") orelse try std.fmt.allocPrint(alloc, "/{s}bin/{s}", .{ prefix, name })));
+    try entrypoint.array.append(str(try std.fmt.allocPrint(alloc, "/{s}bin/{s}", .{ prefix, name })));
     try cc.object.put("Entrypoint", entrypoint);
     _ = cc.object.orderedRemove("Cmd");
     var labels = cc.object.get("Labels") orelse newObject(alloc);
