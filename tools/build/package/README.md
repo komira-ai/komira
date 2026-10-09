@@ -309,7 +309,8 @@ fails the build in these cases:
   form komira_pack gives a komira library dependency, and no external
   requirement), a package the release set does not list, or a member listed
   after it (the native package `komira_native` is excepted from the order, not
-  from being listed); the message names both. The `release_order_*` targets in [`BUCK`](BUCK) run this
+  from being listed); the message names both. A metadata.json holding a pin
+  (`==`) in no JSON string is refused too: the check cannot read it. The `release_order_*` targets in [`BUCK`](BUCK) run this
   check over the fixtures in `release_order/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;

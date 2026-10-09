@@ -56,7 +56,9 @@ build actions:
     package it does not list is refused, naming both, and so is a member
     listed after it. The native package komira_native, which libraries
     require and which is listed after every library, is exempt from the
-    order, not from being listed. The target's `order_tests`
+    order, not from being listed. The check reads every JSON string of the
+    file, whatever its whitespace, and refuses a metadata.json holding a pin
+    (`==`) in no string, which it cannot read. The target's `order_tests`
     (release_order_test: this check over fixture metadata.json files) must
     pass first;
   * after the stamp check, `komira_pack conda-check --kind metapackage
@@ -186,6 +188,8 @@ esac
 PATH="$T/bin"; export PATH
 unset LD_LIBRARY_PATH LD_PRELOAD || true
 no() { echo "conda_release_set_check: $*" >&2; exit 1; }
+# Whether word $2 is one of the words of $1: whole names, never a part of one.
+has() { for x in $1; do [ "$x" != "$2" ] || return 0; done; return 1; }
 names=""; metas=""
 while [ "$#" -gt 0 ]; do
     names="$names $1"
@@ -196,22 +200,26 @@ set -- $metas
 earlier=""
 for m in $names; do
     f="$1"; shift
-    # One JSON value per line; a requirement is a whole string value.
-    tr ',[]' '\\n\\n\\n' < "$f" > "$T/reqs"
+    # Each JSON string of the file, quotes included, one per line, wherever
+    # the file puts its whitespace and line breaks (komira_pack writes no
+    # escaped quote); a requirement is a whole string value.
+    grep -o '"[^"]*"' "$f" > "$T/reqs" || :
+    # Fail closed: a pin no string holds is one this parser cannot read.
+    if grep -qF '==' "$f" && ! grep -qF '==' "$T/reqs"; then
+        no "member $m's metadata.json holds a pin (==) but no requirement string the check can read ($f): write its depends as a JSON array of strings"
+    fi
     while IFS= read -r l; do
         case "$l" in
             \\"*" ==$V $B\\"") ;;
             *) continue ;;
         esac
         r="${l#\\"}"; r="${r% ==$V $B\\"}"
-        case " $earlier " in *" $r "*) continue ;; esac
-        case " $names " in
-            *" $r "*)
-                [ "$r" = komira_native ] ||
-                    no "member $m requires $r, which $SET lists after it: list each member after the members it requires (here, in release/artifacts.textproto and in libs)" ;;
-            *)
-                no "member $m requires $r, a komira package $SET does not list: a package a member requires at the set's version and build string is a member too (add $r before $m, here, in release/artifacts.textproto and in libs)" ;;
-        esac
+        ! has "$earlier" "$r" || continue
+        if ! has "$names" "$r"; then
+            no "member $m requires $r, a komira package $SET does not list: a package a member requires at the set's version and build string is a member too (add $r before $m, here, in release/artifacts.textproto and in libs)"
+        fi
+        [ "$r" = komira_native ] ||
+            no "member $m requires $r, which $SET lists after it: list each member after the members it requires (here, in release/artifacts.textproto and in libs)"
     done < "$T/reqs"
     earlier="$earlier $m"
 done

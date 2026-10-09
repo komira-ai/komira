@@ -158,6 +158,11 @@ conda_release_set_check(
         ":release_order_refuses_an_undeclared_requirement",
         ":release_order_refuses_an_undeclared_komira_native",
         ":release_order_passes_an_external_requirement",
+        ":release_order_refuses_a_requirement_named_inside_an_earlier_member",
+        ":release_order_refuses_a_requirement_named_inside_a_listed_member",
+        ":release_order_reads_a_spaced_depends",
+        ":release_order_reads_a_pretty_printed_depends",
+        ":release_order_refuses_unreadable_requirements",
     ],
 )
 
@@ -243,6 +248,62 @@ release_order_test(
     build = "hb_1",
     members = ["a"],
     metadata_files = ["release_order/requires_external.json"],
+)
+
+# a requires b; bb, whose name contains b's, is listed before a and b after
+# it. A member is found among the earlier ones by its whole name: refused.
+release_order_test(
+    name = "release_order_refuses_a_requirement_named_inside_an_earlier_member",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["bb", "a", "b"],
+    metadata_files = ["release_order/leaf.json", "release_order/requires_b.json", "release_order/leaf.json"],
+    refuses = "member a requires b, which release_set lists after it",
+)
+
+# a requires b; the set lists bb, whose name contains b's, and not b. A
+# package is found among the members by its whole name: refused as unlisted.
+release_order_test(
+    name = "release_order_refuses_a_requirement_named_inside_a_listed_member",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a", "bb"],
+    metadata_files = ["release_order/requires_b.json", "release_order/leaf.json"],
+    refuses = "member a requires b, a komira package release_set does not list",
+)
+
+# a requires b listed after it, in metadata.json with a space after each
+# comma and colon: the requirement is read and refused all the same.
+release_order_test(
+    name = "release_order_reads_a_spaced_depends",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a", "b"],
+    metadata_files = ["release_order/requires_b_spaced.json", "release_order/leaf.json"],
+    refuses = "member a requires b, which release_set lists after it",
+)
+
+# a requires b, which the set does not list, in a pretty-printed metadata.json
+# (one value per line, indented): read and refused.
+release_order_test(
+    name = "release_order_reads_a_pretty_printed_depends",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a"],
+    metadata_files = ["release_order/requires_b_pretty.json"],
+    refuses = "member a requires b, a komira package release_set does not list",
+)
+
+# a's metadata.json holds a pin (==) but no JSON string with one (its depends
+# are single-quoted): the check cannot read the requirements, so it refuses
+# rather than pass with none.
+release_order_test(
+    name = "release_order_refuses_unreadable_requirements",
+    version = "1.0.0",
+    build = "hb_1",
+    members = ["a"],
+    metadata_files = ["release_order/requires_b_unquoted.json"],
+    refuses = "member a's metadata.json holds a pin (==) but no requirement string the check can read",
 )
 
 # The release set file: kci_artifact's welded test holds it equal to
