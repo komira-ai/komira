@@ -17,6 +17,7 @@ mojo_library(
     test_srcs = ["tests/test_vocabulary_scan.mojo"],
     visibility = [
         "//src/komira_authz_api:",
+        "//src/komira_http_auth:",
         "//src/komira_http_server:",
     ],
 )

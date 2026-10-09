@@ -127,6 +127,7 @@ _TESTS_LINTS = [
     "//src/komira_authz_api:deps_lint",
     "//src/komira_aws_lambda_http:deps_lint",
     "//src/komira_contacts:deps_lint",
+    "//src/komira_http_auth:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
