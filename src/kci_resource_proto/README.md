@@ -5,13 +5,15 @@
 The kci resource catalog (`kci.resource.v1`) as protobuf messages and the
 Mojo structs generated from them: what an author writes in a deploy step.
 A `ResourceList` holds `Resource` entries; each has an author-chosen `id`,
-the other resources it `uses` (a `Ref` plus an `Access`), a `retention`, and
-one `body` arm. Version 1 declares nineteen primitives as body arms:
+the other resources it `uses` (a `Ref` plus an `Access`), a `retention`, its
+metadata (`physical_name`, the cloud name of its primary object; `labels`,
+the author's own; `adopt`, take over an existing object of that name), and
+one `body` arm. Version 1 declares twenty primitives as body arms:
 `service` (10), `container_job` (11), `worker` (12), `table` (13), `bucket`
 (14), `queue` (15), `secret` (16), `dns_zone` (18), `service_account` (20),
-`topic` (21), `schedule` (22), `network` (23), `grant` (25), `dns_record`
-(26), `certificate` (27), `subscription` (28), `subnet` (29), `ip_address`
-(30) and `event_trigger` (31).
+`topic` (21), `schedule` (22), `network` (23), `registry` (24), `grant`
+(25), `dns_record` (26), `certificate` (27), `subscription` (28), `subnet`
+(29), `ip_address` (30) and `event_trigger` (31).
 Every other number the header of `resource.proto` lists is
 held: undeclared today, so it decodes as an unknown field, and declaring it
 later is an addition. A `secret` resource is the container only; a workload
@@ -27,7 +29,10 @@ job, the worker, the `command` fields and `Size.gpus` in
 `tests/test_resource_compute_numbers.mojo`, the schedule, the event trigger
 and `SourceEvent` in `tests/test_resource_trigger_numbers.mojo`, the network,
 the subnet, the IP address and `Service.network` in
-`tests/test_resource_network_numbers.mojo`), and
+`tests/test_resource_network_numbers.mojo`, the registry and
+`ArtifactFormat` in `tests/test_resource_registry_numbers.mojo`, and
+`Resource.physical_name`, `labels` and `adopt` in
+`tests/test_resource_metadata_numbers.mojo`), and
 `tests/test_resource_held_numbers.mojo` and
 `tests/test_held_numbers_are_unused.mojo` pin every held number as
 undeclared.
@@ -148,4 +153,35 @@ var back = decode_proto[Resource](encode_proto(s))
 assert_equal(back.subnet.value().network.value().resource, "core")
 assert_equal(back.subnet.value().ipv4_cidr, "10.20.4.0/24")
 assert_false(Bool(back.subnet.value().zone))
+```
+
+A `registry` names the format of what it holds; its JSON names the value:
+
+```mojo
+from kci_resource_proto.resource import ArtifactFormat, Resource
+from komira_proto_codec import decode_json, decode_proto, encode_proto
+from std.testing import assert_equal
+
+var g = decode_json[Resource](String('{"id":"images","registry":{"format":"OCI"}}'))
+var back = decode_proto[Resource](encode_proto(g))
+assert_equal(back.registry.value().format.value, ArtifactFormat.OCI)
+```
+
+Every resource may carry metadata: the cloud name of its primary object
+(`physical_name`, with presence), the author's labels (a map), and `adopt`
+(take over an existing object of that name):
+
+```mojo
+from kci_resource_proto.resource import Resource
+from komira_proto_codec import decode_json, decode_proto, encode_proto
+from std.testing import assert_equal, assert_true
+
+var r = decode_json[Resource](
+    String('{"id":"logs","physicalName":"acme-logs","labels":{"team":"data"},')
+    + '"adopt":true,"bucket":{}}'
+)
+var back = decode_proto[Resource](encode_proto(r))
+assert_equal(back.physical_name.value(), "acme-logs")
+assert_equal(back.labels["team"], "data")
+assert_true(back.adopt)
 ```

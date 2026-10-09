@@ -1,0 +1,74 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps", "shell_lint")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "git_packs")
+
+# Test-only: komira_git's pack reader against packs the pinned git
+# (//third_party/git) writes. Nothing depends on this package.
+#
+# gen_packs.sh (the :packs target below) builds two repositories (sha1 and
+# sha256) with the same thirty-commit history and has git write packs of them
+# with OFS_DELTA and REF_DELTA entries, with no deltas, with deep and narrow
+# delta windows, with stored (uncompressed) zlib blocks, and a thin pack; with
+# each, git's own index (`git index-pack`), its `git verify-pack -v` listing,
+# and every object of the repository as `git cat-file --batch` prints it. The
+# tests (test_git_packs, test_git_thin_sha256) read each pack with komira_git
+# and require: the index it writes byte-equal to git's, entry by entry the
+# offset, size in the pack, type, delta depth and base that verify-pack lists,
+# and every object equal to cat-file's. tests/test_git_packs.mojo says what
+# each check catches; tests/test_check_refusals.mojo shows each check of
+# check.mojo, and each fixture parse refusal, raising on input that breaks it.
+# The fixtures are a build action, so the cache keeps them for exactly these
+# inputs (the pinned git and the script).
+#
+# The pinned git is built for linux-x86_64 only, so this package builds on
+# that platform only.
+
+_TESTS = [
+    "tests/test_check_refusals.mojo",
+    "tests/test_git_packs.mojo",
+    "tests/test_git_thin_sha256.mojo",
+]
+
+mojo_library(
+    name = "komira_git_pack_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_git:komira_git",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    conda = False,
+    # The packs come from the pinned git, built for linux-x86_64 only.
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    test_srcs = _TESTS,
+    # The packs (:packs, gen_packs.sh), staged at packs/.
+    test_data = {t: {"packs": ":packs"} for t in _TESTS},
+    visibility = ["PUBLIC"],
+)
+
+# The pack fixtures: one build action with the pinned git (gen_packs.sh).
+git_packs(
+    name = "packs",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    checks = [":shell_lint"],
+    git = "//third_party/git:git",
+    script = "gen_packs.sh",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["gen_packs.sh"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

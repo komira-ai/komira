@@ -11,7 +11,8 @@ Byte inputs are `Span[UInt8, _]`; fixed-size outputs are `Array[UInt8, N]`.
   expand, the TLS 1.3 `hkdf_expand_label`), `pbkdf2_hmac_sha256`.
 - AEADs: `AesGcm128`, `AesGcm256`, `ChaCha20Poly1305`, sealing and opening
   in place (`[plaintext][16-byte tag]`); opening raises on a tag mismatch.
-- Key agreement: `x25519`, `x25519_base_mult`, and a 4-way batched form.
+- Key agreement: `x25519`, `x25519_base_mult`, and a 4-way batched form;
+  P-256 ECDH, `p256_ecdh`.
 - Signatures: Ed25519 (sign, verify, public key from seed, generate), ECDSA
   P-256 and P-384, RSA-SHA256 PKCS#1 v1.5 sign and verify (with a PEM
   `PRIVATE KEY` reader), RSA-PSS verify, and RS256 JWS verification against a

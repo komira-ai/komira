@@ -1,0 +1,67 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_git's SHA-1 collision detection (komira_git/sha1dc.mojo, a
+# pure-Mojo port) against sha1collisiondetection's C, the library the port
+# follows, pinned in //third_party/sha1collisiondetection and linked into
+# these tests only (oracle.mojo holds the FFI). Nothing depends on this
+# package.
+#   test_dv_table_and_ubc -- the 32 disturbance vectors (fields and all 80
+#     message-difference words) against upstream's sha1_dvs, and the
+#     unavoidable-bit-condition mask against upstream's ubc_check over 2^20
+#     arbitrary word arrays (every DV's bit surviving in some), 2^16 random
+#     expanded blocks and every block of both SHAttered PDFs.
+#   test_digests -- digest and collision verdict against upstream's under
+#     all 16 combinations of the four switches: a generated corpus (every
+#     length 0 to 300 and multi-block lengths), the same input fed in
+#     different pieces to each side, the SHAttered PDFs and upstream's
+#     reduced-round collision, and every one-bit change of the SHAttered
+#     collision blocks.
+#   test_recompression -- the disturbance-vector loop one DV at a time:
+#     for every DV, blocks whose ubc mask has it as the highest bit, and
+#     the recompressed message and starting chaining value of that DV
+#     (upstream's ctx->m2 and ctx->ihv2) against komira_git's, and the set
+#     of DVs recompressed against upstream's mask (all 32 with the filter
+#     off); for every DV below 31, blocks where it is set below a higher
+#     DV, sampled from the blocks meeting DV 27 to 31's bit conditions.
+#
+# komira_git's oracles that need the pinned git (//third_party/git, built for
+# linux-x86_64 only) are their own packages, so this one carries no platform
+# limit: the pack reader in komira_git_pack_conformance, the protocol state
+# machines in komira_git_protocol_conformance.
+
+_TESTS = [
+    "tests/test_digests.mojo",
+    "tests/test_dv_table_and_ubc.mojo",
+    "tests/test_recompression.mojo",
+]
+
+mojo_library(
+    name = "komira_git_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_git:komira_git",
+        "//src/komira_zlib:komira_zlib",
+        "//third_party/sha1collisiondetection:sha1dc",
+    ],
+    conda = False,
+    test_srcs = _TESTS,
+    # The SHAttered PDFs and upstream's reduced-round collision, staged at
+    # sha1dc/test/.
+    test_data = {
+        "tests/test_digests.mojo": {"sha1dc": "//third_party/sha1collisiondetection:testdata"},
+        "tests/test_dv_table_and_ubc.mojo": {"sha1dc": "//third_party/sha1collisiondetection:testdata"},
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

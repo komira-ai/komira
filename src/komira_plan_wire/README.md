@@ -7,7 +7,7 @@ written by one program, in any language, and executed by another. A decoded
 plan renders to the same text as the original, so its structural hash is the
 same; `plan_round_trip` does both directions in one call.
 `plan_to_bytes_with_write_target` adds a destination (`COPY <plan> TO
-<target>`) and declares format version 3; a plain plan declares version 2,
+<target>`) and declares format version 5; a plain plan declares version 4,
 and `plan_wire_supported_versions` is the set this build reads.
 `schema_to_bytes` and `binding_to_bytes` let a frontend in another language
 write the schema of a Parquet scan or a whole scan binding without computing
@@ -24,6 +24,14 @@ the format cannot carry rather than dropping it: an in-memory source, a
 Hive-partitioned or non-local Parquet scan, an undescribable user-defined
 function and the other shapes the codec's ledger lists. Every refusal is an
 error whose text starts with one of the exported `PLAN_WIRE_*` names.
+
+The decoder rebuilds every node through its `LogicalPlan` factory and refuses
+a message whose `output_schema` differs from the one the factory derives
+(`PLAN_WIRE_OUTPUT_SCHEMA_DIVERGED`). For a join, that schema marks the side
+that supplies NULLs as nullable: the right side's fields of a LEFT join, the
+left side's of a RIGHT join, both sides' of a FULL join, and the right side's
+of an as-of join. A producer in another language must write `nullable: true`
+for those fields even when the input column is not nullable.
 
 This package does not optimize or execute a plan.
 

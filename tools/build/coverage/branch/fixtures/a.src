@@ -17,6 +17,6 @@ def pick(n: Int, flag: Bool) raises -> String:
     var half = n // 2
     var rest = n % 2
     check(half + rest)
-    for part in kind.split(","):
+    for part in kind.split(sep(",")):
         i += 1
     return kind

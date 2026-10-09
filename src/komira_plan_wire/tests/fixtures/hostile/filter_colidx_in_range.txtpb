@@ -1,5 +1,5 @@
 # proto-message: komira.plan.v1.WirePlanEnvelope
-format_version: 2
+format_version: 4
 plan {
   output_schema {
     fields {
@@ -35,7 +35,6 @@ plan {
             int_val: 25
             kind: SCALAR_KIND_DTYPE
             time_unit: SCALAR_TIME_UNIT_MICRO
-            error_code: XL_ERR_NONE
           }
         }
       }

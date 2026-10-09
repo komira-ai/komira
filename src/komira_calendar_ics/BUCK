@@ -1,0 +1,53 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The `.ics` edge of a simple calendar: iCalendar (RFC 5545) read into
+# komira_calendar's model with a report of what was dropped or refused, and
+# the model written back as iCalendar. A declared subset only (README.md);
+# zones come from komira_datetime through a ZoneSource.
+#
+# test_values pins the DATE, DATE-TIME, DURATION and UTC offset forms;
+# test_rrule the RRULE subset, accepted and refused rule by rule, and the
+# first day a rule picks;
+# test_read the file-level refusals, the event mapping and every report
+# entry; test_read_edges the rarer refusals and all-day edits;
+# test_read_cases cancelled edits, enumerated values in any case, a start
+# its rule skips, the report's cap, two series edited at one start and a
+# titled event's alarm text; test_write the export line by line
+# and its VTIMEZONEs; test_round_trip_edges the values a round trip can
+# lose, a start the export moves, series before 1970 and a series it
+# leaves out. The RFC 5545
+# examples and client-shaped files are in
+# //src/tests/conformance/komira_calendar_ics_conformance. README.md's
+# examples run as one more welded test.
+mojo_library(
+    name = "komira_calendar_ics",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_calendar:komira_calendar",
+        "//src/komira_calendar_proto:komira_calendar_proto",
+        "//src/komira_content_line:komira_content_line",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+    test_srcs = [
+        "tests/test_read.mojo",
+        "tests/test_read_cases.mojo",
+        "tests/test_read_edges.mojo",
+        "tests/test_round_trip_edges.mojo",
+        "tests/test_rrule.mojo",
+        "tests/test_values.mojo",
+        "tests/test_write.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

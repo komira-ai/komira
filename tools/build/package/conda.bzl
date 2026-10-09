@@ -156,14 +156,30 @@ def _subdir(ctx):
         return "linux-64"
     return None
 
+# The command lines of a conda package's two joins (`conda_join`, what
+# [default] is; `conda_release_join`, what [release] is), the very cmd_args
+# given to the actions, and `lib`, the label of the library packaged. A check
+# reads their `inputs`: tests//functional/coverage:conda_gate fails at
+# analysis unless both wait for every coverage marker of the library
+# (MojoCoverageGateInfo) and the `coverage_gate` given, in a build without
+# `-c komira.coverage=true`.
+CondaJoinInfo = provider(fields = {
+    "join": provider_field(typing.Any),
+    "lib": provider_field(typing.Any),
+    "release_join": provider_field(typing.Any),
+})
+
 def _copy_dir(ctx, bb, src, dst, category, identifier, hidden):
     # The published directories are copies made after the check passed, so none
     # of them exists unless it did (the gate join of mojo_library, one level up).
+    # Returns the command line, for CondaJoinInfo.
+    cmd = cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, src, dst.as_output(), hidden = hidden)
     ctx.actions.run(
-        cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, src, dst.as_output(), hidden = hidden),
+        cmd,
         category = category,
         identifier = identifier,
     )
+    return cmd
 
 def _doc_args(info):
     # The package's documentation: its README.md, installed at
@@ -279,22 +295,28 @@ def _conda_package_impl(ctx):
     # With coverage on, what ships waits for the library's coverage runs and
     # its gate (tools/build/mojo/coverage.bzl); for a library of the coverage
     # ledger (tools/build/coverage/policy.bzl, COVERAGE_NO_GATE) the gate is
-    # its `<name>_cov_gate`. The library itself waits for neither.
+    # its `<name>_cov_gate`, and so for one naming `coverage_tests`. The
+    # library itself waits for neither.
     gate = lib[MojoCoverageGateInfo].markers if MojoCoverageGateInfo in lib else []
+    if MojoCoverageGateInfo in lib and lib[MojoCoverageGateInfo].external_gate and not ctx.attrs.coverage_gate:
+        fail("{}: the coverage gate of {} is its target `<name>_cov_gate` (a library of the ledger COVERAGE_NO_GATE, or one naming `coverage_tests`), which this package does not wait for; mojo_library declares the package with it".format(ctx.label.raw_target(), lib.label.raw_target()))
     if ctx.attrs.coverage_gate:
+        want = "{}_cov_gate".format(lib.label.raw_target())
+        if str(ctx.attrs.coverage_gate.label.raw_target()) != want:
+            fail("{}: coverage_gate is {}, not {}, the gate of its library".format(ctx.label.raw_target(), ctx.attrs.coverage_gate.label.raw_target(), want))
         gate = gate + ctx.attrs.coverage_gate[DefaultInfo].default_outputs
 
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("out", dir = True)
-    _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded] + gate)
+    join = _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded] + gate)
 
     # [release]: the same directory, copied only after the RELEASE check passed
     # (stamped, with its source commit and a positive commit time, and not
     # refused) and the kcov guard passed. This is the only thing an uploader
     # reads.
     rel = ctx.actions.declare_output("release", dir = True)
-    _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded] + gate)
-    return [DefaultInfo(
+    release_join = _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded] + gate)
+    return [CondaJoinInfo(join = join, lib = lib.label, release_join = release_join), DefaultInfo(
         default_output = out,
         sub_targets = {
             "check": [DefaultInfo(default_output = checked)],
@@ -317,8 +339,10 @@ _conda_package = rule(
     attrs = {
         # The source commit of the stamp (-c komira.package_commit), "" if none.
         "commit": attrs.string(default = ""),
-        # The `<lib>_cov_gate` of a library of the coverage ledger, set by
-        # mojo_library with coverage on (tools/build/mojo/coverage.bzl).
+        # The `<lib>_cov_gate` of a library of the coverage ledger or naming
+        # `coverage_tests`, set by mojo_library with coverage on
+        # (tools/build/mojo/coverage.bzl); refused when the library's
+        # MojoCoverageGateInfo says it has one and this is not set.
         "coverage_gate": attrs.option(attrs.dep(), default = None),
         "lib": attrs.dep(providers = [MojoInfo]),
         "stamp": attrs.string(),
