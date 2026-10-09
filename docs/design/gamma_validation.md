@@ -5,8 +5,13 @@ row and note here about the shared-library package `komira_native` (the
 release state list, "Declared by open pull requests", its row in the library
 table, and the gap list) describes a plan that is replaced: each library that
 owns C ships its own shared library in its own package, and every check of an
-installed native package runs in beta's install job, not in gamma. That plan's
-slice 13 rewrites these rows; until then, read them as history.
+installed native package runs in beta's install job, not in gamma. The stage
+and channel text below (gamma publishing to and installing from the conda
+channel `gamma`) describes today's `kci.yml`; under the staged pipeline's
+glossary (#1184) beta publishes and runs the install checks, and gamma touches
+only real cloud resources. That plan's slice 13 rewrites both the
+`komira_native` rows and this stage and channel text; until then, read the
+rows as history and the channel text as today's pipeline only.
 
 ## What is this document for?
 
