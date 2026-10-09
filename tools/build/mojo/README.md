@@ -464,11 +464,35 @@ descriptor-set flag is passed. `deps` holds the `komira_db` runtime the
 generated code imports. `proto_srcs(name, srcs, import_prefix, proto_deps)`
 names `.proto` files that others import but no Mojo is generated from.
 
+```python
+load("@komira//tools/build/mojo:proto.bzl", "mojo_routes_proto_library")
+```
+
+`mojo_routes_proto_library(name, srcs, outs, messages, deps, proto_deps,
+import_prefix, test_srcs, test_data)` runs protoc with
+`protoc-gen-mojo-routes`, which serves the services of `srcs` over HTTP from
+their RPCs' `(google.api.http)` rules. For each `.proto` declaring a service
+it writes `<stem>_routes.mojo` (stated in `outs`): per service a handler trait
+with one method per RPC, `<service>_router()` building
+`komira_http_server`'s `Router` (one route per HTTP binding), and
+`<Service>Routes[H]`, a `RequestDispatcher` that binds the request message from
+path variables, query parameters and a `body: "*"` JSON body (unknown fields
+and parameters are refused with 400), answers 405 for a known path under
+another method, and writes the response as proto3 JSON. `messages` is the Mojo
+proto library of the request and response messages (its import name is where
+the routes module imports them from; it is added to `deps`); `proto_deps` lets
+protoc resolve the imports, `google/api/annotations.proto` included. Like the
+welded `mojo_proto_library`, it is two targets, `<name>_gen` and the library
+`<name>`, so `test_srcs` gate the package. What the plugin refuses is listed
+in [`../proto-codegen/src/routes/mod.rs`](../proto-codegen/src/routes/mod.rs);
+[`../proto-codegen/routes/`](../proto-codegen/routes/BUCK) is its fixture and
+tests.
+
 The toolchain, `toolchains//:mojo_proto` (declared by
 `komira_proto_toolchains()`, see [toolchains](../toolchains/README.md)), is protoc
 29.1 (the sha256-pinned static release build, with its well-known-type
-`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo` and
-`:protoc-gen-mojo-db`, built from source with the [Rust rules](../rust/README.md) against the
+`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo`,
+`:protoc-gen-mojo-db` and `:protoc-gen-mojo-routes`, built from source with the [Rust rules](../rust/README.md) against the
 crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
 in [`../proto-codegen/`](../proto-codegen/);
 [`tests//functional/proto`](../tests/functional/proto/BUCK) holds the example protos and tests.
