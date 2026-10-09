@@ -300,6 +300,28 @@ def test_es256_key_checks() raises:
     var last_one = zero.copy()
     last_one[0] = UInt8(1)
     accepted.append(last_one^)
+    # Every byte position decides: for each i, a scalar whose only nonzero
+    # byte is byte i is accepted; n with byte i lowered (later bytes 0xFF)
+    # is accepted, and n with byte i raised (later bytes 0x00) refused. A
+    # loop that skips any one byte misjudges one of these.
+    for i in range(32):
+        var only = zero.copy()
+        only[i] = UInt8(1)
+        accepted.append(only^)
+        if order[i] > UInt8(0):
+            var lo = order.copy()
+            lo[i] = order[i] - 1
+            for j in range(i + 1, 32):
+                lo[j] = UInt8(0xFF)
+            accepted.append(lo^)
+        if order[i] < UInt8(0xFF):
+            var hi = order.copy()
+            hi[i] = order[i] + 1
+            for j in range(i + 1, 32):
+                hi[j] = UInt8(0)
+            var got = _err_build("ES256", hi)
+            if got != RANGE:
+                misses += String("raised byte ") + String(i) + " -> " + got + "; "
     for i in range(len(accepted)):
         var got = _err_build("ES256", accepted[i])
         if got != "":
@@ -412,16 +434,24 @@ def test_rs256_key_checks() raises:
     # sign with: refused for its algorithm.
     var ed = _cat(_hex("302e020100300506032b657004220420"), _b64d(SEED))
     assert_equal(_err_build("RS256", ed), NOT_RSA)
-    # The rsaEncryption OID with its first or its last byte replaced
-    # (1.3.113549.1.1.1 and RSASSA-PSS), and one byte longer or shorter.
+    # The rsaEncryption OID one byte longer or shorter.
     var rsa_oid = _hex("2a864886f70d010101")
     var n256 = List[UInt8](length=256, fill=UInt8(0))
     n256[0] = UInt8(0x01)
     var misses = String("")
-    for o in ["2b864886f70d010101", "2a864886f70d01010a", "2a864886f70d01010101", "2a864886f70d0101"]:
+    for o in ["2a864886f70d01010101", "2a864886f70d0101"]:
         var got = _err_build("RS256", _pkcs8(_hex(String(o)), n256))
         if got != NOT_RSA:
             misses += String(o) + " -> " + got + "; "
+    # Each of the nine OID bytes with one bit flipped in turn: a compare
+    # that skips any one byte accepts one of them. (The real key with its
+    # last OID byte made RSASSA-PSS's follows.)
+    for i in range(9):
+        var o = rsa_oid.copy()
+        o[i] = o[i] ^ UInt8(0x08)
+        var got = _err_build("RS256", _pkcs8(o, n256))
+        if got != NOT_RSA:
+            misses += String("OID byte ") + String(i) + " -> " + got + "; "
     assert_equal(misses, "")
     # The real key with its OID's last byte replaced.
     var pss = der.copy()
