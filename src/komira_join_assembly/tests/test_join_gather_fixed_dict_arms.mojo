@@ -265,7 +265,10 @@ def test_d_malformed_dictionary_is_refused() raises:
 
 
 def _flag(phys: Int) -> Bool:
-    return phys % 3 == 0
+    """Period 4, which does not divide `_BASE = 3`: `_flag(_BASE + i)` differs
+    from `_flag(i)` for most `i`, so a value read that drops `_offset` is
+    caught."""
+    return phys % 4 == 1
 
 
 def test_e_bool_outer_side_over_nullable_window() raises:

@@ -13,8 +13,9 @@
 #   C  STRING with no offsets buffer is refused with a message naming the type.
 #   D  The serial arm's 64-bit offset promotion, driven by a lowered
 #      `offset_promote_at`: the column is retagged LARGE_STRING, its offsets are
-#      8 bytes wide, `-1` rows stay flat and empty rows copy nothing. Its twin
-#      at exactly the trip point stays STRING with 4-byte offsets.
+#      8 bytes wide, `-1` rows stay flat, empty rows copy nothing and 1- and
+#      2-byte rows are copied whole. Its twin at exactly the trip point stays
+#      STRING with 4-byte offsets.
 #   E  LARGE_STRING, outer side over a windowed nullable source (the Int64
 #      offsets arm).
 #   F  LARGE_BINARY, inner side over a windowed nullable source: the type tag is
@@ -48,12 +49,18 @@ gather that forgets `_offset` reads the wrong rows and the wrong validity bits."
 
 
 def _vals(n: Int) -> List[String]:
-    """Distinct per row; row `i % 7 == 5` is the empty string so the
-    `slen > 0` skip is exercised next to real copies."""
+    """Distinct per row (for `n <= 52`); row `i % 7 == 5` is the empty string
+    so the `slen > 0` skip is exercised next to real copies, row `i % 7 == 3`
+    is ONE byte and row `i % 7 == 1` is TWO bytes, so a copy guard raised to
+    `slen > 1` or `slen > 2` drops a row the checks read."""
     var out = List[String]()
     for i in range(n):
         if i % 7 == 5:
             out.append(String(""))
+        elif i % 7 == 3:
+            out.append(chr(65 + i % 26))
+        elif i % 7 == 1:
+            out.append(String("s") + chr(97 + i % 26))
         else:
             var s = String("r") + String(i)
             for _ in range(i % 4):
@@ -264,9 +271,20 @@ def test_d_serial_string_promotes_past_the_trip_point() raises:
     )
     var idx = _indices(23, 40 - _BASE, True)
     var total = 0
+    var one_byte = 0
+    var two_byte = 0
     for i in range(len(idx)):
         if idx[i] != -1:
-            total += len(vals[_BASE + idx[i]].as_bytes())
+            var blen = len(vals[_BASE + idx[i]].as_bytes())
+            total += blen
+            if blen == 1:
+                one_byte += 1
+            elif blen == 2:
+                two_byte += 1
+    # Fixture self-check: the rows gathered here include 1- and 2-byte values,
+    # so the short-copy path of both arms is read back below.
+    assert_true(one_byte > 0, "§D fixture gathers a 1-byte value")
+    assert_true(two_byte > 0, "§D fixture gathers a 2-byte value")
 
     # One byte below the payload: must promote.
     var out = _gather(batch, idx, True, total - 1)
