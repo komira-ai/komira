@@ -9,7 +9,8 @@
 #   * a service_account file and an external_account file are each told
 #     apart by their `type`;
 #   * an authorized_user file (a person's own login) and any other type are
-#     REFUSED, the type named;
+#     REFUSED, the type named only when it is a plain word (an oversized or
+#     binary type is never repeated);
 #   * a service_account file REACHES komira_gcp_core's reader: one whose
 #     private key is not a key is refused in the core's own words, which only
 #     the core's service-account reader writes;
@@ -108,6 +109,18 @@ def test_the_type_chooses_the_reader() raises:
     assert_true(other.startswith("kci: REFUSED:") and other.find("impersonated_service_account") >= 0, other)
 
 
+def test_a_type_that_is_not_a_word_is_not_repeated() raises:
+    var long_type = String("")
+    for _ in range(100):
+        long_type += String("x")
+    var oversized = _type_or_refusal(String(_PATH), String('{"type":"') + long_type + String('"}'))
+    assert_true(oversized.find("not a credentials type word") >= 0, oversized)
+    assert_true(oversized.find("xxxxxxxx") < 0, "an oversized type is not repeated")
+    var binary = _type_or_refusal(String(_PATH), String('{"type":"bearer \\u0001ya29.SECRET"}'))
+    assert_true(binary.find("not a credentials type word") >= 0, binary)
+    assert_true(binary.find("SECRET") < 0, "a type holding bytes outside [a-z_] is not repeated")
+
+
 def test_a_service_account_file_reaches_the_core_reader() raises:
     var text = _source_refusal(String(_SA))
     assert_true(text.find("is not an RSA PKCS#8 PEM key") >= 0, text)
@@ -201,6 +214,8 @@ def main() raises:
     test_an_unreadable_file_is_refused_without_its_path()
     print("test_the_type_chooses_the_reader")
     test_the_type_chooses_the_reader()
+    print("test_a_type_that_is_not_a_word_is_not_repeated")
+    test_a_type_that_is_not_a_word_is_not_repeated()
     print("test_a_service_account_file_reaches_the_core_reader")
     test_a_service_account_file_reaches_the_core_reader()
     print("test_an_authorized_user_file_never_reaches_the_core")

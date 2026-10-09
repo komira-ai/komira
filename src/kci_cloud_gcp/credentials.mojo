@@ -21,7 +21,12 @@
 # The variable is read through komira_gcp_core's `EnvSource` seam and the
 # file through its `FileSource`, so a test runs every branch with no
 # process environment and no file system. No error names the file's path
-# or repeats its bytes: only the variable and the type.
+# or repeats its bytes: only the variable, and the type when it is a plain
+# word. An external_account file is read once, and the text whose type was
+# checked is the text wif parses. A service_account file is read twice:
+# once here to choose, and again by komira_gcp_core's chain, whose reader
+# takes the variable and a `FileSource`, not text (its text reader is
+# private to adc.mojo).
 # =============================================================================
 
 from komira_gcp_core import (
@@ -49,11 +54,21 @@ comptime CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 comptime _WHERE = "named by GOOGLE_APPLICATION_CREDENTIALS"
 
 
-def deploy_credentials_type[E: EnvSource, F: FileSource](mut env: E, mut files: F) raises -> String:
-    """`service_account` or `external_account`: the type of the file
-    GOOGLE_APPLICATION_CREDENTIALS names (the file header). Refused: the
-    variable unset or empty, the file unreadable or not a credentials file,
-    and every other type."""
+def _is_word(s: String) -> Bool:
+    """`[a-z_]{1,64}`: a credentials type word, safe to repeat."""
+    var b = s.as_bytes()
+    if len(b) == 0 or len(b) > 64:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not ((c >= ord("a") and c <= ord("z")) or c == ord("_")):
+            return False
+    return True
+
+
+def _read_credentials[E: EnvSource, F: FileSource](mut env: E, mut files: F) raises -> Tuple[String, String]:
+    """The text of the file GOOGLE_APPLICATION_CREDENTIALS names, read once,
+    and its type (`deploy_credentials_type`'s rules)."""
     var path = env.get(ENV_GOOGLE_APPLICATION_CREDENTIALS)
     if path.byte_length() == 0:
         raise Error(
@@ -67,16 +82,32 @@ def deploy_credentials_type[E: EnvSource, F: FileSource](mut env: E, mut files: 
         raise Error("kci: REFUSED: the credentials file named by GOOGLE_APPLICATION_CREDENTIALS cannot be read")
     var t = credentials_type(parse_credentials_json(text, String(_WHERE)), String(_WHERE))
     if t == CREDENTIALS_SERVICE_ACCOUNT or t == CREDENTIALS_EXTERNAL_ACCOUNT:
-        return t^
+        return (text^, t^)
     if t == "authorized_user":
         raise Error(
             "kci: REFUSED: the credentials file named by GOOGLE_APPLICATION_CREDENTIALS is an authorized_user"
             " file (a person's own login); a deploy runs as a service_account or an external_account identity"
         )
+    # The type is repeated only when it is a plain word: the file's bytes
+    # are never echoed otherwise.
+    if not _is_word(t):
+        raise Error(
+            "kci: REFUSED: the credentials file named by GOOGLE_APPLICATION_CREDENTIALS has a type that is not"
+            " a credentials type word; a deploy reads service_account or external_account only"
+        )
     raise Error(
         String("kci: REFUSED: the credentials file named by GOOGLE_APPLICATION_CREDENTIALS is of type \"") + t
         + String("\"; a deploy reads service_account or external_account only")
     )
+
+
+def deploy_credentials_type[E: EnvSource, F: FileSource](mut env: E, mut files: F) raises -> String:
+    """`service_account` or `external_account`: the type of the file
+    GOOGLE_APPLICATION_CREDENTIALS names (the file header). Refused: the
+    variable unset or empty, the file unreadable or not a credentials file,
+    and every other type (named only when it is a plain word)."""
+    var got = _read_credentials(env, files)
+    return got[1].copy()
 
 
 def service_account_token_source[
@@ -128,14 +159,14 @@ def external_account_token_source[
     Refuses any file `deploy_credentials_type` does not call an
     external_account file before wif reads it (a service_account file goes
     to komira_gcp_core instead)."""
-    var t = deploy_credentials_type(env, files)
-    if t != CREDENTIALS_EXTERNAL_ACCOUNT:
+    # Read once: the text chosen by its type is the text wif parses.
+    var got = _read_credentials(env, files)
+    if got[1] != CREDENTIALS_EXTERNAL_ACCOUNT:
         raise Error(
-            String("kci: the credentials file named by GOOGLE_APPLICATION_CREDENTIALS is a ") + t
+            String("kci: the credentials file named by GOOGLE_APPLICATION_CREDENTIALS is a ") + got[1]
             + String(" file, which komira_gcp_core reads, not komira_gcp_wif")
         )
-    var text = files.read(env.get(ENV_GOOGLE_APPLICATION_CREDENTIALS))
-    var config = parse_external_account(text)
+    var config = parse_external_account(got[0])
     return CachingTokenSource[ExternalAccountFetcher[CS, C, F, W], K](
         ExternalAccountFetcher[CS, C, F, W](config^, subject_client^, sts^, iam^, files^, wall^), monotonic^
     )
