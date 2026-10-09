@@ -907,8 +907,9 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 
 ## 14. Questions, now decided
 
-Each question below was open in an earlier revision of this document. Each is now decided, and the text above states
-the decision; the list keeps its numbering so references to it stay valid.
+Each question below was open in an earlier revision of this document. Each is now decided, except the part of
+question 7 marked not yet decided, and the text above states the decision; the list keeps its numbering so
+references to it stay valid.
 
 1. **`group_topk`.** Keep refusing it until an owner specifies its semantics (§5.2, §5.4).
 2. **Scalar subqueries.** Host-side `SCALAR_FOLD` (§5.3); revisit only if the gap measured on TPC-H Q11, Q15 and Q22 is
@@ -924,8 +925,8 @@ the decision; the list keeps its numbering so references to it stay valid.
 6. **Return types learned at run time.** Not shipped. Every return type is explicit in the plan (§10.5): a type hint
    or a verb argument in Python, a type value in TypeScript, and a refusal by name otherwise.
 7. **Serializer acceptance across base releases.** Each base accepts its own serializer version and those of the bases
-   it supersedes within one Python minor, proven by one corpus payload per version (§9.4). The same rule holds for the
-   Node capture format within one Node major.
+   it supersedes within one Python minor, proven by one corpus payload per version (§9.4). The rule for the Node
+   capture format is **not yet decided**: it depends on which Node majors a base carries (§10.11).
 8. **System libraries.** A dependency that needs a system library (not a Python wheel) lands inside `/opt/venv/` to
    stay within §10.11's two prefixes: the image builder installs such libraries into a relocatable prefix there, the
    worker, not the supervisor, gets it on its library path, and a library that cannot be relocated is refused by name

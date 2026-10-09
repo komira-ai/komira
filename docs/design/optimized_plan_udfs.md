@@ -178,7 +178,7 @@ message UdfResources {
   uint64  max_runtime_ms       = 6;  // PYTHON_STEP only; 0 = the host's default
   uint32  max_concurrent_calls = 7;  // async functions only; 0 = the host's default
   uint64  max_state_bytes      = 8;  // AGGREGATE mergeable form only: a ceiling per group's state;
-                                     // 0 = the host's default (64 MiB)
+                                     // 0 = the host's default (64 MiB proposed; not yet decided)
 }
 ```
 
@@ -202,7 +202,10 @@ sites of one function with the same arguments are one UDF. Whether one call may 
 **Nested return types.** `WireField` describes children only one level deep today (`child_names`,
 `child_type_ids`, `child_nullables`, fields 13-15), which cannot express `list<fixed_size_list<float32>>` or a struct
 inside a list. A new field `repeated WireField children = 16` carries children recursively; a field that sets it
-leaves 13-15 empty (`PLAN_WIRE_FIELD_CHILDREN_BOTH`). It is admitted in both contexts.
+leaves 13-15 empty (`PLAN_WIRE_FIELD_CHILDREN_BOTH`). It is admitted in both contexts. An earlier draft of this
+design numbered a deferred-type mark `type_deferred = 17`; types are now always explicit (§10.5), so `WireField`
+reserves that number and name (`reserved 17; reserved "type_deferred";`), by the rule for fields removed before any
+release (§9.2).
 
 ### 10.4 Wire arms
 
@@ -424,8 +427,9 @@ function in one of two forms:
     goes into `data_blobs`, as in Python;
   - anything else (a client, a socket, a class instance with native state, a native function) is refused with
     `UDF_CAPTURE_UNSUPPORTED`, naming the variable.
-- **Node only.** The inspector capture is a Node facility. A producer on another JavaScript runtime (Bun, Deno, a
-  browser) is refused by name (`UDF_CAPTURE_RUNTIME_UNSUPPORTED`). Reading closures this way depends on V8 internals
+- **Node only, for both forms.** The SDK captures only on Node: the inspector is a Node facility, and the bundle is
+  resolved and run against Node. A producer on another JavaScript runtime (Bun, Deno, a browser) is refused by name
+  (`UDF_CAPTURE_RUNTIME_UNSUPPORTED`), for `js_module` and `js_value` alike. Reading closures this way depends on V8 internals
   that have changed between Node releases ([pulumi#11488](https://github.com/pulumi/pulumi/issues/11488)), so
   each Node major a base ships is tested against the corpus (§9.4).
 - **Source is always recoverable.** Both forms carry source text, so a stored TypeScript UDF can always be captured
@@ -593,15 +597,17 @@ begins with that base's layers. The base contains:
 - the job supervisor (`src/komira_job_supervisor`);
 - the komira Python runtime: the worker and the accepted serializers;
 - one CPython minor version;
-- one Node.js major version and the komira Node runtime: the worker and the accepted capture formats. Which Node majors
-  bases ship is a release decision, outside this format.
+- a Node.js runtime and the komira Node runtime: the worker and the accepted capture formats. *(Not yet decided:
+  which Node majors a base carries, one or several, and whether remote runs follow the client's Node major as they
+  follow its Python minor. This document assumes one major per base and runs that follow the client's major.)*
 
 The base image's `[layers]` output lets this prefix be checked: "An image whose layers begin with these is built
 FROM this one" (`packaging/images/base/README.md` in komira-ai/komira#1070, not yet on `main`). The layers the
 user's side adds may contain:
 
 - a dependency layer, or one layer per distribution;
-- a code layer with the source bundles, JavaScript bundles and payloads;
+- a code layer with the source bundles, JavaScript bundles and payloads. *(Not yet decided: where JavaScript
+  bundles and any `node_modules` live within the two prefixes below; this document assumes the code layer.)*
 - data-blob layers. A large blob may be its own layer, so an unchanged blob is pulled once per host.
 
 **Added layers write only two prefixes.** An added layer may contain paths only under `/opt/venv/` (dependencies) and
@@ -633,7 +639,8 @@ needs only the manifest bytes, so a scheduler never pulls a layer:
      fixed within a released minor, which it has broken once, in 3.5.3. Each base release compares
      `importlib.util.MAGIC_NUMBER` across the patches of each minor it ships.)*
    - Likewise `needs.node_abi` equals the base's Node major (for example `node22`). Otherwise:
-     `OPTIMIZED_ENV_NODE_ABI_MISMATCH`.
+     `OPTIMIZED_ENV_NODE_ABI_MISMATCH`. *(This follows the assumption above that runs follow the client's Node major;
+     it changes with that decision.)*
 
 The host runs these again, and then, with the layers in hand:
 
@@ -709,7 +716,8 @@ What §9.1's "accepts and executes" means for a UDF plan:
   the original image reproduces the original result.
 
 The corpus (§9.4) holds this: each UDF corpus plan is executed with an environment on the newest base of its Python
-minor, so a plan whose minor new bases no longer ship still runs, on the last base that shipped it.
+minor, or for a `NODE` UdfRef of its Node major, so a plan whose minor or major new bases no longer ship still runs,
+on the last base that shipped it.
 
 **Format version.** If the UDF arms ship in the first release that ships `OptimizedPlan`, they are part of
 `format_version` 1 and need no bump. Otherwise each field above is added under a new `format_version` (§9.2); none of
