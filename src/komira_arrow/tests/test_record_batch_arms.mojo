@@ -149,6 +149,8 @@ def _assert_utf8_slots(
     slots are those in `nulls`, and only those."""
     assert_equal(a.length, len(expected))
     assert_equal(Int(a.offsets.get_typed[Int32](0)), 0)
+    if len(nulls) > 0:
+        assert_true(Bool(a.validity), msg="nulls expected but no validity buffer")
     for i in range(len(expected)):
         var is_null = False
         for j in range(len(nulls)):
@@ -207,6 +209,7 @@ def test_empty_from_schema_offsets_per_layout() raises:
         if widths[i] == 0:
             assert_false(Bool(c._offsets))
             continue
+        assert_true(Bool(c._offsets), msg=String("no offsets, column ") + String(i))
         assert_equal(c._offsets.value().len(), widths[i])
         for k in range(widths[i]):
             assert_equal(Int(c._offsets.value().read_u8_at(k)), 0)
