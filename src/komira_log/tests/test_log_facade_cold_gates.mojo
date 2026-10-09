@@ -162,7 +162,9 @@ def test_a_disabled_engine_writes_nothing_through_the_facade() raises:
     eng.set_enabled(True)
     log.error["cov engine control", "cov_facade"]()
     LogManager._test_reset()
-    eng.flush_sink()
+    # Keeps `eng` (and its sink's fd) alive past the facade calls that reach it
+    # through the global: Mojo ends a value's life at its last direct use.
+    _ = eng.enabled()
     var got = _read(_base(tag) + ".log")
     _rm(_base(tag) + ".log")
     assert_true(String("cov engine control") in got, "control landed: " + got)

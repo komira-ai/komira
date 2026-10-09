@@ -54,7 +54,8 @@ def _engine_with_file(tag: String) raises -> SharedEngine:
 
 
 def _sink_text(mut eng: SharedEngine, tag: String) raises -> String:
-    eng.flush_sink()
+    # No fsync: a write(2) is visible to a read at once, and an fsync on a
+    # loaded disk can take tens of seconds.
     var f = FileHandle(_base(tag) + ".log", "r")
     var s = String(f.read())
     f.close()

@@ -141,7 +141,6 @@ def test_reopening_a_live_segment_truncates_and_resets_its_count() raises:
     seg.open_live()
     assert_equal(seg.current_bytes(), 0, "the count restarts with the file")
     seg.append_line(String("z"))
-    seg.flush()
     var got = _read(_base(tag) + ".log")
     _cleanup(tag)
     assert_equal(got, String("z\n"), "the reopened file was truncated")
@@ -254,6 +253,10 @@ def test_set_sink_stderr_switches_back() raises:
     eng.set_sink_stderr()
     _cleanup(tag)
     assert_equal(eng.sink_kind(), SINK_STDERR)
+    eng.flush_sink()
+    assert_equal(
+        eng.sink_flush_failure_count(), Int64(0), "a stderr flush is a no-op"
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -281,7 +284,6 @@ def test_with_capture_off_a_span_is_written_to_the_sink() raises:
     var s = eng.start_span["cov.sink.span"](0)
     eng.end_span(s, 0)
     assert_equal(eng.drain_worker(0, 64), 2)
-    eng.flush_sink()
     var got = _read(_base(tag) + ".log")
     _cleanup(tag)
     assert_true(String('"name":"cov.sink.span"') in got, got)

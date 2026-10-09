@@ -218,10 +218,11 @@ def test_short_f64_stops_the_walk() raises:
 
 
 def test_short_bool_stops_the_walk() raises:
-    """A BOOL with no byte at all: both tags are BOOL, no payload."""
+    """A BOOL with no byte at all, then an unknown tag (which needs no
+    payload): a decoder that skipped the short BOOL would print `?`."""
     var b = List[UInt8]()
     b.append(ARG_BOOL)
-    b.append(ARG_BOOL)
+    b.append(UInt8(0x7F))
     _assert_decodes(
         _rec(2, b), String("a={} b={}"), List[String](), String("short bool")
     )

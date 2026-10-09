@@ -151,13 +151,19 @@ def test_merge_keeps_a_trailing_line_with_no_newline() raises:
 
 
 def test_a_ring_of_no_capacity_is_refused() raises:
-    var refused = False
-    try:
-        _ = LogRecordRing(capacity=0)
-    except e:
-        refused = True
-        assert_true(String("capacity must be > 0") in String(e), String(e))
-    assert_true(refused, "capacity 0 must raise")
+    """Refused by `LogRecordRing` itself (its message names it), before the
+    SPSC ring underneath is built; 0 and a negative capacity alike."""
+    for cap in [0, -1]:
+        var refused = False
+        try:
+            _ = LogRecordRing(capacity=cap)
+        except e:
+            refused = True
+            assert_true(
+                String("LogRecordRing: capacity must be > 0") in String(e),
+                String(e),
+            )
+        assert_true(refused, String("capacity ") + String(cap) + " must raise")
 
 
 def test_an_engine_of_no_workers_is_refused() raises:
