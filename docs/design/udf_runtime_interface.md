@@ -1,11 +1,11 @@
 # Design: one UDF runtime interface for every language
 
-Status: proposed, not built. Nothing was built or run to write this document. Citations are to komira `origin/main` at `091b0ae450` unless marked **[#1094]**. That mark means the branch `docs/optimized-plan` at `711a6a90d4` (komira-ai/komira#1094, unmerged), and covers two files: `docs/design/optimized_plan.md` and `docs/design/optimized_plan_udfs.md`.
+Status: proposed, not built. Nothing was built or run to write this document. Citations are to komira `origin/main` at `091b0ae450` unless marked **[#1094]**. That mark means the branch `docs/optimized-plan` at `b699cdda24` (komira-ai/komira#1094, unmerged; at that commit it follows this document), and covers two files: `docs/design/optimized_plan.md` and `docs/design/optimized_plan_udfs.md`.
 
 Section numbers:
 - `§10.x` refers to `optimized_plan_udfs.md`.
-- `§9.x`, `§5.x`, `§6.x`, `§7.x` and `§11` refer to `optimized_plan.md`.
-- Sections 1 to 10 without a prefix are this document.
+- `§7.x`, `§9.x` and `§11` refer to `optimized_plan.md`; a citation of its other sections names the file.
+- Every other section number is this document's.
 
 Statements marked *(inferred)* are my reading, not facts taken from the code.
 
@@ -102,18 +102,18 @@ The plan system supports two classes of UDF. The class decides how a runtime exe
   - a UDF executor;
   - a UDF operator in the physical plan. `src/komira_plan_ir/physical_plan.mojo:206-209` lists only `OP_FILTER/PROJECT/LIMIT/JOIN_PROBE`. Today the SDK walks the expression and evaluates UDF calls itself, because of a package cycle (`src/komira_plan_ir/expr_udf_sites.mojo:1-30`).
 
-**The optimized-plan draft hard-codes two languages in six places [#1094].**
+**Why the plan format must not name languages.** A plan format with a per-language shape hard-codes its languages in at least six places. This design keeps the plan language-neutral in each of them, and the optimized-plan UDF section follows it [#1094]:
 
-| Place | Where |
-|---|---|
-| `UdfRuntime`, "PYTHON \| NODE (closed enum; a new runtime is a new value)" | `optimized_plan_udfs.md` §10.3, the `UdfRef.runtime` field |
-| `oneof code`, with one arm per language's code form | §10.3, `UdfRef`'s `oneof code` and the code messages after it |
-| `BatchFormat`, mixing the neutral `ARROW` with `PANDAS`, `POLARS`, `NUMPY`, `PY_VALUES` and `JS_VALUES` | §10.3, the `UdfRef.batch_format` field |
-| A kind named after a language, `PYTHON_STEP`, and its arm `WirePythonStepNode` | §10.2, the kinds table; §10.4, the step arm |
-| One ABI field per language, `python_abi = 6` and `node_abi = 7`, both in the digest trailer | `optimized_plan.md` §6.1, `DeclaredNeeds` and the host's checks of it; §7.1, the `DigestTrailer` |
-| Admission checks, load checks, path prefixes and error codes written per language | `optimized_plan_udfs.md` §10.11, from "Added layers write only their prefixes" through "Load check" |
+| Place | A per-language format would carry | This design carries | In the plan spec [#1094] |
+|---|---|---|---|
+| The runtime | A closed enum (`PYTHON \| NODE`); a new runtime is a new value | An open, namespaced string, `UdfCode.runtime` (§3.1) | `optimized_plan_udfs.md` §10.3, `UdfCode` |
+| The code form | A `oneof` with one arm per language's code form | A neutral `CodeForm` (`PACKAGE`, `BUNDLE`, `VALUE`), an `entry`, a digest list and a runtime-owned descriptor (§3.1) | §10.3, `UdfCode` and `CodeForm` |
+| The batch format | An enum mixing the neutral `ARROW` with `PANDAS`, `POLARS`, `NUMPY` and per-language value formats | A field of each runtime's descriptor (§3.1, *Descriptor rules*) | §10.3, the informative table of descriptors |
+| The kinds | A kind named after a language (a Python step) and an arm named after it | Shapes only: `STEP` and `WireStepNode` (§3.1) | §10.2, the kinds table; §10.4, the step arm |
+| The ABI | One `DeclaredNeeds` field per language, each in the digest trailer | One `repeated RuntimeNeed runtimes` (§3.2) | `optimized_plan.md` §6.1, `DeclaredNeeds`; §7.1, the `DigestTrailer` |
+| Admission | Checks, load checks, path prefixes and error codes written per language | Checks over the neutral fields; the rest is each runtime's `validate` and `load` (§3.1, §4.3) | `optimized_plan_udfs.md` §10.11, from "Added layers write only their prefixes" through "Load check" |
 
-Each of these places is part of a format that stays compatible forever. Once the format is released, every new language would cost a `format_version` bump plus new optimizer and validator code, forever. #1094 is unmerged and no `format_version` has shipped yet. Changing the shape now costs only edits to a document, which a follow-up to #1094 makes.
+Each of these places is part of a format that stays compatible forever. Had the format been released with a per-language shape, every new language would cost a `format_version` bump plus new optimizer and validator code, forever. No `format_version` has shipped, so the plan spec takes this shape before its first release, and an earlier draft's per-language fields are reserved, never reused (§10.3).
 
 Spark Connect took the path of one arm per language: `CommonInlineUserDefinedFunction` has `PythonUDF`, `ScalarScalaUDF` and `JavaUDF` arms ([expressions.proto](https://github.com/apache/spark/blob/master/sql/connect/common/src/main/protobuf/spark/connect/expressions.proto)). Spark's Python eval-type enum grew to dozens of values that mix shape, format and mode ([pyspark/util.py](https://github.com/apache/spark/blob/master/python/pyspark/util.py)). SPARK-55278 proposes a language-agnostic UDF protocol for Spark ([JIRA](https://issues.apache.org/jira/browse/SPARK-55278)). This design starts language-neutral instead of retrofitting it.
 
@@ -177,9 +177,9 @@ enum CodeForm {
 - So a new language adds a string, not a format value.
 - The id is part of the UDF's identity, because it is inside the canonical `UdfRef` bytes. A runtime id is therefore never renamed; a successor gets a new id.
 
-**The runtime's ABI tag is not part of the UDF's identity.** `UdfCode` carries no ABI tag (`cp312`, `node22`). The tag lives only in `needs.runtimes` (§3.2), as `python_abi` did in the draft [#1094]. So a `PACKAGE` or `BUNDLE` reference keeps its digest when it is recaptured under a new interpreter minor. A form whose bytes really are ABI-specific (a pickled payload) records that in its descriptor, and the runtime's `validate` refuses a mismatch.
+**The runtime's ABI tag is not part of the UDF's identity.** `UdfCode` carries no ABI tag (`cp312`, `node22`). The tag lives only in `needs.runtimes` (§3.2; `optimized_plan_udfs.md` §10.3 [#1094] states the same rule). So a `PACKAGE` or `BUNDLE` reference keeps its digest when it is recaptured under a new interpreter minor. A form whose bytes really are ABI-specific (a pickled payload) records that in its descriptor, and the runtime's `validate` refuses a mismatch.
 
-**The kind is the call shape, fully resolved.** #1094 records one `MAP_BATCHES` kind and derives the column or frame form from the arm that targets it (`optimized_plan_udfs.md` §10.2, the bullets after the kinds table). Because identical `UdfRef` bytes are one entry, one index could then be the target of both a `WireUdfApply` and a `WireMapBatchesNode`, with two different argument schemas. A runtime binds its schemas once per `UdfRef` at `load` (§4.3), so the shape must be in the `UdfRef`. Plan validation refuses an arm whose target has the wrong kind (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`). Plain versus mergeable `AGGREGATE` is already decided by `state_type`.
+**The kind is the call shape, fully resolved.** The plan spec records two kinds, `MAP_BATCHES_COLUMN` (the target of a `WireUdfApply`) and `MAP_BATCHES_FRAME` (the target of a `WireMapBatchesNode`), and does not derive the form from the arm (`optimized_plan_udfs.md` §10.2, the kinds table and the bullet "The kind records the call shape" [#1094]). With one `MAP_BATCHES` kind whose form came from the arm, identical `UdfRef` bytes would be one entry, so one index could be the target of both a `WireUdfApply` and a `WireMapBatchesNode`, with two different argument schemas. A runtime binds its schemas once per `UdfRef` at `load` (§4.3), so the shape must be in the `UdfRef`. Plan validation refuses an arm whose target has the wrong kind (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`). Plain versus mergeable `AGGREGATE` is already decided by `state_type`.
 
 **What each field is for, and who reads it.**
 
@@ -199,7 +199,7 @@ enum CodeForm {
 
 **Determinism is `stability`.** `IMMUTABLE`, `STABLE` and `VOLATILE` already state what the optimizer and the host may assume about repeated calls and retries (§10.7). A separate determinism field would state the same fact twice.
 
-**`STEP`, not `PYTHON_STEP`.** A step is a shape: a source node with literal arguments that runs once per run. Whether a runtime supports steps is a runtime capability (§4.2), checked at admission; it is not a plan rule. The arm is renamed `WireStepNode`. Its field and tag numbers stay the same, because nothing has been released. A `STEP` `UdfRef` must be `VOLATILE` (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`); §10.7 already lists a step as always `VOLATILE` (`optimized_plan_udfs.md` §10.7, the `VOLATILE` row of the stability table), and plan validation now enforces it.
+**`STEP` is a shape, not a language.** A step is a shape: a source node with literal arguments that runs once per run. Whether a runtime supports steps is a runtime capability (§4.2), checked at admission; it is not a plan rule. Its arm is `WireStepNode` (`optimized_plan_udfs.md` §10.4 [#1094]). A `STEP` `UdfRef` must be `VOLATILE` (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`): §10.7 lists a step as always `VOLATILE` (the `VOLATILE` row of the stability table), and plan validation enforces it (§7.2 step 8).
 
 **`ROW`: a row-shaped UDF with a declared read set.** A row-shaped function receives one row object per input row and reads its fields by name (`df.map_rows(f)`, pandas `DataFrame.apply(f, axis=1)`). Handed the whole row, it would make every column of its input live and defeat projection pushdown. So the `ROW` `UdfRef` carries the fields it reads, and nothing else reaches it.
 - **The read set is `arg_types`.** Each entry names one field and gives its explicit Arrow type. The call site's `WireUdfApply` passes one argument per entry, in the same order, usually a column reference. Names are non-empty and unique (`OPTIMIZED_UDF_ROW_READ_SET_INVALID`). The field name is what user code reads; the argument binds it by position, so a rename below the call does not change the `UdfRef`.
@@ -212,15 +212,15 @@ enum CodeForm {
 - **A `ROW` UDF is `MANUAL`** (`OPTIMIZED_UDF_ROW_NULL_MODE`). Under `PROPAGATE`, a null in a field read only on some branches would drop rows the function would have computed.
 - **Output.** One value of `return_type` per row, as for `SCALAR`. A function returning several values per row (`map_rows` returning a tuple) declares a struct, which the producer unpacks into columns with ordinary field access.
 
-**Code forms.** The three forms in #1094 (§10.6) generalize to every language:
+**Code forms.** Three neutral forms cover every language. §10.6 [#1094] is the Python and TypeScript instance, and §10.3's informative table maps an earlier draft's per-language code messages onto them:
 
-| Language | #1094 form | `CodeForm` |
+| Language | The function is | `CodeForm` |
 |---|---|---|
-| Python | `installed` | `PACKAGE` |
-| Python | `source` | `BUNDLE` |
-| Python | `value` | `VALUE` |
-| TypeScript | `js_module` | `BUNDLE` |
-| TypeScript | `js_value` | `VALUE` |
+| Python | A top-level function of an installed, non-editable distribution | `PACKAGE` |
+| Python | A top-level function of a project module, not installed or installed editable | `BUNDLE` |
+| Python | Anything else: `__main__`, a notebook cell, a lambda, a closure | `VALUE` |
+| TypeScript | A module-level function in a bundle | `BUNDLE` |
+| TypeScript | A closure or arrow function over plain data | `VALUE` |
 | A native UDF (Mojo, Rust, C, C++, Zig; §1.2) | none | `BUNDLE`, whose code objects are one shared library per platform, run by `komira/native` |
 | A managed compiled UDF (Go; any language compiled to a WASM component) | none | `BUNDLE`, whose code object is a Go shared library or a WASM component, run by that language's runtime |
 
@@ -254,7 +254,7 @@ The engine itself knows no runtime ids, so a plan is never refused because the *
 The optimized plan carries the same `UdfRef` entries. It adds one message:
 
 ```proto
-message RuntimeNeed {            // in DeclaredNeeds, replacing python_abi = 6 and node_abi = 7
+message RuntimeNeed {            // in DeclaredNeeds (optimized_plan.md §6.1)
   string runtime     = 1;
   string runtime_abi = 2;        // the runtime's own ABI tag: "cp312", "cp313t", "node22"; may be empty
 }
@@ -265,7 +265,7 @@ message RuntimeNeed {            // in DeclaredNeeds, replacing python_abi = 6 a
   - It is sorted by runtime id.
   - It has at most one entry per runtime id (`OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`): a base ships one ABI of each runtime (§10.11), so a plan naming two could never be admitted.
   - It has no missing and no unused runtime (`OPTIMIZED_UDF_RUNTIME_UNDECLARED`, `OPTIMIZED_NEEDS_RUNTIME_UNUSED`).
-  - It goes into the `DigestTrailer` in place of `needs.python_abi` and `needs.node_abi`.
+  - It is part of the `DigestTrailer` (§7.1).
   - A scheduler can place a plan using this list from the header alone.
 - **Shape decisions are pinned, as they are today.** These are:
   - where each UDF is placed (§10.9);
@@ -305,7 +305,7 @@ At lowering, the host binds the following for each runtime. None of it is record
 - **Pool size**: the number of contexts. It is set from the CPU count, `max_workers`, and the memory a context uses *with its UDFs loaded* (`worker_mem_bytes`), as §10.10 states. For a runtime whose loaded objects belong to one context (a Node isolate, a Python sub-interpreter), a captured model is loaded once per context, so its memory is counted once per context.
 - **Batch rows**: adapted at run time, below `max_batch_rows` (§10.8).
 
-These are host-local choices (§5.3). Two hosts may bind one plan differently. The results are still equal, because the contract (§4), the call semantics (§3.4) and the post-conditions (§4.6) are the same on both transports.
+These are host-local choices (`optimized_plan.md` §5.3). Two hosts may bind one plan differently. The results are still equal, because the contract (§4), the call semantics (§3.4) and the post-conditions (§4.6) are the same on both transports.
 
 ### 3.4 Call semantics the format fixes
 
@@ -848,7 +848,7 @@ This follows two precedents: DuckDB's C extension API, whose function struct is 
 - The ABI promise matters only for a runtime built and shipped separately (§8.3). Such a runtime must keep loading into newer bases without a rebuild for every release.
 
 **Candidates for ABI 1.1, not in 1.0.** Entries the format may need later are left out of 1.0 rather than frozen with undefined meaning:
-- **`snapshot` and `restore`** for state a streaming checkpoint keeps (§10.10 lets a stateful callable define them, `optimized_plan_udfs.md` §10.10, the bullet on worker state across a restart). Their meaning must be fixed first: per instance, called by the host only between calls at a checkpoint barrier, returning one Arrow value. Until they exist, a restarted context starts with empty state, and mergeable aggregate state is checkpointed through `agg_state`.
+- **`snapshot` and `restore`** for a callable's own state, kept across a restart by a streaming checkpoint. ABI 1.0 has neither, and the plan spec says so: a restarted worker loads the code again and starts with empty state, and keeping a callable's own state needs these entries (`optimized_plan_udfs.md` §10.10, the bullet on worker state across a restart, which cites this section [#1094]). Their meaning must be fixed first: per instance, called by the host only between calls at a checkpoint barrier, returning one Arrow value. Until they exist, a restarted context starts with empty state, and mergeable aggregate state is checkpointed through `agg_state`.
 - **Per-row errors** for a TRY form (§4.5).
 
 ### 8.2 Plans stay readable forever
@@ -873,7 +873,7 @@ Each stage lands with its tests welded and its testing plan stated: what each te
 
 | Stage | Work | Owner area | Done when |
 |---|---|---|---|
-| S0 | This document; the format edits to the optimized-plan UDF section, made before any `format_version` ships, including the `ROW` kind (#1094's verb table maps `DataFrame.apply(f, axis=1)` to `SCALAR`; it moves to `ROW`, with `map_rows`) | design | Both merged |
+| S0 | This document, and the optimized-plan UDF section aligned to it before any `format_version` ships [#1094]: open runtime ids, `CodeForm`, `needs.runtimes`, `STEP`, the two `MAP_BATCHES` kinds and the `ROW` kind (`DataFrame.apply(f, axis=1)` and `map_rows` map to `ROW`) | design | Both merged |
 | S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `komira_arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case in-process; the leak, double-release and skip-validation mutants go red |
 | S2 | The conformance corpus package (ABI cases), the harness and the coverage assertion; the runtime-swap invariance test for the optimizer (§3.2) | tests, optimizer | The corpus runs against echo; the invariance mutant goes red |
 | S3 | The worker transport: `komira_udf_worker` and `komira-udf-worker`, slot heaps, worker-to-engine copy-out, IPC framing, frame credits, `HELLO`, cancel, crash mapping; supervisor integration (user id, limits, `posix_spawn`) | engine, supervisor | Echo passes the corpus on both transports; the worker-abort, held-views and cancel cases pass |
