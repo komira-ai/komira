@@ -1,5 +1,13 @@
 # Gamma validation: what checks a release before prod, per package family
 
+**Superseded in part by [native_packaging.md](native_packaging.md).** Every
+row and note here about the shared-library package `komira_native` (the
+release state list, "Declared by open pull requests", its row in the library
+table, and the gap list) describes a plan that is replaced: each library that
+owns C ships its own shared library in its own package, and every check of an
+installed native package runs in beta's install job, not in gamma. That plan's
+slice 13 rewrites these rows; until then, read them as history.
+
 ## What is this document for?
 
 `gamma` is the stage of komira's release machine that publishes a release to
