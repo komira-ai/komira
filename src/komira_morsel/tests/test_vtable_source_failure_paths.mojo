@@ -368,13 +368,25 @@ def test_projection_not_pushed_or_refused() raises:
 
 
 def test_projection_with_an_index_outside_the_schema_is_not_pushed() raises:
-    # komira-ai/komira#1012: the connector would accept anything, so every
-    # call that reaches it counts. Before the fix [1, 5, -1, 0] reached it
+    # komira-ai/komira#1012: the connector counts every call that reaches
+    # it, accepted or refused. Before the fix [1, 5, -1, 0] reached it
     # with n = 4 while the schema narrowed to 2 columns.
     var s = _make([KOMIRA_SCAN_OK], KOMIRA_SCAN_CAP_PROJECTION)
     var src = VTableMorselSource(_vt(s), _schema())
-    # One assert after each call, so a check dropped for one kind of bad
-    # index fails here by name instead of aborting later in `field_at`.
+    # First against a connector that refuses: a refused push leaves the
+    # schema alone, so a bound check dropped for one kind of bad index fails
+    # the assert after that call by name. Against an accepting connector the
+    # same defect aborts inside `set_projection` (the narrowing reads
+    # `field_at(bad)`), which kills the binary and hides other failures.
+    s[].proj_rc = KOMIRA_SCAN_ERR_UNSUPPORTED
+    src.set_projection([1, 5, -1, 0])
+    assert_equal(s[].proj_calls, 0, "refusing: mixed bad indices are not pushed")
+    src.set_projection([2])
+    assert_equal(s[].proj_calls, 0, "refusing: an index at the width is not pushed")
+    src.set_projection([0, -1])
+    assert_equal(s[].proj_calls, 0, "refusing: a negative index is not pushed")
+    # Then accepting: nothing bad is pushed and the schema is not narrowed.
+    s[].proj_rc = KOMIRA_SCAN_OK
     src.set_projection([1, 5, -1, 0])
     assert_equal(s[].proj_calls, 0, "mixed bad indices are not pushed")
     src.set_projection([2])
