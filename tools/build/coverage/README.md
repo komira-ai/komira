@@ -257,6 +257,19 @@ the end of a line (CRLF) are not part of the line.
 Everything else counts, declarations included (`def`, `struct`,
 `comptime`, a decorator, a lone `)`).
 
+Except in a **declaration-only** file: one whose statements outside its
+imports are, at the top level, `trait` headers and `comptime` declarations
+only, and in a trait's block `comptime` declarations, decorators and
+methods whose body is `...` alone (a trait of required members, aliases:
+the compiler emits no code for any of it). Such a file, if it has no
+exemption marker and no branch record, counts no line and is not counted
+as a file; it raises `DeclarationOnlyFile`, information in every package
+(`info_findings`, its `count` the lines it would have counted), never a
+failure. The test is conservative: a trait method with any other body (a
+default implementation, even `pass`), a free function, a struct, a `;`
+outside an import, a tab in the indentation, a header ending neither with
+`:` nor with `: ...`, keep the file counted.
+
 ## Exemptions
 
 A line no test can reach is exempted in the source by an end-of-line comment:
@@ -333,6 +346,7 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | `BranchFloorMissing` | branches were measured and the row's branch floor is `-` |
 | `MutantSurvived` | a surviving mutant |
 | `UnmeasuredFile` | a source file of a measured package that no report names still has lines counted (see Files no test compiled) |
+| `DeclarationOnlyFile` | information, never counted: a file no report names is declaration-only and counts no line (see Files no test compiled) |
 | `BranchUnmeasuredFile` | a file with a line record, in a package one of whose kept files a branch record file names, that no branch record file names and whose line report gives no branch record of its own: cov_branch_classify names every measured file its test holds code of (a decision-free one with no `BRDA`), so this file's branches were not read, and counting them as none would lift the package's branch number. A failure in enforce mode, listed in census mode, as `UnmeasuredFile` is |
 | `ExemptionWithoutReason`, `StaleExemption` | see Exemptions |
 
@@ -354,7 +368,8 @@ gate never fails on a finding, in any mode. An input covcheck refuses
 test-only package (a row it has is kept as it was), so test-only packages
 have no floor. The summary's status
 column says `info` (with the kinds, `info: BelowTarget, MissingRow`), its
-findings are listed under `### Info: test-only packages (N)`, the target
+findings are listed under `### Info: test-only packages, declaration-only
+files (N)` (with every `DeclarationOnlyFile`), the target
 line names the directories, the title counts them (`N info`), and the
 annotations of its files are `notice` in every mode. The policy names the
 directories (`COVERAGE_INFO_ONLY_DIRS`, The build gate).

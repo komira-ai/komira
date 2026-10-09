@@ -23,7 +23,11 @@ and the findings: the one computation both `covcheck report` and
    file. Such a file with a line left raises `UnmeasuredFile` and is counted
    in `unmeasured_files`; one with no line left (an `__init__.mojo` of
    imports, every line exempted) raises nothing and is listed only for its
-   markers, if it has any.
+   markers, if it has any. A declaration-only file (lexer.mojo: traits
+   whose methods have no body, `comptime` declarations, imports) with no
+   marker and no branch record counts no line either: it emits no code.
+   It is not counted as a file, and raises `DeclarationOnlyFile`, which is
+   information (`info_findings`), never counted.
 5. The mutants are read and mapped the same way.
 6. Per package: lines, branches, exemptions, mutants; the ratchet row.
 7. Findings: `BelowTarget` (line, and branch when measured, below
@@ -74,7 +78,7 @@ from covcheck.branch_lcov import DecisionShapes, parse_branch_lcov
 from covcheck.cobertura import parse_cobertura
 from covcheck.exempt import STATUS_NO_REASON, STATUS_STALE, Exemption, apply_exemptions, scan_markers
 from covcheck.lcov import parse_lcov
-from covcheck.lexer import executable_lines
+from covcheck.lexer import declaration_only, executable_lines
 from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, is_test_source, map_path, package_of
@@ -83,6 +87,7 @@ from covcheck.stats import (
     BELOW_TARGET,
     BRANCH_NOT_MEASURED,
     BRANCH_UNMEASURED_FILE,
+    DECLARATION_ONLY_FILE,
     NOT_MEASURED,
     EXEMPTION_WITHOUT_REASON,
     MODE_NEUTRAL,
@@ -170,7 +175,8 @@ struct Analysis(Copyable, Movable):
     is sorted by package; `exemptions` and `mutants` by path then line.
     `info_dirs` are the options' `info_packages`, `info_packages` the
     measured packages they cover (in `packages` order) and `info_findings`
-    those packages' findings, which `findings` does not hold (step 8)."""
+    those packages' findings, which `findings` does not hold (step 8),
+    then every package's `DeclarationOnlyFile` (step 4)."""
 
     var mode: String
     var target_bp: Int
@@ -275,11 +281,13 @@ def _unmeasured_files(
     repo: RepoFiles,
     sources: Sources,
     opts: Options,
+    mut notes: List[Finding],
 ) raises -> List[Finding]:
     """Step 4's full source: counts every file of a `measured` package that
     is not `named` (no line report gives it a record), with the branches
     `pending` holds for it (branch record files'); returns their
-    `UnmeasuredFile` findings."""
+    `UnmeasuredFile` findings, and adds a `DeclarationOnlyFile` to `notes`
+    for each declaration-only file it counts nothing of."""
     var paths = List[String]()
     for e in repo.files.items():
         var path = e.key
@@ -296,12 +304,20 @@ def _unmeasured_files(
         var text = sources.read(paths[i])
         var f = FileCov(paths[i])
         var exe = executable_lines(text)
+        var markers = scan_markers(paths[i], text)
+        if len(exe) > 0 and len(markers) == 0 and paths[i] not in pending and declaration_only(text):
+            notes.append(Finding(
+                String(DECLARATION_ONLY_FILE), pkg, String(""), -1, -1, paths[i], 0,
+                String("UnmeasuredFile (declaration-only): no test binary compiled this file, and it declares only traits whose methods have no body, comptime values and imports, which emit no code: its ")
+                + String(len(exe)) + String(" executable lines by the heuristic are not counted"),
+                len(exe),
+            ))
+            continue
         for k in range(len(exe)):
             f.add_line(exe[k], 0)
         if paths[i] in pending:
             f.absorb(pending[paths[i]])
         var branches = f.branch_found()
-        var markers = scan_markers(paths[i], text)
         var removed = apply_exemptions(f, markers)
         for e in range(len(markers)):
             exemptions.append(markers[e].copy())
@@ -523,7 +539,8 @@ def analyze(
         a.files.append(f^)
         a.file_packages.append(pkg)
         a.unmeasured.append(False)
-    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts)
+    var decl_notes = List[Finding]()
+    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes)
     var mut_pkgs = List[String]()
     var kept_muts = List[Mutant]()
     for i in range(len(muts)):
@@ -645,6 +662,9 @@ def analyze(
             a.info_findings.append(findings[forder[i]].copy())
         else:
             a.findings.append(findings[forder[i]].copy())
+    # Declaration-only files are information in every package.
+    for i in range(len(decl_notes)):
+        a.info_findings.append(decl_notes[i].copy())
     for i in range(len(a.packages)):
         if is_info_package(a.packages[i].package, opts.info_packages):
             a.info_packages.append(a.packages[i].package)

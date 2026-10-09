@@ -22,8 +22,10 @@ package has no row (or, for the branch floor, the row has `-`). A package's
 raised `UnmeasuredFile`; a finding's `line` is 0 when it is about a whole file, its `count`
 the lines an `UnmeasuredFile` counts uncovered (`null` for other kinds).
 `info_packages` are the measured test-only packages (`--info-package`) and
-`info_findings` their findings, which `findings` does not hold and the
-conclusion does not count (analyze.mojo, step 8).
+`info_findings` their findings, then any package's `DeclarationOnlyFile`
+(a file no test compiled that counts no line, analyze.mojo step 4), which
+`findings` does not hold and the conclusion does not count (analyze.mojo,
+step 8).
 """
 
 from covcheck.analyze import Analysis
