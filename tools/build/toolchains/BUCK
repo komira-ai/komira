@@ -57,8 +57,9 @@ pixi_pin_record(
 
 # The DEPLOY_PROBE pre-flight's helper image of the linux-x86_64 row, as
 # kci.yml's validate job passes it (--preflight-image); src/kci_workflow_check's
-# test_repo_kci_yml holds the job to this record. Until the table records a
-# digest it is the table's UNPINNED_IMAGE, which kci refuses for any probe.
+# test_repo_kci_yml holds the job to this record. A row whose image is a
+# `placeholder(...)` hands on the table's UNPINNED_IMAGE, which kci refuses
+# for any probe.
 preflight_image_record(
     name = "preflight_image_linux_x86_64",
     image = preflight_image("linux-x86_64"),

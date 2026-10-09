@@ -503,10 +503,9 @@ jobs:
       PIXI_SHA256: 807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f
       # The DEPLOY_PROBE pre-flight's helper image: the linux-x86_64 row's
       # `preflight_image` of the same table, exactly (test_repo_kci_yml holds
-      # it to the table's record). Until a digest is recorded it is the
-      # table's placeholder, which kci refuses for any DEPLOY_PROBE; this
-      # job's validations take it and run no probe.
-      PREFLIGHT_IMAGE: unpinned.invalid/busybox@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      # it to the table's record): busybox 1.37.0's linux/amd64 image
+      # manifest, by digest.
+      PREFLIGHT_IMAGE: docker.io/library/busybox@sha256:66a6306db78bf2dbf3487f293aa8d6990d8e506fdffab9cc43fe422becf886e4
     steps:
       # The machine file at the release revision; the full history kci's
       # read of this workflow at its commit needs. The README examples the

@@ -799,11 +799,12 @@ HEAD:refs/heads/MAIN`); it must be refused.
   rule with holes, and the other rules above are documented, not verified.
   kci never inserts or removes a rule and needs no privilege at run time.
   `nc`'s exit contract is a farm test
-  (`//src/kci_validate:preflight_exit_contract`). The helper image's
-  linux/amd64 digest is not recorded in the table yet: until it is,
-  `preflight_image` is a `placeholder(...)`, `--preflight-image` carries an
-  all-zero digest, and kci refuses every run that selects a `DEPLOY_PROBE`
-  at start. `CONDA_INSTALL_SMOKE` has the same exposure today and takes the
+  (`//src/kci_validate:preflight_exit_contract`). The helper image is
+  Docker Hub's `library/busybox` 1.37.0, pinned by its linux/amd64 image
+  manifest digest (not the multi-arch index's). A row whose
+  `preflight_image` is a `placeholder(...)` passes an all-zero digest
+  instead, and kci refuses every run that selects a `DEPLOY_PROBE` at
+  start. `CONDA_INSTALL_SMOKE` has the same exposure today and takes the
   same pre-flight in a follow-up.
 - **The channels.** prefix.dev channels `komira-ai/gamma` and
   `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),

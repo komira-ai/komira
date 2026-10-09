@@ -387,10 +387,11 @@ PLATFORMS = {
         "pool": "pool=mojo-sized",
         # The DEPLOY_PROBE pre-flight's helper image (kci_validate
         # deploy_probe.mojo): busybox, whose `nc -z` checks that the link-local
-        # metadata address does not answer from a container. Its linux/amd64
-        # manifest digest is recorded by the maintainers; until then kci refuses
-        # every DEPLOY_PROBE run (docs/ci.md).
-        "preflight_image": placeholder("busybox's linux/amd64 image manifest digest is not recorded yet; until it is, kci refuses every DEPLOY_PROBE"),
+        # metadata address does not answer from a container. Docker Hub
+        # library/busybox tag 1.37.0: the linux/amd64 image manifest's digest,
+        # not the multi-arch index's (the index lists every platform; this
+        # pins the one image a linux-x86_64 runner pulls).
+        "preflight_image": image("docker.io/library/busybox@sha256:66a6306db78bf2dbf3487f293aa8d6990d8e506fdffab9cc43fe422becf886e4"),
         "re_key": "linux_x86_64_properties",
         "registered": True,
         "remote_required": True,

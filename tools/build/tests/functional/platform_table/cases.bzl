@@ -148,7 +148,7 @@ def platform_table_cases():
         refusal = host_refusal(h)
         if (refusal == None) != (why == None) or (why != None and why not in refusal):
             fail("platform table: host {} {}: refusal is {}, expected {}".format(os, arch, refusal, why))
-    # what --preflight-image is given: the unpinned placeholder until a digest is recorded
+    # what --preflight-image is given: the row's digest reference, or the unpinned placeholder
     want = PLATFORMS["linux-x86_64"]["preflight_image"].get("image") or UNPINNED_IMAGE
     if preflight_image("linux-x86_64") != want or preflight_image("darwin-arm64") != UNPINNED_IMAGE:
         fail("platform table: preflight_image() hands on {} and {}".format(preflight_image("linux-x86_64"), preflight_image("darwin-arm64")))
