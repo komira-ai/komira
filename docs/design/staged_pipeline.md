@@ -25,7 +25,15 @@ The project owner's ruling: publishing is continuous, through three stages, **be
 - **(A) No bake for now.** A 24-hour bake in gamma is the goal, but it is useful only once canaries
   and monitoring watch the candidate during it. It is a future stage, gated on its prerequisites
   ([Future: gamma bake](#future-gamma-bake), #1183).
-- **(B) Gamma is single-flight:** one run at a time, the latest candidate wins (b).
+- **(B) Gamma is single-flight:** one run at a time, the latest candidate wins (b). **Departure,
+  for the project owner's ruling:** gamma is two slots, the `gamma` job (publish, then the
+  real-cloud wait, e2) and the `validate` job (the two installs), and `validate` runs after
+  `gamma` releases `kci-gamma-main`. So candidate N's installs can run while candidate N+1
+  publishes and dispatches: two candidates are in gamma at once, for the length of one install.
+  *Recommendation:* accept. Each job is pinned to its own set's digests, and prod refuses unless
+  `gamma`'s `real_cloud_set_hash` equals `validate`'s `validated_set_hash` (R19 amended, e2), so
+  the overlap can never promote a set that one of the two did not vouch for. Holding both jobs in
+  one group is what question 1 rules out; questions 1 and 11 give the detail.
 - **(C) Prod is promoted when every gamma validation has passed**, with no wait after it.
 - **(D) Gamma's validations include an external real-cloud validation**, run privately by the
   operator, outside this repository ([e2](#e2-gamma-the-external-real-cloud-validation)).
@@ -47,8 +55,9 @@ prod": S10c's release checks move from `build` into beta's `checks`, and S12's i
 from gamma's `validate` to `beta_install`, so both run **before** anything is published. Everything
 else in #1168 stands. #1168 leaves real cloud accounts out of its own scope and holds no cloud
 credential; e2's validation keeps that true for this repository (the cloud credential is the
-operator's, outside it), and #1168 points here for it. Merge order: **#1168 first, then this doc**; the two do not conflict, and the
-index row below says which sections this doc overrides. P4 rewrites ci.md's "Queued runs" and "Never
+operator's, outside it), and #1168 points here for it. Merge order: this doc's first version
+(#1173) merged first, and #1168 is still open; the two do not conflict, so #1168 can merge before
+or after this amendment, and the index row below says which sections this doc overrides. P4 rewrites ci.md's "Queued runs" and "Never
 backward", which today describe prod only.
 
 ## a. Where the build-once files live, and how each stage proves it has them
@@ -303,37 +312,56 @@ with the validation's owner:
 | receiver refuses | a `commit` not on `main`, or a `set_hash` other than the one that commit's gamma run published |
 | answer | a commit **status** on `commit` in this repository, context exactly `kci-real-cloud/<set_hash>`, state `success`, `failure` or `error` |
 | passes | `success` only |
-| fails closed | `failure`; `error` (an infrastructure fault on the operator's side); no status by the deadline; a status whose context names another set hash |
-| deadline | 90 minutes after the dispatch (the operator's run is capped at 75) |
+| fails closed | `failure`; `error` (an infrastructure fault on the operator's side); no status by the deadline; a status whose context is not byte-for-byte `kci-real-cloud/<set_hash>` (another set hash, a prefix, a suffix, another case) is never counted, so the attempt fails at the deadline unless the exact `success` arrives in time (it does not fail at once) |
+| deadline | 90 minutes after the dispatch (the operator's run is capped at 75); in practice a few seconds less, see step 3 |
 | after a red | gamma fails and nothing promotes; re-run once (#1168's flake policy); no override without the project owner's explicit go |
+| flakes | #1168's other half applies: once `real-cloud` needs its re-run twice in ten releases, it gets an issue with an owner, as #1168 requires of every check; the run summary names each attempt and its result, which is what that count reads |
 
 **Where it runs: in the `gamma` job, after the publish.** `kci run --stage gamma --only step:publish
 --only validation:real-cloud` (one `kci run`, R5). The job keeps its job-level group
-`kci-gamma-main` (b) for the whole wait, so gamma is single-flight through its validation (B):
+`kci-gamma-main` (b) for the whole wait, so the `gamma` job is single-flight through its
+validation (B):
 while it waits, a newer commit's gamma job is pending, a still newer one replaces it, and the
-running one is never cancelled. It cannot be a part job like `validate`: a part job holds no
+running one is never cancelled. The `validate` job runs after it, in its own slot, so one
+candidate's installs can overlap the next candidate's publish; that is the departure stated
+under (B). It cannot be a part job like `validate`: a part job holds no
 environment (R9), and the dispatch credential is an environment secret; and a job of its own in
 the same group would let the stage cancel its own pending newer run (question 1).
 
 **The steps kci takes (P7):**
 
-1. **Before any effect,** with the run's other start checks: the run is a push to `main`, both
-   secret names resolve (`--secret-store env`, kci's existing store for secret material), and
+1. **Before any effect,** with the run's other start checks: the run is a push to `main`, all
+   three secret names resolve (`--secret-store env`, kci's existing store for secret material), and
    `REVISION` is a full commit id. Otherwise `REFUSED`, exit 2, and nothing is published (a
    publish that cannot be validated never starts).
 2. **Publish** (EXISTS).
 3. **The clock is GitHub's.** kci reads this repository's statuses of `commit` once and takes
    `T0` from the response's `Date` header. `deadline_utc = T0 + 90 min`. Every later "now" is a
-   later response's `Date`, never the runner's clock.
+   later response's `Date`, never the runner's wall clock. **The window opens a few seconds
+   early:** `T0` comes from the read just before the dispatch, not from the dispatch's own
+   response, because the dispatch's payload must already carry `deadline_utc`. The deadline is
+   therefore dispatch + 90 min less the seconds between that read and the dispatch: stricter
+   than the ruling, never looser, and it fails closed. If this read fails or its response has no
+   `Date`, the attempt is FAILED with no dispatch (kci does not ask without a deadline).
 4. **Dispatch** with `{set_hash, commit, deadline_utc}`. Any answer but `204` is a failed attempt;
    kci does not wait on an ask that was not accepted.
-5. **Wait.** Every 60 seconds, list `GET /repos/{this repo}/commits/{commit}/statuses` (newest
-   first, as GitHub documents), reading pages until a status is older than `T0`. Keep only
-   statuses whose context is **exactly** `kci-real-cloud/<set_hash>` and whose `created_at` lies in
-   `[T0, deadline_utc]`; the newest of them decides. `success` → VALIDATED; `failure` → FAILED;
-   `error` → FAILED, reported as an operator-side fault; `pending`, none yet, or a read that failed
-   → keep waiting. At the deadline with no decision → FAILED, "no status by the deadline". A status
-   for another set hash is listed in the summary and never counted.
+5. **Wait.** Every 60 seconds, list `GET /repos/{this repo}/commits/{commit}/statuses?per_page=100`
+   (newest first, as GitHub documents), reading pages until a status is older than `T0`. Keep only
+   statuses whose context equals `kci-real-cloud/<set_hash>` **byte for byte** and whose
+   `created_at` lies in `[T0, deadline_utc]`; the newest of them decides. `success` → VALIDATED;
+   `failure` → FAILED; `error` → FAILED, reported as an operator-side fault; `pending` or none yet
+   → keep waiting. At the deadline with no decision → FAILED, "no status by the deadline". A
+   status for another set hash is listed in the summary and never counted. GitHub documents
+   `context` as case-insensitive; kci does not: a case variant of the context is not counted and
+   fails closed, and the interface fixes the context in lower case (a hex set hash is lower case).
+   **A failed read** (a non-`200` answer, a transport error, or a response with no `Date`) is
+   retried at the next 60-second tick and moves no "now" forward. So that failed reads cannot hold
+   an attempt open, kci also measures the runner's **monotonic** time elapsed since `T0`'s read; it
+   is only an upper bound: the attempt ends at the **earlier** of a response's `Date` reaching
+   `deadline_utc` and 90 minutes of elapsed time, so elapsed time can end an attempt early and
+   never extends one. An attempt therefore makes at most 91 ticks after its dispatch (a tick reads as many pages as
+   it needs), and ends
+   FAILED, "no status by the deadline (reads failed)", when none succeeded in time.
 6. **Re-run once.** After a FAILED attempt kci dispatches once more with a fresh `T0`; a second
    FAILED fails the validation. Each attempt stands alone: a status written before its own `T0`,
    the first attempt's red included, never decides the second.
@@ -341,7 +369,7 @@ the same group would let the stage cancel its own pending newer run (question 1)
    for every validation), and the job hands it on as `real_cloud_set_hash`.
 
 A late answer to the first attempt that lands after the second `T0` is counted: it is a status for
-the same commit and the same set hash, so it judges the same bytes.
+the same commit and the same set hash, so it judges the same bytes (row 23).
 
 **Prod (C).** `prod` already `needs: [gamma, validate]`, so a red `gamma` job skips prod. That is
 not enough on its own: R19 is amended so that prod's job also reads `needs.gamma.outputs.real_cloud_set_hash`
@@ -355,7 +383,7 @@ its publish (today's `timeout-minutes: 30`) plus two waits of 90 minutes: 210 mi
 `timeout-minutes` becomes **240**, under the 360 the platform allows; R25 pins it (f).
 
 **Break-glass and dry runs.** Break-glass never reaches prod (EXISTS), so a break-glass gamma run
-does not select `real-cloud`; `gamma-breakglass` holds neither secret, and the receiver would
+does not select `real-cloud`; `gamma-breakglass` holds none of the secrets, and the receiver would
 refuse a commit off `main` anyway. A dry run (`--plan`) prints the dispatch it would send and sends
 nothing.
 
@@ -364,31 +392,46 @@ nothing.
 - **The dispatch credential** (a **go** item, question 9). Sending a `repository_dispatch` to
   another repository needs a credential of that repository: this repository's job token cannot.
   GitHub lists `POST /repos/{owner}/{repo}/dispatches` under the repository permission **Contents:
-  write**, and accepts nothing narrower. Minimum: a token limited to the **one** receiving
-  repository, that permission alone, with an expiry. It is stored as a secret of the **`gamma`
-  environment only** (deployment branches: `main`), so only the `gamma` job of a push to `main`
-  can read it; no repository-level or other environment's secret holds it. The receiver's
-  `owner/name` is a second secret of the same environment, so it appears in no file and no log.
-  Contents write could also push to the receiving repository; the receiver's branch protection is
-  what keeps that from changing its code, and that is the operator's side to hold.
+  write**, and accepts nothing narrower. **Type: a GitHub App installation token** (the
+  recommendation; question 9). A GitHub App owned by the project owner is installed on the **one**
+  receiving repository with the repository permission Contents: write alone. Its App id and private
+  key are secrets of the **`gamma` environment only** (deployment branches: `main`), so only the
+  `gamma` job of a push to `main` can read them; no repository-level or other environment's secret
+  holds them. Before each dispatch kci signs the App's JWT (RS256, `komira_crypto`'s
+  `rsa_sha256_sign`) and requests an installation token restricted to that repository and to
+  `contents: write`; GitHub expires such a token after one hour, and kci mints a fresh one for the
+  re-run's dispatch, so no token outlives the attempt that used it. An App token belongs to no
+  person, which is why it is preferred over a fine-grained personal token (tied to the person who
+  made it, with a lifetime of up to a year). **Rotation owner: the project owner**, who owns the
+  App, rotates its private key (question 9 recommends a period) and revokes it if the `gamma`
+  environment is ever exposed. The receiver's `owner/name` is a third secret of the same
+  environment, so it appears in no file and no log. Contents write could also push to the
+  receiving repository; the receiver's branch protection is what keeps that from changing its
+  code, and that is the operator's side to hold.
 - **Reading the answer** needs `statuses: read` on the `gamma` job's own token (R4 amended for that
   job alone); an anonymous read shares a hosted runner's address and its rate limit.
 - **Writing the answer** is the operator side's credential, with `statuses: write` on this
   repository. Anyone with push access can also write a status with any context; question 10
-  proposes pinning the writer.
+  proposes pinning the writer, and is ruled **before P8** (g).
 
 **Planted tests (`src/kci_validate/tests/`, a fake GitHub API in process: a dispatch endpoint that
-records requests, a statuses list the test scripts, and a `Date` header the test sets).**
+records requests, a statuses list the test scripts, and a **fake clock**).** The fake clock drives
+all three of kci's time sources: the `Date` header on each response, the 60-second sleep between
+reads, and the monotonic elapsed time of step 5. kci's wait takes its sleep and its clocks as
+injected values, so no row waits on the wall clock: a row's 90 to 180 fake minutes run in
+milliseconds. The fake fails the test if it is asked to advance past 6 hours of fake time, so a
+version with no deadline goes red instead of hanging the build. Rows run with `attempts: 2` unless
+they say otherwise.
 
 | # | case | expect | mutant caught |
 |---|---|---|---|
 | 1 | no status at all; the fake clock passes the deadline | FAILED, "no status by the deadline", after two dispatches | absent counts as a pass; no deadline |
 | 2 | `failure` for the exact context | FAILED (both attempts red) | any final state passes |
 | 3 | `error` for the exact context | FAILED, reported as an operator-side fault | `error` treated as success, or waited on |
-| 4 | `success` only for `kci-real-cloud/<another hash>` | FAILED at the deadline; the other hash listed | prefix match on `kci-real-cloud/` |
+| 4 | `success` only for `kci-real-cloud/<another hash>`, a hash that differs in its first character | FAILED at the deadline; the other hash listed | prefix match on `kci-real-cloud/` |
 | 5 | `success` for the exact context, `created_at` before `T0` (a stale answer) | FAILED at the deadline | drop the `T0` floor |
-| 6 | `success` for the exact context, `created_at` after the deadline | FAILED | compare with the runner's clock or the job's end |
-| 7 | the fake's `Date` runs 30 minutes ahead of the runner clock | deadline taken from `Date`: FAILED at GitHub's deadline, not the runner's | trust the runner clock |
+| 6 | `success` for the exact context, `created_at` after the deadline, listed first on the read whose `Date` is the first past the deadline | FAILED | compare with the runner's clock or the job's end |
+| 7 | `attempts: 1`; the runner's wall clock runs 30 minutes ahead of the fake's `Date`; from the first read on, the fake lists a `success` for the exact context whose `created_at` is GitHub's deadline + 15 min, which lies inside a window taken from the runner's clock (deadline 30 minutes later) | FAILED at GitHub's deadline, one dispatch | trust the runner clock (it returns VALIDATED) |
 | 8 | `pending`, then nothing until the deadline | FAILED | `pending` counts as a pass |
 | 9 | dispatch answered `404` | that attempt FAILED with no wait; second attempt made | ignore the dispatch status |
 | 10 | first attempt `failure`, second attempt `success` | VALIDATED, exactly two dispatches | no re-run |
@@ -398,6 +441,15 @@ records requests, a statuses list the test scripts, and a `Date` header the test
 | 14 | the dispatch's bytes | `event_type` `kci-gamma-validate`; payload keys exactly `set_hash`, `commit`, `deadline_utc`; deadline `T0` + 90 min | payload drift |
 | 15 | a push run whose secrets do not resolve | `REFUSED` exit 2, zero publish and dispatch calls | check after publish |
 | 16 | prod with `real_cloud_set_hash` absent or unequal to `validate`'s | `KCI-E-SET-HASH`, exit 3, zero uploads | prod reads `validate`'s hash only |
+| 17 | `success` only for `kci-real-cloud/<h'>`, where `h'` is the set hash with only its **last** character changed | FAILED at the deadline | compare only the first N characters of the hash; "contains the first N" |
+| 18 | `success` only for the exact context with a **suffix** added (`kci-real-cloud/<set_hash>-x`) | FAILED at the deadline | "starts with the expected context" |
+| 19 | `success` only for the exact context with a **prefix** added (`x/kci-real-cloud/<set_hash>`) | FAILED at the deadline | "contains the set hash"; "ends with the expected context" |
+| 20 | `success` only for the context in upper case (`KCI-REAL-CLOUD/<SET_HASH>`) | FAILED at the deadline, not counted | case-insensitive compare |
+| 21 | the dispatch is answered `204`; every statuses read after it fails: a `502` that carries a `Date`, then transport errors with no `Date` | FAILED, "no status by the deadline (reads failed)", in each attempt after at most 91 ticks and 90 fake minutes; two dispatches | "now" only from `Date` (never ends: the fake's 6-hour stop goes red); elapsed time extends the deadline |
+| 22 | the `T0` read fails (transport error, no `Date`) in both attempts | FAILED, zero dispatches | dispatch with no deadline, or with one from the runner's clock |
+| 23 | first attempt: no status; after the second `T0`, a `success` for the exact context, written for the first attempt (a late answer) | VALIDATED, exactly two dispatches | late answers dropped; the second attempt keeps the first's window |
+| 24 | the exact `success` in the window sits behind 150 newer statuses of other contexts (page 2) | VALIDATED | read only the first page (fails falsely: a liveness bug) |
+| 25 | only if question 10 adopts the `creator` check: the exact `success` in the window, written by another account | FAILED at the deadline, not counted | skip the `creator` check |
 
 ## f. The machine file, the environments, the workflow rules
 
@@ -432,13 +484,16 @@ validation {
   status_context: "kci-real-cloud/"   # kci appends the set hash; matched exactly
   deadline_s: 5400                    # 90 min after the dispatch
   attempts: 2                         # one re-run
-  credential: "KCI_REAL_CLOUD_TOKEN"  # secret NAMES, resolved by --secret-store env
+  app_id: "KCI_REAL_CLOUD_APP_ID"     # secret NAMES, resolved by --secret-store env
+  app_key: "KCI_REAL_CLOUD_APP_KEY"   # the GitHub App's private key (e2, the credentials)
   receiver: "KCI_REAL_CLOUD_RECEIVER"
 }
 ```
 
 `kci_release_machine` refuses `EXTERNAL_STATUS` on any stage without an environment, on a part
-job's validations (R9: no environment there), a `deadline_s` above 5400 and `attempts` above 2.
+job's validations (R9: no environment there), a `deadline_s` above 5400 or below 4500 (the
+operator's run is capped at 75 minutes, so a shorter deadline could only fail), and `attempts`
+above 2 or below 1.
 
 | stage | job(s) | environment | token | runs on |
 |---|---|---|---|---|
@@ -485,8 +540,8 @@ Each slice: the check that is red before it. **Go** marks a project-owner action
 | P4 | The switch, one PR: `release/machine.textproto` with beta; `kci.yml` with job groups, `beta`, `beta_install`, the `superseded` steps, R23/R24 guards and the line on every job; R16, R23, R24 in `kci_workflow_check`; ci.md's "Queued runs" and "Never backward" rewritten for every stage; the paths between this doc and continuous publish become links | fixtures refused: a workflow-level group, a job without a group, `queue: max`, a job missing R23's conjunct or step, gamma reading `beta`'s unvalidated `set_hash` (R19), a job without R24; today's `kci.yml` fails the new R16 | **Go**: changes the release; the first push creates `beta` and spends farm time |
 | P5 | Retention of `kci-release-*` to the ruled value | none (a setting) | **Go** with question 3 |
 | P6 | #1168 S10c's derived checks join beta's `checks`; S12's join `beta_install` | as #1168 states them | as #1168 |
-| P7 | kci: the `EXTERNAL_STATUS` validation kind and its machine-file refusals; the dispatch, GitHub's clock, the wait, the exact-context read and the one re-run (e2); prod's second hash (R19 amended); a fake GitHub API for tests | e2's table, rows 1 to 12 and 14 to 16 (13 guards); machine fixtures refused: `EXTERNAL_STATUS` on a stage without an environment, `deadline_s` 5401, `attempts` 3 | none: it sends nothing until P8 wires it |
-| P8 | The wiring, one PR: `real-cloud` in gamma's step in `release/machine.textproto`; `kci.yml`'s `gamma` job with `--secret-store env`, the two secrets on its `kci` step, `statuses: read`, `timeout-minutes: 240`, `real_cloud_set_hash` handed to prod; R4 and R19 amended, R25 and R9's exception in `kci_workflow_check` | fixtures refused: `statuses: read` on any other job, a secret named in any other job or in `gamma-breakglass`'s path, `timeout-minutes` other than 240, prod without the second hash; today's `kci.yml` fails R25 | **Go**, two: the dispatch credential (question 9) and the operator side's status writer (question 10); the first push dispatches to the operator's side |
+| P7 | kci: the `EXTERNAL_STATUS` validation kind and its machine-file refusals; the App token mint, the dispatch, GitHub's clock (injected, with the monotonic upper bound), the wait, the exact-context read and the one re-run (e2); prod's second hash (R19 amended); a fake GitHub API for tests | e2's table, rows 1 to 12 and 14 to 24 (13 guards; row 25 joins if question 10 adopts the `creator` check); machine fixtures refused: `EXTERNAL_STATUS` on a stage without an environment, `EXTERNAL_STATUS` on a part job's validations (R9), `deadline_s` 5401 and 4499, `attempts` 3 and 0 | none: it sends nothing until P8 wires it |
+| P8 | The wiring, one PR: `real-cloud` in gamma's step in `release/machine.textproto`; `kci.yml`'s `gamma` job with `--secret-store env`, the three secrets on its `kci` step, `statuses: read`, `timeout-minutes: 240`, `real_cloud_set_hash` handed to prod; R4 and R19 amended, R25 and R9's exception in `kci_workflow_check` | fixtures refused: `statuses: read` on any other job, a secret named in any other job or in `gamma-breakglass`'s path, `timeout-minutes` other than 240, prod without the second hash; today's `kci.yml` fails R25 | **Go**: the dispatch credential (question 9; the App, its installation and its key). Question 10 is ruled **before P8 opens**, not with it: if it adopts the `creator` check, that check and row 25 land in P7 first and the expected writer is a fourth `gamma` secret here. The first push dispatches to the operator's side |
 
 P1, P2, P3 and P7 merge on their own and change nothing that runs (P1 changes only what a push to
 gamma may do when the channel is ahead; P2's `stalled` reads only push runs, which are unchanged
@@ -533,19 +588,24 @@ P4 only for gamma's job-level group: until P4, gamma's wait holds the workflow-l
    *Recommendation:* accept, with `stalled`'s issue. Refusing skip markers in the PR check would not
    close it: the merge commit's message is written at merge time, after the check ran.
 9. **The dispatch credential (a go).** e2's dispatch needs a credential of the receiving
-   repository, stored as a secret here. *Recommendation:* go, at the minimum scope: limited to that
-   one repository, the permission **Contents: write** alone (the only one GitHub accepts for a
-   dispatch), with an expiry and a rotation owner; held as a secret of the `gamma` environment
-   only, never of the repository or of `gamma-breakglass`, beside a second secret naming the
-   receiver.
-10. **Who may write the answer.** The answer is a commit status, and anyone with push access, or
-    any workflow here granted `statuses: write`, can write one with any context. R4 already keeps
-    `statuses: write` off every release job, but not off people with push access. *Recommendation:*
-    go for the operator side's writer to hold `statuses: write` on this repository and nothing
-    else, and, agreed with the validation's owner as an addition to the interface, kci also checks
-    each counted status's `creator` against an expected writer held as a third `gamma` environment
-    secret (so no account is named in this repository). Without it, a hand-written `success` would
-    promote.
+   repository, stored as a secret here. *Recommendation:* go, as a **GitHub App installation
+   token**: an App the project owner owns, installed on that one repository only, with the
+   permission **Contents: write** alone (the only one GitHub accepts for a dispatch); kci mints a
+   token per dispatch, restricted to that repository and permission, which GitHub expires after
+   one hour. The App id and private key are secrets of the `gamma` environment only, never of the
+   repository or of `gamma-breakglass`, beside a third secret naming the receiver. The project
+   owner is the rotation owner and rotates the private key every 90 days and on any suspected
+   exposure. The alternative, a fine-grained personal token, is tied to the person who made it and
+   lives up to a year; it fits "minimum" worse.
+10. **Who may write the answer (rule before P8).** The answer is a commit status, and anyone with
+    push access, or any workflow here granted `statuses: write`, can write one with any context.
+    R4 already keeps `statuses: write` off every release job, but not off people with push access.
+    Without a pinned writer, a hand-written `success` would promote. *Recommendation:* rule this
+    **before P8 opens**, not as part of P8's go: go for the operator side's writer to hold
+    `statuses: write` on this repository and nothing else, and, agreed with the validation's owner
+    as an addition to the interface, kci also checks each counted status's `creator` against an
+    expected writer held as a fourth `gamma` environment secret (so no account is named in this
+    repository). If adopted, the check and e2's row 25 land in P7, before P8 wires anything.
 11. **The order inside gamma.** The real-cloud validation runs in the `gamma` job, after the
     publish and **before** `validate`'s installs, which run in their own slot after it: putting the
     installs' third-party code in the job that holds the publish token and the dispatch secret is
