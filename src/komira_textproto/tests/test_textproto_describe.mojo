@@ -129,5 +129,22 @@ def test_end_of_input_names_the_last_token_line() raises:
     )
 
 
+def test_end_of_a_single_token_input_names_its_line() raises:
+    # One token on line 3: last_line() must read that token's line, not fall
+    # back to the empty-input line 1.
+    var c = TokenCursor(lex(String("\n\nx")))
+    assert_equal(c.last_line(), 3)
+    _ = c.next(String("x"))
+    var msg = String("<no refusal>")
+    try:
+        _ = c.expect(TOKEN_STRING)
+    except e:
+        msg = String(e)
+    assert_equal(
+        msg,
+        String("textproto: line 3: expected string but reached the end of input"),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
