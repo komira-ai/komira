@@ -660,7 +660,7 @@ spills instead.
 ### 8.4 Key groups
 
 The streaming forms of stateful operators, and their state contract, come under a later `format_version` (§5.2;
-[`plan_models.md`](plan_models.md) §3.5-§3.6). Their exchanges are fixed here, so the cut can carry them.
+`plan_models.md` §3.5-§3.6, komira-ai/komira#1169). Their exchanges are fixed here, so the cut can carry them.
 
 - **The field.** A `HASH` exchange that feeds a keyed stateful node sets `key_groups > 0`: keys hash into that many
   buckets, and state is laid out per bucket. Every `HASH` exchange feeding one stateful node has the same
@@ -870,7 +870,7 @@ Specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md), §10.1-§10.14.
   (`WireUdfApply`, an n-ary expression; `WireMapBatchesNode`; `WireStepNode`) and from the `AGG_UDF` aggregate
   function. The kinds are scalar, map-batches over a column, map-batches over a frame, aggregate (a plain function
   over a group, or a mergeable accumulator) and step. A `UdfRef` names its runtime by an open string, so native and
-  managed UDFs in any language use the same reference ([`udf_runtime_interface.md`](udf_runtime_interface.md)). GPU
+  managed UDFs in any language use the same reference (`udf_runtime_interface.md`, komira-ai/komira#1132). GPU
   UDFs come later.
 - Every return type is explicit in the plan: a Python type hint or a `return_dtype=`/`schema=` argument, or in
   TypeScript a type value on the verb. A function with no type is refused by name on the user's machine.

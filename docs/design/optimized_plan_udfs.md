@@ -9,7 +9,7 @@ Citations are to komira `main` as merged by komira-ai/komira#977 unless marked o
 reading, not facts taken from the code. Nothing was built or run to write this document.
 
 The runtime interface a UDF runs through, and what a language implements, is
-[`udf_runtime_interface.md`](udf_runtime_interface.md). This section keeps the plan language-neutral to match it.
+`udf_runtime_interface.md` (komira-ai/komira#1132). This section keeps the plan language-neutral to match it.
 
 ---
 
@@ -58,7 +58,7 @@ process), every cgo call from an engine thread runs on its own operating-system 
 runtime schedules those threads in parallel with no global lock. Each engine thread keeps its own per-thread UDF state.
 
 The mode is a capability of the runtime, not a property of the plan. In the threading declaration of
-[`udf_runtime_interface.md`](udf_runtime_interface.md) (§4.2), modes 1 and 2 are `CONTEXT_PER_THREAD`: one context per
+`udf_runtime_interface.md` (komira-ai/komira#1132, §4.2), modes 1 and 2 are `CONTEXT_PER_THREAD`: one context per
 engine thread, each called by one thread at a time (a Python build with a GIL that can hold only one interpreter per
 process declares `SINGLE_THREAD` and reaches mode 2 through one worker process per engine thread). Mode 3 is
 `THREAD_SAFE`: one virtual machine shared by the engine threads, each with its own per-thread UDF state.
@@ -269,7 +269,7 @@ needs no field number of its own: it is the bound argument schema, which `arg_ty
 already carries. A separate `read_set` field would state that schema twice (§10.13).
 
 **`preserves_event_time`: a frame UDF that keeps event time.** In a streaming plan a node's event-time column and
-watermark are derived by fixed rules ([`plan_models.md`](plan_models.md) §3.2). `SCALAR`, `ROW` and
+watermark are derived by fixed rules (`plan_models.md` §3.2, komira-ai/komira#1169). `SCALAR`, `ROW` and
 `MAP_BATCHES_COLUMN` keep their input rows, so event time passes through them unchanged. A `MAP_BATCHES_FRAME` UDF
 may emit any rows, so its output carries no event time unless its `UdfRef` sets `preserves_event_time`: the UDF
 declares that it keeps the event-time column and that the input's watermark holds for its output. The output watermark

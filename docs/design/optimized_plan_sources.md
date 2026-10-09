@@ -5,8 +5,8 @@ file stays under 1,000 lines. Section numbers continue that document's: `§15.x`
 [`optimized_plan_udfs.md`](optimized_plan_udfs.md), and every other `§n` is in `optimized_plan.md`.
 
 Citations are to komira `main` as of 2026-10-09 unless marked otherwise. The storage rules cited as
-"storage stack" are [`storage_stack.md`](storage_stack.md) revision 2 (komira-ai/komira#1134, at the head of branch
-`docs/storage-stack`); the graph rules cited as "graph storage" are [`data_graph_storage.md`](data_graph_storage.md)
+"storage stack" are `storage_stack.md` revision 2 (komira-ai/komira#1134, at the head of branch
+`docs/storage-stack`); the graph rules cited as "graph storage" are `data_graph_storage.md`
 (komira-ai/komira#833, at the head of branch `docs/search-format-kg`). Statements marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run
 to write this document.
 
