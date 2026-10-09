@@ -1,0 +1,11 @@
+{
+ "name": "fault_out_set_on_error",
+ "defect": "an output left set by a failing call is ignored (leaked) or read",
+ "run": "call_batch",
+ "entry": "out_set_on_error",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]},
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RUNTIME_FAULT", "message": "nonempty"}
+}

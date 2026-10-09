@@ -1,0 +1,598 @@
+# The engine side of the UDF runtime contract, behind a value API: open a
+# runtime library, drive its table, and check every result with the host's
+# post-conditions (docs/design/udf_runtime_interface.md sections 4.3 to 4.6).
+# It knows no runtime by name: everything it learns comes through describe.
+#
+# Every call returns an Outcome: the runtime's status, message, trace, row
+# and group, and `fault`, a post-condition the host found broken (a layout
+# that fails import validation, a wrong length, a null in a non-nullable
+# result, `args` not moved, `out` set on failure). run_error() maps either to
+# the run's named error through one table (contract.run_error).
+#
+# Handles are opaque: a Handle holds the runtime's pointer as a Word, which
+# this file cannot read through, and its kind; it is passed back only to the
+# entry of its kind.
+
+from ._cabi import Word
+from ._host import (
+    Counts,
+    _Arena,
+    array_released,
+    counts,
+    device_column,
+    device_stream,
+    device_struct,
+    host_data_of,
+    import_column,
+    import_struct,
+    make_host,
+    new_error,
+    pulls_of,
+    release_out,
+    schema_of,
+    stream_moved,
+    stream_record,
+    take_error,
+)
+from ._table import (
+    init_runtime,
+    join_cancel_timer,
+    memory_report_present,
+    new_call,
+    new_caps,
+    new_spec,
+    open_library,
+    read_caps,
+    required_size,
+    slot_value,
+    start_cancel_timer,
+    t_agg_close,
+    t_agg_finish,
+    t_agg_merge,
+    t_agg_open,
+    t_agg_state,
+    t_agg_update,
+    t_call_batch,
+    t_close_context,
+    t_close_instance,
+    t_describe,
+    t_frame_close,
+    t_frame_next,
+    t_frame_open,
+    t_load,
+    t_memory_report,
+    t_open_context,
+    t_open_instance,
+    t_shutdown,
+    t_unload,
+    t_validate,
+    table_abi,
+    table_size,
+)
+from .contract import (
+    ABI_MAJOR,
+    FEATURE_MEMORY_REPORT,
+    FORM_BUNDLE,
+    IMMUTABLE,
+    NULL_MANUAL,
+    NULL_PROPAGATE,
+    OK,
+    run_error,
+    status_name,
+)
+from .values import Batch, Column, ColumnType, TYPE_INT32
+
+comptime KIND_UDF = 1
+comptime KIND_CONTEXT = 2
+comptime KIND_INSTANCE = 3
+comptime KIND_FRAME = 4
+comptime KIND_GROUPS = 5
+comptime _MAX_FRAME_PULLS = 10_000
+
+
+@fieldwise_init
+struct Capabilities(Copyable, Movable, Writable):
+    """What describe returned (design section 4.2), plus whether the optional
+    memory_report entry is present."""
+
+    var runtime_id: String
+    var runtime_abi: String
+    var max_descriptor_version: UInt32
+    var shapes: UInt32
+    var threading: UInt32
+    var thread_affine: UInt32
+    var transports: UInt32
+    var hosting: UInt32
+    var devices: UInt32
+    var features: UInt32
+    var udf_class: UInt32
+    var has_memory_report: Bool
+
+    def write_to(self, mut writer: Some[Writer]):
+        writer.write(
+            self.runtime_id, " abi=", self.runtime_abi, " class=", self.udf_class, " shapes=", self.shapes,
+            " threading=", self.threading, " transports=", self.transports, " hosting=", self.hosting,
+            " features=", self.features,
+        )
+
+
+struct UdfSpec(Copyable, Movable):
+    """A UdfRef as the host decoded it: what komira_udf_spec carries. `args`
+    is the argument struct's fields, named by `arg_names` (`c<i>` past its
+    end; for ROW, the read set); `result` the result type, one field for a
+    column, a struct's fields when `result_is_table`."""
+
+    var shape: UInt32
+    var form: Int32
+    var entry: String
+    var descriptor_version: UInt32
+    var descriptor: List[UInt8]
+    var args: List[ColumnType]
+    var arg_names: List[String]
+    var result: List[ColumnType]
+    var result_is_table: Bool
+    var state: Optional[ColumnType]
+    var null_mode: Int32
+    var stability: Int32
+
+    def __init__(out self, shape: UInt32, entry: String, var args: List[ColumnType], var result: List[ColumnType]):
+        self.shape = shape
+        self.form = FORM_BUNDLE
+        self.entry = entry
+        self.descriptor_version = 0
+        self.descriptor = List[UInt8]()
+        self.args = args^
+        self.arg_names = List[String]()
+        self.result = result^
+        self.result_is_table = False
+        self.state = None
+        self.null_mode = NULL_MANUAL
+        self.stability = IMMUTABLE
+
+
+@fieldwise_init
+struct Outcome(Copyable, Movable, Writable):
+    var status: Int32
+    var message: String
+    var trace: String
+    var row: Int64
+    var group: Int64
+    var fault: String
+
+    @staticmethod
+    def of(status: Int32) -> Outcome:
+        return Outcome(status, "", "", -1, -1, "")
+
+    def is_ok(self) -> Bool:
+        return self.status == OK and self.fault == ""
+
+    def run_error(self, at_call: Bool = True) -> String:
+        """The fault's name when the host found one, else the status's
+        (`at_call` False: the status came from validate or load)."""
+        if self.fault != "":
+            return String(self.fault.split(":")[0])
+        return run_error(self.status, at_call)
+
+    def write_to(self, mut writer: Some[Writer]):
+        writer.write(status_name(self.status))
+        if self.message != "":
+            writer.write(" '", self.message, "'")
+        if self.row >= 0:
+            writer.write(" row=", self.row)
+        if self.fault != "":
+            writer.write(" fault=", self.fault)
+
+
+@fieldwise_init
+struct Handle(Copyable, Movable):
+    var _w: Word
+    var kind: Int
+
+
+@fieldwise_init
+struct Opened(Copyable, Movable):
+    var outcome: Outcome
+    var handle: Handle
+
+
+@fieldwise_init
+struct CallResult(Copyable, Movable):
+    var outcome: Outcome
+    var column: Column
+
+
+@fieldwise_init
+struct FrameResult(Copyable, Movable):
+    var outcome: Outcome
+    var outputs: List[Batch]
+    var pulls_before_first_output: Int
+    var pulls: Int
+
+
+@fieldwise_init
+struct CallOptions(Copyable, Movable):
+    """`cancel`: the cancel flag is set before the call. `cancel_after_ns`
+    above 0: a C thread sets the flag that long after the call starts, while
+    it runs. `deadline_passed`: the deadline is one nanosecond after the host
+    clock's zero, long past."""
+
+    var cancel: Bool
+    var cancel_after_ns: Int64
+    var deadline_passed: Bool
+
+    @staticmethod
+    def plain() -> CallOptions:
+        return CallOptions(False, 0, False)
+
+
+def _need(h: Handle, kind: Int) raises:
+    if h.kind != kind:
+        raise Error("UDF_HARNESS_HANDLE_KIND: " + String(h.kind) + ", wanted " + String(kind))
+
+
+struct _Call(Copyable, Movable):
+    """One komira_udf_call and, when the options ask for one, the timer that
+    cancels it while it runs."""
+
+    var call: Word
+    var timer: Word
+
+    def __init__(out self, call: Word, timer: Word):
+        self.call = call
+        self.timer = timer
+
+
+struct UdfRuntime(Movable):
+    """One loaded runtime library and its table."""
+
+    var path: String
+    var _arena: _Arena
+    var _lib: Word
+    var _table: Word
+    var _rt: Word
+    var _host: Word
+    var _calls: Int64
+    var _shut: Bool
+
+    def __init__(out self, path: String, var arena: _Arena, lib: Word, table: Word, rt: Word, host: Word):
+        self.path = path
+        self._arena = arena^
+        self._lib = lib
+        self._table = table
+        self._rt = rt
+        self._host = host
+        self._calls = 0
+        self._shut = False
+
+    @staticmethod
+    def open(path: String, abi_major: UInt32 = ABI_MAJOR) raises -> UdfRuntime:
+        """dlopen `path`, init with a host claiming `abi_major` (this ABI's
+        unless a test asks for another), and check the table covers every
+        required entry. Raises UDF_RUNTIME_OPEN_FAILED,
+        UDF_RUNTIME_MISSING_SYMBOL, UDF_RUNTIME_INIT or UDF_RUNTIME_ABI."""
+        var arena = _Arena()
+        var lib = open_library(path)
+        var host = make_host(arena, abi_major)
+        var slot = arena.word(8)
+        var err = new_error(arena)
+        var t = init_runtime(lib, host, slot, err)
+        if t.is_null():
+            var e = take_error(err)
+            arena.free_all()
+            raise Error("UDF_RUNTIME_INIT: " + path + ": " + status_name(e.code) + " " + e.message)
+        if table_abi(t) != ABI_MAJOR or table_size(t) < required_size():
+            arena.free_all()
+            raise Error(
+                "UDF_RUNTIME_ABI: " + path + ": table major " + String(table_abi(t)) + ", "
+                + String(table_size(t)) + " bytes; this host needs major " + String(ABI_MAJOR)
+                + " and " + String(required_size()) + " bytes"
+            )
+        return UdfRuntime(path, arena^, lib, t, slot_value(slot), host)
+
+    def init_refusal(mut self, abi_major: UInt32) -> Outcome:
+        """Call init again with a host claiming `abi_major`: a runtime of
+        another major must return NULL with ERR_ABI and create nothing."""
+        var host = make_host(self._arena, abi_major)
+        var slot = self._arena.word(8)
+        var err = new_error(self._arena)
+        var t = init_runtime(self._lib, host, slot, err)
+        if not t.is_null():
+            t_shutdown(t, slot_value(slot))
+            return Outcome(OK, "", "", -1, -1, "UDF_RUNTIME_FAULT: init accepted ABI major " + String(abi_major))
+        var e = take_error(err)
+        return Outcome(e.code, e.message, e.trace, e.row, e.group, "")
+
+    def describe(mut self) raises -> Capabilities:
+        var c = new_caps(self._arena)
+        var rc = t_describe(self._table, self._rt, c)
+        if rc != OK:
+            raise Error("UDF_RUNTIME_FAULT: describe returned " + status_name(rc))
+        var t = read_caps(c)
+        return Capabilities(
+            t.runtime_id, t.runtime_abi, t.words[0], t.words[1], t.words[2], t.words[3],
+            t.words[4], t.words[5], t.words[6], t.words[7], t.words[8], memory_report_present(self._table),
+        )
+
+    def feature_slots_agree(mut self) raises -> Bool:
+        """The MEMORY_REPORT feature bit is set exactly when the entry is."""
+        var caps = self.describe()
+        return ((caps.features & FEATURE_MEMORY_REPORT) != 0) == caps.has_memory_report
+
+    def _spec(mut self, spec: UdfSpec) -> Word:
+        var hd = host_data_of(self._host)
+        var args = schema_of(self._arena, spec.args, spec.arg_names, True, hd)
+        var result = schema_of(self._arena, spec.result, List[String](), spec.result_is_table, hd)
+        var state = Word.null()
+        if spec.state:
+            state = schema_of(self._arena, [spec.state.value().copy()], List[String](), False, hd)
+        return new_spec(
+            self._arena, spec.shape, spec.form, spec.entry, spec.descriptor_version, spec.descriptor,
+            args, result, state, spec.null_mode, spec.stability,
+        )
+
+    def _outcome(mut self, rc: Int32, err: Word) -> Outcome:
+        if rc == OK:
+            return Outcome.of(OK)
+        var e = take_error(err)
+        return Outcome(rc, e.message, e.trace, e.row, e.group, "")
+
+    def _opened(mut self, rc: Int32, err: Word, slot: Word, kind: Int) -> Opened:
+        return Opened(self._outcome(rc, err), Handle(slot_value(slot) if rc == OK else Word.null(), kind))
+
+    def validate(mut self, spec: UdfSpec) -> Outcome:
+        var err = new_error(self._arena)
+        return self._outcome(t_validate(self._table, self._rt, self._spec(spec), err), err)
+
+    def load(mut self, spec: UdfSpec) -> Opened:
+        var err = new_error(self._arena)
+        var slot = self._arena.word(8)
+        var rc = t_load(self._table, self._rt, self._spec(spec), slot, err)
+        return self._opened(rc, err, slot, KIND_UDF)
+
+    def unload(mut self, udf: Handle) raises:
+        _need(udf, KIND_UDF)
+        t_unload(self._table, udf._w)
+
+    def open_context(mut self, slot_index: UInt32) -> Opened:
+        var err = new_error(self._arena)
+        var slot = self._arena.word(8)
+        var rc = t_open_context(self._table, self._rt, slot_index, slot, err)
+        return self._opened(rc, err, slot, KIND_CONTEXT)
+
+    def close_context(mut self, ctx: Handle) raises:
+        _need(ctx, KIND_CONTEXT)
+        t_close_context(self._table, ctx._w)
+
+    def open_instance(mut self, ctx: Handle, udf: Handle) raises -> Opened:
+        _need(ctx, KIND_CONTEXT)
+        _need(udf, KIND_UDF)
+        var err = new_error(self._arena)
+        var slot = self._arena.word(8)
+        var rc = t_open_instance(self._table, ctx._w, udf._w, slot, err)
+        return self._opened(rc, err, slot, KIND_INSTANCE)
+
+    def close_instance(mut self, inst: Handle) raises:
+        _need(inst, KIND_INSTANCE)
+        t_close_instance(self._table, inst._w)
+
+    def memory_report(mut self, ctx: Handle) raises -> Int64:
+        """The entry's answer, or -2 when the runtime has no such entry."""
+        _need(ctx, KIND_CONTEXT)
+        if not memory_report_present(self._table):
+            return -2
+        return t_memory_report(self._table, ctx._w)
+
+    def _begin(mut self, opts: CallOptions) -> _Call:
+        self._calls += 1
+        var call = new_call(self._arena, Int64(1) if opts.deadline_passed else Int64(0), self._calls, opts.cancel)
+        var timer = Word.null()
+        if opts.cancel_after_ns > 0:
+            timer = start_cancel_timer(call, opts.cancel_after_ns)
+        return _Call(call, timer)
+
+    def _end(mut self, c: _Call):
+        join_cancel_timer(c.timer)
+
+    def call_batch(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) raises -> CallResult:
+        """One call_batch. Under PROPAGATE the host drops every row with a null
+        argument before the call and scatters nulls back after it (design
+        section 3.4 rule 2)."""
+        _need(inst, KIND_INSTANCE)
+        if spec.null_mode != NULL_PROPAGATE:
+            return self._call_batch(inst, spec, args, opts)
+        var keep = List[Int]()
+        for r in range(args.length):
+            var all_valid = True
+            for c in range(len(args.columns)):
+                if not args.columns[c].valid[r]:
+                    all_valid = False
+            if all_valid:
+                keep.append(r)
+        var compact = Batch(len(keep))
+        for c in range(len(args.columns)):
+            var col = Column(args.columns[c].type_id)
+            for k in range(len(keep)):
+                col.bits.append(args.columns[c].bits[keep[k]])
+                col.valid.append(True)
+            compact.columns.append(col^)
+        var res = self._call_batch(inst, spec, compact, opts)
+        if not res.outcome.is_ok():
+            return res^
+        var out = Column(res.column.type_id)
+        var k = 0
+        for r in range(args.length):
+            if k < len(keep) and keep[k] == r:
+                out.bits.append(res.column.bits[k])
+                out.valid.append(res.column.valid[k])
+                k += 1
+            else:
+                out.append_null()
+        return CallResult(res.outcome.copy(), out^)
+
+    def _call_batch(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) -> CallResult:
+        var hd = host_data_of(self._host)
+        var d_args = device_struct(self._arena, args, hd)
+        var d_out = self._arena.word(128)
+        var err = new_error(self._arena)
+        var c = self._begin(opts)
+        var rc = t_call_batch(self._table, inst._w, c.call, d_args, d_out, err)
+        self._end(c)
+        var res = self._finish_column(rc, err, d_out, spec.result[0], args.length)
+        if not array_released(d_args):
+            # Not moved, so still the host's: released here, once.
+            _ = release_out(d_args)
+            if res.outcome.fault == "":
+                res.outcome.fault = "UDF_RUNTIME_FAULT: args not moved by call_batch"
+        return res^
+
+    def _finish_column(mut self, rc: Int32, err: Word, d_out: Word, want: ColumnType, rows: Int) -> CallResult:
+        """Import a column a runtime returned, with the post-conditions: the
+        layout, `rows` rows (-1: any), no null in a non-nullable type."""
+        var out = self._outcome(rc, err)
+        if rc != OK:
+            if not array_released(d_out):
+                _ = release_out(d_out)
+                out.fault = "UDF_RUNTIME_FAULT: out set on failure"
+            return CallResult(out^, Column(want.type_id))
+        if array_released(d_out):
+            out.fault = "UDF_RUNTIME_FAULT: OK without an output"
+            return CallResult(out^, Column(want.type_id))
+        var col = Column(want.type_id)
+        try:
+            col = import_column(d_out, want)
+        except e:
+            out.fault = String(e)
+        if not release_out(d_out) and out.fault == "":
+            out.fault = "UDF_RUNTIME_FAULT: release left its slot set"
+        if out.fault == "" and rows >= 0 and len(col) != rows:
+            out.fault = "UDF_BATCH_LENGTH_MISMATCH: " + String(len(col)) + " rows for " + String(rows)
+        if out.fault == "" and not want.nullable and col.null_count() > 0:
+            out.fault = "UDF_RETURN_TYPE_MISMATCH: a null in a non-nullable result"
+        return CallResult(out^, col^)
+
+    def run_frame(mut self, inst: Handle, spec: UdfSpec, inputs: List[Batch], opts: CallOptions) raises -> FrameResult:
+        """frame_open over a stream of `inputs`, frame_next until the end,
+        frame_close. Records how many input batches the runtime had pulled
+        when it produced its first output."""
+        _need(inst, KIND_INSTANCE)
+        var hd = host_data_of(self._host)
+        var s = device_stream(self._arena, inputs, hd)
+        var rec = stream_record(s)
+        var err = new_error(self._arena)
+        var slot = self._arena.word(8)
+        var c = self._begin(opts)
+        var rc = t_frame_open(self._table, inst._w, c.call, s, slot, err)
+        var out = self._outcome(rc, err)
+        if not stream_moved(s) and out.fault == "":
+            out.fault = "UDF_RUNTIME_FAULT: the input stream was not moved by frame_open"
+        var outputs = List[Batch]()
+        var first = -1
+        if rc != OK:
+            self._end(c)
+            return FrameResult(out^, outputs^, first, pulls_of(rec))
+        var frame = slot_value(slot)
+        for _ in range(_MAX_FRAME_PULLS):
+            var d_out = self._arena.word(128)
+            var e2 = new_error(self._arena)
+            var rc2 = t_frame_next(self._table, frame, c.call, d_out, e2)
+            if rc2 != OK:
+                out = self._outcome(rc2, e2)
+                if not array_released(d_out):
+                    _ = release_out(d_out)
+                    out.fault = "UDF_RUNTIME_FAULT: out set on failure"
+                break
+            if array_released(d_out):
+                break
+            if first < 0:
+                first = pulls_of(rec)
+            try:
+                if spec.result_is_table:
+                    outputs.append(import_struct(d_out, spec.result))
+                else:
+                    var col = import_column(d_out, spec.result[0])
+                    var b = Batch(len(col))
+                    b.columns.append(col^)
+                    outputs.append(b^)
+            except e:
+                out.fault = String(e)
+            _ = release_out(d_out)
+            if out.fault != "":
+                break
+        t_frame_close(self._table, frame)
+        self._end(c)
+        return FrameResult(out^, outputs^, first, pulls_of(rec))
+
+    def agg_open(mut self, inst: Handle) raises -> Opened:
+        _need(inst, KIND_INSTANCE)
+        var err = new_error(self._arena)
+        var slot = self._arena.word(8)
+        var rc = t_agg_open(self._table, inst._w, slot, err)
+        return self._opened(rc, err, slot, KIND_GROUPS)
+
+    def _gids(mut self, gids: List[Int32]) -> Word:
+        var col = Column(TYPE_INT32)
+        for i in range(len(gids)):
+            col.append_int(Int64(gids[i]))
+        return device_column(self._arena, col, host_data_of(self._host))
+
+    def _moved_check(self, mut got: Outcome, a: Word, b: Word, entry: String):
+        if got.fault == "" and (not array_released(a) or not array_released(b)):
+            got.fault = "UDF_RUNTIME_FAULT: an input not moved by " + entry
+
+    def agg_update(mut self, g: Handle, args: Batch, gids: List[Int32], n_groups: UInt32, opts: CallOptions) raises -> Outcome:
+        _need(g, KIND_GROUPS)
+        var d_args = device_struct(self._arena, args, host_data_of(self._host))
+        var d_gids = self._gids(gids)
+        var err = new_error(self._arena)
+        var c = self._begin(opts)
+        var rc = t_agg_update(self._table, g._w, c.call, d_args, d_gids, n_groups, err)
+        self._end(c)
+        var out = self._outcome(rc, err)
+        self._moved_check(out, d_args, d_gids, "agg_update")
+        return out^
+
+    def agg_merge(mut self, g: Handle, states: Column, gids: List[Int32], n_groups: UInt32, opts: CallOptions) raises -> Outcome:
+        _need(g, KIND_GROUPS)
+        var d_states = device_column(self._arena, states, host_data_of(self._host))
+        var d_gids = self._gids(gids)
+        var err = new_error(self._arena)
+        var c = self._begin(opts)
+        var rc = t_agg_merge(self._table, g._w, c.call, d_states, d_gids, n_groups, err)
+        self._end(c)
+        var out = self._outcome(rc, err)
+        self._moved_check(out, d_states, d_gids, "agg_merge")
+        return out^
+
+    def agg_state(mut self, g: Handle, emit_first_n: UInt32, state_type: ColumnType) raises -> CallResult:
+        """A PARTIAL step's states: `emit_first_n` rows of state_type."""
+        _need(g, KIND_GROUPS)
+        var d_out = self._arena.word(128)
+        var err = new_error(self._arena)
+        var rc = t_agg_state(self._table, g._w, emit_first_n, d_out, err)
+        return self._finish_column(rc, err, d_out, state_type, Int(emit_first_n))
+
+    def agg_finish(mut self, g: Handle, emit_first_n: UInt32, result: ColumnType) raises -> CallResult:
+        _need(g, KIND_GROUPS)
+        var d_out = self._arena.word(128)
+        var err = new_error(self._arena)
+        var rc = t_agg_finish(self._table, g._w, emit_first_n, d_out, err)
+        return self._finish_column(rc, err, d_out, result, Int(emit_first_n))
+
+    def agg_close(mut self, g: Handle) raises:
+        _need(g, KIND_GROUPS)
+        t_agg_close(self._table, g._w)
+
+    def ledger(self) -> Counts:
+        """Arrays and streams the host exported and their release counts."""
+        return counts(host_data_of(self._host))
+
+    def shutdown(mut self):
+        """Shut the runtime down (once); no callback may run after this."""
+        if not self._shut:
+            t_shutdown(self._table, self._rt)
+            self._shut = True
+
+    def __del__(deinit self):
+        if not self._shut:
+            t_shutdown(self._table, self._rt)
+        self._arena.free_all()

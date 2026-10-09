@@ -1,0 +1,10 @@
+{
+ "name": "validate_missing_entry",
+ "defect": "validate accepts an entry that names no function",
+ "run": "validate",
+ "entry": "no_such_function",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID"}
+}

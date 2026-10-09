@@ -1,0 +1,11 @@
+{
+ "name": "empty_batch",
+ "defect": "off-by-one on a batch of zero rows",
+ "run": "call_batch",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 0, "columns": [{"type": "int64", "values": []}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": []}}
+}

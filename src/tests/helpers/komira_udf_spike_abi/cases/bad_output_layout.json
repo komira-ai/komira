@@ -1,0 +1,11 @@
+{
+ "name": "bad_output_layout",
+ "defect": "an output with the wrong n_buffers is read (no import validation)",
+ "run": "call_batch",
+ "entry": "bad_layout",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]},
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT"}
+}

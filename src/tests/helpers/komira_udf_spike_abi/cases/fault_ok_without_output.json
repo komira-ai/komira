@@ -1,0 +1,11 @@
+{
+ "name": "fault_ok_without_output",
+ "defect": "OK with no output array is read as an empty result",
+ "run": "call_batch",
+ "entry": "ok_without_output",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]},
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT"}
+}

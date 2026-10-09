@@ -1,0 +1,11 @@
+{
+ "name": "sliced_input_offset",
+ "defect": "a reader ignores the array offset (13: not a multiple of 8), in the values or the validity bitmap",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [5, 6, 7, null, 9], "offset": 13}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [5, 6, 7, null, 9]}}
+}

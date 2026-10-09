@@ -1,0 +1,11 @@
+{
+ "name": "validate_newer_descriptor_version",
+ "defect": "validate accepts a descriptor_version newer than the runtime reads",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor_version": 1,
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID"}
+}

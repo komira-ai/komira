@@ -1,0 +1,11 @@
+{
+ "name": "validate_unspecified_form",
+ "defect": "validate accepts CODE_FORM_UNSPECIFIED",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "form": "UNSPECIFIED",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID"}
+}
