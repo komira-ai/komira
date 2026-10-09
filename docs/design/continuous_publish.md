@@ -1,6 +1,6 @@
-# Continuous publish: every package built, published to gamma, tested there, promoted to prod
+# Continuous publish: every package built, published to beta, tested there, promoted to prod
 
-Status: design, not built (revision 4). Everything marked **EXISTS** names the code that does it on
+Status: design, not built (revision 5). Everything marked **EXISTS** names the code that does it on
 `main`; everything marked **PROPOSED** has no code yet. **Every name this document introduces is
 PROPOSED and absent from `main`:** `komira_test_emulator`, `EmulatorEndpoint`,
 `LoopbackOnlyConnector`, the `release_checks` attribute, the `[conda_status]` sub-target,
@@ -14,10 +14,22 @@ and on [ci.md](../ci.md), the authority for the workflows. Where this document a
 `gamma_validation.md` disagree on how an emulator runs, this document is the later decision, and
 `gamma_validation.md` points here. Related: #371, #779, #835, #929, #1136, #1138, #1140, #1153.
 
+**Vocabulary.** The words *beta*, *gamma*, *prod*, *beta channel*, *gamma accounts*, the *tiers*
+(fake, emulator, fixture, e2e, real-cloud), *validated hash*, *single flight*, *never backward*,
+*break-glass* and *main red* mean exactly what the glossary of the staged pipeline says
+(`docs/design/staged_pipeline.md`, section "Glossary"; a path, not a link, until both docs are on
+`main`). This document does not define them again. In short: **beta** builds once, runs this
+document's tiers, publishes to the **beta channel** and installs from it; **gamma** holds only real
+cloud resources and names no channel; **prod** promotes the same bytes. **Today the beta channel is
+named `gamma`**, and today's jobs `gamma` and `validate` are beta's publish and installs under their
+old names; the staged pipeline's migration (M1 to M4, each a go) renames the channel. Where this
+document describes today (**EXISTS**), it uses today's names and says so. `gamma_validation.md` and
+its decisions predate the ruling: their "gamma" channel and its installs are beta here.
+
 ## What is it for, and what is out of scope?
 
-The goal: every komira library is built, published to the conda channel `gamma`, tested there, and
-promoted to `prod`, on every change to `main`, with no human click per release. That includes the
+The goal: every komira library is built, published to the beta channel, tested there, and promoted
+to `prod`, on every change to `main`, with no human click per release. That includes the
 cloud SDK packages, which are tested **without spending money on a cloud**. They are tested against
 in-memory fakes (`kci_cloud_fake`), against emulators that run as local processes, and against
 fixtures derived from pinned models and documented examples where no emulator exists.
@@ -25,8 +37,8 @@ fixtures derived from pinned models and documented examples where no emulator ex
 This document covers:
 
 1. how a release runs today and what is missing (with evidence);
-2. the target pipeline: the trigger, what "continuous" means at the CI's throughput, the gate between
-   gamma and prod, rollback and yank;
+2. the target pipeline: the trigger, what "continuous" means at the CI's throughput, the gates before
+   the beta channel and before gamma, rollback and yank;
 3. what stands between "the declared set" and "every package";
 4. the emulator test tier: where it runs, how emulators start and stop, one harness for all generated
    clients, the mapping from package to emulator, and fixture tests for the rest;
@@ -36,12 +48,12 @@ This document covers:
 
 Out of scope:
 
-- **Real cloud accounts in gamma.** These are decision 4 of
-  [gamma validation decisions](gamma_validation_decisions.md#open-decisions-for-the-project-owner).
-  This design spends nothing and holds no cloud credential. (**Pointer:** the staged pipeline,
-  `docs/design/staged_pipeline.md` (#1173, section e2), adds an operator-run real-cloud validation
-  outside this repository as a gamma gate that blocks prod; this repository still holds no cloud
-  credential, and the in-repository route of decision 4 stays open.)
+- **Real cloud accounts.** They are the gamma stage: the real-cloud kci tests run as ordinary gamma
+  validations with the `gamma` environment's federated credential, bound to the immutable OIDC
+  subject, and a red one blocks prod (the staged pipeline, `docs/design/staged_pipeline.md`, section
+  e2; it supersedes decision 4 of
+  [gamma validation decisions](gamma_validation_decisions.md#open-decisions-for-the-project-owner)).
+  This design's tiers run in beta: they spend nothing and hold no cloud credential.
 - **The native package format.** That is #835. This document depends on it but does not decide it.
 - **Other platforms** (linux-aarch64, macOS) and Python wheels.
 - **DEPLOY.** See [the DEPLOY step](deploy_step.md).
@@ -55,10 +67,13 @@ Out of scope:
 `.github/workflows/kci.yml` as four jobs:
 
 1. `build` runs on the build farm.
-2. `gamma` publishes to the `gamma` channel.
+2. `gamma` publishes to the channel `gamma` (the beta channel under its old name).
 3. `validate` installs what `gamma` published and runs the README examples. It `needs: [build,
    gamma]`, so it runs after `gamma` has published.
 4. `prod` publishes the same release set to `prod`.
+
+In the glossary's words, these are beta's build, publish and installs, then prod: today there is no
+gamma stage of real cloud resources.
 
 `prod` runs automatically when `validate` succeeds. It publishes exactly the set `validate` installed,
 using the `validated_set_hash` that `validate` hands it (the `kci.yml` header, "CONTINUOUS
@@ -76,7 +91,7 @@ environment ([ci.md](../ci.md#pausing-promotion-to-prod)).
 | what is not released | 161 libraries: 202 directories under `src/` hold a `BUCK` file (`src/tests` holds none) and 41 are declared | see [What blocks every package?](#what-blocks-every-package) |
 | cloud SDK tests | welded unit tests with `ScriptedConnector`, `AwsEchoConnector`, in-memory fakes and loopback fakes on `komira_http_server`. No emulator anywhere. | [gamma validation](gamma_validation.md#aws), §AWS, §GCP, §Azure |
 | a release on the release revision | builds `<lib>_conda[release]` and those libraries' welded tests. It runs no standalone e2e, conformance or service test. | [gamma validation](gamma_validation.md#where-can-a-check-run); decision item 6 |
-| a failed validate | prod does not start (no `always()`). The gamma bytes stay in `gamma`. | `kci.yml`, job `prod` |
+| a failed validate | prod does not start (no `always()`). The bytes stay in the channel `gamma`. | `kci.yml`, job `prod` |
 | rollback | "a revert on `main`, released forward as the next build number". There is no yank path. | [ci.md](../ci.md) |
 
 **Measured run time.** These are the last ten releases that ran to the end, all of them after the
@@ -118,9 +133,11 @@ the doc), as tracked in #779. Slice S1 fixes `releases.md`.
 
 ### Trigger: per merge, coalesced
 
-**Superseded in part:** this trigger, the "within one release duration" arithmetic below (and the
-rollback time in "Rollback and yank" that rests on it), and the placement of the two gates in "The gate
-between gamma and prod" are superseded by the staged pipeline, `docs/design/staged_pipeline.md` (#1173).
+**Superseded in part:** this trigger and the "within one release duration" arithmetic below (and the
+rollback time in "Rollback and yank" that rests on it) are superseded by the staged pipeline,
+`docs/design/staged_pipeline.md` (#1173, amended by #1184). The two gates in the next section keep
+their places under the glossary's names: the release checks in `build` (the staged pipeline's `TEST`
+step) and the installed-bytes checks in `beta_validate`.
 
 **PROPOSED: keep the trigger as it is.** Every push to `main` is a release, and pushes made during a
 release coalesce into the next one. That *is* the per-batch trigger. The batch is whatever landed while
@@ -141,21 +158,22 @@ independent of this design, and each is its own slice:
   fixed-size batches in dependency order, so that a cold full release takes several batches rather
   than one oversized one. The first such release is slow, and the queue coalesces behind it.
 
-### The gate between gamma and prod: results, not clicks
+### The gates before the beta channel and before gamma: results, not clicks
 
-**EXISTS:** prod publishes only the set that `validate` vouched for. **PROPOSED:** two more inputs,
-at two different points:
+**EXISTS:** prod publishes only the set that `validate` (beta's installs) vouched for. **PROPOSED:**
+two more inputs, at two different points:
 
 | input | runs in | runs when | a failure stops | slice |
 |---|---|---|---|---|
-| the release checks | `build` (farm) | before `gamma` publishes | `gamma` and everything after it | S10c |
-| the installed-bytes checks: the cloud smoke and the native `.so` check | `validate` (hosted runner) | after `gamma` has published, before `prod` | `prod` only; the bytes stay in `gamma` | S12 (after #835) |
+| the release checks | `build` (farm; the `TEST` step) | before `beta` publishes | `beta`'s publish and everything after it | S10c |
+| the installed-bytes checks: the cloud smoke and the native `.so` check | `beta_validate` (hosted runner) | after `beta` has published, before gamma | gamma and prod; the bytes stay in the beta channel | S12 (after #835) |
 
-Neither one changes what `prod` trusts: `prod` still publishes only `validate`'s set.
+Neither one changes what `prod` trusts: `prod` still publishes only the set beta's installs vouched
+for, by its validated hash (and, under the staged pipeline, gamma's as well).
 
 1. **The release checks** (S10c) are Buck2 standalone test targets that the release's `build` step
    *runs* (`buck2 test`, not `buck2 build`: building a standalone test does not run it) on the release
-   revision. A failure fails `build`, so nothing reaches `gamma`. **The list is derived, not kept by
+   revision. A failure fails `build`, so nothing reaches the beta channel. **The list is derived, not kept by
    hand**: it is every check `release/ci/derive_checks.py` derives whose targets depend on a declared
    library, the emulator and fixture tiers included. A new standalone test of a released library, or a
    newly declared library, joins the gate with no edit. This is decision item 6 of
@@ -168,7 +186,7 @@ Neither one changes what `prod` trusts: `prod` still publishes only `validate`'s
    margin; otherwise it goes back to the project owner with the numbers.
    These tests run on the source build. The conda payload is that same gated `.mojoc`
    (`tools/build/package/conda.bzl`), so they test the bytes that are published. The installed-path
-   differences (linking, loading, the README against the install) are what `validate` covers.
+   differences (linking, loading, the README against the install) are what `beta_validate` covers.
 2. **The installed-bytes checks** (S12, only after #835). One emulator round trip per cloud family,
    run against the *installed* package, plus decision item 8's check of every installed `.so`: the
    rules of `tools/build/native/native_check.sh` and the highest `GLIBC_` symbol version against the
@@ -199,10 +217,10 @@ pipeline, `docs/design/staged_pipeline.md` (#1173), section b.)
 **Yank** (PROPOSED, slice S11, and **every use needs the project owner's go**). A yank is for a
 published build that is unsafe for anyone to keep solving to: a security defect, or corrupt bytes.
 
-- **What a yank does.** It removes the file from `prod` (and from `gamma`), so that no new solve
+- **What a yank does.** It removes the file from `prod` (and from the beta channel), so that no new solve
   selects it, and it records the file in `release/yanked.textproto` on `main`, through a PR.
 - **What stops it coming back.** kci refuses to publish a file that `release/yanked.textproto` names
-  (a new `KCI-E-YANKED`, checked before any upload, in `gamma` and `prod`). Without that tombstone a
+  (a new `KCI-E-YANKED`, checked before any upload, in `beta` and `prod`). Without that tombstone a
   manual re-run of the same commit would regenerate the same name and build number (both count
   first-parent commits), find the name absent from the channel, and upload the yanked bytes again:
   "never overwrites" checks only what the channel holds. **kci reads the tombstone from `main`'s
@@ -215,9 +233,9 @@ published build that is unsafe for anyone to keep solving to: a security defect,
   re-run of the yanked commit carries a lower number and is refused by number. If the yanked build
   was the newest, the yank removes it, so the highest number left is the previous build's. A
   re-run of the yanked commit then carries a higher number, descends from the newest remaining
-  build, and passes both refusals. `gamma` has neither refusal. The tombstone covers both cases at
+  build, and passes both refusals. Today's channel before prod has neither refusal. The tombstone covers both cases at
   both channels. Planted defect (S11): a re-run of a commit older than the tombstone commit,
-  whose own tree does not name the file, is refused in `gamma` before any upload; a variant of kci
+  whose own tree does not name the file, is refused in `beta` before any upload; a variant of kci
   that reads the checked-out file uploads it and turns the test red.
 - **What a yank never does.** It never removes anything from a consumer's lockfile, and it never
   publishes anything.
@@ -238,8 +256,8 @@ analysis; asking for `[release]` then fails naming the reason, `tools/build/pack
 - it has no tests;
 - it depends on a library that is refused.
 
-The packer refuses a library that uses `OwnedDLHandle` (`tools/build/package/pack/conda.zig`). Gamma
-refuses a library that has no README, or a README with no runnable example
+The packer refuses a library that uses `OwnedDLHandle` (`tools/build/package/pack/conda.zig`). The
+installs (beta's) refuse a library that has no README, or a README with no runnable example
 (`src/kci_validate/readme_installed.mojo`). **PROPOSED (S3a):** one more refusal, below, for a cloud
 library with no release check.
 
@@ -258,7 +276,7 @@ table with one the build checks.
 | depends on a library that is not declared yet | 4 | the PRs above, then a declare PR |
 
 **Every cloud SDK package is in the native rows.** They all reach `komira_http_core`, `komira_crypto`
-or `komira_async`. So no cloud package can be published to `gamma`, or be tested there as installed
+or `komira_async`. So no cloud package can be published to the beta channel, or be tested there as installed
 bytes, before #835 is decided and built. What can ship before it:
 
 - **The 21 non-native libraries** in the last three rows: through #1136, #1138 and three small declare
@@ -285,7 +303,7 @@ The rule has two halves, because Buck2 analysis can compute only one of them:
   checks, S10c runs, for each declared cloud library, `buck2 cquery "rdeps(set(<its
   release_checks>), <library>)"` and requires at least one named target that (a) exists, (b) is a
   standalone test, (c) has the library in its dependency closure, and (d) is not in
-  `release/quarantine.textproto`. A failure fails `build`, so nothing reaches `gamma`. The same query
+  `release/quarantine.textproto`. A failure fails `build`, so nothing reaches the beta channel. The same query
   runs in the pull-request check of a PR that changes `release/` or a `release_checks` attribute.
   Planted defects, each red: a `release_checks` naming a test of an unrelated library (fails c), a
   label with no target (fails a), and a library whose only named check is quarantined (fails d).
@@ -603,11 +621,12 @@ not reach, could show it.
 ## The safety rules
 
 1. **No cloud spend.** No test in the tier has a credential to any account. With no credential,
-   nothing can be billed. No real-cloud step exists in this design.
+   nothing can be billed. No real-cloud step exists in this design: the only one is gamma's (the
+   staged pipeline, e2), and no test of these tiers runs in gamma.
 2. **No credentials.** The harness passes only fixed dummy values: a dummy AWS key pair, the emulator
    bearer, and Azurite's published development key. The emulator test targets carry no secret
    attribute, and the jobs that run them hold no cloud identity (`build` holds only the farm
-   connection; `validate` has no `id-token`). The generated `_no_env_reads` scan covers only the
+   connection; `beta_validate`, today's `validate`, has no `id-token`). The generated `_no_env_reads` scan covers only the
    generated files and only environment reads; it does **not** stop `komira_aws_core`'s chain from
    reading credential files or the metadata endpoints. Those are kept out by the lint above and by
    rule 3.
@@ -701,7 +720,8 @@ not reach, could show it.
    - **The credential** (defence in depth). If a request escaped both, it would carry a dummy key,
      which any cloud rejects, and a rejected unauthenticated request is not billed.
 4. **No upload and no cluster write from the tier.** Emulators are build inputs. The tier publishes
-   nothing; only the `gamma` and `prod` jobs publish, as they do today.
+   nothing; only the `beta` and `prod` jobs publish (today's `gamma` job is beta's publish under its
+   old name).
 5. **Third-party code runs unprivileged.** Where the action runs as uid 0, as every farm action
    does, every emulator and its runtime run as `nobody` (harness step 2; a failed drop fails the
    test), inside the namespace, with a state directory as the only place they may write. The pins
@@ -719,9 +739,9 @@ explicit go. Everything else is code that publishes nothing on its own.
 
 | # | slice | proof | go |
 |---|---|---|---|
-| S0 | **Lock gamma.** `gamma`'s deployment branches set to `main`. `gamma-breakglass` created with a required reviewer, and administrator bypass unchecked. The gamma channel's second trusted publisher confirmed. These are settings. Plus a drift check: the release's `build` step, which runs from `main`, reads `gamma`'s environment through the API and fails the release if its branch policy is not `main` only. | Before: the drift check fails on today's settings. After the settings change: it passes. Planted: the check run against a canned environment answer with no policy turns red. Whether the job's token may read environments is S0's first check; if it may not, the drift check is a documented manual read and S0 says so. A drift check detects; it does not lock: only the settings lock. | **Go** (repository settings) |
+| S0 | **Lock gamma** (the staged pipeline's G0, the same slice). `gamma`'s deployment branches set to `main`: today that guards the channel `gamma` (beta's under its old name), and later the gamma accounts' trust. `beta` and `beta-breakglass` are created locked by the staged pipeline's M1; `gamma-breakglass` is never created (gamma has no break-glass). These are settings. Plus a drift check: the release's `build` step, which runs from `main`, reads `gamma`'s, `beta`'s and `prod`'s environments through the API and fails the release unless each branch policy is `main` only. | Before: the drift check fails on today's settings. After the settings change: it passes. Planted: the check run against a canned environment answer with no policy turns red. The read needs no token: this repository is public, and an anonymous read of an environment and its branch policies answers (read for revision 5); a failed read fails the release. A drift check detects; it does not lock: only the settings lock. | **Go** (repository settings) |
 | S1 | **The release ledger** (`release/unreleased.textproto`, a `[conda_status]` sub-target, `release_ledger_check` in `release/BUCK`). Fix `docs/releases.md`'s "Held" list. | A planted library that is in neither file turns the check red. A ledger `NATIVE` row on a library that is not native turns it red. | none |
-| S2 | **Declare the 21 non-native libraries:** #1136, #1138, then three declare PRs. | Before merge: the PR's ledger check is red until the library leaves `PENDING_DECLARE`, and its `[release]` builds in the pull-request check. **Residual risk:** `install-set` runs only after merge, so the new name reaches `gamma` before any installed check; a failure stops `prod`, and `gamma` keeps the bad name. | **Go per PR:** a merged declare PR publishes permanent names to `gamma` and then `prod` |
+| S2 | **Declare the 21 non-native libraries:** #1136, #1138, then three declare PRs. | Before merge: the PR's ledger check is red until the library leaves `PENDING_DECLARE`, and its `[release]` builds in the pull-request check. **Residual risk:** `install-set` runs only after merge, so the new name reaches the beta channel before any installed check; a failure stops gamma and `prod`, and the beta channel keeps the bad name. | **Go per PR:** a merged declare PR publishes permanent names to `beta` and then `prod` |
 | S3a | **The cloud-check refusal, analysis half:** the `release_checks` label attribute and the `_conda_facts` refusal of an empty list; `NO_CLOUD_CHECK` in the ledger. | Planted: a cloud-family fixture library with `release_checks = []` turns `[release]` red; naming one target turns it green. **Residual risk until S10c:** the named target is not checked to exist, to reach the library or to be unquarantined; no cloud declare PR merges before S10c. | none |
 | S3 | **Native packaging,** #835 and its stack. Then declare the `NATIVE` and `DLOPEN` rows in ledger-sized PRs; each cloud declare PR depends on S3a, S10c and its family's suite. | As S2 (ledger check and `[release]` before merge; `install-set` after). For a cloud library, `[release]` is red without a check (S3a). The installed `.so` check is S12. | **Go:** the #835 decision, then per declare PR as in S2 |
 | S4 | **`komira_test_emulator`:** the namespace and its self-checks, process start as PID 1 with the two-line uid map and the drop to `nobody`, the inherit list and the allowlisted environment, readiness and the outer-uid check, stop, `LoopbackOnlyConnector`, the tier lint; probe rows `netns_loopback_only` (required) and `ambient_identity` (reported). | Mutants, each turning a named test red. **Range:** the refusal test uses a counting inner connector and asserts zero inner connects for a TEST-NET address; rows for the byte-swapped form of `127.0.0.1` (refused), the addresses just below and just above `127.0.0.0/8` (refused) and its last address (accepted) kill a byte-order mutant and the edge mutants. **Killed harness:** an outer test creates a pipe and starts P0 with the pipe's write end W on the harness's inherit list (step 2), so W reaches P1, E and G while every other descriptor is closed; the outer test closes its own copy of W. The fake emulator E starts a grandchild G that calls `setsid`. P1, E and G each write one byte naming themselves (`P`, `E`, `G`) through W, then block in `pause()`; P1 writes after the readiness answer and never reaches step 6, so its body blocks until it is killed. **Armed first:** the outer test reads until it holds all three bytes, within the start-up budget; EOF or the budget before that fails the test as "oracle not armed", never as a pass, and each byte proves its writer was alive and held W. Only then does it SIGKILL P0, the outermost process (as the probe's `pdeathsig` row does), and require EOF within 10 s: EOF arrives only when every holder of W is gone, in any namespace, so the oracle does not depend on the mechanism it checks. On red, the outer test names and SIGKILLs every process whose `/proc/<pid>/fd` links to the pipe's inode, so a mutant run leaves nothing behind. Three mutants, each red as written: (1) P1's death signal dropped (`PR_SET_PDEATHSIG`; util-linux's `--kill-child`): the three bytes arrive, P1 outlives P0 holding W, and it cannot finish its body and stop everything itself because the body blocks, so no EOF. (2) `CLONE_NEWPID` dropped with the death signal kept: without a new PID namespace the fresh-`/proc` mount fails, the PID 1 check fails, and the outer-uid scan matches every process on the worker; each would fail the test before the oracle is armed, so this run bypasses the mount and disables those two checks, keeping step 6's own `getpid() == 1` guard; the three bytes arrive, the kill takes P1 but leaves E and G, re-parented outside, holding W, so no EOF. (3) A harness that ignores the inherit list and closes W before exec: E's and G's bytes never arrive, so the read ends in the budget (P1 still holds W) or in EOF (it lost W too) before all three bytes, and the test is red as not armed. Neither of the first two links masks the other. **Normal stop:** a fake emulator whose G calls `setsid` and writes its namespace pid to the state directory; after stop, `kill(G, 0)` answers `ESRCH` and the fresh `/proc` holds only pid 1. The mutant that stops by signalling E's process group only (no `kill(-1, SIGKILL)` sweep) leaves G alive, and both assertions turn red. **Readiness:** against a fake emulator that never answers, "not ready treated as ready" and "budget ignored" each turn the readiness test red (it expects a failure naming the emulator within the budget); against one that answers once and exits, dropping the alive-after-answer check turns it red. **No skip:** a descriptor pointing at a missing file turns the test red. **Namespace and self-checks:** each self-check of safety rule 3 with its own planted defect, as listed there: `CLONE_NEWNET` removed (red on the namespace inode and the interface list), a dummy interface with a default route (red on the interface list and on `ENETUNREACH`), `lo` left down, a down address-less dummy interface (green-expected: the fallback-tunnel shape), `CLONE_NEWPID` removed (red on PID 1), the action's `HOME` forwarded, the environment passed through (red on `KOMIRA_TIER_CANARY`), a credential variable set in P1's environment, the drop to `nobody` skipped and the "is P0 uid 0" test forced to "no" (each red on the outer-uid check). **Lint:** a tier test calling `process_creds_source` turns red; a descriptor whose environment keys include `AWS_ACCESS_KEY_ID` turns red; one calling `build_gcs_tls_connector_trusting` stays green (whole-identifier match). | none |
@@ -733,9 +753,9 @@ explicit go. Everything else is code that publishes nothing on its own.
 | S9 | **Fixtures:** the provenance, schema, secret, dead-fixture and generator-independence lints; fixtures for the packages that have no emulator | a planted fixture without provenance; a planted unknown field; a planted bearer token; a fixture generator that imports `tools/build/cloud`. Each turns the lint red. | none |
 | S10a | **kci built once per revision** (#1153) | a release whose kci is unchanged spends the cached-build time on "build kci" in every job but the first | none |
 | S10b | **The release build in batches** | a cold full release (every package re-keyed) finishes in batches each under `--build-timeout-s` | none |
-| S10c | **Release checks:** a `checks:` field on the BUILD step that runs (`buck2 test`) the derived checks reaching a declared library plus every `release_checks` target; the flake re-run and `release/quarantine.textproto`; the reach check of `release_checks` (cquery `rdeps`), at release time and in the pull-request check; the reverse-dependency filter on the derived checks. First task: measure its time and farm cost on a release revision and write them in this document. | a machine-file fixture whose check target fails: `kci run --stage build` fails and `gamma` never starts; a check that fails once then passes is re-run once and passes; a `release_checks` naming an unrelated library's test, a label with no target, and a library whose only check is quarantined each fail `build` | none: it adds a gate to an approved pipeline |
-| S11 | **Yank:** verify that the channel host can delete a file or mark it removed; a `kci yank` verb, dry run by default; `release/yanked.textproto` and `KCI-E-YANKED` | a dry run against the fake channel lists exactly one file. A real run is refused without `--channel` and `--file`. A re-run of a commit older than the tombstone, whose own tree does not name the file, is refused before any upload in `gamma` (the tombstone is read from `main`'s head); a kci that reads the checked-out copy turns that test red. | **Go per use** |
-| S12 | **Installed-bytes checks** in `validate` (after S3): one emulator round trip per cloud family against the installed package, and the installed `.so` check (decision item 8) | a planted missing `.so` in a fixture package turns it red; a fixture `.so` with a `GLIBC_` version above the floor turns it red | **Go:** decision 1 (a `service` block in gamma) and the workflow-rule amendment (item 7) |
+| S10c | **Release checks:** the `TEST` step of stage `build` (the staged pipeline, e) that runs (`buck2 test`) the derived checks reaching a declared library plus every `release_checks` target; the flake re-run and `release/quarantine.textproto`; the reach check of `release_checks` (cquery `rdeps`), at release time and in the pull-request check; the reverse-dependency filter on the derived checks. First task: measure its time and farm cost on a release revision and write them in this document. | a machine-file fixture whose check target fails: `kci run --stage build` fails and `beta` never starts; a check that fails once then passes is re-run once and passes; a `release_checks` naming an unrelated library's test, a label with no target, and a library whose only check is quarantined each fail `build` | none: it adds a gate to an approved pipeline |
+| S11 | **Yank:** verify that the channel host can delete a file or mark it removed; a `kci yank` verb, dry run by default; `release/yanked.textproto` and `KCI-E-YANKED` | a dry run against the fake channel lists exactly one file. A real run is refused without `--channel` and `--file`. A re-run of a commit older than the tombstone, whose own tree does not name the file, is refused before any upload in `beta` (the tombstone is read from `main`'s head); a kci that reads the checked-out copy turns that test red. | **Go per use** |
+| S12 | **Installed-bytes checks** in `beta_validate` (after S3): one emulator round trip per cloud family against the installed package, and the installed `.so` check (decision item 8) | a planted missing `.so` in a fixture package turns it red; a fixture `.so` with a `GLIBC_` version above the floor turns it red | **Go:** decision 1 (a `service` block in that document's gamma, beta's installs here) and the workflow-rule amendment (item 7) |
 
 S0 is independent of the rest and should go first. S4 to S10c can start at once, in parallel with S2
 and S3, because they test source code. S3's cloud declare PRs cannot merge before S3a, S10c and their
@@ -745,11 +765,13 @@ family's suite: S3a makes that a build failure, not a convention.
 
 Each has a recommendation. None is decided here.
 
-1. **Lock gamma now (S0)?** *Recommendation:* yes, today. It is two settings, and until they exist any
-   branch can publish to `gamma` (it cannot reach `prod`; see above).
+1. **Lock gamma now (S0)?** *Recommendation:* yes, today. It is one setting and a drift check, and
+   until it exists any branch can publish to the channel `gamma` (it cannot reach `prod`; see above),
+   and no cloud may trust the `gamma` environment.
 2. **Is merging a declare PR the go for its new names?** A merged declare PR publishes names to
-   `gamma` and then to `prod`, permanently and with no further click. *Recommendation:* yes, the merge
-   is the go. The `gamma` job summary already lists "NEW NAMES" for `prod`.
+   the beta channel and then to `prod`, permanently and with no further click. *Recommendation:* yes,
+   the merge is the go. The publish job's summary (today's `gamma`, beta's after the rename) already
+   lists "NEW NAMES" for `prod`.
 3. **Native packaging (#835).** 139 of the 161 unreleased libraries, and every cloud SDK package,
    wait on it. *Recommendation:* decide #835 next. Nothing else in this document moves the count as
    much.
@@ -758,15 +780,16 @@ Each has a recommendation. None is decided here.
 5. **Pinned third-party emulators as build inputs** (moto and its wheel set, storage-testbench, the
    Firestore emulator, Azurite, and their runtimes), run as `nobody` in a loopback-only namespace.
    *Recommendation:* yes, by sha256 only. Accept the Firestore emulator's terms before pinning it.
-6. **Where the cloud tier gates.** *Recommendation:* the release checks in `build`, before `gamma`
-   (S10c), once their measured cost fits. The installed-bytes checks in `validate`, before `prod`, once
+6. **Where the cloud tier gates.** *Recommendation:* the release checks in `build`, before `beta`
+   publishes (S10c), once their measured cost fits. The installed-bytes checks in `beta_validate`,
+   before gamma, once
    #835 ships native packages (S12), because that is when the build stops being able to see the
    defect.
 7. **Yank.** *Recommendation:* approve the mechanism (S11), with the tombstone, and each use still a
    separate go.
 8. **Fixtures from a live cloud.** *Recommendation:* no. It needs an account and a credential, so the
-   fixture tier uses models, documented examples and emulators only. Revisit together with real gamma
-   projects (decision 4).
+   fixture tier uses models, documented examples and emulators only. The only live-cloud tier is
+   gamma's real-cloud tests (the staged pipeline, e2); revisit once they run.
 9. **The Pub/Sub, Bigtable, Spanner, Datastore and Cosmos DB emulators.** komira has no client for any
    of them. *Recommendation:* adopt each emulator in the PR that adds its client, with this harness.
 10. **If the farm refuses a loopback-only namespace** (S4's `netns_loopback_only` row fails).
