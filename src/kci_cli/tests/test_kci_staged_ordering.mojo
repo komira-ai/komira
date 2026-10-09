@@ -348,6 +348,14 @@ def test_a_superseded_publish_stops_the_run_with_exit_0() raises:
     assert_equal(r.set_hash, String(""))
     var text = Path(summary).read_text()
     assert_true(text.find(String("### superseded: gamma did nothing for a1b2c3d4: step 'publish'")) >= 0, text)
+    # a stage with no validation (prod): the set its start-up check recomputed
+    # is not handed on either
+    var p = Fake()
+    p.publish_outcome = String(OUTCOME_SUPERSEDED)
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_args(m, String("prod"), String("1")), p, rec2), 0)
+    assert_equal(_last(rec2).outcome, String(OUTCOME_SUPERSEDED))
+    assert_equal(_last(rec2).set_hash, String(""))
 
 
 # ---- (c7) to (c10), (a) the admission check -------------------------------------------
