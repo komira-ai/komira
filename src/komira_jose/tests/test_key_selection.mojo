@@ -148,8 +148,9 @@ def test_kid_selects_and_never_falls_back() raises:
     # prefix, the kid extended at the end and at the front, a proper suffix,
     # a case variant, and the same length with the first or the last byte
     # replaced (an empty kid is refused by the header gate before any key is
-    # looked at). A prefix, suffix, case-folded or partial byte-loop compare
-    # in either direction accepts at least one of them.
+    # looked at). A prefix, suffix or case-folded compare in either direction,
+    # or a byte loop that skips the first or the last byte, accepts at least
+    # one of them.
     var misses = String("")
     for k in ["k", "k1x", "xk1", "1", "K1", "z1", "k2"]:
         var got = _err(v, _kid(String(k)))
@@ -344,13 +345,16 @@ def test_off_curve_key_does_not_verify() raises:
 
 def test_key_lengths_rechecked() raises:
     # Catches: the verifier trusting a Jwk's lengths (a Jwk built around
-    # the constructors). The RS256 bounds are 256..512 modulus bytes and 1..8
+    # the constructors). ES256 x and y are each 31 and 33 bytes; EdDSA x is 31
+    # and 33 bytes. The RS256 bounds are 256..512 modulus bytes and 1..8
     # exponent bytes, each edge on both sides.
     assert_equal(_single_err("EdDSA", _raw("OKP", "Ed25519", 31, 0, 0, 0)), SUIT)
     assert_equal(_single_err("EdDSA", _raw("OKP", "Ed25519", 33, 0, 0, 0)), SUIT)
     assert_equal(_single_err("EdDSA", _raw("OKP", "Ed25519", 32, 0, 0, 0)), "")
     assert_equal(_single_err("EdDSA", _raw("OKP", "X25519", 32, 0, 0, 0)), SUIT)
     assert_equal(_single_err("ES256", _raw("EC", "P-256", 32, 31, 0, 0)), SUIT)
+    assert_equal(_single_err("ES256", _raw("EC", "P-256", 32, 33, 0, 0)), SUIT)
+    assert_equal(_single_err("ES256", _raw("EC", "P-256", 31, 32, 0, 0)), SUIT)
     assert_equal(_single_err("ES256", _raw("EC", "P-256", 33, 32, 0, 0)), SUIT)
     assert_equal(_single_err("ES256", _raw("EC", "P-384", 32, 32, 0, 0)), SUIT)
     assert_equal(_single_err("ES256", _raw("EC", "P-256", 32, 32, 0, 0)), "")
@@ -362,6 +366,52 @@ def test_key_lengths_rechecked() raises:
     assert_equal(_single_err("RS256", _raw("RSA", "", 0, 0, 256, 1)), "")
     assert_equal(_single_err("RS256", _raw("RSA", "", 0, 0, 256, 8)), "")
     assert_equal(_single_err("RS256", _raw("RSA", "", 0, 0, 256, 9)), SUIT)
+
+
+def _suit_misses(alg: String, kty: String, crv: String, key: Jwk) -> String:
+    var got = key_refusal(key, alg)
+    if got == "the key does not suit the pinned algorithm":
+        return String("")
+    return alg + " kty=" + kty + " crv=" + crv + " -> \"" + got + "\"; "
+
+
+def test_kty_crv_and_alg_are_exact() raises:
+    # Catches: a key-type, curve or algorithm compare in the key check that
+    # is not exact (a Jwk built around the constructors reaches it with any
+    # strings). Each key below has the right lengths, so only the one wrong
+    # string can refuse it. The near-miss table of each expected value: a
+    # prefix, the value extended at the end and at the front, a proper
+    # suffix, a case variant, "", and the same length with the first, the
+    # middle (index len/2) or the last byte replaced; the kty tables also
+    # hold the other two key types and the crv tables a sibling curve. A
+    # prefix, suffix, case-folded, always-true or byte loop that skips the
+    # first, the middle or the last byte, in either direction, accepts at
+    # least one of them; every miss is reported.
+    var m = String("")
+    for k in ["E", "ECx", "xEC", "C", "ec", "", "zC", "Ez", "OKP", "RSA"]:
+        m += _suit_misses("ES256", String(k), "P-256", _raw(String(k), "P-256", 32, 32, 0, 0))
+    for k in ["OK", "OKPx", "xOKP", "KP", "okp", "", "zKP", "OzP", "OKz", "EC", "RSA"]:
+        m += _suit_misses("EdDSA", String(k), "Ed25519", _raw(String(k), "Ed25519", 32, 0, 0, 0))
+    for k in ["RS", "RSAx", "xRSA", "SA", "rsa", "", "zSA", "RzA", "RSz", "EC", "OKP"]:
+        m += _suit_misses("RS256", String(k), "", _raw(String(k), "", 0, 0, 256, 3))
+    for c in ["P-25", "P-256x", "xP-256", "-256", "p-256", "", "z-256", "P-z56", "P-25z", "P-384"]:
+        m += _suit_misses("ES256", "EC", String(c), _raw("EC", String(c), 32, 32, 0, 0))
+    for c in [
+        "Ed2551", "Ed25519x", "xEd25519", "d25519", "ed25519", "", "zd25519",
+        "Ed2z519", "Ed2551z", "X25519",
+    ]:
+        m += _suit_misses("EdDSA", "OKP", String(c), _raw("OKP", String(c), 32, 0, 0, 0))
+    for a in ["ES25", "ES256x", "xES256", "S256", "es256", "", "zS256", "ESz56", "ES25z"]:
+        m += _suit_misses(String(a), "EC", "P-256", _raw("EC", "P-256", 32, 32, 0, 0))
+    for a in ["EdDS", "EdDSAx", "xEdDSA", "dDSA", "eddsa", "", "zdDSA", "EdzSA", "EdDSz"]:
+        m += _suit_misses(String(a), "OKP", "Ed25519", _raw("OKP", "Ed25519", 32, 0, 0, 0))
+    for a in ["RS25", "RS256x", "xRS256", "S256", "rs256", "", "zS256", "RSz56", "RS25z"]:
+        m += _suit_misses(String(a), "RSA", "", _raw("RSA", "", 0, 0, 256, 3))
+    assert_equal(m, "")
+    # The controls: each expected triple is accepted.
+    assert_equal(key_refusal(_raw("EC", "P-256", 32, 32, 0, 0), "ES256"), "")
+    assert_equal(key_refusal(_raw("OKP", "Ed25519", 32, 0, 0, 0), "EdDSA"), "")
+    assert_equal(key_refusal(_raw("RSA", "", 0, 0, 256, 3), "RS256"), "")
 
 
 def test_rs256_signature_length_is_the_modulus_length() raises:
@@ -435,6 +485,10 @@ def main() raises:
         test_key_lengths_rechecked()
     except e:
         failures += String("test_key_lengths_rechecked: ") + String(e) + "\n"
+    try:
+        test_kty_crv_and_alg_are_exact()
+    except e:
+        failures += String("test_kty_crv_and_alg_are_exact: ") + String(e) + "\n"
     try:
         test_rs256_signature_length_is_the_modulus_length()
     except e:

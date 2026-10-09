@@ -281,8 +281,9 @@ def test_iss() raises:
     # public-boundary lint refuses it, so the prefixes stop before the host
     # or keep all of it), the issuer extended at the end and at the front, a
     # proper suffix, a case variant, and the same length with the first or
-    # the last byte replaced. A prefix, suffix, case-folded or partial
-    # byte-loop compare accepts at least one of them; every miss is reported.
+    # the last byte replaced. A prefix, suffix or case-folded compare, or a
+    # byte loop that skips the first or the last byte, accepts at least one
+    # of them; every miss is reported.
     var misses = String("")
     for i in [
         "https:/", "https://issuer.example/", "https://issuer.example/ax",
@@ -337,8 +338,9 @@ def test_aud() raises:
     # audience extended at the end and at the front, a proper suffix, a case
     # variant, "", and the same length with the first or the last byte
     # replaced, each as a string and as the only array element. A prefix,
-    # suffix, case-folded or partial byte-loop compare in either direction
-    # accepts at least one of them; every miss is reported.
+    # suffix or case-folded compare in either direction, or a byte loop that
+    # skips the first or the last byte, accepts at least one of them; every
+    # miss is reported.
     var misses = String("")
     for a in [
         "service", "service-ab", "xservice-a", "ervice-a", "SERVICE-A", "",
