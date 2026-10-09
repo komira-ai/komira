@@ -233,7 +233,7 @@ Field numbers are the next free numbers at the pinned commit.
 | `WireScanNode` | `Boundedness boundedness = 13` (`BOUNDED`, `UNBOUNDED`) | Required in OPTIMIZED; admitted in RAW too (below). Marks a source with no end, which makes the plan a streaming plan. |
 | `WireScanNode` | `WireAccessPath access_path = 14` | Required in OPTIMIZED; admitted in RAW. The scan's access path (full, text index, vector index), with its index generation and consistency mode (§15.5). |
 | `WirePlan` | new arms `index_lookup = 23`, `expand = 24` | A query per input row against an index, and graph traversal (§15.6, §15.7). Admitted in both contexts. |
-| `WirePlan` | new arm `WireExchangeNode exchange = 20` | `{child = 1, kind = 2 (GATHER, BROADCAST, HASH, RANGE), keys = 3, key_encoding = 4, ordering = 5, partitions = 6, adaptive_allowed = 7}`. `partitions = 0` means "filled in at the cut" (§8). |
+| `WirePlan` | new arm `WireExchangeNode exchange = 20` | `{child = 1, kind = 2 (GATHER, BROADCAST, HASH, RANGE), keys = 3, key_encoding = 4, ordering = 5, partitions = 6, adaptive_allowed = 7, key_groups = 8}`. `partitions = 0` means "filled in at the cut" (§8); `key_groups` is set only below keyed state (§8.4). |
 
 The UDF arms of §10.4 (`WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, the `AGG_UDF` aggregate function),
 the `WireField` addition `children`, `WireScanNode.boundedness`, and the §15 additions (`access_path` and the two
@@ -616,6 +616,7 @@ message ExchangeEdge {
   repeated uint32 keys          = 4;
   KeyEncoding  key_encoding     = 5;
   uint32       partitions       = 6;  // non-zero
+  uint32       key_groups       = 7;  // the exchange's key_groups, copied unchanged (§8.4)
 }
 ```
 
@@ -628,7 +629,7 @@ exchange elided, so hosts admit one form.
 
 1. The producer declares `needs.resources.host_count_max`. When it is above 1, the producer places
    `WireExchangeNode`s for that maximum, with `partitions = 0`, and marks those whose kind or fan-out may change at
-   runtime as `adaptive_allowed`.
+   runtime as `adaptive_allowed`. A keyed stateful node's `HASH` exchange is placed at any maximum (§8.4).
 2. The scheduler picks hosts.
 3. The coordinator is the first party that knows the host count, and it is the same build as the hosts. It verifies
    `plan_digest` on the uncut plan (§7.2 steps 1-8), then runs the **cutter**:
@@ -637,7 +638,7 @@ exchange elided, so hosts admit one form.
    - above it, a scan of the shuffle partition is added (a new scan source over the reader in
      `src/komira_shuffle/source.mojo`);
    - `partitions` is filled in;
-   - with one host, every exchange is elided.
+   - with one host, every exchange is elided, including one placed for keyed state (§8.4).
 
 **The cut is not optimization.** It changes no §5.2 field, reorders no join and adds no aggregate split. A test
 asserts this by comparing the decisions of the uncut plan with the union of the segments. Mutants: a cutter that
@@ -654,6 +655,27 @@ At sealed stage boundaries a host may coalesce reducers and split skewed partiti
 change is recorded so a replay reproduces it, and the post-condition compares against the recorded change. A join
 reorder, a build-side flip or an aggregate-mode change during execution is never allowed; a large estimate miss
 spills instead.
+
+### 8.4 Key groups
+
+The streaming forms of stateful operators, and their state contract, come under a later `format_version` (§5.2;
+[`plan_models.md`](plan_models.md) §3.5-§3.6). Their exchanges are fixed here, so the cut can carry them.
+
+- **The field.** A `HASH` exchange that feeds a keyed stateful node sets `key_groups > 0`: keys hash into that many
+  buckets, and state is laid out per bucket. Every `HASH` exchange feeding one stateful node has the same
+  `key_groups` and `key_encoding`. On every other exchange `key_groups` is 0, so the canonical form (§7.1) has one
+  encoding. The producer fixes it for the plan's life and refuses `host_count_max > key_groups`
+  (`OPTIMIZED_KEY_GROUPS_TOO_FEW`).
+- **The cut.** The cutter copies `key_groups` onto the edge unchanged, fills `partitions` with the host count, and
+  gives each host a contiguous range of groups. A rescale moves state group by group; a key never changes group.
+- **Placement.** Such an exchange is in the plan even when `host_count_max = 1`, the exception in §8.2 step 1. At one
+  host the cut elides it as it elides every exchange, and the state is still laid out by key group, so a single-host
+  run can be rescaled.
+- **Frozen meaning.** The key → group function (the hash function, its seed and the key encoding) is frozen per
+  `optimizer_contract_version` (§9.3); otherwise state written by one build would be routed wrongly by another.
+- **Numbers.** `WireExchangeNode.key_groups = 8` and `ExchangeEdge.key_groups = 7` are the next free numbers, never
+  released. The first is added under the `format_version` that adds the stateful streaming forms (§9.2); the second,
+  like every segment message, carries no cross-build promise (§9.6).
 
 ---
 
@@ -702,7 +724,8 @@ It names the meaning, as a host must lower them, of the decisions in the body. I
 - the lowering meaning of a §5.2 field, including the set of `(join type, build side)` pairs a host can lower;
 - the set of host-local rules or the rewrite set of §7.3;
 - the canonical form;
-- the meaning of a snapshot pin.
+- the meaning of a snapshot pin;
+- the key → group function of a keyed exchange (§8.4).
 
 It does **not** bump when optimizer heuristics improve: a host executes an older optimizer's decisions correctly; it
 just executes older choices.
@@ -931,61 +954,14 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 
 ## 13. Comparison with other systems
 
-- **Trino** ([`PlanFragment`](https://github.com/trinodb/trino/blob/master/core/trino-main/src/main/java/io/trino/sql/planner/PlanFragment.java)).
-  The coordinator optimizes and fragments; workers only lower (`LocalExecutionPlanner`). That is the same split as
-  here, except the optimizer runs on the coordinator. Coordinator and workers must run the same version: the
-  equal-build option rejected in §9.8.
-- **DataFusion** ([`datafusion.proto`](https://github.com/apache/datafusion/blob/main/datafusion/proto/proto/datafusion.proto)).
-  The logical proto has no slots for optimizer decisions; the norm is to round-trip a logical plan and optimize it
-  again. Decisions such as join partition mode exist only in the physical proto, which makes no compatibility
-  promise across releases. *(My reading)* The lessons are to make decisions explicit fields and to reference UDFs by
-  identity. Here the identity is a content digest, not a name (§10.3); §10.14 compares the UDF design with Spark
-  Connect, Daft, Ray Data and Polars.
-- **Spark Connect** ([overview](https://spark.apache.org/docs/latest/spark-connect-overview.html)). A thin client
-  sends an unresolved plan, and the server analyzes and optimizes it. The opposite trade: version decoupling comes
-  cheaply, and every plan is optimized server-side.
-- **Substrait** ([`algebra.proto`](https://github.com/substrait-io/substrait/blob/main/proto/substrait/algebra.proto)).
-  The precedent for `AggregationPhase` (our `mode`), per-relation advisory `Hint.Stats` (our `advice`), extension
-  URIs for UDF identity, and `Plan.version` with a producer string (our `ProducerStamp`). It has no snapshot pins,
-  no digest and no do-not-re-optimize contract.
+Moved to [`optimized_plan_decisions.md`](optimized_plan_decisions.md): Trino, DataFusion, Spark Connect, Substrait.
 
 ---
 
 ## 14. Questions, now decided
 
-Each question below was open in an earlier revision of this document. Each is now decided, and the text above
-states the decision; the list keeps its numbering so references to it stay valid.
-
-1. **`group_topk`.** Keep refusing it until an owner specifies its semantics (§5.2, §5.4).
-2. **Scalar subqueries.** Host-side `SCALAR_FOLD` (§5.3); revisit only if the gap measured on TPC-H Q11, Q15 and Q22 is
-   material. That benchmark, like every benchmark in this plan, runs on the build farm's existing benchmark support,
-   not a harness of its own.
-3. **Exchanges at the cut.** The cutter never adds an exchange the producer did not place. A producer that declared
-   `host_count_max = 1` gets one host (§8.2).
-4. **Keep the lowering or write an upgrade step** (§9.3). Decided per change, preferring kept lowering; an upgrade step
-   only when keeping two lowerings would split an operator's code path.
-5. **Supported CPython minors and Node majors.** Remote runs follow the producer's version: its CPython minor, 3.12 to
-   3.14 at the first release, or its Node major. A release ships several bases, one per CPython minor and one per
-   Node major (§10.11). A new minor is added soon after its upstream release, and one is dropped from new bases at its
-   upstream end of life, and Node majors likewise. A plan recorded against a dropped version keeps running on the
-   last base that shipped it (§10.12). Free-threaded builds are distinct ABI tags and are refused by name until a base ships one.
-6. **Return types learned at run time.** Not shipped. Every return type is explicit in the plan (§10.5): a type hint
-   or a verb argument in Python, a type value in TypeScript, and a refusal by name otherwise.
-7. **Serializer acceptance across base releases.** Each base accepts its own serializer version and those of the bases
-   it supersedes within one Python minor, proven by one corpus payload per version (§9.4). The Node capture format
-   follows the same rule within one Node major, since each base carries one major.
-8. **System libraries and JavaScript dependencies.** Dependencies live in the image, in the runtime's environment
-   directory `/opt/env/<runtime>/` (Python's virtual environment is `/opt/env/komira/python/`), or, for pure
-   JavaScript, bundled into the code layer under `/komira-code/`; a JavaScript package with a native addon is
-   installed for the host's platform into `/opt/env/komira/node/` (§10.6). A dependency that needs a system library
-   lands in the same environment directory: the image builder installs it into a relocatable prefix there, the
-   worker, not the supervisor, gets it on its library path, and a library that cannot be relocated is refused by name
-   at build time. *(Inferred: not yet tried against real packages.)*
-9. **Aggregate state.** A fixed 64 MiB cap per group at the first release; a group over it fails by name (§10.2).
-   Tuning the cap is komira-ai/komira#1148.
-10. **Native UDFs** (Mojo, Rust, C, C++ and Zig, through the C ABI) ship at the first release, in-process by
-    default, with the worker transport opt-in for crash isolation. The default holds because the supervisor's
-    run-scoped heartbeat token never reaches the engine's process or user id (§10.10).
+Moved to [`optimized_plan_decisions.md`](optimized_plan_decisions.md), with its numbering, so references to "question
+N in §14" stay valid.
 
 ---
 
