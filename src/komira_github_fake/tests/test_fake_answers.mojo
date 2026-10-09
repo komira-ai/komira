@@ -293,6 +293,27 @@ def test_other_repository_objects() raises:
     var listed = _send(w, "GET", "/repos/alice/app1/actions/runs", both, "").json()
     assert_equal(listed.get(String("total_count")).as_int64(), 1, "app1's runs only")
     assert_equal(listed.get(String("workflow_runs")).element_at(0).get(String("id")).as_int64(), run_a)
+    # The list handler reads head_sha, per_page and page (status, branch,
+    # event are not read). app1 and app2 share SHA, so a head_sha or page
+    # query that skipped the repo filter would show app2's run here.
+    var queries = List[String]()
+    queries.append(String("?head_sha=") + SHA)
+    queries.append(String("?head_sha=") + SHA + String("&per_page=1&page=1"))
+    queries.append(String("?per_page=100&page=1"))
+    var leaked = String("")
+    for t in range(len(tokens)):
+        for i in range(len(queries)):
+            var doc = _send(w, "GET", String("/repos/alice/app1/actions/runs") + queries[i], tokens[t], "").json()
+            var n = doc.get(String("total_count")).as_int64()
+            var first = Int64(-1)
+            if n >= 1:
+                first = doc.get(String("workflow_runs")).element_at(0).get(String("id")).as_int64()
+            if n != 1 or first != run_a:
+                leaked += String("[") + String(t) + String("]") + queries[i] + String("=") + String(n) + String("/") + String(first) + String(" ")
+        var p2 = _send(w, "GET", String("/repos/alice/app1/actions/runs?head_sha=") + SHA + String("&per_page=1&page=2"), tokens[t], "").json()
+        if p2.get(String("total_count")).as_int64() != 1 or p2.get(String("workflow_runs")).array_len() != 0:
+            leaked += String("[") + String(t) + String("]page2 ")
+    assert_equal(leaked, String(""), "a head_sha or page query lists app1's run only")
     var control = String("")
     for i in range(len(tails)):
         var got = _send(w, "GET", String("/repos/alice/app2") + tails[i], both, "").status
