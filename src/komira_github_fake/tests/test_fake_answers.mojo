@@ -24,6 +24,16 @@
 #     completed without a conclusion, a member of the wrong type, an output
 #     that is not an object) and 404s an update of an unknown check run.
 #   * test_unknown_objects: unknown runs, jobs and artifacts answer 404.
+#   * test_other_repository_objects: app1 and app2 share one installation;
+#     app2's run, job, artifact and check run all exist (each answers 200
+#     through app2's path), yet asked by id through app1's path every route
+#     that looks one up answers 404, with a token for app1 only and with one
+#     for both: get run, get run attempt, list jobs, list jobs of an
+#     attempt, list artifacts, get job, get artifact and update check run
+#     (which leaves app2's check run unchanged). Listing app1's runs leaves
+#     app2's run out, and `add_job`/`add_artifact` refuse app2's run under
+#     app1. Catches any of those lookups matching on the id alone, which
+#     would hand a token another repository's object.
 #   * test_setup_refusals: each set-up verb refuses an unknown or invalid
 #     object; `advance` moves the fake's clock.
 # =============================================================================
@@ -240,6 +250,73 @@ def test_unknown_objects() raises:
     print("  test_unknown_objects PASS")
 
 
+def test_other_repository_objects() raises:
+    var w = _world()
+    var run_a = w.fake.state.add_run(w.a, String(SHA), "completed", "success")
+    var run_b = w.fake.state.add_run(w.b, String(SHA), "completed", "success")
+    var job_b = w.fake.state.add_job(w.b, run_b, 1, "build", "completed", "success")
+    var art_b = w.fake.state.add_artifact(w.b, run_b, "out", 10)
+    var both = _token(w)
+    var scoped = _mint(w, String('{"repository_ids":[') + String(w.a) + String("]}"))
+    assert_equal(scoped.status, 201)
+    var one = scoped.json().get(String("token")).as_string()
+    var created = _send(w, "POST", "/repos/alice/app2/check-runs", both, String('{"name":"b","head_sha":"') + SHA + String('"}'))
+    assert_equal(created.status, 201)
+    var check_b = created.json().get(String("id")).as_int64()
+    assert_equal(_send(w, "GET", "/repos/alice/app2", one, "").status, 404, "the scoped token cannot see app2")
+    var tails = List[String]()
+    tails.append(String("/actions/runs/") + String(run_b))
+    tails.append(String("/actions/runs/") + String(run_b) + String("/attempts/1"))
+    tails.append(String("/actions/runs/") + String(run_b) + String("/jobs"))
+    tails.append(String("/actions/runs/") + String(run_b) + String("/attempts/1/jobs"))
+    tails.append(String("/actions/runs/") + String(run_b) + String("/artifacts"))
+    tails.append(String("/actions/jobs/") + String(job_b))
+    tails.append(String("/actions/artifacts/") + String(art_b))
+    var patch = String('{"status":"in_progress"}')
+    var check_tail = String("/check-runs/") + String(check_b)
+    var tokens = List[String]()
+    tokens.append(one.copy())
+    tokens.append(both.copy())
+    var wrong = String("")
+    for t in range(len(tokens)):
+        for i in range(len(tails)):
+            var got = _send(w, "GET", String("/repos/alice/app1") + tails[i], tokens[t], "").status
+            if got != 404:
+                wrong += String("[") + String(t) + String("]") + tails[i] + String("=") + String(got) + String(" ")
+        var upd = _send(w, "PATCH", String("/repos/alice/app1") + check_tail, tokens[t], patch).status
+        if upd != 404:
+            wrong += String("[") + String(t) + String("]") + check_tail + String("=") + String(upd) + String(" ")
+    assert_equal(wrong, String(""), "app2's objects are 404 through app1's path")
+    ref cr = w.fake.state.check_runs[len(w.fake.state.check_runs) - 1]
+    assert_equal(cr.id, check_b)
+    assert_equal(cr.status, String("queued"), "a refused update changes nothing")
+    var listed = _send(w, "GET", "/repos/alice/app1/actions/runs", both, "").json()
+    assert_equal(listed.get(String("total_count")).as_int64(), 1, "app1's runs only")
+    assert_equal(listed.get(String("workflow_runs")).element_at(0).get(String("id")).as_int64(), run_a)
+    var control = String("")
+    for i in range(len(tails)):
+        var got = _send(w, "GET", String("/repos/alice/app2") + tails[i], both, "").status
+        if got != 200:
+            control += tails[i] + String("=") + String(got) + String(" ")
+    var upd = _send(w, "PATCH", String("/repos/alice/app2") + check_tail, both, patch).status
+    if upd != 200:
+        control += check_tail + String("=") + String(upd)
+    assert_equal(control, String(""), "each object exists through app2's path")
+    var refused = String("")
+    try:
+        _ = w.fake.state.add_job(w.a, run_b, 1, "j", "queued", "")
+        refused += "job "
+    except:
+        pass
+    try:
+        _ = w.fake.state.add_artifact(w.a, run_b, "x", 1)
+        refused += "artifact "
+    except:
+        pass
+    assert_equal(refused, String(""), "set-up refuses app2's run under app1")
+    print("  test_other_repository_objects PASS")
+
+
 def test_setup_refusals() raises:
     var w = _world()
     var refused = String("")
@@ -294,5 +371,6 @@ def main() raises:
     test_app_lookups()
     test_check_run_rules()
     test_unknown_objects()
+    test_other_repository_objects()
     test_setup_refusals()
     print("PASS komira_github_fake answers")
