@@ -140,6 +140,12 @@ def _table() -> ResourceRouteTable:
             String("GET"), String("/lit2/{}x"), String("thing"), AuthzAction.read()
         )
     )
+    # An unterminated `{` is a literal segment too.
+    rules.append(
+        RouteRule.on_kind(
+            String("GET"), String("/brace/{abc"), String("thing"), AuthzAction.read()
+        )
+    )
     # A pattern that is not canonical matches nothing.
     rules.append(RouteRule.public_route(String("GET"), String("/open//x")))
     return ResourceRouteTable(rules^)
@@ -258,6 +264,8 @@ def test_one_letter_capture_and_nameless_literal() raises:
     _expect_deny(t, "GET", "/lit/anything")
     _expect(t, "GET", "/lit2/{}x", "read", "thing", "")
     _expect_deny(t, "GET", "/lit2/ax")
+    _expect(t, "GET", "/brace/{abc", "read", "thing", "")
+    _expect_deny(t, "GET", "/brace/xyz")
 
 
 def test_non_canonical_paths_deny() raises:
