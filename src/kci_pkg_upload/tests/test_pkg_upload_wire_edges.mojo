@@ -17,10 +17,11 @@
 #       number, never as another kind;
 #   (4) a quoted server body becomes printable: tab, LF and CR are spaces,
 #       any other byte outside printable ASCII is `?`;
-#   (5) echo detection: a Basic pair whose decoded bytes are not ASCII yields
-#       no PASSWORD shape (an ASCII prefix of it is not withheld), the whole
-#       value and its blob still are; a non-ASCII bearer token is matched
-#       WHOLE, never by its windows;
+#   (5) echo detection: a Basic pair whose decoded bytes are not ASCII does
+#       not withhold an ASCII prefix of its password; the whole value and its
+#       blob still are withheld; a non-ASCII bearer token is matched WHOLE,
+#       never by its windows. (Such a pair also yields no decoded-password
+#       shape today: a gap, komira-ai/komira#1185, deliberately not asserted.)
 #   (6) local refusals before any request: an EMPTY repo, whitespace in a
 #       repo, an EMPTY file name, a file name that is not one path segment,
 #       a file with no conda extension asked for its repodata key;
@@ -200,9 +201,10 @@ def test_a_quoted_body_is_printable() raises:
 
 
 def test_echo_shapes_of_non_ascii_credentials() raises:
-    # A Basic pair `u:abcdefgh` + U+00E9: the decoded bytes are not ASCII,
-    # so the pair yields no password shape at all. Its ASCII prefix
-    # `abcdefgh` (8 bytes, under the 16-byte window) is not the password.
+    # A Basic pair `u:abcdefgh` + U+00E9: its ASCII prefix `abcdefgh` (8
+    # bytes, under the 16-byte window) is not the password and is not
+    # withheld. Not asserted: whether the decoded non-ASCII password itself is
+    # withheld (today it is not; komira-ai/komira#1185).
     var raw = bytes_of(String("u:abcdefgh"))
     raw.append(UInt8(0xC3))
     raw.append(UInt8(0xA9))

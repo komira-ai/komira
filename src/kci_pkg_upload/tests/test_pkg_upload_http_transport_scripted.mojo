@@ -29,8 +29,9 @@ from kci_pkg_upload.transport import HttpPkgTransport, PkgRequest, try_exchange
 from kci_pkg_upload.wire import bytes_of
 
 
-# Hosts the client parses without DNS (its IP-literal fast path): the
-# scripted connector is reached with no resolver call.
+# Hosts the client parses without DNS (its fast path for a loopback alias
+# such as `localhost` or an IPv4 literal): the scripted connector is reached
+# with no resolver call.
 comptime _GET_HOST: String = "localhost"
 comptime _POST_HOST: String = "127.0.0.1"
 comptime _DOWN_HOST: String = "127.0.0.2"
