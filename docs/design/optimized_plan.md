@@ -1,0 +1,665 @@
+# Design: `OptimizedPlan`, a serializable optimized plan
+
+Status: proposed, not built. Scope: komira's plan wire, optimizer, plan cutter and executor admission.
+
+Pinned commit: komira `origin/main` at `af1d841f`. Paths are cited as `path:line`; the line numbers were read at
+`547e9849`, and `git diff 547e9849 af1d841f` is empty for `src/komira_plan_proto`, `komira_plan_wire`,
+`komira_plan_ir`, `komira_optimizer`, `komira_plan_stats`, `komira_join_assembly` and `komira_shuffle`. Statements
+marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run to write this document.
+
+---
+
+## 1. Problem
+
+A query plan reaches an executor today as a `WirePlanEnvelope` (`src/komira_plan_proto/plan.proto:1615`). That
+format was built for plans taken **before** the optimizer runs. It refuses optimizer output by name:
+`estimated_groups` (`src/komira_plan_wire/plan_wire_codec.mojo:3285`) and `TableStats`
+(`plan_wire_codec.mojo:337`, `:2990`). It also has no field for several decisions the optimizer makes, such as the
+build side of a join or the PARTIAL/FINAL split of an aggregate.
+
+A scheduler that accepted that raw logical plan would force one of two things on the system: either the scheduler
+runs the optimizer, or every executor host does. Both are expensive, and in both the optimizer runs far from the
+party that wrote the query.
+
+This design makes the **optimized logical plan** a defined, serializable type. A client that links the engine
+(the Python or TypeScript SDK, or a Mojo program) optimizes once and submits that type. A scheduler places it. An
+executor host **lowers** it to physical operators and does not optimize it again. When the plan runs on more than
+one host, it is cut into **optimized segments**, a second defined type built from the same pieces.
+
+### 1.1 Goals
+
+1. One type, `komira.plan.v1.OptimizedPlan`, which is the plan payload a scheduler accepts.
+2. One type, `komira.plan.v1.OptimizedSegment`, for a piece of a cut plan travelling between processes of one
+   engine build.
+3. The optimizer's decisions are explicit, typed and checkable. They are not implied by convention.
+4. A host validates the plan before it runs it, and every refusal has a name.
+5. The producer's build and the host's build may differ within a declared compatibility window.
+6. A physical-plan form is reserved so it can be added later without a format break.
+
+### 1.2 Non-goals
+
+- A second node vocabulary. The body reuses `WirePlan` (§3).
+- Shipping physical plans now. Physical choices depend on the host, which is picked after submission, and the
+  physical IR (`src/komira_plan_ir/physical_plan.mojo`) is tied to a single engine build. It has no producer or
+  consumer in this tree yet (`physical_plan.mojo:5-6`).
+- Trusting producer statistics for correctness or for resource reservation (§6).
+
+---
+
+## 2. Roles
+
+| Role | What it does |
+|---|---|
+| **Producer** | Binds, gathers statistics, optimizes, and emits an `OptimizedPlan`. It is either the client SDK, or a **server-side producer**: the same optimizer library running next to the data, used for SQL text from tools that have no engine. For identical inputs both yield the same `plan_digest` (§7.1). The stamps differ, so the header bytes do not. |
+| **Scheduler** | Any system that places work. It is not part of komira. It reads only the header, through the header-only library (§4.1), and never decodes the body. |
+| **Coordinator** | Learns the host count once placement is done. It verifies `plan_digest`, then **cuts** the plan into `OptimizedSegment`s (§8). The cut is mechanical and changes no decision. |
+| **Executor host** | Admits a segment or a plan (§7), lowers it, and applies only the named host-local rules (§5.3). It never re-optimizes. |
+
+The producer optimizes, the scheduler places, the coordinator cuts and the host lowers. Each step runs once.
+
+---
+
+## 3. Why the body reuses `WirePlan`
+
+`WirePlan` has 16 node arms in fields 4-19 (`plan.proto:1524`), mirroring `PLAN_TAG_COUNT = 16`
+(`src/komira_plan_ir/logical_plan.mojo:174`). The format already carries much of what an optimized plan contains:
+
+- equi-keys, `residual` and `algo_hint` on joins (`plan.proto:1252`);
+- pushed `filter` and `projection` on scans (`plan.proto:1133`);
+- `is_cse_introduced` on projects (`plan.proto:1235`);
+- `over_fetch_k` on partition top-N (`plan.proto:1383`);
+- `cse_ref` with a `canonical_hash` (`WireCseRefNode`, field 18, arm 15; field number is not arm ordinal,
+  `plan.proto:1563-1565`).
+
+An optimized logical plan is still a `LogicalPlan`. A parallel node set would double `komira_plan_wire`, which is
+12,861 source lines in five files (`wc -l src/komira_plan_wire/*.mojo`; the codec alone is 4,310), and the two sets
+would drift apart.
+
+**The codec gets a decode context instead:** `WireContext { RAW, OPTIMIZED }`.
+
+- **RAW** is today's behaviour. Every existing refusal stays. It is used for view bodies, the existing plan
+  endpoint, and the input to the server-side producer.
+- **OPTIMIZED** accepts the decision fields in §5.2, requires the ones marked required, and refuses the
+  statistics fields listed there.
+
+The same bytes can mean different things in the two contexts, so the context comes from the **enclosing message**:
+a `WirePlanEnvelope` is RAW; an `OptimizedPlanBody` or an `OptimizedSegment` is OPTIMIZED. It never comes from a
+flag inside `WirePlan`, which a producer could set wrongly.
+
+---
+
+## 4. Messages
+
+There is one new file, `src/komira_plan_proto/optimized_plan.proto`, in package `komira.plan.v1`. It imports
+`plan.proto` and is commented in that file's house style. New enums go in `plan_vocabulary.proto` with a
+`*_WIRE_UNSPECIFIED = 0` entry, a "Derived from" line and an engine prefix, as `JoinAlgo` does
+(`plan_vocabulary.proto:225-234`).
+
+### 4.1 The plan: header and body
+
+```proto
+// What a producer submits and a scheduler accepts. A scheduler reads fields 1-7 and 9.
+message OptimizedPlan {
+  uint32           format_version      = 1;  // minimum reader capability; set membership (§9.1)
+  ProducerStamp    producer            = 2;
+  bytes            plan_digest         = 3;  // 32 bytes (§7.1)
+  bytes            recurring_signature = 4;  // 32 bytes or empty; advisory
+  DeclaredNeeds    needs               = 5;  // the only input to placement (§6.1)
+  WireWriteTarget  write_target        = 6;  // same meaning as WirePlanEnvelope.write_target
+  PlanAdvice       advice              = 7;  // advisory; outside the digest (§6.3)
+  bytes            body                = 8;  // a canonical OptimizedPlanBody; a scheduler never parses it
+  ReoptimizeSource reoptimize_source   = 9;  // optional opt-in (§9.3)
+}
+
+message ProducerStamp {
+  bytes        engine_build               = 1;  // digest of the engine build output; provenance and revocation key
+  uint32       optimizer_contract_version = 2;  // the compatibility key (§9.2)
+  bytes        optimizer_config_digest    = 3;  // digest of the OptimizerConfig values used; reproduction only
+  ProducerKind kind                       = 4;  // CLIENT_PYTHON | CLIENT_TYPESCRIPT | CLIENT_MOJO | SERVER
+}
+
+// The type is the "do not re-optimize" mark; §7.3 says how that is enforced.
+message OptimizedPlanBody {
+  WirePlan               plan      = 1;  // one uncut plan, decoded in the OPTIMIZED context
+  repeated SharedSubplan shared    = 2;  // targets of cse_ref (§4.3)
+  repeated ScanPin       scan_pins = 3;  // the snapshot each scan was optimized against (§6.2)
+}
+
+message PlanAdvice {
+  repeated NodeEstimate estimates   = 1;  // {node_ordinal, node_tag, rows, bytes, source}; preorder ordinal
+  repeated ScanStats    stats_basis = 2;  // the statistics the optimizer used
+}
+
+message ReoptimizeSource {
+  WirePlanEnvelope bound_plan      = 1;  // decoded in the RAW context
+  bool             allow_reoptimize = 2;
+}
+```
+
+**The header is separate from the body on purpose.** `body` is `bytes`, so a reader of the header does not need
+`komira_plan_wire`. The header codec and its checks (§7.2 steps 1-3) live in their own library target,
+`komira_optimized_plan_header`, whose dependency closure must exclude `komira_plan_wire`. A Buck2 closure assertion
+checks it, proven by planting the dependency and watching the build go red. "A scheduler never decodes the body"
+is then a property of what a scheduler links, not only a policy.
+
+**`write_target`** is in the header because a scheduler needs it to authorize the write. It is also bound into
+`plan_digest` (§7.1), because it changes the plan's effect.
+
+**There is no hop-1 segment form and no `final` flag.** An `OptimizedPlan` always carries one uncut plan; segments
+exist only after the cut (§8). A boolean "final" would be a check that cannot fail: the enclosing message already
+fixes the context.
+
+### 4.2 Header invariants
+
+| # | Field | Invariant | Checked by |
+|---|---|---|---|
+| 1 | `format_version` | In the reader's accepted set; never `>=`. An understated version (a field present that its version does not include) is refused, as `plan.proto:1631` does for `write_target`. | header library, host |
+| 2 | `producer` | Required. `engine_build` not on the revocation set passed in by the caller. `optimizer_contract_version` in the host's accepted set. | header library (revocation), host (revocation and contract) |
+| 3 | `plan_digest` | Exactly 32 bytes; the host recomputes it (§7.1). | host, coordinator |
+| 4 | `recurring_signature` | 32 bytes or empty. It cannot be verified from the body, so it keys only history and caches, never authorization or limits. | none (advisory) |
+| 5 | `needs` | Required (§6.1). The host cross-checks it against the body. | header library (caps), host (cross-check) |
+| 6 | `write_target` | Same rules as in `WirePlanEnvelope`: an empty path is refused. A write-carrying plan declares the format version that includes it. | header library, host |
+| 7 | `advice` | Advisory. No reader refuses a plan for its content; a mismatch between an estimate's `node_tag` and the node at its ordinal is shown as such by diagnostics and otherwise ignored. | none |
+| 8 | `body` | Canonical (§7.1) and decodes as `OptimizedPlanBody` in the OPTIMIZED context. | host |
+| 9 | `reoptimize_source` | Optional. Used only by a server-side producer. | server-side producer |
+
+### 4.3 Shared subplans
+
+```proto
+message SharedSubplan {
+  uint64   canonical_hash = 1;   // matches WireCseRefNode.canonical_hash
+  WirePlan plan           = 2;
+}
+```
+
+Every `cse_ref` must resolve to exactly one entry, and every entry must be referenced. The host materializes each
+entry once and fans it out. Aggregate CSE today substitutes a materialized `InMemorySource` leaf
+(`src/komira_optimizer/optimizer_agg_cse.mojo:33`, `:426`); that stays refused on the wire, and the producer emits
+`cse_ref` plus a `shared` entry instead. Scan dedup takes the same form. The producer owns the decision; the host
+only materializes.
+
+---
+
+## 5. Pinning the optimizer's decisions
+
+### 5.1 Rule: a decision is a node field, an estimate is advice
+
+A decision that the lowering must obey is a typed field on the node it governs, for three reasons:
+
+1. Neither the IR nor the wire has node ids; every reference to a node is positional. A table keyed by node would
+   need ids plus uniqueness, dangling-key and orphan checks, each a new way to fail silently.
+2. The lowering already reads `left_on`, `right_on` and `residual` from the node. Reading `build_side` there is one
+   field access, and it cannot fall out of step after a rewrite.
+3. A typed field appears in the text goldens (`src/komira_plan_wire/tests/fixtures/golden/*.txtpb`), so a named
+   mutant can target it.
+
+Estimates are the exception. They are numerous, nothing obeys them, and they must stay out of the digest. They go
+in the header's `advice` (§6.3).
+
+### 5.2 Wire changes (OPTIMIZED context only; RAW refuses each new field by name)
+
+Field numbers are the next free numbers at the pinned commit.
+
+| Message | Change | Meaning |
+|---|---|---|
+| `WireJoinNode` | `JoinBuildSide build_side = 9` (`LEFT`, `RIGHT`) | Required. The side the host builds its hash table on. **Child order still fixes the output schema** (column order and the `_right` collision names, `src/komira_join_assembly/compiler_join_assembly.mojo:81-83`); `build_side` chooses only the hash-table side. Today's convention is probe = left, build = right. |
+| `WireJoinNode` | `bool adaptive_allowed = 10` | The host may switch this join between broadcast and partitioned at runtime (§8.3). |
+| `WireJoinNode` | `algo_hint` (existing field 6) | OPTIMIZED requires a decided algorithm; `JOIN_ALGO_AUTO` and unspecified are refused (`OPTIMIZED_JOIN_ALGO_UNDECIDED`). |
+| `WireAggregateNode` | `AggMode mode = 8` (`SINGLE`, `PARTIAL`, `FINAL`) | Required. The producer records the mode only; the host derives the partial-state layout from the aggregate expressions, because that layout belongs to the engine build, not to the optimizer. |
+| `WireAggregateNode`, `WireDistinctNode` | `estimated_groups` (existing field 5) | Admitted. The host uses it only to pre-size hash tables, clamped to its memory budget, so a wrong value costs speed, never correctness. The refusal at `plan_wire_codec.mojo:3285` becomes RAW-only. |
+| `WireScanNode` | `uint32 pin_ref = 12` | Required. Index into `scan_pins`. |
+| `WireScanNode` | `row_count` (9), `has_table_stats` (11) | **Refused in OPTIMIZED.** Statistics have one home, `advice.stats_basis`, outside the digest; no host decision reads a producer statistic. |
+| `WirePlan` | new arm `WireExchangeNode exchange = 20` | `{child = 1, kind = 2 (GATHER, BROADCAST, HASH, RANGE), keys = 3, key_encoding = 4, ordering = 5, partitions = 6, adaptive_allowed = 7}`. `partitions = 0` means "filled in at the cut" (§8). |
+
+**A join's distribution is derived, not recorded.** No exchange below a join means local; a broadcast exchange on
+its build input means broadcast; hash exchanges on both inputs with the same keys and key encoding mean partitioned.
+Any other shape is refused (`OPTIMIZED_JOIN_EXCHANGE_INCONSISTENT`). A separate `distribution` field would be a
+second statement of the same fact that nothing could keep in agreement.
+
+**Not every `(join type, build side)` pair can be lowered.** `build_side = LEFT` with `RIGHT`, `FULL`, `SEMI` or
+`ANTI` joins (`logical_plan.mojo:471-474`) needs build-side-outer, right-semi and right-anti operators *(inferred:
+komira has none today)*. A host refuses each pair it cannot lower with `OPTIMIZED_JOIN_BUILD_SIDE_UNSUPPORTED`. The
+supported set is part of `optimizer_contract_version` (§9.2), so a producer knows it in advance.
+
+**`group_topk` gets no wire field.** It exists on the IR (`logical_plan_variants.mojo:661`), nothing sets it, and its
+semantics are unspecified. The encoder refuses a plan carrying it in both contexts (§5.4). A field that is always
+refused would be an unobservable slot.
+
+**The exchange arm takes plan tag id 18, not 16.** Tag ids 16 and 17 are retired, and the comment says "THE NEXT TAG
+ADDED TAKES 18" (`logical_plan.mojo:170-180`; `plan_vocabulary.proto:56-57` reserves wire numbers 17 and 18). So
+`PLAN_EXCHANGE = 18`, its `PlanTag` wire number is 19, and `PLAN_TAG_COUNT` becomes 19. Every consumer sized from
+that constant, the vocabulary census and the enum-number tests
+(`src/komira_plan_proto/tests/test_plan_enum_numbers_nodes.mojo`) change in the same stage.
+
+**Join order, predicate placement and projection placement are expressed by shape.** Shape is binding: the host
+does not link the optimizer (§7.3), so it cannot reorder.
+
+### 5.3 What the producer decides and what the host decides
+
+Some of today's optimizer passes are local to one process or need to execute part of the plan. The producer entry
+point takes a **portable profile** as a required argument. It turns those passes off and hands their work to the
+host as **named host-local rules**. The profile is an argument rather than a non-defaulted `OptimizerConfig` field
+because `OptimizerConfig()` is constructed with no arguments in 20 places across 3 files today
+(`git grep -c "OptimizerConfig()"`; the docstring at `src/komira_optimizer/optimizer_config.mojo:23` says to), and
+in-process use keeps that default.
+
+| Output | Producer, portable profile | Host |
+|---|---|---|
+| Join order, build side, algorithm | Decides and records it (§5.2) | Obeys it |
+| PARTIAL/FINAL aggregate split, eager aggregation | Decides and records `mode` | Obeys it; derives the state layout |
+| Predicate and projection pushdown, CSE projects, top-N and window fusion, group-key elision | Decides; expressed as shape | Obeys it |
+| Exchange placement | Decides, for the declared maximum host count | The coordinator fills in `partitions` (§8) |
+| Aggregate CSE to a materialized result, scan dedup | Emits `cse_ref` plus `shared` | Materializes once |
+| `estimated_groups` | Records it | Pre-sizes, clamped |
+| Scalar-subquery literal folding (`optimizer_scalar_deps.mojo`, `optimizer_resolve_scalar_subqueries.mojo`) | Keeps the decorrelated broadcast shape (`scalar_subquery_decorrelate.mojo`); does not execute | May fold the scalar to a literal at lowering (`SCALAR_FOLD`) |
+| Payload narrowing (`optimizer_payload_narrow.mojo`) | Off | Derives it from footers it opened after the pin check (§7.2) |
+| Scan sharing and its dynamic-filter slot (`optimizer_scan_share.mojo`) | Off | Derives it at lowering; the filter direction follows the recorded `build_side`; row-count thresholds read the host's own verified footers, never a producer number |
+
+All paths in this table are under `src/komira_optimizer/` at the pinned commit.
+
+The **complete list of host-local rules**:
+
+1. lowering to physical operators;
+2. `SCALAR_FOLD`;
+3. payload narrowing;
+4. scan sharing, honouring `build_side`;
+5. shared-subplan materialization;
+6. choice of morsel size, and of operator variant within a node's recorded algorithm;
+7. spill;
+8. the adaptive changes of §8.3, only where `adaptive_allowed` is set.
+
+A host change that alters a §5.2 field or the shape, other than by these rules, is a defect, and the post-condition
+in §7.3 catches it.
+
+**Why payload narrowing moves to the host.** It truncates values. A wrong `[min, max]` from a producer would be a
+correctness defect, not a performance one, so no producer statistic ever drives it.
+
+**Why scan sharing changes.** Today its both-filtered direction tie-break reads raw `row_count` from the scan node
+(`optimizer_scan_share.mojo:178`, `:367-408`) and picks the direction whose small side builds. Under this design
+that question is answered by the recorded `build_side`, and the remaining thresholds use footers the host has
+itself verified.
+
+*Cost (inferred):* a host-side scalar fold does not re-run the folding and pruning that the bound literal would
+have enabled. Plans shaped like TPC-H Q11, Q15 and Q22 may run with a less pruned shape than a fixed-point optimizer
+would produce. A server-side producer can execute a scalar subquery before it optimizes; whether to route such
+plans there is open question 2.
+
+### 5.4 Fields that are silently dropped today
+
+`LogicalPlan` scan data carries `payload_narrow` (`src/komira_plan_ir/logical_plan_variants.mojo:193`); aggregate
+data carries `group_topk` (`logical_plan_variants.mojo:661`). Neither name appears anywhere in
+`src/komira_plan_wire/` (`git grep`, 0 matches). *(Inferred)* Both are therefore lost on encode without a refusal.
+
+This defect is independent of this design. In both contexts the encoder must refuse a plan that carries either
+field. It ships first, with a test that fails before the fix (§11, stage 1).
+
+---
+
+## 6. Needs, snapshots and advice
+
+### 6.1 Declared needs
+
+```proto
+message DeclaredNeeds {
+  ResourceNeeds    resources   = 1;  // cpu_millis, peak_mem_bytes, scanned_bytes, max_parallelism,
+                                     // spill_ok, host_count_max, interruptible, accelerators
+                                     // (closed enum and count)
+  repeated UdfRef  udfs        = 2;  // runtime, module, qualified name, image digest
+  repeated string  images      = 3;  // digests; a superset of udfs[].image_digest
+  repeated Hint    hints       = 4;  // closed enum key + typed value; an unknown key is refused
+  repeated string  data_scopes = 5;  // scan binding keys the plan reads
+}
+```
+
+`needs` is what a scheduler places by, capped by its own limits. The producer derives it from its estimates; the
+scheduler never sees those estimates as anything but advice. A producer that overstates needs reserves more than it
+uses; one that understates spills or is refused by the host's memory budget.
+
+The host checks against the decoded body:
+
+- every `udf_call` in the plan, in `shared` and in every segment names a `udfs` entry;
+- every UDF image appears in `images`;
+- every scan's binding appears in `data_scopes`;
+- closures are refused.
+
+### 6.2 Snapshot pins (binding)
+
+```proto
+message ScanPin {
+  string binding_key      = 1;  // the scan's binding identity
+  bytes  data_fingerprint = 2;  // a table snapshot token, or sha256 over sorted (path, size, etag)
+}
+```
+
+Every scan pins the data it was optimized against. `WireScanBinding` already distinguishes a pinned snapshot from a
+live one (`snapshot_policy` and `snapshot_token`, `plan.proto:380-389`); a pin generalizes that to every scan source.
+The host resolves each pin **before
+lowering** and refuses a mismatch with `OPTIMIZED_PLAN_SNAPSHOT_STALE`. It neither re-optimizes nor reads newer
+data. The footers that payload narrowing and scan sharing read come from that verified open, and data reads are
+conditional on the pinned identity (for example an etag precondition) so a file that changes after the check fails
+the read rather than being truncated by a stale narrowing *(inferred mechanism)*. Pins are part of the digest.
+
+A file list that would push the message over the 16 MiB reader budget (`plan_wire_admit.mojo:255`) travels as a
+manifest object referenced by digest *(inferred need: large partitioned listings)*.
+
+### 6.3 Advice: estimates and the statistics basis
+
+```proto
+message ScanStats {
+  uint32      pin_index            = 1;  // which ScanPin these describe
+  uint64      row_count            = 2;
+  StatsSource source               = 3;  // PARQUET_METADATA | FILE_SIZE_HEURISTIC | RUNTIME_FEEDBACK | UNKNOWN
+  repeated ColumnStatsWire columns = 4;  // name, ndv, min, max, null_count, from_sketch
+}
+```
+
+`ScanStats` mirrors `TableStats` and `ColumnStats` (`src/komira_plan_stats/table_stats.mojo:154`, `:57`). It records
+what the optimizer saw, for reproduction and diagnosis. Advice is advisory everywhere:
+
+- A scheduler places by `needs`, capped by its own limits. It does not reserve resources or set limits from
+  `advice`.
+- No correctness-relevant host action reads a producer statistic (§5.3).
+- Actual rows and bytes per node can be recorded against `recurring_signature`. A producer may read them back as a
+  `RUNTIME_FEEDBACK` source for the **next** plan. Feedback never changes the current one.
+
+`advice` is in the header and outside `plan_digest`: the digest identifies what will execute, not why it was
+chosen.
+
+---
+
+## 7. Admission
+
+### 7.1 Canonical form and the digest
+
+The existing format has no canonical encoding and says so: "Do NOT compare plan bytes for equality, use them as a
+cache key, sign them" (`plan.proto:36-50`). It names the remedy: "omit defaults, order fields by number". This design
+defines **canonical form** for every message reachable from `OptimizedPlanBody` and `OptimizedSegment`:
+
+- fields in ascending field-number order;
+- default-valued scalars omitted, including the `has_*` booleans when false;
+- repeated scalars packed;
+- no unknown fields (a body with one is refused, never re-emitted);
+- minimal varints;
+- floats: every NaN canonicalized to one bit pattern; -0.0 kept distinct from 0.0;
+- `oneof`: exactly the set arm is emitted.
+
+The Mojo encoder writes defaults explicitly today (`plan.proto:36-41`), so the canonical encoder is a second encoder
+mode. This change amends the `plan.proto:36-50` comment for these two messages. The existing
+`tests/fixtures/golden/*.canonical.hex` files are protoc renderings, not this form; the new goldens get a distinct
+suffix.
+
+**The digest.** The body must already be canonical: the host decodes it, re-encodes it canonically and compares
+bytes (`OPTIMIZED_PLAN_NOT_CANONICAL`). Then
+
+```
+plan_digest = sha256(body ‖ canonical(DigestTrailer))
+DigestTrailer = { format_version, optimizer_contract_version, write_target, needs.udfs, needs.images,
+                  needs.data_scopes }
+```
+
+The trailer binds the plan's effect, the code it runs, the data it may read and the contract version under which its
+fields have their meaning. The check proves integrity and that producer and host agree on canonical form. It does
+**not** prove who wrote the plan; authenticating the submitter is the transport's job.
+
+`structural_hash` (`logical_plan.mojo:1807`) is not reused. It is an FNV-1a hash over a render, which is not
+collision-resistant, and the render omits `output_schema`.
+
+### 7.2 Admission order and refusal tokens
+
+The header library runs steps 1-3 on the header only:
+
+1. **Size.** At most the 16 MiB plan budget plus a fixed header allowance, checked before parsing.
+   `OPTIMIZED_PLAN_LIMIT_EXCEEDED`.
+2. **Format.** `OPTIMIZED_PLAN_VERSION_UNSUPPORTED`: `format_version` not in the set, or understated.
+3. **Producer and needs.** `OPTIMIZED_PLAN_PRODUCER_REVOKED`: `engine_build` is in the revocation set the caller
+   passes. `OPTIMIZED_PLAN_NEEDS_OVER_LIMIT`: `needs` exceeds the limits the caller passes.
+
+The host, or the coordinator before a cut, runs steps 1-12:
+
+4. **Contract.** `OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`: `optimizer_contract_version` not in the host's set. The
+   refusal carries the accepted set.
+5. **Limits.** `plan_wire_admit`'s limits over the plan and `shared` together: depth 64, nodes 65,536
+   (`src/komira_plan_wire/plan_wire_admit.mojo:197`, `:228`). `OPTIMIZED_PLAN_LIMIT_EXCEEDED`.
+6. **Decode** in the OPTIMIZED context; the value checks in `plan_wire_values.mojo` still run.
+7. **Canonical and digest.** `OPTIMIZED_PLAN_NOT_CANONICAL`, then `OPTIMIZED_PLAN_DIGEST_MISMATCH`.
+8. **Structure**, each refused by name:
+   - `OPTIMIZED_JOIN_BUILD_SIDE_MISSING`, `OPTIMIZED_JOIN_BUILD_SIDE_UNSUPPORTED`, `OPTIMIZED_JOIN_ALGO_UNDECIDED`
+   - `OPTIMIZED_JOIN_EXCHANGE_INCONSISTENT`
+   - `OPTIMIZED_AGG_MODE_MISSING`
+   - `OPTIMIZED_AGG_PAIR_MISMATCH` (a FINAL whose input does not reach a PARTIAL with the same group keys and
+     aggregate list, through exchanges only)
+   - `OPTIMIZED_CSE_REF_UNRESOLVED`, `OPTIMIZED_SHARED_SUBPLAN_UNREFERENCED`
+   - `OPTIMIZED_SCAN_PIN_MISSING`
+   - `OPTIMIZED_UDF_UNDECLARED`, `OPTIMIZED_SCOPE_UNDECLARED`
+   - `OPTIMIZED_FIELD_UNSUPPORTED` (a statistics field on a node, §5.2)
+   - on a segment only: `OPTIMIZED_EXCHANGE_PARTITIONS_UNSET`
+9. **Pins.** Resolve and verify every pin. `OPTIMIZED_PLAN_SNAPSHOT_STALE`.
+10. **Lower**, applying only the §5.3 rules, with footers from the verified open.
+11. **Post-condition.** `OPTIMIZED_LOWERING_DIVERGED` (§7.3).
+12. **Run.**
+
+A host repeats step 3's revocation check itself, because a stored or replayed plan may never pass a scheduler.
+Refusal names are permanent. A retired check keeps its name reserved.
+
+### 7.3 Making "do not re-optimize" checkable
+
+A flag cannot be checked, so the rule is backed by two checks that can each be made to fail.
+
+1. **Build graph.** The host lowering target's closure must not contain `komira_optimizer`. Three host-local rules
+   live in that package today (payload narrowing, scan sharing and the scalar-subquery passes), and it is one
+   library (`srcs = glob(["**/*.mojo"])`, `src/komira_optimizer/BUCK`). So those passes move first into a new
+   package, `komira_lowering_rules`, whose closure also must not contain `komira_optimizer` (§11, stage 6). A
+   Buck2 closure assertion checks both, proven by planting the dependency and watching the build go red.
+2. **Post-condition** (step 11). The physical plan's join tree, build sides, algorithms, aggregate modes and
+   exchanges must equal the admitted plan **modulo an enumerated rewrite set**, one entry per host-local rule, each
+   a named and checkable difference. For example: `SCALAR_FOLD` removes exactly one CROSS join whose other input is
+   a single-row scalar subplan, and replaces the reference with a literal; shared-subplan materialization replaces
+   each `cse_ref` with a read of the materialized entry; an adaptive change of §8.3 appears in the run's record.
+   Named mutants:
+   - a lowering that flips `build_side` is refused;
+   - a lowering that re-derives the build side from row counts, as scan sharing does today, is refused;
+   - a `SCALAR_FOLD` that also drops a sibling join is refused.
+
+---
+
+## 8. Segments: cross-host splits
+
+### 8.1 Messages
+
+```proto
+// One piece of a cut plan. Produced and consumed by the SAME engine build; no cross-build promise.
+message OptimizedSegment {
+  bytes                  engine_build       = 1;  // the coordinator's build; a host of another build refuses
+  bytes                  parent_plan_digest = 2;  // the verified OptimizedPlan.plan_digest
+  uint32                 segment_id         = 3;
+  bytes                  segment_digest     = 4;  // sha256 over the canonical segment with this field cleared
+  SegmentContract        contract           = 5;  // output schema; partitioning (keys, key_encoding,
+                                                  // partitions); ordering; write_target on the final segment
+  DeclaredNeeds          needs              = 6;
+  repeated SharedSubplan shared             = 7;  // the entries this segment references
+  repeated ScanPin       scan_pins          = 8;  // the parent's list, unchanged, so pin_ref stays valid
+  oneof body {
+    WirePlan logical = 10;                        // OPTIMIZED context; exchange leaves replaced (§8.2)
+  }
+  reserved 11; reserved "physical";               // §10
+}
+
+message OptimizedSegmentDag {
+  repeated OptimizedSegment segments = 1;  // topologically ordered, producers first
+  repeated ExchangeEdge     edges    = 2;
+}
+
+message ExchangeEdge {
+  uint32       producer_segment = 1;
+  uint32       consumer_segment = 2;
+  ExchangeKind kind             = 3;
+  repeated uint32 keys          = 4;
+  KeyEncoding  key_encoding     = 5;
+  uint32       partitions       = 6;  // non-zero
+}
+```
+
+A segment host refuses a build mismatch (`OPTIMIZED_SEGMENT_BUILD_MISMATCH`) and an unset or unknown body
+(`OPTIMIZED_SEGMENT_BODY_UNKNOWN`), recomputes `segment_digest` (`OPTIMIZED_SEGMENT_DIGEST_MISMATCH`), and then
+runs §7.2 steps 5-12 on the segment. On a single host the cut still runs and emits a one-segment DAG with every
+exchange elided, so hosts admit one form.
+
+### 8.2 Who decides what
+
+1. The producer declares `needs.resources.host_count_max`. When it is above 1, the producer places
+   `WireExchangeNode`s for that maximum, with `partitions = 0`, and marks those whose kind or fan-out may change at
+   runtime as `adaptive_allowed`.
+2. The scheduler picks hosts.
+3. The coordinator is the first party that knows the host count, and it is the same build as the hosts. It verifies
+   `plan_digest` on the uncut plan (§7.2 steps 1-8), then runs the **cutter**:
+   - each exchange becomes an edge;
+   - below it, a sink leaf is added (a new `WireSinkBinding`, which does not exist yet);
+   - above it, a scan of the shuffle partition is added (a new scan source over the reader in
+     `src/komira_shuffle/source.mojo`);
+   - `partitions` is filled in;
+   - with one host, every exchange is elided.
+
+**The cut is not optimization.** It changes no §5.2 field, reorders no join and adds no aggregate split. A test
+asserts this by comparing the decisions of the uncut plan with the union of the segments. Mutants: a cutter that
+reorders a join, and one that flips a build side, must each go red.
+
+**Cutter limit.** A `cse_ref` whose shared subplan feeds more than one segment is refused
+(`OPTIMIZED_SEGMENT_CSE_CROSSES_CUT`) until the cutter can materialize a shared subplan as its own segment.
+
+### 8.3 Adaptive execution
+
+At sealed stage boundaries a host may coalesce reducers and split skewed partitions on an exchange marked
+`adaptive_allowed`, and switch a join between broadcast and partitioned when the **join** is marked
+`adaptive_allowed` (the switch changes the exchanges on both inputs, so one exchange cannot authorize it). Each such
+change is recorded so a replay reproduces it, and the post-condition compares against the recorded change. A join
+reorder, a build-side flip or an aggregate-mode change during execution is never allowed; a large estimate miss
+spills instead.
+
+---
+
+## 9. Versioning and skew
+
+### 9.1 `format_version`
+
+`format_version` follows the envelope's rule (`plan.proto:1615-1640`): a **minimum reader capability**, checked by
+set membership and never by `>=`, and an understated version is refused. Because a host refuses unknown fields in
+the body (§7.1), **every new body field bumps it**; there is no "harmless field" exception for this type. Each
+version is defined by the set of fields it may carry, and a producer writes the lowest version whose field set the
+plan actually uses, so an older host still accepts plans that do not use the new field.
+
+### 9.2 `optimizer_contract_version`
+
+Producer and host builds **may differ**; the compatibility key is `optimizer_contract_version`. It bumps when any of
+these changes:
+
+- the lowering meaning of a §5.2 field, including the set of `(join type, build side)` pairs a host can lower;
+- the set of host-local rules or the rewrite set of §7.3;
+- the canonical form;
+- the meaning of a snapshot pin.
+
+It does **not** bump when optimizer heuristics improve: a host executes an older optimizer's decisions correctly; it
+just executes older choices. The host accepts a set (the current version and the two before it), checked by
+membership so a version can be retired early. A plan outside the set is refused with
+`OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`, and the refusal lists the set.
+
+### 9.3 The three options considered
+
+| Option | Verdict |
+|---|---|
+| Accept only an equal producer and host build | Rejected. Every executor deploy would break every installed client. |
+| Always re-optimize next to the host | Rejected as the default. It brings back the cost this design removes, and it makes the submitted plan advisory. |
+| A compatibility window on `optimizer_contract_version` | **Chosen.** |
+
+**Re-optimization is opt-in only.** If the client sent `reoptimize_source` with `allow_reoptimize = true`, a plan
+refused for contract skew can be re-optimized by a server-side producer from the bound plan, on the same code path
+engine-less clients use. The record of the execution says so and names both builds. A client that did not opt in
+gets the refusal; its remedy is to upgrade.
+
+**Revocation.** A header reader takes a set of revoked `engine_build`s. It stops plans from an optimizer build later
+found to be wrong without bumping the contract.
+
+Segments carry no compatibility window: they live between processes of one build (§8.1).
+
+---
+
+## 10. The reserved physical arm
+
+`OptimizedSegment.body` field 11 is reserved, number and name, for a later self-contained physical form: opaque
+bytes with a format tag, or a reference to a compiled image. It belongs on the segment and not on the plan, because
+a physical form is meaningful only between equal builds, and only the segment has that property. Reserving it now
+means adding it later is not a format break. Today a segment that sets field 11 is refused
+(`OPTIMIZED_SEGMENT_BODY_UNKNOWN`).
+
+---
+
+## 11. Implementation plan
+
+Each stage is independently reviewable and leaves `main` green. Every stage ships its tests welded to the library
+(`test_srcs`), each with a named mutant that must turn a test red.
+
+| Stage | Package(s) | Change | Proving test and mutant |
+|---|---|---|---|
+| 1 | `komira_plan_wire` | Refuse `payload_narrow` and `group_topk` on encode (§5.4). | A plan carrying each is refused by name. Mutant: remove the refusal; the round-trip test sees an unequal plan. |
+| 2 | `komira_plan_ir`, `komira_join_assembly`, `komira_optimizer` | Add `build_side`, aggregate `mode`, `adaptive_allowed` and the exchange variant (tag 18) to `LogicalPlan`. Join assembly honours `build_side` while output order still follows child order. The optimizer records each decision it makes. | Mutant: a join assembly that ignores `build_side` and always builds right; a test on a `build_side = LEFT` inner join sees the wrong physical build side. |
+| 3 | `komira_plan_proto`, `komira_plan_wire` | The §5.2 fields and enums, the `exchange` arm and its `PlanTag` entry; the `WireContext` decode parameter; RAW keeps every refusal; OPTIMIZED refuses scan statistics. New goldens. | Every new field refused in RAW and required in OPTIMIZED; protoc text goldens round-trip; the enum-number tests cover tag 19. |
+| 4 | `komira_plan_proto` | `optimized_plan.proto` (§4, §6, §8). | protoc golden fixtures for each message. |
+| 5 | new `komira_optimized_plan_header`, new `komira_optimized_plan` | Header codec and steps 1-3 in the first; body and segment codecs, canonical encoder, both digests and steps 4-9 in the second. Each file under 1,000 lines. | Canonical bytes cross-checked against protoc for every golden without NaN. Mutant: perturb field order; the digest test goes red. One hostile test per refusal token. The header target's closure must exclude `komira_plan_wire`; planting it goes red. |
+| 6 | new `komira_lowering_rules`, `komira_optimizer` | Move payload narrowing, scan sharing and the scalar-subquery passes out of `komira_optimizer`. Scan sharing reads `build_side` and takes row counts from an argument. | Closure lint excludes `komira_optimizer`; planting it goes red. Mutant: scan sharing that ignores `build_side`. |
+| 7 | `komira_optimizer`, new `komira_plan_producer` | The portable profile (§5.3) and the producer library over bind, the optimizer driver and the statistics readers, used by both producers. Cost comparisons break ties on a total integer order. | For the same bound plan, statistics and build, the client path and the server path yield the same `plan_digest`, run on each producer platform. Mutant: a producer that reads its config from the environment instead of its argument (`optimizer_config.mojo` reads none today). |
+| 8 | `komira_optimized_plan`, `komira_shuffle` | `WireSinkBinding`, the shuffle-partition scan source, and the cutter (§8) with its "no decision changed" assertion. | Mutants: a cutter that reorders a join; one that flips a build side. |
+| 9 | the host lowering target | The post-condition (§7.3) and the closure lint excluding `komira_optimizer`. | A planted dependency goes red; each §7.3 mutant is refused. |
+
+**Critical path.** komira has no optimizer driver at the pinned commit: no `def optimize` exists under `src/`, and
+there is no `select_join_build_side` (`git grep`). It also has no lowering target: the physical IR has no producer
+or consumer in this tree (`physical_plan.mojo:5-6`). Neither producer can emit this type until a driver is written,
+and no host can admit it until the lowering exists. Stages 1-6 can proceed in parallel with both; stage 7 depends on
+the driver and stage 9 on the lowering.
+
+**Size, inferred from current sizes.** `komira_plan_wire` is 12,861 source lines in five files and `plan.proto` is
+1,646 lines. I expect stages 3-9 to add roughly 5,500-8,000 source lines and 11,000-14,000 test lines across 12-14
+files, excluding the driver and the lowering. That is an estimate, not a measurement.
+
+**Client prerequisites.**
+
+- Cost decisions need Parquet footer row counts (`optimizer_eager_agg.mojo:44-60`), so a client optimizes only when
+  it can read footers. A client that cannot (no read access, or too far from the data) uses a server-side producer.
+- `recurring_signature` needs a literal-normalizing render of the bound plan, a few hundred lines in stage 5.
+- A cache of optimized plans is keyed by the sha256 of the canonical **bound** plan with its literals, plus the
+  pins, the engine build, the config digest and `optimizer_contract_version`. Never by `recurring_signature`: two
+  queries that differ only in a literal share a signature, and a hit would run one query's plan with the other's
+  predicates.
+
+---
+
+## 12. Comparison with other systems
+
+- **Trino** ([`PlanFragment`](https://github.com/trinodb/trino/blob/master/core/trino-main/src/main/java/io/trino/sql/planner/PlanFragment.java)).
+  The coordinator optimizes and fragments; workers only lower (`LocalExecutionPlanner`). That is the same split as
+  here, except the optimizer runs on the coordinator. Coordinator and workers must run the same version: the
+  equal-build option rejected in §9.3.
+- **DataFusion** ([`datafusion.proto`](https://github.com/apache/datafusion/blob/main/datafusion/proto/proto/datafusion.proto)).
+  The logical proto has no slots for optimizer decisions; the norm is to round-trip a logical plan and optimize it
+  again. Decisions such as join partition mode exist only in the physical proto, which makes no compatibility
+  promise across releases. *(My reading)* The lessons are to make decisions explicit fields and to reference UDFs by
+  identity.
+- **Spark Connect** ([overview](https://spark.apache.org/docs/latest/spark-connect-overview.html)). A thin client
+  sends an unresolved plan, and the server analyzes and optimizes it. The opposite trade: version decoupling comes
+  cheaply, and every plan is optimized server-side.
+- **Substrait** ([`algebra.proto`](https://github.com/substrait-io/substrait/blob/main/proto/substrait/algebra.proto)).
+  The precedent for `AggregationPhase` (our `mode`), per-relation advisory `Hint.Stats` (our `advice`), extension
+  URIs for UDF identity, and `Plan.version` with a producer string (our `ProducerStamp`). It has no snapshot pins,
+  no digest and no do-not-re-optimize contract.
+
+---
+
+## 13. Open questions
+
+1. **`group_topk`**: define its semantics so it can be admitted, or keep refusing it? Recommendation: refuse until an
+   owner specifies it.
+2. **Scalar subqueries**: host-side `SCALAR_FOLD` (this design), or route plans with scalar subqueries to a
+   server-side producer that executes them first? Recommendation: `SCALAR_FOLD` now; revisit if the gap measured on
+   TPC-H Q11, Q15 and Q22 is material.
+3. **Exchanges at the cut**: may the cutter ever add an exchange the producer did not place? Recommendation: no. A
+   producer that declared `host_count_max = 1` gets one host.
+4. **Contract window width**: the current version and two before it, or wider for long-lived installed clients?
+   Recommendation: two before it, revisited once clients ship on a release cadence.
