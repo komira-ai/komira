@@ -10,13 +10,15 @@
 #    service, a CALL edge, an account's READ on a bucket and each identity's
 #    cell LOGS edge. Steps 14 and 15 are shown to have run: the members the
 #    kit planted on the cell scope are still there (never removed), one a
-#    foreign identity, one an unmapped role, and step 15 armed a create.
+#    foreign identity, one an unmapped role, and step 15 failed the create
+#    of every wanted node of `base`'s lowering, each once.
 # 2. BORN WITH NO LABELS: every binding object of an apply carries no label
 #    as stored, yet reads as its own node's stamp (identity, retention, run
 #    id), and `list_owned` names it; on aws the same grants carry labels.
 # 3. A FOREIGN MEMBER IS REPORTED AND KEPT, on an owned target's policy and
 #    on the cell scope's: the plan keeps the node a NOOP and reports it, an
-#    apply makes no call, the member stays.
+#    apply makes no call, the member stays. A member of ANOTHER MACHINE
+#    whose cell has this cell's name is foreign too.
 # 4. `check` REFUSES, ON THE GCP FAKE, a grant resource and a `uses` line on
 #    a workload with `run_as`, before any call; aws plans both.
 # 5. THE IMAGE REGISTRY is the bootstrap registry's name, and two cells
@@ -30,6 +32,7 @@ from kci_reconciler import (
     CellScope,
     Creds,
     InMemoryStateStore,
+    LABEL_MACHINE,
     Provenance,
     VERB_NOOP,
 )
@@ -43,7 +46,9 @@ from kci_cloud import (
     ROLE_MAPPED,
     ROLE_UNMAPPED,
     apply_resources,
+    decode_label_value,
     describe,
+    encode_label_value,
     label_problems,
     lower_data,
     plan_resources,
@@ -128,7 +133,8 @@ def test_the_gcp_fake_passes_all_fifteen_steps() raises:
     """Catches: a binding whose derived stamp is not its node's (steps 3, 12,
     15), a foreign member taken as the cell's or removed (step 14), an object
     created before it is stamped (step 15); and a kit whose steps 14 and 15
-    silently do nothing (the members it planted are asserted below)."""
+    silently do nothing, or whose step 15 arms only some nodes (the members
+    it planted and every create it failed are asserted below)."""
     var cloud = FakeCloud(String("p-d3r"), shape=ProviderShape.gcp())
     var reg = _reg(FakeCloud(String("p-d3r"), shape=ProviderShape.gcp()))
     run_conformance(
@@ -149,7 +155,19 @@ def test_the_gcp_fake_passes_all_fifteen_steps() raises:
     assert_equal(on_cell, 2, "step 14 planted two members on the cell scope, and they stayed")
     assert_equal(foreign, 1, "one is an identity of another cell")
     assert_equal(unmapped, 1, "one holds a role the table does not map")
-    assert_true(s.failed_after.byte_length() > 0, "step 15 armed a create and it failed after landing")
+    var wanted = List[String]()
+    var lowered = lower_data(cloud, _list(_graph()))
+    for i in range(len(lowered)):
+        if lowered[i].wanted:
+            wanted.append(lowered[i].id.copy())
+    assert_true(len(wanted) > 1, "base lowers several nodes, so a kit that arms only one is visible")
+    assert_equal(len(s.failed_log), len(wanted), "step 15 failed one create per wanted node")
+    for w in range(len(wanted)):
+        var hits = 0
+        for k in range(len(s.failed_log)):
+            if s.failed_log[k] == wanted[w]:
+                hits += 1
+        assert_equal(hits, 1, "step 15 failed the create of " + wanted[w] + " once")
     print("  test_the_gcp_fake_passes_all_fifteen_steps: PASS")
 
 
@@ -233,6 +251,43 @@ def test_a_foreign_member_is_reported_and_kept() raises:
     print("  test_a_foreign_member_is_reported_and_kept: PASS")
 
 
+def test_a_member_of_another_machine_is_foreign() raises:
+    """THE MEMBER CHECK on the fake, its machine half: an identity of another
+    machine whose cell has this cell's name (two machines in one project),
+    holding the node's own mapped role, on an owned target's policy and on
+    the cell scope's. Catches: a check that compares only the cells (the
+    member then reads as this cell's own binding and is not reported)."""
+    var cloud = FakeCloud(String("p-m"), shape=ProviderShape.gcp())
+    var reg = _reg(FakeCloud(String("p-m"), shape=ProviderShape.gcp()))
+    var store = InMemoryStateStore()
+    _done(apply_resources(reg, cloud, _ctx(), _list(_graph()), Creds.none(), store))
+    for field in [String("target"), String("cell")]:
+        var node = _first_with(cloud, _graph(), field)
+        var i = cloud.store[].find(node)
+        var principal = cloud.store[].b_member[i].copy()
+        var src = cloud.store[].find(principal)
+        assert_true(src >= 0, principal + " is live")
+        var labels = cloud.store[].labels[src].copy()
+        var changed = 0
+        for k in range(len(labels)):
+            if labels[k].key == LABEL_MACHINE:
+                labels[k].value = encode_label_value(decode_label_value(labels[k].value) + String("-depot"))
+                changed += 1
+        assert_equal(changed, 1, "the principal carries one machine label")
+        var id = String(OUTSIDE_PREFIX) + String("machine/") + principal
+        cloud.store[].outside_ids.append(id)
+        cloud.store[].outside_labels.append(labels^)
+        cloud.store[].planted_key.append(cloud.store[].b_target[i].copy())
+        cloud.store[].planted_member.append(id)
+        cloud.store[].planted_role.append(cloud.store[].b_role[i].copy())
+        var report = _unmanaged(cloud, reg, node, store)
+        assert_true(report.find(id) >= 0, node + ": the other machine's member is reported: " + report)
+        var m = cloud.mutations()
+        _done(apply_resources(reg, cloud, _ctx(), _list(_graph()), Creds.none(), store))
+        assert_equal(cloud.mutations(), m, node + ": the apply made no call")
+    print("  test_a_member_of_another_machine_is_foreign: PASS")
+
+
 # ---- 4. check refuses what cannot be derived ---------------------------------------------
 
 
@@ -303,6 +358,7 @@ def main() raises:
     test_the_gcp_fake_passes_all_fifteen_steps()
     test_a_binding_carries_no_label_and_reads_as_its_node()
     test_a_foreign_member_is_reported_and_kept()
+    test_a_member_of_another_machine_is_foreign()
     test_check_refuses_a_grant_and_uses_on_run_as_on_gcp()
     test_the_image_registry_is_the_cells_bootstrap_registry()
     print("ALL kci_cloud_fake DERIVED GRANT TESTS PASSED")

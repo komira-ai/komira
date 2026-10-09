@@ -10,10 +10,12 @@
 #    `create_labels` writes for it, with the member's retention and run id;
 #    everyone on the public role is `<T>/public`; a cell-scope binding hashes
 #    `cell/<NAME>`; a composite's identity keeps its path and its owner.
-# 2. NOT OURS: an identity of another cell (THE MEMBER CHECK), a role the
+# 2. NOT OURS: an identity of another cell, or of another machine with the
+#    same cell name (THE MEMBER CHECK, each coordinate alone), a role the
 #    table does not map (or maps twice), a member that is not an identity, a
-#    target of another cell or of another kind, everyone on a non-public
-#    role: each is no attribution (an unmanaged difference).
+#    target of another cell or of another kind, a target kind's role held on
+#    the cell scope, everyone on a non-public role: each is no attribution
+#    (an unmanaged difference).
 # 3. THE TABLE IS INJECTIVE: `role_table_problems` names a role on two rows
 #    and a (target, access) with two roles, wherever in the table they are.
 # 4. THE REFUSALS: on gcp (DERIVED) a `grant` resource and a `uses` line on a
@@ -52,8 +54,10 @@ comptime _BUCKET = "storage.googleapis.com/Bucket"
 comptime _RUN = "run.googleapis.com/Service"
 
 
-def _scope(cell: String = String("blue"), run: Optional[String] = None) -> CellScope:
-    var s = CellScope(String("shop"), cell, Provenance(String("run-1"), String("rev-1")))
+def _scope(
+    cell: String = String("blue"), run: Optional[String] = None, machine: String = String("shop")
+) -> CellScope:
+    var s = CellScope(machine, cell, Provenance(String("run-1"), String("rev-1")))
     s.validation_run_id = run.copy()
     return s^
 
@@ -148,7 +152,29 @@ def test_an_identity_of_another_cell_is_never_this_cells() raises:
     print("  test_an_identity_of_another_cell_is_never_this_cells: PASS")
 
 
+def test_an_identity_of_another_machine_is_never_this_cells() raises:
+    """THE MEMBER CHECK, its machine half. Two machines may name a cell the
+    same in one project. Catches: a check that compares only the cells, so
+    the other machine's identity holding a mapped role on this cell's bucket
+    reads as this cell's node (an apply could remove or rewrite it)."""
+    var s = _scope()
+    var other = _scope(machine=String("depot"))
+    var member = _object(other, String("runner"), String("runner/identity"), String(_SA))
+    var target = _object(s, String("media"), String("media/bucket"), String(_BUCKET))
+    var d = attribute(False, target, False, member, String("roles/storage.objectViewer"), _rows())
+    assert_false(Bool(d), "another machine's identity of the same cell name on this cell's bucket")
+    # Its own machine's bucket of the same cell name: attributed, to that machine.
+    var its = _object(other, String("media"), String("media/bucket"), String(_BUCKET))
+    var e = attribute(False, its, False, member, String("roles/storage.objectViewer"), _rows())
+    assert_true(Bool(e) and e.value().machine == "depot", "the other machine's own binding")
+    print("  test_an_identity_of_another_machine_is_never_this_cells: PASS")
+
+
 def test_what_the_table_does_not_map_is_not_ours() raises:
+    """Catches: an unmapped or twice-mapped role read as a verb, a role of
+    another kind on the target, and a target kind's role on the cell scope
+    read as a node (`<P>/u-h(P, <kind>)`: owned, unwanted, deleted by an
+    apply) when the cell-scope branch does not require a `cell/<NAME>` row."""
     var s = _scope()
     var member = _object(s, String("runner"), String("runner/identity"), String(_SA))
     var target = _object(s, String("media"), String("media/bucket"), String(_BUCKET))
@@ -158,6 +184,10 @@ def test_what_the_table_does_not_map_is_not_ours() raises:
     assert_false(
         Bool(attribute(False, target, False, member, String("roles/storage.objectViewer"), twice)),
         "a role on two rows reads back to no verb",
+    )
+    assert_false(
+        Bool(attribute(True, _cell(), False, member, String("roles/storage.objectViewer"), _rows())),
+        "a bucket's role on the cell scope: no cell/<NAME> row, so no node",
     )
     var wrong_kind = _object(s, String("media"), String("media/bucket"), String(_SA))
     assert_false(
@@ -269,6 +299,7 @@ def main() raises:
     test_a_cell_scope_binding_hashes_the_cell_path()
     test_a_composite_identity_keeps_its_path_and_owner()
     test_an_identity_of_another_cell_is_never_this_cells()
+    test_an_identity_of_another_machine_is_never_this_cells()
     test_what_the_table_does_not_map_is_not_ours()
     test_a_member_or_target_kci_does_not_own_is_not_ours()
     test_the_role_table_must_be_injective()

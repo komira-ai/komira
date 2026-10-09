@@ -42,7 +42,8 @@
 #     refused as ALREADY_EXISTS.
 #   * `fail_after_create_of(id)`: the next create of `id` stores the object
 #     as the request carried it (stamp included), logs it, then raises, as
-#     when a create lands and its wait times out; `failed_after` names it.
+#     when a create lands and its wait times out; `failed_after` names it,
+#     and `failed_log` keeps every such id, in order.
 #
 # MEMBER BINDINGS (a shape whose grants are DERIVED, `roles` non-empty): a
 # binding object is stored at its node id like every object, with NO labels:
@@ -173,6 +174,7 @@ struct FakeStore(Movable):
     var outside_labels: List[List[Label]]
     var _fail_after: String
     var failed_after: String
+    var failed_log: List[String]
 
     def __init__(
         out self,
@@ -215,6 +217,7 @@ struct FakeStore(Movable):
         self.outside_labels = List[List[Label]]()
         self._fail_after = String("")
         self.failed_after = String("")
+        self.failed_log = List[String]()
         for i in range(len(foreign)):
             self.plant(foreign[i], String("foreign"))
 
@@ -379,6 +382,7 @@ struct FakeStore(Movable):
             # an error (its wait timed out).
             self._fail_after = String("")
             self.failed_after = id
+            self.failed_log.append(id)
             raise Error(String("fake: DEADLINE_EXCEEDED waiting for the create of ") + id + String(", which landed"))
 
     def fail_after_create_of(mut self, id: String):
