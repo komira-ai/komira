@@ -29,6 +29,7 @@ The optimized-plan design says what a plan carries and how it is admitted. This 
 3. **Plans stay backward compatible forever.** Every later engine decodes, admits and lowers every released plan that contains a UDF (§9.1, §10.12). Each runtime keeps its own runtime-specific bytes readable forever (§8.2).
 4. **One contract, two transports.** The same operations run either in-process, through a C ABI over the Arrow C Data Interface, or in a worker process, over Arrow IPC on shared memory. The host picks the transport. Neither the language nor the plan does (§4.1, §5.3).
 5. **The engine crosses into a runtime once per batch, never once per row and never once per group,** with no copy wherever the transport and the trust boundary allow it (§4.4, §5.2).
+6. **A row-shaped UDF stays columnar.** A function that takes a whole row (`df.map_rows(f)`, pandas `apply(axis=1)`) reads only the columns it declares, and every other column is pruned down to the scan (`ROW`, §3.1).
 
 **Non-goals.**
 - GPU UDFs. The ABI reserves their shape (§4.2), but §10.2 defers them.
@@ -47,11 +48,13 @@ The plan system supports two classes of UDF. The class decides how a runtime exe
 | Interpreter | None | Embedded in the runtime library, or provided by the runtime's launcher (§4.1) |
 | Runtime id | `komira/native`, one id for every native language | One per language runtime: `komira/python`, `komira/node`, `example.org/go` |
 | How a batch reaches user code | The `komira/native` runtime loads the library and calls it through the C ABI over Arrow C Data, in-process and without a copy | The runtime converts each batch to the language's values or columns and calls user code inside an interpreter or isolate |
-| Contexts (§3.3) | As the library declares; typically `THREAD_SAFE` | One interpreter or isolate per engine thread: an in-process context per thread, or one worker process per engine thread for a runtime that cannot run several contexts in one process (CPython with a GIL) |
+| Contexts (§3.3) | One per engine thread: `komira/native` always reports `CONTEXT_PER_THREAD` and refuses a library that cannot take it (below) | As the runtime's `threading` declares (§4.2). Typically one interpreter or isolate per engine thread: an in-process context per thread, or one worker process per engine thread for a runtime that cannot run several contexts in one process (CPython with a GIL). A runtime whose virtual machine is itself thread-safe (JVM, .NET, free-threaded Python) may declare `THREAD_SAFE` and share one context (§5.3) |
 | Transports (§5.3) | Both. In-process is the native path; the worker transport adds crash isolation and privilege separation | Both, as the runtime's capabilities allow |
 | Conformance (§6.3) | The shared corpus on both transports, plus the native cases | The shared corpus on both transports, plus the managed cases |
 
 **Go is managed.** Go compiles to native code, but a Go shared library carries the Go runtime: its scheduler, its garbage collector and its own signal handlers, with one Go runtime per process. A Go UDF therefore runs under a managed runtime, in workers first, like the JVM and .NET.
+
+**Mojo is native, although its libraries need a runtime library.** Every `mojo_shared_lib` output has `DT_NEEDED libKGENCompilerRTShared.so`, which holds the Mojo allocator, async runtime and globals (`tools/build/mojo/README.md`). Unlike Go's runtime, it is a support library in the way `libstdc++` is for C++: it does not own the threads that call into it and does not take over the process's signals, so several Mojo libraries and the engine can share one process *(inferred; S3b checks it with two Mojo fixture libraries called from several engine threads in one process, §6.3)*. If that check fails, Mojo libraries run only on the worker transport; the class and the plan do not change.
 
 **What is the same for both classes.**
 - **The plan reference.** A native UDF is a `UdfRef` like any other: an open runtime id, explicit Arrow types and a kind (§3.1). Its code form is `BUNDLE`.
@@ -61,7 +64,8 @@ The plan system supports two classes of UDF. The class decides how a runtime exe
 **The native runtime, `komira/native`.** It is a base runtime with no interpreter: a loader that forwards the C ABI to user libraries.
 - **Code.** `form` is `BUNDLE`. `code` lists one shared library per target platform, with the role `lib:<os>-<cpu>` (for example `lib:linux-x86_64`, `lib:linux-aarch64`). `entry` names the UDF inside the library, since one library may hold many UDFs. The descriptor records the source language and toolchain, for diagnostics only; the runtime never dispatches on them.
 - **Platform.** `validate` refuses a spec with no library for the host's platform (`ERR_UNSUPPORTED`). So a plan whose native code was not built for the host is refused at admission, by name, never in the middle of a run.
-- **Loading.** `load` verifies the library's sha256 *before* `dlopen` (`RTLD_LOCAL | RTLD_NOW`, never `dlclose`d, as §4.3 states for runtimes). It resolves the library's one exported symbol, `komira_udf_native_init_v1`, which has the signature of `komira_udf_runtime_init_v1` and returns a `komira_udf_runtime` table. It negotiates that table's minor as §8.1 does, checks that the library's `describe` covers the spec's shape, and forwards every later entry to the table. The distinct symbol name keeps a user library from being registered as a runtime, and a runtime from being loaded as a user library.
+- **Loading.** `load` verifies the library's sha256 *before* `dlopen` (`RTLD_LOCAL | RTLD_NOW`, never `dlclose`d, as §4.3 states for runtimes). It resolves the library's one exported symbol, `komira_udf_native_init_v1`, which has the signature of `komira_udf_runtime_init_v1` and returns a `komira_udf_runtime` table. It negotiates that table's minor as §8.1 does, checks the library's `describe` (next item), and forwards every later entry to the table. The distinct symbol name keeps a user library from being registered as a runtime, and a runtime from being loaded as a user library.
+- **Capabilities.** The host binds contexts and the transport from `komira/native`'s own `describe`, never from a library's, so `komira/native` reports one fixed set: `runtime_id` `komira/native`, `udf_class` `NATIVE`, `hosting` 0, `threading` `CONTEXT_PER_THREAD` without `thread_affine`, and both transports. That is the least concurrency it can offer a library: the host never calls one context from two threads at once, and a context may move between threads. A library's own `describe` must report `runtime_id` `komira/native`, `udf_class` `NATIVE`, a `threading` of `CONTEXT_PER_THREAD` or `THREAD_SAFE` (which is stronger), no `thread_affine`, `IN_PROCESS` in `transports` (a library always runs in-process, in the engine or in a worker; the transport belongs to `komira/native`), and the spec's shape in `shapes`. `load` refuses any other library with `ERR_LOAD`, naming the capability (`OPTIMIZED_UDF_CODE_UNLOADABLE`). A library that cannot be called from two threads, even in two contexts, is not supported at ABI 1.0.
 - **ABI tag.** The `runtime_abi` of `komira/native` in `needs.runtimes` is the C ABI major its libraries target (`abi1`).
 - **One id for every native language.** Every native language speaks the same C ABI, so the language is not part of dispatch. A new native language adds an SDK: helpers that export the table from a function's signature (an `extern "C"` Rust function, a `noexcept` C++ function, an exported Mojo function), a typed view of Arrow C Data in that language, and capture of the library into the code layer. It adds no runtime id and no change to the base.
 
@@ -123,7 +127,7 @@ A `UdfRef` describes one UDF. In a RAW (bound, logical) plan, the list of `UdfRe
 message UdfRef {
   UdfKind      kind        = 2;   // a shape, never a language (below)
   UdfCode      code        = 16;  // which runtime, which entry, which code bytes
-  repeated WireField arg_types = 17; // declared argument types, in call order (*Types*, below)
+  repeated WireField arg_types = 17; // declared argument types, in call order; for ROW, the declared read set (*Types*, below)
   WireField    return_type = 8;   // required; nested to any depth (WireField.children, §10.3)
   WireField    state_type  = 15;  // AGGREGATE only; set iff the mergeable form (§10.2)
   UdfStability stability   = 10;  // IMMUTABLE | STABLE | VOLATILE: this is the determinism declaration
@@ -142,6 +146,7 @@ enum UdfKind {
   AGGREGATE            = 3;   // plain or mergeable, decided by state_type
   STEP                 = 4;   // source node, runs once per run
   MAP_BATCHES_FRAME    = 5;   // target of a WireMapBatchesNode; any number of output rows
+  ROW                  = 6;   // target of a WireUdfApply; one row object per input row, built from arg_types only
 }
 
 message UdfCode {
@@ -189,12 +194,23 @@ enum CodeForm {
 **Types.**
 - `arg_types` makes each `UdfRef` a self-contained signature. A runtime binds the argument schema once, at `load`, before it sees the plan body.
 - At each call site, the argument types must equal `arg_types` exactly. A producer that wants a conversion inserts an explicit cast (`OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH`).
-- For `MAP_BATCHES_FRAME`, and for an `AGGREGATE` over several columns, each column is one entry, in input order. For a `STEP`, `arg_types` lists the types of the literal arguments.
+- For `MAP_BATCHES_FRAME`, and for an `AGGREGATE` over several columns, each column is one entry, in input order. For a `STEP`, `arg_types` lists the types of the literal arguments. For a `ROW`, `arg_types` is the declared read set: one entry per field, whose `name` is the field name user code reads and whose type is that column's Arrow type (below).
 - Arrow is the single source of truth for every type (§6.2).
 
 **Determinism is `stability`.** `IMMUTABLE`, `STABLE` and `VOLATILE` already state what the optimizer and the host may assume about repeated calls and retries (§10.7). A separate determinism field would state the same fact twice.
 
 **`STEP`, not `PYTHON_STEP`.** A step is a shape: a source node with literal arguments that runs once per run. Whether a runtime supports steps is a runtime capability (§4.2), checked at admission; it is not a plan rule. The arm is renamed `WireStepNode`. Its field and tag numbers stay the same, because nothing has been released. A `STEP` `UdfRef` must be `VOLATILE` (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`); §10.7 already lists a step as always `VOLATILE` (`optimized_plan_udfs.md:457`), and plan validation now enforces it.
+
+**`ROW`: a row-shaped UDF with a declared read set.** A row-shaped function receives one row object per input row and reads its fields by name (`df.map_rows(f)`, pandas `DataFrame.apply(f, axis=1)`). Handed the whole row, it would make every column of its input live and defeat projection pushdown. So the `ROW` `UdfRef` carries the fields it reads, and nothing else reaches it.
+- **The read set is `arg_types`.** Each entry names one field and gives its explicit Arrow type. The call site's `WireUdfApply` passes one argument per entry, in the same order, usually a column reference. Names are non-empty and unique (`OPTIMIZED_UDF_ROW_READ_SET_INVALID`). The field name is what user code reads; the argument binds it by position, so a rename below the call does not change the `UdfRef`.
+- **The producer determines it when the plan is built** (§6.1), never a host:
+  1. `columns=[...]` on the verb, when the user declares it;
+  2. otherwise the union of a *recording row proxy* during the local run, which records each field read, and static analysis of the function's field accesses, where the SDK has one. An earlier engine recorded reads this way (`Row.accessed_column_names()`);
+  3. otherwise every input column. A function that iterates the row, converts it to a dict or passes it whole to other code marks the read set as undetermined, and so does a local run that saw no rows with no static result. This is correct and slower; the SDK says so in its local diagnostics.
+- **The optimizer prunes everything else.** Because the call site's arguments are ordinary expressions, projection pushdown through the UDF needs no rule of its own: only the read set's columns stay live, down to the scan. No host re-derives the read set.
+- **The runtime builds rows from those columns only**, per batch, inside the runtime (§4.3). A read of an undeclared field fails the batch with `ERR_FIELD_NOT_DECLARED` (`UDF_FIELD_NOT_DECLARED`), naming the field and the read set, with a fix-it: add the field to `columns=[...]`. It never yields a null. A field read only on a branch the local run did not take is the case this catches; static analysis narrows it, and the error makes it safe.
+- **A `ROW` UDF is `MANUAL`** (`OPTIMIZED_UDF_ROW_NULL_MODE`). Under `PROPAGATE`, a null in a field read only on some branches would drop rows the function would have computed.
+- **Output.** One value of `return_type` per row, as for `SCALAR`. A function returning several values per row (`map_rows` returning a tuple) declares a struct, which the producer unpacks into columns with ordinary field access.
 
 **Code forms.** The three forms in #1094 (§10.6) generalize to every language:
 
@@ -258,7 +274,7 @@ message RuntimeNeed {            // in DeclaredNeeds, replacing python_abi = 6 a
   - CSE of calls that are not `VOLATILE`.
 
   None of these decisions reads the runtime.
-- **What the optimizer may read:** `kind`, the types, `stability`, `null_mode` and `resources`. It must not read `code`.
+- **What the optimizer may read:** `kind`, the types, `stability`, `null_mode` and `resources`. It must not read `code`. A `ROW` call's columns are its arguments, so pruning treats it as any other call (§3.1).
 - **Host observations never change shape.** The optimizer runs on the producer, before any run, and an optimized plan is never re-optimized (§10.9). Latency the host observes changes only host-local choices: batch size and pool size (§3.3). An optional producer-side cost hint on the verb (a relative per-row cost class, an expected selectivity) may be added later to order several UDF conjuncts. It would live in `PlanAdvice`, not in `UdfRef`, because `UdfRef` bytes are identity. This document does not add it.
 - **The runtime-swap invariance test.**
   - Plan every query in the UDF corpus twice. The second time, replace every `code` with `{runtime: "komira-test/null"}` and empty fields, and every `needs.runtimes` entry likewise.
@@ -272,7 +288,7 @@ The physical plan is the host's lowering of the optimized plan. It is not a wire
 
 | Plan arm | Physical operator | Runtime operation (§4.3) |
 |---|---|---|
-| `WireUdfApply` targeting `SCALAR` or `MAP_BATCHES_COLUMN` | `UdfProject`, inside a project or filter segment | `call_batch` |
+| `WireUdfApply` targeting `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN` | `UdfProject`, inside a project or filter segment | `call_batch` |
 | `WireMapBatchesNode`, ungrouped or grouped (`MAP_BATCHES_FRAME`) | `UdfFrame` | `frame_open` / `frame_next` |
 | `AGG_UDF` measure, plain form | `UdfAggregate`, behind a `HASH` exchange | `frame_open` / `frame_next`, many groups per batch |
 | `AGG_UDF` measure, mergeable form | A groups accumulator in the aggregate operator | `agg_*`, many groups per batch |
@@ -297,9 +313,9 @@ These rules are part of the plan's meaning, so they hold on every host, for ever
 
 1. **Conditional evaluation.** A UDF call is evaluated only on rows for which every enclosing conditional selects its branch (`CASE`, `coalesce`, the right-hand side of `AND`/`OR`), and only on rows that survive earlier conjuncts of the same filter. So `CASE WHEN x > 0 THEN f(x) END` never calls `f` on a row with `x <= 0`. The ordering of UDF conjuncts last (`optimized_plan_udfs.md:498`) depends on this rule.
 2. **Compaction.** The host compacts the selected rows (a `take`) before the call and scatters the result after it. Under `PROPAGATE` it also removes rows with a null argument. The arrays a runtime receives contain only rows it must compute.
-3. **Independence from instances and batch boundaries.** The result of a `SCALAR` or `MAP_BATCHES_COLUMN` call on a row does not depend on which instance serves it or on where batches were split. A function may cache (a loaded model, a memo table); a function whose per-row result depends on earlier calls (a row counter) is not expressible at the first format version. This replaces the `SERIAL_ORDERED` parallelism contract, which `UdfRef` does not carry. A frame-form function already sees batch boundaries; #1094 states its rule (`optimized_plan_udfs.md:485`).
+3. **Independence from instances and batch boundaries.** The result of a `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN` call on a row does not depend on which instance serves it or on where batches were split. A function may cache (a loaded model, a memo table); a function whose per-row result depends on earlier calls (a row counter) is not expressible at the first format version. This replaces the `SERIAL_ORDERED` parallelism contract, which `UdfRef` does not carry. A frame-form function already sees batch boundaries; #1094 states its rule (`optimized_plan_udfs.md:485`).
 4. **Exact argument encoding.** The host hands the runtime arrays in exactly the `arg_types` encoding: no dictionary or view encoding unless the declared type is one; the host casts first. Arrays may have a non-zero `offset`, including bit offsets that are not multiples of 8.
-5. **The argument struct.** Arguments arrive as one struct array, one child per `arg_types` entry, with no validity buffer and offset 0. Its `length` is the row count and is authoritative: a zero-argument `SCALAR` such as `uuid()` receives a struct with no children and `length` rows.
+5. **The argument struct.** Arguments arrive as one struct array, one child per `arg_types` entry, with no validity buffer and offset 0. For a `ROW`, the children are exactly the read set, named as in `arg_types`; the host passes no other column. Its `length` is the row count and is authoritative: a zero-argument `SCALAR` such as `uuid()` receives a struct with no children and `length` rows.
 6. **Delivery.** A call to a non-`VOLATILE` UDF is at-least-once, as §10.7 states; a `VOLATILE` batch is never called twice.
 
 ## 4. The runtime interface
@@ -327,7 +343,7 @@ So each language is implemented once, and the protocol is written once, not once
 |---|---|---|
 | `runtime_id`, `runtime_abi` | strings | Matched against `needs.runtimes` |
 | `max_descriptor_version` | the highest version the runtime reads | `validate` refuses any newer version |
-| `shapes` | bitmask of SCALAR, MAP_BATCHES_COLUMN, MAP_BATCHES_FRAME, MAP_BATCHES_FRAME_GROUPED, AGG_PLAIN, AGG_MERGEABLE, STEP | `OPTIMIZED_UDF_KIND_UNSUPPORTED` |
+| `shapes` | bitmask of SCALAR, ROW, MAP_BATCHES_COLUMN, MAP_BATCHES_FRAME, MAP_BATCHES_FRAME_GROUPED, AGG_PLAIN, AGG_MERGEABLE, STEP | `OPTIMIZED_UDF_KIND_UNSUPPORTED` |
 | `threading` | `THREAD_SAFE`: several threads may call one context at once. `CONTEXT_PER_THREAD`: several contexts run in parallel in one process, and one thread at a time calls each. `SINGLE_THREAD`: one context per process | Binding contexts and the pool (§3.3) |
 | `thread_affine` | flag: the host always calls a context, its instances and their objects from the OS thread that opened the context | A CPython thread state, a sub-interpreter and a Node env are bound to one OS thread, not merely serialized. Without the flag, the runtime does its own handoff, as Node in-process does (§5.3) |
 | `transports` | `IN_PROCESS`, `WORKER`, or both | Binding the transport (§5.3) |
@@ -368,7 +384,8 @@ typedef enum {                        /* 0 is success; values are never reused *
   KOMIRA_UDF_ERR_DEADLINE = 12,
   KOMIRA_UDF_ERR_OUT_OF_MEMORY = 13,  /* refused by the host's memory hook, or the runtime's own */
   KOMIRA_UDF_ERR_INSTANCE_LOST = 14,  /* the context cannot be used again; the host closes and reopens it */
-  KOMIRA_UDF_ERR_INTERNAL = 15        /* a runtime bug; never user code */
+  KOMIRA_UDF_ERR_INTERNAL = 15,       /* a runtime bug; never user code */
+  KOMIRA_UDF_ERR_FIELD_NOT_DECLARED = 16  /* ROW: user code read a field outside the read set; message names it */
 } komira_udf_status;
 
 typedef struct komira_udf_error {     /* allocated by the host per call; filled by the runtime on failure */
@@ -408,7 +425,7 @@ typedef struct komira_udf_spec {      /* the UdfRef, decoded by the host; borrow
   const char*        entry;
   uint32_t           descriptor_version;
   const uint8_t*     descriptor;  size_t descriptor_len;
-  const struct ArrowSchema* args;     /* a struct schema, one child per arg_types entry */
+  const struct ArrowSchema* args;     /* a struct schema, one child per arg_types entry; for ROW, the read set by name */
   const struct ArrowSchema* result;   /* return_type; a struct for a table */
   const struct ArrowSchema* state;    /* state_type, or NULL */
   int32_t            null_mode, stability;
@@ -442,7 +459,7 @@ typedef struct komira_udf_runtime {   /* static in the runtime; the host reads e
   void    (*close_context)(komira_udf_context*);
   int32_t (*open_instance)(komira_udf_context*, komira_udf_udf*, komira_udf_instance** out, komira_udf_error*);
   void    (*close_instance)(komira_udf_instance*);
-  /* SCALAR, MAP_BATCHES_COLUMN. args moved in; out moved out (release == NULL on failure). */
+  /* SCALAR, ROW, MAP_BATCHES_COLUMN. args moved in; out moved out (release == NULL on failure). */
   int32_t (*call_batch)(komira_udf_instance*, const komira_udf_call*,
                         struct ArrowDeviceArray* args, struct ArrowDeviceArray* out, komira_udf_error*);
   /* MAP_BATCHES_FRAME (grouped or not), AGG_PLAIN, STEP. `in` is moved in. */
@@ -482,6 +499,7 @@ const komira_udf_runtime* komira_udf_runtime_init_v1(const komira_udf_host* host
 6. **`open_instance(context, udf)`** makes a UDF callable in a context. A plan with 10 UDFs on 32 engine threads has 32 contexts and 320 instances, not 320 interpreters. This is the counterpart of DuckDB's `local_init`.
 7. **Calls**, by shape:
    - **`SCALAR` and `MAP_BATCHES_COLUMN`: `call_batch`.** A `SCALAR` runtime loops over the rows *inside* the runtime, in its own language. An `async` function is awaited inside the runtime, with at most `max_concurrent_calls` calls in flight (§10.8). The output has the same length as the input.
+   - **`ROW`: `call_batch`, rows built inside the runtime.** At `load` the runtime binds the field names from `spec->args`, the read set. Per batch it builds one row object per row over the `args` children only, in its own language: a lazy view that reads child *i* at row *r* when a field is read (a Python row proxy or a pandas `Series` holding only the read set, a JavaScript object with getters, a typed row view in a native SDK). A read of any other name fails with `ERR_FIELD_NOT_DECLARED`, with `row` set. If user code catches the language's exception, the runtime still fails the batch: the proxy records the violation and `call_batch` checks it before it returns. A native SDK whose row view exposes only the declared fields rejects other names when the library is built.
    - **`MAP_BATCHES_FRAME`, ungrouped: `frame_open`, then `frame_next` until the end.** The runtime pulls input batches from `in` when it needs them; the host pulls output batches, so a generator yields as it goes, before it has read all its input.
    - **`MAP_BATCHES_FRAME`, grouped, and plain `AGGREGATE`: the same entries, with a group column.** Each input batch's first child is a non-null `int64` group ordinal. Rows of one group are contiguous and ordinals increase; a group may span batches. The runtime collects a group's rows and calls the user function once per group, in its own language. A grouped frame returns the user's tables (which carry their own key columns, §10.4); a plain aggregate returns one row per completed group, in ordinal order, so the host pairs results with keys by position. One crossing serves many groups.
    - **Mergeable `AGGREGATE`: the `agg_*` entries, vectorized over groups** (the shape of DataFusion's `GroupsAccumulator`, [docs](https://docs.rs/datafusion/latest/datafusion/logical_expr/trait.GroupsAccumulator.html)):
@@ -532,6 +550,7 @@ Every entry returns a `komira_udf_status` and on failure fills the host's `komir
 |---|---|
 | `ERR_RAISED` | `UDF_RAISED`, with `user_trace` and the row (per §10.7, the host bisects a batch that is not `VOLATILE`) |
 | `ERR_RETURN_TYPE`, `ERR_LENGTH` | `UDF_RETURN_TYPE_MISMATCH`, `UDF_BATCH_LENGTH_MISMATCH` |
+| `ERR_FIELD_NOT_DECLARED` | `UDF_FIELD_NOT_DECLARED`, naming the field, the read set and the row, with the fix-it "add it to `columns=[...]`". Never retried: the same batch fails the same way |
 | `ERR_STATE_TOO_LARGE`, `ERR_GROUP_TOO_LARGE` | `UDF_STATE_TOO_LARGE`, `UDF_GROUP_TOO_LARGE` (the host names the key from `group`) |
 | `ERR_LOAD`, `ERR_CODE_DIGEST`, `ERR_DESCRIPTOR` | `OPTIMIZED_UDF_CODE_UNLOADABLE`, `OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`, `OPTIMIZED_UDF_DESCRIPTOR_INVALID` |
 | `ERR_CANCELLED`, `ERR_DEADLINE` | The run's cancel, or `UDF_DEADLINE_EXCEEDED` (`UDF_STEP_TIMED_OUT` for a step) |
@@ -622,7 +641,7 @@ The host chooses: `transport = host policy ∩ runtime.transports`. This is the 
 | `komira/python` (CPython with a GIL) | managed | `SINGLE_THREAD`, `thread_affine`; `IN_PROCESS` (`HOST_INTERPRETER`), `WORKER` (`EMBEDDED`) | Worker processes, one per share of the cores | In-process for a quick single-threaded preview; workers for a full local run (§10.10's "same path") |
 | `komira/python` on the free-threaded ABI (`cp313t`), later | managed | `THREAD_SAFE` or `CONTEXT_PER_THREAD` | Workers (for crash containment), with threads inside each | In-process |
 | `komira/node` | managed | `CONTEXT_PER_THREAD`; `IN_PROCESS` (Node-API: one `worker_threads` isolate per context, Arrow buffers as external `ArrayBuffer`s), `WORKER` (launcher: `node`) | Worker processes, or in-process isolates where host policy allows | In-process isolates (the engine runs as a Node addon) |
-| `komira/native` (Mojo, Rust, C, C++, Zig; stage S3b) | native | As each library declares, typically `THREAD_SAFE`; both | Worker, until the host shows that in-process native code cannot reach its privileged credentials (§1.2); then in-process | In-process |
+| `komira/native` (Mojo, Rust, C, C++, Zig; stage S3b) | native | `CONTEXT_PER_THREAD`, fixed; each library must allow it (§1.2); both | Worker, until the host shows that in-process native code cannot reach its privileged credentials (§1.2); then in-process | In-process |
 | Future: JVM, .NET | managed | `THREAD_SAFE`; `WORKER` first | Worker | Worker |
 | Future: Go (a Go shared library carries the Go runtime, one per process) | managed | `SINGLE_THREAD`; `WORKER` first | Worker | Worker |
 | Future: `komira/wasm` (any language compiled to a WASM component, with a WIT world that mirrors §4.3, run by Wasmtime) | managed | `CONTEXT_PER_THREAD`; both | In-process (a memory-safe sandbox, with fuel or epoch deadlines) | In-process |
@@ -664,6 +683,7 @@ Notes:
    - How the type is declared depends on the language:
      - A language whose types survive to run time (Python) may read them, from type hints or from a `return_dtype=` or `schema=` argument on the verb (§10.5).
      - A language whose types are erased (TypeScript) takes the type as a **value** on the verb. The static type is derived from that value, so the compiler still checks the function (§10.5).
+     - For a `ROW` verb, the read set's types are the input columns' types, which the SDK knows when the plan is built; `columns=[...]` naming a column the input lacks is refused (`UDF_ROW_COLUMN_UNKNOWN`).
      - A native language (Mojo, Rust, C++, Zig; §1.2) derives the types from the function's signature when the library is built, through its SDK's mapping table (§6.2); the export helper records them in the library, and capture checks them against the verb's declared types. C, whose signatures cannot carry Arrow types, takes them as a value on the verb. A managed compiled language (Go) does the same as the native ones, in its own SDK.
 3. **Capture.** The SDK:
    - chooses a `CodeForm`;
@@ -680,6 +700,7 @@ Notes:
    §10.6 is the Python and TypeScript instance.
 4. **The code layer.** Code objects go under the image's code prefix, named by hex sha256. That prefix is the `code_root` a runtime receives in `komira_udf_spec`.
 5. **A local run through the same runtime and transport** (§10.10's "same path"), so that a capture error or a type error fails on the user's machine first.
+6. **The read set of each `ROW` UDF** (§3.1), before the plan is optimized: `columns=[...]`, else the union of the recording proxy's reads during the local run and the SDK's static analysis, else every input column. The recording proxy treats whole-row operations (iteration, length, conversion to a dict or tuple, unpacking) as "undetermined".
 
 A language may ship a producer without a runtime, for plans that reference only runtimes in the base image. It may also ship a runtime without a producer: a runtime that executes code another SDK captured, such as WASM components built by any toolchain.
 
@@ -745,6 +766,11 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
 | A descriptor with a trailing unknown field; non-canonical bytes; a newer `descriptor_version` | The validator is too lax | `validate` always returns OK |
 | A `STEP` returning a table with no columns | An empty table is mistaken for an error | Treat zero columns as failure |
 | Round trip of every type in the runtime's mapping table | A silent loss beyond the stated ones | Truncate microseconds in Python |
+| `ROW` with a conditionally read field: `f(r) = r.a if r.flag else r.b`, read set `{flag, a}` (recorded on a local run where `flag` was always true), over a batch where row 3 has `flag` false | An undeclared read returns null or a wrong value | The row proxy returns null for an unknown name |
+| The same case with the read set `{flag, a, b}` (static analysis or `columns=[...]`) | A correct read set still fails | The proxy checks names against the input schema instead of the read set |
+| `ROW` whose function catches the language's exception around the undeclared read | A caught violation passes silently | `call_batch` reports only uncaught errors |
+| `ROW` reading 2 fields of a 100-column scan (plan case) | The row UDF keeps every column live | Lowering passes the whole input row; the case asserts the scan's projection and the `args` children equal the read set |
+| Producer: a function that iterates its row; a local run with zero rows and no static result | A guessed read set too small | The recording proxy ignores iteration; an empty recording becomes an empty read set |
 
 - **Reference runtimes ship with the harness, one per class.**
   - `komira-test/echo`, written in C, implements every entry trivially, with no user code and no code objects. It proves the harness and the transports independently of any language, and it is the template a new managed runtime copies: the C table it implements is the part every managed runtime writes around its interpreter.
@@ -757,7 +783,9 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
 | native | A spec with libraries only for another platform | A wrong-platform library is loaded, or the refusal comes mid-run | `validate` accepts any platform and `load` picks the first library |
 | native | Two fixture libraries that both define the same internal symbol | One library's symbol resolves into the other | Load with `RTLD_GLOBAL` |
 | native | A library that exports `komira_udf_runtime_init_v1` instead of `komira_udf_native_init_v1`, or a second symbol | A runtime and a user library are confused | Resolve either symbol |
-| native | A fixture that throws (C++) or panics (Rust) on row 3 | Unwinding across the ABI | An export helper without the catch |
+| native | A fixture that raises on row 3: a Mojo function declared `raises`, behind the Mojo export helper (S3b); later a C++ fixture that throws and a Rust fixture that panics, behind their helpers | An error escaping the export helper: unwinding across the ABI, or a Mojo error with no `ERR_RAISED` | An export helper without the catch |
+| native | A library whose `describe` reports `SINGLE_THREAD`, `thread_affine`, no `IN_PROCESS`, or another `runtime_id` | The host binds a library to concurrency it cannot take | `load` forwards without checking the library's capabilities |
+| native | Two Mojo fixture libraries loaded in one process, called from several engine threads | The Mojo runtime library cannot be shared in one process | None: it tests an assumption (§1.2), not host code. Red means Mojo libraries run on workers only |
 | native | A fixture that dereferences NULL, on the worker transport | The engine dies with the library | Run the native default in-process on a host whose policy says worker |
 | managed | Two contexts in parallel, each with a cached model | State shared across interpreters or isolates | One interpreter shared by all contexts |
 | managed | A context used from a thread other than the one that opened it (`thread_affine`) | A thread state or env used off its thread | The host calls from any engine thread |
@@ -845,12 +873,12 @@ Each stage lands with its tests welded and its testing plan stated: what each te
 
 | Stage | Work | Owner area | Done when |
 |---|---|---|---|
-| S0 | This document; the format edits to the optimized-plan UDF section, made before any `format_version` ships | design | Both merged |
+| S0 | This document; the format edits to the optimized-plan UDF section, made before any `format_version` ships, including the `ROW` kind (#1094's verb table maps `DataFrame.apply(f, axis=1)` to `SCALAR`; it moves to `ROW`, with `map_rows`) | design | Both merged |
 | S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `komira_arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case in-process; the leak, double-release and skip-validation mutants go red |
 | S2 | The conformance corpus package (ABI cases), the harness and the coverage assertion; the runtime-swap invariance test for the optimizer (§3.2) | tests, optimizer | The corpus runs against echo; the invariance mutant goes red |
 | S3 | The worker transport: `komira_udf_worker` and `komira-udf-worker`, slot heaps, worker-to-engine copy-out, IPC framing, frame credits, `HELLO`, cancel, crash mapping; supervisor integration (user id, limits, `posix_spawn`) | engine, supervisor | Echo passes the corpus on both transports; the worker-abort, held-views and cancel cases pass |
-| S3b | The `komira/native` runtime (§1.2): digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo; the native cases (§6.3) | engine, Mojo | Both fixture libraries pass the corpus and the native cases on both transports; the digest-after-`dlopen`, `RTLD_GLOBAL` and missing-catch mutants go red |
-| S4 | The `komira/python` runtime: in-process on the host interpreter, and worker (CPython embedded in the worker); batch formats in the descriptor; the requirements of §5.3 | Python | Python fixtures pass the corpus on both transports |
+| S3b | The `komira/native` runtime (§1.2): digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo; the native cases (§6.3) | engine, Mojo | Both fixture libraries pass the corpus and the native cases on both transports; the digest-after-`dlopen`, `RTLD_GLOBAL`, unchecked-capabilities and missing-catch mutants go red (the catch case uses the Mojo fixture's raising function; C cannot raise) |
+| S4 | The `komira/python` runtime: in-process on the host interpreter, and worker (CPython embedded in the worker); batch formats in the descriptor; the requirements of §5.3; the `ROW` proxy, and the producer's recording proxy and read set (§6.1) | Python | Python fixtures pass the corpus, `ROW` cases included, on both transports |
 | S5 | The `komira/node` runtime: Node-API in-process, with one `worker_threads` isolate per context and external `ArrayBuffer`s with a copy fallback; worker processes launched by `node` | Node | Node fixtures pass the corpus on both transports |
 | S6 | Physical operators (`UdfProject`, `UdfFrame`, `UdfAggregate`, the groups accumulator, `UdfStep`) in lowering, linking `komira_udf_host`; the plan cases. They replace the SDK-side walk that works around the package cycle (`expr_udf_sites.mojo:1-30`) | engine | UDF plan cases run through lowering, not through the SDK |
 | Later | ABI 1.1 candidates (§8.1); third-party runtime layers (§8.3); native SDKs for Rust, C++ and Zig (each adds fixtures, no runtime id); managed runtimes for JVM, .NET, Go and WASM; free-threaded Python; GPU devices; remote transport | — | Each native SDK adds corpus fixtures; each managed runtime adds a runtime id and fixtures; neither changes the format |
@@ -883,6 +911,8 @@ Whatever the prototypes measure, the results do not change the plan format. They
 | Aggregate calls per group, with an opaque handle per group | Rejected. A high-cardinality group-by would cross the ABI once per group per batch. Aggregates are vectorized over groups, as DataFusion's `GroupsAccumulator` is. |
 | Aggregate state that is pickled or private to the language | Rejected. `state_type` is Arrow: it crosses exchanges and checkpoints, and it has a size the host can cap. |
 | A separate determinism field | Rejected. `stability` is the determinism declaration. |
+| A row-shaped UDF as a `SCALAR` over the whole row, or a host that infers the fields read | Rejected. The whole row keeps every column live; a host cannot re-derive what the producer knew, and two hosts could disagree. `ROW` declares the read set in `arg_types` (§3.1). |
+| A separate `read_set` field beside `arg_types` in a `ROW` | Rejected. It would state the bound argument schema twice. |
 | A `cancel` entry callable from any thread or a signal handler | Rejected. It races with close and cannot be built for CPython or Node-API. Cancel is a per-call flag (§4.7). |
 | Zero-copy decode of worker-to-engine payloads, with sealed per-payload memory files (`F_SEAL_WRITE`) | Not chosen for the first release. It removes one copy but adds a file per payload; the copy-out is simpler and P2 measures its cost. |
 | A class field in `UdfRef`, or a plan rule per class | Rejected. The class is how a runtime executes code, which is a host fact like the transport. It is a capability (§4.2), and the plan carries native and managed UDFs identically (§1.2). |
