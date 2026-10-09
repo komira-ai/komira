@@ -27,6 +27,15 @@ static void free_state(napi_env env, void *data, void *hint) {
   atomic_fetch_add(&finalized_count, 1);
 }
 
+// Not static, and not marked for export: c_shared_lib's -fvisibility=hidden
+// keeps it out of the dynamic symbol table (test `addon_exports`).
+int64_t addon_next_count(env_state *state);
+
+int64_t addon_next_count(env_state *state) {
+  state->calls += 1;
+  return state->calls;
+}
+
 static napi_value count(napi_env env, napi_callback_info info) {
   (void)info;
   void *data = NULL;
@@ -34,10 +43,8 @@ static napi_value count(napi_env env, napi_callback_info info) {
     napi_throw_error(env, NULL, "count: this environment has no instance data");
     return NULL;
   }
-  env_state *state = data;
-  state->calls += 1;
   napi_value out;
-  if (napi_create_int64(env, state->calls, &out) != napi_ok) return NULL;
+  if (napi_create_int64(env, addon_next_count(data), &out) != napi_ok) return NULL;
   return out;
 }
 

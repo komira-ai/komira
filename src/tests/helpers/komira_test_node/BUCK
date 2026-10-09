@@ -66,3 +66,10 @@ node_test(
     src = "addon/addon_test.js",
     data = {"addon/addon.node": ":addon"},
 )
+
+# What the addon exports: only the two Node-API module symbols.
+node_test(
+    name = "addon_exports",
+    src = "addon/exports_test.js",
+    data = {"addon/addon.node": ":addon"},
+)

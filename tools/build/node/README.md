@@ -50,6 +50,38 @@ env -i LC_ALL=C TZ=UTC0 HOME=<scratch>/home TMPDIR=<scratch>/tmp \
 - `zig cc` runs with its caches in the action's scratch directory, as in
   `c_exe` ([native](../native/README.md)).
 
+## Tests
+
+What works is tested by
+[`src/tests/helpers/komira_test_node`](../../../src/tests/helpers/komira_test_node/README.md).
+
+### Test 54: planted defects
+
+Every target of [`tests//negative/node`](../tests/negative/node/BUCK) must
+fail, and [`node_tests.sh`](../tests/node_tests.sh) (run by
+`tools/build/tests/run_tests.sh`) requires the text written above each:
+
+| planted defect | what it proves |
+|---|---|
+| `script_fails`: a `node_test` whose script fails | the target fails, with the script's own error: a `node_test` is a check that can fail |
+| `error_not_on_stderr`: `expect_error` text the failing script never prints | `expect_error` requires the text on stderr, not only a non-zero exit |
+| `expected_fail_passed`: `expect_error` on a script that passes | `expect_error` requires a non-zero exit |
+| `src_listed_twice`, `bundle_listed_twice`, `data_is_source`, `data_is_package` | analysis refuses two files staged at one path, `node_modules/<package>` included |
+| `version_conflict`, `own_dep` | analysis refuses a closure holding one package at two versions, and a package among its own deps |
+| `unresolved_import` | `esbuild_bundle` fails on an import of a file that is not staged |
+| `integrity_not_sha512`, `integrity_differs` | `npm_package` refuses an integrity that is not `sha512-<base64>`, and a tarball whose sha512 differs from it |
+| `name_differs`, `version_differs` | `npm_package` refuses a `package.json` that states another name or version |
+| `exe_does_not_run` | `npm_package` refuses an `exe` that does not run |
+| `version_differs_node`, `not_node` | `node_dist` refuses a `node` that prints another version, and an archive with no `bin/node` |
+
+The fixtures name the pinned runtime, packages and downloads, which
+[`third_party/node/BUCK`](../../../third_party/node/BUCK) makes visible to
+that package only where the `tests` cell exists. Not planted: a `node` that
+does not run (the farm's workers carry a C++ runtime of their own, so no
+fixture makes the pinned one fail to start), an `exe` that runs and prints
+another version, and a tarball without `package/package.json` (each would
+need a download pinned for the purpose).
+
 ## Limits
 
 - linux x86_64 only: the archive is Node's `linux-x64` build, and the zig

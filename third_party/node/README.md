@@ -69,9 +69,14 @@ package:
   packages `_TEST_ONLY` in [`BUCK`](BUCK) lists, all test-only packages under
   `src/tests` (`//:src_layout` holds that directory to test-only packages). A
   `mojo_bundle`, `conda_package` or any other target elsewhere that names one
-  fails analysis with a visibility error, and so does a `node_test`,
-  `esbuild_bundle` or `c_shared_lib` elsewhere that takes the default runtime,
-  bundler or headers.
+  fails analysis with a visibility error, and so does a `node_test` or
+  `esbuild_bundle` elsewhere that takes the default runtime or bundler, and a
+  `c_shared_lib` elsewhere that names the Node-API headers
+  (`:node[include]`). `c_shared_lib` itself names no Node.js target and
+  builds from any package. The one exception is the package of test 54's
+  planted defects, `tests//negative/node`, which must fail and is in the
+  `tests` cell that only komira's own checkout has: it sees `:node`, the
+  packages and their downloads there.
 - **What a test hands on.** A `node_test`'s only output is its pass marker:
   it provides no runtime, package or library to a target depending on it.
 - **What a package holds.** A `conda_package` holds only a `.mojoc` and a

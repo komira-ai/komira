@@ -17,11 +17,19 @@ _TEST_ONLY = [
     "komira//src/tests/helpers/komira_test_node/...",
 ]
 
+# The planted defects of test 54 (tools/build/tests/negative/node), which must
+# fail: the runtime, the packages and the downloads behind them are visible
+# there too. That package is in the `tests` cell, which only komira's own
+# checkout has; a label naming it would fail to load in a repository that
+# uses komira as a cell, so it is named only when the cell exists.
+_NEGATIVE = ["tests//negative/node:"] if read_root_config("cells", "tests") else []
+
 pinned_file(
     name = NODE["archive"],
     url = NODE["url"],
     sha256 = NODE["sha256"],
     size_bytes = NODE["size"],
+    visibility = _NEGATIVE,
 )
 
 # The C++ runtime `node` links beyond glibc (libstdc++.so.6, libgcc_s.so.1),
@@ -41,6 +49,7 @@ conda_libs(
         "lib/libstdc++.so.6": ":" + pinned_kwargs("linux-x86_64", "libstdcxx")["name"],
     },
     unpacker = "komira//tools/build/toolchains:conda_unpack",
+    visibility = _NEGATIVE,
 )
 
 # `:node`; its sub-target `:node[include]` is the Node-API headers.
@@ -50,7 +59,7 @@ node_dist(
     native_libs = ":native_libs",
     top = NODE["top"],
     version = NODE["version"],
-    visibility = _TEST_ONLY,
+    visibility = _TEST_ONLY + _NEGATIVE,
 )
 
 [pinned_file(
@@ -58,6 +67,7 @@ node_dist(
     url = p["url"],
     sha256 = p["sha256"],
     size_bytes = p["size"],
+    visibility = _NEGATIVE,
 ) for p in NPM]
 
 # One target per package, named by npm_target (`:apache-arrow`,
@@ -70,5 +80,5 @@ node_dist(
     tarball = ":" + p["file"],
     exe = p["exe"],
     deps = [":" + npm_target(d) for d in p["deps"]],
-    visibility = _TEST_ONLY,
+    visibility = _TEST_ONLY + _NEGATIVE,
 ) for p in NPM]

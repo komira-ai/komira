@@ -1,0 +1,183 @@
+load("@komira//third_party/node:pins.bzl", "NODE", "NPM")
+load("@komira//tools/build/node:defs.bzl", "esbuild_bundle", "node_dist", "node_test", "npm_package")
+load(":stand_in.bzl", "stand_in_npm")
+
+# Planted defects for the hermetic Node.js rules (test 54,
+# tools/build/node/README.md): every target here must fail, and
+# tools/build/tests/run_tests.sh requires the text written above each. The
+# targets that work are in src/tests/helpers/komira_test_node. The pinned
+# runtime, packages and downloads are visible here
+# (third_party/node/BUCK, _NEGATIVE): this package exists only in komira's
+# own checkout.
+
+_TSLIB = [p for p in NPM if p["name"] == "tslib"][0]
+
+_FLATBUFFERS = [p for p in NPM if p["name"] == "flatbuffers"][0]
+
+_PKG = "komira//third_party/node:"
+
+# ---- node_test: the verdict -------------------------------------------------
+
+# RED "the negative fixture fails its own assertion": a script that fails
+# fails its node_test.
+node_test(
+    name = "script_fails",
+    src = "fail.js",
+)
+
+# RED "failed, but its stderr does not hold": the script fails, but not with
+# the expected error.
+node_test(
+    name = "error_not_on_stderr",
+    src = "fail.js",
+    expect_error = "text the script never prints",
+)
+
+# RED "exited 0; it was expected to fail": the script passes, but an error was
+# expected.
+node_test(
+    name = "expected_fail_passed",
+    src = "pass.js",
+    expect_error = "any error",
+)
+
+# ---- node_test: analysis ----------------------------------------------------
+
+stand_in_npm(
+    name = "tslib_a",
+    dir = "pass.js",
+    package = "tslib",
+    version = "1.0.0",
+)
+
+stand_in_npm(
+    name = "tslib_b",
+    dir = "pass.js",
+    package = "tslib",
+    version = "2.0.0",
+)
+
+# RED "pass.js is listed twice".
+node_test(
+    name = "src_listed_twice",
+    src = "pass.js",
+    srcs = ["pass.js"],
+)
+
+# RED "data destination pass.js is also a source".
+node_test(
+    name = "data_is_source",
+    src = "pass.js",
+    data = {"pass.js": "fail.js"},
+)
+
+# RED "data destination node_modules/tslib is also a package of deps".
+node_test(
+    name = "data_is_package",
+    src = "pass.js",
+    data = {"node_modules/tslib": "fail.js"},
+    deps = [":tslib_a"],
+)
+
+# RED "tslib is pinned at 1.0.0 and at 2.0.0 in its deps".
+node_test(
+    name = "version_conflict",
+    src = "pass.js",
+    deps = [":tslib_a", ":tslib_b"],
+)
+
+# ---- esbuild_bundle ---------------------------------------------------------
+
+# RED "Could not resolve \"./absent.mjs\"": an import of a file not staged.
+esbuild_bundle(
+    name = "unresolved_import",
+    entry = "bundle/main.mjs",
+)
+
+# RED "bundle/main.mjs is listed twice".
+esbuild_bundle(
+    name = "bundle_listed_twice",
+    entry = "bundle/main.mjs",
+    srcs = ["bundle/main.mjs"],
+)
+
+# ---- npm_package ------------------------------------------------------------
+
+# RED "integrity sha256-AAAA is not sha512-<base64>".
+npm_package(
+    name = "integrity_not_sha512",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = "sha256-AAAA",
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "the pinned integrity": tslib's tarball with flatbuffers' integrity.
+npm_package(
+    name = "integrity_differs",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _FLATBUFFERS["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "does not state \"name\":\"tslib2\"": another name than package.json's.
+npm_package(
+    name = "name_differs",
+    package = "tslib2",
+    version = _TSLIB["version"],
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "does not state \"version\":\"2.8.0\"": another version than
+# package.json's.
+npm_package(
+    name = "version_differs",
+    package = "tslib",
+    version = "2.8.0",
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "tslib: package.json does not run": `exe` names a file that is no
+# executable.
+npm_package(
+    name = "exe_does_not_run",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+    exe = "package.json",
+)
+
+# RED "tslib is in its own deps".
+npm_package(
+    name = "own_dep",
+    package = "tslib",
+    version = "1.0.0",
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+    deps = [":tslib_a"],
+)
+
+# ---- node_dist --------------------------------------------------------------
+
+# RED "the pin says v24.20.0": the pinned archive under another version.
+node_dist(
+    name = "version_differs_node",
+    archive = _PKG + NODE["archive"],
+    native_libs = _PKG + "native_libs",
+    top = NODE["top"],
+    version = "24.20.0",
+)
+
+# RED "holds no package/bin/node": an archive that is no Node.js release
+# (tslib's tarball, whose top directory is `package`).
+node_dist(
+    name = "not_node",
+    archive = _PKG + _TSLIB["file"],
+    native_libs = _PKG + "native_libs",
+    top = "package",
+    version = NODE["version"],
+)
