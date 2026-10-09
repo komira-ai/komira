@@ -74,10 +74,13 @@ thread count N: N = 1, 4 and 16, and every other N a report holds.
 | latency ns | median / p90 |
 | flags | `noisy`: user + system CPU time is below 0.8 x wall x N; `throttled`: the cgroup throttled the run |
 
-A row with more threads than its host's CPUs, and a missing N above the CPUs
-of the variant's first report, read `not measured: <cpus> cpus`. Any other
-missing N reads `missing`. The same variant, function and N in two rows is an
-error. Below the table, one line per report gives its host and build facts.
+A row with more threads than the CPUs of its own report's host reads
+`not measured: <cpus> cpus`. A missing N reads the same when it is above the
+most CPUs of any report holding that variant and function, with that report's
+CPUs and run id (the first such report, in the order given); any other missing
+N reads `missing`, since a host with enough CPUs ran the function. The same
+variant, function and N in two rows is an error. Below the table, one line
+per report gives its host and build facts.
 
 ## Tests
 
@@ -86,7 +89,10 @@ error. Below the table, one line per report gives its host and build facts.
 reader, each schema refusal and the reports that must pass (equal latency
 quantiles among them), the table's numbers and flags (a row at N equal to
 the host's CPUs among them), and the command line. Every comparison and
-range has a case that passes at its boundary and one refused just past it.
+range has a case that passes at its boundary and one refused just past it,
+and every field the check or the table reads has a case where its value
+differs from the other fields' and between rows and reports, so a value
+read from the wrong field, row or report changes the result.
 `report_demo` and `report_wiring` in
 [`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md)
 check the whole path: a report test's `[report]`, and the `bench_table` made

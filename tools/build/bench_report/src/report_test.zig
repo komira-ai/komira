@@ -41,6 +41,39 @@ test "report: good_report" {
     try eq([_]u64{ 30, 10, 20, 30, 40 }, [_]u64{ row.latency.samples, row.latency.min, row.latency.median, row.latency.p90, row.latency.max });
 }
 
+test "report: each_value_from_its_own_key" {
+    // The good report has samples equal to p90 (30) and both throttle counts
+    // 0; here each differs, so a value stored in another field is seen.
+    const r = try F.report(&.{
+        .{ "\"nr_throttled_delta\": 0", "\"nr_throttled_delta\": 1" },
+        .{ "\"throttled_usec_delta\": 0", "\"throttled_usec_delta\": 2500" },
+        .{ "\"samples\": 30", "\"samples\": 31" },
+    });
+    try eq([_]u64{ 1, 2500 }, [_]u64{ r.host.nr_throttled_delta, r.host.throttled_usec_delta });
+    const l = r.rows[0].latency;
+    try eq([_]u64{ 4, 31, 10, 20, 30, 40 }, [_]u64{ l.warmup_discarded, l.samples, l.min, l.median, l.p90, l.max });
+    // Each row is read from its own element: a second row differing in
+    // every field the table reads.
+    const second =
+        \\,
+        \\    {"variant": "w", "function": "per_row", "threads": 2, "rows": 7, "batches": 5, "calls": 5,
+        \\     "wall_ns": 11, "cpu_user_ns": 12, "cpu_sys_ns": 13, "invol_ctx_switches": 14,
+        \\     "memory": {"pss": 15},
+        \\     "latency_ns": {"warmup_discarded": 16, "samples": 30, "min": 17, "median": 18, "p90": 19, "max": 20}}
+        \\  ]
+    ;
+    const two = try F.report(&.{.{ "}}\n  ]", "}}" ++ second }});
+    try eq(@as(usize, 2), two.rows.len);
+    try eqs("v", two.rows[0].variant);
+    const w = two.rows[1];
+    try eqs("w", w.variant);
+    try eqs("per_row", w.function);
+    try eq([_]u64{ 2, 7, 5, 5, 11, 12, 13, 14 }, [_]u64{ w.threads, w.rows, w.batches, w.calls, w.wall_ns, w.cpu_user_ns, w.cpu_sys_ns, w.invol_ctx_switches });
+    try eqs("pss", w.memory[0].k);
+    try eq(@as(u64, 15), w.memory[0].bytes);
+    try eq([_]u64{ 16, 30, 17, 18, 19, 20 }, [_]u64{ w.latency.warmup_discarded, w.latency.samples, w.latency.min, w.latency.median, w.latency.p90, w.latency.max });
+}
+
 test "report: variants_that_pass" {
     // Empty versions are allowed.
     try eq(@as(usize, 0), (try F.report(&.{.{ "{\"python\": \"3.13.9\"}", "{}" }})).build.versions.len);
@@ -157,6 +190,10 @@ test "report: refusals" {
         .{ "\"variant\": \"v\"", "\"variant\": \"/\"", "rows[0].variant: '/' is not a name (a-z 0-9 _ ')" },
         .{ "\"variant\": \"v\"", "\"variant\": \":\"", "rows[0].variant: ':' is not a name (a-z 0-9 _ ')" },
         .{ "\"engine\": \"3\"", "\"engine\": \"/\"", "build.opt_levels.engine: '/' is not one of 0, 1, 2, 3" },
+        // Capitals, refused for their case alone: one inside A-Z and each end.
+        .{ "\"variant\": \"v\"", "\"variant\": \"V\"", "rows[0].variant: 'V' is not a name (a-z 0-9 _ ')" },
+        .{ "\"variant\": \"v\"", "\"variant\": \"A\"", "rows[0].variant: 'A' is not a name (a-z 0-9 _ ')" },
+        .{ "\"variant\": \"v\"", "\"variant\": \"Z\"", "rows[0].variant: 'Z' is not a name (a-z 0-9 _ ')" },
     };
     // Every case runs; each one that passes or fails otherwise is named.
     var bad: usize = 0;

@@ -5,9 +5,12 @@
 //! other N a report holds, ascending. A line's numbers come from its row:
 //! rows/s = rows / wall time, per thread = rows/s / N, efficiency =
 //! rows/s(N) / (N x rows/s(1)), from the same variant and function at N = 1.
-//! A row with more threads than its host's CPUs, and a missing line whose N
-//! is above the CPUs of the variant's first report, read
-//! `not measured: <cpus> cpus`; any other missing line reads `missing`.
+//! A row with more threads than the CPUs of its own report's host reads
+//! `not measured: <cpus> cpus`. A missing line reads the same when its N is
+//! above the most CPUs of any report holding that variant and function, with
+//! that report's CPUs and run id (the first such report, in the order given);
+//! any other missing line reads `missing`, since a host with enough CPUs ran
+//! the function and the line could have been measured.
 //! Flags: `noisy` when user + system CPU time is below 0.8 x wall x N, and
 //! `throttled` when the cgroup throttled the run (nr_throttled went up).
 //! The same variant, function and N in two rows is an error.
@@ -114,7 +117,11 @@ pub fn render(reports: []const R.Report) Fail![]const u8 {
     line(&out, &([_][]const u8{"---"} ** 10));
     for (try groups(reports)) |g| {
         const base: ?f64 = if (g.at(1)) |e| rowsPerS(e.row) else null;
-        const first = g.rows.items[0].rep;
+        // The report of the group with the most CPUs; the first, on a tie.
+        var most = g.rows.items[0].rep;
+        for (g.rows.items) |e| {
+            if (e.rep.host.cpus > most.host.cpus) most = e.rep;
+        }
         var ns = C.list(u64);
         for (g.rows.items) |e| C.push(u64, &ns, e.row.threads);
         for (standard_threads) |n| C.push(u64, &ns, n);
@@ -122,10 +129,10 @@ pub fn render(reports: []const R.Report) Fail![]const u8 {
             var cells = C.list([]const u8);
             for ([_][]const u8{ g.variant, g.function, C.fmt("{d}", .{n}) }) |c| C.push([]const u8, &cells, c);
             const e = g.at(n) orelse {
-                const why = if (n > first.host.cpus) C.fmt("not measured: {d} cpus", .{first.host.cpus}) else "missing";
+                const why = if (n > most.host.cpus) C.fmt("not measured: {d} cpus", .{most.host.cpus}) else "missing";
                 C.push([]const u8, &cells, why);
                 for (dashes5) |d| C.push([]const u8, &cells, d);
-                C.push([]const u8, &cells, first.run_id);
+                C.push([]const u8, &cells, most.run_id);
                 line(&out, cells.items);
                 continue;
             };
