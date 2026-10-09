@@ -839,6 +839,13 @@ def test_install_package_name_grammar() raises:
     bad.append(String("komira X"))
     bad.append(String("komiraA"))
     bad.append(String("a{"))
+    # the neighbours of each range boundary: backtick (96) and ':' (58)
+    bad.append(String("komira`x"))
+    bad.append(String("komira:x"))
+    # '_', '.' and '-' are allowed, but not as the first byte
+    bad.append(String("_a"))
+    bad.append(String(".a"))
+    bad.append(String("-a"))
     for i in range(len(bad)):
         _assert_refused(
             _with_validation(String(_V_OK) + String(" install: \"") + bad[i] + String("\"")),
