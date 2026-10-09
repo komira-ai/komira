@@ -123,6 +123,7 @@ _TESTS_LINTS = [
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
     "//src/kci_cell:deps_lint",
+    "//src/komira_authz_api:deps_lint",
     "//src/komira_aws_lambda_http:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",

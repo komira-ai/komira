@@ -133,7 +133,7 @@ struct _Identify(Middleware, Movable, Deinitable):
         mut ctx: RequestContext,
     ) raises -> Optional[HttpResponse]:
         ctx.principal = Optional[Principal](
-            Principal(String("svc-7")).with_claim(String("role"), String("reader"))
+            Principal(scheme=String("jwt"), subject=String("svc-7")).with_claim(String("role"), String("reader"))
         )
         ctx.attributes.set(String("request-id"), String("r-42"))
         req.headers[String("x-injected")] = String("yes")
