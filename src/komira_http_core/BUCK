@@ -26,6 +26,7 @@ mojo_library(
         "tests/test_L1_h1_length_wrap.mojo",
         "tests/test_L1_tls_alpn.mojo",
         "tests/test_L1_tls_buffered_plaintext_lost_wakeup.mojo",
+        "tests/test_L1_tls_cert_chain_freed.mojo",
         "tests/test_L1_tls_cert_verify.mojo",
         "tests/test_L1_tls_client_construction.mojo",
         "tests/test_L1_tls_client_disable_verify.mojo",
@@ -75,6 +76,10 @@ mojo_library(
     ],
     test_data = {
         "tests/test_L1_tls_buffered_plaintext_lost_wakeup.mojo": [
+            "tests/fixtures/tls/leaf_cert.pem",
+            "tests/fixtures/tls/leaf_key.pem",
+        ],
+        "tests/test_L1_tls_cert_chain_freed.mojo": [
             "tests/fixtures/tls/leaf_cert.pem",
             "tests/fixtures/tls/leaf_key.pem",
         ],
