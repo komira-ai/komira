@@ -273,6 +273,47 @@ def test_expect_ids() raises:
     assert_false(is_probe_case_id(String("a b")))
 
 
+def test_case_id_bad_byte_last() raises:
+    # the bad byte is the last one, so a loop that stops one byte early lets
+    # it through
+    assert_false(is_probe_case_id(String("ab.")))
+    assert_false(is_probe_case_id(String("abC")))
+    assert_false(is_probe_case_id(String("health.")))
+    var head = String("image: \"") + String(_IMAGE) + String("\" timeout_seconds: 60")
+    _assert_refused(
+        _probe_machine(_probe(head + String(" expect: \"health.\""))),
+        String(_WHERE) + String(" has expect 'health.'; a case id is [a-z0-9_-]+"),
+    )
+
+
+def test_case_id_byte_bounds() raises:
+    # just above 'z' (123..126) and non-ASCII: a dropped upper bound on
+    # [a-z] lets these through
+    assert_false(is_probe_case_id(String("a{")))
+    assert_false(is_probe_case_id(String("a|")))
+    assert_false(is_probe_case_id(String("a~")))
+    assert_false(is_probe_case_id(String("aé")))
+    # the neighbours of every other class bound: '`' (96), '/' (47), ':' (58),
+    # ',' (44), '.' (46), '^' (94), '@' (64), 'A', 'Z'
+    assert_false(is_probe_case_id(String("a`")))
+    assert_false(is_probe_case_id(String("a/")))
+    assert_false(is_probe_case_id(String("a:")))
+    assert_false(is_probe_case_id(String("a,")))
+    assert_false(is_probe_case_id(String("a.")))
+    assert_false(is_probe_case_id(String("a^")))
+    assert_false(is_probe_case_id(String("a@")))
+    assert_false(is_probe_case_id(String("aA")))
+    assert_false(is_probe_case_id(String("aZ")))
+    # every bound itself is in [a-z0-9_-]+, so none can be tightened
+    assert_true(is_probe_case_id(String("a")))
+    assert_true(is_probe_case_id(String("z")))
+    assert_true(is_probe_case_id(String("0")))
+    assert_true(is_probe_case_id(String("9")))
+    assert_true(is_probe_case_id(String("_")))
+    assert_true(is_probe_case_id(String("-")))
+    assert_true(is_probe_case_id(String("a-z_09")))
+
+
 # ---- has_probe ---------------------------------------------------------------
 
 
