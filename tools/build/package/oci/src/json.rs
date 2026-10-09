@@ -295,8 +295,11 @@ impl Parser<'_> {
 
     fn hex4(&mut self) -> Result<u32, String> {
         let h = self.s.get(self.i..self.i + 4).ok_or_else(|| self.err("a short \\u escape"))?;
-        let t = std::str::from_utf8(h).map_err(|_| self.err("a bad \\u escape"))?;
-        let v = u32::from_str_radix(t, 16).map_err(|_| self.err("a bad \\u escape"))?;
+        // Four hex digits, nothing else: from_str_radix would take a sign.
+        let mut v = 0;
+        for &b in h {
+            v = v * 16 + (b as char).to_digit(16).ok_or_else(|| self.err("a bad \\u escape"))?;
+        }
         self.i += 4;
         Ok(v)
     }
@@ -443,6 +446,11 @@ mod tests {
             (br#"1e+"#, "no digits in the exponent"),
             (br#""\u12""#, "a short \\u escape"),
             (br#""\u12G4""#, "a bad \\u escape"),
+            // Four bytes that are not UTF-8, and a sign before three hex digits.
+            (b"\"\\u\xff\xff\xff\xff\"", "a bad \\u escape"),
+            (br#""\u+041""#, "a bad \\u escape"),
+            (br#""\u-041""#, "a bad \\u escape"),
+            (br#""\ud83d\u+e00""#, "a bad \\u escape"),
             (br#""\ud83d""#, "a lone high surrogate"),
             (br#""\ud83dx""#, "a lone high surrogate"),
             (br#""\ud83d\u0041""#, "a bad low surrogate"),
@@ -468,5 +476,20 @@ mod tests {
         }
         assert_eq!(parse(b" \t\r\n[ ] ").unwrap(), Value::Arr(vec![]));
         assert_eq!(parse(br#"{ "a" : [ 1 , { } ] }"#).unwrap().to_json(), r#"{"a":[1,{}]}"#);
+    }
+
+    #[test]
+    fn depth_counts_nesting_not_containers() {
+        // 65 siblings of each shape in one array are nested two deep; each
+        // closing bracket, of an empty container too, gives its level back.
+        for one in ["[1]", r#"{"a":1}"#, "{}", "[]"] {
+            let doc = format!("[{}]", vec![one; 65].join(","));
+            assert_eq!(parse(doc.as_bytes()).unwrap().as_arr().map(|a| a.len()), Some(65), "{}", one);
+        }
+        // The deepest level reached twice, one after the other.
+        let d63 = "[".repeat(63) + &"]".repeat(63);
+        assert!(parse(format!("[{},{}]", d63, d63).as_bytes()).is_ok());
+        let d64 = "[".repeat(64) + &"]".repeat(64);
+        assert!(parse(format!("[{}]", d64).as_bytes()).unwrap_err().contains("nested too deep"));
     }
 }
