@@ -1,6 +1,6 @@
 load("@komira//third_party/node:pins.bzl", "NODE", "NPM")
 load("@komira//tools/build/node:defs.bzl", "esbuild_bundle", "node_dist", "node_test", "npm_package")
-load(":stand_in.bzl", "stand_in_npm")
+load(":stand_in.bzl", "stand_in_archive", "stand_in_npm")
 
 # Planted defects for the hermetic Node.js rules (test 54,
 # tools/build/node/README.md): every target here must fail, and
@@ -15,6 +15,15 @@ _TSLIB = [p for p in NPM if p["name"] == "tslib"][0]
 _FLATBUFFERS = [p for p in NPM if p["name"] == "flatbuffers"][0]
 
 _PKG = "komira//third_party/node:"
+
+# tslib's integrity with its last byte changed: the base64 group holding
+# that byte is the last four characters, "<c1><c2>==", and c1 carries its
+# high six bits.
+# The sha512 of the Node.js archive (`sha512-<base64>`), for an npm_package
+# fixture over it.
+_NODE_SHA512 = "sha512-exyTGgmF8h4eV3qLcr2iyXfpDDcBkQL63gY0D8CXiKXQgf5EKhdQnJpvsmaS4DSFPFvQHUgoSWtKScPFYSq1Kg=="
+
+_TSLIB_NEAR = _TSLIB["integrity"][:-4] + ("B" if _TSLIB["integrity"][-4] == "A" else "A") + _TSLIB["integrity"][-3:]
 
 # ---- node_test: the verdict -------------------------------------------------
 
@@ -31,6 +40,14 @@ node_test(
     name = "error_not_on_stderr",
     src = "fail.js",
     expect_error = "text the script never prints",
+)
+
+# RED "failed, but its stderr does not hold: printed on stdout only": the
+# script fails and prints the expected text, but on stdout.
+node_test(
+    name = "error_on_stdout",
+    src = "stdout_only.js",
+    expect_error = "printed on stdout only",
 )
 
 # RED "exited 0; it was expected to fail": the script passes, but an error was
@@ -112,6 +129,25 @@ npm_package(
     tarball = _PKG + _TSLIB["file"],
 )
 
+# RED "is not sha512-<base64>": an empty digest.
+npm_package(
+    name = "integrity_empty",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = "sha512-",
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "is not sha512-<base64>": the right integrity after one more
+# character, so the form is anchored at the start.
+npm_package(
+    name = "integrity_not_leading",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = "x" + _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
 # RED "the pinned integrity": tslib's tarball with flatbuffers' integrity.
 npm_package(
     name = "integrity_differs",
@@ -121,10 +157,41 @@ npm_package(
     tarball = _PKG + _TSLIB["file"],
 )
 
-# RED "does not state \"name\":\"tslib2\"": another name than package.json's.
+# RED "the pinned integrity": tslib's tarball with its own integrity but for
+# the last byte, so every byte of the digest is compared.
+npm_package(
+    name = "integrity_last_byte",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _TSLIB_NEAR,
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "holds no package/package.json": a tarball (the Node.js archive, at its
+# own sha512) whose top directory is not `package`.
+npm_package(
+    name = "no_package_json",
+    package = "node",
+    version = NODE["version"],
+    integrity = _NODE_SHA512,
+    tarball = _PKG + NODE["archive"],
+)
+
+# RED "does not state \"name\":\"tslib2\"": another name than package.json's,
+# which begins with it.
 npm_package(
     name = "name_differs",
     package = "tslib2",
+    version = _TSLIB["version"],
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "does not state \"name\":\"tsli\"": a name package.json's begins with,
+# so the name is compared to its end.
+npm_package(
+    name = "name_prefix",
+    package = "tsli",
     version = _TSLIB["version"],
     integrity = _TSLIB["integrity"],
     tarball = _PKG + _TSLIB["file"],
@@ -136,6 +203,16 @@ npm_package(
     name = "version_differs",
     package = "tslib",
     version = "2.8.0",
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "does not state \"version\":\"2.8\"": a version package.json's begins
+# with, so the version is compared to its end.
+npm_package(
+    name = "version_prefix",
+    package = "tslib",
+    version = "2.8",
     integrity = _TSLIB["integrity"],
     tarball = _PKG + _TSLIB["file"],
 )
@@ -172,6 +249,24 @@ node_dist(
     version = "24.20.0",
 )
 
+# RED "is v24.21.0, the pin says v24.21": a version the node's begins with.
+node_dist(
+    name = "version_prefix_node",
+    archive = _PKG + NODE["archive"],
+    native_libs = _PKG + "native_libs",
+    top = NODE["top"],
+    version = "24.21",
+)
+
+# RED "is v24.21.0, the pin says v4.21.0": a version the node's ends with.
+node_dist(
+    name = "version_suffix_node",
+    archive = _PKG + NODE["archive"],
+    native_libs = _PKG + "native_libs",
+    top = NODE["top"],
+    version = "4.21.0",
+)
+
 # RED "holds no package/bin/node": an archive that is no Node.js release
 # (tslib's tarball, whose top directory is `package`).
 node_dist(
@@ -179,5 +274,72 @@ node_dist(
     archive = _PKG + _TSLIB["file"],
     native_libs = _PKG + "native_libs",
     top = "package",
+    version = NODE["version"],
+)
+
+# Archives built here, top directory `node-x`, for the checks of what the
+# archive holds and of the node in it.
+
+stand_in_archive(
+    name = "archive_no_bin_node",
+    top = "node-x",
+    files = ["LICENSE", "include/node/node_api.h"],
+)
+
+stand_in_archive(
+    name = "archive_no_header",
+    top = "node-x",
+    files = ["LICENSE"],
+    programs = ["bin/node"],
+)
+
+stand_in_archive(
+    name = "archive_node_not_executable",
+    top = "node-x",
+    files = ["LICENSE", "bin/node", "include/node/node_api.h"],
+)
+
+stand_in_archive(
+    name = "archive_node_does_not_run",
+    top = "node-x",
+    files = ["LICENSE", "include/node/node_api.h"],
+    programs = ["bin/node"],
+)
+
+# RED "holds no node-x/bin/node": the Node-API header, but no node.
+node_dist(
+    name = "no_bin_node",
+    archive = ":archive_no_bin_node",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
+# RED "holds no node-x/bin/node or node-x/include/node/node_api.h": a node,
+# but no Node-API header.
+node_dist(
+    name = "no_header",
+    archive = ":archive_no_header",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
+# RED "holds no node-x/bin/node": a bin/node that is not executable.
+node_dist(
+    name = "node_not_executable",
+    archive = ":archive_node_not_executable",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
+# RED "bin/node does not run": a bin/node that exits non-zero (busybox, run
+# as `node`, which is none of its applets).
+node_dist(
+    name = "node_does_not_run",
+    archive = ":archive_node_does_not_run",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
     version = NODE["version"],
 )

@@ -64,23 +64,28 @@ fail, and [`node_tests.sh`](../tests/node_tests.sh) (run by
 | planted defect | what it proves |
 |---|---|
 | `script_fails`: a `node_test` whose script fails | the target fails, with the script's own error: a `node_test` is a check that can fail |
-| `error_not_on_stderr`: `expect_error` text the failing script never prints | `expect_error` requires the text on stderr, not only a non-zero exit |
+| `error_not_on_stderr`: `expect_error` text the failing script never prints | `expect_error` requires its text, not only a non-zero exit |
+| `error_on_stdout`: the failing script prints the `expect_error` text on stdout only | `expect_error` reads stderr alone |
 | `expected_fail_passed`: `expect_error` on a script that passes | `expect_error` requires a non-zero exit |
 | `src_listed_twice`, `bundle_listed_twice`, `data_is_source`, `data_is_package` | analysis refuses two files staged at one path, `node_modules/<package>` included |
 | `version_conflict`, `own_dep` | analysis refuses a closure holding one package at two versions, and a package among its own deps |
 | `unresolved_import` | `esbuild_bundle` fails on an import of a file that is not staged |
-| `integrity_not_sha512`, `integrity_differs` | `npm_package` refuses an integrity that is not `sha512-<base64>`, and a tarball whose sha512 differs from it |
-| `name_differs`, `version_differs` | `npm_package` refuses a `package.json` that states another name or version |
+| `integrity_not_sha512`, `integrity_empty`, `integrity_not_leading` | `npm_package` refuses an integrity that is not `sha512-<base64>`: another algorithm, an empty digest, a valid one after a leading character |
+| `integrity_differs`, `integrity_last_byte` | `npm_package` refuses a tarball whose sha512 differs from the integrity, in every byte or in the last byte only |
+| `no_package_json` | `npm_package` refuses a tarball (the Node.js archive, at its own sha512) with no `package/package.json` |
+| `name_differs`, `version_differs`, `name_prefix`, `version_prefix` | `npm_package` refuses a `package.json` that states another name or version: one that differs in its last character, one that extends the pin (`tslib2`), and one the pin is a prefix of (`tsli`, `2.8` for tslib 2.8.1) |
 | `exe_does_not_run` | `npm_package` refuses an `exe` that does not run |
-| `version_differs_node`, `not_node` | `node_dist` refuses a `node` that prints another version, and an archive with no `bin/node` |
+| `version_differs_node`, `version_prefix_node`, `version_suffix_node` | `node_dist` refuses a `node` that prints another version: `24.20.0`, `24.21` (a prefix of `24.21.0`) and `4.21.0` (a suffix) |
+| `not_node`, `no_bin_node`, `no_header`, `node_not_executable` | `node_dist` refuses an archive that is no Node.js release, one with the Node-API header but no `bin/node`, one with `bin/node` but no header, and one whose `bin/node` is not executable |
+| `node_does_not_run` | `node_dist` refuses a `bin/node` that exits non-zero (busybox under the name `node`) |
 
 The fixtures name the pinned runtime, packages and downloads, which
 [`third_party/node/BUCK`](../../../third_party/node/BUCK) makes visible to
-that package only where the `tests` cell exists. Not planted: a `node` that
-does not run (the farm's workers carry a C++ runtime of their own, so no
-fixture makes the pinned one fail to start), an `exe` that runs and prints
-another version, and a tarball without `package/package.json` (each would
-need a download pinned for the purpose).
+that package only where the `tests` cell exists; the archives of
+`no_bin_node`, `no_header`, `node_not_executable` and `node_does_not_run`
+are built in that package (`stand_in_archive`). Not planted: an `exe` that
+runs and prints another version (its package must pass the integrity check
+first, so it would need a download pinned for the purpose).
 
 ## Limits
 
