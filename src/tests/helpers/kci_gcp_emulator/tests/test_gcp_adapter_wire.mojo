@@ -14,6 +14,14 @@
 #     mark and the adoption mark, and NO run-id line;
 #   * a job's adoption keeps a label a human wrote, and its release drops
 #     every kci label and keeps that one;
+#   * removing kci's membership (roles_off, a destroy) keeps every other
+#     member of the same role, on an account's policy and the project's;
+#   * a job's long-running operation not yet done is read again after each
+#     wait of the bounded backoff until it is, and one that never ends
+#     stops the apply after twelve reads;
+#   * a job's adoption and release keep the fields kci does not model;
+#   * another cell's account holding a mapped role on the project is never
+#     listed, nor reported leftover;
 #   * whoami names the emulator's principal;
 #   * gcp lowers as the gcp fake does, byte for byte.
 # =============================================================================
@@ -23,6 +31,9 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from kci_cloud import (
     Catalog,
+    create_labels,
+    description_lines,
+    destroy_resources,
     CellContext,
     Clouds,
     ProviderShape,
@@ -34,8 +45,16 @@ from kci_cloud import (
     uses_role,
 )
 from kci_cloud_fake import FakeCloud
-from kci_cloud_gcp import ROLE_ACCOUNT_VIEWER, ROLE_LOG_WRITER, account_email, account_member, derived_name, job_resource
-from kci_reconciler import CellScope, Creds, InMemoryStateStore, Provenance
+from kci_cloud_gcp import (
+    ROLE_ACCOUNT_VIEWER,
+    ROLE_LOG_WRITER,
+    account_email,
+    account_member,
+    account_resource,
+    derived_name,
+    job_resource,
+)
+from kci_reconciler import CellScope, Creds, InMemoryStateStore, OwnerStamp, Provenance, RETAIN_DELETE
 from kci_resource_proto.resource import Resource, ResourceList
 from komira_json import JsonValue
 from komira_proto_codec import decode_json
@@ -161,12 +180,22 @@ def test_an_adoption_writes_no_run_id() raises:
     assert_equal(emu[].creates_of(email), 0, "adopted, not created")
 
 
+def _unmodelled_kept(emu: ArcPointer[GcpEmulator], name: String, when: String) raises:
+    """The fields kci does not model, planted on the job, still stand."""
+    var j = emu[].job_index(name)
+    var t = emu[].jobs[j].body.get("template")
+    assert_equal(t.get("parallelism").text, "3", String("the parallelism ") + when)
+    var c = t.get("template").get("containers").element_at(0)
+    assert_equal(c.get("workingDir").as_string(), "/srv", String("the working directory ") + when)
+    assert_equal(c.get("image").as_string(), "sha256:a1")
+
+
 def test_a_job_adoption_and_release_keep_a_human_label() raises:
     var emu = ArcPointer[GcpEmulator](GcpEmulator())
     var name = job_resource(String(_PROJECT), String("europe-west1"), String("jobadopt"))
     var body = parse_object(
-        String('{"name":"') + name + String('","labels":{"owner-team":"data"},"template":{"template":{"containers":[')
-        + String('{"image":"sha256:a1","resources":{"limits":{"cpu":"1000m","memory":"512Mi"}}}],')
+        String('{"name":"') + name + String('","labels":{"owner-team":"data"},"template":{"parallelism":3,"template":{"containers":[')
+        + String('{"image":"sha256:a1","workingDir":"/srv","resources":{"limits":{"cpu":"1000m","memory":"512Mi"}}}],')
         + String('"maxRetries":0,"timeout":"600s"}}}')
     )
     emu[].jobs.append(EmuJob(name, body^))
@@ -182,6 +211,7 @@ def test_a_job_adoption_and_release_keep_a_human_label() raises:
     assert_equal(labels.get("owner-team").as_string(), "data", "an adoption keeps the labels it was not handed")
     assert_false(labels.has("kci-run-id"))
     assert_equal(emu[].creates_of(name), 0, "adopted, not created")
+    _unmodelled_kept(emu, name, "after the adoption's update")
     # Its resource leaves the list: the job is released, not deleted.
     _apply(target, _ctx(), String('{"resource":[]}'))
     j = emu[].job_index(name)
@@ -189,6 +219,7 @@ def test_a_job_adoption_and_release_keep_a_human_label() raises:
     var left = emu[].jobs[j].body.get("labels")
     assert_equal(left.num_members(), 1, left.serialize())
     assert_equal(left.get("owner-team").as_string(), "data")
+    _unmodelled_kept(emu, name, "after the release")
 
 
 def test_a_dropped_resource_s_nodes_are_leftover() raises:
@@ -202,6 +233,16 @@ def test_a_dropped_resource_s_nodes_are_leftover() raises:
     var reg = Clouds(Catalog.v1())
     reg.add(describe(target))
     var store = InMemoryStateStore()
+    # An account of ANOTHER cell of the same machine, holding the log writer
+    # role on the project: never this cell's, so never listed.
+    var ghost_email = account_email(String("ghost-elsewhere"), String(_PROJECT))
+    var ghost = description_lines(
+        create_labels(OwnerStamp(String("shop"), String("staging-elsewhere"), String("ghost"), String("identity")), RETAIN_DELETE)
+    )
+    emu[].accounts.append(EmuAccount(String("ghost-elsewhere"), ghost_email, String(""), ghost, String("77"), True))
+    var p = emu[].policy_of(String("projects/") + _PROJECT)
+    emu[].policies[p].add(account_member(ghost_email), String(ROLE_LOG_WRITER))
+    before = emu[].live_count()
     var without = String('{"resource":[{"id":"peer","serviceAccount":{}},')
     without += String('{"id":"runner","serviceAccount":{},"uses":[{"target":{"resource":"peer"},"access":"DESCRIBE"}]}]}')
     var out = apply_resources(reg, target, _ctx(), _list(without), Creds.none(), store)
@@ -214,6 +255,85 @@ def test_a_dropped_resource_s_nodes_are_leftover() raises:
     var binding = String("nightly/") + uses_role(String("nightly"), String("cell/LOGS"))
     assert_true(left.find(String(",") + binding + String(",")) >= 0, String("the project's binding: ") + left)
     assert_equal(emu[].live_count(), before, "a leftover is reported, never deleted")
+    assert_true(left.find(",ghost/") < 0, String("another cell's binding is not this cell's: ") + left)
+    var owned = target.list_owned(Creds.none(), _ctx().scope)
+    for i in range(len(owned)):
+        assert_true(owned[i].id.find(ghost_email) < 0, String("listed as this cell's: ") + owned[i].owner_node)
+    assert_equal(_members(emu, String("projects/") + _PROJECT, String(ROLE_LOG_WRITER)).find(ghost_email) >= 0, True)
+
+
+def _graph(uses: Bool) -> String:
+    var runner = String('{"id":"runner","serviceAccount":{},"uses":[{"target":{"resource":"peer"},"access":"DESCRIBE"}]}') if uses else String('{"id":"runner","serviceAccount":{}}')
+    return String('{"resource":[{"id":"peer","serviceAccount":{}},') + runner + String("]}")
+
+
+def test_a_removal_keeps_the_role_s_other_members() raises:
+    # A human and an account of another project hold the SAME roles kci's
+    # bindings hold, on peer's policy and on the project's. Removing kci's
+    # membership (roles_off, then a destroy) takes kci's member out of the
+    # role and leaves every other member in it.
+    var emu = ArcPointer[GcpEmulator](GcpEmulator())
+    var target = EmulatedGcpCloud(emu)
+    var reg = Clouds(Catalog.v1())
+    reg.add(describe(target))
+    var store = InMemoryStateStore()
+    var on = apply_resources(reg, target, _ctx(), _list(_graph(True)), Creds.none(), store)
+    assert_true(not on.error, on.error.value() if on.error else String(""))
+    var human = String("user:human@demo-project.example")
+    var foreign = account_member(account_email(String("someone-else"), String("other-project")))
+    var peer = account_resource(String(_PROJECT), _email(String("peer/identity")))
+    var project = String("projects/") + _PROJECT
+    var planted = List[String]()
+    planted.append(human)
+    planted.append(foreign)
+    for i in range(len(planted)):
+        var pp = emu[].policy_of(peer)
+        emu[].policies[pp].add(planted[i], String(ROLE_ACCOUNT_VIEWER))
+        var pj = emu[].policy_of(project)
+        emu[].policies[pj].add(planted[i], String(ROLE_LOG_WRITER))
+    var off = apply_resources(reg, target, _ctx(), _list(_graph(False)), Creds.none(), store)
+    assert_true(not off.error, off.error.value() if off.error else String(""))
+    var viewers = _members(emu, peer, String(ROLE_ACCOUNT_VIEWER))
+    assert_true(viewers.find(account_member(_email(String("runner/identity")))) < 0, String("runner's binding is gone: ") + viewers)
+    assert_true(viewers.find(human) >= 0, String("the human viewer stays: ") + viewers)
+    assert_true(viewers.find(foreign) >= 0, String("the foreign viewer stays: ") + viewers)
+    _ = destroy_resources(reg, target, _ctx(), _list(_graph(False)), Creds.none(), store)
+    var writers = _members(emu, project, String(ROLE_LOG_WRITER))
+    assert_true(writers.find(account_member(_email(String("peer/identity")))) < 0, String("kci's writers are gone: ") + writers)
+    assert_true(writers.find(human) >= 0, String("the human writer stays: ") + writers)
+    assert_true(writers.find(foreign) >= 0, String("the foreign writer stays: ") + writers)
+
+
+def test_an_operation_not_yet_done_is_polled_until_it_is() raises:
+    # Every job operation is done only at its third read: the create is
+    # read three times, waiting 500, 1000 and 2000 ms (never slept: the
+    # target's sleeper records).
+    var emu = ArcPointer[GcpEmulator](GcpEmulator())
+    emu[].op_polls = 3
+    var target = EmulatedGcpCloud(emu)
+    _apply(target, _ctx(), _base())
+    assert_equal(emu[].op_reads, 3)
+    var waits = target.sleeps()
+    assert_equal(len(waits), 3)
+    assert_equal(waits[0], 500)
+    assert_equal(waits[1], 1000)
+    assert_equal(waits[2], 2000)
+
+
+def test_an_operation_that_never_ends_fails_the_apply() raises:
+    # An operation still not done after the last read stops the apply: the
+    # job the call already made does not pass for one that settled.
+    var emu = ArcPointer[GcpEmulator](GcpEmulator())
+    emu[].op_polls = 1000
+    var target = EmulatedGcpCloud(emu)
+    var why = String("(it applied)")
+    try:
+        _apply(target, _ctx(), _base())
+    except e:
+        why = String(e)
+    assert_true(why.find("did not finish after 12 reads of its operation") >= 0, why)
+    assert_equal(emu[].op_reads, 12)
+    assert_equal(len(target.sleeps()), 12)
 
 
 def test_whoami_names_the_token_s_principal() raises:
@@ -242,6 +362,12 @@ def main() raises:
     test_a_job_adoption_and_release_keep_a_human_label()
     print("test_a_dropped_resource_s_nodes_are_leftover")
     test_a_dropped_resource_s_nodes_are_leftover()
+    print("test_a_removal_keeps_the_role_s_other_members")
+    test_a_removal_keeps_the_role_s_other_members()
+    print("test_an_operation_not_yet_done_is_polled_until_it_is")
+    test_an_operation_not_yet_done_is_polled_until_it_is()
+    print("test_an_operation_that_never_ends_fails_the_apply")
+    test_an_operation_that_never_ends_fails_the_apply()
     print("test_whoami_names_the_token_s_principal")
     test_whoami_names_the_token_s_principal()
     print("test_gcp_lowers_as_the_gcp_fake")
