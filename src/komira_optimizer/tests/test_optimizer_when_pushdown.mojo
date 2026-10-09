@@ -6,7 +6,7 @@
 # `komira_plan_ir.plan_helpers`) and `_substitute_col_refs` did NOT have
 # EXPR_WHEN arms — a projection-pushdown pass would silently prune
 # any column referenced ONLY inside a `when_then_else(...)` expression, and
-# Rule 13 (absorb-expr-into-agg, not in this tree) would silently leave un-substituted
+# Rule 13 (absorb-expr-into-agg) would silently leave un-substituted
 # col_refs inside CASE/WHEN children. This regression test pins the fix.
 #
 # Surfaced by the TPC-H Q8 plan shape:
@@ -58,8 +58,7 @@ from komira_plan_ir.plan_helpers import (
     _collect_expr_columns,
     _expr_fingerprint,
 )
-# Rule 13's substitution (Rule 13 is not in this tree) is now
-# `substitute_project_refs`:
+# Rule 13's substitution is now `substitute_project_refs`:
 # the old `plan_helpers._substitute_col_refs`
 # copy returned a MathFn / string / window node as built and is deleted.
 from komira_optimizer.optimizer_project_merge_guard import (

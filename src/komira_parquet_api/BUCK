@@ -20,6 +20,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   expected value is written by hand. It also holds the PageHeader.crc and
 #   Statistics.nan_count docs to the spec's fields 4 and 9, and
 #   ColumnMetaData.key_value_metadata to field 8.
+# - test_enum_unknown_values: every enum written for each byte 0..255 through
+#   both constructors: the defined values by name, every other value (the
+#   Encoding gap at 1 included) as `<Type>(<n>)`.
 # - test_hll_footer: the registers' key-value encoding (round trip, the
 #   pinned alphabet, every malformed value refused, other keys ignored) and
 #   the field 9 rule (only i64 is nan_count; the old binary is not).
@@ -42,6 +45,7 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_enum_unknown_values.mojo",
         "tests/test_hll_footer.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_parquet_types.mojo",

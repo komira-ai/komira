@@ -6,15 +6,15 @@
 #
 # ⛔⛔ THIS PASS IS HALF OF A PAIR AND IS A PESSIMISATION ON ITS OWN.
 # ==================================================================
-# It deliberately emits ONE `SUM(x)` AND ONE `COUNT(x)` PER MATCHED AGGREGATE,
-# i.e. it TURNS N AGGREGATES INTO 2N. It is designed to run immediately before
-# a pass that collapses structurally-identical aggregates (a common-aggregate
-# dedup, `dedup_common_aggregates`, not in this tree): for ClickBench cbq29
-# (`SELECT sum(rw), sum(rw+1), ... sum(rw+89)`) this pass produces **180**
-# aggregates and such a dedup collapses them to **2**. komira_optimizer has no
+# It emits ONE `SUM(x)` PER MATCHED AGGREGATE plus ONE `COUNT(x)` per non-zero
+# offset, i.e. UP TO 2N AGGREGATES WHERE THERE WERE N. What makes that a win is
+# `dedup_common_aggregates` (`optimizer_agg_cse.mojo`), designed to run
+# immediately after and collapse the structurally-identical ones: for ClickBench
+# cbq29 (`SELECT sum(rw), sum(rw+1), ... sum(rw+89)`) this pass produces **179**
+# aggregates and the dedup collapses them to **2**. komira_optimizer has no
 # driver that orders its passes; the order this pass is designed for is this
-# pass, then the aggregate dedup. Without the dedup the plan carries 2N
-# aggregates where it had N.
+# pass, then the dedup. Without the dedup the plan carries up to 2N aggregates
+# where it had N; do not fund, move or gate one without the other.
 #
 # WHY IT IS WORTH ANYTHING AT ALL
 # ===============================

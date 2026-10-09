@@ -1,12 +1,12 @@
 # =============================================================================
-# test_resource_graph_golden_bytes.mojo: the bytes of eight resource graphs,
+# test_resource_graph_golden_bytes.mojo: the bytes of ten resource graphs,
 # frozen, so protoc can read them.
 # =============================================================================
 #
 # The other tests of this package hold `kci.resource.v1` to bytes written by
 # hand here and to this package's own decoder. Neither is read by anything
 # that did not come from this repository. This file freezes the bytes this
-# package's encoder writes for eight composed graphs, as `.hex` fixtures; the
+# package's encoder writes for ten composed graphs, as `.hex` fixtures; the
 # `resource_graph_fixtures` check in BUCK has protoc (which learned the format
 # from `resource.proto` alone) decode those bytes to the committed `.txtpb`,
 # and encode that text to the committed `.canonical.hex`. A symmetric defect,
@@ -15,7 +15,7 @@
 #
 # THE CORPUS. Each graph is authored as proto3 JSON, the form an author
 # writes and the one kci reads (`decode_json[ResourceList]`), then encoded
-# with `encode_proto`. Between them the eight graphs set every field of every
+# with `encode_proto`. Between them the ten graphs set every field of every
 # message of `resource.proto` at least once, to a value other than its
 # default (a field at its default is not on protoc's side of the wire, so it
 # would check nothing), and every `Resource.body` arm:
@@ -63,6 +63,15 @@
 #                   address, and a service whose outbound connections leave
 #                   through the subnet (`Service.network`) and that reads
 #                   the address's ADDRESS.
+#   registry_graph  a registry of OCI artifacts kept on delete (every
+#                   `Registry` field), a container job that pushes to it
+#                   (WRITE) and reads its ADDRESS, and an identity that
+#                   pulls from it (READ) through a grant.
+#   metadata_graph  a bucket kept on delete under a cloud name of the
+#                   author's, adopted, with two labels (every metadata field
+#                   of `Resource`), an identity with one label and a
+#                   written-empty cloud name (presence: protoc must print
+#                   it), and a grant that lets it READ the bucket.
 #
 # Map keys are authored in sorted order. protoc prints and re-encodes a map
 # sorted by key, and this encoder writes a map in insertion order, so a
@@ -316,6 +325,33 @@ comptime _NETWORK_GRAPH = (
     + "]}"
 )
 
+comptime _REGISTRY_GRAPH = (
+    '{"resource":['
+    # Every Registry field, kept on delete.
+    + '{"id":"images","retention":"KEEP","registry":{"format":"OCI"}},'
+    # A container job that pushes to it and reads its ADDRESS.
+    + '{"id":"builder","uses":[{"target":{"resource":"images"},"access":"WRITE"}],'
+    + '"containerJob":{"image":{"digest":"sha256:5e1f0a22"},'
+    + '"env":{"REGISTRY":{"ref":{"resource":"images","standard":"ADDRESS"}}}}},'
+    # An identity that pulls from it, through a grant.
+    + '{"id":"puller","serviceAccount":{}},'
+    + '{"id":"pull-images","grant":{"principal":{"resource":"puller"},'
+    + '"target":{"resource":"images"},"access":"READ"}}'
+    + "]}"
+)
+
+comptime _METADATA_GRAPH = (
+    '{"resource":['
+    # Every metadata field of Resource, on a bucket kept on delete.
+    + '{"id":"logs","retention":"KEEP","physicalName":"acme-logs",'
+    + '"labels":{"team":"data","tier":"gold"},"adopt":true,"bucket":{}},'
+    # A written-empty cloud name (presence) and one label.
+    + '{"id":"reader","physicalName":"","labels":{"team":"data"},"serviceAccount":{}},'
+    + '{"id":"read-logs","grant":{"principal":{"resource":"reader"},'
+    + '"target":{"resource":"logs"},"access":"READ"}}'
+    + "]}"
+)
+
 
 # =============================================================================
 # The `.hex` format (tools/build/mojo/README.md, "Wire fixtures"): lowercase,
@@ -544,6 +580,14 @@ def test_network_graph_bytes_are_frozen() raises:
     _assert_frozen("network_graph", _NETWORK_GRAPH, 4)
 
 
+def test_registry_graph_bytes_are_frozen() raises:
+    _assert_frozen("registry_graph", _REGISTRY_GRAPH, 4)
+
+
+def test_metadata_graph_bytes_are_frozen() raises:
+    _assert_frozen("metadata_graph", _METADATA_GRAPH, 3)
+
+
 def main() raises:
     print("test_resource_graph_golden_bytes")
     _print_golden("service_graph", _SERVICE_GRAPH)
@@ -554,6 +598,8 @@ def main() raises:
     _print_golden("compute_graph", _COMPUTE_GRAPH)
     _print_golden("trigger_graph", _TRIGGER_GRAPH)
     _print_golden("network_graph", _NETWORK_GRAPH)
+    _print_golden("registry_graph", _REGISTRY_GRAPH)
+    _print_golden("metadata_graph", _METADATA_GRAPH)
     test_service_graph_bytes_are_frozen()
     test_job_bucket_graph_bytes_are_frozen()
     test_messaging_graph_bytes_are_frozen()
@@ -562,4 +608,6 @@ def main() raises:
     test_compute_graph_bytes_are_frozen()
     test_trigger_graph_bytes_are_frozen()
     test_network_graph_bytes_are_frozen()
+    test_registry_graph_bytes_are_frozen()
+    test_metadata_graph_bytes_are_frozen()
     print("ALL kci.resource.v1 GRAPH GOLDEN-BYTES TESTS PASSED")

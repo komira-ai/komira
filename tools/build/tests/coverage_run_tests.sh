@@ -11,7 +11,12 @@
 #      covlib_forced equals its golden file: a covered function, an arm no
 #      test takes, a `# cov: unreachable` line, all under
 #      tools/build/tests/functional/coverage/; and covgen's, whose generated
-#      source is not measured); :census (covcheck's gate in
+#      source is not measured, and covgenmany's, whose twelve long-named
+#      generated sources are not either: cov_run.sh once named them all in
+#      one kcov argument of 2048 bytes or more, which kcov fails on);
+#      :covgentest_report and :covgentest_result (a generated test has its
+#      coverage run, and its gate counts what it runs and sets it aside);
+#      :census (covcheck's gate in
 #      census mode reads them: 7 of 9 lines, 1 exempt, the tests set aside);
 #      :aggregates_tests and :aggregates_all ([coverage][tests] and
 #      [coverage]); covenv[coverage] (test_env, data, PATH, HOME, TMPDIR, no
@@ -38,16 +43,31 @@
 #      lostdir[coverage] red (a binary naming the sources by another
 #      directory than the run stages is refused before kcov runs); clash and
 #      clash_buckout red at analysis (data where a run stages sources);
-#      refused[coverage] red (kcov refused by the executor is said so).
+#      refused[coverage] red (kcov refused by the executor is said so);
+#      covreadme[coverage][tests][readme] and covreadme_none's (a README's
+#      examples, and a README with none, run under kcov like a test) and
+#      covmt_cov_gate[tests] (the mojo_test targets covmt names in
+#      coverage_tests, one in another package, run against its sources);
+#      longarg[coverage] red (a cov_run.sh copy whose limit on a kcov
+#      argument is 64 bytes refuses the run before kcov starts, naming it);
+#      shared libraries: covso's driver report and census gate, covso_skip
+#      red with kcov skipping the loaded library, the examples' [coverage]
+#      with the switch, coverage_shared_lib.sh (no release action moves),
+#      and covso_gen's run red (every source generated: nothing to check).
 #      The release actions with the switch on: coverage_keys.sh (test 41).
 
 expect_green coverage_runs tests//functional/coverage:numbers tests//functional/coverage:census \
+    tests//functional/coverage:covgentest_report tests//functional/coverage:covgentest_result \
     tests//functional/coverage:aggregates_tests tests//functional/coverage:aggregates_all \
     tests//functional/coverage:covenv 'tests//functional/coverage:covenv[coverage]' \
-    tests//functional/coverage:covgen 'tests//functional/coverage:branchlib[coverage][tests][test_gate_env]' \
+    tests//functional/coverage:covgen tests//functional/coverage:covgenmany \
+    'tests//functional/coverage:branchlib[coverage][tests][test_gate_env]' \
     tests//negative/coverage:tracer tests//negative/coverage:lost \
     tests//negative/coverage:orphan 'tests//negative/coverage:orphan[coverage]' \
-    tests//negative/coverage:linger 'tests//negative/coverage:linger[coverage][tests][test_brief]'
+    tests//negative/coverage:linger 'tests//negative/coverage:linger[coverage][tests][test_brief]' \
+    'tests//functional/coverage/covreadme:covreadme[coverage][tests][readme]' \
+    'tests//functional/coverage/covreadme_none:covreadme_none[coverage][tests][readme]' \
+    'tests//functional/coverage:covmt_cov_gate[tests]'
 expect_red coverage_run_tracer "test_tracer: traced, TracerPid" 'tests//negative/coverage:tracer[coverage][tests][test_tracer]'
 expect_red coverage_run_lost "lostlib/value.mojo': no --map or --exclude prefix covers it" 'tests//negative/coverage:lost[coverage][tests][test_lost]'
 expect_red coverage_run_data_clash 'collides with its source, which a coverage run stages at "tests/test_lost.mojo"' tests//negative/coverage:clash
@@ -66,6 +86,7 @@ else
 fi
 expect_red coverage_run_lostdir "this run stages them at buck-out/v2/art/tests/negative/coverage/__lostdir__/" 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'
 expect_red coverage_run_refused "kcov could not trace the test" 'tests//negative/coverage:refused[coverage][tests][test_one]'
+expect_red coverage_run_longarg "is longer than kcov takes (64)" 'tests//negative/coverage:longarg[coverage][tests][test_lost]'
 expect_red coverage_run_lingers "The test left processes running or did not finish within 20 s under kcov" 'tests//negative/coverage:linger[coverage][tests][test_lingers]'
 # The limit's kill reached the whole group: cov_run.sh says when a process
 # of it survived (a kill of gate_runner alone, its pid without the '-').
@@ -78,6 +99,30 @@ else
     pass coverage_run_lingers_group
 fi
 expect_red coverage_run_proc "/proc is not readable as this run's own" 'tests//negative/coverage:lingerproc[coverage][tests][test_lingers]'
+
+# Shared libraries (mojo_shared_lib): each driver of gate_srcs runs under
+# kcov with the library's coverage build, which kcov measures as the driver
+# loads it. covso's report and census gate (tests//functional/coverage);
+# covso_skip's published file is green and its run red with kcov told to skip
+# the libraries a driver loads (the report must hold the library's source);
+# the example shared libraries, coverage from the switch (drivers at the
+# package's top, a force-loaded C library, a version script); and
+# coverage_shared_lib.sh: the switch moves no release action of a shared
+# library, and its published file waits for no coverage action.
+expect_green coverage_run_shared_lib tests//functional/coverage:covso_report tests//functional/coverage:covso_result \
+    tests//negative/coverage:covso_skip
+expect_red coverage_run_shared_lib_skip "no class for tools/build/tests/negative/coverage/covso/covso_one.mojo (--must-contain)" \
+    'tests//negative/coverage:covso_skip[coverage][tests][covso_one_driver]'
+expect_red coverage_run_shared_lib_generated "cov_run: --solib with no --solib-src: every source of the shared library covso_one.so is generated" \
+    'tests//negative/coverage:covso_gen[coverage][tests][covso_one_driver]'
+expect_green coverage_run_shared_lib_switch 'komira//tools/build/examples/shared_lib:spike[coverage]' \
+    'komira//tools/build/examples/shared_lib:plain[coverage]' 'komira//tools/build/examples/shared_lib:spike_exact[coverage]' \
+    -c komira.coverage=true
+if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/coverage_shared_lib.sh" "$LOG" > "$LOG/coverage_shared_lib.log" 2>&1; then
+    pass "$(grep -o 'PASS  coverage shared lib: .*' "$LOG/coverage_shared_lib.log" | cut -c 7-)"
+else
+    fail "$(grep -o 'FAIL  coverage shared lib: .*' "$LOG/coverage_shared_lib.log" | cut -c 7- | cut -c 1-400) (see $LOG/coverage_shared_lib.log)"
+fi
 
 # 46
 # shellcheck source=tools/build/tests/coverage_gate_tests.sh

@@ -47,6 +47,16 @@
 # addresses nothing.
 # A role the file turned off is the same node with `wanted` False.
 #
+# A NAMED PRIMARY OBJECT (`physical_name`, a desired field kci writes on the
+# primary node) is part of the digest like any field, and its outputs follow
+# the name: a bucket's, a table's, a secret's, a queue's or a topic's NAME is
+# the name itself (its ADDRESS built on it), an account's NAME is
+# `<name>@identity.fake`, a service's URL and HOST are `fake://<name>` and
+# `<name>.fake`. The fake keeps every object at its node id (it does not
+# look an object up by name): the object at a named node IS the object of
+# that name. The create, or the adoption, records the name with the object
+# (`FakeStore.names`), and `list_owned` reports it; an update never renames.
+#
 # A node keeps the retention kci set on the lowered node. Its object carries
 # the retention mark `kci-retention=<retain|delete>` from its create call on,
 # and the mark follows the node: retention is part of the node's digest, so a
@@ -197,6 +207,9 @@ struct FakeNode(EngineResource, Movable, Deinitable):
     var _outs: List[String]
     """`out.<OUTPUT>` fields in order, two entries each: the OUTPUT name,
     then its value."""
+    var _name: String
+    """The author's cloud name of this node's object (`physical_name`), or
+    empty."""
     var _retention: Int
     var _deps: List[String]
     var _refs: List[InputRef]
@@ -222,6 +235,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             if k.startswith("out."):
                 self._outs.append(String(k[byte = 4 : k.byte_length()]))
                 self._outs.append(node.desired[i].value.copy())
+        self._name = node.field(String("physical_name"))
         self._retention = node.retention
         self._deps = node.depends_on.copy()
         self._refs = node.inputs.copy()
@@ -237,9 +251,16 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             d += String("|") + self._refs[i].field + String("=") + self._bound[i]
         return d^
 
+    def _base(self) -> String:
+        """What this node's outputs are built on: its object's name, else
+        its owner's id."""
+        if self._name.byte_length() > 0:
+            return self._name.copy()
+        return self._owner.copy()
+
     def _url(self) -> String:
         if self._serves:
-            return fake_url(self._owner)
+            return fake_url(self._base())
         return String("")
 
     def logical_id(mut self) -> String:
@@ -296,6 +317,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             self._url(),
             retain_labels(self._retention),
             String(""),
+            self._name,
         )
         return self._id.copy()
 
@@ -305,7 +327,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         var labels = create_labels(stamp, self._retention)
         var note = stamp.provenance.run_id + String("@") + stamp.provenance.revision
         self._store[].create(
-            self._id, self._kind, self._desired_digest(), self._url(), labels, note
+            self._id, self._kind, self._desired_digest(), self._url(), labels, note, self._name
         )
         return self._id.copy()
 
@@ -316,7 +338,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         # No validation-run label: this run did not create the object.
         var labels = standard_label_rule(stamp)
         labels.extend(retain_labels(self._retention))
-        self._store[].relabel(physical_id, labels, note)
+        self._store[].relabel(physical_id, labels, note, self._name)
 
     def update(mut self, creds: Creds) raises:
         var mark = retain_labels(self._retention)
@@ -346,22 +368,25 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             for i in range(0, len(self._outs), 2):
                 o.set(self._outs[i], self._outs[i + 1])
             return o^
+        var named = self._name.byte_length() > 0
         if self._stores:
-            o.set(String("NAME"), fake_bucket_name(self._owner))
-            o.set(String("ADDRESS"), fake_bucket_address(self._owner))
+            var n = self._name.copy() if named else fake_bucket_name(self._owner)
+            o.set(String("NAME"), n)
+            o.set(String("ADDRESS"), String("fake-bucket://") + n)
             return o^
         if self._account:
-            o.set(String("NAME"), fake_account_name(self._owner))
+            o.set(String("NAME"), fake_account_name(self._base()))
             return o^
         if self._named:
-            o.set(String("NAME"), fake_table_name(self._owner))
+            o.set(String("NAME"), self._name.copy() if named else fake_table_name(self._owner))
             return o^
         if self._secret_named:
-            o.set(String("NAME"), fake_secret_name(self._owner))
+            o.set(String("NAME"), self._name.copy() if named else fake_secret_name(self._owner))
             return o^
         if self._addressed.byte_length() > 0:
-            o.set(String("NAME"), fake_messaging_name(self._owner, self._addressed))
-            o.set(String("ADDRESS"), fake_messaging_address(self._owner, self._addressed))
+            var n = self._name.copy() if named else fake_messaging_name(self._owner, self._addressed)
+            o.set(String("NAME"), n)
+            o.set(String("ADDRESS"), String("fake-") + self._addressed + String("://") + n)
             return o^
         if not self._serves:
             return o^
@@ -369,7 +394,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         if not v.present:
             return o^
         o.set(String("URL"), v.url)
-        o.set(String("HOST"), fake_host(self._owner))
+        o.set(String("HOST"), fake_host(self._base()))
         return o^
 
     def owner(mut self) -> String:

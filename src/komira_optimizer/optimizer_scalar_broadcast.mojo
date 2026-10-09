@@ -167,7 +167,7 @@ def _substitute_agg_fn(
     if expr.tag == EXPR_CAST:
         # `cast_preserving_arrow` — rebuilding from `cast_target()` alone RESETS
         # a temporal or decimal target to its bare physical DType (the same
-        # rule as `optimizer_expr._fold_expr`'s EXPR_CAST arm, not in this tree).
+        # rule as `optimizer_expr._fold_expr`'s EXPR_CAST arm).
         var new_child = _substitute_agg_fn(expr.cast_child_ref(), scalar_value)
         return Expr.cast_preserving_arrow(new_child^, expr)
     if expr.tag == EXPR_ALIAS:

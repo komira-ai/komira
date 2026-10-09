@@ -1,0 +1,50 @@
+N	kgfix.shapes.Dot	struct	Dot	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	35	struct Dot\nA point: area zero.
+N	kgfix.shapes.Dot.__init__	method	__init__	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	38	def __init__(out self)\nA dot.
+N	kgfix.shapes.Dot.area	method	area	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	42	def area(self) -> Int\nZero.
+N	kgfix.shapes.Grid	struct	Grid	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	18	struct Grid[width: Int, height: Int]\nA grid whose header spans four lines.
+N	kgfix.shapes.Grid.__init__	method	__init__	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	26	def __init__(out self)\nAn empty grid.
+N	kgfix.shapes.Grid.area	method	area	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	30	def area(self) -> Int\n`width * height`.
+N	kgfix.shapes.SIDES	alias	SIDES	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	6	comptime SIDES\nThe sides of a square.
+N	kgfix.shapes.Shaped	trait	Shaped	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	10	Has an area.
+N	kgfix.shapes.Shaped.area	method	area	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	13	def area(self) -> Int\nThe area.
+N	kgfix.shapes.as_json	function	as_json	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	52	def as_json(n: Int) -> JsonValue\n`n` as a JSON number.
+N	kgfix.shapes.total_area	function	total_area	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	47	def total_area[T: Shaped](a: T, b: T) -> Int\nThe sum of two areas.
+N	kgfix.sub.leaf.leaf_area	function	leaf_area	src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo	9	def leaf_area() -> Int\nThe area of an empty 2 by 3 grid.
+N	komira//src/komira_json:komira_json	target	komira_json	src/komira_json	0	
+N	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/__init__.mojo	file	__init__.mojo	src/komira_kg_code/tests/fixtures/repo/kgfix/__init__.mojo	0	
+N	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	file	shapes.mojo	src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	0	
+N	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/__init__.mojo	file	__init__.mojo	src/komira_kg_code/tests/fixtures/repo/kgfix/sub/__init__.mojo	0	
+N	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo	file	leaf.mojo	src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo	0	
+N	komira//src/komira_kg_code/tests/fixtures/repo/tests/test_dot.mojo	file	test_dot.mojo	src/komira_kg_code/tests/fixtures/repo/tests/test_dot.mojo	0	
+N	komira//src/komira_kg_code/tests/fixtures/repo/tests/test_grid.mojo	file	test_grid.mojo	src/komira_kg_code/tests/fixtures/repo/tests/test_grid.mojo	0	
+N	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	target	kgfix	src/komira_kg_code/tests/fixtures/repo	0	mojo_library kgfix
+N	komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test	target	kgfix_dot_test	src/komira_kg_code/tests/fixtures/repo	0	mojo_test kgfix_dot_test
+N	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	doc	kgfix.md	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	0	kgfix
+E	kgfix.shapes.Dot	conforms	kgfix.shapes.Shaped
+E	kgfix.shapes.Dot	declares	kgfix.shapes.Dot.__init__
+E	kgfix.shapes.Dot	declares	kgfix.shapes.Dot.area
+E	kgfix.shapes.Grid	conforms	kgfix.shapes.Shaped
+E	kgfix.shapes.Grid	declares	kgfix.shapes.Grid.__init__
+E	kgfix.shapes.Grid	declares	kgfix.shapes.Grid.area
+E	kgfix.shapes.Shaped	declares	kgfix.shapes.Shaped.area
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	declares	kgfix.shapes.Dot
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	declares	kgfix.shapes.Grid
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	declares	kgfix.shapes.SIDES
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	declares	kgfix.shapes.Shaped
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	declares	kgfix.shapes.as_json
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	declares	kgfix.shapes.total_area
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo	imports	komira//src/komira_json:komira_json
+E	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo	declares	kgfix.sub.leaf.leaf_area
+E	komira//src/komira_kg_code/tests/fixtures/repo/tests/test_dot.mojo	imports	komira//src/komira_kg_code/tests/fixtures/repo:kgfix
+E	komira//src/komira_kg_code/tests/fixtures/repo/tests/test_grid.mojo	imports	komira//src/komira_kg_code/tests/fixtures/repo:kgfix
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	deps	komira//src/komira_json:komira_json
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/__init__.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/__init__.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	srcs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/sub/leaf.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	tests	komira//src/komira_kg_code/tests/fixtures/repo/tests/test_grid.mojo
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix	tests	komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test	deps	komira//src/komira_kg_code/tests/fixtures/repo:kgfix
+E	komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test	srcs	komira//src/komira_kg_code/tests/fixtures/repo/tests/test_dot.mojo
+E	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	governs	komira//src/komira_kg_code/tests/fixtures/repo/kgfix/shapes.mojo
+E	src/komira_kg_code/tests/fixtures/repo/docs/kgfix.md	governs	komira//src/komira_kg_code/tests/fixtures/repo:kgfix

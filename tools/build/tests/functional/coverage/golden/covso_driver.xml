@@ -1,0 +1,30 @@
+<?xml version="1.0" ?>
+<coverage timestamp="0">
+	<sources>
+		<source>.</source>
+	</sources>
+	<packages>
+		<package name="">
+			<classes>
+				<class name="tools/build/tests/functional/coverage/covso/covso_abi.mojo" filename="tools/build/tests/functional/coverage/covso/covso_abi.mojo">
+					<lines>
+						<line number="5" hits="1"/>
+						<line number="6" hits="1"/>
+						<line number="7" hits="1"/>
+						<line number="12" hits="0"/>
+						<line number="13" hits="0"/>
+					</lines>
+				</class>
+				<class name="tools/build/tests/functional/coverage/tests/covso_driver.mojo" filename="tools/build/tests/functional/coverage/tests/covso_driver.mojo">
+					<lines>
+						<line number="6" hits="1"/>
+						<line number="7" hits="1"/>
+						<line number="8" hits="1"/>
+						<line number="9" hits="1"/>
+						<line number="10" hits="0"/>
+					</lines>
+				</class>
+			</classes>
+		</package>
+	</packages>
+</coverage>

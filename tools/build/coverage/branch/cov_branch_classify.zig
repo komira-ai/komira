@@ -36,10 +36,14 @@
 //! call's error flag), and the `(` of a call off a `for` line (`name(` or
 //! `name[...](`: br; select only on a raising call's error flag), unless the
 //! callee is a measured `@always_inline("nodebug")` function, whose code
-//! carries its callers' locations. Anything else is refused.
+//! carries its callers' locations. In the body of a `try:` of its function,
+//! a br at a call, a subscript or a `+` is a source decision of kind `try`
+//! when it tests a raising call's error flag (arm 0: the call returned,
+//! arm 1: it raised into the handler), and refused otherwise. Anything else
+//! is refused.
 //!
 //! Records. `BRDA:<line>,<col>:<kind>:<n>/<N>,<arm>,<count>`: <kind> is `br`,
-//! `select`, `switch` or `rhs` (the right operand of `and`/`or`); <N> is how
+//! `select`, `switch`, `try` or `rhs` (the right operand of `and`/`or`); <N> is how
 //! many decisions of that kind one copy of a function (an LLVM function, or
 //! one inlined copy of it) holds at that location, <n> which one, in IR
 //! order. Copies are summed arm by arm and must agree on <N> and on where
@@ -47,14 +51,10 @@
 //! it inside the same header). A branch on the same condition value
 //! with the same weights at the same location as another (a loop's
 //! two, an `if` both branched on and selected on) is that one. A count of an
-//! instruction that never ran is `-`. Every bool `and`/`or` must have its
-//! right operand counted: derived from the left operand's branch or select
-//! and the branch or select that tests the whole condition (directly, through
-//! the phi of a short-circuit form, or through `xor ..., true`), or, for one
-//! that is the right operand of a short-circuit `and`/`or`, from that one's.
-//! The phi of a short-circuit form joins one value arriving under the
-//! branch's target for the deciding left value (the constant, or a reload
-//! of the left operand) and one under the other target.
+//! instruction that never ran is `-`. A bool `and`/`or` is a decision at its
+//! token (its left operand's branch or select: the right operand evaluated
+//! or skipped); its right operand is counted too (`rhs`) when a source
+//! decision tests the whole condition (cov_branch_andor.zig).
 //!
 //! Output: per measured file the IR holds code of, `SF:<repository path>`,
 //! its records, `end_of_record` (a file with no decision: no record), files
@@ -88,6 +88,7 @@ const metaId = ir_mod.metaId;
 const operand = ir_mod.operand;
 const core = ir_mod.core;
 const records = @import("cov_branch_records.zig");
+const andor = @import("cov_branch_andor.zig");
 const Record = records.Record;
 const render = records.render;
 const writeOut = records.writeOut;
@@ -112,13 +113,13 @@ fn usageFail(comptime fmt: []const u8, args: anytype) noreturn {
 // ---- branches --------------------------------------------------------------
 
 /// What an `and`/`or` still needs before its function ends.
-const Need = enum { none, phi, observe };
+pub const Need = enum { none, phi, observe };
 
 /// A position in a measured file; line 0: not known.
 const Pos = struct { line: u64 = 0, col: u64 = 0 };
 
 /// One measured decision of the function being read.
-const Dec = struct {
+pub const Dec = struct {
     file: *File,
     line: u64,
     col: u64,
@@ -139,19 +140,21 @@ const Dec = struct {
     // does not join them (rank 1).
     note: []const u8 = "",
     note_rank: u8 = 0,
+    // An `i1` phi at its token that is neither a result nor an error flag
+    // (an error text): an and/or no test reads is refused for it.
+    odd: []const u8 = "",
+    // Why a test of its result gave no right operand (an error text): it
+    // ran another number of times than the left operand.
+    unmatched: []const u8 = "",
     parent: ?usize = null, // rhs: its and/or
     keep: bool = true,
     ordinal: usize = 0,
     total: usize = 0,
 };
 
-/// An SSA value whose outcomes give an and/or's right operand; for a
-/// short-circuit one's phi, `rhs` is the value its right operand gives it.
-const Await = struct { dec: usize, negated: bool, rhs: []const u8 = "" };
-
 const Copy = struct { key: []const u8, where: []const u8, file: *File, line: u64, col: u64, n: usize, fp: []const Pos };
 
-const State = struct {
+pub const State = struct {
     alloc: Alloc,
     opts: *const Opts,
     meta: std.AutoHashMap(u32, Meta),
@@ -163,17 +166,18 @@ const State = struct {
     counts: [@typeInfo(Class).Enum.fields.len]usize = [_]usize{0} ** @typeInfo(Class).Enum.fields.len,
     outside: usize = 0,
     derived: usize = 0,
+    escaped: usize = 0, // and/or results no test reads: the and/or's two arms
     same: usize = 0,
     function: usize = 0,
     // The function being read: its instructions, its decisions, and the
     // values whose outcomes an and/or awaits.
     fun: Fn,
     decs: std.ArrayList(Dec),
-    awaits: std.StringHashMap(Await),
+    awaits: std.StringHashMap(andor.Await),
     // Every copy of a function's decisions at one location and kind.
     copies: std.StringHashMap(Copy),
 
-    fn err(self: *State, comptime fmt: []const u8, args: anytype) void {
+    pub fn err(self: *State, comptime fmt: []const u8, args: anytype) void {
         self.errors.append(std.fmt.allocPrint(self.alloc, fmt, args) catch oom()) catch oom();
     }
 
@@ -204,9 +208,23 @@ const State = struct {
     }
 
     /// The file and location of metadata id `loc` (a DILocation), or null.
-    fn locate(self: *State, loc: u32) ?At {
+    pub fn locate(self: *State, loc: u32) ?At {
         const w = self.where(loc) orelse return null;
         return .{ .file = self.fileOf(w.name), .line = w.line, .col = w.col, .inlined_at = w.inlined_at };
+    }
+
+    /// Whether location `loc` is inlined at `at`, directly or through
+    /// another inlined call.
+    pub fn inlinedAt(self: *State, loc: u32, at: u32) bool {
+        var l = loc;
+        for (0..32) |_| {
+            const m = self.meta.get(l) orelse return false;
+            if (m != .location) return false;
+            const i = m.location.inlined_at orelse return false;
+            if (i == at) return true;
+            l = i;
+        }
+        return false;
     }
 
     /// Whether `loc` is in the standard library (--stdlib), inlined at `at`.
@@ -216,7 +234,7 @@ const State = struct {
         return i == at and std.mem.startsWith(u8, w.name, self.opts.stdlib);
     }
 
-    fn weightsOf(self: *State, prof: ?u32, arms: usize, what: []const u8) ?[]const u64 {
+    pub fn weightsOf(self: *State, prof: ?u32, arms: usize, what: []const u8) ?[]const u64 {
         const p = prof orelse return null;
         const m = self.meta.get(p) orelse {
             self.err("{s}: !prof !{d} is not in the module", .{ what, p });
@@ -233,14 +251,10 @@ const State = struct {
         return null;
     }
 
-    fn whereOf(self: *State, d: Dec) []const u8 {
+    pub fn whereOf(self: *State, d: Dec) []const u8 {
         return std.fmt.allocPrint(self.alloc, "{s}:{d}:{d}", .{ d.file.repo, d.line, d.col }) catch oom();
     }
 };
-
-fn constant(x: []const u8) bool {
-    return std.mem.eql(u8, x, "i1 true") or std.mem.eql(u8, x, "i1 false");
-}
 
 const fmf = [_][]const u8{ "nnan ", "ninf ", "nsz ", "arcp ", "contract ", "afn ", "reassoc ", "fast " };
 
@@ -249,7 +263,7 @@ const fmf = [_][]const u8{ "nnan ", "ninf ", "nsz ", "arcp ", "contract ", "afn 
 /// else its `!prof`, read only when an and/or awaits its outcomes.
 /// `decision`: a measured branch of a source decision's class (an and/or's
 /// result is counted only from such a test, never from a call's error check).
-const Seen = struct { dec: ?usize = null, weights: ?[]const u64 = null, prof: ?u32 = null, parsed: bool = true, decision: bool = false };
+pub const Seen = struct { dec: ?usize = null, weights: ?[]const u64 = null, prof: ?u32 = null, parsed: bool = true, decision: bool = false };
 
 /// One branch instruction: `kind` with `arms` arms on condition `cond`, its
 /// `!dbg` and `!prof` on `text`, in block `blk`.
@@ -298,6 +312,25 @@ fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u
         st.counts[@intFromEnum(Class.string)] += 1;
         return .{ .weights = w };
     }
+    // In a `try:` body of its function, a br at a call, a subscript or a `+`
+    // is a raising call's error check, and a decision: whether the call
+    // raised into the handler. Any other br there is refused: whether its
+    // error reaches the handler is not known.
+    const in_try = if (kind == .br and (c.class == .call or c.class == .subscript or c.class == .plus)) source.inTry(st.alloc, at.file, at.line) else false;
+    if (in_try == null) {
+        st.counts[@intFromEnum(Class.unknown)] += 1;
+        if (!at.file.unbalanced_told) {
+            at.file.unbalanced_told = true;
+            st.err("{s}: the brackets of the file do not balance ({s}): which lines are continuations, and so whether a call is in a try body, cannot be read", .{ at.file.repo, at.file.unbalanced });
+        }
+        return .{ .weights = w };
+    }
+    if (in_try.?) {
+        if (st.fun.errorFlag(cond, dbg, st)) return tryDecision(st, at, w, cond, prof, blk);
+        st.counts[@intFromEnum(Class.unknown)] += 1;
+        st.err("{s}: a br at '{s}' in a try body that is not a raising call's error flag (the i1, or field 0 of the {{ i1, ... }}, a call at this location returns, or a phi of such flags, constants and the code of a callee inlined here): whether it is the call's error check is not known: {s}", .{ where, c.token, code });
+        return .{ .weights = w };
+    }
     st.counts[@intFromEnum(c.class)] += 1;
     if (c.class == .unknown) {
         st.err("{s}: a {s} at '{s}' is neither a source decision nor a known compiler-made branch: {s}", .{ where, @tagName(kind), c.token, code });
@@ -318,212 +351,45 @@ fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u
         return .{ .weights = w };
     }
     if (!c.class.decision()) return .{ .weights = w };
-    // Where its condition is computed, when in this copy of the function.
-    var fp = Pos{};
-    if (st.fun.defs.get(cond)) |dd| {
-        if (dd.dbg) |d| {
-            if (st.locate(d)) |ca| {
-                if (ca.inlined_at == at.inlined_at and ca.file == at.file) fp = .{ .line = ca.line, .col = ca.col };
-            }
-        }
-    }
-    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = kind, .class = c.class, .arms = arms, .weights = w, .cond = cond, .prof = prof, .fp = fp, .block = blk }) catch oom();
+    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = kind, .class = c.class, .arms = arms, .weights = w, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
     return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = true };
 }
 
-fn total(w: []const u64) u64 {
-    var n: u64 = 0;
-    for (w) |x| n += x;
-    return n;
+/// Where condition `cond` of a branch at `at` is computed, when in the same
+/// copy of the function and file (line 0: elsewhere).
+fn condPos(st: *State, cond: []const u8, at: State.At) Pos {
+    const dd = st.fun.defs.get(cond) orelse return .{};
+    const d = dd.dbg orelse return .{};
+    const ca = st.locate(d) orelse return .{};
+    if (ca.inlined_at == at.inlined_at and ca.file == at.file) return .{ .line = ca.line, .col = ca.col };
+    return .{};
 }
 
-fn swapped(st: *State, w: ?[]const u64, negated: bool) ?[]const u64 {
-    const x = w orelse return null;
-    if (!negated or x.len != 2) return x;
-    const sw = st.alloc.alloc(u64, 2) catch oom();
-    sw[0] = x[1];
-    sw[1] = x[0];
-    return sw;
-}
-
-/// The right operand of and/or `d`: s = its own weights (the left operand:
-/// true, false), b = the whole condition's (true, false). A select LLVM
-/// gives no weights ran no time: with a whole of zero counts, never ran.
-fn derive(st: *State, di: usize, b_or_null: ?[]const u64, rhs_val: []const u8) void {
-    const p = st.decs.items[di];
-    st.decs.items[di].need = .none;
-    const where = st.whereOf(p);
-    var rhs = p;
-    rhs.need = .none;
-    rhs.kind = .rhs;
-    rhs.parent = di;
-    rhs.arms = 2;
-    const b_ran = if (b_or_null) |b| total(b) > 0 else false;
-    if (p.weights == null and !b_ran) {
-        rhs.weights = null;
-        st.decs.append(rhs) catch oom();
-        st.derived += 1;
-        return inner(st, rhs_val, null);
-    }
-    const s = p.weights orelse return st.err("{s}: the '{s}' never ran but the test of its result did", .{ where, @tagName(p.class)[0 .. @tagName(p.class).len - 1] });
-    const b = b_or_null orelse return st.err("{s}: the '{s}' ran but the test of its result never did", .{ where, @tagName(p.class)[0 .. @tagName(p.class).len - 1] });
-    if (s.len != 2 or b.len != 2) return;
-    if (s[0] + s[1] != b[0] + b[1]) return st.err("{s}: the left operand ran {d} times and the test of the result {d}: the right operand cannot be derived", .{ where, s[0] + s[1], b[0] + b[1] });
-    var w = st.alloc.alloc(u64, 2) catch oom();
-    if (p.class == .or_) {
-        // true = left true + (left false, right true); false = both false.
-        if (b[0] < s[0]) return st.err("{s}: 'or' is true {d} times but its left operand {d}", .{ where, b[0], s[0] });
-        w[0] = b[0] - s[0];
-        w[1] = b[1];
-    } else {
-        // true = both true; left true, right false = left true - true.
-        if (s[0] < b[0]) return st.err("{s}: 'and' is true {d} times but its left operand {d}", .{ where, b[0], s[0] });
-        w[0] = b[0];
-        w[1] = s[0] - b[0];
-    }
-    rhs.weights = w;
-    st.decs.append(rhs) catch oom();
-    st.derived += 1;
-    inner(st, rhs_val, w);
-}
-
-/// An and/or `p`'s right operand, `w` its outcomes, may itself be an
-/// and/or no branch tests (`a and not (b and c)`): its whole condition's
-/// outcomes are `w`, swapped through each `xor ..., true`.
-fn inner(st: *State, rhs_val: []const u8, w: ?[]const u64) void {
-    if (rhs_val.len == 0) return;
-    const a = st.awaits.get(rhs_val) orelse return;
-    if (st.decs.items[a.dec].need != .observe) return;
-    derive(st, a.dec, swapped(st, w, a.negated), a.rhs);
-}
-
-/// A branch or select `seen` tested `cond`: the whole condition of an
-/// and/or that awaits it.
-fn observe(st: *State, cond: []const u8, seen: Seen) void {
-    const a = st.awaits.get(cond) orelse return;
-    if (st.decs.items[a.dec].need != .observe) return;
-    if (seen.parsed and !seen.decision) return;
-    const w = if (seen.parsed) seen.weights else st.weightsOf(seen.prof, 2, st.whereOf(st.decs.items[a.dec]));
-    derive(st, a.dec, swapped(st, w, a.negated), a.rhs);
-}
-
-/// A phi at the token of an and/or `br` of this copy: a result of it when
-/// it joins one value arriving under the br's true target and one under its
-/// false target (`under`: every path from the branch to the incoming block
-/// passes through that target). A non-`i1` one is a value and/or's (no
-/// right operand decides). An `i1` one is a candidate when the value that
-/// decides (`true` for or, `false` for and) arrives under the target the
-/// left operand takes for it (true for or, false for and), as that constant
-/// or as a reload of the left operand (README.md, "and, or"); the first
-/// candidate a source decision tests is the result. Others (a raising right
-/// operand's error flag, joined the same way) are left: a phi that is no
-/// candidate is refused only when none is.
-fn phi(st: *State, t: []const u8, ln: usize) void {
-    const eq = std.mem.indexOf(u8, t, " = phi ") orelse return;
-    const dbg = metaId(t, "!dbg !") orelse return;
-    const at = st.locate(dbg) orelse return;
-    if (at.file.where != .measured) return;
-    var i = st.decs.items.len;
-    const di = while (i > 0) {
-        i -= 1;
-        const d = st.decs.items[i];
-        if ((d.need == .phi or d.need == .observe) and d.kind == .br and d.targets[0].len > 0 and d.file == at.file and d.line == at.line and d.col == at.col and d.inl == at.inlined_at) break i;
-    } else return;
-    const d = st.decs.items[di];
-    const rest = t[eq + " = phi ".len ..];
-    var ins = std.ArrayList([]const u8).init(st.alloc);
-    var from = std.ArrayList([]const u8).init(st.alloc);
-    const ty_end = std.mem.indexOf(u8, rest, " [") orelse return;
-    var it = std.mem.splitSequence(u8, core(rest[ty_end + 1 ..]), "], ");
-    while (it.next()) |piece| {
-        const p = std.mem.trim(u8, piece, " ");
-        if (p.len == 0 or p[0] != '[') break;
-        const v = operand(std.mem.trim(u8, p[1..], " "));
-        ins.append(v) catch oom();
-        const after = std.mem.trim(u8, p[1..], " ");
-        from.append(if (after.len > v.len + 2) std.mem.trim(u8, after[v.len + 2 ..], " ]") else "") catch oom();
-    }
-    const word = @tagName(d.class)[0 .. @tagName(d.class).len - 1];
-    const want: usize = if (d.class == .or_) 0 else 1;
-    const arm = [2][]const u8{ "true", "false" };
-    const tt = d.targets[want];
-    const ot = d.targets[1 - want];
-    var ti: ?usize = null;
-    if (ins.items.len == 2) {
-        for (0..2) |x| {
-            if (st.fun.under(from.items[x], tt, d.block) and st.fun.under(from.items[1 - x], ot, d.block)) ti = x;
+/// A `try:` body's raising call (README.md, "try"): its br is a decision
+/// whose arm 0 is the call returning (LLVM's false, the second weight) and
+/// arm 1 the call raising into the handler (true, the first).
+fn tryDecision(st: *State, at: State.At, w: ?[]const u64, cond: []const u8, prof: ?u32, blk: []const u8) Seen {
+    st.counts[@intFromEnum(Class.try_)] += 1;
+    var arms: ?[]const u64 = w;
+    if (w) |x| {
+        if (x.len == 2) {
+            const sw = st.alloc.alloc(u64, 2) catch oom();
+            sw[0] = x[1];
+            sw[1] = x[0];
+            arms = sw;
         }
     }
-    const k = ti orelse {
-        noteOn(st, di, 1, std.fmt.allocPrint(st.alloc, "{s}: a short-circuit '{s}' (a br) whose result is not a phi at its location: its right operand cannot be counted (IR line {d}: the phi at this '{s}' does not join one value arriving under the branch's {s} target {s} and one under its {s} target {s}: {s})", .{ st.whereOf(d), word, ln, word, arm[want], tt, arm[1 - want], ot, t }) catch oom());
-        return;
-    };
-    if (!std.mem.startsWith(u8, rest, "i1 ")) {
-        if (d.need == .phi) st.decs.items[di].need = .none; // a value and/or: no right operand decides
-        return;
-    }
-    const kc: []const u8 = if (d.class == .or_) "true" else "false";
-    const v = ins.items[k];
-    const other = ins.items[1 - k];
-    const deciding = std.mem.eql(u8, v, kc) or st.fun.reload(v, d.cond, from.items[k]);
-    if (!deciding or isConst(other)) {
-        // The constant arriving under the other target is the phi of
-        // another expression (`not a or b`): the right operand derived
-        // from it would be wrong.
-        const msg = if (std.mem.eql(u8, other, kc) and !isConst(v))
-            std.fmt.allocPrint(st.alloc, "{s}: IR line {d}: the '{s}' of the phi at this '{s}' arrives from {s}, the branch's {s} target, not its {s} target ({s}): the right operand cannot be derived: {s}", .{ st.whereOf(d), ln, kc, word, from.items[1 - k], arm[1 - want], arm[want], tt, t }) catch oom()
-        else
-            std.fmt.allocPrint(st.alloc, "{s}: IR line {d}: the phi at this '{s}' is not that of a short-circuit one (the value arriving under the branch's {s} target {s} is '{s}', not '{s}' or a reload of the left operand; the other is not a constant): {s}", .{ st.whereOf(d), ln, word, arm[want], tt, v, kc, t }) catch oom();
-        noteOn(st, di, 2, msg);
-        return;
-    }
-    st.decs.items[di].need = .observe;
-    st.awaits.put(t[0..eq], .{ .dec = di, .negated = false, .rhs = other }) catch oom();
+    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = .@"try", .class = .try_, .arms = 2, .weights = arms, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
+    // No source decision's test: an and/or's result is never counted from it.
+    return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = false };
 }
 
-/// Keeps `msg` as why and/or `di` has no result phi, unless one of a higher
-/// rank (or an earlier one of its rank) is kept.
-fn noteOn(st: *State, di: usize, rank: u8, msg: []const u8) void {
-    const d = &st.decs.items[di];
-    if (d.need != .phi or rank <= d.note_rank) return;
-    d.note = msg;
-    d.note_rank = rank;
-}
-
-/// The two targets of `br i1 %c, label %t, label %f, ...`: `%t`, `%f`
-/// ("" when the text is not of that form, which no phi block matches).
-fn brTargets(t: []const u8) [2][]const u8 {
-    var out = [2][]const u8{ "", "" };
-    var rest = t["br i1 ".len..];
-    for (&out) |*o| {
-        const at = std.mem.indexOf(u8, rest, ", label ") orelse return .{ "", "" };
-        rest = rest[at + ", label ".len ..];
-        o.* = operand(rest);
-    }
-    return out;
-}
-
-fn isConst(x: []const u8) bool {
-    return std.mem.eql(u8, x, "true") or std.mem.eql(u8, x, "false");
-}
-
-/// The end of a function: every bool and/or has its right operand; branches
-/// that are one are folded; ordinals assigned; the decisions recorded.
+/// The end of a function: every bool and/or is read (andor.finish);
+/// branches that are one are folded; ordinals assigned; the decisions
+/// recorded.
 fn endFunction(st: *State) void {
+    andor.finish(st);
     const ds = st.decs.items;
-    for (ds) |d| {
-        if (d.need == .none) continue;
-        const word = @tagName(d.class)[0 .. @tagName(d.class).len - 1];
-        if (d.need == .phi) {
-            if (d.note.len > 0) {
-                st.err("{s}", .{d.note});
-            } else {
-                st.err("{s}: a short-circuit '{s}' (a br) whose result is not a phi at its location: its right operand cannot be counted", .{ st.whereOf(d), word });
-            }
-        } else {
-            st.err("{s}: the right operand of this '{s}' is not counted: its result is not tested by a branch or select in this function (it is returned, stored or passed on), so when the right operand decides cannot be told", .{ st.whereOf(d), word });
-        }
-    }
     // One decision tested twice (the same condition value and weights at the
     // same location): keep one, a br before a switch before a select.
     for (ds, 0..) |*a, i| {
@@ -532,7 +398,7 @@ fn endFunction(st: *State) void {
             if (!b.keep or b.kind == .rhs or b.class != a.class) continue;
             if (b.file != a.file or b.line != a.line or b.col != a.col or b.inl != a.inl or !std.mem.eql(u8, b.cond, a.cond)) continue;
             if ((a.prof == null) != (b.prof == null) or (a.prof != null and a.prof.? != b.prof.?)) continue;
-            const rank = [_]u8{ 0, 3, 2, 1 }; // br, rhs, select, switch
+            const rank = [_]u8{ 0, 3, 2, 1, 0 }; // br, rhs, select, switch, try
             if (rank[@intFromEnum(b.kind)] < rank[@intFromEnum(a.kind)]) {
                 a.keep = false;
                 b.keep = true;
@@ -610,13 +476,10 @@ fn walk(st: *State) void {
         if (std.mem.startsWith(u8, t, "br i1 ")) {
             const cond = operand(t["br i1 ".len..]);
             const r = branch(st, .br, 2, cond, t, ln, blk);
-            observe(st, cond, r);
+            andor.observe(st, cond, r);
             if (r.dec) |di| {
                 const c = st.decs.items[di].class;
-                if (c == .or_ or c == .and_) {
-                    st.decs.items[di].need = .phi;
-                    st.decs.items[di].targets = brTargets(t);
-                }
+                if (c == .or_ or c == .and_) andor.brAt(st, di, t);
             }
         } else if (std.mem.startsWith(u8, t, "switch ")) {
             sw_cases = 0;
@@ -630,13 +493,9 @@ fn walk(st: *State) void {
                 st.err("{s}:{d}:{d}: an {s} in a measured file: the classifier reads no such branch", .{ at.?.file.repo, at.?.line, at.?.col, word });
             }
         } else if (std.mem.startsWith(u8, body, "phi ")) {
-            phi(st, t, ln);
+            andor.phiAt(st, t, ln);
         } else if (std.mem.startsWith(u8, body, "xor i1 ")) {
-            const ops = body["xor i1 ".len..];
-            const x = operand(ops);
-            if (ops.len > x.len + 2 and std.mem.startsWith(u8, ops[x.len + 2 ..], "true")) {
-                if (st.awaits.get(x)) |a| st.awaits.put(t[0..eq.?], .{ .dec = a.dec, .negated = !a.negated, .rhs = a.rhs }) catch oom();
-            }
+            andor.xorAt(st, t[0..eq.?], body["xor i1 ".len..]);
         } else if (std.mem.startsWith(u8, body, "select ")) {
             var rest = body["select ".len..];
             var more = true;
@@ -653,22 +512,9 @@ fn walk(st: *State) void {
             const ops = rest["i1 ".len..];
             const cond = operand(ops);
             const r = branch(st, .select, 2, cond, t, ln, blk);
-            observe(st, cond, r);
+            andor.observe(st, cond, r);
             const di = r.dec orelse continue;
-            const c = st.decs.items[di].class;
-            if (c != .or_ and c != .and_) continue;
-            if (ops.len < cond.len + 2) continue;
-            const a = operand(ops[cond.len + 2 ..]);
-            if (!std.mem.startsWith(u8, a, "i1 ")) continue; // a value and/or: no right operand decides
-            const b = if (ops.len > cond.len + 2 + a.len + 2) operand(ops[cond.len + 2 + a.len + 2 ..]) else "";
-            const or_form = std.mem.eql(u8, a, "i1 true") and std.mem.startsWith(u8, b, "i1 ") and !constant(b);
-            const and_form = std.mem.eql(u8, b, "i1 false") and std.mem.startsWith(u8, a, "i1 ") and !constant(a);
-            if ((c == .or_ and or_form) or (c == .and_ and and_form)) {
-                st.decs.items[di].need = .observe;
-                st.awaits.put(t[0..eq.?], .{ .dec = di, .negated = false }) catch oom();
-            } else {
-                st.err("{s}: IR line {d}: the select at this '{s}' is not that of one ('select i1 c, i1 true, i1 x' for or, 'select i1 c, i1 x, i1 false' for and): {s}", .{ st.whereOf(st.decs.items[di]), ln, @tagName(c)[0 .. @tagName(c).len - 1], t });
-            }
+            andor.selectAt(st, di, t[0..eq.?], ops, cond, t, ln);
         }
     }
 }
@@ -782,7 +628,7 @@ pub fn main() void {
         .unmapped = std.StringHashMap(void).init(alloc),
         .fun = Fn.init(alloc),
         .decs = std.ArrayList(Dec).init(alloc),
-        .awaits = std.StringHashMap(Await).init(alloc),
+        .awaits = std.StringHashMap(andor.Await).init(alloc),
         .copies = std.StringHashMap(Copy).init(alloc),
     };
     // A nodebug operator, constructor or destructor lands on any token.
@@ -889,10 +735,11 @@ pub fn main() void {
         if (c.decision()) decisions += st.counts[f.value] else if (c != .unknown) made += st.counts[f.value];
     }
     const cn = st.counts;
-    std.debug.print("cov_branch_classify: {d} measured file(s): {d} source decision(s) (if {d}, elif {d}, while {d}, and {d}, or {d}, for-in {d}; {d} right operand(s) derived, {d} a second test of one decision), {d} compiler-made (String lifetime {d}, + {d}, call( {d}, [ {d}, // {d}, % {d}) not written; {d} branch(es) outside the measured sources\n", .{
+    std.debug.print("cov_branch_classify: {d} measured file(s): {d} source decision(s) (if {d}, elif {d}, while {d}, and {d}, or {d}, for-in {d}, try {d}; {d} right operand(s) derived, {d} and/or result(s) no test reads, {d} a second test of one decision), {d} compiler-made (String lifetime {d}, + {d}, call( {d}, [ {d}, // {d}, % {d}) not written; {d} branch(es) outside the measured sources\n", .{
         measured_files,                      decisions,                              cn[@intFromEnum(Class.if_)],       cn[@intFromEnum(Class.elif)],
         cn[@intFromEnum(Class.while_)],       cn[@intFromEnum(Class.and_)],            cn[@intFromEnum(Class.or_)],       cn[@intFromEnum(Class.for_in)],
-        st.derived,                          st.same,                                made,                             cn[@intFromEnum(Class.string)],
+        cn[@intFromEnum(Class.try_)],
+        st.derived,                          st.escaped,                             st.same,                                made,                             cn[@intFromEnum(Class.string)],
         cn[@intFromEnum(Class.plus)],         cn[@intFromEnum(Class.call)],            cn[@intFromEnum(Class.subscript)], cn[@intFromEnum(Class.floordiv)],
         cn[@intFromEnum(Class.mod)],          st.outside,
     });

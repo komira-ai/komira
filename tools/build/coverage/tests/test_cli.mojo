@@ -424,6 +424,87 @@ def test_branch_lcov_flag() raises:
     assert_equal(run(_with(_with(_gate(_tmp(String("branch_lcov_n")), String("census")), String("--branch-lcov"), one), String("--branch-lcov"), n2)), EXIT_INPUT)
 
 
+def _levels(dir: String, prefix: String) raises -> String:
+    """The annotation levels of the paths under `prefix` in the full
+    annotation list (`anns.json` of `dir`), each once, sorted."""
+    var anns = parse_json_value(read_text(dir + "/anns.json"))
+    var seen = List[String]()
+    for i in range(anns.array_len()):
+        var a = anns.element_at(i)
+        if not a.get(String("path")).as_string().startswith(prefix):
+            continue
+        var l = a.get(String("annotation_level")).as_string()
+        var has = False
+        for k in range(len(seen)):
+            if seen[k] == l:
+                has = True
+        if not has:
+            seen.append(l)
+    sort_strings(seen)
+    var s = String("")
+    for k in range(len(seen)):
+        s += seen[k] + String(" ")
+    return s^
+
+
+def _package_kinds(result: JsonValue, key: String) raises -> String:
+    """`<package>:<kind>` of each finding in `key` of a result JSON."""
+    var fs = result.get(key)
+    var s = String("")
+    for i in range(fs.array_len()):
+        var f = fs.element_at(i)
+        s += f.get(String("package")).as_string() + String(":") + f.get(String("kind")).as_string() + String(" ")
+    return s^
+
+
+def test_info_package() raises:
+    # A test-only package (`--info-package DIR`: DIR and every package under
+    # it) is measured and shown, its findings information: they leave
+    # `findings` (so the conclusion, the gate's exit and the annotation
+    # level) for `info_findings`, and its annotations are notices.
+    var base = _tmp(String("info_none"))
+    assert_equal(run(_with(_with(_report(base), String("--mode"), String("enforce")), String("--annotations-out"), base + "/anns.json")), EXIT_OK)
+    assert_true(_levels(base, String("src/alpha/")).find("failure") >= 0)
+    var dir = _tmp(String("info_alpha"))
+    var a = _with(_with(_report(dir), String("--mode"), String("enforce")), String("--annotations-out"), dir + "/anns.json")
+    assert_equal(run(_with(a^, String("--info-package"), String("src/alpha/"))), EXIT_OK)
+    var r = parse_json_value(read_text(dir + "/result.json"))
+    # src/beta's BranchNotMeasured and src/gone's ExtraRow still count.
+    assert_equal(r.get(String("conclusion")).as_string(), "failure")
+    assert_equal(r.get(String("info_packages")).serialize(), String('["src/alpha"]'))
+    var f = _package_kinds(r, String("findings"))
+    var i = _package_kinds(r, String("info_findings"))
+    assert_true(f.find("src/alpha:") < 0 and f.find("src/beta:BranchNotMeasured") >= 0, f)
+    assert_true(i.find("src/alpha:BelowTarget") >= 0 and i.find("src/beta:") < 0, i)
+    assert_equal(_levels(dir, String("src/alpha/")), "notice ")
+    var summary = read_text(dir + "/summary.md")
+    assert_true(summary.find("### Info: test-only packages, declaration-only files (") >= 0, summary)
+    assert_true(summary.find(" | info: BelowTarget") >= 0, summary)
+    assert_true(summary.find("except a test-only package (`src/alpha` and under)") >= 0, summary)
+    # Every package under `src`: nothing fails, no annotation is a failure,
+    # and the last body concludes success.
+    var all = _tmp(String("info_all"))
+    var b = _with(_with(_report(all), String("--mode"), String("enforce")), String("--annotations-out"), all + "/anns.json")
+    assert_equal(run(_with(b^, String("--info-package"), String("src"))), EXIT_OK)
+    var ra = parse_json_value(read_text(all + "/result.json"))
+    assert_equal(ra.get(String("conclusion")).as_string(), "success")
+    assert_equal(ra.get(String("findings")).array_len(), 0)
+    assert_equal(_levels(all, String("src/")), "notice ")
+    assert_equal(parse_json_value(read_text(all + "/checkrun/001.json")).get(String("conclusion")).as_string(), "success")
+    assert_true(read_text(all + "/checkrun/000.json").find('"annotation_level":"failure"') < 0)
+    # The gate: src/alpha below the target is exit 3 in enforce mode, and 0
+    # as a test-only package; a prefix that is not a whole segment
+    # (`src/alph`) covers nothing.
+    var g = _tmp(String("info_gate"))
+    assert_equal(run(_with(_gate(g, String("enforce")), String("--info-package"), String("src/alpha"))), EXIT_OK)
+    var rg = parse_json_value(read_text(g + "/result.json"))
+    assert_equal(rg.get(String("conclusion")).as_string(), "success")
+    assert_true(_package_kinds(rg, String("info_findings")).find("src/alpha:BelowTarget") >= 0)
+    assert_equal(run(_with(_gate(_tmp(String("info_gate_seg")), String("enforce")), String("--info-package"), String("src/alph"))), EXIT_GATE)
+    assert_equal(run(_with(_gate(_tmp(String("info_gate_abs")), String("enforce")), String("--info-package"), String("/src/alpha"))), EXIT_USAGE)
+    assert_equal(run(_with(_gate(_tmp(String("info_gate_slash")), String("enforce")), String("--info-package"), String("///"))), EXIT_USAGE)
+
+
 def main() raises:
     test_report_end_to_end()
     test_gate_entry_is_the_report_entry()
@@ -435,4 +516,5 @@ def main() raises:
     test_gate_test_sources()
     test_report_file_names()
     test_branch_lcov_flag()
+    test_info_package()
     print("test_cli: PASS")

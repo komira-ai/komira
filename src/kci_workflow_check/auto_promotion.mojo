@@ -847,7 +847,7 @@ def check_auto_promotion(
         try:
             st = g.stage(stage_name)
         except:
-            continue
+            continue  # part_stage names a stage the machine lacks: nothing here to hold
         if st.is_pull_request():
             continue  # R6
         var whose = String("job '") + ids[i] + String("': ")

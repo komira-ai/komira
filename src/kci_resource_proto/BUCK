@@ -1,13 +1,13 @@
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_check")
 
-# Eight composed graphs, frozen as bytes (tests/test_resource_graph_golden_bytes.mojo
+# Ten composed graphs, frozen as bytes (tests/test_resource_graph_golden_bytes.mojo
 # says what each holds): between them every field of every message of
 # `resource.proto`, each at a value other than its default. `Scale.min` and
 # `ContainerJob.max_retries` are also set to an explicit zero: an encoder that
 # drops a present zero still round-trips, and the field-number test compares
 # with zero records dropped, so only these bytes see it.
-_GRAPHS = ["compute_graph", "dns_graph", "job_bucket_graph", "messaging_graph", "network_graph", "secret_graph", "service_graph", "trigger_graph"]
+_GRAPHS = ["compute_graph", "dns_graph", "job_bucket_graph", "messaging_graph", "metadata_graph", "network_graph", "registry_graph", "secret_graph", "service_graph", "trigger_graph"]
 
 mojo_proto_library(
     name = "kci_resource_proto",
@@ -25,6 +25,8 @@ mojo_proto_library(
         "tests/test_resource_compute_numbers.mojo",
         "tests/test_resource_trigger_numbers.mojo",
         "tests/test_resource_network_numbers.mojo",
+        "tests/test_resource_registry_numbers.mojo",
+        "tests/test_resource_metadata_numbers.mojo",
         "tests/test_resource_held_numbers.mojo",
         "tests/test_resource_list_copy_and_json.mojo",
         "tests/test_held_numbers_are_unused.mojo",

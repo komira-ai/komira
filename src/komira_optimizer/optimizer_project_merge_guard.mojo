@@ -27,7 +27,7 @@
 #     reference.
 #   * `expr_substitutes_safely` -- the same mirror for ONE expression, for a
 #     rewrite that folds a Project into a node other than a Project (Rule 13,
-#     `optimizer_join.absorb_expression_into_aggregate`, not in this tree).
+#     `optimizer_join.absorb_expression_into_aggregate`).
 #   * `predicate_below_project` -- the same question for a FILTER pushed below
 #     a Project (`optimizer_filter.push_predicates_down`). A check BY NAME
 #     against the Project's CHILD schema alone passes a Project that REPLACES a

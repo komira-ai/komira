@@ -1,22 +1,27 @@
 """`komira_optimizer` -- logical-plan rewrite rules and the estimates they use.
 
-Filter fusion, decomposition, OR factoring, symmetric-OR decomposition and
-predicate pushdown; cross-join elimination, equi-filter folding into joins,
-transitive join edges and non-equi join predicate decomposition; pushing a
-join's single-side ON residual to the owning child; greedy join reordering,
-TDOM equivalence classes, and cardinality and selectivity estimates;
-correlated-subquery flattening, scalar-subquery decorrelation and resolution,
-and the scalar broadcast; eager and partial aggregation, the SUM rewrite and
-group-key elision; the Project-merge substitution and its safety check; limit
-pushdown, sort + limit fusion into TopN, TopN below a Project and the TopN
-tie-break; partition pruning, view resolution, payload narrowing and
-shared-relation CSE; and the row-count estimate. A rule takes a `LogicalPlan`
-and returns or rewrites it; none executes anything. komira_optimizer has no
-driver that orders its passes.
+Join rules (inner-to-semi conversion, build-side selection, the SEMI/ANTI
+reducer pushdown, the join-reorder output-order guard, absorbing a projection
+into an aggregate); filter, predicate and OR rewrites (fusion, decomposition,
+pushdown, cross-join elimination, OR factoring, symmetric-OR inference);
+expression rules (constant
+folding, predicate simplification, CSE, IN-list rewrite); view resolution and
+partition pruning; subquery decorrelation and scalar-subquery resolution through
+a `ScalarDepTable` of engine-supplied bindings; join-predicate decomposition,
+transitive edges and greedy join reordering with TDOM-based cardinality and
+per-column NDV providers; aggregate rewrites (functionally dependent group keys,
+eager and partial aggregation below joins, the SUM-of-offset rewrite,
+duplicate aggregate folding and common-aggregate dedup); join payload
+narrowing; limit and TopN rules, partition TopN fusion and window rewrites;
+scan-share planning; the `OptimizerConfig` options value; and the non-raising
+`OptimizeResult`. Every rule takes a `LogicalPlan` and returns the rewritten
+plan (the duplicate-aggregate collect and find walks return hash counts and a
+subtree copy, and scan-share planning returns a `ScanSharePlan` descriptor);
+none executes anything. komira_optimizer has no driver that orders its passes.
 
 It depends on `komira_plan_ir`, `komira_plan_expr`, `komira_plan_stats`,
-`komira_arrow`, `komira_kernels` (the join-key envelope), `komira_collections`
-and `komira_scan_source`, and on no engine package.
+`komira_arrow`, `komira_kernels`, `komira_collections`, `komira_exec_types`,
+`komira_scan_source`, `komira_counters` and `komira_libc`.
 
 Public API: import directly from sub-modules. No facade.
 """

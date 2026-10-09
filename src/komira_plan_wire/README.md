@@ -25,6 +25,14 @@ Hive-partitioned or non-local Parquet scan, an undescribable user-defined
 function and the other shapes the codec's ledger lists. Every refusal is an
 error whose text starts with one of the exported `PLAN_WIRE_*` names.
 
+The decoder rebuilds every node through its `LogicalPlan` factory and refuses
+a message whose `output_schema` differs from the one the factory derives
+(`PLAN_WIRE_OUTPUT_SCHEMA_DIVERGED`). For a join, that schema marks the side
+that supplies NULLs as nullable: the right side's fields of a LEFT join, the
+left side's of a RIGHT join, both sides' of a FULL join, and the right side's
+of an as-of join. A producer in another language must write `nullable: true`
+for those fields even when the input column is not nullable.
+
 This package does not optimize or execute a plan.
 
 ## Examples

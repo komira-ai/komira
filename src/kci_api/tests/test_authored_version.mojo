@@ -54,6 +54,16 @@ def test_refusals() raises:
     assert_true(_v(String("schema_version: -1\n")).find(String("not a decimal integer")) >= 0)
     assert_true(_v(String("schema_version: 1.0\n")).find(String("not a decimal integer")) >= 0)
     assert_true(_v(String("schema_version\n")).find(String("not a decimal integer")) >= 0)
+    # nine digits is the longest major read; a tenth digit is refused on its
+    # line, never read as a (wrapped or huge) number. Only the refusal and its
+    # line are asserted: the message today says "not a decimal integer", which
+    # is false (komira-ai/komira#1016).
+    assert_equal(
+        _v(String("schema_version: 999999999\n")),
+        String("f: schema_version 999999999 needs a newer kci (this kci reads kci.channels up to major 1)"),
+    )
+    var ten = _v(String("schema_version: 1000000000\n"))
+    assert_true(ten.startswith(String("f: line 1: schema_version ")), ten)
 
 
 def test_skip_then_parse_the_rest() raises:

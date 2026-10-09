@@ -11,8 +11,8 @@
 #     `bucket`,
 #     `service_account`, `grant`, `queue`, `topic`, `subscription`,
 #     `secret`, `dns_zone`, `dns_record`, `certificate`, `schedule`,
-#     `event_trigger`, `network`, `subnet` nor `ip_address` (NOT_YET), and
-#     it has no public ingress,
+#     `event_trigger`, `network`, `subnet`, `ip_address` nor `registry`
+#     (NOT_YET), and it has no public ingress,
 #     so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
@@ -46,6 +46,13 @@
 #              `<id>/address` (network.mojo; no identity, no grants); a
 #              subnet reads its network's NAME, and a service's run its
 #              `network` subnet's NAME, as inputs
+#   registry -> `<id>/registry` (registry.mojo; no identity, no grants of
+#              its own: it is only granted to, WRITE to push, READ to pull)
+# kci writes the METADATA on the lowered nodes (`label.<key>` on every
+# node, `physical_name` on the primary one); the fake's outputs of a named
+# primary object follow its name (nodes.mojo), `list_owned` reports the name
+# each object was created or adopted under (`FakeStore.names`), and `check`
+# refuses what the shape's `MetadataLimits` refuse (metadata.mojo).
 # The grants are kci's EDGES (`kci_cloud.grants`), handed to `lower` with
 # each target's type: a `uses` line, the implicit `cell LOGS WRITE` of an
 # identity the resource holds itself, or a grant resource. An edge lowers to
@@ -69,8 +76,8 @@
 # aws shape a queue's policy; on the gcp shape a certificate's DNS
 # authorization and its record. A shape's NOT_YET types (onprem: `table`,
 # `queue`, `topic`, `subscription`, `dns_zone`, `dns_record`,
-# `certificate`, `event_trigger`, `network`, `subnet`, `ip_address`) are the
-# cloud's absences, and such a cloud is not complete. `list_owned` reports a table object's stored key
+# `certificate`, `event_trigger`, `network`, `subnet`, `ip_address`,
+# `registry`) are the cloud's absences, and such a cloud is not complete. `list_owned` reports a table object's stored key
 # (`OwnedRecord.key`) and the validation run that created the object (its
 # `kci-run-id` label, `OwnedRecord.validation_run_id`), both read back from
 # the object.
@@ -136,6 +143,7 @@ from kci_cloud import (
     FIELD_NETWORK,
     FIELD_SUBNET,
     FIELD_QUEUE,
+    FIELD_REGISTRY,
     FIELD_SCHEDULE,
     FIELD_SECRET,
     FIELD_SERVICE,
@@ -173,7 +181,9 @@ from kci_cloud_fake.limits import (
     index_limits,
 )
 from kci_cloud_fake.network import lower_address, lower_network, lower_subnet, network_limits
+from kci_cloud_fake.metadata import metadata_limits
 from kci_cloud_fake.nodes import FakeNode, live_key
+from kci_cloud_fake.registry import lower_registry
 from kci_cloud_fake.secrets import lower_secret
 from kci_cloud_fake.shapes import (
     ProviderShape,
@@ -323,6 +333,8 @@ def _lower(
         return lower_subnet(r, shape)
     if field == FIELD_IP_ADDRESS:
         return lower_address(r, shape)
+    if field == FIELD_REGISTRY:
+        return lower_registry(r, shape)
     var out = List[LoweredNode]()
     if field == FIELD_GRANT:
         _lower_edges(r, edges, shape, out)
@@ -382,6 +394,7 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) raises -> List[OwnedR
                 retained_by(labels),
                 live_key(s.digests[i]),
                 validation_run_of(labels),
+                s.names[i].copy(),
             )
         )
     return out^
@@ -480,6 +493,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         all.append(FIELD_NETWORK)
         all.append(FIELD_SUBNET)
         all.append(FIELD_IP_ADDRESS)
+        all.append(FIELD_REGISTRY)
         var l = List[Int]()
         for i in range(len(all)):
             if self._shape.hosts(all[i]):
@@ -526,6 +540,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         workload_limits(r, self._shape, self._id, out)
         trigger_limits(r, firings, self._shape, self._id, out)
         network_limits(r, self._shape, self._id, out)
+        metadata_limits(r, firings, self._shape.metadata, self._shape.schedule_folds, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
@@ -682,6 +697,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
         l.append(Absence(FIELD_EVENT_TRIGGER, NOT_YET, String("fake-limited delivers no events")))
         for f in [FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS]:
             l.append(Absence(f, NOT_YET, String("fake-limited has no networks")))
+        l.append(Absence(FIELD_REGISTRY, NOT_YET, String("fake-limited has no registry")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:

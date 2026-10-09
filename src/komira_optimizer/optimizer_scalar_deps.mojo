@@ -77,7 +77,7 @@
 #     (`propagate_statistics` reads no literal at all) -- and both are designed
 #     to run BEFORE the subquery fold, so the folded scalar is never visible to
 #     them either way.
-#   * Constant folding and predicate simplification (not in this tree) are
+#   * Constant folding and predicate simplification (`optimizer_expr`) are
 #     designed to run AFTER the subquery fold and can see its literal. The
 #     re-plan preserves this exactly.
 #   * `compute_selectivity` (`optimizer_filter_selectivity.mojo`), which feeds
