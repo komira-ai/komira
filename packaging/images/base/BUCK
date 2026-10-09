@@ -1,0 +1,70 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/package:defs.bzl", "mojo_bundle", "oci_image", "oci_tree")
+load("@komira//tools/build/package:oci_check.bzl", "oci_image_check")
+load(":pin_cases.bzl", "base_pin_cases")
+
+# The komira base image (README.md): the pinned distroless base (glibc, CA
+# certificates), `sh`, the supervisor at /komira/bin/supervisor as the
+# entrypoint, and kci at /opt/kci/bin/kci. Nothing is pushed by the build.
+
+# The program at /komira/bin/supervisor. A stand-in until the job
+# supervisor's binary exists; then this line names it.
+SUPERVISOR = ":supervisor_stub"
+
+VERSION = "0.1.0"
+
+# The base is pinned by digest, never by tag: fails loading this package (and
+# so building :komira_base) if `oci_base_refusals` accepts a tag or refuses
+# the pinned base (pin_cases.bzl).
+base_pin_cases()
+
+mojo_binary(
+    name = "supervisor_stub",
+    srcs = ["supervisor_stub.mojo"],
+)
+
+mojo_bundle(
+    name = "supervisor_bundle",
+    binary = SUPERVISOR,
+    program = "supervisor",
+    version = VERSION,
+)
+
+mojo_bundle(
+    name = "kci_bundle",
+    binary = "//bin/kci:kci",
+    version = VERSION,
+)
+
+# The layer the image adds: the supervisor bundle at /komira/, kci's at
+# /opt/kci/, the pinned static busybox as /bin/sh.
+oci_tree(
+    name = "floor",
+    bundles = {
+        "komira/": ":supervisor_bundle",
+        "opt/kci/": ":kci_bundle",
+    },
+    files = {"bin/sh": "//tools/build/toolchains:busybox"},
+    version = VERSION,
+)
+
+oci_image(
+    name = "komira_base_unchecked",
+    tree = ":floor",
+    entrypoint = "/komira/bin/supervisor",
+    repository = "komira/base",
+)
+
+# The image, read back by its check: building it, or any of its sub-targets
+# ([digest], [docker_archive], [layers]), runs the check (oci_check.bzl).
+oci_image_check(
+    name = "komira_base",
+    image = ":komira_base_unchecked",
+    entrypoint = "/komira/bin/supervisor",
+    executables = [
+        "bin/sh",
+        "opt/kci/bin/kci",
+    ],
+    files = ["etc/ssl/certs/ca-certificates.crt"],
+    visibility = ["PUBLIC"],
+)
