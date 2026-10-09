@@ -58,7 +58,8 @@ fn number(h: &[u8], at: usize, len: usize, what: &str) -> Result<u64, String> {
     u64::from_str_radix(s, 8).map_err(|_| format!("tar: {} `{}` is not octal", what, s))
 }
 
-/// The pax records `<len> <key>=<value>\n` of an extended header.
+/// The pax records `<len> <key>=<value>\n` of an extended header; a key
+/// given twice is refused, so a header cannot say two things about a field.
 fn pax(data: &[u8]) -> Result<Vec<(String, String)>, String> {
     let mut out = Vec::new();
     let mut at = 0;
@@ -70,7 +71,11 @@ fn pax(data: &[u8]) -> Result<Vec<(String, String)>, String> {
         }
         let rec = &data[at + sp + 1..at + n - 1];
         let eq = rec.iter().position(|&b| b == b'=').ok_or("tar: a pax record without `=`")?;
-        out.push((text(&rec[..eq], "a pax key")?, text(&rec[eq + 1..], "a pax value")?));
+        let key = text(&rec[..eq], "a pax key")?;
+        if out.iter().any(|(k, _)| *k == key) {
+            return Err(format!("tar: pax key `{}` given twice", key));
+        }
+        out.push((key, text(&rec[eq + 1..], "a pax value")?));
         at += n;
     }
     Ok(out)
@@ -361,6 +366,7 @@ mod tests {
             (b"6 \xff=b\n", "tar: a pax key is not UTF-8"),
             (b"7 a=\xffb\n", "tar: a pax value is not UTF-8"),
             (b"9 size=x\n", "tar: a pax size is not a number"),
+            (b"6 a=b\n6 a=c\n", "tar: pax key `a` given twice"),
         ] {
             assert_eq!(with_pax(rec), Err(why.to_string()), "{:?}", String::from_utf8_lossy(rec));
         }
