@@ -56,10 +56,10 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 365
-"""Total published members across all 33 spaces. A drift tripwire a test can pin."""
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 352
+"""Total published members across all 32 spaces. A drift tripwire a test can pin."""
 
-comptime PLAN_WIRE_SPACE_COUNT: Int = 33
+comptime PLAN_WIRE_SPACE_COUNT: Int = 32
 """Number of enumerated tag spaces the vocabulary publishes."""
 
 
@@ -2938,19 +2938,19 @@ def regexp_op_wire_name(wire: Int32) -> String:
 # Declared in: src/komira_arrow/arrow_types.mojo
 # ==========================================================================
 
-comptime ARROW_TYPE_WIRE_MEMBERS: Int = 51
+comptime ARROW_TYPE_WIRE_MEMBERS: Int = 50
 comptime ARROW_TYPE_ENGINE_MIN: UInt8 = 0
-comptime ARROW_TYPE_ENGINE_MAX: UInt8 = 50
+comptime ARROW_TYPE_ENGINE_MAX: UInt8 = 49
 comptime ARROW_TYPE_WIRE_MIN: Int32 = 1
-comptime ARROW_TYPE_WIRE_MAX: Int32 = 51
+comptime ARROW_TYPE_WIRE_MAX: Int32 = 50
 
 
 def arrow_type_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this ArrowType value?
 
-    Runs: [(0, 50)]. Total, never raising.
+    Runs: [(0, 49)]. Total, never raising.
     """
-    return engine_tag <= 50
+    return engine_tag <= 49
 
 
 def arrow_type_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -3147,9 +3147,6 @@ def write_arrow_type_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 50:
         writer.write("ARROW_TYPE_LARGE_LIST_VIEW")
-        return
-    if wire == 51:
-        writer.write("ARROW_TYPE_ERROR")
         return
     writer.write("ArrowType#", Int(wire))
 
@@ -3386,19 +3383,19 @@ def write_compression_wire_name(wire: Int32) -> String:
 # Declared in: src/komira_plan_expr/scalar_value.mojo
 # ==========================================================================
 
-comptime SCALAR_KIND_WIRE_MEMBERS: Int = 11
+comptime SCALAR_KIND_WIRE_MEMBERS: Int = 10
 comptime SCALAR_KIND_ENGINE_MIN: UInt8 = 0
-comptime SCALAR_KIND_ENGINE_MAX: UInt8 = 10
+comptime SCALAR_KIND_ENGINE_MAX: UInt8 = 9
 comptime SCALAR_KIND_WIRE_MIN: Int32 = 1
-comptime SCALAR_KIND_WIRE_MAX: Int32 = 11
+comptime SCALAR_KIND_WIRE_MAX: Int32 = 10
 
 
 def scalar_kind_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this ScalarKind value?
 
-    Runs: [(0, 10)]. Total, never raising.
+    Runs: [(0, 9)]. Total, never raising.
     """
-    return engine_tag <= 10
+    return engine_tag <= 9
 
 
 def scalar_kind_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -3475,9 +3472,6 @@ def write_scalar_kind_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 10:
         writer.write("SCALAR_KIND_BINARY")
-        return
-    if wire == 11:
-        writer.write("SCALAR_KIND_ERROR")
         return
     writer.write("ScalarKind#", Int(wire))
 
@@ -3592,126 +3586,6 @@ def scalar_time_unit_wire_name(wire: Int32) -> String:
     """
     var out = String()
     write_scalar_time_unit_wire_name(out, wire)
-    return out^
-
-
-# ==========================================================================
-# ExcelErrorCode — engine prefix `XL_ERR_`
-# The Excel error value carried by a SCALAR_KIND_ERROR literal.
-# Core-owned, shared by both surfaces — the Excel formula layer maps
-# `FormulaValue.ERROR(code)` onto it as a pure code copy — so an
-# unknown code decodes as a DIFFERENT error, not as an error.
-# Declared in: src/komira_plan_expr/excel_error_code.mojo
-# ==========================================================================
-
-comptime EXCEL_ERROR_CODE_WIRE_MEMBERS: Int = 11
-comptime EXCEL_ERROR_CODE_ENGINE_MIN: UInt8 = 0
-comptime EXCEL_ERROR_CODE_ENGINE_MAX: UInt8 = 10
-comptime EXCEL_ERROR_CODE_WIRE_MIN: Int32 = 1
-comptime EXCEL_ERROR_CODE_WIRE_MAX: Int32 = 11
-
-
-def excel_error_code_is_declared(engine_tag: UInt8) -> Bool:
-    """Does the engine declare this ExcelErrorCode value?
-
-    Runs: [(0, 10)]. Total, never raising.
-    """
-    return engine_tag <= 10
-
-
-def excel_error_code_to_wire(engine_tag: UInt8) raises -> Int32:
-    """Engine tag -> permanent wire number for ExcelErrorCode.
-
-    RAISES on a value the engine does not declare: encoding a tag
-    this vocabulary has never heard of would write bytes that no
-    reader can name."""
-    if not excel_error_code_is_declared(engine_tag):
-        raise Error("ExcelErrorCode: engine tag " + String(Int(engine_tag))
-            + " is not in the plan wire vocabulary")
-    return Int32(Int(engine_tag)) + 1
-
-
-def excel_error_code_from_wire(wire: Int32) raises -> UInt8:
-    """Wire number -> engine tag for ExcelErrorCode.
-
-    RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
-    field decodes to) and on any value this reader does not know.
-    Fail loud; never guess a plan node."""
-    if wire <= 0:
-        raise Error("ExcelErrorCode: wire 0 is XL_ERR_WIRE_UNSPECIFIED — an absent"
-            + " proto3 enum field is not a tag")
-    if wire > 256:
-        raise Error("ExcelErrorCode: wire value " + String(Int(wire))
-            + " is out of range for a UInt8 engine tag")
-    var engine_tag = UInt8(Int(wire) - 1)
-    if not excel_error_code_is_declared(engine_tag):
-        raise Error("ExcelErrorCode: wire value " + String(Int(wire))
-            + " is unknown to this reader")
-    return engine_tag
-
-
-def write_excel_error_code_wire_name[W: Writer](mut writer: W, wire: Int32):
-    """WRITE the stable wire NAME for a ExcelErrorCode value.
-
-    ⚠ THIS WRITES; IT DOES NOT RETURN — see the LADDER SHAPE banner
-    at the top of this file. Every arm writes its literal into
-    `writer`; no string constant is ever selected and returned, so
-    the compiler synthesises no parallel (pointer, length) constant
-    arrays for this ladder and there is no pair for a later link to
-    cross. Total, never raising: this is the diagnostic path, and a
-    diagnostic that raises is one you cannot use inside an error
-    handler. An unknown value renders as `<enum>#<n>`."""
-    if wire == 0:
-        writer.write("XL_ERR_WIRE_UNSPECIFIED")
-        return
-    if wire == 1:
-        writer.write("XL_ERR_NONE")
-        return
-    if wire == 2:
-        writer.write("XL_ERR_DIV0")
-        return
-    if wire == 3:
-        writer.write("XL_ERR_NA")
-        return
-    if wire == 4:
-        writer.write("XL_ERR_VALUE")
-        return
-    if wire == 5:
-        writer.write("XL_ERR_REF")
-        return
-    if wire == 6:
-        writer.write("XL_ERR_NAME")
-        return
-    if wire == 7:
-        writer.write("XL_ERR_NUM")
-        return
-    if wire == 8:
-        writer.write("XL_ERR_NULL")
-        return
-    if wire == 9:
-        writer.write("XL_ERR_SPILL")
-        return
-    if wire == 10:
-        writer.write("XL_ERR_CALC")
-        return
-    if wire == 11:
-        writer.write("XL_ERR_CIRCULAR")
-        return
-    writer.write("ExcelErrorCode#", Int(wire))
-
-
-def excel_error_code_wire_name(wire: Int32) -> String:
-    """The stable wire NAME for a ExcelErrorCode value, as a String.
-
-    A thin `String`-collecting wrapper over
-    `write_excel_error_code_wire_name`, for the many diagnostic call sites
-    that build a message by concatenation and have no `Writer` in
-    scope. The LADDER lives in the writing helper — keep it that
-    way; moving the arms back in here restores the shape the banner
-    describes. Total, never raising.
-    """
-    var out = String()
-    write_excel_error_code_wire_name(out, wire)
     return out^
 
 
@@ -4019,7 +3893,7 @@ def snapshot_policy_wire_name(wire: Int32) -> String:
 
 # ==========================================================================
 # SPACE-INDEXED DISPATCH — one generic codec over all
-# 33 spaces, addressed by a stable space index.
+# 32 spaces, addressed by a stable space index.
 #
 # The index is an INTERNAL addressing scheme, not a wire value:
 # it is derived from the generator's space order and may move if
@@ -4056,10 +3930,9 @@ comptime PLAN_WIRE_SPACE_WRITE_FORMAT: Int = 25
 comptime PLAN_WIRE_SPACE_WRITE_COMPRESSION: Int = 26
 comptime PLAN_WIRE_SPACE_SCALAR_KIND: Int = 27
 comptime PLAN_WIRE_SPACE_SCALAR_TIME_UNIT: Int = 28
-comptime PLAN_WIRE_SPACE_EXCEL_ERROR_CODE: Int = 29
-comptime PLAN_WIRE_SPACE_PARAM_TAG: Int = 30
-comptime PLAN_WIRE_SPACE_PUSHDOWN_GATE_MODE: Int = 31
-comptime PLAN_WIRE_SPACE_SNAPSHOT_POLICY: Int = 32
+comptime PLAN_WIRE_SPACE_PARAM_TAG: Int = 29
+comptime PLAN_WIRE_SPACE_PUSHDOWN_GATE_MODE: Int = 30
+comptime PLAN_WIRE_SPACE_SNAPSHOT_POLICY: Int = 31
 
 
 def write_plan_wire_space_name[W: Writer](mut writer: W, space: Int):
@@ -4156,15 +4029,12 @@ def write_plan_wire_space_name[W: Writer](mut writer: W, space: Int):
         writer.write("ScalarTimeUnit")
         return
     if space == 29:
-        writer.write("ExcelErrorCode")
-        return
-    if space == 30:
         writer.write("ParamTag")
         return
-    if space == 31:
+    if space == 30:
         writer.write("PushdownGateMode")
         return
-    if space == 32:
+    if space == 31:
         writer.write("SnapshotPolicy")
         return
     writer.write("PlanWireSpace#", space)
@@ -4233,22 +4103,20 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
     if space == 23:
         return 10
     if space == 24:
-        return 51
+        return 50
     if space == 25:
         return 3
     if space == 26:
         return 5
     if space == 27:
-        return 11
+        return 10
     if space == 28:
         return 4
     if space == 29:
-        return 11
-    if space == 30:
         return 6
-    if space == 31:
+    if space == 30:
         return 3
-    if space == 32:
+    if space == 31:
         return 3
     raise Error("plan wire: no such space index " + String(space))
 
@@ -4304,22 +4172,20 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     if space == 23:
         return 9
     if space == 24:
-        return 50
+        return 49
     if space == 25:
         return 2
     if space == 26:
         return 4
     if space == 27:
-        return 10
+        return 9
     if space == 28:
         return 3
     if space == 29:
-        return 10
-    if space == 30:
         return 5
-    if space == 31:
+    if space == 30:
         return 2
-    if space == 32:
+    if space == 31:
         return 2
     raise Error("plan wire: no such space index " + String(space))
 
@@ -4389,12 +4255,10 @@ def plan_wire_is_declared(space: Int, engine_tag: UInt8) raises -> Bool:
     if space == 28:
         return scalar_time_unit_is_declared(engine_tag)
     if space == 29:
-        return excel_error_code_is_declared(engine_tag)
-    if space == 30:
         return param_tag_is_declared(engine_tag)
-    if space == 31:
+    if space == 30:
         return pushdown_gate_mode_is_declared(engine_tag)
-    if space == 32:
+    if space == 31:
         return snapshot_policy_is_declared(engine_tag)
     raise Error("plan wire: no such space index " + String(space))
 
@@ -4460,12 +4324,10 @@ def plan_wire_to_wire(space: Int, engine_tag: UInt8) raises -> Int32:
     if space == 28:
         return scalar_time_unit_to_wire(engine_tag)
     if space == 29:
-        return excel_error_code_to_wire(engine_tag)
-    if space == 30:
         return param_tag_to_wire(engine_tag)
-    if space == 31:
+    if space == 30:
         return pushdown_gate_mode_to_wire(engine_tag)
-    if space == 32:
+    if space == 31:
         return snapshot_policy_to_wire(engine_tag)
     raise Error("plan wire: no such space index " + String(space))
 
@@ -4531,12 +4393,10 @@ def plan_wire_from_wire(space: Int, wire: Int32) raises -> UInt8:
     if space == 28:
         return scalar_time_unit_from_wire(wire)
     if space == 29:
-        return excel_error_code_from_wire(wire)
-    if space == 30:
         return param_tag_from_wire(wire)
-    if space == 31:
+    if space == 30:
         return pushdown_gate_mode_from_wire(wire)
-    if space == 32:
+    if space == 31:
         return snapshot_policy_from_wire(wire)
     raise Error("plan wire: no such space index " + String(space))
 
@@ -4637,15 +4497,12 @@ def write_plan_wire_name[W: Writer](mut writer: W, space: Int, wire: Int32):
         write_scalar_time_unit_wire_name(writer, wire)
         return
     if space == 29:
-        write_excel_error_code_wire_name(writer, wire)
-        return
-    if space == 30:
         write_param_tag_wire_name(writer, wire)
         return
-    if space == 31:
+    if space == 30:
         write_pushdown_gate_mode_wire_name(writer, wire)
         return
-    if space == 32:
+    if space == 31:
         write_snapshot_policy_wire_name(writer, wire)
         return
     writer.write("PlanWireSpace#", space, "/", Int(wire))
