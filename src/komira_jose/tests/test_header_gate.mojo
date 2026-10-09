@@ -195,6 +195,24 @@ def test_alg() raises:
     assert_equal(_err(_mint('{"alg":"xEdDSA","kid":"k1"}')), NOT_PINNED)
     # A proper suffix of the pinned alg is not it.
     assert_equal(_err(_mint('{"alg":"dDSA","kid":"k1"}')), NOT_PINNED)
+    # The same length with the first or the last byte replaced is not it
+    # (catches a byte loop that skips either end), and the same holds for
+    # `none`: `zone` and `nonz` are merely unpinned.
+    var misses = String("")
+    for a in ["FdDSA", "EdDSB", "zone", "nonz"]:
+        var h = String('{"alg":"') + String(a) + '","kid":"k1"}'
+        var got = _err(_mint(h))
+        if got != NOT_PINNED:
+            misses += String(a) + " -> " + got + "; "
+    # The member is named `alg` exactly: a header whose only near name is
+    # another member (a prefix, an extension at either end, a suffix, a case
+    # variant, the first or last byte replaced) has no alg.
+    for m in ["al", "algx", "xalg", "lg", "ALG", "zlg", "alz"]:
+        var h = String('{"') + String(m) + '":"EdDSA","kid":"k1"}'
+        var got = _err(_mint(h))
+        if got != ALG_MISSING:
+            misses += String("member ") + String(m) + " -> " + got + "; "
+    assert_equal(misses, "")
 
 
 def test_crit_cannot_hide_alg() raises:

@@ -29,7 +29,7 @@ from komira_jwks import Jwk, JwkSet
 comptime SEED = "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"
 comptime X = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
 comptime HDR = '{"alg":"EdDSA","kid":"k1","typ":"at+jwt"}'
-comptime ISS = "https://issuer.example"
+comptime ISS = "https://issuer.example/a"
 comptime AUD = "service-a"
 comptime NOW: Int64 = 1000000
 
@@ -57,7 +57,7 @@ def _claims(
     iat: String = "1000000",
     extra: String = "",
     aud: String = '"service-a"',
-    iss: String = '"https://issuer.example"',
+    iss: String = '"https://issuer.example/a"',
     sub: String = '"user-1"',
 ) -> String:
     """A payload; an argument of "-" leaves that claim out."""
@@ -161,13 +161,15 @@ def test_policy_bounds() raises:
     assert_equal(_policy_err(typ="JWT"), "")
     # Each of the two accepted types is matched exactly: the near-miss
     # tables of `at+jwt` and `JWT` (a prefix, an extension at the end and at
-    # the front, a proper suffix, a case variant), the long media type and
+    # the front, a proper suffix, a case variant, the same length with the
+    # first or the last byte replaced), the long media type and
     # "". Every value is tried and every miss is reported, so a loose
-    # compare on either type shows.
+    # compare (prefix, suffix, case-folded or a byte loop that skips the
+    # first or last byte) on either type shows.
     var misses = String("")
     for t in [
-        "at+jw", "at+jwtx", "xat+jwt", "t+jwt", "AT+JWT",
-        "JW", "JWTx", "xJWT", "WT", "jwt",
+        "at+jw", "at+jwtx", "xat+jwt", "t+jwt", "AT+JWT", "zt+jwt", "at+jwx",
+        "JW", "JWTx", "xJWT", "WT", "jwt", "ZWT", "JWX",
         "application/at+jwt", "",
     ]:
         var got = _policy_err(typ=String(t))
@@ -228,9 +230,10 @@ def test_typ_is_pinned() raises:
     # The pin is byte for byte, case included (a deliberate narrowing of
     # RFC 7515 4.1.9's case-insensitive media types). The near-miss table of
     # `at+jwt`: a prefix, the type extended at the end and at the front, a
-    # proper suffix, a case variant and "". Every miss is reported.
+    # proper suffix, a case variant, "", and the same length with the first
+    # or the last byte replaced. Every miss is reported.
     var misses = String("")
-    for t in ["at+jw", "at+jwtx", "xat+jwt", "t+jwt", "AT+JWT", ""]:
+    for t in ["at+jw", "at+jwtx", "xat+jwt", "t+jwt", "AT+JWT", "", "zt+jwt", "at+jwx"]:
         var h = String('{"alg":"EdDSA","kid":"k1","typ":"') + String(t) + '"}'
         var got = _err(_mint_h(h, c))
         if got != OTHER:
@@ -272,16 +275,34 @@ def test_iss() raises:
     comptime OTHER = "JoseError: claim iss is not the issuer"
     assert_equal(_err(_mint(_claims(iss="-"))), BAD)
     assert_equal(_err(_mint(_claims(iss="1"))), BAD)
-    assert_equal(_err(_mint(_claims(iss='"https://issuer.example/"'))), OTHER)
     assert_equal(_err(_mint(_claims(iss='"issuer.example"'))), OTHER)
-    assert_equal(_err(_mint(_claims(iss='"HTTPS://issuer.example"'))), OTHER)
-    # A prefix of the issuer, down to the empty string, is another issuer.
-    # (The prefix stops before the host: a shortened host is not a reserved
-    # example name, and the public-boundary lint refuses it.)
-    assert_equal(_err(_mint(_claims(iss='"https:/"'))), OTHER)
-    assert_equal(_err(_mint(_claims(iss='""'))), OTHER)
-    # The issuer with something in front of it is another issuer.
-    assert_equal(_err(_mint(_claims(iss='"xhttps://issuer.example"'))), OTHER)
+    # The near-miss table of the issuer `https://issuer.example/a`: prefixes
+    # down to "" (a shortened host is not a reserved example name and the
+    # public-boundary lint refuses it, so the prefixes stop before the host
+    # or keep all of it), the issuer extended at the end and at the front, a
+    # proper suffix, a case variant, and the same length with the first or
+    # the last byte replaced. A prefix, suffix, case-folded or partial
+    # byte-loop compare accepts at least one of them; every miss is reported.
+    var misses = String("")
+    for i in [
+        "https:/", "https://issuer.example/", "https://issuer.example/ax",
+        "xhttps://issuer.example/a", "ttps://issuer.example/a",
+        "HTTPS://issuer.example/a", "", "zttps://issuer.example/a",
+        "https://issuer.example/b",
+    ]:
+        var s = String('"') + String(i) + '"'
+        var got = _err(_mint(_claims(iss=s)))
+        if got != OTHER:
+            misses += s + " -> " + got + "; "
+    # The member is named `iss` exactly: a payload whose only near name is
+    # another member (a prefix, an extension at either end, a suffix, a case
+    # variant, the first or last byte replaced) has no iss.
+    for m in ["is", "issx", "xiss", "ss", "ISS", "zss", "isz"]:
+        var e = String('"') + String(m) + '":"' + ISS + '"'
+        var got = _err(_mint(_claims(iss="-", extra=e)))
+        if got != BAD:
+            misses += String("member ") + String(m) + " -> " + got + "; "
+    assert_equal(misses, "")
 
 
 def test_aud() raises:
@@ -314,11 +335,15 @@ def test_aud() raises:
     # RFC 7519 2 and 4.1.3: aud values are compared case-sensitively with no
     # transformation. The near-miss table of `service-a`: a prefix, the
     # audience extended at the end and at the front, a proper suffix, a case
-    # variant and "", each as a string and as the only array element. A
-    # prefix, suffix or case-folded compare in either direction accepts at
-    # least one of them; every miss is reported.
+    # variant, "", and the same length with the first or the last byte
+    # replaced, each as a string and as the only array element. A prefix,
+    # suffix, case-folded or partial byte-loop compare in either direction
+    # accepts at least one of them; every miss is reported.
     var misses = String("")
-    for a in ["service", "service-ab", "xservice-a", "ervice-a", "SERVICE-A", ""]:
+    for a in [
+        "service", "service-ab", "xservice-a", "ervice-a", "SERVICE-A", "",
+        "zervice-a", "service-b",
+    ]:
         var s = String('"') + String(a) + '"'
         var got = _err(_mint(_claims(aud=s)))
         if got != NOT_OURS:
