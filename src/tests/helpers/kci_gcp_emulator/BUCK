@@ -1,0 +1,35 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A stateful, in-memory GCP REST emulator behind komira_http_core's Connector
+# (test-only: no shipped library depends on it). No test here opens a
+# socket, resolves a name or holds a credential: every client is pointed at
+# an IP-literal http endpoint that the emulator's connector serves in
+# memory.
+#
+# The welded test:
+#   test_emulator_wire     the emulator through komira's generated clients:
+#                          each route, its paging, its error envelopes
+#                          (NOT_FOUND, ALREADY_EXISTS, a stale etag's ABORTED,
+#                          INVALID_ARGUMENT, UNAUTHENTICATED) and the
+#                          token-information endpoint.
+mojo_library(
+    name = "kci_gcp_emulator",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_gcp_iam:komira_gcp_iam",
+        "//src/komira_gcp_run:komira_gcp_run",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+    test_srcs = [
+        "tests/test_emulator_wire.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
