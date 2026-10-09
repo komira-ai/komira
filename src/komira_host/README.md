@@ -81,6 +81,9 @@ setting is `madvise` and the process has not disabled hugepages. `always`
 resolves to off (the kernel already does it, so the advice only adds cost),
 and so does anything unreadable or unrecognised.
 `hugepage_auto_advice_mode()` applies the same decision to this host.
+On a kernel before Linux 5.0 `/proc/self/status` has no `THP_enabled:` field,
+so a process that set `PR_SET_THP_DISABLE` reads as available. The package's
+tests observe that row on the real kernel and so require Linux 5.0 or later.
 
 ```mojo
 from komira_host.thp_policy import ADVICE_HUGEPAGE, ADVICE_OFF, THP_DEFRAG_DEFER, THP_DEFRAG_DEFER_MADVISE, THP_ENABLED_ALWAYS, THP_ENABLED_MADVISE, THP_ENABLED_UNKNOWN, THP_PROCESS_AVAILABLE, THP_PROCESS_DISABLED, parse_thp_defrag, parse_thp_enabled, parse_thp_process_enabled, resolve_auto_mode

@@ -4,9 +4,14 @@
 #
 # This process sets PR_SET_THP_DISABLE before anything reads the THP policy,
 # so the frozen snapshot is taken from a `/proc/self/status` that reports
-# `THP_enabled: 0` (on a kernel that emits the field). The `auto` mode must
-# then be OFF whatever `enabled` says, and the report must name the flag.
-# Kept in its own test binary because the flag is process-wide and inherited.
+# `THP_enabled: 0`. The `auto` mode must then be OFF whatever `enabled` says,
+# and the report must name the flag. Kept in its own test binary because the
+# flag is process-wide and inherited.
+#
+# Requires Linux 5.0 or later to build: `THP_enabled:` first appears in
+# `/proc/<pid>/status` in 5.0 (commit a1400af75563, "mm, proc: report
+# PR_SET_THP_DISABLE in proc"). On an older kernel this test fails with that
+# message rather than passing without observing row 1.
 # =============================================================================
 
 from std.ffi import external_call, c_int
@@ -36,9 +41,12 @@ def test_pr_set_thp_disable_resolves_off_and_is_reported() raises:
         assert_equal(Int(rc), 0, "prctl(PR_SET_THP_DISABLE) failed")
         var status = _read_small_file("/proc/self/status")
         if status.find("THP_enabled:") < 0:
-            # A kernel before the field: absent reads as available, and row 1
+            # A kernel before 5.0: absent reads as available, and row 1
             # cannot be observed through /proc/self/status on this host.
-            raise Error("this kernel does not report THP_enabled")
+            raise Error(
+                "komira_host tests require Linux 5.0 or later: this kernel's"
+                " /proc/self/status has no THP_enabled field"
+            )
         assert_equal(parse_thp_process_enabled(status), THP_PROCESS_DISABLED)
         assert_equal(thp_process_enabled(), THP_PROCESS_DISABLED)
         assert_equal(hugepage_auto_advice_mode(), ADVICE_OFF)

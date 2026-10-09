@@ -6,8 +6,10 @@
 # `_parent_cgroup_path`) are pure and are asserted from literals. The reader is
 # asserted against files written under `TEST_TMPDIR`: missing, empty, a lone
 # newline, the trailing-newline strip, and both sides of the 4 KiB cap. The
-# probe itself reads this host's `/proc/meminfo` and cgroup files, so it is
-# asserted against the rule it documents (min of the two readable signals).
+# basis rule (`_min_of_readable`) is pure and asserted from literals. The probe
+# itself reads this host's `/proc/meminfo` and cgroup files, whose
+# MemAvailable moves between reads, so it is asserted only by bounds that hold
+# on every read: never above the cgroup cap, positive on Linux.
 # =============================================================================
 
 from std.os import getenv
@@ -19,6 +21,7 @@ from komira_host.proc_probe import (
     _find_substring_bytes,
     _linux_read_cgroup_v2_mem_max_bytes,
     _linux_read_meminfo_available_bytes,
+    _min_of_readable,
     _parent_cgroup_path,
     _parse_decimal_int,
     _read_small_file_to_string,
@@ -136,20 +139,33 @@ def test_reader_caps_at_4_kib() raises:
 # -----------------------------------------------------------------------------
 
 
-def test_basis_is_the_min_of_the_readable_signals() raises:
-    var avail = _linux_read_meminfo_available_bytes()
+def test_min_of_readable_takes_the_smaller_readable_signal() raises:
+    # 0 means unreadable. Both readable: the smaller one, either order.
+    assert_equal(_min_of_readable(5 << 30, 7 << 30), 5 << 30)
+    assert_equal(_min_of_readable(7 << 30, 5 << 30), 5 << 30)
+    assert_equal(_min_of_readable(4096, 4096), 4096)
+    # Only one readable: that one, whichever side it is on.
+    assert_equal(_min_of_readable(5 << 30, 0), 5 << 30)
+    assert_equal(_min_of_readable(0, 7 << 30), 7 << 30)
+    # Neither readable: 0, so the caller falls back to its fixed default.
+    assert_equal(_min_of_readable(0, 0), 0)
+
+
+def test_basis_on_this_host_is_bounded_by_the_signals() raises:
+    # MemAvailable moves between any two reads on a busy host, so the live
+    # basis is not compared with a second reading here (the rule itself is
+    # pinned above from literals). What must hold on every read: the basis
+    # never exceeds a cgroup cap, and on Linux it is a positive byte count.
     var cg = _linux_read_cgroup_v2_mem_max_bytes()
     var basis = detect_scan_cache_ram_basis_bytes()
+    assert_true(cg >= 0)
+    if cg > 0:
+        assert_true(basis <= cg, "the basis never exceeds the cgroup cap")
     comptime if CompilationTarget.is_linux():
+        var avail = _linux_read_meminfo_available_bytes()
         assert_true(avail > 0, "/proc/meminfo has MemAvailable on Linux")
         assert_equal(avail % 1024, 0, "kibibytes are scaled to bytes")
-    var want = cg
-    if avail > 0 and cg > 0:
-        want = min(avail, cg)
-    elif avail > 0:
-        want = avail
-    assert_equal(basis, want)
-    assert_true(cg >= 0)
+        assert_true(basis > 0, "MemAvailable is readable, so the basis is")
 
 
 def test_cgroup_path_is_the_unified_line() raises:
