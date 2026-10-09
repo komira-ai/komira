@@ -367,13 +367,22 @@ comptime _VT_MAX_WORKERS: Int = 128
 """Matches `batch_morsel_source._MAX_WORKERS` / the parquet source's
 `_MAX_WORKERS_FOR_SPLIT`: the scheduler's worst-case worker id."""
 
+comptime _VT_SLOT_CELLS: Int = _VT_MAX_WORKERS + 1
+"""Cells in `_VtCounters.slots`: one per in-range worker, plus the OVERFLOW
+cell at index `_VT_SLOT_CELLS - 1` that every worker id outside
+`[0, _VT_MAX_WORKERS)` shares. Both the allocation and the overflow index use
+this one constant so they cannot drift apart: an overflow index past the
+allocation would write one cell past the end, which no test here can see."""
+
 
 struct _VtCounters:
     """Heap slab: the morsel id counter, the SERIALISING lock, and the
     PER-WORKER out-param slots.
 
-    `lock` is a test-and-set spin flag used ONLY when the connector did NOT
-    set `KOMIRA_SCAN_CAP_MT_SAFE`. It is `int8` for the same reason the cancel
+    `lock` is a test-and-set spin flag held by every call on a connector that
+    did NOT set `KOMIRA_SCAN_CAP_MT_SAFE`, and by every call on the shared
+    OVERFLOW slot cell (a worker id outside `[0, _VT_MAX_WORKERS)`) whatever
+    the connector declared. It is `int8` for the same reason the cancel
     flag is (`morsel_source.mojo`: Mojo's LLVM backend refuses atomic
     loads on i1)."""
 
@@ -394,7 +403,7 @@ struct _VtCounters:
     # ⚠ AND IT IS PER WORKER, NOT ONE SLOT. `next_morsel` is an IMMUTABLE
     # borrow that N workers call concurrently; one shared out-param slot would
     # be a data race the door itself introduced -- exactly the class it exists
-    # to keep the connector out of. Index `_VT_MAX_WORKERS` is the OVERFLOW
+    # to keep the connector out of. Index `_VT_SLOT_CELLS - 1` is the OVERFLOW
     # cell every worker id outside `[0, _VT_MAX_WORKERS)` shares; a call on it
     # always holds `lock`, even on an MT-safe connector (see `next_morsel`).
     # SAFETY (safety model §7.11):
@@ -405,7 +414,7 @@ struct _VtCounters:
     #   (b) NON-NULL WINDOW: from `VTableMorselSource.__init__` to `__del__`.
     #       Never null in between; there is no "between dispatches" state.
     #   (c) OWNING? YES, and it is a FIXED-SIZE POD ARRAY of
-    #       `_VT_MAX_WORKERS + 1` scratch cells -- no `List`, `String`,
+    #       `_VT_SLOT_CELLS` scratch cells -- no `List`, `String`,
     #       `OwnedPointer` or nested heap in the element type, so it is not the
     #       gap6 shape. The ban targets owning pointers to HEAP-OWNING
     #       elements; every field of `KomiraScanBatch` is a machine word.
@@ -487,7 +496,7 @@ struct VTableMorselSource(MorselSourceImpl):
         self._counters[].next_id = AtomicI64(0)
         self._counters[].lock = AtomicI8(0)
         self._counters[].eof = AtomicI8(0)
-        self._counters[].slots = alloc[KomiraScanBatch](_VT_MAX_WORKERS + 1)
+        self._counters[].slots = alloc[KomiraScanBatch](_VT_SLOT_CELLS)
         self._pool = _vt_null_ptr[ExprPool, MutUntrackedOrigin]()
         self._pushed = False
         self._vt = vt^
@@ -525,7 +534,7 @@ struct VTableMorselSource(MorselSourceImpl):
         var w = worker_id
         var overflow = w < 0 or w >= _VT_MAX_WORKERS
         if overflow:
-            w = _VT_MAX_WORKERS
+            w = _VT_SLOT_CELLS - 1
         var mt_safe = (
             (self._caps & KOMIRA_SCAN_CAP_MT_SAFE) != Int64(0) and not overflow
         )
@@ -620,8 +629,10 @@ struct VTableMorselSource(MorselSourceImpl):
 
     @always_inline
     def _acquire(self):
-        """Spin-acquire the serialising lock. Only reached when the connector
-        did NOT declare `KOMIRA_SCAN_CAP_MT_SAFE` — i.e. the fail-SAFE arm."""
+        """Spin-acquire the serialising lock. Reached on every call when the
+        connector did NOT declare `KOMIRA_SCAN_CAP_MT_SAFE` (the fail-SAFE
+        arm), and on an MT-safe connector only for a call on the shared
+        OVERFLOW slot cell."""
         while True:
             var expected = Int8(0)
             if self._counters[].lock.compare_exchange(expected, Int8(1)):

@@ -373,10 +373,14 @@ def test_projection_with_an_index_outside_the_schema_is_not_pushed() raises:
     # with n = 4 while the schema narrowed to 2 columns.
     var s = _make([KOMIRA_SCAN_OK], KOMIRA_SCAN_CAP_PROJECTION)
     var src = VTableMorselSource(_vt(s), _schema())
+    # One assert after each call, so a check dropped for one kind of bad
+    # index fails here by name instead of aborting later in `field_at`.
     src.set_projection([1, 5, -1, 0])
+    assert_equal(s[].proj_calls, 0, "mixed bad indices are not pushed")
     src.set_projection([2])
+    assert_equal(s[].proj_calls, 0, "an index at the schema width is not pushed")
     src.set_projection([0, -1])
-    assert_equal(s[].proj_calls, 0, "no projection with a bad index is pushed")
+    assert_equal(s[].proj_calls, 0, "a negative index is not pushed")
     var sch = src.output_schema()
     assert_equal(sch.num_columns(), 2, "the schema keeps every column")
     assert_equal(sch.field_at(0).name, "id")
@@ -410,6 +414,7 @@ def test_worker_id_outside_the_slot_table_mt_safe_connector() raises:
     var codes = List[Int32]()
     for _ in range(5):
         codes.append(KOMIRA_SCAN_OK)
+    codes.append(KOMIRA_SCAN_ERR)
     var s = _make(codes, KOMIRA_SCAN_CAP_MT_SAFE)
     var src = VTableMorselSource(_vt(s), _schema())
     _watch_lock(s, src)
@@ -448,6 +453,27 @@ def test_worker_id_outside_the_slot_table_mt_safe_connector() raises:
     assert_true(s[].lock_seen)
     assert_false(_lock_held(src), "lock released on the overflow error path")
     assert_equal(s[].release_calls, 5)
+
+    # The two other release paths of an overflow call: a non-OK status from
+    # `next`, then EOF. A leak on either would make the next overflow call
+    # spin in `_acquire` forever, so read the lock directly after each.
+    s[].lock_seen = False
+    var raised = False
+    try:
+        _ = src.next_morsel(200)
+    except:
+        raised = True
+    assert_true(raised, "the scripted error status is raised")
+    assert_true(s[].lock_seen, "the overflow call held the lock during next")
+    assert_false(_lock_held(src), "lock released on the overflow status-error path")
+
+    s[].lock_seen = False
+    var e = src.next_morsel(-5)
+    assert_false(Bool(e), "the script is exhausted: EOF")
+    assert_true(s[].lock_seen, "the overflow EOF call held the lock during next")
+    assert_false(_lock_held(src), "lock released on the overflow EOF path")
+    assert_equal(s[].next_calls, 7)
+    assert_equal(s[].release_calls, 5, "no release after a status error or EOF")
     s[].lock_watch = False
     _ = src^
     _free(s)
