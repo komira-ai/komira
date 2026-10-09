@@ -6,12 +6,16 @@
 #
 # One cluster is encoded at every Metadata version: broker 1 "kb":9092,
 # controller 1, a topic "t1" with two partitions and an explicit leader map
-# [1, -1] (partition 1 has no leader), and an internal topic "in" with one
-# partition and no map, which reports the encoder's fallback leader 7. So
-# each golden checks the per-partition leader map, the no-leader sentinel and
-# the fallback, and each version's added fields: leader_epoch (v7+),
-# offline_replicas (v5+), the authorized operations (v8+), and at v9 the
-# compact forms and tag buffers.
+# [1, 2], and an internal topic "in" with one partition and no map, which
+# reports the encoder's fallback leader 7. So each golden checks the
+# per-partition leader map and the fallback, and each version's added fields:
+# leader_epoch (v7+), offline_replicas (v5+), the authorized operations (v8+),
+# and at v9 the compact forms and tag buffers.
+#
+# A leaderless partition (map entry -1) is deliberately not encoded here: the
+# encoder reports it with error_code 0 and replicas/isr [-1], which the
+# MetadataResponse schema does not allow (komira-ai/komira#1034), so no golden
+# pins those bytes. The -1 entry takes the same lines as any other leader.
 
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -68,7 +72,7 @@ def _brokers() -> List[MetadataBroker]:
 def _topics() -> List[MetadataTopic]:
     var leaders = List[Int32]()
     leaders.append(Int32(1))
-    leaders.append(Int32(-1))
+    leaders.append(Int32(2))
     var out = List[MetadataTopic]()
     out.append(MetadataTopic(String("t1"), 2, False, leaders^))
     out.append(MetadataTopic(String("in"), 1, True))
@@ -92,8 +96,8 @@ def _nonflexible_golden(version: Int) -> String:
     s += " 00 00 | 00 02 74 31 | 00 | 00 00 00 02"  # "t1", not internal, 2 parts
     s += " 00 00 | 00 00 00 00 | 00 00 00 01" + epoch  # p0, leader 1
     s += " 00 00 00 01 00 00 00 01 | 00 00 00 01 00 00 00 01" + offline
-    s += " 00 00 | 00 00 00 01 | ff ff ff ff" + epoch  # p1, no leader
-    s += " 00 00 00 01 ff ff ff ff | 00 00 00 01 ff ff ff ff" + offline
+    s += " 00 00 | 00 00 00 01 | 00 00 00 02" + epoch  # p1, leader 2
+    s += " 00 00 00 01 00 00 00 02 | 00 00 00 01 00 00 00 02" + offline
     s += topic_ops
     s += " 00 00 | 00 02 69 6e | 01 | 00 00 00 01"  # "in", internal, 1 part
     s += " 00 00 | 00 00 00 00 | 00 00 00 07" + epoch  # p0, fallback 7
@@ -141,8 +145,8 @@ def test_metadata_response_v9() raises:
         " 00 00 | 03 74 31 | 00 | 03"  # "t1", 2 partitions
         " 00 00 | 00 00 00 00 | 00 00 00 01 | 00 00 00 00"  # p0 leader 1, epoch
         " 02 00 00 00 01 | 02 00 00 00 01 | 01 | 00"  # replicas, isr, offline
-        " 00 00 | 00 00 00 01 | ff ff ff ff | 00 00 00 00"  # p1 no leader
-        " 02 ff ff ff ff | 02 ff ff ff ff | 01 | 00"
+        " 00 00 | 00 00 00 01 | 00 00 00 02 | 00 00 00 00"  # p1 leader 2
+        " 02 00 00 00 02 | 02 00 00 00 02 | 01 | 00"
         " 80 00 00 00 | 00"  # topic_authorized_operations, tags
         " 00 00 | 03 69 6e | 01 | 02"  # "in", internal, 1 partition
         " 00 00 | 00 00 00 00 | 00 00 00 07 | 00 00 00 00"  # p0 fallback 7
@@ -162,7 +166,7 @@ def test_metadata_copies() raises:
     assert_equal(c.num_partitions, 2, "partitions")
     assert_false(c.is_internal, "internal")
     assert_equal(len(c.partition_leaders), 2, "map length")
-    assert_equal(Int(c.partition_leaders[1]), -1, "the copy's map is its own")
+    assert_equal(Int(c.partition_leaders[1]), 2, "the copy's map is its own")
     var b = _brokers()[0].copy()
     assert_equal(Int(b.node_id), 1, "node")
     assert_equal(b.host, String("kb"), "host")
@@ -171,12 +175,14 @@ def test_metadata_copies() raises:
 
 # -----------------------------------------------------------------------------
 # The v9 request: topics COMPACT_ARRAY of {name, tags}, three booleans, tags.
+# At v9 a topic name is not nullable (MetadataRequest.json: Name
+# "nullableVersions": "10+"); the decoder accepts and skips a null name
+# (komira-ai/komira#1033), so no input here carries one.
 # -----------------------------------------------------------------------------
 def test_metadata_request_v9_named() raises:
     var b = _hex(
-        "04"  # topics: 3
+        "03"  # topics: 2
         " 03 74 31 | 00"  # "t1", no tags
-        " 00 | 00"  # a null name (skipped), no tags
         " 02 61 | 01 00 01 ff"  # "a", one tagged field (tag 0, 1 byte)
         " 01 00 01"  # allow_auto_topic_creation, include_cluster_ops, include_topic_ops
         " 00"  # tags

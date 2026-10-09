@@ -77,11 +77,12 @@ comptime PRODUCE = (
     " 00 00 75 30"  # timeout_ms 30000
     " 00 00 00 02"  # topic_data: 2
     " 00 01 61"  # "a"
-    " 00 00 00 04"  # partition_data: 4
+    " 00 00 00 05"  # partition_data: 5
     " 00 00 00 00 | 00 00 00 03 01 80 ff"  # 0: three bytes
     " 00 00 00 01 | ff ff ff ff"  # 1: null records
     " 00 00 00 02 | 00 00 00 00"  # 2: empty records
     " 00 00 00 03 | 00 00 00 01 fe"  # 3: one byte
+    " 00 00 00 04 | ff ff ff fb"  # 4: length -5, read as null
     " 00 02 62 62"  # "bb"
     " 00 00 00 00"  # partition_data: 0
 )
@@ -98,13 +99,16 @@ def test_produce_request() raises:
     assert_equal(len(req.topics), 2, "topics")
     ref t = req.topics[0]
     assert_equal(t.name, String("a"), "topic 0")
-    assert_equal(len(t.partitions), 4, "partitions")
-    for i in range(4):
+    assert_equal(len(t.partitions), 5, "partitions")
+    for i in range(5):
         assert_equal(Int(t.partitions[i].index), i, "index")
     _assert_bytes_eq(t.partitions[0].records, _hex("01 80 ff"), "records 0")
     assert_equal(len(t.partitions[1].records), 0, "null records read empty")
     assert_equal(len(t.partitions[2].records), 0, "empty records")
     _assert_bytes_eq(t.partitions[3].records, _hex("fe"), "records 3")
+    # Any negative length is null, as in Kafka's generated reader
+    # (`if (length < 0)` reads null for a nullable field), not only -1.
+    assert_equal(len(t.partitions[4].records), 0, "length -5 reads null")
     assert_equal(req.topics[1].name, String("bb"), "topic 1")
     assert_equal(len(req.topics[1].partitions), 0, "no partitions")
     for cut in range(len(b)):
