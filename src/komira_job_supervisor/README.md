@@ -51,7 +51,8 @@ supervisor is built to be a container's PID 1:
   then sends SIGKILL to what is left;
 - a SIGTERM or SIGINT sent to the supervisor (a platform stopping the
   container) is caught, forwarded to the job's group as the same signal, and
-  the job is reported CANCELLED;
+  the job is reported CANCELLED; one that arrives before the job is started
+  (during the fetch or the first heartbeat) cancels it without starting it;
 - descendants orphaned by the job are re-parented to the supervisor (PID 1
   receives them; elsewhere on Linux it becomes a child subreaper) and
   collected, so none stays a zombie. The supervisor assumes it owns every

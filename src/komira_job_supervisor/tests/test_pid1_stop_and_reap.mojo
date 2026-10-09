@@ -9,6 +9,10 @@
 # A file of its own: these tests send signals to this process and make it a
 # child subreaper, and each one leaves no child behind for the next.
 #
+# Off Linux there is no child subreaper and no /proc: the four tests that need
+# one of them (the grandchild, the SIGKILL, the orphans, the default signals)
+# are skipped by name, and adopt_orphans() is asserted to refuse instead.
+#
 #   test_the_run_loop_turns_a_platform_sigterm_into_cancelled  (runs FIRST)
 #       `run_job_supervisor` on `sh -c 'kill -TERM $PPID; exec sleep 30'`: the
 #       job SIGTERMs its parent, this process, as a platform stops a container.
@@ -66,6 +70,7 @@
 # =============================================================================
 
 from std.ffi import external_call
+from std.sys.info import CompilationTarget
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -447,10 +452,17 @@ def main() raises:
     # FIRST: nothing before it may install the stop handler (module header).
     test_the_run_loop_turns_a_platform_sigterm_into_cancelled()
     test_a_stop_before_the_spawn_starts_no_job()
-    test_a_stop_signal_reaches_the_grandchild()
-    test_sigkill_reaches_a_grandchild_that_ignores_sigterm()
     test_a_forwarded_sigint_stays_sigint()
-    test_orphans_are_reaped()
-    test_the_job_starts_with_default_signals()
     test_the_terminal_beat_is_retried_after_one_503()
+    comptime if CompilationTarget.is_linux():
+        test_a_stop_signal_reaches_the_grandchild()
+        test_sigkill_reaches_a_grandchild_that_ignores_sigterm()
+        test_orphans_are_reaped()
+        test_the_job_starts_with_default_signals()
+    else:
+        assert_false(adopt_orphans(), "no child subreaper off Linux")
+        print(
+            "  SKIP (not Linux: no child subreaper, no /proc):"
+            " grandchild, SIGKILL escalation, orphans, default signals"
+        )
     print("PASS test_pid1_stop_and_reap")

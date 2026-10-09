@@ -14,8 +14,11 @@
 #       process the caller may signal; kill(0) the caller's own group). Signal
 #       0 is used, so a defect sends nothing. Mutant: the shim's `pgid <= 1`
 #       guard removed -> kill(-1, 0) and kill(0, 0) return 0.
+#
+# The first test reads /proc and is skipped off Linux.
 # =============================================================================
 
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true
 
 from komira_supervisor.supervisor import ChildSpec, Supervisor
@@ -63,6 +66,9 @@ def test_the_group_signal_refuses_every_group_but_a_job() raises:
 
 
 def main() raises:
-    test_the_child_leads_its_own_group()
     test_the_group_signal_refuses_every_group_but_a_job()
+    comptime if CompilationTarget.is_linux():
+        test_the_child_leads_its_own_group()
+    else:
+        print("  SKIP (not Linux: no /proc): test_the_child_leads_its_own_group")
     print("PASS test_process_group")
