@@ -139,10 +139,11 @@ def test_kid_selects_and_never_falls_back() raises:
     _ = v.verify(_kid("k1"))
     assert_equal(_err(v, _kid("k0")), "JoseError: the signature does not verify")
     assert_equal(_err(v, _kid("k2")), "JoseError: kid names no key in the set")
-    # Exact match only: a kid that extends or shortens a key's kid names
-    # no key (catches a prefix comparison either way).
+    # Exact match only: a kid that extends or shortens a key's kid, at
+    # either end, names no key (catches a prefix or suffix comparison).
     assert_equal(_err(v, _kid("k1x")), "JoseError: kid names no key in the set")
     assert_equal(_err(v, _kid("k")), "JoseError: kid names no key in the set")
+    assert_equal(_err(v, _kid("xk1")), "JoseError: kid names no key in the set")
 
 
 def test_two_keys_one_kid_refused() raises:
@@ -242,6 +243,9 @@ def test_single_key() raises:
     )
     assert_equal(
         _err(v, _kid("k")), "JoseError: kid does not name the configured key"
+    )
+    assert_equal(
+        _err(v, _kid("xk1")), "JoseError: kid does not name the configured key"
     )
     var anon = JwsVerifier.single_key("EdDSA", Jwk.ed25519(Span(x)))
     _ = anon.verify(_kid("anything"))
