@@ -36,3 +36,8 @@ src/tests/helpers/komira_udf_spike_abi/refrt/echo_global_lock_so.mojo	the init e
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_so.mojo	the init export of the echo UDF runtime library, forwarded to its C init
 src/tests/helpers/komira_udf_spike_python/refrt/python_shared_gil_so.mojo	the init export of the python_shared_gil UDF runtime library, forwarded to its C init
 src/tests/helpers/komira_udf_spike_python/refrt/python_subinterp_so.mojo	the init export of the python_subinterp UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_python_worker/refrt/pyworker_pipe_so.mojo	the init export of the pyworker_pipe UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_python_worker/refrt/pyworker_pyarrow_so.mojo	the init export of the pyworker_pyarrow UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_python_worker/refrt/pyworker_spawn_so.mojo	the init export of the pyworker_spawn UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_python_worker/refrt/pyworker_zygote_so.mojo	the init export of the pyworker_zygote UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_python_worker/refrt/pyworker_zygote_threads_so.mojo	the init export of the pyworker_zygote_threads UDF runtime library, forwarded to its C init
