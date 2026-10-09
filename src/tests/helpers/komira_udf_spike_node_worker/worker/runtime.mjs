@@ -9,8 +9,9 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { batchParts, corruptParts, readBatch, readMessages, readSchema } from './arrow_io.mjs';
+import { batchParts, readBatch, readMessages, readSchema } from './arrow_io.mjs';
 import { ST, UdfError, column, raised, row, rowShape, scalar } from './calls.mjs';
+import { replyCorrupt } from './corrupt.mjs';
 import { Frame, Groups } from './frames.mjs';
 import { OP, WIRE_VERSION, reply, replyError, replyU64 } from './wire.mjs';
 
@@ -167,8 +168,7 @@ export class Runtime {
     else if (u.shape === 'MAP_BATCHES_COLUMN') col = column(inst.fn, req, batch, fmt);
     else throw new UdfError(ST.UNSUPPORTED, `call_batch on a ${u.shape} UDF`);
     const t2 = process.hrtime.bigint();
-    const bad = this.corrupt ? corruptParts(batch.length) : null;
-    reply(req.id, 0, bad ?? batchParts(col.values.length, [col]));
+    if (!(this.corrupt && replyCorrupt(req.id, batch))) reply(req.id, 0, batchParts(col.values.length, [col]));
     const s = this.stats;
     s.calls++;
     s.rows += batch.length;

@@ -501,7 +501,7 @@ int kudfw_ipc_decode(const uint8_t* msg, size_t len, const kudfw_field* fields, 
     return -1;
   }
   if ((size_t)nv + 4 + 16 * (size_t)n > r.n || (size_t)bv + 4 + 32 * (size_t)n > r.n) {
-    *why = "the RecordBatch metadata is malformed";
+    *why = "a node or buffer vector runs past the metadata";
     return -1;
   }
   const uint8_t* body = msg + 8 + meta;
@@ -517,7 +517,10 @@ int kudfw_ipc_decode(const uint8_t* msg, size_t len, const kudfw_field* fields, 
     else if (nnull < 0 || nnull > nlen) bad = "a column's null count is out of range";
     else if (vo < 0 || vl < 0 || dofs < 0 || dl < 0 || vo > body_len - vl || dofs > body_len - dl)
       bad = "a buffer lies outside the body";
-    else if (dl < nlen * w) bad = "a values buffer is shorter than the column";
+    /* dl / w, not nlen * w: the worker's row count can be large enough to
+     * wrap the product. Past this check nlen <= dl / w <= body_len, so the
+     * bitmap's (nlen + 7) / 8 cannot overflow either. */
+    else if (dl / w < nlen) bad = "a values buffer is shorter than the column";
     else if (nnull > 0 && vl < (nlen + 7) / 8) bad = "a validity bitmap is shorter than the column";
     else if (((uintptr_t)(body + dofs)) % (uintptr_t)w != 0) bad = "a values buffer is not aligned to its type";
     if (bad != NULL) {

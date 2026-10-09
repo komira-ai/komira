@@ -20,18 +20,35 @@
 #     error, or a dead channel reused);
 #   - a cancel the user's code never checks (a batch function that spins):
 #     the proxy kills the worker after its grace period, ERR_INSTANCE_LOST;
+#   - a cancel belongs to its call: after a call cancelled mid-batch, the
+#     next call on the same instance runs to the end (the proxy never clears
+#     the cancel word, so a worker that honours any nonzero word, not only
+#     its own request's id, would cancel every later call);
 #   - a frame that yields a non-table is ERR_RETURN_TYPE; a step generator's
 #     three tables come back in order;
-#   - outputs that break the IPC layout, sent by a worker in its
-#     --corrupt-output mode (node_worker_corrupt.so), are refused by the
-#     proxy's validation before any pointer is formed, each by its reason,
-#     and the worker stays usable;
+#   - replies a worker in its --corrupt-output mode sends
+#     (node_worker_corrupt.so, worker/corrupt.mjs), each refused with its
+#     own reason: one RecordBatch layout per refusal of the proxy's IPC
+#     validation (ipc.c, kudfw_ipc_decode), before any pointer is formed,
+#     including a row count whose byte size wraps int64; malformed ERROR
+#     replies and ERROR codes that are not errors (the worker stays usable);
+#     and each break of the framing (magic, request id, op, INLINE flag,
+#     payload limit), after which the worker is killed (a validator that
+#     lets a layout through hands the host a pointer past the reply);
 #   - every array and stream the host exported is released once.
 #
-# Mutants planted: channel.c mapping end of file on the channel to
-# ERR_INTERNAL instead of ERR_INSTANCE_LOST: red ("exit mid-batch").
-# ipc.c without the "a buffer lies outside the body" check: red (the
-# corrupt worker's first output is accepted).
+# Mutants planted, each red on the farm: channel.c mapping end of file on
+# the channel to ERR_INTERNAL instead of ERR_INSTANCE_LOST ("exit
+# mid-batch"); ipc.c without the "a buffer lies outside the body" check
+# (corrupt case 1 accepted); ipc.c without the column length check (case
+# 5); ipc.c without the validity bitmap check (case 6); ipc.c with the
+# values check back to `dl < nlen * w` (case 8, the wrapping row count);
+# ipc.c without the compressed check (case 9); ipc.c without the buffer
+# vector's half of the past-the-metadata check (case 17); channel.c without
+# the request id check of the framing (case 102); channel.c without the
+# payload limit (case 105); channel.c keeping an ERROR code of 0 (case
+# 113); wire.mjs honouring any nonzero cancel word (the call after a
+# cancel).
 
 from std.testing import assert_equal, assert_true
 
@@ -196,6 +213,17 @@ def _hard_cancel(mut rt: UdfRuntime) raises:
     _unbind(rt, b)
 
 
+def _cancel_scoped(mut rt: UdfRuntime) raises:
+    var s = _spec(SHAPE_SCALAR, "fixtures.mjs#slow_loop", TYPE_INT64)
+    var b = _bind(rt, s, 0)
+    var c = rt.call_batch(b.inst, s, _ints([0, 0, 0, 0, 0]), CallOptions(False, True, False))
+    _expect(c.outcome, ERR_CANCELLED, "cancelled at row", "a cancel during the call")
+    var after = rt.call_batch(b.inst, s, _ints([1, 2, 3]), CallOptions.plain())
+    assert_true(after.outcome.is_ok(), "the call after a cancelled one: " + String(after.outcome))
+    assert_equal(after.column.bits[2], 3)
+    _unbind(rt, b)
+
+
 def _frames(mut rt: UdfRuntime) raises:
     var s = _spec(SHAPE_MAP_BATCHES_FRAME, "fixtures.mjs#not_a_table", TYPE_INT64)
     s.result_is_table = True
@@ -220,22 +248,51 @@ def _corrupt_outputs() raises:
     var rt = UdfRuntime.open(CORRUPT_LIB)
     var s = _spec(SHAPE_SCALAR, "fixtures.mjs#double", TYPE_INT64)
     var b = _bind(rt, s, 0)
-    var reasons: List[String] = [
+    # The RecordBatch cases 1 to 17 of worker/corrupt.mjs, by number.
+    var layouts: List[String] = [
         "a buffer lies outside the body",
         "a values buffer is shorter than the column",
-        "columns or buffers differ from the bound schema",
-        "null count is out of range",
+        "the RecordBatch's columns or buffers differ from the bound schema",
+        "a column's null count is out of range",
+        "a column's length differs from the batch's",
+        "a validity bitmap is shorter than the column",
+        "a values buffer is not aligned to its type",
+        "a values buffer is shorter than the column",
+        "the RecordBatch is compressed",
+        "the IPC message is not a RecordBatch",
+        "the reply is not an IPC message (no continuation marker)",
+        "the IPC metadata length is past the payload or not a multiple of 8",
+        "the IPC metadata length is past the payload or not a multiple of 8",
+        "the RecordBatch body is longer than the payload",
+        "the RecordBatch metadata is malformed",
+        "a node or buffer vector runs past the metadata",
+        "a node or buffer vector runs past the metadata",
     ]
-    for n in range(1, 5):
-        var vals = List[Int]()
-        for k in range(n):
-            vals.append(k)
-        var r = rt.call_batch(b.inst, s, _ints(vals), CallOptions.plain())
-        _expect(r.outcome, ERR_INTERNAL, reasons[n - 1], "corrupt output of " + String(n) + " rows")
+    for i in range(len(layouts)):
+        var r = rt.call_batch(b.inst, s, _ints([i + 1]), CallOptions.plain())
+        _expect(r.outcome, ERR_INTERNAL, "failed validation: " + layouts[i], "corrupt case " + String(i + 1))
+    # Malformed ERROR replies (cases 111 to 114): the framing holds, so the
+    # worker stays usable.
+    var errors: List[String] = [
+        "a malformed ERROR reply (10 bytes)",
+        "a malformed ERROR reply",
+        "an ERROR reply with code 0",
+        "an ERROR reply with code -5",
+    ]
+    for i in range(len(errors)):
+        var r = rt.call_batch(b.inst, s, _ints([111 + i]), CallOptions.plain())
+        _expect(r.outcome, ERR_INTERNAL, errors[i], "corrupt case " + String(111 + i))
     var ok = rt.call_batch(b.inst, s, _ints([1, 2, 3, 4, 5]), CallOptions.plain())
-    assert_true(ok.outcome.is_ok(), "the worker after refused outputs: " + String(ok.outcome))
+    assert_true(ok.outcome.is_ok(), "the worker after refused replies: " + String(ok.outcome))
     assert_equal(ok.column.bits[4], 10)
     _unbind(rt, b)
+    # Breaks of the framing (cases 101 to 105): the worker is killed, so
+    # each case gets its own context.
+    for k in range(101, 106):
+        var f = _bind(rt, s, 0)
+        var r = rt.call_batch(f.inst, s, _ints([k]), CallOptions.plain())
+        _expect(r.outcome, ERR_INSTANCE_LOST, "a reply broke the framing", "corrupt case " + String(k))
+        _unbind(rt, f)
     var l = rt.ledger()
     assert_equal(l.exported, l.released, "corrupt: arrays exported vs released")
     rt.shutdown()
@@ -250,6 +307,7 @@ def main() raises:
     _state_per_context(rt)
     _crashes(rt)
     _hard_cancel(rt)
+    _cancel_scoped(rt)
     _frames(rt)
     var l = rt.ledger()
     assert_equal(l.exported, l.released, "arrays exported vs released")

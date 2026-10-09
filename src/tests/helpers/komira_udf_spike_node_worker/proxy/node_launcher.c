@@ -17,7 +17,7 @@
  * komira_udf_runtime_init_v1 (refrt/): kudfw_node_init_v1 for
  * node_worker.so, and kudfw_node_corrupt_init_v1 for node_worker_corrupt.so,
  * whose workers run with --corrupt-output (worker/worker.mjs) for the test of
- * the proxy's validation of worker outputs. The C library cannot define the
+ * the proxy's validation of worker replies. The C library cannot define the
  * export itself: the one-definition gate links every C library under src/
  * into one binary, where echo's forwarders define it too.
  */

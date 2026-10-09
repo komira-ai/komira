@@ -42,8 +42,10 @@ load(":defs.bzl", "udf_bench")
 #                 describe, validate's refusals, load and return-type
 #                 refusals, state per context, a worker that exits or is
 #                 killed, a cancel user code ignores (killed after the
-#                 grace period), frames and steps, and outputs that break
-#                 the IPC layout refused by the proxy (node_worker_corrupt.so).
+#                 grace period), a cancel scoped to its own call, frames and
+#                 steps, and replies that break the IPC layout, the framing
+#                 or the ERROR encoding, each refused by the proxy with its
+#                 reason (node_worker_corrupt.so).
 #   test_threads  4 engine threads, 4 workers: values, calls == batches,
 #                 releases, and the CPU/wall parallelism case.
 
@@ -54,6 +56,7 @@ _CASES = {"src/tests/helpers/komira_udf_spike_abi": _ABI + ":cases"}
 _WORKER = {"node_worker/worker/" + f: "worker/" + f for f in [
     "arrow_io.mjs",
     "calls.mjs",
+    "corrupt.mjs",
     "frames.mjs",
     "runtime.mjs",
     "wire.mjs",
@@ -146,9 +149,10 @@ cxx_library(
 # The runtime libraries the engine loads, each exporting
 # komira_udf_runtime_init_v1 and nothing else:
 #   node_worker.so          komira-test/node on the worker transport.
-#   node_worker_corrupt.so  the same, whose workers send outputs that break
-#                           the IPC layout (--corrupt-output): the proxy's
-#                           validation test.
+#   node_worker_corrupt.so  the same, whose workers answer the case batches
+#                           of worker/corrupt.mjs with replies that break the
+#                           IPC layout or the framing (--corrupt-output): the
+#                           proxy's validation test.
 [mojo_shared_lib(
     name = v,
     srcs = ["refrt/{}_so.mojo".format(v)],

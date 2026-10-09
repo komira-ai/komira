@@ -29,8 +29,9 @@
 # aggregate state across workers, the error row and message.
 #
 # Mutant planted: worker/calls.mjs Watch.check not reading the cancel word
-# (cancelRequested replaced by false): red on cancel_set_during_call (the
-# call runs all 20 rows and returns OK).
+# (cancelRequested replaced by false): red on cancel_set_during_call, which
+# gets ERR_INSTANCE_LOST: the worker keeps running rows, so the proxy kills
+# it once its 500 ms grace period after the cancel ends.
 
 from std.testing import assert_equal, assert_true
 

@@ -191,22 +191,3 @@ function messagePrefix(length, nodes, regions, bodyLength) {
   prefix.set(meta, 8);
   return prefix;
 }
-
-// Outputs whose layout is wrong, for the test of the engine's validation
-// of worker outputs (--corrupt-output; tests/test_node_worker.mojo): by the
-// batch's row count, 1: a values buffer past the body; 2: a values buffer
-// shorter than the column; 3: two columns where one is bound; 4: a null
-// count above the length. null for any other count.
-export function corruptParts(length) {
-  const body = new Uint8Array(ALIGN);
-  const one = (n, nulls, regions) => [messagePrefix(n, [new FieldNode(n, nulls)], regions, ALIGN), body];
-  if (length === 1) return one(1, 0, [new BufferRegion(0, 0), new BufferRegion(1 << 20, 8)]);
-  if (length === 2) return one(2, 0, [new BufferRegion(0, 0), new BufferRegion(0, 8)]);
-  if (length === 3) {
-    const nodes = [new FieldNode(3, 0), new FieldNode(3, 0)];
-    const regions = [new BufferRegion(0, 0), new BufferRegion(0, 24), new BufferRegion(0, 0), new BufferRegion(0, 24)];
-    return [messagePrefix(3, nodes, regions, ALIGN), body];
-  }
-  if (length === 4) return one(4, 5, [new BufferRegion(0, 1), new BufferRegion(0, 32)]);
-  return null;
-}

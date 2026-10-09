@@ -47,7 +47,8 @@ function readExact(buf, off, len) {
   }
 }
 
-function writeAll(parts) {
+// Every byte of `parts`, in order, on the channel.
+export function writeRaw(parts) {
   let bufs = parts.filter((p) => p.byteLength > 0);
   while (bufs.length > 0) {
     let k;
@@ -120,7 +121,7 @@ export function reply(id, flags, parts = []) {
   header.writeUInt32LE(0, 20);
   header.writeBigUInt64LE(0n, 24);
   header.writeBigUInt64LE(BigInt(total), 32);
-  writeAll([header, ...parts]);
+  writeRaw([header, ...parts]);
 }
 
 export function replyU64(id, v) {
@@ -152,7 +153,7 @@ export function replyError(id, code, message, { row = -1, group = -1, trace = ''
   header.writeUInt32LE(0, 20);
   header.writeBigUInt64LE(0n, 24);
   header.writeBigUInt64LE(BigInt(total), 32);
-  writeAll([header, ...parts]);
+  writeRaw([header, ...parts]);
 }
 
 // Whether the engine cancelled request `id`: the cancel word holds the id of

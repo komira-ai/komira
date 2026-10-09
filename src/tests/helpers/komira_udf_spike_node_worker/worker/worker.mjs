@@ -4,8 +4,9 @@
 // on fd 3 and its cancel word on fd 4. It serves one context: the engine
 // starts one worker per engine thread, so one isolate runs one thread's UDF
 // calls and no lock is shared across engine threads. --corrupt-output makes
-// call_batch's outputs break the IPC layout (arrow_io.mjs, corruptParts), for
-// the test of the engine's validation of what a worker sends.
+// call_batch answer the case batches of corrupt.mjs with replies that break
+// the IPC layout or the framing, for the test of the engine's validation of
+// what a worker sends.
 
 import { Runtime } from './runtime.mjs';
 import { nextRequest } from './wire.mjs';
