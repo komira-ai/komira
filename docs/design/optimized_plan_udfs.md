@@ -33,14 +33,14 @@ Further languages are added as runtimes and SDK producers (`udf_runtime_interfac
 format.
 
 **Two classes of UDF, one plan reference.** The plan system supports two classes of UDF
-([`udf_runtime_interface.md`](udf_runtime_interface.md) §4-§5):
+([`udf_runtime_interface.md`](udf_runtime_interface.md) §1.2):
 
 - **Native UDFs**, in languages that compile to native code and speak the C ABI directly (Mojo, Rust, C, C++, Zig). A
   native UDF is a shared library compiled for the host platform, loaded and called through the UDF runtime C ABI over
   Arrow C Data, with no interpreter.
 - **Managed UDFs**, in languages that need a runtime or a virtual machine: Python and TypeScript on Node at first,
-  and later JVM languages, .NET, Go and WASM. The runtime is embedded in the engine or runs as worker processes, with
-  one interpreter or isolate per engine thread.
+  and later JVM languages, .NET, Go and WASM. The runtime is embedded in the engine or runs as worker processes, as
+  each runtime's threading declaration says, typically one interpreter or isolate per engine thread.
 
 Both classes are the same `UdfRef` (§10.3): an open runtime id, explicit Arrow types and a kind. Both run through the
 same runtime contract: the C ABI, called in-process or served by a worker process. The logical, optimized and physical
