@@ -40,9 +40,9 @@ How each was checked when it was pinned:
 
 The checks the build repeats: `pinned_file` refuses a download whose sha256
 or size differs; `npm_package` refuses a tarball whose sha512 differs from
-the integrity, or whose `package.json` states another name or version;
-`node_dist` refuses a `node` that does not print the pinned version, and the
-`esbuild_linux-x64` target an `esbuild` that does not.
+the integrity, or whose `package.json` states another top-level name or
+version; `node_dist` refuses a `node` that does not print the pinned
+version, and the `esbuild_linux-x64` target an `esbuild` that does not.
 
 ## Licences
 

@@ -21,6 +21,13 @@ node_test(
     expect_error = "AssertionError [ERR_ASSERTION]: node_test reports this failure",
 )
 
+# An expect_error that starts with "--" is text to match, not an option.
+node_test(
+    name = "fails_dash",
+    src = "fails_dash.js",
+    expect_error = "--flag-like text node_test must match",
+)
+
 # Two modules, one of them TypeScript, bundled into one file that runs alone.
 esbuild_bundle(
     name = "two_module_bundle",

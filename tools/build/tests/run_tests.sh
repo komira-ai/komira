@@ -403,9 +403,9 @@
 #  54. The hermetic Node.js rules (tools/build/node/defs.bzl): each target of
 #      tests//negative/node fails with its planted defect: a failing script,
 #      a wrong expected error or an unexpected pass under node_test, a path or
-#      package staged twice, an unresolved import, and a pin's integrity,
-#      name, version, executable or archive that differs. See
-#      tools/build/tests/node_tests.sh.
+#      package staged twice, an unresolved import, an empty expect_error or
+#      exe, a pin's integrity, top-level name, version, executable or archive
+#      that differs, a C warning. See tools/build/tests/node_tests.sh.
 set -uo pipefail
 
 umbrella=1

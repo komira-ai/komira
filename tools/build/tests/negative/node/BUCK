@@ -1,5 +1,5 @@
 load("@komira//third_party/node:pins.bzl", "NODE", "NPM")
-load("@komira//tools/build/node:defs.bzl", "esbuild_bundle", "node_dist", "node_test", "npm_package")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_dist", "node_test", "npm_package")
 load(":stand_in.bzl", "stand_in_archive", "stand_in_npm")
 
 # Planted defects for the hermetic Node.js rules (test 54,
@@ -16,14 +16,17 @@ _FLATBUFFERS = [p for p in NPM if p["name"] == "flatbuffers"][0]
 
 _PKG = "komira//third_party/node:"
 
-# tslib's integrity with its last byte changed: the base64 group holding
-# that byte is the last four characters, "<c1><c2>==", and c1 carries its
-# high six bits.
 # The sha512 of the Node.js archive (`sha512-<base64>`), for an npm_package
 # fixture over it.
 _NODE_SHA512 = "sha512-exyTGgmF8h4eV3qLcr2iyXfpDDcBkQL63gY0D8CXiKXQgf5EKhdQnJpvsmaS4DSFPFvQHUgoSWtKScPFYSq1Kg=="
 
+# tslib's integrity with its last byte changed: the base64 group holding
+# that byte is the last four characters, "<c1><c2>==", and c1 carries its
+# high six bits.
 _TSLIB_NEAR = _TSLIB["integrity"][:-4] + ("B" if _TSLIB["integrity"][-4] == "A" else "A") + _TSLIB["integrity"][-3:]
+
+# An integrity of 64 zero bytes.
+_ZERO_SHA512 = "sha512-" + "A" * 86 + "=="
 
 # ---- node_test: the verdict -------------------------------------------------
 
@@ -58,6 +61,22 @@ node_test(
     expect_error = "any error",
 )
 
+# RED "stderr does not hold: THE NEGATIVE FIXTURE FAILS ITS OWN ASSERTION":
+# the script's message in other case, so expect_error is matched with case.
+node_test(
+    name = "error_other_case",
+    src = "fail.js",
+    expect_error = "THE NEGATIVE FIXTURE FAILS ITS OWN ASSERTION",
+)
+
+# RED "stderr does not hold: negative fixture.fails": a regular expression
+# that the message matches ("fixture fails"), so expect_error is fixed text.
+node_test(
+    name = "error_as_pattern",
+    src = "fail.js",
+    expect_error = "negative fixture.fails",
+)
+
 # ---- node_test: analysis ----------------------------------------------------
 
 stand_in_npm(
@@ -72,6 +91,13 @@ stand_in_npm(
     dir = "pass.js",
     package = "tslib",
     version = "2.0.0",
+)
+
+# RED "expect_error is empty": an empty text would be held by any stderr.
+node_test(
+    name = "expect_error_empty",
+    src = "fail.js",
+    expect_error = "",
 )
 
 # RED "pass.js is listed twice".
@@ -167,6 +193,17 @@ npm_package(
     tarball = _PKG + _TSLIB["file"],
 )
 
+# RED "the pinned integrity sha512-AAAA...AA== is 000...000" (128 zeros):
+# an integrity of 64 zero bytes, whose rows of od output repeat, decodes to
+# all 64 bytes, not to od's "*" for a repeated row.
+npm_package(
+    name = "integrity_repeated_rows",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _ZERO_SHA512,
+    tarball = _PKG + _TSLIB["file"],
+)
+
 # RED "holds no package/package.json": a tarball (the Node.js archive, at its
 # own sha512) whose top directory is not `package`.
 npm_package(
@@ -226,6 +263,94 @@ npm_package(
     integrity = _TSLIB["integrity"],
     tarball = _PKG + _TSLIB["file"],
     exe = "package.json",
+)
+
+# Tarballs made for the checks of package.json, each holding package/ with a
+# package.json, pinned below at their own sha512. Built with
+# `tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0
+# --mode=u=rwX,go=rX --format=ustar -C <dir> -cf - package | gzip -n -9`.
+[export_file(name = f, src = "package_json/" + f) for f in [
+    "distractors.tgz",
+    "exe_other_version.tgz",
+    "name_absent.tgz",
+    "name_nested.tgz",
+    "version_nested.tgz",
+    "version_number.tgz",
+]]
+
+# RED "does not state \"name\":\"komira-fixture\" at its top level; its
+# top-level \"name\" is \"komira-fixture-other\"": package.json's top-level
+# name differs, and a nested object, before it, holds the pinned one.
+npm_package(
+    name = "name_nested",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-ey4aOtnemuvYHXTBnCuN7kFkyP6oJGFVYIWhGIpIy6xrvwL+BeaunGpijCHmwjJLiujSzFHqEM8sE9YlT931pA==",
+    tarball = ":name_nested.tgz",
+)
+
+# RED "its top-level \"name\" is absent": no top-level name; a nested
+# object and the description hold the pinned one.
+npm_package(
+    name = "name_absent",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-QAvHA1o1diU6pT+oW4Re1Jo/GX/4EfHGE985hf1hPbQ9J0837IZwXEMV4mIcpI0ElLrRZyCvDadamc5qvtYHZQ==",
+    tarball = ":name_absent.tgz",
+)
+
+# RED "its top-level \"version\" is \"1.0.1\"": package.json's top-level
+# version differs, and a nested object, before it, holds the pinned one.
+npm_package(
+    name = "version_nested",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-TSWmMZSWcjVCkOQJfO4Mi39U52i7Sibr1TDF47JW8TSh81xNuYwQ9ODwxHGqja33xPKdMTg33uM668GFzqOH5g==",
+    tarball = ":version_nested.tgz",
+)
+
+# RED "its top-level \"version\" is 1": the number 1, not the string "1".
+npm_package(
+    name = "version_number",
+    package = "komira-fixture",
+    version = "1",
+    integrity = "sha512-/PETCJiK0DNW43rPHC5hZPdNNww44uYOywZsDPE6ndcHGstshbac6EVPHdxMYLHWiBUk0R6iheAbEJ9r/JmDsA==",
+    tarball = ":version_number.tgz",
+)
+
+# RED "komira-fixture: package.json does not run": the top-level name and
+# version are the pinned ones while nested objects before and after them hold
+# others, so the package.json check passes and the exe check refuses.
+npm_package(
+    name = "nested_distractors",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-j6YnXUPW8/fGTRemXcHsxqXiWFYMKL+n8+OCpuoJwjDrGubGR0hbOyz8jIAGNaGcDEWpuz5Noq4XXnJnp6JFRw==",
+    tarball = ":distractors.tgz",
+    exe = "package.json",
+)
+
+# RED "bin/echo --version prints --version, the pin says 1.0.0": an exe that
+# runs and prints another version. bin/echo is a symlink to /proc/self/exe,
+# which the kernel resolves for the process that executes it, the pinned
+# busybox, so it runs busybox's `echo`.
+npm_package(
+    name = "exe_other_version",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-Y1KEAijs5lufsFqRnDA1aJW5Uz3kZMtKchif6q2s0A0/I0v9/4E8RkGcAMIo1d8oaS0DZpG1chiZWKwbOq2Iig==",
+    tarball = ":exe_other_version.tgz",
+    exe = "bin/echo",
+)
+
+# RED "exe is empty".
+npm_package(
+    name = "exe_empty",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+    exe = "",
 )
 
 # RED "tslib is in its own deps".
@@ -300,6 +425,13 @@ stand_in_archive(
 )
 
 stand_in_archive(
+    name = "archive_header_is_dir",
+    top = "node-x",
+    files = ["LICENSE", "include/node/node_api.h/not_a_header"],
+    programs = ["bin/node"],
+)
+
+stand_in_archive(
     name = "archive_node_does_not_run",
     top = "node-x",
     files = ["LICENSE", "include/node/node_api.h"],
@@ -325,6 +457,16 @@ node_dist(
     version = NODE["version"],
 )
 
+# RED "holds no node-x/bin/node or node-x/include/node/node_api.h": a
+# node_api.h that is a directory, not a file.
+node_dist(
+    name = "header_is_dir",
+    archive = ":archive_header_is_dir",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
 # RED "holds no node-x/bin/node": a bin/node that is not executable.
 node_dist(
     name = "node_not_executable",
@@ -342,4 +484,13 @@ node_dist(
     native_libs = _PKG + "native_libs",
     top = "node-x",
     version = NODE["version"],
+)
+
+# ---- c_shared_lib -----------------------------------------------------------
+
+# RED "error: unused variable 'unused_on_purpose'": a warning fails the
+# build (-Wall -Werror).
+c_shared_lib(
+    name = "warns",
+    srcs = ["warns.c"],
 )

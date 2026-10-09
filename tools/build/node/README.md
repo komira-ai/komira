@@ -17,7 +17,7 @@ Node.js here is test-only. Nothing built with these rules is shipped
 | rule | what it builds |
 |---|---|
 | `node_dist(name, archive, top, version, native_libs)` | a Node.js release archive (`.tar.gz`, linux-x64) unpacked by busybox `tar` and reduced to `bin/node`, `include/node` (the Node-API headers) and `LICENSE`; npm, npx and corepack are left out. Fails unless that `node` runs and prints `v<version>` (`node_dist: the node in <archive> is <got>, the pin says v<version>`). `native_libs` is a directory whose `lib/` holds the libraries `node` links beyond glibc. The sub-target `[include]` is the header directory. |
-| `npm_package(name, package, version, integrity, tarball, exe, deps)` | one npm tarball's `package/` directory. Before unpacking, the tarball's sha512 must equal `integrity`, the registry's `dist.integrity` (`sha512-<base64>`); after, its `package.json` must state `package` as `"name"` and `version` as `"version"`, and with `exe` (a path in the package), that file must run and print `version`. `deps` are the packages it imports; a closure holding one package at two versions fails analysis. |
+| `npm_package(name, package, version, integrity, tarball, exe, deps)` | one npm tarball's `package/` directory. Before unpacking, the tarball's sha512 must equal `integrity`, the registry's `dist.integrity` (`sha512-<base64>`); after, the top-level `"name"` and `"version"` of its `package.json`, parsed by the pinned `node` (`JSON.parse`, as npm reads it), must be the strings `package` and `version` (a nested key, a missing key or a number does not count), and with `exe` (a path in the package), that file must run and print `version`. `deps` are the packages it imports; a closure holding one package at two versions fails analysis. |
 | `node_test(name, src, srcs, data, deps, args, expect_error, node)` | runs `src` with the pinned `node` as a build action; its output (`<name>.pass`) exists only if the script passed (exit 0), so building the target is running the test. With `expect_error`, the script passes only if it exits non-zero and its stderr holds that text. `srcs` are staged next to `src` at their package paths and `data` (`{dest: source}`, a build output allowed) at `dest`, so a script finds them through `__dirname`; the closure of the `npm_package` targets in `deps` is staged under `node_modules/<package>` beside the script, where node resolves a bare import (`import ... from 'apache-arrow'`). `args` are the script's arguments (`$(location ...)` expands, relative to the action's working directory). `node` defaults to `komira//third_party/node:node`. |
 | `esbuild_bundle(name, entry, srcs, deps, format, out, esbuild)` | `entry` bundled by the pinned esbuild (`--bundle --platform=node`) into one file, `out` (default `<name>.js`), in `format` (`cjs`, the default, or `esm`). `srcs` (JavaScript or TypeScript; esbuild strips the types) are staged next to `entry` at their package paths, and the closure of the `npm_package` targets in `deps` under `node_modules/<package>`. An import of anything else fails the build. A `node_test` runs the bundle as its `src`. |
 | `c_shared_lib(name, srcs, headers, include_dirs, copts, out, zig_triple)` | C `srcs` compiled and linked into one shared library by the pinned zig: `zig cc -target <zig_triple> -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror -Wl,-z,undefs`. A symbol the sources use and do not define stays undefined, for the program that loads the library to resolve: a Node-API addon's `napi_*` functions are `node`'s. Only symbols with default visibility are exported (a Node-API module's `napi_register_module_v1`). `headers` are staged with the sources, and their directory is an `-I`; each of `include_dirs` is a directory output, an `-I` (`//third_party/node:node[include]`). `out` defaults to `lib<name>.so`; a Node addon names it `<x>.node`. `zig_triple` defaults to the linux x86_64 row's (its glibc floor, [platform table](../platforms/table.bzl)). |
@@ -67,25 +67,33 @@ fail, and [`node_tests.sh`](../tests/node_tests.sh) (run by
 | `error_not_on_stderr`: `expect_error` text the failing script never prints | `expect_error` requires its text, not only a non-zero exit |
 | `error_on_stdout`: the failing script prints the `expect_error` text on stdout only | `expect_error` reads stderr alone |
 | `expected_fail_passed`: `expect_error` on a script that passes | `expect_error` requires a non-zero exit |
+| `error_other_case`, `error_as_pattern`: the script's message in capitals, and a regular expression it matches (`negative fixture.fails`) | `expect_error` is matched as fixed text, with case |
+| `expect_error_empty`, `exe_empty` | analysis refuses an empty `expect_error` (any stderr holds it) and an empty `exe` |
 | `src_listed_twice`, `bundle_listed_twice`, `data_is_source`, `data_is_package` | analysis refuses two files staged at one path, `node_modules/<package>` included |
 | `version_conflict`, `own_dep` | analysis refuses a closure holding one package at two versions, and a package among its own deps |
 | `unresolved_import` | `esbuild_bundle` fails on an import of a file that is not staged |
 | `integrity_not_sha512`, `integrity_empty`, `integrity_not_leading` | `npm_package` refuses an integrity that is not `sha512-<base64>`: another algorithm, an empty digest, a valid one after a leading character |
-| `integrity_differs`, `integrity_last_byte` | `npm_package` refuses a tarball whose sha512 differs from the integrity, in every byte or in the last byte only |
+| `integrity_differs`, `integrity_last_byte`, `integrity_repeated_rows` | `npm_package` refuses a tarball whose sha512 differs from the integrity, in every byte or in the last byte only; the integrity is decoded in full even where rows of its bytes repeat (64 zero bytes; the error shows all 128 hex digits) |
 | `no_package_json` | `npm_package` refuses a tarball (the Node.js archive, at its own sha512) with no `package/package.json` |
 | `name_differs`, `version_differs`, `name_prefix`, `version_prefix` | `npm_package` refuses a `package.json` that states another name or version: one that differs in its last character, one that extends the pin (`tslib2`), and one the pin is a prefix of (`tsli`, `2.8` for tslib 2.8.1) |
 | `exe_does_not_run` | `npm_package` refuses an `exe` that does not run |
+| `name_nested`, `name_absent`, `version_nested`, `version_number` | `npm_package` reads only the top level of `package.json`: it refuses another top-level name while a nested object holds the pinned one, no top-level name while a nested object and the description hold it, another top-level version while a nested object holds it, and the number `1` for the version `"1"` |
+| `nested_distractors` | the pinned top-level name and version pass with other ones nested before and after them: the target fails only at its `exe`, after the `package.json` check |
+| `exe_other_version` | `npm_package` refuses an `exe` that runs and prints another version (`bin/echo`, a symlink to `/proc/self/exe`, runs the busybox that executes it as `echo`) |
 | `version_differs_node`, `version_prefix_node`, `version_suffix_node` | `node_dist` refuses a `node` that prints another version: `24.20.0`, `24.21` (a prefix of `24.21.0`) and `4.21.0` (a suffix) |
-| `not_node`, `no_bin_node`, `no_header`, `node_not_executable` | `node_dist` refuses an archive that is no Node.js release, one with the Node-API header but no `bin/node`, one with `bin/node` but no header, and one whose `bin/node` is not executable |
+| `not_node`, `no_bin_node`, `no_header`, `header_is_dir`, `node_not_executable` | `node_dist` refuses an archive that is no Node.js release, one with the Node-API header but no `bin/node`, one with `bin/node` but no header, one whose `node_api.h` is a directory, and one whose `bin/node` is not executable |
 | `node_does_not_run` | `node_dist` refuses a `bin/node` that exits non-zero (busybox under the name `node`) |
+| `warns` | `c_shared_lib` fails on a warning (`-Wall -Werror`) |
 
 The fixtures name the pinned runtime, packages and downloads, which
 [`third_party/node/BUCK`](../../../third_party/node/BUCK) makes visible to
 that package only where the `tests` cell exists; the archives of
-`no_bin_node`, `no_header`, `node_not_executable` and `node_does_not_run`
-are built in that package (`stand_in_archive`). Not planted: an `exe` that
-runs and prints another version (its package must pass the integrity check
-first, so it would need a download pinned for the purpose).
+`no_bin_node`, `no_header`, `header_is_dir`, `node_not_executable` and
+`node_does_not_run` are built in that package (`stand_in_archive`). The npm
+tarballs of `name_nested`, `name_absent`, `version_nested`, `version_number`,
+`nested_distractors` and `exe_other_version` are checked in (`package_json/`)
+and pinned at their own sha512: a tarball built in the action would carry
+the worker's file owner and times, so it would have no fixed digest.
 
 ## Limits
 
@@ -93,6 +101,5 @@ first, so it would need a download pinned for the purpose).
   triple is that row's.
 - `c_shared_lib` links C sources only: no archive, shared library or other
   target is linked in.
-- `npm_package` reads the name and version from `package.json` by text, with
-  whitespace removed: a nested `"name"` or `"version"` with the same value
-  would also match.
+- `npm_package` runs the pinned `node` to parse `package.json`, so every
+  package depends on the runtime.

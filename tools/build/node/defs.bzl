@@ -5,8 +5,8 @@
 a directory holding `bin/node`, `include/node` (the Node-API headers) and the
 licence, and fails unless that `node` runs and reports the pinned version.
 `npm_package` unpacks one sha256-pinned npm tarball after checking its
-registry integrity (`sha512-<base64>`) and the name and version in its
-`package.json`. `node_test` runs one script with the pinned `node` as a build
+registry integrity (`sha512-<base64>`) and the top-level `name` and `version`
+of its `package.json`, which the pinned `node` parses. `node_test` runs one script with the pinned `node` as a build
 action; its output exists only if the script passed, so building the target
 is running the test. `esbuild_bundle` bundles an entry module, its sibling
 sources and npm packages into one file with the pinned esbuild.
@@ -142,11 +142,27 @@ _node_dist = rule(
 
 # ---- npm_package -------------------------------------------------------------
 
+# Reads package.json with JSON.parse, as npm does, and requires its top-level
+# `name` and `version` to be the pinned strings: a nested key, another type
+# (`"version": 1`) or a missing key is refused. argv: the file, the text that
+# starts the error, the name, the version.
+_PACKAGE_JSON_JS = """
+const [file, where, name, version] = process.argv.slice(1);
+const top = JSON.parse(require('fs').readFileSync(file, 'utf8'));
+for (const [key, want] of [['name', name], ['version', version]]) {
+    if (top[key] !== want) {
+        console.error(`${where} does not state "${key}":"${want}" at its top level; its top-level "${key}" is ${JSON.stringify(top[key]) ?? 'absent'}`);
+        process.exit(1);
+    }
+}
+"""
+
 # Checks the tarball's sha512 against the integrity, unpacks its `package/`
-# directory, checks the name and version its package.json states and, with an
-# executable named, that it runs and prints the version.
+# directory, checks the name and version its package.json states (with the
+# pinned node and _PACKAGE_JSON_JS; under `sh -e` its failure fails the
+# action) and, with an executable named, that it runs and prints the version.
 _NPM_SCRIPT = _PRELUDE + """
-TGZ="$1"; OUT="$2"; NAME="$3"; VERSION="$4"; SRI="$5"; EXE="$6"
+TGZ="$1"; OUT="$2"; NAME="$3"; VERSION="$4"; SRI="$5"; EXE="$6"; NODE=$(abs "$7"); LIBS=$(abs "$8"); JS="$9"
 case "$SRI" in
     sha512-?*) ;;
     *) echo "npm_package: $NAME: integrity $SRI is not sha512-<base64>" >&2; exit 2 ;;
@@ -163,13 +179,7 @@ if [ ! -f "$T/x/package/package.json" ]; then
     echo "npm_package: $NAME: $TGZ holds no package/package.json" >&2
     exit 2
 fi
-FLAT=$(tr -d ' \\t\\r\\n' < "$T/x/package/package.json")
-for kv in "\\"name\\":\\"$NAME\\"" "\\"version\\":\\"$VERSION\\""; do
-    case "$FLAT" in
-        *"$kv"*) ;;
-        *) echo "npm_package: $NAME: package.json of $TGZ does not state $kv" >&2; exit 2 ;;
-    esac
-done
+env -i LD_LIBRARY_PATH="$LIBS/lib" "$NODE/bin/node" -e "$JS" "$T/x/package/package.json" "npm_package: $NAME: package.json of $TGZ" "$NAME" "$VERSION"
 mv "$T/x/package" "$OUT"
 if [ "$EXE" != "-" ]; then
     GOT=$(env -i "$OUT/$EXE" --version) || { echo "npm_package: $NAME: $EXE does not run" >&2; exit 2; }
@@ -182,7 +192,10 @@ rm -rf "$T"
 """
 
 def _npm_package_impl(ctx):
+    if ctx.attrs.exe == "":
+        fail("{}: exe is empty: name the package's executable, or leave exe out".format(ctx.label.raw_target()))
     out = ctx.actions.declare_output("package", dir = True)
+    dist = ctx.attrs._node[NodeDistInfo]
     ctx.actions.run(
         busybox_sh(
             _out(ctx.attrs._busybox),
@@ -193,6 +206,9 @@ def _npm_package_impl(ctx):
             ctx.attrs.version,
             ctx.attrs.integrity,
             ctx.attrs.exe or "-",
+            dist.root,
+            dist.native_libs,
+            _PACKAGE_JSON_JS,
         ),
         category = "npm_package",
     )
@@ -207,7 +223,7 @@ def _npm_package_impl(ctx):
 
 _npm_package = rule(
     impl = _npm_package_impl,
-    doc = "One npm tarball's `package/` directory, unpacked after its sha512 is checked against `integrity` (the registry's `dist.integrity`); fails unless its package.json states `package` and `version`, and, with `exe`, unless that file of the package runs and prints `version`. `deps` are the packages it imports.",
+    doc = "One npm tarball's `package/` directory, unpacked after its sha512 is checked against `integrity` (the registry's `dist.integrity`); fails unless its package.json's top-level `name` and `version` are `package` and `version` (parsed by the pinned `node`), and, with `exe`, unless that file of the package runs and prints `version`. `deps` are the packages it imports.",
     attrs = {
         "deps": attrs.list(attrs.dep(providers = [NpmPackageInfo]), default = []),
         # A path in the package of an executable whose `--version` is `version`.
@@ -219,6 +235,7 @@ _npm_package = rule(
         "tarball": attrs.dep(),
         "version": attrs.string(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_node": attrs.exec_dep(providers = [NodeDistInfo], default = "komira//third_party/node:node"),
     },
 )
 
@@ -252,6 +269,8 @@ rm -rf "$T"
 def _node_test_impl(ctx):
     dist = ctx.attrs.node[NodeDistInfo]
     where = str(ctx.label.raw_target())
+    if ctx.attrs.expect_error == "":
+        fail("{}: expect_error is empty: name the text the script must print on stderr, or leave expect_error out".format(where))
     staged = {ctx.attrs.src.short_path: ctx.attrs.src}
     for s in ctx.attrs.srcs:
         if s.short_path in staged:
@@ -279,7 +298,7 @@ def _node_test_impl(ctx):
             root,
             ctx.attrs.src.short_path,
             "pass" if ctx.attrs.expect_error == None else "fail",
-            ctx.attrs.expect_error or "-",
+            ctx.attrs.expect_error if ctx.attrs.expect_error != None else "-",
             ctx.attrs.args,
         ),
         category = "node_test",
