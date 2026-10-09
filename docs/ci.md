@@ -354,10 +354,25 @@ channel answers NOOP (exit 0).
   Those are lint rules a script could spell around. **The lock is kci**,
   which on a push is built from `main`: it refuses `--plan` on a push to
   `refs/heads/main` for every stage (exit 3, `KCI-E-PLAN-ON-RELEASE`), and
-  its result carries a `set_hash` only for a run that is not `--plan` and,
-  when it selects validations, whose every validation VALIDATED and
-  SUCCEEDED. `validate`'s `validated_set_hash` comes from that field, so a
-  dry run hands `prod` nothing, and `prod` refuses an empty hash.
+  its result carries a `set_hash` only for a run that is not `--plan`, that
+  ended SUCCEEDED or NOOP, and, when it selects validations, whose every
+  validation VALIDATED and SUCCEEDED. `validate`'s `validated_set_hash`
+  comes from that field, so a dry run or a failed run hands `prod` nothing,
+  and `prod` refuses an empty hash.
+- **A failed DEPLOY step stops the run, and nothing rolls it back.** `kci
+  run` stops at the first step that does not end SUCCEEDED or NOOP. A DEPLOY
+  step that ends FAILED or PARTIAL leaves its cell exactly as the failed
+  apply left it: kci does not unwind what landed, and a later step of the
+  stage (a DEPLOY step into another cell included) has no row and never
+  runs. The job exits non-zero (4 or 6), so no job that `needs:` it starts,
+  and the run's result carries no `set_hash`, so the next stage, which
+  refuses an empty hash, could not start from it either. The recovery is a
+  fixed revision pushed to `main`: its apply completes what the failed one
+  left `pending`. `--rollback-on-failure`, which would re-apply the failed
+  cell at its last known-good revision, needs a per-cell deployed-revision
+  record that kci does not have yet, so kci refuses the flag on every stage,
+  with or without `--plan`, before it reads anything (exit 2,
+  `KCI-E-USAGE`, no RUNNING record).
 - **Queued runs: one release at a time, newest push wins.** A PUSH to `main`
   is in the concurrency group `kci-release-main` (rule R16 holds the group
   text byte for byte). A running release is never cancelled. GitHub keeps at
