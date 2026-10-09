@@ -57,8 +57,11 @@ test "report: variants_that_pass" {
     // Counts at the bounds: 2^53, and samples exactly 30 (the good report's).
     try eq(@as(u64, 9007199254740992), (try F.report(&.{.{ "\"rows\": 1000000,", "\"rows\": 9007199254740992," }})).rows[0].rows);
     try eq(@as(u64, 9007199254740992), (try F.report(&.{.{ "\"rows\": 1000000,", "\"rows\": 9.007199254740992e15," }})).rows[0].rows);
-    // Names may hold a-z 0-9 _ and '.
+    // Names may hold a-z 0-9 _ and ': each end of each range included.
     try eqs("a_9'", (try F.report(&.{.{ "\"variant\": \"v\"", "\"variant\": \"a_9'\"" }})).rows[0].variant);
+    try eqs("az09_", (try F.report(&.{.{ "\"function\": \"per_batch\"", "\"function\": \"az09_\"" }})).rows[0].function);
+    // Opt levels at both ends: "0" and "3" (the good report's engine).
+    try eqs("0", (try F.report(&.{.{ "\"driver\": \"1\"", "\"driver\": \"0\"" }})).build.opt_levels[1].v);
 }
 
 fn refused(doc: []const u8, why: []const u8) !void {

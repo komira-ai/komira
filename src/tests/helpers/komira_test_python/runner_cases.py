@@ -113,6 +113,7 @@ REPORT_CASES = [
     ("report_ok", "report_ok.py", "run-7\n", (0, "stderr is not captured", True, OK)),
     ("report_id_without_newline", "report_ok.py", "run-7", (0, "stderr is not captured", True, OK)),
     ("report_id_128", "report_ok.py", "a" * 128, (0, "stderr is not captured", True, report_of("a" * 128, {"a": 1, "b": [2]}))),
+    ("report_id_leading_digit", "report_ok.py", "7a\n", (0, "stderr is not captured", True, report_of("7a", {"a": 1, "b": [2]}))),
     ("report_id_charset", "report_ok.py", "Z9._:+-\n", (0, "stderr is not captured", True, report_of("Z9._:+-", {"a": 1, "b": [2]}))),
     (
         "report_not_json",
@@ -150,6 +151,12 @@ REPORT_CASES = [
         "report_out_of_range.py",
         "run-7\n",
         (1, failed("report_out_of_range.py", "its standard output is not one JSON object (1e999 is out of the range of a double)"), False, None),
+    ),
+    (
+        "report_huge_integer",
+        "report_huge_integer.py",
+        "run-7\n",
+        (1, failed("report_huge_integer.py", "its standard output is not one JSON object (an integer of 310 digits is out of the range of a double)"), False, None),
     ),
     (
         "report_not_utf8",

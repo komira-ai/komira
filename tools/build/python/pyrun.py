@@ -23,8 +23,9 @@ writes nothing to `--out`.
 
 Reports: with `--report`, everything the script and its children write to
 file descriptor 1 is captured (not shown), and the script passes only if
-that is one JSON object without a `run_id` or `target` key, and without
-NaN or an infinity. The object is written to `--report` with `run_id` (the
+that is one JSON object without a `run_id` or `target` key, without a key
+written twice, and without NaN, an infinity or a number (with or without a
+fraction) out of the range of a double. The object is written to `--report` with `run_id` (the
 content of the `--run-id` file, one line of at most 128 characters from
 `A-Z a-z 0-9 . _ : + -`, starting with a letter or a digit) and `target` (the
 `--target` label) put first. A script that fails has its captured output
@@ -119,6 +120,16 @@ def _finite(text):
     return v
 
 
+def _whole(text):
+    """A JSON number without a fraction or an exponent, refused outside the range of a double (json.loads reads it as a Python int of any size)."""
+    v = int(text)
+    try:
+        float(v)
+    except OverflowError:
+        raise ValueError("an integer of {} digits is out of the range of a double".format(len(text.lstrip("-")))) from None
+    return v
+
+
 def _no_duplicates(pairs):
     """An object's members, refused if a key is written twice (a dict would keep only the last value)."""
     obj = {}
@@ -136,6 +147,7 @@ def _report(captured, run_id, target):
             captured.decode("utf-8"),
             parse_constant=_refuse_constant,
             parse_float=_finite,
+            parse_int=_whole,
             object_pairs_hook=_no_duplicates,
         )
     except (UnicodeDecodeError, ValueError) as e:
