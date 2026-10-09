@@ -212,7 +212,7 @@ struct CapsText(Copyable, Movable):
     var runtime_abi: String
     var words: List[UInt32]
     """max_descriptor_version, shapes, threading, thread_affine, transports,
-    hosting, devices, features, udf_class, in that order."""
+    hosting, devices, features, udf_class, global_lock, in that order."""
 
 
 def new_caps(mut arena: _Arena) -> Word:
@@ -225,7 +225,7 @@ def read_caps(c: Word) -> CapsText:
     var p = c.p.bitcast[CUdfCapabilities]()
     var w: List[UInt32] = [
         p[].max_descriptor_version, p[].shapes, p[].threading, p[].thread_affine,
-        p[].transports, p[].hosting, p[].devices, p[].features, p[].udf_class,
+        p[].transports, p[].hosting, p[].devices, p[].features, p[].udf_class, p[].global_lock,
     ]
     return CapsText(read_cstr(p[].runtime_id), read_cstr(p[].runtime_abi), w^)
 
@@ -279,13 +279,15 @@ def new_call(mut arena: _Arena, deadline_ns: Int64, call_id: Int64, cancel: Bool
     return Word(c.bitcast[NoneType]())
 
 
-def start_cancel_timer(call: Word, delay_ns: Int64) -> Word:
-    """Start a C thread that sets `call`'s cancel flag after `delay_ns`; the
-    timer, to pass to join_cancel_timer before the call's blocks are freed.
-    NULL when no thread could be started."""
-    # SAFETY: the flag is an 8-byte arena block that outlives the join.
+def start_cancel_timer(call: Word, clock_reads: Word) -> Word:
+    """Start a C thread that sets `call`'s cancel flag once the host's clock
+    has been read after this point (the call has started); the timer, to
+    pass to join_cancel_timer before the call's blocks are freed. NULL when
+    no thread could be started."""
+    # SAFETY: the flag is an 8-byte arena block and `clock_reads` a field of
+    # the arena's _HostData block; both outlive the join.
     var flag = call.p.bitcast[CUdfCall]()[].cancel
-    return Word(external_call["komira_udf_spike_cancel_after", Void](flag, delay_ns))
+    return Word(external_call["komira_udf_spike_cancel_on_clock_read", Void](flag, clock_reads.p))
 
 
 def join_cancel_timer(timer: Word):

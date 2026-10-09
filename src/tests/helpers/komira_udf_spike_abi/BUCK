@@ -66,7 +66,7 @@ mojo_library(
     test_data = {
         "tests/test_conform_broken.mojo": _CASES | {"echo_broken.so": ":echo_broken"},
         "tests/test_conform_echo.mojo": _CASES | {"echo.so": ":echo"},
-        "tests/test_harness.mojo": {"echo.so": ":echo"},
+        "tests/test_harness.mojo": {"echo.so": ":echo", "echo_global_lock.so": ":echo_global_lock"},
         # The scan reads the harness's sources, both headers and the cases:
         # not the reference runtimes, which a runtime id names by design.
         "tests/test_no_runtime_special_case.mojo": glob(
@@ -115,6 +115,10 @@ cxx_library(
 #                   KOMIRA_UDF_ECHO_BROKEN, seven planted defects (the file
 #                   header lists them). The suite must fail on it, on exactly
 #                   the cases that name those defects (test_conform_broken).
+#   echo_global_lock.so
+#                   echo through its second init: it reports global_lock 1
+#                   beside THREAD_SAFE, which UdfRuntime.open must refuse
+#                   (test_harness).
 # Each C build defines an init of its own name (the one-definition gate links
 # every C library under src/ whole, so the two cannot share one), and a
 # one-function Mojo file forwards the ABI's export to it. Each library's gate
@@ -122,7 +126,10 @@ cxx_library(
 cxx_library(
     name = "komira_udf_echo",
     srcs = [":c_files[refrt/echo_runtime.c]"],
-    preprocessor_flags = ["-DECHO_INIT=komira_udf_echo_init_v1"],
+    preprocessor_flags = [
+        "-DECHO_INIT=komira_udf_echo_init_v1",
+        "-DECHO_INIT_GLOBAL_LOCK=komira_udf_echo_global_lock_init_v1",
+    ],
     deps = [":komira_udf_spike_c"],
     visibility = ["PUBLIC"],
 )
@@ -141,6 +148,15 @@ cxx_library(
 mojo_shared_lib(
     name = "echo",
     srcs = ["refrt/echo_so.mojo"],
+    exports = ["komira_udf_runtime_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_echo"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "echo_global_lock",
+    srcs = ["refrt/echo_global_lock_so.mojo"],
     exports = ["komira_udf_runtime_init_v1"],
     exports_exact = True,
     deps = [":komira_udf_echo"],

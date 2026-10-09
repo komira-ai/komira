@@ -16,14 +16,19 @@
 # argument (`all_valid = True` where it is set False): scalar_nulls_propagate
 # goes red. runtime.mojo starting no cancel timer: cancel_set_during_call goes
 # red (the call runs to the end and returns OK). _host.mojo's check_device
-# returning at once: fault_output_not_on_cpu goes red.
+# returning at once: fault_output_not_on_cpu goes red. The PROPAGATE null scan
+# reading only the first argument: scalar_nulls_propagate_second_arg goes red.
+# The length post-condition weakened to `len(col) < rows`: column_long_by_one
+# goes red. _moved_check not releasing an input the runtime kept: the ledger
+# of fault_agg_args_not_moved goes red. run_frame recording no fault when its
+# bound is reached: fault_frame_never_ends goes red.
 
 from std.testing import assert_equal
 
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 34
+comptime CASE_COUNT = 38
 """The JSON files under cases/: an empty or partial staging cannot pass."""
 
 

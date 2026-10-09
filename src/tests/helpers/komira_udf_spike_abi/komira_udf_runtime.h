@@ -220,7 +220,8 @@ typedef struct komira_udf_capabilities {
   const char* runtime_abi; /* may be empty */
   uint32_t max_descriptor_version;
   uint32_t shapes, threading, thread_affine, transports, hosting, devices, features;
-  uint32_t udf_class; /* NATIVE or MANAGED */
+  uint32_t udf_class;   /* NATIVE or MANAGED */
+  uint32_t global_lock; /* 1 if user code is serialized across contexts; THREAD_SAFE requires 0 */
 } komira_udf_capabilities;
 
 typedef struct komira_udf_spec { /* the UdfRef, decoded by the host; borrowed for the call */

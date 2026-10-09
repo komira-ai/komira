@@ -1,0 +1,12 @@
+{
+ "name": "scalar_nulls_propagate_second_arg",
+ "defect": "under PROPAGATE the host drops rows with a null in some arguments only (the first), so user code sees a null in a later argument",
+ "run": "call_batch",
+ "entry": "add_strict",
+ "shape": "SCALAR",
+ "null_mode": "PROPAGATE",
+ "args": [{"type": "int64", "nullable": true}, {"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [1, null, 3, 4, 5]}, {"type": "int64", "values": [10, 20, null, 40, null]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [11, null, null, 44, null]}}
+}

@@ -153,6 +153,7 @@ def _udf_rows(mut r: Rows):
     r.add("offsetof komira_udf_capabilities.devices", Int(UnsafePointer(to=c[].devices)) - cb)
     r.add("offsetof komira_udf_capabilities.features", Int(UnsafePointer(to=c[].features)) - cb)
     r.add("offsetof komira_udf_capabilities.udf_class", Int(UnsafePointer(to=c[].udf_class)) - cb)
+    r.add("offsetof komira_udf_capabilities.global_lock", Int(UnsafePointer(to=c[].global_lock)) - cb)
     free_zeroed(c.bitcast[NoneType]())
 
 

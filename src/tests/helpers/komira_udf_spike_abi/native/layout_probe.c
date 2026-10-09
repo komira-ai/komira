@@ -68,7 +68,7 @@ static const row ROWS[] = {
     O(komira_udf_capabilities, threading), O(komira_udf_capabilities, thread_affine),
     O(komira_udf_capabilities, transports), O(komira_udf_capabilities, hosting),
     O(komira_udf_capabilities, devices), O(komira_udf_capabilities, features),
-    O(komira_udf_capabilities, udf_class),
+    O(komira_udf_capabilities, udf_class), O(komira_udf_capabilities, global_lock),
 
     S(komira_udf_spec), O(komira_udf_spec, struct_size), O(komira_udf_spec, shape),
     O(komira_udf_spec, form), O(komira_udf_spec, entry), O(komira_udf_spec, descriptor_version),

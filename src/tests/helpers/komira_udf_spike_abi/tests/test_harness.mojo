@@ -12,11 +12,15 @@
 #     case read as a default and passing vacuously);
 #   - UdfRuntime.open refuses a missing library, a library without the init
 #     export, and a runtime that refuses the host's ABI major, each by name;
+#     and a runtime reporting THREAD_SAFE with global_lock 1
+#     (echo_global_lock.so), naming both capabilities (design section 4.2: a
+#     runtime with a global lock bound as a parallel virtual machine);
 #   - a handle passed to an entry of another kind is refused before the
 #     runtime sees it; a run the reader does not know is refused;
 #   - memory_report reaches the optional entry (echo reports 0).
-# Mutant planted: runtime_id_ok accepting upper-case letters (A to Z among
-# the alphanumerics): red ("upper case").
+# Mutants planted: runtime_id_ok accepting upper-case letters (A to Z among
+# the alphanumerics): red ("upper case"). UdfRuntime.open not reading
+# global_lock: red (echo_global_lock.so opens).
 
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -140,12 +144,22 @@ def _open_refusals() raises:
     except e:
         msg = String(e)
     assert_true(msg.startswith("UDF_RUNTIME_INIT") and "ERR_ABI" in msg, msg)
+    msg = String()
+    try:
+        _ = UdfRuntime.open("./echo_global_lock.so")
+    except e:
+        msg = String(e)
+    assert_true(
+        msg.startswith("UDF_RUNTIME_FAULT") and "THREAD_SAFE" in msg and "global_lock 1" in msg, msg
+    )
 
 
 def _handles_and_runs() raises:
     var rt = UdfRuntime.open("./echo.so")
     var caps = rt.describe()
     assert_equal(caps.udf_class, CLASS_MANAGED)
+    assert_equal(caps.threading, THREAD_SAFE)
+    assert_equal(caps.global_lock, 0)
     assert_true(caps.has_memory_report)
     var ctx = rt.open_context(0)
     assert_true(ctx.outcome.is_ok())

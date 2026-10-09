@@ -157,6 +157,7 @@ struct CUdfCapabilities:
     var devices: UInt32
     var features: UInt32
     var udf_class: UInt32
+    var global_lock: UInt32
 
 
 struct CUdfSpec:

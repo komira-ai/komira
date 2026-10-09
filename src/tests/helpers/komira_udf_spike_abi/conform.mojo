@@ -295,12 +295,12 @@ def _run_agg_split(mut rt: UdfRuntime, c: Case) raises -> String:
         var st = rt.agg_state(g.handle, p.n_groups, c.spec.state.value())
         rt.agg_close(g.handle)
         why = _check(up, c.expect)
-        if why == "":
+        if why == "" and up.is_ok():
             why = _check(st.outcome, c.expect)
-        if why != "":
+        if why != "" or not up.is_ok():
             break
         states.append(st.column.copy())
-    if why == "" and c.expect.status == OK:
+    if why == "" and c.expect.status == OK and len(states) == len(c.partials):
         var g = rt.agg_open(b.insts[len(c.partials)])
         for i in range(len(states)):
             var ids = List[Int32]()

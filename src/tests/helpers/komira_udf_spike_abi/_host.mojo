@@ -30,6 +30,7 @@
 #     runtime's until its `release` (called once, when non-NULL).
 # =============================================================================
 
+from std.ffi import external_call
 from std.sys import size_of
 from std.time import perf_counter_ns
 
@@ -72,6 +73,9 @@ struct _HostData:
     var streams_released: Int
     var reserved_bytes: Int
     var log_lines: Int
+    var clock_reads: Int
+    """now_ns calls, counted in C atomically (native/cancel_timer.c): the
+    cancel timer's thread reads it. Never read or written here."""
 
 
 struct _ArrRec:
@@ -147,7 +151,14 @@ def _host_mem_release(host_data: Void, bytes: Int64) abi("C"):
     _hd(host_data)[].reserved_bytes -= Int(bytes)
 
 
+def clock_reads_of(hd: Word) -> Word:
+    """The address of `hd`'s now_ns call count, for the cancel timer."""
+    # SAFETY: `hd` is a _HostData block make_host allocated, alive with the arena.
+    return Word(UnsafePointer(to=_hd(hd.p)[].clock_reads).bitcast[NoneType]())
+
+
 def _host_now_ns(host_data: Void) abi("C") -> Int64:
+    external_call["komira_udf_spike_clock_read", NoneType](clock_reads_of(Word(host_data)).p)
     return Int64(perf_counter_ns())
 
 

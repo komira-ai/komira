@@ -6,8 +6,9 @@
 # Every call returns an Outcome: the runtime's status, message, trace, row
 # and group, and `fault`, a post-condition the host found broken (a layout
 # that fails import validation, a wrong length, a null in a non-nullable
-# result, `args` not moved, `out` set on failure). run_error() maps either to
-# the run's named error through one table (contract.run_error).
+# result, an input not moved (then released here, once), `out` set on
+# failure, a frame that does not end). run_error() maps either to the run's
+# named error through one table (contract.run_error).
 #
 # Handles are opaque: a Handle holds the runtime's pointer as a Word, which
 # this file cannot read through, and its kind; it is passed back only to the
@@ -18,6 +19,7 @@ from ._host import (
     Counts,
     _Arena,
     array_released,
+    clock_reads_of,
     counts,
     device_column,
     device_stream,
@@ -77,6 +79,7 @@ from .contract import (
     NULL_MANUAL,
     NULL_PROPAGATE,
     OK,
+    THREAD_SAFE,
     run_error,
     status_name,
 )
@@ -87,7 +90,9 @@ comptime KIND_CONTEXT = 2
 comptime KIND_INSTANCE = 3
 comptime KIND_FRAME = 4
 comptime KIND_GROUPS = 5
-comptime _MAX_FRAME_PULLS = 10_000
+comptime _MAX_FRAME_OUTPUTS = 1_000
+"""run_frame's bound: a frame that has not ended after this many outputs is
+a runtime fault (no case's frame comes near it)."""
 
 
 @fieldwise_init
@@ -106,13 +111,14 @@ struct Capabilities(Copyable, Movable, Writable):
     var devices: UInt32
     var features: UInt32
     var udf_class: UInt32
+    var global_lock: UInt32
     var has_memory_report: Bool
 
     def write_to(self, mut writer: Some[Writer]):
         writer.write(
             self.runtime_id, " abi=", self.runtime_abi, " class=", self.udf_class, " shapes=", self.shapes,
             " threading=", self.threading, " transports=", self.transports, " hosting=", self.hosting,
-            " features=", self.features,
+            " features=", self.features, " global_lock=", self.global_lock,
         )
 
 
@@ -211,18 +217,19 @@ struct FrameResult(Copyable, Movable):
 
 @fieldwise_init
 struct CallOptions(Copyable, Movable):
-    """`cancel`: the cancel flag is set before the call. `cancel_after_ns`
-    above 0: a C thread sets the flag that long after the call starts, while
-    it runs. `deadline_passed`: the deadline is one nanosecond after the host
+    """`cancel`: the cancel flag is set before the call. `cancel_during_call`:
+    a C thread sets the flag while the call runs, once the runtime has read
+    the host's clock inside it (native/cancel_timer.c), so the call has
+    started; no wall-clock delay decides when. `deadline_passed`: the deadline is one nanosecond after the host
     clock's zero, long past."""
 
     var cancel: Bool
-    var cancel_after_ns: Int64
+    var cancel_during_call: Bool
     var deadline_passed: Bool
 
     @staticmethod
     def plain() -> CallOptions:
-        return CallOptions(False, 0, False)
+        return CallOptions(False, False, False)
 
 
 def _need(h: Handle, kind: Int) raises:
@@ -269,7 +276,10 @@ struct UdfRuntime(Movable):
         """dlopen `path`, init with a host claiming `abi_major` (this ABI's
         unless a test asks for another), and check the table covers every
         required entry. Raises UDF_RUNTIME_OPEN_FAILED,
-        UDF_RUNTIME_MISSING_SYMBOL, UDF_RUNTIME_INIT or UDF_RUNTIME_ABI."""
+        UDF_RUNTIME_MISSING_SYMBOL, UDF_RUNTIME_INIT or UDF_RUNTIME_ABI; and
+        UDF_RUNTIME_FAULT, after shutting it down, for a runtime that reports
+        threading THREAD_SAFE with global_lock 1 (design section 4.2: a
+        runtime with a global lock may not declare that mode)."""
         var arena = _Arena()
         var lib = open_library(path)
         var host = make_host(arena, abi_major)
@@ -287,7 +297,15 @@ struct UdfRuntime(Movable):
                 + String(table_size(t)) + " bytes; this host needs major " + String(ABI_MAJOR)
                 + " and " + String(required_size()) + " bytes"
             )
-        return UdfRuntime(path, arena^, lib, t, slot_value(slot), host)
+        var rt = UdfRuntime(path, arena^, lib, t, slot_value(slot), host)
+        var caps = rt.describe()
+        if caps.threading == THREAD_SAFE and caps.global_lock != 0:
+            rt.shutdown()
+            raise Error(
+                "UDF_RUNTIME_FAULT: " + path + ": runtime " + caps.runtime_id + " reports threading THREAD_SAFE"
+                + " with global_lock " + String(caps.global_lock) + "; THREAD_SAFE requires no global lock"
+            )
+        return rt^
 
     def init_refusal(mut self, abi_major: UInt32) -> Outcome:
         """Call init again with a host claiming `abi_major`: a runtime of
@@ -310,7 +328,8 @@ struct UdfRuntime(Movable):
         var t = read_caps(c)
         return Capabilities(
             t.runtime_id, t.runtime_abi, t.words[0], t.words[1], t.words[2], t.words[3],
-            t.words[4], t.words[5], t.words[6], t.words[7], t.words[8], memory_report_present(self._table),
+            t.words[4], t.words[5], t.words[6], t.words[7], t.words[8], t.words[9],
+            memory_report_present(self._table),
         )
 
     def feature_slots_agree(mut self) raises -> Bool:
@@ -386,8 +405,8 @@ struct UdfRuntime(Movable):
         self._calls += 1
         var call = new_call(self._arena, Int64(1) if opts.deadline_passed else Int64(0), self._calls, opts.cancel)
         var timer = Word.null()
-        if opts.cancel_after_ns > 0:
-            timer = start_cancel_timer(call, opts.cancel_after_ns)
+        if opts.cancel_during_call:
+            timer = start_cancel_timer(call, clock_reads_of(host_data_of(self._host)))
         return _Call(call, timer)
 
     def _end(mut self, c: _Call):
@@ -491,17 +510,20 @@ struct UdfRuntime(Movable):
             self._end(c)
             return FrameResult(out^, outputs^, first, pulls_of(rec))
         var frame = slot_value(slot)
-        for _ in range(_MAX_FRAME_PULLS):
+        var ended = False
+        for _ in range(_MAX_FRAME_OUTPUTS + 1):
             var d_out = self._arena.word(128)
             var e2 = new_error(self._arena)
             var rc2 = t_frame_next(self._table, frame, c.call, d_out, e2)
             if rc2 != OK:
+                ended = True
                 out = self._outcome(rc2, e2)
                 if not array_released(d_out):
                     _ = release_out(d_out)
                     out.fault = "UDF_RUNTIME_FAULT: out set on failure"
                 break
             if array_released(d_out):
+                ended = True
                 break
             if first < 0:
                 first = pulls_of(rec)
@@ -517,7 +539,12 @@ struct UdfRuntime(Movable):
                 out.fault = String(e)
             _ = release_out(d_out)
             if out.fault != "":
+                ended = True
                 break
+        if not ended:
+            out.fault = (
+                "UDF_RUNTIME_FAULT: frame_next did not end after " + String(len(outputs)) + " outputs"
+            )
         t_frame_close(self._table, frame)
         self._end(c)
         return FrameResult(out^, outputs^, first, pulls_of(rec))
@@ -536,7 +563,16 @@ struct UdfRuntime(Movable):
         return device_column(self._arena, col, host_data_of(self._host))
 
     def _moved_check(self, mut got: Outcome, a: Word, b: Word, entry: String):
-        if got.fault == "" and (not array_released(a) or not array_released(b)):
+        """An input the runtime did not move is still the host's: released
+        here, once, and a fault."""
+        var kept = False
+        if not array_released(a):
+            _ = release_out(a)
+            kept = True
+        if not array_released(b):
+            _ = release_out(b)
+            kept = True
+        if kept and got.fault == "":
             got.fault = "UDF_RUNTIME_FAULT: an input not moved by " + entry
 
     def agg_update(mut self, g: Handle, args: Batch, gids: List[Int32], n_groups: UInt32, opts: CallOptions) raises -> Outcome:

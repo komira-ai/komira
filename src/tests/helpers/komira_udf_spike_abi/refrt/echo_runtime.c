@@ -23,8 +23,12 @@
  *   7. a ROW read outside the read set that the fixture catches is not
  *      reported: call_batch returns OK.
  *
- * Every symbol but ECHO_INIT is static, so both builds link into one
- * process (the one-definition gate links every C library whole).
+ * With ECHO_INIT_GLOBAL_LOCK defined, the build also defines that init:
+ * the same runtime reporting global_lock 1 beside THREAD_SAFE, the test
+ * setting of design section 6.3, which a host must refuse at init.
+ *
+ * Every symbol but the inits is static, so the builds link into one process
+ * (the one-definition gate links every C library whole).
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -46,7 +50,7 @@
 #endif
 
 #define FMT_I64 'l'
-#define SLOW_ROW_NS 10000000 /* slow_loop: 10 ms of the host's clock per row */
+#define SLOW_ROW_NS 100000000 /* slow_loop: at most 100 ms of the host's clock per row */
 #define FMT_F64 'g'
 
 /* ---- fixtures ------------------------------------------------------------ */
@@ -73,7 +77,11 @@ enum fixture_id {
   F_DEVICE_NOT_CPU,
   F_NULL_COUNT_LIES,
   F_ARGS_KEPT,
-  F_YIELD_TWO_THEN_RAISE
+  F_YIELD_TWO_THEN_RAISE,
+  F_ADD_STRICT,
+  F_LONG_BY_ONE,
+  F_SUM_ARGS_KEPT,
+  F_ENDLESS
 };
 
 /* args: one format per argument ('*' for ROW: any number of int64 fields,
@@ -120,6 +128,13 @@ static const struct fixture FIXTURES[] = {
     /* A frame that yields its first two input batches unchanged, then
      * raises, leaving the rest of its input unread. */
     {"yield_two_then_raise", F_YIELD_TWO_THEN_RAISE, KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME, "l", "tl", ""},
+    /* a + b, raising on a null in either argument. */
+    {"add_strict", F_ADD_STRICT, KOMIRA_UDF_SHAPE_SCALAR, "ll", "l", ""},
+    /* More runtime bugs: one row too many; sum whose agg_update reads `args`
+     * in place and never moves it; a frame that never ends. */
+    {"long_by_one", F_LONG_BY_ONE, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "l", "l", ""},
+    {"sum_args_kept", F_SUM_ARGS_KEPT, KOMIRA_UDF_SHAPE_AGG_MERGEABLE, "l", "l", "l"},
+    {"endless", F_ENDLESS, KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME, "l", "tl", ""},
 };
 
 #define N_FIXTURES (sizeof(FIXTURES) / sizeof(FIXTURES[0]))
@@ -128,6 +143,7 @@ static const struct fixture FIXTURES[] = {
 
 struct komira_udf_rt {
   const komira_udf_host* host;
+  uint32_t global_lock;
 };
 #define ROW_FIELDS_MAX 8
 
@@ -149,6 +165,7 @@ struct komira_udf_instance {
   int64_t calls; /* BROKEN (6) reads it */
 };
 struct komira_udf_groups {
+  const struct fixture* fx;
   int64_t* st;
   uint32_t n;
   uint32_t cap;
@@ -365,7 +382,6 @@ static int32_t check_spec(const komira_udf_spec* s, komira_udf_error* e, const s
 }
 
 static int32_t echo_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
-  (void)rt;
   if (c == NULL || c->struct_size < sizeof(komira_udf_capabilities)) return KOMIRA_UDF_ERR_ABI;
   c->runtime_id = ECHO_ID;
   c->runtime_abi = "";
@@ -380,6 +396,7 @@ static int32_t echo_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   c->devices = KOMIRA_UDF_DEVICE_CPU;
   c->features = KOMIRA_UDF_FEATURE_MEMORY_REPORT;
   c->udf_class = KOMIRA_UDF_CLASS_MANAGED;
+  c->global_lock = rt->global_lock;
   return KOMIRA_UDF_OK;
 }
 
@@ -524,10 +541,12 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
   const komira_udf_rt* rt = inst->ctx->rt;
   int64_t n = in->length;
   const struct ArrowArray* x = in->n_children > 0 ? in->children[0] : NULL;
-  int64_t rows = (fx->id == F_SHORT_BY_ONE && n > 0) ? n - 1 : n;
-  if (fx->id == F_DOUBLE_STRICT)
+  const struct ArrowArray* y = in->n_children > 1 ? in->children[1] : NULL;
+  int64_t rows = (fx->id == F_SHORT_BY_ONE && n > 0) ? n - 1 : fx->id == F_LONG_BY_ONE ? n + 1 : n;
+  if (fx->id == F_DOUBLE_STRICT || fx->id == F_ADD_STRICT)
     for (int64_t r = 0; r < n; r++)
-      if (!is_valid(x, r)) return fail(e, KOMIRA_UDF_ERR_RAISED, "double_strict: a null argument", r);
+      if (!is_valid(x, r) || (y != NULL && !is_valid(y, r)))
+        return fail(e, KOMIRA_UDF_ERR_RAISED, "a strict fixture got a null argument", r);
   if (fx->id == F_RAISE_ON_ROW_3 && n > 3) return fail(e, KOMIRA_UDF_ERR_RAISED, "raise_on_row_3: row 3", 3);
   uint8_t* v;
   void* d;
@@ -543,13 +562,14 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
         release_array(o);
         return fail(e, KOMIRA_UDF_ERR_DEADLINE, "slow_loop: deadline passed", r);
       }
-      /* Each row takes SLOW_ROW_NS of the host's clock, so a cancel the
-       * host sets during the call lands between rows. */
+      /* Each row waits SLOW_ROW_NS of the host's clock, or until the flag
+       * is set; a cancel set during the call is seen at the next row. */
       int64_t until = rt->host->now_ns(rt->host->host_data) + SLOW_ROW_NS;
-      while (rt->host->now_ns(rt->host->host_data) < until) {
+      while (rt->host->now_ns(rt->host->host_data) < until && !cancelled(call)) {
       }
     }
     di[r] = 0;
+    if (r >= n) continue; /* long_by_one's extra row */
     if (fx->id == F_CONST7) {
       di[r] = 7;
       continue;
@@ -572,6 +592,9 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
         break;
       case F_DOUBLE_STRICT:
         di[r] = 2 * i64_at(x, r);
+        break;
+      case F_ADD_STRICT:
+        di[r] = i64_at(x, r) + i64_at(y, r);
         break;
       default: /* identity, short_by_one, bad_layout, raise_on_row_3 below row 4, slow_loop */
         di[r] = i64_at(x, r);
@@ -629,9 +652,11 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
 /* ---- mergeable aggregate: sum ------------------------------------------ */
 
 static int32_t echo_agg_open(komira_udf_instance* inst, komira_udf_groups** out, komira_udf_error* e) {
-  if (inst->fx->id != F_SUM) return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "agg_open on a fixture of another shape", -1);
+  if (inst->fx->shape != KOMIRA_UDF_SHAPE_AGG_MERGEABLE)
+    return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "agg_open on a fixture of another shape", -1);
   komira_udf_groups* g = calloc(1, sizeof(*g));
   if (g == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "agg_open: out of memory", -1);
+  g->fx = inst->fx;
   *out = g;
   return KOMIRA_UDF_OK;
 }
@@ -685,6 +710,11 @@ static int32_t fold(komira_udf_groups* g, const komira_udf_call* call, struct Ar
 
 static int32_t echo_agg_update(komira_udf_groups* g, const komira_udf_call* c, struct ArrowDeviceArray* args,
                                struct ArrowDeviceArray* gids, uint32_t n, komira_udf_error* e) {
+  if (g->fx->id == F_SUM_ARGS_KEPT) { /* the bug: args read in place, never moved */
+    struct ArrowDeviceArray view = *args;
+    view.array.release = NULL; /* fold's release of its copy is then a no-op */
+    return fold(g, c, &view, gids, n, e, 0);
+  }
   return fold(g, c, args, gids, n, e, 0);
 }
 
@@ -871,6 +901,19 @@ static int32_t next_yield_two(komira_udf_frame* fr, struct ArrowDeviceArray* out
   return KOMIRA_UDF_OK;
 }
 
+/* endless: a one-row table on every call; it never ends. */
+static int32_t next_endless(struct ArrowDeviceArray* out, komira_udf_error* e) {
+  uint8_t* v;
+  void* d;
+  if (!make_struct(&out->array, 1, 1) || !make_col(out->array.children[0], 1, &v, &d)) {
+    release_array(&out->array);
+    return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "endless: out of memory", -1);
+  }
+  ((int64_t*)d)[0] = 0;
+  set_cpu(out);
+  return KOMIRA_UDF_OK;
+}
+
 static int32_t echo_frame_next(komira_udf_frame* fr, const komira_udf_call* call, struct ArrowDeviceArray* out,
                                komira_udf_error* e) {
   out->array.release = NULL;
@@ -883,6 +926,8 @@ static int32_t echo_frame_next(komira_udf_frame* fr, const komira_udf_call* call
       return next_group_max(fr, out, e);
     case F_YIELD_TWO_THEN_RAISE:
       return next_yield_two(fr, out, e);
+    case F_ENDLESS:
+      return next_endless(out, e);
     default:
       return next_step(fr, out, e);
   }
@@ -919,7 +964,8 @@ static const komira_udf_runtime TABLE = {
     echo_memory_report,
 };
 
-const komira_udf_runtime* ECHO_INIT(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e) {
+static const komira_udf_runtime* init_rt(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e,
+                                         uint32_t global_lock) {
   if (host == NULL || host->struct_size < sizeof(komira_udf_host) || host->abi_major != KOMIRA_UDF_ABI_MAJOR) {
     fail(e, KOMIRA_UDF_ERR_ABI, "this runtime speaks ABI major 1", -1);
     return NULL;
@@ -930,6 +976,18 @@ const komira_udf_runtime* ECHO_INIT(const komira_udf_host* host, komira_udf_rt**
     return NULL;
   }
   r->host = host;
+  r->global_lock = global_lock;
   *rt = r;
   return &TABLE;
 }
+
+const komira_udf_runtime* ECHO_INIT(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e) {
+  return init_rt(host, rt, e, 0);
+}
+
+#ifdef ECHO_INIT_GLOBAL_LOCK
+const komira_udf_runtime* ECHO_INIT_GLOBAL_LOCK(const komira_udf_host* host, komira_udf_rt** rt,
+                                                komira_udf_error* e) {
+  return init_rt(host, rt, e, 1);
+}
+#endif
