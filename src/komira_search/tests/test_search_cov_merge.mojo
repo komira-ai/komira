@@ -4,13 +4,15 @@
 # =============================================================================
 #
 #   1. F64 keys, descending, missing last: a higher key ranks first; an equal
-#      key across splits falls to (doc_id, split) order; the missing row is
-#      last; the merged keys travel with their rows.
+#      key across splits with different doc-ids falls to doc_id order; the
+#      missing row is last; the merged keys travel with their rows.
 #   2. STR keys, ascending, missing first: the missing row comes first, then
 #      the keys in byte order; the merged keys travel with their rows.
 #   3. A page starting past every hit is empty and still sums the totals.
 #   4. merge_agg_results folds min and max across splits (a later split's lower
 #      minimum and higher maximum win), count and sum add.
+#   5. The same doc_id with an equal key (and the same doc_id with both keys
+#      missing) in two splits falls to split order: the earlier split first.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -160,6 +162,37 @@ def test_04_metric_fold() raises:
     assert_equal(r.max, 9.0, "4: the higher maximum wins")
     assert_equal(r.count, 6, "4: counts add")
     assert_equal(r.sum, 28.0, "4: sums add")
+
+
+def _assert_split_order(
+    ids: List[Int], m_split: List[Int], label: String
+) raises:
+    var want_ids: List[Int] = [3, 3, 4, 4]
+    var want_split: List[Int] = [0, 1, 0, 1]
+    assert_equal(len(ids), 4, label + ": four rows")
+    for i in range(4):
+        assert_equal(ids[i], want_ids[i], label + ": id row " + String(i))
+        assert_equal(m_split[i], want_split[i], label + ": split row " + String(i))
+
+
+def test_05_same_doc_id_tie_falls_to_split_order() raises:
+    # Both splits hold doc_id 3 with key 2.0 and doc_id 4 with no key: only the
+    # split index can order each pair.
+    var results = Slab[SearchResult]()
+    results.append(_result_f64([3, 4], [2.0, 0.0], [False, True], 2))
+    results.append(_result_f64([3, 4], [2.0, 0.0], [False, True], 2))
+    var m = merge_search_results(
+        results^, 0, 10, SORT_MODE_SCORE, SORT_DESC, MISSING_LAST
+    )
+    _assert_split_order(_ids(m.result), m.hit_split_index.copy(), "5")
+    # The same rows under string keys, ascending, missing last.
+    var rs = Slab[SearchResult]()
+    rs.append(_result_str([3, 4], [String("k"), String("")], [False, True], 2))
+    rs.append(_result_str([3, 4], [String("k"), String("")], [False, True], 2))
+    var ms = merge_search_results(
+        rs^, 0, 10, SORT_MODE_SCORE, SORT_ASC, MISSING_LAST
+    )
+    _assert_split_order(_ids(ms.result), ms.hit_split_index.copy(), "5s")
 
 
 def main() raises:

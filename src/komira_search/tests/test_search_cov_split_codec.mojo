@@ -5,8 +5,11 @@
 #
 #   1. Bitpack: a width outside [0, 64] and a negative value are refused; an
 #      unpack past the source is refused; width 64 is valid on both sides.
-#   2. ULEB128: a read past the region end and an 11-byte varint are refused; a
-#      10-byte varint with the top bit set reads as a negative Int.
+#   2. ULEB128: a read past the region end is refused, and so is a varint
+#      whose first eleven bytes all carry the continuation bit (the input is
+#      twelve bytes); a 10-byte varint with the top bit set reads as a
+#      negative Int. An 11-byte varint that ends at its 11th byte is accepted
+#      today (komira-ai/komira#1085), so no test pins that case.
 #   3. Posting-list encode (plain and with block metadata): length mismatch,
 #      a negative doc-id, a non-ascending doc-id, a negative tf are refused.
 #   4. Posting-list decode: a region past the source, a negative doc_count, a
@@ -97,13 +100,14 @@ def test_02_uleb128_edges() raises:
     var cont: List[UInt8] = [0x80, 0x80]
     with assert_raises(contains="ran past region end"):
         _ = _read_uleb128_span(Span(cont), 0, 2)
+    # Eleven continuation bytes, then a terminator: refused at the 11th byte.
     var long = List[UInt8]()
     for _ in range(11):
         long.append(0x80)
     long.append(0x00)
     with assert_raises(contains="varint exceeds 10 bytes"):
         _ = _read_uleb128_span(Span(long), 0, len(long))
-    # Ten bytes is the most a varint may take: no refusal.
+    # A 10-byte varint is read without a refusal.
     var neg = _neg_uleb()
     var r = _read_uleb128_span(Span(neg), 0, len(neg))
     assert_equal(r[0], -1, "2: all 64 bits set reads as -1")

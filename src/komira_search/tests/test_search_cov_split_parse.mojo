@@ -19,6 +19,11 @@
 #      (termdict, postings, docstore, fast fields, BLOCKMAX) is refused.
 #   5. A region with a negative offset, an offset inside the magic, and a
 #      region running past the footer start are refused.
+#   6. A region whose offset + length wraps past the Int maximum slips under
+#      the footer-start check (the sum is negative) and is refused because its
+#      offset lies past the end of the file. (A wrapped length with an
+#      in-range offset is accepted today: komira-ai/komira#1084; no test pins
+#      that.)
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -193,6 +198,17 @@ def test_05_region_bounds_refusals() raises:
     _put_u64(past, p, UInt64(len(past)))
     with assert_raises(contains="region 'docstore' extends past footer start"):
         _ = SplitView.parse(past^)
+
+
+def test_06_wrapped_region_offset_past_eof() raises:
+    # 2^62 + (2^62 + 100) = 2^63 + 100 wraps to a negative Int, so the
+    # `offset + length > footer_start` check passes; the offset alone is past
+    # the end of the file.
+    var b = _base()
+    _put_u64(b, _slot(b, TD_OFF), UInt64(1) << 62)
+    _put_u64(b, _slot(b, TD_LEN), (UInt64(1) << 62) + 100)
+    with assert_raises(contains="region 'termdict' offset past EOF"):
+        _ = SplitView.parse(b^)
 
 
 def main() raises:

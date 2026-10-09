@@ -1896,4 +1896,4 @@ def _validate_region(
             + ")"
         )
     if offset > total:
-        raise Error("SplitView.parse: region '" + name + "' offset past EOF")  # cov: unreachable offset + length <= footer_start < total
+        raise Error("SplitView.parse: region '" + name + "' offset past EOF")
