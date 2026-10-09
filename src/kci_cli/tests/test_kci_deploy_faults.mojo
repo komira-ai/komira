@@ -29,7 +29,16 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from kci_build import BuildRequest
 from kci_reconciler import Creds, InMemoryStateStore
 from kci_cloud_fake import FakeCloud
-from kci_cli import CliRecorder, CloudDeploys, SecretStoreChoice, StageSteps, StepEnd, kci_main_with, write_whole_file
+from kci_cli import (
+    CliRecorder,
+    CloudDeploys,
+    NoRegistryClient,
+    SecretStoreChoice,
+    StageSteps,
+    StepEnd,
+    kci_main_with,
+    write_whole_file,
+)
 from kci_api import ResultValidation, parse_result
 from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest
@@ -149,7 +158,9 @@ def _deploy(var cloud: FakeCloud, tag: String, plan: Bool) raises -> _Seen:
     """One run of the deploy stage on `cloud`; what it ended with."""
     var m = _machine(_root(tag))
     var steps = Steps()
-    var deploys = CloudDeploys[FakeCloud, InMemoryStateStore](cloud^, InMemoryStateStore(), Creds.none())
+    var deploys = CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient](
+        cloud^, InMemoryStateStore(), Creds.none(), NoRegistryClient()
+    )
     var rec = CliRecorder.memory(String(""))
     var seen = _Seen()
     seen.rc = kci_main_with(_run(m, plan), steps, deploys, rec)

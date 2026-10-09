@@ -17,11 +17,10 @@
 #      that names no file is a usage error (KCI-E-USAGE, exit 2); a file
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
-#      (KCI-E-FORMAT), and so is a file holding a PUBLISH step into a cell,
-#      which this kci parses and does not run; then every cells file a step
-#      names is read (kci_cell) and a step naming a cell its cells file does
-#      not declare, or a cells file that cannot be read or parsed, is
-#      REFUSED (KCI-E-FORMAT) before any step runs;
+#      (KCI-E-FORMAT); then every cells file a step names is read
+#      (kci_cell) and a step naming a cell its cells file does not declare,
+#      or a cells file that cannot be read or parsed, is REFUSED
+#      (KCI-E-FORMAT) before any step runs;
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
 #      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
@@ -95,7 +94,10 @@
 #      name, the stage and its GitHub environment, the revision, the
 #      platform, the run identity, `--plan` and its own inputs; a DEPLOY step
 #      through `deploys.deploy` (deploy_step.mojo: the clouds this kci was
-#      built with, given the machine file's `name`). Each step adds
+#      built with, given the machine file's `name`), and a PUBLISH step into
+#      a cell (`cells` and `cell`, no channel) through `deploys.publish`
+#      (cell_publish.mojo: the release set's images pushed to the cell's
+#      registry, tagged with the revision). Each step adds
 #      its row, artifacts, new names and first error to the result; a step
 #      `--only` did not select gets a row with `selected: false` and no
 #      outcome. Right after a step's row come its SELECTED validations
@@ -113,7 +115,8 @@
 #      NOT_REACHED row. Under `--plan` a validation runs nothing and its row
 #      is WOULD_VALIDATE;
 #   7. NEW NAMES AHEAD: when the run ended SUCCEEDED or NOOP, every PUBLISH
-#      step of each stage whose `after` is S is read through `steps.lookahead`
+#      step to a channel of each stage whose `after` is S (a PUBLISH into a
+#      cell names no channel) is read through `steps.lookahead`
 #      (anonymous reads of that stage's channel, kci_publish
 #      `lookahead_new_names`), so the names a later, approval-gated stage
 #      would publish for the first time are in THIS run's result
@@ -159,8 +162,9 @@
 # seam: the steps, the lookahead reads, the platform-set variables and the
 # committed workflow. `LibrarySteps` (library_verbs.mojo) is the real one;
 # the welded tests drive a recording fake. DEPLOY steps go through the
-# `CellDeploys` seam (deploy_step.mojo): `NoCloudBuilt` in the kci binary,
-# `CloudDeploys[FakeCloud, InMemoryStateStore]` in the welded tests. Human
+# `CellDeploys` seam (deploy_step.mojo), and so do PUBLISH steps into a cell:
+# `NoCloudBuilt` in the kci binary, `CloudDeploys[FakeCloud,
+# InMemoryStateStore, T]` in the welded tests. Human
 # text goes to stderr; stdout carries nothing but a DEPLOY step's plan.
 #
 # Encapsulation: owned values and a generic seam; no pointer, no wildcard
@@ -232,6 +236,7 @@ from kci_release_machine import (
 )
 from kci_cell import cell_names, parse_cells_file
 
+from .cell_publish import cell_publish_request
 from .deploy_step import CellDeploys, NoCloudBuilt, check_deploy_set_hash, deploy_request
 from .args import (
     CLI_VERB_HELP,
@@ -333,17 +338,6 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMach
         g = parse_machine_file(text, cmd.machine)
     except e:
         raise Error(String(ERROR_FORMAT) + String("\n") + String(e))
-    for i in range(len(g.stages)):
-        for k in range(len(g.stages[i].steps)):
-            ref step = g.stages[i].steps[k]
-            if step.is_publish() and step.names_cell():
-                raise Error(
-                    String(ERROR_FORMAT) + String("\n") + cmd.machine + String(": line ") + String(step.line)
-                    + String(": step '") + step.name + String("' of stage '") + g.stages[i].name
-                    + String("' publishes into cell '") + step.cell
-                    + String("': that needs a newer kci (this kci runs BUILD steps, PUBLISH steps to a channel and")
-                    + String(" DEPLOY steps)")
-                )
     var files = cells_files_named(g)
     for i in range(len(files)):
         try:
@@ -489,7 +483,7 @@ def _lookahead[S: StageSteps](
             continue
         for k in range(len(later.steps)):
             ref step = later.steps[k]
-            if not step.is_publish():
+            if not step.is_publish() or step.names_cell():
                 continue
             var r: NewNamesReport
             if cmd.release_version.byte_length() == 0:
@@ -533,6 +527,9 @@ def _run_step[S: StageSteps, D: CellDeploys](
             end = steps.build(_build_request(cmd, step), result, recorder)
         elif step.is_deploy():
             end = deploys.deploy(deploy_request(cmd, machine, stage, step), result)
+        elif step.names_cell():
+            end = deploys.publish(cell_publish_request(cmd, machine, stage, step), result)
+            result.plan = cmd.plan
         else:
             end = steps.publish(_publish_request(cmd, stage, step, break_glass), result, recorder, cmd.store)
             # the run's dry-run flag is the command line's: a step refused

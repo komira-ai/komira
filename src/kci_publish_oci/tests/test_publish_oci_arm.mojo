@@ -6,6 +6,13 @@
 #   credential in any error. Every image row's artifact type is the literal
 #   "OCI" (kci_release_channel's ARTIFACT_TYPE_OCI, the one word for an
 #   image), never compared with the arm's own constant.
+#
+#   `publish_layout` takes the digest the release set names for the member.
+#   The existing cases pass each layout's own digest (read here with
+#   `read_oci_layout`, independently of the arm). The swap case calls the arm
+#   directly, with no `verify_member` in the path: a second, valid layout is
+#   written where the first one was, and the first one's digest is passed.
+#   It must be REFUSED with zero requests, with and without `plan`.
 # =============================================================================
 
 from std.os import getenv
@@ -26,6 +33,7 @@ from kci_api import (
     ARTIFACT_WOULD_UPLOAD,
     ERROR_IMAGE_PLATFORM,
     ERROR_IMAGE_PUSH,
+    ERROR_MEMBER,
     ERROR_PLATFORM,
     ERROR_REVISION,
     OUTCOME_FAILED,
@@ -67,8 +75,19 @@ def _pusher(var reg: FakeOciRegistry) -> LayoutPusher[FakeOciRegistry]:
     return LayoutPusher[FakeOciRegistry](reg^, OciAuth.basic(String("publisher"), String(_SECRET)), False, 0)
 
 
+def _own_digest(dir: String) -> String:
+    """The layout's own manifest digest, or "" when it does not read (the
+    arm refuses that layout before it compares digests)."""
+    try:
+        return read_oci_layout(dir).manifest_digest
+    except:
+        return String("")
+
+
 def _push(mut pusher: LayoutPusher[FakeOciRegistry], dir: String, plan: Bool = False) -> ImagePublish:
-    return publish_layout(pusher, dir, String(_HOST), String(_REPO), String(_REV), String(_PLATFORM), plan)
+    return publish_layout(
+        pusher, dir, _own_digest(dir), String(_HOST), String(_REPO), String(_REV), String(_PLATFORM), plan
+    )
 
 
 def _expect(p: ImagePublish, outcome: String, code: Int, error_id: String) raises:
@@ -142,16 +161,50 @@ def test_plan_reads_the_layout_and_sends_nothing() raises:
 def test_revision_and_platform_refused_before_any_request() raises:
     var dir = _layout_dir(String("rev"))
     var pusher = _pusher(FakeOciRegistry(_HOST))
-    var short = publish_layout(pusher, dir, String(_HOST), String(_REPO), String("3f2a9c1"), String(_PLATFORM), False)
+    var own = _own_digest(dir)
+    var short = publish_layout(pusher, dir, own, String(_HOST), String(_REPO), String("3f2a9c1"), String(_PLATFORM), False)
     _expect(short, String(OUTCOME_REFUSED), 3, String(ERROR_REVISION))
     assert_true(short.message.find(String("the image's tag is the revision")) >= 0, short.message)
-    var reserved = publish_layout(pusher, dir, String(_HOST), String(_REPO), String(_REV), String("darwin-arm64"), False)
+    var reserved = publish_layout(pusher, dir, own, String(_HOST), String(_REPO), String(_REV), String("darwin-arm64"), False)
     _expect(reserved, String(OUTCOME_REFUSED), 3, String(ERROR_PLATFORM))
-    var noarch = publish_layout(pusher, dir, String(_HOST), String(_REPO), String(_REV), String("noarch"), False)
+    var noarch = publish_layout(pusher, dir, own, String(_HOST), String(_REPO), String(_REV), String("noarch"), False)
     _expect(noarch, String(OUTCOME_REFUSED), 3, String(ERROR_PLATFORM))
     var missing = _push(pusher, dir + String("/not-there"))
     _expect(missing, String(OUTCOME_REFUSED), 3, String(ERROR_IMAGE_PUSH))
     assert_equal(pusher.transport().call_count(), 0)
+
+
+def test_a_layout_swapped_after_verify_is_refused_with_zero_requests() raises:
+    """Catches: the digest comparison removed from `publish_layout` (the
+    swapped layout is pushed and SUCCEEDED), made only under `plan`, or
+    made after the push (requests recorded)."""
+    var dir = _layout_dir(String("swap"))
+    var verified = read_oci_layout(dir).manifest_digest
+    # a second, valid layout put where the verified one was
+    var layers = List[List[UInt8]]()
+    layers.append(_bytes(String("another-image-entirely")))
+    var swapped = write_test_layout(dir, layers, String("linux"), String("amd64"))
+    assert_true(swapped != verified, "the second layout is another image")
+    assert_equal(read_oci_layout(dir).manifest_digest, swapped, "the layout on disk is the second one, and valid")
+    for k in range(2):
+        var plan = k == 1
+        var pusher = _pusher(FakeOciRegistry(_HOST))
+        var p = publish_layout(
+            pusher, dir, verified, String(_HOST), String(_REPO), String(_REV), String(_PLATFORM), plan
+        )
+        _expect(p, String(OUTCOME_REFUSED), 3, String(ERROR_MEMBER))
+        assert_true(p.message.find(verified) >= 0, p.message)
+        assert_true(p.message.find(swapped) >= 0, p.message)
+        assert_true(p.message.find(String("Nothing was sent")) >= 0, p.message)
+        assert_equal(p.artifact.effect, String(ARTIFACT_NOT_REACHED))
+        assert_equal(pusher.transport().call_count(), 0, "zero requests")
+        assert_equal(pusher.transport().tag_digest(_REPO, _REV), String(""))
+    # the same layout with its own digest is pushed: the refusal is the
+    # digest's, nothing else
+    var pusher = _pusher(FakeOciRegistry(_HOST))
+    var ok = publish_layout(pusher, dir, swapped, String(_HOST), String(_REPO), String(_REV), String(_PLATFORM), False)
+    _expect(ok, String(OUTCOME_SUCCEEDED), 0, String(""))
+    assert_equal(pusher.transport().tag_digest(_REPO, _REV), swapped)
 
 
 def test_credential_refused_is_failed_exit_4_without_the_secret() raises:

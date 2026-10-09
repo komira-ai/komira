@@ -1,6 +1,7 @@
 # =============================================================================
 # src/kci_cli/tests/test_kci_deploy_step.mojo -- a DEPLOY step end to end
-#   through `kci_main_with`, on `CloudDeploys[FakeCloud, InMemoryStateStore]`.
+#   through `kci_main_with`, on `CloudDeploys[FakeCloud, InMemoryStateStore,
+#   NoRegistryClient]` (no PUBLISH into a cell runs here).
 # =============================================================================
 #
 # The machine file is named `shop` and has a `build` stage (the BUILD step
@@ -60,6 +61,7 @@ from kci_cli import (
     CliRecorder,
     CloudDeploys,
     NOT_BUILT_WITH,
+    NoRegistryClient,
     SecretStoreChoice,
     StageSteps,
     StepEnd,
@@ -184,8 +186,10 @@ def _last(rec: CliRecorder) raises -> KciRunResult:
     return parse_result(rec.records[len(rec.records) - 1], String("record"))
 
 
-def _deploys(var cloud: FakeCloud) raises -> CloudDeploys[FakeCloud, InMemoryStateStore]:
-    return CloudDeploys[FakeCloud, InMemoryStateStore](cloud^, InMemoryStateStore(), Creds.none())
+def _deploys(var cloud: FakeCloud) raises -> CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]:
+    return CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient](
+        cloud^, InMemoryStateStore(), Creds.none(), NoRegistryClient()
+    )
 
 
 def _scope() -> CellScope:
@@ -452,7 +456,7 @@ def test_plan_hash_is_over_the_actions_in_node_id_order() raises:
     assert_equal(_last(rec).steps[0].deploy.plan_hash, String(_PLAN_HASH))
 
 
-def _deletes(deploys: CloudDeploys[FakeCloud, InMemoryStateStore]) -> Int:
+def _deletes(deploys: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]) -> Int:
     var n = 0
     ref calls = deploys.cloud.store[].calls
     for i in range(len(calls)):

@@ -67,6 +67,11 @@
 #      `outputs` stays empty: the engine does not hand its recorded outputs
 #      back to kci yet.
 #
+# A PUBLISH step into a cell goes through the same seam (`CellDeploys.publish`,
+# cell_publish.mojo): `CloudDeploys[S, St, T]` also holds the registry client
+# `T` it pushes images with, and `NoCloudBuilt` refuses that step at its step
+# 1 too.
+#
 # `--rollback-on-failure`, and emptying `set_hash` when a DEPLOY step fails,
 # are not here.
 #
@@ -141,7 +146,10 @@ from kci_api import RunResult as KciRunResult
 from kci_release_machine import ReleaseMachine, Selection, Stage, StageStep
 from kci_release_set import bytewise_less
 
+from komira_oci.oci_transport import OciTransport
+
 from .args import KciCommand
+from .cell_publish import CellPublishRequest, cell_publish_step, cell_publish_without_cloud
 from .seam import StageSteps, StepEnd
 from .start_checks import StartVerdict
 from .summary import deploy_markdown
@@ -200,10 +208,16 @@ def deploy_request(cmd: KciCommand, machine: String, stage: Stage, step: StageSt
 
 trait CellDeploys:
     """The clouds a kci binary was built with, as dispatch.mojo's seam for
-    DEPLOY steps: one step's request in, how it ended out. It adds the
-    step's row (with its deploy keys) and first error to `result`."""
+    the steps that write into a cell: one step's request in, how it ended
+    out. Each adds the step's row (with its cell keys) and first error to
+    `result`."""
 
     def deploy(mut self, req: DeployRequest, mut result: KciRunResult) -> StepEnd:
+        ...
+
+    def publish(mut self, req: CellPublishRequest, mut result: KciRunResult) -> StepEnd:
+        """A PUBLISH step into a cell (cell_publish.mojo); it also adds the
+        images' artifact rows."""
         ...
 
 
@@ -553,9 +567,11 @@ def _raised[
     )
 
 
-struct CloudDeploys[S: CloudAdapter & Deinitable, St: StateStore](CellDeploys, Movable):
+struct CloudDeploys[S: CloudAdapter & Deinitable, St: StateStore, T: OciTransport & Copyable](CellDeploys, Movable):
     """One built-in cloud (`cloud`, the only entry of `clouds`), the state
-    store it deploys through and its credentials (file header).
+    store it deploys through, its credentials, and the registry client a
+    PUBLISH step into a cell copies into each push, with the sleep before a
+    retry (`registry_backoff_ms`; file header).
 
     Layout: owned values only. No pointer field."""
 
@@ -563,21 +579,34 @@ struct CloudDeploys[S: CloudAdapter & Deinitable, St: StateStore](CellDeploys, M
     var cloud: Self.S
     var store: Self.St
     var creds: Creds
+    var registry: Self.T
+    var registry_backoff_ms: Int
 
-    def __init__(out self, var cloud: Self.S, var store: Self.St, creds: Creds) raises:
+    def __init__(
+        out self, var cloud: Self.S, var store: Self.St, creds: Creds, var registry: Self.T,
+        registry_backoff_ms: Int = 250,
+    ) raises:
         self.clouds = Clouds(Catalog.v1())
         self.clouds.add(describe(cloud))
         self.cloud = cloud^
         self.store = store^
         self.creds = creds.copy()
+        self.registry = registry^
+        self.registry_backoff_ms = registry_backoff_ms
 
     def deploy(mut self, req: DeployRequest, mut result: KciRunResult) -> StepEnd:
         return deploy_step(req, self.clouds, self.cloud, self.store, self.creds, result)
 
+    def publish(mut self, req: CellPublishRequest, mut result: KciRunResult) -> StepEnd:
+        return cell_publish_step(
+            req, self.clouds, self.cloud, self.registry, self.creds, self.registry_backoff_ms, result
+        )
+
 
 struct NoCloudBuilt(CellDeploys, Movable):
     """A kci built with no cloud (file header): every DEPLOY step is REFUSED
-    at step 1, before its resource list is read."""
+    at step 1, before its resource list is read, and so is every PUBLISH
+    step into a cell, before its release set is read."""
 
     def __init__(out self):
         pass
@@ -602,6 +631,9 @@ struct NoCloudBuilt(CellDeploys, Movable):
             row.deploy.cell = ld.cell.name.copy()
             row.deploy.cloud = ld.cell.cloud.copy()
         return _stopped(row^, result, stop)
+
+    def publish(mut self, req: CellPublishRequest, mut result: KciRunResult) -> StepEnd:
+        return cell_publish_without_cloud(req, result)
 
 
 def check_deploy_set_hash[S: StageSteps](

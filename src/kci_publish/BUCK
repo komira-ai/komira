@@ -85,6 +85,12 @@ mojo_library(
         # the subdir is the platform's; an OIDC channel publishes only from its
         # stage's environment
         "tests/test_publish_platform.mojo",
+        # a PUBLISH into a cell: the set's images with the set's digest, CONDA
+        # members skipped; no image, another revision, another set hash and a
+        # flipped layer byte each refused
+        "tests/test_publish_cell_release.mojo",
     ],
+    # komira_oci writes the test's image layout
+    test_deps = ["//src/komira_oci:komira_oci"],
     visibility = ["PUBLIC"],
 )
