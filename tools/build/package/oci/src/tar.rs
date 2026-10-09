@@ -315,6 +315,161 @@ mod tests {
         assert!(write(vec![item("a", 0o644, b""), item("a", 0o755, b"")]).unwrap_err().contains("a given twice"));
     }
 
+    /// The header's checksum written again after an edit, as `%07o\0`
+    /// (byte 155 NUL: the sum must count all eight checksum bytes as spaces).
+    fn resum(h: &mut [u8]) {
+        h[148..156].copy_from_slice(b"        ");
+        let sum: u32 = h[..512].iter().map(|&b| b as u32).sum();
+        h[148..156].copy_from_slice(format!("{:07o}\0", sum).as_bytes());
+    }
+
+    fn end(mut t: Vec<u8>) -> Vec<u8> {
+        t.resize(t.len() + 1024, 0);
+        t
+    }
+
+    fn with_pax(rec: &[u8]) -> Result<Vec<Entry>, String> {
+        let mut t = Vec::new();
+        entry(&mut t, "PaxHeader", b'x', 0o644, rec, "");
+        entry(&mut t, "f", b'0', 0o644, b"", "");
+        read(&end(t))
+    }
+
+    #[test]
+    fn each_malformed_pax_record_is_refused() {
+        for (rec, why) in [
+            (&b"abc"[..], "tar: a pax record without a length"),
+            (b"x path=a\n", "tar: a pax record length is not a number"),
+            (b"9 a=b\n", "tar: a malformed pax record"),
+            (b"6 a=bX", "tar: a malformed pax record"),
+            (b"2 \n", "tar: a malformed pax record"),
+            (b"0 a=b\n", "tar: a malformed pax record"),
+            (b"5 ab\n", "tar: a pax record without `=`"),
+            (b"6 \xff=b\n", "tar: a pax key is not UTF-8"),
+            (b"7 a=\xffb\n", "tar: a pax value is not UTF-8"),
+            (b"9 size=x\n", "tar: a pax size is not a number"),
+        ] {
+            assert_eq!(with_pax(rec), Err(why.to_string()), "{:?}", String::from_utf8_lossy(rec));
+        }
+        // Every record is read, not only the first.
+        assert_eq!(with_pax(b"6 a=b\n12 path=xyz\n").unwrap()[0].path, "xyz");
+    }
+
+    #[test]
+    fn a_pax_size_is_the_size_of_the_next_entry_only() {
+        // The header says 0; the pax record says 3.
+        let mut t = Vec::new();
+        entry(&mut t, "PaxHeader", b'x', 0o644, b"10 size=3\n", "");
+        t.extend(header("f", b'0', 0o644, 0, ""));
+        t.extend(b"abc");
+        t.resize(t.len().div_ceil(512) * 512, 0);
+        entry(&mut t, "g", b'0', 0o644, b"z", "");
+        let e = read(&end(t)).unwrap();
+        assert_eq!(e.iter().map(|e| (e.path.as_str(), e.size)).collect::<Vec<_>>(), [("f", 3), ("g", 1)]);
+        // Not the size of a long-name header that comes between.
+        let long = "n".repeat(120);
+        let mut t = Vec::new();
+        entry(&mut t, "PaxHeader", b'x', 0o644, b"10 size=2\n", "");
+        entry(&mut t, "././@LongLink", b'L', 0o644, long.as_bytes(), "");
+        t.extend(header("short", b'0', 0o644, 0, ""));
+        t.extend(b"ab");
+        t.resize(t.len().div_ceil(512) * 512, 0);
+        let e = read(&end(t)).unwrap();
+        assert_eq!((e[0].path.as_str(), e[0].size), (long.as_str(), 2));
+    }
+
+    #[test]
+    fn numbers_are_octal_or_base_256() {
+        let one = |edit: &dyn Fn(&mut [u8])| {
+            let mut h = header("f", b'0', 0o644, 0, "");
+            edit(&mut h);
+            resum(&mut h);
+            h.resize(512 + 1024 + 512, 0);
+            read(&h)
+        };
+        // Base-256: 0x80 then big-endian bytes.
+        assert_eq!(one(&|h| {
+            h[124..136].fill(0);
+            h[124] = 0x80;
+            h[135] = 3;
+        }).unwrap()[0].size, 3);
+        assert_eq!(one(&|h| h[124..136].fill(0xff)), Err("tar: size overflows".into()));
+        assert_eq!(one(&|h| h[124..136].copy_from_slice(b"00000000z0\0\0")), Err("tar: size `00000000z0` is not octal".into()));
+        assert_eq!(one(&|h| h[124..136].copy_from_slice(b"0000000000\xff\0")), Err("tar: size is not octal".into()));
+        // NULs and spaces around the digits; an empty field is 0.
+        assert_eq!(one(&|h| h[100..108].copy_from_slice(b" 644 \0\0\0")).unwrap()[0].mode, 0o644);
+        assert_eq!(one(&|h| h[100..108].fill(0)).unwrap()[0].mode, 0);
+        // The mode keeps its low twelve bits.
+        assert_eq!(one(&|h| h[100..108].copy_from_slice(b"0104755\0")).unwrap()[0].mode, 0o4755);
+        // A name that is not UTF-8.
+        assert_eq!(one(&|h| h[0] = 0xff), Err("tar: a name is not UTF-8".into()));
+    }
+
+    #[test]
+    fn names_links_and_kinds() {
+        let mut t = Vec::new();
+        // A ustar prefix is joined to the name; without the ustar magic it is not read.
+        let mut h = header("c", b'0', 0o644, 0, "");
+        h[345..348].copy_from_slice(b"a/b");
+        resum(&mut h);
+        t.extend(&h);
+        h[257..263].fill(0);
+        resum(&mut h);
+        t.extend(&h);
+        // Only links keep a link name; NUL and '7' are files; a global header is no entry.
+        entry(&mut t, "file", b'0', 0o644, b"", "x");
+        entry(&mut t, "dir/", b'5', 0o755, b"", "x");
+        entry(&mut t, "hard", b'1', 0o644, b"", "file");
+        entry(&mut t, "nul", 0, 0o644, b"", "");
+        entry(&mut t, "contig", b'7', 0o644, b"", "");
+        entry(&mut t, "global", b'g', 0o644, b"11 path=zz\n", "");
+        let long = "t".repeat(130);
+        entry(&mut t, "././@LongLink", b'K', 0o644, long.as_bytes(), "");
+        entry(&mut t, "sym", b'2', 0o777, b"", "short");
+        let got: Vec<_> = read(&end(t)).unwrap().into_iter().map(|e| (e.path, e.kind, e.link)).collect();
+        let want: Vec<(String, Kind, String)> = [
+            ("a/b/c", Kind::File, ""),
+            ("c", Kind::File, ""),
+            ("file", Kind::File, ""),
+            ("dir/", Kind::Dir, ""),
+            ("hard", Kind::Hardlink, "file"),
+            ("nul", Kind::File, ""),
+            ("contig", Kind::File, ""),
+            ("sym", Kind::Symlink, long.as_str()),
+        ]
+        .iter()
+        .map(|(p, k, l)| (p.to_string(), *k, l.to_string()))
+        .collect();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn an_entry_ending_at_the_archive_end_still_wants_a_zero_block() {
+        let mut t = header("f", b'0', 0o644, 2000, "");
+        t.resize(512 + 1024, 0);
+        assert_eq!(read(&t), Err("tar: an entry runs past the end".into()));
+        let mut t = header("f", b'0', 0o644, 512, "");
+        t.resize(1024, 1);
+        assert_eq!(read(&t), Err("tar: the archive ends without a zero block".into()));
+    }
+
+    #[test]
+    fn long_paths_round_trip_at_every_length_boundary() {
+        // 100 bytes fits the header; 101 takes a pax record, whose length
+        // field grows from 3 to 4 digits between 989 and 990 bytes of path.
+        for n in [99, 100, 101, 102, 988, 989, 990, 991] {
+            let path = "p".repeat(n);
+            let t = write(vec![Item { path: path.clone(), mode: 0o644, data: b"d".to_vec() }]).unwrap();
+            let e = read(&t).unwrap();
+            assert_eq!((e.len(), e[0].path.len(), e[0].size), (1, n, 1), "{}", n);
+        }
+        let mut f = [0u8; 8];
+        assert_eq!(octal(&mut f, 0o7777777), Ok(()));
+        assert_eq!(&f, b"7777777\0");
+        assert_eq!(octal(&mut f, 0o10000000), Err("tar: 2097152 does not fit a 8-byte field".into()));
+        assert!(write(vec![Item { path: "a".into(), mode: 0o10000000, data: vec![] }]).is_err());
+    }
+
     #[test]
     fn refuses_a_bad_checksum_and_a_truncated_archive() {
         let mut t = tar(&[("a", b'0', 0o644, b"x", "")]);

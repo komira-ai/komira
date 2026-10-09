@@ -380,6 +380,87 @@ mod tests {
         assert!(fs.resolve("loop").unwrap_err().contains("symbolic links"));
     }
 
+    fn layer(entries: &[(&str, u8, u32, &[u8], &str)]) -> Vec<Entry> {
+        read(&tar(entries)).unwrap()
+    }
+
+    fn based() -> Fs {
+        let mut fs = Fs::default();
+        fs.apply(&base()).unwrap();
+        fs
+    }
+
+    #[test]
+    fn a_layer_that_cannot_be_applied_is_refused() {
+        for wh in ["etc/.wh.", "etc/.wh..", "etc/.wh..."] {
+            assert_eq!(based().apply(&layer(&[(wh, b'0', 0o644, b"", "")])), Err(format!("a whiteout `{}` names no entry", wh)));
+        }
+        assert_eq!(Fs::default().apply(&layer(&[("./", b'0', 0o644, b"", "")])), Err("the layer's root entry `./` is not a directory".into()));
+        let mut fs = Fs::default();
+        fs.apply(&layer(&[("./", b'5', 0o755, b"", ""), ("/", b'5', 0o755, b"", "")])).unwrap();
+        assert!(fs.nodes.is_empty(), "{:?}", fs.nodes);
+        assert_eq!(based().apply(&layer(&[("a", b'1', 0o644, b"", "nope")])), Err("hard link a -> nope: no such entry".into()));
+        assert_eq!(based().apply(&layer(&[("a", b'1', 0o644, b"", "etc")])), Err("hard link a -> etc: a directory".into()));
+        // A hard link is its target: type, mode and size.
+        let mut fs = based();
+        fs.apply(&layer(&[("a", b'1', 0o644, b"", "./usr/bin/tool")])).unwrap();
+        assert_eq!(fs.nodes["a"], Node { ty: Type::File, mode: 0o755, size: 1, link: String::new() });
+    }
+
+    #[test]
+    fn whiteouts_are_never_entries_and_an_opaque_root_empties_all() {
+        let (_, fs, _) = image(&[("etc/", b'5', 0o755, b"", ""), ("etc/.wh.ssl", b'0', 0o644, b"", ""), ("usr/.wh..wh..opq", b'0', 0o644, b"", "")]);
+        assert!(fs.nodes.keys().all(|k| !k.contains(".wh.")), "{:?}", fs.nodes.keys());
+        assert!(fs.nodes.keys().all(|k| !k.starts_with("usr/")), "{:?}", fs.nodes.keys());
+        let mut fs = based();
+        fs.apply(&layer(&[(".wh..wh..opq", b'0', 0o644, b"", "")])).unwrap();
+        assert!(fs.nodes.is_empty(), "{:?}", fs.nodes.keys());
+        // A directory over a directory keeps what is under it.
+        let (_, fs, _) = image(&[("etc/", b'5', 0o700, b"", ""), ("etc/ssl/", b'5', 0o755, b"", "")]);
+        assert_eq!(certs_ok(&fs), Ok(()));
+        assert_eq!(fs.nodes["etc"].mode, 0o700);
+    }
+
+    #[test]
+    fn at_most_forty_links_are_followed() {
+        let chain = |prefix: &str, n: usize| -> Vec<(String, String)> { (0..n).map(|i| (format!("{}{}", prefix, i), if i + 1 == n { "usr/lib/os-release".to_string() } else { format!("{}{}", prefix, i + 1) })).collect() };
+        let links: Vec<(String, String)> = chain("a", MAX_LINKS).into_iter().chain(chain("b", MAX_LINKS + 1)).collect();
+        let entries: Vec<(&str, u8, u32, &[u8], &str)> = links.iter().map(|(p, t)| (p.as_str(), b'2', 0o777, &b""[..], t.as_str())).collect();
+        let (_, fs, _) = image(&entries);
+        assert_eq!(fs.resolve("a0"), Ok("usr/lib/os-release".into()));
+        assert_eq!(fs.resolve("b0"), Err("b0: more than 40 symbolic links".into()));
+        let (_, bad) = check_paths(&fs, &[(Want::File, "b0".into())]);
+        assert_eq!(bad, ["file b0: b0: more than 40 symbolic links"]);
+    }
+
+    #[test]
+    fn an_exec_is_exactly_0755_and_a_file_one_byte_or_more() {
+        let (_, fs, _) = image(&[("bin/", b'5', 0o755, b"", ""), ("bin/a", b'0', 0o775, b"x", ""), ("bin/b", b'0', 0o4755, b"x", ""), ("one", b'0', 0o644, b"x", "")]);
+        let (ok, bad) = check_paths(&fs, &[(Want::Exec, "bin/a".into()), (Want::Exec, "bin/b".into()), (Want::File, "one".into()), (Want::File, "bin/a".into())]);
+        assert_eq!(bad, ["exec bin/a: bin/a has mode 775, want 755", "exec bin/b: bin/b has mode 4755, want 755"]);
+        assert_eq!(ok, ["ok file one -> one", "ok file bin/a -> bin/a"]);
+    }
+
+    #[test]
+    fn every_type_change_of_the_last_layer_is_named() {
+        let (below, _, layer) = image(&[
+            ("etc/", b'5', 0o755, b"", ""),
+            ("etc/ssl/", b'1', 0o644, b"", "usr/bin/tool"),
+            ("usr/lib/os-release", b'3', 0o644, b"", ""),
+            ("usr/lib/", b'5', 0o755, b"", ""),
+            ("usr/bin", b'2', 0o777, b"", "lib"),
+            ("usr/bin/tool", b'0', 0o644, b"y", ""),
+        ]);
+        assert_eq!(
+            type_changes(&below, &layer),
+            [
+                "the last layer turns etc/ssl from type d into type -",
+                "the last layer turns usr/lib/os-release from type - into type ?",
+                "the last layer turns usr/bin from type d into type l",
+            ]
+        );
+    }
+
     #[test]
     fn normalize_stays_under_root() {
         assert_eq!(normalize("./a//b/../c/"), "a/c");

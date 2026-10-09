@@ -182,6 +182,68 @@ mod tests {
     }
 
     #[test]
+    fn plain_is_letters_digits_and_four_marks() {
+        assert_eq!(refusals(&["A_b+c-d.9/"], &["x/A_b+c-d.9"]), Vec::<String>::new());
+        for bad in ["a:b", "a*b", "a\\b", "a b", "\u{e9}", "a=b"] {
+            assert_eq!(refusals(&[], &[bad]), [format!("file path `{}` must be a plain relative path", bad)]);
+        }
+    }
+
+    /// A directory of its own under this run's TMPDIR.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("tree_{}_{}", name, std::process::id()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn at(p: &str, src: &Path, bundle: bool) -> Place {
+        Place { path: p.into(), src: src.to_str().unwrap().into(), bundle }
+    }
+
+    fn mode(p: &Path) -> u32 {
+        fs::symlink_metadata(p).unwrap().permissions().mode() & 0o7777
+    }
+
+    #[test]
+    fn lay_copies_with_plain_modes() {
+        let d = scratch("lay");
+        let src = d.join("src");
+        fs::create_dir_all(src.join("b/sub")).unwrap();
+        for (f, m) in [("exe", 0o700), ("ro", 0o400), ("b/sub/f", 0o600)] {
+            fs::write(src.join(f), f).unwrap();
+            fs::set_permissions(src.join(f), fs::Permissions::from_mode(m)).unwrap();
+        }
+        let p = plan(vec![at("bin/exe", &src.join("exe"), false), at("bin/ro", &src.join("ro"), false), at("opt/b/", &src.join("b"), true)]).unwrap();
+        let out = d.join("out");
+        lay(&out, &p).unwrap();
+        for (f, m) in [("", 0o755), ("bin", 0o755), ("bin/exe", 0o755), ("bin/ro", 0o644), ("opt", 0o755), ("opt/b", 0o755), ("opt/b/sub", 0o755), ("opt/b/sub/f", 0o644)] {
+            assert_eq!(mode(&out.join(f)), m, "{}", f);
+        }
+        assert_eq!(fs::read(out.join("opt/b/sub/f")).unwrap(), b"b/sub/f");
+        assert!(lay(&out, &p).unwrap_err().starts_with(&format!("cannot create {}: ", out.display())));
+    }
+
+    #[test]
+    fn lay_refuses_what_it_cannot_copy() {
+        let d = scratch("refuse");
+        fs::create_dir_all(d.join("empty/sub")).unwrap();
+        fs::create_dir(d.join("linky")).unwrap();
+        std::os::unix::fs::symlink("x", d.join("linky/l")).unwrap();
+        let laid = |name: &str, place: Place| lay(&d.join(name), &plan(vec![place]).unwrap());
+        assert_eq!(laid("o1", at("e/", &d.join("empty"), true)), Err(format!("bundle {} holds no files", d.join("empty").display())));
+        assert_eq!(laid("o2", at("l/", &d.join("linky"), true)), Err(format!("{}: not a regular file or directory", d.join("linky/l").display())));
+        assert_eq!(laid("o3", at("f", &d.join("empty"), false)), Err(format!("{}: not a regular file", d.join("empty").display())));
+        assert!(laid("o4", at("f", &d.join("missing"), false)).unwrap_err().starts_with(&format!("cannot read {}: ", d.join("missing").display())));
+        // What a plan never asks for: a file over one already laid, a
+        // directory through a file.
+        fs::write(d.join("x"), b"x").unwrap();
+        assert_eq!(copy_file(&d.join("x"), &d.join("x")), Err(format!("{}: already in the tree", d.join("x").display())));
+        assert_eq!(mkdirs(&d, "x/y"), Err(format!("{}: not a directory", d.join("x").display())));
+        assert_eq!(mkdirs(&d, "empty/sub/new"), Ok(()));
+        assert_eq!(mode(&d.join("empty/sub/new")), 0o755);
+    }
+
+    #[test]
     fn a_path_that_is_not_plain_is_refused() {
         assert_eq!(refusals(&["komira"], &[]), ["bundle path `komira` must be a plain relative path ending in /"]);
         assert_eq!(refusals(&[], &["/bin/sh"]), ["file path `/bin/sh` must be a plain relative path"]);

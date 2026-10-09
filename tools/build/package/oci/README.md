@@ -57,6 +57,15 @@ inline tests, so no tree or image builds unless they pass. They cover:
 - the check: the Entrypoint must be exactly the one named (another program,
   another spelling of the same path, two elements, none are red); every
   `--exec` and `--file` item is read, not only the first;
+- every refusal by itself: each site that returns an error has a case that
+  hits it and asserts its exact message, so deleting one refusal, weakening
+  its comparison, or skipping the last item of its loop is red. That covers
+  each field of the base manifest and its descriptors (the base re-pinned, so
+  only the edited field can be refused), the base config, the layout
+  (`index.json`, digests, the manifest), `layers`, `check` with and without
+  `--expect-red`, the arguments, gzip's header, the tar and JSON readers, and
+  laying a tree. Layouts and trees are written under the test run's own
+  TMPDIR; busybox's `true` and `false` applets stand in for a failing gzip;
 - layers over a fixture base holding `etc/ssl/certs/ca-certificates.crt`:
   the control is green; a directory whiteout `etc/.wh.ssl` and an opaque
   `etc/ssl/certs/.wh..wh..opq` each hide the certificates; an opaque

@@ -419,4 +419,54 @@ mod tests {
         let ok = "[".repeat(64) + &"]".repeat(64);
         assert!(parse(ok.as_bytes()).is_ok());
     }
+
+    #[test]
+    fn each_refusal_names_its_reason() {
+        let deep = "[".repeat(65) + &"]".repeat(65);
+        for (bad, why) in [
+            (&br#"{"a":1} x"#[..], "bytes after the value"),
+            (br#"{"a" 1}"#, "expected `:`"),
+            (br#"tru"#, "not a JSON literal"),
+            (br#"fals"#, "not a JSON literal"),
+            (br#"nul"#, "not a JSON literal"),
+            (br#"x"#, "expected a value"),
+            (b"", "expected a value"),
+            (br#"[1,]"#, "expected a value"),
+            (br#"[1 2]"#, "expected `,` or `]`"),
+            (br#"{"a":1 "b":2}"#, "expected `,` or `}`"),
+            (br#"{1:2}"#, "expected a key"),
+            (br#"{"a":1,"a":2}"#, "key `a` given twice"),
+            (br#"-"#, "a number without digits"),
+            (br#"-x"#, "a number without digits"),
+            (br#"1."#, "no digits after `.`"),
+            (br#"1e"#, "no digits in the exponent"),
+            (br#"1e+"#, "no digits in the exponent"),
+            (br#""\u12""#, "a short \\u escape"),
+            (br#""\u12G4""#, "a bad \\u escape"),
+            (br#""\ud83d""#, "a lone high surrogate"),
+            (br#""\ud83dx""#, "a lone high surrogate"),
+            (br#""\ud83d\u0041""#, "a bad low surrogate"),
+            (br#""\ud800\ue000""#, "a bad low surrogate"),
+            (br#""\ud800\udbff""#, "a bad low surrogate"),
+            (br#""\udc00""#, "a lone surrogate"),
+            (br#""\x""#, "an unknown escape"),
+            (b"\"a\x1fb\"", "a control character in a string"),
+            (b"\"\x00\"", "a control character in a string"),
+            (b"\"\xff\"", "a string that is not UTF-8"),
+            (br#""open"#, "an unterminated string"),
+            (br#""a\"#, "an unterminated escape"),
+            (deep.as_bytes(), "nested too deep"),
+        ] {
+            let e = parse(bad).unwrap_err();
+            assert!(e.starts_with(&format!("JSON: {} at byte ", why)), "{:?}: {}", String::from_utf8_lossy(bad), e);
+        }
+        // Each boundary's first accepted value.
+        assert_eq!(parse(b"\"\x20~\"").unwrap(), s(" ~"));
+        assert_eq!(parse(br#""\ud800\udc00\udbff\udfff\ue000\ud7ff""#).unwrap(), s("\u{10000}\u{10FFFF}\u{E000}\u{D7FF}"));
+        for n in ["0", "-0", "0.5", "1e5", "1E-5", "12.25e+3"] {
+            assert_eq!(parse(n.as_bytes()).unwrap(), Value::Num(n.into()));
+        }
+        assert_eq!(parse(b" \t\r\n[ ] ").unwrap(), Value::Arr(vec![]));
+        assert_eq!(parse(br#"{ "a" : [ 1 , { } ] }"#).unwrap().to_json(), r#"{"a":[1,{}]}"#);
+    }
 }
