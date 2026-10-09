@@ -10,7 +10,8 @@ interface. This package names no cloud:
 
   * catalog.mojo     — the catalog's types as data (arm number, portability,
                        exposed outputs, accepted access, retention default,
-                       primary role).
+                       primary role) and a resource's type, read from its
+                       set arm (`body_field`, `body_is`).
   * cloud_id.mojo    — the opaque `CloudId` (equality and printing only).
   * adapter.mojo     — the `CloudAdapter` trait every built-in cloud
                        implements (an internal module boundary, not frozen):
@@ -77,8 +78,9 @@ interface. This package names no cloud:
                        `resolve` (with a typo suggestion), and the rule that
                        every cloud declares every catalog type.
   * validate.mojo    — the validate phase: graph, coverage and limit
-                       findings, collected in one pass; the role label
-                       budget over a lowering; the refusal text.
+                       findings, collected in one pass; on a graph with
+                       no other finding, the role label budget over the
+                       cloud's lowering; the refusal text.
   * deploy.mojo      — plan / apply / destroy in a cell: configure and
                        validate first, lower to data with the lowering
                        contract checked (`lowering_json` for golden tests),
@@ -156,6 +158,7 @@ from kci_cloud.catalog import (
     BodyArm,
     body_arms,
     body_field,
+    body_is,
     effective_retention,
     portability_word,
     primary_node,
@@ -305,6 +308,7 @@ from kci_cloud.validate import (
     refusal_text,
     id_problem,
     node_role,
+    lowered_budget_findings,
     role_budget_findings,
     ID_MAX_BYTES,
 )
