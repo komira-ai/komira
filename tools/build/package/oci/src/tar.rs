@@ -184,7 +184,13 @@ fn put_header(out: &mut Vec<u8>, name: &[u8], flag: u8, mode: u32, size: u64) ->
     octal(&mut h[100..108], mode as u64)?;
     octal(&mut h[108..116], 0)?;
     octal(&mut h[116..124], 0)?;
-    octal(&mut h[124..136], size)?;
+    // Past eleven octal digits (8 GiB) the size is base-256: 0x80, then the
+    // number big-endian, as GNU tar writes it and `number` reads it.
+    if octal(&mut h[124..136], size).is_err() {
+        // `octal` wrote nothing: the field is still all NUL.
+        h[124] = 0x80;
+        h[128..136].copy_from_slice(&size.to_be_bytes());
+    }
     octal(&mut h[136..148], 0)?;
     h[156] = flag;
     h[257..263].copy_from_slice(b"ustar\0");
@@ -202,8 +208,8 @@ fn pad(out: &mut Vec<u8>) {
 }
 
 /// `items` as a tar, sorted by path, uid, gid and mtime 0, a path over 100
-/// bytes in a pax header, ending with two zero blocks. A path given twice
-/// is refused.
+/// bytes in a pax header, a size over 8 GiB in base-256, ending with two
+/// zero blocks. A path given twice is refused.
 pub fn write(mut items: Vec<Item>) -> Result<Vec<u8>, String> {
     items.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
     let mut out = Vec::new();
@@ -592,3 +598,7 @@ mod tests {
         assert!(read(&t[..600]).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "tar_fields.rs"]
+mod fields;
