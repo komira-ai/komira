@@ -1,9 +1,10 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load(":defs.bzl", "cov_debug_check", "cov_set_check")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
-# Coverage builds (tools/build/mojo/README.md, "Coverage builds"; test 41 of
-# tools/build/tests/run_tests.sh).
+# Coverage builds and runs (tools/build/mojo/README.md, "Coverage builds";
+# tests 41 and 43 of tools/build/tests/run_tests.sh).
 
 # A library with two tests and no README, coverage by the switch: with
 # `-c komira.coverage=true` it has [coverage]; without it, none.
@@ -22,6 +23,27 @@ mojo_library(
     ],
 )
 
+# Test 46: a library that depends on covlib. coverage_keys.sh builds it with
+# the switch off, then on: its compile and test must not run again, so
+# covlib's package (its join's output) is the same bytes either way.
+mojo_library(
+    name = "covuser",
+    srcs = ["covuser/__init__.mojo"],
+    conda = False,
+    deps = [":covlib"],
+    test_srcs = ["tests/test_user.mojo"],
+)
+
+# Test 41: a library with no test and no README. Its package is the
+# compiler's output and it has no join, with the switch off and on: its
+# coverage gate (no report: NotMeasured) is waited for by a conda package
+# only, and it has none. coverage_keys.sh reads both.
+mojo_library(
+    name = "covbare",
+    srcs = ["covbare/__init__.mojo"],
+    conda = False,
+)
+
 # The same library with coverage whatever the switch says (a tests-cell
 # fixture may name the link directory), linked through the one every library
 # uses: what the checks below read.
@@ -38,6 +60,55 @@ mojo_library(
         "tests/test_describe.mojo",
         "tests/test_value.mojo",
     ],
+)
+
+# The coverage gate of what ships, in a build without the switch: a library
+# with coverage and a gate whatever the switch says, and WITH a conda package
+# (the macro's covconda_conda), as a library of komira has with
+# `-c komira.coverage=true`. Its gate is komira's, in census mode (findings
+# never fatal), and does not read branch records, so its markers are its one
+# coverage run's and its gate's.
+mojo_library(
+    name = "covconda",
+    srcs = [
+        "covlib/__init__.mojo",
+        "covlib/value.mojo",
+    ],
+    conda_name = "covconda",
+    coverage_branch_gate = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    import_name = "covlib",
+    test_srcs = ["tests/test_value.mojo"],
+)
+
+# Both joins of covconda_conda (what [default] and [release] are copies of)
+# wait for covconda's two coverage markers, and those of covmt_conda for
+# covmt's gate: checked at analysis (CondaJoinInfo,
+# tools/build/package/conda.bzl), so `pr / check`, which builds
+# tests//functional/... without the switch, fails when conda.bzl stops
+# passing `gate` to either copy.
+cov_conda_gate_check(
+    name = "conda_gate",
+    conda = ":covconda_conda",
+    lib = ":covconda",
+    markers = 2,
+)
+
+# The package of a library whose gate is the target `<name>_cov_gate` (one of
+# the ledger COVERAGE_NO_GATE, tools/build/coverage/policy.bzl, or one naming
+# `coverage_tests`) is given that target as `coverage_gate`, and conda.bzl
+# refuses any other: covmt_conda, which mojo_library declares with
+# `coverage_gate = ":covmt_cov_gate"`. Its joins wait for covmt's one
+# coverage marker and for the outputs of covmt_cov_gate (its gate's marker
+# and the runs of the three tests covmt names), none of which is covmt's.
+cov_conda_gate_check(
+    name = "conda_gate_ledger",
+    conda = ":covmt_conda",
+    coverage_gate = ":covmt_cov_gate",
+    lib = ":covmt",
+    markers = 1,
 )
 
 # Each coverage binary has line tables naming the library source its test
@@ -61,18 +132,345 @@ cov_debug_check(
     script = "check.sh",
 )
 
-# [coverage] and [coverage][bin] are every test's binary, no more and no
-# fewer (checked at analysis).
+# [coverage][bin] is every test's binary, [coverage][tests] every test's
+# report, and [coverage] both, no more and no fewer (checked at analysis).
+_BINS = [
+    ":covlib_forced[coverage][bin][test_describe]",
+    ":covlib_forced[coverage][bin][test_value]",
+]
+
+_REPORTS = [
+    ":covlib_forced[coverage][tests][test_describe]",
+    ":covlib_forced[coverage][tests][test_value]",
+]
+
 cov_set_check(
     name = "aggregates",
-    aggregates = [
-        ":covlib_forced[coverage]",
-        ":covlib_forced[coverage][bin]",
+    aggregates = [":covlib_forced[coverage][bin]"],
+    members = _BINS,
+)
+
+cov_set_check(
+    name = "aggregates_tests",
+    aggregates = [":covlib_forced[coverage][tests]"],
+    members = _REPORTS,
+)
+
+cov_set_check(
+    name = "aggregates_all",
+    aggregates = [":covlib_forced[coverage]"],
+    members = _BINS + _REPORTS,
+)
+
+# Test 43: each test's report from its kcov run is its golden file byte for
+# byte. In covlib/value.mojo, test_value covers clamp and test_describe
+# calls describe(0) only: the arm `if x > 0: return "positive"` (lines 12
+# and 13) is never taken, and line 14 carries `# cov: unreachable`, uncovered
+# in the report (an exemption is covcheck's business). Lines 5 and 6 of
+# clamp (`return hi`, `return x`) are absent, not uncovered: the -O0
+# binary's line table has rows for value.mojo's lines 1 to 4 and none, not
+# even a non-statement row (which kcov skips), for 5 or 6 (`readelf
+# --debug-dump=decodedline` of [coverage][bin][test_value]; debug_relocate
+# rewrites directory strings only). So the pinned Mojo emits no row there,
+# and an arm like `return hi`, never taken, is invisible to coverage. The library is
+# in the tests cell, outside src/, and its sources are in covlib/ below the
+# package, so the paths are tools/build/tests/functional/coverage/....
+cov_report_check(
+    name = "numbers",
+    goldens = [
+        "golden/test_describe.xml",
+        "golden/test_value.xml",
+        "golden/test_gen.xml",
+        "golden/test_gen_many.xml",
     ],
-    members = [
-        ":covlib_forced[coverage][bin][test_describe]",
-        ":covlib_forced[coverage][bin][test_value]",
+    mode = "golden",
+    reports = _REPORTS + [
+        ":covgen[coverage][tests][test_gen]",
+        ":covgenmany[coverage][tests][test_gen_many]",
     ],
+    script = "report.sh",
+)
+
+# Test 43: a library with a generated source. covgen/gen.mojo is made from
+# covgen/gen.mojo.in (cov_plant used as a generator); test_gen calls a
+# function of each. Its golden report has covgen/plain.mojo and the test, and
+# no gen.mojo: a generated source is not measured (cov_run.sh --gen).
+cov_plant(
+    name = "covgen_gen",
+    expr = "s/@FACTOR@/2/",
+    out = "covgen/gen.mojo",
+    src = "covgen/gen.mojo.in",
+)
+
+mojo_library(
+    name = "covgen",
+    srcs = [
+        "covgen/__init__.mojo",
+        "covgen/plain.mojo",
+        ":covgen_gen",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_gen.mojo"],
+)
+
+# Test 43: a library whose one test is generated (a `test_srcs` entry that is
+# a build output: tests/test_gen_triple.mojo, made from its .in by cov_plant
+# used as a generator). It has its coverage binary and run as a written test
+# has ([coverage][tests][test_gen_triple] is its golden report, naming the
+# test by its output path in the package), and its gate (census) counts the
+# line it runs of covgentest/triple.mojo and sets the test aside.
+cov_plant(
+    name = "covgentest_test",
+    expr = "s/@ARG@/4/",
+    out = "tests/test_gen_triple.mojo",
+    src = "tests/test_gen_triple.mojo.in",
+)
+
+mojo_library(
+    name = "covgentest",
+    srcs = [
+        "covgentest/__init__.mojo",
+        "covgentest/triple.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    test_srcs = [":covgentest_test"],
+)
+
+cov_report_check(
+    name = "covgentest_report",
+    goldens = ["golden/test_gen_triple.xml"],
+    mode = "golden",
+    reports = [":covgentest[coverage][tests][test_gen_triple]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covgentest_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,',
+        '"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covgentest[coverage][gate][result]"],
+    script = "report.sh",
+)
+
+# Test 43: a shared library with coverage builds (forced here, as for
+# covlib_forced). Its driver, tests/covso_driver.mojo, loads the library's
+# coverage build and calls covso_scale only: its report
+# ([coverage][tests][covso_driver]) holds the driver and covso_abi.mojo's
+# lines, those of covso_scale run and those of covso_unused not, and its gate
+# (census) counts them with the driver set aside.
+mojo_shared_lib(
+    name = "covso",
+    srcs = ["covso/covso_abi.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    exports = [
+        "covso_scale",
+        "covso_unused",
+    ],
+    gate_srcs = ["tests/covso_driver.mojo"],
+)
+
+cov_report_check(
+    name = "covso_report",
+    goldens = ["golden/covso_driver.xml"],
+    mode = "golden",
+    reports = [":covso[coverage][tests][covso_driver]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covso_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":3,"line_found":5,"line_bp":6000,',
+        '"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covso[coverage][gate][result]"],
+    script = "report.sh",
+)
+
+# Test 43: a library with twelve generated sources, each with a long name.
+# cov_run.sh once named every generated source to kcov in one
+# --exclude-path argument (two absolute paths each); kcov opens every
+# argument before the program as a candidate binary and fails "Too long
+# string!" at 2048 bytes, so this run was red. Its golden report has
+# covgenmany/plain.mojo and the test, and none of the generated sources.
+_GEN_MANY = "generated_source_with_a_name_long_enough_to_fill_kcov_argv_"
+
+_GEN_MANY_N = [("0" + str(v))[-2:] for v in range(12)]
+
+[
+    cov_plant(
+        name = "covgenmany_gen_{}".format(_GEN_MANY_N[v]),
+        expr = "s/@N@/{}/; s/@V@/{}/".format(_GEN_MANY_N[v], v),
+        out = "covgenmany/{}{}.mojo".format(_GEN_MANY, _GEN_MANY_N[v]),
+        src = "covgenmany/gen.mojo.in",
+    )
+    for v in range(12)
+]
+
+mojo_library(
+    name = "covgenmany",
+    srcs = [
+        "covgenmany/__init__.mojo",
+        "covgenmany/plain.mojo",
+    ] + [":covgenmany_gen_{}".format(n) for n in _GEN_MANY_N],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_gen_many.mojo"],
+)
+
+# Test 43: a test of the gate's runtime contract (test_env, declared data
+# reached from the working directory, the runner's PATH, LD_LIBRARY_PATH,
+# HOME and TMPDIR, no LD_PRELOAD), green in the release gate and, with
+# [coverage][tests][test_env], in its kcov run: the run has the gate's
+# environment. One data file sits where the binary names a standard library
+# source, so the run is red unless --include-path keeps it out of the report.
+mojo_library(
+    name = "covenv",
+    srcs = ["covenv/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_data = {"tests/test_env.mojo": {
+        "functional/coverage/tests/data/covenv.txt": "tests/data/covenv.txt",
+        # Where the binary's line tables name a standard library source:
+        # kcov would measure it but for cov_run.sh's --include-path list,
+        # and its report would then hold a name no --map covers.
+        "oss/modular/mojo/stdlib/std/testing/testing.mojo": "tests/data/stdlib_decoy.txt",
+    }},
+    test_env = {"COVENV": "set by test_env"},
+    test_srcs = ["tests/test_env.mojo"],
+)
+
+# Test 43: covcheck's build gate reads those reports (census mode), over the
+# package's sources: its numbers are the reports' (value.mojo's lines, the
+# exempted line out of them) and the tests are set aside.
+cov_report_check(
+    name = "census",
+    covcheck = "komira//tools/build/coverage:covcheck_bin",
+    # value.mojo: 9 lines recorded besides the exempted one (1-4 by
+    # test_value; 9-13 by test_describe), 7 hit (12 and 13 not), line 14
+    # exempt; __init__.mojo has no executable line; the two tests set aside.
+    expect = [
+        '"conclusion":"neutral","mode":"census"',
+        '"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":7,"line_found":9,"line_bp":7777,',
+        '"exempt_lines":1,',
+        '"exemptions":[{"path":"tools/build/tests/functional/coverage/covlib/value.mojo","line":14,"reason":"a fixture line (test 43): the tests describe 0 only","status":"exempt"}]',
+        '"excluded_test_files":2,',
+    ],
+    files = {
+        "tools/build/tests/functional/coverage/covlib/__init__.mojo": "covlib/__init__.mojo",
+        "tools/build/tests/functional/coverage/covlib/value.mojo": "covlib/value.mojo",
+        "tools/build/tests/functional/coverage/tests/test_describe.mojo": "tests/test_describe.mojo",
+        "tools/build/tests/functional/coverage/tests/test_value.mojo": "tests/test_value.mojo",
+    },
+    mode = "census",
+    package = "tools/build/tests/functional/coverage",
+    reports = _REPORTS,
+    script = "report.sh",
+)
+
+# Tests 43 and 46: a library whose only tests are standalone mojo_test
+# targets, which it names in `coverage_tests`: test_covmt in this package
+# calls half, test_covmt_far in //functional/coverage/covmt_far (another
+# package, as an end-to-end test under src/tests/ is) calls quarter. Its gate
+# is the target covmt_cov_gate (the library cannot depend on its tests),
+# which runs each test's coverage binary under kcov against covmt's sources
+# and gates over both reports: every line of half.mojo is covered, by one
+# test or the other. The test in this package is set aside (--test-source),
+# and the other one's source is staged with a BUCK file at its package, so
+# the gate does not measure it as covmt's.
+mojo_library(
+    name = "covmt",
+    srcs = [
+        "covmt/__init__.mojo",
+        "covmt/half.mojo",
+    ],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    coverage_tests = [
+        ":test_covmt",
+        ":test_covmt_top",
+        "//functional/coverage/covmt_far:test_covmt_far",
+    ],
+    visibility = ["//functional/coverage/covmt_far:"],
+)
+
+mojo_test(
+    name = "test_covmt",
+    srcs = ["tests/test_covmt.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    deps = [":covmt"],
+)
+
+# A test of covmt's package at the package's top, outside tests/: covcheck
+# sets aside only <package>/tests/ by itself, so the gate must name this one
+# (--test-source), or its lines count as covmt's source.
+mojo_test(
+    name = "test_covmt_top",
+    srcs = ["test_covmt_top.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    deps = [":covmt"],
+)
+
+# Test 46: what covmt's gate (covmt_cov_gate) found: both functions of
+# half.mojo, each compiled into one test's binary and run (a dropped test
+# leaves its function uncompiled: line_found 1); the two test sources of
+# covmt's package set aside (test_covmt_top.mojo, outside tests/, only by
+# --test-source), the other another package's.
+cov_report_check(
+    name = "covmt_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,',
+        '"ignored_files":0,"excluded_test_files":2,',
+    ],
+    mode = "result",
+    reports = [":covmt_cov_gate[gate][result]"],
+    script = "report.sh",
+)
+
+# Test 46: the gate of a library whose only test is its README's example
+# (//functional/coverage/covreadme): twice.mojo's two lines covered by the
+# example's run, the README's program counted outside the repository (its
+# report names it under buck-out/readme/). Without the README's run the
+# package is NotMeasured. And of one whose README holds no example
+# (covreadme_none): the run of a program that runs nothing, thrice.mojo
+# measured and not covered.
+cov_report_check(
+    name = "covreadme_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage/covreadme","files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,',
+        '"ignored_files":1,"excluded_test_files":0,',
+    ],
+    mode = "result",
+    reports = ["//functional/coverage/covreadme:covreadme[coverage][gate][result]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covreadme_none_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage/covreadme_none","files":1,"unmeasured_files":1,"line_hit":0,"line_found":2,"line_bp":0,',
+        '"kind":"NotMeasured",',
+        '"ignored_files":1,"excluded_test_files":0,',
+    ],
+    mode = "result",
+    reports = ["//functional/coverage/covreadme_none:covreadme_none[coverage][gate][result]"],
+    script = "report.sh",
 )
 
 # Reproducibility without --no-remote-cache: two libraries build the same
@@ -112,14 +510,249 @@ cov_debug_check(
     script = "check.sh",
 )
 
-# For the planted defects of tests//negative/coverage.
+# Test 47: branch coverage. A library whose function has every kind of
+# source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
+# its arms, never the first (and a String destroyed at an `if`, loops over
+# collections, a Dict subscript, user masks, raising calls in `try:`
+# bodies, `and`/`or` whose result is returned, stored or passed on, a
+# function only a folded-away assert failure calls): with
+# coverage (forced here, as for covlib_forced) it has [coverage][bc],
+# [coverage][pgo_bin] and [coverage][branch].
+mojo_library(
+    name = "branchlib",
+    srcs = [
+        "branchlib/__init__.mojo",
+        "branchlib/lookup.mojo",
+        "branchlib/loops.mojo",
+        "branchlib/mask.mojo",
+        "branchlib/score.mojo",
+        "branchlib/shapes.mojo",
+        "branchlib/strings.mojo",
+        "branchlib/trial.mojo",
+        "branchlib/unrun.mojo",
+        "branchlib/values.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = [
+        "tests/test_gate_env.mojo",
+        "tests/test_score_arms.mojo",
+        "tests/test_unrun.mojo",
+    ],
+)
+
+# Test 47: a library with a C library in its closure (the cshim example's,
+# a cxx_library): its tests' links end with the C library, as mojo_wrapper.sh
+# appends it (--link-tail), and its branch coverage links pass the same
+# arguments in the same order. Its test calls into C and takes two of the
+# three arms of add_clamped.
+mojo_library(
+    name = "branchc",
+    srcs = ["branchc/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_add_clamped.mojo"],
+    deps = ["komira//tools/build/examples/cshim:add"],
+)
+
+# Test 47: a library whose test imports a package only its `test_deps`
+# give it (branchtdsup), which has a C library in its closure (the cshim
+# example's): the test's branch coverage bitcode is compiled against that
+# package and its binary links that C library, as its release build and its
+# [coverage][bin] are.
+mojo_library(
+    name = "branchtdsup",
+    srcs = ["branchtdsup/__init__.mojo"],
+    conda = False,
+    deps = ["komira//tools/build/examples/cshim:add"],
+)
+
+mojo_library(
+    name = "branchtd",
+    srcs = ["branchtd/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_deps = [":branchtdsup"],
+    test_srcs = ["tests/test_with_support.mojo"],
+)
+
+# The profile of test_score_arms's instrumented run holds one function named
+# like classify_score (`ld-temp.o;branchlib::score::classify_score(...)`),
+# with six counters. IR profile counters sit on the edges outside a spanning
+# tree of the function's control flow, not one per arm, so the list is what
+# the instrumentation of this function gives, sorted, as measured remotely:
+# 1 and 1 are "top" and "high" (one call each), 2 is "pass" (two calls), and
+# the zeros include the "invalid" arm, which the test never takes. A run
+# whose counters were not written would read all zeros, and a test taking
+# another set of arms other numbers.
+cov_branch_check(
+    name = "branch_counts",
+    counts = [0, 0, 1, 1, 2, 2],
+    exec_compatible_with = LINUX_X86_64,
+    function = "classify_score",
+    profdata = ":branchlib[coverage][branch][test_score_arms]",
+    script = "branch_check.sh",
+)
+
+# Test 47: the branch records of test_score_arms's run
+# ([coverage][branch_info], cov_branch_classify) are its golden file byte for
+# byte. classify_score's `if` and both `elif`s are three branches Mojo puts
+# on the `if`'s line and column (4,5): 0/3 is the `if` (0 taken: the test
+# never asks for "invalid"), 1/3 the first `elif` (1 of 4), 2/3 the second
+# (1 of 3). The `or` (4,18) is a select whose right operand never decides
+# true (rhs 0,4), and the `and` (6,22) one whose right operand, `bonus`,
+# decides both ways once (rhs 1,1). shapes.mojo: the plain @always_inline
+# `pick`'s `if` is a select at its own line (9,5: 1,1), not at its call;
+# in `a > 0 or b > 0 or c > 0` (15) the first `or`'s result is the second's
+# condition, so its right operand is derived from the second select (rhs
+# 0,1: `b` never decides true) and the second's from the `if`'s branch
+# (rhs 1,0); the `while` (23,5: 3,2); the `range(` loop's two branches on
+# one value, one record (25,19: arm 0 the loop's end, 2, arm 1 an
+# iteration, 3); the ternary (27,15: 1,1). A classifier summing the three
+# branches at 4,5 into one record would give 2,9 here; one losing a
+# derivation, no rhs; one writing a decision tested twice, 25,19 twice.
+# strings.mojo: `first` owns a String destroyed on its `if`'s return path,
+# so the IR holds five branches at the `if` (8,5): the `if` and the String
+# destructor's four, one record (1,1); a classifier reading the String's
+# branches as decisions there gives 8,5:br:0/5 to 4/5. loops.mojo: a loop
+# over a List by name (9,14, at the name) and one over a list literal of
+# Strings (16,14, at the `[`, whose branch is on the `i1` that
+# `_ArrayIterOwned.__next__` returns, true when it raises StopIteration):
+# one record each, arm 0 the end and arm 1 an iteration (2,3 and 1,2); a
+# classifier dropping a raising call's flag at a loop head loses 16,14.
+# lookup.mojo: `d[key]`'s branch on `Dict.__getitem__`'s error flag at the
+# `[` is compiler-made (no record), and one refusing it fails here.
+# mask.mojo: `if ys.capacity() & (1 << 62):` (11,5) is a String's flags
+# test in shape, the `and` and `icmp ne` at the `&`; it stays a decision
+# because the test is not at the `if`'s location (`!= 0`, 9,5, is an
+# `icmp eq` and a `xor`, no String shape).
+# trial.mojo: each raising call in a `try:` body is a `try` decision, arm 0
+# the call returned, arm 1 it raised into the handler: `both` (15,23: 1,1),
+# `normal_only` (23,20: 1,0, its raise never taken), a nested `try` (35,24
+# outer, 37,25 inner, 39,25 a call in the inner `except` body, still in the
+# outer `try:` body: 1,0), a `try`/`finally` (57,20), a `try`/`else` (66,20;
+# the call in the `else` body, 70, is the compiler's), a Dict subscript
+# (76,17, at the `[`), and in `calls` a call returning only its flag (110),
+# an inlined raising callee (111,16: its `if` is 88,5 at its own line), the
+# two calls of `checked(checked(x))` (112,29 inner, 112,21 outer: 4,0), a
+# raising constructor (113), a method (114) and `Int(s)` (115); one in a
+# loop (125,25). `outside`'s call (30), whose error goes to its caller, and
+# `raise` (48) give no record. A classifier without the `try` rule loses
+# every try record; one ignoring the `try:` scope records 70 (and
+# lookup.mojo's 7,13); one keeping LLVM's arm order gives 23,20 as 0,1.
+# values.mojo: an `and`/`or` whose result no branch tests is a decision of
+# its own two arms, the right operand skipped or evaluated, with no `rhs`:
+# returned (`both_set`'s select 31,14: 1,1; `either_small`'s short-circuit
+# 35,21: 1,1; `nested_values` 48,18 and its inner `or` 48,32: 0,1),
+# stored (39,19), passed to a call (44,24: 0,1, the right operand never
+# skipped), with a raising right operand (`and` 52,18: 2,0, and `or`
+# 56,18: 1,1, its error flag a phi beside the result). In `guarded`, a
+# `try:` body's `if a > 0 and strict(b):`, the call is a `try` decision
+# (61,28: returned 1, raised 1) and the `if` (61,9) ran 2 of the `and`'s 3
+# times (the raise skips it): no test of this result, so 61,18 is its own
+# two arms (2,1). Where a branch does test the result its right
+# operand is counted as before: `digit`, a plain @always_inline helper
+# inlined twice, is tested by the `if` (folded into a select, 71,9) in one
+# copy and passed on in the other: 27,20 sums both copies (5,1) and its
+# rhs is the tested copy's (2,1); in `folded`, Mojo folds `if a > 0 and
+# is_even(b): hit = True` away and the `if hit:` select (91,5) tests the
+# `and`'s phi itself (89,14 rhs 1,1). `lowers`'s `lower = c >= 97 and ...`
+# is tested only when `i != 0` (the `or` at 81,46), two of its three runs:
+# no test of this result, so 80,29 is its own two arms (2,1) and no rhs; the
+# `or`'s result merges with `lower` in a phi before the `if ok:`, which no
+# rule follows: 81,46 is its own two arms too. A classifier refusing an
+# untested and/or (as it first did: `return a or b` refused) fails here; one
+# dropping its record loses 31,14 to 52,18; one deriving a right operand
+# from a test of other counts writes 80,29:rhs and 61,18:rhs.
+# test_gate_env calls none of branchlib: its record file is empty.
+# test_unrun asserts two known equal Tags equal: assert_equal's failure path,
+# which writes them (unrun.mojo's Tag.write_to), is a branch Mojo folds to
+# never taken, so the instrumented link drops Tag.write_to with its counters
+# and the run's profile holds no record of it. Its `if` (24,9) is one record
+# with both arms never run (`-`); an annotation refusing a function the
+# profile lacks fails this test's [branch_ir] (as every one did, naming
+# Tag::write_to among 182), and one dropping such a function's branches
+# gives an empty file.
+cov_report_check(
+    name = "branch_info",
+    goldens = [
+        "golden/test_score_arms.info",
+        "golden/test_unrun.info",
+    ],
+    mode = "golden",
+    reports = [
+        ":branchlib[coverage][branch_info][test_score_arms]",
+        ":branchlib[coverage][branch_info][test_unrun]",
+    ],
+    script = "report.sh",
+)
+
+# Test 47: the branch coverage link of test_score_arms is the link of its
+# release build plus the profile runtime: mojo_wrapper.sh's `cc` shim gives
+# zig what `mojo build` asks for (the compiler's runtime library,
+# --gc-sections, -lm, the shim's --strip-debug and run path), and
+# cov_branch_link.sh gives zig the same line for the instrumented object
+# (link_line.sh). A Mojo release linking with another library, or a link
+# script that drops one, fails here.
+cov_link_line_check(
+    name = "link_line",
+    bc = ":branchlib[coverage][bc][test_score_arms]",
+    exec_compatible_with = LINUX_X86_64,
+    lib = ":branchlib",
+    script = "link_line.sh",
+    src = "tests/test_score_arms.mojo",
+)
+
+# Test 47: the bitcode and the instrumented binary of one test built in two
+# actions with different keys (repro_a and repro_b, above), so two
+# sandboxes, are the same bytes. No --no-remote-cache.
+cov_debug_check(
+    name = "reproducible_branch",
+    bins = [
+        ":repro_a[coverage][bc][test_same]",
+        ":repro_b[coverage][bc][test_same]",
+    ],
+    mode = "same",
+    script = "check.sh",
+)
+
+cov_debug_check(
+    name = "reproducible_pgo_bin",
+    bins = [
+        ":repro_a[coverage][pgo_bin][test_same]",
+        ":repro_b[coverage][pgo_bin][test_same]",
+    ],
+    mode = "same",
+    script = "check.sh",
+)
+
+# For the planted defects and the gate checks of tests//negative/coverage
+# (and, report.sh, of the test-only package tests//src/tests/coverage).
 export_file(
     name = "check.sh",
     visibility = ["//negative/coverage:"],
 )
 
+export_file(
+    name = "report.sh",
+    visibility = [
+        "//negative/coverage:",
+        "//src/tests/coverage:",
+    ],
+)
+
+export_file(
+    name = "link_line.sh",
+    visibility = ["//negative/coverage:"],
+)
+
 shell_lint(
     name = "shell_lint",
-    srcs = ["check.sh"],
+    srcs = [
+        "branch_check.sh",
+        "check.sh",
+        "link_line.sh",
+        "report.sh",
+    ],
     visibility = ["komira//:tests_lints"],
 )

@@ -1,0 +1,15 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.1: NOT TRUE is FALSE, NOT FALSE is TRUE, NOT NULL is NULL.
+# Types: §8.8.
+id:int64	a:bool?	not_a:bool?
+1	true	false
+2	true	false
+3	true	false
+4	false	true
+5	false	true
+6	false	true
+7	\N	\N
+8	\N	\N
+9	\N	\N

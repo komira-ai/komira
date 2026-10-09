@@ -7,12 +7,21 @@ export_file(name = "gate_runner.sh", visibility = ["PUBLIC"])
 
 export_file(name = "run_check.sh", visibility = ["PUBLIC"])
 
+export_file(name = "mem_cap.sh", visibility = ["PUBLIC"])
+
+export_file(name = "test_deadline.sh", visibility = ["PUBLIC"])
+
 export_file(name = "proto_fixture.sh", visibility = ["PUBLIC"])
 
 export_file(name = "conda_unpack.zig", src = "tools/conda_unpack.zig", visibility = ["PUBLIC"])
 
 export_file(name = "launch.sh", visibility = ["PUBLIC"])
 export_file(name = "zig_cc_launcher.zig", src = "tools/zig_cc_launcher.zig", visibility = ["PUBLIC"])
+
+# The rule of the branch coverage actions, as data for the coverage
+# workflow's cases (the root BUCK's coverage_ci_cases), which hold
+# .github/ci/coverage_measure.sh's list of their categories equal to its.
+export_file(name = "coverage_branch.bzl", visibility = ["PUBLIC"])
 
 # Every script above; a validation of the Mojo toolchain (toolchain.bzl).
 shell_lint(

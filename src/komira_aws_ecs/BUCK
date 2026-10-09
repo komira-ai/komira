@@ -41,12 +41,13 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # names failures, and the error forms read through komira_aws_core and the
 # modeled error shapes), test_ecs_endpoints (botocore's endpoint cases for
 # ecs through every operation's resolver, and the regional, FIPS,
-# dual-stack and custom endpoints), test_no_env_reads (the generated module
-# reads no environment) and test_ecs_client (the generated client over a
-# scripted connector: a call answered, a missing cluster raised under its
-# code, and a request as it reached the wire, through komira_aws_core's
-# AwsEchoConnector; and over a transport that records each attempt, a
-# RunTask retried after a 500 under one clientToken).
+# dual-stack and custom endpoints), _no_env_reads (written by
+# mojo_aws_client: the package reads no environment) and test_ecs_client
+# (the generated client over a scripted connector: a call answered, a
+# missing cluster raised under its code, and a request as it reached the
+# wire, through komira_aws_core's AwsEchoConnector; and over a transport
+# that records each attempt, a RunTask retried after a 500 under one
+# clientToken).
 #
 # No test here talks to the service.
 
@@ -81,17 +82,12 @@ mojo_aws_client(
         "tests/test_ecs_endpoints.mojo": {
             _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
         },
-        "tests/test_no_env_reads.mojo": {
-            "gen/" + f: ":komira_aws_ecs_gen[{}]".format(f)
-            for f in ["__init__.mojo", "_layout_probe.mojo", "komira_aws_ecs.mojo"]
-        },
     },
     test_srcs = [
         "tests/test_ecs_client.mojo",
         "tests/test_ecs_endpoints.mojo",
         "tests/test_ecs_requests.mojo",
         "tests/test_ecs_responses.mojo",
-        "tests/test_no_env_reads.mojo",
     ],
     visibility = ["PUBLIC"],
     deps = [

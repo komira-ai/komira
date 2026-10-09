@@ -21,7 +21,11 @@ from a Kafka client or broker.
   `AddPartitionsToTxnRequest.json`, `AddPartitionsToTxnResponse.json`,
   `AddOffsetsToTxnRequest.json`, `AddOffsetsToTxnResponse.json`,
   `EndTxnRequest.json`, `EndTxnResponse.json`,
-  `TxnOffsetCommitRequest.json`, `TxnOffsetCommitResponse.json`.
+  `TxnOffsetCommitRequest.json`, `TxnOffsetCommitResponse.json`,
+  `ApiVersionsRequest.json`, `ApiVersionsResponse.json`,
+  `MetadataRequest.json`, `MetadataResponse.json`,
+  `ProduceRequest.json`, `FetchRequest.json`, `FetchResponse.json`,
+  `ListOffsetsRequest.json`.
 - License: those schema files are Apache License 2.0, copyright the Apache
   Software Foundation. They are not vendored here; the tests contain only
   example messages laid out as the schemas describe.
@@ -30,9 +34,10 @@ from a Kafka client or broker.
 
 What each golden test checks, per reference message:
 
-- Request: the reference is request header v1 plus the body. The test parses
-  the header, decodes the body at the header's version, asserts every decoded
-  field, checks the decoder consumed the message exactly, and checks that
+- Request: the reference is the request header plus the body (header v1 for
+  a non-flexible version, header v2 for a flexible one, as in InitProducerId
+  v2+). The test parses the header, decodes the body at the header's version,
+  asserts every decoded field, checks the decoder consumed the message exactly, and checks that
   every strict prefix is refused with the decoder's short-read error.
 - Response: the codec has encoders only, so the test encodes the reference's
   field values and asserts byte equality with the reference.

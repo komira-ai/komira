@@ -29,7 +29,9 @@ files first (each group by path, then line):
 - `Mutant survived`: one per surviving mutant;
 - `Coverage exemption` (level `notice`): one per marker.
 
-Level `warning` in census and neutral mode, `failure` in enforce mode.
+Level `warning` in census and neutral mode, `failure` in enforce mode;
+`notice` in every mode for a file of a test-only package (`--info-package`,
+analyze.mojo step 8), whose findings are information.
 
 The list can be long (a package's first run, a file nobody tests), so the
 check run carries at most `--max-annotations` of them (`cap_annotations`):
@@ -45,7 +47,7 @@ from covcheck.exempt import STATUS_EXEMPT
 from covcheck.model import FileCov, branch_line
 from covcheck.mutants import SURVIVED
 from covcheck.paths import RepoFiles, is_test_source, package_of
-from covcheck.stats import MODE_ENFORCE
+from covcheck.stats import MODE_ENFORCE, is_info_package
 from covcheck.text import line_key, pad_int, sort_by_keys, sort_ints, sort_strings, suffix
 
 comptime TITLE_LINE = "Line not covered"
@@ -305,13 +307,14 @@ def annotations(a: Analysis, d: Diff, touched: List[String]) -> List[Annotation]
     var changed = Dict[String, Bool]()
     for i in range(len(d.paths)):
         changed[d.paths[i]] = True
-    var paths = Dict[String, Bool]()
+    # Each annotated path, and its package's level.
+    var paths = Dict[String, String]()
     for i in range(len(a.files)):
         if a.file_packages[i] in is_touched:
-            paths[a.files[i].path] = True
+            paths[a.files[i].path] = String("notice") if is_info_package(a.file_packages[i], a.info_dirs) else level
     for i in range(len(a.mutants)):
         if a.mutant_packages[i] in is_touched:
-            paths[a.mutants[i].path] = True
+            paths[a.mutants[i].path] = String("notice") if is_info_package(a.mutant_packages[i], a.info_dirs) else level
     var first = List[String]()
     var rest = List[String]()
     for e in paths.items():
@@ -325,7 +328,7 @@ def annotations(a: Analysis, d: Diff, touched: List[String]) -> List[Annotation]
         first.append(rest[i])
     var out = List[Annotation]()
     for i in range(len(first)):
-        var fa = _file_annotations(a, first[i], level)
+        var fa = _file_annotations(a, first[i], paths.get(first[i], level))
         for k in range(len(fa)):
             out.append(fa[k].copy())
     return out^

@@ -2,3 +2,4 @@ functional/test_weld/src/komira_a/tests/test_dead.mojo	planted: the BUCK file na
 functional/test_weld/src/komira_b	planted: a package with a source and no test
 functional/test_weld/src/komira_gen	planted: no .mojo
 functional/test_weld/src/komira_a/tests/test_gone.mojo	planted: no such file
+functional/test_weld/src/tests/helpers/komira_e	planted: a test-only package with a source and no test, named by its path under tests/<kind>/

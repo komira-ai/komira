@@ -6,7 +6,7 @@
 # Rows: IMDS asks for a storage-scoped token with the mandatory `Metadata:
 # true` header (and the user-assigned `client_id` when one is set), reads
 # `expires_in` as the JSON string IMDS sends, and caches the token against
-# the wall clock; the service principal POSTs the form-encoded
+# its injected clock (a ManualClock here); the service principal POSTs the form-encoded
 # client-credentials grant to `/<tenant>/oauth2/v2.0/token` with its values
 # percent-encoded, and reads `expires_in` as the JSON number Entra sends; a
 # non-2xx answer and a body that is not a token response are named errors
@@ -26,7 +26,6 @@ from komira_azure_core import (
     AzureImdsProvider,
     ServicePrincipalProvider,
 )
-from komira_clock import now_unix_ms
 from komira_http_client.body import RequestBody
 from komira_http_client.header_map import HeaderMap
 from komira_http_client.response_body import BufferedResponseBody
@@ -34,6 +33,7 @@ from komira_http_client.service import ClientRequest, HttpService
 from komira_http_client.state_machine import ClientResponse
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_retry import ManualClock, MonotonicClock
 
 
 comptime _RT = PerCoreAsyncRuntime[NoopSink]
@@ -105,7 +105,9 @@ def _connector() -> ScriptedConnector:
     return ScriptedConnector.with_stream(ScriptedStream.empty())
 
 
-def _refresh_imds(mut p: AzureImdsProvider, mut svc: CapturingService) raises:
+def _refresh_imds[K: MonotonicClock](
+    mut p: AzureImdsProvider[K], mut svc: CapturingService
+) raises:
     var conn = _connector()
     var reactor = _reactor()
     p.refresh_with_service[CapturingService, _RT, ScriptedConnector](
@@ -113,8 +115,8 @@ def _refresh_imds(mut p: AzureImdsProvider, mut svc: CapturingService) raises:
     )
 
 
-def _refresh_sp(
-    mut p: ServicePrincipalProvider, mut svc: CapturingService
+def _refresh_sp[K: MonotonicClock](
+    mut p: ServicePrincipalProvider[K], mut svc: CapturingService
 ) raises:
     var conn = _connector()
     var reactor = _reactor()
@@ -131,15 +133,15 @@ comptime _IMDS_OK = (
 
 
 def test_imds_request_and_cached_token() raises:
-    var p = AzureImdsProvider.with_endpoint(String("http://127.0.0.1:18080"))
+    var p = AzureImdsProvider.with_endpoint(
+        String("http://127.0.0.1:18080")
+    ).with_clock(ManualClock(7_000))
     assert_false(p.has_credential())
     assert_true(p.is_expired_or_near_expiry())
     with assert_raises(contains="no cached token"):
         _ = p.credential()
     var svc = CapturingService(200, String(_IMDS_OK))
-    var before = now_unix_ms()
     _refresh_imds(p, svc)
-    var after = now_unix_ms()
     assert_equal(svc.calls, 1)
     assert_equal(svc.method, "GET")
     assert_equal(
@@ -150,10 +152,10 @@ def test_imds_request_and_cached_token() raises:
     assert_equal(svc.metadata_header, "true")
     assert_true(p.has_credential())
     assert_equal(p.credential().token, "imds-token")
-    # expires_in "3599" (a JSON string) lands 3599 s after the fetch.
-    var expiry = p.cached_expiry_unix_ms()
-    assert_true(expiry >= before + 3_599_000 and expiry <= after + 3_599_000)
-    assert_equal(p.credential().expiry_unix_ms, expiry)
+    # expires_in "3599" (a JSON string) lands 3599 s after the clock's
+    # reading at the fetch.
+    assert_equal(p.cached_expiry_ms(), 7_000 + 3_599_000)
+    assert_equal(p.credential().expiry_ms, 7_000 + 3_599_000)
     assert_false(p.is_expired_or_near_expiry())
 
 
@@ -198,15 +200,13 @@ def test_service_principal_grant_on_the_wire() raises:
         String("http"),
         String("127.0.0.1"),
         UInt16(18081),
-    )
+    ).with_clock(ManualClock(9_000))
     var svc = CapturingService(
         200,
         String('{"token_type":"Bearer","expires_in":3599,"ext_expires_in":3599,'
         '"access_token":"sp-token"}'),
     )
-    var before = now_unix_ms()
     _refresh_sp(p, svc)
-    var after = now_unix_ms()
     assert_equal(svc.method, "POST")
     assert_equal(
         svc.url, "http://127.0.0.1:18081/contoso.example/oauth2/v2.0/token"
@@ -223,8 +223,8 @@ def test_service_principal_grant_on_the_wire() raises:
         svc.wire,
     )
     assert_equal(p.credential().token, "sp-token")
-    var expiry = p.cached_expiry_unix_ms()
-    assert_true(expiry >= before + 3_599_000 and expiry <= after + 3_599_000)
+    assert_equal(p.cached_expiry_ms(), 9_000 + 3_599_000)
+    assert_equal(p.credential().expiry_ms, 9_000 + 3_599_000)
 
 
 def test_service_principal_defaults_and_refusals() raises:
@@ -253,8 +253,8 @@ def test_service_principal_defaults_and_refusals() raises:
 
 
 def test_near_expiry_is_due_for_refresh() raises:
-    var p = AzureImdsProvider.make()
-    var now = now_unix_ms()
+    var now = Int64(50_000_000)
+    var p = AzureImdsProvider.make().with_clock(ManualClock(now))
     # Inside the 300 s margin: due.
     p.set_credential_for_test(AzureBearerToken(String("t"), now + 60_000), now + 60_000)
     assert_true(p.is_expired_or_near_expiry())
@@ -263,7 +263,9 @@ def test_near_expiry_is_due_for_refresh() raises:
         AzureBearerToken(String("t"), now + 3_600_000), now + 3_600_000
     )
     assert_false(p.is_expired_or_near_expiry())
-    var sp = ServicePrincipalProvider.make(String("t"), String("c"), String("s"))
+    var sp = ServicePrincipalProvider.make(
+        String("t"), String("c"), String("s")
+    ).with_clock(ManualClock(now))
     sp.set_credential_for_test(AzureBearerToken(String("t"), now - 1), now - 1)
     assert_true(sp.is_expired_or_near_expiry())
 
@@ -432,7 +434,7 @@ def test_valid_endpoints_and_tenants() raises:
 # -----------------------------------------------------------------------------
 
 
-def _sp_local() raises -> ServicePrincipalProvider:
+def _sp_local() raises -> ServicePrincipalProvider[]:
     return ServicePrincipalProvider.with_login_endpoint(
         String("t"),
         String("c"),
@@ -444,7 +446,7 @@ def _sp_local() raises -> ServicePrincipalProvider:
 
 
 def _sp_token(body: String) raises -> AzureBearerToken:
-    var p = _sp_local()
+    var p = _sp_local().with_clock(ManualClock(1_000))
     var svc = CapturingService(200, body)
     _refresh_sp(p, svc)
     return p.credential()
@@ -460,12 +462,11 @@ def _sp_body_refused(body: String, contains: String) raises:
 
 def test_token_response_json_shapes() raises:
     # expires_in as a numeric string (IMDS's shape) and as a number.
-    var before = now_unix_ms()
     var t = _sp_token(
         String('{"access_token":"x","expires_in":"3599","token_type":"Bearer"}')
     )
     assert_equal(t.token, "x")
-    assert_true(t.expiry_unix_ms >= before + 3_599_000)
+    assert_equal(t.expiry_ms, 1_000 + 3_599_000)
     # Extra fields, nested objects and arrays are skipped; a decoy
     # access_token inside a nested object is not the token.
     t = _sp_token(

@@ -503,7 +503,6 @@ struct FirestoreDatabase[
         now_cols: List[String],
     ) raises -> UInt64:
         _ = reactor
-        _ = coalesce  # per-column COALESCE via DbColVal.kind, not the global flag
         # ---------------------------------------------------------------------
         # (a) THE PK FAST PATH — the guard has an EQ pred on the table's PK
         #     column, so the doc-id IS that value: a direct GET + one CAS
@@ -520,7 +519,7 @@ struct FirestoreDatabase[
             if not _guard_matches(pk_doc, guard):
                 return UInt64(0)  # a phase/version mismatch — the pre-check fails
             var pk_fields = _apply_updates(
-                pk_doc, updates, bump_version_col, now_cols, _now_micros()
+                pk_doc, updates, coalesce, bump_version_col, now_cols, _now_micros()
             )
             var pk_committed = self._cas_write(
                 table, pk_doc_id, pk_fields^, String(pk_doc.update_time)
@@ -587,7 +586,7 @@ struct FirestoreDatabase[
             # blind multi-doc write would not be safe under concurrency: a racer
             # that moved one row must lose that row and only that row.
             var fields = _apply_updates(
-                docs[i], updates, bump_version_col, now_cols, stmt_now
+                docs[i], updates, coalesce, bump_version_col, now_cols, stmt_now
             )
             if self._cas_write(
                 table,
@@ -776,7 +775,7 @@ struct FirestoreDatabase[
             #    FAILED_PRECONDITION (a racer/heartbeat moved the doc since the
             #    query read) the CAS is rejected -> SKIP (the SKIP-LOCKED skip).
             var fields = _apply_updates(
-                doc, updates, bump_version_col, now_cols, now_us
+                doc, updates, False, bump_version_col, now_cols, now_us
             )
             var won = self._cas_write(
                 table, _last_name_segment(doc.name), fields^, String(doc.update_time)
@@ -1289,6 +1288,7 @@ def _guard_matches(doc: FirestoreDocument, guard: Filter) raises -> Bool:
 def _apply_updates(
     doc: FirestoreDocument,
     updates: List[DbColVal],
+    coalesce: Bool,
     bump_version_col: Optional[String],
     now_cols: List[String],
     now_us: Int64,
@@ -1302,6 +1302,8 @@ def _apply_updates(
       * COLVAL_BIND     -> overwrite the column with the bound value.
       * COLVAL_COALESCE -> overwrite ONLY if the bound value is non-NULL (a NULL
         leaves the read-back value — the partial-heartbeat COALESCE semantic).
+        With `coalesce` True a COLVAL_BIND term is read the same way, as the
+        `Database.conditional_update` contract and the SQL renderer have it.
       * COLVAL_RAW_EXPR -> classified by the NEUTRAL `classify_raw_expr` (the one
         vocabulary this backend and DynamoDB share):
           - `<col> + 1`  -> the INCREMENT: read the column back and add one (the
@@ -1354,7 +1356,9 @@ def _apply_updates(
                     u.val.as_text(),
                 )
             )
-        if u.kind == COLVAL_COALESCE and u.val.is_null:
+        if u.val.is_null and (
+            u.kind == COLVAL_COALESCE or (coalesce and u.kind == COLVAL_BIND)
+        ):
             continue  # COALESCE(NULL, col) -> leave the read-back value untouched
         if u.kind != COLVAL_BIND and u.kind != COLVAL_COALESCE:
             # A kind this backend has no arm for. Same reason as above: a silent

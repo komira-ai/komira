@@ -1,0 +1,43 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+
+# Planted defects for the memory cap of a test run (test 49;
+# tools/build/mojo/mem_cap.sh). Every target here must fail;
+# tools/build/tests/assert_level_tests.sh requires the failure written above
+# it. What works is in ../../functional/mem_cap.
+
+_SRCS = [
+    "__init__.mojo",
+    "chunks.mojo",
+]
+
+# RED (GATED TEST FAILED, then MEMORY CAP: killed ... over its cap of
+# 512 MiB): a test that allocates without bound is stopped by its cap. With
+# no cap it would reach its 2 GiB fuse, hold it for 5 s and pass.
+mojo_library(
+    name = "lib_unbounded",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "memcap",
+    test_memory_cap_mib = 512,
+    test_srcs = ["tests/test_unbounded.mojo"],
+)
+
+# RED under `buck2 test`, the same way.
+mojo_test(
+    name = "test_unbounded",
+    srcs = ["tests/test_unbounded.mojo"],
+    memory_cap_mib = 512,
+    deps = ["//functional/mem_cap:lib_under_cap"],
+)
+
+# RED (GATED TEST FAILED, then MEMORY CAP: killed ... over its cap of
+# 192 MiB): the test that passes under 1024 MiB (functional:lib_under_cap)
+# fails under a cap below the 256 MiB it holds for 2 s, after it has started.
+mojo_library(
+    name = "lib_over_cap",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "memcap",
+    test_memory_cap_mib = 192,
+    test_srcs = ["tests/test_holds_256mib.mojo"],
+)

@@ -58,7 +58,11 @@ if [ -z "${BUCK2:-}" ]; then
 fi
 case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; esac
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_umbrella.XXXXXX")
-GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init.defaultBranch=main)
+# gc.auto=0: the snapshot commit may start a background `git gc --auto`,
+# which repacks $W/src while the local clones below hardlink its objects
+# ("hardlink different from source"). `-c` reaches the git commands these
+# start (submodule add's clone) too.
+GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init.defaultBranch=main -c gc.auto=0)
 
 die() { echo "FAIL  umbrella cache: $1"; echo "logs: $W"; exit 1; }
 
@@ -155,6 +159,124 @@ TARGETS=(
 )
 RUN_CHECKS=("komira//tools/build/examples:hello[run_check]" "komira//tools/build/examples:hello_pkg_user[run_check]"
     "komira//tools/build/examples/cshim:cadd_user[run_check]")
+
+# Analysis only. Outside the tests cell the coverage attributes are the
+# rules' own (tools/build/mojo/coverage.bzl; test 46): in the consumer's
+# cell, a BUCK file passing them to mojo_library is refused when it loads
+# (even the policy's mode with komira's directories), and one calling
+# mojo_library_rule itself is refused in analysis for a mode other than the
+# policy's, a gate or branch coverage directory other than komira's,
+# coverage runs with no gate for a library not in the ledger
+# COVERAGE_NO_GATE, and a gate reading branch records for a library not in
+# COVERAGE_BRANCH_GATE (`coverage_branch_gate`, which a BUCK file passing it
+# to mojo_library is refused for too). A library the rule is given
+# `coverage_tests` (its gate is then `<name>_cov_gate`) passes the rule's
+# checks, and a conda package of it that waits for no such gate is refused.
+CR="$W/umbrella/covrefuse"
+mkdir -p "$CR/macro/lib" "$CR/macro_branch/lib" "$CR/rule/lib"
+printf 'def one() -> Int:\n    return 1\n' > "$CR/macro/lib/__init__.mojo"
+cp "$CR/macro/lib/__init__.mojo" "$CR/rule/lib/__init__.mojo"
+cp "$CR/macro/lib/__init__.mojo" "$CR/macro_branch/lib/__init__.mojo"
+cat > "$CR/macro_branch/BUCK" <<'BUCKEOF'
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+mojo_library(
+    name = "lib",
+    srcs = ["lib/__init__.mojo"],
+    conda = False,
+    coverage_branch_gate = True,
+)
+BUCKEOF
+cp "$W/src/tools/build/coverage/ratchet.tsv" "$CR/rule/ratchet.tsv"
+cat > "$CR/macro/BUCK" <<'BUCKEOF'
+load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_MODE")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+mojo_library(
+    name = "lib",
+    srcs = ["lib/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = COVERAGE_MODE,
+)
+BUCKEOF
+cat > "$CR/rule/BUCK" <<'BUCKEOF'
+load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
+load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
+load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_MODE")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library_rule")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+
+_GATE = "komira//tools/build/coverage:cov_gate"
+
+cov_gate_dir(
+    name = "lenient",
+    ratchet = "ratchet.tsv",
+)
+
+cov_branch_dir(
+    name = "mybranch",
+)
+
+[
+    mojo_library_rule(
+        name = name,
+        srcs = ["lib/__init__.mojo"],
+        conda = False,
+        coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+        coverage_run = "komira//tools/build/coverage/kcov:cov_run",
+        import_name = "lib",
+        **kw
+    )
+    for name, kw in {
+        "mode": {"coverage_gate": _GATE, "coverage_mode": "neutral" if COVERAGE_MODE != "neutral" else "census"},
+        "gate": {"coverage_gate": ":lenient", "coverage_mode": COVERAGE_MODE},
+        "branch": {"coverage_branch": ":mybranch", "coverage_gate": _GATE, "coverage_mode": COVERAGE_MODE},
+        "branch_gate": {"coverage_branch_gate": True, "coverage_gate": _GATE, "coverage_mode": COVERAGE_MODE},
+        "runs": {},
+    }.items()
+]
+
+mojo_library_rule(
+    name = "named",
+    srcs = ["lib/__init__.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_run = "komira//tools/build/coverage/kcov:cov_run",
+    coverage_tests = [":no_such_test"],
+    import_name = "lib",
+)
+
+conda_package(
+    name = "named_conda",
+    lib = ":named",
+    summary = "a conda package waiting for no coverage gate",
+)
+BUCKEOF
+# Each expected text is the formatted message (it names the target), not the
+# fail() line of the .bzl file that buck2 also prints. The mode fixture asks
+# for neutral, or census when the policy's mode is neutral.
+pol=$(sed -n 's/^COVERAGE_MODE = "\(.*\)"$/\1/p' "$W/src/tools/build/coverage/policy.bzl")
+other=neutral
+[ "$pol" != neutral ] || other=census
+for c in "macro|uquery|app//covrefuse/macro:lib|fail: lib: \`coverage_debug\`, \`coverage_run\`, \`coverage_gate\` and \`coverage_mode\` are set by mojo_library" \
+    "mode|audit providers|app//covrefuse/rule:mode|app//covrefuse/rule:mode: coverage_mode is $other, but the policy's is $pol" \
+    "gate|audit providers|app//covrefuse/rule:gate|app//covrefuse/rule:gate: coverage_gate is app//covrefuse/rule:lenient, not komira//tools/build/coverage:cov_gate" \
+    "macro_branch|uquery|app//covrefuse/macro_branch:lib|fail: lib: \`coverage_branch_gate\` is set by mojo_library from COVERAGE_BRANCH_GATE" \
+    "branch|audit providers|app//covrefuse/rule:branch|app//covrefuse/rule:branch: coverage_branch is app//covrefuse/rule:mybranch, not komira//tools/build/coverage/branch:cov_branch" \
+    "branch_gate|audit providers|app//covrefuse/rule:branch_gate|app//covrefuse/rule:branch_gate: coverage_branch_gate is True, but the library is not in COVERAGE_BRANCH_GATE" \
+    "runs|audit providers|app//covrefuse/rule:runs|app//covrefuse/rule:runs: coverage builds with no coverage_gate: its conda package would wait for no coverage gate" \
+    "named|audit providers|app//covrefuse/rule:named_conda|app//covrefuse/rule:named_conda: the coverage gate of app//covrefuse/rule:named is its target"; do
+    IFS='|' read -r n cmd t want <<< "$c"
+    # shellcheck disable=SC2086 # `audit providers` is two words
+    if (cd "$W/umbrella" && "$BUCK2" $cmd "$t") > "$W/umbrella.covrefuse_$n.log" 2>&1; then
+        die "umbrella: the consumer's $t, which sets coverage attributes, was accepted (see $W/umbrella.covrefuse_$n.log)"
+    fi
+    grep -qF -- "$want" "$W/umbrella.covrefuse_$n.log" ||
+        die "umbrella: $t was refused without '$want' (see $W/umbrella.covrefuse_$n.log)"
+done
+(cd "$W/umbrella" && "$BUCK2" kill > /dev/null 2>&1)
+echo "      coverage attributes: refused in the consumer's cell, passed to mojo_library (any of them, coverage_branch_gate alone included) or to the rule (another mode, another gate, another branch coverage directory, branch records read off COVERAGE_BRANCH_GATE, runs without a gate, a conda package of a library naming coverage_tests that waits for no gate)"
 
 # Analysis only. The toolchains cell of every checkout declares the expected
 # targets; a planted override in a consumer's toolchains cell reaches hello's

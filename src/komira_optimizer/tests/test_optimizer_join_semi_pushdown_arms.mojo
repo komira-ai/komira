@@ -540,5 +540,29 @@ def test_a_pure_project_leaf_is_an_accepted_landing_site() raises:
     assert_true(_is_pushed(push_semi_reducers_down(semi^, _on()), 0))
 
 
+def test_r_b_carries_the_carrier_residual_onto_the_rebuilt_join() raises:
+    """The INNER carrier has its own residual (`av < bv`): the push leaves both
+    children's schemas unchanged, so the rebuilt INNER keeps that residual,
+    rendered identically. Catches the carrier residual dropped by the rebuild
+    (the rewritten join would match rows the original rejected)."""
+    var lo: List[String] = ["ak"]
+    var ro: List[String] = ["bk"]
+    var res = Optional[OwnedPointer[Expr]](
+        OwnedPointer(Expr.binary(BIN_LT, Expr.col_ref("av"), Expr.col_ref("bv")))
+    )
+    var carrier = LogicalPlan.join(
+        _a(), _b(), lo^, ro^, JOIN_INNER, JOIN_ALGO_AUTO, res^
+    )
+    var want = String("")
+    carrier._join.value()[].residual.value()[].write_to(want)
+    var out = push_semi_reducers_down(_semi_over(carrier^, "ak"), _on())
+    assert_true(_is_pushed(out, 0))
+    assert_true(out._join.value()[].has_residual())
+    var got = String("")
+    out._join.value()[].residual.value()[].write_to(got)
+    assert_equal(got, want)
+    assert_false(out._join.value()[].left[]._join.value()[].has_residual())
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

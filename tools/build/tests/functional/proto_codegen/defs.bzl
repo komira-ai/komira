@@ -15,6 +15,9 @@ of the target IS the check:
     holds each string of `present` (which keeps an absence check from
     passing over an empty output).
 
+With `service_config`, that file is passed to the plugin as its
+`service_config` option, after `options`.
+
 `proto_codegen_rest_helpers` cuts the REST URL helpers block out of one
 generated file, for a mojo_library whose welded test runs them.
 
@@ -140,6 +143,9 @@ def _proto_codegen_golden_impl(ctx):
     else:
         fail("{}: `plugin` is `mojo` or `mojo-db`, not `{}`".format(ctx.label, ctx.attrs.plugin))
     gen = ctx.actions.declare_output("gen", dir = True)
+    options = ctx.attrs.options
+    if ctx.attrs.service_config:
+        options = cmd_args(options, ",service_config=", ctx.attrs.service_config, delimiter = "")
     ctx.actions.run(
         cmd_args(
             ptc.busybox,
@@ -152,7 +158,7 @@ def _proto_codegen_golden_impl(ctx):
             plugin,
             corpus,
             gen.as_output(),
-            ctx.attrs.options,
+            options,
             str(len(ctx.attrs.import_roots)),
             ctx.attrs.import_roots,
             ctx.attrs.generate,
@@ -214,6 +220,8 @@ proto_codegen_golden_rule = rule(
         # (`mojo-db`), both from the proto toolchain.
         "plugin": attrs.string(default = "mojo"),
         "present": attrs.list(attrs.string(), default = []),
+        # A service configuration YAML, passed as the `service_config` option.
+        "service_config": attrs.option(attrs.source(), default = None),
         # The corpus, every file under corpus/ at its import path.
         "srcs": attrs.list(attrs.source()),
         "_proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),

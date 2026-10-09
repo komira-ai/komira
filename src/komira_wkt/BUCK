@@ -18,6 +18,9 @@ mojo_library(
         "//src/komira_encoding:komira_encoding",
     ],
     test_srcs = [
+        "tests/test_wkt_decode_keys.mojo",
+        "tests/test_wkt_double_text.mojo",
+        "tests/test_wkt_edges.mojo",
         "tests/test_wkt_json_codec_path.mojo",
         "tests/test_wkt_list_copy.mojo",
         "tests/test_wkt_plain_arms.mojo",

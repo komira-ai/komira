@@ -7,9 +7,12 @@
 # ranged GETs against the Azure Blob REST API:
 #
 #   * `HttpClient[C]` — TCP/TLS connection pool + reactor binding
-#   * `SharedKeySigningLayer[HttpClient[C], StaticSharedKeyProvider]` —
+#   * `SasQueryLayer[HttpClient[C]]` — a SAS token appended to each
+#     request's query (none when the client has no token)
+#   * `SharedKeySigningLayer[<that>, StaticSharedKeyProvider]` —
 #     `Authorization: SharedKey <account>:<sig>` per-request injection
-#   * `AzureStore[ <layer> ]` — endpoint + GET glue
+#     (none when the client has no key)
+#   * `AzureStore[AzureClientHttp[C]]` — endpoint + GET glue
 #   * a per-client `Connector` instance (separate from the one inside
 #     HttpClient — `AzureStore.get_range[RT, C](..., mut connector,
 #     mut reactor)` consumes a `mut C` at call-time)
@@ -18,12 +21,14 @@
 # Auth model (caller-resolves-credential): the SDK NEVER performs ambient
 # credential discovery. The caller supplies the AzureSharedKey explicitly
 # (account name + base64 account key — pasted from the Azure portal /
-# `az storage account keys list`) OR an empty credential for anonymous
-# public-container reads (the SharedKeySigningLayer skips signing on an
-# empty credential). Token-based auth (managed identity / service
+# `az storage account keys list`), OR a SAS token (the SasQueryLayer
+# appends it to every request), OR neither for anonymous public-container
+# reads (the SharedKeySigningLayer skips signing on an empty credential).
+# A key and a token together are refused. `AzureClientSpec`
+# (azure_client_spec.mojo) builds a client from an `AzureCredential`. Token-based auth (managed identity / service
 # principal) is provided by the AzureImdsProvider / ServicePrincipalProvider
 # in komira_azure_core; those fetch an OAuth2 token, and a bearer-token
-# Azure layer is not written yet: Shared Key is the read path here.
+# Azure layer is not written yet: Shared Key or SAS is the read path here.
 #
 # Sentinel/configured pattern: the no-arg
 # `__init__()` yields an empty sentinel (`is_configured() == False`) whose
@@ -54,7 +59,16 @@ from komira_http_client.client import HttpClient
 from komira_http_core.transport.io_stream import Connector
 
 from .azure import AzureBlobMeta, AzureConfig, AzureStore
+from .azure_sas_query import SasQueryLayer
 from .azure_signing import SharedKeySigningLayer, StaticSharedKeyProvider
+
+
+# The client's HTTP stack: Shared Key signing over the SAS query layer over
+# the pooled HttpClient. With a key and no token the SAS layer passes
+# requests through; with a token and no key the signing layer does.
+comptime AzureClientHttp[C: Connector] = SharedKeySigningLayer[
+    SasQueryLayer[HttpClient[C]], StaticSharedKeyProvider
+]
 
 
 # -----------------------------------------------------------------------------
@@ -86,24 +100,24 @@ struct AzureClient[C: Connector](Movable, Deinitable):
     `AzureFs[C, dispatch_o]` construction (caller-creates-fs pattern,
     mirrors S3Client / GcsClient).
 
-    Layered HTTP stack:
+    Layered HTTP stack (`AzureClientHttp[C]`):
       HttpClient[C]
-        -> SharedKeySigningLayer[HttpClient[C], StaticSharedKeyProvider]
-        -> AzureStore[<layer>]
+        -> SasQueryLayer[HttpClient[C]]
+        -> SharedKeySigningLayer[<that>, StaticSharedKeyProvider]
+        -> AzureStore[AzureClientHttp[C]]
 
     Typical instantiation is `AzureClient[KernelTcpConnector]` for
     production TCP and `AzureClient[ScriptedConnector]` for unit-test
     fixtures.
 
-    Auth: caller-resolved AzureSharedKey. Pass an empty account+key for
-    anonymous public-container reads — the SharedKeySigningLayer skips
-    signing on an empty credential.
+    Auth: a caller-resolved AzureSharedKey, or a SAS token
+    (`sas_query`). Pass an empty account+key and no token for anonymous
+    public-container reads — the SharedKeySigningLayer skips signing on an
+    empty credential.
     """
 
     var _inner_store: Optional[
-        AzureStore[
-            SharedKeySigningLayer[HttpClient[Self.C], StaticSharedKeyProvider]
-        ]
+        AzureStore[AzureClientHttp[Self.C]]
     ]
     var _inner_connector: Optional[Self.C]
     var _inner_reactor: Optional[Reactor[NoopSink]]
@@ -116,11 +130,7 @@ struct AzureClient[C: Connector](Movable, Deinitable):
         """Default-construct an EMPTY sentinel AzureClient[C]. NEVER
         dereferenced; gated by `is_configured()`."""
         self._inner_store = Optional[
-            AzureStore[
-                SharedKeySigningLayer[
-                    HttpClient[Self.C], StaticSharedKeyProvider
-                ]
-            ]
+            AzureStore[AzureClientHttp[Self.C]]
         ]()
         self._inner_connector = Optional[Self.C]()
         self._inner_reactor = Optional[Reactor[NoopSink]]()
@@ -136,6 +146,7 @@ struct AzureClient[C: Connector](Movable, Deinitable):
         var connector: Self.C,
         var call_connector: Self.C,
         var config: AzureConfig,
+        sas_query: String = String(""),
     ) raises:
         """Construct a configured AzureClient[C].
 
@@ -152,25 +163,33 @@ struct AzureClient[C: Connector](Movable, Deinitable):
                 `AzureStore.get_range[RT, C](...)` dispatch.
             config: AzureConfig (use `AzureConfig.azure(account)` for real
                 Azure or `AzureConfig.azurite(account)` for the emulator).
+            sas_query: a SAS token appended to every request's query ("",
+                the default, for none), checked by
+                `azure_sas_query_normalize`.
+
+        Raises `AzureClient: a shared key and a SAS token were both given;
+        a request is authorized by one` when `key_b64` and `sas_query` are
+        both non-empty.
         """
+        if key_b64.byte_length() > 0 and sas_query.byte_length() > 0:
+            raise Error(
+                "AzureClient: a shared key and a SAS token were both given;"
+                " a request is authorized by one"
+            )
         var http = HttpClient[Self.C].with_defaults(connector^)
-        var provider = StaticSharedKeyProvider.make(account, key_b64)
-        var layer = SharedKeySigningLayer[
-            HttpClient[Self.C], StaticSharedKeyProvider
-        ].wrap(http^, provider^)
+        var sas = SasQueryLayer[HttpClient[Self.C]].wrap(http^, sas_query)
+        # No key: the provider's credential is empty, so the signing layer
+        # passes requests through unsigned (a SAS token, or anonymous).
+        var signer_account = account if key_b64.byte_length() > 0 else String("")
+        var provider = StaticSharedKeyProvider.make(signer_account, key_b64)
+        var layer = AzureClientHttp[Self.C].wrap(sas^, provider^)
         var account_name = String(config.account)
-        var store = AzureStore[
-            SharedKeySigningLayer[HttpClient[Self.C], StaticSharedKeyProvider]
-        ].new(config^, layer^)
+        var store = AzureStore[AzureClientHttp[Self.C]].new(config^, layer^)
 
         var call_reactor = _make_reactor()
 
         self._inner_store = Optional[
-            AzureStore[
-                SharedKeySigningLayer[
-                    HttpClient[Self.C], StaticSharedKeyProvider
-                ]
-            ]
+            AzureStore[AzureClientHttp[Self.C]]
         ](store^)
         self._inner_connector = Optional[Self.C](call_connector^)
         self._inner_reactor = Optional[Reactor[NoopSink]](call_reactor^)
@@ -197,9 +216,7 @@ struct AzureClient[C: Connector](Movable, Deinitable):
     def _store_mut(
         mut self,
     ) -> ref [self._inner_store] Optional[
-        AzureStore[
-            SharedKeySigningLayer[HttpClient[Self.C], StaticSharedKeyProvider]
-        ]
+        AzureStore[AzureClientHttp[Self.C]]
     ]:
         """INTERNAL: ref to the Optional holding the AzureStore. Caller
         (AzureFs.read_at) accesses `.value()` after confirming the client

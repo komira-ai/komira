@@ -1014,7 +1014,7 @@ def _join_child_protected_scan_key(
         return None
     var meta = _extract_scan_metadata(child)
     if not meta.path:
-        return None
+        return None  # cov: unreachable both arms of _extract_scan_metadata set path
     if not _scan_field_is_int64(meta.schema, key_col):
         return None
     # Unfiltered → empty filter fingerprint (matches `_collect_scan_keys`'s
@@ -1769,7 +1769,7 @@ def plan_scan_shares(
         # path, once for its row_count (both are on the same node).
         var path_opt = _lookup_first_path(plan, k)
         if not path_opt:
-            continue
+            continue  # cov: unreachable _collect_scan_keys walked these nodes to make k
         var rc_opt = _lookup_row_count(plan, k)
         if not rc_opt:
             # Unknown row count -- conservative: skip.

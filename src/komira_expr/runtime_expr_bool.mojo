@@ -25,15 +25,14 @@
 #   - `run_filter_self` whole-batch entry point forwarding to the
 #     free-function default.
 #   - Shape-classify stub returning FALLBACK.
-#   - Builder `build_from_expr` (raises on node-count overflow — NOT
-#     fill=False poison).
+#   - Builder `build_runtime_expr_bool` over a hand-built node list
+#     (raises on node-count overflow and on an out-of-range root).
 #
 # Not yet implemented:
-#   - Per-tag arms for EXPR_AGG_FN / EXPR_WHEN / EXPR_CAST (currently
-#     stubbed to the RuntimeExprError fallback path; all 16 tags are
-#     scaffolded).
+#   - Per-tag arms for LIT_STR / IN_LIST / EXPR_AGG_FN / EXPR_WHEN /
+#     EXPR_CAST: the walker raises an Error on them.
 #   - A production fast-path shape registry.
-#   - A production `build_from_expr` that walks the SDK Expr tree.
+#   - A translation from the planner's Expr tree to a node list.
 #
 # Encapsulation invariants:
 #   - No `UnsafePointer` in any public method signature.
@@ -66,9 +65,8 @@ from komira_kernels.kleene import (
 # full tag scope, including EXPR_AGG_FN and EXPR_WHEN.
 #
 # Tag numbering is INDEPENDENT of the planner's EXPR_* constants —
-# the runtime-tree storage shape is a compressed POD form. The
-# `build_from_expr` builder translates planner tags to
-# runtime tags.
+# the runtime-tree storage shape is a compressed POD form. Nothing in
+# this module translates planner tags to runtime tags.
 # =============================================================================
 
 
@@ -164,8 +162,7 @@ struct RuntimeNode(Copyable, Movable, ImplicitlyCopyable):
     var list_count: Int   # aux-list count; -1 default
 
 
-# Helper constructors — used by `build_from_expr` and by
-# tests which build small trees manually.
+# Helper constructors — used by tests which build small trees manually.
 
 
 def rt_lit_bool(value: Bool) -> RuntimeNode:
@@ -468,8 +465,8 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         shape_classify: returns ShapeClass — stub.
 
     Build entry:
-        build_from_expr — translates a planner Expr into
-            a populated RuntimeExprBool. Raises on overflow.
+        build_runtime_expr_bool — wraps a hand-built node list. Raises
+            on overflow and on an out-of-range root.
 
     Encapsulation:
         - No UnsafePointer in any public method signature.
@@ -487,7 +484,8 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         Required by the ExprBoolU trait surface (
         Mojo trait conformance requires explicit `__init__`).
         Never called productively; the production path always goes
-        through `__init__(nodes, count, root)` or `build_from_expr`.
+        through `__init__(nodes, count, root)` or
+        `build_runtime_expr_bool`.
         """
         self.nodes = Array[RuntimeNode, MAX_NODES](fill=_rt_sentinel())
         self.node_count = 0
@@ -500,14 +498,16 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         node_count: Int,
         root: Int,
     ):
-        """Canonical ctor — used by `build_from_expr` and by tests.
+        """Canonical ctor — used by `build_runtime_expr_bool` and by tests.
 
         Args:
             nodes: Pre-populated node array (sentinel-fill the unused
                 slots above `node_count`).
-            node_count: Number of populated nodes (must be ≤
-                MAX_NODES; caller enforces).
-            root: Index of the root node (must be < node_count).
+            node_count: Number of populated nodes. Not checked here; the
+                walker refuses any node index outside
+                [0, min(node_count, MAX_NODES)).
+            root: Index of the root node. Not checked here; the walker
+                refuses it if it is out of range.
         """
         self.nodes = nodes^
         self.node_count = node_count
@@ -586,6 +586,33 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         ](self, batch, mask_out, validity_out)
 
     # -------------------------------------------------------------------------
+    # Internal — bounds-checked node read
+    # -------------------------------------------------------------------------
+
+    def _node_at(self, node_idx: Int, caller: StaticString) raises -> RuntimeNode:
+        """The node at `node_idx`, or an Error naming `caller` and the index.
+
+        The bound is `node_count` capped at MAX_NODES: `node_count` is a
+        public field, and the cap keeps a count set past the array from
+        admitting an index outside it. Every read of `self.nodes` in the
+        walker goes through here.
+        """
+        var bound = min(self.node_count, MAX_NODES)
+        if node_idx < 0 or node_idx >= bound:
+            raise Error(
+                String(
+                    "RuntimeExprBool.",
+                    caller,
+                    ": node_idx ",
+                    node_idx,
+                    " out of bounds [0, ",
+                    bound,
+                    ")",
+                )
+            )
+        return self.nodes[node_idx]
+
+    # -------------------------------------------------------------------------
     # Internal — recursive node walker
     # -------------------------------------------------------------------------
 
@@ -602,15 +629,7 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         feed into RT_COMPARISON / RT_BETWEEN parents that produce
         Bool).
         """
-        if node_idx < 0 or node_idx >= self.node_count:
-            raise Error(
-                "RuntimeExprBool._eval_node: node_idx "
-                + String(node_idx)
-                + " out of bounds [0, "
-                + String(self.node_count)
-                + ")"
-            )
-        var node = self.nodes[node_idx]
+        var node = self._node_at(node_idx, "_eval_node")
         var t = node.tag
 
         # --- RT_LIT_BOOL ---
@@ -697,8 +716,8 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         validity (= `left.validity & right.validity` per
         `_cmp_result_validity_chunk`).
         """
-        var left = self.nodes[node.left_idx]
-        var right = self.nodes[node.right_idx]
+        var left = self._node_at(node.left_idx, "_eval_comparison")
+        var right = self._node_at(node.right_idx, "_eval_comparison")
 
         # Left must be a column ref.
         if left.tag != RT_COL_REF:
@@ -777,13 +796,21 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         defined nullability).
 
         IS_NOT_NULL is the negation: result value = validity.
+
+        A variant in `node.extra` other than ISNULL_IS_NULL /
+        ISNULL_IS_NOT_NULL raises.
         """
-        var child = self.nodes[node.left_idx]
+        var child = self._node_at(node.left_idx, "_eval_is_null")
         if child.tag != RT_COL_REF:
             raise Error(
                 "RuntimeExprBool._eval_is_null: supports only "
                 + "col_ref child; got tag "
                 + String(Int(child.tag))
+            )
+        if node.extra != ISNULL_IS_NULL and node.extra != ISNULL_IS_NOT_NULL:
+            raise Error(
+                "RuntimeExprBool._eval_is_null: unknown variant "
+                + String(Int(node.extra))
             )
 
         # Use Int64 col reader to obtain validity (works for any
@@ -794,9 +821,8 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         var all_true = SIMD[DType.bool, W](fill=True)
         if node.extra == ISNULL_IS_NULL:
             return EvalBoolChunk[W](values=~v, validity=all_true)
-        else:
-            # ISNULL_IS_NOT_NULL
-            return EvalBoolChunk[W](values=v, validity=all_true)
+        # ISNULL_IS_NOT_NULL (any other variant raised above)
+        return EvalBoolChunk[W](values=v, validity=all_true)
 
     # -------------------------------------------------------------------------
     # Internal — RT_BETWEEN evaluator
@@ -817,9 +843,9 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
         Validity per Kleene: result valid iff value.valid AND
         low.valid AND high.valid.
         """
-        var value_node = self.nodes[node.left_idx]
-        var low_node = self.nodes[node.right_idx]
-        var high_node = self.nodes[node.third_idx]
+        var value_node = self._node_at(node.left_idx, "_eval_between")
+        var low_node = self._node_at(node.right_idx, "_eval_between")
+        var high_node = self._node_at(node.third_idx, "_eval_between")
 
         if value_node.tag != RT_COL_REF:
             raise Error(

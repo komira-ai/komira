@@ -166,9 +166,11 @@ def _collect_unsafe_window_cols(
         plan: subplan to examine.
         ancestor_cols: column names referenced by operators STRICTLY
             ABOVE this plan node (Sort keys, Project exprs, Aggregate
-            exprs, Join keys, etc.). Filter predicates of THIS node are
-            NOT in ancestor_cols (the Filter is the legitimate consumer
-            of the window column).
+            exprs, Join keys, Filter predicates, etc.). Filter
+            predicates of THIS node are NOT in ancestor_cols, and a
+            Filter does not add its own child PartitionBy's window
+            column for that child (the Filter is the legitimate consumer
+            of that window column).
         unsafe_cols: out-param. Window-output column names of any
             PartitionBy that is `Filter > PartitionBy(RowNumber|Rank)`
             shaped AND whose window column name appears in
@@ -199,12 +201,25 @@ def _collect_unsafe_window_cols(
                     if win_col_name in ancestor_cols:
                         unsafe_cols.add(win_col_name)
 
-        # Recurse: the Filter's predicate consumes the window col, but
-        # operators ABOVE the Filter add to ancestor_cols. The Filter
-        # itself does NOT contribute to ancestor_cols for its child —
-        # Filter is the legitimate consumer.
+        # Recurse: the Filter's predicate is the legitimate consumer of
+        # its CHILD PartitionBy's window column, so that one name is not
+        # added for the child. Every other column the predicate reads is:
+        # a window column produced further down (e.g. under another
+        # Filter) is still read here after that lower node fuses.
+        var pred_cols = Set[String]()
+        _collect_expr_columns(plan._filter.value()[].predicate, pred_cols)
+        if plan._filter.value()[].child[].tag == PLAN_PARTITION_BY:
+            ref child_schema = plan._filter.value()[].child[].output_schema
+            var consumed = child_schema.field_name(
+                child_schema.num_columns() - 1
+            )
+            if consumed in pred_cols:
+                pred_cols.remove(consumed)
+        var new_ancestor = ancestor_cols.copy()
+        for c in pred_cols:
+            new_ancestor.add(c)
         _collect_unsafe_window_cols(
-            plan._filter.value()[].child[], ancestor_cols, unsafe_cols
+            plan._filter.value()[].child[], new_ancestor, unsafe_cols
         )
 
     elif plan.tag == PLAN_PROJECT:
@@ -237,6 +252,11 @@ def _collect_unsafe_window_cols(
             new_ancestor.add(key)
         for key in plan._join.value()[].right_on:
             new_ancestor.add(key)
+        # A residual predicate reads columns of either side.
+        if plan._join.value()[].residual:
+            _collect_expr_columns(
+                plan._join.value()[].residual.value()[], new_ancestor
+            )
         _collect_unsafe_window_cols(
             plan._join.value()[].left[], new_ancestor, unsafe_cols
         )
@@ -262,6 +282,11 @@ def _collect_unsafe_window_cols(
         if plan._distinct.value()[].columns:
             for c in plan._distinct.value()[].columns.value():
                 new_ancestor.add(c)
+        else:
+            # A Distinct over all columns reads every column of its child.
+            ref child_schema = plan._distinct.value()[].child[].output_schema
+            for i in range(child_schema.num_columns()):
+                new_ancestor.add(child_schema.field_name(i))
         _collect_unsafe_window_cols(
             plan._distinct.value()[].child[], new_ancestor, unsafe_cols
         )
@@ -275,18 +300,30 @@ def _collect_unsafe_window_cols(
         )
 
     elif plan.tag == PLAN_PARTITION_BY:
-        # Recurse into the PartitionBy's own child to catch nested
-        # PartitionBy candidates. The PartitionBy's own keys are NOT
-        # added to ancestor_cols for its child — they're legitimate
-        # internal references (sort+partition keys of the window).
-        _collect_unsafe_window_cols(
-            plan._partition_by.value()[].child[], ancestor_cols, unsafe_cols
-        )
+        # The PartitionBy reads its partition keys, its order keys and
+        # each partition expression's argument column from its child; a
+        # window column produced below must survive fusion for them.
+        var new_ancestor = ancestor_cols.copy()
+        ref pbd = plan._partition_by.value()[]
+        for key in pbd.partition_keys:
+            new_ancestor.add(key)
+        for key in pbd.order_keys:
+            new_ancestor.add(key)
+        for i in range(len(pbd.partition_exprs)):
+            if pbd.partition_exprs[i].column.byte_length() > 0:
+                new_ancestor.add(pbd.partition_exprs[i].column)
+        _collect_unsafe_window_cols(pbd.child[], new_ancestor, unsafe_cols)
 
     elif plan.tag == PLAN_PARTITION_TOPN:
-        _collect_unsafe_window_cols(
-            plan._partition_topn.value()[].child[], ancestor_cols, unsafe_cols
-        )
+        # The PartitionTopN reads its partition and sort keys from its
+        # child.
+        var new_ancestor = ancestor_cols.copy()
+        ref ptd = plan._partition_topn.value()[]
+        for key in ptd.partition_keys:
+            new_ancestor.add(key)
+        for key in ptd.sort_keys:
+            new_ancestor.add(key)
+        _collect_unsafe_window_cols(ptd.child[], new_ancestor, unsafe_cols)
 
     elif plan.tag == PLAN_ASOF_JOIN:
         # Conservative: ASOF join may reference any column on either
