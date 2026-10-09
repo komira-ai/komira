@@ -139,6 +139,7 @@ from komira_http_server.serve_h2_flow import (
     H2_MAX_BUFFERED_REQUEST_BODY,
     _answer_stream_decode_error,
     _buffered_request_body_bytes,
+    _charge_connection_only,
     _credit_recv_windows,
     _emit_goaway,
     _reset_stream,
@@ -528,6 +529,14 @@ def _dispatch_h2_frames[
             # decoded data.
             var data_fc_len = Int(frame.header.length)
             var data_stream_id = frame.header.stream_id
+            if h2.streams[idx].reset_sent:
+                # We reset this stream; the peer sent this frame before it
+                # saw our RST_STREAM. §5.1: frames received on a closed
+                # stream after sending RST_STREAM MUST be ignored. Only the
+                # connection window still counts it (§6.9.1).
+                if not _charge_connection_only(h2, data_fc_len):
+                    return False
+                continue
             var action = h2.streams[idx].advance_on_recv_frame(
                 FRAME_DATA, frame.header.flags,
             )
@@ -543,11 +552,8 @@ def _dispatch_h2_frames[
                 # The stream is gone, but §6.9.1 still counts the octets
                 # against the connection window: charge them and give
                 # them back, or the peer's window is short for good.
-                var fr_c = h2.recv_fc.on_conn_data_received(data_fc_len)
-                if fr_c.kind != FLOW_RESULT_OK:
-                    _emit_goaway(h2, H2_ERR_FLOW_CONTROL_ERROR)
+                if not _charge_connection_only(h2, data_fc_len):
                     return False
-                _credit_recv_windows(h2, -1)
                 continue
             # Action == KEEP: charge recv flow control. Which window
             # overran decides the scope (§6.9): the stream's is a stream

@@ -11,6 +11,8 @@
 #   * `_reset_stream`: a stream error (RFC 9113 §5.4.2). RST_STREAM, and the
 #     stream is closed (§5.1) with its pending request and unsent response
 #     dropped; the connection carries on.
+#   * `_charge_connection_only`: DATA on a closed stream still counts
+#     against the connection window (§6.9.1).
 #   * `_answer_stream_decode_error`: a decode error the frame decoder scoped
 #     to one stream (a PRIORITY of the wrong length, §6.3; a zero WINDOW_UPDATE
 #     increment on a stream, §6.9) is a stream error, not a GOAWAY.
@@ -22,9 +24,11 @@
 # =============================================================================
 
 from komira_http_core.codec.h2.connection_state import H2ConnectionState
+from komira_http_core.codec.h2.flow_control import FLOW_RESULT_OK
 from komira_http_core.codec.h2.frame import (
     FRAME_PRIORITY,
     FRAME_WINDOW_UPDATE,
+    H2_ERR_FLOW_CONTROL_ERROR,
     H2_ERR_FRAME_SIZE_ERROR,
     H2_ERR_PROTOCOL_ERROR,
     encode_goaway_frame,
@@ -98,8 +102,11 @@ def _reset_stream(
     Queues RST_STREAM(`error_code`). Sending RST_STREAM closes the stream
     (§5.1, "closed"), so a known stream is moved to CLOSED and loses its
     deferred request (never dispatched) and its unsent response body (the
-    deferred pump would otherwise keep sending DATA on a reset stream). Later
-    frames on it are answered as frames on a closed stream."""
+    deferred pump would otherwise keep sending DATA on a reset stream). The
+    stream is marked `reset_sent`: a DATA frame the peer had in flight
+    before it saw the RST_STREAM is then ignored (§5.1): the serve loop
+    sends nothing back and only charges the connection window
+    (`_charge_connection_only`)."""
     var rst = List[UInt8]()
     encode_rst_stream_frame(stream_id, error_code, rst)
     h2.append_out_bytes(rst^)
@@ -107,6 +114,7 @@ def _reset_stream(
     if idx < 0:
         return
     h2.streams[idx].state = STREAM_STATE_CLOSED
+    h2.streams[idx].reset_sent = True
     if h2.streams[idx].has_pending_request:
         h2.streams[idx].has_pending_request = False
         if h2.find_pending_request_idx(stream_id) >= 0:
@@ -115,6 +123,20 @@ def _reset_stream(
     if h2.streams[idx].has_deferred_response_body:
         h2.streams[idx].has_deferred_response_body = False
         h2.drop_deferred_response(stream_id)
+
+
+def _charge_connection_only(mut h2: H2ConnectionState, octets: Int) -> Bool:
+    """Charge a DATA frame's `octets` to the connection window alone and
+    give them back once the watermark is reached: the frame's stream is
+    closed, but §6.9.1 still counts it against the connection. Returns False
+    when the connection window is overrun (a GOAWAY(FLOW_CONTROL_ERROR) is
+    queued and the connection must close)."""
+    var fr = h2.recv_fc.on_conn_data_received(octets)
+    if fr.kind != FLOW_RESULT_OK:
+        _emit_goaway(h2, H2_ERR_FLOW_CONTROL_ERROR)
+        return False
+    _credit_recv_windows(h2, -1)
+    return True
 
 
 def _credit_recv_windows(mut h2: H2ConnectionState, stream_idx: Int):

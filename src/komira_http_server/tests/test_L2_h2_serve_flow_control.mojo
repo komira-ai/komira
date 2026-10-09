@@ -22,6 +22,11 @@
 #      without bound once the windows are credited back, or refused at the
 #      ceiling itself; a ceiling per stream, which lets 50 concurrent
 #      streams buffer 50 times as much on one connection.
+#   R  after our RST_STREAM: a DATA frame already in flight on a stream the
+#      server reset answered with RST_STREAM(STREAM_CLOSED) instead of
+#      ignored (§5.1), or its octets not charged to and given back on the
+#      connection window (§6.9.1); a stream the peer has ended still given
+#      a stream WINDOW_UPDATE; the refused frame's octets not given back.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -555,6 +560,97 @@ def test_buffered_bodies_share_one_connection_ceiling() raises:
     assert_true(c.h2.streams[idx1].has_pending_request)
     assert_true(c.h2.find_pending_request_idx(UInt32(1)) >= 0)
     assert_false(c.h2.is_goaway_sent())
+
+
+# -----------------------------------------------------------------------------
+# R. After the server's own RST_STREAM (RFC 9113 §5.1, §6.9.1).
+# -----------------------------------------------------------------------------
+
+
+def _data_end(sid: Int, n: Int) -> List[UInt8]:
+    """DATA of `n` 'x' bytes with END_STREAM."""
+    var d = _data(sid, n)
+    d[4] = d[4] | FLAG_END_STREAM
+    return d^
+
+
+def test_data_after_our_413_is_ignored() raises:
+    """The DATA frame that crosses the ceiling also takes the connection to
+    the watermark: 413, RST_STREAM(NO_ERROR) and WINDOW_UPDATE(0, 32768),
+    and no stream update for the reset stream. A DATA frame already in
+    flight on stream 1 then arrives: after sending RST_STREAM the server
+    MUST ignore it (§5.1), so nothing is queued, and it is still charged to
+    the connection window (§6.9.1)."""
+    var c = _Client()
+    assert_true(c.send(c.request(1, "POST", "/up", "20000000")))
+    _ = c.out()
+    var idx = c.h2.find_stream_idx(UInt32(1))
+    c.h2.streams[idx].recv_data_bytes = Int64(H2_MAX_BUFFERED_REQUEST_BODY - 3)
+    c.h2.recv_fc.conn_recv_window = Int32(WINDOW - 32764)
+    assert_true(c.send(_data(1, 4)))
+    var outs = c.out()
+    assert_equal(len(outs), 3, "a 413, an RST_STREAM and a connection update")
+    assert_equal(Int(outs[0].kind), Int(FRAME_HEADERS))
+    _assert_rst(outs[1], 1, NO_ERROR)
+    _assert_wu(outs[2], 0, 32768)
+    assert_true(c.send(_data(1, 4)), "the connection must stay open")
+    assert_equal(len(c.out()), 0, "a frame was sent for DATA on a stream we reset")
+    assert_equal(Int(c.h2.recv_fc.conn_recv_window), WINDOW - 4)
+    assert_false(c.h2.is_goaway_sent())
+
+
+def test_data_after_our_flow_control_reset_is_ignored() raises:
+    """Stream 1 overruns its window with the connection 20 short of the
+    watermark: RST_STREAM(1, FLOW_CONTROL_ERROR) then WINDOW_UPDATE(0,
+    32768), the octets given back on the connection only. More DATA on
+    stream 1 is ignored and charged."""
+    var c = _Client()
+    c.open(1)
+    c.h2.streams[c.h2.find_stream_idx(UInt32(1))].recv_window = Int32(10)
+    c.h2.recv_fc.conn_recv_window = Int32(WINDOW - 32748)
+    assert_true(c.send(_data(1, 20)))
+    var outs = c.out()
+    assert_equal(len(outs), 2, "an RST_STREAM and a connection update")
+    _assert_rst(outs[0], 1, FLOW_CONTROL_ERROR)
+    _assert_wu(outs[1], 0, 32768)
+    assert_true(c.send(_data(1, 5)))
+    assert_equal(len(c.out()), 0, "a frame was sent for DATA on a stream we reset")
+    assert_equal(Int(c.h2.recv_fc.conn_recv_window), WINDOW - 5)
+
+
+def test_data_after_a_decode_error_reset_is_charged_and_given_back() raises:
+    """A zero increment resets stream 1. Two 16384-byte DATA frames in
+    flight on it are ignored (no RST_STREAM) but reach the connection
+    watermark, so the only frame queued is WINDOW_UPDATE(0, 32768)."""
+    var c = _Client()
+    c.open(1)
+    assert_true(c.send(_window_update(1, UInt32(0))))
+    var outs = c.out()
+    assert_equal(len(outs), 1)
+    _assert_rst(outs[0], 1, PROTOCOL_ERROR)
+    assert_true(c.send(_data(1, 16384)))
+    assert_true(c.send(_data(1, 16384)))
+    var outs2 = c.out()
+    assert_equal(len(outs2), 1, "exactly one frame: the connection update")
+    _assert_wu(outs2[0], 0, 32768)
+    assert_equal(Int(c.h2.recv_fc.conn_recv_window), WINDOW)
+
+
+def test_an_ended_stream_is_credited_on_the_connection_only() raises:
+    """32000 bytes on stream 1, then 768 more with END_STREAM: both windows
+    reach the watermark, but the peer can send nothing more on stream 1
+    (it is closed), so a stream WINDOW_UPDATE would be a frame sent on a
+    closed stream (§5.1). Only WINDOW_UPDATE(0, 32768) is queued."""
+    var c = _Client()
+    c.open(1)
+    assert_true(c.send(_data(1, 16000)))
+    assert_true(c.send(_data(1, 16000)))
+    assert_equal(len(c.out()), 0)
+    assert_true(c.send(_data_end(1, 768)))
+    var outs = c.out()
+    assert_equal(len(outs), 1, "exactly one frame: the connection update")
+    _assert_wu(outs[0], 0, 32768)
+    assert_equal(c.state(1), Int(STREAM_STATE_CLOSED))
 
 
 def main() raises:
