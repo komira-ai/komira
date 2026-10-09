@@ -52,6 +52,8 @@ comptime ERROR_NOT_ON_MAIN: String = "KCI-E-NOT-ON-MAIN"
 comptime ERROR_BREAK_GLASS_REASON: String = "KCI-E-BREAK-GLASS-REASON"
 comptime ERROR_BREAK_GLASS_REVISION: String = "KCI-E-BREAK-GLASS-REVISION"
 comptime ERROR_PLAN_ON_RELEASE: String = "KCI-E-PLAN-ON-RELEASE"
+comptime ERROR_CLOUD: String = "KCI-E-CLOUD"
+comptime ERROR_DEPLOY: String = "KCI-E-DEPLOY"
 
 
 struct ErrorRow(Copyable, Movable):
@@ -104,6 +106,8 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_BREAK_GLASS_REASON), String("a break-glass run has no reason, one that is blank once trimmed, or one over 200 bytes")))
     t.append(ErrorRow(String(ERROR_BREAK_GLASS_REVISION), String("a break-glass run that can publish names a revision other than the commit it started on, or a dry run names one not on that commit's history")))
     t.append(ErrorRow(String(ERROR_PLAN_ON_RELEASE), String("--plan on a release run (a push to main), which is never a dry run")))
+    t.append(ErrorRow(String(ERROR_CLOUD), String("a cell's cloud is not built into this kci, refused the cell's settings or the deploy identity, or could not be asked who the credentials are")))
+    t.append(ErrorRow(String(ERROR_DEPLOY), String("a DEPLOY step's plan or apply was refused, failed before anything was written, or stopped part-way")))
     return t^
 
 
