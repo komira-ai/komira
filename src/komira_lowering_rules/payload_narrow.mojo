@@ -59,7 +59,11 @@
 #   - a column is judged by the side's output schema (name, type,
 #     nullability), while its bounds are looked up under the same name in the
 #     scan's footer. A pure PROJECT that renames a column (`a AS b`) therefore
-#     looks up `b`.
+#     takes the bounds of the scan's column `b`, which is unrelated to `a` and
+#     may be nullable (or takes none, when the scan has no `b`). Bounds that do
+#     not hold `a` cost speed, not correctness: the join's narrowing pass
+#     range-checks every value and, on one outside the bounds, runs the join
+#     unnarrowed.
 #
 # POINTER DISCIPLINE: no pointer in any signature; the plan is read through
 # `ref`s into its `OwnedPointer` payloads, and nothing is moved out of them.

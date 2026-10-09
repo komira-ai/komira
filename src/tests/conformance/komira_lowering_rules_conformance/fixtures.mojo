@@ -306,7 +306,8 @@ def _side_cases(mut out: List[NarrowCase]):
 
     # A rename: output `qq` is the scan's `pv`, and the scan also has a
     # nullable `qq` with bounds [0, 3]. The rule judges the output column and
-    # looks its bounds up by the output name.
+    # looks its bounds up by the output name, so `qq`'s bounds, unrelated to
+    # `pv` and those of a nullable column, are used.
     var r = _left()
     var qq = _int("qq", 0, 3)
     qq.nullable = True
@@ -382,6 +383,16 @@ def _walk_cases(mut out: List[NarrowCase]) raises:
         _asof(LogicalPlan.cse_ref(7, _scan(_right()).output_schema.copy()), _base()),
     ))
     out.append(NarrowCase("lone_scan", _scan(_left())))
+    # A join two levels below a UNION or a CAST_TO_VARCHAR: the node between
+    # them must pass the not-decided state down, not reset it.
+    out.append(NarrowCase("union_asof_join", _union2(_asof(_base(), _base()), _base())))
+    out.append(NarrowCase("union_filter_join", _union2(_filter(_base()), _base())))
+    out.append(NarrowCase("cast_sort_join", _over(PLAN_CAST_TO_VARCHAR, _over(PLAN_SORT, _base()))))
+    var o2 = List[Col]()
+    o2.append(_int("key", 0, 24999999))
+    o2.append(_int("ov", -5, 5))
+    var jj = _join(_base(), _scan(o2.copy()))
+    out.append(NarrowCase("union_join_of_join", _union2(jj^, _join(_base(), _scan(o2^)))))
 
 
 def cases() raises -> List[NarrowCase]:

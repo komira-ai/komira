@@ -227,6 +227,14 @@ def test_sides_that_do_not_reach_a_parquet_scan_narrow_nothing() raises:
     _eq(_derive(_join(agg^, _scan("bv")), f), " | 1:bv:2:1")
 
     _eq(_derive(_join(_scan("pv", SOURCE_CSV), _scan("bv")), f), " | 1:bv:2:1")
+    # A FILTER, a pure PROJECT, and a chain of both, over a CSV scan: the
+    # side check recurses to the scan rather than admitting at the first
+    # FILTER or PROJECT. Catches: the FILTER or the PROJECT arm returning
+    # True instead of looking below.
+    _eq(_derive(_join(_filter(_scan("pv", SOURCE_CSV)), _scan("bv")), f), " | 1:bv:2:1")
+    _eq(_derive(_join(_pure_project(_scan("pv", SOURCE_CSV), True), _scan("bv")), f), " | 1:bv:2:1")
+    var csv_chain = _pure_project(_filter(_pure_project(_filter(_scan("pv", SOURCE_CSV)), False)), True)
+    _eq(_derive(_join(csv_chain^, _scan("bv")), f), " | 1:bv:2:1")
 
     # A bare SCAN tag is still a scan in the order: it takes slot 0.
     _eq(_derive(_join(LogicalPlan(PLAN_SCAN, _schema("pv")), _scan("bv")), f), " | 1:bv:2:1")
@@ -331,6 +339,67 @@ def test_a_join_below_a_union_or_a_cast_to_varchar_is_not_decided() raises:
     var g = Footers()
     _hc4_footers(g)
     _eq(_derive(LogicalPlan.cast_to_varchar(_hc4()), g), " | ")
+
+
+def _deep_chain() raises -> LogicalPlan:
+    """Every pass-through arm stacked over joins that would narrow if decided.
+
+    Bottom: an as-of join whose left side is a join of `_hc4()` and a scan of
+    `ov`, and whose right side is a join of a scan of `ov` and `_hc4()`. The
+    two outer joins each have one qualifying scan side, the two `_hc4()`s
+    both. Above it, one node of every one-child kind. Scans in pre-order:
+    pv, bv, ov, ov, pv, bv.
+    """
+    var left = _join(_hc4(), _scan("ov"))
+    var right = _join(_scan("ov"), _hc4())
+    var node = _asof(left^, right^)
+    var kinds = List[UInt8]()
+    kinds.append(PLAN_FILTER)
+    kinds.append(PLAN_PARTITION_TOPN)
+    kinds.append(PLAN_PARTITION_BY)
+    kinds.append(PLAN_SORT)
+    kinds.append(PLAN_LIMIT)
+    kinds.append(PLAN_TOPN)
+    kinds.append(PLAN_DISTINCT)
+    kinds.append(PLAN_PROJECT)
+    kinds.append(PLAN_AGGREGATE)
+    for i in range(len(kinds)):
+        node = _over(kinds[i], node^)
+    return node^
+
+
+def _deep_footers(mut f: Footers):
+    _hc4_footers(f)
+    f.pay("ov", 999)
+    f.pay("ov", 999)
+    _hc4_footers(f)
+
+
+def test_a_join_deep_below_a_union_or_a_cast_to_varchar_is_not_decided() raises:
+    # `_deep_chain()` decided on its own narrows all six scans. Below a UNION
+    # (as its first child) or a CAST_TO_VARCHAR it narrows none: every node
+    # between them and the joins passes the not-decided state down. Catches:
+    # any one pass-through arm (FILTER, PROJECT, AGGREGATE, SORT, LIMIT,
+    # DISTINCT, TOPN, PARTITION_BY, PARTITION_TOPN, either as-of side, either
+    # join side) walking its child as decided, which the depth-one cases
+    # above cannot see.
+    var f = Footers()
+    _deep_footers(f)
+    _eq(
+        _derive(_deep_chain(), f),
+        "0:pv:2:1 | 1:bv:2:1 | 2:ov:2:1 | 3:ov:2:1 | 4:pv:2:1 | 5:bv:2:1",
+    )
+    var kids = List[OwnedPointer[LogicalPlan]]()
+    kids.append(OwnedPointer(_deep_chain()))
+    kids.append(OwnedPointer(_scan("x")))
+    var u = LogicalPlan.union(kids^, _schema("x"))
+    var g = Footers()
+    _deep_footers(g)
+    g.none()
+    _eq(_derive(u, g), " |  |  |  |  |  | ")
+    var h = Footers()
+    _deep_footers(h)
+    _eq(_derive(LogicalPlan.cast_to_varchar(_deep_chain()), h), " |  |  |  |  | ")
 
 
 # =============================================================================
