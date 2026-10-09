@@ -429,8 +429,9 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
 
 1. The library's sources are staged at their repository paths: every
    `srcs` file that is a source (a generated one is not measured), every
-   test source, and a BUCK file at the package's directory, so covcheck's
-   nearest-BUCK rule names the package. A tests-cell package is under
+   test source (a generated one at its output path in the package), and a
+   BUCK file at the package's directory, so covcheck's nearest-BUCK rule
+   names the package. A tests-cell package is under
    `tools/build/tests/`. Each test source is also named to covcheck
    (`--test-source`), so a welded test outside the package's `tests/`
    (`wire/tests/test_x.mojo`, a test at the package's top) is set aside as
@@ -483,6 +484,33 @@ against `covlow`, whose gate is red). With the switch off nothing waits for
 them. Bundles and OCI images (`tools/build/package/defs.bzl`) do not wait
 for the gates of the libraries their program is built from: a program's
 libraries are not packages it ships.
+
+**Platforms.** Coverage is measured on linux-x86_64 and never on another
+platform (decided: `coverage-linux-x86-64` in
+`tools/build/platforms/limits.tsv`; kcov and the LLVM pieces of
+branch coverage are pinned for linux-x86_64 only). On another target
+platform `-c komira.coverage=true` is a no-op, not an error: the coverage
+attributes are None (a `select` in `tools/build/mojo/coverage.bzl`), so a
+library and a shared library have the actions they have with the switch
+off, and no `[coverage]` (test 41's `coverage_platforms.sh`, on
+darwin-arm64).
+
+**Shared libraries.** A `mojo_shared_lib` has a gate too, over its
+drivers' reports (each driver run under kcov measuring the library it
+loads; `tools/build/mojo/README.md`, "Coverage builds") and its own
+sources, in `COVERAGE_SHARED_LIB_MODE` (`policy.bzl`), census: its line
+coverage is reported, never enforced. That is its own constant, so moving
+`COVERAGE_MODE` to enforce moves no shared library; `enforce` there, or as
+any `mojo_shared_lib`'s `coverage_mode` (a fixture of the tests cell
+included), is refused in analysis (test 46). Nothing waits for
+a shared library's coverage runs or gate: it ships no conda package, and
+its published file waits for its release gate alone. Its gate is reported
+when its `[coverage]` is built by name: the coverage workflow
+(`.github/ci/coverage_measure.sh`) selects `mojo_library` targets only, so
+no workflow reports a shared library's gate yet. A shared library's report
+counts its own sources (its C ABI layer), not the code compiled into it
+from its Mojo dependencies (an engine's), which their own tests measure in
+their own gates.
 
 **Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
 `COVERAGE_TARGET_BP = 10000`, and `COVERAGE_INFO_ONLY_DIRS = ["src/tests"]`:

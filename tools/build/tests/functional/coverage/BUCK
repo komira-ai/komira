@@ -1,5 +1,5 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
@@ -217,6 +217,91 @@ mojo_library(
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     test_srcs = ["tests/test_gen.mojo"],
+)
+
+# Test 43: a library whose one test is generated (a `test_srcs` entry that is
+# a build output: tests/test_gen_triple.mojo, made from its .in by cov_plant
+# used as a generator). It has its coverage binary and run as a written test
+# has ([coverage][tests][test_gen_triple] is its golden report, naming the
+# test by its output path in the package), and its gate (census) counts the
+# line it runs of covgentest/triple.mojo and sets the test aside.
+cov_plant(
+    name = "covgentest_test",
+    expr = "s/@ARG@/4/",
+    out = "tests/test_gen_triple.mojo",
+    src = "tests/test_gen_triple.mojo.in",
+)
+
+mojo_library(
+    name = "covgentest",
+    srcs = [
+        "covgentest/__init__.mojo",
+        "covgentest/triple.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    test_srcs = [":covgentest_test"],
+)
+
+cov_report_check(
+    name = "covgentest_report",
+    goldens = ["golden/test_gen_triple.xml"],
+    mode = "golden",
+    reports = [":covgentest[coverage][tests][test_gen_triple]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covgentest_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,',
+        '"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covgentest[coverage][gate][result]"],
+    script = "report.sh",
+)
+
+# Test 43: a shared library with coverage builds (forced here, as for
+# covlib_forced). Its driver, tests/covso_driver.mojo, loads the library's
+# coverage build and calls covso_scale only: its report
+# ([coverage][tests][covso_driver]) holds the driver and covso_abi.mojo's
+# lines, those of covso_scale run and those of covso_unused not, and its gate
+# (census) counts them with the driver set aside.
+mojo_shared_lib(
+    name = "covso",
+    srcs = ["covso/covso_abi.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    exports = [
+        "covso_scale",
+        "covso_unused",
+    ],
+    gate_srcs = ["tests/covso_driver.mojo"],
+)
+
+cov_report_check(
+    name = "covso_report",
+    goldens = ["golden/covso_driver.xml"],
+    mode = "golden",
+    reports = [":covso[coverage][tests][covso_driver]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covso_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":3,"line_found":5,"line_bp":6000,',
+        '"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covso[coverage][gate][result]"],
+    script = "report.sh",
 )
 
 # Test 43: a library with twelve generated sources, each with a long name.

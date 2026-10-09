@@ -53,6 +53,10 @@
 #      release action of a library, its join included: coverage_keys.sh
 #      (test 41). The refusals of the coverage attributes outside the tests
 #      cell are test 7's (umbrella_cache.sh, in a consumer's cell).
+#      A shared library's gate (COVERAGE_SHARED_LIB_MODE): covso_traced is
+#      green with the switch on and its driver's coverage run red (nothing
+#      waits for it); enforce is refused in analysis (covso_enforce). A
+#      welded test at a library source's path is refused (testpath).
 
 N=tests//negative/coverage
 P=tools/build/tests/negative/coverage
@@ -161,3 +165,19 @@ for lib in "$N:tracer_shipped" //tools/build/readme_examples:readme_examples; do
         fail "$n: an aquery of $lib with -c komira.coverage=true failed (see $LOG/${n}_*.err)"
     fi
 done
+
+# A shared library's gate is reported, never enforced, and nothing of it
+# waits for its coverage: covso_traced (the published file) builds with the
+# switch on while its driver's coverage run is red; enforce is refused in
+# analysis (covso_enforce: the rule called without the macro, so a BUCK
+# file cannot bypass it; the macro passes the mode through to the same check).
+expect_green coverage_shared_lib_published "$N:covso_traced" -c komira.coverage=true
+if "$BUCK2" build "$N:covso_traced[coverage][tests][covso_traced_driver]" -c komira.coverage=true > "$LOG/coverage_shared_lib_run.log" 2>&1; then
+    fail "coverage_shared_lib_run: $N:covso_traced[coverage][tests][covso_traced_driver] built, but its driver fails under kcov"
+elif grep -qF "COVERAGE RUN FAILED: $N:covso_traced:tests/covso_traced_driver.mojo [coverage]" "$LOG/coverage_shared_lib_run.log"; then
+    pass coverage_shared_lib_run
+else
+    fail "coverage_shared_lib_run: failed without the coverage run's message (see $LOG/coverage_shared_lib_run.log)"
+fi
+expect_red coverage_gate_test_path "$N:testpath: coverage gate: the test lostlib/value.mojo has the path of a source of the library" "$N:testpath"
+expect_red coverage_shared_lib_enforce "$N:covso_enforce: a mojo_shared_lib's coverage gate is reported, never enforced" "$N:covso_enforce"
