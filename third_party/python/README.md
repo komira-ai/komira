@@ -28,6 +28,12 @@ No source distribution is built and pip never runs.
 | grpcio | 1.84.0 | typing-extensions | gRPC interop |
 | typing-extensions | 4.16.0 | | grpcio |
 | tzdata | 2026.5 | | the time-zone database of every `py_test` and `python_oracle` (IANA 2026e) |
+| scikit-learn | 1.9.1 | numpy, scipy, joblib, narwhals, threadpoolctl | which libraries load in a sub-interpreter (the UDF runtime spike) |
+| scipy | 1.18.1 | numpy | scikit-learn |
+| joblib | 1.6.0 | cloudpickle | scikit-learn |
+| narwhals | 2.26.0 | | scikit-learn |
+| threadpoolctl | 3.7.0 | | scikit-learn |
+| cloudpickle | 3.1.2 | | joblib; serialized functions (the UDF runtime spike) |
 
 polars is pinned at 1.44.2, the version komira's Python surface implements;
 moving to polars 2 is a later change. pandas 3.0.6 is the version the
@@ -61,6 +67,10 @@ drivers), and anything they require.
 | numpy | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | OpenBLAS (BSD-3-Clause), and two GCC runtime libraries: libgfortran (GPL-3.0-or-later WITH GCC-exception-3.1) and libquadmath (LGPL-2.1-or-later) |
 | pandas | BSD-3-Clause | its licence file adds those of the code it carries (MIT, BSD, Apache-2.0, and the PSF licence) |
 | python-dateutil | Apache-2.0 AND BSD-3-Clause | |
+| scipy | BSD-3-Clause | OpenBLAS (BSD-3-Clause), LAPACK (BSD-3-Clause-Open-MPI), Qhull (Qhull), and the same two GCC runtime libraries as numpy, libgfortran (GPL-3.0-or-later WITH GCC-exception-3.1) and libquadmath (LGPL-2.1-or-later); its wheel declares no `License-Expression`, so the pin records these together |
+| scikit-learn | BSD-3-Clause | GCC's libgomp (GPL-3.0-or-later WITH GCC-exception-3.1) |
+| joblib, threadpoolctl, cloudpickle | BSD-3-Clause | |
+| narwhals | MIT | |
 | six | MIT | |
 | polars, polars-runtime-32 | MIT | |
 | protobuf | BSD-3-Clause | |
@@ -71,13 +81,14 @@ drivers), and anything they require.
 | zlib | Zlib | |
 
 None is the AGPL. The GNU-licensed code is GCC's runtime libraries.
-libgcc_s, libstdc++ and numpy's libgfortran are GPL-3.0-or-later WITH
-GCC-exception-3.1, the GCC Runtime Library Exception, which komira's own
-toolchains already use for libgcc_s and libstdc++
-([toolchains](../../tools/build/toolchains/README.md)). numpy's libquadmath is
-LGPL-2.1-or-later with no exception. libgfortran and libquadmath ship only
-inside the numpy wheel, which is test-only: its visibility (`_TEST_ONLY` in
-[`BUCK`](BUCK)) keeps it out of every shipped package
+libgcc_s, libstdc++, the libgfortran of numpy and scipy, and scikit-learn's
+libgomp are GPL-3.0-or-later WITH GCC-exception-3.1, the GCC Runtime Library
+Exception, which komira's own toolchains already use for libgcc_s and
+libstdc++ ([toolchains](../../tools/build/toolchains/README.md)). The
+libquadmath of numpy and scipy is LGPL-2.1-or-later with no exception.
+libgfortran, libquadmath and libgomp ship only inside the numpy, scipy and
+scikit-learn wheels, which are test-only: their visibility (`_TEST_ONLY` in
+[`BUCK`](BUCK)) keeps them out of every shipped package
 ([Never shipped](#never-shipped)).
 
 The test [`licenses`](../../src/tests/helpers/komira_test_python/README.md)

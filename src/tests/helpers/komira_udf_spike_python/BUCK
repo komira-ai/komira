@@ -1,0 +1,244 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/python:defs.bzl", "py_test")
+load(":defs.bzl", "runtime_data", "udf_bench")
+
+# Test-only: a Python UDF runtime that embeds CPython behind the C ABI of
+# docs/design/udf_runtime_interface.md (komira_udf_spike_abi), the engine
+# loop that drives any runtime on N engine threads, and the measurements of
+# the design's mode 2 (one interpreter per engine thread). Spike code:
+# nothing outside src/tests may depend on it.
+#
+#   pyrt/           the runtime, in C (python_runtime.c: life cycle and
+#                   contexts; python_call.c: call_batch; pyapi.c: the CPython
+#                   C API through dlsym), its Python adapter
+#                   (komira_udf_pyrt.py) and the user modules the tests load
+#                   (udf_fixtures.py, udf_np.py, probe_<library>.py)
+#   refrt/          the two builds' one export each (below)
+#   native/         the engine loop: one pthread per engine thread
+#   engine.mojo     Engine, Workload, RunReport: the engine loop's value API
+#   workloads.mojo  the workloads of the threads tests and the bench
+#   managed_cases.mojo, imports.mojo, calls.mojo
+#                   what the tests share
+#   bench/          the bench program; defs.bzl runs it (udf_bench)
+#   load_gate/      a Mojo library CPython loads (the load gate)
+#
+# The runtime finds what it needs beside its own library file: python/ (the
+# CPython install), pyrt/ (the Python modules) and site/<wheel> (each wheel's
+# directory). Each test and bench stages that layout.
+#
+# The welded tests (each file's header names the mutant planted to see it go
+# red):
+#   test_conform_subinterp, test_conform_shared_gil
+#                    the shared conformance cases a managed runtime's user
+#                    code can express, through the same runner as echo.
+#   test_python_subinterp, test_python_shared_gil
+#                    describe; validate from the source alone; open_instance,
+#                    per-row and numpy batch calls, errors with rows and
+#                    traces, return-type refusals; numpy not loading in a
+#                    sub-interpreter.
+#   test_imports_subinterp, test_imports_shared_gil
+#                    which of numpy, pandas, pyarrow, sklearn, cloudpickle
+#                    import in each mode, pinned.
+#   test_threads_subinterp, test_threads_shared_gil
+#                    4 engine threads: values, calls == batches, releases,
+#                    state per context, and the CPU/wall parallelism case.
+# and the py_test load_gate.
+
+_CASES = {"src/tests/helpers/komira_udf_spike_abi": "//src/tests/helpers/komira_udf_spike_abi:cases"}
+
+_PYRT = {"pyrt/" + f: "pyrt/" + f for f in [
+    "komira_udf_pyrt.py",
+    "udf_fixtures.py",
+    "udf_np.py",
+]}
+
+_PROBES = {"pyrt/probe_{}.py".format(m): "pyrt/probe_{}.py".format(m) for m in [
+    "cloudpickle",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "sklearn",
+]}
+
+_NUMPY = {"site/numpy": "//third_party/python:numpy"}
+
+# The import probes' libraries with every dependency they import.
+_PROBED = {"site/" + w: "//third_party/python:" + w for w in [
+    "cloudpickle",
+    "joblib",
+    "narwhals",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "python-dateutil",
+    "scikit-learn",
+    "scipy",
+    "six",
+    "threadpoolctl",
+    "tzdata",
+]}
+
+mojo_library(
+    name = "komira_udf_spike_python",
+    srcs = glob(["*.mojo"]),
+    conda = False,
+    deps = [
+        ":komira_udf_spike_python_engine",
+        "//src/komira_json:komira_json",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
+    ],
+    test_srcs = [
+        "tests/test_conform_shared_gil.mojo",
+        "tests/test_conform_subinterp.mojo",
+        "tests/test_imports_shared_gil.mojo",
+        "tests/test_imports_subinterp.mojo",
+        "tests/test_python_shared_gil.mojo",
+        "tests/test_python_subinterp.mojo",
+        "tests/test_threads_shared_gil.mojo",
+        "tests/test_threads_subinterp.mojo",
+    ],
+    test_data = {
+        "tests/test_conform_shared_gil.mojo": runtime_data("shared_gil", _PYRT) | _CASES,
+        "tests/test_conform_subinterp.mojo": runtime_data("subinterp", _PYRT) | _CASES,
+        "tests/test_imports_shared_gil.mojo": runtime_data("shared_gil", _PYRT | _PROBES | _PROBED),
+        "tests/test_imports_subinterp.mojo": runtime_data("subinterp", _PYRT | _PROBES | _PROBED),
+        "tests/test_python_shared_gil.mojo": runtime_data("shared_gil", _PYRT | _NUMPY),
+        "tests/test_python_subinterp.mojo": runtime_data("subinterp", _PYRT | _NUMPY),
+        "tests/test_threads_shared_gil.mojo": runtime_data("shared_gil", _PYRT | _NUMPY),
+        "tests/test_threads_subinterp.mojo": runtime_data("subinterp", _PYRT | _NUMPY) | {
+            # read by its check that the engine names no runtime or language
+            "engine.mojo": "engine.mojo",
+            "native/engine_loop.c": "native/engine_loop.c",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The C side, after the library so the deps lint reads the library's name
+# first. Copied into buck-out so the objects' digests do not depend on where
+# komira is mounted (cxx.bzl, staged_files).
+staged_files(
+    name = "c_files",
+    srcs = [
+        "native/engine_loop.c",
+        "pyrt/pyapi.c",
+        "pyrt/pyapi.h",
+        "pyrt/pyrt.h",
+        "pyrt/python_call.c",
+        "pyrt/python_runtime.c",
+    ],
+)
+
+# The engine loop (native/engine_loop.c), linked into the library's tests and
+# the bench program.
+cxx_library(
+    name = "komira_udf_spike_python_engine",
+    srcs = [":c_files[native/engine_loop.c]"],
+    compiler_flags = ["-O2"],
+    deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The Python runtime, compiled against the pinned interpreter's headers
+# (types and layouts only: pyapi.h) and linking no libpython.
+cxx_library(
+    name = "komira_udf_python_rt",
+    srcs = [
+        ":c_files[pyrt/pyapi.c]",
+        ":c_files[pyrt/python_call.c]",
+        ":c_files[pyrt/python_runtime.c]",
+    ],
+    headers = {
+        "pyapi.h": ":c_files[pyrt/pyapi.h]",
+        "pyrt.h": ":c_files[pyrt/pyrt.h]",
+    },
+    header_namespace = "",
+    compiler_flags = ["-O2"],
+    preprocessor_flags = ["-I$(location //third_party/python:cpython)/include/python3.13"],
+    deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The runtime's two builds, each a shared library exporting
+# komira_udf_runtime_init_v1 and nothing else:
+#   python_subinterp.so   komira-test/python: one sub-interpreter with its
+#                         own GIL per context.
+#   python_shared_gil.so  komira-test/python-shared-gil: every context a
+#                         thread state of the main interpreter (the baseline).
+[mojo_shared_lib(
+    name = "python_" + v,
+    srcs = ["refrt/python_{}_so.mojo".format(v)],
+    exports = ["komira_udf_runtime_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_python_rt"],
+    visibility = ["PUBLIC"],
+) for v in [
+    "shared_gil",
+    "subinterp",
+]]
+
+# The bench program and its two runs, one per build (each its own process:
+# a process initializes CPython once). Their outputs are the numbers:
+#   ./buck2 build komira//src/tests/helpers/komira_udf_spike_python:bench_subinterp --show-output
+mojo_binary(
+    name = "bench",
+    srcs = ["bench/bench_main.mojo"],
+    deps = [
+        ":komira_udf_spike_python",
+        ":komira_udf_spike_python_engine",
+        "//src/komira_json:komira_json",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
+    ],
+)
+
+[udf_bench(
+    name = "bench_" + v,
+    args = [
+        "./python_{}.so".format(v),
+        v,
+    ],
+    binary = ":bench",
+    data = runtime_data(v, _PYRT | _NUMPY),
+    exec_compatible_with = LINUX_X86_64,
+    run_id = "bench/run_id",
+) for v in [
+    "shared_gil",
+    "subinterp",
+]]
+
+# The load gate: CPython loads a Mojo shared library (ctypes.CDLL) and calls
+# it from its main thread and from host threads (load_gate/load_gate.py).
+mojo_shared_lib(
+    name = "load_gate",
+    srcs = ["load_gate/gate_lib.mojo"],
+    exports = ["komira_udf_spike_load_gate"],
+    exports_exact = True,
+)
+
+# A program with no deps, for its runnable directory's lib/: the Mojo runtime
+# libraries load_gate.so needs beside it.
+mojo_binary(
+    name = "load_gate_runtime",
+    srcs = ["load_gate/runtime_dir.mojo"],
+)
+
+py_test(
+    name = "load_gate_test",
+    src = "load_gate/load_gate.py",
+    args = [
+        "$(location :load_gate)",
+        "$(location :load_gate_runtime[runnable])/lib",
+    ],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
