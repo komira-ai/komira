@@ -69,6 +69,15 @@ def test_tail_stray_quote_stops_splitting() raises:
     assert_equal(_ranges('ab"c\nd"\ne\n', 0, 2), "0-10")
 
 
+def test_tail_quote_after_bare_cr_opens() raises:
+    """`a<CR>"b"<LF>c<LF>d<LF>` (10 bytes), k = 2: the candidate is 5. A bare
+    CR ends a record, so the quote at 2 is at a cell start and opens a
+    field; the LF at 5 after the closing quote is the boundary (6). Mutant:
+    drop the bare-CR half of `at_cell_start` (red: the quote reads as stray
+    and the splitter keeps one range, 0-10)."""
+    assert_equal(_ranges('a\r"b"\nc\nd\n', 0, 2), "0-6,6-10")
+
+
 def test_doubled_quote_straddling_the_simd_chunk_end() raises:
     """A quoted field opens at byte 0; bytes 63-64 are a `""` escape that
     straddles the first 64-byte chunk, so the tail must step over its high
@@ -105,6 +114,7 @@ def main() raises:
     test_tail_quoted_newline_and_doubled_quote()
     test_tail_skips_newlines_before_the_candidate()
     test_tail_stray_quote_stops_splitting()
+    test_tail_quote_after_bare_cr_opens()
     test_doubled_quote_straddling_the_simd_chunk_end()
     test_edge_returns()
-    print("test_csv_cov_chunk_split: 5 tests PASS")
+    print("test_csv_cov_chunk_split: 6 tests PASS")

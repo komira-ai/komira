@@ -283,9 +283,9 @@ def infer_column_types_wide(
             # Date64 covers both date-only and datetime. Reserve TIMESTAMP_*
             # for cells that exercise sub-second precision.
             result.append(ArrowType.DATE64)
-        elif all_ts_s:  # cov: unreachable a Timestamp_S or _MS cell also parses as Date64, which wins (issue 1126)
+        elif all_ts_s:  # cov: unreachable kcov records no hit on an elif line, which runs whenever an earlier arm fails; the arm body is unreachable: a Timestamp_S or _MS cell also parses as Date64, which wins (issue 1126)
             result.append(ArrowType.TIMESTAMP_S)  # cov: unreachable a Timestamp_S or _MS cell also parses as Date64, which wins (issue 1126)
-        elif all_ts_ms:  # cov: unreachable a Timestamp_S or _MS cell also parses as Date64, which wins (issue 1126)
+        elif all_ts_ms:  # cov: unreachable kcov records no hit on an elif line, which runs whenever an earlier arm fails; the arm body is unreachable: a Timestamp_S or _MS cell also parses as Date64, which wins (issue 1126)
             result.append(ArrowType.TIMESTAMP_MS)  # cov: unreachable a Timestamp_S or _MS cell also parses as Date64, which wins (issue 1126)
         elif all_ts_us:
             result.append(ArrowType.TIMESTAMP_US)
@@ -301,11 +301,11 @@ def infer_column_types_wide(
             result.append(ArrowType.TIME64_NS)
         elif all_dur_s:
             result.append(ArrowType.DURATION_S)
-        elif all_dur_ms:  # cov: unreachable Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
+        elif all_dur_ms:  # cov: unreachable kcov records no hit on an elif line, which runs whenever an earlier arm fails; the arm body is unreachable: Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
             result.append(ArrowType.DURATION_MS)  # cov: unreachable Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
-        elif all_dur_us:  # cov: unreachable Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
+        elif all_dur_us:  # cov: unreachable kcov records no hit on an elif line, which runs whenever an earlier arm fails; the arm body is unreachable: Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
             result.append(ArrowType.DURATION_US)  # cov: unreachable Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
-        elif all_dur_ns:  # cov: unreachable Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
+        elif all_dur_ns:  # cov: unreachable kcov records no hit on an elif line, which runs whenever an earlier arm fails; the arm body is unreachable: Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
             result.append(ArrowType.DURATION_NS)  # cov: unreachable Duration_MS/US/NS accept exactly the cells Duration_S accepts (issue 1126)
         elif all_bool:
             result.append(ArrowType.BOOL)

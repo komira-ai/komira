@@ -944,8 +944,8 @@ def _parallel_format_columns_packed_impl[
         columns.append(_PackedCells(0))
         i = i + 1
     if num_cols == 0:
-        _ = cancel_token^  # cov: unreachable _accept_batch_impl returns before formatting a zero-column batch
-        return columns^  # cov: unreachable _accept_batch_impl returns before formatting a zero-column batch
+        _ = cancel_token^
+        return columns^
     if num_cols == 1:
         _ = cancel_token^
         columns[0] = _format_column_cells_packed(rb, 0, delimiter, quote)

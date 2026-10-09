@@ -19,7 +19,8 @@
 # phase-2 cells), make CR_LF_LOOKAHEAD consume the non-LF byte (phase-1 rows),
 # drop the end-of-input flush (phase-2 rows), drop the Posix escape bits from
 # the phase-3 candidates, skip the unterminated-quote raise (phase-1 cells),
-# and the projected-scanner and Row.copy mutants named in the docstrings.
+# and the projected-scanner and Row.copy mutants named in the docstrings
+# (including the column-index reset after a closing quote in column 1).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -293,6 +294,45 @@ def test_projected_scanner_skips_unwanted_quoted_cells() raises:
     assert_equal(_proj_cells[Rfc4180]("p,q\rr,s", w.copy()), "[q]/[s]")
 
 
+def test_quoted_cell_after_column_0_ends_the_row() raises:
+    """A quoted cell in column 1 ends the row with LF, a bare CR and CRLF.
+    With every column wanted all seven scanners agree; with only column 0
+    wanted the projected scanner must reset its column index at the row end,
+    or the next row's column 0 is read as column 1 and dropped. Mutants:
+    replace `col_idx = 0` with `pass` after the projected scanner's
+    closing-quote LF exit (red: `[a]/[]/...`) and after its bare-CR exit
+    (red: same)."""
+    _check_all[Rfc4180](
+        'a,"b"\nc,"d"\re,"f"\r\ng,h',
+        "[a|q:b]/[c|q:d]/[e|q:f]/[g|h]",
+        "rfc quoted last cell",
+    )
+    _check_all[Posix](
+        'a,"b"\nc,"d"\re,"f"\r\ng,h',
+        "[a|q:b]/[c|q:d]/[e|q:f]/[g|h]",
+        "posix quoted last cell",
+    )
+    var w = List[Bool]()
+    w.append(True)
+    w.append(False)
+    assert_equal(
+        _proj_cells[Rfc4180]('a,"b"\nc,d\n', w.copy()), "[a]/[c]", "rfc lf"
+    )
+    assert_equal(
+        _proj_cells[Rfc4180]('a,"b"\rc,d\n', w.copy()), "[a]/[c]", "rfc cr"
+    )
+    assert_equal(
+        _proj_cells[Posix]('a,"b"\nc,d\n', w.copy()), "[a]/[c]", "posix lf"
+    )
+    assert_equal(
+        _proj_cells[Posix]('a,"b"\rc,d\n', w.copy()), "[a]/[c]", "posix cr"
+    )
+    assert_equal(
+        _proj_cells[Rfc4180]('a,"b"\r\nc,d\n', w.copy()), "[a]/[c]",
+        "rfc crlf",
+    )
+
+
 def _violation[Q: QuoteStyle](
     text: String, variant: Int
 ) raises -> Tuple[String, Int, Int, Int]:
@@ -366,6 +406,7 @@ def main() raises:
     test_unterminated_quote_refused_by_every_scanner()
     test_simd_chunks_with_quotes_and_escapes()
     test_projected_scanner_skips_unwanted_quoted_cells()
+    test_quoted_cell_after_column_0_ends_the_row()
     test_byte_after_closing_quote_is_recorded()
     test_row_copy_is_deep()
-    print("test_csv_cov_scanner_edges: 8 tests PASS")
+    print("test_csv_cov_scanner_edges: 9 tests PASS")

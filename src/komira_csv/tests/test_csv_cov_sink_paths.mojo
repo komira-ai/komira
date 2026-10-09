@@ -23,7 +23,7 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_collections.slab import Slab
-from komira_csv.csv_sink import CsvSink
+from komira_csv.csv_sink import CsvSink, _parallel_format_columns_packed
 from komira_row_format.row_block import (
     DT_F32,
     DT_F64,
@@ -336,10 +336,23 @@ def test_dispatcher_write_small_large_and_single_column() raises:
     _ = ct^
 
 
+def test_format_zero_column_batch() raises:
+    """The serial packed-format entry, called directly with a zero-column
+    batch (the sink itself returns before formatting one), returns no
+    column. Mutant: append one column in the zero-column return (red: 1).
+    Dropping the arm altogether is an equivalent mutant: the general path
+    also returns an empty list for zero columns."""
+    var b = RecordBatchBuilder.with_capacity(0)
+    var sb = SchemaBuilder()
+    var rb = b.build(sb.build())
+    assert_equal(len(_parallel_format_columns_packed(rb, ",", '"')), 0)
+
+
 def main() raises:
     test_lifecycle_refusals()
     test_unfinished_sink_removes_its_partial_file()
     test_accept_row_blocks_writes_every_supported_tag()
     test_accept_row_blocks_refusals()
     test_dispatcher_write_small_large_and_single_column()
-    print("test_csv_cov_sink_paths: 5 tests PASS")
+    test_format_zero_column_batch()
+    print("test_csv_cov_sink_paths: 6 tests PASS")

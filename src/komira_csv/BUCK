@@ -34,6 +34,7 @@ mojo_library(
         "tests/test_csv_cov_cell_parsers.mojo",
         "tests/test_csv_cov_chunk_split.mojo",
         "tests/test_csv_cov_parallel_blank_prefix.mojo",
+        "tests/test_csv_cov_parallel_concat.mojo",
         "tests/test_csv_cov_parallel_empty_workers.mojo",
         "tests/test_csv_cov_parallel_fallbacks.mojo",
         "tests/test_csv_cov_parallel_headerless.mojo",
