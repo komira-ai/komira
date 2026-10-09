@@ -20,7 +20,7 @@
 # A use-after-free in this arm (the driver's boundary lists destroyed before
 # the workers read them) faults only under the dispatcher.
 #
-# THE INVARIANT UNDER TEST is the same one `test_csv_parallel_reader.mojo`
+# THE INVARIANT UNDER TEST is the same one `test_csv_parallel_reader_*.mojo`
 # states for the serial arm -- byte-identity with the single-thread reader --
 # asserted here against the DISPATCHER arm, plus a closed-form value check
 # (`col_a[i] == i`) that does not depend on the serial reader being right

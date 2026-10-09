@@ -20,12 +20,13 @@
 #     splits are read by `SearchSplitReader` (`search_split_reader.mojo`).
 #
 # THE SPLITS. A scan reads one split per split object live at the resolved
-# generation, in publish order, keyed `<index>/<ordinal>` (the ordinal is the
+# generation that indexes the binding's field (`split_field_at`; an index
+# with several fields holds splits of each), in publish order, keyed `<index>/<ordinal>` (the ordinal is the
 # split's place in publish order, stable for every generation that has it).
 # Each runs from rank 0 to the end of its hits, so every split is bounded and
 # the plan is complete: the kind is BOUNDED, and `discover_splits` is refused
 # by name. `plan_splits` is the execution's one read of the catalog (the
-# analyzer check and the split count); the plan's `resolved` is
+# analyzer check, the split count and each split's field); the plan's `resolved` is
 # `{generation}`. The row `limit` is not the kind's: `drain_scan` applies it
 # across splits, and a reader honours what is left of it per poll.
 #
@@ -148,8 +149,9 @@ generation this execution read."""
 
 comptime SEARCH_SPLIT_KEY_INVALID: StaticString = "SEARCH_SPLIT_KEY_INVALID"
 """NAMED ERROR -- a split handed to `open_split` whose key is not
-`<index>/<ordinal>` for the scan's index, or whose ordinal is not a split of
-the resolved generation."""
+`<index>/<ordinal>` for the scan's index, whose ordinal is not a split of
+the resolved generation, or whose split indexes another field than the
+scan's."""
 
 comptime SEARCH_INDEX_UNKNOWN: StaticString = "SEARCH_INDEX_UNKNOWN"
 """NAMED ERROR -- the catalog holds no index of that name (or no such field)."""
@@ -385,6 +387,18 @@ trait SearchIndexCatalog(Movable, Deinitable):
         _check_ordinal(index, generation, ordinal, len(every))
         return every[ordinal].copy()
 
+    def split_field_at(
+        self, index: String, generation: Int64, ordinal: Int
+    ) raises -> String:
+        """The text field the `ordinal`-th split live at `generation` indexes
+        (`SplitView.field_name`), refused as `split_at` refuses. What
+        `plan_splits` routes on: a scan reads only its field's splits. The
+        default fetches and parses the split; a catalog that records each
+        split's field overrides it."""
+        return SplitView.parse(
+            self.split_at(index, generation, ordinal)
+        ).field_name()
+
 
 def _check_ordinal(index: String, generation: Int64, ordinal: Int, n: Int) raises:
     if ordinal < 0 or ordinal >= n:
@@ -407,12 +421,14 @@ struct _CatalogIndex(Copyable, Movable, Deinitable):
     """One index of the in-memory catalog. Split `i` was published at
     generation `i + 1`, so generation `g` sees splits `[0, g)`. `fields[i]`
     analyzes with `analyzers[i]` (parallel Lists: an index has a handful of
-    fields). A List element, never a byte-slab element."""
+    fields). `split_fields[i]` is the field split `i` indexes. A List
+    element, never a byte-slab element."""
 
     var name: String
     var fields: List[String]
     var analyzers: List[AnalyzerConfig]
     var splits: List[List[UInt8]]
+    var split_fields: List[String]
 
 
 struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
@@ -457,7 +473,13 @@ struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
         var analyzers = List[AnalyzerConfig]()
         analyzers.append(analyzer^)
         self._indexes.append(
-            _CatalogIndex(name^, fields^, analyzers^, List[List[UInt8]]())
+            _CatalogIndex(
+                name^,
+                fields^,
+                analyzers^,
+                List[List[UInt8]](),
+                List[String](),
+            )
         )
 
     def add_field(
@@ -480,9 +502,14 @@ struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
         self._indexes[at].analyzers.append(analyzer^)
 
     def publish(mut self, index: String, var split_bytes: List[UInt8]) raises -> Int64:
-        """Append one split; returns the NEW generation."""
+        """Append one split; returns the NEW generation. The split's field
+        (`SplitView.field_name`) is recorded with it and must be one of the
+        index's fields (`SEARCH_INDEX_UNKNOWN` otherwise, nothing published)."""
         var at = self._find_or_raise(index)
+        var field = SplitView.parse(split_bytes.copy()).field_name()
+        _ = self.analyzer(index, field)  # refuses a field the index lacks.
         self._indexes[at].splits.append(split_bytes^)
+        self._indexes[at].split_fields.append(field^)
         return Int64(len(self._indexes[at].splits))
 
     def generation(self, index: String) raises -> Int64:
@@ -546,6 +573,14 @@ struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
         var at = self._generation_or_raise(index, generation)
         _check_ordinal(index, generation, ordinal, Int(generation))
         return self._indexes[at].splits[ordinal].copy()
+
+    def split_field_at(
+        self, index: String, generation: Int64, ordinal: Int
+    ) raises -> String:
+        """The field recorded for the split at `publish`; no copy, no parse."""
+        var at = self._generation_or_raise(index, generation)
+        _check_ordinal(index, generation, ordinal, Int(generation))
+        return self._indexes[at].split_fields[ordinal]
 
 
 # =============================================================================
@@ -681,18 +716,23 @@ struct SearchScanResolver[C: SearchIndexCatalog](
         return cfg^
 
     def plan_splits(self, req: ScanRequest) raises -> ScanSplitPlan:
-        """One split per split live at the binding's generation, in publish
-        order, each from rank 0 to its end. Refuses a foreign binding, analyzer
-        drift and a generation the catalog cannot serve, each by name."""
+        """One split per split live at the binding's generation that indexes
+        the binding's field (`split_field_at`), in publish order, each from
+        rank 0 to its end; a split of another field of the index is not
+        planned. Refuses a foreign binding, analyzer drift and a generation
+        the catalog cannot serve, each by name."""
         ref binding = req.binding
         self._refuse_foreign(binding, String("plan_splits"))
         _ = self._checked_analyzer(binding)
         var index = binding.params.get_str(String(SEARCH_PARAM_INDEX))
         var generation = self._generation_of(binding)
+        var field = binding.params.get_str(String(SEARCH_PARAM_FIELD))
         var n = self._catalog.split_count_at(index, generation)
         var kind_id = search_scan_kind_id()
         var splits = List[ScanSplit](capacity=n)
         for i in range(n):
+            if self._catalog.split_field_at(index, generation, i) != field:
+                continue
             splits.append(
                 ScanSplit(
                     search_split_key(index, i),
@@ -720,8 +760,9 @@ struct SearchScanResolver[C: SearchIndexCatalog](
         the engine keeps the whole filter). Each split's hits are the rows
         `SearchCore.search` returns for `QueryIR(field, query, top_k=<the
         split's doc count>)`, ranked. Refuses a foreign binding, analyzer
-        drift, a split key that is not one of this scan's, and a position that
-        is foreign, mis-versioned or malformed, each by name."""
+        drift, a split key that is not one of this scan's (including a split
+        of another field), and a position that is foreign, mis-versioned or
+        malformed, each by name."""
         ref binding = req.binding
         self._refuse_foreign(binding, String("open_split"))
         var kind_id = search_scan_kind_id()
@@ -761,6 +802,18 @@ struct SearchScanResolver[C: SearchIndexCatalog](
         var bytes = self._catalog.split_at(index, generation, ordinal)
         var n_bytes = len(bytes)
         var view = SplitView.parse(bytes^)
+        var field = binding.params.get_str(String(SEARCH_PARAM_FIELD))
+        if view.field_name() != field:
+            raise Error(
+                String(SEARCH_SPLIT_KEY_INVALID)
+                + String(": split '")
+                + split.split_key
+                + String("' indexes field '")
+                + view.field_name()
+                + String("', not the scan's field '")
+                + field
+                + String("'")
+            )
         var lowered: Optional[Expr] = None
         if req.predicate:
             lowered = _lower_fast_field_conjuncts(
@@ -770,7 +823,7 @@ struct SearchScanResolver[C: SearchIndexCatalog](
         return SearchSplitReader(
             core^,
             kind_id,
-            binding.params.get_str(String(SEARCH_PARAM_FIELD)),
+            field^,
             binding.params.get_str(String(SEARCH_PARAM_QUERY)),
             cfg^,
             generation,

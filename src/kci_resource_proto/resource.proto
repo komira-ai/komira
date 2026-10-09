@@ -52,7 +52,7 @@
 // test `test_held_numbers_are_unused` reads: no field of the named message may
 // use a held number, and no message may reuse a `reserved` number. A held
 // number leaves this list in the same change that declares it.
-// held-numbers: Resource 5 6 17 19 32-36 80 90 100-299 300-499 500-699 700-899
+// held-numbers: Resource 5 17 19 32-36 80 90 100-299 300-499 500-699 700-899
 // held-numbers: Value 4
 // held-numbers: Image 4
 // held-numbers: Uses 3
@@ -146,13 +146,25 @@
 // "kci cannot delete this", is a capability of a cloud object, not a policy
 // an author chooses, so it has no value here.
 //
+// METADATA (`Resource.physical_name` 6, `labels` 7, `adopt` 8) means the
+// same on every type that takes it. `physical_name` is the cloud name of
+// the resource's primary object; a `grant` (an edge: its objects are
+// bindings) and a `dns_record` (named by the DNS name and type it writes)
+// have no name of their own, so writing one there is refused. `adopt` takes
+// over the existing object of that name instead of refusing it as foreign.
+// `labels` are the author's, written beside kci's own; a key in kci's own
+// label space (`kci_*`, `kci-*`) is refused. A name or a label a cloud
+// refuses (a name too long or too short, a kind with no name of its own
+// there, one name on two objects of one kind there, more labels than an
+// object carries there) is refused as a limit
+// of that cloud when the graph is validated, before anything is created.
+//
 // RESERVED NOW, BUILT LATER (held numbers, not declared; each is an addition
-// when it lands): `Resource` 5 a typed per-cloud settings map, `Resource` 6
-// `physical_name` (keep an existing cloud name), `Image` 4 an `artifact_ref
-// { name, platform, revision }` source arm beside `output`, `Service` 13,
-// `ContainerJob` 8 and `Worker` 12 a `source` that may also be a non-image
-// artifact, and `Output` 5 REVISION (the cloud's own revision of a service,
-// not kci's revision id). `Table` 4 an analytics replica (its meaning
+// when it lands): `Resource` 5 a typed per-cloud settings map, `Image` 4 an
+// `artifact_ref { name, platform, revision }` source arm beside `output`,
+// `Service` 13, `ContainerJob` 8 and `Worker` 12 a `source` that may also
+// be a non-image artifact, and `Output` 5 REVISION (the cloud's own
+// revision of a service, not kci's revision id). `Table` 4 an analytics replica (its meaning
 // differs per cloud, so it waits for a decision). Per-cloud extensions 50 to
 // 53 are held on `Service`, `ContainerJob`, `Worker`, `Table`, `Bucket`,
 // `ServiceAccount`, `Grant`, `Queue`, `Topic`, `Subscription`, `Secret`,
@@ -355,7 +367,35 @@ message Resource {
   // live in the release machine file.
   reserved 4;
   reserved "only_in";
-  // 5 is held for a typed per-cloud settings map, 6 for `physical_name`.
+  // 5 is held for a typed per-cloud settings map.
+
+  // THE METADATA (see the file header): the cloud name of the resource's
+  // primary object, the author's labels on its objects, and whether kci
+  // takes over an existing object of that name. Each applies to every type
+  // the catalog allows it on, and each is checked when the graph is
+  // validated, before anything is created.
+  //
+  // The cloud name of the resource's PRIMARY object (the one a reference
+  // to the resource lands on). Unset: the cloud adapter names it. It has
+  // presence, so a written empty name is told apart from an unwritten one
+  // (and refused). The other objects of the resource keep the names the
+  // adapter gives them. A changed name on an object kci holds is refused
+  // before any change: a new name is a new object. Ownership is read from
+  // the stamp, never parsed from a name.
+  optional string physical_name = 6;
+  // The author's labels, written on every object the resource lowers to
+  // that carries labels on its cloud (an object that carries none, such as
+  // a policy binding, carries none of them), beside kci's own. A key that
+  // starts with `kci_` or `kci-` (kci's identity labels and marks) is
+  // refused.
+  map<string, string> labels = 7;
+  // Take over the existing object named `physical_name` (which must be
+  // written): an object of that name that carries no kci stamp is stamped
+  // and recorded instead of being refused as foreign, and is then the
+  // resource's like any object kci created (the closed world and the
+  // resource's retention apply to it). With no such object, it is created.
+  // Without `adopt`, an unstamped object of that name refuses the apply.
+  bool adopt = 8;
 
   // Typed and closed. Held, not declared (see the file header): 17, 19
   // and 32 to 36 the later neutral primitives, 80

@@ -27,10 +27,13 @@ plan {
       nullable: true
       dict_index_type_id: 4
     }
+    # how="left": an unmatched left row has NULL in every right column, so
+    # the right side's fields are nullable in the join's output schema.
     fields {
       name: "cust_id_right"
       arrow_type_id: 5
       dtype_code: _DT_INT64
+      nullable: true
       dict_index_type_id: 4
     }
     fields {

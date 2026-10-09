@@ -23,6 +23,7 @@ mojo_library(
         "//src/komira_search:komira_search",
     ],
     test_srcs = [
+        "tests/test_search_scan_field_routing.mojo",
         "tests/test_search_scan_kind.mojo",
         "tests/test_search_source_conformance.mojo",
     ],
