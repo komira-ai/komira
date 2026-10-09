@@ -13,7 +13,8 @@ system descriptor, explicit paths, row window and the two dictionary flags;
 the operators `FILTER`, `PROJECT` and `LIMIT`; the expression kinds column
 reference, literal, binary operator, unary operator and alias; and every field
 of a `ScalarValue`. Anything else is refused by name rather than dropped: a
-Hive partition column list or Hive predicate, any other operator or
+Hive partition column list or Hive predicate, a non-empty `payload_narrow`
+list (the format has no slot for it), any other operator or
 expression kind (a `CAST` or a string match included), and on decode a wrong
 magic or version, truncation, trailing bytes, an out-of-vocabulary code, a
 negative count, a non-UTF-8 identifier, a value out of range, a `PROJECT`
@@ -24,8 +25,8 @@ whose name and expression counts differ, or an expression nested deeper than
 `pplan_fields_equal` (with `pq_data_equal`, `ops_equal`, `exprs_equal` and
 `scalars_equal`) compares two plans field for field; it is what a round-trip
 test asserts on. It does not check that a `ScalarValue`'s fields agree with
-its kind. The source's `payload_narrow` list is not part of the format: a
-decoded plan has it empty.
+its kind. A decoded plan's `payload_narrow` list is always empty, since
+encoding refuses a source whose list is not.
 
 ## Examples
 

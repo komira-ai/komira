@@ -14,6 +14,7 @@ from komira_collections.slab import Slab
 from komira_plan_expr.col_expr import col
 from komira_plan_expr.expr import Expr
 from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
+from komira_plan_expr.payload_narrow import PayloadNarrowSpec, PAYLOAD_NARROW_2B
 from komira_plan_ir.logical_plan import ExprArray
 from komira_plan_ir.physical_plan import (
     MorselOp,
@@ -24,6 +25,7 @@ from komira_pplan_wire import (
     PPLAN_WIRE_BAD_MAGIC,
     PPLAN_WIRE_TRAILING_BYTES,
     PPLAN_WIRE_TRUNCATED,
+    PPLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW,
     pplan_fields_equal,
     pplan_from_bytes,
     pplan_to_bytes,
@@ -159,6 +161,39 @@ def test_truncation_is_refused_by_name() raises:
     assert_true(_error_of(cut^).find(PPLAN_WIRE_TRUNCATED) >= 0)
 
 
+def test_payload_narrow_is_refused_at_encode() raises:
+    """The format has no slot for `payload_narrow`. Without the refusal the
+    encoder returns bytes and the decoded source has the list empty: a
+    different plan from the one encoded, and `pplan_fields_equal` does not
+    compare the list, so the round-trip test above cannot see the loss."""
+    var pq = _mk_rich()
+    pq.payload_narrow.append(
+        PayloadNarrowSpec(String("a"), PAYLOAD_NARROW_2B, Int64(100))
+    )
+    var text = String("")
+    try:
+        _ = pplan_to_bytes(pq, _mk_ops())
+    except e:
+        text = String(e)
+    assert_true(
+        text != "",
+        "pplan_to_bytes returned bytes for a source carrying payload_narrow",
+    )
+    assert_true(
+        text.startswith(PPLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW), "got: " + text
+    )
+    assert_true(
+        "ParquetSourceData.payload_narrow" in text,
+        "the refusal does not name the field. Got: " + text,
+    )
+
+
+def test_an_empty_payload_narrow_still_encodes() raises:
+    var pq = _mk_rich()
+    var decoded = pplan_from_bytes(pplan_to_bytes(pq, _mk_ops()))
+    assert_equal(len(decoded.pq_data.payload_narrow), 0)
+
+
 def main() raises:
     test_rich_plan_round_trips_field_for_field()
     test_encoding_is_deterministic()
@@ -167,4 +202,6 @@ def main() raises:
     test_bad_magic_is_refused_by_name()
     test_trailing_byte_is_refused_by_name()
     test_truncation_is_refused_by_name()
+    test_payload_narrow_is_refused_at_encode()
+    test_an_empty_payload_narrow_still_encodes()
     print("ok")

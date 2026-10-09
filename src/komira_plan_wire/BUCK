@@ -24,6 +24,7 @@ mojo_library(
         "tests/test_plan_wire_agg_args.mojo",
         "tests/test_plan_wire_codec_encode_refusals.mojo",
         "tests/test_plan_wire_codec_tampered_wire.mojo",
+        "tests/test_plan_wire_encode_refuses_annotations.mojo",
         "tests/test_plan_wire_golden_bytes.mojo",
         "tests/test_plan_wire_hostile_bytes.mojo",
         "tests/test_plan_wire_hostile_values.mojo",

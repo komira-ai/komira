@@ -333,6 +333,12 @@
 #       `TableStats` is pure data and CAN be encoded; it simply is not yet.
 #       Refused rather than dropped because stats steer join-order and a
 #       silently statless decoded plan is a silent plan change.
+#   `ScanData.payload_narrow` (non-empty) / `AggregateData.group_topk` (set)
+#       The optimizer's narrowing instructions and the TopN root's bounded
+#       top-K hint. `plan.proto` has no slot for either. Both are advisory to
+#       the engine, but a decoded plan that lost them is not the plan that was
+#       encoded, so they are refused like `table_stats`. An empty list and an
+#       unset hint are the shapes the wire does carry, and they encode.
 #
 # --- THE DECODE SIDE, WHICH DOES NOT CHOOSE ITS INPUT ------------------------
 #   Every narrowing from a wire type to an engine type is CHECKED and RAISES BY
@@ -759,6 +765,8 @@ comptime PLAN_WIRE_UDF_NOT_DESCRIBABLE: String = "PLAN_WIRE_UDF_NOT_DESCRIBABLE"
 comptime PLAN_WIRE_UNSUPPORTED_TABLE_STATS: String = "PLAN_WIRE_UNSUPPORTED_TABLE_STATS"
 comptime PLAN_WIRE_UNSUPPORTED_SCHEMALESS_SCAN: String = "PLAN_WIRE_UNSUPPORTED_SCHEMALESS_SCAN"
 comptime PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS: String = "PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS"
+comptime PLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW: String = "PLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW"
+comptime PLAN_WIRE_UNSUPPORTED_GROUP_TOPK: String = "PLAN_WIRE_UNSUPPORTED_GROUP_TOPK"
 comptime PLAN_WIRE_UNSUPPORTED_DTYPE: String = "PLAN_WIRE_UNSUPPORTED_DTYPE"
 comptime PLAN_WIRE_UNSUPPORTED_ARROW_TYPE: String = "PLAN_WIRE_UNSUPPORTED_ARROW_TYPE"
 comptime PLAN_WIRE_UNSUPPORTED_PARAM_TAG: String = "PLAN_WIRE_UNSUPPORTED_PARAM_TAG"
@@ -2986,6 +2994,13 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
                 PLAN_WIRE_UNSUPPORTED_TABLE_STATS + ": ScanData for '"
                 + d.source_path + "' carries TableStats"
             )
+        if len(d.payload_narrow) != 0:
+            raise Error(
+                PLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW + ": ScanData for '"
+                + d.source_path + "' carries "
+                + String(len(d.payload_narrow))
+                + " ScanData.payload_narrow spec(s); the wire has no slot"
+            )
         var sch_present = _present_schema(d.schema)
         var sch: Optional[WireSchema] = None
         if sch_present:
@@ -3045,6 +3060,12 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     elif tag == PLAN_AGGREGATE:
         arm = 4
         ref d = p.aggregate_data_ref()
+        if d.group_topk:
+            raise Error(
+                PLAN_WIRE_UNSUPPORTED_GROUP_TOPK + ": AggregateData.group_topk"
+                + " (k=" + String(d.group_topk.value().k)
+                + ") is set; the wire has no slot"
+            )
         var ag_udf: Optional[WireUdf] = None
         if d.udf:
             ag_udf = Optional(_udf_to_wire(d.udf.value()[], "AggregateData"))

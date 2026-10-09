@@ -22,7 +22,8 @@ execute, such as a column name the input schema does not have, a positional
 column reference, a negative count or empty sort keys. Encoding refuses what
 the format cannot carry rather than dropping it: an in-memory source, a
 Hive-partitioned or non-local Parquet scan, an undescribable user-defined
-function and the other shapes the codec's ledger lists. Every refusal is an
+function, a scan carrying `payload_narrow` specs, an aggregate carrying a
+`group_topk` hint and the other shapes the codec's ledger lists. Every refusal is an
 error whose text starts with one of the exported `PLAN_WIRE_*` names.
 
 The decoder rebuilds every node through its `LogicalPlan` factory and refuses

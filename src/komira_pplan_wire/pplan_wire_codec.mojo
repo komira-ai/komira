@@ -30,15 +30,18 @@
 # A codec that quietly drops a field round-trips a SMALLER plan and passes its
 # own test.
 #
-# --- ParquetSourceData: 10 of 10 fields modelled ------------------------------
+# --- ParquetSourceData: 11 of 11 fields modelled ------------------------------
 #   ENCODED    file_path, projection, pushed_filter, fs_descriptor,
 #              preserve_numeric_dict, explicit_paths, row_window,
 #              preserve_string_dict
 #   REFUSED    hive_partition_cols (non-empty) -> PPLAN_WIRE_UNSUPPORTED_HIVE_COLS
 #              hive_predicate (present)        -> PPLAN_WIRE_UNSUPPORTED_HIVE_PRED
-#   ⚠ The two refusals are the LAZY dir-scan Hive path. They are refused rather
-#   than dropped because a dropped `hive_predicate` is a plan that scans EVERY
-#   partition and still returns rows — a silent 100x, not a crash.
+#              payload_narrow (non-empty)      -> PPLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW
+#   ⚠ The two Hive refusals are the LAZY dir-scan Hive path. They are refused
+#   rather than dropped because a dropped `hive_predicate` is a plan that scans
+#   EVERY partition and still returns rows — a silent 100x, not a crash.
+#   `payload_narrow` has no slot in the format; a decoded plan would have it
+#   empty, which is a different plan from the one encoded.
 #
 # --- MorselOp: 3 of 13+ variants modelled -------------------------------------
 #   ENCODED    OP_FILTER, OP_PROJECT, OP_LIMIT
@@ -138,6 +141,7 @@ comptime PPLAN_WIRE_TRUNCATED: String = "PPLAN_WIRE_TRUNCATED"
 comptime PPLAN_WIRE_TRAILING_BYTES: String = "PPLAN_WIRE_TRAILING_BYTES"
 comptime PPLAN_WIRE_UNSUPPORTED_HIVE_COLS: String = "PPLAN_WIRE_UNSUPPORTED_HIVE_COLS"
 comptime PPLAN_WIRE_UNSUPPORTED_HIVE_PRED: String = "PPLAN_WIRE_UNSUPPORTED_HIVE_PRED"
+comptime PPLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW: String = "PPLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW"
 comptime PPLAN_WIRE_UNSUPPORTED_OP_TAG: String = "PPLAN_WIRE_UNSUPPORTED_OP_TAG"
 comptime PPLAN_WIRE_UNSUPPORTED_EXPR_TAG: String = "PPLAN_WIRE_UNSUPPORTED_EXPR_TAG"
 comptime PPLAN_WIRE_UNSUPPORTED_DTYPE: String = "PPLAN_WIRE_UNSUPPORTED_DTYPE"
@@ -713,9 +717,9 @@ def pplan_to_bytes(
     _put_u32(out, PPLAN_WIRE_FORMAT_VERSION)
 
     # ---- ParquetSourceData ----
-    # ⚠ THE TWO REFUSALS COME FIRST, BEFORE ANY BYTE OF THE SOURCE IS WRITTEN.
-    # A hive-carrying source that got half-encoded and then raised would leave
-    # a caller holding a prefix it might be tempted to use.
+    # ⚠ THE REFUSALS COME FIRST, BEFORE ANY BYTE OF THE SOURCE IS WRITTEN.
+    # A refused source that got half-encoded and then raised would leave a
+    # caller holding a prefix it might be tempted to use.
     if len(pq_data.hive_partition_cols) != 0:
         raise Error(
             PPLAN_WIRE_UNSUPPORTED_HIVE_COLS, ": ",
@@ -723,6 +727,12 @@ def pplan_to_bytes(
         )
     if pq_data.hive_predicate:
         raise Error(PPLAN_WIRE_UNSUPPORTED_HIVE_PRED, ": predicate present")
+    if len(pq_data.payload_narrow) != 0:
+        raise Error(
+            PPLAN_WIRE_UNSUPPORTED_PAYLOAD_NARROW, ": ",
+            len(pq_data.payload_narrow),
+            " ParquetSourceData.payload_narrow spec(s); the format has no slot",
+        )
 
     _put_str(out, pq_data.file_path)
     if pq_data.projection:
