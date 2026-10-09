@@ -574,7 +574,7 @@ def test_each_shape_refuses_its_metadata_limits() raises:
         String('{"resource":[')
         + String('{"id":"ok42",') + _labels(42) + String('"bucket":{}},')
         + String('{"id":"over43",') + _labels(43) + String('"bucket":{}},')
-        + String('{"id":"core","physicalName":"core-net","network":{"ipv4Cidr":"10.0.0.0/16"}},')
+        + String('{"id":"core","physicalName":"core-net","network":{"ipv4Cidr":"198.51.100.0/24"}},')
         + String('{"id":"b2","physicalName":"ab","bucket":{}}')
         + String("]}"),
     )
