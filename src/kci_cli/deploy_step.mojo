@@ -607,7 +607,10 @@ def check_deploy_set_hash[S: StageSteps](
     cmd: KciCommand, g: ReleaseMachine, stage: Stage, sel: Selection, mut steps: S, mut result: KciRunResult
 ) -> StartVerdict:
     """Step 2 (file header), at start-up: "" outcome when the run may go
-    on."""
+    on. The release is the one the machine file's first BUILD step for
+    linux-x86_64 makes; this stands until the image work (I4 of
+    deploy_step.md) resolves the set through the BUILD step each image's
+    `StepOutput` names, which replaces it."""
     var deploying = False
     for i in range(len(stage.steps)):
         if sel.steps[i] and stage.steps[i].is_deploy():
