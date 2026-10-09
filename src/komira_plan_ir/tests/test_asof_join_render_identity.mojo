@@ -14,7 +14,8 @@
 #
 # The hint keys are QUOTED in the render: written raw, one key `k, ts` rendered
 # like the two keys `k`, `ts`, and a left key spelling `k]/[F], right_sorted=[ts`
-# rendered like a left hint `[k]` plus a right hint `[ts]`.
+# rendered like a left hint `[k]` plus a right hint `[ts]`. The quoting
+# escapes: under bare quotes the one key `k", "ts` rendered like `k`, `ts`.
 #
 # Each test is a pair that must hash differently, plus a control pair that
 # must hash equal (the render stays deterministic, so caching still works).
@@ -151,6 +152,20 @@ def test_a_hint_key_cannot_split_into_two_keys() raises:
         _asof(AsofTolerance.none(), ak^, ad^),
         _asof(AsofTolerance.none(), bk^, bd^),
         "hint keys [\"k, ts\"] (one key) vs [\"k\", \"ts\"]",
+    )
+
+
+def test_a_quote_in_a_hint_key_cannot_split_it() raises:
+    # The quoting must ESCAPE: bare quotes around the key `k", "ts` write
+    # `["k", "ts"]`, the render of the two keys `k`, `ts`.
+    var ak: List[String] = ["k\", \"ts"]
+    var ad: List[Bool] = [False, False]
+    var bk: List[String] = ["k", "ts"]
+    var bd: List[Bool] = [False, False]
+    _differ(
+        _asof(AsofTolerance.none(), ak^, ad^),
+        _asof(AsofTolerance.none(), bk^, bd^),
+        "hint keys ['k\", \"ts'] (one key) vs [\"k\", \"ts\"]",
     )
 
 

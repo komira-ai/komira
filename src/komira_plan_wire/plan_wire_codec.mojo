@@ -81,7 +81,7 @@
 #   `plan_display` prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…])`, then
 #   `tolerance=INT64(<int_val>)` or `tolerance=FLOAT64(<float_val>)` (nothing
 #   at kind NONE), then each NON-EMPTY pre-sort hint as
-#   `left_sorted=[keys]/[dirs]` / `right_sorted=…`. So LEG 1 sees the hints and
+#   `left_sorted=[quoted keys]/[dirs]` / `right_sorted=…`. So LEG 1 sees the hints and
 #   the selected tolerance value, but never the slot `kind` does not select,
 #   and at kind NONE it sees no tolerance at all. All THREE slots are carried
 #   verbatim, including the one `kind` does not select: `AsofTolerance` is
