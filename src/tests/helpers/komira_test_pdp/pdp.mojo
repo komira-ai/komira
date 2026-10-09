@@ -240,9 +240,9 @@ def bearer_token(authorization: Optional[String]) -> BearerCredential:
     for i in range(6):
         if _lower(b[i]) != w[i]:
             return BearerCredential(BEARER_ABSENT, String(""))
-    var start = sp + 1
-    if start >= n:  # `Bearer` alone, or `Bearer ` and nothing after it
+    if sp == n:  # `Bearer` and nothing after it
         return BearerCredential(BEARER_MALFORMED, String(""))
+    var start = sp + 1
     var end = n
     while end > start and b[end - 1] == 0x3D:  # trailing `=`
         end -= 1

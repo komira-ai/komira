@@ -127,9 +127,8 @@ def _string_member(obj: JsonValue, name: String) -> Optional[String]:
 
 
 def _read_resource(obj: JsonValue) -> Optional[EvalResource]:
-    """`{"type": K, "id": R, "properties"?: {...}}`, checked, or None."""
-    if obj.kind_tag() != JSON_OBJECT:
-        return None
+    """`{"type": K, "id": R, "properties"?: {...}}`, checked, or None.
+    `obj` is an object (both callers read it with `_member(..., JSON_OBJECT)`)."""
     var kind = _string_member(obj, String("type"))
     var id = _string_member(obj, String("id"))
     if not kind or not id:
