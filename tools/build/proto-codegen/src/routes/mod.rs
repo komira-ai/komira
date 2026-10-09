@@ -4,7 +4,8 @@
 //! `<stem>_routes.mojo`: per service, a handler trait (one method per RPC), a
 //! function building komira_http_server's `Router` from the RPCs'
 //! `(google.api.http)` rules, and a dispatcher (a komira_http_server
-//! `RequestDispatcher`) that matches a request through that router, binds the
+//! `RoutedDispatcher`, so `ComposedRoutes` can serve several services from one
+//! server) that matches a request through that router, binds the
 //! request message from the path, the query and the body, calls the handler
 //! and writes the response message as proto3 JSON.
 //!
@@ -337,10 +338,11 @@ fn header(s: &mut String, file: &IrFile) {
 #
 # For each service: a handler trait with one method per RPC, `<service>_router()`
 # (komira_http_server's `Router`, one entry per HTTP binding of each RPC's
-# `(google.api.http)` rule), and `<Service>Routes[H]`, a `RequestDispatcher`
-# that answers:
+# `(google.api.http)` rule), and `<Service>Routes[H]`, a `RoutedDispatcher`
+# (`ComposedRoutes` serves several from one server) that answers:
 #   no route matches the path                     404
-#   a route matches the path, not the method      405
+#   a route matches the path, not the method      405, `Allow` naming the path's
+#                                                      methods
 #   the body, path or query does not bind         400 (an unknown JSON field or
 #                                                      query parameter included)
 #   the handler raises                            the handler's `error_response`
@@ -352,7 +354,7 @@ from std.collections.dict import Dict
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
-from komira_http_server.dispatch import RequestDispatcher
+from komira_http_server.routing.compose import RoutedDispatcher
 from komira_http_server.routing.router import Router
 from komira_proto_codec import decode_json, encode_json
 ",
@@ -412,13 +414,18 @@ fn emit_service(s: &mut String, file: &IrFile, svc: &IrService, routes: &[Route<
     // The dispatcher.
     let _ = write!(
         s,
-        "\n\nstruct {name}Routes[H: {name}Handler](Movable, RequestDispatcher):\n\
+        "\n\nstruct {name}Routes[H: {name}Handler](Movable, RoutedDispatcher):\n\
          \x20   \"\"\"`{fq}` over HTTP: the routes of `{snake}_router()`, each bound and passed to `handler`.\"\"\"\n\n\
          \x20   var handler: Self.H\n\
          \x20   var _router: Router\n\n\
          \x20   def __init__(out self, var handler: Self.H) raises:\n\
          \x20       self.handler = handler^\n\
          \x20       self._router = {snake}_router()\n\n\
+         \x20   def has_route(self, method: HttpMethod, path: String) -> Bool:\n\
+         \x20       var params = Dict[String, String]()\n\
+         \x20       return Bool(self._router.match_route(method, path, params))\n\n\
+         \x20   def allowed_methods(self, path: String, mut methods: List[HttpMethod]):\n\
+         \x20       methods.extend(self._router.allowed_methods(path))\n\n\
          \x20   def dispatch[\n\
          \x20       RT: Runtime,\n\
          \x20   ](\n\
@@ -427,8 +434,9 @@ fn emit_service(s: &mut String, file: &IrFile, svc: &IrService, routes: &[Route<
          \x20       var params = Dict[String, String]()\n\
          \x20       var hit = self._router.match_route(req.method, req.path, params)\n\
          \x20       if not hit:\n\
-         \x20           if self._router.has_path_match(req.path):\n\
-         \x20               return HttpResponse.method_not_allowed()\n\
+         \x20           var allowed = self._router.allowed_methods(req.path)\n\
+         \x20           if len(allowed) != 0:\n\
+         \x20               return HttpResponse.method_not_allowed(allowed)\n\
          \x20           return HttpResponse.not_found()\n\
          \x20       var route = hit.value()\n",
         name = svc.name

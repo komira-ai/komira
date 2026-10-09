@@ -4,10 +4,11 @@
 #
 # For each service: a handler trait with one method per RPC, `<service>_router()`
 # (komira_http_server's `Router`, one entry per HTTP binding of each RPC's
-# `(google.api.http)` rule), and `<Service>Routes[H]`, a `RequestDispatcher`
-# that answers:
+# `(google.api.http)` rule), and `<Service>Routes[H]`, a `RoutedDispatcher`
+# (`ComposedRoutes` serves several from one server) that answers:
 #   no route matches the path                     404
-#   a route matches the path, not the method      405
+#   a route matches the path, not the method      405, `Allow` naming the path's
+#                                                      methods
 #   the body, path or query does not bind         400 (an unknown JSON field or
 #                                                      query parameter included)
 #   the handler raises                            the handler's `error_response`
@@ -19,7 +20,7 @@ from std.collections.dict import Dict
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
-from komira_http_server.dispatch import RequestDispatcher
+from komira_http_server.routing.compose import RoutedDispatcher
 from komira_http_server.routing.router import Router
 from komira_proto_codec import decode_json, encode_json
 from komira_routes_fixture_messages.library import Book
@@ -287,7 +288,7 @@ def _book_service_bind_3(
     return msg^
 
 
-struct BookServiceRoutes[H: BookServiceHandler](Movable, RequestDispatcher):
+struct BookServiceRoutes[H: BookServiceHandler](Movable, RoutedDispatcher):
     """`example.library.v1.BookService` over HTTP: the routes of `book_service_router()`, each bound and passed to `handler`."""
 
     var handler: Self.H
@@ -297,6 +298,13 @@ struct BookServiceRoutes[H: BookServiceHandler](Movable, RequestDispatcher):
         self.handler = handler^
         self._router = book_service_router()
 
+    def has_route(self, method: HttpMethod, path: String) -> Bool:
+        var params = Dict[String, String]()
+        return Bool(self._router.match_route(method, path, params))
+
+    def allowed_methods(self, path: String, mut methods: List[HttpMethod]):
+        methods.extend(self._router.allowed_methods(path))
+
     def dispatch[
         RT: Runtime,
     ](
@@ -305,8 +313,9 @@ struct BookServiceRoutes[H: BookServiceHandler](Movable, RequestDispatcher):
         var params = Dict[String, String]()
         var hit = self._router.match_route(req.method, req.path, params)
         if not hit:
-            if self._router.has_path_match(req.path):
-                return HttpResponse.method_not_allowed()
+            var allowed = self._router.allowed_methods(req.path)
+            if len(allowed) != 0:
+                return HttpResponse.method_not_allowed(allowed)
             return HttpResponse.not_found()
         var route = hit.value()
         if route == 0:
@@ -440,7 +449,7 @@ def _shelf_service_bind_2(
     return msg^
 
 
-struct ShelfServiceRoutes[H: ShelfServiceHandler](Movable, RequestDispatcher):
+struct ShelfServiceRoutes[H: ShelfServiceHandler](Movable, RoutedDispatcher):
     """`example.library.v1.ShelfService` over HTTP: the routes of `shelf_service_router()`, each bound and passed to `handler`."""
 
     var handler: Self.H
@@ -450,6 +459,13 @@ struct ShelfServiceRoutes[H: ShelfServiceHandler](Movable, RequestDispatcher):
         self.handler = handler^
         self._router = shelf_service_router()
 
+    def has_route(self, method: HttpMethod, path: String) -> Bool:
+        var params = Dict[String, String]()
+        return Bool(self._router.match_route(method, path, params))
+
+    def allowed_methods(self, path: String, mut methods: List[HttpMethod]):
+        methods.extend(self._router.allowed_methods(path))
+
     def dispatch[
         RT: Runtime,
     ](
@@ -458,8 +474,9 @@ struct ShelfServiceRoutes[H: ShelfServiceHandler](Movable, RequestDispatcher):
         var params = Dict[String, String]()
         var hit = self._router.match_route(req.method, req.path, params)
         if not hit:
-            if self._router.has_path_match(req.path):
-                return HttpResponse.method_not_allowed()
+            var allowed = self._router.allowed_methods(req.path)
+            if len(allowed) != 0:
+                return HttpResponse.method_not_allowed(allowed)
             return HttpResponse.not_found()
         var route = hit.value()
         if route == 0:

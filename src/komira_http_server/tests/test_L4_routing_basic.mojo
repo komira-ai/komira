@@ -90,6 +90,26 @@ def test_405_disposition_via_has_path_match() raises:
     assert_false(r.has_path_match("/totally/different"))
 
 
+def test_allowed_methods_are_the_paths_routes() raises:
+    """`allowed_methods(path)`: the method of every route matching the path,
+    each once, in registration order; a route of another path (or of the
+    same prefix) is not counted. Catches a list that stops at the first
+    matching route: the last route registered for the path is DELETE."""
+    var r = Router()
+    r.add(HttpMethod.get(), "/orders/:id", 0)
+    r.add(HttpMethod.get(), "/orders", 1)
+    r.add(HttpMethod.put(), "/orders/:id", 2)
+    r.add(HttpMethod.get(), "/orders/:id/lines", 3)
+    r.add(HttpMethod.put(), "/orders/*", 4)
+    r.add(HttpMethod.delete(), "/orders/:id", 5)
+    var got = r.allowed_methods("/orders/42")
+    assert_equal(len(got), 3)
+    assert_true(got[0] == HttpMethod.get())
+    assert_true(got[1] == HttpMethod.put())
+    assert_true(got[2] == HttpMethod.delete())
+    assert_equal(len(r.allowed_methods("/invoices/1")), 0)
+
+
 def test_param_match() raises:
     """`/users/:id` matches `/users/42` and binds id=42."""
     var r = Router()
@@ -213,6 +233,7 @@ def main() raises:
     test_method_dispatch_distinguishes_methods()
     test_404_fallback_no_match()
     test_405_disposition_via_has_path_match()
+    test_allowed_methods_are_the_paths_routes()
     test_param_match()
     test_multiple_params()
     test_param_no_match_when_length_differs()
