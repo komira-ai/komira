@@ -11,7 +11,8 @@
 #      tests//negative/coverage (tools/build/coverage/README.md, "The build
 #      gate"; tools/build/tests/coverage_runs.md, test 46):
 #      the [coverage][gate] of covlow, covnotests, covun, covfull_unread,
-#      covbranch and covtry in enforce mode is red, each naming its finding:
+#      covbranch, covtry and covandor in enforce mode is red, each naming its
+#      finding:
 #      BelowTarget (a test covering 3 of 6 lines, and 1 of the 4 arms of its
 #      two `if`s), NotMeasured (a library with no test still has a gate),
 #      UnmeasuredFile (a source no test compiles), BranchNotMeasured alone
@@ -19,12 +20,18 @@
 #      record: coverage_branch_gate = False), BelowTarget on branch alone
 #      (every line covered, one arm of its `if` never taken: the branch
 #      records reach the gate), BelowTarget on branch alone again (every
-#      line covered, a raising call in a `try:` body never raising);
-#      covbranch_both and covtry_both (every arm taken) and covfull
+#      line covered, a raising call in a `try:` body never raising), and
+#      again (every line covered, `return a or b` never skipping its right
+#      operand: an and/or whose result no branch tests is a decision);
+#      covbranch_both, covtry_both and covandor_both (every arm taken) and covfull
 #      (the library of covfull_unread, no decision, its records naming its
 #      file with no arm) are green in enforce mode, gate included; the
 #      census twins are green and their result.json says so
-#      (:<name>_census_result); covtop_census_result: a library whose welded
+#      (:<name>_census_result); covlow's library in a test-only package
+#      (tests//src/tests/coverage:covinfo, under COVERAGE_INFO_ONLY_DIRS) has a
+#      green gate in enforce mode, its BelowTarget and MissingRow information
+#      (:covinfo_result), while covlow's stays red, and so does its copy
+#      in tests//src/testsuite/coverage (covnotinfo: not under src/tests); covtop_census_result: a library whose welded
 #      tests are outside its package's tests/ analyzes with coverage, and
 #      its gate leaves both tests out of its numbers (--test-source); covbad:
 #      a census gate over a malformed ratchet is red (covcheck exit 1 fails
@@ -55,7 +62,14 @@ P=tools/build/tests/negative/coverage
 expect_green coverage_gate_census "$N:covlow_census_result" "$N:covnotests_census_result" \
     "$N:covun_census_result" "$N:covfull_census_result" "$N:covfull_unread_census_result" \
     "$N:covtop_census_result" "$N:covbranch_census_result" "$N:covtry_census_result" \
-    "$N:covbranch_both[coverage][gate]" "$N:covtry_both[coverage][gate]" "$N:covfull[coverage][gate]"
+    "$N:covandor_census_result" "$N:covbranch_both[coverage][gate]" "$N:covtry_both[coverage][gate]" \
+    "$N:covandor_both[coverage][gate]" "$N:covfull[coverage][gate]"
+# A test-only package below the target: its gate is green in enforce mode,
+# what it found information (covlow, the same library elsewhere, is red
+# below).
+expect_green coverage_gate_test_only "tests//src/tests/coverage:covinfo[coverage][gate]" tests//src/tests/coverage:covinfo_result
+# ... at a segment boundary: src/testsuite is not under src/tests.
+expect_red coverage_gate_not_test_only "COVERAGE GATE FAILED (enforce): tools/build/tests/src/testsuite/coverage (tests//src/testsuite/coverage:covnotinfo [coverage gate]): covcheck gate exited 3" "tests//src/testsuite/coverage:covnotinfo[coverage][gate]"
 expect_red coverage_gate_census_malformed "COVERAGE GATE ERROR: $P ($N:covbad [coverage gate]): covcheck exited 1" "$N:covbad[coverage][gate]"
 expect_red coverage_gate_enforce "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow[coverage][gate]"
 expect_red coverage_gate_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests[coverage][gate]"
@@ -63,10 +77,12 @@ expect_red coverage_gate_unmeasured "- **UnmeasuredFile** \`$P\` \`$P/covun/unus
 expect_red coverage_gate_branch "- **BranchNotMeasured** \`$P\`: no branch of this package was measured" "$N:covfull_unread[coverage][gate]"
 expect_red coverage_gate_branch_arm "COVERAGE GATE FAILED (enforce): $P ($N:covbranch [coverage gate]): covcheck gate exited 3" "$N:covbranch[coverage][gate]"
 expect_red coverage_gate_branch_try "COVERAGE GATE FAILED (enforce): $P ($N:covtry [coverage gate]): covcheck gate exited 3" "$N:covtry[coverage][gate]"
+expect_red coverage_gate_branch_andor "COVERAGE GATE FAILED (enforce): $P ($N:covandor [coverage gate]): covcheck gate exited 3" "$N:covandor[coverage][gate]"
 # Each red is its own finding: covlow's is BelowTarget, covfull_unread's
 # only finding is BranchNotMeasured (line 100%, a ratchet row), and covbranch's
 # only finding is BelowTarget on branch (line 100%, a ratchet row, its
-# branch records read), and so is covtry's (a `try` decision's raise arm).
+# branch records read), and so is covtry's (a `try` decision's raise arm)
+# and covandor's (an `or`'s arm skipping its right operand).
 # The enforce banner names what a red gate blocks:
 # the conda package only.
 for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is below the target 100.00%" \
@@ -75,7 +91,9 @@ for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is belo
     "coverage_gate_branch_arm|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
     "coverage_gate_branch_arm|### Findings (1)" \
     "coverage_gate_branch_try|- **BelowTarget** \`$P\`: branch 83.33% is below the target 100.00%" \
-    "coverage_gate_branch_try|### Findings (1)"; do
+    "coverage_gate_branch_try|### Findings (1)" \
+    "coverage_gate_branch_andor|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
+    "coverage_gate_branch_andor|### Findings (1)"; do
     if grep -qF -- "${want#*|}" "$LOG/${want%%|*}.log"; then
         pass "${want%%|*}_finding"
     else
@@ -87,7 +105,7 @@ done
 # and runs its test). A library with no test has a REFUSED conda package,
 # which waits for its gate all the same.
 expect_green coverage_gate_library "$N:covlow" "$N:covnotests" "$N:covun" "$N:covfull" "$N:covfull_unread" \
-    "$N:covbranch" "$N:covtry" "$N:covbad" "$N:covlow_user"
+    "$N:covbranch" "$N:covtry" "$N:covandor" "$N:covbad" "$N:covlow_user"
 expect_red coverage_gate_conda "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow_conda"
 expect_red coverage_gate_conda_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests_conda"
 # A generated client whose welded tests are at its package's top analyzes

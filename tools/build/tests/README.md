@@ -426,7 +426,8 @@ fixtures, one of them a producer's bytes that are not protoc's serialization
 cases' fixtures end to end, one defect per refusal, each a fixture one change
 away from the self-test's, and each must fail naming its leg: `leg0_identical`
 (the `.hex` is protoc's own bytes), `leg0_duplicate` (`id` written twice,
-which the decode shows once), `leg1_value` (the `.txtpb` says `id: 151` where
+which the decode shows once), `leg0_duplicate_message` (the string `name`
+written twice, so the walk must step over a length-delimited value), `leg1_value` (the `.txtpb` says `id: 151` where
 the bytes hold 150; its `.canonical.hex` is protoc's encoding of that text, so
 only leg 1 fires), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
 the top level, field 9 inside `inner`, and an empty group 99, which protoc

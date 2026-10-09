@@ -114,6 +114,7 @@ runs a whole plan yet ([Layers still to come](#layers-still-to-come)).
 | [`komira_xml`](../src/komira_xml/) | a general XML codec: reader, tree, writer and escaping. |
 | [`komira_encoding`](../src/komira_encoding/) | binary-to-text encodings, base64, base64url, base32 and hex, and RFC 7468 PEM armor, in pure Mojo with no dependencies; decoding is strict and names the byte position of what it rejects. |
 | [`komira_mail_address`](../src/komira_mail_address/) | email addresses: one grammar for RFC 5322 header fields (addr-spec, name-addr, groups, comments) and RFC 5321 SMTP paths, with validating constructors and minimum-quoting formatting; refuses CR, LF and NUL anywhere and non-ASCII (no SMTPUTF8 or IDNA). No dependencies. |
+| [`komira_mail_message`](../src/komira_mail_message/) | email messages over bytes: composes RFC 5322 messages with MIME (text, `multipart/alternative`, `multipart/mixed` attachments, RFC 2183/2231 parameters) and RFC 2047 encoded words, folding every header and refusing CR, LF and NUL in header values; parses header fields and MIME parts with bounded depth and part count, bodies kept as bytes. Depends on `komira_mail_address` and `komira_encoding`. |
 | [`komira_json`](../src/komira_json/) | a small dependency-free JSON library (RFC 8259): a tagged `JsonValue`, a strict non-recursive parser with a nesting-depth limit, a duplicate-member check (`refuse_duplicate_keys`), and direct-byte writers. |
 | [`komira_textproto`](../src/komira_textproto/) | a zero-dependency textproto lexer: typed tokens (so a quoted brace never equals a brace) and a cursor for hand-written parsers. |
 | [`komira_json_index`](../src/komira_json_index/) | the JSON structural index (the SIMD stage-1 primitives, the structural-token indexer, input limits, the string unescaper, a UTF-8 check) and the `json_extract` kernel over a string column. |
@@ -277,13 +278,15 @@ The dependency order is the order of the rows.
 
 ### Applications
 
-The libraries of the applications komira serves over an open JSON API. The
+The libraries of the applications komira serves over an open JSON API. An
+app's API is its `komira_<app>_proto` package, the published wire. The
 dependency order is the order of the rows.
 
 | module | what it is |
 |---|---|
 | [`komira_calendar_proto`](../src/komira_calendar_proto/) | the resources of a simple calendar service's JSON API, `komira.calendar.v1`, generated: `Calendar`, `Event` (all-day or timed in an IANA zone), a structured `Recurrence` rule (not RRULE text), `Reminder`, `OccurrenceOverride` and the `ErrorResponse` envelope. |
 | [`komira_calendar`](../src/komira_calendar/) | a simple calendar's model and validation over `komira_calendar_proto`: `check_calendar`, `check_event` (timing, the recurrence rule, removed occurrences, reminders) and `check_override`, each refusal a stable code, a JSON field path and a sentence; the local date and date-time text forms. No zone rules, no expansion, no store. |
+| [`komira_chat_proto`](../src/komira_chat_proto/) | the chat API, `komira.chat.v1`, generated: the messages of a small Slack-like chat (users, public and private channels, DMs, members, a numbered timeline of message, edit, delete, join and leave events with one-level threads and mentions, read state and sync, file uploads and downloads, search, and the erasure of one subject), carried as proto3 canonical JSON over HTTP. `chat_service.proto` lists the methods and their HTTP routes as `.proto` source only. |
 | [`komira_managed_mail_proto`](../src/komira_managed_mail_proto/) | the managed mail API, `komira.managed_mail.v1`, generated: the messages of a simple mail app (mailboxes, emails in a fixed set of folders, their parts, threads, sending through a queue of submissions, raw and mbox export), and its two HTTP contracts with a submission service, inbound delivery (the raw message as the body, an `InboundEnvelope` in a header field) and HTTP submission (`RawMessageRequest`), carried as proto3 canonical JSON. Not IMAP or JMAP. `mail_service.proto` lists the methods and their HTTP routes as `.proto` source only. |
 
 ### CI and deploy (`kci`)
