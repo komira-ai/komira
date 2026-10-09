@@ -381,7 +381,7 @@ def test_huffman_tab_outside_printable_ascii() raises:
 
 def test_huffman_utf8_octets_with_seven_bits_of_padding() raises:
     """Appendix B: c3 is 7fff1 (19 bits) and a9 is 3fffdd (22 bits); 41 bits
-    with 7 bits of padding make fffe3fffeeff. They decode to the two octets
+    with 7 bits of padding make ff fe 3f ff ee ff. They decode to the two octets
     of "é"."""
     var buf = _hex("86ff fe3f ffee ff")
     var r = decode_string(Span(buf), 0)
