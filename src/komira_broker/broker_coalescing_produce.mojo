@@ -860,7 +860,7 @@ struct BrokerBatchAppender[
         if r:
             return AppendOutcome.won(r.take())
         # take->None is the defense-in-depth 412 path (a deferred 412).
-        return AppendOutcome.lost_slot()
+        return AppendOutcome.lost_slot()  # cov: unreachable both AsyncCasStore conformers report a 412 from cas_put_start/poll, so take never returns None
 
     def classify_append_error(self, msg: String) -> UInt8:
         # The reaped-slot refusals (manifest_slot_guard.mojo) come FIRST, and
@@ -1251,7 +1251,7 @@ struct BrokerProduceSpineFactory[
         # The segment key's flush_ts. Use the OLDEST buffered
         # item's enqueue ts (the linger band's basis) when present; else 0.
         if items.len() == 0:
-            return Int64(0)
+            return Int64(0)  # cov: unreachable the window makes a spine only for a non-empty buffer
         return items[0].ts_ms
 
 

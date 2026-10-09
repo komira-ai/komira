@@ -1416,10 +1416,10 @@ def assign_partitions(
             fill_cursor += 1
         if fill_cursor >= n:
             # Defensive: capacity must always cover the unassigned count.
-            raise Error(
-                "assign_partitions: ran out of node capacity at pid "
-                + String(pid)
-                + " (invariant violated — capacity should equal P)"
+            raise Error(  # cov: unreachable the quotas sum to P and each pid takes one slot, so a slot is always left
+                "assign_partitions: ran out of node capacity at pid "  # cov: unreachable see the line above
+                + String(pid)  # cov: unreachable see the line above
+                + " (invariant violated — capacity should equal P)"  # cov: unreachable see the line above
             )
         owners[pid] = node_ids[fill_cursor]
         remaining[fill_cursor] = remaining[fill_cursor] - 1
@@ -1937,8 +1937,8 @@ def _vread_i64(body: Span[UInt8, _], pos: Int) raises -> Int64:
     # reinterpreted as Int64 (two's-complement bitcast). The check raises before
     # any index access. Used for the generations trailer.
     if pos < 0 or pos + 8 > len(body):
-        raise Error(
-            "assignment binary view: truncated i64 at offset " + String(pos)
+        raise Error(  # cov: unreachable generation() and max_generation() read only inside the arrays the view constructor bounds-checked
+            "assignment binary view: truncated i64 at offset " + String(pos)  # cov: unreachable see the line above
         )
     var u = UInt64(0)
     for k in range(8):
