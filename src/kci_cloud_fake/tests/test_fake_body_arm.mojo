@@ -148,7 +148,7 @@ def test_a_merged_resource_is_its_last_arm() raises:
     _same_as_last("certificate, then bucket", cert, _BUCKET, graph, Bool(_merged(cert, _BUCKET).certificate), bad)
 
     # network_limits: a subnet with no zone, read off a bucket (aws).
-    var subnet = String('{"id":"x","subnet":{"network":{"resource":"n"},"ipv4Cidr":"10.0.1.0/24"}}')
+    var subnet = String('{"id":"x","subnet":{"network":{"resource":"n"},"ipv4Cidr":"192.0.2.0/24"}}')
     _same_as_last("subnet, then bucket", subnet, _BUCKET, graph, Bool(_merged(subnet, _BUCKET).subnet), bad)
 
     # trigger_limits: a day of the month and a day of the week, read off a
