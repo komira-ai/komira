@@ -218,7 +218,8 @@ def test_safe_as_built_node_over_pass_through_and_computed() raises:
 
 
 def test_safe_alias_pass_through_spelling() raises:
-    # The python skins author Alias(ColRef(k), "k") for every kept column;
+    # A front end may author Alias(ColRef(k), "k") for every kept column (the
+    # python skins, which are not in this tree, do);
     # `_is_col_named` must see through alias layers that keep the name, and
     # must refuse one that renames. Defect: alias layers treated as computed,
     # or any alias treated as a pass-through.
@@ -303,7 +304,7 @@ def test_below_pass_through_returns_the_predicate_itself() raises:
 def test_below_computed_row_local_is_substituted_without_alias() raises:
     # `v > 8` over `x * 2 AS v` becomes `x * 2 > 8`, with the alias stripped.
     # Defect: pushed raw (reads the child's own v), or the alias left inside
-    # the comparison (the pipeline compiler cannot resolve it).
+    # the comparison (no column below the Project carries that name).
     var got = _below(_gt(Expr.col_ref("v"), 8))
     assert_true(Bool(got))
     var r = _render(got.value())

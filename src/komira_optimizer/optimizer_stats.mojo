@@ -2,9 +2,10 @@
 # Optimizer statistics -- cardinality + row width estimation
 # =============================================================================
 #
-# Used by the optimizer for:
-#   - Join build-side selection (smaller side = build side)
-#   - Future: join order optimization, filter selectivity
+# `estimate_cardinality` is used by join reordering (`optimizer_reorder`)
+# and eager aggregation (`optimizer_eager_agg`). `estimate_row_width` is the
+# row-width half of a build-side cost model (smaller side = build side); no
+# build-side selection rule is in this tree.
 #
 # This is a port of the v0.3 Rust cost model (cardinality and
 # estimate_row_width).
@@ -12,7 +13,7 @@
 # Cardinality is heuristic: scan nodes return either
 # `ScanData.row_count` (if populated) or a hardcoded default.
 #
-# The cost model used for build-side selection is:
+# The cost model a build-side selection is designed to use is:
 #     build_cost = cardinality * row_width
 # matching DuckDB `build_probe_side_optimizer.cpp:119-153` and our v0.3
 # Rust implementation.
@@ -55,9 +56,8 @@ comptime DEFAULT_FILTER_SELECTIVITY_NUM: Int = 1
 comptime DEFAULT_FILTER_SELECTIVITY_DEN: Int = 2
 
 # HAVING clause selectivity (Filter above Aggregate). HAVING predicates
-# typically filter out most groups (e.g. Q18's `SUM(l_quantity) > 300`
-# selects 57 of 600K groups = 0.01%). We use 1% -- critical for Q18
-# semi-join flip decisions. Matches DuckDB HAVING behavior.
+# typically filter out most groups (e.g. TPC-H Q18's
+# `SUM(l_quantity) > 300`). We use 1%. Matches DuckDB HAVING behavior.
 # Encoded as num/den since Optional[Int] avoids Float64 copies.
 comptime HAVING_SELECTIVITY_NUM: Int = 1
 comptime HAVING_SELECTIVITY_DEN: Int = 100
@@ -90,9 +90,9 @@ def _apply_selectivity_ceil(card: Int, sel: Float64) -> Int:
 
     Floor-to-Int truncation (`Int(card * sel)`) under-counts when the
     product is non-integral. The ceil-correction lifts the floor by
-    one when there is a fractional remainder. Empirically this affects
-    cardinality only at small selectivities (< 0.5 with small card);
-    the clamp-to-1 below catches the degenerate sel ~ 0 case so we
+    one when there is a fractional remainder, so it changes the result
+    only for a non-integral product; the clamp-to-1 below catches the
+    degenerate sel ~ 0 case so we
     never emit 0 rows.
     """
     if card < 1:
@@ -126,7 +126,7 @@ def _ceil_div(num: Int, den: Int) -> Int:
 def estimate_row_width(schema: Schema) -> Int:
     """Estimate the average row width in bytes for a schema.
 
-    Used by the build-side cost model: wider rows cost more memory in the
+    For a build-side cost model (not in this tree): wider rows cost more memory in the
     hash table. Includes a per-column overhead byte (DuckDB
     COLUMN_COUNT_PENALTY) and a fixed hash table entry overhead
     (hash + ~3 HT entry pointers).
@@ -199,7 +199,7 @@ def estimate_cardinality(plan: LogicalPlan) -> Int:
     `ScanData.row_count` and fall back to `DEFAULT_ROW_COUNT` when
     `row_count` is None.
 
-    Used by the optimizer's join build-side rule. Must return >= 1 to
+    Used by join reordering and eager aggregation. Must return >= 1 to
     avoid divide-by-zero and degenerate cost comparisons.
     """
     var tag = plan.tag
@@ -234,7 +234,7 @@ def estimate_cardinality(plan: LogicalPlan) -> Int:
         var child_card = estimate_cardinality(fdata.child[])
         # HAVING clause: Filter above Aggregate. These predicates reference
         # aggregate outputs (counts, sums), and they typically filter most
-        # groups. 1% selectivity matches DuckDB and is critical for Q18.
+        # groups. 1% selectivity matches DuckDB.
         if fdata.child[].tag == PLAN_AGGREGATE:
             # ceil((card * NUM) / DEN) clamped to >= 1.
             # Floor under-counts surviving HAVING groups; ceil matches

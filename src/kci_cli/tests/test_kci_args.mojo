@@ -465,6 +465,14 @@ def test_build_budget_is_the_per_change_check_s() raises:
     assert_equal(parse_kci_args(_pr("--build-budget-s", "604800")).build_budget_s, 604800)
     _refused(_pr("--build-budget-s", "604801"), String("--build-budget-s '604801' is more than 604800 (a week)"))
     _refused(_pr("--build-budget-s", "999999999"), String("is more than 604800"))
+    # komira#1153: under a budget every build run may take all the budget left,
+    # so a per-run cap beside it is refused, never silently ignored; either
+    # alone is still taken
+    _refused(
+        _pr("--work-dir", "/w", "--log-dir", "/l", "--build-budget-s", "6900", "--build-timeout-s", "3600"),
+        String("--build-timeout-s is not used with --build-budget-s: every build run may take all the budget left"),
+    )
+    assert_equal(parse_kci_args(_pr("--work-dir", "/w", "--log-dir", "/l", "--build-timeout-s", "60")).build_timeout_s, 60)
     # a release build has no budget to share: refused, never silently ignored
     _refused(
         _run("--work-dir", "/w", "--log-dir", "/l", "--build-budget-s", "60"),

@@ -28,5 +28,35 @@ Mojo library only if its welded test passed.
 | `:komira_test_python` | a welded Mojo test reads `:golden_sums[sums.tsv]` and the whole `:golden_sums` directory as declared `test_data`, and finds the sums worked out by hand from the CSV | an oracle's output that a Mojo test cannot stage, or a sub-target naming another file |
 | `:protobuf_gencode` | the pinned protobuf runtime imports `gencode_probe_pb2`, which the pinned protoc generated (`python_proto`) and which records gencode 5.29.1, with its upb backend, and parses fixed wire bytes to the values they encode and back to the same bytes | a protobuf pin that refuses the gencode of the repository's protoc (the runtime's `VersionError`), or a protoc bump that changes the gencode unnoticed |
 
+## CPython 3.14 and free-threaded 3.14t
+
+These run on `:cpython314` or `:cpython314t`
+([third_party/python](../../../../third_party/python/README.md#cpython-314))
+with its own closure. Their pinned outcomes, in [`BUCK`](BUCK), are facts
+about the pinned versions, recorded so that a bump that changes one fails
+until the pin says the new outcome.
+
+| target | what it proves | the defect it catches |
+|---|---|---|
+| `:gil_cp314`, `:gil_cp314t` | the interpreter is 3.14.8 and a GIL build (`Py_GIL_DISABLED` unset, the GIL enabled at startup) or a free-threaded one (the GIL disabled at startup, `sys._is_gil_enabled()`); each distribution of the closure imports at its pinned version in a fresh child interpreter, whose GIL is in the build's state when it starts; the GIL's state after the import, and after importing every extension module the distribution installs, is the pinned one (`disabled`, `enabled`, or `enabled by <module>` from CPython's warning); the parser of that warning reads each kind of result, and on 3.14t the warning's text is found in the interpreter's own files (no import of the pinned closure enables the GIL, so the `enabled by <module>` reading is proved by this synthetic check, not by a real import); a child's result, and a child that exits non-zero or is killed, are read as such | a free-threaded pin that is a GIL build or the reverse; a wheel bump whose extension module stops declaring free-threading support, so that importing it puts user code meant to run in parallel back behind the GIL; a parser that misreads CPython's warning |
+| `:subinterp_cp314`, `:subinterp_cp314t` | each of cloudpickle, numpy, pandas, pyarrow and scikit-learn, imported in a child process inside one own-GIL sub-interpreter (`concurrent.interpreters`), gives its pinned outcome: `ok`, or the innermost exception of the failure; the walk to that exception follows a `raise ... from` cause, an implicit context and a context `from None` suppresses, and a child killed by a signal, exiting non-zero or printing nothing is read as such, with absolute paths cut to their last component | a bump that changes which libraries a user-defined function can import in a sub-interpreter, unnoticed |
+| `:licenses_cp314`, `:licenses_cp314t` | `licenses.py`, as `:licenses`, over each 3.14 interpreter and its closure | as `:licenses` |
+
+What they measured (both interpreters alike, except the GIL's state):
+
+| distribution | GIL after the import, and after every extension module, on 3.14t | own-GIL sub-interpreter (3.14 and 3.14t) |
+|---|---|---|
+| cloudpickle | disabled | ok |
+| numpy | disabled | `ImportError: module numpy._core._multiarray_umath does not support loading in subinterpreters` |
+| pandas | disabled | fails on numpy's module, as numpy |
+| pyarrow | disabled | `ImportError: module pyarrow.lib does not support loading in subinterpreters` |
+| scikit-learn | disabled | `ImportError: module sklearn.__check_build._check_build does not support loading in subinterpreters` |
+| scipy, joblib, narwhals, threadpoolctl, python-dateutil, six, tzdata | disabled | not measured |
+
+No extension module of the 3.14t closure enables the GIL.
+`scipy.linalg._matfuncs_sqrtm_triu` does not import alone, on either
+interpreter (a circular import with `scipy.linalg`); that is part of the
+pinned outcome.
+
 The mutants each was seen red against are in the pull request that added
 them.
