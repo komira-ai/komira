@@ -157,10 +157,23 @@ def test_policy_bounds() raises:
     assert_equal(_policy_err(issuer=""), "JoseError: the policy issuer is empty")
     assert_equal(_policy_err(audience=""), "JoseError: the policy audience is empty")
     comptime TYP = "JoseError: the policy typ must be at+jwt or JWT"
-    assert_equal(_policy_err(typ="application/at+jwt"), TYP)
-    assert_equal(_policy_err(typ="jwt"), TYP)
-    assert_equal(_policy_err(typ=""), TYP)
+    assert_equal(_policy_err(typ="at+jwt"), "")
     assert_equal(_policy_err(typ="JWT"), "")
+    # Each of the two accepted types is matched exactly: the near-miss
+    # tables of `at+jwt` and `JWT` (a prefix, an extension at the end and at
+    # the front, a proper suffix, a case variant), the long media type and
+    # "". Every value is tried and every miss is reported, so a loose
+    # compare on either type shows.
+    var misses = String("")
+    for t in [
+        "at+jw", "at+jwtx", "xat+jwt", "t+jwt", "AT+JWT",
+        "JW", "JWTx", "xJWT", "WT", "jwt",
+        "application/at+jwt", "",
+    ]:
+        var got = _policy_err(typ=String(t))
+        if got != TYP:
+            misses += String(t) + " -> " + got + "; "
+    assert_equal(misses, "")
     assert_equal(_policy_err(now=-1), "JoseError: the policy time is negative")
     assert_equal(_policy_err(now=0), "")
     comptime LEEWAY = "JoseError: the policy leeway must be 0 to 60 seconds"
@@ -212,6 +225,17 @@ def test_typ_is_pinned() raises:
         _err(_b64('{"alg":"EdDSA","kid":"k1","typ":"JWT"}') + "." + _b64(c) + ".AAAA"),
         OTHER,
     )
+    # The pin is byte for byte, case included (a deliberate narrowing of
+    # RFC 7515 4.1.9's case-insensitive media types). The near-miss table of
+    # `at+jwt`: a prefix, the type extended at the end and at the front, a
+    # proper suffix, a case variant and "". Every miss is reported.
+    var misses = String("")
+    for t in ["at+jw", "at+jwtx", "xat+jwt", "t+jwt", "AT+JWT", ""]:
+        var h = String('{"alg":"EdDSA","kid":"k1","typ":"') + String(t) + '"}'
+        var got = _err(_mint_h(h, c))
+        if got != OTHER:
+            misses += String(t) + " -> " + got + "; "
+    assert_equal(misses, "")
     # A JWT-typed policy accepts JWT and refuses at+jwt.
     var jwt = _policy(typ="JWT")
     assert_equal(_err_p(_mint_h('{"alg":"EdDSA","kid":"k1","typ":"JWT"}', c), jwt), "")
@@ -252,7 +276,9 @@ def test_iss() raises:
     assert_equal(_err(_mint(_claims(iss='"issuer.example"'))), OTHER)
     assert_equal(_err(_mint(_claims(iss='"HTTPS://issuer.example"'))), OTHER)
     # A prefix of the issuer, down to the empty string, is another issuer.
-    assert_equal(_err(_mint(_claims(iss='"https://issuer.exampl"'))), OTHER)
+    # (The prefix stops before the host: a shortened host is not a reserved
+    # example name, and the public-boundary lint refuses it.)
+    assert_equal(_err(_mint(_claims(iss='"https:/"'))), OTHER)
     assert_equal(_err(_mint(_claims(iss='""'))), OTHER)
     # The issuer with something in front of it is another issuer.
     assert_equal(_err(_mint(_claims(iss='"xhttps://issuer.example"'))), OTHER)
@@ -261,7 +287,7 @@ def test_iss() raises:
 def test_aud() raises:
     # Catches: aud missing, an array without ours accepted, an empty or
     # mixed array accepted, only the first or last element looked at, or a
-    # prefix or suffix match either way.
+    # prefix, suffix or case-folded match either way.
     comptime BAD = "JoseError: claim aud is not a string or a non-empty array of strings"
     comptime NOT_OURS = "JoseError: claim aud does not name the audience"
     assert_equal(_err(_mint(_claims(aud="-"))), "JoseError: claim aud is missing")
@@ -285,6 +311,22 @@ def test_aud() raises:
     # Ours first and another value after it: every element is looked at,
     # not only the last.
     assert_equal(_err(_mint(_claims(aud='["service-a","x"]'))), "")
+    # RFC 7519 2 and 4.1.3: aud values are compared case-sensitively with no
+    # transformation. The near-miss table of `service-a`: a prefix, the
+    # audience extended at the end and at the front, a proper suffix, a case
+    # variant and "", each as a string and as the only array element. A
+    # prefix, suffix or case-folded compare in either direction accepts at
+    # least one of them; every miss is reported.
+    var misses = String("")
+    for a in ["service", "service-ab", "xservice-a", "ervice-a", "SERVICE-A", ""]:
+        var s = String('"') + String(a) + '"'
+        var got = _err(_mint(_claims(aud=s)))
+        if got != NOT_OURS:
+            misses += s + " -> " + got + "; "
+        got = _err(_mint(_claims(aud=String("[") + s + "]")))
+        if got != NOT_OURS:
+            misses += String("[") + s + "] -> " + got + "; "
+    assert_equal(misses, "")
 
 
 def test_sub() raises:

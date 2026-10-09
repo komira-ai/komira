@@ -144,6 +144,17 @@ def test_kid_selects_and_never_falls_back() raises:
     assert_equal(_err(v, _kid("k1x")), "JoseError: kid names no key in the set")
     assert_equal(_err(v, _kid("k")), "JoseError: kid names no key in the set")
     assert_equal(_err(v, _kid("xk1")), "JoseError: kid names no key in the set")
+    # RFC 7515 4.1.4: kid is case-sensitive. The near-miss table of `k1`: a
+    # prefix, the kid extended at the end and at the front, a proper suffix
+    # and a case variant (an empty kid is refused by the header gate before
+    # any key is looked at). A prefix, suffix or case-folded compare in
+    # either direction accepts at least one of them.
+    var misses = String("")
+    for k in ["k", "k1x", "xk1", "1", "K1"]:
+        var got = _err(v, _kid(String(k)))
+        if got != "JoseError: kid names no key in the set":
+            misses += String(k) + " -> " + got + "; "
+    assert_equal(misses, "")
 
 
 def test_two_keys_one_kid_refused() raises:
@@ -160,14 +171,27 @@ def test_two_keys_one_kid_refused() raises:
 def test_unsupported_algorithms() raises:
     # Catches: a verifier built for an algorithm outside the three.
     var s = _set(_okp("k1"))
-    for alg in ["HS256", "none", "PS256", "ES384", "RS512", "eddsa", ""]:
+    # Each of the three names is matched exactly: its prefix, the name
+    # extended at the end and at the front, a proper suffix and a case
+    # variant are all unsupported. Every value is tried and every miss is
+    # reported, so a loose compare on any one of the three names shows.
+    var misses = String("")
+    for alg in [
+        "HS256", "none", "PS256", "ES384", "RS512", "",
+        "ES25", "ES256x", "xES256", "S256", "es256",
+        "EdDS", "EdDSAx", "xEdDSA", "dDSA", "eddsa",
+        "RS25", "RS256x", "xRS256", "rs256",
+    ]:
         var a = String(alg)
-        assert_equal(
-            _ctor_err(a, s),
+        var got = _ctor_err(a, s)
+        var want = (
             String("JoseError: algorithm \"")
             + a
-            + "\" is not supported (ES256, EdDSA and RS256 are)",
+            + "\" is not supported (ES256, EdDSA and RS256 are)"
         )
+        if got != want:
+            misses += a + " -> " + got + "; "
+    assert_equal(misses, "")
 
 
 def test_set_without_a_suitable_key() raises:
@@ -228,6 +252,37 @@ def test_key_alg_use_and_key_ops() raises:
     _ = v.verify(_kid("o-ok"))
 
 
+def test_key_alg_use_and_key_ops_are_exact() raises:
+    # Catches: a key's alg, use or key_ops element compared by prefix,
+    # suffix or case. Each near-miss table holds a prefix, the value
+    # extended at the end and at the front, a proper suffix, a case variant
+    # and "", and every miss is reported. A key_ops array with verify first
+    # and another value after it is accepted (every element is looked at).
+    var x = base64_url_decode_nopad(X)
+    var misses = String("")
+    for a in ["EdDS", "EdDSAx", "xEdDSA", "dDSA", "eDdsa", ""]:
+        var got = key_refusal(Jwk.ed25519(Span(x), alg=String(a)), "EdDSA")
+        if got != "the key's alg is not the pinned algorithm":
+            misses += String("alg ") + String(a) + " -> " + got + "; "
+    for u in ["si", "sigx", "xsig", "ig", "SIG", ""]:
+        var got = key_refusal(Jwk.ed25519(Span(x), key_use=String(u)), "EdDSA")
+        if got != "the key's use is not sig":
+            misses += String("use ") + String(u) + " -> " + got + "; "
+    for o in ["verif", "verifyx", "xverify", "erify", "VERIFY", ""]:
+        var ops = List[String]()
+        ops.append(String(o))
+        var got = key_refusal(Jwk.ed25519(Span(x), key_ops=ops^), "EdDSA")
+        if got != "the key's key_ops does not include verify":
+            misses += String("key_ops ") + String(o) + " -> " + got + "; "
+    var first = List[String]()
+    first.append("verify")
+    first.append("sign")
+    var got = key_refusal(Jwk.ed25519(Span(x), key_ops=first^), "EdDSA")
+    if got != "":
+        misses += String("key_ops [verify, sign] -> ") + got + "; "
+    assert_equal(misses, "")
+
+
 def test_single_key() raises:
     # Catches: a single-key verifier that ignores a kid naming another key,
     # or that requires a kid (RFC 7515's own examples carry none).
@@ -247,6 +302,14 @@ def test_single_key() raises:
     assert_equal(
         _err(v, _kid("xk1")), "JoseError: kid does not name the configured key"
     )
+    # The same near-miss table as the set path (see
+    # test_kid_selects_and_never_falls_back), against the one key's kid.
+    var misses = String("")
+    for k in ["k", "k1x", "xk1", "1", "K1"]:
+        var got = _err(v, _kid(String(k)))
+        if got != "JoseError: kid does not name the configured key":
+            misses += String(k) + " -> " + got + "; "
+    assert_equal(misses, "")
     var anon = JwsVerifier.single_key("EdDSA", Jwk.ed25519(Span(x)))
     _ = anon.verify(_kid("anything"))
     var a3x = base64_url_decode_nopad(A3_X)
@@ -350,6 +413,12 @@ def main() raises:
         test_key_alg_use_and_key_ops()
     except e:
         failures += String("test_key_alg_use_and_key_ops: ") + String(e) + "\n"
+    try:
+        test_key_alg_use_and_key_ops_are_exact()
+    except e:
+        failures += (
+            String("test_key_alg_use_and_key_ops_are_exact: ") + String(e) + "\n"
+        )
     try:
         test_single_key()
     except e:
