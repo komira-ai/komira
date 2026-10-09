@@ -40,6 +40,16 @@ def test_unrecorded_sites_read_zero_and_have_names() raises:
     assert_equal(keyeq_read(KEYEQ_SLAB_STRIDE16, 0), 0)
     for s in range(KEYEQ_N_SITES):
         assert_true(keyeq_site_name(s) != String(""))
+        # An in-range site has its own name, never the numbered fallback.
+        assert_true(not keyeq_site_name(s).startswith("site_"))
+
+
+def test_out_of_range_site_falls_back_to_its_number() raises:
+    # A site id past the table (a newer caller, a stale dump reader) is named
+    # by its number rather than dropped or aliased to a real site.
+    assert_equal(keyeq_site_name(KEYEQ_N_SITES), String("site_") + String(KEYEQ_N_SITES))
+    assert_equal(keyeq_site_name(1000), "site_1000")
+    assert_equal(keyeq_site_name(-1), "site_-1")
 
 
 def main() raises:
