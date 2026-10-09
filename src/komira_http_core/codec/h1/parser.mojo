@@ -34,7 +34,6 @@ from komira_http_core.codec.h1.limits import (
     PARSE_ERR_HEADER_SIZE_OVERFLOW,
     PARSE_ERR_HEADER_TOTAL_OVERFLOW,
     PARSE_ERR_HEADER_VALUE_CONTROL_CHAR,
-    PARSE_ERR_HEADER_VALUE_NOT_UTF8,
     PARSE_ERR_HTTP_09_REJECTED,
     PARSE_ERR_HTTP_VERSION_BAD,
     PARSE_ERR_HTTP_VERSION_UNSUPPORTED,
@@ -521,12 +520,13 @@ def _parse_header_line(
             )
             return out^
         k = k + 1
-    # RFC 9110 §5.5: obs-text is opaque data, so the value keeps the octets
-    # the client sent. A `String` must be well-formed UTF-8; a value that is
-    # not cannot be kept unchanged and is refused.
-    var bad = utf8_error_offset(buf, vs, ve)
-    if bad >= 0:
-        out.err = ParseError.make(PARSE_ERR_HEADER_VALUE_NOT_UTF8, bad)
+    # RFC 9110 §5.5: obs-text is opaque data. The header map holds `String`s,
+    # which must be well-formed UTF-8, so a value that is well-formed UTF-8 is
+    # kept as the octets sent. A value that is not (a lone 0xFF, Latin-1 0xE9)
+    # is still served: each octet becomes the code point of the same number,
+    # as the HPACK decoder does, so the value is re-encoded, never refused.
+    if utf8_error_offset(buf, vs, ve) >= 0:
+        out.value = _slice_to_string(buf, vs, ve)
         return out^
     out.value = String(unsafe_from_utf8=buf[vs:ve])
     return out^

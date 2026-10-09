@@ -33,7 +33,6 @@ from komira_http_core.codec import (
     PARSE_ERR_HEADER_SIZE_OVERFLOW,
     PARSE_ERR_HEADER_TOTAL_OVERFLOW,
     PARSE_ERR_HEADER_VALUE_CONTROL_CHAR,
-    PARSE_ERR_HEADER_VALUE_NOT_UTF8,
     PARSE_ERR_HTTP_09_REJECTED,
     PARSE_ERR_HTTP_VERSION_BAD,
     PARSE_ERR_HTTP_VERSION_UNSUPPORTED,
@@ -414,7 +413,8 @@ def test_field_value_ows_and_content() raises:
 def test_field_value_ctl_and_del_refused() raises:
     """CTLs and DEL are not field-vchar (RFC 9110 section 5.5): refused at
     their offset. obs-text (0x80-0xFF) is kept as sent when it is well-formed
-    UTF-8 and refused at the ill-formed byte when it is not."""
+    UTF-8; when it is not, the request is still served, each octet stored as
+    the code point of the same number."""
     _expect_err(String(_RL) + "X: a" + chr(0x7F) + "b\r\n\r\n", _D(),
                 PARSE_ERR_HEADER_VALUE_CONTROL_CHAR, 400, 20)
     _expect_err(String(_RL) + "X: a" + chr(0x01) + "\r\n\r\n", _D(),
@@ -426,9 +426,14 @@ def test_field_value_ctl_and_del_refused() raises:
     for b in tail:
         buf.append(b)
     var o = _parse_bytes(buf, _D())
-    assert_equal(Int(o.err.kind), Int(PARSE_ERR_HEADER_VALUE_NOT_UTF8))
-    assert_equal(Int(o.err.status), 400)
-    assert_equal(o.err.offset, 20)
+    assert_true(o.err.is_ok())
+    var lat = String("a") + chr(0x80) + chr(0xFF)
+    var lat_s = _header(o, String("x"))
+    var lat_got = lat_s.as_bytes()
+    var lat_want = lat.as_bytes()
+    assert_equal(len(lat_got), len(lat_want))
+    for i in range(len(lat_want)):
+        assert_equal(lat_got[i], lat_want[i])
     var ok = _bytes(String(_RL) + "X: a" + chr(0xFF) + "\r\n\r\n")
     var p = _parse_bytes(ok, _D())
     assert_true(p.err.is_ok())

@@ -3,10 +3,11 @@
 # =============================================================================
 #
 # The h1 parser stores a header field value as the exact octets the client
-# sent (RFC 9110 §5.5: obs-text is opaque data). The header map holds
-# `String`s, and a `String` must be well-formed UTF-8, so the parser checks a
-# value with `utf8_error_offset` before it builds the `String` from its bytes,
-# and refuses a value that fails.
+# sent (RFC 9110 §5.5: obs-text is opaque data) when it can. The header map
+# holds `String`s, and a `String` must be well-formed UTF-8, so the parser
+# checks a value with `utf8_error_offset` before it builds the `String` from
+# its bytes. A value that fails is still served, re-encoded one code point per
+# octet.
 # =============================================================================
 
 

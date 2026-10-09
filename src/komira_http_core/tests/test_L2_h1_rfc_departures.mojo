@@ -13,11 +13,12 @@
 #   * RFC 9110 section 10.1.1: a server MUST ignore Expect: 100-continue in an
 #     HTTP/1.0 request (it reported the expectation, so the server sent 100).
 #   * RFC 9110 section 5.5: obs-text is opaque data (each byte was re-encoded
-#     as the UTF-8 of the code point with that number). A value is now kept as
-#     the octets sent; one that is not well-formed UTF-8 cannot be held in the
-#     String header map unchanged, so it is refused at its first ill-formed
-#     byte. The well-formed set is the Unicode Standard's Table 3-7, and each
-#     bound of each row has a case on both sides.
+#     as the UTF-8 of the code point with that number). A value that is
+#     well-formed UTF-8 is now kept as the octets sent. One that is not cannot
+#     be held in the String header map unchanged; it is still served, with
+#     each octet re-encoded as before, never refused. The well-formed set is
+#     the Unicode Standard's Table 3-7, and each bound of each row has a case
+#     on both sides.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -27,7 +28,6 @@ from komira_http_core.codec import (
     HttpMethod,
     PARSE_ERR_EXPECT_UNSUPPORTED,
     PARSE_ERR_HEADER_TOTAL_OVERFLOW,
-    PARSE_ERR_HEADER_VALUE_NOT_UTF8,
     PARSE_ERR_HTTP_VERSION_BAD,
     PARSE_ERR_METHOD_LOWERCASE,
     PARSE_ERR_METHOD_UNKNOWN,
@@ -96,8 +96,8 @@ def test_leading_empty_lines_are_ignored() raises:
 
 
 def test_leading_empty_lines_count_against_the_header_window() raises:
-    """Skipped CRLFs are bytes of the head: 20 of them fill a 20-byte window,
-    so a request after them is 431, not parsed."""
+    """Skipped CRLFs are bytes of the head: 10 CRLFs (20 bytes) fill a
+    20-byte window, so a request after them is 431, not parsed."""
     var lim = ParseLimits.defaults()
     lim.max_total_header_bytes = 20
     var s = String()
@@ -107,6 +107,27 @@ def test_leading_empty_lines_count_against_the_header_window() raises:
     var o = _parse(_bytes(s), lim)
     assert_equal(Int(o.err.kind), Int(PARSE_ERR_HEADER_TOTAL_OVERFLOW))
     assert_equal(Int(o.err.status), 431)
+
+
+def test_bare_cr_before_request_line_is_not_skipped() raises:
+    """Only CR followed by LF is an empty line: a CR followed by anything else
+    is the first byte of the request-line, which is then malformed (400 at 0).
+    Skipping a CR and the byte after it would turn "\rXGET" into GET."""
+    var cases = List[String]()
+    cases.append(String("\rGET / HTTP/1.1\r\n\r\n"))
+    cases.append(String("\rXGET / HTTP/1.1\r\n\r\n"))
+    cases.append(String("\r\n\rXGET / HTTP/1.1\r\n\r\n"))
+    var at = List[Int]()
+    at.append(0)
+    at.append(0)
+    at.append(2)
+    for i in range(len(cases)):
+        var o = _parse(_bytes(cases[i]), ParseLimits.defaults())
+        assert_equal(
+            Int(o.err.kind), Int(PARSE_ERR_REQUEST_LINE_MALFORMED), repr(cases[i])
+        )
+        assert_equal(Int(o.err.status), 400, repr(cases[i]))
+        assert_equal(o.err.offset, at[i], repr(cases[i]))
 
 
 # -----------------------------------------------------------------------------
@@ -181,7 +202,7 @@ def test_expect_continue_ignored_on_http10() raises:
 
 
 # -----------------------------------------------------------------------------
-# RFC 9110 section 5.5: obs-text kept as sent.
+# RFC 9110 section 5.5: obs-text kept as sent when it is well-formed UTF-8.
 # -----------------------------------------------------------------------------
 
 
@@ -208,10 +229,21 @@ def _seq(a: Int, b: Int = -1, c: Int = -1, d: Int = -1) -> List[UInt8]:
     return out^
 
 
+def _per_octet(b: List[UInt8]) -> List[UInt8]:
+    """The UTF-8 of `b` with each octet taken as the code point of the same
+    number: what a value that is not well-formed UTF-8 is stored as."""
+    var s = String()
+    for x in b:
+        s += chr(Int(x))
+    return _bytes(s)
+
+
 def test_obs_text_kept_as_sent() raises:
     """Every well-formed sequence at the edges of each Table 3-7 row is kept
-    byte for byte; every sequence one step outside an edge is refused with 400
-    at its lead byte. Each failing case is named, not only the first."""
+    byte for byte; every sequence one step outside an edge is served, not
+    refused, with each octet re-encoded. The two stored forms differ for every
+    case, so a wrong bound in the check shows. Each failing case is named,
+    not only the first."""
     var good = List[List[UInt8]]()
     good.append(_seq(0xC2, 0x80))
     good.append(_seq(0xDF, 0xBF))
@@ -273,15 +305,19 @@ def test_obs_text_kept_as_sent() raises:
             failed.append(String("kept ") + _hex(g) + "as " + _hex(got))
     for x in bad:
         var o = _parse(_value_with(x), ParseLimits.defaults())
-        if (
-            Int(o.err.kind) != Int(PARSE_ERR_HEADER_VALUE_NOT_UTF8)
-            or Int(o.err.status) != 400
-            or o.err.offset != 20
-        ):
+        var raw = _bytes("a")
+        for b in x:
+            raw.append(b)
+        raw.append(UInt8(ord("z")))
+        if not o.err.is_ok():
             failed.append(
-                String("not refused at 20: ") + _hex(x) + "kind "
+                String("refused ") + _hex(x) + "kind "
                 + String(Int(o.err.kind)) + " offset " + String(o.err.offset)
             )
+            continue
+        var got = _bytes(o.request.headers[String("x")])
+        if _hex(got) != _hex(_per_octet(raw)):
+            failed.append(String("ill-formed ") + _hex(x) + "as " + _hex(got))
     # A sequence cut short by the value's end: by the CR, and by trailing OWS.
     var cut = List[List[UInt8]]()
     cut.append(_seq(0xC2))
@@ -295,11 +331,15 @@ def test_obs_text_kept_as_sent() raises:
         for b in ows_end:
             buf.append(b)
         var o = _parse(buf, ParseLimits.defaults())
-        if (
-            Int(o.err.kind) != Int(PARSE_ERR_HEADER_VALUE_NOT_UTF8)
-            or o.err.offset != 20
-        ):
-            failed.append(String("truncated not refused: ") + _hex(s))
+        var raw = _bytes("a")
+        for b in s:
+            raw.append(b)
+        if not o.err.is_ok():
+            failed.append(String("truncated refused: ") + _hex(s))
+            continue
+        var got = _bytes(o.request.headers[String("x")])
+        if _hex(got) != _hex(_per_octet(raw)):
+            failed.append(String("truncated ") + _hex(s) + "as " + _hex(got))
     for f in failed:
         print("FAIL", f)
     assert_equal(len(failed), 0)

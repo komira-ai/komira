@@ -122,9 +122,6 @@ comptime PARSE_ERR_HEADER_OBS_FOLD: UInt8 = 23
 comptime PARSE_ERR_HEADER_COUNT_OVERFLOW: UInt8 = 24    # → 431
 comptime PARSE_ERR_HEADER_SIZE_OVERFLOW: UInt8 = 25     # → 431
 comptime PARSE_ERR_HEADER_TOTAL_OVERFLOW: UInt8 = 26    # → 431
-# A field value whose obs-text bytes are not well-formed UTF-8: the header
-# map holds `String`s, which cannot carry those octets unchanged.
-comptime PARSE_ERR_HEADER_VALUE_NOT_UTF8: UInt8 = 27
 # Body / encoding errors.
 comptime PARSE_ERR_CONTENT_LENGTH_INVALID: UInt8 = 40
 comptime PARSE_ERR_CONTENT_LENGTH_CONFLICT: UInt8 = 41
