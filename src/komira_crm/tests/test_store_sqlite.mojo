@@ -25,7 +25,8 @@
 #               the deal, an update that does not move writing none, list
 #               by pipeline and archived, external_id rules
 #   activities  create on a deal (moving last_activity_at forward only),
-#               an account and a card; a missing subject; list newest
+#               an account and a card (an equal or older time takes no
+#               number); a missing subject; list newest
 #               first; update; a system activity refused; a subject change
 #               refused
 #   fields      create, a key taken per kind but free in another kind, list
@@ -63,6 +64,7 @@ from komira_crm import (
     ERR_NOT_INITIALIZED,
     ERR_SYSTEM_ACTIVITY,
     ERR_VERSION_CONFLICT,
+    FEED,
     sqlite_schema,
 )
 
@@ -513,6 +515,11 @@ def check_activities() raises:
     var dd2 = store.get_deal[Rt](reactor, d.id)
     assert_equal(dd2.last_activity_at.value().seconds, Int64(100), "older and equal activities leave it")
     assert_equal(dd2.modseq, dd.modseq, "and write nothing to the deal")
+    var cols = List[String]()
+    cols.append(String("id"))
+    cols.append(String("modseq"))
+    var counter = store.database().get_by_key[Rt](reactor, String(FEED), cols^, String("id"), DbValue.text(String("crm")))
+    assert_equal(UInt64(counter.value().get_int8(1)), same.modseq, "nor take a number for it")
     var listed = store.list_activities[Rt](reactor, EntityKind.DEAL, d.id)
     assert_equal(len(listed), 3)
     var hi = same.id if same.id > n1.id else n1.id

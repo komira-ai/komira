@@ -27,6 +27,12 @@
 #   feed_cursor    a write commits after the feed read its rows and before it
 #                  answered: the next call with the returned cursor returns
 #                  it. Catches a cursor taken from the counter after the rows.
+#   feed_split     after the feed read the accounts, one writer commits an
+#                  account (n) and another an activity (n + 1): neither is
+#                  in the page, and the next call returns both. Catches
+#                  reading the tables without the counter read first as
+#                  their bound (the page would hold n + 1 and its cursor
+#                  would pass n).
 #   last_activity  a peer moves a deal's last_activity_at later between
 #                  create_activity's read and its guarded write: the later
 #                  time stays. Catches the write without its guard.
@@ -67,8 +73,8 @@ from komira_crm import (
     PIPELINES,
     sqlite_schema,
 )
-from komira_crm.rows import activity_row
-from komira_crm.schema import activity_cols, strs
+from komira_crm.rows import account_row, activity_row
+from komira_crm.schema import account_cols, activity_cols, strs
 
 comptime Rt = BlockingRuntime[NoopSink]
 comptime OK = "ok"
@@ -81,6 +87,7 @@ comptime FAIL_FEED = 4  # the next counter bump fails
 comptime PEER_FEED_WRITE = 5  # after the feed's last table read: the peer writes an activity
 comptime PEER_LAST_ACTIVITY = 6  # before the guarded last_activity_at write: the peer moves it later
 comptime PEER_OWNER = 7  # after erasure's query of `table`: the peer changes every owner
+comptime PEER_FEED_SPLIT = 8  # after the feed read `table`: an account, then an activity, commit
 comptime PUT_FAILED = "racing db: put failed"
 comptime FEED_FAILED = "racing db: counter write failed"
 comptime LATER_US = Int64(9_000_000_000_000_000)
@@ -107,6 +114,14 @@ struct RacingDb(Database, Movable, Deinitable):
             self.race = NO_RACE
             return True
         return False
+
+    def _bump[RT: Runtime](mut self, mut reactor: Reactor[RT.Sink]) raises -> UInt64:
+        """Take the next feed number, as a peer writer does."""
+        _ = self.inner.conditional_update[RT](
+            reactor, String(FEED), Filter.none(), List[DbColVal](), False, Optional[String](String("modseq")), List[String]()
+        )
+        var top = self.inner.get_by_key[RT](reactor, String(FEED), strs("id", "modseq"), String("id"), DbValue.text(String("crm")))
+        return UInt64(top.value().get_int8(1))
 
     def begin[RT: Runtime](mut self, mut reactor: Reactor[RT.Sink]) raises:
         self.inner.begin[RT](reactor)
@@ -164,6 +179,20 @@ struct RacingDb(Database, Movable, Deinitable):
             act.id = String("peer-activity")
             act.version = 1
             act.modseq = UInt64(top.value().get_int8(1))
+            _ = self.inner.put[RT](reactor, String(ACTIVITIES), activity_cols(), activity_row(act))
+        if len(cols) == 3 and self._fire(PEER_FEED_SPLIT, table):
+            # Two writers commit after the feed read the accounts: an account
+            # (a table already read) at n, then an activity (a table not yet
+            # read) at n + 1.
+            var acct = decode_json[Account]('{"orgCardId":"late"}')
+            acct.id = String("peer-account")
+            acct.version = 1
+            acct.modseq = self._bump[RT](reactor)
+            _ = self.inner.put[RT](reactor, String(ACCOUNTS), account_cols(), account_row(acct))
+            var act = decode_json[Activity]('{"subjectKind":"CARD","subjectId":"c","occurredAt":"2026-10-01T00:00:00Z"}')
+            act.id = String("peer-activity")
+            act.version = 1
+            act.modseq = self._bump[RT](reactor)
             _ = self.inner.put[RT](reactor, String(ACTIVITIES), activity_cols(), activity_row(act))
         if len(cols) == 1 and self._fire(PEER_OWNER, table):
             var moved = List[DbColVal]()
@@ -437,6 +466,21 @@ def check_feed_cursor() raises:
     assert_equal(next.modseq, UInt64(3))
 
 
+def check_feed_split() raises:
+    var rt = Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var store = _store(reactor)
+    store.database().arm(PEER_FEED_SPLIT, ACCOUNTS)
+    var first = store.changes[Rt](reactor, 0, 1000)
+    assert_equal(store.database().race, NO_RACE, "the peers wrote during the read")
+    assert_equal(len(first.changes), 1, "neither late write is in this page")
+    assert_equal(first.modseq, UInt64(1))
+    var next = store.changes[Rt](reactor, first.modseq, 1000)
+    assert_equal(len(next.changes), 2, "the next call returns both")
+    assert_equal(next.changes[0].id, "peer-account")
+    assert_equal(next.changes[1].id, "peer-activity")
+
+
 def check_last_activity() raises:
     var rt = Rt.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
@@ -505,6 +549,7 @@ def main() raises:
     check_key_lost()
     check_cas_lost()
     check_feed_cursor()
+    check_feed_split()
     check_last_activity()
     check_erase_moved()
     check_fails()

@@ -110,16 +110,8 @@ def activity_cols() -> List[String]:
     )
 
 
-def external_id_cols() -> List[String]:
-    return strs("entity_kind", "external_id", "entity_id")
-
-
 def field_def_cols() -> List[String]:
     return strs("id", "entity_kind", "field_key", "version", "modseq", "body")
-
-
-def field_key_cols() -> List[String]:
-    return strs("entity_kind", "field_key", "def_id")
 
 
 def sqlite_schema() -> List[String]:

@@ -34,7 +34,7 @@ from komira_crm_proto.crm import Account
 
 from komira_crm import ACCOUNTS, CrmStore, ERR_EXTERNAL_ID_TAKEN, ERR_NOT_FOUND, EXTERNAL_IDS
 from komira_crm.rows import account_row
-from komira_crm.schema import account_cols, external_id_cols, strs
+from komira_crm.schema import account_cols, strs
 
 from komira_crm_store_conformance import Rt, new_rt
 
@@ -99,7 +99,7 @@ struct PausingDb[D: Database](Database, Movable, Deinitable):
             key.append(DbValue.text(String("E")))
             key.append(DbValue.text(String("writer-b")))
             _ = self.peer.create_if_absent_composite[RT](
-                reactor, String(EXTERNAL_IDS), strs("entity_kind", "external_id"), external_id_cols(), key^
+                reactor, String(EXTERNAL_IDS), strs("entity_kind", "external_id"), strs("entity_kind", "external_id", "entity_id"), key^
             )
         elif table == String(ACCOUNTS) and self.mode == KILL:
             self.mode = NONE

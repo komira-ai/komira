@@ -34,7 +34,7 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_db import DbValue, Filter, Order
+from komira_db import DbColVal, DbValue, Filter, Order, Pred
 from komira_db.blocking import db_blocking_execute
 from komira_db_sqlite import SqliteDatabase
 from komira_proto_codec import decode_json, encode_json
@@ -48,11 +48,12 @@ from komira_crm import (
     DEALS,
     ERR_NOT_FOUND,
     FIELD_DEFS,
+    FEED,
     FIELD_KEYS,
     sqlite_schema,
 )
 from komira_crm.rows import account_row, deal_row, field_def_row
-from komira_crm.schema import account_cols, deal_cols, field_def_cols, field_key_cols
+from komira_crm.schema import account_cols, deal_cols, field_def_cols
 
 comptime Rt = BlockingRuntime[NoopSink]
 comptime Store = CrmStore[SqliteDatabase]
@@ -158,10 +159,20 @@ def check_orphans() raises:
     ref reactor = rt.reactor()
     var store = _store(reactor)
     var pid = _pid(store, reactor)
-    # Three orphans ahead of the live rows: rows a create wrote before its
-    # key, at numbers 2, 3 and 4 that the counter has passed.
+    # Orphans ahead of the live rows, rows a create wrote before its key:
+    # three accounts (numbers 2, 3 and 4), a deal (2) and two definitions
+    # (3 and 4), at numbers the counter has passed (taken directly: no live
+    # row holds them).
     for n in range(3):
-        _ = store.create_pipeline[Rt](reactor, decode_json[Pipeline]('{"name":"Z","stages":[{"key":"a","label":"A"}]}'))
+        _ = store.database().conditional_update[Rt](
+            reactor,
+            String(FEED),
+            Filter.just(Pred.eq(String("id"), DbValue.text(String("crm")))),
+            List[DbColVal](),
+            False,
+            Optional[String](String("modseq")),
+            List[String](),
+        )
         var ghost = decode_json[Account]('{"orgCardId":"o","externalId":"GHOST' + String(n) + '"}')
         ghost.id = String("ghost-account-") + String(n)
         ghost.version = 1
@@ -213,10 +224,11 @@ def check_orphans() raises:
     assert_equal(len(defs), 1)
     assert_equal(defs[0].id, real.id)
     # the feed: the orphans' numbers are passed over
-    comptime FULL = "PIPELINE@1 PIPELINE@2 PIPELINE@3 PIPELINE@4 CUSTOM_FIELD_DEF@5 ACCOUNT@6 "
+    comptime FULL = "PIPELINE@1 CUSTOM_FIELD_DEF@5 ACCOUNT@6 "
     assert_equal(_feed(store, reactor, 0, 1000), String(FULL) + "|6")
     assert_equal(_walk(store, reactor), FULL, "a page of one pages past three orphans")
     assert_equal(_feed(store, reactor, 4, 2), "CUSTOM_FIELD_DEF@5 ACCOUNT@6 |6")
+    assert_equal(_feed(store, reactor, 1, 1), "CUSTOM_FIELD_DEF@5 |5", "a page of one reads past the orphans of every table")
     # the next create of an orphan's external id wins the key
     var again = store.create_account[Rt](reactor, decode_json[Account]('{"orgCardId":"o","externalId":"GHOST1"}'), _at(2))
     assert_equal(store.get_account[Rt](reactor, again.id).external_id, "GHOST1")
