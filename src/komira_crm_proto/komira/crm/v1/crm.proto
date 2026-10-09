@@ -1,0 +1,222 @@
+syntax = "proto3";
+package komira.crm.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// The resources of a simple CRM's JSON API: accounts, the contacts cards
+// linked to them, pipelines and their stages, deals, activities, custom-field
+// definitions, the change feed and the error envelope. The API is the proto3
+// JSON mapping of these messages. People and companies are contacts cards
+// (`komira.contacts.v1.Card`); a CRM row names a card by its id.
+//
+// Generated into the Mojo package `komira_crm_proto` as
+// `komira_crm_proto.crm`; `komira_crm` stores them.
+//
+// Text forms used below:
+//   date      `YYYY-MM-DD`, a calendar date with no time zone
+//   currency  an ISO 4217 alphabetic code with a minor unit, for example `EUR`
+
+// Whether an account or a deal is listed. An archived one is left out of
+// lists and still resolves by id. A row written without one is active.
+enum Status {
+  ACTIVE = 0;
+  ARCHIVED = 1;
+}
+
+// What a pipeline stage means for the deals in it.
+enum StageKind {
+  OPEN = 0;
+  WON = 1;
+  LOST = 2;
+}
+
+// What an activity records. STAGE_CHANGED is written by the service when a
+// deal changes stage, never by a client.
+enum ActivityKind {
+  NOTE = 0;
+  CALL = 1;
+  MEETING = 2;
+  EMAIL_LOGGED = 3;
+  STAGE_CHANGED = 4;
+}
+
+// The kinds of row a field names: an activity's subject (ACCOUNT, DEAL or
+// CARD), a custom-field definition's entity (ACCOUNT, DEAL or CARD), an
+// external id's owner (ACCOUNT or DEAL), and a change feed entry (every kind
+// but CARD).
+enum EntityKind {
+  ENTITY_KIND_UNSPECIFIED = 0;
+  ACCOUNT = 1;
+  DEAL = 2;
+  CARD = 3;
+  ACTIVITY = 4;
+  PIPELINE = 5;
+  CUSTOM_FIELD_DEF = 6;
+}
+
+// The type of a custom field's value. Values are written as text: TEXT as
+// is, NUMBER as a decimal (`-12.5`), DATE as `YYYY-MM-DD`, BOOL as `true` or
+// `false`.
+enum FieldType {
+  TEXT = 0;
+  NUMBER = 1;
+  DATE = 2;
+  BOOL = 3;
+}
+
+// An authenticated principal: the token issuer and the subject within it.
+// Both are empty for "nobody" (an unowned row).
+message Principal {
+  string issuer = 1;
+  string subject = 2;
+}
+
+// A company the CRM tracks. Its name and addresses are the org card's.
+message Account {
+  string id = 1;                               // a UUID, written by the service
+  string org_card_id = 2;                      // the `org` card; several accounts may name one
+  Principal owner = 3;                         // a field to filter on, not a permission
+  string domain = 4;                           // for example `example.org`
+  Status status = 5;
+  string external_id = 6;                      // set at create only, unique among accounts
+  map<string, string> custom_fields = 7;       // CustomFieldDef.key -> value as text
+  uint64 version = 8;                          // the ETag; a conditional write names it
+  uint64 modseq = 9;                           // the change feed's number at the last write
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+// A card linked to an account, once per (account, card).
+message AccountContact {
+  string account_id = 1;
+  string card_id = 2;
+  string role = 3;                             // free text, for example "buyer"
+}
+
+// One stage of a pipeline. `key` is unique within its pipeline.
+message Stage {
+  string key = 1;                              // [a-z0-9_], 1 to 64 bytes
+  string label = 2;
+  StageKind kind = 3;
+}
+
+// An ordered list of stages a deal moves through.
+message Pipeline {
+  string id = 1;
+  string name = 2;
+  repeated Stage stages = 3;
+  uint64 version = 4;
+  uint64 modseq = 5;
+}
+
+// A sale in progress. The amount is an integer count of the currency's minor
+// unit (cents for `USD`, yen for `JPY`), so it is exact and sortable.
+message Deal {
+  string id = 1;
+  string pipeline_id = 2;
+  string stage_key = 3;                        // a key of the pipeline's stages
+  string title = 4;
+  string account_id = 5;                       // empty, or an account's id
+  string primary_contact_card_id = 6;          // empty, or a card's id
+  int64 amount_minor = 7;                      // not negative
+  string currency = 8;                         // empty only when the amount is 0
+  string close_date = 9;                       // empty, or a date
+  Principal owner = 10;
+  string external_id = 11;                     // set at create only, unique among deals
+  Status status = 12;
+  map<string, string> custom_fields = 13;
+  google.protobuf.Timestamp last_activity_at = 14;  // the latest activity's `occurred_at`
+  uint64 version = 15;
+  uint64 modseq = 16;
+  google.protobuf.Timestamp created_at = 17;
+  google.protobuf.Timestamp updated_at = 18;
+}
+
+// Something that happened to an account, a deal or a card. An activity is
+// never archived or deleted. A system activity (`system`) is written by the
+// service and refuses every update.
+message Activity {
+  string id = 1;
+  ActivityKind kind = 2;
+  EntityKind subject_kind = 3;                 // ACCOUNT, DEAL or CARD
+  string subject_id = 4;
+  string body = 5;
+  Principal actor = 6;                         // who wrote it, set by the service
+  google.protobuf.Timestamp occurred_at = 7;
+  bool system = 8;
+  uint64 version = 9;
+  uint64 modseq = 10;
+  string from_stage_key = 11;                  // STAGE_CHANGED: the stage the deal left
+  string to_stage_key = 12;                    // STAGE_CHANGED: the stage it entered
+}
+
+// A custom field of one entity kind. `key` is unique per entity kind; `key`,
+// `entity_kind` and `type` cannot change once written.
+message CustomFieldDef {
+  string id = 1;
+  EntityKind entity_kind = 2;                  // ACCOUNT, DEAL or CARD
+  string key = 3;                              // [a-z0-9_], 1 to 64 bytes
+  string label = 4;
+  FieldType type = 5;
+  uint64 version = 6;
+  uint64 modseq = 7;
+}
+
+message ListAccountsResponse {
+  repeated Account accounts = 1;
+}
+
+message ListAccountContactsResponse {
+  repeated AccountContact contacts = 1;
+}
+
+message ListPipelinesResponse {
+  repeated Pipeline pipelines = 1;
+}
+
+message ListDealsResponse {
+  repeated Deal deals = 1;
+}
+
+message ListActivitiesResponse {
+  repeated Activity activities = 1;
+}
+
+message ListCustomFieldDefsResponse {
+  repeated CustomFieldDef custom_field_defs = 1;
+}
+
+// One row in the change feed: its kind, its id and the feed number of its
+// latest write.
+message FeedEntry {
+  EntityKind kind = 1;
+  string id = 2;
+  uint64 modseq = 3;
+}
+
+// The rows written after a client's `since`, in feed-number order. `modseq`
+// is the cursor for the next call: the highest number returned, or `since`
+// when nothing is.
+message ChangesResponse {
+  repeated FeedEntry changes = 1;
+  uint64 modseq = 2;
+}
+
+// What an erasure of one principal rewrote: the accounts and deals it owned
+// (now unowned) and the activities it wrote (now by "erased").
+message EraseSubjectResponse {
+  uint32 accounts = 1;
+  uint32 deals = 2;
+  uint32 activities = 3;
+}
+
+// The body of every refusal: `{"error":{"code":...,"message":...}}`.
+message ApiError {
+  string code = 1;
+  string message = 2;
+  string field = 3;                            // the JSON path of the refused field, when there is one
+}
+
+message ErrorResponse {
+  ApiError error = 1;
+}
