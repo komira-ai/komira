@@ -14,7 +14,7 @@
 # ⛔ WHAT GOES RED WITHOUT THE GATE. Every refusal case here calls the door and
 # requires it to RAISE; against no gate at all the module does not exist and
 # this file does not compile, and against a gate that walks only the tags the
-# fail-open walker walks, the EIGHT non-WHEN container cases in
+# fail-open walker walks, the TWELVE non-WHEN container cases in
 # `test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips`
 # return False and this file fails.
 #
@@ -52,6 +52,9 @@ from komira_plan_expr.expr import (
     EXPR_TAG_COUNT,
     EXTRACT_YEAR,
     MATH2_POW,
+    MATH_SQRT,
+    STRFN_UPPER,
+    STRFNN_CONCAT,
     STR_LIKE,
 )
 from komira_plan_expr.scalar_value import ScalarValue
@@ -302,6 +305,41 @@ def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() ra
         "JSON_EXTRACT parent",
     )
 
+    # EXPR_MATH_FN / EXPR_STRING_FN — the one-child scalar function families.
+    assert_equal(
+        _walk(Expr.math_fn(MATH_SQRT, _corr())), String("T"), "MATH_FN child"
+    )
+    assert_equal(
+        _walk(Expr.string_fn(STRFN_UPPER, _corr())), String("T"),
+        "STRING_FN child",
+    )
+
+    # EXPR_STRING_FN_N — hidden in the THIRD argument, which is what catches an
+    # arm that reads a fixed number of arguments instead of looping over all.
+    var concat_args = List[Expr]()
+    concat_args.append(Expr.col_ref(String("a")))
+    concat_args.append(Expr.col_ref(String("b")))
+    concat_args.append(_corr())
+    assert_equal(
+        _walk(Expr.string_fn_n(STRFNN_CONCAT, concat_args^)), String("T"),
+        "STRING_FN_N third argument",
+    )
+
+    # EXPR_UDF_CALL — the UDF's one argument. `affine((SELECT ...))`.
+    assert_equal(
+        _walk(
+            Expr.udf_call(
+                String("affine"),
+                Optional[Int](7),
+                ArrowType.INT64,
+                ArrowType.INT64,
+                _corr(),
+            )
+        ),
+        String("T"),
+        "UDF_CALL child",
+    )
+
     # And one the fail-open walker DOES model, so the fixture is not selecting
     # only its blind spots: nested three deep under arms it has.
     assert_equal(
@@ -393,9 +431,9 @@ def test_door_refuses_a_subquery_on_the_pushed_parquet_filter() raises:
 
 
 def test_door_refuses_a_subquery_on_a_filter_op() raises:
-    """SITE 2 of 4: `ops[i].filter_predicate` — the site the cutter's PLAN_FILTER
-    arm writes verbatim from `FilterData.predicate`, i.e. the one a real
-    undecorrelated plan lands on."""
+    """SITE 2 of 4: `ops[i].filter_predicate`, which `MorselOp.filter` sets —
+    the field a filter predicate is held in, so the one an undecorrelated
+    `WHERE EXISTS (...)` would occupy."""
     var ops = Slab[MorselOp]()
     ops.append(MorselOp.filter(_corr()))
     var segs = List[SegmentDescPod]()
@@ -442,8 +480,8 @@ def test_door_refuses_a_subquery_in_a_project_expr_array() raises:
 
 
 def test_door_refuses_a_subquery_in_a_probe_residual() raises:
-    """SITE 4 of 4: `ops[i].probe_residual` — the non-equi join residual the
-    cutter carries onto the probe op."""
+    """SITE 4 of 4: `ops[i].probe_residual` — the non-equi join residual that
+    `MorselOp.join_probe_with_residual` sets on the probe op."""
     var ops = Slab[MorselOp]()
     ops.append(
         MorselOp.join_probe_with_residual(
