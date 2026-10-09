@@ -207,6 +207,15 @@ Each path (`covcheck/paths.mojo`), in this order:
    (`src/...`) is **unmapped**, an error (exit 1) naming every such path; any
    other relative path (`oss/modular/mojo/stdlib/...`, the Mojo standard
    library) is outside. Outside files are ignored and counted in the summary.
+6. One exception to unmapped: a welded test's generated main (the layout
+   probe a `mojo_aws_client` or `mojo_gcp_client` generates) is named by its
+   output path in the package (`src/m/gen/<name>/_layout_probe.mojo`), which
+   the gate stages and the checkout lacks. In a test's own report
+   (`.../cov/tests/<stem>.xml`, or `.../cov/branch/<stem>.info`), a path
+   named `<stem>.mojo`, in a package, whose directory is none of the
+   repository's, is that test: counted as a test source and left out (with
+   `--include-tests` too: it has no source). Any other unmapped path stays
+   an error.
 
 A file's package is the nearest directory above it holding a `BUCK` file
 (`src/m/x/y.mojo` is in `src/m`); `(root)` when only the top directory holds
