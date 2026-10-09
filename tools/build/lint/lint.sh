@@ -37,7 +37,7 @@
 #       group and cancels it for a newer one, so a group shared by pushes
 #       loses the middle push's run. Checks nothing, so fails, when no
 #       workflow is push-triggered.
-#   kind "mojo_deps", args <BUCK file> <.mojo file>...
+#   kind "mojo_deps", args <BUCK file> <refused> <.mojo file>...
 #       The `deps` of the package's mojo_library name every `komira_*` module
 #       the .mojo files import, by target name (`:komira_x`): the deps are a
 #       superset of the imports. A library built from the .mojo files of one
@@ -47,7 +47,12 @@
 #       finding (a dep may be there for a macro or a link). Targets named in
 #       `test_deps` count too, since the .mojo files include the welded tests;
 #       a library source importing a test_deps package passes here and fails
-#       its compile.
+#       its compile. <refused> is `-` or a comma-separated list of dotted
+#       module names (`komira_x.y`) that no .mojo file may import: a finding is
+#       `import M`, `from M import ...` or `from P import N` (names on the
+#       line or inside its parentheses) where M, or P.N, is a refused name or
+#       a module under one. A module of a dep can be refused while the dep
+#       itself stays declared.
 #   kind "retired_names", args <tree> <prefix of tree> <name>... -- <file>...
 #       No file under <tree> (the cell's doc_tree, findings named <prefix of
 #       tree><path>) and no <file> holds a <name> (a fixed string) on a line
@@ -223,8 +228,8 @@ push_verdicts)
     ;;
 mojo_deps)
     [ "$1" = -- ] && shift
-    buck=$1
-    shift
+    buck=$1 refused=$2
+    shift 2
     checked=$#
     self=$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\([A-Za-z0-9_]*\)",.*/\1/p' "$buck" | head -1)
     # The target names inside `deps = [ ... ]` and `test_deps = [ ... ]`.
@@ -240,6 +245,45 @@ mojo_deps)
                 grep -qx "$mod" "$T/declared" ||
                     echo "$f:$line: imports $mod, which the deps of $buck do not name (:$mod)" >> "$REPORT"
             done
+        [ "$refused" = - ] && continue
+        awk -v F="$f" -v R="$refused" '
+            BEGIN { n = split(R, r, ",") }
+            function check(m, l,   i, hit) {
+                for (i = 1; i <= n; i++)
+                    if (m == r[i] || index(m, r[i] ".") == 1) {
+                        print F ":" l ": imports " m ", a module this package refuses (" r[i] ")"
+                        hit = 1
+                    }
+                return hit
+            }
+            function names(s, base, l,   k, a, i, t) {
+                sub(/#.*$/, "", s)
+                gsub(/[()]/, " ", s)
+                k = split(s, a, ",")
+                for (i = 1; i <= k; i++) {
+                    t = a[i]
+                    sub(/^[ \t]+/, "", t)
+                    sub(/[ \t].*$/, "", t)
+                    if (t != "") check(base t, l)
+                }
+            }
+            # Inside the parentheses of a from-import: the names of a module
+            # already refused are not reported again.
+            open { if (!skip) names($0, base, NR); if ($0 ~ /\)/) open = 0; next }
+            /^[ \t]*from[ \t]+komira_[A-Za-z0-9_.]*[ \t]+import([ \t(]|$)/ {
+                skip = check($2, NR)
+                rest = $0
+                sub(/^[ \t]*from[ \t]+[^ \t]+[ \t]+import/, "", rest)
+                base = $2 "."
+                if (!skip) names(rest, base, NR)
+                if (rest ~ /\(/ && rest !~ /\)/) open = 1
+                next
+            }
+            /^[ \t]*import[ \t]+komira_/ {
+                rest = $0
+                sub(/^[ \t]*import[ \t]+/, "", rest)
+                names(rest, "", NR)
+            }' "$f" >> "$REPORT"
     done
     ;;
 retired_names)
