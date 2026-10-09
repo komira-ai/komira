@@ -49,6 +49,7 @@ load(":defs.bzl", "node_bench", "udf_node_log", "udf_node_test")
 #   test_conform_*         the shared conformance suite, through the Mojo
 #                          harness
 #   test_context_aware     the addon loaded in four worker_threads at once
+#   test_adapter_units     the adapter's aggregate paths on sliced columns
 #   test_external_buffers_*
 #                          the V8 wrap rule, zero copy, detach, the copy path
 #   test_threads_*         four engine threads: values, releases, state per
@@ -190,6 +191,9 @@ udf_node_test("test_load_gate", "load_gate.js", data = _STAGED | _MOJO)
 ]]
 
 udf_node_test("test_context_aware", "context_aware.js", data = _STAGED)
+
+# The adapter alone, on sliced aggregate columns (no addon, no engine).
+udf_node_test("test_adapter_units", "adapter_units.js", data = _STAGED)
 
 # The refusals, the wrap rule and the zero-copy counters, the engine's threads
 # and the cancel limits, once per build.

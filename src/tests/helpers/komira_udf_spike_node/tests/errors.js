@@ -15,13 +15,19 @@
 // aggregate object under SCALAR, a function under AGG_MERGEABLE) is ERR_LOAD
 // at open_instance.
 //
+// An int32 result outside 32 bits and an int64 result outside 64 bits are
+// ERR_RETURN_TYPE at either end (both bounds are inclusive); the largest and
+// smallest of each pass.
+//
 // Defects caught: a validator that lets a bad entry through to a mid-run
 // failure; a lossy cast accepted (0.5 stored as 0); a thrown non-Error lost
 // or crashing the adapter; a mismatch of export and shape found only at the
 // first row.
 //
 // Mutant planted (adapter.js): storeFor('l') accepting a non-integer number
-// by truncating it: red (float_into_int returns OK).
+// by truncating it: red (float_into_int returns OK); storeFor('i') without its
+// range check: red (3e9 stored as a wrapped int32, status OK); a bound of
+// storeFor('i') or storeFor('l') made exclusive: red on the edges.
 'use strict';
 
 const assert = require('node:assert/strict');
@@ -66,6 +72,18 @@ h.watchdog(`errors ${variant}`);
     assert.ok(r.message.includes(text), `${what}: '${r.message}' lacks '${text}'`);
   };
   await fails('0.5 for int64', base('fixtures.js#float_into_int'), STATUS.RETURN_TYPE, 'not an integer');
+  const i32 = { argFmt: 'i', resultFmt: 'i' };
+  await fails('3e9 for int32', base('fixtures.js#int32_too_high', i32), STATUS.RETURN_TYPE, 'int32');
+  await fails('-3e9 for int32', base('fixtures.js#int32_too_low', i32), STATUS.RETURN_TYPE, 'int32');
+  await fails('2^63 for int64', base('fixtures.js#int64_too_high'), STATUS.RETURN_TYPE, 'int64');
+  await fails('-2^63-1 for int64', base('fixtures.js#int64_too_low'), STATUS.RETURN_TYPE, 'int64');
+  {
+    // the edges themselves are accepted: both bounds are inclusive
+    const r = await run(base('fixtures.js#int32_edges', i32));
+    assert.equal(r.run[R.STATUS], 0, `int32 edges: ${r.message}`);
+    const r64 = await run(base('fixtures.js#int64_edges'));
+    assert.equal(r64.run[R.STATUS], 0, `int64 edges: ${r64.message}`);
+  }
   await fails('a string for float64', base('fixtures.js#returns_string', { argFmt: 'g', resultFmt: 'g' }), STATUS.RETURN_TYPE, 'string');
   await fails('a Float64Array for int64', base('fixtures.js#wrong_array', { shape: SHAPE.COLUMN }), STATUS.RETURN_TYPE, 'Float64Array');
   await fails('a thrown string', base('fixtures.js#throws_string'), STATUS.RAISED, 'a thrown string');

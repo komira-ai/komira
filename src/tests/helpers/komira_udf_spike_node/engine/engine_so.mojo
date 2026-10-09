@@ -36,6 +36,9 @@ def komira_udf_spike_node_conform(runtime_path: Void, cases_dir: Void, report_bu
     var b = text.as_bytes()
     var n = len(b)
     var room = Int(cap) - 1
+    if room < 0:
+        # No room for even the NUL: nothing is written.
+        return rc
     if n > room:
         n = room
     # SAFETY: `report_buf` is a buffer of `cap` bytes the caller owns for this call;

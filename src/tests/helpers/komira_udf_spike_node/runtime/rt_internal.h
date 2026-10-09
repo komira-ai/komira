@@ -114,6 +114,7 @@ struct wrap_entry {
   const void* ptr;
   size_t bytes;
   napi_ref ab; /* a strong reference to the ArrayBuffer */
+  int external; /* wrapped over the engine's memory (to detach), not copied */
 };
 struct wrap_set {
   struct wrap_entry* e;

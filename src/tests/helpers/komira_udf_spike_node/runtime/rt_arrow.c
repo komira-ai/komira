@@ -5,12 +5,13 @@
  *
  * Into JavaScript, no copy: each buffer of an argument array is wrapped as an
  * external ArrayBuffer over the engine's memory (napi_create_external_arraybuffer),
- * once per distinct address in a request (V8 aborts when one address is
- * wrapped twice while the first wrap lives: the wrap set is how a column used
- * twice, or two children sharing a buffer, stays safe). When the request
- * ends every wrapped ArrayBuffer is detached, so a view the user's code kept
- * is empty and the engine's array can be released at once; the finalizer
- * Node-API requires is a no-op. A Node built without external buffers
+ * once per distinct address in a request (a column used twice, or two
+ * children sharing a buffer, gets one ArrayBuffer: two wraps would be two
+ * finalizers, and a finalizer that released the engine's array would release
+ * it twice). When the request ends every wrapped ArrayBuffer is detached, so
+ * a view the user's code kept is empty and the engine's array can be released
+ * at once; the finalizer Node-API requires is a no-op, so no release depends
+ * on a garbage collection. A Node built without external buffers
  * (napi_no_external_buffers_allowed), or g_copy_mode, takes the copy path:
  * the bytes are copied into V8's own memory (counted as copy_wraps).
  *
@@ -221,6 +222,7 @@ int32_t rt_wrap_buffer(struct request* r, const void* ptr, size_t bytes, napi_va
   struct wrap_entry* w = &r->wraps.e[r->wraps.n];
   w->ptr = ptr;
   w->bytes = bytes;
+  w->external = !copied;
   s = napi_create_reference(env, ab, 1, &w->ab);
   if (s != napi_ok) return fail_napi(r, "napi_create_reference", s);
   r->wraps.n++;
@@ -230,13 +232,14 @@ int32_t rt_wrap_buffer(struct request* r, const void* ptr, size_t bytes, napi_va
 
 /* End of a request: every external ArrayBuffer is detached (a view the user
  * kept is empty from here) and its reference dropped. Copied buffers belong
- * to V8 and need no detach. */
+ * to V8 and need no detach; each entry records which kind it is, so a copy
+ * mode switched during the request cannot leave an external wrap attached. */
 void rt_unwrap_all(struct request* r) {
   napi_env env = r->es->env;
   for (int i = 0; i < r->wraps.n; i++) {
     struct wrap_entry* w = &r->wraps.e[i];
     napi_value ab;
-    if (!g_copy_mode && napi_get_reference_value(env, w->ab, &ab) == napi_ok && ab != NULL) {
+    if (w->external && napi_get_reference_value(env, w->ab, &ab) == napi_ok && ab != NULL) {
       if (napi_detach_arraybuffer(env, ab) == napi_ok)
         STAT_ADD(detaches, 1);
       else

@@ -218,7 +218,7 @@ static int export_args(const struct run_opts* o, struct ArrowDeviceArray* d, con
     b->cbufs[k][0] = in->valid;
     b->cbufs[k][1] = in->values[o->dup_cols ? 0 : k];
     b->child[k].length = o->rows;
-    b->child[k].null_count = in->nulls;
+    b->child[k].null_count = o->null_count_unknown ? -1 : in->nulls;
     b->child[k].offset = o->offset;
     b->child[k].n_buffers = 2;
     b->child[k].buffers = b->cbufs[k];

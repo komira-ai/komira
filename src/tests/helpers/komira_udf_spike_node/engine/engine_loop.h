@@ -27,6 +27,7 @@ struct run_opts {
   int32_t dup_cols;   /* every argument child is one buffer, shared (a column used twice) */
   int64_t offset;     /* the arrays are sliced: this offset into buffers of offset + rows values */
   int32_t null_every; /* every k-th row is null (0: none) */
+  int32_t null_count_unknown; /* the arguments declare null_count -1 (unknown), whatever they hold */
   int32_t form;       /* the spec's CodeForm (2, BUNDLE, by default) */
   int32_t descriptor_version, descriptor_len; /* the spec's descriptor (version 0, empty: the only canonical one) */
   int32_t n_code;     /* code objects the spec lists (none are checked by this runtime) */

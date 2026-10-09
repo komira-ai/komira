@@ -153,6 +153,43 @@ export function float_into_int(_x: bigint): number {
   return 0.5;
 }
 
+// Switches the runtime to its copy path in the middle of a call, as the
+// automatic fallback does when a Node refuses external buffers: the arguments
+// of this call were wrapped over the engine's memory and must still be
+// detached when it ends. The test names the runtime's file in the environment
+// (the only test-only channel a fixture has to its own runtime).
+declare const process: { env: Record<string, string | undefined> };
+declare const require: (id: string) => { setCopyMode(on: boolean): void };
+export function switch_to_copy_path(x: bigint): bigint {
+  require(process.env.KOMIRA_TEST_RUNTIME_FILE as string).setCopyMode(true);
+  return x;
+}
+
+export function int32_too_high(_x: number): number {
+  return 3000000000;
+}
+
+export function int32_too_low(_x: number): number {
+  return -3000000000;
+}
+
+// The edges themselves are fine: the largest and the smallest int32.
+export function int32_edges(x: number): number {
+  return x % 2 === 0 ? 2147483647 : -2147483648;
+}
+
+export function int64_edges(x: bigint): bigint {
+  return x % 2n === 0n ? 2n ** 63n - 1n : -(2n ** 63n);
+}
+
+export function int64_too_high(_x: bigint): bigint {
+  return 2n ** 63n;
+}
+
+export function int64_too_low(_x: bigint): bigint {
+  return -(2n ** 63n) - 1n;
+}
+
 export function returns_string(_x: number): string {
   return "not a number";
 }
@@ -180,6 +217,16 @@ export function fahrenheit_batch(c: Vector<Float64>): Float64Array {
 
 // The boundary alone: the typed array goes back as it came, with no Arrow
 // vector built (a function marked raw gets typed arrays).
+// Returns an Arrow vector of two chunks (the argument followed by itself).
+export function chunked_twice(c: Vector<Float64>): Vector<Float64> {
+  return c.concat(c);
+}
+
+// 1 for each row if it was handed a typed array (raw), 0 if an Arrow vector.
+export const is_typed_array_raw = Object.assign(
+  (x: Float64Array | Vector<Float64>): Float64Array => new Float64Array(x.length).fill(x instanceof Float64Array ? 1 : 0),
+  { raw: true });
+
 export const identity_raw = Object.assign((x: Float64Array): Float64Array => x, { raw: true });
 
 export function identity_rows(x: number): number {

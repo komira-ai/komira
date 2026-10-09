@@ -27,16 +27,28 @@
 //   - every array the engine exported was released by the end of the call,
 //     not at a garbage collection.
 //
-// Defects caught: a column wrapped twice (V8 aborts, or the counter doubles);
+// An argument declaring null_count -1 (unknown) has its nulls counted by the
+// runtime from the array's offset: a runtime that took -1 for none would drop
+// every null.
+//
+// The copy mode switched during a call (the automatic fallback does it when a
+// Node refuses external buffers) leaves no external wrap of that call
+// attached.
+//
+// Defects caught: a column wrapped twice (the counter doubles, and two
+// finalizers would be two releases of one engine array);
 // a wrap left attached (a kept view reads memory the engine freed); a buffer
 // wrapped past its length; a sliced reader ignoring the offset; an engine
 // array held until the finalizer.
 //
 // Mutants planted: rt_columns_to_js wrapping per child, not per address
-// (rt_wrap_buffer without the wrap set): red on the wrap count (or an abort);
+// (rt_wrap_buffer without the wrap set): red on the wrap count;
 // rt_unwrap_all not detaching: red on the kept view; adapter.js's getter() reading
 // a validity bit at the row, not at the offset plus the row: red on the sliced
-// null bitmap.
+// null bitmap; rt_columns_to_js taking an unknown null count (-1) for zero:
+// red on the unknown-count run (the nulls come back as values); rt_unwrap_all
+// deciding by the process-wide copy mode, not the entry's own record: red on
+// the switch-during-call run (the detach count falls short of the wraps).
 'use strict';
 
 const assert = require('node:assert/strict');
@@ -144,6 +156,13 @@ h.watchdog(`external buffers ${variant}`);
     const nulls = await run({ entry: 'fixtures.js#double', offset: 13, nullEvery: 7, check: CHECK.NULLS, a: 2, b: 0 });
     assert.equal(t0(nulls.r, T.BAD_VALUES), 0, 'a null bitmap sliced at a bit offset (13) is read from it, and the result is null exactly where the input is');
     assert.equal(nulls.d.externalWraps, 2 * nulls.calls, 'the validity bitmap is wrapped beside the values');
+    // null_count -1 (unknown) with nulls in a bitmap sliced at bit 13: the runtime counts them itself
+    const unknown = await run({ entry: 'fixtures.js#double', offset: 13, nullEvery: 7, nullCountUnknown: 1, check: CHECK.NULLS, a: 2, b: 0 });
+    assert.equal(t0(unknown.r, T.BAD_VALUES), 0, 'an argument declaring null_count -1 keeps its nulls: the runtime counts them from the offset');
+    assert.equal(unknown.d.externalWraps, 2 * unknown.calls, 'an unknown null count with nulls wraps the bitmap');
+    // null_count -1 and no null at all: counted as none, so no bitmap crosses
+    const none = await run({ entry: 'fixtures.js#double', offset: 13, nullEvery: 0, nullCountUnknown: 1, check: CHECK.AFFINE, a: 2, b: 0 });
+    assert.equal(t0(none.r, T.BAD_VALUES), 0);
   }
   // a view the user kept
   {
@@ -163,6 +182,19 @@ h.watchdog(`external buffers ${variant}`);
     assert.equal(t0(kept.r, T.LAST_VALUE), 1000, 'a view kept from a copy stays valid: V8 owns it');
   }
   addon.setCopyMode(false);
+  // the copy mode switched in the middle of a call: the wraps already made are still detached
+  {
+    process.env.KOMIRA_TEST_RUNTIME_FILE = file;
+    try {
+      const { r, d } = await run({ entry: 'fixtures.js#switch_to_copy_path', batches: 3 });
+      assert.equal(t0(r, T.BAD_VALUES), 0);
+      assert.ok(d.externalWraps >= 1, 'the call that switched the mode was wrapped over the engine memory');
+      assert.equal(d.detaches, d.externalWraps, 'every external wrap is detached, though the mode changed during its call');
+      assert.equal(d.detachFailures, 0);
+    } finally {
+      addon.setCopyMode(false);
+    }
+  }
   // the result is one copy out
   {
     const { r, d, calls } = await run({ entry: 'fixtures.js#fahrenheit_batch', shape: SHAPE.COLUMN, argFmt: 'g', resultFmt: 'g', rows: 1024, check: CHECK.AFFINE, a: 1.8, b: 32 });
