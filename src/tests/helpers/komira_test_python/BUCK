@@ -167,7 +167,8 @@ py_test(
 
 # A report test: report_demo.py prints a bench report with fixed numbers
 # (report_fixture.py); the runner keeps it, with the run id and the label,
-# as `[report]`. The run id file is an input of this test alone.
+# as `[report]`. Of the py_tests, this one and report_wiring (which stages
+# the file to check the run id) take the run id file.
 py_test(
     name = "report_demo",
     src = "report_demo.py",

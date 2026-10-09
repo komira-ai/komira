@@ -50,6 +50,36 @@ test "json: values_and_order" {
     try std.testing.expectEqual(@as(f64, 0.015), (try ok("1.5e-2")).num);
 }
 
+test "json: boundaries_that_pass" {
+    // Each end of the \u escape's hex ranges; the last code point below the
+    // surrogates and the first above them; the lowest surrogate pair; a space,
+    // the first byte that is not a control character; the largest double,
+    // written just below the point where it would round to infinity.
+    // Every case runs; each one refused or read otherwise is named.
+    const cases = [_][2][]const u8{
+        .{ "\"\\uaaaa\"", "\u{aaaa}" },
+        .{ "\"\\uAAAA\"", "\u{aaaa}" },
+        .{ "\"\\ud7ff\"", "\u{d7ff}" },
+        .{ "\"\\ue000\"", "\u{e000}" },
+        .{ "\"\\ud800\\udc00\"", "\u{10000}" },
+        .{ "\" \"", " " },
+    };
+    var bad: usize = 0;
+    for (cases) |c| {
+        const got = J.parse(c[0]) catch {
+            std.debug.print("{s}: refused: {s}\n", .{ c[0], C.msg });
+            bad += 1;
+            continue;
+        };
+        if (got != .str or !C.eql(got.str, c[1])) {
+            std.debug.print("{s}: not read as {s}\n", .{ c[0], c[1] });
+            bad += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), bad);
+    try std.testing.expectEqual(std.math.floatMax(f64), (try ok("1.7976931348623158e308")).num);
+}
+
 test "json: refusals" {
     const cases = [_][2][]const u8{
         .{ "{\"a\":1,\"a\":2}", "byte 10: key 'a' written twice" },
@@ -80,8 +110,32 @@ test "json: refusals" {
         .{ "tru", "byte 0: not a JSON value" },
         .{ "", "byte 0: unexpected end of input" },
         .{ "@", "byte 0: not a JSON value" },
+        // Just past each boundary: the first double past the largest (it rounds
+        // to infinity); four hex digits that end the input; the byte next to
+        // each end of the hex ranges; a high surrogate followed by the code
+        // unit below and the one above the low surrogates; a low surrogate
+        // that a second one follows, and the highest low surrogate alone; the
+        // last control character.
+        .{ "1.7976931348623159e308", "byte 22: number out of range" },
+        .{ "\"\\u0041", "byte 7: unterminated string" },
+        .{ "\"\\u000/\"", "byte 3: bad \\u escape" },
+        .{ "\"\\u000:\"", "byte 3: bad \\u escape" },
+        .{ "\"\\u000`\"", "byte 3: bad \\u escape" },
+        .{ "\"\\u000g\"", "byte 3: bad \\u escape" },
+        .{ "\"\\u000@\"", "byte 3: bad \\u escape" },
+        .{ "\"\\u000G\"", "byte 3: bad \\u escape" },
+        .{ "\"\\ud800\\udbff\"", "byte 13: unpaired surrogate" },
+        .{ "\"\\ud800\\ue000\"", "byte 13: unpaired surrogate" },
+        .{ "\"\\udc00\\udc00\"", "byte 7: unpaired surrogate" },
+        .{ "\"\\udfff\"", "byte 7: unpaired surrogate" },
+        .{ "\"\x1f\"", "byte 1: control character in a string" },
     };
-    for (cases) |c| try refused(c[0], c[1]);
+    // Every case runs; each one that parses or fails otherwise is named.
+    var bad: usize = 0;
+    for (cases) |c| refused(c[0], c[1]) catch {
+        bad += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 0), bad);
     const deep = "[" ** 66 ++ "]" ** 66;
     try refused(deep, "byte 65: nesting deeper than 64");
     _ = try ok("[" ** 65 ++ "]" ** 65);

@@ -180,7 +180,33 @@ REPORT_CASES = [
     ("report_id_leading_dash", "report_ok.py", "-a\n", (2, "pyrun: the run id file {} holds '-a\\n', " + ID_RULE, False, None)),
     ("report_id_two_lines", "report_ok.py", "a\n\n", (2, "pyrun: the run id file {} holds 'a\\n\\n', " + ID_RULE, False, None)),
     ("report_id_129", "report_ok.py", "a" * 129, (2, "pyrun: the run id file {} holds '" + "a" * 129 + "', " + ID_RULE, False, None)),
+    # The range of a double at each end: the largest is accepted (as a number
+    # with a fraction and as an integer), and the first value past it refused.
+    ("report_max_double", "report_max_double.py", "run-7\n", (0, "", True, report_of("run-7", {"f": sys.float_info.max}))),
+    (
+        "report_double_past_max",
+        "report_double_past_max.py",
+        "run-7\n",
+        (1, failed("report_double_past_max.py", "its standard output is not one JSON object (1.7976931348623159e308 is out of the range of a double)"), False, None),
+    ),
+    ("report_max_integer", "report_max_integer.py", "run-7\n", (0, "", True, report_of("run-7", {"i": 2**1024 - 2**970 - 1}))),
+    (
+        "report_integer_past_max",
+        "report_integer_past_max.py",
+        "run-7\n",
+        (1, failed("report_integer_past_max.py", "its standard output is not one JSON object (an integer of 309 digits is out of the range of a double)"), False, None),
+    ),
 ]
+
+# A run id's character classes at each end: one-character ids of each end of
+# the first character's ranges (A-Z a-z 0-9), and a later character at each
+# end of A-Z a-z 0-9 after an `x` (9 and . _ : + - are also in
+# report_id_charset); refused, the byte just past each end or next to each
+# single character, first and later.
+for rid in ["A", "Z", "a", "z", "0", "9", "xA", "xZ", "xa", "xz", "x0", "x9"]:
+    REPORT_CASES.append(("report_id_" + rid, "report_ok.py", rid, (0, "stderr is not captured", True, report_of(rid, {"a": 1, "b": [2]}))))
+for rid in ["@a", "[a", "`a", "{a", "/a", ":a", "a@", "a[", "a`", "a{", "a/", "a;", "a,", "a*", "a^"]:
+    REPORT_CASES.append(("report_id_" + rid, "report_ok.py", rid, (2, "pyrun: the run id file {} holds " + repr(rid) + ", " + ID_RULE, False, None)))
 
 for name, script, run_id, want in REPORT_CASES:
     rc, last, out, body, stdout, stderr, run_id_path = run_report(script, run_id)
@@ -199,6 +225,13 @@ if '{"partial": 1}\n' not in stderr:
     bad.append("report_script_fails: the captured output is not on standard error: {!r}".format(stderr))
 else:
     print("ok report_output_shown_on_failure")
+
+# A report the runner refuses shows what the script wrote, on standard error, too.
+rc, last, out, body, stdout, stderr, _ = run_report("report_duplicate_key.py")
+if '{"calls": 9, "calls": 8}\n' not in stderr:
+    bad.append("report_duplicate_key: the captured output is not on standard error: {!r}".format(stderr))
+else:
+    print("ok report_output_shown_on_refusal")
 
 # The report flags come together, and not with --expect-error.
 for name, flags, expect, want in [

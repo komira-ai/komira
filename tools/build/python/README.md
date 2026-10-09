@@ -42,13 +42,16 @@ measures, and its numbers are kept as its `[report]` sub-target.
   run id file's one line, and the test's label.
   The schema of a bench report and the table made of reports are
   [`bench_report`](../bench_report/README.md)'s.
-- A failing report test copies what it captured to standard error and writes
-  no report. A report test does not take `expect_error`.
-- The run id file is an input of the report test's action and of nothing
-  else. A test without `run_id` is unchanged, so it stays a cache hit when a
-  run id changes; bumping a run id re-runs exactly the report tests that name
-  that file. A report whose run id is the one in the file was measured by a
-  run that read that file; a run id that was not bumped can be a replay from
+- A failing report test (its script fails, or its output is refused) copies
+  what it captured to standard error and writes no report. A report test does not take `expect_error`.
+- The run id file is an input of the report test's action and of no other
+  `py_test` action unless that test stages the file itself (as `report_wiring`
+  in `src/tests/helpers/komira_test_python` does, to check the run id). A test
+  without `run_id` is unchanged, so it stays a cache hit when a run id
+  changes; bumping a run id re-runs the report tests that name that file, the
+  targets that take their reports, and the tests that stage the file. A
+  report whose run id is the one in the file was measured by a run that read
+  that file; a run id that was not bumped can be a replay from
   the cache, of the same inputs.
 - A run id is one line of at most 128 characters from `A-Z a-z 0-9 . _ : + -`,
   starting with a letter or a digit (a trailing newline is dropped).

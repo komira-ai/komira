@@ -28,8 +28,9 @@ written twice, and without NaN, an infinity or a number (with or without a
 fraction) out of the range of a double. The object is written to `--report` with `run_id` (the
 content of the `--run-id` file, one line of at most 128 characters from
 `A-Z a-z 0-9 . _ : + -`, starting with a letter or a digit) and `target` (the
-`--target` label) put first. A script that fails has its captured output
-copied to standard error, and writes no report. `--report`, `--run-id` and
+`--target` label) put first. A script that fails, or whose output is
+refused, has its captured output copied to standard error, and writes no
+report. `--report`, `--run-id` and
 `--target` come together, and not with `--expect-error`.
 """
 

@@ -15,8 +15,8 @@ unless both runs wrote the same tree. `python_proto` runs the pinned protoc
 to generate one `_pb2.py` module. A `py_test` with a `run_id` file is a
 report test: what its script writes to standard output must be one JSON
 object, kept as its `[report]` with the run id and the target's label added.
-The run id file is an input of that action only, so bumping it re-runs the
-report tests that name it and no other test.
+A test without `run_id` does not take the file, so bumping it re-runs only
+the report tests that name it and what takes their reports or stages the file.
 
 Every action runs `bin/python3.<minor>` of the unpacked archive with `-I -S`:
 no `PYTHON*` variable, no user or system site directory, no script directory

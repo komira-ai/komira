@@ -81,11 +81,32 @@ test "table: full_machine_row_is_measured" {
     try has(try rendered(&.{r16}), "| v | per_batch | 16 | missing | - | - | - | - | - | r1 |\n");
 }
 
+test "table: one_past_the_cpus" {
+    // N one above the host's CPUs: a row at N=9 on 8 CPUs is not measured,
+    // and a missing N=16 line on 15 CPUs reads `not measured`, not `missing`.
+    const r9 = withRows(try F.report(&.{}), &.{ try rowAt(1, 1_000_000_000, 1_000_000_000), try rowAt(9, 1_000_000_000, 9_000_000_000) });
+    try has(try rendered(&.{r9}), "| v | per_batch | 9 | not measured: 8 cpus | - | - | - | - | - | r1 |\n");
+    const r15 = withRows(try F.report(&.{.{ "\"cpus\": 8", "\"cpus\": 15" }}), &.{try rowAt(1, 1_000_000_000, 1_000_000_000)});
+    try has(try rendered(&.{r15}), "| v | per_batch | 16 | not measured: 15 cpus | - | - | - | - | - | r1 |\n");
+}
+
+test "table: two_functions_of_one_variant" {
+    // A group is a variant and a function: two functions of one variant, each
+    // at N=1, are two lines, not one N=1 written twice.
+    var other = try rowAt(1, 500_000_000, 500_000_000);
+    other.function = "per_row";
+    const r = withRows(try F.report(&.{}), &.{ try rowAt(1, 1_000_000_000, 1_000_000_000), other });
+    const got = try rendered(&.{r});
+    try has(got, "| v | per_batch | 1 | 1000000 | 1000000 | 1.00 | rss_delta_per_thread 1.0 MiB | 20 / 30 | - | r1 |\n");
+    try has(got, "| v | per_row | 1 | 2000000 | 2000000 | 1.00 | rss_delta_per_thread 1.0 MiB | 20 / 30 | - | r1 |\n");
+}
+
 test "table: over_cpus_missing_and_no_base" {
     // A 16-thread row on 8 CPUs is not measured whatever its numbers;
-    // N=4 is missing (4 <= 8 CPUs); with no N=1 row, efficiency is "-".
+    // N=4 is missing (4 <= 8 CPUs); with no N=1 row, efficiency is "-";
+    // a throttled count of 1 (the least above 0) flags the row.
     const r = withRows(
-        try F.report(&.{.{ "\"nr_throttled_delta\": 0", "\"nr_throttled_delta\": 2" }}),
+        try F.report(&.{.{ "\"nr_throttled_delta\": 0", "\"nr_throttled_delta\": 1" }}),
         &.{ try rowAt(2, 1_000_000_000, 2_000_000_000), try rowAt(16, 1_000_000_000, 16_000_000_000) },
     );
     const got = try rendered(&.{r});

@@ -85,7 +85,9 @@ error. Below the table, one line per report gives its host and build facts.
 `src/main.zig`, whose test block imports every `src/*_test.zig`: the JSON
 reader, each schema refusal and the reports that must pass (equal latency
 quantiles among them), the table's numbers and flags (a row at N equal to
-the host's CPUs among them), and the command line. `report_demo` and `report_wiring` in
+the host's CPUs among them), and the command line. Every comparison and
+range has a case that passes at its boundary and one refused just past it.
+`report_demo` and `report_wiring` in
 [`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md)
 check the whole path: a report test's `[report]`, and the `bench_table` made
 of it against a golden table.

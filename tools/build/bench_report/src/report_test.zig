@@ -64,6 +64,33 @@ test "report: variants_that_pass" {
     try eqs("0", (try F.report(&.{.{ "\"driver\": \"1\"", "\"driver\": \"0\"" }})).build.opt_levels[1].v);
 }
 
+test "report: boundaries_that_pass" {
+    // Each count at its least allowed value, alone, and a load average of 0
+    // (only a negative one is refused). Every case runs, and each one that is
+    // refused is named, so one build shows which boundary moved.
+    const cases = [_]struct { []const u8, []const [2][]const u8 }{
+        .{ "cpus_1", &.{.{ "\"cpus\": 8", "\"cpus\": 1" }} },
+        .{ "loadavg_0", &.{.{ "[0.5, 1, 1.5]", "[0, 0, 0]" }} },
+        .{ "rows_1", &.{.{ "\"rows\": 1000000,", "\"rows\": 1," }} },
+        .{ "batches_and_calls_1", &.{ .{ "\"batches\": 100", "\"batches\": 1" }, .{ "\"calls\": 100", "\"calls\": 1" } } },
+        .{ "wall_ns_1", &.{.{ "\"wall_ns\": 1000000000", "\"wall_ns\": 1" }} },
+        .{ "cpu_user_ns_0", &.{.{ "\"cpu_user_ns\": 900000000", "\"cpu_user_ns\": 0" }} },
+        .{ "cpu_sys_ns_0", &.{.{ "\"cpu_sys_ns\": 100000000", "\"cpu_sys_ns\": 0" }} },
+        .{ "invol_ctx_switches_0", &.{.{ "\"invol_ctx_switches\": 3", "\"invol_ctx_switches\": 0" }} },
+        .{ "memory_bytes_0", &.{.{ "{\"rss_delta_per_thread\": 1048576}", "{\"rss_delta_per_thread\": 0}" }} },
+        .{ "warmup_discarded_0", &.{.{ "\"warmup_discarded\": 4", "\"warmup_discarded\": 0" }} },
+        .{ "latency_all_0", &.{.{ "\"min\": 10, \"median\": 20, \"p90\": 30, \"max\": 40", "\"min\": 0, \"median\": 0, \"p90\": 0, \"max\": 0" }} },
+    };
+    var bad: usize = 0;
+    for (cases) |c| {
+        if (F.checked(try F.edit(F.good, c[1]))) |_| {} else |_| {
+            std.debug.print("{s}: refused: {s}\n", .{ c[0], C.msg });
+            bad += 1;
+        }
+    }
+    try eq(@as(usize, 0), bad);
+}
+
 fn refused(doc: []const u8, why: []const u8) !void {
     if (F.checked(doc)) |_| {
         std.debug.print("passed; want {s}\n", .{why});
@@ -119,14 +146,28 @@ test "report: refusals" {
         .{ "\"max\": 40", "\"max\": 29", "rows[0].latency_ns: min 10 <= median 20 <= p90 30 <= max 29 does not hold" },
         .{ "\"max\": 40", "\"max\": 40, \"mean\": 25", "rows[0].latency_ns.mean: not a key of the schema" },
         .{ "\"invol_ctx_switches\": 3,", "\"invol_ctx_switches\": 3, \"ok\": true,", "rows[0].ok: not a key of the schema" },
+        // Just past each boundary: four loads, a count at 0 where 1 is the
+        // least, and the byte next to each end of a name's and an opt level's
+        // ranges.
+        .{ "[0.5, 1, 1.5]", "[0.5, 1, 1.5, 2]", "host.loadavg: is not an array of three numbers" },
+        .{ "\"rows\": 1000000,", "\"rows\": 0,", "rows[0].rows: 0 is below 1" },
+        .{ "\"batches\": 100", "\"batches\": 0", "rows[0].batches: 0 is below 1" },
+        .{ "\"variant\": \"v\"", "\"variant\": \"`\"", "rows[0].variant: '`' is not a name (a-z 0-9 _ ')" },
+        .{ "\"variant\": \"v\"", "\"variant\": \"{\"", "rows[0].variant: '{' is not a name (a-z 0-9 _ ')" },
+        .{ "\"variant\": \"v\"", "\"variant\": \"/\"", "rows[0].variant: '/' is not a name (a-z 0-9 _ ')" },
+        .{ "\"variant\": \"v\"", "\"variant\": \":\"", "rows[0].variant: ':' is not a name (a-z 0-9 _ ')" },
+        .{ "\"engine\": \"3\"", "\"engine\": \"/\"", "build.opt_levels.engine: '/' is not one of 0, 1, 2, 3" },
     };
+    // Every case runs; each one that passes or fails otherwise is named.
+    var bad: usize = 0;
     for (cases) |c| {
         const doc = try F.edit(F.good, &.{.{ c[0], c[1] }});
-        refused(doc, c[2]) catch |e| {
+        refused(doc, c[2]) catch {
             std.debug.print("edit: {s} -> {s}\n", .{ c[0], c[1] });
-            return e;
+            bad += 1;
         };
     }
+    try eq(@as(usize, 0), bad);
     try refused("[]", "report: is an array, not an object");
     const rows_at = std.mem.indexOf(u8, F.good, "\"rows\": [").?;
     const head = F.good[0..rows_at];
