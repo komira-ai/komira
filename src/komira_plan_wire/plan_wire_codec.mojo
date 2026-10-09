@@ -534,7 +534,6 @@ from komira_plan_wire.plan_wire_vocabulary import (
     col_side_from_wire,
     correlated_kind_to_wire,
     correlated_kind_from_wire,
-    expr_tag_to_wire,
     extract_field_to_wire,
     extract_field_from_wire,
     join_algo_to_wire,
@@ -1842,7 +1841,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
     else:
         raise Error(
             PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
-            + expr_tag_wire_name(expr_tag_to_wire(tag))
+            + _expr_tag_name(tag)
             + "' (engine tag " + String(Int(tag)) + ") has no message arm in"
             + " plan.proto. See the COVERAGE LEDGER at the top of"
             + " plan_wire_codec.mojo." + _missing_wire_artefact_hint(tag)
@@ -1855,6 +1854,17 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         struct_field_idx^, map_get^, json_extract^, window_fn^,
         string_fn^, string_fn_n^, udf_call^,
     )
+
+
+def _expr_tag_name(tag: UInt8) -> String:
+    """The wire name of an engine ExprTag, for a refusal message.
+
+    Total, unlike `expr_tag_to_wire`: the tags these refusals are about
+    include EXPR_BETWEEN and EXPR_SORT_KEY, whose wire numbers
+    plan_vocabulary.proto reserves, and `expr_tag_to_wire` raises on them.
+    Raising here would replace the PLAN_WIRE_UNSUPPORTED_EXPR_TAG refusal
+    with the vocabulary's untokened one."""
+    return expr_tag_wire_name(Int32(Int(tag)) + 1)
 
 
 def _missing_wire_artefact_hint(tag: UInt8) -> String:
@@ -2390,7 +2400,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
     # when a reader must hear about it rather than fall through.
     raise Error(
         PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
-        + expr_tag_wire_name(expr_tag_to_wire(tag))
+        + _expr_tag_name(tag)
         + "' has no decode arm"
     )
 

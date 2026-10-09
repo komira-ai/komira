@@ -246,7 +246,8 @@ Exit status, both tools: 0 done, 1 refused, 2 bad usage.
 ```
 busybox sh <cov_run dir>/cov_run.sh <busybox> <gate_runner> <compiler_dir> <label>
     <test_binary> <share> <src_dir> <xml_out> <marker_out>
-    <src_repo> <test> <test_repo> <import> [--gen <file>]... [--env NAME=VALUE]...
+    <src_repo> <test> <test_repo> <import> [--solib <file> [--solib-src <path>]...]
+    [--gen <file>]... [--env NAME=VALUE]...
 ```
 
 The action `mojo_cov_run` of a coverage build
@@ -283,7 +284,8 @@ header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
    `--include-path` of exactly the staged `[src]` directory and the test
    source, under `share/` and under `lost/`;
    `--replace-src-path='^(?!/):<lost>/'`. No argument grows with the
-   library: kcov v42 reads every argument before the program as a path
+   library's generated sources (`--include-path` grows only with a shared
+   library's `--solib-src` paths, below): kcov v42 reads every argument before the program as a path
    while it looks for the program (`configuration.cc`, through
    `peek_file` in `utils.cc`) and fails `Too long string!` on one of 2048
    bytes or more, and it keeps only the last `--exclude-path` given, so a
@@ -309,6 +311,36 @@ out: it would say the release gate's test failed. With coverage on, the
 conda package (`<name>_conda`) waits for every coverage run; the library
 and its dependents do not
 ([The build gate](../README.md#the-build-gate)).
+
+**A shared library's driver** (`--solib`; a `mojo_shared_lib`'s
+`gate_srcs` entry): the test is a driver that loads `<file>`, the library's
+coverage build, from `share/`, where the run stages it as data, as the
+release gate does. kcov runs without `--skip-solibs`, so it preloads its
+library (`libkcov_sowrapper.so`, which reports each shared library the
+driver loads) and measures what the driver runs of the loaded library. The
+library's line tables name its sources by their paths in the package (as a
+test's), so each is given as `--solib-src <path>`, staged at that path in
+`share/` and in `lost/`, added to `--include-path`, and mapped with
+`share/` itself to the package's repository directory (`<test_repo>`
+without `<test>`); the report must hold the first (the library's `main`),
+so a run in which kcov did not measure the library fails (`no class for
+... (--must-contain)`) rather than reporting none of its lines. What also
+differs from a library test's run: the driver's environment holds
+`LD_PRELOAD` (kcov's library). An `--include-path` too long for kcov (many
+`--solib-src` paths) fails the run before kcov starts, as any too-long
+argument does (above). A shared library none of whose sources is a source
+file (every one generated) gives no `--solib-src`, so nothing could show
+that kcov measured it: the run is refused, saying so (`--solib with no
+--solib-src`), rather than passing unchecked; nothing waits for it.
+
+A possible race, not seen: kcov learns of a library the driver loads
+through its preload library, which writes the load to kcov's FIFO, and
+sets its breakpoints in that library when it reads it. Code of the library
+that ran before kcov had patched it would not be recorded, so its lines
+would read as not run (fewer hits, never a failed run). covso's driver
+calls into the library right after loading it, and nine fresh runs of it,
+and the run after each change of `cov_run.sh` since, gave its golden
+report byte for byte.
 
 **The run is bounded.** kcov waits for every process the test started
 before it writes the report, so a test that leaves a child running would

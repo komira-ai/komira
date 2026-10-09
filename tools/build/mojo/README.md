@@ -845,56 +845,42 @@ and, per library, with tests or without:
   and `summary.md` are `[coverage][gate]` (`cov/gate/`, action category
   `mojo_cov_gate`; [The build gate](../coverage/README.md#the-build-gate)).
 
-What ships, the library's conda package (`<name>_conda`: both its joins,
-[`conda.bzl`](../package/conda.bzl)), then also waits for every coverage run
-and the gate: with the switch on, a test that fails at `-O0` or traced, or a
-gate that fails in enforce mode, leaves the conda package unbuilt. The
-library's own package (`mojo_gate_join`) does not wait for them, so the
-library builds and every dependent compiles and tests against it: a red
-coverage run or gate blocks the package it measures from shipping, and
-nothing else. A library with no test still has a gate (`NotMeasured`: it
-fails in enforce mode), which its conda package waits for, as does a
-library whose sources are all generated (a cloud SDK client). The libraries
-the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
-`policy.bzl` (`covcheck`, `komira_json`, `readme_examples`): they have no
-gate of their own (the library would depend on the gate's tool, which
-depends on it), and their gate is `<name>_cov_gate`, which their conda
-package waits for too. `[coverage]` is the binaries, the reports and the
-gate's outputs; the branch coverage files are only its sub-targets `[bc]`,
-`[pgo_bin]`, `[branch]`, `[branch_ir]` and `[branch_info]`.
+What ships, the library's conda package (`<name>_conda`: both its joins, [`conda.bzl`](../package/conda.bzl)),
+then also waits for every coverage run and the gate: with the switch on, a test that fails at `-O0` or
+traced, or a gate that fails in enforce mode, leaves the conda package unbuilt. The library's own package
+(`mojo_gate_join`) does not wait for them, so the library builds and every dependent compiles and tests
+against it: a red coverage run or gate blocks the package it measures from shipping, and nothing else. A
+library with no test still has a gate (`NotMeasured`: it fails in enforce mode), which its conda package waits
+for, as does a library whose sources are all generated (a cloud SDK client). The libraries the gate's own tool
+depends on are the ledger `COVERAGE_NO_GATE` of `policy.bzl` (`covcheck`, `komira_json`, `readme_examples`):
+they have no gate of their own (the library would depend on the gate's tool, which depends on it), and their
+gate is `<name>_cov_gate`, which their conda package waits for too. `[coverage]` is the binaries, the reports
+and the gate's outputs; the branch coverage files are only its sub-targets `[bc]`, `[pgo_bin]`, `[branch]`,
+`[branch_ir]` and `[branch_info]`.
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage][gate][summary]' -c komira.coverage=true --show-full-output
 ```
 
-The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
-and does one thing: it sets the attributes `coverage_debug` to
-`komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
-`komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and
-cov_normalize), `coverage_branch` to
-`komira//tools/build/coverage/branch:cov_branch` (the branch coverage
-scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
-(cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
-(for a library of the ledger: no gate). A buckconfig
-value is not part of the configuration, so no output path moves; with the
-switch off the attributes are absent and analysis is what it was without
-coverage builds. With it on, every release action of the library
-(`mojo_precompile`, `mojo_build_test`, `mojo_gated_test`, the README's,
-`mojo_gate_join`) keeps its command line and inputs, so it keeps its cache
-hits and so do its dependents; the conda package's joins keep their command
-lines and gain the coverage markers as inputs; the coverage builds, runs
-and gate are new actions ([test 41](../tests/README.md#41-coverage-builds)'s
-`coverage_keys.sh`). A value other than `true` or `false` fails at load,
-naming it.
+The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl)) and does one thing: it
+sets the attributes `coverage_debug` to `komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
+`komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and cov_normalize), `coverage_branch` to
+`komira//tools/build/coverage/branch:cov_branch` (the branch coverage scripts and the LLVM pieces),
+`coverage_gate` to `komira//tools/build/coverage:cov_gate` (cov_gate.sh, covcheck and the ratchet) and
+`coverage_mode` to the policy's (for a library of the ledger: no gate). A buckconfig value is not part of the
+configuration, so no output path moves; with the switch off the attributes are absent and analysis is what it was
+without coverage builds. With it on, every release action of the library (`mojo_precompile`, `mojo_build_test`,
+`mojo_gated_test`, the README's, `mojo_gate_join`) keeps its command line and inputs, so it keeps its cache hits
+and so do its dependents; the conda package's joins keep their command lines and gain the coverage markers as
+inputs; the coverage builds, runs and gate are new actions ([test 41](../tests/README.md#41-coverage-builds)'s
+`coverage_keys.sh`). A value other than `true` or `false` fails at load, naming it.
 
-The macro reads the switch from the buckconfig of the cell whose BUCK file
-it runs in. `-c komira.coverage=true` on the command line, or a global
-buckconfig (`~/.buckconfig.d`), applies to every cell. `[komira] coverage =
-true` in a cell's own `.buckconfig` or `.buckconfig.local` applies to that
-cell only: in a repository that mounts komira as the cell `komira`, setting it
-in the root cell's file leaves komira's libraries without `[coverage]`
-("unknown subtarget").
+The macro reads the switch from the buckconfig of the cell whose BUCK file it runs in. `-c komira.coverage=true`
+on the command line, or a global buckconfig (`~/.buckconfig.d`), applies to every cell. `[komira] coverage =
+true` in a cell's own `.buckconfig` or `.buckconfig.local` applies to that cell only: in a repository that
+mounts komira as the cell `komira`, setting it in the root cell's file leaves komira's libraries without
+`[coverage]` ("unknown subtarget").
 
 A coverage build runs the same `mojo_wrapper.sh` as every compile, byte for
 byte, with one argument changed: its link directory (`<zig_dir>`) is
@@ -914,16 +900,17 @@ happen fails there ([test 41](../tests/README.md#41-coverage-builds)).
 
 Scope, for now:
 
-- linux-x86_64. On another target platform the attributes are None (a
-  `select`) and the library builds as with the switch off: it has no
-  `[coverage]` sub-target, so asking for one is an "unknown subtarget" error,
-  not an empty result. Whatever collects coverage asks only on linux-x86_64,
-  as the pull request's `coverage` workflow does
-  ([The coverage workflow](../coverage/README.md#the-coverage-workflow)).
-- A library's `test_srcs` that are source files. A README's examples,
-  `mojo_test`, the drivers of `mojo_shared_lib` and generated test sources
-  (a `test_srcs` entry that is a build output) get no coverage binary, and
-  the library's generated sources are not measured.
+- linux-x86_64, and never another platform (decided: `coverage-linux-x86-64` in [`limits.tsv`](../platforms/limits.tsv);
+  kcov and branch coverage's LLVM pieces are pinned for linux-x86_64 only). On another target platform the switch
+  is a no-op: the attributes are None (a `select`) and a library or shared library builds as with the switch off,
+  the same actions (test 41's `coverage_platforms.sh`): it has no `[coverage]` sub-target, so asking for one is
+  an "unknown subtarget" error, not an empty result. Whatever collects coverage asks only on linux-x86_64, as the
+  pull request's `coverage` workflow does ([The coverage workflow](../coverage/README.md#the-coverage-workflow)).
+- A library's `test_srcs`, written or generated: a generated test (an entry that is a build output) has its
+  coverage binary and run as a written one has, and is named by its output path in the package (its report,
+  the gate's `--test-source`). A README's examples and `mojo_test` get no coverage binary, and the library's
+  generated sources are not measured.
+- A `mojo_shared_lib`'s drivers (below).
 - A test's data may not be staged at its own source's path or under
   `buck-out/`: a coverage run stages the sources there (analysis fails,
   naming the destination).
@@ -932,17 +919,36 @@ Scope, for now:
   other library the gate's branch is `not measured` and never passes in
   enforce mode (`BranchNotMeasured`).
 
-A library in the `tests` cell may pass `coverage_debug` itself (a
-`cov_link_dir`), and with it `coverage_run` (a `cov_run_dir`; the default one
-when not given) and `coverage_gate` (a `cov_gate_dir`) with `coverage_mode`
-(the policy's when not given): it then has coverage binaries and runs, and
-with `coverage_gate` the gate, whatever the switch says, which
-is how tests 41, 43, 46 and 47 build them, plant a defective relocator or run
-script, and gate in enforce mode, without `-c`. Its conda package, if it has
-one, waits for its runs and that gate. It may also pass
-`coverage_branch_gate = False`, so its gate does not read its branch
-records (test 46's `covfull_unread`). Anywhere else passing any of them is
-refused.
+**Shared libraries.** With the switch, a `mojo_shared_lib` also has `[coverage]`: the library built again at
+`-O0` with line tables through `cov_link` (`[coverage][bin][<out_name>.so]`, `mojo_build_cov_shared_lib`);
+each driver of `gate_srcs`, written or generated, at `-O0` with line tables (`[coverage][bin][<driver>]`,
+`mojo_build_cov_driver`), run under kcov with that build staged where the gate stages the library
+and kcov measuring the libraries the driver loads (`[coverage][tests][<driver>]`, `mojo_cov_run`;
+[cov_run](../coverage/kcov/README.md#cov_run), `--solib`); and its gate, over those reports and the
+library's own non-generated sources (`srcs` and `main`), the drivers set aside (`[coverage][gate]`). A
+driver counts toward the shared library's own sources only: the code of its Mojo dependencies compiled into
+it is measured by their own tests, in their own gates (a library's numbers do not depend on what links it).
+The generated exports driver is not run: it only loads the library and looks its symbols up. A shared library
+none of whose sources is a source file (all generated) has nothing measured, and its drivers' coverage runs are
+refused, saying so. The gate's mode is `COVERAGE_SHARED_LIB_MODE` of [`policy.bzl`](../coverage/policy.bzl),
+census: a shared library's line coverage is reported, never enforced (one loaded by end-to-end tests exists
+for them), and `enforce` is refused for every `mojo_shared_lib`, a fixture of the tests cell included (in
+analysis). Nothing waits for any of it: the published file (`mojo_shared_lib_join`) waits for the release
+gate only, and a shared library ships no conda package. No workflow reports it yet: the coverage workflow
+(`.github/ci/coverage_measure.sh`) selects `mojo_library` targets only, so a shared library's `[coverage]`
+is built by name. For a shared library over an engine, the report covers its own C-ABI sources only, not
+the engine code compiled in from its dependencies. A source under the package's `tests/` (a probe library
+such as `komira_arrow_ipc`'s `arrow_c_abi_probe`) is set aside by covcheck like a test, so such a library's
+gate is `NotMeasured`.
+
+A library in the `tests` cell may pass `coverage_debug` itself (a `cov_link_dir`), and with it `coverage_run`
+(a `cov_run_dir`; the default one when not given) and `coverage_gate` (a `cov_gate_dir`) with `coverage_mode`
+(the policy's when not given): it then has coverage binaries and runs, and with `coverage_gate` the gate,
+whatever the switch says, which is how tests 41, 43, 46 and 47 build them, plant a defective relocator or
+run script, and gate in enforce mode, without `-c`. Its conda package, if it has one, waits for its runs
+and that gate. It may also pass `coverage_branch_gate = False`, so its gate does not read its branch records
+(test 46's `covfull_unread`). Anywhere else passing any of them is refused. A `mojo_shared_lib` in the `tests`
+cell may pass the same four (`enforce` is refused).
 
 ## API JSON: mojo_doc_json
 
