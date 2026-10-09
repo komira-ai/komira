@@ -33,6 +33,14 @@ def _wheel(name, version, url, sha256, size, license, deps = []):
 
 WHEELS = [
     _wheel(
+        "cloudpickle",
+        "3.1.2",
+        "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl",
+        "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a",
+        22228,
+        "BSD-3-Clause",
+    ),
+    _wheel(
         "duckdb",
         "1.5.6",
         "https://files.pythonhosted.org/packages/70/21/61dd2876bbaa69cf77d7b5c620e52e8b25faae7096f4d2e4a812b52095d7/duckdb-1.5.6-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
@@ -48,6 +56,23 @@ WHEELS = [
         7159572,
         "Apache-2.0",
         deps = ["typing-extensions"],
+    ),
+    _wheel(
+        "joblib",
+        "1.6.0",
+        "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl",
+        "3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba",
+        306115,
+        "BSD-3-Clause",
+        deps = ["cloudpickle"],
+    ),
+    _wheel(
+        "narwhals",
+        "2.26.0",
+        "https://files.pythonhosted.org/packages/40/b5/1b84b2c784db76d69442334bc8b8748c840f13ca53be086f4f250ad4a0bc/narwhals-2.26.0-py3-none-any.whl",
+        "29326d74f107c347fd1009bd58e38d9f7c7c5b51e6de97bc93dbc325d9038b54",
+        474034,
+        "MIT",
     ),
     _wheel(
         "numpy",
@@ -111,12 +136,38 @@ WHEELS = [
         deps = ["six"],
     ),
     _wheel(
+        "scikit-learn",
+        "1.9.1",
+        "https://files.pythonhosted.org/packages/23/e5/688703d357e5393f708d98eb189fd415ae69e39f6de03c6bd4005aef6118/scikit_learn-1.9.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "55e79d6e9b0923f1a978179822bd43d7f5543f45e970a00fe861f43486380aba",
+        9121732,
+        "BSD-3-Clause",
+        deps = ["joblib", "narwhals", "numpy", "scipy", "threadpoolctl"],
+    ),
+    _wheel(
+        "scipy",
+        "1.18.1",
+        "https://files.pythonhosted.org/packages/41/48/6450ed9243315322bbc19ac57b9b70d66a20bf1d38d124c96bc4bf6af9ea/scipy-1.18.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "fdaf5ea890a6183d0565f51a61799d67081bd5b1cf03c5f4b3fd3732108625c9",
+        35312578,
+        "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND Qhull AND GPL-3.0-or-later WITH GCC-exception-3.1 AND LGPL-2.1-or-later",
+        deps = ["numpy"],
+    ),
+    _wheel(
         "six",
         "1.17.0",
         "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
         "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
         11050,
         "MIT",
+    ),
+    _wheel(
+        "threadpoolctl",
+        "3.7.0",
+        "https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl",
+        "cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be",
+        26362,
+        "BSD-3-Clause",
     ),
     _wheel(
         "typing-extensions",

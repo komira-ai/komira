@@ -50,8 +50,8 @@ py_test(
 )
 
 # The files that name a GNU licence, each reviewed (third_party/python/README.md,
-# Licences): none puts a pinned component under a GNU licence except
-# numpy's two bundled GCC runtime libraries.
+# Licences): none puts a pinned component under a GNU licence except the GCC
+# runtime libraries numpy, scipy and scikit-learn bundle.
 _REVIEWED = [
     # CPython's licence: its history of Python's releases says which were
     # "GPL-compatible" and that 1.6.1 incorporated "material that was
@@ -69,6 +69,16 @@ _REVIEWED = [
     "numpy:numpy-2.5.3.dist-info/licenses/LICENSE.txt",
     "numpy:numpy.libs/libgfortran-83c28eba-468e71e5.so.5.0.0",
     "numpy:numpy.libs/libquadmath-2284e583-a9307bba.so.0.0.0",
+    # scipy bundles the same two GCC runtime libraries (two builds of each:
+    # its own and OpenBLAS's), and its licence file names both licences.
+    "scipy:scipy-1.18.1.dist-info/LICENSE.txt",
+    "scipy:scipy.libs/libgfortran-040039e1-0352e75f.so.5.0.0",
+    "scipy:scipy.libs/libgfortran-83c28eba.so.5.0.0",
+    "scipy:scipy.libs/libquadmath-2284e583.so.0.0.0",
+    "scipy:scipy.libs/libquadmath-96973f99-934c22de.so.0.0.0",
+    # scikit-learn bundles GCC's libgomp (GPL-3.0-or-later WITH
+    # GCC-exception-3.1); its licence file names that licence.
+    "scikit-learn:scikit_learn-1.9.1.dist-info/licenses/COPYING",
 ]
 
 py_test(
