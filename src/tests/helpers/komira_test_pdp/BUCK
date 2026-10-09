@@ -28,6 +28,7 @@ mojo_library(
         "tests/test_endpoint.mojo",
         "tests/test_no_product_vocabulary.mojo",
         "tests/test_request_shape.mojo",
+        "tests/test_runner.mojo",
         "tests/test_safety_near_miss.mojo",
         "tests/test_scenario_table.mojo",
     ],
