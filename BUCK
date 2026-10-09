@@ -129,6 +129,7 @@ _TESTS_LINTS = [
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
+    "//src/komira_jose:deps_lint",
     "//src/tests/conformance/komira_connect_conformance:deps_lint",
     "//src/tests/conformance/komira_contacts_store_conformance:deps_lint",
     "//src/tests/conformance/komira_db_conformance:deps_lint",

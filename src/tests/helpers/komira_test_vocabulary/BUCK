@@ -18,5 +18,6 @@ mojo_library(
     visibility = [
         "//src/komira_authz_api:",
         "//src/komira_http_server:",
+        "//src/komira_jose:",
     ],
 )

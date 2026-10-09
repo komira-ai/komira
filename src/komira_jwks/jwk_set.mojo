@@ -26,12 +26,14 @@
 #     curve other than P-256 (so a P-384 key never enters a P-256 set);
 #   * a missing or non-string required member (`kty`, `crv`, `x`, `y`, `n`,
 #     `e`), or a non-string `kid`, `alg` or `use`;
+#   * a `key_ops` that is not an array of strings, or names one value twice
+#     (RFC 7517 section 4.3);
 #   * a key member that is not base64url without padding, or of the wrong
 #     length, or outside the supported RSA range (see jwk.mojo);
 #   * an empty `kid`.
 #
-# IGNORED: members this package does not read (`key_ops`, `x5c`, `x5t`, and
-#   any other), per RFC 7517 section 4; they are still checked for duplicates.
+# IGNORED: members this package does not read (`x5c`, `x5t`, and any
+#   other), per RFC 7517 section 4; they are still checked for duplicates.
 #
 # A single JWK (`parse_jwk`) has no set to skip from: every problem raises.
 # =============================================================================
@@ -54,6 +56,7 @@ from komira_jwks.jwk import (
     _JwkParts,
     _check_ec,
     _check_ec_crv,
+    _check_key_ops,
     _check_kid,
     _check_okp,
     _check_okp_crv,
@@ -129,6 +132,25 @@ def _optional_string(obj: JsonValue, name: String) raises -> Optional[String]:
     return Optional[String]()
 
 
+def _optional_string_list(
+    obj: JsonValue, name: String
+) raises -> Optional[List[String]]:
+    for i in range(len(obj.obj_keys)):
+        if obj.obj_keys[i] == name:
+            ref arr = obj.children[i]
+            if arr.kind != JSON_ARRAY:
+                raise Error(String("member ") + _q(name) + " is not an array")
+            var out = List[String]()
+            for j in range(len(arr.children)):
+                if arr.children[j].kind != JSON_STRING:
+                    raise Error(
+                        String("member ") + _q(name) + " holds a non-string"
+                    )
+                out.append(arr.children[j].text.copy())
+            return Optional[List[String]](out^)
+    return Optional[List[String]]()
+
+
 def _required_string(obj: JsonValue, name: String) raises -> String:
     var v = _optional_string(obj, name)
     if not v:
@@ -154,7 +176,9 @@ def _jwk_from_object(obj: JsonValue) raises -> Jwk:
     var kid = _optional_string(obj, "kid")
     var alg = _optional_string(obj, "alg")
     var key_use = _optional_string(obj, "use")
+    var key_ops = _optional_string_list(obj, "key_ops")
     _check_kid(kid)
+    _check_key_ops(key_ops)
     if kty == JWK_KTY_OKP:
         var crv = _required_string(obj, "crv")
         _check_okp_crv(crv)
@@ -171,6 +195,7 @@ def _jwk_from_object(obj: JsonValue) raises -> Jwk:
                 kid=kid^,
                 alg=alg^,
                 key_use=key_use^,
+                key_ops=key_ops^,
             )
         )
     if kty == JWK_KTY_EC:
@@ -190,6 +215,7 @@ def _jwk_from_object(obj: JsonValue) raises -> Jwk:
                 kid=kid^,
                 alg=alg^,
                 key_use=key_use^,
+                key_ops=key_ops^,
             )
         )
     if kty == JWK_KTY_RSA:
@@ -207,6 +233,7 @@ def _jwk_from_object(obj: JsonValue) raises -> Jwk:
                 kid=kid^,
                 alg=alg^,
                 key_use=key_use^,
+                key_ops=key_ops^,
             )
         )
     raise Error(

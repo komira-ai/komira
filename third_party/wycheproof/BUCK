@@ -1,0 +1,33 @@
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# Wycheproof (github.com/C2SP/wycheproof, Apache License 2.0, LICENSE below):
+# test vectors for known attacks on cryptographic libraries, at one pinned
+# commit of its default branch. Each file is fetched at build time and checked
+# against its sha256; nothing of it is committed here.
+#
+# Test data of //src/komira_jose (tests/test_wycheproof_jws.mojo):
+#   json_web_signature_test.json - 401 compact JWS vectors over HS*, ES256,
+#                                  RS*, PS* and the RFC 7520 examples, each
+#                                  with the public JWK it is checked against.
+#
+# A newer pin is `_COMMIT` and each file's sha256 and size here, and a re-read
+# of the expected counts in that test against the new file.
+_COMMIT = "12fd3aaf33eb5fa1f52e026912ee00c054f9d984"
+
+_URL = "https://raw.githubusercontent.com/C2SP/wycheproof/{}/".format(_COMMIT)
+
+pinned_file(
+    name = "LICENSE",
+    url = _URL + "LICENSE",
+    sha256 = "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    size_bytes = 11357,
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "json_web_signature_test.json",
+    url = _URL + "testvectors_v1/json_web_signature_test.json",
+    sha256 = "8e687a06fe8359f4ec51480f1a9f73c8faebd6f4c01b818b843b44eee54fd5d9",
+    size_bytes = 252527,
+    visibility = ["PUBLIC"],
+)

@@ -15,6 +15,7 @@ mojo_library(
     name = "komira_jwks",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = [
+        "tests/test_jwk_key_ops.mojo",
         "tests/test_jwk_rfc_vectors.mojo",
         "tests/test_jwk_set_strict.mojo",
         "tests/test_jwks.mojo",

@@ -6,7 +6,9 @@ fetches to learn which keys sign tokens.
 - `Jwk` is one public key of a supported type: OKP Ed25519 (RFC 8037), EC
   P-256 or RSA (2048 to 4096 bits). `Jwk.ed25519`, `Jwk.ec_p256` and
   `Jwk.rsa` build one and refuse a wrong length or range; the accessors
-  (`kty`, `crv`, `x`, `y`, `n`, `e`, `kid`, `alg`, `key_use`) return copies.
+  (`kty`, `crv`, `x`, `y`, `n`, `e`, `kid`, `alg`, `key_use`, `key_ops`)
+  return copies. A `key_ops` array that names one value twice is refused
+  (RFC 7517 section 4.3).
   It has no field for a private member, so nothing built from it carries one.
 - `parse_jwk_set(doc)` reads a JWK Set strictly, on `komira_json`. It refuses
   the whole document (`JwksError: ...`) above `JWKS_MAX_DOCUMENT_BYTES` or
@@ -18,7 +20,7 @@ fetches to learn which keys sign tokens.
   `parse_jwk(doc)` reads one key and raises for either kind of problem.
   `JwkSet.index_of_kid` finds a key by `kid`.
 - `render_jwk`, `render_jwk_set` and `JwkSet.render` write the canonical
-  form: members in the order `kty`, `crv`, `alg`, `use`, `kid`, then the key
+  form: members in the order `kty`, `crv`, `alg`, `use`, `key_ops`, `kid`, then the key
   members, optional members only when present, strings escaped.
 - `kid_for_pubkey(pubkey)` is a key id for an Ed25519 key: base64url without
   padding of the SHA-256 of the 32-byte public key, the whole digest (43
