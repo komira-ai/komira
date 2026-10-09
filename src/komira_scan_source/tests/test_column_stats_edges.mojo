@@ -13,7 +13,8 @@
 #      STRING field over a column without offsets: the NDV was Exact 0 (or
 #      the min/max Exact over the scanned batch only, or the nulls of the
 #      offset-less column uncounted). Now: exact nulls, everything else
-#      Absent, no sketch, no bloom. FLOAT16 and DATE64 widths are 2 and 8.
+#      Absent, no sketch, no bloom; one unscanned value is enough. FLOAT16
+#      and DATE64 widths are 2 and 8.
 #   8. Floats. NaN: min over the other values, max and sum Absent, one
 #      distinct NaN. All NaN: no min/max. All +inf / all -inf: the infinity,
 #      not the largest finite value. -0.0 and +0.0: one distinct value.
@@ -196,6 +197,52 @@ def test_string_field_over_a_column_without_offsets_counts_nulls() raises:
     var s = _stats1(c^, ArrowType.STRING)
     _assert_only_nulls_known(s, 2, "no offsets")
     assert_equal(s.avg_size_bytes, 0.0, "no width known")
+
+
+# Exactly one non-null value goes unscanned in each of the next three
+# tests, so a check that needed two (`n_unscanned > 1`) would report NDV
+# Exact 0 for the DECIMAL128 columns and Exact min/max over the STRING batch.
+
+
+def test_one_row_decimal_column_reports_only_nulls() raises:
+    var one = List[Int64]()
+    one.append(Int64(42))
+    _assert_only_nulls_known(
+        _stats1(_int_col[DType.int64](one), ArrowType.DECIMAL128), 0, "one DECIMAL128 row"
+    )
+
+
+def test_one_decimal_value_among_nulls_reports_only_nulls() raises:
+    var three = List[Int64]()
+    for x in [5, 6, 7]:
+        three.append(Int64(x))
+    var dn = _int_col[DType.int64](three)
+    var nulls = List[Int]()
+    nulls.append(0)
+    nulls.append(2)
+    _set_nulls(dn, nulls)
+    _assert_only_nulls_known(_stats1(dn^, ArrowType.DECIMAL128), 2, "one DECIMAL128 value, two nulls")
+
+
+def test_string_batch_beside_a_one_index_dictionary_batch_claims_nothing() raises:
+    var schema = _schema1(ArrowType.STRING)
+    var sv = List[String]()
+    sv.append(String("b"))
+    sv.append(String("a"))
+    var dv = List[String]()
+    dv.append(String("0"))
+    var idx = List[Int32]()
+    idx.append(Int32(0))
+    var dict_col = Column.from_dictionary(
+        StringDictionaryArray.from_parts(
+            PrimitiveArray[DType.int32].from_list(idx^), StringArray.from_strings(dv)
+        )
+    )
+    var sl = Slab[RecordBatch].create(2)
+    sl.append(_batch(Column.from_string(StringArray.from_strings(sv)), schema))
+    sl.append(_batch(dict_col^, schema))
+    var s = compute_column_stats(sl, schema)[0].copy()
+    _assert_only_nulls_known(s, 0, "string batch + one-index dictionary batch")
 
 
 # =============================================================================
