@@ -158,11 +158,11 @@ def test_steps() raises:
 def test_step_kinds() raises:
     _assert_refused(
         _one_stage(String(" name: \"b\"\n step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" artifacts: \"d\" }\n")),
-        String("is a DEPLOY step: that kind needs a newer kci"),
+        String("step 'd' of stage 'b' is a DEPLOY step and has platform 'linux-x86_64': a platform is an OS plus a CPU"),
     )
     _assert_refused(
         _one_stage(String(" name: \"b\"\n step { name: \"d\" kind: VALIDATE platform: \"linux-x86_64\" artifacts: \"d\" }\n")),
-        String("has kind 'VALIDATE'; a step is BUILD or PUBLISH"),
+        String("has kind 'VALIDATE'; a step is BUILD, PUBLISH or DEPLOY"),
     )
     _assert_refused(
         _one_stage(String(" name: \"b\"\n step { name: \"d\" platform: \"linux-x86_64\" artifacts: \"d\" }\n")),

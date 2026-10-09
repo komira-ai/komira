@@ -53,19 +53,23 @@
 #   kind      inputs                                    what it does
 #   BUILD     platform, artifacts                    kci_build: one build per
 #                                                       declared artifact
-#   PUBLISH   platform, artifacts, channels, channel kci_publish: the release
-#                                                       set to one channel
-#   DEPLOY    (none yet)                                reserved: refused as
-#                                                       "needs a newer kci"
+#   PUBLISH   platform, artifacts, and ONE destination: kci_publish: the release
+#             channels + channel, or cells + cell       set to one channel, or
+#                                                       (not run yet) one cell
+#   DEPLOY    cells, cell, resources, definitions    parsed; this kci does
+#                                                       not run it yet
 #
 # A stage may hold steps of different kinds. The kind words are
 # kci_api's (verbs.mojo), and so is the name grammar (selection.mojo).
 #
-# DEPLOY, reserved. When its body lands, a DEPLOY step names a CELL (one
-# deploy target: an account or project in one region), and the cell names
-# its CLOUD (the deploy-target adapter that turns resources into calls). A
-# platform stays OS + CPU only; it never names a cloud. No field for either
-# exists yet.
+# CELLS. A step that writes into a cell (a DEPLOY step, or a PUBLISH step
+# with `cells` and `cell`) names a cells file (`cells`, format `kci.cells`)
+# and one cell of it (`cell`); the cell names its cloud. A platform stays
+# OS + CPU only; it never names a cloud. Every rule of such a step is
+# deploy.mojo's (`validate_cell_steps`, which `parse_machine_file` runs after
+# `validate_release_machine`); this file only lets the kind and the fields
+# through. Whether the cell is in the file is `require_cells_declared`'s, run
+# by whoever reads the cells file (this package opens no file).
 #
 # VALIDATIONS. A PUBLISH step may carry `validation { ... }` blocks that check
 # what it published. A validation name is unique in its stage (the grammar of
@@ -209,6 +213,10 @@ struct StageStep(Copyable, Movable):
     var artifacts: String
     var channels: String
     var channel: String
+    var cells: String
+    var cell: String
+    var resources: String
+    var definitions: List[String]
     var validations: List[StageValidation]
     var line: Int
 
@@ -219,6 +227,10 @@ struct StageStep(Copyable, Movable):
         self.artifacts = String("")
         self.channels = String("")
         self.channel = String("")
+        self.cells = String("")
+        self.cell = String("")
+        self.resources = String("")
+        self.definitions = List[String]()
         self.validations = List[StageValidation]()
         self.line = line
 
@@ -227,6 +239,18 @@ struct StageStep(Copyable, Movable):
 
     def is_publish(self) -> Bool:
         return self.kind == STEP_KIND_PUBLISH
+
+    def is_deploy(self) -> Bool:
+        return self.kind == STEP_KIND_DEPLOY
+
+    def names_cell(self) -> Bool:
+        """Whether the step sets `cells` or `cell`."""
+        return self.cells.byte_length() > 0 or self.cell.byte_length() > 0
+
+    def writes_cell(self) -> Bool:
+        """A DEPLOY step, or a PUBLISH step into a cell (file header,
+        CELLS)."""
+        return self.is_deploy() or (self.is_publish() and self.names_cell())
 
 
 struct Stage(Copyable, Movable):
@@ -292,15 +316,20 @@ struct Stage(Copyable, Movable):
 
 
 struct ReleaseMachine(Copyable, Movable):
-    """Every stage of a machine file, in file order.
+    """Every stage of a machine file, in file order, and the machine's
+    `name` ("" when the file has none; `name_line` is 0 then).
 
     Layout: owned values only. No pointer field."""
 
     var schema_version: Int
+    var name: String
+    var name_line: Int
     var stages: List[Stage]
 
     def __init__(out self, schema_version: Int):
         self.schema_version = schema_version
+        self.name = String("")
+        self.name_line = 0
         self.stages = List[Stage]()
 
     def stage_names(self) -> List[String]:
@@ -544,16 +573,13 @@ def _check_step(source: String, stage: Stage, step: StageStep) raises:
             + String(" bytes, not ending in '-'")
         )
     if step.kind == STEP_KIND_DEPLOY:
-        raise Error(
-            _at(source, step.line) + where
-            + String(" is a DEPLOY step: that kind needs a newer kci (this kci runs BUILD and PUBLISH steps)")
-        )
+        return  # every rule of a DEPLOY step is deploy.mojo's (file header, CELLS)
     if step.kind != STEP_KIND_BUILD and step.kind != STEP_KIND_PUBLISH:
         if step.kind.byte_length() == 0:
-            raise Error(_at(source, step.line) + where + String(" has no kind (BUILD or PUBLISH)"))
+            raise Error(_at(source, step.line) + where + String(" has no kind (BUILD, PUBLISH or DEPLOY)"))
         raise Error(
             _at(source, step.line) + where + String(" has kind '") + step.kind
-            + String("'; a step is BUILD or PUBLISH")
+            + String("'; a step is BUILD, PUBLISH or DEPLOY")
         )
     if step.platform.byte_length() == 0:
         raise Error(_at(source, step.line) + where + String(" has no platform"))
@@ -570,6 +596,8 @@ def _check_step(source: String, stage: Stage, step: StageStep) raises:
                 + String(" is a BUILD step: channels and channel belong to a PUBLISH step")
             )
         return
+    if step.names_cell():
+        return  # a PUBLISH into a cell: its destination is deploy.mojo's
     if step.channels.byte_length() == 0:
         raise Error(_at(source, step.line) + where + String(" has no channels (the channels file)"))
     if step.channel.byte_length() == 0:

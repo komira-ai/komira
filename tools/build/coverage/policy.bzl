@@ -29,6 +29,26 @@ COVERAGE_MODE = "census"
 # Basis points of line (and branch) coverage per package: 10000 is 100%.
 COVERAGE_TARGET_BP = 10000
 
+# The mode of every mojo_shared_lib's coverage gate (tools/build/mojo/coverage.bzl,
+# coverage_shared_lib): a shared library's drivers are measured and their
+# reports and the gate's result are its `[coverage]`, but it has no coverage
+# target. Decided: a shared library is the C ABI of code whose own
+# libraries are measured and gated by their tests (a library's gate reads its
+# own tests' reports only), and one loaded by a program's end-to-end tests
+# exists for those tests, so its line coverage is reported, never enforced.
+# This is its own constant, not COVERAGE_MODE: moving the libraries to enforce
+# moves no shared library. coverage.bzl refuses `enforce` here, and for any
+# mojo_shared_lib, a tests-cell fixture included (in analysis); and nothing
+# waits for a shared library's coverage runs or gate (it ships no conda
+# package), so its published file builds whatever they find. Reported means
+# its `[coverage]` (`[coverage][gate][summary]`) when built by name: the pull
+# request's coverage workflow (.github/ci/coverage_measure.sh) selects
+# mojo_library targets only, so no workflow reports a shared library's gate
+# yet. Its report counts the shared library's own sources (its C ABI), not
+# the code compiled into it from its Mojo dependencies, which their own
+# tests measure.
+COVERAGE_SHARED_LIB_MODE = "census"
+
 # The directories of test-only packages, relative to a cell's root (the
 # layout of src/: test-only packages are under src/tests/<kind>/). A
 # package in one of them or under it, at a path-segment boundary, is

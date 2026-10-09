@@ -98,7 +98,13 @@
 # The id each answers to is a constructor argument (default "fake" /
 # "fake-limited") so the conformance kit can run them under a random id and
 # catch any code that keyed on the spelling. `fail_at_call`, `read_lag` and
-# `foreign` build the faulty variant (see `FakeStore`).
+# `foreign` build the faulty variant (see `FakeStore`). `FakeCloud` takes four
+# more faults, each a constructor argument and off by default:
+# `trust_check_raises` (its `trust_check` raises instead of answering),
+# `presence_read_raises` (the node ids whose every live read raises, as
+# `FakeStore.fail_reads_of`), `lower_misowned` (the id of a resource whose
+# first lowered node names another resource as its owner, which kci_cloud's
+# lowering contract refuses) and `realize_raises` (every `realize` raises).
 #
 # A RESOURCE'S TYPE IS ITS SET ARM, read through the catalog table
 # (`body_field`, `body_is`) in every lowering and every limit of this
@@ -454,7 +460,7 @@ def _setting_finding(key: String, why: String) -> Finding:
     return Finding(FINDING_CELL, String("(cell)"), String("settings.") + key, why)
 
 
-struct FakeCloud(ConformanceTarget, Movable):
+struct FakeCloud(ConformanceTarget, Movable, Deinitable):
     """The complete fake cloud. `shape` is the provider shape it lowers to
     (`ProviderShape.generic()` by default: the fake's own roles); the shaped
     fakes are this cloud built with `aws`, `gcp`, `azure` or `onprem`."""
@@ -463,6 +469,9 @@ struct FakeCloud(ConformanceTarget, Movable):
     var _mechanism: String
     var _principal: String
     var _shape: ProviderShape
+    var _trust_check_raises: Bool
+    var _lower_misowned: String
+    var _realize_raises: Bool
     var store: ArcPointer[FakeStore]
 
     def __init__(
@@ -472,12 +481,21 @@ struct FakeCloud(ConformanceTarget, Movable):
         read_lag: Int = 0,
         foreign: List[String] = List[String](),
         shape: ProviderShape = ProviderShape.generic(),
+        trust_check_raises: Bool = False,
+        presence_read_raises: List[String] = List[String](),
+        lower_misowned: String = String(""),
+        realize_raises: Bool = False,
     ):
         self._id = id
         self._shape = shape.copy()
         self._mechanism = String("invoker")
         self._principal = String("")
+        self._trust_check_raises = trust_check_raises
+        self._lower_misowned = lower_misowned
+        self._realize_raises = realize_raises
         self.store = ArcPointer[FakeStore](FakeStore(fail_at_call, read_lag, foreign))
+        for i in range(len(presence_read_raises)):
+            self.store[].fail_reads_of(presence_read_raises[i])
 
     def cloud_id(self) -> CloudId:
         return CloudId(self._id)
@@ -562,9 +580,16 @@ struct FakeCloud(ConformanceTarget, Movable):
     def lower(
         self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
     ) raises -> List[LoweredNode]:
-        return _lower(r, edges, feeds, firings, self._mechanism, self._shape)
+        var nodes = _lower(r, edges, feeds, firings, self._mechanism, self._shape)
+        if r.id == self._lower_misowned and len(nodes) > 0:
+            # the faulty variant: a node owned by another resource, which
+            # kci_cloud's lowering contract refuses
+            nodes[0].owner = String("not-") + r.id
+        return nodes^
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
+        if self._realize_raises:
+            raise Error(String("fake: injected realize fault (") + node.id + String(")"))
         return ErasedResource.erase(FakeNode(self.store, node))
 
     def bootstrap_resources(self, machine: String, cell: String) -> List[BootstrapItem]:
@@ -607,6 +632,8 @@ struct FakeCloud(ConformanceTarget, Movable):
         )
 
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
+        if self._trust_check_raises:
+            raise Error(String("fake: injected trust_check fault (cell ") + scope.cell + String(")"))
         return _trust_findings(self._principal, creds)
 
     def live_count(self) -> Int:

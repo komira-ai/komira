@@ -411,9 +411,21 @@ def test_the_machine_file() raises:
     assert_equal(kci_main_with(_run(newer, String("build")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT-VERSION"))
     var bad = d + String("/bad.textproto")
-    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
+    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: VALIDATE platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
     assert_equal(kci_main_with(_run(bad, String("x")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
+    # a valid PUBLISH into a cell: parsed, never run (a DEPLOY step runs:
+    # test_kci_deploy_step.mojo)
+    write_whole_file(
+        bad,
+        String("schema_version: 1\nname: \"m\"\nstage { name: \"x\" step { name: \"d\" ")
+        + String("kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"a\" cells: \"c\" cell: \"s\" } }\n"),
+    )
+    var a = _run(bad, String("x"))
+    a.extend(_publish_flags())
+    assert_equal(kci_main_with(a, steps, rec), 3)
+    assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
+    assert_true(_last(rec).error.message.find(String("publishes into cell 's': that needs a newer kci")) >= 0)
     assert_equal(len(steps.calls), 0)
 
 

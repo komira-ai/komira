@@ -19,6 +19,11 @@
 #                         previous build of this version, so a run that was
 #                         replaced while pending (or never started) is
 #                         reported by the run that released its commit
+#   deploy_markdown       a DEPLOY step's block: its cell and cloud, the
+#                         outcome, the plan (or what the apply did) and the
+#                         deploy keys; leftover and left behind are listed,
+#                         never deleted; and the two v1 limits (no cell
+#                         lease, no destroy verb)
 #   append_summary        appends to the file, never truncates
 #
 # Pure functions over owned values (append_summary writes the one file it is
@@ -34,6 +39,7 @@ from kci_api import (
     STEP_KIND_PUBLISH,
     credential_probe_note,
 )
+from kci_api import ResultDeploy
 from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, new_names_markdown
 
@@ -63,7 +69,7 @@ def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead:
     else:
         s += String("FULL run.")
     if result.plan:
-        s += String(" Dry run (--plan): nothing built, nothing written to a channel.")
+        s += String(" Dry run (--plan): nothing built, nothing written to a channel or a cell.")
     s += String("\n\n")
     s += String("- revision: `") + result.revision + String("`\n")
     if result.set_hash.byte_length() > 0:
@@ -238,4 +244,67 @@ def carried_markdown(stage: String, previous: Int, ours: Int, first_parent: List
             break
         s += String("- `") + first_parent[i] + String("`\n")
         shown += 1
+    return s + String("\n")
+
+
+comptime DEPLOY_NO_LEASE_LINE: String = (
+    "- v1 has no cell lease: only pushes to main deploy, one run at a time; an apply run by hand outside CI is"
+    " serialized with nothing"
+)
+"""The first of a DEPLOY block's v1 limits (deploy_step.md, "What v1 does not do")."""
+
+comptime DEPLOY_NO_DESTROY_LINE: String = (
+    "- v1 has no destroy verb: a resource removed from the file is left standing as leftover; teardown is a"
+    " human step"
+)
+"""The second of a DEPLOY block's v1 limits."""
+
+
+def _ids_line(label: String, ids: List[String]) -> String:
+    var s = String("- ") + label + String(":")
+    for i in range(len(ids)):
+        s += (String(" `") if i == 0 else String(", `")) + ids[i] + String("`")
+    return s + String("\n")
+
+
+def deploy_markdown(
+    step: String, d: ResultDeploy, outcome: String, plan: Bool, plan_text: String, message: String
+) -> String:
+    """A DEPLOY step's block (deploy_step.mojo's header, 6): the cell and its
+    cloud, the outcome, the plan (or what the apply did), and its deploy
+    keys. `leftover` and `left_behind` are listed, and kci never deletes
+    them."""
+    var s = String("### DEPLOY step `") + step + String("`")
+    if d.cell.byte_length() > 0:
+        s += String(" into cell `") + d.cell + String("` (cloud `") + d.cloud + String("`)")
+    s += String(": ") + outcome + String("\n\n")
+    if message.byte_length() > 0:
+        s += message + String("\n\n")
+    if plan:
+        s += String("Dry run (--plan): nothing was written to the cell or its store.")
+        if d.plan_hash.byte_length() > 0:
+            s += String(" plan_hash `") + d.plan_hash + String("`")
+        s += String("\n\n")
+    if plan_text.byte_length() > 0:
+        s += String("```\n") + plan_text + String("\n```\n\n")
+    if len(d.landed) > 0:
+        s += String("- landed (live in the cell):")
+        for i in range(len(d.landed)):
+            s += (String(" `") if i == 0 else String(", `")) + d.landed[i].node + String("` (") + d.landed[i].verb + String(")")
+        s += String("\n")
+    if len(d.pending) > 0:
+        s += _ids_line(String("pending (in apply order; the first is where the apply stopped)"), d.pending)
+    if d.has_failed:
+        s += (
+            String("- failed: `") + d.failed.node + String("` ") + d.failed.verb + String(" (fault ")
+            + d.failed.fault_domain + String("): ") + d.failed.message + String("\n")
+        )
+    if len(d.leftover) > 0:
+        s += _ids_line(String("leftover (owned by resources the file no longer names; kci does not delete them)"), d.leftover)
+    if len(d.left_behind) > 0:
+        s += _ids_line(String("left behind (retained objects the file no longer lowers; kci does not delete them)"), d.left_behind)
+    if len(d.released) > 0:
+        s += _ids_line(String("would release") if plan else String("released"), d.released)
+    if d.cell.byte_length() > 0:
+        s += String(DEPLOY_NO_LEASE_LINE) + String("\n") + String(DEPLOY_NO_DESTROY_LINE) + String("\n")
     return s + String("\n")

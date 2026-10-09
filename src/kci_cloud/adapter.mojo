@@ -204,6 +204,11 @@ names is missing or is not the one it declares; a planned change would
 replace an adopted object (always refused) or delete one whose resource is
 not ADOPT_DELETABLE; or an object carries kci's stamp and adoption mark while
 its resource no longer writes adopt."""
+comptime FINDING_OWNERSHIP: Int = 6
+"""The engine refused a node before any change (refusal.mojo): an object of
+the node's name that is foreign, or a conflict (stamped for another owner, or
+its stamp stripped while the ledger records it), or a node that cannot stamp.
+`resource_id` is the node's owner and `field_path` the node id."""
 
 
 struct Finding(Copyable, Movable, Deinitable):

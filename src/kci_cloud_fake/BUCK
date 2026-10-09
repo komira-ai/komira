@@ -61,6 +61,7 @@ mojo_library(
         "tests/test_fake_composite.mojo",
         "tests/test_fake_kci_job.mojo",
         "tests/test_fake_kci_app.mojo",
+        "tests/test_fake_typed_refusal.mojo",
     ],
     test_data = {
         # The authored graph the lifecycle test reads, as an author writes it.

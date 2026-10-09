@@ -17,7 +17,11 @@
 #      that names no file is a usage error (KCI-E-USAGE, exit 2); a file
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
-#      (KCI-E-FORMAT);
+#      (KCI-E-FORMAT), and so is a file holding a PUBLISH step into a cell,
+#      which this kci parses and does not run; then every cells file a step
+#      names is read (kci_cell) and a step naming a cell its cells file does
+#      not declare, or a cells file that cannot be read or parsed, is
+#      REFUSED (KCI-E-FORMAT) before any step runs;
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
 #      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
@@ -79,14 +83,19 @@
 #      run, and, for a run that selects validations, only when every one of
 #      them VALIDATED and SUCCEEDED (checked at the run's end): kci.yml hands
 #      the validate job's on to prod, and prod refuses an empty one. Under
-#      GitHub Actions the flag is required (KCI-E-USAGE, exit 2);
+#      GitHub Actions the flag is required (KCI-E-USAGE, exit 2). A run
+#      that selects a DEPLOY step always takes the flag (args.mojo), and its
+#      release is recomputed the same way (deploy_step.mojo
+#      `check_deploy_set_hash`);
 #   5. the RUNNING record (`recorder.begin`) BEFORE the first effect. A
 #      record that cannot be written stops the run FAILED
 #      (KCI-E-RESULT-FILE), nothing done;
 #   6. every SELECTED step of S, in file order: a BUILD step through
 #      `steps.build`, a PUBLISH step through `steps.publish`, each given its
 #      name, the stage and its GitHub environment, the revision, the
-#      platform, the run identity, `--plan` and its own inputs. Each step adds
+#      platform, the run identity, `--plan` and its own inputs; a DEPLOY step
+#      through `deploys.deploy` (deploy_step.mojo: the clouds this kci was
+#      built with, given the machine file's `name`). Each step adds
 #      its row, artifacts, new names and first error to the result; a step
 #      `--only` did not select gets a row with `selected: false` and no
 #      outcome. Right after a step's row come its SELECTED validations
@@ -149,8 +158,10 @@
 # Everything a run does outside this process goes through the `StageSteps`
 # seam: the steps, the lookahead reads, the platform-set variables and the
 # committed workflow. `LibrarySteps` (library_verbs.mojo) is the real one;
-# the welded tests drive a recording fake. Human text goes to stderr; stdout
-# carries nothing.
+# the welded tests drive a recording fake. DEPLOY steps go through the
+# `CellDeploys` seam (deploy_step.mojo): `NoCloudBuilt` in the kci binary,
+# `CloudDeploys[FakeCloud, InMemoryStateStore]` in the welded tests. Human
+# text goes to stderr; stdout carries nothing but a DEPLOY step's plan.
 #
 # Encapsulation: owned values and a generic seam; no pointer, no wildcard
 # origin.
@@ -213,11 +224,15 @@ from kci_release_machine import (
     ReleaseMachine,
     StageStep,
     StageValidation,
+    cells_files_named,
     machine_schema_version,
     parse_machine_file,
+    require_cells_declared,
     resolve_selection,
 )
+from kci_cell import cell_names, parse_cells_file
 
+from .deploy_step import CellDeploys, NoCloudBuilt, check_deploy_set_hash, deploy_request
 from .args import (
     CLI_VERB_HELP,
     KCI_USAGE,
@@ -318,6 +333,24 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMach
         g = parse_machine_file(text, cmd.machine)
     except e:
         raise Error(String(ERROR_FORMAT) + String("\n") + String(e))
+    for i in range(len(g.stages)):
+        for k in range(len(g.stages[i].steps)):
+            ref step = g.stages[i].steps[k]
+            if step.is_publish() and step.names_cell():
+                raise Error(
+                    String(ERROR_FORMAT) + String("\n") + cmd.machine + String(": line ") + String(step.line)
+                    + String(": step '") + step.name + String("' of stage '") + g.stages[i].name
+                    + String("' publishes into cell '") + step.cell
+                    + String("': that needs a newer kci (this kci runs BUILD steps, PUBLISH steps to a channel and")
+                    + String(" DEPLOY steps)")
+                )
+    var files = cells_files_named(g)
+    for i in range(len(files)):
+        try:
+            var declared = cell_names(parse_cells_file(_read(files[i])))
+            require_cells_declared(g, files[i], declared, cmd.machine)
+        except e:
+            raise Error(String(ERROR_FORMAT) + String("\nthe cells file '") + files[i] + String("': ") + String(e))
     result.machine_path = cmd.machine.copy()
     result.machine_sha256 = file_sha256_hex(cmd.machine)
     return g^
@@ -478,23 +511,28 @@ def _lookahead[S: StageSteps](
     return out^
 
 
-def _run_step[S: StageSteps](
+def _run_step[S: StageSteps, D: CellDeploys](
     cmd: KciCommand,
+    machine: String,
     stage: Stage,
     step: StageStep,
     mut steps: S,
+    mut deploys: D,
     mut recorder: CliRecorder,
     mut result: KciRunResult,
     mut step_blocks: List[String],
     break_glass: Bool,
 ) -> StepEnd:
     """One selected step (file header, 6): run it, print its lines, keep its
-    summary block. `break_glass`: the run is break-glass (4a)."""
+    summary block. `break_glass`: the run is break-glass (4a); `machine`:
+    the machine file's `name`, a DEPLOY step's scope."""
     _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(" (") + step.kind + String(")"))
     var end: StepEnd
     try:
         if step.is_build():
             end = steps.build(_build_request(cmd, step), result, recorder)
+        elif step.is_deploy():
+            end = deploys.deploy(deploy_request(cmd, machine, stage, step), result)
         else:
             end = steps.publish(_publish_request(cmd, stage, step, break_glass), result, recorder, cmd.store)
             # the run's dry-run flag is the command line's: a step refused
@@ -511,9 +549,10 @@ def _run_step[S: StageSteps](
     return end^
 
 
-def _run_stage[S: StageSteps](
+def _run_stage[S: StageSteps, D: CellDeploys](
     cmd: KciCommand,
     mut steps: S,
+    mut deploys: D,
     mut recorder: CliRecorder,
     mut result: KciRunResult,
     mut step_blocks: List[String],
@@ -586,6 +625,9 @@ def _run_stage[S: StageSteps](
     var hash_verdict = check_set_hash_at_start(cmd, stage, sel, steps, result)
     if hash_verdict.outcome.byte_length() > 0:
         return _stop_run(result, recorder, hash_verdict.outcome, hash_verdict.error_id, hash_verdict.message)
+    var deploy_verdict = check_deploy_set_hash(cmd, g, stage, sel, steps, result)
+    if deploy_verdict.outcome.byte_length() > 0:
+        return _stop_run(result, recorder, deploy_verdict.outcome, deploy_verdict.error_id, deploy_verdict.message)
     for i in range(len(stage.steps)):
         var validated = False
         for m in range(len(stage.steps[i].validations)):
@@ -616,7 +658,7 @@ def _run_stage[S: StageSteps](
             _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(": not selected (--only)"))
             result.steps.append(ResultStep.unselected(step.name.copy(), step.kind.copy(), step.platform.copy()))
         else:
-            var end = _run_step(cmd, stage, step, steps, recorder, result, step_blocks, break_glass)
+            var end = _run_step(cmd, g.name, stage, step, steps, deploys, recorder, result, step_blocks, break_glass)
             try:
                 outcome = worst_outcome(outcome, end.outcome)
             except e:
@@ -679,8 +721,18 @@ def _run_stage[S: StageSteps](
 
 
 def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: CliRecorder) -> Int:
-    """`kci run --stage S` (file header). Returns the exit number; the
-    summary goes to `--summary-file` on every path."""
+    """`run_stage_with` (the next form) on a kci built with no cloud: every
+    DEPLOY step is refused (deploy_step.mojo `NoCloudBuilt`)."""
+    var deploys = NoCloudBuilt()
+    return run_stage_with(cmd, steps, deploys, recorder)
+
+
+def run_stage_with[S: StageSteps, D: CellDeploys](
+    cmd: KciCommand, mut steps: S, mut deploys: D, mut recorder: CliRecorder
+) -> Int:
+    """`kci run --stage S` (file header), its DEPLOY steps through
+    `deploys`. Returns the exit number; the summary goes to
+    `--summary-file` on every path."""
     var result = KciRunResult(String(VERB_RUN), String("run"))
     result.started_at_ms = _now()
     result.stage = cmd.stage.copy()
@@ -690,7 +742,7 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
     var ahead = List[NewNamesReport]()
     var banner = String("")
     var main_only = False
-    var rc = _run_stage(cmd, steps, recorder, result, step_blocks, ahead, banner, main_only)
+    var rc = _run_stage(cmd, steps, deploys, recorder, result, step_blocks, ahead, banner, main_only)
     var text = String("")
     if banner.byte_length() > 0:
         text += String("### ") + banner + String("\n\n")
@@ -704,7 +756,16 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
 
 
 def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder: CliRecorder) -> Int:
-    """`kci <args>`: parse; print the usage; or `kci run`. A refused command
+    """`kci_main_with` (the next form) on a kci built with no cloud."""
+    var deploys = NoCloudBuilt()
+    return kci_main_with(args, steps, deploys, recorder)
+
+
+def kci_main_with[S: StageSteps, D: CellDeploys](
+    args: List[String], mut steps: S, mut deploys: D, mut recorder: CliRecorder
+) -> Int:
+    """`kci <args>`: parse; print the usage; or `kci run`, its DEPLOY steps
+    through `deploys`. A refused command
     line is exit 2, recorded in the file `--result-file` names and summarized
     in the file `--summary-file` names, when it names them. Returns the exit
     number."""
@@ -728,7 +789,7 @@ def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder:
     if cmd.verb == String(CLI_VERB_HELP):
         _say(String(KCI_USAGE))
         return EXIT_OK
-    return run_stage_with(cmd, steps, recorder)
+    return run_stage_with(cmd, steps, deploys, recorder)
 
 
 def recorder_for(args: List[String]) -> CliRecorder:

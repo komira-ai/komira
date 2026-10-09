@@ -22,7 +22,7 @@ from covcheck.text import basis_points, render_bp, render_bp_or_na
 comptime MAX_SUMMARY: Int = 65535
 comptime MAX_RANGES: Int = 200
 
-comptime CAVEAT = "Line coverage counts the lines the compiler emitted code for, and every executable line of a package's source file that no test binary compiled (`UnmeasuredFile`). Still missing: a function no test reaches inside a compiled file may emit no lines at all, so these numbers are upper bounds until declaration reachability lands."
+comptime CAVEAT = "Line coverage counts the lines the compiler emitted code for, and every executable line of a package's source file that no test binary compiled (`UnmeasuredFile`). Still missing: a function no test reaches inside a compiled file emits no lines at all, so these numbers are upper bounds; the result JSON lists the functions none of whose lines has a record (`unrecorded_functions`) without counting them."
 
 
 def md_code(s: String) -> String:

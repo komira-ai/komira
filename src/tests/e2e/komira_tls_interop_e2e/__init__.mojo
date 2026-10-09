@@ -1,13 +1,16 @@
 # komira_tls_interop_e2e: komira's TLS (s2n-tls under komira_http_core.tls)
-# against real TLS peers built from the pinned aws-lc: its bssl tool, as
-# `bssl s_server` and `bssl s_client`, a child process of the test.
+# against real TLS peers, each a child process of the test: aws-lc's bssl
+# tool built from the pinned archive, as `bssl s_server` and `bssl s_client`,
+# and CPython's `ssl` module (OpenSSL) in the pinned interpreter, as
+# cpython_peer.py's server and client.
 #
 # A test-only package. Its tests (BUCK) run under `./buck2 test`, given the
-# bssl binary as a flag; its welded test checks the reading of bssl's report
-# on its own. The library holds the peer processes (children.mojo), the
-# reading of what bssl prints (bssl.mojo), the fixtures and komira's
-# configurations (fixtures.mojo), and komira's side of a connection
-# (tls_io.mojo).
+# bssl binary or the interpreter as a flag; its welded tests check the
+# reading of bssl's report and of the CPython server's port on their own.
+# The library holds the peer processes (children.mojo), the reading of what
+# bssl prints (bssl.mojo), the CPython peer (cpython.mojo, cpython_peer.py),
+# the fixtures and komira's configurations (fixtures.mojo), and komira's side
+# of a connection (tls_io.mojo).
 
 from .bssl import (
     BsslReport,
@@ -16,6 +19,7 @@ from .bssl import (
     standard_cipher_name,
     tls_version_name,
 )
+from .cpython import LISTENING, PEER_SCRIPT, listening_port, start_cpython_peer
 from .children import PeerGroup, PeerOutcome, deadline_after_ms, past, tick
 from .fixtures import (
     LEAF_CERT_PATH,

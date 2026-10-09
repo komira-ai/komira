@@ -1,5 +1,5 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
@@ -219,6 +219,91 @@ mojo_library(
     test_srcs = ["tests/test_gen.mojo"],
 )
 
+# Test 43: a library whose one test is generated (a `test_srcs` entry that is
+# a build output: tests/test_gen_triple.mojo, made from its .in by cov_plant
+# used as a generator). It has its coverage binary and run as a written test
+# has ([coverage][tests][test_gen_triple] is its golden report, naming the
+# test by its output path in the package), and its gate (census) counts the
+# line it runs of covgentest/triple.mojo and sets the test aside.
+cov_plant(
+    name = "covgentest_test",
+    expr = "s/@ARG@/4/",
+    out = "tests/test_gen_triple.mojo",
+    src = "tests/test_gen_triple.mojo.in",
+)
+
+mojo_library(
+    name = "covgentest",
+    srcs = [
+        "covgentest/__init__.mojo",
+        "covgentest/triple.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    test_srcs = [":covgentest_test"],
+)
+
+cov_report_check(
+    name = "covgentest_report",
+    goldens = ["golden/test_gen_triple.xml"],
+    mode = "golden",
+    reports = [":covgentest[coverage][tests][test_gen_triple]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covgentest_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,',
+        '"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covgentest[coverage][gate][result]"],
+    script = "report.sh",
+)
+
+# Test 43: a shared library with coverage builds (forced here, as for
+# covlib_forced). Its driver, tests/covso_driver.mojo, loads the library's
+# coverage build and calls covso_scale only: its report
+# ([coverage][tests][covso_driver]) holds the driver and covso_abi.mojo's
+# lines, those of covso_scale run and those of covso_unused not, and its gate
+# (census) counts them with the driver set aside.
+mojo_shared_lib(
+    name = "covso",
+    srcs = ["covso/covso_abi.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    exports = [
+        "covso_scale",
+        "covso_unused",
+    ],
+    gate_srcs = ["tests/covso_driver.mojo"],
+)
+
+cov_report_check(
+    name = "covso_report",
+    goldens = ["golden/covso_driver.xml"],
+    mode = "golden",
+    reports = [":covso[coverage][tests][covso_driver]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covso_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":3,"line_found":5,"line_bp":6000,',
+        '"excluded_test_files":1,',
+    ],
+    mode = "result",
+    reports = [":covso[coverage][gate][result]"],
+    script = "report.sh",
+)
+
 # Test 43: a library with twelve generated sources, each with a long name.
 # cov_run.sh once named every generated source to kcov in one
 # --exclude-path argument (two absolute paths each); kcov opens every
@@ -341,7 +426,8 @@ cov_debug_check(
 # source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
 # its arms, never the first (and a String destroyed at an `if`, loops over
 # collections, a Dict subscript, user masks, raising calls in `try:`
-# bodies, a function only a folded-away assert failure calls): with
+# bodies, `and`/`or` whose result is returned, stored or passed on, a
+# function only a folded-away assert failure calls): with
 # coverage (forced here, as for covlib_forced) it has [coverage][bc],
 # [coverage][pgo_bin] and [coverage][branch].
 mojo_library(
@@ -356,6 +442,7 @@ mojo_library(
         "branchlib/strings.mojo",
         "branchlib/trial.mojo",
         "branchlib/unrun.mojo",
+        "branchlib/values.mojo",
     ],
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
@@ -465,6 +552,30 @@ cov_branch_check(
 # `raise` (48) give no record. A classifier without the `try` rule loses
 # every try record; one ignoring the `try:` scope records 70 (and
 # lookup.mojo's 7,13); one keeping LLVM's arm order gives 23,20 as 0,1.
+# values.mojo: an `and`/`or` whose result no branch tests is a decision of
+# its own two arms, the right operand skipped or evaluated, with no `rhs`:
+# returned (`both_set`'s select 31,14: 1,1; `either_small`'s short-circuit
+# 35,21: 1,1; `nested_values` 48,18 and its inner `or` 48,32: 0,1),
+# stored (39,19), passed to a call (44,24: 0,1, the right operand never
+# skipped), with a raising right operand (`and` 52,18: 2,0, and `or`
+# 56,18: 1,1, its error flag a phi beside the result). In `guarded`, a
+# `try:` body's `if a > 0 and strict(b):`, the call is a `try` decision
+# (61,28: returned 1, raised 1) and the `if` (61,9) ran 2 of the `and`'s 3
+# times (the raise skips it): no test of this result, so 61,18 is its own
+# two arms (2,1). Where a branch does test the result its right
+# operand is counted as before: `digit`, a plain @always_inline helper
+# inlined twice, is tested by the `if` (folded into a select, 71,9) in one
+# copy and passed on in the other: 27,20 sums both copies (5,1) and its
+# rhs is the tested copy's (2,1); in `folded`, Mojo folds `if a > 0 and
+# is_even(b): hit = True` away and the `if hit:` select (91,5) tests the
+# `and`'s phi itself (89,14 rhs 1,1). `lowers`'s `lower = c >= 97 and ...`
+# is tested only when `i != 0` (the `or` at 81,46), two of its three runs:
+# no test of this result, so 80,29 is its own two arms (2,1) and no rhs; the
+# `or`'s result merges with `lower` in a phi before the `if ok:`, which no
+# rule follows: 81,46 is its own two arms too. A classifier refusing an
+# untested and/or (as it first did: `return a or b` refused) fails here; one
+# dropping its record loses 31,14 to 52,18; one deriving a right operand
+# from a test of other counts writes 80,29:rhs and 61,18:rhs.
 # test_gate_env calls none of branchlib: its record file is empty.
 # test_unrun asserts two known equal Tags equal: assert_equal's failure path,
 # which writes them (unrun.mojo's Tag.write_to), is a branch Mojo folds to

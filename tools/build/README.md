@@ -49,6 +49,30 @@ another. Every file loads the rules as `@komira//tools/build/mojo:...`, and the
 `tests` cell has its own fixtures rather than reusing
 [`examples/`](examples/).
 
+## Languages for build tools
+
+Every build tool under `tools/build` is written in Zig. Zig is already the
+pinned hermetic C compiler and linker (`zig cc`), so a Zig tool needs no
+extra toolchain, builds to a small static binary and calls C directly.
+Rust is for long-running services, not for build tools.
+
+[`mojo/tools/conda_unpack.zig`](mojo/tools/conda_unpack.zig) must be Zig
+regardless: the Rust toolchain's conda libraries are unpacked by it
+(`rustc_libs` in [`toolchains/rust/BUCK`](toolchains/rust/BUCK) sets
+`unpacker = "komira//tools/build/toolchains:conda_unpack"`), so a Rust
+version would be a bootstrap cycle.
+
+The one exception is [`proto-codegen/`](proto-codegen/) (`protoc-gen-mojo`
+and its sibling generators), which stays in Rust because it is built on
+`prost`, the mature Rust protobuf library; Zig has no equivalent.
+
+The Rust sources under [`tests/negative/`](tests/negative/) and
+[`examples/rust/`](examples/rust/) are fixtures and examples that exercise
+the Rust rules. They are not tools, and this policy does not cover them.
+
+A new build tool is written in Zig unless it needs a library only Rust has;
+that needs a written justification like the one for `proto-codegen` above.
+
 ## Using komira from another repository
 
 A repository builds Mojo with komira's rules by naming komira as its `komira`

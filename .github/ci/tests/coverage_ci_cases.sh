@@ -26,7 +26,9 @@
 # (enforce) failing in its gate alone, beside its census twin; and so is
 # build_report_branch_failed.json: `tests//negative/coverage:branchretor`'s
 # `[coverage][tests]` and `[coverage][branch_info]` in one build, its runs
-# built and its classifier refusing its branch records.
+# built and its classifier refusing its branch records (a recorded report:
+# that target, whose `return a or b` the classifier refused then, has since
+# been deleted; the cases read the report, not the target).
 # Exits 1 on the first wrong result, naming it; writes the validation
 # result and exits 0 when every case holds.
 set -eu
