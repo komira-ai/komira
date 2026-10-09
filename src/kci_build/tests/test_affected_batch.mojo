@@ -5,7 +5,8 @@
 #   logs, its argv file), a target two units share given once, a unit alone
 #   built as before, a failed batch retried unit by unit to name each failing
 #   unit, the 3-failure cap, a timed-out or signal-killed batch attributed
-#   to no unit, a run that cannot be started stopping the step and
+#   to no unit (timed out: INDETERMINATE, time ran out; killed: FAILED;
+#   komira#1153), a run that cannot be started stopping the step and
 #   outranking a failed unit,
 #   interference never a pass, the outcome's precedence, and BUILT only for
 #   units an exit-0 run covered. One case runs a real fake build program
@@ -358,13 +359,14 @@ def test_t7_a_failed_batch_whose_units_all_build_alone_is_never_a_pass() raises:
 
 
 def test_t8_a_timed_out_batch_is_not_split() raises:
+    # no unit of it failed: time ran out, INDETERMINATE (komira#1153)
     var root = _fresh(String("t8"))
     var req = _request(root)
     var runner = ScriptedRunner()
     runner.expect(_build(_argv(_A, _B, _DOCS, _SHELL), timed_out=True))
     var o = _go(req, _argv("lib_a", "lib_b", "lints"), runner)
-    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
-    assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(len(runner.calls), 1)
     assert_equal(runner.remaining(), 0)
     assert_equal(
@@ -546,7 +548,8 @@ def test_t12_the_batch_argv_file_holds_one_argument_per_line() raises:
     )
 
 
-def test_t14_a_timeout_outranks_interference() raises:
+def test_t14_a_timeout_and_interference_are_indeterminate_timeout_first() raises:
+    # neither is a failure: INDETERMINATE, the timed-out batch's note first
     var root = _fresh(String("t14"))
     var req = _request(root)
     var runner = ScriptedRunner()
@@ -555,8 +558,8 @@ def test_t14_a_timeout_outranks_interference() raises:
     runner.expect(_build(_argv(_DOCS, _SHELL)))
     runner.expect(_keep(_argv(_C, _D), timed_out=True))
     var o = _go(req, _argv("lib_a", "lib_c", "lib_d", "lints"), runner)
-    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
-    assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(len(runner.calls), 4)
     assert_equal(runner.remaining(), 0)
     assert_true(

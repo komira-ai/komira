@@ -841,8 +841,14 @@ history, so the base commit is there.
 
 **How the reached units are built:** units whose `build_targets` commands are
 identical (both build systems of `release/artifacts.textproto` share
-`sh release/ci/build_targets.sh`) are built in ONE run over the union of their
-targets, so a `build_targets` command must be correct on such a union.
+`sh release/ci/build_targets.sh`) are built together, in runs (batches) of at
+most 32 units over the union of their targets, so a `build_targets` command
+must be correct on such a union. A group of n units is ceil(n / 32) batches of
+near-equal size, each a consecutive slice in unit order (the artifacts file
+lists each library after the libraries it depends on, so a later batch reuses
+what an earlier one built); a widened change (every unit, about 300) is about
+ten batches, each sized to finish within its timeout, where one batch of every
+unit did not finish in 60 minutes.
 `release/ci/build_targets.sh` builds with `--keep-going`, then checks the lints
 and runs the tests among all the targets (a failed build stops before the lints
 and tests). The per-run timeout (`--build-timeout-s`, default 3600 s) bounds the
@@ -864,15 +870,19 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
   later batch that fails is noted as not attributed (a later batch that
   passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
   the summary's line is `BUILD step: F of N unit(s) failed: ...`.
-- **The batch times out (or is killed by a signal):** the batch had the whole
+- **The batch times out:** the batch had the whole
   `--build-timeout-s` (default 3600 s), or what was left of the build budget
   when that was less (the note then says `timed out after N s, what was left
   of the build budget`), not a share per unit. It is not retried and no unit
-  of it is attributed: FAILED.
+  of it is attributed. Time ran out and nothing failed: INDETERMINATE
+  (`KCI-E-CANNOT-TELL`), never a pass, and the later batches still run.
+- **The batch is killed by a signal** (not by its timeout): not retried, no
+  unit of it attributed: FAILED.
 - **The batch fails but every unit builds alone:** the units interfere or the
   build is flaky. That is INDETERMINATE (`KCI-E-CANNOT-TELL`), never a pass.
-  FAILED outranks it: if a unit failed or a batch was not attributed anywhere
-  in the step, the step is FAILED and the interference is a note.
+  FAILED outranks it and time running out: if a unit failed or a failed or
+  killed batch was not attributed anywhere in the step, the step is FAILED
+  and the timeouts, the units not built and the interference are notes.
 - **A run cannot be started** (a batch, a unit alone or a retry): the step
   stops at once, nothing after it is started, and the step is INDETERMINATE
   (`KCI-E-CANNOT-TELL`) even when a unit has already failed.
@@ -890,9 +900,11 @@ derive or affected command not started makes the step INDETERMINATE
 (`KCI-E-AFFECTED`: kci cannot tell what the change reaches). A build run not
 started lists its units, and those of every later run, as `BUILD step: U of
 N unit(s) not built: the build budget (--build-budget-s B) was spent before
-their run could start: ...`, which is FAILED (`KCI-E-BUILD-FAILED`), never
-a pass; the units earlier runs built keep their `BUILT` lines. A batch whose
-retries ran out of budget is not called interference. Without the flag,
+their run could start: ...`: time ran out, INDETERMINATE (`KCI-E-CANNOT-TELL`),
+never a pass (FAILED when a unit failed too); the units earlier runs built keep
+their `BUILT` lines. A batch that failed and whose retries ran out of budget
+before one failed is not called interference: it is FAILED, a failure nobody
+was attributed for. Without the flag,
 each run has its `--build-timeout-s` and there is no total.
 
 `pr.yml` passes the time its job has left: its first step writes the job's

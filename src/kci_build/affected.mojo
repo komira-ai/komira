@@ -62,12 +62,14 @@
 #    With --build-budget-s, every run of this step 5 may take what is left
 #    of the budget, which counts from kci's own start (the steps above and
 #    kci's start-up are charged to it), at most --build-timeout-s, and a run
-#    with nothing left is not started (its units are not built).
-#    Any failed unit, unattributed batch or unit not built for want of
-#    budget is FAILED (KCI-E-BUILD-FAILED); a
-#    build that cannot be started is INDETERMINATE (KCI-E-CANNOT-TELL), and
-#    so is a batch that failed while each of its units built alone (never a
-#    pass). `BUILT <unit>` lines name exactly the units an exit-0 run
+#    with nothing left is not started (its units are not built). A group
+#    of more than `req.max_batch_units` units (32) runs as ceil(n / max)
+#    batches in unit order. Any failed unit, or a failed or killed batch
+#    nobody was attributed for, is FAILED (KCI-E-BUILD-FAILED); a build that
+#    cannot be started is INDETERMINATE (KCI-E-CANNOT-TELL), and so are time
+#    running out with nothing failed (a batch that timed out, units not built
+#    for want of budget) and a batch that failed while each of its units
+#    built alone (never a pass). `BUILT <unit>` lines name exactly the units an exit-0 run
 #    covered, whatever the outcome. Nothing is written under --release-dir,
 #    there is no manifest and no release.json: nothing ships.
 # 6. The result gets the step's row, the first error, and `affected_by`

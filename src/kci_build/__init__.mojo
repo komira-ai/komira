@@ -21,7 +21,8 @@
 #   affected_batch.mojo     build_affected_units: those units built in one
 #                           run per shared build_targets command, a failed
 #                           batch retried unit by unit to name its failures,
-#                           every run within the --build-budget-s budget
+#                           at most max_batch_units units a run, every run
+#                           within the --build-budget-s budget
 #
 # What to build, and with which program, is the artifacts file's
 # (kci_artifact); what a build must leave is checked by
@@ -31,10 +32,11 @@
 # =============================================================================
 
 from kci_build.affected import run_affected
-from kci_build.affected_batch import MAX_FAILED_UNITS, build_affected_units, run_timeout_s
+from kci_build.affected_batch import MAX_FAILED_UNITS, batch_chunks, build_affected_units, run_timeout_s
 from kci_build.build import check_log_dir, check_platform_dir, resolved_path, run_build
 from kci_build.request import (
     DEFAULT_BUILD_TIMEOUT_S,
+    DEFAULT_MAX_BATCH_UNITS,
     MAX_BUILD_BUDGET_S,
     NO_BUILD_BUDGET,
     BuildOutcome,

@@ -25,7 +25,9 @@
 #                  makes exit 2 like any other command-line error: nothing
 #                  was run
 #   FAILED         a build exited non-zero, was killed by a signal or timed
-#                  out (KCI-E-BUILD-FAILED), or the run's result could not
+#                  out (KCI-E-BUILD-FAILED; in the per-change check, a
+#                  batch that timed out and a unit the budget left no time
+#                  for are INDETERMINATE instead, below), or the run's result could not
 #                  be recorded before the first effect (KCI-E-RESULT-FILE);
 #                  later artifacts not built. A build leaves no external
 #                  effect (member directories are local and `release.json`
@@ -39,7 +41,9 @@
 # that reaches no declared unit) and INDETERMINATE with KCI-E-AFFECTED (an
 # affected command that could not be started, failed, timed out or answered
 # outside its grammar: never a widening). A unit whose build fails is FAILED
-# (KCI-E-BUILD-FAILED); a file without what the check needs is REFUSED
+# (KCI-E-BUILD-FAILED); time running out with no unit failed (a batch that
+# timed out, units the build budget left no time for) is INDETERMINATE
+# (KCI-E-CANNOT-TELL, affected_batch.mojo step 4); a file without what the check needs is REFUSED
 # (KCI-E-ARTIFACT).
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
@@ -64,6 +68,13 @@ comptime NO_BUILD_BUDGET: Int = 0
 `--build-budget-s`: the per-change check's runs are bounded by
 `--build-timeout-s` each, and by nothing in total."""
 
+comptime DEFAULT_MAX_BATCH_UNITS: Int = 32
+"""The most units one batch of the per-change check builds
+(`BuildRequest.max_batch_units`): a group of more is split into
+ceil(n / 32) batches of near-equal size, in unit order
+(affected_batch.mojo `batch_chunks`). One batch of every unit (299 on a
+widened change) did not finish within --build-timeout-s (3600 s)."""
+
 comptime MAX_BUILD_BUDGET_S: Int = 7 * 24 * 3600
 """The largest `--build-budget-s` kci takes (a week, longer than any CI
 job runs): a larger one is refused, so `budget * 10^9` added to a
@@ -83,7 +94,8 @@ struct BuildRequest(Copyable, Movable):
     `build_deadline_ns` is when it ends on the runner's monotonic clock
     (`ProcessRunner.now_ns`): kci's start plus the budget, so everything
     kci did before the step is charged to it (affected_batch.mojo, THE
-    BUDGET).
+    BUDGET). `max_batch_units` is the most units one batch of the
+    per-change check builds (DEFAULT_MAX_BATCH_UNITS).
 
     Layout: owned values only. No pointer field."""
 
@@ -98,6 +110,7 @@ struct BuildRequest(Copyable, Movable):
     var build_timeout_s: Int
     var build_budget_s: Int
     var build_deadline_ns: Int
+    var max_batch_units: Int
     var plan: Bool
     var affected_by: String
 
@@ -113,6 +126,7 @@ struct BuildRequest(Copyable, Movable):
         self.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
         self.build_budget_s = NO_BUILD_BUDGET
         self.build_deadline_ns = 0
+        self.max_batch_units = DEFAULT_MAX_BATCH_UNITS
         self.plan = False
         self.affected_by = String("")
 

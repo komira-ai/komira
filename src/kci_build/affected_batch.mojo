@@ -8,7 +8,14 @@
 #
 # 1. GROUP: kci_artifact `batch_groups` splits `units` (decision order) into
 #    groups whose build_targets commands are element-wise identical; groups
-#    in the order of their first unit, decision order inside each.
+#    in the order of their first unit, decision order inside each. Then
+#    `batch_chunks` splits a group of more than `req.max_batch_units`
+#    (DEFAULT_MAX_BATCH_UNITS) units into ceil(n / max) runs of near-equal
+#    size (the first n % runs one larger), each a consecutive slice in
+#    decision order. Decision order is the artifacts file's (each library
+#    after the libraries it depends on), so a later run reuses what an
+#    earlier one built, and a widened change (every unit) is several runs
+#    each sized to finish within its timeout, not one that cannot.
 # 2. Each group runs ONCE (cwd --work-dir, timeout: see THE BUDGET below):
 #    - a group of one unit runs `render_targets_argv` with stdout and stderr
 #      at `<log>/<unit>.stdout|.stderr`, and is never rerun;
@@ -20,7 +27,9 @@
 #    - it could not be started (the runner raises): INDETERMINATE
 #      (KCI-E-CANNOT-TELL) naming every unit of that run; stop at once;
 #    - exit 0: every unit of the run is PROVEN;
-#    - timed out or killed by a signal: no unit of it is attributed (FAILED,
+#    - a batch that timed out: no unit of it is attributed and it is not
+#      retried; time ran out, nothing failed (INDETERMINATE, step 4);
+#    - a batch killed by a signal: no unit of it is attributed (FAILED,
 #      KCI-E-BUILD-FAILED), and it is not retried;
 #    - a non-zero exit of a batch: its units run one at a time, in order,
 #      each as a group of one. A unit that fails (a timeout counts) is a
@@ -28,21 +37,32 @@
 #      nothing more is retried: the rest are "not tried", and a later batch
 #      that fails is noted "not attributed" (a later batch that passes still
 #      proves its units). A batch that failed while every one of its units
-#      built alone is INTERFERENCE.
+#      built alone is INTERFERENCE. A batch that failed and whose retries
+#      the budget cut off before any of them failed is a failure nobody was
+#      attributed for.
 # 4. The outcome, first match: a run that could not be started is
-#    INDETERMINATE (KCI-E-CANNOT-TELL); any failed unit, a batch nobody
-#    was attributed for, or a unit the budget left no time to start is
-#    FAILED (KCI-E-BUILD-FAILED); any interference is
-#    INDETERMINATE (KCI-E-CANNOT-TELL: the units interfere or the build is
-#    flaky, never a pass); else SUCCEEDED, `<head>: N unit(s) built`.
+#    INDETERMINATE (KCI-E-CANNOT-TELL); any failed unit, or a batch that
+#    exited non-zero or was killed by a signal with nobody attributed, is
+#    FAILED (KCI-E-BUILD-FAILED); TIME RAN OUT with no failure (a batch
+#    that timed out, a unit the budget left no time to start) is
+#    INDETERMINATE (KCI-E-CANNOT-TELL: not a pass, and not a failure: kci
+#    cannot tell how the units it did not finish would have ended); any
+#    interference is INDETERMINATE (KCI-E-CANNOT-TELL: the units interfere
+#    or the build is flaky, never a pass); else SUCCEEDED,
+#    `<head>: N unit(s) built`.
 #    A FAILED message's first line is `BUILD step: F of N unit(s) failed:
 #    a, c` (with no failed unit, the first unattributed batch's note; with
 #    neither, the not-built line below), then one paragraph per failed
 #    unit, the units not tried, the failed batches' notes, the (other)
 #    unattributed batches' notes, `BUILD step: U of N unit(s) not built:
 #    the build budget (--build-budget-s B) was spent before their run could
-#    start: x, y` when there are such units, and the interference notes. An INDETERMINATE message for a run that could not be started is
-#    that run, then the paragraphs of the units already failed.
+#    start: x, y` when there are such units, the timed-out batches' notes,
+#    and the interference notes. An INDETERMINATE message for a run that
+#    could not be started is that run, then the paragraphs of the units
+#    already failed. One for time that ran out is the first timed-out
+#    batch's note (`batch k (...): `...` timed out (...): no unit of it was
+#    attributed`; with none, the not-built line), the other timed-out
+#    batches' notes, the not-built line, then the interference notes.
 # 5. The lines: `notices`, then `BUILT <unit>` for each proven unit in
 #    decision order, whatever the outcome. A unit is BUILT only when an
 #    exit-0 run covered it.
@@ -57,9 +77,9 @@
 # read just before the run: the smaller of --build-timeout-s and the whole
 # seconds left until the deadline. A run with less than one second left is
 # NOT STARTED: its units are "not built: the build budget was spent", which is
-# FAILED (KCI-E-BUILD-FAILED) like an unattributed batch, never a pass, and
-# every later run is not started either, so the message lists every unit
-# left. A run the budget cut short and that timed out says so, with the
+# time that ran out (INDETERMINATE, KCI-E-CANNOT-TELL, never a pass; FAILED
+# when a unit failed too), and every later run is not started either, so the
+# message lists every unit left. A run the budget cut short and that timed out says so, with the
 # seconds it had. A batch whose units were cut off by the budget during
 # their one-at-a-time retries is not interference.
 #
@@ -85,6 +105,33 @@ comptime MAX_FAILED_UNITS: Int = 3
 
 comptime _SHOWN_TARGETS: Int = 4
 comptime _STDERR: FileDescriptor = FileDescriptor(2)
+
+
+def batch_chunks(groups: List[List[String]], max_units: Int) raises -> List[List[String]]:
+    """`groups` with every group of more than `max_units` units split into
+    ceil(n / max_units) consecutive slices of near-equal size, the first
+    n % slices one unit larger (file header, step 1); groups and units keep
+    their order. Raises when `max_units` is less than 1."""
+    if max_units < 1:
+        raise Error(String("the most units of a batch must be at least 1, not ") + String(max_units))
+    var out = List[List[String]]()
+    for g in range(len(groups)):
+        var n = len(groups[g])
+        var runs = (n + max_units - 1) // max_units
+        if runs <= 1:
+            out.append(groups[g].copy())
+            continue
+        var size = n // runs
+        var larger = n % runs
+        var at = 0
+        for c in range(runs):
+            var take = size + (1 if c < larger else 0)
+            var chunk = List[String]()
+            for i in range(at, at + take):
+                chunk.append(groups[g][i].copy())
+            out.append(chunk^)
+            at += take
+    return out^
 
 
 def run_timeout_s(build_timeout_s: Int, build_budget_s: Int, deadline_ns: Int, now_ns: Int) -> Int:
@@ -139,6 +186,8 @@ struct _Tally(Movable):
     var unattributed: List[String]
     var interference: List[String]
     var over_budget: List[String]
+    var timed_out: List[String]
+    var cut_retries: Int
     var cannot: String
 
     def __init__(out self):
@@ -150,6 +199,8 @@ struct _Tally(Movable):
         self.unattributed = List[String]()
         self.interference = List[String]()
         self.over_budget = List[String]()
+        self.timed_out = List[String]()
+        self.cut_retries = 0
         self.cannot = String("")
 
 
@@ -287,14 +338,17 @@ def _run_batch[R: ProcessRunner](
             t.proven.append(group[i].copy())
         return
     if r.timed_out or r.signaled:
-        t.unattributed.append(
-            _with_tail(
-                tag + String(" (") + n + String(": ") + _names(group) + String("): `") + shown + String("` ")
-                + r.describe() + _budget_clause(req, timeout_s, r) + String(" (stderr: ") + spec.stderr_path
-                + String("): no unit of it was attributed"),
-                r,
-            )
+        var note = _with_tail(
+            tag + String(" (") + n + String(": ") + _names(group) + String("): `") + shown + String("` ")
+            + r.describe() + _budget_clause(req, timeout_s, r) + String(" (stderr: ") + spec.stderr_path
+            + String("): no unit of it was attributed"),
+            r,
         )
+        # time ran out (step 4: INDETERMINATE) vs a kill nobody asked for
+        if r.timed_out:
+            t.timed_out.append(note^)
+        else:
+            t.unattributed.append(note^)
         return
     if len(t.failed) >= MAX_FAILED_UNITS:
         t.unattributed.append(
@@ -325,6 +379,10 @@ def _run_batch[R: ProcessRunner](
             continue
         if t.cannot.byte_length() > 0:
             return
+    if not every_one_tried and len(t.failed) == failed_before:
+        # the budget cut the retries off before any failed: the batch's
+        # non-zero exit is a failure nobody was attributed for
+        t.cut_retries += 1
     if every_one_tried and len(t.failed) == failed_before:
         t.interference.append(
             tag + String(" (`") + shown + String("` ") + r.describe() + String(", stderr: ") + spec.stderr_path
@@ -350,7 +408,7 @@ def _finish(units: List[String], head: String, notices: List[String], t: _Tally,
         for i in range(len(t.paragraphs)):
             m += String("\n") + t.paragraphs[i]
         o = BuildOutcome(String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL), m^)
-    elif len(t.failed) > 0 or len(t.unattributed) > 0 or len(t.over_budget) > 0:
+    elif len(t.failed) > 0 or len(t.unattributed) > 0 or t.cut_retries > 0:
         var m: String
         var skip = 0
         var budget_first = False
@@ -376,11 +434,29 @@ def _finish(units: List[String], head: String, notices: List[String], t: _Tally,
             m += String("\n") + t.batch_notes[i]
         for i in range(skip, len(t.unattributed)):
             m += String("\n") + t.unattributed[i]
+        for i in range(len(t.timed_out)):
+            m += String("\n") + t.timed_out[i]
         if len(t.over_budget) > 0 and not budget_first:
             m += String("\n") + _over_budget_line(t, units, budget_s)
         for i in range(len(t.interference)):
             m += String("\n") + t.interference[i]
         o = BuildOutcome(String(OUTCOME_FAILED), String(ERROR_BUILD_FAILED), m^)
+    elif len(t.timed_out) > 0 or len(t.over_budget) > 0:
+        # time ran out and nothing failed: not a pass, not a failure
+        var m: String
+        if len(t.timed_out) > 0:
+            m = String("BUILD step: ") + t.timed_out[0]
+        else:
+            m = _over_budget_line(t, units, budget_s)
+        for i in range(1, len(t.timed_out)):
+            m += String("\n") + t.timed_out[i]
+        if len(t.over_budget) > 0 and len(t.timed_out) > 0:
+            m += String("\n") + _over_budget_line(t, units, budget_s)
+        for i in range(len(t.interference)):
+            m += String("\n") + t.interference[i]
+        for i in range(len(t.batch_notes)):
+            m += String("\n") + t.batch_notes[i]
+        o = BuildOutcome(String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL), m^)
     elif len(t.interference) > 0:
         var m = String("BUILD step: ") + t.interference[0]
         for i in range(1, len(t.interference)):
@@ -407,10 +483,11 @@ def build_affected_units[R: ProcessRunner](
     mut runner: R,
 ) raises -> BuildOutcome:
     """Step 5 of the per-change check (file header): build `units`, in
-    decision order, one run per shared build_targets command."""
+    decision order, one run per shared build_targets command and at most
+    `req.max_batch_units` units."""
     makedirs(req.log_dir, exist_ok=True)
     var t = _Tally()
-    var groups = batch_groups(arts, units)
+    var groups = batch_chunks(batch_groups(arts, units), req.max_batch_units)
     var k = 0
     for g in range(len(groups)):
         if len(groups[g]) == 1:

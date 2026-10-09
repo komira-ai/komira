@@ -9,10 +9,12 @@
 #   --build-timeout-s; with one, each run gets what is left until the
 #   deadline (at most --build-timeout-s), after a run that passed, failed or
 #   timed out alike; a run with nothing left is not started and
-#   its units are named as not built (FAILED, never a pass) while the units
+#   its units are named as not built (time ran out: INDETERMINATE, never a
+#   pass, and not FAILED unless something failed; komira#1153) while the units
 #   an earlier run built keep their BUILT lines; a batch the budget cut short
-#   says so when it times out; retries share the same budget and a batch
-#   whose retries ran out of budget is not called interference.
+#   says so when it times out (INDETERMINATE: no unit was attributed);
+#   retries share the same budget and a batch whose retries ran out of
+#   budget is not called interference (FAILED: the batch exited non-zero).
 # =============================================================================
 #
 # Every test asserts the outcome, the error id, len(runner.calls) and
@@ -25,7 +27,14 @@ from std.os.path import realpath
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_api import ERROR_BUILD_FAILED, OUTCOME_FAILED, OUTCOME_SUCCEEDED, RunIdentity
+from kci_api import (
+    ERROR_BUILD_FAILED,
+    ERROR_CANNOT_TELL,
+    OUTCOME_FAILED,
+    OUTCOME_INDETERMINATE,
+    OUTCOME_SUCCEEDED,
+    RunIdentity,
+)
 from kci_artifact import parse_artifacts
 from kci_artifact_proto.artifact import Artifacts
 from kci_build import (
@@ -238,13 +247,14 @@ def test_b3_each_run_gets_what_the_earlier_runs_left() raises:
 
 def test_b4_a_run_with_no_budget_left_is_not_started_and_its_units_are_named() raises:
     # batch 1 spends the whole budget and passes: its units are BUILT;
-    # batch 2 is never started, and its units are named as not built
+    # batch 2 is never started, and its units are named as not built.
+    # Nothing failed: time ran out, INDETERMINATE (komira#1153)
     var req = _request(String("b4"), 100)
     var runner = ScriptedRunner()
     runner.expect(_build(_argv(_A, _B, _DOCS), took_s=100))
     var o = _go(req, _argv("lib_a", "lib_b", "lints", "lib_c", "lib_d"), runner)
-    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
-    assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(len(runner.calls), 1)
     assert_equal(runner.remaining(), 0)
     assert_equal(
@@ -259,14 +269,15 @@ def test_b4_a_run_with_no_budget_left_is_not_started_and_its_units_are_named() r
 
 def test_b5_a_batch_the_budget_cut_short_says_so() raises:
     # lib_c alone takes 50 of 100 s; the batch gets the 50 left (not 77),
-    # times out, and is attributed to no unit; lib_c keeps its BUILT line
+    # times out, and is attributed to no unit (INDETERMINATE: time ran
+    # out); lib_c keeps its BUILT line
     var req = _request(String("b5"), 100)
     var runner = ScriptedRunner()
     runner.expect(_keep(_argv(_C), took_s=50))
     runner.expect(_build(_argv(_A, _B, _DOCS), took_s=50, timed_out=True))
     var o = _go(req, _argv("lib_c", "lib_a", "lib_b", "lints"), runner)
-    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
-    assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(len(runner.calls), 2)
     assert_equal(runner.remaining(), 0)
     assert_equal(runner.calls[1].timeout_s, 50)
@@ -294,8 +305,8 @@ def test_b5_a_timed_out_batch_is_charged_before_the_next_group() raises:
     runner.expect(_build(_argv(_A, _B, _DOCS), took_s=77, timed_out=True))
     runner.expect(_keep(_argv(_C, _D), took_s=23))
     var o = _go(req, _argv("lib_a", "lib_b", "lints", "lib_c", "lib_d"), runner)
-    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
-    assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(len(runner.calls), 2)
     assert_equal(runner.remaining(), 0)
     assert_equal(runner.calls[0].timeout_s, 77)
@@ -330,7 +341,8 @@ def test_b5_a_timeout_the_budget_did_not_shorten_reads_as_before() raises:
     var runner = ScriptedRunner()
     runner.expect(_build(_argv(_A, _B, _DOCS), took_s=77, timed_out=True))
     var o = _go(req, _argv("lib_a", "lib_b", "lints"), runner)
-    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(len(runner.calls), 1)
     assert_equal(runner.remaining(), 0)
     assert_equal(runner.calls[0].timeout_s, 77)

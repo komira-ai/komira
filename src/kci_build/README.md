@@ -59,7 +59,8 @@ batch, a unit alone, a retry) can share a budget,
 runner's monotonic clock (`ProcessRunner.now_ns`, CLOCK_MONOTONIC by
 default). Each run's timeout is the smaller of `--build-timeout-s` and the
 whole seconds left until the deadline. With less than one second left the run
-is not started: a unit is reported as not built (FAILED), a derive or affected
+is not started: a unit is reported as not built (time ran out: INDETERMINATE,
+like a batch that timed out; FAILED only when a unit failed), a derive or affected
 command as not started (INDETERMINATE). Without a budget every run gets
 `--build-timeout-s`:
 

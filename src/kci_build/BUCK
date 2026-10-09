@@ -92,6 +92,13 @@ mojo_library(
         # what the earlier runs left, a run with none left is not started and
         # its units are named, a timeout the budget caused says so
         "tests/test_affected_budget.mojo",
+        # a widened change (komira#1153): 70 units in ceil(70/32) batches in
+        # unit order; a timed-out batch or a spent budget with nothing failed
+        # is INDETERMINATE, a failed unit still FAILED
+        "tests/test_affected_wide.mojo",
+        # batch_chunks and BuildRequest.max_batch_units: ceil(n/max) slices of
+        # near-equal size per group, a limit under 1 refused
+        "tests/test_affected_chunks.mojo",
         # SupervisorRunner over /bin/sh: output files, exit codes, the timeout,
         # how long a run took, an explicit child environment and inheritance
         "tests/test_supervisor_runner.mojo",
