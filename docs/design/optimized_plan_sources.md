@@ -4,10 +4,10 @@ Status: proposed, not built. This is §15 of [`optimized_plan.md`](optimized_pla
 file stays under 1,000 lines. Section numbers continue that document's: `§15.x` is here, `§10.x` is in
 [`optimized_plan_udfs.md`](optimized_plan_udfs.md), and every other `§n` is in `optimized_plan.md`.
 
-Citations are to komira `origin/main` at `43569cea24` unless marked otherwise. The storage rules cited as
-"storage stack" are [`storage_stack.md`](storage_stack.md) revision 2 (komira-ai/komira#1134, at `c13a878c82`); the
-graph rules cited as "graph storage" are [`data_graph_storage.md`](data_graph_storage.md) (komira-ai/komira#833, at
-`8f3e266b42`). Statements marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run
+Citations are to komira `main` as of 2026-10-09 unless marked otherwise. The storage rules cited as
+"storage stack" are [`storage_stack.md`](storage_stack.md) revision 2 (komira-ai/komira#1134, at the head of branch
+`docs/storage-stack`); the graph rules cited as "graph storage" are [`data_graph_storage.md`](data_graph_storage.md)
+(komira-ai/komira#833, at the head of branch `docs/search-format-kg`). Statements marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run
 to write this document.
 
 ---
@@ -344,7 +344,7 @@ message WireTextQuery {
 }
 
 message WireVectorQuery {
-  string        column      = 1;    // FIXED_SIZE_LIST<FLOAT32|FLOAT16|INT8>, or a text column the index embeds
+  string        column      = 1;    // a vector column (below), or a text column the index embeds
   WireExpr      query       = 2;    // a constant: a vector literal, or a probe column inside an index lookup (§15.6)
   VectorMetric  metric      = 3;    // L2 | COSINE | DOT
   bytes         model_fp    = 4;    // embedding model fingerprint; equals the index's when the index embeds
@@ -361,6 +361,14 @@ message IndexPin {
   bytes     builder_fp         = 6;  // analyzer, embedding model and field ids, as the generation records them
 }
 ```
+
+**Vector columns.** Iceberg has no fixed-size list type. A VECTOR access path therefore accepts an Iceberg
+`list<float32>`, `list<float16>` or `list<int8>` column whose table property declares its dimension (graph storage,
+komira-ai/komira#833, keeps the column as `list<float>` plus that declared dimension). The dimension is validated on
+read: a row whose list length differs from it fails the scan rather than being skipped. The scan
+presents the column as an Arrow `FIXED_SIZE_LIST<element, dim>`, so the query vector's `dim`, the distance kernels
+and the result schema all see a fixed size. A column with no declared dimension cannot be a VECTOR access path's
+`column`.
 
 **Meaning.** A scan with `kind = FULL` is today's scan. A scan with `TEXT` or `VECTOR` is the same relation (the
 table at its pin, with the pushed `filter`), restricted to its top `k` matches and extended with one column:
@@ -405,7 +413,7 @@ message WireVectorDistance { WireExpr left = 1; WireExpr right = 2; VectorMetric
 
 - A vector literal is a `WireScalar` with `kind = SCALAR_KIND_VECTOR` and `vector_val` set. Its byte length must be
   `dim` times the element width, and a NaN element is refused (`OPTIMIZED_VECTOR_LITERAL_MALFORMED`); its `dim` must
-  equal the column's list size (`OPTIMIZED_VECTOR_DIM_MISMATCH`).
+  equal the column's declared dimension (`OPTIMIZED_VECTOR_DIM_MISMATCH`).
 - `vector_distance` is an ordinary expression returning FLOAT64. It makes the exact, index-free form of a k-nearest
   query plain relational algebra: `TopN(k, by distance(col, q))` over a scan, or `PartitionTopN` per probe row over
   a cross join. That form is the definition the VECTOR access path must agree with when `ann = EXACT_ONLY`.

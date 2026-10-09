@@ -773,9 +773,10 @@ of its CPython minor, and a TypeScript producer's FROM the base of its Node majo
   CPython minor, or `komira/node` with its one Node major), each with its library and its worker launcher, and the
   serializers and capture formats each accepts.
 
-A plan that needs both `komira/python` and `komira/node` has no base at the first release and is refused at
-admission check 3 (`OPTIMIZED_ENV_RUNTIME_MISSING`); each SDK captures only its own language, so only an assembled
-plan can need both *(inferred)*.
+**One managed runtime per base image.** A base carries exactly one managed runtime (one CPython minor or one Node
+major) besides `komira/native`. A plan that needs two managed runtimes (for example both `komira/python` and
+`komira/node`) therefore has no base and is refused at admission check 3 (`OPTIMIZED_ENV_RUNTIME_MISSING`). Each SDK
+captures only its own language, so only an assembled plan can need two.
 
 The base image's `[layers]` output lets this prefix be checked: "An image whose layers begin with these is built
 FROM this one" (`packaging/images/base/README.md` in komira-ai/komira#1070, not yet on `main`). The layers the
@@ -783,8 +784,8 @@ user's side adds may contain:
 
 - dependency layers, in the runtime's environment directory `/opt/env/<runtime>/` (one layer, or one per
   distribution or package): `/opt/env/komira/python/` is a virtual environment created at that path, and
-  `/opt/env/komira/node/` holds the packages with native addons (§10.6). Earlier revisions named Python's directory
-  `/opt/venv/`; it is mapped to `/opt/env/komira/python/` and never shipped;
+  `/opt/env/komira/node/` holds the packages with native addons (§10.6). The
+  older name `/opt/venv/` is retired: no base or added layer uses it;
 - a code layer under `/komira-code/` with the source bundles, the JavaScript bundles (pure-JavaScript dependencies
   included, §10.6) and the payloads;
 - data-blob layers. A large blob may be its own layer, so an unchanged blob is pulled once per host;
