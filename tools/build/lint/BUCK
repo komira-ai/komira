@@ -17,6 +17,9 @@ export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
 # The reader of lint kind pointer_lint (lint.sh; the rule is pointer_lint in defs.bzl).
 export_file(name = "pointer_lint.awk", visibility = ["PUBLIC"])
 
+# The reader of the refused imports of lint kind mojo_deps (lint.sh; the rule is mojo_deps in defs.bzl).
+export_file(name = "refused_imports.awk", visibility = ["PUBLIC"])
+
 # The reader of lint kind public_boundary (lint.sh; the rule is public_boundary in defs.bzl).
 export_file(name = "public_boundary.awk", visibility = ["PUBLIC"])
 

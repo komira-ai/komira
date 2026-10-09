@@ -1,0 +1,16 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+
+# Test 54 (refused imports, mojo_deps), the half that must build: near.mojo
+# spells each refused module where it is not an import of it (a comment, a
+# docstring, a string literal, a longer module name, a name imported from
+# another module), so `ok` building proves none is a finding.
+# negative/refused_imports plants one import form per target.
+mojo_deps(
+    name = "ok",
+    buck = "deps.txt",
+    srcs = ["near.mojo"],
+    refused_imports = [
+        "komira_plan_ir.physical_plan",
+        "komira_plan_ir.physical_plan_purity_gate",
+    ],
+)

@@ -140,10 +140,25 @@ def _mojo_deps_impl(ctx):
         fail("mojo_deps {}: srcs is empty, so it would check nothing".format(ctx.label))
     staged, copy = _stage(ctx, [ctx.attrs.buck] + ctx.attrs.srcs)
     for m in ctx.attrs.refused_imports:
-        if "," in m or not m.startswith("komira_"):
-            fail("mojo_deps {}: refused_imports entry `{}` is not one dotted komira_* module name".format(ctx.label, m))
+        if not _dotted_komira_module(m):
+            fail("mojo_deps {}: refused_imports entry `{}` is not a dotted module name komira_<x>.<y>[.<z>...] of letters, digits and _".format(ctx.label, m))
     refused = ",".join(ctx.attrs.refused_imports) or "-"
-    return _lint(ctx, "mojo_deps", [], [copy[ctx.attrs.buck.short_path], refused] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
+    return _lint(ctx, "mojo_deps", [ctx.attrs._reader], [copy[ctx.attrs.buck.short_path], refused] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
+
+_WORD = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+
+def _dotted_komira_module(m):
+    """Whether m matches komira_[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+."""
+    parts = m.split(".")
+    if len(parts) < 2 or not parts[0].startswith("komira_") or len(parts[0]) == len("komira_"):
+        return False
+    for p in parts:
+        if not p:
+            return False
+        for i in range(len(p)):
+            if p[i] not in _WORD:
+                return False
+    return True
 
 mojo_deps_rule = rule(
     impl = _mojo_deps_impl,
@@ -151,6 +166,7 @@ mojo_deps_rule = rule(
     attrs = _COMMON | {
         "buck": attrs.source(),
         "refused_imports": attrs.list(attrs.string(), default = []),
+        "_reader": attrs.source(default = "komira//tools/build/lint:refused_imports.awk"),
         "srcs": attrs.list(attrs.source()),
     },
 )
