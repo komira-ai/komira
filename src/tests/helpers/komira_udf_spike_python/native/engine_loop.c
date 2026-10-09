@@ -71,6 +71,22 @@ enum {
   T_SAMPLES
 };
 
+/* Fields of kudf_misuse (kudf_misuse_get): a status, or as noted. */
+enum {
+  M_OPEN = 0,               /* open_context, then open_instance, on the owner thread */
+  M_FOREIGN_OPEN_INSTANCE,  /* open_instance on that context from another thread */
+  M_FOREIGN_CALL,           /* call_batch on its instance from another thread */
+  M_FOREIGN_CALL_MOVED,     /* 1 when that call_batch moved its args in */
+  M_FOREIGN_CLOSE_LOGS,     /* log lines during close_instance + close_context from another thread */
+  M_OFFSET_CALL,            /* call_batch, owner thread, the argument struct at offset 1 */
+  M_OFFSET_CALL_MOVED,      /* 1 when that call_batch moved its args in */
+  M_AFTER_CALL,             /* a valid call_batch on the owner thread after the above */
+  M_AFTER_BAD_VALUES,       /* its wrong output values */
+  M_EXPORTED,               /* argument arrays exported */
+  M_RELEASED,               /* of those, released by the end */
+  M_FIELDS
+};
+
 struct engine {
   void* lib;
   const komira_udf_runtime* t;
@@ -81,6 +97,7 @@ struct engine {
   int64_t t_open;  /* before dlopen */
   int64_t open_ns; /* dlopen + init */
   int runs;
+  int64_t logs; /* log lines the runtime has written, atomic */
   komira_udf_capabilities caps;
 };
 
@@ -108,6 +125,8 @@ struct run {
   pthread_barrier_t opened, warmed, measured;
   int64_t f[R_INVOLUNTARY_SWITCHES + 1];
   char message[MSG];
+  int64_t m[M_FIELDS];      /* kudf_misuse only */
+  char m_message[M_FIELDS][MSG];
   struct thread_state th[MAX_THREADS];
 };
 
@@ -133,7 +152,7 @@ static int64_t host_now(void* hd) {
   return now_mono();
 }
 static void host_log(void* hd, int32_t level, const char* utf8) {
-  (void)hd;
+  __atomic_fetch_add(&((struct engine*)hd)->logs, 1, __ATOMIC_ACQ_REL);
   fprintf(stderr, "runtime log %d: %s\n", level, utf8 ? utf8 : "");
 }
 
@@ -413,11 +432,13 @@ static int64_t tv_ns(struct timeval tv) { return (int64_t)tv.tv_sec * 1000000000
 
 static void no_release(struct ArrowSchema* s) { (void)s; }
 
-struct run* kudf_run(struct engine* e, const char* entry, int32_t shape, char arg_fmt, char result_fmt,
-                     int32_t threads, int32_t warmup, int32_t batches, int64_t rows, int32_t check, double a,
-                     double b, double base, double step) {
+/* A run with its UDF loaded, or with R_STATUS and the message set. */
+static struct run* run_load(struct engine* e, const char* entry, int32_t shape, char arg_fmt, char result_fmt,
+                            int32_t threads, int32_t warmup, int32_t batches, int64_t rows, int32_t check, double a,
+                            double b, double base, double step) {
   struct run* r = calloc(1, sizeof(*r));
   if (r == NULL) return NULL;
+  for (int k = 0; k < M_FIELDS; k++) r->m[k] = -1;
   r->e = e;
   r->shape = shape;
   r->arg_fmt = arg_fmt;
@@ -467,8 +488,16 @@ struct run* kudf_run(struct engine* e, const char* entry, int32_t shape, char ar
   if (rc != KOMIRA_UDF_OK) {
     r->f[R_STATUS] = rc;
     take_error(&err, r->message);
-    return r;
   }
+  return r;
+}
+
+struct run* kudf_run(struct engine* e, const char* entry, int32_t shape, char arg_fmt, char result_fmt,
+                     int32_t threads, int32_t warmup, int32_t batches, int64_t rows, int32_t check, double a,
+                     double b, double base, double step) {
+  struct run* r =
+      run_load(e, entry, shape, arg_fmt, result_fmt, threads, warmup, batches, rows, check, a, b, base, step);
+  if (r == NULL || r->udf == NULL) return r;
   r->f[R_RSS_BEFORE] = rss_bytes();
   pthread_barrier_init(&r->opened, NULL, (unsigned)r->threads + 1);
   pthread_barrier_init(&r->warmed, NULL, (unsigned)r->threads + 1);
@@ -506,6 +535,124 @@ struct run* kudf_run(struct engine* e, const char* entry, int32_t shape, char ar
       snprintf(r->message, MSG, "thread %d: %s", i, r->th[i].message);
     }
   return r;
+}
+
+/* ---- misuse: calls the contract forbids the host ------------------------- */
+/* For a thread_affine runtime (design section 4.2): a context and its
+ * instances are used only from the thread that opened them, and the
+ * argument struct is at offset 0 (section 3.4). kudf_misuse opens a context
+ * and an instance on the calling thread, makes the forbidden calls, then one
+ * valid call, and closes on the calling thread; kudf_misuse_get reads what
+ * the runtime did. The run has one thread record: the owner's. */
+
+static void values_fill(struct run* r, void* values) {
+  for (int64_t i = 0; i < r->rows; i++) {
+    double x = r->base + r->step * (double)i;
+    if (r->arg_fmt == 'g')
+      ((double*)values)[i] = x;
+    else
+      ((int64_t*)values)[i] = (int64_t)x;
+  }
+}
+
+/* One call_batch whose output is released unread. Returns its status; the
+ * error message goes to m_message[field]; *moved is 1 when args were moved. */
+static int32_t raw_call(struct run* r, komira_udf_instance* inst, const void* values, int64_t parent_offset,
+                        int field, int64_t* moved) {
+  struct thread_state* s = &r->th[0];
+  struct ArrowDeviceArray args, out;
+  memset(&out, 0, sizeof(out));
+  if (!export_args(&args, values, r->rows, &s->f[T_RELEASED])) return KOMIRA_UDF_ERR_OUT_OF_MEMORY;
+  args.array.offset = parent_offset;
+  s->f[T_EXPORTED]++;
+  komira_udf_call call = {sizeof(komira_udf_call), 0, 1, NULL};
+  komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
+  int32_t rc = r->e->t->call_batch(inst, &call, &args, &out, &err);
+  *moved = args.array.release == NULL;
+  if (args.array.release != NULL) args.array.release(&args.array);
+  if (rc != KOMIRA_UDF_OK) take_error(&err, r->m_message[field]);
+  if (out.array.release != NULL) out.array.release(&out.array);
+  return rc;
+}
+
+struct foreign {
+  struct run* r;
+  komira_udf_context* ctx;
+  komira_udf_instance* inst;
+  const void* values;
+};
+
+static void* foreign_thread(void* p) {
+  struct foreign* f = p;
+  struct run* r = f->r;
+  const komira_udf_runtime* t = r->e->t;
+  komira_udf_instance* other = NULL;
+  komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
+  int32_t rc = t->open_instance(f->ctx, r->udf, &other, &err);
+  r->m[M_FOREIGN_OPEN_INSTANCE] = rc;
+  if (rc != KOMIRA_UDF_OK)
+    take_error(&err, r->m_message[M_FOREIGN_OPEN_INSTANCE]);
+  else
+    t->close_instance(other); /* the runtime accepted it: undo as it allows */
+  r->m[M_FOREIGN_CALL] = raw_call(r, f->inst, f->values, 0, M_FOREIGN_CALL, &r->m[M_FOREIGN_CALL_MOVED]);
+  int64_t logs = __atomic_load_n(&r->e->logs, __ATOMIC_ACQUIRE);
+  t->close_instance(f->inst);
+  t->close_context(f->ctx);
+  r->m[M_FOREIGN_CLOSE_LOGS] = __atomic_load_n(&r->e->logs, __ATOMIC_ACQUIRE) - logs;
+  return NULL;
+}
+
+struct run* kudf_misuse(struct engine* e, const char* entry, int32_t shape, char arg_fmt, char result_fmt,
+                        int64_t rows, double a, double b, double base, double step) {
+  struct run* r = run_load(e, entry, shape, arg_fmt, result_fmt, 1, 1, 0, rows, CHECK_AFFINE, a, b, base, step);
+  if (r == NULL || r->udf == NULL) return r;
+  const komira_udf_runtime* t = e->t;
+  struct thread_state* s = &r->th[0];
+  s->run = r;
+  s->f[T_INCREASING] = 1;
+  void* values = malloc((size_t)(r->rows > 0 ? r->rows : 1) * 8);
+  komira_udf_context* ctx = NULL;
+  komira_udf_instance* inst = NULL;
+  komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
+  int32_t rc = KOMIRA_UDF_ERR_OUT_OF_MEMORY;
+  if (!e->caps.thread_affine) {
+    rc = KOMIRA_UDF_ERR_UNSUPPORTED;
+    snprintf(r->m_message[M_OPEN], MSG, "the runtime is not thread_affine");
+  } else if (values != NULL) {
+    values_fill(r, values);
+    rc = t->open_context(e->rt, 0, &ctx, &err);
+    if (rc == KOMIRA_UDF_OK) rc = t->open_instance(ctx, r->udf, &inst, &err);
+    if (rc != KOMIRA_UDF_OK) take_error(&err, r->m_message[M_OPEN]);
+  }
+  r->m[M_OPEN] = rc;
+  if (inst != NULL) {
+    struct foreign f = {r, ctx, inst, values};
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, foreign_thread, &f) == 0) pthread_join(tid, NULL);
+    r->m[M_OFFSET_CALL] = raw_call(r, inst, values, 1, M_OFFSET_CALL, &r->m[M_OFFSET_CALL_MOVED]);
+    int64_t prev = 0;
+    int have_prev = 0;
+    one_call(s, inst, values, &prev, &have_prev);
+    r->m[M_AFTER_CALL] = s->f[T_STATUS];
+    snprintf(r->m_message[M_AFTER_CALL], MSG, "%s", s->message);
+    r->m[M_AFTER_BAD_VALUES] = s->f[T_BAD_VALUES];
+    t->close_instance(inst);
+  }
+  if (ctx != NULL) t->close_context(ctx);
+  t->unload(r->udf);
+  r->udf = NULL;
+  free(values);
+  r->m[M_EXPORTED] = s->f[T_EXPORTED];
+  r->m[M_RELEASED] = __atomic_load_n(&s->f[T_RELEASED], __ATOMIC_ACQUIRE);
+  return r;
+}
+
+int64_t kudf_misuse_get(const struct run* r, int32_t field) {
+  return field >= 0 && field < M_FIELDS ? r->m[field] : 0;
+}
+
+const char* kudf_misuse_message(const struct run* r, int32_t field) {
+  return field >= 0 && field < M_FIELDS ? r->m_message[field] : "";
 }
 
 int64_t kudf_run_get(const struct run* r, int32_t thread, int32_t field) {

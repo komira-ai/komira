@@ -11,8 +11,9 @@
 #     kudf_engine_open and freed by kudf_engine_close in Engine.__del__,
 #     which shuts the runtime down first. Held here as a Word that only this
 #     file reads through.
-#   - a run handle (struct run): created by kudf_run and freed by
-#     kudf_run_free before run() returns, once every field is copied out.
+#   - a run handle (struct run): created by kudf_run or kudf_misuse and
+#     freed by kudf_run_free before run() or misuse() returns, once every
+#     field is copied out.
 #   - C strings this file passes (the library path, the entry): zeroed
 #     blocks freed right after the call that reads them; the C side copies
 #     what it keeps.
@@ -50,6 +51,19 @@ comptime _T_INCREASING: Int32 = 9
 comptime _T_EXPORTED: Int32 = 10
 comptime _T_RELEASED: Int32 = 11
 comptime _T_SAMPLES: Int32 = 12
+
+# kudf_misuse_get; the order of the C enum.
+comptime _M_OPEN: Int32 = 0
+comptime _M_FOREIGN_OPEN_INSTANCE: Int32 = 1
+comptime _M_FOREIGN_CALL: Int32 = 2
+comptime _M_FOREIGN_CALL_MOVED: Int32 = 3
+comptime _M_FOREIGN_CLOSE_LOGS: Int32 = 4
+comptime _M_OFFSET_CALL: Int32 = 5
+comptime _M_OFFSET_CALL_MOVED: Int32 = 6
+comptime _M_AFTER_CALL: Int32 = 7
+comptime _M_AFTER_BAD_VALUES: Int32 = 8
+comptime _M_EXPORTED: Int32 = 9
+comptime _M_RELEASED: Int32 = 10
 
 comptime CHECK_NONE: Int32 = 0
 """Outputs are checked for their row count and layout only."""
@@ -161,6 +175,39 @@ struct RunReport(Copyable, Movable):
         return out^
 
 
+@fieldwise_init
+struct MisuseReport(Copyable, Movable):
+    """What a thread_affine runtime did with calls the contract forbids its
+    host (Engine.misuse). Statuses are the table's; -1 is a step not
+    reached."""
+
+    var load_status: Int32
+    var load_message: String
+    var open_status: Int32
+    """open_context then open_instance, on the owner thread."""
+    var open_message: String
+    var foreign_open_instance: Int32
+    """open_instance on the owner's context, from another thread."""
+    var foreign_open_instance_message: String
+    var foreign_call: Int32
+    """call_batch on the owner's instance, from another thread."""
+    var foreign_call_message: String
+    var foreign_call_moved: Bool
+    var foreign_close_logs: Int64
+    """Log lines the runtime wrote during close_instance and close_context
+    from another thread."""
+    var offset_call: Int32
+    """call_batch on the owner thread with the argument struct at offset 1."""
+    var offset_call_message: String
+    var offset_call_moved: Bool
+    var after_call: Int32
+    """A valid call_batch on the owner thread after all of the above."""
+    var after_call_message: String
+    var after_bad_values: Int64
+    var exported: Int64
+    var released: Int64
+
+
 def quantile(var xs: List[Int64], q: Float64) -> Int64:
     """The q-quantile (nearest rank) of xs; 0 for an empty list."""
     if len(xs) == 0:
@@ -231,9 +278,44 @@ struct Engine(Movable):
         external_call["kudf_run_free", NoneType](r.p)
         return out^
 
+    def misuse(mut self, w: Workload) -> MisuseReport:
+        """Opens a context and an instance of `w`'s UDF on this thread, then
+        makes the calls the contract forbids (open_instance, call_batch,
+        close_instance and close_context from another thread; an argument
+        struct at a nonzero offset), one valid call of `w.rows` rows checked
+        as `w` says, and closes here. For a thread_affine runtime."""
+        var entry = _cstr(w.entry)
+        var r = Word(
+            external_call["kudf_misuse", Void](
+                self._e.p, entry, Int32(w.shape), Int8(Int(w.arg_fmt.as_bytes()[0])),
+                Int8(Int(w.result_fmt.as_bytes()[0])), Int64(w.rows), w.a, w.b, w.base, w.step,
+            )
+        )
+        free_zeroed(entry)
+        var out = MisuseReport(
+            Int32(_get(r, -1, _R_STATUS)), read_cstr(external_call["kudf_run_message", Void](r.p, Int32(-1))),
+            Int32(_m(r, _M_OPEN)), _m_message(r, _M_OPEN),
+            Int32(_m(r, _M_FOREIGN_OPEN_INSTANCE)), _m_message(r, _M_FOREIGN_OPEN_INSTANCE),
+            Int32(_m(r, _M_FOREIGN_CALL)), _m_message(r, _M_FOREIGN_CALL), _m(r, _M_FOREIGN_CALL_MOVED) == 1,
+            _m(r, _M_FOREIGN_CLOSE_LOGS),
+            Int32(_m(r, _M_OFFSET_CALL)), _m_message(r, _M_OFFSET_CALL), _m(r, _M_OFFSET_CALL_MOVED) == 1,
+            Int32(_m(r, _M_AFTER_CALL)), _m_message(r, _M_AFTER_CALL), _m(r, _M_AFTER_BAD_VALUES),
+            _m(r, _M_EXPORTED), _m(r, _M_RELEASED),
+        )
+        external_call["kudf_run_free", NoneType](r.p)
+        return out^
+
     def __del__(deinit self):
         external_call["kudf_engine_close", NoneType](self._e.p)
 
 
 def _get(r: Word, thread: Int32, field: Int32) -> Int64:
     return external_call["kudf_run_get", Int64](r.p, thread, field)
+
+
+def _m(r: Word, field: Int32) -> Int64:
+    return external_call["kudf_misuse_get", Int64](r.p, field)
+
+
+def _m_message(r: Word, field: Int32) -> String:
+    return read_cstr(external_call["kudf_misuse_message", Void](r.p, field))

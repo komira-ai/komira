@@ -8,6 +8,9 @@
 #   - the numpy batch function: numpy arrays over the Arrow buffers, nulls
 #     as a masked array and back as nulls, a float64 result copied out once
 #     (values wrong, or a null lost, in either direction);
+#   - a sliced argument (Arrow offset 13) with a null: the numpy array and
+#     its mask both start at the offset (values read from row 0 are the
+#     exporter's padding; a mask read from bit 0 loses the null);
 #   - an int64 numpy result for a declared float64 column is cast (a safe
 #     cast), and a column of the right length comes back;
 #   - an argument array user code still views after its call (a numpy
@@ -19,6 +22,9 @@
 #
 # Mutants planted: komira_udf_pyrt.py's _numpy dropping the mask of a
 # masked result (mask = None): red (row 1 comes back as a value).
+# _numpy reading count=n values from 0 instead of [off:off + n]: red
+# (sliced case: padding values); _numpy reading the mask bits [:n] instead
+# of [off:off + n]: red (sliced case: row 1 not null).
 # python_call.c releasing the argument array when the call returns, whatever
 # views remain: red ("the kept argument array is still the runtime's").
 
@@ -48,6 +54,10 @@ def main() raises:
     want.append_float(212.0)
     want.append_float(-40.0)
     assert_equal(same_column(r.column, want), "")
+
+    r = call_once(rt, f, floats([0.0, 1.0, 100.0, -40.0], null_at=1, offset=13))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    assert_equal(same_column(r.column, want), "", "sliced at offset 13")
 
     var cast = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_np:as_float", TYPE_INT64, TYPE_FLOAT64)
     r = call_once(rt, cast, ints([1, 2, 3]))

@@ -13,14 +13,21 @@
 #     would fail on, mid-run);
 #   - open_instance refuses a hint that does not resolve when the module is
 #     imported (ERR_LOAD), after validate accepted its source;
-#   - calls: a per-row function's values; a raise on row 3 as ERR_RAISED
+#   - calls: a per-row function's values; a sliced argument (Arrow offset
+#     13, not a multiple of 8) read from its offset, both without nulls (no
+#     validity buffer: the single-argument fast path) and with a null (the
+#     validity bitmap at the same offset) (a reader that starts at row 0
+#     reads the exporter's padding); a raise on row 3 as ERR_RAISED
 #     with the row and a user_trace naming the user's file; a float returned
 #     for an int64 result refused as ERR_RETURN_TYPE (an unsafe cast); and
 #   - the numpy batch function cannot load here: numpy does not import in a
 #     sub-interpreter, so this mode reports it FAIL with numpy's error.
 #
-# Mutant planted: komira_udf_pyrt.py's _rows writing a float into an int64
-# column through int() instead of refusing it: red (float_into_int).
+# Mutants planted: komira_udf_pyrt.py's _rows writing a float into an int64
+# column through int() instead of refusing it: red (float_into_int); its
+# fast path reading x0[i] instead of x0[off0 + i]: red (the sliced case
+# without nulls); its general path reading row p = i instead of
+# offs[j] + i: red (the sliced case with a null).
 
 from std.testing import assert_equal, assert_true
 
@@ -83,6 +90,24 @@ def _calls(mut rt: UdfRuntime) raises:
     for v in [32.0, 212.0, -40.0, 98.6]:
         want.append_float(v)
     assert_equal(same_column(r.column, want), "")
+
+    # Sliced at offset 13: rows 0..12 of the buffers are the exporter's
+    # padding. Without nulls the column has no validity buffer.
+    var dbl = spec1(SHAPE_SCALAR, "udf_fixtures:double", TYPE_INT64, TYPE_INT64)
+    r = call_once(rt, dbl, ints([5, 6, 7, 8, 9], offset=13))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    var doubled = Column(TYPE_INT64)
+    for v in [10, 12, 14, 16, 18]:
+        doubled.append_int(Int64(v))
+    assert_equal(same_column(r.column, doubled), "", "sliced, no nulls")
+    r = call_once(rt, dbl, ints([5, 6, 7, 8, 9], null_at=3, offset=13))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    var doubled_null = Column(TYPE_INT64)
+    for v in [10, 12, 14]:
+        doubled_null.append_int(Int64(v))
+    doubled_null.append_null()
+    doubled_null.append_int(18)
+    assert_equal(same_column(r.column, doubled_null), "", "sliced, row 3 null")
 
     # A null reaches the per-row function as None, and `None * 1.8` raises.
     r = call_once(rt, f, floats([0.0, 1.0, 2.0, 3.0, 4.0], null_at=3))

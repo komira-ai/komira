@@ -11,7 +11,10 @@
 # shapes the runtime does not declare (ROW, frames, aggregates, steps) are
 # skipped and counted; every array the host exported is released once.
 #
-# Defects caught: the adapter reading a sliced argument from offset 0, or
+# Defects caught: the adapter's list reader (_lists, the column shape)
+# reading a sliced argument from offset 0 (the corpus's one sliced case is a
+# list[int] column; the per-row and numpy readers' offsets are
+# test_python_subinterp's and test_python_shared_gil's), or
 # writing a null as a value; the runtime holding an argument array past its
 # call (the ledger); cancel or a deadline ignored; validate accepting a
 # signature the hints contradict.

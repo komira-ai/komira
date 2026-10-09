@@ -12,7 +12,10 @@
 #     design rejects this mode for state, pinned so the two builds differ);
 #   - the one lock: 4 threads spinning 200 ms of CPU each keep CPU time over
 #     wall time at most 1.3 (a baseline that is not serialized would measure
-#     something else than it says).
+#     something else than it says);
+#   - misuse (calls.check_misuse), as in the sub-interpreter build: a
+#     context's thread state used off its thread is refused or, for the
+#     two closes, logged and ignored.
 #
 # Mutant planted: python_runtime.c opening (and closing) every context of
 # the shared build as a sub-interpreter: red (numpy cannot load in a
@@ -20,6 +23,7 @@
 
 from std.testing import assert_equal, assert_true
 
+from komira_udf_spike_python.calls import check_misuse
 from komira_udf_spike_python.engine import CAP_GLOBAL_LOCK, Engine, RunReport
 from komira_udf_spike_python.workloads import call_counter, fahrenheit_np, fahrenheit_rows, spin
 
@@ -36,6 +40,7 @@ def main() raises:
     var e = Engine("./python_shared_gil.so")
     assert_equal(e.status(), 0, e.message())
     assert_equal(e.cap(CAP_GLOBAL_LOCK), 1)
+    check_misuse(e)
 
     for w in [fahrenheit_np(4, 1024, 2, 20), fahrenheit_rows(4, 1024, 2, 20)]:
         var r = e.run(w)

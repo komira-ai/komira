@@ -425,7 +425,25 @@ static int32_t py_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_cont
  * the interpreter frees the views: for a sub-interpreter, when it ends here;
  * for the shared interpreter, when the objects go, at the latest at
  * finalization (python_call.c, ArrowBuffer). */
+/* close_context and close_instance return nothing, so a call from a thread
+ * other than the context's (a host that broke thread_affine) cannot be
+ * refused with a status: it is logged and the handle is left untouched,
+ * still the owner thread's to close. Entering the thread state here would
+ * run the interpreter on a thread it does not belong to. */
+static int off_owner_thread(komira_udf_context* c, const char* what) {
+  if (pthread_equal(c->owner, pthread_self())) return 0;
+  const komira_udf_host* h = c->rt->host;
+  if (h->log != NULL) {
+    char m[160];
+    snprintf(m, sizeof(m), "komira-test/python: %s from a thread other than the context's (thread_affine); ignored",
+             what);
+    h->log(h->host_data, 2, m);
+  }
+  return 1;
+}
+
 static void py_close_context(komira_udf_context* c) {
+  if (off_owner_thread(c, "close_context")) return;
   struct komira_udf_rt* rt = c->rt;
   struct pyapi* a = &rt->api;
   pyrt_enter(c);
@@ -498,6 +516,7 @@ static int32_t py_open_instance(komira_udf_context* c, komira_udf_udf* u, komira
 
 static void py_close_instance(komira_udf_instance* i) {
   struct komira_udf_context* c = i->ctx;
+  if (off_owner_thread(c, "close_instance")) return;
   pyrt_enter(c);
   c->rt->api.Py_DecRef(i->call);
   c->rt->api.Py_DecRef(i->inst);

@@ -15,7 +15,12 @@
 #     least 0.6 x min(4, CPUs) (a lock shared across engine threads: under
 #     one GIL the ratio is about 1);
 #   - the engine loop names no runtime and no language (it drives any
-#     runtime library through the table).
+#     runtime library through the table);
+#   - misuse (calls.check_misuse): open_instance and call_batch from a
+#     thread other than the context's refused, close_instance and
+#     close_context from it logged and ignored, an argument struct at a
+#     nonzero offset refused (a sub-interpreter entered off its thread; a
+#     context freed under its owner; an offset read as 0).
 #
 # Mutant planted: python_runtime.c's open_context and close_context treating
 # every context of the sub-interpreter build as a thread state of the main
@@ -24,9 +29,14 @@
 # counted in the same module).
 # The shared conformance suite stays green under it: its cases are
 # stateless, so this case is where a shared interpreter shows.
+# Mutants planted: python_runtime.c's off_owner_thread always answering
+# "owner" (closes entered off their thread): red (foreign_close_logs 0);
+# python_call.c's args_layout_error without its offset check: red
+# (offset_call OK).
 
 from std.testing import assert_equal, assert_false, assert_true
 
+from komira_udf_spike_python.calls import check_misuse
 from komira_udf_spike_python.engine import CAP_GLOBAL_LOCK, Engine, RunReport
 from komira_udf_spike_python.workloads import call_counter, fahrenheit_rows, spin
 
@@ -53,6 +63,7 @@ def main() raises:
     var e = Engine("./python_subinterp.so")
     assert_equal(e.status(), 0, e.message())
     assert_equal(e.cap(CAP_GLOBAL_LOCK), 0)
+    check_misuse(e)
 
     var r = e.run(fahrenheit_rows(4, 1024, 2, 20))
     _all_ok(r, "fahrenheit_rows")

@@ -80,6 +80,7 @@ static int cancelled(const komira_udf_call* c) {
 static const char* args_layout_error(const struct ArrowArray* in, const struct komira_udf_udf* u) {
   if (in->n_children != u->n_args) return "args has a child count other than the bound signature's";
   if (in->length < 0) return "args has a negative length";
+  if (in->offset != 0) return "args has a nonzero offset (the argument struct is at offset 0)";
   for (int64_t i = 0; i < in->n_children; i++) {
     const struct ArrowArray* c = in->children[i];
     if (c == NULL || c->n_buffers != 2) return "an argument is not a primitive array";
