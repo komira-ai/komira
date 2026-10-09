@@ -18,7 +18,10 @@
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
 #      (KCI-E-FORMAT), and so is a file holding a PUBLISH step into a cell,
-#      which this kci parses and does not run;
+#      which this kci parses and does not run; then every cells file a step
+#      names is read (kci_cell) and a step naming a cell its cells file does
+#      not declare, or a cells file that cannot be read or parsed, is
+#      REFUSED (KCI-E-FORMAT) before any step runs;
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
 #      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
@@ -221,10 +224,13 @@ from kci_release_machine import (
     ReleaseMachine,
     StageStep,
     StageValidation,
+    cells_files_named,
     machine_schema_version,
     parse_machine_file,
+    require_cells_declared,
     resolve_selection,
 )
+from kci_cell import cell_names, parse_cells_file
 
 from .deploy_step import CellDeploys, NoCloudBuilt, check_deploy_set_hash, deploy_request
 from .args import (
@@ -338,6 +344,13 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMach
                     + String("': that needs a newer kci (this kci runs BUILD steps, PUBLISH steps to a channel and")
                     + String(" DEPLOY steps)")
                 )
+    var files = cells_files_named(g)
+    for i in range(len(files)):
+        try:
+            var declared = cell_names(parse_cells_file(_read(files[i])))
+            require_cells_declared(g, files[i], declared, cmd.machine)
+        except e:
+            raise Error(String(ERROR_FORMAT) + String("\nthe cells file '") + files[i] + String("': ") + String(e))
     result.machine_path = cmd.machine.copy()
     result.machine_sha256 = file_sha256_hex(cmd.machine)
     return g^
