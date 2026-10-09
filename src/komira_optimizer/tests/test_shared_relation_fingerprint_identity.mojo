@@ -19,6 +19,8 @@
 #   * TopN `n` (and keys/direction): the TopN arm folded only its child.
 #   * Limit `offset`: only `n` was folded.
 #   * Sort direction under a Limit: only the key names were folded.
+#   * TopN / Sort NULL placement (`nulls_first`): under a LIMIT, NULLS FIRST
+#     and NULLS LAST keep different rows.
 #   * Distinct over different projections: projection-insensitivity is only
 #     sound when nothing above the pruned columns depends on them, and
 #     DISTINCT does -- distinct (pk, v) rows are not distinct (v) rows.
@@ -143,6 +145,27 @@ def test_sort_direction_under_a_limit_is_identity() raises:
         _total(LogicalPlan.limit(5, LogicalPlan.sort(_keys_v(), _desc(), _narrow()))),
     )
     _declines(plan, "ORDER BY v ASC LIMIT 5 vs ORDER BY v DESC LIMIT 5")
+
+
+def _nulls(first: Bool) -> Optional[List[Bool]]:
+    var nf: List[Bool] = [first]
+    return Optional(nf^)
+
+
+def test_topn_nulls_first_is_identity() raises:
+    var plan = _cross(
+        _grouped(LogicalPlan.topn(_keys_v(), _asc(), 5, _wide(), _nulls(True))),
+        _total(LogicalPlan.topn(_keys_v(), _asc(), 5, _narrow(), _nulls(False))),
+    )
+    _declines(plan, "TopN NULLS FIRST vs TopN NULLS LAST")
+
+
+def test_sort_nulls_first_under_a_limit_is_identity() raises:
+    var plan = _cross(
+        _grouped(LogicalPlan.limit(5, LogicalPlan.sort(_keys_v(), _asc(), _wide(), _nulls(True)))),
+        _total(LogicalPlan.limit(5, LogicalPlan.sort(_keys_v(), _asc(), _narrow(), _nulls(False)))),
+    )
+    _declines(plan, "ORDER BY v NULLS FIRST LIMIT 5 vs ORDER BY v NULLS LAST LIMIT 5")
 
 
 def test_distinct_over_different_projections_is_identity() raises:
