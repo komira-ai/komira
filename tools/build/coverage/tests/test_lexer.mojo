@@ -201,6 +201,54 @@ def test_a_semicolon_ends_an_import() raises:
     assert_equal(_nums(executable_lines(String("import a; s = ';'\n"))), "1")
 
 
+def test_trait_requirements_are_not_executable() raises:
+    # A trait's header and its requirements (a `def` whose body is only
+    # `...`, after an optional docstring; decorators and every signature
+    # line included) emit no code. A default body, a `...` body outside a
+    # trait and the code after the trait block stay counted.
+    var src = String(
+        "trait T(Movable,\n"                                       # 1 header
+        "        Copyable):\n"                                     # 2 header
+        "    \"\"\"Doc.\"\"\"\n"                                  # 3 docstring
+        "\n"                                                       # 4
+        "    def f(self) raises:\n"                                # 5 requirement
+        "        ...\n"                                            # 6 requirement
+        "\n"                                                       # 7
+        "    @staticmethod\n"                                      # 8 decorator
+        "    def g[\n"                                             # 9 requirement
+        "        X: AnyType,\n"                                    # 10 signature
+        "    ](a: List[Int] = \"[\") -> String:\n"                 # 11 signature
+        "        \"\"\"Doc.\n"                                     # 12 docstring
+        "        ... not code\"\"\"\n"                              # 13 docstring
+        "        ...\n"                                            # 14 requirement
+        "\n"                                                       # 15
+        "    def h(self): ...\n"                                   # 16 inline
+        "    def d(self) -> Int:\n"                                # 17 default
+        "        return 1\n"                                       # 18 default body
+        "    # a comment at member indent\n"                       # 19
+        "# a comment at column 0 inside the trait\n"              # 20
+        "    def e(self):\n"                                       # 21 requirement
+        "        ...  # trailing comment\n"                        # 22
+        "\n"                                                       # 23
+        "def free():\n"                                            # 24 not a trait
+        "    ...\n"                                                # 25
+        "struct S:\n"                                              # 26
+        "    def m(self):\n"                                       # 27
+        "        ...\n"                                            # 28
+        "trait_count = 1\n"                                        # 29 not a keyword
+    )
+    assert_equal(_nums(executable_lines(src)), "17,18,24,25,26,27,28,29")
+    # A trait made only of requirements leaves nothing counted.
+    var only = String(
+        "from a import B\n"
+        "\n"
+        "trait R(B):\n"
+        "    def r[T: AnyType](mut self, x: T) raises -> Int:\n"
+        "        ...\n"
+    )
+    assert_equal(_nums(executable_lines(only)), "")
+
+
 def main() raises:
     test_marker_inside_a_string_or_another_comment_is_not_a_marker()
     test_marker_in_a_multi_line_docstring_is_not_a_marker()
@@ -212,4 +260,5 @@ def main() raises:
     test_a_byte_order_mark_is_not_code()
     test_a_lone_quote_does_not_close_a_triple_quoted_string()
     test_a_semicolon_ends_an_import()
+    test_trait_requirements_are_not_executable()
     print("test_lexer: PASS")
