@@ -86,6 +86,9 @@ test "json: boundaries_that_pass" {
 test "json: refusals" {
     const cases = [_][2][]const u8{
         .{ "{\"a\":1,\"a\":2}", "byte 10: key 'a' written twice" },
+        // A key written again after another key: checked against every key
+        // before it, not only the last.
+        .{ "{\"a\":1,\"b\":2,\"a\":3}", "byte 16: key 'a' written twice" },
         .{ "NaN", "byte 0: not a JSON value" },
         .{ "Infinity", "byte 0: not a JSON value" },
         .{ "1e999", "byte 5: number out of range" },
@@ -113,6 +116,9 @@ test "json: refusals" {
         .{ "tru", "byte 0: not a JSON value" },
         .{ "", "byte 0: unexpected end of input" },
         .{ "@", "byte 0: not a JSON value" },
+        // The byte on each side of 0-9, which start a number.
+        .{ "/", "byte 0: not a JSON value" },
+        .{ ":", "byte 0: not a JSON value" },
         // Just past each boundary: the first double past the largest (it rounds
         // to infinity); four hex digits that end the input; the byte next to
         // each end of the hex ranges; a high surrogate followed by the code
@@ -150,6 +156,10 @@ test "json: refusals" {
     _ = try ok("[" ** 63 ++ "{\"a\": 1}" ++ "]" ** 63);
     try refused("[" ** 65 ++ "]" ** 65, "byte 64: nesting deeper than 64");
     try refused("[" ** 64 ++ "{}" ++ "]" ** 64, "byte 64: nesting deeper than 64");
+    // Through objects alone: 64 objects inside one another pass, a 65th is
+    // refused, so each object counts one level as each array does.
+    _ = try ok("{\"a\":" ** 64 ++ "1" ++ "}" ** 64);
+    try refused("{\"a\":" ** 65 ++ "1" ++ "}" ** 65, "byte 320: nesting deeper than 64");
 }
 
 test "json: kinds" {

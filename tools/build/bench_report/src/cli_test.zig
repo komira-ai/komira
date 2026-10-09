@@ -55,6 +55,7 @@ test "cli: usage_errors" {
     try usage(&.{ "--out", "t.md" }, "at least one --report is required");
     try usage(&.{ "--report", "good.json" }, "--out is required");
     try usage(&.{"--out"}, "--out needs a value");
+    try usage(&.{ "--out", "t.md", "--report" }, "--report needs a value");
     try usage(&.{ "--out", "a", "--out", "b", "--report", "good.json" }, "--out is given twice");
     try usage(&.{ "--out", "a", "good.json", "x" }, "unknown argument good.json");
 }
@@ -72,6 +73,10 @@ test "cli: refused_reports_name_the_file" {
     // Two refused reports: only the first given is named, either way round.
     try refused(&.{ "--out", "t.md", "--report", "latin1.json", "--report", "broken.json" }, 1, "bench_report: latin1.json: cannot read: not UTF-8");
     try refused(&.{ "--out", "t.md", "--report", "broken.json", "--report", "latin1.json" }, 1, "bench_report: broken.json: not JSON: byte 11: unexpected end of input");
+    // A file that cannot be read after one that is read but refused: the
+    // first is named, so each file is checked before the next is read.
+    try refused(&.{ "--out", "t.md", "--report", "broken.json", "--report", "missing.json" }, 1, "bench_report: broken.json: not JSON: byte 11: unexpected end of input");
+    try refused(&.{ "--out", "t.md", "--report", "latin1.json", "--report", "missing.json" }, 1, "bench_report: latin1.json: cannot read: not UTF-8");
     // A line in two reports of different targets: the earlier one first,
     // in either order.
     try refused(
@@ -131,6 +136,12 @@ test "cli: exec_writes_the_table_only_when_every_report_passes" {
     try eq(@as(usize, 1), writes);
     try eqs("t.md", wrote_path);
     try eqs(cli.run(&args, files).table.md, wrote_data);
+    // --report before --out: the table goes to the --out value.
+    writes = 0;
+    const late = cli.exec(&.{ "--report", "good.json", "--out", "late.md" }, files, record);
+    try eq(@as(u8, 0), late.code);
+    try eq(@as(usize, 1), writes);
+    try eqs("late.md", wrote_path);
     // A refused report after a good one, and a usage error: nothing written.
     writes = 0;
     const bad = cli.exec(&.{ "--out", "t.md", "--report", "good.json", "--report", "broken.json" }, files, record);

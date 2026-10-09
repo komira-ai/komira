@@ -185,10 +185,16 @@ test "report: refusals" {
         .{ "[0.5, 1, 1.5]", "[0.5, 1, 1.5, 2]", "host.loadavg: is not an array of three numbers" },
         .{ "\"rows\": 1000000,", "\"rows\": 0,", "rows[0].rows: 0 is below 1" },
         .{ "\"batches\": 100", "\"batches\": 0", "rows[0].batches: 0 is below 1" },
+        .{ "\"calls\": 100", "\"calls\": 0", "rows[0].calls: 0 is below 1" },
         .{ "\"variant\": \"v\"", "\"variant\": \"`\"", "rows[0].variant: '`' is not a name (a-z 0-9 _ ')" },
         .{ "\"variant\": \"v\"", "\"variant\": \"{\"", "rows[0].variant: '{' is not a name (a-z 0-9 _ ')" },
         .{ "\"variant\": \"v\"", "\"variant\": \"/\"", "rows[0].variant: '/' is not a name (a-z 0-9 _ ')" },
         .{ "\"variant\": \"v\"", "\"variant\": \":\"", "rows[0].variant: ':' is not a name (a-z 0-9 _ ')" },
+        // The byte on each side of the single characters _ (^ below, ` above)
+        // and ' (& below, ( above).
+        .{ "\"variant\": \"v\"", "\"variant\": \"^\"", "rows[0].variant: '^' is not a name (a-z 0-9 _ ')" },
+        .{ "\"variant\": \"v\"", "\"variant\": \"&\"", "rows[0].variant: '&' is not a name (a-z 0-9 _ ')" },
+        .{ "\"variant\": \"v\"", "\"variant\": \"(\"", "rows[0].variant: '(' is not a name (a-z 0-9 _ ')" },
         .{ "\"engine\": \"3\"", "\"engine\": \"/\"", "build.opt_levels.engine: '/' is not one of 0, 1, 2, 3" },
         // Capitals, refused for their case alone: one inside A-Z and each end.
         .{ "\"variant\": \"v\"", "\"variant\": \"V\"", "rows[0].variant: 'V' is not a name (a-z 0-9 _ ')" },

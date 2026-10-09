@@ -103,11 +103,19 @@ reader, each schema refusal and the reports that must pass (equal latency
 quantiles among them), the table's numbers and flags (a row at N equal to
 the host's CPUs among them), its order (reports given in neither ascending
 nor descending order) and its runs line, and the command line, each message
-above among it. Every comparison and
-range has a case that passes at its boundary and one refused just past it,
-and every field the check or the table reads has a case where its value
-differs from the other fields' and between rows and reports, so a value
-read from the wrong field, row or report changes the result.
+above among it. What they catch was measured by mutation: every
+single-point mutant of `json.zig`, `report.zig`, `table.zig` and `cli.zig`
+of these kinds was built against them: a relational operator swapped, a
+literal in a comparison moved by one, `and` and `or` swapped, a condition
+negated, a refusal, `continue` or `break` deleted, two arguments of one
+type swapped, an index replaced by 0, and a length in a comparison
+replaced by the length minus one. Of the 482 that compile, 475 fail a test
+(one of them by never finishing). The other 7 are equivalent: no input
+tells them from the code. Five are in the check of a lone low surrogate,
+which `std.unicode.utf8Encode` repeats with the same message at the same
+byte. One moves the count limit to 2^53 + 1, which rounds to 2^53 as a
+double. One swaps the arguments of the equality that `uniq` calls, which
+is symmetric.
 `report_demo` and `report_wiring` in
 [`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md)
 check the whole path: a report test's `[report]`, the `bench_table` made
