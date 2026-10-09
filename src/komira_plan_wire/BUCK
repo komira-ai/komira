@@ -26,6 +26,7 @@ mojo_library(
         "tests/test_plan_wire_hostile_bytes.mojo",
         "tests/test_plan_wire_hostile_values.mojo",
         "tests/test_plan_wire_round_trip_ir.mojo",
+        "tests/test_plan_wire_scan_variant_tag.mojo",
         "tests/test_plan_wire_udf_tier.mojo",
         "tests/test_plan_wire_vocabulary.mojo",
         "tests/test_plan_wire_vocabulary_names.mojo",
@@ -44,6 +45,9 @@ mojo_library(
             exclude = ["tests/fixtures/hostile/*.canonical.hex"],
         ) + [
             "tests/fixtures/endpoint/filter_over_parquet.canonical.hex",
+        ],
+        "tests/test_plan_wire_scan_variant_tag.mojo": [
+            "tests/fixtures/golden/scan.canonical.hex",
         ],
     },
     visibility = ["PUBLIC"],

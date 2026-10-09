@@ -75,9 +75,10 @@ struct LexState(Copyable, Movable):
 struct SourceLine(Copyable, Movable):
     """One line as the lexer read it. `text` is the line without a trailing
     carriage return; `comment` the byte offset of its comment's `#`, or -1;
-    `opens`/`closes` count `(` and `)` in its code, `sq_opens`/`sq_closes`
-    `[` and `]`; `semi` is the offset of
-    its first `;` in code, or -1; `tail_code` is set on an import line when
+    `opens`/`closes` count `(` and `)` in its code, `brackets` is the
+    number of `[` less the number of `]` in it (decls.mojo reads both to
+    find where a signature ends); `semi` is the offset of its first `;` in
+    code, or -1; `tail_code` is set on an import line when
     a statement that is not an import follows a `;`; `in_string` is set when
     the line starts inside a string literal."""
 
@@ -86,8 +87,7 @@ struct SourceLine(Copyable, Movable):
     var code: Bool
     var opens: Int
     var closes: Int
-    var sq_opens: Int
-    var sq_closes: Int
+    var brackets: Int
     var semi: Int
     var continued: Bool
     var is_import: Bool
@@ -100,8 +100,7 @@ struct SourceLine(Copyable, Movable):
         self.code = False
         self.opens = 0
         self.closes = 0
-        self.sq_opens = 0
-        self.sq_closes = 0
+        self.brackets = 0
         self.semi = -1
         self.continued = False
         self.is_import = False
@@ -150,8 +149,7 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
     var code = False
     var opens = 0
     var closes = 0
-    var sq_opens = 0
-    var sq_closes = 0
+    var brackets = 0
     var semi = -1
     var continued = False
     var string_continues = False
@@ -197,9 +195,9 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
         elif c == 41:
             closes += 1
         elif c == 91:
-            sq_opens += 1
+            brackets += 1
         elif c == 93:
-            sq_closes += 1
+            brackets -= 1
         elif c == 59 and semi < 0:
             semi = i
         elif c == _BACKSLASH and i == n - 1:
@@ -213,8 +211,7 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
     out.code = code
     out.opens = opens
     out.closes = closes
-    out.sq_opens = sq_opens
-    out.sq_closes = sq_closes
+    out.brackets = brackets
     out.semi = semi
     out.continued = continued
     return out^
@@ -342,7 +339,7 @@ def _statement(l: SourceLine) -> Bool:
 
 
 def _depth(l: SourceLine) -> Int:
-    return l.opens - l.closes + l.sq_opens - l.sq_closes
+    return l.opens - l.closes + l.brackets
 
 
 def _block_end(ls: List[SourceLine], start: Int, indent: Int) -> Int:
