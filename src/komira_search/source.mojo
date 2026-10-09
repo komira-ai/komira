@@ -2911,7 +2911,7 @@ struct SearchCore(Movable, Deinitable):
                 if fn_resolver:
                     dl = fn_resolver.value().dl_at(self._view, pivot_doc)
                 elif len(fieldnorm_dls) > 0:
-                    dl = fieldnorm_dls[slot]
+                    dl = fieldnorm_dls[slot]  # cov: unreachable dls fill only without a footer total; BLOCKMAX needs one
                 var doc_score = 0.0
                 # dedup-TERM order (the float-order pin): the outer term index `t`.
                 # A scored doc's block was decoded full (its block-entry bound >=
