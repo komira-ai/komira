@@ -204,8 +204,9 @@ forms it reads and what it misreads (it reads characters, not Mojo tokens).
 [`near.mojo`](functional/refused_imports/near.mojo), which spells each refused
 module where it is not an import of it: in comments (one with a parenthesis
 inside an open import list), docstrings, string literals, longer module names
-(`physical_planner`, `physical_plan_x`, `x.<module>`) and a name imported
-from another module. Each target of
+(`physical_planner`, `physical_plan_x`, `x.<module>`), a name imported
+from another module, `x .method()` and calls over lines on other names, and
+aliases of modules that hold no refused one. Each target of
 [`negative/refused_imports`](negative/refused_imports/BUCK) holds one import
 form and must fail naming exactly its one finding: `from M`, `from M.sub`,
 `from P import N`, an import list over lines in parentheses (plain, with a
@@ -213,8 +214,11 @@ parenthesis in the comment of its first line, with one in a name's comment),
 `import M`, `import M as p`, `import M.sub`, `import a, M`, statements split by
 `;`, a `\` continuation, an indented import, an import after a docstring
 that spells one, after a `"""` docstring holding `'''`, after `'"""'` (a triple
-quote inside a one-line string), and a dotted reference
-(`komira_x.y.Z()`) with no import of the module. `bad_entry` names an entry that is not a dotted komira_*
+quote inside a one-line string), `from`/`import` with spaces around the
+dot, and a dotted reference with no import of the module: plain
+(`komira_x.y.Z()`), spaced, continued by `\`, over lines inside
+parentheses, through an `as` alias of its parent and through a name a
+from-import bound (`alias_from`, whose refused module is one level deeper). `bad_entry` names an entry that is not a dotted komira_*
 module name and is refused at analysis.
 
 ```sh

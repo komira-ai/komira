@@ -410,9 +410,12 @@
 #      parenthesis in a comment, import M, M as p, M.sub, an import list,
 #      `;` statements, a `\` continuation, an indented import, an import
 #      after a docstring, after a docstring holding the other triple quote,
-#      after a triple quote inside a one-line string, a dotted reference
-#      with no import of the module), and an entry that is not a dotted
-#      komira_* module name is refused at analysis.
+#      after a triple quote inside a one-line string, `from`/`import` with
+#      spaces around the dot, a dotted reference with no import of the module
+#      (plain, spaced, continued by `\`, over lines inside parentheses,
+#      through an `as` alias of its parent, through a name a from-import
+#      bound)), and an entry that is not a dotted komira_* module name is
+#      refused at analysis.
 set -uo pipefail
 
 umbrella=1
@@ -1474,13 +1477,17 @@ P=komira_plan_ir.physical_plan
 G=komira_plan_ir.physical_plan_purity_gate
 for want in \
     "after_docstring|5: imports $P, a module this package refuses ($P)" \
+    "alias_from|4: names $P.segment, a module this package refuses ($P.segment)" \
+    "alias_parent|4: names $P, a module this package refuses ($P)" \
     "continuation|2: imports $P, a module this package refuses ($P)" \
     "from_module|2: imports $P, a module this package refuses ($P)" \
     "from_parent|2: imports $G, a module this package refuses ($G)" \
+    "from_spaced|2: imports $P, a module this package refuses ($P)" \
     "from_submodule|2: imports $P.sub, a module this package refuses ($P)" \
     "import_as|2: imports $P, a module this package refuses ($P)" \
     "import_list|2: imports $P, a module this package refuses ($P)" \
     "import_module|2: imports $P, a module this package refuses ($P)" \
+    "import_spaced|2: imports $P, a module this package refuses ($P)" \
     "import_sub|2: imports $P.sub, a module this package refuses ($P)" \
     "indented|3: imports $P, a module this package refuses ($P)" \
     "paren_comment_close|4: imports $P, a module this package refuses ($P)" \
@@ -1488,6 +1495,9 @@ for want in \
     "mixed_triple_quotes|5: imports $P, a module this package refuses ($P)" \
     "parenthesised|4: imports $P, a module this package refuses ($P)" \
     "qualified|4: names $P, a module this package refuses ($P)" \
+    "qualified_continued|4: names $P, a module this package refuses ($P)" \
+    "qualified_in_parens|4: names $P, a module this package refuses ($P)" \
+    "qualified_spaced|4: names $P, a module this package refuses ($P)" \
     "semicolon|2: imports $P, a module this package refuses ($P)" \
     "semicolon_imports|2: imports $G, a module this package refuses ($G)" \
     "triple_quote_in_string|3: imports $P, a module this package refuses ($P)"; do

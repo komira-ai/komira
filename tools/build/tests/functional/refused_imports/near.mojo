@@ -29,3 +29,17 @@ def f() -> String:
     var d = komira_plan_ir.physical_planner.f()  # komira_plan_ir.physical_plan.X
     var e = x.komira_plan_ir.physical_plan
     return a + b + c
+
+
+def g(x: Int) -> Int:
+    import komira_plan_ir as kp
+    from komira_plan_ir import logical_plan as lp
+    var s = x .bit_length()
+    var t = (x
+        .bit_length())
+    var u = kp.logical_plan.LogicalPlan
+    var v = kp . physical_planner.f()
+    var w = lp.physical_plan
+    var y = [x,
+        x .bit_length()]
+    return s + t + y[0] + 1.5

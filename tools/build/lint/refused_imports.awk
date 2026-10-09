@@ -10,22 +10,30 @@
 # `from M import ...`, and `from P import N` where P.N is refused, the names
 # on the line or inside parentheses over any number of lines. A from-import
 # of a refused module is one finding, whatever it names. A statement that
-# is no import and names a refused module by its dotted path
-# (`komira_x.y.Z()` after `import komira_x`) is a finding too:
-# "<F>:<line>: names <name>, a module this package refuses (<name>)".
+# is no import and names a refused module by a dotted path is a finding
+# too, "<F>:<line>: names <name>, a module this package refuses (<name>)":
+# the full path (`komira_x.y.Z()` after `import komira_x`), or a path
+# through a name an import bound to an ancestor of a refused module
+# (`kx.y.Z()` after `import komira_x as kx`; `y.Z()` after
+# `from komira_x import y`, when komira_x.y.z is refused). A path inside a
+# longer one (`a.komira_x.y`) or a longer name (`komira_x.y_z`) is not it.
 #
 # Each line is first reduced to its code: string literals (one-line '...'
 # and "...", with backslash escapes, and triple-quoted strings over any
 # lines, closed only by the delimiter that opened them) and the comment
-# (`#` outside a string, to the end of the line) are removed. Then a code
-# line ending in `\` is joined with the next and the rest splits on `;`
-# into statements. A finding names the line where its statement starts,
-# or, inside parentheses, the line of the name.
+# (`#` outside a string, to the end of the line) are removed. A code line
+# ending in `\` is joined with the next, and so is one that leaves a
+# bracket ((, [ or {) open, unless it opens the import list of a
+# from-import, whose names are read line by line. Whitespace around a `.`
+# is dropped (`komira_x . y` is `komira_x.y`). The rest splits on `;` into
+# statements. A finding names the line where its statement starts, or,
+# inside a from-import's parentheses, the line of the name.
 #
 # It reads characters, not Mojo tokens: a string prefix is an ordinary
 # character before the quote, and a one-line string left open at the end
-# of its line ends there. A Mojo tokenizer in a Zig tool is to replace
-# this reader (#1175).
+# of its line ends there. A name bound by an import holds for the whole
+# file, whatever scope the import is in. A Mojo tokenizer in a Zig tool is
+# to replace this reader (#1175).
 
 BEGIN { n = split(R, r, ",") }
 
@@ -38,32 +46,50 @@ function check(m, l,   i, hit) {
     return hit
 }
 
-# A dotted path of a refused module in the code of a statement that is no
-# import: not inside a longer name on either side (`x.M`, `M_x` are not it).
-function qualified(s, l,   i, t, p, b, a) {
-    for (i = 1; i <= n; i++) {
-        t = s
-        while ((p = index(t, r[i])) > 0) {
-            b = p > 1 ? substr(t, p - 1, 1) : ""
-            a = substr(t, p + length(r[i]), 1)
-            if (b !~ /[A-Za-z0-9_.]/ && a !~ /[A-Za-z0-9_]/) {
+# The dotted paths in the code of a statement that is no import: each
+# maximal name.name... chain, its first name expanded when an import bound
+# it (alias), checked against the refused modules once per statement.
+function qualified(s, l,   t, chain, head, full, i, seen) {
+    t = s
+    while (match(t, /[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*/)) {
+        chain = substr(t, RSTART, RLENGTH)
+        if (RSTART > 1 && substr(t, RSTART - 1, 1) ~ /[0-9.]/) chain = ""
+        t = substr(t, RSTART + RLENGTH)
+        if (chain == "") continue
+        head = chain
+        sub(/\..*$/, "", head)
+        full = (head in alias) ? alias[head] substr(chain, length(head) + 1) : chain
+        for (i = 1; i <= n; i++)
+            if (!(i in seen) && (full == r[i] || index(full, r[i] ".") == 1)) {
                 print F ":" l ": names " r[i] ", a module this package refuses (" r[i] ")"
-                break
+                seen[i] = 1
             }
-            t = substr(t, p + length(r[i]))
-        }
     }
 }
 
+# Whether m is a proper ancestor of a refused module.
+function ancestor(m,   i) {
+    for (i = 1; i <= n; i++)
+        if (index(r[i], m ".") == 1) return 1
+    return 0
+}
+
 # The names of an import list (`a, b as c, (d)`), each prefixed with base.
-function names(s, base, l,   k, a, i, t) {
+# A name bound to an ancestor of a refused module becomes an alias: the
+# `as` name, or for a from-import the imported name itself.
+function names(s, base, l,   k, a, i, t, w, nw) {
     gsub(/[()]/, " ", s)
     k = split(s, a, ",")
     for (i = 1; i <= k; i++) {
-        t = a[i]
-        sub(/^[ \t]+/, "", t)
-        sub(/[ \t].*$/, "", t)
-        if (t != "") check(base t, l)
+        nw = split(a[i], w, " ")
+        if (nw == 0) continue
+        t = w[1]
+        check(base t, l)
+        if (nw >= 3 && w[2] == "as") {
+            if (ancestor(base t)) alias[w[3]] = base t
+        } else if (base != "" && ancestor(base t)) {
+            alias[t] = base t
+        }
     }
 }
 
@@ -130,26 +156,18 @@ function code(s,   out, i, len, c) {
     return out
 }
 
-{
-    s = code($0)
-    l = NR
-    if (cont) {
-        s = held " " s
-        l = heldl
-    }
-    if (s ~ /\\[ \t]*$/) {
-        sub(/\\[ \t]*$/, "", s)
-        held = s
-        heldl = l
-        cont = 1
-        next
-    }
-    cont = 0
+function opens(s,   o) {
+    o = gsub(/[([{]/, "&", s)
+    return o - gsub(/[])}]/, "&", s)
+}
+
+function line(s, l,   c, k, i, part) {
+    gsub(/[ \t]*\.[ \t]*/, ".", s)
     if (open) {
         c = index(s, ")")
         if (!c) {
             if (!skip) names(s, base, l)
-            next
+            return
         }
         if (!skip) names(substr(s, 1, c - 1), base, l)
         open = 0
@@ -158,3 +176,29 @@ function code(s,   out, i, len, c) {
     k = split(s, part, ";")
     for (i = 1; i <= k; i++) stmt(part[i], l)
 }
+
+{
+    s = code($0)
+    l = NR
+    if (cont) {
+        s = held " " s
+        l = heldl
+    }
+    cont = 0
+    if (s ~ /\\[ \t]*$/) {
+        sub(/\\[ \t]*$/, "", s)
+        held = s
+        heldl = l
+        cont = 1
+        next
+    }
+    if (!open && opens(s) > 0 && s !~ /^[ \t]*from[ \t]+komira_[A-Za-z0-9_. \t]*[ \t]import([ \t(]|$)/) {
+        held = s
+        heldl = l
+        cont = 1
+        next
+    }
+    line(s, l)
+}
+
+END { if (cont) line(held, heldl) }
