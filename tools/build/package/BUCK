@@ -161,6 +161,9 @@ conda_release_set_check(
         "//src/komira_snapshotter:komira_snapshotter",
         "//src/komira_mail_message:komira_mail_message",
         "//src/komira_vcard:komira_vcard",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_calendar:komira_calendar",
+        "//src/komira_calendar_ics:komira_calendar_ics",
     ],
     release_set = "release_set.txt",
     order_tests = [
