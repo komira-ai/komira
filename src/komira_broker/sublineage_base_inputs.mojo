@@ -64,11 +64,7 @@
 #     owned `String` only — no Movable-struct-in-byte-slab-with-heap-field shape.
 # =============================================================================
 
-from komira_objectstore.cas_manifest import (
-    CasManifestStore,
-    ManifestHead,
-    RetryPolicy,
-)
+from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_base_fold import (
     BASE_SHARD_ID,
@@ -77,6 +73,7 @@ from komira_objectstore.sublineage_base_fold import (
     SubLineageBaseFold,
 )
 
+from .chunk_walk import is_not_found_msg, restart_point_after_failed_read
 from .manifest_body import ManifestBody, chunk_has_segment
 from .partition_assignment import sublineage_prefix
 
@@ -147,14 +144,12 @@ struct _CachedShardChunk(Copyable, Movable, Deinitable):
 struct _CachedShard(Copyable, Movable, Deinitable):
     """ONE source shard's single-walk capture: its `_LOG_START` cursor (seq +
     offset — the running base + seed both replays use) plus the decoded chunk
-    list `[log_start_seq .. head]` in source-local order. `present` is False when
-    the shard manifest was reaped between snapshot and walk (the live
-    `_append_block_segments` would `read_head_authoritative` and raise; the
-    cached folded-prefix then contributes 0, the source `_LOG_START` carries the
-    watermark — identical to the un-cached `_base_folded_prefix` head-404 path)."""
+    list `[log_start_seq .. head]` in source-local order. The cursor is the
+    one the chunk list starts at: a walk that restarted past a reaped chunk
+    captures the `_LOG_START` it restarted from. A shard with no manifest
+    captures its `_LOG_START` (zero when absent) and no chunks."""
 
     var shard_id: String
-    var present: Bool
     var log_start_offset: Int64
     var log_start_seq: Int64
     var chunks: List[_CachedShardChunk]
@@ -344,11 +339,8 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         for i in range(len(snap)):
             ref ss = snap[i]
             var shard = self.shard_manifest(ss.shard_id)
-            var ls_folded = Int64(0)
-            try:
-                ls_folded = shard.read_log_start().log_start_offset
-            except e:
-                _ = e  # no `_LOG_START` yet (never folded) -> 0
+            # No `_LOG_START` yet (never folded) reads as 0; an error raises.
+            var ls_folded = shard.read_log_start().log_start_offset
             # `_base`-derived materialized prefix for this shard (crash-window
             # anchor): walk the shard's chunks in source-local order, summing
             # record_count while the chunk's `.seg` object_key is present in
@@ -385,9 +377,8 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         Correctness: the cache captures each shard in ONE consistent read (head +
         `_LOG_START` + chunks at that boundary), so the derived watermark equals
         what the un-cached double-read would compute in the absence of concurrent
-        reaping; under reaping a shard chunk dropped between the cache build and a
-        would-be second read is simply absent from the cache, exactly as the live
-        404-skip path would have skipped it. The fold's STANDALONE `folded_counts`
+        reaping; a shard chunk reaped during the capture restarts the capture from
+        the new `_LOG_START`, exactly as the live walks restart. The fold's STANDALONE `folded_counts`
         is untouched — serve==fold stays structural (both derive the identical
         watermark; this is a read de-dup, not a second formula)."""
         var out = List[ShardFoldedWatermark]()
@@ -398,10 +389,8 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
             var cs = _cached_shard_for(cache.shards, ss.shard_id)
             if cs >= 0:
                 ref sh = cache.shards[cs]
-                # `_LOG_START.log_start_offset` is captured for BOTH present and
-                # reaped shards (the live `folded_counts` reads it unconditionally
-                # before the head walk), so use it directly. `present=False` just
-                # means the `_base`-prefix walk has no live chunks (contributes 0).
+                # The captured `_LOG_START.log_start_offset` (the live
+                # `folded_counts` reads it before the head walk).
                 ls_folded = sh.log_start_offset
                 base_folded = _base_folded_prefix_cached(sh, cache.base_keys)
             # The watermark NEVER regresses: MAX of the steady-state source cursor
@@ -429,30 +418,13 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         consume resolve. Reads are the IDENTICAL verbs the un-cached
         `_base_folded_prefix` / `_append_block_segments` issued
         (`read_head_authoritative` + `read_log_start` + per-chunk `read_chunk`),
-        just done ONCE. A reaped shard manifest (head 404) yields `present=False`
-        with an empty chunk list (the cached folded-prefix then contributes 0,
-        identical to the live head-404 path)."""
+        just done ONCE. A shard with no manifest reads as an empty chunk list
+        (head chunk_seq -1); an error reading its head or `_LOG_START` raises.
+        A chunk that cannot be read restarts the walk from a `_LOG_START` that
+        moved past it, or raises (chunk_walk.mojo)."""
         var shard = self.shard_manifest(shard_id)
         var chunks = List[_CachedShardChunk]()
-        var head: ManifestHead
-        try:
-            head = shard.read_head_authoritative()
-        except e:
-            _ = e
-            _ = shard^
-            # Shard reaped post-snapshot — no live manifest. `_LOG_START` may
-            # still carry a retired/reaped watermark; capture it (best-effort).
-            var lso = Int64(0)
-            var lsq = Int64(0)
-            try:
-                var ls0 = self.shard_manifest(shard_id).read_log_start()
-                lso = ls0.log_start_offset
-                lsq = ls0.log_start_seq
-            except e2:
-                _ = e2
-            return _CachedShard(
-                String(shard_id), False, lso, lsq, chunks^
-            )
+        var head = shard.read_head_authoritative()
         var n_chunks = head.chunk_seq + Int64(1)
         var ls = shard.read_log_start()
         var seq = ls.log_start_seq if ls.log_start_seq >= Int64(0) else Int64(0)
@@ -472,15 +444,14 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
                 )
                 seq += Int64(1)
             except e:
-                if _is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue  # reaped mid-walk (benign) — skip
-                _ = shard^
-                raise e^
+                ls = restart_point_after_failed_read(
+                    shard, seq, e^, "SegmentBaseInputs.walk_shard_chunks"
+                )
+                chunks = List[_CachedShardChunk]()
+                seq = ls.log_start_seq
         _ = shard^
         return _CachedShard(
             String(shard_id),
-            True,
             ls.log_start_offset,
             ls.log_start_seq,
             chunks^,
@@ -503,16 +474,10 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         re-derives from the surviving set + the source `_LOG_START` covers any
         reaped folded prefix). An ABSENT `_base` (no fold yet) yields an empty
         set -> every shard's `_base`-derived prefix is 0 (the source `_LOG_START`
-        then carries the watermark)."""
+        then carries the watermark); an error reading the head raises."""
         var keys = List[String]()
         var base = self.base_manifest()
-        var head: ManifestHead
-        try:
-            head = base.read_head_authoritative()
-        except e:
-            _ = e
-            _ = base^
-            return keys^  # no `_base` yet
+        var head = base.read_head_authoritative()  # no `_base`: chunk_seq -1
         var n_chunks = head.chunk_seq + Int64(1)
         var ls = base.read_log_start()
         var seq = ls.log_start_seq if ls.log_start_seq >= Int64(0) else Int64(0)
@@ -523,7 +488,7 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
                     keys.append(String(body.object_key))
                 seq += Int64(1)
             except e:
-                if _is_not_found_msg(String(e)):
+                if is_not_found_msg(String(e)):
                     seq += Int64(1)
                     continue  # reaped mid-walk (benign) — skip
                 raise e^
@@ -546,15 +511,11 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         record == the `_base`-anchored folded watermark for this shard. Seeded at
         the shard's `_LOG_START.log_start_offset` so a RETIRED+REAPED prefix (its
         source chunks gone) is already accounted for and this walk only extends it
-        with the still-live materialized chunks. Reaped-mid-walk (404) chunks are
-        skipped (benign race). O(live shard chunks) — within the plan/materialize's
+        with the still-live materialized chunks. A chunk that cannot be read
+        restarts the walk from a `_LOG_START` that moved past it, or raises
+        (chunk_walk.mojo). O(live shard chunks) — within the plan/materialize's
         existing per-shard walk bound."""
-        var head: ManifestHead
-        try:
-            head = shard.read_head_authoritative()
-        except e:
-            _ = e
-            return Int64(0)  # shard reaped — source `_LOG_START` carries it
+        var head = shard.read_head_authoritative()  # absent: chunk_seq -1
         var n_chunks = head.chunk_seq + Int64(1)
         var ls = shard.read_log_start()
         var running = ls.log_start_offset  # source-local base of the first chunk
@@ -577,10 +538,12 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
                 folded = running
                 seq += Int64(1)
             except e:
-                if _is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue  # reaped mid-walk (benign) — skip
-                raise e^
+                ls = restart_point_after_failed_read(
+                    shard, seq, e^, "SegmentBaseInputs._base_folded_prefix"
+                )
+                running = ls.log_start_offset
+                folded = ls.log_start_offset
+                seq = ls.log_start_seq
         return folded
 
     def base_next_dense(self) raises -> Int64:
@@ -589,15 +552,10 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         the manifest's next base offset == the cumulative committed record count ==
         the dense high-water, retention-stable). The plan assigns the tail's dense
         offsets starting HERE. Empty `_base` -> 0 (the whole partition is tail).
-        Now computed ONCE, here — for BOTH the fold and the resolver."""
+        Now computed ONCE, here — for BOTH the fold and the resolver. An absent
+        `_base` reads as next_offset 0; an error reading its head raises."""
         var base = self.base_manifest()
-        var head: ManifestHead
-        try:
-            head = base.read_head_authoritative()
-        except e:
-            _ = e
-            _ = base^
-            return Int64(0)
+        var head = base.read_head_authoritative()
         _ = base^
         return head.next_offset
 
@@ -616,19 +574,6 @@ def _str_in(xs: List[String], v: String) -> Bool:
         if xs[i] == v:
             return True
     return False
-
-
-@always_inline
-def _is_not_found_msg(msg: String) -> Bool:
-    """Classify a not-found / 404 store error (the reaped-chunk race in a walk).
-    Mirrors `sublineage_segment_fold._is_not_found_msg` /
-    `sublineage_consume._is_not_found_msg`."""
-    return (
-        msg.find("not_found") >= 0
-        or msg.find("NotFound") >= 0
-        or msg.find("404") >= 0
-        or msg.find("NoSuchKey") >= 0
-    )
 
 
 # =============================================================================
@@ -655,16 +600,13 @@ def _base_folded_prefix_cached(
     """The CACHE-BACKED twin of `SegmentBaseInputs._base_folded_prefix`: replays
     the IDENTICAL derivation over the shard's CACHED chunk list instead of
     re-reading the store. BYTE-IDENTICAL by construction:
-      * a reaped shard (`present=False`, the live head-404 case) returns 0;
-      * else seed `running = folded = log_start_offset`, walk the cached chunks in
+      * seed `running = folded = log_start_offset`, walk the cached chunks in
         the SAME source-local (seq) order, skip markers, BREAK at the first chunk
         whose `.seg` object_key is NOT in `base_keys`, else `running += rc;
         folded = running`.
     The cached chunk list was captured from `log_start_seq` up (the same start the
-    live walk used) with the same marker / 404-skip handling, so the replay visits
+    live walk used) with the same marker / restart handling, so the replay visits
     the same chunks in the same order and computes the same prefix offset."""
-    if not shard.present:
-        return Int64(0)  # reaped shard — live `_base_folded_prefix` returns 0
     var running = shard.log_start_offset  # source-local base of the first chunk
     var folded = shard.log_start_offset  # seed: the retired/reaped prefix
     for i in range(len(shard.chunks)):

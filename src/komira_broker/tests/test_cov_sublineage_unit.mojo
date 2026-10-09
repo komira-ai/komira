@@ -11,7 +11,8 @@
 #      shard capture and the folded-prefix walk.
 #   2. The `_base` key walk skips a chunk that 404s (it keeps no offsets).
 #   3. A block or watermark for a shard the cache never captured contributes
-#      nothing, and an absent shard contributes a 0 folded prefix.
+#      nothing, and a shard with no manifest captures no chunks and a 0
+#      folded prefix.
 #   4. SegmentBaseFold: a concurrent `_base` append that takes the fold's
 #      slot is refused as a torn fold; should_fold delegates the cadence.
 #   5. SubLineageMigration: a migration that failed after its first chunk
@@ -30,7 +31,6 @@ from komira_broker.sublineage_base_inputs import (
     FoldedCountsCache,
     SegmentBaseInputs,
     _CachedShard,
-    _CachedShardChunk,
     _base_folded_prefix_cached,
 )
 from komira_broker.sublineage_consume import (
@@ -306,14 +306,9 @@ def test_uncaptured_and_absent_shards_contribute_nothing() raises:
     var wm = inputs.folded_counts_cached(snap, empty)
     assert_equal(len(wm), 1)
     assert_equal(wm[0].folded_count, Int64(0))
-    # An absent shard's cached capture has no folded prefix.
-    var chunks = List[_CachedShardChunk]()
-    chunks.append(
-        _CachedShardChunk(
-            Int64(0), Int64(5), UInt32(0), String("k1"), String(""), Int64(-1), Int64(0)
-        )
-    )
-    var absent = _CachedShard(String("w9"), False, Int64(0), Int64(0), chunks^)
+    # A shard with no manifest captures no chunks, so no folded prefix.
+    var absent = inputs.walk_shard_chunks("w9")
+    assert_equal(len(absent.chunks), 0)
     var keys = List[String]()
     keys.append("k1")
     assert_equal(_base_folded_prefix_cached(absent, keys), Int64(0))
