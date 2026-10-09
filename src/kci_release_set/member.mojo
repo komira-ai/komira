@@ -39,19 +39,30 @@
 # name, `file` a bare name and not `manifest.json`, nothing else at the top
 # level), it is refused when:
 #
+#   - the manifest's `platform` is `noarch` (an image is built for one
+#     platform);
 #   - `file` is missing, or is not a directory;
+#   - anything inside the layout, at any depth, is a symlink (lstat
+#     semantics, checked BEFORE any file of the layout is read, so a link is
+#     never followed: as at the top level, it can name bytes outside the
+#     release directory);
 #   - the layout does not verify: komira_oci's `read_oci_layout`, which reads
 #     `index.json` and the manifest and HASHES EVERY BLOB (config and layers)
 #     against the digest that names it; one flipped byte of a layer refuses;
+#   - the layout holds an entry its index and manifest do not reference: it
+#     holds exactly `oci-layout`, `index.json`, the directories `blobs` and
+#     `blobs/sha256`, and the blobs of the manifest, the config and the
+#     layers (entries checked in bytewise order of their paths);
 #   - the layout's image manifest digest is not `sha256:` + the manifest's
 #     `sha256`. That ties the bytes on disk to the release set: the set hash
 #     carries the manifest's `sha256` (set_hash.mojo), so a member that
-#     verifies holds exactly the image the set names.
+#     verifies holds exactly the image the set names;
+#   - the image's OCI platform (its config's `os/architecture[/variant]`) is
+#     not the manifest platform's (kci_api's `oci_platform_of`).
 #
-# Inside the layout, `read_oci_layout` follows links: every byte it reads is
-# checked against a digest, so a link can only fail the check. An OCI
-# member's `size` is the sum of the image manifest's, the config's and the
-# layers' byte lengths.
+# An OCI member's `size` is the sum of the byte lengths of the image
+# manifest and of each DISTINCT blob it names (a layer listed twice is one
+# file, counted once).
 #
 # PYTHON is accepted as the manifest parser accepts it; the PUBLISH step refuses
 # to publish it.
@@ -71,11 +82,12 @@ from kci_artifact import (
     require_one_manifest,
 )
 from kci_artifact_manifest import ArtifactManifest, read_artifact_manifest
-from kci_api import require_member_platform
+from kci_api import oci_platform_of, require_member_platform
 from kci_release_channel import ARTIFACT_TYPE_CONDA, ARTIFACT_TYPE_OCI
 from komira_oci import OciLayout, read_oci_layout
 
 from kci_release_set.conda_metadata import CondaMetadata, read_conda_metadata
+from kci_release_set.set_hash import sort_bytewise
 
 
 struct ReleaseMember(Copyable, Movable):
@@ -282,6 +294,37 @@ def verify_member(artifact: String, dir: String) raises -> ReleaseMember:
     return member^
 
 
+def _walk_layout(
+    artifact: String, file: String, root: String, rel: String, mut entries: List[String]
+) raises:
+    """Every entry under `root/rel`, as paths relative to `root` (a
+    directory's path ends in `/`), refusing a symlink before anything is
+    read through it."""
+    var here = root + rel
+    var names = listdir(here)
+    for i in range(len(names)):
+        var path = rel + String(names[i])
+        if islink(root + path):
+            _refuse(
+                artifact,
+                String("its image layout '")
+                + file
+                + String("' holds a symlink at '")
+                + path
+                + String("': a link can name bytes outside the release directory"),
+            )
+        if isdir(root + path):
+            entries.append(path + String("/"))
+            _walk_layout(artifact, file, root, path + String("/"), entries)
+        else:
+            entries.append(path.copy())
+
+
+def _blob_entry(digest: String) -> String:
+    """`blobs/<algorithm>/<hex>`: where a layout keeps the blob `digest`."""
+    return String("blobs/") + digest.replace(String(":"), String("/"))
+
+
 def _verify_image(
     artifact: String, dir: String, base: String, listing: List[String], m: ArtifactManifest
 ) raises -> ReleaseMember:
@@ -298,6 +341,12 @@ def _verify_image(
                 + String(KCI_MANIFEST_NAME)
                 + String(" and the image layout"),
             )
+    if m.platform == "noarch":
+        _refuse(
+            artifact,
+            String("an OCI member's platform is 'noarch': an image is built for one platform"),
+        )
+    var want_platform = oci_platform_of(m.platform)
     var layout_dir = base + m.file
     if not exists(layout_dir):
         _refuse(artifact, String("its file '") + m.file + String("' is not in the directory"))
@@ -308,6 +357,8 @@ def _verify_image(
             + m.file
             + String("' is not a directory: an OCI member's file is its image layout"),
         )
+    var entries = List[String]()
+    _walk_layout(artifact, m.file, layout_dir + String("/"), String(""), entries)
     var layout: OciLayout
     try:
         layout = read_oci_layout(layout_dir)
@@ -317,6 +368,30 @@ def _verify_image(
             String("its image layout '") + m.file + String("' does not verify: ") + String(e),
         )
         return ReleaseMember(artifact.copy(), dir.copy(), m.copy(), 0)
+    var known = List[String]()
+    known.append(String("oci-layout"))
+    known.append(String("index.json"))
+    known.append(String("blobs/"))
+    known.append(String("blobs/sha256/"))
+    known.append(_blob_entry(layout.manifest_digest))
+    known.append(_blob_entry(layout.config.digest))
+    for i in range(len(layout.layers)):
+        known.append(_blob_entry(layout.layers[i].digest))
+    sort_bytewise(entries)
+    for i in range(len(entries)):
+        var referenced = False
+        for j in range(len(known)):
+            if known[j] == entries[i]:
+                referenced = True
+        if not referenced:
+            _refuse(
+                artifact,
+                String("its image layout '")
+                + m.file
+                + String("' holds '")
+                + entries[i]
+                + String("', which its index and manifest do not reference"),
+            )
     var named = String("sha256:") + m.sha256_hex
     if layout.manifest_digest != named:
         _refuse(
@@ -328,9 +403,32 @@ def _verify_image(
             + String(" but its manifest says ")
             + named,
         )
-    var size = len(layout.manifest_raw) + layout.config.size
-    for i in range(len(layout.layers)):
-        size += layout.layers[i].size
+    if layout.platform() != want_platform:
+        _refuse(
+            artifact,
+            String("its image layout '")
+            + m.file
+            + String("' is for ")
+            + layout.platform()
+            + String(" but its manifest says platform ")
+            + m.platform
+            + String(" (")
+            + want_platform
+            + String(")"),
+        )
+    # Each distinct blob once: an image may list one layer twice.
+    var counted = List[String]()
+    var size = len(layout.manifest_raw)
+    var blobs = layout.layers.copy()
+    blobs.append(layout.config.copy())
+    for i in range(len(blobs)):
+        var seen = False
+        for j in range(len(counted)):
+            if counted[j] == blobs[i].digest:
+                seen = True
+        if not seen:
+            counted.append(blobs[i].digest.copy())
+            size += blobs[i].size
     return ReleaseMember(artifact.copy(), dir.copy(), m.copy(), size)
 
 

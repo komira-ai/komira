@@ -108,10 +108,10 @@ def _expect(dir: String, why: String, name: String = String(_HELLO)) raises:
     assert_equal(_refusal(dir, name), String("artifact '") + name + String("': ") + why)
 
 
-def _oci_manifest(name: String, file: String, hex: String) -> String:
+def _oci_manifest(name: String, file: String, hex: String, platform: String = String("linux-x86_64")) -> String:
     return (
         String('{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"OCI",')
-        + String('"name":"') + name + String('","version":"0.1.0","platform":"linux-x86_64",')
+        + String('"name":"') + name + String('","version":"0.1.0","platform":"') + platform + String('",')
         + String('"file":"') + file + String('","sha256":"') + hex + String('"}\n')
     )
 
@@ -227,11 +227,11 @@ def _layers() -> List[List[UInt8]]:
     return out^
 
 
-def _small(tag: String) raises -> String:
+def _small(tag: String, architecture: String = String("amd64")) raises -> String:
     """A good OCI member `<root>/img` holding `img.oci`; returns it."""
     var d = _root(tag) + String("/img")
     makedirs(d, exist_ok=True)
-    var digest = write_test_layout(d + String("/img.oci"), _layers())
+    var digest = write_test_layout(d + String("/img.oci"), _layers(), architecture=architecture)
     _write(d + String("/manifest.json"), _oci_manifest(String("img"), String("img.oci"), _hex_of(digest)))
     return d^
 
@@ -330,6 +330,128 @@ def test_refuses_a_file_that_is_not_a_bare_name_or_is_the_manifest() raises:
     _expect_img(d, String("the manifest's 'file' names the manifest itself"))
     _write(d + String("/manifest.json"), _oci_manifest(String("img"), String("x/img.oci"), String("ab") * 32))
     _expect_img(d, String("the manifest's 'file' is 'x/img.oci', not a file name in the artifact's directory"))
+
+
+# ---- platform, links and strays inside the layout, size ---------------------
+
+
+def test_refuses_a_layout_for_another_platform() raises:
+    var d = _small(String("arm64"), architecture=String("arm64"))
+    _expect_img(
+        d,
+        String("its image layout 'img.oci' is for linux/arm64 but its manifest says platform")
+        + String(" linux-x86_64 (linux/amd64)"),
+    )
+
+
+def test_refuses_a_noarch_oci_member() raises:
+    var d = _small(String("noarch"))
+    var text = Path(d + String("/manifest.json")).read_text()
+    _write(d + String("/manifest.json"), text.replace(String('"linux-x86_64"'), String('"noarch"')))
+    _expect_img(d, String("an OCI member's platform is 'noarch': an image is built for one platform"))
+
+
+def _symlink(target: String, link: String) raises:
+    """`ln -s target link`, through libc (test-only FFI: the std has no
+    symlink call)."""
+    var t = target.copy()
+    var l = link.copy()
+    var rc = external_call["symlink", Int32](
+        t.as_c_string_slice().unsafe_ptr(), l.as_c_string_slice().unsafe_ptr()
+    )
+    if rc != 0:
+        raise Error(String("symlink(") + target + String(", ") + link + String(") failed"))
+
+
+def _digest_of(data: List[UInt8]) -> String:
+    return String("sha256:") + hex_lower_array_32(sha256(Span(data)))
+
+
+def test_refuses_a_layer_blob_that_is_a_symlink() raises:
+    # The middle layer replaced by a link to a file OUTSIDE the release
+    # directory holding the same bytes: only the link can cause the refusal,
+    # and the message names the link, not a hash of what it points at.
+    var d = _small(String("bloblink"))
+    var layers = _layers()
+    var middle = _digest_of(layers[1])
+    var blob = _blob_path(d + String("/img.oci"), middle)
+    var outside = _root(String("bloblink_outside")) + String("/blob")
+    Path(outside).write_bytes(Span(layers[1]))
+    remove(blob)
+    _symlink(outside, blob)
+    _expect_img(
+        d,
+        String("its image layout 'img.oci' holds a symlink at 'blobs/sha256/") + _hex_of(middle)
+        + String("': a link can name bytes outside the release directory"),
+    )
+
+
+def test_refuses_an_unreferenced_blob_in_the_middle() raises:
+    # A content-named blob nothing references, whose name sorts strictly
+    # between the layout's first and last blob: entries are checked in
+    # bytewise order, so it is neither the first nor the last checked.
+    var d = _small(String("strayblob"))
+    var blobs = d + String("/img.oci/blobs/sha256")
+    var names = listdir(blobs)
+    var lo = String(names[0])
+    var hi = String(names[0])
+    for i in range(len(names)):
+        var n = String(names[i])
+        if n < lo:
+            lo = n
+        if n > hi:
+            hi = n
+    var stray = String("")
+    var data = List[UInt8]()
+    for k in range(1000):
+        data = List[UInt8]()
+        var text = String("unreferenced ") + String(k)
+        var bs = text.as_bytes()
+        for j in range(len(bs)):
+            data.append(bs[j])
+        var hex = hex_lower_array_32(sha256(Span(data)))
+        if hex > lo and hex < hi:
+            stray = hex^
+            break
+    assert_true(stray.byte_length() == 64, String("no stray name between ") + lo + String(" and ") + hi)
+    Path(blobs + String("/") + stray).write_bytes(Span(data))
+    _expect_img(
+        d,
+        String("its image layout 'img.oci' holds 'blobs/sha256/") + stray
+        + String("', which its index and manifest do not reference"),
+    )
+
+
+def test_refuses_an_extra_file_at_the_layout_root() raises:
+    # `extra.txt` sorts after every `blobs/` entry and before `index.json`.
+    var d = _small(String("strayroot"))
+    _write(d + String("/img.oci/extra.txt"), String("x"))
+    _expect_img(
+        d,
+        String("its image layout 'img.oci' holds 'extra.txt', which its index and manifest")
+        + String(" do not reference"),
+    )
+
+
+def test_a_layer_listed_twice_is_counted_once() raises:
+    var layers = _layers()
+    var twice = List[List[UInt8]]()
+    twice.append(layers[0].copy())
+    twice.append(layers[1].copy())
+    twice.append(layers[0].copy())
+    var d = _root(String("twice")) + String("/img")
+    makedirs(d, exist_ok=True)
+    var digest = write_test_layout(d + String("/img.oci"), twice)
+    _write(d + String("/manifest.json"), _oci_manifest(String("img"), String("img.oci"), _hex_of(digest)))
+    var m = verify_member(String("img"), d)
+    # four files: the manifest, the config and the two distinct layers
+    var blobs = d + String("/img.oci/blobs/sha256")
+    var names = listdir(blobs)
+    assert_equal(len(names), 4)
+    var total = 0
+    for i in range(len(names)):
+        total += len(Path(blobs + String("/") + String(names[i])).read_bytes())
+    assert_equal(m.size, total)
 
 
 def main() raises:
