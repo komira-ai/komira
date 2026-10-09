@@ -25,12 +25,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # deploy tests drive kci_cloud_fake's FakeCloud, a test dependency only
 # (`test_deps`), never shipped in the binary.
 #
-# The welded tests: the one parser and every usage refusal; the stage run over
+# The welded tests: the one parser and every usage refusal (`--rollback-on-failure`
+# is parsed and refused: no deployed-revision record); the stage run over
 # a recording fake (order, stop at the first failure, worst outcome, PARTIAL
 # after a publish, the result records, the workflow check, validations after
 # their step and on their own, VALIDATION_FAILED and NOT_REACHED, the
 # lookahead, the summary); the result file; the real libraries
-# reached through a machine file; and a scan that no kci source but
+# reached through a machine file; a failed DEPLOY step stopping the run (no
+# later step, `set_hash` emptied); and a scan that no kci source but
 # kci_api spells an exit number.
 mojo_library(
     name = "kci_cli",
@@ -91,6 +93,10 @@ mojo_library(
         # the same on a faulty FakeCloud: trust_check, a presence read,
         # a broken lowering contract and realize, each raising
         "tests/test_kci_deploy_faults.mojo",
+        # a failed DEPLOY step stops the run: a PUBLISH into cell a, then
+        # DEPLOY steps into a and b, one FakeCloud each; a fault in a or b,
+        # set_hash emptied, --rollback-on-failure refused before anything
+        "tests/test_kci_deploy_stop.mojo",
     ],
     test_env = {
         # resolved by name through --secret-store=env's store
@@ -115,6 +121,10 @@ mojo_library(
             for d in ["kci.app", "kci.job"]
         },
         "tests/test_kci_deploy_faults.mojo": {
+            "src/kci_composites/definitions/{}.json".format(d): "//src/kci_composites:{}.json".format(d)
+            for d in ["kci.app", "kci.job"]
+        },
+        "tests/test_kci_deploy_stop.mojo": {
             "src/kci_composites/definitions/{}.json".format(d): "//src/kci_composites:{}.json".format(d)
             for d in ["kci.app", "kci.job"]
         },

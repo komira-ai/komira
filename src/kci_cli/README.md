@@ -16,6 +16,11 @@ release set it was handed. Every
 run writes `kci_api`'s result document to `--result-file` (RUNNING before
 the first effect, FINISHED on every exit path), appends a markdown summary
 to `--summary-file` when given, and exits with `kci_api`'s exit numbers.
+A step that does not end SUCCEEDED or NOOP stops the run (a failed DEPLOY
+step leaves its cell as the failed apply left it, and no later step runs),
+and a run that does not end SUCCEEDED or NOOP hands on no set hash.
+`--rollback-on-failure` is parsed and refused: this kci has no per-cell
+deployed-revision record to roll a cell back to.
 
 `kci_main_with` and `run_stage_with` take the steps as a `StageSteps`
 value, so a test can run a stage over a recording fake; `LibrarySteps` is
