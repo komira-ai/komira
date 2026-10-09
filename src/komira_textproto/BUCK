@@ -6,11 +6,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # from a brace and name the line it refuses. Zero deps by design: any reader
 # of a textproto file can share it without pulling a schema along.
 #
-# The welded test covers each token kind, every supported escape, comments,
-# line tracking, the cursor helpers, and each refusal by its message.
+# The welded tests cover each token kind, every supported escape, comments,
+# line tracking, the cursor helpers, and each refusal by its message; the
+# describe test pins how refusals name every token kind and an empty input.
 mojo_library(
     name = "komira_textproto",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_textproto_lexer.mojo"],
+    test_srcs = [
+        "tests/test_textproto_describe.mojo",
+        "tests/test_textproto_lexer.mojo",
+    ],
     visibility = ["PUBLIC"],
 )
