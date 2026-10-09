@@ -12,6 +12,10 @@
 # plan whose hint says "the input is already sorted, skip the sort" would share
 # a compiled plan with one that must sort.
 #
+# The hint keys are QUOTED in the render: written raw, one key `k, ts` rendered
+# like the two keys `k`, `ts`, and a left key spelling `k]/[F], right_sorted=[ts`
+# rendered like a left hint `[k]` plus a right hint `[ts]`.
+#
 # Each test is a pair that must hash differently, plus a control pair that
 # must hash equal (the render stays deterministic, so caching still works).
 # =============================================================================
@@ -135,6 +139,32 @@ def test_a_pre_sort_hint_is_identity() raises:
         _asof(AsofTolerance.none(), ak^, ad^),
         _asof(AsofTolerance.none(), bk^, bd^),
         "pre-sort hint direction",
+    )
+
+
+def test_a_hint_key_cannot_split_into_two_keys() raises:
+    var ak: List[String] = ["k, ts"]
+    var ad: List[Bool] = [False, False]
+    var bk: List[String] = ["k", "ts"]
+    var bd: List[Bool] = [False, False]
+    _differ(
+        _asof(AsofTolerance.none(), ak^, ad^),
+        _asof(AsofTolerance.none(), bk^, bd^),
+        "hint keys [\"k, ts\"] (one key) vs [\"k\", \"ts\"]",
+    )
+
+
+def test_a_left_hint_key_cannot_spell_a_right_hint() raises:
+    var ak: List[String] = ["k]/[F], right_sorted=[ts"]
+    var ad: List[Bool] = [False]
+    var bk: List[String] = ["k"]
+    var bd: List[Bool] = [False]
+    var ck: List[String] = ["ts"]
+    var cd: List[Bool] = [False]
+    _differ(
+        _asof(AsofTolerance.none(), ak^, ad^),
+        _asof(AsofTolerance.none(), bk^, bd^, ck^, cd^),
+        "a left hint key spelling `]/[F], right_sorted=[ts` vs a real right hint",
     )
 
 

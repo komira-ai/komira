@@ -924,13 +924,15 @@ def _write_sort_hint[W: Writer](
     mut writer: W, keys: List[String], desc: List[Bool]
 ):
     """An as-of pre-sort hint: the keys, then the per-key directions as their
-    own list (`[k, ts]/[F, T]`). The two lists are written separately so a
-    length mismatch between them still reaches the render."""
+    own list (`["k", "ts"]/[F, T]`). The two lists are written separately so a
+    length mismatch between them still reaches the render. Each key is QUOTED
+    (`write_quoted`): a raw key `k, ts` rendered like the two keys `k`, `ts`,
+    and a key could spell `]/[F], right_sorted=[…` and forge the other hint."""
     writer.write("[")
     for i in range(len(keys)):
         if i > 0:
             writer.write(", ")
-        writer.write(keys[i])
+        write_quoted(writer, keys[i])
     writer.write("]/[")
     for i in range(len(desc)):
         if i > 0:
