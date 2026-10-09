@@ -70,8 +70,12 @@ are values (`shape/`):
                        kci creates or adopts, and the `kci-run-id=<id>`
                        label of an object created in a scope with a
                        validation run id (no kci verb sets one yet);
-                       `create_labels` is every label a create writes; and
-                       kci's adoption mark `kci_adopted=true`.
+                       `create_labels` is every label a create writes;
+                       kci's adoption mark `kci_adopted=true`; and the
+                       lines a description carrier (an object with a
+                       description and no labels) holds every label in
+                       (`description_lines`, `description_labels`,
+                       `released_description`, `description_carrier_bytes`).
   * metadata.mojo    — the rules of every resource's metadata (`labels`,
                        `physical_name`, `adopt`): their
                        graph findings, the label fields kci lowers, the
@@ -349,6 +353,11 @@ from kci_cloud.labels import (
     adoption_labels,
     adopted_by,
     is_kci_label_key,
+    DESCRIPTION_LINE_SEPARATOR,
+    description_lines,
+    description_labels,
+    released_description,
+    description_carrier_bytes,
 )
 from kci_cloud.clouds import (
     Clouds,

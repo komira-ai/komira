@@ -19,6 +19,7 @@ mojo_library(
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
+        "tests/test_builtin_match_fns.mojo",
         "tests/test_cast_to_varchar_kernels.mojo",
         "tests/test_comparison_kleene_convergence.mojo",
         "tests/test_comparison_kleene_offset_validity.mojo",
@@ -31,6 +32,8 @@ mojo_library(
         "tests/test_kleene_helpers.mojo",
         "tests/test_sel_kernels.mojo",
         "tests/test_simd_of.mojo",
+        "tests/test_temporal_extract_fields.mojo",
+        "tests/test_temporal_extract_trunc.mojo",
     ],
     visibility = ["PUBLIC"],
 )
