@@ -24,7 +24,12 @@ executable, `-I -S`), since the GIL, once enabled, stays enabled for the
 process. Fails unless the version and the build are the pins, the
 distributions named are exactly MODULES, each imports at its pinned version,
 the GIL is in its build's state at the start of the script and of every
-child, and each import leaves the GIL in the pinned state. Every row is
+child, each import leaves the GIL in the pinned state, and the self-checks
+pass (check_state: the warning parser over synthetic results, and on 3.14t
+the warning's text in the interpreter's own files; check_child: how a
+child's result or failure is read). No import of the pinned closure enables
+the GIL, so the `enabled by <module>` reading and the before/after
+distinction are proved by check_state alone, not by a real import. Every row is
 printed before the verdict, so one failing run shows the whole table.
 """
 
@@ -143,9 +148,10 @@ def check_state(freethreaded):
         print("warning text found in", ", ".join(sorted(found)))
 
 
-def child(preload, module, dist, every):
+def child(preload, module, dist, every, program=CHILD):
+    """The child's JSON result, or why it gave none; `program` replaces the child's code (check_child)."""
     proc = subprocess.run(
-        [sys.executable, "-I", "-S", "-c", CHILD, json.dumps([preload, sys.path, module, dist, every])],
+        [sys.executable, "-I", "-S", "-c", program, json.dumps([preload, sys.path, module, dist, every])],
         capture_output=True,
         text=True,
     )
@@ -153,6 +159,19 @@ def child(preload, module, dist, every):
         tail = proc.stderr.strip().splitlines()[-1:] or ["(no output)"]
         return None, "exit {}: {}".format(proc.returncode, tail[0])
     return json.loads(proc.stdout.strip().splitlines()[-1]), None
+
+
+def check_child():
+    """child() reads the last line of a child that exits 0, and reports a child that does not by its status and last error line."""
+    programs = [
+        ("print('noise'); print('{\"after\": false}')", ({"after": False}, None)),
+        ("import sys; sys.stderr.write('first\\nlast line\\n'); sys.exit(3)", (None, "exit 3: last line")),
+        ("import sys; sys.exit(2)", (None, "exit 2: (no output)")),
+        ("import os, signal; os.kill(os.getpid(), signal.SIGKILL)", (None, "exit -9: (no output)")),
+    ]
+    for program, want in programs:
+        got = child([], "unused", "unused", False, program)
+        assert got == want, "a child running {!r} reads as {!r}, not {!r}".format(program, got, want)
 
 
 def main(args):
@@ -172,6 +191,7 @@ def main(args):
     assert build in ("gil", "freethreaded"), "build is {!r}, not gil or freethreaded".format(build)
     freethreaded = build == "freethreaded"
     check_state(freethreaded)
+    check_child()
 
     bad = []
     got_python = "%d.%d.%d" % sys.version_info[:3]

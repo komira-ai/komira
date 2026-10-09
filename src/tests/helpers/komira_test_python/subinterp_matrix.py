@@ -16,7 +16,9 @@ several interpreters. The child puts its `sys.path` in the sub-interpreter
 and imports the module there; a failure is reported as the innermost
 exception of its chain (the extension module that refused, not a wrapper
 such as pandas' "Unable to import required dependency"). Fails unless the
-modules named are exactly MODULES and every outcome is the pinned one. Every
+self-checks pass (check_self: the chain walk over a cause, an implicit and a
+suppressed context, and each way a child can end), the modules named are
+exactly MODULES and every outcome is the pinned one. Every
 row is printed before the verdict, so one failing run shows the whole table.
 """
 
@@ -45,26 +47,36 @@ finally:
     interp.close()
 """
 
+# The innermost exception of a failure's chain, as `<ExceptionType>: <first
+# line of its message>`: its cause (`raise ... from`), else the exception it
+# was raised while handling, even one `from None` suppresses. Run both in the
+# sub-interpreter (SUB) and by check_self, so it holds no `%`.
+DESCRIBE = r"""
+def describe(e):
+    while e.__cause__ is not None or e.__context__ is not None:
+        e = e.__cause__ if e.__cause__ is not None else e.__context__
+    return type(e).__name__ + ": " + (str(e).splitlines() or [""])[0]
+"""
+
 # Run in the sub-interpreter: imports the module, and on failure raises the
-# innermost exception of the chain (its cause, or the exception it was raised
-# while handling), as `<ExceptionType>: <first line of its message>`.
-SUB = r"""
+# innermost exception of its chain, described.
+SUB = DESCRIBE + r"""
 import sys
 sys.path[:] = %r
 try:
     import %s
 except BaseException as e:
-    while e.__cause__ is not None or e.__context__ is not None:
-        e = e.__cause__ if e.__cause__ is not None else e.__context__
-    raise RuntimeError("%%s: %%s" %% (type(e).__name__, (str(e).splitlines() or [""])[0]))
+    raise RuntimeError(describe(e))
 """
 
 ABSOLUTE = re.compile(r"/[^\s'\"]*/")
 
 
-def outcome(preload, module):
+def outcome(preload, module, program=None):
+    """The outcome of importing the module in a child; `program` replaces the child's code (check_self)."""
+    code = "SUB = %r\n" % SUB + CHILD if program is None else program
     proc = subprocess.run(
-        [sys.executable, "-I", "-S", "-c", "SUB = %r\n" % SUB + CHILD, json.dumps([preload, sys.path, module])],
+        [sys.executable, "-I", "-S", "-c", code, json.dumps([preload, sys.path, module])],
         capture_output=True,
         text=True,
     )
@@ -76,6 +88,68 @@ def outcome(preload, module):
     return ABSOLUTE.sub("", lines[-1] if lines else "(no output)"), proc.stderr
 
 
+def check_self():
+    """describe() finds the innermost exception of each kind of chain, and outcome() reads each way a child ends."""
+    space = {}
+    exec(DESCRIBE, space)
+    describe = space["describe"]
+
+    def raised(f):
+        try:
+            f()
+        except BaseException as e:
+            return e
+        raise AssertionError("{} raised nothing".format(f))
+
+    def implicit():
+        try:
+            raise ImportError("inner, implicit\nsecond line")
+        except ImportError:
+            raise ImportError("wrapper")
+
+    def explicit():
+        try:
+            raise ValueError("context, not the cause")
+        except ValueError:
+            raise ImportError("wrapper") from OSError("inner, explicit")
+
+    def suppressed():
+        try:
+            raise KeyError("inner, suppressed")
+        except KeyError:
+            raise ImportError("wrapper") from None
+
+    def deep():
+        try:
+            implicit()
+        except ImportError as e:
+            raise RuntimeError("outer") from e
+
+    def bare():
+        raise ImportError()
+
+    cases = [
+        (implicit, "ImportError: inner, implicit"),
+        (explicit, "OSError: inner, explicit"),
+        (suppressed, "KeyError: 'inner, suppressed'"),
+        (deep, "ImportError: inner, implicit"),
+        (bare, "ImportError: "),
+    ]
+    for f, want in cases:
+        got = describe(raised(f))
+        assert got == want, "describe({}) is {!r}, not {!r}".format(f.__name__, got, want)
+    assert "%" not in DESCRIBE, "DESCRIBE holds a %, which SUB's formatting would take"
+    programs = [
+        ("import os, signal; os.kill(os.getpid(), signal.SIGKILL)", "signal 9"),
+        ("import sys; sys.exit(3)", "exit 3"),
+        ("pass", "(no output)"),
+        ("print('first'); print(\"ImportError: /abs/dir/mod.so: cannot open '/x/y/lib.so'\")", "ImportError: mod.so: cannot open 'lib.so'"),
+    ]
+    for program, want in programs:
+        got, _ = outcome([], "unused", program)
+        assert got == want, "a child running {!r} reads as {!r}, not {!r}".format(program, got, want)
+
+
 def main(args):
     preload, want = [], {}
     for a in args:
@@ -84,6 +158,7 @@ def main(args):
             preload.append(value)
         else:
             want[key] = value
+    check_self()
     bad = []
     if sorted(want) != sorted(MODULES):
         bad.append("pinned outcomes for {}, but subinterp_matrix.py checks {}".format(sorted(want), sorted(MODULES)))
