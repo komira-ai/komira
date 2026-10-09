@@ -34,3 +34,4 @@ src/tests/helpers/komira_udf_spike_abi/_table.mojo	the dlopened UDF runtime libr
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_broken_so.mojo	the init export of the echo_broken UDF runtime library, forwarded to its C init
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_global_lock_so.mojo	the init export of the echo_global_lock UDF runtime library, forwarded to its second C init
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_so.mojo	the init export of the echo UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_node/engine/engine_so.mojo	the export of the conform_engine library: the conformance harness run from node's engine addon, with its paths read from two C strings and its report written to the caller's buffer
