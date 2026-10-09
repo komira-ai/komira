@@ -23,6 +23,7 @@ from komira_agg_api.agg_strategy import (
     HLL_NUM_REGISTERS,
     HyperLogLog,
     choose_strategy,
+    is_s3_eligible,
 )
 
 
@@ -160,6 +161,17 @@ def test_choose_strategy_1m_groups_routes_radix() raises:
     assert_true(1_000_000 < S1_PARTITIONED_THRESHOLD)
 
 
+def test_is_s3_eligible_needs_all_three() raises:
+    """True only for presorted AND cardinality < S3_SORTED_THRESHOLD AND one
+    worker; dropping any one precondition (or the strict bound) goes red."""
+    assert_true(is_s3_eligible(0, True, 1))
+    assert_true(is_s3_eligible(S3_SORTED_THRESHOLD - 1, True, 1))
+    assert_true(not is_s3_eligible(S3_SORTED_THRESHOLD, True, 1))
+    assert_true(not is_s3_eligible(10, False, 1))
+    assert_true(not is_s3_eligible(10, True, 2))
+    assert_true(not is_s3_eligible(10, True, 0))
+
+
 def main() raises:
     print("=" * 72)
     print("agg_strategy tests")
@@ -195,6 +207,9 @@ def main() raises:
     print("  PASS test_s1_partitioned_threshold_value")
     test_choose_strategy_1m_groups_routes_radix()
     print("  PASS test_choose_strategy_1m_groups_routes_radix")
+
+    test_is_s3_eligible_needs_all_three()
+    print("  PASS test_is_s3_eligible_needs_all_three")
 
     print("")
     print("All agg_strategy tests passed.")
