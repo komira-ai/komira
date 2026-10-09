@@ -394,7 +394,9 @@ struct _VtCounters:
     # ⚠ AND IT IS PER WORKER, NOT ONE SLOT. `next_morsel` is an IMMUTABLE
     # borrow that N workers call concurrently; one shared out-param slot would
     # be a data race the door itself introduced -- exactly the class it exists
-    # to keep the connector out of.
+    # to keep the connector out of. Index `_VT_MAX_WORKERS` is the OVERFLOW
+    # cell every worker id outside `[0, _VT_MAX_WORKERS)` shares; a call on it
+    # always holds `lock`, even on an MT-safe connector (see `next_morsel`).
     # SAFETY (safety model §7.11):
     #   (a) WHY A WILDCARD: `KomiraScanBatch` is a C-ABI POD whose address is
     #       handed to a foreign callee. It CANNOT be a `Slab[T]`/`OwnedPointer`
@@ -403,7 +405,7 @@ struct _VtCounters:
     #   (b) NON-NULL WINDOW: from `VTableMorselSource.__init__` to `__del__`.
     #       Never null in between; there is no "between dispatches" state.
     #   (c) OWNING? YES, and it is a FIXED-SIZE POD ARRAY of
-    #       `_VT_MAX_WORKERS` scratch cells -- no `List`, `String`,
+    #       `_VT_MAX_WORKERS + 1` scratch cells -- no `List`, `String`,
     #       `OwnedPointer` or nested heap in the element type, so it is not the
     #       gap6 shape. The ban targets owning pointers to HEAP-OWNING
     #       elements; every field of `KomiraScanBatch` is a machine word.
@@ -485,7 +487,7 @@ struct VTableMorselSource(MorselSourceImpl):
         self._counters[].next_id = AtomicI64(0)
         self._counters[].lock = AtomicI8(0)
         self._counters[].eof = AtomicI8(0)
-        self._counters[].slots = alloc[KomiraScanBatch](_VT_MAX_WORKERS)
+        self._counters[].slots = alloc[KomiraScanBatch](_VT_MAX_WORKERS + 1)
         self._pool = _vt_null_ptr[ExprPool, MutUntrackedOrigin]()
         self._pushed = False
         self._vt = vt^
@@ -514,15 +516,21 @@ struct VTableMorselSource(MorselSourceImpl):
         if self._counters[].eof.load() != Int8(0):
             return None
 
-        var mt_safe = (self._caps & KOMIRA_SCAN_CAP_MT_SAFE) != Int64(0)
+        # ⛔ HEAP slot, indexed by worker. See `_VtCounters.slots` -- a stack
+        # local here builds green and reads back its own initialiser. A worker
+        # id outside the table takes the shared OVERFLOW cell, and therefore
+        # the lock, even on an MT-safe connector: two such workers on one cell
+        # unlocked would read each other's columns. In-range workers on an
+        # MT-safe connector stay lock-free.
+        var w = worker_id
+        var overflow = w < 0 or w >= _VT_MAX_WORKERS
+        if overflow:
+            w = _VT_MAX_WORKERS
+        var mt_safe = (
+            (self._caps & KOMIRA_SCAN_CAP_MT_SAFE) != Int64(0) and not overflow
+        )
         if not mt_safe:
             self._acquire()
-
-        # ⛔ HEAP slot, indexed by worker. See `_VtCounters.slots` -- a stack
-        # local here builds green and reads back its own initialiser.
-        var w = worker_id
-        if w < 0 or w >= _VT_MAX_WORKERS:
-            w = 0
         var cbp = self._counters[].slots + w
         cbp[].n_rows = Int64(0)
         cbp[].n_cols = Int64(0)
@@ -668,16 +676,23 @@ struct VTableMorselSource(MorselSourceImpl):
 
         The marshal is a stack `InlineArray` copy of at most 256 indices; a
         wider projection is NOT pushed (the engine projects above the scan,
-        which is correct, just slower). No allocation, no raising, once per
-        query.
+        which is correct, just slower). Nor is one holding an index outside
+        the schema (below 0 or at/above its width): such an index means
+        nothing to the connector, and pushing it would leave the connector
+        and `output_schema()` disagreeing on the column set. Not pushing
+        keeps both on the full schema, as for a source with no projection.
+        No allocation, no raising, once per query.
         """
         if (self._caps & KOMIRA_SCAN_CAP_PROJECTION) == Int64(0):
             return
         var n = len(cols)
         if n == 0 or n > 256:
             return
+        var width = self._schema.num_columns()
         var buf = Array[Int32, 256](fill=Int32(0))
         for i in range(n):
+            if cols[i] < 0 or cols[i] >= width:
+                return
             buf[i] = Int32(cols[i])
         var rc = self._vt.set_projection(
             self._vt.handle,
@@ -692,9 +707,7 @@ struct VTableMorselSource(MorselSourceImpl):
         try:
             var sb = SchemaBuilder()
             for i in range(n):
-                var ci = cols[i]
-                if ci >= 0 and ci < self._schema.num_columns():
-                    sb.add_field(self._schema.field_at(ci))
+                sb.add_field(self._schema.field_at(cols[i]))
             self._schema = sb.build()
         except:
             pass

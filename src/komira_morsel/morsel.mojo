@@ -726,9 +726,8 @@ def split_record_batch(
     var total_rows = batch.num_rows()
     var num_cols = batch.num_columns()
 
-    if total_rows == 0 or num_cols == 0:
-        var result = MorselArray(1)
-        return result^
+    if total_rows == 0:  # a count-only batch (no columns) still has rows
+        return MorselArray(1)
 
     # SELECTION-VECTOR #2 (KOMIRA_SEL_PIPE): if the input batch carries a
     # deferred `_selection_mask`, the split must slice it per sub-morsel so the
@@ -874,7 +873,8 @@ def split_record_batch(
                 _dg_copy += 1
                 _dg_copy_rows += rows_in_morsel
 
-        var morsel_batch = builder.build(schema_template.copy())
+        var morsel_batch = (builder.build(schema_template.copy()) if num_cols > 0
+                            else RecordBatch.count_only(rows_in_morsel))
 
         if mask_opt:
             # Slice the [start_row, start_row+rows_in_morsel) window of the
