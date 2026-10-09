@@ -38,7 +38,10 @@ Out of scope:
 
 - **Real cloud accounts in gamma.** These are decision 4 of
   [gamma validation decisions](gamma_validation_decisions.md#open-decisions-for-the-project-owner).
-  This design spends nothing and holds no cloud credential.
+  This design spends nothing and holds no cloud credential. (**Pointer:** the staged pipeline,
+  `docs/design/staged_pipeline.md` (#1173, section e2), adds an operator-run real-cloud validation
+  outside this repository as a gamma gate that blocks prod; this repository still holds no cloud
+  credential, and the in-repository route of decision 4 stays open.)
 - **The native package format.** That is #835. This document depends on it but does not decide it.
 - **Other platforms** (linux-aarch64, macOS) and Python wheels.
 - **DEPLOY.** See [the DEPLOY step](deploy_step.md).
