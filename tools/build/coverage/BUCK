@@ -56,22 +56,38 @@ mojo_library(
         # in a string, a docstring or another comment's text), CRLF, and the
         # executable-line heuristic over every kind of line
         "tests/test_lexer.mojo",
+        # declaration reachability (report only): the functions a source
+        # declares (methods, multi-line and generic signatures, one-line
+        # bodies, nested functions, trait requirements left out, `def` in a
+        # string or comment ignored, scanner edges), each one's class
+        # (plain, always_inline, comptime_if), which ones no report gives a
+        # line, markers leaving their count, a branch-only file listing
+        # none, and analyze listing them, split by class, in both JSON
+        # results without changing any number or finding
+        "tests/test_decls.mojo",
         # the full-source denominator: a measured package's source file no
         # report names counts uncovered and raises UnmeasuredFile
         "tests/test_full_source.mojo",
+        # declaration-only files: a fixture of bodiless trait methods,
+        # comptime values and imports no test compiled counts no line and is
+        # a DeclarationOnlyFile note; the near-miss fixture (a default
+        # method body with code) and a table of near misses still count
+        "tests/test_declaration_only.mojo",
         # the ratchet grammar, the shipped ratchet.tsv, every comparison
         # outcome, and the proposed file
         "tests/test_ratchet.mojo",
         # the shared computation: merged reports, test sources both ways,
         # exemptions, mutants, the target, conclusions per mode, rounding, and
-        # the gate's numbers equal to the report's
+        # the gate's numbers equal to the report's, test-only packages'
+        # findings as information
         "tests/test_analyze.mojo",
         # check-run batching, annotation scope/order/ranges/levels, changed-line
         # coverage, the summary's size limit, JSON escaping
         "tests/test_report.mojo",
         # the command line end to end: the summary golden, check-run files,
         # result JSON, proposed ratchet, gate == report, the annotation cap
-        # and the full annotations file, every exit code
+        # and the full annotations file, every exit code, --info-package
+        # (information, notices, a gate passing in enforce mode)
         "tests/test_cli.mojo",
     ],
     test_data = {
@@ -80,6 +96,10 @@ mojo_library(
             "tests/fixtures/equiv.info",
             "tests/fixtures/equiv.xml",
             "tests/fixtures/kcov_trimmed.xml",
+        ],
+        "tests/test_declaration_only.mojo": [
+            "tests/fixtures/decl/declaration_only.mojo",
+            "tests/fixtures/decl/near_miss.mojo",
         ],
         "tests/test_ratchet.mojo": {
             "tools/build/coverage/ratchet.tsv": ":ratchet.tsv",

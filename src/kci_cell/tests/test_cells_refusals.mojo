@@ -112,6 +112,60 @@ def test_setting_value_set_twice() raises:
     )
 
 
+# ── a scalar whose value is a brace or a colon ──────────────────────────────
+# `_scalar_token` takes only a string, word or number after the `:`. Each
+# case would parse on (taking the brace or colon as the value) if that kind
+# check were gone, and would then fail later with another message or not
+# at all.
+
+
+def test_cell_name_value_is_an_open_brace() raises:
+    assert_equal(
+        _refusal(_file(_cell(String("  name: {\n") + String(_CLOUD) + String(_LEVEL)))),
+        String("cells file: line 3: expected a value for 'name' but got '{'"),
+    )
+
+
+def test_cell_cloud_value_is_a_close_brace() raises:
+    assert_equal(
+        _refusal(_file(_cell(String(_NAME) + String("  cloud: }\n") + String(_LEVEL)))),
+        String("cells file: line 4: expected a value for 'cloud' but got '}'"),
+    )
+
+
+def test_bootstrap_level_value_is_a_colon() raises:
+    assert_equal(
+        _refusal(_file(_cell(String(_NAME) + String(_CLOUD) + String("  bootstrap_level: :\n")))),
+        String("cells file: line 5: expected a value for 'bootstrap_level' but got ':'"),
+    )
+
+
+def test_setting_value_is_a_close_brace() raises:
+    assert_equal(
+        _refusal(_file(_cell(String(_NAME) + String(_CLOUD) + String("  setting { key: \"a\" value: }\n") + String(_LEVEL)))),
+        String("cells file: line 5: expected a value for 'value' but got '}'"),
+    )
+
+
+def test_setting_key_value_is_an_open_brace() raises:
+    assert_equal(
+        _refusal(_file(_cell(String(_NAME) + String(_CLOUD) + String("  setting { key: { value: \"x\" }\n") + String(_LEVEL)))),
+        String("cells file: line 5: expected a value for 'key' but got '{'"),
+    )
+
+
+def test_schema_version_value_is_a_close_brace() raises:
+    # the top-level field never reaches `_scalar_token`: kci_api's
+    # `authored_schema_version` checks it first, over the whole token list
+    assert_equal(
+        _refusal(String("schema_version: }\n") + _ok_cell()),
+        String(
+            "cells file: line 1: schema_version is not a decimal integer"
+            " (expected `schema_version: <major>`)"
+        ),
+    )
+
+
 # ── a duplicate cell name or setting key ────────────────────────────────────
 
 

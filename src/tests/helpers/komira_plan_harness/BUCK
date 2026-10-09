@@ -1,0 +1,153 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
+
+# Test-only: the canonical result text of a query result, for conformance
+# suites that run plans and compare results (canon_text.mojo states the
+# format). render.mojo turns a komira_arrow RecordBatch or Table into the
+# text, reading the Arrow buffers itself; parse.mojo reads an expected file
+# (a hand-written one may give a float as an exactly representable decimal),
+# and nested_floats.mojo walks a nested cell along its type to refuse a
+# float leaf canon would not write; compare.mojo compares the two under the
+# expected file's order and float policy and reports every mismatch.
+# fixtures.mojo builds columns of every type from raw buffers for the tests
+# here and for suites that use canon.
+# door.mojo dlopens a plan-door library (its path a `--plan-door=` flag),
+# checks its ABI version and runs plan bytes through Door A (an Arrow C
+# stream) and Door B (Arrow IPC bytes, probe then fill), returning a Table
+# or a named error; door_ipc.mojo reads Door B's IPC stream.
+#
+# The welded tests, and the defect each one catches:
+#   test_render       a cell spelling per type; NULL taken from validity for
+#                     every type; the string `\N` against NULL; a type canon
+#                     cannot render refused by name; a table's zero-row
+#                     chunks not read and only their Fields' names, top
+#                     types, decimal parameters, time zones and
+#                     nullability checked.
+#   test_float        decimal-only floats accepted only when exact; a decimal
+#                     that disagrees with its bits refused (ties to even);
+#                     NaN and -0.0
+#                     compared by bits; ulps and rel tolerances.
+#   test_compare      order total / keys / none; every mismatch reported, not
+#                     only the first; schema and row-count mismatches; the
+#                     escapes, nested cells and nested float bits a parser
+#                     refuses; no first-fit search when the walk is exact.
+#   test_round_trip   render -> text -> parse -> compare is equal, and the
+#                     text is a fixed point, for a batch of every type.
+#   test_types_and_slices
+#                     the full type tree (cells that read alike never share a
+#                     schema line); floats in nested values as bits and in
+#                     dictionaries as floats; a leading `#` in a name; slice
+#                     offsets on every layout, dictionaries included; a dense
+#                     union by type code.
+#   test_door_stub    both doors against :plan_door_stub: the table matches
+#                     its canonical text, Door A's stream is released exactly
+#                     once, the stub's async runtime ran the work; each
+#                     producer fault the door names (ABI mismatch, missing
+#                     symbol, NULL ctx, out not written or released on DOOR_OK,
+#                     release slot left set, probe/fill length mismatch, a
+#                     write past cap, an out slot written on a refusal of the
+#                     stream, the probe or the fill) is raised by name; a
+#                     refusal comes back with its PLAN_ENDPOINT_<NAME>(<code>)
+#                     text; an empty plan and a bad flag are named errors.
+#   test_door_ipc     decode_ipc_stream over streams built with komira's IPC
+#                     encoders: every claimed type round-trips to the same
+#                     canonical text; a dictionary field and an unclaimed
+#                     type are refused by name; a truncated stream and bytes
+#                     after the end-of-stream marker are MALFORMED.
+mojo_library(
+    name = "komira_plan_harness",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+    ],
+    test_srcs = [
+        "tests/test_compare.mojo",
+        "tests/test_door_ipc.mojo",
+        "tests/test_door_stub.mojo",
+        "tests/test_float.mojo",
+        "tests/test_render.mojo",
+        "tests/test_round_trip.mojo",
+        "tests/test_types_and_slices.mojo",
+    ],
+    test_data = {
+        "tests/test_door_stub.mojo": {
+            "plan_door_no_bytes.so": ":plan_door_no_bytes",
+            "plan_door_null_ctx.so": ":plan_door_null_ctx",
+            "plan_door_stub.so": ":plan_door_stub",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# Test-only: a plan door with canned answers (tests/door_stub/plan_door_stub.mojo
+# says which), for test_door_stub. It starts a komira_async runtime inside the
+# library, so a Mojo process dlopening a Mojo library that runs its own
+# threads is exercised before a real plan door exists. Its gate checks that
+# the eight symbols resolve; test_door_stub is what calls them.
+mojo_shared_lib(
+    name = "plan_door_stub",
+    srcs = ["tests/door_stub/plan_door_stub.mojo"],
+    exports = [
+        "komira_abi_version",
+        "komira_ctx_free",
+        "komira_ctx_new",
+        "komira_last_error",
+        "komira_plan_bytes",
+        "komira_plan_door_stub_pool_threads",
+        "komira_plan_door_stub_releases",
+        "komira_plan_stream",
+    ],
+    exports_exact = True,
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+    ],
+)
+
+# Two doors with nothing behind them, from one file
+# (tests/door_stub/plan_door_tiny.mojo), for test_door_stub's open refusals:
+# komira_ctx_new returns NULL in both; :plan_door_no_bytes hides
+# komira_plan_bytes with `exports_exact`.
+mojo_shared_lib(
+    name = "plan_door_null_ctx",
+    srcs = ["tests/door_stub/plan_door_tiny.mojo"],
+    exports = [
+        "komira_abi_version",
+        "komira_ctx_free",
+        "komira_ctx_new",
+        "komira_last_error",
+        "komira_plan_bytes",
+        "komira_plan_stream",
+    ],
+    exports_exact = True,
+)
+
+mojo_shared_lib(
+    name = "plan_door_no_bytes",
+    srcs = ["tests/door_stub/plan_door_tiny.mojo"],
+    exports = [
+        "komira_abi_version",
+        "komira_ctx_free",
+        "komira_ctx_new",
+        "komira_last_error",
+        "komira_plan_stream",
+    ],
+    exports_exact = True,
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

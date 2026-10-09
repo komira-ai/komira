@@ -17,6 +17,9 @@ and a deadline on every phase. What it offers:
   auth (`AuthProvider`);
 - typed failures (`HttpError`, the `HTTP_ERROR_*` kinds), and an outbound
   time budget (`outbound_budget_us`);
+- `TlsConnector.upgrade`: STARTTLS, a TLS client handshake over an
+  already-connected plaintext stream; it refuses a stream that still holds
+  bytes the peer sent before the handshake;
 - `ObjectStoreHttp`: ranged GETs over an object store's HTTP API, with a
   scripted double for tests;
 - `Clock` / `Rng` seams (`MockClock`, `DeterministicRng`) so retry timing is

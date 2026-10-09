@@ -745,5 +745,114 @@ def test_break_glass_environment() raises:
     )
 
 
+# ---- the parser's remaining paths: optional ':' before '{', a block left
+# open, a value that is no scalar, `after` twice, `has_stage`, the
+# install package-name grammar ------------------------------------------------
+
+
+def test_a_colon_before_each_block_is_optional() raises:
+    # `stage: {`, `step: {` and `validation: {` read as `stage {` ... do
+    var text = (
+        String("schema_version: 1\nstage: {\n name: \"p\"\n")
+        + String("step: {\n  name: \"publish\"\n  kind: PUBLISH\n  platform: \"linux-x86_64\"\n")
+        + String("  artifacts: \"a\"\n  channels: \"c\"\n  channel: \"gamma\"\n")
+        + String("  validation: { ") + String(_V_OK) + String(" }\n}\n}\n")
+    )
+    var g = parse_machine_file(text, String(_SRC))
+    assert_equal(len(g.stages), 1)
+    assert_equal(g.stages[0].name, String("p"))
+    assert_equal(len(g.stages[0].steps), 1)
+    assert_equal(g.stages[0].steps[0].channel, String("gamma"))
+    assert_equal(len(g.stages[0].steps[0].validations), 1)
+    assert_equal(g.stages[0].steps[0].validations[0].name, String("v"))
+    assert_equal(g.stages[0].steps[0].validations[0].line, 11)
+
+
+def test_a_step_or_validation_left_open() raises:
+    # the step opens on line 4 and the file ends inside it
+    _assert_refused(
+        String("schema_version: 1\nstage {\n name: \"b\"\n step { name: \"s\" kind: BUILD\n"),
+        String("machine file: line 4: a step of stage 'b' is not closed (expected '}')"),
+    )
+    # the validation opens on line 11 (as `_with_validation`'s) and the
+    # file ends inside it, named and unnamed
+    var head = (
+        String("schema_version: 1\nstage {\n name: \"p\"\n")
+        + String("step {\n  name: \"publish\"\n  kind: PUBLISH\n  platform: \"linux-x86_64\"\n")
+        + String("  artifacts: \"a\"\n  channels: \"c\"\n  channel: \"gamma\"\n  validation { ")
+    )
+    _assert_refused(
+        head + String("name: \"v\" kind: CONDA_INSTALL_SMOKE\n"),
+        String("machine file: line 11: validation 'v' is not closed (expected '}')"),
+    )
+    _assert_refused(
+        head + String("kind: CONDA_INSTALL_SMOKE\n"),
+        String("machine file: line 11: a validation of step 'publish' of stage 'p' is not closed (expected '}')"),
+    )
+
+
+def test_a_value_that_is_not_a_scalar() raises:
+    _assert_refused(
+        _one_stage(String(" name: {\n") + String(_BUILD_STEP)),
+        String("machine file: line 3: expected a value for 'name' but got '{'"),
+    )
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: }\n")),
+        String("machine file: line 4: expected a value for 'kind' but got '}'"),
+    )
+
+
+def test_after_set_twice() raises:
+    var text = (
+        String("schema_version: 1\nstage { name: \"a\" ") + String(_BUILD_STEP) + String("}\n")
+        + String("stage { name: \"b\" ") + String(_BUILD_STEP) + String("}\n")
+        + String("stage {\n name: \"c\"\n after: \"a\"\n after: \"b\"\n") + String(_PUBLISH_STEP) + String("}\n")
+    )
+    _assert_refused(text, String("machine file: line 9: field 'after' is set twice in stage 'c'"))
+
+
+def test_has_stage() raises:
+    var g = parse_machine_file(_two_stages(), String(_SRC))
+    assert_true(g.has_stage(String("build")))
+    assert_true(g.has_stage(String("prod")))
+    assert_false(g.has_stage(String("gamma")))
+    assert_false(g.has_stage(String("")))
+    assert_false(g.has_stage(String("pro")))
+
+
+def test_install_package_name_grammar() raises:
+    # every byte the grammar allows, and a digit first
+    var g = parse_machine_file(
+        _with_validation(String(_V_OK) + String(" install: \"9lib_a.b-c\" install: \"z0\"")), String(_SRC)
+    )
+    ref installs = g.stages[0].steps[0].validations[0].installs
+    assert_equal(len(installs), 3)
+    assert_equal(installs[1], String("9lib_a.b-c"))
+    assert_equal(installs[2], String("z0"))
+    # empty, and a refused byte after an allowed first byte
+    _assert_refused(
+        _with_validation(String(_V_OK) + String(" install: \"\"")),
+        String("line 11: validation 'v' of step 'publish' of stage 'p' has install ''; a package name is [a-z0-9_.-]+"),
+    )
+    var bad = List[String]()
+    bad.append(String("komira+x"))
+    bad.append(String("komira/x"))
+    bad.append(String("komira X"))
+    bad.append(String("komiraA"))
+    bad.append(String("a{"))
+    # the neighbours of each range boundary: backtick (96) and ':' (58)
+    bad.append(String("komira`x"))
+    bad.append(String("komira:x"))
+    # '_', '.' and '-' are allowed, but not as the first byte
+    bad.append(String("_a"))
+    bad.append(String(".a"))
+    bad.append(String("-a"))
+    for i in range(len(bad)):
+        _assert_refused(
+            _with_validation(String(_V_OK) + String(" install: \"") + bad[i] + String("\"")),
+            String("has install '") + bad[i] + String("'; a package name is [a-z0-9_.-]+"),
+        )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

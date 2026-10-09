@@ -9,9 +9,9 @@
 # passes.
 #
 # Scope: the methods in BUCK's `methods`. The services' other methods
-# (IAM policy, executions listing and deletion, revisions read, instances,
-# tasks, builds, worker pools, operations listing, deletion and
-# cancellation) are not in the generated code.
+# (TestIamPermissions, a worker pool's IAM policy, executions listing and
+# deletion, revisions read, instances, tasks, builds, operations listing,
+# deletion and cancellation) are not in the generated code.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -89,16 +89,43 @@ def test_only_the_used_methods_are_generated() raises:
     var total = 0
     total += _methods_of(
         "service.mojo",
-        ["create_service", "get_service", "list_services", "update_service", "delete_service"],
+        [
+            "create_service",
+            "get_service",
+            "list_services",
+            "update_service",
+            "delete_service",
+            "get_iam_policy",
+            "set_iam_policy",
+        ],
     )
     total += _methods_of("revision.mojo", ["list_revisions", "delete_revision"])
     total += _methods_of(
         "job.mojo",
-        ["create_job", "get_job", "list_jobs", "update_job", "delete_job", "run_job"],
+        [
+            "create_job",
+            "get_job",
+            "list_jobs",
+            "update_job",
+            "delete_job",
+            "run_job",
+            "get_iam_policy",
+            "set_iam_policy",
+        ],
+    )
+    total += _methods_of(
+        "worker_pool.mojo",
+        [
+            "create_worker_pool",
+            "get_worker_pool",
+            "list_worker_pools",
+            "update_worker_pool",
+            "delete_worker_pool",
+        ],
     )
     total += _methods_of("execution.mojo", ["get_execution", "cancel_execution"])
     total += _methods_of("operations.mojo", ["get_operation", "wait_operation"])
-    assert_equal(total, 17)
+    assert_equal(total, 26)
     var files = _files()
     var methods = 0
     for i in range(len(files)):

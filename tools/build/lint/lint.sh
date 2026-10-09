@@ -44,7 +44,10 @@
 #       package compiles only against the packages on its `-I` closure, so a
 #       missing dep is a failure at build time, found here in review. The
 #       library's own name is not an import to declare. Extra deps are not a
-#       finding (a dep may be there for a macro or a link).
+#       finding (a dep may be there for a macro or a link). Targets named in
+#       `test_deps` count too, since the .mojo files include the welded tests;
+#       a library source importing a test_deps package passes here and fails
+#       its compile.
 #   kind "retired_names", args <tree> <prefix of tree> <name>... -- <file>...
 #       No file under <tree> (the cell's doc_tree, findings named <prefix of
 #       tree><path>) and no <file> holds a <name> (a fixed string) on a line
@@ -224,8 +227,8 @@ mojo_deps)
     shift
     checked=$#
     self=$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\([A-Za-z0-9_]*\)",.*/\1/p' "$buck" | head -1)
-    # The target names inside `deps = [ ... ]`.
-    awk '/^[[:space:]]*deps[[:space:]]*=[[:space:]]*\[/ { on = 1 }
+    # The target names inside `deps = [ ... ]` and `test_deps = [ ... ]`.
+    awk '/^[[:space:]]*(test_)?deps[[:space:]]*=[[:space:]]*\[/ { on = 1 }
          on { while (match($0, /:[A-Za-z0-9_]+"/)) { print substr($0, RSTART + 1, RLENGTH - 2); $0 = substr($0, RSTART + RLENGTH) } }
          on && /\]/ { on = 0 }' "$buck" | sort -u > "$T/declared"
     [ -n "$self" ] || echo "$buck: no mojo_library name found" >> "$REPORT"

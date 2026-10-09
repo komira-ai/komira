@@ -22,8 +22,8 @@
 # =============================================================================
 
 
-from komira_plan_expr.excel_error_code import XL_ERR_NONE
 from komira_arrow.dtype_sentinel import DTYPE_NONE
+from komira_plan_expr.render_text import write_hex, write_quoted
 
 # Sub-tag for kinds that don't have a clean DType representative.
 comptime SCALAR_KIND_DTYPE: UInt8 = 0        # default — use the `dtype` field
@@ -34,24 +34,18 @@ comptime SCALAR_KIND_TIMESTAMP: UInt8 = 3
 # `_kind == SCALAR_KIND_STRING` discriminant rather than a
 # "dtype == DTYPE_NONE && len(string_val) > 0" convention, which would make
 # `''` (empty string) indistinguishable from a NULL (both dtype==invalid with
-# an empty string) — a wrong-answer footgun for BOTH surfaces (SQL:
-# `'' <> NULL`; Excel: `""` is a real value). With the dedicated kind, the
-# string's `_kind` alone discriminates it, so an empty string is a
-# first-class value and a NULL stays a NULL.
+# an empty string) — a wrong-answer footgun (SQL: `'' <> NULL`). With the
+# dedicated kind, the string's `_kind` alone discriminates it, so an empty
+# string is a first-class value and a NULL stays a NULL.
 comptime SCALAR_KIND_STRING: UInt8 = 4
-# Additional value-model kinds for SQL money/date math and Excel literals. Each
-# is out-of-band (`_kind`) because Mojo's DType cannot represent it. int8/16
-# and uint8/16/32/64 stay DType-keyed (DType HAS those), carried in int_val.
+# Additional value-model kinds for SQL money/date math. Each is out-of-band
+# (`_kind`) because Mojo's DType cannot represent it. int8/16 and
+# uint8/16/32/64 stay DType-keyed (DType HAS those), carried in int_val.
 comptime SCALAR_KIND_INTERVAL: UInt8 = 5    # month-day-nano interval
 comptime SCALAR_KIND_TIME: UInt8 = 6        # time-of-day (int_val + time_unit)
 comptime SCALAR_KIND_DURATION: UInt8 = 7    # duration (int_val + time_unit)
 comptime SCALAR_KIND_DECIMAL256: UInt8 = 8  # 256-bit decimal (4 Int64 limbs)
 comptime SCALAR_KIND_BINARY: UInt8 = 9      # opaque bytes (in string_val)
-# The Excel #VALUE!-class error value at the scalar/literal level. Carries an
-# `XL_ERR_*` code (the shared, core-owned code space in `excel_error_code`).
-# The formula layer's `FormulaValue.ERROR(code)` maps 1:1 to
-# `ScalarValue.SCALAR_KIND_ERROR` — a pure code copy, no re-encoding.
-comptime SCALAR_KIND_ERROR: UInt8 = 10      # Excel error value (error_code field)
 
 # Arrow time unit for TIME / DURATION scalars.
 comptime SCALAR_TIME_UNIT_SECOND: UInt8 = 0
@@ -117,8 +111,6 @@ struct ScalarValue(Movable, Copyable, Writable):
     #   narrow int / uint literals reuse `int_val` (DType-keyed).
     var dec256_high_lo: Int64
     var dec256_high_hi: Int64
-    #   ERROR (SCALAR_KIND_ERROR): the XL_ERR_* code (see `excel_error_code`).
-    var error_code: UInt8
 
     # --- Constructors ---
 
@@ -143,7 +135,6 @@ struct ScalarValue(Movable, Copyable, Writable):
         self.time_unit = SCALAR_TIME_UNIT_MICRO
         self.dec256_high_lo = 0
         self.dec256_high_hi = 0
-        self.error_code = XL_ERR_NONE
 
     def __init__(out self, dtype: DType, int_val: Int64, float_val: Float64, string_val: String, bool_val: Bool):
         """5-arg ctor used by the factory methods
@@ -167,7 +158,6 @@ struct ScalarValue(Movable, Copyable, Writable):
         self.time_unit = SCALAR_TIME_UNIT_MICRO
         self.dec256_high_lo = 0
         self.dec256_high_hi = 0
-        self.error_code = XL_ERR_NONE
 
     def copy(self) -> Self:
         """Explicit copy."""
@@ -186,7 +176,6 @@ struct ScalarValue(Movable, Copyable, Writable):
         sv.time_unit = self.time_unit
         sv.dec256_high_lo = self.dec256_high_lo
         sv.dec256_high_hi = self.dec256_high_hi
-        sv.error_code = self.error_code
         return sv^
 
     # --- Factory methods ---
@@ -412,7 +401,7 @@ struct ScalarValue(Movable, Copyable, Writable):
     def duration(value: Int64, unit: UInt8 = SCALAR_TIME_UNIT_MICRO) -> ScalarValue:
         """Create a DURATION ScalarValue: `value` in `unit` (Arrow time unit).
 
-        SQL `INTERVAL` with an exact time span, Excel elapsed time. Distinct
+        SQL `INTERVAL` with an exact time span. Distinct
         from INTERVAL (which keeps months/days independent of nanos)."""
         var sv = ScalarValue()
         sv._kind = SCALAR_KIND_DURATION
@@ -455,18 +444,6 @@ struct ScalarValue(Movable, Copyable, Writable):
         var sv = ScalarValue()
         sv._kind = SCALAR_KIND_BINARY
         sv.string_val = data^
-        return sv^
-
-    @staticmethod
-    def from_error(code: UInt8) -> ScalarValue:
-        """Create an Excel ERROR ScalarValue carrying an `XL_ERR_*` code.
-        The scalar/literal substrate for the #VALUE!-class
-        error value — e.g. an `IFERROR(x, #N/A)` literal error, or the scalar
-        boundary of a columnar `status=ERROR` row (a 1:1 code copy). The
-        error-DOMINANT propagation algebra lives in the formula layer."""
-        var sv = ScalarValue()
-        sv._kind = SCALAR_KIND_ERROR
-        sv.error_code = code
         return sv^
 
     # --- Type checks ---
@@ -594,16 +571,6 @@ struct ScalarValue(Movable, Copyable, Writable):
         return self._kind == SCALAR_KIND_BINARY
 
     @always_inline
-    def is_error(self) -> Bool:
-        """True if this holds an Excel ERROR value."""
-        return self._kind == SCALAR_KIND_ERROR
-
-    @always_inline
-    def error_code_value(self) -> UInt8:
-        """The `XL_ERR_*` code (only meaningful when is_error())."""
-        return self.error_code
-
-    @always_inline
     def fits_int64_family(self) -> Bool:
         """True for an integer literal that folds LOSSLESSLY to the Int64
         runtime family: int8/16/32/64 and uint8/16/32 (all in [-2**63, 2**63)).
@@ -665,10 +632,6 @@ struct ScalarValue(Movable, Copyable, Writable):
             )
         if self._kind == SCALAR_KIND_BINARY:
             return self.string_val == other.string_val
-        if self._kind == SCALAR_KIND_ERROR:
-            # Two error values are equal iff their codes match (kinds already
-            # match via the early return); an error never equals a NULL/value.
-            return self.error_code == other.error_code
         # SCALAR_KIND_DTYPE — discriminate by dtype.
         if self.dtype != other.dtype:
             return False
@@ -715,9 +678,13 @@ struct ScalarValue(Movable, Copyable, Writable):
         elif self.is_decimal256():
             writer.write("ScalarValue(decimal256(", self.dec128_precision, ",", self.dec128_scale, "), hh=", Int(self.dec256_high_hi), ", hl=", Int(self.dec256_high_lo), ", lh=", Int(self.dec128_high), ", ll=", Int(self.dec128_low), ")")
         elif self.is_binary():
-            writer.write("ScalarValue(binary, ", self.string_val.byte_length(), " bytes)")
-        elif self.is_error():
-            writer.write("ScalarValue(error, code=", Int(self.error_code), ")")
+            # ⛔ PLAN IDENTITY: the BYTES, not only their count. This render
+            # feeds `LogicalPlan.structural_hash`, the plan-compile cache key;
+            # a length-only render let `b = X'0102'` and `b = X'0304'` share a
+            # compiled plan (komira#960).
+            writer.write("ScalarValue(binary, ", self.string_val.byte_length(), " bytes, ")
+            write_hex(writer, self.string_val)
+            writer.write(")")
         elif self.is_int():
             writer.write("ScalarValue(", self.dtype, ", ", Int(self.int_val), ")")
         elif self.is_signed_int_narrow() or self.is_uint():
@@ -725,11 +692,20 @@ struct ScalarValue(Movable, Copyable, Writable):
         elif self.is_float():
             writer.write("ScalarValue(", self.dtype, ", ", self.float_val, ")")
         elif self.is_string():
-            writer.write("ScalarValue(utf8, \"", self.string_val, "\")")
+            # Escaped (`render_text`): a raw write lets the value close its
+            # own quote and spell a different list (komira#960).
+            writer.write("ScalarValue(utf8, ")
+            write_quoted(writer, self.string_val)
+            writer.write(")")
         elif self.is_bool():
             if self.bool_val:
                 writer.write("ScalarValue(bool, true)")
             else:
                 writer.write("ScalarValue(bool, false)")
-        else:
+        elif self.null_dtype == DTYPE_NONE:
             writer.write("ScalarValue(null)")
+        else:
+            # ⛔ PLAN IDENTITY: a typed NULL's declared type is its output
+            # column's type, so `null(int64)` and `null(float64)` must not
+            # render alike (komira#960). An untyped NULL renders as before.
+            writer.write("ScalarValue(null, ", self.null_dtype, ")")

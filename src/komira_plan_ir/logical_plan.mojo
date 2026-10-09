@@ -1245,18 +1245,32 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         and rewrites the surviving residual to plain col-refs. `None` for
         ordinary pure-EQ joins.
         """
-        # ⚠ CONTRACT-BOUND: this output-schema construction (left cols verbatim;
-        # right cols only for non-SEMI/ANTI; right-side name collisions get a
-        # `_right` suffix) is mirrored at comptime in
-        # `komira_sdk/typed_schema.mojo` (`join_out_schema`). Keep in sync —
-        # see `test_typed_sout_matches_runtime.mojo`.
+        # ⚠ CONTRACT-BOUND: this output-schema construction (left cols; right
+        # cols only for non-SEMI/ANTI; right-side name collisions get a
+        # `_right` suffix; the NULL-supplying side of an outer join forced
+        # nullable) is mirrored at comptime in `komira_plan_expr/
+        # typed_schema.mojo` (`join_out_schema`) and re-derived by
+        # `schema_propagation._infer_join_schema`. Keep the three in sync.
         # Use `field_at_unchecked`
         # to preserve Field metadata on both sides. Right-side collision
         # rename uses the clone-then-mutate pattern.
+        #
+        # ⛔ NULLABILITY IS PART OF THE CONTRACT. A LEFT join emits every left
+        # row and fills the right columns of an unmatched one with NULL; RIGHT
+        # is the mirror image and FULL does both. Copying those fields
+        # verbatim left a non-nullable right column `nullable=False` after a
+        # LEFT join while the executor writes NULLs into it (komira#960).
+        # `asof_join` below forces its right side for the same reason.
+        # Falsifier: `test_outer_join_nullability.mojo`.
+        var left_nulls = join_type == JOIN_RIGHT or join_type == JOIN_FULL
+        var right_nulls = join_type == JOIN_LEFT or join_type == JOIN_FULL
         var builder = SchemaBuilder()
         # Always include left-side columns
         for i in range(left.output_schema.num_columns()):
-            builder.add_field(left.output_schema.field_at_unchecked(i))
+            var lf = left.output_schema.field_at_unchecked(i)
+            if left_nulls:
+                lf.nullable = True
+            builder.add_field(lf^)
         # For non-semi/anti joins, also include right-side columns
         if join_type != JOIN_SEMI and join_type != JOIN_ANTI:
             for i in range(right.output_schema.num_columns()):
@@ -1270,6 +1284,8 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
                 var rf = right.output_schema.field_at_unchecked(i)
                 if has_collision:
                     rf.name = rname + "_right"
+                if right_nulls:
+                    rf.nullable = True
                 builder.add_field(rf^)
         var out_schema = builder.build()
         var plan = LogicalPlan(PLAN_JOIN, out_schema^)
@@ -1288,7 +1304,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         """Create a Sort node. Output schema = child schema.
 
         `nulls_first` is an optional per-key NULL
-        placement override (SQL `NULLS FIRST/LAST`, Excel). None (default)
+        placement override (SQL `NULLS FIRST/LAST`). None (default)
         takes `null_order_policy.derived_nulls_first` (NULLS LAST, both
             directions).
         """
@@ -2108,9 +2124,9 @@ def agg_func_base_name(func: UInt8) -> StaticString:
     .alias_name` before `LogicalPlan.aggregate` runs, and this ladder is then
     never consulted for that aggregate — see `komira_sdk/agg_output_naming.mojo`
     (the Mojo dataframe surface, polars' rule) and `sql_binder._duckdb_agg_text`
-    (the SQL surface, DuckDB's deparse). What still lands here is the Excel /
-    XLFN surface, which has no convention to be faithful to, and any child-less
-    aggregate that is not `count(*)`.
+    (the SQL surface, DuckDB's deparse). What still lands here is a surface
+    that has no convention to be faithful to, and any child-less aggregate
+    that is not `count(*)`.
 
     ⚠ THERE IS NO COMPTIME MIRROR OF THIS LADDER, DELIBERATELY. The typed
     grouped-agg `S_out` brand asks `agg_output_naming.polars_agg_out_name` —

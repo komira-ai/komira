@@ -676,7 +676,6 @@ def _scalar_ir(v: ScalarValue) -> String:
         + " time_unit=" + String(Int(v.time_unit))
         + " dec256_high_lo=" + String(Int(v.dec256_high_lo))
         + " dec256_high_hi=" + String(Int(v.dec256_high_hi))
-        + " error_code=" + String(Int(v.error_code))
         + ")"
     )
 
@@ -1278,16 +1277,10 @@ def _plan_ir(p: LogicalPlan) raises -> String:
             + " child=" + _plan_ir(d.child[]) + "]"
         )
     if p.tag == PLAN_ASOF_JOIN:
-        # ★ FOUR OF THESE TWELVE REACH NO OTHER LEG AT ANY VALUE. `plan_display`
-        # prints strategy, the on-pair, the by-pairs and a tolerance KIND that
-        # it SUPPRESSES at NONE; it prints none of `left_sort_keys`,
-        # `left_sort_desc`, `right_sort_keys`, `right_sort_desc`, empty or not.
-        # The output schema (left cols + right cols forced nullable) does not
-        # read them either. This line is the only comparison they have.
-        #
-        # And `tolerance` is printed as three parts, because the render prints
-        # one: `tolerance=INT64` is the same text for 5 and for 5000, and the
-        # off-kind slot is not in the text on any kind.
+        # `plan_display` prints strategy, the on-pair, the by-pairs, the
+        # tolerance kind with its SELECTED slot (nothing at NONE) and each
+        # non-empty pre-sort hint. The tolerance's off-kind slot reaches no
+        # other leg, so `tolerance` is printed here as all three parts.
         ref d = p.asof_join_data_ref()
         return (
             head + "ASOFJOIN left_keys=" + _strs(d.left_keys)
@@ -1716,11 +1709,11 @@ def test_a_cse_introduced_project_round_trips() raises:
 
 
 def test_every_scalar_kind_round_trips() raises:
-    """★ SEVENTEEN OF `ScalarValue`'s TWENTY SLOTS WERE AT ZERO.
+    """★ SIXTEEN OF `ScalarValue`'s NINETEEN SLOTS WERE AT ZERO.
 
     The whole corpus used `from_int64`, which sets `dtype`, `int_val` and
     `_kind` and leaves everything else at the type's zero — and proto3 omits
-    zeros, so an encoder that wrote none of the other seventeen produced
+    zeros, so an encoder that wrote none of the other sixteen produced
     identical bytes. One literal per kind, each with a DISTINCT non-zero
     payload, so a codec that crossed two slots goes red rather than lucky.
 
@@ -1728,7 +1721,7 @@ def test_every_scalar_kind_round_trips() raises:
     form, which for several kinds does not include every slot that defines it
     (a decimal's precision and scale, an interval's three components).
 
-    ⛔ NINE OF THESE THIRTEEN CANNOT BE BARE PROJECTION EXPRESSIONS. The value
+    ⛔ EIGHT OF THESE TWELVE CANNOT BE BARE PROJECTION EXPRESSIONS. The value
     gate grades every plan position, and a BARE literal in a PROJECTION is
     refused unless `compiler_helpers.broadcast_scalar` has an arm that carries
     it. Every other kind falls to that function's `else: create a zero int64
@@ -1737,10 +1730,10 @@ def test_every_scalar_kind_round_trips() raises:
     (`column_arrow_type` raises `PHYSICAL LAYOUT CONFLICT ... the Column
     carries int64 but the Schema says ...`).
 
-    ⇒ The nine travel in the spelling the refusal itself recommends —
+    ⇒ The eight travel in the spelling the refusal itself recommends —
     `<column> OP <literal of that column's own domain>` — and the bool, whose
     only working reader is the PREDICATE one, travels as an `AND` operand.
-    Same thirteen kinds, same distinct payloads, same slots; only the position
+    Same twelve kinds, same distinct payloads, same slots; only the position
     differs. `Expr.col_idx` is treated the same way for the same reason: this
     corpus may not assert that a plan the door refuses decodes."""
     var e = ExprArray()
@@ -1837,12 +1830,12 @@ def test_every_scalar_kind_round_trips() raises:
         )
     )
 
-    # ---- binary and error: NO column domain exists for either ----------------
-    # ⚠ THESE TWO ARE ADMITTED BY THE CARVE-OUT, NOT BY A MATCH, AND SAYING SO
-    # IS THE POINT. `_comparison_domain_of_literal` returns the UNKNOWN sentinel
-    # for a BINARY and for an ERROR literal, and `_comparison_pair_is_evaluable`
-    # answers TRUE whenever either side is unknown — "not judged here". So this
-    # position is where they are carried, not where they are proven; the column
+    # ---- binary: NO column domain exists for it ------------------------------
+    # ⚠ IT IS ADMITTED BY THE CARVE-OUT, NOT BY A MATCH, AND SAYING SO IS THE
+    # POINT. `_comparison_domain_of_literal` returns the UNKNOWN sentinel for a
+    # BINARY literal, and `_comparison_pair_is_evaluable` answers TRUE whenever
+    # either side is unknown — "not judged here". So this position is where it
+    # is carried, not where it is proven; the column
     # chosen is `s` because a STRING column is the closest thing this engine has
     # to a byte column and a reader looking for the arm would look there first.
     e.append(
@@ -1852,15 +1845,6 @@ def test_every_scalar_kind_round_trips() raises:
                 Expr.literal(ScalarValue.from_binary(String("\x01\x02"))),
             ),
             String("bin"),
-        )
-    )
-    e.append(
-        Expr.alias(
-            Expr.binary(
-                BIN_GT, Expr.col_ref("s"),
-                Expr.literal(ScalarValue.from_error(UInt8(3))),
-            ),
-            String("err"),
         )
     )
     _assert_round_trips(
@@ -2732,7 +2716,7 @@ def test_an_extract_unit_in_the_sparse_hole_is_refused() raises:
 
     A codec that range-checked would ACCEPT it: 15 narrows into a `UInt8`
     losslessly. This is the same distinction the ArrowType narrowing turns on
-    (51 narrows fine and is still not a type), and the refusal names the SPACE
+    (50 narrows fine and is still not a type), and the refusal names the SPACE
     so a caller learns which vocabulary rejected it.
 
     ⚠ THE TOKEN HERE IS NOT A `PLAN_WIRE_*` ONE, AND THAT IS CORRECT. The
@@ -3249,9 +3233,10 @@ def test_the_json_extract_field_no_render_reads_deviates_and_round_trips() raise
     and which a re-deriving decoder turns back into STRING.
 
     THE PATH IS ALSO CARRIED AS SEGMENTS AND NOT AS THE JOINED STRING, and
-    this test pins why: `["a", "b"]` and `["a.b"]` render to the SAME `$.a.b`,
-    and `parse_json_path` cannot produce the second at all, so a decoder that
-    re-parsed would silently split it in two."""
+    this test pins why: `["a", "b"]` and `["a.b"]` are different paths, and a
+    decoder that re-parsed a joined `$.a.b` would silently split the second in
+    two. The render escapes a `.` inside a segment (`$.a\\.b`), so LEG 1 tells
+    them apart as well as LEG 3."""
     # ★ LEG 1 SEES `output_type`: the render prints `type=<t>` when the target
     # is not the STRING both query factories pin. This pins the visibility, so
     # a render that drops the field is red here.
@@ -3279,19 +3264,19 @@ def test_the_json_extract_field_no_render_reads_deviates_and_round_trips() raise
         + " means NOTHING here can. `_expr_ir`'s"
         + " EXPR_JSON_EXTRACT arm must print `output_type`.",
     )
-    # The AMBIGUOUS SEGMENT LIST: one segment that CONTAINS the separator. The
-    # render joins it to `$.a.b`, indistinguishable from the two-segment path
-    # above, and `parse_json_path` cannot build it — so this is a plan only
-    # the segment-carrying wire can round-trip.
+    # One segment that CONTAINS the separator. The render escapes it
+    # (`$.user\.id`), so it is distinguishable from the two-segment path
+    # above in the render (the render is plan identity) as well as on the
+    # segment-carrying wire.
     var dotted = Expr.json_extract_from_parts(
         Expr.col_ref("js"), [String("user.id")], ArrowType.STRING, False
     )
     var split = Expr.json_extract_string(Expr.col_ref("js"), String("$.user.id"))
     assert_true(
-        String(dotted) == String(split),
-        "a one-segment path containing a `.` no longer renders identically to"
-        + " the two-segment path it joins to. The render has become"
-        + " unambiguous — good news; restate this test.",
+        String(dotted) != String(split),
+        "a one-segment path containing a `.` renders like the two-segment"
+        + " path it joins to, so the two share a plan-compile cache key: "
+        + String(dotted),
     )
     assert_true(
         _expr_ir(dotted) != _expr_ir(split),
@@ -4255,9 +4240,8 @@ def _deviating_tolerance() -> AsofTolerance:
     `kind=INT64` with a non-zero `float_val` — is one the plan builder can
     construct even though neither named factory produces it. A codec that
     re-derived the inactive slot from `kind` would silently rewrite it, and no
-    other leg would ever say so: the render prints the KIND NAME and neither
-    number, so `tolerance=INT64` is the same six characters for 5, for 5000,
-    and for any `float_val` at all.
+    other leg would ever say so: the render prints the kind and the SELECTED
+    slot (`tolerance=INT64(5000)`), never the off-kind `float_val`.
 
     Both numbers are also far from proto3's zero, which is the other half of
     the point — an encoder that never wrote either field emits byte-identical
@@ -4265,22 +4249,20 @@ def _deviating_tolerance() -> AsofTolerance:
     return AsofTolerance(ASOF_TOL_INT64, Int64(5000), Float64(2.5))
 
 
-def _asof_render_hides(p: LogicalPlan) raises -> Bool:
-    """True when the AsofJoin render mentions NONE of the four pre-sort hint
-    lists and NEITHER tolerance number, while the node carries all six at
-    non-defaults.
+def _asof_render_hides_only_the_off_kind_slot(p: LogicalPlan) raises -> Bool:
+    """True when the AsofJoin render prints both pre-sort hints and the
+    SELECTED tolerance value, and NOT the off-kind tolerance slot, while the
+    node carries all six at non-defaults.
 
     `plan_display` emits `AsofJoin(strategy=<NAME>, on=<l>=<r>, by=[<l>=<r>…]
-    <, tolerance=<KIND>>)`. The four `*_sort_*` lists appear at no value, and
-    the tolerance appears as a KIND — so a codec that dropped a pre-sort hint,
-    or wrote 5 where 5000 was, is invisible to LEG 1 entirely. The output
-    schema (left columns + right columns forced nullable) reads none of them
-    either, so LEG 2 is blind too and LEG 3 is the only comparison they have.
+    <, tolerance=<KIND>(<value>)><, left_sorted=[…]/[…]><, right_sorted=…>)`.
+    The hints and the selected value are therefore LEG 1's to compare; the
+    off-kind slot (`float_val` under kind INT64) is in no render and no output
+    schema, so LEG 3 is the only comparison it has.
 
     ⚠ THE SORT-KEY NAMES ARE DELIBERATELY COLUMNS THE RENDER PRINTS ELSEWHERE,
     so this predicate cannot test for them by substring — `s` and `a` are in
-    the `by=` and `on=` clauses. It tests for the FIELD LABELS instead, which
-    is what a render that started emitting them would have to print."""
+    the `by=` and `on=` clauses. It tests for the FIELD LABELS instead."""
     var txt = String(p)
     ref d = p.asof_join_data_ref()
     return (
@@ -4289,8 +4271,9 @@ def _asof_render_hides(p: LogicalPlan) raises -> Bool:
         and len(d.left_sort_desc) > 0
         and len(d.right_sort_desc) > 0
         and not d.tolerance.is_none()
-        and "sort" not in txt
-        and "5000" not in txt
+        and "left_sorted=" in txt
+        and "right_sorted=" in txt
+        and "5000" in txt
         and "2.5" not in txt
     )
 
@@ -4341,15 +4324,16 @@ def _asof(
 
 
 def test_an_asof_join_round_trips_with_every_render_invisible_part_deviating() raises:
-    """★ FOUR OF TWELVE FIELDS REACH NO LEG BUT LEG 3, AND THEIR FAILURE MODE
-    IS ASYMMETRIC.
+    """★ THE PRE-SORT HINTS' FAILURE MODE IS ASYMMETRIC, AND THE TOLERANCE'S
+    OFF-KIND SLOT REACHES NO LEG BUT LEG 3.
 
     A `*_sort_keys` hint asserts "this side is ALREADY sorted on these columns,
     skip the sort phase". Dropping one costs a sort. INVENTING one — which is
     what a decoder that let the factory's empty defaults stand does in reverse,
     and what a decoder that re-derived them from the equi-keys would do
-    outright — skips a sort that was needed and produces WRONG ROWS. Neither
-    the render nor the output schema can see either mistake.
+    outright — skips a sort that was needed and produces WRONG ROWS. The render
+    prints non-empty hints, so LEG 1 sees either mistake; the off-kind
+    tolerance slot it does not print at all.
 
     `strategy` is NEAREST, not BACKWARD: BACKWARD is engine value 0 and hence
     proto3's absent-field value, so an encoder that never wrote the field would
@@ -4361,10 +4345,9 @@ def test_an_asof_join_round_trips_with_every_render_invisible_part_deviating() r
         _scan(String("r"), String("/right.orc")),
     )
     assert_true(
-        _asof_render_hides(plan),
-        "the AsofJoin render now prints a pre-sort hint list or a tolerance"
-        + " NUMBER. That is GOOD NEWS and this assertion is the red that"
-        + " reports it — rewrite it to name whatever the render still hides."
+        _asof_render_hides_only_the_off_kind_slot(plan),
+        "the AsofJoin render dropped a pre-sort hint or the selected tolerance"
+        + " value (both are plan identity), or now prints the off-kind slot."
         + " Render text: " + String(plan),
     )
     _assert_round_trips(
@@ -5233,7 +5216,7 @@ def _assert_forged_slot_refused(
 def test_an_in_vocabulary_range_but_undeclared_scalar_kind_is_refused() raises:
     """★ A DISCRIMINATOR MUST NOT BE ASSIGNED WITHOUT A CHECK.
 
-    `ScalarValue._kind` selects which of the struct's 18 payload fields is
+    `ScalarValue._kind` selects which of the struct's 17 payload fields is
     live. The naive decode is
 
         v._kind = UInt8(Int(w.kind))
@@ -5243,8 +5226,8 @@ def test_an_in_vocabulary_range_but_undeclared_scalar_kind_is_refused() raises:
     `SCALAR_KIND_*` is a registered vocabulary space, with a proto enum and a
     test that walks it.
 
-    ⚠ 12 IS THE INTERESTING VALUE, NOT 300. It is one past the highest declared
-    member (`SCALAR_KIND_ERROR` = engine 10 = wire 11), so it fits in a UInt8,
+    ⚠ 11 IS THE INTERESTING VALUE, NOT 300. It is one past the highest declared
+    member (`SCALAR_KIND_BINARY` = engine 9 = wire 10), so it fits in a UInt8,
     narrows LOSSLESSLY, and survives every range check a decoder might have. It
     is exactly what a peer built from a NEWER `scalar_value.mojo` sends — the
     version-skew case the format's fail-loud rule exists for. Separating a RANGE
@@ -5252,7 +5235,7 @@ def test_an_in_vocabulary_range_but_undeclared_scalar_kind_is_refused() raises:
     value can do it.
 
     The bound is DERIVED: `scalar_kind_is_declared` comes out of the generated
-    vocabulary's ScalarKind space, so once `comptime SCALAR_KIND_NEW: UInt8 = 11`
+    vocabulary's ScalarKind space, so once `comptime SCALAR_KIND_NEW: UInt8 = 10`
     is added to the engine and the vocabulary is regenerated from the engine's
     tag declarations, this value is legal with no edit here.
     """
@@ -5265,9 +5248,9 @@ def test_an_in_vocabulary_range_but_undeclared_scalar_kind_is_refused() raises:
         _scan(String("t"), String("/x.orc")),
     )
     var good = plan_to_bytes(lit)
-    var what = String("scalar kind wire 12 (in range, not declared)")
+    var what = String("scalar kind wire 11 (in range, not declared)")
     _assert_forged_slot_refused(
-        _forge_slot_byte(good, String("WireScalar|6"), UInt8(12), what),
+        _forge_slot_byte(good, String("WireScalar|6"), UInt8(11), what),
         String("ScalarKind"),
         what,
         "the decoder ACCEPTED an out-of-vocabulary ScalarKind and built a plan"
@@ -5348,19 +5331,19 @@ def test_an_out_of_range_child_type_id_is_refused_by_name() raises:
 def test_an_in_range_but_undeclared_arrow_type_id_is_refused_by_name() raises:
     """★ THE CASE THAT SEPARATES A RANGE CHECK FROM A MEMBERSHIP CHECK.
 
-    51 fits in a UInt8 and narrows LOSSLESSLY, so a `w.arrow_type_id > 255`
-    guard accepts it — and `ArrowType` declares 0..50, so there is no such
+    50 fits in a UInt8 and narrows LOSSLESSLY, so a `w.arrow_type_id > 255`
+    guard accepts it — and `ArrowType` declares 0..49, so there is no such
     type. It is exactly what a peer built from a NEWER `arrow_types.mojo`
     sends, which is the version-skew case the format's fail-loud rule exists
     for: a plan you cannot execute is not a plan you may partially execute.
 
     The bound is DERIVED, not written here: `arrow_type_is_declared` comes out
     of the generated vocabulary's ArrowType space, so once
-    `comptime NEW_TYPE = ArrowType(51)` is added to the engine and the
+    `comptime NEW_TYPE = ArrowType(50)` is added to the engine and the
     vocabulary is regenerated from the engine's tag declarations, this value is
     legal with no edit to the codec."""
     _assert_hostile_type_id_refused(
-        String("arrow_type_id=51 (in range, not declared)"), 0, UInt32(51)
+        String("arrow_type_id=50 (in range, not declared)"), 0, UInt32(50)
     )
 
 
@@ -5892,7 +5875,6 @@ def _wire_slot_registry() -> List[String]:
     r.append(String("WireScalar|17|time_unit||ScalarTimeUnit"))
     r.append(String("WireScalar|18|dec256_high_lo||"))
     r.append(String("WireScalar|19|dec256_high_hi||"))
-    r.append(String("WireScalar|20|error_code||ExcelErrorCode"))
     r.append(String("WireScanBinding|1|kind_id||"))
     r.append(String("WireScanBinding|2|kind_name||"))
     r.append(String("WireScanBinding|3|name||"))
@@ -5998,7 +5980,6 @@ def _wire_enum_members() -> List[String]:
     r.append(String("ColSide|0,1,2,3"))
     r.append(String("CorrelatedKind|0,1,2,3,4"))
     r.append(String("DTypeCode|0,1,2,3,4,5,6,7,8,9,10,11,12"))
-    r.append(String("ExcelErrorCode|0,1,2,3,4,5,6,7,8,9,10,11"))
     r.append(String("ExtractField|0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,17,18,19,20,21,22,23,24,25,26"))
     r.append(String("FrameBound|0,1,2,3,4,5"))
     r.append(String("FrameUnits|0,1,2"))
@@ -6009,7 +5990,7 @@ def _wire_enum_members() -> List[String]:
     r.append(String("ParamTag|0,1,2,3,4,5,6"))
     r.append(String("PushdownGateMode|0,1,2,3"))
     r.append(String("RegexpOp|0,1,2,3,4,5,6,7,8,9,10"))
-    r.append(String("ScalarKind|0,1,2,3,4,5,6,7,8,9,10,11"))
+    r.append(String("ScalarKind|0,1,2,3,4,5,6,7,8,9,10"))
     r.append(String("ScalarTimeUnit|0,1,2,3,4"))
     r.append(String("SnapshotPolicy|0,1,2,3"))
     r.append(String("SourceOrientation|0,1,2,256"))
@@ -7616,7 +7597,7 @@ def _parquet_leaf_b() raises -> LogicalPlan:
     )
 
 
-comptime _WIRE_SLOTS_REACHED_FLOOR: Int = 289
+comptime _WIRE_SLOTS_REACHED_FLOOR: Int = 288
 # ⚠ `WireExpr.col_idx` AND `WireColIdx.index` ARE NOT REACHED, AND THE FORMAT
 # DID NOT LOSE THEM — the encoder still writes both and `plan.proto` still
 # declares them. A DECODED plan carrying one is refused by the value gate
@@ -7786,18 +7767,18 @@ there a place the codec writes it where nothing reads it". A slot can pass the
 first and fail this, and the gap is where a real defect hides.
 
 ★ `WirePlanEnvelope.format_version` IS ONE OF THEM, AND THAT IS THE HONEST
-PRICE OF A VERSION SET. The reader tests SET MEMBERSHIP over `{2, 3}`, because a
-write-carrying envelope declares 3 and a plan-only one declares 2 — so on the
-plain envelopes the perturbation 2 -> 3 lands on a version the reader
+PRICE OF A VERSION SET. The reader tests SET MEMBERSHIP over `{4, 5}`, because a
+write-carrying envelope declares 5 and a plan-only one declares 4 — so on the
+plain envelopes the perturbation 4 -> 5 lands on a version the reader
 LEGITIMATELY ACCEPTS, and the decode is identical. It is noticed only on the
-write envelopes, where the perturbation runs 3 -> 2 and produces the
+write envelopes, where the perturbation runs 5 -> 4 and produces the
 UNDERSTATED shape that `PLAN_WIRE_WRITE_TARGET_VERSION_UNDERSTATED` refuses.
 
-⚠ THE OBVIOUS FIX IS WRONG. Refusing an OVERSTATED version (3 declared, no
+⚠ THE OBVIOUS FIX IS WRONG. Refusing an OVERSTATED version (5 declared, no
 write target) would restore every occurrence by making the version an exact
 function of the content. It cannot be adopted, because the case the version
 field exists for — an existing field CHANGING MEANING — is by definition not
-derivable from content: a hypothetical version 4 that re-meant `WirePlan.plan`
+derivable from content: a future version that re-meant `WirePlan.plan`
 would be carried by a plain envelope, and an exact-against-derived check would
 refuse it. So the rule is AT LEAST the required version, understating is
 refused, overstating is accepted, and the blind occurrences are the honest
@@ -7982,9 +7963,9 @@ def _obs_scalars(v: Int) raises -> ExprArray:
         )
     )
 
-    # ---- binary and error: NO column domain exists for either ----------------
+    # ---- binary: NO column domain exists for it ------------------------------
     # ⚠ ADMITTED BY THE UNKNOWN-DOMAIN CARVE-OUT, NOT BY A MATCH. See the note
-    # on the same two entries in `test_every_scalar_kind_round_trips`.
+    # on the same entry in `test_every_scalar_kind_round_trips`.
     e.append(
         Expr.alias(
             Expr.binary(
@@ -7992,15 +7973,6 @@ def _obs_scalars(v: Int) raises -> ExprArray:
                 Expr.literal(ScalarValue.from_binary(String("\x01\x02") + String(v))),
             ),
             String("bin"),
-        )
-    )
-    e.append(
-        Expr.alias(
-            Expr.binary(
-                BIN_GT if v == 0 else BIN_LT, Expr.col_ref("s"),
-                Expr.literal(ScalarValue.from_error(UInt8(3) + UInt8(v))),
-            ),
-            String("err"),
         )
     )
     return e^
@@ -8133,10 +8105,10 @@ def _observability_corpus(reg: _SlotRegistry, mut led: _SlotLedger) raises:
         # the format/codec cross is what makes the pair-check reachable.
         #
         # ⚠ AND THIS IS WHAT KEEPS `WirePlanEnvelope.format_version`
-        # OBSERVABLE. On a plain envelope (version 2) the perturbation 2 -> 3
+        # OBSERVABLE. On a plain envelope (version 4) the perturbation 4 -> 5
         # lands on a version the reader ACCEPTS (over-declaring a reader floor
         # is legal — see `PLAN_WIRE_WRITE_TARGET_VERSION_UNDERSTATED`) and the
-        # decode is identical. Here the perturbation runs the other way: 3 -> 2 on a
+        # decode is identical. Here the perturbation runs the other way: 5 -> 4 on a
         # write-carrying envelope is the UNDERSTATED shape, which is refused by
         # name. The refusal is the observation.
         _census_env(
@@ -8553,19 +8525,19 @@ def _append_varint_field_to_the_envelopes_plan(
     return out^
 
 
-comptime _ENUM_SLOTS_PIN: Int = 39
+comptime _ENUM_SLOTS_PIN: Int = 38
 """How many wire slots carry a DECLARED enum.
 
 The number is a property of the FORMAT, so it moves only when the format does.
 A vocabulary field that crosses as a bare `uint32` is validated by nothing, so
 every vocabulary-valued slot is a declared enum: `WireScalar.kind` /
-`.time_unit` / `.error_code`, `WireParam.tag`, `WirePushdownGate.mode`,
+`.time_unit`, `WireParam.tag`, `WirePushdownGate.mode`,
 `WireScanBinding.snapshot_policy`, the four `DTypeCode` slots
 (`WireField.dtype_code`, `WireScalar.dtype_code` / `.null_dtype_code`,
 `WireCast.target_dtype_code`), `WireWriteTarget.format` / `.codec`,
 `WireStringFn.op` and `WireStringFnN.op`, among others.
 
-★ A DTYPE CODE IS AN ENUM SO A READER CAN NAME IT. A Python or Excel reader
+★ A DTYPE CODE IS AN ENUM SO A READER CAN NAME IT. A Python or TypeScript reader
 that decodes `dtype_code: 5` has nowhere to look up what 5 IS, in a format whose
 whole purpose is that several languages share one plan. The perturbation reach
 below comes free with it, and it is large.
@@ -8600,7 +8572,7 @@ the vocabulary allocates its members, not of the corpus. A pin that comes back
 down with no stated cause reads as a weakened operator — so say which, when it
 moves."""
 
-comptime _ENUM_MUTATION_SITES_PIN: Int = 2866
+comptime _ENUM_MUTATION_SITES_PIN: Int = 2794
 """How many perturbation sites `_census` mutated with the ENUM operator.
 
 The reach is per-column, not per-node: `WireField.dtype_code` IS ON EVERY
@@ -8612,8 +8584,8 @@ refuses it for the DType code) instead of an implausible byte mutation.
 
 ⚠ IT MOVES WITH THE CORPUS AS WELL AS THE FORMAT. A plan added to the corpus
 adds its enum sites (an `alias(literal(...))` adds its `WireExpr` tags plus the
-literal's three enum-valued scalar fields — `WireScalar.kind`, `.time_unit`
-and `.error_code`); a plan removed removes them. When it moves, attribute the
+literal's two enum-valued scalar fields — `WireScalar.kind` and
+`.time_unit`); a plan removed removes them. When it moves, attribute the
 movement per plan in the change that moves it; the operator's own count is the
 authority for the total.
 

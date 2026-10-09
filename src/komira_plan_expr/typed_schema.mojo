@@ -1370,16 +1370,20 @@ def select_named_schema[S: SchemaDescriptor, *names: StaticString]() -> SchemaDe
 # construction (logical_plan.mojo, the `def join` builder).
 # =============================================================================
 # CONTRACT-BOUND SECOND COPY (the fiddliest of the three S_out mirrors). The runtime rule (verified by reading `def join`):
-#   * left columns: included verbatim (name, type, nullability) — always.
+#   * left columns: always included, name and type as-is (nullability below).
 #   * right columns: included ONLY when `join_type` is not SEMI and not ANTI.
 #       - if a right column's NAME collides with any left column name, its name
 #         becomes `<name> + "_right"` (the bare `_right` suffix — NOT `right.`,
 #         NOT a counter; check `def join` if this ever changes).
-#       - type + nullability copied as-is (LEFT joins do NOT toggle right-side
-#         nullability in the runtime path; `def join` keeps
-#         `field_nullable(i)` unchanged. We mirror the runtime.)
+#       - type copied as-is.
+#   * nullability: the NULL-supplying side of an outer join is forced
+#     nullable — the right columns of a LEFT join, the left columns of a RIGHT
+#     join, both sides of a FULL join (an unmatched row is NULL there). Every
+#     other column keeps its flag. `def join` does the same.
 #   * CROSS join: left ++ right (no key columns; same collision rule).
-# The typed-S_out drift test is the guard. RECIPROCAL POINTER: `def join` carries a comment back here.
+# Nullability is pinned by `tests/test_expr_render_value_identity.mojo`
+# (`test_typed_join_mirror_marks_the_null_supplying_side`). RECIPROCAL POINTER:
+# `def join` carries a comment back here.
 #
 # `join_type` here is the runtime UInt8 tag (logical_plan.JOIN_*). SEMI = 4,
 # ANTI = 5 — the only two that drop the right side.
@@ -1396,9 +1400,14 @@ def join_out_schema(left: SchemaDescriptor, right: SchemaDescriptor, join_type: 
     runtime `logical_plan.JOIN_*` tag (INNER=0, LEFT=1, RIGHT=2, FULL=3,
     SEMI=4, ANTI=5, CROSS=6)."""
     var cols = List[ColDescriptor]()
-    # left columns verbatim
+    # RIGHT = 2, FULL = 3 null the left side; LEFT = 1, FULL = 3 the right.
+    var left_nulls = join_type == 2 or join_type == 3
+    var right_nulls = join_type == 1 or join_type == 3
     for i in range(len(left.cols)):
-        cols.append(left.cols[i].copy())
+        var lc = left.cols[i].copy()
+        if left_nulls:
+            lc.nullable = True
+        cols.append(lc^)
     if not _join_drops_right(join_type):
         for i in range(len(right.cols)):
             var rname = right.cols[i].name
@@ -1408,7 +1417,7 @@ def join_out_schema(left: SchemaDescriptor, right: SchemaDescriptor, join_type: 
                     collides = True
                     break
             var final_name = rname + "_right" if collides else rname.copy()
-            cols.append(ColDescriptor(final_name^, right.cols[i].dtype, right.cols[i].nullable, right.cols[i].struct_fields.copy(), right.cols[i].map_key_dtype, right.cols[i].map_value_dtype))
+            cols.append(ColDescriptor(final_name^, right.cols[i].dtype, right.cols[i].nullable or right_nulls, right.cols[i].struct_fields.copy(), right.cols[i].map_key_dtype, right.cols[i].map_value_dtype))
     return SchemaDescriptor(cols^, False)
 
 

@@ -65,7 +65,15 @@
 #                       was exchanged and discarded, nothing written),
 #                       NOT_UNDER_CI (no CI token to exchange; never a pass),
 #                       NOT_OIDC (the channel's credential is not exchanged),
-#                       or "" (no probe: not a plan, or not a PUBLISH step)
+#                       or "" (no probe: not a plan, or not a PUBLISH step).
+#                       A step that names a cell also holds the deploy keys
+#                       (result_deploy.mojo): cell, cloud, landed[]
+#                       {node, verb}, pending[], failed {fault_domain,
+#                       message, node, verb}, outputs[] {output, resource,
+#                       value}, plan_hash, leftover[], left_behind[],
+#                       released[]. They were added inside major 1 and are
+#                       ABSENT from a row whose cell is "" (a reader takes
+#                       an absent one as empty)
 #   validations[]       {channel_url, checks[], effect, environment, kind,
 #                       name, outcome, pixi_sha256, skip_reason, step}: the
 #                       validations of the selected steps, in machine-file
@@ -113,9 +121,12 @@
 # killed kci left behind reads as interrupted without a special case.
 #
 # Readers ignore unknown keys inside major 1 (formats.mojo); `parse_result`
-# records them in `ignored_keys`. These names are RESERVED for the deploy
-# side and added inside major 1 when it lands; nothing emits them yet:
-#   landed[] pending[] failed outputs[] plan_hash security_relevant_changes[]
+# records them in `ignored_keys`, with one exception: a deploy key of a step
+# row (`deploy_step_keys`) at the TOP level is refused, never ignored. A stage
+# can deploy into several cells, and a top-level `landed` cannot say which
+# cell a node is in, so a reader that skipped it would lose what landed.
+# `security_relevant_changes[]` stays RESERVED for the deploy side and is
+# not emitted: an always-empty list would claim a check that has no code.
 #
 # `RunRecorder` is the seam a verb records through: `begin` before the first
 # effect, `finish` at the end. Writing a file is the CLI's recorder; tests
@@ -124,7 +135,7 @@
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
-from komira_json import JSON_ARRAY, JSON_BOOL, JSON_NUMBER, JSON_OBJECT, JSON_STRING, JsonValue, parse_json_value
+from komira_json import JSON_ARRAY, JSON_OBJECT, JSON_STRING, JsonValue, parse_json_value
 
 from kci_api.errors import require_error_id
 from kci_api.exit_codes import EXIT_PARTIAL, default_retry, exit_code_of, require_retry_for
@@ -142,236 +153,51 @@ from kci_api.selection import (
     require_scope,
 )
 from kci_api.verbs import STEP_KIND_PUBLISH, require_step_kind, require_validation_kind, require_verb
+from kci_api.result_deploy import (
+    check_deploy_row,
+    deploy_step_keys,
+    parse_deploy_keys,
+    put_deploy_keys,
+    refuse_top_level_deploy_keys,
+)
+from kci_api.result_json import (
+    _b,
+    _i,
+    _is_sha256_hex,
+    _keys,
+    _member,
+    _need,
+    _no_dup_keys,
+    _note_unknown,
+    _Obj,
+    _refuse,
+    _s,
+    _s_absent_empty,
+    _str_array,
+)
+from kci_api.result_rows import (
+    VALIDATION_ENVIRONMENT_CONTAINER,
+    VALIDATION_ENVIRONMENT_ENV,
+    VALIDATION_NOT_REACHED,
+    VALIDATION_VALIDATED,
+    VALIDATION_WOULD_VALIDATE,
+    WORKFLOW_NOT_REACHED,
+    WORKFLOW_PATH_PREFIX,
+    ResultArtifact,
+    ResultError,
+    ResultNewName,
+    ResultStep,
+    ResultValidation,
+    ResultValidationCheck,
+    all_artifact_effects,
+    all_credential_probes,
+)
 
 comptime KCI_VERSION: String = "0.0.0-unreleased"
 """This kci's version, until kci itself is released."""
 
 comptime STATUS_RUNNING: String = "RUNNING"
 comptime STATUS_FINISHED: String = "FINISHED"
-
-comptime ARTIFACT_BUILT: String = "BUILT"
-comptime ARTIFACT_WOULD_BUILD: String = "WOULD_BUILD"
-comptime ARTIFACT_UPLOADED: String = "UPLOADED"
-comptime ARTIFACT_ALREADY_PRESENT: String = "ALREADY_PRESENT"
-comptime ARTIFACT_WOULD_UPLOAD: String = "WOULD_UPLOAD"
-comptime ARTIFACT_NOT_REACHED: String = "NOT_REACHED"
-
-comptime VALIDATION_VALIDATED: String = "VALIDATED"
-comptime VALIDATION_WOULD_VALIDATE: String = "WOULD_VALIDATE"
-comptime VALIDATION_NOT_REACHED: String = "NOT_REACHED"
-
-comptime VALIDATION_ENVIRONMENT_ENV: String = "ENV"
-"""`validations[].environment` of a validation that ran on this machine."""
-comptime VALIDATION_ENVIRONMENT_CONTAINER: String = "CONTAINER"
-"""`validations[].environment` of a validation that ran in a container."""
-
-comptime CREDENTIAL_PROBE_MINTED: String = "MINTED"
-comptime CREDENTIAL_PROBE_NOT_UNDER_CI: String = "NOT_UNDER_CI"
-comptime CREDENTIAL_PROBE_NOT_OIDC: String = "NOT_OIDC"
-
-comptime CREDENTIAL_PROBE_NOT_RUN_NOTE: String = "credential probe NOT RUN (not under GitHub Actions)"
-"""What the evidence line and the summary say next to the outcome of a run
-whose PUBLISH step recorded NOT_UNDER_CI: a green dry run outside CI never
-exchanged a token, so it cannot be read as covering the OIDC mint."""
-
-comptime WORKFLOW_PATH_PREFIX: String = ".github/workflows/"
-comptime WORKFLOW_NOT_REACHED: String = "not reached"
-"""`workflow.reason` of a record written before the workflow check ran."""
-
-
-def all_artifact_effects() -> List[String]:
-    """What a step did to an artifact (`artifacts[].effect`)."""
-    var out = List[String]()
-    out.append(String(ARTIFACT_BUILT))
-    out.append(String(ARTIFACT_WOULD_BUILD))
-    out.append(String(ARTIFACT_UPLOADED))
-    out.append(String(ARTIFACT_ALREADY_PRESENT))
-    out.append(String(ARTIFACT_WOULD_UPLOAD))
-    out.append(String(ARTIFACT_NOT_REACHED))
-    return out^
-
-
-def all_validation_effects() -> List[String]:
-    """What happened to a validation (`validations[].effect`)."""
-    var out = List[String]()
-    out.append(String(VALIDATION_VALIDATED))
-    out.append(String(VALIDATION_WOULD_VALIDATE))
-    out.append(String(VALIDATION_NOT_REACHED))
-    return out^
-
-
-def all_credential_probes() -> List[String]:
-    """The non-empty values of `steps[].credential_probe`."""
-    var out = List[String]()
-    out.append(String(CREDENTIAL_PROBE_MINTED))
-    out.append(String(CREDENTIAL_PROBE_NOT_UNDER_CI))
-    out.append(String(CREDENTIAL_PROBE_NOT_OIDC))
-    return out^
-
-
-def credential_probe_note(steps: List[ResultStep]) -> String:
-    """`CREDENTIAL_PROBE_NOT_RUN_NOTE` when a step recorded the credential
-    probe NOT_UNDER_CI, else ""."""
-    for i in range(len(steps)):
-        if steps[i].credential_probe == CREDENTIAL_PROBE_NOT_UNDER_CI:
-            return String(CREDENTIAL_PROBE_NOT_RUN_NOTE)
-    return String("")
-
-
-def reserved_result_keys() -> List[String]:
-    """Names kept for the deploy side (file header); never emitted yet."""
-    var out = List[String]()
-    out.append(String("failed"))
-    out.append(String("landed"))
-    out.append(String("outputs"))
-    out.append(String("pending"))
-    out.append(String("plan_hash"))
-    out.append(String("security_relevant_changes"))
-    return out^
-
-
-struct ResultError(Copyable, Movable):
-    """`error`: a stable id (errors.mojo) and a message for people.
-
-    Layout: owned Strings. No pointer field."""
-
-    var id: String
-    var message: String
-
-    def __init__(out self, var id: String, var message: String):
-        self.id = id^
-        self.message = message^
-
-
-struct ResultStep(Copyable, Movable):
-    """One step of the stage: whether it was selected, its outcome once it
-    ran ("" for an unselected step), and a PUBLISH step's --plan credential
-    probe ("" when none was made).
-
-    Layout: owned Strings and a Bool. No pointer field."""
-
-    var name: String
-    var kind: String
-    var platform: String
-    var selected: Bool
-    var outcome: String
-    var credential_probe: String
-
-    def __init__(out self, var name: String, var kind: String, var platform: String, var outcome: String):
-        """A selected step that ran, with its outcome."""
-        self.name = name^
-        self.kind = kind^
-        self.platform = platform^
-        self.selected = True
-        self.outcome = outcome^
-        self.credential_probe = String("")
-
-    @staticmethod
-    def unselected(var name: String, var kind: String, var platform: String) -> ResultStep:
-        """A step `--only` did not select: no outcome."""
-        var s = ResultStep(name^, kind^, platform^, String(""))
-        s.selected = False
-        return s^
-
-
-struct ResultValidationCheck(Copyable, Movable):
-    """One check a validation made: what it expected, what it got, and
-    whether they agree.
-
-    Layout: owned Strings and a Bool. No pointer field."""
-
-    var check: String
-    var expected: String
-    var got: String
-    var ok: Bool
-
-    def __init__(out self, var check: String, var expected: String, var got: String, ok: Bool):
-        self.check = check^
-        self.expected = expected^
-        self.got = got^
-        self.ok = ok
-
-
-struct ResultValidation(Copyable, Movable):
-    """One validation of a step (file header).
-
-    Layout: owned Strings and a List of owned rows. No pointer field."""
-
-    var name: String
-    var step: String
-    var kind: String
-    var effect: String
-    var outcome: String
-    var checks: List[ResultValidationCheck]
-    var environment: String
-    var pixi_sha256: String
-    var channel_url: String
-    var skip_reason: String
-
-    def __init__(out self, var name: String, var step: String, var kind: String, var effect: String, var outcome: String):
-        self.name = name^
-        self.step = step^
-        self.kind = kind^
-        self.effect = effect^
-        self.outcome = outcome^
-        self.checks = List[ResultValidationCheck]()
-        self.environment = String("")
-        self.pixi_sha256 = String("")
-        self.channel_url = String("")
-        self.skip_reason = String("")
-
-
-struct ResultNewName(Copyable, Movable):
-    """A declared name a PUBLISH step's channel holds no file of yet.
-
-    Layout: owned Strings. No pointer field."""
-
-    var stage: String
-    var step: String
-    var channel: String
-    var name: String
-
-    def __init__(out self, var stage: String, var step: String, var channel: String, var name: String):
-        self.stage = stage^
-        self.step = step^
-        self.channel = channel^
-        self.name = name^
-
-
-struct ResultArtifact(Copyable, Movable):
-    """One artifact row (file header).
-
-    Layout: owned Strings and a Bool. No pointer field."""
-
-    var effect: String
-    var artifact_type: String
-    var build: String
-    var file: String
-    var indexed: Bool
-    var name: String
-    var platform: String
-    var revision: String
-    var sha256: String
-    var state_after: String
-    var state_before: String
-    var subdir: String
-    var version: String
-
-    def __init__(out self):
-        self.effect = String("")
-        self.artifact_type = String("")
-        self.build = String("")
-        self.file = String("")
-        self.indexed = False
-        self.name = String("")
-        self.platform = String("")
-        self.revision = String("")
-        self.sha256 = String("")
-        self.state_after = String("")
-        self.state_before = String("")
-        self.subdir = String("")
-        self.version = String("")
-
 
 struct RunResult(Copyable, Movable):
     """The result document (file header). Start one with `RunResult(verb,
@@ -556,60 +382,6 @@ struct MemoryRecorder(RunRecorder, Copyable, Movable):
 # ---- rendering ---------------------------------------------------------------
 
 
-struct _Obj(Movable):
-    """An object under construction whose keys are written sorted."""
-
-    var keys: List[String]
-    var values: List[JsonValue]
-
-    def __init__(out self):
-        self.keys = List[String]()
-        self.values = List[JsonValue]()
-
-    def put(mut self, var key: String, var value: JsonValue):
-        self.keys.append(key^)
-        self.values.append(value^)
-
-    def put_str(mut self, var key: String, s: String):
-        self.put(key^, JsonValue.from_string(s.copy()))
-
-    def put_int(mut self, var key: String, n: Int):
-        self.put(key^, JsonValue.from_i64(Int64(n)))
-
-    def build(mut self) raises -> JsonValue:
-        var order = List[Int]()
-        for i in range(len(self.keys)):
-            order.append(i)
-        for i in range(1, len(order)):
-            var j = i
-            while j > 0 and _less(self.keys[order[j]], self.keys[order[j - 1]]):
-                var t = order[j]
-                order[j] = order[j - 1]
-                order[j - 1] = t
-                j -= 1
-        var doc = JsonValue.empty_object()
-        for i in range(len(order)):
-            doc.set_member(self.keys[order[i]].copy(), self.values[order[i]].copy())
-        return doc^
-
-
-def _less(a: String, b: String) -> Bool:
-    var x = a.as_bytes()
-    var y = b.as_bytes()
-    var n = min(len(x), len(y))
-    for i in range(n):
-        if x[i] != y[i]:
-            return x[i] < y[i]
-    return len(x) < len(y)
-
-
-def _str_array(items: List[String]) raises -> JsonValue:
-    var a = JsonValue.empty_array()
-    for i in range(len(items)):
-        a.push(JsonValue.from_string(items[i].copy()))
-    return a^
-
-
 def _check(r: RunResult) raises:
     """What a result must satisfy, for the renderer and the parser alike."""
     require_verb(r.verb)
@@ -643,7 +415,7 @@ def _check(r: RunResult) raises:
     for i in range(len(r.only)):
         var sel = parse_selector(r.only[i])
         if sel.canonical() != r.only[i]:
-            raise Error(String("result: only[") + String(i) + String("] '") + r.only[i] + String("' is not canonical"))
+            raise Error(String("result: only[") + String(i) + String("] '") + r.only[i] + String("' is not canonical"))  # cov: unreachable parse_selector splits at the first ':' and canonical() rejoins it there, so it is the text
         for j in range(i):
             if r.only[j] == r.only[i]:
                 raise Error(String("result: only '") + r.only[i] + String("' is given twice"))
@@ -661,6 +433,7 @@ def _check(r: RunResult) raises:
         if st.name.byte_length() == 0:
             raise Error(String("result: steps[") + String(i) + String("] has no name"))
         require_step_kind(st.kind)
+        check_deploy_row(st.deploy, st.outcome, where)
         if st.credential_probe.byte_length() > 0:
             if not _member(all_credential_probes(), st.credential_probe):
                 raise Error(
@@ -725,24 +498,6 @@ def _check_affected_by(r: RunResult) raises:
         for j in range(i):
             if r.affected_units[j] == r.affected_units[i]:
                 raise Error(where + String("unit '") + r.affected_units[i] + String("' is listed twice"))
-
-
-def _member(words: List[String], w: String) -> Bool:
-    for i in range(len(words)):
-        if words[i] == w:
-            return True
-    return False
-
-
-def _is_sha256_hex(s: String) -> Bool:
-    var b = s.as_bytes()
-    if len(b) != 64:
-        return False
-    for i in range(len(b)):
-        var c = Int(b[i])
-        if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
-            return False
-    return True
 
 
 def _check_validations(r: RunResult) raises:
@@ -852,6 +607,7 @@ def render_result(r: RunResult) raises -> String:
         o.put_str(String("outcome"), a.outcome)
         o.put_str(String("platform"), a.platform)
         o.put(String("selected"), JsonValue.from_bool(a.selected))
+        put_deploy_keys(o, a.deploy)
         steps.push(o.build())
     top.put(String("steps"), steps^)
     var arts = JsonValue.empty_array()
@@ -968,68 +724,6 @@ def render_result(r: RunResult) raises -> String:
 # ---- parsing -----------------------------------------------------------------
 
 
-def _refuse(source: String, why: String) raises:
-    raise Error(String("result '") + source + String("': ") + why)
-
-
-def _need(doc: JsonValue, key: String, tag: Int, source: String, where: String) raises -> JsonValue:
-    if not doc.has(key):
-        _refuse(source, where + String("missing '") + key + String("'"))
-    var v = doc.get(key)
-    if v.kind_tag() != tag:
-        _refuse(source, where + String("'") + key + String("' has the wrong JSON type"))
-    return v^
-
-
-def _s(doc: JsonValue, key: String, source: String, where: String = String("")) raises -> String:
-    return _need(doc, key, JSON_STRING, source, where).as_string()
-
-
-def _s_absent_empty(doc: JsonValue, key: String, source: String, where: String) raises -> String:
-    """A string key added inside the major: "" when a document written before
-    it has none; the wrong JSON type is still refused."""
-    if not doc.has(key):
-        return String("")
-    return _s(doc, key, source, where)
-
-
-def _i(doc: JsonValue, key: String, source: String, where: String = String("")) raises -> Int:
-    var v = _need(doc, key, JSON_NUMBER, source, where)
-    if not v.is_integral_number():
-        _refuse(source, where + String("'") + key + String("' is not an integer"))
-    return Int(v.as_int64())
-
-
-def _b(doc: JsonValue, key: String, source: String, where: String = String("")) raises -> Bool:
-    return _need(doc, key, JSON_BOOL, source, where).as_bool()
-
-
-def _no_dup_keys(doc: JsonValue, source: String, where: String) raises:
-    for i in range(doc.num_members()):
-        for j in range(i):
-            if doc.key_at(j) == doc.key_at(i):
-                _refuse(source, where + String("'") + doc.key_at(i) + String("' is given twice"))
-
-
-def _note_unknown(doc: JsonValue, known: List[String], where: String, mut ignored: List[String]) raises:
-    for i in range(doc.num_members()):
-        var key = doc.key_at(i)
-        var ok = False
-        for j in range(len(known)):
-            if known[j] == key:
-                ok = True
-        if not ok:
-            ignored.append(where + key)
-
-
-def _keys(names: String) -> List[String]:
-    var out = List[String]()
-    var parts = names.split(String(" "))
-    for i in range(len(parts)):
-        out.append(String(parts[i]))
-    return out^
-
-
 def parse_result(text: String, source: String) raises -> RunResult:
     """Parse a result document (file header); `source` names it. Unknown keys
     are ignored and listed in `ignored_keys`."""
@@ -1038,11 +732,12 @@ def parse_result(text: String, source: String) raises -> RunResult:
         doc = parse_json_value(text)
     except e:
         _refuse(source, String("not JSON: ") + String(e))
-        return RunResult(String(""), String(""))
+        return RunResult(String(""), String(""))  # cov: unreachable _refuse always raises; the return only satisfies the compiler
     if not doc.is_object():
         _refuse(source, String("not a JSON object"))
     _no_dup_keys(doc, source, String(""))
     _ = produced_header(doc, String(FORMAT_RESULT), source)
+    refuse_top_level_deploy_keys(doc, source)
     var r = RunResult(_s(doc, String("verb"), source), _s(doc, String("invoked_as"), source))
     _note_unknown(
         doc,
@@ -1105,12 +800,10 @@ def parse_result(text: String, source: String) raises -> RunResult:
         if a.kind_tag() != JSON_OBJECT:
             _refuse(source, where + String("not an object"))
         _no_dup_keys(a, source, where)
-        _note_unknown(
-            a,
-            _keys(String("credential_probe kind name outcome platform selected")),
-            String("steps[") + String(i) + String("]."),
-            r.ignored_keys,
-        )
+        var known = _keys(String("credential_probe kind name outcome platform selected"))
+        known.extend(deploy_step_keys())
+        var path = String("steps[") + String(i) + String("].")
+        _note_unknown(a, known, path, r.ignored_keys)
         var st = ResultStep(
             _s(a, String("name"), source, where),
             _s(a, String("kind"), source, where),
@@ -1119,6 +812,7 @@ def parse_result(text: String, source: String) raises -> RunResult:
         )
         st.selected = _b(a, String("selected"), source, where)
         st.credential_probe = _s(a, String("credential_probe"), source, where)
+        st.deploy = parse_deploy_keys(a, source, where, path, r.ignored_keys)
         r.steps.append(st^)
     r.plan = _b(doc, String("plan"), source)
     r.channel = _s(doc, String("channel"), source)

@@ -20,12 +20,12 @@
 #      distinct keys could then share a kid, and the verifier could select the
 #      wrong one), and it buys nothing (43 base64url chars is a fine header field).
 #
-#   2. `render_jwks_json(keys) -> String` — the RFC 7517 JWK Set document for the
+#   2. `render_jwks_json(keys) raises -> String` — the RFC 7517 JWK Set document for the
 #      ACTIVE public-key set, as an OKP (RFC 8037) Ed25519 JWK array:
 #          {"keys":[{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig",
 #                    "kid":"<kid>","x":"<base64url_nopad(pubkey)>"}, ...]}
-#      Hand-serialized from the in-memory `(kid, pubkey)` set (NO JSON dependency
-#      for a fixed-shape document). CRITICAL — a JWK for a PUBLIC key NEVER
+#      Rendered through `render_jwk_set` (jwk.mojo), the one JWK renderer of
+#      this package. CRITICAL — a JWK for a PUBLIC key NEVER
 #      carries the private `d` member (that would be the seed); this renderer
 #      emits ONLY the public `x` (the pubkey). There is no code path here that
 #      can see a seed, so `d` cannot be emitted by construction (the input is a
@@ -48,6 +48,8 @@
 
 from komira_crypto import sha256
 from komira_encoding import base64_url_encode_nopad
+
+from komira_jwks.jwk import Jwk, render_jwk_set
 
 
 # =============================================================================
@@ -78,40 +80,23 @@ def kid_for_pubkey(pubkey: Span[UInt8, _]) -> String:
 
 
 # =============================================================================
-# §2 — the JWKS document renderer. Hand-serialized OKP/Ed25519 JWK Set (RFC 7517
-#      + RFC 8037). PUBLIC-key only — NEVER a `d` member (the seed).
+# §2 — the JWKS document renderer for a set of Ed25519 public keys. Each key is
+#      rendered by `render_jwk_set` (jwk.mojo) as
+#      {"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":..,"x":..}.
+#      PUBLIC-key only — NEVER a `d` member (the seed).
 # =============================================================================
-def _render_one_jwk(kid: String, pubkey: Span[UInt8, _]) -> String:
-    """Render ONE OKP/Ed25519 public JWK object (RFC 8037 §2):
-    `{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":"<kid>",
-      "x":"<base64url_nopad(pubkey)>"}`.
-
-    ONLY the PUBLIC members are emitted — `kty` / `crv` / `alg` / `use` / `kid`
-    / `x`. There is deliberately NO `d` (the private seed): this function is
-    handed a PUBLIC key, so it has nothing private to leak. `alg`+`crv` pin the
-    key to Ed25519 (an offline verifier can reject a JWK whose `crv` != Ed25519
-    before trusting it). `x` is the base64url-nopad of the raw 32-byte pubkey (the
-    RFC 8037 `x` member for an OKP Ed25519 public key IS the raw pubkey). The
-    `kid` is emitted verbatim — it is a base64url string (no JSON-escape needed).
-    """
-    var x = base64_url_encode_nopad(pubkey)
-    return (
-        String('{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":"')
-        + kid
-        + String('","x":"')
-        + x
-        + String('"}')
-    )
-
-
-def render_jwks_json(keys: List[Tuple[String, Array[UInt8, 32]]]) -> String:
+def render_jwks_json(
+    keys: List[Tuple[String, Array[UInt8, 32]]]
+) raises -> String:
     """Render the RFC 7517 JWK Set for the ACTIVE public-key set as an OKP/Ed25519
-    JWK array: `{"keys":[<jwk>, <jwk>, ...]}`.
+    JWK array: `{"keys":[<jwk>, <jwk>, ...]}`, each element
+    `{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":"<kid>",
+      "x":"<base64url_nopad(pubkey)>"}` in list order.
 
-    PUBLIC-key document ONLY — every element is a `_render_one_jwk`, which emits
-    the public `x` and NEVER a private `d`. An EMPTY set renders `{"keys":[]}` (a
-    valid, well-formed empty JWK Set — a verifier fetching it simply finds no key,
-    which is the honest state when no signing key is loaded).
+    PUBLIC-key document ONLY: the input is a public key, so there is nothing
+    private to emit. An EMPTY set renders `{"keys":[]}` (a valid, well-formed
+    empty JWK Set — a verifier fetching it simply finds no key, which is the
+    honest state when no signing key is loaded).
 
     A SET even for one key (rotation is a DATA change): the caller passes whatever
     `(kid, pubkey)` set the keyring currently holds; adding a rotated key later is
@@ -122,19 +107,23 @@ def render_jwks_json(keys: List[Tuple[String, Array[UInt8, 32]]]) -> String:
             public key (PUBLIC material; the seed is NEVER passed here).
 
     Returns:
-        The JWKS JSON document string (hand-serialized; no JSON dependency).
+        The JWKS JSON document string.
+
+    Raises:
+        `JwksError: member "kid" is empty` if a `kid` is the empty string.
     """
-    var out = String('{"keys":[')
+    var jwks = List[Jwk](capacity=len(keys))
     for i in range(len(keys)):
-        if i > 0:
-            out += String(",")
-        # `ref`, not a copy: Mojo refuses the implicit copy out of the borrowed
-        # list, and the renderer only READS both halves — so binding by
-        # reference is both the correct fix and the zero-copy one.
+        # `ref`, not a copy: the renderer only READS both halves.
         ref kid = keys[i][0]
         ref pubkey = keys[i][1]
-        out += _render_one_jwk(
-            kid, Span[UInt8, origin_of(pubkey)](pubkey)
+        # The key is 32 bytes by type, so only the kid check can fail here.
+        jwks.append(
+            Jwk.ed25519(
+                Span[UInt8, origin_of(pubkey)](pubkey),
+                kid=Optional[String](kid.copy()),
+                alg=Optional[String](String("EdDSA")),
+                key_use=Optional[String](String("sig")),
+            )
         )
-    out += String("]}")
-    return out^
+    return render_jwk_set(jwks)

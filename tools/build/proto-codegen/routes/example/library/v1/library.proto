@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package example.library.v1;
+
+// The messages of the routes fixture (library_service.proto): every path
+// variable kind the emitter binds (string, int64), query fields of each
+// scalar kind it binds, a body with a nested message, and a field that only
+// the body can set.
+
+message Book {
+  string shelf = 1;
+  int64 id = 2;
+  string title = 3;
+  int32 pages = 4;
+}
+
+message GetBookRequest {
+  string shelf = 1;
+  int64 book_id = 2;
+}
+
+message ListBooksRequest {
+  string shelf = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+  optional bool include_drafts = 4;
+  // Not a query field: a repeated field is set only through a body.
+  repeated string tags = 5;
+}
+
+message ListBooksResponse {
+  repeated Book books = 1;
+  string next_page_token = 2;
+}
+
+message CreateBookRequest {
+  string shelf = 1;
+  Book book = 2;
+  string request_id = 3;
+}
+
+message DeleteBookRequest {
+  string shelf = 1;
+  int64 book_id = 2;
+}
+
+message DeleteBookResponse {}
+
+message Shelf {
+  string name = 1;
+  string theme = 2;
+}
+
+message GetShelfRequest {
+  string shelf = 1;
+}
+
+message SearchShelvesRequest {
+  string query = 1;
+  uint32 limit = 2;
+}
+
+message SearchShelvesResponse {
+  repeated Shelf shelves = 1;
+}

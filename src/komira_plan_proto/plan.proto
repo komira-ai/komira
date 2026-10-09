@@ -168,7 +168,7 @@ message WireField {
   // lossy for `DType.index`, which `ArrowType.from_dtype` folds onto INT64.
   //
   // ★ AN ENUM, NOT A BARE `uint32`, BECAUSE "LANGUAGE-AGNOSTIC" REQUIRES IT.
-  // A Python or Excel frontend that decoded `dtype_code: 5` from a bare
+  // A Python or TypeScript frontend that decoded `dtype_code: 5` from a bare
   // integer would have NOWHERE TO LOOK UP WHAT 5 IS — in a format whose whole
   // purpose is that four languages share one plan. `DTypeCode` is a real enum
   // in `plan_vocabulary.proto`, DERIVED from the codec's own `_DT_*` table,
@@ -324,12 +324,10 @@ message WireScalar {
   ScalarTimeUnit time_unit = 17;
   int64 dec256_high_lo = 18;
   int64 dec256_high_hi = 19;
-  // ⚠ MEANING CHANGED AT format_version 2, same as `kind`. The `XL_ERR_*` code
-  // of a SCALAR_KIND_ERROR literal — core-owned; a frontend copies its error
-  // code onto it verbatim.
-  // An unknown code taken verbatim becomes a DIFFERENT error, which is worse
-  // than not being an error at all.
-  ExcelErrorCode error_code = 20;
+  // Field number 20 and the name `error_code` are reserved: no field may
+  // use either.
+  reserved 20;
+  reserved "error_code";
 }
 
 // ===========================================================================
@@ -475,8 +473,8 @@ message WireColRef {
 // ONE — it is the single most likely thing a GENERATED client gets wrong.
 //
 // Addressing a column by ORDINAL is what a client does when it has a schema and
-// no name-resolution layer, which is the normal shape of an Excel or a Python
-// frontend. Every in-tree producer emits `col_ref`, so no Mojo caller ever
+// no name-resolution layer, which is the normal shape of a TypeScript or a
+// Python frontend. Every in-tree producer emits `col_ref`, so no Mojo caller ever
 // reached this arm; THE FIRST NON-MOJO PRODUCER IS EXACTLY WHO DOES.
 //
 // An ordinal is dangerous here: `col_idx: 1` against a three-column schema —
@@ -525,12 +523,13 @@ message WireInList {
   repeated WireScalar values = 2;
 }
 
-// `CastData`, TOTALLY — all SIX `var`s, and FOUR of them are invisible to the
-// plan render.
+// `CastData`, TOTALLY — all SIX `var`s, and FOUR of them reach the plan render
+// only when they deviate from a plain cast.
 //
-// ⚠ THE RENDER EMITS `Cast(<child>, <target>)` AND NOTHING ELSE. `target_arrow`,
-// `decimal_precision`, `decimal_scale` and `try_cast` reach no render at any
-// value, so `structural_hash` cannot see one of them go missing — which is why
+// ⚠ THE RENDER EMITS `Cast(<child>, <target>` and then `, arrow=<type>` only
+// when `target_arrow` is not the target DType's default Arrow type, `, p=, s=`
+// only when either is non-zero, and `, try` only for TRY_CAST. At the default
+// value `structural_hash` cannot see one of them go missing — which is why
 // each has its own slot here rather than being derived at decode. Deriving
 // `target_arrow` from `target` drops the Arrow logical type
 // (`cast_preserving_arrow` exists to keep it: `Expr.cast(child,
@@ -1251,6 +1250,15 @@ message WireAggregateNode {
   WireUdf udf = 7;
 }
 
+// ⛔ OUTPUT-SCHEMA NULLABILITY OF AN OUTER JOIN. The `WirePlan.output_schema`
+// of a join node is left's fields, then (unless SEMI/ANTI) right's, with a
+// colliding right name suffixed `_right`, and with the NULL-SUPPLYING side
+// forced `nullable: true`: the right side of LEFT, the left side of RIGHT, both
+// sides of FULL. INNER, CROSS, SEMI and ANTI keep each field's nullability.
+// The decoder re-derives this through `LogicalPlan.join` and refuses a message
+// that disagrees with `PLAN_WIRE_OUTPUT_SCHEMA_DIVERGED`, so a producer in
+// another language must write it the same way (`WireAsofJoinNode`: the right
+// side is always forced nullable).
 message WireJoinNode {
   WirePlan left = 1;
   WirePlan right = 2;
@@ -1396,13 +1404,13 @@ message WirePartitionTopNNode {
 
 // `komira_plan_ir.logical_plan.AsofTolerance`, all THREE `var`s.
 //
-// ⚠ THE RENDER PRINTS THE KIND AND NEVER THE NUMBER, AND OMITS THE WHOLE
-// THING AT `NONE`. `plan_display`'s AsofJoin arm is
-// `if not aj.tolerance.is_none(): writer.write(", tolerance=",
-// _asof_tolerance_name(aj.tolerance.tag))` — so LEG 1 can tell INT64 from
-// FLOAT64 and cannot tell a tolerance of 5 from one of 5000, and at the
-// DEFAULT kind it cannot see the field at all. A corpus that used
-// `AsofTolerance.none()` would be testing a suppressed render.
+// ⚠ THE RENDER PRINTS THE KIND AND THE SELECTED VALUE ONLY, AND OMITS THE
+// WHOLE THING AT `NONE`. `plan_display`'s AsofJoin arm writes
+// `, tolerance=INT64(<int_val>)` or `, tolerance=FLOAT64(<float_val>)` — so
+// LEG 1 can tell a tolerance of 5 from one of 5000 but never sees the slot
+// `kind` does not select, and at the DEFAULT kind it cannot see the field at
+// all. A corpus that used `AsofTolerance.none()` would be testing a suppressed
+// render.
 //
 // ⚠ ALL THREE SLOTS ARE CARRIED, NOT JUST THE ONE `kind` SELECTS.
 // `AsofTolerance` is `@fieldwise_init` and public, so
@@ -1419,16 +1427,16 @@ message WireAsofTolerance {
 
 // `komira_plan_ir.logical_plan_variants.AsofJoinData`, all twelve `var`s.
 //
-// ⚠ THE FOUR PRE-SORT HINT LISTS REACH NO RENDER AT ANY VALUE. `plan_display`
-// prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…]<, tolerance=…>)` and stops —
-// `left_sort_keys`, `left_sort_desc`, `right_sort_keys` and `right_sort_desc`
-// are absent from the text whether they are empty or not, and
-// `LogicalPlan.asof_join` does not read them into the output schema either
-// (that is left-columns + right-columns-forced-nullable). So four of the
-// twelve are held by the IR-equality leg ALONE, and their failure mode is the
-// bad kind: a non-empty pre-sort hint asserts "this side is ALREADY sorted,
-// skip the sort phase", so dropping one costs time while INVENTING one on a
-// side that is not sorted produces wrong rows.
+// ⚠ THE FOUR PRE-SORT HINT LISTS REACH THE RENDER ONLY WHEN NON-EMPTY.
+// `plan_display` prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…]<, tolerance=…>`
+// and then, for each side whose keys or directions are non-empty,
+// `, left_sorted=["k", …]/[F, …]` / `, right_sorted=…` (keys quoted, so a key
+// cannot forge a second key or the other side's hint). An empty side prints
+// nothing, and `LogicalPlan.asof_join` does not read the hints into the output
+// schema (that is left-columns + right-columns-forced-nullable). The failure
+// mode is the bad kind: a non-empty pre-sort hint asserts "this side is
+// ALREADY sorted, skip the sort phase", so dropping one costs time while
+// INVENTING one on a side that is not sorted produces wrong rows.
 //
 // ⚠ THE `by=[…]` RENDER IS SIZED FROM `left_keys`. The loop is
 // `for i in range(len(aj.left_keys))` and indexes `aj.right_keys[i]`, so a
@@ -1627,18 +1635,18 @@ message WirePlanEnvelope {
   // 36 unnecessary.
   //
   // SO THE VERSION IS A MINIMUM READER CAPABILITY, not a format generation:
-  //   * a plan-only envelope declares 2, and every reader from 2 onwards runs it
-  //   * a WRITE-CARRYING envelope declares 3, and a reader that speaks only 2
+  //   * a plan-only envelope declares 4
+  //   * a WRITE-CARRYING envelope declares 5, and a reader that speaks only 4
   //     REFUSES IT BY NAME rather than silently returning rows
-  // The reader's check is SET MEMBERSHIP (`{2, 3}` today), never equality and
+  // The reader's check is SET MEMBERSHIP (`{4, 5}` today), never equality and
   // never `>=`: a future version whose meaning genuinely changed must be able to
   // leave the set. See `PLAN_WIRE_FORMAT_VERSION` and `PlanWireVersionSet` in
   // komira_plan_wire's codec and admission check.
   //
   // ⚠ A DECODER MUST ALSO REFUSE AN UNDERSTATED VERSION — field 3 present with
-  // `format_version < 3`. Bumping the writer does not help against bytes the
+  // `format_version < 5`. Bumping the writer does not help against bytes the
   // writer did not write, and an understated write envelope is precisely the
-  // shape an old reader mis-executes. Refusing it is what makes "declare 3" a
+  // shape an old reader mis-executes. Refusing it is what makes "declare 5" a
   // rule a producer cannot skip rather than a convention it may forget.
   uint32 format_version = 1;
   WirePlan plan = 2;
