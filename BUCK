@@ -6,6 +6,7 @@ load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdow
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("@komira//tools/build/package:release_ledger.bzl", "library_census")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
@@ -99,6 +100,21 @@ src_layout(
         "komira_test_run_id",
         "komira_test_verdict",
     ],
+)
+
+# Every library under src/ (not src/tests/), read from the build graph, so
+# a new library is counted with no edit here: whether its closure links
+# native code, whether it has a README, its deps. Written at analysis; it
+# builds no library. Read by //release:release_ledger_check
+# (tools/build/package/release_ledger.bzl).
+library_census(
+    name = "library_census",
+    # Their binary takes the directory's name.
+    targets = {
+        "kci_build": "kci_build_lib",
+        "kci_publish": "kci_publish_lib",
+    },
+    visibility = ["//release:"],
 )
 
 # The shell lints of the tests cell (tools/build/tests: run_tests.sh and

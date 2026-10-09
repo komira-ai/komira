@@ -1,0 +1,196 @@
+# The release ledger: every library under src/ that release/artifacts.textproto
+# does not declare, with the reason it is not released. Every library
+# directory under src/ (not src/tests/) is in exactly one of the two files;
+# //release:release_ledger_check fails the build when one is in neither or in
+# both, when a row names a directory that holds no library, or when a row's
+# reason disagrees with what the build knows of the library
+# (tools/build/package/release_ledger.sh). Declaring a library removes its
+# row in the same change. Changes need the release approver's review
+# (.github/CODEOWNERS), as for everything under release/.
+#
+# One row per line, sorted by name:
+#
+#   libraries { name: "<dir>" reason: <REASON> }
+#   libraries { name: "<dir>" reason: PENDING_DECLARE pr: <N> }
+#
+# The reasons, a closed set (docs/design/continuous_publish.md, "What blocks
+# every package?"); the first three take precedence in this order:
+#
+#   NATIVE           its closure links native code (a vendored C/C++ library
+#                    or a C shim): a .mojoc holds none, so the build refuses
+#                    its conda package (_conda_facts, tools/build/mojo/defs.bzl).
+#                    Computed by the build: the check holds the row to it.
+#   DLOPEN           its own source opens a shared library at run time
+#                    (OwnedDLHandle), which the packer refuses
+#                    (tools/build/package/pack/conda.zig). Not computed.
+#   NO_README        no README: gamma refuses a package without runnable
+#                    examples (src/kci_validate/readme_installed.mojo).
+#                    Computed by the build: the check holds the row to it.
+#   UNDECLARED_DEP   it depends on a library that is not declared. The check
+#                    requires one such dependency.
+#   NO_CLOUD_CHECK   a cloud library with no release check (the design's S3a).
+#   TEST_SUPPORT     a library that exists for tests only.
+#   PENDING_DECLARE  buildable and declared by the open pull request `pr`.
+
+libraries { name: "kci_artifact" reason: UNDECLARED_DEP }
+libraries { name: "kci_artifact_proto" reason: NO_README }
+libraries { name: "kci_build" reason: NATIVE }
+libraries { name: "kci_cell" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "kci_cli" reason: NATIVE }
+libraries { name: "kci_cloud" reason: NATIVE }
+libraries { name: "kci_cloud_fake" reason: NATIVE }
+libraries { name: "kci_deploy_model_proto" reason: NO_README }
+libraries { name: "kci_manifest_proto" reason: NO_README }
+libraries { name: "kci_pkg_upload" reason: NATIVE }
+libraries { name: "kci_publish" reason: NATIVE }
+libraries { name: "kci_publish_oci" reason: NATIVE }
+libraries { name: "kci_reconciler" reason: NATIVE }
+libraries { name: "kci_release_set" reason: NATIVE }
+libraries { name: "kci_secret_writer" reason: NATIVE }
+libraries { name: "kci_validate" reason: NATIVE }
+libraries { name: "komira_agg" reason: NATIVE }
+libraries { name: "komira_agg_api" reason: NATIVE }
+libraries { name: "komira_arrow" reason: NATIVE }
+libraries { name: "komira_arrow_ipc" reason: NATIVE }
+libraries { name: "komira_async" reason: NATIVE }
+libraries { name: "komira_async_api" reason: NATIVE }
+libraries { name: "komira_authz_api" reason: NATIVE }
+libraries { name: "komira_avro" reason: NATIVE }
+libraries { name: "komira_aws_apigatewayv2" reason: NATIVE }
+libraries { name: "komira_aws_core" reason: NATIVE }
+libraries { name: "komira_aws_dynamodb" reason: NATIVE }
+libraries { name: "komira_aws_dynamodbstreams" reason: NATIVE }
+libraries { name: "komira_aws_ec2" reason: NATIVE }
+libraries { name: "komira_aws_ecr" reason: NATIVE }
+libraries { name: "komira_aws_ecs" reason: NATIVE }
+libraries { name: "komira_aws_iam" reason: NATIVE }
+libraries { name: "komira_aws_lambda" reason: NATIVE }
+libraries { name: "komira_aws_lambda_http" reason: NATIVE }
+libraries { name: "komira_aws_logs" reason: NATIVE }
+libraries { name: "komira_aws_metrics" reason: NATIVE }
+libraries { name: "komira_aws_route53" reason: NATIVE }
+libraries { name: "komira_aws_s3" reason: NATIVE }
+libraries { name: "komira_aws_scheduler" reason: NATIVE }
+libraries { name: "komira_aws_secretsmanager" reason: NATIVE }
+libraries { name: "komira_aws_ses" reason: NATIVE }
+libraries { name: "komira_aws_sesv2" reason: NATIVE }
+libraries { name: "komira_aws_sns" reason: NATIVE }
+libraries { name: "komira_aws_sqs" reason: NATIVE }
+libraries { name: "komira_azure_blob" reason: NATIVE }
+libraries { name: "komira_azure_core" reason: NATIVE }
+libraries { name: "komira_broker" reason: NATIVE }
+libraries { name: "komira_broker_coordinator" reason: NATIVE }
+libraries { name: "komira_buffer" reason: NATIVE }
+libraries { name: "komira_calendar" reason: UNDECLARED_DEP }
+libraries { name: "komira_calendar_ics" reason: UNDECLARED_DEP }
+libraries { name: "komira_calendar_proto" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_chat_proto" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_chat_store" reason: NATIVE }
+libraries { name: "komira_column_format" reason: NATIVE }
+libraries { name: "komira_column_kernels" reason: NATIVE }
+libraries { name: "komira_compression" reason: NATIVE }
+libraries { name: "komira_connect" reason: NATIVE }
+libraries { name: "komira_contacts" reason: NATIVE }
+libraries { name: "komira_contacts_proto" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_content_line" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_crypto" reason: NATIVE }
+libraries { name: "komira_csv" reason: NATIVE }
+libraries { name: "komira_db" reason: NATIVE }
+libraries { name: "komira_db_postgres" reason: NATIVE }
+libraries { name: "komira_db_sqlite" reason: NATIVE }
+libraries { name: "komira_dispatch_agg_exec" reason: NATIVE }
+libraries { name: "komira_dispatch_agg_folds" reason: NATIVE }
+libraries { name: "komira_dispatch_join_kernels" reason: NATIVE }
+libraries { name: "komira_dispatch_scan" reason: NATIVE }
+libraries { name: "komira_dynamic_filter" reason: NATIVE }
+libraries { name: "komira_eval" reason: NATIVE }
+libraries { name: "komira_exec_types" reason: NATIVE }
+libraries { name: "komira_expr" reason: NATIVE }
+libraries { name: "komira_fs" reason: NATIVE }
+libraries { name: "komira_gcp_apigateway" reason: NATIVE }
+libraries { name: "komira_gcp_artifactregistry" reason: NATIVE }
+libraries { name: "komira_gcp_cloudresourcemanager" reason: NATIVE }
+libraries { name: "komira_gcp_cloudscheduler" reason: NATIVE }
+libraries { name: "komira_gcp_compute" reason: NATIVE }
+libraries { name: "komira_gcp_core" reason: NATIVE }
+libraries { name: "komira_gcp_fcm" reason: NATIVE }
+libraries { name: "komira_gcp_firestore" reason: NATIVE }
+libraries { name: "komira_gcp_firestore_db" reason: NATIVE }
+libraries { name: "komira_gcp_iam" reason: NATIVE }
+libraries { name: "komira_gcp_logging" reason: NATIVE }
+libraries { name: "komira_gcp_monitoring" reason: NATIVE }
+libraries { name: "komira_gcp_monitoring_client" reason: NATIVE }
+libraries { name: "komira_gcp_run" reason: NATIVE }
+libraries { name: "komira_gcp_secretmanager" reason: NATIVE }
+libraries { name: "komira_gcp_serviceusage" reason: NATIVE }
+libraries { name: "komira_gcp_storage" reason: NATIVE }
+libraries { name: "komira_gcp_wif" reason: NATIVE }
+libraries { name: "komira_git" reason: NATIVE }
+libraries { name: "komira_grpc" reason: NATIVE }
+libraries { name: "komira_http_auth" reason: NATIVE }
+libraries { name: "komira_http_client" reason: NATIVE }
+libraries { name: "komira_http_core" reason: NATIVE }
+libraries { name: "komira_http_server" reason: NATIVE }
+libraries { name: "komira_iceberg_catalog" reason: NATIVE }
+libraries { name: "komira_job_supervisor" reason: NATIVE }
+libraries { name: "komira_join_assembly" reason: NATIVE }
+libraries { name: "komira_json_index" reason: NATIVE }
+libraries { name: "komira_jsonl" reason: NATIVE }
+libraries { name: "komira_jwks" reason: NATIVE }
+libraries { name: "komira_kernels" reason: NATIVE }
+libraries { name: "komira_kg_code" reason: NATIVE }
+libraries { name: "komira_libc" reason: NATIVE }
+libraries { name: "komira_log" reason: NATIVE }
+libraries { name: "komira_log_query" reason: NATIVE }
+libraries { name: "komira_lz4" reason: DLOPEN }
+libraries { name: "komira_mail_address" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_mail_message" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_managed_mail_proto" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_mcp_server" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_metrics" reason: NATIVE }
+libraries { name: "komira_metrics_reader" reason: NATIVE }
+libraries { name: "komira_morsel" reason: NATIVE }
+libraries { name: "komira_net" reason: NATIVE }
+libraries { name: "komira_objectstore" reason: NATIVE }
+libraries { name: "komira_objectstore_gcs" reason: NATIVE }
+libraries { name: "komira_objectstore_s3" reason: NATIVE }
+libraries { name: "komira_oci" reason: NATIVE }
+libraries { name: "komira_op_agg_row_api" reason: NATIVE }
+libraries { name: "komira_op_agg_state" reason: NATIVE }
+libraries { name: "komira_optimizer" reason: NATIVE }
+libraries { name: "komira_orc" reason: NATIVE }
+libraries { name: "komira_parquet" reason: NATIVE }
+libraries { name: "komira_parquet_codec" reason: NATIVE }
+libraries { name: "komira_plan_expr" reason: NATIVE }
+libraries { name: "komira_plan_ir" reason: NATIVE }
+libraries { name: "komira_plan_stats" reason: NATIVE }
+libraries { name: "komira_plan_wire" reason: NATIVE }
+libraries { name: "komira_pplan_wire" reason: NATIVE }
+libraries { name: "komira_row_format" reason: NATIVE }
+libraries { name: "komira_rowcell" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_scan_planning" reason: NATIVE }
+libraries { name: "komira_scan_resolver" reason: NATIVE }
+libraries { name: "komira_scan_source" reason: NATIVE }
+libraries { name: "komira_sdk" reason: NATIVE }
+libraries { name: "komira_search" reason: NATIVE }
+libraries { name: "komira_search_catalog" reason: NATIVE }
+libraries { name: "komira_search_scan" reason: NATIVE }
+libraries { name: "komira_secret_env" reason: NATIVE }
+libraries { name: "komira_secret_registry" reason: NATIVE }
+libraries { name: "komira_secret_store" reason: NATIVE }
+libraries { name: "komira_shuffle" reason: NATIVE }
+libraries { name: "komira_shuffle_streaming" reason: NATIVE }
+libraries { name: "komira_snapshotter" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_source_url" reason: NATIVE }
+libraries { name: "komira_spsc_ring" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_sql" reason: NATIVE }
+libraries { name: "komira_supervisor" reason: NATIVE }
+libraries { name: "komira_sync" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_table_store" reason: NATIVE }
+libraries { name: "komira_trace" reason: UNDECLARED_DEP }
+libraries { name: "komira_udf" reason: NATIVE }
+libraries { name: "komira_uuid" reason: NATIVE }
+libraries { name: "komira_vcard" reason: PENDING_DECLARE pr: 1136 }
+libraries { name: "komira_viewport" reason: NATIVE }
+libraries { name: "komira_webpush" reason: NATIVE }
+libraries { name: "komira_zlib" reason: DLOPEN }

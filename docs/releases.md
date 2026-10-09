@@ -4,9 +4,15 @@ What komira publishes today, and how another repository pins a version of it.
 
 ## What exists today
 
-Komira has no release tags and no version number of its own, and this
-repository does not yet contain the step that uploads to a package registry.
-A version of komira is a commit. What the build produces from a program is
+Komira has no release tags and no version number of its own. A version of
+komira is a commit. Every push to `main` is a release: kci builds the
+libraries `release/artifacts.textproto` declares, publishes their conda
+packages to the `gamma` channel, installs them from there, and publishes the
+same bytes to the `prod` channel (`release/channels.textproto` names the
+channels and who may write to each; [ci.md](ci.md) has the pipeline). Each
+package carries the Mojo compiler version and the release's build number, and
+the metapackage `komira_all` requires every member at exactly those. What the
+build produces from a program is
 described in [release machines](design/release_machine.md): a relocatable
 bundle, a reproducible tarball of it, and an OCI image layout. The build rules
 only write these files; publishing them is the step a release machine runs
@@ -70,6 +76,21 @@ A declaration whose plan leaves a part empty waits. The plan lives in the pull
 request, not in the repository: what the build enforces is the tests
 themselves (`test_srcs`) and the README examples the release machine runs.
 
+### The release ledger
+
+Every library under `src/` that `release/artifacts.textproto` does not
+declare is listed in `release/unreleased.textproto` with its reason: it links
+native code (`NATIVE`), opens a shared library at run time (`DLOPEN`), has no
+README (`NO_README`), depends on a library that is not declared
+(`UNDECLARED_DEP`), or is declared by an open pull request
+(`PENDING_DECLARE`), among others the file's header lists. The build target
+`//release:release_ledger_check` fails when a library is in neither file or
+in both, when a row names a directory that holds no library, and when a
+`NATIVE` or `NO_README` row disagrees with the library itself. A pull request
+that declares a library removes its row; one that adds a library declares it
+or adds a row. The file's counts per reason are how much of the repository is
+not released yet, and why.
+
 ## Pinning komira from another repository
 
 A repository that builds Mojo with komira's rules names komira as its `komira`
@@ -85,15 +106,15 @@ repository once per commit.
 
 ## Held
 
-These parts of a release machine's publish step are not described here
-because the libraries that implement them are not part of this repository
-yet:
+These parts of a release are not built yet:
 
-- The upload of conda packages, their other platforms (linux-aarch64 and
-  macOS) and Python wheels of the Mojo libraries.
-- Package channels, and the rules for which writers each channel admits.
-- Copying and promoting a container image between registries by digest.
-- A release version shared by every artifact, and the procedure for cutting
-  one.
+- Conda packages of libraries that link native code or open a shared library
+  at run time: a `.mojoc` holds no native code, so the build refuses their
+  packages (the `NATIVE` and `DLOPEN` rows of the release ledger, above).
+- Conda packages for other platforms (linux-aarch64 and macOS): the build
+  writes linux-64 only. Python wheels of the Mojo libraries.
+- Container images in a release: `src/kci_publish_oci` pushes an OCI layout
+  to a registry, but no release step runs it, and nothing copies or promotes
+  an image between registries by digest.
 
 Each lands with its own section when its code does.

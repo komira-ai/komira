@@ -4,6 +4,8 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
+load(":release_ledger.bzl", "release_ledger_case")
+load(":release_ledger_cases.bzl", "LEDGER_CASES")
 load(":release_set.bzl", "conda_release_set_check", "release_order_test")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
@@ -39,6 +41,7 @@ shell_lint(
     srcs = [
         "kcov_guard.sh",
         "list_conda_targets.sh",
+        "release_ledger.sh",
         "release_version.sh",
     ],
 )
@@ -222,4 +225,31 @@ export_file(
 conda_manifest_kci(
     name = "release_set_kci",
     package = ":release_set_check",
+)
+
+# The release ledger check (release_ledger.bzl, release_ledger.sh) over
+# fixtures whose verdict is known (release_ledger_cases.bzl).
+# //release:release_ledger_check runs only after every case has passed, so a
+# check that stops refusing is red there.
+export_file(
+    name = "release_ledger.sh",
+    src = "release_ledger.sh",
+    visibility = ["PUBLIC"],
+)
+
+[
+    release_ledger_case(
+        name = "release_ledger_case_" + name,
+        census = census,
+        declared = declared,
+        ledger = ledger,
+        expect = expect,
+    )
+    for name, (census, declared, ledger, expect) in LEDGER_CASES.items()
+]
+
+filegroup(
+    name = "release_ledger_cases",
+    srcs = [":release_ledger_case_" + name for name in LEDGER_CASES],
+    visibility = ["PUBLIC"],
 )

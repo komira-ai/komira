@@ -325,3 +325,24 @@ are), and agreement across members beyond the stamp.
 [`list_conda_targets.sh`](list_conda_targets.sh) prints the package targets. The layout,
 the version scheme and the metapackage: [packaging/conda](../../../packaging/conda/README.md). The version
 a release carries comes from [`release_version.sh`](release_version.sh).
+
+## The release ledger
+
+`release_ledger_check` ([`release_ledger.bzl`](release_ledger.bzl), run by
+[`release_ledger.sh`](release_ledger.sh); the target
+`//release:release_ledger_check`) holds `release/artifacts.textproto` and
+`release/unreleased.textproto` to the libraries under `src/`: each library
+directory is declared in the one or listed with a reason in the other, never
+both and never neither, and no row names a directory that holds no library.
+It reads the libraries from `//:library_census`, which the root `BUCK` fills
+from the build graph and which writes, at analysis, whether each library's
+closure links native code, whether it has a README, and its `deps`; so a
+`NATIVE` row on a library with no native code is red, as is a library with
+native code under another reason, and likewise for `NO_README`.
+`DLOPEN`, `NO_CLOUD_CHECK`, `TEST_SUPPORT` and the pull request of
+`PENDING_DECLARE` are not computed and not checked. The script's header lists
+every refusal. The check runs only after the `release_ledger_case_*` targets
+in [`BUCK`](BUCK), the same script over the fixtures of
+[`release_ledger_cases.bzl`](release_ledger_cases.bzl) with each verdict
+asserted, have passed. Nothing depends on the check, so a change to the ledger
+rebuilds no library and no kci target.

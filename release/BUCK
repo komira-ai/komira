@@ -12,12 +12,16 @@
 # The machine file's validations run each installed library's README examples
 # (src/<library>/README.md, shipped as share/doc/<name>/README.md): the same
 # examples are a welded test of the library's own build, so they cannot rot.
+# unreleased.textproto, the release ledger, lists every library under src/
+# that artifacts.textproto does not declare, with its reason;
+# :release_ledger_check (below) holds the two files to the libraries.
 # release/ci holds the commands the per-change check runs (artifacts.textproto's
 # `build_targets` and `derive_checks`); its `affected` is the binary
 # //tools/build/ci:affected. It also holds main_red.py, the script of
 # .github/workflows/main_red.yml, tested by //release/ci/tests:test_main_red.
 # Changes need the release approver's review (.github/CODEOWNERS).
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/package:release_ledger.bzl", "release_ledger_check")
 
 export_file(
     name = "artifacts.textproto",
@@ -45,4 +49,18 @@ export_file(
 shell_lint(
     name = "shell_lint",
     srcs = glob(["ci/*.sh"]),
+)
+
+# Every library directory under src/ (not src/tests/; //:library_census reads
+# them from the build graph) is declared in artifacts.textproto or listed in
+# unreleased.textproto with a reason, never both and never neither; no row
+# names a directory that holds no library; a NATIVE or NO_README row agrees
+# with the library (tools/build/package/release_ledger.sh says what else it
+# refuses). Standalone: nothing depends on it, so a ledger change rebuilds no
+# library and no kci target. `./buck2 build //release:release_ledger_check`.
+release_ledger_check(
+    name = "release_ledger_check",
+    artifacts = "artifacts.textproto",
+    census = "//:library_census",
+    ledger = "unreleased.textproto",
 )
