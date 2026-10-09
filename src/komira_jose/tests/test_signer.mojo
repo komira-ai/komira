@@ -14,9 +14,9 @@
 #
 # A near-miss table of a value: a prefix, the value extended at the end and
 # at the front, a proper suffix, a case variant, and the same length with
-# the first or the last byte replaced. A prefix, suffix or case-folded
-# compare in either direction, or a byte loop that skips the first or the
-# last byte, accepts at least one of them. Every value is tried and every
+# the first, the middle or the last byte replaced. A prefix, suffix or
+# case-folded compare in either direction, or a byte loop that skips one of
+# those bytes, accepts at least one of them. Every value is tried and every
 # miss is collected into one assert.
 #
 # main runs every test and reports every failure.
@@ -136,6 +136,10 @@ def _near_misses(s: String) -> List[String]:
     var first = b.copy()
     first[0] = UInt8(0x7A) if b[0] != UInt8(0x7A) else UInt8(0x79)  # z / y
     out.append(_str(first))
+    var middle = b.copy()
+    var m = n // 2
+    middle[m] = UInt8(0x7A) if b[m] != UInt8(0x7A) else UInt8(0x79)
+    out.append(_str(middle))
     var last = b.copy()
     last[n - 1] = UInt8(0x7A) if b[n - 1] != UInt8(0x7A) else UInt8(0x79)
     out.append(_str(last))

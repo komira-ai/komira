@@ -154,6 +154,27 @@ def _kids(doc: String) raises -> String:
     return out
 
 
+def _near(s: String) -> List[String]:
+    """The near-miss table of `s`: a prefix, `s` extended at the end and at
+    the front, a proper suffix, a case variant, the same length with the
+    first, a middle or the last byte replaced, and "". A prefix, suffix or
+    case-folded compare either way, or a byte loop that skips one byte,
+    accepts at least one of them."""
+    var n = s.byte_length()
+    var mid = n // 2
+    var out = List[String]()
+    out.append(String(s[byte = 0 : n - 1]))
+    out.append(s + "x")
+    out.append(String("x") + s)
+    out.append(String(s[byte = 1 : n]))
+    out.append(s.upper() if s.upper() != s else s.lower())
+    out.append(String("z") + String(s[byte = 1 : n]))
+    out.append(String(s[byte = 0 : mid]) + "z" + String(s[byte = mid + 1 : n]))
+    out.append(String(s[byte = 0 : n - 1]) + "z")
+    out.append(String(""))
+    return out^
+
+
 def _active_ring(i: Int, alg: String = "EdDSA") raises -> Keyring:
     """A ring at T0 + LEAD whose signing key is key `i`."""
     var r = _ring(alg)
@@ -189,15 +210,15 @@ def test_bounds() raises:
     comptime ALG = "JoseError: the keyring algorithm must be ES256, EdDSA or RS256"
     # The near-miss tables of the three names, and two refused names.
     var misses = String("")
-    for a in [
-        "ES25", "ES256x", "xES256", "S256", "es256", "zS256", "ES25z",
-        "EdDS", "EdDSAx", "xEdDSA", "dDSA", "eDdsa", "zdDSA", "EdDSz",
-        "RS25", "RS256x", "xRS256", "S256", "rs256", "zS256", "RS25z",
-        "HS256", "none", "",
-    ]:
-        var got = _ring_err(alg=String(a))
+    var names = _near("ES256")
+    names.extend(_near("EdDSA"))
+    names.extend(_near("RS256"))
+    names.append("HS256")
+    names.append("none")
+    for a in names:
+        var got = _ring_err(alg=a.copy())
         if got != ALG:
-            misses += String(a) + " -> " + got + "; "
+            misses += a + " -> " + got + "; "
     assert_equal(misses, "")
     var r = _ring("ES256")
     assert_equal(r.alg(), "ES256")
@@ -226,19 +247,8 @@ def test_publish_before_sign() raises:
     assert_equal(_promote_err(r, _kid(1), T0 + 10 + LEAD - 1), EARLY)
     # Only the staged key's exact kid promotes it.
     comptime OTHER = "JoseError: kid does not name the staged key"
-    var k1 = _kid(1)
     var misses = String("")
-    var b = k1.as_bytes()
-    var n = len(b)
-    var near = List[String]()
-    near.append(String(k1[byte = 0 : n - 1]))
-    near.append(k1 + "x")
-    near.append(String("x") + k1)
-    near.append(String(k1[byte = 1 : n]))
-    near.append(k1.upper())
-    near.append(String("z") + String(k1[byte = 1 : n]))
-    near.append(String(k1[byte = 0 : n - 1]) + "z")
-    near.append(String(""))
+    var near = _near(_kid(1))
     near.append(_kid(2))
     for k in near:
         var got = _promote_err(r, k.copy(), T0 + 10 + LEAD)
@@ -362,14 +372,26 @@ def test_retire_names_one_key() raises:
     var t = now + TTL + LEEWAY - 1
     assert_equal(_retire_err(r, _kid(3), t), EARLY)
     assert_equal(_retire_err(r, _kid(1), t), "")
-    var k3 = _kid(3)
-    var n = k3.byte_length()
     var misses = String("")
-    for k in [String(k3[byte = 0 : n - 1]), k3 + "x", String("x") + k3, String(k3[byte = 1 : n]), k3.upper(), String("")]:
+    comptime NONE = "JoseError: kid names no key in the keyring"
+    for k in _near(_kid(3)):
         var got = _retire_err(r, k.copy(), now + TTL + LEEWAY)
-        if got != "JoseError: kid names no key in the keyring":
-            misses += k + " -> " + got + "; "
+        if got != NONE:
+            misses += String("retiring ") + k + " -> " + got + "; "
+    # Near misses of the signing key and of a staged key name no key
+    # either: neither is refused as the signing key nor retired.
+    for k in _near(_kid(4)):
+        var got = _retire_err(r, k.copy(), now + TTL + LEEWAY)
+        if got != NONE:
+            misses += String("signing ") + k + " -> " + got + "; "
+    r.rotate(_key(5), now + TTL + LEEWAY)
+    for k in _near(_kid(5)):
+        var got = _retire_err(r, k.copy(), now + TTL + LEEWAY)
+        if got != NONE:
+            misses += String("staged ") + k + " -> " + got + "; "
     assert_equal(misses, "")
+    assert_equal(r.staged_kid().value(), _kid(5))
+    assert_equal(r.signing_kid().value(), _kid(4))
     assert_equal(_retire_err(r, _kid(3), now + TTL + LEEWAY), "")
     assert_equal(r.retiring_kids()[0], _kid(2))
 

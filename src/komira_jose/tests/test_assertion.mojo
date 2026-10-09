@@ -250,12 +250,14 @@ def test_jti_required() raises:
 
 def test_client_sub_is_iss() raises:
     # Catches: a client assertion whose sub is not exactly its iss
-    # accepted: the near-miss table of the client id as sub.
+    # accepted: the near-miss table of the client id as sub (a prefix, the
+    # id extended at the end and at the front, a proper suffix, a case
+    # variant, and the first, a middle or the last byte replaced).
     comptime NOT_CLIENT = "JoseError: claim sub is not the client (iss)"
     var s = _signer("EdDSA")
     var v = _verifier(s)
     var misses = String("")
-    for sub in ["client-", "client-1x", "xclient-1", "lient-1", "CLIENT-1", "zlient-1", "client-z"]:
+    for sub in ["client-", "client-1x", "xclient-1", "lient-1", "CLIENT-1", "zlient-1", "cliezt-1", "client-z"]:
         var c = (
             String('{"iss":"client-1","sub":"')
             + String(sub)
