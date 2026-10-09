@@ -1,0 +1,37 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test 55 (std_only, mojo_deps), the half that must go red: each mojo_deps
+# here names a library whose deps hold one thing besides the standard
+# library, and must fail analysis naming it. run_tests.sh requires the text.
+# The library's sources import nothing, so only `std_only` can refuse it.
+
+# A Mojo package in deps.
+mojo_library(
+    name = "mojo_dep_lib",
+    srcs = ["mojo_dep_lib/__init__.mojo"],
+    conda = False,
+    deps = ["//functional/std_only:leaf"],
+)
+
+mojo_deps(
+    name = "mojo_dep",
+    buck = "deps.txt",
+    srcs = ["mojo_dep_lib/__init__.mojo"],
+    std_only = ":mojo_dep_lib",
+)
+
+# A C library in deps.
+mojo_library(
+    name = "c_dep_lib",
+    srcs = ["c_dep_lib/__init__.mojo"],
+    conda = False,
+    deps = ["komira//tools/build/examples/cshim:add"],
+)
+
+mojo_deps(
+    name = "c_dep",
+    buck = "deps.txt",
+    srcs = ["c_dep_lib/__init__.mojo"],
+    std_only = ":c_dep_lib",
+)

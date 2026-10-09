@@ -416,6 +416,10 @@
 #      through an `as` alias of its parent, through a name a from-import
 #      bound)), and an entry that is not a dotted komira_* module name is
 #      refused at analysis.
+#  55. Standard-library-only closure (tools/build/lint/defs.bzl, mojo_deps
+#      std_only): tests//functional/std_only:ok (a library with no deps)
+#      builds; each target of tests//negative/std_only fails analysis naming
+#      its library's one extra dep: a Mojo package, a C library.
 set -uo pipefail
 
 umbrella=1
@@ -1507,6 +1511,12 @@ for want in \
     if [ "$n" = "mojo_deps: 1 finding line(s)" ]; then pass "refused_imports_${t}_alone"; else fail "refused_imports_${t}_alone: '$n', want 1 finding (see $LOG/refused_imports_$t.log)"; fi
 done
 expect_red refused_imports_bad_entry "refused_imports entry \`komira_plan_ir\` is not a dotted module name" "$N:bad_entry"
+
+# 55
+expect_green std_only tests//functional/std_only:ok
+N=tests//negative/std_only
+expect_red std_only_mojo_dep "std_only: $N:mojo_dep_lib depends on the Mojo package(s) leaf; its closure must be the standard library alone" "$N:mojo_dep"
+expect_red std_only_c_dep "std_only: $N:c_dep_lib links a C library; its closure must be the standard library alone" "$N:c_dep"
 
 # 37
 pt_rc=0

@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The plan refusal tokens and the class of each, shared by the optimizer and
 # the packages that build or check a physical plan. It has no deps: its
 # closure is the standard library, so any package that refuses or classifies
-# a plan can depend on it. Do not add deps.
+# a plan can depend on it. Do not add deps; deps_lint below refuses them.
 mojo_library(
     name = "komira_plan_tokens",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -12,12 +12,14 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# With no deps above, this lint refuses any `komira_*` import in the library
-# or its tests (tools/build/lint: mojo_deps), so the closure stays the
-# standard library.
+# `std_only` fails analysis if the library above names any Mojo package or C
+# library in its deps, so its closure stays the standard library. The import
+# check (every `komira_*` import named in deps) then refuses any `komira_*`
+# import in the library or its tests (tools/build/lint: mojo_deps).
 mojo_deps(
     name = "deps_lint",
     buck = "BUCK",
     srcs = glob(["**/*.mojo"]),
+    std_only = ":komira_plan_tokens",
     visibility = ["komira//:tests_lints"],
 )

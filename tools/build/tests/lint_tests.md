@@ -225,3 +225,23 @@ module name and is refused at analysis.
 ./buck2 build tests//functional/refused_imports:ok
 ./buck2 build tests//negative/refused_imports:paren_comment_open   # must fail: paren_comment_open.mojo:3: imports komira_plan_ir.physical_plan
 ```
+
+## 55. Standard-library-only closure
+
+A package's `mojo_deps` lint ([`defs.bzl`](../lint/defs.bzl)) can name
+`std_only`, a mojo_library whose closure must be the standard library alone:
+analysis fails if that library names any Mojo package or C library in its
+`deps` (its `test_deps` are not checked). The import check alone cannot keep
+a leaf a leaf, since extra deps are allowed and a dep added with its import
+passes it. komira_plan_tokens uses it.
+[`functional/std_only:ok`](functional/std_only/BUCK) builds over a library
+with no deps. Each target of [`negative/std_only`](negative/std_only/BUCK)
+names a library whose sources import nothing but whose `deps` hold one Mojo
+package (`mojo_dep`) or one C library (`c_dep`), and must fail analysis
+naming it.
+
+```sh
+./buck2 build tests//functional/std_only:ok
+./buck2 build tests//negative/std_only:mojo_dep   # must fail: std_only: ...:mojo_dep_lib depends on the Mojo package(s) leaf
+./buck2 build tests//negative/std_only:c_dep      # must fail: std_only: ...:c_dep_lib links a C library
+```

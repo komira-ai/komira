@@ -18,6 +18,7 @@ result, a JSON file whose message holds the findings.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
 
 _COMMON = {
@@ -142,8 +143,21 @@ def _mojo_deps_impl(ctx):
     for m in ctx.attrs.refused_imports:
         if not _dotted_komira_module(m):
             fail("mojo_deps {}: refused_imports entry `{}` is not a dotted module name komira_<x>.<y>[.<z>...] of letters, digits and _".format(ctx.label, m))
+    if ctx.attrs.std_only != None:
+        _check_std_only(ctx.label, ctx.attrs.std_only)
     refused = ",".join(ctx.attrs.refused_imports) or "-"
     return _lint(ctx, "mojo_deps", [ctx.attrs._reader], [copy[ctx.attrs.buck.short_path], refused] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
+
+def _check_std_only(label, lib):
+    """Fails analysis unless the library `lib` depends on nothing but the
+    standard library: no Mojo package in its deps (MojoInfo.direct) and no C
+    library (MojoInfo.c_link). The library's `test_deps` are not part of its
+    closure and are not checked."""
+    info = lib[MojoInfo]
+    if info.direct:
+        fail("mojo_deps {}: std_only: {} depends on the Mojo package(s) {}; its closure must be the standard library alone".format(label, lib.label.raw_target(), ", ".join(info.direct)))
+    if info.c_link != None:
+        fail("mojo_deps {}: std_only: {} links a C library; its closure must be the standard library alone".format(label, lib.label.raw_target()))
 
 _WORD = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 
@@ -162,10 +176,11 @@ def _dotted_komira_module(m):
 
 mojo_deps_rule = rule(
     impl = _mojo_deps_impl,
-    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed. `refused_imports` names dotted modules (`komira_x.y`) that no file in `srcs` may import, nor any module under them, nor name by their dotted path outside an import: a layering rule finer than a target's deps.",
+    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed. `refused_imports` names dotted modules (`komira_x.y`) that no file in `srcs` may import, nor any module under them, nor name by their dotted path outside an import: a layering rule finer than a target's deps. `std_only`, a mojo_library, fails analysis if that library names any Mojo package or C library in its `deps`: its closure must be the standard library alone (its `test_deps` are not checked).",
     attrs = _COMMON | {
         "buck": attrs.source(),
         "refused_imports": attrs.list(attrs.string(), default = []),
+        "std_only": attrs.option(attrs.dep(providers = [MojoInfo]), default = None),
         "_reader": attrs.source(default = "komira//tools/build/lint:refused_imports.awk"),
         "srcs": attrs.list(attrs.source()),
     },
