@@ -13,19 +13,24 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # multipart, S3ConditionalStore (one bucket as a
 # CloneableConditionalWriteStore and RangeFetchStore), S3PresignSigner
 # (an ObjectUrlSigner over komira_aws_core's sigv4_presign) and S3Fs (one
-# bucket as komira_fs's FileSystem: listings, ranged reads with one object
-# version per prefetched fetch, one-request footers, multipart writes,
-# delete; its settings in S3FsOptions).
+# bucket as komira_fs's FileSystem: listings, ranged reads of one object
+# version per file handle, one-request footers, multipart writes, delete,
+# and up to its in-flight bounds of requests at once on threads of
+# komira_fork_join, each over a store of its own; its settings in
+# S3FsOptions), and s3_prod_fs, the production S3Fs over komira_http_client's
+# KernelSchemeConnector, which dials plaintext only for an http:// endpoint.
 #
 # the core packages supplies the ByteView of komira_objectstore's RangeFetchStore
 # signature, and S3Fs's buffers, Slab and FS_SCHEME_S3. komira_async is the
-# tests': the fake S3 connector implements komira_http_core's Connector over
-# its reactor and runtime.
+# tests': the fake connectors of test_s3_fs_inflight and
+# test_s3_fs_one_version implement komira_http_core's Connector over its
+# reactor and runtime.
 #
 # The tests are hermetic, no socket: komira_http_core's ScriptedConnector
-# (S3's answers, one stream per request), a fake S3 connector in the tests
-# that keeps objects in memory and honours If-Match / If-None-Match (so a
-# compare-and-swap loop runs against it), and komira_aws_core's
+# (S3's answers, one stream per request), komira_test_fake_s3's fake S3
+# connector, which keeps objects in memory and honours If-Match /
+# If-None-Match (so a compare-and-swap loop runs against it), and
+# komira_aws_core's
 # AwsEchoConnector (each request as it reached the wire). They are:
 # test_s3_basics (the configuration, the status table and the error
 # message, the range arithmetic, the key decoding), test_s3_store (each
@@ -43,35 +48,65 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # listings, writes as one PutObject or a multipart upload, an upload
 # aborted on failure, delete, and a Hive partition prune that never reads
 # the pruned partition), test_s3_fs_clone (an S3Fs clone builds its own
-# store), test_s3_fs_options (S3FsOptions), test_s3_http_config (a
+# store), test_s3_fs_inflight (the in-flight bounds kept and never passed:
+# a prefetch, one capped by S3Config's max_inflight, and a multipart write
+# over a slow fake S3 that counts its requests in flight; every request of a prefetch, on any
+# worker's store, carrying the handle's ETag; and run_bounded_inflight over
+# a fake that counts requests in flight),
+# test_s3_fs_one_version (a handle reads one object version: after an
+# overwrite its next read_at, prefetch or read_footer_of raises the named
+# error, its reads carry its first ETag in If-Match, and a new handle reads
+# the new version), test_s3_fs_options (S3FsOptions), test_s3_http_config (a
 # non-default HttpClientConfig reaches the HTTP client of S3Store, S3Fs,
 # S3ConditionalStore and their clones: a body cap and a request budget
 # observed on the wire), test_s3_retry_quota_clones (a clone of S3Fs or
 # S3ConditionalStore retries on its own AwsRetryQuota after the original
-# spent its own) and test_no_env_reads (the package's sources read no
+# spent its own), test_s3_shared_creds (temporary
+# credentials rotate under cloned clients: komira_aws_core's
+# SharedCredsSource over the real default chain, scripted, signs the request
+# after the refresh window with the new credential on an S3Fs, an
+# S3ConditionalStore and each one's clone, one refresh for all of them),
+# test_s3_fs_shared_creds_clone (an S3Fs and its clone, over AwsEchoConnector,
+# sign with the shared chain's credential of the moment: one refresh for
+# both), test_s3_endpoint_scheme (the endpoint's scheme picks the connector:
+# s3_endpoint_is_plaintext's answers and refusals, an http:// endpoint read
+# over the plaintext side of komira_http_client's SchemeConnector and an
+# https:// one over the TLS side, the production factory's and s3_prod_fs's
+# choice, and the production type cloning without dialing),
+# test_s3_fs_scripted_read (an S3Fs and its clone each read over a
+# ScriptedConnector with a store of their own, a built store kept through a
+# move, and the production connector's TLS form refusing a plaintext
+# http:// endpoint) and test_no_env_reads (the package's sources read no
 # environment).
 #
-# test_s3_conditional_store and test_s3_fs each hold a fake S3: a test here
-# is built from its one source file, so the two cannot share a module
-# without a library of their own. They differ in what they serve (the
-# conditional PutObject and its 409; budgets, traps, suffix ranges and
-# multipart), and a change to S3's answers is made in both.
+# test_s3_conditional_store and test_s3_fs share one fake S3,
+# komira_test_fake_s3 (src/tests/helpers), named in `test_deps` with
+# komira_counters (test_s3_fs_inflight's fake counts requests in flight in a
+# process-wide GlobalCounterTable): they reach
+# the welded tests only, never this library's package, closure or conda
+# package (tools/build/mojo/test_deps.bzl).
 mojo_library(
     name = "komira_objectstore_s3",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_async:komira_async",
         "//src/komira_aws_s3:komira_aws_s3",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_fork_join:komira_fork_join",
         "//src/komira_fs:komira_fs",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_retry:komira_retry",
+    ],
+    test_deps = [
+        "//src/komira_counters:komira_counters",
+        "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
         "tests/test_no_env_reads.mojo": {
@@ -83,12 +118,18 @@ mojo_library(
         "tests/test_no_env_reads.mojo",
         "tests/test_s3_basics.mojo",
         "tests/test_s3_conditional_store.mojo",
+        "tests/test_s3_endpoint_scheme.mojo",
         "tests/test_s3_fs.mojo",
         "tests/test_s3_fs_clone.mojo",
+        "tests/test_s3_fs_inflight.mojo",
+        "tests/test_s3_fs_one_version.mojo",
         "tests/test_s3_fs_options.mojo",
+        "tests/test_s3_fs_scripted_read.mojo",
+        "tests/test_s3_fs_shared_creds_clone.mojo",
         "tests/test_s3_http_config.mojo",
         "tests/test_s3_presign.mojo",
         "tests/test_s3_retry_quota_clones.mojo",
+        "tests/test_s3_shared_creds.mojo",
         "tests/test_s3_store.mojo",
         "tests/test_s3_wire.mojo",
     ],

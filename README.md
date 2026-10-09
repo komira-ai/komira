@@ -50,7 +50,7 @@ remote-execution service, and what to do when something goes wrong.
 | [docs/knowledge_graph.md](docs/knowledge_graph.md) | the knowledge graph: not here yet (it returns as a Mojo tool) |
 | [docs/index.md](docs/index.md) | the canonical docs, and what each is the authority for |
 | [tools/build/examples/](tools/build/examples/) | small targets using each rule |
-| [DEVELOPMENT.md#repository-layout](DEVELOPMENT.md#repository-layout) | the repository layout: every Mojo module directly under `src/`, tooling in `tools/` |
+| [DEVELOPMENT.md#repository-layout](DEVELOPMENT.md#repository-layout) | the repository layout: every Mojo module komira ships directly under `src/`, test-only packages under `src/tests/`, tooling in `tools/` |
 | [third_party/](third_party/) | C and C++ libraries built from pinned source archives, for Mojo code to call |
 
 ## License

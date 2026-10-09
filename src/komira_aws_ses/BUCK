@@ -1,0 +1,83 @@
+load(
+    "@komira//third_party/botocore:models.bzl",
+    "botocore_endpoint_file",
+    "botocore_endpoint_tests_path",
+    "botocore_model",
+)
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+
+# Amazon SES, the classic API: an awsQuery client generated at build time
+# from botocore's ses model (//third_party/botocore, pinned by sha256;
+# nothing of it is copied here), in client mode: each operation's request
+# builder (a form body) and response parser (its <OpResult> element), its
+# endpoint resolved through the service's published endpoint ruleset and
+# partition table, embedded in the module, and `SESClient`, which resolves
+# each call's endpoint and sends through komira_aws_core's
+# send_sigv4_signed_request over the komira_http_core Connector it is
+# given. The host is `email.<region>` and the signing name `ses`, both from
+# the ruleset and the model, as for SES API v2 (//src/komira_aws_sesv2).
+#
+# `operations` is inbound mail routing, which SES API v2 does not have: a
+# receipt rule set created and made the active one (or none active), the
+# active set read back with its rules, and a receipt rule created in a set
+# and deleted from it. The generator refuses none of them. An operation
+# joins the list with its own rows in the tests below.
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Amazon SES API reference (no upstream test body is copied):
+# test_ses_requests (the form body each operation builds, exactly, a rule's
+# nested lists of structures included, and the model's bounds refused
+# before the wire), test_ses_responses (each result read from its wrapper,
+# and the <ErrorResponse> read through komira_aws_core), test_ses_endpoints
+# (botocore's endpoint cases for ses through every operation's resolver,
+# the regional, FIPS, dual-stack and LocalStack endpoints, and two requests
+# signed end to end against independently computed signatures),
+# _no_env_reads (written by mojo_aws_client: the package reads no
+# environment) and test_ses_client (the generated client over a scripted
+# connector: one call answered, one error per verb raised under its code,
+# and each verb's request as it reached the wire, through komira_aws_core's
+# AwsEchoConnector).
+#
+# No test here talks to the service.
+
+_SES = botocore_model("ses")
+
+_ENDPOINT_TESTS = botocore_endpoint_tests_path("ses")
+
+mojo_aws_client(
+    name = "komira_aws_ses",
+    endpoint_rules = _SES.endpoint_rules,
+    mode = "client",
+    model = _SES.model,
+    model_sha256 = _SES.sha256,
+    operations = [
+        "CreateReceiptRule",
+        "CreateReceiptRuleSet",
+        "DeleteReceiptRule",
+        "DescribeActiveReceiptRuleSet",
+        "SetActiveReceiptRuleSet",
+    ],
+    partitions = _SES.partitions,
+    test_data = {
+        "tests/test_ses_endpoints.mojo": {
+            _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
+        },
+    },
+    test_srcs = [
+        "tests/test_ses_client.mojo",
+        "tests/test_ses_endpoints.mojo",
+        "tests/test_ses_requests.mojo",
+        "tests/test_ses_responses.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        # test_ses_endpoints reads botocore's endpoint cases with it.
+        "//src/komira_json:komira_json",
+        # The client's `send_with` takes a komira_retry loop.
+        "//src/komira_retry:komira_retry",
+        "//src/komira_xml:komira_xml",
+    ],
+)

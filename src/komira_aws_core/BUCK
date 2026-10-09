@@ -56,13 +56,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # never signs, so test_sigv4_test_suite alone covers them.
 # test_aws_xml_codec and test_aws_rest_xml_errors check the restXml body
 # codec and error readers (aws_xml.mojo) row by row against the Smithy
-# restXml protocol and the AWS docs. test_xml_canonical_differential checks
-# komira_xml's canonical form against the conformance harness's XML
-# equivalence over every body of botocore's rest-xml corpus: it reads the
-# verdicts xml-equiv-verdicts writes, the target
-# //tools/build/proto-codegen:rest_xml_verdicts, and the corpus they were
-# written from. Welding it makes this library's build depend on that Rust
-# tool and its run over the corpus, as well as on the corpus itself.
+# restXml protocol and the AWS docs. komira_xml's canonical form is checked
+# against the conformance harness's XML equivalence by the test-only package
+# //src/tests/conformance/komira_xml_conformance, not here: welded here, it
+# made this library's build depend on the xml-equiv-verdicts Rust tool.
 # test_aws_retry checks the retry classifier, policy, attempt limit and
 # quota against botocore's standard retry mode, reading
 # botocore/retries/standard.py, quota.py and special.py from the botocore
@@ -88,6 +85,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # ruleset, and requires each to pass. test_env_source_only scans the
 # package's own sources, staged as its data, for any environment read
 # outside sources.mojo.
+# shared_creds.mojo is the one Copyable credential source over a refreshing
+# chain (komira_sync's SpinMutex behind an ArcPointer), and
+# process_creds.mojo the default chain of a process in that type. Its test,
+# test_shared_creds, runs the real chain over a scripted container endpoint
+# and a clock it advances, with clones of the source and real threads
+# (komira_fork_join, a dependency for that test): rotation, one refresh for
+# all clones, single flight, a failed refresh, the named error with canary
+# secrets kept out of it, and a source that never expires; test_shared_creds_clone
+# checks, over a provider that caches by value, that clones read the one
+# provider's cache; test_http_credential_transport checks the scheme-split
+# transport's routing (http, https, any other refused) over scripted
+# transports.
 _FIXTURES = glob(["tests/fixtures/*"])
 
 # botocore's S3 endpoint ruleset, partition table and endpoint test cases,
@@ -113,16 +122,6 @@ _RETRIES = {
     ]
 }
 
-# botocore's rest-xml protocol case files, read from the same archive, each
-# staged at its path in it.
-_REST_XML_CORPUS = {
-    path: "//third_party/botocore:protocol_tests[{}]".format(path)
-    for path in [
-        "tests/unit/protocols/input/rest-xml.json",
-        "tests/unit/protocols/output/rest-xml.json",
-    ]
-}
-
 mojo_library(
     name = "komira_aws_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -131,11 +130,13 @@ mojo_library(
         "//src/komira_clock:komira_clock",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_encoding:komira_encoding",
+        "//src/komira_fork_join:komira_fork_join",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         "//src/komira_libc:komira_libc",
         "//src/komira_retry:komira_retry",
+        "//src/komira_sync:komira_sync",
         "//src/komira_xml:komira_xml",
     ],
     test_srcs = [
@@ -157,15 +158,17 @@ mojo_library(
         "tests/test_endpoint_resolution.mojo",
         "tests/test_endpoint_rules_library.mojo",
         "tests/test_endpoint_signing.mojo",
+        "tests/test_http_credential_transport.mojo",
         "tests/test_env_source_only.mojo",
         "tests/test_idempotency_token.mojo",
         "tests/test_s3_endpoint_rules.mojo",
         "tests/test_s3_wire.mojo",
         "tests/test_shared_config.mojo",
+        "tests/test_shared_creds.mojo",
+        "tests/test_shared_creds_clone.mojo",
         "tests/test_signed_request.mojo",
         "tests/test_sigv4_refusals.mojo",
         "tests/test_sigv4_test_suite.mojo",
-        "tests/test_xml_canonical_differential.mojo",
     ],
     test_data = {
         "tests/test_credential_chain.mojo": _FIXTURES,
@@ -182,9 +185,6 @@ mojo_library(
         },
         "tests/test_s3_endpoint_rules.mojo": _ENDPOINT_RULES,
         "tests/test_aws_retry.mojo": _RETRIES,
-        "tests/test_xml_canonical_differential.mojo": {
-            "rest_xml_verdicts.tsv": "//tools/build/proto-codegen:rest_xml_verdicts",
-        } | _REST_XML_CORPUS,
         "tests/test_endpoint_rules_library.mojo": {
             "botocore/data/partitions.json": _ENDPOINT_RULES["botocore/data/partitions.json"],
         },

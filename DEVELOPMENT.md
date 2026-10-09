@@ -16,13 +16,16 @@ configured only by a `.buckconfig.local` you write.
 
 | directory | holds |
 |---|---|
-| `src/<module>/` | one Mojo library per directory, directly under `src/`. The directory name is the import name (`from komira_crypto import ...`) and the name of its `mojo_library`; there are no nested Mojo namespaces, because a nested one has to re-export every child. A module's tests are in its own `tests/`, and a binary is declared in its module's own package. |
+| `src/<module>/` | one Mojo library komira ships per directory, directly under `src/`. The directory name is the import name (`from komira_crypto import ...`) and the name of its `mojo_library`; there are no nested Mojo namespaces, because a nested one has to re-export every child. A module's tests are in its own `tests/`, and a binary is declared in its module's own package. |
+| `src/tests/<kind>/<module>/` | a package that exists only to test others, by kind: `e2e` (end-to-end and loopback tests), `conformance` (against an external suite), `helpers` (test harnesses no shipped library depends on). Same rules as `src/<module>/`; the `src_layout` lint keeps an `*_e2e`, `*_loopback` or `*_conformance` package out of `src/<module>/` ([architecture](docs/architecture.md#end-to-end-tests)). |
 | `tools/` | the build rules, toolchains and platforms, the lints, and the end-to-end tests cell (`tools/build/tests`) |
 | `docs/` | the repository's documentation |
 | `third_party/` | C and C++ libraries built from pinned source archives |
 
-A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`;
-the Markdown link check reads its files with nothing more ([step 2](#2-build-linux-x86_64)).
+A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`
+and a row in the [module map](docs/architecture.md#the-module-map), which
+`//:src_layout` requires; the Markdown link check reads its files with
+nothing more ([step 2](#2-build-linux-x86_64)).
 A library kci owns is named `kci_<x>`.
 
 ## 1. Get buck2
@@ -275,13 +278,19 @@ service.
   not match refuses the action. The compile runs on the macOS workers and the
   toolchain unpack runs on Linux x86_64 workers of the same service. Checks:
   [check.sh](tools/build/tests/functional/darwin/check.sh).
-- Known gap, not fixed on main yet and being fixed: the macOS test gate loses
-  the runtime library path (macOS strips `DYLD_*` variables passed through
-  `/usr/bin/env`), so a welded test of a `darwin-arm64` library fails because a
-  runtime library is not found. A target with no gated test,
-  `//tools/build/examples:hello`, is reported to build there; section 7 of
-  [check.sh](tools/build/tests/functional/darwin/check.sh) is the check, and it
-  needs macOS workers.
+- Welded tests and the runtime library path: a test binary finds the Mojo
+  runtime libraries through `DYLD_LIBRARY_PATH`, which the macOS gate runner
+  sets. macOS drops every `DYLD_*` variable when it starts one of its protected
+  binaries (everything in `/bin` and `/usr/bin`, so every busybox applet on a
+  macOS worker), so the runner starts the test itself, with no applet such as
+  `env` in between. Two checks need no macOS worker:
+  `tests//functional/test_data:runner_cases` (a build action) and section 6 of
+  [check.sh](tools/build/tests/functional/darwin/check.sh) run the macOS
+  runner against a busybox that drops `DYLD_*` as macOS does. Section 7 of
+  check.sh builds `//tools/build/examples/libgate_ok:libgate_ok`, whose welded
+  test needs the variable, on the macOS workers. A C or C++ dependency cannot
+  build for `darwin-arm64` yet (the C toolchain is Linux x86_64 only), so no
+  welded test with native code runs on macOS.
 
 ## Host floor
 

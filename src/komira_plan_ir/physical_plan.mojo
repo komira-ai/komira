@@ -3,17 +3,17 @@
 # =============================================================================
 #
 # This module is the home of the in-process PhysicalPlan IR shared between
-# `komira_compiler` (emitter) and the engine (consumer). These structs are
-# INERT data — no Arc, OwnedPointer, ArcPointer, UnsafePointer, Atomic,
-# callbacks, closures, or trait-object fields. The inert constraint is
-# enforced by a repository structural lint and the schema-drift canary
-# `PHYSICAL_PLAN_IR_VERSION` defined below.
+# the plan compiler (emitter) and the engine (consumer); neither is in this
+# tree. These structs are INERT data — no Arc, OwnedPointer, ArcPointer,
+# UnsafePointer, Atomic, callbacks, closures, or trait-object fields. The inert
+# constraint is enforced by a repository structural lint and the schema-drift
+# canary `PHYSICAL_PLAN_IR_VERSION` defined below.
 # =============================================================================
 
 # ⚠ NO `from std.testing import assert_true` HERE. This is an INERT-IR module,
 # and the version door raises an `Error` whose message it builds ONLY on the
 # failing path -- `assert_true` evaluates its message eagerly, and the door
-# runs on every cut of every query.
+# is written to run on every cut of every query.
 
 from komira_plan_expr.expr import Expr
 from komira_plan_expr.agg_expr import AggExpr
@@ -42,7 +42,7 @@ from komira_collections.slab import Slab
 #   - A change that makes routing depend on a previously-inert field -> bump
 #     (a compatibility marker even with no layout change).
 #   - Pure renames where new and old names mean the same thing -> NO bump
-#     (but coordinate with `unified/` callers in the same commit).
+#     (but update every caller in the same commit).
 #
 # Enforcement: a code-review responsibility AND a repository lint that fires
 # when this file's variant struct bodies change without a bump in the same
@@ -120,7 +120,7 @@ comptime PHYSICAL_PLAN_IR_VERSION_UNCHECKABLE: StaticString = (
 """The token this door puts in its zero-segment refusal.
 
 ⚠ IT IS A `comptime` CONSTANT SO A CLASSIFIER CAN IMPORT IT RATHER THAN
-RE-SPELL IT. The `@extern` boundary (`komira_sdk/optimizer_physical_result.mojo`)
+RE-SPELL IT. The `@extern` boundary (in the SDK; not in this tree)
 has to tell a door refusal apart from a pass refusal -- a door refusal means the
 PRODUCER emitted a physical plan this binary cannot read, which is not the
 caller's bug and is not fixed by resubmitting -- and a second spelling on the
@@ -141,11 +141,13 @@ def assert_physical_plan_ir_version_compatible(
     THIS binary. Raises on the first mismatch, naming the segment and both
     versions.
 
-    Called ONCE per cut at the plan-entry chokepoint
-    (`segment_cutter.cut_and_admit`). It takes the whole segment list rather
-    than one segment so the chokepoint stays a single call site: a per-segment
-    call scattered through the cutter is the shape that gets partially deleted
-    later, leaving some segments unchecked and the gate still green.
+    Written to be called ONCE per cut at the plan-entry chokepoint
+    (`segment_cutter.cut_and_admit`). That cutter is not in this tree, and
+    nothing here calls this function except its test. It takes the whole
+    segment list rather than one segment so the chokepoint stays a single call
+    site: a per-segment call scattered through a cutter is the shape that gets
+    partially deleted later, leaving some segments unchecked and the gate still
+    green.
 
     ⚠ AN EMPTY PLAN IS NOT CHECKABLE AND IS NOT A PASS. Zero segments means the
     caller has nothing whose version could be compared, and a door that returns
@@ -159,15 +161,16 @@ def assert_physical_plan_ir_version_compatible(
             ": asked to verify the IR",
             " version of a plan with ZERO segments. Nothing was compared, so",
             " this is a REFUSAL, not a pass -- an empty plan reaching the",
-            " version door means the cutter emitted no DAG.",
+            " version door means its producer emitted no segments.",
         )
     for i in range(len(segments)):
         var seen = segments[i].ir_version
         if seen == PHYSICAL_PLAN_IR_VERSION:
             continue
-        # ⚠ THE MESSAGE IS BUILT ONLY ON THE FAILING PATH. This door runs on
-        # EVERY cut of EVERY query; N message constructions per plan, for a
-        # check that passes every time, is real work on the plan path.
+        # ⚠ THE MESSAGE IS BUILT ONLY ON THE FAILING PATH. This door is
+        # written to run on EVERY cut of EVERY query; N message constructions
+        # per plan, for a check that passes every time, is real work on the
+        # plan path.
         raise Error(
             PHYSICAL_PLAN_IR_VERSION_MISMATCH,
             ": segment seg_id=",
@@ -180,7 +183,7 @@ def assert_physical_plan_ir_version_compatible(
             PHYSICAL_PLAN_IR_VERSION,
             ". Either the two packages are built from different revisions",
             " (rebuild both), or a field was added/removed/retyped in",
-            " core/plan/physical_plan.mojo without bumping",
+            " komira_plan_ir/physical_plan.mojo without bumping",
             " PHYSICAL_PLAN_IR_VERSION in the same change. Do NOT silence",
             " this: the struct layouts have diverged, and reading a",
             " SegmentDescPod through the wrong layout was measured to",
@@ -192,7 +195,7 @@ def assert_physical_plan_ir_version_compatible(
 # Tag constants for tagged unions
 # =============================================================================
 
-# MorselSource tags
+# Source tags (`SegmentDescPod.source_kind`)
 comptime SOURCE_PARQUET: UInt8 = 0     # Read from Parquet file
 comptime SOURCE_BATCH: UInt8 = 1       # Read from in-memory RecordBatch
 comptime SOURCE_SINK_OUTPUT: UInt8 = 2 # Read from a completed sink's output
@@ -207,7 +210,7 @@ comptime OP_JOIN_PROBE: UInt8 = 3      # Hash join probe (streaming)
 # MorselOp tag values 4-13 are retired and must not be reused; the next free
 # tag id is 14.
 
-# MorselSinkTag tags
+# Sink tags (`SegmentDescPod.sink_kind`)
 comptime SINK_AGG: UInt8 = 0           # Hash aggregation
 comptime SINK_SORT: UInt8 = 1          # Full sort
 comptime SINK_TOPN: UInt8 = 2          # TopN (fused sort + limit)
@@ -234,10 +237,10 @@ struct ParquetRowWindow(Copyable, Movable, ImplicitlyCopyable):
     (file-major, row-group-order) sequence. Carried on `ParquetSourceData` ONLY
     for a scan-only / projection-only `df.slice(offset, length)` pushdown (the
     child chain must not change cardinality/order — no filter / breaker). The
-    collect leaf resolves this window against the footer row-group prefix sums
-    (`resolve_row_group_window`) into a targeted flat-RG index range so the
-    source decodes ONLY the row groups that overlap the window, then trims the
-    concatenated result to exactly `[offset, offset + length)`.
+    collect leaf (in the engine; not in this tree) resolves this window
+    against the footer row-group prefix sums into a targeted flat-RG index
+    range so the source decodes ONLY the row groups that overlap the window,
+    then trims the concatenated result to exactly `[offset, offset + length)`.
 
     Fields:
         offset: absolute row offset over the ordered table (>= 0).
@@ -265,12 +268,12 @@ struct ParquetSourceData(Movable):
             `Some(empty())` is the un-filtered Hive read (surfaces partition
             cols, prunes nothing).
         fs_descriptor: the per-source FS IDENTITY POD (scheme +
-            bucket/container + node_id). Defaulted to `FsDescriptorPod.local()`
-            (scheme=FILE, node_id=-1) — the local default. When
-            `has_binding()` is True (a non-negative node_id) the engine
-            resolver looks up the live `FsHandle` in the `komira_fs_registry`
-            side table by node_id; otherwise the local default resolver is
-            used. Core names NO FS type here — only the identity POD. See
+            bucket/container + node_id): the exact source the scan reads,
+            its scheme the code komira_source_url maps the source URL's
+            prefix to. Defaulted to `FsDescriptorPod.local()` (scheme=FILE,
+            node_id=-1) — the local default. Core names NO FS type here —
+            only the identity POD; the file system that reads the source is
+            the one whose `SCHEME` is this scheme. See
             `komira_plan_expr/fs_descriptor_pod.mojo`.
     """
     var file_path: String
@@ -279,22 +282,21 @@ struct ParquetSourceData(Movable):
     # --- Hive dir-scan fields — both defaulted (List[Field]() / None). ---
     var hive_partition_cols: List[Field]
     var hive_predicate: Optional[PartitionPredicatePod]
-    # --- Defaulted to FsDescriptorPod.local() (local default). The live
-    #     FsHandle is paired to this POD's node_id in the komira_fs_registry
-    #     side table at materialize time. ---
+    # --- Defaulted to FsDescriptorPod.local() (local default). Names the
+    #     source; the plan carries no live file system. ---
     var fs_descriptor: FsDescriptorPod
-    # --- Defaulted False. ONLY the col-untyped agg-source
-    #     path (`_source_parquet_scan_batches`) sets it True, which
+    # --- Defaulted False. ONLY the engine's col-untyped agg-source
+    #     path (not in this tree) sets it True, which
     #     turns on `hooks.set_dict_preservation(True)` inside
-    #     `materialize_parquet_collect_batches` so the numeric dict arms of
-    #     `_decode_column_pages` emit NUMERIC DICTIONARY Columns. Scoped to the
+    #     the engine's parquet collect so the numeric dict arms of
+    #     the page decoder emit NUMERIC DICTIONARY Columns. Scoped to the
     #     agg source so scan-collect / to_parquet (which can't consume a numeric
     #     DICTIONARY column) stay on the flat path. ---
     var preserve_numeric_dict: Bool
     # --- The EXPLICIT enumerated file list for a
     #     flat multi-file OR eager-Hive-partitioned read. DEFAULTED EMPTY
     #     (empty ⇒ discovery keys off `file_path` alone). When NON-empty the collect
-    #     leaf (`build_columnar_source_and_collect`) builds discovery from THIS list
+    #     leaf (in the engine; not in this tree) builds discovery from THIS list
     #     via `EagerGlobDiscovery.open_paths` (flat, when `hive_partition_cols` is
     #     empty) or `PrunedHiveDiscovery.from_listing` (partition-aware, when
     #     `hive_partition_cols` is non-empty), rather than `DISC.open(fs,
@@ -318,35 +320,35 @@ struct ParquetSourceData(Movable):
     #     those on the sink-absorption fallback). ---
     var row_window: Optional[ParquetRowWindow]
     # --- The STRING dict-preservation ARM
-    #     selector. DEFAULTED **True**: `materialize_parquet_typed_stage`
-    #     turns `hooks.set_dict_preservation(True)` on for a HASH_AGG breaker,
-    #     which makes `_decode_column_pages` emit DICTIONARY (codes + per-RG
-    #     dict page) Columns for STRING group keys instead of a dense
-    #     StringArray that `_dict_to_string_array` has to build.
+    #     selector. DEFAULTED **True**: the engine's typed parquet stage (not
+    #     in this tree) turns `hooks.set_dict_preservation(True)` on for a
+    #     HASH_AGG breaker, which makes the page decoder emit DICTIONARY (codes
+    #     + per-RG dict page) Columns for STRING group keys instead of a dense
+    #     StringArray built from the dictionary.
     #
     #     WHY A FIELD AND NOT AN ENV PROBE. The DENSE-STRING arm must stay
     #     reachable through the real engine so the end-to-end parquet-decode
-    #     -> HASH_AGG differential exists. The session knob
-    #     `EngineContext.set_string_dict_preservation(...)` is stamped onto
+    #     -> HASH_AGG differential exists. The engine's session knob (not in
+    #     this tree) is stamped onto
     #     this POD at the typed-grouped-agg dispatch sites and the
     #     materialize site consults the POD — production API, not an
     #     environment variable.
     #
     #     SCOPE. Read ONLY inside the `B.tag() == BREAKER_HASH_AGG` comptime
-    #     scope of `materialize_parquet_typed_stage`. That scope gate is
+    #     scope of the engine's typed parquet stage. That scope gate is
     #     load-bearing (a non-HASH_AGG breaker handed a DICTIONARY column
     #     tcmalloc-crashes) — this field can only ever move a
     #     HASH_AGG string group key BACK onto the dense-STRING decode that every
     #     other breaker already takes, never the other way. ---
     var preserve_string_dict: Bool
     # --- The per-column integral-narrowing
-    #     instructions carried down from `ScanData.payload_narrow` by
-    #     `join_node_exec._resolve_filter_scan_side`. EMPTY at construction at
+    #     instructions carried down from `ScanData.payload_narrow` by the
+    #     engine's join executor (not in this tree). EMPTY at construction at
     #     every site (it is deliberately NOT a ctor argument — see the same note
     #     on `ScanData.payload_narrow`).
     #
     #     ⚠ IT IS ADVISORY, AND EXACTLY ONE LEAF HONOURS IT.
-    #     `materialize_join.materialize_parquet_join` narrows the BUILD-side
+    #     The engine's parquet join materializer narrows the BUILD-side
     #     resident batch on the way in and widens the joined batch on the way
     #     out, so the narrow representation is created and destroyed inside one
     #     function. Any other consumer of a `ParquetSourceData` carrying this
@@ -392,7 +394,8 @@ struct ParquetSourceData(Movable):
 # carried by value. `ParquetSourceData`, `MorselOp`, and every `*SinkData`
 # struct (`AggSinkData`, `SortSinkData`, `TopNSinkData`, `PartitionBySinkData`,
 # `PartitionTopNSinkData`, `AsofJoinSinkData`, `HashBuildSinkData`,
-# `SMJBuildSinkData`) each have independent consumers in the operators tree.
+# `SMJBuildSinkData`) each have independent consumers in the engine's
+# operators, which are not in this tree.
 # =============================================================================
 
 # =============================================================================
@@ -409,8 +412,9 @@ struct AggSinkData(Movable):
         presorted: True when the input plan advertises a sort order whose
             prefix equals the group-by keys in order (i.e. the S3
             streaming-sort strategy is candidate-eligible). Computed by
-            `_compile_aggregate` in plan_compiler; consumed by
-            `FlatHashAggSink` via `choose_strategy`. Defaults False for
+            the plan compiler; consumed by the engine's hash-aggregation
+            sink via `choose_strategy` (`komira_agg_api`). The compiler and
+            the sink are not in this tree. Defaults False for
             call sites that do not know the input order.
         estimated_groups: Plan-time cardinality estimate (from Parquet
             stats / logical plan hints). 0 means "unknown" -- the sink
@@ -455,16 +459,17 @@ struct SortSinkData(Movable):
         sort_keys: Column names to sort by.
         descending: Per-key sort direction flags.
         memory_budget: Bytes; 0 = unlimited (concat-then-sort path).
-            >0 = route through ExternalSorter (engine/sort_external.mojo)
-            with input-side spill at this byte budget. Threaded by the plan
-            compiler from MorselScheduler op_budget.
+            >0 = route through the engine's external sorter with
+            input-side spill at this byte budget. Threaded by the plan
+            compiler from the scheduler's operator budget (the engine and
+            the compiler are not in this tree).
         nulls_first: Per-key EXPLICIT NULL placement, or EMPTY for "derive".
 
     ★★ `nulls_first` IS EMPTY-MEANS-DERIVE, AND THAT IS THE WHOLE COMPATIBILITY
     STORY. An EMPTY list means "the engine's
     own derived default", `null_order_policy.derived_nulls_first(descending[i])`
     (`logical_plan_variants._resolve_nulls_first`) — so a construction site
-    that does not ask gets the default arm of `_execute_sort_sink`.
+    that does not ask gets the default arm of the engine's sort sink.
 
     ⛔ AN EMPTY LIST IS NOT `[False, False, ...]`. Spelling the default as
     all-false would hard-code one placement at every construction site;
@@ -473,8 +478,8 @@ struct SortSinkData(Movable):
     THIRD state neither boolean can encode.
 
     ⚠ LENGTH IS CHECKED WHERE IT IS READ, NOT HERE. A non-empty list of the
-    wrong length is a producer bug, and the sink refuses it BY NAME rather than
-    indexing past the end (`_resolve_sink_nulls_first`).
+    wrong length is a producer bug, and the engine's sort sink (not in this
+    tree) refuses it BY NAME rather than indexing past the end.
     """
     var sort_keys: List[String]
     var descending: List[Bool]
@@ -583,7 +588,7 @@ def is_explicit_nulls_first_request(
         # A producer bug. Report it as EXPLICIT so the caller's decline /
         # refusal arm runs, rather than reading past the end or answering with
         # the default. The arity is checked and named where the placement is
-        # CONSUMED (`_explicit_single_key_nulls_first`).
+        # CONSUMED, in the engine (not in this tree).
         return True
     for i in range(n):
         if nulls_first[i] != derived_nulls_first(descending[i]):
@@ -643,10 +648,9 @@ struct PartitionTopNSinkData(Movable):
 
     CONTRACT for the engine:
       - `func` is the window-function tag from `partition_expr.mojo`
-        (`PF_ROW_NUMBER = 0`, `PF_RANK = 1`). The current `_combine_compact`
-        + `_combine_generic` paths in `partition_topn_sink.mojo`
-        implement ROW_NUMBER semantics (first K rows by sort key per
-        partition, no tie handling). For RANK, the engine must:
+        (`PF_ROW_NUMBER = 0`, `PF_RANK = 1`). The engine's PartitionTopN sink
+        (not in this tree) implements ROW_NUMBER semantics (first K rows by
+        sort key per partition, no tie handling). For RANK, the engine must:
           1. Use `over_fetch_k` as the heap capacity (NOT `k`).
           2. After collecting the top `over_fetch_k` rows by sort key,
              compute a rank for each row (1 + count of rows with strictly
@@ -722,9 +726,10 @@ struct AsofJoinSinkData(Movable):
     resolved output schema (left cols as-is + right cols force-nullable
     with `_right` suffix on name collisions).
 
-    The merge kernel is a two-cursor walker + generic
-    `_find_best_asof[strategy, dtype]` + interleave materialization over
-    batch-ingested sides (both sides loaded, sorted, walked).
+    The engine's merge kernel (not in this tree) is a two-cursor walker + a
+    best-match search generic over (strategy, dtype) + interleave
+    materialization over batch-ingested sides (both sides loaded, sorted,
+    walked).
 
     Fields:
         left_keys / right_keys: Parallel equi-key column names (BY).
@@ -749,12 +754,12 @@ struct AsofJoinSinkData(Movable):
     var output_schema: Schema
     # Resolved once at plan-compile time (inverse of
     # ArrowType.from_dtype over the output_schema lookup for `left_asof`).
-    # Kernel dispatch (`asof_merge_dispatch`) reads this to pick the
+    # The engine's kernel dispatch (not in this tree) reads this to pick the
     # correct (strategy, dtype) monomorph without re-inspecting schemas.
     var asof_dtype: DType
     # seg_id of the right-side materialization segment. The
     # executor's SINK_ASOF_JOIN branch pulls the right RecordBatch back
-    # from `sink_outputs[right_seg_id]` at materialize time (batch-ingest
+    # from that segment's sink output at materialize time (batch-ingest
     # topology -- both sides land as single pre-materialized batches, then
     # the walker runs once). The -1 sentinel produces a clear failure.
     var right_seg_id: Int
@@ -821,11 +826,11 @@ struct HashBuildSinkData(Movable):
 #
 # SMJ build is strictly simpler than hash build: no hash table is constructed.
 # The sink is an identity pass -- it accumulates the build-side RecordBatch so
-# the probe can read it back via `sink_outputs` and run the sort-merge kernel
-# directly. Carrying a distinct tag (SINK_SMJ_BUILD) instead of reusing
-# SINK_HASH_BUILD eliminates a wasted HashBuildSink construction and
-# naturally prevents the streaming-join fusion
-# fast path (`_can_stream_parquet_join` gates on SINK_HASH_BUILD) from firing
+# the probe can read it back from that sink's output and run the sort-merge
+# kernel directly. Carrying a distinct tag (SINK_SMJ_BUILD) instead of reusing
+# SINK_HASH_BUILD eliminates a wasted hash-build sink construction and
+# naturally prevents the engine's streaming-join fusion
+# fast path (it gates on SINK_HASH_BUILD) from firing
 # on SMJ pipelines -- SMJ probe cannot fuse with a streaming build.
 # =============================================================================
 
@@ -836,7 +841,8 @@ struct SMJBuildSinkData(Movable):
     Fields:
         key_names: Build-side key column names. For single-key SMJ this
             list has length 1; multi-key SMJ is not yet supported and the
-            plan_compiler downgrades multi-key SORT_MERGE hints to HASH.
+            plan compiler (not in this tree) downgrades multi-key
+            SORT_MERGE hints to HASH.
         join_type: Join type constant (JOIN_INNER; LEFT/RIGHT/FULL SMJ are
             not yet supported).
     """
@@ -885,7 +891,7 @@ struct MorselOp(Movable):
     # references (no rename), no column is dropped and none is duplicated. Such an
     # op changes the column ORDER and NOTHING ELSE, so a consumer that resolves
     # its inputs BY NAME may see through it. Derived at cut time from the two
-    # schemas (`segment_cutter._project_reorders_only`), never asserted by a
+    # schemas by the segment cutter (not in this tree), never asserted by a
     # producer -- the property is a fact about the node, so deriving it covers
     # whichever pass emits the next one. Default False: absent proof, an
     # OP_PROJECT is opaque.
@@ -896,21 +902,21 @@ struct MorselOp(Movable):
     var probe_right_keys: List[String] # build-side key column names for OP_JOIN_PROBE (len >= 1)
     var probe_join_type: UInt8 # join type for OP_JOIN_PROBE
     # Physical-algorithm selector for OP_JOIN_PROBE. Orthogonal to probe_join_type;
-    # plan_compiler resolves JOIN_ALGO_AUTO to a concrete algo (HASH today, cost
-    # model later). join_probe.mojo dispatches to the SMJ kernel when
-    # probe_algo == JOIN_ALGO_SORT_MERGE.
+    # the plan compiler resolves JOIN_ALGO_AUTO to a concrete algo (HASH today,
+    # cost model later), and the engine's join probe dispatches to the SMJ kernel
+    # when probe_algo == JOIN_ALGO_SORT_MERGE. Neither is in this tree.
     var probe_algo: UInt8
     var probe_output_cols: Optional[List[String]]  # late-materialization projection (OP_JOIN_PROBE)
     # Non-equi / range / complex join residual predicate (OP_JOIN_PROBE).
-    # Set by `plan_compiler._compile_join` from `JoinData.residual` after the
-    # `join_predicate_decompose` pass has lifted every `Expr.left == Expr.right`
-    # conjunct into `probe_left_keys`/`probe_right_keys`. The residual Expr is
-    # already rewritten to plain (COL_SIDE_NONE) col-refs over the joined-row
-    # schema (left cols [0..L), right cols [L..L+R) with `_right` collision
-    # rename) so the engine can `_eval_predicate` it directly against the
-    # assembled matched-pair batch. When set, the join probe routes through
-    # `execute_residual_join_probe`. `Expr` is inert IR data
-    # (same as `filter_predicate`), so this field keeps the IR inert.
+    # Set by the plan compiler (not in this tree) from `JoinData.residual`
+    # after the `join_predicate_decompose` pass has lifted every `Expr.left ==
+    # Expr.right` conjunct into `probe_left_keys`/`probe_right_keys`. The
+    # residual Expr is already rewritten to plain (COL_SIDE_NONE) col-refs over
+    # the joined-row schema (left cols [0..L), right cols [L..L+R) with
+    # `_right` collision rename) so the engine can evaluate it directly against
+    # the assembled matched-pair batch. When set, the engine's join probe takes
+    # its residual path. `Expr` is inert IR data (same as `filter_predicate`),
+    # so this field keeps the IR inert.
     var probe_residual: Optional[Expr]
 
     @staticmethod
@@ -1060,11 +1066,11 @@ struct MorselOp(Movable):
 # bans pointer/thunk/operator-by-value FIELDS in this file. A descriptor that
 # carried kernel thunks or a state `OwnedPointer` COULD NOT be inert IR. So the
 # descriptor is pure POD here (passes the lint); the fn-ptr kernel-thunk table +
-# the erased state live in a runtime module (`segment_desc_registry.mojo`) that
-# this file never imports. The sink is a TAG TRIPLE (sink_kind / sink_key_dtype /
-# sink_orientation), NEVER a sink struct by value — a god-struct line. Params
-# are erased behind `sink_param_id` so the descriptor is CONSTANT-WIDTH across
-# the sink zoo.
+# the erased state live in a runtime module of the engine (not in this tree)
+# that this file never imports. The sink is a TAG TRIPLE (sink_kind /
+# sink_key_dtype / sink_orientation), NEVER a sink struct by value — a
+# god-struct line. Params are erased behind `sink_param_id` so the descriptor
+# is CONSTANT-WIDTH across the sink zoo.
 #
 # SAFETY: the driver holds `List[SegmentDescPod]`, NEVER a byte-slab of
 # segments — `SegmentDescPod` and `MorselOp` carry `List`/`String` inner fields,
@@ -1107,7 +1113,7 @@ comptime KEY_DTYPE_STRING: UInt8 = 5
 
 
 struct SourceSpecPod(Movable):
-    """POD source spec — the LANDED closed 4-kind `MorselSource` vocabulary as an
+    """POD source spec — the closed 4-kind `SOURCE_*` vocabulary as an
     INLINE descriptor field (source symmetry: the source set is bounded and
     is NOT the growth axis a new SINK kind widens, so it stays inline, not erased).
 
@@ -1146,19 +1152,18 @@ struct SourceSpecPod(Movable):
     -- a DERIVED CACHE kept for single-path readers. So a consumer that
     rebuilds a `ParquetSourceData` from an untotal spec reads FILE 0 OF N and
     returns a well-formed batch with the other N-1 files' rows missing.
-    `komira_sdk.multifile_scan_fields` names exactly this: "A resident collect
-    leaf that builds a `ParquetSourceData` from `source_path` alone (empty
-    `explicit_paths`) silently decodes ONLY file 0". This pod is the same
-    construction reached from the PHYSICAL side, and it is the one that
-    crosses an ABI.
+    A resident collect leaf that builds a `ParquetSourceData` from
+    `source_path` alone (empty `explicit_paths`) silently decodes ONLY file 0.
+    This pod is the same construction reached from the PHYSICAL side, and it
+    is the one that crosses an ABI.
 
     ★ DERIVED, NEVER DECLARED -- same rule, same reason, as
     `MorselOp.project_reorders_only`. The verdict is computed at the CUT, from
-    the `ScanData` in hand (`segment_cutter._parquet_spec_is_total`), not stamped
+    the `ScanData` in hand by the segment cutter (not in this tree), not stamped
     by whoever happens to construct a pod. A caller cannot assert it.
 
     ⚠ DEFAULT FALSE, SO EVERY OTHER PRODUCER FAILS CLOSED. A `SourceSpecPod`
-    built by a test, by `komira_pplan.lower`, or by any future minter that does
+    built by a test, or by any future minter that does
     not derive the verdict says "not total" and is refused by a consumer that
     checks -- which is the safe direction. A default of True would make every
     unaudited producer look audited.

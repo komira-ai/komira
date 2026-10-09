@@ -6,7 +6,8 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library")
 # reached through the FFI declarations in ffi.mojo.
 #
 # The library has no welded tests (no test_srcs); its test is the standalone
-# :test_dbstorable_sqlite_crud below.
+# :test_dbstorable_sqlite_crud below. The komira_db contract suites run
+# against it from //src/tests/conformance/komira_db_conformance.
 
 mojo_library(
     name = "komira_db_sqlite",
