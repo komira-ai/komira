@@ -1,7 +1,9 @@
 # Design: `OptimizedPlan`, a serializable optimized plan
 
-Status: proposed, not built. Scope: komira's plan wire, optimizer, plan cutter, executor admission, and user code in
-plans (UDF nodes and the environment image, §10, specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md)).
+Status: proposed, not built. Scope: komira's plan wire, optimizer, plan cutter, executor admission, user code in
+plans (UDF nodes and the environment image, §10, specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md)),
+and sources, index access paths and graph operators (§15, specified in
+[`optimized_plan_sources.md`](optimized_plan_sources.md)).
 
 Pinned commit: komira `origin/main` at `af1d841f`. Paths are cited as `path:line`; the line numbers were read at
 `547e9849`, and `git diff 547e9849 af1d841f` (and onward to `8bfba390`) is empty for `src/komira_plan_proto`,
@@ -144,6 +146,7 @@ message OptimizedPlanBody {
   WirePlan               plan      = 1;  // one uncut plan, decoded in the OPTIMIZED context
   repeated SharedSubplan shared    = 2;  // targets of cse_ref (§4.3)
   repeated ScanPin       scan_pins = 3;  // the snapshot each scan was optimized against (§6.2)
+  repeated PinGroup      pin_groups = 4; // recorded multi-table snapshot sets (§15.3.4)
 }
 
 message PlanAdvice {
@@ -151,6 +154,7 @@ message PlanAdvice {
   repeated ScanStats    stats_basis = 2;  // the statistics the optimizer used
   repeated UdfOrigin    udf_origins = 3;  // {udf_index, display_name, file, line, captured_version}; diagnostics
                                           // only (§10.3)
+  repeated IndexCoverage index_coverage = 4;  // what each pinned index generation does not cover (§15.5.2)
 }
 ```
 
@@ -227,11 +231,14 @@ Field numbers are the next free numbers at the pinned commit.
 | `WireScanNode` | `uint32 pin_ref = 12` | Required. Index into `scan_pins`. |
 | `WireScanNode` | `row_count` (9), `has_table_stats` (11) | **Refused in OPTIMIZED.** Statistics have one home, `advice.stats_basis`, outside the digest; no host decision reads a producer statistic. |
 | `WireScanNode` | `Boundedness boundedness = 13` (`BOUNDED`, `UNBOUNDED`) | Required in OPTIMIZED; admitted in RAW too (below). Marks a source with no end, which makes the plan a streaming plan. |
+| `WireScanNode` | `WireAccessPath access_path = 14` | Required in OPTIMIZED; admitted in RAW. The scan's access path (full, text index, vector index), with its index generation and consistency mode (§15.5). |
+| `WirePlan` | new arms `index_lookup = 23`, `expand = 24` | A query per input row against an index, and graph traversal (§15.6, §15.7). Admitted in both contexts. |
 | `WirePlan` | new arm `WireExchangeNode exchange = 20` | `{child = 1, kind = 2 (GATHER, BROADCAST, HASH, RANGE), keys = 3, key_encoding = 4, ordering = 5, partitions = 6, adaptive_allowed = 7}`. `partitions = 0` means "filled in at the cut" (§8). |
 
 The UDF arms of §10.4 (`WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, the `AGG_UDF` aggregate function),
-the `WireField` addition `children`, and `WireScanNode.boundedness` are an exception to this table's heading: they
-are admitted in both contexts, because a stored bound plan contains UDFs and streaming sources too. OPTIMIZED refuses
+the `WireField` addition `children`, `WireScanNode.boundedness`, and the §15 additions (`access_path` and the two
+arms above) are an exception to this table's heading: they are admitted in both contexts, because a stored bound plan
+contains UDFs, streaming sources, searches and traversals too. OPTIMIZED refuses
 the name-keyed `WireUdfCall` and the node-level `WireUdf` (`OPTIMIZED_UDF_LEGACY_FORM`).
 
 **A join's distribution is derived, not recorded.** No exchange below a join means local; a broadcast exchange on
@@ -321,7 +328,9 @@ The **complete list of host-local rules**:
 6. choice of morsel size, and of operator variant within a node's recorded algorithm;
 7. spill;
 8. the adaptive changes of §8.3, only where `adaptive_allowed` is set;
-9. UDF worker count, thread limits and batch slicing, within `UdfResources` (§10.8, §10.10).
+9. UDF worker count, thread limits and batch slicing, within `UdfResources` (§10.8, §10.10);
+10. the three source rules of §15.8.3 (numbered 10-12 there): a reaped topic span read from a descendant snapshot,
+    top-k per split, and the uncovered-file overlay of an `EXACT` index read.
 
 A host change that alters a §5.2 field or the shape, other than by these rules, is a defect, and the post-condition
 in §7.3 catches it.
@@ -366,6 +375,7 @@ message DeclaredNeeds {
   reserved 6, 7; reserved "python_abi", "node_abi";  // a draft's per-language ABI fields; see runtimes
   bool             unbounded   = 8;  // true iff some scan in the body is UNBOUNDED (§5.2)
   repeated RuntimeNeed runtimes = 9; // one entry per runtime id used by udfs, sorted by id
+  repeated DataScope scopes    = 10; // every table, tail, index, topic and prefix the pins name (§15.10.2)
 }
 
 message RuntimeNeed {               // udf_runtime_interface.md §3.2
@@ -401,12 +411,12 @@ The host checks against the decoded body:
 ```proto
 message ScanPin {
   string binding_key      = 1;  // the scan's binding identity
-  bytes  data_fingerprint = 2;  // a table snapshot token, or sha256 over sorted (path, size, etag)
+  bytes  data_fingerprint = 2;  // sha256 over sorted (path, size, etag); typed pins are in §15.3
 }
 ```
 
 Every scan pins the data it was optimized against. `WireScanBinding` already distinguishes a pinned snapshot from a
-live one (`snapshot_policy` and `snapshot_token`, `plan.proto:380-389`); a pin generalizes that to every scan source.
+live one (`snapshot_policy` and `snapshot_token`, `plan.proto:382-389`); a pin generalizes that to every scan source.
 The host resolves each pin **before
 lowering** and refuses a mismatch with `OPTIMIZED_PLAN_SNAPSHOT_STALE`. It neither re-optimizes nor reads newer
 data. The footers that payload narrowing and scan sharing read come from that verified open, and data reads are
@@ -416,6 +426,11 @@ the read rather than being truncated by a stale narrowing *(inferred mechanism)*
 **An `UNBOUNDED` scan pins the stream, not its contents,** which keep growing: `data_fingerprint` names the stream and
 its schema, and the stale-pin check refuses a stream whose identity or schema changed. Where a run starts reading is
 run state, a checkpointed source position, outside the plan and its digest.
+
+**Typed pins** (§15.3). `ScanPin` gains typed arms: an Iceberg snapshot with its table uuid and metadata file, a
+topic's offsets with its rolled table, a row store's (snapshot, log seq), a Delta version, an index generation; and
+pin groups for a recorded multi-table snapshot set. The producer resolves a `SNAPSHOT_LIVE` binding into its pin at
+optimize time, and an unresolved one is refused (`OPTIMIZED_SCAN_LIVE_UNRESOLVED`).
 
 A file list that would push the message over the 16 MiB reader budget (`plan_wire_admit.mojo:255`) travels as a
 manifest object referenced by digest *(inferred need: large partitioned listings)*.
@@ -472,7 +487,7 @@ bytes (`OPTIMIZED_PLAN_NOT_CANONICAL`). Then
 ```
 plan_digest = sha256(body ‖ canonical(DigestTrailer))
 DigestTrailer = { format_version, optimizer_contract_version, write_target, needs.udfs, needs.runtimes,
-                  needs.data_scopes }
+                  needs.data_scopes, needs.scopes }
 ```
 
 The trailer binds the plan's effect, the code it runs (by digest; the environment image that holds it is outside the
@@ -529,6 +544,7 @@ The host, or the coordinator before a cut, runs steps 1-12:
    - `OPTIMIZED_UDF_ROW_READ_SET_INVALID`, `OPTIMIZED_UDF_ROW_NULL_MODE`
    - `OPTIMIZED_FIELD_UNSUPPORTED` (a statistics field on a node, §5.2)
    - on a segment only: `OPTIMIZED_EXCHANGE_PARTITIONS_UNSET`
+   - the structural refusals of §15.10.1 (its pin refusals run in step 9)
 9. **Pins and environment.** Resolve and verify every pin (`OPTIMIZED_PLAN_SNAPSHOT_STALE`). Repeat §10.11 checks 1-3
    and run checks 4-7 against the image this host runs (`OPTIMIZED_ENV_CODE_MISSING`, `OPTIMIZED_ENV_PACKAGE_MISSING`,
    `OPTIMIZED_ENV_RESERVED_PATH`, `OPTIMIZED_UDF_DESCRIPTOR_INVALID`, `OPTIMIZED_UDF_KIND_UNSUPPORTED`). Bind each
@@ -581,6 +597,7 @@ message OptimizedSegment {
   DeclaredNeeds          needs              = 6;  // udfs is the parent's list, unchanged, so udf_index stays valid
   repeated SharedSubplan shared             = 7;  // the entries this segment references
   repeated ScanPin       scan_pins          = 8;  // the parent's list, unchanged, so pin_ref stays valid
+  repeated PinGroup      pin_groups         = 12; // the parent's list, unchanged (§15.3.4)
   oneof body {
     WirePlan logical = 10;                        // OPTIMIZED context; exchange leaves replaced (§8.2)
   }
@@ -959,3 +976,13 @@ references to it stay valid.
    stay within §10.11's two prefixes: the image builder installs such libraries into a relocatable prefix there, the
    worker, not the supervisor, gets it on its library path, and a library that cannot be relocated is refused by name
    at build time. *(Inferred: not yet tried against real packages.)*
+
+---
+
+## 15. Sources, index operators and graph operators
+
+Specified in [`optimized_plan_sources.md`](optimized_plan_sources.md), §15.1-§15.13. In brief: Iceberg, Delta,
+Hive-style Parquet, topic (tail plus rolled table) and row-store reads are scan kinds with typed snapshot pins; text
+and vector search over a table are an access path on its scan, pinned to an index generation with a consistency mode,
+and every hit is checked against the scan's pin; a per-row index lookup and a graph traversal are two new arms; the
+optimizer's choice of index or scan is a node field that hosts obey; and every SDK emits the same nodes.
