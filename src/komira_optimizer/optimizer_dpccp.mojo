@@ -458,7 +458,7 @@ def _relation_graph_is_connected(
         return True
     var parent = _compute_relation_components(n, neighbors)
     if len(parent) == 0:
-        return True
+        return True  # cov: unreachable _compute_relation_components returns n entries and n > 1 here
     var first = parent[0]
     for i in range(1, len(parent)):
         if parent[i] != first:
@@ -1449,9 +1449,9 @@ def solve_dpccp_with_cost(
                 if not first_hit:
                     take_aug = True
                 else:
-                    var aug_cost = aug_full_hit.value().cost
-                    var first_cost = first_hit.value().cost
-                    if aug_cost < first_cost:
+                    var aug_cost = aug_full_hit.value().cost  # cov: unreachable the trigger fires only when the first pass has no full-set entry, so first_hit is empty
+                    var first_cost = first_hit.value().cost  # cov: unreachable see the line above
+                    if aug_cost < first_cost:  # cov: unreachable see the line above
                         take_aug = True
                 if take_aug:
                     # Replay every dp_aug entry into dp. The reconstruction
