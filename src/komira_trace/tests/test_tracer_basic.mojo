@@ -154,6 +154,58 @@ def test_capturing_exporter_clear() raises:
     print("  test_capturing_exporter_clear PASS")
 
 
+def test_close_in_a_later_drain_makes_no_record() raises:
+    """A span drained while open comes out OPEN with end_ns = 0; its CLOSE,
+    drained later with no OPEN in that drain, matches nothing and yields no
+    record. Pins current behaviour (the late CLOSE is dropped); it catches a
+    join that turns an unmatched CLOSE into a record.
+    """
+    var t = Tracer(num_workers=1)
+    t.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
+    var sid = t.start_span["split.window"](worker_id=0)
+    var first = CapturingExporter()
+    t.drain_into_capture(first)
+    assert_equal(first.count(), Int(1), "the open span is drained once")
+    assert_equal(first.captured_spans[0].span_id, sid, "its span id")
+    assert_equal(first.captured_spans[0].status, SPAN_STATUS_OPEN, "still open")
+    assert_equal(first.captured_spans[0].end_ns, UInt64(0), "no end yet")
+
+    t.end_span(span_id=sid, worker_id=0)
+    var second = CapturingExporter()
+    t.drain_into_capture(second)
+    assert_equal(
+        second.count(), Int(0), "a CLOSE without its OPEN yields no record"
+    )
+    print("  test_close_in_a_later_drain_makes_no_record PASS")
+
+
+def test_duplicate_span_id_close_patches_first_open() raises:
+    """Two OPENs with one span id in a drain (reachable only by re-seeding
+    `install_mock_ids`): every CLOSE patches the FIRST record with that id and
+    the second stays open. Pins the join's first-match rule.
+    """
+    var t = Tracer(num_workers=1)
+    t.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(7))
+    var a = t.start_span["dup"](worker_id=0)
+    t.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(7))
+    var b = t.start_span["dup"](worker_id=0, parent_id=UInt64(5))
+    assert_equal(a, b, "re-seeding repeats the span id")
+    t.end_span(span_id=b, worker_id=0)
+    t.end_span(span_id=a, worker_id=0)
+    var exp = CapturingExporter()
+    t.drain_into_capture(exp)
+    assert_equal(exp.count(), Int(2), "one record per OPEN")
+    assert_equal(exp.captured_spans[0].parent_id, UInt64(0), "first OPEN")
+    assert_equal(
+        exp.captured_spans[0].status, SPAN_STATUS_CLOSED, "first record closed"
+    )
+    assert_equal(exp.captured_spans[1].parent_id, UInt64(5), "second OPEN")
+    assert_equal(
+        exp.captured_spans[1].status, SPAN_STATUS_OPEN, "second record open"
+    )
+    print("  test_duplicate_span_id_close_patches_first_open PASS")
+
+
 def main() raises:
     print("test_tracer_basic")
     print("=================")
@@ -167,5 +219,7 @@ def main() raises:
     test_explicit_parent_id_clears_root_flag()
     test_drain_collects_all_records()
     test_capturing_exporter_clear()
+    test_close_in_a_later_drain_makes_no_record()
+    test_duplicate_span_id_close_patches_first_open()
     print()
     print("ALL TESTS PASS")

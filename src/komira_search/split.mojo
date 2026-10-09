@@ -41,7 +41,7 @@
 # =============================================================================
 
 from komira_buffer.byte_buffer import ByteBuffer, write_uleb128
-from komira_lz4.codec import lz4_compress, lz4_decompress
+from komira_compression.lz4 import lz4_compress, lz4_decompress
 
 from .inverted import FinalizedIndex
 from .term_dict import TermDictionary
@@ -679,8 +679,8 @@ struct DocStoreBuilder(Movable, Deinitable):
     the flag byte. All-POD List substrate (clean).
 
     The builder always accumulates UNCOMPRESSED blobs during ingest; compression
-    happens ONCE at serialize (per-blob LZ4 raw block via the shared
-    komira_lz4 codec). `_compress` (default True) toggles it — set it
+    happens ONCE at serialize (per-blob LZ4 raw block via
+    komira_compression's lz4 codec). `_compress` (default True) toggles it — set it
     False to write an uncompressed split (the backward-compat test
     path).
 

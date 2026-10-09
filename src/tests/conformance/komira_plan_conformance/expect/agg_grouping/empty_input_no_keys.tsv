@@ -1,0 +1,10 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: the input is groups filtered by id < 0; ids are 1 to 7, so no
+# row passes (§1.2). §2.3: an aggregate with no grouping keys over zero rows
+# returns one row, COUNT 0 and every other aggregate NULL. Types: §8.6
+# (COUNT, never NULL), §8.1 (SUM), §8.7 (MAX); SUM and MAX are nullable
+# (§2.2, §2.3).
+n:int64	nv:int64	s:int64?	hi:int64?
+0	0	\N	\N

@@ -1,0 +1,55 @@
+"""Held: every spelling of every rule; fixed in 1a2b3c4.
+
+The change 5e6f7a8b9c is in a docstring line, which is prose.
+"""
+
+# Dates, one spelling a line (15):
+# iso 2031-08-31
+# underscore notes_2031_08_31
+# slash 2031/08/31
+# dot 2031.08.31
+# year and month 2031-08
+# eight digits 20310831
+# Aug 31, 2031
+# 31 August 2031
+# August 2030
+# Feb. 3rd, 2031
+# 8/31/2031
+# 31.08.2030
+# 2030-12-01T00:00:00Z
+# unpadded 2031-8-31
+# day first with dashes 31-08-2031
+
+# Home directories (4):
+# /home/jdoe/src
+# /Users/jdoe/Library
+var p = "C:\\Users\\jdoe\\AppData"
+# C:\Users\jdoe\x
+
+# Addresses (8):
+# 10.1.2.3 private
+# 172.20.0.5 private
+# 192.168.10.1 private
+# 100.100.1.2 shared
+# 169.254.1.1 link-local
+# 8.8.4.4:53 public, with a port
+# grpc://9.9.9.9 public, after a scheme
+# admin@11.12.13.14 public, after an at sign
+
+# Hosts (7), and the userinfo line is an email too:
+# http://builder:8980/ a single label
+# https://build.corp.zz/x a domain no row allows
+# http://svc.corp.internal/ a private name
+# http://[2001:db8::1]:80/ an IPv6 address
+# https://u:p@deploy.corp.zz:8443/ userinfo and a port
+# HTTPS://UPPER.CORP.ZZ/ capitals
+# postgres://db.corp.zz:5432/x another scheme
+
+# Email addresses (2, and the one above):
+# jdoe@corp.zz
+# Jane.Doe+tag@mail.corp.zz
+
+# Commit ids in comments (3, and the two in the docstring):
+# see 9f8e7d6c5b for the change
+x = 1  # trailing 4e5f6a7b8c
+# 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b

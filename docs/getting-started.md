@@ -123,7 +123,8 @@ are in [tools/build/examples/](../tools/build/examples/).
 
 - **The module's own description** goes at the top of its `__init__.mojo`:
   what the package is and why it is a package of its own.
-  [architecture.md](architecture.md#the-module-map) quotes it.
+  [architecture.md](architecture.md#the-module-map) quotes it, one row per
+  package: add the row in the same change, or `//:src_layout` fails.
 - **A design doc** for a subsystem goes in `docs/design/<doc>.md`, one flat
   directory, and gets a row in [docs/index.md](index.md), which records what
   each canonical doc is the authority for.

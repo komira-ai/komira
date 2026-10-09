@@ -571,7 +571,7 @@ def _run_stage[S: StageSteps](
     if cmd.given(String("--channel")) and steps.platform_env(String(GITHUB_ACTIONS)) == String("true"):
         return _stop_run(
             result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE),
-            String("kci: --channel names a local channel, and ") + String(GITHUB_ACTIONS)
+            String("--channel names a local channel, and ") + String(GITHUB_ACTIONS)
             + String(" is true: a workflow validates only what was published, from the step's channel"),
         )
     # 4. the workflow this job runs under, held to the machine file
