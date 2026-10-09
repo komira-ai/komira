@@ -34,7 +34,8 @@
 #       RULING.]
 #   R4  `id-token: write` is in a job's own `permissions` exactly when its
 #       stage needs an identity token: it publishes to a channel whose
-#       credential is OIDC trusted publishing (`id_token_stages`), or it is
+#       credential is OIDC trusted publishing, holds a DEPLOY step, or
+#       publishes into a cell (`id_token_stages`, id_token.mojo), or it is
 #       farm-connected (the farm connection exchanges the job's identity
 #       token for a network credential). Never in the workflow-level
 #       `permissions`, which reach every job. No other job carries it.
@@ -125,6 +126,9 @@
 #           S EXACTLY ONCE (`--only step:<s>` runs no validation, and a job
 #           without `--only` runs all of S), so the split runs what one FULL
 #           run would, and each job's result says SELECTIVE;
+#         * a part job never runs a DEPLOY_PROBE validation that has a
+#           `target`: it holds neither the DEPLOY step's recorded outputs
+#           nor a token, so `kci run` would refuse it at start;
 #         * a part job runs in NO environment (R2), never holds `id-token:
 #           write` nor uses the farm-connect action (R4, R11), and `needs`
 #           the job named after the stage, and besides it only the stage's
@@ -163,8 +167,7 @@
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
-from kci_api import DEFAULT_MACHINE_FILE, Selector, parse_selector
-from kci_release_channel import Channel, find_channel, parse_channels_file
+from kci_api import DEFAULT_MACHINE_FILE, VALIDATION_KIND_DEPLOY_PROBE, Selector, parse_selector
 from kci_release_machine import Selection, Stage, ReleaseMachine, joined_names, resolve_selection
 
 from .auto_promotion import (
@@ -174,6 +177,7 @@ from .auto_promotion import (
     check_pull_request_paths,
     check_push_filter,
 )
+from .id_token import ChannelsFile, id_token_stages
 from .kci_run_calls import KciRunCall, kci_run_calls
 from .pull_request import check_no_secret, check_pull_request_job, check_release_only
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
@@ -181,72 +185,6 @@ from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read
 comptime FARM_CONNECT_ACTION: String = "./.github/actions/farm-connect"
 """The one local action a workflow may use (R8), and the step a
 farm-connected stage's job must have (R11)."""
-
-struct ChannelsFile(Copyable, Movable):
-    """A channels file's path, as a machine-file step names it, and its
-    text. Layout: owned Strings. No pointer field."""
-
-    var path: String
-    var text: String
-
-    def __init__(out self, var path: String, var text: String):
-        self.path = path^
-        self.text = text^
-
-
-def _channels_text(files: List[ChannelsFile], path: String) raises -> String:
-    for i in range(len(files)):
-        if files[i].path == path:
-            return files[i].text.copy()
-    raise Error(String("the channels file '") + path + String("' was not given"))
-
-
-def channels_paths(g: ReleaseMachine) -> List[String]:
-    """Every distinct channels path a PUBLISH step names, in file order: what
-    `id_token_stages` needs read."""
-    var out = List[String]()
-    for i in range(len(g.stages)):
-        for k in range(len(g.stages[i].steps)):
-            ref s = g.stages[i].steps[k]
-            if not s.is_publish():
-                continue
-            var seen = False
-            for j in range(len(out)):
-                if out[j] == s.channels:
-                    seen = True
-            if not seen:
-                out.append(s.channels.copy())
-    return out^
-
-
-def _channel_is_oidc(ch: Channel) -> Bool:
-    for i in range(len(ch.repositories)):
-        ref r = ch.repositories[i]
-        if r.credential and r.credential.value().is_oidc_trusted_publishing():
-            return True
-    return False
-
-
-def id_token_stages(g: ReleaseMachine, files: List[ChannelsFile]) raises -> List[String]:
-    """The stages that need a CI identity token: those with a PUBLISH step
-    whose channel publishes by OIDC trusted publishing. Raises when a
-    channels file is not given or is refused, or names no such channel."""
-    var out = List[String]()
-    for i in range(len(g.stages)):
-        ref st = g.stages[i]
-        var needs = False
-        for k in range(len(st.steps)):
-            ref s = st.steps[k]
-            if not s.is_publish():
-                continue
-            var channels = parse_channels_file(_channels_text(files, s.channels))
-            var ch = find_channel(channels, s.channel)
-            if _channel_is_oidc(ch):
-                needs = True
-        if needs:
-            out.append(st.name.copy())
-    return out^
-
 
 def _path(p: String) -> String:
     var s = p.copy()
@@ -517,6 +455,8 @@ def _check_job(
         var why = String("' publishes by OIDC trusted publishing")
         if not publishes_by_oidc:
             why = String("' is farm-connected")
+        elif _writes_cell(st):
+            why = String("' writes into a cell (a DEPLOY step or a PUBLISH into a cell), which kci reaches by OIDC")
         findings.append(
             where + String(": R4: stage '") + st.name + why
             + String(", so the job needs `id-token: write` in its own permissions")
@@ -707,6 +647,19 @@ def _check_split(
                     + st.steps[s].name + String("' of stage '") + st.name
                     + String("'; only the job named after the stage runs its steps")
                 )
+            for v in range(len(st.steps[s].validations)):
+                ref pv = st.steps[s].validations[v]
+                if (
+                    pv.kind == VALIDATION_KIND_DEPLOY_PROBE
+                    and pv.wrote(String("target"))
+                    and _member(sel.validations, pv.name)
+                ):
+                    findings.append(
+                        _at(doc, job_nodes[parts[k]]) + String("R9: job '") + job_ids[parts[k]]
+                        + String("' runs validation '") + pv.name + String("' of stage '") + st.name
+                        + String("', a DEPLOY_PROBE with a target; a part job holds neither the DEPLOY step's")
+                        + String(" recorded outputs nor a token, so only the job named after the stage runs it")
+                    )
         ids.append(job_ids[parts[k]].copy())
         sels.append(sel^)
     var over = String("job ") if len(ids) == 1 else String("jobs ")
@@ -737,6 +690,13 @@ def _one_runner(st: Stage, over: String, kind: String, name: String, by: List[St
             String("R9: stage '") + st.name + String("': ") + kind + String(" '") + name + String("' is run by ")
             + String(len(by)) + String(" jobs (") + joined_names(by) + String(")")
         )
+
+
+def _writes_cell(st: Stage) -> Bool:
+    for i in range(len(st.steps)):
+        if st.steps[i].writes_cell():
+            return True
+    return False
 
 
 def _stage_index(g: ReleaseMachine, name: String) -> Int:

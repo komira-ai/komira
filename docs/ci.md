@@ -644,10 +644,12 @@ HEAD:refs/heads/MAIN`); it must be refused.
   machine file and every channels file it names (rules R1-R12 and R14-R22 of
   `src/kci_workflow_check/rules.mojo` and `auto_promotion.mojo`: a job per stage named for it, each job's
   environment its stage's, `needs` the jobs that run the stage's `after`,
-  `id-token: write` only where a stage publishes by trusted publishing or is
-  farm-connected, one `kci run` per job with `--summary-file`, `--only` only
-  in a split stage whose jobs run all of it once (a validations-only job has
-  no environment, no identity token, and needs the stage's own job), a
+  `id-token: write` only where a stage publishes by trusted publishing,
+  deploys or publishes into a cell, or is farm-connected, one `kci run` per
+  job with `--summary-file`, `--only` only in a split stage whose jobs run
+  all of it once (a validations-only job has no environment, no identity
+  token, needs the stage's own job, and runs no `DEPLOY_PROBE` that has a
+  `target`), a
   `pull_request` trigger and no job for the PULL_REQUEST stage (rule R6),
   the inputs `revision`, `reason` and `dry_run`, every `uses:` pinned,
   `farm-connect` exactly on farm-connected stages, and the auto-promotion

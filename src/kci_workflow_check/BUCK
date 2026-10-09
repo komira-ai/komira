@@ -8,11 +8,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # machine file owns the stages; the workflow must agree: one job per stage with
 # the stage's name, running in the stage's environment, `needs` = the stage's
 # `after`, `id-token: write` exactly on the stages that publish by OIDC
-# trusted publishing or are farm-connected, the farm-connect action exactly on
-# the farm-connected stages, one literal `kci run --stage <id>` per job with a
-# `--summary-file`, a pull_request trigger exactly when the machine file
-# declares a PULL_REQUEST stage, whose job is then the only one a pull request
-# runs (same-repository pull requests only, no environment, `contents: read`
+# trusted publishing, deploy or publish into a cell, or are farm-connected,
+# the farm-connect action exactly on the farm-connected stages, one literal
+# `kci run --stage <id>` per job with a `--summary-file`, a pull_request
+# trigger exactly when the machine file declares a PULL_REQUEST stage, whose
+# job is then the only one a pull request runs (same-repository pull requests
+# only, no environment, `contents: read`
 # and the farm connection's token, `--affected-by` the pull request's base
 # commit, the full history) while every other job's `if:` keeps a pull request
 # out, a `revision` input on workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
@@ -65,6 +66,10 @@ mojo_library(
         # R15-R20 and R4's allow-list: mutations of the repository's own kci.yml
         # and machine file, each ending in its rule's finding
         "tests/test_ci_auto_promotion.mojo",
+        # steps that write into a cell: a DEPLOY step or a PUBLISH into a
+        # cell puts its stage in id_token_stages (R4) with no channels file;
+        # a part job never runs a DEPLOY_PROBE that has a target (R9)
+        "tests/test_ci_cell_steps.mojo",
     ],
     # The repository's own release workflow, machine file and channels file
     # (the root BUCK and release/BUCK), the pixi pin its validate job

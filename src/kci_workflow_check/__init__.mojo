@@ -12,8 +12,11 @@
 #                         with `pull_request_file`, the pull request's check
 #                         (pr.yml, `check_pull_request_workflow`);
 #                         `check_running_workflow`: the start-up check `kci
-#                         run` makes; `id_token_stages`: which stages publish
-#                         by OIDC; `kci_run_calls`
+#                         run` makes
+#   id_token.mojo         `id_token_stages`: which stages need a CI identity
+#                         token (an OIDC channel, a DEPLOY step, a PUBLISH
+#                         into a cell); `channels_paths`: the channels files
+#                         that takes
 #   pull_request.mojo     R6: pr.yml's one job runs the PULL_REQUEST stage
 #                         (same-repository pull requests only, `contents:
 #                         read` and the farm connection's token); the
@@ -71,13 +74,11 @@ from kci_workflow_check.auto_promotion import (
     documentation_paths,
 )
 from kci_workflow_check.kci_run_calls import KciRunCall, kci_run_calls
+from kci_workflow_check.id_token import ChannelsFile, channels_paths, id_token_stages
 from kci_workflow_check.rules import (
     FARM_CONNECT_ACTION,
-    ChannelsFile,
-    channels_paths,
     check_running_workflow,
     check_pull_request_workflow,
     check_workflow,
     check_workflow_doc,
-    id_token_stages,
 )
