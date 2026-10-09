@@ -93,6 +93,9 @@ def test_near_misses_keep_counting() raises:
     no.append("comptime X = {\n    1: 2,\n")
     no.append("comptime X = (\n    1,\nstruct S:\n    def f(self) -> Int:\n        return 1\n")
     no.append("comptime X = {\n    1: 2,\nstruct S:\n    def f(self) -> Int:\n        return 1\n")
+    # a function inside a statement whose braces balance around it: the
+    # walk never reads it as a statement, decls finds it
+    no.append("comptime X = {\nstruct S:\n    def f(self) -> Int:\n        return 1\n}\n")
     # a one-line body that opens a bracket and ends in `: ...`
     no.append("trait T:\n    def f(self) -> Int: y[1: ...\n")
     # a carriage return with no line feed: one line to the lexer

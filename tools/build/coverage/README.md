@@ -261,9 +261,10 @@ Everything else counts, declarations included (`def`, `struct`,
 
 Except in a **declaration-only** file (`declaration_only` in
 `covcheck/decls.mojo`, whose declaration reader is the one authority on
-which declarations are requirements, with a body of `...` alone, and where
-that body ends): one whose every declaration is such a requirement inside a
-trait's block, and every other statement outside the
+which declarations are functions and which are requirements, with a body of
+`...` alone): one in which that reader finds no function, every declaration
+it finds is a requirement inside a trait's block, and every other statement
+outside the
 imports is, at the top level, a `trait` header or a `comptime`
 declaration, and in a trait's block a `comptime` declaration, a decorator
 or `...`. Such a file, if it has no exemption marker and no branch record,
@@ -276,7 +277,11 @@ indentation, a statement still open at the end of the file, a file the
 lexer ends inside a string, a carriage return not followed by a line feed
 all keep the file counted. It assumes (and does not check) that a
 `comptime` initialiser and a requirement's default-argument expressions
-are computed at compile time and emit no code to run.
+are computed at compile time and emit no code to run. A known limit: the
+lexer reads a backslash before a quote as an escape in a raw string too, so
+contrived text that puts it out of step with the compiler and back in step
+before the end of the file can hide a line of code from the heuristic and
+from this test alike.
 
 ## Functions with no recorded line
 

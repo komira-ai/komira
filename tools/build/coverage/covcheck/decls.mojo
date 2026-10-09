@@ -60,11 +60,11 @@ whose code the compiler emits without line rows.
 
 **Declaration-only files** (`declaration_only`, read by analyze.mojo for a
 file no test compiled). This module's declaration and body reader is the
-one authority on which lines are a requirement (a body of `...` alone) and
-where its body ends; a file is declaration-only when every declaration in
-it is such a requirement, inside a trait's block, and every other
-executable line belongs to a statement that emits no code (so a function,
-whose `def` line is neither, makes it False):
+one authority on which declarations are functions and which are
+requirements (a body of `...` alone), and where a body ends; a file is
+declaration-only when that reader finds no function in it, every
+declaration it finds is a requirement inside a trait's block, and every
+other executable line belongs to a statement that emits no code:
 
 - at the top level, a `trait` header (ending in `:`, or `: ...`) or a
   `comptime` declaration (not one opening a block, as `comptime if` does);
@@ -81,6 +81,11 @@ what follows), a carriage return not followed by a line feed (a CR-only
 file is one line to the lexer). It assumes what a `comptime` initialiser or
 a requirement's default-argument expression computes is computed at
 compile time, emitting nothing at run time.
+
+A known limit: the lexer reads a backslash before a quote as an escape in
+a raw string too, so contrived text in which that puts it out of step with
+the compiler and back in step before the end of the file can hide a line
+of code from the heuristic and from this test alike.
 """
 
 from covcheck.lexer import LexState, SourceLine, executable_lines, lex_line, lex_source
@@ -393,11 +398,13 @@ def declaration_only(text: String) -> Bool:
     unsure."""
     if _bare_cr(text) or _ends_in_string(text):
         return False
-    # decls' reader decides which `def` lines are requirements and where
-    # their bodies end; every other `def` line, a function, falls to the
-    # walk below, which refuses it.
+    # decls' reader is the authority: any function it finds (even one the
+    # walk below would not reach, inside a statement whose brackets balance
+    # around it) makes the file not declaration-only; the requirements it
+    # finds are the only `def` lines the walk accepts.
     var requirements = List[FnDecl]()
-    _ = _declarations(text, requirements)
+    if len(_declarations(text, requirements)) > 0:
+        return False
     # The last line of the requirement each `def` line starts.
     var req_end = Dict[Int, Int]()
     for k in range(len(requirements)):
