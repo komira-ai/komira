@@ -11,7 +11,8 @@
 #   - describe reports what the native runtime requires of a library:
 #     runtime_id komira/native, NATIVE, hosting 0, CONTEXT_PER_THREAD, no
 #     thread_affine, global_lock 0, IN_PROCESS (a library the runtime would
-#     refuse to load);
+#     refuse to load), and exactly its descriptor version 0, its seven
+#     shapes and the CPU (a field reported wrong that no runtime checks);
 #   - validate accepts a fixture's own signature and refuses an unknown entry
 #     (ERR_DESCRIPTOR) and a wrong signature (ERR_UNSUPPORTED), each with a
 #     message (a validate that accepts anything);
@@ -105,6 +106,15 @@ def main() raises:
     assert_equal(caps.words[8], CLASS_NATIVE)
     assert_equal(caps.words[9], 0)
     assert_true(caps.words[1] & SHAPE_SCALAR != 0)
+    assert_equal(caps.words[0], 0, "max_descriptor_version")
+    assert_equal(
+        caps.words[1],
+        SHAPE_SCALAR | SHAPE_ROW | SHAPE_MAP_BATCHES_COLUMN | SHAPE_MAP_BATCHES_FRAME | SHAPE_AGG_PLAIN
+        | SHAPE_AGG_MERGEABLE | SHAPE_STEP,
+        "shapes",
+    )
+    assert_equal(caps.words[4], TRANSPORT_IN_PROCESS, "transports")
+    assert_equal(caps.words[6], DEVICE_CPU, "devices")
 
     assert_equal(_validate(arena, t, rt, host, "double", TYPE_INT64), OK)
     assert_equal(_validate(arena, t, rt, host, "no_such_function", TYPE_INT64), ERR_DESCRIPTOR)

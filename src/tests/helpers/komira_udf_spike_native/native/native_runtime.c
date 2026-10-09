@@ -30,7 +30,8 @@
  * must export komira_udf_native_init_v1 and must not export
  * komira_udf_runtime_init_v1, so a runtime and a user library are never
  * confused. Its init gets this runtime's host struct; its table must be ABI
- * major 1 and cover every required entry; its describe must report
+ * major 1 and cover every required entry (a table refused for either is
+ * never called again, not even its shutdown); its describe must report
  * runtime_id "komira/native", udf_class NATIVE, threading CONTEXT_PER_THREAD
  * or THREAD_SAFE, global_lock 0, no thread_affine and IN_PROCESS, and at
  * load, the spec's shape. A library refused once is refused again with the
@@ -389,8 +390,11 @@ static int32_t open_library(komira_udf_rt* rt, const char* root, const uint8_t s
   else if (l->t->struct_size < offsetof(komira_udf_runtime, memory_report))
     bad_table = "the library's table struct_size ends before a required entry";
   if (bad_table != NULL) {
+    /* No entry of this table is called, shutdown included: a table of
+     * another major has another layout, and a short one has no shutdown
+     * entry. The library's handle is left as it is (the library stays
+     * mapped for good anyway). */
     refuse(l, KOMIRA_UDF_ERR_ABI, bad_table);
-    l->t->shutdown(l->rt);
     l->t = NULL;
     return KOMIRA_UDF_OK;
   }

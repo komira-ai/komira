@@ -13,6 +13,11 @@
 #     relies on).
 #   - udf, context, instance, groups and frame handles: one heap struct
 #     each, made by its open entry and freed by its close entry.
+#   - every block above, and every scratch block, is reserved from the host
+#     (mem_reserve) while it lives and released when it is freed (_box,
+#     _unbox, _scratch, _free_scratch): the host's reserved bytes are how a
+#     test sees a block this library never frees. The harness's host never
+#     refuses a reservation; a refusal is not handled here (spike code).
 #   - `args`, `states` and `group_ids`: moved on entry into the instance's or
 #     the groups' scratch blocks (calls on one of them are serialized by the
 #     host), released here once, before the entry returns.
@@ -64,6 +69,7 @@ from komira_udf_spike_abi.contract import (
 )
 
 from ._arrow import (
+    _cstr,
     arr,
     child,
     fail,
@@ -78,7 +84,6 @@ from ._arrow import (
     release_array,
     set_cpu,
     set_null,
-    _cstr,
 )
 from ._fixtures import (
     F_ARGS_KEPT,
@@ -116,6 +121,7 @@ struct _Rt(Movable):
 
 @fieldwise_init
 struct _Udf(Movable):
+    var host: Void
     var fx: Fixture
     var fields: List[String]
 
@@ -136,6 +142,7 @@ struct _Inst(Movable):
 
 @fieldwise_init
 struct _Groups(Movable):
+    var host: Void
     var fx: Int
     var st: List[Int64]
     var scratch: Void
@@ -143,6 +150,7 @@ struct _Groups(Movable):
 
 @fieldwise_init
 struct _Frame(Movable):
+    var host: Void
     var fx: Int
     var stream: Void
     var done: Bool
@@ -151,19 +159,45 @@ struct _Frame(Movable):
     var max: Int64
 
 
-def _box[T: Movable & ImplicitlyDestructible](var v: T) -> Void:
+def _reserve(host: Void, n: Int):
+    # SAFETY: `host` is the komira_udf_host native_init got, alive until
+    # shutdown returns.
+    var h = host.bitcast[CUdfHost]()
+    _ = h[].mem_reserve(h[].host_data, Int64(n))
+
+
+def _release(host: Void, n: Int):
+    # SAFETY: as _reserve.
+    var h = host.bitcast[CUdfHost]()
+    h[].mem_release(h[].host_data, Int64(n))
+
+
+def _box[T: Movable & ImplicitlyDestructible](host: Void, var v: T) -> Void:
     # SAFETY: a heap slot of this library, untracked because the host holds
     # it across calls; written before the pointer leaves, freed by _unbox.
+    _reserve(host, size_of[T]())
     var p = alloc[T](1).unsafe_origin_cast[MutUntrackedOrigin]()
     p.unsafe_write(v^)
     return p.bitcast[NoneType]()
 
 
-def _unbox[T: Movable & ImplicitlyDestructible](p: Void):
+def _unbox[T: Movable & ImplicitlyDestructible](host: Void, p: Void):
     # SAFETY: `p` came from _box[T] and is freed once, by its close entry.
     var q = p.bitcast[T]()
     q.destroy_pointee()
     q.free()
+    _release(host, size_of[T]())
+
+
+def _scratch(host: Void, n: Int) -> Void:
+    """`n` zeroed bytes, reserved from the host until _free_scratch."""
+    _reserve(host, n)
+    return zeroed(n)
+
+
+def _free_scratch(host: Void, p: Void, n: Int):
+    free_zeroed(p)
+    _release(host, n)
 
 
 def _set_out_slot(slot: Void, v: Void):
@@ -208,33 +242,36 @@ def _load(rt: Void, s: Void, out_p: Void, e: Void) abi("C") -> Int32:
     if rc != OK:
         return rc
     var fields = read_set(s) if fx.shape == SHAPE_ROW else List[String]()
-    _set_out_slot(out_p, _box(_Udf(fx^, fields^)))
+    var host = rt.bitcast[_Rt]()[].host
+    _set_out_slot(out_p, _box(host, _Udf(host, fx^, fields^)))
     return OK
 
 
 def _unload(u: Void) abi("C"):
-    _unbox[_Udf](u)
+    _unbox[_Udf](u.bitcast[_Udf]()[].host, u)
 
 
 def _open_context(rt: Void, slot: UInt32, out_p: Void, e: Void) abi("C") -> Int32:
-    _set_out_slot(out_p, _box(_Ctx(rt, slot)))
+    _set_out_slot(out_p, _box(rt.bitcast[_Rt]()[].host, _Ctx(rt, slot)))
     return OK
 
 
 def _close_context(c: Void) abi("C"):
-    _unbox[_Ctx](c)
+    _unbox[_Ctx](c.bitcast[_Ctx]()[].rt.bitcast[_Rt]()[].host, c)
 
 
 def _open_instance(c: Void, u: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var udf = u.bitcast[_Udf]()
     var host = c.bitcast[_Ctx]()[].rt.bitcast[_Rt]()[].host
-    _set_out_slot(out_p, _box(_Inst(host, udf[].fx.copy(), udf[].fields.copy(), zeroed(_DEVICE_ARRAY))))
+    var scratch = _scratch(host, _DEVICE_ARRAY)
+    _set_out_slot(out_p, _box(host, _Inst(host, udf[].fx.copy(), udf[].fields.copy(), scratch)))
     return OK
 
 
 def _close_instance(i: Void) abi("C"):
-    free_zeroed(i.bitcast[_Inst]()[].scratch)
-    _unbox[_Inst](i)
+    var host = i.bitcast[_Inst]()[].host
+    _free_scratch(host, i.bitcast[_Inst]()[].scratch, _DEVICE_ARRAY)
+    _unbox[_Inst](host, i)
 
 
 # --- call_batch -------------------------------------------------------------------
@@ -283,7 +320,9 @@ def _agg_open(i: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var inst = i.bitcast[_Inst]()
     if inst[].fx.shape != SHAPE_AGG_MERGEABLE:
         return fail(e, ERR_UNSUPPORTED, "agg_open on a fixture of another shape")
-    _set_out_slot(out_p, _box(_Groups(inst[].fx.id, List[Int64](), zeroed(2 * _DEVICE_ARRAY))))
+    var host = inst[].host
+    var scratch = _scratch(host, 2 * _DEVICE_ARRAY)
+    _set_out_slot(out_p, _box(host, _Groups(host, inst[].fx.id, List[Int64](), scratch)))
     return OK
 
 
@@ -317,14 +356,15 @@ def _fold(g: Void, call: Void, values: Void, gids: Void, n_groups: UInt32, e: Vo
 
 
 def _agg_update(g: Void, call: Void, args: Void, gids: Void, n: UInt32, e: Void) abi("C") -> Int32:
+    var host = g.bitcast[_Groups]()[].host
     if g.bitcast[_Groups]()[].fx == F_SUM_ARGS_KEPT:  # the bug: args read in place, never moved
-        var view = zeroed(_DEVICE_ARRAY)
+        var view = _scratch(host, _DEVICE_ARRAY)
         move_array(view, args)
         # Put the host's release back: the host still owns `args`.
         arr(args)[].release = arr(view)[].release
         arr(view)[].release = null_void()
         var rc = _fold(g, call, view, gids, n, e, False)
-        free_zeroed(view)
+        _free_scratch(host, view, _DEVICE_ARRAY)
         return rc
     return _fold(g, call, args, gids, n, e, False)
 
@@ -362,8 +402,9 @@ def _agg_finish(g: Void, n: UInt32, out_p: Void, e: Void) abi("C") -> Int32:
 
 
 def _agg_close(g: Void) abi("C"):
-    free_zeroed(g.bitcast[_Groups]()[].scratch)
-    _unbox[_Groups](g)
+    var host = g.bitcast[_Groups]()[].host
+    _free_scratch(host, g.bitcast[_Groups]()[].scratch, 2 * _DEVICE_ARRAY)
+    _unbox[_Groups](host, g)
 
 
 # --- frames --------------------------------------------------------------------------
@@ -377,7 +418,8 @@ def _stream_release(s: Void):
 
 def _frame_open(i: Void, call: Void, in_p: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var inst = i.bitcast[_Inst]()
-    var mine = zeroed(_STREAM)
+    var host = inst[].host
+    var mine = _scratch(host, _STREAM)
     # Moved in, whatever the status: copy the six words, NULL the source.
     for w in range(6):
         mine.bitcast[Int64]()[w] = in_p.bitcast[Int64]()[w]
@@ -390,9 +432,9 @@ def _frame_open(i: Void, call: Void, in_p: Void, out_p: Void, e: Void) abi("C") 
         rc = start_call(inst[].host, call, e)
     if rc != OK:
         _stream_release(mine)
-        free_zeroed(mine)
+        _free_scratch(host, mine, _STREAM)
         return rc
-    _set_out_slot(out_p, _box(_Frame(inst[].fx.id, mine, False, 0, -1, 0)))
+    _set_out_slot(out_p, _box(host, _Frame(host, inst[].fx.id, mine, False, 0, -1, 0)))
     return OK
 
 
@@ -406,18 +448,18 @@ def _pull(fr: Void, b: Void) -> Int32:
 
 def _next_running_sum(fr: Void, out_p: Void, e: Void) -> Int32:
     var f = fr.bitcast[_Frame]()
-    var b = zeroed(_DEVICE_ARRAY)
+    var b = _scratch(fr.bitcast[_Frame]()[].host, _DEVICE_ARRAY)
     if _pull(fr, b) != 0:
-        free_zeroed(b)
+        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
         return fail(e, ERR_INTERNAL, "the input stream failed")
     if is_null(arr(b)[].release):
         f[].done = True
-        free_zeroed(b)
+        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
         return OK
     var n = length(b)
     if n_children(b) < 1:
         release_array(b)
-        free_zeroed(b)
+        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
         return fail(e, ERR_INTERNAL, "running_sum: no input column")
     var x = child(b, 0)
     make_struct(out_p, n, 1)
@@ -431,7 +473,7 @@ def _next_running_sum(fr: Void, out_p: Void, e: Void) -> Int32:
         f[].running += i64_at(x, r)
         d.bitcast[Int64]()[r] = f[].running
     release_array(b)
-    free_zeroed(b)
+    _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
     set_cpu(out_p)
     return OK
 
@@ -441,10 +483,10 @@ def _next_group_max(fr: Void, out_p: Void, e: Void) -> Int32:
     completed groups' maxima, one row each, in ordinal order."""
     var f = fr.bitcast[_Frame]()
     var done = List[Int64]()
-    var b = zeroed(_DEVICE_ARRAY)
+    var b = _scratch(fr.bitcast[_Frame]()[].host, _DEVICE_ARRAY)
     while len(done) == 0 and not f[].done:
         if _pull(fr, b) != 0:
-            free_zeroed(b)
+            _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
             return fail(e, ERR_INTERNAL, "the input stream failed")
         var at_eos = is_null(arr(b)[].release)
         var n = 0 if at_eos else length(b)
@@ -452,7 +494,7 @@ def _next_group_max(fr: Void, out_p: Void, e: Void) -> Int32:
             f[].done = True
         if n > 0 and n_children(b) < 2:
             release_array(b)
-            free_zeroed(b)
+            _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
             return fail(e, ERR_INTERNAL, "group_max: a batch without its group and value columns")
         for r in range(n + 1):
             var at_end = r == n
@@ -470,7 +512,7 @@ def _next_group_max(fr: Void, out_p: Void, e: Void) -> Int32:
             if not at_end:
                 f[].max = i64_at(child(b, 1), r)
         release_array(b)
-    free_zeroed(b)
+    _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
     if len(done) == 0:
         return OK  # the end
     var d = make_col(out_p, len(done))
@@ -483,18 +525,18 @@ def _next_group_max(fr: Void, out_p: Void, e: Void) -> Int32:
 def _next_step(fr: Void, out_p: Void, e: Void) -> Int32:
     """A step: one length-1 batch of literals in; a table with no columns
     and as many rows as the first literal says, out."""
-    var b = zeroed(_DEVICE_ARRAY)
+    var b = _scratch(fr.bitcast[_Frame]()[].host, _DEVICE_ARRAY)
     var rc = _pull(fr, b)
     fr.bitcast[_Frame]()[].done = True
     if rc != 0:
-        free_zeroed(b)
+        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
         return fail(e, ERR_INTERNAL, "the input stream failed")
     if is_null(arr(b)[].release):
-        free_zeroed(b)
+        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
         return fail(e, ERR_INTERNAL, "a step got no literal batch")
     var rows = i64_at(child(b, 0), 0) if length(b) == 1 and n_children(b) == 1 else Int64(-1)
     release_array(b)
-    free_zeroed(b)
+    _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
     if rows < 0:
         return fail(e, ERR_INTERNAL, "a step's literal batch is not one int64 row")
     make_struct(out_p, Int(rows), 0)
@@ -545,21 +587,27 @@ def _frame_next(fr: Void, call: Void, out_p: Void, e: Void) abi("C") -> Int32:
 
 
 def _frame_close(fr: Void) abi("C"):
+    var host = fr.bitcast[_Frame]()[].host
     var s = fr.bitcast[_Frame]()[].stream
     _stream_release(s)
-    free_zeroed(s)
-    _unbox[_Frame](fr)
+    _free_scratch(host, s, _STREAM)
+    _unbox[_Frame](host, fr)
 
 
 # --- init and shutdown -------------------------------------------------------------------
 
 
+comptime _ID = "komira/native"
+comptime _ABI = "abi1"
+
+
 def _shutdown(rt: Void) abi("C"):
     var r = rt.bitcast[_Rt]()
-    free_zeroed(r[].table)
-    free_zeroed(r[].id)
-    free_zeroed(r[].abi)
-    _unbox[_Rt](rt)
+    var host = r[].host
+    _free_scratch(host, r[].table, size_of[CUdfRuntime]())
+    _free_scratch(host, r[].id, _ID.byte_length() + 1)
+    _free_scratch(host, r[].abi, _ABI.byte_length() + 1)
+    _unbox[_Rt](host, rt)
 
 
 def native_init(host: Void, rt_slot: Void, e: Void) -> Void:
@@ -570,7 +618,7 @@ def native_init(host: Void, rt_slot: Void, e: Void) -> Void:
     if is_null(host) or h[].struct_size < size_of[CUdfHost]() or h[].abi_major != ABI_MAJOR:
         _ = fail(e, ERR_ABI, "this library speaks ABI major 1")
         return null_void()
-    var block = zeroed(size_of[CUdfRuntime]())
+    var block = _scratch(host, size_of[CUdfRuntime]())
     # SAFETY: a zeroed block of the table's size; every entry is written below
     # except memory_report, which stays NULL (no MEMORY_REPORT feature).
     var t = block.bitcast[CUdfRuntime]()
@@ -596,5 +644,7 @@ def native_init(host: Void, rt_slot: Void, e: Void) -> Void:
     t[].agg_finish = _agg_finish
     t[].agg_close = _agg_close
     t[].shutdown = _shutdown
-    _set_out_slot(rt_slot, _box(_Rt(host, block, _cstr("komira/native"), _cstr("abi1"))))
+    _reserve(host, _ID.byte_length() + 1)
+    _reserve(host, _ABI.byte_length() + 1)
+    _set_out_slot(rt_slot, _box(host, _Rt(host, block, _cstr(_ID), _cstr(_ABI))))
     return block

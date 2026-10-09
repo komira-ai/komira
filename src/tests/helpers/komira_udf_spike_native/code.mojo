@@ -106,3 +106,13 @@ def loaded_objects() -> Int:
     """The objects the dynamic loader has mapped into this process
     (native/probe.c)."""
     return Int(external_call["komira_udf_spike_loaded_objects", Int64]())
+
+
+def heap_in_use() -> Int:
+    """The bytes of the C heap in use (native/probe.c, glibc's mallinfo2)."""
+    return Int(external_call["komira_udf_spike_heap_in_use", Int64]())
+
+
+def open_fds() -> Int:
+    """The file descriptors open in this process (native/probe.c)."""
+    return Int(external_call["komira_udf_spike_open_fds", Int64]())
