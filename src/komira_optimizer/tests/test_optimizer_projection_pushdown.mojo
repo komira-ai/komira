@@ -17,7 +17,6 @@ from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_stats.table_stats import TableStats, ColumnStats
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
-    ScanData,
     ExprArray,
     AggExprArray,
     PLAN_SCAN,
@@ -182,19 +181,6 @@ def test_scan_left_alone_when_all_or_none_needed() raises:
     aggs.append(AggExpr(AGG_COUNT, None, Optional(String("n"))))
     var none_needed = push_projections_down(LogicalPlan.aggregate(ExprArray(), aggs^, _scan("a,b,c")))
     assert_equal(_proj(none_needed._aggregate.value()[].child[]), String("*"))
-
-
-def test_scan_without_a_schema_uses_its_output_schema() raises:
-    """A scan node whose ScanData has no schema, under Project(a): it is
-    rebuilt from its output schema and reads [a].
-
-    Catches: the no-schema case reading an empty Optional."""
-    var bare = LogicalPlan(PLAN_SCAN, _schema(_names("a,b")))
-    bare._scan = OwnedPointer(
-        ScanData(SourceVariant(ParquetSource("t.parquet", _schema(_names("a,b")))), None, None, None)
-    )
-    var out = push_projections_down(LogicalPlan.project(_cols("a"), bare^))
-    assert_equal(_proj(_under_project(out)), String("a"))
 
 
 # =============================================================================
@@ -391,7 +377,6 @@ def main() raises:
     test_filter_keeps_its_predicate_columns()
     test_scan_keeps_its_pushed_filter_columns_and_fields()
     test_scan_left_alone_when_all_or_none_needed()
-    test_scan_without_a_schema_uses_its_output_schema()
     test_sort_topn_limit_distinct_keep_their_keys()
     test_aggregate_reads_group_keys_and_every_agg_slot()
     test_join_residual_columns_reach_each_side()

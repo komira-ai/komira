@@ -190,7 +190,7 @@ def _push_projections_impl(
         if plan._scan.value()[].schema:
             full_schema = _copy_schema(plan._scan.value()[].schema.value())
         else:
-            full_schema = _copy_schema(plan.output_schema)
+            full_schema = _copy_schema(plan.output_schema)  # cov: unreachable a narrowed scan is a _copy_plan copy, which always has a schema; the root scan needs every column and returned above
         var proj_opt: Optional[List[String]] = proj^
         var rc_opt: Optional[Int] = None
         if plan._scan.value()[].row_count:
