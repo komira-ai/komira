@@ -1,0 +1,6 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: the same empty input (id < 0, §1.2). §2.3: an aggregate with
+# grouping keys over zero rows returns zero rows.
+k:int64?	n:int64

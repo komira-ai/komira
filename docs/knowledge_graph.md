@@ -10,6 +10,11 @@ Its source of a library's declarations is in place: the build rule
 the pinned compiler's `mojo doc` on a library and makes the JSON a build
 output. That JSON holds no source locations.
 
+The library [`komira_kg_code`](../src/komira_kg_code/) derives the graph's nodes
+and edges from that JSON, `buck2 uquery` JSON, the import lines of the
+sources and the `governs:` front matter of documents. Nothing stores or
+queries them yet.
+
 Until then, the build graph itself answers what the graph would:
 
 ```sh

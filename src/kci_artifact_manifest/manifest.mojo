@@ -171,7 +171,7 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
         doc = parse_json_value(text)
     except e:
         _refuse(source, String("not JSON: ") + String(e))
-        return ArtifactManifest(source.copy())
+        return ArtifactManifest(source.copy())  # cov: unreachable _refuse above always raises
     if not doc.is_object():
         _refuse(source, String("not a JSON object"))
     for i in range(doc.num_members()):

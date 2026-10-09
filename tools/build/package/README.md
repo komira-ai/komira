@@ -232,7 +232,7 @@ kci's parser, so `buck2 build //...` fails if the packer and kci disagree.
 `:release_set_check` in [`BUCK`](BUCK)) builds the stamped release path without a
 release's `-c komira.package_*`, in any build that includes it (`buck2 build //...`
 and the per-change check's unit that holds it). It packages each library of the
-release set (today only `komira_encoding`) with the fixed test stamp of
+release set ([`release_set.txt`](release_set.txt)) with the fixed test stamp of
 `conda_package_test_stamped` in [`conda.bzl`](conda.bzl): build number 999999999,
 a made-up source commit whose first 8 hex are `7e57c0de` (no 8-hex slice of it
 repeats another or is `00000000`), commit time 86400000 ms. No release carries
@@ -245,6 +245,10 @@ fails the build in these cases:
   the stamp at the top level of its metadata.json; the message names the package;
 - the metapackage does not require a member at its version and build string; the
   message names the member;
+- a member's metadata.json requires, at the set's version and build string, a
+  member listed after it (the native package `komira_native` excepted); the
+  message names both. The `release_order_*` targets in [`BUCK`](BUCK) run this
+  check over the fixtures in `release_order/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`
@@ -254,9 +258,10 @@ The welded test `test_release_artifacts_file` of `src/kci_artifact` holds
 `release_set.txt` equal to `release/artifacts.textproto`'s metapackage, so a
 library added to the release set and not here is red. `:release_set_kci` reads
 the stamped metapackage's manifest with kci's parser. Not covered: the macro's
-reading of `-c komira.package_*` (these packages are given the test stamp), and,
-while the release set holds one library with no dependencies, one member's
-lockstep pin on another and agreement across members.
+reading of `-c komira.package_*` (these packages are given the test stamp), that
+a member's requirement on another member is at the set's version and build
+string (the packer writes it so; the order check reads only requirements that
+are), and agreement across members beyond the stamp.
 [`list_conda_targets.sh`](list_conda_targets.sh) prints the package targets. The layout,
 the version scheme and the metapackage: [packaging/conda](../../../packaging/conda/README.md). The version
 a release carries comes from [`release_version.sh`](release_version.sh).

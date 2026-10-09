@@ -2,13 +2,14 @@
 # The cases of cov_branch_classify (README.md), run as a build action by the
 # `cov_branch_classify_cases` target (kcov/defs.bzl, kcov_tool_cases):
 #   sh cov_branch_classify_cases.sh <busybox> <result.json> <cov_branch_classify> <dir>
-# <dir> holds fixtures/case.ll and fixtures/rules.ll, annotated IR made by
-# hand in the form cov_branch_annotate.sh writes it (made-up paths and
-# counts; rules.ll holds the shapes of README.md's String lifetime, raising
-# call, loop head and short-circuit rules, each excerpted from a library's
-# IR), fixtures/case.golden.info and fixtures/rules.golden.info, the outputs
-# they must give byte for byte, and fixtures/{a,b,c,d,gen}.src, the library
-# sources the IR names as a.mojo, b.mojo, c.mojo, d.mojo and gen.mojo, staged
+# <dir> holds fixtures/case.ll, fixtures/rules.ll and fixtures/try.ll,
+# annotated IR made by hand in the form cov_branch_annotate.sh writes it
+# (made-up paths and counts; rules.ll holds the shapes of README.md's String
+# lifetime, raising call, loop head and short-circuit rules, each excerpted
+# from a library's IR; try.ll those of a `try:` body), their outputs
+# fixtures/{case,rules,try}.golden.info, which they must give byte for
+# byte, and fixtures/{a,b,c,d,gen,t}.src, the library sources the IR names
+# as a.mojo, b.mojo, c.mojo, d.mojo, gen.mojo and t.mojo, staged
 # here under the made-up [src] name the IR gives them (kept as .src so no
 # lint of the cell reads them as Mojo). Each case says the defect
 # (mutant) it kills. Exits 1 on the first wrong result, naming it; writes the
@@ -26,6 +27,8 @@ FX="$DIR/fixtures/case.ll"
 GOLDEN="$DIR/fixtures/case.golden.info"
 RX="$DIR/fixtures/rules.ll"
 RGOLDEN="$DIR/fixtures/rules.golden.info"
+TX="$DIR/fixtures/try.ll"
+TGOLDEN="$DIR/fixtures/try.golden.info"
 
 case "${BUCK_SCRATCH_PATH:-}" in
     "") T="$PWD/.cov_branch_classify_cases" ;;
@@ -39,7 +42,7 @@ export PATH LC_ALL=C
 W="$T/work"
 SRC=buck-out/v2/art/cell/src/pkg/__pkg__/0123456789abcdef/src/pkg
 mkdir -p "$W/$SRC"
-for f in a b c d gen; do cp "$DIR/fixtures/$f.src" "$W/$SRC/$f.mojo"; done
+for f in a b c d gen t; do cp "$DIR/fixtures/$f.src" "$W/$SRC/$f.mojo"; done
 # The tool reads the sources at the names the IR gives them, relative to its
 # working directory, as the action runs it from the root holding [src].
 cd "$W"
@@ -111,7 +114,7 @@ if ! cmp -s "$W/out.info" "$GOLDEN"; then
     diff -u "$GOLDEN" "$W/out.info" >&2 || true
     red "golden: the output differs from fixtures/case.golden.info"
 fi
-want="3 measured file(s): 23 source decision(s) (if 13, elif 1, while 2, and 2, or 3, for-in 2; 5 right operand(s) derived, 2 a second test of one decision), 5 compiler-made (String lifetime 0, + 1, call( 2, [ 0, // 1, % 1) not written; 6 branch(es) outside the measured sources"
+want="3 measured file(s): 23 source decision(s) (if 13, elif 1, while 2, and 2, or 3, for-in 2, try 0; 5 right operand(s) derived, 0 and/or result(s) no test reads, 2 a second test of one decision), 5 compiler-made (String lifetime 0, + 1, call( 2, [ 0, // 1, % 1) not written; 6 branch(es) outside the measured sources"
 grep -qF "$want" "$W/err" || red "golden: stderr does not say '$want'"
 pass
 
@@ -237,14 +240,6 @@ pass
 # 9. Malformed or inconsistent IR is refused.
 sed 1d "$FX" >"$W/v.ll"
 refused "no header" "does not start with '; *** IR Dump After PGOInstrumentationUse on [module] ***'" "$W/v.ll"
-variant 's/^!64 = .*/!64 = !{!"branch_weights", i32 1, i32 5}/'
-refused "derive totals" "src/pkg/a.mojo:13:14: the left operand ran 6 times and the test of the result 5" "$W/v.ll"
-variant 's/^!64 = .*/!64 = !{!"branch_weights", i32 4, i32 1}/'
-refused "or below its operand" "src/pkg/a.mojo:13:14: 'or' is true 3 times but its left operand 4" "$W/v.ll"
-variant 's/, !dbg !28, !prof !65/, !dbg !28/'
-refused "derive one never ran" "src/pkg/a.mojo:13:14: the 'or' ran but the test of its result never did" "$W/v.ll"
-variant 's/^!66 = .*/!66 = !{!"branch_weights", i32 2, i32 3}/'
-refused "and above its operand" "src/pkg/a.mojo:15:14: 'and' is true 3 times but its left operand 2" "$W/v.ll"
 variant 's/^!61 = .*/!61 = !{!"branch_weights", i32 1, i32 9, i32 2}/'
 refused "arms" "src/pkg/a.mojo:5:5: 3 branch weights for 2 arms" "$W/v.ll"
 variant 's/^!61 = .*/!61 = !{!"branch_weights", !"expected", i32 1, i32 9}/'
@@ -270,11 +265,8 @@ refused "copies differ" "src/pkg/a.mojo:3:5 (br): one copy of its function has 1
 variant 's/^  %3 = icmp slt i64 %0, 0, !dbg !40$/  %3 = icmp slt i64 %0, 0, !dbg !41/'
 refused "copies' conditions" "src/pkg/a.mojo:3:5 (br): two copies of its function hold different branches here: the condition of the one numbered 0 is computed at" "$W/v.ll"
 
-# 9c. An and/or whose right operand cannot be counted is refused, naming
-# it. Kills: a right operand dropped unseen (a false 100%).
-# A select at `or` whose result is not tested (`var r = a or b`).
-awk '{ print } /^  %4 = xor i1 %3, true, !dbg !123$/ { print "  %7 = select i1 %0, i1 true, i1 %1, !dbg !127, !prof !134" }' "$FX" >"$W/v.ll"
-refused "or not tested" "src/pkg/c.mojo:13:15: the right operand of this 'or' is not counted" "$W/v.ll"
+# 9c. An and/or whose result cannot be read is refused, naming it. Kills:
+# an and/or taken on its token alone (a branch no and/or shape shows).
 # A select at `or` of another form.
 variant 's/^  %3 = select i1 %0, i1 true, i1 %1, !dbg !122/  %3 = select i1 %0, i1 %1, i1 true, !dbg !122/'
 refused "or select form" "src/pkg/c.mojo:11:15: IR line" "$W/v.ll"
@@ -303,6 +295,242 @@ awk '/^define .*@"pkg::c::spend"/ { s = 1 } s && /^}$/ { s = 0 } s && /^  br i1 
 ! cmp -s "$W/v.ll" "$FX" || red "or straight edge: the edit changed nothing"
 grep -qF '%8 = phi i1 [ %6, %5 ], [ true, %2 ]' "$W/v.ll" || red "or straight edge: the phi was not rewritten"
 refused "or straight edge" "src/pkg/c.mojo:3:17: a short-circuit 'or' (a br) whose result is not a phi at its location: its right operand cannot be counted (IR line 119: the phi at this 'or' does not join one value arriving under the branch's true target %7 and one under its false target %5" "$W/v.ll"
+
+# 9j. An and/or whose result no source decision tests (README.md, "and,
+# or": returned, stored or passed on) is a decision of its own two arms,
+# its left operand's (the right operand evaluated or skipped), with no
+# `rhs`; so is one whose test ran another number of times than its left
+# operand (that test is not this result's: it reads the value elsewhere,
+# or on some paths only). Each case says the mutant it kills.
+# accepted <name> <ir> <stderr substring>: exit 0, the substring said.
+accepted() {
+    run "$TOOL" --ir "$2" --out "$W/out.info" $MAP $EXC
+    [ "$RC" -eq 0 ] || red "$1: exit $RC, want 0"
+    grep -qF -- "$3" "$W/err" || red "$1: stderr does not say '$3'"
+}
+# both(): c.mojo 7,14's `and` with the `if` (7,5) testing another value,
+# a forward of the result (one incoming value) at the `and` between.
+# `$1` names what the `if` tests: %80 (another value) or %87 (the forward).
+both_untested() {
+    awk -v c="$1" '
+        /^define .*@"pkg::c::both"/ { s = 1 }
+        s && /^}$/ { s = 0 }
+        s && /^  br i1 %8, label %9, label %10, !dbg !119, !prof !133$/ {
+            print "  br label %86, !dbg !119"
+            print ""
+            print "86:                                               ; preds = %7"
+            print "  %87 = phi i1 [ %8, %7 ], !dbg !117"
+            if (c == "%80") print "  %80 = icmp eq i64 %0, 7, !dbg !119"
+            print "  br i1 " c ", label %9, label %10, !dbg !119, !prof !133"
+            next
+        }
+        s { sub(/preds = %7$/, "preds = %86") }
+        { print }' "$FX" >"$W/b.ll"
+    ! cmp -s "$W/b.ll" "$FX" || red "both_untested $1: the edit changed nothing"
+}
+# A select at `or` whose result is stored (`var r = a or b`, c.mojo 13).
+# Kills: the old refusal ("the right operand ... is not counted"); the
+# untested and/or's own record dropped.
+awk '{ print } /^  %4 = xor i1 %3, true, !dbg !123$/ { print "  %7 = select i1 %0, i1 true, i1 %1, !dbg !127, !prof !134" }' "$FX" >"$W/v.ll"
+accepted "or not tested" "$W/v.ll" "5 right operand(s) derived, 1 and/or result(s) no test reads"
+grep -qx 'BRDA:13,15:select:0/1,0,3' "$W/out.info" || red "or not tested: 13,15's select is not a decision of 3 (left true, the right operand skipped)"
+grep -qx 'BRDA:13,15:select:0/1,1,4' "$W/out.info" || red "or not tested: 13,15's select is not a decision of 4 (the right operand evaluated)"
+! grep -q '^BRDA:13,15:rhs' "$W/out.info" || red "or not tested: a right operand was written with no test of the result"
+pass
+# A short-circuit `and` whose result is passed on (both() with the `if`
+# testing another value), a forward of it at its token. Kills: the
+# untested br refused; a forward phi (one incoming value) at the token
+# taken for an odd one.
+both_untested %80
+accepted "and not tested" "$W/b.ll" "4 right operand(s) derived, 1 and/or result(s) no test reads"
+grep -qx 'BRDA:7,14:br:0/1,0,4' "$W/out.info" || red "and not tested: 7,14 is not a decision of 4 (the right operand evaluated)"
+grep -qx 'BRDA:7,14:br:0/1,1,2' "$W/out.info" || red "and not tested: 7,14 is not a decision of 2 (the right operand skipped)"
+! grep -q '^BRDA:7,14:rhs' "$W/out.info" || red "and not tested: a right operand was written with no test of the result"
+pass
+# The `if` testing the forward: the result's test, read through it. Kills:
+# a phi forwarding an awaited value not awaited (no rhs: the and/or alone).
+both_untested %87
+accepted "forward tested" "$W/b.ll" "5 right operand(s) derived, 0 and/or result(s) no test reads"
+grep -qx 'BRDA:7,14:rhs:0/1,0,3' "$W/out.info" || red "forward tested: 7,14's right operand is not 3 true (the test through the forward not read)"
+grep -qx 'BRDA:7,14:rhs:0/1,1,1' "$W/out.info" || red "forward tested: 7,14's right operand is not 4-3 false"
+pass
+# An `i1` phi at the token that is neither a result nor an error flag (the
+# `true` arrives under the and's false target): with no test of the result,
+# which phi the result is cannot be told. Refused; so is one that does not
+# join the branch's targets (arriving from the branch's own block). Kills:
+# an untested and/or accepted whatever phis its token holds; one not
+# joining the targets left unchecked.
+both_untested %80
+awk '{ print } /^  %8 = phi i1 \[ %5, %4 \], \[ false, %6 \], !dbg !117$/ { print "  %81 = phi i1 [ %5, %4 ], [ true, %6 ], !dbg !117" }' "$W/b.ll" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$W/b.ll" || red "odd phi: the edit changed nothing"
+refused "odd phi" "src/pkg/c.mojo:7:14: the right operand of this 'and' is not counted (no test in this function reads its result), and a phi at its location is neither its result nor an error flag" "$W/v.ll"
+grep -qF "the value arriving under the branch's false target %6 is 'true'" "$W/err" || red "odd phi: the phi is not named"
+awk '{ print } /^  %8 = phi i1 \[ %5, %4 \], \[ false, %6 \], !dbg !117$/ { print "  %81 = phi i1 [ %5, %4 ], [ %3, %2 ], !dbg !117" }' "$W/b.ll" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$W/b.ll" || red "odd phi, not joining: the edit changed nothing"
+refused "odd phi, not joining" "src/pkg/c.mojo:7:14: the right operand of this 'and' is not counted (no test in this function reads its result), and a phi at its location is neither its result nor an error flag" "$W/v.ll"
+grep -qF "does not join one value arriving under the branch's false target %6 and one under its true target %4" "$W/err" || red "odd phi, not joining: the phi is not named"
+# A test of the result that ran another number of times than the left
+# operand (6), or not at all, is not this result's: the and/or alone, no
+# rhs. Kills: the old refusals; a right operand derived from such a test.
+variant 's/^!133 = .*/!133 = !{!"branch_weights", i32 3, i32 2}/'
+accepted "test ran 5 of 6" "$W/v.ll" "4 right operand(s) derived, 1 and/or result(s) no test reads"
+grep -qx 'BRDA:7,14:br:0/1,0,4' "$W/out.info" || red "test ran 5 of 6: 7,14's own record is not written"
+! grep -q '^BRDA:7,14:rhs' "$W/out.info" || red "test ran 5 of 6: a right operand was derived from a test of other counts"
+pass
+variant 's/^!64 = .*/!64 = !{!"branch_weights", i32 1, i32 5}/'
+accepted "derive totals" "$W/v.ll" "4 right operand(s) derived, 1 and/or result(s) no test reads"
+! grep -q '^BRDA:13,14:rhs' "$W/out.info" || red "derive totals: 13,14's right operand derived from a test of 5 (its left operand ran 6)"
+pass
+variant 's/^!64 = .*/!64 = !{!"branch_weights", i32 4, i32 1}/'
+accepted "or below its operand" "$W/v.ll" "4 right operand(s) derived, 1 and/or result(s) no test reads"
+! grep -q '^BRDA:13,14:rhs' "$W/out.info" || red "or below its operand: 13,14's right operand derived from a test true 3 times (its left operand 4)"
+pass
+variant 's/, !dbg !28, !prof !65/, !dbg !28/'
+accepted "derive one never ran" "$W/v.ll" "4 right operand(s) derived, 1 and/or result(s) no test reads"
+! grep -q '^BRDA:13,14:rhs' "$W/out.info" || red "derive one never ran: 13,14's right operand derived from a test that never ran"
+grep -qx 'BRDA:13,14:select:0/1,1,4' "$W/out.info" || red "derive one never ran: 13,14's own record is not written"
+pass
+variant 's/^!66 = .*/!66 = !{!"branch_weights", i32 2, i32 3}/'
+accepted "and above its operand" "$W/v.ll" "4 right operand(s) derived, 1 and/or result(s) no test reads"
+! grep -q '^BRDA:15,14:rhs' "$W/out.info" || red "and above its operand: 15,14's right operand derived from a test true 3 times (its left operand 2)"
+pass
+# The same with an odd phi at the token: refused, saying why the test was
+# not taken. Kills: the odd check skipped for an and/or a test was refused for.
+awk '/^!133 = / { print "!133 = !{!\"branch_weights\", i32 3, i32 2}"; next } { print } /^  %8 = phi i1 \[ %5, %4 \], \[ false, %6 \], !dbg !117$/ { print "  %81 = phi i1 [ %5, %4 ], [ true, %6 ], !dbg !117" }' "$FX" >"$W/v.ll"
+grep -qF '%81 = phi i1 [ %5, %4 ], [ true, %6 ]' "$W/v.ll" || red "odd phi, test of other counts: the phi was not added"
+refused "odd phi, test of other counts" "src/pkg/c.mojo:7:14: the right operand of this 'and' is not counted (src/pkg/c.mojo:7:14: the left operand ran 6 times and the test of the result 5: the right operand cannot be derived), and a phi at its location" "$W/v.ll"
+# A raising right operand's error flag beside the result of an `or` whose
+# result is passed on (spend(), c.mojo 3,17: `false` under the or's true
+# target, field 0 of the `{ i1, ... }` the right operand's call returns
+# under the other): no result, not odd. Kills: an error flag taken for an
+# odd phi (refused); any value under the other target taken for a flag.
+spend_flag() {
+    awk -v flag="$1" '
+        /^define .*@"pkg::c::spend"/ { s = 1 }
+        s && /^}$/ { s = 0 }
+        s && /^  %6 = icmp sgt i64 %0, %1, !dbg !112$/ {
+            print
+            print "  %84 = call { i1, i1 } @\"pkg::c::check\"(i64 %0), !dbg !112"
+            print "  %83 = " flag ", !dbg !112"
+            next
+        }
+        s && /^  %8 = phi i1 \[ %6, %5 \], \[ true, %4 \], !dbg !111$/ {
+            print
+            print "  %82 = phi i1 [ %83, %5 ], [ false, %4 ], !dbg !111"
+            print "  %80 = icmp eq i64 %1, 7, !dbg !113"
+            next
+        }
+        s { sub(/select i1 %8, /, "select i1 %80, "); sub(/br i1 %8, /, "br i1 %80, ") }
+        { print }' "$FX" >"$W/v.ll"
+    grep -qF '%82 = phi i1 [ %83, %5 ], [ false, %4 ]' "$W/v.ll" || red "spend_flag: the flag phi was not added"
+}
+spend_flag 'extractvalue { i1, i1 } %84, 0'
+accepted "or, raising right operand" "$W/v.ll" "4 right operand(s) derived, 1 and/or result(s) no test reads"
+grep -qx 'BRDA:3,17:br:0/1,0,1' "$W/out.info" || red "or, raising right operand: 3,17's own record is not written"
+! grep -q '^BRDA:3,17:rhs' "$W/out.info" || red "or, raising right operand: a right operand was written with no test of the result"
+pass
+spend_flag 'icmp eq i64 %0, 3'
+refused "or, not a flag" "src/pkg/c.mojo:3:17: the right operand of this 'or' is not counted (no test in this function reads its result), and a phi at its location is neither its result nor an error flag" "$W/v.ll"
+# The flag's orientation: the call's flag under the or's true target (the
+# right operand skipped) and `false` under the other is no error flag (a
+# skipped call has no flag), and is odd. Kills: the flag exemption taken
+# in either orientation.
+spend_flag 'extractvalue { i1, i1 } %84, 0'
+sed 's/%82 = phi i1 \[ %83, %5 \], \[ false, %4 \]/%82 = phi i1 [ false, %5 ], [ %83, %4 ]/' "$W/v.ll" >"$W/v2.ll"
+! cmp -s "$W/v2.ll" "$W/v.ll" || red "or, flag under the skip target: the edit changed nothing"
+refused "or, flag under the skip target" "src/pkg/c.mojo:3:17: the right operand of this 'or' is not counted (no test in this function reads its result), and a phi at its location is neither its result nor an error flag" "$W/v2.ll"
+# An odd phi with three incoming values (not a forward) at an untested
+# and's token is refused like one with two. Kills: only two-incoming phis
+# marked odd.
+both_untested %80
+awk '{ print } /^  %8 = phi i1 \[ %5, %4 \], \[ false, %6 \], !dbg !117$/ { print "  %81 = phi i1 [ %5, %4 ], [ false, %6 ], [ true, %2 ], !dbg !117" }' "$W/b.ll" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$W/b.ll" || red "odd phi, three incoming: the edit changed nothing"
+refused "odd phi, three incoming" "src/pkg/c.mojo:7:14: the right operand of this 'and' is not counted (no test in this function reads its result), and a phi at its location is neither its result nor an error flag" "$W/v.ll"
+# A phi of two constants at a tested `or`, the deciding `true` under its
+# true target and `false` under the other, is no result (the right
+# operand's value would be a constant): refused, as no candidate is.
+# Kills: a constant under the other target accepted (a right operand
+# derived from a phi that does not carry it).
+variant 's/%8 = phi i1 \[ %6, %5 \], \[ true, %4 \]/%8 = phi i1 [ false, %5 ], [ true, %4 ]/'
+refused "or, two constants" "src/pkg/c.mojo:3:17: IR line" "$W/v.ll"
+grep -qF "the phi at this 'or' is not that of a short-circuit one" "$W/err" || red "or, two constants: not named as such"
+
+# 9k. Three short-circuit and/or on one line (`if (a or b) and (c or e):`,
+# c.mojo 19, a function added to case.ll): each phi is its own and/or's,
+# told by its column, and each right operand is derived (the inner `or`'s
+# through the `and`'s). Kills: a phi matched to an and/or by its line alone
+# (the `and`'s phi taken for the second `or`'s: the `and` refused).
+printf '%s\n' 'def two(a: Bool, b: Bool, c: Bool, e: Bool) -> Int:' '    if (a or b) and (c or e):' '        return 1' '    return 0' >>"$W/$SRC/c.mojo"
+cat >"$W/two.ll" <<'TWO'
+define internal i64 @"pkg::c::two"(i1 %0, i1 %1, i1 %2, i1 %3) #0 !dbg !170 !prof !73 {
+4:
+  br i1 %0, label %5, label %6, !dbg !171, !prof !180
+
+5:                                                ; preds = %4
+  br label %7, !dbg !171
+
+6:                                                ; preds = %4
+  br label %7, !dbg !171
+
+7:                                                ; preds = %5, %6
+  %8 = phi i1 [ true, %5 ], [ %1, %6 ], !dbg !171
+  br i1 %8, label %9, label %15, !dbg !172, !prof !181
+
+9:                                                ; preds = %7
+  br i1 %2, label %10, label %11, !dbg !173, !prof !182
+
+10:                                               ; preds = %9
+  br label %12, !dbg !173
+
+11:                                               ; preds = %9
+  br label %12, !dbg !173
+
+12:                                               ; preds = %10, %11
+  %13 = phi i1 [ true, %10 ], [ %3, %11 ], !dbg !173
+  br label %14, !dbg !172
+
+14:                                               ; preds = %12
+  br label %16, !dbg !172
+
+15:                                               ; preds = %7
+  br label %16, !dbg !172
+
+16:                                               ; preds = %14, %15
+  %17 = phi i1 [ %13, %14 ], [ false, %15 ], !dbg !172
+  br i1 %17, label %18, label %19, !dbg !174, !prof !183
+
+18:                                               ; preds = %16
+  ret i64 1, !dbg !175
+
+19:                                               ; preds = %16
+  ret i64 0, !dbg !176
+}
+
+TWO
+cat >"$W/two.meta" <<'TWO'
+!170 = distinct !DISubprogram(name: "two", linkageName: "pkg::c::two", scope: !8, file: !8, line: 18, type: !9, scopeLine: 18, spFlags: DISPFlagDefinition, unit: !0)
+!171 = !DILocation(line: 19, column: 11, scope: !170)
+!172 = !DILocation(line: 19, column: 17, scope: !170)
+!173 = !DILocation(line: 19, column: 24, scope: !170)
+!174 = !DILocation(line: 19, column: 5, scope: !170)
+!175 = !DILocation(line: 20, column: 9, scope: !170)
+!176 = !DILocation(line: 21, column: 5, scope: !170)
+!180 = !{!"branch_weights", i32 2, i32 4}
+!181 = !{!"branch_weights", i32 3, i32 3}
+!182 = !{!"branch_weights", i32 1, i32 2}
+!183 = !{!"branch_weights", i32 2, i32 4}
+TWO
+awk -v f="$W/two.ll" '/^attributes #0/ { while ((getline l < f) > 0) print l } { print }' "$FX" >"$W/v.ll"
+cat "$W/two.meta" >>"$W/v.ll"
+grep -qF '@"pkg::c::two"' "$W/v.ll" || red "one line: the function was not added"
+run "$TOOL" --ir "$W/v.ll" --out "$W/out.info" $MAP $EXC
+[ "$RC" -eq 0 ] || red "one line: exit $RC, want 0"
+for r in 19,5:br:0/1,0,2 19,5:br:0/1,1,4 19,11:br:0/1,0,2 19,11:rhs:0/1,0,1 19,11:rhs:0/1,1,3 19,17:br:0/1,0,3 19,17:rhs:0/1,0,2 19,17:rhs:0/1,1,1 19,24:br:0/1,0,1 19,24:rhs:0/1,0,1 19,24:rhs:0/1,1,1; do
+    grep -qx "BRDA:$r" "$W/out.info" || red "one line: BRDA:$r is not in the output"
+done
+cp "$DIR/fixtures/c.src" "$W/$SRC/c.mojo"
+pass
+
 
 # 9d. A branch at the call of a function a measured source declares
 # @always_inline("nodebug") is refused (it may be that function's own
@@ -401,7 +629,7 @@ if ! cmp -s "$W/out.info" "$RGOLDEN"; then
     diff -u "$RGOLDEN" "$W/out.info" >&2 || true
     red "rules golden: the output differs from fixtures/rules.golden.info"
 fi
-want="1 measured file(s): 33 source decision(s) (if 15, elif 0, while 0, and 6, or 2, for-in 10; 8 right operand(s) derived, 1 a second test of one decision), 26 compiler-made (String lifetime 15, + 0, call( 9, [ 1, // 1, % 0) not written; 0 branch(es) outside the measured sources"
+want="1 measured file(s): 33 source decision(s) (if 15, elif 0, while 0, and 6, or 2, for-in 10, try 0; 8 right operand(s) derived, 0 and/or result(s) no test reads, 1 a second test of one decision), 26 compiler-made (String lifetime 15, + 0, call( 9, [ 1, // 1, % 0) not written; 0 branch(es) outside the measured sources"
 grep -qF "$want" "$W/err" || red "rules golden: stderr does not say '$want'"
 [ "$(grep -c '^BRDA:3,5:' "$W/out.info")" = 2 ] || red "String at a decision: 3,5 is not one decision of two arms (a destructor's branch recorded as the if's)"
 grep -qx 'BRDA:16,5:br:0/1,0,2' "$W/out.info" || red "String strictness: 16,5 (a flags test computed at 5:10, tested at the if) is not a decision"
@@ -518,6 +746,122 @@ refused "flags phis, no String leaf" "src/pkg/d.mojo:71:28: a select at 'read(' 
 # positions taken).
 rvariant 's/^  br i1 %3, label %4, label %5, !dbg !266, !prof !273/  br i1 %6, label %4, label %5, !dbg !266, !prof !273/; s/^  br i1 %6, label %4, label %4, !dbg !266, !prof !274/  br i1 %3, label %4, label %4, !dbg !266, !prof !274/'
 refused "copies, elif line" "src/pkg/d.mojo:44:5 (br): two copies of its function hold different branches here" "$W/v.ll"
+
+# 12. A `try:` body (README.md, "try"), on try.ll and t.mojo: the golden
+# output, byte for byte. Each raising call's error check in a `try:` body of
+# its function is a decision of two arms, arm 0 the call returned (LLVM's
+# false), arm 1 it raised into the handler (true): a call's `i1` (6,14), the
+# field 0 of its `{ i1, ... }` (5,14), a Dict subscript's `[` (7,15), an
+# inlined raising callee's flag, a phi of its `if`'s condition (8,17), a
+# phi of a call's flag (9,17), a call in a nested `try:` (11,19), one in
+# the `except` body of a `try` inside another's body (13,19), a one-line
+# `try: return f(x)` (35,18), one that never ran (28,22: `-`), and the
+# raising right operand of an `and` (49,23), whose error check tests a phi
+# of the and's result shape: the `if` (49,9) is the and's test, not the
+# `try` decision (as rules.ll's 74,12, in a `try:` body), and a callee
+# inlined from another file whose flag is a phi of `true` and `false`
+# arriving from its raise path and its return (56,30, as
+# `komira_parquet`'s rle.mojo 226:54, `read_uleb128`). A
+# String's destructor and a select at 5,14 stay compiler-made, so does the
+# error check of a call in an `except` (17), an `else` (19) or after the
+# `try` (22), in a `def` nested in a `try:` body (27), in a `with` body
+# (33), and after a triple-quoted string holding `try:` (41). Kills, named
+# below: the rule removed (no `try` record); the scope ignored (a call
+# outside a `try:` body recorded); the arms in LLVM's order (5,14 is 5,2);
+# the clause rule (an `except`/`else` body read as the `try`'s); the `def`
+# boundary; the triple-quoted lines, or a signature's continuation lines
+# (64: `) raises -> Int:` has the `def`'s indentation), read as statements; a `try` decision
+# taken as an and/or's test (49,16's right operand derived from 49,23).
+run "$TOOL" --ir "$TX" --out "$W/out.info" $MAP $EXC
+[ "$RC" -eq 0 ] || red "try golden: exit $RC, want 0"
+if ! cmp -s "$W/out.info" "$TGOLDEN"; then
+    diff -u "$TGOLDEN" "$W/out.info" >&2 || true
+    red "try golden: the output differs from fixtures/try.golden.info"
+fi
+want="1 measured file(s): 16 source decision(s) (if 3, elif 0, while 0, and 1, or 0, for-in 0, try 12; 1 right operand(s) derived, 0 and/or result(s) no test reads, 0 a second test of one decision), 9 compiler-made (String lifetime 1, + 0, call( 8, [ 0, // 0, % 0) not written; 1 branch(es) outside the measured sources"
+grep -qF "$want" "$W/err" || red "try golden: stderr does not say '$want'"
+[ "$(grep -c ':try:' "$W/out.info")" = 24 ] || red "try: not twelve try decisions of two arms (the rule removed, or the scope ignored)"
+grep -qx 'BRDA:49,16:rhs:0/1,0,1' "$W/out.info" || red "try and and: 49,16's right operand is not 1 true (derived from the call's try decision, not the if)"
+grep -qx 'BRDA:5,14:try:0/1,0,5' "$W/out.info" || red "try arms: 5,14 arm 0 (the call returned) is not 5 (arms in LLVM's order)"
+grep -qx 'BRDA:13,19:try:0/1,1,0' "$W/out.info" || red "nested try: 13,19 (an inner except body, in the outer try body) is not a try decision"
+! grep -qE '^BRDA:(17|19|22|27|33|41|64),' "$W/out.info" || red "try scope: a call outside a try body (except, else, after, nested def, with, after a quoted try:, a nested def whose signature runs over lines) was recorded"
+pass
+
+# tinsert <line of try.ll> <line>...: try.ll with the lines after that one.
+tinsert() {
+    at=$1
+    shift
+    awk -v at="$at" -v add="$(printf '%s\n' "$@")" '{ print } $0 == at { print add }' "$TX" >"$W/v.ll"
+    ! cmp -s "$W/v.ll" "$TX" || red "insert after '$at' changes nothing, so its case checks nothing"
+}
+
+# 12a. In a `try:` body a br at a call, `[` or `+` that is not a raising
+# call's error flag is refused (whether it is the call's error check is not
+# known); so is a phi whose value is not inlined at the call, or whose
+# constants arrive from no block of a callee inlined there (kills: such a
+# phi accepted without that evidence), or say `true` from a block that is
+# not the callee's raise path; `try` and
+# `with` keep no branch of their own. Kills: the refusal dropped (any br at
+# a call in a try body dropped or taken); the inlined-at check of the phi
+# dropped; `try` or `with` taken as a token.
+tinsert '  %6 = extractvalue { i1, i64 } %5, 0, !dbg !410' '  %900 = icmp slt i64 %0, 0, !dbg !410' '  br i1 %900, label %9, label %14, !dbg !410, !prof !480'
+refused "try, a call's br not on its flag" "src/pkg/t.mojo:5:14: a br at 'f(' in a try body that is not a raising call's error flag" "$W/v.ll"
+tinsert '  %32 = extractvalue { i1, i64 } %31, 0, !dbg !418' '  %900 = icmp slt i64 %0, 0, !dbg !439' '  br i1 %900, label %33, label %36, !dbg !439, !prof !480' '!439 = !DILocation(line: 11, column: 22, scope: !403)'
+sed -e '/^!439 = /d' "$W/v.ll" >"$W/v2.ll"
+printf '%s\n' '!439 = !DILocation(line: 11, column: 22, scope: !403)' >>"$W/v2.ll"
+refused "try, a br at '+'" "src/pkg/t.mojo:11:22: a br at '+' in a try body that is not a raising call's error flag" "$W/v2.ll"
+sed -e 's/^!414 = !DILocation(line: 44, column: 10, scope: !409, inlinedAt: !413)/!414 = !DILocation(line: 44, column: 10, scope: !409, inlinedAt: !421)/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "variant: the inlinedAt edit changed nothing"
+refused "try, a phi of code inlined elsewhere" "src/pkg/t.mojo:8:17: a br at 'inl(' in a try body that is not a raising call's error flag" "$W/v.ll"
+sed -e 's/^!455 = !DILocation(line: 283, column: 17, scope: !459, inlinedAt: !452)/!455 = !DILocation(line: 57, column: 5, scope: !451)/' \
+    -e 's/^!456 = !DILocation(line: 292, column: 9, scope: !459, inlinedAt: !452)/!456 = !DILocation(line: 56, column: 9, scope: !451)/' "$TX" >"$W/v.ll"
+grep -qx '!455 = !DILocation(line: 57, column: 5, scope: !451)' "$W/v.ll" && grep -qx '!456 = !DILocation(line: 56, column: 9, scope: !451)' "$W/v.ll" || red "variant: the two block locations were not both changed"
+refused "try, constants from no callee block" "src/pkg/t.mojo:56:30: a br at 'read_uleb128(' in a try body that is not a raising call's error flag" "$W/v.ll"
+# The constants swapped: `true` arrives from the callee's return, `false`
+# from its raise path (the block calling the raise hook). Read as a flag,
+# its arms would swap; it is refused. Kills: the polarity check dropped.
+sed -e 's/^  %7 = phi i1 \[ false, %5 \], \[ true, %4 \], !dbg !452$/  %7 = phi i1 [ true, %5 ], [ false, %4 ], !dbg !452/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "variant: the constant swap changed nothing"
+refused "try, constants of the wrong polarity" "src/pkg/t.mojo:56:30: a br at 'read_uleb128(' in a try body that is not a raising call's error flag" "$W/v.ll"
+# Both constants `true`, one from the raise path and one from the return:
+# the raise block's `true` is there, but the return's says raised too.
+# Kills: the polarity check dropped alone (the `true` from the raise block
+# still required).
+sed -e 's/^  %7 = phi i1 \[ false, %5 \], \[ true, %4 \], !dbg !452$/  %7 = phi i1 [ true, %5 ], [ true, %4 ], !dbg !452/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "variant: the true/true edit changed nothing"
+refused "try, true from the return too" "src/pkg/t.mojo:56:30: a br at 'read_uleb128(' in a try body that is not a raising call's error flag" "$W/v.ll"
+# 12b. Brackets that do not balance in a measured file: which lines are
+# continuations cannot be told, so whether a call is in a `try:` body
+# cannot either; refused once, naming the file and the line. Kills: the
+# refusal removed (every later line skipped, inTry false: the calls in
+# `try:` bodies read as the compiler's, silently).
+printf '    v = f(\n' >>"$W/$SRC/t.mojo"
+refused "unbalanced, never closed" "src/pkg/t.mojo: the brackets of the file do not balance (a bracket line 68 opens is never closed)" "$TX"
+cp "$DIR/fixtures/t.src" "$W/$SRC/t.mojo"
+printf '    )\n' >>"$W/$SRC/t.mojo"
+refused "unbalanced, closed twice" "src/pkg/t.mojo: the brackets of the file do not balance (line 68 closes a bracket no line opened)" "$TX"
+cp "$DIR/fixtures/t.src" "$W/$SRC/t.mojo"
+tinsert '  %15 = call i1 @"pkg::t::touch"(i64 %0, ptr %3), !dbg !411' '  br i1 %15, label %90, label %16, !dbg !440, !prof !482' '!440 = !DILocation(line: 4, column: 5, scope: !403)'
+sed -e '/^!440 = /d' "$W/v.ll" >"$W/v2.ll"
+printf '%s\n' '!440 = !DILocation(line: 4, column: 5, scope: !403)' >>"$W/v2.ll"
+refused "try keyword" "src/pkg/t.mojo:4:5: a br at 'try' is neither" "$W/v2.ll"
+sed -e 's/^  br i1 %4, label %5, label %5, !dbg !432, !prof !489/  br i1 %4, label %5, label %5, !dbg !433, !prof !489/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "variant: the with edit changed nothing"
+refused "with keyword" "src/pkg/t.mojo:32:5: a br at 'with' is neither" "$W/v.ll"
+
+# 12c. A `try` decision is no test of an and/or's result (README.md, "try"),
+# even one that ran as many times as the left operand: in `ands` (49,16)
+# the call's error check tests the flag phi beside the result, here given
+# the counts of a br after the join (7, as the left operand's 4 + 3), and
+# the `if` (49,9) is the test. Kills: a `try` decision taken as a test (the
+# right operand derived from the error check: 0 true, 4 false).
+sed -e 's/^!492 = .*/!492 = !{!"branch_weights", i32 0, i32 7}/' "$TX" >"$W/v.ll"
+! cmp -s "$W/v.ll" "$TX" || red "try, no test: the edit changed nothing"
+run "$TOOL" --ir "$W/v.ll" --out "$W/out.info" $MAP $EXC
+[ "$RC" -eq 0 ] || red "try, no test: exit $RC, want 0"
+grep -qx 'BRDA:49,16:rhs:0/1,0,1' "$W/out.info" || red "try, no test: 49,16's right operand is not the if's 1 true (derived from the try's error check)"
+grep -qx 'BRDA:49,16:rhs:0/1,1,3' "$W/out.info" || red "try, no test: 49,16's right operand is not 4-1 false"
+pass
 
 # 10. Bad usage exits 2.
 for args in "--out $W/out.info $MAP $STD" "--ir $FX $MAP $STD" "--ir $FX --out $W/out.info $STD" \
