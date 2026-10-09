@@ -301,6 +301,43 @@ mod tests {
         Base { pin: sha256::digest(manifest.as_bytes()), manifest: manifest.into_bytes(), config: BASE_CONFIG.as_bytes().to_vec(), layers: vec![layer] }
     }
 
+    /// A base of two distinct layers, whose manifest is edited by `f` and
+    /// pinned again: only what `f` changed can be refused.
+    fn edited(f: impl FnOnce(&mut Value)) -> Base {
+        let layers = vec![b"gzip bytes of layer zero".to_vec(), b"gzip bytes of layer one".to_vec()];
+        let descs = layers.iter().map(|l| descriptor(LAYER_TYPE, l)).collect();
+        let mut m = obj(vec![
+            ("schemaVersion", num(2)),
+            ("mediaType", s(MANIFEST_TYPE)),
+            ("config", descriptor(CONFIG_TYPE, BASE_CONFIG.as_bytes())),
+            ("layers", Value::Arr(descs)),
+        ]);
+        f(&mut m);
+        let manifest = m.to_json().into_bytes();
+        Base { pin: sha256::digest(&manifest), manifest, config: BASE_CONFIG.as_bytes().to_vec(), layers }
+    }
+
+    /// Sets `key` of the manifest's member `at` (`config`), or of its layer `at`.
+    fn set_in(m: &mut Value, at: &str, key: &str, v: Value) {
+        let mut d = match at.parse::<usize>() {
+            Ok(i) => m.get("layers").unwrap().as_arr().unwrap()[i].clone(),
+            Err(_) => m.get(at).unwrap().clone(),
+        };
+        if let Value::Null = v {
+            d.remove(key);
+        } else {
+            d.set(key, v).unwrap();
+        }
+        match at.parse::<usize>() {
+            Ok(i) => {
+                let mut ls = m.get("layers").unwrap().as_arr().unwrap().to_vec();
+                ls[i] = d;
+                m.set("layers", Value::Arr(ls)).unwrap();
+            }
+            Err(_) => m.set(at, d).unwrap(),
+        }
+    }
+
     #[test]
     fn the_config_names_the_entrypoint_layer_and_version() {
         let c = config(BASE_CONFIG.as_bytes(), "sha256:bb", &named()).unwrap();
@@ -350,6 +387,123 @@ mod tests {
     }
 
     #[test]
+    fn every_base_refusal_has_its_own_case() {
+        assert_eq!(check_base(&edited(|_| {})).unwrap().len(), 2);
+        let refused = |f: &dyn Fn(&mut Value)| check_base(&edited(f)).unwrap_err();
+        // The manifest's own fields.
+        assert_eq!(refused(&|m| m.set("mediaType", s(INDEX_TYPE)).unwrap()), format!("base manifest: mediaType {}, want {}", INDEX_TYPE, MANIFEST_TYPE));
+        assert_eq!(refused(&|m| m.remove("mediaType")), "base manifest: no `mediaType`");
+        assert_eq!(refused(&|m| m.set("mediaType", num(1)).unwrap()), "base manifest: `mediaType` is not a string");
+        assert_eq!(refused(&|m| m.set("schemaVersion", num(1)).unwrap()), "base manifest: schemaVersion is not 2");
+        assert_eq!(refused(&|m| m.set("schemaVersion", s("2")).unwrap()), "base manifest: `schemaVersion` is not a number");
+        assert_eq!(refused(&|m| m.remove("config")), "base manifest: no `config`");
+        assert_eq!(refused(&|m| set_in(m, "config", "digest", Value::Null)), "base manifest config: no `digest`");
+        assert_eq!(refused(&|m| set_in(m, "config", "size", s("1"))), "base manifest config: `size` is not a number");
+        assert_eq!(refused(&|m| m.remove("layers")), "base manifest: no `layers`");
+        assert_eq!(refused(&|m| m.set("layers", obj(vec![])).unwrap()), "base manifest: `layers` is not an array");
+        // Each layer, the last one included.
+        for i in ["0", "1"] {
+            assert_eq!(refused(&|m| set_in(m, i, "mediaType", s(CONFIG_TYPE))), format!("base layer {}: not {}", i, LAYER_TYPE));
+            assert_eq!(refused(&|m| set_in(m, i, "mediaType", Value::Null)), "base layer: no `mediaType`");
+            assert_eq!(refused(&|m| set_in(m, i, "digest", s("sha256:00"))), format!("base layer {} does not hash to sha256:00", i));
+            assert_eq!(refused(&|m| set_in(m, i, "digest", Value::Null)), "base layer: no `digest`");
+            assert_eq!(refused(&|m| set_in(m, i, "size", num(1))), format!("base layer {}: size differs", i));
+            assert_eq!(refused(&|m| set_in(m, i, "size", Value::Null)), "base layer: no `size`");
+        }
+        // Fewer blobs given than the manifest names, and more.
+        let mut b = edited(|_| {});
+        b.layers.pop();
+        assert_eq!(check_base(&b).unwrap_err(), "base manifest names 2 layers, 1 given");
+        let mut b = edited(|_| {});
+        b.layers.clear();
+        assert_eq!(check_base(&b).unwrap_err(), "base manifest names 2 layers, 0 given");
+        // The blobs swapped: each digest names the other one.
+        let mut b = edited(|_| {});
+        b.layers.swap(0, 1);
+        assert!(check_base(&b).unwrap_err().starts_with("base layer 0 does not hash to "));
+        // A manifest that is not JSON, pinned as it is.
+        let mut b = base();
+        b.manifest = b"{\"schemaVersion\":2,}".to_vec();
+        b.pin = sha256::digest(&b.manifest);
+        assert!(check_base(&b).unwrap_err().starts_with("base manifest: JSON: "), "{}", check_base(&b).unwrap_err());
+        // image() refuses what check_base refuses.
+        let mut b = base();
+        b.pin = sha256::digest(b"other");
+        assert!(image(&b, b"t", b"g", &named()).is_err());
+    }
+
+    #[test]
+    fn every_config_refusal_has_its_own_case() {
+        let refused = |from: &str, to: &str| {
+            assert_eq!(BASE_CONFIG.matches(from).count(), 1, "{}", from);
+            config(BASE_CONFIG.replace(from, to).as_bytes(), "sha256:bb", &named()).unwrap_err()
+        };
+        assert_eq!(refused(r#""os":"linux""#, r#""os":"windows""#), "base config is not linux/amd64");
+        assert_eq!(refused(r#""architecture":"amd64","#, ""), "base config: no `architecture`");
+        assert_eq!(refused(r#""os":"linux","#, ""), "base config: no `os`");
+        assert_eq!(refused(r#","rootfs":{"type":"layers","diff_ids":["sha256:aa"]}"#, ""), "base config: no `rootfs`");
+        assert_eq!(refused(r#""diff_ids":["sha256:aa"]"#, r#""diff_ids":"sha256:aa""#), "base config: `diff_ids` is not an array");
+        assert_eq!(refused(r#","diff_ids":["sha256:aa"]"#, ""), "base config rootfs: no `diff_ids`");
+        assert_eq!(refused(r#""rootfs":{"type":"layers","diff_ids":["sha256:aa"]}"#, r#""rootfs":[]"#), "base config rootfs: no `diff_ids`");
+        assert_eq!(refused(r#""config":{"Cmd":["/bin/x"],"User":"65532","Labels":{"k":"v"}}"#, r#""config":[]"#), "base config: `config`: cannot set `Entrypoint`: not an object");
+        assert_eq!(refused(r#""Labels":{"k":"v"}"#, r#""Labels":1"#), "base config: `Labels`: cannot set `org.opencontainers.image.version`: not an object");
+        assert_eq!(refused(r#""history":[{"created_by":"base"}]"#, r#""history":{}"#), "base config: `history` is not an array");
+        assert!(refused(r#""created":"the base time"}"#, r#""created":"#).starts_with("base config: JSON: "));
+        // What the base config may leave out: no `config`, `Labels` or `history`.
+        let bare = r#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#;
+        assert_eq!(
+            config(bare.as_bytes(), "sha256:bb", &named()).unwrap().to_json(),
+            r#"{"architecture":"amd64","config":{"Entrypoint":["/komira/bin/supervisor"],"Labels":{"org.opencontainers.image.version":"0.1.0"}},"created":"1970-01-01T00:00:00Z","history":[{"created":"1970-01-01T00:00:00Z","created_by":"komira oci_tree floor 0.1.0"}],"os":"linux","rootfs":{"diff_ids":["sha256:bb"],"type":"layers"}}"#
+        );
+    }
+
+    #[test]
+    fn two_identical_base_layers_are_one_file() {
+        let mut b = edited(|m| {
+            let d = m.get("layers").unwrap().as_arr().unwrap()[0].clone();
+            m.set("layers", Value::Arr(vec![d.clone(), d])).unwrap();
+        });
+        b.layers[1] = b.layers[0].clone();
+        let img = image(&b, b"layer tar", b"layer gz", &named()).unwrap();
+        let (layout, items) = files(&img);
+        let names: Vec<&str> = layout.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(names.len(), 6, "{:?}", names);
+        assert!(tar::write(items).is_ok());
+        // Docker's manifest.json still names the base layer twice.
+        let docker = String::from_utf8(img.docker_manifest).unwrap();
+        assert_eq!(docker.matches(&sha256::hex(&b.layers[0])).count(), 2, "{}", docker);
+    }
+
+    /// A directory of its own under this run's TMPDIR.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("pack_{}_{}", name, std::process::id()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_tree_holds_files_and_directories_only() {
+        let d = scratch("empty");
+        assert_eq!(tree_items(&d).err().unwrap(), format!("tree {} holds no files", d.display()));
+        fs::create_dir(d.join("sub")).unwrap();
+        assert_eq!(tree_items(&d).err().unwrap(), format!("tree {} holds no files", d.display()));
+        let d = scratch("modes");
+        fs::create_dir(d.join("bin")).unwrap();
+        fs::write(d.join("bin/x"), b"exe").unwrap();
+        fs::set_permissions(d.join("bin/x"), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(d.join("bin/r"), b"").unwrap();
+        fs::set_permissions(d.join("bin/r"), fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(d.join("top"), b"t").unwrap();
+        fs::set_permissions(d.join("top"), fs::Permissions::from_mode(0o640)).unwrap();
+        let mut got: Vec<(String, u32, Vec<u8>)> = tree_items(&d).unwrap().into_iter().map(|i| (i.path, i.mode, i.data)).collect();
+        got.sort();
+        let want: Vec<(String, u32, Vec<u8>)> = vec![("bin/".to_string(), 0o755, vec![]), ("bin/r".to_string(), 0o644, vec![]), ("bin/x".to_string(), 0o755, b"exe".to_vec()), ("top".to_string(), 0o644, b"t".to_vec())];
+        assert_eq!(got, want);
+        std::os::unix::fs::symlink("top", d.join("bin/link")).unwrap();
+        assert_eq!(tree_items(&d).err().unwrap(), "bin/link: not a regular file or directory");
+    }
+
+    #[test]
     fn the_image_adds_one_layer_and_tags_the_version() {
         let img = image(&base(), b"layer tar", b"layer gz", &named()).unwrap();
         let m = json::parse(img.blobs.last().unwrap()).unwrap();
@@ -371,6 +525,33 @@ mod tests {
         assert_eq!(items.len(), 9);
         // Same inputs, same bytes.
         assert_eq!(image(&base(), b"layer tar", b"layer gz", &named()).unwrap().manifest_digest, img.manifest_digest);
+    }
+
+    #[test]
+    fn write_lays_every_file_and_names_what_it_cannot_write() {
+        let img = image(&base(), b"layer tar", b"layer gz", &named()).unwrap();
+        let d = scratch("write");
+        let (out, archive, digest) = (d.join("out"), d.join("archive.tar"), d.join("digest"));
+        write(&img, &out, &archive, &digest).unwrap();
+        let (layout, items) = files(&img);
+        for (p, data) in &layout {
+            assert_eq!(&fs::read(out.join(p)).unwrap(), data, "{}", p);
+        }
+        assert_eq!(fs::read(&archive).unwrap(), tar::write(items).unwrap());
+        assert_eq!(fs::read_to_string(&digest).unwrap(), format!("{}\n", img.manifest_digest));
+        // Each target that cannot be written is named.
+        let dir = |name: &str| {
+            let p = d.join(name);
+            fs::create_dir_all(&p).unwrap();
+            p
+        };
+        assert!(write(&img, &archive, &d.join("a2"), &d.join("d2")).unwrap_err().starts_with(&format!("cannot create {}: ", archive.display())));
+        let out3 = d.join("out3");
+        let blocked = out3.join("blobs/sha256").join(sha256::hex(&img.blobs[3]));
+        fs::create_dir_all(&blocked).unwrap();
+        assert!(write(&img, &out3, &d.join("a3"), &d.join("d3")).unwrap_err().starts_with(&format!("cannot write {}: ", blocked.display())));
+        assert!(write(&img, &d.join("out4"), &dir("a4"), &d.join("d4")).unwrap_err().starts_with(&format!("cannot write {}: ", d.join("a4").display())));
+        assert!(write(&img, &d.join("out5"), &d.join("a5"), &dir("d5")).unwrap_err().starts_with(&format!("cannot write {}: ", d.join("d5").display())));
     }
 
     #[test]
