@@ -1,4 +1,4 @@
-# Test 54: one refused import form.
+# Test 55: one refused import form.
 import komira_plan_ir
 def f():
     var d = komira_plan_ir.\

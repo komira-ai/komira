@@ -191,7 +191,7 @@ e2e targets; `tests//functional/...` builds them.
 ./buck2 build tests//negative/surface_capability_matrix/incompatible:   # must fail: ... because its transitive dep .../pandas_e2e:test_mac
 ```
 
-## 54. Refused imports
+## 55. Refused imports
 
 A package's `mojo_deps` lint ([`defs.bzl`](../lint/defs.bzl)) can name
 `refused_imports`: dotted modules (`komira_x.y`) that no file of the package

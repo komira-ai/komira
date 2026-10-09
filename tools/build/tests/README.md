@@ -965,7 +965,8 @@ With coverage, a library's conda package (what ships), not the library, waits fo
 ## 51. [Python oracles](../python/README.md#test-51-python-oracles)
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
-## 54. [Refused imports](lint_tests.md#54-refused-imports)
+## 54. [Hermetic Node.js: planted defects](../node/README.md#test-54-planted-defects)
+## 55. [Refused imports](lint_tests.md#55-refused-imports)
 
 ## 49. Assert level, defines and memory cap
 

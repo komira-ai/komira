@@ -1,6 +1,6 @@
 load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 
-# Test 54 (refused imports, mojo_deps), the half that must go red: one import
+# Test 55 (refused imports, mojo_deps), the half that must go red: one import
 # form per target, each in its own file (<name>.mojo); the qualified_* and
 # alias_* targets name the module by a dotted path without importing it. run_tests.sh requires
 # each to fail naming exactly its one finding.

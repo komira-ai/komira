@@ -1,4 +1,4 @@
-# Near misses of the refused imports of test 54: none is a finding.
+# Near misses of the refused imports of test 55: none is a finding.
 # from komira_plan_ir.physical_plan import SegmentDescPod
 from komira_plan_ir.logical_plan import LogicalPlan  # physical_plan
 from komira_plan_ir.physical_planner import Planner
