@@ -711,11 +711,11 @@ def _u128_div10(low: UInt64, high: UInt64) -> Tuple[UInt64, UInt64, UInt64]:
             # Compute (sum_plus_6 + 2^64) / 10:
             #   = sum_plus_6/10 + (sum_plus_6%10 + 2^64) / 10
             # Use 2^64 = 10*k + 6.
-            var sp10 = sum_plus_6 // UInt64(10)
-            var sp_mod = sum_plus_6 - sp10 * UInt64(10)
-            var sp_mod_plus_6 = sp_mod + UInt64(6)
-            q_lo_part = sp10 + k + (sp_mod_plus_6 // UInt64(10))
-            rem = sp_mod_plus_6 - (sp_mod_plus_6 // UInt64(10)) * UInt64(10)
+            var sp10 = sum_plus_6 // UInt64(10)  # cov: unreachable after a carry, sum <= 9 * 6 - 1, so sum + 6 cannot wrap
+            var sp_mod = sum_plus_6 - sp10 * UInt64(10)  # cov: unreachable see the line above
+            var sp_mod_plus_6 = sp_mod + UInt64(6)  # cov: unreachable see the line above
+            q_lo_part = sp10 + k + (sp_mod_plus_6 // UInt64(10))  # cov: unreachable see the line above
+            rem = sp_mod_plus_6 - (sp_mod_plus_6 // UInt64(10)) * UInt64(10)  # cov: unreachable see the line above
         else:
             q_lo_part = sum_plus_6 // UInt64(10) + k
             rem = sum_plus_6 - (sum_plus_6 // UInt64(10)) * UInt64(10)
