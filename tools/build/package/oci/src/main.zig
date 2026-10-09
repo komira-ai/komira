@@ -34,7 +34,8 @@
 //!
 //! Gzip goes through the pinned busybox (`<busybox> gzip -dc` to read a
 //! layer, `<busybox> gzip -c` to write one, its header's time then zeroed);
-//! nothing else runs. The commands are in cli.zig.
+//! nothing else runs. The commands, and the exit code and stderr line of
+//! each run (`cli.outcome`), are in cli.zig.
 
 const std = @import("std");
 const C = @import("common.zig");
@@ -43,23 +44,10 @@ const cli = @import("cli.zig");
 pub fn main() void {
     const raw = std.process.argsAlloc(C.a()) catch C.oom();
     const argv = C.a().alloc([]const u8, raw.len) catch C.oom();
-    var refused = false;
-    for (raw, 0..) |arg, i| {
-        argv[i] = arg;
-        if (!refused and !C.utf8Valid(arg)) {
-            C.msg = C.fmt("argument {d} is not UTF-8: {s}", .{ i, C.debugOsStr(arg) });
-            refused = true;
-        }
-    }
-    if (!refused) {
-        cli.run(argv) catch {
-            refused = true;
-        };
-    }
-    if (refused) {
-        std.io.getStdErr().writer().print("komira_oci: {s}\n", .{C.msg}) catch {};
-        std.process.exit(1);
-    }
+    for (raw, 0..) |arg, i| argv[i] = arg;
+    const o = cli.outcome(argv);
+    std.io.getStdErr().writeAll(o.stderr) catch {};
+    std.process.exit(o.code);
 }
 
 // The unit tests, run by `zig test` on this file (BUCK: `:komira_oci_unit`).

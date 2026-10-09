@@ -337,3 +337,22 @@ pub fn run(argv: []const []const u8) Fail!void {
     if (C.eql(a.cmd, "check")) return check(a);
     return C.fail("unknown command `{s}` (tree, image, layers, check)", .{a.cmd});
 }
+
+/// What the process does with `argv`: its exit code and the bytes it writes
+/// to stderr (main.zig writes them and exits, nothing more). An argument that
+/// is not UTF-8 is refused before any command runs. A refusal is code 1 and
+/// the one line `komira_oci: <refusal>`; Buck2 must not take a `--out` that a
+/// late refusal left half written. Success is code 0 and no stderr.
+pub const Outcome = struct { code: u8, stderr: []const u8 };
+
+pub fn outcome(argv: []const []const u8) Outcome {
+    for (argv, 0..) |arg, i| {
+        if (!C.utf8Valid(arg)) return refused(C.fmt("argument {d} is not UTF-8: {s}", .{ i, C.debugOsStr(arg) }));
+    }
+    run(argv) catch return refused(C.msg);
+    return .{ .code = 0, .stderr = "" };
+}
+
+fn refused(m: []const u8) Outcome {
+    return .{ .code = 1, .stderr = C.fmt("komira_oci: {s}\n", .{m}) };
+}
