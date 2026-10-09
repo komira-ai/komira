@@ -3,9 +3,10 @@
 Status: proposed, not built. Scope: komira's plan wire, optimizer, plan cutter and executor admission.
 
 Pinned commit: komira `origin/main` at `af1d841f`. Paths are cited as `path:line`; the line numbers were read at
-`547e9849`, and `git diff 547e9849 af1d841f` is empty for `src/komira_plan_proto`, `komira_plan_wire`,
-`komira_plan_ir`, `komira_optimizer`, `komira_plan_stats`, `komira_join_assembly` and `komira_shuffle`. Statements
-marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run to write this document.
+`547e9849`, and `git diff 547e9849 af1d841f` (and onward to `8bfba390`) is empty for `src/komira_plan_proto`,
+`komira_plan_wire`, `komira_plan_ir`, `komira_optimizer`, `komira_plan_stats`, `komira_join_assembly` and
+`komira_shuffle`. Statements marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or
+run to write this document.
 
 ---
 
@@ -21,9 +22,10 @@ A scheduler that accepted that raw logical plan would force one of two things on
 runs the optimizer, or every executor host does. Both are expensive, and in both the optimizer runs far from the
 party that wrote the query.
 
-This design makes the **optimized logical plan** a defined, serializable type. A client that links the engine
-(the Python or TypeScript SDK, or a Mojo program) optimizes once and submits that type. A scheduler places it. An
-executor host **lowers** it to physical operators and does not optimize it again. When the plan runs on more than
+This design makes the **optimized logical plan** a defined, serializable type. There is no raw SQL submission: SQL
+is written inside the Mojo, TypeScript or Python SDK (or a notebook built on one), and the SDK parses it into a
+logical plan, optimizes it once and submits that type. A scheduler places it. An executor host **lowers** it to
+physical operators and does not optimize it again. When the plan runs on more than
 one host, it is cut into **optimized segments**, a second defined type built from the same pieces.
 
 ### 1.1 Goals
@@ -33,7 +35,9 @@ one host, it is cut into **optimized segments**, a second defined type built fro
    engine build.
 3. The optimizer's decisions are explicit, typed and checkable. They are not implied by convention.
 4. A host validates the plan before it runs it, and every refusal has a name.
-5. The producer's build and the host's build may differ within a declared compatibility window.
+5. **Backward compatibility, always.** Every later host build accepts and executes every `OptimizedPlan` that any
+   released producer ever emitted (§9). Producer and host builds may therefore differ without limit in that
+   direction.
 6. A physical-plan form is reserved so it can be added later without a format break.
 
 ### 1.2 Non-goals
@@ -43,6 +47,8 @@ one host, it is cut into **optimized segments**, a second defined type built fro
   physical IR (`src/komira_plan_ir/physical_plan.mojo`) is tied to a single engine build. It has no producer or
   consumer in this tree yet (`physical_plan.mojo:5-6`).
 - Trusting producer statistics for correctness or for resource reservation (§6).
+- Forward compatibility. An older host need not accept a newer plan; the scheduler routes by version (§9.5).
+- A raw SQL or bound-plan door on the scheduler. Every submission is already optimized (§2).
 
 ---
 
@@ -50,12 +56,16 @@ one host, it is cut into **optimized segments**, a second defined type built fro
 
 | Role | What it does |
 |---|---|
-| **Producer** | Binds, gathers statistics, optimizes, and emits an `OptimizedPlan`. It is either the client SDK, or a **server-side producer**: the same optimizer library running next to the data, used for SQL text from tools that have no engine. For identical inputs both yield the same `plan_digest` (§7.1). The stamps differ, so the header bytes do not. |
-| **Scheduler** | Any system that places work. It is not part of komira. It reads only the header, through the header-only library (§4.1), and never decodes the body. |
+| **Producer** | Parses SQL (or takes a dataframe expression), binds, gathers statistics, optimizes, and emits an `OptimizedPlan`. It is a program that links the engine and the producer library: the Mojo, TypeScript or Python SDK, or a notebook built on one. A **service that re-optimizes a stored query** on each run (for example a scheduler running a recurring job) is a producer too: it starts from a bound plan that an SDK produced and stored, links the same library, and stamps `kind = SERVER`. It is not a path for clients without an engine; there is none. For identical inputs every producer yields the same `plan_digest` (§7.1). The stamps differ, so the header bytes do not. |
+| **Scheduler** | Any system that places work. It is not part of komira. It accepts plan work only as an `OptimizedPlan`, never as SQL text or a bound plan, so it never runs the optimizer. It reads only the header, through the header-only library (§4.1), and never decodes the body. |
 | **Coordinator** | Learns the host count once placement is done. It verifies `plan_digest`, then **cuts** the plan into `OptimizedSegment`s (§8). The cut is mechanical and changes no decision. |
 | **Executor host** | Admits a segment or a plan (§7), lowers it, and applies only the named host-local rules (§5.3). It never re-optimizes. |
 
 The producer optimizes, the scheduler places, the coordinator cuts and the host lowers. Each step runs once.
+
+*A future option, not part of this design:* a SQL gateway for BI tools that speak only SQL would itself be a producer,
+built on the SDK's producer library. It would submit `OptimizedPlan`s like any other producer and need no scheduler
+change.
 
 ---
 
@@ -78,7 +88,7 @@ would drift apart.
 **The codec gets a decode context instead:** `WireContext { RAW, OPTIMIZED }`.
 
 - **RAW** is today's behaviour. Every existing refusal stays. It is used for view bodies, the existing plan
-  endpoint, and the input to the server-side producer.
+  endpoint, and a bound plan stored for re-optimization (§2).
 - **OPTIMIZED** accepts the decision fields in §5.2, requires the ones marked required, and refuses the
   statistics fields listed there.
 
@@ -98,9 +108,9 @@ There is one new file, `src/komira_plan_proto/optimized_plan.proto`, in package 
 ### 4.1 The plan: header and body
 
 ```proto
-// What a producer submits and a scheduler accepts. A scheduler reads fields 1-7 and 9.
+// What a producer submits and a scheduler accepts. A scheduler reads fields 1-7.
 message OptimizedPlan {
-  uint32           format_version      = 1;  // minimum reader capability; set membership (§9.1)
+  uint32           format_version      = 1;  // minimum reader capability; set membership (§9.2)
   ProducerStamp    producer            = 2;
   bytes            plan_digest         = 3;  // 32 bytes (§7.1)
   bytes            recurring_signature = 4;  // 32 bytes or empty; advisory
@@ -108,14 +118,14 @@ message OptimizedPlan {
   WireWriteTarget  write_target        = 6;  // same meaning as WirePlanEnvelope.write_target
   PlanAdvice       advice              = 7;  // advisory; outside the digest (§6.3)
   bytes            body                = 8;  // a canonical OptimizedPlanBody; a scheduler never parses it
-  ReoptimizeSource reoptimize_source   = 9;  // optional opt-in (§9.3)
 }
 
 message ProducerStamp {
   bytes        engine_build               = 1;  // digest of the engine build output; provenance and revocation key
-  uint32       optimizer_contract_version = 2;  // the compatibility key (§9.2)
+  uint32       optimizer_contract_version = 2;  // meaning frozen per version (§9.3)
   bytes        optimizer_config_digest    = 3;  // digest of the OptimizerConfig values used; reproduction only
   ProducerKind kind                       = 4;  // CLIENT_PYTHON | CLIENT_TYPESCRIPT | CLIENT_MOJO | SERVER
+                                                  // (SERVER: a service re-optimizing a stored query, §2)
 }
 
 // The type is the "do not re-optimize" mark; §7.3 says how that is enforced.
@@ -128,11 +138,6 @@ message OptimizedPlanBody {
 message PlanAdvice {
   repeated NodeEstimate estimates   = 1;  // {node_ordinal, node_tag, rows, bytes, source}; preorder ordinal
   repeated ScanStats    stats_basis = 2;  // the statistics the optimizer used
-}
-
-message ReoptimizeSource {
-  WirePlanEnvelope bound_plan      = 1;  // decoded in the RAW context
-  bool             allow_reoptimize = 2;
 }
 ```
 
@@ -153,15 +158,14 @@ fixes the context.
 
 | # | Field | Invariant | Checked by |
 |---|---|---|---|
-| 1 | `format_version` | In the reader's accepted set; never `>=`. An understated version (a field present that its version does not include) is refused, as `plan.proto:1631` does for `write_target`. | header library, host |
-| 2 | `producer` | Required. `engine_build` not on the revocation set passed in by the caller. `optimizer_contract_version` in the host's accepted set. | header library (revocation), host (revocation and contract) |
+| 1 | `format_version` | In the reader's accepted set, which holds **every released version** and loses none (§9.2); never `>=`. An understated version (a field present that its version does not include) is refused, as `plan.proto:1631` does for `write_target`. | header library, host |
+| 2 | `producer` | Required. `engine_build` not on the revocation set passed in by the caller. `optimizer_contract_version` a released version the host knows; every released version stays known (§9.3). | header library (revocation), host (revocation and contract) |
 | 3 | `plan_digest` | Exactly 32 bytes; the host recomputes it (§7.1). | host, coordinator |
 | 4 | `recurring_signature` | 32 bytes or empty. It cannot be verified from the body, so it keys only history and caches, never authorization or limits. | none (advisory) |
 | 5 | `needs` | Required (§6.1). The host cross-checks it against the body. | header library (caps), host (cross-check) |
 | 6 | `write_target` | Same rules as in `WirePlanEnvelope`: an empty path is refused. A write-carrying plan declares the format version that includes it. | header library, host |
 | 7 | `advice` | Advisory. No reader refuses a plan for its content; a mismatch between an estimate's `node_tag` and the node at its ordinal is shown as such by diagnostics and otherwise ignored. | none |
 | 8 | `body` | Canonical (§7.1) and decodes as `OptimizedPlanBody` in the OPTIMIZED context. | host |
-| 9 | `reoptimize_source` | Optional. Used only by a server-side producer. | server-side producer |
 
 ### 4.3 Shared subplans
 
@@ -218,8 +222,10 @@ second statement of the same fact that nothing could keep in agreement.
 
 **Not every `(join type, build side)` pair can be lowered.** `build_side = LEFT` with `RIGHT`, `FULL`, `SEMI` or
 `ANTI` joins (`logical_plan.mojo:471-474`) needs build-side-outer, right-semi and right-anti operators *(inferred:
-komira has none today)*. A host refuses each pair it cannot lower with `OPTIMIZED_JOIN_BUILD_SIDE_UNSUPPORTED`. The
-supported set is part of `optimizer_contract_version` (§9.2), so a producer knows it in advance.
+komira has none today)*. The supported set is part of `optimizer_contract_version` (§9.3), so a producer knows it in
+advance, and it only grows: a pair that any released contract version admits stays lowerable by every later host.
+A host refuses a pair that no contract version up to the plan's admits with `OPTIMIZED_JOIN_BUILD_SIDE_UNSUPPORTED`;
+no correct producer emits one.
 
 **`group_topk` gets no wire field.** It exists on the IR (`logical_plan_variants.mojo:661`), nothing sets it, and its
 semantics are unspecified. The encoder refuses a plan carrying it in both contexts (§5.4). A field that is always
@@ -281,8 +287,8 @@ itself verified.
 
 *Cost (inferred):* a host-side scalar fold does not re-run the folding and pruning that the bound literal would
 have enabled. Plans shaped like TPC-H Q11, Q15 and Q22 may run with a less pruned shape than a fixed-point optimizer
-would produce. A server-side producer can execute a scalar subquery before it optimizes; whether to route such
-plans there is open question 2.
+would produce. A producer links the engine and could execute a scalar subquery before it optimizes; whether it
+should is open question 2.
 
 ### 5.4 Fields that are silently dropped today
 
@@ -410,18 +416,22 @@ The header library runs steps 1-3 on the header only:
 
 1. **Size.** At most the 16 MiB plan budget plus a fixed header allowance, checked before parsing.
    `OPTIMIZED_PLAN_LIMIT_EXCEEDED`.
-2. **Format.** `OPTIMIZED_PLAN_VERSION_UNSUPPORTED`: `format_version` not in the set, or understated.
+2. **Format.** `OPTIMIZED_PLAN_VERSION_UNSUPPORTED`: `format_version` not in the set, or understated. Every
+   released version is in every later reader's set (§9.2), so this refuses only a version newer than the reader, or
+   one never released.
 3. **Producer and needs.** `OPTIMIZED_PLAN_PRODUCER_REVOKED`: `engine_build` is in the revocation set the caller
    passes. `OPTIMIZED_PLAN_NEEDS_OVER_LIMIT`: `needs` exceeds the limits the caller passes.
 
 The host, or the coordinator before a cut, runs steps 1-12:
 
-4. **Contract.** `OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`: `optimizer_contract_version` not in the host's set. The
-   refusal carries the accepted set.
+4. **Contract.** `OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`: `optimizer_contract_version` newer than the host knows (an
+   older released version is always known, §9.3). The refusal carries the accepted set, so a scheduler can route.
 5. **Limits.** `plan_wire_admit`'s limits over the plan and `shared` together: depth 64, nodes 65,536
    (`src/komira_plan_wire/plan_wire_admit.mojo:197`, `:228`). `OPTIMIZED_PLAN_LIMIT_EXCEEDED`.
 6. **Decode** in the OPTIMIZED context; the value checks in `plan_wire_values.mojo` still run.
-7. **Canonical and digest.** `OPTIMIZED_PLAN_NOT_CANONICAL`, then `OPTIMIZED_PLAN_DIGEST_MISMATCH`.
+7. **Canonical, digest, upgrade.** `OPTIMIZED_PLAN_NOT_CANONICAL` (against the canonical form of the plan's own
+   version), then `OPTIMIZED_PLAN_DIGEST_MISMATCH` (over the bytes as produced). Then, for a plan whose contract
+   version has upgrade steps (§9.3), the chain runs on the decoded plan, and steps 8-11 see the upgraded plan.
 8. **Structure**, each refused by name:
    - `OPTIMIZED_JOIN_BUILD_SIDE_MISSING`, `OPTIMIZED_JOIN_BUILD_SIDE_UNSUPPORTED`, `OPTIMIZED_JOIN_ALGO_UNDECIDED`
    - `OPTIMIZED_JOIN_EXCHANGE_INCONSISTENT`
@@ -468,6 +478,7 @@ A flag cannot be checked, so the rule is backed by two checks that can each be m
 
 ```proto
 // One piece of a cut plan. Produced and consumed by the SAME engine build; no cross-build promise.
+// A stored cut does not outlive an engine upgrade; it is re-derived from its stored OptimizedPlan (§9.6).
 message OptimizedSegment {
   bytes                  engine_build       = 1;  // the coordinator's build; a host of another build refuses
   bytes                  parent_plan_digest = 2;  // the verified OptimizedPlan.plan_digest
@@ -537,20 +548,45 @@ spills instead.
 
 ---
 
-## 9. Versioning and skew
+## 9. Versioning: backward compatibility, always
 
-### 9.1 `format_version`
+### 9.1 The promise
+
+The format promises **backward compatibility with no window**: every header reader, coordinator and host built from
+any later release accepts and executes every `OptimizedPlan` that any released producer ever emitted. The promise
+covers plans in flight, plans a scheduler or a run record keeps for replay, and plans stored in the definition of a
+recurring job. It also covers a bound plan (`WirePlanEnvelope`, RAW) that a service stores in order to re-optimize it
+on each run (§2): every later producer binds and optimizes it.
+
+"Accepts and executes" means the plan passes admission (§7.2) unless it is invalid for a reason unrelated to its age
+(a digest mismatch, a stale snapshot pin, `needs` over a limit), and on the same pinned data it produces the result it
+produced under the build that first ran it. The one exception is revocation of a specific producer build (§9.7).
+
+### 9.2 `format_version` and how the messages evolve
 
 `format_version` follows the envelope's rule (`plan.proto:1615-1640`): a **minimum reader capability**, checked by
 set membership and never by `>=`, and an understated version is refused. Because a host refuses unknown fields in
 the body (§7.1), **every new body field bumps it**; there is no "harmless field" exception for this type. Each
 version is defined by the set of fields it may carry, and a producer writes the lowest version whose field set the
-plan actually uses, so an older host still accepts plans that do not use the new field.
+plan actually uses.
 
-### 9.2 `optimizer_contract_version`
+Every reader's accepted set holds **every released version**; a version is never retired. The evolution rules, for
+every message reachable from `OptimizedPlan` and for the enums they use:
 
-Producer and host builds **may differ**; the compatibility key is `optimizer_contract_version`. It bumps when any of
-these changes:
+- Add fields and enum values only, each under a new `format_version`.
+- Never renumber a field, never reuse a number or a name, never change a field's type, and never change the meaning
+  of a field or an enum value. A different meaning is a new field or a new value.
+- A field or value that a released version may carry stays in the schema and in the reader forever. A producer may
+  stop writing it; readers keep accepting and executing it.
+- A field or value removed before any release could carry it is `reserved`, number and name, as
+  `plan_vocabulary.proto:56-57` does for retired plan tags.
+- `*_WIRE_UNSPECIFIED = 0` keeps its meaning: refused wherever a value is required.
+- The canonical form (§7.1) of a released version is frozen. A new canonical rule applies only to versions defined
+  after it, and a host checks each plan against its own version's form.
+
+### 9.3 `optimizer_contract_version`
+
+It names the meaning, as a host must lower them, of the decisions in the body. It bumps when any of these changes:
 
 - the lowering meaning of a §5.2 field, including the set of `(join type, build side)` pairs a host can lower;
 - the set of host-local rules or the rewrite set of §7.3;
@@ -558,27 +594,99 @@ these changes:
 - the meaning of a snapshot pin.
 
 It does **not** bump when optimizer heuristics improve: a host executes an older optimizer's decisions correctly; it
-just executes older choices. The host accepts a set (the current version and the two before it), checked by
-membership so a version can be retired early. A plan outside the set is refused with
-`OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`, and the refusal lists the set.
+just executes older choices.
 
-### 9.3 The three options considered
+**Meaning is frozen per version.** Once version N is released, its meaning never changes, and every later host
+executes version-N plans with version-N meaning, in one of two ways:
+
+1. **Keep the lowering.** The host keeps code for every decision value any released contract version admits. This is
+   the default, because most changes add a value (a new join algorithm, a newly lowerable `(join type, build side)`
+   pair), and an addition leaves older plans untouched.
+2. **A versioned upgrade step on read.** `upgrade_N_to_N+1` is a total function from valid version-N plans to
+   version-N+1 plans with the same result. It runs after the digest check (§7.2 step 7), and steps compose into a
+   chain up to the host's version. It translates; it does not optimize. It changes no join order, build side,
+   algorithm or aggregate mode except through named entries in its own rewrite set, and the post-condition (§7.3)
+   compares the lowering against the upgraded plan. An upgrade step never refuses a valid plan of its source
+   version: there is no "too old".
+
+A new decision is preferably a new field or enum value under a new `format_version`; a contract bump is the last
+resort. A host's accepted set is every released contract version up to its own.
+
+### 9.4 The golden corpus
+
+For each released `format_version` and each released `optimizer_contract_version`, the release's producer emits a
+corpus of plans. They are committed at release time under `src/komira_optimized_plan/tests/fixtures/corpus/`, with
+the small pinned data files they read and the expected output of each. The corpus is **append-only**: a release adds
+files, and a CI check refuses a change that edits or deletes one.
+
+The header, admission and lowering targets each weld a test (`test_srcs`) that, for every corpus plan, decodes it,
+recomputes `plan_digest`, admits it with an empty revocation set, runs the upgrade chain, lowers it, executes it on
+the pinned data and compares the output with the expected output. A second assertion checks coverage: every field
+and enum value that any released version admits appears in at least one corpus plan, so a new decision value cannot
+ship without one. The corpus also holds bound plans (`WirePlanEnvelope`) as a released producer stores them for
+re-optimization (§9.1); a test welded into `komira_plan_producer` optimizes each one and admits the result.
+
+What it catches, each with a planted mutant that must turn it red:
+
+- a renumbered or reused field, or a changed field type: decoding fails or the digest differs. Mutant: swap two
+  field numbers in `WireJoinNode`.
+- a released version dropped from an accepted set: admission refuses. Mutant: remove the oldest `format_version`.
+- a canonical rule changed for an old version: `OPTIMIZED_PLAN_NOT_CANONICAL`. Mutant: change NaN canonicalization
+  for every version.
+- a changed meaning of a field or enum value, or a lowering removed for an old decision value: a refusal or a wrong
+  result. Mutant: lower `AggMode.FINAL` as `SINGLE` for the first contract version.
+- an upgrade step that changes a result or refuses a valid plan. Mutant: an upgrade step that drops a scan's pushed
+  `filter`.
+- a field or value released with no corpus plan: the coverage assertion. Mutant: add a `JoinAlgo` value without a
+  corpus entry.
+
+The corpus starts with the first release that ships this type; there is nothing to backfill.
+
+### 9.5 Not promised: forward compatibility
+
+An older host need not accept a newer plan. It refuses with `OPTIMIZED_PLAN_VERSION_UNSUPPORTED` or
+`OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`, each carrying its accepted set. A scheduler **routes by version**: it reads
+`format_version` and `optimizer_contract_version` from the header and places the plan only on hosts whose build
+accepts both; the header library exposes each build's accepted sets for that purpose. During a rolling deploy, a plan
+that only new hosts accept goes to new hosts. Because a producer writes the lowest `format_version` its plan needs, a
+newer producer's plans that use no new field still run on older hosts.
+
+### 9.6 Segments, and a cut that is stored
+
+`OptimizedSegment` and `OptimizedSegmentDag` travel between processes of one engine build within one run (§8.1). They
+carry no compatibility promise: a host of another build refuses them (`OPTIMIZED_SEGMENT_BUILD_MISMATCH`), and the
+segment format may change in any release.
+
+A party that keeps a cut beyond one run, such as a long-running streaming query that restarts, stores the
+`OptimizedPlan` beside it. The same build may reuse its stored cut after re-verifying `segment_digest`. After an
+engine upgrade:
 
 | Option | Verdict |
 |---|---|
-| Accept only an equal producer and host build | Rejected. Every executor deploy would break every installed client. |
-| Always re-optimize next to the host | Rejected as the default. It brings back the cost this design removes, and it makes the submitted plan advisory. |
-| A compatibility window on `optimizer_contract_version` | **Chosen.** |
+| The new build **re-derives** the cut from the stored `OptimizedPlan`, with the same host count | **Chosen.** The plan already carries the backward-compatibility promise. The cut is mechanical and changes no decision (§8.2), so re-cutting a fixed plan reproduces the same decisions; nothing is re-optimized, so the statistics that would change a re-optimized plan play no part. One format is promised forever instead of two, and the segment format stays free to change; its reserved physical arm (§10) is meaningful only between equal builds and could never carry such a promise. |
+| Give stored segments the same backward-compatibility promise | Rejected: a second permanent format, impossible for the physical arm. |
 
-**Re-optimization is opt-in only.** If the client sent `reoptimize_source` with `allow_reoptimize = true`, a plan
-refused for contract skew can be re-optimized by a server-side producer from the bound plan, on the same code path
-engine-less clients use. The record of the execution says so and names both builds. A client that did not opt in
-gets the refusal; its remedy is to upgrade.
+Anything keyed to the cut, such as per-operator state identifiers, is derived from the plan and not from segment
+layout, so a re-cut by a new build yields the same keys. Test: for every corpus plan with `host_count_max > 1`, the
+current cutter's keys equal those recorded at release. Mutant: a cutter that numbers state by segment order. Whether
+operator state written by one build can be read by another is a separate question, outside this design.
 
-**Revocation.** A header reader takes a set of revoked `engine_build`s. It stops plans from an optimizer build later
-found to be wrong without bumping the contract.
+### 9.7 Revocation: the one exception
 
-Segments carry no compatibility window: they live between processes of one build (§8.1).
+A header reader takes a set of revoked `engine_build` digests, and a host repeats the check (§7.2). It stops plans
+from a specific producer build later found to be compromised or to emit wrong plans
+(`OPTIMIZED_PLAN_PRODUCER_REVOKED`). Revocation names **builds, never versions**: no `format_version` or
+`optimizer_contract_version` is ever revoked, and a plan of the same versions from another build is still accepted.
+The remedy for a revoked plan is to produce it again with a good build.
+
+### 9.8 The options considered
+
+| Option | Verdict |
+|---|---|
+| Accept only an equal producer and host build | Rejected. Every executor deploy would break every installed client and every stored plan. |
+| Always re-optimize next to the host | Rejected. It brings back the cost this design removes, and it makes the submitted plan advisory. |
+| A compatibility window (the current contract version and a few before it) | Rejected. A stored plan, a recurring job's definition or a replayed run record outlives any window and would start failing on a date its owner did not choose. |
+| Backward compatibility with no window, no forward promise, revocation by build | **Chosen.** Its cost is that every lowering and every upgrade step is kept forever; the corpus (§9.4) makes that checkable. |
 
 ---
 
@@ -605,9 +713,10 @@ Each stage is independently reviewable and leaves `main` green. Every stage ship
 | 4 | `komira_plan_proto` | `optimized_plan.proto` (§4, §6, §8). | protoc golden fixtures for each message. |
 | 5 | new `komira_optimized_plan_header`, new `komira_optimized_plan` | Header codec and steps 1-3 in the first; body and segment codecs, canonical encoder, both digests and steps 4-9 in the second. Each file under 1,000 lines. | Canonical bytes cross-checked against protoc for every golden without NaN. Mutant: perturb field order; the digest test goes red. One hostile test per refusal token. The header target's closure must exclude `komira_plan_wire`; planting it goes red. |
 | 6 | new `komira_lowering_rules`, `komira_optimizer` | Move payload narrowing, scan sharing and the scalar-subquery passes out of `komira_optimizer`. Scan sharing reads `build_side` and takes row counts from an argument. | Closure lint excludes `komira_optimizer`; planting it goes red. Mutant: scan sharing that ignores `build_side`. |
-| 7 | `komira_optimizer`, new `komira_plan_producer` | The portable profile (§5.3) and the producer library over bind, the optimizer driver and the statistics readers, used by both producers. Cost comparisons break ties on a total integer order. | For the same bound plan, statistics and build, the client path and the server path yield the same `plan_digest`, run on each producer platform. Mutant: a producer that reads its config from the environment instead of its argument (`optimizer_config.mojo` reads none today). |
+| 7 | `komira_optimizer`, new `komira_plan_producer` | The portable profile (§5.3) and the producer library over SQL parsing, bind, the optimizer driver and the statistics readers, linked by every SDK and by a service re-optimizing a stored query. Cost comparisons break ties on a total integer order. | For the same bound plan, statistics and build, every producer platform yields the same `plan_digest`. Mutant: a producer that reads its config from the environment instead of its argument (`optimizer_config.mojo` reads none today). |
 | 8 | `komira_optimized_plan`, `komira_shuffle` | `WireSinkBinding`, the shuffle-partition scan source, and the cutter (§8) with its "no decision changed" assertion. | Mutants: a cutter that reorders a join; one that flips a build side. |
 | 9 | the host lowering target | The post-condition (§7.3) and the closure lint excluding `komira_optimizer`. | A planted dependency goes red; each §7.3 mutant is refused. |
+| 10 | `komira_optimized_plan`, the host lowering target, the release machine | The golden corpus (§9.4): emitted at each release that ships this type, append-only, welded into the header, admission and lowering targets, with the coverage assertion and the stored-cut key test (§9.6). | Each §9.4 mutant goes red; editing or deleting a corpus file is refused by the CI check. |
 
 **Critical path.** komira has no optimizer driver at the pinned commit: no `def optimize` exists under `src/`, and
 there is no `select_join_build_side` (`git grep`). It also has no lowering target: the physical IR has no producer
@@ -621,8 +730,9 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 
 **Client prerequisites.**
 
-- Cost decisions need Parquet footer row counts (`optimizer_eager_agg.mojo:44-60`), so a client optimizes only when
-  it can read footers. A client that cannot (no read access, or too far from the data) uses a server-side producer.
+- Cost decisions need Parquet footer row counts (`optimizer_eager_agg.mojo:44-60`). A producer that cannot read
+  footers (no read access, or too far from the data) optimizes on default statistics (`optimizer_stats.mojo:13`) and
+  records the source as `UNKNOWN` in `advice`; the plan is valid, possibly slower. There is no server-side fallback.
 - `recurring_signature` needs a literal-normalizing render of the bound plan, a few hundred lines in stage 5.
 - A cache of optimized plans is keyed by the sha256 of the canonical **bound** plan with its literals, plus the
   pins, the engine build, the config digest and `optimizer_contract_version`. Never by `recurring_signature`: two
@@ -636,7 +746,7 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 - **Trino** ([`PlanFragment`](https://github.com/trinodb/trino/blob/master/core/trino-main/src/main/java/io/trino/sql/planner/PlanFragment.java)).
   The coordinator optimizes and fragments; workers only lower (`LocalExecutionPlanner`). That is the same split as
   here, except the optimizer runs on the coordinator. Coordinator and workers must run the same version: the
-  equal-build option rejected in §9.3.
+  equal-build option rejected in §9.8.
 - **DataFusion** ([`datafusion.proto`](https://github.com/apache/datafusion/blob/main/datafusion/proto/proto/datafusion.proto)).
   The logical proto has no slots for optimizer decisions; the norm is to round-trip a logical plan and optimize it
   again. Decisions such as join partition mode exist only in the physical proto, which makes no compatibility
@@ -656,10 +766,11 @@ files, excluding the driver and the lowering. That is an estimate, not a measure
 
 1. **`group_topk`**: define its semantics so it can be admitted, or keep refusing it? Recommendation: refuse until an
    owner specifies it.
-2. **Scalar subqueries**: host-side `SCALAR_FOLD` (this design), or route plans with scalar subqueries to a
-   server-side producer that executes them first? Recommendation: `SCALAR_FOLD` now; revisit if the gap measured on
-   TPC-H Q11, Q15 and Q22 is material.
+2. **Scalar subqueries**: host-side `SCALAR_FOLD` (this design), or have the producer, which links the engine,
+   execute them before it optimizes? Recommendation: `SCALAR_FOLD` now; revisit if the gap measured on TPC-H Q11,
+   Q15 and Q22 is material.
 3. **Exchanges at the cut**: may the cutter ever add an exchange the producer did not place? Recommendation: no. A
    producer that declared `host_count_max = 1` gets one host.
-4. **Contract window width**: the current version and two before it, or wider for long-lived installed clients?
-   Recommendation: two before it, revisited once clients ship on a release cadence.
+4. **Keep the lowering or write an upgrade step** (§9.3), when a contract change is not an addition? Recommendation:
+   decide per change, preferring kept lowering; an upgrade step only when keeping two lowerings would split an
+   operator's code path.
