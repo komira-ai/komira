@@ -102,39 +102,125 @@ def _dict_data_len(col: Column[HeapRegion]) -> Int:
     return 0
 
 
+def _dict_payload_error(
+    name: StaticString,
+    site: StaticString,
+    which: Int,
+    col: Column[HeapRegion],
+    what: String,
+) -> Error:
+    return Error(
+        String(name)
+        + ": "
+        + String(site)
+        + ": input "
+        + String(which)
+        + " claims "
+        + String(col._dict_size)
+        + " dictionary entries but "
+        + what
+    )
+
+
 def _require_dict_payload(
     site: StaticString, which: Int, col: Column[HeapRegion]
 ) raises:
-    """Refuse a dictionary that claims entries it does not carry.
+    """Refuse a dictionary whose buffers do not hold the entries it claims.
+
+    The merge reads entry `i` through `ByteView.sub` / `get_typed`, whose
+    bounds are `debug_assert`s (inert at `ASSERT=none`), so every read it
+    makes is proven here first:
+      * numeric: a values buffer of at least `dict_size * value width` bytes;
+      * string: at least `dict_size + 1` Int32 offsets, the first one
+        non-negative, never decreasing (one O(dict_size) pass), the last one
+        within the values buffer.
+    A missing buffer is `ArrowConcatDictMissingPayload`; a present but short
+    or inconsistent one is `ArrowConcatDictMalformed`.
 
     A string dictionary whose entries are all empty (its offsets span zero
     bytes) may omit its values buffer: that is a zero-length buffer, legal
     in Arrow, and reads as empty strings."""
-    if col._dict_size <= 0:
+    comptime missing = "ArrowConcatDictMissingPayload"
+    comptime bad = "ArrowConcatDictMalformed"
+    var n = col._dict_size
+    if n <= 0:
         return
-    var missing = String()
     if col.is_numeric_dict():
         if not col._dict_data:
-            missing = "values buffer"
-    elif not col._offsets:
-        missing = "offsets buffer"
-    elif not col._dict_data:
-        ref offs = col._offsets.value()
-        var span = Int(offs.get_typed[Int32](col._dict_size)) - Int(
-            offs.get_typed[Int32](0)
+            raise _dict_payload_error(
+                missing, site, which, col, "carries no dictionary values buffer"
+            )
+        var need = n * _numeric_dict_value_width(col)
+        var have = col._dict_data.value().len()
+        if have < need:
+            raise _dict_payload_error(
+                bad,
+                site,
+                which,
+                col,
+                String("its values buffer holds ")
+                + String(have)
+                + " bytes, fewer than the "
+                + String(need)
+                + " those entries take",
+            )
+        return
+    if not col._offsets:
+        raise _dict_payload_error(
+            missing, site, which, col, "carries no dictionary offsets buffer"
         )
-        if span != 0:
-            missing = "values buffer"
-    if missing.byte_length() > 0:
-        raise Error(
-            String("ArrowConcatDictMissingPayload: ")
-            + String(site)
-            + ": input "
-            + String(which)
-            + " claims "
-            + String(col._dict_size)
-            + " dictionary entries but carries no dictionary "
-            + missing
+    ref offs = col._offsets.value()
+    if offs.len() < (n + 1) * size_of[Int32]():
+        raise _dict_payload_error(
+            bad,
+            site,
+            which,
+            col,
+            String("its offsets buffer holds ")
+            + String(offs.len())
+            + " bytes, fewer than dict_size + 1 Int32 offsets",
+        )
+    var first = Int(offs.get_typed[Int32](0))
+    if first < 0:
+        raise _dict_payload_error(
+            bad, site, which, col, "its first offset is negative: " + String(first)
+        )
+    var last = first
+    for i in range(1, n + 1):
+        var cur = Int(offs.get_typed[Int32](i))
+        if cur < last:
+            raise _dict_payload_error(
+                bad,
+                site,
+                which,
+                col,
+                String("its offsets decrease at entry ")
+                + String(i)
+                + " ("
+                + String(last)
+                + " then "
+                + String(cur)
+                + ")",
+            )
+        last = cur
+    if not col._dict_data:
+        if last != first:
+            raise _dict_payload_error(
+                missing, site, which, col, "carries no dictionary values buffer"
+            )
+        return
+    var dlen = col._dict_data.value().len()
+    if last > dlen:
+        raise _dict_payload_error(
+            bad,
+            site,
+            which,
+            col,
+            String("its last offset ")
+            + String(last)
+            + " runs past its values buffer ("
+            + String(dlen)
+            + " bytes)",
         )
 
 
@@ -237,6 +323,54 @@ def _carry_dict_payload(
     out._dict_index_byte_width = w
 
 
+def _code_out_of_range(
+    site: StaticString, row: Int, code: Int, dict_size: Int
+) -> Error:
+    return Error(
+        String("ArrowConcatDictCodeOutOfRange: ")
+        + String(site)
+        + ": input 1 row "
+        + String(row)
+        + " carries code "
+        + String(code)
+        + " but its dictionary has "
+        + String(dict_size)
+        + " entries"
+    )
+
+
+@always_inline
+def _remap_codes[
+    code_dt: DType, has_nulls: Bool
+](
+    mut dst: OwnedAlignedBuffer,
+    dst_row: Int,
+    b: Column[HeapRegion],
+    remap: List[Int32],
+    site: StaticString,
+) raises:
+    """`dst[dst_row + i] = remap[code_i]` for each of `b`'s rows, codes read
+    at `code_dt` from element `b._offset`.
+
+    The code under a NULL slot is undefined in Arrow and is never looked up:
+    the output carries 0 there (`has_nulls`; a column whose null count is 0
+    takes the loop without the validity test). A non-null code outside `b`'s
+    dictionary is refused rather than read past the table: one unsigned
+    compare, which also sends every negative code out of range."""
+    comptime C = Scalar[code_dt]
+    var limit = UInt64(b._dict_size)
+    var base = b._offset
+    for i in range(b._length):
+        comptime if has_nulls:
+            if _row_is_null(b, i):
+                dst.set_typed[C](dst_row + i, C(0))
+                continue
+        var code = b._data.get_typed[C](base + i)
+        if code.cast[DType.int64]().cast[DType.uint64]() >= limit:
+            raise _code_out_of_range(site, i, Int(code), b._dict_size)
+        dst.set_typed[C](dst_row + i, remap[Int(code)].cast[code_dt]())
+
+
 def _numeric_dict_value_width(col: Column[HeapRegion]) raises -> Int:
     var vdt = col._dict_value_dtype
     if vdt == DType.int32 or vdt == DType.float32:
@@ -263,6 +397,18 @@ def _concat_dict_columns[
     Fast path: the dictionaries are identical (`_dicts_identical`), so the
     codes are copied through and `a`'s dictionary is kept. Otherwise `b`'s
     dictionary is merged into `a`'s and `b`'s codes are remapped.
+
+    ⚠ CODES COPIED THROUGH ARE TRUSTED, CODES LOOKED UP ARE CHECKED. Only
+    `b`'s codes on the remap path index a table here (`remap[code]`), so only
+    they are range-checked (`ArrowConcatDictCodeOutOfRange`). `a`'s codes,
+    and both inputs' codes on the fast path, are copied byte-for-byte: a
+    code in a valid slot is trusted to lie in [0, dict_size), and the output
+    carries it as given (the reader that resolves it owns that check, e.g.
+    `dict_code_bounds.validate_dict_codes`). Checking them here is not cheap:
+    the codes under NULL slots are undefined, so it needs the per-row
+    validity walk the memcpy avoids, and the N-way fold re-concatenates its
+    growing accumulator as `a`, which would re-scan every earlier row at each
+    step.
     """
     comptime site = "_concat_columns(pair-wise, dictionary)"
     _refuse_dict_layout_disagreement(site, 1, a, b)
@@ -318,17 +464,16 @@ def _concat_dict_columns[
     var dict_size_a = a._dict_size
     var dict_size_b = b._dict_size
     var interner = DictInterner(expected_entries=dict_size_a + dict_size_b)
-    # The key of every entry of a string dictionary that omits its (then
-    # zero-length) values buffer: `_require_dict_payload` proved them empty.
-    var no_bytes = OwnedAlignedBuffer(1)
-    no_bytes.set_length(0)
+    # A string dictionary that omits its (then zero-length) values buffer has
+    # only empty entries (`_require_dict_payload` proved it); their key is a
+    # zero-byte view of its offsets buffer, so no buffer is allocated for it.
     for i in range(dict_size_a):
         if numeric:
             _ = interner.seed_append(
                 a._dict_data.value().view_ro().sub(i * vw, vw)
             )
         elif not a._dict_data:
-            _ = interner.seed_append(no_bytes.view_range_ro(0, 0))
+            _ = interner.seed_append(a._offsets.value().view_range_ro(0, 0))
         else:
             var s = Int(a._offsets.value().get_typed[Int32](i))
             var e = Int(a._offsets.value().get_typed[Int32](i + 1))
@@ -345,7 +490,9 @@ def _concat_dict_columns[
                 )
             )
         elif not b._dict_data:
-            remap.append(interner.find_or_insert(no_bytes.view_range_ro(0, 0)))
+            remap.append(
+                interner.find_or_insert(b._offsets.value().view_range_ro(0, 0))
+            )
         else:
             var bs = Int(b._offsets.value().get_typed[Int32](i))
             var be = Int(b._offsets.value().get_typed[Int32](i + 1))
@@ -365,34 +512,17 @@ def _concat_dict_columns[
 
     # a's codes pass through unchanged (seed_append kept a's ordinals).
     _copy_dict_codes(new_data, 0, a, w)
-    # b's codes are remapped. The code under a NULL slot is undefined in Arrow
-    # and is never looked up: the output carries 0 there. A non-null code
-    # outside b's dictionary is refused rather than read past the table.
-    for i in range(len_b):
-        var out_code = 0
-        if not _row_is_null(b, i):
-            var code: Int
-            if w == 8:
-                code = Int(b._data.get_typed[Int64](b._offset + i))
-            else:
-                code = Int(b._data.get_typed[Int32](b._offset + i))
-            if code < 0 or code >= dict_size_b:
-                raise Error(
-                    String("ArrowConcatDictCodeOutOfRange: ")
-                    + String(site)
-                    + ": input 1 row "
-                    + String(i)
-                    + " carries code "
-                    + String(code)
-                    + " but its dictionary has "
-                    + String(dict_size_b)
-                    + " entries"
-                )
-            out_code = Int(remap[code])
-        if w == 8:
-            new_data.set_typed[Int64](len_a + i, Int64(out_code))
+    # b's codes are remapped (`_remap_codes`): width and null handling are
+    # dispatched once here, not per row.
+    if w == 8:
+        if b._null_count == 0:
+            _remap_codes[DType.int64, False](new_data, len_a, b, remap, site)
         else:
-            new_data.set_typed[Int32](len_a + i, Int32(out_code))
+            _remap_codes[DType.int64, True](new_data, len_a, b, remap, site)
+    elif b._null_count == 0:
+        _remap_codes[DType.int32, False](new_data, len_a, b, remap, site)
+    else:
+        _remap_codes[DType.int32, True](new_data, len_a, b, remap, site)
 
     var merged_offsets = Optional[OwnedAlignedBuffer](None)
     if not numeric:

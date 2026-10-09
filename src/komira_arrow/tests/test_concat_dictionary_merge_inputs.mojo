@@ -12,6 +12,13 @@
 #   * a dictionary that claims entries but carries no data buffer: the merge
 #     unwrapped the absent buffer. It must be refused with an error.
 #   * a non-null code past the end of its dictionary: refused, not looked up.
+#     Both boundaries are pinned (code == dict_size, code == -1) at both code
+#     widths, with and without nulls in the input (the remap has one loop per
+#     case);
+#   * a dictionary whose buffers are present but too short or inconsistent
+#     (short values buffer, short offsets buffer, last offset past the values,
+#     decreasing offsets, negative first offset): refused before any entry is
+#     read. Each refusal is asserted by error name and reason.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -54,13 +61,20 @@ def _validity(nulls: List[Bool]) -> Optional[Bitmap[HeapRegion]]:
 
 
 def _str_dict_col(
-    codes: List[Int], dict_data: String, dict_offs: List[Int], nulls: List[Bool]
+    codes: List[Int],
+    dict_data: String,
+    dict_offs: List[Int],
+    nulls: List[Bool],
+    width: Int = 4,
 ) raises -> Column[HeapRegion]:
     var n = len(codes)
-    var buf = OwnedAlignedBuffer(max(n * 4, 1))
-    buf.set_length(Int64(n * 4))
+    var buf = OwnedAlignedBuffer(max(n * width, 1))
+    buf.set_length(Int64(n * width))
     for i in range(n):
-        buf.set_typed[Int32](i, Int32(codes[i]))
+        if width == 8:
+            buf.set_typed[Int64](i, Int64(codes[i]))
+        else:
+            buf.set_typed[Int32](i, Int32(codes[i]))
     var obuf = OwnedAlignedBuffer(len(dict_offs) * 4)
     obuf.set_length(Int64(len(dict_offs) * 4))
     for i in range(len(dict_offs)):
@@ -81,6 +95,7 @@ def _str_dict_col(
     )
     col._set_dict_data_from_oab(dbuf^)
     col._dict_size = len(dict_offs) - 1
+    col._dict_index_byte_width = width
     return col^
 
 
@@ -183,27 +198,139 @@ def test_remap_does_not_look_up_codes_under_null_slots() raises:
     assert_equal(_dict_str_at(out, 3), "w", "row 3")
 
 
-def test_remap_refuses_a_non_null_code_past_the_dictionary() raises:
-    var a = _str_dict_col([0], "xyz", [0, 1, 2, 3], _no_nulls(1))
-    var b = _str_dict_col([0, 5], "zw", [0, 1, 2], _no_nulls(2))
-    var raised = False
+def _pair_error(a: Column[HeapRegion], b: Column[HeapRegion]) -> String:
+    """The error `a ++ b` raises, or "" if it returns."""
     try:
         _ = _concat_columns(a, b)
-    except:
-        raised = True
-    assert_true(raised, "a non-null code past the dictionary must raise")
+    except e:
+        return String(e)
+    return String()
+
+
+def _assert_refused(msg: String, name: String, reason: String, label: String) raises:
+    assert_true(
+        msg.startswith(name + ": ") and msg.find(reason) >= 0,
+        label + ": want " + name + " (" + reason + "), got '" + msg + "'",
+    )
+
+
+def test_remap_refuses_a_non_null_code_past_the_dictionary() raises:
+    """b's dictionary ["z", "w"] has 2 entries: codes 2 and -1 are out of
+    range and 1 is in. Each at code widths 4 and 8, in an input without
+    nulls and in one with a NULL row ahead of the bad code."""
+    var a_offs: List[Int] = [0, 1, 2, 3]
+    var b_offs: List[Int] = [0, 1, 2]
+    var bad: List[Int] = [2, -1]
+    for wi in range(2):
+        var w = 4 if wi == 0 else 8
+        for with_null in range(2):
+            var label = (
+                "width " + String(w) + (", nulls" if with_null == 1 else ", no nulls")
+            )
+            var a = _str_dict_col([0], "xyz", a_offs.copy(), _no_nulls(1), w)
+            for k in range(len(bad)):
+                var codes: List[Int] = [1, bad[k]]
+                var nulls: List[Bool] = [False, False]
+                if with_null == 1:
+                    codes = [7, 1, bad[k]]
+                    nulls = [True, False, False]
+                var b = _str_dict_col(codes, "zw", b_offs.copy(), nulls, w)
+                _assert_refused(
+                    _pair_error(a, b),
+                    "ArrowConcatDictCodeOutOfRange",
+                    "carries code " + String(bad[k]) + " ",
+                    label + ", code " + String(bad[k]),
+                )
+            # The last in-range code is accepted and decoded.
+            var ok_codes: List[Int] = [1, 1]
+            var ok_nulls: List[Bool] = [False, False]
+            if with_null == 1:
+                ok_codes = [7, 1]
+                ok_nulls = [True, False]
+            var out = _concat_columns(
+                a, _str_dict_col(ok_codes, "zw", b_offs.copy(), ok_nulls, w)
+            )
+            assert_equal(_dict_str_at(out, 2), "w", label + ": code 1 decodes")
 
 
 def test_dictionary_without_data_buffer_is_refused() raises:
     var a = _str_dict_col([0, 1], "xy", [0, 1, 2], _no_nulls(2))
     a._dict_data = None
     var b = _str_dict_col([0], "zwv", [0, 1, 2, 3], _no_nulls(1))
-    var raised = False
+    _assert_refused(
+        _pair_error(a, b),
+        "ArrowConcatDictMissingPayload",
+        "no dictionary values buffer",
+        "a dictionary claiming 2 entries with no data",
+    )
+
+
+def _zw() raises -> Column[HeapRegion]:
+    return _str_dict_col([0, 1], "zw", [0, 1, 2], _no_nulls(2))
+
+
+def test_short_numeric_values_buffer_is_refused() raises:
+    """3 int64 entries claimed over a 16-byte values buffer: entry 2 would be
+    read past the buffer."""
+    var a = Column.from_numeric_dict[DType.int32, DType.int64](
+        _codes([0, 1]), [Int64(100), Int64(200)]
+    )
+    a._dict_size = 3
+    var b = Column.from_numeric_dict[DType.int32, DType.int64](
+        _codes([0]), [Int64(300)]
+    )
+    _assert_refused(
+        _pair_error(a, b), "ArrowConcatDictMalformed", "values buffer holds 16 bytes", "short numeric values"
+    )
+
+
+def test_short_offsets_buffer_is_refused() raises:
+    """3 string entries claimed over 3 Int32 offsets (4 are needed)."""
+    var b = _str_dict_col([0, 1], "zw", [0, 1, 2], _no_nulls(2))
+    b._dict_size = 3
+    _assert_refused(
+        _pair_error(_str_dict_col([0], "x", [0, 1], _no_nulls(1)), b),
+        "ArrowConcatDictMalformed",
+        "offsets buffer holds 12 bytes",
+        "short offsets",
+    )
+
+
+def test_last_offset_past_values_buffer_is_refused() raises:
+    """Offsets [0, 1, 5] over the 2 bytes "zw": entry 1 would read 4 bytes
+    from a 2-byte buffer. Pair-wise and N-way."""
+    var a = _str_dict_col([0, 1], "zw", [0, 1, 5], _no_nulls(2))
+    _assert_refused(
+        _pair_error(a, _zw()), "ArrowConcatDictMalformed", "last offset 5 runs past", "pair last offset"
+    )
+    var batches = Slab[RecordBatch]()
+    batches.append(_batch(_str_dict_col([0, 1], "zw", [0, 1, 5], _no_nulls(2))))
+    batches.append(_batch(_str_dict_col([0], "q", [0, 1], _no_nulls(1))))
+    var msg = String()
     try:
-        _ = _concat_columns(a, b)
-    except:
-        raised = True
-    assert_true(raised, "a dictionary claiming 2 entries with no data must raise")
+        _ = concat_record_batches_nway_ref(batches)
+    except e:
+        msg = String(e)
+    _assert_refused(msg, "ArrowConcatDictMalformed", "last offset 5 runs past", "nway last offset")
+
+
+def test_decreasing_offsets_are_refused() raises:
+    """Offsets [0, 2, 1, 3]: entry 1 would be a negative-length read."""
+    var b = _str_dict_col([0, 2], "xyz", [0, 2, 1, 3], _no_nulls(2))
+    _assert_refused(
+        _pair_error(_zw(), b), "ArrowConcatDictMalformed", "offsets decrease at entry 2", "decreasing offsets"
+    )
+
+
+def test_negative_first_offset_is_refused() raises:
+    """Offsets [-1, 1, 2]: entry 0 would read the byte before the buffer."""
+    var a = _str_dict_col([0, 1], "zw", [-1, 1, 2], _no_nulls(2))
+    _assert_refused(
+        _pair_error(a, _str_dict_col([0], "q", [0, 1], _no_nulls(1))),
+        "ArrowConcatDictMalformed",
+        "first offset is negative",
+        "negative first offset",
+    )
 
 
 def main() raises:
@@ -213,4 +340,9 @@ def main() raises:
     t.test[test_remap_does_not_look_up_codes_under_null_slots]()
     t.test[test_remap_refuses_a_non_null_code_past_the_dictionary]()
     t.test[test_dictionary_without_data_buffer_is_refused]()
+    t.test[test_short_numeric_values_buffer_is_refused]()
+    t.test[test_short_offsets_buffer_is_refused]()
+    t.test[test_last_offset_past_values_buffer_is_refused]()
+    t.test[test_decreasing_offsets_are_refused]()
+    t.test[test_negative_first_offset_is_refused]()
     t^.run()

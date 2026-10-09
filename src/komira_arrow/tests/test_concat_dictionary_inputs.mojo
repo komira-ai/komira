@@ -19,7 +19,9 @@
 #     bytes reuses the wrong one.
 #   * code widths that disagree between inputs, or that are not 4 or 8 (the
 #     only widths a Column carries), are refused instead of read at the wrong
-#     stride.
+#     stride; so are dictionaries of different kinds (numeric value dtypes
+#     that differ, string vs numeric). Each refusal is asserted by its error
+#     name, so a different failure on the way does not pass for it.
 #   * a numeric dictionary stays numeric: `_dict_value_dtype` is carried.
 # =============================================================================
 
@@ -351,23 +353,31 @@ def test_pairwise_identical_dict_null_slot_issue_repro() raises:
 # -----------------------------------------------------------------------------
 
 
-def _raises_pair(var a: Column[HeapRegion], var b: Column[HeapRegion]) -> Bool:
+def _pair_error(var a: Column[HeapRegion], var b: Column[HeapRegion]) -> String:
+    """The error `a ++ b` raises, or "" if it returns."""
     try:
         _ = _concat_columns(a, b)
-    except:
-        return True
-    return False
+    except e:
+        return String(e)
+    return String()
 
 
-def _raises_nway(var a: Column[HeapRegion], var b: Column[HeapRegion]) raises -> Bool:
+def _nway_error(var a: Column[HeapRegion], var b: Column[HeapRegion]) raises -> String:
     var batches = Slab[RecordBatch]()
     batches.append(_batch(a^))
     batches.append(_batch(b^))
     try:
         _ = concat_record_batches_nway_ref(batches)
-    except:
-        return True
-    return False
+    except e:
+        return String(e)
+    return String()
+
+
+def _assert_refused(msg: String, name: String, label: String) raises:
+    assert_true(
+        msg.startswith(name + ": "),
+        label + ": want a " + name + " error, got '" + msg + "'",
+    )
 
 
 def test_mixed_code_widths_are_refused() raises:
@@ -377,19 +387,21 @@ def test_mixed_code_widths_are_refused() raises:
         if identical == 1:
             b_data = String("xyz")
             b_offs = _xyz_offs()
-        assert_true(
-            _raises_pair(
+        _assert_refused(
+            _pair_error(
                 _str_dict_col([0, 1], 4, "xyz", _xyz_offs(), _no_nulls(2), 0, 2),
                 _str_dict_col([1, 0], 8, b_data, b_offs.copy(), _no_nulls(2), 0, 2),
             ),
-            "pair: 4-byte ++ 8-byte codes must raise (identical=" + String(identical) + ")",
+            "ArrowConcatLayoutDisagreement",
+            "pair: 4-byte ++ 8-byte codes (identical=" + String(identical) + ")",
         )
-        assert_true(
-            _raises_nway(
+        _assert_refused(
+            _nway_error(
                 _str_dict_col([0, 1], 4, "xyz", _xyz_offs(), _no_nulls(2), 0, 2),
                 _str_dict_col([1, 0], 8, b_data, b_offs.copy(), _no_nulls(2), 0, 2),
             ),
-            "nway: 4-byte ++ 8-byte codes must raise (identical=" + String(identical) + ")",
+            "ArrowConcatLayoutDisagreement",
+            "nway: 4-byte ++ 8-byte codes (identical=" + String(identical) + ")",
         )
 
 
@@ -398,19 +410,21 @@ def test_int8_int16_code_widths_are_refused() raises:
     selection-column builder accept 4 and 8 only). Reading them at 4 bytes is
     a silent wrong answer, so concat must refuse them."""
     for w in range(1, 3):
-        assert_true(
-            _raises_pair(
+        _assert_refused(
+            _pair_error(
                 _str_dict_col([0, 1], w, "xyz", _xyz_offs(), _no_nulls(2), 0, 2),
                 _str_dict_col([2], w, "xyz", _xyz_offs(), _no_nulls(1), 0, 1),
             ),
-            "pair: width " + String(w) + " must raise",
+            "ArrowConcatDictCodeWidth",
+            "pair: width " + String(w),
         )
-        assert_true(
-            _raises_nway(
+        _assert_refused(
+            _nway_error(
                 _str_dict_col([0, 1], w, "xyz", _xyz_offs(), _no_nulls(2), 0, 2),
                 _str_dict_col([2], w, "xyz", _xyz_offs(), _no_nulls(1), 0, 1),
             ),
-            "nway: width " + String(w) + " must raise",
+            "ArrowConcatDictCodeWidth",
+            "nway: width " + String(w),
         )
 
 
@@ -488,6 +502,69 @@ def test_nway_numeric_dict_keeps_value_dtype() raises:
     )
 
 
+def _num_dict[val_dt: DType]() raises -> Column[HeapRegion]:
+    """Codes [0, 1] over the values [1, 2] stored as `val_dt`."""
+    return Column.from_numeric_dict[DType.int32, val_dt](
+        _codes([0, 1], _no_nulls(2)), [Int64(1), Int64(2)]
+    )
+
+
+def _xyz_dict() raises -> Column[HeapRegion]:
+    return _str_dict_col([0, 1], 4, "xyz", _xyz_offs(), _no_nulls(2), 0, 2)
+
+
+def test_numeric_value_dtypes_that_differ_are_refused() raises:
+    """int32 values ++ int64 values: same codes, same numbers, different
+    value widths. Merged at one input's width, the other's entries are read
+    at the wrong stride (int64 1 read as int32 entries 1 and 0)."""
+    _assert_refused(
+        _pair_error(_num_dict[DType.int32](), _num_dict[DType.int64]()),
+        "ArrowConcatLayoutDisagreement",
+        "pair: int32 ++ int64 values",
+    )
+    _assert_refused(
+        _pair_error(_num_dict[DType.int64](), _num_dict[DType.int32]()),
+        "ArrowConcatLayoutDisagreement",
+        "pair: int64 ++ int32 values",
+    )
+    _assert_refused(
+        _nway_error(_num_dict[DType.int32](), _num_dict[DType.int64]()),
+        "ArrowConcatLayoutDisagreement",
+        "nway: int32 ++ int64 values",
+    )
+    _assert_refused(
+        _nway_error(_num_dict[DType.int64](), _num_dict[DType.int32]()),
+        "ArrowConcatLayoutDisagreement",
+        "nway: int64 ++ int32 values",
+    )
+
+
+def test_string_and_numeric_dictionaries_are_refused() raises:
+    """A string dictionary (offsets + bytes) and a numeric one (flat values)
+    are two layouts under one tag; merging one into the other reads a buffer
+    the other does not have. Both orders, pair-wise and N-way."""
+    _assert_refused(
+        _pair_error(_xyz_dict(), _num_dict[DType.int64]()),
+        "ArrowConcatLayoutDisagreement",
+        "pair: string ++ numeric",
+    )
+    _assert_refused(
+        _pair_error(_num_dict[DType.int64](), _xyz_dict()),
+        "ArrowConcatLayoutDisagreement",
+        "pair: numeric ++ string",
+    )
+    _assert_refused(
+        _nway_error(_xyz_dict(), _num_dict[DType.int64]()),
+        "ArrowConcatLayoutDisagreement",
+        "nway: string ++ numeric",
+    )
+    _assert_refused(
+        _nway_error(_num_dict[DType.int64](), _xyz_dict()),
+        "ArrowConcatLayoutDisagreement",
+        "nway: numeric ++ string",
+    )
+
+
 # -----------------------------------------------------------------------------
 # Empty slices
 # -----------------------------------------------------------------------------
@@ -524,5 +601,7 @@ def main() raises:
     t.test[test_int8_int16_code_widths_are_refused]()
     t.test[test_pairwise_numeric_dict_keeps_value_dtype]()
     t.test[test_nway_numeric_dict_keeps_value_dtype]()
+    t.test[test_numeric_value_dtypes_that_differ_are_refused]()
+    t.test[test_string_and_numeric_dictionaries_are_refused]()
     t.test[test_empty_dict_slices]()
     t^.run()

@@ -131,7 +131,7 @@ def _var_len_window[dt: DType](col: Column[HeapRegion]) -> Tuple[Int, Int]:
     entries `_offset` and `_offset + _length`. Arrow does not require the first
     entry to be 0 nor the data buffer to end at the last one, so neither the
     buffer's start nor its length is the window. No offsets buffer (every row
-    empty) or no rows is the empty window."""
+    empty, a komira convention) or no rows is the empty window."""
     if col._length == 0 or not col._offsets:
         return (0, 0)
     ref offs = col._offsets.value()
@@ -155,8 +155,8 @@ def _rebase_offsets[
     """`dst[dst_elem + i] = src[src_elem + i] + delta` for `i` in `[0, count)`.
     The wrap-around add is exact: every result is a valid offset."""
     # PERF-CRITICAL: SIMD offset rewrite — load + add constant + store.
-    # 3-4x speedup on aligned int32 addition. Migrated onto
-    # MmapAlignedBuffer.load_simd / store_simd (byte-offset addressed).
+    # 3-4x speedup on int32 addition; loads/stores are unaligned (alignment=1),
+    # byte-offset addressed through load_simd / store_simd.
     comptime sz = size_of[Scalar[dt]]()
     comptime W = simd_width_of[dt]()
     var delta_vec = SIMD[dt, W](delta)
@@ -366,7 +366,6 @@ def _concat_columns[
             )
         new_data.set_length(Int64(data_len_a + data_len_b))
 
-
         # Build merged offsets: a's offsets + b's offsets shifted by a's data length.
         comptime int32_size = size_of[Int32]()
         var offsets_bytes = (total + 1) * int32_size
@@ -384,7 +383,9 @@ def _concat_columns[
                 Int32(-data_start_a),
             )
         else:
-            # No offsets buffer (every row empty) or no rows: all zeros.
+            # No offsets buffer or no rows: all zeros. An absent offsets
+            # buffer meaning "every row empty" is a komira convention, not
+            # Arrow's (Arrow carries length + 1 offsets for any non-empty array).
             _fill_offsets[DType.int32](new_offsets, 0, len_a + 1, Int32(0))
 
         # b's entries (_offset, _offset + len_b], rebased to follow a's bytes.
@@ -402,9 +403,6 @@ def _concat_columns[
             _fill_offsets[DType.int32](
                 new_offsets, len_a + 1, len_b, Int32(data_len_a)
             )
-
-        new_offsets.set_length(Int64(offsets_bytes))
-
 
         return Column[HeapRegion](
             arrow_type=at,
@@ -499,12 +497,13 @@ def _concat_columns[
                 Int64(-wdata_start_a),
             )
         else:
-            # No offsets buffer (every row empty) or no rows: all zeros.
+            # No offsets buffer (every row empty: komira convention, see the
+            # narrow arm) or no rows: all zeros.
             _fill_offsets[DType.int64](wnew_offsets, 0, len_a + 1, Int64(0))
 
         # b's offsets are rebased to follow a's bytes, SIMD-staged exactly
         # like the narrow arm (same helper, 8-byte lanes). No offsets buffer on
-        # b: every one of its rows is empty, so each offset is the running base.
+        # b (komira convention): every row is empty, each offset the running base.
         if b._offsets and len_b > 0:
             _rebase_offsets[DType.int64](
                 wnew_offsets,
@@ -518,8 +517,6 @@ def _concat_columns[
             _fill_offsets[DType.int64](
                 wnew_offsets, len_a + 1, len_b, Int64(wdata_len_a)
             )
-
-        wnew_offsets.set_length(Int64(woffsets_bytes))
 
         return Column[HeapRegion](
             arrow_type=at,
@@ -949,7 +946,6 @@ def _concat_columns_nway_var_len_wide[
 
         cumulative_data += wwin[1] - wwin[0]
         dst_elem += blen
-    new_offsets.set_length(Int64(offsets_bytes))
 
     var validity = _merge_validity_nway(
         batches, col_idx, n_batches, total_len, any_validity

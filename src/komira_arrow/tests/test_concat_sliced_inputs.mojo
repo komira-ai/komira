@@ -19,6 +19,8 @@
 #   * var-len: the second input's offsets do not start at 0, and the first
 #     input's data buffer is longer than its last offset (both legal in Arrow).
 #   * empty slices: a zero-row window at a non-zero offset contributes nothing.
+#   * long var-len windows (tens of rows, at non-zero offsets): the offsets
+#     rebase runs its SIMD body, not only its scalar tail, at Int32 and Int64.
 #
 # Both the pair-wise kernel (`_concat_columns`) and the N-way kernel
 # (`concat_record_batches_nway_ref`) are exercised on the same fixtures.
@@ -468,6 +470,61 @@ def test_nway_large_string_sliced() raises:
     )
 
 
+def _long_rows(n: Int) -> List[String]:
+    """`n` rows of 0..3 bytes each, every one differing from its neighbours."""
+    var rows = List[String](capacity=n)
+    for i in range(n):
+        var r = String()
+        for k in range(i % 4):
+            r += chr(65 + (i * 7 + k) % 26)
+        rows.append(r^)
+    return rows^
+
+
+def _long_var_col(at: ArrowType, rows: List[String], off: Int, n: Int) raises -> Column[HeapRegion]:
+    """`rows` packed after a 3-byte prefix (so offsets start at 3) and before
+    a trailing byte, viewing rows [off, off + n)."""
+    var data = String("###")
+    var offs: List[Int] = [3]
+    for i in range(len(rows)):
+        data += rows[i]
+        offs.append(data.byte_length())
+    data += "#"
+    return _var_col(at, data, offs, _no_nulls(len(rows)), off, n)
+
+
+def _window(rows: List[String], off: Int, n: Int) -> List[String]:
+    var out = List[String](capacity=n)
+    for i in range(off, off + n):
+        out.append(rows[i])
+    return out^
+
+
+def test_long_var_len_windows_run_the_simd_rebase() raises:
+    """Windows of 40 and 37 rows (more than 2 SIMD vectors of Int32 or Int64
+    offsets on any target) at offsets 5 and 11. A rebase whose vector loads
+    ignore the source element reads the wrong offsets for every row it
+    vectorises; a short window only reaches the scalar tail."""
+    var rows = _long_rows(80)
+    for wi in range(2):
+        var at = ArrowType.STRING if wi == 0 else ArrowType.LARGE_STRING
+        var label = String("int32 offsets") if wi == 0 else String("int64 offsets")
+        var want = _window(rows, 5, 40)
+        want.extend(_window(rows, 11, 37))
+        var out = _concat_columns(
+            _long_var_col(at, rows, 5, 40), _long_var_col(at, rows, 11, 37)
+        )
+        _check_str(out, want, _no_nulls(77), "pair long " + label)
+        var batches = Slab[RecordBatch]()
+        batches.append(_batch(_long_var_col(at, rows, 5, 40)))
+        batches.append(_batch(_long_var_col(at, rows, 11, 37)))
+        batches.append(_batch(_long_var_col(at, rows, 2, 33)))
+        var want3 = want.copy()
+        want3.extend(_window(rows, 2, 33))
+        var out3 = concat_record_batches_nway_ref(batches)
+        _check_str(out3.column_at(0), want3, _no_nulls(110), "nway long " + label)
+
+
 # -----------------------------------------------------------------------------
 # BOOL
 # -----------------------------------------------------------------------------
@@ -526,6 +583,7 @@ def main() raises:
     t.test[test_nway_string_sliced_and_rebased]()
     t.test[test_pairwise_large_string_sliced]()
     t.test[test_nway_large_string_sliced]()
+    t.test[test_long_var_len_windows_run_the_simd_rebase]()
     t.test[test_pairwise_bool_sliced_with_nulls]()
     t.test[test_empty_slices_contribute_nothing]()
     t^.run()
