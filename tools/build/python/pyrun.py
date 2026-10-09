@@ -34,6 +34,7 @@ copied to standard error, and writes no report. `--report`, `--run-id` and
 
 import ctypes
 import json
+import math
 import os
 import re
 import runpy
@@ -110,10 +111,33 @@ def _refuse_constant(name):
     raise ValueError("{} is not a number JSON allows".format(name))
 
 
+def _finite(text):
+    """A JSON number with a fraction or an exponent, refused outside the range of a double (json.loads reads 1e999 as infinity)."""
+    v = float(text)
+    if math.isinf(v):
+        raise ValueError("{} is out of the range of a double".format(text))
+    return v
+
+
+def _no_duplicates(pairs):
+    """An object's members, refused if a key is written twice (a dict would keep only the last value)."""
+    obj = {}
+    for k, v in pairs:
+        if k in obj:
+            raise ValueError("key '{}' written twice".format(k))
+        obj[k] = v
+    return obj
+
+
 def _report(captured, run_id, target):
     """The report: the script's JSON object, `run_id` and `target` first; or the reason it is none."""
     try:
-        obj = json.loads(captured.decode("utf-8"), parse_constant=_refuse_constant)
+        obj = json.loads(
+            captured.decode("utf-8"),
+            parse_constant=_refuse_constant,
+            parse_float=_finite,
+            object_pairs_hook=_no_duplicates,
+        )
     except (UnicodeDecodeError, ValueError) as e:
         return None, "its standard output is not one JSON object ({})".format(e)
     if not isinstance(obj, dict):

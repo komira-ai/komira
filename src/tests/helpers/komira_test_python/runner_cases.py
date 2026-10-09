@@ -140,6 +140,18 @@ REPORT_CASES = [
         (1, failed("report_nan.py", "its standard output is not one JSON object (NaN is not a number JSON allows)"), False, None),
     ),
     (
+        "report_duplicate_key",
+        "report_duplicate_key.py",
+        "run-7\n",
+        (1, failed("report_duplicate_key.py", "its standard output is not one JSON object (key 'calls' written twice)"), False, None),
+    ),
+    (
+        "report_out_of_range",
+        "report_out_of_range.py",
+        "run-7\n",
+        (1, failed("report_out_of_range.py", "its standard output is not one JSON object (1e999 is out of the range of a double)"), False, None),
+    ),
+    (
         "report_not_utf8",
         "report_not_utf8.py",
         "run-7\n",

@@ -36,8 +36,10 @@ measures, and its numbers are kept as its `[report]` sub-target.
 - Its script writes one JSON object to standard output (file descriptor 1,
   so a child process or native code writing there counts). The runner
   captures it and the script passes only if it is one JSON object, without
-  NaN or an infinity, and without the keys `run_id` and `target`, which the
-  runner writes first: the run id file's one line, and the test's label.
+  NaN, an infinity, a number out of the range of a double or a key written
+  twice in one object (each would otherwise be read as another value), and
+  without the keys `run_id` and `target`, which the runner writes first: the
+  run id file's one line, and the test's label.
   The schema of a bench report and the table made of reports are
   [`bench_report`](../bench_report/README.md)'s.
 - A failing report test copies what it captured to standard error and writes

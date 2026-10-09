@@ -1,7 +1,7 @@
 # bench_report
 
-`komira//tools/build/bench_report` checks bench reports against their schema
-and merges them into one parallelism table. A bench report is the `[report]`
+`komira//tools/build/bench_report` is a Zig tool that checks bench reports
+against their schema and merges them into one parallelism table. A bench report is the `[report]`
 of a report test: a `py_test` with a `run_id`
 ([Report tests](../python/README.md#report-tests)).
 
@@ -30,7 +30,7 @@ action, so the table exists only for good reports.
 
 ## The schema, `komira-bench-report-1`
 
-The full list of keys is at the top of [`src/report.rs`](src/report.rs). Every
+The full list of keys is at the top of [`src/report.zig`](src/report.zig). Every
 key is required, and a key the schema does not name is refused, so a
 misspelt field is an error rather than a dropped number.
 
@@ -42,20 +42,27 @@ misspelt field is an error rather than a dropped number.
   coverage build, and the versions of interpreters and runtimes.
 - `rows`, one per variant, function and thread count: rows, batches,
   runtime calls, wall time, user and system CPU time, involuntary context
-  switches, memory (`pss`, `uss`, `rss_delta_per_thread`, `node_external`,
-  `v8_heap`, `memory_report`: at least one), and the latency of a call in
+  switches, memory (`pss`, `uss`, `rss_delta_per_thread`, `memory_report`:
+  at least one), and the latency of a call in
   nanoseconds (warm-up batches discarded, at least 30 samples, min, median,
   p90, max, in order).
 - A row's `calls` must equal its `batches`: a runtime is called once per
   batch, so a runtime called once per row is refused. This replaces a
   latency ceiling, which would flake.
+- The memory kinds name no language or runtime: what a runtime holds
+  outside Arrow buffers (an interpreter's heap among it) is what its
+  `memory_report` entry returns.
 - Counts are whole JSON numbers from 0 to 2^53. The JSON reader
-  ([`src/json.rs`](src/json.rs)) refuses a key written twice, NaN and
-  infinities.
+  ([`src/json.zig`](src/json.zig)) refuses a key written twice, NaN,
+  infinities, a number out of the range of a double and input that is not
+  UTF-8. A report test's own runner refuses the same in what its script
+  writes, before the report exists
+  ([Report tests](../python/README.md#report-tests)), so a key written twice
+  is never dropped on the way.
 
 ## The table
 
-[`src/table.rs`](src/table.rs) makes one line per variant, function and
+[`src/table.zig`](src/table.zig) makes one line per variant, function and
 thread count N: N = 1, 4 and 16, and every other N a report holds.
 
 | column | value |
@@ -74,9 +81,11 @@ error. Below the table, one line per report gives its host and build facts.
 
 ## Tests
 
-`:bench_report` is published behind `:bench_report_unit`, the crate's inline
-tests: the JSON reader, each schema refusal, the table's numbers and flags,
-and the command line. `report_demo` and `report_wiring` in
+`:bench_report` is published behind `:bench_report_unit`, `zig test` of
+`src/main.zig`, whose test block imports every `src/*_test.zig`: the JSON
+reader, each schema refusal and the reports that must pass (equal latency
+quantiles among them), the table's numbers and flags (a row at N equal to
+the host's CPUs among them), and the command line. `report_demo` and `report_wiring` in
 [`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md)
 check the whole path: a report test's `[report]`, and the `bench_table` made
 of it against a golden table.
