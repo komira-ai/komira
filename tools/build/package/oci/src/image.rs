@@ -376,6 +376,9 @@ mod tests {
         let (_, fs, _) = image(&[("lib", b'2', 0o777, b"", "usr/lib"), ("abs", b'2', 0o777, b"", "/etc/os-release"), ("loop", b'2', 0o777, b"", "loop")]);
         assert_eq!(fs.resolve("lib/os-release").unwrap(), "usr/lib/os-release");
         assert_eq!(fs.resolve("abs").unwrap(), "usr/lib/os-release");
+        // An absolute target is read from /, not from the link's directory.
+        let (_, sub, _) = image(&[("usr/abs", b'2', 0o777, b"", "/etc/os-release")]);
+        assert_eq!(sub.resolve("usr/abs").unwrap(), "usr/lib/os-release");
         assert_eq!(fs.resolve("/etc/../../etc/./os-release").unwrap(), "usr/lib/os-release");
         assert!(fs.resolve("loop").unwrap_err().contains("symbolic links"));
     }

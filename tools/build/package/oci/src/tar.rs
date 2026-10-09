@@ -341,6 +341,7 @@ mod tests {
             (&b"abc"[..], "tar: a pax record without a length"),
             (b"x path=a\n", "tar: a pax record length is not a number"),
             (b"9 a=b\n", "tar: a malformed pax record"),
+            (b"7 a=b\n", "tar: a malformed pax record"),
             (b"6 a=bX", "tar: a malformed pax record"),
             (b"2 \n", "tar: a malformed pax record"),
             (b"0 a=b\n", "tar: a malformed pax record"),
@@ -447,6 +448,10 @@ mod tests {
     fn an_entry_ending_at_the_archive_end_still_wants_a_zero_block() {
         let mut t = header("f", b'0', 0o644, 2000, "");
         t.resize(512 + 1024, 0);
+        assert_eq!(read(&t), Err("tar: an entry runs past the end".into()));
+        // One byte past the end.
+        let mut t = header("f", b'0', 0o644, 513, "");
+        t.resize(1024, 1);
         assert_eq!(read(&t), Err("tar: an entry runs past the end".into()));
         let mut t = header("f", b'0', 0o644, 512, "");
         t.resize(1024, 1);
