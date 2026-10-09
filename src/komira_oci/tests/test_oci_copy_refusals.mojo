@@ -218,8 +218,13 @@ def test_manifest_get_non_200_raises_with_status_and_body_excerpt() raises:
         String("a manifest GET answered 404"),
     )
 
-    # A body longer than 400 bytes is cut at exactly 400.
-    var long_body = String("x") * 399 + String("Y") + String("TAIL-NOT-SHOWN")
+    # A body longer than 400 bytes is cut at exactly 400. The body is 401
+    # bytes: 399 `x`, the marker `Y` as byte 400, and the sentinel `Z` as byte
+    # 401. The excerpt is the last thing in the message, so the message must
+    # end with ` — ` and the first 400 bytes: a cut at 399 drops `Y`, a cut at
+    # 401 or later keeps `Z`, and either breaks the `endswith` below.
+    var first_400 = String("x") * 399 + String("Y")
+    var long_body = first_400 + String("Z")
     var t2 = ScriptedOciTransport()
     t2.queue(_with_body(500, long_body))
     var copier2 = _copier(t2^)
@@ -231,12 +236,12 @@ def test_manifest_get_non_200_raises_with_status_and_body_excerpt() raises:
         var msg = String(e)
         assert_true(msg.find(String("returned HTTP 500 — ")) >= 0, msg)
         assert_true(
-            msg.find(String("x") * 399 + String("Y")) >= 0,
-            "the first 400 bytes are in the message: " + msg,
+            msg.endswith(String(" — ") + first_400),
+            "the message ends with exactly the first 400 bytes: " + msg,
         )
         assert_true(
-            msg.find(String("TAIL")) < 0,
-            "byte 401 on is cut: " + msg,
+            msg.find(first_400 + String("Z")) < 0,
+            "byte 401 (the sentinel) is cut: " + msg,
         )
     assert_true(raised, "a manifest GET answered 500 must raise")
     print("  test_manifest_get_non_200_raises_with_status_and_body_excerpt: PASS")
