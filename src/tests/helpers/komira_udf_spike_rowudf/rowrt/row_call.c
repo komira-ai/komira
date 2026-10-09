@@ -16,8 +16,9 @@
  * call, one per ArrowBuffer. The last one to go releases the array, so the
  * array lives exactly as long as Python holds a view of any of its buffers
  * and is released when the call returns otherwise. The adapter drops its
- * row objects' access to the views when the call returns (a row kept past
- * its batch raises when read). An ArrowBuffer goes when its interpreter
+ * row objects' access to the views when the call returns, and a row carries
+ * the number of the batch that made it, so a row kept past its batch raises
+ * when read, also in a later batch of the same instance. An ArrowBuffer goes when its interpreter
  * frees it, on the thread that holds that interpreter; the release it may
  * run is the host's and takes no lock of this runtime.
  *

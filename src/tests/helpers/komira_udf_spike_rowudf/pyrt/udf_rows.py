@@ -10,6 +10,9 @@ bare name (`pick`, `pick_caught`); the tests load them as
 
 # A row a function kept past its batch (keeps_row), read by read_kept.
 KEPT = []
+# The first row keeps_then_reads saw; the first row keeps_then_misreads saw.
+KEPT_SAME = []
+KEPT_MISS = []
 
 
 def price_qty(row) -> float:
@@ -81,6 +84,23 @@ def keeps_row(row) -> float:
 def read_kept(row) -> float:
     """Reads the first row keeps_row kept, from a later batch."""
     return KEPT[0].price
+
+
+def keeps_then_reads(row) -> float:
+    """Keeps the first row it sees and returns that row's price on every
+    call: in a later batch of the same instance the kept row is expired."""
+    if not KEPT_SAME:
+        KEPT_SAME.append(row)
+    return KEPT_SAME[0].price
+
+
+def keeps_then_misreads(row) -> float:
+    """Keeps the first row it sees; on later calls reads `qty`, outside the
+    read set {price}, through that kept row."""
+    if not KEPT_MISS:
+        KEPT_MISS.append(row)
+        return row.price
+    return KEPT_MISS[0].qty
 
 
 def typo(row) -> float:

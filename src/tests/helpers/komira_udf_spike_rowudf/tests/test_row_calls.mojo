@@ -16,19 +16,29 @@
 #     scan's read set {a, b, c} computes every row (a proxy that checks names
 #     against something other than the read set);
 #   - a function that catches the error, or reads through getattr with a
-#     default, still fails the batch (a violation user code swallows);
-#   - a null field reads None and a None result is a null;
-#   - a row kept past its batch raises when read later (a row reading
-#     buffers its batch released);
+#     default, still fails the batch (a violation user code swallows), and
+#     the next batch of the same instance, with no violation, is OK (a
+#     violation that outlives its batch);
+#   - a null field reads None and a None result is a null, also on a sliced
+#     input (a reader that ignores the offset in the validity bitmap);
+#   - a row kept past its batch raises RowExpired when read: from another
+#     instance, and from a later batch of the same instance, by a field in
+#     the read set and by one outside it (a row of batch 1 reading batch 2's
+#     buffers at its old index: a wrong value with status OK, or a
+#     violation charged to the wrong row);
 #   - an argument struct with a child outside the read set is refused, and
 #     its args still moved (a runtime that accepts columns it did not bind);
 #   - validate refuses, by name, a shape other than ROW, PROPAGATE, an
 #     unnamed or repeated field, a function not of one row, one with no or
 #     the wrong return hint, and a missing function.
 #
-# Mutant planted: komira_udf_rowrt.py's __getattr__ returning None for an
-# undeclared name instead of raising: red (branchy with the recorded read
-# set returned OK).
+# Mutants planted, each red: komira_udf_rowrt.py's __getattr__ returning
+# None for an undeclared name instead of raising (branchy with the recorded
+# read set returned OK); the row's batch-number check dropped (the kept row
+# of the same instance read batch 2's value); the per-batch reset of the
+# recorded violation dropped (the batch after a caught violation failed);
+# the validity bit read at the row instead of offset + row (the sliced
+# nullable_half lost its null).
 
 from std.testing import assert_equal, assert_true
 
@@ -167,11 +177,76 @@ def test_nulls(mut rt: UdfRuntime) raises:
     assert_true(r.column.valid[0] and not r.column.valid[1] and r.column.valid[2], String(r.column))
     assert_equal(r.column.as_float(0), 2.0)
     assert_equal(r.column.as_float(2), 4.5)
+    var xs: List[Float64] = [4.0, 0.0, 9.0]
+    var s = call_once(rt, spec, floats([xs^], null_at=1, offset=3))
+    assert_true(s.outcome.is_ok(), "sliced: " + String(s.outcome))
+    assert_true(s.column.valid[0] and not s.column.valid[1] and s.column.valid[2], "sliced: " + String(s.column))
+    assert_equal(s.column.as_float(0), 2.0, "sliced")
+    assert_equal(s.column.as_float(2), 4.5, "sliced")
+
+
+def two_batches(mut rt: UdfRuntime, spec: UdfSpec, first: Batch, second: Batch, what: String) raises -> CallResult:
+    """Calls one instance of `spec` twice, in one context; asserts the first
+    call is OK and returns the second's result."""
+    var u = rt.load(spec)
+    assert_true(u.outcome.is_ok(), what + ": " + String(u.outcome))
+    var ctx = rt.open_context(0)
+    assert_true(ctx.outcome.is_ok(), what + ": " + String(ctx.outcome))
+    var inst = rt.open_instance(ctx.handle, u.handle)
+    assert_true(inst.outcome.is_ok(), what + ": " + String(inst.outcome))
+    var r1 = rt.call_batch(inst.handle, spec, first, CallOptions.plain())
+    assert_true(r1.outcome.is_ok(), what + ", batch 1: " + String(r1.outcome))
+    var r2 = rt.call_batch(inst.handle, spec, second, CallOptions.plain())
+    rt.close_instance(inst.handle)
+    rt.close_context(ctx.handle)
+    rt.unload(u.handle)
+    return r2^
+
+
+def test_caught_then_clean(mut rt: UdfRuntime) raises:
+    """A caught violation fails its batch only: the same instance's next
+    batch, which reads only declared fields, is OK."""
+    var fa: List[String] = ["flag", "a"]
+    var spec = row_spec("udf_rows:pick_caught", fa, TYPE_INT64, TYPE_INT64)
+    var u = rt.load(spec)
+    var ctx = rt.open_context(0)
+    var inst = rt.open_instance(ctx.handle, u.handle)
+    assert_true(inst.outcome.is_ok(), String(inst.outcome))
+    var f1: List[Int64] = [1, 0]
+    var a1: List[Int64] = [10, 20]
+    var f2: List[Int64] = [1, 1]
+    var a2: List[Int64] = [30, 40]
+    var bad = rt.call_batch(inst.handle, spec, ints([f1^, a1^]), CallOptions.plain())
+    assert_not_declared(bad, "b", "['flag', 'a']", 1, "pick_caught batch 1")
+    var good = rt.call_batch(inst.handle, spec, ints([f2^, a2^]), CallOptions.plain())
+    assert_true(good.outcome.is_ok(), "pick_caught batch 2: " + String(good.outcome))
+    assert_equal(good.column.bits[0], 30)
+    assert_equal(good.column.bits[1], 40)
+    rt.close_instance(inst.handle)
+    rt.close_context(ctx.handle)
+    rt.unload(u.handle)
+
+
+def test_kept_row_same_instance(mut rt: UdfRuntime) raises:
+    """A row of batch 1 read in batch 2 of the same instance, whose columns
+    then hold batch 2's buffers, raises RowExpired: by a declared field (not
+    batch 2's value at its index), and by an undeclared one (not a violation
+    charged to batch 2's row)."""
+    var p: List[String] = ["price"]
+    var b1: List[Float64] = [7.0]
+    var b2: List[Float64] = [9.0, 11.0]
+    for name in ["keeps_then_reads", "keeps_then_misreads"]:
+        var spec = row_spec("udf_rows:" + name, p, TYPE_FLOAT64, TYPE_FLOAT64)
+        var r = two_batches(rt, spec, floats([b1.copy()]), floats([b2.copy()]), name)
+        assert_equal(status_name(r.outcome.status), "ERR_RAISED", name + ": " + String(r.outcome))
+        assert_true("RowExpired" in r.outcome.message, name + ": " + r.outcome.message)
+        assert_equal(r.outcome.row, Int64(0), name + ": " + String(r.outcome))
 
 
 def test_kept_row(mut rt: UdfRuntime) raises:
-    """keeps_row keeps a row of batch 1; read_kept reads it in batch 2, in
-    the same context (the module's KEPT list is per interpreter)."""
+    """keeps_row keeps a row of batch 1; read_kept, another instance in the
+    same context (the module's KEPT list is per interpreter), reads it in
+    its own batch: another instance's row is never live."""
     var pq: List[String] = ["price"]
     var keep = row_spec("udf_rows:keeps_row", pq, TYPE_FLOAT64, TYPE_FLOAT64)
     var read = row_spec("udf_rows:read_kept", pq, TYPE_FLOAT64, TYPE_FLOAT64)
@@ -239,7 +314,9 @@ def main() raises:
     test_branchy(rt, sets)
     test_caught(rt)
     test_nulls(rt)
+    test_caught_then_clean(rt)
     test_kept_row(rt)
+    test_kept_row_same_instance(rt)
     test_extra_column(rt)
     var l = rt.ledger()
     assert_equal(l.released, l.exported, "every exported argument array released")
