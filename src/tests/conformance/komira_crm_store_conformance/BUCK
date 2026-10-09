@@ -1,0 +1,56 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_crm's CrmStore, checked once, generic over the komira_db
+# `Database` it runs on, against every backend that can run in a build
+# action:
+#
+#   tests/test_sqlite.mojo          SqliteDatabase, a new in-memory database
+#                                   per check, the store's DDL applied; the
+#                                   change feed is checked here.
+#   tests/test_firestore_mock.mojo  FirestoreDatabase over MockFirestore, no
+#                                   composite index declared.
+#   tests/test_write_order_firestore.mojo
+#                                   FirestoreDatabase over MockFirestore, a
+#                                   writer paused or killed between its row
+#                                   and its key.
+#   tests/test_suite_failures.mojo  a target whose every check fails: the
+#                                   suite raises naming each one.
+#
+# The checks live here, written once for both backends. (komira_crm's own
+# tests run the store on SQLite, so that package measures its lines.)
+# Nothing depends on this package. Postgres is not claimed: no Postgres
+# server runs in a build action.
+mojo_library(
+    name = "komira_crm_store_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_crm:komira_crm",
+        "//src/komira_crm_proto:komira_crm_proto",
+        "//src/komira_db:komira_db",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+        # Imported only by the tests (the backends under test).
+        "//src/komira_db_sqlite:komira_db_sqlite",
+        "//src/komira_gcp_firestore:komira_gcp_firestore",
+        "//src/komira_gcp_firestore_db:komira_gcp_firestore_db",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_firestore_mock.mojo",
+        "tests/test_sqlite.mojo",
+        "tests/test_suite_failures.mojo",
+        "tests/test_write_order_firestore.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

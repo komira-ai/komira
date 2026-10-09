@@ -1,0 +1,53 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A simple CRM's rows: `CrmStore[DB]` over the backend-neutral komira_db
+# `Database` (accounts, the cards linked to them, pipelines, deals,
+# activities, custom-field definitions, one change feed and the erasure of a
+# principal), validation, ISO 4217 currency codes and exact amounts. The
+# messages are komira_crm_proto's. People and companies are contacts cards,
+# named by id.
+#
+# test_money and test_validate need no database. test_store_sqlite and
+# test_feed_sqlite run every store call on SQLite, a `test_deps` package (it
+# reaches the tests only, never a consumer), so this package measures the
+# store's lines; test_store_races plays a peer that writes, or a write that
+# fails, between the store's steps (the paths one SQLite connection never reaches). The
+# store's contract on SQLite and Firestore (MockFirestore) is
+# //src/tests/conformance/komira_crm_store_conformance.
+mojo_library(
+    name = "komira_crm",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_crm_proto:komira_crm_proto",
+        "//src/komira_db:komira_db",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+    test_deps = [
+        "//src/komira_db_sqlite:komira_db_sqlite",
+    ],
+    test_srcs = [
+        "tests/test_feed_sqlite.mojo",
+        "tests/test_money.mojo",
+        "tests/test_store_races.mojo",
+        "tests/test_store_sqlite.mojo",
+        "tests/test_validate.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps). The lint reads `deps` only, so the tests that
+# import the `test_deps` package (komira_db_sqlite) are left out of it.
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"], exclude = [
+        "tests/test_feed_sqlite.mojo",
+        "tests/test_store_races.mojo",
+        "tests/test_store_sqlite.mojo",
+    ]),
+    visibility = ["komira//:tests_lints"],
+)
