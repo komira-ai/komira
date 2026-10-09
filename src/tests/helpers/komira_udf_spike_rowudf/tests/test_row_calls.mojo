@@ -20,7 +20,16 @@
 #     the next batch of the same instance, with no violation, is OK (a
 #     violation that outlives its batch);
 #   - a null field reads None and a None result is a null, also on a sliced
-#     input (a reader that ignores the offset in the validity bitmap);
+#     input (a reader that ignores the offset in the validity bitmap), and
+#     at row 8 of nine with two nulls (a bitmap byte index off, a view of the
+#     bitmap one byte short, a null count off);
+#   - two fields at different Arrow offsets (3 and 0, then 0 and 5), with a
+#     null in either, read each field at its own offset (a reader that
+#     applies one child's offset, or validity, to every field);
+#   - a result of the wrong type fails the batch with ERR_RETURN_TYPE at its
+#     row, naming the value and the declared type; an int for a float64
+#     result is stored as a float (a runtime that stores any value, or
+#     refuses an int it can widen);
 #   - a row kept past its batch raises RowExpired when read: from another
 #     instance, and from a later batch of the same instance, by a field in
 #     the read set and by one outside it (a row of batch 1 reading batch 2's
@@ -32,13 +41,16 @@
 #     unnamed or repeated field, a function not of one row, one with no or
 #     the wrong return hint, and a missing function.
 #
-# Mutants planted, each red: komira_udf_rowrt.py's __getattr__ returning
+# Every single-point mutant of the runtime and the adapter was run against
+# these tests and test_row_args (the PR's mutation scorecard). Mutants
+# planted by hand, each red: komira_udf_rowrt.py's __getattr__ returning
 # None for an undeclared name instead of raising (branchy with the recorded
 # read set returned OK); the row's batch-number check dropped (the kept row
 # of the same instance read batch 2's value); the per-batch reset of the
 # recorded violation dropped (the batch after a caught violation failed);
 # the validity bit read at the row instead of offset + row (the sliced
-# nullable_half lost its null).
+# nullable_half lost its null); row_call.c's field_columns handing child
+# 0's offset to every field (price_qty at offsets 3 and 0 read padding).
 
 from std.testing import assert_equal, assert_true
 
@@ -74,6 +86,22 @@ def floats(cols: List[List[Float64]], null_at: Int = -1, offset: Int = 0) -> Bat
     return b^
 
 
+def floats_at(cols: List[List[Float64]], offsets: List[Int], nulls: List[Int]) -> Batch:
+    """Float64 columns, column j exported at Arrow offset `offsets[j]` with
+    row `nulls[j]` null (-1: none)."""
+    var b = Batch(len(cols[0]))
+    for j in range(len(cols)):
+        var c = Column(TYPE_FLOAT64)
+        c.offset = offsets[j]
+        for i in range(len(cols[j])):
+            if i == nulls[j]:
+                c.append_null()
+            else:
+                c.append_float(cols[j][i])
+        b.columns.append(c^)
+    return b^
+
+
 def ints(cols: List[List[Int64]]) -> Batch:
     var b = Batch(len(cols[0]))
     for j in range(len(cols)):
@@ -100,12 +128,15 @@ def assert_not_declared(r: CallResult, field: String, read_set: String, row: Int
     assert_true("'" + field + "'" in o.message, what + ": message names the field: " + o.message)
     assert_true(read_set in o.message, what + ": message names the read set: " + o.message)
     assert_true("columns=[...]" in o.message, what + ": message has the fix-it: " + o.message)
+    assert_equal(o.group, Int64(-1), what + ": " + String(o))
 
 
 def refused(mut rt: UdfRuntime, spec: UdfSpec, status: String, words: String, what: String) raises:
     var o = rt.validate(spec)
     assert_equal(status_name(o.status), status, what + ": " + String(o))
     assert_true(words in o.message, what + ": '" + words + "' not in: " + o.message)
+    assert_equal(o.row, Int64(-1), what + ": " + String(o))
+    assert_equal(o.group, Int64(-1), what + ": " + String(o))
 
 
 def test_describe(mut rt: UdfRuntime) raises:
@@ -183,6 +214,83 @@ def test_nulls(mut rt: UdfRuntime) raises:
     assert_true(s.column.valid[0] and not s.column.valid[1] and s.column.valid[2], "sliced: " + String(s.column))
     assert_equal(s.column.as_float(0), 2.0, "sliced")
     assert_equal(s.column.as_float(2), 4.5, "sliced")
+
+
+def test_offsets(mut rt: UdfRuntime) raises:
+    """Each field read at its own child's offset, values and validity."""
+    var pq: List[String] = ["price", "qty"]
+    var spec = row_spec("udf_rows:price_qty", pq, TYPE_FLOAT64, TYPE_FLOAT64)
+    var price: List[Float64] = [1.5, 2.0, 3.0, 4.0]
+    var qty: List[Float64] = [2.0, 3.0, 0.5, 10.0]
+    var want: List[Float64] = [3.0, 6.0, 1.5, 40.0]
+    var none: List[Int] = [-1, -1]
+    var offsets: List[List[Int]] = [[3, 0], [0, 5]]
+    for k in range(len(offsets)):
+        var at = String(offsets[k][0]) + "/" + String(offsets[k][1])
+        var b = floats_at([price.copy(), qty.copy()], offsets[k].copy(), none.copy())
+        assert_floats(call_once(rt, spec, b), want, "price_qty at " + at)
+    var xy: List[String] = ["x", "y"]
+    spec = row_spec("udf_rows:x_plus_y", xy, TYPE_FLOAT64, TYPE_FLOAT64)
+    var x: List[Float64] = [1.0, 2.0, 3.0]
+    var y: List[Float64] = [10.0, 20.0, 30.0]
+    var cases: List[List[Int]] = [[0, 5, -1, 1], [3, 0, 2, -1]]
+    for k in range(len(cases)):
+        ref c = cases[k]
+        var r = call_once(rt, spec, floats_at([x.copy(), y.copy()], [c[0], c[1]], [c[2], c[3]]))
+        var what = "x_plus_y at " + String(c[0]) + "/" + String(c[1]) + ": " + String(r.column)
+        assert_true(r.outcome.is_ok(), what + " " + String(r.outcome))
+        var null_row = c[2] if c[2] >= 0 else c[3]
+        for i in range(3):
+            if i == null_row:
+                assert_true(not r.column.valid[i], what)
+            else:
+                assert_true(r.column.valid[i], what)
+                assert_equal(r.column.as_float(i), x[i] + y[i], what)
+
+
+def test_return_types(mut rt: UdfRuntime) raises:
+    var p: List[String] = ["price"]
+    var v: List[Float64] = [3.75, 8.0]
+    var spec = row_spec("udf_rows:as_text", p, TYPE_FLOAT64, TYPE_FLOAT64)
+    var r = call_once(rt, spec, floats([v.copy()]))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
+    assert_equal(r.outcome.row, Int64(0), String(r.outcome))
+    assert_true("row 0: str 'not a number' is not float64" in r.outcome.message, r.outcome.message)
+    spec = row_spec("udf_rows:whole", p, TYPE_FLOAT64, TYPE_FLOAT64)
+    var want: List[Float64] = [3.0, 8.0]
+    assert_floats(call_once(rt, spec, floats([v.copy()])), want, "an int for a float64 result")
+    var a: List[String] = ["a"]
+    var n: List[Int64] = [4, 6]
+    spec = row_spec("udf_rows:halved", a, TYPE_INT64, TYPE_INT64)
+    r = call_once(rt, spec, ints([n.copy()]))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
+    assert_true("row 0: float 2.0 is not int64" in r.outcome.message, r.outcome.message)
+
+
+def test_nulls_wide(mut rt: UdfRuntime) raises:
+    """Nine rows with nulls at rows 1 and 8: the second validity byte, in
+    and out, at offsets 0 and 5."""
+    var spec = row_spec("udf_rows:nullable_half", [String("x")], TYPE_FLOAT64, TYPE_FLOAT64)
+    for off in [0, 5]:
+        var b = Batch(9)
+        var c = Column(TYPE_FLOAT64)
+        c.offset = off
+        for i in range(9):
+            if i == 1 or i == 8:
+                c.append_null()
+            else:
+                c.append_float(Float64(2 * i))
+        b.columns.append(c^)
+        var r = call_once(rt, spec, b)
+        var what = "nine rows at offset " + String(off) + ": " + String(r.column)
+        assert_true(r.outcome.is_ok(), what + " " + String(r.outcome))
+        assert_equal(r.column.null_count(), 2, what)
+        for i in range(9):
+            if i == 1 or i == 8:
+                assert_true(not r.column.valid[i], what)
+            else:
+                assert_true(r.column.valid[i], what)
+                assert_equal(r.column.as_float(i), Float64(i), what)
 
 
 def two_batches(mut rt: UdfRuntime, spec: UdfSpec, first: Batch, second: Batch, what: String) raises -> CallResult:
@@ -314,6 +422,9 @@ def main() raises:
     test_branchy(rt, sets)
     test_caught(rt)
     test_nulls(rt)
+    test_offsets(rt)
+    test_nulls_wide(rt)
+    test_return_types(rt)
     test_caught_then_clean(rt)
     test_kept_row(rt)
     test_kept_row_same_instance(rt)

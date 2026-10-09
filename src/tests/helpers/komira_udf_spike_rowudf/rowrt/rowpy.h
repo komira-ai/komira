@@ -66,6 +66,7 @@ struct rowpy {
   ROWPY_FN(PyMemoryView_FromObject);
   ROWPY_FN(PyBuffer_FillInfo);
   ROWPY_FN(PyType_FromSpec);
+  ROWPY_FN(PyCMethod_New);
   ROWPY_FN(PyErr_Occurred);
   ROWPY_FN(PyErr_GetRaisedException);
   ROWPY_FN(PyErr_Clear);

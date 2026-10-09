@@ -1,11 +1,14 @@
 # =============================================================================
 # FFI-BOUNDARY: the row-UDF engine loop over N engine threads
-# (native/row_engine.c), behind a value API.
+# (native/row_engine.c) and its single probing calls (native/row_probe.c),
+# behind a value API.
 # =============================================================================
 # RowEngine opens a UDF runtime library and keeps it until it is dropped;
 # run() loads one ROW UDF with a read set and drives it on N engine threads
 # (pthreads started in C, on which no Mojo code runs), returning a RowReport
-# of values.
+# of values. probe() makes one call on the calling thread with an argument
+# struct broken in one place, or under a scripted host clock (Probe);
+# misuse() calls one entry the way the ABI or the runtime refuses.
 #
 # Who owns and frees each pointer:
 #   - the engine handle (struct engine): native/row_engine.c's, created by
@@ -14,6 +17,10 @@
 #     through.
 #   - a run handle (struct run): created by rowe_run and freed by
 #     rowe_run_free before run() returns, once every field is copied out.
+#   - a probe or misuse handle (struct probe, struct misuse): created by
+#     rowe_probe or rowe_misuse and freed by rowe_probe_free or
+#     rowe_misuse_free before probe() or misuse() returns, once every field
+#     is copied out.
 #   - C strings this file passes: zeroed blocks freed right after the call
 #     that reads them; the C side copies what it keeps.
 #   - strings the C side returns: its own, copied here by read_cstr before
@@ -55,6 +62,55 @@ comptime _T_BYTES: Int32 = 9
 comptime _T_WARMUP_CALLS: Int32 = 10
 comptime _T_WARM_STABLE: Int32 = 11
 comptime _T_SAMPLES: Int32 = 12
+
+
+# Probe kinds: the order of native/row_engine.c's PK_* enum.
+comptime PROBE_GOOD: Int32 = 0
+comptime PROBE_SHORT_CHILD: Int32 = 1
+comptime PROBE_NEG_LENGTH: Int32 = 2
+comptime PROBE_STRUCT_OFFSET: Int32 = 3
+comptime PROBE_NULL_CHILD: Int32 = 4
+comptime PROBE_CHILD_BUFFERS: Int32 = 5
+comptime PROBE_NEG_CHILD_OFFSET: Int32 = 6
+comptime PROBE_NO_VALUES: Int32 = 7
+comptime PROBE_NOT_CPU: Int32 = 8
+comptime PROBE_CALL_SIZE: Int32 = 9
+comptime PROBE_OTHER_THREAD: Int32 = 10
+comptime PROBE_FOREIGN_CLOSE: Int32 = 11
+comptime PROBE_NULL_CANCEL: Int32 = 12
+
+# Misuse kinds: the order of native/row_probe.c's MU_* enum.
+comptime MISUSE_CAPS_SMALL: Int32 = 0
+comptime MISUSE_SPEC_SMALL: Int32 = 1
+comptime MISUSE_ERR_SMALL: Int32 = 2
+comptime MISUSE_ERR_NULL: Int32 = 3
+comptime MISUSE_HOST_NULL: Int32 = 4
+comptime MISUSE_HOST_SMALL: Int32 = 5
+comptime MISUSE_HOST_MAJOR: Int32 = 6
+comptime MISUSE_INIT_AGAIN: Int32 = 7
+comptime MISUSE_ARGS_NULL: Int32 = 8
+comptime MISUSE_ARGS_NO_FORMAT: Int32 = 9
+comptime MISUSE_ARGS_LIST: Int32 = 10
+comptime MISUSE_ARGS_NEGATIVE: Int32 = 11
+comptime MISUSE_FIELD_NULL: Int32 = 12
+comptime MISUSE_FIELD_NO_FORMAT: Int32 = 13
+comptime MISUSE_FIELD_EMPTY: Int32 = 14
+comptime MISUSE_FIELD_TWO_CHARS: Int32 = 15
+comptime MISUSE_FIELD_CHILD: Int32 = 16
+comptime MISUSE_FIELD_NO_NAME: Int32 = 17
+comptime MISUSE_RESULT_NULL: Int32 = 18
+comptime MISUSE_CODE: Int32 = 19
+comptime MISUSE_FRAME_OPEN: Int32 = 20
+comptime MISUSE_FRAME_NEXT: Int32 = 21
+comptime MISUSE_AGG_OPEN: Int32 = 22
+comptime MISUSE_AGG_UPDATE: Int32 = 23
+comptime MISUSE_AGG_MERGE: Int32 = 24
+comptime MISUSE_AGG_STATE: Int32 = 25
+comptime MISUSE_AGG_FINISH: Int32 = 26
+comptime MISUSE_LEAK: Int32 = 27
+comptime MISUSE_SIGNALS: Int32 = 28
+comptime MISUSE_FRAME_OPEN_RELEASED: Int32 = 29
+comptime MISUSE_AGG_UPDATE_RELEASED: Int32 = 30
 
 
 def _cstr(s: String) -> Void:
@@ -181,6 +237,97 @@ def quantile(var xs: List[Int64], q: Float64) -> Int64:
     return xs[k]
 
 
+@fieldwise_init
+struct Probe(Copyable, Movable):
+    """One probe call: the argument struct has `rows` rows (field 0 holds
+    i + 1 at row i, field 1 holds 10 * (i + 1)) broken by `kind`. While it
+    runs the host clock reads `clock0` + the number of reads so far; the
+    read numbered `cancel_at` (0: none) sets the cancel flag, which
+    `cancel_now` sets before the call; `deadline` is the call's (0: none)."""
+
+    var entry: String
+    var read_set: List[String]
+    var kind: Int32
+    var field: Int32
+    """The field `kind` breaks: 0 or 1."""
+    var rows: Int
+    var clock0: Int64
+    var deadline: Int64
+    var cancel_at: Int64
+    var cancel_now: Bool
+
+    @staticmethod
+    def of(entry: String, read_set: List[String], kind: Int32, rows: Int) -> Probe:
+        return Probe(entry, read_set.copy(), kind, 1, rows, 0, 0, 0, False)
+
+
+@fieldwise_init
+struct ProbeResult(Copyable, Movable):
+    var status: Int32
+    var message: String
+    var row: Int64
+    var moved: Bool
+    """call_batch cleared the host's args slot."""
+    var released: Bool
+    """The argument struct's release ran by the end of the probe."""
+    var clock_reads: Int64
+    var logs: Int64
+    """Host log lines while the probe ran."""
+    var open_status: Int32
+    """PROBE_OTHER_THREAD: open_instance from the probing thread."""
+    var open_message: String
+    var open_row: Int64
+    var reserved_zero: Bool
+    """An OK output's device struct came back with zero reserved words."""
+    var last_level: Int32
+    """The level of the last host log line, by the probe's end."""
+    var out_len: Int64
+    var out_nulls: Int64
+    var out: List[Float64]
+    """The first (at most 8) output values; NaN for a null."""
+
+
+@fieldwise_init
+struct ChildOpen(Copyable, Movable):
+    """open_in_child's report: the engine's status after open (init's code
+    when it failed), init's error row (-1 unless it failed) and message."""
+
+    var status: Int32
+    var row: Int64
+    var message: String
+
+
+def open_in_child(dir: String, path: String) raises -> ChildOpen:
+    """Opens and initializes the runtime library at `path` in a child
+    process, after changing to `dir` when it is not empty
+    (native/row_probe.c, rowe_open_in_child)."""
+    var d = _cstr(dir)
+    var p = _cstr(path)
+    var h = Word(external_call["rowe_open_in_child", Void](d, p))
+    free_zeroed(d)
+    free_zeroed(p)
+    if h.is_null():
+        raise Error("UDF_HARNESS_CHILD: the child for " + path + " reported nothing")
+    var c = ChildOpen(
+        Int32(external_call["rowe_child_get", Int64](h.p, Int32(0))),
+        external_call["rowe_child_get", Int64](h.p, Int32(1)),
+        read_cstr(external_call["rowe_child_message", Void](h.p)),
+    )
+    external_call["rowe_child_free", NoneType](h.p)
+    return c^
+
+
+@fieldwise_init
+struct Misuse(Copyable, Movable):
+    """One misuse call: the status, the error's row and message, and a
+    value the kind defines (native/row_probe.c, struct misuse)."""
+
+    var status: Int32
+    var row: Int64
+    var value: Int64
+    var message: String
+
+
 struct RowEngine(Movable):
     """One runtime library, opened and initialized; shut down when dropped."""
 
@@ -255,9 +402,60 @@ struct RowEngine(Movable):
         external_call["rowe_run_free", NoneType](r.p)
         return out^
 
+    def probe(mut self, p: Probe) -> ProbeResult:
+        var entry = _cstr(p.entry)
+        var read = _cstr(_join(p.read_set))
+        var h = Word(
+            external_call["rowe_probe", Void](
+                self._e.p, entry, read, p.kind, p.field, Int64(p.rows), p.clock0, p.deadline, p.cancel_at,
+                Int32(1) if p.cancel_now else Int32(0),
+            )
+        )
+        free_zeroed(entry)
+        free_zeroed(read)
+        var out = List[Float64]()
+        var n = Int(_pget(h, 7))
+        for i in range(min(n, 8)):
+            out.append(external_call["rowe_probe_value", Float64](h.p, Int32(i)))
+        var r = ProbeResult(
+            Int32(_pget(h, 0)), read_cstr(external_call["rowe_probe_message", Void](h.p, Int32(0))), _pget(h, 1),
+            _pget(h, 2) != 0, _pget(h, 3) != 0, _pget(h, 4), _pget(h, 5), Int32(_pget(h, 6)),
+            read_cstr(external_call["rowe_probe_message", Void](h.p, Int32(1))), _pget(h, 9), _pget(h, 10) != 0,
+            Int32(_pget(h, 11)), _pget(h, 7), _pget(h, 8), out^,
+        )
+        external_call["rowe_probe_free", NoneType](h.p)
+        return r^
+
+    def misuse(mut self, which: Int32) -> Misuse:
+        var h = Word(external_call["rowe_misuse", Void](self._e.p, which))
+        var m = Misuse(
+            Int32(external_call["rowe_misuse_get", Int64](h.p, Int32(0))),
+            external_call["rowe_misuse_get", Int64](h.p, Int32(1)),
+            external_call["rowe_misuse_get", Int64](h.p, Int32(2)),
+            read_cstr(external_call["rowe_misuse_message", Void](h.p)),
+        )
+        external_call["rowe_misuse_free", NoneType](h.p)
+        return m^
+
+    def shutdown_off_thread(mut self) -> Int64:
+        """Shuts the runtime down from another thread; the log lines it wrote.
+        The engine holds no runtime afterwards."""
+        return external_call["rowe_shutdown_off_thread", Int64](self._e.p)
+
+    def last_log_level(self) -> Int32:
+        return external_call["rowe_last_log_level", Int32](self._e.p)
+
+    def init_row(self) -> Int64:
+        """The error row init returned, when it failed."""
+        return external_call["rowe_init_row", Int64](self._e.p)
+
     def __del__(deinit self):
         external_call["rowe_close", NoneType](self._e.p)
 
 
 def _get(r: Word, thread: Int32, field: Int32) -> Int64:
     return external_call["rowe_get", Int64](r.p, thread, field)
+
+
+def _pget(h: Word, field: Int32) -> Int64:
+    return external_call["rowe_probe_get", Int64](h.p, field)

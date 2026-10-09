@@ -24,12 +24,17 @@ struct komira_udf_rt {
   char dir[1024];         /* the directory the runtime library was loaded from */
 };
 
+/* One read-set field: its name and Arrow format ('l' int64, 'g' float64). */
+struct rowrt_field {
+  char* name;
+  char fmt;
+};
+
 /* A validated, loaded ROW UDF: the read set and the types bound at load. */
 struct komira_udf_udf {
   char* entry;
-  int n;          /* fields in the read set */
-  char** names;   /* each field's name, in the argument struct's order */
-  char* fmts;     /* each field's Arrow format: 'l' int64 or 'g' float64 */
+  int n;                      /* fields in the read set */
+  struct rowrt_field* fields; /* in the argument struct's order; NULL when n is 0 */
   char result_fmt;
 };
 
@@ -41,6 +46,7 @@ struct komira_udf_context {
   PyObject* adapter;      /* komira_udf_rowrt in this context's interpreter */
   PyObject* name_release; /* "release", for memoryview.release() */
   PyObject* buffer_type;  /* ArrowBuffer, this interpreter's (row_call.c) */
+  PyObject* now_fn;       /* a Python callable reading host->now_ns */
 };
 
 struct komira_udf_instance {

@@ -44,6 +44,9 @@
 /* init runs once per process: CPython is not re-initialized here. */
 static int g_initialized;
 
+/* The one runtime of the process, for the clock callable (now_ns_fn). */
+static struct komira_udf_rt* g_rt;
+
 /* ---- errors -------------------------------------------------------------- */
 
 static void free_error(komira_udf_error* e) {
@@ -164,6 +167,17 @@ static PyObject* bootstrap(struct komira_udf_rt* rt) {
   return a->PyImport_ImportModule("komira_udf_rowrt");
 }
 
+/* ---- the host clock, as a Python callable -------------------------------- */
+
+static PyObject* now_ns_fn(PyObject* self, PyObject* unused) {
+  (void)self;
+  (void)unused;
+  /* The interpreter is entered; g_rt is set before any context exists. */
+  return g_rt->api.PyLong_FromLongLong(g_rt->host->now_ns(g_rt->host->host_data));
+}
+
+static PyMethodDef NOW_NS_DEF = {"now_ns", now_ns_fn, METH_NOARGS, "The host's monotonic clock, in ns."};
+
 /* ---- describe / validate / load ------------------------------------------ */
 
 static int32_t row_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
@@ -193,9 +207,8 @@ static int leaf_fmt(const struct ArrowSchema* s, char* fmt) {
 
 static void free_udf(struct komira_udf_udf* u) {
   if (u == NULL) return;
-  for (int i = 0; u->names != NULL && i < u->n; i++) free(u->names[i]);
-  free(u->names);
-  free(u->fmts);
+  for (int i = 0; u->fields != NULL && i < u->n; i++) free(u->fields[i].name);
+  free(u->fields);
   free(u->entry);
   free(u);
 }
@@ -235,20 +248,19 @@ static struct komira_udf_udf* check_spec(const komira_udf_spec* s, komira_udf_er
   u = calloc(1, sizeof(*u));
   if (u == NULL) REFUSE(KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory");
   u->n = (int)s->args->n_children;
-  u->names = calloc((size_t)(u->n > 0 ? u->n : 1), sizeof(char*));
-  u->fmts = calloc((size_t)u->n + 1, 1);
+  u->fields = u->n > 0 ? calloc((size_t)u->n, sizeof(struct rowrt_field)) : NULL;
   u->entry = dup_str(s->entry);
-  if (u->names == NULL || u->fmts == NULL || u->entry == NULL) REFUSE(KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory");
+  if ((u->n > 0 && u->fields == NULL) || u->entry == NULL) REFUSE(KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory");
   for (int i = 0; i < u->n; i++) {
     const struct ArrowSchema* f = s->args->children[i];
-    if (!leaf_fmt(f, &u->fmts[i])) REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "a read-set field's type is not int64 or float64");
+    if (!leaf_fmt(f, &u->fields[i].fmt)) REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "a read-set field's type is not int64 or float64");
     if (f->name == NULL || f->name[0] == 0)
       REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "the read set has a field with no name (OPTIMIZED_UDF_ROW_READ_SET_INVALID)");
     for (int j = 0; j < i; j++)
-      if (strcmp(u->names[j], f->name) == 0)
+      if (strcmp(u->fields[j].name, f->name) == 0)
         REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "the read set names a field twice (OPTIMIZED_UDF_ROW_READ_SET_INVALID)");
-    u->names[i] = dup_str(f->name);
-    if (u->names[i] == NULL) REFUSE(KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory");
+    u->fields[i].name = dup_str(f->name);
+    if (u->fields[i].name == NULL) REFUSE(KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory");
   }
   if (!leaf_fmt(s->result, &u->result_fmt))
     REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "the result type is not int64 or float64");
@@ -257,25 +269,34 @@ static struct komira_udf_udf* check_spec(const komira_udf_spec* s, komira_udf_er
 #undef REFUSE
 }
 
-/* The adapter's arguments for `u`: (entry, [names], fmts, result_fmt), as
- * new references in `o`; 0 when one could not be made. */
-static int udf_args(struct rowpy* a, const struct komira_udf_udf* u, PyObject* o[4]) {
+/* komira_udf_rowrt.<method>(entry, [names,] result_fmt) on `adapter`, in
+ * the entered interpreter (validate takes no names). A new reference, or
+ * NULL with the exception set. */
+static PyObject* adapter_call(struct rowpy* a, PyObject* adapter, const char* method, const struct komira_udf_udf* u,
+                              int with_names) {
   char res[2] = {u->result_fmt, 0};
-  o[0] = a->PyUnicode_FromString(u->entry);
-  o[1] = a->PyList_New(u->n);
-  o[2] = a->PyUnicode_FromString(u->fmts);
-  o[3] = a->PyUnicode_FromString(res);
-  for (int i = 0; o[1] != NULL && i < u->n; i++) {
-    PyObject* n = a->PyUnicode_FromString(u->names[i]);
-    if (n == NULL) return 0;
-    a->PyList_SetItem(o[1], i, n); /* steals */
+  PyObject* m = a->PyUnicode_FromString(method);
+  PyObject* entry = a->PyUnicode_FromString(u->entry);
+  PyObject* result = a->PyUnicode_FromString(res);
+  PyObject* names = with_names ? a->PyList_New(u->n) : NULL;
+  int ok = m != NULL && entry != NULL && result != NULL && (names != NULL || !with_names);
+  for (int i = 0; ok && with_names && i < u->n; i++) {
+    PyObject* n = a->PyUnicode_FromString(u->fields[i].name);
+    if (n == NULL)
+      ok = 0;
+    else
+      a->PyList_SetItem(names, i, n); /* steals */
   }
-  return o[0] && o[1] && o[2] && o[3];
-}
-
-static void drop_all(struct rowpy* a, PyObject** o, int n) {
-  for (int i = 0; i < n; i++)
-    if (o[i]) a->Py_DecRef(o[i]);
+  PyObject* r = NULL;
+  if (ok && with_names)
+    r = a->PyObject_CallMethodObjArgs(adapter, m, entry, names, result, NULL);
+  else if (ok)
+    r = a->PyObject_CallMethodObjArgs(adapter, m, entry, result, NULL);
+  /* The list first: of the four it is the one a collection can count. */
+  PyObject* drop[4] = {names, m, entry, result};
+  for (int i = 0; i < 4; i++)
+    if (drop[i] != NULL) a->Py_DecRef(drop[i]);
+  return r;
 }
 
 /* The adapter's static check (komira_udf_rowrt.validate: the module's
@@ -284,10 +305,7 @@ static int32_t check_source(struct komira_udf_rt* rt, const struct komira_udf_ud
   struct rowpy* a = &rt->api;
   PyThreadState* ts = main_enter(rt);
   if (ts == NULL) return rowrt_fail(e, KOMIRA_UDF_ERR_INTERNAL, "validate: no thread state", NULL, -1);
-  PyObject* o[5] = {NULL, NULL, NULL, NULL, NULL};
-  int ok = udf_args(a, u, o);
-  o[4] = a->PyUnicode_FromString("validate");
-  PyObject* r = ok && o[4] ? a->PyObject_CallMethodObjArgs(rt->main_adapter, o[4], o[0], o[1], o[2], o[3], NULL) : NULL;
+  PyObject* r = adapter_call(a, rt->main_adapter, "validate", u, 0);
   int32_t rc;
   if (r == NULL) {
     rc = fail_exception(a, e, KOMIRA_UDF_ERR_INTERNAL, "validate");
@@ -296,7 +314,6 @@ static int32_t check_source(struct komira_udf_rt* rt, const struct komira_udf_ud
     if (rc != KOMIRA_UDF_OK) rowrt_fail(e, rc, a->PyUnicode_AsUTF8(a->PyTuple_GetItem(r, 1)), NULL, -1);
     a->Py_DecRef(r);
   }
-  drop_all(a, o, 5);
   main_leave(rt, ts);
   return rc;
 }
@@ -332,10 +349,12 @@ static void context_drop_objects(struct komira_udf_context* c) {
   if (c->adapter) a->Py_DecRef(c->adapter);
   if (c->name_release) a->Py_DecRef(c->name_release);
   if (c->buffer_type) a->Py_DecRef(c->buffer_type);
-  c->adapter = c->name_release = c->buffer_type = NULL;
+  if (c->now_fn) a->Py_DecRef(c->now_fn);
+  c->adapter = c->name_release = c->buffer_type = c->now_fn = NULL;
 }
 
-/* Imports the adapter in the entered interpreter and makes its objects. */
+/* Imports the adapter in the entered interpreter and makes its objects,
+ * the clock callable among them. */
 static int32_t context_setup(struct komira_udf_context* c, komira_udf_error* e) {
   struct rowpy* a = &c->rt->api;
   c->adapter = bootstrap(c->rt);
@@ -344,6 +363,8 @@ static int32_t context_setup(struct komira_udf_context* c, komira_udf_error* e) 
   if (c->name_release == NULL) return fail_exception(a, e, KOMIRA_UDF_ERR_INTERNAL, "open_context: a name");
   c->buffer_type = rowrt_buffer_type_new(a);
   if (c->buffer_type == NULL) return fail_exception(a, e, KOMIRA_UDF_ERR_INTERNAL, "open_context: ArrowBuffer");
+  c->now_fn = a->PyCMethod_New(&NOW_NS_DEF, NULL, NULL, NULL);
+  if (c->now_fn == NULL) return fail_exception(a, e, KOMIRA_UDF_ERR_INTERNAL, "open_context: the clock");
   return KOMIRA_UDF_OK;
 }
 
@@ -434,10 +455,7 @@ static int32_t row_open_instance(komira_udf_context* c, komira_udf_udf* u, komir
   komira_udf_instance* i = calloc(1, sizeof(*i));
   if (i == NULL) return rowrt_fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_instance: out of memory", NULL, -1);
   rowrt_enter(c);
-  PyObject* o[5] = {NULL, NULL, NULL, NULL, NULL};
-  int ok = udf_args(a, u, o);
-  o[4] = a->PyUnicode_FromString("open_instance");
-  PyObject* r = ok && o[4] ? a->PyObject_CallMethodObjArgs(c->adapter, o[4], o[0], o[1], o[2], o[3], NULL) : NULL;
+  PyObject* r = adapter_call(a, c->adapter, "open_instance", u, 1);
   int32_t rc = KOMIRA_UDF_OK;
   if (r == NULL) {
     rc = fail_exception(a, e, KOMIRA_UDF_ERR_INTERNAL, "open_instance");
@@ -458,7 +476,6 @@ static int32_t row_open_instance(komira_udf_context* c, komira_udf_udf* u, komir
     }
     a->Py_DecRef(r);
   }
-  drop_all(a, o, 5);
   rowrt_leave(c);
   if (rc != KOMIRA_UDF_OK) {
     free(i);
@@ -540,6 +557,7 @@ static void row_shutdown(komira_udf_rt* rt) {
     a->PyEval_RestoreThread(rt->main_ts);
     a->Py_DecRef(rt->main_adapter);
     a->Py_FinalizeEx();
+    g_rt = NULL;
   } else if (rt->host->log != NULL) {
     /* CPython finalizes on the thread that initialized it. */
     rt->host->log(rt->host->host_data, 2, RT_ID ": shutdown off the init thread; not finalized");
@@ -647,6 +665,7 @@ const komira_udf_runtime* komira_udf_python_row_init_v1(const komira_udf_host* h
     a->Py_FinalizeEx();
     return init_fail(rt, e, KOMIRA_UDF_ERR_LOAD, why);
   }
+  g_rt = rt;
   rt->main_ts = a->PyEval_SaveThread();
   *out = rt;
   return &TABLE;

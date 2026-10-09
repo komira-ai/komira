@@ -23,6 +23,9 @@ Arrow types) is decided by the producer when the plan is built
   its batch raises RowExpired when read: after the call returned, and in a
   later batch of the same instance, where the instance's columns hold that
   batch's buffers (each row carries the number of the batch that made it).
+  The host's cancel flag is read before each row (ERR_CANCELLED at that
+  row); the host clock after row 0 and every CLOCK_EVERY rows, and a passed
+  deadline fails the batch with ERR_DEADLINE at the next row.
 
 Statuses are komira_udf_status values of komira_udf_runtime.h.
 """
@@ -40,11 +43,16 @@ ERR_LOAD = 5
 ERR_RAISED = 6
 ERR_RETURN_TYPE = 7
 ERR_CANCELLED = 11
+ERR_DEADLINE = 12
 ERR_FIELD_NOT_DECLARED = 16
 
 # Arrow format -> memoryview code, type name.
 CODE = {"l": "q", "g": "d"}
 TYPE = {"l": "int64", "g": "float64"}
+
+# How often (in rows) a call reads the host clock for its deadline, after
+# reading it once past row 0.
+CLOCK_EVERY = 1024
 
 _NO_FLAG = memoryview(b"\0\0\0\0").cast("i")
 
@@ -114,7 +122,7 @@ def _check(entry, n_params, has_varargs, ret_fmt, result_fmt):
     return (OK, "")
 
 
-def validate(entry, names, fmts, result_fmt):
+def validate(entry, result_fmt):
     """(status, message) for a ROW UDF reference, from the source alone."""
     module, _, qual = entry.partition(":")
     path = _find_source(module)
@@ -181,8 +189,13 @@ def _row_type(names):
         return property(lambda self: read(self, j))
 
     def __getattr__(self, name):
-        # Only names no property or slot answers reach here.
-        if (name.startswith("__") and name.endswith("__")) or name in ("_i", "_b"):
+        # Names no property or slot answers: a field read by attribute
+        # without a property (below), a dunder the language probes for, or
+        # a name outside the read set.
+        j = index.get(name)
+        if j is not None:
+            return read(self, j)
+        if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
         raise FieldNotDeclared(violation(self, name))
 
@@ -206,8 +219,10 @@ def _row_type(names):
         "__repr__": __repr__,
     }
     for j, n in enumerate(names):
-        # A field whose name is not an attribute name (or would shadow the
-        # row's own) is read by subscript only.
+        # The fast path for a field read by attribute. A name that is not an
+        # identifier, or starts with "_" (it could shadow the row's own
+        # slots), gets none: __getattr__ answers it, and `_i` and `_b` are
+        # the row's own (read such a field by subscript).
         if n.isidentifier() and not n.startswith("_"):
             ns[n] = field(j)
     return type("Row", (), ns), slots, batch, seen
@@ -216,7 +231,7 @@ def _row_type(names):
 # ---- open_instance and calls ------------------------------------------------------
 
 
-def open_instance(entry, names, fmts, result_fmt):
+def open_instance(entry, names, result_fmt):
     """(OK, RowInstance) or (status, message)."""
     import importlib
     import inspect
@@ -242,6 +257,13 @@ def open_instance(entry, names, fmts, result_fmt):
     return (OK, RowInstance(f, list(names), result_fmt))
 
 
+def _fill(slots, cols):
+    """The slots of a batch: each field's (typed values view, validity view
+    or None, offset), from the host's columns."""
+    for j, (fmt, data, valid, off) in enumerate(cols):
+        slots[j] = (data.cast(CODE[fmt]), valid, off)
+
+
 class RowInstance:
     """One ROW UDF bound in one interpreter."""
 
@@ -253,24 +275,42 @@ class RowInstance:
         self.result_fmt = result_fmt
         self.row, self.slots, self.batch, self.seen = _row_type(names)
 
-    def call(self, n, cols, out, outv, cancel):
+    def call(self, n, cols, out, outv, cancel, now, deadline):
         """One batch. `cols`: one (fmt, values view, validity view or None,
         offset) per read-set field, the views over the Arrow buffers from
         offset 0. `out`, `outv`: writable views of the output column.
-        `cancel`: a view of the host's int32 cancel flag, or None. Returns
+        `cancel`: a view of the host's int32 cancel flag, or None. `now`:
+        the host clock; `deadline`: in its ns, 0 for none. Returns
         (OK, null_count) or (status, message, trace or None, row)."""
+        # A frame of this call can outlive it: user code that keeps an
+        # exception keeps its traceback, whose frames lead back here. So the
+        # column views live only in the slots, and every view made here is
+        # released before returning (the host frees what they view).
         slots = self.slots
         self.batch[0] += 1
         self.seen[0] = None
+        _fill(slots, cols)
+        cols = None
+        o = out.cast(CODE[self.result_fmt])
+        flag = cancel.cast("i") if cancel is not None else _NO_FLAG
         try:
-            for j, (fmt, data, valid, off) in enumerate(cols):
-                slots[j] = (data.cast(CODE[fmt]), valid, off)
             self.batch[1] = True
-            return self._rows(n, out, outv, cancel.cast("i") if cancel is not None else _NO_FLAG)
+            return self._rows(n, o, outv, flag, now, deadline)
         finally:
             self.batch[1] = False
             for j in range(len(slots)):
                 slots[j] = None
+            o.release()
+            if flag is not _NO_FLAG:
+                flag.release()
+
+    def _raised(self, exc, i):
+        """ERR_RAISED for user code's exception at row i, with its trace. The
+        trace's frames are cleared: what they held (rows, column views) goes
+        now, even when user code kept the exception."""
+        trace = "".join(traceback.format_exception(exc))
+        traceback.clear_frames(exc.__traceback__)
+        return (ERR_RAISED, "{}: {}".format(type(exc).__name__, exc), trace, i)
 
     def _not_declared(self):
         name, row = self.seen[0]
@@ -282,12 +322,11 @@ class RowInstance:
             row,
         )
 
-    def _rows(self, n, out, outv, flag):
+    def _rows(self, n, o, outv, flag, now, deadline):
         f = self.f
         Row = self.row
         seen = self.seen
         b = self.batch[0]
-        o = out.cast(CODE[self.result_fmt])
         nulls = 0
         for i in range(n):
             if flag[0]:
@@ -300,28 +339,29 @@ class RowInstance:
             except BaseException as exc:
                 if seen[0] is not None:
                     return self._not_declared()
-                trace = "".join(traceback.format_exception(exc))
-                if exc.__traceback__ is not None:
-                    traceback.clear_frames(exc.__traceback__)
-                return (ERR_RAISED, "{}: {}".format(type(exc).__name__, exc), trace, i)
+                return self._raised(exc, i)
             if seen[0] is not None:
                 # The read outside the read set was caught by user code.
                 return self._not_declared()
             if y is None:
                 nulls += 1
                 outv[i >> 3] &= ~(1 << (i & 7)) & 0xFF
-                continue
-            try:
-                o[i] = y
-            except (TypeError, ValueError, OverflowError):
-                if self.result_fmt == "g" and type(y) is int:
-                    o[i] = float(y)
-                else:
+            else:
+                try:
+                    # A float64 view takes an int too (as a float).
+                    o[i] = y
+                except (TypeError, ValueError, OverflowError):
                     return (
                         ERR_RETURN_TYPE,
                         "row {}: {} {!r} is not {}".format(i, type(y).__name__, y, TYPE[self.result_fmt]),
                         None,
                         i,
                     )
-        o.release()
+                except BaseException as exc:
+                    # User code: the value's own conversion raised.
+                    return self._raised(exc, i)
+            if not i % CLOCK_EVERY:
+                t = now()
+                if deadline and t > deadline:
+                    return (ERR_DEADLINE, "the deadline passed at row {}".format(i + 1), None, i + 1)
         return (OK, nulls)

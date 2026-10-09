@@ -66,6 +66,7 @@ int rowpy_load(struct rowpy* api, const char* path, char* why, size_t why_len) {
   RESOLVE(PyMemoryView_FromObject);
   RESOLVE(PyBuffer_FillInfo);
   RESOLVE(PyType_FromSpec);
+  RESOLVE(PyCMethod_New);
   RESOLVE(PyErr_Occurred);
   RESOLVE(PyErr_GetRaisedException);
   RESOLVE(PyErr_Clear);

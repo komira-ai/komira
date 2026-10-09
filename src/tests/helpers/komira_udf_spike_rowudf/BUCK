@@ -31,18 +31,34 @@ load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
 # CPython install) and pyrt/ (the Python modules). Each test and the bench
 # stage that layout, with the producer's read_sets.tsv.
 #
-# The welded tests (each file's header names the mutant planted to see it go
-# red): test_row_calls (the runtime through the C ABI: values, the
-# undeclared-field error, caught violations, nulls, a kept row, an argument
-# struct wider than the read set, validate's refusals), test_row_conform
-# (the shared corpus's ROW cases), test_row_threads (4 engine threads, bytes
-# crossed per read set). And the py_test readset_test (the capture).
+# The welded tests (each file's header says what it proves and names the
+# mutant planted by hand to see it go red): test_row_calls (values, the
+# undeclared-field error, caught violations, nulls, per-field offsets, result
+# types, kept rows, an argument struct wider than the read set),
+# test_row_objects (row objects, user errors, how long an argument array
+# lives), test_row_shapes (describe, the spec, validate and open_instance),
+# test_row_interp (the sub-interpreter's settings, leaks), test_row_args
+# (argument structs and ABI structs broken in one place, cancel, deadline,
+# threads, through the engine's probe), test_row_init (layouts init
+# refuses), test_row_conform (the shared corpus's ROW cases),
+# test_row_threads (4 engine threads, bytes crossed per read set). And the
+# py_test readset_test (the capture).
 
 _CASES = {"src/tests/helpers/komira_udf_spike_abi": "//src/tests/helpers/komira_udf_spike_abi:cases"}
 
-_RUNTIME = {
-    "pyrt/komira_udf_rowrt.py": "pyrt/komira_udf_rowrt.py",
-    "pyrt/udf_rows.py": "pyrt/udf_rows.py",
+# The adapter, then the user modules the tests load.
+_PYRT = [
+    "pyrt/komira_udf_rowrt.py",
+    "pyrt/bad_import.py",
+    "pyrt/not_python.py",
+    "pyrt/rowpkg/__init__.py",
+    "pyrt/rowpkg/fns.py",
+    "pyrt/udf_checks.py",
+    "pyrt/udf_rows.py",
+    "pyrt/udf_shapes.py",
+]
+
+_RUNTIME = {f: f for f in _PYRT} | {
     "python": "//third_party/python:cpython",
     "python_row.so": ":python_row",
     "read_sets.tsv": ":read_sets[read_sets.tsv]",
@@ -59,17 +75,37 @@ mojo_library(
         "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python",
     ],
     test_srcs = [
+        "tests/test_row_args.mojo",
         "tests/test_row_calls.mojo",
         "tests/test_row_conform.mojo",
+        "tests/test_row_init.mojo",
+        "tests/test_row_interp.mojo",
+        "tests/test_row_objects.mojo",
+        "tests/test_row_shapes.mojo",
         "tests/test_row_threads.mojo",
     ],
     test_data = {
+        "tests/test_row_args.mojo": _RUNTIME,
         "tests/test_row_calls.mojo": _RUNTIME,
+        # Three layouts init refuses, and the runtime it links long
+        # directories to (tests/test_row_init.mojo).
+        "tests/test_row_init.mojo": _RUNTIME | {
+            "fake/python/lib/libpython3.13.so.1.0": ":python_row",
+            "fake/python_row.so": ":python_row",
+            "lonely/python_row.so": ":python_row",
+            "noadapter/python": "//third_party/python:cpython",
+            "noadapter/python_row.so": ":python_row",
+        },
+        "tests/test_row_interp.mojo": _RUNTIME,
+        "tests/test_row_objects.mojo": _RUNTIME,
+        "tests/test_row_shapes.mojo": _RUNTIME,
         "tests/test_row_conform.mojo": _RUNTIME | _CASES,
         "tests/test_row_threads.mojo": _RUNTIME | {
             # read by its check that the engine names no runtime or language
             "engine.mojo": "engine.mojo",
             "native/row_engine.c": "native/row_engine.c",
+            "native/row_engine.h": "native/row_engine.h",
+            "native/row_probe.c": "native/row_probe.c",
         },
     },
     visibility = ["PUBLIC"],
@@ -82,6 +118,8 @@ staged_files(
     name = "c_files",
     srcs = [
         "native/row_engine.c",
+        "native/row_engine.h",
+        "native/row_probe.c",
         "rowrt/row_call.c",
         "rowrt/row_runtime.c",
         "rowrt/rowpy.c",
@@ -90,10 +128,16 @@ staged_files(
     ],
 )
 
-# The engine loop, linked into the library's tests and the bench program.
+# The engine loop and its single probing calls, linked into the library's
+# tests and the bench program.
 cxx_library(
     name = "komira_udf_spike_rowudf_engine",
-    srcs = [":c_files[native/row_engine.c]"],
+    srcs = [
+        ":c_files[native/row_engine.c]",
+        ":c_files[native/row_probe.c]",
+    ],
+    headers = {"row_engine.h": ":c_files[native/row_engine.h]"},
+    header_namespace = "",
     compiler_flags = ["-O2"],
     deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
     visibility = ["PUBLIC"],

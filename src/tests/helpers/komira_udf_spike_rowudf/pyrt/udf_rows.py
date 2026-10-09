@@ -86,6 +86,12 @@ def read_kept(row) -> float:
     return KEPT[0].price
 
 
+def read_kept_misread(row) -> float:
+    """Reads `qty`, outside keeps_row's read set, through the row keeps_row
+    kept."""
+    return KEPT[0].qty
+
+
 def keeps_then_reads(row) -> float:
     """Keeps the first row it sees and returns that row's price on every
     call: in a later batch of the same instance the kept row is expired."""
@@ -101,6 +107,26 @@ def keeps_then_misreads(row) -> float:
         KEPT_MISS.append(row)
         return row.price
     return KEPT_MISS[0].qty
+
+
+def x_plus_y(row) -> float | None:
+    """None where either field is null, else their sum."""
+    return None if row.x is None or row.y is None else row.x + row.y
+
+
+def as_text(row) -> float:
+    """Hinted float, returns a str."""
+    return "not a number"
+
+
+def whole(row) -> float:
+    """Hinted float, returns an int: stored as a float."""
+    return int(row.price)
+
+
+def halved(row) -> int:
+    """Hinted int, returns a float."""
+    return row.a / 2
 
 
 def typo(row) -> float:

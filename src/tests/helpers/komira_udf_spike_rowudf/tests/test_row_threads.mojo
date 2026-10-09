@@ -45,7 +45,7 @@ def _all_ok(r: RowReport, what: String) raises:
 
 
 def _neutral() raises:
-    for path in ["native/row_engine.c", "engine.mojo"]:
+    for path in ["native/row_engine.c", "native/row_engine.h", "native/row_probe.c", "engine.mojo"]:
         var text = String("")
         with open(path, "r") as f:
             text = f.read().lower()

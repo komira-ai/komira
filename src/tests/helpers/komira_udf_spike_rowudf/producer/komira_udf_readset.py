@@ -66,10 +66,11 @@ class ReadSet:
 
 
 def _row_param(f):
-    """The name of f's one positional parameter, or a ReadSetError."""
-    code = getattr(f, "__code__", None)
-    if not isinstance(f, types.FunctionType) or code is None:
+    """The name of f's one positional parameter; None when f is not a plain
+    function; a ReadSetError when it does not take one row."""
+    if not isinstance(f, types.FunctionType):
         return None
+    code = f.__code__
     if code.co_argcount != 1 or code.co_kwonlyargcount or code.co_flags & (0x04 | 0x08):
         raise ReadSetError(
             "UDF_ROW_SIGNATURE",
@@ -88,7 +89,9 @@ def scan(f):
     code = f.__code__
     if row in code.co_cellvars:
         return None, "a nested function or lambda captures the row"
-    ins = [i for i in dis.get_instructions(code) if i.opname not in ("CACHE", "EXTENDED_ARG", "NOP")]
+    # get_instructions yields no CACHE entries; an EXTENDED_ARG prefix or a
+    # NOP is not an operation on the row.
+    ins = [i for i in dis.get_instructions(code) if i.opname not in ("EXTENDED_ARG", "NOP")]
     fields = []
     for k, i in enumerate(ins):
         op = i.opname
@@ -111,24 +114,17 @@ def scan(f):
         if not loads_row:
             continue
         # The row is on top of the stack: what comes next must read one
-        # constant field from it.
-        nxt = ins[k + 1] if k + 1 < len(ins) else None
-        after = ins[k + 2] if k + 2 < len(ins) else None
-        if nxt is not None and nxt.opname == "LOAD_ATTR":
+        # constant field from it. A code object ends with a return, so a
+        # load is never its last instruction, nor is the constant after it.
+        nxt = ins[k + 1]
+        if nxt.opname == "LOAD_ATTR":
             if nxt.arg & 1:
                 return None, "a method of the row is called: .{} (line {})".format(nxt.argval, nxt.positions.lineno)
             name = nxt.argval
-        elif (
-            nxt is not None
-            and nxt.opname == "LOAD_CONST"
-            and isinstance(nxt.argval, str)
-            and after is not None
-            and after.opname == "BINARY_SUBSCR"
-        ):
+        elif nxt.opname == "LOAD_CONST" and isinstance(nxt.argval, str) and ins[k + 2].opname == "BINARY_SUBSCR":
             name = nxt.argval
         else:
-            line = i.positions.lineno if i.positions else "?"
-            return None, "the row is used other than by a constant field name (line {})".format(line)
+            return None, "the row is used other than by a constant field name (line {})".format(i.positions.lineno)
         if name not in fields:
             fields.append(name)
     return fields, ""

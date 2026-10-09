@@ -20,6 +20,9 @@
  * within 2% (or a cap), then all threads run their measured batches between
  * two barriers.
  *
+ * row_probe.c makes single calls on the calling thread, broken in one known
+ * way each, through the same engine (row_engine.h).
+ *
  * FFI-BOUNDARY. The runtime library is dlopened once (RTLD_NOW |
  * RTLD_LOCAL) and never closed. The engine, run and per-thread structs,
  * their sample arrays and the input columns are this file's, freed by
@@ -40,11 +43,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "komira_udf_runtime.h"
+#include "row_engine.h"
 
 #define MAX_THREADS 64
-#define MAX_COLS 256
-#define MSG 512
 
 /* Run-level fields (thread -1) and per-thread fields of rowe_get. */
 enum {
@@ -81,21 +82,6 @@ enum {
   T_WARM_STABLE,   /* 1 when three window medians agreed within 2% before the cap */
   T_SAMPLES,
   T_LAST = T_SAMPLES
-};
-
-struct engine {
-  void* lib;
-  const komira_udf_runtime* t;
-  komira_udf_rt* rt;
-  komira_udf_host host;
-  int32_t status;
-  char message[MSG];
-  int64_t t_open;
-  int64_t open_ns;
-  int runs;
-  komira_udf_capabilities caps;
-  char cpu_model[MSG];
-  char cpu_max[64];
 };
 
 struct thread_state {
@@ -141,15 +127,20 @@ static void host_release(void* hd, int64_t bytes) {
   (void)bytes;
 }
 static int64_t host_now(void* hd) {
-  (void)hd;
-  return now_mono();
+  struct engine* e = hd;
+  if (!e->script) return now_mono();
+  int64_t n = ++e->reads;
+  if (e->cancel_at != 0 && n == e->cancel_at && e->cancel_flag != NULL)
+    __atomic_store_n(e->cancel_flag, 1, __ATOMIC_RELEASE);
+  return e->clock0 + n;
 }
 static void host_log(void* hd, int32_t level, const char* utf8) {
-  (void)hd;
+  __atomic_store_n(&((struct engine*)hd)->last_level, level, __ATOMIC_RELEASE);
+  __atomic_add_fetch(&((struct engine*)hd)->logs, 1, __ATOMIC_ACQ_REL);
   fprintf(stderr, "runtime log %d: %s\n", level, utf8 ? utf8 : "");
 }
 
-static void take_error(komira_udf_error* err, char* into) {
+void rowe_take_error(komira_udf_error* err, char* into) {
   snprintf(into, MSG, "%s", err->message ? err->message : "(no message)");
   if (err->release != NULL) err->release(err);
 }
@@ -218,12 +209,18 @@ struct engine* rowe_open(const char* path) {
   e->host.mem_release = host_release;
   e->host.now_ns = host_now;
   e->host.log = host_log;
+  const int sigs[3] = {SIGINT, SIGPIPE, SIGXFSZ};
+  for (int i = 0; i < 3; i++) {
+    struct sigaction sa;
+    e->signals_before[i] = sigaction(sigs[i], NULL, &sa) == 0 ? sa.sa_handler : NULL;
+  }
   komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
   e->t = init(&e->host, &e->rt, &err);
   e->open_ns = now_mono() - e->t_open;
   if (e->t == NULL) {
     e->status = err.code;
-    take_error(&err, e->message);
+    e->init_row = err.row;
+    rowe_take_error(&err, e->message);
     return e;
   }
   e->caps.struct_size = sizeof(e->caps);
@@ -241,6 +238,7 @@ struct engine* rowe_open(const char* path) {
 int32_t rowe_status(const struct engine* e) { return e == NULL ? KOMIRA_UDF_ERR_OUT_OF_MEMORY : e->status; }
 const char* rowe_message(const struct engine* e) { return e == NULL ? "out of memory" : e->message; }
 int64_t rowe_open_ns(const struct engine* e) { return e->open_ns; }
+int64_t rowe_init_row(const struct engine* e) { return e->init_row; }
 const char* rowe_runtime_id(const struct engine* e) { return e->caps.runtime_id ? e->caps.runtime_id : ""; }
 /* 0: the CPU model; 1: the cgroup's cpu.max ("" when unreadable). */
 const char* rowe_host_fact(const struct engine* e, int32_t which) { return which == 0 ? e->cpu_model : e->cpu_max; }
@@ -264,7 +262,7 @@ struct export_block {
   const void** cbufs;
 };
 
-static void release_child(struct ArrowArray* a) { a->release = NULL; }
+void rowe_release_child(struct ArrowArray* a) { a->release = NULL; }
 
 static void release_parent(struct ArrowArray* a) {
   struct export_block* b = a->private_data;
@@ -296,7 +294,7 @@ static int64_t export_args(struct thread_state* s, struct ArrowDeviceArray* d) {
     c->length = r->rows;
     c->n_buffers = 2;
     c->buffers = &b->cbufs[2 * i];
-    c->release = release_child;
+    c->release = rowe_release_child;
     c->private_data = b;
     b->kids[i] = c;
   }
@@ -362,7 +360,7 @@ static int64_t one_call(struct thread_state* s, komira_udf_instance* inst) {
   }
   if (rc != KOMIRA_UDF_OK) {
     char m[MSG];
-    take_error(&err, m);
+    rowe_take_error(&err, m);
     fail_thread(s, rc, m);
     if (out.array.release != NULL) out.array.release(&out.array);
     return ns;
@@ -431,7 +429,7 @@ static void* engine_thread(void* p) {
   s->f[T_OPEN_CONTEXT_NS] = now_mono() - t0;
   if (rc != KOMIRA_UDF_OK) {
     char m[MSG];
-    if (ok) take_error(&err, m);
+    if (ok) rowe_take_error(&err, m);
     fail_thread(s, rc, ok ? m : "input: out of memory");
   } else {
     t0 = now_mono();
@@ -439,7 +437,7 @@ static void* engine_thread(void* p) {
     s->f[T_OPEN_INSTANCE_NS] = now_mono() - t0;
     if (rc != KOMIRA_UDF_OK) {
       char m[MSG];
-      take_error(&err, m);
+      rowe_take_error(&err, m);
       fail_thread(s, rc, m);
     }
   }
@@ -476,7 +474,7 @@ static int64_t tv_ns(struct timeval tv) { return (int64_t)tv.tv_sec * 1000000000
 static void no_release(struct ArrowSchema* s) { (void)s; }
 
 /* Splits a comma-separated list in place into at most `max` names. */
-static int split(char* s, char** out, int max) {
+int rowe_split(char* s, char** out, int max) {
   int n = 0;
   if (s[0] == 0) return 0;
   for (char* p = s; n < max;) {
@@ -495,17 +493,18 @@ static int index_of(char** names, int n, const char* name) {
   return -1;
 }
 
-/* Loads the UDF with the read set as its argument struct; on failure sets
- * R_STATUS and the message. */
-static void run_load(struct run* r, const char* entry, char** read) {
+/* Loads `entry` with the `k` names of `read` (float64 each) as its argument
+ * struct; on failure fills `msg` and returns the status. */
+int32_t rowe_load_read_set(struct engine* e, const char* entry, char** read, int k, komira_udf_udf** out,
+                             char* msg) {
   struct ArrowSchema kids_s[MAX_COLS];
   struct ArrowSchema* kids[MAX_COLS];
-  for (int i = 0; i < r->k; i++) {
+  for (int i = 0; i < k; i++) {
     struct ArrowSchema c = {"g", read[i], NULL, ARROW_FLAG_NULLABLE, 0, NULL, NULL, no_release, NULL};
     kids_s[i] = c;
     kids[i] = &kids_s[i];
   }
-  struct ArrowSchema args = {"+s", "", NULL, 0, r->k, kids, NULL, no_release, NULL};
+  struct ArrowSchema args = {"+s", "", NULL, 0, k, kids, NULL, no_release, NULL};
   struct ArrowSchema result = {"g", "", NULL, ARROW_FLAG_NULLABLE, 0, NULL, NULL, no_release, NULL};
   komira_udf_spec s;
   memset(&s, 0, sizeof(s));
@@ -519,14 +518,20 @@ static void run_load(struct run* r, const char* entry, char** read) {
   s.stability = KOMIRA_UDF_IMMUTABLE;
   s.code_root = "";
   komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
-  int64_t t0 = now_mono();
-  int32_t rc = r->e->t->load(r->e->rt, &s, &r->udf, &err);
-  r->f[R_LOAD_NS] = now_mono() - t0;
+  int32_t rc = e->t->load(e->rt, &s, out, &err);
   if (rc != KOMIRA_UDF_OK) {
-    r->f[R_STATUS] = rc;
-    take_error(&err, r->message);
-    r->udf = NULL;
+    rowe_take_error(&err, msg);
+    *out = NULL;
   }
+  return rc;
+}
+
+/* Loads the run's UDF; on failure sets R_STATUS and the message. */
+static void run_load(struct run* r, const char* entry, char** read) {
+  int64_t t0 = now_mono();
+  int32_t rc = rowe_load_read_set(r->e, entry, read, r->k, &r->udf, r->message);
+  r->f[R_LOAD_NS] = now_mono() - t0;
+  if (rc != KOMIRA_UDF_OK) r->f[R_STATUS] = rc;
 }
 
 /* One run: `input` (comma-separated, `width` names) and the read set
@@ -556,8 +561,8 @@ struct run* rowe_run(struct engine* e, const char* entry, const char* input_csv,
   char* rs_copy = strdup(read_csv);
   char* input[MAX_COLS];
   char* read[MAX_COLS];
-  r->width = in_copy ? split(in_copy, input, MAX_COLS) : 0;
-  r->k = rs_copy ? split(rs_copy, read, MAX_COLS) : 0;
+  r->width = in_copy ? rowe_split(in_copy, input, MAX_COLS) : 0;
+  r->k = rs_copy ? rowe_split(rs_copy, read, MAX_COLS) : 0;
   r->f[R_WIDTH] = r->width;
   r->f[R_READ_FIELDS] = r->k;
   for (int i = 0; i < r->k; i++) {
@@ -639,3 +644,4 @@ void rowe_run_free(struct run* r) {
   for (int i = 0; i < r->threads; i++) free(r->th[i].samples);
   free(r);
 }
+

@@ -18,9 +18,14 @@
  * and is released when the call returns otherwise. The adapter drops its
  * row objects' access to the views when the call returns, and a row carries
  * the number of the batch that made it, so a row kept past its batch raises
- * when read, also in a later batch of the same instance. An ArrowBuffer goes when its interpreter
- * frees it, on the thread that holds that interpreter; the release it may
- * run is the host's and takes no lock of this runtime.
+ * when read, also in a later batch of the same instance. An ArrowBuffer
+ * goes when its interpreter frees it, on the thread that holds that
+ * interpreter; the release it may run is the host's and takes no lock of
+ * this runtime.
+ *
+ * The adapter checks the cancel flag before each row and reads the host's
+ * clock (c->now_fn) after row 0 and every CLOCK_EVERY rows, failing the
+ * batch with ERR_DEADLINE once the deadline (0: none) has passed.
  *
  * `out` is moved to the host on success: one malloc block (buffer list,
  * validity, values), freed by its release, which takes no interpreter lock
@@ -96,10 +101,12 @@ static int args_fit(const struct ArrowArray* in, const struct komira_udf_udf* u,
   if (what == NULL && in->offset != 0) what = "args has a nonzero offset (the argument struct is at offset 0)";
   for (int64_t i = 0; what == NULL && i < in->n_children; i++) {
     const struct ArrowArray* c = in->children[i];
-    field = u->names[i];
+    field = u->fields[i].name;
     if (c == NULL || c->n_buffers != 2)
       what = "is not a primitive array";
-    else if (c->offset < 0 || c->length < in->length)
+    else if (c->offset < 0)
+      what = "has a negative offset";
+    else if (c->length < in->length)
       what = "is shorter than the batch";
     else if (in->length > 0 && c->buffers[1] == NULL)
       what = "has no values buffer";
@@ -214,7 +221,7 @@ static PyObject* field_columns(struct komira_udf_context* c, struct row_owner* o
   PyObject* cols = a->PyList_New(u->n);
   for (int i = 0; cols != NULL && i < u->n; i++) {
     const struct ArrowArray* ch = owner->args.children[i];
-    char fmt[2] = {u->fmts[i], 0};
+    char fmt[2] = {u->fields[i].fmt, 0};
     PyObject* d = owned_view(c, owner, ch->buffers[1], (ch->offset + n) * 8);
     PyObject* v = a->none;
     if (ch->buffers[0] != NULL && ch->null_count != 0)
@@ -305,11 +312,13 @@ int32_t rowrt_call_batch(komira_udf_instance* inst, const komira_udf_call* call,
   if (out_d != NULL) own_views[n_own++] = out_d;
   if (out_v != NULL) own_views[n_own++] = out_v;
   PyObject* r = NULL;
-  PyObject* targs = a->PyTuple_New(5);
+  PyObject* targs = a->PyTuple_New(7);
   PyObject* pn = a->PyLong_FromLongLong(n);
-  if (targs != NULL && pn != NULL && cols != NULL && cancel_view != NULL && out_d != NULL && out_v != NULL) {
-    PyObject* items[5] = {pn, cols, out_d, out_v, cancel_view};
-    for (int i = 0; i < 5; i++) {
+  PyObject* pd = a->PyLong_FromLongLong(call->deadline_ns);
+  if (targs != NULL && pn != NULL && pd != NULL && cols != NULL && cancel_view != NULL && out_d != NULL &&
+      out_v != NULL) {
+    PyObject* items[7] = {pn, cols, out_d, out_v, cancel_view, c->now_fn, pd};
+    for (int i = 0; i < 7; i++) {
       a->Py_IncRef(items[i]); /* SetItem steals */
       a->PyTuple_SetItem(targs, i, items[i]);
     }
@@ -318,6 +327,7 @@ int32_t rowrt_call_batch(komira_udf_instance* inst, const komira_udf_call* call,
   char* internal = r == NULL ? rowrt_take_exception(a) : NULL;
   if (targs) a->Py_DecRef(targs);
   if (pn) a->Py_DecRef(pn);
+  if (pd) a->Py_DecRef(pd);
   if (cols) a->Py_DecRef(cols);
 
   /* The verdict, copied out before the objects go: (OK, null_count) or
