@@ -72,7 +72,7 @@ With coverage on, each test's coverage binary also runs under kcov through the r
 ./buck2 build tests//functional/coverage:numbers tests//functional/coverage:census 'tests//functional/coverage:covenv[coverage]' tests//negative/coverage:tracer
 ./buck2 build 'tests//negative/coverage:tracer[coverage][tests][test_tracer]'   # must fail: test_tracer: traced, TracerPid
 ./buck2 build 'tests//negative/coverage:lost[coverage][tests][test_lost]'       # must fail: no --map or --exclude prefix covers it
-./buck2 build 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'    # must fail: this run stages them at ...
+./buck2 build 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'    # must fail: names none of its sources by lostlibx/
 ./buck2 build tests//negative/coverage:orphan 'tests//negative/coverage:orphan[coverage]'
 ./buck2 build 'tests//negative/coverage:exits[coverage][tests][test_parent_fails]'   # must fail: exit 1
 ./buck2 build 'tests//negative/coverage:exits[coverage][tests][test_killed]'         # must fail: exit 137
