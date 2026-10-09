@@ -167,7 +167,9 @@ as released):
    parallel code, behaved differently and slowly. The function is now
    empty. On x86-64, the only platform kcov is built for, the instruction
    cache is coherent with stores, and kcov inserts its breakpoints before
-   the program runs (`--skip-solibs`: no library is patched later); while
+   the program runs (`--skip-solibs`: no library is patched later; a
+   shared library's driver runs without it, and kcov patches the library it
+   loads when its preload library reports the load); while
    it runs, kcov only removes a breakpoint once hit, a one-byte write that
    another thread sees either before (a trap kcov handles, since it keeps
    the address in its map) or after.

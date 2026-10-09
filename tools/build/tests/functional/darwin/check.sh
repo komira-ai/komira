@@ -42,8 +42,10 @@
 #      build and pass there, with the configured property set in `buck2 log
 #      what-ran`; the binary is an arm64 Mach-O for macOS 11.0 whose only run
 #      path is @loader_path/lib and which loads only the runtime library and
-#      the system; and a compile whose host list names no worker is refused
-#      (exit 2) on the worker.
+#      the system; the mojo_shared_lib examples and their gates, and
+#      libgate_ok's welded test, pass there (both start through
+#      gate_runner.sh and need DYLD_LIBRARY_PATH); and a compile whose
+#      host list names no worker is refused (exit 2) on the worker.
 
 set -u
 mkdir -p "$1" && LOG=$(cd "$1" && pwd) || { echo "usage: $0 <log_dir>" >&2; exit 2; }
@@ -677,6 +679,16 @@ else
         else
             pass "live: mojo_shared_lib builds a .dylib on macOS and its gate passes (plain, plain_exact)"
         fi
+    fi
+    # A mojo_library's welded test: the test binary loads the runtime library
+    # through DYLD_LIBRARY_PATH, which gate_runner.sh must hand it past
+    # macOS's pruning (section 6 and tests//functional/test_data:runner_cases
+    # show the same against stand-ins).
+    if ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" \
+            //tools/build/examples/libgate_ok:libgate_ok > "$LOG/darwin_welded.log" 2>&1; then
+        fail "live: the welded test of //tools/build/examples/libgate_ok failed on macOS (see $LOG/darwin_welded.log)"
+    else
+        pass "live: a mojo_library's welded test passes on macOS (libgate_ok)"
     fi
     for t in missing_export:'MISSING EXPORT: neg_missing' failing_driver:'GATED TEST FAILED' plain_leaks:'plain_hidden leaked into the dynamic symbol table'; do
         if timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" "tests//negative/shared_lib:${t%%:*}" > "$LOG/darwin_neg_${t%%:*}.log" 2>&1; then
