@@ -36,8 +36,9 @@
 # `OptimizeResult` carries. komira_optimizer imports no physical-plan IR
 # (`deps_lint` in its BUCK refuses `komira_plan_ir.physical_plan` and
 # `komira_plan_ir.physical_plan_purity_gate`): lowering to a physical plan,
-# and the doors that check one, belong to the packages that build it, so no
-# refusal of theirs is classified here.
+# and the doors that check one, belong to the packages that build it. Their
+# tokens are in the shared table `_classify` reads, as PRODUCER_BUG, and land
+# on PASS_REFUSED here: this status set has no code of its own for them.
 #
 # Each is `def ... -> OptimizeResult` with NO `raises`, and each is a
 # `try` / `except` around the raising function it wraps. The raising functions
@@ -80,12 +81,14 @@
 #                    same plan.
 #   PASS_REFUSED     a pass refused. The catch-all.
 #
-# ⚠ CLASSIFICATION IS BY IMPORTED TOKEN, NEVER BY A STRING SPELLED HERE.
-# `SCAN_BINDING_EPOCH_MISMATCH` / `SCAN_BINDING_HANDLE_NOT_BOUND` are imported
-# from the module that RAISES them (`komira_scan_source.scan_resolver`), so a
-# rename moves both sides at once. Re-spelling either literal in this file would
-# create the second source of truth that `lint_boundary_struct_single_
-# declaration.py` exists to prevent, one layer down.
+# ⚠ CLASSIFICATION IS BY THE SHARED TOKEN TABLE, NEVER BY A STRING SPELLED HERE.
+# `_classify` asks `komira_plan_tokens.message_class` for the class of the
+# first table token the message holds and maps the class to a status. The
+# table is the one a physical-plan result type reads too, so a token has one
+# class in both. Its strings are pinned against the raisers' constants by
+# tests: `SCAN_BINDING_EPOCH_MISMATCH` / `SCAN_BINDING_HANDLE_NOT_BOUND`
+# (`komira_scan_source.scan_resolver`) and `OPTIMIZE_REFUSAL_UNRESOLVED_DEPS`
+# (below) in test_optimizer_result.
 #
 # ⚠ AND CLASSIFICATION CANNOT MANUFACTURE AN OK. `_classify` is only ever
 # reached from an `except` arm, and its most general answer is a FAILURE code,
@@ -95,10 +98,7 @@
 # =============================================================================
 
 from komira_plan_ir.logical_plan import LogicalPlan
-from komira_scan_source.scan_resolver import (
-    SCAN_BINDING_EPOCH_MISMATCH,
-    SCAN_BINDING_HANDLE_NOT_BOUND,
-)
+from komira_plan_tokens import RefusalClass, message_class
 
 
 # -----------------------------------------------------------------------------
@@ -136,10 +136,10 @@ comptime OPTIMIZE_REFUSAL_UNRESOLVED_DEPS: StaticString = (
 )
 """The named token `_optimize_pure_with_deps` puts in its round-cap refusal.
 
-⚠ THE RAISE SITE MUST IMPORT THIS, NOT RE-SPELL IT. It is the only reason
-`_classify` can tell that refusal apart from any other pass refusal, and a
-second spelling makes the two silently stop matching. Same idiom, and the same
-reason, as `SCAN_BINDING_EPOCH_MISMATCH` and the 13 `PLAN_WIRE_*` tokens."""
+⚠ THE RAISE SITE MUST IMPORT THIS, NOT RE-SPELL IT. The shared table in
+`komira_plan_tokens` holds the same string as UNRESOLVED_DEPS, and that row is
+the only reason `_classify` can tell this refusal apart from any other pass
+refusal; test_optimizer_result checks the two strings are equal."""
 
 
 def _classify(message: String) -> Int32:
@@ -150,11 +150,18 @@ def _classify(message: String) -> Int32:
     function does not recognise degrades to `PASS_REFUSED` (still an error) and
     never to success.
     """
-    if message.find(String(SCAN_BINDING_EPOCH_MISMATCH)) >= 0:
+    var cls = message_class(message)
+    if not cls:
+        return OPTIMIZE_ERR_PASS_REFUSED
+    return _status_of_class(cls.value())
+
+
+def _status_of_class(cls: RefusalClass) -> Int32:
+    """The status of a shared-table class. SCAN_BINDING and UNRESOLVED_DEPS
+    have their own codes; PRODUCER_BUG and PASS_REFUSAL are PASS_REFUSED."""
+    if cls == RefusalClass.SCAN_BINDING:
         return OPTIMIZE_ERR_SCAN_BINDING
-    if message.find(String(SCAN_BINDING_HANDLE_NOT_BOUND)) >= 0:
-        return OPTIMIZE_ERR_SCAN_BINDING
-    if message.find(String(OPTIMIZE_REFUSAL_UNRESOLVED_DEPS)) >= 0:
+    if cls == RefusalClass.UNRESOLVED_DEPS:
         return OPTIMIZE_ERR_UNRESOLVED_DEPS
     return OPTIMIZE_ERR_PASS_REFUSED
 

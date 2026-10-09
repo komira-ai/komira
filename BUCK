@@ -133,6 +133,7 @@ _TESTS_LINTS = [
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
     "//src/komira_optimizer:deps_lint",
+    "//src/komira_plan_tokens:deps_lint",
     "//src/tests/conformance/komira_calendar_ics_conformance:deps_lint",
     "//src/tests/conformance/komira_connect_conformance:deps_lint",
     "//src/tests/conformance/komira_contacts_store_conformance:deps_lint",
