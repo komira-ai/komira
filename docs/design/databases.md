@@ -61,7 +61,9 @@ The arguments are value types from `neutral_ops.mojo`. `Pred` is one comparison 
 `sql_neutral_ops.mojo` renders each operation once, in `sql_op_*` and `render_*` functions generic over `DB: SqlDatabase`, and each SQL driver's operation calls one of them. The renderer branches on `DB.dialect()` where backends differ:
 
 - `query_rows_locked` appends `FOR UPDATE SKIP LOCKED` only when the dialect is `"pg"`.
-- `query_rows` evaluates in Mojo an array-contains predicate on every dialect but `"pg"`, which pushes it down as `<val> = ANY(<col>)`. It then drops the SQL `LIMIT` and applies the limit after filtering, so that the count is right.
+- `query_rows` evaluates in Mojo an array-contains predicate on every dialect but `"pg"`, which pushes it down as `<val> = ANY(<col>)`, and a JSON-key predicate on `"pgstore"`, whose executor has neither `->>` nor `json_extract`. It then drops the SQL `LIMIT` and applies the limit after filtering, so that the count is right. An AND filter pushes its other predicates and keeps a row only if every predicate evaluated in Mojo holds. An OR filter made only of such predicates pushes no `WHERE` and keeps a row if any holds; an OR filter that mixes them with predicates pushed into SQL raises, because a row matching only the Mojo half is never loaded.
+- `render_where` raises on an array-contains predicate for any dialect but `"pg"` and on a JSON-key predicate for any dialect but `"pg"` and `"sqlite"`, so `delete_where`, `conditional_update` and `query_rows_locked` refuse them there. An empty `in_list` or `in_literals` renders `1 = 0` (it matches no row), since `col IN ()` is not valid Postgres.
+- A `DbColVal` with a `kind` other than bind, coalesce or raw expression is refused by its three-argument constructor and by the SET renderers of `conditional_update` and `claim_rows`.
 - `create_if_absent` renders `ON CONFLICT ... DO NOTHING RETURNING` for `"pg"` and `"sqlite"`.
 
 The renderer also has arms for a third dialect tag, `"pgstore"`, for a driver that is not part of this tree.
@@ -168,7 +170,7 @@ Two operations serve handlers that must not block a worker. `PgQueryOp` (`pg_que
 | `src/komira_db/database.mojo` | the two traits | `Database`, `SqlDatabase` |
 | `src/komira_db/db_storable.mojo`, `db_schema.mojo` | the row-type contracts and the typed store | `DbStorable`, `DbSchema`, `Store` |
 | `src/komira_db/neutral_ops.mojo` | operation value types | `Pred`, `Filter`, `Order`, `DbColVal`, `classify_raw_expr`, `derive_pod_name` |
-| `src/komira_db/sql_neutral_ops.mojo` | SQL rendering of the ten operations | `sql_op_query_rows`, `sql_op_claim_rows`, `render_where` |
+| `src/komira_db/sql_neutral_ops.mojo`, `sql_claim_ops.mojo` | SQL rendering of the ten operations (the claim in `sql_claim_ops.mojo`, re-exported) | `sql_op_query_rows`, `sql_op_claim_rows`, `render_where` |
 | `src/komira_db/db_value.mojo`, `db_row.mojo`, `db_uuid.mojo`, `timestamptz.mojo`, `proto_json.mojo` | values, rows and nested-field JSON | `DbValue`, `DbRow`, `DbRows`, `Uuid`, `Timestamptz`, `to_proto_json` |
 | `src/komira_db_sqlite/sqlite_driver.mojo`, `ffi.mojo` | the SQLite driver | `SqliteDatabase` |
 | `src/komira_db_postgres/pg_driver.mojo`, `pg_pool.mojo` | the Postgres driver and its pool | `PgDatabase`, `PgPool` |

@@ -324,7 +324,20 @@ struct DbColVal(Movable, Copyable):
         self.val = val^
         self.kind = COLVAL_BIND
 
-    def __init__(out self, var col: String, var val: DbValue, kind: UInt8):
+    def __init__(
+        out self, var col: String, var val: DbValue, kind: UInt8
+    ) raises:
+        """A term of an explicit `kind`. Raises unless `kind` is one of
+        COLVAL_BIND / COLVAL_COALESCE / COLVAL_RAW_EXPR: any other value is
+        no SET-term shape. (`kind` is a public field, so the SQL renderers
+        refuse an unknown kind too rather than number a placeholder the op
+        binds no param for.)"""
+        if kind > COLVAL_RAW_EXPR:
+            raise Error(
+                String("DbColVal: kind ")
+                + String(Int(kind))
+                + String(" is not COLVAL_BIND, COLVAL_COALESCE or COLVAL_RAW_EXPR")
+            )
         self.col = col^
         self.val = val^
         self.kind = kind
@@ -332,19 +345,23 @@ struct DbColVal(Movable, Copyable):
     @staticmethod
     def bind(var col: String, var val: DbValue) -> DbColVal:
         """A plain `col = $n` hard set (binds `val`)."""
-        return DbColVal(col^, val^, COLVAL_BIND)
+        return DbColVal(col^, val^)
 
     @staticmethod
     def coalesce(var col: String, var val: DbValue) -> DbColVal:
         """A `col = COALESCE($n, col)` partial-update set (binds `val`; a None
         leaves the column untouched)."""
-        return DbColVal(col^, val^, COLVAL_COALESCE)
+        var t = DbColVal(col^, val^)
+        t.kind = COLVAL_COALESCE
+        return t^
 
     @staticmethod
     def raw_expr(var col: String, var expr: String) -> DbColVal:
         """A `col = <expr>` SET term where `<expr>` is literal SQL (NO bind) —
         e.g. `version = version + 1`, `updated_at = NOW()`."""
-        return DbColVal(col^, DbValue.text(expr^), COLVAL_RAW_EXPR)
+        var t = DbColVal(col^, DbValue.text(expr^))
+        t.kind = COLVAL_RAW_EXPR
+        return t^
 
     def is_bind(self) -> Bool:
         return self.kind == COLVAL_BIND
