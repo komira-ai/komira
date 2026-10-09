@@ -6,6 +6,13 @@ what kci must add before gamma can run a service validation, and the
 questions left to the project owner. Section names and item numbers are
 referred to from that document.
 
+**Vocabulary.** This note and [gamma validation](gamma_validation.md)
+predate the staged pipeline's [glossary](staged_pipeline.md#glossary). Here
+"gamma" means today's stage that publishes to the conda channel `gamma` and
+installs from it, which the glossary calls **beta** (the beta channel and
+`beta_validate`); the glossary's gamma holds only real cloud resources.
+Open decision 4 below already uses the glossary's words.
+
 ## What kci must add to run service validations in gamma
 
 None of this exists. Each item is a change to `kci_api`,

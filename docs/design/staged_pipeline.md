@@ -1,18 +1,19 @@
 # The staged pipeline: build once, then beta, gamma and prod, each one run at a time
 
-Status: design, not built. **EXISTS** names code or a setting on `main`; everything else is PROPOSED.
-New names (all absent from `main`): the conda channel `beta` and its environments `beta` and
-`beta-breakglass`; the job `beta_validate`; the stage `gamma` in its new meaning (real cloud
-resources, no channel); the step kind `TEST`, its field `checks` and the steps `test` and
-`real-cloud`; the outcome `SUPERSEDED` (as a successful stop), the job output `superseded` and the
-step `superseded`; the `main_red` decision `stalled`; rules R23, R24 and R25; the validation kind
-`BUCK2_TARGET`, its fields `target`, `cloud`, `identity`, `region`, `timeout_seconds` and `attempts`,
-and the suite flag `--list-cases`; the directory `src/tests/real_cloud/`; the validations
-`real-cloud-<cloud>`; the named form `--release-set-hash <stage>=<hash>`; the slices G0 and M1 to M4.
-Related: continuous publish (`docs/design/continuous_publish.md`, #1168; a path, not a link, until
-both docs are on `main`, since the doc links lint refuses a dead link; P4 makes it a link),
-[ci.md](../ci.md), [release machines](release_machine.md), [gamma validation](gamma_validation.md),
-[the DEPLOY step](deploy_step.md).
+Status: design, not built. **EXISTS** names code or a setting on `main`; everything else is
+PROPOSED. New names (all absent from `main`): the conda channel `beta` and its environments `beta`
+and `beta-breakglass`; the job `beta_validate`; the stage `gamma` in its new meaning (real cloud
+resources, no channel); the stage and job `prod_deploy` and its environment `prod-deploy`; the step
+kind `TEST`, its field `checks` and the steps `test` and `real-cloud`; the outcome `SUPERSEDED` (as
+a successful stop), the job output `superseded` and the step `superseded`; the `main_red` decision
+`stalled`; rules R23, R24, R25 and R26; the validation kind `BUCK2_TARGET`, its fields `target`,
+`cloud`, `identity`, `region`, `timeout_seconds` and `attempts`, and the suite flag `--list-cases`;
+the directory `src/tests/real_cloud/`; the validations `real-cloud-<cloud>`; the named form
+`--release-set-hash <stage>=<hash>`; the slices G0 and M1 to M4. Related: continuous publish
+(`docs/design/continuous_publish.md`, #1168; a path, not a link, until that doc is on `main`, since
+the doc links lint refuses a dead link; P4 makes it a link), [ci.md](../ci.md), [release
+machines](release_machine.md), [gamma validation](gamma_validation.md), [the DEPLOY
+step](deploy_step.md).
 
 ## Glossary
 
@@ -21,12 +22,12 @@ implements them. Continuous publish links here; it does not define them again.
 
 | word | meaning |
 |---|---|
-| **stage** | One of the pipeline's three: **beta**, **gamma**, **prod**. The machine file (`release/machine.textproto`) also holds a stage `build`, the first part of beta: a machine-file stage has one environment and is farm-connected or not, and beta's build runs on the farm while its publish runs on a hosted runner with a publishing token (R11 keeps the two apart). |
+| **stage** | One of the pipeline's three: **beta**, **gamma**, **prod**. The machine file (`release/machine.textproto`) also holds a stage `build`, the first part of beta, and, once the DEPLOY step is built, a stage `prod_deploy`, the second part of prod: a machine-file stage has one environment and is farm-connected or not, and beta's build runs on the farm while its publish runs on a hosted runner with a publishing token (R11 keeps the two apart); prod's deploy and prod's publish never share a job (e2, "Prod deploy"). |
 | **beta** | The first stage. It **builds each commit once** (job `build`, on the farm), runs the per-package **fake, emulator and fixture tiers** on that build (the `TEST` step `test`, same job) and, once the engine port lands, the **e2e suite**; it **publishes** the packages to the beta channel (job `beta`), then **installs** them from that channel and runs every README example (job `beta_validate`). It holds no cloud credential and spends no cloud money. |
 | **beta channel** | The public conda channel `beta`. A test channel: consumers install from prod. Today the channel in this role is named **`gamma`**; M1 to M4 (section e3) move it to `beta`, each step with the project owner's go. |
 | **gamma** | The second stage: **only real resources, in the gamma cloud accounts**. kci deploys there (once the DEPLOY step is built, [deploy_step.md](deploy_step.md)) and runs the real-cloud kci tests as gamma's `BUCK2_TARGET` validations (e2). Gamma publishes nothing: **`gamma` names no conda channel**. |
 | **gamma accounts** | Cloud accounts used only by gamma. Their roles trust the `gamma` environment's OIDC subject, in GitHub's immutable form (e2), and nothing else trusts that subject. |
-| **prod** | The third stage: it promotes **the same bytes** (the same sha256 digests) to the prod channel, and deploys prod once the DEPLOY step is built. |
+| **prod** | The third stage: it promotes **the same bytes** (the same sha256 digests) to the prod channel (job `prod`), and, once the DEPLOY step is built, deploys prod from a **separate** job `prod_deploy` in the environment `prod-deploy`, so no job holds a publishing identity and a cloud trust together (e2, "Prod deploy"). |
 | **prod channel** | The public conda channel `prod`. |
 | **build once, same bytes** | Every job after `build` handles the files `build` wrote to the run's artifact `kci-release-<revision>`; nothing is rebuilt or re-downloaded from a channel to promote. |
 | **set hash** | kci's hash of the release directory; `build` outputs it as `set_hash`. Every later job recomputes it and refuses another one (`KCI-E-SET-HASH`, exit 3). |
@@ -46,7 +47,8 @@ implements them. Continuous publish links here; it does not define them again.
 | beta | `beta` (PUBLISH) | hosted | `beta` on a push; `beta-breakglass` on a manual run | OIDC, trusted by the beta channel's publisher only | writes `beta` |
 | beta | `beta_validate` (the installs) | hosted | none | none (`contents: read`) | reads `beta`, anonymously |
 | gamma | `gamma` (DEPLOY once built, then `real-cloud`) | hosted | `gamma`, push only | OIDC, trusted by the gamma accounts' roles only; the role and region as `gamma` secrets | reads `prod`'s listing, anonymously; writes none |
-| prod | `prod` (PUBLISH; DEPLOY once built) | hosted | `prod` | OIDC, trusted by the prod channel's publisher (and the prod deploy role, once built) | writes `prod` |
+| prod | `prod` (PUBLISH) | hosted | `prod` | OIDC, trusted by the prod channel's publisher only | writes `prod` |
+| prod | `prod_deploy` (machine stage `prod_deploy`: DEPLOY and its `DEPLOY_PROBE`s; once DEPLOY is built) | hosted | `prod-deploy`, push only | OIDC, trusted by the prod deploy role only; no channel trusts it | none |
 
 ## The ruling, and what changes
 
@@ -70,8 +72,10 @@ emulator and fixture tiers), and **gamma holds only real cloud resources**. Ever
 revision 3 put on gamma's channel moves to beta: the publish, the two installs, never-backward on a
 channel and break-glass. Gamma keeps single flight and the real-cloud validations, and gains the
 deploy. Because gamma no longer publishes, its job holds **no publishing identity**, which is what
-answers the credential-boundary review of revision 3 (e2). The rename of the channel itself is a
-migration with the project owner's go at each step (e3).
+answers the credential-boundary review of revision 3 (e2). Prod's deploy, once built, gets a job of
+its own for the same reason: prod's publish job holds the prod channel's identity, so no cloud
+trusts it. The rename of the channel itself is a migration with the project owner's go at each step
+(e3).
 
 **Today (EXISTS).** One run per push carries `build → gamma → validate → prod`
 (`.github/workflows/kci.yml`); `gamma` publishes to the conda channel `gamma` and `validate` installs
@@ -88,7 +92,8 @@ one release duration" arithmetic with the rollback time resting on it (restated 
 #1168's two gates keep their places under the new names: S10c's release checks run in `build`
 (the `TEST` step, e), before anything is published, and S12's installed-bytes checks in
 `beta_validate`, before gamma. #1168's slice S0 (lock today's `gamma` environment to `main`) is
-this doc's G0. #1168 holds no cloud credential; e2 adds the only one, in gamma. Merge order: #1173
+this doc's G0. #1168 holds no cloud credential; e2 adds the first, in gamma (prod's deploy
+credential, once built, sits in its own job, `prod_deploy`). Merge order: #1173
 merged first and #1168 is still open; they do not conflict, so #1168 can merge before or after this
 amendment. P4 rewrites ci.md's "Queued runs" and "Never backward", which today describe prod only.
 
@@ -124,11 +129,12 @@ GitHub's concurrency documentation: in a group at most one job runs; a newer arr
 guaranteed"; `queue: max` keeps up to 100 pending.
 
 **Exclusion (rule 2): one workflow, no workflow-level group, a job-level group on every release
-job** (`build`, `beta`, `beta_validate`, `gamma`, `prod`), `cancel-in-progress: false`, no `queue`
+job** (`build`, `beta`, `beta_validate`, `gamma`, `prod`, and `prod_deploy` once built),
+`cancel-in-progress: false`, no `queue`
 key (`queue: max` would run every commit). A push to `main`: `kci-<job id>-main`; a manual dry run:
 `kci-<job id>-plan-<run id>`; any other manual run: `kci-<job id>-ref-<ref name>`, except as question
-2 proposes for beta's publish. **Gamma and prod are one job each, so each is single-flight as a
-whole.** Beta is three jobs (question 1).
+2 proposes for beta's publish. **Gamma is one job, so it is single-flight as a whole.** Beta is
+three jobs (question 1); prod is one job until DEPLOY is built, then two (question 14).
 
 **The hazard R16 names, stated.** GitHub keeps the newest **arrival**, not the newest **commit**. An
 older arrival cancels a newer pending job, and nothing brings the newer one back. Three paths deliver
@@ -261,7 +267,8 @@ stage.break_glass` (`src/kci_cli/dispatch.mojo:418`), so today's publish before 
   `classify` calls green (one jobs read per candidate, within the existing 30); `decide_green` (:300)
   and the close path use the same `classify`, so a superseded run never closes an issue as "Fixed".
   `stalled` (b.4) is the fourth decision. The rename (M2) changes no name `main_red.py` reads: it
-  keys on `prod`.
+  keys on `prod`. When `prod_deploy` is wired, `classify` requires both `prod` and `prod_deploy`
+  green, in the same PR, with a planted run whose `prod` succeeded and `prod_deploy` failed (red).
 - **The record of a superseded commit** is the run that carries it: each publishing stage's summary
   lists the commits between the channel's previous build and this one ("carried").
 
@@ -342,9 +349,10 @@ credential; a red one fails gamma. Nothing outside this repository is asked or w
 step `real-cloud` is a `TEST` step with no `checks` (it only validates) holding one
 `real-cloud-<cloud>` validation per cloud; the DEPLOY step precedes it once it is built.
 
-**Prerequisites, first and each a go.** (1) **G0, lock `gamma` to `main`.** Today the `gamma`
-environment has **no** deployment-branch policy and no protection rule (read through the API again
-for this revision): any branch whose workflow names `environment: gamma` runs with gamma's subject.
+**Prerequisites, first and each a go.** (1) **G0, lock `gamma` to `main`** (and give
+`gamma-breakglass` a required reviewer, g). Today the `gamma` environment has **no**
+deployment-branch policy and no protection rule (read through the API again for this revision): any
+branch whose workflow names `environment: gamma` runs with gamma's subject.
 (2) **M3, the old channel stops trusting `gamma`.** Until the rename, the channel `gamma`'s trusted
 publisher accepts the `gamma` environment's subject; a cloud trust of the same subject would put a
 publishing identity and a cloud identity in one job. No cloud trust names `gamma` before both.
@@ -378,9 +386,9 @@ R9) runs, for each `BUCK2_TARGET` validation:
    `main` (event `push` **and** ref `refs/heads/main`); every `BUCK2_TARGET` validation of the stage
    is selected (below); each `identity` and `region` secret name resolves to a non-empty value; the
    job can request an ID token; each executable is present with `build`'s sha256; `<executable>
-   --list-cases` (run with the child environment of step 3 minus every credential, 60 s) prints at
-   least one case name, each once. Any one failing is `REFUSED`, exit 2, with zero token requests
-   and zero suite runs.
+   --list-cases` (run with the child environment of step 3 minus every credential) exits 0 within
+   60 s, its process group killed at 60 s, having printed at least one case name, each once. Any
+   one failing is `REFUSED`, exit 2, with zero token requests and zero suite runs.
 2. **Exchange.** kci requests the job's ID token with the cloud's audience (AWS STS's own audience
    for AWS), writes it to `<scratch>/<validation>/oidc/token`, mode 0600, and builds the child's
    environment **from nothing**: `PATH`, `HOME`, `TMPDIR`, `LANG`, and the provider-standard
@@ -407,15 +415,23 @@ R9) runs, for each `BUCK2_TARGET` validation:
 6. **Result.** kci hands on `validated_set_hash` only when **every** validation of the stage was
    selected and each VALIDATED and SUCCEEDED (below).
 
-**Every validation, or no hash (P7).** On `main` today, `keep_set_hash_only_if_validated`
-(`src/kci_cli/start_checks.mojo`) returns early when a run selects **no** validation, so such a run
-keeps its set hash: a gamma job whose `kci run` gained `--only` and lost the real-cloud validation
-would hand prod a valid hash with no suite run. Two changes close it in kci, not only in a workflow
-lint: (a) a push run of a stage that holds a `BUCK2_TARGET` validation and whose selection omits any
-of them is `REFUSED`, exit 2, before any effect; (b) a run of a stage that declares validations hands
-on a validated hash only when its selection holds **all** of them and each VALIDATED and SUCCEEDED,
-so a run selecting none hands on an empty one (prod refuses an empty hash, exit 2). R25 keeps its
-workflow clause as well.
+**Every validation, or no hash (P7), for every stage.** On `main` today,
+`keep_set_hash_only_if_validated` (`src/kci_cli/start_checks.mojo`) returns early when a run selects
+**no** validation, so such a run keeps its set hash, and otherwise compares the passes with the
+**selected** count, not the stage's: a gamma job whose `kci run` gained `--only` and lost the
+real-cloud validation, or a `beta_validate` run selecting only `install-komira-encoding`, would hand
+prod a valid hash. Two changes close it in kci, not only in a workflow lint, for every validation
+kind (`CONDA_INSTALL_ENV` in beta, `BUCK2_TARGET` in gamma, `DEPLOY_PROBE` once DEPLOY is built):
+(a) **selection, all or none:** a push run that selects any validation of its stage and omits
+another is `REFUSED`, exit 2, before any effect; a stage that holds a `BUCK2_TARGET` validation must
+select all of them, so gamma's run cannot select none either. A push run selecting none of a stage
+without `BUCK2_TARGET` is admitted, as beta's publish job (`--only step:publish`) is today. (b)
+**the hash:** any run, break-glass included, hands on a validated hash only when its selection holds
+**every** validation of the stage, counted over the stage and not the selection, and each VALIDATED
+and SUCCEEDED; a run selecting some or none hands on an empty one (prod refuses an empty hash, exit
+2). Beta's publish job therefore hands on an empty hash: nothing reads it (`kci.yml` reads `build`'s
+and `validate`'s), and row 19b guards that the publish still runs. R9 and R25 keep their workflow
+clauses as well.
 
 **The real trust boundary, stated.** A suite is a child process of kci in the `gamma` job, as the
 runner's user, the same user as kci. It can read kci's and the runner's environment
@@ -470,14 +486,44 @@ last validation: one candidate in gamma at a time, a newer commit pending, a sti
 replacing it, the running one never cancelled. Revision 3's two gamma slots (the publish job and the
 installs job) are gone: the installs are beta's.
 
-**Prod.** `prod` `needs: [beta_validate, gamma]`. kci on prod requires **exactly one**
-`--release-set-hash <stage>=<hash>` for each stage on prod's `after` chain that declares validations
-(today's machine: `beta` and `gamma`), refuses a missing stage, a repeated stage or an unknown one
-(exit 2), and refuses any value unequal to the recomputed set hash (`KCI-E-SET-HASH`, exit 3). R19
-pins the values: `beta=` is `needs.beta_validate.outputs.validated_set_hash` and `gamma=` is
+**Prod.** `prod` `needs: [beta_validate, gamma]`. kci on a stage whose `after` chain holds **two or
+more** stages that declare validations (after P9: `beta` and `gamma`) requires **exactly one**
+`--release-set-hash <stage>=<hash>` for each of them, refuses a missing stage, a repeated stage or an
+unknown one (exit 2), and refuses any value unequal to the recomputed set hash (`KCI-E-SET-HASH`, exit
+3). R19 pins the values: `beta=` is `needs.beta_validate.outputs.validated_set_hash` and `gamma=` is
 `needs.gamma.outputs.validated_set_hash`, each exactly once. In a good run the two values are equal
 (one set), so kci cannot tell one job's output passed twice from two; that is R19's to refuse, with a
 fixture. Nothing waits after that.
+
+**The transition to named hashes (P7, then P9).** Today's `kci.yml` passes prod one bare
+`--release-set-hash "$RELEASE_SET_HASH"` (parsed by `src/kci_cli/args.mojo`), and today's chain has
+exactly one stage that declares validations (the old `gamma`; `beta` after M2). P7 merges with
+`kci.yml` unchanged, so P7 keeps the bare form **while exactly one stage on the chain declares
+validations**, bound to that stage, accepts the named form as well, and refuses the bare form once
+two stages do (rows 31 and 32). P9, which adds the second such stage, carries `kci.yml`'s named
+`beta=` and `gamma=` and R19's clause in the same PR, under its go. **Prod's stages are pinned twice:**
+by the machine file's chain and by R19's literal `beta=` and `gamma=` clauses in
+`src/kci_workflow_check`. A machine-file PR that deletes the gamma stage leaves `kci.yml` passing
+`gamma=`, which kci refuses as an unknown stage (row 24), and R19 still demanding it; the PR is red
+until it also changes kci_workflow_check's code, a reviewed change to kci, never a silent drop.
+
+**Prod deploy: its own job (once DEPLOY is built).** Prod's publish and prod's deploy never share a
+job. `prod` (PUBLISH, environment `prod`) holds the subject that only the prod channel's publisher
+trusts. Prod's deploy runs in a separate machine-file stage and job, `prod_deploy`: its DEPLOY step
+and `DEPLOY_PROBE` validations, environment `prod-deploy` (deployment branches `main` only),
+`after: "prod"`, push only, no break-glass, `needs: [prod, beta_validate, gamma]` and the same `beta=` and
+`gamma=` as prod (R19), so it deploys only what prod published and both stages validated. Its
+subject is trusted by the prod deploy role only, in the immutable form and with the claim conditions
+gamma's trust uses. The reason is the one e2 applies to gamma: that job runs kci and the
+digest-pinned `DEPLOY_PROBE` images this revision built, and any process in a job can mint the job's
+ID token ("The real trust boundary, stated"), so a publishing identity beside them would let a
+faulty or hostile probe publish to prod. kci_release_machine refuses (row 29) a stage holding a
+DEPLOY step whose environment a channel's `push_identity` or `break_glass_push_identity` names, and
+a stage holding both a PUBLISH to a channel and a DEPLOY step (both accepted on `main` today:
+`graph.mojo` lets a stage hold steps of different kinds); R26 keeps `prod-deploy` out of every other
+job. Gamma's deploy and suites share one job (question 11): gamma holds no publishing identity, so
+that pairing crosses no boundary between a channel and a cloud. Prod becomes two jobs, like beta's
+three (question 14).
 
 **Fits a hosted job.** GitHub's documented limit: "Each job in a workflow can run for up to 6 hours of
 execution time" on a GitHub-hosted runner. The `gamma` job's worst case is a fixed 30 minutes
@@ -509,18 +555,28 @@ fake ID-token endpoint; no cloud).** Each names the mutant it catches.
 | 5 | exit 0, results list two of three declared cases, both `PASS` | FAILED | check listed cases, not the declared set |
 | 6 | exit 0, results add an undeclared case, or repeat one | FAILED | ignore extras and repeats |
 | 7 | `--list-cases` prints nothing | `REFUSED` exit 2, zero token requests, zero runs | accept a suite with no cases |
+| 7a | `--list-cases` prints one name twice | `REFUSED` exit 2, zero token requests, zero runs | accept repeated case names |
+| 7b | `--list-cases` prints names, then exits 1 | `REFUSED` exit 2, zero token requests, zero runs | ignore `--list-cases`' exit status |
+| 7c | `--list-cases` sleeps past 60 s | `REFUSED` exit 2 within 70 s, its process group gone, zero token requests | no `--list-cases` timeout |
 | 8 | the suite exits 77 | FAILED, not skipped | 77 treated as a skip |
 | 9 | the suite starts a child that holds a pipe to the test and sleeps; the parent sleeps past `timeout_seconds` | FAILED; the pipe reaches EOF within 10 s of the kill (every holder gone) | kill the parent only; no timeout |
 | 10 | first attempt red, second green | VALIDATED, exactly two runs, two token requests, two run ids | no re-run; the token reused |
 | 11 | both attempts red | FAILED, exactly two runs | unbounded re-runs |
 | 12 | every declared case `PASS`, exit 0 | VALIDATED, validated hash handed on | guard (green before and after) |
-| 13 | push run, `identity` secret unresolved or empty | `REFUSED` exit 2, zero token requests, zero runs | check after the exchange |
-| 14 | push run, `region` secret unresolved or empty, `identity` fine | `REFUSED` exit 2 | check `identity` only |
+| 13 | push run, `identity` secret unresolved | `REFUSED` exit 2, zero token requests, zero runs | check after the exchange |
+| 13a | push run, `identity` secret resolves to the empty string | `REFUSED` exit 2, zero token requests, zero runs | check presence only |
+| 14 | push run, `region` secret unresolved, `identity` fine | `REFUSED` exit 2 | check `identity` only |
+| 14a | push run, `region` secret resolves to the empty string, `identity` fine | `REFUSED` exit 2 | check presence only |
 | 15 | push run with no ID-token request variables | `REFUSED` exit 2 | check the secrets only |
 | 16 | a push of a ref other than `refs/heads/main` | `REFUSED` exit 2 | check the event only |
+| 16a | an event that is neither `push` nor a manual run (`schedule`) of `refs/heads/main` | `REFUSED` exit 2 (green on `main` today: a guard) | check the ref only |
 | 17 | the executable's sha256 differs from `build`'s | `REFUSED` before any run | skip the compare |
-| 18 | push run of gamma with `--only` selecting no `BUCK2_TARGET` validation (a fixture machine with two, selecting one) | `REFUSED` exit 2, zero runs | no selection check |
+| 18 | push run of gamma whose `--only` selects none of its `BUCK2_TARGET` validations | `REFUSED` exit 2, zero token requests, zero runs | no selection check |
+| 18a | push run of gamma on a fixture machine with two `BUCK2_TARGET` validations, selecting one | `REFUSED` exit 2, zero token requests, zero runs | at least one selected is enough |
+| 18b | push run of beta on a fixture machine with two `CONDA_INSTALL_ENV` validations, selecting one | `REFUSED` exit 2, zero installs | the selection check for `BUCK2_TARGET` only |
 | 19 | a run of a stage with validations that selects none | the validated hash empty | `keep_set_hash_only_if_validated`'s early return (red on `main` today) |
+| 19a | a break-glass run of beta on a fixture machine with two `CONDA_INSTALL_ENV` validations, selecting one, which VALIDATED and SUCCEEDED | the validated hash empty | compare against the selection, not the stage (red on `main` today) |
+| 19b | push run of beta's publish job, `--only step:publish`, no validation selected | the publish uploads and exits 0; the validated hash empty | refuse a run that selects no validation (a guard) |
 | 20 | the suite prints its environment | only the named variables; no request variable, no `GITHUB_TOKEN` | inherit the job's environment (accident guard, not containment) |
 | 21 | the suite prints the `identity` value and an account-shaped number | neither in the job log or summary; case names and verdicts are | copy the suite's output to the log |
 | 22 | the token file | mode 0600, the cloud's audience, requested after the start checks | mint at start; world-readable file |
@@ -530,8 +586,11 @@ fake ID-token endpoint; no cloud).** Each names the mutant it catches.
 | 26 | prod, `beta=` unequal, `gamma=` equal | `KCI-E-SET-HASH`, exit 3 | compare `gamma=` only |
 | 27 | a manual run of gamma, and `--only validation:real-cloud-aws` on one | refused, exit 2 | gamma treated as break-glass |
 | 28 | `--plan` | `WOULD_VALIDATE`, zero token requests, zero runs | run under `--plan` |
-| 29 | machine fixtures: `BUCK2_TARGET` on a `farm_connected` stage, on a stage without an environment, in a part job, on a PUBLISH step, `timeout_seconds` 3601, `attempts` 0 or 3, a `cloud` with no exchange, a gamma sum of 301 minutes, a `checks` pattern reaching `src/tests/real_cloud/`, a stage holding `BUCK2_TARGET` whose environment a channel's `push_identity` or `break_glass_push_identity` names | each refused | one refusal per mutant; the last is the trust-table refusal |
+| 29 | machine fixtures: `BUCK2_TARGET` on a `farm_connected` stage, on a stage without an environment, in a part job, on a PUBLISH step, `timeout_seconds` 3601, `attempts` 0 or 3, a `cloud` with no exchange, a gamma sum of 301 minutes, a `checks` pattern reaching `src/tests/real_cloud/`, a stage holding `BUCK2_TARGET` whose environment a channel's `push_identity` or `break_glass_push_identity` names, a stage holding a DEPLOY step whose environment either names, a stage holding a PUBLISH to a channel and a DEPLOY step | each refused (the last two red on `main` today) | one refusal per mutant; the last three are the trust-table refusals (`BUCK2_TARGET`, DEPLOY, the shared stage) |
 | 30 | lint fixture: a `mojo_test` under `src/tests/real_cloud/`, and a library with `test_srcs` there | each refused | the lint checks one form |
+| 31 | prod on a chain where exactly one stage declares validations (today's machine, and M2's), bare `--release-set-hash` equal to the set | publishes | refuse the bare form before P9 (main red on P7's merge) |
+| 32 | prod on a chain where two stages declare validations, bare `--release-set-hash` equal to the set | exit 2, zero uploads | accept the bare form on any chain |
+| 33 | R26 fixtures: a second workflow file whose job names `environment: gamma`; a `pull_request_target` job naming `beta`; a `workflow_run` job naming `prod`; a non-release job of `kci.yml` naming `prod-deploy` | each refused | R26 reads `kci.yml` only; R26 skips `pull_request_target` or `workflow_run` |
 
 ## e3. The channel rename: `gamma` to `beta` (a migration, each step a go)
 
@@ -543,27 +602,48 @@ secrets; `gamma-breakglass` and `beta` do not exist; the channels file names `ga
 publishers `environment:gamma` and `environment:gamma-breakglass`) and `prod`.
 
 - **M1, create (go).** On the channel host: a public channel `beta`, with trusted publishers for this
-  repository, `kci.yml` and the environments `beta` and `beta-breakglass`; which subject form the
-  host matches (name or immutable) is read and recorded here. On GitHub: the environment `beta`,
+  repository, `kci.yml` and the environments `beta` and `beta-breakglass`. Two reads are recorded
+  here: which subject form the host matches (name or immutable), and a read-back of each publisher
+  showing that it pins the repository, the workflow `kci.yml` **and** the environment. A publisher
+  that does not pin the environment is not accepted and M2 waits: otherwise a `gamma` token, or any
+  other job of `kci.yml`, could publish to `beta`. On GitHub: the environment `beta`,
   deployment branches `main` only, and `beta-breakglass`, a required reviewer with administrator
   bypass off; **neither holds a secret** (trusted publishing). Both are locked before anything trusts
   them. Proof: the drift check (G0) reads `beta` and passes; a canned answer with no policy is red.
 - **M2, switch (go: it changes the release).** One PR: `release/channels.textproto` names `beta`
-  (location, `push_identity` and `break_glass_push_identity` in the immutable form, environments
-  `beta` and `beta-breakglass`) and drops `gamma`; `release/machine.textproto`'s stage `gamma`
-  becomes `beta` (its `channel` field `beta`, `environment` `beta`, `break_glass_environment`
+  (location, `push_identity` and `break_glass_push_identity` **in the form M1 recorded**: the
+  immutable form if the host matches it, else the name form today's file uses; environments `beta`
+  and `beta-breakglass`) and drops `gamma`; `release/machine.textproto`'s stage `gamma` becomes
+  `beta` (its `channel` field `beta`, `environment` `beta`, `break_glass_environment`
   `beta-breakglass`), and prod's `after` becomes `beta` (the real-cloud gamma stage arrives in P9);
-  `kci.yml`'s jobs `gamma` and `validate` become `beta` and `beta_validate`, with their
-  environments; `test_repo_kci_yml` and the workflow-check fixtures follow; ci.md,
-  release_machine.md, gamma_validation.md and releases.md say `beta` for the channel. **The install
+  `release/validations/BUCK` maps `install-komira-encoding` and `install-set` to the stage `beta`
+  (kci_release_machine's welded test holds it to the machine file); `kci.yml`'s jobs `gamma` and
+  `validate` become `beta` and `beta_validate`, with their environments; `test_repo_kci_yml` and the
+  workflow-check fixtures follow. **Every other place on `main` that says `gamma` for the channel,
+  the stage or its jobs** (from `git grep -i gamma` on `main`, math functions excluded) says `beta`:
+  the docs ci.md, release_machine.md (the stage list and its validations), gamma_validation.md and
+  gamma_validation_decisions.md (their headers already point here); the comment headers of
+  `.github/workflows/kci.yml`, `release/channels.textproto` (lines 3 to 17),
+  `release/machine.textproto` (lines 19 to 77) and `release/artifacts.textproto` (the NEW NAMES
+  note); the comments of `.github/workflows/pr.yml` (its job list),
+  `src/kci_pkg_upload/prefix_dev_registry.mojo` (the `komira-ai/gamma` examples),
+  `src/kci_release_machine/parse.mojo` (its example machine),
+  `src/kci_workflow_check/auto_promotion.mojo` (the chain `build -> gamma -> validate -> prod`) and
+  `src/kci_workflow_check/rules.mojo` (its list of release jobs, one of them in a refusal message);
+  and the example in `src/kci_release_machine/README.md`. **Kept on purpose:** test fixtures under
+  `src/kci_*/tests/`, `src/kci_publish/release_fixture.mojo` and `src/kci_validate/README.md`, which
+  name an example channel or stage `gamma` on `example.invalid` (fixtures, not the channel);
+  `release/ci/tests/test_main_red.py`, whose job named `gamma` is a fixture for `main_red.py`, which
+  keys on `prod`; and `.github/ci/tests/coverage_ci_cases.sh`, where `gamma` is a placeholder
+  package name. `docs/releases.md` names no channel `gamma`; it gains M4's notice. **The install
   tests** (`CONDA_INSTALL_ENV`) install from their step's channel, so they follow the `channel`
-  field with no edit of their own; test fixtures that name a channel `gamma` are fixtures, not the
-  channel, and stay. A parser row: `push_identity_environment` reads `beta` from the immutable form
-  (`_environment_of` today is documented for the name form only). Red before: today's channels file
-  has no `beta`, so a fixture machine whose beta stage publishes to it is refused. After merge, the
-  first push publishes to `beta` and `prod`; the next build number continues (build numbers count
-  first-parent commits), so beta's empty listing passes never-backward; the old channel receives
-  nothing, which a read of its listing confirms.
+  field with no edit of their own. A parser row: `push_identity_environment` reads `beta` from the
+  form M1 recorded (`_environment_of` today is documented for the name form only, so the immutable
+  form needs the row). Red before: today's channels file has no `beta`, so a fixture machine whose
+  beta stage publishes to it is refused. After merge, the first push publishes to `beta` and `prod`;
+  the next build number continues (build numbers count first-parent commits), so beta's empty
+  listing passes never-backward; the old channel receives nothing, which a read of its listing
+  confirms.
 - **M3, retire the old publishers (go).** After M2's first green release, the channel `gamma`'s
   trusted publishers (`environment:gamma`, `environment:gamma-breakglass`) are removed on the host.
   **This must precede any cloud trust of `environment:gamma` (P9).** Proof: the host's publisher
@@ -572,11 +652,15 @@ publishers `environment:gamma` and `environment:gamma-breakglass`) and `prod`.
   also holds (every validated set was promoted) or one that failed its checks; no consumer needs
   one prod lacks. Nothing is copied into `beta`. The channel is kept read-only (no publisher, after
   M3) for a notice period, named in `docs/releases.md`, then deleted with a go; whether the host can
-  delete a channel is read first.
+  delete a channel is read first. The environment `gamma-breakglass` is deleted with it.
 
 **Environments and secrets after M4.** `beta` and `beta-breakglass`: no secrets. `gamma`: locked to
 `main` (G0), no secrets until P9 adds `KCI_GAMMA_AWS_ROLE` and `KCI_GAMMA_AWS_REGION`, trusted by no
-channel. `gamma-breakglass` is never created: gamma has no break-glass. `prod`: unchanged.
+channel. `gamma-breakglass`: created by G0 with a required reviewer (`kci.yml` names it on every
+manual run until M2, and GitHub would otherwise create it unprotected on first use); after M2 no
+workflow names it and after M3 nothing trusts it, so M4 deletes it with the old channel's go; the new
+gamma has no break-glass. `prod`: unchanged. `prod-deploy`: created with prod's deploy, locked to
+`main`, trusted by the prod deploy role only (e2, "Prod deploy").
 
 ## f. The machine file, the environments, the workflow rules
 
@@ -618,6 +702,9 @@ stage {
   }
 }
 # prod: unchanged except `after: "gamma"`.
+# Once the DEPLOY step is built (never as a step of `prod`):
+# stage { name: "prod_deploy"  environment: "prod-deploy"  after: "prod"   # no break_glass
+#   step { name: "deploy" kind: DEPLOY ... validation { kind: DEPLOY_PROBE ... } } }
 ```
 
 On a `farm_connected` stage a `TEST` step always runs S10c's derived set, and `checks` adds patterns
@@ -633,16 +720,25 @@ nothing), `checks` on a stage that is not `farm_connected`, `checks` on any othe
   `needs.<J>.outputs.superseded != 'true'` (J: the job R19 reads its hash from), J declares the
   output, and every release job has the step `superseded` with R23's exact `if:`.
 - **R24, new:** every release job's first `kci` invocation runs with the admission check (b.2).
-- **R19, amended:** `beta` and `beta_validate` read `needs.build.outputs.set_hash`; `gamma` reads
-  `needs.beta_validate.outputs.validated_set_hash`; prod passes `beta=` and `gamma=` (e2, "Prod"),
-  each from its own job's output, never the same output twice. **R20**'s last step carries the "main
-  is at" line on every job.
+- **R19, amended (in P9, with `kci.yml`'s named form; e2, "The transition"):** `beta` and
+  `beta_validate` read `needs.build.outputs.set_hash`; `gamma` reads
+  `needs.beta_validate.outputs.validated_set_hash`; prod (and `prod_deploy`, once built) passes
+  `beta=` and `gamma=` (e2, "Prod"), each from its own job's output, never the same output twice.
+  **R20**'s last step carries the "main is at" line on every job.
 - **R4, amended:** `id-token: write` also on a job whose stage holds a `BUCK2_TARGET` validation
-  with a `cloud`; no release job gains any other permission.
+  with a `cloud` (and on `prod_deploy`, once built); no release job gains any other permission.
 - **R25, new:** the `gamma` job's `timeout-minutes` is exactly 30 plus the machine file's sum of
   `attempts` × `timeout_seconds` over gamma's `BUCK2_TARGET` validations; its `kci run` carries no
   `--only`; its `if:` admits a push to `main` only; the `secrets` context appears in no release job
   but `gamma`, and there only as the names the machine file gives, on the step that runs `kci`.
+- **R26, new, over every file in `.github/workflows/`** (today's rules read `kci.yml` and `pr.yml`
+  only): an environment that the machine file or the channels file names (`build`, `beta`,
+  `beta-breakglass`, `gamma`, `prod`, `prod-deploy`, and `gamma-breakglass` until M2) may appear
+  only as the `environment:` of `kci.yml`'s release job for that stage; a job of a workflow
+  triggered by `workflow_run` or `pull_request_target` names none of them. G0 binds the `gamma`
+  subject to the branch `main`, not to a workflow, so without R26 any workflow file on `main` could
+  name `environment: gamma` and get the subject the gamma accounts trust; no workflow does today
+  (none uses `pull_request_target`, and `main_red.yml` names no environment). Fixtures: e2's row 33.
 - R9, R11 and R14 need no change: gamma is a FULL run, so R9's "every validation exactly once" holds
   with no exception.
 
@@ -652,7 +748,7 @@ Each slice: the check that is red before it. **Go** marks a project-owner action
 
 | # | slice | red before | go |
 |---|---|---|---|
-| G0 | **Lock `gamma` to `main`, first** (#1168's S0): `gamma`'s deployment branches set to `main`; the drift check in `build` that reads `gamma`, `beta` (once M1 exists) and `prod` and fails the release unless each policy is `main` only. The read is anonymous: this repository is public, and an unauthenticated `GET .../environments/<name>` and `.../deployment-branch-policies` answer with the policy and protection rules (read for this revision); a failed read fails the release | the drift check fails on today's settings; a canned answer with no policy is red; after the change it passes | **Go** (repository settings) |
+| G0 | **Lock `gamma` to `main`, first** (#1168's S0): `gamma`'s deployment branches set to `main`; **`gamma-breakglass` created now** with a required reviewer and administrator bypass off (`kci.yml` names it on every manual run, the channel `gamma` trusts its subject until M3, and GitHub creates a named environment that does not exist with no protection rule, so today the first manual run would publish to the channel `gamma` unreviewed; it cannot reach prod, whose installs check each file's sha256). The drift check in `build` reads every environment the channels file's push identities name, every environment of a stage holding a `BUCK2_TARGET` validation or a DEPLOY step, and `prod`, and fails the release unless each **exists** and a push environment's policy is `main` only and a break-glass environment has a required reviewer with bypass off; it also reads `build`, which must exist and hold no secret and is not locked to `main` (break-glass builds run on any ref; its subject reaches only the farm, whose trust P0 reads). The read is anonymous: this repository is public, and an unauthenticated `GET .../environments/<name>` and `.../deployment-branch-policies` answer with the policy and protection rules (read for this revision); a failed read fails the release | the drift check fails on today's settings; canned answers each red: `gamma` with no policy, `gamma-breakglass` absent, `gamma-breakglass` with no reviewer, `beta` with no policy (once M1 exists); after the change it passes | **Go** (repository settings) |
 | P0 | **Probe** on a `probe/*` branch: hosted jobs that only `sleep` and `echo`, `permissions: {}` (one job `actions: write` on its own run), no secret, farm, cloud or upload, plus a `probe-wait` environment with a required reviewer. Records (a) the run conclusion when a job is replaced in its group; (b) a job waiting on a reviewer holds only its group; (c) a job skipped by `if:` takes no group slot; (d) a re-run attempt joins the same group and downloads attempt 1's artifact; (e) whether `rerun-failed-jobs` re-runs cancelled jobs, does not re-run a succeeded one, and lets attempt 2 read attempt 1's `needs` outputs. Plus a read of the farm's trust policy: no `gamma` or `beta` subject in it | each fact written here with the run's URL, or P2 and P4 stop | **Go**: it starts workflow runs and creates an environment |
 | P1 | kci: `never_backward` per run; the main-line filter; the descendant read and `SUPERSEDED`; R24's admission; gamma's read of prod's listing; the "carried" list | c's table, rows 1, 3 to 9 and 11; rows 2 and 10 guard | none |
 | P2 | `main_red.py`: `classify` from jobs and the `superseded` step; `last_green` filtered; `stalled`, its re-run and its issue | d's tests (a) to (e) | the re-run needs question 6 |
@@ -664,11 +760,13 @@ Each slice: the check that is red before it. **Go** marks a project-owner action
 | P4 | The groups, one PR: job-level groups on every release job, the `superseded` steps, R23/R24 guards and the line on every job; R16, R23, R24; ci.md's "Queued runs" and "Never backward" for every stage; the paths to continuous publish become links | fixtures refused: a workflow-level group, a job without a group, `queue: max`, a job missing R23's conjunct or step, a job without R24; today's `kci.yml` fails the new R16 | **Go**: changes the release |
 | P5 | Retention of `kci-release-*` to the ruled value | none (a setting) | **Go** with question 3 |
 | P6 | #1168's S10c derived checks run in `build`'s `test`; S12's in `beta_validate` | as #1168 states them | as #1168 |
-| P7 | kci: `BUCK2_TARGET` and its machine-file refusals (row 29, the trust-table refusal included); the start checks; `--list-cases` and the exact case set; the exchange; the child environment; the flags; the timeout and process-group kill; the verdict; the output kept off the log; the one re-run; the every-validation rule and the hash fix; prod's named hashes and their R19 clause | e2's rows 1 to 11 and 13 to 30 (12 guards); row 19 is red on `main` today | none: no machine file uses the kind until P9 |
+| P7 | kci: `BUCK2_TARGET` and its machine-file refusals (row 29, the trust-table refusal included); the start checks; `--list-cases` and the exact case set; the exchange; the child environment; the flags; the timeout and process-group kill; the verdict; the output kept off the log; the one re-run; the every-validation rule for every stage and the hash fix; prod's named hashes, with the bare form kept while one stage on the chain declares validations; the DEPLOY trust-table refusals (row 29) | e2's rows 1 to 11 and 13 to 32 with their lettered rows (12, 16a, 19b and 31 guard); rows 19, 19a and row 29's two DEPLOY fixtures are red on `main` today | none: no machine file uses the kind until P9, and today's `kci.yml` keeps working (row 31) |
 | P8 | `build` builds every `BUCK2_TARGET` target and ships each executable and its sha256; the lint on `src/tests/real_cloud/`; the first AWS suite, with its README naming its owner, teardown and budget alert | e2's rows 17 and 30; the suite builds on the farm (`local: 0`) and `buck2 test` over its directory runs nothing | none: it runs no suite |
-| P9 | The wiring, one PR: the `gamma` stage of f; `kci.yml`'s `gamma` job (`--secret-store env`, the two secrets on its `kci` step, `timeout-minutes` per R25, push-only `if:`, `validated_set_hash` output); prod's `after` and `gamma=`; R4 and R25 | fixtures refused, each **correct except one clause**: a secret named in another job; a `timeout-minutes` other than R25's; a `kci run` with `--only` omitting `real-cloud-aws` (timeout and secrets correct, so only the selection clause can turn it red); prod without `gamma=`; prod passing `needs.beta_validate.outputs.validated_set_hash` as both `beta=` and `gamma=` | **Go**: the cloud trust for the immutable `environment:gamma` subject (question 9), only after G0 is green and M3 is done. The first push spends real money |
+| P9 | The wiring, one PR: the `gamma` stage of f; `kci.yml`'s `gamma` job (`--secret-store env`, the two secrets on its `kci` step, `timeout-minutes` per R25, push-only `if:`, `validated_set_hash` output); prod's `after`; `kci.yml`'s named `beta=` and `gamma=` and R19's clause (e2, "The transition"); R4, R25 and R26 | fixtures refused, each **correct except one clause**: a secret named in another job; a `timeout-minutes` other than R25's; a `kci run` with `--only` omitting `real-cloud-aws` (timeout and secrets correct, so only the selection clause can turn it red); prod without `gamma=`; prod passing `needs.beta_validate.outputs.validated_set_hash` as both `beta=` and `gamma=` | **Go**: the cloud trust for the immutable `environment:gamma` subject (question 9), only after G0 is green and M3 is done. The first push spends real money |
 
-**Order.** G0 first. M1 → M2 → M3 → M4. P1 to P3, P7 and P8 merge on their own and change nothing
+**Order.** G0 first. M1 → M2 → M3 → M4. `prod_deploy` (e2, "Prod deploy") lands with the DEPLOY
+step's own wiring ([deploy_step.md](deploy_step.md)), never as a step of `prod`; P7's row-29 refusal
+makes the shared form unwritable before then. P1 to P3, P7 and P8 merge on their own and change nothing
 that runs. P4 depends on P0 to P3 and on M2 (it names the renamed jobs). P9 depends on **G0 applied
 and green**, **M3 done**, P7 and P8, and on P4 only for gamma's job-level group: until P4, gamma holds
 the workflow-level `kci-release-main`, which is single-flight already.
@@ -679,8 +777,8 @@ the workflow-level `kci-release-main`, which is single-flight already.
    `beta_validate` (installs) are three slots: one job would put an install's third-party code next
    to the publishing token, or the farm's token next to a publishing one (R11), and jobs sharing one
    group would let a stage cancel its own pending newer run. So beta can build C while publishing B
-   and installing A. *Recommendation:* accept; each job is pinned to its own set's digests. Gamma and
-   prod are one job each and hold rule 2 literally.
+   and installing A. *Recommendation:* accept; each job is pinned to its own set's digests. Gamma is
+   one job and holds rule 2 literally; prod does until DEPLOY is built (question 14).
 2. **Break-glass runs and the push groups.** Manual runs keep per-ref groups, so a break-glass
    publish to beta could overlap main's: two writers to one channel. *Recommendation:* beta's
    **publish** job joins `kci-beta-main` in every non-dry run, one writer per channel; `build` stays
@@ -714,11 +812,25 @@ the workflow-level `kci-release-main`, which is single-flight already.
     test role, needs a second gamma job and so two candidates in gamma at once.
 12. **An override after a red.** None is built. The **only allowances** are kci's one in-job re-run
     of a suite (`attempts: 2`, #1168's flake policy) and a re-run of the `gamma` job, now safe
-    because gamma publishes nothing (R24 admits a re-run only for the tip). *Recommendation:* keep
-    exactly these two; a release past a red result is a revert or fix on `main`.
+    because gamma publishes nothing (R24 admits a re-run only for the tip). **Combined bound:** each
+    run of the `gamma` job runs a suite at most `attempts` (2) times (rows 10 and 11), so one
+    whole-job re-run makes at most **4 runs of each suite** for one release, and each further job
+    re-run adds 2. kci does not count job attempts (GitHub caps a run at 50 re-runs), so the bound
+    past one re-run is this recommendation and the run's attempt history, not a check.
+    *Recommendation:* keep exactly these two allowances, with at most one whole-job re-run per
+    release (a `stalled` repair counts as it); a release past a red result is a revert or fix on
+    `main`.
 13. **The old channel `gamma` (M4).** *Recommendation:* no copy into `beta`; keep `gamma` read-only
     for 30 days after M2 with a notice in `docs/releases.md`, then delete it; each of M1 to M4 is its
     own go.
+14. **Prod as two jobs, once DEPLOY is built (a departure from rule 2).** `prod` publishes and
+    `prod_deploy` deploys (e2, "Prod deploy"), each with its own environment, subject and group, so
+    prod can publish C while deploying B; whether a cell may go backward is the deploy step's
+    per-cell record ([deploy_step.md](deploy_step.md), its question Q12), as for gamma (c).
+    The alternative, one prod job holding both, puts the prod channel's publishing identity beside
+    the code DEPLOY runs, the pairing M3 removes from gamma. *Recommendation:* accept two jobs; the
+    machine file refuses the shared form (row 29), so choosing it later would be a reviewed change to
+    kci, not a setting.
 
 ## Future: gamma bake
 
