@@ -1,7 +1,13 @@
 # Continuous publish: every package built, published to gamma, tested there, promoted to prod
 
-Status: design, not built (revision 2). Everything marked **EXISTS** names the code that does it on
-`main`; everything marked **PROPOSED** has no code yet. It builds on
+Status: design, not built (revision 3). Everything marked **EXISTS** names the code that does it on
+`main`; everything marked **PROPOSED** has no code yet. **Every name this document introduces is
+PROPOSED and absent from `main`:** `komira_test_emulator`, `EmulatorEndpoint`,
+`LoopbackOnlyConnector`, the `release_checks` attribute, the `[conda_status]` sub-target,
+`release/unreleased.textproto`, `release_ledger_check`, `release/quarantine.textproto`,
+`release/yanked.textproto`, `KCI-E-YANKED`, `kci yank`, the BUILD step's `checks:` field, the probe
+rows `netns_loopback_only` and `ambient_identity`, the `tests/fixture_tier/` directories and the
+`src/tests/emulator/` tree. It builds on
 [gamma validation](gamma_validation.md) and its
 [decisions](gamma_validation_decisions.md), which say what checks each package family before prod,
 and on [ci.md](../ci.md), the authority for the workflows. Where this document and
@@ -147,7 +153,9 @@ Neither one changes what `prod` trusts: `prod` still publishes only `validate`'s
    library, the emulator and fixture tiers included. A new standalone test of a released library, or a
    newly declared library, joins the gate with no edit. This is decision item 6 of
    [gamma validation decisions](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)
-   restricted to the released set's reverse dependencies. It is sized before it gates: S10c's first
+   restricted to the released set's reverse dependencies. **That restriction is PROPOSED S10c work:**
+   `derive_checks.py` today groups targets by path and has no reverse-dependency filter; S10c adds one
+   through `buck2 cquery "rdeps(<standalone tests>, <declared libraries>)"`. It is sized before it gates: S10c's first
    task measures its wall time and farm cost on a release revision and writes both here. It gates only
    if the measured time plus the 95th-percentile `build` time fits under `build`'s 120 minutes with a
    margin; otherwise it goes back to the project owner with the numbers.
@@ -164,9 +172,10 @@ Neither one changes what `prod` trusts: `prod` still publishes only `validate`'s
 **Flakes.** One emulator that fails to start now blocks every release to prod, so the gate has a
 policy: a release check that fails is re-run once, alone; a second failure fails the release. A check
 that needed its re-run twice in any ten releases gets an issue with an owner. A check may be
-quarantined only by a PR that names the issue and owner in `release/quarantine.textproto`; the build
-rule below still requires every released cloud library to keep at least one check that is not
-quarantined, so quarantining a library's only check stops that library's release until it is fixed.
+quarantined only by a PR that names the issue and owner in `release/quarantine.textproto`
+(PROPOSED, S10c). S10c's reach check (below) still requires every released cloud library to keep at
+least one check that reaches it and is not quarantined, so quarantining a library's only check stops
+that library's release until it is fixed.
 
 A human enters only to pause, by adding a reviewer to `prod`, or for break-glass. Neither one is part
 of the normal path.
@@ -188,7 +197,16 @@ published build that is unsafe for anyone to keep solving to: a security defect,
   (a new `KCI-E-YANKED`, checked before any upload, in `gamma` and `prod`). Without that tombstone a
   manual re-run of the same commit would regenerate the same name and build number (both count
   first-parent commits), find the name absent from the channel, and upload the yanked bytes again:
-  "never overwrites" checks only what the channel holds.
+  "never overwrites" checks only what the channel holds. **kci reads the tombstone from `main`'s
+  head, never from the revision it releases:** it fetches `origin/main` and reads
+  `release/yanked.textproto` there (`git show origin/main:release/yanked.textproto`). A re-run of
+  an old commit checks out a tree whose own copy predates the yank, so reading the checked-out file
+  would let the yanked bytes through. A tombstone that cannot be fetched or parsed fails the
+  publish; there is no fail-open path. The existing lower-build-number refusal does not cover this:
+  a re-run of the same commit produces the same build number, not a lower one, and that refusal
+  exists only at `prod`. Planted defect (S11): a re-run of a commit older than the tombstone commit,
+  whose own tree does not name the file, is refused in `gamma` before any upload; a variant of kci
+  that reads the checked-out file uploads it and turns the test red.
 - **What a yank never does.** It never removes anything from a consumer's lockfile, and it never
   publishes anything.
 - **Why yank cannot be automatic.** It deletes from a public channel.
@@ -239,17 +257,31 @@ bytes, before #835 is decided and built. What can ship before it:
 **A cloud package cannot be declared without its check** (PROPOSED, S3a, before any cloud declare PR).
 This is a build rule, not an ordering hope:
 
-- `mojo_library` gains a `release_checks` attribute: the standalone test targets that exercise the
-  library in the emulator or fixture tier.
-- `_conda_facts` refuses the package of a library in a cloud family, with the reason "no emulator or
-  fixture check", when `release_checks` is empty or names only quarantined targets. A cloud family is
-  computed at analysis from `deps`, which is the full transitive closure: the library is, or depends
-  on, `komira_aws_core`, `komira_gcp_core` or `komira_azure_core`. Like the other refusals, it passes
-  to dependents, and asking for `[release]` fails.
-- S10c runs every `release_checks` target named by a declared library, in addition to the derived
-  set, so a check cannot be named and then not run.
-- The planted defect that proves it: a fixture library in a cloud family with `release_checks = []`
-  turns its `[release]` red; adding one emulator target turns it green.
+The rule has two halves, because Buck2 analysis can compute only one of them:
+
+- **At analysis (S3a).** `mojo_library` gains a `release_checks` attribute: a list of plain labels
+  (`attrs.label`, not a dependency: the test depends on the library, so a dependency edge back would
+  be a cycle). `_conda_facts` refuses the package of a library in a cloud family, with the reason "no
+  emulator or fixture check", when `release_checks` is empty. That is all analysis can see: it cannot
+  read `release/quarantine.textproto`, and a plain label is not resolved, so analysis checks neither
+  that the target exists nor what it tests. A cloud family is computed at analysis from `deps`, which
+  is the full transitive closure: the library is, or depends on, `komira_aws_core`, `komira_gcp_core`
+  or `komira_azure_core`. Like the other refusals, it passes to dependents, and asking for
+  `[release]` fails. Planted defect: a cloud-family fixture library with `release_checks = []` turns
+  its `[release]` red; naming one target turns it green.
+- **At release time and in the pull-request check (S10c, the reach check).** Before it runs the
+  checks, S10c runs, for each declared cloud library, `buck2 cquery "rdeps(set(<its
+  release_checks>), <library>)"` and requires at least one named target that (a) exists, (b) is a
+  standalone test, (c) has the library in its dependency closure, and (d) is not in
+  `release/quarantine.textproto`. A failure fails `build`, so nothing reaches `gamma`. The same query
+  runs in the pull-request check of a PR that changes `release/` or a `release_checks` attribute.
+  Planted defects, each red: a `release_checks` naming a test of an unrelated library (fails c), a
+  label with no target (fails a), and a library whose only named check is quarantined (fails d).
+- S10c also runs every `release_checks` target named by a declared library, in addition to the
+  derived set, so a check cannot be named and then not run.
+- **Residual risk, stated:** a test target that depends on the library and asserts nothing passes
+  both halves. The reach check proves the test can reach the library, not that it exercises it;
+  review of the test is the guard.
 
 S3's cloud declare PRs therefore **depend on** S3a and S10c and on that family's suite (S5 to S8):
 without them the declare PR's `[release]` fails in its own pull-request check.
@@ -316,18 +348,42 @@ uid 0 with outbound network next to shared storage, and such an action can write
 
 **PROPOSED: one harness library, `src/tests/helpers/komira_test_emulator`.** It reuses
 `komira_test_minio`'s process code (`process.mojo`, `server.mojo`). Every emulator test does the same
-six things:
+six things.
 
-1. **Isolate.** The test re-executes itself inside a fresh user, network and PID namespace
-   (`unshare --user --map-root-user --net --pid --fork`, or the same through a C shim), brings up
-   `lo`, and runs the self-checks of [safety rule 3](#the-safety-rules). If the namespace cannot be
-   created, the test FAILS naming the capability; it never falls back to the host network. Inside the
-   namespace each test has its own loopback, so two tests on one worker cannot meet on a port.
-2. **Start.** The harness runs the pinned emulator as the namespace's only workload, under
-   `setpriv --pdeathsig KILL`, and, where the test runs as uid 0, `setpriv --reuid 65534 --regid
-   65534 --clear-groups` (the probe's `uid` row shows the drop works). `nobody` cannot write
-   `TEST_TMPDIR`, so the harness creates the emulator's state directory under it and hands it to
-   that uid first. The emulator binds `127.0.0.1` on a port taken from the descriptor (in a private
+**The processes, named.** *P0* is the process the test runner starts and kills: the outermost one,
+in the worker's namespaces. *P1* is the test body, re-executed by P0 inside fresh namespaces: it is
+**PID 1** of its PID namespace. *E* is the emulator, a child of P1; *G* is anything E starts (a JVM
+behind a wrapper script, a server's workers).
+
+1. **Isolate.** P0 starts P1 with `clone(CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWPID |
+   CLONE_NEWNS)` through a C shim (the util-linux form is `unshare --user --net --pid --mount
+   --mount-proc --fork --kill-child`, but its `--map-root-user` maps only uid 0, which step 2 cannot
+   use). In order:
+   - P1 sets `PR_SET_PDEATHSIG(SIGKILL)`, then blocks on a pipe from P0. EOF on that pipe means P0
+     died before the death signal was armed, and P1 exits. P0 creates P1 from the thread that then
+     waits for it, because the death signal fires when the parent *thread* exits.
+   - P0, still in the worker's user namespace, writes P1's maps itself: `uid_map` `0 0 1` and
+     `65534 65534 1`, `gid_map` the same, so inner uid 65534 is outer 65534. Writing a second line
+     needs `CAP_SETUID` in the parent namespace, which a uid-0 P0 has. Where P0 is not uid 0 (a
+     developer's machine), the map is the single line `0 <caller uid> 1`, the only map an
+     unprivileged writer may set; step 2's drop is skipped, and E runs as the developer's own
+     unprivileged uid outside. P0 then writes the go byte.
+   - P1 makes its mounts private, mounts a fresh `/proc` (so `/proc` lists only the namespace's
+     processes, by namespace pid), brings up `lo`, and runs the self-checks of
+     [safety rule 3](#the-safety-rules).
+   If a namespace, a map or the mount cannot be made, the test FAILS naming the capability; it never
+   falls back to the host network. Inside the namespace each test has its own loopback, so two tests
+   on one worker cannot meet on a port.
+2. **Start.** P1 runs the pinned emulator E as the namespace's only workload. Where P0 is uid 0, E
+   is started with `setpriv --reuid 65534 --regid 65534 --clear-groups`, inside the namespace, where
+   step 1's map makes 65534 a mapped uid. The probe's `uid` row proved this drop only in the
+   worker's own user namespace ([ci.md](../ci.md#what-a-farm-test-action-can-do)), so it does not carry over;
+   the `netns_loopback_only` row repeats it inside the namespace. **If the drop fails, the test
+   FAILS;** E never runs as uid 0, which step 1's map makes the worker's real uid 0. A self-check
+   reads E's `/proc/<pid>/status` from P1 and requires `Uid: 65534` in every field before the
+   readiness poll. Planted defect: a harness that skips the drop starts E as inner uid 0, and the
+   check turns the test red. `nobody` cannot write `TEST_TMPDIR`, so P1 creates the emulator's state
+   directory under it and hands it to uid 65534 first. The emulator binds `127.0.0.1` on a port taken from the descriptor (in a private
    namespace no other process holds it). Its command line comes from a per-emulator descriptor: the
    runtime, the entry point, the arguments, the readiness probe and the start-up budget.
 3. **Ready.** The harness polls the readiness route until a budget runs out, and requires the
@@ -339,13 +395,19 @@ six things:
    `StaticCredsSource` with a fixed dummy key pair. For GCP it is `StaticTokenSource` with the
    emulator bearer. For Azure it is Azurite's published development key.
 5. **Run.** The test runs the package's round-trip table.
-6. **Stop.** The harness sends SIGTERM to the emulator's process group, waits, sends SIGKILL, and
-   reaps. It is a child subreaper (`PR_SET_CHILD_SUBREAPER`), so grandchildren (a JVM launched by a
-   wrapper script, a server's worker processes) are re-parented to it and reaped too. Before the test
-   ends it asserts that it has no descendant left (`waitpid` answers `ECHILD`). If the test itself is
-   killed, the PID namespace's init dies and the kernel kills every process in it;
-   `PR_SET_PDEATHSIG` alone would reach only the direct child, and fires when the parent *thread*
-   exits.
+6. **Stop.** P1 sends SIGTERM to E's process group and waits up to the descriptor's stop budget.
+   Then, having checked `getpid() == 1` again (also a self-check of safety rule 3), it sends `kill(-1, SIGKILL)`, which
+   inside a PID namespace reaches every process in that namespace except P1, including a G that
+   left E's process group with `setsid`. It reaps until `waitpid` answers `ECHILD`: as PID 1, P1 is
+   the parent every orphan in the namespace is re-parented to, so no subreaper flag is needed
+   (revision 2's `PR_SET_CHILD_SUBREAPER` is dropped as a second way to do what PID 1 already does).
+   **The assertion is a scan, not `ECHILD`:** before the test ends, P1 lists the fresh `/proc` and
+   requires that the only process in it is pid 1. `ECHILD` alone cannot see a process that was
+   re-parented away from the caller.
+   **If P0 is killed,** three links fire in order, and each is necessary: P1's death signal kills
+   P1; P1 is PID 1, so the kernel kills every process in its namespace; the namespace holds E and
+   every G. `PR_SET_PDEATHSIG` alone reaches only P1, and the PID namespace alone does nothing if P1
+   outlives P0.
 
 **Emulators as build inputs, pinned by sha256.** No test downloads anything. Each runtime and each
 emulator is an action input:
@@ -423,9 +485,12 @@ in the style of the generated `_no_env_reads` scan): a tier test may not name
 `build_public_ca_tls_connector`, `build_unpinned_public_ca_tls_connector`, `default_tls_factory`,
 `kernel_tls_scheme_connector`, `KernelSchemeConnector`, `KernelTcpConnector.new` outside the harness,
 `ProcessCredsSource`, `process_creds_source`, `ProcessEnv`, `ProcessFiles`, `firestore_cloud_client`,
-`firestore_adc_token_source`, `FirestoreWatchSource`, `build_gcs_tls_connector`, or any ADC or
-managed-identity source. Its planted defect: a tier test that calls `process_creds_source` turns it
-red. The lint covers what a tier test names, not what a library does inside; the namespace of safety
+`firestore_adc_token_source`, `FirestoreWatchSource`, `build_firestore_tls_connector`
+(`firestore_endpoint.mojo`: a public-CA or skip-verify factory), `build_gcs_tls_connector`, or any ADC
+or managed-identity source. **The match is on the whole identifier**, not a substring, so
+`build_gcs_tls_connector` does not refuse `build_gcs_tls_connector_trusting`, which S7b may use. Its
+planted defects: a tier test that calls `process_creds_source` turns it red; a tier test that calls
+`build_gcs_tls_connector_trusting` stays green (a substring matcher would turn it red). The lint covers what a tier test names, not what a library does inside; the namespace of safety
 rule 3 covers that.
 
 ### Which emulator covers which package
@@ -478,7 +543,7 @@ not reach, could show it.
 
 **How the fixtures are kept honest** (PROPOSED, slice S9; each rule is a lint that turns the build red):
 
-- **Provenance.** Every file under a package's `tests/recorded/` has a sidecar `.provenance` line:
+- **Provenance.** Every file under a package's `tests/fixture_tier/` has a sidecar `.provenance` line:
   `model <path> sha256 <hex>`; `doc "<title>" "<section>" excerpt <file> sha256 <hex>`, where the
   excerpt file holds the copied text, so a later edit of either shows in review; or
   `emulator <name> <version> sha256 <hex of the pinned artifact>`. A fixture without one is refused.
@@ -490,7 +555,7 @@ not reach, could show it.
 - **No secrets.** The lint refuses an `Authorization` header, a JWT-shaped value, or a key-shaped
   value other than the documented example keys.
 - **No dead fixtures.** Every fixture must be read by at least one test.
-- **Scope.** The tier's claim counts only fixtures under `tests/recorded/`. Response bytes written
+- **Scope.** The tier's claim counts only fixtures under `tests/fixture_tier/`. Response bytes written
   inline in existing unit tests are unit tests, not part of this tier's claim, and the lint does not
   cover them.
 
@@ -523,25 +588,54 @@ not reach, could show it.
      dial from the test, from a library's own connector, or from the emulator can leave it, whatever
      connector built it. A test that cannot create the namespace FAILS; there is no host-network
      fallback. The farm capability probe gets a required `netns_loopback_only` row (S4): create the
-     namespace without privilege flags beyond a user namespace, bring up `lo`, and show that a connect
-     to a non-loopback address fails with "network unreachable". If the workers refuse it, S4 stops
+     namespaces of harness step 1 with the two-line uid and gid maps, mount the fresh `/proc`, bring
+     up `lo`, run the network self-checks below, and drop a child to uid 65534 *inside* the namespace
+     (the existing `uid` row proves the drop only outside it). If the workers refuse it, S4 stops
      there and the choice goes to the project owner (question 10); the tier does not gate a release
      without it.
-   - **The self-checks**, at the start of every test, inside the namespace, before the emulator
-     starts. Each failure fails the test, naming the check:
-     - a connect to a non-loopback address fails (a TEST-NET address of RFC 5737, never a host
-       anyone runs);
-     - a connect to the link-local metadata address (`IMDS_IPV4_HOST` in
-       `komira_aws_core/imds_credentials.mojo`, `METADATA_IP` in `komira_gcp_core/token_wire.mojo`,
-       the Azure IMDS address in `komira_azure_core`) fails, and so does the AWS
-       container-credentials address;
-     - `HOME` is a fresh empty directory under `TEST_TMPDIR`, set by the harness for the test and the
-       emulator, so no `~/.aws/credentials`, `~/.aws/config` or gcloud
-       `application_default_credentials.json` can be found;
-     - no credential variable is set: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
-       `AWS_SESSION_TOKEN`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_*`,
-       `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG`, `GCE_METADATA_HOST`, `AZURE_*`,
-       `IDENTITY_ENDPOINT`, `MSI_ENDPOINT`.
+   - **The self-checks**, run by P1 at the start of every test, before the emulator starts (the
+     environment check on E runs right after E starts, before the readiness poll). Each failure
+     fails the test, naming the check. Each one is listed with the defect it exists to catch, the
+     planted form of that defect in S4, and why the check sees it. A check that also passes on the
+     worker's own network is not a check of the namespace, so none of the network checks is "a
+     connect fails": on the worker's network a connect to an unused address also fails, by timeout
+     or `EHOSTUNREACH`, and on a worker that is not a cloud VM so does a connect to the metadata
+     address.
+     - **A different network namespace.** P0 passes P1 the inode of its own `/proc/self/ns/net`; P1
+       requires its own to differ. *Catches:* the clone without `CLONE_NEWNET`, or a re-exec that
+       never entered the namespace. *Planted:* the shim with `CLONE_NEWNET` removed; the inodes are
+       equal, and the check is red.
+     - **Only `lo`, and up.** `if_nameindex()` lists exactly one interface, `lo`, and its flags
+       include `IFF_UP`. *Catches:* a namespace that is not loopback-only (an interface moved or
+       created in it), and the same missing `CLONE_NEWNET` (a farm worker has outbound network, so
+       it has a second interface). *Planted:* the harness creates a dummy interface in the namespace
+       with an address and a default route; the list has two entries. A second planted defect, `lo`
+       left down, fails the flag check.
+     - **No route, by error code.** A non-blocking connect to a TEST-NET address of RFC 5737 and to
+       each link-local metadata address (`IMDS_IPV4_HOST` in `komira_aws_core/imds_credentials.mojo`,
+       `METADATA_IP` in `komira_gcp_core/token_wire.mojo`, the Azure IMDS address in
+       `komira_azure_core`, the AWS container-credentials address) must fail at once with
+       `ENETUNREACH`. Any other result fails the check: success, `EINPROGRESS` followed by a timeout,
+       `EHOSTUNREACH` or `ECONNREFUSED`. *Catches:* any route out of the namespace. *Planted:* the
+       dummy-interface defect above; with a default route the connect is `EINPROGRESS`, not
+       `ENETUNREACH`, and the check is red even if the interface check were removed.
+     - **PID 1.** `getpid() == 1`. *Catches:* the clone without `CLONE_NEWPID`, which would also
+       make step 6's `kill(-1, SIGKILL)` reach every process the action's uid may signal on the
+       worker; step 6 runs the kill only after this check. *Planted:* the shim with `CLONE_NEWPID`
+       removed; `getpid()` is the worker's pid, and the check is red before any emulator starts.
+     - **A fresh, empty `HOME`.** `HOME` names a directory under `TEST_TMPDIR`, created by the
+       harness and empty, so no `~/.aws/credentials`, `~/.aws/config` or gcloud
+       `application_default_credentials.json` can be found. *Catches:* the action's `HOME` passed
+       through. *Planted:* the harness forwards the action's `HOME`; it is not under `TEST_TMPDIR`.
+     - **No credential variable,** in P1's environment and in E's (`/proc/<E>/environ`):
+       `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
+       `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_*`, `GOOGLE_APPLICATION_CREDENTIALS`,
+       `CLOUDSDK_CONFIG`, `GCE_METADATA_HOST`, `AZURE_*`, `IDENTITY_ENDPOINT`, `MSI_ENDPOINT`.
+       *Catches:* an environment inherited instead of built from the harness's allowlist.
+       *Planted:* the test target sets `AWS_ACCESS_KEY_ID` to a dummy value and the harness passes
+       the environment through; the check names the variable.
+     - **E is not root.** Harness step 2: `Uid: 65534` in every field of `/proc/<E>/status`, where P0
+       is uid 0. *Planted:* the drop skipped.
    - **The worker assumption, stated.** Farm actions run as uid 0 with outbound network
      ([ci.md](../ci.md#what-a-farm-test-action-can-do), rows `uid` and `egress`). Whether a worker is a
      cloud VM with an attached identity is **not verified here**. The design does not depend on the
@@ -559,8 +653,9 @@ not reach, could show it.
      which any cloud rejects, and a rejected unauthenticated request is not billed.
 4. **No upload and no cluster write from the tier.** Emulators are build inputs. The tier publishes
    nothing; only the `gamma` and `prod` jobs publish, as they do today.
-5. **Third-party code runs unprivileged.** Every emulator and its runtime run as `nobody` (harness
-   step 2), inside the namespace, with a state directory as the only place they may write. The pins
+5. **Third-party code runs unprivileged.** Where the action runs as uid 0, as every farm action
+   does, every emulator and its runtime run as `nobody` (harness step 2; a failed drop fails the
+   test), inside the namespace, with a state directory as the only place they may write. The pins
    are sha256 only; a pin bump is a reviewed PR that names the upstream release. This narrows, and
    does not remove, the farm's exposure described in
    [What farm access means](../ci.md#what-farm-access-means): the test process itself still runs as
@@ -575,12 +670,12 @@ explicit go. Everything else is code that publishes nothing on its own.
 
 | # | slice | proof | go |
 |---|---|---|---|
-| S0 | **Lock gamma.** `gamma`'s deployment branches set to `main`. `gamma-breakglass` created with a required reviewer, and administrator bypass unchecked. The gamma channel's second trusted publisher confirmed. These are settings. Plus a drift check: the release's `build` step, which runs from `main`, reads `gamma`'s environment through the API and fails the release if its branch policy is not `main` only. | Before: the drift check fails on today's settings. After the settings change: it passes. Planted: the check run against a recorded environment answer with no policy turns red. Whether the job's token may read environments is S0's first check; if it may not, the drift check is a documented manual read and S0 says so. A drift check detects; it does not lock: only the settings lock. | **Go** (repository settings) |
+| S0 | **Lock gamma.** `gamma`'s deployment branches set to `main`. `gamma-breakglass` created with a required reviewer, and administrator bypass unchecked. The gamma channel's second trusted publisher confirmed. These are settings. Plus a drift check: the release's `build` step, which runs from `main`, reads `gamma`'s environment through the API and fails the release if its branch policy is not `main` only. | Before: the drift check fails on today's settings. After the settings change: it passes. Planted: the check run against a canned environment answer with no policy turns red. Whether the job's token may read environments is S0's first check; if it may not, the drift check is a documented manual read and S0 says so. A drift check detects; it does not lock: only the settings lock. | **Go** (repository settings) |
 | S1 | **The release ledger** (`release/unreleased.textproto`, a `[conda_status]` sub-target, `release_ledger_check` in `release/BUCK`). Fix `docs/releases.md`'s "Held" list. | A planted library that is in neither file turns the check red. A ledger `NATIVE` row on a library that is not native turns it red. | none |
 | S2 | **Declare the 21 non-native libraries:** #1136, #1138, then three declare PRs. | Before merge: the PR's ledger check is red until the library leaves `PENDING_DECLARE`, and its `[release]` builds in the pull-request check. **Residual risk:** `install-set` runs only after merge, so the new name reaches `gamma` before any installed check; a failure stops `prod`, and `gamma` keeps the bad name. | **Go per PR:** a merged declare PR publishes permanent names to `gamma` and then `prod` |
-| S3a | **The cloud-check refusal:** the `release_checks` attribute and the `_conda_facts` refusal; `NO_CLOUD_CHECK` in the ledger. | Planted: a cloud-family fixture library with `release_checks = []` turns `[release]` red; one emulator target turns it green. | none |
+| S3a | **The cloud-check refusal, analysis half:** the `release_checks` label attribute and the `_conda_facts` refusal of an empty list; `NO_CLOUD_CHECK` in the ledger. | Planted: a cloud-family fixture library with `release_checks = []` turns `[release]` red; naming one target turns it green. **Residual risk until S10c:** the named target is not checked to exist, to reach the library or to be unquarantined; no cloud declare PR merges before S10c. | none |
 | S3 | **Native packaging,** #835 and its stack. Then declare the `NATIVE` and `DLOPEN` rows in ledger-sized PRs; each cloud declare PR depends on S3a, S10c and its family's suite. | As S2 (ledger check and `[release]` before merge; `install-set` after). For a cloud library, `[release]` is red without a check (S3a). The installed `.so` check is S12. | **Go:** the #835 decision, then per declare PR as in S2 |
-| S4 | **`komira_test_emulator`:** the namespace and its self-checks, process start under a subreaper and `nobody`, readiness, stop, `LoopbackOnlyConnector`, the tier lint; probe rows `netns_loopback_only` (required) and `ambient_identity` (reported). | Mutants, each turning a named test red. **Range:** the refusal test uses a counting inner connector and asserts zero inner connects for a TEST-NET address; rows for the byte-swapped form of `127.0.0.1` (refused), the addresses just below and just above `127.0.0.0/8` (refused) and its last address (accepted) kill a byte-order mutant and the edge mutants. **Killed harness:** a test starts a harness process that starts a fake emulator with a grandchild, SIGKILLs that harness process (as the probe's `pdeathsig` row does), and asserts both are gone; the PID namespace and pdeathsig each suffice, so the mutant that drops both turns it red (dropping one alone is masked by the other, by design). **Subreaper:** on the normal stop path, dropping `PR_SET_CHILD_SUBREAPER` leaves the grandchild alive and the no-descendant assertion turns red. **Readiness:** against a fake emulator that never answers, "not ready treated as ready" and "budget ignored" each turn the readiness test red (it expects a failure naming the emulator within the budget); against one that answers once and exits, dropping the alive-after-answer check turns it red. **No skip:** a descriptor pointing at a missing file turns the test red. **Namespace:** a self-check reading a non-loopback connect as success turns red. **Lint:** a tier test calling `process_creds_source` turns red. | none |
+| S4 | **`komira_test_emulator`:** the namespace and its self-checks, process start as PID 1 with the two-line uid map and the drop to `nobody`, readiness, stop, `LoopbackOnlyConnector`, the tier lint; probe rows `netns_loopback_only` (required) and `ambient_identity` (reported). | Mutants, each turning a named test red. **Range:** the refusal test uses a counting inner connector and asserts zero inner connects for a TEST-NET address; rows for the byte-swapped form of `127.0.0.1` (refused), the addresses just below and just above `127.0.0.0/8` (refused) and its last address (accepted) kill a byte-order mutant and the edge mutants. **Killed harness:** an outer test creates a pipe, starts a harness process P0 whose fake emulator starts a grandchild that calls `setsid`; P0, P1, E and G all inherit the pipe's write end, and the outer test closes its own. The test SIGKILLs P0, the outermost process (as the probe's `pdeathsig` row does), and requires EOF on the pipe within 10 s: EOF arrives only when every holder of the write end is gone, in any namespace, so the oracle does not depend on the mechanism it checks. Two mutants, each red on its own: dropping P1's death signal (`PR_SET_PDEATHSIG`; util-linux's `--kill-child`) leaves P1 alive, so no EOF; dropping `CLONE_NEWPID` with the death signal kept kills P1 but leaves G, which is not P1's child, so no EOF (that mutant is also caught earlier by the PID 1 self-check, so the test runs it with that check disabled and step 6's own `getpid() == 1` guard kept). Neither link masks the other. **Normal stop:** a fake emulator whose G calls `setsid` and writes its namespace pid to the state directory; after stop, `kill(G, 0)` answers `ESRCH` and the fresh `/proc` holds only pid 1. The mutant that stops by signalling E's process group only (no `kill(-1, SIGKILL)` sweep) leaves G alive, and both assertions turn red. **Readiness:** against a fake emulator that never answers, "not ready treated as ready" and "budget ignored" each turn the readiness test red (it expects a failure naming the emulator within the budget); against one that answers once and exits, dropping the alive-after-answer check turns it red. **No skip:** a descriptor pointing at a missing file turns the test red. **Namespace and self-checks:** each self-check of safety rule 3 with its own planted defect, as listed there: `CLONE_NEWNET` removed (red on the namespace inode and the interface list), a dummy interface with a default route (red on the interface list and on `ENETUNREACH`), `lo` left down, `CLONE_NEWPID` removed (red on PID 1), the action's `HOME` forwarded, a credential variable forwarded, the drop to `nobody` skipped. **Lint:** a tier test calling `process_creds_source` turns red; one calling `build_gcs_tls_connector_trusting` stays green (whole-identifier match). | none |
 | S5 | **moto, pinned wheels,** with the first AWS suite: STS through the chain, s3, sqs, secretsmanager, `komira_objectstore_s3` | A planted serialization bug (a required parameter dropped from `ReceiveMessage`) turns the round trip red. The corrupted-signature mutant with moto's authentication on decides whether the tier claims SigV4. | **Go (one-time ruling):** moto over LocalStack, and third-party emulator packages as build inputs (decisions 3 and 5) |
 | S6 | **The remaining AWS packages:** round-trip tables for the other client-mode services, the pure-mode shim, and the `komira_aws_metrics` probe | a planted bug per package (for example, a pagination token not echoed in `ListObjectsV2` or `Scan`) | none |
 | S7 | **GCP:** the Firestore emulator (pinned JRE and jar) for the document client and firestore_db; storage-testbench's gRPC plaintext checked, then `komira_gcp_storage`'s unary methods | a planted precondition bug (an ignored `currentDocument.exists`) turns the Firestore suite red; a planted generation-match bug (an ignored `if_generation_match` on DeleteObject) turns the storage suite red | **Go:** the Firestore emulator's redistribution terms checked and accepted |
@@ -589,8 +684,8 @@ explicit go. Everything else is code that publishes nothing on its own.
 | S9 | **Fixtures:** the provenance, schema, secret, dead-fixture and generator-independence lints; fixtures for the packages that have no emulator | a planted fixture without provenance; a planted unknown field; a planted bearer token; a fixture generator that imports `tools/build/cloud`. Each turns the lint red. | none |
 | S10a | **kci built once per revision** (#1153) | a release whose kci is unchanged spends the cached-build time on "build kci" in every job but the first | none |
 | S10b | **The release build in batches** | a cold full release (every package re-keyed) finishes in batches each under `--build-timeout-s` | none |
-| S10c | **Release checks:** a `checks:` field on the BUILD step that runs (`buck2 test`) the derived checks reaching a declared library plus every `release_checks` target; the flake re-run and `release/quarantine.textproto`. First task: measure its time and farm cost on a release revision and write them in this document. | a machine-file fixture whose check target fails: `kci run --stage build` fails and `gamma` never starts; a check that fails once then passes is re-run once and passes | none: it adds a gate to an approved pipeline |
-| S11 | **Yank:** verify that the channel host can delete a file or mark it removed; a `kci yank` verb, dry run by default; `release/yanked.textproto` and `KCI-E-YANKED` | a dry run against the fake channel lists exactly one file. A real run is refused without `--channel` and `--file`. A re-run of a release whose file is in `yanked.textproto` is refused before any upload. | **Go per use** |
+| S10c | **Release checks:** a `checks:` field on the BUILD step that runs (`buck2 test`) the derived checks reaching a declared library plus every `release_checks` target; the flake re-run and `release/quarantine.textproto`; the reach check of `release_checks` (cquery `rdeps`), at release time and in the pull-request check; the reverse-dependency filter on the derived checks. First task: measure its time and farm cost on a release revision and write them in this document. | a machine-file fixture whose check target fails: `kci run --stage build` fails and `gamma` never starts; a check that fails once then passes is re-run once and passes; a `release_checks` naming an unrelated library's test, a label with no target, and a library whose only check is quarantined each fail `build` | none: it adds a gate to an approved pipeline |
+| S11 | **Yank:** verify that the channel host can delete a file or mark it removed; a `kci yank` verb, dry run by default; `release/yanked.textproto` and `KCI-E-YANKED` | a dry run against the fake channel lists exactly one file. A real run is refused without `--channel` and `--file`. A re-run of a commit older than the tombstone, whose own tree does not name the file, is refused before any upload in `gamma` (the tombstone is read from `main`'s head); a kci that reads the checked-out copy turns that test red. | **Go per use** |
 | S12 | **Installed-bytes checks** in `validate` (after S3): one emulator round trip per cloud family against the installed package, and the installed `.so` check (decision item 8) | a planted missing `.so` in a fixture package turns it red; a fixture `.so` with a `GLIBC_` version above the floor turns it red | **Go:** decision 1 (a `service` block in gamma) and the workflow-rule amendment (item 7) |
 
 S0 is independent of the rest and should go first. S4 to S10c can start at once, in parallel with S2
