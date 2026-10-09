@@ -1021,12 +1021,11 @@ def serialize_split(
         blockmax_offset = 0  # canonical "absent" sentinel.
 
     # (e4) L0-POSTING region (LSM logger L0 — laid AFTER blockmax, BEFORE footer).
-    #      The CHEAP unsorted-posting blob (term-hash -> ascending doc-id deltas +
-    #      per-doc TF). PRESENT on an L0 (cheap drain) split, ABSENT (empty) on an
+    #      The writer copies the caller's bytes verbatim. PRESENT on an L0 (cheap drain) split, ABSENT (empty) on an
     #      optimized split — the FORMAT DISCRIMINATOR is the presence of this
-    #      region's footer slot. The region's byte layout is owned by
-    #      the producer (komira_log_index's serialize_l0_posting_region);
-    #      split.mojo treats it as an opaque blob (offset/len only).
+    #      region's footer slot. split.mojo treats it as an opaque blob
+    #      (offset/len only) and specifies no byte layout for it. No reader in
+    #      this package decodes it: SearchCore refuses a split that carries it.
     var l0_posting_offset = len(out)
     var l0_posting_len = len(l0_posting_region)
     for i in range(l0_posting_len):
@@ -1104,7 +1103,8 @@ def serialize_split(
         _append_u64_le(out, UInt64(blockmax_len))  # blockmax_len
     # L0-POSTING footer slot pair (LSM logger L0 — ADDITIVE, after blockmax). This
     # is the FORMAT DISCRIMINATOR: present (len > 0) => an L0 cheap-posting split;
-    # absent => an optimized split (the read fan-out routes per-split on it).
+    # absent => an optimized split. SearchCore construction raises on a split
+    # that carries it (SearchCore has no l0_posting reader).
     # A new reader detects it via the footer_len-bounded remaining-
     # bytes check (>= 16 after the blockmax pair). 0/0 is NEVER written here — the
     # slot is emitted ONLY when the region is genuinely present.
@@ -1602,7 +1602,7 @@ struct SplitView(Movable, Deinitable):
         # l0_posting slot is ONLY ever written after the blockmax pair, which is
         # written 0/0 when absent to keep the chain hole-free — so this read is
         # unambiguous). Present (len > 0) => the FORMAT DISCRIMINATOR: an L0
-        # cheap-posting split (the read fan-out routes per-split on it).
+        # cheap-posting split (SearchCore construction refuses it).
         # 0/0 / absent => an optimized split.
         var l0_posting_offset = 0
         var l0_posting_len = 0
@@ -1810,9 +1810,10 @@ struct SplitView(Movable, Deinitable):
         """True iff this split carries an LSM logger L0 cheap-posting region
         (len > 0). This is the FORMAT DISCRIMINATOR: an L0 (cheap drain)
         split returns True (empty term-dict + non-empty l0_posting); an optimized
-        split returns False (populated term-dict + no l0_posting). The read
-        fan-out routes PER-SPLIT on this (L-READ phase): True -> the simple L0
-        posting probe; False -> the full SearchCore BM25 path."""
+        split returns False (populated term-dict + no l0_posting). No reader in
+        this package decodes the l0_posting region: SearchCore construction
+        (`SearchCore(bytes)` and `SearchCore.from_view`) raises when this is
+        True."""
         return self._l0_posting_len > 0
 
     @always_inline
@@ -1861,10 +1862,10 @@ struct SplitView(Movable, Deinitable):
     def l0_posting_region(
         self,
     ) -> Span[UInt8, origin_of(self._bytes)]:
-        """The LSM logger L0 cheap-posting region bytes (term-hash -> ascending
-        doc-id deltas + per-doc TF; the format owned by komira_log_index).
-        Span tied to the INNER _bytes field origin. An EMPTY span
-        when absent (has_l0_posting() False — an optimized split)."""
+        """The LSM logger L0 cheap-posting region bytes, an opaque blob whose
+        layout this package does not specify or decode. Span tied to the INNER
+        _bytes field origin. An EMPTY span when absent (has_l0_posting()
+        False — an optimized split)."""
         return Span(self._bytes)[self._l0_posting_offset : self._l0_posting_offset + self._l0_posting_len]
 
 
