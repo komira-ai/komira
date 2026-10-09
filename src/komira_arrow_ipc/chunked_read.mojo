@@ -286,7 +286,7 @@ def read_chunked_into_list(path: String) raises -> List[UInt8]:
     var n = buf.len()
     var out = List[UInt8](capacity=n)
     if n == 0:
-        return out^
+        return out^  # cov: unreachable read_chunked raises on an empty file
     # Copy in 64 MiB chunks. The single-chunk fast path covers the
     # common case (any file under 64 MiB takes one loop iteration).
     var src_span = buf.view_range_ro(0, n).into_span()

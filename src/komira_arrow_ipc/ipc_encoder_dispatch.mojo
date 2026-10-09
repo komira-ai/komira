@@ -435,8 +435,8 @@ def encode_record_batch_message_streaming[
     header.copy_from_aligned_buffer_at(pos, fb_payload, 0, fb_size)
     pos += fb_size
     if pad_after_fb > 0:
-        for i in range(pad_after_fb):
-            header.write_u8_at(pos + i, UInt8(0))
+        for i in range(pad_after_fb):  # cov: unreachable a Message payload holds an i64 field, so finalize pads it to 8
+            header.write_u8_at(pos + i, UInt8(0))  # cov: unreachable a Message payload holds an i64 field, so finalize pads it to 8
         pos += pad_after_fb
     header.set_length(header_size)
 
@@ -472,12 +472,12 @@ def encode_record_batch_message_streaming[
             columns[i], sink, body_cursor, buffers2, nodes2
         )
     if body_cursor != dry_cursor:
-        raise Error(
-            "encode_record_batch_message_streaming: pass-2 cursor "
-            + String(body_cursor)
-            + " != pass-1 cursor "
-            + String(dry_cursor)
-            + " (encoder dry-run / wet-run divergence)"
+        raise Error(  # cov: unreachable both passes run the same encoders over the same columns
+            "encode_record_batch_message_streaming: pass-2 cursor "  # cov: unreachable both passes run the same encoders over the same columns
+            + String(body_cursor)  # cov: unreachable both passes run the same encoders over the same columns
+            + " != pass-1 cursor "  # cov: unreachable both passes run the same encoders over the same columns
+            + String(dry_cursor)  # cov: unreachable both passes run the same encoders over the same columns
+            + " (encoder dry-run / wet-run divergence)"  # cov: unreachable both passes run the same encoders over the same columns
         )
     # Write body-pad bytes (0-7) through the adapter.
     if body_pad > 0:
