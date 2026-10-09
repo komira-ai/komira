@@ -107,6 +107,7 @@ mojo_library(
         "tests/test_project_merge_guard_arms.mojo",
         "tests/test_resolve_scalar_subqueries.mojo",
         "tests/test_scalar_subquery_decorrelate.mojo",
+        "tests/test_shared_relation_fingerprint_identity.mojo",
         "tests/test_sort_null_placement_survives_rebuild.mojo",
         "tests/test_topn_tiebreak_policy.mojo",
         "tests/test_view_resolution_pass.mojo",

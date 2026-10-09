@@ -560,7 +560,7 @@ def dual_tier_resolve(
             continue
         if s.last_offset < compacted_tail:
             # Fully within the compacted range — superseded, skip.
-            continue
+            continue  # cov: unreachable live_start >= compacted_tail, so the check above already skipped every such segment
         out.append(
             TierRef(
                 is_compacted=False,

@@ -4,8 +4,8 @@
 #
 # The byte layout is gitformat-pack's "Version 2 pack-*.idx files". That
 # `serialize` writes what `git index-pack` writes, byte for byte, is checked
-# against git itself in src/tests/conformance/komira_git_conformance; here
-# the layout is checked field by field on an index built by hand.
+# against git itself in src/tests/conformance/komira_git_pack_conformance;
+# here the layout is checked field by field on an index built by hand.
 #
 # WHAT EACH TEST CATCHES:
 #   * test_layout: a fan-out table that counts `<` instead of `<=` (entry i

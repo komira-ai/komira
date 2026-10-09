@@ -606,24 +606,25 @@ def test_asof_join_strategy_and_tolerance_names() raises:
         _render(_asof(_parquet(), _parquet(), ASOF_BACKWARD, AsofTolerance.none())),
         String("AsofJoin(strategy=BACKWARD, on=ts=ts2, by=[k=k2, m=m2])\n") + tail,
     )
-    # A set tolerance names its payload kind. The render does not carry the
-    # tolerance VALUE today, so two as-of joins differing only in it render
-    # alike (komira-ai/komira#960): only the field's presence and kind are
-    # asserted, which hold with or without the value.
-    var fwd = _render(_asof(_parquet(), _parquet(), ASOF_FORWARD, AsofTolerance.int64(5)))
-    assert_true(
-        fwd.startswith("AsofJoin(strategy=FORWARD, on=ts=ts2, by=[k=k2, m=m2], tolerance=INT64"),
-        fwd,
+    # A set tolerance names its payload kind AND its value: the render is the
+    # plan-compile cache key, so two as-of joins differing only in the value
+    # must render apart (komira-ai/komira#960).
+    assert_equal(
+        _render(_asof(_parquet(), _parquet(), ASOF_FORWARD, AsofTolerance.int64(5))),
+        String("AsofJoin(strategy=FORWARD, on=ts=ts2, by=[k=k2, m=m2], tolerance=INT64(5))\n")
+        + tail,
     )
-    var near = _render(_asof(_parquet(), _parquet(), ASOF_NEAREST, AsofTolerance.float64(0.5)))
-    assert_true(
-        near.startswith("AsofJoin(strategy=NEAREST, on=ts=ts2, by=[k=k2, m=m2], tolerance=FLOAT64"),
-        near,
+    assert_equal(
+        _render(_asof(_parquet(), _parquet(), ASOF_NEAREST, AsofTolerance.float64(0.5))),
+        String("AsofJoin(strategy=NEAREST, on=ts=ts2, by=[k=k2, m=m2], tolerance=FLOAT64(0.5))\n")
+        + tail,
     )
-    var odd = AsofTolerance(tag=UInt8(9), int_val=Int64(0), float_val=Float64(0.0))
+    # An unknown tag keeps both payload slots.
+    var odd = AsofTolerance(tag=UInt8(9), int_val=Int64(3), float_val=Float64(0.25))
     assert_equal(
         _render(_asof(_parquet(), _parquet(), UInt8(9), odd)),
-        String("AsofJoin(strategy=UNKNOWN, on=ts=ts2, by=[k=k2, m=m2], tolerance=UNKNOWN)\n") + tail,
+        String("AsofJoin(strategy=UNKNOWN, on=ts=ts2, by=[k=k2, m=m2], tolerance=UNKNOWN(tag=9, 3, 0.25))\n")
+        + tail,
     )
 
 
