@@ -5,20 +5,24 @@
 # `AzureFs[C: Connector]` is komira_fs's `FileSystem` for Azure Blob
 # (az:// / abfs://) URIs, the sibling of komira_objectstore_s3's `S3Fs` and
 # komira_objectstore_gcs's `GcsFs`. It OWNS its `AzureClient[C]`, in a
-# length-1 `Slab`, and a client factory that a clone uses to build its own.
+# length-1 `Slab`, and the `AzureClientSpec[C]` (endpoint, credential,
+# connector factory) every client it or a clone builds is made from.
 #
 # Usage:
-#     def mk_client() raises -> AzureClient[MyConnector]:
-#         return AzureClient[MyConnector](
-#             account="mystoraccount",
-#             key_b64=account_key_b64,
-#             connector=MyConnector.new(),
-#             call_connector=MyConnector.new(),
-#             config=AzureConfig.azure("mystoraccount"),
-#         )
-#     var azure_fs = AzureFs[MyConnector](
-#         container="my-container", client=mk_client(), mk_client=mk_client,
+#     def mk_connector() raises -> MyConnector:
+#         return MyConnector.new()
+#     var spec = AzureClientSpec[MyConnector](
+#         AzureConfig.azure("mystoraccount"),
+#         AzureCredential.shared_key(
+#             AzureSharedKey("mystoraccount", account_key_b64)
+#         ),
+#         mk_connector,
 #     )
+#     var azure_fs = AzureFs[MyConnector](container="my-container", spec=spec)
+#
+# That form builds its client on the first verb, so constructing it dials
+# nothing. `AzureFs(container=, client=, spec=)` seeds the first client
+# instead (a test's scripted one); clones still build theirs from `spec`.
 #
 # The `container` plays the role S3/GCS give `bucket`. The blob key is
 # the path passed to `open()`.
@@ -57,6 +61,7 @@ from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_AZURE
 from komira_http_core.transport.io_stream import Connector
 
 from .azure_client import AzureClient
+from .azure_client_spec import AzureClientSpec
 
 
 # The most List Blobs pages one listing (`list` or `list_dir_shallow`)
@@ -111,17 +116,16 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
     Each worker constructs its OWN AzureClient + AzureFs; the HttpClient
     pool inside is per-pthread single-thread-access by design.
 
-    The client-factory `_mk_client: fn () raises -> AzureClient[C]` is
-    threaded in at construction; `clone()` uses it to mint a FRESH
-    AzureClient (the HttpClient pool is OWNED + NOT Copyable).
+    The `AzureClientSpec[C]` is threaded in at construction; a missing
+    client (the lazy form's, a clone's) is built from it on the first verb
+    (the HttpClient pool is OWNED + NOT Copyable).
 
     Fields:
       * `_container: String` — the Azure container name (owned).
       * `_client: Slab[AzureClient[C]]` — OWNED client in a length-1 Slab;
         the read methods reach it mutably from immutable `self` via
         `get_mut_interior(0)`.
-      * `_mk_client: fn () raises -> AzureClient[C]` — client-factory for
-        `clone()`.
+      * `_spec: AzureClientSpec[C]` — what each client is built from.
     """
 
     comptime File = AzureFileHandle
@@ -136,8 +140,8 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
     # list + list_dir_shallow work for prefix pruning, nothing more.
     comptime SUPPORTS_LAZY_HIVE: Bool = True
 
-    # The scheme tag: FS_SCHEME_AZURE (byte-identical to
-    # FsHandle.FS_AZURE). The SDK cloud read seam picks `FsHandle.from_azure`.
+    # The scheme tag: FS_SCHEME_AZURE, the code komira_source_url maps
+    # az://, abfs[s]:// and Azure Blob https:// URLs to.
     comptime SCHEME: UInt8 = FS_SCHEME_AZURE
 
     var _container: String
@@ -147,50 +151,55 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
     # mutably from immutable `self` via `get_mut_interior(0)`. The initial FS
     # seeds slot 0; clones start with an EMPTY slab (built on first read).
     var _client: Slab[Optional[AzureClient[Self.C]]]
-    # # SAFETY: a code pointer (the FFI-POD carve-out of the pointer
-    # # rules). Holds a code address, NO heap, NO origin. Used to lazily
-    # build / rebuild the client.
-    var _mk_client: def () raises thin -> AzureClient[Self.C]
+    # What the lazy build (the lazy form's first verb, a clone's) makes a
+    # client from: endpoint, credential and connector factory.
+    var _spec: AzureClientSpec[Self.C]
 
     def __init__(
         out self,
         var container: String,
         var client: AzureClient[Self.C],
-        mk_client: def () raises thin -> AzureClient[Self.C],
+        var spec: AzureClientSpec[Self.C],
     ):
         """Construct an AzureFs bound to `container`, seeding slot 0 of the
-        length-1 client slab with `client`, with `mk_client` threaded in for
-        the lazy (re)build on clones.
+        length-1 client slab with `client`; clones build theirs from `spec`.
 
         Args:
             container: Azure container name. Moved in.
             client: A configured `AzureClient[C]` (`is_configured() ==
                 True`), MOVED in + OWNED by the AzureFs (seeds slot 0).
-            mk_client: A client-factory minting a fresh configured
-                `AzureClient[C]` on demand, supplied from the construction
-                site. Used to lazily (re)build the client.
+            spec: What a clone's client is built from.
         """
         self._container = container^
         var slab = Slab[Optional[AzureClient[Self.C]]]()
         slab.append(Optional[AzureClient[Self.C]](client^))
         self._client = slab^
-        self._mk_client = mk_client
+        self._spec = spec^
+
+    def __init__(out self, var container: String, var spec: AzureClientSpec[Self.C]):
+        """Construct an AzureFs bound to `container` whose client is built
+        from `spec` on the first verb: nothing is built or dialed here."""
+        self._container = container^
+        var slab = Slab[Optional[AzureClient[Self.C]]]()
+        slab.append(Optional[AzureClient[Self.C]](None))
+        self._client = slab^
+        self._spec = spec^
 
     def __init__(
         out self,
         var _container: String,
         var _client: Slab[Optional[AzureClient[Self.C]]],
-        _mk_client: def () raises thin -> AzureClient[Self.C],
+        var _spec: AzureClientSpec[Self.C],
     ):
         """INTERNAL fieldwise ctor — used by `clone()` (infallible)."""
         self._container = _container^
         self._client = _client^
-        self._mk_client = _mk_client
+        self._spec = _spec^
 
     # ---- FileSystem trait conformance ----
 
     def clone(self) -> Self:
-        """Return a fresh `AzureFs[C]` with the same container + factory and
+        """Return a fresh `AzureFs[C]` with the same container + spec and
         an EMPTY (lazily-built) client slab. INFALLIBLE per the FileSystem
         trait; the AzureClient is built on the clone's FIRST read (it cannot
         be deep-copied, and the ctor is fallible)."""
@@ -199,7 +208,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         return Self(
             _container=self._container.copy(),
             _client=slab^,
-            _mk_client=self._mk_client,
+            _spec=self._spec.copy(),
         )
 
     # ---- Lazy client build (private helper, inlined into read methods) ----
@@ -209,7 +218,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         # grown; single-threaded.
         ref slot = self._client.get_mut_interior(0)
         if not slot:
-            slot = Optional[AzureClient[Self.C]](self._mk_client())
+            slot = Optional[AzureClient[Self.C]](self._spec.build())
         # Defensive sentinel guard: a configured client is required to read.
         if not slot.value().is_configured():
             raise Error(
@@ -222,6 +231,16 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
     def container(self) -> String:
         """The Azure container name this AzureFs is bound to."""
         return self._container
+
+    def spec(self) -> AzureClientSpec[Self.C]:
+        """A copy of the spec this file system builds its clients from."""
+        return self._spec.copy()
+
+    def client_built(self) -> Bool:
+        """True once this file system holds a client (seeded, or built by
+        a verb)."""
+        # SAFETY: get_mut_interior(0) invariants as `_build_client_if_absent`.
+        return Bool(self._client.get_mut_interior(0))
 
     def list(self, prefix: String) raises -> List[String]:
         """List Azure blob keys under `prefix` (RECURSIVE — all blobs at any
