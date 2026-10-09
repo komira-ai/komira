@@ -1,0 +1,250 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle")
+load(":defs.bzl", "node_bench", "udf_node_log", "udf_node_test")
+
+# Test-only: a Node.js UDF runtime in-process behind the C ABI of
+# docs/design/udf_runtime_interface.md (komira_udf_spike_abi), the engine side
+# that drives any runtime on N engine threads from a node process, and the
+# measurements of the design's mode 2 on Node: one isolate per engine thread
+# (worker_threads), and the single-isolate baseline. Spike code: nothing
+# outside src/tests may depend on it.
+#
+#   runtime/    the runtime, a Node-API addon in C (rt_table.c: the table, as
+#               engine threads see it; rt_js.c: the requests on an
+#               environment's JavaScript thread; rt_arrow.c: Arrow C Data
+#               <-> JavaScript; rt_main.c: the module, its environments and
+#               their registry), and its JavaScript half: adapter.js (binds a
+#               user function to a shape and loops over rows and batches) and
+#               worker.js (the entry of a context's worker_threads isolate)
+#   fixtures/   the user code the tests and benches load, TypeScript,
+#               bundled by esbuild
+#   engine/     the engine side: engine_loop.c (N engine threads through the
+#               table), engine_host.c (the Node-API addon that starts them and
+#               calls the Mojo conformance harness), engine_so.mojo (that
+#               harness as a library)
+#   gate/       a Mojo library that node's addon loads (the load gate)
+#   node_cases.mojo
+#               the shared cases a TypeScript function can express
+#   tests/      the node_test scripts and their helpers
+#   bench/      the bench script; defs.bzl runs it (node_bench)
+#
+# One source, two builds of the runtime (-DKOMIRA_NODE_WORKERS):
+#   runtime_shared.node   komira-test/node-shared-isolate: every context an
+#                         object of the main isolate, behind its one thread
+#                         (the baseline: it declares global_lock 1)
+#   runtime_workers.node  komira-test/node-workers: every context a
+#                         worker_threads isolate of its own
+# Node loads the addon (it hosts the process: Node-API symbols resolve only
+# when node loads the library), and the engine's dlopen of the same file finds
+# it already mapped.
+#
+# The tests, each a node_test (building the target runs it; README.md says what
+# each proves and each script's header names the mutant planted to see it go
+# red), once per build where the build matters (a _shared and a _workers
+# target):
+#   test_load_gate         the Mojo runtime starts inside node's addon and is
+#                          entered from the main thread, a pool thread and four
+#                          worker_threads (exit statuses pinned)
+#   test_conform_*         the shared conformance suite, through the Mojo
+#                          harness
+#   test_context_aware     the addon loaded in four worker_threads at once
+#   test_adapter_units     the adapter's aggregate paths on sliced columns
+#   test_external_buffers_*
+#                          the V8 wrap rule, zero copy, detach, the copy path
+#   test_threads_*         four engine threads: values, releases, state per
+#                          context, parallelism
+#   test_cancel_*          what cancel can and cannot stop
+#   test_errors_*          what validate and the calls refuse
+# and the Mojo test of node_cases.mojo (the library's own test_srcs).
+
+_ABI = "//src/tests/helpers/komira_udf_spike_abi"
+
+# The Node-API headers of the pinned node.
+_NODE_INCLUDE = ["//third_party/node:node[include]"]
+
+_RUNTIME_SRCS = [
+    "runtime/rt_arrow.c",
+    "runtime/rt_js.c",
+    "runtime/rt_main.c",
+    "runtime/rt_table.c",
+]
+
+_RUNTIME_HEADERS = [
+    "runtime/rt_internal.h",
+    _ABI + ":headers",
+]
+
+[c_shared_lib(
+    name = "runtime_" + v,
+    srcs = _RUNTIME_SRCS,
+    headers = _RUNTIME_HEADERS,
+    copts = ["-DKOMIRA_NODE_WORKERS={}".format(w)],
+    include_dirs = _NODE_INCLUDE,
+    out = "runtime_{}.node".format(v),
+) for v, w in [
+    ("shared", 0),
+    ("workers", 1),
+]]
+
+c_shared_lib(
+    name = "engine_host",
+    srcs = [
+        "engine/engine_host.c",
+        "engine/engine_loop.c",
+    ],
+    headers = [
+        "engine/engine_loop.h",
+        _ABI + ":headers",
+    ],
+    include_dirs = _NODE_INCLUDE,
+    out = "engine_host.node",
+)
+
+# The user code: TypeScript, bundled alone (apache-arrow is imported for its
+# types only and is the base image's package at run time).
+esbuild_bundle(
+    name = "fixtures",
+    entry = "fixtures/fixtures.ts",
+    out = "fixtures.js",
+)
+
+esbuild_bundle(
+    name = "model",
+    entry = "fixtures/model.ts",
+    out = "model.js",
+)
+
+mojo_library(
+    name = "komira_udf_spike_node",
+    srcs = glob(["*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_json:komira_json",
+        _ABI + ":komira_udf_spike_abi",
+    ],
+    test_srcs = ["tests/test_node_cases.mojo"],
+    test_data = {
+        "tests/test_node_cases.mojo": {"src/tests/helpers/komira_udf_spike_abi": _ABI + ":cases"},
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The conformance harness as a library the engine addon runs.
+mojo_shared_lib(
+    name = "conform_engine",
+    srcs = ["engine/engine_so.mojo"],
+    exports = ["komira_udf_spike_node_conform"],
+    exports_exact = True,
+    deps = [
+        ":komira_udf_spike_node",
+        "//src/komira_json:komira_json",
+        _ABI + ":komira_udf_spike_abi",
+    ],
+)
+
+# The load gate: a Mojo library node's addon loads, and a program with no
+# deps, for its runnable directory's lib/: the Mojo runtime libraries both
+# Mojo shared libraries need beside them.
+mojo_shared_lib(
+    name = "load_gate",
+    srcs = ["gate/gate_lib.mojo"],
+    exports = ["komira_udf_spike_node_load_gate"],
+    exports_exact = True,
+)
+
+mojo_binary(
+    name = "mojo_runtime_dir",
+    srcs = ["gate/runtime_dir.mojo"],
+)
+
+# What a test finds beside its script (tests/): the addons, the adapter and the
+# bundle the runtime loads from its code directory, and the engine's pieces.
+_STAGED = {
+    "tests/adapter.js": "runtime/adapter.js",
+    "tests/engine_host.node": ":engine_host",
+    "tests/fixtures.js": ":fixtures",
+    "tests/model.js": ":model",
+    "tests/runtime_shared.node": ":runtime_shared",
+    "tests/runtime_workers.node": ":runtime_workers",
+    "tests/worker.js": "runtime/worker.js",
+}
+
+_MOJO = {
+    "tests/conform_engine.so": ":conform_engine",
+    "tests/load_gate.so": ":load_gate",
+    "tests/mojo_runtime": ":mojo_runtime_dir[runnable]",
+}
+
+_CASES = {"src/tests/helpers/komira_udf_spike_abi": _ABI + ":cases"}
+
+udf_node_test("test_load_gate", "load_gate.js", data = _STAGED | _MOJO)
+
+[udf_node_test(
+    "test_conform_" + v,
+    "conform.js",
+    args = [v],
+    data = _STAGED | _MOJO | _CASES,
+) for v in [
+    "shared",
+    "workers",
+]]
+
+udf_node_test("test_context_aware", "context_aware.js", data = _STAGED)
+
+# The adapter alone, on sliced aggregate columns (no addon, no engine).
+udf_node_test("test_adapter_units", "adapter_units.js", data = _STAGED)
+
+# The refusals, the wrap rule and the zero-copy counters, the engine's threads
+# and the cancel limits, once per build.
+[[udf_node_test(
+    "test_{}_{}".format(t, v),
+    t + ".js",
+    args = [v],
+    data = _STAGED,
+) for t in [
+    "cancel",
+    "errors",
+    "external_buffers",
+    "threads",
+]] for v in [
+    "shared",
+    "workers",
+]]
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
+
+# The stdout of the scripts that print numbers, kept as files.
+[[udf_node_log(
+    "log_{}_{}".format(t, v),
+    t + ".js",
+    args = [v],
+    data = _STAGED,
+) for t in [
+    "cancel",
+    "external_buffers",
+    "threads",
+]] for v in [
+    "shared",
+    "workers",
+]]
+
+# The measurements: one JSON object per build, kept as a file. Bump bench/run_id
+# to re-run it and nothing else; a cache hit replays the numbers of the run
+# its run_id names.
+#   ./buck2 build komira//src/tests/helpers/komira_udf_spike_node:bench --show-output
+node_bench(
+    name = "bench",
+    src = "bench/bench.js",
+    srcs = ["tests/helpers.js"],
+    data = _STAGED,
+    deps = ["//third_party/node:apache-arrow"],
+    run_id = "bench/run_id",
+)
