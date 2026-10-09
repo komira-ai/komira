@@ -873,7 +873,9 @@ def _collect_expr_columns(expr: Expr, mut cols: Set[String]):
 # that fingerprint equal are treated as ONE value by CSE Phase A (the second
 # project column becomes an alias of the first), by OR-factoring, and by
 # `udf_call_column_key` (one scratch column). The encoding is unambiguous by
-# construction:
+# construction, EXCEPT the `?:` fallback for an un-armed tag (end of
+# `_expr_fingerprint`): it keys on the render, so it is only as injective as
+# the render is (komira#1004). Everywhere else:
 #
 #   * every string taken from the query (column, alias and struct-field names,
 #     string and binary literals, patterns, regexp fields, JSON path segments,
@@ -939,14 +941,15 @@ def _expr_fingerprint(expr: Expr) -> String:
         # `CAST(x AS DECIMAL(10,2))` and `CAST(x AS DECIMAL(18,4))` (or
         # `CAST(x AS DATE32)` vs `CAST(x AS TIMESTAMP)`) fingerprint EQUAL and
         # Phase A whole-expr dedup silently collapses the 2nd to the 1st.
-        # Append the full cast-target identity. (Mirrors the lesson that
-        # `Expr.cast_preserving_arrow` learned for rewrite sites.)
+        # Append the full cast-target identity, and `:t1` for TRY_CAST only:
+        # a strict CAST raises where TRY_CAST yields NULL.
         var child_fp = _expr_fingerprint(expr.cast_child_ref())
         return (
             "T:" + String(expr.cast_target())
             + ":a" + String(Int(expr.cast_target_arrow().type_id))
             + ":p" + String(expr.cast_decimal_precision())
             + ":s" + String(expr.cast_decimal_scale())
+            + (String(":t1") if expr.cast_is_try() else String(""))
             + "(" + child_fp + ")"
         )
     elif expr.tag == EXPR_ALIAS:

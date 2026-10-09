@@ -24,6 +24,9 @@
 #     shape.
 #   * a side-qualified column (`Expr.left("x")`) and a plain one keyed the
 #     same `C:x`.
+#   * TRY_CAST and CAST of one child to one type: the CAST arm did not fold
+#     `cast_is_try()`, so both keyed `T:int64:a5:p0:s0(C:1:s)` and a strict
+#     CAST (raises on a bad value) could become an alias of a TRY_CAST (NULL).
 #
 # Controls: equal expressions still fingerprint equal (CSE still fires), and an
 # IN list is still order-insensitive.
@@ -212,6 +215,23 @@ def test_or_of_column_names_containing_the_separator() raises:
 def test_side_qualified_column_is_not_the_plain_column() raises:
     _distinct(_fp(Expr.left("x")), _fp(Expr.col_ref("x")), "left.x vs x")
     _distinct(_fp(Expr.left("x")), _fp(Expr.right("x")), "left.x vs right.x")
+
+
+def test_try_cast_is_not_cast() raises:
+    _distinct(
+        _fp(Expr.try_cast(Expr.col_ref("s"), DType.int64)),
+        _fp(Expr.cast(Expr.col_ref("s"), DType.int64)),
+        "TRY_CAST(s AS int64) vs CAST(s AS int64)",
+    )
+    # The flag is appended only for TRY_CAST, so a plain CAST keeps its key.
+    assert_equal(
+        _fp(Expr.try_cast(Expr.col_ref("s"), DType.int64)), "T:int64:a5:p0:s0:t1(C:1:s)"
+    )
+    # Control: two TRY_CASTs of the same child and type still share a key.
+    assert_equal(
+        _fp(Expr.try_cast(Expr.col_ref("s"), DType.int64)),
+        _fp(Expr.try_cast(Expr.col_ref("s"), DType.int64)),
+    )
 
 
 def main() raises:
