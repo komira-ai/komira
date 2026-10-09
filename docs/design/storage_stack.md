@@ -328,7 +328,7 @@ Every adapter follows the same rules, taken from the REST spec and from Iceberg 
 - `komira.readers`: the readers the user named, which gate opt-ins;
 - `komira.subject-keys`: columns that erasure targets (see [Erasure](#erasure));
 - `komira.writer.<writer-id>.last-commit`;
-- for a topic or row-store table, `komira.tail.<lineage>.watermarks` (see [the roll](#tails-the-komira-tables-that-remain)).
+- for a topic or row-store table, `komira.tail.<lineage>.rolled-offsets` (see [the roll](#tails-the-komira-tables-that-remain)).
 
 On a table komira did not create, komira writes data and delete files and snapshot summaries, and nothing else: no property, schema-incompatible change, format upgrade, tag or branch.
 
@@ -456,7 +456,7 @@ komira states two freshness numbers for each table:
 
 | who reads | sees data | default |
 |---|---|---|
-| komira's SDK and consumers | at acknowledgement: the Iceberg snapshot plus the tail above its watermark | sub-second |
+| komira's SDK and consumers | at acknowledgement: the Iceberg snapshot plus the tail above its rolled offsets | sub-second |
 | any other tool | at the last roll into Iceberg, plus that tool's catalog cache or refresh | `target_lag` = 60 s on every catalog (komira's own allows down to 10 s) |
 
 The measured lag is published both as a metric and on the topic.
@@ -491,7 +491,7 @@ komira's own artifacts follow within the same deadline:
 - Every derived index generation that covered a removed file is rebuilt or purged (see [L4](#l4-derived-indexes)), and cached embeddings of the erased values are purged.
 - The topic's tail segments that hold the subject: compacted on the key when the subject is the message key; otherwise the affected segments are rewritten without the matching records, leaving offset gaps as key compaction does.
 - The graph's delta objects that hold the subject and have not rolled into the graph's Iceberg tables yet, superseded fact versions included: each affected delta object is rewritten without the matching facts, or dropped when no other fact remains in it, within the same deadline and before the roll or at the roll at the latest, so the roll never carries the subject into the tables. A delta that rolled before the erasure is already rows in the graph's tables and goes through the five steps above.
-- The row store's log above its base watermark, which has not rolled into the row store's Iceberg base yet: each commit chunk that holds the subject's `WriteOp`s is rewritten without them, or dropped when no other op remains in it, within the same deadline and before the roll or at the roll at the latest, so the roll never carries the subject into the base. Rows that rolled before the erasure are already in the base table and go through the five steps above.
+- The row store's log above its base's rolled offset, which has not rolled into the row store's Iceberg base yet: each commit chunk that holds the subject's `WriteOp`s is rewritten without them, or dropped when no other op remains in it, within the same deadline and before the roll or at the roll at the latest, so the roll never carries the subject into the base. Rows that rolled before the erasure are already in the base table and go through the five steps above.
 
 Who does what depends on who maintains the table:
 
@@ -522,7 +522,7 @@ A tail exists where data must be visible faster than Iceberg can commit. There a
 
 The roll replaces the first revision's "tier move". It is a maintenance job, never part of the broker:
 
-1. **Plan** against a pinned tail snapshot: for each partition, a contiguous span of offsets (or log seqs) above the table's watermark for that partition.
+1. **Plan** against a pinned tail snapshot: for each partition, a contiguous span of offsets (or log seqs) above the table's rolled offset for that partition.
 2. **Record the intent** on the tail's own L1 lineage: (commit id, per-partition spans). This is komira's lineage, not a write to anyone else's table.
 3. **Write Parquet** sized for the table: 64 MB or more per file. A roll waits until it has that much data or until `target_lag` passes, whichever comes first.
 4. **Resolve keys to positions** in the Iceberg table's live files, and write position-delete files:
@@ -532,9 +532,9 @@ The roll replaces the first revision's "tier move". It is a maintenance job, nev
    This is the key-to-position lookup that the first revision kept off the write path. It now runs in the roll, which is maintenance. Its cost is bounded by partitioning upsert tables on a key bucket *(inferred)*. Because these deletes target live files, an upsert roll can conflict with a concurrent compaction (see [Concurrent writers](#concurrent-writers)).
 5. **Commit one snapshot** through the catalog, with `assert-ref-snapshot-id`, carrying in the same `commit_table`:
    - `add-snapshot`, with `komira.commit-id`, `komira.tail.lineage` and the spans in the summary;
-   - `set-properties` for `komira.tail.<lineage>.watermarks` (the last rolled offset of **every** partition, not only those in this roll) and `komira.writer.<writer-id>.last-commit`.
+   - `set-properties` for `komira.tail.<lineage>.rolled-offsets` (the last rolled offset of **every** partition, not only those in this roll) and `komira.writer.<writer-id>.last-commit`.
 
-   Table properties survive snapshot expiry and other tools' compaction; summaries do not carry forward. On an unknown outcome, the reload compares the watermark property with the recorded intent, so the span is never committed twice.
+   Table properties survive snapshot expiry and other tools' compaction; summaries do not carry forward. On an unknown outcome, the reload compares the rolled-offsets property with the recorded intent, so the span is never committed twice.
 6. **Record the result** on the tail lineage: (commit id, Iceberg snapshot id).
 7. **Advance the tail's `_LOG_START`** past the span. Tombstone the rolled tail objects and reap them after the grace period.
 
@@ -544,13 +544,13 @@ Once the tail is reaped, the Iceberg table is the only copy of those offsets, an
 
 1. pins the tail;
 2. loads the Iceberg table;
-3. reads the per-partition watermarks from the loaded metadata's table properties (the summary copy is a cross-check);
-4. for each partition, if `watermark + 1 < log_start` of the pinned tail, the catalog served stale metadata: reload, and if the gap persists, fail with a named error. It never reads across a gap;
-5. reads the tail strictly above each watermark.
+3. reads the per-partition rolled offsets from the loaded metadata's table properties (the summary copy is a cross-check);
+4. for each partition, if `rolled_offset + 1 < log_start` of the pinned tail, the catalog served stale metadata: reload, and if the gap persists, fail with a named error. It never reads across a gap;
+5. reads the tail strictly above each rolled offset.
 
 Pinning the tail first means that any tail chunk reaped after the pin is covered by a snapshot the reader can see, provided the catalog's load reflects the commit; step 4 catches a catalog that does not *(inferred)*.
 
-**Rollback by another tool.** If another tool sets the current snapshot to one before a roll, the watermark property still names offsets that the current snapshot does not hold, and their tail was reaped. The maintenance service checks on each cycle that the last rolled snapshot id (from the tail lineage) is an ancestor of the current snapshot. If not, it raises a named alert: those offsets are lost for every reader, and the roll pauses until an operator decides.
+**Rollback by another tool.** If another tool sets the current snapshot to one before a roll, the rolled-offsets property still names offsets that the current snapshot does not hold, and their tail was reaped. The maintenance service checks on each cycle that the last rolled snapshot id (from the tail lineage) is an ancestor of the current snapshot. If not, it raises a named alert: those offsets are lost for every reader, and the roll pauses until an operator decides.
 
 **Record fidelity.** The topic's Iceberg table keeps every record field that a live read returns: offset, timestamp, key, headers, producer id and epoch, sequence, and transaction markers. A consumer read served from the table then equals one served from the tail *(inferred; the transcoder is not in komira)*.
 
@@ -561,9 +561,9 @@ An analytic table keyed by business data is a separate table materialized from t
 **The row store:**
 
 - Its log stays the commit path and the snapshot allocator. Row MVCC (snapshot isolation on `snapshot_lsn`, first committer wins) is unchanged.
-- Its base is an Iceberg table, rolled in upsert mode with the same watermark property.
+- Its base is an Iceberg table, rolled in upsert mode with the same rolled-offsets property.
 - A snapshot is the pair (Iceberg snapshot id, log seq), pinned log first.
-- Recovery loads the base and replays the log above its watermark.
+- Recovery loads the base and replays the log above its rolled offset.
 - The roll advances `_LOG_START` when it deletes log chunks, which the current table store does not (see [L1 known gaps](#l0-and-l1-unchanged-now-with-a-narrower-scope)).
 
 ## L4: derived indexes
@@ -627,7 +627,7 @@ So an index may lag, but it cannot lie.
 
 The first revision's rule stands: every stored artifact is either a source of truth or derived, never both.
 
-- **Sources of truth:** Iceberg tables (whoever wrote them), komira tails for the spans not yet rolled, the row store's log above its base watermark, blobs, and log-search splits.
+- **Sources of truth:** Iceberg tables (whoever wrote them), komira tails for the spans not yet rolled, the row store's log above its base's rolled offset, blobs, and log-search splits.
 - **Derived:** every index, the content cache, statistics that komira keeps outside the table, and materialized copies.
 
 A roll transfers ownership; it does not derive.
@@ -652,7 +652,7 @@ A roll transfers ownership; it does not derive.
 | fold manifest | komira lineages | always | reap (`SubLineageBaseFold`, "ZERO byte copy") |
 | fold deletes (key compaction), erasure rewrite | topic tails | always | reap |
 | erasure rewrite or drop | graph delta tails | always, before or at the roll | reap |
-| erasure rewrite or drop | row-store log chunks above the base watermark | always, before or at the roll | reap |
+| erasure rewrite or drop | row-store log chunks above the base's rolled offset | always, before or at the roll | reap |
 | re-partition | topic tails | on request; renumbers offsets into child lineages, so indexes over the parent are rebuilt | reap |
 | merge index | index generations | always | a visible new generation, then reap of its inputs |
 
@@ -698,7 +698,7 @@ A roll transfers ownership; it does not derive.
 6. **The hot-tail roll**, journey 3:
    - topic and row store into Iceberg;
    - intent and result records on the tail lineage;
-   - the watermark table property and the gap check;
+   - the rolled-offsets table property and the gap check;
    - tombstones and upserted keys resolved to position deletes;
    - the span-plus-count check;
    - record fidelity;
@@ -729,7 +729,7 @@ A roll transfers ownership; it does not derive.
 - **komira maintains, changes properties of, or upgrades only tables it created or adopted,** and never one whose `komira.maintenance` names another maintainer. It writes rows to other tables only when the user asks, in the owner's delete mode and format version.
 - **An unknown commit outcome is never treated as a failure.**
 - **Whatever komira writes is readable in every tool in the table's reader set:** v2 unless the table opted in, no equality deletes, field ids everywhere.
-- **The table-to-tail boundary survives other tools' maintenance.** The watermark lives in a table property; a reader never reads across a gap.
+- **The table-to-tail boundary survives other tools' maintenance.** The rolled offsets live in a table property; a reader never reads across a gap.
 - **Derived artifacts never lead their source.** No index returns a row that its reader's snapshot does not hold.
 - **Erasure has a deadline and an honest report.** It covers tables, their metadata, tails, indexes and old snapshots, and names what is outside komira's reach.
 - **Decoding is strict.** An unknown komira body kind or version, or an unimplemented Delta reader feature, is an error, never a default.
@@ -751,7 +751,7 @@ The prototype is proposed and has not been run. It tests interop: komira writes 
 3. **Unknown outcome.** The catalog commits and then answers 502. komira reloads, finds its commit, and does not commit again. Repeat with the snapshot expired before the reload, on a table komira created: the writer property still finds it.
 4. **Deletes.** komira deletes rows. The manifests hold position-delete files with `referenced_data_file` set and equal `file_path` bounds, and no equality-delete file. DuckDB and Spark return the same rows as komira.
 5. **Schema change by another tool.** Spark adds one column and renames another. komira's next append carries the new schema id and writes by field id. DuckDB reads the old and new files together.
-6. **Topic roll.** Produce to a 3-partition topic and roll twice, the second roll covering only two partitions. komira's reader, with the tail, sees every offset exactly once across the boundary. DuckDB sees exactly the offsets up to the watermarks.
+6. **Topic roll.** Produce to a 3-partition topic and roll twice, the second roll covering only two partitions. komira's reader, with the tail, sees every offset exactly once across the boundary. DuckDB sees exactly the offsets each partition has rolled.
 7. **Roll under foreign maintenance.** After step 6, Spark runs `rewrite_data_files` and `expire_snapshots(retain_last=1)`. komira's reader with the tail still sees every offset exactly once, and a third roll lands. Then an upsert-mode roll runs against a concurrent `rewrite_data_files`: one is replanned, and every key has exactly one live row.
 8. **Index over a table another tool changes.**
    - Build a search index at snapshot S1.
@@ -780,8 +780,8 @@ Each planted mutant below must turn a test red:
 | treat a 5xx as a failure and retry | step 3: the rows appear twice |
 | drop `assert-ref-snapshot-id` on append | step 2: Spark's append is lost |
 | skip the merge revalidation | step 2: the deleted row returns |
-| keep the watermark only in the snapshot summary | step 7: duplicate or missing offsets after expiry |
-| write the watermark of rolled partitions only | step 6: duplicate offsets in the partition left out |
+| keep the rolled offsets only in the snapshot summary | step 7: duplicate or missing offsets after expiry |
+| write the rolled offset only for partitions in the roll | step 6: duplicate offsets in the partition left out |
 | upsert roll without deleting the previous row of a PUT key | step 7: a key with two live rows |
 | drop the live-row check | step 8: the deleted row is returned |
 | ignore equality deletes in the live-row check | step 8: the equality-deleted row is returned |
@@ -825,11 +825,11 @@ Decisions 2, 3, 7, 8 and 9 are kept, revised as noted below.
    - **Recommend yes.** Taking over one job's writes to an existing table is the most likely first workload.
    - Rejected: writing only tables komira created or adopted. It leaves that workload no path, since `adopt` covers only Hive-style Parquet, while the commit client already handles concurrent writers.
    - Rejected: maintaining any table komira writes. komira would share maintenance with a tool it cannot see.
-6. **A topic is a komira IPC tail plus an Iceberg table it rolls into, with per-partition watermarks as a table property. The row store is its log plus an Iceberg base, pinned log first. The broker never writes Parquet.** *Replaces old 4 and 10.*
+6. **A topic is a komira IPC tail plus an Iceberg table it rolls into, with per-partition rolled offsets as a table property. The row store is its log plus an Iceberg base, pinned log first. The broker never writes Parquet.** *Replaces old 4 and 10.*
    - **Recommend yes.**
    - Rejected: zero-copy log-equals-table. It forces one sort order and puts Parquet CPU on the produce path.
    - Rejected: a topic committing straight to Iceberg on every flush. A few commits a minute is the ceiling.
-   - Rejected: watermarks only in snapshot summaries. Other tools' compaction and expiry lose them.
+   - Rejected: rolled offsets only in snapshot summaries. Other tools' compaction and expiry lose them.
 7. **`target_lag` defaults to 60 s on every catalog (komira's own allows down to 10 s); Glue commits use `SkipArchive=true`.** *New; revised in review.*
    - **Recommend yes.**
    - Rejected: a 5-minute Glue default. It rested on Glue's table-version cap, which applies only when archiving is on, and Iceberg's own Glue catalog turns it off.
@@ -866,7 +866,8 @@ Decisions 2, 3, 7, 8 and 9 are kept, revised as noted below.
 
 - Appends now carry `assert-ref-snapshot-id`; without it a server that does not check sequence numbers installs a manifest list that drops another writer's files.
 - The Glue table-version cap is not a constraint with `SkipArchive=true`; the 5-minute Glue default and its arithmetic are gone.
-- The tail watermark moved from snapshot summaries, which other tools' compaction and expiry lose, to a per-partition table property.
+- The tail's rolled offsets moved from snapshot summaries, which other tools' compaction and expiry lose, to a per-partition table property.
+- The per-partition boundary between rolled Iceberg data and the tail is called the *rolled offset* (property `komira.tail.<lineage>.rolled-offsets`), not a watermark: in komira's specs "watermark" means only the event-time watermark of the streaming plan model.
 - Upsert rolls resolve every overwritten key, not only tombstones, and are not conflict-free appends.
 - Erasure now covers manifest statistics, partition values and manifest rewrite; the erasure table no longer contradicts the write rules; v3 tables of other owners wait for the deletion-vector writer.
 - In-place adoption no longer lets maintenance delete the source files.
