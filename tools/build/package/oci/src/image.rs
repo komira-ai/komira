@@ -380,6 +380,10 @@ mod tests {
         let (_, sub, _) = image(&[("usr/abs", b'2', 0o777, b"", "/etc/os-release")]);
         assert_eq!(sub.resolve("usr/abs").unwrap(), "usr/lib/os-release");
         assert_eq!(fs.resolve("/etc/../../etc/./os-release").unwrap(), "usr/lib/os-release");
+        // An empty component, in the path or in a link's target, is none.
+        assert_eq!(fs.resolve("usr//lib//os-release").unwrap(), "usr/lib/os-release");
+        let (_, dbl, _) = image(&[("dbl", b'2', 0o777, b"", "usr//lib")]);
+        assert_eq!(dbl.resolve("dbl/os-release").unwrap(), "usr/lib/os-release");
         assert!(fs.resolve("loop").unwrap_err().contains("symbolic links"));
     }
 

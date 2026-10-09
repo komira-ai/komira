@@ -665,6 +665,16 @@ mod tests {
         assert_eq!(normalized_repo("komira/base"), "docker.io/komira/base");
         assert_eq!(normalized_repo("ghcr.io/a/b"), "ghcr.io/a/b");
         assert_eq!(normalized_repo("localhost/a"), "localhost/a");
+        // A first component with a `:` (a port) or a `.` is a registry.
+        assert_eq!(normalized_repo("host:5000/a"), "host:5000/a");
+        assert_eq!(normalized_repo("a.b/c"), "a.b/c");
+        // Each of the four marks is plain on its own; others are not.
+        for ok in ["a_b", "a.b", "a+b", "a-b"] {
+            assert_eq!(plain(ok, "name", ""), Ok(ok));
+        }
+        for bad in ["a/b", "a:b", "a~b", "a@b"] {
+            assert!(plain(bad, "name", "").is_err(), "{}", bad);
+        }
         assert_eq!(plain("0.1.0~rc1", "version", "~"), Ok("0.1.0~rc1"));
         assert_eq!(plain("a b", "name", ""), Err("name `a b` holds ` `".into()));
         assert_eq!(plain("", "name", ""), Err("name is empty".into()));
