@@ -61,8 +61,11 @@ def _flag_values(argv: List[String], flag: String) -> List[String]:
 
 def test_the_declared_names_in_release_order() raises:
     """The names this file declares, in build order: each library after the
-    libraries it depends on, and the metapackage last. A name added or
-    dropped here is a change to what is published, so it changes this list."""
+    libraries it depends on (release_set_check's stamp check refuses a member
+    whose package requires a member listed after it in release_set.txt, which
+    this file's test below holds equal to these names), and the metapackage
+    last. A name added or dropped here is a change to what is published, so
+    it changes this list."""
     assert_equal(read_artifacts(String(_FILE)).schema_version, Int32(1))
     var d = read_artifacts(String(_FILE))
     var want = List[String]()
@@ -102,6 +105,11 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("komira_validation_run"))
     want.append(String("komira_test_run_id"))
     want.append(String("komira_test_verdict"))
+    want.append(String("komira_kafka_server"))
+    want.append(String("komira_collections"))
+    want.append(String("komira_broker_proto"))
+    want.append(String("komira_supervisor_proto"))
+    want.append(String("komira_plan_proto"))
     want.append(String("komira_all"))
     assert_equal(len(d.artifacts), len(want))
     for i in range(len(want)):

@@ -811,8 +811,8 @@ def test_the_version_gate_still_fires_on_an_otherwise_perfect_message() raises:
     # cannot pass the leg above by refusing every deep message with a version
     # token.
     #
-    # ⚠ NOT `PLAN_WIRE_FORMAT_VERSION + 1`: 3 is a real version (the write
-    # envelope). The version check is SET MEMBERSHIP, not `!= 2`, so "one more
+    # ⚠ NOT `PLAN_WIRE_FORMAT_VERSION + 1`: that is a real version (the write
+    # envelope). The version check is SET MEMBERSHIP, not `!=`, so "one more
     # than the plain version" is inside the set. The unsupported value has to
     # be derived from the TOP of the set, not from the bottom.
     var good = plan_to_bytes(_filter_over_scan())
@@ -837,15 +837,15 @@ def test_a_supported_version_with_no_write_target_is_admitted() raises:
     """★ THE OTHER DIRECTION, AND IT IS THE ONE A `>=` OR A `!=` WOULD GET
     WRONG.
 
-    `format_version = 3` on an envelope carrying NO write target is a producer
-    OVER-DECLARING its reader requirement. That is conservative and legal: the
-    version is a MINIMUM READER CAPABILITY, so declaring a floor higher than you
-    need can only make an older reader refuse bytes it would in fact have
-    handled — never a wrong answer.
+    `PLAN_WIRE_WRITE_TARGET_MIN_VERSION` on an envelope carrying NO write
+    target is a producer OVER-DECLARING its reader requirement. That is
+    conservative and legal: the version is a MINIMUM READER CAPABILITY, so
+    declaring a floor higher than you need can only make an older reader refuse
+    bytes it would in fact have handled — never a wrong answer.
 
     ⚠ WITHOUT THIS LEG, `plan_wire_supported_versions()` could quietly become
-    `{2}` again and only the write path would notice. Here the plain path
-    notices too."""
+    `{PLAN_WIRE_FORMAT_VERSION}` alone and only the write path would notice.
+    Here the plain path notices too."""
     var plan_bytes = _envelope(
         PLAN_WIRE_WRITE_TARGET_MIN_VERSION, _nested_plan(1)
     )
@@ -859,7 +859,8 @@ def test_a_supported_version_with_no_write_target_is_admitted() raises:
         refusal = String(e)
     assert_false(
         refusal.startswith(PLAN_WIRE_VERSION_MISMATCH),
-        "format_version=3 with no write target must be ADMITTED by the version"
+        "format_version=WRITE_TARGET_MIN_VERSION with no write target must be"
+        " ADMITTED by the version"
         " gate (a producer may over-declare its reader floor); got: " + refusal,
     )
 
@@ -1108,37 +1109,39 @@ def _write_envelope(
     return out^
 
 
-def test_f3_a_reader_pinned_at_version_2_refuses_a_write_envelope() raises:
+def test_f3_a_reader_pinned_at_the_plain_version_refuses_a_write_envelope() raises:
     """THE FALSIFIER THAT JUSTIFIES BUMPING THE VERSION AT ALL.
 
-    A reader that speaks only version 2 must REFUSE a write-carrying envelope BY
-    NAME. If it did not, it would decode the plan, ignore field 3, execute, and
-    hand back correct rows with the user's file never written.
+    A reader that speaks only the plain version must REFUSE a write-carrying
+    envelope BY NAME. If it did not, it would decode the plan, ignore field 3,
+    execute, and hand back correct rows with the user's file never written.
 
     THE PINNED READER IS CONSTRUCTED, NOT SIMULATED. `PlanWireVersionSet` is a
-    type precisely so this leg can exist: `only(2)` IS a version-2 reader, and it
-    drives the CURRENT admit pass. A test that asserted this by reasoning about
-    what an old binary would do would be a comment."""
+    type precisely so this leg can exist: `only(PLAN_WIRE_FORMAT_VERSION)` IS a
+    plain-version reader, and it drives the CURRENT admit pass. A test that
+    asserted this by reasoning about what an old binary would do would be a
+    comment."""
     var bytes = plan_to_bytes_with_write_target(
         _filter_over_scan(),
         WriteTarget(String("/tmp/f3.parquet"), WFMT_PARQUET, WCOMP_UNCOMPRESSED),
     )
-    var v2_only = PlanWireVersionSet.only(PLAN_WIRE_FORMAT_VERSION)
+    var plain_only = PlanWireVersionSet.only(PLAN_WIRE_FORMAT_VERSION)
     assert_false(
-        v2_only.contains(PLAN_WIRE_WRITE_TARGET_MIN_VERSION),
+        plain_only.contains(PLAN_WIRE_WRITE_TARGET_MIN_VERSION),
         "the pinned reader must NOT speak the write version, or this leg proves"
         " nothing",
     )
     var raised = False
     var msg = String("")
     try:
-        plan_wire_admit(bytes, v2_only)
+        plan_wire_admit(bytes, plain_only)
     except e:
         raised = True
         msg = String(e)
     assert_true(
         raised,
-        "a reader pinned at version 2 ADMITTED a write-carrying envelope. It"
+        "a reader pinned at the plain version ADMITTED a write-carrying"
+        " envelope. It"
         " would then decode the plan, skip field 3, execute, and return rows"
         " with nothing written - the silent-wrong this version bump exists to"
         " make impossible.",
@@ -1151,7 +1154,7 @@ def test_f3_a_reader_pinned_at_version_2_refuses_a_write_envelope() raises:
     )
     # THE CONTROL. The same reader must still admit a PLAIN envelope, or the leg
     # above is satisfied by a reader that refuses everything.
-    plan_wire_admit(plan_to_bytes(_filter_over_scan()), v2_only)
+    plan_wire_admit(plan_to_bytes(_filter_over_scan()), plain_only)
 
 
 def test_an_understated_write_envelope_is_refused_by_name() raises:
@@ -1159,19 +1162,20 @@ def test_an_understated_write_envelope_is_refused_by_name() raises:
 
     Bumping the WRITER is a claim about envelopes this build produced. This
     format is parsed from bytes some other program produced, so a frontend in
-    another language can set `write_target` and leave `format_version = 2` - and
+    another language can set `write_target` and declare the plain version - and
     those bytes are executed WRONG by every reader shipped before the field
     existed, while this build could run them perfectly.
 
-    Refusing them is what turns 'declare 3' from a convention a frontend author
-    may forget into a rule the wire enforces on the first message."""
+    Refusing them is what turns 'declare the write version' from a convention
+    a frontend author may forget into a rule the wire enforces on the first
+    message."""
     var understated = _write_envelope(
         PLAN_WIRE_FORMAT_VERSION,
         _nested_plan(1),
         _write_target_submessage(String("/tmp/understated.parquet"), 1, 2),
     )
     _assert_refused(
-        "write_target under format_version=2",
+        "write_target under the plain format_version",
         understated,
         PLAN_WIRE_WRITE_TARGET_VERSION_UNDERSTATED,
     )
@@ -1192,6 +1196,57 @@ def test_an_understated_write_envelope_is_refused_by_name() raises:
         "the prescan's refusal must be the capability-floor one, from a"
         " top-level field scan with the tree still unread. got: " + msg,
     )
+
+
+def _redeclared(var bytes: List[UInt8], version: UInt32) raises -> List[UInt8]:
+    """`bytes` with its `format_version` set to `version`. The encoder writes
+    field 1 first as a one-byte varint (`0x08`, then the version), so the
+    rewrite is one byte and the plan behind it is unchanged."""
+    assert_true(
+        len(bytes) > 2 and bytes[0] == UInt8(0x08) and bytes[1] < UInt8(0x80),
+        "the envelope no longer starts with a one-byte format_version varint;"
+        " this helper's premise is gone",
+    )
+    bytes[1] = UInt8(Int(version))
+    return bytes^
+
+
+def test_a_retired_version_is_refused_by_name() raises:
+    """Versions 2 and 3 are the layouts with `WireScalar.error_code` (field
+    20), which this one reserves. Bytes that declare either are refused by
+    `PLAN_WIRE_VERSION_MISMATCH` before the tree is parsed, on a plain envelope
+    and on a write-carrying one.
+
+    Each case is a plan this build encodes with only its version byte changed,
+    so the version is the one thing refused. With 2 or 3 back in the supported
+    set, the plain envelope at 2 decodes and this test fails."""
+    var retired = List[UInt32]()
+    retired.append(UInt32(2))
+    retired.append(UInt32(3))
+    var plain = plan_to_bytes(_filter_over_scan())
+    var write = plan_to_bytes_with_write_target(
+        _filter_over_scan(),
+        WriteTarget(String("/tmp/retired.parquet"), WFMT_PARQUET, WCOMP_SNAPPY),
+    )
+    # THE CONTROL: both envelopes, as encoded, pass the version gate.
+    plan_wire_admit(plain, plan_wire_supported_versions())
+    plan_wire_admit(write, plan_wire_supported_versions())
+    for i in range(len(retired)):
+        var v = retired[i]
+        _assert_refused(
+            "a plain envelope declaring retired version " + String(Int(v)),
+            _redeclared(plain.copy(), v),
+            PLAN_WIRE_VERSION_MISMATCH,
+        )
+        _assert_refused(
+            "a write envelope declaring retired version " + String(Int(v)),
+            _redeclared(write.copy(), v),
+            PLAN_WIRE_VERSION_MISMATCH,
+        )
+        assert_false(
+            plan_wire_supported_versions().contains(v),
+            "version " + String(Int(v)) + " is back in the supported set",
+        )
 
 
 def test_plan_from_bytes_refuses_a_write_envelope_rather_than_dropping_it() raises:
@@ -1343,8 +1398,11 @@ def main() raises:
         test_the_version_gate_still_fires_on_an_otherwise_perfect_message
     ]()
     suite.test[test_a_supported_version_with_no_write_target_is_admitted]()
-    suite.test[test_f3_a_reader_pinned_at_version_2_refuses_a_write_envelope]()
+    suite.test[
+        test_f3_a_reader_pinned_at_the_plain_version_refuses_a_write_envelope
+    ]()
     suite.test[test_an_understated_write_envelope_is_refused_by_name]()
+    suite.test[test_a_retired_version_is_refused_by_name]()
     suite.test[
         test_plan_from_bytes_refuses_a_write_envelope_rather_than_dropping_it
     ]()

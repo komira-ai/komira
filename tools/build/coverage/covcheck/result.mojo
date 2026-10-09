@@ -7,10 +7,12 @@
      "touched_packages": [...], "packages": [<package>...],
      "findings": [<finding>...], "exemptions": [<exemption>...],
      "ignored_files", "excluded_test_files", "ignored_mutants",
-     "excluded_test_mutants"}
+     "excluded_test_mutants", "info_packages": [...],
+     "info_findings": [<finding>...]}
 
 `covcheck gate`: `{"conclusion", "mode", "target_bp", "package": <package>,
-"findings", "exemptions", ...the four counts}`. A `<package>` is written by
+"findings", "exemptions", ...the four counts, "info_packages",
+"info_findings"}`. A `<package>` is written by
 one function for both, so the gate's entry for a package and the report's
 are the same bytes when the numbers are the same.
 
@@ -19,12 +21,15 @@ package has no row (or, for the branch floor, the row has `-`). A package's
 `files` counts every file in its numbers, `unmeasured_files` those that
 raised `UnmeasuredFile`; a finding's `line` is 0 when it is about a whole file, its `count`
 the lines an `UnmeasuredFile` counts uncovered (`null` for other kinds).
+`info_packages` are the measured test-only packages (`--info-package`) and
+`info_findings` their findings, which `findings` does not hold and the
+conclusion does not count (analyze.mojo, step 8).
 """
 
 from covcheck.analyze import Analysis
 from covcheck.annotate import DiffCoverage
 from covcheck.jsonw import JsonOut
-from covcheck.stats import PackageStats
+from covcheck.stats import Finding, PackageStats
 
 
 def _numbers(mut j: JsonOut, p: PackageStats):
@@ -60,11 +65,11 @@ def package_json(p: PackageStats) -> String:
     return j.text()
 
 
-def _tail(mut j: JsonOut, a: Analysis):
-    j.key(String("findings"))
+def _findings(mut j: JsonOut, key: String, fs: List[Finding]):
+    j.key(key)
     j.begin_array()
-    for i in range(len(a.findings)):
-        ref f = a.findings[i]
+    for i in range(len(fs)):
+        ref f = fs[i]
         j.item()
         j.begin_object()
         j.field_str(String("kind"), f.kind)
@@ -78,6 +83,10 @@ def _tail(mut j: JsonOut, a: Analysis):
         j.field_opt(String("count"), f.count)
         j.end_object()
     j.end_array()
+
+
+def _tail(mut j: JsonOut, a: Analysis):
+    _findings(j, String("findings"), a.findings)
     j.key(String("exemptions"))
     j.begin_array()
     for i in range(len(a.exemptions)):
@@ -94,6 +103,13 @@ def _tail(mut j: JsonOut, a: Analysis):
     j.field_int(String("excluded_test_files"), a.excluded_test_files)
     j.field_int(String("ignored_mutants"), a.ignored_mutants)
     j.field_int(String("excluded_test_mutants"), a.excluded_test_mutants)
+    j.key(String("info_packages"))
+    j.begin_array()
+    for i in range(len(a.info_packages)):
+        j.item()
+        j.str_value(a.info_packages[i])
+    j.end_array()
+    _findings(j, String("info_findings"), a.info_findings)
 
 
 def _head(mut j: JsonOut, a: Analysis):

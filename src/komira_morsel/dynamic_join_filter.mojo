@@ -224,11 +224,10 @@ struct DynamicJoinFilter(Movable):
             return None
         var range_filter = range_opt.take()
 
-        # Q13-OUTER-JOIN-COMPLETENESS-V0.4 Phase A (Lever 2) built a
-        # RangeFilter-ONLY DynamicJoinFilter here when `n > CAP`, as a producer
-        # foundation for a consumer-side "Phase B" (`apply_range =
-        # df.has_range()`) that was never written. DELETED
-        # (CB20-DEAD-DYNFILTER): the object it produced had no reachable
+        # An earlier revision built a RangeFilter-ONLY DynamicJoinFilter here
+        # when `n > CAP`, as a producer foundation for a consumer-side step
+        # (`apply_range = df.has_range()`) that was never written. DELETED:
+        # the object it produced had no reachable
         # consumer, and installing one made the probe scan SLOWER by forcing
         # `has_dyn_filter` late-materialisation. The refusal now happens up
         # front in `dynamic_filter_admits_build`, before the caller pays for
