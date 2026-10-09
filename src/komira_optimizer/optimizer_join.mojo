@@ -1632,7 +1632,7 @@ def _semi_target_side(
         elif side != this_side:
             return -1
     if side < 0:
-        return -1
+        return -1  # cov: unreachable left_on is non-empty and every pass of the loop above returns -1 or sets side to 0 or 1
 
     if residual:
         var cols = Set[String]()
