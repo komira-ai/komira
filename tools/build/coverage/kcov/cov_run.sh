@@ -24,7 +24,7 @@
 #   <test_repo>    the repository path of the test source
 #   <import>       the library's import name: <src_dir> ends in src/<import>,
 #                  and the run stages the sources at <import>/ (the directory
-#                  the line tables name them by)
+#                  the line tables name them by; with --solib, at <src_dir>)
 #   --solib        the test is a shared library's driver (a mojo_shared_lib's
 #                  gate_srcs entry): <file> is the library's coverage build in
 #                  <share>, which the driver loads; kcov measures the
@@ -192,6 +192,11 @@ if [ -n "$SOLIB" ] && [ "$PKG_REPO" = - ]; then
     echo "cov_run: with --solib, <test_repo> $TEST_REPO must be a directory then <test> $TEST" >&2
     exit 2
 fi
+# A shared library's driver names none of <src_dir> (the library's line
+# tables name its sources by their paths in the package, given as data and
+# --solib-src, which may well be under <import>/): <src_dir> is staged at its
+# own path then, out of their way, as nothing names it.
+[ -z "$SOLIB" ] || STAGE=$SRC_REL
 GEN=""
 while [ "$#" -gt 0 ] && [ "$1" = --gen ]; do
     [ "$#" -ge 2 ] || { echo "cov_run: --gen needs a file" >&2; exit 2; }

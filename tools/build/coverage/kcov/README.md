@@ -272,9 +272,10 @@ header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
    `$ORIGIN/../lib` reaches them), `bin/<test>`, and `share/` holding the
    test's declared data, its source at its path in the package
    (`tests/test_x.mojo`, the name its line tables use) and the library's
-   staged sources at `<import>/` (the name the line tables use for them).
-   Copies,
-   never links: kcov resolves each name with `realpath`. A second copy of
+   staged sources at `<import>/` (the name the line tables use for them;
+   a shared library's driver names none of them, so with `--solib` they
+   sit at the `[src]` path, out of the way of its sources, which are data).
+   Copies, never links: kcov resolves each name with `realpath`. A second copy of
    the same sources, `lost/`, sits beside it. The one exception: each
    generated source (`--gen`) is moved to `gen/`, outside `share/` and
    `lost/`, and linked from both, so `realpath` takes its name out of every

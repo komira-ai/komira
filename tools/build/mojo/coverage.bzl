@@ -299,8 +299,12 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     for dest in data:
         if dest == name or dest.startswith(name + "/") or name.startswith(dest + "/"):
             fail("{}: the test's data destination {} collides with its source, which a coverage run stages at {}".format(where, repr(dest), repr(name)))
-        if dest == import_name or dest.startswith(import_name + "/"):
-            fail("{}: the data destination {} is under {}/, where a coverage run stages the library's sources".format(where, repr(dest), import_name))
+        # cov_run.sh stages [src] at <import_name>/, where the line tables
+        # name its sources; for a shared library's driver, which names none
+        # of it, at its own path under buck-out/ (its sources are data).
+        stage = "buck-out" if solib else import_name
+        if dest == stage or dest.startswith(stage + "/"):
+            fail("{}: the data destination {} is under {}/, where a coverage run stages the library's sources".format(where, repr(dest), stage))
     share = ctx.actions.copied_dir("cov/tests/{}/share".format(stem), dict(data) | {name: t})
     pkg_dir = _pkg_dir(ctx.label)
     src_repo, gens = coverage_sources(ctx, root)
