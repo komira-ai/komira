@@ -196,10 +196,13 @@ def test_short_destination_refused() raises:
 
 
 def test_uncovered_widths_refused() raises:
+    """Widths with no kernel here return False and write nothing. Width 4
+    has no kernel in this function (ORC calls its own), and -1 is not a
+    multiple of 8 (`-1 % 8 == 7`), so neither reaches a kernel."""
     var packed = _make_packed(8, 64)
     var got = List[Int64](length=64, fill=Int64(-1))
     var dst_span = Span(got)
-    var widths: List[Int] = [3, 5, 7, 12, 63]
+    var widths: List[Int] = [3, 4, 5, 7, 12, 63, -1]
     for wi in range(len(widths)):
         assert_true(
             not simd_unpack_bits(Span(packed), widths[wi], 8, dst_span),
