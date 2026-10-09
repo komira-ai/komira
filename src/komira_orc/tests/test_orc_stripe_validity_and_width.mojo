@@ -15,8 +15,10 @@
 #    column's Arrow width is refused, not truncated. Both edges of each width
 #    still decode.
 # 3. DICTIONARY / DICTIONARY_V2 on a kind other than STRING / VARCHAR / CHAR
-#    is refused (spec "Column Encoding"), on both the PRESENT and the
-#    no-PRESENT path.
+#    is refused (spec "Column Encoding"); the refusal runs before the
+#    PRESENT / no-PRESENT split, so one stream layout covers it. STRING,
+#    VARCHAR and CHAR still decode both dictionary encodings, with and
+#    without a PRESENT stream.
 # 4. The build refuses a validity list whose length is not the row count.
 #
 # Integer streams use the RLEv2 Direct and RLEv1 literal layouts from the
@@ -48,6 +50,7 @@ from komira_orc import (
     ORC_STREAM_PRESENT,
     ORC_STREAM_DATA,
     ORC_STREAM_LENGTH,
+    ORC_STREAM_DICTIONARY_DATA,
     ORC_ENCODING_DIRECT,
     ORC_ENCODING_DIRECT_V2,
     ORC_ENCODING_DICTIONARY,
@@ -60,6 +63,8 @@ from komira_orc import (
     ORC_KIND_FLOAT,
     ORC_KIND_DOUBLE,
     ORC_KIND_STRING,
+    ORC_KIND_VARCHAR,
+    ORC_KIND_CHAR,
     ORC_KIND_BINARY,
     ORC_KIND_DATE,
 )
@@ -458,20 +463,63 @@ def test_dictionary_encoding_refused_on_non_string_kinds() raises:
     ]
     for ki in range(len(kinds)):
         for enc in [ORC_ENCODING_DICTIONARY, ORC_ENCODING_DICTIONARY_V2]:
-            for pres in ["", "v"]:
-                var acc = make_accumulator(kinds[ki], ArrowType.INT64)
-                with assert_raises(contains="BAD_ENCODING: ORC Type.Kind"):
-                    decode_stripe_column(
-                        acc, kinds[ki], enc, 1,
-                        _streams(pres, _bytes(0xFF, 0x01), _bytes(0x00, 0x00, 0x01)),
-                        1,
-                    )
+            var acc = make_accumulator(kinds[ki], ArrowType.INT64)
+            with assert_raises(contains="BAD_ENCODING: ORC Type.Kind"):
+                decode_stripe_column(
+                    acc, kinds[ki], enc, 1,
+                    _streams("", _bytes(0xFF, 0x01), _bytes(0x00, 0x00, 0x01)),
+                    1,
+                )
     var acc = make_accumulator(ORC_KIND_BINARY, ArrowType.BINARY)
     with assert_raises(contains="binary has a DICTIONARY encoding (1)"):
         decode_stripe_column(
             acc, ORC_KIND_BINARY, ORC_ENCODING_DICTIONARY, 1,
             _streams("", _bytes(0x61), _rlev2_direct(_i64s(1), 1, False)), 1,
         )
+
+
+def _dict_streams(present: String, is_v2: Bool) -> List[StreamSpan]:
+    """Dictionary ["blue", "red"]: DICTIONARY_DATA "bluered", LENGTH [4, 3],
+    DATA indices [1, 0, 1] (one per present row), RLEv2 Direct for
+    DICTIONARY_V2 and an RLEv1 literal for DICTIONARY."""
+    var out = List[StreamSpan]()
+    if present != "":
+        out.append(StreamSpan(ORC_STREAM_PRESENT, _present(present)))
+    out.append(
+        StreamSpan(
+            ORC_STREAM_DICTIONARY_DATA,
+            _bytes(0x62, 0x6C, 0x75, 0x65, 0x72, 0x65, 0x64),
+        )
+    )
+    if is_v2:
+        out.append(StreamSpan(ORC_STREAM_LENGTH, _rlev2_direct(_i64s(4, 3), 4, False)))
+        out.append(StreamSpan(ORC_STREAM_DATA, _rlev2_direct(_i64s(1, 0, 1), 1, False)))
+    else:
+        out.append(StreamSpan(ORC_STREAM_LENGTH, _bytes(0xFE, 4, 3)))
+        out.append(StreamSpan(ORC_STREAM_DATA, _bytes(0xFD, 1, 0, 1)))
+    return out^
+
+
+def test_dictionary_encoding_decodes_on_string_kinds() raises:
+    # The allow-list's other side: Apache ORC writers dictionary-encode
+    # STRING, VARCHAR and CHAR, so each must still decode, on the PRESENT
+    # path ("vnvv") and the no-PRESENT path.
+    for kind in [ORC_KIND_STRING, ORC_KIND_VARCHAR, ORC_KIND_CHAR]:
+        for enc in [ORC_ENCODING_DICTIONARY, ORC_ENCODING_DICTIONARY_V2]:
+            var is_v2 = enc == ORC_ENCODING_DICTIONARY_V2
+            var label = String("kind ") + String(kind) + " enc " + String(enc)
+            var acc = make_accumulator(kind, ArrowType.STRING)
+            decode_stripe_column(acc, kind, enc, 2, _dict_streams("", is_v2), 3)
+            decode_stripe_column(acc, kind, enc, 2, _dict_streams("vnvv", is_v2), 4)
+            var col = acc^.build()
+            assert_equal(_nulls(7, col), "vvvvnvv", label)
+            var s = col.as_string()
+            assert_equal(s.get(0), "red", label)
+            assert_equal(s.get(1), "blue", label)
+            assert_equal(s.get(2), "red", label)
+            assert_equal(s.get(3), "red", label)
+            assert_equal(s.get(5), "blue", label)
+            assert_equal(s.get(6), "red", label)
 
 
 # =============================================================================
@@ -501,5 +549,6 @@ def main() raises:
     test_short_out_of_width_refused_in_chunk_and_tail()
     test_int_and_date_out_of_width_refused_both_paths()
     test_dictionary_encoding_refused_on_non_string_kinds()
+    test_dictionary_encoding_decodes_on_string_kinds()
     test_build_refuses_validity_shorter_than_rows()
     print("test_orc_stripe_validity_and_width: ALL PASS")
