@@ -103,23 +103,23 @@ def test_request_line_http_10_with_keepalive() raises:
 
 
 def test_request_line_lowercase_method_rejected() raises:
-    """get / HTTP/1.1 → 400 / PARSE_ERR_METHOD_LOWERCASE."""
+    """get / HTTP/1.1 → 501 / PARSE_ERR_METHOD_LOWERCASE."""
     var buf = _bytes(String("get / HTTP/1.1\r\n\r\n"))
     var span = Span[UInt8](buf)
     var outcome = parse_request_head(span, ParseLimits.defaults())
     assert_false(outcome.err.is_ok())
     assert_equal(Int(outcome.err.kind), Int(PARSE_ERR_METHOD_LOWERCASE))
-    assert_equal(Int(outcome.err.status), 400)
+    assert_equal(Int(outcome.err.status), 501)
 
 
 def test_request_line_unknown_method() raises:
-    """FOOBAR / HTTP/1.1 → 400 / PARSE_ERR_METHOD_UNKNOWN."""
+    """FOOBAR / HTTP/1.1 → 501 / PARSE_ERR_METHOD_UNKNOWN."""
     var buf = _bytes(String("FOOBAR / HTTP/1.1\r\n\r\n"))
     var span = Span[UInt8](buf)
     var outcome = parse_request_head(span, ParseLimits.defaults())
     assert_false(outcome.err.is_ok())
     assert_equal(Int(outcome.err.kind), Int(PARSE_ERR_METHOD_UNKNOWN))
-    assert_equal(Int(outcome.err.status), 400)
+    assert_equal(Int(outcome.err.status), 501)
 
 
 def test_request_line_uri_whitespace_rejected() raises:
@@ -153,15 +153,13 @@ def test_request_line_http_2_unsupported() raises:
     assert_equal(Int(outcome.err.status), 505)
 
 
-def test_request_line_http_invalid_minor_unsupported() raises:
-    """HTTP/1.5 — major 1, minor 5 → 505 (unsupported HTTP minor)."""
+def test_request_line_http_higher_minor_is_1_1() raises:
+    """HTTP/1.5 — major 1, minor 5 → treated as HTTP/1.1 (RFC 9110 §6.2)."""
     var buf = _bytes(String("GET / HTTP/1.5\r\n\r\n"))
     var span = Span[UInt8](buf)
     var outcome = parse_request_head(span, ParseLimits.defaults())
-    assert_false(outcome.err.is_ok())
-    assert_equal(
-        Int(outcome.err.kind), Int(PARSE_ERR_HTTP_VERSION_UNSUPPORTED),
-    )
+    assert_true(outcome.err.is_ok())
+    assert_equal(Int(outcome.http_version_minor), 1)
 
 
 def test_request_line_version_bad_string() raises:
@@ -228,7 +226,7 @@ def main() raises:
     test_request_line_uri_whitespace_rejected()
     test_request_line_http_09_rejected()
     test_request_line_http_2_unsupported()
-    test_request_line_http_invalid_minor_unsupported()
+    test_request_line_http_higher_minor_is_1_1()
     test_request_line_version_bad_string()
     test_request_line_empty_method_rejected()
     test_request_line_empty_target_rejected()

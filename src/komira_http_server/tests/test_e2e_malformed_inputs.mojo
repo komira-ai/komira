@@ -184,16 +184,17 @@ def _assert_status_line(resp: List[UInt8], expected_status_line: String) raises:
 # =============================================================================
 
 
-def test_e2e_lowercase_method_400() raises:
-    """Lowercase method → 400 Bad Request on the wire."""
+def test_e2e_lowercase_method_501() raises:
+    """Lowercase method → 501 Not Implemented on the wire: methods are
+    case-sensitive, so "post" is an unrecognized method (RFC 9110 §9.1)."""
     var resp = _send_and_recv(_bytes(String("post / HTTP/1.1\r\n\r\n")))
-    _assert_status_line(resp, String("HTTP/1.1 400 Bad Request"))
+    _assert_status_line(resp, String("HTTP/1.1 501 Not Implemented"))
 
 
-def test_e2e_unknown_method_400() raises:
-    """Unknown method → 400 Bad Request on the wire."""
+def test_e2e_unknown_method_501() raises:
+    """Unknown method → 501 Not Implemented on the wire (RFC 9110 §9.1)."""
     var resp = _send_and_recv(_bytes(String("FOOBAR / HTTP/1.1\r\n\r\n")))
-    _assert_status_line(resp, String("HTTP/1.1 400 Bad Request"))
+    _assert_status_line(resp, String("HTTP/1.1 501 Not Implemented"))
 
 
 def test_e2e_http_2_unsupported_505() raises:
@@ -230,7 +231,7 @@ def test_e2e_error_response_no_client_input() raises:
     var resp = _send_and_recv(_bytes(String(
         "post / HTTP/1.1\r\nX-Pwn-Me: leakthis\r\n\r\n"
     )))
-    _assert_status_line(resp, String("HTTP/1.1 400 Bad Request"))
+    _assert_status_line(resp, String("HTTP/1.1 501 Not Implemented"))
     # Inspect the full response — 'leakthis' MUST NOT appear.
     var s = _bytes_to_string(resp)
     var needle = String("leakthis")
@@ -267,8 +268,8 @@ def test_e2e_happy_request_still_works() raises:
 
 
 def main() raises:
-    test_e2e_lowercase_method_400()
-    test_e2e_unknown_method_400()
+    test_e2e_lowercase_method_501()
+    test_e2e_unknown_method_501()
     test_e2e_http_2_unsupported_505()
     test_e2e_te_and_cl_smuggling_400()
     test_e2e_expect_unsupported_417()
