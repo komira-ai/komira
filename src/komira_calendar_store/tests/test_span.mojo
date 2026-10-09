@@ -172,4 +172,6 @@ def main() raises:
         NO_END,
     )
     assert_equal(f, String(), "utc_span rows")
+    # The form the failure lines above print a span in.
+    assert_equal(String(UtcSpan(1, 2)), "[1, 2)")
     print("PASS test_span: 13 rows")
