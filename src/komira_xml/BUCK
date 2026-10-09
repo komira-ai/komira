@@ -9,7 +9,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # XML 1.0; test_xml_accessors the position-based child lookup (`child_index`,
 # `children_named`) and the text accessors; test_xml_copy checks that a node
 # copied as a list element, or with its children, shares no buffer with the
-# original.
+# original; test_xml_edges the edges the others leave unexercised (lenient
+# unescape bounds, declaration and tag shapes cut short, the reserved
+# namespace names, canonical_node, the writer's small accessors).
 mojo_library(
     name = "komira_xml",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -17,6 +19,7 @@ mojo_library(
         "tests/test_xml_accessors.mojo",
         "tests/test_xml_codec.mojo",
         "tests/test_xml_copy.mojo",
+        "tests/test_xml_edges.mojo",
         "tests/test_xml_strict.mojo",
     ],
     visibility = ["PUBLIC"],

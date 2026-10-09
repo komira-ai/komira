@@ -244,7 +244,7 @@ def parse_xml(doc: StringSlice) raises -> XmlNode:
             continue
         # XML_END
         if len(stack) == 0:
-            raise Error("xml: end tag with no open element")
+            raise Error("xml: end tag with no open element")  # cov: unreachable reader ENDs only what it opened
         var done = stack.pop()
         var mark = ns_mark.pop()
         while len(ns_prefix) > mark:
@@ -252,16 +252,16 @@ def parse_xml(doc: StringSlice) raises -> XmlNode:
             _ = ns_uri.pop()
         if len(stack) == 0:
             if have_root:
-                raise Error("xml: more than one root element")
+                raise Error("xml: more than one root element")  # cov: unreachable reader refuses a 2nd root
             root = done^
             have_root = True
         else:
             stack[len(stack) - 1].children.append(done^)
 
     if len(stack) != 0:
-        raise Error("xml: unterminated element")
+        raise Error("xml: unterminated element")  # cov: unreachable reader raises first
     if not have_root:
-        raise Error("xml: no root element")
+        raise Error("xml: no root element")  # cov: unreachable reader raises first
     return root^
 
 
