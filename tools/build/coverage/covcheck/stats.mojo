@@ -22,6 +22,7 @@ comptime EXEMPTION_WITHOUT_REASON = "ExemptionWithoutReason"
 comptime STALE_EXEMPTION = "StaleExemption"
 comptime UNMEASURED_FILE = "UnmeasuredFile"
 comptime BRANCH_UNMEASURED_FILE = "BranchUnmeasuredFile"
+comptime DECLARATION_ONLY_FILE = "DeclarationOnlyFile"
 
 comptime NO_FLOOR: Int = -1
 
@@ -94,7 +95,8 @@ struct Finding(Copyable, Movable):
     points (the target or the floor) or -1 when they do not apply; `path`
     and `line` place the finding in a file (line 0: the whole file), or are
     empty and 0; `count` is the number of lines an `UnmeasuredFile` counts
-    uncovered, -1 for every other finding."""
+    uncovered, or a `DeclarationOnlyFile` would have counted, -1 for every
+    other finding."""
 
     var kind: String
     var package: String

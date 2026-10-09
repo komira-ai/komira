@@ -30,24 +30,29 @@
 #
 #   test_membership_agrees_with_protoc
 #       Every space, every wire value 1 to 256: `plan_wire_from_wire` accepts
-#       it exactly when the .proto declares it (or it is in `_exempt`), decodes
-#       it to wire - 1, and `plan_wire_to_wire` maps that back. The member
+#       it exactly when the .proto declares it, decodes it to wire - 1, and
+#       `plan_wire_to_wire` maps that back. A number in `_exempt` is declared
+#       by the engine and refused in both directions as reserved. The member
 #       count and highest engine value each space publishes are recomputed
-#       from protoc's view, not read from the file under test.
+#       from protoc's view plus `_exempt`, not read from the file under test.
 #       Catches: a run boundary off by one in `*_is_declared`, a space that
-#       accepts a number the .proto never named (or refuses one it did), a
-#       stale `plan_wire_space_member_count` / `plan_wire_space_engine_max` row.
+#       accepts a number the .proto never named or reserves (or refuses one
+#       it declares), a stale `plan_wire_space_member_count` /
+#       `plan_wire_space_engine_max` row.
 #
 #   test_from_wire_refusals_say_why
-#       The three refusals of every `*_from_wire` (not positive, past a UInt8,
-#       undeclared), each with its full message, on every space.
+#       The five refusals of every `*_from_wire` (negative, zero, past a
+#       UInt8, undeclared, reserved), each with its full message, on every
+#       space.
 #       Catches: swapped or merged guards (a value above 256 reported as
-#       merely unknown, a 0 reported as unknown), a message naming another
-#       space or the wrong UNSPECIFIED name.
+#       merely unknown, a 0 reported as unknown, a negative value reported as
+#       wire 0), a message naming another space or the wrong UNSPECIFIED name,
+#       a reserved number decoded or reported as unknown.
 #
 #   test_to_wire_refuses_every_undeclared_engine_tag_by_name
 #       Every engine value 0 to 255 a space does not declare: `*_to_wire`
-#       refuses it with its message.
+#       refuses it with its message; every `_exempt` engine value: refused as
+#       reserved.
 #
 #   test_space_names_are_the_proto_enum_names
 #       `plan_wire_space_name` for all 32 spaces equals the enum's name in the
@@ -58,12 +63,13 @@
 #       -1 and 32 against all five raising dispatchers, by message, and the
 #       name dispatcher's total fallback.
 #
-# ⚠ `_exempt` IS A DEPARTURE, PINNED, NOT A BLESSING. The .proto RESERVES
-# ExprTag 11 and 12 (EXPR_BETWEEN, EXPR_SORT_KEY) and SourceVariantTag 1 and 2
-# (SOURCE_VARIANT_PARQUET, SOURCE_VARIANT_IN_MEMORY) as "declared by the
-# engine, deliberately NOT on the wire". The Mojo vocabulary still declares,
-# names, encodes and decodes all four. The ledger keeps the gap from growing
-# silently; a change that closes it removes its row here.
+# `_exempt`: the .proto RESERVES ExprTag 11 and 12 (EXPR_BETWEEN,
+# EXPR_SORT_KEY) and SourceVariantTag 1 and 2 (SOURCE_VARIANT_PARQUET,
+# SOURCE_VARIANT_IN_MEMORY) as "declared by the engine, deliberately NOT on the
+# wire". The Mojo vocabulary declares and names all four, because the engine
+# does, and refuses them in both directions as reserved. The ledger keeps the
+# set from growing silently; a tag that leaves the engine, or gets a wire
+# number back, removes its row here.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -276,6 +282,20 @@ def _exempt() -> List[String]:
     ]
 
 
+def _reserved_from_wire(space_name: String, w: Int, name: String) -> String:
+    return (
+        space_name + ": wire value " + String(w) + " (" + name
+        + ") is reserved: plan_vocabulary.proto keeps it off the wire"
+    )
+
+
+def _reserved_to_wire(space_name: String, t: Int, name: String) -> String:
+    return (
+        space_name + ": engine tag " + String(t) + " (" + name
+        + ") is reserved on the wire: plan_vocabulary.proto keeps it off"
+    )
+
+
 def _exempt_name(space: Int, w: Int) -> String:
     """The Mojo name `_exempt` gives (space, w), or empty."""
     var prefix = _proto_types()[space] + " " + String(w) + " "
@@ -452,10 +472,24 @@ def test_membership_agrees_with_protoc() raises:
         var top = -1
         for w in range(1, 257):
             var where = space_name + " wire " + String(w)
-            var named = _proto_declares(space, w) or _exempt_name(space, w).byte_length() > 0
+            var exempt = _exempt_name(space, w)
             var err = _from_wire_error(space, Int32(w))
             var t = UInt8(w - 1)
-            if named:
+            if exempt.byte_length() > 0:
+                assert_equal(
+                    err,
+                    _reserved_from_wire(space_name, w, exempt),
+                    where + ": reserved, so refused",
+                )
+                assert_true(plan_wire_is_declared(space, t), where + ": declared")
+                assert_equal(
+                    _to_wire_error(space, t),
+                    _reserved_to_wire(space_name, w - 1, exempt),
+                    where + ": reserved, so not encoded",
+                )
+                members += 1
+                top = w - 1
+            elif _proto_declares(space, w):
                 assert_equal(err, String(), where + ": must decode")
                 assert_equal(
                     Int(plan_wire_from_wire(space, Int32(w))),
@@ -485,6 +519,7 @@ def test_membership_agrees_with_protoc() raises:
 
 def test_from_wire_refusals_say_why() raises:
     var ws = _sweep()
+    var refused_reserved = 0
     for space in range(PLAN_WIRE_SPACE_COUNT):
         var space_name = plan_wire_space_name(space)
         var unspecified = space_name + ": wire 0 is " + _proto_name(space, 0)
@@ -494,7 +529,18 @@ def test_from_wire_refusals_say_why() raises:
             var w = ws[i]
             var err = _from_wire_error(space, Int32(w))
             var where = space_name + " wire " + String(w)
-            if w <= 0:
+            if w < 0:
+                assert_equal(
+                    err,
+                    space_name
+                    + ": wire value "
+                    + String(w)
+                    + " is negative; no "
+                    + space_name
+                    + " value has a negative wire number",
+                    where,
+                )
+            elif w == 0:
                 assert_equal(err, unspecified, where)
             elif w > 256:
                 assert_equal(
@@ -515,6 +561,13 @@ def test_from_wire_refusals_say_why() raises:
                     + " is unknown to this reader",
                     where,
                 )
+            elif _exempt_name(space, w).byte_length() > 0:
+                refused_reserved += 1
+                assert_equal(
+                    err,
+                    _reserved_from_wire(space_name, w, _exempt_name(space, w)),
+                    where,
+                )
             else:
                 assert_equal(err, String(), where)
         # Every space leaves some wire value in 1..256 undeclared, so the third
@@ -524,16 +577,26 @@ def test_from_wire_refusals_say_why() raises:
             256 - plan_wire_space_member_count(space),
             space_name + ": undeclared values in 1..256",
         )
+    assert_equal(refused_reserved, len(_exempt()), "every _exempt row refused")
 
 
 def test_to_wire_refuses_every_undeclared_engine_tag_by_name() raises:
     var refused = 0
+    var reserved = 0
     for space in range(PLAN_WIRE_SPACE_COUNT):
         var space_name = plan_wire_space_name(space)
         for i in range(256):
             var t = UInt8(i)
             var err = _to_wire_error(space, t)
-            if plan_wire_is_declared(space, t):
+            var exempt = _exempt_name(space, i + 1)
+            if exempt.byte_length() > 0:
+                reserved += 1
+                assert_equal(
+                    err,
+                    _reserved_to_wire(space_name, i, exempt),
+                    space_name + " engine " + String(i),
+                )
+            elif plan_wire_is_declared(space, t):
                 assert_equal(err, String(), space_name + " engine " + String(i))
             else:
                 refused += 1
@@ -549,6 +612,7 @@ def test_to_wire_refuses_every_undeclared_engine_tag_by_name() raises:
         PLAN_WIRE_SPACE_COUNT * 256 - PLAN_WIRE_VOCABULARY_MEMBERS,
         "every undeclared engine value refused",
     )
+    assert_equal(reserved, len(_exempt()), "every _exempt row refused")
 
 
 # ---------------------------------------------------------------------------

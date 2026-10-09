@@ -94,7 +94,6 @@ def _held() -> List[Held]:
     # Resource: header fields, then the body oneof.
     l.append(Held("Resource", 4, 4, "reserved: the retired stage filter"))
     l.append(Held("Resource", 5, 5, "a typed per-cloud settings map"))
-    l.append(Held("Resource", 6, 6, "physical_name"))
     l.append(Held("Resource", 17, 17, "unused"))
     l.append(Held("Resource", 19, 19, "unused"))
     l.append(
@@ -336,6 +335,15 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("Resource")
     nums.append(3)
     what.append("retention (an enum)")
+    names.append("Resource")
+    nums.append(6)
+    what.append("physical_name (an optional string)")
+    names.append("Resource")
+    nums.append(7)
+    what.append("labels (a map)")
+    names.append("Resource")
+    nums.append(8)
+    what.append("adopt (a bool)")
     names.append("Value")
     nums.append(2)
     what.append("param (a string oneof arm)")

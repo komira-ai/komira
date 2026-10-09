@@ -1,0 +1,100 @@
+load("@komira//tools/build/package:defs.bzl", "oci_image", "oci_tree")
+load("@komira//tools/build/package:oci_check.bzl", "oci_image_check")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The image tool (README.md): oci_tree runs `komira_oci tree`, oci_image of a
+# tree `komira_oci image`, every oci_image `komira_oci layers`, and
+# oci_image_check `komira_oci check`. Zig, as every build tool under
+# tools/build is (komira#956).
+
+_SRCS = glob(["src/*.zig"])
+
+# The unit tests (the tree refusals, the writers, the whiteout fixtures among
+# them): `zig test` of main.zig, whose test block imports every *_test.zig,
+# run as a build action.
+zig_test(
+    name = "komira_oci_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Published behind its unit tests: no tree or image builds unless they pass.
+zig_exe(
+    name = "komira_oci",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":komira_oci_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The check on images of the pinned distroless base. The controls are green;
+# each other case has exactly one defect and is built with `expect_red`, so it
+# builds only while the check is red naming that defect. A check that ignored
+# a whiteout kind, compared the Entrypoint loosely, or read only the first
+# `executables` or `files` item would build one of them green, and so fail.
+
+_CERTS = "etc/ssl/certs/ca-certificates.crt"
+
+_SH = {"bin/sh": "//tools/build/toolchains:busybox"}
+
+# image name -> files of its tree (all with entrypoint /bin/sh)
+_IMAGES = {
+    "control": _SH,
+    # `.wh.ssl` in etc/: etc/ssl and everything under it is gone.
+    "dir_whiteout": _SH | {"etc/.wh.ssl": "whiteout"},
+    # an opaque etc/ssl/certs: the base's files in it are gone.
+    "opaque_whiteout": _SH | {"etc/ssl/certs/.wh..wh..opq": "whiteout"},
+    # a second program, /bin/other, which is not the entrypoint.
+    "two_programs": _SH | {"bin/other": "//tools/build/toolchains:busybox"},
+}
+
+[
+    (
+        oci_tree(
+            name = name + "_tree",
+            files = files,
+            version = "0.1.0",
+        ),
+        oci_image(
+            name = name + "_image",
+            tree = ":{}_tree".format(name),
+            entrypoint = "/bin/sh",
+            repository = "komira/oci-check-" + name.replace("_", "-"),
+        ),
+    )
+    for name, files in _IMAGES.items()
+]
+
+# check name -> (image, entrypoint, executables, files, expect_red)
+_CHECKS = {
+    "control": ("control", "/bin/sh", [], [_CERTS], None),
+    "dir_whiteout": ("dir_whiteout", "/bin/sh", [], [_CERTS], "file {}: not in the image".format(_CERTS)),
+    "opaque_whiteout": ("opaque_whiteout", "/bin/sh", [], [_CERTS], "file {}: not in the image".format(_CERTS)),
+    # /bin/other is a 0755 file of the image, so the only defect of
+    # `wrong_entrypoint` is that the config's Entrypoint names /bin/sh.
+    "two_programs": ("two_programs", "/bin/sh", ["bin/other"], [_CERTS], None),
+    "wrong_entrypoint": ("two_programs", "/bin/other", ["bin/sh"], [_CERTS], "the config's Entrypoint is not [\"/bin/other\"]"),
+    # The bad item is not the first: etc/os-release is a symlink to a file
+    # without mode 0755, and etc/nope is not in the image.
+    "second_exec": ("control", "/bin/sh", ["bin/sh", "etc/os-release"], [_CERTS], "exec etc/os-release: "),
+    "second_file": ("control", "/bin/sh", [], [_CERTS, "etc/nope"], "file etc/nope: not in the image"),
+}
+
+[
+    oci_image_check(
+        name = name,
+        image = ":{}_image".format(image),
+        entrypoint = entrypoint,
+        executables = executables,
+        files = files,
+        expect_red = expect_red,
+    )
+    for name, (image, entrypoint, executables, files, expect_red) in _CHECKS.items()
+]
