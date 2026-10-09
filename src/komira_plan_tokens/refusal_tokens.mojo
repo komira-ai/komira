@@ -9,13 +9,15 @@
 # standard library: a package that may not depend on the optimizer can import
 # it.
 #
-# The table holds the token strings. The constants the raisers use are
-# declared in the raising packages, none of which this package may import:
+# The table holds the token strings. Their constants are declared in other
+# packages, none of which this package may import:
 #
 #     SCAN_BINDING_EPOCH_MISMATCH, SCAN_BINDING_HANDLE_NOT_BOUND
 #         komira_scan_source.scan_resolver
 #     OPTIMIZER_UNRESOLVED_SCALAR_DEPS
-#         komira_optimizer.optimizer_result (OPTIMIZE_REFUSAL_UNRESOLVED_DEPS)
+#         komira_optimizer.optimizer_result (OPTIMIZE_REFUSAL_UNRESOLVED_DEPS).
+#         No code in the tree raises it yet (the round-cap driver is not in
+#         this tree); the row is kept for the UNRESOLVED_DEPS class.
 #     PHYSICAL_PLAN_IR_VERSION_MISMATCH, PHYSICAL_PLAN_IR_VERSION_UNCHECKABLE
 #         komira_plan_ir.physical_plan
 #     PHYSICAL_PLAN_CARRIES_LOGICAL_PLAN,
@@ -25,7 +27,7 @@
 #
 # The welded test pins each string literally. komira_optimizer's
 # test_optimizer_result checks the scan-binding and scalar-dependency strings
-# equal the raisers' constants.
+# equal the declared constants.
 #
 # No token is a substring of another (the welded test checks it), so a message
 # that holds one token matches one entry. For a message that holds two,

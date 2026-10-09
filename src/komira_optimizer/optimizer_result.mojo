@@ -119,9 +119,11 @@ frames later if it is laundered instead of refused. Caller-actionable."""
 comptime OPTIMIZE_ERR_UNRESOLVED_DEPS: Int32 = -2
 """The plan's scalar dependencies did not reach a fixpoint.
 
-`_optimize_pure_with_deps` runs the pure pipeline, resolves the requests it
-emitted, and re-plans with them bound. Exceeding the round cap means a pass is
-emitting a request nobody consumes, or the query nests deeper than the cap.
+The driver that would return it (run the pure pipeline, resolve the requests
+it emitted, re-plan with them bound, and refuse past a round cap) is not yet
+in this tree, so nothing returns this code today. Exceeding the round cap would
+mean a pass is emitting a request nobody consumes, or the query nests deeper
+than the cap.
 Returning a plan anyway would ship an unfolded subquery site that fails much
 later, at eval, far from this cause."""
 
@@ -134,12 +136,13 @@ Its message is the pass's own `Error` text, unmodified."""
 comptime OPTIMIZE_REFUSAL_UNRESOLVED_DEPS: StaticString = (
     "OPTIMIZER_UNRESOLVED_SCALAR_DEPS"
 )
-"""The named token `_optimize_pure_with_deps` puts in its round-cap refusal.
+"""The named token of the round-cap refusal. No code in the tree raises it yet:
+the round-cap driver is not in this tree. The constant and the shared table's
+UNRESOLVED_DEPS row are kept for that class.
 
-⚠ THE RAISE SITE MUST IMPORT THIS, NOT RE-SPELL IT. The shared table in
-`komira_plan_tokens` holds the same string as UNRESOLVED_DEPS, and that row is
-the only reason `_classify` can tell this refusal apart from any other pass
-refusal; test_optimizer_result checks the two strings are equal."""
+A raise site added later must import this, not re-spell it: the table row is
+what lets `_classify` tell the refusal apart from any other pass refusal, and
+test_optimizer_result checks the two strings are equal."""
 
 
 def _classify(message: String) -> Int32:

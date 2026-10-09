@@ -2,10 +2,10 @@
 # refusal_tokens: the shared table of plan refusal tokens
 # =============================================================================
 #
-# The table's rows are pinned literally: the raisers' constants live in
-# packages this one may not import (komira_scan_source, komira_plan_ir,
-# komira_optimizer), so each string below is the value of the raiser's
-# constant, copied. Each test names the defect it catches.
+# The table's rows are pinned literally: the constants live in packages this
+# one may not import (komira_scan_source, komira_plan_ir, komira_optimizer),
+# so each string below is the value of the declared constant, copied. Nothing
+# in the tree raises OPTIMIZER_UNRESOLVED_SCALAR_DEPS yet. Each test names the defect it catches.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -20,7 +20,7 @@ from komira_plan_tokens import (
 
 
 def _expected() -> List[RefusalToken]:
-    """The table as the raisers spell it, in table order."""
+    """The table as the declaring packages spell it, in table order."""
     var t = List[RefusalToken]()
     # komira_scan_source.scan_resolver
     t.append(RefusalToken("SCAN_BINDING_EPOCH_MISMATCH", RefusalClass.SCAN_BINDING))
@@ -135,6 +135,22 @@ def test_message_class_finds_a_token_anywhere() raises:
         _name(message_class("round cap hit: OPTIMIZER_UNRESOLVED_SCALAR_DEPS")),
         String("UNRESOLVED_DEPS"),
     )
+
+
+def test_message_class_finds_every_row() raises:
+    """Catches a search that skips a row (a loop bound of `len(table) - 1`
+    misses the last door token), alone or inside a longer message. No token
+    contains another, so each message names one row."""
+    var t = plan_refusal_tokens()
+    for i in range(len(t)):
+        var tok = String(t[i].token)
+        var want = t[i].refusal_class.name()
+        assert_equal(_name(message_class(tok)), want, "alone: " + tok)
+        assert_equal(
+            _name(message_class(String("refused: ") + tok + String(" (node 2)"))),
+            want,
+            "inside a message: " + tok,
+        )
 
 
 def test_message_class_of_unnamed_text_is_none() raises:

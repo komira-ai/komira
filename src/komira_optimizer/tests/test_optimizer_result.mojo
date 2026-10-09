@@ -5,8 +5,9 @@
 # `OptimizeResult` carries a plan iff its status is OPTIMIZE_OK, and
 # `_classify` maps a caught error's text to one of three failure classes by
 # the shared token table of komira_plan_tokens, whose strings are checked here
-# against the constants the raising modules export. Each test names the defect
-# it catches.
+# against the constants their modules declare (the scan-binding pair, which
+# komira_scan_source raises, and the round-cap token, which nothing in the
+# tree raises yet). Each test names the defect it catches.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -86,9 +87,11 @@ def _status_for(cls: RefusalClass) raises -> Int32:
 
 
 def test_classify_every_table_token_by_its_class() raises:
-    """Catches a `_classify` that reads its own arms instead of the table (a
-    token added to the table is not classified), maps a class to the wrong
-    status, or gives a physical-plan door token a status of its own."""
+    """Catches a wrong status for a SCAN_BINDING or UNRESOLVED_DEPS row, and a
+    physical-plan door token (PRODUCER_BUG) given a status of its own. It
+    cannot tell whether `_classify` reads the table or spells its own arms:
+    PRODUCER_BUG and an unnamed message both land on PASS_REFUSED, so the
+    former arms answer every row the same way."""
     var t = plan_refusal_tokens()
     assert_true(len(t) > 0)
     for i in range(len(t)):
@@ -113,9 +116,10 @@ def _table_class_name(token: StaticString) -> String:
     return cls.value().name()
 
 
-def test_table_strings_equal_the_raisers_constants() raises:
-    """Catches a table row that drifts from the constant its raiser uses: the
-    raiser's refusal would no longer be classified."""
+def test_table_strings_equal_the_declared_constants() raises:
+    """Catches a table row that drifts from the constant its module declares:
+    a refusal raised with that constant would no longer be classified. The
+    round-cap constant has no raiser in the tree yet."""
     assert_equal(_table_class_name(SCAN_BINDING_EPOCH_MISMATCH), String("SCAN_BINDING"))
     assert_equal(_table_class_name(SCAN_BINDING_HANDLE_NOT_BOUND), String("SCAN_BINDING"))
     assert_equal(_table_class_name(OPTIMIZE_REFUSAL_UNRESOLVED_DEPS), String("UNRESOLVED_DEPS"))
