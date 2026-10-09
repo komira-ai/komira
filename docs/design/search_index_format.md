@@ -9,9 +9,13 @@ format. Each decision gives the options, a recommendation, and the proof its cha
 ## What is it for, and what is out of scope?
 
 A graph over data is planned for komira: a labelled property graph of nodes, edges and episodes,
-kept as `komira_search` splits, queried by typed primitives (`search`, `knn`, `neighbors`, `k_hop`,
-`as_of`, and rank fusion of their results). This document says what the split format and its catalog must hold for that, measured against the code
-as it is.
+queried by typed primitives (`search`, `knn`, `neighbors`, `k_hop`, `as_of`, and rank fusion of
+their results). This document says what the split format and its catalog must hold if that graph is
+kept as `komira_search` splits, measured against the code as it is. Whether it is kept that way, as
+tables with a snapshot manifest, or as tables with a derived search index, is decided in
+[data_graph_storage.md](data_graph_storage.md), which also says which of the decisions below the
+graph depends on under each choice. The correctness fixes below (the summary version check, the L0
+refusal, the unchecked query field) are needed whatever is chosen.
 
 What the graph stores, per document kind:
 
@@ -425,6 +429,9 @@ concern before it grows.
 
 ## Open questions for the maintainers (recommendation first)
 
+Questions 1 to 12 are about the search format. Whether the graph needs decisions 1 to 4 at all is
+question 13.
+
 1. Version 2 with a field directory and a `required_features` set, or an additive directory slot?
    Recommend version 2.
 2. Keep writing version 1 for single-field splits, or always write version 2? Recommend version 1
@@ -453,3 +460,7 @@ concern before it grows.
     version 2 (recommended), or bring its reader into komira first?
 12. The erasure deadline: what bound must the merge policy meet when it selects a split that a live
     delete set resolves to? Recommend a per-index setting, checked by the compactor's tests.
+13. Does a graph over data depend on decisions 1 to 4? Recommend not: keep the graph as tables with a
+    snapshot manifest and use search splits as a derived text index
+    ([data_graph_storage.md](data_graph_storage.md)); then only the correctness fixes and the version
+    1 golden go ahead now, and decisions 1 to 4 wait for a search index that needs them.
