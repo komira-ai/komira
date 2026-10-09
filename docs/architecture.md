@@ -182,6 +182,7 @@ runs a whole plan yet ([Layers still to come](#layers-still-to-come)).
 | [`komira_secret_registry`](../src/komira_secret_registry/) | the per-execution secret registry: a side table binding a query's secret-bearing plan nodes to opaque handles, and the connector reveal seam that resolves a handle only at the moment a connector needs the bytes. |
 | [`komira_secret_env`](../src/komira_secret_env/) | a `SecretStore` whose handle is the name of an environment variable (`[A-Za-z_][A-Za-z0-9_]*`, at most 128 bytes): it returns the variable's value as a zeroizing, redacted `SecretValue`. |
 | [`komira_authz_api`](../src/komira_authz_api/) | the neutral authorization interface, `AuthzPort` with the plain `AuthzAction` and `AuthzResource` (kind, opaque id, attributes) values, and two store-free reference conformers. |
+| [`komira_resource_gate`](../src/komira_resource_gate/) | per-resource authorization in front of a dispatcher: a route table whose zero decision is deny, the `ResourceCatalog` an application declares, and `ResourceAuthzGate`, which serves declared public routes without an identity, answers 401 without a principal, and asks an `AuthzPort` about every governed request (403 on a denial, 503 when the decision is unavailable). |
 
 ### Runtime support and change data capture
 

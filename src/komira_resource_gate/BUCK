@@ -1,0 +1,46 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Per-resource authorization in front of a dispatcher: `RouteDecision` (DENY is
+# its zero value), the `ResourceRouteTable` an application declares its routes
+# in, the `ResourceCatalog` trait, and `ResourceAuthzGate`, which asks a
+# komira_authz_api `AuthzPort` about every governed request.
+# The welded tests pin the decision type, the route grammar and its refusals,
+# the gate's order and its three refusals, and (test_no_product_vocabulary,
+# over komira_test_vocabulary) that the sources name no product concept and
+# hold no early date.
+mojo_library(
+    name = "komira_resource_gate",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_authz_api:komira_authz_api",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+    ],
+    test_srcs = [
+        "tests/test_gate.mojo",
+        "tests/test_no_product_vocabulary.mojo",
+        "tests/test_route_decision.mojo",
+        "tests/test_route_table.mojo",
+    ],
+    test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
+    test_data = {
+        # The vocabulary test reads the library's own sources, staged at their
+        # repository paths.
+        "tests/test_no_product_vocabulary.mojo": glob(
+            ["**/*.mojo"],
+            exclude = ["tests/**/*.mojo"],
+        ),
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
