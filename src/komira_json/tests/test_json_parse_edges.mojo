@@ -9,12 +9,14 @@
 # bytes differ, an object key at the end of the input, an exponent followed
 # by a non-digit, hex digits just outside each `\u` digit range, the 4-byte
 # UTF-8 lead bytes F1..F3, a third or fourth byte above 0xBF, and a high
-# surrogate followed by a `\u` escape above the low-surrogate range.
+# surrogate followed by a `\u` escape above the low-surrogate range, and
+# the line cursor queried past the end of its input.
 # =============================================================================
 
 from std.testing import assert_equal
 
 from komira_json import parse_json_bytes, parse_json_value
+from komira_json.parse import _LineCursor
 
 
 def _refusal_of(doc: String) -> String:
@@ -167,6 +169,21 @@ def test_high_surrogate_then_above_low_range() raises:
     print("  test_high_surrogate_then_above_low_range: PASS")
 
 
+def test_line_cursor_target_past_end() raises:
+    # The parser never asks past the end, so only a direct call reaches the
+    # `pos < n` stop: without it the walk reads b[3] of a 3-byte input.
+    var b: List[UInt8] = [0x61, 0x0A, 0x62]
+    var c = _LineCursor()
+    assert_equal(c.line_at(b, 1), 1)
+    assert_equal(c.pos, 1)
+    assert_equal(c.line_at(b, 10), 2)
+    assert_equal(c.pos, 3)
+    # A later query, still past the end, stays put.
+    assert_equal(c.line_at(b, 11), 2)
+    assert_equal(c.pos, 3)
+    print("  test_line_cursor_target_past_end: PASS")
+
+
 def main() raises:
     print("test_json_parse_edges")
     test_literal_same_length_other_bytes()
@@ -176,4 +193,5 @@ def main() raises:
     test_four_byte_leads_f1_to_f3()
     test_later_byte_above_continuation_range()
     test_high_surrogate_then_above_low_range()
+    test_line_cursor_target_past_end()
     print("test_json_parse_edges: ALL PASS")

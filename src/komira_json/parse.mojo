@@ -169,7 +169,7 @@ struct _LineCursor(Copyable, Movable):
 
     def line_at(mut self, b: List[UInt8], target: Int) -> Int:
         var n = len(b)
-        while self.pos < target and self.pos < n:  # cov: unreachable every caller passes target <= len(b), so pos < n never fails first
+        while self.pos < target and self.pos < n:
             if b[self.pos] == 0x0A:  # '\n'
                 self.line += 1
             self.pos += 1
