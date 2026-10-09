@@ -32,15 +32,17 @@
 #   4. THE CREDENTIAL comes from the channel's CONDA repository, never from a
 #      flag: an API_TOKEN by secret name (resolved through the `SecretStore`)
 #      or OIDC trusted publishing, whose token's `environment` claim must be
-#      the stage's environment. Reads on a PUBLIC channel are anonymous; on a
-#      PRIVATE one
-#      they carry the credential, so it is resolved before step 1 (an OIDC
-#      exchange included: that is the one value the run uses). On a PUBLIC
-#      channel the write value is resolved at step 2, once. A credential
-#      that cannot be had is FAILED (KCI-E-CREDENTIAL), nothing sent;
+#      the stage's environment. Step 1's reads on a PUBLIC channel are
+#      anonymous; on a PRIVATE one they carry the credential, so it is
+#      resolved before step 1 (an OIDC exchange included: that is the one
+#      value the run uses). On a PUBLIC channel the write value is resolved
+#      at step 2, once, and from then on every request carries it, the
+#      read-backs of steps 2 to 4 included (`upload.mojo`'s header). A
+#      credential that cannot be had is FAILED (KCI-E-CREDENTIAL), nothing
+#      sent;
 #   5. --plan: steps 0 and 1 only, and NO WRITE to the channel. The reads
-#      stay as above (a PUBLIC channel's anonymous; a PRIVATE API_TOKEN
-#      channel's carry the token). THE CREDENTIAL PROBE: for an OIDC channel
+#      are step 1's as above (a PUBLIC channel's anonymous; a PRIVATE
+#      API_TOKEN channel's carry the token). THE CREDENTIAL PROBE: for an OIDC channel
 #      under GitHub Actions, the plan asks for the ID token (its `environment`
 #      claim held to the stage's environment, refused before the exchange
 #      otherwise), exchanges it at the channel host's mint endpoint, and

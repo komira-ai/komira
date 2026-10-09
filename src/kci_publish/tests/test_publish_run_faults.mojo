@@ -291,6 +291,12 @@ def test_a_settle_read_that_cannot_tell_is_unconfirmed() raises:
     assert_false(rep.has_line_containing(String("READ-BACK ")), _lines(rep))
 
 
+# sha256 of "bytes written after the check", computed outside this process
+# (`printf '%s' ... | sha256sum`), so the line must name the NEW digest, never
+# the verified one.
+comptime _CHANGED_SHA256: String = "25bfbea503d8f080167e1ec524ebd44ab0d36b9d9c097a97f5222d82ba068626"
+
+
 def test_a_file_changed_after_step_0_is_never_sent() raises:
     var t = _targets(String("changed"))
     write_text_file(t[0].file_path, String("bytes written after the check"))
@@ -301,7 +307,7 @@ def test_a_file_changed_after_step_0_is_never_sent() raises:
     assert_equal(rep.reason, String(REASON_FAILED), _lines(rep))
     assert_true(
         rep.has_line_containing(String("FAILED linux-64/") + t[0].coordinate.file_name + String(" -- '") + t[0].file_path
-        + String("' changed after it was verified (sha256 now ")),
+        + String("' changed after it was verified (sha256 now ") + _CHANGED_SHA256 + String(")")),
         _lines(rep),
     )
     assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 0)

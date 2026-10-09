@@ -181,7 +181,17 @@ def test_listed_files_without_a_build_number() raises:
 def test_a_newest_build_that_names_no_commit() raises:
     var t = _one(String("komira_alpha-1.0.0-h89abcdef_9.conda"))
     var history = _strings(String("0123456000000000000000000000000000000000"), String("abcdefab00000000000000000000000000000000"))
+    # each edge of the two allowed ranges ['0'-'9'] and ['a'-'f'] is tried
+    # by a byte just outside it: ':' (58), '`' (96), 'g' (103), in the first
+    # and in the last of the 8 digits. '/' (47) cannot be tried: a listed
+    # path is split at its last '/', so no build string holds one.
     var bads = _strings(String("h0123456_7"), String("x0123abcd_7"), String("hxyzxyzxy_7"))
+    bads.append(String("h0123456g_7"))
+    bads.append(String("hg1234567_7"))
+    bads.append(String("h0123456`_7"))
+    bads.append(String("h`1234567_7"))
+    bads.append(String("h0123456:_7"))
+    bads.append(String("h:1234567_7"))
     for k in range(len(bads)):
         ref bad = bads[k]
         var listed = _strings(String("linux-64/komira_alpha-1.0.0-") + bad + String(".conda"))
@@ -194,6 +204,10 @@ def test_a_newest_build_that_names_no_commit() raises:
     # a commit that is on the history is not backward
     var on = _strings(String("linux-64/komira_alpha-1.0.0-habcdefab_7.conda"))
     assert_equal(len(backward_files(t, on, history)), 0)
+    # the four in-range edges '0', '9', 'a', 'f' name a commit too
+    var edges = _strings(String("09af09af00000000000000000000000000000000"))
+    var on_edges = _strings(String("linux-64/komira_alpha-1.0.0-h09af09af_7.conda"))
+    assert_equal(len(backward_files(t, on_edges, edges)), 0)
 
 
 def main() raises:
