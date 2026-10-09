@@ -20,6 +20,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_app_jwt.mojo",
+        "tests/test_client_scripted.mojo",
         "tests/test_https_transport.mojo",
         "tests/test_link_and_rate_limit.mojo",
         "tests/test_route_and_request.mojo",
@@ -28,6 +29,7 @@ mojo_library(
     ],
     test_data = {
         "tests/test_app_jwt.mojo": _KEY,
+        "tests/test_client_scripted.mojo": _KEY,
         "tests/test_https_transport.mojo": _KEY,
     },
     visibility = ["PUBLIC"],

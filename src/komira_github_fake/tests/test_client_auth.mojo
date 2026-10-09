@@ -12,7 +12,9 @@
 #     same JWT at its `exp` (EXPIRED; one second earlier it is accepted),
 #     under another public key, for another issuer, with its claims
 #     re-encoded to another valid `exp` (the signature no longer matches), with
-#     `alg` changed, and with no credential. Catches the fake (or GitHub's
+#     `alg` changed, and with no credential; and, each with a VALID signature
+#     over its own header, `alg` RS384, rs256, RS25, RS2560, XRS256, XS256,
+#     RS257, none and "" (an RS256 control passes). Catches the fake (or GitHub's
 #     rule in komira_github) accepting an expired or forged JWT.
 #   * test_client_remints_before_expiry: the client sends the same JWT until
 #     61 s of it remain, a new one from 60 s (at +480 s), and never one
@@ -39,7 +41,7 @@
 from std.pathlib import Path
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_crypto import rsa_pkcs8_der_from_pem
+from komira_crypto import rsa_pkcs8_der_from_pem, rsa_sha256_sign
 from komira_encoding import base64_url_encode_nopad
 from komira_github import (
     AppCredentials,
@@ -184,6 +186,34 @@ def test_app_jwt_checked_by_fake() raises:
     if _raw_app_get(fake, segs[0] + String(".") + segs[1]) != 401:
         refused += "two-segments "
     assert_equal(refused, String(""), "forged App JWTs are refused")
+    # Signed by the App's key over the header as written, so only the alg
+    # compare can refuse them: near misses of RS256, each a VALID signature.
+    var algs = List[String]()
+    algs.append(String("RS384"))
+    algs.append(String("rs256"))
+    algs.append(String("RS25"))
+    algs.append(String("RS2560"))
+    algs.append(String("XRS256"))
+    algs.append(String("XS256"))
+    algs.append(String("RS257"))
+    algs.append(String("none"))
+    algs.append(String(""))
+    var accepted = String("")
+    for i in range(len(algs)):
+        var h = _b64(String('{"alg":"') + algs[i] + String('","typ":"JWT"}'))
+        var signing_input = h + String(".") + segs[1]
+        var sig = rsa_sha256_sign(Span[UInt8, origin_of(key)](key), signing_input.as_bytes())
+        var forged = signing_input + String(".") + base64_url_encode_nopad(Span[UInt8, origin_of(sig)](sig))
+        if _raw_app_get(fake, forged) != 401:
+            accepted += algs[i] + String(" ")
+    assert_equal(accepted, String(""), "a validly signed JWT naming another alg is refused")
+    var rs = _b64(String('{"alg":"RS256","typ":"JWT"}')) + String(".") + segs[1]
+    var good_sig = rsa_sha256_sign(Span[UInt8, origin_of(key)](key), rs.as_bytes())
+    assert_equal(
+        _raw_app_get(fake, rs + String(".") + base64_url_encode_nopad(Span[UInt8, origin_of(good_sig)](good_sig))),
+        200,
+        "the positive control: the same construction with RS256 passes",
+    )
     assert_equal(_raw_app_get(fake, jwt.token), 200, "the real one still passes")
     print("  test_app_jwt_checked_by_fake PASS")
 
