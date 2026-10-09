@@ -118,12 +118,15 @@ host	tools/build/tests/negative/public_boundary/plant_host_private.txt	1	a plant
 host	tools/build/tests/negative/public_boundary/plant_host_single.txt	1	a planted finding of test 44 (the public boundary lint)
 host	tools/build/tests/negative/public_boundary/plant_host_unlisted.txt	1	a planted finding of test 44 (the public boundary lint)
 ip	src/kci_cloud/network.mojo	5	the private ranges the network rule accepts (RFC 1918)
+ip	src/kci_cloud/tests/test_cloud_compose_expand.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_cloud/tests/test_cloud_network_rules.mojo	57	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_cloud_fake/tests/test_fake_body_arm.mojo	1	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_cloud_fake/tests/test_fake_metadata.mojo	1	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_cloud_fake/tests/test_fake_network.mojo	9	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_cloud_fake/tests/test_fake_validation_run_tag.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_reconciler/tests/test_resource_outputs.mojo	2	a private address as test input
 ip	src/kci_resource_proto/README.md	2	the private range of the README's network example
-ip	src/kci_resource_proto/resource.proto	2	the private ranges the network comment names (RFC 1918)
+ip	src/kci_resource_proto/networks.proto	2	the private ranges the network comment names (RFC 1918)
 ip	src/kci_resource_proto/tests/fixtures/graph/network_graph.txtpb	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_resource_proto/tests/test_resource_graph_golden_bytes.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_resource_proto/tests/test_resource_network_numbers.mojo	6	a private range as data: a network's range must be private, so documentation ranges are refused
