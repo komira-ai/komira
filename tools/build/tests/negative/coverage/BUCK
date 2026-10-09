@@ -1,7 +1,7 @@
 load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
 load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage/kcov:defs.bzl", "cov_link_dir", "cov_run_dir")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_shared_lib_rule")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("//functional/coverage:defs.bzl", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "kcov_stub_dir")
@@ -172,6 +172,37 @@ mojo_library(
     test_srcs = ["tests/test_lost.mojo"],
 )
 
+# Test 43. cov_run.sh's refusal of a kcov argument too long for kcov (2048
+# bytes or more: kcov reads each as a path and fails "Too long string!"),
+# made to trip with a limit of 64 bytes, which the --include-path argument
+# passes: the run fails before kcov starts, naming the argument. RED:
+# tests//negative/coverage:longarg[coverage][tests][test_lost]
+cov_plant(
+    name = "longarg_run_sh",
+    expr = "s|^KCOV_ARG_MAX=2047$|KCOV_ARG_MAX=64|",
+    out = "cov_run.sh",
+    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+)
+
+cov_run_dir(
+    name = "longarg_run",
+    exec_compatible_with = LINUX_X86_64,
+    script = ":longarg_run_sh",
+)
+
+mojo_library(
+    name = "longarg",
+    srcs = [
+        "lostlib/__init__.mojo",
+        "lostlib/value.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_run = ":longarg_run",
+    import_name = "lostlib",
+    test_srcs = ["tests/test_lost.mojo"],
+)
+
 # Test 43. The exit status of a coverage run is the test's: not that of the
 # last process kcov traced, and 128+N for a test killed by signal N, as the
 # release gate reports it. GREEN: tests//negative/coverage:orphan and its
@@ -328,6 +359,18 @@ _GATED = {
     # one `if` whose false arm test_clamp_high never takes: the one finding
     # is BelowTarget on branch (its branch records, not BranchNotMeasured).
     "covbranch": (["covbranch/__init__.mojo", "covbranch/clamp.mojo"], ["tests/test_clamp_high.mojo"], ":covbranch_gate"),
+    # Every line covered, the `except` body included (the first raising call
+    # in its `try:` body raises once), but the second call never raises: the
+    # one finding is BelowTarget on branch, a `try` decision's raise arm
+    # (tools/build/coverage/branch/README.md, "try"), which line coverage
+    # cannot see.
+    "covtry": (["covtry/__init__.mojo", "covtry/total.mojo"], ["tests/test_total_first.mojo"], ":covbranch_gate"),
+    # Every line covered, but `return a or b` is only ever decided by its
+    # right operand: the one finding is BelowTarget on branch, the `or`'s
+    # arm that skips its right operand (tools/build/coverage/branch/README.md,
+    # "And, or": an and/or whose result no branch tests is a decision of
+    # its own), which line coverage cannot see.
+    "covandor": (["covandor/__init__.mojo", "covandor/either.mojo"], ["tests/test_either_one.mojo"], ":covbranch_gate"),
 }
 
 cov_gate_dir(
@@ -350,6 +393,38 @@ mojo_library(
     coverage_mode = "enforce",
     import_name = "covbranch",
     test_srcs = ["tests/test_clamp_both.mojo"],
+)
+
+# GREEN in enforce mode: covtry with a test making each raising call of its
+# `try:` body raise once: no finding.
+mojo_library(
+    name = "covtry_both",
+    srcs = [
+        "covtry/__init__.mojo",
+        "covtry/total.mojo",
+    ],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = ":covbranch_gate",
+    coverage_mode = "enforce",
+    import_name = "covtry",
+    test_srcs = ["tests/test_total_both.mojo"],
+)
+
+# GREEN in enforce mode: covandor with a test taking both arms of its
+# `or`: no finding.
+mojo_library(
+    name = "covandor_both",
+    srcs = [
+        "covandor/__init__.mojo",
+        "covandor/either.mojo",
+    ],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = ":covbranch_gate",
+    coverage_mode = "enforce",
+    import_name = "covandor",
+    test_srcs = ["tests/test_either_both.mojo"],
 )
 
 cov_gate_dir(
@@ -381,13 +456,16 @@ cov_gate_dir(
 ]
 
 # RED: tests//negative/coverage:covlow[coverage][gate], :covnotests[...],
-# :covun[...], :covfull_unread[...], :covbranch[...] (enforce), and
+# :covun[...], :covfull_unread[...], :covbranch[...], :covtry[...],
+# :covandor[...] (enforce), and
 # :covlow_conda, :covnotests_conda (a library with no test: a REFUSED conda
 # package, which waits for its NotMeasured gate all the same). GREEN:
-# :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch (the
-# libraries), :covfull[coverage][gate] (enforce), :covlow_census,
-# :covnotests_census, :covun_census, :covfull_census, :covbranch_census and
-# their :<name>_census_result checks.
+# :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch,
+# :covtry, :covandor (the libraries), :covfull[coverage][gate],
+# :covtry_both[coverage][gate] and :covandor_both[coverage][gate]
+# (enforce), :covlow_census,
+# :covnotests_census, :covun_census, :covfull_census, :covbranch_census,
+# :covtry_census, :covandor_census and their :<name>_census_result checks.
 [
     mojo_library(
         name = name + suffix,
@@ -448,6 +526,22 @@ _RESULTS = {
         '"conclusion":"neutral","mode":"census",',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":3,"line_found":3,"line_bp":10000,"branch_hit":1,"branch_found":2,"branch_bp":5000,',
         '"line_floor_bp":10000,"branch_floor_bp":0}',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"branch 50.00% is below the target 100.00%","count":null}],"exemptions"',
+    ],
+    # Every line (9 of 9), 5 of 6 arms: check's `if` (2 of 2), the first
+    # call's `try` decision (2 of 2), the second's (returned, never raised:
+    # 1 of 2). BelowTarget on branch is the only finding.
+    "covtry": [
+        '"conclusion":"neutral","mode":"census",',
+        _PKG + '"files":1,"unmeasured_files":0,"line_hit":9,"line_found":9,"line_bp":10000,"branch_hit":5,"branch_found":6,"branch_bp":8333,',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":8333,"bound_bp":10000,"path":"","line":0,"message":"branch 83.33% is below the target 100.00%","count":null}],"exemptions"',
+    ],
+    # Every line (2 of 2), 1 of 2 arms: the `or` of `return a or b`, whose
+    # left operand is never true (its right operand never skipped).
+    # BelowTarget on branch is the only finding.
+    "covandor": [
+        '"conclusion":"neutral","mode":"census",',
+        _PKG + '"files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,"branch_hit":1,"branch_found":2,"branch_bp":5000,',
         '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"branch 50.00% is below the target 100.00%","count":null}],"exemptions"',
     ],
 }
@@ -642,10 +736,11 @@ cov_branch_dir(
 ]
 
 # A cov_branch_run.sh copy whose merge leaves out the test's `main`: the
-# profile does not hold a function of the bitcode, as a profile of other
-# bitcode would not, and applying it would read that function as never run.
-# RED: tests//negative/coverage:branchmissing[coverage][branch_ir][test_one],
-# "no profile data available for function".
+# profile holds no record of a function the instrumented binary links (a run
+# writes one for each, ran or not), as a profile of another binary would
+# not, and applying it would read that function as never run. RED:
+# tests//negative/coverage:branchmissing[coverage][branch_ir][test_one],
+# "a run writes the record of every function its binary links".
 cov_plant(
     name = "branchmissing_run_sh",
     expr = "s|\"$PD\" merge -o|\"$PD\" merge --no-function=main -o|",
@@ -657,6 +752,63 @@ cov_branch_dir(
     name = "branchmissing_branch",
     exec_compatible_with = LINUX_X86_64,
     run_script = ":branchmissing_run_sh",
+)
+
+# A cov_branch_annotate.sh copy that internalizes the bitcode before applying
+# the profile: `main` becomes a local function, whose profile name is not
+# the one the binary's run wrote, so the bitcode the profile is applied to
+# is not the one the binary was made from (as other bitcode would be), and
+# LLVM finds one function of the profile fewer in it. RED:
+# tests//negative/coverage:branchinternal[coverage][branch_ir][test_one],
+# "the binary that wrote it was not made from this bitcode".
+cov_plant(
+    name = "branchinternal_annotate_sh",
+    expr = "s|\"--lto-newpm-passes=pgo-instr-use\"|\"--lto-newpm-passes=internalize,pgo-instr-use\"|",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchinternal_branch",
+    annotate_script = ":branchinternal_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
+)
+
+# A cov_branch_annotate.sh copy whose section-name pipeline carries about
+# 1 MB more after each name: the reader that cuts the name must read all of
+# it, or its writer dies of SIGPIPE (exit 141 under pipefail; a race at 16
+# bytes, as seen in remote runs with `head -n 1`, certain here). GREEN:
+# tests//negative/coverage:branchwide[coverage][branch_ir][test_one].
+cov_plant(
+    name = "branchwide_annotate_sh",
+    expr = "s#count=16 2>/dev/null |#count=16 2>/dev/null | { cat; awk 'BEGIN { while (n++ < 40000) print \"padding padding padding\" }'; } |#",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchwide_branch",
+    annotate_script = ":branchwide_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
+)
+
+# The branchweights copy with its branch-weights check reading for a string
+# no bitcode holds: the bitcode the annotation reads holds entry counts
+# (`function_entry_count`) before the profile is applied, which the
+# entry-count check would count as functions found in the profile. RED:
+# tests//negative/coverage:branchentry[coverage][branch_ir][test_one],
+# "already holds function entry counts".
+cov_plant(
+    name = "branchentry_annotate_sh",
+    expr = "s|^# 0\\. No branch weights before.*$|\"$LLD\" -flavor gnu -r -m elf_x86_64 \"$BC\" -o \"$K/w.bc\" --lto-O0 --plugin-opt=emit-llvm --lto-newpm-passes=pgo-instr-use -mllvm \"-pgo-test-profile-file=$PROF\" \\&\\& BC=\"$K/w.bc\"|; s|grep -q -F branch_weights \"$BC\"|grep -q -F branch_weights_unread \"$BC\"|",
+    out = "cov_branch_annotate.sh",
+    src = "komira//tools/build/coverage/branch:cov_branch_annotate.sh",
+)
+
+cov_branch_dir(
+    name = "branchentry_branch",
+    annotate_script = ":branchentry_annotate_sh",
+    exec_compatible_with = LINUX_X86_64,
 )
 
 # A cov_branch_annotate.sh copy that first applies the profile and writes
@@ -691,7 +843,7 @@ cov_branch_dir(
         import_name = "noop",
         test_srcs = ["tests/test_one.mojo"],
     )
-    for name in ("branchmissing", "branchweights")
+    for name in ("branchentry", "branchinternal", "branchmissing", "branchweights", "branchwide")
 ]
 
 # A helper declared @always_inline("nodebug"): its `while` carries the
@@ -705,18 +857,6 @@ mojo_library(
     conda = False,
     coverage_debug = _LINK,
     test_srcs = ["tests/test_nodebug.mojo"],
-)
-
-# `return a or b`: the `or`'s result is never branched on, so when its right
-# operand decides cannot be counted. RED:
-# tests//negative/coverage:branchretor[coverage][branch_info][test_either],
-# "the right operand of this 'or' is not counted".
-mojo_library(
-    name = "branchretor",
-    srcs = ["branchretor/__init__.mojo"],
-    conda = False,
-    coverage_debug = _LINK,
-    test_srcs = ["tests/test_either.mojo"],
 )
 
 # A test_env setting LLVM_PROFILE_FILE, which a branch coverage run sets
@@ -760,4 +900,97 @@ cov_link_line_check(
     lib = ":branchnoprof",
     script = "//functional/coverage:link_line.sh",
     src = "tests/test_one.mojo",
+)
+
+# ---- Shared libraries (mojo_shared_lib) -----------------------------------------
+
+# Test 43. cov_run.sh with kcov told to skip the shared libraries a driver
+# loads (--skip-solibs, as for a library's test): the driver's report would
+# hold the driver alone, and the run must fail instead, since the report must
+# hold the library's first source (--must-contain). RED:
+# tests//negative/coverage:covso_skip[coverage][tests][covso_one_driver]
+cov_plant(
+    name = "covso_skip_run_sh",
+    expr = 's#^\\[ -n "\\$SOLIB" \\] || set -- "\\$@" --arg --skip-solibs$#set -- "$@" --arg --skip-solibs#',
+    out = "cov_run.sh",
+    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+)
+
+cov_run_dir(
+    name = "covso_skip_run",
+    exec_compatible_with = LINUX_X86_64,
+    script = ":covso_skip_run_sh",
+)
+
+mojo_shared_lib(
+    name = "covso_skip",
+    srcs = ["covso/covso_one.mojo"],
+    coverage_debug = _LINK,
+    coverage_run = ":covso_skip_run",
+    exports = ["covso_one"],
+    gate_srcs = ["tests/covso_one_driver.mojo"],
+    out_name = "covso_one",
+)
+
+# Test 46. A shared library whose driver passes in its gate and fails under
+# kcov (it checks TracerPid), coverage from the switch. With
+# -c komira.coverage=true, :covso_traced (the published file) is GREEN:
+# nothing of a shared library waits for its coverage runs or gate, and it
+# ships no conda package; its [coverage][tests][covso_traced_driver] is RED
+# ("COVERAGE RUN FAILED").
+mojo_shared_lib(
+    name = "covso_traced",
+    srcs = ["covso/covso_one.mojo"],
+    exports = ["covso_one"],
+    gate_srcs = ["tests/covso_traced_driver.mojo"],
+)
+
+# Test 46. The rule called without the macro, its gate in enforce mode: the
+# analysis refuses it, in every cell (a shared library's coverage is
+# reported, never enforced). RED: tests//negative/coverage:covso_enforce
+mojo_shared_lib_rule(
+    name = "covso_enforce",
+    srcs = ["covso/covso_one.mojo"],
+    coverage_debug = _LINK,
+    coverage_gate = _GATE,
+    coverage_mode = "enforce",
+    coverage_run = "komira//tools/build/coverage/kcov:cov_run",
+    exports = ["covso_one"],
+)
+
+# Test 43. A shared library whose one source is generated (a build output):
+# no source of it is measured, so its driver's run could not show that kcov
+# measured the library, and is refused, saying so. RED:
+# tests//negative/coverage:covso_gen[coverage][tests][covso_one_driver]
+cov_plant(
+    name = "covso_gen_src",
+    expr = "s/var one: Int32 = 1/var one: Int32 = 2 - 1/",
+    out = "covso/covso_gen.mojo",
+    src = "covso/covso_one.mojo",
+)
+
+mojo_shared_lib(
+    name = "covso_gen",
+    srcs = [":covso_gen_src"],
+    coverage_debug = _LINK,
+    exports = ["covso_one"],
+    gate_srcs = ["tests/covso_one_driver.mojo"],
+    out_name = "covso_one",
+)
+
+# Test 46. A welded test at the path of one of the library's sources: the
+# gate stages both at that repository path, so the analysis refuses it,
+# naming the test. RED: tests//negative/coverage:testpath
+mojo_library(
+    name = "testpath",
+    srcs = [
+        "lostlib/__init__.mojo",
+        "lostlib/value.mojo",
+    ],
+    conda = False,
+    coverage_debug = _LINK,
+    coverage_gate = _GATE,
+    coverage_mode = "census",
+    import_name = "lostlib",
+    test_srcs = ["lostlib/value.mojo"],
 )

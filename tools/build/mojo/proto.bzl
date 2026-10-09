@@ -459,7 +459,7 @@ _mojo_proto_gen = rule(
 )
 
 # Every other keyword is refused in the welded form rather than dropped.
-_WELDED_KWARGS = ["default_protocol", "default_wire", "deps", "import_name", "import_prefix", "package_name", "proto_deps", "visibility"]
+_WELDED_KWARGS = ["default_protocol", "default_wire", "deps", "import_name", "import_prefix", "package_name", "proto_deps", "readme", "visibility"]
 
 def _mojo_proto_library(
         name,
@@ -503,6 +503,8 @@ def _mojo_proto_library(
         lib["test_data"] = test_data
     if test_env != None:
         lib["test_env"] = test_env
+    if "readme" in kwargs:
+        lib["readme"] = kwargs["readme"]
     mojo_library(
         name = name,
         srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}.mojo]".format(gen, s) for s in stems],

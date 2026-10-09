@@ -11,6 +11,7 @@ from komira_json import parse_json_value
 
 from kci_api import (
     FORMAT_ARTIFACTS,
+    FORMAT_CELLS,
     FORMAT_CHANNELS,
     FORMAT_RELEASE_SET,
     FORMAT_RESULT,
@@ -44,9 +45,10 @@ def _header(text: String, name: String) -> String:
 def test_golden_table() raises:
     var t = format_table()
     # `kci.stages` went with the `stages` verb
-    assert_equal(len(t), 7)
+    assert_equal(len(t), 8)
     var want = List[String]()
     want.append(String("kci.artifacts AUTHORED 1 1"))
+    want.append(String("kci.cells AUTHORED 1 1"))
     want.append(String("kci.channels AUTHORED 1 1"))
     want.append(String("kci.machine AUTHORED 1 1"))
     want.append(String("kci.artifact_manifest PRODUCED 1 1"))
@@ -126,6 +128,8 @@ def test_unknown_keys_are_listed_not_refused() raises:
 def test_rows_by_name() raises:
     assert_equal(format_row(String(FORMAT_RELEASE_SET)).current_major, 2)
     assert_equal(format_row(String(FORMAT_CHANNELS)).kind, String(KIND_AUTHORED))
+    assert_equal(format_row(String(FORMAT_CELLS)).kind, String(KIND_AUTHORED))
+    assert_equal(format_row(String(FORMAT_CELLS)).current_major, 1)
     assert_equal(format_row(String(FORMAT_RESULT)).kind, String(KIND_PRODUCED))
 
 
