@@ -8,10 +8,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The welded test hands what the renderers emit to the parser unchanged and
 # reads the same values back, and asserts each refusal by its message: a
 # missing required parameter, an unknown one at either end, a literal for a
-# secret parameter, and an empty value.
+# secret parameter, and an empty value. test_param_decl_refusals walks every
+# other refusal (names at each byte-range edge, codes, duplicates, kind
+# mismatches, a flag with no value, an unbound read); test_param_config_wire
+# covers the store's config encoding, its sort, and the map render.
 mojo_library(
     name = "kci_params",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_param_round_trip.mojo"],
+    test_srcs = [
+        "tests/test_param_round_trip.mojo",
+        "tests/test_param_decl_refusals.mojo",
+        "tests/test_param_config_wire.mojo",
+    ],
     visibility = ["PUBLIC"],
 )

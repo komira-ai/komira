@@ -115,6 +115,18 @@ def _copy_aggs(arr: AggExprArray) -> AggExprArray:
 # fingerprint EQUAL, while relations differing in a filter, a join, a source, or
 # a computed column fingerprint DIFFERENT -- a fold can never merge two relations
 # that would produce different ROWS.
+#
+# ⛔ THE FINGERPRINT IS THE WHOLE DECISION. There is no second equality check
+# after it, and `install_shared_cross_source` swaps EVERY aggregate child that
+# matches, so each field that changes the ROWS must be folded and every string
+# must be folded with its LENGTH (`_fnv_str`), or two key lists whose bytes
+# concatenate alike (`ab`=`c` vs `a`=`bc`) collide. Row-changing fields:
+# TopN n/keys/directions/null placement, Sort keys/directions/null placement
+# (they decide which rows a Limit above keeps), Limit n AND offset. DISTINCT
+# is the one node whose rows depend on the PROJECTION below it (distinct
+# `(pk, v)` rows are not distinct `(v)` rows), so it folds the projection-
+# SENSITIVE `structural_hash` of its whole subtree and never folds across a
+# differential prune. Falsifier: `test_shared_relation_fingerprint_identity`.
 # -----------------------------------------------------------------------------
 comptime _FNV_OFFSET: UInt64 = 0xcbf29ce484222325
 comptime _FNV_PRIME: UInt64 = 0x100000001b3
@@ -126,10 +138,28 @@ def _fnv_u64(h: UInt64, v: UInt64) -> UInt64:
 
 
 def _fnv_str(h: UInt64, s: String) -> UInt64:
-    var acc = h
+    """Fold `s` LENGTH-FIRST, so consecutive strings keep their boundaries."""
     var bytes = s.as_bytes()
+    var acc = _fnv_u64(h, UInt64(len(bytes)))
     for i in range(len(bytes)):
         acc = (acc ^ UInt64(bytes[i])) * _FNV_PRIME
+    return acc
+
+
+def _fold_order(
+    h: UInt64, keys: List[String], descending: List[Bool], nulls_first: List[Bool]
+) -> UInt64:
+    """Fold a sort specification: each list with its length, each key with its
+    direction and NULL placement."""
+    var acc = _fnv_u64(h, UInt64(len(keys)))
+    for i in range(len(keys)):
+        acc = _fnv_str(acc, keys[i])
+    acc = _fnv_u64(acc, UInt64(len(descending)))
+    for i in range(len(descending)):
+        acc = _fnv_u64(acc, UInt64(1) if descending[i] else UInt64(0))
+    acc = _fnv_u64(acc, UInt64(len(nulls_first)))
+    for i in range(len(nulls_first)):
+        acc = _fnv_u64(acc, UInt64(1) if nulls_first[i] else UInt64(0))
     return acc
 
 
@@ -158,6 +188,7 @@ def _fp_accumulate(plan: LogicalPlan, h: UInt64) raises -> UInt64:
     elif plan.tag == PLAN_JOIN:
         ref jd = plan._join.value()[]
         acc = _fnv_u64(acc, UInt64(Int(jd.join_type)))
+        acc = _fnv_u64(acc, UInt64(len(jd.left_on)))
         for i in range(len(jd.left_on)):
             acc = _fnv_str(acc, jd.left_on[i])
         for i in range(len(jd.right_on)):
@@ -168,6 +199,7 @@ def _fp_accumulate(plan: LogicalPlan, h: UInt64) raises -> UInt64:
         return _fp_accumulate(jd.right[], acc)
     elif plan.tag == PLAN_AGGREGATE:
         ref ad = plan._aggregate.value()[]
+        acc = _fnv_u64(acc, UInt64(len(ad.group_by)))
         for i in range(len(ad.group_by)):
             acc = _fnv_str(acc, String(ad.group_by[i]))
         for i in range(len(ad.agg_exprs)):
@@ -175,16 +207,21 @@ def _fp_accumulate(plan: LogicalPlan, h: UInt64) raises -> UInt64:
         return _fp_accumulate(ad.child[], acc)
     elif plan.tag == PLAN_SORT:
         ref srt = plan._sort.value()[]
-        for i in range(len(srt.keys)):
-            acc = _fnv_str(acc, srt.keys[i])
+        acc = _fold_order(acc, srt.keys, srt.descending, srt.nulls_first)
         return _fp_accumulate(srt.child[], acc)
     elif plan.tag == PLAN_DISTINCT:
-        return _fp_accumulate(plan._distinct.value()[].child[], acc)
+        # Projection-SENSITIVE on purpose (see the block above): the columns
+        # under a DISTINCT decide its rows.
+        return _fnv_u64(acc, plan.structural_hash())
     elif plan.tag == PLAN_LIMIT:
         acc = _fnv_u64(acc, UInt64(plan._limit.value()[].n))
+        acc = _fnv_u64(acc, UInt64(plan._limit.value()[].offset))
         return _fp_accumulate(plan._limit.value()[].child[], acc)
     elif plan.tag == PLAN_TOPN:
-        return _fp_accumulate(plan._topn.value()[].child[], acc)
+        ref tn = plan._topn.value()[]
+        acc = _fnv_u64(acc, UInt64(tn.n))
+        acc = _fold_order(acc, tn.keys, tn.descending, tn.nulls_first)
+        return _fp_accumulate(tn.child[], acc)
     # Un-handled kinds: fold in the projection-SENSITIVE structural_hash (a
     # consistent, conservative fallback -- may miss a fold, never a wrong fold).
     return _fnv_u64(acc, plan.structural_hash())

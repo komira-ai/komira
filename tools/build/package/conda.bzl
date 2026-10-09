@@ -295,9 +295,15 @@ def _conda_package_impl(ctx):
     # With coverage on, what ships waits for the library's coverage runs and
     # its gate (tools/build/mojo/coverage.bzl); for a library of the coverage
     # ledger (tools/build/coverage/policy.bzl, COVERAGE_NO_GATE) the gate is
-    # its `<name>_cov_gate`. The library itself waits for neither.
+    # its `<name>_cov_gate`, and so for one naming `coverage_tests`. The
+    # library itself waits for neither.
     gate = lib[MojoCoverageGateInfo].markers if MojoCoverageGateInfo in lib else []
+    if MojoCoverageGateInfo in lib and lib[MojoCoverageGateInfo].external_gate and not ctx.attrs.coverage_gate:
+        fail("{}: the coverage gate of {} is its target `<name>_cov_gate` (a library of the ledger COVERAGE_NO_GATE, or one naming `coverage_tests`), which this package does not wait for; mojo_library declares the package with it".format(ctx.label.raw_target(), lib.label.raw_target()))
     if ctx.attrs.coverage_gate:
+        want = "{}_cov_gate".format(lib.label.raw_target())
+        if str(ctx.attrs.coverage_gate.label.raw_target()) != want:
+            fail("{}: coverage_gate is {}, not {}, the gate of its library".format(ctx.label.raw_target(), ctx.attrs.coverage_gate.label.raw_target(), want))
         gate = gate + ctx.attrs.coverage_gate[DefaultInfo].default_outputs
 
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
@@ -333,8 +339,10 @@ _conda_package = rule(
     attrs = {
         # The source commit of the stamp (-c komira.package_commit), "" if none.
         "commit": attrs.string(default = ""),
-        # The `<lib>_cov_gate` of a library of the coverage ledger, set by
-        # mojo_library with coverage on (tools/build/mojo/coverage.bzl).
+        # The `<lib>_cov_gate` of a library of the coverage ledger or naming
+        # `coverage_tests`, set by mojo_library with coverage on
+        # (tools/build/mojo/coverage.bzl); refused when the library's
+        # MojoCoverageGateInfo says it has one and this is not set.
         "coverage_gate": attrs.option(attrs.dep(), default = None),
         "lib": attrs.dep(providers = [MojoInfo]),
         "stamp": attrs.string(),

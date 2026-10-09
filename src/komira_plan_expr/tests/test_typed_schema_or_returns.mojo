@@ -166,19 +166,25 @@ def _right() -> SchemaDescriptor:
 
 
 def test_join_out_schema_keeps_right_side() raises:
-    """INNER, LEFT, RIGHT, FULL and CROSS (0, 1, 2, 3, 6): left columns
-    verbatim, then right's; a right name colliding with a left name gets
-    `_right`, the others keep theirs; right types, nullability, children and
-    map types copied; never strict."""
+    """INNER, LEFT, RIGHT, FULL and CROSS (0, 1, 2, 3, 6): left columns, then
+    right's; a right name colliding with a left name gets `_right`, the others
+    keep theirs; types, children and map types copied; never strict.
+    Nullability is copied except on the NULL-supplying side of an outer join
+    (LEFT: the right side, RIGHT: the left side, FULL: both), which is forced
+    nullable as `LogicalPlan.join` does (komira-ai/komira#960)."""
     var kinds: List[Int] = [0, 1, 2, 3, 6]
     for k in range(len(kinds)):
         var j = join_out_schema(_left(), _right(), kinds[k])
+        var left_nulls = kinds[k] == 2 or kinds[k] == 3
+        var right_nulls = kinds[k] == 1 or kinds[k] == 3
         assert_equal(j.names_joined(), "id, name, id_right, amount, addr, tags")
         assert_false(j.strict)
         assert_equal(j.cols[0].dtype, TYPE_INT64)
-        assert_false(j.cols[0].nullable)
+        assert_equal(j.cols[0].nullable, left_nulls)
+        assert_equal(j.cols[1].nullable, left_nulls)
         assert_equal(j.cols[2].dtype, TYPE_INT32)
         assert_true(j.cols[2].nullable)
+        assert_equal(j.cols[3].nullable, right_nulls)
         assert_equal(j.cols[3].dtype, TYPE_FLOAT64)
         assert_equal(j.cols[4].struct_fields[0].name, "street")
         assert_equal(j.cols[5].map_key_dtype, TYPE_STRING)

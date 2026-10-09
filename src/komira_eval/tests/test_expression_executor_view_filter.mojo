@@ -462,8 +462,8 @@ def test_in_list_int64_skips_null_and_non_integer_values() raises:
     _expect(_run(_in_exec(make_col(0), vals^), batch), [0, 3], "a64 IN (0, 1, 2.5)")
     # A list of non-integral floats only: no Int64 value is taken, no row
     # matches. A whole-number float such as 3.0 is skipped the same way,
-    # where SQL coerces it and would keep row 2; that answer is not pinned
-    # here (komira-ai/komira#932).
+    # where SQL coerces it and would keep row 2. The walker does not coerce
+    # today, so that answer is not pinned here.
     var only_float = List[ScalarValue]()
     only_float.append(ScalarValue.from_float(3.5))
     _expect(_run(_in_exec(make_col(0), only_float^), batch), List[Int](), "a64 IN (3.5)")

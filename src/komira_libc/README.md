@@ -21,7 +21,8 @@ each name from its module:
 - `komira_libc.owned_fd`: `OwnedFd`, which closes a descriptor it owns when
   dropped.
 - `komira_libc.posix`: the one `getenv` (`_read_env`, and `_read_env_into`
-  for secrets), the `access(2)` probes `_path_is_directory` and
+  for secrets), the one `unsetenv` (`_unset_env`, which removes a secret's
+  variable once it is read), the `access(2)` probes `_path_is_directory` and
   `_path_is_executable`, and `_thread_self`.
 - The C shim (`native/komira_libc_posix.c`) holds the fixed-arity wrappers
   over the variadic and platform-width POSIX calls, including the read-only
