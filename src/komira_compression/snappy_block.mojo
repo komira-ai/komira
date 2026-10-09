@@ -108,7 +108,7 @@ def snappy_compress_into[
     # stores the count written in `size`, a stack local. Every buffer is alive
     # across this synchronous call; snappy keeps none of the pointers.
     var status = external_call[
-        "snappy_compress",
+        "komira_snappy_compress",
         Int32,
         UnsafePointer[UInt8, MutUntrackedOrigin],
         UInt64,
@@ -157,7 +157,7 @@ def snappy_uncompress_into[
     # stores the decoded length in `size`, a stack local. Every buffer is
     # alive across this synchronous call; snappy keeps none of the pointers.
     var status = external_call[
-        "snappy_uncompress",
+        "komira_snappy_uncompress",
         Int32,
         UnsafePointer[UInt8, MutUntrackedOrigin],
         UInt64,
@@ -199,7 +199,7 @@ def snappy_uncompressed_length(src: Span[UInt8, _]) raises -> Int:
     # and stores the declared length in `result`, a stack local. Both are
     # alive across this synchronous call; snappy keeps neither pointer.
     var status = external_call[
-        "snappy_uncompressed_length",
+        "komira_snappy_uncompressed_length",
         Int32,
         UnsafePointer[UInt8, MutUntrackedOrigin],
         UInt64,

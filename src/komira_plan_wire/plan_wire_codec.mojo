@@ -17,9 +17,8 @@
 # the core packages' deps stay minimal and that is load-bearing — almost every
 # package depends on it, so anything added to its deps goes upstream of nearly
 # everything. The codec needs `komira_proto_codec` and the generated `komira_plan_proto`
-# messages, so it lives in its own package ABOVE core. Same shape as
-# `komira_fs_registry`: the package whose job is to close over a lower layer's
-# types sits on top of it, never inside it.
+# messages, so it lives in its own package ABOVE core: the package whose job
+# is to close over a lower layer's types sits on top of it, never inside it.
 #
 # ============================ THE COVERAGE LEDGER ============================
 #
@@ -345,7 +344,7 @@
 #   NAME. There are three, all on `WireField` and all `uint32` -> `UInt8`:
 #   `arrow_type_id`, `dict_index_type_id`, `child_type_ids[]`. See
 #   `_arrow_type_from_wire` — the check is MEMBERSHIP in the derived ArrowType
-#   vocabulary, not a range test, because 51 narrows losslessly and is still
+#   vocabulary, not a range test, because 50 narrows losslessly and is still
 #   not a type. A narrowing that does not raise does not fail; it succeeds at
 #   naming a DIFFERENT type, and a decoded plan with a different schema is a
 #   silently wrong plan that LEG 2 would compare happily.
@@ -430,7 +429,6 @@ from komira_plan_proto.plan_vocabulary import (
     ColSide,
     CorrelatedKind,
     DTypeCode,
-    ExcelErrorCode,
     ExtractField,
     FrameBound,
     FrameUnits,
@@ -536,7 +534,6 @@ from komira_plan_wire.plan_wire_vocabulary import (
     col_side_from_wire,
     correlated_kind_to_wire,
     correlated_kind_from_wire,
-    expr_tag_to_wire,
     extract_field_to_wire,
     extract_field_from_wire,
     join_algo_to_wire,
@@ -583,8 +580,6 @@ from komira_plan_wire.plan_wire_vocabulary import (
     scalar_kind_from_wire,
     scalar_time_unit_to_wire,
     scalar_time_unit_from_wire,
-    excel_error_code_to_wire,
-    excel_error_code_from_wire,
     param_tag_to_wire,
     param_tag_from_wire,
     pushdown_gate_mode_to_wire,
@@ -654,12 +649,12 @@ from komira_scan_source.source_variant import (
 # Format version + the refusal tokens
 # =============================================================================
 
-comptime PLAN_WIRE_FORMAT_VERSION: UInt32 = 2
+comptime PLAN_WIRE_FORMAT_VERSION: UInt32 = 4
 """THE VERSION A PLAIN (non-write) ENVELOPE DECLARES.
 
 ⚠ THIS IS NO LONGER "THE" VERSION — it is the FLOOR, and reading it as the only
 one is now a bug. A write-carrying envelope declares
-`PLAN_WIRE_WRITE_TARGET_MIN_VERSION` (3) instead; see
+`PLAN_WIRE_WRITE_TARGET_MIN_VERSION` (5) instead; see
 `plan_wire_supported_versions()` for what this build READS, and
 `_envelope_version_for` for what it WRITES.
 
@@ -695,7 +690,8 @@ answers is: CAN A READER THAT DID NOT BUMP MIS-READ THESE BYTES?
 VERSION 2 carries two changes:
   * the `WirePlan.tag` / `WireExpr.tag` retirement; and
   * six vocabulary fields moving from ENGINE-VERBATIM `uint32` to the derived
-    +1-offset enums — `WireScalar.kind` / `.time_unit` / `.error_code`,
+    +1-offset enums — `WireScalar.kind` / `.time_unit` / `.error_code` (the
+    last deleted in version 4),
     `WireParam.tag`, `WirePushdownGate.mode`, `WireScanBinding.snapshot_policy`.
     Same bytes, every value shifted by one, which is the meaning change this
     rule's first line has always been about.
@@ -705,15 +701,23 @@ THE FIRST RULE ABOVE ON PURPOSE. `WirePlanEnvelope.write_target` is a field
 whose OMISSION IS THE FAILURE: "ADD a field -> NO BUMP" is sound exactly when
 proto3's skip-what-you-do-not-know loses nothing the caller needed, and here it
 loses the entire point of the message — the reader runs the query, returns rows,
-writes no file, and raises nothing. So version 3 is declared ONLY by envelopes
-that carry field 3, which makes it a MINIMUM READER CAPABILITY rather than a
-format generation: a version-2 reader refuses a write envelope by name instead
-of executing half of it.
+writes no file, and raises nothing. So the write version (3 then, 5 now) is
+declared ONLY by envelopes that carry field 3, which makes it a MINIMUM READER
+CAPABILITY rather than a format generation: a version-2 reader refuses a write
+envelope by name instead of executing half of it.
+
+VERSIONS 4 AND 5 DELETE `WireScalar.error_code` (field 20; its number and name
+are reserved). Both envelope shapes carry scalars, so both move: a plain
+envelope declares 4 and a write-carrying one declares 5, and this build reads
+only `{4, 5}`. A reader of `{2, 3}` refuses either by
+`PLAN_WIRE_VERSION_MISMATCH`, and this build refuses 2 and 3 the same way.
+5 is still a minimum reader capability over 4: a write target under 4 is
+refused as understated.
 """
 
 
 def plan_wire_supported_versions() raises -> PlanWireVersionSet:
-    """THE VERSIONS THIS BUILD READS. `{2, 3}`.
+    """THE VERSIONS THIS BUILD READS. `{4, 5}`.
 
     ⚠ A FUNCTION AND NOT A `comptime`, because `PlanWireVersionSet` construction
     is `raises` (it refuses a version >= 32 rather than shifting past the end of
@@ -723,8 +727,8 @@ def plan_wire_supported_versions() raises -> PlanWireVersionSet:
     ⚠ AND IT IS A SET, WHICH IS THE WHOLE POINT. `>=` would claim that any
     reader speaking a lower version can read a higher one, which is precisely
     false for the CHANGE-A-MEANING case this format's version field exists for.
-    A future version 4 that re-meant `WirePlan.plan` would make this `{4}`, and
-    an ordering could not express that.
+    A DELETE-a-field bump needs the same: this build reads `{4, 5}` and
+    refuses 2 and 3, which an ordering could not express.
     """
     return PlanWireVersionSet.only(PLAN_WIRE_FORMAT_VERSION).plus(
         PLAN_WIRE_WRITE_TARGET_MIN_VERSION
@@ -894,7 +898,7 @@ def _col_ref_of_side(var name: String, side: UInt8) raises -> Expr:
 # ★ THESE NUMBERS ARE PUBLISHED, AND THEY ARE NAMED.
 # The generated plan vocabulary DERIVES the `DTypeCode` proto enum from
 # these very `comptime` lines, so `plan_vocabulary.proto` carries
-# `_DT_INT64 = 5` and a Python or Excel reader decodes `dtype_code: _DT_INT64`
+# `_DT_INT64 = 5` and a Python or TypeScript reader decodes `dtype_code: _DT_INT64`
 # instead of a bare `5` it has nowhere to look up. Adding a constant here adds
 # a member there; MOVING or reusing one is never allowed, because a published
 # number is part of the format.
@@ -1031,8 +1035,8 @@ def _dtype_from_wire(c: DTypeCode) raises -> DType:
 # ★ THE BOUND IS DERIVED, NOT WRITTEN HERE. `arrow_type_is_declared` comes out
 # of the generated plan vocabulary's ArrowType space, whose members are generated
 # from `arrow_types.mojo` itself. So this is a MEMBERSHIP check, not a range
-# check — 51 fits in a UInt8 and narrows losslessly, and is still not a type —
-# and once `comptime NEW_TYPE = ArrowType(51)` is added to the engine and the
+# check — 50 fits in a UInt8 and narrows losslessly, and is still not a type —
+# and once `comptime NEW_TYPE = ArrowType(50)` is added to the engine and the
 # vocabulary is regenerated from the engine's tag declarations, it is admitted
 # here with no edit to the codec.
 #
@@ -1222,13 +1226,13 @@ def _opt_schema_from_wire(
 
 
 def _scalar_to_wire(v: ScalarValue) raises -> WireScalar:
-    """TOTAL: 18 `var`s, 18 slots. The struct is a flat union whose live arm is
+    """TOTAL: 19 `var`s, 19 slots. The struct is a flat union whose live arm is
     (`_kind`, `dtype`); every other slot is zero, and proto3 omits zeros, so
     totality is free on the wire.
 
-    THE THREE ENUM SLOTS GO THROUGH THE DERIVED VOCABULARY, so encoding a kind
-    / unit / error code the engine does not declare RAISES here rather than
-    writing bytes no reader can name."""
+    THE ENUM SLOTS GO THROUGH THE DERIVED VOCABULARY, so encoding a kind or
+    unit the engine does not declare RAISES here rather than writing bytes no
+    reader can name."""
     return WireScalar(
         _dtype_to_wire(v.dtype),
         v.int_val,
@@ -1249,7 +1253,6 @@ def _scalar_to_wire(v: ScalarValue) raises -> WireScalar:
         ScalarTimeUnit(Int(scalar_time_unit_to_wire(v.time_unit))),
         v.dec256_high_lo,
         v.dec256_high_hi,
-        ExcelErrorCode(Int(excel_error_code_to_wire(v.error_code))),
     )
 
 
@@ -1257,10 +1260,10 @@ def _scalar_from_wire(w: WireScalar) raises -> ScalarValue:
     """⚠ `kind` IS A DISCRIMINATOR, SO IT IS NEVER ASSIGNED UNCHECKED
     (`v._kind = UInt8(Int(w.kind))` would be the bug).
 
-    `_kind` selects which of the struct's 18 payload fields is live, so an
+    `_kind` selects which of the struct's 17 payload fields is live, so an
     out-of-vocabulary kind would produce a ScalarValue that reads a field
     nothing wrote, with no arm-presence check to turn a perturbation into a
-    refusal. All three enum slots go through the derived vocabulary, which
+    refusal. Both enum slots go through the derived vocabulary, which
     validates the RANGE BEFORE the narrowing rather than after it."""
     var v = ScalarValue()
     v.dtype = _dtype_from_wire(w.dtype_code)
@@ -1282,7 +1285,6 @@ def _scalar_from_wire(w: WireScalar) raises -> ScalarValue:
     v.time_unit = scalar_time_unit_from_wire(Int32(w.time_unit.number()))
     v.dec256_high_lo = w.dec256_high_lo
     v.dec256_high_hi = w.dec256_high_hi
-    v.error_code = excel_error_code_from_wire(Int32(w.error_code.number()))
     return v^
 
 
@@ -1839,7 +1841,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
     else:
         raise Error(
             PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
-            + expr_tag_wire_name(expr_tag_to_wire(tag))
+            + _expr_tag_name(tag)
             + "' (engine tag " + String(Int(tag)) + ") has no message arm in"
             + " plan.proto. See the COVERAGE LEDGER at the top of"
             + " plan_wire_codec.mojo." + _missing_wire_artefact_hint(tag)
@@ -1852,6 +1854,17 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         struct_field_idx^, map_get^, json_extract^, window_fn^,
         string_fn^, string_fn_n^, udf_call^,
     )
+
+
+def _expr_tag_name(tag: UInt8) -> String:
+    """The wire name of an engine ExprTag, for a refusal message.
+
+    Total, unlike `expr_tag_to_wire`: the tags these refusals are about
+    include EXPR_BETWEEN and EXPR_SORT_KEY, whose wire numbers
+    plan_vocabulary.proto reserves, and `expr_tag_to_wire` raises on them.
+    Raising here would replace the PLAN_WIRE_UNSUPPORTED_EXPR_TAG refusal
+    with the vocabulary's untokened one."""
+    return expr_tag_wire_name(Int32(Int(tag)) + 1)
 
 
 def _missing_wire_artefact_hint(tag: UInt8) -> String:
@@ -2387,7 +2400,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
     # when a reader must hear about it rather than fall through.
     raise Error(
         PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
-        + expr_tag_wire_name(expr_tag_to_wire(tag))
+        + _expr_tag_name(tag)
         + "' has no decode arm"
     )
 
@@ -3948,7 +3961,7 @@ def plan_to_bytes(p: LogicalPlan) raises -> List[UInt8]:
     RAISES, by name, on any shape the wire cannot carry — see the COVERAGE
     LEDGER at the top of this file. Nothing is dropped silently.
 
-    The envelope declares `format_version = 2` and carries NO `write_target`:
+    The envelope declares `format_version = 4` and carries NO `write_target`:
     a plan alone means "run this and return the rows". To ask a receiver to
     WRITE the rows somewhere, use `plan_to_bytes_with_write_target`."""
     return encode_proto[WirePlanEnvelope](
@@ -3963,7 +3976,7 @@ def plan_to_bytes_with_write_target(
 ) raises -> List[UInt8]:
     """Encode a plan AND A DESTINATION — `COPY <plan> TO <target>` on the wire.
 
-    The envelope declares `format_version = 3`, which is not decoration: it is
+    The envelope declares `format_version = 5`, which is not decoration: it is
     what makes a reader that does not know field 3 REFUSE these bytes instead of
     skipping the field, running the query, returning rows and writing nothing.
     The version is derived from the shape (`_envelope_version_for`) rather than
@@ -4037,7 +4050,7 @@ struct DecodedPlanEnvelope(Movable):
 
     ⚠ `write_target` IS `Optional` AND MUST STAY THAT WAY. Absence is the
     ordinary case and means "return the rows" — the behaviour of every
-    format-version-2 envelope. Making it non-optional with a sentinel path
+    plain envelope. Making it non-optional with a sentinel path
     would put "no destination" and "a destination named empty-string" in the
     same value, which is the proto3 confusion `_check_write_target` refuses.
 

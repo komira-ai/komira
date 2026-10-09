@@ -10,13 +10,14 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | the release path of `kci.yml` |
-| pull request from a branch of this repository | `pr / check` |
+| push to `main` | the release path of `kci.yml`; when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
+| pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
 
-There is no separate static or lint job, and no other pull request check. The
-only scheduled run is the
+There is no separate static or lint job, and no other pull request check
+that can block a merge: the `coverage` workflow only reports. The only
+scheduled run is the
 [build-system self-tests](#build-system-self-tests), which is not the gate.
 `ci.yml` and its check `ci / build` no longer exist. The whole-repository
 `//...` build they ran on every push to `main` is not run by any workflow now;
@@ -943,6 +944,99 @@ to the release workflow's), and the welded test
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
+
+## coverage.yml: the pull request's coverage (not a gate)
+
+[`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) posts
+the check run `coverage`: the line coverage of the `mojo_library` targets the
+change touches, and the branch coverage of those whose coverage gate reads
+branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
+annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
+conclusion is `neutral` in the policy's census mode, and it cannot make
+`pr / check` red. Job `measure` (the same farm connection and permissions as
+`pr / check`) builds the touched libraries' `[coverage][tests]`, and
+`[coverage][branch_info]` of those whose gate reads branch records, with
+`-c komira.coverage=true` on the farm, in one call, and runs `covcheck
+report` over the reports and those records (`--branch-lcov`); a library
+whose coverage build fails is listed as not measured, one whose branch
+records (or gate) fail as branch not measured, and the job stays green. Job `post` holds the only write permission
+(`checks: write`), checks nothing out and sends the bodies `measure`
+uploaded. A pull request from a fork runs neither, and nor does one whose
+base is not `main`: a stacked pull request gets no coverage run until it is
+retargeted to `main` and then pushed to (a retarget alone is an `edited`
+event, which neither workflow listens for; the pull request adding the
+workflow sees its first real run then). A pull request whose head predates the workflow (no
+`.github/ci/coverage_measure.sh`) is not measured: job `measure` is green
+with a notice to merge `main`, job `post` is skipped, and no `coverage` check
+run is posted. Making it a required check, or switching coverage on in
+`pr / check`, waits for the sweep of tests that fail at `-O0` or under kcov
+(in a coverage build one such test leaves its library's conda package
+unbuilt: a coverage run or gate blocks only the package it measures from
+shipping, never the library or its dependents) and is the CEO's decision. Details:
+[The coverage workflow](../tools/build/coverage/README.md#the-coverage-workflow).
+
+## main_red.yml: the main red alert
+
+There is no merge queue: pull requests are checked one at a time and merged
+into `main`, and the release run of `kci.yml` builds each push to `main`. Two
+changes that are each green can still break `main` together. The rule is
+**fix forward or revert within the hour**: when the release run of `main`
+fails, the author of a culprit pull request lands a fix, or reverts the
+pull request, within an hour of the alert, before anything else merges on
+top of it.
+
+[`.github/workflows/main_red.yml`](../.github/workflows/main_red.yml) is the
+alert. It runs when a run of `kci.yml` on `main` completes (`workflow_run`)
+and runs [`release/ci/main_red.py`](../release/ci/main_red.py) with
+`issues: write`, `actions: read` and `contents: read`, checking out `main`
+and running no code of any pull request. It acts only on a run started by a
+push to `main`:
+
+- **Red** (`failure`, `timed_out`, `startup_failure`): the last green
+  commit is the newest commit of a successful push run of `kci.yml` on
+  `main` that is an ancestor of the red one; the culprits are the pull
+  requests merged into `main` after it (the first-parent commits of the
+  range, newest first); the failing targets are the `Action failed:`,
+  `GATED TEST FAILED:` and ``Validation for `<target>` failed`` lines of
+  the failed jobs' logs (with none, the failed job and step). If no issue
+  labelled `main-red` is open, it opens one titled `main red: <first
+  failing target>`; otherwise it comments on the open one. A red commit
+  that a later green run already contains (a re-run of an old run) is
+  left alone.
+- **Green** (`success`): every open `main-red` issue is closed with the
+  comment `Fixed: main is green at <commit> (run <url>)`, unless it records
+  a red head the green commit does not contain (a re-run of an older
+  commit went green). The recorded heads are the `Head:` lines of the
+  issue's body and of the workflow's own comments (`github-actions[bot]`);
+  no other comment counts, and a head the API cannot place on `main`'s
+  line is skipped.
+- **Cancelled or skipped**: nothing.
+
+The issue body, and each comment on a later red run, is one `Key: value`
+line per field, in this order, for tools that read it:
+
+```
+Run: <run url>
+Head: <full commit id>
+Last green: <full commit id, or none>
+Culprits: #N, #M            (or: Culprits: unknown)
+Failing: <target>           (one line per failing target)
+Log: <key log line>         (none, one or two lines)
+```
+
+**Nothing hides a red `main`.** `kci.yml`'s push runs share one
+concurrency group with `cancel-in-progress: false` ([Queued
+runs](#continuous-auto-promotion)): a running release is never cancelled,
+and a newer push replaces only a pending run, which never started. The run
+that replaces it builds a later commit of `main`, which carries the
+replaced one's changes, and the culprits come from the whole range since
+the last green commit, so the replaced commit's pull request is still
+named. `main_red.yml` has no concurrency group, so none of its runs is
+replaced or cancelled; if two red runs race to open the issue, the newer
+issue is closed as a duplicate of the older. One delay remains: a push
+that changes only `docs/**` or `*.md` files starts no `kci.yml` run (rule
+R17), so a README example it breaks is found by the next push's run, whose
+range names it. Cases: `//release/ci/tests:test_main_red`.
 
 ## merge-from-live (not yet running)
 

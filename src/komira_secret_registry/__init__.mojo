@@ -1,10 +1,10 @@
 """`komira_secret_registry`: the per-execution secret registry side table and
 the connector reveal seam.
 
-The secrets counterpart of `komira_fs_registry` (the file-system
-`node_id -> FsHandle` side table). It binds a query's secret-bearing plan nodes
-to opaque secret handles and resolves a handle only at the moment a connector
-needs the bytes.
+The secrets counterpart of komira_plan_expr's `FsBindings` (the file-system
+`node_id -> scheme` table a plan carries). It binds a query's secret-bearing
+plan nodes to opaque secret handles and resolves a handle only at the moment a
+connector needs the bytes.
 
 WHAT IT SHIPS:
   * `SecretRegistry[Store]`: the per-execution `node_id -> secret_ref` side
@@ -32,11 +32,11 @@ inside `reveal_for` then runs every check that composition makes: an
 authorization deny raises before the inner provider is reached. There is no
 type erasure; the concrete composed type is the `Store` parameter.
 
-FAIL-FAST ON A MISSING BINDING (unlike `komira_fs_registry`). An unbound
-`node_id` raises in `reveal_for`: a secret-bearing node with no binding is a
-wiring error, never a silent local fallback. The file-system registry falls back
-to the local file system for an unbound node, a benign default that a missing
-secret does not have.
+FAIL-FAST ON A MISSING BINDING (unlike `FsBindings`). An unbound `node_id`
+raises in `reveal_for`: a secret-bearing node with no binding is a wiring
+error, never a silent local fallback. An unbound file-system node resolves to
+the local file system (`FsBindings.resolve_scheme` answers `FS_SCHEME_FILE`),
+a benign default that a missing secret does not have.
 
 Dependencies: `komira_secret_store` (the `SecretStore` trait and `SecretValue`)
 and the core packages (`Slab` and the bindings table). Nothing from the engine,

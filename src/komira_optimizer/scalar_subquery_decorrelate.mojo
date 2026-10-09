@@ -416,7 +416,7 @@ def _decorrelate_filter(mut plan: LogicalPlan) raises:
     var sites = Slab[_DecorrSite]()
     _collect_decorrelatable_in_expr(pred_copy, sites)
     if len(sites) == 0:
-        return  # (defensive — _expr_contains said yes; can't happen)
+        return  # cov: unreachable _expr_contains_decorrelatable_scalar said yes and the collect walk mirrors it
 
     var new_pred = _rewrite_decorrelated_in_expr(pred_copy, sites)
     var new_child = _build_cross_chain(child_copy^, sites)
@@ -451,7 +451,7 @@ def _decorrelate_project(mut plan: LogicalPlan) raises:
     for i in range(len(pj0.exprs)):
         _collect_decorrelatable_in_expr(pj0.exprs[i], sites)
     if len(sites) == 0:
-        return
+        return  # cov: unreachable a decorrelatable expr was found above and the collect walk mirrors that check
     var new_exprs = _rewrite_exprs_in_array(pj0.exprs, sites)
 
     var new_child = _build_cross_chain(child_copy^, sites)

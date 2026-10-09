@@ -271,12 +271,12 @@ def derive_transitive_edges(mut chain: JoinChain) -> Int:
                 var root_b = _uf_find(parent, kb)
                 var existing = class_rels.get(root_b)
                 if not existing:
-                    var rl = List[Int]()
-                    rl.append(e.right_relation)
-                    class_rels[root_b] = rl^
-                    var cl = List[String]()
-                    cl.append(e.right_keys[j])
-                    class_cols[root_b] = cl^
+                    var rl = List[Int]()  # cov: unreachable ka shares the root of kb and was recorded on this edge or an earlier one, so the class exists
+                    rl.append(e.right_relation)  # cov: unreachable see the line above
+                    class_rels[root_b] = rl^  # cov: unreachable see the line above
+                    var cl = List[String]()  # cov: unreachable see the line above
+                    cl.append(e.right_keys[j])  # cov: unreachable see the line above
+                    class_cols[root_b] = cl^  # cov: unreachable see the line above
                 else:
                     var cur_rels = existing.value().copy()
                     var cur_cols_opt = class_cols.get(root_b)
@@ -294,11 +294,11 @@ def derive_transitive_edges(mut chain: JoinChain) -> Int:
     for root in class_rels.keys():
         var rels_opt = class_rels.get(root)
         if not rels_opt:
-            continue
+            continue  # cov: unreachable root comes from class_rels.keys()
         var rels = rels_opt.value().copy()
         var cols_opt = class_cols.get(root)
         if not cols_opt:
-            continue
+            continue  # cov: unreachable class_cols gets a key whenever class_rels does
         var cols = cols_opt.value().copy()
         var sz = len(rels)
         if sz < 3:
