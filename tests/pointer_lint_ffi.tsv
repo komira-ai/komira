@@ -5,6 +5,7 @@
 # tab-separated: <file> <the foreign resource it owns>. A row's file must hold a
 # comment line starting `# FFI-BOUNDARY:` and must name a wildcard origin, or the
 # row fails the build. The other pointer rules hold here as anywhere.
+src/komira_agg_api/tests/test_accumulator_trait.mojo	the Accumulator trait's raw-pointer update_batch ABI, as a stand-in conformer: the group-id and value buffers it is handed for one call
 src/komira_arrow_ipc/c_data_interface.mojo	the Arrow C Data Interface: the C structs exchanged with a foreign producer or consumer
 src/komira_arrow_ipc/c_data_stream.mojo	the Arrow C Stream Interface (ArrowArrayStream)
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe
