@@ -191,7 +191,7 @@ e2e targets; `tests//functional/...` builds them.
 ./buck2 build tests//negative/surface_capability_matrix/incompatible:   # must fail: ... because its transitive dep .../pandas_e2e:test_mac
 ```
 
-## 54. Refused imports
+## 55. Refused imports
 
 A package's `mojo_deps` lint ([`defs.bzl`](../lint/defs.bzl)) can name
 `refused_imports`: dotted modules (`komira_x.y`) that no file of the package
@@ -226,7 +226,7 @@ module name and is refused at analysis.
 ./buck2 build tests//negative/refused_imports:paren_comment_open   # must fail: paren_comment_open.mojo:3: imports komira_plan_ir.physical_plan
 ```
 
-## 55. Standard-library-only closure
+## 56. Standard-library-only closure
 
 A package's `mojo_deps` lint ([`defs.bzl`](../lint/defs.bzl)) can name
 `std_only`, a mojo_library whose closure must be the standard library alone:

@@ -400,7 +400,13 @@
 #      a repeated capability, fewer filled cells than the floor, no surface,
 #      and (built by package pattern) a test incompatible with the lint's
 #      platform.
-#  54. Refused imports (tools/build/lint/defs.bzl, mojo_deps refused_imports;
+#  54. The hermetic Node.js rules (tools/build/node/defs.bzl): each target of
+#      tests//negative/node and below fails with its planted defect: a failing
+#      script, a wrong expected error or an unexpected pass, a path or package
+#      staged twice, an unresolved import, an empty expect_error or exe, a pin
+#      that differs, a C warning, the test-only runtime named where it is not
+#      visible. See tools/build/tests/node_tests.sh.
+#  55. Refused imports (tools/build/lint/defs.bzl, mojo_deps refused_imports;
 #      tools/build/lint/refused_imports.awk): tests//functional/refused_imports:ok
 #      (each refused module spelt where it is no import of it: comments,
 #      docstrings, string literals, longer module names, a name imported
@@ -416,7 +422,7 @@
 #      through an `as` alias of its parent, through a name a from-import
 #      bound)), and an entry that is not a dotted komira_* module name is
 #      refused at analysis.
-#  55. Standard-library-only closure (tools/build/lint/defs.bzl, mojo_deps
+#  56. Standard-library-only closure (tools/build/lint/defs.bzl, mojo_deps
 #      std_only): tests//functional/std_only:ok (a library with no deps)
 #      builds; each target of tests//negative/std_only fails analysis naming
 #      its library's one extra dep: a Mojo package, a C library.
@@ -1475,6 +1481,10 @@ done
 scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
 
 # 54
+# shellcheck source=tools/build/tests/node_tests.sh
+. "$ROOT/tools/build/tests/node_tests.sh"
+
+# 55
 expect_green refused_imports tests//functional/refused_imports:ok
 N=tests//negative/refused_imports
 P=komira_plan_ir.physical_plan
@@ -1512,7 +1522,7 @@ for want in \
 done
 expect_red refused_imports_bad_entry "refused_imports entry \`komira_plan_ir\` is not a dotted module name" "$N:bad_entry"
 
-# 55
+# 56
 expect_green std_only tests//functional/std_only:ok
 N=tests//negative/std_only
 expect_red std_only_mojo_dep "std_only: $N:mojo_dep_lib depends on the Mojo package(s) leaf; its closure must be the standard library alone" "$N:mojo_dep"

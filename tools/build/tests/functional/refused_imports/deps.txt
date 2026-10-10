@@ -1,4 +1,4 @@
-# The BUCK text mojo_deps reads for the fixtures of test 54: a library name
+# The BUCK text mojo_deps reads for the fixtures of test 55: a library name
 # and the deps every fixture import names.
 mojo_library(
     name = "komira_fixture",

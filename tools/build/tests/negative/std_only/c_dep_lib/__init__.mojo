@@ -1,4 +1,4 @@
-# Test 55: a library that imports nothing; its BUCK deps are the defect.
+# Test 56: a library that imports nothing; its BUCK deps are the defect.
 
 
 def value() -> Int:

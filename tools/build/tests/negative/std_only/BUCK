@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test 55 (std_only, mojo_deps), the half that must go red: each mojo_deps
+# Test 56 (std_only, mojo_deps), the half that must go red: each mojo_deps
 # here names a library whose deps hold one thing besides the standard
 # library, and must fail analysis naming it. run_tests.sh requires the text.
 # The library's sources import nothing, so only `std_only` can refuse it.

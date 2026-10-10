@@ -1,4 +1,4 @@
-# The BUCK text mojo_deps reads for test 55's negatives. Their sources import
+# The BUCK text mojo_deps reads for test 56's negatives. Their sources import
 # nothing, so the import check passes and only `std_only` refuses.
 mojo_library(
     name = "fixture",

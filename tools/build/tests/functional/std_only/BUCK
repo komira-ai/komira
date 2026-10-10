@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test 55 (std_only, mojo_deps), the half that must build: a library with no
+# Test 56 (std_only, mojo_deps), the half that must build: a library with no
 # deps passes `std_only`. negative/std_only plants a Mojo dep and a C dep.
 mojo_library(
     name = "leaf",

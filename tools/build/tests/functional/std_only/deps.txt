@@ -1,4 +1,4 @@
-# The BUCK text mojo_deps reads for test 55's `ok`: a library with no deps.
+# The BUCK text mojo_deps reads for test 56's `ok`: a library with no deps.
 mojo_library(
     name = "leaf",
 )
