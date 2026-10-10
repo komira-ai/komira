@@ -126,8 +126,10 @@ def test_presign_percent_encode() raises:
 def test_presigned_url_value() raises:
     var hs = List[PresignedHeader]()
     hs.append(PresignedHeader(String("x-ms-blob-type"), String("BlockBlob")))
-    var u = PresignedUrl(String("https://h/k"), String("PUT"), Int64(42), hs^)
-    assert_equal(u.url, String("https://h/k"))
+    var u = PresignedUrl(
+        String("https://h.test/k"), String("PUT"), Int64(42), hs^
+    )
+    assert_equal(u.url, String("https://h.test/k"))
     assert_equal(u.method, String("PUT"))
     assert_equal(u.expires_unix_seconds, Int64(42))
     assert_equal(len(u.required_headers), 1)

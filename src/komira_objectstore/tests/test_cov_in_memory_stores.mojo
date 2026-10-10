@@ -225,6 +225,14 @@ struct _ReaderArg(Movable, Deinitable):
         self.store = store^
 
 
+
+# FFI-BOUNDARY: the pthread_create / pthread_join FFI of the lock-wait case.
+# `_reader_entry` is the C thread entry, so its argument and result are
+# spelled with MutUntrackedOrigin, as are the C NULLs passed for the
+# attributes and the join result (tests/pointer_lint_ffi.tsv lists this
+# file). Ownership: `test_delimiter_faithful_lock_waits` allocates the
+# `_ReaderArg` and hands it to the thread, whose OwnedPointer frees it; the
+# entry returns NULL, which pthread_join discards.
 def _reader_entry(
     arg: UnsafePointer[NoneType, MutUntrackedOrigin]
 ) -> UnsafePointer[NoneType, MutUntrackedOrigin]:
