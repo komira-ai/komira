@@ -57,6 +57,7 @@ mojo_library(
         "tests/test_avro_resolve_field_skip.mojo",
         "tests/test_avro_resolve_promotions.mojo",
         "tests/test_avro_resolve_union_enum.mojo",
+        "tests/test_avro_schema_default_edges.mojo",
         "tests/test_avro_schema_json_grammar.mojo",
         "tests/test_avro_schema_json_unicode.mojo",
         "tests/test_avro_schema_names.mojo",
