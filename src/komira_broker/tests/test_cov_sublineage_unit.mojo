@@ -9,9 +9,11 @@
 #   1. A non-404 chunk read error propagates out of every walk: the `_base`
 #      walks (plain and tagged), the block walks (plain and tagged), the
 #      shard capture and the folded-prefix walk.
-#   2. The `_base` key walk skips a chunk that 404s (it keeps no offsets).
+#   2. The `_base` key walk refuses a `_base` chunk that 404s at or above
+#      `_base`'s `_LOG_START` (a torn `_base`), like every other walk.
 #   3. A block or watermark for a shard the cache never captured contributes
-#      nothing, and an absent shard contributes a 0 folded prefix.
+#      nothing, and a shard with no manifest captures no chunks and a 0
+#      folded prefix.
 #   4. SegmentBaseFold: a concurrent `_base` append that takes the fold's
 #      slot is refused as a torn fold; should_fold delegates the cadence.
 #   5. SubLineageMigration: a migration that failed after its first chunk
@@ -30,7 +32,6 @@ from komira_broker.sublineage_base_inputs import (
     FoldedCountsCache,
     SegmentBaseInputs,
     _CachedShard,
-    _CachedShardChunk,
     _base_folded_prefix_cached,
 )
 from komira_broker.sublineage_consume import (
@@ -253,13 +254,11 @@ def test_walks_propagate_store_errors() raises:
     var sink = List[String]()
     with assert_raises(contains="boom: base chunk"):
         _ = r._resolve_base_index_tagged_capturing(sink)
-    # The `_base` key walk keeps no offsets: a 404 there is skipped.
+    # The `_base` key walk: a 404 at or above `_LOG_START` is a torn `_base`.
     var inputs = SegmentBaseInputs[_FaultStore](fs.clone(), _PART)
     fs.arm("get", b1, 1, 1, "not_found (404) injected")
-    var keys = inputs.walk_base_object_keys()
-    assert_equal(len(keys), 2)
-    assert_equal(keys[0], "k1")
-    assert_equal(keys[1], "k3")
+    with assert_raises(contains="is missing at or above _LOG_START seq"):
+        _ = inputs.walk_base_object_keys()
     fs.arm("get", b1, 1, 1, "boom: base keys")
     with assert_raises(contains="boom: base keys"):
         _ = inputs.walk_base_object_keys()
@@ -306,14 +305,9 @@ def test_uncaptured_and_absent_shards_contribute_nothing() raises:
     var wm = inputs.folded_counts_cached(snap, empty)
     assert_equal(len(wm), 1)
     assert_equal(wm[0].folded_count, Int64(0))
-    # An absent shard's cached capture has no folded prefix.
-    var chunks = List[_CachedShardChunk]()
-    chunks.append(
-        _CachedShardChunk(
-            Int64(0), Int64(5), UInt32(0), String("k1"), String(""), Int64(-1), Int64(0)
-        )
-    )
-    var absent = _CachedShard(String("w9"), False, Int64(0), Int64(0), chunks^)
+    # A shard with no manifest captures no chunks, so no folded prefix.
+    var absent = inputs.walk_shard_chunks("w9")
+    assert_equal(len(absent.chunks), 0)
     var keys = List[String]()
     keys.append("k1")
     assert_equal(_base_folded_prefix_cached(absent, keys), Int64(0))

@@ -13,13 +13,21 @@
 from std.testing import assert_equal, assert_true, assert_false
 
 from komira_agg_api.agg_layout import (
+    ACC_TAG_INVALID,
     ACC_SUM_F64,
+    ACC_SUM_I64,
     ACC_COUNT_STAR,
+    ACC_COUNT_NONNULL,
+    ACC_SUM_COUNT_I64,
+    ACC_MIN_F64,
+    ACC_MAX_F64,
+    ACC_COUNT_DISTINCT_I64,
     ACC_SUM_COUNT_F64,
     ACC_SUM_COUNT_MIN_MAX_F64,
     AggLayout,
     acc_slot_width,
     agg_layout_is_quartet,
+    layout_for_funcs,
     select_agg_layout,
 )
 
@@ -141,6 +149,62 @@ def test_select_layout_empty() raises:
     print("  ok")
 
 
+def test_acc_slot_width_every_tag() raises:
+    """Each declared AccTag maps to its documented width; ACC_TAG_INVALID and
+    an undeclared tag map to 0. Pins the full table, so an arm returning the
+    wrong width or dropping to the 0 fallback goes red."""
+    print("test_acc_slot_width_every_tag...")
+    assert_equal(acc_slot_width(ACC_TAG_INVALID), 0)
+    assert_equal(acc_slot_width(ACC_SUM_F64), 8)
+    assert_equal(acc_slot_width(ACC_SUM_I64), 8)
+    assert_equal(acc_slot_width(ACC_COUNT_STAR), 8)
+    assert_equal(acc_slot_width(ACC_COUNT_NONNULL), 8)
+    assert_equal(acc_slot_width(ACC_SUM_COUNT_F64), 16)
+    assert_equal(acc_slot_width(ACC_SUM_COUNT_I64), 16)
+    assert_equal(acc_slot_width(ACC_MIN_F64), 8)
+    assert_equal(acc_slot_width(ACC_MAX_F64), 8)
+    assert_equal(acc_slot_width(ACC_SUM_COUNT_MIN_MAX_F64), 32)
+    assert_equal(acc_slot_width(ACC_COUNT_DISTINCT_I64), 8)
+    assert_equal(acc_slot_width(UInt8(11)), 0)
+    assert_equal(acc_slot_width(UInt8(255)), 0)
+    print("  ok")
+
+
+def test_mixed_tag_layout_offsets() raises:
+    """A layout of every narrow tag: offsets are the running sum of the
+    per-tag widths, in tag order."""
+    print("test_mixed_tag_layout_offsets...")
+    var tags: List[UInt8] = [
+        ACC_SUM_I64, ACC_COUNT_NONNULL, ACC_SUM_COUNT_I64, ACC_MIN_F64,
+        ACC_MAX_F64, ACC_COUNT_DISTINCT_I64,
+    ]
+    var layout = AggLayout(tags^)
+    var want_w: List[Int] = [8, 8, 16, 8, 8, 8]
+    var want_o: List[Int] = [0, 8, 16, 32, 40, 48]
+    assert_equal(layout.num_aggs, 6)
+    for i in range(6):
+        assert_equal(layout.slot_width(i), want_w[i])
+        assert_equal(layout.slot_offset(i), want_o[i])
+    assert_equal(layout.total_width, 56)
+    assert_false(agg_layout_is_quartet(layout))
+    print("  ok")
+
+
+def test_layout_for_funcs() raises:
+    """layout_for_funcs routes through select_agg_layout with f64 values: all
+    SUM/COUNT -> narrow 16B slots; any other func -> 32B quartet."""
+    print("test_layout_for_funcs...")
+    var narrow = layout_for_funcs([UInt8(0), UInt8(1), UInt8(0)])
+    assert_equal(narrow.num_aggs, 3)
+    assert_equal(narrow.total_width, 48)
+    assert_equal(Int(narrow.slot_tag(2)), Int(ACC_SUM_COUNT_F64))
+    var wide = layout_for_funcs([UInt8(1), UInt8(3)])
+    assert_equal(wide.num_aggs, 2)
+    assert_equal(wide.total_width, 64)
+    assert_true(agg_layout_is_quartet(wide))
+    print("  ok")
+
+
 def main() raises:
     test_acc_slot_widths()
     test_default_quartet_layout()
@@ -151,4 +215,7 @@ def main() raises:
     test_select_layout_with_min()
     test_select_layout_non_f64_values()
     test_select_layout_empty()
+    test_acc_slot_width_every_tag()
+    test_mixed_tag_layout_offsets()
+    test_layout_for_funcs()
     print("All AggLayout tests passed!")

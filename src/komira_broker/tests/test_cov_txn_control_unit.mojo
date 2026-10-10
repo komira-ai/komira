@@ -14,8 +14,9 @@
 #   4. Each verb refuses a missing transaction and a wrong state.
 #   5. Each CAS loop retries a precondition failure, gives up after its
 #      retry budget, and propagates any other store error unchanged.
-#   6. stage_offset returns what it wrote when the read after the write
-#      finds nothing.
+#   6. stage_offset and add_partitions return what they wrote when the read
+#      after the write finds nothing (komira-ai/komira#1075: add_partitions
+#      returned an empty partition list there).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
@@ -395,8 +396,7 @@ def test_write_then_vanished_read_synthesizes() raises:
     _ = s.begin("x", Int64(9), Int64(5))
     _ = s.add_partitions("x", _parts("t", Int64(2)))
     # The first get (the read before the CAS) passes; the read after it
-    # finds nothing. (add_partitions' own fallback is left out: it drops the
-    # partitions it just wrote, filed upstream.)
+    # finds nothing.
     fs.arm("get", "/_meta/txn/x", 1, 1, "not_found (404) injected")
     var so = s.stage_offset("x", "g", "t", Int64(2), Int64(8), "md")
     # Every field comes from the staged update: producer 9, epoch 5 (distinct
@@ -412,6 +412,33 @@ def test_write_then_vanished_read_synthesizes() raises:
     assert_equal(so.etag, s.read("x").value().etag)
 
 
+def test_add_partitions_vanished_read_returns_written() raises:
+    # komira-ai/komira#1075. One partition and one staged offset are already
+    # on the txn; the call adds a second partition and re-adds the first.
+    var fs = _FaultStore()
+    var s = _store(fs)
+    _ = s.begin("x", Int64(9), Int64(5))
+    _ = s.add_partitions("x", _parts("t", Int64(2)))
+    _ = s.stage_offset("x", "g", "t", Int64(2), Int64(8), "md")
+    var more = _parts("t", Int64(2))
+    more.append(TxnPartition(String("u"), Int64(4)))
+    fs.arm("get", "/_meta/txn/x", 1, 1, "not_found (404) injected")
+    var ap = s.add_partitions("x", more^)
+    var stored = s.read("x").value().copy()
+    assert_equal(len(stored.partitions), 2)
+    assert_equal(ap.producer_id, Int64(9))
+    assert_equal(ap.epoch, Int64(5))
+    assert_equal(ap.state, TXN_STATE_ONGOING)
+    assert_equal(ap.complete_version, stored.complete_version)
+    assert_equal(len(ap.partitions), 2)
+    assert_true(ap.has_partition("t", Int64(2)))
+    assert_true(ap.has_partition("u", Int64(4)))
+    assert_equal(len(ap.pending_offsets), 1)
+    assert_equal(ap.pending_offsets[0].offset, Int64(8))
+    assert_equal(ap.pending_offsets[0].metadata, "md")
+    assert_equal(ap.etag, stored.etag)
+
+
 def main() raises:
     test_state_names()
     test_decode_round_trip_and_truncations()
@@ -420,4 +447,5 @@ def main() raises:
     test_read_propagates_store_error()
     test_cas_loops_retry_give_up_and_propagate()
     test_write_then_vanished_read_synthesizes()
+    test_add_partitions_vanished_read_returns_written()
     print("[OK] test_cov_txn_control_unit")
