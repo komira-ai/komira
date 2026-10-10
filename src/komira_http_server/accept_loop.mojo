@@ -151,6 +151,44 @@ def close_and_remove(
         _ = taken^
 
 
+def _sweep_stale_mapping(
+    mut conns: Slab[ConnEntry],
+    mut fd_to_idx: Dict[Int, Int],
+    fd: Int32,
+):
+    """Drop the table's mapping for `fd`, a number accept(2) just returned:
+    whatever the table held under it was closed behind its back.
+
+      * The mapped slot holds `fd`: the stale conn. Its slot goes WITHOUT
+        closing the number (`ConnEntry.forget_fd`), which now belongs to
+        the conn just accepted (komira-ai/komira#936).
+      * The mapped slot holds another fd mapped to that slot: a live conn.
+        Only the stale mapping goes.
+      * The mapped slot holds an fd no mapping reaches (an orphan): nothing
+        can address it, so it goes too, without closing a number the table
+        cannot show it still owns (komira-ai/komira#947).
+
+    Afterwards every slot left is reached by its own fd's mapping.
+    """
+    var idx = fd_to_idx.pop(Int(fd), -1)
+    var n = conns.len()
+    if idx < 0 or idx >= n:
+        return
+    var slot_fd = conns[idx]._fd
+    if slot_fd != fd:
+        var owner = fd_to_idx.find(Int(slot_fd))
+        if owner and owner.value() == idx:
+            return
+    conns[idx].forget_fd()
+    var tail_idx = n - 1
+    var moved_fd = conns[tail_idx]._fd
+    _ = conns.swap_remove(idx)
+    if idx != tail_idx:
+        var moved = fd_to_idx.find(Int(moved_fd))
+        if moved and moved.value() == tail_idx:
+            fd_to_idx[Int(moved_fd)] = idx
+
+
 # =============================================================================
 # §3 — Accept new conns from the listener.
 # =============================================================================
@@ -183,15 +221,8 @@ def accept_one_and_register(
         var new_fd = Int32(Int(ar.value()))
         if new_fd < Int32(0):
             break
-        # Handle the rare race where a stale fd was about to be cleaned
-        # up but the kernel re-handed it (a defensive sweep).
-        var stale_lookup = fd_to_idx.find(Int(new_fd))
-        if stale_lookup:
-            var stale_idx = stale_lookup.value()
-            try:
-                close_and_remove(conns, fd_to_idx, stale_idx)
-            except e:
-                _ = e
+        # The table still maps the number the kernel re-handed: sweep it.
+        _sweep_stale_mapping(conns, fd_to_idx, new_fd)
         var new_stream = TcpStream(new_fd)
         var new_reg = reactor.register_long_lived(new_fd, INTEREST_READ)
         var new_entry = ConnEntry(stream=new_stream^, reg=new_reg)
@@ -259,6 +290,14 @@ def _write_all_or_buffer(
         sent_off = sent_off + sent_n
     bytes_sent = bytes_sent + Int64(n)
     return 0
+
+
+def _park_behind(mut entry: ConnEntry, src: List[UInt8]):
+    """Queue `src` behind the tail `_write_all_or_buffer` just parked (its
+    buffer holds exactly `_pending_len` bytes), so the resume sends both."""
+    for i in range(len(src)):
+        entry._pending_buf.append(src[i])
+    entry._pending_len = entry._pending_len + len(src)
 
 
 # =============================================================================
@@ -345,6 +384,7 @@ def serve_read_round(
                 break
 
             # Optionally serve the 100 Continue interim.
+            var interim_parked = False
             if outcome.expects_continue:
                 if not enable_expect_continue:
                     # Server config disabled — respond 417 instead.
@@ -359,7 +399,7 @@ def serve_read_round(
                 build_100_continue_bytes(interim_buf)
                 var iw = _write_all_or_buffer(entry, interim_buf, bytes_sent)
                 if iw == 1:
-                    return True
+                    interim_parked = True
                 if iw < 0:
                     keep_alive = False
                     break
@@ -372,6 +412,12 @@ def serve_read_round(
             while i < resp_len:
                 resp_list.append(resp_buf[i])
                 i = i + 1
+            if interim_parked:
+                # The request is consumed: its response must follow the
+                # parked interim, or it is never sent (komira-ai/komira#947).
+                _park_behind(entry, resp_list)
+                reqs_handled = reqs_handled + Int64(1)
+                return True
             var rw = _write_all_or_buffer(entry, resp_list, bytes_sent)
             if rw == 1:
                 # Partially buffered; conn alive but pending. Treat
@@ -474,6 +520,7 @@ def serve_read_round_chained(
                 keep_alive = False
                 break
 
+            var interim_parked = False
             if outcome.expects_continue:
                 if not enable_expect_continue:
                     var err_buf = List[UInt8]()
@@ -487,7 +534,7 @@ def serve_read_round_chained(
                 build_100_continue_bytes(interim_buf)
                 var iw = _write_all_or_buffer(entry, interim_buf, bytes_sent)
                 if iw == 1:
-                    return True
+                    interim_parked = True
                 if iw < 0:
                     keep_alive = False
                     break
@@ -514,6 +561,12 @@ def serve_read_round_chained(
 
             var resp_list = List[UInt8]()
             serialize_response(chain_outcome.response, resp_list)
+            if interim_parked:
+                # As in `serve_read_round`: the response follows the parked
+                # interim (komira-ai/komira#947).
+                _park_behind(entry, resp_list)
+                reqs_handled = reqs_handled + Int64(1)
+                return True
             var rw = _write_all_or_buffer(entry, resp_list, bytes_sent)
             if rw == 1:
                 reqs_handled = reqs_handled + Int64(1)
@@ -594,14 +647,8 @@ def accept_one_and_register_tls(
         var new_fd = Int32(Int(ar.value()))
         if new_fd < Int32(0):
             break
-        # Stale-fd race defense (same shape as the plaintext path).
-        var stale_lookup = fd_to_idx.find(Int(new_fd))
-        if stale_lookup:
-            var stale_idx = stale_lookup.value()
-            try:
-                close_and_remove(conns, fd_to_idx, stale_idx)
-            except e:
-                _ = e
+        # Stale-mapping sweep (same as the plaintext path).
+        _sweep_stale_mapping(conns, fd_to_idx, new_fd)
 
         # Set the fd non-blocking BEFORE constructing the TlsStream —
         # otherwise s2n_negotiate would block on read() indefinitely.
