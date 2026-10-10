@@ -418,6 +418,17 @@ channel answers NOOP (exit 0).
     taking the branch's changes back out. A history git cannot list (a
     shallow clone, no `RUNNER_TEMP`) is exit 5, never a pass.
 
+  The rule is the run's, not the stage's: a push to `main` holds `gamma` to
+  it too, where it counts only `gamma`'s MAIN-LINE builds (those whose
+  `h<8 hex>` is a commit on `main`'s freshly fetched history; a branch's
+  break-glass build is reported and not counted). Before refusing, kci asks
+  git whether the release revision is on the history of the commit the
+  channel's newest build names (`git rev-parse --verify`, then `git
+  merge-base --is-ancestor`): when it is, a newer release is already in the
+  channel and the run stops SUPERSEDED, exit 0, nothing uploaded and no set
+  hash handed on. A prefix git cannot resolve to one commit, or a shallow
+  clone, is exit 5.
+
   Only a late re-run of an old run reaches either, since the group
   serialises live runs. A re-run of the same release is NOOP (or finishes a
   partial publish). Rolling back
@@ -825,6 +836,11 @@ so the release files list no package:
   for an artifact, a refusal (`KCI-E-ARTIFACT`): a release must build what an
   artifact names. A derive tool that fails or answers outside its grammar is
   "cannot tell" (`KCI-E-AFFECTED`), never a pass.
+- **A universe the derive tool cannot query:** when its `buck2 cquery` fails,
+  for any reason (a target with an unknown or invisible dependency, a
+  transport error, a buck2 that does not start), `derive_checks.py` answers
+  one `BROKEN <reason>` line holding buck2's error, and kci FAILS the check
+  (`KCI-E-BUILD-FAILED`): nothing is built, and no affected command runs.
 
 **Which units a change reaches:** each build system's `affected` command,
 `buck2 run //tools/build/ci:affected` ([`tools/build/ci`](../tools/build/ci)),
@@ -834,7 +850,17 @@ package that held it at the base commit), takes their reverse dependencies, and
 answers the units whose targets (labels, or the package patterns of the derived
 checks) are among them. A file it cannot map, and a change to `.buckconfig`,
 the toolchains, `tools/build`, `prelude` or `third_party`
-([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit. A
+([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit.
+A widened answer is given only after `buck2 cquery` configures the whole
+universe. A failed query is never a widening: when the query mapping the
+files, the reverse-dependency query or the query configuring the universe
+fails, for any reason (a target with an unknown or invisible dependency, a
+transport error), the answer is `BROKEN`, carrying buck2's error (its
+stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
+check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
+the target buck2 names, when it names one, only leads the message. So a
+change that plants a target buck2 cannot configure fails its own check,
+widened or not. A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
 history, so the base commit is there.

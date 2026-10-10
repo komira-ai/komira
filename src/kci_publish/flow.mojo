@@ -127,7 +127,8 @@ from .plan import PublishTarget, resolve_targets
 from .release_version import ReleaseVersion, read_release_version
 from .report import REASON_FAILED, PublishReport, record_publish_result
 from .request import PublishRequest
-from .run import run_publish
+from .history import HistoryReader, UnreadHistory
+from .run import run_publish_reading
 from .upload import PublishCredential, RunOptions
 from .verify import require_closure, require_conda_only, require_lockstep
 from .workers import MAX_CONCURRENCY, MIN_CONCURRENCY, ChannelTransport, HttpChannelTransport, WorkerSleeper
@@ -379,7 +380,7 @@ def _probe[U: PkgTransport, W: WorkerSleeper](
     return String(CREDENTIAL_PROBE_MINTED)
 
 
-def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper, C: RunRecorder](
+def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper, C: RunRecorder, H: HistoryReader](
     req: PublishRequest,
     mut result: KciRunResult,
     mut recorder: C,
@@ -389,10 +390,12 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
     mut store: S,
     run_opts: RunOptions,
     mut sleeper: W,
+    mut reader: H,
 ) -> PublishReport:
     var opts = run_opts.copy()
     opts.concurrency = req.concurrency
     opts.never_backward = req.never_backward
+    opts.main_line_only = req.main_line_only
     var step0 = _step0(req)
     if not step0.prepared:
         return step0.refusal.copy()
@@ -435,7 +438,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
                 var auth = token.authorization(SURFACE_PREFIX_DEV, host)
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth^)
             var nobody = AnonymousCredential()
-            return run_publish(p.targets, registry, nobody, True, opts, sleeper, base.copy(), req.revision_history)
+            return run_publish_reading(p.targets, registry, nobody, True, opts, sleeper, base.copy(), req.revision_history, reader)
         if is_oidc:
             var oidc = _oidc_credential(oidc_t^, sleeper.for_worker(), actions^, host, req.github_environment())
             if public:
@@ -444,7 +447,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
                 var auth = oidc.authorization(SURFACE_PREFIX_DEV, host)
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
                 registry.credential().arm(auth^)
-            return run_publish(p.targets, registry, oidc, False, opts, sleeper, base.copy(), req.revision_history)
+            return run_publish_reading(p.targets, registry, oidc, False, opts, sleeper, base.copy(), req.revision_history, reader)
         var token = StaticTokenCredential.token_secret(
             SURFACE_PREFIX_DEV, host.copy(), store, p.credential.value().secret_name
         )
@@ -454,7 +457,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
             var auth = token.authorization(SURFACE_PREFIX_DEV, host)
             registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
             registry.credential().arm(auth^)
-        return run_publish(p.targets, registry, token, False, opts, sleeper, base.copy(), req.revision_history)
+        return run_publish_reading(p.targets, registry, token, False, opts, sleeper, base.copy(), req.revision_history, reader)
     except e:
         base.stop(
             String(REASON_FAILED),
@@ -480,8 +483,30 @@ def publish_flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: Worker
     it), `oidc_t` carries the OIDC exchange, `actions` is the runner's OIDC
     handshake. `recorder.begin` is called at most once, before the first
     effect; this step's row, artifacts, set hash, new names and first error
-    go into `result`. Never raises."""
-    var r = _flow(req, result, recorder, registry, oidc_t^, actions^, store, opts, sleeper)
+    go into `result`. Never raises. A never-backward run the rules would
+    refuse cannot tell (no history reader; `publish_flow_reading` gives
+    one)."""
+    var reader = UnreadHistory()
+    return publish_flow_reading(req, result, recorder, registry, oidc_t^, actions^, store, opts, sleeper, reader)
+
+
+def publish_flow_reading[
+    T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper, C: RunRecorder, H: HistoryReader
+](
+    req: PublishRequest,
+    mut result: KciRunResult,
+    mut recorder: C,
+    mut registry: RegistrySet[T, PublishCredential],
+    var oidc_t: U,
+    var actions: ActionsOidcEnv,
+    mut store: S,
+    opts: RunOptions,
+    mut sleeper: W,
+    mut reader: H,
+) -> PublishReport:
+    """`publish_flow` whose never-backward split asks `reader` (run.mojo,
+    THE SPLIT)."""
+    var r = _flow(req, result, recorder, registry, oidc_t^, actions^, store, opts, sleeper, reader)
     try:
         record_publish_result(r, req.step_name, req.stage, req.revision_id, req.platform, result)
     except e:
@@ -504,11 +529,12 @@ def _http() -> _Http:
     return _Http(_mk_connector)
 
 
-def publish_release_with_store[S: SecretStore, C: RunRecorder](
-    req: PublishRequest, mut result: KciRunResult, mut recorder: C, mut store: S
+def publish_release_with_store[S: SecretStore, C: RunRecorder, H: HistoryReader](
+    req: PublishRequest, mut result: KciRunResult, mut recorder: C, mut store: S, mut reader: H
 ) -> PublishReport:
-    """`publish_flow` over the real HTTPS transport, resolving an API_TOKEN
-    channel credential through `store`."""
+    """`publish_flow_reading` over the real HTTPS transport, resolving an
+    API_TOKEN channel credential through `store`; never-backward's split
+    asks `reader`."""
     var sleeper = UsleepSleeper()
     var registry = RegistrySet[_Http, PublishCredential](_http(), PublishCredential())
     var actions: ActionsOidcEnv
@@ -523,7 +549,7 @@ def publish_release_with_store[S: SecretStore, C: RunRecorder](
         except:
             pass
         return r^
-    return publish_flow(req, result, recorder, registry, _http(), actions^, store, RunOptions(), sleeper)
+    return publish_flow_reading(req, result, recorder, registry, _http(), actions^, store, RunOptions(), sleeper, reader)
 
 
 struct NoSecretStore(SecretStore, Movable):
