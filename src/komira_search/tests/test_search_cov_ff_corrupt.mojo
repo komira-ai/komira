@@ -31,6 +31,10 @@
 #      directory, a dictionary term in a KEYWORD sub-region, a field name
 #      (komira-ai/komira#1203). A sub-region one byte past the region end is
 #      refused by the same check.
+#   8. Each bound pinned at its exact edge: a field name one byte longer than
+#      the bytes left in the region, and a KEYWORD dictionary term one byte
+#      longer than the bytes left in its sub-region, are refused by their own
+#      checks (a bound off by one, or one that drops the offset, reads past).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -363,6 +367,23 @@ def test_07_wrapping_lengths_refused() raises:
     name.append(0x61)
     with assert_raises(contains="FastFieldReader: field name out of bounds"):
         _ = FastFieldReader(_split(name^))
+
+
+
+def test_08_one_byte_past_end_refused() raises:
+    # Field name: the 8-byte region has 1 byte after the name length at
+    # position 7, and the name claims 2. A bound of `name_len > rlen` or
+    # `name_len > rlen - pos + 1` would read region[8].
+    var name: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1, 2, 0x61]
+    with assert_raises(contains="FastFieldReader: field name out of bounds"):
+        _ = FastFieldReader(_split(name^))
+    # KEYWORD dictionary: 3 docs, 1 term of length 2 with 1 byte left in the
+    # 4-byte sub-region. A bound off by one walks the term past the
+    # sub-region end and is refused later, by a different check.
+    var k = String("k")
+    var v = _one(_kw(k, [3, 1, 2, 0x61]))
+    with assert_raises(contains="FastFieldReader: dict term out of bounds"):
+        _ = FastFieldReader(v).fast_field_keyword(v, k, 0)
 
 
 def main() raises:
