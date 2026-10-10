@@ -29,6 +29,10 @@ from komira_plan_ir.logical_plan import (
     ASOF_BACKWARD,
     SOURCE_PARQUET,
     SOURCE_CSV,
+    SOURCE_NDJSON,
+    SOURCE_IN_MEMORY,
+    SOURCE_JSON,
+    SOURCE_ORC,
     JOIN_INNER,
     PLAN_SCAN,
     PLAN_FILTER,
@@ -52,6 +56,8 @@ from komira_plan_stats.table_stats import (
     TableStats,
     STATS_SOURCE_PARQUET_METADATA,
 )
+from komira_scan_source.orc_source import OrcSource
+from komira_scan_source.source_variant import SourceVariant
 
 from komira_lowering_rules.payload_narrow import (
     derive_payload_narrow,
@@ -192,7 +198,7 @@ def test_filter_and_pure_project_sides_reach_their_scan() raises:
 
 
 def test_sides_that_do_not_reach_a_parquet_scan_narrow_nothing() raises:
-    # A computed project, a UDF project, an aggregate, a CSV scan, and a SCAN,
+    # A computed project, a UDF project, an aggregate, a non-Parquet scan, and a SCAN,
     # FILTER and PROJECT whose payload is unset. The right side narrows in
     # every case. Catches: a computed or UDF project admitted, a side that is
     # not FILTER/PROJECT/SCAN admitted, a non-Parquet scan admitted, or an
@@ -207,6 +213,18 @@ def test_sides_that_do_not_reach_a_parquet_scan_narrow_nothing() raises:
     pe.append(Expr.col_ref("pv"))
     pe.append(Expr.alias(Expr.binary(BIN_ADD, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(1))), String("z")))
     _eq(_derive(_join(LogicalPlan.project(pe^, _scan("pv")), _scan("bv")), f), " | 1:bv:2:1")
+    # The same project with the computed expression first and in the middle:
+    # every expression is checked, not only those after the first or the last.
+    var first = ExprArray()
+    first.append(Expr.alias(Expr.binary(BIN_ADD, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(1))), String("z")))
+    first.append(Expr.col_ref("key"))
+    first.append(Expr.col_ref("pv"))
+    _eq(_derive(_join(LogicalPlan.project(first^, _scan("pv")), _scan("bv")), f), " | 1:bv:2:1")
+    var middle = ExprArray()
+    middle.append(Expr.col_ref("key"))
+    middle.append(Expr.alias(Expr.binary(BIN_ADD, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(1))), String("z")))
+    middle.append(Expr.col_ref("pv"))
+    _eq(_derive(_join(LogicalPlan.project(middle^, _scan("pv")), _scan("bv")), f), " | 1:bv:2:1")
 
     var in_cols = List[Tuple[String, UInt8]]()
     in_cols.append((String("pv"), DTAG_I64))
@@ -226,7 +244,29 @@ def test_sides_that_do_not_reach_a_parquet_scan_narrow_nothing() raises:
     var agg = LogicalPlan.aggregate(gb^, aggs^, _scan("pv"))
     _eq(_derive(_join(agg^, _scan("bv")), f), " | 1:bv:2:1")
 
-    _eq(_derive(_join(_scan("pv", SOURCE_CSV), _scan("bv")), f), " | 1:bv:2:1")
+    # A scan of every other source kind, each given a footer entry: only
+    # Parquet is admitted. Each scan's `source_type` is asserted first, since
+    # the positional `LogicalPlan.scan` builds a CSV source for any type it
+    # has no arm for, and NDJSON comes out as SOURCE_JSON. Catches: the check
+    # written against one non-Parquet source (`!= SOURCE_CSV`) or as an
+    # ordering over the source codes.
+    var others = List[LogicalPlan]()
+    var types = List[UInt8]()
+    others.append(_scan("pv", SOURCE_CSV))
+    types.append(SOURCE_CSV)
+    others.append(_scan("pv", SOURCE_NDJSON))
+    types.append(SOURCE_JSON)
+    others.append(_scan("pv", SOURCE_IN_MEMORY))
+    types.append(SOURCE_IN_MEMORY)
+    others.append(
+        LogicalPlan.scan_from_source(
+            SourceVariant(OrcSource(String("t.orc"), _schema("pv"), List[Int]())), _schema("pv")
+        )
+    )
+    types.append(SOURCE_ORC)
+    for i in range(len(others)):
+        assert_equal(others[i]._scan.value()[].source_type, types[i])
+        _eq(_derive(_join(others[i].copy(), _scan("bv")), f), " | 1:bv:2:1")
     # A FILTER, a pure PROJECT, and a chain of both, over a CSV scan: the
     # side check recurses to the scan rather than admitting at the first
     # FILTER or PROJECT. Catches: the FILTER or the PROJECT arm returning

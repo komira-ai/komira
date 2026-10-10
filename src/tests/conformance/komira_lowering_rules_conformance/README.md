@@ -5,22 +5,26 @@ Test-only. Checks `komira_lowering_rules`' payload-narrowing rule,
 `komira_optimizer`'s payload-narrowing pass, on a fixture set.
 
 ```text
-fixtures.mojo                the fixtures: plans whose scans carry statistics,
-                             one input moved at a time from a join that narrows;
-                             each scan's statistics are also its footer entry
+fixtures.mojo                the builders and fixtures of komira_optimizer's
+                             payload-narrowing parity table, copied verbatim
+extra_fixtures.mojo          the cases this package adds, and `build(name)`
+render.mojo                  a case's footer list (each scan's statistics, in
+                             scan pre-order) and the table's row rendering
 golden.mojo                  the reader of the golden file
-golden/payload_narrow.tsv    one line per fixture: <case> TAB <specs>, one [...]
-                             per scan in scan pre-order
+golden/payload_narrow.txt    one row per case, `<case> => scan#0: ... | ...`:
+                             the optimizer's 83-row table verbatim, then the
+                             added cases
 tests/test_payload_narrow_parity.mojo
 ```
 
-The welded test runs both rules on every fixture and compares each with the
-fixture's golden line, reporting every mismatch. On a mismatch it prints the
-optimizer rule's results for the whole set as golden lines. It also checks
-that the golden file names exactly the fixtures and holds results of every
-width and empty ones.
+The welded test builds the fixture each golden row names, runs both rules on
+it, and compares each rendering with the row, reporting every mismatch. On a
+mismatch it prints both rules' rows for the whole file. It also pins the row
+count and the order of the added cases, and checks that the rows hold
+results of every width and empty ones.
 
-To add a fixture, add it to a `_*_cases` function in `fixtures.mojo`, add its
-golden line, and build the package. A wrong golden line fails the test, which
-prints the line the optimizer rule gives. Once the optimizer rule is deleted,
-the golden file is the only expectation.
+To add a case, add its builder to `_extra_fixture` and its name to
+`extra_names` in `extra_fixtures.mojo`, append its row to the golden file,
+and build the package. A wrong row fails the test, which prints the row each
+rule gives. Once the optimizer rule is deleted, the golden file is the only
+expectation.

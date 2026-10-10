@@ -46,6 +46,8 @@ mojo_library(
     name = "komira_lowering_rules",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = deps,
+    # The walk test builds an ORC scan from its source variant.
+    test_deps = ["//src/komira_scan_source:komira_scan_source"],
     test_srcs = [
         "tests/test_payload_narrow_columns.mojo",
         "tests/test_payload_narrow_walk.mojo",

@@ -1,14 +1,17 @@
 # =============================================================================
-# fixtures: the payload-narrowing fixture set
+# fixtures: the fixtures of the optimizer's payload-narrowing parity table
 # =============================================================================
 #
-# Each case is a plan whose scans carry their statistics on the plan
-# (`ScanData.table_stats`), which is what the optimizer rule reads, and the
-# same statistics as the footer list the host rule reads (`case_footers`, in
-# scan pre-order). The set moves one input at a time away from a base join
-# that narrows, so that every condition of the rule decides at least one case:
-#   left  scan: key (INT64), pv (INT64, [1, 999]), qv (INT64, [5, 9])
-#   right scan: key (INT64), bv (INT64, [1, 9999])
+# The builders and fixtures below, from `Col` through `_nested_fixture`, are
+# copied verbatim from komira_optimizer's
+# tests/test_optimizer_payload_narrow_parity.mojo, whose table is the first
+# block of golden/payload_narrow.txt. Each row of that table names the
+# fixture built here under the same name, so the host rule is checked against
+# the optimizer's table on the optimizer's own plans. Every scan carries its
+# statistics on the plan (`ScanData.table_stats`, what the optimizer rule
+# reads); `case_footers` (render.mojo) hands the same statistics to the host
+# rule as its footer list. The cases this package adds beyond that table are
+# in extra_fixtures.mojo.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -16,9 +19,8 @@ from std.memory import OwnedPointer
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_plan_expr.agg_expr import AggExpr, AGG_SUM
-from komira_plan_expr.expr import Expr, BIN_ADD, BIN_GT
+from komira_plan_expr.expr import Expr, BIN_ADD, BIN_GT, UN_NEGATE
 from komira_plan_expr.partition_expr import PartitionExpr
-from komira_plan_expr.payload_narrow import PayloadNarrowSpec
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.udf_data import UdfData, UDF_KIND_MAP, DTAG_I64
 from komira_plan_ir.logical_plan import (
@@ -28,7 +30,7 @@ from komira_plan_ir.logical_plan import (
     AsofTolerance,
     ASOF_BACKWARD,
     SOURCE_PARQUET,
-    SOURCE_CSV,
+    SOURCE_IN_MEMORY,
     JOIN_INNER,
     JOIN_LEFT,
     JOIN_RIGHT,
@@ -36,21 +38,8 @@ from komira_plan_ir.logical_plan import (
     JOIN_SEMI,
     JOIN_ANTI,
     JOIN_CROSS,
-    PLAN_SCAN,
-    PLAN_FILTER,
-    PLAN_PROJECT,
-    PLAN_AGGREGATE,
-    PLAN_JOIN,
-    PLAN_SORT,
-    PLAN_LIMIT,
-    PLAN_DISTINCT,
-    PLAN_TOPN,
-    PLAN_PARTITION_BY,
-    PLAN_PARTITION_TOPN,
-    PLAN_ASOF_JOIN,
-    PLAN_UNION,
-    PLAN_CAST_TO_VARCHAR,
 )
+from komira_plan_stats.cardinality_estimator import merge_table_stats
 from komira_plan_stats.table_stats import (
     ColumnStats,
     TableStats,
@@ -58,101 +47,371 @@ from komira_plan_stats.table_stats import (
 )
 
 
-struct NarrowCase(Movable):
-    """One fixture: a name (the golden file's key) and a plan."""
-
-    var name: String
-    var plan: LogicalPlan
-
-    def __init__(out self, var name: String, var plan: LogicalPlan):
-        self.name = name^
-        self.plan = plan^
-
-
 @fieldwise_init
 struct Col(Copyable, Movable):
-    """One column of a fixture scan: its declared field and its statistics."""
+    """One scan column: declared type, nullability, and its footer stats
+    entry (None: the column has no entry in `table_stats`)."""
 
     var name: String
-    var arrow_type: ArrowType
+    var t: ArrowType
     var nullable: Bool
-    var in_stats: Bool
-    var lo: Optional[ScalarValue]
-    var hi: Optional[ScalarValue]
+    var stats: Optional[ColumnStats]
 
 
-def _int(name: String, lo: Int64, hi: Int64) -> Col:
-    return Col(
-        name, ArrowType.INT64, False, True,
+def _int_stats(lo: Int64, hi: Int64) -> ColumnStats:
+    return ColumnStats(
+        None,
         Optional[ScalarValue](ScalarValue.from_int64(lo)),
         Optional[ScalarValue](ScalarValue.from_int64(hi)),
+        Optional[Int](0),
     )
 
 
-def _left() -> List[Col]:
-    var c = List[Col]()
-    c.append(_int("key", 0, 24999999))
-    c.append(_int("pv", 1, 999))
-    c.append(_int("qv", 5, 9))
-    return c^
+def _c(name: String, lo: Int64, hi: Int64) -> Col:
+    """A non-nullable INT64 column with integer footer bounds [lo, hi]."""
+    return Col(name, ArrowType.INT64, False, Optional[ColumnStats](_int_stats(lo, hi)))
 
 
-def _right() -> List[Col]:
-    var c = List[Col]()
-    c.append(_int("key", 0, 24999999))
-    c.append(_int("bv", 1, 9999))
-    return c^
+def _key() -> Col:
+    return _c("key", 0, 24999999)
 
 
-def _scan(cols: List[Col], source_type: UInt8 = SOURCE_PARQUET, with_stats: Bool = True) -> LogicalPlan:
-    var sb = SchemaBuilder()
+def _cols2(var a: Col, var b: Col) -> List[Col]:
+    var l = List[Col]()
+    l.append(a^)
+    l.append(b^)
+    return l^
+
+
+def _cols3(var a: Col, var b: Col, var c: Col) -> List[Col]:
+    var l = _cols2(a^, b^)
+    l.append(c^)
+    return l^
+
+
+def _table_stats(imm cols: List[Col]) -> TableStats:
     var names = List[String]()
     var stats = List[ColumnStats]()
     for i in range(len(cols)):
-        sb.add_field(Field(cols[i].name, cols[i].arrow_type, cols[i].nullable))
-        if cols[i].in_stats:
+        if cols[i].stats:
             names.append(cols[i].name)
-            stats.append(ColumnStats(None, cols[i].lo.copy(), cols[i].hi.copy(), Optional[Int](0)))
-    var ts: Optional[TableStats] = None
-    if with_stats:
-        ts = Optional[TableStats](TableStats(1000, names^, stats^, STATS_SOURCE_PARQUET_METADATA))
-    return LogicalPlan.scan("t.parquet", source_type, sb.build(), None, None, None, ts^)
+            stats.append(cols[i].stats.value().copy())
+    return TableStats(1000, names^, stats^, STATS_SOURCE_PARQUET_METADATA)
 
 
-def _keys(name: String) -> List[String]:
+def _schema(imm cols: List[Col]) -> Schema:
+    var sb = SchemaBuilder()
+    for i in range(len(cols)):
+        sb.add_field(Field(cols[i].name, cols[i].t, cols[i].nullable))
+    return sb.build()
+
+
+def _scan_ts(
+    path: String, imm cols: List[Col], var ts: Optional[TableStats],
+    source: UInt8 = SOURCE_PARQUET,
+) -> LogicalPlan:
+    return LogicalPlan.scan(path, source, _schema(cols), None, None, None, ts^)
+
+
+def _scan(path: String, imm cols: List[Col], source: UInt8 = SOURCE_PARQUET) -> LogicalPlan:
+    return _scan_ts(path, cols, Optional[TableStats](_table_stats(cols)), source)
+
+
+def _side(path: String, pay: String, lo: Int64, hi: Int64) -> LogicalPlan:
+    """A Parquet scan `(key, pay)` whose payload has footer bounds [lo, hi]."""
+    return _scan(path, _cols2(_key(), _c(pay, lo, hi)))
+
+
+def _keys() -> List[String]:
     var k = List[String]()
-    k.append(name)
+    k.append(String("key"))
     return k^
 
 
 def _join(var l: LogicalPlan, var r: LogicalPlan, join_type: UInt8 = JOIN_INNER) -> LogicalPlan:
-    return LogicalPlan.join(l^, r^, _keys("key"), _keys("key"), join_type)
+    return LogicalPlan.join(l^, r^, _keys(), _keys(), join_type)
 
 
-def _base() -> LogicalPlan:
-    return _join(_scan(_left()), _scan(_right()))
+def _good_right() -> LogicalPlan:
+    return _side("b.parquet", "bv", 1, 9999)
 
 
-def _with_left(var left: List[Col]) -> LogicalPlan:
-    return _join(_scan(left), _scan(_right()))
+def _hc4p() -> LogicalPlan:
+    return _join(_side("p.parquet", "pv", 1, 999), _good_right())
 
 
-def _filter(var child: LogicalPlan) -> LogicalPlan:
-    return LogicalPlan.filter(
-        Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(3))), child^
-    )
+def _ladder(lo: Int64, hi: Int64) -> LogicalPlan:
+    return _join(_side("p.parquet", "pv", lo, hi), _good_right())
 
 
-def _project(var child: LogicalPlan, var exprs: ExprArray) -> LogicalPlan:
-    return LogicalPlan.project(exprs^, child^)
+def _refused(var bad: Col) -> LogicalPlan:
+    """Left scan `(key, rv, gv)`: `rv` has one reason not to narrow, `gv`
+    [5, 300] narrows on the same scan; the right side narrows too."""
+    var left = _scan("l.parquet", _cols3(_key(), bad^, _c("gv", 5, 300)))
+    return _join(left^, _good_right())
 
 
-def _cols(a: String, b: String, c: String) -> ExprArray:
+def _outer(var inner: LogicalPlan) -> LogicalPlan:
+    """`inner` as the left side of an INNER join whose right side narrows."""
+    return _join(inner^, _side("o.parquet", "ov", 1, 999))
+
+
+def _gt3() -> Expr:
+    return Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(3)))
+
+
+def _project_key_pv(var child: LogicalPlan, var pv_expr: Expr) -> LogicalPlan:
     var pe = ExprArray()
-    pe.append(Expr.col_ref(a))
-    pe.append(Expr.col_ref(b))
-    pe.append(Expr.col_ref(c))
-    return pe^
+    pe.append(Expr.col_ref("key"))
+    pe.append(pv_expr^)
+    return LogicalPlan.project(pe^, child^)
+
+
+def _p() -> LogicalPlan:
+    return _side("p.parquet", "pv", 1, 999)
+
+
+def _pv_plus_1() -> Expr:
+    return Expr.binary(BIN_ADD, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(1)))
+
+
+# =============================================================================
+# Fixtures, by table name
+# =============================================================================
+
+
+def _ladder_fixture(name: String) raises -> Optional[LogicalPlan]:
+    var p62: Int64 = Int64(1) << 62
+    if name == "ladder_0_255":
+        return _ladder(0, 255)
+    if name == "ladder_0_256":
+        return _ladder(0, 256)
+    if name == "ladder_0_65535":
+        return _ladder(0, 65535)
+    if name == "ladder_0_65536":
+        return _ladder(0, 65536)
+    if name == "ladder_0_4294967295":
+        return _ladder(0, 4294967295)
+    if name == "ladder_0_4294967296":
+        return _ladder(0, 4294967296)
+    if name == "ladder_max_below_min":
+        return _ladder(10, 9)
+    if name == "ladder_point":
+        return _ladder(7, 7)
+    if name == "ladder_far_base":
+        return _ladder(1000000, 1000100)
+    if name == "ladder_negative_base":
+        return _ladder(-300, -1)
+    if name == "ladder_pos_2p62":
+        return _ladder(p62, p62)
+    if name == "ladder_pos_over_2p62":
+        return _ladder(p62 + 1, p62 + 1)
+    if name == "ladder_neg_2p62":
+        return _ladder(-p62, -p62)
+    if name == "ladder_neg_over_2p62":
+        return _ladder(-p62 - 1, -p62 - 1)
+    if name == "payload_first_column":
+        # The payload at schema and stats index 0, ahead of the key.
+        return _join(_scan("p.parquet", _cols2(_c("pv", 1, 999), _key())), _good_right())
+    if name == "multi_payload_widths":
+        var cols = _cols3(_key(), _c("a", 0, 10), _c("b", 0, 1000))
+        cols.append(_c("c", 0, 70000))
+        cols.append(_c("d", 0, 4294967296))
+        return _join(_scan("p.parquet", cols), _good_right())
+    if name == "key_names_per_side":
+        # Left keyed on `lk` carries a payload named `rk`, the RIGHT side's key.
+        var left = _scan("l.parquet", _cols2(_c("lk", 0, 24999999), _c("rk", 0, 10)))
+        var right = _scan("r.parquet", _cols2(_c("rk", 0, 24999999), _c("x", 0, 300)))
+        var lk = List[String]()
+        lk.append(String("lk"))
+        var rk = List[String]()
+        rk.append(String("rk"))
+        return LogicalPlan.join(left^, right^, lk^, rk^, JOIN_INNER)
+    return None
+
+
+def _refusal_fixture(name: String) raises -> Optional[LogicalPlan]:
+    var some = Optional[ColumnStats](_int_stats(1, 9))
+    if name == "refuse_nullable":
+        return _refused(Col("rv", ArrowType.INT64, True, some.copy()))
+    if name == "refuse_stats_entry_missing":
+        return _refused(Col("rv", ArrowType.INT64, False, None))
+    if name == "refuse_no_min":
+        var cs = ColumnStats(
+            None, None, Optional[ScalarValue](ScalarValue.from_int64(9)), Optional[Int](0)
+        )
+        return _refused(Col("rv", ArrowType.INT64, False, Optional[ColumnStats](cs^)))
+    if name == "refuse_no_max":
+        var cs = ColumnStats(
+            None, Optional[ScalarValue](ScalarValue.from_int64(1)), None, Optional[Int](0)
+        )
+        return _refused(Col("rv", ArrowType.INT64, False, Optional[ColumnStats](cs^)))
+    if name == "refuse_float_bounds":
+        var cs = ColumnStats(
+            None,
+            Optional[ScalarValue](ScalarValue.from_float(1.0)),
+            Optional[ScalarValue](ScalarValue.from_float(9.0)),
+            Optional[Int](0),
+        )
+        return _refused(Col("rv", ArrowType.INT64, False, Optional[ColumnStats](cs^)))
+    if name == "refuse_mixed_bounds_float_max":
+        # The int min is below 0: a float's int_val is 0, so a rule that
+        # skipped the max's integer check would read [-3, 0] and narrow it
+        # (with a min above 0 it would read max < min and refuse anyway).
+        var cs = ColumnStats(
+            None,
+            Optional[ScalarValue](ScalarValue.from_int64(-3)),
+            Optional[ScalarValue](ScalarValue.from_float(9.0)),
+            Optional[Int](0),
+        )
+        return _refused(Col("rv", ArrowType.INT64, False, Optional[ColumnStats](cs^)))
+    if name == "refuse_mixed_bounds_float_min":
+        var cs = ColumnStats(
+            None,
+            Optional[ScalarValue](ScalarValue.from_float(1.0)),
+            Optional[ScalarValue](ScalarValue.from_int64(9)),
+            Optional[Int](0),
+        )
+        return _refused(Col("rv", ArrowType.INT64, False, Optional[ColumnStats](cs^)))
+    if name == "refuse_int32_declared":
+        return _refused(Col("rv", ArrowType.INT32, False, some.copy()))
+    if name == "refuse_uint64_declared":
+        return _refused(Col("rv", ArrowType.UINT64, False, some.copy()))
+    if name == "refuse_float64_declared":
+        return _refused(Col("rv", ArrowType.FLOAT64, False, some.copy()))
+    if name == "refuse_no_table_stats":
+        var cols = _cols2(_key(), _c("pv", 1, 999))
+        return _join(_scan_ts("p.parquet", cols, None), _good_right())
+    if name == "refuse_non_parquet_side":
+        var cols = _cols2(_key(), _c("pv", 1, 999))
+        return _join(_scan("mem", cols, SOURCE_IN_MEMORY), _good_right())
+    if name == "refuse_left_join":
+        return _outer(_join(_p(), _good_right(), JOIN_LEFT))
+    if name == "refuse_semi_join":
+        return _outer(_join(_p(), _good_right(), JOIN_SEMI))
+    if name == "refuse_right_join":
+        return _outer(_join(_p(), _good_right(), JOIN_RIGHT))
+    if name == "refuse_full_join":
+        return _outer(_join(_p(), _good_right(), JOIN_FULL))
+    if name == "refuse_anti_join":
+        return _outer(_join(_p(), _good_right(), JOIN_ANTI))
+    if name == "refuse_cross_join":
+        # One key per side, so only the join-type check refuses it.
+        return _outer(_join(_p(), _good_right(), JOIN_CROSS))
+    if name == "refuse_cross_join_no_keys":
+        return _outer(
+            LogicalPlan.join(
+                _p(), _good_right(), List[String](), List[String](), JOIN_CROSS
+            )
+        )
+    if name == "refuse_residual":
+        var residual = Optional[OwnedPointer[Expr]](
+            OwnedPointer(Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("bv")))
+        )
+        return _outer(
+            LogicalPlan.join(
+                _p(), _good_right(), _keys(), _keys(), JOIN_INNER, residual=residual^
+            )
+        )
+    if name == "refuse_two_key":
+        # Keys (key, k2) on both sides; pv and bv are payloads, not keys.
+        var lcols = _cols3(_key(), _c("k2", 0, 9), _c("pv", 1, 999))
+        var rcols = _cols3(_key(), _c("k2", 0, 9), _c("bv", 1, 9999))
+        var l = _keys()
+        l.append(String("k2"))
+        var r = _keys()
+        r.append(String("k2"))
+        return _outer(
+            LogicalPlan.join(
+                _scan("l.parquet", lcols), _scan("r.parquet", rcols), l^, r^, JOIN_INNER
+            )
+        )
+    if name == "refuse_two_left_keys":
+        # (key, k2) on the left, one key on the right.
+        var lcols = _cols3(_key(), _c("k2", 0, 9), _c("pv", 1, 999))
+        var l = _keys()
+        l.append(String("k2"))
+        return _outer(
+            LogicalPlan.join(_scan("l.parquet", lcols), _good_right(), l^, _keys(), JOIN_INNER)
+        )
+    if name == "refuse_two_right_keys":
+        # One key on the left, (key, k2) on the right.
+        var rcols = _cols3(_key(), _c("k2", 0, 9), _c("bv", 1, 9999))
+        var r = _keys()
+        r.append(String("k2"))
+        return _outer(
+            LogicalPlan.join(_p(), _scan("r.parquet", rcols), _keys(), r^, JOIN_INNER)
+        )
+    if name == "refuse_no_keys":
+        # An INNER join with no equi-keys (a predicate join's shape).
+        return _outer(
+            LogicalPlan.join(
+                _p(), _good_right(), List[String](), List[String](), JOIN_INNER
+            )
+        )
+    return None
+
+
+def _side_fixture(name: String) raises -> Optional[LogicalPlan]:
+    if name == "side_filter":
+        return _join(LogicalPlan.filter(_gt3(), _p()), _good_right())
+    if name == "side_pure_project":
+        return _join(_project_key_pv(_p(), Expr.col_ref("pv")), _good_right())
+    if name == "side_alias_same_name":
+        var e = Expr.alias(Expr.col_ref("pv"), String("pv"))
+        return _join(_project_key_pv(_p(), e^), _good_right())
+    if name == "side_alias_rename":
+        var e = Expr.alias(Expr.col_ref("pv"), String("pv2"))
+        return _join(_project_key_pv(_p(), e^), _good_right())
+    if name == "side_filter_project_filter":
+        var inner = _project_key_pv(LogicalPlan.filter(_gt3(), _p()), Expr.col_ref("pv"))
+        return _join(LogicalPlan.filter(_gt3(), inner^), _good_right())
+    if name == "side_project_project":
+        var inner = _project_key_pv(_p(), Expr.col_ref("pv"))
+        return _join(_project_key_pv(inner^, Expr.col_ref("pv")), _good_right())
+    if name == "side_computed_project":
+        # `-pv` aliased back to `pv`: type-preserving, so the Project field is
+        # a non-nullable INT64 named like the scanned column.
+        var e = Expr.alias(Expr.unary(UN_NEGATE, Expr.col_ref("pv")), String("pv"))
+        return _join(_project_key_pv(_p(), e^), _good_right())
+    if name == "side_computed_project_first":
+        # The computed expr at Project index 0, ahead of the key.
+        var pe = ExprArray()
+        pe.append(Expr.alias(Expr.unary(UN_NEGATE, Expr.col_ref("pv")), String("pv")))
+        pe.append(Expr.col_ref("key"))
+        return _join(LogicalPlan.project(pe^, _p()), _good_right())
+    if name == "side_computed_project_unaliased":
+        var e = _pv_plus_1()
+        return _join(_project_key_pv(_p(), e^), _good_right())
+    if name == "side_udf_project":
+        var in_cols = List[Tuple[String, UInt8]]()
+        in_cols.append((String("pv"), DTAG_I64))
+        var out_cols = List[Tuple[String, UInt8]]()
+        out_cols.append((String("pv"), DTAG_I64))
+        var udf = OwnedPointer(UdfData(UDF_KIND_MAP, String("m"), in_cols^, out_cols^, 1, 1))
+        var pe = ExprArray()
+        pe.append(Expr.col_ref("key"))
+        pe.append(Expr.col_ref("pv"))
+        return _join(LogicalPlan.project_with_udf(pe^, _p(), udf^), _good_right())
+    if name == "side_aggregate":
+        var gb = ExprArray()
+        gb.append(Expr.col_ref("key"))
+        var aggs = AggExprArray()
+        aggs.append(AggExpr(AGG_SUM, Optional[Expr](Expr.col_ref("pv")), Optional[String]("pv")))
+        return _join(LogicalPlan.aggregate(gb^, aggs^, _p()), _good_right())
+    return None
+
+
+def _sort_keys() -> List[String]:
+    var keys = List[String]()
+    keys.append(String("pv"))
+    return keys^
+
+
+def _asc() -> List[Bool]:
+    var desc = List[Bool]()
+    desc.append(False)
+    return desc^
 
 
 def _asof(var l: LogicalPlan, var r: LogicalPlan) -> LogicalPlan:
@@ -162,315 +421,140 @@ def _asof(var l: LogicalPlan, var r: LogicalPlan) -> LogicalPlan:
     )
 
 
-def _union2(var a: LogicalPlan, var b: LogicalPlan) -> LogicalPlan:
-    var schema = a.output_schema.copy()
-    var kids = List[OwnedPointer[LogicalPlan]]()
-    kids.append(OwnedPointer(a^))
-    kids.append(OwnedPointer(b^))
-    return LogicalPlan.union(kids^, schema^)
+def _union_of_hc4(n: Int) -> LogicalPlan:
+    var schema = _hc4p().output_schema.copy()
+    var ch = List[OwnedPointer[LogicalPlan]]()
+    for _ in range(n):
+        ch.append(OwnedPointer(_hc4p()))
+    return LogicalPlan.union(ch^, schema^)
 
 
-def _over(kind: UInt8, var child: LogicalPlan) raises -> LogicalPlan:
-    var keys = _keys("pv")
-    var desc = List[Bool]()
-    desc.append(False)
-    if kind == PLAN_FILTER:
-        return _filter(child^)
-    if kind == PLAN_PROJECT:
-        return _project(child^, _cols("pv", "qv", "bv"))
-    if kind == PLAN_AGGREGATE:
+def _walk_fixture(name: String) raises -> Optional[LogicalPlan]:
+    if name == "walk_filter":
+        return LogicalPlan.filter(Expr.col_ref("pv"), _hc4p())
+    if name == "walk_project":
+        var pe = ExprArray()
+        pe.append(Expr.col_ref("pv"))
+        return LogicalPlan.project(pe^, _hc4p())
+    if name == "walk_aggregate":
         var aggs = AggExprArray()
         aggs.append(AggExpr(AGG_SUM, Optional[Expr](Expr.col_ref("pv")), Optional[String]("s")))
-        return LogicalPlan.aggregate(ExprArray(), aggs^, child^)
-    if kind == PLAN_SORT:
-        return LogicalPlan.sort(keys^, desc^, child^)
-    if kind == PLAN_LIMIT:
-        return LogicalPlan.limit(5, child^)
-    if kind == PLAN_TOPN:
-        return LogicalPlan.topn(keys^, desc^, 5, child^)
-    if kind == PLAN_DISTINCT:
-        return LogicalPlan.distinct(None, child^)
-    if kind == PLAN_PARTITION_BY:
-        return LogicalPlan.partition_by(List[String](), keys^, desc^, List[PartitionExpr](), child^)
-    if kind == PLAN_PARTITION_TOPN:
-        return LogicalPlan.partition_topn(_keys("key"), keys^, desc^, 1, child^)
-    if kind == PLAN_CAST_TO_VARCHAR:
-        return LogicalPlan.cast_to_varchar(child^)
-    raise Error("fixtures: no wrapper for plan tag " + String(Int(kind)))
+        return LogicalPlan.aggregate(ExprArray(), aggs^, _hc4p())
+    if name == "walk_sort":
+        return LogicalPlan.sort(_sort_keys(), _asc(), _hc4p())
+    if name == "walk_limit":
+        return LogicalPlan.limit(5, _hc4p())
+    if name == "walk_topn":
+        return LogicalPlan.topn(_sort_keys(), _asc(), 5, _hc4p())
+    if name == "walk_distinct":
+        return LogicalPlan.distinct(None, _hc4p())
+    if name == "walk_partition_by":
+        return LogicalPlan.partition_by(
+            List[String](), _sort_keys(), _asc(), List[PartitionExpr](), _hc4p()
+        )
+    if name == "walk_partition_topn":
+        return LogicalPlan.partition_topn(_keys(), _sort_keys(), _asc(), 1, _hc4p())
+    if name == "walk_asof_left":
+        return _asof(_hc4p(), _side("r.parquet", "rv", 1, 999))
+    if name == "walk_asof_right":
+        return _asof(_side("r.parquet", "rv", 1, 999), _hc4p())
+    if name == "walk_union":
+        return _union_of_hc4(2)
+    if name == "walk_union_one_branch":
+        return _union_of_hc4(1)
+    if name == "walk_cast_to_varchar":
+        return LogicalPlan.cast_to_varchar(_hc4p())
+    if name == "walk_union_under_join_side":
+        var ch = List[OwnedPointer[LogicalPlan]]()
+        ch.append(OwnedPointer(_p()))
+        var schema = _p().output_schema.copy()
+        return _join(LogicalPlan.union(ch^, schema^), _good_right())
+    if name == "view_ref_leaf":
+        return LogicalPlan.view_ref(String("v"), _p().output_schema.copy())
+    if name == "cse_ref_leaf":
+        return LogicalPlan.cse_ref(UInt64(42), _p().output_schema.copy())
+    if name == "view_ref_side":
+        var v = LogicalPlan.view_ref(String("v"), _p().output_schema.copy())
+        return _join(v^, _good_right())
+    if name == "cse_ref_side":
+        var c = LogicalPlan.cse_ref(UInt64(42), _good_right().output_schema.copy())
+        return _join(_p(), c^)
+    return None
 
 
-# =============================================================================
-# The cases
-# =============================================================================
+def _nested_fixture(name: String) raises -> Optional[LogicalPlan]:
+    if name == "hc4":
+        # The hc4 cell's measured ranges.
+        return _join(
+            _side("probe.parquet", "probe_val", 1, 999),
+            _side("build.parquet", "build_val", 1, 9999),
+        )
+    if name == "nested_left":
+        return _join(_hc4p(), _side("o.parquet", "ov", 1, 999))
+    if name == "nested_right":
+        return _join(_side("o.parquet", "ov", 1, 999), _hc4p())
+    if name == "nested_both":
+        var other = _join(_side("q.parquet", "qv", 0, 200), _side("c.parquet", "cv", 0, 300))
+        return _join(_hc4p(), other^)
+    if name == "nested_three_deep":
+        var ab = _join(_side("a.parquet", "a", 1, 999), _side("b.parquet", "b", 1, 999))
+        var abc = _join(ab^, _side("c.parquet", "c", 1, 999))
+        return _join(abc^, _side("d.parquet", "d", 1, 999))
+    # An eligible INNER join below a join the rule refuses: the inner join
+    # still narrows and the refused join's own sides do not.
+    if name == "nested_under_left_join":
+        return _join(_hc4p(), _side("o.parquet", "ov", 1, 999), JOIN_LEFT)
+    if name == "nested_under_right_join":
+        return _join(_side("o.parquet", "ov", 1, 999), _hc4p(), JOIN_RIGHT)
+    if name == "nested_under_residual_join":
+        var residual = Optional[OwnedPointer[Expr]](
+            OwnedPointer(Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("ov")))
+        )
+        return LogicalPlan.join(
+            _hc4p(), _side("o.parquet", "ov", 1, 999), _keys(), _keys(), JOIN_INNER,
+            residual=residual^,
+        )
+    if name == "nested_under_residual_join_right":
+        # The eligible join is the residual join's RIGHT child, so the right
+        # walk must run before the residual refusal.
+        var residual = Optional[OwnedPointer[Expr]](
+            OwnedPointer(Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("ov")))
+        )
+        return LogicalPlan.join(
+            _side("o.parquet", "ov", 1, 999), _hc4p(), _keys(), _keys(), JOIN_INNER,
+            residual=residual^,
+        )
+    if name == "nested_under_two_key_join":
+        # Outer keys (key, k2); the inner join on the right joins on key
+        # alone, so its k2 and pv are payloads.
+        var ocols = _cols3(_key(), _c("k2", 0, 9), _c("ov", 1, 999))
+        var pcols = _cols3(_key(), _c("k2", 0, 9), _c("pv", 1, 999))
+        var inner = _join(_scan("p.parquet", pcols), _good_right())
+        var l = _keys()
+        l.append(String("k2"))
+        var r = _keys()
+        r.append(String("k2"))
+        return LogicalPlan.join(_scan("o.parquet", ocols), inner^, l^, r^, JOIN_INNER)
+    if name == "multifile_two_merged" or name == "multifile_one_passthrough":
+        var per_file = List[TableStats]()
+        per_file.append(_table_stats(_cols2(_key(), _c("pv", 1, 999))))
+        if name == "multifile_two_merged":
+            per_file.append(_table_stats(_cols2(_key(), _c("pv", 500, 1500))))
+        var cols = _cols2(_key(), _c("pv", 1, 999))
+        var ts = Optional[TableStats](merge_table_stats(per_file))
+        return _join(_scan_ts("p.parquet", cols, ts^), _good_right())
+    return None
 
 
-def _column_cases(mut out: List[NarrowCase]):
-    out.append(NarrowCase("base", _base()))
-    out.append(NarrowCase(
-        "right_key_is_bv",
-        LogicalPlan.join(_scan(_left()), _scan(_right()), _keys("key"), _keys("bv"), JOIN_INNER),
-    ))
-    var c = _left()
-    c[2].arrow_type = ArrowType.INT32
-    out.append(NarrowCase("qv_declared_int32", _with_left(c^)))
-    c = _left()
-    c[1].nullable = True
-    out.append(NarrowCase("pv_nullable", _with_left(c^)))
-    out.append(NarrowCase("left_without_stats", _join(_scan(_left(), with_stats=False), _scan(_right()))))
-    c = _left()
-    c[1].in_stats = False
-    out.append(NarrowCase("pv_absent_from_stats", _with_left(c^)))
-    c = _left()
-    c[1].lo = None
-    out.append(NarrowCase("pv_without_min", _with_left(c^)))
-    c = _left()
-    c[1].hi = None
-    out.append(NarrowCase("pv_without_max", _with_left(c^)))
-    c = _left()
-    c[1].lo = Optional[ScalarValue](ScalarValue.from_float(1.0))
-    out.append(NarrowCase("pv_float_min", _with_left(c^)))
-    c = _left()
-    c[1].lo = Optional[ScalarValue](ScalarValue.from_int64(-5))
-    c[1].hi = Optional[ScalarValue](ScalarValue.from_float(999.0))
-    out.append(NarrowCase("pv_float_max", _with_left(c^)))
-    c = _left()
-    c[1].lo = Optional[ScalarValue](ScalarValue.from_int32(1))
-    c[1].hi = Optional[ScalarValue](ScalarValue.from_int32(999))
-    out.append(NarrowCase("pv_int32_bounds", _with_left(c^)))
-    c = _left()
-    c[1].lo = Optional[ScalarValue](ScalarValue.from_string("1"))
-    out.append(NarrowCase("pv_string_min", _with_left(c^)))
-
-    var w = List[Col]()
-    w.append(_int("key", 0, 24999999))
-    w.append(_int("a", -10, 245))
-    w.append(_int("b", 0, 256))
-    w.append(_int("c", 7, 65543))
-    w.append(_int("d", 0, 4294967296))
-    w.append(_int("e", 0, 4294967295))
-    w.append(_int("f", 10, 9))
-    w.append(_int("g", (Int64(1) << 62) - 10, Int64(1) << 62))
-    w.append(_int("h", -(Int64(1) << 62) - 1, 0))
-    w.append(_int("i", 42, 42))
-    out.append(NarrowCase("width_ladder", _with_left(w^)))
-
-
-def _join_cases(mut out: List[NarrowCase]):
-    out.append(NarrowCase("join_left", _join(_scan(_left()), _scan(_right()), JOIN_LEFT)))
-    out.append(NarrowCase("join_right", _join(_scan(_left()), _scan(_right()), JOIN_RIGHT)))
-    out.append(NarrowCase("join_full", _join(_scan(_left()), _scan(_right()), JOIN_FULL)))
-    out.append(NarrowCase("join_semi", _join(_scan(_left()), _scan(_right()), JOIN_SEMI)))
-    out.append(NarrowCase("join_anti", _join(_scan(_left()), _scan(_right()), JOIN_ANTI)))
-    out.append(NarrowCase("join_cross", _join(_scan(_left()), _scan(_right()), JOIN_CROSS)))
-    var residual = Optional[OwnedPointer[Expr]](
-        OwnedPointer(Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("bv")))
-    )
-    out.append(NarrowCase(
-        "join_residual",
-        LogicalPlan.join(
-            _scan(_left()), _scan(_right()), _keys("key"), _keys("key"), JOIN_INNER, residual=residual^
-        ),
-    ))
-    var two = _keys("key")
-    two.append("pv")
-    var two_r = _keys("key")
-    two_r.append("bv")
-    out.append(NarrowCase(
-        "join_two_keys",
-        LogicalPlan.join(_scan(_left()), _scan(_right()), two.copy(), two_r.copy(), JOIN_INNER),
-    ))
-    out.append(NarrowCase(
-        "join_two_left_keys",
-        LogicalPlan.join(_scan(_left()), _scan(_right()), two^, _keys("key"), JOIN_INNER),
-    ))
-    out.append(NarrowCase(
-        "join_two_right_keys",
-        LogicalPlan.join(_scan(_left()), _scan(_right()), _keys("key"), two_r^, JOIN_INNER),
-    ))
-    out.append(NarrowCase(
-        "join_no_keys",
-        LogicalPlan.join(_scan(_left()), _scan(_right()), List[String](), List[String](), JOIN_INNER),
-    ))
-
-
-def _side_cases(mut out: List[NarrowCase]):
-    out.append(NarrowCase("side_filter", _join(_filter(_scan(_left())), _scan(_right()))))
-    out.append(NarrowCase(
-        "side_pure_project", _join(_project(_scan(_left()), _cols("key", "pv", "qv")), _scan(_right()))
-    ))
-    var pe = ExprArray()
-    pe.append(Expr.col_ref("key"))
-    pe.append(Expr.alias(Expr.col_ref("pv"), String("pv")))
-    var chain = _project(_filter(_project(_filter(_scan(_left())), _cols("key", "pv", "qv"))), pe^)
-    out.append(NarrowCase("side_alias_project_chain", _join(chain^, _scan(_right()))))
-
-    # A rename: output `qq` is the scan's `pv`, and the scan also has a
-    # nullable `qq` with bounds [0, 3]. The rule judges the output column and
-    # looks its bounds up by the output name, so `qq`'s bounds, unrelated to
-    # `pv` and those of a nullable column, are used.
-    var r = _left()
-    var qq = _int("qq", 0, 3)
-    qq.nullable = True
-    r.append(qq^)
-    var pr = ExprArray()
-    pr.append(Expr.col_ref("key"))
-    pr.append(Expr.alias(Expr.col_ref("pv"), String("qq")))
-    out.append(NarrowCase("side_alias_rename", _join(_project(_scan(r), pr^), _scan(_right()))))
-
-    var pc = ExprArray()
-    pc.append(Expr.col_ref("key"))
-    pc.append(Expr.col_ref("pv"))
-    pc.append(Expr.alias(Expr.binary(BIN_ADD, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(1))), String("z")))
-    out.append(NarrowCase("side_computed_project", _join(_project(_scan(_left()), pc^), _scan(_right()))))
-
-    var in_cols = List[Tuple[String, UInt8]]()
-    in_cols.append((String("pv"), DTAG_I64))
-    var out_cols = List[Tuple[String, UInt8]]()
-    out_cols.append((String("pv"), DTAG_I64))
-    var udf = OwnedPointer(UdfData(UDF_KIND_MAP, String("m"), in_cols^, out_cols^, 1, 1))
-    var with_udf = LogicalPlan.project_with_udf(_cols("key", "pv", "qv"), _scan(_left()), udf^)
-    out.append(NarrowCase("side_udf_project", _join(with_udf^, _scan(_right()))))
-
-    var gb = ExprArray()
-    gb.append(Expr.col_ref("key"))
-    var aggs = AggExprArray()
-    aggs.append(AggExpr(AGG_SUM, Optional[Expr](Expr.col_ref("pv")), Optional[String]("pv")))
-    out.append(NarrowCase(
-        "side_aggregate", _join(LogicalPlan.aggregate(gb^, aggs^, _scan(_left())), _scan(_right()))
-    ))
-    out.append(NarrowCase("side_csv_scan", _join(_scan(_left(), SOURCE_CSV), _scan(_right()))))
-
-
-def _walk_cases(mut out: List[NarrowCase]) raises:
-    var kinds = List[UInt8]()
-    kinds.append(PLAN_FILTER)
-    kinds.append(PLAN_PROJECT)
-    kinds.append(PLAN_AGGREGATE)
-    kinds.append(PLAN_SORT)
-    kinds.append(PLAN_LIMIT)
-    kinds.append(PLAN_TOPN)
-    kinds.append(PLAN_DISTINCT)
-    kinds.append(PLAN_PARTITION_BY)
-    kinds.append(PLAN_PARTITION_TOPN)
-    kinds.append(PLAN_CAST_TO_VARCHAR)
-    var names = List[String]()
-    names.append("under_filter")
-    names.append("under_project")
-    names.append("under_aggregate")
-    names.append("under_sort")
-    names.append("under_limit")
-    names.append("under_topn")
-    names.append("under_distinct")
-    names.append("under_partition_by")
-    names.append("under_partition_topn")
-    names.append("under_cast_to_varchar")
-    for i in range(len(kinds)):
-        out.append(NarrowCase(names[i], _over(kinds[i], _base())))
-    out.append(NarrowCase("under_union", _union2(_base(), _base())))
-    out.append(NarrowCase("asof_of_joins", _asof(_base(), _base())))
-    var o = List[Col]()
-    o.append(_int("key", 0, 24999999))
-    o.append(_int("ov", -5, 5))
-    out.append(NarrowCase("join_of_join_and_scan", _join(_base(), _scan(o.copy()))))
-    out.append(NarrowCase("join_of_filtered_join_and_scan", _join(_filter(_base()), _scan(o^))))
-    out.append(NarrowCase("asof_union_then_join", _asof(_union2(_scan(_right()), _scan(_right())), _base())))
-    out.append(NarrowCase(
-        "asof_view_ref_then_join",
-        _asof(LogicalPlan.view_ref("v", _scan(_right()).output_schema.copy()), _base()),
-    ))
-    out.append(NarrowCase(
-        "asof_cse_ref_then_join",
-        _asof(LogicalPlan.cse_ref(7, _scan(_right()).output_schema.copy()), _base()),
-    ))
-    out.append(NarrowCase("lone_scan", _scan(_left())))
-    # A join two levels below a UNION or a CAST_TO_VARCHAR: the node between
-    # them must pass the not-decided state down, not reset it.
-    out.append(NarrowCase("union_asof_join", _union2(_asof(_base(), _base()), _base())))
-    out.append(NarrowCase("union_filter_join", _union2(_filter(_base()), _base())))
-    out.append(NarrowCase("cast_sort_join", _over(PLAN_CAST_TO_VARCHAR, _over(PLAN_SORT, _base()))))
-    var o2 = List[Col]()
-    o2.append(_int("key", 0, 24999999))
-    o2.append(_int("ov", -5, 5))
-    var jj = _join(_base(), _scan(o2.copy()))
-    out.append(NarrowCase("union_join_of_join", _union2(jj^, _join(_base(), _scan(o2^)))))
-
-
-def cases() raises -> List[NarrowCase]:
-    """Every fixture, in the golden file's order."""
-    var out = List[NarrowCase]()
-    _column_cases(out)
-    _join_cases(out)
-    _side_cases(out)
-    _walk_cases(out)
-    return out^
-
-
-# =============================================================================
-# The footer list of a case, and the rendering
-# =============================================================================
-
-
-def _collect_stats(node: LogicalPlan, mut out: List[Optional[TableStats]]) raises:
-    """Each scan's plan statistics in scan pre-order, by a walk written apart
-    from the rule's (the tags the fixtures use)."""
-    if node.tag == PLAN_SCAN:
-        out.append(node.scan_data_ref().table_stats.copy())
-    elif node.tag == PLAN_JOIN:
-        _collect_stats(node.join_data_ref().left[], out)
-        _collect_stats(node.join_data_ref().right[], out)
-    elif node.tag == PLAN_ASOF_JOIN:
-        _collect_stats(node.asof_join_data_ref().left[], out)
-        _collect_stats(node.asof_join_data_ref().right[], out)
-    elif node.tag == PLAN_UNION:
-        ref kids = node.union_data_ref().children
-        for i in range(len(kids)):
-            _collect_stats(kids[i][], out)
-    elif node.tag == PLAN_FILTER:
-        _collect_stats(node.filter_data_ref().child[], out)
-    elif node.tag == PLAN_PROJECT:
-        _collect_stats(node.project_data_ref().child[], out)
-    elif node.tag == PLAN_AGGREGATE:
-        _collect_stats(node.aggregate_data_ref().child[], out)
-    elif node.tag == PLAN_SORT:
-        _collect_stats(node.sort_data_ref().child[], out)
-    elif node.tag == PLAN_LIMIT:
-        _collect_stats(node.limit_data_ref().child[], out)
-    elif node.tag == PLAN_DISTINCT:
-        _collect_stats(node.distinct_data_ref().child[], out)
-    elif node.tag == PLAN_TOPN:
-        _collect_stats(node.topn_data_ref().child[], out)
-    elif node.tag == PLAN_PARTITION_BY:
-        _collect_stats(node.partition_by_data_ref().child[], out)
-    elif node.tag == PLAN_PARTITION_TOPN:
-        _collect_stats(node.partition_topn_data_ref().child[], out)
-    elif node.tag == PLAN_CAST_TO_VARCHAR:
-        _collect_stats(node.cast_to_varchar_data_ref().child[], out)
-
-
-def case_footers(plan: LogicalPlan) raises -> List[Optional[TableStats]]:
-    """The footer list the host rule takes for `plan`: each scan's plan
-    statistics, in scan pre-order."""
-    var out = List[Optional[TableStats]]()
-    _collect_stats(plan, out)
-    return out^
-
-
-def render_slot(specs: List[PayloadNarrowSpec]) -> String:
-    """One scan's specs as `[name:bytes:base ...]`."""
-    var out = String("[")
-    for i in range(len(specs)):
-        if i > 0:
-            out += " "
-        out += specs[i].column_name + ":" + String(Int(specs[i].target_bytes)) + ":" + String(specs[i].base)
-    out += "]"
-    return out^
-
-
-def render(slots: List[List[PayloadNarrowSpec]]) -> String:
-    """Every scan's slot in scan pre-order, separated by one space."""
-    var out = String()
-    for s in range(len(slots)):
-        if s > 0:
-            out += " "
-        out += render_slot(slots[s])
-    return out^
+def parity_fixture(name: String) raises -> Optional[LogicalPlan]:
+    """The optimizer table's fixture named `name`, or None."""
+    var p = _ladder_fixture(name)
+    if not p:
+        p = _refusal_fixture(name)
+    if not p:
+        p = _side_fixture(name)
+    if not p:
+        p = _walk_fixture(name)
+    if not p:
+        p = _nested_fixture(name)
+    return p^
