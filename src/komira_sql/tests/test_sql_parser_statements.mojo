@@ -37,9 +37,13 @@
 #      `unnamed_subquery2`, ... per SELECT level; every derived table, aliased
 #      or not, is keyed apart by subquery index (`<qualifier>#<index>`), and a
 #      derived qualifier that another relation of the same FROM answers to
-#      (by name or alias) is refused with the exact text. (catches: the count
-#      not restarted in a nested SELECT; an aliased derived table keyed by
-#      its bare alias; either arm of the name-or-alias test dropped)
+#      (its alias, or its name when it has none) is refused with the exact
+#      text, at every SELECT level; a derived table named like an aliased
+#      table's hidden name parses. Two same-alias derived tables at two
+#      levels get two keys. (catches: the count not restarted in a nested
+#      SELECT; an aliased derived table keyed by its bare alias or by index
+#      0; either arm of the alias-else-name test dropped; the check skipped
+#      in a nested SELECT)
 #  12. A derived table's column-list rename and its malformed spellings.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -389,6 +393,45 @@ def test_aliased_derived_tables_are_keyed_by_subquery_index() raises:
     # (mutant: the `#` test dropped, which refuses `kk AS mm` against mm)
     assert_equal(len(_parse("SELECT * FROM t, (SELECT 1 AS a) AS d").query.from_tables), 2)
     assert_equal(len(_parse("SELECT * FROM kk AS mm JOIN mm AS z ON mm.k = z.k").query.from_tables), 2)
+
+
+def test_same_alias_derived_tables_at_two_levels_get_two_keys() raises:
+    # subqueries[0] is the inner body's derived table (index 0), the top
+    # FROM's is index 1. (mutant: an aliased table keyed `<alias>#0`
+    # whatever its index, which makes the outer `d` read the inner body)
+    var st = _parse("SELECT * FROM (SELECT a + 1 AS a FROM (SELECT 1 AS a) AS d) AS d")
+    assert_equal(st.query.subqueries[1].body.from_tables[0].name, "d#0")
+    assert_equal(st.query.subqueries[1].body.from_tables[0].rel_alias, "d")
+    assert_equal(st.query.from_tables[0].name, "d#1")
+    assert_equal(st.query.from_tables[0].rel_alias, "d")
+    assert_equal(st.query.subqueries[0].derived_alias, "d#0")
+    assert_equal(st.query.subqueries[1].derived_alias, "d#1")
+
+
+def test_a_collision_inside_a_nested_select_is_refused() raises:
+    # The same-FROM check runs at every SELECT level, not only the top:
+    # inside a derived-table body and inside a scalar-subquery body.
+    # (mutant: the check skipped when the SELECT ends at `)`, which bound
+    # `d.k` below to u's k)
+    assert_equal(
+        _err("SELECT * FROM (SELECT d.k FROM u AS d, (SELECT 5 AS k) AS d) AS x"),
+        _dup("d"),
+    )
+    assert_equal(
+        _err("SELECT (SELECT max(d.k) FROM u AS d, (SELECT 5 AS k) AS d) FROM t"),
+        _dup("d"),
+    )
+
+
+def test_an_aliased_table_does_not_collide_by_its_name() raises:
+    # An aliased table answers to its alias only, so a derived table named
+    # like the table's NAME is no collision; one named like its ALIAS is.
+    # (mutant: the other relation's name compared even when it has an
+    # alias, which refuses both parses below)
+    assert_equal(len(_parse("SELECT * FROM t AS x, (SELECT 1 AS a) AS t").query.from_tables), 2)
+    assert_equal(len(_parse("SELECT * FROM (SELECT 1 AS a) AS t, t AS x").query.from_tables), 2)
+    assert_equal(len(_parse("SELECT * FROM unnamed_subquery AS z, (SELECT 1 AS a)").query.from_tables), 2)
+    assert_equal(_err("SELECT * FROM t AS x, (SELECT 1 AS a) AS x"), _dup("x"))
 
 
 def test_derived_table_column_list() raises:

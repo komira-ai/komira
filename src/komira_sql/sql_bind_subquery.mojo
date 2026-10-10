@@ -36,7 +36,7 @@ from komira_sql.sql_bind_parquet import (
 )
 from komira_sql.sql_bind_scope import (
     CteScope, _build_bind_scope, _date_to_days, _relation_schema, _relation_scan,
-    _schema_has_col,
+    _schema_has_col, _visible_qualifiers,
 )
 from komira_sql.sql_bind_timestamp import _timestamp_literal_micros
 from komira_sql.sql_binder import _bind_select
@@ -71,19 +71,6 @@ def _bind_scalar_subquery_body(body: SelectStmt, catalog: SqlCatalog, cte_scope:
 # =============================================================================
 # Predicate subqueries: EXISTS / NOT EXISTS / IN / NOT IN -> SEMI / ANTI
 # =============================================================================
-
-
-def _inner_alias_set(rel: FromRelation) -> List[String]:
-    """The set of qualifiers (lower-cased) that name a correlated subquery's OWN
-    single FROM relation — its AS alias and/or its base/CTE name. A `t.col` whose
-    qualifier is in this set is an INNER column; any other qualifier is an outer
-    reference."""
-    var out = List[String]()
-    if rel.rel_alias != "":
-        out.append(rel.rel_alias.lower())
-    if rel.name != "":
-        out.append(rel.name.lower())
-    return out^
 
 
 @always_inline
@@ -269,7 +256,7 @@ def _bind_correlated_subquery_body(
 
     ref rel = body.from_tables[0]
     var inner_schema = _relation_schema(rel, catalog, cte_scope)
-    var inner_aliases = _inner_alias_set(rel)
+    var inner_aliases = _visible_qualifiers(rel)
     var scan = _relation_scan(rel, catalog, cte_scope)
 
     var outer_refs = List[String]()
@@ -363,7 +350,7 @@ def _not_in_inner_plan(
     move-only — and appends the body's outer references to `outer_refs`."""
     ref rel = body.from_tables[0]
     var inner_schema = _relation_schema(rel, catalog, cte_scope)
-    var inner_aliases = _inner_alias_set(rel)
+    var inner_aliases = _visible_qualifiers(rel)
     var scan = _relation_scan(rel, catalog, cte_scope)
     var where_expr: Optional[Expr] = None
     if body.where_pred:
@@ -577,7 +564,7 @@ def _body_has_equi_correlation(
         return False
     ref rel = body.from_tables[0]
     var inner_schema = _relation_schema(rel, catalog, cte_scope)
-    var inner_aliases = _inner_alias_set(rel)
+    var inner_aliases = _visible_qualifiers(rel)
     var refs = List[String]()
     var w = _bind_corr_scalar(
         body.where_pred.value(), inner_schema, inner_aliases, refs, catalog, cte_scope, prebound

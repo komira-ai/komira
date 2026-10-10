@@ -27,10 +27,10 @@ from komira_sql.sql_bind_parquet import (
 )
 from komira_sql.sql_bind_scope import (
     CteScope, _relation_scan, _build_bind_scope, _dedupe_join_right,
-    _result_display_names, _result_rename_exprs,
+    _result_display_names, _result_rename_exprs, _visible_qualifiers,
 )
 from komira_sql.sql_bind_subquery import (
-    _bind_scalar_subquery_body, _inner_alias_set, _bind_correlated_subquery_body,
+    _bind_scalar_subquery_body, _bind_correlated_subquery_body,
     _not_in_lhs_is_null_free, _in_lhs_output_name,
 )
 from komira_sql.sql_bind_window_order import (
@@ -338,7 +338,7 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
     # qualifier-aware `scope`.
     var scope = _build_bind_scope(stmt.from_tables, stmt.joins, catalog, cte_scope)
     var plan = _relation_scan(stmt.from_tables[0], catalog, cte_scope)
-    var left_aliases = _inner_alias_set(stmt.from_tables[0])
+    var left_aliases = _visible_qualifiers(stmt.from_tables[0])
     for i in range(1, len(stmt.from_tables)):
         var right = _relation_scan(stmt.from_tables[i], catalog, cte_scope)
         ref jc = stmt.joins[i - 1]
@@ -407,7 +407,7 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
                 )
             var left_schema = plan.output_schema.copy()
             var right_schema = right.output_schema.copy()
-            var right_aliases = _inner_alias_set(stmt.from_tables[i])
+            var right_aliases = _visible_qualifiers(stmt.from_tables[i])
             plan = _bind_outer_join(
                 plan^, right^, left_schema, right_schema, left_aliases, right_aliases,
                 jc.on_pred.value(), jc.kind, scope, catalog, cte_scope, prebound,
@@ -425,7 +425,7 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
             )
         # Accumulate the just-joined relation's qualifiers into the LEFT alias set
         # (so a later LEFT join can classify a column against ANY prior relation).
-        var ra = _inner_alias_set(stmt.from_tables[i])
+        var ra = _visible_qualifiers(stmt.from_tables[i])
         for k in range(len(ra)):
             left_aliases.append(String(ra[k]))
 

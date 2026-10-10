@@ -3207,9 +3207,12 @@ struct _Parser(Movable):
 def _refuse_ambiguous_derived_qualifier(from_tables: List[FromRelation]) raises:
     """⛔ Refuse a derived table whose qualifier (its alias, or the synthetic
     `unnamed_subquery[N]` of an unaliased one, see
-    `_Parser._parse_derived_table`) is ALSO the name or alias of another
-    relation in the same FROM clause (`FROM t, (SELECT ...) AS t`,
-    `FROM (SELECT ...) AS d, u AS d`, `FROM (SELECT 1 AS a), unnamed_subquery`).
+    `_Parser._parse_derived_table`) is ALSO what another relation in the same
+    FROM clause answers to: that relation's alias, or its name when it has no
+    alias (`FROM t, (SELECT ...) AS t`, `FROM (SELECT ...) AS d, u AS d`,
+    `FROM (SELECT 1 AS a), unnamed_subquery`). An aliased table's name is
+    hidden by its alias (the binder's `_visible_qualifiers`), so
+    `FROM t AS x, (SELECT ...) AS t` is not a collision and is not refused.
 
     This binder's qualifier resolution takes the first relation that answers
     to a qualifier, so it could pick the other one and answer from the wrong
@@ -3231,7 +3234,8 @@ def _refuse_ambiguous_derived_qualifier(from_tables: List[FromRelation]) raises:
             if j == i:
                 continue
             ref o = from_tables[j]
-            if o.name.lower() == q or o.rel_alias.lower() == q:
+            var oq = o.rel_alias.lower() if o.rel_alias != "" else o.name.lower()
+            if oq == q:
                 raise Error(
                     "SQL not supported: a derived table `(SELECT ...)` is"
                     + " named `" + q + "`, and another relation in the same"

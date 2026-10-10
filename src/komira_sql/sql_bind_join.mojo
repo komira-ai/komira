@@ -24,6 +24,7 @@ from komira_sql.sql_bind_expr import _bind_scalar
 from komira_sql.sql_bind_names import _group_has
 from komira_sql.sql_bind_scope import (
     CteScope, _schema_has_col, _schema_col_spelling, _RelCols, BindScope, _resolve_col,
+    _visible_qualifiers,
 )
 from komira_sql.sql_bind_subquery import _alias_in
 from komira_sql.sql_catalog import SqlCatalog
@@ -418,25 +419,14 @@ def _bind_keyed_join(
 # `WHERE [NOT] EXISTS (SELECT 1 FROM r WHERE ...)` is the equivalent spelling,
 # and the refusal names it.
 #
-# ⚠ THE RIGHT SIDE IS NAMED BY WHAT IS **VISIBLE**, NOT BY `_inner_alias_set`.
+# ⚠ THE RIGHT SIDE IS NAMED BY WHAT IS **VISIBLE** (`_visible_qualifiers`).
 # An aliased relation is not reachable by its table name (DuckDB:
 # `SELECT t.k FROM t AS x` -> "Referenced table t not found"), and in a
 # self-join that distinction decides the answer: in
 # `L SEMI JOIN L y ON L.lk = y.lk` the qualifier `L` names the LEFT L. Had it
-# classified as the right side (both of `_inner_alias_set`'s names match), the
+# classified as the right side (by the right relation's table name), the
 # conjunct would be `y.lk = y.lk`, one-sided — refused here, and an every-row
 # answer in any binder that carried it.
-
-
-def _visible_qualifiers(rel: FromRelation) -> List[String]:
-    """The qualifiers that name `rel` in the query text: its alias when it has
-    one, and its table name ONLY when it does not (lower-cased)."""
-    var out = List[String]()
-    if rel.rel_alias != "":
-        out.append(rel.rel_alias.lower())
-    elif rel.name != "":
-        out.append(rel.name.lower())
-    return out^
 
 
 def _qualified_text(sx: SqlExpr) -> String:

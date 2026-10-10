@@ -1308,9 +1308,10 @@ struct FromRelation(Copyable, Movable):
 
     `rel_alias` is the AS alias (`t AS a` / `t a`), or `""` (a derived table
     always has one: its alias or `unnamed_subquery[N]`). A qualified `q.col`
-    resolves against it and the base `name` (`BindScope`'s qualifiers, a join
-    side's `_inner_alias_set`, a correlated subquery's inner-alias set that
-    classifies `t.col` as inner vs outer)."""
+    resolves against the alias when there is one, and against `name` only when
+    there is not (`_visible_qualifiers`: an alias hides the table name). That
+    one set is what `BindScope`, a join side and a correlated subquery's inner
+    relation match a qualifier against."""
 
     var name: String  # catalog/CTE/derived table name; "" when a pure TVF
     var tvf_path: Optional[String]  # Some(path) => a read_* TVF

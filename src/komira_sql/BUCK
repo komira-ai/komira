@@ -61,6 +61,7 @@ mojo_library(
         "tests/test_sql_bind_names.mojo",
         "tests/test_sql_bind_ops.mojo",
         "tests/test_sql_bind_parquet.mojo",
+        "tests/test_sql_bind_qualifiers.mojo",
         "tests/test_sql_bind_scope.mojo",
         "tests/test_sql_bind_subquery.mojo",
         "tests/test_sql_bind_udf_stmt.mojo",

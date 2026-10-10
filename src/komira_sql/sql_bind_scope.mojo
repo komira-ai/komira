@@ -227,6 +227,25 @@ struct _RelCols(Copyable, Movable):
         self.rel_idx = 0
 
 
+def _visible_qualifiers(rel: FromRelation) -> List[String]:
+    """The qualifiers that name `rel` in the query text (lower-cased): its
+    alias when it has one, and its table name ONLY when it has none.
+
+    An alias HIDES the table name, as in DuckDB v1.5.3 (`SELECT t.k FROM t AS
+    x` -> "Referenced table t not found"). Every qualifier resolver uses this
+    one set (`BindScope`, a join side, a correlated subquery's inner
+    relation), because they take the first relation a qualifier names: were an
+    aliased table still reachable by its name, `mm.k` in `FROM mm AS z, kk AS
+    mm` would read mm's k instead of kk's. A derived table always has an
+    alias, so its `#`-keyed relation name is never a qualifier."""
+    var out = List[String]()
+    if rel.rel_alias != "":
+        out.append(rel.rel_alias.lower())
+    elif rel.name != "":
+        out.append(rel.name.lower())
+    return out^
+
+
 struct BindScope(Movable):
     """Qualifier-aware column-resolution scope for one SELECT's FROM, built
     once per `_bind_select` from the FROM relations in join order.
@@ -364,10 +383,7 @@ def _build_bind_scope(
                         coalesced.append(String(jc.using_cols[c]))
         var rc = _RelCols()
         rc.rel_idx = ti
-        if rel.rel_alias != "":
-            rc.aliases.append(rel.rel_alias.lower())
-        if rel.name != "":
-            rc.aliases.append(rel.name.lower())
+        rc.aliases = _visible_qualifiers(rel)
         for j in range(sch.num_columns()):
             var cn = String(sch.field_name(j))
             rc.orig.append(String(cn))
