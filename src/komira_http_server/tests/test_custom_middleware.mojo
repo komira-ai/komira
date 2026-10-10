@@ -19,6 +19,8 @@
 #                           layer and the dispatcher read them.
 #   4. WRAP THE RESPONSE  — an `after` may rewrite the response the inner
 #                           layers (or the dispatcher) produced.
+#   5. PASSTHROUGH        — `PassthroughMiddleware` refuses nothing, sets no
+#                           principal and leaves the response alone.
 #
 # Driven through `_drive_chain_dispatch`, the transport leaf the socket serve
 # path calls per request, so the composition is exercised exactly as served.
@@ -44,6 +46,7 @@ from komira_http_server.middleware import (
     RequestContext,
 )
 from komira_http_server.middleware.metrics import PairMiddleware
+from komira_http_server.middleware.passthrough import PassthroughMiddleware
 
 comptime _Rt = BlockingRuntime[NoopSink]
 
@@ -404,6 +407,22 @@ def test_after_wraps_response_in_reverse_order() raises:
     _ = disp^
 
 
+def test_passthrough_neither_refuses_nor_touches() raises:
+    """PassthroughMiddleware: `before` never short-circuits and leaves
+    `ctx.principal` unset (an identity it made up would be unverified), and
+    `after` leaves the response as it was."""
+    var mw = PassthroughMiddleware()
+    var req = HttpRequest()
+    var ctx = RequestContext.new()
+    assert_false(Bool(mw.before(req, ctx)))
+    assert_false(Bool(ctx.principal))
+    var resp = HttpResponse.ok(String("body"))
+    mw.after(req, resp, ctx)
+    assert_equal(Int(resp.status), 200)
+    assert_equal(_text(resp), String("body"))
+    _ = mw^
+
+
 def main() raises:
     test_compose_in_order()
     test_short_circuit_skips_inner_and_dispatcher()
@@ -411,4 +430,5 @@ def main() raises:
     test_context_and_request_mutation_reach_inner_layer_and_dispatcher()
     test_inner_layer_without_outer_identity_refuses()
     test_after_wraps_response_in_reverse_order()
+    test_passthrough_neither_refuses_nor_touches()
     print("PASS test_custom_middleware")

@@ -187,6 +187,15 @@ struct ConnEntry(Movable, Deinitable):
         """Borrow the conn's fd (the kernel-level identifier)."""
         return self._fd
 
+    def forget_fd(mut self):
+        """Give up the fd without closing it: the entry's drop then closes
+        nothing. For an entry whose fd number was closed behind its back
+        and has been handed out again (komira_http_server.accept_loop's
+        stale-mapping sweep): closing it would close the new owner's
+        descriptor."""
+        _ = self._stream.release_fd()
+        self._fd = Int32(-1)
+
     def state(self) -> UInt8:
         """Current connection state (CONN_STATE_*)."""
         return self._state

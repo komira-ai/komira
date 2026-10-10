@@ -33,7 +33,8 @@
 #   C  close_and_remove: an index out of range touching the table, the moved
 #      tail's mapping not patched, the wrong descriptor closed.
 #   A  accept: a connection not registered or mapped to the wrong slot, a
-#      listener error not ending the drain.
+#      listener error not ending the drain; a stale-mapping sweep closing
+#      the reused descriptor, leaving an orphan slot, or dropping a live one.
 #   D  count_complete_requests: a terminator counted from a partial match,
 #      or one counted twice.
 # =============================================================================
@@ -576,18 +577,24 @@ def test_blocked_417_is_parked() raises:
         assert_equal(rig.pending(), _error_bytes(417))
 
 
-def test_blocked_interim_is_parked_and_ends_the_round() raises:
-    """The interim response is parked and the round ends there: the request
-    is not answered in this round."""
+def test_blocked_interim_parks_the_response_behind_it() raises:
+    """The interim response blocks: the request's response is parked behind
+    it and the round ends there. Once the peer reads, the resume delivers
+    both, in order (komira-ai/komira#947: the response was lost, since the
+    request had been consumed when the round ended)."""
     for v in range(2):
         var rig = _Rig(chained=v == 1)
-        _ = rig.fill()
+        var filler = rig.fill()
         _send(rig.peer, EXPECT)
         assert_true(rig.round())
-        assert_equal(rig.reqs, Int64(0))
+        assert_equal(rig.reqs, Int64(1))
         assert_equal(rig.sent, Int64(0))
         assert_equal(rig.entry.state(), CONN_STATE_WAITING_FOR_WRITABLE)
-        assert_equal(rig.pending(), String(CONTINUE))
+        assert_equal(rig.pending(), String(CONTINUE) + rig.ok())
+        assert_equal(len(rig.read().data), filler)
+        assert_true(resume_pending_write(rig.entry, rig.sent))
+        assert_equal(_text(rig.read().data), String(CONTINUE) + rig.ok())
+        assert_equal(rig.sent, Int64((String(CONTINUE) + rig.ok()).byte_length()))
 
 
 def test_expect_continue_then_pipelined_request() raises:
@@ -833,13 +840,15 @@ def test_accept_listener_error_ends_the_drain() raises:
 def test_accept_stale_mapping_is_swept() raises:
     """The table still maps a descriptor number that was closed behind its
     back, and the kernel hands that number out again: the sweep removes the
-    stale entry, and the new connection takes its place in the table.
-    Whether the new descriptor survives the sweep is tracked in
-    komira-ai/komira#936, so this test does not look at it."""
+    stale entry without closing the number (the live entry behind it moves
+    into its slot, mapping patched), and the new connection is registered
+    and open: its peer does not see end of stream (komira-ai/komira#936:
+    the sweep closed the new descriptor)."""
     var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
     var r = _reactor(mock=True)
     var conns = Slab[ConnEntry]()
     var fd_to_idx = Dict[Int, Int]()
+    var live = _socketpair()
     var c = _connect(l.local_port())
     _ = _poll([l.fd()])
     # The lowest free descriptor number, which accept(2) must use next.
@@ -852,22 +861,35 @@ def test_accept_stale_mapping_is_swept() raises:
         )
     )
     fd_to_idx[Int(stale)] = 0
+    # A live connection behind it, which the removal moves into slot 0.
+    conns.append(
+        ConnEntry(
+            stream=TcpStream(live[0]),
+            reg=RegistrationHandle(_fd=live[0], _interest_set=INTEREST_READ),
+        )
+    )
+    fd_to_idx[Int(live[0])] = 1
     assert_equal(accept_one_and_register(l, r, conns, fd_to_idx), 1)
-    assert_equal(conns.len(), 1)
-    assert_equal(len(fd_to_idx), 1)
-    assert_equal(conns[0].fd(), stale)
-    assert_equal(fd_to_idx[Int(stale)], 0)
+    assert_equal(conns.len(), 2)
+    assert_equal(len(fd_to_idx), 2)
+    assert_equal(conns[0].fd(), live[0])
+    assert_equal(fd_to_idx[Int(live[0])], 0)
+    assert_equal(conns[1].fd(), stale)
+    assert_equal(fd_to_idx[Int(stale)], 1)
+    assert_false(_read_all(c).eof)
+    assert_false(_read_all(live[1]).eof)
     _ = conns^
+    _close(live[1])
     _close(c)
     _ = r^
     _ = l^
 
 
-def test_accept_stale_mapping_to_another_slot_is_survived() raises:
+def test_accept_stale_mapping_to_an_orphan_slot_removes_it() raises:
     """The table maps the reused descriptor number to a slot that holds a
-    different (unmapped) descriptor, so removing that slot fails. The
-    failure is swallowed, the slot is left alone, and the new connection is
-    registered, mapped and open."""
+    different descriptor no mapping reaches (-1 here): the sweep removes
+    that slot too, so every slot left is mapped, and the new connection is
+    registered, mapped and open (komira-ai/komira#947: the slot stayed)."""
     var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
     var r = _reactor(mock=True)
     var conns = Slab[ConnEntry]()
@@ -884,15 +906,52 @@ def test_accept_stale_mapping_to_another_slot_is_survived() raises:
     )
     fd_to_idx[Int(next)] = 0
     assert_equal(accept_one_and_register(l, r, conns, fd_to_idx), 1)
-    assert_equal(conns.len(), 2)
-    assert_equal(conns[0].fd(), Int32(-1))
-    assert_equal(conns[1].fd(), next)
+    assert_equal(conns.len(), 1)
+    assert_equal(conns[0].fd(), next)
     assert_equal(len(fd_to_idx), 1)
-    assert_equal(fd_to_idx[Int(next)], 1)
+    assert_equal(fd_to_idx[Int(next)], 0)
     var got = _read_all(c)
     assert_false(got.eof)
     assert_equal(len(got.data), 0)
     _ = conns^
+    _close(c)
+    _ = r^
+    _ = l^
+
+
+def test_accept_stale_mapping_to_a_live_slot_keeps_it() raises:
+    """The table maps the reused descriptor number to a slot whose own
+    descriptor is mapped to it: that slot is a live connection, so the sweep
+    drops only the stale mapping and leaves the slot, and its descriptor,
+    alone."""
+    var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
+    var r = _reactor(mock=True)
+    var conns = Slab[ConnEntry]()
+    var fd_to_idx = Dict[Int, Int]()
+    var live = _socketpair()
+    conns.append(
+        ConnEntry(
+            stream=TcpStream(live[0]),
+            reg=RegistrationHandle(_fd=live[0], _interest_set=INTEREST_READ),
+        )
+    )
+    fd_to_idx[Int(live[0])] = 0
+    var c = _connect(l.local_port())
+    _ = _poll([l.fd()])
+    var next = external_call["dup", Int32](c)
+    _close(next)
+    fd_to_idx[Int(next)] = 0
+    assert_equal(accept_one_and_register(l, r, conns, fd_to_idx), 1)
+    assert_equal(conns.len(), 2)
+    assert_equal(conns[0].fd(), live[0])
+    assert_equal(conns[1].fd(), next)
+    assert_equal(len(fd_to_idx), 2)
+    assert_equal(fd_to_idx[Int(live[0])], 0)
+    assert_equal(fd_to_idx[Int(next)], 1)
+    assert_false(_read_all(live[1]).eof)
+    assert_false(_read_all(c).eof)
+    _ = conns^
+    _close(live[1])
     _close(c)
     _ = r^
     _ = l^
