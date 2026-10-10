@@ -12,6 +12,10 @@
 #
 # Coverage:
 #   P1  OrcRowIndexEntry: block [0x80], then 0x01 outside the message -> raise.
+#   P1b OrcRowIndexEntry: block [0x80], then field 2 (statistics, empty)
+#       inside the same message -> raise. Bounding the read by the message
+#       end instead of the block end would decode [0x80 0x12] = 2304 from
+#       the next field's tag; P1 alone cannot tell those bounds apart.
 #   P2  OrcRawType: block [0x80], then field 1 (kind=5) -> raise (before the
 #       fix: subtypes == [1024], the next field's tag byte read as payload).
 #   P3  Both: a valid block whose last value is multi-byte and ends exactly
@@ -43,6 +47,22 @@ def test_row_index_positions_varint_past_block_raises() raises:
         _assert_block_overrun(err)
         raised = True
     assert_true(raised, "positions varint crossing the block end decoded")
+
+
+def test_row_index_positions_varint_into_next_field_raises() raises:
+    """P1b: positions block [0x80]; the next byte is field 2's tag (0x12),
+    still inside the message, so only the block end refuses it."""
+    var b = List[UInt8](
+        [UInt8(0x0A), UInt8(0x01), UInt8(0x80), UInt8(0x12), UInt8(0x00)]
+    )
+    var raised = False
+    try:
+        var e = OrcRowIndexEntry.parse(Span(b), 0, 5)
+        print("unexpected positions len:", len(e.positions))
+    except err:
+        _assert_block_overrun(err)
+        raised = True
+    assert_true(raised, "positions varint read into the next field decoded")
 
 
 def test_raw_type_subtypes_varint_past_block_raises() raises:
@@ -107,6 +127,11 @@ def main() raises:
         test_row_index_positions_varint_past_block_raises()
     except err:
         print("FAIL P1 OrcRowIndexEntry positions:", err)
+        failed += 1
+    try:
+        test_row_index_positions_varint_into_next_field_raises()
+    except err:
+        print("FAIL P1b OrcRowIndexEntry positions into next field:", err)
         failed += 1
     try:
         test_raw_type_subtypes_varint_past_block_raises()
