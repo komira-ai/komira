@@ -1,0 +1,37 @@
+// The IDENTITY primitives of the kci resource catalog (`kci.resource.v1`):
+// `service_account` and `grant` (resource.proto, IDENTITY AND GRANTS).
+// The field numbers are what is stored, pinned as literal wire bytes by the
+// welded tests in tests/ (resource.proto says how the files are split).
+// held-numbers: ServiceAccount 50-53
+// held-numbers: Grant 50-53
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "kci/resource/v1/refs.proto";
+
+// ---- identity: service account and grant -------------------------------------------
+
+// A workload identity: the provider's own identity object for workloads (a
+// role only the compute service may assume, a service account, a managed
+// identity, a Kubernetes service account). Its NAME is the cloud's name for
+// it. An identity with an arbitrary trust is not this type. No field yet;
+// 50 to 53 are held for the per-cloud extensions (resource.proto header).
+message ServiceAccount {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+}
+
+// One edge: `principal` may do `access` to `target`, or to the cell's
+// `cell` (exactly one of the two). `principal` names a `service_account`,
+// or a workload with no `run_as` (its private identity). The verb
+// must be one the target accepts. A grant exposes nothing and accepts
+// nothing. 50 to 53 are held for the per-cloud extensions (resource.proto header).
+message Grant {
+  option (portability) = PORTABLE;
+
+  Ref principal = 1;
+  Ref target = 2;
+  Access access = 3;
+  CellResource cell = 4;
+}

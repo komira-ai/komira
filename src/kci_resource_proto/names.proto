@@ -1,0 +1,87 @@
+// The NAME primitives of the kci resource catalog (`kci.resource.v1`):
+// `dns_zone`, `dns_record` and `certificate`.
+// The field numbers are what is stored, pinned as literal wire bytes by the
+// welded tests in tests/ (resource.proto says how the files are split).
+// held-numbers: DnsZone 50-53
+// held-numbers: DnsRecord 50-53
+// held-numbers: Certificate 50-53
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "google/protobuf/duration.proto";
+import "kci/resource/v1/refs.proto";
+
+// ---- names: DNS zone, DNS record and certificate ------------------------------------
+
+// A PUBLIC DNS zone: the servers that answer for `name` and every name below
+// it that no other zone holds. A private zone (one answered only inside a
+// network) is not this type. Its NAME is the cloud's name for the zone
+// object, not the domain. kci creates the zone; pointing the domain's
+// registrar at the zone's servers is the domain owner's step, outside kci.
+// A zone re-created after a delete may be answered by other servers, which
+// is the domain owner's step again. Its retention default is DELETE. 50 to
+// 53 are held for the per-cloud extensions (resource.proto header).
+message DnsZone {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // The domain, lowercase, with no trailing dot ("example.com"): at least
+  // two labels, each of letters, digits and inner hyphens. One zone per
+  // domain in a list.
+  string name = 1;
+}
+
+// What a DNS record set holds. Only the types every built-in cloud hosts
+// with one meaning: A (IPv4 addresses), AAAA (IPv6 addresses), CNAME
+// (another name: one value, never at a zone's own name), TXT (text) and MX
+// (mail servers, each "<preference> <host>").
+enum RecordType {
+  RECORD_TYPE_UNSET = 0;
+  A = 1;
+  AAAA = 2;
+  CNAME = 3;
+  TXT = 4;
+  MX = 5;
+}
+
+// One record set: every value of one `type` at one `name`, in one `zone`
+// of the list. Its HOST is `name`. A value is a literal, or (for a CNAME
+// only) a `Ref` to the HOST another resource exposes, so the record follows
+// the service it names. Its retention default is DELETE. 50 to 53 are held
+// for the per-cloud extensions (resource.proto header).
+message DnsRecord {
+  option (portability) = PORTABLE;
+  option (exposes) = HOST;
+
+  // The full name, lowercase, with no trailing dot: the zone's own name or
+  // a name below it. A first label `*` is a wildcard.
+  string name = 1;
+  // The `dns_zone` the record is in (the resource itself, no output).
+  Ref zone = 2;
+  RecordType type = 3;
+  // At least one, in order; a CNAME has exactly one.
+  repeated Value values = 4;
+  // Whole seconds from 60 to 86400. Unset: the versioned default, 300
+  // seconds.
+  google.protobuf.Duration ttl = 5;
+}
+
+// A MANAGED, DOMAIN-VALIDATED certificate, publicly trusted: the cloud
+// obtains it, proves control of each domain with records in `zone`, and
+// renews it. kci never holds its private key. This version means a publicly
+// trusted certificate only; whether private-CA certificates join this type
+// (a new field) or another type is open. Its NAME is the cloud's name for
+// it. Its retention default is DELETE. 50 to 53 are held for the per-cloud
+// extensions (resource.proto header).
+message Certificate {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // From 1 to 10 names, each the zone's own name or below it; a first label
+  // `*` is a wildcard. The first is the certificate's subject.
+  repeated string domains = 1;
+  // The `dns_zone` the validation records go in (the resource itself, no
+  // output).
+  Ref zone = 2;
+}
