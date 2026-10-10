@@ -9,6 +9,10 @@
 #      independent scalar MSB-first bit-cursor oracle on a deterministic
 #      pseudo-random packed buffer. Counts chosen to exercise both the SIMD
 #      body and the scalar tail (non-multiple-of-lane).
+#   2. Edges: width 0 writes `count` zeros; an empty `count` writes nothing;
+#      a source one byte short of the packed run, or a destination one slot
+#      short of `count`, is refused (False) without writing; widths that no
+#      kernel covers are refused.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -133,6 +137,81 @@ def test_width_64() raises:
     _check_width(64, 1001)
 
 
+# =============================================================================
+# Edges — width 0, empty count, short buffers, uncovered widths.
+# =============================================================================
+
+
+def test_width_0_writes_zeros() raises:
+    var packed: List[UInt8] = [0xFF, 0xFF]
+    var got = List[Int64](length=5, fill=Int64(-1))
+    var dst_span = Span(got)
+    assert_true(simd_unpack_bits(Span(packed), 0, 5, dst_span), "width 0")
+    for i in range(5):
+        assert_equal(got[i], Int64(0), "width 0 idx " + String(i))
+
+
+def test_count_0_writes_nothing() raises:
+    var packed: List[UInt8] = [0xFF]
+    var got = List[Int64](length=1, fill=Int64(-1))
+    var dst_span = Span(got)
+    assert_true(simd_unpack_bits(Span(packed), 8, 0, dst_span), "count 0")
+    assert_equal(got[0], Int64(-1), "count 0 wrote")
+
+
+def test_short_source_refused() raises:
+    """72 values of 1 bit need exactly 9 bytes: 9 is accepted, 8 is refused
+    and nothing is written (the destination is long enough either way)."""
+    var packed = _make_packed(8, 16)
+    var got = List[Int64](length=72, fill=Int64(-1))
+    var dst_span = Span(got)
+    var exact = Span(packed)[0:9]
+    var short = Span(packed)[0:8]
+    assert_true(
+        not simd_unpack_bits(short, 1, 72, dst_span), "8 bytes for 72 bits"
+    )
+    for i in range(72):
+        assert_equal(got[i], Int64(-1), "refused call wrote " + String(i))
+    var got72 = List[Int64](length=72, fill=Int64(-1))
+    var d72 = Span(got72)
+    assert_true(simd_unpack_bits(exact, 1, 72, d72), "9 bytes for 72 bits")
+    var oracle = List[Int64]()
+    _ref_unpack(exact, 1, 72, oracle)
+    for i in range(72):
+        assert_equal(got72[i], oracle[i], "exact source idx " + String(i))
+
+
+def test_short_destination_refused() raises:
+    """The destination view is one slot short of `count`; it is carved out
+    of a longer list, so a call that wrote anyway lands in the list's last
+    slot and shows up there."""
+    var packed = _make_packed(16, 8)
+    var got = List[Int64](length=8, fill=Int64(-1))
+    var short = Span(got)[0:7]
+    assert_true(
+        not simd_unpack_bits(Span(packed), 16, 8, short), "7 slots for 8"
+    )
+    for i in range(8):
+        assert_equal(got[i], Int64(-1), "refused call wrote " + String(i))
+
+
+def test_uncovered_widths_refused() raises:
+    """Widths with no kernel here return False and write nothing. Width 4
+    has no kernel in this function (ORC calls its own), and -1 is not a
+    multiple of 8 (`-1 % 8 == 7`), so neither reaches a kernel."""
+    var packed = _make_packed(8, 64)
+    var got = List[Int64](length=64, fill=Int64(-1))
+    var dst_span = Span(got)
+    var widths: List[Int] = [3, 4, 5, 7, 12, 63, -1]
+    for wi in range(len(widths)):
+        assert_true(
+            not simd_unpack_bits(Span(packed), widths[wi], 8, dst_span),
+            "width " + String(widths[wi]) + " has no kernel",
+        )
+    for i in range(64):
+        assert_equal(got[i], Int64(-1), "refused width wrote " + String(i))
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_width_1]()
@@ -145,4 +224,9 @@ def main() raises:
     suite.test[test_width_48]()
     suite.test[test_width_56]()
     suite.test[test_width_64]()
+    suite.test[test_width_0_writes_zeros]()
+    suite.test[test_count_0_writes_nothing]()
+    suite.test[test_short_source_refused]()
+    suite.test[test_short_destination_refused]()
+    suite.test[test_uncovered_widths_refused]()
     suite^.run()
