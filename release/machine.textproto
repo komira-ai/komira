@@ -52,7 +52,7 @@
 #          its channel holds.
 #          The gamma job's summary lists the names new to prod (NEW NAMES).
 #   pr     the per-change check of a pull request (trigger PULL_REQUEST):
-#          `kci run --stage pr --affected-by <the pull request's base commit>`
+#          `kci run --stage pr --affected-by <the merge commit's first parent>`
 #          builds, with each build system's `build_targets` command, exactly
 #          the units of release/artifacts.textproto (its artifacts and
 #          checks) that the change reaches, as each build system's
