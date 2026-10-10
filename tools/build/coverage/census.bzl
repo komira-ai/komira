@@ -6,7 +6,7 @@ every library) and `ratchet` (ratchet.tsv), and fails the build unless `doc`
 and `ratchet` are exactly what it renders: the doc was not edited by hand,
 and every floor is at least what the census measured (a floor is lowered
 only by a hand edit of ratchet.tsv to a value the census does not exceed).
-README.md, "The census".
+census.md.
 
 A validation of one action, which writes the result Buck2 reads.
 """

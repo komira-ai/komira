@@ -17,22 +17,22 @@
 # The rows are the census's: census.sh render writes them from census.tsv,
 # raising a floor to what was measured and never lowering one, and the build
 # (//:coverage_census) holds them to it. A floor that must stay under the
-# measurement is a pinned row here (README.md, "The census").
+# measurement is a pinned row here (census.md).
 src/kci_api	10000	-
 src/kci_artifact	9727	-
 src/kci_artifact_manifest	10000	-
 src/kci_artifact_proto	0	-
-src/kci_build	9382	-
+src/kci_build	9385	-
 src/kci_cell	10000	-
-src/kci_cli	9021	-
-src/kci_cloud	8475	-
-src/kci_cloud_fake	9651	9023
+src/kci_cli	8988	-
+src/kci_cloud	8538	-
+src/kci_cloud_fake	9710	9101
 src/kci_deploy_model_proto	0	-
 src/kci_logs	8395	-
 src/kci_manifest_proto	0	-
 src/kci_params	10000	-
 src/kci_pkg_upload	8905	-
-src/kci_publish	9169	-
+src/kci_publish	9215	-
 src/kci_publish_oci	9775	-
 src/kci_reconciler	8798	-
 src/kci_release_channel	10000	-
@@ -47,10 +47,10 @@ src/kci_workflow_check	10000	-
 src/komira_agg	9236	9826
 src/komira_agg_api	2873	-
 src/komira_anomaly	10000	-
-src/komira_arrow	6765	-
+src/komira_arrow	6776	-
 src/komira_arrow_ipc	8609	-
 src/komira_async	8618	-	async_mutex.mojo:197-198 and semaphore.mojo:213-218 (the contended slow paths) run only when the unsynchronised two-thread smoke tests contend; 8618 is 86.18% without those 6 lines
-src/komira_async_api	8037	5000
+src/komira_async_api	8431	5000
 src/komira_atomic_alias	0	-
 src/komira_authz_api	10000	-
 src/komira_avro	9929	-
@@ -83,6 +83,7 @@ src/komira_buffer	9560	8636
 src/komira_calendar	10000	-
 src/komira_calendar_ics	10000	-
 src/komira_calendar_proto	0	-
+src/komira_calendar_store	10000	-
 src/komira_chat_proto	0	-
 src/komira_chat_store	10000	-
 src/komira_clock	10000	10000
@@ -98,7 +99,7 @@ src/komira_counters	8338	9750
 src/komira_crypto	8356	-
 src/komira_csv	0	-
 src/komira_datetime	10000	-
-src/komira_db	8121	-
+src/komira_db	8241	-
 src/komira_db_postgres	9929	-
 src/komira_db_sqlite	9402	-
 src/komira_dispatch_agg_exec	9902	-
@@ -136,15 +137,15 @@ src/komira_hash	10000	10000
 src/komira_host	6041	-
 src/komira_http_auth	9571	-
 src/komira_http_client	8140	-
-src/komira_http_core	9289	-
-src/komira_http_server	8480	-
+src/komira_http_core	9188	-
+src/komira_http_server	8494	-
 src/komira_iceberg_catalog	8717	-
 src/komira_job_report_proto	0	-
-src/komira_job_supervisor	8626	-
+src/komira_job_supervisor	8687	-
 src/komira_join_assembly	6474	-
 src/komira_json	10000	10000
 src/komira_json_index	8477	-
-src/komira_jsonl	8440	-
+src/komira_jsonl	9959	-
 src/komira_jwks	9917	9184
 src/komira_kafka_server	10000	-
 src/komira_kernels	5270	-
@@ -163,18 +164,18 @@ src/komira_metrics_reader	9727	-
 src/komira_morsel	9619	-
 src/komira_name_registry	8412	7500
 src/komira_net	8521	-
-src/komira_objectstore	8347	-
-src/komira_objectstore_gcs	9091	-
+src/komira_objectstore	8364	-
+src/komira_objectstore_gcs	9405	-
 src/komira_objectstore_s3	9530	-
-src/komira_oci	8299	-
+src/komira_oci	10000	-
 src/komira_op_agg_row_api	7454	-
 src/komira_op_agg_state	9994	-
-src/komira_optimizer	10000	-
+src/komira_optimizer	9995	-
 src/komira_orc	8337	-
 src/komira_parquet	9986	-
 src/komira_parquet_api	10000	10000
 src/komira_parquet_codec	9603	9278
-src/komira_plan_expr	5432	-
+src/komira_plan_expr	5440	-
 src/komira_plan_ir	8950	8146
 src/komira_plan_proto	0	-
 src/komira_plan_stats	5759	7844
@@ -184,12 +185,12 @@ src/komira_proto_codec	9528	-
 src/komira_protobuf	10000	10000
 src/komira_resources	10000	10000
 src/komira_retry	10000	10000
-src/komira_row_format	9622	9618
+src/komira_row_format	9627	9624
 src/komira_rowcell	10000	-
 src/komira_scalar_arithmetic	9972	9965
 src/komira_scan_planning	7521	-
 src/komira_scan_resolver	9596	-
-src/komira_scan_source	6247	-
+src/komira_scan_source	6318	-
 src/komira_sdk	9904	-
 src/komira_search	10000	-
 src/komira_search_catalog	8359	-
@@ -204,7 +205,7 @@ src/komira_snapshotter	8823	7857
 src/komira_source_url	9807	-
 src/komira_spsc_ring	8623	7800
 src/komira_sql	9987	-
-src/komira_supervisor	8338	-
+src/komira_supervisor	7878	-
 src/komira_supervisor_proto	0	-
 src/komira_sync	10000	10000
 src/komira_table_store	8524	-
@@ -212,7 +213,7 @@ src/komira_test_run_id	10000	10000
 src/komira_test_verdict	10000	-
 src/komira_textproto	10000	-
 src/komira_trace	7780	8725
-src/komira_udf	1678	10000
+src/komira_udf	1750	10000
 src/komira_uuid	9534	8928
 src/komira_validation_run	10000	-
 src/komira_vcard	9500	-

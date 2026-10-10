@@ -268,7 +268,7 @@ _TESTS_LINTS = [
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 
-# The coverage census (tools/build/coverage/README.md, "The census"):
+# The coverage census (tools/build/coverage/census.md):
 # docs/coverage_census.md and the floors of tools/build/coverage/ratchet.tsv
 # are exactly what tools/build/coverage/census.sh renders from census.tsv, so
 # the doc is never edited by hand and no floor is under what was measured.

@@ -6,7 +6,7 @@ build of every library under `src/`, and from the floors of
 [ratchet.tsv](../tools/build/coverage/ratchet.tsv), which it raises to them.
 The build holds this file, census.tsv and ratchet.tsv to each other
 (`//:coverage_census`), so edit none of them by hand except to lower a floor;
-[The census](../tools/build/coverage/README.md#the-census) says how to refresh
+[The census](../tools/build/coverage/census.md) says how to refresh
 them and what a floor does: a library measured under its package's floor
 fails its coverage gate in every mode, so its conda package is not built.
 

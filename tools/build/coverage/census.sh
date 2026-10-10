@@ -2,7 +2,7 @@
 # census.sh -- the coverage census of every library: one coverage build of
 # each library's gate, its numbers as data (census.tsv), the ranked table
 # rendered from it (docs/coverage_census.md) and the floors of ratchet.tsv
-# raised to it. README.md, "The census".
+# raised to it. census.md says how.
 #
 # usage: census.sh run     --out <dir> [--cap <seconds>] [--attempts <n>] [--batch <n>] [--skip <file>]
 #        census.sh collect --out <dir> [--skip <file>] [--source <commit>] [--note <text>]
@@ -45,7 +45,7 @@
 #            or `no`. --source names the commit measured (default: HEAD of
 #            the checkout) and --note says anything else the census line
 #            must (a fix applied to it, say). Then copy <dir>/census.tsv over census.tsv here and
-#            run render (README.md, "The census", says how).
+#            run render (census.md says how).
 #   render   writes the doc and the ratchet from census.tsv and the current
 #            ratchet.tsv. A library row of census.tsv is a library under
 #            src/ but not under src/tests/ (`kind` library); its package's
@@ -219,7 +219,7 @@ render() { # busybox census ratchet doc_out ratchet_out
             print "[ratchet.tsv](../tools/build/coverage/ratchet.tsv), which it raises to them."
             print "The build holds this file, census.tsv and ratchet.tsv to each other"
             print "(`//:coverage_census`), so edit none of them by hand except to lower a floor;"
-            print "[The census](../tools/build/coverage/README.md#the-census) says how to refresh"
+            print "[The census](../tools/build/coverage/census.md) says how to refresh"
             print "them and what a floor does: a library measured under its package'"'"'s floor"
             print "fails its coverage gate in every mode, so its conda package is not built."
             print ""
@@ -325,7 +325,7 @@ check)
     elif ! "$BB" cmp -s "$S/ratchet.tsv" "$3"; then
         msg="ratchet.tsv is not what census.sh render writes from census.tsv and it (a floor under what census.tsv measured, a row of no library of the census, or a package with none): $("$BB" diff "$3" "$S/ratchet.tsv" | "$BB" grep '^[-+][^-+]' | "$BB" head -10)"
     elif ! "$BB" cmp -s "$S/doc.md" "$4"; then
-        msg="docs/coverage_census.md is not what census.sh render writes from census.tsv and ratchet.tsv (run it; README.md of tools/build/coverage, \"The census\"): $("$BB" diff "$4" "$S/doc.md" | "$BB" grep '^[-+][^-+]' | "$BB" head -10)"
+        msg="docs/coverage_census.md is not what census.sh render writes from census.tsv and ratchet.tsv (run it; tools/build/coverage/census.md): $("$BB" diff "$4" "$S/doc.md" | "$BB" grep '^[-+][^-+]' | "$BB" head -10)"
     fi
     if [ -n "$msg" ]; then
         esc=$(printf '%s' "$msg" | "$BB" tr -d '\000-\010\013-\037' | "$BB" awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); printf "%s\\n", $0 }')
@@ -461,7 +461,7 @@ REPORT=$OUT/$(cat "$OUT/last").json
     }
 ' tools/build/coverage/policy.bzl release/artifacts.textproto "$OUT/all_targets.txt" "$OUT/libraries.txt" "$SKIP" "$REPORT" > "$OUT/collected.tsv"
 {
-    echo "# The coverage census: the data docs/coverage_census.md is rendered from (census.sh; README.md, \"The census\")."
+    echo "# The coverage census: the data docs/coverage_census.md is rendered from (census.sh; census.md)."
     printf 'census\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%d)" "$SRC" "$NOTE"
     while IFS="$(printf '\t')" read -r l pkg kind st f bg pub note; do
         if [ "$st" = OK ]; then
