@@ -3,7 +3,7 @@
 #   Scalar, EXISTS, IN and NOT IN subquery bodies.
 # =============================================================================
 
-from komira_arrow.schema import Schema
+from komira_arrow.schema import Schema, SchemaBuilder
 from komira_plan_expr.agg_expr import (
     AGG_COUNT, AggExpr,
 )
@@ -35,7 +35,8 @@ from komira_sql.sql_bind_parquet import (
     path_has_glob, is_parquet_tvf_kind,
 )
 from komira_sql.sql_bind_scope import (
-    CteScope, _build_bind_scope, _date_to_days, _relation_schema, _relation_scan,
+    BindScope, CteScope, _RelCols, _build_bind_scope, _date_to_days, _relation_schema,
+    _relation_scan,
     _schema_has_col, _visible_qualifiers,
 )
 from komira_sql.sql_bind_timestamp import _timestamp_literal_micros
@@ -82,6 +83,57 @@ def _alias_in(aliases: List[String], q: String) -> Bool:
     return False
 
 
+struct _CorrOuter(Movable):
+    """The FROM scope a predicate subquery's qualified outer references
+    resolve in: that of the statement whose WHERE holds the subquery
+    (`known`), or an empty one (`known` False) when no WHERE holds it."""
+
+    var scope: BindScope
+    var known: Bool
+
+    def __init__(out self, var scope: BindScope, known: Bool):
+        self.scope = scope^
+        self.known = known
+
+
+def _no_outer() -> _CorrOuter:
+    """A `_CorrOuter` that knows no outer scope."""
+    var sb = SchemaBuilder()
+    return _CorrOuter(BindScope(List[_RelCols](), sb.build()), False)
+
+
+def _where_owner(stmt: SelectStmt, idx: Int) -> Int:
+    """Which statement's WHERE holds subquery `idx` (`_where_holds_subquery`):
+    -1 for `stmt` itself, `j` for the body of `stmt.subqueries[j]` (a derived
+    table, a UNION ALL branch, a subquery predicate), -2 for none (the
+    subquery sits in a HAVING, a select item or an outer join's ON, or under a
+    CASE or a function call)."""
+    if _where_holds_subquery(stmt, idx):
+        return -1
+    for j in range(len(stmt.subqueries)):
+        if _where_holds_subquery(stmt.subqueries[j].body, idx):
+            return j
+    return -2
+
+
+def _corr_outer_of(
+    stmt: SelectStmt, idx: Int, catalog: SqlCatalog, cte_scope: CteScope
+) raises -> _CorrOuter:
+    """The `_CorrOuter` of predicate subquery `idx`: the FROM scope of the
+    statement `_where_owner` names, built as that statement's own WHERE binds
+    against it (`_build_bind_scope`). Only the immediately enclosing FROM: a
+    qualifier that only a FROM two levels out answers to is not found there."""
+    var owner = _where_owner(stmt, idx)
+    if owner == -1:
+        return _CorrOuter(
+            _build_bind_scope(stmt.from_tables, stmt.joins, catalog, cte_scope), True
+        )
+    if owner >= 0:
+        ref b = stmt.subqueries[owner].body
+        return _CorrOuter(_build_bind_scope(b.from_tables, b.joins, catalog, cte_scope), True)
+    return _no_outer()
+
+
 def _dedup_names(names: List[String]) -> List[String]:
     var out = List[String]()
     for i in range(len(names)):
@@ -99,6 +151,7 @@ def _bind_corr_scalar(
     sx: SqlExpr,
     inner_schema: Schema,
     inner_aliases: List[String],
+    outer: _CorrOuter,
     mut outer_refs: List[String],
     catalog: SqlCatalog,
     cte_scope: CteScope,
@@ -106,23 +159,39 @@ def _bind_corr_scalar(
 ) raises -> Expr:
     """Bind a correlated subquery's inner predicate. A column is inner (a plain
     col_ref, schema-checked against `inner_schema`) when its qualifier names
-    the inner relation or, unqualified, it resolves in the inner schema;
-    otherwise it is an outer reference: recorded in `outer_refs` and emitted
-    as a bare col_ref that the optimizer's `flatten_dependent_joins` hoists
+    the inner relation and that relation has the column or, unqualified, it
+    resolves in the inner schema: the inner relation shadows the outer ones,
+    as in DuckDB v1.5.3, which binds a column in the innermost scope where it
+    resolves. Otherwise it is an outer reference: recorded in `outer_refs` and
+    emitted as a col_ref that the optimizer's `flatten_dependent_joins` hoists
     into the SEMI / ANTI join keys (it is never resolved against the inner
-    scan). Outer refs are not schema-checked here. Self-recursive only (it
-    never calls `_bind_select`), so it adds no binder call cycle."""
+    scan). A QUALIFIED outer reference is resolved in `outer`'s FROM scope
+    (`BindScope.resolve_qualified`), so `u.k` over `FROM t, u` is the outer
+    output column `k_right`, and an unknown, hidden or ambiguous qualifier is
+    refused as a select item's would be; an unqualified one keeps its bare
+    name and is not checked here. Self-recursive only (it never calls
+    `_bind_select`), so it adds no binder call cycle."""
     if sx.tag == SX_COLUMN:
-        var is_inner: Bool
         if sx.qualifier != "":
-            is_inner = _alias_in(inner_aliases, sx.qualifier)
-        else:
-            is_inner = _schema_has_col(inner_schema, sx.text)
-        if is_inner:
-            if not _schema_has_col(inner_schema, sx.text):
+            var inner_named = _alias_in(inner_aliases, sx.qualifier)
+            if inner_named and _schema_has_col(inner_schema, sx.text):
+                return Expr.col_ref(sx.text)
+            if inner_named and not outer.scope.answers_to(sx.qualifier):
                 raise Error("SQL bind error: unknown column '" + sx.text + "' in correlated subquery")
+            if not outer.known:
+                raise Error(
+                    "SQL not supported: a qualified outer reference `" + sx.qualifier
+                    + "." + sx.text + "` in a subquery that is not an AND / OR /"
+                    + " NOT / comparison operand of a WHERE clause"
+                )
+            var oname = outer.scope.resolve_qualified(sx.qualifier, sx.text)
+            outer_refs.append(oname)
+            return Expr.left(oname)
+        if _schema_has_col(inner_schema, sx.text):
             return Expr.col_ref(sx.text)
-        # OUTER reference: mark with the COL_SIDE_LEFT qualifier so the
+        # An unqualified OUTER reference keeps its bare name. Every outer
+        # reference (this one and the qualified one above) is marked with the
+        # COL_SIDE_LEFT qualifier so the
         # optimizer's `flatten_dependent_joins` can tell it apart from an inner
         # column that shares its NAME (a self-correlated subquery — TPC-H Q21's
         # `l3.l_suppkey <> l1.l_suppkey`, where both refs are `l_suppkey`).
@@ -153,17 +222,17 @@ def _bind_corr_scalar(
     if sx.tag == SX_BINARY:
         if _is_null_comparison(sx):
             if sx._binary.value().left[].tag != SX_NULL:
-                return _null_comparison(sx.op, _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer_refs, catalog, cte_scope, prebound))
+                return _null_comparison(sx.op, _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound))
             if sx._binary.value().right[].tag != SX_NULL:
-                return _null_comparison(sx.op, _bind_corr_scalar(sx._binary.value().right[], inner_schema, inner_aliases, outer_refs, catalog, cte_scope, prebound))
+                return _null_comparison(sx.op, _bind_corr_scalar(sx._binary.value().right[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound))
             raise Error(_BARE_NULL_REFUSAL)
         var big_cmp = _big_int_cmp_serves(sx)
         var lhs = _bind_big_int_uint64(sx._binary.value().left[]) if (
             big_cmp and _sx_is_big_int(sx._binary.value().left[])
-        ) else _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer_refs, catalog, cte_scope, prebound)
+        ) else _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound)
         var rhs = _bind_big_int_uint64(sx._binary.value().right[]) if (
             big_cmp and _sx_is_big_int(sx._binary.value().right[])
-        ) else _bind_corr_scalar(sx._binary.value().right[], inner_schema, inner_aliases, outer_refs, catalog, cte_scope, prebound)
+        ) else _bind_corr_scalar(sx._binary.value().right[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound)
         # An OUTER reference types as unknown against `inner_schema`, so `/`
         # falls back to the untyped door's own rule.
         return _bind_sql_operator(sx.op, lhs^, rhs^, inner_schema)
@@ -172,10 +241,10 @@ def _bind_corr_scalar(
     if sx.tag == SX_UNARY:
         return Expr.unary(
             _map_unop(sx.op),
-            _bind_corr_scalar(sx._agg.value().arg[], inner_schema, inner_aliases, outer_refs, catalog, cte_scope, prebound),
+            _bind_corr_scalar(sx._agg.value().arg[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound),
         )
     if sx.tag == SX_LIKE:
-        var child = _bind_corr_scalar(sx._agg.value().arg[], inner_schema, inner_aliases, outer_refs, catalog, cte_scope, prebound)
+        var child = _bind_corr_scalar(sx._agg.value().arg[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound)
         return _bind_like(sx, child^)
     if sx.tag == SX_CALL:
         # Inside a correlated-subquery predicate the only supported call is the
@@ -219,6 +288,7 @@ def _bind_correlated_subquery_body(
     catalog: SqlCatalog,
     cte_scope: CteScope,
     prebound: List[Expr],
+    outer: _CorrOuter,
     lhs_null_free: Bool = False,
 ) raises -> Expr:
     """Bind one parked predicate-subquery body (EXISTS / NOT EXISTS / IN /
@@ -251,7 +321,7 @@ def _bind_correlated_subquery_body(
 
     if kind == SUBQ_NOT_IN:
         return _bind_null_aware_not_in(
-            body, in_lhs_col, catalog, cte_scope, prebound, lhs_null_free
+            body, in_lhs_col, catalog, cte_scope, prebound, outer, lhs_null_free
         )
 
     ref rel = body.from_tables[0]
@@ -263,7 +333,7 @@ def _bind_correlated_subquery_body(
     var where_expr: Optional[Expr] = None
     if body.where_pred:
         where_expr = _bind_corr_scalar(
-            body.where_pred.value(), inner_schema, inner_aliases, outer_refs, catalog, cte_scope, prebound
+            body.where_pred.value(), inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound
         )
 
     # IN / NOT IN: synthesize the membership equi `inner_proj = in_lhs_col`.
@@ -344,6 +414,7 @@ def _not_in_inner_plan(
     catalog: SqlCatalog,
     cte_scope: CteScope,
     prebound: List[Expr],
+    outer: _CorrOuter,
 ) raises -> LogicalPlan:
     """A FRESH `Filter(body.where AND extra, scan(body.from))` for one of the
     NOT IN lowering's sub-plans. Each call binds its own copy — plan nodes are
@@ -355,7 +426,7 @@ def _not_in_inner_plan(
     var where_expr: Optional[Expr] = None
     if body.where_pred:
         where_expr = _bind_corr_scalar(
-            body.where_pred.value(), inner_schema, inner_aliases, outer_refs, catalog, cte_scope, prebound
+            body.where_pred.value(), inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound
         )
     if extra:
         if where_expr:
@@ -459,32 +530,24 @@ def _where_holds_subquery(s: SelectStmt, idx: Int) -> Bool:
     return _sx_contains_subquery(s.where_pred.value(), idx)
 
 
-def _in_lhs_output_name(
-    stmt: SelectStmt, idx: Int, catalog: SqlCatalog, cte_scope: CteScope
-) raises -> String:
+def _in_lhs_output_name(stmt: SelectStmt, idx: Int, outer: _CorrOuter) raises -> String:
     """The name the membership equi of `[NOT] IN (subquery)` `idx` binds its
     left column by (and the name `_not_in_lhs_is_null_free` proves).
 
     An unqualified `x` keeps its bare name, as the rest of a WHERE binds it.
-    A qualified `q.x` resolves (`BindScope.resolve_qualified`) in the FROM
-    scope of the statement whose WHERE holds the subquery: the top statement
-    or another subquery's body (a derived table, a UNION ALL branch, a
-    subquery predicate). Over `FROM t, u`, `u.k` is the output column
-    `k_right`. (A CTE body is bound before this runs and refuses a subquery
-    it holds.) A qualified left column found in no WHERE that way (one in
-    a HAVING, a select item or an outer join's ON, or under a CASE or a
-    function call) is refused."""
+    A qualified `q.x` resolves (`BindScope.resolve_qualified`) in `outer`,
+    the FROM scope of the statement whose WHERE holds the subquery
+    (`_corr_outer_of`): the top statement or another subquery's body (a
+    derived table, a UNION ALL branch, a subquery predicate). Over
+    `FROM t, u`, `u.k` is the output column `k_right`. (A CTE body is bound
+    before this runs and refuses a subquery it holds.) A qualified left
+    column found in no WHERE that way (one in a HAVING, a select item or an
+    outer join's ON, or under a CASE or a function call) is refused."""
     ref sd = stmt.subqueries[idx]
     if sd.in_lhs_qualifier == "":
         return String(sd.in_lhs_col)
-    if _where_holds_subquery(stmt, idx):
-        var scope = _build_bind_scope(stmt.from_tables, stmt.joins, catalog, cte_scope)
-        return scope.resolve_qualified(sd.in_lhs_qualifier, sd.in_lhs_col)
-    for j in range(len(stmt.subqueries)):
-        ref b = stmt.subqueries[j].body
-        if _where_holds_subquery(b, idx):
-            var scope = _build_bind_scope(b.from_tables, b.joins, catalog, cte_scope)
-            return scope.resolve_qualified(sd.in_lhs_qualifier, sd.in_lhs_col)
+    if outer.known:
+        return outer.scope.resolve_qualified(sd.in_lhs_qualifier, sd.in_lhs_col)
     raise Error(
         "SQL not supported: a qualified left column `" + sd.in_lhs_qualifier
         + "." + sd.in_lhs_col + "` of `IN (subquery)` that is not an AND / OR /"
@@ -557,7 +620,11 @@ def _conjuncts_have_equi_correlation(e: Expr) -> Bool:
 
 
 def _body_has_equi_correlation(
-    body: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]
+    body: SelectStmt,
+    catalog: SqlCatalog,
+    cte_scope: CteScope,
+    prebound: List[Expr],
+    outer: _CorrOuter,
 ) raises -> Bool:
     """Does the subquery's own WHERE carry a top-level `inner = outer` conjunct?"""
     if not body.where_pred:
@@ -567,7 +634,7 @@ def _body_has_equi_correlation(
     var inner_aliases = _visible_qualifiers(rel)
     var refs = List[String]()
     var w = _bind_corr_scalar(
-        body.where_pred.value(), inner_schema, inner_aliases, refs, catalog, cte_scope, prebound
+        body.where_pred.value(), inner_schema, inner_aliases, outer, refs, catalog, cte_scope, prebound
     )
     return _conjuncts_have_equi_correlation(w)
 
@@ -612,6 +679,7 @@ def _bind_null_aware_not_in(
     catalog: SqlCatalog,
     cte_scope: CteScope,
     prebound: List[Expr],
+    outer: _CorrOuter,
     lhs_null_free: Bool,
 ) raises -> Expr:
     """`x NOT IN (SELECT y FROM r [WHERE p])` -> DuckDB's three-valued answer as
@@ -630,7 +698,7 @@ def _bind_null_aware_not_in(
     var member = _not_in_inner_plan(
         body,
         Optional(Expr.binary(BIN_EQ, Expr.col_ref(proj_col), Expr.left(in_lhs_col))),
-        member_refs, catalog, cte_scope, prebound,
+        member_refs, catalog, cte_scope, prebound, outer,
     )
     # `_bind_corr_scalar` appended the BODY's outer references only (the
     # synthesized equi is built here, not bound), so this is the correlation
@@ -650,13 +718,13 @@ def _bind_null_aware_not_in(
         # their only key is the body's own EQUALITY correlation. Without one
         # the engine refuses them at execution with its join-envelope text;
         # refuse BY NAME here instead, where the reason can be said.
-        if not _body_has_equi_correlation(body, catalog, cte_scope, prebound):
+        if not _body_has_equi_correlation(body, catalog, cte_scope, prebound, outer):
             raise Error(_NOT_IN_NON_EQUI_REFUSAL)
         # (2) no NULL y in S(row):  NOT EXISTS (S AND y IS NULL)
         var null_refs = List[String]()
         var null_rows = _not_in_inner_plan(
             body, Optional(Expr.unary(UN_IS_NULL, Expr.col_ref(proj_col))),
-            null_refs, catalog, cte_scope, prebound,
+            null_refs, catalog, cte_scope, prebound, outer,
         )
         var no_null_y = Expr.correlated_subquery(
             null_rows^, _dedup_names(null_refs), CORR_KIND_NOT_EXISTS
@@ -665,7 +733,7 @@ def _bind_null_aware_not_in(
         var lhs_refs = List[String]()
         var lhs_null = _not_in_inner_plan(
             body, Optional(Expr.unary(UN_IS_NULL, Expr.left(in_lhs_col))),
-            lhs_refs, catalog, cte_scope, prebound,
+            lhs_refs, catalog, cte_scope, prebound, outer,
         )
         lhs_refs.append(String(in_lhs_col))
         var lhs_ok = Expr.correlated_subquery(
@@ -685,12 +753,12 @@ def _bind_null_aware_not_in(
     var r_null = List[String]()
     var none_extra: Optional[Expr] = None
     var null_rows = _not_in_inner_plan(
-        body, none_extra^, r_null, catalog, cte_scope, prebound,
+        body, none_extra^, r_null, catalog, cte_scope, prebound, outer,
     )
     var r_all = List[String]()
     var none_extra2: Optional[Expr] = None
     var all_rows = _not_in_inner_plan(
-        body, none_extra2^, r_all, catalog, cte_scope, prebound,
+        body, none_extra2^, r_all, catalog, cte_scope, prebound, outer,
     )
     var no_null_y = Expr.binary(
         BIN_EQ,

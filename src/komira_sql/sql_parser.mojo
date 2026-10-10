@@ -842,7 +842,6 @@ struct _Parser(Movable):
         # here rather than reported as "unexpected trailing tokens" (or as a
         # missing ')' one level up, in a nested SELECT).
         self._refuse_unsupported_clause()
-        _refuse_ambiguous_derived_qualifier(stmt.from_tables)
         self.unnamed_derived = outer_unnamed
         # A nested SELECT body ends at ')' (CTE) or the top-level trailing
         # ';'/EOF — the caller (parse / _parse_with_clause) consumes those.
@@ -1030,6 +1029,14 @@ struct _Parser(Movable):
             var opts = self._parse_tvf_options(name, kind)
             self._expect(TK_RPAREN, "')'")
             var tvf_alias = self._parse_optional_alias()
+            # An unaliased table function answers to the function name as
+            # written, as in DuckDB v1.5.3 (`GetAlias` in
+            # bind_table_function.cpp): `read_parquet.k` over
+            # `FROM read_parquet('p')`. With no name it would answer to
+            # nothing, and inside a subquery body `read_parquet.k` would be
+            # taken for an outer reference.
+            if tvf_alias == "":
+                tvf_alias = name
             # ⛔ EVERY KIND CARRIES ITS `opts`, PARQUET INCLUDED. An early
             # `return FromRelation.tvf(path, tvf_alias)` for parquet would drop
             # the parsed `TvfOptions` on the floor. The per-key kind guards in
@@ -1348,7 +1355,7 @@ struct _Parser(Movable):
         # so the key can neither collide with a twin at another level nor
         # SHADOW a catalog table or CTE outside the FROM entry that declares
         # it. A same-FROM relation that answers to the same qualifier is
-        # refused by `_refuse_ambiguous_derived_qualifier`.
+        # bound per reference (`BindScope.resolve_qualified`).
         var synthetic = d_alias == ""
         if synthetic:
             self.unnamed_derived += 1
@@ -3202,48 +3209,6 @@ struct _Parser(Movable):
             "SQL syntax error: expected a frame bound (UNBOUNDED PRECEDING/FOLLOWING,"
             + " CURRENT ROW, or `<n> PRECEDING/FOLLOWING`)"
         )
-
-
-def _refuse_ambiguous_derived_qualifier(from_tables: List[FromRelation]) raises:
-    """⛔ Refuse a derived table whose qualifier (its alias, or the synthetic
-    `unnamed_subquery[N]` of an unaliased one, see
-    `_Parser._parse_derived_table`) is ALSO what another relation in the same
-    FROM clause answers to: that relation's alias, or its name when it has no
-    alias (`FROM t, (SELECT ...) AS t`, `FROM (SELECT ...) AS d, u AS d`,
-    `FROM (SELECT 1 AS a), unnamed_subquery`). An aliased table's name is
-    hidden by its alias (the binder's `_visible_qualifiers`), so
-    `FROM t AS x, (SELECT ...) AS t` is not a collision and is not refused.
-
-    This binder's qualifier resolution takes the first relation that answers
-    to a qualifier, so it could pick the other one and answer from the wrong
-    relation under a plausible column. (For the synthetic name DuckDB v1.5.3
-    accepts it and resolves each qualified column by name — with a table that
-    is itself called `unnamed_subquery`, `unnamed_subquery.z` reaches the
-    TABLE and `unnamed_subquery.a` the SUBQUERY, measured.) Refused, naming the
-    collision and the remedy.
-
-    A derived relation is recognised by the `#` in its relation NAME, which no
-    lower-folded identifier can contain. One with no `rel_alias` (a shape the
-    parser never builds) is skipped: an empty qualifier names nothing."""
-    for i in range(len(from_tables)):
-        ref s = from_tables[i]
-        if s.name.find("#") < 0 or s.rel_alias == "":
-            continue
-        var q = s.rel_alias.lower()
-        for j in range(len(from_tables)):
-            if j == i:
-                continue
-            ref o = from_tables[j]
-            var oq = o.rel_alias.lower() if o.rel_alias != "" else o.name.lower()
-            if oq == q:
-                raise Error(
-                    "SQL not supported: a derived table `(SELECT ...)` is"
-                    + " named `" + q + "`, and another relation in the same"
-                    + " FROM clause also answers to `" + q + "`, so a column"
-                    + " qualified by that name is ambiguous. Give the"
-                    + " relations distinct aliases (an unaliased derived table"
-                    + " is named `unnamed_subquery`, `unnamed_subquery2`, ...)."
-                )
 
 
 def _replacement_scan_kind(path: String) raises -> UInt8:

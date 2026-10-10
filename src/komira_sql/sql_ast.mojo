@@ -1307,7 +1307,9 @@ struct FromRelation(Copyable, Movable):
     does, and only through the FROM entry that declares it.
 
     `rel_alias` is the AS alias (`t AS a` / `t a`), or `""` (a derived table
-    always has one: its alias or `unnamed_subquery[N]`). A qualified `q.col`
+    always has one: its alias or `unnamed_subquery[N]`; so does a `read_*`
+    table function: its alias or the function name; a `FROM '<path>'`
+    replacement scan's is its alias or the file stem). A qualified `q.col`
     resolves against the alias when there is one, and against `name` only when
     there is not (`_visible_qualifiers`: an alias hides the table name). That
     one set is what `BindScope`, a join side and a correlated subquery's inner

@@ -84,6 +84,7 @@ from komira_sql.sql_bind_expr import _bind_scalar, _bound_expr_is_float
 from komira_sql.sql_bind_subquery import (
     _bind_corr_scalar,
     _body_has_equi_correlation,
+    _no_outer,
     _rel_col_null_free,
 )
 from komira_sql.sql_bind_join import _outer_join_type
@@ -386,13 +387,13 @@ def test_subquery_helpers_without_reading_files() raises:
     assert_false(_rel_col_null_free(unknown, "k", cat, cte))
     var body = parse_sql(tokenize("SELECT k FROM t"))
     var pre = List[Expr]()
-    assert_false(_body_has_equi_correlation(body.query, cat, cte, pre))
+    assert_false(_body_has_equi_correlation(body.query, cat, cte, pre, _no_outer()))
     var refs = List[String]()
     var aliases = List[String]()
     aliases.append(String("t"))
     try:
         _ = _bind_corr_scalar(
-            SqlExpr.subquery(5), _schema(), aliases, refs, cat, cte, pre
+            SqlExpr.subquery(5), _schema(), aliases, _no_outer(), refs, cat, cte, pre
         )
         raise Error("bound")
     except e:

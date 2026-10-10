@@ -31,7 +31,7 @@ from komira_sql.sql_bind_scope import (
 )
 from komira_sql.sql_bind_subquery import (
     _bind_scalar_subquery_body, _bind_correlated_subquery_body,
-    _not_in_lhs_is_null_free, _in_lhs_output_name,
+    _corr_outer_of, _not_in_lhs_is_null_free, _in_lhs_output_name,
 )
 from komira_sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
@@ -213,14 +213,15 @@ def _bind_query(
             prebound.append(sq^)
         else:
             # `in_lhs` is "" for EXISTS / NOT EXISTS (no left column).
-            var in_lhs = _in_lhs_output_name(stmt, i, catalog, cte_scope)
+            var outer = _corr_outer_of(stmt, i, catalog, cte_scope)
+            var in_lhs = _in_lhs_output_name(stmt, i, outer)
             var lhs_null_free = False
             if sd.kind == SUBQ_NOT_IN:
                 lhs_null_free = _not_in_lhs_is_null_free(
                     stmt, i, in_lhs, catalog, cte_scope
                 )
             var pred = _bind_correlated_subquery_body(
-                sd.body, sd.kind, in_lhs, catalog, cte_scope, prebound,
+                sd.body, sd.kind, in_lhs, catalog, cte_scope, prebound, outer,
                 lhs_null_free,
             )
             prebound.append(pred^)
@@ -362,7 +363,7 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
             # later ON may classify a column against it (`_build_bind_scope`
             # omits it for the same reason).
             plan = _bind_semi_anti_join(
-                plan^, right^, jc, stmt.from_tables[i], left_aliases, scope,
+                plan^, right^, jc, stmt.from_tables[i], left_aliases, scope, i,
                 catalog, cte_scope, prebound,
             )
             continue
@@ -410,7 +411,7 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
             var right_aliases = _visible_qualifiers(stmt.from_tables[i])
             plan = _bind_outer_join(
                 plan^, right^, left_schema, right_schema, left_aliases, right_aliases,
-                jc.on_pred.value(), jc.kind, scope, catalog, cte_scope, prebound,
+                jc.on_pred.value(), jc.kind, scope, i, catalog, cte_scope, prebound,
             )
         else:
             # Unreachable over the parser's `JK_*` set: the arms above cover

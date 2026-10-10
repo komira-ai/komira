@@ -35,15 +35,12 @@
 #      wrapped bits of a big literal used as the limit)
 #  11. Unaliased derived tables are named `unnamed_subquery`,
 #      `unnamed_subquery2`, ... per SELECT level; every derived table, aliased
-#      or not, is keyed apart by subquery index (`<qualifier>#<index>`), and a
-#      derived qualifier that another relation of the same FROM answers to
-#      (its alias, or its name when it has none) is refused with the exact
-#      text, at every SELECT level; a derived table named like an aliased
-#      table's hidden name parses. Two same-alias derived tables at two
-#      levels get two keys. (catches: the count not restarted in a nested
-#      SELECT; an aliased derived table keyed by its bare alias or by index
-#      0; either arm of the alias-else-name test dropped; the check skipped
-#      in a nested SELECT)
+#      or not, is keyed apart by subquery index (`<qualifier>#<index>`), also
+#      when another relation of the same FROM answers to the same qualifier
+#      (the binder resolves each qualified column). Two same-alias derived
+#      tables at two levels get two keys. (catches: the count not restarted
+#      in a nested SELECT; an aliased derived table keyed by its bare alias
+#      or by index 0)
 #  12. A derived table's column-list rename and its malformed spellings.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -356,18 +353,11 @@ def test_unaliased_derived_tables_are_named_per_level() raises:
     assert_equal(nested.query.from_tables[0].rel_alias, "unnamed_subquery")
     assert_equal(nested.query.from_tables[0].name, "unnamed_subquery#1")
     assert_equal(nested.query.from_tables[1].rel_alias, "unnamed_subquery2")
-    _refuses("SELECT * FROM (SELECT 1 AS a), unnamed_subquery", "is named `unnamed_subquery`")
-    _refuses("SELECT * FROM t AS Unnamed_Subquery, (SELECT 1 AS a)", "another relation in the same FROM clause")
-
-
-def _dup(q: String) -> String:
-    return (
-        "SQL not supported: a derived table `(SELECT ...)` is named `" + q
-        + "`, and another relation in the same FROM clause also answers to `"
-        + q + "`, so a column qualified by that name is ambiguous. Give the"
-        + " relations distinct aliases (an unaliased derived table is named"
-        + " `unnamed_subquery`, `unnamed_subquery2`, ...)."
-    )
+    # A relation that answers to the synthetic name too parses: a qualified
+    # column is bound per reference (test_sql_bind_dup_qualifiers).
+    var clash = _parse("SELECT * FROM (SELECT 1 AS a), unnamed_subquery")
+    assert_equal(clash.query.from_tables[0].rel_alias, "unnamed_subquery")
+    assert_equal(clash.query.from_tables[1].name, "unnamed_subquery")
 
 
 def test_aliased_derived_tables_are_keyed_by_subquery_index() raises:
@@ -379,20 +369,12 @@ def test_aliased_derived_tables_are_keyed_by_subquery_index() raises:
     assert_equal(st.query.subqueries[1].body.from_tables[0].name, "t#0")
     assert_equal(st.query.subqueries[1].body.from_tables[0].rel_alias, "t")
     assert_equal(st.query.subqueries[0].derived_alias, "t#0")
-    # A derived table's qualifier that another relation of the same FROM
-    # answers to is refused: by that relation's name (`t`), by its alias
-    # (`d`), or by another derived table's alias. (mutants: each arm of the
-    # name-or-alias test dropped; the self-skip `j == i` dropped refuses
-    # every derived table)
-    assert_equal(_err("SELECT * FROM t, (SELECT 1 AS a) AS t"), _dup("t"))
-    assert_equal(_err("SELECT * FROM (SELECT 1 AS a) AS d, u AS d"), _dup("d"))
-    assert_equal(_err("SELECT * FROM (SELECT 1 AS a) AS d, (SELECT 2 AS b) AS D"), _dup("d"))
-    assert_equal(_err("SELECT * FROM (SELECT 1 AS a), unnamed_subquery"), _dup("unnamed_subquery"))
-    # Distinct qualifiers parse, and the check is for derived tables only: a
-    # catalog table aliased like another table's name is not refused.
-    # (mutant: the `#` test dropped, which refuses `kk AS mm` against mm)
-    assert_equal(len(_parse("SELECT * FROM t, (SELECT 1 AS a) AS d").query.from_tables), 2)
-    assert_equal(len(_parse("SELECT * FROM kk AS mm JOIN mm AS z ON mm.k = z.k").query.from_tables), 2)
+    # Two relations of one FROM may answer to the same qualifier; the parser
+    # keeps both, keyed apart, and the binder resolves each qualified column.
+    var dup = _parse("SELECT * FROM t, (SELECT 1 AS a) AS t")
+    assert_equal(dup.query.from_tables[0].name, "t")
+    assert_equal(dup.query.from_tables[1].name, "t#0")
+    assert_equal(dup.query.from_tables[1].rel_alias, "t")
 
 
 def test_same_alias_derived_tables_at_two_levels_get_two_keys() raises:
@@ -406,32 +388,6 @@ def test_same_alias_derived_tables_at_two_levels_get_two_keys() raises:
     assert_equal(st.query.from_tables[0].rel_alias, "d")
     assert_equal(st.query.subqueries[0].derived_alias, "d#0")
     assert_equal(st.query.subqueries[1].derived_alias, "d#1")
-
-
-def test_a_collision_inside_a_nested_select_is_refused() raises:
-    # The same-FROM check runs at every SELECT level, not only the top:
-    # inside a derived-table body and inside a scalar-subquery body.
-    # (mutant: the check skipped when the SELECT ends at `)`, which bound
-    # `d.k` below to u's k)
-    assert_equal(
-        _err("SELECT * FROM (SELECT d.k FROM u AS d, (SELECT 5 AS k) AS d) AS x"),
-        _dup("d"),
-    )
-    assert_equal(
-        _err("SELECT (SELECT max(d.k) FROM u AS d, (SELECT 5 AS k) AS d) FROM t"),
-        _dup("d"),
-    )
-
-
-def test_an_aliased_table_does_not_collide_by_its_name() raises:
-    # An aliased table answers to its alias only, so a derived table named
-    # like the table's NAME is no collision; one named like its ALIAS is.
-    # (mutant: the other relation's name compared even when it has an
-    # alias, which refuses both parses below)
-    assert_equal(len(_parse("SELECT * FROM t AS x, (SELECT 1 AS a) AS t").query.from_tables), 2)
-    assert_equal(len(_parse("SELECT * FROM (SELECT 1 AS a) AS t, t AS x").query.from_tables), 2)
-    assert_equal(len(_parse("SELECT * FROM unnamed_subquery AS z, (SELECT 1 AS a)").query.from_tables), 2)
-    assert_equal(_err("SELECT * FROM t AS x, (SELECT 1 AS a) AS x"), _dup("x"))
 
 
 def test_derived_table_column_list() raises:

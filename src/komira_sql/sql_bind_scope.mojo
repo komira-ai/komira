@@ -234,16 +234,42 @@ def _visible_qualifiers(rel: FromRelation) -> List[String]:
     An alias HIDES the table name, as in DuckDB v1.5.3 (`SELECT t.k FROM t AS
     x` -> "Referenced table t not found"). Every qualifier resolver uses this
     one set (`BindScope`, a join side, a correlated subquery's inner
-    relation), because they take the first relation a qualifier names: were an
-    aliased table still reachable by its name, `mm.k` in `FROM mm AS z, kk AS
-    mm` would read mm's k instead of kk's. A derived table always has an
-    alias, so its `#`-keyed relation name is never a qualifier."""
+    relation): were an aliased table still reachable by its name, `mm.k` in
+    `FROM mm AS z, kk AS mm` would be an ambiguous reference instead of kk's
+    k. Two relations may still answer to one qualifier (`FROM t, t`,
+    `FROM a AS z, b AS z`, `FROM kk AS mm, mm`); see
+    `BindScope.resolve_qualified`. A derived table always has an alias, so its
+    `#`-keyed relation name is never a qualifier."""
     var out = List[String]()
     if rel.rel_alias != "":
         out.append(rel.rel_alias.lower())
     elif rel.name != "":
         out.append(rel.name.lower())
     return out^
+
+
+def _alias_in_list(aliases: List[String], q: String) -> Bool:
+    """`q` (already lower-cased) is one of `aliases`."""
+    for i in range(len(aliases)):
+        if aliases[i] == q:
+            return True
+    return False
+
+
+# How every `_ambiguous_qualifier_error` message starts.
+comptime _AMBIGUOUS_QUALIFIER_PREFIX = "SQL bind error: ambiguous reference to table `"
+
+
+def _ambiguous_qualifier_error(q: String, name: String) -> String:
+    """The refusal of a qualified column that more than one relation
+    answering to `q` has (DuckDB v1.5.3: `Ambiguous reference to table "z"
+    (duplicate alias "z", explicitly alias one of the tables using "AS
+    my_alias")`)."""
+    return (
+        String(_AMBIGUOUS_QUALIFIER_PREFIX) + q + "`: more than"
+        + " one relation answers to `" + q + "` and has a column `" + name
+        + "`. Give one of them a distinct alias (`AS my_alias`)."
+    )
 
 
 struct BindScope(Movable):
@@ -266,46 +292,85 @@ struct BindScope(Movable):
         self.rels = rels^
         self.out_schema = out_schema^
 
-    def resolve_qualified(self, qualifier: String, name: String) raises -> String:
-        """Resolve `qualifier.name` to its OUTPUT column name. Raises cleanly if no
-        relation named by `qualifier` has a column `name`."""
-        var q = qualifier.lower()
-        var nl = name.lower()
+    def _find_qualified(self, q: String, nl: String) raises -> Tuple[Int, Int]:
+        """The (relation, column) indices of the one relation answering to
+        lower-cased qualifier `q` that has column `nl` (lower-cased), or
+        (-1, -1) when none has it. Raises when two do: DuckDB v1.5.3 binds a
+        qualified column per reference, over every binding with that alias
+        (`BindContext::GetBinding`), and refuses only when the column is in
+        more than one of them, so `z.b` over `FROM mm AS z, kk AS z` is mm's b
+        and `z.k` is an error."""
+        var hit_r = -1
+        var hit_c = -1
         for ri in range(len(self.rels)):
             ref r = self.rels[ri]
-            var named = False
-            for ai in range(len(r.aliases)):
-                if r.aliases[ai] == q:
-                    named = True
-                    break
-            if not named:
+            if not _alias_in_list(r.aliases, q):
                 continue
             for i in range(len(r.orig)):
                 if r.orig[i].lower() == nl:
-                    return String(r.out[i])
-        raise Error("SQL bind error: unknown column '" + qualifier + "." + name + "'")
+                    if hit_r >= 0:
+                        raise Error(_ambiguous_qualifier_error(q, nl))
+                    hit_r = ri
+                    hit_c = i
+                    break
+        return (hit_r, hit_c)
 
-    def source_name_of(self, qualifier: String, name: String) -> String:
+    def resolve_qualified(self, qualifier: String, name: String) raises -> String:
+        """Resolve `qualifier.name` to its OUTPUT column name. Raises cleanly if no
+        relation named by `qualifier` has a column `name`, and when more than
+        one does (`_find_qualified`)."""
+        var hit = self._find_qualified(qualifier.lower(), name.lower())
+        if hit[0] < 0:
+            raise Error("SQL bind error: unknown column '" + qualifier + "." + name + "'")
+        return String(self.rels[hit[0]].out[hit[1]])
+
+    def source_name_of(self, qualifier: String, name: String) raises -> String:
         """The SOURCE spelling of `qualifier.name` — the column's name in its
         own relation, which is the name DuckDB v1.5.3 gives it in a result
         (`SELECT M.k` is a column called `k`; over a column declared `"K"`,
         `SELECT U.k` is `K`). "" when it does not resolve (the caller keeps
-        the plan's name; binding it has already raised)."""
+        the plan's name; binding it has already raised). Raises on an
+        ambiguous reference, as `resolve_qualified` does."""
+        var hit = self._find_qualified(qualifier.lower(), name.lower())
+        if hit[0] < 0:
+            return String("")
+        return String(self.rels[hit[0]].orig[hit[1]])
+
+    def has_qualified(self, qualifier: String, name: String) -> Bool:
+        """Whether some relation answering to `qualifier` has column `name`
+        (case-insensitive), whether or not another one has it too."""
         var q = qualifier.lower()
         var nl = name.lower()
         for ri in range(len(self.rels)):
             ref r = self.rels[ri]
-            var named = False
-            for ai in range(len(r.aliases)):
-                if r.aliases[ai] == q:
-                    named = True
-                    break
-            if not named:
+            if not _alias_in_list(r.aliases, q):
                 continue
             for i in range(len(r.orig)):
                 if r.orig[i].lower() == nl:
-                    return String(r.orig[i])
-        return String("")
+                    return True
+        return False
+
+    def answers_to(self, qualifier: String) -> Bool:
+        """Whether some relation of this scope answers to `qualifier`."""
+        var q = qualifier.lower()
+        for ri in range(len(self.rels)):
+            if _alias_in_list(self.rels[ri].aliases, q):
+                return True
+        return False
+
+    def slice(self, lo: Int, hi: Int) -> BindScope:
+        """The relations at FROM positions `lo <= rel_idx < hi` only, with the
+        same output names (a relation's output names depend on the relations
+        before it, never after). A join's ON sees its two inputs and not a
+        relation joined later (DuckDB binds an ON against the join's
+        children), so a qualifier that a LATER relation also answers to is not
+        ambiguous there."""
+        var rels = List[_RelCols]()
+        for ri in range(len(self.rels)):
+            var idx = self.rels[ri].rel_idx
+            if idx >= lo and idx < hi:
+                rels.append(self.rels[ri].copy())
+        return BindScope(rels^, self.out_schema.copy())
 
     def source_name_of_output(self, out_name: String) -> String:
         """The SOURCE spelling of join-output column `out_name` (`k_right` ->
@@ -513,7 +578,7 @@ def _dedupe_join_right(
 # reference keeps the name the query wrote.
 
 
-def _result_display_names(stmt: SelectStmt, scope: BindScope) -> List[String]:
+def _result_display_names(stmt: SelectStmt, scope: BindScope) raises -> List[String]:
     """Per result column (a `*` expanded over the FROM scope), the name DuckDB
     gives it — or "" where the plan's own name already is that name."""
     var out = List[String]()

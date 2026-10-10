@@ -27,7 +27,10 @@
 #      `FROM mm AS z, kk AS mm` is kk's k (`k_right`) in a select item, in a
 #      JOIN ... ON folded into WHERE, in a LEFT JOIN ON and in a SEMI JOIN
 #      ON (with and without a relation before the aliased one); `t.k` inside
-#      `EXISTS (SELECT 1 FROM t AS x WHERE x.k = t.k)` is the OUTER t's k;
+#      `EXISTS (SELECT 1 FROM t AS x WHERE x.k = t.k)` is the OUTER t's k,
+#      and so it is under NOT IN with a nullable y (the three-anti-join
+#      lowering; mutants: the alias-and-name set at the NOT IN inner plan,
+#      or at its equi-correlation check, each alone);
 #      `t.k` over `FROM t AS x` is an unknown column; and a derived table
 #      named like an aliased table's hidden name binds.
 #      (defect: an aliased relation also answered to its table name, so the
@@ -265,6 +268,20 @@ def test_an_alias_hides_the_table_name_in_a_correlated_body() raises:
         "    " + _T,
     )
     assert_equal(_refs(sql), "k")
+    # The same body under NOT IN, whose y (`v`) may hold NULLs: the
+    # correlated lowering (three anti joins, `k` an outer reference) binds
+    # the body through `_not_in_inner_plan` and checks its equi correlation
+    # through `_body_has_equi_correlation`, each with this qualifier set.
+    var not_in = String("SELECT k FROM t WHERE v NOT IN (SELECT v FROM t AS x WHERE x.k = t.k)")
+    _check(
+        not_in,
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=BinaryOp(AND, CorrelatedSubquery(kind=1, outer_refs=#2, inner_tag=1),"
+        " BinaryOp(AND, CorrelatedSubquery(kind=1, outer_refs=#1, inner_tag=1),"
+        " CorrelatedSubquery(kind=1, outer_refs=#2, inner_tag=1))))\n"
+        "    " + _T,
+    )
+    assert_equal(_refs(not_in), "k,v")
 
 
 def main() raises:

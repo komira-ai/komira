@@ -24,7 +24,7 @@ from komira_sql.sql_bind_expr import _bind_scalar
 from komira_sql.sql_bind_names import _group_has
 from komira_sql.sql_bind_scope import (
     CteScope, _schema_has_col, _schema_col_spelling, _RelCols, BindScope, _resolve_col,
-    _visible_qualifiers,
+    _AMBIGUOUS_QUALIFIER_PREFIX, _ambiguous_qualifier_error, _visible_qualifiers,
 )
 from komira_sql.sql_bind_subquery import _alias_in
 from komira_sql.sql_catalog import SqlCatalog
@@ -76,16 +76,35 @@ def _classify_side(
     right_schema: Schema,
     left_aliases: List[String],
     right_aliases: List[String],
-) -> Int:
+    left_scope: BindScope,
+    right_scope: BindScope,
+) raises -> Int:
     """Classify an SX_COLUMN ON-operand as belonging to the RIGHT relation (1),
     the accumulated LEFT plan (0), or ambiguous/unknown (-1). A qualified ref uses
     its qualifier against the alias sets; an unqualified ref uses which side's
-    schema uniquely contains the column."""
+    schema uniquely contains the column.
+
+    A qualifier BOTH sides answer to (`a AS z JOIN b AS z`, `kk AS mm JOIN
+    mm`) is decided by the column, as DuckDB v1.5.3 binds it: the side whose
+    relation named by it has the column, and an ambiguity error when both
+    do. `left_scope` / `right_scope` hold the two sides' relations."""
     if sx.qualifier != "":
         var q = sx.qualifier.lower()
-        if _alias_in(right_aliases, q):
+        var in_r = _alias_in(right_aliases, q)
+        var in_l = _alias_in(left_aliases, q)
+        if in_r and in_l:
+            var has_r = right_scope.has_qualified(q, sx.text)
+            var has_l = left_scope.has_qualified(q, sx.text)
+            if has_r and has_l:
+                raise Error(_ambiguous_qualifier_error(q, sx.text.lower()))
+            if has_r:
+                return 1
+            if has_l:
+                return 0
+            return -1
+        if in_r:
             return 1
-        if _alias_in(left_aliases, q):
+        if in_l:
             return 0
         return -1
     var inl = _schema_has_col(left_schema, sx.text)
@@ -105,6 +124,8 @@ def _process_on_pred(
     right_aliases: List[String],
     out_schema: Schema,
     scope: BindScope,
+    left_scope: BindScope,
+    right_scope: BindScope,
     catalog: SqlCatalog,
     cte_scope: CteScope,
     prebound: List[Expr],
@@ -117,23 +138,30 @@ def _process_on_pred(
     (`left_on` = the LEFT column's output name, `right_on` = the RIGHT column's own
     schema name — `LogicalPlan.join` matches `right_on` pre-rename). Every other
     conjunct is bound (qualifier-aware, against the join OUTPUT schema) and ANDed
-    into `residual`."""
+    into `residual`. `scope` holds the join's two inputs' relations only, and
+    `left_scope` / `right_scope` each side's (`_classify_side`)."""
     if sx.tag == SX_BINARY and sx.op == SXOP_AND:
         _process_on_pred(
             sx._binary.value().left[], left_schema, right_schema, left_aliases, right_aliases,
-            out_schema, scope, catalog, cte_scope, prebound, left_on, right_on, residual,
+            out_schema, scope, left_scope, right_scope, catalog, cte_scope, prebound,
+            left_on, right_on, residual,
         )
         _process_on_pred(
             sx._binary.value().right[], left_schema, right_schema, left_aliases, right_aliases,
-            out_schema, scope, catalog, cte_scope, prebound, left_on, right_on, residual,
+            out_schema, scope, left_scope, right_scope, catalog, cte_scope, prebound,
+            left_on, right_on, residual,
         )
         return
     if sx.tag == SX_BINARY and sx.op == SXOP_EQ:
         ref l = sx._binary.value().left[]
         ref r = sx._binary.value().right[]
         if l.tag == SX_COLUMN and r.tag == SX_COLUMN:
-            var ls = _classify_side(l, left_schema, right_schema, left_aliases, right_aliases)
-            var rs = _classify_side(r, left_schema, right_schema, left_aliases, right_aliases)
+            var ls = _classify_side(
+                l, left_schema, right_schema, left_aliases, right_aliases, left_scope, right_scope
+            )
+            var rs = _classify_side(
+                r, left_schema, right_schema, left_aliases, right_aliases, left_scope, right_scope
+            )
             if ls == 0 and rs == 1:
                 left_on.append(_resolve_col(l, left_schema, scope))
                 right_on.append(String(r.text))
@@ -189,6 +217,7 @@ def _bind_outer_join(
     on_sx: SqlExpr,
     jkind: UInt8,
     scope: BindScope,
+    right_idx: Int,
     catalog: SqlCatalog,
     cte_scope: CteScope,
     prebound: List[Expr],
@@ -206,14 +235,20 @@ def _bind_outer_join(
     left row whose equi-matches all fail the residual re-appears
     NULL-extended); RIGHT / FULL with a residual is refused by name. Folding
     the residual into a post-join WHERE is not an alternative for any outer
-    kind: it collapses the null-extension to an INNER join."""
+    kind: it collapses the null-extension to an INNER join.
+
+    `scope` is the statement's FROM scope and `right_idx` the right
+    relation's FROM position: the ON binds against FROM positions
+    `0..right_idx` only (`BindScope.slice`)."""
     var out_schema = _join_out_schema(left_schema, right_schema)
     var left_on = List[String]()
     var right_on = List[String]()
     var residual: Optional[Expr] = None
     _process_on_pred(
         on_sx, left_schema, right_schema, left_aliases, right_aliases,
-        out_schema, scope, catalog, cte_scope, prebound, left_on, right_on, residual,
+        out_schema, scope.slice(0, right_idx + 1), scope.slice(0, right_idx),
+        scope.slice(right_idx, right_idx + 1), catalog, cte_scope, prebound,
+        left_on, right_on, residual,
     )
     if len(left_on) == 0:
         raise Error(
@@ -482,10 +517,8 @@ def _single_relation_scope(rel: FromRelation, schema: Schema) -> BindScope:
 
 
 def _col_refs_within(e: Expr, schema: Schema) -> Bool:
-    """True when every column `e` reads is a column of `schema`. A qualified
-    ref resolved through the statement-wide scope can name a relation joined
-    LATER (not in the left input yet); this is what keeps such a conjunct from
-    being classified as left-only."""
+    """True when every column `e` reads is a column of `schema`: a conjunct is
+    filed on a side only when everything it reads is in that side's input."""
     var names = List[String]()
     var sink = ordered_name_sink(names)
     walk_expr_column_refs(e, sink)
@@ -524,8 +557,11 @@ def _bind_one_sided_conjunct(
     * RIGHT only (or no column at all, e.g. `1 = 1`) -> ANDed into
       `right_pred`, a filter on the right input. EXACT for SEMI and ANTI.
     * LEFT only -> `left_pred`, a filter on the left input — SEMI only.
-    * Both -> an unqualified column both relations have: ambiguous (DuckDB
-      v1.5.3 refuses it too, measured: "Ambiguous reference to column name").
+    * Both -> an unqualified column both relations have, or a qualifier both
+      sides answer to with the column on both: ambiguous (DuckDB v1.5.3
+      refuses the first, measured: "Ambiguous reference to column name", and
+      the second in `BindContext::GetBinding`: "Ambiguous reference to
+      table").
     * Neither -> it reads both sides (or names nothing): refused."""
     var r_ok = False
     var r_expr: Optional[Expr] = None
@@ -543,8 +579,14 @@ def _bind_one_sided_conjunct(
         if _col_refs_within(e, left_schema):
             l_expr = Optional(e^)
             l_ok = True
-    except:
-        pass
+    except e:
+        # A qualifier two LEFT relations answer to, both with the column, is
+        # an error of the query, not "does not bind on this side": swallowed,
+        # the conjunct would be filed on the right side when the right
+        # relation has that column too.
+        var msg = String(e)
+        if msg.startswith(_AMBIGUOUS_QUALIFIER_PREFIX):
+            raise Error(msg)
     if r_ok and l_ok:
         # A conjunct naming no column binds on both sides and belongs on the
         # right input (exact for both kinds); anything else here is ambiguous.
@@ -554,9 +596,9 @@ def _bind_one_sided_conjunct(
         if len(names) > 0:
             raise Error(
                 "SQL not supported: " + _a_join_kw(kw) + " JOIN ON conjunct is ambiguous"
-                + " — an unqualified column it reads exists on BOTH sides."
-                + " Qualify it with the table name or alias of the side it"
-                + " belongs to."
+                + " — a column it reads, unqualified or qualified by a name both"
+                + " sides answer to, exists on BOTH sides. Qualify it with the"
+                + " table name or a distinct alias of the side it belongs to."
             )
         l_ok = False
     if r_ok:
@@ -632,8 +674,12 @@ def _semi_anti_on_keys(
         ref l = sx._binary.value().left[]
         ref r = sx._binary.value().right[]
         if l.tag == SX_COLUMN and r.tag == SX_COLUMN:
-            var ls = _classify_side(l, left_schema, right_schema, left_aliases, right_aliases)
-            var rs = _classify_side(r, left_schema, right_schema, left_aliases, right_aliases)
+            var ls = _classify_side(
+                l, left_schema, right_schema, left_aliases, right_aliases, scope, right_scope
+            )
+            var rs = _classify_side(
+                r, left_schema, right_schema, left_aliases, right_aliases, scope, right_scope
+            )
             if ls == -1 or rs == -1:
                 var shown: String
                 if ls == -1:
@@ -669,6 +715,7 @@ def _bind_semi_anti_join(
     right_rel: FromRelation,
     left_aliases: List[String],
     scope: BindScope,
+    right_idx: Int,
     catalog: SqlCatalog,
     cte_scope: CteScope,
     prebound: List[Expr],
@@ -677,7 +724,11 @@ def _bind_semi_anti_join(
     conjuncts]> | USING (c, ...))` -> a `JOIN_SEMI` / `JOIN_ANTI` node whose
     output is the LEFT columns only, with any one-sided conjunct applied as a
     FILTER on its side's input. See the section note above for what is
-    admitted and what is refused."""
+    admitted and what is refused.
+
+    `scope` is the statement's FROM scope and `right_idx` the right
+    relation's FROM position: the left side of the ON binds against the
+    relations before it only (`BindScope.slice`)."""
     var kw = String("SEMI") if jc.kind == JK_SEMI else String("ANTI")
     var left_schema = left_plan.output_schema.copy()
     var right_schema = right_plan.output_schema.copy()
@@ -693,8 +744,8 @@ def _bind_semi_anti_join(
         var right_scope = _single_relation_scope(right_rel, right_schema)
         _semi_anti_on_keys(
             jc.on_pred.value(), left_schema, right_schema, left_aliases,
-            _visible_qualifiers(right_rel), scope, right_scope, catalog,
-            cte_scope, prebound, kw, left_on, right_on, left_pred, right_pred,
+            _visible_qualifiers(right_rel), scope.slice(0, right_idx), right_scope,
+            catalog, cte_scope, prebound, kw, left_on, right_on, left_pred, right_pred,
         )
     else:
         raise Error(

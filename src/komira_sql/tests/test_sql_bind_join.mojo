@@ -533,7 +533,7 @@ def test_semi_and_anti_join_refusals() raises:
     )
     _check(
         "SELECT * FROM kk SEMI JOIN mm ON kk.k = mm.k AND k > 1",
-        "ERR: SQL not supported: a SEMI JOIN ON conjunct is ambiguous — an unqualified column it reads exists on BOTH sides. Qualify it with the table name or alias of the side it belongs to."
+        "ERR: SQL not supported: a SEMI JOIN ON conjunct is ambiguous — a column it reads, unqualified or qualified by a name both sides answer to, exists on BOTH sides. Qualify it with the table name or a distinct alias of the side it belongs to."
     )
     _check(
         "SELECT * FROM kk SEMI JOIN mm ON a = b",
