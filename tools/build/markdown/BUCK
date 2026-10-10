@@ -1,0 +1,36 @@
+# The Markdown reader the README examples tool and the doc link check share
+# (markdown.zig): fenced blocks, code spans, link and reference targets, HTML
+# comment blocks, line numbers. A tool imports it as `@import("markdown")`
+# by naming `komira//tools/build/markdown:markdown` in its `deps`.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The reader's cases (markdown_test.zig), run by `zig test` as a build action.
+zig_test(
+    name = "markdown_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["markdown.zig"],
+    src = "markdown_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Welded: nothing imports the module unless `:markdown_unit` passed.
+zig_module(
+    name = "markdown",
+    src = "markdown.zig",
+    unit_tests = [":markdown_unit"],
+    visibility = ["PUBLIC"],
+)
+
+# An importer in another directory, as a tool is: `@import("markdown")`
+# resolves only through `deps` (a relative import of ../markdown.zig is
+# outside the importer's directory, which zig refuses).
+zig_test(
+    name = "importer_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "importer/importer_test.zig",
+    deps = [":markdown"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
