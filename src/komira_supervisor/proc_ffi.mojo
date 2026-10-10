@@ -26,6 +26,15 @@ from std.ffi import external_call
 # -----------------------------------------------------------------------------
 comptime SIGTERM: Int32 = Int32(15)
 comptime SIGKILL: Int32 = Int32(9)
+comptime SIGINT: Int32 = Int32(2)
+
+
+# -----------------------------------------------------------------------------
+# komira_proc_spawn `flags` bits: this file's ABI with _proc_shim.c
+# (KOMIRA_SPAWN_* there), not platform constants.
+# -----------------------------------------------------------------------------
+comptime SPAWN_OWN_PGROUP: Int32 = Int32(1)
+comptime SPAWN_DEFAULT_SIGNALS: Int32 = Int32(2)
 
 
 # -----------------------------------------------------------------------------
@@ -88,6 +97,7 @@ def build_cstr_blob(items: List[String]) -> List[UInt8]:
 #   envc        : number of envp entries (0 => inherit)
 #   cwd         : working directory (NUL-terminated) or empty => inherit
 #   has_cwd     : True => apply cwd; False => pass NULL (inherit)
+#   flags       : SPAWN_OWN_PGROUP | SPAWN_DEFAULT_SIGNALS, or 0
 # Returns (rc, stdout_fd, stderr_fd, pid). rc==0 success; rc<0 is -errno.
 # -----------------------------------------------------------------------------
 def proc_spawn(
@@ -98,6 +108,7 @@ def proc_spawn(
     envc: Int,
     cwd: String,
     has_cwd: Bool,
+    flags: Int32,
     mut out_stdout_fd: Int32,
     mut out_stderr_fd: Int32,
     mut out_pid: Int32,
@@ -134,6 +145,7 @@ def proc_spawn(
         Int32(envc),
         cwd_ptr,
         Int32(1) if has_cwd else Int32(0),
+        flags,
         sout_ptr,
         serr_ptr,
         pid_ptr,
@@ -305,6 +317,44 @@ def proc_close(fd: Int32):
 
 def proc_kill(pid: Int32, sig: Int32) -> Int32:
     return external_call["komira_proc_kill", Int32](pid, sig)
+
+
+def proc_kill_group(pgid: Int32, sig: Int32) -> Int32:
+    """kill(-pgid, sig): signal every process in group `pgid`. Returns 0 /
+    -errno. The shim refuses pgid <= 1 with -EINVAL (kill(-1) would signal
+    every process the caller may signal, kill(0) the caller's own group)."""
+    return external_call["komira_proc_kill_group", Int32](pgid, sig)
+
+
+# -----------------------------------------------------------------------------
+# The stop-signal latch and orphan adoption (_proc_shim.c has the full notes).
+#
+# FFI-BOUNDARY: scalars only. The latch is a process-wide int inside the shim,
+# written by its own SIGTERM/SIGINT handler and read-and-cleared by
+# proc_take_stop_signal; no pointer crosses and nothing is allocated.
+# -----------------------------------------------------------------------------
+def proc_install_stop_handler() -> Int32:
+    """Catch SIGTERM and SIGINT into the latch. 0, or -errno."""
+    return external_call["komira_proc_install_stop_handler", Int32]()
+
+
+def proc_take_stop_signal() -> Int32:
+    """The first stop signal caught since the last take (SIGTERM or SIGINT),
+    cleared by this read; 0 when none."""
+    return external_call["komira_proc_take_stop_signal", Int32]()
+
+
+def proc_adopt_orphans() -> Int32:
+    """1 when this process is PID 1 (orphans come to it already); 0 once it
+    is a Linux child subreaper; -errno on failure, -ENOSYS where the OS has no
+    subreaper."""
+    return external_call["komira_proc_adopt_orphans", Int32]()
+
+
+def proc_reap_orphans(keep_pid: Int32, max: Int32) -> Int32:
+    """Collect up to `max` exited children other than `keep_pid`, without
+    blocking. Returns how many, or -errno."""
+    return external_call["komira_proc_reap_orphans", Int32](keep_pid, max)
 
 
 def proc_reap(pid: Int32, nohang: Bool) -> ReapStatus:

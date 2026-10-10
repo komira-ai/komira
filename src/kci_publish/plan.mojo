@@ -68,6 +68,22 @@
 #   when this is not empty, and cannot tell (exit 5) when the channel lists
 #   a numbered build and `history` is empty (it was not read).
 #
+# `main_line_files(listed_files, main_commits)` -- THE MAIN-LINE FILTER of a
+#   stage whose channel also takes break-glass builds (gamma): the listed
+#   files whose `h<8 hex>` is a prefix of some commit on main's history
+#   (`main_commits`, `git rev-list refs/remotes/origin/main` after a fetch,
+#   kci_cli). A prefix that main's history holds counts as main-line even
+#   when another commit off main shares it (an ambiguous prefix counts:
+#   the side that refuses rather than ignores), and so does a numbered
+#   build whose build string names no commit. The rest (`off_main_files`)
+#   are a branch's break-glass builds: reported, never counted, so a
+#   break-glass build cannot stall main. A never-backward publish reads
+#   every rule below over these files only.
+#
+# `newest_build_prefixes(listed_files)` -- the commits (`h<8 hex>`, each
+#   once; "" for a build string that names none) of the listed files with
+#   the HIGHEST build number: what THE SPLIT (run.mojo) asks git about.
+#
 # `previous_build_number(targets, listed_files)` -- what a never-backward
 #   publish CARRIES: the highest build number the channel lists, of any
 #   name and version, that is LOWER than the release's; -1 when it lists
@@ -548,18 +564,75 @@ def _commit_of_build(build: String) -> String:
 
 struct RevisionHistory(Copyable, Movable):
     """What a never-backward publish holds the channel's newest build
-    against (the file header's `backward_files`): `commits`, every commit id
-    on the release revision's history (`git rev-list <revision>`, kci_cli),
-    and `unread`, why it was not read ("" when it was).
+    against (the file header's `backward_files`): `revision`, the release
+    revision (a full commit id; THE SPLIT asks whether it is on the newest
+    build's history), `commits`, every commit id on its history (`git
+    rev-list <revision>`, kci_cli), and `unread`, why it was not read (""
+    when it was). For THE MAIN-LINE FILTER (`main_line_files`):
+    `main_line`, every commit on main's history, and `main_unread`, why it
+    was not read ("" when it was).
 
     Layout: owned values only. No pointer field."""
 
+    var revision: String
     var commits: List[String]
     var unread: String
+    var main_line: List[String]
+    var main_unread: String
 
     def __init__(out self):
+        self.revision = String("")
         self.commits = List[String]()
         self.unread = String("")
+        self.main_line = List[String]()
+        self.main_unread = String("")
+
+
+def _on_main(commit: String, main_commits: List[String]) -> Bool:
+    for i in range(len(main_commits)):
+        if main_commits[i].startswith(commit):
+            return True
+    return False
+
+
+def main_line_files(listed_files: List[String], main_commits: List[String]) -> List[String]:
+    """The file header's MAIN-LINE FILTER: the listed files that count."""
+    var out = List[String]()
+    for k in range(len(listed_files)):
+        var commit = _commit_of_build(_listed_build(listed_files[k]))
+        if commit.byte_length() == 0 or _on_main(commit, main_commits):
+            out.append(listed_files[k].copy())
+    return out^
+
+
+def off_main_files(listed_files: List[String], main_commits: List[String]) -> List[String]:
+    """The listed files the MAIN-LINE FILTER leaves out (a branch's
+    break-glass builds)."""
+    var out = List[String]()
+    for k in range(len(listed_files)):
+        var commit = _commit_of_build(_listed_build(listed_files[k]))
+        if commit.byte_length() > 0 and not _on_main(commit, main_commits):
+            out.append(listed_files[k].copy())
+    return out^
+
+
+def newest_build_prefixes(listed_files: List[String]) -> List[String]:
+    """The file header's `newest_build_prefixes`."""
+    var out = List[String]()
+    var newest = newest_listed_build_number(listed_files)
+    if newest < 0:
+        return out^
+    for k in range(len(listed_files)):
+        if _listed_build_number(listed_files[k]) != newest:
+            continue
+        var commit = _commit_of_build(_listed_build(listed_files[k]))
+        var seen = False
+        for j in range(len(out)):
+            if out[j] == commit:
+                seen = True
+        if not seen:
+            out.append(commit^)
+    return out^
 
 
 def backward_files(targets: List[PublishTarget], listed_files: List[String], history: List[String]) -> List[String]:

@@ -174,6 +174,6 @@ def parse_jsonl[T: JsonCompatible](bytes: Span[UInt8, _]) raises -> List[T]:
     for i in range(nl):
         var s = lines[i]
         if s.byte_length() == 0:
-            continue
+            continue  # cov: unreachable split_lines never returns an empty line
         out.append(T.from_json(s))
     return out^

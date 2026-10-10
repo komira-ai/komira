@@ -7,16 +7,17 @@
 #   "Optimizer's job is just to convert a logical plan to a physical plan, and
 #    the physical plan allows for some level of runtime adaptation."
 #
-# The optimizer is a PURE function. It executes nothing, opens nothing, and
-# calls back into no engine. Where it previously EXECUTED an inner sub-plan to
-# constant-fold an uncorrelated scalar subquery, it now emits a DEPENDENCY --
-# "evaluate this sub-plan, bind its result" -- and the ENGINE resolves it.
+# komira_optimizer's passes are PURE: they execute nothing, open nothing and
+# call back into nothing. Where a pass needs the value of an inner sub-plan to
+# constant-fold an uncorrelated scalar subquery, it emits a DEPENDENCY --
+# "evaluate this sub-plan, bind its result" -- for a caller that executes
+# plans to resolve. komira has no such caller in this tree.
 #
 # ⛔ WHAT THIS REPLACES. `trait SubqueryExecutor.execute_subplan(...) raises ->
 # RecordBatch`, called from three optimizer pass sites
 # (`optimizer_resolve_scalar_subqueries.mojo`, `optimizer_scalar_broadcast.mojo`
 # x2). That callback is what made the optimizer impure, and it is also what made
-# the whole pipeline PARAMETRIC on a trait conformer -- which is the
+# every pass that reached it PARAMETRIC on a trait conformer -- which is the
 # blocker for an `@extern` boundary, because `@export` refuses a
 # parametric function. Removing it is a purity fix AND the compile prerequisite;
 # they are the same work.
@@ -25,74 +26,75 @@
 # THE PROTOCOL -- two-pass, and it terminates in exactly two
 # =============================================================================
 #
-# `ScalarDepTable` is a bidirectional channel threaded through the optimizer:
+# `ScalarDepTable` is a bidirectional channel threaded through the passes:
 #
-#   * BINDINGS (engine -> optimizer): resolved values, keyed by the inner
-#     plan's `structural_hash()`. EMPTY on the first pass.
-#   * REQUESTS (optimizer -> engine): the dependencies the optimizer could not
+#   * BINDINGS (executing caller -> passes): resolved values, keyed by the
+#     inner plan's `structural_hash()`. EMPTY on the first pass.
+#   * REQUESTS (passes -> executing caller): the dependencies a pass could not
 #     satisfy from `bindings`. Filled on a MISS; the pass then leaves the plan
 #     site UNTOUCHED and continues.
 #
-# The engine drives:
+# komira_optimizer has no driver that orders its passes or runs this loop. The
+# protocol the table is designed for is:
 #
 #     var deps = ScalarDepTable()
-#     var opt  = _optimize_pipeline_core(plan^, deps)     # PURE
+#     var opt  = <run the passes in order>(plan^, deps)        # PURE
 #     if deps.has_requests():
-#         <engine executes each request, appends a binding>
+#         <the caller executes each request, appends a binding>
 #         deps.clear_requests()
-#         opt = _optimize_pipeline_core(original^, deps)  # PURE, re-plan
+#         opt = <run the passes in order>(original^, deps)     # PURE, re-plan
 #
-# ★ WHY THE SECOND PASS RUNS THE WHOLE PIPELINE FROM THE ORIGINAL PLAN, rather
-# than binding into the once-optimized output. The two folding passes sit at
-# FIXED POSITIONS mid-pipeline -- `resolve_scalar_subqueries_rewrite`
-# (BEFORE `flatten_dependent_joins`, `fold_constants`, `push_predicates_down`)
-# and `scalar_broadcast_rewrite` (BEFORE projection pushdown,
-# `prune_columns`, join reorder, limit pushdown). Every one of those passes sees
-# the FOLDED plan today. Re-running from the original with the bindings in hand
-# makes the fold happen at the ORIGINAL POSITION with the ORIGINAL VALUE, so the
-# second pass's output is byte-identical to what the impure optimizer produced.
-# Binding into the already-optimized plan instead would be a cheaper-looking
-# shortcut that silently changes the plan shape.
+# ★ WHY THE SECOND PASS RUNS EVERY PASS FROM THE ORIGINAL PLAN, rather than
+# binding into the once-optimized output. The two folding passes are designed
+# for FIXED POSITIONS in the pass order -- `resolve_scalar_subqueries_rewrite`
+# BEFORE `flatten_dependent_joins`, constant folding and `push_predicates_down`,
+# and `scalar_broadcast_rewrite` BEFORE projection pushdown and column pruning
+# (neither is in this tree), join reorder (`reorder_joins`) and limit pushdown
+# (`push_limit_down`). Every
+# one of those later passes is designed to see the FOLDED plan. Re-running from
+# the original with the bindings in hand makes the fold happen at its position
+# with its value. Binding into the already-optimized plan instead would be a
+# cheaper-looking shortcut that silently changes the plan shape.
 #
 # ★ WHY IT TERMINATES IN TWO. Both passes are FIXPOINTS once bound: after
-# `resolve_scalar_subqueries` folds, no `EXPR_CORRELATED_SUBQUERY` remains for
-# Phase 1 to collect; after `scalar_broadcast` folds, the predicate holds a
-# literal and no `EXPR_AGG_FN` remains. So the second pass emits no requests. The
-# driver still LOOPS with a cap rather than asserting two, because a chained
+# `resolve_scalar_subqueries_rewrite` folds, no `EXPR_CORRELATED_SUBQUERY` remains
+# for Phase 1 to collect; after `scalar_broadcast_rewrite` folds, the predicate holds a
+# literal and no `EXPR_AGG_FN` remains. So the second pass emits no requests. A
+# caller should still LOOP with a cap rather than assert two, because a chained
 # dependency (a subquery whose inner itself contains one) is a shape the cap
-# must survive; exceeding it is a REFUSAL, never a silent partial fold.
+# must survive; exceeding it should be a REFUSAL, never a silent partial fold.
 #
 # =============================================================================
-# WHAT IS AND IS NOT LOST -- the capability cost, measured against the tree
+# WHAT IS AND IS NOT LOST -- the capability cost, against the passes here
 # =============================================================================
 #
-# A fold-by-execution lets LATER optimizer passes see the actual value. Under a
-# dependency that value arrives at bind time. Because the engine re-invokes the
-# PURE optimizer with the value in hand (above), the answer is: NOTHING is lost.
-# Enumerated against the real pass list in `optimizer.mojo`:
+# A fold-by-execution lets LATER passes see the actual value. Under a
+# dependency that value arrives at bind time. Because the protocol re-runs the
+# PURE passes with the value in hand (above), NOTHING is lost. Enumerated
+# against the passes in komira_optimizer, in the order they are designed for:
 #
-#   * `partition_prune_scans` and `propagate_statistics` DO route on a
-#     literal's value -- and both run BEFORE the subquery fold, so the
-#     folded scalar has never been visible to them. No capability is lost
-#     because none was ever exercised.
-#   * `fold_constants` / `simplify_predicates` run AFTER the subquery fold and
-#     can see its literal. The re-plan preserves this exactly.
+#   * `partition_prune_scans` DOES route on a literal's value
+#     (`propagate_statistics` reads no literal at all) -- and both are designed
+#     to run BEFORE the subquery fold, so the folded scalar is never visible to
+#     them either way.
+#   * Constant folding and predicate simplification (`optimizer_expr`) are
+#     designed to run AFTER the subquery fold and can see its literal. The
+#     re-plan preserves this exactly.
 #   * `compute_selectivity` (`optimizer_filter_selectivity.mojo`), which feeds
 #     join reordering and the DP cost model, reads a literal's VALUE only when
 #     it is a BOOLEAN. Range predicates return a flat `DEFAULT_RANGE_SELECTIVITY`
 #     and equality routes on the column's NDV, not the constant. So "knowing the
 #     scalar is 5" buys the cost model nothing today even when it is visible.
-#   * The parquet pruners (`rg_pruner`, `page_pruner`, `bloom_pruner`) DO route
-#     on the value, and they all require the shape `EXPR_COL_REF <op>
-#     EXPR_LITERAL`. They run in the ENGINE at scan time, AFTER binding -- so
-#     they see a real `EXPR_LITERAL` and prune exactly as before. ⚠ THIS IS THE
-#     ONE THAT WOULD HAVE REGRESSED had the design left an unbound parameter
-#     node in the predicate instead of substituting a literal at bind time.
-#     Row-group, page and bloom pruning would all have gone silently dead.
+#   * Scan-time pruning (row-group, page and bloom-filter pruning, outside
+#     komira_optimizer) routes on the value and needs the shape `EXPR_COL_REF
+#     <op> EXPR_LITERAL`. It sees the plan after binding, so it sees a real
+#     `EXPR_LITERAL`. ⚠ This is why the design substitutes a literal at bind
+#     time: an unbound parameter node left in the predicate would leave
+#     row-group, page and bloom pruning nothing to prune on.
 #
-# ⇒ The cost is PLAN TIME: one extra `_optimize_pipeline_core` run for a query
-# that actually carries an uncorrelated scalar subquery. A query with none emits
-# no requests and runs the pipeline exactly once, unchanged.
+# ⇒ The cost is PLAN TIME: one extra run of the passes for a query that
+# actually carries an uncorrelated scalar subquery. A query with none emits no
+# requests and the passes run once.
 # =============================================================================
 
 from std.collections import List, Optional
@@ -131,9 +133,9 @@ comptime DEP_SCALAR_BROADCAST: UInt8 = 1
 
 
 struct ScalarDepTable(Movable):
-    """The optimizer's dependency channel. Pure data: no executor, no engine
-    handle, no origin parameters -- which is what lets the whole
-    pipeline stop being parametric.
+    """The optimizer's dependency channel. Pure data: no executor, no
+    execution handle, no origin parameters -- which is what keeps the passes
+    that take it non-parametric.
 
     Storage: parallel arrays keyed by list position, with `Slab`
     for the Movable-only `LogicalPlan`. `Schema`, `ScalarValue` and
@@ -141,24 +143,23 @@ struct ScalarDepTable(Movable):
 
     ⚠ REQUESTS AND BINDINGS ARE INDEXED DIFFERENTLY ON PURPOSE. A binding is
     found by KEY (the inner plan's structural hash), because the same subquery
-    appearing N times in a query is ONE dependency -- that is the Q15-shape
-    "same scalar subquery appears N times" win the pre-existing per-call cache bought,
-    and keying by hash preserves it across the engine boundary for free. A
+    appearing N times in a query is ONE dependency -- the TPC-H Q15 shape,
+    where one scalar subquery appears N times, needs one execution. A
     request is appended in ENCOUNTER order and de-duplicated by the same key, so
-    the engine executes each distinct inner plan exactly once.
+    the executing caller sees each distinct inner plan exactly once.
     """
 
     # ---- REQUESTS: what the optimizer could not satisfy -----------------
     var req_kinds: List[UInt8]
     var req_keys: List[UInt64]
     var req_plans: Slab[LogicalPlan]
-    # DEP_SCALAR_BROADCAST only -- the agg op + input column the engine needs to
+    # DEP_SCALAR_BROADCAST only -- the agg op + input column the caller needs to
     # build the ungrouped reduction sub-plan. Unused (0 / "") for
     # DEP_SCALAR_SUBQUERY, whose inner plan is executed as-is.
     var req_ops: List[UInt8]
     var req_cols: List[String]
 
-    # ---- BINDINGS: what the engine resolved ------------------------------
+    # ---- BINDINGS: what the executing caller resolved --------------------
     var bnd_kinds: List[UInt8]
     var bnd_keys: List[UInt64]
     var bnd_scalars: List[ScalarValue]
@@ -183,7 +184,7 @@ struct ScalarDepTable(Movable):
         self.aux_schemas = List[Schema]()
         self.aux_names = List[String]()
 
-    # ---- request side (written by the optimizer, read by the engine) -----
+    # ---- request side (written by the passes, read by the caller) --------
 
     @always_inline
     def num_requests(self) -> Int:
@@ -230,12 +231,10 @@ struct ScalarDepTable(Movable):
         return self.req_cols[i].copy()
 
     def request_plan(self, i: Int) raises -> LogicalPlan:
-        """A COPY of the i-th requested inner plan, for the engine to execute.
+        """A COPY of the i-th requested inner plan, for the caller to execute.
 
         ⚠ A COPY, NOT A BORROW, AND DELIBERATELY SO. Executing a plan CONSUMES
-        it, so the engine needs its own; and `Slab.__getitem__` hands back a
-        wildcard-origin reference, which this repo's pointer rules forbid
-        crossing a module boundary. `_copy_plan` is the same deep copy the
+        it, so the caller needs its own. `_copy_plan` is the same deep copy the
         optimizer passes use, and it REFUSES a corrupt / partially-moved node
         rather than propagating one."""
         return _copy_plan(self.req_plans[i])
@@ -243,17 +242,17 @@ struct ScalarDepTable(Movable):
     def clear_requests(mut self):
         """Drop every recorded request, keeping the bindings.
 
-        Called by the engine between optimizer passes: the requests of pass N
-        have been resolved into bindings, and pass N+1 must start from an empty
-        request list so `has_requests()` reports only what pass N+1 could not
-        satisfy."""
+        Called by the executing caller between runs of the passes: the
+        requests of run N have been resolved into bindings, and run N+1 must
+        start from an empty request list so `has_requests()` reports only what
+        run N+1 could not satisfy."""
         self.req_kinds = List[UInt8]()
         self.req_keys = List[UInt64]()
         self.req_plans = Slab[LogicalPlan]()
         self.req_ops = List[UInt8]()
         self.req_cols = List[String]()
 
-    # ---- binding side (written by the engine, read by the optimizer) -----
+    # ---- binding side (written by the caller, read by the passes) --------
 
     def bind_scalar(mut self, key: UInt64, var value: ScalarValue):
         """Bind a DEP_SCALAR_SUBQUERY dependency to its folded scalar."""

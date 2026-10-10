@@ -268,6 +268,27 @@ def test_row_read_f64_widens_ints_and_f32() raises:
     assert_equal(src.read_f64(2, 9), 0.0)
 
 
+def test_row_read_f64_widens_narrow_and_unsigned_ints() raises:
+    """read_f64 on I16/I8/U8/U16/U32/U64 cells converts the integer value
+    (the trait's contract: conformers widen int storage to f64): signed
+    cells sign-extend (row 0's set top bits give negatives), unsigned cells
+    stay positive (u64 2^64-1 and 2^63 survive). A raw 8-byte float read of
+    these cells gives some unrelated float or NaN."""
+    var rb = _row_block()
+    var src = RowCellSource(rb, _offsets(), _dtypes())
+    var cols: List[Int] = [2, 3, 4, 5, 6, 10]
+    var row0: List[Float64] = [
+        -32767.0, -127.0, 255.0, 65534.0, 4294967294.0, 18446744073709551615.0
+    ]
+    var row1: List[Float64] = [
+        258.0, 127.0, 1.0, 258.0, 16909060.0, 9223372036854775808.0
+    ]
+    for i in range(len(cols)):
+        assert_equal(src.read_f64(0, cols[i]), row0[i], "row 0 col " + String(cols[i]))
+        assert_equal(src.read_f64(1, cols[i]), row1[i], "row 1 col " + String(cols[i]))
+        assert_equal(src.read_f64(2, cols[i]), 0.0, "row 2 col " + String(cols[i]))
+
+
 def test_row_read_i32_and_f32_read_their_width() raises:
     """read_i32 / read_f32 read 4 bytes at the cell's offset (f32 at 23,
     unaligned)."""
@@ -577,6 +598,7 @@ def main() raises:
     s.test[test_row_read_i64_widens_each_storage_width]()
     s.test[test_row_read_u64_zero_extends_unsigned_cells]()
     s.test[test_row_read_f64_widens_ints_and_f32]()
+    s.test[test_row_read_f64_widens_narrow_and_unsigned_ints]()
     s.test[test_row_read_i32_and_f32_read_their_width]()
     s.test[test_row_read_i128_reads_both_words]()
     s.test[test_row_decimal_scale_of_side_table]()
