@@ -104,10 +104,9 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
             _refuse("the test issuer signs ES256 or EdDSA")
         if typ != JWT_TYP_AT_JWT and typ != JWT_TYP_JWT:
             _refuse("the token typ must be at+jwt or JWT")
-        if seed.byte_length() == 0:
-            _refuse("the key seed is empty")
         if now < publish_lead_s:
             _refuse("the start time is earlier than the publish lead")
+        # An empty seed is refused by `derived_key`, with the same text.
         var start = now - publish_lead_s
         var ring = Keyring(
             alg=alg,

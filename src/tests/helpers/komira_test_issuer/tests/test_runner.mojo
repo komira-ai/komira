@@ -24,14 +24,17 @@
 #                      thumbprint, that key served under an unrelated kid
 #                      or a near miss of it);
 #   wrong_typ       -> mint_verifies (the issuer inside mints `JWT`);
+#   long_life       -> mint_verifies (the issuer inside mints for twice the
+#                      profile's max lifetime);
 #   sub, client_id, scope -> claims, for every near miss of the value asked
 #                      for and, for client_id and scope, the member left out;
 #   iat one second early or late -> claims;
 #   client_id or jti as a JSON number (whose text equals the client_id
 #                      asked for) -> claims, and jti_unique for the jti;
 #   jti left out or empty -> claims and jti_unique;
-#   repeat_jti      -> jti_unique (jti-1, jti-2, jti-2: the repeat is of the
-#                      last jti seen);
+#   repeat_jti      -> jti_unique, run alone on a fresh issuer (jti-1,
+#                      jti-2, jti-2: the third token repeats the last jti
+#                      seen);
 #   empty_subject_ok -> subject_required.
 #
 # main runs every test and reports every failure.
@@ -85,6 +88,7 @@ comptime F_JTI = 13
 comptime F_REPEAT_JTI = 14
 comptime F_EMPTY_SUBJECT_OK = 15
 comptime F_KID_SWAP = 16
+comptime F_LONG_LIFE = 17
 
 
 def _profile() -> IssuerProfile:
@@ -191,7 +195,7 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
             issuer=ISS,
             alg="ES256",
             typ="JWT" if fault == F_WRONG_TYP else "at+jwt",
-            max_ttl_s=TTL,
+            max_ttl_s=2 * TTL if fault == F_LONG_LIFE else TTL,
             leeway_s=LEEWAY,
             publish_lead_s=0 if fault == F_EARLY_SWITCH else LEAD,
             seed="seed-a",
@@ -254,7 +258,11 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
         client_id: String,
         scope: String,
     ) raises -> String:
-        if self.fault < F_KID_NOT_THUMBPRINT or self.fault == F_WRONG_TYP:
+        if (
+            self.fault < F_KID_NOT_THUMBPRINT
+            or self.fault == F_WRONG_TYP
+            or self.fault == F_LONG_LIFE
+        ):
             return self.inner.mint_user_token(subject, audience, client_id, scope)
         if subject == "" and self.fault != F_EMPTY_SUBJECT_OK:
             return self.inner.mint_user_token(subject, audience, client_id, scope)
@@ -350,7 +358,7 @@ def test_rotation_faults() raises:
     )
     _expect(misses, F_NO_SWITCH, SCENARIO_PUBLISH_BEFORE_SIGN, "after the switch the token is not signed by a new key")
     _expect(misses, F_WRONG_TYP, SCENARIO_MINT_VERIFIES, "JoseError: header typ is not the pinned type")
-    _expect(misses, F_REPEAT_JTI, SCENARIO_JTI_UNIQUE, "two tokens carry one jti")
+    _expect(misses, F_LONG_LIFE, SCENARIO_MINT_VERIFIES, "JoseError: the token lives longer than the max TTL")
     _expect(misses, F_EMPTY_SUBJECT_OK, SCENARIO_SUBJECT_REQUIRED, "a token was minted for an empty subject")
     assert_equal(misses, "")
 
@@ -422,6 +430,9 @@ def test_claim_faults() raises:
     _claims_fault(misses, F_CLIENT_ID, String("#12345"), SCENARIO_CLAIMS, CID, "12345")
     _claims_fault(misses, F_JTI, String("#5"), SCENARIO_CLAIMS, JTI)
     _claims_fault(misses, F_JTI, String("#5"), SCENARIO_JTI_UNIQUE, JTI)
+    # On a fresh issuer, so the jtis are jti-1, jti-2, jti-2: the repeat is
+    # the third token and matches the last jti seen.
+    _claims_fault(misses, F_REPEAT_JTI, None, SCENARIO_JTI_UNIQUE, "two tokens carry one jti")
     _claims_fault(misses, F_JTI, String(""), SCENARIO_JTI_UNIQUE, JTI)
     assert_equal(misses, "")
 
