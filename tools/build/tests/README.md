@@ -383,11 +383,11 @@ that target on a branch no configured build takes, and the query fails with
 
 ## 21. Location path
 
-`tests//functional/location_path:main[run_check]`: a `mojo_binary` whose main file
-indexes a `List`, so the binary records the main file's source location. It
-builds only because the wrapper strips the staging directory from recorded
-paths, and its run check compares stdout exactly. Test 20 covers the same
-for tests with a C dependency; this one is a plain binary.
+`tests//functional/location_path:main[run_check]`: a `mojo_binary` whose main file indexes a `List`, so the
+binary records the main file's source location. It builds only because the wrapper strips the staging directory
+from recorded paths, and its run check compares stdout exactly (test 20 covers tests with a C dependency).
+`tests//functional/mojoc_path:same_bytes` precompiles one package twice, sources and `-I` staged at different
+paths, and fails unless the two `.mojoc` are identical ([why](../mojo/README.md#outputs-and-the-runnable-directory)).
 
 ## 22. Rust rules
 

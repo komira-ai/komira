@@ -43,8 +43,9 @@ W="$T/work"
 SRC=buck-out/v2/art/cell/src/pkg/__pkg__/0123456789abcdef/src/pkg
 mkdir -p "$W/$SRC"
 for f in a b c d gen t; do cp "$DIR/fixtures/$f.src" "$W/$SRC/$f.mojo"; done
-# The tool reads the sources at the names the IR gives them, relative to its
-# working directory, as the action runs it from the root holding [src].
+# The tool reads the sources under --src (by default --map's PREFIX, the
+# names case.ll gives them), relative to its working directory, as the
+# action runs it from the root holding [src].
 cd "$W"
 
 N=0
@@ -216,7 +217,7 @@ refused "zero branches" "src/pkg/a.mojo: zero branches parsed, yet the IR has co
 mkdir -p buck-out/v2/art/cell/src/pkg/__pkg__/ffffffffffffffff/src/pkg
 run "$TOOL" --ir "$FX" --out "$W/out.info" --map buck-out/v2/art/cell/src/pkg/__pkg__/ffffffffffffffff/src/pkg/=src/pkg/ $EXC
 [ "$RC" -eq 1 ] || red "other hash: exit $RC, want 1"
-grep -qF "'$SRC/a.mojo' is the library's source under another [src] than --map's ('buck-out/v2/art/cell/src/pkg/__pkg__/ffffffffffffffff/src/pkg/')" "$W/err" || red "other hash: a.mojo not named"
+grep -qF "'$SRC/a.mojo' is the library's source under a [src], not under --map's PREFIX ('buck-out/v2/art/cell/src/pkg/__pkg__/ffffffffffffffff/src/pkg/'" "$W/err" || red "other hash: a.mojo not named"
 ! grep -qF "dep/d.mojo" "$W/err" || red "other hash: the dependency was refused too"
 [ ! -e "$W/out.info" ] || red "other hash: an output was written"
 pass
@@ -224,17 +225,56 @@ pass
 # directory (`/<hash>/src/pkg/` in another place), which `--exclude
 # buck-out/` would drop unseen. Kills: a check of the hash segment alone.
 variant 's|^!6 = !DIFile(filename: "buck-out/v2/art/cell/src/dep/__dep__/fedcba9876543210/src/dep/d.mojo"|!6 = !DIFile(filename: "buck-out/v2/art/cfg/other/__pkg2__/fedcba9876543210/src/pkg/d.mojo"|'
-refused "other [src]" "'buck-out/v2/art/cfg/other/__pkg2__/fedcba9876543210/src/pkg/d.mojo' is the library's source under another [src]" "$W/v.ll"
-# 8c. A --map PREFIX with no `/<16 hex>/` segment is refused: with no hash
-# to look for, a library source under another [src] (8, 8b) could not be
-# told and `--exclude buck-out/` would drop it unseen. Kills: the check of 8
-# skipped silently when the prefix has no hash.
+refused "other [src]" "'buck-out/v2/art/cfg/other/__pkg2__/fedcba9876543210/src/pkg/d.mojo' is the library's source under a [src]" "$W/v.ll"
+# 8c. A [src] (here --map's PREFIX, with no --src) with no `/<16 hex>/`
+# segment is refused: with no hash to look for, a library source under
+# another [src] (8, 8b) could not be told and `--exclude buck-out/` would
+# drop it unseen. Kills: the check of 8 skipped silently when the [src] has
+# no hash.
 mkdir -p srcroot/pkg
 cp "$SRC"/*.mojo srcroot/pkg/
 run "$TOOL" --ir "$FX" --out "$W/out.info" --map srcroot/pkg/=src/pkg/ $EXC
 [ "$RC" -eq 2 ] || red "no hash: exit $RC, want 2"
-grep -qF "the --map PREFIX 'srcroot/pkg/' holds no '/<16 hex>/' segment" "$W/err" || red "no hash: not named"
+grep -qF "the [src] 'srcroot/pkg/' (--src, or --map's PREFIX without it) holds no '/<16 hex>/' segment" "$W/err" || red "no hash: not named"
 [ ! -e "$W/out.info" ] || red "no hash: an output was written"
+pass
+
+# 8d. A package compiled from the parent of its [src] names its sources
+# `pkg/<file>` in the IR (and its dependency's `dep/<file>`): with
+# `--map pkg/=src/pkg/ --src <[src]>/` the output is case 1's, byte for
+# byte. Kills: a measured source read at the IR's name instead of under
+# --src (no pkg/ here: "cannot read the measured source").
+sed -e 's|filename: "buck-out/v2/art/cell/src/pkg/__pkg__/0123456789abcdef/src/pkg/|filename: "pkg/|' \
+    -e 's|filename: "buck-out/v2/art/cell/src/dep/__dep__/fedcba9876543210/src/dep/|filename: "dep/|' "$FX" >"$W/v.ll"
+[ "$(grep -c 'filename: "pkg/' "$W/v.ll")" = 4 ] || red "import names: case.ll's four library files were not renamed"
+[ ! -e pkg ] || red "import names: pkg/ exists in the working directory, so reading at the IR's name would pass"
+SRCX="--map pkg/=src/pkg/ --src $SRC/"
+EXCX="$STD --exclude oss/modular/ --exclude dep/ --exclude-file tests/test_a.mojo --exclude-file <unknown> --gen gen.mojo"
+run "$TOOL" --ir "$W/v.ll" --out "$W/out.info" $SRCX $EXCX
+[ "$RC" -eq 0 ] || red "import names: exit $RC, want 0"
+cmp -s "$W/out.info" "$GOLDEN" || red "import names: the output differs from fixtures/case.golden.info"
+pass
+# 8e. Without --src, the PREFIX pkg/ is the [src], which has no hash: bad
+# usage. Kills: a --src defaulted to somewhere that happens to work.
+run "$TOOL" --ir "$W/v.ll" --out "$W/out.info" --map pkg/=src/pkg/ $EXCX
+[ "$RC" -eq 2 ] || red "import names, no --src: exit $RC, want 2"
+grep -qF "the [src] 'pkg/' (--src, or --map's PREFIX without it) holds no '/<16 hex>/' segment" "$W/err" || red "import names, no --src: not named"
+pass
+# 8f. With --src given, an IR naming the library's sources by that [src]
+# (case.ll itself: a package compiled from [src], not from its parent) is
+# refused, naming them, although `--exclude buck-out/` covers them. Kills:
+# the [src] check of 8 dropped when --src is given.
+run "$TOOL" --ir "$FX" --out "$W/out.info" $SRCX $EXC
+[ "$RC" -eq 1 ] || red "named by [src]: exit $RC, want 1"
+grep -qF "'$SRC/a.mojo' is the library's source under a [src], not under --map's PREFIX ('pkg/', read at '$SRC/')" "$W/err" || red "named by [src]: a.mojo not named"
+[ ! -e "$W/out.info" ] || red "named by [src]: an output was written"
+pass
+# 8g. The dependency named `dep/d.mojo` with no `--exclude dep/` is
+# unmapped and refused: an exclusion of each dependency is what drops it.
+EXCN="$STD --exclude oss/modular/ --exclude-file tests/test_a.mojo --exclude-file <unknown> --gen gen.mojo"
+run "$TOOL" --ir "$W/v.ll" --out "$W/out.info" $SRCX $EXCN
+[ "$RC" -eq 1 ] || red "import names, dependency: exit $RC, want 1"
+grep -qF "unmapped file name 'dep/d.mojo'" "$W/err" || red "import names, dependency: not named"
 pass
 
 # 9. Malformed or inconsistent IR is refused.
@@ -868,7 +908,8 @@ for args in "--out $W/out.info $MAP $STD" "--ir $FX $MAP $STD" "--ir $FX --out $
     "--ir $FX --out $W/out.info --map $SRC=src/pkg/ $STD" "--ir $FX --out $W/out.info --map $SRC/=/abs/ $STD" \
     "--ir $FX --out $W/out.info $MAP $MAP $STD" "--ir $FX --out $W/out.info $MAP $STD --frobnicate x" \
     "--ir $FX --out $W/out.info $MAP $STD --exclude oss" "--ir $FX --out $W/out.info $MAP $STD --gen /abs" \
-    "--ir $FX --out $W/out.info $MAP" "--ir $FX --out $W/out.info $MAP $STD $STD" "--ir $FX --out $W/out.info $MAP --stdlib oss"; do
+    "--ir $FX --out $W/out.info $MAP" "--ir $FX --out $W/out.info $MAP $STD $STD" "--ir $FX --out $W/out.info $MAP --stdlib oss" \
+    "--ir $FX --out $W/out.info $MAP --src $SRC/ --src $SRC/ $STD" "--ir $FX --out $W/out.info $MAP --src $SRC $STD"; do
     run "$TOOL" $args
     [ "$RC" -eq 2 ] || red "usage '$args': exit $RC, want 2"
     grep -q '^usage: cov_branch_classify' "$W/err" || red "usage '$args': no usage line"

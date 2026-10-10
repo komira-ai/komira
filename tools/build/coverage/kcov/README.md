@@ -170,7 +170,7 @@ step that runs kcov over it has to map. Read from the binaries of
 | units | directory | file names | maps to |
 |---|---|---|---|
 | the test (`producer: Mojo`) | none | `tests` + `test_<x>.mojo` | the package's `tests/` |
-| the library | none | `buck-out/v2/art/<cell>/<package>/__<target>__/<hash>/src/<import>` + the file, where `<hash>` names the staged source directory | the package's `<import>/` |
+| the library | none | `<import>` + the file: the package is compiled from the parent of its staged sources (`[src]`, which ends in `src/<import>`), by that name | the package's `<import>/` |
 | the Mojo standard library | none | `oss/modular/mojo/stdlib/std/...` | nothing in the repository: not measured |
 | zig's C runtime (`crt1`, `crti`, `crtn`) | the placeholder `/___...` | `buck-out/v2/art/komira/tools/build/coverage/kcov/__cov_link__/<hash>/cov_link/real/lib/libc/...`, where `<hash>` is the configuration of `:cov_link` | nothing in the repository: not measured |
 
@@ -260,20 +260,27 @@ file) and, from a library's `<name>_cov_gate`, each `mojo_test` it names in
 `coverage_tests` (`<test>` the test's main as its package names it). The
 header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
 
-0. **Where the binary names the sources.** Every string in the test binary
-   holding `buck-out/` and, inside an artifact (after buck2's `__<target>__/`
-   directory), the path component `src/<import>` (a directory
-   of the library's sources in its line tables, relative or absolute) must
-   be the `[src]` directory the run stages, or the action fails before kcov
-   runs, naming both. kcov would drop sources named elsewhere without an
-   error, and `lost/` (below) only catches names under the staged path.
+0. **Where the binary names the sources.** The binary must name the
+   library's sources by `<import>/`, where the run stages them, or the
+   action fails before kcov runs. It fails when a string of the binary
+   holds `buck-out/` and, inside an artifact (after buck2's `__<target>__/`
+   directory), the path component `src/<import>` (the library's `[src]`:
+   the name a package compiled from `[src]` itself would give its sources),
+   and when the binary holds the library's code (a string with
+   `<import>::`, how a function or type of it is named) but no whole string
+   `<import>` or `<import>/...` (the line tables' directory, or a file
+   named with it). kcov would drop sources named elsewhere without an
+   error, and `lost/` (below) only catches names under the staged path. A
+   test that calls none of its library holds neither string and passes:
+   there is nothing of the library to measure.
 1. **A root of copies.** `bin/kcov` and kcov's `lib/` (its `DT_RPATH`
    `$ORIGIN/../lib` reaches them), `bin/<test>`, and `share/` holding the
    test's declared data, its source at its path in the package
    (`tests/test_x.mojo`, the name its line tables use) and the library's
-   staged sources at the path of `[src]` from the action's directory
-   (`buck-out/v2/art/...`, the name the line tables use for them). Copies,
-   never links: kcov resolves each name with `realpath`. A second copy of
+   staged sources at `<import>/` (the name the line tables use for them;
+   a shared library's driver names none of them, so with `--solib` they
+   sit at the `[src]` path, out of the way of its sources, which are data).
+   Copies, never links: kcov resolves each name with `realpath`. A second copy of
    the same sources, `lost/`, sits beside it. The one exception: each
    generated source (`--gen`) is moved to `gen/`, outside `share/` and
    `lost/`, and linked from both, so `realpath` takes its name out of every
@@ -286,7 +293,7 @@ header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
    kcov, and gate_runner reports a failure as for a gated test (what
    differs is below). The flags:
    `--cobertura-only --skip-solibs --configure=cobertura-full-paths=1`;
-   `--include-path` of exactly the staged `[src]` directory and the test
+   `--include-path` of exactly the staged `<import>/` directory and the test
    source, under `share/` and under `lost/`;
    `--replace-src-path='^(?!/):<lost>/'`. No argument grows with the
    library's generated sources (`--include-path` grows only with a shared
@@ -299,7 +306,7 @@ header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
    long (a deep action directory) fails the run, saying so, before kcov
    starts.
 3. **Exactly one report** (`--cobertura-only` writes `<out>/cov.xml`).
-4. **`cov_normalize`** maps `<share>/<[src] path>/` to the package's
+4. **`cov_normalize`** maps `<share>/<import>/` to the package's
    directory of those sources (with a repository prefix for a cell that is
    not its repository's root: `tools/build/tests/` for the tests cell) and
    the test's directory to the package's, requires the test's own source in
@@ -370,7 +377,7 @@ kcov's own error (`kcov: error: `) as kcov's, not the test's.
 **What differs from the release gate.** The test is traced (TracerPid is
 kcov's) and runs without address randomization (kcov sets
 `ADDR_NO_RANDOMIZE`); its working directory `share/` also holds its own
-source and the library's sources under `buck-out/` (the line tables name
+source and the library's sources under `<import>/` (the line tables name
 them relative to it); kcov shares its TMPDIR (kcov writes there only when it
 cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
 kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`),
@@ -395,10 +402,10 @@ slot instead, the same mistake gives a green run whose report has no
 library file (test 43 shows both). The other names a binary holds, the
 standard library's and the C runtime's, are outside `--include-path` and
 never reach the report; were one to, it would be unmapped too. `lost/` holds
-copies at the staged `[src]` path and the test's path only, so it catches a
+copies at `<import>/` and the test's path only, so it catches a
 mis-staged tree, not a binary naming the sources by another directory: that
-is step 0's check (test 43's `lostdir`). A future Mojo naming them outside
-`buck-out/` would need step 0 extended.
+is step 0's check (test 43's `lostdir`). A Mojo naming them by an absolute
+directory is the hermetic check's (test 41).
 
 ## Tests
 

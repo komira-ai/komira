@@ -225,7 +225,13 @@ if its output contains the action's working directory
 ([test 6](../tests/README.md#6-outputs)).
 The compiler records source file names in a linked program (for error
 locations); they are recorded relative to the package (`hello.mojo`), not as
-paths inside the action.
+paths inside the action. A package (`.mojoc`) records them as
+`<import name>/<file>.mojo`: `mojo precompile` ignores
+`-strip-file-prefix`, so the wrapper runs it from the directory that holds
+the staged package ([`precompile.bzl`](precompile.bzl)), and the same
+sources give the same bytes under any buck-out path or isolation directory
+([test 21](../tests/README.md#21-location-path)). The exit 4 check cannot
+see into a `.mojoc`, whose payload is compressed; test 21 is what holds it.
 
 A built binary loads a few shared libraries from the toolchain
 (`komira//tools/build/toolchains:mojo_runtime`: the Mojo runtime and the pinned C++ runtime,

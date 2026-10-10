@@ -120,11 +120,12 @@ cov_debug_check(
         ":covlib_forced[coverage][bin][test_describe]",
         ":covlib_forced[coverage][bin][test_value]",
     ],
-    # The directories of the tests and of the library's staged sources, as
-    # the pinned Mojo writes them: relative.
+    # The directories of the tests and of the library's sources, as the
+    # pinned Mojo writes them: relative, the library's its import name (its
+    # package is compiled from the parent of [src]).
     dirs = [
         "tests",
-        "buck-out/v2/art/tests/functional/coverage/__covlib_forced__/[0-9a-f]+/src/covlib",
+        "covlib",
     ],
     mode = "hermetic",
     # Both tests call covlib/value.mojo.

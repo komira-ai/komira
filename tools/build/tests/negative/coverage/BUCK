@@ -41,7 +41,7 @@ mojo_library(
 # thing, checked as :hermetic checks the real binaries.
 _DIRS = [
     "tests",
-    "buck-out/v2/art/tests/functional/coverage/__covlib_forced__/[0-9a-f]+/src/covlib",
+    "covlib",
 ]
 
 # RED: tests//negative/coverage:abs_relocated (a Mojo source named by an
@@ -82,7 +82,7 @@ mojo_library(
 # tests//negative/coverage:lost[coverage][tests][test_lost]
 cov_plant(
     name = "lost_run_sh",
-    expr = 's|^cp -RL "\\$SRC/\\." "\\$R/share/\\$SRC_REL/"$|cp -RL "$SRC/." "$R/share/"|',
+    expr = 's|^cp -RL "\\$SRC/\\." "\\$R/share/\\$STAGE/"$|cp -RL "$SRC/." "$R/share/"|',
     out = "cov_run.sh",
     src = "komira//tools/build/coverage/kcov:cov_run.sh",
 )
@@ -122,11 +122,11 @@ mojo_library(
     test_srcs = ["tests/test_lost.mojo"],
 )
 
-# Test 43. A test's data staged under buck-out/, where a coverage run stages
-# the library's sources: analysis fails, naming it. RED:
-# tests//negative/coverage:clash_buckout
+# Test 43. A test's data staged under the library's import name, where a
+# coverage run stages the library's sources: analysis fails, naming it. RED:
+# tests//negative/coverage:clash_import
 mojo_library(
-    name = "clash_buckout",
+    name = "clash_import",
     srcs = [
         "lostlib/__init__.mojo",
         "lostlib/value.mojo",
@@ -134,20 +134,21 @@ mojo_library(
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     import_name = "lostlib",
-    test_data = {"tests/test_lost.mojo": {"buck-out/data.txt": "lostlib/value.mojo"}},
+    test_data = {"tests/test_lost.mojo": {"lostlib/data.txt": "lostlib/value.mojo"}},
     test_srcs = ["tests/test_lost.mojo"],
 )
 
 # Test 43. The library's sources staged, and named to kcov and cov_normalize,
-# at a directory other than the one the line tables name them by (as if the
-# rule passed cov_run.sh another [src] than the one the binary was compiled
-# from): kcov would drop them without an error, and lost/ (a copy at the
-# same wrong directory) cannot catch it. cov_run.sh's check of the names in
-# the binary refuses it before kcov runs. RED:
+# at a directory other than the one the line tables name them by
+# (`lostlibx/` for `lostlib/`, as if the package were compiled from another
+# directory than the run assumes): kcov would drop them without an error,
+# and lost/ (a copy at the same wrong directory) cannot catch it.
+# cov_run.sh's check of the names in the binary refuses it before kcov
+# runs: the binary holds lostlib's code but no name under lostlibx/. RED:
 # tests//negative/coverage:lostdir[coverage][tests][test_lost]
 cov_plant(
     name = "lostdir_run_sh",
-    expr = 's|^SRC=\\$(abs "\\$SRC_REL")$|SRC=$(abs "$SRC_REL"); SRC_REL=${SRC_REL}x|',
+    expr = 's|^STAGE=\\$IMPORT$|STAGE=${IMPORT}x|',
     out = "cov_run.sh",
     src = "komira//tools/build/coverage/kcov:cov_run.sh",
 )

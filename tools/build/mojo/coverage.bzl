@@ -381,8 +381,12 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
     for dest in data:
         if dest == name or dest.startswith(name + "/") or name.startswith(dest + "/"):
             fail("{}: the test's data destination {} collides with its source, which a coverage run stages at {}".format(where, repr(dest), repr(name)))
-        if dest == "buck-out" or dest.startswith("buck-out/"):
-            fail("{}: the data destination {} is under buck-out/, where a coverage run stages the library's sources".format(where, repr(dest)))
+        # cov_run.sh stages [src] at <import_name>/, where the line tables
+        # name its sources; for a shared library's driver, which names none
+        # of it, at its own path under buck-out/ (its sources are data).
+        stage = "buck-out" if solib else facts.import_name
+        if dest == stage or dest.startswith(stage + "/"):
+            fail("{}: the data destination {} is under {}/, where a coverage run stages the library's sources".format(where, repr(dest), stage))
     share = actions.copied_dir("cov/tests/{}/share".format(stem), dict(data) | {name: t})
     gen = []
     for rel in facts.gen:
@@ -422,8 +426,9 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     binary `cov_bin` run under kcov by cov_run.sh, through the release gate's
     runner with the gate's environment (`env_args`) and data (`data`, staged
     as the gate stages it). `src_dir` is the library's [src] (it ends in
-    `src/<import_name>`) and `root` the package directory it stages
-    (_package_root). `solib`, for a shared library's driver
+    `src/<import_name>`; the run stages it at `<import_name>/`, the directory
+    the binary's line tables name its sources by) and `root` the package
+    directory it stages (_package_root). `solib`, for a shared library's driver
     (coverage_shared_lib): (the library's file in `data`, which the driver
     loads, and its sources, also in `data` at their paths in the package,
     `main` first), cov_run.sh's `--solib` and `--solib-src`: kcov measures

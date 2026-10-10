@@ -131,7 +131,7 @@ toolchain's zig as `real/` and, as `zig`, `cov_zig`
 and after the link overwrites the action's directory with a placeholder of
 the same length, with `debug_relocate`. The pinned Mojo records no
 compilation directory and names its sources by relative paths (`tests/...`,
-the staged library sources under `buck-out/`, the standard library under
+the library's by its import name, `<import>/...`, the standard library under
 `oss/modular/`); the directory overwritten is the one zig's C runtime units
 record ([names in a coverage binary](../coverage/kcov/README.md#names-in-a-coverage-binary)).
 The wrapper's own check, that no output holds the action's working directory
@@ -157,9 +157,9 @@ Scope, for now:
   kcov, nor one whose main is generated, and the library's generated
   sources are not measured.
 - A `mojo_shared_lib`'s drivers (below).
-- A test's data may not be staged at its own source's path or under
-  `buck-out/`: a coverage run stages the sources there (analysis fails,
-  naming the destination).
+- A test's data may not be staged at its own source's path or under the
+  library's import name (`<import>/`): a coverage run stages the sources
+  there (analysis fails, naming the destination).
 - Branch coverage only where the gate reads the branch records
   (`coverage_branch_gate`, above): kcov gives no branch data, so for any
   other library the gate's branch is `not measured` and never passes in

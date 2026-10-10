@@ -4,22 +4,25 @@
 //! ("cov_branch_classify") has the rules with their evidence; in brief:
 //!
 //! usage: cov_branch_classify --ir <test.ll> --out <file> --map <PREFIX>=<REPO>
-//!            --stdlib <PREFIX> [--gen <REL>]... [--exclude <PREFIX>]...
-//!            [--exclude-file <NAME>]...
+//!            [--src <DIR>] --stdlib <PREFIX> [--gen <REL>]...
+//!            [--exclude <PREFIX>]... [--exclude-file <NAME>]...
 //!
 //! <test.ll> is the module cov_branch_annotate.sh prints after LLVM's
 //! `pgo-instr-use`: each `br i1`, `select i1` and `switch` that ran carries
 //! `!prof !{!"branch_weights", ...}`, the counts of its arms.
 //!
 //! Files. A branch is attributed to its innermost `!dbg` location. A file
-//! name is measured when it starts with --map's PREFIX (the library's [src],
-//! `.../<16 hex>/src/<lib>/`; a PREFIX with no such segment is bad usage) and
-//! is not a --gen source; its repository path
-//! is REPO followed by the rest. A name holding `/<16 hex>/src/<lib>/` but not
-//! PREFIX (the library's sources under another [src]) is refused; one equal
-//! to an --exclude-file or under an --exclude prefix is not measured; any
-//! other name is refused. Every `.mojo` file under PREFIX is read for the
-//! functions it declares `@always_inline("nodebug")`. --stdlib names where
+//! name is measured when it starts with --map's PREFIX (what the IR names
+//! the library's sources by: `<lib>/` for a package compiled from the
+//! parent of its [src]) and is not a --gen source; its repository path is
+//! REPO followed by the rest, and it is read at --src (the library's [src],
+//! `.../<16 hex>/src/<lib>/`; PREFIX when --src is not given) followed by
+//! the rest. A --src with no such segment is bad usage. A name holding
+//! `/<16 hex>/src/<lib>/` but not PREFIX (the library's sources under a
+//! [src], this one or another) is refused; one equal to an --exclude-file
+//! or under an --exclude prefix is not measured; any other name is refused.
+//! Every `.mojo` file under --src is read for the functions it declares
+//! `@always_inline("nodebug")`. --stdlib names where
 //! the standard library's sources are (a String's last-reference test is
 //! its code, inlined at the branch).
 //!
@@ -96,8 +99,8 @@ const lessStr = records.lessStr;
 
 const usage =
     \\usage: cov_branch_classify --ir <test.ll> --out <file> --map <PREFIX>=<REPO>
-    \\           --stdlib <PREFIX> [--gen <REL>]... [--exclude <PREFIX>]...
-    \\           [--exclude-file <NAME>]...
+    \\           [--src <DIR>] --stdlib <PREFIX> [--gen <REL>]...
+    \\           [--exclude <PREFIX>]... [--exclude-file <NAME>]...
     \\
 ;
 
@@ -188,7 +191,7 @@ pub const State = struct {
             f.* = placeFile(self.alloc, self.opts, name);
             slot.value_ptr.* = f;
             if (f.where == .unmapped) self.unmapped.put(name, {}) catch oom();
-            if (f.where == .other_src) self.err("'{s}' is the library's source under another [src] than --map's ('{s}'): the IR was compiled from other sources than the ones measured", .{ name, self.opts.prefix });
+            if (f.where == .other_src) self.err("'{s}' is the library's source under a [src], not under --map's PREFIX ('{s}', read at '{s}'): the IR was compiled from other sources than the ones measured", .{ name, self.opts.prefix, self.opts.src });
         }
         return slot.value_ptr.*;
     }
@@ -557,6 +560,7 @@ pub fn main() void {
     var ir_path: ?[]const u8 = null;
     var out_path: ?[]const u8 = null;
     var map: ?[]const u8 = null;
+    var src_dir: ?[]const u8 = null;
     var stdlib: ?[]const u8 = null;
     var gens = std.ArrayList([]const u8).init(alloc);
     var excludes = std.ArrayList([]const u8).init(alloc);
@@ -575,6 +579,10 @@ pub fn main() void {
         } else if (std.mem.eql(u8, flag, "--map")) {
             if (map != null) usageFail("--map given twice", .{});
             map = v;
+        } else if (std.mem.eql(u8, flag, "--src")) {
+            if (src_dir != null) usageFail("--src given twice", .{});
+            if (v.len < 2 or v[v.len - 1] != '/') usageFail("--src '{s}' must end with '/'", .{v});
+            src_dir = v;
         } else if (std.mem.eql(u8, flag, "--stdlib")) {
             if (stdlib != null) usageFail("--stdlib given twice", .{});
             if (v.len < 2 or v[v.len - 1] != '/') usageFail("--stdlib '{s}' must end with '/'", .{v});
@@ -597,9 +605,11 @@ pub fn main() void {
     const m = map orelse usageFail("--map is required", .{});
     const std_prefix = stdlib orelse usageFail("--stdlib is required", .{});
     const eq = std.mem.indexOfScalar(u8, m, '=') orelse usageFail("--map '{s}' is not PREFIX=REPO", .{m});
+    const src = src_dir orelse m[0..eq];
     const opts = Opts{
         .prefix = m[0..eq],
-        .hash_tail = hashTail(m[0..eq]),
+        .src = src,
+        .hash_tail = hashTail(src),
         .repo = m[eq + 1 ..],
         .gens = gens.items,
         .excludes = excludes.items,
@@ -608,10 +618,9 @@ pub fn main() void {
     };
     if (opts.prefix.len < 2 or opts.prefix[opts.prefix.len - 1] != '/') usageFail("--map PREFIX '{s}' must end with '/'", .{opts.prefix});
     if (opts.repo.len > 0 and (opts.repo[0] == '/' or opts.repo[opts.repo.len - 1] != '/')) usageFail("--map REPO '{s}' must be empty or relative and end with '/'", .{opts.repo});
-    // With no content hash in the [src] name, the library's sources under
-    // another [src] could not be told, and `--exclude buck-out/` would drop
-    // them unseen.
-    if (opts.hash_tail == null) usageFail("the --map PREFIX '{s}' holds no '/<16 hex>/' segment: it is not a [src] of a library, and its sources under another [src] could not be told", .{opts.prefix});
+    // With no content hash in the [src] name, the library's sources named by
+    // a [src] could not be told, and an exclusion would drop them unseen.
+    if (opts.hash_tail == null) usageFail("the [src] '{s}' (--src, or --map's PREFIX without it) holds no '/<16 hex>/' segment: it is not a [src] of a library, and its sources named by a [src] could not be told", .{opts.src});
 
     const ir = std.fs.cwd().readFileAlloc(alloc, in_file, max_ir) catch |err| fail("{s}: {s}", .{ in_file, @errorName(err) });
     const first = ir[0 .. std.mem.indexOfScalar(u8, ir, '\n') orelse ir.len];

@@ -189,19 +189,23 @@ index and the instruction shapes, and
 
 **Files.** Each branch is attributed to its innermost `!dbg` location (an
 inlined instruction's own file, line and column, not its call site's). The
-library's sources are named in the IR by their path in its `[src]`
-(`buck-out/v2/art/.../__<lib>__/<content hash>/src/<lib>/...`: the package is
-compiled from it), given as `--map <[src]>/=<repository dir>/`, so a record
-names `src/<lib>/policy.mojo`; a generated source (`--gen`) is not measured.
-The standard library (`oss/modular/`), the closure's other libraries (under
-`buck-out/`), the test itself and `<unknown>` are left out by name; any
-other name fails the action, and so does any name holding `/<content
-hash>/src/<lib>/` that is not `--map`'s (the library's sources under another
-`[src]`: another hash, target or configuration directory), which `--exclude
-buck-out/` would otherwise drop. `--stdlib oss/modular/` says where the
-standard library's sources are named (a String's last-reference test, below,
-is its code). Every `.mojo` file of `[src]` is read for the functions it
-declares `@always_inline("nodebug")` (below).
+library's sources are named in the IR `<lib>/<file>` (the package is
+compiled from the parent of its `[src]`,
+`buck-out/v2/art/.../__<lib>__/<content hash>/src/<lib>`), given as
+`--map <lib>/=<repository dir>/`, and read in `[src]`, given as `--src`, so
+a record names `src/<lib>/policy.mojo`; a generated source (`--gen`) is not
+measured. The standard library (`oss/modular/`), the closure's other
+packages (`<their import>/`, an `--exclude` each, `test_deps` included),
+anything under `buck-out/`, the test itself and `<unknown>` are left out by
+name; any other name fails the action, and so does any name holding
+`/<content hash>/src/<lib>/` (the library's sources named by a `[src]`,
+this one or another: IR compiled otherwise than the package measured),
+which `--exclude buck-out/` would otherwise drop. A `--src` (or, without
+one, a `--map` PREFIX) with no content hash is bad usage. `--stdlib
+oss/modular/` says where the standard library's sources are named (a
+String's last-reference test, below, is its code). Every `.mojo` file of
+`[src]` is read for the functions it declares `@always_inline("nodebug")`
+(below).
 
 **String lifetime.** Mojo 1.0's `String` destructor and copy are
 `nodebug` inline code: their branches carry the location of whatever token

@@ -116,7 +116,9 @@
 #  21. A Mojo binary whose own code records a source location (a List
 #      index) builds and runs: the compile wrapper strips the staging
 #      directory from recorded paths, so its exit-4 refusal does not fire
-#      (tests//functional/location_path).
+#      (tests//functional/location_path). A package precompiled twice
+#      under different staging paths is byte-identical
+#      (tests//functional/mojoc_path:same_bytes).
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
@@ -932,6 +934,7 @@ fi
 
 # 21
 expect_green location_path "tests//functional/location_path:main[run_check]"
+expect_green mojoc_path "tests//functional/mojoc_path:same_bytes"
 
 # 22
 # shellcheck source=tools/build/tests/rust_tests.sh
