@@ -49,8 +49,9 @@
 #
 # # Build wiring
 #
-# The `external_call["komira_crypto_sha256_block_data_order", ...]`
-# decls below are symbol REFERENCES; it is resolved at the FINAL LINK of any
+# The `external_call["komira_crypto_sha256_block_data_order", ...]` and
+# `external_call["komira_crypto_sha256_block_data_order_nohw", ...]` decls
+# below are symbol REFERENCES; each is resolved at the FINAL LINK of any
 # consumer binary (test or production). The names are this package's C
 # wrappers (`native/komira_crypto_sha256_hw.c`, the `cxx_library`
 # `:komira_crypto_sha256_hw`), which call aws-lc's functions, renamed
