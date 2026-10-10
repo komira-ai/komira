@@ -68,7 +68,6 @@ from komira_db.sql_neutral_ops import (
     render_create_if_absent_composite,
     render_where,
     render_order,
-    _n_update_binds,
 )
 
 
@@ -690,18 +689,6 @@ def test_render_delete_where_and_composite_insert() raises:
     )
 
 
-def test_n_update_binds() raises:
-    """BIND and COALESCE terms bind one param each; RAW_EXPR binds none.
-    `_n_update_binds` has no caller in the library: this test only covers the
-    uncalled helper and goes away with it (komira#954, item 5)."""
-    var u = List[DbColVal]()
-    u.append(DbColVal.bind("a", _i(1)))
-    u.append(DbColVal.raw_expr("v", "v + 1"))
-    u.append(DbColVal.coalesce("c", _i(2)))
-    assert_equal(_n_update_binds(u), 2)
-    assert_equal(_n_update_binds(List[DbColVal]()), 0)
-
-
 def main() raises:
     print("== komira_db sql_neutral_ops ==")
     test_render_where_every_arm_pg_numbering_from_offset()
@@ -715,5 +702,4 @@ def main() raises:
     test_render_conditional_update_mixed_set()
     test_render_conditional_update_coalesce_default_and_lead_terms()
     test_render_delete_where_and_composite_insert()
-    test_n_update_binds()
     print("PASS test_sql_neutral_ops (renderers)")

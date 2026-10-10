@@ -494,8 +494,8 @@ def test_needs_decompose_finds_a_side_ref_in_every_expression_kind() raises:
     result or default), IN list and aggregate, and False for the same shapes
     over plain refs, for a literal and for a col-idx.
 
-    Catches: any arm removed (its residual is never decomposed, so the
-    engine sees side-qualified refs); a CASE that checks only its first
+    Catches: any arm removed (its residual is never decomposed, so it
+    keeps side-qualified refs); a CASE that checks only its first
     part; the binary arm checking only one operand."""
     var r = Expr.right("k")
     var p = Expr.col_ref("k")
@@ -549,7 +549,7 @@ def test_case_walks_reach_every_when_case() raises:
     1's condition, or only in case 1's result, and False when no case has one.
 
     Catches: either WHEN loop bounded to the first case (case 1 dropped from
-    the rebuilt CASE, or copied with `right.k` raw so the engine sees a
+    the rebuilt CASE, or copied with `right.k` raw so the residual keeps a
     side-qualified ref; or a raw `predicate=` residual whose only side ref
     is in a later case is never decomposed)."""
     var cols = _left_cols()

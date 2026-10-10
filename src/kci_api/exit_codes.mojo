@@ -4,10 +4,12 @@
 # =============================================================================
 #
 #   exit  name                     outcomes (outcome.mojo)       meaning
-#   0     EXIT_OK                  SUCCEEDED, NOOP               the end state holds. This includes
-#                                                                "already published, identical
-#                                                                bytes" and a dry run that found
-#                                                                nothing wrong: neither is a red job
+#   0     EXIT_OK                  SUCCEEDED, NOOP,              the end state holds. This includes
+#                                  SUPERSEDED                    "already published, identical
+#                                                                bytes", a dry run that found
+#                                                                nothing wrong and a run stopped
+#                                                                because something newer is ahead:
+#                                                                none is a red job
 #   1     EXIT_INTERNAL            (error KCI-E-INTERNAL)        kci itself raised past its handlers
 #   2     EXIT_USAGE               (error KCI-E-USAGE)           the command line is wrong; nothing read
 #   3     EXIT_REFUSED             REFUSED                       a check refused; nothing external changed
@@ -49,6 +51,7 @@ from kci_api.outcome import (
     OUTCOME_NOOP,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
+    OUTCOME_SUPERSEDED,
     OUTCOME_VALIDATION_FAILED,
     RETRY_NEEDS_HUMAN,
     RETRY_SAFE,
@@ -106,7 +109,7 @@ def exit_code_of(outcome: String, error_id: String = String("")) raises -> Int:
         return EXIT_INTERNAL
     if error_id == ERROR_USAGE or error_id == ERROR_SELECTOR:
         return EXIT_USAGE
-    if outcome == OUTCOME_SUCCEEDED or outcome == OUTCOME_NOOP:
+    if outcome == OUTCOME_SUCCEEDED or outcome == OUTCOME_NOOP or outcome == OUTCOME_SUPERSEDED:
         return EXIT_OK
     if outcome == OUTCOME_REFUSED:
         return EXIT_REFUSED

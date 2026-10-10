@@ -93,6 +93,10 @@ struct Fake(StageSteps, Movable):
         self.calls.append(String("is-ancestor ") + commit + String(" ") + of)
         return True
 
+    def main_tip_past(mut self, revision: String) raises -> String:
+        # no run here passes --admission (test_kci_staged_ordering.mojo does)
+        raise Error(String("main_tip_past is not asked in this test"))
+
     def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
         raise Error(String("no release is read here"))
 

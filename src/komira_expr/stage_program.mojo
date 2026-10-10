@@ -4,10 +4,13 @@
 # This module publishes the foundational engine IR for `Stage[Program]`:
 #
 #   - 3 role traits: FilterLike / ProjectsLike / BreakerLike
-#   - 5 BreakerSpec sibling-family arms: HashAggSpec / SortSpec /
-#     TopNSpec / WindowSpec / JoinProbeSpec
+#   - 12 BreakerSpec arms: HashAggSpec / SortSpec / TopNSpec / WindowSpec /
+#     PartitionUdfSpec / WindowUdfSpec / JoinProbeSpec / DistinctSpec /
+#     PartitionTopNSpec / AsofJoinSpec (§5) and JoinBuildSpec /
+#     AsofJoinBuildSpec (§5b)
 #   - 3 sentinel structs (Optional-shaped slot fillers):
 #     NoFilter / NoProjects / NoBreaker
+#   - 1 FilterLike conformer over a predicate: PredicateFilter[P]
 #   - 1 aggregate marker: StageProgram[Filter, Projects, Breaker]
 #   - 1 placeholder ProjectsLike conformer for test coverage:
 #     ProjectListStub[arity: Int] (superseded by the typed per-arity-N
@@ -46,9 +49,10 @@
 #
 # # Encapsulation invariants
 #
-#   - NO UnsafePointer anywhere in this module (POD-only structs).
+#   - NO UnsafePointer anywhere in this module.
 #   - NO wildcard origins anywhere in this module (no fields hold
-#     references; every struct is a single `var sentinel: Int` POD).
+#     references). Every struct is a single `var sentinel: Int` POD except
+#     `PredicateFilter`, which holds its predicate by value (`var pred`).
 #   - NO partial-move-via-UnsafePointer shapes.
 #
 # # Cross-references
@@ -147,12 +151,8 @@ comptime BREAKER_WINDOW_UDF: Int = 12
 # §2 — Join-type comptime constants
 #
 # Carried by `JoinProbeSpec[n_probe_keys, join_t]`. Read via
-# `Self.Breaker.join_t_static()`.
-#
-# Only INNER + LEFT are supported by the HashJoin
-# infrastructure (JoinBuildTable3I64 builds for INNER and LEFT shapes);
-# RIGHT / SEMI / ANTI are reserved for later JoinProbe template
-# extensions.
+# `Self.Breaker.join_t_static()`. This module names the join types; it
+# neither checks a `join_t` value nor implements any join.
 # -----------------------------------------------------------------------------
 
 comptime JOIN_INNER: Int = 1
@@ -160,12 +160,8 @@ comptime JOIN_LEFT: Int = 2
 comptime JOIN_RIGHT: Int = 3
 comptime JOIN_SEMI: Int = 4
 comptime JOIN_ANTI: Int = 5
-# FULL-OUTER. INNER matches + unmatched-probe (LEFT side) + unmatched-build
-# rows. The unmatched-build side requires a per-build-slot matched bitmap,
-# OR-merged across the parallel probe workers in the driver (each worker marks
-# the build slots it matched; after probe, the serial OR-merge emits the build
-# slots with bit == 0, null-padded on the probe side). Wired through the typed
-# join driver `run_typed_join_two_segment`.
+# FULL OUTER: the INNER matches plus the unmatched rows of both sides, each
+# null-padded on the other side.
 comptime JOIN_OUTER: Int = 6
 
 
@@ -349,23 +345,16 @@ trait ProjectsLike(Movable, Deinitable):
     # --- bind: propagate to projected Exprs -------------------------
     def bind(mut self, resolver: ColumnResolver) raises:
         """Walk to populate runtime _idx on every leaf inside the project
-        Expr pack. NoProjects no-ops; ProjectListStub no-ops; production
-        ProjectList[*Outs] needs an instance store to do this — current
-        ProjectList carries `*Outs` as comptime-only (no instance to walk)
-        so its bind is a no-op stub today. SDK-side, project-bearing typed
-        pipelines fall through to .untyped() at materialize_typed; a future
-        slot adds the per-output-instance ProjectList variant or a
-        @parameter for static bind walk.
-
-        Default body is no-op for sentinel conformers."""
+        Expr pack. NoProjects and ProjectListStub keep this no-op default;
+        `ProjectList[*Outs]` (typed_projects.mojo) overrides it to call
+        `bind` on each stored output instance."""
         pass
 
 
 trait BreakerLike(Copyable, Movable, ImplicitlyCopyable, Deinitable):
     """Role trait for the StageProgram Breaker slot.
 
-    Conformers: `NoBreaker` + 5 BreakerSpec arms (`HashAggSpec` /
-    `SortSpec` / `TopNSpec` / `WindowSpec` / `JoinProbeSpec`).
+    Conformers: `NoBreaker` + the 12 BreakerSpec arms of §5 and §5b.
 
     UNIFORM accessor surface: every conformer
     implements all 9 accessors, returning `-1` for slots the flavor
@@ -383,6 +372,15 @@ trait BreakerLike(Copyable, Movable, ImplicitlyCopyable, Deinitable):
     | TopNSpec      | BREAKER_TOPN    | -1     | -1     | S           | N      | -1          | -1           | -1           | -1     |
     | WindowSpec    | BREAKER_WINDOW  | -1     | -1     | -1          | -1     | P           | W            | -1           | -1     |
     | JoinProbeSpec | BREAKER_JOIN_PROBE| -1   | -1     | -1          | -1     | -1          | -1           | Pk           | JT     |
+    | PartitionUdfSpec | BREAKER_PARTITION_UDF | -1 | -1 | -1        | -1     | P           | -1           | -1           | -1     |
+    | WindowUdfSpec | BREAKER_WINDOW_UDF| -1   | -1     | -1          | -1     | P           | -1           | -1           | -1     |
+    | DistinctSpec  | BREAKER_DISTINCT| K      | -1     | -1          | -1     | -1          | -1           | -1           | -1     |
+    | PartitionTopNSpec | BREAKER_PARTITION_TOPN | -1 | -1 | S        | N      | P           | -1           | -1           | -1     |
+    | AsofJoinSpec  | BREAKER_ASOF_JOIN | -1   | -1     | -1          | -1     | -1          | -1           | Pk           | -1     |
+    | JoinBuildSpec | BREAKER_JOIN_BUILD | K     | Pl     | -1          | -1     | -1          | -1           | -1           | -1     |
+    | AsofJoinBuildSpec | BREAKER_ASOF_JOIN_BUILD | K | Pl | -1       | -1     | -1          | -1           | -1           | -1     |
+
+    `Pl` is the build arms' payload count, carried in the n_aggs slot.
 
     The Stage[Program] body comptime-dispatches via
     `comptime if Self.Breaker.tag() == BREAKER_HASH_AGG: ...` and
@@ -691,7 +689,7 @@ def predicate_filter[
 
 
 # -----------------------------------------------------------------------------
-# §5 — BreakerSpec sibling-family — 5 arms
+# §5 — BreakerSpec arms (the query-shape side; §5b holds the build arms)
 #
 # Each arm encodes its sub-state via comptime-Int parameters. The uniform BreakerLike trait surface is
 # implemented by every arm with `-1` for fields the flavor does NOT
@@ -1005,18 +1003,14 @@ struct WindowUdfSpec[n_part_keys: Int](BreakerLike):
 
 @fieldwise_init
 struct JoinProbeSpec[n_probe_keys: Int, join_t: Int](BreakerLike):
-    """JoinProbe breaker — `n_probe_keys` probe keys, `join_t` selects
-    INNER / LEFT / RIGHT / SEMI / ANTI semantics.
+    """JoinProbe breaker — `n_probe_keys` probe keys and `join_t`, one of
+    the JOIN_* constants of §2 (INNER / LEFT / RIGHT / SEMI / ANTI /
+    OUTER).
 
-    BreakerState backing: `JoinBuildTable3I64` carried via
-    `ArcPointer` (the one shared-ownership carve-out) — true
-    shared ownership across the build / probe pipeline boundary.
-    JoinProbe is the SOLE Arc carve-out among the 7 breaker
-    primitives; the other 6 use direct-field storage.
-
-    Supported `join_t` values are JOIN_INNER + JOIN_LEFT.
-    JOIN_RIGHT / JOIN_SEMI / JOIN_ANTI are not supported by this
-    JoinProbe template.
+    This struct only carries the two values, through
+    `n_probe_keys_static()` and `join_t_static()`. It does not check
+    `join_t`; which values a probe accepts is decided by the join operator
+    that reads it, which is not in this package.
     """
 
     var sentinel: Int
@@ -1449,9 +1443,8 @@ struct ProjectListStub[arity: Int](ProjectsLike):
 # (per the AnyType-erasure caveat) and constructs `StageProgram` only
 # at `to_program()` time.
 #
-# A composition probe compiles and runs end-to-end with 12 chain shapes
-# covering all 6 BreakerSpec arms (NoBreaker + HashAgg + Sort + TopN + Window
-# + JoinProbe x {INNER, LEFT}).
+# tests/test_stage_program.mojo pins the accessor row of NoBreaker and of
+# every BreakerSpec arm.
 # -----------------------------------------------------------------------------
 
 

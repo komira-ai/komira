@@ -450,6 +450,40 @@ def test_expect_continue_disabled_gets_417_and_close() raises:
         assert_equal(_text(rig.read().data), want)
 
 
+def test_http10_expect_continue_gets_no_interim() raises:
+    """RFC 9110 section 10.1.1 and 15.2: a 100-continue expectation in an
+    HTTP/1.0 request is ignored, and no 1xx goes to an HTTP/1.0 client. With
+    the interim enabled, only the response is written; with it disabled, the
+    request is still served, not refused with 417."""
+    for v in range(2):
+        for enabled in range(2):
+            var rig = _Rig(chained=v == 1)
+            rig.continue_ok = enabled == 1
+            _send(
+                rig.peer,
+                "POST / HTTP/1.0\r\nExpect: 100-continue\r\n"
+                "Content-Length: 5\r\n\r\nhello",
+            )
+            assert_false(rig.round())
+            assert_equal(rig.reqs, Int64(1))
+            assert_equal(_text(rig.read().data), rig.ok())
+
+
+def test_empty_line_between_pipelined_requests_is_ignored() raises:
+    """RFC 9112 section 2.2: the CRLF a client sends after a request body is
+    skipped, so the next request is answered too, not refused with 400."""
+    for v in range(2):
+        var rig = _Rig(chained=v == 1)
+        _send(
+            rig.peer,
+            "POST /p HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\nhello\r\n"
+            + String(GET),
+        )
+        assert_true(rig.round())
+        assert_equal(rig.reqs, Int64(2))
+        assert_equal(_text(rig.read().data), rig.ok() + rig.ok())
+
+
 def test_end_of_stream_closes() raises:
     for v in range(2):
         var rig = _Rig(chained=v == 1)

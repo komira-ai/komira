@@ -176,8 +176,8 @@ def render_summary(
             s += _finding_line(a.findings[i], a.mode == String(MODE_CENSUS))
         s += String("\n")
     if len(a.info_findings) > 0:
-        s += String("### Info: test-only packages (") + String(len(a.info_findings)) + String(")\n\n")
-        s += String("What the policy would find in a package held to no target; none of it counts.\n\n")
+        s += String("### Info: test-only packages, declaration-only files (") + String(len(a.info_findings)) + String(")\n\n")
+        s += String("What the policy would find in a package held to no target, and files no test compiled that emit no code; none of it counts.\n\n")
         for i in range(len(a.info_findings)):
             s += _finding_line(a.info_findings[i], False)
         s += String("\n")
