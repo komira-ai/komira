@@ -34,6 +34,7 @@ mojo_library(
         "tests/test_avro_bytes_fixed_defaults.mojo",
         "tests/test_avro_codec_matrix.mojo",
         "tests/test_avro_codec_owner_equivalence.mojo",
+        "tests/test_avro_codec_truncation.mojo",
         "tests/test_avro_comptime_shape_kind_decode.mojo",
         "tests/test_avro_cov_comptime.mojo",
         "tests/test_avro_cov_decode.mojo",
