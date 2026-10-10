@@ -33,14 +33,17 @@
 #       it did before the footer check existed. Catches a footer check that
 #       looks only at the last 12 bytes. Other trailing bytes (2 zero bytes,
 #       which is not a multiple of 4; a 4-byte group with one non-zero byte at
-#       either end) and a cut block followed by 4 zero bytes are refused as
-#       XZ_TRUNCATED: this reader accepts only one stream plus Stream Padding.
+#       any of its four positions) and a cut block followed by 4 zero bytes
+#       are refused as XZ_TRUNCATED: this reader accepts only one stream plus
+#       Stream Padding.
 #       Mutants: drop the padding skip: red, the +4 zero block refused; skip
 #       zero bytes one at a time: red, the +2 zero block accepted; test only
 #       the last byte of each 4-byte group: red, the 01 00 00 00 block
 #       accepted; test only the first byte: red earlier, since the footer's
 #       Stream Flags start with a zero byte, so the skip eats into the footer
-#       and every whole xz block is refused.
+#       and every whole xz block is refused; drop the test of the second
+#       (or third) byte from the end of a group: red, the 00 00 01 00 (or
+#       00 01 00 00) block accepted.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -193,6 +196,18 @@ def test_xz_stream_padding() raises:
         _refusal(AVRO_CODEC_XZ, _with_tail(x, trail)),
         _XZ_TRUNC,
         "xz + 00 00 00 01",
+    )
+    var mid3: List[UInt8] = [0, 0, 1, 0]
+    assert_equal(
+        _refusal(AVRO_CODEC_XZ, _with_tail(x, mid3)),
+        _XZ_TRUNC,
+        "xz + 00 00 01 00",
+    )
+    var mid2: List[UInt8] = [0, 1, 0, 0]
+    assert_equal(
+        _refusal(AVRO_CODEC_XZ, _with_tail(x, mid2)),
+        _XZ_TRUNC,
+        "xz + 00 01 00 00",
     )
     assert_equal(
         _refusal(
