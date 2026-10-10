@@ -258,6 +258,8 @@ def test_assertion_refusals() raises:
     forms.append(_form("eyJhbGciOiJFUzI1NiJ9.!!!.c2ln"))
     cases.append("a payload that is not JSON")
     forms.append(_form("eyJhbGciOiJFUzI1NiJ9.bm9wZQ.c2ln"))
+    cases.append("no iss")
+    forms.append(_form(_signed(CLIENT, String('{"sub":"client-1","aud":"https://issuer.example/a","iat":1000000,"exp":1000060,"jti":"j10"}'))))
     cases.append("an iss that names the client but is not a string")
     forms.append(_form(_signed(CLIENT, String('{"iss":["client-1"],"sub":"client-1","aud":"https://issuer.example/a","iat":1000000,"exp":1000060,"jti":"j9"}'))))
     cases.append("unknown client")

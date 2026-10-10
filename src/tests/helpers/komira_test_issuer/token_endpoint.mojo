@@ -51,7 +51,7 @@ from komira_jose import (
     VerifiedAssertion,
     verify_client_assertion,
 )
-from komira_json import parse_json_bytes
+from komira_json import JsonValue, parse_json_bytes
 from komira_oauth import (
     OAUTH_ERROR_INVALID_CLIENT,
     OAUTH_ERROR_INVALID_SCOPE,
@@ -105,14 +105,14 @@ def _unverified_issuer(assertion: String) -> String:
     var parts = assertion.split(".")
     if len(parts) < 2:
         return String("")
+    var v: JsonValue
     try:
-        var payload = base64_url_decode_nopad(String(parts[1]))
-        var v = parse_json_bytes(payload, 16)
-        for i in range(len(v.obj_keys)):
-            if v.obj_keys[i] == "iss":
-                return v.children[i].text.copy()
+        v = parse_json_bytes(base64_url_decode_nopad(String(parts[1])), 16)
     except:
-        pass
+        return String("")
+    for i in range(len(v.obj_keys)):
+        if v.obj_keys[i] == "iss":
+            return v.children[i].text.copy()
     return String("")
 
 
