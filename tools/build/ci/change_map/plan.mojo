@@ -16,6 +16,14 @@ A pure function over a `Graph`. The rules, in this order, for each file:
 The answer is the seeds and everything that depends on one of them. It never
 under-approximates: anything the mapping cannot do widens, with the reason,
 and a change whose files reach no target is VACUOUS, never an empty pass.
+
+One failure does not widen: a reverse-dependency query that buck2 refuses
+because a target of the universe cannot be configured (a fixture that fails
+analysis by design, a visibility a change narrowed). That target breaks the
+query for every change, so widening would answer every unit on every change
+and bury the cause in a reason; dropping it from the universe would pass a
+change that broke it. `compute` raises instead, naming the target: the caller
+cannot tell, and says so (kci refuses the check, never widens on it).
 """
 
 from buildtools.bytes import dirname, join, sorted_unique
@@ -132,10 +140,28 @@ def _widened[G: Graph](var reason: String, files: Int, var warnings: List[String
     return Verdict(String(KIND_WIDENED), reason^, all^, files, 0, warnings^)
 
 
+comptime _CONFIGURED_NODE: String = "Error looking up configured node "
+
+
+def unconfigurable_target(error: String) -> String:
+    """The target buck2 named as one it could not configure in a failed
+    query's message, or "" when the message names none."""
+    var at = error.find(String(_CONFIGURED_NODE))
+    if at < 0:
+        return String("")
+    var start = at + String(_CONFIGURED_NODE).byte_length()
+    var b = error.as_bytes()
+    var end = start
+    while end < len(b) and Int(b[end]) != 32 and Int(b[end]) != 10:
+        end += 1
+    return String(error[byte=start:end])
+
+
 def compute[G: Graph](rules: Rules, files_in: List[String], mut graph: G) raises -> Verdict:
     """The verdict for a change of `files_in` (repository-relative paths).
-    Raises only when even the widened answer cannot be made (the graph
-    cannot be listed)."""
+    Raises when even the widened answer cannot be made (the graph cannot be
+    listed), and when the universe holds a target buck2 cannot configure (the
+    module's header says why that is not a widening)."""
     var files = sorted_unique(files_in)
     var warnings = List[String]()
     if len(files) == 0:
@@ -166,6 +192,13 @@ def compute[G: Graph](rules: Rules, files_in: List[String], mut graph: G) raises
     try:
         reached = graph.rdeps(seeds)
     except e:
+        var broken = unconfigurable_target(String(e))
+        if broken.byte_length() > 0:
+            raise Error(
+                String("the universe holds a target buck2 cannot configure: ") + broken
+                + String(" (a fixture that must fail analysis is a staged BUCK file, outside the universe;")
+                + String(" see tools/build/tests/README.md): ") + String(e)
+            )
         return _widened(String("the reverse-dependency query failed: ") + String(e), len(files), warnings^, graph)
     if len(reached) == 0:
         return _widened(

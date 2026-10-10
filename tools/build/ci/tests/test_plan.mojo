@@ -46,6 +46,7 @@ struct FakeGraph(Graph, Movable):
     var base_known: Bool
     var fail_owners: Bool
     var fail_rdeps: Bool
+    var rdeps_error: String
     var empty_rdeps: Bool
     var asked_owners: Int
     var asked_paths: List[String]
@@ -79,6 +80,7 @@ struct FakeGraph(Graph, Movable):
         self.base_known = True
         self.fail_owners = False
         self.fail_rdeps = False
+        self.rdeps_error = String("")
         self.empty_rdeps = False
         self.asked_owners = 0
         self.asked_paths = List[String]()
@@ -127,6 +129,8 @@ struct FakeGraph(Graph, Movable):
     def rdeps(mut self, seeds: List[String]) raises -> List[String]:
         if self.fail_rdeps:
             raise Error("cquery failed")
+        if self.rdeps_error.byte_length() > 0:
+            raise Error(self.rdeps_error)
         if self.empty_rdeps:
             return List[String]()
         var out = List[String]()
@@ -339,6 +343,41 @@ def test_a_failing_rdeps_query_widens() raises:
     _widened_everything(_compute(_list("lib/a/a.mojo"), g), g)
 
 
+# What BuckGraph.rdeps raised in the per-change check when the universe held
+# a target that fails analysis by design (a negative fixture naming a target
+# not visible to it): buck2's own text, as `_buck` wraps it.
+comptime UNCONFIGURABLE: String = (
+    String("buck2 cquery failed (exit 3): [2026-10-10T01:02:37.138+00:00] Build ID: 67a6")
+    + String(" Command failed:  Error looking up configured node")
+    + String(" tests//negative/node/visibility:node_not_visible")
+    + String(" (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)  Caused by:")
+    + String("     `komira//third_party/node:node` is not visible to")
+    + String(" `tests//negative/node/visibility:node_not_visible`")
+)
+
+
+def test_a_target_the_universe_cannot_configure_is_named_and_never_widens() raises:
+    # A target outside the change that buck2 cannot configure breaks the
+    # query for every change. Widening would turn it into every unit on every
+    # change (the check times out, the cause buried in a reason); the answer
+    # is "cannot tell", naming the target, so the change that planted it is
+    # refused by its own check and the next one is not silently widened.
+    var g = FakeGraph()
+    g.rdeps_error = String(UNCONFIGURABLE)
+    var raised = String("")
+    try:
+        var v = _compute(_list("lib/a/a.mojo"), g)
+        raised = String("no error: ") + v.kind + String(" ") + String(len(v.targets)) + String(" target(s)")
+    except e:
+        raised = String(e)
+    assert_true(
+        raised.startswith(String("the universe holds a target buck2 cannot configure: tests//negative/node/visibility:node_not_visible")),
+        raised,
+    )
+    # buck2's cause stays in the message
+    assert_true(raised.find(String("is not visible to")) >= 0, raised)
+
+
 def test_an_rdeps_answer_of_nothing_widens() raises:
     var g = FakeGraph()
     g.empty_rdeps = True
@@ -449,6 +488,7 @@ def main() raises:
     test_the_same_file_twice_counts_once()
     test_a_failing_owner_query_widens_never_passes()
     test_a_failing_rdeps_query_widens()
+    test_a_target_the_universe_cannot_configure_is_named_and_never_widens()
     test_an_rdeps_answer_of_nothing_widens()
     test_the_targets_are_sorted_and_unique()
     test_the_answer_kci_reads_for_a_table_of_changes()

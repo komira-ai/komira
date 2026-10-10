@@ -29,7 +29,15 @@ do:
   there fails to analyse, to compile or to pass its gate, and
   `run_tests.sh` requires the failure it names (the message, not only the
   exit status); [`lint_weld.sh`](negative/lint_weld.sh) plants its defects
-  in a snapshot of the tree.
+  in a snapshot of the tree. A target that fails to analyse or configure
+  (an unknown or invisible dependency) must not be loadable: the CI's
+  reverse-dependency query configures every target of `tests//...`, and one
+  such target makes it fail for every change (`//tools/build/ci:affected`
+  then refuses to answer, naming it). Such a fixture is a `<case>.BUCK` file
+  that the driver copies to `<case>/BUCK` for its one build and deletes, its
+  directory gitignored, as
+  [`node/visibility.BUCK`](negative/node/visibility.BUCK) and
+  [`surface_capability_matrix/dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) are.
 
 A test with both halves keeps one package name in each, for example
 `tests//functional/test_data` (the test runtime contract that works) and

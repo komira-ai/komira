@@ -60,5 +60,10 @@ expect_red node_dist_does_not_run "/bin/node does not run" "$N:node_does_not_run
 # c_shared_lib compiles with -Wall -Werror.
 expect_red node_c_warns "error: unused variable 'unused_on_purpose'" "$N:warns"
 # The runtime is test-only: a package outside third_party/node/BUCK's
-# _TEST_ONLY and _NEGATIVE (a subpackage of $N) cannot name it.
+# _TEST_ONLY and _NEGATIVE (a subpackage of $N) cannot name it. The
+# subpackage fails analysis, so it exists only for this build (visibility.BUCK
+# says why); its directory is gitignored in case a run is cut short.
+D="$ROOT/tools/build/tests/negative/node"
+mkdir -p "$D/visibility" && cp "$D/visibility.BUCK" "$D/visibility/BUCK" && cp "$D/visibility.js" "$D/visibility/pass.js"
 expect_red node_not_visible "\`komira//third_party/node:node\` is not visible to \`$N/visibility:node_not_visible\`" "$N/visibility:node_not_visible"
+rm -f "$D/visibility/BUCK" "$D/visibility/pass.js" && rmdir "$D/visibility"

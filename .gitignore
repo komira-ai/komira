@@ -8,3 +8,5 @@
 # Written and deleted by tools/build/tests/run_tests.sh (test 53) around one build each.
 /tools/build/tests/negative/surface_capability_matrix/dangling/
 /tools/build/tests/negative/surface_capability_matrix/incompatible/
+# Written and deleted by tools/build/tests/node_tests.sh (test 54) around one build.
+/tools/build/tests/negative/node/visibility/
