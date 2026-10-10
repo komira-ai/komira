@@ -60,7 +60,8 @@ mojo_library(
         "tests/test_exempt_mutants.mojo",
         # the source lexer: markers recognised only in a real comment (not
         # in a string, a docstring or another comment's text), CRLF, and the
-        # executable-line heuristic over every kind of line
+        # executable-line heuristic over every kind of line, trait
+        # requirements (no code) left out
         "tests/test_lexer.mojo",
         # declaration reachability (report only): the functions a source
         # declares (methods, multi-line and generic signatures, one-line

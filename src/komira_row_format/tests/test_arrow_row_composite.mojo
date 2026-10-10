@@ -17,9 +17,10 @@
 # byte) and distinct bytes (a byte-order slip permutes them). A NULL slot is
 # the sentinel plus the type's width of zeros, so the widths are pinned too.
 #
-# The NULL sentinel of a DESC key is not pinned here: the encoder inverts it
-# today, which puts the NULL on the wrong side of the values (tracked as a
-# finding); only ASC NULL sentinels are asserted.
+# A NULL slot's sentinel is never inverted, DESC or not (as in arrow-rs):
+# NULLS_FIRST is 0x00 and NULLS_LAST 0xFF under both directions, so the NULL
+# stays on its side of a DESC value slot (sentinel 0xFE). An inverted NULL
+# sentinel would put a NULLS_FIRST NULL after every DESC value.
 #
 # The values are read from a batch at run time; the existing per-encoder tests
 # call the scalar encoders with constants, which the compiler folds.
@@ -245,17 +246,17 @@ def test_timestamp_units_encode_alike() raises:
 
 def test_null_slots_sentinel_and_zero_padding() raises:
     """A NULL slot is one sentinel and the type's width of zeros. Over every
-    family plus DECIMAL128 (width 16): NULLS_FIRST ASC 0x00, NULLS_LAST ASC
-    0xFF. DESC NULL sentinels are left unpinned (see the header)."""
+    family plus DECIMAL128 (width 16): NULLS_FIRST 0x00 and NULLS_LAST 0xFF,
+    ASC and DESC alike (the NULL sentinel is not inverted for DESC)."""
     var batch = _batch()
     var tags = _tags()
     tags.append(DT_DECIMAL128)
     var n = len(tags)
     var widths: List[Int] = [8, 8, 8, 4, 4, 4, 4, 8, 8, 2, 2, 1, 1, 1, 16]
-    var orders: List[UInt8] = [SORT_ASC, SORT_ASC]
-    var nfs: List[UInt8] = [NULLS_FIRST, NULLS_LAST]
-    var sentinels: List[UInt8] = [0x00, 0xFF]
-    for i in range(2):
+    var orders: List[UInt8] = [SORT_ASC, SORT_ASC, SORT_DESC, SORT_DESC]
+    var nfs: List[UInt8] = [NULLS_FIRST, NULLS_LAST, NULLS_FIRST, NULLS_LAST]
+    var sentinels: List[UInt8] = [0x00, 0xFF, 0x00, 0xFF]
+    for i in range(4):
         var got = _encode(
             batch, 1, tags, _fill_u8(n, orders[i]), _fill_u8(n, nfs[i]),
             List[Bool](length=n, fill=True),
@@ -286,6 +287,42 @@ def test_mixed_null_and_value_keys() raises:
         0x01, 0x81, 0x02, 0xFF, 0x00, 0xFE, 0xFF, 0xFE, 0x00, 0x00,
     ]
     assert_equal(got, want)
+
+
+def test_desc_null_sides() raises:
+    """Under DESC, a NULLS_FIRST NULL sorts before every value and a
+    NULLS_LAST NULL after every value, by the encodings alone. The values
+    are the extremes of each key's DESC image (i64 MAX encodes to all zero
+    bytes under DESC, MIN to all 0xFF), so the sentinel alone must decide."""
+    var batch = _desc_null_batch()
+    var tags: List[UInt8] = [DT_I64]
+    var cols: List[Int] = [0]
+    var desc: List[UInt8] = [SORT_DESC]
+    var is_null: List[Bool] = [True]
+    var not_null: List[Bool] = [False]
+    var nfs: List[UInt8] = [NULLS_FIRST, NULLS_LAST]
+    var want: List[Int] = [-1, 1]
+    for i in range(2):
+        var nf: List[UInt8] = [nfs[i]]
+        var bv = BatchView(batch)
+        var e_null = encode_row_keys_for_sort(bv, 0, cols, tags, desc, nf, is_null)
+        for row in range(2):
+            var e_val = encode_row_keys_for_sort(
+                bv, row, cols, tags, desc, nf, not_null
+            )
+            assert_equal(
+                arrow_row_compare(e_null, e_val), want[i],
+                "nf case " + String(i) + " row " + String(row),
+            )
+
+
+def _desc_null_batch() raises -> RecordBatch:
+    """One i64 column: INT64_MAX, INT64_MIN."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", DType.int64, False))
+    var rbb = RecordBatchBuilder.with_capacity(1)
+    _prim[DType.int64](rbb, [Int64.MAX, Int64.MIN])
+    return rbb.build(sb.build())
 
 
 def test_rows_order_by_encoding() raises:
@@ -394,26 +431,37 @@ def test_widths_and_refusals() raises:
         assert_true("arrow_row.encoded_width_for_dtype:" in msg, msg)
 
 
-def test_decimal128_value_refused_or_correct() raises:
-    """A non-NULL DECIMAL128 key: the composite encoder has no hi/lo read
-    today and refuses. This holds either way: a refusal, or exactly the
-    sentinel plus `encode_decimal128_to_bytes` of the cell (row 0: 2^64 + 5)."""
+def test_decimal128_value_encodes_both_words() raises:
+    """A non-NULL DECIMAL128 key encodes as the sentinel plus
+    `encode_decimal128_to_bytes` of the cell's high and low words, read at
+    the 16-byte cell stride: row 0 is 2^64 + 5 (high word 1, so a read of
+    the low word alone loses it), row 1 is -1 (both words all ones, so a
+    missed sign flip or a swapped half shows). ASC and DESC, and the rows
+    order by value: -1 < 2^64 + 5."""
     var batch = _batch()
     var tags: List[UInt8] = [DT_DECIMAL128]
     var cols: List[Int] = [14]
-    var flags: List[UInt8] = [SORT_ASC]
     var nulls: List[Bool] = [False]
-    var dec = encode_decimal128_to_bytes(UInt64(1), UInt64(5), True)
-    var want: List[UInt8] = [0x01]
-    for i in range(16):
-        want.append(dec[i])
-    try:
-        var got = encode_row_keys_for_sort(
-            BatchView(batch), 0, cols, tags, flags, flags, nulls
-        )
-        assert_equal(got, want)
-    except e:
-        assert_true("DECIMAL128" in String(e), String(e))
+    var his: List[UInt64] = [1, 0xFFFFFFFFFFFFFFFF]
+    var los: List[UInt64] = [5, 0xFFFFFFFFFFFFFFFF]
+    var dirs: List[UInt8] = [SORT_ASC, SORT_DESC]
+    for d in range(2):
+        var flags: List[UInt8] = [dirs[d]]
+        var nf: List[UInt8] = [NULLS_FIRST]
+        var enc = List[List[UInt8]]()
+        for row in range(2):
+            var dec = encode_decimal128_to_bytes(his[row], los[row], d == 0)
+            var want = List[UInt8]()
+            want.append(UInt8(0x01) if d == 0 else UInt8(0xFE))
+            for i in range(16):
+                want.append(dec[i])
+            var got = encode_row_keys_for_sort(
+                BatchView(batch), row, cols, tags, flags, nf, nulls
+            )
+            assert_equal(got, want, "dir " + String(d) + " row " + String(row))
+            enc.append(got^)
+        # Row 1 (-1) against row 0 (2^64 + 5).
+        assert_equal(arrow_row_compare(enc[1], enc[0]), -1 if d == 0 else 1)
 
 
 def test_compare_length_tiebreak() raises:
@@ -443,9 +491,10 @@ def main() raises:
     s.test[test_timestamp_units_encode_alike]()
     s.test[test_null_slots_sentinel_and_zero_padding]()
     s.test[test_mixed_null_and_value_keys]()
+    s.test[test_desc_null_sides]()
     s.test[test_rows_order_by_encoding]()
     s.test[test_argument_length_checks]()
     s.test[test_widths_and_refusals]()
-    s.test[test_decimal128_value_refused_or_correct]()
+    s.test[test_decimal128_value_encodes_both_words]()
     s.test[test_compare_length_tiebreak]()
     s^.run()

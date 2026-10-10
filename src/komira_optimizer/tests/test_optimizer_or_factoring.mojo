@@ -277,7 +277,7 @@ def test_partial_overlap_not_hoisted_at_outer_or() raises:
     """3-branch OR; X appears in branches 1+2 but NOT 3 -- X NOT hoisted
     above the OUTER OR.
 
-      (b==2 AND e==5) OR (b==2 AND f-conjunct) OR (d==4 AND c==3)
+      (b==2 AND e==5) OR (b==2 AND a==1) OR (d==4 AND c==3)
         (use distinct columns per branch to avoid ANY common conjunct
          from also being a sub-OR-2 candidate)
 

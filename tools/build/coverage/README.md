@@ -268,7 +268,15 @@ A UTF-8 byte-order mark at the start of the file and a carriage return at
 the end of a line (CRLF) are not part of the line.
 
 Everything else counts, declarations included (`def`, `struct`,
-`comptime`, a decorator, a lone `)`).
+`comptime`, a decorator, a lone `)`), except a trait's header and its
+requirements, which emit no code: a requirement is a `def` inside a
+`trait` block whose body is only `...` (after an optional docstring), or a
+`def` line ending in `: ...`, and its decorators, signature lines and `...`
+line are not executable. A trait method with a default body counts. A
+`trait` block runs from its header (with the lines its open brackets
+carry) to the next line holding code at the header's indent or less. So a
+file of traits only, such as a package's interface declarations, has no
+executable line.
 
 Except in a **declaration-only** file (`declaration_only` in
 `covcheck/decls.mojo`, whose declaration reader is the one authority on

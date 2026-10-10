@@ -2,8 +2,21 @@ from std.testing import assert_equal, assert_true, assert_false
 
 from buildtools.bytes import bytes_less
 
-from change_map.graph import Graph, PackageOf, PACKAGE_FOUND, PACKAGE_NONE, PACKAGE_UNKNOWN
-from change_map.plan import KIND_AFFECTED, KIND_EMPTY, KIND_VACUOUS, KIND_WIDENED, Verdict, compute, uncovered
+from change_map.graph import Graph, PackageOf, PACKAGE_FOUND, PACKAGE_NONE, PACKAGE_UNKNOWN, buck_failure, kept_stderr
+from change_map.plan import (
+    KIND_AFFECTED,
+    KIND_BROKEN,
+    KIND_EMPTY,
+    KIND_VACUOUS,
+    KIND_WIDENED,
+    QUERY_MAPPING,
+    QUERY_RDEPS,
+    QUERY_UNIVERSE,
+    Verdict,
+    compute,
+    named_target,
+    uncovered,
+)
 from change_map.report import render_units_answer
 from change_map.rules import Rules, parse_rules, read_rules
 from change_map.units import affected_units, parse_units_file
@@ -46,6 +59,9 @@ struct FakeGraph(Graph, Movable):
     var base_known: Bool
     var fail_owners: Bool
     var fail_rdeps: Bool
+    var rdeps_error: String
+    var configure_error: String
+    var asked_configure: Int
     var empty_rdeps: Bool
     var asked_owners: Int
     var asked_paths: List[String]
@@ -79,6 +95,9 @@ struct FakeGraph(Graph, Movable):
         self.base_known = True
         self.fail_owners = False
         self.fail_rdeps = False
+        self.rdeps_error = String("")
+        self.configure_error = String("")
+        self.asked_configure = 0
         self.empty_rdeps = False
         self.asked_owners = 0
         self.asked_paths = List[String]()
@@ -127,6 +146,8 @@ struct FakeGraph(Graph, Movable):
     def rdeps(mut self, seeds: List[String]) raises -> List[String]:
         if self.fail_rdeps:
             raise Error("cquery failed")
+        if self.rdeps_error.byte_length() > 0:
+            raise Error(self.rdeps_error)
         if self.empty_rdeps:
             return List[String]()
         var out = List[String]()
@@ -150,6 +171,11 @@ struct FakeGraph(Graph, Movable):
                 for k in range(len(self.dependents[t])):
                     work.append(self.dependents[t][k])
         return out^
+
+    def configure_universe(mut self) raises:
+        self.asked_configure += 1
+        if self.configure_error.byte_length() > 0:
+            raise Error(self.configure_error)
 
     def all_targets(mut self) raises -> List[String]:
         return self.universe.copy()
@@ -325,18 +351,162 @@ def test_the_same_file_twice_counts_once() raises:
     assert_equal(v.files, 1)
 
 
-def test_a_failing_owner_query_widens_never_passes() raises:
-    var g = FakeGraph()
-    g.fail_owners = True
-    var v = _compute(_list("lib/a/a.mojo"), g)
-    _widened_everything(v, g)
-    assert_true(v.reason.find("buck2 uquery failed") >= 0)
+# What buck2 printed on stderr, byte for byte, for `cquery '//... + tests//...'`
+# over a tree with one planted target in tools/build/ci/BUCK: a filegroup
+# whose dependency does not exist (UNKNOWN: buck2 prints the dependency
+# chain) and one whose dependency is not visible to it (INVISIBLE: buck2
+# names the node it was looking up). Exit 3 both times.
+comptime UNKNOWN_DEPENDENCY_STDERR: String = """[2026-10-09T23:48:30.370-05:00] Starting new buck2 daemon...
+[2026-10-09T23:48:30.435-05:00] Connected to new buck2 daemon.
+[2026-10-09T23:48:30.437-05:00] Build ID: 7bfa5b7e-ebba-42e0-b748-640e03bc7d92
+Command failed: 
+Error in configured node dependency, dependency chain follows (-> indicates depends on, ^ indicates same configuration as previous):
+       komira//tools/build/ci:planted_unknown (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+    -> komira//src/komira_hash:no_such_target_here (^)
 
 
-def test_a_failing_rdeps_query_widens() raises:
+Caused by:
+    0: looking up unconfigured target node `komira//src/komira_hash:no_such_target_here`
+    1: Unknown target `no_such_target_here` from package `komira//src/komira_hash`.
+       Did you mean one of the 3 targets in komira//src/komira_hash:BUCK?
+       
+       Available targets:
+         komira//src/komira_hash:doc_tree
+         komira//src/komira_hash:komira_hash
+         komira//src/komira_hash:komira_hash_conda
+"""
+comptime UNKNOWN_DEPENDENCY_LABEL: String = "komira//tools/build/ci:planted_unknown"
+comptime INVISIBLE_DEPENDENCY_STDERR: String = """[2026-10-09T23:48:34.256-05:00] Build ID: a1ce274c-c2d5-4960-a8cf-59f4c55b7d84
+[2026-10-09T23:48:34.270-05:00] File changed: komira//tools/build/ci/BUCK
+Command failed: 
+Error looking up configured node komira//tools/build/ci:planted_invisible (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+
+Caused by:
+    `komira//third_party/node:node` is not visible to `komira//tools/build/ci:planted_invisible` (run `buck2 uquery --output-attribute visibility komira//third_party/node:node` to check the visibility)
+"""
+comptime INVISIBLE_DEPENDENCY_LABEL: String = "komira//tools/build/ci:planted_invisible"
+# A failure that names no target: the query never got an answer.
+comptime TRANSPORT_STDERR: String = (
+    "Command failed: \nError: the remote execution service did not answer in 600s"
+    + " (transport error: connection reset by peer)\n"
+)
+# The invisible form as a CI log printed it, whitespace collapsed: the label
+# ends at the space before its configuration.
+comptime COLLAPSED_STDERR: String = (
+    String("[2026-10-10T01:02:37.138+00:00] Build ID: 67a6 Command failed:  Error looking up configured node")
+    + String(" tests//negative/node/visibility:node_not_visible")
+    + String(" (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)  Caused by:")
+    + String("     `komira//third_party/node:node` is not visible to")
+    + String(" `tests//negative/node/visibility:node_not_visible`")
+)
+
+
+def _failed(stderr: String) -> String:
+    """What BuckGraph raises when a cquery exits 3 with this stderr."""
+    return buck_failure(String("cquery"), 3, stderr)
+
+
+def _broken_by(v: Verdict, query: String, named: String, cause: String) raises:
+    # BROKEN: nothing to build, one BROKEN line for kci (it fails the
+    # check), the reason naming the query that failed, then the target
+    # buck2 named (when it named one), then buck2's error with its cause.
+    assert_equal(v.kind, String(KIND_BROKEN), v.kind + String(": ") + v.reason)
+    assert_equal(len(v.targets), 0)
+    var head = String("the ") + query + String(" failed")
+    if named.byte_length() > 0:
+        head += String(", naming ") + named
+    head += String(": ")
+    assert_true(v.reason.startswith(head), String("want '") + head + String("': ") + v.reason)
+    assert_true(v.reason.find(cause) >= 0, String("want '") + cause + String("': ") + v.reason)
+    var answer = render_units_answer(v, List[String]())
+    assert_true(answer.startswith(String("BROKEN the ") + query), answer)
+    assert_equal(len(answer.split(String("\n"))), 2, answer)
+
+
+def test_the_target_buck2_names_is_read_from_both_forms() raises:
+    # For the message only: the decision is the failure itself. The chain
+    # form names the target whose dependency is unknown first; the lookup
+    # form names the target, then " (" and its configuration.
+    assert_equal(named_target(_failed(String(UNKNOWN_DEPENDENCY_STDERR))), String(UNKNOWN_DEPENDENCY_LABEL))
+    assert_equal(named_target(_failed(String(INVISIBLE_DEPENDENCY_STDERR))), String(INVISIBLE_DEPENDENCY_LABEL))
+    assert_equal(named_target(String(COLLAPSED_STDERR)), String("tests//negative/node/visibility:node_not_visible"))
+    assert_equal(named_target(_failed(String(TRANSPORT_STDERR))), String(""))
+
+
+def test_a_failed_rdeps_query_is_broken_never_widened() raises:
+    # Each failure of the reverse-dependency query, whatever buck2 printed,
+    # is BROKEN. Before: only the lookup form was; the unknown-dependency
+    # chain and a transport error widened, so a broken universe passed as
+    # "every unit" on every change.
+    var cases = List[Tuple[String, String, String]]()
+    cases.append((String(UNKNOWN_DEPENDENCY_STDERR), String(UNKNOWN_DEPENDENCY_LABEL), String("Unknown target `no_such_target_here`")))
+    cases.append((String(INVISIBLE_DEPENDENCY_STDERR), String(INVISIBLE_DEPENDENCY_LABEL), String("is not visible to")))
+    cases.append((String(TRANSPORT_STDERR), String(""), String("connection reset by peer")))
+    for i in range(len(cases)):
+        var g = FakeGraph()
+        g.rdeps_error = _failed(cases[i][0])
+        _broken_by(_compute(_list("lib/a/a.mojo"), g), String(QUERY_RDEPS), cases[i][1], cases[i][2])
     var g = FakeGraph()
     g.fail_rdeps = True
-    _widened_everything(_compute(_list("lib/a/a.mojo"), g), g)
+    _broken_by(_compute(_list("lib/a/a.mojo"), g), String(QUERY_RDEPS), String(""), String("cquery failed"))
+
+
+def test_a_widening_change_configures_the_universe_and_any_failure_is_broken() raises:
+    # A widen rule (tools/build/**), an unmapped file and an empty rdeps
+    # answer decide before any configured query, so each widening first
+    # configures the universe. Each failure of that query, whatever buck2
+    # printed, is BROKEN: a change that plants a target buck2 cannot
+    # configure fails its own check. Before: the chain form and a
+    # transport error were a warning and a WIDENED answer.
+    var stderrs = List[Tuple[String, String, String]]()
+    stderrs.append((String(UNKNOWN_DEPENDENCY_STDERR), String(UNKNOWN_DEPENDENCY_LABEL), String("Unknown target `no_such_target_here`")))
+    stderrs.append((String(INVISIBLE_DEPENDENCY_STDERR), String(INVISIBLE_DEPENDENCY_LABEL), String("is not visible to")))
+    stderrs.append((String(TRANSPORT_STDERR), String(""), String("connection reset by peer")))
+    for i in range(len(stderrs)):
+        for which in range(3):
+            var g = FakeGraph()
+            g.configure_error = _failed(stderrs[i][0])
+            var files = _list("tools/build/cells/toolchains/BUCK")
+            if which == 1:
+                files = _list("stray.txt")
+            elif which == 2:
+                g.empty_rdeps = True
+                files = _list("lib/a/a.mojo")
+            var v = _compute(files, g)
+            assert_equal(g.asked_configure, 1)
+            _broken_by(v, String(QUERY_UNIVERSE), stderrs[i][1], stderrs[i][2])
+            assert_equal(len(v.warnings), 0 if which != 1 else 1)
+    # a universe that configures: the widened answer, after the one query
+    var g3 = FakeGraph()
+    _widened_everything(_compute(_list("tools/build/cells/toolchains/BUCK"), g3), g3)
+    assert_equal(g3.asked_configure, 1)
+
+
+def test_a_failed_owner_query_is_broken_never_widened() raises:
+    var g = FakeGraph()
+    g.fail_owners = True
+    _broken_by(_compute(_list("lib/a/a.mojo"), g), String(QUERY_MAPPING), String(""), String("buck2 uquery failed"))
+    assert_equal(g.asked_configure, 0)
+
+
+def test_buck2s_stderr_is_kept_whole_or_by_both_ends() raises:
+    # Up to 8 KiB, whole: the unknown-dependency stderr is 948 bytes, and a
+    # 600-byte tail (before) lost its first line, the chain's header.
+    assert_equal(kept_stderr(String(UNKNOWN_DEPENDENCY_STDERR)), String(UNKNOWN_DEPENDENCY_STDERR))
+    var head = String(UNKNOWN_DEPENDENCY_STDERR)
+    var whole = head + String("x") * (8192 - head.byte_length())
+    assert_equal(kept_stderr(whole), whole)
+    # Longer: the first and last 4 KiB around the count of what was cut, so
+    # a long cause keeps both buck2's error and its end.
+    var long = head + String("y") * 20000 + String("THE-LAST-LINE")
+    var kept = kept_stderr(long)
+    var cut = long.byte_length() - 8192
+    assert_true(kept.startswith(String(long[byte=0:4096])), kept)
+    assert_true(kept.endswith(String(long[byte = long.byte_length() - 4096 :])), kept)
+    assert_true(kept.find(String("[... ") + String(cut) + String(" bytes of buck2's stderr cut ...]")) >= 0, kept)
+    assert_true(kept.byte_length() < long.byte_length())
+    assert_equal(named_target(_failed(long)), String(UNKNOWN_DEPENDENCY_LABEL))
+    assert_true(_failed(long).find(String("THE-LAST-LINE")) >= 0)
 
 
 def test_an_rdeps_answer_of_nothing_widens() raises:
@@ -447,8 +617,11 @@ def main() raises:
     test_a_widening_file_widens_even_beside_mapped_ones()
     test_an_empty_change_is_empty_and_asks_nothing()
     test_the_same_file_twice_counts_once()
-    test_a_failing_owner_query_widens_never_passes()
-    test_a_failing_rdeps_query_widens()
+    test_the_target_buck2_names_is_read_from_both_forms()
+    test_a_failed_rdeps_query_is_broken_never_widened()
+    test_a_widening_change_configures_the_universe_and_any_failure_is_broken()
+    test_a_failed_owner_query_is_broken_never_widened()
+    test_buck2s_stderr_is_kept_whole_or_by_both_ends()
     test_an_rdeps_answer_of_nothing_widens()
     test_the_targets_are_sorted_and_unique()
     test_the_answer_kci_reads_for_a_table_of_changes()
