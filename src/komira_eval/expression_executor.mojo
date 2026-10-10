@@ -254,6 +254,41 @@ def _ee_div_floor(a: Int, b: Int) -> Int:
 
 
 @always_inline
+def _ee_div_trunc[dt: DType](a: Scalar[dt], b: Scalar[dt]) -> Scalar[dt]:
+    """Integer division that truncates toward zero: the plan's `BIN_DIV`
+    (docs/design/query_semantics.md §5.1, DuckDB's `//`: `-7 // 2` is -3).
+    Mojo's `//` floors (-4), so the floor quotient moves one step toward zero
+    when the division is inexact and the operands' signs differ. The caller
+    has refused a zero divisor."""
+    var q = a // b
+    if q * b != a and ((a < 0) != (b < 0)):
+        q += 1
+    return q
+
+
+@always_inline
+def _in_list_int_probe(
+    x: Int64, vt: List[Int64], ki: Int, vf: List[Float64], kf: Int
+) -> Bool:
+    """Whether the integer `x` equals an integer entry of `vt`, or, compared
+    as Float64, a float entry of `vf` (the IN-list probe of an INT64 or
+    INT32 column)."""
+    var j = 0
+    while j < ki:
+        if x == vt[j]:
+            return True
+        j = j + 1
+    if kf > 0:
+        var xf = x.cast[DType.float64]()
+        j = 0
+        while j < kf:
+            if xf == vf[j]:
+                return True
+            j = j + 1
+    return False
+
+
+@always_inline
 def _ee_civil_from_days(z: Int) -> Tuple[Int, Int, Int]:
     """Days-since-1970 -> (year, month[1..12], day[1..31]) in the proleptic
     Gregorian calendar. Branch-free scalar arithmetic; no floating point.
@@ -2639,48 +2674,50 @@ struct ExpressionExecutor(Movable, Deinitable):
             # Pre-extract typed value table (avoid per-row ScalarValue field
             # access on the hot path).
             var vt = List[Int64](capacity=k)
+            # Float entries: `x IN (v, ...)` is `x = v OR ...`, and an
+            # integer compared with a float compares as Float64 (the
+            # `*_F64_MIXED` compares), so a whole-number float such as 3.0
+            # matches 3. A non-integral float matches no integer. NULL and
+            # other-DType entries are skipped.
+            var vf = List[Float64]()
             for i in range(k):
                 if values[i].is_int():
                     vt.append(values[i].int_val)
-                else:
-                    # Skip non-int list entries (NULL or wrong-DType
-                    # literals): they cannot match an INT64 column under
-                    # SQL semantics, and the kernel defends without
-                    # raising (matches legacy `_eval_in_list_int64`).
-                    pass
+                elif values[i].is_float():
+                    vf.append(values[i].float_val)
             var ki = len(vt)
+            var kf = len(vf)
             var i_sel = 0
             while i_sel < n_sel:
                 var row = Int(input_sel.get(i_sel))
                 if not arr.is_null(row):
                     var x = arr.get(row)
-                    var j = 0
-                    while j < ki:
-                        if x == vt[j]:
-                            output_sel.append(UInt32(row))
-                            break
-                        j = j + 1
+                    if _in_list_int_probe(x.cast[DType.int64](), vt, ki, vf, kf):
+                        output_sel.append(UInt32(row))
                 i_sel = i_sel + 1
             return output_sel.len()
 
         if col_at == ArrowType.INT32:
             var arr = batch.column_as_primitive_int32(runtime_idx)
-            var vt = List[Int32](capacity=k)
+            # Integer entries stay Int64 and the Int32 value is widened, so
+            # an entry outside the Int32 range matches nothing rather than
+            # wrapping onto one. Float entries as in the INT64 arm.
+            var vt = List[Int64](capacity=k)
+            var vf = List[Float64]()
             for i in range(k):
                 if values[i].is_int():
-                    vt.append(Int32(Int(values[i].int_val)))
+                    vt.append(values[i].int_val)
+                elif values[i].is_float():
+                    vf.append(values[i].float_val)
             var ki = len(vt)
+            var kf = len(vf)
             var i_sel = 0
             while i_sel < n_sel:
                 var row = Int(input_sel.get(i_sel))
                 if not arr.is_null(row):
                     var x = arr.get(row)
-                    var j = 0
-                    while j < ki:
-                        if x == vt[j]:
-                            output_sel.append(UInt32(row))
-                            break
-                        j = j + 1
+                    if _in_list_int_probe(x.cast[DType.int64](), vt, ki, vf, kf):
+                        output_sel.append(UInt32(row))
                 i_sel = i_sel + 1
             return output_sel.len()
 
@@ -3048,11 +3085,8 @@ struct ExpressionExecutor(Movable, Deinitable):
                         " EXPR_DIV_I64 division by zero at sel index "
                         + String(k)
                     )
-                # Mojo `//` on Int64 FLOORS (-7 // 2 = -4), where SQL
-                # integer division truncates toward zero (-3); see
-                # `_ee_div_floor`. The two agree when the operands share a
-                # sign or the division is exact.
-                out.append(lhs_vals[k] // rhs_vals[k])
+                # Truncates toward zero (-7 / 2 = -3), not Mojo's floor.
+                out.append(_ee_div_trunc(lhs_vals[k], rhs_vals[k]))
                 k = k + 1
             return
 
@@ -3713,10 +3747,8 @@ struct ExpressionExecutor(Movable, Deinitable):
                         " EXPR_DIV_I32 division by zero at row "
                         + String(row)
                     )
-                # Mojo `//` on Int32 FLOORS (-7 // 2 = -4), where SQL
-                # integer division truncates toward zero (-3); see
-                # `_ee_div_floor`.
-                out.append(lhs // rhs)
+                # Truncates toward zero (-7 / 2 = -3), not Mojo's floor.
+                out.append(_ee_div_trunc(lhs, rhs))
                 k = k + 1
             return
 
@@ -3928,7 +3960,7 @@ struct ExpressionExecutor(Movable, Deinitable):
                     " EXPR_DIV_I32 division by zero at row "
                     + String(row)
                 )
-            return lhs // rhs
+            return _ee_div_trunc(lhs, rhs)
 
         raise Error(
             "ExpressionExecutor._eval_scalar_i32_from_view: unsupported"
@@ -5498,7 +5530,9 @@ struct ExpressionExecutor(Movable, Deinitable):
                     "ExpressionExecutor._eval_i64_from_source: EXPR_DIV_I64"
                     " division by zero at row " + String(row)
                 )
-            return self._eval_i64_from_source[CS](src, node.left, row) // rhs
+            return _ee_div_trunc(
+                self._eval_i64_from_source[CS](src, node.left, row), rhs
+            )
 
         raise Error(
             "ExpressionExecutor._eval_i64_from_source: unsupported node kind "

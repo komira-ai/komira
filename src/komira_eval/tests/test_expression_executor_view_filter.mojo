@@ -460,10 +460,8 @@ def test_in_list_int64_skips_null_and_non_integer_values() raises:
     vals.append(ScalarValue.from_int(1))
     vals.append(ScalarValue.from_float(2.5))
     _expect(_run(_in_exec(make_col(0), vals^), batch), [0, 3], "a64 IN (0, 1, 2.5)")
-    # A list of non-integral floats only: no Int64 value is taken, no row
-    # matches. A whole-number float such as 3.0 is skipped the same way,
-    # where SQL coerces it and would keep row 2. The walker does not coerce
-    # today, so that answer is not pinned here.
+    # A list of non-integral floats only: no Int64 value equals 3.5, no row
+    # matches. Whole-number floats are test_in_list_int_column_*_float_entry.
     var only_float = List[ScalarValue]()
     only_float.append(ScalarValue.from_float(3.5))
     _expect(_run(_in_exec(make_col(0), only_float^), batch), List[Int](), "a64 IN (3.5)")
@@ -478,6 +476,48 @@ def test_in_list_int32_skips_null_and_non_integer_values() raises:
     vals.append(ScalarValue.from_string("x"))
     vals.append(ScalarValue.from_int(3))
     _expect(_run(_in_exec(make_col(1), vals^), batch), [2, 4], "a32 IN (0, 4, 'x', 3)")
+
+
+def test_in_list_int_column_matches_a_whole_number_float_entry() raises:
+    """`x IN (v, ...)` is `x = v OR ...` (query_semantics.md §1), and an
+    integer column compared with a float compares as Float64, so a
+    whole-number float entry matches the equal integer (DuckDB agrees).
+    a64 = [1, N/0, 3, 1, 7], a32 = [5, N/0, 4, 2, 3] (komira-ai/komira#932)."""
+    var batch = _in_batch()
+    var three = List[ScalarValue]()
+    three.append(ScalarValue.from_float(3.0))
+    _expect(_run(_in_exec(make_col(0), three^), batch), [2], "a64 IN (3.0)")
+    var mixed = List[ScalarValue]()
+    mixed.append(ScalarValue.from_float(2.5))
+    mixed.append(ScalarValue.from_float(7.0))
+    _expect(_run(_in_exec(make_col(0), mixed^), batch), [4], "a64 IN (2.5, 7.0)")
+    # Row 1 is NULL and stores 0: a float 0.0 entry does not reach it.
+    var zero = List[ScalarValue]()
+    zero.append(ScalarValue.from_float(0.0))
+    _expect(_run(_in_exec(make_col(0), zero^), batch), List[Int](), "a64 IN (0.0)")
+    # A float far outside the Int64 range matches nothing and is not converted.
+    var huge = List[ScalarValue]()
+    huge.append(ScalarValue.from_float(1.0e300))
+    huge.append(ScalarValue.from_float(-1.0e300))
+    _expect(_run(_in_exec(make_col(0), huge^), batch), List[Int](), "a64 IN (1e300, -1e300)")
+    var four = List[ScalarValue]()
+    four.append(ScalarValue.from_float(4.0))
+    four.append(ScalarValue.from_float(3.5))
+    _expect(_run(_in_exec(make_col(1), four^), batch), [2], "a32 IN (4.0, 3.5)")
+
+
+def test_in_list_int32_column_does_not_wrap_a_wide_integer_entry() raises:
+    """2^32 + 4 and 2^32 + 3 are no Int32 value: no row of
+    a32 = [5, N/0, 4, 2, 3] equals either. Narrowed to Int32 they would be
+    4 and 3 and keep rows 2 and 4."""
+    var batch = _in_batch()
+    var wide = List[ScalarValue]()
+    wide.append(ScalarValue.from_int(4294967300))
+    wide.append(ScalarValue.from_int(4294967299))
+    _expect(_run(_in_exec(make_col(1), wide^), batch), List[Int](), "a32 IN (2^32 + 4, 2^32 + 3)")
+    var neg = List[ScalarValue]()
+    neg.append(ScalarValue.from_int(-4294967294))
+    _expect(_run(_in_exec(make_col(1), neg^), batch), List[Int](), "a32 IN (-(2^32) + 2)")
 
 
 def test_in_list_float64_takes_floats_and_widened_integers() raises:
@@ -686,6 +726,8 @@ def main() raises:
     suite.test[test_unsupported_root_kind_is_refused]()
     suite.test[test_in_list_int64_skips_null_and_non_integer_values]()
     suite.test[test_in_list_int32_skips_null_and_non_integer_values]()
+    suite.test[test_in_list_int_column_matches_a_whole_number_float_entry]()
+    suite.test[test_in_list_int32_column_does_not_wrap_a_wide_integer_entry]()
     suite.test[test_in_list_float64_takes_floats_and_widened_integers]()
     suite.test[test_in_list_string_skips_null_and_non_string_values]()
     suite.test[test_in_list_bool_per_truth_value]()
