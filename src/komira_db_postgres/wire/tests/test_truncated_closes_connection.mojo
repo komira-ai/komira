@@ -30,6 +30,16 @@ query() returns its rows and the connection stays open. That shows the
 harness delivers a reply the connection can read, so a red case is the
 connection's behaviour, not the harness's.
 
+An ErrorResponse is the other half of the design: the server is still in
+step, so the connection reads on to ReadyForQuery and stays open. Three
+cases (one per ErrorResponse branch of query, prepare and query_prepared)
+serve an ErrorResponse, its ReadyForQuery, then a second well-formed result
+whose one row is "next". Each checks that the call raises the server's
+error, closed() is False, and a second query() returns exactly the row
+"next". Closing on the error instead of draining fails the closed() check;
+skipping the drain leaves the first ReadyForQuery unread, so the second
+query() returns no rows instead of "next".
+
 main runs every case and raises after the last one if any failed.
 """
 
@@ -59,6 +69,7 @@ from komira_db_postgres.wire.pgwire import (
     MSG_BIND_COMPLETE,
     MSG_CMD_COMPLETE,
     MSG_DATA_ROW,
+    MSG_ERROR,
     MSG_NO_DATA,
     MSG_PARAM_DESC,
     MSG_PARSE_COMPLETE,
@@ -232,6 +243,36 @@ def _ready() -> List[UInt8]:
     return b^
 
 
+def _error_response() -> List[UInt8]:
+    """S ERROR, C 42P01, M relation "t" does not exist."""
+    var b = List[UInt8]()
+    b.append(UInt8(ord("S")))
+    _ascii(b, String("ERROR"))
+    b.append(UInt8(0))
+    b.append(UInt8(ord("C")))
+    _ascii(b, String("42P01"))
+    b.append(UInt8(0))
+    b.append(UInt8(ord("M")))
+    _ascii(b, String('relation "t" does not exist'))
+    b.append(UInt8(0))
+    b.append(UInt8(0))
+    return b^
+
+
+comptime _SERVER_ERR = 'PgError[ERROR 42P01]: relation "t" does not exist'
+
+
+def _error_then_next(mut out: List[UInt8]):
+    """ErrorResponse and its ReadyForQuery, then a second well-formed simple
+    query result whose one row is "next"."""
+    _put_msg(out, MSG_ERROR, _error_response())
+    _put_msg(out, MSG_READY, _ready())
+    _put_msg(out, MSG_ROW_DESC, _row_desc_one_text(String("a")))
+    _put_msg(out, MSG_DATA_ROW, _data_row_text(String("next")))
+    _put_msg(out, MSG_CMD_COMPLETE, _cmd_complete(String("SELECT 1")))
+    _put_msg(out, MSG_READY, _ready())
+
+
 def _tail(mut out: List[UInt8]):
     """The rest of a normal result after the message under test: a
     well-formed "stale" row, CommandComplete, ReadyForQuery."""
@@ -243,12 +284,21 @@ def _tail(mut out: List[UInt8]):
 # -----------------------------------------------------------------------------
 # One case: a TLS session over a socketpair, a canned reply, one call
 # -----------------------------------------------------------------------------
-def _run(reply: List[UInt8], op: Int, expect_err: String, what: String) raises:
+def _run(
+    reply: List[UInt8],
+    op: Int,
+    expect_err: String,
+    what: String,
+    server_error: Bool = False,
+) raises:
     """Serve `reply`, run `op` on a fresh PgConnection, and check the outcome.
 
     `expect_err` empty: the call must succeed with both rows ("ok" and
-    "stale") and leave the connection open. Otherwise the call must raise with `expect_err` in its
-    text, leave the connection closed, and refuse a second query()."""
+    "stale") and leave the connection open. `server_error`: the call must
+    raise with `expect_err` in its text, leave the connection open, and a
+    second query() must return exactly the row "next". Otherwise the call
+    must raise with `expect_err` in its text, leave the connection closed,
+    and refuse a second query()."""
     tls_init()
     var fds = _socketpair()
     var server_fd = fds[0]
@@ -307,6 +357,27 @@ def _run(reply: List[UInt8], op: Int, expect_err: String, what: String) raises:
         assert_equal(raised, String(""), what + ": the call raised")
         assert_equal(rows_seen, 2, what + ": rows returned")
         assert_false(conn.closed(), what + ": connection left open")
+    elif server_error:
+        assert_true(
+            raised.find(expect_err) >= 0,
+            what + ": expected '" + expect_err + "', got '" + raised + "'",
+        )
+        assert_false(
+            conn.closed(), what + ": connection open after the server error"
+        )
+        var nrows = -1
+        var first = String("")
+        var again = String("")
+        try:
+            var res2 = conn.query[BRT](reactor, String("SELECT a"))
+            nrows = res2.__len__()
+            if nrows > 0:
+                first = res2.row(0).get_text(0)
+        except e:
+            again = String(e)
+        assert_equal(again, String(""), what + ": next query raised")
+        assert_equal(nrows, 1, what + ": next query row count")
+        assert_equal(first, String("next"), what + ": next query row")
     else:
         assert_true(
             raised.find(expect_err) >= 0,
@@ -423,6 +494,46 @@ def test_query_prepared_truncated_row_description() raises:
     )
 
 
+def test_query_server_error_drains() raises:
+    """An error mid-result: a row already sent, then ErrorResponse."""
+    var r = List[UInt8]()
+    _put_msg(r, MSG_ROW_DESC, _row_desc_one_text(String("a")))
+    _put_msg(r, MSG_DATA_ROW, _data_row_text(String("partial")))
+    _error_then_next(r)
+    _run(
+        r,
+        _QUERY,
+        String(_SERVER_ERR),
+        String("query, ErrorResponse"),
+        server_error=True,
+    )
+
+
+def test_prepare_server_error_drains() raises:
+    var r = List[UInt8]()
+    _error_then_next(r)
+    _run(
+        r,
+        _PREPARE,
+        String(_SERVER_ERR),
+        String("prepare, ErrorResponse"),
+        server_error=True,
+    )
+
+
+def test_query_prepared_server_error_drains() raises:
+    var r = List[UInt8]()
+    _put_msg(r, MSG_BIND_COMPLETE, List[UInt8]())
+    _error_then_next(r)
+    _run(
+        r,
+        _QUERY_PREPARED,
+        String(_SERVER_ERR),
+        String("query_prepared, ErrorResponse"),
+        server_error=True,
+    )
+
+
 def main() raises:
     var failed = List[String]()
     try:
@@ -460,6 +571,21 @@ def main() raises:
     except e:
         print("FAIL query_prepared_row_description:", e)
         failed.append(String("query_prepared_row_description"))
+    try:
+        test_query_server_error_drains()
+    except e:
+        print("FAIL query_server_error:", e)
+        failed.append(String("query_server_error"))
+    try:
+        test_prepare_server_error_drains()
+    except e:
+        print("FAIL prepare_server_error:", e)
+        failed.append(String("prepare_server_error"))
+    try:
+        test_query_prepared_server_error_drains()
+    except e:
+        print("FAIL query_prepared_server_error:", e)
+        failed.append(String("query_prepared_server_error"))
     if len(failed) > 0:
         raise Error(
             "test_truncated_closes_connection: "
