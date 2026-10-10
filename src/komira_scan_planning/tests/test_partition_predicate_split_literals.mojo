@@ -19,7 +19,9 @@
 #     the residual (the row filter still rejects the rows).
 # The cases cover the comparison shape (literal on either side), the
 # `EXPR_IN_LIST` node and the OR-of-EQ chain `Expr.in_list` folds to, since
-# all three render literals.
+# all three render literals. The literal-on-the-left and `EXPR_IN_LIST`
+# shapes each have a case SQL rejects, so dropping the conjunct from the
+# residual on those paths fails a case, not only pruning the file.
 # =============================================================================
 
 from std.testing import TestSuite, assert_true
@@ -219,6 +221,65 @@ def test_date32_or_chain_keeps_matching_file() raises:
     )
 
 
+def test_null_on_the_left_rejects_the_null_partition() raises:
+    # `NULL = dt` is never true either; the conjunct must stay on the
+    # residual when the literal is on the left.
+    _check(
+        Expr.binary(
+            BIN_EQ,
+            Expr.literal(ScalarValue.null(DType.int64)),
+            Expr.col_ref(String("dt")),
+        ),
+        String("dt"),
+        ArrowType.STRING,
+        String(""),
+        False,
+        String("null on the left"),
+    )
+
+
+def test_float_literal_on_the_left_rejects_zero_int_file() raises:
+    _check(
+        Expr.binary(
+            BIN_EQ,
+            Expr.literal(ScalarValue.from_float(2020.0)),
+            Expr.col_ref(String("yr")),
+        ),
+        String("yr"),
+        ArrowType.INT64,
+        String("0"),
+        False,
+        String("2020.0 on the left, yr=0"),
+    )
+
+
+def test_float_in_list_node_rejects_zero_int_file() raises:
+    var vs = List[ScalarValue]()
+    vs.append(ScalarValue.from_float(2020.0))
+    _check(
+        Expr.in_list_node(Expr.col_ref(String("yr")), vs^),
+        String("yr"),
+        ArrowType.INT64,
+        String("0"),
+        False,
+        String("yr IN node (2020.0), yr=0"),
+    )
+
+
+def test_null_in_list_node_rejects_the_null_partition() raises:
+    # `dt IN (NULL)` is never true.
+    var vs = List[ScalarValue]()
+    vs.append(ScalarValue.null(DType.int64))
+    _check(
+        Expr.in_list_node(Expr.col_ref(String("dt")), vs^),
+        String("dt"),
+        ArrowType.STRING,
+        String(""),
+        False,
+        String("dt IN node (NULL)"),
+    )
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_date32_literal_keeps_matching_date_file]()
@@ -233,4 +294,8 @@ def main() raises:
     suite.test[test_uint64_above_int64_rejects_int64_min_file]()
     suite.test[test_date32_in_list_node_keeps_matching_file]()
     suite.test[test_date32_or_chain_keeps_matching_file]()
+    suite.test[test_null_on_the_left_rejects_the_null_partition]()
+    suite.test[test_float_literal_on_the_left_rejects_zero_int_file]()
+    suite.test[test_float_in_list_node_rejects_zero_int_file]()
+    suite.test[test_null_in_list_node_rejects_the_null_partition]()
     suite^.run()
