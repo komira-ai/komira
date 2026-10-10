@@ -14,4 +14,4 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_publish_oci.arm import ARTIFACT_TYPE_OCI_IMAGE, ImagePublish, publish_layout, record_image_publish
+from kci_publish_oci.arm import ARTIFACT_TYPE_OCI, ImagePublish, publish_layout, record_image_publish

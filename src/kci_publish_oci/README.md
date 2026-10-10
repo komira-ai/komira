@@ -33,7 +33,7 @@ from komira_oci.oci_auth import OciAuth
 from komira_oci.oci_fake_registry import FakeOciRegistry
 from komira_oci.oci_layout_fixture import write_test_layout
 from komira_oci.oci_push import LayoutPusher
-from kci_publish_oci import ARTIFACT_TYPE_OCI_IMAGE, publish_layout
+from kci_publish_oci import ARTIFACT_TYPE_OCI, publish_layout
 
 def bytes_of(s: String) -> List[UInt8]:
     var out = List[UInt8]()
@@ -54,7 +54,7 @@ var pusher = LayoutPusher[FakeOciRegistry](
 var first = publish_layout(pusher, dir, "registry.example.test", "team/app", rev, "linux-x86_64", False)
 assert_equal(first.outcome, "SUCCEEDED")
 assert_equal(first.exit_code(), 0)
-assert_equal(first.artifact.artifact_type, ARTIFACT_TYPE_OCI_IMAGE)
+assert_equal(first.artifact.artifact_type, ARTIFACT_TYPE_OCI)
 assert_equal(first.artifact.file, "registry.example.test/team/app@" + digest)
 assert_equal(pusher.transport().tag_digest("team/app", rev), digest)
 
