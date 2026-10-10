@@ -28,13 +28,23 @@
 #   - the orphan slot's drop closing its descriptor, which the live slot
 #     holding the same number still uses;
 #   - the moved tail's mapping rewritten when it reached another slot, so
-#     the slot the loop has been driving is no longer reached.
+#     the slot the loop has been driving is no longer reached;
+#   - the moved tail's mapping patched to a slot other than the removed one
+#     (only visible when a slot below the last two is removed);
+#   - the live-slot check made on the tail's descriptor instead of the
+#     mapped slot's (a live slot below a live tail is removed, its
+#     descriptor leaked);
+#   - a number the table does not map taken as a mapping to slot 0 (the
+#     sweep removes slot 0 without closing its descriptor, leaking it);
+#   - `ConnEntry.forget_fd` leaving the entry reporting the given-up number
+#     (`close_and_remove` pops the mapping keyed by it, which by then
+#     belongs to the connection that reused the number).
 # =============================================================================
 
 from std.collections.dict import Dict
 from std.ffi import external_call
 from std.sys.info import CompilationTarget
-from std.testing import TestSuite, assert_equal, assert_false
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.completion_queue import (
@@ -292,6 +302,141 @@ def test_sweep_ignores_a_stale_mapping_one_past_the_last_slot() raises:
     _close(c)
     _ = r^
     _ = l^
+
+
+def test_sweep_patches_a_tail_moved_below_the_last_two_slots() raises:
+    """Slot 0 holds -1 (an orphan), slot 1 holds the live descriptor A
+    mapped to it, and the tail, slot 2, holds the live descriptor B mapped
+    to it. The reused number's stale mapping reaches slot 0, so the sweep
+    removes it and B moves into slot 0. B's mapping reached the tail, so it
+    is patched to slot 0, the slot B now sits in (not slot 1, which is
+    tail - 1 but still A's). The new connection takes slot 2."""
+    var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
+    var r = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
+    var conns = Slab[ConnEntry]()
+    var fd_to_idx = Dict[Int, Int]()
+    var a = _socketpair()
+    var b = _socketpair()
+    var cn = _reused_number(l.local_port())
+    var c = cn[0]
+    var next = cn[1]
+    _wait_readable(l.fd())
+    conns.append(_entry(Int32(-1)))
+    conns.append(_entry(a[0]))
+    conns.append(_entry(b[0]))
+    fd_to_idx[Int(a[0])] = 1
+    fd_to_idx[Int(b[0])] = 2
+    fd_to_idx[Int(next)] = 0
+    assert_equal(accept_one_and_register(l, r, conns, fd_to_idx), 1)
+    assert_equal(conns.len(), 3)
+    assert_equal(len(fd_to_idx), 3)
+    # B moved into the removed slot, its mapping following it.
+    assert_equal(conns[0].fd(), b[0])
+    assert_equal(fd_to_idx[Int(b[0])], 0)
+    # A is untouched.
+    assert_equal(conns[1].fd(), a[0])
+    assert_equal(fd_to_idx[Int(a[0])], 1)
+    # The new connection sits at slot 2, mapped and open.
+    assert_equal(conns[2].fd(), next)
+    assert_equal(fd_to_idx[Int(next)], 2)
+    assert_false(_peer_sees_eof(a[1]))
+    assert_false(_peer_sees_eof(b[1]))
+    assert_false(_peer_sees_eof(c))
+    _ = conns^
+    _close(a[1])
+    _close(b[1])
+    _close(c)
+    _ = r^
+    _ = l^
+
+
+def test_sweep_keeps_a_live_slot_below_a_live_tail() raises:
+    """Slot 0 holds the live descriptor A mapped to it, and the tail, slot
+    1, holds the live descriptor B mapped to it. The reused number's stale
+    mapping reaches slot 0, which is live (A's own mapping reaches it): the
+    sweep drops only the stale mapping, and both slots stay where they are,
+    mapped and open. The new connection takes slot 2."""
+    var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
+    var r = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
+    var conns = Slab[ConnEntry]()
+    var fd_to_idx = Dict[Int, Int]()
+    var a = _socketpair()
+    var b = _socketpair()
+    var cn = _reused_number(l.local_port())
+    var c = cn[0]
+    var next = cn[1]
+    _wait_readable(l.fd())
+    conns.append(_entry(a[0]))
+    conns.append(_entry(b[0]))
+    fd_to_idx[Int(a[0])] = 0
+    fd_to_idx[Int(b[0])] = 1
+    fd_to_idx[Int(next)] = 0
+    assert_equal(accept_one_and_register(l, r, conns, fd_to_idx), 1)
+    assert_equal(conns.len(), 3)
+    assert_equal(len(fd_to_idx), 3)
+    assert_equal(conns[0].fd(), a[0])
+    assert_equal(fd_to_idx[Int(a[0])], 0)
+    assert_equal(conns[1].fd(), b[0])
+    assert_equal(fd_to_idx[Int(b[0])], 1)
+    assert_equal(conns[2].fd(), next)
+    assert_equal(fd_to_idx[Int(next)], 2)
+    assert_false(_peer_sees_eof(a[1]))
+    assert_false(_peer_sees_eof(b[1]))
+    assert_false(_peer_sees_eof(c))
+    _ = conns^
+    _close(a[1])
+    _close(b[1])
+    _close(c)
+    _ = r^
+    _ = l^
+
+
+def test_sweep_of_an_unmapped_number_touches_no_slot() raises:
+    """Slot 0 holds the live descriptor L, which no mapping reaches, and
+    the table does not map the number accept(2) returns. The sweep has no
+    mapping to act on, so it leaves slot 0 alone: L stays in the table,
+    which still owns it, so dropping the table closes L (a sweep that took
+    the missing mapping for slot 0 would remove the slot without closing
+    L, leaking it). The new connection takes slot 1."""
+    var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
+    var r = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
+    var conns = Slab[ConnEntry]()
+    var fd_to_idx = Dict[Int, Int]()
+    var live = _socketpair()
+    var cn = _reused_number(l.local_port())
+    var c = cn[0]
+    var next = cn[1]
+    _wait_readable(l.fd())
+    conns.append(_entry(live[0]))
+    assert_equal(accept_one_and_register(l, r, conns, fd_to_idx), 1)
+    assert_equal(conns.len(), 2)
+    assert_equal(len(fd_to_idx), 1)
+    assert_equal(conns[0].fd(), live[0])
+    assert_equal(conns[1].fd(), next)
+    assert_equal(fd_to_idx[Int(next)], 1)
+    assert_false(_peer_sees_eof(live[1]))
+    assert_false(_peer_sees_eof(c))
+    _ = conns^
+    # The table owned L: its drop closed it.
+    assert_true(_peer_sees_eof(live[1]))
+    _close(live[1])
+    _close(c)
+    _ = r^
+    _ = l^
+
+
+def test_forget_fd_gives_up_the_number() raises:
+    """After `forget_fd` the entry reports -1, not the number it gave up,
+    and its drop leaves the descriptor open."""
+    var live = _socketpair()
+    var e = _entry(live[0])
+    e.forget_fd()
+    assert_equal(e.fd(), Int32(-1))
+    _ = e^
+    assert_false(_peer_sees_eof(live[1]))
+    _close(live[0])
+    assert_true(_peer_sees_eof(live[1]))
+    _close(live[1])
 
 
 def main() raises:
