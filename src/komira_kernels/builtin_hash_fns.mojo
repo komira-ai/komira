@@ -181,7 +181,7 @@ def _simd_hash_int[dt: DType, INPUT_VALID: Bool](
         while i < n:
             var is_valid = True
             if input.validity:
-                if not input.validity.value().test(i):
+                if not input.validity.value().test(input.offset + i):
                     is_valid = False
             if is_valid:
                 var k = input.load[width=1](i).cast[DType.uint64]()
@@ -243,7 +243,7 @@ def _simd_hash_f32[INPUT_VALID: Bool](
         while i < n:
             var is_valid = True
             if input.validity:
-                if not input.validity.value().test(i):
+                if not input.validity.value().test(input.offset + i):
                     is_valid = False
             if is_valid:
                 var v = input.load[width=1](i)[0]
@@ -282,7 +282,7 @@ def _simd_hash_f64[INPUT_VALID: Bool](
         while i < n:
             var is_valid = True
             if input.validity:
-                if not input.validity.value().test(i):
+                if not input.validity.value().test(input.offset + i):
                     is_valid = False
             if is_valid:
                 var v = input.load[width=1](i)[0]
@@ -344,7 +344,7 @@ def _simd_hash_bool[INPUT_VALID: Bool](
         while i < n:
             var is_valid = True
             if input.validity:
-                if not input.validity.value().test(i):
+                if not input.validity.value().test(input.offset + i):
                     is_valid = False
             if is_valid:
                 var v = input.load[width=1](i)[0]
