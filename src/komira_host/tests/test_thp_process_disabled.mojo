@@ -9,7 +9,7 @@
 # flag is process-wide and inherited.
 #
 # Requires Linux 5.0 or later to build: `THP_enabled:` first appears in
-# `/proc/<pid>/status` in 5.0 (commit a1400af75563, "mm, proc: report
+# `/proc/<pid>/status` in 5.0 (the upstream change "mm, proc: report
 # PR_SET_THP_DISABLE in proc"). On an older kernel this test fails with that
 # message rather than passing without observing row 1.
 # =============================================================================
