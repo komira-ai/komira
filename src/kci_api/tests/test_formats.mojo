@@ -24,6 +24,7 @@ from kci_api import (
     produced_header,
     unknown_keys,
 )
+from kci_api.formats import FormatRow, _range_refusal
 
 
 def _authored(name: String, present: Bool, found: Int) -> String:
@@ -106,6 +107,10 @@ def test_produced_header() raises:
         String("r.json: 'schema_version' is not an integer"),
     )
     assert_equal(_header(String('[1]'), String(FORMAT_RESULT)), String("r.json: not a JSON object"))
+    assert_equal(
+        _header(String('{"format":1,"schema_version":1}'), String(FORMAT_RESULT)),
+        String("r.json: 'format' is not a string"),
+    )
     var refused = False
     try:
         check_produced_version(String(FORMAT_CHANNELS), String("x"), String(FORMAT_CHANNELS), 1)
@@ -123,6 +128,24 @@ def test_unknown_keys_are_listed_not_refused() raises:
     assert_equal(len(u), 2)
     assert_equal(u[0], String("later"))
     assert_equal(u[1], String("also"))
+
+
+def _range(row: FormatRow, found: Int) -> String:
+    try:
+        _range_refusal(row, String("s"), found)
+    except e:
+        return String(e)
+    return String("<ok>")
+
+
+def test_a_row_reading_several_majors_names_the_span() raises:
+    # every row of today's table reads one major; the refusal of a row that
+    # reads 2..4 names the span, the bounds themselves are read
+    var row = FormatRow(String("kci.x"), String(KIND_PRODUCED), 4, 2)
+    assert_equal(_range(row, 2), String("<ok>"))
+    assert_equal(_range(row, 4), String("<ok>"))
+    assert_equal(_range(row, 1), String("s: schema_version 1 is no longer read (this kci reads kci.x major 2..4)"))
+    assert_equal(_range(row, 5), String("s: schema_version 5 needs a newer kci (this kci reads kci.x up to major 4)"))
 
 
 def test_rows_by_name() raises:

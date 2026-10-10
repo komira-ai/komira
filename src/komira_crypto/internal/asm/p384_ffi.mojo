@@ -370,11 +370,11 @@ def p384_sign_with_nonce(
     # it does not apply to a try/FINALLY.)
     try:
         if Int(eckey) == 0:
-            raise Error("p384_sign: EC_KEY_new_by_curve_name OOM")
+            raise Error("p384_sign: EC_KEY_new_by_curve_name OOM")  # cov: unreachable an allocation failure
 
         priv_bn = _bn_bin2bn_from_span(priv_be)
         if Int(priv_bn) == 0:
-            raise Error("p384_sign: BN_bin2bn(priv) OOM")
+            raise Error("p384_sign: BN_bin2bn(priv) OOM")  # cov: unreachable an allocation failure
 
         # SAFETY: EC_KEY_set_private_key copies priv_bn into eckey;
         # priv_bn ownership stays with caller (must free after).
@@ -422,7 +422,7 @@ def p384_sign_with_nonce(
         var pad_r = _bn_bn2binpad_to_inline48(r_bn, r_out)
         var pad_s = _bn_bn2binpad_to_inline48(s_bn, s_out)
         if pad_r != Int32(P384_BYTES) or pad_s != Int32(P384_BYTES):
-            raise Error("p384_sign: BN_bn2binpad encoding failed")
+            raise Error("p384_sign: BN_bn2binpad encoding failed")  # cov: unreachable r and s are below n, so both always pad to the field width
     finally:
         # Cleanup all owned heap handles (in reverse alloc order).
         # SAFETY: ECDSA_SIG_free frees the sig + its internal r,s BIGNUMs
@@ -475,13 +475,13 @@ def p384_verify(
     var sig_owns_rs = False  # ECDSA_SIG_set0 transferred ownership of r/s
     try:
         if Int(eckey) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # Decode pubkey x + y from BE bytes.
         x_bn = _bn_bin2bn_from_span(pub_xy_be[0:P384_BYTES])
         y_bn = _bn_bin2bn_from_span(pub_xy_be[P384_BYTES:2 * P384_BYTES])
         if Int(x_bn) == 0 or Int(y_bn) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # Set public key via affine coordinates (avoids EC_POINT alloc).
         # SAFETY: EC_KEY_set_public_key_affine_coordinates internally
@@ -502,11 +502,11 @@ def p384_verify(
             _FfiHandle,
         ]()
         if Int(sig) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
         r_bn = _bn_bin2bn_from_span(r_be)
         s_bn = _bn_bin2bn_from_span(s_be)
         if Int(r_bn) == 0 or Int(s_bn) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # SAFETY: ECDSA_SIG_set0 TAKES OWNERSHIP of r_bn + s_bn — they
         # are now owned by sig and will be freed when sig is freed.
@@ -520,7 +520,7 @@ def p384_verify(
         ](sig, r_bn, s_bn)
         if rc_set != 1:
             # set0 failed — r_bn / s_bn ownership stays with us.
-            return False
+            return False  # cov: unreachable ECDSA_SIG_set0 fails only on a NULL r or s, refused above
         sig_owns_rs = True
 
         # SAFETY: ECDSA_do_verify reads 48 bytes from digest_ptr, performs
@@ -592,16 +592,16 @@ def p384_pubkey_from_priv(
     # it does not apply to a try/FINALLY.)
     try:
         if Int(eckey) == 0:
-            raise Error("p384_pubkey: EC_KEY_new_by_curve_name OOM")
+            raise Error("p384_pubkey: EC_KEY_new_by_curve_name OOM")  # cov: unreachable an allocation failure
 
         # Borrowed group ptr; do NOT free.
         var group = _ec_key_get0_group(eckey)
         if Int(group) == 0:
-            raise Error("p384_pubkey: EC_KEY_get0_group returned NULL")
+            raise Error("p384_pubkey: EC_KEY_get0_group returned NULL")  # cov: unreachable an EC_KEY made for this curve always has its group
 
         priv_bn = _bn_bin2bn_from_span(priv_be)
         if Int(priv_bn) == 0:
-            raise Error("p384_pubkey: BN_bin2bn(priv) OOM")
+            raise Error("p384_pubkey: BN_bin2bn(priv) OOM")  # cov: unreachable an allocation failure
 
         pub_pt = external_call[
             "komira_awslc_EC_POINT_new",
@@ -609,7 +609,7 @@ def p384_pubkey_from_priv(
             _FfiHandle,  # group
         ](group)
         if Int(pub_pt) == 0:
-            raise Error("p384_pubkey: EC_POINT_new OOM")
+            raise Error("p384_pubkey: EC_POINT_new OOM")  # cov: unreachable an allocation failure
 
         # SAFETY: EC_POINT_mul(group, r, n, q, m, ctx):
         #   r = n*G + m*q where G is the group's generator.
@@ -626,7 +626,7 @@ def p384_pubkey_from_priv(
             _FfiHandle,  # ctx (NULL)
         ](group, pub_pt, priv_bn, null_ptr, null_ptr, null_ptr)
         if rc_mul != 1:
-            raise Error("p384_pubkey: EC_POINT_mul failed")
+            raise Error("p384_pubkey: EC_POINT_mul failed")  # cov: unreachable EC_POINT_mul reduces any scalar mod n and fails only on an allocation failure
 
         # SAFETY: EC_POINT_point2oct writes the uncompressed point
         # (1 format byte + 48 x bytes + 48 y bytes = 97 bytes) into buf
@@ -650,7 +650,7 @@ def p384_pubkey_from_priv(
         if n_written != UInt(P384_POINT_OCT_LEN):
             raise Error("p384_pubkey: EC_POINT_point2oct failed")
         if raw97[0] != UInt8(0x04):
-            raise Error("p384_pubkey: unexpected point format byte")
+            raise Error("p384_pubkey: unexpected point format byte")  # cov: unreachable POINT_CONVERSION_UNCOMPRESSED always writes 0x04 first
 
         # Strip leading 0x04, copy x||y into pub_xy_out (96 bytes).
         for i in range(2 * P384_BYTES):

@@ -4,13 +4,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # messages: check_calendar, check_event (timing, the structured recurrence
 # rule, removed occurrences, reminders) and check_override, each refusal a
 # stable code, a JSON field path and a sentence; the local date and
-# date-time text forms. No zone rules, no expansion, no store.
+# date-time text forms; expand and series_span, the occurrences of an event
+# in local time. No zone rules, no store.
 #
 # test_validation_table holds the event rows: two valid events and, row by
 # row, one broken field each, asserting the exact code, field and message.
 # test_calendar_override_table holds the calendar rows, the override rows and
 # the error envelope. test_local_time pins the text forms. README.md's
-# examples run as one more welded test.
+# examples run as one more welded test. test_expand_goldens restates the
+# classic RRULE expansion cases (weekly by weekday, count, until, exdate,
+# ordinal weekday) as structured rules;
+# test_expand_rules pins each part of the rule, the window and series_span
+# against hand-derived dates.
 mojo_library(
     name = "komira_calendar",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -22,6 +27,8 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_calendar_override_table.mojo",
+        "tests/test_expand_goldens.mojo",
+        "tests/test_expand_rules.mojo",
         "tests/test_local_time.mojo",
         "tests/test_validation_table.mojo",
     ],

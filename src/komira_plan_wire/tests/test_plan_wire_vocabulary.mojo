@@ -183,15 +183,52 @@ def test_countless_space_totals_are_pinned() raises:
 # ---------------------------------------------------------------------------
 
 
+def _reserved_on_wire(space: Int, engine_tag: Int) -> Bool:
+    """The engine tags plan_vocabulary.proto reserves: ExprTag (space 1)
+    EXPR_BETWEEN and EXPR_SORT_KEY, SourceVariantTag (space 13)
+    SOURCE_VARIANT_PARQUET and SOURCE_VARIANT_IN_MEMORY. Declared by the
+    engine, refused in both directions."""
+    if space == 1:
+        return engine_tag == 10 or engine_tag == 11
+    if space == 13:
+        return engine_tag == 0 or engine_tag == 1
+    return False
+
+
 def test_every_space_round_trips_every_declared_tag() raises:
-    """EVERY space, EVERY value 0..255. No space is named here on purpose."""
+    """EVERY space, EVERY value 0..255. No space is named here on purpose,
+    except in `_reserved_on_wire`."""
     var total_declared = 0
+    var total_reserved = 0
     for space in range(PLAN_WIRE_SPACE_COUNT):
         var name = plan_wire_space_name(space)
         var declared_here = 0
         for i in range(0, 256):
             var t = UInt8(i)
-            if plan_wire_is_declared(space, t):
+            if _reserved_on_wire(space, i):
+                # Declared, counted as a member, and refused both ways: the
+                # .proto reserves the number.
+                assert_true(plan_wire_is_declared(space, t), name + ": declared")
+                declared_here += 1
+                total_reserved += 1
+                var to_raised = False
+                try:
+                    _ = plan_wire_to_wire(space, t)
+                except:
+                    to_raised = True
+                assert_true(
+                    to_raised, name + ": to_wire must refuse reserved " + String(i)
+                )
+                var from_raised = False
+                try:
+                    _ = plan_wire_from_wire(space, Int32(i + 1))
+                except:
+                    from_raised = True
+                assert_true(
+                    from_raised,
+                    name + ": from_wire must refuse reserved " + String(i + 1),
+                )
+            elif plan_wire_is_declared(space, t):
                 declared_here += 1
                 var w = plan_wire_to_wire(space, t)
                 assert_equal(
@@ -234,6 +271,7 @@ def test_every_space_round_trips_every_declared_tag() raises:
         PLAN_WIRE_VOCABULARY_MEMBERS,
         "the drive must cover every published member of every space",
     )
+    assert_equal(total_reserved, 4, "four reserved engine tags")
 
 
 def test_every_space_refuses_the_four_bad_wire_values() raises:

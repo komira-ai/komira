@@ -7,11 +7,23 @@ mojo_library(
     deps = [
         "//src/komira_atomic_alias:komira_atomic_alias",
     ],
+    # The welded tests are compiled with every runtime_introspection hook ON,
+    # so test_runtime_introspection checks the lines they emit. No other test
+    # reads these defines.
+    test_defines = [
+        "KOMIRA_TRACE_ARC=true",
+        "KOMIRA_TRACE_TCMALLOC=true",
+        "KOMIRA_TRACE_TRAMPOLINE=true",
+    ],
+    test_deps = [
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
     test_srcs = [
         "tests/test_global_counter.mojo",
         "tests/test_keyeq_census.mojo",
         "tests/test_parquet_read_counter.mojo",
         "tests/test_planner_scale_counter.mojo",
+        "tests/test_runtime_introspection.mojo",
         "tests/test_strdrain_counter.mojo",
     ],
     visibility = ["PUBLIC"],

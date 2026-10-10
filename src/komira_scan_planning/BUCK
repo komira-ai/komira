@@ -22,6 +22,8 @@ mojo_library(
         "tests/test_partition_pred_bridge_fields.mojo",
         "tests/test_partition_pred_bridge_roundtrip.mojo",
         "tests/test_partition_predicate_split.mojo",
+        "tests/test_partition_predicate_split_ops.mojo",
+        "tests/test_partition_predicate_split_shapes.mojo",
     ],
     visibility = ["PUBLIC"],
 )

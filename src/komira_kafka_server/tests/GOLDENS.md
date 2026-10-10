@@ -21,7 +21,11 @@ from a Kafka client or broker.
   `AddPartitionsToTxnRequest.json`, `AddPartitionsToTxnResponse.json`,
   `AddOffsetsToTxnRequest.json`, `AddOffsetsToTxnResponse.json`,
   `EndTxnRequest.json`, `EndTxnResponse.json`,
-  `TxnOffsetCommitRequest.json`, `TxnOffsetCommitResponse.json`.
+  `TxnOffsetCommitRequest.json`, `TxnOffsetCommitResponse.json`,
+  `ApiVersionsRequest.json`, `ApiVersionsResponse.json`,
+  `MetadataRequest.json`, `MetadataResponse.json`,
+  `ProduceRequest.json`, `FetchRequest.json`, `FetchResponse.json`,
+  `ListOffsetsRequest.json`.
 - License: those schema files are Apache License 2.0, copyright the Apache
   Software Foundation. They are not vendored here; the tests contain only
   example messages laid out as the schemas describe.

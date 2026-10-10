@@ -1,6 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
+load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
@@ -119,20 +120,32 @@ _TESTS_LINTS = [
     "tests//functional/mem_cap:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
+    "tests//functional/test_deadline:shell_lint",
     "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
     "//src/kci_cell:deps_lint",
+    "//src/komira_authz_api:deps_lint",
     "//src/komira_aws_lambda_http:deps_lint",
+    "//src/komira_calendar_ics:deps_lint",
+    "//src/komira_contacts:deps_lint",
+    "//src/komira_http_auth:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
+    "//src/komira_optimizer:deps_lint",
+    "//src/tests/conformance/komira_calendar_ics_conformance:deps_lint",
     "//src/tests/conformance/komira_connect_conformance:deps_lint",
+    "//src/tests/conformance/komira_contacts_store_conformance:deps_lint",
     "//src/tests/conformance/komira_db_conformance:deps_lint",
     "//src/tests/conformance/komira_git_conformance:deps_lint",
+    "//src/tests/conformance/komira_git_pack_conformance:deps_lint",
+    "//src/tests/conformance/komira_git_protocol_conformance:deps_lint",
     "//src/tests/conformance/komira_http_conformance:deps_lint",
+    "//src/tests/conformance/komira_datetime_conformance:deps_lint",
     "//src/tests/conformance/komira_json_conformance:deps_lint",
     "//src/tests/conformance/komira_plan_conformance:deps_lint",
+    "//src/tests/conformance/komira_xml_conformance:deps_lint",
     "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
     "//src/tests/e2e/komira_formats_e2e:deps_lint",
     "//src/tests/e2e/komira_http_tls_e2e:deps_lint",
@@ -254,6 +267,15 @@ _TESTS_LINTS = [
     rows = MATRIX,
     surfaces = SURFACES,
     tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# The coverage census (tools/build/coverage/census.md):
+# docs/coverage_census.md and the floors of tools/build/coverage/ratchet.tsv
+# are exactly what tools/build/coverage/census.sh renders from census.tsv, so
+# the doc is never edited by hand and no floor is under what was measured.
+[coverage_census(
+    name = "coverage_census",
+    doc = "docs/coverage_census.md",
 ) for _ in _TESTS_LINTS[:1]]
 
 # The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md, "What must

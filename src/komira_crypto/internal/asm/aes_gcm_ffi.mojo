@@ -376,7 +376,7 @@ struct AesGcmCtx[KEY_SIZE: Int](Movable, Deinitable):
             UInt(len(aad)),
         )
         if rc != 1:
-            raise Error("AesGcm.seal_in_place: EVP_AEAD_CTX_seal failed")
+            raise Error("AesGcm.seal_in_place: EVP_AEAD_CTX_seal failed")  # cov: unreachable seal fails only on arguments fixed here (key, nonce, tag sizes) or a plaintext of tens of GiB
 
     @always_inline
     def open_in_place[o: Origin[mut=True]](

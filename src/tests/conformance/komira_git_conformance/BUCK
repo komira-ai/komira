@@ -1,15 +1,11 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps", "shell_lint")
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "git_transcripts")
 
-# Test-only: komira_git against external oracles. Nothing depends on this
+# Test-only: komira_git's SHA-1 collision detection (komira_git/sha1dc.mojo, a
+# pure-Mojo port) against sha1collisiondetection's C, the library the port
+# follows, pinned in //third_party/sha1collisiondetection and linked into
+# these tests only (oracle.mojo holds the FFI). Nothing depends on this
 # package.
-#
-# SHA-1 collision detection (komira_git/sha1dc.mojo, a pure-Mojo port)
-# against sha1collisiondetection's C, the library the port follows, pinned in
-# //third_party/sha1collisiondetection and linked into these tests only
-# (oracle.mojo holds the FFI):
 #   test_dv_table_and_ubc -- the 32 disturbance vectors (fields and all 80
 #     message-difference words) against upstream's sha1_dvs, and the
 #     unavoidable-bit-condition mask against upstream's ubc_check over 2^20
@@ -29,39 +25,15 @@ load(":defs.bzl", "git_transcripts")
 #     off); for every DV below 31, blocks where it is set below a higher
 #     DV, sampled from the blocks meeting DV 27 to 31's bit conditions.
 #
-# Protocol state machines against the pinned git (//third_party/git).
-# capture.sh (the :transcripts target below) runs real git on both ends of
-# fetches (protocol v2) and pushes (receive-pack) over file:// and records
-# the bytes each way, with the server repository's state (capture.sh lists
-# the scenarios). checks.mojo, graph.mojo and transcript.mojo hold what
-# these tests share (loading a scenario, the scenario's repository as a
-# CommitGraph, pack and push-verdict checks):
-#   test_upload_pack_server   komira_git's v2 server answers git's client
-#                             byte for byte as git's server did
-#   test_fetch_client         komira_git's v2 client writes git's requests
-#                             byte for byte and reads git's responses
-#   test_receive_pack_server  komira_git's receive-pack answers git's pushes
-#                             byte for byte as git's receive-pack did
-#   test_send_pack_client     komira_git's push client writes git's commands
-#                             byte for byte and reads git's reports
-#   test_capability_truth     every capability komira_git advertises is one
-#                             git's client used in a transcript
-#   test_harness              the library's own refusals and graph walk,
-#                             on fixtures/ (hand-written scenarios), not
-#                             transcripts
+# komira_git's oracles that need the pinned git (//third_party/git, built for
+# linux-x86_64 only) are their own packages, so this one carries no platform
+# limit: the pack reader in komira_git_pack_conformance, the protocol state
+# machines in komira_git_protocol_conformance.
 
-_SHA1DC_TESTS = [
+_TESTS = [
     "tests/test_digests.mojo",
     "tests/test_dv_table_and_ubc.mojo",
     "tests/test_recompression.mojo",
-]
-
-_TESTS = [
-    "tests/test_capability_truth.mojo",
-    "tests/test_fetch_client.mojo",
-    "tests/test_receive_pack_server.mojo",
-    "tests/test_send_pack_client.mojo",
-    "tests/test_upload_pack_server.mojo",
 ]
 
 mojo_library(
@@ -73,38 +45,16 @@ mojo_library(
         "//src/komira_git:komira_git",
         "//src/komira_zlib:komira_zlib",
         "//third_party/sha1collisiondetection:sha1dc",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     conda = False,
-    # The transcripts come from the git oracle, built for linux-x86_64 only.
-    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
-    test_srcs = _SHA1DC_TESTS + _TESTS + ["tests/test_harness.mojo"],
+    test_srcs = _TESTS,
     # The SHAttered PDFs and upstream's reduced-round collision, staged at
-    # sha1dc/test/; git's transcripts at transcripts/.
+    # sha1dc/test/.
     test_data = {
         "tests/test_digests.mojo": {"sha1dc": "//third_party/sha1collisiondetection:testdata"},
         "tests/test_dv_table_and_ubc.mojo": {"sha1dc": "//third_party/sha1collisiondetection:testdata"},
-    } | {t: {"transcripts": ":transcripts"} for t in _TESTS} | {
-        "tests/test_harness.mojo": {
-            "transcripts/" + f.removeprefix("fixtures/"): f
-            for f in glob(["fixtures/**"])
-        },
     },
     visibility = ["PUBLIC"],
-)
-
-git_transcripts(
-    name = "transcripts",
-    exec_compatible_with = LINUX_X86_64,
-    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
-    checks = [":shell_lint"],
-    git = "//third_party/git:git",
-    script = "capture.sh",
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = ["capture.sh"],
 )
 
 # The deps above name every komira_* module the library and its tests import

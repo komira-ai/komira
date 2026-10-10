@@ -24,6 +24,7 @@ zig_exe(
     name = "cov_branch_classify_exe",
     exec_compatible_with = LINUX_X86_64,
     imports = [
+        "cov_branch_andor.zig",
         "cov_branch_ir.zig",
         "cov_branch_records.zig",
         "cov_branch_source.zig",

@@ -1,6 +1,6 @@
 # =============================================================================
 # physical_plan_purity_gate — THE REFUSAL that keeps a LOGICAL plan out of the
-# PHYSICAL one, at the cut chokepoint, beside the IR version door.
+# PHYSICAL one, written to run beside the IR version door.
 # =============================================================================
 #
 # A prerequisite for running the optimizer as a separately built library
@@ -76,10 +76,10 @@
 # can see.
 #
 # ── COST ─────────────────────────────────────────────────────────────────────
-# This is meant to run on every cut of every query, like the version door. It is
-# a tag-dispatched walk over expressions that are already in cache (the cutter
-# has just COPIED each of them into the descriptor), it allocates nothing on the
-# passing path, and every message is built only on the failing path.
+# It is written to run on every cut of every query, as the version door is. It
+# is a tag-dispatched walk over the expressions the segments already hold; it
+# allocates nothing on the passing path, and every message is built only on the
+# failing path.
 # =============================================================================
 
 from komira_plan_expr.expr import (
@@ -420,7 +420,7 @@ def assert_physical_plan_carries_no_logical_plan(
             " logical plan. Nothing was inspected, so this is a REFUSAL, not a",
             " pass -- a gate that returns OK over an empty list is",
             " indistinguishable from a gate that was never called. An empty",
-            " plan reaching here means the cutter emitted no DAG.",
+            " plan reaching here means its producer emitted no segments.",
         )
 
     var sites = 0

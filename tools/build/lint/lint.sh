@@ -37,14 +37,22 @@
 #       group and cancels it for a newer one, so a group shared by pushes
 #       loses the middle push's run. Checks nothing, so fails, when no
 #       workflow is push-triggered.
-#   kind "mojo_deps", args <BUCK file> <.mojo file>...
+#   kind "mojo_deps", tools <refused_imports.awk>, args <BUCK file> <refused> <.mojo file>...
 #       The `deps` of the package's mojo_library name every `komira_*` module
 #       the .mojo files import, by target name (`:komira_x`): the deps are a
 #       superset of the imports. A library built from the .mojo files of one
 #       package compiles only against the packages on its `-I` closure, so a
 #       missing dep is a failure at build time, found here in review. The
 #       library's own name is not an import to declare. Extra deps are not a
-#       finding (a dep may be there for a macro or a link).
+#       finding (a dep may be there for a macro or a link). Targets named in
+#       `test_deps` count too, since the .mojo files include the welded tests;
+#       a library source importing a test_deps package passes here and fails
+#       its compile. <refused> is `-` or a comma-separated list of dotted
+#       module names (`komira_x.y`) that no .mojo file may import, nor any
+#       module under one, nor name by its dotted path outside an import;
+#       refused_imports.awk, the reader, says which forms it reads and what
+#       it misreads. A module of a dep can be refused while the dep itself
+#       stays declared.
 #   kind "retired_names", args <tree> <prefix of tree> <name>... -- <file>...
 #       No file under <tree> (the cell's doc_tree, findings named <prefix of
 #       tree><path>) and no <file> holds a <name> (a fixed string) on a line
@@ -219,13 +227,14 @@ push_verdicts)
     done
     ;;
 mojo_deps)
+    AWK=$(abs "$1"); shift
     [ "$1" = -- ] && shift
-    buck=$1
-    shift
+    buck=$1 refused=$2
+    shift 2
     checked=$#
     self=$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\([A-Za-z0-9_]*\)",.*/\1/p' "$buck" | head -1)
-    # The target names inside `deps = [ ... ]`.
-    awk '/^[[:space:]]*deps[[:space:]]*=[[:space:]]*\[/ { on = 1 }
+    # The target names inside `deps = [ ... ]` and `test_deps = [ ... ]`.
+    awk '/^[[:space:]]*(test_)?deps[[:space:]]*=[[:space:]]*\[/ { on = 1 }
          on { while (match($0, /:[A-Za-z0-9_]+"/)) { print substr($0, RSTART + 1, RLENGTH - 2); $0 = substr($0, RSTART + RLENGTH) } }
          on && /\]/ { on = 0 }' "$buck" | sort -u > "$T/declared"
     [ -n "$self" ] || echo "$buck: no mojo_library name found" >> "$REPORT"
@@ -237,6 +246,7 @@ mojo_deps)
                 grep -qx "$mod" "$T/declared" ||
                     echo "$f:$line: imports $mod, which the deps of $buck do not name (:$mod)" >> "$REPORT"
             done
+        [ "$refused" = - ] || awk -v F="$f" -v R="$refused" -f "$AWK" "$f" >> "$REPORT"
     done
     ;;
 retired_names)

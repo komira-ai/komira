@@ -53,23 +53,33 @@
 #   kind      inputs                                    what it does
 #   BUILD     platform, artifacts                    kci_build: one build per
 #                                                       declared artifact
-#   PUBLISH   platform, artifacts, channels, channel kci_publish: the release
-#                                                       set to one channel
-#   DEPLOY    (none yet)                                reserved: refused as
-#                                                       "needs a newer kci"
+#   PUBLISH   platform, artifacts, and ONE destination: kci_publish: the release
+#             channels + channel, or cells + cell       set to one channel, or
+#                                                       (not run yet) one cell
+#   DEPLOY    cells, cell, resources, definitions,   parsed; this kci does
+#             DEPLOY_PROBE validations                  not run it yet
 #
 # A stage may hold steps of different kinds. The kind words are
 # kci_api's (verbs.mojo), and so is the name grammar (selection.mojo).
 #
-# DEPLOY, reserved. When its body lands, a DEPLOY step names a CELL (one
-# deploy target: an account or project in one region), and the cell names
-# its CLOUD (the deploy-target adapter that turns resources into calls). A
-# platform stays OS + CPU only; it never names a cloud. No field for either
-# exists yet.
+# CELLS. A step that writes into a cell (a DEPLOY step, or a PUBLISH step
+# with `cells` and `cell`) names a cells file (`cells`, format `kci.cells`)
+# and one cell of it (`cell`); the cell names its cloud. A platform stays
+# OS + CPU only; it never names a cloud. Every rule of such a step is
+# deploy.mojo's (`validate_cell_steps`, which `parse_machine_file` runs after
+# `validate_release_machine`); this file only lets the kind and the fields
+# through. Whether the cell is in the file is `require_cells_declared`'s, run
+# by whoever reads the cells file (this package opens no file).
 #
-# VALIDATIONS. A PUBLISH step may carry `validation { ... }` blocks that check
-# what it published. A validation name is unique in its stage (the grammar of
-# a step name). Two kinds (kci_api): CONDA_INSTALL_SMOKE installs the
+# VALIDATIONS. A step may carry `validation { ... }` blocks. A validation
+# name is unique in its stage (the grammar of a step name). The kind says
+# which step it belongs to: CONDA_INSTALL_SMOKE and CONDA_INSTALL_ENV check
+# what a PUBLISH step published; DEPLOY_PROBE checks the cell a DEPLOY step
+# deployed into (any other pairing is refused here). Every rule of a
+# DEPLOY_PROBE past its name and kind is probe.mojo's (run by deploy.mojo's
+# `validate_cell_steps`); a CONDA_* validation that writes a probe's field
+# (`args`, `target`, `timeout_seconds`, `expect`) is refused here. The two
+# CONDA kinds (kci_api): CONDA_INSTALL_SMOKE installs the
 # published packages inside a container and runs a program against them;
 # CONDA_INSTALL_ENV installs them on the machine that runs kci, with no
 # container (a pinned pixi, a scratch directory, a cleared environment), and
@@ -135,6 +145,7 @@ from kci_api import (
     is_step_name,
     require_release_platform,
     VALIDATION_KIND_CONDA_INSTALL_ENV,
+    VALIDATION_KIND_DEPLOY_PROBE,
     require_validation_kind,
 )
 
@@ -166,9 +177,11 @@ GitHub environment name (kci_api states the number)."""
 
 
 struct StageValidation(Copyable, Movable):
-    """One validation of a step (file header). `installs` and
-    `extra_channels` are in file order; `line` is the line its block opens
-    on.
+    """One validation of a step (file header). `installs`,
+    `extra_channels`, `args` and `expects` are in file order; `written`
+    names each field the block wrote, once, in file order (so a rule can
+    tell a field left at its default from one written with that value);
+    `line` is the line its block opens on.
 
     Layout: owned Strings, Lists of Strings and Ints. No pointer field."""
 
@@ -181,6 +194,12 @@ struct StageValidation(Copyable, Movable):
     var program: String
     var smoke: String
     var wait_for_index_seconds: Int
+    var args: List[String]
+    var target_resource: String
+    var target_output: String
+    var timeout_seconds: Int
+    var expects: List[String]
+    var written: List[String]
     var line: Int
 
     def __init__(out self, line: Int):
@@ -193,7 +212,20 @@ struct StageValidation(Copyable, Movable):
         self.program = String("")
         self.smoke = String("")
         self.wait_for_index_seconds = VALIDATION_WAIT_DEFAULT_SECONDS
+        self.args = List[String]()
+        self.target_resource = String("")
+        self.target_output = String("")
+        self.timeout_seconds = 0
+        self.expects = List[String]()
+        self.written = List[String]()
         self.line = line
+
+    def wrote(self, field: String) -> Bool:
+        """Whether the block wrote `field` (a default never counts)."""
+        for i in range(len(self.written)):
+            if self.written[i] == field:
+                return True
+        return False
 
 
 struct StageStep(Copyable, Movable):
@@ -209,6 +241,10 @@ struct StageStep(Copyable, Movable):
     var artifacts: String
     var channels: String
     var channel: String
+    var cells: String
+    var cell: String
+    var resources: String
+    var definitions: List[String]
     var validations: List[StageValidation]
     var line: Int
 
@@ -219,6 +255,10 @@ struct StageStep(Copyable, Movable):
         self.artifacts = String("")
         self.channels = String("")
         self.channel = String("")
+        self.cells = String("")
+        self.cell = String("")
+        self.resources = String("")
+        self.definitions = List[String]()
         self.validations = List[StageValidation]()
         self.line = line
 
@@ -227,6 +267,18 @@ struct StageStep(Copyable, Movable):
 
     def is_publish(self) -> Bool:
         return self.kind == STEP_KIND_PUBLISH
+
+    def is_deploy(self) -> Bool:
+        return self.kind == STEP_KIND_DEPLOY
+
+    def names_cell(self) -> Bool:
+        """Whether the step sets `cells` or `cell`."""
+        return self.cells.byte_length() > 0 or self.cell.byte_length() > 0
+
+    def writes_cell(self) -> Bool:
+        """A DEPLOY step, or a PUBLISH step into a cell (file header,
+        CELLS)."""
+        return self.is_deploy() or (self.is_publish() and self.names_cell())
 
 
 struct Stage(Copyable, Movable):
@@ -292,15 +344,20 @@ struct Stage(Copyable, Movable):
 
 
 struct ReleaseMachine(Copyable, Movable):
-    """Every stage of a machine file, in file order.
+    """Every stage of a machine file, in file order, and the machine's
+    `name` ("" when the file has none; `name_line` is 0 then).
 
     Layout: owned values only. No pointer field."""
 
     var schema_version: Int
+    var name: String
+    var name_line: Int
     var stages: List[Stage]
 
     def __init__(out self, schema_version: Int):
         self.schema_version = schema_version
+        self.name = String("")
+        self.name_line = 0
         self.stages = List[Stage]()
 
     def stage_names(self) -> List[String]:
@@ -427,6 +484,16 @@ def _is_package_name(name: String) -> Bool:
     return True
 
 
+def probe_only_fields() -> List[String]:
+    """The validation fields only a DEPLOY_PROBE may write (file header)."""
+    var out = List[String]()
+    out.append(String("args"))
+    out.append(String("target"))
+    out.append(String("timeout_seconds"))
+    out.append(String("expect"))
+    return out^
+
+
 def _check_validation(source: String, stage: Stage, step: StageStep, v: StageValidation) raises:
     var of_step = String(" of step '") + step.name + String("' of stage '") + stage.name + String("'")
     if v.name.byte_length() == 0:
@@ -438,17 +505,34 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
             + String(" bytes, not ending in '-'")
         )
     var where = String("validation '") + v.name + String("'") + of_step
-    if step.kind != STEP_KIND_PUBLISH:
+    if v.kind.byte_length() == 0:
         raise Error(
             _at(source, v.line) + where
-            + String(": a validation belongs to a PUBLISH step (it checks what the step published)")
+            + String(" has no kind (CONDA_INSTALL_SMOKE, CONDA_INSTALL_ENV or DEPLOY_PROBE)")
         )
-    if v.kind.byte_length() == 0:
-        raise Error(_at(source, v.line) + where + String(" has no kind (CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV)"))
     try:
         require_validation_kind(v.kind)
     except e:
         raise Error(_at(source, v.line) + where + String(": ") + String(e))
+    if v.kind == VALIDATION_KIND_DEPLOY_PROBE:
+        if step.kind != STEP_KIND_DEPLOY:
+            raise Error(
+                _at(source, v.line) + where + String(": a DEPLOY_PROBE validation belongs to a DEPLOY step")
+                + String(" (it checks the cell the step deployed into)")
+            )
+        return  # every other rule of a probe is probe.mojo's (file header, VALIDATIONS)
+    if step.kind != STEP_KIND_PUBLISH:
+        raise Error(
+            _at(source, v.line) + where + String(": a ") + v.kind
+            + String(" validation belongs to a PUBLISH step (it checks what the step published)")
+        )
+    var probe_only = probe_only_fields()
+    for i in range(len(probe_only)):
+        if v.wrote(probe_only[i]):
+            raise Error(
+                _at(source, v.line) + where + String(" is a ") + v.kind + String(" validation and has ")
+                + probe_only[i] + String(": it belongs to a DEPLOY_PROBE validation")
+            )
     var on_this_machine = v.kind == VALIDATION_KIND_CONDA_INSTALL_ENV
     if on_this_machine:
         if v.image.byte_length() > 0:
@@ -544,16 +628,13 @@ def _check_step(source: String, stage: Stage, step: StageStep) raises:
             + String(" bytes, not ending in '-'")
         )
     if step.kind == STEP_KIND_DEPLOY:
-        raise Error(
-            _at(source, step.line) + where
-            + String(" is a DEPLOY step: that kind needs a newer kci (this kci runs BUILD and PUBLISH steps)")
-        )
+        return  # every rule of a DEPLOY step is deploy.mojo's (file header, CELLS)
     if step.kind != STEP_KIND_BUILD and step.kind != STEP_KIND_PUBLISH:
         if step.kind.byte_length() == 0:
-            raise Error(_at(source, step.line) + where + String(" has no kind (BUILD or PUBLISH)"))
+            raise Error(_at(source, step.line) + where + String(" has no kind (BUILD, PUBLISH or DEPLOY)"))
         raise Error(
             _at(source, step.line) + where + String(" has kind '") + step.kind
-            + String("'; a step is BUILD or PUBLISH")
+            + String("'; a step is BUILD, PUBLISH or DEPLOY")
         )
     if step.platform.byte_length() == 0:
         raise Error(_at(source, step.line) + where + String(" has no platform"))
@@ -570,6 +651,8 @@ def _check_step(source: String, stage: Stage, step: StageStep) raises:
                 + String(" is a BUILD step: channels and channel belong to a PUBLISH step")
             )
         return
+    if step.names_cell():
+        return  # a PUBLISH into a cell: its destination is deploy.mojo's
     if step.channels.byte_length() == 0:
         raise Error(_at(source, step.line) + where + String(" has no channels (the channels file)"))
     if step.channel.byte_length() == 0:
