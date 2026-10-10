@@ -74,7 +74,7 @@ on `main` uses; continuous_publish.md already calls it `beta_validate`, the name
 | conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`) | no new kind. `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
 | kind `native`, `lib_files`, `native_link_args` | on #695 and #704 only | `lib_files` survives on `library`; the kind goes |
 | dlopen declarations | the packer refuses any `OwnedDLHandle` (above). `mojo_library(dlopen = ...)` and `tools/build/package/system_libs.bzl` on #685 only; kci's acceptance of the requirements (`src/kci_release_set/system_libs.mojo`) on #704 only (from #763) | slice 3, ahead of the shared libraries |
-| beta stage, `beta_install` | design only ([staged_pipeline.md](staged_pipeline.md), merged; its follow-up #1184 on gamma is open). `kci.yml` runs `build → gamma → validate → prod` | native install checks run only in `beta_install` (section "Built once"); gamma runs none |
+| beta stage, `beta_install` | design only ([staged_pipeline.md](staged_pipeline.md), merged; its follow-up #1184 on gamma is open). `kci.yml` runs `build → beta → beta_validate → prod` (`gamma` and `validate` before M2) | native install checks run only in `beta_install` (section "Built once"); gamma runs none |
 
 ## What each library ships
 
