@@ -100,6 +100,11 @@ def _owner_of(
 def test_encoders_keep_utf8_whole() raises:
     assert_equal(_encode_doc_id_part(_ID), _ID, "nothing to escape: unchanged")
     assert_equal(_encode_doc_id_part(String("é%ü/漢")), String("é%25ü%2F漢"))
+    # Only the composite encoder escapes `~` (its separator); a single-column
+    # doc id keeps it, because put and get_by_key name the document by the raw id.
+    assert_equal(
+        _encode_doc_id_part(String("é~ü")), String("é~ü"), "doc ids keep ~"
+    )
     assert_equal(_encode_composite_part(_ID), _ID, "nothing to escape: unchanged")
     assert_equal(
         _encode_composite_part(String("é~ü%/🙂")), String("é%7Eü%25%2F🙂")
@@ -218,6 +223,17 @@ def test_create_if_absent_mints_the_utf8_id() raises:
     )
     assert_equal(mock.count(_ID), 1, "the doc is named by the id's own bytes")
     assert_equal(_owner_of(db, reactor, _ID), String("o"))
+
+    # A `~` in a single-column id stays raw, so get_by_key finds the row.
+    var tilde_id = String("é~ü")
+    assert_true(
+        db.create_if_absent[_Rt](
+            reactor, _TABLE, String("id"), DbValue.text(tilde_id), _cols(),
+            _row(tilde_id, "t"),
+        )
+    )
+    assert_equal(mock.count(tilde_id), 1, "the doc keeps the raw ~")
+    assert_equal(_owner_of(db, reactor, tilde_id), String("t"))
 
     var conflict = List[String]()
     conflict.append(String("id"))
