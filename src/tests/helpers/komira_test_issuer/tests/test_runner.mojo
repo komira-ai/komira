@@ -21,7 +21,8 @@
 #   kid_not_thumbprint -> mint_verifies (signed by a key whose kid is a
 #                      near miss of its RFC 7638 thumbprint);
 #   kid_swap        -> mint_verifies (the kid is another served key's
-#                      thumbprint, that key served under another kid);
+#                      thumbprint, that key served under an unrelated kid
+#                      or a near miss of it);
 #   wrong_typ       -> mint_verifies (the issuer inside mints `JWT`);
 #   sub, client_id, scope -> claims, for every near miss of the value asked
 #                      for and, for client_id and scope, the member left out;
@@ -178,11 +179,14 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
     var inner: TestIssuer
     var fault: Int
     var alt: Optional[String]
+    var alt2: String
     var minted: Int
     var former: String
     var switched_at: Int64
 
-    def __init__(out self, fault: Int, alt: Optional[String] = None) raises:
+    def __init__(
+        out self, fault: Int, alt: Optional[String] = None, alt2: String = ""
+    ) raises:
         self.inner = TestIssuer(
             issuer=ISS,
             alg="ES256",
@@ -195,6 +199,7 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
         )
         self.fault = fault
         self.alt = alt
+        self.alt2 = alt2
         self.minted = 0
         self.former = String("")
         self.switched_at = -1
@@ -236,7 +241,7 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
             var x = a.x()
             var y = a.y()
             var renamed = Jwk.ec_p256(
-                Span(x), Span(y), kid=String("swapped-a"), alg=String("ES256"), key_use=String("sig")
+                Span(x), Span(y), kid=self.alt2, alg=String("ES256"), key_use=String("sig")
             )
             var swapped = _with(_without(doc, drop), renamed)
             return _with(swapped, _odd_signer(self.alt.value()).public_jwk())
@@ -378,8 +383,9 @@ def _claims_fault(
     scenario: String,
     reason: String,
     client_id: String = CLIENT,
+    alt2: String = "",
 ) raises:
-    var f = Faulty(fault, alt)
+    var f = Faulty(fault, alt, alt2)
     var p = _profile()
     p.client_id = client_id
     var got = run_issuer_scenario(f, p, scenario)
@@ -429,9 +435,16 @@ def test_kid_not_thumbprint() raises:
     comptime WHY = "the token's kid is not the RFC 7638 thumbprint of its key"
     for i in range(len(near) - 1):
         _claims_fault(misses, F_KID_NOT_THUMBPRINT, near[i], SCENARIO_MINT_VERIFIES, WHY)
-    # Key 0's thumbprint named by the odd key, key 0 under another kid.
+    # Key 0's thumbprint named by the odd key, key 0 served under another
+    # kid: an unrelated one and every near miss of its thumbprint (so a
+    # loose kid match cannot pick key 0 and find its thumbprint).
     var a = derived_key("ES256", "seed-a", 0).kid()
-    _claims_fault(misses, F_KID_SWAP, a, SCENARIO_MINT_VERIFIES, WHY)
+    var renames = _near_misses(a)
+    renames[len(renames) - 1] = String("swapped-a")  # in place of ""
+    for i in range(len(renames)):
+        _claims_fault(
+            misses, F_KID_SWAP, a, SCENARIO_MINT_VERIFIES, WHY, CLIENT, renames[i]
+        )
     # With its real thumbprint as kid the same key passes.
     _claims_fault(misses, F_KID_NOT_THUMBPRINT, real, SCENARIO_MINT_VERIFIES, "")
     assert_equal(misses, "")
