@@ -1,0 +1,62 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A simple calendar service's store: `CalendarStore[DB]` over the
+# backend-neutral komira_db `Database` (calendars, events, one-occurrence
+# edits, the change feed, erasure), the stored UTC span that makes a time
+# window one indexed query, the SQL migration chain and the document-store
+# indexes. The messages are komira_calendar_proto's; komira_calendar checks
+# and expands them; zones come from a komira_calendar_ics ZoneSource.
+#
+# test_span pins utc_span against hand-computed instants on POSIX-rule
+# zones (no zone data needed). test_store_sqlite runs every store call on
+# SQLite, a `test_deps` package (it reaches the tests only, never a
+# consumer), so this package measures its own lines. test_store_races plays
+# a peer that writes between the store's read and its write, and a writer
+# that stopped part way (the paths one SQLite connection never reaches).
+# test_store_interleave runs two writers and a reader interleaved on the
+# Firestore mock, where nothing serializes them but the store. The store's
+# contract on SQLite and the Firestore mock is
+# //src/tests/conformance/komira_calendar_store_conformance.
+mojo_library(
+    name = "komira_calendar_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_calendar:komira_calendar",
+        "//src/komira_calendar_ics:komira_calendar_ics",
+        "//src/komira_calendar_proto:komira_calendar_proto",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_db:komira_db",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+    test_deps = [
+        "//src/komira_db_sqlite:komira_db_sqlite",
+        "//src/komira_gcp_firestore:komira_gcp_firestore",
+        "//src/komira_gcp_firestore_db:komira_gcp_firestore_db",
+    ],
+    test_srcs = [
+        "tests/test_span.mojo",
+        "tests/test_store_interleave.mojo",
+        "tests/test_store_overrides.mojo",
+        "tests/test_store_races.mojo",
+        "tests/test_store_sqlite.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps). The lint reads `deps` only, so the tests
+# that import the `test_deps` packages are left out of it.
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"], exclude = [
+        "tests/test_store_interleave.mojo",
+        "tests/test_store_overrides.mojo",
+        "tests/test_store_races.mojo",
+        "tests/test_store_sqlite.mojo",
+    ]),
+    visibility = ["komira//:tests_lints"],
+)

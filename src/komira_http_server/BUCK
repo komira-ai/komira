@@ -43,6 +43,7 @@ mojo_library(
         "tests/test_L3_metrics_sink.mojo",
         "tests/test_L3_short_circuit.mojo",
         "tests/test_L3_tracing.mojo",
+        "tests/test_L4_routes_compose.mojo",
         "tests/test_L4_routing_basic.mojo",
         "tests/test_chunked_request_body_dispatch.mojo",
         "tests/test_claims_principal.mojo",
