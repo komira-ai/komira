@@ -141,7 +141,7 @@ def _read_whole_file(path: String) raises -> List[UInt8]:
         fd, buf.unsafe_ptr(), Int64(n), UnsafePointer(to=got)
     )
     if rrc != 0:
-        raise _io_error(path, _STAGE_READ, rrc)
+        raise _io_error(path, _STAGE_READ, rrc)  # cov: unreachable read(2) on an open regular file fails only on a device fault
     if Int(got) != n:
         raise Error(
             "LocalFsConditionalStore: short read (" + String(Int(got)) + " < "
