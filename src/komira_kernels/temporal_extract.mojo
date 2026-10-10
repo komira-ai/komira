@@ -75,7 +75,7 @@
 #
 #   date_trunc_date32(arr, unit)                     -> PrimitiveArray[int32]
 #       unit ∈ {year, quarter, month, week, day} — sub-day truncs are
-#       no-ops on DATE32.
+#       no-ops on DATE32. A unit outside TRUNC_* (> 9) raises.
 #       ⚠ THE TYPE IS A STATED DIFFERENCE FROM DuckDB, NOT PARITY. DuckDB
 #       v1.5.3 has NO DATE-returning `date_trunc` overload at all — the DATE
 #       is implicitly widened and `typeof(date_trunc('month', DATE
@@ -87,7 +87,8 @@
 #   date_trunc_ts(arr, src_unit, trunc_unit)         -> PrimitiveArray[int64]
 #       trunc_unit ∈ {year, quarter, month, week, day, hour, minute,
 #       second, millisecond, microsecond}. The output stays in src_unit
-#       ticks; only the value is rounded down to the period start.
+#       ticks; only the value is rounded down to the period start. A unit
+#       outside TRUNC_* (> 9) raises.
 #
 # Algorithm:
 #   * `_civil_from_days(z: Int) -> Tuple[Int, Int, Int]` — Howard Hinnant's
@@ -141,6 +142,18 @@ comptime TRUNC_MILLISECOND: UInt8 = 8
 comptime TRUNC_MICROSECOND: UInt8 = 9
 
 
+def _check_trunc_unit(trunc_unit: UInt8, kernel: StaticString) raises:
+    """Refuse a unit outside TRUNC_* before any row is read, so an unknown
+    code is an error rather than an unchanged column."""
+    if trunc_unit > TRUNC_MICROSECOND:
+        raise Error(
+            "temporal_extract."
+            + String(kernel)
+            + ": unknown trunc unit "
+            + String(Int(trunc_unit))
+        )
+
+
 # =============================================================================
 # DAY-INDEX field units — THE IR's OWN NUMBERS, NOT A LOCAL ENCODING
 # =============================================================================
@@ -154,9 +167,10 @@ comptime TRUNC_MICROSECOND: UInt8 = 9
 #
 # ⛔ A MIRROR THAT DRIFTS IS A WRONG FIELD, NOT A COMPILE ERROR. The value is
 # pinned against the IR constant by
-# `komira_compiler.tests.test_temporal_extract`
-# (`test_day_index_kernel_unit_codes_mirror_the_plan_IR`), which imports BOTH
-# and asserts they are equal — the only thing that can see a drift.
+# `komira_kernels/tests/test_temporal_offset_and_units.mojo`
+# (`test_day_index_kernel_unit_codes_mirror_the_plan_IR`), which drives every
+# mirrored unit through its kernel AS the IR constant and checks the field —
+# a drifted copy answers a different field or raises.
 comptime _K_DAYOFWEEK: UInt8 = 7
 comptime _K_ISODOW: UInt8 = 8
 comptime _K_DAYOFYEAR: UInt8 = 9
@@ -204,7 +218,7 @@ def _div_floor(a: Int, b: Int) -> Int:
     weekdays for pre-1970 rows — this helper is where that would be fixed
     once, and the alternative is fixing it at ~15 call sites; (3) the
     assumption is now PINNED, by
-    `komira_compiler.tests.test_temporal_extract`'s
+    `komira_kernels/tests/test_temporal_offset_and_units.mojo`'s
     `test_mojo_integer_division_and_modulo_are_FLOOR_not_truncating`, so the
     day Mojo changes it the repo goes RED instead of computing quietly.
 
@@ -362,29 +376,36 @@ def _ticks_per_day(tps: Int64) -> Int64:
 
 def _clone_validity_to_out_i32(
     src_length: Int,
+    src_offset: Int,
     src_validity: Optional[Bitmap[HeapRegion]],
     mut out: PrimitiveArray[DType.int32],
 ) raises:
-    """Copy validity bitmap from src onto i32 output array; recompute null_count.
-    No-op when src has no validity bitmap.  Lengths must match.
+    """Copy the source's visible validity window onto the i32 output and
+    recompute null_count. No-op when the source has no validity bitmap.
+
+    A sliced `PrimitiveArray` keeps its bitmap indexed ABSOLUTELY (logical
+    row i is bit `src_offset + i`), so the window copied is
+    `[src_offset, src_offset + src_length)`, rebased to bit 0 of the output.
     """
     if not src_validity:
         return
     ref src_bm = src_validity.value()
-    var cloned = Bitmap.copy_slice_from(src_bm, 0, src_bm.length)
+    var cloned = Bitmap.copy_slice_from(src_bm, src_offset, src_length)
     out.null_count = cloned.null_count()
     out.validity = cloned^
 
 
 def _clone_validity_to_out_i64(
     src_length: Int,
+    src_offset: Int,
     src_validity: Optional[Bitmap[HeapRegion]],
     mut out: PrimitiveArray[DType.int64],
 ) raises:
+    """The i64 twin of `_clone_validity_to_out_i32`."""
     if not src_validity:
         return
     ref src_bm = src_validity.value()
-    var cloned = Bitmap.copy_slice_from(src_bm, 0, src_bm.length)
+    var cloned = Bitmap.copy_slice_from(src_bm, src_offset, src_length)
     out.null_count = cloned.null_count()
     out.validity = cloned^
 
@@ -981,7 +1002,9 @@ def _date_trunc_date32_range(
             elif trunc_unit == TRUNC_DAY:
                 trunc_days = days
             else:
-                # Sub-day truncs (hour/minute/...) on DATE32 — no-op.
+                # Sub-day truncs (hour/minute/...) on DATE32 — no-op. Units
+                # past TRUNC_MICROSECOND never get here: `date_trunc_date32`
+                # refuses them before the loop.
                 trunc_days = days
             out.set(i, Scalar[DType.int32](Int32(trunc_days)))
 
@@ -1081,7 +1104,7 @@ def extract_year_date32(arr: PrimitiveArray[DType.int32]) raises -> PrimitiveArr
     var n = arr.length
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_year_date32_range(arr, out, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1090,7 +1113,7 @@ def extract_month_date32(arr: PrimitiveArray[DType.int32]) raises -> PrimitiveAr
     var n = arr.length
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_month_date32_range(arr, out, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1099,7 +1122,7 @@ def extract_day_date32(arr: PrimitiveArray[DType.int32]) raises -> PrimitiveArra
     var n = arr.length
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_day_date32_range(arr, out, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1108,7 +1131,7 @@ def extract_quarter_date32(arr: PrimitiveArray[DType.int32]) raises -> Primitive
     var n = arr.length
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_quarter_date32_range(arr, out, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1140,7 +1163,7 @@ def extract_subday_zero_date32(
     var out = PrimitiveArray[DType.int64].allocate(n)
     for i in range(n):
         out.set(i, Scalar[DType.int64](0))
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1156,7 +1179,7 @@ def extract_year_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType) raise
     var tpd = _ticks_per_day(tps)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_year_ts_range(arr, out, tpd, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1166,7 +1189,7 @@ def extract_month_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType) rais
     var tpd = _ticks_per_day(tps)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_month_ts_range(arr, out, tpd, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1176,7 +1199,7 @@ def extract_day_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType) raises
     var tpd = _ticks_per_day(tps)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_day_ts_range(arr, out, tpd, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1186,7 +1209,7 @@ def extract_quarter_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType) ra
     var tpd = _ticks_per_day(tps)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_quarter_ts_range(arr, out, tpd, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1201,7 +1224,7 @@ def extract_hour_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType) raise
     var tph = tps * Int64(3600)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_hour_ts_range(arr, out, tph, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1211,7 +1234,7 @@ def extract_minute_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType) rai
     var tpm = tps * Int64(60)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_minute_ts_range(arr, out, tpm, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1220,7 +1243,7 @@ def extract_second_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType) rai
     var tps = _ticks_per_second(src_unit)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_second_ts_range(arr, out, tps, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1251,7 +1274,7 @@ def extract_day_index_date32(
     var n = arr.length
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_day_index_date32_range(arr, out, unit, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1269,7 +1292,7 @@ def extract_day_index_ts(
     var tpd = _ticks_per_day(tps)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_day_index_ts_range(arr, out, tpd, unit, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1288,7 +1311,7 @@ def extract_iso_week_date32(
     var n = arr.length
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_iso_week_date32_range(arr, out, unit, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1302,7 +1325,7 @@ def extract_iso_week_ts(
     var tpd = _ticks_per_day(tps)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_iso_week_ts_range(arr, out, tpd, unit, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1333,7 +1356,7 @@ def extract_subsecond_ts(
     var tps = _ticks_per_second(src_unit)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _extract_subsecond_ts_range(arr, out, tps, unit, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1347,10 +1370,11 @@ def extract_subsecond_ts(
 
 def date_trunc_date32(arr: PrimitiveArray[DType.int32], trunc_unit: UInt8) raises -> PrimitiveArray[DType.int32]:
     """Round each row in `arr` down to the start of the period."""
+    _check_trunc_unit(trunc_unit, "date_trunc_date32")
     var n = arr.length
     var out = PrimitiveArray[DType.int32].allocate(n)
     _date_trunc_date32_range(arr, out, trunc_unit, 0, n)
-    _clone_validity_to_out_i32(n, arr.validity, out)
+    _clone_validity_to_out_i32(n, arr.offset, arr.validity, out)
     return out^
 
 
@@ -1365,6 +1389,7 @@ def date_trunc_date32(arr: PrimitiveArray[DType.int32], trunc_unit: UInt8) raise
 def date_trunc_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType, trunc_unit: UInt8) raises -> PrimitiveArray[DType.int64]:
     """Round each row down to the start of the period.  Output unit ==
     input unit (TIMESTAMP_* tick count)."""
+    _check_trunc_unit(trunc_unit, "date_trunc_ts")
     var n = arr.length
     var tps = _ticks_per_second(src_unit)
     var tpd = _ticks_per_day(tps)
@@ -1372,7 +1397,7 @@ def date_trunc_ts(arr: PrimitiveArray[DType.int64], src_unit: ArrowType, trunc_u
     var tpm = tps * Int64(60)
     var out = PrimitiveArray[DType.int64].allocate(n)
     _date_trunc_ts_range(arr, out, tps, tpd, tph, tpm, trunc_unit, 0, n)
-    _clone_validity_to_out_i64(n, arr.validity, out)
+    _clone_validity_to_out_i64(n, arr.offset, arr.validity, out)
     return out^
 
 

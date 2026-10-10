@@ -1,0 +1,93 @@
+load("@komira//tools/build/python:defs.bzl", "python_dist", "python_oracle", "python_wheel")
+load(":stand_in.bzl", "stand_in_tzdata")
+
+# Planted defects for python_oracle's independence check (test 51): an
+# oracle's input that an action built must come from a target under
+# third_party/. Every target here must fail analysis;
+# tools/build/tests/run_tests.sh requires the failure written above it. The
+# oracles that work are in src/tests/helpers/komira_test_python.
+#
+# The real interpreter (komira//third_party/python:cpython) is visible only to
+# the test-only packages, so these oracles name a stand-in python_dist over a
+# file that is no archive, and so is the tzdata wheel, so they name a stand-in for it
+# (stand_in.bzl) over a checked-in file, which the check passes. The
+# interpreter is checked after every other input, so each oracle but
+# local_python is refused for its other input. Nothing here runs: analysis
+# refuses each oracle first.
+
+export_file(
+    name = "not_an_archive",
+    src = "oracle.py",
+)
+
+stand_in_tzdata(
+    name = "tzdata",
+    site = "oracle.py",
+)
+
+python_dist(
+    name = "stand_in_python",
+    archive = ":not_an_archive",
+    version = "3.13.0",
+)
+
+# RED: the gated package of a komira library as data.
+python_oracle(
+    name = "komira_data",
+    src = "oracle.py",
+    data = {"encoding.mojoc": "komira//src/komira_encoding:komira_encoding"},
+    python = ":stand_in_python",
+    tzdata = ":tzdata",
+)
+
+# RED: a komira binary staged next to the script.
+python_oracle(
+    name = "komira_srcs",
+    src = "oracle.py",
+    srcs = ["komira//tools/build/examples:hello"],
+    python = ":stand_in_python",
+    tzdata = ":tzdata",
+)
+
+# RED: a wheel installed by a target outside third_party/.
+python_wheel(
+    name = "local_wheel",
+    distribution = "local",
+    python = ":stand_in_python",
+    version = "0",
+    wheel = ":not_an_archive",
+)
+
+python_oracle(
+    name = "local_wheel_dep",
+    src = "oracle.py",
+    python = ":stand_in_python",
+    tzdata = ":tzdata",
+    deps = [":local_wheel"],
+)
+
+# RED: a zone database installed by a target outside third_party/.
+python_oracle(
+    name = "local_tzdata",
+    src = "oracle.py",
+    python = ":stand_in_python",
+    tzdata = ":local_wheel",
+)
+
+# RED: a komira binary as the script.
+python_oracle(
+    name = "komira_src",
+    src = "komira//tools/build/examples:hello",
+    python = ":stand_in_python",
+    tzdata = ":tzdata",
+)
+
+# RED: an interpreter built outside third_party/ (the stand-in above). The
+# targets before this one fail on their other input first: python is checked
+# last.
+python_oracle(
+    name = "local_python",
+    src = "oracle.py",
+    python = ":stand_in_python",
+    tzdata = ":tzdata",
+)

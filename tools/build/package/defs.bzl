@@ -2,7 +2,7 @@
 
 `load("@komira//tools/build/package:defs.bzl", "mojo_bundle")`
 
-    mojo_bundle(name, binary, version, data = {"share/<path>": <source>})
+    mojo_bundle(name, binary, version, data = {"share/<path>": <source>}, program = None)
 
 builds `<name>/`, the program and everything it needs besides glibc and the
 kernel, for the target platform (linux x86_64):
@@ -20,7 +20,9 @@ flag, the directory name and the check), refuses with one line naming it when
 the CPU is below it, and otherwise loads the program through the loader's
 glibc-hwcaps search. Every run path is `$ORIGIN`-relative, so the bundle runs
 from wherever it is copied. A program finds its data through
-/proc/self/exe: `<dirname>/../share`.
+/proc/self/exe: `<dirname>/../share`. `program` names the program in the
+bundle (`bin/<program>`, `lib<program>.so`); by default it is the name of the
+`binary` target.
 
 Sub-targets: `[test_launcher]` is the same launcher built with the test hook
 (it judges the made-up CPU named by $KOMIRA_TEST_CPU); it is never part of
@@ -96,7 +98,9 @@ test -s "$OUT"
 
 def _bundle_impl(ctx):
     prog = ctx.attrs.binary[MojoProgramInfo]
-    name = prog.name
+    # `program` names the program in the bundle (bin/<program>,
+    # lib<program>.so); by default the binary target's name.
+    name = ctx.attrs.program or prog.name
     if not regex_match("^[A-Za-z0-9_][A-Za-z0-9_.+-]*$", name):
         fail("{}: program name `{}` cannot name bin/{} and lib{}.so".format(ctx.label, name, name, name))
     if prog.target_cpu not in _LEVELS:
@@ -173,6 +177,8 @@ _mojo_bundle = rule(
         "binary": attrs.dep(providers = [MojoProgramInfo]),
         # bundle path under share/ -> file
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        # the program's name in the bundle; None: the binary's
+        "program": attrs.option(attrs.string(), default = None),
         "version": attrs.string(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
@@ -270,6 +276,9 @@ def bundle_tarball(**kwargs):
 # blobs, in manifest order.
 OciBaseInfo = provider(fields = ["config", "layers", "manifest", "manifest_digest"])
 
+# layout: an image's OCI layout directory; layers: its `[layers]` file.
+OciImageInfo = provider(fields = ["layout", "layers"])
+
 def _oci_base_impl(ctx):
     def one(d):
         return d[DefaultInfo].default_outputs[0]
@@ -293,9 +302,32 @@ _oci_base = rule(
     },
 )
 
+def _is_digest(d):
+    return type(d) == "string" and regex_match("^sha256:[0-9a-f]{64}$", d)
+
+def oci_base_refusals(manifest, config, layers, layer_sizes):
+    """Why `oci_base` refuses these pins: a list of messages, empty when it accepts them.
+
+    The image is pinned by digest only: `manifest`, `config` and each of
+    `layers` must be a `sha256:<64 hex>` digest, so a tag (`debian:12`,
+    `nonroot`, `latest`) or a reference holding one is refused; there is no
+    tag field. The same check `oci_base` fails on, callable from a load-time
+    case.
+    """
+    out = []
+    for what, d in [("manifest", manifest), ("config", config)]:
+        if not _is_digest(d):
+            out.append("{} `{}` is not a sha256:<64 hex> digest (a base is pinned by digest, never by tag)".format(what, d))
+    if not layers:
+        out.append("no layers")
+    for i, d in enumerate(layers):
+        if not _is_digest(d):
+            out.append("layer {} `{}` is not a sha256:<64 hex> digest (a base is pinned by digest, never by tag)".format(i, d))
+    if len(layer_sizes) != len(layers):
+        out.append("{} layers but {} layer_sizes".format(len(layers), len(layer_sizes)))
+    return out
+
 def _sha256_of(digest):
-    if not regex_match("^sha256:[0-9a-f]{64}$", digest):
-        fail("`{}` is not a sha256:<64 hex> digest".format(digest))
     return digest[len("sha256:"):]
 
 def oci_base(name, registry, repository, manifest, manifest_file, config, config_size, layers, layer_sizes, visibility = None):
@@ -313,10 +345,10 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, config
     them, so the downloads need no request to the registry while the remote
     cache holds them.
     """
-    if len(layer_sizes) != len(layers):
-        fail("oci_base {}: {} layers but {} layer_sizes".format(name, len(layers), len(layer_sizes)))
+    refusals = oci_base_refusals(manifest, config, layers, layer_sizes)
+    if refusals:
+        fail("oci_base {}: {}".format(name, "; ".join(refusals)))
     base_url = "https://{}/v2/{}/".format(registry, repository)
-    _sha256_of(manifest)
     pinned_file(
         name = name + "_config",
         url = base_url + "blobs/" + config,
@@ -341,30 +373,102 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, config
         visibility = visibility,
     )
 
+# dir: a directory to lay at / in an image; kcov_guard: the guard's output
+# over it; name, version: what the image's history and tag say.
+OciTreeInfo = provider(fields = ["dir", "kcov_guard", "name", "version"])
+
+def _oci_tree_impl(ctx):
+    args = []
+    for prefix, dep in sorted(ctx.attrs.bundles.items()):
+        b = dep[BundleInfo]
+        # komira-limit:image-linux-x86-64-only
+        if b.platform != "linux-x86_64":
+            fail("{}: a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
+        args.extend(["--bundle", cmd_args(prefix, b.dir, delimiter = "=")])
+    for path, src in sorted(ctx.attrs.files.items()):
+        args.extend(["--file", cmd_args(path, src, delimiter = "=")])
+    if not regex_match("^[0-9A-Za-z][0-9A-Za-z.+~-]*$", ctx.attrs.version):
+        fail("{}: version `{}` is not a plain version string".format(ctx.label, ctx.attrs.version))
+
+    # The paths are refused by the Zig tool (komira_oci tree: none may be
+    # inside another, each must be plain); a refused tree fails this action.
+    out = ctx.actions.declare_output(ctx.label.name, dir = True)
+    ctx.actions.run(
+        cmd_args(ctx.attrs._oci[RunInfo], "tree", "--out", out.as_output(), args),
+        category = "komira_oci_tree",
+    )
+    # No file of the tree is kcov (kcov_guard.bzl): read by the guard, which
+    # oci_image waits for.
+    guarded = kcov_guard(ctx, ctx.attrs._kcov_guard, ctx.label.name, [[".", out]])
+    return [
+        DefaultInfo(default_output = out, other_outputs = [guarded]),
+        OciTreeInfo(dir = out, kcov_guard = guarded, name = ctx.label.name, version = ctx.attrs.version),
+    ]
+
+_oci_tree = rule(
+    impl = _oci_tree_impl,
+    attrs = {
+        # path in the tree, ending in / -> a bundle copied there whole
+        "bundles": attrs.dict(attrs.string(), attrs.dep(providers = [BundleInfo]), default = {}),
+        # path in the tree -> a file copied there
+        "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "version": attrs.string(),
+        "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
+        "_oci": attrs.exec_dep(default = "komira//tools/build/package/oci:komira_oci", providers = [RunInfo]),
+    },
+)
+
+def oci_tree(**kwargs):
+    """A directory laid at / in an image: bundles and files at paths, none inside another.
+
+    `bundles` maps a path ending in / to a bundle copied there whole;
+    `files` maps a path to a file. Modes are 0755 for directories and files
+    with an exec bit, else 0644. A path that is not plain, or is inside
+    another, fails the build (`komira_oci tree`, oci/README.md). The kcov
+    guard reads every file of the tree, and `oci_image(tree = ...)` packs it
+    only after the guard passed.
+    """
+    _oci_tree(exec_compatible_with = LINUX_X86_64, **kwargs)
+
 def _oci_image_impl(ctx):
-    b = ctx.attrs.bundle[BundleInfo]
-    # komira-limit:image-linux-x86-64-only
-    if b.platform != "linux-x86_64":
-        fail("{}: an image of a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
+    if (ctx.attrs.bundle == None) == (ctx.attrs.tree == None):
+        fail("{}: name exactly one of `bundle` and `tree`".format(ctx.label))
+    if (ctx.attrs.tree == None) != (ctx.attrs.entrypoint == None):
+        fail("{}: `entrypoint` goes with `tree`, and only with it".format(ctx.label))
+    if ctx.attrs.entrypoint != None and (len(ctx.attrs.entrypoint) < 2 or not ctx.attrs.entrypoint.startswith("/")):
+        fail("{}: entrypoint `{}` is not an absolute path".format(ctx.label, ctx.attrs.entrypoint))
+    if ctx.attrs.bundle != None:
+        b = ctx.attrs.bundle[BundleInfo]
+        # komira-limit:image-linux-x86-64-only
+        if b.platform != "linux-x86_64":
+            fail("{}: an image of a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
+        # komira_pack (zig): the bundle at /opt/<name>/.
+        tool, category = [ctx.attrs._pack[RunInfo], "oci", "--bundle", b.dir], "komira_pack_oci"
+        name, version, guard = b.name, b.version, b.kcov_guard
+    else:
+        t = ctx.attrs.tree[OciTreeInfo]
+        # komira_oci (zig): the tree at /.
+        bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+        tool = [ctx.attrs._oci[RunInfo], "image", "--tree", t.dir, "--entrypoint", ctx.attrs.entrypoint, "--busybox", bb]
+        category = "komira_oci_image"
+        name, version, guard = t.name, t.version, t.kcov_guard
     if not regex_match("^[a-z0-9]+([._/-][a-z0-9]+)*$", ctx.attrs.repository):
         fail("{}: repository `{}` is not an image repository name".format(ctx.label, ctx.attrs.repository))
     base = ctx.attrs.base[OciBaseInfo]
     layout = ctx.actions.declare_output(ctx.label.name + ".oci", dir = True)
     archive = ctx.actions.declare_output(ctx.label.name + ".docker.tar")
     digest = ctx.actions.declare_output(ctx.label.name + ".digest")
+    layer_list = ctx.actions.declare_output(ctx.label.name + ".layers")
     layer_args = []
-    for layer in base.layers:
-        layer_args.extend(["--layer", layer])
+    for l in base.layers:
+        layer_args.extend(["--layer", l])
     ctx.actions.run(
         cmd_args(
-            ctx.attrs._pack[RunInfo],
-            "oci",
-            "--bundle",
-            b.dir,
+            tool,
             "--name",
-            b.name,
+            name,
             "--version",
-            b.version,
+            version,
             "--repo",
             ctx.attrs.repository,
             "--manifest",
@@ -380,36 +484,67 @@ def _oci_image_impl(ctx):
             archive.as_output(),
             "--digest",
             digest.as_output(),
-            # Packed only after the kcov guard passed over the bundle.
-            hidden = [b.kcov_guard],
+            # Packed only after the kcov guard passed over the bundle or tree.
+            hidden = [guard],
         ),
-        category = "komira_pack_oci",
+        category = category,
     )
-    return [DefaultInfo(
-        default_output = layout,
-        sub_targets = {
-            "digest": [DefaultInfo(default_output = digest)],
-            "docker_archive": [DefaultInfo(default_output = archive)],
-        },
-    )]
+    # The layer list, read from the manifest by komira_oci, which refuses
+    # an Entrypoint that is not a 0755 regular file of the added layer: on
+    # the default output, so no image builds without it.
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._oci[RunInfo],
+            "layers",
+            "--layout",
+            layout,
+            "--busybox",
+            ctx.attrs._busybox[DefaultInfo].default_outputs[0],
+            "--out",
+            layer_list.as_output(),
+        ),
+        category = "oci_layers",
+    )
+    return [
+        DefaultInfo(
+            default_output = layout,
+            other_outputs = [layer_list],
+            sub_targets = {
+                "digest": [DefaultInfo(default_output = digest)],
+                "docker_archive": [DefaultInfo(default_output = archive)],
+                "layers": [DefaultInfo(default_output = layer_list)],
+            },
+        ),
+        OciImageInfo(layout = layout, layers = layer_list),
+    ]
 
 _oci_image = rule(
     impl = _oci_image_impl,
     attrs = {
         "base": attrs.dep(providers = [OciBaseInfo], default = "komira//tools/build/toolchains:distroless_base"),
-        "bundle": attrs.dep(providers = [BundleInfo]),
+        "bundle": attrs.option(attrs.dep(providers = [BundleInfo]), default = None),
+        "entrypoint": attrs.option(attrs.string(), default = None),
         "repository": attrs.string(),
+        "tree": attrs.option(attrs.dep(providers = [OciTreeInfo]), default = None),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_oci": attrs.exec_dep(default = "komira//tools/build/package/oci:komira_oci", providers = [RunInfo]),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
     },
 )
 
 def oci_image(**kwargs):
-    """An OCI image of a bundle: the base's layers plus the bundle at /opt/<name>/.
+    """An OCI image: the base's layers plus one layer, the bundle at /opt/<name>/ or a tree at /.
 
+    `bundle`: the layer holds the bundle at /opt/<name>/, entrypoint
+    /opt/<name>/bin/<name> (written by `komira_pack oci`). `tree` (an
+    `oci_tree`) with `entrypoint`: the layer holds the tree at /, and the
+    entrypoint, an absolute path, must be a regular file of the tree with
+    mode 0755 (refused otherwise; written by `komira_oci image`).
     The default output is an OCI image layout directory (`index.json` names
     it `<repository>:<version>`). `[docker_archive]` is the same as one tar
     plus a Docker `manifest.json`, which `docker load` reads; `[digest]`
-    holds the manifest digest. Nothing is pushed.
+    holds the manifest digest; `[layers]` the digest of each layer of the
+    manifest, one per line, in order. Nothing is pushed.
     """
     _oci_image(exec_compatible_with = LINUX_X86_64, **kwargs)
 
@@ -420,3 +555,4 @@ launcher_level_test = declares_docs(launcher_level_test_rule)
 mojo_bundle = declares_docs(mojo_bundle)
 oci_base = declares_docs(oci_base)
 oci_image = declares_docs(oci_image)
+oci_tree = declares_docs(oci_tree)

@@ -17,7 +17,7 @@
 #     without children, an unsupported column type;
 #   - value refusals: an unquoted STRING or DATE32 value, a nested value for
 #     a column of the other nested kind or a scalar kind; a scalar for a
-#     LIST, STRUCT or MAP column (read as NULL today);
+#     LIST, STRUCT or MAP column (refused; #917);
 #   - tab and CR around a scalar (RFC 8259 section 2), and `_is_ws` itself;
 #   - the cell budget at its boundary (equal passes, one over refuses);
 #   - JSONTestSuite (nst/JSONTestSuite) y_object_* cases, byte for byte;
@@ -426,16 +426,22 @@ def test_nested_value_for_other_kind_refused() raises:
         _has(msg, kinds[k])
 
 
-def test_scalar_for_nested_column_reads_null() raises:
-    # Today a number or literal for a LIST, STRUCT or MAP column falls
-    # through every scalar arm and the row reads NULL (an unquoted value for
-    # a STRING or DATE32 column is refused). This pins the current
-    # behavior; the report names it as a departure.
-    var batch = _read(String('{"l":5,"t":true,"m":1.5}\n'), _all_kinds())
-    assert_equal(batch.num_rows(), 1)
-    assert_true(batch.column_at(6).is_null_at(0))
-    assert_true(batch.column_at(7).is_null_at(0))
-    assert_true(batch.column_at(8).is_null_at(0))
+def test_scalar_for_nested_column_refused() raises:
+    # A number or literal for a LIST, STRUCT or MAP column is refused, as an
+    # unquoted value for a STRING or DATE32 column is. It read as NULL
+    # before #917 was fixed; test_jsonl_nested_nulls.mojo pins each message.
+    var cases = List[String]()
+    cases.append(String('{"l":5}'))
+    cases.append(String('{"t":true}'))
+    cases.append(String('{"m":1.5}'))
+    var words = List[String]()
+    words.append(String("LIST column 'l' expects a JSON array"))
+    words.append(String("STRUCT column 't' expects a JSON object"))
+    words.append(String("MAP column 'm' expects a JSON object"))
+    for k in range(len(cases)):
+        var msg = _err_of(cases[k] + "\n", _all_kinds())
+        _starts(msg, "komira_jsonl: line 1: materialize_jsonl_to_batch: ")
+        _has(msg, words[k])
 
 
 def test_tab_and_cr_around_scalar() raises:
@@ -933,7 +939,7 @@ def main() raises:
     test_schema_refusals()
     test_unquoted_string_and_date_refused()
     test_nested_value_for_other_kind_refused()
-    test_scalar_for_nested_column_reads_null()
+    test_scalar_for_nested_column_refused()
     test_tab_and_cr_around_scalar()
     test_is_ws_is_rfc8259_whitespace()
     test_cell_budget_boundary()

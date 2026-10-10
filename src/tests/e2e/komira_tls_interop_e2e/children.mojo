@@ -3,7 +3,8 @@
 # owned so that none outlives it.
 # =============================================================================
 #
-# `PeerGroup` starts each peer (a `bssl` subcommand) through
+# `PeerGroup` starts each peer (a `bssl` subcommand, or the CPython peer
+# script, cpython.mojo) through
 # `komira_supervisor.Supervisor`, which captures stdout and stderr on two
 # pipes, read here without blocking, and keeps the peer until it is reaped:
 #
@@ -127,10 +128,18 @@ struct PeerGroup(Movable):
             self._peers[i].sup.close()
 
     def start(
-        mut self, var label: String, program: String, args: List[String], stdin_file: String = "", busybox: String = ""
+        mut self,
+        var label: String,
+        program: String,
+        args: List[String],
+        stdin_file: String = "",
+        busybox: String = "",
+        env: List[String] = List[String](),
     ) raises -> Int:
         """Start `program args...`, its standard input `stdin_file` when that
-        is not empty (read through `busybox sh`); returns the peer's handle."""
+        is not empty (read through `busybox sh`); returns the peer's handle.
+        A non-empty `env` ("NAME=VALUE" entries) is the peer's whole
+        environment; otherwise it inherits the test's."""
         var argv = List[String]()
         if stdin_file.byte_length() > 0:
             if busybox.byte_length() == 0:
@@ -155,6 +164,8 @@ struct PeerGroup(Movable):
             spec = ChildSpec(argv[0])
             for i in range(1, len(argv)):
                 spec.with_arg(argv[i])
+        if len(env) > 0:
+            spec.set_env(env.copy())
         var sup = Supervisor()
         var pid = sup.spawn(spec)
         if pid <= Int32(0):
