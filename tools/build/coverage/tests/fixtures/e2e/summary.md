@@ -1,6 +1,6 @@
 ## Coverage: line 40.00% (4/10), branch 50.00% (1/2); changed lines 0.00% (0/2)
 
-Line coverage counts the lines the compiler emitted code for, and every executable line of a package's source file that no test binary compiled (`UnmeasuredFile`). Still missing: a function no test reaches inside a compiled file may emit no lines at all, so these numbers are upper bounds until declaration reachability lands.
+Line coverage counts the lines the compiler emitted code for, and every executable line of a package's source file that no test binary compiled (`UnmeasuredFile`). Still missing: a function no test reaches inside a compiled file emits no lines at all, so these numbers are upper bounds; the result JSON lists the functions none of whose lines has a record (`unrecorded_functions`) without counting them.
 
 Mode: **neutral**, conclusion **neutral**. Target: 100.00% line and branch coverage per package.
 

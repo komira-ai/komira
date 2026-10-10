@@ -4,8 +4,8 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 #
 # `plan_vocabulary.proto` is the language-agnostic half of the plan wire: every
 # enumerated tag space a plan or expression node can name. It mirrors the
-# engine's own `comptime` tag declarations and the core packages'
-# `plan/plan_wire_vocabulary.mojo` (same wire numbers), and is kept in step
+# engine's own `comptime` tag declarations and
+# `komira_plan_wire/plan_wire_vocabulary.mojo` (same wire numbers), and is kept in step
 # with them by hand. `plan.proto` is the message layer: what a NODE is.
 # Building this target is what PARSES both files, so an unbalanced brace or a
 # duplicate enum value is a build error here rather than in the first non-Mojo

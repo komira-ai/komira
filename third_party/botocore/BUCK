@@ -54,8 +54,8 @@ archive_files(
 # botocore's tests/unit/test_protocols.py does). One directory, the
 # `[tests/unit/protocols]` sub-target, read by
 # komira//tools/build/proto-codegen (the conformance driver, its test, and
-# xml-equiv-verdicts), and the rest-xml case files by komira_aws_core's
-# test_xml_canonical_differential.
+# xml-equiv-verdicts), and the rest-xml case files by
+# komira//src/tests/conformance/komira_xml_conformance.
 _PROTOCOL_TESTS = "tests/unit/protocols"
 
 _PROTOCOL_TEST_STEMS = [

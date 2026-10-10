@@ -9,15 +9,17 @@
 # more relations share an equi-join column equivalence class (e.g. Q9's
 # {l_partkey, p_partkey, ps_partkey}), DuckDB emits the full O(N**2)
 # cross-product of pairwise equality comparisons, which the join-order
-# optimizer then sees as additional graph edges. Our chain extractor reads
-# edges directly from the LogicalPlan's JOIN_INNER `left_on`/`right_on`
-# lists and never derived the transitive pairs, so DPccp's neighbor
-# traversal could not form CSGs like Q9's {ps, s, n} which depends on
-# `partsupp <-> supplier` (derived from the suppkey equivalence class
-# {l_suppkey, s_suppkey, ps_suppkey}).
+# optimizer then sees as additional graph edges. The chain extractor
+# (`extract_join_chain`) reads edges directly from the LogicalPlan's
+# JOIN_INNER `left_on`/`right_on` lists and does not derive the transitive
+# pairs, so a DPccp enumerator's neighbor traversal cannot form CSGs like
+# Q9's {ps, s, n}, which depends on `partsupp <-> supplier` (derived from the
+# suppkey equivalence class {l_suppkey, s_suppkey, ps_suppkey}).
 #
-# This module ADDS the missing derivation as a side-effect-free pass
-# applied to a JoinChain AFTER extraction and BEFORE DPccp.
+# This module ADDS the missing derivation: `derive_transitive_edges` appends
+# to a JoinChain's edges in place. komira_optimizer has no driver that orders
+# its passes; `optimizer_dpccp.reorder_joins_with_dp` calls it AFTER
+# extraction and BEFORE join enumeration (DPccp).
 #
 # Algorithm (faithful to DuckDB's mechanism, adapted to Komira's
 # JoinChain representation):
@@ -44,11 +46,11 @@
 #       edges. E.g. if the chain has `l_partkey = p_partkey` AND
 #       `l_partkey = ps_partkey`, then `p_partkey = ps_partkey` follows
 #       by transitivity. The synthetic edge ADDS no constraint to the
-#       join query — it's a redundant condition that the engine can
-#       choose to enforce or not.
+#       join query — it's a redundant condition that execution may
+#       enforce or not without changing the answer.
 #
-#   (b) DPccp consumes `chain.edges` via `_build_neighbors`, which
-#       deduplicates per-pair neighbors.
+#   (b) DPccp (`optimizer_dpccp`) consumes `chain.edges` through
+#       `_build_neighbors`, which deduplicates per-pair neighbors.
 #       Synthetic edges densify the relation graph for DPccp's CSG
 #       traversal without affecting cost estimation: the cost model
 #       (`optimizer_tdom_cost.estimate_with_tdom`) keys denominator
@@ -56,8 +58,8 @@
 #       which use the SAME join-key bindings as our union-find here. The
 #       per-bucket TDOM is unchanged.
 #
-#   (c) Plan reconstruction (`reconstruct_plan_from_dp` ->
-#       `collect_connecting_keys`) walks `chain.edges` in Slab insertion
+#   (c) Plan reconstruction (`collect_connecting_keys` in optimizer_reorder,
+#       which `greedy_join_order` calls) walks `chain.edges` in Slab insertion
 #       order. Per the M1 contract in the chain extractor of
 #       optimizer_reorder, per-column edges from one composite source must be
 #       appended CONTIGUOUSLY in INDEX ORDER. Synthetic edges are
@@ -122,8 +124,8 @@ def _uf_union(mut parent: Dict[String, String], var a: String, var b: String):
     var rb = _uf_find(parent, b^)
     if ra == rb:
         return
-    # Attach rb under ra (no rank/size tracking — chains are <= 12 relations,
-    # union-find tree depth is bounded by 12 in the worst case).
+    # Attach rb under ra (no rank/size tracking — one node per (relation,
+    # join column) pair, so tree depth is bounded by that small node count).
     parent[rb] = ra^
 
 

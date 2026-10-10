@@ -140,7 +140,7 @@ def test_a_plan_without_a_subquery_passes_through() raises:
 
 def test_a_miss_requests_the_inner_plan_and_leaves_the_site() raises:
     # Catches: a miss that rewrites anyway, or a request keyed on anything but
-    # the inner plan's structural hash (the engine binds by that key).
+    # the inner plan's structural hash (bindings are keyed by it).
     var plan = LogicalPlan.filter(_gt(_q(), _subq()), _lineitem())
     var before = plan.structural_hash()
     var deps = ScalarDepTable()
@@ -363,7 +363,8 @@ def test_a_subquery_below_an_aggregate_is_out_of_reach() raises:
 
 
 def test_the_multiple_rows_prefix_is_stable() raises:
-    # Callers match on this prefix; catches a rename.
+    # The executing caller this is designed for (not in this tree) raises with
+    # this prefix and tests match on it; catches a rename.
     assert_equal(SCALAR_SUBQUERY_MULTIPLE_ROWS, String("ScalarSubqueryMultipleRows"))
 
 

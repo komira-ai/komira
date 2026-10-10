@@ -97,14 +97,74 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   docker run --rm komira/hello:0.1.0
   ```
 
+`[layers]` is the digest of each layer of the image manifest, one per line,
+in order: the base's layers, then the one the build adds. It is read from the
+manifest by [`komira_oci layers`](oci/README.md), which also refuses an
+image whose Entrypoint is not a regular file with mode 0755 in the added
+layer; it is part of every image's default output.
+
+An image can instead add a tree laid at `/`, made by `oci_tree` from
+bundles and files at paths, with an explicit entrypoint (a bundle's program
+can be given another name in it with `mojo_bundle`'s `program`):
+
+```python
+load("@komira//tools/build/package:defs.bzl", "mojo_bundle", "oci_image", "oci_tree")
+load("@komira//tools/build/package:oci_check.bzl", "oci_image_check")
+
+mojo_bundle(name = "tool_bundle", binary = ":tool", program = "tool", version = "0.1.0")
+oci_tree(
+    name = "tree",
+    bundles = {"app/": ":tool_bundle"},          # /app/bin/tool, /app/lib/...
+    files = {"bin/sh": "//tools/build/toolchains:busybox"},
+    version = "0.1.0",
+)
+oci_image(name = "image_unchecked", tree = ":tree", entrypoint = "/app/bin/tool", repository = "example/tool")
+oci_image_check(
+    name = "image",
+    image = ":image_unchecked",
+    entrypoint = "/app/bin/tool",
+    executables = ["bin/sh"],
+    files = ["etc/ssl/certs/ca-certificates.crt"],
+)
+```
+
+No path of an `oci_tree` may be inside another (a file at `app/bin/tool`
+would replace the bundle's program), and modes are 0755 for directories and
+files with an exec bit, else 0644; the kcov guard reads the whole tree before
+it is packed. The tree is laid out by the Zig tool
+[`komira_oci tree`](oci/README.md), which refuses the paths (naming each
+reason) and so fails the build; its unit tests, welded to it, hold the
+refusals to known paths. The image of a tree is written by `komira_oci
+image`. `oci_image_check`
+([`oci_check.bzl`](oci_check.bzl), running
+[`komira_oci check`](oci/README.md)) reads the
+built image back in a build action and is that image with the check's output
+added to its default output and each sub-target, so the image cannot be built
+through it unless: the config's Entrypoint is exactly the one named; it and
+each of `executables` is a regular file with mode 0755 in the image's
+filesystem (layers applied in order; a whiteout removes its path and
+everything under it, an opaque whiteout every child of its directory from the
+layers below; symbolic links followed);
+each of `files` is a non-empty regular file there; `[layers]` is the
+manifest's layers in order; and the added layer changes the type of no base
+entry (a directory over a base symlink such as `bin -> usr/bin` would hide
+what the link reaches). With `expect_red = "<text>"` an `oci_image_check` is
+a negative case of the check, which builds only while the check is red naming
+`<text>` (the cases in [`oci/BUCK`](oci/BUCK)). The
+komira base image is built this way:
+[`packaging/images/base`](../../../packaging/images/base/README.md).
+
 The base image is `komira//tools/build/toolchains:distroless_base` (distroless base-debian12,
 which has glibc, CA certificates and no shell), declared with `oci_base`: the
 digest of its linux/amd64 manifest, that manifest's bytes checked in, and one
-pinned download per blob. The packing action does not use the network: it
+pinned download per blob. A base is pinned by digest only: `oci_base` fails
+unless the manifest, the config and each layer is a `sha256:<64 hex>` digest,
+so a tag is refused (`oci_base_refusals`, the same check as a function a
+load-time case can call). The packing action does not use the network: it
 takes no URLs, reads only those files and refuses unless the manifest hashes to its
 digest and names exactly the downloaded blobs.
 
-Both formats are written by `komira_pack` ([`komira_pack.zig`](pack/komira_pack.zig)), a
+Both formats of a bundle are written by `komira_pack` ([`komira_pack.zig`](pack/komira_pack.zig)), a
 static executable built by the pinned zig and run with no shell. It holds
 its output in memory until it exits, up to about three times the bundle's
 size at peak, which sets the size of bundle a worker can pack. The
@@ -143,7 +203,7 @@ refuses kcov by its usage line alone.
 | format | what the guard reads | what waits for it |
 |---|---|---|
 | `mojo_bundle` | every file of the bundle | the bundle target (`[kcov_guard]` is built with it) |
-| `bundle_tarball`, `oci_image` | the bundle, through the bundle's guard | the `komira_pack tar` and `komira_pack oci` actions |
+| `bundle_tarball`, `oci_image` | the bundle, through the bundle's guard; a tree (`oci_tree`), through the tree's guard | the `komira_pack tar`, `komira_pack oci` and `komira_oci image` actions |
 | `conda_package` | every file `komira_pack conda` copies in: the `.mojoc`, the README, the licence files | the copies behind `[default]` and `[release]` (`[kcov_guard]` is the marker) |
 
 The image's base layers (the pinned distroless blobs) and the files the
@@ -210,6 +270,14 @@ uploaded, and an uploader reads only the `[release]` sub-target, which exists on
 after the release check (stamped, with its source commit) passed. The name, the run
 requirements, the subdir and the version are derived, a library that cannot be
 packaged keeps a target that builds as a refusal, and the bytes are reproducible.
+
+[`system_libs.bzl`](system_libs.bzl) maps each system library a package may open
+at run time (by soname) to the conda-forge requirement of the package that ships
+it. kci's closure checks accept exactly those requirements on a library; the
+target `:system_libs` ([`system_libs_record.bzl`](system_libs_record.bzl)) writes
+the table for the welded test that holds kci's compiled copy equal to it. The
+packer does not write them yet: it still refuses a library that opens a shared
+library by name.
 
 With coverage on (`-c komira.coverage=true`), both copies of a conda package
 (its default output and `[release]`) also wait for the library's coverage runs

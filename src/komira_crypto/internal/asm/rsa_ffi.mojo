@@ -193,11 +193,11 @@ def _bn_free(bn: _FfiHandle):
 
     # SAFETY: bn must be a valid BIGNUM pointer or NULL.
     """
-    if Int(bn) != 0:
+    if Int(bn) != 0:  # cov: unreachable called only when RSA_set0_key did not take n and e, which happens only after an allocation failure
         external_call[
             "komira_awslc_BN_free", NoneType,
             _FfiHandle,
-        ](bn)
+        ](bn)  # cov: unreachable see the line above
 
 
 @always_inline
@@ -274,7 +274,7 @@ def _evp_md_for_kind(
             "komira_awslc_EVP_sha512",
             _FfiHandle,
         ]()
-    return _ffi_null()
+    return _ffi_null()  # cov: unreachable the only caller, rsa_pss_verify_ffi, checks md_kind at entry
 
 
 # -----------------------------------------------------------------------------
@@ -338,14 +338,14 @@ def rsa_pss_verify_ffi(
     var rsa_owns_ne = False  # set true once RSA_set0_key takes ownership
     try:
         if Int(rsa) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         bn_n = _bn_bin2bn_from_span(n_be)
         if Int(bn_n) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
         bn_e = _bn_new_from_u64(e_value)
         if Int(bn_e) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # SAFETY: RSA_set0_key(rsa, n, e, d) TAKES OWNERSHIP of n + e
         # on success (returns 1). On failure (returns 0) ownership stays
@@ -359,14 +359,14 @@ def rsa_pss_verify_ffi(
             _FfiHandle,  # d (NULL)
         ](rsa, bn_n, bn_e, d_null)
         if rc_set != 1:
-            return False
+            return False  # cov: unreachable RSA_set0_key fails only on a NULL n or e, refused above
         rsa_owns_ne = True
 
         # SAFETY: EVP_sha{256,384,512}() return const singleton EVP_MD*
         # pointers. MUST NOT be freed.
         var md_ptr = _evp_md_for_kind(md_kind)
         if Int(md_ptr) == 0:
-            return False
+            return False  # cov: unreachable md_kind was checked at entry, so the digest is never NULL
         # mgf1_md = NULL means "use the same hash as md" — universal
         # cert-chain convention. Our existing in-tree code matches this
         # (MGF1 instantiated with the same H: Hash trait param).
@@ -403,8 +403,8 @@ def rsa_pss_verify_ffi(
         # _rsa_free and _bn_free are no-ops on NULL.
         _rsa_free(rsa)
         if not rsa_owns_ne:
-            _bn_free(bn_e)
-            _bn_free(bn_n)
+            _bn_free(bn_e)  # cov: unreachable n and e are unowned only after an allocation failure
+            _bn_free(bn_n)  # cov: unreachable see the line above
     return ok
 
 
@@ -489,14 +489,14 @@ def rsa_pkcs1_sha256_verify_ffi(
     var rsa_owns_ne = False  # set true once RSA_set0_key takes ownership
     try:
         if Int(rsa) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         bn_n = _bn_bin2bn_from_span(n_be)
         if Int(bn_n) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
         bn_e = _bn_new_from_u64(e_value)
         if Int(bn_e) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # SAFETY: RSA_set0_key(rsa, n, e, d) TAKES OWNERSHIP of n + e on
         # success (returns 1). On failure (returns 0) ownership stays with the
@@ -510,7 +510,7 @@ def rsa_pkcs1_sha256_verify_ffi(
             _FfiHandle,  # d (NULL)
         ](rsa, bn_n, bn_e, d_null)
         if rc_set != 1:
-            return False
+            return False  # cov: unreachable RSA_set0_key fails only on a NULL n or e, refused above
         rsa_owns_ne = True
 
         # SAFETY: RSA_verify reads len(digest) bytes from digest_ptr and
@@ -538,6 +538,6 @@ def rsa_pkcs1_sha256_verify_ffi(
         # stayed with us — free them ourselves. Both frees are NULL-safe.
         _rsa_free(rsa)
         if not rsa_owns_ne:
-            _bn_free(bn_e)
-            _bn_free(bn_n)
+            _bn_free(bn_e)  # cov: unreachable n and e are unowned only after an allocation failure
+            _bn_free(bn_n)  # cov: unreachable see the line above
     return ok
