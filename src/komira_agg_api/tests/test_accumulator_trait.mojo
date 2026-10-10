@@ -10,6 +10,14 @@
 # finalize. A renamed or re-typed trait method fails this file's compile.
 # The accumulator is a per-group SUM over int64 values honouring
 # `col_offset`, so the driver's result is checked, not only compiled.
+#
+# FFI-BOUNDARY: SumI64Acc is a stand-in conformer of the Accumulator trait's
+# raw-pointer ABI (the shape the kernel thunks call through a fn-ptr), and the
+# trait spells both pointer parameters with MutUntrackedOrigin, so a conformer
+# must too (tests/pointer_lint_ffi.tsv lists this file). Ownership: `_drive`'s
+# caller owns both buffers (the `gids` and `vals` Lists of the test) and frees
+# them when they go out of scope after the call; update_batch only borrows them
+# for the call and neither stores nor frees either pointer.
 # =============================================================================
 
 from std.collections import List
@@ -35,6 +43,9 @@ struct SumI64Acc(Accumulator):
         col_offset: Int,
         n: Int,
     ) raises:
+        # SAFETY: the caller (`_drive`) keeps `gids` alive for n Ints and
+        # `vals` for col_offset + n Int64s for the duration of this call;
+        # neither pointer is stored.
         var vals = col_data_ptr.bitcast[Int64]()
         for i in range(n):
             self.sums[gids_ptr[i]] += vals[col_offset + i]
@@ -62,6 +73,11 @@ def _drive[
     HeapRegion
 ]:
     acc.ensure_capacity(3)
+    # SAFETY: both pointers address the caller's Lists, which `mut` keeps
+    # borrowed (alive and unmoved) across the update_batch call and which the
+    # caller frees afterwards. The cast to the trait's untracked origin is
+    # forced (no implicit conversion from origin_of(gids) exists); the
+    # pointers live only for this call.
     var gp = gids.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
     var vp = vals.unsafe_ptr().bitcast[UInt8]().unsafe_origin_cast[
         MutUntrackedOrigin
