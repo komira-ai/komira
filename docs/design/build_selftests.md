@@ -8,8 +8,8 @@ tests are Zig too. The script is not ported as one runner with a table of cases.
 check moves to the cheapest place that can still fail. This doc lists every check, says where it goes and
 which planted defect proves it can go red. The conversion then lands in slices (the last section).
 
-Status: design, nothing converted yet. Today the script runs nightly
-([ci.md](../ci.md#build-system-self-tests)) and is not the gate. When the conversion is done, every
+Status: design, nothing converted yet. Today the script runs on a schedule in the build-system
+self-test workflow ([ci.md](../ci.md#build-system-self-tests)) and is not the gate. When the conversion is done, every
 check runs in `pr / check`, and nothing runs on a schedule.
 
 ## The three buckets
@@ -391,7 +391,10 @@ All under `//tools/build/selftest/`, one Zig test target each:
 
 The graph checks (`aquery_host_paths`, `config_hash_pin`, `docs_package_coverage`,
 `test_weld_real_graph`, `golden_linux_x86_64`, `selftest_closure`) are not scenarios. They are BXL
-scripts run in the gate (see "Graph checks in the gate").
+scripts run in the gate (see "Graph checks in the gate"). They run when `build_selftests` is reached,
+that is on widened changes, so a defect that only a `src/` BUCK file introduces (an absolute host path
+passed through an attribute, say) is not caught on that pull request; every listed mutant lives under
+`tools/build`.
 
 ## Scenarios run in pr / check
 
@@ -478,7 +481,7 @@ own inner builds.
   `--nested` instead of driving buck2. Slice 3 shows this red.
 
 Rejected options:
-- A scheduled or nightly workflow, or a separate farm-attached runner. The scenarios check the build
+- A scheduled workflow, or a separate farm-attached runner. The scenarios check the build
   system, so they gate the changes to it.
 - Leaving the scenarios in the derived check `tools_build`, which changes under `src/` reach (above).
 - A label that `build_targets.sh` excludes, or any selection in YAML or in a shell script. That is
@@ -495,7 +498,8 @@ A scenario is a `buck2 test` target that runs buck2. Four things make that work.
 1. **The rule.** `selftest_scenario` (Starlark, `tools/build/selftest/defs.bzl`) returns an
    `ExternalRunnerTestInfo`. Its command is the scenario's Zig binary itself, with no shell around it.
    The rule takes that binary as an `exec_dep`, so it is configured as the gate configures it and is a
-   cache hit from the gate. Its other inputs:
+   cache hit from the gate. That assumes the execution configuration hashes the same as the gate's
+   target configuration (one execution platform per OS); slice 3 confirms it. Its other inputs:
    - The pinned buck2 release, also an `exec_dep`: a `pinned_file` of the asset `tools/buck2` names,
      unpacked by a Zig tool. The `./buck2` script is used only by the `bootstrap_pin` scenario, as the
      program under test.
@@ -702,7 +706,8 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
      3. **This doc's `doc_links` slice** comes last. It ports `doc_links` to Zig on the shared markdown
         module and writes no second reader. Its welded unit tests carry the link cases of
         `test_buildtools` (row 17 doc_links_dead), each with the planted defect it names. It moves the
-        `doc_links` lint (`tools/build/lint/defs.bzl`, which runs `inspect doc-links` today) to the Zig
+        `doc_links` lint (`tools/build/lint/defs.bzl` passes `inspect` to `lint.sh`, which runs
+        `inspect doc-links` today; the slice moves both) to the Zig
         binary. The rest of `tools/build/inspect` is not part of this slice.
    - Rows 38 readme_marker, compile_error (`compile_isolation`) and owner_base_no_readme, readme_keyword
      (`analysis_refusals_readme`) stay checks of this design: a target and selftest scenarios. Slice 6
@@ -747,7 +752,7 @@ once the macOS build hosts are connected to CI.
 
 What is known now (`functional/darwin/check.sh` section 7, `.buckconfig.local.example`):
 - The darwin-arm64 execution platform is registered only when `[komira_re] darwin_arm64_properties`
-  and `[komira_re] darwin_macos_hosts` are both set. `darwin_platform` covers the unset case and a
+  and `[komira_re] darwin_macos_hosts` are both set; a property set without hosts is refused at load. `darwin_platform` covers the unset case and a
   placeholder set in `pr / check`, with no macOS worker.
 - What the scenario asserts, in the checkout under its isolation dir, with `--target-platforms`
   darwin-arm64:
