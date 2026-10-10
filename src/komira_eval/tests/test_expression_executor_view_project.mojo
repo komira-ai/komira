@@ -5,10 +5,11 @@
 # of the k-th selected row gives a different list.
 #
 # Integer division truncates toward zero (docs/design/query_semantics.md
-# §5.1, DuckDB's `//`: -7 // 2 is -3), over negative quotients too. A zero divisor raises
-# here, as standard SQL does (a division-by-zero exception), where DuckDB
-# answers NULL; the tests pin the raise as what the code does today. Decimal result types follow the code's rules
-# (`decimal_*_result_ps`).
+# §5.1, DuckDB's `//`: -7 // 2 is -3), over negative quotients too, in the
+# Float64 walker as well. A zero divisor raises here, as standard SQL does (a
+# division-by-zero exception), where DuckDB answers NULL; the tests pin the
+# raise as what the code does today. Decimal result types follow the code's
+# rules (`decimal_*_result_ps`).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
@@ -353,6 +354,19 @@ def test_f64_integer_arithmetic_widens() raises:
     _floats(_f64(_unary(make_i64_to_f64(0), make_col(A)), [0, 1, 3]), [7.0, -7.0, 10.0], "CAST(a AS DOUBLE)")
 
 
+def test_f64_integer_division_truncates_toward_zero() raises:
+    """An Int64 division read through the Float64 walker (the value of a
+    `*_F64_MIXED` compare side) is still integer division (§5.1): a / b over
+    rows [0, 1, 3] is 7 / 2, -7 / 2, 10 / -3 = [3.0, -3.0, -3.0], not the
+    true quotients [3.5, -3.5, -3.33...]. 7 / -20 truncates to the integer 0,
+    which widens to +0.0, not the -0.0 that truncating -0.35 gives
+    (komira-ai/komira#932)."""
+    _floats(_f64(_binary(EXPR_DIV_I64, make_col(A), make_col(B)), [0, 1, 3]), [3.0, -3.0, -3.0], "a / b")
+    var zero = _f64(_binary(EXPR_DIV_I64, make_col(A), make_lit_i64(-20)), [0])
+    _floats(zero, [0.0], "a / -20")
+    assert_true(1.0 / zero[0] > 0.0, "a / -20 is +0.0, not -0.0")
+
+
 def test_f64_math_functions() raises:
     _floats(_f64(_unary(make_sqrt_f64(0), make_col(X)), [2]), [2.0], "sqrt(4.0)")
     _floats(_f64(_unary(_node(EXPR_SIN_F64, 0, 0), make_lit_f64(0.0)), [0]), [0.0], "sin(0)")
@@ -611,6 +625,7 @@ def main() raises:
     suite.test[test_f64_leaves]()
     suite.test[test_f64_arithmetic]()
     suite.test[test_f64_integer_arithmetic_widens]()
+    suite.test[test_f64_integer_division_truncates_toward_zero]()
     suite.test[test_f64_math_functions]()
     suite.test[test_f64_case_takes_the_first_true_branch]()
     suite.test[test_f64_unsupported_kind_raises]()

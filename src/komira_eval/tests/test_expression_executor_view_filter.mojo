@@ -35,6 +35,7 @@ from komira_kernels.runtime_expr import (
     EXPR_GE_F64_MIXED,
     EXPR_GE_I64,
     EXPR_GT_F64,
+    EXPR_DIV_I64,
     EXPR_GT_F64_MIXED,
     EXPR_GT_I64,
     EXPR_LE_F64,
@@ -370,6 +371,21 @@ def test_mixed_float64_against_int64_every_operator() raises:
         _expect(_run(exec, batch), want[k], "i op 3.0, kind " + String(kinds[k]))
 
 
+def test_mixed_compare_over_an_integer_quotient() raises:
+    """`(i / j) > 0.4`: the Int64 quotient truncates toward zero (§5.1)
+    before it is widened, so i / j over i = [5, 1, 4, 2, 3],
+    j = [5, 2, 3, 2, 9] is [1, 0, 1, 1, 0] and rows 0, 2, 3 survive. The
+    true quotient 0.5 of row 1 would also pass (komira-ai/komira#932)."""
+    var batch = _numeric_batch()
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(I))                     # 0
+    pool.append(make_col(J))                     # 1
+    pool.append(_node(EXPR_DIV_I64, 0, 1))       # 2: i / j
+    pool.append(make_lit_f64(0.4))               # 3
+    pool.append(_node(EXPR_GT_F64_MIXED, 2, 3))  # 4
+    _expect(_run(ExpressionExecutor(pool^, 4, _numeric_names()), batch), [0, 2, 3], "(i / j) > 0.4")
+
+
 def test_unsupported_root_kind_is_refused() raises:
     var batch = _numeric_batch()
     var pool = List[RuntimeExpr]()
@@ -518,6 +534,23 @@ def test_in_list_int32_column_does_not_wrap_a_wide_integer_entry() raises:
     var neg = List[ScalarValue]()
     neg.append(ScalarValue.from_int(-4294967294))
     _expect(_run(_in_exec(make_col(1), neg^), batch), List[Int](), "a32 IN (-(2^32) + 2)")
+
+
+def test_in_list_int64_compares_integer_entries_exactly() raises:
+    """2^53 + 1 and 2^53 are distinct Int64 values that round to the same
+    Float64, so an integer entry must be compared as Int64: a64 IN (2^53)
+    keeps only the 2^53 row, and a64 IN (2^53 + 1) only the other."""
+    var fields = List[Field]()
+    fields.append(Field("a64", DType.int64, True))
+    var cols = Slab[Column[HeapRegion]]()
+    cols.append(_i64([9007199254740993, 9007199254740992]))
+    var batch = _batch(fields, cols^)
+    var lo = List[ScalarValue]()
+    lo.append(ScalarValue.from_int(9007199254740992))
+    _expect(_run(_in_exec(make_col(0), lo^), batch), [1], "a64 IN (2^53)")
+    var hi = List[ScalarValue]()
+    hi.append(ScalarValue.from_int(9007199254740993))
+    _expect(_run(_in_exec(make_col(0), hi^), batch), [0], "a64 IN (2^53 + 1)")
 
 
 def test_in_list_float64_takes_floats_and_widened_integers() raises:
@@ -723,11 +756,13 @@ def main() raises:
     suite.test[test_or_merges_both_sides_in_row_order]()
     suite.test[test_and_nested_under_or]()
     suite.test[test_mixed_float64_against_int64_every_operator]()
+    suite.test[test_mixed_compare_over_an_integer_quotient]()
     suite.test[test_unsupported_root_kind_is_refused]()
     suite.test[test_in_list_int64_skips_null_and_non_integer_values]()
     suite.test[test_in_list_int32_skips_null_and_non_integer_values]()
     suite.test[test_in_list_int_column_matches_a_whole_number_float_entry]()
     suite.test[test_in_list_int32_column_does_not_wrap_a_wide_integer_entry]()
+    suite.test[test_in_list_int64_compares_integer_entries_exactly]()
     suite.test[test_in_list_float64_takes_floats_and_widened_integers]()
     suite.test[test_in_list_string_skips_null_and_non_string_values]()
     suite.test[test_in_list_bool_per_truth_value]()

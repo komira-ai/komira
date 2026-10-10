@@ -50,7 +50,7 @@
 # no stale-pointer hazard across destroy and recreate.
 # =============================================================================
 
-from std.math import sqrt, sin, cos, asin, atan2, pi
+from std.math import sqrt, sin, cos, asin, atan2, pi, ceil, floor
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.record_batch import RecordBatch
@@ -3504,10 +3504,17 @@ struct ExpressionExecutor(Movable, Deinitable):
             )
             var k = 0
             while k < n_sel:
-                # IEEE-754: div-by-zero produces +-Inf or NaN, no raise
-                # (matches the EXPR_DIV_F64 arm's semantics — i64 inputs
-                # are widened to F64 BEFORE the divide).
-                out.append(lhs_vals[k] / rhs_vals[k])
+                # Integer division truncates toward zero (query_semantics.md
+                # §5.1), so the widened quotient is truncated: 7 / 2 is 3.0,
+                # not 3.5. Exact while both operands are below 2^53. `+ 0.0`
+                # turns the -0.0 of a truncated -0.35 into the integer 0's
+                # +0.0. A zero divisor gives +-Inf or NaN here, no raise.
+                var q = lhs_vals[k] / rhs_vals[k]
+                if q >= 0.0:
+                    q = floor(q)
+                else:
+                    q = ceil(q)
+                out.append(q + 0.0)
                 k = k + 1
             return
 

@@ -436,7 +436,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** `BIN_DIV` over two integer operands is integer division that truncates toward zero, and its result is an integer (§8.9): `7 / 2` is 3 and `-7 / 2` is -3. This is DuckDB's `//`. A frontend whose `/` means true division (SQL, DuckDB, polars) casts the left operand to DOUBLE before building `BIN_DIV`. A frontend whose `//` floors (polars, pandas, Python: `-7 // 2` is -4) builds that from `BIN_DIV` and a correction, not from `BIN_DIV` alone. Over float operands `BIN_DIV` is IEEE division.
 - **DuckDB.** `/` is floating-point division (`5 / 2 = 2.5`) and `//` is integer division (DuckDB documentation, "numeric functions"). The sign of `//` for negative operands is not documented; measured on 1.5.3, `-7 // 2` is -3 (`src/komira_plan_expr/col_expr_division.mojo:5-17`).
-- **Current behaviour.** The column kernel divides with Mojo's integer `/`, which truncates (`src/komira_column_kernels/arithmetic.mojo:675`); its header records the result-type divergence from DuckDB's `/` as deliberate (`:83-88`). The Mojo dataframe surface decides `/` against `//` in one place (`src/komira_plan_expr/col_expr_division.mojo:28-35`). The expression executor (`src/komira_eval/expression_executor.mojo`, `_ee_div_trunc`) also truncates; expression template 8 floors ("Code that does not follow", item 1).
+- **Current behaviour.** The column kernel divides with Mojo's integer `/`, which truncates (`src/komira_column_kernels/arithmetic.mojo:675`); its header records the result-type divergence from DuckDB's `/` as deliberate (`:83-88`). The Mojo dataframe surface decides `/` against `//` in one place (`src/komira_plan_expr/col_expr_division.mojo:28-35`). The expression executor (`src/komira_eval/expression_executor.mojo`) also truncates: its integer walkers through `_ee_div_trunc`, and its Float64 walker's `EXPR_DIV_I64` arm by truncating the widened quotient (exact below 2^53). Expression template 8 floors ("Code that does not follow", item 1).
 - **Mark.** MATCHES: at the SQL surface. The plan has one division operator, DuckDB's `//`; a SQL frontend lowers `/` to a DOUBLE division and `//` to `BIN_DIV`, so a SQL query's result is DuckDB's for both spellings.
 
 ### 5.2 Modulo sign
@@ -450,7 +450,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** An integer `BIN_DIV` or `BIN_MOD` whose divisor is zero answers NULL for that row. Other rows keep their values. No error is raised.
 - **DuckDB.** Measured on 1.5.3 (`src/komira_column_kernels/arithmetic.mojo:74-78`): `qty // 0` and `qty % 0` are NULL. This holds through 1.5; on 2.0 the oracle sets `error_on_division_by_zero = false` (see the oracle settings). **pyarrow.** `divide` on integers raises on a zero divisor; it is not the oracle for this item.
-- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:572-580` and `:615-676` answer NULL per row. The expression executor raises instead ("Code that does not follow", item 1).
+- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:572-580` and `:615-676` answer NULL per row. The expression executor's integer walkers raise instead, and its Float64 walker answers +-Inf or NaN ("Code that does not follow", item 1).
 - **Mark.** MATCHES.
 
 ### 5.4 Signed MIN divided by -1
