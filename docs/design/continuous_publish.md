@@ -143,7 +143,7 @@ step) and the installed-bytes checks in `beta_validate`.
 **PROPOSED: keep the trigger as it is.** Every push to `main` is a release, and pushes made during a
 release coalesce into the next one. That *is* the per-batch trigger. The batch is whatever landed while
 the previous release ran, so there is no clock to tune and no second trigger to keep in step with the
-first. A scheduled batch trigger (nightly, for example) would only add delay: a release that changed
+first. A scheduled batch trigger would only add delay: a release that changed
 nothing is a NOOP that exits 0 (build numbers count first-parent commits, not runs).
 
 "Continuous" therefore means **every push to `main` that touches code reaches `prod` within one release
