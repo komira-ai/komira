@@ -48,7 +48,7 @@
 # heap-byte defect this replaced.
 # =============================================================================
 
-from std.memory import alloc, unsafe_memcpy
+from std.memory import alloc, bitcast, unsafe_memcpy
 from std.sys import size_of
 
 from komira_arrow.arrow_types import ArrowType
@@ -646,7 +646,11 @@ def _bytes_to_i32(p: UnsafePointer[Int8, MutUntrackedOrigin]) -> Int32:
     var b1 = UInt32(Int((p + 1)[]) & 0xFF)
     var b2 = UInt32(Int((p + 2)[]) & 0xFF)
     var b3 = UInt32(Int((p + 3)[]) & 0xFF)
-    return Int32(Int(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)))
+    # Reinterpret the 32 bits as two's complement. `Int32(Int(u))` widens
+    # the UInt32 first and then narrows an Int above Int32's range, which
+    # is not a defined wrap: FF FF FF FF came out as 4294967295, not -1,
+    # and the callers' `< 0` checks never fired.
+    return bitcast[DType.int32](b0 | (b1 << 8) | (b2 << 16) | (b3 << 24))
 
 
 def encode_metadata(
@@ -708,7 +712,7 @@ def decode_metadata(
     Raises if the buffer self-describes a negative count, negative key/value
     length, or implausibly large length (>= 2^28 bytes per token guards
     against corrupted input). The implementation walks the bytes
-    sequentially using native-endian i32 reads (matches `encode_metadata`).
+    sequentially using little-endian i32 reads (matches `encode_metadata`).
 
 
     """
