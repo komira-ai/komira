@@ -6,6 +6,7 @@ from .mask import roomy
 from .score import classify_score
 from .shapes import any_positive, shapes
 from .strings import first
+from .unrun import Tag
 from .trial import (
     both,
     calls,
@@ -17,4 +18,17 @@ from .trial import (
     raise_in_try,
     with_else,
     with_finally,
+)
+from .values import (
+    both_set,
+    digits,
+    either_small,
+    folded,
+    guarded,
+    lowers,
+    nested_values,
+    passed,
+    raising,
+    raising_or,
+    stored,
 )

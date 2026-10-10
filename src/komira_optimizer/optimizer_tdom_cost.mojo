@@ -2,8 +2,9 @@
 # TDOM cost computation — estimate_with_tdom + bridging-edge enumeration
 # =============================================================================
 #
-# The cost function the DP enumerator calls for
-# EVERY (left_set, right_set) cost lookup. The `TdomGraph`
+# The cost function a DP join enumerator (DPccp; `optimizer_dpccp`, not in
+# this tree) is designed to call for EVERY (left_set, right_set) cost lookup;
+# in this tree only tests call it. The `TdomGraph`
 # data structure + `build_tdom_graph` live in sibling file `optimizer_tdom.mojo`.
 # This module closes the loop: given a `TdomGraph` + the candidate joining pair,
 # compute the denominator product across bridging edges, DEDUPED by
@@ -21,7 +22,7 @@
 #   * `JoinChain` (from `optimizer_reorder.mojo`) — relations + edges (the
 #     edge geometry the chain extractor emitted).
 #   * `left_set`, `right_set` (`RelationSet`) — the candidate joining pair
-#     from the DP enumerator.
+#     from the DP enumerator (not in this tree).
 #   * `left_card`, `right_card` (`Int`) — cumulative cardinalities for each
 #     side, supplied by the DP table entries.
 #   * `provider` (`P: ColumnStatsProvider`) — required for the leftover-
@@ -32,9 +33,9 @@
 #
 # Outputs:
 #   * `Int` — the estimated join cardinality. Identical units as the legacy
-#     `estimate_join_cardinality_with_ndv`; consumers add this to the
-#     cumulative `pair_cost = join_card + left_cost + right_cost` in DPccp's
-#     `emit_pair`.
+#     `estimate_join_cardinality_with_ndv`; a DPccp enumerator (not in this
+#     tree) is designed to add this to the cumulative
+#     `pair_cost = join_card + left_cost + right_cost`.
 #
 # Tie-break determinism:
 #   Within the primary TDOM-decreasing sort, ties resolve by
@@ -45,16 +46,16 @@
 #   pins this.
 #
 # Saturating numerator:
-#   Option (b) — NO in-function saturation. The existing
-#   `estimate_join_cardinality_with_ndv` clamp in `optimizer_reorder.mojo`
-#   catches the pathological case after the divide. This module trusts this; the
-#   numerator `left_card * right_card` can in principle overflow Int on
-#   SF=100+ data (1e9 * 1e9 = 1e18 is near the Int64 edge). Mojo's Int is
+#   Option (b) — NO in-function saturation. The numerator
+#   `left_card * right_card` can in principle overflow Int on SF=100+ data
+#   (1e9 * 1e9 = 1e18 is near the Int64 edge), and nothing clamps it here or
+#   after the divide: `estimate_join_cardinality_with_ndv` in
+#   `optimizer_reorder.mojo` saturates only its own product. Mojo's Int is
 #   64-bit; the test suite includes a near-overflow case (#7) for a product
-#   that still fits Int64. If a future SF=1000 bench fails the test, swap to
-#   `REORDER_CARDINALITY_MAX` saturated multiplication here.
+#   that still fits Int64. To admit larger products, saturate at
+#   `REORDER_CARDINALITY_MAX` here the way `optimizer_reorder` does.
 #
-# Encapsulation rule: SDK-internal module; no UnsafePointer
+# Encapsulation rule: package-internal module; no UnsafePointer
 # crosses any boundary. The trait-bound `P: ColumnStatsProvider` keeps the
 # leftover-composite path closed under the same dispatch surface that
 # `build_tdom_graph` uses, so test injection works through one interface.
@@ -105,8 +106,8 @@ def edge_bridges(
     #   Test #4 in `test_optimizer_tdom_estimate_with_tdom.mojo` covers
     #   all four boundary cases.
 
-    `@always_inline` because the inner DP cost loop calls this for every
-    edge of every candidate pair (n_edges * n_pairs per chain).
+    `@always_inline` because every cost lookup calls this for every edge
+    of the candidate pair (n_edges * n_pairs per chain under DP).
     """
     var l_in_left = left_set.contains(edge.left_relation)
     var l_in_right = right_set.contains(edge.left_relation)
@@ -169,7 +170,7 @@ def _class_tdom_or_none(imm tdom: TdomGraph, edge_idx: Int) -> Int:
 
 
 # =============================================================================
-# _max_ndv_across_keys_for_edge — leftover composite denominator (M2 fallback)
+# _max_ndv_across_keys_for_edge — leftover composite denominator (fallback)
 # =============================================================================
 
 
@@ -483,9 +484,9 @@ def estimate_with_tdom[
       2. Walk sorted edges. For each edge:
          * If class == -1 (leftover composite): contribute
            `_max_ndv_across_keys_for_edge(edge, provider)` as a flat
-           multiplier into `composite_denom` (legacy M2 path).
+           multiplier into `composite_denom` (legacy path).
          * Else if class already seen: SKIP (DuckDB :336-341 dedup —
-           THE redundant-edge skip that re-ranks Q5).
+           THE redundant-edge skip).
          * Else: classify the edge by its canonical relation-pair
            bucket `(min(lr,rr), max(lr,rr))` and record the class TDOM
            in the bucket's running MAX. Mark class as seen.
@@ -520,13 +521,11 @@ def estimate_with_tdom[
     #   bridging bucket has a Tier-1-backed PK signal. Tier-2
     #   (row-count fallback) NDV trivially equals cardinality, so the
     #   gate rejects that case to avoid spuriously clamping Tier-2-only
-    #   join pairs. This keeps Q5's plan-shape rebalancing intact while
-    #   enabling Q9's correct FK-PK ceiling.
+    #   join pairs.
 
     # CONTRACT (saturation policy):
-    #   Numerator can overflow Int64 on SF=100+ data; the existing
-    #   `estimate_join_cardinality_with_ndv` clamp in
-    #   `optimizer_reorder.mojo` catches that after the divide.
+    #   Numerator can overflow Int64 on SF=100+ data; nothing saturates it
+    #   (see the module header). The product must fit Int64.
 
     Trait-bound P so test SyntheticColumnStatsProvider feeds through
     one surface (matches `build_tdom_graph[P: ColumnStatsProvider, //]`).
@@ -596,7 +595,7 @@ def estimate_with_tdom[
             bucket_max_tdom.append(tdom_val)
         else:
             if tdom_val > bucket_max_tdom[found]:
-                bucket_max_tdom[found] = tdom_val
+                bucket_max_tdom[found] = tdom_val  # cov: unreachable bridging is sorted by TDOM descending, so the first class in a bucket holds its maximum
 
     var denom: Int = composite_denom
     for j in range(len(bucket_max_tdom)):

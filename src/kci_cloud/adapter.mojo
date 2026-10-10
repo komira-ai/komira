@@ -71,6 +71,21 @@
 #     differs from the stored one, before any change
 #     (`data.key_change_findings`): a new key is a new table, never an
 #     update.
+#   * THE METADATA IS KCI'S (metadata.mojo). After `lower`, kci writes the
+#     author's labels on every node of the resource as desired fields
+#     `label.<key>` (sorted by key), and the written cloud name on its
+#     primary node as the desired field `physical_name`; an adapter writes
+#     neither field itself (`deploy.lower_data` raises if it does). An
+#     adapter creates the primary object under `Resource.physical_name` when
+#     it is written (it reads it from the resource, as its outputs follow
+#     it) and writes the label fields where its object carries labels.
+#     `list_owned` reports the author's cloud name each object was created
+#     under (`OwnedRecord.name`; empty when the adapter chose the name), and
+#     kci refuses a plan, an apply or a destroy whose primary node asks for
+#     another one, before any change (`metadata.name_change_findings`): a
+#     new name is a new object. `Resource.adopt` adds the primary node to
+#     the scope's adopt list on plan and apply (the engine's `--adopt`), so
+#     an unstamped object of that name is stamped instead of refused.
 #
 # ⛔ PRECONDITION FOR THE FIRST REAL ADAPTER: NO `--` STAMPS MAY BE LEFT.
 # The standard label rule once wrote the `/` of a role as `--` (`uses--jobs`);
@@ -297,7 +312,10 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     list), its immutable KEY as the cloud stores it (a table's, rendered as
     `data.table_key_text`; empty for every other kind), and the VALIDATION
     RUN that created it: the `kci-run-id` label's value as the cloud stores
-    it (`labels.validation_run_of`), or None when the object carries none."""
+    it (`labels.validation_run_of`), or None when the object carries none;
+    and the author's cloud NAME it was created under
+    (`Resource.physical_name`, as the cloud stores it; empty when the
+    adapter chose the name)."""
 
     var kind: String
     var id: String
@@ -310,6 +328,7 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     var retained: Bool
     var key: String
     var validation_run_id: Optional[String]
+    var name: String
 
     def __init__(
         out self,
@@ -324,6 +343,7 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
         retained: Bool,
         key: String,
         validation_run_id: Optional[String],
+        name: String = String(""),
     ):
         self.kind = kind
         self.id = id
@@ -336,6 +356,7 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
         self.retained = retained
         self.key = key
         self.validation_run_id = validation_run_id.copy()
+        self.name = name
 
     def __init__(out self, *, copy: Self):
         self.kind = copy.kind.copy()
@@ -349,6 +370,7 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
         self.retained = copy.retained
         self.key = copy.key.copy()
         self.validation_run_id = copy.validation_run_id.copy()
+        self.name = copy.name.copy()
 
 
 @fieldwise_init

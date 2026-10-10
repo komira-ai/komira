@@ -22,7 +22,8 @@
 #   - reorder_joins
 #
 # **Scope**: this module is the greedy search and the chain types and
-# cost functions it shares with the DPccp enumerator (`optimizer_dpccp`).
+# cost functions it shares with the DPccp enumerator (`optimizer_dpccp`,
+# not in this tree).
 #
 # **Cost model**: greedy ranks candidates with
 # `estimate_join_cardinality_for_reorder`, the conservative fallback
@@ -153,8 +154,8 @@ struct RelationSet(Copyable, Movable):
         Port of v0.3 `RelationSet::iter`. Mojo 0.26 has
         no first-class iterator protocol that composes well with struct
         methods, so the helper materializes a small `List[Int]` instead.
-        For DPccp n <= 12 means at most 12 entries per call — the alloc
-        cost is negligible next to DP hashing, and the explicit list
+        For DPccp (not in this tree) n <= 12 means at most 12 entries per
+        call — the alloc cost is negligible next to DP hashing, and the explicit list
         sidesteps the `ref` / self-lifetime gymnastics an iterator would
         require.
         """
@@ -603,23 +604,24 @@ def _extract_join_chain_inner(
     # so the frontend emits `part × supplier` as a CROSS at the bottom of the
     # left-deep tree and `eliminate_cross_join` correctly can NOT fold it (no
     # bridging conjunct exists between the two). Treating that CROSS as an
-    # opaque leaf forces the reorder to materialize the full ~200K×10K
-    # cartesian before the selective lineitem FK join runs (out of memory).
+    # opaque leaf makes the reordered plan materialize the full ~200K×10K
+    # cartesian below the selective lineitem FK join.
     #
     # Instead FLATTEN it: recurse into BOTH children as separate leaves
     # WITHOUT emitting an edge between them. The cross-sides then reconnect to
     # the chain through the per-column edges of the OTHER joins (the
     # `(part×supplier) ⋈ lineitem` composite splits into part↔lineitem +
-    # supplier↔lineitem via the per-column split above) plus
-    # `derive_transitive_edges` densification, so DPccp/greedy rebuild a
-    # proper join tree instead of the cartesian.
+    # supplier↔lineitem via the per-column split above), plus
+    # `derive_transitive_edges` densification where a caller runs it (this
+    # module does not), so greedy rebuilds a proper join tree instead of
+    # the cartesian.
     #
     # Correctness in the genuine-cross case is preserved by the existing
     # guards: if the flattened relations are truly disconnected (a real cross
     # product with no bridging FK anywhere), `extract_join_chain` yields 0
-    # edges and returns None (caller keeps the original CROSS), OR the DPccp
-    # cross-product augmentation / greedy CROSS-fallback rebuild a valid tree
-    # and the top-level synthesized-cross guard rejects an unsafe top CROSS.
+    # edges and returns None (caller keeps the original CROSS), OR greedy's
+    # CROSS fallback rebuilds a valid tree. (DPccp's cross-product augmentation
+    # and a guard against an unsafe synthesized top CROSS are not in this tree.)
     # A residual-carrying CROSS (cross+non-equi predicate) is NOT flattened —
     # it falls through to the opaque-leaf path below, preserving the residual.
     if plan.tag == PLAN_JOIN and plan._join.value()[].join_type == JOIN_CROSS \
@@ -759,7 +761,7 @@ def _max_ndv_across_keys(
         if dc > best:
             best = dc
     if best <= 0:
-        return None
+        return None  # cov: unreachable key_names is non-empty and every dc is above 0, so best is above 0
     return Optional[Int](best)
 
 
@@ -784,9 +786,8 @@ def estimate_join_cardinality_with_ndv(
     on a low-NDV column (e.g. customer.c_nationkey with only ~25 distinct
     values out of 150K rows) produces a Cartesian-shaped fanout
     `(150K * 2K) / 25 = 12M`, NOT `max(150K, 2K) = 150K`. The latter
-    is what the legacy fallback returned for Q5; that's why Q5's greedy
-    order picked customer-supp_nation early and ate the fanout instead
-    of joining on a higher-NDV path.
+    is what the max-based fallback returns, which ranks such a low-NDV
+    join as cheap and orders it early instead of a higher-NDV path.
 
     The CLAMP `min(NDV, side_card)` is load-bearing: writer-emitted
     distinct_count is summed across row groups (over-estimate), and
@@ -794,9 +795,9 @@ def estimate_join_cardinality_with_ndv(
     after a filter. Without the clamp, divisor > L produces
     (L*R)/divisor < R, which is sub-physical for the FK-PK shape
     (a join cannot produce fewer rows than the smaller side's
-    matched-key count). That sub-physical estimate makes greedy/DPccp
-    rank candidate joins by the WRONG metric and pick worse plans.
-    Empirically validated: without the clamp, Q5 wall regresses 2x.
+    matched-key count). That sub-physical estimate would make a
+    cost-based enumerator (DPccp, not in this tree) rank candidate joins
+    by the WRONG metric and pick worse plans.
 
     Algorithm:
       1. For each side, compute clamped_ndv = min(max_NDV, side_card).
@@ -962,12 +963,10 @@ def greedy_join_order(var chain: JoinChain) raises -> LogicalPlan:
     Cost model: legacy `max(l, r)` fallback via
     `estimate_join_cardinality_for_reorder`. The NDV-aware path
     (`estimate_join_cardinality_with_ndv`) is the DPccp cost function
-    (`optimizer_dpccp._cost_for_pair`); greedy intentionally does NOT
-    consume it. Re-enabling greedy-NDV was measured: TPC-H
-    Q9 regressed 39%, Q7 33% and Q8 31%. Multi-way reordering wins flow through
-    DPccp (n>=4 chains via `should_use_dpccp`); greedy serves the
-    n<4 fallback path where the small chain shape makes the FK-PK
-    cost signal moot.
+    (`optimizer_dpccp._cost_for_pair`, not in this tree); greedy
+    intentionally does NOT consume it. Multi-way reordering is designed to
+    go through DPccp (n>=4 chains); greedy serves the n<4 fallback path,
+    where the small chain shape makes the FK-PK cost signal moot.
     """
     var first = _take_smallest_relation(chain.relations)
     var current_set = RelationSet.singleton(first.id)
@@ -1047,7 +1046,7 @@ def reorder_joins(var plan: LogicalPlan) raises -> LogicalPlan:
     first reorder both children (so any nested chains become part of the
     outer chain's leaves), then extract and apply greedy.
 
-    For non-INNER joins (LEFT / RIGHT / FULL / SEMI / ANTI / CROSS / SMJ)
+    For non-INNER joins (LEFT / RIGHT / FULL / SEMI / ANTI / CROSS)
     we only recurse -- they're reorder barriers because their semantics
     depend on side.
     """
@@ -1074,12 +1073,12 @@ def reorder_joins(var plan: LogicalPlan) raises -> LogicalPlan:
                 new_left^, new_right^, lk^, rk^, JOIN_INNER
             )
 
-            # We passed `rebuilt` through a clone-free `extract_join_chain`
-            # that owns its input. For a well-formed INNER-join tree
-            # (which is what this branch handles), extraction always
+            # `extract_join_chain` consumes its input. For a well-formed
+            # INNER-join tree (which is what this branch handles), extraction
             # yields >= 2 relations because both children of `rebuilt`
-            # contribute at least one leaf. Thus the Optional is always
-            # Some here; the None path is a belt-and-suspenders guard.
+            # contribute at least one leaf, but it still returns None when
+            # the chain has no edge or more than MAX_RELATIONS_FOR_REORDER
+            # relations.
             #
             # We must copy `rebuilt` before passing it to
             # extract_join_chain so we can return the unchanged plan if

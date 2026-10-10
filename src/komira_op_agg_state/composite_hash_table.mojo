@@ -58,6 +58,8 @@
 #   - NARY-HASHAGG analog: stage_primitives/hash_agg.mojo (KeyTuple family).
 # =============================================================================
 
+from std.memory import bitcast
+
 from komira_agg.agg_op_traits import HashAggOpF64, HashAggOpI64
 from komira_expr.composite_key import ColumnValue, KeyValue2, KeyValue3
 from komira_op_agg_state.agg_state_slab import (
@@ -118,7 +120,8 @@ comptime _CVT_STRING: UInt8 = 14
 struct _ComponentArm(Copyable, Movable):
     """SoA arms for ONE composite-key component cell column.
 
-    - f64: Int64-bit-pattern, raw F64, or Bool-as-int cells.
+    - f64: Int64 cells as their bit pattern (bitcast, exact for every
+           Int64), raw F64 cells, or Bool cells as 0.0 / 1.0.
     - s:   String cells.
     - tag: ColumnValue.kind() per slot.
     """
@@ -145,9 +148,13 @@ struct _ComponentArm(Copyable, Movable):
         var k = cv.kind()
         self.tag[slot] = k
         if k == _CVT_INT64:
-            self.f64[slot] = SIMD[DType.int64, 1](cv.as_i64()).cast[
-                DType.float64
-            ]()[0]
+            # The Int64's BITS, not its value: a value conversion rounds
+            # every |v| > 2^53, and the probe compares the loaded key, so a
+            # rounded key splits one group or merges two. The arm is only
+            # moved, never computed on, so NaN-shaped patterns keep their bits.
+            self.f64[slot] = bitcast[DType.float64, 1](
+                SIMD[DType.int64, 1](cv.as_i64())
+            )[0]
         elif k == _CVT_FLOAT64:
             self.f64[slot] = cv.as_f64()
         elif k == _CVT_STRING:
@@ -163,7 +170,9 @@ struct _ComponentArm(Copyable, Movable):
         var t = self.tag[slot]
         if t == _CVT_INT64:
             return ColumnValue(
-                SIMD[DType.float64, 1](self.f64[slot]).cast[DType.int64]()[0]
+                bitcast[DType.int64, 1](SIMD[DType.float64, 1](self.f64[slot]))[
+                    0
+                ]
             )
         elif t == _CVT_FLOAT64:
             return ColumnValue(self.f64[slot])

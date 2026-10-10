@@ -205,10 +205,13 @@ toptags() {
             do { b = byte(); v += (b % 128) * m; m *= 128 } while (b >= 128 && !broken)
             return v
         }
-        function skip(w,   depth, t) {
+        # The length is read into `len` before `p` moves: busybox awk reads
+        # `p` before calling the function in `p += varint()`, so the length
+        # bytes varint() consumed would be lost.
+        function skip(w,   depth, t, len) {
             if (w == 0) varint()
             else if (w == 1) p += 8
-            else if (w == 2) p += varint()
+            else if (w == 2) { len = varint(); p += len }
             else if (w == 5) p += 4
             else if (w == 3) {
                 depth = 1

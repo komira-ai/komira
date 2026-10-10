@@ -12,6 +12,11 @@ mojo_library(
     test_srcs = [
         "tests/test_agg_combine_laws.mojo",
         "tests/test_agg_fn_agg.mojo",
+        "tests/test_cov_aggfn_bool_str_vec_pod.mojo",
+        "tests/test_cov_aggfn_minmax_firstlast.mojo",
+        "tests/test_cov_aggfn_sum_count_avg.mojo",
+        "tests/test_cov_hash_agg_op_adapters.mojo",
+        "tests/test_cov_hash_agg_op_dt_grouped.mojo",
         "tests/test_minmax_float_nan_order_independence.mojo",
         "tests/test_typed_col_corr_kerneldirect.mojo",
         "tests/test_typed_col_count_distinct_kerneldirect.mojo",

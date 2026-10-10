@@ -50,10 +50,25 @@
 # anything is realized or created. A destroy is not refused: it removes what
 # the cloud holds, whatever key the file now writes.
 #
-# THE ROLE LABEL BUDGET. After lowering and before anything else, every
-# node's role must fit the 63-byte label value (`role_budget_findings`); one
-# that does not refuses the graph with the one refusal text. The owner of a
-# node is its first segment at any depth (`owner_of_node`).
+# THE METADATA (metadata.mojo). `lower_data` writes the author's labels on
+# every node of a resource (`label.<key>` fields) and the written cloud name
+# on its primary node (`physical_name`); an adapter that writes either field
+# itself breaks the lowering contract. A plan, an apply or a destroy whose
+# primary node asks for another cloud name than the one its object was
+# created under is refused after `list_owned`, before anything is realized
+# (`metadata.name_change_findings`). Unlike a table key, a changed name
+# refuses a destroy too: where a cloud addresses an object by its name, a
+# destroy realized from the file's new name would address another object
+# and leave the first one behind. Plan and apply run with the primary
+# node of every resource that writes `adopt` in the scope's adopt list
+# (`with_adopted`); destroy does not need it (the engine ignores it there).
+#
+# THE ROLE LABEL BUDGET. Every node's role must fit the 63-byte label value;
+# validate reports a role that does not (`lowered_budget_findings`, item 4
+# of validate.mojo), so plan, apply and destroy, which validate first,
+# refuse it with the one refusal text before anything is listed, realized
+# or created. The owner of a node is its first segment at any depth
+# (`owner_of_node`).
 #
 # Every verb runs the engine's OWNED forms (the cell scope): the store keyed
 # by (machine, cell, resource), the stamp born with each object, and a
@@ -97,7 +112,14 @@ from kci_cloud.feed import feeds_of
 from kci_cloud.grants import edges_for
 from kci_cloud.firing import firings_of
 from kci_cloud.labels import validation_run_problem
-from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
+from kci_cloud.metadata import (
+    LABEL_FIELD_PREFIX,
+    PHYSICAL_NAME_FIELD,
+    adopted_nodes,
+    label_fields,
+    name_change_findings,
+)
+from kci_cloud.validate import refusal_text, validate_for
 
 
 def refuse_unless_valid[
@@ -175,6 +197,8 @@ def lower_data[
                 + String("\" to no nodes")
             )
         var prefix = r.id + String("/")
+        var primary = primary_node(catalog, resources, r.id)
+        var named = False
         for n in range(len(nodes)):
             ref node = nodes[n]
             if node.owner != r.id or not node.id.startswith(prefix):
@@ -200,13 +224,39 @@ def lower_data[
                         + node.id
                         + String("\" twice")
                     )
+            for k in range(len(node.desired)):
+                ref key = node.desired[k].key
+                if key == PHYSICAL_NAME_FIELD or key.startswith(LABEL_FIELD_PREFIX):
+                    raise Error(
+                        String("cloud \"")
+                        + cloud.cloud_id().text()
+                        + String("\" broke the lowering contract on \"")
+                        + node.id
+                        + String("\": it wrote the desired field \"")
+                        + key
+                        + String("\", which is kci's (the metadata)")
+                    )
             var low = node.copy()
+            low.desired.extend(label_fields(r))
+            if node.id == primary and r.physical_name:
+                low.desired.append(Setting(String(PHYSICAL_NAME_FIELD), r.physical_name.value()))
+                named = True
             for k in range(len(low.depends_on)):
                 low.depends_on[k] = _resolve(catalog, resources, low.depends_on[k])
             for k in range(len(low.inputs)):
                 low.inputs[k].producer = _resolve(catalog, resources, low.inputs[k].producer)
             low.retention = retention
             out.append(low^)
+        if r.physical_name and not named:
+            raise Error(
+                String("cloud \"")
+                + cloud.cloud_id().text()
+                + String("\" lowered no primary node \"")
+                + primary
+                + String("\" to hold the cloud name of \"")
+                + r.id
+                + String("\"")
+            )
     return out^
 
 
@@ -266,18 +316,22 @@ struct Removals(Movable):
     (`left_behind`, reported only), and nodes of resources the file no
     longer names (`leftover`, reported only). And `key_changes`: a table
     whose stored key differs from the one the file asks for (refused by plan
-    and apply)."""
+    and apply). And `name_changes`: a node whose object was created under
+    another cloud name than the one the file asks for (refused by plan,
+    apply and destroy)."""
 
     var roles: List[LoweredNode]
     var left_behind: List[String]
     var leftover: List[String]
     var key_changes: List[Finding]
+    var name_changes: List[Finding]
 
     def __init__(out self):
         self.roles = List[LoweredNode]()
         self.left_behind = List[String]()
         self.leftover = List[String]()
         self.key_changes = List[Finding]()
+        self.name_changes = List[Finding]()
 
 
 def owner_of_node(node_id: String) -> String:
@@ -303,6 +357,7 @@ def removals[
     var out = Removals()
     var owned = cloud.list_owned(creds, ctx.scope)
     out.key_changes = key_change_findings(nodes, owned)
+    out.name_changes = name_change_findings(nodes, owned)
     for i in range(len(owned)):
         var nid = owned[i].owner_node.copy()
         var lowered = False
@@ -361,16 +416,15 @@ def _graph_for[
     mut left_behind: List[String],
     refuse_key_change: Bool = True,
 ) raises -> ResourceGraph:
-    """Lowering + the roles `list_owned` says to remove, realized. A role
-    over the label budget refuses the graph here: after lowering (data),
-    before `list_owned`, realize or any create. A changed table key refuses
-    it after `list_owned` and before realize (unless `refuse_key_change` is
-    False: a destroy)."""
+    """Lowering + the roles `list_owned` says to remove, realized. Called
+    after validate, which has refused a role over the label budget. A
+    changed cloud name refuses the graph after `list_owned` and before
+    realize; so does a changed table key, unless `refuse_key_change` is
+    False (a destroy)."""
     var nodes = lower_data(cloud, resources)
-    var over = role_budget_findings(nodes)
-    if len(over) > 0:
-        raise Error(refusal_text(cloud.cloud_id(), over))
     var rem = removals(cloud, ctx, nodes, resources, creds)
+    if len(rem.name_changes) > 0:
+        raise Error(refusal_text(cloud.cloud_id(), rem.name_changes))
     if refuse_key_change and len(rem.key_changes) > 0:
         raise Error(refusal_text(cloud.cloud_id(), rem.key_changes))
     for i in range(len(rem.roles)):
@@ -378,6 +432,17 @@ def _graph_for[
     leftover = rem.leftover.copy()
     left_behind = rem.left_behind.copy()
     return realize_graph(cloud, nodes)
+
+
+def with_adopted(ctx: CellContext, resources: List[Resource]) raises -> CellContext:
+    """`ctx` with the primary node of every resource that writes `adopt`
+    added to its scope's adopt list (each once)."""
+    var out = ctx.copy()
+    var nodes = adopted_nodes(Catalog.v1(), resources)
+    for i in range(len(nodes)):
+        if not out.scope.adopts(nodes[i]):
+            out.scope.adopt.append(nodes[i])
+    return out^
 
 
 def lower_resources[
@@ -404,7 +469,7 @@ def plan_resources[
     var leftover = List[String]()
     var left_behind = List[String]()
     var graph = _graph_for(cloud, ctx, resources, creds, leftover, left_behind)
-    return plan_graph_owned(graph, creds, ctx.scope, store)
+    return plan_graph_owned(graph, creds, with_adopted(ctx, resources).scope, store)
 
 
 struct ApplyOutcome(Movable, Deinitable):
@@ -489,12 +554,13 @@ def apply_resources[
     var leftover = List[String]()
     var left_behind = List[String]()
     var graph = _graph_for(cloud, ctx, resources, creds, leftover, left_behind)
+    var scope = with_adopted(ctx, resources).scope.copy()
     var landed = List[AppliedNode]()
     var pending = List[String]()
     var applied = List[AppliedNode]()
     var error: Optional[String] = None
     try:
-        applied = apply_graph_owned(graph, creds, ctx.scope, store, landed, pending)
+        applied = apply_graph_owned(graph, creds, scope, store, landed, pending)
     except e:
         error = String(e)
     if error:

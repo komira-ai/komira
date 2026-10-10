@@ -43,6 +43,7 @@ mojo_library(
         "tests/test_simd_scalar_tail_lengths.mojo",
         "tests/test_string_eq_arm_counter.mojo",
         "tests/test_unary_math_domain_guard.mojo",
+        "tests/test_unicode_case_table.mojo",
     ],
     visibility = ["PUBLIC"],
 )

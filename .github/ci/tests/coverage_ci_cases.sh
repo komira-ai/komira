@@ -26,7 +26,9 @@
 # (enforce) failing in its gate alone, beside its census twin; and so is
 # build_report_branch_failed.json: `tests//negative/coverage:branchretor`'s
 # `[coverage][tests]` and `[coverage][branch_info]` in one build, its runs
-# built and its classifier refusing its branch records.
+# built and its classifier refusing its branch records (a recorded report:
+# that target, whose `return a or b` the classifier refused then, has since
+# been deleted; the cases read the report, not the target).
 # Exits 1 on the first wrong result, naming it; writes the validation
 # result and exits 0 when every case holds.
 set -eu
@@ -425,6 +427,7 @@ echo "\$*" >>"$W/buck2_calls"
 case "\$1" in
     uquery)
         [ ! -f "$W/uquery_fail" ] || { echo "uquery: a BUCK file failed to load" >&2; exit 3; }
+        case "\$*" in *attrregexfilter*) if [ -f "$W/cov_tests_out" ]; then cat "$W/cov_tests_out"; fi; exit 0 ;; esac
         if [ -f "$W/uquery_raw" ]; then cat "$W/uquery_raw"; exit 0; fi
         printf '{\n'
         n=0
@@ -445,7 +448,7 @@ case "\$1" in
                 --build-report) br=\$2; shift 2 ;;
                 -c) shift 2 ;;
                 -*) shift ;;
-                *"[coverage][tests]" | *"[coverage][branch_info]")
+                *"[coverage][tests]" | *"[coverage][branch_info]" | *"_cov_gate[tests]")
                     lib=\${1%%\[*}
                     case " \$libs " in *" \$lib "*) ;; *) libs="\$libs \$lib" ;; esac
                     case "\$1" in *branch_info]) bi="\$bi\$lib " ;; esac
@@ -591,6 +594,7 @@ measure M1
 [ "$RC" -eq 0 ] || red "M1: a failed coverage build, and the script exited $RC (it must exit 0)"
 {
     echo "uquery -c komira.coverage=true $QUERY --output-attribute ^coverage_branch_gate\$"
+    echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/beta:beta[coverage][tests] komira//src/gamma:gamma[coverage][tests]"
 } >"$W/want_buck2"
 cmp -s "$W/buck2_calls" "$W/want_buck2" || { diff "$W/want_buck2" "$W/buck2_calls" >&2 || true; red "M1: buck2 was not asked the expected query and builds"; }
@@ -757,6 +761,7 @@ measure B1
 [ "$RC" -eq 0 ] || red "B1: exited $RC"
 {
     echo "uquery -c komira.coverage=true $QUERY2 --output-attribute ^coverage_branch_gate\$"
+    echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY2)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/alpha:alpha[coverage][branch_info] komira//src/beta:beta[coverage][tests]"
 } >"$W/want_buck2"
 cmp -s "$W/buck2_calls" "$W/want_buck2" || { diff "$W/want_buck2" "$W/buck2_calls" >&2 || true; red "B1: buck2 was not asked for alpha's branch records (alone) in the one build"; }
@@ -829,6 +834,46 @@ measure B4
 [ "$RC" -eq 1 ] && grep -q "names 0 branch record file(s) for 1 report(s)" "$W/err" || red "B4: a listed library with no record, and the script exited $RC"
 pass
 
+# B7. A listed library whose entry names its README's report
+# (cov/tests/readme.xml) beside its test's report and the test's one branch
+# record: the README's run has no branch records (line coverage only), so
+# one record for its one test is right, exit 0, and covcheck reads both
+# reports and the record. Red when the README's report is counted as a
+# test's (exit 1, "1 branch record file(s) for 2 report(s)").
+XR="buck-out/v2/art/komira/0123/src/alpha/__alpha__/cov/tests/readme.xml"
+cp "$M/$XA" "$M/$XR"
+printf 'komira//src/alpha:alpha SUCCESS - %s %s %s\n' "$XA" "$XR" "$IA" >"$W/build_table"
+measure B7
+[ "$RC" -eq 0 ] || red "B7: a listed library with a README report beside one test's report and record, and the script exited $RC: $(head -c 300 "$W/err")"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] && grep -qx "$XR" "$W/covcheck_argv" || red "B7: covcheck did not read both reports, the README's included"
+[ "$(grep -A1 -x -- --branch-lcov "$W/covcheck_argv" | tail -n 1)" = "$IA" ] || red "B7: covcheck's --branch-lcov is not the test's record"
+pass
+
+# C1. A library naming mojo_test targets in coverage_tests (the second
+# query's answer): its `<library>_cov_gate[tests]` is built in the same
+# call, and that entry's reports are read beside its own. C2: when that
+# entry failed (a run of a named test), the library is NOT MEASURED. Red
+# when the runs of coverage_tests are not asked for or not read.
+rm -f "$W/branch_gate"
+printf 'komira//src/alpha:alpha\n' >"$W/uquery_out"
+printf 'komira//src/alpha:alpha\n' >"$W/cov_tests_out"
+XT="buck-out/v2/art/komira/0123/src/alpha/__alpha_cov_gate__/cov/tests/test_far.xml"
+mkdir -p "$M/${XT%/*}"
+cp "$M/$XA" "$M/$XT"
+printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/alpha:alpha_cov_gate SUCCESS - %s\n' "$XA" "$XT" >"$W/build_table"
+measure C1
+[ "$RC" -eq 0 ] || red "C1: exited $RC: $(head -c 300 "$W/err")"
+grep -q "build .*komira//src/alpha:alpha\[coverage\]\[tests\] komira//src/alpha:alpha_cov_gate\[tests\]\$" "$W/buck2_calls" || red "C1: the build did not ask for alpha_cov_gate[tests]"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] && grep -qx "$XT" "$W/covcheck_argv" || red "C1: covcheck did not read the coverage_tests run's report"
+[ "$(cat "$O/publish/coverage_tests_libraries.txt")" = "komira//src/alpha:alpha" ] || red "C1: coverage_tests_libraries.txt is not alpha"
+pass
+printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/alpha:alpha_cov_gate FAIL mojo_cov_run@self\n' "$XA" >"$W/build_table"
+measure C2
+[ "$RC" -eq 0 ] || red "C2: exited $RC"
+[ "$(cat "$O/publish/not_measured.txt")" = "komira//src/alpha:alpha" ] || red "C2: a library whose coverage_tests run failed is not listed as not measured"
+pass
+rm "$W/cov_tests_out"
+
 # B5. The query's answer is a library and its attribute, each: a library
 # with no value (buck2 printing `{}`) is a wrong answer, exit 1.
 printf '{\n  "komira//src/alpha:alpha": {}\n}\n' >"$W/uquery_raw"
@@ -845,6 +890,102 @@ sed -n 's/^BRANCH_CATEGORIES="\([a-z_ ]*\)"$/\1/p' "$MEASURE" | tr ' ' '\n' | so
 [ -s "$W/cats_rule" ] && cmp -s "$W/cats_rule" "$W/cats_script" ||
     { diff "$W/cats_rule" "$W/cats_script" >&2 || true; red "B6: BRANCH_CATEGORIES is not the categories of coverage_branch.bzl"; }
 pass
+
+# Test-only packages (T cases): a package under a directory of the
+# policy's COVERAGE_INFO_ONLY_DIRS (src/tests) is measured and shown, but
+# what covcheck finds in it is information. src/tests/e2e/eps is alpha's
+# source (2 of 3 lines covered: BelowTarget) in such a package; the policy
+# is put in enforce mode, where a finding fails the check run.
+mkdir -p "$M/src/tests/e2e/eps"
+: >"$M/src/tests/e2e/eps/BUCK"
+cp "$M/src/alpha/alpha.mojo" "$M/src/tests/e2e/eps/eps.mojo"
+printf 'src/tests/e2e/eps/BUCK\nsrc/tests/e2e/eps/eps.mojo\n' >>"$W/git_files"
+XE="buck-out/v2/art/komira/0123/src/tests/e2e/eps/__eps__/cov/tests/test_e.xml"
+mkdir -p "$M/${XE%/*}"
+sed 's|src/alpha/alpha.mojo|src/tests/e2e/eps/eps.mojo|' "$M/$XA" >"$M/$XE"
+sed 's|src/alpha/alpha.mojo|src/tests/e2e/eps/eps.mojo|g' "$W/git_diff" >"$W/git_diff_eps"
+cp "$W/git_diff" "$W/git_diff_alpha"
+cat "$W/git_diff_alpha" "$W/git_diff_eps" >"$W/git_diff"
+: >"$W/branch_gate"
+cp "$M/tools/build/coverage/policy.bzl" "$W/policy.keep"
+sed -i 's/^COVERAGE_MODE = .*/COVERAGE_MODE = "enforce"/' "$M/tools/build/coverage/policy.bzl"
+grep -qx 'COVERAGE_INFO_ONLY_DIRS = \["src/tests"\]' "$M/tools/build/coverage/policy.bzl" ||
+    red "T0: the real policy.bzl does not hold COVERAGE_INFO_ONLY_DIRS = [\"src/tests\"] on one line"
+# levels <case> <path prefix>: the annotation levels of the paths under it
+# in publish/annotations.json, each once, sorted, on one line.
+levels() {
+    tr '{' '\n' <"$O/publish/annotations.json" | grep -F "\"path\":\"$2" |
+        sed -n 's/.*"annotation_level":"\([a-z]*\)".*/\1/p' | sort -u | tr '\n' ' '
+}
+pass
+
+# T0. The policy's COVERAGE_INFO_ONLY_DIRS line is read as written, one
+# line of double-quoted directories, or the script fails (exit 1) naming
+# it: renamed (no line), given twice, a list over several lines, a
+# single-quoted item; and an item that is no repository directory ('.',
+# '..', a '..' segment, a trailing '/', empty). Red when a malformed line
+# reads as an empty list (no test-only package) or an item is passed on.
+info_policy() { # <case> <want in the message> <sed program>
+    cp "$W/policy.keep" "$M/tools/build/coverage/policy.bzl"
+    sed -i "$3" "$M/tools/build/coverage/policy.bzl"
+    measure "$1"
+    cp "$W/policy.keep" "$M/tools/build/coverage/policy.bzl"
+    sed -i 's/^COVERAGE_MODE = .*/COVERAGE_MODE = "enforce"/' "$M/tools/build/coverage/policy.bzl"
+    [ "$RC" -eq 1 ] && grep -qF -- "$2" "$W/err" || red "$1: a malformed COVERAGE_INFO_ONLY_DIRS, and the script exited $RC without '$2'"
+    [ ! -s "$W/buck2_calls" ] || red "$1: a malformed COVERAGE_INFO_ONLY_DIRS, and buck2 was asked something"
+    pass
+}
+NO1="has no single COVERAGE_INFO_ONLY_DIRS line"
+info_policy T0a "$NO1" 's/^COVERAGE_INFO_ONLY_DIRS = /COVERAGE_INFO_ONLY_DIRS_X = /'
+info_policy T0b "$NO1" 's/^\(COVERAGE_INFO_ONLY_DIRS = .*\)$/\1\n\1/'
+info_policy T0c "$NO1" 's/^COVERAGE_INFO_ONLY_DIRS = \[\(.*\)\]$/COVERAGE_INFO_ONLY_DIRS = [\n    \1,\n]/'
+info_policy T0d "$NO1" "s/^COVERAGE_INFO_ONLY_DIRS = .*/COVERAGE_INFO_ONLY_DIRS = ['src\/tests']/"
+NODIR="is not a repository directory"
+for bad in . .. src/../tests src/tests/ ""; do
+    info_policy "T0e($bad)" "$NODIR" "s|^COVERAGE_INFO_ONLY_DIRS = .*|COVERAGE_INFO_ONLY_DIRS = [\"src/tests\", \"$bad\"]|"
+done
+
+# T1. Only the test-only package is touched: covcheck is given the policy's
+# directory as --info-package; the check run concludes success in enforce
+# mode with no finding, its BelowTarget information; every annotation of the
+# package is a notice, and no body carries a failure. Red when the script
+# passes no --info-package, or covcheck counts the package's findings.
+printf 'src/tests/e2e/eps/eps.mojo\n' >"$W/git_names"
+printf 'komira//src/tests/e2e/eps:eps\n' >"$W/uquery_out"
+printf 'komira//src/tests/e2e/eps:eps SUCCESS - %s\n' "$XE" >"$W/build_table"
+measure T1
+[ "$RC" -eq 0 ] || red "T1: exited $RC"
+[ "$(grep -A1 -x -- --info-package "$W/covcheck_argv" | grep -vx -- --info-package)" = src/tests ] ||
+    red "T1: covcheck's --info-package is not the policy's src/tests alone"
+grep -q '"conclusion":"success"' "$O/publish/result.json" && grep -q '"findings":\[\],' "$O/publish/result.json" ||
+    red "T1: a test-only package below the target, and the result is not success with no finding"
+grep -q '"info_findings":\[{"kind":"BelowTarget","package":"src/tests/e2e/eps","metric":"line"' "$O/publish/result.json" ||
+    red "T1: the result does not give the package's BelowTarget as information"
+last=$(ls "$O/publish/checkrun" | tail -n 1)
+grep -q '"status":"completed","conclusion":"success"' "$O/publish/checkrun/$last" || red "T1: the last body does not conclude success"
+! grep -q '"annotation_level":"\(failure\|warning\)"' "$O"/publish/checkrun/*.json || red "T1: a body carries a failure or warning annotation"
+[ "$(levels T1 src/tests/e2e/eps/)" = "notice " ] || red "T1: the package's annotations are not all notices: $(levels T1 src/tests/e2e/eps/)"
+grep -qF '| `src/tests/e2e/eps` (touched) |' "$O/publish/summary.md" && grep -qF '| info: BelowTarget' "$O/publish/summary.md" ||
+    red "T1: the summary does not show the package with its information"
+pass
+
+# T2. The same change touching alpha too: alpha below the target still fails
+# the run (the information is the test-only package's alone), its
+# annotations failures, the test-only package's still notices. Red when the
+# exclusion covers every package.
+printf 'src/alpha/alpha.mojo\nsrc/tests/e2e/eps/eps.mojo\n' >"$W/git_names"
+printf 'komira//src/alpha:alpha\nkomira//src/tests/e2e/eps:eps\n' >"$W/uquery_out"
+printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/tests/e2e/eps:eps SUCCESS - %s\n' "$XA" "$XE" >"$W/build_table"
+measure T2
+[ "$RC" -eq 0 ] || red "T2: exited $RC"
+last=$(ls "$O/publish/checkrun" | tail -n 1)
+grep -q '"status":"completed","conclusion":"failure"' "$O/publish/checkrun/$last" || red "T2: alpha below the target, and the run does not conclude failure"
+grep -q '"findings":\[{"kind":"BelowTarget","package":"src/alpha",' "$O/publish/result.json" || red "T2: alpha's BelowTarget is not a finding"
+[ "$(levels T2 src/alpha/)" = "failure " ] || red "T2: alpha's annotations are not failures: $(levels T2 src/alpha/)"
+[ "$(levels T2 src/tests/e2e/eps/)" = "notice " ] || red "T2: the test-only package's annotations are not all notices: $(levels T2 src/tests/e2e/eps/)"
+pass
+cp "$W/policy.keep" "$M/tools/build/coverage/policy.bzl"
+cp "$W/git_diff_alpha" "$W/git_diff"
 
 cd /
 rm -rf "$T"

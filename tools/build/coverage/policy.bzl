@@ -29,6 +29,42 @@ COVERAGE_MODE = "census"
 # Basis points of line (and branch) coverage per package: 10000 is 100%.
 COVERAGE_TARGET_BP = 10000
 
+# The mode of every mojo_shared_lib's coverage gate (tools/build/mojo/coverage.bzl,
+# coverage_shared_lib): a shared library's drivers are measured and their
+# reports and the gate's result are its `[coverage]`, but it has no coverage
+# target. Decided: a shared library is the C ABI of code whose own
+# libraries are measured and gated by their tests (a library's gate reads its
+# own tests' reports only), and one loaded by a program's end-to-end tests
+# exists for those tests, so its line coverage is reported, never enforced.
+# This is its own constant, not COVERAGE_MODE: moving the libraries to enforce
+# moves no shared library. coverage.bzl refuses `enforce` here, and for any
+# mojo_shared_lib, a tests-cell fixture included (in analysis); and nothing
+# waits for a shared library's coverage runs or gate (it ships no conda
+# package), so its published file builds whatever they find. Reported means
+# its `[coverage]` (`[coverage][gate][summary]`) when built by name: the pull
+# request's coverage workflow (.github/ci/coverage_measure.sh) selects
+# mojo_library targets only, so no workflow reports a shared library's gate
+# yet. Its report counts the shared library's own sources (its C ABI), not
+# the code compiled into it from its Mojo dependencies, which their own
+# tests measure.
+COVERAGE_SHARED_LIB_MODE = "census"
+
+# The directories of test-only packages, relative to a cell's root (the
+# layout of src/: test-only packages are under src/tests/<kind>/). A
+# package in one of them or under it, at a path-segment boundary, is
+# measured and shown as every package is, but held to no target: what
+# covcheck finds in it is information (covcheck --info-package), never a
+# finding, so its coverage gate never fails on a finding, in any mode, and
+# a check run neither fails on it nor annotates it above `notice`. An input
+# covcheck refuses (its exit 1 or 2) still fails the gate. Every finding
+# of the package is information, BelowTarget and the ratchet's (a
+# Regression below a row it has) included, and covcheck proposes no
+# ratchet row for it: a test-only package has no floor. An entry must be
+# a relative directory with no empty, `.` or `..` segment and no trailing
+# `/` (tools/build/mojo/coverage.bzl fails at load otherwise). Read by the
+# gate and, as written on this one line, by .github/ci/coverage_measure.sh.
+COVERAGE_INFO_ONLY_DIRS = ["src/tests"]
+
 # The ledger of libraries that cannot have a coverage gate of their own, by
 # label, each with why and where it is gated instead.
 # tools/build/coverage/no_gate.bxl holds this list equal to the Mojo
@@ -138,7 +174,7 @@ COVERAGE_BRANCH_GATE = {
     "komira//src/komira_trace:komira_trace": "its eight tests' branches all classify (102 arms of 2 files)",
     "komira//src/komira_udf:komira_udf": "its four tests' branches all classify (36 arms of 1 file)",
     "komira//src/komira_uuid:komira_uuid": "its test's branches all classify (84 arms of 2 files)",
-    "komira//src/komira_wkt:komira_wkt": "its six tests' branches all classify (550 arms of 6 files, 2 of them `try` arms)",
+    "komira//src/komira_wkt:komira_wkt": "its eight tests' branches all classify (556 arms of 6 files, 2 of them `try` arms)",
     "komira//src/komira_zlib:komira_zlib": "its test's branches all classify (76 arms of 1 file, 2 of them `try` arms)",
     "komira//src/tests/e2e/komira_udf_e2e:komira_udf_e2e": "its four tests' branches all classify (16 arms of 1 file)",
     "komira//src/tests/helpers/komira_test_minio:komira_test_minio": "its two tests' branches all classify (110 arms of 4 files, 42 of them `try` arms)",

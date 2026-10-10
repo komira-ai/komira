@@ -1,0 +1,56 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":zones.bzl", "ZONES")
+
+# The IANA time zone database (the tz database), release 2026e, as compiled
+# TZif files (RFC 8536): the source distribution of the Python `tzdata`
+# package on PyPI, version 2026.5, whose zoneinfo/ tree is that IANA release
+# compiled by zic (its src/tzdata/__init__.py records
+# IANA_VERSION = "2026e"; the first line of src/tzdata/zoneinfo/tzdata.zi is
+# "# version 2026e"). The tz data is in the public domain; the package around
+# it is Apache-2.0 (LICENSE, extracted below). zic writes the "slim" form:
+# the version 1 block is empty, and transitions past the last explicit one
+# come from the footer's POSIX TZ string.
+#
+# Nothing of it is committed here: the archive is fetched at build time and
+# checked against its sha256 (the digest PyPI publishes for the file).
+#
+# Test data of //src/tests/conformance/komira_datetime_conformance only.
+# komira_datetime itself reads TZif bytes or a zoneinfo directory its caller
+# names; no library or binary depends on this target.
+#
+# A newer pin is `_VERSION`, `_URL`, `_SHA256` and `_SIZE` here, the IANA
+# release named above, zones.bzl (regenerated from the new src/tzdata/zones),
+# and the goldens of komira_datetime_conformance (regenerated with its
+# regen_goldens.sh against the new files, then reviewed as a diff).
+_VERSION = "2026.5"
+_URL = "https://files.pythonhosted.org/packages/d9/68/f1b440335057bfce71b6e50a9d09445aa2ecbd08359a337976627b8409e7/tzdata-2026.5.tar.gz"
+_SHA256 = "8cc73c0a0bfca7dbfa59235d60b2eff82231dee33f53d206db1acd9173cfc0a7"
+_SIZE = 200404
+
+pinned_file(
+    name = "tzdata.tar.gz",
+    url = _URL,
+    sha256 = _SHA256,
+    size_bytes = _SIZE,
+)
+
+# One directory: LICENSE, src/tzdata/zones (the package's list of zone
+# names), src/tzdata/zoneinfo/tzdata.zi (the release's text form, read only
+# for its version line) and src/tzdata/zoneinfo/<zone> for every name in
+# zones.bzl. A listed file missing from the archive fails the extraction.
+archive_files(
+    name = "files",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":tzdata.tar.gz",
+    one_tree = True,
+    files = [
+        "LICENSE",
+        "src/tzdata/zones",
+        "src/tzdata/zoneinfo/tzdata.zi",
+    ] + ["src/tzdata/zoneinfo/" + z for z in ZONES],
+    tree_dirs = ["src/tzdata/zoneinfo"],
+    strip_prefix = "tzdata-" + _VERSION,
+    visibility = ["//src/tests/conformance/komira_datetime_conformance/..."],
+)

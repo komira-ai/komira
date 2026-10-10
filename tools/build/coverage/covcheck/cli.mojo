@@ -2,7 +2,8 @@
 
 Exit codes: 0 the outputs were written (whatever they conclude); 1 an input
 is malformed, a report path is unmapped, or an output cannot be written;
-2 bad usage; 3 (`gate` only) `--mode enforce` and the package has a finding.
+2 bad usage; 3 (`gate` only) `--mode enforce` and the package has a finding
+(a test-only package, `--info-package`, has information, never a finding).
 """
 
 from std.io import FileDescriptor
@@ -39,14 +40,14 @@ comptime USAGE_REPORT = (
     "covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR"
     + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce] [--target-bp N]"
-    + " [--include-tests] [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
+    + " [--include-tests] [--info-package DIR]... [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
     + " [--annotations-out F] [--ratchet-out F]"
 )
 comptime USAGE_GATE = (
     "covcheck gate --package DIR --repo-files F --source-root DIR"
     + " [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... --ratchet F --mode census|neutral|enforce [--target-bp N]"
-    + " [--include-tests] [--test-source P]... --result-out F --summary-out F"
+    + " [--include-tests] [--test-source P]... [--info-package DIR]... --result-out F --summary-out F"
 )
 
 
@@ -71,6 +72,7 @@ struct Args(Copyable, Movable):
     var mutants: List[FileArg]
     var strip_prefixes: List[String]
     var test_sources: List[String]
+    var info_packages: List[String]
     var include_tests: Bool
 
     def __init__(out self):
@@ -80,6 +82,7 @@ struct Args(Copyable, Movable):
         self.mutants = List[FileArg]()
         self.strip_prefixes = List[String]()
         self.test_sources = List[String]()
+        self.info_packages = List[String]()
         self.include_tests = False
 
     def get(self, flag: String) -> String:
@@ -126,7 +129,7 @@ def parse_args(args: List[String]) raises -> Args:
             continue
         var known = (
             flag == String("--cobertura") or flag == String("--lcov") or flag == String("--branch-lcov")
-            or flag == String("--mutants") or flag == String("--strip-prefix")
+            or flag == String("--mutants") or flag == String("--strip-prefix") or flag == String("--info-package")
         )
         if flag == String("--test-source") and not report:
             known = True
@@ -153,6 +156,15 @@ def parse_args(args: List[String]) raises -> Args:
             a.strip_prefixes.append(v)
         elif flag == String("--test-source"):
             a.test_sources.append(v)
+        elif flag == String("--info-package"):
+            # A test-only package's directory (analyze.mojo, step 8), a
+            # repository directory as package_of names it.
+            var d = v
+            while d.endswith("/"):
+                d = substr(d, 0, d.byte_length() - 1)
+            if d.byte_length() == 0 or d.startswith("/") or d.find("//") >= 0 or d == String("."):
+                _usage(String("--info-package '") + v + String("' is not a repository directory"))
+            a.info_packages.append(d)
         else:
             if flag in a.values:
                 _usage(String("'") + flag + String("' is given twice"))
@@ -216,6 +228,7 @@ def _options(a: Args) -> Options:
         o.only_package = a.get(String("--package"))
     for i in range(len(a.test_sources)):
         o.test_sources[a.test_sources[i]] = True
+    o.info_packages = a.info_packages.copy()
     return o^
 
 
@@ -239,7 +252,8 @@ def _title(an: Analysis) -> String:
     return (
         String("line ") + render_bp_or_na(an.total.line_bp()) + String(", branch ")
         + render_bp_or_na(an.total.branch_bp()) + String(", ") + String(len(an.findings))
-        + String(" findings (") + an.mode + String(")")
+        + String(" findings") + (String(", ") + String(len(an.info_findings)) + String(" info") if len(an.info_findings) > 0 else String(""))
+        + String(" (") + an.mode + String(")")
     )
 
 

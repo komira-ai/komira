@@ -3,10 +3,24 @@
 # Over S3Fs, with a fake S3 whose every ranged GET and UploadPart takes
 # _DELAY_MS: a prefetch of _RANGES ranges too far apart to coalesce, with
 # `prefetch_max_inflight` K, takes at least ceil(_RANGES / K) delays (more
-# than K requests at once would finish sooner) and well under _RANGES delays
-# (one request at a time takes that long); with `prefetch_max_inflight` 0
-# (every range) and S3Config's `max_inflight` 2, at least ceil(_RANGES / 2)
-# delays; a write of _PARTS parts with `upload_max_inflight` K likewise.
+# than K requests at once would finish sooner), and every one of its requests
+# is in flight together with K - 1 others and never with more (the fake
+# counts, below); with `prefetch_max_inflight` 0 (every range) and S3Config's
+# `max_inflight` 2, likewise with K = 2; a write of _PARTS parts with
+# `upload_max_inflight` K likewise.
+#
+# HOW THE FAKE COUNTS. While a timed run is armed with its bound K (`_arm`),
+# each slow request adds itself to a process-wide in-flight count
+# (komira_counters' GlobalCounterTable: the fakes are reached from a thin
+# connector factory and keep no state of their own, but a name-keyed global
+# is the process's, not theirs), waits until K are in flight (or
+# _GATHER_GUARD_MS pass, once per run), holds _DELAY_MS, and leaves. It
+# records whether it saw K in flight and any moment it saw more. "K at a time"
+# is then a count, not a duration: a wall-clock ceiling such as "under 5
+# delays" also charges the CPU time of building, signing and summing 5 MiB
+# parts, which under coverage instrumentation alone was 7 s and failed a
+# runner that kept its bound. The floor of ceil(n / K) delays stays: CPU time
+# can only lengthen a run, never shorten it.
 # Every request of a prefetch carries the handle's ETag, whichever worker's
 # store sends it: under `ver/` the fake answers a ranged GET by its
 # precondition (If-Match "v1": version 1; none, past offset 0: version 2,
@@ -38,6 +52,7 @@ from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
 from komira_buffer.heap_region import HeapRegion
 from komira_collections.slab import Slab
+from komira_counters.global_counter import GlobalCounterTable
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import (
     Connector,
@@ -67,6 +82,92 @@ comptime _DELAY_MS = 200
 comptime _PART = 5 * 1024 * 1024
 comptime _PARTS = 6
 comptime _LAST = 1000  # the last part's bytes
+comptime _GATHER_GUARD_MS = 30_000
+"""How long an armed request waits for its bound's worth of requests to be in
+flight before it stops waiting (and the run is recorded as never having
+reached it). Paid once per run, and only by a runner that does not keep its
+bound in flight; a runner that does reaches K as soon as its K threads have
+built their requests."""
+
+# The fake's counters (see the header). Slots of `_Counts`:
+comptime _Counts = GlobalCounterTable["komira_objectstore_s3_test_inflight_fake", 6]
+comptime _ARMED_K = 0  # the bound a timed run expects; 0: not counting
+comptime _IN_FLIGHT = 1  # armed requests inside the fake now
+comptime _SERVED = 2  # armed requests served
+comptime _REACHED = 3  # armed requests that saw K in flight
+comptime _OVER = 4  # moments an armed request saw more than K in flight
+comptime _GAVE_UP = 5  # 1 once a request waited out _GATHER_GUARD_MS
+
+
+def _arm(k: Int, n: Int) raises:
+    """Count the next run's `n` slow requests against the bound `k`. `n` must
+    be a multiple of `k`: a last round of fewer than `k` would wait out
+    _GATHER_GUARD_MS and read as a runner that does not keep its bound."""
+    assert_true(k > 0 and n % k == 0, String(n) + " requests are not whole rounds of " + String(k))
+    _Counts.reset()
+    _Counts.add(_ARMED_K, k)
+
+
+def _disarm() raises:
+    _Counts.reset_slot(_ARMED_K)
+
+
+def _slow_request() raises:
+    """The delay of a slow request; counted while a run is armed."""
+    var k = _Counts.read(_ARMED_K)
+    if k <= 0:
+        _ = external_call["usleep", Int32](UInt32(_DELAY_MS * 1000))
+        return
+    _Counts.incr(_IN_FLIGHT)
+    var reached = False
+    var waited_ms = 0
+    while True:
+        var now = _Counts.read(_IN_FLIGHT)
+        if now > k:
+            _Counts.incr(_OVER)
+        if now >= k:
+            reached = True
+            break
+        if _Counts.read(_GAVE_UP) > 0:
+            break
+        if waited_ms >= _GATHER_GUARD_MS:
+            _Counts.add(_GAVE_UP, 1)
+            break
+        _ = external_call["usleep", Int32](UInt32(1000))
+        waited_ms += 1
+    if reached:
+        _Counts.incr(_REACHED)
+    _ = external_call["usleep", Int32](UInt32(_DELAY_MS * 1000))
+    if _Counts.read(_IN_FLIGHT) > k:
+        _Counts.incr(_OVER)
+    _Counts.add(_IN_FLIGHT, -1)
+    _Counts.incr(_SERVED)
+
+
+def _check_counts(what: String, k: Int, n: Int) raises:
+    """Every one of the `n` requests of the run just timed was in flight
+    together with `k - 1` others, and none ever saw more than `k`."""
+    _disarm()
+    assert_equal(_Counts.read(_SERVED), n, what + ": requests the fake served while armed")
+    assert_equal(
+        _Counts.read(_OVER),
+        0,
+        what + ": more than " + String(k) + " were in flight",
+    )
+    assert_equal(
+        _Counts.read(_REACHED),
+        n,
+        what
+        + ": of "
+        + String(n)
+        + " requests, only "
+        + String(_Counts.read(_REACHED))
+        + " were in flight with "
+        + String(k - 1)
+        + " others: they were not sent "
+        + String(k)
+        + " at a time",
+    )
 
 
 def _byte_at(i: Int) -> UInt8:
@@ -191,7 +292,7 @@ def _serve(written: List[UInt8]) raises -> List[UInt8]:
     var slow = target.find("/fast/") < 0
     if method == "PUT" and target.find("uploadId=up-0") >= 0:
         if slow:
-            _ = external_call["usleep", Int32](UInt32(_DELAY_MS * 1000))
+            _slow_request()
         var at = target.find("partNumber=")
         var stop = at + 11
         while stop < target.byte_length() and target.as_bytes()[stop] >= 48 and target.as_bytes()[stop] <= 57:
@@ -215,7 +316,7 @@ def _serve(written: List[UInt8]) raises -> List[UInt8]:
     if range_.byte_length() == 0:
         raise Error("the fake S3 answers ranged GETs only")
     if slow:
-        _ = external_call["usleep", Int32](UInt32(_DELAY_MS * 1000))
+        _slow_request()
     var spec = _sub(range_, 6, range_.byte_length())
     var dash = spec.find("-")
     var first = Int(_sub(spec, 0, dash))
@@ -364,49 +465,44 @@ def _check(got: Slab[SharedAlignedBuffer[HeapRegion]]) raises:
             assert_equal(view[b], _byte_at(i * _SPACING + b))
 
 
-def _timed_prefetch_ms(bound: Int, max_inflight: Int = 64) raises -> Int:
+def _timed_prefetch_ms(bound: Int, expect_k: Int, max_inflight: Int = 64) raises -> Int:
     """Milliseconds of a prefetch of the far ranges on a handle a first
     prefetch has already read through (so the stores are built and the
-    handle's version is known), with the bytes checked; `bound` is
-    `prefetch_max_inflight` and `max_inflight` is S3Config's."""
+    handle's version is known), with the bytes checked and the fake's counts
+    checked against `expect_k` in flight; `bound` is `prefetch_max_inflight`
+    and `max_inflight` is S3Config's."""
     var fs = _fs(bound, max_inflight=max_inflight)
     var f = fs.open("v/big")
     _check(fs.read_ranges_prefetched(f, _far_ranges()))
+    _arm(expect_k, _RANGES)
     var start = perf_counter_ns()
     var out = fs.read_ranges_prefetched(f, _far_ranges())
     var ms = Int((perf_counter_ns() - start) // 1_000_000)
     _check(out)
+    _check_counts(
+        String(_RANGES) + " requests under a bound of " + String(expect_k), expect_k, _RANGES
+    )
     return ms
 
 
 def test_a_prefetch_keeps_its_bound_in_flight() raises:
     # K = 4: two rounds of four requests.
-    var ms = _timed_prefetch_ms(4)
+    var ms = _timed_prefetch_ms(4, 4)
     assert_true(
         ms >= 2 * _DELAY_MS,
         String("8 requests under a bound of 4 took ") + String(ms) + " ms: more than 4 were in flight",
-    )
-    assert_true(
-        ms < 6 * _DELAY_MS,
-        String("8 requests under a bound of 4 took ") + String(ms) + " ms: they were not sent 4 at a time",
     )
 
 
 def test_s3_config_max_inflight_caps_the_prefetch() raises:
     # prefetch_max_inflight 0 is every range at once; S3Config's max_inflight
     # of 2 caps it at two: four rounds, ceil(8 / 2) = 4 delays at least.
-    var ms = _timed_prefetch_ms(0, max_inflight=2)
+    var ms = _timed_prefetch_ms(0, 2, max_inflight=2)
     assert_true(
         ms >= 4 * _DELAY_MS,
         String("8 requests under S3Config.max_inflight 2 took ")
         + String(ms)
         + " ms: more than 2 were in flight",
-    )
-    assert_true(
-        ms < 7 * _DELAY_MS,
-        String("8 requests under S3Config.max_inflight 2 took ")
-        + String(ms)
-        + " ms: they were not sent 2 at a time",
     )
 
 
@@ -438,7 +534,7 @@ def test_every_request_of_a_prefetch_carries_the_etag() raises:
 
 
 def test_a_bound_of_one_is_one_at_a_time() raises:
-    var ms = _timed_prefetch_ms(1)
+    var ms = _timed_prefetch_ms(1, 1)
     assert_true(
         ms >= _RANGES * _DELAY_MS,
         String("8 requests under a bound of 1 took ") + String(ms) + " ms: more than 1 was in flight",
@@ -447,17 +543,23 @@ def test_a_bound_of_one_is_one_at_a_time() raises:
 
 def _timed_write_ms(bound: Int) raises -> Int:
     """Milliseconds of a write of the _PARTS parts (one write_at and the
-    close), the completion checked by the fake."""
+    close), the completion checked by the fake and its counts checked against
+    `bound` in flight."""
     var fs = _fs(1, bound)
     var total = (_PARTS - 1) * _PART + _LAST
     var data = List[UInt8](capacity=total)
     for i in range(total):
         data.append(_pattern_at(i))
     var w = fs.open_write("w/big", WriteMode.create_truncate())
+    _arm(bound, _PARTS)
     var start = perf_counter_ns()
     assert_equal(fs.write_at(w, Span(data)), Int64(total))
     fs.close_write(w^)
-    return Int((perf_counter_ns() - start) // 1_000_000)
+    var ms = Int((perf_counter_ns() - start) // 1_000_000)
+    _check_counts(
+        String(_PARTS) + " parts under a bound of " + String(bound), bound, _PARTS
+    )
+    return ms
 
 
 def test_a_write_keeps_its_bound_in_flight() raises:
@@ -466,10 +568,6 @@ def test_a_write_keeps_its_bound_in_flight() raises:
     assert_true(
         ms >= 2 * _DELAY_MS,
         String("6 parts under a bound of 3 took ") + String(ms) + " ms: more than 3 were in flight",
-    )
-    assert_true(
-        ms < 5 * _DELAY_MS,
-        String("6 parts under a bound of 3 took ") + String(ms) + " ms: they were not sent 3 at a time",
     )
 
 

@@ -1,42 +1,36 @@
 # =============================================================================
-# composite_key.mojo — CompositeKey per-arity comptime adapters
+# composite_key.mojo — runtime composite-key values, hash and equality
 # =============================================================================
 #
-# Multi-key extraction for the CompositeHashTable stage primitive.
-# CompositeKey2[K0: ExprString, K1: ExprI64] is the reference 2-arity shape;
-# this module generalises it to arities 1, 2, 3 and 4, which covers the
-# group-by widths of typical OLAP workloads (TPC-H, H2O, ClickBench). Each
-# arity ships:
-#   - `KeyValueN` runtime struct holding the N extracted column values.
-#   - `CompositeKeyN[K0, K1, ..., K_{N-1}]` comptime adapter conforming
-#     to the `KeyExpr` trait declared below.
+# The key value, hash and equality a multi-column GROUP BY table uses
+# (`komira_op_agg_state.composite_hash_table` through the `KeyHashFnv1..4` /
+# `KeyEqElementwise1..4` conformers in `agg_state_slab.mojo`). This module ships:
+#   - `ColumnValue`, a tagged union holding one Int64 / Float64 / String /
+#     Bool component.
+#   - `KeyValue1..4`, fixed-arity tuples of `ColumnValue`.
+#   - `hash_key_value1..4`, an FNV-1a 64-bit hash over the components.
+#   - `eq_key_value1..4`, component-wise equality.
 #
-# Per-component KeyExpr conformers can be any of ExprX{Bool, I64, F64,
-# String}. The KeyValueN runtime struct uses a runtime tagged-union
-# field per component for type erasure at the value level — this avoids
-# requiring N orthogonal comptime expansions at the hash-table
-# container level.
+# No key extractor (no per-arity adapter over the ExprX traits) is declared
+# here; the caller builds the `KeyValueN` itself.
 #
-# Field design: `KeyValueN` carries N `ColumnValue` runtime values, each
-# holding a typed scalar (Int64 / Float64 / String / Bool tagged-union). The
-# CompositeHashTable's hash + eq fns are parametric on the KeyHashFn /
-# KeyEqFn conformers; this module ships generic FNV-1a hash + element-wise
-# equality.
+# Hash and equality are one contract: `eq(a, b)` implies `hash(a) == hash(b)`.
+# Float64 components follow the GROUP BY model of
+# `komira_udf.float_quotient_order`: `+0.0` and `-0.0` are one key, every NaN
+# is one key. Equality uses `float_quotient_eq_f64`; the hash folds
+# `canonical_bits_f64`, the bit pattern of the canonical representative.
 #
 # Encapsulation invariants:
 #   - NO `UnsafePointer` in any public method signature.
 #   - NO wildcard origins.
-#   - All BatchView references threaded via `BatchView[bo]`.
-#   - `KeyValueN` is heap-light: a fixed-arity tagged struct (no List).
-#     The String component holds a heap String value (unavoidable for
-#     variable-width keys); other components are inline-stored scalars.
-#
-# Cross-references:
-#   - composite_hash_table — consumer of CompositeKeyN.
+#   - `KeyValueN` is a fixed-arity struct (no List). The String component
+#     holds a heap String; the other components are inline scalars.
 # =============================================================================
 
-from komira_arrow.batch_view import BatchView
-from komira_expr.expr_x import ExprXBool, ExprXI64, ExprXF64, ExprXString
+from komira_udf.float_quotient_order import (
+    canonical_bits_f64,
+    float_quotient_eq_f64,
+)
 
 
 # =============================================================================
@@ -48,15 +42,11 @@ from komira_expr.expr_x import ExprXBool, ExprXI64, ExprXF64, ExprXString
 # / Float64 / String / Bool), the runtime KeyValueN holds N tagged
 # ColumnValue cells.
 #
-# ColumnValue uses tag+Optional shape mirroring SourceVariant /
-# SinkVariant from komira_scan_source.source_variant (the canonical
-# in-tree tag+Optional pattern). The tag identifies which DType cell
-# is populated; the other cells are None.
+# ColumnValue uses a tag plus one Optional per arm. The tag identifies
+# which cell is populated; the other cells are None.
 #
-# Tag aliases use the same numeric domain as Arrow DType enums (Int64=8,
-# Float64=12, String=14, Bool=3) — these don't have to match the Arrow
-# numbering exactly since they're internal, but using Arrow's numbers
-# keeps the mental model uniform.
+# The CVT_* tag values are local to this module; they are not the
+# `komira_arrow.ArrowType` codes and nothing converts between the two.
 # =============================================================================
 
 comptime CVT_INT64: UInt8 = 8
@@ -69,8 +59,7 @@ struct ColumnValue(Copyable, Movable, Deinitable):
     """Tagged-union runtime cell for one composite-key component.
 
     Holds exactly one of {Int64, Float64, String, Bool} per the
-    `tag` field. The other Optional cells are None. Mirrors the
-    in-tree tag+Optional pattern (SourceVariant, SinkVariant).
+    `tag` field. The other Optional cells are None.
 
     Used as a field of KeyValueN (the N-tuple runtime key value).
     """
@@ -152,29 +141,7 @@ struct ColumnValue(Copyable, Movable, Deinitable):
 
 
 # =============================================================================
-# §2 — KeyExpr trait — comptime composite-key extractor
-# =============================================================================
-#
-# A `trait KeyExpr`
-# generalized to N-arity via the per-arity `extract` returning a
-# `KeyValueN`. Arities 1..4 are provided; KeyExpr trait itself is
-# parametric-free (the arity is encoded in the conformer struct).
-#
-# Conformers: CompositeKey1[K0], CompositeKey2[K0, K1], CompositeKey3[K0,
-# K1, K2], CompositeKey4[K0, K1, K2, K3]. Each K_i can be any of
-# ExprX{Bool, I64, F64, String}.
-#
-# DESIGN NOTE: the trait carries an associated `Arity` int + `extract`
-# method but Mojo 1.0.0b1 doesn't enforce that the trait's `extract`
-# method has the right return type per arity (KeyValueN). Each
-# CompositeKeyN conformer ships its own `extract` returning the matching
-# KeyValueN. The CompositeHashTable consumer is parametric on the
-# CompositeKeyN type and dispatches per-arity.
-# =============================================================================
-
-
-# =============================================================================
-# §3 — KeyValue1..4 — runtime N-tuple value structs
+# §2 — KeyValue1..4 — runtime N-tuple value structs
 # =============================================================================
 
 
@@ -214,49 +181,12 @@ struct KeyValue4(Copyable, Movable, Deinitable):
 
 
 # =============================================================================
-# §4 — Component-type trait variants (one per ExprX kind to keep parameter
-#       resolution disambiguated across CompositeKeyN per-arity conformers)
-# =============================================================================
-#
-# To keep the CompositeKeyN ctors simple while supporting mixed component
-# types, this module ships ONE conformer per arity that takes the four ExprX
-# variants positionally as comptime params (with sentinel-typed "unused"
-# placeholders). Mojo 1.0.0b1's per-position trait-bound resolution
-# requires each position to bind to a specific trait — we cannot have
-# one CompositeKeyN with K_i: ExprXBool | ExprXI64 | ExprXF64 | ExprXString.
-#
-# Workaround: per-arity-per-DType-combo enumeration is impractical (1..4
-# arities × 4 DTypes^arity = 4 + 16 + 64 + 256 = 340 combinations). A
-# fixed-shape conformer such as CompositeKey2[K0: ExprString, K1: ExprI64]
-# is instead generated for the specific shape by the SDK / shape classifier
-# at plan-compile time. This module ships:
-#
-#   - Generic ColXI64 / ColXF64 / ColXBool / ColXString column accessor
-#     conformers (NOT in this file — they live in expr_x_conformers.mojo;
-#     the trait declarations here are sufficient for
-#     stage-primitive smoke tests).
-#   - The smoke tests use HAND-CRAFTED test-local CompositeKeyN
-#     conformers (each test pins one K_i: ExprXI64 shape, etc.).
-#
-# This file (composite_key.mojo) thus ships the KeyValueN runtime structs
-# + ColumnValue tagged-union + GENERIC HELPERS for hashing /
-# comparing KeyValueN values. The per-arity comptime adapter conformers
-# (e.g. CompositeKey2[K0: ExprXString, K1: ExprXI64]) are emitted at
-# plan-compile time by the StageFusionPass per the shape-classifier registry.
-# =============================================================================
-
-
-# =============================================================================
-# §5 — Generic helpers for hashing + equality over KeyValueN
+# §3 — Generic helpers for hashing + equality over KeyValueN
 # =============================================================================
 #
 # These helpers operate on the runtime KeyValueN structs and provide:
-#   - `hash_key_value` — FNV-1a 64-bit hash over the ColumnValue components.
-#   - `eq_key_value` — element-wise equality across components.
-#
-# Used by the CompositeHashTable stage primitive ; also
-# directly callable by shape-classified dispatch when the
-# typed-path conformer route is not taken.
+#   - `hash_key_valueN` — FNV-1a 64-bit hash over the ColumnValue components.
+#   - `eq_key_valueN` — component-wise equality.
 #
 # The FNV-1a polynomial is 0x100000001b3
 # (1099511628211 decimal); FNV offset is 14695981039346656037.
@@ -279,10 +209,14 @@ def _hash_column_value(state: UInt64, cv: ColumnValue) -> UInt64:
 
     Per-DType:
       - Int64: hash the 8 bytes of the Int64 (little-endian byte order).
-      - Float64: hash the 8 bytes of the IEEE-754 bit pattern (cast via
-        bitcast SIMD).
+      - Float64: hash the 8 little-endian bytes of `canonical_bits_f64`,
+        the IEEE-754 bit pattern after -0.0 -> +0.0 and every NaN -> the
+        canonical NaN, so the values `_eq_column_value` calls equal hash
+        equal.
       - String: hash each byte of the UTF-8 representation.
       - Bool: hash 1 byte (0x00 or 0x01).
+      - Any other tag: fold nothing.
+    The tag itself is not hashed; `_eq_column_value` separates the kinds.
     """
     var s = state
     var t = cv.kind()
@@ -292,10 +226,7 @@ def _hash_column_value(state: UInt64, cv: ColumnValue) -> UInt64:
             var b = UInt8((v >> UInt64((k * 8))) & 0xFF)
             s = _fnv1a_step(s, b)
     elif t == CVT_FLOAT64:
-        # bitcast Float64 -> Int64 via SIMD cast, then hash 8 bytes
-        var f = cv.as_f64()
-        var bits = SIMD[DType.float64, 1](f).cast[DType.int64]()
-        var v = UInt64(bits[0])
+        var v = canonical_bits_f64(cv.as_f64())
         for k in range(8):
             var b = UInt8((v >> UInt64((k * 8))) & 0xFF)
             s = _fnv1a_step(s, b)
@@ -320,8 +251,7 @@ def hash_key_value1(k: KeyValue1) -> UInt64:
 
 @always_inline
 def hash_key_value2(k: KeyValue2) -> UInt64:
-    """FNV-1a 64-bit hash over a 2-component KeyValue. Matches the
-    KeyHashFnv shape."""
+    """FNV-1a 64-bit hash over a 2-component KeyValue."""
     var s = FNV_OFFSET
     s = _hash_column_value(s, k.c0)
     s = _hash_column_value(s, k.c1)
@@ -351,8 +281,12 @@ def hash_key_value4(k: KeyValue4) -> UInt64:
 
 @always_inline
 def _eq_column_value(a: ColumnValue, b: ColumnValue) -> Bool:
-    """Element-wise equality on two ColumnValue cells. Returns False
-    on tag mismatch (heterogeneous comparisons are not meaningful here).
+    """Component equality on two ColumnValue cells. Returns False on a tag
+    mismatch and on a tag outside the four arms.
+
+    Float64 uses `float_quotient_eq_f64`, not IEEE `==`: +0.0 equals
+    -0.0 (as in IEEE) and every NaN equals every NaN (unlike IEEE), so all
+    NaN rows form one group, matching the canonical-bits hash.
     """
     if a.kind() != b.kind():
         return False
@@ -360,7 +294,7 @@ def _eq_column_value(a: ColumnValue, b: ColumnValue) -> Bool:
     if t == CVT_INT64:
         return a.as_i64() == b.as_i64()
     elif t == CVT_FLOAT64:
-        return a.as_f64() == b.as_f64()
+        return float_quotient_eq_f64(a.as_f64(), b.as_f64())
     elif t == CVT_STRING:
         return a.as_str() == b.as_str()
     elif t == CVT_BOOL:

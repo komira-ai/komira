@@ -104,6 +104,8 @@ expect_red proto_fixture_hex_odd "hex_odd: FIXTURE: hex_odd.hex holds an odd num
     tests//negative/proto_fixture:hex_odd
 expect_red proto_fixture_leg0_duplicate "leg0_duplicate: LEG 0: leg0_duplicate.hex writes a singular field of example.fixture.v1.Sample more than once" \
     tests//negative/proto_fixture:leg0_duplicate
+expect_red proto_fixture_leg0_duplicate_message "leg0_duplicate_message: LEG 0: leg0_duplicate_message.hex writes a singular field of example.fixture.v1.Sample more than once" \
+    tests//negative/proto_fixture:leg0_duplicate_message
 expect_red proto_fixture_leg0_identical "leg0_identical: LEG 0: leg0_identical.hex is byte for byte leg0_identical.canonical.hex" \
     tests//negative/proto_fixture:leg0_identical
 expect_red proto_fixture_leg1 "leg1_value: LEG 1: protoc's decode of leg1_value.hex as example.fixture.v1.Sample differs from leg1_value.txtpb" \

@@ -29,8 +29,9 @@
 #
 # Outputs:
 #   * `TdomGraph` — per-equivalence-class TDOMs + `edge_to_class` mapping.
-#     Consumed by `estimate_with_tdom` for every DPccp cost-of-pair
-#     lookup.
+#     Read by `estimate_with_tdom` (`optimizer_tdom_cost.mojo`) for each
+#     cost-of-pair lookup; the DP join enumerator that would issue those
+#     lookups is not in this tree.
 #
 # Worked Q5 example:
 #   6 per-column edges produce 5 equivalence classes:
@@ -40,7 +41,8 @@
 #     C2 = {orders.o_custkey, customer.c_custkey},                  TDOM 150000
 #     C3 = {lineitem.l_orderkey, orders.o_orderkey},                TDOM 1500000
 #     C4 = {lineitem.l_suppkey, supplier.s_suppkey},                TDOM 10000
-#   These are EXACTLY DuckDB's TDOMs for Q5.
+#   Each TDOM is the MIN of the member relations' row counts at TPC-H scale
+#   factor 1 (the row-count fallback, which DuckDB also falls back to).
 #
 # Encapsulation rule: optimizer-internal module; no UnsafePointer
 # crosses any boundary. The provider's borrowed Slab[JoinRelation] ref is
@@ -74,8 +76,8 @@ struct ColumnBinding(Movable, Copyable, ImplicitlyCopyable):
     `relation_id` is the dense 0..n-1 id assigned at `extract_join_chain`
     time (matches the slab index in `JoinChain.relations`).
 
-    POD: All fields are trivially copyable, so `ImplicitlyCopyable` is
-    sound and lets us materialize bindings out of `List` indexing without
+    `ImplicitlyCopyable`: an implicit copy is an Int plus a String copy,
+    and it lets us materialize bindings out of `List` indexing without
     explicit `.copy()` ceremony.
     """
 
@@ -133,8 +135,8 @@ struct EquivalenceClass(Movable, Copyable):
     Movable + Copyable. Copyable is required for `List[EquivalenceClass]`
     storage in `TdomGraph.classes`; every field
     is itself Copyable (`List[ColumnBinding]` with Copyable bindings,
-    `Optional[Int]`, `List[Int]`) so the auto-synthesized copy is well-
-    defined. Hot-path consumers should still bind via `ref c = classes[i]`
+    `Optional[Int]`, `List[Int]`), and `copy()` below copies each one.
+    Hot-path consumers should still bind via `ref c = classes[i]`
     to avoid the deep-copy cost of the `List[ColumnBinding]` String field.
     """
 
@@ -216,8 +218,9 @@ struct EquivalenceClass(Movable, Copyable):
 struct TdomGraph(Movable):
     """Equivalence-set TDOM graph for one JoinChain.
 
-    Built once per chain by `build_tdom_graph`; consumed by
-    `estimate_with_tdom` for every DPccp cost-of-pair lookup.
+    Built once per chain by `build_tdom_graph`; read by
+    `estimate_with_tdom` (`optimizer_tdom_cost.mojo`) for each
+    cost-of-pair lookup.
 
     Fields:
       * `classes` — one `EquivalenceClass` per equivalence class
@@ -253,8 +256,8 @@ struct TdomGraph(Movable):
         (the canonical fix for composite over-estimation
         is the per-column split itself).
 
-        `@always_inline` because the inner DP cost loop calls this
-        for every bridging edge of every candidate pair.
+        `@always_inline` because `estimate_with_tdom` calls this for
+        every bridging edge of a candidate pair.
         """
         if edge_idx < 0 or edge_idx >= len(self.edge_to_class):
             return -1
@@ -331,12 +334,12 @@ def _ingest_provider_value[
     Mirrors DuckDB `cardinality_estimator.cpp:489-509`:
       * `from_hll=True`  → merge into `hll_ndv`. True register-level
         HLL merge requires the writer to populate `ColumnStats.hll_registers`
-        (future wiring); for now we conservatively take the cross-class MAX
-        of the per-column NDVs as the merged sketch's distinct count, which
-        is the upper bound DuckDB's HLL implementation produces under
-        merge. (Lower bound would be the per-column MAX, true value lies
-        between the two; choosing the upper bound = stronger denominator =
-        cost model favors plans that traverse this class.)
+        (future wiring); for now we take the cross-class MAX of the
+        per-column NDVs as the merged sketch's distinct count. The MAX is a
+        LOWER bound on the distinct count of the union a register-level
+        merge would estimate (the union lies between the MAX and the SUM).
+        A larger TDOM is a larger join denominator, so a smaller estimate
+        for joins that traverse this class.
 
       * `from_hll=False` → merge into `no_hll_ndv` via MIN-across-class.
         Exact mirror of DuckDB :503-504. The MIN encodes the soundness
@@ -526,9 +529,9 @@ def build_tdom_graph[
             # 4) also fold in lb/rb (one or both may have been the
             # bridging element; either way they belong in keep now).
             if not classes[keep_idx].contains(lb):
-                classes[keep_idx].bindings.append(lb.copy())
+                classes[keep_idx].bindings.append(lb.copy())  # cov: unreachable classes stay disjoint, so one touched class held lb and the drained one rb; keep now holds both
             if not classes[keep_idx].contains(rb):
-                classes[keep_idx].bindings.append(rb.copy())
+                classes[keep_idx].bindings.append(rb.copy())  # cov: unreachable classes stay disjoint, so one touched class held lb and the drained one rb; keep now holds both
 
             # 5) remap any prior edge_to_class entries that pointed at
             # `drain_idx` to `keep_idx`. After this loop the invariant
@@ -558,8 +561,8 @@ def build_tdom_graph[
     for c_idx in range(len(compacted)):
         # The iteration is destructure-then-rebind: we need to iterate
         # the bindings (read) AND mutate hll_ndv/no_hll_ndv (write) on
-        # the SAME class. We capture binding metadata into a list first
-        # so the mutation doesn't conflict with the borrow on bindings.
+        # the SAME class. We copy each binding's id and name into locals
+        # first so the mutation doesn't conflict with the borrow on bindings.
         var n_bind = len(compacted[c_idx].bindings)
         for i in range(n_bind):
             var rel_id = compacted[c_idx].bindings[i].relation_id
@@ -575,9 +578,9 @@ def build_tdom_graph[
 # Composite-key NDV tracking per relation-pair bucket
 # =============================================================================
 #
-# PURELY ADDITIVE — no behavior
-# change. The cost model in `optimizer_tdom_cost.mojo` does NOT yet consume
-# the composite-NDV signal; a later step will layer the FK-PK clamp on top.
+# This section only computes the composite-NDV signal; the cost model in
+# `optimizer_tdom_cost.mojo` consumes it to gate its FK-PK clamp
+# (`_bucket_has_fkpk_signal`).
 #
 # Background: post-split (per-column edge split), a composite equi-join
 # `(a, b) = (c, d)` between rels L and R lowers to TWO single-column
@@ -585,11 +588,10 @@ def build_tdom_graph[
 # pair. Treating those two edges as
 # INDEPENDENT denominator contributions (PRODUCT) is wrong — they're a
 # correlated composite predicate on one relation pair (MAX-within-bucket
-# is the right algebra). The MAX-within-bucket fix is algebraically
-# correct but exposed a second-order gap: the cost model has no FK-PK
-# upper-bound clamp, so the composite step is over-estimated (24M vs
-# true 6M for lineitem⋈partsupp on TPC-H Q9), driving DPccp to a worse
-# (bushy) plan than the pre-split happy-accident.
+# is the right algebra). MAX-within-bucket alone has a second-order gap:
+# without an FK-PK upper-bound clamp a composite step (lineitem⋈partsupp
+# in TPC-H Q9) is over-estimated, which can push the join order to a
+# worse (bushy) plan.
 #
 # This section's job is to expose the signal the clamp needs:
 #
@@ -606,13 +608,13 @@ def build_tdom_graph[
 #
 # Why this is the right FK-PK signal: when `composite_NDV[rel] == |rel|`,
 # every row of `rel` is unique on the composite key — that is the PK side
-# of an FK-PK relationship (a DuckDB MSc thesis §5.3). The clamp will gate
+# of an FK-PK relationship (a DuckDB MSc thesis §5.3). The cost model gates
 # the clamp `est = min(est, max(|L|, |R|))` on this predicate. The signal is
 # approximate (the single-col-NDV product is an upper bound on the true
 # composite NDV under independence; correlated columns produce lower true
 # NDV) — so the heuristic over-detects PK on the side whose row count is
-# >> the product. The clamp will refine the gate logic (e.g. require one and
-# only one side equal, prefer the side with larger cardinality, etc.).
+# >> the product. `_bucket_has_fkpk_signal` therefore also requires the PK
+# side's bucket columns to carry `from_hll=True` NDVs.
 #
 # Mirrors DuckDB's `cardinality_estimator.cpp:MultiplyDenominator` +
 # `EstimateCrossProduct` + `EstimateFilteredCardinality`. DuckDB uses
@@ -793,7 +795,7 @@ def composite_ndv_for_relation[
         happen via `build_pair_buckets` but be safe).
       * If `rel_id` is out of `chain.relations` range: return 1.
 
-    The FK-PK clamp will use this to detect PK side: `composite_ndv == |rel|`
+    The FK-PK clamp gate uses this to detect PK side: `composite_ndv == |rel|`
     flags `rel` as PK on the bucket's composite key. The signal is
     approximate (independence assumption); see module-header rationale.
     """
@@ -873,8 +875,8 @@ def composite_ndv_pk_side[
     side qualifies, or -2 if BOTH sides qualify (ambiguous).
 
     A bucket is PK-qualified on `rel` when
-    `composite_ndv_for_relation(rel) == |rel|`. The FK-PK clamp will gate the
-    FK-PK clamp on this signal.
+    `composite_ndv_for_relation(rel) == |rel|`. `_bucket_has_fkpk_signal`
+    (`optimizer_tdom_cost.mojo`) gates the FK-PK clamp on this signal.
 
     Return values:
       *  rel_a / rel_b — exactly one side is PK-qualified.
@@ -883,9 +885,9 @@ def composite_ndv_pk_side[
       * -2            — both sides are PK-qualified (e.g. a 1-to-1
                          join, or the heuristic over-detects because
                          the single-col-NDV product saturates at |rel|
-                         on the larger side). The clamp should decide
-                         tie-break (e.g. prefer larger cardinality side
-                         as the FK side / smaller as PK).
+                         on the larger side). The clamp gate accepts
+                         -2 when either side's bucket columns carry
+                         `from_hll=True` NDVs.
 
     A bucket endpoint outside `chain.relations` answers -1 (no FK-PK
     signal); `build_pair_buckets` never emits one.

@@ -17,6 +17,7 @@ _SAMPLE = "example.fixture.v1.Sample"
 _DEFECTS = {
     "hex_odd": "example.fixture.v1.Meters",
     "leg0_duplicate": _SAMPLE,
+    "leg0_duplicate_message": _SAMPLE,
     "leg0_identical": _SAMPLE,
     "leg1_value": _SAMPLE,
     "leg2_group": _SAMPLE,
