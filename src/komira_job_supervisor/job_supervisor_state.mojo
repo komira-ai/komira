@@ -137,13 +137,17 @@ struct JobSupervisorState(Movable):
       message           — Optional[String] human status line.
       failure           — Some only once the child is analyzed as Failed.
       cancel_requested  — set True when a heartbeat reply asks to cancel;
-                          the loop then terminates the child."""
+                          the loop then terminates the child.
+      timed_out         — set True when the loop stopped the child for
+                          running past --max-runtime-secs (the phase is
+                          then FAILED and `message` says why)."""
 
     var phase: JobSupervisorPhase
     var progress: Optional[Int32]
     var message: Optional[String]
     var failure: Optional[FailureReport]
     var cancel_requested: Bool
+    var timed_out: Bool
 
     def __init__(out self):
         self.phase = JobSupervisorPhase.running()
@@ -151,3 +155,4 @@ struct JobSupervisorState(Movable):
         self.message = Optional[String]()
         self.failure = Optional[FailureReport]()
         self.cancel_requested = False
+        self.timed_out = False

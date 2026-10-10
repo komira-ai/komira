@@ -88,7 +88,7 @@ struct _ProbeMiddleware(Movable, Deinitable, Middleware):
             return Optional[HttpResponse](r^)
         # Stamp the marker identity onto the ctx (the seam an authentication
         # middleware uses).
-        ctx.principal = Optional[Principal](Principal(String(_MARKER_SUBJECT)))
+        ctx.principal = Optional[Principal](Principal(scheme=String("jwt"), subject=String(_MARKER_SUBJECT)))
         return Optional[HttpResponse]()
 
     def after(

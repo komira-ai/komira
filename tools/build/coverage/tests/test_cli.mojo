@@ -478,7 +478,7 @@ def test_info_package() raises:
     assert_true(i.find("src/alpha:BelowTarget") >= 0 and i.find("src/beta:") < 0, i)
     assert_equal(_levels(dir, String("src/alpha/")), "notice ")
     var summary = read_text(dir + "/summary.md")
-    assert_true(summary.find("### Info: test-only packages (") >= 0, summary)
+    assert_true(summary.find("### Info: test-only packages, declaration-only files (") >= 0, summary)
     assert_true(summary.find(" | info: BelowTarget") >= 0, summary)
     assert_true(summary.find("except a test-only package (`src/alpha` and under)") >= 0, summary)
     # Every package under `src`: nothing fails, no annotation is a failure,

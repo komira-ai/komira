@@ -24,6 +24,7 @@ from std.memory import OwnedPointer, ArcPointer
 from komira_collections.slab import Slab
 from komira_arrow.arrow_types import ArrowType
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.render_text import write_escaped, write_quoted
 # `PartitionFrame` comes from the ZERO-IMPORT leaf `partition_frame.mojo`, NOT
 # from `partition_expr.mojo`. Same type (that file re-exports this one); the
 # difference is the CLOSURE — `partition_expr` also declares
@@ -89,14 +90,14 @@ comptime EXPR_BETWEEN: UInt8 = 10
 comptime EXPR_SORT_KEY: UInt8 = 11
 # Aggregate-as-expression for the
 # scalar-broadcast rewrite. Carries an `op: UInt8` (one of AGG_*) and a
-# `child: Expr` (the column reference). Eval raises "agg-fn outside
-# filter-over-aggregate context" — the optimizer rule is expected to
-# consume the variant before eval ever sees it.
+# `child: Expr` (the column reference). An optimizer rule is expected to
+# consume the variant before eval sees it; `interpret_expr`
+# (komira_kernels) returns NULL for this tag.
 comptime EXPR_AGG_FN: UInt8 = 12
 
 # Window-function-as-expression for the
 # `df.with_column(col("x").rank().over("g"))` Polars-shape API. Lowered
-# by `dataframe_window.with_column_window_impl` to PARTITION_BY directly
+# by the SDK's window lowering (not in this tree) to PARTITION_BY directly
 # (fast-path). Multi-window co-location is not done.
 comptime EXPR_WINDOW_FN: UInt8 = 13
 
@@ -108,19 +109,19 @@ comptime EXPR_WINDOW_FN: UInt8 = 13
 # plan with `corr_subquery.corr_subq_inner_plan_ref(expr)`.
 #
 # `Expr` stores `Optional[OwnedPointer[CorrelatedSubqueryData]]` and
-# is not in any cycle. The compiler pass `flatten_dependent_joins` consumes this
-# variant before plan_compiler sees it (lowered to SEMI / ANTI / LEFT+agg
-# joins). Eval raises if it ever reaches eval — the flatten pass
-# missed a node.
+# is not in any cycle. The optimizer pass `flatten_dependent_joins`
+# (komira_optimizer) consumes this variant before the plan compiler sees it
+# (lowered to SEMI / ANTI / LEFT+agg joins). `interpret_expr` (komira_kernels)
+# returns NULL for this tag; a node that reaches eval was missed by the pass.
 comptime EXPR_CORRELATED_SUBQUERY: UInt8 = 14
 
 # `regexp_*`
-# functions backed by the pure-Mojo Thompson NFA (`the core packages
-# regexp_nfa.mojo`).  One variant carrying `RegexpData{op, child, pattern,
-# replacement, flags, group}` where `op` is one of the `REGEXP_*` ops below.
-# The pattern is a plan-literal String (compiled once per batch by the
-# dispatch arm; compiling once per plan is a possible optimization — see
-# regexp_functions.mojo).
+# functions backed by the pure-Mojo Thompson NFA
+# (`komira_column_kernels/regexp_nfa.mojo`).  One variant carrying
+# `RegexpData{op, child, pattern, replacement, flags, group}` where `op` is one
+# of the `REGEXP_*` ops below. The pattern is a plan-literal String (compiled
+# once per batch by the dispatch arm; compiling once per plan is a possible
+# optimization — see regexp_functions.mojo).
 comptime EXPR_REGEXP: UInt8 = 15
 
 # STRUCT field projection.
@@ -174,9 +175,9 @@ comptime EXPR_MAP_GET: UInt8 = 18
 # discriminates `->` (True — attach `ARROW:extension:name = "komira.ext.json"`)
 # vs `->>` (False — plain STRING).
 #
-# Eval-arm lives in `komira_compiler/compiler_eval_column.mojo`
+# Eval-arm lives in the plan compiler's column evaluator (not in this tree)
 # (like EXPR_STRUCT_FIELD / EXPR_MAP_GET).
-# The kernel `extract_column` is in `komira_json/json_extract_kernel.mojo`
+# The kernel `extract_column` is in `komira_json_index/json_extract_kernel.mojo`
 # and uses the structural index per-row (path-aware fast-path).
 comptime EXPR_JSON_EXTRACT: UInt8 = 19
 
@@ -187,9 +188,9 @@ comptime EXPR_JSON_EXTRACT: UInt8 = 19
 # `child` must evaluate to a DATE32 (Int32 days) or TIMESTAMP_* (Int64
 # ticks) Column.  `unit` is one of the `EXTRACT_*` constants below.
 #
-# Eval-arm lives in `komira_compiler/compiler_eval_column.mojo`
+# Eval-arm lives in the plan compiler's column evaluator (not in this tree)
 # (like EXPR_JSON_EXTRACT).  The kernel
-# entry points are in `komira_eval/temporal_extract.mojo`.
+# entry points are in `komira_kernels/temporal_extract.mojo`.
 #
 # Unit semantics:
 #   - EXTRACT_YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER
@@ -222,7 +223,7 @@ comptime EXPR_EXTRACT: UInt8 = 20
 # arithmetic BinOp dispatch — which is type-preserving — distinct from the
 # always-FLOAT64 math-fn dispatch.
 #
-# Eval-arms live in `komira_compiler/compiler_eval_column.mojo`
+# Eval-arms live in the plan compiler's column evaluator (not in this tree)
 # (like EXPR_EXTRACT).  The kernels are in
 # `komira_column_kernels/scalar_math.mojo`.
 comptime EXPR_MATH_FN: UInt8 = 21
@@ -237,9 +238,9 @@ comptime EXPR_MATH_FN2: UInt8 = 22
 # SHORTFALL is the part a plan-time field can carry. ⛔ It is NOT DuckDB's
 # negative-length semantics (a window extending BACKWARD from `start`), and the
 # SQL binder must keep REFUSING a negative `length` literal for that reason.
-# The arithmetic lives at ONE site: `compiler_eval_column._sql_substring_bytes`.
-# String-producing, so it routes through
-# the `_eval_column_expr` / compute_project OVERLAY (the EXPR_REGEXP precedent),
+# The arithmetic lives at ONE site, in the plan compiler's column evaluator (not
+# in this tree). String-producing, so it routes through
+# the column evaluator's project OVERLAY (the EXPR_REGEXP precedent),
 # NOT the numeric runtime-expr opcode path.
 comptime EXPR_SUBSTRING: UInt8 = 23
 
@@ -263,8 +264,8 @@ comptime EXPR_SUBSTRING: UInt8 = 23
 # output-type inference and the wire payload conditional on the op in a family
 # whose whole shape is that they are not.
 #
-# String-producing, so eval routes through the `_eval_column_expr` /
-# compute_project OVERLAY (the EXPR_SUBSTRING / EXPR_REGEXP precedent), NOT the
+# String-producing, so eval routes through the column evaluator's project
+# OVERLAY (the EXPR_SUBSTRING / EXPR_REGEXP precedent), NOT the
 # numeric runtime-expr opcode path.
 comptime EXPR_STRING_FN: UInt8 = 24
 
@@ -282,7 +283,8 @@ comptime EXPR_STRING_FN: UInt8 = 24
 #
 # ⚠ AND IT SURVIVES THE OPTIMIZER, WHICH THE NODE FORM DOES NOT. A `UdfData`
 # on a plan node is dropped by every rebuild site that uses the non-UDF plan
-# factories (measured: after `optimize_full`, `has_udf()` is already False).
+# factories (measured: after the full optimizer pipeline, `has_udf()` is
+# already False).
 # An `Expr` payload has
 # ONE copy site — `Expr.copy()`, one arm below — so a rebuilt plan carries the
 # UDF by construction rather than by every rebuilder remembering.
@@ -311,10 +313,11 @@ comptime EXPR_UDF_CALL: UInt8 = 25
 # ⛔ AND THIS IS WHY `concat` IS NOT A `BIN_CONCAT` ON `EXPR_BINARY_OP`,
 # WHICH IS THE OBVIOUS-LOOKING FREE ROUTE AND IS WRONG. That tag is already
 # `{op, left, right}` and an n-ary fold over it is linear, so it reads as a
-# one-line addition. MEASURED: **dozens of non-test modules switch on the
-# `BIN_*` op space** — `expr_to_runtime` (numeric opcode compilation),
-# `komira_eval/expr_interpreter`, `expr_kernel_templates`, `builtin_binary_fns`,
-# `viewport_expr_codec`, `row_capability`, `optimizer_expr` among them — and a
+# one-line addition. MEASURED: **many non-test modules switch on the
+# `BIN_*` op space** — `komira_kernels/expr_interpreter`,
+# `expr_kernel_templates` and `viewport_expr_codec` among them, and the engine's
+# numeric opcode compiler and the optimizer's expression rules outside this
+# tree — and a
 # STRING-PRODUCING member arriving at any of those AS A BINARY OP is a silent
 # mishandling, not a refusal. Nothing measures that space the way the
 # walker-arms lint measures this one. The `EXPR_*`
@@ -329,8 +332,8 @@ comptime EXPR_UDF_CALL: UInt8 = 25
 # the binder, the wire decoder and the evaluator all refuse a malformed node
 # against ONE table instead of three opinions.
 #
-# String-producing (except `strpos`), so eval routes through the
-# `_eval_column_expr` / compute_project OVERLAY — the `EXPR_STRING_FN`
+# String-producing (except `strpos`), so eval routes through the column
+# evaluator's project OVERLAY — the `EXPR_STRING_FN`
 # precedent — never the numeric runtime-expr opcode path.
 comptime EXPR_STRING_FN_N: UInt8 = 26
 
@@ -558,8 +561,8 @@ comptime EXTRACT_SECOND: UInt8 = 6
 # ⚠ THESE MUST STAY BELOW 16 AND THE REASON IS `_is_trunc_unit`, NOT TIDINESS.
 # The whole engine discriminates "field extract" from "date_trunc" with the
 # single predicate `unit >= EXTRACT_TRUNC_YEAR` below — one function, delegated
-# by `compiler_eval_column`, `expr_walk`, `row_capability` and
-# `row_streaming_segment` rather than restated (see `expr_walk.mojo`'s EXTRACT
+# by `expr_walk` (and by the column evaluator and the row-mode walkers, which
+# are not in this tree) rather than restated (see `expr_walk.mojo`'s EXTRACT
 # arm, which says so). A new FIELD unit numbered above 25 would be typed as a
 # date_trunc by every one of them: DECLARED as the child's temporal type over an
 # INT64 buffer. The 7..15 run was left free for exactly this, and 15 is
@@ -698,12 +701,12 @@ comptime UN_IS_NOT_NULL: UInt8 = 3
 # ⭐ WHY THEY LIVE HERE AND NOT ON `EXPR_MATH_FN`, WHICH IS THE OBVIOUS HOME.
 #
 # `EXPR_MATH_FN` is **ALWAYS FLOAT64** — that is the tag's contract, stated on
-# the tag and relied on by name: `row_streaming_segment._expr_is_float_numeric`
-# returns `True` for the tag UNCONDITIONALLY, with the comment "the math fns
-# ALWAYS produce FLOAT64, regardless of the child's family — so the project
-# root picks the f64 walker family". A type-PRESERVING member on that tag is a
-# silent type divergence waiting for the first person to give it a row-walker
-# opcode.
+# the tag and relied on by name: the engine's row-streaming classifier (not in
+# this tree) returns `True` for the tag UNCONDITIONALLY, with the comment "the
+# math fns ALWAYS produce FLOAT64, regardless of the child's family — so the
+# project root picks the f64 walker family". A type-PRESERVING member on that
+# tag is a silent type divergence waiting for the first person to give it a
+# row-walker opcode.
 #
 # `EXPR_UNARY_OP`, by contrast, ALREADY carries the type-preserving unary
 # numeric rule: `walk_expr_field`'s arm for this tag is PER-OP, and its
@@ -724,14 +727,14 @@ comptime UN_IS_NOT_NULL: UInt8 = 3
 #     abs(-9223372036854775808)`.
 # Both are why these are real kernels with a real overflow guard.
 #
-# ⚠ THE UN_* SPACE FAILS SAFE ON AN UNKNOWN MEMBER, and that is MEASURED
-# rather than assumed — every non-test module that reads a `UN_*` is an
-# ALLOWLIST: `row_capability._unary_walkable`
-# and `_value_expr_is_bool_output`, the engine's `_translate_unary` mirror,
-# `_arith_node_walkable` (rejects EXPR_UNARY_OP outright), `viewport_expr_codec.
-# _is_allowed_unop`, `optimizer_expr`'s template matcher (returns None),
-# `optimizer_filter_selectivity`, `inmem_leaf`, `plan_leaf_servable`,
-# `lower_untyped_expr` and both display ladders. An unknown member is an honest
+# ⚠ THE UN_* SPACE FAILS SAFE ON AN UNKNOWN MEMBER, and that was MEASURED
+# rather than assumed, over a tree that also held the engine, the plan compiler
+# and the optimizer's expression rules — every non-test module there that read
+# a `UN_*` was an ALLOWLIST. Of those, `viewport_expr_codec._is_allowed_unop`
+# and both display ladders are in this tree; the row-capability and
+# row-streaming walkers, the engine's unary translation, the optimizer's
+# template matcher and selectivity estimate, and the SDK's leaf and lowering
+# checks are not. An unknown member is an honest
 # column demote or a named raise, never a wrong answer. That is the property
 # `BIN_CONCAT` could NOT have had on the `BIN_*` space, and it is why the same
 # reasoning does not generalise to that space.
@@ -791,10 +794,9 @@ ERROR on v1.5.3 (measured), so a FLOAT32 / FLOAT64 operand here RAISES in the
 eval arm rather than being cast to an integer first. Casting would answer a
 number for an expression DuckDB refuses to run at all.
 
-⚠ NOT SERVED OVER BIT: this engine has no BIT type (see `_R_BITFN` in
-`komira_sdk/sql_fn_table.mojo`), and the BIT overload is the ONE whose return
-type is BIGINT rather than TINYINT — so the day a BIT array lands, this node's
-fixed INT8 output rule does NOT extend to it."""
+⚠ NOT SERVED OVER BIT: this engine has no BIT type, and the BIT overload is
+the ONE whose return type is BIGINT rather than TINYINT — so the day a BIT
+array lands, this node's fixed INT8 output rule does NOT extend to it."""
 
 
 # =============================================================================
@@ -1078,9 +1080,10 @@ MEASURED v1.5.3 over a COLUMN: `sha256('abc')` =
 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'.
 
 ⭐ ITS KERNEL IS A SECOND SHA-256 IN THIS REPO AND THAT IS DELIBERATE.
-`komira_crypto.sha256` is an AWS-LC FFI wrapper, and its package declares 58
-gating tests that `komira_compiler` would inherit transitively — the CAVP
-suites and bettertls on every engine build, for one scalar function. The
+`komira_crypto.sha256` is an AWS-LC FFI wrapper, and its package declares the
+CAVP suites and bettertls as gating tests that the plan compiler (not in this
+tree) would inherit transitively — on every engine build, for one scalar
+function. The
 reasoning is recorded in `komira_column_kernels/digest_functions.mojo`; do not
 "fix" the duplication by adding the dependency edge.
 
@@ -1895,9 +1898,9 @@ struct AggFnData(Movable):
 
     Construction: prefer the ColExpr `.max()` / `.min()` / `.sum()` /
     `.avg()` / `.count()` factories which produce an `Expr` of tag
-    `EXPR_AGG_FN`. The variant is consumed by `optimizer_scalar_broadcast`
-    at plan-compile time; if eval ever sees one, that's a missed-rule
-    bug surfaced by `eval_expr` raising clearly.
+    `EXPR_AGG_FN`. The variant is expected to be consumed by an optimizer
+    rule (not in this tree) before eval; `interpret_expr` (komira_kernels)
+    returns NULL for it.
     """
     var op: UInt8
     var child: OwnedPointer[Expr]
@@ -1920,9 +1923,9 @@ struct WindowFnData(Movable):
     is set by chaining `.over(...)` on the constructed Expr.
 
     User-facing entry: ColExpr `.rank()` / `.lag(n)` / `.cum_sum()` /
-    `.rolling_mean(n)` factories. Lowered by
-    `dataframe_window.with_column_window_impl` to a `PARTITION_BY`
-    plan node directly (no Project wrap). Eval raises if seen.
+    `.rolling_mean(n)` factories. Lowered by the SDK's window lowering
+    (not in this tree) to a `PARTITION_BY` plan node directly (no Project
+    wrap). `interpret_expr` (komira_kernels) returns NULL for it.
     """
     var func: UInt8
     var arg_col: String
@@ -2467,7 +2470,8 @@ def string_fn_n_arity(op: UInt8) -> Int:
     # that looks like extra capability. Refusing the 3-argument form is a
     # narrowing the caller is TOLD about; accepting a 4-argument one is a
     # promise nothing can keep. The cutoff overload needs a NUMERIC operand on
-    # this tag, which `_sfnn_string_arg` cannot bind — the same wall
+    # this tag, which the column evaluator's string-argument binder (not in
+    # this tree) cannot bind — the same wall
     # `STRFNN_LPAD` needed its own eval path to get past.
     #
     # `jaccard` has no 3-argument overload there at all (measured:
@@ -2576,10 +2580,10 @@ struct UdfCallData(Movable):
     ⚠ THE THUNK IS NOT A FIELD, AND IT MUST NOT BECOME ONE. `UdfRunBatchThunk`
     is a function type over `UnsafePointer[..., MutExternalOrigin]`, so putting
     it here would (a) put a wildcard-origin pointer in a plan-IR field, (b)
-    make the core packages depend on `komira_engine_operators` — a package CYCLE,
-    since engine_operators already depends on komira_compiler which depends on
-    core — and (c) put an unserializable value in a type the wire encodes. The
-    handle is the indirection that avoids all three.
+    make the plan packages depend on the engine's operators (not in this tree)
+    — a package CYCLE, since those depend on the plan compiler, which depends
+    on the plan packages — and (c) put an unserializable value in a type the
+    wire encodes. The handle is the indirection that avoids all three.
     """
 
     var name: String
@@ -3125,7 +3129,7 @@ struct Expr(Movable, Writable):
         `left(s, NEGATIVE)` desugars to. ⛔ It is NOT DuckDB's negative-length
         semantics (a BACKWARD window from `start`), so a SQL binder must keep
         refusing a negative `length` LITERAL. The arithmetic is at one site,
-        `compiler_eval_column._sql_substring_bytes`."""
+        in the plan compiler's column evaluator (not in this tree)."""
         var e = Expr(EXPR_SUBSTRING)
         e._substring = SubstringData(child^, start, length)
         return e^
@@ -4148,13 +4152,10 @@ struct Expr(Movable, Writable):
         node directly when needed (e.g. during pattern recognition or
         substitution traversal).
 
-        Eval-side semantics: the optimizer's
-        `optimizer_scalar_broadcast` rule (slot after
-        `push_predicates_down`, before `convert_inner_to_semi`) is
-        expected to consume the variant before eval ever sees one. If
-        an `EXPR_AGG_FN` reaches eval, that's a missed-rule bug and
-        eval raises "agg-fn outside filter-over-aggregate context"
-        loudly so the diagnostic surfaces immediately.
+        Eval-side semantics: an optimizer rule (the scalar-broadcast
+        rewrite, not in this tree) is expected to consume the variant
+        before eval ever sees one. `interpret_expr` (komira_kernels)
+        returns NULL for an `EXPR_AGG_FN` that reaches it.
         """
         var e = Expr(EXPR_AGG_FN)
         e._agg_fn = AggFnData(op, child^)
@@ -4186,7 +4187,7 @@ struct Expr(Movable, Writable):
         """Canonical EXPR_IN_LIST factory.
 
         Builds the IR-level IN-list node directly. `Expr.in_list(...)`
-        folds to OR-of-eq; `rewrite_in_clauses`
+        folds to OR-of-eq; an optimizer rule (not in this tree)
         canonicalizes that shape to `EXPR_IN_LIST` during plan optimization.
         """
         var e = Expr(EXPR_IN_LIST)
@@ -4220,14 +4221,13 @@ struct Expr(Movable, Writable):
             (SEMI / ANTI / LEFT+agg).
 
         This factory is the user-facing entry point on the Expr surface;
-        a free-fn alias also lives on `komira_sdk.expr_builder` taking
-        a `DataFrame^` rather than `LogicalPlan^` for the high-level SDK
-        ergonomic that mirrors `Expr.scalar_subquery(df)`.
+        the SDK's DataFrame-taking alias is not in this tree.
 
         Eval-side: this variant must be consumed by
-        `flatten_dependent_joins` (compiler pass-1 INDEP) BEFORE
-        plan_compiler dispatches the plan. If it ever reaches eval,
-        `eval_expr` raises clearly so the missed-rule bug surfaces.
+        `flatten_dependent_joins` (komira_optimizer, a pass-1 INDEP rule)
+        BEFORE the plan compiler dispatches the plan. `interpret_expr`
+        (komira_kernels) returns NULL for it; reaching eval means the pass
+        missed a node.
         """
         var e = Expr(EXPR_CORRELATED_SUBQUERY)
         var data = make_correlated_subquery_data[P](inner_plan^, outer_refs^, kind)
@@ -4266,7 +4266,7 @@ struct Expr(Movable, Writable):
           - `in_rhs_col`: the INNER column the subquery projects that the
             `IN` matches against (e.g. `ps_suppkey`).
 
-        Lowering (compiler pass-1 INDEP `flatten_dependent_joins`):
+        Lowering (`flatten_dependent_joins`, komira_optimizer, pass-1 INDEP):
           `Filter(outer, <this>)` → `outer ⋈SEMI inner_after_hoist
           ON (hoisted_corr_keys..., in_lhs_col) = (..., in_rhs_col)`.
 
@@ -4912,26 +4912,34 @@ struct Expr(Movable, Writable):
         elif self.tag == EXPR_ALIAS:
             writer.write("Alias(")
             self._alias.value().child[].write_to(writer)
-            writer.write(", \"", self._alias.value().name, "\")")
+            writer.write(", ")
+            write_quoted(writer, self._alias.value().name)
+            writer.write(")")
         elif self.tag == EXPR_STRING_OP:
             writer.write("StringOp(")
             _write_strop(writer, self._string_op.value().op)
             writer.write(", ")
             self._string_op.value().child[].write_to(writer)
-            writer.write(", \"", self._string_op.value().pattern, "\")")
+            writer.write(", ")
+            write_quoted(writer, self._string_op.value().pattern)
+            writer.write(")")
         elif self.tag == EXPR_REGEXP:
             ref rd = self._regexp.value()
             writer.write("Regexp(op=", Int(rd.op), ", ")
             rd.child[].write_to(writer)
-            writer.write(", pattern=\"", rd.pattern, "\"")
+            writer.write(", pattern=")
+            write_quoted(writer, rd.pattern)
             if rd.flags.byte_length() > 0:
-                writer.write(", flags=\"", rd.flags, "\"")
+                writer.write(", flags=")
+                write_quoted(writer, rd.flags)
             if rd.op == REGEXP_EXTRACT or rd.op == REGEXP_EXTRACT_ALL:
                 writer.write(", group=", rd.group)
             if rd.group_name.byte_length() > 0:
-                writer.write(", group_name=\"", rd.group_name, "\"")
+                writer.write(", group_name=")
+                write_quoted(writer, rd.group_name)
             if rd.op == REGEXP_REPLACE:
-                writer.write(", replacement=\"", rd.replacement, "\"")
+                writer.write(", replacement=")
+                write_quoted(writer, rd.replacement)
             writer.write(")")
         elif self.tag == EXPR_SUBSTRING:
             ref sd = self._substring.value()
@@ -4942,7 +4950,7 @@ struct Expr(Movable, Writable):
             # ⛔ PLAN IDENTITY, NOT DECORATION. This render feeds
             # `LogicalPlan.structural_hash`, the plan-compile cache key. A
             # constant `When(...)` would let two plans differing only
-            # INSIDE a CASE share a compiled plan: in ONE EngineContext
+            # INSIDE a CASE share a compiled plan: in ONE engine session
             # `select([k, when(v > 5, 1, 0)])` after `when(v > 8, 1, 0)`
             # would answer the FIRST query's column (MEASURED).
             ref wd = self._when.value()
@@ -4968,15 +4976,14 @@ struct Expr(Movable, Writable):
             # ⛔ PLAN IDENTITY (the EXPRESSION-level twin of the
             # PLAN_PARTITION_BY render). Printing `partition_by=#N,
             # order_by=#N` — two COUNTS, no names, no directions, no frame —
-            # would let, in ONE EngineContext, `sum(v).over("k")` after
+            # would let, in ONE engine session, `sum(v).over("k")` after
             # `sum(v).over("g")`, and a row_number ordered DESC after the same
             # one ASC, answer the FIRST query (MEASURED). Every field is
             # emitted; the three lists are NOT parallel, so each prints in full.
             ref w = self._window_fn.value()
-            writer.write(
-                "WindowFn(func=", Int(w.func), ", col=\"", w.arg_col,
-                "\", offset=", w.arg_offset, ", partition_by=[",
-            )
+            writer.write("WindowFn(func=", Int(w.func), ", col=")
+            write_quoted(writer, w.arg_col)
+            writer.write(", offset=", w.arg_offset, ", partition_by=[")
             for i in range(len(w.partition_by)):
                 if i > 0:
                     writer.write(", ")
@@ -5010,7 +5017,9 @@ struct Expr(Movable, Writable):
             ref sf = self._struct_field.value()
             writer.write("StructField(")
             sf.parent[].write_to(writer)
-            writer.write(", \"", sf.field_name, "\")")
+            writer.write(", ")
+            write_quoted(writer, sf.field_name)
+            writer.write(")")
         elif self.tag == EXPR_STRUCT_FIELD_IDX:
             # Surface for EXPLAIN (by-idx).
             ref sfi = self._struct_field_idx.value()
@@ -5111,7 +5120,7 @@ struct Expr(Movable, Writable):
         elif self.tag == EXPR_JSON_EXTRACT:
             # Surface for EXPLAIN. The path
             # is shown in canonical "$.a.b.c" form (rebuilt from segments)
-            # so optimizer_cse path-equality byte-compare sees a stable
+            # so a CSE path-equality byte-compare sees a stable
             # canonical form across instances. The preserve_extension_metadata
             # bit is part of the printed surface so EXPLAIN distinguishes
             # `->` (json) vs `->>` (string) calls.
@@ -5119,8 +5128,12 @@ struct Expr(Movable, Writable):
             writer.write("JsonExtract(")
             je.parent[].write_to(writer)
             writer.write(", path=\"$")
+            # Each segment escaped, `.` included: the ONE key `a.b`
+            # (`$."a.b"`) must not render like the TWO keys `a`, `b`
+            # (`$.a.b`) -- this render is plan identity (komira#960).
             for i in range(len(je.path_segments)):
-                writer.write(".", je.path_segments[i])
+                writer.write(".")
+                write_escaped(writer, je.path_segments[i], escape_dot=True)
             writer.write("\"")
             if je.preserve_extension_metadata:
                 writer.write(", mode=->")
@@ -5141,7 +5154,7 @@ struct Expr(Movable, Writable):
             # THE HASH, THERE IS NO SECOND SOURCE OF IDENTITY" — and it is
             # ALREADY under-discriminating: two subqueries agreeing on `kind`,
             # `len(outer_refs)` and `inner_tag` hash IDENTICALLY however
-            # different their inner plans are, so `plan_cse` can share them.
+            # different their inner plans are, so plan CSE can share them.
             # ⇒ A KNOWN DEFECT of the render, independent of the type
             # erasure. `cs.inner_tag` is a snapshot taken at construction from
             # the plan that was boxed.
@@ -5187,7 +5200,7 @@ struct Expr(Movable, Writable):
 # AGG_* -> PF_* by NUMBER, not by name: `agg_expr.mojo` and `partition_expr.mojo`
 # both import this module, so importing either here is a cycle. The same
 # mirror `col_expr.mojo`'s aggregate-as-expression factories keep, and the
-# same mapping `dataframe_window._agg_op_to_partition_func` states; pinned
+# same mapping the SDK's window lowering (not in this tree) states; pinned
 # against the real constants by `test_col_expr_desugar_verbs`.
 def _agg_op_as_partition_func(op: UInt8) -> UInt8:
     """AGG_SUM 0 -> PF_SUM 20, AGG_COUNT 1 -> PF_COUNT 22, AGG_MIN 2 ->

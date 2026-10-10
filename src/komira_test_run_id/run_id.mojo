@@ -55,6 +55,6 @@ def mint_run_id[C: WallClock, E: Entropy](mut clock: C, mut entropy: E) raises -
     if now <= 0:
         raise Error("mint_run_id: the wall clock read " + String(now) + "; refusing to mint")
     var value = String(now) + "-" + hex16_lower(entropy.next_u64())
-    if not is_valid_validation_run_id(value):
-        raise Error("mint_run_id: minted an id that is not a valid validation-run id")
+    if not is_valid_validation_run_id(value):  # cov: unreachable a positive Int, "-" and 16 lowercase hex digits are at most 36 legal bytes
+        raise Error("mint_run_id: minted an id that is not a valid validation-run id")  # cov: unreachable see the line above
     return RunId(value^, now)

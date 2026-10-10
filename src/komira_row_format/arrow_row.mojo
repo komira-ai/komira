@@ -32,12 +32,14 @@
 #     reinterpret bits; if sign set, flip all bits; if clear, flip only the
 #     sign bit. Then big-endian.
 #   * Bool: 0x00 / 0x01 raw.
-#   * Decimal128 (high 64 + low 64 stored as 2× u64 cells in row_block):
+#   * Decimal128 (the 16-byte cell's high and low u64 words):
 #     flip sign bit of high u64; write [high_BE, low_BE] (16 bytes).
 #   * Date/Timestamp: inherits underlying I32/I64 encoding.
-#   * ASC: encoded bytes stand. DESC: bit-invert all bytes (^0xFF)
-#     including the sentinel. NULLS_LAST inverts the null sentinel
-#     from 0x00 to 0xFF; this composes correctly with DESC.
+#   * ASC: encoded bytes stand. DESC: bit-invert the value bytes (^0xFF)
+#     and the non-null sentinel (0x01 -> 0xFE). A NULL slot's sentinel is
+#     never inverted (as in arrow-rs): NULLS_FIRST is 0x00 and NULLS_LAST
+#     0xFF under either direction, so the NULL sorts before (0x00 < 0x01,
+#     0xFE) or after (0xFF > 0x01, 0xFE) every value of that key.
 #   * Composite (multi-column): concatenate per-column encoded bytes in
 #     column order. memcmp on the concatenation = lex order over columns.
 #
@@ -420,18 +422,19 @@ def _append_sentinel(
     mut out: List[UInt8], is_null: Bool, nulls_first: Bool, asc: Bool
 ):
     """Emit the per-slot null sentinel byte. NULLS_FIRST: null=0x00,
-    non-null=0x01. NULLS_LAST: null=0xFF, non-null=0x01. DESC: bit-invert.
+    NULLS_LAST: null=0xFF; non-null=0x01, bit-inverted to 0xFE under DESC.
 
-    Note: Under DESC + NULLS_FIRST, null=0x00 inverts to 0xFF (still
-    sorts last in DESC view = first in ASC view). Under DESC + NULLS_LAST,
-    null=0xFF inverts to 0x00. Both semantically correct.
+    A NULL's sentinel is not inverted under DESC (arrow-rs does the same):
+    `nulls_first` names the NULL's place in the output order, which the
+    sort direction does not change. 0x00 sorts before both non-null
+    sentinels and 0xFF after both.
     """
-    var b: UInt8
     if is_null:
-        b = ARROW_ROW_NULL_FIRST if nulls_first else ARROW_ROW_NULL_LAST
+        out.append(
+            ARROW_ROW_NULL_FIRST if nulls_first else ARROW_ROW_NULL_LAST
+        )
     else:
-        b = ARROW_ROW_NON_NULL
-    out.append(_maybe_invert_for_desc(b, asc))
+        out.append(_maybe_invert_for_desc(ARROW_ROW_NON_NULL, asc))
 
 
 @always_inline
@@ -668,19 +671,12 @@ def encode_row_keys_for_sort[bo: Origin[mut=False]](
             if col_is_null:
                 _append_zeros(out, ENC_W_DECIMAL128)
             else:
-                # DECIMAL128 modeled as 2× u64 cells (row_block.mojo).
-                # We need both halves; BatchView exposes col_decimal128_hi /
-                # col_decimal128_lo if available — else fall back to the
-                # underlying buffer. This is the documented stub
-                # for the consumer to provide hi/lo at encode time. For
-                # the SORT slow-path, layouts call encode_decimal128_to_bytes
-                # directly with the two u64 halves; in this composite
-                # entry, DECIMAL128 raises (BatchView has no accessor for
-                # hi/lo).
-                raise Error(
-                    "arrow_row.encode_row_keys_for_sort: DECIMAL128"
-                    " composite encode requires BatchView hi/lo accessor"
-                    " use encode_decimal128_to_bytes directly for now"
+                # The 16-byte cell's high and low words, read at the
+                # 16-byte cell stride.
+                var hi = batch.col_decimal128_hi(col_idx).load[1](row_idx)[0]
+                var lo = batch.col_decimal128_lo(col_idx).load[1](row_idx)[0]
+                _append_inline_array_16(
+                    out, encode_decimal128_to_bytes(hi, lo, asc)
                 )
         elif dt == DT_STRING or dt == DT_BINARY:
             raise Error(
@@ -710,9 +706,8 @@ def arrow_row_compare(imm a: List[UInt8], imm b: List[UInt8]) -> Int:
     semantics. For arrow-row encoded keys with equal column-arity + same
     dtypes, lengths are identical so the length-tiebreak is unreached.
 
-    For varlen STRING/BINARY, the block-escape encoding
-    guarantees that comparison terminates at the trailing length byte
-    even when the unpadded lengths differ.
+    There is no varlen STRING/BINARY encoding (the encoder refuses those
+    tags), so every key this compares has a fixed width per dtype.
     """
     var na = len(a)
     var nb = len(b)

@@ -14,7 +14,11 @@ JSON Lines (one JSON object per line) to and from Arrow record batches
   before any row is built: every line must be blank (skipped) or one JSON object
   (RFC 8259), and an error names the line (`komira_jsonl: line N: ...`). A key
   the schema reads may appear once per object; keys the schema does not read
-  are skipped. The parallel and streaming readers (`read_jsonl_streamed_to_batches`)
+  are skipped. A JSON `null` reads NULL inside a nested value too: a list
+  element, a struct member (and a member missing from its object), a map
+  value. A list, struct or map column refuses a number or literal other than
+  `null`. A DECIMAL128 column reads a JSON number or a string, an exponent
+  included (`1e2`), truncating digits past its scale. The parallel and streaming readers (`read_jsonl_streamed_to_batches`)
   treat a newline inside a JSON string as part of the string, not a line end.
 - **Writing.** `komira_jsonl.json_writer` writes a batch as JSON Lines
   (`write_batch_jsonl_direct`, `write_batch_jsonl_fused`) or as a pretty JSON

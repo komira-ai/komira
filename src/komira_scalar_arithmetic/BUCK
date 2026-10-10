@@ -6,6 +6,12 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = [
         "tests/test_decimal256_arith.mojo",
+        "tests/test_decimal256_bounds.mojo",
+        "tests/test_decimal_arith.mojo",
+        "tests/test_decimal_cast.mojo",
+        "tests/test_decimal_compare.mojo",
+        "tests/test_decimal_parse.mojo",
+        "tests/test_int_overflow.mojo",
     ],
     visibility = ["PUBLIC"],
 )

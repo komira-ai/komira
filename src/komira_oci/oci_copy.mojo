@@ -259,16 +259,16 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
         # `found[0]` is the root, and phase 3 walks backwards, so the LAST PUT is
         # the root — `confirmed` therefore holds the root's confirmed digest.
         if confirmed != src.reference:
-            raise Error(
-                String("oci: stage copy of ")
-                + src_ref
-                + String(" -> ")
-                + dst_ref
-                + String(" did NOT preserve the digest: source ")
-                + src.reference
-                + String(", destination confirmed ")
-                + confirmed
-                + String(
+            raise Error(  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                String("oci: stage copy of ")  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + src_ref  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + String(" -> ")  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + dst_ref  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + String(" did NOT preserve the digest: source ")  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + src.reference  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + String(", destination confirmed ")  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + confirmed  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + String(  # cov: unreachable _put_manifest returns the root digest it PUT or raises
                     ". REFUSING to report success — the recorded deployable ref"
                     " would point at different content than was built."
                 )

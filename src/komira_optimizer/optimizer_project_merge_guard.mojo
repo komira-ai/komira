@@ -1,22 +1,19 @@
 # =============================================================================
 # optimizer_project_merge_guard — folding Project(outer, Project(inner, gc))
 # into ONE Project over gc: the substitution AND the question of whether it is
-# safe (2026-09-25)
+# safe
 # =============================================================================
 #
-# `optimizer_projection.merge_projects_inplace` folds a Project above a Project
-# by SUBSTITUTING each outer column reference with the inner expression that
-# produces it. Until 2026-09-25 that substitution descended ColRef / BinaryOp /
-# UnaryOp / Cast / Alias ONLY and returned every other node AS BUILT, so an
-# outer MathFn / CASE / string op / window reading an inner COMPUTED column was
-# merged into a Project over the grandchild that has no such column -- or, when
-# the inner Project REPLACED the column under its own name, one that read the
-# grandchild's ORIGINAL column: a silent wrong answer.
-#
-# ⛔ MEASURED (LOCAL darwin): @sql `SELECT k, sqrt(v) FROM (SELECT k, v*2 AS v
-# FROM t)` answered sqrt(7) where DuckDB answers sqrt(14); `sqrt(v2)` / `CASE
-# WHEN v2 > 5` over `(SELECT v*2 AS v2 ..)` raised "no field named 'v2'"; at
-# @mojo the `.over()` refusal's own named remedy failed the same way.
+# A projection merge (`optimizer_projection.merge_projects_inplace`, not in this
+# tree) folds a Project above a Project by SUBSTITUTING each outer column
+# reference with the inner expression that produces it. A substitution that
+# descends ColRef / BinaryOp / UnaryOp / Cast / Alias ONLY and returns every
+# other node AS BUILT merges an outer MathFn / CASE / string op / window reading
+# an inner COMPUTED column into a Project over the grandchild that has no such
+# column -- or, when the inner Project REPLACED the column under its own name,
+# one that reads the grandchild's ORIGINAL column: a silent wrong answer
+# (`SELECT k, sqrt(v) FROM (SELECT k, v*2 AS v FROM t)` would compute sqrt(7)
+# where the answer is sqrt(14)).
 #
 # This module owns BOTH halves, so they cannot drift apart:
 #   * `substitute_project_refs` -- the substitution, descending MathFn /
@@ -27,26 +24,16 @@
 #     WINDOW, whose input is a column NAME; a regexp; a UDF call; ...) must PASS
 #     THROUGH the inner Project unchanged (`ColRef(<same name>)`). Otherwise the
 #     two Projects are left standing -- never a dangling or re-pointed
-#     reference. ⚠ NOT "one extra projection" for free: MEASURED, the
-#     unmerged pair can be outside an executor's envelope
-#     -- at @mojo "non-breaker child is not a parquet-collect shape", at @sql a
-#     TopN operator refusal -- a NAMED failure where the unguarded fold
-#     answered WRONG.
+#     reference.
 #   * `expr_substitutes_safely` -- the same mirror for ONE expression, for a
 #     rewrite that folds a Project into a node other than a Project (Rule 13,
-#     `optimizer_join.absorb_expression_into_aggregate`, which had its own
-#     copy of the walk with the same hole).
+#     `optimizer_join.absorb_expression_into_aggregate`).
 #   * `predicate_below_project` -- the same question for a FILTER pushed below
-#     a Project (`optimizer_filter.push_predicates_down`), which checked BY
-#     NAME against the Project's CHILD schema only. A Project that REPLACES a
-#     name its child also has passed that check, and the pushed predicate read
-#     the ORIGINAL column: MEASURED (LOCAL
-#     darwin; by-name check since an earlier change)
-#     @sql `SELECT k, v FROM (SELECT k, g, v*2 AS v FROM t) q WHERE v > 8`
-#     answered k 3 where DuckDB 1.5.3 answers k 1, 3; @mojo
-#     `with_columns((col("v") * 2).alias("v")).filter(col("v") > 8)` k 3, and
-#     `with_columns(col("x").max().over("g").alias("x")).filter(x > 3)` k 3, 5
-#     (DuckDB k 3, 4, 5, 6).
+#     a Project (`optimizer_filter.push_predicates_down`). A check BY NAME
+#     against the Project's CHILD schema alone passes a Project that REPLACES a
+#     name its child also has, and the pushed predicate then reads the ORIGINAL
+#     column: in `SELECT k, v FROM (SELECT k, g, v*2 AS v FROM t) q WHERE v > 8`
+#     the pushed predicate must be `v * 2 > 8`, not the scan's `v > 8`.
 # =============================================================================
 
 from komira_plan_expr.expr import (
@@ -186,10 +173,8 @@ def _passes_through(
     name: String, inner_names: List[String], inner_exprs: ExprArray
 ) -> Bool:
     """True when the inner Project outputs `name` as `ColRef(name)` (or an
-    `Alias(ColRef(name), name)`, which the python skins author for every
-    kept column -- MEASURED: without it the guard refused their floor-`//`
-    and grouped-CASE plans, which then failed the executor's one-Project
-    envelope)."""
+    `Alias(ColRef(name), name)`, a form a plan builder may author for a kept
+    column; refusing it would refuse merges that are safe)."""
     for i in range(len(inner_names)):
         if inner_names[i] == name:
             return _is_col_named(inner_exprs[i], name)
@@ -279,13 +264,12 @@ def _row_local(e: Expr) -> Bool:
     RAISE on a value outside its domain (`sqrt` / `ln` of a negative, a
     narrowing cast), and a predicate pushed below the Project is pushed on
     past any FILTER under it (the filter-over-filter arm swaps them), so it
-    meets rows that guard excluded. MEASURED (@sql, LOCAL
-    darwin, fxt.parquet): `SELECT k FROM (SELECT k, sqrt(x) AS x FROM t WHERE
-    x >= 0) q WHERE x > 1` answered DuckDB's k 1, 3, 5 with the filter kept
-    above and RAISED "cannot take square root of a negative number" with
-    sqrt(x) substituted and pushed. A predicate over one of those stays ABOVE
-    the Project. (Integer `+ - *` can raise on OVERFLOW the same way; that
-    residual is accepted -- it needs a guard that excludes overflowing rows.)
+    meets rows that guard excluded. In `SELECT k FROM (SELECT k, sqrt(x) AS x
+    FROM t WHERE x >= 0) q WHERE x > 1`, `sqrt(x) > 1` pushed below the
+    `x >= 0` filter would take the square root of a negative x. A predicate
+    over one of those stays ABOVE the Project. (Integer `+ - *` can raise on
+    OVERFLOW the same way; that residual is accepted -- it needs a guard that
+    excludes overflowing rows.)
     A window, a CASE, a string op or a UDF is not taken either."""
     if e.tag == EXPR_COL_REF or e.tag == EXPR_LITERAL:
         return True
@@ -314,9 +298,9 @@ def predicate_below_project(
       (`expr_substitutes_safely`): `pred` with those expressions SUBSTITUTED,
       each without its output alias -- DuckDB's rule
       (`pushdown_projection.cpp`); `v > 8` over `v * 2 AS v` is `v * 2 > 8`.
-      (An alias left inside a comparison reads to the scan / pipeline
-      compiler as a column -- MEASURED: "cannot resolve column
-      index from expression tag: 3".)
+      (The alias is stripped because an alias inside a comparison is not a
+      column reference; a consumer that resolves comparison operands to
+      columns could not resolve it.)
     * else None."""
     var names = List[String]()
     var sink = ordered_name_sink(names)
