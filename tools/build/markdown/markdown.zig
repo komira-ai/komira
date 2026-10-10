@@ -34,10 +34,25 @@
 //! Whitespace is CommonMark's: space, tab, line feed, line tabulation, form
 //! feed, carriage return (bytes 32 and 9..13).
 //!
-//! Where this differs from CommonMark, it reports a link CommonMark would
-//! not, never the reverse, except for empty and unmodelled targets below
-//! (a link checker that over-reports asks for a fix; one that under-reports
-//! lets a broken link through):
+//! Where this differs from CommonMark, it mostly reports a link CommonMark
+//! would not (a link checker that over-reports asks for a fix; one that
+//! under-reports lets a broken link through). It reports fewer links than
+//! CommonMark in these cases:
+//! - A `<!--` line indented four or more spaces opens a comment block here
+//!   and hides the links on the lines after it, up to `-->`. CommonMark
+//!   reads that line as paragraph text when it directly follows a paragraph
+//!   line (an indented code block cannot interrupt a paragraph), and as an
+//!   indented code block otherwise, which ends at the first line indented
+//!   less; either way it reads the links on the later lines that are not
+//!   themselves indented code.
+//! - A fence is recognised at any indentation (container blocks are not
+//!   modelled), so a ``` line indented four or more spaces outside a list
+//!   item, which CommonMark reads as indented code or paragraph text, opens
+//!   a block here and hides the links up to its close or the end.
+//! - An empty target, `[e]()` or `[r]: <>`, is no link (CommonMark: a link
+//!   to the empty destination).
+//! - The unmodelled forms listed last.
+//! It reports more links than CommonMark in these cases:
 //! - A reference definition is read on any line, also one that would
 //!   continue a paragraph (CommonMark: a definition cannot interrupt a
 //!   paragraph, so `x\n[r]: r.md` is one paragraph there).
@@ -48,8 +63,6 @@
 //! - What follows a reference definition's target on its line is not
 //!   checked (CommonMark: only a title may follow, or the line is no
 //!   definition).
-//! - An empty target, `[e]()` or `[r]: <>`, is no link (CommonMark: a link
-//!   to the empty destination).
 //! Not modelled, so not read as CommonMark reads them: brackets nested more
 //! than one level in link text; parentheses in a target (`[a](f(x).md)`
 //! reads `f(x`); a `<...>` target holding whitespace (`<a b.md>`, no link

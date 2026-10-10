@@ -354,3 +354,32 @@ test "the comment mask covers exactly the comment blocks" {
     const want = [_]bool{ true, true, true, false, true, true };
     try std.testing.expectEqualSlices(bool, &want, m);
 }
+
+fn expectOne(cs: []const md.Comment, open: usize, close: ?usize) !void {
+    try eq(@as(usize, 1), cs.len);
+    try eq(open, cs[0].open_line);
+    try eq(close, cs[0].close_line);
+}
+
+test "an opener inside an open block starts no second entry" {
+    // CommonMark: one HTML block from line 0 to the first line holding -->.
+    try expectOne(comments("<!-- a\n<!-- b -->\n"), 0, 1);
+    // Left open, the block runs to the end and swallows a later opener.
+    try expectOne(comments("<!-- a\nx\n<!-- b\n"), 0, null);
+}
+
+test "a block closing on the document's last line is closed" {
+    try expectOne(comments("x\n<!-- a\nb -->"), 1, 2);
+    try expectOne(comments("<!-- a -->"), 0, 0);
+}
+
+test "only <!-- opens a comment block" {
+    try eq(@as(usize, 0), comments("<!- a\n<! -- b\n").len);
+}
+
+test "a comment block closes on a --> line that a fence covers" {
+    // The fence on line 1 runs to line 3, but the --> on line 2 still ends
+    // the block that opened on line 0 (as CommonMark, where the fence lines
+    // are inside the HTML block).
+    try expectOne(comments("<!-- a\n```\n-->\n```\n"), 0, 2);
+}
