@@ -15,7 +15,7 @@
 #     one-byte move still moves.
 # =============================================================================
 
-from std.memory import alloc, unsafe_memcpy, unsafe_memset
+from std.memory import unsafe_memcpy, unsafe_memset
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_simd.fast_copy import (
@@ -82,13 +82,11 @@ def test_route_runtime_sizes() raises -> None:
 # =============================================================================
 
 
-def _first_diff(
-    a: UnsafePointer[UInt8, MutUntrackedOrigin],
-    b: UnsafePointer[UInt8, MutUntrackedOrigin],
-    n: Int,
-) -> Int:
+def _first_diff(a_list: List[UInt8], b_list: List[UInt8], n: Int) -> Int:
     """Index of the first differing byte, or -1. 64-byte vector compares, so a
     4 MiB arena costs a few thousand steps rather than millions."""
+    var a = a_list.unsafe_ptr()
+    var b = b_list.unsafe_ptr()
     var i = 0
     while i + 64 <= n:
         if a.load[width=64](i).ne(b.load[width=64](i)).reduce_or():
@@ -101,13 +99,14 @@ def _first_diff(
     return -1
 
 
-def _arena(n: Int, fill: UInt8) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    """An `n`-byte heap arena filled by one memset. Raw allocations, not
-    `List`s: a per-element fill or teardown of several MiB dominates the
-    test's run time otherwise. The caller frees it."""
-    var a = alloc[UInt8](n).unsafe_origin_cast[MutUntrackedOrigin]()
-    unsafe_memset(a, fill, n)
-    return a
+def _arena(n: Int, fill: UInt8) -> List[UInt8]:
+    """An `n`-byte arena filled by one memset: the list takes its length
+    uninitialized, so no per-element fill of several MiB dominates the
+    test's run time (UInt8 has no per-element teardown either)."""
+    var a = List[UInt8](capacity=n)
+    a.resize(unsafe_uninit_length=n)
+    unsafe_memset(a.unsafe_ptr(), fill, n)
+    return a^
 
 
 def _check_nt_copy(n: Int, dst_off: Int, src_off: Int) raises -> None:
@@ -120,23 +119,30 @@ def _check_nt_copy(n: Int, dst_off: Int, src_off: Int) raises -> None:
     var filled = 0
     while filled < src_total:
         var step = min(256, src_total - filled)
-        unsafe_memcpy(dest=src + filled, src=period.unsafe_ptr(), count=step)
+        unsafe_memcpy(
+            dest=src.unsafe_ptr() + filled, src=period.unsafe_ptr(), count=step
+        )
         filled += step
     var arena = n + dst_off + PAD
     var mine = _arena(arena, GUARD)
     var oracle = _arena(arena, GUARD)
 
     fast_copy_bytes[nt_ok=True](
-        Span[UInt8, MutUntrackedOrigin](unsafe_ptr=mine + dst_off, length=n),
-        Span[UInt8, MutUntrackedOrigin](unsafe_ptr=src + src_off, length=n),
+        Span[UInt8, origin_of(mine)](
+            unsafe_ptr=mine.unsafe_ptr() + dst_off, length=n
+        ),
+        Span[UInt8, origin_of(src)](
+            unsafe_ptr=src.unsafe_ptr() + src_off, length=n
+        ),
     )
-    unsafe_memcpy(dest=oracle + dst_off, src=src + src_off, count=n)
+    unsafe_memcpy(
+        dest=oracle.unsafe_ptr() + dst_off,
+        src=src.unsafe_ptr() + src_off,
+        count=n,
+    )
     var at = _first_diff(mine, oracle, arena)
     var got = Int(mine[at]) if at >= 0 else -1
     var exp = Int(oracle[at]) if at >= 0 else -1
-    src.free()
-    mine.free()
-    oracle.free()
     if at >= 0:
         print(
             "NT MISMATCH n=", n, " dst_off=", dst_off, " src_off=", src_off,
@@ -163,6 +169,11 @@ def test_copy_small_zero_writes_nothing() raises -> None:
     and d[n-1], i.e. d[-1] at n = 0) changes a guard byte."""
     var src = List[UInt8](length=8, fill=0x11)
     var dst = List[UInt8](length=8, fill=GUARD)
+    # FFI-BOUNDARY: `_copy_small`'s raw-pointer signature spells its
+    # destination with MutUntrackedOrigin, so the pointer into `dst` is cast
+    # to it (tests/pointer_lint_ffi.tsv lists this file). Ownership: `dst`
+    # owns and frees the bytes when this test returns; `_copy_small` only
+    # borrows the pointer for the call and neither stores nor frees it.
     var d = dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]() + 4
     var s = Span(src).as_imm().unsafe_ptr().unsafe_origin_cast[
         ImmUntrackedOrigin
