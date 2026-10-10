@@ -341,10 +341,11 @@ def test_identical_scans_are_narrowed_each_to_its_own_consumer() raises:
 
 def test_strip_right_suffix() raises:
     """`x_right` -> `x`, `é_right` -> `é`; `_right` (6 bytes), `abc`,
-    `x_rightz` and `x_Right` are returned unchanged.
+    `x_rightz`, `x_Right`, `x_rigHt` and `abcright` are returned unchanged.
 
     Catches: the length guard admitting a 6-byte name (`_right` -> ``); a
-    suffix check that ignores a byte; a copy that re-encodes each byte of a
+    suffix check that ignores the `_` (`abcright` -> `ab`) or the `R`/`H`
+    byte, or accepts a trailing extra byte; a copy that re-encodes each byte of a
     multi-byte character as its own code point."""
     assert_equal(_strip_right_suffix_nr("x_right"), String("x"))
     assert_equal(_strip_right_suffix_nr("_right"), String("_right"))
@@ -352,6 +353,8 @@ def test_strip_right_suffix() raises:
     assert_equal(_strip_right_suffix_nr("x_rightz"), String("x_rightz"))
     assert_equal(_strip_right_suffix_nr("x_Right"), String("x_Right"))
     assert_equal(_strip_right_suffix_nr("x_rigHt"), String("x_rigHt"))
+    # `right` without the `_` separator, in a name longer than 6 bytes.
+    assert_equal(_strip_right_suffix_nr("abcright"), String("abcright"))
     # Multi-byte UTF-8 before the suffix is copied byte for byte.
     assert_equal(_strip_right_suffix_nr("é_right"), String("é"))
     assert_equal(_strip_right_suffix_nr("名前_right"), String("名前"))
