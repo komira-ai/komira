@@ -2,7 +2,7 @@
 
 The sections of [the tests](README.md) for the lints that hold the
 repository's own tree: test welding, README API coverage, the layout of
-`src/`, the surface capability matrix and refused imports. Each keeps its number; [`run_tests.sh`](run_tests.sh) runs them with
+`src/` and the surface capability matrix. Each keeps its number; [`run_tests.sh`](run_tests.sh) runs them with
 the rest.
 
 ## 39. Test welding
@@ -189,39 +189,4 @@ e2e targets; `tests//functional/...` builds them.
 ./buck2 build tests//negative/surface_capability_matrix:alias           # must fail: ... stands for a target of tests//functional/surface_capability_matrix
 # after run_tests.sh's copy of incompatible.BUCK to incompatible/BUCK:
 ./buck2 build tests//negative/surface_capability_matrix/incompatible:   # must fail: ... because its transitive dep .../pandas_e2e:test_mac
-```
-
-## 55. Refused imports
-
-A package's `mojo_deps` lint ([`defs.bzl`](../lint/defs.bzl)) can name
-`refused_imports`: dotted modules (`komira_x.y`) that no file of the package
-may import, nor any module under them, while the package that holds them
-stays a dep (komira_optimizer refuses the physical-plan modules of
-komira_plan_ir). The reader is
-[`refused_imports.awk`](../lint/refused_imports.awk), which says the import
-forms it reads and what it misreads (it reads characters, not Mojo tokens).
-[`functional/refused_imports:ok`](functional/refused_imports/BUCK) builds over
-[`near.mojo`](functional/refused_imports/near.mojo), which spells each refused
-module where it is not an import of it: in comments (one with a parenthesis
-inside an open import list), docstrings, string literals, longer module names
-(`physical_planner`, `physical_plan_x`, `x.<module>`), a name imported
-from another module, `x .method()` and calls over lines on other names, and
-aliases of modules that hold no refused one. Each target of
-[`negative/refused_imports`](negative/refused_imports/BUCK) holds one import
-form and must fail naming exactly its one finding: `from M`, `from M.sub`,
-`from P import N`, an import list over lines in parentheses (plain, with a
-parenthesis in the comment of its first line, with one in a name's comment),
-`import M`, `import M as p`, `import M.sub`, `import a, M`, statements split by
-`;`, a `\` continuation, an indented import, an import after a docstring
-that spells one, after a `"""` docstring holding `'''`, after `'"""'` (a triple
-quote inside a one-line string), `from`/`import` with spaces around the
-dot, and a dotted reference with no import of the module: plain
-(`komira_x.y.Z()`), spaced, continued by `\`, over lines inside
-parentheses, through an `as` alias of its parent and through a name a
-from-import bound (`alias_from`, whose refused module is one level deeper). `bad_entry` names an entry that is not a dotted komira_*
-module name and is refused at analysis.
-
-```sh
-./buck2 build tests//functional/refused_imports:ok
-./buck2 build tests//negative/refused_imports:paren_comment_open   # must fail: paren_comment_open.mojo:3: imports komira_plan_ir.physical_plan
 ```

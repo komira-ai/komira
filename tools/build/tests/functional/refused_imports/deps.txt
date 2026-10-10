@@ -1,9 +1,0 @@
-# The BUCK text mojo_deps reads for the fixtures of test 55: a library name
-# and the deps every fixture import names.
-mojo_library(
-    name = "komira_fixture",
-    deps = [
-        "//src/komira_a:komira_a",
-        "//src/komira_plan_ir:komira_plan_ir",
-    ],
-)
